@@ -1,10 +1,11 @@
 // GLSL for the portal ray tracer.
 //
-// Every pixel is a light ray traced backwards from the eye. Inside the cube light travels in
-// straight lines (space is flat in there). When a ray reaches a glued face it continues from
-// the partner face, with its position and direction transformed by that face's portal map, so
-// what you see is exactly what an inhabitant of the glued-up space would see. Walls stop the
-// ray, mirrors reflect it.
+// Every pixel is a light ray traced backwards from the eye. Everything happens in voxel
+// coordinates, a rescaled projective chart in which light travels in straight lines even when
+// space is curved (see math/geometry.js). When a ray reaches a glued face it continues from the
+// partner face, its position and direction mapped by that face's 4x4 portal map, so what you
+// see is exactly what an inhabitant of the glued-up space would see. Walls stop the ray, mirrors
+// reflect it. True distances (for the fog) use the curved metric.
 
 export const MAX_SELF_IMAGES = 4;
 
@@ -27,8 +28,8 @@ uniform float uTanHalf, uAspect;
 
 // faces: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z
 uniform float uFaceKind[6];                        // 0 wall, 1 glued, 2 mirror
-uniform mat3 uPortalA[6];
-uniform vec3 uPortalT[6];
+uniform mat4 uPortal[6];                           // homogeneous voxel coordinates
+uniform float uTarget[6];                          // the face a ray comes back in through
 uniform vec3 uFaceColor[6];
 uniform vec3 uFaceU[6], uFaceV[6];                 // face frames (seen from outside)
 uniform float uGlyphCount[6];
@@ -38,8 +39,12 @@ uniform vec3 uEdgeColor[24];                       // per half-edge of the cube 
 uniform float uEdgeSingular[24];
 
 uniform vec3 uSelfPos[${MAX_SELF_IMAGES}];
-uniform mat3 uSelfFrame[${MAX_SELF_IMAGES}];
+uniform mat3 uSelfFrame[${MAX_SELF_IMAGES}];       // voxel displacement per block along right, up, back
+uniform mat3 uSelfInverse[${MAX_SELF_IMAGES}];
 uniform int uSelfCount;
+
+uniform float uGeometry;                           // 0 flat, 1 spherical, -1 hyperbolic
+uniform float uChartA, uCurvatureR;                // cube half-width in the chart; radius in blocks
 
 uniform float uShowFrame, uShowSeams, uShowSelf;
 uniform float uFog;                                // e-folding distance in blocks
@@ -54,6 +59,15 @@ const float BEAM_R = 0.09;
 const vec3 SELF_HALF = vec3(0.26, 0.28, 0.26);
 const vec2 GLYPH_AT = vec2(0.55, 0.22);
 const float GLYPH_SIZE = 0.2;
+
+// True distance in blocks between two points given in voxel coordinates.
+float trueDistance(vec3 p, vec3 q) {
+  if (uGeometry == 0.0) return length(p - q);
+  vec4 P = vec4((p * (2.0 / uN) - 1.0) * uChartA, 1.0), Q = vec4((q * (2.0 / uN) - 1.0) * uChartA, 1.0);
+  if (uGeometry > 0.0) return uCurvatureR * acos(clamp(dot(P, Q) / (length(P) * length(Q)), -1.0, 1.0));
+  float pq = dot(P.xyz, Q.xyz) - P.w * Q.w, pp = dot(P.xyz, P.xyz) - P.w * P.w, qq = dot(Q.xyz, Q.xyz) - Q.w * Q.w;
+  return uCurvatureR * acosh(max(1.0, -pq / sqrt(pp * qq)));
+}
 
 float hash3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 
@@ -181,14 +195,13 @@ float selfHit(vec3 p, vec3 v, float tMaxHit, bool skipFirst, out vec3 colour) {
   for (int i = 0; i < ${MAX_SELF_IMAGES}; i++) {
     if (i >= uSelfCount) break;
     if (i == 0 && skipFirst) continue;   // that's the copy you are looking out of
-    mat3 F = uSelfFrame[i];
-    mat3 Ft = transpose(F);
-    vec3 o = Ft * (p - uSelfPos[i]), d = Ft * v, n, lp;
+    mat3 F = uSelfFrame[i], Fi = uSelfInverse[i];
+    vec3 o = Fi * (p - uSelfPos[i]), d = Fi * v, n, lp;
     float limit = best >= 0.0 ? best : tMaxHit;
     float t = localBox(o, d, vec3(0.0), SELF_HALF, n, lp);
-    if (t > 0.0 && t < limit) { best = limit = t; colour = headColour(n, lp) * faceLight(F * n); }
+    if (t > 0.0 && t < limit) { best = limit = t; colour = headColour(n, lp) * faceLight(normalize(F * n)); }
     t = localBox(o, d, vec3(0.0, -0.78, 0.04), vec3(0.3, 0.46, 0.17), n, lp);
-    if (t > 0.0 && t < limit) { best = t; colour = bodyColour(n) * faceLight(F * n); }
+    if (t > 0.0 && t < limit) { best = t; colour = bodyColour(n) * faceLight(normalize(F * n)); }
   }
   return best;
 }
@@ -263,10 +276,10 @@ void main() {
       float t = selfHit(p, v, min(tHit, tExit), seg == 0, c);
       if (t >= 0.0) { tHit = t; hitColour = c; }
     }
-    if (tHit < 1e29) { dist += tHit; surface = hitColour; break; }
+    if (tHit < 1e29) { dist += trueDistance(p, p + v * tHit); surface = hitColour; break; }
 
     // reached a face of the cube
-    dist += tExit;
+    dist += trueDistance(p, p + v * tExit);
     p += v * tExit;
     int face = exitAxis * 2 + (v[exitAxis] > 0.0 ? 0 : 1);
     float fogLeft = exp(-dist / uFog);
@@ -284,12 +297,13 @@ void main() {
       acc += trans * a * mix(uFogColor, uFaceColor[face], fogLeft);
       trans *= 1.0 - a;
     }
-    // go through: continue from the partner face
-    p = uPortalA[face] * p + uPortalT[face];
-    v = uPortalA[face] * v;
-    p = clamp(p, vec3(0.0), vec3(uN));
-    vec3 av = abs(uPortalA[face] * vec3(exitAxis == 0 ? 1.0 : 0.0, exitAxis == 1 ? 1.0 : 0.0, exitAxis == 2 ? 1.0 : 0.0));
-    entryAxis = av.x > 0.5 ? 0 : (av.y > 0.5 ? 1 : 2);
+    // go through: continue from the partner face. The portal map is projective, so map the
+    // point, and differentiate it to map the direction.
+    vec4 Y = uPortal[face] * vec4(p, 1.0);
+    vec4 dY = uPortal[face] * vec4(v, 0.0);
+    p = clamp(Y.xyz / Y.w, vec3(0.0), vec3(uN));
+    v = normalize(dY.xyz * Y.w - Y.xyz * dY.w);
+    entryAxis = int(uTarget[face]) / 2;
     if (seg == MAX_SEGMENTS - 1) surface = uFogColor;
   }
 

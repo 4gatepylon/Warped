@@ -26,8 +26,7 @@ test('the scene fits in every cube size and leaves room to spawn', () => {
 test('flying east in the 3-torus comes back in from the west, unchanged', () => {
   const space = new PortalSpace(preset('t3'), emptyGrid(16));
   const p = new Player(space);
-  p.pos = [15.5, 8, 8];
-  p.body = FACING_EAST.slice();
+  p.place([15.5, 8, 8], FACING_EAST.slice());
   p.pitch = 0;
   p.move([0, 0, 1]);
   assert.ok(near(p.pos, [0.5, 8, 8], 1e-6), `got ${p.pos}`);
@@ -39,8 +38,7 @@ test('flying east in the 3-torus comes back in from the west, unchanged', () => 
 test('flying north in Klein bottle × circle mirrors you, twice restores you', () => {
   const space = new PortalSpace(preset('amphicosm1'), emptyGrid(16));
   const p = new Player(space);
-  p.pos = [5, 8, 0.4];
-  p.body = IDENTITY.slice(); // facing -z = north
+  p.place([5, 8, 0.4], IDENTITY.slice()); // facing -z = north
   p.pitch = 0;
   p.move([0, 0, 1]);
   assert.equal(p.crossings, 1);
@@ -55,8 +53,7 @@ test('flying north in Klein bottle × circle mirrors you, twice restores you', (
 test('in the half-turn space, going north turns you upside down', () => {
   const space = new PortalSpace(preset('dicosm'), emptyGrid(16));
   const p = new Player(space);
-  p.pos = [8, 8, 0.2];
-  p.body = IDENTITY.slice();
+  p.place([8, 8, 0.2], IDENTITY.slice());
   p.move([0, 0, 0.5]);
   assert.equal(p.crossings, 1);
   assert.ok(!p.mirrored);
@@ -66,16 +63,14 @@ test('in the half-turn space, going north turns you upside down', () => {
 test('walls stop you, mirrors bounce you', () => {
   const walls = new PortalSpace(preset('solid-torus'), emptyGrid(16));
   const p = new Player(walls);
-  p.pos = [1, 8, 8];
-  p.body = FACING_WEST.slice();
+  p.place([1, 8, 8], FACING_WEST.slice());
   p.move([0, 0, 5]);
   assert.ok(Math.abs(p.pos[0] - RADIUS) < 0.11, `stopped at the wall: ${p.pos}`);
   assert.equal(p.crossings, 0);
 
   const mirrors = new PortalSpace(preset('kaleidoscope'), emptyGrid(16));
   const q = new Player(mirrors);
-  q.pos = [1, 8, 8];
-  q.body = FACING_WEST.slice();
+  q.place([1, 8, 8], FACING_WEST.slice());
   q.move([0, 0, 2]);
   assert.ok(near(q.pos, [1, 8, 8], 1e-6), `bounced back: ${q.pos}`);
   assert.ok(q.mirrored);
@@ -88,8 +83,7 @@ test('blocks are solid, also when seen through a portal', () => {
   assert.ok(space.isSolid([0.5, 8.5, 8.5]));
   assert.ok(space.isSolid([16.5, 8.5, 8.5]), 'east of the east face is the block by the west face');
   const p = new Player(space);
-  p.pos = [15, 8.5, 8.5];
-  p.body = FACING_EAST.slice();
+  p.place([15, 8.5, 8.5], FACING_EAST.slice());
   p.move([0, 0, 3]);
   assert.equal(p.crossings, 0, 'blocked by the block on the other side');
 });

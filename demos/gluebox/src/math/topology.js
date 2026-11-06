@@ -216,9 +216,12 @@ function edgeOrbits(maps) {
     };
     const leg1 = walk(e0, Ed.triangles[0]);
     const leg2 = leg1 && walk(e0, Ed.triangles[1]);
+    const cubeEdges = [...orbitEdges].filter((e) => edges[e].dihedral === 1).length;
     cycles.push({
       edges: [...orbitEdges],
-      angle: [...orbitEdges].reduce((s, e) => s + edges[e].dihedral, 0), // units of π/2
+      angle: [...orbitEdges].reduce((s, e) => s + edges[e].dihedral, 0), // units of π/2, flat cube
+      cubeEdges,                          // pieces of the cube's edges in this class (angle = the cube's corner angle)
+      spokes: orbitEdges.size - cubeEdges, // lines inside faces (angle 180° whatever the curvature)
       boundary: !!leg1,
       // boundary chains: the boundary triangles at both ends, and whether the chain between
       // them passes through an odd number of orientation-reversing gluings
@@ -300,7 +303,7 @@ export function surfaceName(chi, orientable) {
  * (0/1) says which end of its class it is (so the frame can be drawn like an arrow), and
  * `singular` marks edges whose total angle is not 360°.
  */
-export function cubeEdgeClasses(analysis) {
+export function cubeEdgeClasses(analysis, corner = 90) {
   const cycleOf = new Map();
   analysis.edgeCycles.forEach((c) => c.edges.forEach((e) => cycleOf.set(e, c)));
   const halves = [];
@@ -309,11 +312,11 @@ export function cubeEdgeClasses(analysis) {
     for (let ia = 0; ia < 2; ia++) for (let ib = 0; ib < 2; ib++) for (let h = 0; h < 2; h++) {
       const mid = [0, 0, 0];
       mid[a] = ia ? 1 : -1; mid[b] = ib ? 1 : -1;
-      const corner = mid.slice();
-      corner[axis] = h ? 1 : -1;
-      const e = COMPLEX.edgeBetween(COMPLEX.vertexAt(mid), COMPLEX.vertexAt(corner));
+      const end = mid.slice();
+      end[axis] = h ? 1 : -1;
+      const e = COMPLEX.edgeBetween(COMPLEX.vertexAt(mid), COMPLEX.vertexAt(end));
       const cyc = cycleOf.get(e);
-      halves.push({ cubeEdge: axis * 4 + ia * 2 + ib, cls: analysis.edgeClass[e], singular: !cyc.boundary && cyc.angle !== 4, boundary: cyc.boundary });
+      halves.push({ cubeEdge: axis * 4 + ia * 2 + ib, cls: analysis.edgeClass[e], singular: isSingular(cyc, corner), boundary: cyc.boundary });
     }
   }
   // whole cube edges are in the same class when any of their halves are
@@ -339,10 +342,38 @@ export function cubeEdgeClasses(analysis) {
 }
 
 /** How many of the 12 cube edges, and how many fold lines inside faces, are singular. */
-export function singularSummary(analysis) {
-  const halves = cubeEdgeClasses(analysis);
+export function singularSummary(analysis, corner = 90) {
+  const halves = cubeEdgeClasses(analysis, corner);
   const cubeEdges = new Set(halves.filter((h) => h.singular).map((h) => h.cubeEdge)).size;
   const halfCount = halves.filter((h) => h.singular).length;
-  const others = analysis.singularEdges.filter((c) => c.edges.some((e) => COMPLEX.edges[e].dihedral === 2)).length;
-  return { cubeEdges, halfCount, foldLines: others };
+  const foldLines = singularCycles(analysis, corner).filter((c) => c.spokes > 0).length;
+  return { cubeEdges, halfCount, foldLines };
+}
+
+// ---------------------------------------------------------------------------
+// Curvature. Curving the cube changes the angle between its faces along an edge (its corner
+// angle: 90° flat, more on a sphere, less in hyperbolic space). Lines inside a face always
+// have 180° of cube around them.
+// ---------------------------------------------------------------------------
+
+/** Total angle (degrees) around an edge class when the cube's corners have angle `corner`. */
+export const edgeAngle = (cycle, corner) => cycle.cubeEdges * corner + cycle.spokes * 180;
+
+const isSingular = (cycle, corner) => !cycle.boundary && Math.abs(edgeAngle(cycle, corner) - 360) > 1e-6;
+
+/** Interior edge classes whose angles don't add up to 360° at this corner angle. */
+export const singularCycles = (analysis, corner = 90) => analysis.edgeCycles.filter((c) => isSingular(c, corner));
+
+/**
+ * The corner angle that makes every interior edge add up to 360°, so that the glued space is
+ * smooth: 360°/k when every edge class has k pieces of cube edge. Null if there isn't one
+ * (edge classes of different sizes, or a fold line, which stays at 180°). With no interior
+ * edges at all, any angle works and 90° is returned.
+ */
+export function smoothCorner(analysis) {
+  const interior = analysis.edgeCycles.filter((c) => !c.boundary);
+  if (interior.some((c) => c.spokes > 0 && c.spokes !== 2)) return null;
+  const sizes = new Set(interior.filter((c) => c.cubeEdges > 0).map((c) => c.cubeEdges));
+  if (sizes.size === 0) return 90;
+  return sizes.size === 1 ? 360 / [...sizes][0] : null;
 }
