@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mirror Sphere v2 — solid or mirror wall</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(12, 16, 26, 0.74); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 290px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; text-align: right; max-width: 360px; }
+  #tips { bottom: 10px; right: 10px; width: 350px; max-height: calc(100vh - 150px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #7a2c2c; border-color: #c35a5a; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .laser { color: #ffb4a8; }
+  #sLaser { color: #ff9a8a; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 3px 0; }
+  #tipsToggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+
+<div id="controls" class="panel">
+  <h1>Inside a sphere (v2: solid or mirror)</h1>
+  <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>WASD</kbd> walk · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br>
+    <kbd>E</kbd>/<kbd>Q</kbd> jetpack toward / away from the centre</div>
+  <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
+    <kbd>Click</kbd> (mouse captured) or <kbd>R</kbd>: leave an emitter here that keeps firing<br>
+    <kbd>Z</kbd> remove all emitters</div>
+  <div class="row">
+    <label>Beam range = <b id="rangeVal">300</b> blocks</label>
+    <input id="range" type="range" min="40" max="1500" step="10" value="300">
+    <div class="muted">Power drops linearly with distance travelled and hits zero here.</div>
+  </div>
+  <div class="row">
+    <label>Power lost per reflection = <b id="lossVal">0</b>%</label>
+    <input id="loss" type="range" min="0" max="25" step="1" value="0">
+  </div>
+  <div class="row">
+    <label>Sphere radius = <b id="radVal">30</b> blocks</label>
+    <input id="rad" type="range" min="12" max="60" step="1" value="30">
+    <div class="muted">Changing it removes emitters.</div>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="tMirror"> Mirror wall (<kbd>M</kbd>)</label>
+    <div class="muted">Off: a solid wall with a faint, misted reflection. On: a full mirror. The laser bounces off the wall either way.</div>
+  </div>
+  <div class="row" id="solidRow">
+    <label>Solid wall reflectivity = <b id="reflVal">12</b>%</label>
+    <input id="refl" type="range" min="5" max="20" step="1" value="12">
+    <label>Mist (how blurred the reflection is) = <b id="mistVal">9</b>°</label>
+    <input id="mist" type="range" min="0" max="25" step="1" value="9">
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="tGrid" checked> Grid lines on the wall</label>
+    <label>Render quality <select id="quality"><option value="auto" selected>auto</option><option value="0.35">low</option><option value="0.5">medium</option><option value="0.75">high</option><option value="1">full</option></select></label>
+  </div>
+  <div class="row">
+    <button id="bLaser" class="on">Laser: on</button>
+    <button id="bPin">Leave emitter</button>
+    <button id="bUnpin">Remove emitters</button>
+    <button id="bReset">Reset</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Laser: <span id="sLaser">–</span></div>
+  <div class="muted">Height above the wall: <span id="sH">0.0</span> · gravity <span id="sG">100</span>%</div>
+  <div class="muted">emitters: <span id="sE">0</span> · <span id="sFps">–</span> fps</div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tipsToggle">hide</button>
+  <h1>What you're seeing</h1>
+  <div id="tipsBody">
+  <ol>
+    <li><b>You're on the inside of a hollow sphere.</b> Gravity pulls you outward onto its wall, so "up" always points at the sun in the centre, and the far side of the world hangs over your head.</li>
+    <li><b>The laser reflects</b> every time it reaches the wall, leaving a red dot where it bounces. A beam bouncing around inside a sphere stays in one flat plane through the centre and meets the wall at the same angle every time, so it traces a star-shaped rosette.</li>
+    <li><b>It fades as it goes.</b> Its power drops linearly with distance travelled (and by a fixed amount per reflection, if you set a loss). When the power reaches zero the beam stops and nothing more is computed.</li>
+    <li><b>Try different heights.</b> Aim along the floor and the beam skims round close to the wall, many short hops (a "whispering gallery"). Jump or fly toward the centre and the hops become long chords right across the sphere. Aim at the sun and it's absorbed.</li>
+    <li><b>Solid or mirror</b> (<kbd>M</kbd>). The solid wall reflects a little (5–20%), blurred like a mirror with mist on it. Turn the mirror on to see the beam, the pillars and the sun reflected again and again.</li>
+    <li><b>Use the jetpack</b> (<kbd>E</kbd>). Gravity weakens toward the centre, so the closer you get the more you float; keep going and you fly straight through the middle (and the sun) and fall onto the opposite side.</li>
+  </ol>
+  <div class="muted" style="margin-top:6px">Game rules: a real hollow shell has no gravity inside it (Newton's shell theorem); here the pull is outward and proportional to your distance from the centre. The laser reflects off the wall perfectly in both modes, whatever it looks like (use the loss slider to make it lose power at each bounce). The mirror reflects 82% of light, so repeated reflections darken. Light travels in straight lines. Beams stop at pillars, orbs and the sun, and at 256 segments as a safety cap. You can walk through objects and fly through the sun.</div>
+  </div>
+</div>
+<div id="err"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+const V3 = THREE.Vector3;
+
+// ---------------------------------------------------------------------------
+// World: a hollow sphere of radius R centred at the origin. Its inner surface is a mirror.
+// Objects (all absorbing, not mirrors): the sun at the centre, pillars standing on the inside
+// of the shell, and coloured orbs.
+// ---------------------------------------------------------------------------
+const MAXBOX = 16, MAXORB = 8, MAXBEAMS = 8, MAXSEG = 256, SEG_TEX_W = 1024, MAXSPOTS = 8;
+const SUN_R = 2.2;
+const world = { R: 30, boxes: [], orbs: [] };
+// unit vector from the centre, measured from the "south pole" (0,-1,0) where you start
+const dirAt = (polar, azim) => new V3(Math.sin(polar) * Math.cos(azim), -Math.cos(polar), Math.sin(polar) * Math.sin(azim));
+const COL = { red: [0.80, 0.20, 0.18], orange: [0.92, 0.50, 0.15], yellow: [0.92, 0.80, 0.20], green: [0.30, 0.70, 0.25],
+  cyan: [0.20, 0.70, 0.75], blue: [0.20, 0.35, 0.80], purple: [0.55, 0.25, 0.70], white: [0.90, 0.90, 0.88], gold: [0.95, 0.78, 0.25] };
+function buildWorld() {
+  const R = world.R; world.boxes = []; world.orbs = [];
+  // a box standing on the inside of the shell at direction (polar, azim): base on the wall, "up" toward the centre
+  const pillar = (polar, azim, w, h, colName, twist = 0) => {
+    const u = dirAt(polar, azim), up = u.clone().negate();
+    let t1 = new V3(0, 0, 1).cross(up); if (t1.lengthSq() < 1e-6) t1 = new V3(1, 0, 0).cross(up); t1.normalize();
+    const t2 = up.clone().cross(t1).normalize();
+    const a = t1.clone().multiplyScalar(Math.cos(twist)).addScaledVector(t2, Math.sin(twist)), b = up.clone().cross(a).normalize();
+    world.boxes.push({ c: u.clone().multiplyScalar(R - h / 2), U: a, V: up, W: b, h: [w / 2, h / 2, w / 2], col: COL[colName], name: colName + ' pillar' });
+  };
+  const ring = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'white'];
+  ring.forEach((c, k) => pillar(0.42, (k + 0.5) * Math.PI / 4, 2, 3 + (k % 4) * 1.5, c, k * 0.3));
+  pillar(Math.PI - 0.3, 1.0, 3, 10, 'gold');                                           // nearly overhead (not exactly: every
+                                                                                       // beam fired at spawn passes the point opposite)
+  [['red', 0.3], ['blue', 1.9], ['green', 3.4], ['orange', 4.9]].forEach(([c, az]) => pillar(2.05, az, 2.5, 7, c, az));
+  pillar(1.2, 0.8, 1.5, 12, 'white', 0.4); pillar(1.3, 3.9, 1.5, 9, 'cyan', 1.1);
+  const orb = (dir, dist, r, colName) => world.orbs.push({ c: dir.clone().normalize().multiplyScalar(dist), r, col: COL[colName], name: colName + ' orb' });
+  orb(new V3(1, 0.2, 0.4), 0.55 * R, 2.2, 'purple');
+  orb(new V3(-0.6, 0.5, -0.8), 0.6 * R, 1.8, 'cyan');
+  orb(new V3(0.3, -0.4, -1), 0.5 * R, 1.6, 'yellow');
+  orb(new V3(-0.9, -0.3, 0.6), 0.65 * R, 2.5, 'orange');
+  orb(dirAt(0.12, 2.4), R - 1.2, 1.2, 'red');                                          // resting on the mirror near spawn
+}
+
+// ---------------------------------------------------------------------------
+// Ray tracer. Each pixel's ray bounces off the mirror up to 12 times. On every straight piece it
+// checks the sun, the pillars and orbs, and the laser beams; where it meets the mirror it picks up a
+// little diffuse light (the etched grid, shadows) and reflects.
+// Beams are polylines whose segments live in a float texture. A beam reflected only by the sphere
+// stays in one plane through the centre, so a ray piece that stays away from that plane is skipped.
+// ---------------------------------------------------------------------------
+const vert = `
+precision highp float;
+in vec3 position; out vec2 vNdc;
+void main() { vNdc = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+const frag = `
+precision highp float; precision highp int; precision highp sampler2D;
+uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd; uniform float uTanHalf, uAspect, uPix;
+uniform float uR, uSunR, uGrid;
+uniform float uMirror, uRefl, uMist;          // mirror wall on/off; when solid: reflectivity and blur cone (radians)
+uniform vec4 uBoxC[${MAXBOX}], uBoxU[${MAXBOX}], uBoxV[${MAXBOX}], uBoxW[${MAXBOX}]; uniform vec3 uBoxCol[${MAXBOX}]; uniform int uNBox;
+uniform vec4 uOrb[${MAXORB}]; uniform vec3 uOrbCol[${MAXORB}]; uniform int uNOrb;
+uniform sampler2D uSeg;                       // 2 texels per segment: (start, power), (end, power)
+uniform vec4 uBeamN[${MAXBEAMS}]; uniform int uNBeam;   // beam plane normal + (first*512 + count)
+uniform vec4 uBeamE[${MAXBEAMS}];  // in-plane axis e1 + distance d of every chord from the centre
+uniform vec4 uBeamA[${MAXBEAMS}];  // cos, sin of the first chord's tangent angle, angle step per chord, half chord length
+uniform vec4 uSpots[${MAXSPOTS}]; uniform int uNSpot;  // beam end points on objects + power
+uniform float uBeamR;
+in vec2 vNdc; out vec4 outColor;
+
+const vec3 SUN = vec3(1.0, 0.86, 0.62);
+const vec3 MIRROR_TINT = vec3(0.80, 0.82, 0.86);   // 82% average reflectance, slightly blue
+const float BIG = 1e9;
+
+float raySphere(vec3 o, vec3 d, vec3 c, float r) {   // nearest t > 0, BIG if none
+  vec3 oc = o - c; float b = dot(oc, d), cc = dot(oc, oc) - r * r, disc = b * b - cc;
+  if (disc < 0.0) return BIG;
+  float s = sqrt(disc), t0 = -b - s, t1 = -b + s;
+  return t0 > 1e-4 ? t0 : (t1 > 1e-4 && cc < 0.0 ? t1 : BIG);
+}
+float rayBox(vec3 o, vec3 d, int i, out vec3 n, out vec3 loc) {   // oriented box; BIG if missed or starting inside
+  vec3 U = uBoxU[i].xyz, V = uBoxV[i].xyz, W = uBoxW[i].xyz, h = vec3(uBoxU[i].w, uBoxV[i].w, uBoxW[i].w);
+  vec3 oc = o - uBoxC[i].xyz;
+  vec3 ol = vec3(dot(oc, U), dot(oc, V), dot(oc, W)), dl = vec3(dot(d, U), dot(d, V), dot(d, W));
+  vec3 inv = 1.0 / mix(dl, vec3(1e-9), lessThan(abs(dl), vec3(1e-9)));
+  vec3 t0 = (-h - ol) * inv, t1 = (h - ol) * inv, tmin = min(t0, t1), tmax = max(t0, t1);
+  float tn = max(max(tmin.x, tmin.y), tmin.z), tf = min(min(tmax.x, tmax.y), tmax.z);
+  if (tn > tf || tn < 1e-4) return BIG;
+  vec3 nl = vec3(0.0);
+  if (tn == tmin.x) nl.x = -sign(dl.x); else if (tn == tmin.y) nl.y = -sign(dl.y); else nl.z = -sign(dl.z);
+  n = nl.x * U + nl.y * V + nl.z * W;
+  loc = ol + dl * tn + h;            // local coordinates from the box corner, for the block texture
+  return tn;
+}
+// nearest pillar or orb along o + t d with t < tMax. kind: 0 none, 2 box, 3 orb (the sun is handled separately)
+float sceneHit(vec3 o, vec3 d, float tMax, out int kind, out int idx, out vec3 n, out vec3 loc) {
+  float best = tMax; kind = 0; idx = -1; n = vec3(0.0); loc = vec3(0.0);
+  for (int i = 0; i < ${MAXBOX}; i++) {
+    if (i >= uNBox) break;
+    vec3 bn, bl; float t = rayBox(o, d, i, bn, bl);
+    if (t < best) { best = t; kind = 2; idx = i; n = bn; loc = bl; }
+  }
+  for (int i = 0; i < ${MAXORB}; i++) {
+    if (i >= uNOrb) break;
+    float t = raySphere(o, d, uOrb[i].xyz, uOrb[i].w);
+    if (t < best) { best = t; kind = 3; idx = i; n = normalize(o + d * t - uOrb[i].xyz); }
+  }
+  return best;
+}
+float sunlight(vec3 x) {             // 1 if the sun is visible from x, else 0
+  float L = length(x); vec3 d = -x / L; float tMax = L - uSunR;
+  vec3 n, l;
+  for (int i = 0; i < ${MAXBOX}; i++) { if (i >= uNBox) break; if (rayBox(x, d, i, n, l) < tMax) return 0.0; }
+  for (int i = 0; i < ${MAXORB}; i++) { if (i >= uNOrb) break; if (raySphere(x, d, uOrb[i].xyz, uOrb[i].w) < tMax) return 0.0; }
+  return 1.0;
+}
+float gridLine(float x, float w) { float f = abs(fract(x + 0.5) - 0.5); return 1.0 - smoothstep(w * 0.5, w, f); }
+float hash1(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// The wall's matte colour: for the mirror, the small matte part (silver, a fifth of the light); when solid,
+// stone tiles. Both get lat/long grid lines every 15°, a gold equator and a red mark where you start.
+vec3 wallColor(vec3 q, float fp, int bounce) {
+  vec3 u = q / uR;
+  float polar = acos(clamp(-u.y, -1.0, 1.0)), azim = atan(u.z, u.x), cell = 3.14159265 / 12.0;
+  vec3 base = uMirror > 0.5 ? vec3(0.60, 0.66, 0.76) * 0.20
+    : vec3(0.56, 0.58, 0.62) * (0.86 + 0.18 * hash1(floor(vec2(polar, azim) / (cell / 3.0))));   // 5° tiles
+  if (uGrid > 0.5 && bounce < 2) {             // deeper reflections of the grid only add sparkle
+    float w = max(0.07, 1.5 * fp) / uR / cell;   // never thinner than a pixel
+    float lp = gridLine(polar / cell, w), la = gridLine(azim / cell, w / max(sin(polar), 0.05));
+    float eq = gridLine(polar / 3.14159265 - 0.5, 2.0 * w * cell / 3.14159265);
+    base = mix(base, uMirror > 0.5 ? vec3(0.22, 0.30, 0.42) : vec3(0.30, 0.34, 0.42), max(lp, la) * 0.9);
+    base = mix(base, vec3(0.85, 0.65, 0.20), eq);
+    if (polar < 0.05) base = mix(base, vec3(0.8, 0.2, 0.2), 0.8);
+  }
+  return base;
+}
+// light haze with distance on the solid wall, to help judge depth (the mirror doesn't need it)
+vec3 haze(vec3 c, float dist) { return uMirror > 0.5 ? c : mix(vec3(0.66, 0.72, 0.82), c, exp(-dist / 160.0)); }
+
+// --- laser beams
+float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s, out float t) {   // squared distance between segments
+  vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r);
+  s = 0.0; t = 0.0;
+  if (e < 1e-10) { s = a > 1e-10 ? clamp(-dot(d1, r) / a, 0.0, 1.0) : 0.0; }
+  else if (a < 1e-10) { t = clamp(f / e, 0.0, 1.0); }
+  else {
+    float b = dot(d1, d2), c = dot(d1, r), den = a * e - b * b;
+    s = den > 1e-7 * a * e ? clamp((b * f - c * e) / den, 0.0, 1.0) : 0.0;
+    t = (b * s + f) / e;
+    if (t < 0.0) { t = 0.0; s = clamp(-c / a, 0.0, 1.0); }
+    else if (t > 1.0) { t = 1.0; s = clamp((b - c) / a, 0.0, 1.0); }
+  }
+  vec3 w = p1 + d1 * s - p2 - d2 * t;
+  return dot(w, w);
+}
+const float REACH = 4.8;   // glow is negligible beyond REACH core radii
+vec4 segTex(int i) { return texelFetch(uSeg, ivec2(i % ${SEG_TEX_W}, i / ${SEG_TEX_W}), 0); }
+// strongest beam glow along the straight ray piece a->b, which starts after a path of length travel. The pixel's
+// footprint radius is fp at a and changes by spread per unit length. The beam is drawn at least a pixel
+// wide; where a reflection blurs it wider than that, it gets correspondingly fainter.
+void beamPiece(vec3 a, vec3 b, float fp, float spread, float travel, out float core, out float halo) {
+  core = 0.0; halo = 0.0;
+  float len = length(b - a); vec3 rm = 0.5 * (a + b);
+  float reach = REACH * max(uBeamR, max(abs(fp), abs(fp + spread * len)));
+  for (int k = 0; k < ${MAXBEAMS}; k++) {
+    if (k >= uNBeam) break;
+    vec4 B = uBeamN[k], E = uBeamE[k], A = uBeamA[k];
+    float da = dot(B.xyz, a), db = dot(B.xyz, b);
+    if (min(da, db) > reach || max(da, db) < -reach) continue;     // never comes near this beam's plane
+    // the part of the piece within reach of the plane, in in-plane coordinates
+    float sa = 0.0, sb = 1.0;
+    if (abs(db - da) > 1e-6) { float s0 = (-reach - da) / (db - da), s1 = (reach - da) / (db - da); sa = clamp(min(s0, s1), 0.0, 1.0); sb = clamp(max(s0, s1), 0.0, 1.0); }
+    vec3 xa = mix(a, b, sa), xb = mix(a, b, sb), e1 = E.xyz, e2 = cross(B.xyz, e1);
+    vec2 qa = vec2(dot(xa, e1), dot(xa, e2)), qb = vec2(dot(xb, e1), dot(xb, e2)), qm = 0.5 * (qa + qb);
+    float dd = E.w, qh = 0.5 * length(qb - qa);
+    if (max(length(qa), length(qb)) < dd - reach) continue;      // inside the empty middle of the rosette
+    // Chord j is the line x·u_j = d, tangent at angle α_0 + j·δ, centred on d·u_j: cheap to test, no texture reads
+    vec2 uj = A.xy; float cs = cos(A.z), sn = sin(A.z);
+    int pk = int(B.w + 0.5), first = pk / 512, cnt = pk - first * 512;
+    for (int j = 0; j < ${MAXSEG}; j++) {
+      if (j >= cnt) break;
+      float fa = dot(qa, uj) - dd, fb = dot(qb, uj) - dd;
+      bool near = (fa * fb <= 0.0 || min(abs(fa), abs(fb)) <= reach) && length(qm - dd * uj) <= A.w + qh + reach;
+      uj = vec2(uj.x * cs - uj.y * sn, uj.x * sn + uj.y * cs);
+      if (!near) continue;
+      vec4 s0 = segTex(2 * (first + j)), s1 = segTex(2 * (first + j) + 1);
+      if (length(0.5 * (s0.xyz + s1.xyz) - rm) > 0.5 * (length(s1.xyz - s0.xyz) + len) + reach) continue;
+      float s, u; float d2 = segSeg(a, b, s0.xyz, s1.xyz, s, u);
+      float pw = mix(s0.w, s1.w, u);                 // the beam's power at its closest point
+      float sg = max(uBeamR, abs(fp + spread * s * len)), ref = max(uBeamR, uPix * (travel + s * len));
+      pw *= min(1.0, ref / sg);
+      core = max(core, pw * exp(-d2 / (sg * sg)));
+      halo = max(halo, pw * exp(-d2 / (4.8 * sg * sg)));
+    }
+  }
+}
+float laserSpot(vec3 x, float fp) {   // red dot where a beam ends on an object
+  float g = 0.0, rr = max(0.08, 2.5 * fp);
+  for (int k = 0; k < ${MAXSPOTS}; k++) {
+    if (k >= uNSpot) break;
+    vec3 d = x - uSpots[k].xyz;
+    g = max(g, uSpots[k].w * exp(-dot(d, d) / (rr * rr)));
+  }
+  return g;
+}
+
+// Red dots where beams bounce off the wall. Bounce j is where chord j ends, on the wall at angle α_0 + δ/2 + j·δ
+// in the beam's plane, so no texture reads are needed except for the power at a dot that is actually close.
+float bounceGlow(vec3 x, float fp) {
+  float g = 0.0, rr = max(0.25, 3.0 * fp);      // wider than the beam's own glow, so it shows around the bounce
+  for (int k = 0; k < ${MAXBEAMS}; k++) {
+    if (k >= uNBeam) break;
+    vec4 B = uBeamN[k], E = uBeamE[k], A = uBeamA[k];
+    float off = dot(B.xyz, x);
+    if (abs(off) > 3.0 * rr) continue;
+    vec3 e1 = E.xyz, e2 = cross(B.xyz, e1);
+    vec2 xq = vec2(dot(x, e1), dot(x, e2));
+    float ch = cos(0.5 * A.z), sh = sin(0.5 * A.z), cs = cos(A.z), sn = sin(A.z);
+    vec2 w = vec2(A.x * ch - A.y * sh, A.x * sh + A.y * ch);
+    int pk = int(B.w + 0.5), first = pk / 512, cnt = pk - first * 512;
+    for (int j = 0; j < ${MAXSEG}; j++) {
+      if (j >= cnt - 1) break;                     // the last piece ends in the air or on an object, not a bounce
+      vec2 dv = xq - uR * w; float d2 = dot(dv, dv) + off * off;
+      if (d2 < 9.0 * rr * rr) g = max(g, segTex(2 * (first + j) + 1).w * exp(-d2 / (rr * rr)));
+      w = vec2(w.x * cs - w.y * sn, w.x * sn + w.y * cs);
+    }
+  }
+  return g;
+}
+// the wall's own (matte) light at q, seen after a path of length dist: lit by the sun unless something is in the
+// way. "cheap" skips the shadow test and the laser dots, for faint blurred reflections where neither shows.
+vec3 litWall(vec3 q, float fp, int bounce, float dist, bool cheap) {
+  vec3 N = -q / uR;
+  vec3 c = wallColor(q, fp, bounce) * (cheap ? 0.85 : 0.3 + 0.7 * sunlight(q + N * 1e-3));
+  if (!cheap) {
+    float g = bounceGlow(q, fp) * (uMirror > 0.5 ? 0.4 : 1.0);
+    c = mix(c, vec3(1.0, 0.1, 0.05), clamp(g, 0.0, 1.0)) + vec3(1.0, 0.7, 0.6) * g * g;
+  }
+  return haze(c, dist);
+}
+// One straight piece of a ray, from p along v to the wall or the first object. Laser beams and the sun along
+// it are composited front to back into col (through thr). Returns false if it ended on the sun or an object
+// (already shaded into col), true if it reached the wall at q, a distance t away (left for the caller).
+// The pixel's footprint radius is fp at p and changes by spread per unit length.
+bool tracePiece(vec3 p, vec3 v, float fp, float spread, float travel, int bounce, bool cheap, inout vec3 col, inout vec3 thr, out vec3 q, out float t) {
+  float b = dot(p, v), c = dot(p, p) - uR * uR;
+  float tw = -b + sqrt(max(b * b - c, 0.0));           // where this piece meets the wall
+  int kind, idx; vec3 n, loc;
+  t = sceneHit(p, v, tw, kind, idx, n, loc);
+  q = p + v * t;
+  if (uNBeam > 0 && bounce < 6) {                      // deeper reflections of a beam are dim and tiny
+    float core, halo; beamPiece(p, q, fp, spread, travel, core, halo);
+    float a = clamp(0.9 * halo, 0.0, 1.0);
+    col += thr * (vec3(1.0, 0.06, 0.03) * a + vec3(1.0, 0.62, 0.52) * core);
+    thr *= 1.0 - a;
+  }
+  // the sun: covered fraction of the footprint where this piece passes closest to the centre, plus a glow
+  float tc = clamp(-dot(p, v), 0.0, t), dc = length(p + v * tc), fc = max(abs(fp + spread * tc), 1e-3);
+  float cov = 1.0 - smoothstep(uSunR - fc, uSunR + fc, dc);
+  col += thr * SUN * (2.2 * cov + 0.12 * (1.0 - cov) * exp(-max(dc - uSunR, 0.0) / 0.9));
+  thr *= 1.0 - cov;
+  if (cov > 0.995) return false;
+  if (kind >= 2) {
+    vec3 alb = kind == 2 ? uBoxCol[idx] : uOrbCol[idx];
+    if (kind == 2) {                                    // block-style edges every 1 block
+      vec3 f = fract(loc), e3 = min(f, 1.0 - f);
+      vec3 an = abs(vec3(dot(n, uBoxU[idx].xyz), dot(n, uBoxV[idx].xyz), dot(n, uBoxW[idx].xyz)));
+      float e = an.x > 0.5 ? min(e3.y, e3.z) : (an.y > 0.5 ? min(e3.x, e3.z) : min(e3.x, e3.y));
+      alb *= mix(0.6, 1.0, smoothstep(0.0, 0.05, e));
+    }
+    float lit = max(dot(n, normalize(-q)), 0.0) * (cheap ? 1.0 : sunlight(q + n * 2e-3));
+    vec3 sc = alb * (0.55 + 0.6 * lit);                // strong fill: the wall bounces sunlight onto everything
+    if (!cheap) {
+      float sp = laserSpot(q, abs(fp + spread * t));
+      sc = mix(sc, vec3(1.0, 0.1, 0.05), clamp(sp, 0.0, 1.0)) + vec3(1.0, 0.7, 0.6) * sp * sp;
+    }
+    col += thr * haze(sc, travel + t);
+    return false;
+  }
+  return true;
+}
+
+void main() {
+  vec3 v = normalize(uCamFwd + vNdc.x * uTanHalf * uAspect * uCamRight + vNdc.y * uTanHalf * uCamUp);
+  vec3 p = uCamPos, col = vec3(0.0), thr = vec3(1.0);
+  // The pixel's footprint: fp is its (signed) radius here, spread how fast it changes. The concave wall
+  // focuses it at each reflection, so it shrinks and grows again; blurring small things (the sun, grid
+  // lines, beams) by |fp| keeps deep reflections from sparkling.
+  float fp = 0.0, spread = uPix, travel = 0.0;
+  // One loop serves both walls (a single copy of tracePiece keeps the shader small and fast).
+  //  Mirror: each it is the next reflection, up to 12.
+  //  Solid: it 0 is the view ray; it shows mostly the wall's own colour. Steps 1..nS are a faint reflection
+  //  blurred like a mirror with mist on it: rays spread over a cone of half-angle uMist from where it 0 hit
+  //  the wall, each carrying an equal share of the reflectivity.
+  bool mirror = uMirror > 0.5, done = false;
+  int nS = uMist > 1e-4 ? 5 : 1, nSteps = mirror ? 12 : 1 + nS;
+  vec3 q0 = vec3(0.0), N0 = vec3(0.0), R0 = vec3(0.0), T1 = vec3(0.0), T2 = vec3(0.0), thr0 = vec3(0.0);
+  float fp0 = 0.0, sp0 = 0.0, travel0 = 0.0, rot = 6.2831853 * hash1(gl_FragCoord.xy);   // per-pixel spiral: noise, not ghosts
+  for (int it = 0; it < 12; it++) {
+    if (it >= nSteps) break;
+    if (!mirror && it > 0) {                         // set up blurred-reflection ray number it-1
+      float r = uMist * sqrt((float(it) - 0.5) / float(nS)), a = float(it) * 2.39996 + rot;
+      v = normalize(R0 + r * (cos(a) * T1 + sin(a) * T2));
+      if (dot(v, N0) < 0.02) v = reflect(v, N0);
+      p = q0 + N0 * 1e-4; thr = thr0 * uRefl / float(nS); fp = fp0; spread = sp0; travel = travel0;
+    }
+    bool cheap = mirror ? it >= 3 : it > 0;        // no shadows or laser dots where they wouldn't show
+    vec3 q; float t;
+    if (!tracePiece(p, v, fp, spread, travel, mirror ? it : min(it, 1), cheap, col, thr, q, t)) {
+      if (mirror || it == 0) { done = true; break; } else continue;
+    }
+    fp += spread * t; travel += t;
+    vec3 N = -q / uR;
+    if (mirror) {
+      col += thr * litWall(q, abs(fp), it, travel, cheap);
+      thr *= MIRROR_TINT;
+      spread -= 2.0 * fp / uR;                         // a concave mirror (focal length R/2) bends the bundle inward
+      v = reflect(v, N); p = q + N * 1e-4;
+    } else if (it == 0) {
+      col += thr * (1.0 - uRefl) * litWall(q, abs(fp), 0, travel, false);
+      q0 = q; N0 = N; thr0 = thr; fp0 = fp; travel0 = travel;
+      sp0 = spread - 2.0 * fp / uR + 0.7 * uMist;      // each ray also blurs small things across its share of the cone
+      R0 = reflect(v, N);
+      T1 = normalize(cross(R0, abs(R0.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0))); T2 = cross(R0, T1);
+    } else {
+      col += thr * litWall(q, abs(fp), 1, travel, true);
+    }
+  }
+  if (mirror && !done) col += thr * vec3(0.05, 0.06, 0.09);   // whatever is left after many reflections
+  col = col / (1.0 + max(col - 1.0, 0.0) * 0.6);
+  outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+// ---------------------------------------------------------------------------
+// Three.js setup
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('c');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false }); }
+catch (e) { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = 'WebGL2 is required: ' + e.message; throw e; }
+const segData = new Float32Array(SEG_TEX_W * 4 * 4);   // 4096 texels = 2048 segments
+const segTex = new THREE.DataTexture(segData, SEG_TEX_W, 4, THREE.RGBAFormat, THREE.FloatType);
+segTex.minFilter = segTex.magFilter = THREE.NearestFilter; segTex.needsUpdate = true;
+const vec4s = n => Array.from({ length: n }, () => new THREE.Vector4());
+const vec3s = n => Array.from({ length: n }, () => new THREE.Vector3());
+const uniforms = {
+  uCamPos: { value: new V3() }, uCamRight: { value: new V3() }, uCamUp: { value: new V3() }, uCamFwd: { value: new V3() },
+  uTanHalf: { value: Math.tan(37.5 * Math.PI / 180) }, uAspect: { value: 1 }, uPix: { value: 0.002 },
+  uR: { value: 30 }, uSunR: { value: SUN_R }, uGrid: { value: 1 },
+  uMirror: { value: 0 }, uRefl: { value: 0.12 }, uMist: { value: 9 * Math.PI / 180 },
+  uBoxC: { value: vec4s(MAXBOX) }, uBoxU: { value: vec4s(MAXBOX) }, uBoxV: { value: vec4s(MAXBOX) }, uBoxW: { value: vec4s(MAXBOX) }, uBoxCol: { value: vec3s(MAXBOX) }, uNBox: { value: 0 },
+  uOrb: { value: vec4s(MAXORB) }, uOrbCol: { value: vec3s(MAXORB) }, uNOrb: { value: 0 },
+  uSeg: { value: segTex }, uBeamN: { value: vec4s(MAXBEAMS) }, uBeamE: { value: vec4s(MAXBEAMS) }, uBeamA: { value: vec4s(MAXBEAMS) }, uNBeam: { value: 0 },
+  uSpots: { value: vec4s(MAXSPOTS) }, uNSpot: { value: 0 }, uBeamR: { value: 0.012 }
+};
+const mat = new THREE.RawShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
+const scene = new THREE.Scene(); scene.add(quad);
+const cam = new THREE.Camera();
+
+let quality = 'auto';
+const bufSize = new THREE.Vector2();
+function resize() {
+  const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
+  const q = quality === 'auto' ? Math.min(1, Math.sqrt(520000 / (w * h * dpr * dpr))) : +quality;
+  renderer.setPixelRatio(dpr * q);
+  renderer.setSize(w, h, false);
+  uniforms.uAspect.value = w / h;
+  renderer.getDrawingBufferSize(bufSize);
+  uniforms.uPix.value = 2 * uniforms.uTanHalf.value / Math.max(1, bufSize.y);
+}
+window.addEventListener('resize', resize);
+function uploadWorld() {
+  uniforms.uR.value = world.R;
+  world.boxes.forEach((b, i) => {
+    uniforms.uBoxC.value[i].set(b.c.x, b.c.y, b.c.z, 0);
+    uniforms.uBoxU.value[i].set(b.U.x, b.U.y, b.U.z, b.h[0]);
+    uniforms.uBoxV.value[i].set(b.V.x, b.V.y, b.V.z, b.h[1]);
+    uniforms.uBoxW.value[i].set(b.W.x, b.W.y, b.W.z, b.h[2]);
+    uniforms.uBoxCol.value[i].set(...b.col);
+  });
+  uniforms.uNBox.value = world.boxes.length;
+  world.orbs.forEach((o, i) => { uniforms.uOrb.value[i].set(o.c.x, o.c.y, o.c.z, o.r); uniforms.uOrbCol.value[i].set(...o.col); });
+  uniforms.uNOrb.value = world.orbs.length;
+}
+
+// ---------------------------------------------------------------------------
+// Laser, traced on the CPU: straight pieces between reflections off the sphere. Power starts at 1
+// and drops linearly with distance (reaching 0 after `range` blocks) and by `loss` at each
+// reflection; the beam stops when it reaches 0 or hits an object.
+// ---------------------------------------------------------------------------
+function raySphereJS(o, d, c, r) {
+  const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z, b = ox * d.x + oy * d.y + oz * d.z, cc = ox * ox + oy * oy + oz * oz - r * r, disc = b * b - cc;
+  if (disc < 0) return Infinity;
+  const s = Math.sqrt(disc), t0 = -b - s, t1 = -b + s;
+  return t0 > 1e-6 ? t0 : (t1 > 1e-6 && cc < 0 ? t1 : Infinity);
+}
+function rayBoxJS(o, d, bx) {
+  const oc = o.clone().sub(bx.c), ax = [bx.U, bx.V, bx.W];
+  let tn = -Infinity, tf = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const ol = oc.dot(ax[i]), dl = d.dot(ax[i]), h = bx.h[i];
+    if (Math.abs(dl) < 1e-12) { if (Math.abs(ol) > h) return Infinity; continue; }
+    let t0 = (-h - ol) / dl, t1 = (h - ol) / dl; if (t0 > t1) [t0, t1] = [t1, t0];
+    tn = Math.max(tn, t0); tf = Math.min(tf, t1);
+  }
+  return tn <= tf && tn > 1e-6 ? tn : Infinity;
+}
+const ORIGIN = new V3();
+function firstObject(o, d, tMax) {
+  let best = tMax, what = null;
+  const ts = raySphereJS(o, d, ORIGIN, SUN_R); if (ts < best) { best = ts; what = 'sun'; }
+  for (const b of world.boxes) { const t = rayBoxJS(o, d, b); if (t < best) { best = t; what = b.name; } }
+  for (const s of world.orbs) { const t = raySphereJS(o, d, s.c, s.r); if (t < best) { best = t; what = s.name; } }
+  return { t: best, what };
+}
+function traceLaser(o, d) {
+  const R = world.R, L = state.range, loss = state.loss / 100;
+  let p = o.clone(), v = d.clone().normalize(), power = 1, len = 0, bounces = 0, outcome = 'cap', what = null;
+  // every piece stays in the plane through the centre that contains the start point and direction
+  let n = p.clone().cross(v);
+  if (n.lengthSq() < 1e-10) { n = new V3(1, 0, 0).cross(v); if (n.lengthSq() < 1e-10) n = new V3(0, 0, 1).cross(v); }
+  n.normalize();
+  // In that plane every chord is the same distance d from the centre, and each reflection turns the
+  // chord's tangent point by δ = 2 acos(d / R). The shader uses this to find nearby chords quickly.
+  let e1 = new V3(1, 0, 0).cross(n); if (e1.lengthSq() < 1e-6) e1 = new V3(0, 1, 0).cross(n); e1.normalize();
+  const e2 = n.clone().cross(e1), dd = Math.max(0, p.clone().cross(v).dot(n));
+  const plane = { e1, d: dd, alpha0: Math.atan2(v.dot(e2), v.dot(e1)) - Math.PI / 2,
+    delta: 2 * Math.acos(Math.min(1, dd / R)), half: Math.sqrt(Math.max(0, R * R - dd * dd)) };
+  const segs = [];
+  if (p.length() >= R) return { segs, n, plane, outcome: 'outside', what, len, bounces, power, end: p };
+  while (segs.length < MAXSEG) {
+    const b = p.dot(v), c = p.lengthSq() - R * R, tw = -b + Math.sqrt(Math.max(b * b - c, 0));
+    const hit = firstObject(p, v, tw);
+    const left = power * L;                                // distance before the power runs out
+    const t = Math.min(hit.t, left), q = p.clone().addScaledVector(v, t), pEnd = Math.max(0, power - t / L);
+    segs.push([p.clone(), power, q, pEnd]);
+    len += t;
+    if (left <= hit.t) { outcome = 'fade'; power = 0; p = q; break; }
+    if (hit.what) { outcome = 'hit'; what = hit.what; power = pEnd; p = q; break; }
+    const N = q.clone().divideScalar(R);                   // reflect off the mirror
+    v.addScaledVector(N, -2 * v.dot(N)).normalize();
+    p = q.clone().addScaledVector(N, -1e-7); bounces++;
+    power = pEnd - loss;
+    if (power <= 0) { outcome = 'fade'; power = 0; break; }
+  }
+  return { segs, n, plane, outcome, what, len, bounces, power, end: p };
+}
+function uploadBeams(list) {
+  let nseg = 0, nb = 0, ns = 0;
+  for (const r of list) {
+    if (nb >= MAXBEAMS || !r.segs.length || nseg + r.segs.length > MAXBEAMS * MAXSEG) continue;
+    r.segs.forEach(([a, pa, b, pb], j) => { segData.set([a.x, a.y, a.z, pa, b.x, b.y, b.z, pb], (nseg + j) * 8); });
+    const pl = r.plane;
+    uniforms.uBeamE.value[nb].set(pl.e1.x, pl.e1.y, pl.e1.z, pl.d);
+    uniforms.uBeamA.value[nb].set(Math.cos(pl.alpha0), Math.sin(pl.alpha0), pl.delta, pl.half);
+    uniforms.uBeamN.value[nb++].set(r.n.x, r.n.y, r.n.z, nseg * 512 + r.segs.length);
+    nseg += r.segs.length;
+    if (r.outcome === 'hit' && r.what !== 'sun' && ns < MAXSPOTS) uniforms.uSpots.value[ns++].set(r.end.x, r.end.y, r.end.z, Math.max(r.power, 0.15));
+  }
+  uniforms.uNBeam.value = nb; uniforms.uNSpot.value = ns;
+  segTex.needsUpdate = true;
+}
+function laserText(r) {
+  if (!r) return 'off';
+  const refl = `${r.bounces} reflection${r.bounces === 1 ? '' : 's'}`, L = r.len.toFixed(0);
+  if (r.outcome === 'hit') return r.what === 'sun' ? `absorbed by the sun after ${refl}, ${L} blocks`
+    : `hits the ${r.what} after ${refl}, ${L} blocks (${Math.round(r.power * 100)}% power left)`;
+  if (r.outcome === 'fade') return `${refl}, fades out after ${L} blocks`;
+  if (r.outcome === 'cap') return `${refl}: stopped at the ${MAXSEG}-segment cap with ${Math.round(r.power * 100)}% power left`;
+  return 'outside the sphere';
+}
+
+// ---------------------------------------------------------------------------
+// Player. Your feet are at distance rf from the centre in direction u; "up" is -u (toward the
+// centre). Gravity pulls outward with strength proportional to rf (zero at the centre). Walking moves
+// u along the sphere of radius rf; hf is your horizontal facing, kept tangent as u changes.
+// ---------------------------------------------------------------------------
+const EYE = 1.7, G0 = 18, JUMP = 9, THRUST = 26, SENS = 0.0025, GUN = { right: 0.22, up: -0.2, fwd: 0.3 };
+const state = { u: new V3(0, -1, 0), rf: 30, vr: 0, hf: new V3(0, 0, -1), pitch: 0, grounded: true,
+  range: 300, loss: 0, laser: true, pins: [] };
+function resetPlayer() { state.u.set(0, -1, 0); state.rf = world.R; state.vr = 0; state.hf.set(0, 0, -1); state.pitch = 0.35; }
+function basis() {
+  const up = state.u.clone().negate(), cp = Math.cos(state.pitch), sp = Math.sin(state.pitch);
+  const fwd = state.hf.clone().multiplyScalar(cp).addScaledVector(up, sp);
+  const right = state.hf.clone().cross(up).normalize(), camUp = right.clone().cross(fwd).normalize();
+  return { fwd, right, up: camUp, eye: state.u.clone().multiplyScalar(state.rf - EYE) };
+}
+function keepTangent() {                       // re-project the facing onto the new horizontal plane
+  state.hf.addScaledVector(state.u, -state.hf.dot(state.u));
+  if (state.hf.lengthSq() < 1e-8) { state.hf.set(1, 0, 0).addScaledVector(state.u, -state.u.x); }
+  state.hf.normalize();
+}
+function look(dx, dy) {
+  state.hf.applyAxisAngle(state.u.clone().negate(), -dx * SENS); keepTangent();
+  state.pitch = Math.max(-1.55, Math.min(1.55, state.pitch - dy * SENS));
+}
+function step(dt) {
+  const R = world.R, up = state.u.clone().negate();
+  let f = 0, s = 0;
+  if (keys.KeyW || keys.ArrowUp) f += 1; if (keys.KeyS || keys.ArrowDown) f -= 1; if (keys.KeyD) s += 1; if (keys.KeyA) s -= 1;
+  if (keys.ArrowLeft) look(-2 / SENS * dt, 0); if (keys.ArrowRight) look(2 / SENS * dt, 0);
+  if (f || s) {
+    const right = state.hf.clone().cross(up).normalize(), spd = (keys.ShiftLeft || keys.ShiftRight) ? 14 : 6;
+    const m = state.hf.clone().multiplyScalar(f).addScaledVector(right, s).normalize().multiplyScalar(spd * dt);
+    state.u.multiplyScalar(Math.max(state.rf, 0.5)).add(m).normalize(); keepTangent();
+  }
+  // outward gravity, jumping and the jetpack act along the radius
+  state.vr += G0 * (state.rf / R) * dt;
+  if (keys.KeyE) state.vr -= THRUST * dt; if (keys.KeyQ) state.vr += THRUST * dt;
+  if (keys.Space && state.grounded) state.vr = -JUMP;
+  state.rf += state.vr * dt;
+  if (state.rf >= R) { state.rf = R; state.vr = Math.min(state.vr, 0); state.grounded = true; } else state.grounded = false;
+  if (state.rf < 0) {                          // fell through the centre: now on the other side, keep looking the same way
+    const { fwd } = basis();
+    state.rf = -state.rf; state.vr = -state.vr; state.u.negate();
+    const up2 = state.u.clone().negate();
+    state.pitch = Math.asin(Math.max(-1, Math.min(1, fwd.dot(up2))));
+    const h = fwd.clone().addScaledVector(up2, -fwd.dot(up2)); if (h.lengthSq() > 1e-8) state.hf.copy(h.normalize());
+    keepTangent();
+  }
+}
+function gunPose() {
+  const b = basis();
+  return { o: b.eye.addScaledVector(b.right, GUN.right).addScaledVector(b.up, GUN.up).addScaledVector(b.fwd, GUN.fwd), d: b.fwd };
+}
+function pinLaser() { const g = gunPose(); state.pins.push(g); while (state.pins.length > MAXBEAMS - 1) state.pins.shift(); }
+
+// ---------------------------------------------------------------------------
+// Input & UI
+// ---------------------------------------------------------------------------
+const keys = {};
+const $ = id => document.getElementById(id);
+function setLaser(on) { state.laser = on; $('bLaser').textContent = 'Laser: ' + (on ? 'on' : 'off'); $('bLaser').classList.toggle('on', on); }
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  keys[e.code] = true;
+  if (!e.repeat) {
+    if (e.code === 'KeyL') setLaser(!state.laser);
+    if (e.code === 'KeyR') pinLaser();
+    if (e.code === 'KeyZ') state.pins = [];
+    if (e.code === 'KeyM') setMirror(uniforms.uMirror.value < 0.5);
+  }
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+let dragging = false;
+canvas.addEventListener('pointerdown', e => {
+  if (document.pointerLockElement === canvas) { if (e.button === 0) pinLaser(); return; }   // captured: click leaves an emitter
+  dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === 'mouse') { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+});
+canvas.addEventListener('pointerup', () => { dragging = false; });
+canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0); });
+$('range').addEventListener('input', e => { state.range = +e.target.value; $('rangeVal').textContent = state.range; });
+$('loss').addEventListener('input', e => { state.loss = +e.target.value; $('lossVal').textContent = state.loss; });
+$('rad').addEventListener('input', e => {
+  const R = +e.target.value; state.rf = Math.min(state.rf * R / world.R, R); world.R = R; $('radVal').textContent = R;
+  buildWorld(); uploadWorld(); state.pins = [];
+});
+$('tGrid').addEventListener('change', e => { uniforms.uGrid.value = e.target.checked ? 1 : 0; });
+function setMirror(on) { uniforms.uMirror.value = on ? 1 : 0; $('tMirror').checked = on; $('solidRow').style.opacity = on ? 0.45 : 1; }
+$('tMirror').addEventListener('change', e => setMirror(e.target.checked));
+$('refl').addEventListener('input', e => { uniforms.uRefl.value = +e.target.value / 100; $('reflVal').textContent = e.target.value; });
+$('mist').addEventListener('input', e => { uniforms.uMist.value = +e.target.value * Math.PI / 180; $('mistVal').textContent = e.target.value; });
+$('quality').addEventListener('change', e => { quality = e.target.value; resize(); });
+$('bLaser').addEventListener('click', () => setLaser(!state.laser));
+$('bPin').addEventListener('click', pinLaser);
+$('bUnpin').addEventListener('click', () => { state.pins = []; });
+$('bReset').addEventListener('click', () => { resetPlayer(); state.pins = []; });
+$('tipsToggle').addEventListener('click', () => { const b = $('tipsBody'), hidden = b.style.display === 'none'; b.style.display = hidden ? '' : 'none'; $('tipsToggle').textContent = hidden ? 'hide' : 'show'; });
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+buildWorld(); uploadWorld(); resetPlayer();
+let last = performance.now(), hudT = 0, frames = 0, fpsT0 = performance.now(), liveRes = null;
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
+  step(dt);
+  liveRes = null;
+  if (state.laser) { const g = gunPose(); liveRes = traceLaser(g.o, g.d); }
+  const list = liveRes ? [liveRes] : [];
+  for (let i = state.pins.length - 1; i >= 0; i--) list.push(traceLaser(state.pins[i].o, state.pins[i].d));
+  uploadBeams(list);
+  const b = basis();
+  uniforms.uCamPos.value.copy(b.eye); uniforms.uCamFwd.value.copy(b.fwd); uniforms.uCamRight.value.copy(b.right); uniforms.uCamUp.value.copy(b.up);
+  renderer.render(scene, cam);
+  frames++;
+  if ((hudT += dt) > 0.2) {
+    hudT = 0;
+    $('sLaser').textContent = laserText(liveRes);
+    $('sH').textContent = (world.R - state.rf).toFixed(1); $('sG').textContent = Math.round(100 * state.rf / world.R);
+    $('sE').textContent = state.pins.length;
+    if (now - fpsT0 > 500) { $('sFps').textContent = (frames * 1000 / (now - fpsT0)).toFixed(0); frames = 0; fpsT0 = now; }
+  }
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+window.__demo = { state, world, keys, traceLaser, gunPose, pinLaser, basis, look, frame, renderer, scene, cam, uniforms, V3 };
+</script>
+</body>
+</html>
