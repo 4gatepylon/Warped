@@ -66,7 +66,7 @@ Exactly one **type** label and at least one **area** label.
 | Area | Covers |
 | --- | --- |
 | `area:clients` | the game clients, one per platform (`clients/`) |
-| `area:management_server` | rooms: creating, listing, joining and shutting them down (`management_server/`) |
+| `area:management_server` | starting and stopping game servers, and their players (`management_server/`) |
 | `area:game_server` | the real-time server that runs a room (`game_server/`) |
 | `area:common` | the protocol and physics specifications (`common/`) |
 | `area:tooling` | build, scripts, environment, repo rules |
@@ -93,7 +93,7 @@ gh issue close <n> --reason "not planned"  # or "completed"; close, don't delete
 ```bash
 gh label create experiment             --color 5319e7 --description "Benchmark, comparison or playtest"
 gh label create area:clients           --color 2da44e --description "Game clients, one per platform"
-gh label create area:management_server --color fbca04 --description "Rooms: create, list, join, shut down"
+gh label create area:management_server --color fbca04 --description "Game servers and their players"
 gh label create area:game_server       --color e99695 --description "Real-time server that runs a room"
 gh label create area:common            --color 006b75 --description "Protocol and physics specifications"
 gh label create area:tooling           --color bfd4f2 --description "Build, scripts, environment, repo rules"
