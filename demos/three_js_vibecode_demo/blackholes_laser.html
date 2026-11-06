@@ -427,13 +427,15 @@ void main() {
       if (nc != cell) {
         int m = voxAt(nc);
         if (m > 0) {
-          // which face did we cross first?
-          float best = 2.0; int ax = 0; vec3 seg = p - p0;
+          // which face of the cell we moved into did this step come in through? It is the last of the
+          // cell's three slabs the step enters. (Comparing with the previous cell instead goes wrong for
+          // long steps, like the big straight steps outside the grid that end on the endless grass.)
+          vec3 seg = p - p0, lo = vec3(nc);
+          float best = -1e9; int ax = 0;
           for (int i = 0; i < 3; i++) {
-            if (nc[i] != cell[i] && abs(seg[i]) > 1e-9) {
-              float b = seg[i] > 0.0 ? float(cell[i] + 1) : float(cell[i]);
-              float t = (b - p0[i]) / seg[i];
-              if (t < best) { best = t; ax = i; }
+            if (abs(seg[i]) > 1e-9) {
+              float t = ((seg[i] > 0.0 ? lo[i] : lo[i] + 1.0) - p0[i]) / seg[i];
+              if (t > best) { best = t; ax = i; }
             }
           }
           vec3 n = vec3(0.0); n[ax] = seg[ax] > 0.0 ? -1.0 : 1.0;
