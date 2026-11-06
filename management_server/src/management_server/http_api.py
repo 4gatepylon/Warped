@@ -2,11 +2,14 @@
 
 Interface:
     create_app: Returns an app with the routes of `common/protocol/management_server_api.md`.
+    lifespan_t: What `create_app` takes to run code at startup and shutdown.
 
 Example:
     >>> app = create_app(management.Management(game_server_launcher))
 """
 
+import collections.abc
+import contextlib
 import typing
 import uuid
 
@@ -14,6 +17,9 @@ import fastapi
 
 from management_server import errors, management, models
 
+type lifespan_t = collections.abc.Callable[
+    [fastapi.FastAPI], contextlib.AbstractAsyncContextManager[None]
+]
 DEFAULT_LIST_LIMIT: int = 50
 MAX_LIST_LIMIT: int = 100
 _STATUS_CODE_PER_ERROR: dict[type[Exception], int] = {
@@ -36,16 +42,19 @@ def _handle_error(_: fastapi.Request, error: Exception) -> fastapi.responses.JSO
     )
 
 
-def create_app(management_api: management.Management) -> fastapi.FastAPI:
+def create_app(
+    management_api: management.Management, lifespan: lifespan_t | None = None
+) -> fastapi.FastAPI:
     """`create_app` returns an app whose routes only translate HTTP to `management_api` calls.
 
     Args:
         management_api: The internal management API that the routes call.
+        lifespan: What the app runs at startup and shutdown, if anything.
 
     Example:
         >>> app = create_app(management_api)
     """
-    app: fastapi.FastAPI = fastapi.FastAPI(title="Warped management server")
+    app: fastapi.FastAPI = fastapi.FastAPI(title="Warped management server", lifespan=lifespan)
     for error_type in _STATUS_CODE_PER_ERROR:
         app.add_exception_handler(error_type, _handle_error)
 
