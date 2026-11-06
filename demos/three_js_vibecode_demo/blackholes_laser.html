@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Black Holes + Laser — ray-traced gravitational lensing</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; image-rendering: auto; }
+  .panel { position: fixed; background: rgba(12, 16, 26, 0.74); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 300px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; text-align: right; max-width: 340px; }
+  #tips { bottom: 10px; right: 10px; width: 350px; max-height: calc(100vh - 160px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #7a2c2c; border-color: #c35a5a; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .laser { color: #ffb4a8; }
+  #sLaser { color: #ff9a8a; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 3px 0; }
+  #tipsToggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #warn { position: fixed; top: 40%; width: 100%; text-align: center; color: #fff; font-size: 16px; display: none; text-shadow: 0 0 8px #000; pointer-events: none; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+<div id="warn">You are inside an event horizon. No light from outside can be traced back to you.<br>Fly out with <kbd>S</kbd>, or press <kbd>C</kbd> to clear the black holes.</div>
+
+<div id="controls" class="panel">
+  <h1>Black holes + laser</h1>
+  <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>WASD</kbd> fly · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>Shift</kbd> fast</div>
+  <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
+    <kbd>Click</kbd> (mouse captured) or <kbd>R</kbd>: leave an emitter here that keeps firing<br>
+    <kbd>V</kbd> fire a fan of emitters and rise up to watch<br>
+    <kbd>Z</kbd> remove all emitters</div>
+  <div class="row"><kbd>B</kbd> place black hole 6 blocks ahead<br>
+    <kbd>X</kbd> remove the hole nearest the crosshair · <kbd>C</kbd> clear all<br>
+    <kbd>T</kbd> throw a ball · <kbd>G</kbd> toggle accretion disk</div>
+  <div class="row">
+    <label>Horizon radius r<sub>s</sub> = <b id="rsval">1.2</b> blocks</label>
+    <input id="rs" type="range" min="0.3" max="3" step="0.05" value="1.2">
+    <div class="muted">Applies to new holes and the one you placed last.</div>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="tDisk"> Accretion disk (glowing gas in orbit)</label>
+    <label>Render quality <select id="quality"><option value="auto" selected>auto</option><option value="0.35">low</option><option value="0.5">medium</option><option value="0.75">high</option><option value="1">full</option></select></label>
+  </div>
+  <div class="row">
+    <button id="bLaser" class="on">Laser: on</button>
+    <button id="bPin">Leave emitter</button>
+    <button id="bFan">Laser fan</button>
+    <button id="bUnpin">Remove emitters</button>
+  </div>
+  <div class="row">
+    <button id="bThrow">Throw ball</button>
+    <button id="bPlace">Place hole</button>
+    <button id="bClear">Clear</button>
+    <button id="bReset">Reset view</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Black holes: <b id="sN">1</b> · balls: <b id="sB">0</b> · emitters: <b id="sE">0</b></div>
+  <div>Laser: <span id="sLaser">–</span></div>
+  <div class="muted">Your clock rate vs far away: <span id="sLapse">1.000</span></div>
+  <div class="muted"><span id="sFps">–</span> fps</div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tipsToggle">hide</button>
+  <h1>What you're seeing</h1>
+  <div id="tipsBody">
+  <ol>
+    <li><b>The laser</b> follows the same bent light paths as everything you see. Every pixel's ray checks how close it passes the beam, so the beam itself is lensed too: you can see it behind a hole and inside the Einstein ring. Looking along it, it seems to head straight for the crosshair, because its light comes back to you along the same bent path. To see it bend, leave an emitter (click) and fly off to the side, or press <b>Laser fan</b>.</li>
+    <li><b>Every pixel is a bent light ray.</b> Rays are traced backwards from your eye along real Schwarzschild light paths, so straight lines behind a hole (the checkerboard, the wall, the pillars) curve around it.</li>
+    <li><b>The shadow</b> is about 2.6× the horizon radius, not 1×. Light that comes within 1.5 r<sub>s</sub> (the photon sphere) spirals in. Just outside it, a thin bright <b>Einstein ring</b> shows a distorted image of the whole scene behind you. Aim a laser just past the shadow's edge and it whips around the hole.</li>
+    <li><b>Redshift.</b> Blocks close to a hole look dimmer and redder, because their light loses energy climbing out. Fly close and the outside world turns brighter and bluer instead.</li>
+    <li><b>Throw a ball</b> (<kbd>T</kbd>) past a hole. It gets stretched along the line to the hole (tides), slows down, reddens and fades at the horizon. That's what a distant observer would actually see, rather than it simply vanishing.</li>
+    <li><b>Accretion disk</b> (<kbd>G</kbd>): gas orbiting at up to half the speed of light. You can see its far side above and below the shadow, and the side moving toward you is brighter and bluer (Doppler beaming).</li>
+    <li>Place several holes. Each one lenses the images in the others. Emitters keep firing as you add, move or resize holes.</li>
+  </ol>
+  <div class="muted" style="margin-top:6px">Physics choices: light bending is exact general relativity for a single hole; for several holes their effects are added together (an approximation). Lasers stop when they hit a block, cross a horizon, or have travelled 600 blocks. Ball gravity is weakened so you can watch balls fall: a real hole this size would weigh about 50 Earths. Tidal stretching of balls is exaggerated for visibility.</div>
+  </div>
+</div>
+<div id="err"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+// ---------------------------------------------------------------------------
+// Voxel world (stored in a 3D texture that the ray tracer reads)
+// ---------------------------------------------------------------------------
+const NX = 64, NY = 24, NZ = 64;
+const M = { air: 0, grass: 1, dirt: 2, stone: 3, planks: 4, log: 5, leaves: 6, glass: 7, roof: 8, brick: 9, quartz: 10, obsidian: 11,
+  red: 12, blue: 13, yellow: 14, purple: 15, orange: 16, gold: 17, cobble: 18 };
+const MAT_NAME = Object.fromEntries(Object.entries(M).map(([k, v]) => [v, k]));
+const vox = new Uint8Array(NX * NY * NZ);
+const inGrid = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < NX && y < NY && z < NZ;
+const set = (x, y, z, m) => { if (inGrid(x, y, z)) vox[x + y * NX + z * NX * NY] = m; };
+const get = (x, y, z) => inGrid(x, y, z) ? vox[x + y * NX + z * NX * NY] : (y < 1 ? M.grass : 0);
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+function buildWorld() {
+  vox.fill(0);
+  for (let x = 0; x < NX; x++) for (let z = 0; z < NZ; z++) set(x, 0, z, M.grass);
+  // checkerboard plaza
+  for (let x = 20; x < 44; x++) for (let z = 20; z < 44; z++) set(x, 0, z, ((x + z) & 1) ? M.quartz : M.obsidian);
+  // ring of pillars
+  const cols = [M.red, M.orange, M.yellow, M.blue, M.purple];
+  for (let k = 0; k < 12; k++) {
+    const a = k / 12 * Math.PI * 2, px = Math.round(32 + 15 * Math.cos(a)), pz = Math.round(32 + 15 * Math.sin(a));
+    for (let y = 1; y <= 7; y++) set(px, y, pz, cols[k % cols.length]);
+    set(px, 8, pz, M.gold);
+  }
+  // a long straight wall (straight lines make lensing obvious)
+  for (let x = 4; x < 60; x++) for (let y = 1; y <= 3; y++) set(x, y, 10, (y === 3) ? M.stone : M.cobble);
+  // house (door faces +z)
+  const hx = 12, hz = 52;
+  for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) set(hx + x, 0, hz + z, (Math.abs(x) === 4 || Math.abs(z) === 3) ? M.cobble : M.planks);
+  for (let y = 1; y <= 4; y++) for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) {
+    const ex = Math.abs(x) === 4, ez = Math.abs(z) === 3; if (ex || ez) set(hx + x, y, hz + z, ex && ez ? M.log : M.planks);
+  }
+  set(hx, 1, hz + 3, 0); set(hx, 2, hz + 3, 0);
+  for (const y of [2, 3]) { for (const x of [-2, 2]) { set(hx + x, y, hz + 3, M.glass); set(hx + x, y, hz - 3, M.glass); } set(hx + 4, y, hz, M.glass); set(hx - 4, y, hz, M.glass); }
+  for (let k = 0; k <= 4; k++) {
+    const y = 5 + k, zr = 4 - k;
+    for (let x = -5; x <= 5; x++) { for (const zz of [zr, -zr, zr - 1, -(zr - 1)]) if (Math.abs(zz) <= zr) set(hx + x, y, hz + zz, M.roof); }
+    for (const x of [-4, 4]) for (let z = -(zr - 2); z <= zr - 2; z++) set(hx + x, y, hz + z, M.planks);
+  }
+  for (let y = 6; y <= 10; y++) set(hx + 2, y, hz - 1, M.brick);
+  // trees
+  const rng = mulberry32(7);
+  let placed = 0;
+  for (let tries = 0; tries < 400 && placed < 26; tries++) {
+    const tx = 2 + Math.floor(rng() * (NX - 4)), tz = 2 + Math.floor(rng() * (NZ - 4));
+    if (tx > 15 && tx < 49 && tz > 15 && tz < 49) continue;          // plaza + pillar ring
+    if (Math.abs(tx - hx) < 8 && Math.abs(tz - hz) < 7) continue;     // house
+    if (Math.abs(tz - 10) < 3) continue;                               // wall
+    const h = 4 + Math.floor(rng() * 2);
+    for (let y = h - 1; y <= h; y++) for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) { if (Math.abs(x) === 2 && Math.abs(z) === 2 && rng() < 0.7) continue; set(tx + x, y, tz + z, M.leaves); }
+    for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) set(tx + x, h + 1, tz + z, M.leaves);
+    for (let y = 1; y < h; y++) set(tx, y, tz, M.log);
+    placed++;
+  }
+}
+buildWorld();
+
+// ---------------------------------------------------------------------------
+// Laser beams. A beam is traced on the CPU (below) and handed to the ray tracer as a polyline, grouped
+// into "chunks" of up to 16 segments, each with a bounding capsule. The points live in a float texture,
+// the chunk capsules in uniforms.
+// ---------------------------------------------------------------------------
+const LASER_MAX = 600, MAXPTS = 2048, MAXCH = 64, MAXSPOTS = 8, MAXPINS = 10;
+
+// ---------------------------------------------------------------------------
+// Ray tracer. For each pixel, a ray is marched backwards from the eye. Near a hole it follows the
+// Schwarzschild null-geodesic equation written as a force: d²x/dλ² = -(3/2) r_s |x × v|² x / r⁵ (exact for
+// one hole; summed for several). Far from holes it walks the voxel grid cell by cell.
+// Each straight step of the ray is also tested against the laser beams (segment-to-segment distance),
+// so the beams appear wherever their light would reach you: directly, around a hole, in the Einstein ring.
+// The test is skipped while the ray is provably far from every beam chunk.
+// ---------------------------------------------------------------------------
+const vert = `
+precision highp float;
+in vec3 position; out vec2 vNdc;
+void main() { vNdc = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+const frag = `
+precision highp float; precision highp int; precision highp sampler3D; precision highp sampler2D;
+uniform sampler3D uVox; uniform ivec3 uDim;
+uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd; uniform float uTanHalf, uAspect;
+uniform vec4 uHoles[8]; uniform int uNH;
+uniform vec4 uBalls[16]; uniform vec4 uBallAx[16]; uniform vec3 uBallCol[16]; uniform int uNB;
+uniform float uDisk, uTime, uCamLapse; uniform vec3 uSun;
+uniform sampler2D uBPts;                                   // beam points (xyz)
+uniform vec4 uBCA[${MAXCH}]; uniform vec4 uBCB[${MAXCH}]; uniform int uNC;  // chunks: axis a (xyz) + radius, axis b (xyz) + first*32+count
+uniform vec4 uSpots[${MAXSPOTS}]; uniform int uNS;          // where beams hit blocks
+uniform float uBeamR, uPix;                                 // beam core radius (blocks), pixel size (radians)
+in vec2 vNdc; out vec4 outColor;
+
+const vec3 PAL[19] = vec3[19](vec3(0.0), vec3(0.40,0.65,0.28), vec3(0.55,0.40,0.26), vec3(0.55,0.55,0.57), vec3(0.74,0.57,0.34),
+  vec3(0.42,0.31,0.19), vec3(0.24,0.52,0.20), vec3(0.70,0.87,0.96), vec3(0.64,0.25,0.20), vec3(0.58,0.30,0.25), vec3(0.90,0.89,0.86),
+  vec3(0.13,0.11,0.17), vec3(0.80,0.20,0.18), vec3(0.20,0.35,0.80), vec3(0.92,0.80,0.20), vec3(0.55,0.25,0.70), vec3(0.92,0.50,0.15),
+  vec3(0.95,0.78,0.25), vec3(0.50,0.50,0.50));
+
+float hash3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  return mix(mix(hash2(i), hash2(i+vec2(1,0)), f.x), mix(hash2(i+vec2(0,1)), hash2(i+vec2(1,1)), f.x), f.y); }
+float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; } return s; }
+
+int voxAt(ivec3 c) {
+  if (c.y < 0) return 1;
+  if (c.x < 0 || c.z < 0 || c.x >= uDim.x || c.y >= uDim.y || c.z >= uDim.z) return c.y < 1 ? 1 : 0;   // endless grass plane
+  return int(texelFetch(uVox, c, 0).r * 255.0 + 0.5);
+}
+float lapseAt(vec3 p) {        // sqrt(1 - Σ r_s / r): rate of a static clock relative to one far away
+  float phi = 0.0;
+  for (int k = 0; k < 8; k++) { if (k >= uNH) break; phi += uHoles[k].w / max(length(p - uHoles[k].xyz), 1e-4); }
+  return sqrt(max(1.0 - phi, 0.0));
+}
+vec3 shift(vec3 c, float g) {  // g = received / emitted frequency
+  g = clamp(g, 0.0, 3.0);
+  vec3 s = g < 1.0 ? vec3(c.r, c.g * g, c.b * g * g) : vec3(c.r / (g * g), c.g / g, c.b);
+  return s * g * g * g;
+}
+vec3 sky(vec3 d) {
+  vec3 hor = vec3(0.78, 0.86, 0.95);
+  vec3 c = mix(hor, vec3(0.30, 0.52, 0.88), pow(max(d.y, 0.0), 0.55));
+  if (d.y < 0.0) c = mix(hor, vec3(0.42, 0.56, 0.38), min(-d.y * 5.0, 1.0));
+  if (d.y > 0.01) {
+    vec2 uv = d.xz / (d.y + 0.1) * 0.9 + vec2(uTime * 0.01, 0.0);
+    float n = fbm(uv * 1.6);
+    c = mix(c, vec3(1.0), smoothstep(0.52, 0.78, n) * 0.85 * smoothstep(0.01, 0.15, d.y));
+  }
+  float sd = dot(d, uSun);
+  c += vec3(1.0, 0.92, 0.75) * (smoothstep(0.99955, 0.9998, sd) * 3.0 + pow(max(sd, 0.0), 300.0) * 0.4);
+  return c;
+}
+vec3 shadeVox(int m, vec3 hp, vec3 n, ivec3 cell) {
+  vec3 base = PAL[m];
+  if (m == 1 && n.y < 0.5) base = fract(hp.y) > 0.8 ? PAL[1] : PAL[2];        // grass block sides
+  vec2 uv = abs(n.x) > 0.5 ? hp.zy : (abs(n.y) > 0.5 ? hp.xz : hp.xy);
+  vec2 f = fract(uv);
+  base *= 0.86 + 0.22 * hash3(vec3(floor(f * 8.0), float(cell.x * 7 + cell.y * 131 + cell.z * 29)));
+  vec2 e2 = min(f, 1.0 - f);
+  base *= mix(0.6, 1.0, smoothstep(0.0, 0.04, min(e2.x, e2.y)));
+  if (m == 7) base = mix(base, vec3(0.95), 0.15);
+  float face = n.y > 0.5 ? 1.0 : (n.y < -0.5 ? 0.5 : (abs(n.x) > 0.5 ? 0.82 : 0.68));
+  return base * face * (0.78 + 0.22 * max(dot(n, uSun), 0.0));
+}
+vec3 blackbody(float t) {      // rough colour ramp for a temperature t (1 = inner disk edge)
+  t = max(t, 0.0);
+  vec3 c = vec3(1.0, 0.25 + 0.75 * smoothstep(0.25, 1.0, t), 0.05 + 0.95 * smoothstep(0.6, 1.5, t));
+  return c * 2.6 * pow(t, 2.5);
+}
+
+// --- laser helpers
+float distPS(vec3 p, vec3 a, vec3 b) {
+  vec3 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
+  return length(p - a - ab * t);
+}
+// squared distance between segments p1-q1 and p2-q2; s = parameter of the closest point on the first one
+float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s) {
+  vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), t;
+  s = 0.0;
+  if (e < 1e-10) { t = 0.0; s = a > 1e-10 ? clamp(-dot(d1, r) / a, 0.0, 1.0) : 0.0; }
+  else if (a < 1e-10) { t = clamp(f / e, 0.0, 1.0); }
+  else {
+    float b = dot(d1, d2), c = dot(d1, r), den = a * e - b * b;
+    s = den > 1e-7 * a * e ? clamp((b * f - c * e) / den, 0.0, 1.0) : 0.0;
+    t = (b * s + f) / e;
+    if (t < 0.0) { t = 0.0; s = clamp(-c / a, 0.0, 1.0); }
+    else if (t > 1.0) { t = 1.0; s = clamp((b - c) / a, 0.0, 1.0); }
+  }
+  vec3 w = p1 + d1 * s - p2 - d2 * t;
+  return dot(w, w);
+}
+const float REACH = 4.8;        // glow is negligible beyond REACH core radii
+// Glow from beam chunk c near the straight ray piece a->b (length len, starting after t0 of travel).
+// Returns a lower bound on the distance from a to the chunk's bounding capsule.
+float beamChunk(int c, vec3 a, vec3 b, float len, float reach, float t0, float trans, inout float core, inout float halo) {
+  vec4 A = uBCA[c], B = uBCB[c];
+  vec3 rm = 0.5 * (a + b);
+  float dc = distPS(rm, A.xyz, B.xyz) - A.w;
+  if (dc > 0.5 * len + reach) return dc - 0.5 * len;
+  if (len > 2.0) { float s0; if (sqrt(segSeg(a, b, A.xyz, B.xyz, s0)) - A.w > reach) return dc - 0.5 * len; }   // long pieces: exact capsule test
+  int pk = int(B.w + 0.5), first = pk >> 5, cnt = pk & 31;
+  vec3 q0 = texelFetch(uBPts, ivec2(first, 0), 0).xyz;
+  for (int j = 0; j < 16; j++) {
+    if (j >= cnt) break;
+    vec3 q1 = texelFetch(uBPts, ivec2(first + j + 1, 0), 0).xyz;
+    // cheap reject: the two segments' bounding spheres are too far apart
+    if (length(0.5 * (q0 + q1) - rm) > 0.5 * (length(q1 - q0) + len) + reach) { q0 = q1; continue; }
+    float s; float d2 = segSeg(a, b, q0, q1, s);
+    float tc = t0 + s * len;
+    float sg = max(uBeamR, uPix * tc);                   // never thinner than about a pixel
+    float f = trans * exp(-tc / 260.0);                  // distance haze
+    core = max(core, f * exp(-d2 / (sg * sg)));
+    halo = max(halo, f * exp(-d2 / (4.8 * sg * sg)));
+    q0 = q1;
+  }
+  return dc - 0.5 * len;
+}
+float beamScan(vec3 a, vec3 b, float t0, float trans, inout float core, inout float halo) {   // every chunk
+  float len = length(b - a), reach = REACH * max(uBeamR, uPix * (t0 + len)), dmin = 1e9;
+  for (int c = 0; c < ${MAXCH}; c++) {
+    if (c >= uNC) break;
+    dmin = min(dmin, beamChunk(c, a, b, len, reach, t0, trans, core, halo));
+  }
+  return dmin;
+}
+float laserSpot(vec3 hp, float t) {   // red dot where a beam hits a block
+  float g = 0.0, rr = max(0.07, 2.5 * uPix * t);
+  for (int k = 0; k < ${MAXSPOTS}; k++) {
+    if (k >= uNS) break;
+    vec3 d = hp - uSpots[k].xyz;
+    g = max(g, uSpots[k].w * exp(-dot(d, d) / (rr * rr)));
+  }
+  return g * exp(-t / 260.0);
+}
+
+void main() {
+  vec3 v = normalize(uCamFwd + vNdc.x * uTanHalf * uAspect * uCamRight + vNdc.y * uTanHalf * uCamUp);
+  vec3 p = uCamPos;
+  vec3 emit = vec3(0.0); float trans = 1.0; float travelled = 0.0;
+  ivec3 cell = ivec3(floor(p));
+  vec3 surf = vec3(0.0); int outcome = 0;      // 0 escaped, 1 surface, 2 swallowed
+  vec3 bmin = vec3(0.0), bmax = vec3(uDim);
+  float bNext = 0.0, bCore = 0.0, bHalo = 0.0; // laser: travel distance of the next full check, glow
+  int nearC[10]; int nNear = 0;                // laser chunks close to the ray at the last full check
+
+  for (int it = 0; it < 700; it++) {
+    // --- gravity: bending acceleration and step size
+    vec3 acc = vec3(0.0); float fineStep = 1e9; float rNear = 1e9;
+    for (int k = 0; k < 8; k++) {
+      if (k >= uNH) break;
+      vec3 d = p - uHoles[k].xyz; float rs = uHoles[k].w; float r = length(d);
+      if (r < rs) { outcome = 2; break; }
+      vec3 h = cross(d, v);
+      acc += -1.5 * rs * dot(h, h) * d / (r * r * r * r * r);
+      rNear = min(rNear, r);
+      if (r < 10.0 * rs + 4.0) fineStep = min(fineStep, clamp(0.06 * r, 0.012, 0.35));
+    }
+    if (outcome == 2) break;
+
+    bool inBox = all(greaterThanEqual(p, bmin)) && all(lessThan(p, bmax));
+    float ds;
+    bool gone = false;
+    if (fineStep < 1e8) {
+      ds = fineStep;
+    } else if (inBox || p.y < 1.0) {
+      // voxel DDA: distance to the next cell boundary
+      vec3 bnd = vec3(cell) + step(0.0, v);
+      vec3 tt = (bnd - p) / v;
+      tt = mix(tt, vec3(1e9), lessThan(abs(v), vec3(1e-7)));
+      ds = min(tt.x, min(tt.y, tt.z)) + 1e-4;
+      ds = min(ds, max(0.3 * rNear, 0.05));
+    } else {
+      // outside the grid: big straight steps, stopping at the ground plane, the grid box, or near holes
+      ds = max(1.0, 0.35 * rNear);
+      if (v.y < 0.0) ds = min(ds, (p.y - 1.0) / -v.y + 1e-3);
+      vec3 t0 = (bmin - p) / v, t1 = (bmax - p) / v;
+      vec3 tmin = min(t0, t1), tmax = max(t0, t1);
+      float tn = max(max(tmin.x, tmin.y), tmin.z), tf = min(min(tmax.x, tmax.y), tmax.z);
+      if (tn > 0.0 && tn < tf) ds = min(ds, tn + 1e-3);
+      bool leaving = (tn <= 0.0 || tn >= tf) && v.y >= 0.0;
+      gone = (leaving && rNear > 60.0) || travelled > 600.0;
+    }
+    if (gone) {
+      // the rest of the path is a straight line to the sky: test the beams against all of it at once
+      if (uNC > 0) beamScan(p, p + v * max(620.0 - travelled, 1.0), travelled, trans, bCore, bHalo);
+      outcome = 0; break;
+    }
+    vec3 p0 = p, pn = p + v * ds; float t0 = travelled; float hitFrac = 1.0;
+
+    // --- accretion disk: thin, in each hole's horizontal plane, from the ISCO (3 r_s) to 9 r_s
+    if (uDisk > 0.5) {
+      for (int k = 0; k < 8; k++) {
+        if (k >= uNH) break;
+        vec3 H = uHoles[k].xyz; float rs = uHoles[k].w;
+        float y0 = p.y - H.y, y1 = pn.y - H.y;
+        if (y0 * y1 < 0.0) {
+          vec3 q = mix(p, pn, y0 / (y0 - y1)); vec3 dq = q - H; float r = length(dq.xz);
+          float rin = 3.0 * rs, rout = 9.0 * rs;
+          if (r > rin * 0.98 && r < rout) {
+            vec3 phiDir = normalize(vec3(-dq.z, 0.0, dq.x));
+            float beta = sqrt(rs / (2.0 * (r - rs)));                        // Keplerian speed / c
+            float gam = 1.0 / sqrt(1.0 - beta * beta);
+            float dop = 1.0 / (gam * (1.0 - beta * dot(phiDir, -v)));        // relativistic Doppler
+            float g = dop * sqrt(1.0 - 1.5 * rs / r) / uCamLapse;             // + gravitational redshift
+            float T = pow(rin / r, 0.75);
+            float ang = atan(dq.z, dq.x);
+            float tex = 0.7 + 0.3 * fbm(vec2(r / rs * 3.0, ang * 3.0 - uTime * 0.6 * pow(rin / r, 1.5)));
+            float a = smoothstep(rin * 0.98, rin * 1.12, r) * (1.0 - smoothstep(rout * 0.75, rout, r)) * 0.8;
+            emit += trans * blackbody(T * g) * tex * a;
+            trans *= 1.0 - a;
+          }
+        }
+      }
+    }
+
+    // --- balls (stretched along the line to the nearest hole)
+    float bestT = 2.0; int bestB = -1;
+    for (int b = 0; b < 16; b++) {
+      if (b >= uNB) break;
+      vec3 c = uBalls[b].xyz; float rad = uBalls[b].w; vec3 ax = uBallAx[b].xyz; float e = uBallAx[b].w;
+      vec3 A = p - c, B = pn - c;
+      float se = sqrt(e);
+      vec3 tA = (A - ax * dot(A, ax)) * se / rad + ax * (dot(A, ax) / (e * rad));
+      vec3 tB = (B - ax * dot(B, ax)) * se / rad + ax * (dot(B, ax) / (e * rad));
+      vec3 dd = tB - tA;
+      float aa = dot(dd, dd), bb = dot(tA, dd), cc = dot(tA, tA) - 1.0;
+      float disc = bb * bb - aa * cc;
+      if (disc < 0.0 || aa < 1e-12) continue;
+      float t = (-bb - sqrt(disc)) / aa;
+      if (t >= 0.0 && t <= 1.0 && t < bestT) { bestT = t; bestB = b; }
+    }
+    if (bestB >= 0) {
+      vec3 hp = mix(p, pn, bestT);
+      vec3 c = uBalls[bestB].xyz; vec3 ax = uBallAx[bestB].xyz; float e = uBallAx[bestB].w;
+      vec3 y = hp - c; float yp = dot(y, ax);
+      vec3 n = normalize((y - ax * yp) * e + ax * yp / (e * e));
+      float l = 0.45 + 0.55 * max(dot(n, uSun), 0.0);
+      float spec = pow(max(dot(reflect(-uSun, n), -v), 0.0), 24.0) * 0.35;
+      surf = shift(uBallCol[bestB] * l + spec, lapseAt(hp) / uCamLapse);
+      travelled = t0 + ds * bestT; outcome = 1; hitFrac = bestT;
+    } else {
+      // --- bend, advance, test the voxel we moved into
+      v = normalize(v + acc * ds);
+      p = pn; travelled += ds;
+      ivec3 nc = ivec3(floor(p));
+      if (nc != cell) {
+        int m = voxAt(nc);
+        if (m > 0) {
+          // which face did we cross first?
+          float best = 2.0; int ax = 0; vec3 seg = p - p0;
+          for (int i = 0; i < 3; i++) {
+            if (nc[i] != cell[i] && abs(seg[i]) > 1e-9) {
+              float b = seg[i] > 0.0 ? float(cell[i] + 1) : float(cell[i]);
+              float t = (b - p0[i]) / seg[i];
+              if (t < best) { best = t; ax = i; }
+            }
+          }
+          vec3 n = vec3(0.0); n[ax] = seg[ax] > 0.0 ? -1.0 : 1.0;
+          hitFrac = clamp(best, 0.0, 1.0);
+          vec3 hp = p0 + seg * hitFrac;
+          surf = shift(shadeVox(m, hp, n, nc), lapseAt(hp) / uCamLapse);
+          if (uNS > 0) { float sp = trans * laserSpot(hp, travelled); bHalo = max(bHalo, sp); bCore = max(bCore, sp * sp); }
+          outcome = 1;
+        }
+        cell = nc;
+      }
+    }
+
+    // --- laser beams near this piece of the ray (only up to the surface it hit, if any).
+    // Every so often test all chunks and remember the few that are near. Until the ray could have
+    // reached any of the others (bNext), only the remembered ones are tested.
+    if (uNC > 0) {
+      vec3 b1 = mix(p0, pn, hitFrac); float len = ds * hitFrac;
+      float reach = REACH * max(uBeamR, uPix * (t0 + len));
+      if (t0 + ds >= bNext) {
+        float reach0 = REACH * max(uBeamR, uPix * t0), near = reach0 + 2.5, far = 1e9;
+        bool overflow = false; nNear = 0;
+        for (int c = 0; c < ${MAXCH}; c++) {
+          if (c >= uNC) break;
+          float dc = beamChunk(c, p0, b1, len, reach, t0, trans, bCore, bHalo);
+          if (dc < near) { if (nNear < 10) { nearC[nNear] = c; nNear++; } else overflow = true; }
+          else far = min(far, dc);
+        }
+        // the remaining chunks cannot come within glow range before this much travel
+        bNext = overflow ? t0 : t0 + max(far - reach0, 0.0) / (1.0 + REACH * uPix);
+      } else {
+        for (int k = 0; k < 10; k++) {
+          if (k >= nNear) break;
+          beamChunk(nearC[k], p0, b1, len, reach, t0, trans, bCore, bHalo);
+        }
+      }
+    }
+    if (outcome == 1) break;
+  }
+
+  vec3 col;
+  vec3 haze = vec3(0.78, 0.86, 0.95);
+  if (outcome == 1) col = mix(haze, surf, exp(-travelled / 170.0));
+  else if (outcome == 2) col = vec3(0.0);
+  else col = shift(sky(v), 1.0 / uCamLapse);
+  col = emit + trans * col;
+  col = mix(col, vec3(1.0, 0.06, 0.03), clamp(0.9 * bHalo, 0.0, 1.0)) + vec3(1.0, 0.62, 0.52) * bCore;   // laser
+  col = col / (1.0 + max(col - 1.0, 0.0) * 0.6);     // soft clip for very bright disk light
+  outColor = vec4(pow(clamp(col, 0.0, 1.0), vec3(1.0)), 1.0);
+}`;
+
+// ---------------------------------------------------------------------------
+// Three.js setup
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('c');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false }); }
+catch (e) { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = 'WebGL2 is required: ' + e.message; throw e; }
+const tex = new THREE.Data3DTexture(vox, NX, NY, NZ);
+tex.format = THREE.RedFormat; tex.type = THREE.UnsignedByteType;
+tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.unpackAlignment = 1; tex.needsUpdate = true;
+const beamData = new Float32Array(MAXPTS * 4);
+const beamTex = new THREE.DataTexture(beamData, MAXPTS, 1, THREE.RGBAFormat, THREE.FloatType);
+beamTex.minFilter = beamTex.magFilter = THREE.NearestFilter; beamTex.needsUpdate = true;
+
+const uniforms = {
+  uVox: { value: tex }, uDim: { value: new Int32Array([NX, NY, NZ]) },
+  uCamPos: { value: new THREE.Vector3() }, uCamRight: { value: new THREE.Vector3() }, uCamUp: { value: new THREE.Vector3() }, uCamFwd: { value: new THREE.Vector3() },
+  uTanHalf: { value: Math.tan(37.5 * Math.PI / 180) }, uAspect: { value: 1 },
+  uHoles: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) }, uNH: { value: 0 },
+  uBalls: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, uBallAx: { value: Array.from({ length: 16 }, () => new THREE.Vector4(0, 1, 0, 1)) },
+  uBallCol: { value: Array.from({ length: 16 }, () => new THREE.Vector3()) }, uNB: { value: 0 },
+  uDisk: { value: 0 }, uTime: { value: 0 }, uCamLapse: { value: 1 }, uSun: { value: new THREE.Vector3(0.45, 0.62, 0.35).normalize() },
+  uBPts: { value: beamTex }, uBCA: { value: Array.from({ length: MAXCH }, () => new THREE.Vector4()) }, uBCB: { value: Array.from({ length: MAXCH }, () => new THREE.Vector4()) },
+  uNC: { value: 0 }, uSpots: { value: Array.from({ length: MAXSPOTS }, () => new THREE.Vector4()) }, uNS: { value: 0 },
+  uBeamR: { value: 0.012 }, uPix: { value: 0.002 }
+};
+const mat = new THREE.RawShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
+const scene = new THREE.Scene(); scene.add(quad);
+const cam = new THREE.Camera();
+
+let quality = 'auto';
+const bufSize = new THREE.Vector2();
+function resize() {
+  const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
+  let q = quality === 'auto' ? Math.min(1, Math.sqrt(520000 / (w * h * dpr * dpr))) : +quality;
+  renderer.setPixelRatio(dpr * q);
+  renderer.setSize(w, h, false);
+  uniforms.uAspect.value = w / h;
+  renderer.getDrawingBufferSize(bufSize);
+  uniforms.uPix.value = 2 * uniforms.uTanHalf.value / Math.max(1, bufSize.y);
+}
+window.addEventListener('resize', resize);
+
+// ---------------------------------------------------------------------------
+// State: camera, holes, balls, lasers
+// ---------------------------------------------------------------------------
+const V3 = THREE.Vector3;
+const state = { pos: new V3(), yaw: 0, pitch: 0, holes: [], balls: [], rs: 1.2, disk: false, laser: true, pins: [] };
+function resetView() { state.pos.set(32, 4.5, 47); state.yaw = 0; state.pitch = -0.05; }
+function camBasis() {
+  const cp = Math.cos(state.pitch), sp = Math.sin(state.pitch), cy = Math.cos(state.yaw), sy = Math.sin(state.yaw);
+  const fwd = new V3(sy * cp, sp, -cy * cp), right = new V3(cy, 0, sy), up = new V3().crossVectors(right, fwd);
+  return { fwd, right, up };
+}
+function carve(h) {           // blocks inside a horizon are gone
+  let changed = false;
+  const r = Math.ceil(h.rs) + 1;
+  for (let x = Math.floor(h.p.x) - r; x <= Math.floor(h.p.x) + r; x++)
+    for (let y = Math.floor(h.p.y) - r; y <= Math.floor(h.p.y) + r; y++)
+      for (let z = Math.floor(h.p.z) - r; z <= Math.floor(h.p.z) + r; z++) {
+        if (!inGrid(x, y, z) || !vox[x + y * NX + z * NX * NY]) continue;
+        if (new V3(x + 0.5, y + 0.5, z + 0.5).distanceTo(h.p) < h.rs) { set(x, y, z, 0); changed = true; }
+      }
+  if (changed) tex.needsUpdate = true;
+}
+function placeHole(p, rs) {
+  if (state.holes.length >= 8) state.holes.shift();
+  const h = { p: p.clone(), rs }; state.holes.push(h); carve(h);
+}
+function removeAimed() {
+  if (!state.holes.length) return;
+  const { fwd } = camBasis(); let best = -2, bi = -1;
+  state.holes.forEach((h, i) => { const d = h.p.clone().sub(state.pos).normalize().dot(fwd); if (d > best) { best = d; bi = i; } });
+  state.holes.splice(bi, 1);
+}
+const BALL_COLS = [[0.95, 0.25, 0.25], [0.25, 0.55, 0.95], [0.95, 0.85, 0.25], [0.35, 0.85, 0.35], [0.85, 0.4, 0.9], [1, 1, 1]];
+let ballCount = 0;
+function throwBall() {
+  const { fwd } = camBasis();
+  if (state.balls.length >= 16) state.balls.shift();
+  state.balls.push({ p: state.pos.clone().addScaledVector(fwd, 1.2), v: fwd.clone().multiplyScalar(11).add(new V3(0, 2, 0)), rad: 0.35,
+    col: BALL_COLS[ballCount++ % BALL_COLS.length], age: 0, axis: new V3(0, 1, 0), e: 1 });
+}
+const solid = (x, y, z) => get(Math.floor(x), Math.floor(y), Math.floor(z)) > 0;
+const GRAV_K = 22;   // game-scaled hole gravity (see notes in the panel)
+function stepBalls(dt) {
+  const sub = 4, h = dt / sub;
+  for (let s = 0; s < sub; s++) {
+    for (const b of state.balls) {
+      const a = new V3(0, -9.8, 0); let phi = 0, rNear = 1e9, nearH = null;
+      for (const H of state.holes) {
+        const d = b.p.clone().sub(H.p), r = d.length();
+        phi += H.rs / r;
+        // Paczyński–Wiita potential: Newtonian far away, but plunges inside 3 r_s like the real thing
+        a.addScaledVector(d, -GRAV_K * H.rs / (Math.max(r - H.rs, 0.02) ** 2 * r));
+        if (r / H.rs < rNear) { rNear = r / H.rs; nearH = { H, d, r }; }
+      }
+      const lapse = Math.max(0, 1 - phi);            // coordinate-time slowdown seen from far away
+      b.lapse = lapse;
+      const dte = h * Math.max(lapse, 0.0);
+      b.v.addScaledVector(a, dte);
+      for (let i = 0; i < 3; i++) {
+        const k = ['x', 'y', 'z'][i];
+        b.p[k] += b.v[k] * dte;
+        const probe = b.p.clone(); probe[k] += Math.sign(b.v[k]) * b.rad;
+        if (solid(probe.x, probe.y, probe.z)) {
+          b.p[k] -= b.v[k] * dte; b.v[k] *= -0.4;
+          if (k === 'y') { b.v.x *= 0.92; b.v.z *= 0.92; }
+        }
+      }
+      if (nearH) {
+        b.axis.copy(nearH.d).normalize();
+        b.e = Math.min(7, 1 + 2.5 * (nearH.H.rs / Math.max(nearH.r - nearH.H.rs, 0.05)) ** 2);
+      } else { b.e = 1; }
+      b.age += h;
+    }
+    state.balls = state.balls.filter(b => b.lapse === undefined || (b.lapse > 0.012 && b.p.y > -20 && b.age < 120));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Laser tracing on the CPU: the same bending law as the renderer, integrated with RK4 in arc length
+// (the direction stays a unit vector and only its perpendicular part is bent, which gives exactly the
+// Schwarzschild light-ray shapes). Stops at a block, a horizon, or after LASER_MAX blocks.
+// ---------------------------------------------------------------------------
+const GUN = { right: 0.22, up: -0.2, fwd: 0.3 };      // where the beam leaves, relative to your eye
+function entersBox(px, py, pz, vx, vy, vz) {          // will this straight line enter the voxel grid?
+  const slab = (p, v, hi) => { const iv = Math.abs(v) < 1e-12 ? (v < 0 ? -1e12 : 1e12) : 1 / v, a = -p * iv, b = (hi - p) * iv; return [Math.min(a, b), Math.max(a, b)]; };
+  const X = slab(px, vx, NX), Y = slab(py, vy, NY), Z = slab(pz, vz, NZ);
+  const tn = Math.max(X[0], Y[0], Z[0]), tf = Math.min(X[1], Y[1], Z[1]);
+  return tn > 0 && tn < tf;
+}
+const _vh = { t: 0, m: 0 };
+function voxelHit(ax, ay, az, bx, by, bz) {          // first solid cell entered on the segment a->b (3D DDA)
+  const dx = bx - ax, dy = by - ay, dz = bz - az;
+  let ix = Math.floor(ax), iy = Math.floor(ay), iz = Math.floor(az);
+  const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+  const ddx = dx !== 0 ? Math.abs(1 / dx) : Infinity, ddy = dy !== 0 ? Math.abs(1 / dy) : Infinity, ddz = dz !== 0 ? Math.abs(1 / dz) : Infinity;
+  let tx = dx !== 0 ? ((dx > 0 ? ix + 1 : ix) - ax) / dx : Infinity;
+  let ty = dy !== 0 ? ((dy > 0 ? iy + 1 : iy) - ay) / dy : Infinity;
+  let tz = dz !== 0 ? ((dz > 0 ? iz + 1 : iz) - az) / dz : Infinity;
+  for (let n = 0; n < 256; n++) {
+    let t;
+    if (tx <= ty && tx <= tz) { t = tx; ix += sx; tx += ddx; }
+    else if (ty <= tz) { t = ty; iy += sy; ty += ddy; }
+    else { t = tz; iz += sz; tz += ddz; }
+    if (t > 1) return null;
+    const m = get(ix, iy, iz);
+    if (m) { _vh.t = t; _vh.m = m; return _vh; }
+  }
+  return null;
+}
+function traceLaser(o, d) {
+  const holes = state.holes, nH = holes.length;
+  let px = o.x, py = o.y, pz = o.z;
+  const l0 = Math.hypot(d.x, d.y, d.z);
+  let vx = d.x / l0, vy = d.y / l0, vz = d.z / l0;
+  const pts = [[px, py, pz]];
+  let lx = vx, ly = vy, lz = vz, since = 0, s = 0, bend = 0, outcome = 'far', mat = 0;
+  let ax = 0, ay = 0, az = 0;
+  function accel(x, y, z, ux, uy, uz) {
+    let gx = 0, gy = 0, gz = 0;
+    for (let k = 0; k < nH; k++) {
+      const H = holes[k], ex = x - H.p.x, ey = y - H.p.y, ez = z - H.p.z;
+      const r2 = ex * ex + ey * ey + ez * ez, r = Math.sqrt(r2);
+      const hx = ey * uz - ez * uy, hy = ez * ux - ex * uz, hz = ex * uy - ey * ux;
+      const f = -1.5 * H.rs * (hx * hx + hy * hy + hz * hz) / (r2 * r2 * r);
+      gx += f * ex; gy += f * ey; gz += f * ez;
+    }
+    const t = (gx * ux + gy * uy + gz * uz) / (ux * ux + uy * uy + uz * uz);
+    ax = gx - t * ux; ay = gy - t * uy; az = gz - t * uz;
+  }
+  for (let it = 0; it < 60000; it++) {
+    let h = 0.25, rNear = Infinity, away = true, inside = false;
+    for (let k = 0; k < nH; k++) {
+      const H = holes[k], ex = px - H.p.x, ey = py - H.p.y, ez = pz - H.p.z, r = Math.hypot(ex, ey, ez);
+      if (r < H.rs) inside = true;
+      if (r < rNear) rNear = r;
+      if (ex * vx + ey * vy + ez * vz < 0) away = false;
+      if (r < 10 * H.rs + 4) h = Math.min(h, Math.max(0.003, 0.02 * r));
+    }
+    if (inside) { outcome = 'hole'; break; }
+    if (h >= 0.25 && py >= 1 && (px < 0 || pz < 0 || px > NX || pz > NZ || py > NY)) {
+      if (rNear > 60 && away && vy >= 0 && !entersBox(px, py, pz, vx, vy, vz)) {
+        // gone for good (same test the renderer uses): straight on to the end
+        const L = Math.max(0, LASER_MAX - s); px += vx * L; py += vy * L; pz += vz * L; s += L; since += L; outcome = 'sky'; break;
+      }
+      h = Math.min(8, Math.max(0.25, 0.25 * rNear));
+    }
+    accel(px, py, pz, vx, vy, vz); const a1x = ax, a1y = ay, a1z = az;
+    const u2x = vx + 0.5 * h * a1x, u2y = vy + 0.5 * h * a1y, u2z = vz + 0.5 * h * a1z;
+    accel(px + 0.5 * h * vx, py + 0.5 * h * vy, pz + 0.5 * h * vz, u2x, u2y, u2z); const a2x = ax, a2y = ay, a2z = az;
+    const u3x = vx + 0.5 * h * a2x, u3y = vy + 0.5 * h * a2y, u3z = vz + 0.5 * h * a2z;
+    accel(px + 0.5 * h * u2x, py + 0.5 * h * u2y, pz + 0.5 * h * u2z, u3x, u3y, u3z); const a3x = ax, a3y = ay, a3z = az;
+    const u4x = vx + h * a3x, u4y = vy + h * a3y, u4z = vz + h * a3z;
+    accel(px + h * u3x, py + h * u3y, pz + h * u3z, u4x, u4y, u4z);
+    const nx = px + h / 6 * (vx + 2 * u2x + 2 * u3x + u4x), ny = py + h / 6 * (vy + 2 * u2y + 2 * u3y + u4y), nz = pz + h / 6 * (vz + 2 * u2z + 2 * u3z + u4z);
+    let wx = vx + h / 6 * (a1x + 2 * a2x + 2 * a3x + ax), wy = vy + h / 6 * (a1y + 2 * a2y + 2 * a3y + ay), wz = vz + h / 6 * (a1z + 2 * a2z + 2 * a3z + az);
+    const wl = Math.hypot(wx, wy, wz); wx /= wl; wy /= wl; wz /= wl;
+    const hv = voxelHit(px, py, pz, nx, ny, nz);
+    if (hv) { const f = hv.t; px += (nx - px) * f; py += (ny - py) * f; pz += (nz - pz) * f; s += h * f; since += h * f; outcome = 'hit'; mat = hv.m; break; }
+    bend += 2 * Math.asin(Math.min(1, 0.5 * Math.hypot(wx - vx, wy - vy, wz - vz)));
+    px = nx; py = ny; pz = nz; vx = wx; vy = wy; vz = wz; s += h; since += h;
+    const turn = 2 * Math.asin(Math.min(1, 0.5 * Math.hypot(vx - lx, vy - ly, vz - lz)));
+    // record a polyline point often enough to stay within ~0.01 blocks of the curve
+    if (turn * since > 0.1 || turn > 0.2 || since > 50) { pts.push([px, py, pz]); lx = vx; ly = vy; lz = vz; since = 0; }
+    if (s >= LASER_MAX) break;
+  }
+  if (since > 1e-6) pts.push([px, py, pz]);
+  return { pts, outcome, len: s, bend, mat, end: [px, py, pz] };
+}
+
+// Group a beam polyline into chunks of up to 16 segments whose capsule (axis first->last point) stays thin.
+function distPS3(p, a, b) {
+  const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2], l2 = abx * abx + aby * aby + abz * abz;
+  let t = l2 > 1e-12 ? ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby + (p[2] - a[2]) * abz) / l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p[0] - a[0] - abx * t, p[1] - a[1] - aby * t, p[2] - a[2] - abz * t);
+}
+function chunkify(pts, maxR) {
+  const out = [], n = pts.length;
+  let i = 0;
+  while (i < n - 1) {
+    let j = i + 1, r = 0;
+    while (j + 1 < n && j + 1 - i <= 16) {
+      let rr = 0;
+      for (let k = i + 1; k <= j; k++) rr = Math.max(rr, distPS3(pts[k], pts[i], pts[j + 1]));
+      if (rr > maxR) break;
+      j++; r = rr;
+    }
+    out.push({ i, j, r }); i = j;
+  }
+  return out;
+}
+function uploadBeams(list) {
+  let np = 0, nc = 0, ns = 0;
+  for (const b of list) {
+    let pts = b.pts;
+    if (pts.length < 2) continue;
+    if (pts.length > 900) { const k = Math.ceil(pts.length / 900); pts = pts.filter((_, i) => i % k === 0 || i === pts.length - 1); }
+    let ch, maxR = 0.15;
+    for (;;) { ch = chunkify(pts, maxR); if (nc + ch.length <= MAXCH || maxR > 100) break; maxR *= 2; }
+    if (np + pts.length > MAXPTS || nc + ch.length > MAXCH) break;     // out of room: drop the rest (oldest emitters)
+    for (let i = 0; i < pts.length; i++) { const o = (np + i) * 4; beamData[o] = pts[i][0]; beamData[o + 1] = pts[i][1]; beamData[o + 2] = pts[i][2]; beamData[o + 3] = 1; }
+    for (const c of ch) {
+      const A = pts[c.i], B = pts[c.j];
+      uniforms.uBCA.value[nc].set(A[0], A[1], A[2], c.r + 1e-3);
+      uniforms.uBCB.value[nc].set(B[0], B[1], B[2], (np + c.i) * 32 + (c.j - c.i));
+      nc++;
+    }
+    np += pts.length;
+    if (b.outcome === 'hit' && ns < MAXSPOTS) uniforms.uSpots.value[ns++].set(b.end[0], b.end[1], b.end[2], 1);
+  }
+  uniforms.uNC.value = nc; uniforms.uNS.value = ns;
+  beamTex.needsUpdate = true;
+}
+
+function gunPose(fwdOverride) {
+  const { fwd, right, up } = camBasis();
+  const o = state.pos.clone().addScaledVector(right, GUN.right).addScaledVector(up, GUN.up).addScaledVector(fwd, GUN.fwd);
+  return { o, d: (fwdOverride || fwd).clone() };
+}
+function pinLaser() {
+  const g = gunPose();
+  state.pins.push({ o: g.o, d: g.d, res: null });
+  while (state.pins.length > MAXPINS) state.pins.shift();
+}
+function laserFan() {
+  const { fwd, right } = camBasis(), g = gunPose();
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 6 - 0.5) * 0.7;                          // ±20°
+    state.pins.push({ o: g.o.clone(), d: fwd.clone().multiplyScalar(Math.cos(a)).addScaledVector(right, Math.sin(a)), res: null });
+  }
+  while (state.pins.length > MAXPINS) state.pins.shift();
+  const flat = new V3(Math.sin(state.yaw), 0, -Math.cos(state.yaw));
+  state.pos.addScaledVector(flat, -6).add(new V3(0, 14, 0)); state.pitch = -0.62;
+}
+function setLaser(on) { state.laser = on; $('bLaser').textContent = 'Laser: ' + (on ? 'on' : 'off'); $('bLaser').classList.toggle('on', on); }
+let holesSig = '', liveRes = null;
+function updateLaser() {
+  const sig = state.holes.map(h => `${h.p.x},${h.p.y},${h.p.z},${h.rs}`).join(';');
+  if (sig !== holesSig) { holesSig = sig; for (const p of state.pins) p.res = null; }   // emitters re-fire when holes change
+  for (const p of state.pins) if (!p.res) p.res = traceLaser(p.o, p.d);
+  liveRes = null;
+  if (state.laser) { const g = gunPose(); liveRes = traceLaser(g.o, g.d); }
+  const list = liveRes ? [liveRes] : [];
+  for (let i = state.pins.length - 1; i >= 0; i--) list.push(state.pins[i].res);   // newest first
+  uploadBeams(list);
+}
+function laserText(r) {
+  if (!r) return 'off';
+  const deg = r.bend * 180 / Math.PI, bent = deg >= 0.5 ? `, bent ${deg.toFixed(deg < 10 ? 1 : 0)}°` : ', straight';
+  if (r.outcome === 'hit') return `hits ${MAT_NAME[r.mat]} after ${r.len.toFixed(1)} blocks${bent}`;
+  if (r.outcome === 'hole') return `falls into a black hole after ${r.len.toFixed(1)} blocks${bent}`;
+  return `escapes into the sky${bent}`;
+}
+
+// ---------------------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------------------
+const keys = {};
+const $ = id => document.getElementById(id);
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  keys[e.code] = true;
+  if (e.repeat) return;
+  if (e.code === 'KeyB') { const { fwd } = camBasis(); placeHole(state.pos.clone().addScaledVector(fwd, 6), state.rs); }
+  if (e.code === 'KeyX') removeAimed();
+  if (e.code === 'KeyC') { state.holes = []; state.balls = []; }
+  if (e.code === 'KeyT') throwBall();
+  if (e.code === 'KeyG') { state.disk = !state.disk; $('tDisk').checked = state.disk; }
+  if (e.code === 'KeyL') setLaser(!state.laser);
+  if (e.code === 'KeyR') pinLaser();
+  if (e.code === 'KeyV') laserFan();
+  if (e.code === 'KeyZ') state.pins = [];
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+const SENS = 0.0025; let dragging = false;
+function look(dx, dy) { state.yaw += dx * SENS; state.pitch = Math.max(-1.55, Math.min(1.55, state.pitch - dy * SENS)); }
+canvas.addEventListener('pointerdown', e => {
+  if (document.pointerLockElement === canvas) { if (e.button === 0) pinLaser(); return; }   // captured: click leaves an emitter
+  dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === 'mouse') { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+});
+canvas.addEventListener('pointerup', () => { dragging = false; });
+canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0); });
+
+$('rs').addEventListener('input', e => {
+  state.rs = +e.target.value; $('rsval').textContent = state.rs.toFixed(2);
+  const last = state.holes[state.holes.length - 1]; if (last) { last.rs = state.rs; carve(last); }
+});
+$('tDisk').addEventListener('change', e => { state.disk = e.target.checked; });
+$('quality').addEventListener('change', e => { quality = e.target.value; resize(); });
+$('bThrow').addEventListener('click', throwBall);
+$('bPlace').addEventListener('click', () => { const { fwd } = camBasis(); placeHole(state.pos.clone().addScaledVector(fwd, 6), state.rs); });
+$('bClear').addEventListener('click', () => { state.holes = []; state.balls = []; });
+$('bReset').addEventListener('click', resetView);
+$('bLaser').addEventListener('click', () => setLaser(!state.laser));
+$('bPin').addEventListener('click', pinLaser);
+$('bFan').addEventListener('click', laserFan);
+$('bUnpin').addEventListener('click', () => { state.pins = []; });
+$('tipsToggle').addEventListener('click', () => { const b = $('tipsBody'), hidden = b.style.display === 'none'; b.style.display = hidden ? '' : 'none'; $('tipsToggle').textContent = hidden ? 'hide' : 'show'; });
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+resetView();
+placeHole(new V3(32, 5.5, 32), 1.2);
+let last = performance.now(), hudT = 0, frames = 0, t0 = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const { fwd, right, up } = camBasis();
+  const flat = new V3(Math.sin(state.yaw), 0, -Math.cos(state.yaw));
+  const speed = (keys.ShiftLeft || keys.ShiftRight) ? 18 : 7;
+  const mv = new V3();
+  if (keys.KeyW || keys.ArrowUp) mv.add(flat); if (keys.KeyS || keys.ArrowDown) mv.sub(flat);
+  if (keys.KeyD) mv.add(right); if (keys.KeyA) mv.sub(right);
+  if (keys.KeyE || keys.Space) mv.y += 1; if (keys.KeyQ) mv.y -= 1;
+  if (keys.ArrowLeft) state.yaw -= 2 * dt; if (keys.ArrowRight) state.yaw += 2 * dt;
+  if (mv.lengthSq() > 0) state.pos.addScaledVector(mv.normalize(), speed * dt);
+  stepBalls(dt);
+  updateLaser();
+
+  // camera lapse (clock rate) for gravitational blue/redshift of what you see
+  let phi = 0, inside = false;
+  for (const h of state.holes) { const r = h.p.distanceTo(state.pos); phi += h.rs / r; if (r < h.rs) inside = true; }
+  const camLapse = Math.sqrt(Math.max(1 - phi, 1e-4));
+  $('warn').style.display = inside ? 'block' : 'none';
+
+  const cb = camBasis();
+  uniforms.uCamPos.value.copy(state.pos); uniforms.uCamFwd.value.copy(cb.fwd); uniforms.uCamRight.value.copy(cb.right); uniforms.uCamUp.value.copy(cb.up);
+  uniforms.uNH.value = state.holes.length;
+  state.holes.forEach((h, i) => uniforms.uHoles.value[i].set(h.p.x, h.p.y, h.p.z, h.rs));
+  uniforms.uNB.value = state.balls.length;
+  state.balls.forEach((b, i) => {
+    uniforms.uBalls.value[i].set(b.p.x, b.p.y, b.p.z, b.rad);
+    uniforms.uBallAx.value[i].set(b.axis.x, b.axis.y, b.axis.z, b.e);
+    uniforms.uBallCol.value[i].set(...b.col);
+  });
+  uniforms.uDisk.value = state.disk ? 1 : 0;
+  uniforms.uTime.value = now / 1000;
+  uniforms.uCamLapse.value = camLapse;
+  renderer.render(scene, cam);
+
+  frames++;
+  if ((hudT += dt) > 0.25) {
+    hudT = 0;
+    $('sN').textContent = state.holes.length; $('sB').textContent = state.balls.length; $('sE').textContent = state.pins.length;
+    $('sLaser').textContent = laserText(liveRes);
+    $('sLapse').textContent = inside ? '—' : camLapse.toFixed(3);
+    $('sFps').textContent = (frames * 1000 / (now - t0)).toFixed(0); frames = 0; t0 = now;
+  }
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+window.__demo = { state, look, placeHole, throwBall, resetView, V3, keys, stepBalls, traceLaser, pinLaser, laserFan, gunPose, camBasis, uniforms, renderer, scene, cam, frame };
+</script>
+</body>
+</html>
