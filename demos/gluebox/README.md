@@ -2,7 +2,7 @@
 
 Build a universe by gluing together the faces of a cube, then fly around inside it.
 
-This demo builds on the earlier demos in [`../three_js_vibecode_demo`](../three_js_vibecode_demo/README.md). It uses the same block world, single-player controls and three.js setup. Those demos curve space (a 3-sphere, hyperbolic space, black holes). Gluebox keeps space flat and changes its **topology** instead: what is connected to what.
+This demo builds on the earlier demos in [`../three_js_vibecode_demo`](../three_js_vibecode_demo/README.md). It uses the same block world, single-player controls and three.js setup. Those demos curve space (a 3-sphere, hyperbolic space, black holes). Gluebox changes space's **topology**, what is connected to what, and can also **curve** it: the cube itself can be flat, spherical or hyperbolic (see [Curved space](#curved-space)).
 
 You start in a menu where you choose, for each of the cube's six faces, what happens when you go through it:
 
@@ -10,6 +10,8 @@ You start in a menu where you choose, for each of the cube's six faces, what hap
 - **mirror**: you, and light, bounce back as a mirror image.
 - **glued to another face**: you come out of that face. The gluing can include a **twist** (quarter turns) and a **flip** (mirror image).
 - **glued to itself**: the face is folded onto itself (along a midline or diagonal, or with a half turn about its centre).
+
+A **curvature** slider under the cube makes the cube spherical or hyperbolic instead of flat.
 
 Press **Enter the space** to go in. Press **Esc** to come back to the menu.
 
@@ -40,7 +42,11 @@ The tests cover:
 - the gluing algebra: face maps, inverses, folds, URL encoding;
 - the portal maps, which must send each face onto its partner and the cube onto the neighbouring cube;
 - the topology of every preset, checked against the known answers below;
-- player movement through portals (you come back mirrored in Klein bottle × circle, upside down in the half-turn space, and are stopped by walls).
+- player movement through portals (you come back mirrored in Klein bottle × circle, upside down in the half-turn space, and are stopped by walls);
+- curved geometry:
+  - every face jump preserves distances, and the cube really has the chosen corner angle;
+  - at 120° the quaternionic space's face jumps generate the 8-element quaternion group, and the lens-space preset's generate a cyclic group of order 8 turning by 45° and 135°, which identifies it as L(8,3);
+  - walking covers the right true distance in curved space.
 
 ## Controls
 
@@ -49,6 +55,7 @@ The tests cover:
 | Preset list | load a known space |
 | Face table | for each face choose *glued to*, *twist* and *flip*, or a *fold* when a face is glued to itself |
 | Drag the cube | turn the preview |
+| Curvature slider | the cube's corner angle: below 90° hyperbolic, 90° flat, above 90° spherical. *flat* resets it, and *make it smooth* picks the angle that makes every edge add up to 360°, when there is one |
 | Options | cube size, fog, edge frame, tinted glued faces, showing yourself, render quality |
 
 | In the world | |
@@ -87,6 +94,7 @@ The code is in `src/`.
 | `math/gluing.js` | The gluing model, twist/flip ↔ matrix conversion, consistency checks, portal maps, URL encoding. |
 | `math/topology.js` | Builds the quotient cell complex and computes its invariants. |
 | `math/homology.js` | Smith normal form, giving H₁ over the integers. |
+| `math/geometry.js` | Flat, spherical and hyperbolic space: points, motions, distances, and the curved face jumps. |
 | `catalog.js` | The named presets, and how a gluing is recognised. |
 | `world/scene.js` | The voxel island. |
 | `world/space.js` | Portal maps in block coordinates; collisions through portals. |
@@ -115,6 +123,8 @@ where R_j is the reflection in face *j*. This map sends face *i* onto face *j*, 
 ### Rendering
 
 Rendering is ray tracing, like the black-hole demo. Each pixel sends a ray backwards from the eye. Inside the cube the ray is a straight line, stepped through the voxel grid. At a glued face the ray's position and direction are mapped by h, and it carries on from the partner face. Walls stop the ray, and mirrors reflect it. So the picture is exactly what someone living in the glued-up space would see, including for gluings that don't fit together smoothly.
+
+The same ray tracer handles curved space; see [Curved space](#curved-space).
 
 ### Topology analysis
 
@@ -159,18 +169,19 @@ Two of these usually get a different shape of building block. The third-turn spa
 
 The sixth-turn space is impossible: going around a loop in it turns you by 60°, and a cube has no 60° rotational symmetry.
 
-### Curved spaces built from a flat cube
+### Spaces whose natural geometry is curved
 
-These closed manifolds don't have a flat geometry: their natural geometry is spherical, or S² × ℝ. Built from a flat cube, some edges have total angle 180° or 270° instead of 360°. The topology is still exactly right, and the ray tracer shows what the singular geometry really looks like: doubled or missing wedges near the dashed edges.
+These closed manifolds don't have a flat geometry: their natural geometry is spherical, or S² × ℝ. Built from a flat cube, some edges have total angle 180° or 270° instead of 360°. The topology is still exactly right, and the ray tracer shows what the singular geometry really looks like: doubled or missing wedges near the dashed edges. Two of them become perfectly smooth when the cube is made spherical (the "Smooth at" column; see [Curved space](#curved-space)).
 
-| Space | How to glue | Code | H₁ |
-|---|---|---|---|
-| **3-sphere** S³ | floor ↔ ceiling straight across; each side wall folded onto itself along its horizontal midline | `02f-12f-30-20-42f-52f` | 0 |
-| **Projective space** RP³ | every face to the opposite face with a half turn (each boundary point glued to its antipode) | `12-02-32-22-52-42` | ℤ/2 |
-| **Quaternionic space** S³/Q₈ | all three pairs with a quarter turn, same direction | `11-01-31-21-51-41` | (ℤ/2)² |
-| **Sphere × circle** S² × S¹ | floor–ceiling and north–south straight across; east and west walls each folded | `02f-12f-30-20-50-40` | ℤ |
+| Space | How to glue | Code | H₁ | Smooth at |
+|---|---|---|---|---|
+| **3-sphere** S³ | floor ↔ ceiling straight across; each side wall folded onto itself along its horizontal midline | `02f-12f-30-20-42f-52f` | 0 | never (fold lines) |
+| **Projective space** RP³ | every face to the opposite face with a half turn (each boundary point glued to its antipode) | `12-02-32-22-52-42` | ℤ/2 | 180°, out of reach |
+| **Quaternionic space** S³/Q₈ | all three pairs with a quarter turn, same direction | `11-01-31-21-51-41` | (ℤ/2)² | **120°** |
+| **Lens space** L(8,3) | east–west with a quarter turn; ceiling ↔ south and floor ↔ north with three-quarter turns | `11-01-43-53-23-33` | ℤ/8 | **120°** |
+| **Sphere × circle** S² × S¹ | floor–ceiling and north–south straight across; east and west walls each folded | `02f-12f-30-20-50-40` | ℤ | never (fold lines) |
 
-The search script also finds closed orientable manifolds with H₁ = ℤ/n for n = 3, 4, 5, 6, 7, 8, 10, 12 and 14. Lens spaces are natural candidates, but homology alone can't say which spaces they are.
+The search script also finds other closed orientable manifolds with H₁ = ℤ/n, for n = 3, 4, 5, 6, 7, 8, 10, 12 and 14, all singular whatever the curvature. Lens spaces are natural candidates, but homology alone can't say which spaces they are.
 
 ### Spaces with walls
 
@@ -186,6 +197,36 @@ The search script also finds closed orientable manifolds with H₁ = ℤ/n for n
 
 - **Kaleidoscope** `m-m-m-m-m-m`: six mirrors. Topologically it's just a ball. Geometrically it's an *orbifold* whose universe looks like the 3-torus, with alternate copies mirrored.
 - **Inversion box** `02-12-22-32-42-52`: each face is glued to itself by a half turn about its centre. Eight points are pinched: the six face centres, plus the two points that the cube's corners collapse to. Each one's neighbourhood is a cone on the projective plane, not a ball, so this is not a manifold. Gluebox flags such points in the menu.
+
+## Curved space
+
+The cube doesn't have to be flat. The curvature slider sets its **corner angle**, the angle between two faces along an edge:
+
+| Corner angle | Geometry | The cube |
+|---|---|---|
+| 62° – 89° | hyperbolic | a cube in hyperbolic space, as in the hyperbolic demo; at 72°, five of them fit around an edge |
+| 90° | flat | the ordinary cube |
+| 91° – 150° | spherical | a cube in the 3-sphere, as in the 3-sphere demo; at 120°, eight of them fill the 3-sphere (the surface of a 4D hypercube) |
+
+The cube keeps its true size (half a cube width from centre to face), so changing the angle changes how strongly space curves: the curvature radius in the menu and the HUD.
+
+**What curving buys you.** A glued space is smooth, with no singular edges, exactly when the cube edges glued together around each edge add up to 360°. If *k* cube edges meet there, the corner angle has to be 360°/*k*:
+
+- 4 edges → 90° (flat): the 9 flat universes.
+- 3 edges → 120° (spherical): the quaternionic space and the lens space L(8,3). These are the only two gluings of all six faces in pairs that are smooth this way, found by `tools/enumerate.mjs`. *Make it smooth* in the menu jumps to that angle.
+- 5 edges → 72° (hyperbolic): impossible with one cube. The cube's 12 edges are 24 half-edges once each is split at its midpoint, and 24 can't be split into groups of 5. Smooth closed hyperbolic spaces need several cubes, as in the {4,3,5} honeycomb.
+- 2 edges → 180°: the "cube" would be half of the 3-sphere. This is what RP³ needs, and it is out of reach.
+- A face folded onto itself has a fold line with 180° around it whatever the curvature, so the 3-sphere zip and S² × S¹ stay singular.
+
+You can still pick any curvature for any gluing. For example, the 3-torus at 72° shows hyperbolic space's exponentially shrinking copies, with dashed edges where only 4 × 72° = 288° meets. The menu says which angle, if any, makes the current gluing smooth.
+
+**How it works** (`math/geometry.js`). Points are written in four coordinates (x, y, z, w), as in the earlier demos:
+
+- **Spherical:** points lie on the unit 3-sphere, and motions are 4D rotations.
+- **Hyperbolic:** points lie on the hyperboloid x² + y² + z² − w² = −1, and motions are Lorentz transformations.
+- **Both:** the projective chart (x/w, y/w, z/w) sends every straight line of the curved space to a straight line, and every flat surface to a plane. So the curved cube is still the ordinary cube [−a, a]³ in that chart, with spherical cos θ = −a²/(1 + a²) and hyperbolic cos θ = a²/(1 − a²) for corner angle θ.
+
+That keeps almost everything the same. The voxel grid lives in this chart, so blocks have flat faces but aren't all the same true size. Rays are still straight lines through the grid. The face jumps become 4×4 projective maps: reflect across the partner face, as before, but the reflection is now in curved space. The ray tracer differentiates these maps to carry a ray's direction across. The fog uses true distances (arc lengths on the sphere or hyperboloid). The player is a 4×4 motion that slides along true straight lines.
 
 ## Checking the guesses in the original request
 

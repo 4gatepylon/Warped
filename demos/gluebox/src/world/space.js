@@ -1,61 +1,72 @@
 // The glued cube as a place you can be in: a voxel grid of n blocks per side, occupying
-// [0, n]^3, whose faces are walls, mirrors or portals (see math/gluing.js).
+// [0, n]³ in voxel coordinates, whose faces are walls, mirrors or portals (see math/gluing.js),
+// in flat, spherical or hyperbolic space (see math/geometry.js).
+//
+// Voxel coordinates are a rescaled projective chart, so straight lines stay straight lines in
+// them whatever the curvature. Each portal is therefore a 4x4 projective map H on homogeneous
+// voxel coordinates (an ordinary rotation + translation in flat space).
 
-import { IDENTITY, matMul, matVec } from '../math/cube.js';
+import { IDENTITY, matMul } from '../math/cube.js';
 import { portal, MIRROR } from '../math/gluing.js';
+import { makeGeometry, portalMotion, toVoxelMap, apply4 } from '../math/geometry.js';
 
 export class PortalSpace {
-  constructor(faces, grid) {
+  /** @param corner the cube's corner angle in degrees (90 = flat). */
+  constructor(faces, grid, corner = 90) {
     this.faces = faces;
     this.grid = grid;
     this.n = grid.n;
-    const L = this.n / 2, c = [L, L, L];
-    // Rescale each portal h(x) = A x + t from the unit cube [-1,1]^3 to block coordinates:
-    // x_blocks = L (x_unit + 1), so h_blocks(x) = A (x - c) + c + L t.
+    this.geometry = makeGeometry(corner, this.n);
     this.portals = faces.map((spec, i) => {
       const h = portal(faces, i);
       if (!h) return null;
-      const Ac = matVec(h.A, c);
-      return { A: h.A, t: [0, 1, 2].map((k) => c[k] - Ac[k] + L * h.t[k]), target: h.target, mirror: spec.kind === MIRROR };
+      const G = portalMotion(this.geometry, faces, i);
+      return {
+        G,                                   // the motion, in model coordinates
+        H: toVoxelMap(this.geometry, G),     // the same, in homogeneous voxel coordinates
+        A: h.A,                              // how it turns directions, as a cube symmetry
+        target: h.target,
+        mirror: spec.kind === MIRROR,
+      };
     });
   }
 
-  through(face, p) {
-    const h = this.portals[face];
-    const y = matVec(h.A, p);
-    return [y[0] + h.t[0], y[1] + h.t[1], y[2] + h.t[2]];
+  /** Where a point just past face `face` really is: just inside the partner face. */
+  through(face, v) {
+    const y = apply4(this.portals[face].H, [v[0], v[1], v[2], 1]);
+    return [y[0] / y[3], y[1] / y[3], y[2] / y[3]];
   }
 
-  /** The face that p is furthest outside of, or -1 if p is in the cube. */
-  outsideFace(p) {
+  /** The face that v is furthest outside of, or -1 if v is in the cube. */
+  outsideFace(v) {
     let face = -1, worst = 0;
     for (let k = 0; k < 3; k++) {
-      if (-p[k] > worst) { worst = -p[k]; face = k * 2 + 1; }
-      if (p[k] - this.n > worst) { worst = p[k] - this.n; face = k * 2; }
+      if (-v[k] > worst) { worst = -v[k]; face = k * 2 + 1; }
+      if (v[k] - this.n > worst) { worst = v[k] - this.n; face = k * 2; }
     }
     return face;
   }
 
   /**
-   * Follow portals until p is back inside the cube. Returns the point, the accumulated linear
-   * part A (how directions turn), the faces crossed, and whether a wall got in the way.
+   * Follow portals until v is back inside the cube. Returns the point, the accumulated cube
+   * symmetry A (how directions got turned), the faces crossed, and whether a wall was in the way.
    */
-  wrap(p) {
+  wrap(v) {
     let A = IDENTITY;
     const crossed = [];
     for (let guard = 0; guard < 8; guard++) {
-      const f = this.outsideFace(p);
+      const f = this.outsideFace(v);
       if (f < 0) break;
-      if (!this.portals[f]) return { p, A, crossed, wall: f };
-      p = this.through(f, p);
+      if (!this.portals[f]) return { p: v, A, crossed, wall: f };
+      v = this.through(f, v);
       A = matMul(this.portals[f].A, A);
       crossed.push(f);
     }
-    return { p, A, crossed, wall: -1 };
+    return { p: v, A, crossed, wall: -1 };
   }
 
-  isSolid(p) {
-    const w = this.wrap(p);
+  isSolid(v) {
+    const w = this.wrap(v);
     if (w.wall >= 0) return true;
     return this.grid.get(Math.floor(w.p[0]), Math.floor(w.p[1]), Math.floor(w.p[2])) > 0;
   }

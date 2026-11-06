@@ -54,10 +54,23 @@
     <section id="cubePanel" class="card">
       <h2>Your cube <span class="muted small">(drag to turn it)</span></h2>
       <canvas id="preview"></canvas>
+      <div id="curvature">
+        <div class="curv-row">
+          <label for="optCorner">Curvature</label>
+          <div class="curv-slider">
+            <input type="range" id="optCorner" min="62" max="150" step="1" value="90">
+            <div class="curv-scale"><span class="hyp">hyperbolic</span><span class="flat">flat</span><span class="sph">spherical</span></div>
+          </div>
+          <button id="cornerFlat" class="small" title="Corners at 90°: ordinary flat space">flat</button>
+          <button id="cornerSmooth" class="small">make it smooth</button>
+        </div>
+        <div id="cornerReadout" class="muted"></div>
+      </div>
       <p class="legend">Faces of the same colour are glued together. The <b>F</b> on one face lands on the
         <b>F</b> of the same colour, so you can read off the twist and any mirror flip.
         Edges of the same colour end up as one edge (dark end → light end shows the direction);
-        dashed edges are where the angles don't add up to 360°.</p>
+        dashed edges are where the angles don't add up to 360°. Curving space changes the cube's corner
+        angles, which can make a space smooth that a flat cube can't.</p>
     </section>
 
     <section id="facePanel" class="card">

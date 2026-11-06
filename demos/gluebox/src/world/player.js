@@ -1,38 +1,59 @@
-// The player: a position in the cube and a body frame that is carried through portals.
+// The player: a motion of space (see math/geometry.js) that carries the origin to where you are
+// and the coordinate axes to your body axes (columns: right, up, back, position), plus a
+// separate pitch angle - the same set-up as the curved-space demos.
 //
-// As in the curved-space demos, orientation is a body frame B (columns: right, up, back) plus a
-// separate pitch angle. Turning left/right rotates B about its own up axis, so you stay level
-// relative to your own "up" - but going through a portal applies the portal's linear map to B,
-// so your up can end up pointing anywhere in the cube, and B can even become a mirror image.
+// Turning rotates the motion about your own up axis, so you stay level relative to your own
+// "up". Walking slides you along straight lines of the (possibly curved) space. Going through a
+// portal applies the portal's motion, so your up can end up pointing anywhere in the cube, and
+// you can even come back as a mirror image.
 
-import { IDENTITY, matMul, matVec, det, column, fromColumns, cross } from '../math/cube.js';
+import { IDENTITY, matMul, fromColumns } from '../math/cube.js';
+import {
+  mul4, apply4, col4, det4, embed3, rotation4, chartVelocity, slide, slideTo, distance, tidyMotion,
+  voxelToModel, voxelPose, modelToChart, chartToVoxel,
+} from '../math/geometry.js';
 import { spawnPoint } from './scene.js';
 
 export const RADIUS = 0.3;
 export const LOOK_SENSITIVITY = 0.0025;
 const MAX_PITCH = 1.55;
 const MAX_STEP = 0.1;
+const ORIGIN = [0, 0, 0, 1];
 
-const rotY = (a) => { const c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 1, 0, -s, 0, c]; };
-const rotX = (a) => { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, -s, 0, s, c]; };
 const normalize = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return v.map((x) => x / l); };
 
 export class Player {
   constructor(space) {
     this.space = space;
+    this.g = space.geometry;
     this.reset();
   }
 
   reset() {
     const s = spawnPoint(this.space.n);
-    this.pos = s.pos.slice();
-    this.pitch = s.pitch;
-    this.body = IDENTITY.slice();
+    this.place(s.pos, IDENTITY);
     this.turn(s.yaw);
-    this.holonomy = IDENTITY.slice(); // product of every portal's linear part since spawning
+    this.pitch = s.pitch;
+    this.holonomy = IDENTITY.slice(); // product of every portal's cube symmetry since spawning
     this.crossings = 0;
     this.lastFace = -1;
   }
+
+  /** Stand at voxel position v with body axes given (relative to the cube) by a 3x3 matrix. */
+  place(v, body) {
+    this.motion = mul4(slideTo(this.g, ORIGIN, voxelToModel(this.g, v)), embed3(body));
+  }
+
+  /** Position in voxel coordinates. */
+  get pos() { return chartToVoxel(this.g, modelToChart(col4(this.motion, 3))); }
+
+  /** Body axes (right, up, back) as directions in the cube, as the columns of a 3x3 matrix. */
+  get body() {
+    const X = col4(this.motion, 3);
+    return fromColumns(...[0, 1, 2].map((c) => normalize(chartVelocity(X, col4(this.motion, c)))));
+  }
+
+  get mirrored() { return det4(this.motion) < 0; }
 
   /** Mouse look: dx turns right, dy looks down (screen pixels). */
   look(dx, dy) {
@@ -40,39 +61,63 @@ export class Player {
     this.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this.pitch - dy * LOOK_SENSITIVITY));
   }
 
-  turn(angle) { this.body = matMul(this.body, rotY(-angle)); }
+  turn(angle) { this.motion = mul4(this.motion, rotation4(0, 2, angle)); }
 
-  /** Camera axes in cube coordinates. */
-  camera() {
-    const C = matMul(this.body, rotX(this.pitch));
-    const back = column(C, 2);
-    return { right: column(C, 0), up: column(C, 1), forward: back.map((x) => -x), frame: C };
-  }
+  /** The camera's motion: the body tilted by the pitch. */
+  camera() { return mul4(this.motion, rotation4(1, 2, this.pitch)); }
 
-  get mirrored() { return det(this.body) < 0; }
+  /** Camera position and axes in voxel coordinates (see geometry.voxelPose). */
+  view() { return voxelPose(this.g, this.camera()); }
 
   /**
-   * Move by a displacement given in body coordinates (right, up, forward), sliding along
-   * blocks and walls and going through portals.
+   * Move by a displacement in blocks given in body coordinates (right, up, forward), going
+   * through portals. Each small step goes along a true straight line. If a block or wall is in
+   * the way, the step is split along the cube's three axis directions and only the free parts
+   * are taken, so you slide along walls instead of stopping dead.
    */
   move(local) {
     const len = Math.hypot(local[0], local[1], local[2]);
     if (!len) return;
     const steps = Math.ceil(len / MAX_STEP);
-    const bodyStep = [local[0] / steps, local[1] / steps, -local[2] / steps];
+    const direction = [local[0] / len, local[1] / len, -local[2] / len, 0];
     for (let s = 0; s < steps; s++) {
-      const d = matVec(this.body, bodyStep);
-      for (let k = 0; k < 3; k++) {
-        if (!d[k]) continue;
-        const trial = this.pos.slice();
-        trial[k] += d[k];
-        const probe = trial.slice();
-        probe[k] += Math.sign(d[k]) * RADIUS;
-        if (!this.space.isSolid(probe)) this.pos = trial;
+      const X = col4(this.motion, 3);
+      const v = this.pos;
+      const end = apply4(slide(this.g, X, apply4(this.motion, direction), len / steps), X);
+      const target = chartToVoxel(this.g, modelToChart(end));
+      const dv = target.map((x, i) => x - v[i]);
+      const free = dv.map((d, axis) => Math.abs(d) < 1e-12 || !this.space.isSolid(this.probe(v, axis, d)));
+      if (free.every(Boolean)) {
+        this.moveTo(target);
+      } else {
+        let w = v;
+        dv.forEach((d, axis) => {
+          if (!free[axis] || Math.abs(d) < 1e-12) return;
+          w = w.slice();
+          w[axis] += d;
+          this.moveTo(w);
+        });
       }
       this.passPortals();
     }
-    this.orthonormalize();
+    this.motion = tidyMotion(this.g, this.motion);
+  }
+
+  /** The point RADIUS blocks beyond a move of d along one axis from v (for collisions). */
+  probe(v, axis, d) {
+    const target = v.slice();
+    target[axis] += d;
+    const p = v.slice();
+    p[axis] += d * (1 + RADIUS / this.trueDistance(v, target));
+    return p;
+  }
+
+  trueDistance(v, w) { return distance(this.g, voxelToModel(this.g, v), voxelToModel(this.g, w)); }
+
+  /** Slide straight to a voxel position, carrying the body axes along. */
+  moveTo(v) {
+    const slideMotion = slideTo(this.g, col4(this.motion, 3), voxelToModel(this.g, v));
+    this.motion = mul4(slideMotion, this.motion);
   }
 
   passPortals() {
@@ -80,28 +125,11 @@ export class Player {
       const f = this.space.outsideFace(this.pos);
       if (f < 0) return;
       const h = this.space.portals[f];
-      if (!h) { this.clampInside(); return; }
-      this.pos = this.space.through(f, this.pos);
-      this.body = matMul(h.A, this.body);
+      if (!h) { this.moveTo(this.pos.map((x) => Math.max(1e-3, Math.min(this.space.n - 1e-3, x)))); return; }
+      this.motion = mul4(h.G, this.motion);
       this.holonomy = matMul(h.A, this.holonomy);
       this.crossings++;
       this.lastFace = f;
     }
-  }
-
-  clampInside() {
-    const n = this.space.n;
-    this.pos = this.pos.map((x) => Math.max(1e-3, Math.min(n - 1e-3, x)));
-  }
-
-  // Keep the body frame exactly orthonormal (with its current handedness) despite rounding.
-  orthonormalize() {
-    const sign = det(this.body) < 0 ? -1 : 1;
-    const r = normalize(column(this.body, 0));
-    let u = column(this.body, 1);
-    const ru = r[0] * u[0] + r[1] * u[1] + r[2] * u[2];
-    u = normalize(u.map((x, i) => x - ru * r[i]));
-    const b = cross(r, u).map((x) => x * sign);
-    this.body = fromColumns(r, u, b);
   }
 }

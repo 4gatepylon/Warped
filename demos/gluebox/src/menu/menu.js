@@ -7,6 +7,8 @@ import {
   GLUE, WALL, MIRROR, SELF_FOLDS, withGlue, withBoundary, glueSelf, mapFromTwist, twistOf, selfFoldOf,
 } from '../math/gluing.js';
 import { PRESETS, PRESET_GROUPS, describe } from '../catalog.js';
+import { singularCycles, edgeAngle, smoothCorner } from '../math/topology.js';
+import { makeGeometry, describeGeometry, MIN_CORNER, MAX_CORNER } from '../math/geometry.js';
 import { faceColors, toCss } from '../palette.js';
 
 const $ = (id) => document.getElementById(id);
@@ -23,13 +25,26 @@ export class Menu {
    *   onChange(faces)  – the user edited the gluing
    *   onPreset(preset) – the user picked a preset
    *   onRandom()       – "surprise me"
+   *   onCorner(angle)  – the user changed the curvature (the cube's corner angle in degrees)
    */
   constructor(handlers) {
     this.handlers = handlers;
     this.faces = null;
     this.buildPresetList();
     this.rows = this.buildFaceTable();
+    this.bindCurvature();
     $('randomize').addEventListener('click', () => handlers.onRandom());
+  }
+
+  bindCurvature() {
+    const slider = $('optCorner');
+    // snap to the angles that matter: flat, the 120° cube of the 3-sphere, the 72° hyperbolic cube
+    const snap = (x) => [72, 90, 120].find((s) => Math.abs(x - s) <= 2) ?? x;
+    slider.addEventListener('input', () => this.handlers.onCorner(snap(+slider.value)));
+    $('cornerFlat').addEventListener('click', () => this.handlers.onCorner(90));
+    $('cornerSmooth').addEventListener('click', () => {
+      if (this.smoothAngle !== null) this.handlers.onCorner(this.smoothAngle);
+    });
   }
 
   buildPresetList() {
@@ -90,7 +105,7 @@ export class Menu {
   edit(faces) { this.handlers.onChange(faces); }
 
   /** Show a gluing, its analysis and its name (from catalog.recognize). */
-  show(faces, analysis, name) {
+  show(faces, analysis, name, corner) {
     this.faces = faces;
     const colors = faceColors(faces);
     faces.forEach((spec, i) => {
@@ -112,17 +127,38 @@ export class Menu {
       if (self) r.fold.value = selfFoldOf(i, spec.P);
     });
     for (const [id, b] of this.presetButtons) b.classList.toggle('selected', name.preset?.id === id);
-    this.showAnalysis(analysis, name);
+    this.showCurvature(analysis, corner);
+    this.showAnalysis(analysis, name, corner);
   }
 
-  showAnalysis(a, name) {
+  showCurvature(analysis, corner) {
+    $('optCorner').value = String(corner);
+    const g = makeGeometry(corner, 1); // lengths in cube widths
+    const shape = g.kind === 'flat' ? 'flat space'
+      : g.kind === 'spherical' ? `spherical: the 3-sphere it sits in is ${(2 * Math.PI * g.R).toFixed(1)} cube widths around`
+        : `hyperbolic: curvature radius ${g.R.toFixed(2)} cube widths`;
+    $('cornerReadout').textContent = `Corners ${corner}° · ${shape}`;
+    const best = smoothCorner(analysis);
+    const reachable = best !== null && best >= MIN_CORNER && best <= MAX_CORNER;
+    this.smoothAngle = reachable ? best : null;
+    const button = $('cornerSmooth');
+    button.disabled = !reachable || best === corner;
+    button.textContent = reachable ? (best === corner ? 'smooth ✓' : `make it smooth (${best}°)`) : 'make it smooth';
+    button.title = reachable
+      ? `With ${best}° corners every edge adds up to 360°.`
+      : best === null
+        ? 'No curvature makes every edge add up to 360° for this gluing.'
+        : `It would need ${best}° corners, which a cube can't have (${MIN_CORNER}°–${MAX_CORNER}° here).`;
+  }
+
+  showAnalysis(a, name, corner) {
     $('resultTitle').textContent = name.title;
     $('resultMath').textContent = name.math || '';
     $('resultBlurb').textContent = name.preset?.blurb || (name.exact
       ? 'A flat 3-manifold: Gluebox recognises it from its invariants.'
       : 'A gluing of your own. Its invariants are below.');
 
-    const summary = describe(a);
+    const summary = describe(a, corner);
     $('resultChips').replaceChildren(...summary.chips.map((c) => el('span', { className: `chip ${c.tone}`, textContent: c.text })));
 
     const facts = [
@@ -141,9 +177,14 @@ export class Menu {
         notes.push({ warn: true, text: `${count} point${count > 1 ? 's' : ''} where space is pinched: the neighbourhood is a cone on a ${link}, not a ball.` });
       }
     }
-    if (!a.flat) {
-      const angles = [...new Set(a.singularEdges.map((c) => c.angle * 90))].sort((x, y) => x - y).map((d) => `${d}°`);
-      notes.push({ text: `Around the dashed edges the cube's corners add up to ${angles.join(' or ')} instead of 360°. A flat cube can't make this space smoothly, so you'll see doubled or missing wedges near them.` });
+    const singular = singularCycles(a, corner);
+    if (singular.length) {
+      const angles = [...new Set(singular.map((c) => Math.round(edgeAngle(c, corner))))].sort((x, y) => x - y).map((d) => `${d}°`);
+      notes.push({ text: `Around the dashed edges the cube's corners add up to ${angles.join(' or ')} instead of 360°, so you'll see doubled or missing wedges near them.` });
+      const best = smoothCorner(a);
+      if (best === null) notes.push({ text: 'No amount of curvature fixes that for this gluing: the edge classes have different sizes, or a face is folded (a fold line always has 180° around it).' });
+      else if (best < MIN_CORNER || best > MAX_CORNER) notes.push({ text: `It would take ${best}° corners to make every edge 360°, which is out of reach for a cube.` });
+      else notes.push({ text: `With ${best}° corners (${describeGeometry(makeGeometry(best, 20)).split(',')[0]} space) every edge adds up to 360°: use "make it smooth".` });
     }
     if (!a.orientable && a.manifold) notes.push({ text: 'Non-orientable: some trips bring you back as your own mirror image.' });
     if (!a.closed) notes.push({ text: 'Walls are solid; mirrors bounce you (and light) back.' });

@@ -3,7 +3,7 @@
 import { CUBE_SYMMETRIES } from './math/cube.js';
 import { decode, conjugate, sameGluing } from './math/gluing.js';
 import { groupKey, formatGroup } from './math/homology.js';
-import { singularSummary } from './math/topology.js';
+import { singularSummary, singularCycles } from './math/topology.js';
 
 // Gluing codes: one token per face (+x, −x, +y, −y, +z, −z). "w" wall, "m" mirror, otherwise
 // <partner face><quarter turns of twist>[f = mirror flip]. See gluing.js.
@@ -99,9 +99,17 @@ export const PRESETS = [
     ],
   },
   {
-    id: 'quaternion', group: 'Curved spaces', name: 'Quaternionic space', math: 'S³/Q₈', code: '11-01-31-21-51-41',
-    blurb: 'All three pairs of opposite faces are glued with a quarter turn in the same direction. With a cube whose angles are 120° (one that lives in the 3-sphere) this is perfectly smooth.',
-    tips: ['Around each cube edge there are only 270° of cube instead of 360°: a gap you can see near the edges.'],
+    id: 'quaternion', group: 'Curved spaces', name: 'Quaternionic space', math: 'S³/Q₈', code: '11-01-31-21-51-41', corner: 120,
+    blurb: 'All three pairs of opposite faces are glued with a quarter turn in the same direction. On a spherical cube with 120° corners (eight of which fill the 3-sphere) this is perfectly smooth.',
+    tips: [
+      'Space here is curved like the 3-sphere: distant islands shrink, then grow again.',
+      'Set the curvature back to flat in the menu: the cube edges turn dashed, because only 270° of cube meets around each one.',
+    ],
+  },
+  {
+    id: 'lens83', group: 'Curved spaces', name: 'Lens space', math: 'L(8,3)', code: '11-01-43-53-23-33', corner: 120,
+    blurb: 'East–west glued with a quarter turn; the ceiling is glued to the south wall and the floor to the north wall, with three-quarter turns. On a 120° spherical cube this is smooth: the lens space L(8,3), the 3-sphere wrapped around eight times.',
+    tips: ['Fly in a straight line for about 80 blocks (once round the 3-sphere): you are back where you started, the right way round. Some directions bring you back sooner.'],
   },
   {
     id: 's2xs1', group: 'Curved spaces', name: 'Sphere × circle', math: 'S² × S¹', code: '02f-12f-30-20-50-40',
@@ -191,17 +199,19 @@ export function recognize(faces, analysis, analyzeFn) {
 
 const capitalise = (s) => s.replace(/^the /, '').replace(/^./, (c) => c.toUpperCase());
 
-/** Summary of an analysis for the menu: chips (text + tone), H₁ and χ. */
-export function describe(analysis) {
+/** Summary of an analysis for the menu, for a cube with the given corner angle: chips, H₁, χ. */
+export function describe(analysis, corner = 90) {
   const a = analysis;
-  const sing = singularSummary(a);
+  const sing = singularSummary(a, corner);
+  const smooth = singularCycles(a, corner).length === 0;
+  const geometry = corner === 90 ? 'flat' : corner > 90 ? 'spherical' : 'hyperbolic';
   const edges = `${sing.cubeEdges} cube edge${sing.cubeEdges === 1 ? '' : 's'}`;
   const chips = [
     { text: a.closed ? 'closed' : 'has walls', tone: a.closed ? 'good' : '' },
     { text: a.manifold ? 'manifold' : 'not a manifold', tone: a.manifold ? 'good' : 'bad' },
     { text: a.orientable ? 'orientable' : 'non-orientable', tone: '' },
-    a.flat
-      ? { text: 'flat everywhere', tone: 'good' }
+    smooth
+      ? { text: `${geometry} everywhere`, tone: 'good' }
       : { text: `angles off along ${edges}${sing.foldLines ? ' + fold lines' : ''}`, tone: 'warn' },
   ];
   return { chips, H1: formatGroup(a.H1), euler: a.euler };

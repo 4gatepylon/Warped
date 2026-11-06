@@ -1,6 +1,7 @@
 // Gluebox: wires the menu (choose a gluing) to the world (fly around inside it).
 
-import { FACE_COUNT, FACE_NAMES, FACE_NICKNAMES, describeLinear, column, det } from './math/cube.js';
+import { FACE_COUNT, FACE_NAMES, FACE_NICKNAMES, describeLinear, column } from './math/cube.js';
+import { describeGeometry, MIN_CORNER, MAX_CORNER } from './math/geometry.js';
 import { encode, decode, emptyGluing, withGlue, withBoundary, mapFromTwist, glueSelf, SELF_FOLDS, sameGluing } from './math/gluing.js';
 import { analyze } from './math/topology.js';
 import { PRESETS, recognize } from './catalog.js';
@@ -23,10 +24,11 @@ const GENERIC_TIPS = [
 const app = {
   mode: 'menu',
   faces: PRESETS[0].faces,
+  corner: 90,         // the cube's corner angle: 90° flat, more spherical, less hyperbolic
   analysis: null,
   name: null,
   options: { size: DEFAULT_CUBE_SIZE, fog: 2.5, frame: true, seams: true, self: true, quality: 'auto' },
-  world: null,        // { faces, size, space, player } while a world exists
+  world: null,        // { faces, corner, size, space, player } while a world exists
 };
 
 let renderer, preview, menu, input;
@@ -42,8 +44,9 @@ function init() {
   }
   menu = new Menu({
     onChange: (faces) => setGluing(faces),
-    onPreset: (p) => setGluing(p.faces),
+    onPreset: (p) => setGluing(p.faces, p.corner ?? 90),
     onRandom: () => setGluing(randomGluing()),
+    onCorner: (corner) => setGluing(app.faces, corner),
   });
   input = new Input($('world'), { exit: showMenu, key: onKey });
   bindOptions();
@@ -65,24 +68,28 @@ function init() {
 // ---------------------------------------------------------------------------
 // Gluing state
 // ---------------------------------------------------------------------------
-function setGluing(faces) {
+function setGluing(faces, corner = app.corner) {
   app.faces = faces;
+  app.corner = Math.min(MAX_CORNER, Math.max(MIN_CORNER, corner));
   app.analysis = analyze(faces);
   app.name = recognize(faces, app.analysis, analyze);
-  menu.show(faces, app.analysis, app.name);
-  preview.update(faces, app.analysis);
-  const preset = app.name.preset;
-  const hash = preset && sameGluing(preset.faces, faces) ? preset.id : encode(faces);
+  menu.show(faces, app.analysis, app.name, app.corner);
+  preview.update(faces, app.analysis, app.corner);
+  // URL hash: preset id or gluing code, plus "@angle" when the corners aren't the default
+  const preset = app.name.preset && sameGluing(app.name.preset.faces, faces) ? app.name.preset : null;
+  const base = preset ? preset.id : encode(faces);
+  const hash = app.corner === (preset?.corner ?? 90) ? base : `${base}@${app.corner}`;
   if (location.hash.slice(1) !== hash) history.replaceState(null, '', `#${hash}`);
 }
 
 function loadFromHash() {
-  const h = decodeURIComponent(location.hash.slice(1));
+  const [h, angle] = decodeURIComponent(location.hash.slice(1)).split('@');
   const preset = PRESETS.find((p) => p.id === h);
+  const corner = angle ? +angle : preset?.corner ?? 90;
   try {
-    setGluing(preset ? preset.faces : h ? decode(h) : PRESETS[0].faces);
+    setGluing(preset ? preset.faces : h ? decode(h) : PRESETS[0].faces, Number.isFinite(corner) ? corner : 90);
   } catch (e) {
-    setGluing(PRESETS[0].faces);
+    setGluing(PRESETS[0].faces, 90);
   }
 }
 
@@ -121,17 +128,17 @@ function bindOptions() {
 function enterWorld() {
   const o = app.options;
   const w = app.world;
-  const same = w && w.size === o.size && sameGluing(w.faces, app.faces);
+  const same = w && w.size === o.size && w.corner === app.corner && sameGluing(w.faces, app.faces);
   if (!same) {
     const grid = w && w.size === o.size ? w.space.grid : buildScene(o.size);
-    const space = new PortalSpace(app.faces, grid);
-    app.world = { faces: app.faces, size: o.size, space, player: new Player(space) };
+    const space = new PortalSpace(app.faces, grid, app.corner);
+    app.world = { faces: app.faces, corner: app.corner, size: o.size, space, player: new Player(space) };
     renderer.setWorld(space, app.analysis);
   }
   renderer.setOptions({ frame: o.frame, seams: o.seams, self: o.self, fog: o.fog * o.size });
   showTips();
   $('hudTitle').textContent = app.name.title;
-  $('hudMath').textContent = app.name.math || '';
+  $('hudMath').textContent = [app.name.math, describeGeometry(app.world.space.geometry)].filter(Boolean).join(' · ');
   app.mode = 'world';
   $('menu').hidden = true;
   $('hud').hidden = false;
@@ -200,7 +207,7 @@ function updateHud(now) {
   const p = app.world.player;
   $('sCross').textContent = p.crossings;
   $('sLast').textContent = p.lastFace >= 0 ? `(last: ${FACE_NAMES[p.lastFace]} ${FACE_NICKNAMES[p.lastFace]})` : '';
-  $('sHand').textContent = det(p.body) < 0 ? 'a mirror image' : 'the right way round';
+  $('sHand').textContent = p.mirrored ? 'a mirror image' : 'the right way round';
   const up = column(p.body, 1);
   const k = [0, 1, 2].reduce((b, i) => (Math.abs(up[i]) > Math.abs(up[b]) ? i : b), 0);
   $('sUp').textContent = `${up[k] < 0 ? '−' : '+'}${AXES[k]}${Math.abs(up[k]) < 0.9 ? ' (roughly)' : ''}`;

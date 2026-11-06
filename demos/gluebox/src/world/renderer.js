@@ -1,11 +1,13 @@
 // three.js plumbing for the ray tracer: one full-screen triangle pair with the shader from
-// shader.js, a 3D texture holding the blocks, and uniforms describing the gluing.
+// shader.js, a 3D texture holding the blocks, and uniforms describing the gluing and the
+// geometry (flat, spherical or hyperbolic).
 
 import * as THREE from 'three';
 import { vertexShader, fragmentShader, MAX_SELF_IMAGES } from './shader.js';
 import { MATERIALS } from './scene.js';
-import { FACE_COUNT, faceFrame, faceMap2D, matMul } from '../math/cube.js';
+import { FACE_COUNT, faceFrame, faceMap2D, fromColumns } from '../math/cube.js';
 import { GLUE } from '../math/gluing.js';
+import { FLAT, SPHERICAL, mul4, voxelPose } from '../math/geometry.js';
 import { cubeEdgeClasses } from '../math/topology.js';
 import { faceColors, edgeColor } from '../palette.js';
 
@@ -15,6 +17,7 @@ const FOV_DEG = 75;
 
 const array = (n, make) => Array.from({ length: n }, make);
 const toMatrix3 = (m) => new THREE.Matrix3().set(...m); // row-major in, as three.js expects
+const toMatrix4 = (m) => new THREE.Matrix4().set(...m);
 
 export class WorldRenderer {
   constructor(canvas) {
@@ -29,8 +32,8 @@ export class WorldRenderer {
       uCamUp: { value: new THREE.Vector3() }, uCamFwd: { value: new THREE.Vector3() },
       uTanHalf: { value: Math.tan((FOV_DEG / 2) * Math.PI / 180) }, uAspect: { value: 1 },
       uFaceKind: { value: array(6, () => 0) },
-      uPortalA: { value: array(6, () => new THREE.Matrix3()) },
-      uPortalT: { value: array(6, () => new THREE.Vector3()) },
+      uPortal: { value: array(6, () => new THREE.Matrix4()) },
+      uTarget: { value: array(6, () => 0) },
       uFaceColor: { value: array(6, () => new THREE.Vector3()) },
       uFaceU: { value: array(6, (_, i) => new THREE.Vector3(...faceFrame(i).u)) },
       uFaceV: { value: array(6, (_, i) => new THREE.Vector3(...faceFrame(i).v)) },
@@ -40,7 +43,9 @@ export class WorldRenderer {
       uEdgeSingular: { value: array(24, () => 0) },
       uSelfPos: { value: array(MAX_SELF_IMAGES, () => new THREE.Vector3()) },
       uSelfFrame: { value: array(MAX_SELF_IMAGES, () => new THREE.Matrix3()) },
+      uSelfInverse: { value: array(MAX_SELF_IMAGES, () => new THREE.Matrix3()) },
       uSelfCount: { value: 0 },
+      uGeometry: { value: 0 }, uChartA: { value: 8 }, uCurvatureR: { value: 1 },
       uShowFrame: { value: 1 }, uShowSeams: { value: 1 }, uShowSelf: { value: 1 },
       uFog: { value: 40 }, uFogColor: { value: FOG_COLOR }, uSun: { value: SUN },
     };
@@ -71,12 +76,16 @@ export class WorldRenderer {
     for (let i = 0; i < FACE_COUNT; i++) {
       const spec = space.faces[i], h = space.portals[i];
       u.uFaceKind.value[i] = spec.kind === GLUE ? 1 : spec.kind === 'mirror' ? 2 : 0;
-      u.uPortalA.value[i] = toMatrix3(h ? h.A : [1, 0, 0, 0, 1, 0, 0, 0, 1]);
-      u.uPortalT.value[i].set(...(h ? h.t : [0, 0, 0]));
+      if (h) u.uPortal.value[i] = toMatrix4(h.H);
+      u.uTarget.value[i] = h ? h.target : i;
       u.uFaceColor.value[i].set(...colors[i]);
     }
+    const g = space.geometry;
+    u.uGeometry.value = g.kind === FLAT ? 0 : g.kind === SPHERICAL ? 1 : -1;
+    u.uChartA.value = g.a;
+    u.uCurvatureR.value = g.R;
     this.setGlyphs(space.faces);
-    for (const [i, h] of cubeEdgeClasses(analysis).entries()) {
+    for (const [i, h] of cubeEdgeClasses(analysis, g.corner).entries()) {
       u.uEdgeColor.value[i].set(...edgeColor(h.full, h.ends === 2 ? h.end : 0.5));
       u.uEdgeSingular.value[i] = h.singular ? 1 : 0;
     }
@@ -116,14 +125,19 @@ export class WorldRenderer {
 
   /** Draw the view of a player (see player.js) in a space (see space.js). */
   render(player, space) {
-    const u = this.uniforms, cam = player.camera();
-    u.uCamPos.value.set(...player.pos);
-    u.uCamRight.value.set(...cam.right);
-    u.uCamUp.value.set(...cam.up);
-    u.uCamFwd.value.set(...cam.forward);
-    const images = selfImages(player, space, player.body);
+    const u = this.uniforms, view = player.view();
+    u.uCamPos.value.set(...view.pos);
+    u.uCamRight.value.set(...view.right);
+    u.uCamUp.value.set(...view.up);
+    u.uCamFwd.value.set(...view.back.map((x) => -x));
+    const images = selfImages(player, space);
     u.uSelfCount.value = images.length;
-    images.forEach((img, i) => { u.uSelfPos.value[i].set(...img.pos); u.uSelfFrame.value[i] = toMatrix3(img.frame); });
+    images.forEach((pose, i) => {
+      const F = toMatrix3(fromColumns(pose.right, pose.up, pose.back));
+      u.uSelfPos.value[i].set(...pose.pos);
+      u.uSelfFrame.value[i] = F;
+      u.uSelfInverse.value[i] = F.clone().invert();
+    });
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -139,16 +153,17 @@ export function glyphMaps(faces, i) {
   return i < j ? [[1, 0, 0, 1]] : [faceMap2D(faces[j].P, j, i)];
 }
 
-// You, plus the copies of you that show up just past nearby portals (so you can see the part
-// of yourself sticking through a face).
-function selfImages(player, space, frame) {
-  const out = [{ pos: player.pos, frame }];
+// You (your body, without the pitch), plus the copies of you that show up just past nearby
+// portals, so you can see the part of yourself sticking through a face. Voxel poses.
+function selfImages(player, space) {
+  const g = space.geometry, out = [voxelPose(g, player.motion)];
+  const pos = out[0].pos;
   for (let f = 0; f < FACE_COUNT && out.length < MAX_SELF_IMAGES; f++) {
     const h = space.portals[f];
     if (!h) continue;
     const k = f >> 1, bound = f & 1 ? 0 : space.n;
-    if (Math.abs(player.pos[k] - bound) > 1.3) continue;
-    out.push({ pos: space.through(f, player.pos), frame: matMul(h.A, frame) });
+    if (Math.abs(pos[k] - bound) > 1.3) continue;
+    out.push(voxelPose(g, mul4(h.G, player.motion)));
   }
   return out;
 }

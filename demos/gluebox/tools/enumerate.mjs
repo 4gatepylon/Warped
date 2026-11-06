@@ -6,7 +6,8 @@
 //   node tools/enumerate.mjs --folds    # also faces folded onto themselves (170,305, ~1 min)
 
 import { emptyGluing, withGlue, glueSelf, mapFromTwist, SELF_FOLDS, encode } from '../src/math/gluing.js';
-import { analyze } from '../src/math/topology.js';
+import { analyze, smoothCorner } from '../src/math/topology.js';
+import { MIN_CORNER, MAX_CORNER } from '../src/math/geometry.js';
 import { formatGroup } from '../src/math/homology.js';
 import { recognize } from '../src/catalog.js';
 
@@ -29,10 +30,15 @@ let total = 0;
 for (const faces of gluings(emptyGluing(), 0)) {
   total++;
   const a = analyze(faces);
-  const kind = !a.manifold ? 'not a manifold' : a.flat ? 'flat manifold' : 'manifold, singular edges';
+  // a manifold that isn't flat may still be smooth on a curved cube (see math/geometry.js)
+  const corner = smoothCorner(a);
+  const curvedSmooth = corner !== null && corner !== 90 && corner >= MIN_CORNER && corner <= MAX_CORNER;
+  const kind = !a.manifold ? 'not a manifold'
+    : a.flat ? 'flat manifold'
+      : curvedSmooth ? `smooth at ${corner}° corners` : 'manifold, singular edges';
   const key = `${kind.padEnd(25)} ${(a.orientable ? 'orientable' : 'non-orientable').padEnd(15)} H1 = ${formatGroup(a.H1)}`;
   if (!table.has(key)) {
-    const name = a.manifold && a.flat ? recognize(faces, a).title : '';
+    const name = a.manifold && (a.flat || curvedSmooth) ? recognize(faces, a).title : '';
     table.set(key, { count: 0, example: encode(faces), name });
   }
   table.get(key).count++;

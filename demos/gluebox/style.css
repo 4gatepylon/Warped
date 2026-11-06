@@ -69,6 +69,17 @@ kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; paddin
 #preview { flex: 1; width: 100%; min-height: 260px; display: block; cursor: grab; touch-action: none; }
 #preview:active { cursor: grabbing; }
 .legend { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+#curvature { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(31, 42, 66, 0.6); }
+#curvature .curv-row { display: flex; align-items: center; gap: 8px; }
+#curvature label { color: var(--text); }
+#curvature .curv-slider { flex: 1; min-width: 140px; }
+#curvature input[type=range] { width: 100%; margin: 0; }
+#curvature .curv-scale { position: relative; height: 13px; color: var(--muted); font-size: 10px; }
+#curvature .curv-scale span { position: absolute; top: 0; }
+#curvature .curv-scale .hyp { left: 0; }
+#curvature .curv-scale .flat { left: 31.8%; transform: translateX(-50%); }  /* 90° on a 62°–150° slider */
+#curvature .curv-scale .sph { right: 0; }
+#cornerReadout { margin-top: 4px; font-size: 12px; }
 #faceTable { width: 100%; border-collapse: collapse; }
 #faceTable th { text-align: left; color: var(--muted); font-weight: normal; font-size: 11px; padding: 2px 4px; }
 #faceTable td { padding: 3px 4px; vertical-align: middle; }

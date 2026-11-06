@@ -54,19 +54,19 @@ export class CubePreview {
     });
   }
 
-  /** Repaint for a new gluing and its analysis (from topology.js). */
-  update(faces, analysis) {
+  /** Repaint for a new gluing, its analysis (from topology.js) and the cube's corner angle. */
+  update(faces, analysis, corner = 90) {
     const colors = faceColors(faces);
     faces.forEach((spec, i) => {
       paintFace(this.faces[i].canvas.getContext('2d'), i, spec, colors[i], glyphMaps(faces, i));
       this.faces[i].texture.needsUpdate = true;
     });
-    this.rebuildEdges(analysis);
+    this.rebuildEdges(analysis, corner);
   }
 
-  rebuildEdges(analysis) {
+  rebuildEdges(analysis, corner) {
     for (const child of [...this.edgeGroup.children]) { child.geometry.dispose(); child.material.dispose(); this.edgeGroup.remove(child); }
-    cubeEdgeClasses(analysis).forEach((h, idx) => {
+    cubeEdgeClasses(analysis, corner).forEach((h, idx) => {
       const edge = idx >> 1, half = idx & 1, axis = edge >> 2, a = (axis + 1) % 3, b = (axis + 2) % 3;
       const mid = [0, 0, 0];
       mid[a] = (edge >> 1) & 1 ? 1 : -1; mid[b] = edge & 1 ? 1 : -1;
