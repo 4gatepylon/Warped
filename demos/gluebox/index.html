@@ -98,6 +98,37 @@
 </div>
 
 <div id="fatal" hidden></div>
-<script type="module" src="src/main.js"></script>
+<script>
+  // Start Gluebox. Its code is a set of JavaScript modules (src/), which browsers refuse to load
+  // from a page opened straight from disk (file://). In that case run gluebox.bundle.js instead:
+  // the same code joined into one ordinary script by `npm run build`.
+  (() => {
+    const fromDisk = location.protocol === 'file:';
+    const started = () => !!window.__gluebox;   // main.js sets this once the menu is up
+    const fail = () => {
+      const box = document.getElementById('fatal');
+      if (started() || !box.hidden) return;     // running fine, or already explained (e.g. no WebGL)
+      box.hidden = false;
+      box.innerHTML = '<div><h2>Gluebox couldn’t start</h2>'
+        + '<p>It loads three.js from cdn.jsdelivr.net, so it needs an internet connection.</p>'
+        + '<p>If you are online, the browser’s developer console shows what went wrong. Serving the folder can also help:</p>'
+        + '<pre>cd demos/gluebox\npython3 -m http.server 8123</pre>'
+        + '<p>then open <code>http://localhost:8123</code>.</p></div>';
+    };
+    const script = document.createElement('script');
+    if (fromDisk) {
+      script.src = 'gluebox.bundle.js';
+    } else {
+      script.type = 'module';
+      script.src = 'src/main.js';
+    }
+    script.addEventListener('error', fail);
+    window.addEventListener('gluebox:failed', fail);
+    window.addEventListener('error', fail);
+    window.addEventListener('unhandledrejection', fail);
+    setTimeout(fail, 20000);                    // e.g. a download that never finishes
+    document.body.append(script);
+  })();
+</script>
 </body>
 </html>

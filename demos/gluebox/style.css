@@ -96,6 +96,9 @@ kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; paddin
 #menu footer .spacer { flex: 1; }
 #menuError { position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%); background: #4a1f1f; border: 1px solid var(--bad); padding: 8px 14px; border-radius: 8px; }
 #fatal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #222; color: #fff; padding: 30px; text-align: center; z-index: 10; }
+#fatal > div { max-width: 560px; text-align: left; line-height: 1.5; }
+#fatal h2 { margin-top: 0; }
+#fatal pre { background: #111; border: 1px solid var(--line); padding: 10px 12px; border-radius: 6px; }
 
 @media (max-width: 1100px) {
   #menu main { grid-template-columns: minmax(280px, 1fr) 380px; grid-template-areas: "cube faces" "cube result" "presets presets"; grid-template-rows: auto auto auto; }

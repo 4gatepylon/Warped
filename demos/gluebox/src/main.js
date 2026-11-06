@@ -58,7 +58,7 @@ function init() {
   window.addEventListener('hashchange', loadFromHash);
   loadFromHash();
   requestAnimationFrame(frame);
-  // handle for debugging from the console
+  // Handle for debugging from the console. index.html also checks it to see that startup worked.
   window.__gluebox = { app, enterWorld, showMenu, setGluing, renderer, input, get player() { return app.world?.player; } };
 }
 

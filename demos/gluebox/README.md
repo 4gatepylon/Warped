@@ -15,14 +15,18 @@ Press **Enter the space** to go in. Press **Esc** to come back to the menu.
 
 ## Running it
 
-The code is split into ES modules, so it needs a local web server; opening the HTML file directly won't work.
+Open `index.html` in a browser. Double-clicking it works, or you can serve the folder:
 
 ```bash
 cd demos/gluebox
 python3 -m http.server 8123
 ```
 
-Then open <http://localhost:8123>. three.js is loaded from a CDN, so you need to be online. WebGL 2 is required.
+and open <http://localhost:8123>. three.js is loaded from a CDN, so you need to be online. WebGL 2 is required.
+
+The code is a set of ES modules in `src/`, and browsers won't load those from a page opened straight from disk. In that case `index.html` runs `gluebox.bundle.js` instead: the same code joined into one ordinary script by `tools/build.mjs`. Served over http, the page always uses `src/` directly.
+
+**After editing `src/`, run `npm run build`** so that opening the file from disk picks up your change. `npm test` fails if the bundle is out of date.
 
 The current gluing is kept in the URL hash, for example `#t3` for a preset or `#10-00-30-20-52f-42f` for a custom gluing, so you can bookmark or share a space.
 
@@ -31,6 +35,7 @@ The current gluing is kept in the URL hash, for example `#t3` for a preset or `#
 ```bash
 cd demos/gluebox
 npm test          # node --test, no dependencies
+npm run build     # regenerate gluebox.bundle.js after editing src/
 node tools/enumerate.mjs           # every way to glue the six faces in pairs (7,680 gluings, ~2 s)
 node tools/enumerate.mjs --folds   # also with faces folded onto themselves (170,305 gluings, ~1 min)
 ```
@@ -41,6 +46,7 @@ The tests cover:
 - the portal maps, which must send each face onto its partner and the cube onto the neighbouring cube;
 - the topology of every preset, checked against the known answers below;
 - player movement through portals (you come back mirrored in Klein bottle × circle, upside down in the half-turn space, and are stopped by walls).
+- that `gluebox.bundle.js` matches `src/`.
 
 ## Controls
 
@@ -94,6 +100,7 @@ The code is in `src/`.
 | `world/shader.js`, `world/renderer.js` | The GPU ray tracer and its three.js setup. |
 | `menu/menu.js`, `menu/preview.js` | The menu, and the turnable cube preview. |
 | `main.js` | Switches between the menu and the world, and runs the game loop. |
+| `../tools/build.mjs` | Joins `src/` into `gluebox.bundle.js`, for opening `index.html` from disk. |
 
 ### Gluings
 
