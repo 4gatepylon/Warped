@@ -92,7 +92,7 @@
   <h1>What you're seeing</h1>
   <div id="tipsBody">
   <ol>
-    <li><b>Gravity</b> pulls you and the laser straight down at Earth strength (1 block = 1 m). Real light falls far too little to see, so here the laser falls as if it were fired at 20 blocks/s: a level shot starts curving down along a circle of radius about 41 blocks. The slider makes it stronger, weaker or off. It never slows the beam, only turns it, so a shot aimed up rises, curves over and ends up falling straight down.</li>
+    <li><b>Gravity</b> pulls you and the laser straight down at about three times Earth's pull (30 blocks/s², 1 block = 1 m), for snappy jumps and falls. Real light falls far too little to see, so here the laser falls as if it were fired at 20 blocks/s: a level shot starts curving down along a circle of radius about 13 blocks and lands about 6 blocks away from standing height. The slider makes it stronger, weaker or off. It never slows the beam, only turns it, so a shot aimed up rises, curves over and ends up falling straight down.</li>
     <li><b>Black holes</b> still bend the beam as exactly as before, on top of the downward pull. Fire the fan near a hole and the arcs dive into it or swing around it. The beam is drawn where it really is: every pixel's ray checks how close it passes it, so you can see it behind a hole and inside the Einstein ring. The light you see is not pulled down, only bent by the holes, so the world looks the same as in the other demo.</li>
     <li><b>Every pixel is a bent light ray.</b> Rays are traced backwards from your eye along real Schwarzschild light paths, so straight lines behind a hole (the checkerboard, the wall, the pillars) curve around it.</li>
     <li><b>The shadow</b> is about 2.6× the horizon radius, not 1×. Light that comes within 1.5 r<sub>s</sub> (the photon sphere) spirals in. Just outside it, a thin bright <b>Einstein ring</b> shows a distorted image of the whole scene behind you. Aim a laser just past the shadow's edge and it whips around the hole.</li>
@@ -173,9 +173,11 @@ buildWorld();
 // the chunk capsules in uniforms.
 // ---------------------------------------------------------------------------
 const LASER_MAX = 600, MAXPTS = 2048, MAXCH = 96, MAXSPOTS = 8, MAXPINS = 10;
-// Gravity: Earth strength, straight down, for you and for the laser. Real light falls far too little to
-// see, so the laser falls as if it moved at LASER_SPEED (only its direction bends; its speed never changes).
-const GRAVITY = 9.8, LASER_SPEED = 20, EYE = 1.6;     // blocks/s², blocks/s, eye height above your feet
+// Gravity: about three times Earth's pull (snappy, game-like), for you and for the laser. Real light falls far
+// too little to see, so the laser falls as if it moved at LASER_SPEED (only its direction bends; its speed never
+// changes). You also fall FALL_BOOST times harder on the way down than on the way up, for snappier jumps.
+const GRAVITY = 30, LASER_SPEED = 20, EYE = 1.6;       // blocks/s², blocks/s, eye height above your feet
+const JUMP = 8.5, FALL_BOOST = 1.6;                    // jump speed (blocks/s): about a 1.2-block hop
 
 // ---------------------------------------------------------------------------
 // Ray tracer. For each pixel, a ray is marched backwards from the eye. Near a hole it follows the
@@ -579,7 +581,7 @@ let ballCount = 0;
 function throwBall() {
   const { fwd } = camBasis();
   if (state.balls.length >= 16) state.balls.shift();
-  state.balls.push({ p: state.pos.clone().addScaledVector(fwd, 1.2), v: fwd.clone().multiplyScalar(11).add(new V3(0, 2, 0)), rad: 0.35,
+  state.balls.push({ p: state.pos.clone().addScaledVector(fwd, 1.2), v: fwd.clone().multiplyScalar(16).add(new V3(0, 4, 0)), rad: 0.35,
     col: BALL_COLS[ballCount++ % BALL_COLS.length], age: 0, axis: new V3(0, 1, 0), e: 1 });
 }
 const solid = (x, y, z) => get(Math.floor(x), Math.floor(y), Math.floor(z)) > 0;
@@ -588,7 +590,7 @@ function stepBalls(dt) {
   const sub = 4, h = dt / sub;
   for (let s = 0; s < sub; s++) {
     for (const b of state.balls) {
-      const a = new V3(0, -9.8, 0); let phi = 0, rNear = 1e9, nearH = null;
+      const a = new V3(0, -GRAVITY, 0); let phi = 0, rNear = 1e9, nearH = null;
       for (const H of state.holes) {
         const d = b.p.clone().sub(H.p), r = d.length();
         phi += H.rs / r;
@@ -835,8 +837,9 @@ function movePlayer(dt) {
   }
   // fall; Space/E jumps from the ground and works as a jetpack (net upward pull of 1 g) in the air
   const jet = keys.Space || keys.KeyE;
-  if (jet && state.onGround) state.vel.y = 5.5;
-  state.vel.y = Math.max(-40, Math.min(8, state.vel.y + ((jet ? 2 * GRAVITY : 0) - GRAVITY) * dt));
+  if (jet && state.onGround) state.vel.y = JUMP;
+  const g = GRAVITY * (state.vel.y < 0 && !jet ? FALL_BOOST : 1);
+  state.vel.y = Math.max(-60, Math.min(12, state.vel.y + ((jet ? 2 * GRAVITY : 0) - g) * dt));
   const dy = state.vel.y * dt, y0 = p.y, wasIn = bodyHit(p.x, y0, p.z);
   p.y += dy; state.onGround = false;
   if (!wasIn && bodyHit(p.x, p.y, p.z)) {     // landed (or bumped your head): stop at the contact point
