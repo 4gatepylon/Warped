@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gluebox — glue a cube into a universe</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="world"></canvas>
+
+<!-- ======================= In-world overlay ======================= -->
+<div id="hud" hidden>
+  <div id="cross"></div>
+  <div class="panel" id="hudInfo">
+    <h1 id="hudTitle">Gluebox</h1>
+    <div class="muted" id="hudMath"></div>
+    <div class="row"><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>F</kbd> auto-fly · <kbd>←</kbd><kbd>→</kbd> turn</div>
+    <div class="row muted">Mouse looks around (click the view if it doesn't). <kbd>R</kbd> respawn · <kbd>Esc</kbd> back to the menu</div>
+    <div class="row"><button id="hudMenu">◀ Menu (Esc)</button></div>
+  </div>
+  <div class="panel" id="hudStats">
+    <div>Faces crossed: <b id="sCross">0</b> <span class="muted" id="sLast"></span></div>
+    <div>You are <b id="sHand">the right way round</b></div>
+    <div class="muted">Your up is the cube's <span id="sUp">+y</span></div>
+    <div class="muted">Holonomy since spawn: <span id="sHol">(x, y, z)</span></div>
+    <div class="muted"><span id="sFps">–</span> fps</div>
+  </div>
+  <div class="panel" id="hudTips">
+    <button id="tipsToggle" class="small">hide</button>
+    <h1>Things to try</h1>
+    <ol id="tipsList"></ol>
+  </div>
+</div>
+
+<!-- ======================= Menu ======================= -->
+<div id="menu">
+  <header>
+    <h1>Gluebox</h1>
+    <p>Choose which faces of a cube are glued together, and how. Then fly around inside the space you made.
+      Light and you both go straight through a glued face and carry on out of its partner.</p>
+  </header>
+
+  <main>
+    <section id="presetPanel" class="card">
+      <h2>Start from a known space</h2>
+      <div id="presetList"></div>
+      <button id="randomize" class="wide">🎲 Surprise me (random gluing)</button>
+    </section>
+
+    <section id="cubePanel" class="card">
+      <h2>Your cube <span class="muted small">(drag to turn it)</span></h2>
+      <canvas id="preview"></canvas>
+      <p class="legend">Faces of the same colour are glued together. The <b>F</b> on one face lands on the
+        <b>F</b> of the same colour, so you can read off the twist and any mirror flip.
+        Edges of the same colour end up as one edge (dark end → light end shows the direction);
+        dashed edges are where the angles don't add up to 360°.</p>
+    </section>
+
+    <section id="facePanel" class="card">
+      <h2>Faces</h2>
+      <table id="faceTable">
+        <thead><tr><th>Face</th><th>Glued to</th><th>Twist</th><th>Flip</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted small">Twist turns the face by quarter turns (counter-clockwise seen from outside) before gluing.
+        Flip mirrors it left-to-right. Gluing a face to itself folds it.</p>
+    </section>
+
+    <section id="resultPanel" class="card">
+      <h2 id="resultTitle">3-torus</h2>
+      <div id="resultMath" class="muted"></div>
+      <p id="resultBlurb"></p>
+      <div id="resultChips"></div>
+      <dl id="resultFacts"></dl>
+      <ul id="resultNotes"></ul>
+    </section>
+  </main>
+
+  <footer>
+    <label>Cube <select id="optSize"></select></label>
+    <label>Fog <select id="optFog">
+      <option value="1.4">thick</option><option value="2.5" selected>medium</option><option value="5">light</option><option value="1e9">off</option>
+    </select></label>
+    <label><input type="checkbox" id="optFrame" checked> cube edges</label>
+    <label><input type="checkbox" id="optSeams" checked> glued faces tinted</label>
+    <label><input type="checkbox" id="optSelf" checked> show yourself</label>
+    <label>Quality <select id="optQuality">
+      <option value="auto" selected>auto</option><option value="0.5">low</option><option value="0.75">medium</option><option value="1">full</option>
+    </select></label>
+    <span class="spacer"></span>
+    <button id="enter" class="primary">Enter the space ▶</button>
+  </footer>
+  <div id="menuError" hidden></div>
+</div>
+
+<div id="fatal" hidden></div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
