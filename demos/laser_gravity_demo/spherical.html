@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3-Sphere + Laser + Gravity</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #87bff2; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(15, 20, 30, 0.72); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 280px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; text-align: right; max-width: 360px; }
+  #tips { bottom: 10px; right: 10px; width: 340px; max-height: calc(100vh - 170px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #4f7a3a; border-color: #7bb35d; }
+  button.laseron { background: #7a2c2c; border-color: #c35a5a; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .laser { color: #ffb4a8; }
+  #sLaser { color: #ff9a8a; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 2px 0; }
+  #tipsToggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+
+<div id="controls" class="panel">
+  <h1>3-sphere (S³) + laser + gravity</h1>
+  <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>WASD</kbd> walk · <kbd>Shift</kbd> sprint · <kbd>Space</kbd>/<kbd>E</kbd> jump, hold to jetpack · <kbd>F</kbd> auto-walk<br>
+    <kbd>H</kbd> fly mode (no gravity for you; <kbd>E</kbd>/<kbd>Q</kbd> up/down)</div>
+  <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
+    <kbd>Click</kbd> (mouse captured) or <kbd>R</kbd>: leave an emitter here that keeps firing<br>
+    <kbd>V</kbd> fire a fan of emitters from 40° up to 20° down and step aside to watch<br>
+    <kbd>Z</kbd> remove all emitters</div>
+  <div class="row">
+    <label>Gravity on the laser: ×<b id="lgval">1</b></label>
+    <input id="lg" type="range" min="0" max="3" step="0.25" value="1">
+    <div class="muted" id="lgnote"></div>
+    <label><input type="checkbox" id="tFly"> Fly mode (no gravity for you)</label>
+  </div>
+  <div class="row">
+    <label>Sphere radius R = <b id="rval">16</b> blocks</label>
+    <input id="rslider" type="range" min="8" max="64" step="1" value="16">
+    <div class="muted">Smaller R = stronger curvature. Bigger R looks flatter. Changing it removes emitters.</div>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="tGround" checked> Ground</label>
+    <label><input type="checkbox" id="tFog" checked> Fog (distance haze)</label>
+    <label><input type="checkbox" id="tSecond" checked> Light that goes all the way around (2nd image)</label>
+  </div>
+  <div class="row">
+    <button id="bLaser" class="laseron">Laser: on</button>
+    <button id="bPin">Leave emitter</button>
+    <button id="bFan">Laser fan</button>
+    <button id="bUnpin">Remove emitters</button>
+  </div>
+  <div class="row">
+    <button id="bSpawn">Spawn corner</button>
+    <button id="bHouse">Inside house</button>
+    <button id="bPole">Fly to the pole</button>
+    <button id="bAuto">Auto-walk: off</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Distance from start: <b id="sDist">0.0</b> blocks</div>
+  <div class="muted">Straight-line loop length 2πR = <span id="sCirc">100.5</span></div>
+  <div class="muted">Eye height: <span id="sH">1.7</span> · pole at πR/2 = <span id="sPole">25.1</span></div>
+  <div>Laser: <span id="sLaser">–</span></div>
+  <div class="muted">emitters: <span id="sE">0</span> · <span id="sFps">–</span> fps</div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tipsToggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tipsBody">
+  <ol>
+    <li><b>Gravity</b> pulls you and the laser toward the ground under your feet (not the ground you see overhead), along the shortest way down, at Earth strength (1 block = 1 m). Real light falls far too little to see, so the laser falls as if fired at 20 blocks/s. The slider changes that, down to off.</li>
+    <li><b>Gravity and the geometry pull the same way here.</b> Even with no gravity, a level shot lands exactly πR/2 blocks away from any height. Gravity makes it land sooner. Press <b>Laser fan</b> (<kbd>V</kbd>) on the spawn tower to see a range of angles from the side.</li>
+    <li><b>Turn the ground off</b> (it only hides it from the laser and from view; you still stand on it). Now a beam falls through where the ground was, gets pulled back from the other side, and keeps swinging back and forth across it, never repeating. It would go on forever, so it fades slowly and is cut off once it is dim. With the gravity slider at 0 it instead goes all the way around the universe and comes back to your gun from behind after exactly 2πR, drawn once around.</li>
+    <li><b>The triangle.</b> You start on top of the red tower (walk off the edge to come down). The cobblestone walls are perfectly straight (they're geodesics), and they meet here at 90°. Walk to the blue or yellow tower: those corners are 90° too. One triangle, three right angles.</li>
+    <li><b>Look up.</b> The ground wraps around over your head. The upside-down trees up there are on the far side of the world.</li>
+    <li><b>Walk away from the house</b> (or watch the far towers). In flat space things shrink with distance. Here they shrink until πR/2 away, then grow again.</li>
+    <li><b>Auto-walk</b> (<kbd>F</kbd>) in a straight line: after 2πR blocks you're back where you started.</li>
+    <li><b>Ground off</b>, then look behind you. Light circles the whole universe, so you see the back of every object in the opposite direction.</li>
+    <li><b>Slide R</b> up to 64 and the same house looks almost normal.</li>
+  </ol>
+  </div>
+</div>
+
+<div id="err"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+// ---------------------------------------------------------------------------
+// 4x4 matrix helpers (column-major, m[c*4 + r]); coordinates are (x, y, z, w)
+// The universe is the unit 3-sphere S³ ⊂ R⁴, scaled so its radius is R blocks.
+// Isometries of S³ are rotations of R⁴ (SO(4)).
+// ---------------------------------------------------------------------------
+const X = 0, Y = 1, Z = 2, W = 3, TAU = Math.PI * 2;
+const id4 = () => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; };
+function mul(a, b) {
+  const o = new Float64Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+    o[c * 4 + r] = s;
+  }
+  return o;
+}
+function transpose(a) { const o = new Float64Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[r * 4 + c] = a[c * 4 + r]; return o; }
+function apply(m, v) { const o = [0, 0, 0, 0]; for (let r = 0; r < 4; r++) o[r] = m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2] + m[12 + r] * v[3]; return o; }
+// rotation in the (i, j) plane: e_i -> cos a e_i + sin a e_j
+function rot(i, j, a) { const m = id4(), c = Math.cos(a), s = Math.sin(a); m[i * 4 + i] = c; m[i * 4 + j] = s; m[j * 4 + i] = -s; m[j * 4 + j] = c; return m; }
+const col = (m, c) => [m[c * 4], m[c * 4 + 1], m[c * 4 + 2], m[c * 4 + 3]];
+function fromCols(a, b, c, d) { const m = new Float64Array(16); [a, b, c, d].forEach((v, ci) => { for (let r = 0; r < 4; r++) m[ci * 4 + r] = v[r]; }); return m; }
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+const scale = (a, s) => a.map(x => x * s);
+const sub = (a, b) => a.map((x, i) => x - b[i]);
+const norm = a => { const l = Math.hypot(...a); return a.map(x => x / l); };
+// cross product inside the (x, z, w) 3-space (y = 0): used for frames on the ground
+function cross3(a, b) {
+  const ax = a[X], az = a[Z], aw = a[W], bx = b[X], bz = b[Z], bw = b[W];
+  return [az * bw - aw * bz, 0, aw * bx - ax * bw, ax * bz - az * bx];
+}
+function det4(m) {
+  const a = (r, c) => m[c * 4 + r]; let det = 0;
+  for (let c = 0; c < 4; c++) {
+    const s = []; for (let r = 1; r < 4; r++) for (let cc = 0; cc < 4; cc++) if (cc !== c) s.push(a(r, cc));
+    const d3 = s[0] * (s[4] * s[8] - s[5] * s[7]) - s[1] * (s[3] * s[8] - s[5] * s[6]) + s[2] * (s[3] * s[7] - s[4] * s[6]);
+    det += (c % 2 ? -1 : 1) * a(0, c) * d3;
+  }
+  return det;
+}
+const EY = [0, 1, 0, 0];
+const EW = [0, 0, 0, 1];
+
+// The ground is the great 2-sphere {y = 0}. A "frame on the ground" is an isometry that keeps
+// e_y fixed, so it maps the local ground plane y=0 onto the world ground.
+function frameAt(g, toward) {
+  g = norm(g);
+  let t = norm(sub(toward, scale(g, dot(toward, g))));   // local +z
+  let r = cross3(t, g);                                     // local +x
+  let M = fromCols(r, EY, t, g);
+  if (det4(M) < 0) M = fromCols(scale(r, -1), EY, t, g);
+  return M;
+}
+// Re-orthonormalise the player's body frame (keeps it exactly on SO(4) and upright).
+function renorm(B) {
+  let g = col(B, 3); g[Y] = 0; g = norm(g);
+  let t = col(B, 2); t[Y] = 0; t = norm(sub(t, scale(g, dot(t, g))));
+  let r = cross3(t, g);
+  if (dot(r, col(B, 0)) < 0) r = scale(r, -1);
+  return fromCols(r, EY, t, g);
+}
+
+// ---------------------------------------------------------------------------
+// Mesh building. Every vertex is stored directly as a point of R⁴ on (or, for
+// flat chords, just inside) the unit sphere; the shader only needs the view.
+// buildWorld also records what the laser can hit: voxel structures and walls.
+// ---------------------------------------------------------------------------
+let structs = [], walls = [];
+const vkey = (i, j, k) => ((i + 512) * 1024 + (j + 512)) * 1024 + (k + 512);
+class Builder {
+  constructor() { this.pos = []; this.col = []; this.uv = []; this.seed = []; this.idx = []; }
+  quad(p0, p1, p2, p3, c, seed) {
+    const base = this.pos.length / 4;
+    for (const p of [p0, p1, p2, p3]) this.pos.push(p[0], p[1], p[2], p[3]);
+    this.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let k = 0; k < 4; k++) { this.col.push(c[0], c[1], c[2]); this.seed.push(seed); }
+    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  geometry() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 4));
+    g.setAttribute('col', new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    g.setAttribute('seed', new THREE.Float32BufferAttribute(this.seed, 1));
+    g.setIndex(this.idx);
+    return g;
+  }
+}
+
+const COLORS = {
+  planks: [0.74, 0.57, 0.34], log: [0.42, 0.31, 0.19], cobble: [0.55, 0.55, 0.55],
+  glass: [0.70, 0.87, 0.96], roof: [0.64, 0.25, 0.20], brick: [0.58, 0.30, 0.25],
+  leaves: [0.24, 0.52, 0.20], door: [0.36, 0.24, 0.13],
+  red: [0.80, 0.20, 0.18], blue: [0.20, 0.35, 0.80], yellow: [0.92, 0.80, 0.20],
+  purple: [0.55, 0.25, 0.70], orange: [0.92, 0.50, 0.15], white: [0.92, 0.92, 0.92],
+  gold: [0.95, 0.78, 0.25]
+};
+const SHADE = { px: 0.82, nx: 0.82, py: 1.0, ny: 0.55, pz: 0.68, nz: 0.68 };
+
+// Local structures are built in ordinary block coordinates and then mapped into S³ with the
+// gnomonic chart p -> normalize(p, R). That chart sends straight lines to geodesics and flat
+// faces to totally-geodesic surfaces, so every block edge is a true "straight line" of S³.
+function addVoxels(b, vox, M, R, off, name) {
+  const dirs = [[1, 0, 0, 'px'], [-1, 0, 0, 'nx'], [0, 1, 0, 'py'], [0, -1, 0, 'ny'], [0, 0, 1, 'pz'], [0, 0, -1, 'nz']];
+  const toS3 = p => apply(M, norm([p[0] - off[0], p[1] - off[1], p[2] - off[2], R]));
+  const cells = new Map(); let maxD = 0;
+  for (const [key, type] of vox) {
+    const [i, j, k] = key.split(',').map(Number);
+    cells.set(vkey(i, j, k), type);
+    for (let c = 0; c < 8; c++) maxD = Math.max(maxD, Math.hypot(i + (c & 1) - off[0], j + (c >> 1 & 1) - off[1], k + (c >> 2 & 1) - off[2]));
+    for (const [dx, dy, dz, name] of dirs) {
+      if (vox.has(`${i + dx},${j + dy},${k + dz}`)) continue;
+      if (dy < 0 && j === 0) continue;               // bottom faces resting on the ground
+      const a = dx ? 0 : dy ? 1 : 2, s = dx + dy + dz;
+      const u = (a + 1) % 3, v = (a + 2) % 3;
+      const corners = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([cu, cv]) => {
+        const p = [i, j, k]; if (s > 0) p[a] += 1; p[u] += cu; p[v] += cv; return toS3(p);
+      });
+      const c = COLORS[type].map(x => x * SHADE[name]);
+      const seed = ((i * 73.1 + j * 19.7 + k * 41.3 + a * 7.9) % 97 + 97) % 97;
+      b.quad(corners[0], corners[1], corners[2], corners[3], c, seed);
+    }
+  }
+  // for the laser: base point, bounding radius (radians), and the inverse placement
+  structs.push({ name, inv: transpose(M), off, cells, c: apply(M, EW), rad: Math.atan((maxD + 0.2) / R) });
+}
+
+function houseVoxels() {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t), del = (x, y, z) => v.delete(`${x},${y},${z}`);
+  for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++)
+    set(x, 0, z, (Math.abs(x) === 4 || Math.abs(z) === 3) ? 'cobble' : 'planks');
+  for (let y = 1; y <= 4; y++) for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) {
+    const edgeX = Math.abs(x) === 4, edgeZ = Math.abs(z) === 3;
+    if (edgeX || edgeZ) set(x, y, z, edgeX && edgeZ ? 'log' : 'planks');
+  }
+  del(0, 1, 3); del(0, 2, 3);                                   // door opening
+  for (const y of [2, 3]) {
+    for (const x of [-2, 2]) { set(x, y, 3, 'glass'); set(x, y, -3, 'glass'); }
+    set(4, y, 0, 'glass'); set(-4, y, 0, 'glass');
+  }
+  for (let k = 0; k <= 4; k++) {                                // gable roof, ridge along x
+    const y = 5 + k, zr = 4 - k;
+    for (let x = -5; x <= 5; x++) {
+      set(x, y, zr, 'roof'); set(x, y, -zr, 'roof');
+      if (zr >= 1) { set(x, y, zr - 1, 'roof'); set(x, y, -(zr - 1), 'roof'); }
+    }
+    for (const x of [-4, 4]) for (let z = -(zr - 2); z <= zr - 2; z++) set(x, y, z, 'planks');
+  }
+  for (let y = 6; y <= 10; y++) set(2, y, -1, 'brick');         // chimney
+  return v;
+}
+function towerVoxels(color) {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t);
+  for (let y = 0; y <= 6; y++) for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) set(x, y, z, color);
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) set(x, 7, z, color);
+  set(0, 7, 0, 'gold'); set(0, 8, 0, 'gold');
+  return v;
+}
+function treeVoxels(rng) {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t);
+  const hgt = 4 + Math.floor(rng() * 2);
+  for (let y = hgt - 1; y <= hgt; y++) for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) {
+    if (Math.abs(x) === 2 && Math.abs(z) === 2 && rng() < 0.7) continue;
+    set(x, y, z, 'leaves');
+  }
+  for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) set(x, hgt + 1, z, 'leaves');
+  for (const [x, z] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) set(x, hgt + 2, z, 'leaves');
+  for (let y = 0; y < hgt; y++) set(0, y, 0, 'log');
+  return v;
+}
+
+// Ground: the great sphere {y=0} as an equiangular cube-sphere in (x, z, w). Grid lines are great circles.
+function addGround(b, R) {
+  const N = Math.max(8, Math.min(64, Math.round(Math.PI * R / 2)));
+  const axes = [X, Z, W];
+  let cell = 0;
+  for (const A of axes) for (const s of [1, -1]) {
+    const [U, V] = axes.filter(q => q !== A);
+    const P = (a, bb) => { const p = [0, 0, 0, 0]; p[A] = s; p[U] = Math.tan(a); p[V] = Math.tan(bb); return p; };
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const a0 = -Math.PI / 4 + (i / N) * Math.PI / 2, a1 = -Math.PI / 4 + ((i + 1) / N) * Math.PI / 2;
+      const b0 = -Math.PI / 4 + (j / N) * Math.PI / 2, b1 = -Math.PI / 4 + ((j + 1) / N) * Math.PI / 2;
+      const h = Math.sin(cell * 12.9898) * 43758.5453; const r = h - Math.floor(h);
+      let c = ((i + j) & 1) ? [0.36, 0.60, 0.25] : [0.40, 0.65, 0.28];
+      if (r < 0.04) c = [0.55, 0.42, 0.27];                       // a few dirt patches
+      else c = c.map(x => x * (0.94 + 0.1 * r));
+      b.quad(P(a0, b0), P(a1, b0), P(a1, b1), P(a0, b1), c, (cell * 0.37) % 97);
+      cell++;
+    }
+  }
+}
+
+// A wall along the great circle spanned by e_a, e_b (normal direction e_c inside the ground).
+function addWall(b, a, bb, c, R, height, width, color) {
+  const N = Math.max(24, Math.round(TAU * R));
+  const P = (t, off, h) => {
+    const base = [0, 0, 0, 0]; base[a] = Math.cos(t); base[bb] = Math.sin(t);
+    const side = base.map((x, i) => x * Math.cos(off) + (i === c ? Math.sin(off) : 0));
+    return side.map((x, i) => x * Math.cos(h) + (i === Y ? Math.sin(h) : 0));
+  };
+  const w = width / 2 / R, H = height / R;
+  for (let k = 0; k < N; k++) {
+    const t0 = TAU * k / N, t1 = TAU * (k + 1) / N, sd = (k * 3.7) % 97;
+    b.quad(P(t0, -w, H), P(t1, -w, H), P(t1, w, H), P(t0, w, H), color.map(x => x * 1.0), sd);
+    b.quad(P(t0, w, 0), P(t1, w, 0), P(t1, w, H), P(t0, w, H), color.map(x => x * 0.78), sd + 1);
+    b.quad(P(t0, -w, 0), P(t1, -w, 0), P(t1, -w, H), P(t0, -w, H), color.map(x => x * 0.68), sd + 2);
+  }
+  // for the laser: points with |x_c| <= cos(h) sin(w) and 0 <= h <= H, where h = asin(x_y)
+  walls.push({ c, hw: w, top: H });
+}
+
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// World layout. The three walls lie on the great circles x=0, z=0, w=0 of the ground sphere,
+// cutting it into 8 triangles, each with three 90° corners. Towers mark the 6 corners.
+const HOUSE_CENTER = norm([1, 0, -1, 1]);
+const SPAWN_CORNER = [0, 0, 0, 1];
+function buildWorld(R) {
+  structs = []; walls = [];
+  const ground = new Builder(), world = new Builder();
+  addGround(ground, R);
+  addWall(world, Z, W, X, R, 1, 1, COLORS.cobble);   // circle x = 0
+  addWall(world, X, W, Z, R, 1, 1, COLORS.cobble);   // circle z = 0
+  addWall(world, X, Z, W, R, 1, 1, COLORS.cobble);   // circle w = 0
+  const towers = [
+    [[0, 0, 0, 1], 'red'], [[0, 0, 0, -1], 'white'], [[1, 0, 0, 0], 'blue'],
+    [[-1, 0, 0, 0], 'orange'], [[0, 0, -1, 0], 'yellow'], [[0, 0, 1, 0], 'purple']
+  ];
+  for (const [g, colr] of towers) {
+    const toward = g[W] !== 0 ? [1, 0, 0, 0] : [0, 0, 0, 1];
+    addVoxels(world, towerVoxels(colr), frameAt(g, toward), R, [0.5, 0, 0.5], colr + ' tower');
+  }
+  addVoxels(world, houseVoxels(), frameAt(HOUSE_CENTER, SPAWN_CORNER), R, [0.5, 0, 0.5], 'house');
+
+  const rng = mulberry32(1234);
+  const nTrees = Math.max(20, Math.min(220, Math.round(0.018 * 4 * Math.PI * R * R)));
+  let placed = 0, tries = 0;
+  while (placed < nTrees && tries < 5000) {
+    tries++;
+    const gauss = () => Math.sqrt(-2 * Math.log(rng() + 1e-12)) * Math.cos(TAU * rng());
+    const g = norm([gauss(), 0, gauss(), gauss()]);
+    if ([X, Z, W].some(i => Math.asin(Math.min(1, Math.abs(g[i]))) * R < 3.2)) continue;
+    if (Math.acos(Math.min(1, dot(g, HOUSE_CENTER))) * R < 9) continue;
+    const toward = norm([rng() - 0.5, 0, rng() - 0.5, rng() - 0.5]);
+    if (Math.abs(dot(toward, g)) > 0.99) continue;
+    addVoxels(world, treeVoxels(rng), frameAt(g, toward), R, [0.5, 0, 0.5], 'tree');
+    placed++;
+  }
+  return { ground: ground.geometry(), world: world.geometry() };
+}
+
+// ---------------------------------------------------------------------------
+// Laser with gravity. Gravity pulls toward the ground under you: along the shortest path to the ground
+// sphere y = 0, with the same strength everywhere (from below it, back up; at the pole, the one point
+// with no "down", it vanishes). It never slows the beam, only turns it: the beam bends toward "down" at
+// a rate K (per unit length) times the part of "down" across the beam. With K = 0 the path is a great
+// circle. The path is integrated with RK4 on the 3-sphere (0.25-block steps near things, 1 block
+// otherwise); each step is checked against the ground, the walls and the voxel structures close to it in
+// 0.04-block sub-steps, refined by bisection.
+// With the ground on, every beam lands. With it off, a beam with no gravity closes into a loop after
+// exactly 2πR (it would circle forever, so it is drawn once around); with gravity it keeps swinging
+// back and forth across the ground sphere, so it fades slowly and is cut off once it is dim.
+// ---------------------------------------------------------------------------
+const LASER = { beamR: 0.012, spotR: 0.12, sub: 0.04, fade: 1.5, cutoff: 0.1, maxPins: 10, maxPts: 4000 };   // blocks; fade in loop lengths
+const GUN = { right: 0.22, up: -0.2, fwd: 0.3 };       // where the beam leaves, relative to your eye (blocks)
+// Gravity: Earth strength. Real light falls far too little to see, so the laser falls as if it moved at
+// LASER_SPEED (only its direction bends; its speed never changes).
+const GRAVITY = 9.8, LASER_SPEED = 20, EYE = 1.6;      // blocks/s², blocks/s, eye height above your feet
+const laserK = () => state.lg * GRAVITY / (LASER_SPEED * LASER_SPEED);   // how sharply gravity turns the beam (1/blocks)
+const geoS = (P, V, t) => { const c = Math.cos(t), s = Math.sin(t); return [c * P[0] + s * V[0], c * P[1] + s * V[1], c * P[2] + s * V[2], c * P[3] + s * V[3]]; };
+function voxAt(x, st) {                                 // x in the structure's own frame -> voxel type (gnomonic chart)
+  if (x[3] < 1e-6) return undefined;
+  const k = state.R / x[3];
+  return st.cells.get(vkey(Math.floor(x[0] * k + st.off[0]), Math.floor(x[1] * k + st.off[1]), Math.floor(x[2] * k + st.off[2])));
+}
+function wallAt(x) {
+  if (x[Y] < 0) return null;
+  const h = Math.asin(Math.min(1, x[Y])), ch = Math.cos(h);
+  for (const w of walls) if (h <= w.top && Math.abs(x[w.c]) <= ch * Math.sin(w.hw)) return w;
+  return null;
+}
+const snorm = x => { const n = Math.hypot(...x); return x.map(v => v / n); };
+const chord = (a, b, f) => snorm(a.map((v, i) => v + (b[i] - v) * f));   // point a fraction f along the short arc a-b
+// unit tangent at x pointing to the ground sphere (zero on it and at the pole): ∓(e_y - y x) / √(1 - y²)
+function downAt(x) {
+  const y = x[Y], c2 = 1 - y * y;
+  if (c2 < 1e-12 || y === 0) return [0, 0, 0, 0];
+  const k = (y > 0 ? -1 : 1) / Math.sqrt(c2);
+  return [-k * y * x[0], k * (1 - y * x[1]), -k * y * x[2], -k * y * x[3]];
+}
+function rk4(x, T, h, K) {                              // one step of x' = T, T' = -x + K (down - (down·T) T)
+  const f = (x, T) => { const d = downAt(x), dt = dot(d, T); return x.map((xi, i) => -xi + K * (d[i] - dt * T[i])); };
+  const add = (a, b, s) => a.map((v, i) => v + s * b[i]);
+  const a1 = f(x, T);
+  const x2 = add(x, T, h / 2), T2 = add(T, a1, h / 2), a2 = f(x2, T2);
+  const x3 = add(x, T2, h / 2), T3 = add(T, a2, h / 2), a3 = f(x3, T3);
+  const x4 = add(x, T3, h), T4 = add(T, a3, h), a4 = f(x4, T4);
+  const xn = snorm(x.map((v, i) => v + h / 6 * (T[i] + 2 * T2[i] + 2 * T3[i] + T4[i])));
+  let Tn = T.map((v, i) => v + h / 6 * (a1[i] + 2 * a2[i] + 2 * a3[i] + a4[i]));
+  const c = dot(Tn, xn); Tn = snorm(Tn.map((v, i) => v - c * xn[i]));        // back into the tangent space
+  return [xn, Tn];
+}
+const nearStructs = (x, reach) => structs.filter(st => dot(x, st.c) > Math.cos(Math.min(Math.PI, st.rad + reach / state.R)));
+let wallTopY = 0;
+function solidAt(x, cands) {                            // a wall or a block of one of the given structures
+  if (x[Y] >= 0 && x[Y] < wallTopY) { const w = wallAt(x); if (w) return { what: 'cobble', where: 'cobblestone wall' }; }
+  for (const st of cands) { const ty = voxAt(apply(st.inv, x), st); if (ty) return { what: ty, where: st.name }; }
+  return null;
+}
+function traceLaser(P, V) {
+  const R = state.R, K = laserK() * R;
+  wallTopY = Math.sin(walls[0].top);
+  // how far to go: with gravity and no ground the beam never settles, so stop once it has faded to LASER.cutoff;
+  // with no gravity it closes into a loop after exactly 2π
+  const tMax = state.ground ? TAU : K > 0 ? LASER.fade * TAU * Math.log(1 / LASER.cutoff) : TAU;
+  let x = P, T = V, t = 0, hit = null, spot = null, cands = [], candT = -1;
+  const pts = [[x, T, 0]];                              // point, tangent, distance travelled (blocks)
+  let inside = !!solidAt(P, nearStructs(P, 1));         // started inside a block (you can fly): let it out first
+  while (t < tMax && pts.length < LASER.maxPts) {
+    if (t >= candT) { cands = nearStructs(x, 2.5); candT = t + 2 / R; }
+    const low = x[Y] < wallTopY + 1.5 / R && x[Y] > -1.5 / R;
+    const h = Math.min(tMax - t, (cands.length || low) ? 0.25 / R : 1 / R);
+    const [xn, Tn] = rk4(x, T, h, K);
+    // the ground: y changes sign along the step (y is linear along the chord)
+    let fEnd = 1, g = null;
+    if (state.ground && (x[Y] > 0) !== (xn[Y] > 0)) { fEnd = x[Y] / (x[Y] - xn[Y]); g = { what: 'grass', where: 'the ground' }; }
+    // walls and blocks, in small sub-steps
+    let found = null;
+    if (cands.length || low) {
+      const n = Math.max(1, Math.ceil(h * R * fEnd / LASER.sub));
+      let prev = 0;
+      for (let i = 1; i <= n && !found; i++) {
+        const f = fEnd * i / n, s = solidAt(chord(x, xn, f), cands);
+        if (inside) { if (!s) inside = false; prev = f; continue; }
+        if (s) {
+          let lo = prev, hi = f, hh = s;
+          for (let k = 0; k < 8; k++) { const m = (lo + hi) / 2, sm = solidAt(chord(x, xn, m), cands); if (sm) { hi = m; hh = sm; } else lo = m; }
+          found = { f: hi, hit: hh };
+        }
+        prev = f;
+      }
+    } else inside = false;
+    if (!found && g) found = { f: fEnd, hit: g };
+    if (found) {
+      t += h * found.f; hit = found.hit;
+      spot = chord(x, xn, Math.max(0, found.f - 0.05 / (h * R)));
+      pts.push([chord(x, xn, found.f), Tn, t * R]);
+      break;
+    }
+    x = xn; T = Tn; t += h; pts.push([x, T, t * R]);
+  }
+  return { P, V, pts, tEnd: t, hit, spot, loop: !hit && K === 0, faded: !hit && K > 0 };
+}
+function laserText(r) {
+  if (!r) return 'off';
+  const L = (r.tEnd * state.R).toFixed(1);
+  if (r.hit) return r.hit.where === 'the ground' ? `lands on the ground after ${L} blocks` : `hits the ${r.hit.where} (${r.hit.what}) after ${L} blocks`;
+  if (r.loop) return `hits nothing: goes all the way around (2πR = ${L} blocks) back to your gun, and would loop forever`;
+  return `hits nothing: keeps falling back and forth through where the ground was; faded out after ${L} blocks`;
+}
+
+// ---------------------------------------------------------------------------
+// Shaders. Light travels along great circles. A point x (in camera coordinates, camera at
+// e_w looking down -z) is seen in direction x.xyz at distance d = atan2(|x.xyz|, x.w), and,
+// because light can also go the long way round, in direction -x.xyz at distance 2π - d.
+// Screen position only depends on direction, so a standard perspective matrix applied to
+// x.xyz gives exact apparent sizes (∝ 1/sin d). Depth is written per-fragment from d.
+// ---------------------------------------------------------------------------
+const vert = `
+precision highp float;
+uniform mat4 uView; uniform mat4 uProj; uniform float uImage;
+in vec4 position; in vec3 col; in vec2 uv; in float seed;
+out vec4 vX; out vec3 vCol; out vec2 vUv; out float vSeed;
+void main() {
+  vec4 x = uView * position;
+  vX = x; vCol = col; vUv = uv; vSeed = seed;
+  vec3 v = uImage > 0.5 ? -x.xyz : x.xyz;
+  vec4 clip = uProj * vec4(v, 1.0);
+  clip.z = 0.0;            // depth comes from gl_FragDepth; this clips exactly at the eye plane
+  gl_Position = clip;
+}`;
+const frag = `
+precision highp float;
+uniform float uImage; uniform float uR; uniform float uFog; uniform vec3 uSky;
+in vec4 vX; in vec3 vCol; in vec2 vUv; in float vSeed;
+out vec4 outColor;
+float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+void main() {
+  float d = atan(length(vX.xyz), vX.w);          // geodesic distance (radians), in [0, π]
+  if (uImage > 0.5) d = 6.28318530718 - d;       // the long way round
+  gl_FragDepth = d / 6.28318530718;
+  vec2 cell = floor(clamp(vUv, 0.0, 0.999) * 8.0);
+  float n = hash(vec3(cell, vSeed));
+  vec3 c = vCol * (0.86 + 0.22 * n);
+  vec2 e2 = min(vUv, 1.0 - vUv); float e = min(e2.x, e2.y);
+  c *= mix(0.55, 1.0, smoothstep(0.0, 0.045, e));
+  float D = d * uR;
+  float f = uFog > 0.0 ? exp(-D / uFog) : 1.0;
+  outColor = vec4(mix(uSky, c, f), 1.0);
+}`;
+// Laser beam: a camera-facing ribbon through the traced points (aP, with unit tangents aT), moved into the
+// camera frame by the same view matrix as the world. Its width is the real beam width, clamped to a
+// sensible range of on-screen sizes (so it neither vanishes in the distance nor blows up near the
+// antipode, where everything is magnified). Drawn twice, like the world: short way and long way round.
+const beamVert = `
+precision highp float;
+uniform mat4 uView, uProj; uniform float uBeamR, uAMin, uAMax, uImage;
+in vec3 position; in vec4 aP; in vec4 aT;   // position.x: distance along the beam (blocks), .y: side (-1..1)
+out vec4 vX; out float vSide; out float vS;
+void main() {
+  vec4 A = uView * aP, T = uView * aT;              // point and tangent, camera frame
+  vec3 n = cross(A.xyz, T.xyz); float nl = length(n);
+  n = nl > 1e-20 ? n / nl : vec3(0.0);             // ⟂ to the beam and to the line of sight
+  float sl = length(A.xyz);                         // sin(distance from the eye)
+  float alpha = clamp(uBeamR / max(sl, 1e-9), uAMin, uAMax);
+  float rho = 3.0 * alpha * sl;                     // ribbon half-width, halo included
+  vec4 X = cos(rho) * A + sin(rho) * position.y * vec4(n, 0.0);
+  vX = X; vSide = position.y; vS = position.x;
+  vec4 clip = uProj * vec4(uImage > 0.5 ? -X.xyz : X.xyz, 1.0);
+  clip.z = 0.0;
+  gl_Position = clip;
+}`;
+const beamFrag = `
+precision highp float;
+uniform float uR, uFog, uFade, uImage;
+in vec4 vX; in float vSide; in float vS;
+out vec4 outColor;
+void main() {
+  float d = atan(length(vX.xyz), vX.w);
+  if (uImage > 0.5) d = 6.28318530718 - d;
+  gl_FragDepth = d / 6.28318530718;
+  float u = abs(vSide) * 3.0;
+  float core = exp(-u * u), halo = exp(-u * u / 4.8) * (1.0 - smoothstep(0.75, 1.0, abs(vSide)));
+  float f = (uFog > 0.0 ? exp(-d * uR / (1.5 * uFog)) : 1.0) * exp(-vS / uFade);
+  float a = clamp(0.9 * halo * f, 0.0, 1.0);
+  outColor = vec4(vec3(1.0, 0.06, 0.03) * a + vec3(1.0, 0.62, 0.52) * core * f, a);   // premultiplied
+}`;
+// Where a beam hits something: a glowing camera-facing disc, pulled slightly toward you in depth.
+const spotVert = `
+precision highp float;
+uniform mat4 uProj; uniform vec4 uC; uniform float uSpotR, uAMin, uImage;
+in vec3 position; out vec2 vQ;
+void main() {
+  vec3 a = uC.xyz; float sl = length(a);
+  vec3 dir = sl > 1e-9 ? a / sl : vec3(0.0, 0.0, -1.0);
+  vec3 e1 = normalize(abs(dir.y) < 0.9 ? cross(dir, vec3(0.0, 1.0, 0.0)) : cross(dir, vec3(1.0, 0.0, 0.0)));
+  vec3 e2 = cross(e1, dir);
+  float alpha = clamp(uSpotR / max(sl, 1e-9), 5.0 * uAMin, 0.3);
+  float rho = alpha * sl;
+  vec4 X = cos(rho) * uC + sin(rho) * vec4(position.x * e1 + position.y * e2, 0.0);
+  vQ = position.xy;
+  vec4 clip = uProj * vec4(uImage > 0.5 ? -X.xyz : X.xyz, 1.0);
+  clip.z = 0.0;
+  gl_Position = clip;
+}`;
+const spotFrag = `
+precision highp float;
+uniform vec4 uC; uniform float uR, uFog, uBias, uImage;
+in vec2 vQ; out vec4 outColor;
+void main() {
+  float d = atan(length(uC.xyz), uC.w);
+  if (uImage > 0.5) d = 6.28318530718 - d;
+  d = max(d - uBias, 0.0);
+  gl_FragDepth = d / 6.28318530718;
+  float r2 = dot(vQ, vQ);
+  float core = exp(-r2 * 16.0), halo = exp(-r2 * 4.0) * (1.0 - smoothstep(0.6, 1.0, sqrt(r2)));
+  float f = uFog > 0.0 ? exp(-d * uR / (1.5 * uFog)) : 1.0;
+  float a = clamp(halo * f, 0.0, 1.0);
+  outColor = vec4(vec3(1.0, 0.08, 0.04) * a + vec3(1.0, 0.75, 0.65) * core * f, a);
+}`;
+
+// ---------------------------------------------------------------------------
+// Renderer & scene
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('c');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+} catch (e) {
+  const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = 'WebGL2 is required for this demo: ' + e.message; throw e;
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const SKY = new THREE.Color(0.55, 0.76, 0.95);
+renderer.setClearColor(SKY);
+const scene = new THREE.Scene();
+const dummyCam = new THREE.Camera();
+
+// uniforms shared by the world and laser materials
+const shared = { uView: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() }, uR: { value: 16 }, uFog: { value: 40 }, uAMin: { value: 0.002 } };
+const mats = [0, 1].map(img => new THREE.RawShaderMaterial({
+  uniforms: { uView: shared.uView, uProj: shared.uProj, uR: shared.uR, uFog: shared.uFog, uImage: { value: img }, uSky: { value: new THREE.Vector3(SKY.r, SKY.g, SKY.b) } },
+  vertexShader: vert, fragmentShader: frag, glslVersion: THREE.GLSL3, side: THREE.DoubleSide
+}));
+
+let meshes = [];
+function rebuild() {
+  for (const m of meshes) { scene.remove(m); m.geometry.dispose(); }
+  meshes = [];
+  const geo = buildWorld(state.R);
+  for (const [name, g] of [['ground', geo.ground], ['world', geo.world]]) {
+    for (const img of [0, 1]) {
+      const m = new THREE.Mesh(img ? g.clone() : g, mats[img]);
+      m.frustumCulled = false; m.userData = { name, img };
+      scene.add(m); meshes.push(m);
+    }
+  }
+  state.pins = [];
+  applyVisibility();
+}
+function applyVisibility() {
+  for (const m of meshes) m.visible = (m.userData.name !== 'ground' || state.ground) && (m.userData.img === 0 || state.second);
+}
+
+function perspective(fovDeg, aspect) {
+  const f = 1 / Math.tan(fovDeg * Math.PI / 360), m = new Float32Array(16);
+  m[0] = f / aspect; m[5] = f; m[11] = -1;                   // clip.w = -z ; z row unused
+  return m;
+}
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  const P = perspective(75, window.innerWidth / window.innerHeight);
+  shared.uProj.value.fromArray(P);
+  shared.uAMin.value = 1.2 * 2 / P[5] / Math.max(1, window.innerHeight);   // beam core never thinner than ~1 CSS pixel
+}
+window.addEventListener('resize', resize);
+
+// Beam meshes: each beam has its own ribbon geometry (filled from its traced points, shared by its two
+// images) and a quad for the spot where it hits. All ribbons share one index buffer.
+const RIB_IDX = (() => {
+  const n = LASER.maxPts, idx = new Uint32Array((n - 1) * 6);
+  for (let i = 0; i < n - 1; i++) { const a = 2 * i; idx.set([a, a + 1, a + 3, a, a + 3, a + 2], i * 6); }
+  return new THREE.BufferAttribute(idx, 1);
+})();
+const spotGeo = (() => {
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3)); g.setIndex([0, 1, 2, 0, 2, 3]); return g;
+})();
+const glow = { glslVersion: THREE.GLSL3, transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide,
+  blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendEquation: THREE.AddEquation };
+const beamViews = [];
+function makeBeamView() {
+  const base = { uView: shared.uView, uProj: shared.uProj, uR: shared.uR, uFog: shared.uFog, uAMin: shared.uAMin };
+  const bu = { uBeamR: { value: 0.001 }, uAMax: { value: 0.008 }, uFade: { value: 150 } };
+  const su = { uC: { value: new THREE.Vector4() }, uSpotR: { value: 0.01 }, uBias: { value: 0.01 } };
+  const n = LASER.maxPts * 2, g = new THREE.BufferGeometry();
+  const attrs = { position: new THREE.BufferAttribute(new Float32Array(n * 3), 3), aP: new THREE.BufferAttribute(new Float32Array(n * 4), 4), aT: new THREE.BufferAttribute(new Float32Array(n * 4), 4) };
+  for (const [k, a] of Object.entries(attrs)) { a.setUsage(THREE.DynamicDrawUsage); g.setAttribute(k, a); }
+  g.setIndex(RIB_IDX);
+  const parts = [];
+  for (const img of [0, 1]) {
+    const bm = new THREE.RawShaderMaterial({ ...glow, vertexShader: beamVert, fragmentShader: beamFrag, uniforms: { ...base, ...bu, uImage: { value: img } } });
+    const sm = new THREE.RawShaderMaterial({ ...glow, vertexShader: spotVert, fragmentShader: spotFrag, uniforms: { ...base, ...su, uImage: { value: img } } });
+    const ribbon = new THREE.Mesh(g, bm), spot = new THREE.Mesh(spotGeo, sm);
+    for (const m of [ribbon, spot]) { m.frustumCulled = false; m.renderOrder = 2; scene.add(m); }
+    parts.push({ ribbon, spot, img });
+  }
+  return { parts, bu, su, g, attrs, res: null };
+}
+function fillRibbon(bv, res) {
+  if (bv.res === res) return;
+  bv.res = res;
+  const pts = res.pts, n = pts.length, { position, aP, aT } = bv.attrs;
+  for (let i = 0; i < n; i++) {
+    const [x, t, s] = pts[i];
+    for (let k = 0; k < 2; k++) {
+      const v = 2 * i + k;
+      position.array[v * 3] = s; position.array[v * 3 + 1] = k ? 1 : -1; position.array[v * 3 + 2] = 0;
+      aP.array.set(x, v * 4); aT.array.set(t, v * 4);
+    }
+  }
+  for (const a of [position, aP, aT]) { a.clearUpdateRanges(); a.addUpdateRange(0, 2 * n * a.itemSize); a.needsUpdate = true; }
+  bv.g.setDrawRange(0, Math.max(0, n - 1) * 6);
+}
+function showBeams(list, Vm) {
+  while (beamViews.length < list.length) beamViews.push(makeBeamView());
+  const R = state.R;
+  beamViews.forEach((bv, i) => {
+    const res = list[i];
+    for (const p of bv.parts) { const imgOk = p.img === 0 || state.second; p.ribbon.visible = !!res && res.pts.length > 1 && imgOk; p.spot.visible = !!(res && res.hit) && imgOk; }
+    if (!res) return;
+    fillRibbon(bv, res);
+    bv.bu.uBeamR.value = LASER.beamR / R; bv.bu.uFade.value = LASER.fade * TAU * R;
+    if (res.hit) { bv.su.uC.value.fromArray(apply(Vm, res.spot)); bv.su.uSpotR.value = LASER.spotR / R; bv.su.uBias.value = 0.3 / R; }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Player. B is the body frame: an isometry fixing e_y, so it stands on the ground; h is your eye height.
+// Walking = rotating R⁴ in a (direction, w) plane of the body frame. Gravity pulls you straight down
+// toward the ground under you at Earth strength; the ground (even when hidden), blocks and walls hold you
+// up and stop you walking through them. Fly mode turns gravity off for you.
+// ---------------------------------------------------------------------------
+const state = { R: 16, h: 1.7, vh: 0, onGround: false, fly: false, lg: 1, pitch: 0, B: id4(), B0: null, fog: true, ground: true, second: true, auto: false, laser: true, pins: [] };
+function syncFly() { const el = document.getElementById('tFly'); if (el) el.checked = state.fly; }
+function setFly(on) { state.fly = on; state.vh = 0; syncFly(); }
+function spawn() {
+  // stand on top of the red corner tower, facing along the corner's bisector into the triangle
+  state.B = renorm(rot(X, Z, Math.PI / 4)); state.B0 = state.B; state.h = 10.6; state.vh = 0; state.pitch = -0.32; setFly(false);
+}
+spawn();
+function camFrame(pitch = state.pitch) { return mul(mul(state.B, rot(W, Y, state.h / state.R)), rot(Z, Y, -pitch)); }
+// The gun sits GUN blocks from your eye; the beam leaves it parallel to your view direction
+// (the view direction parallel-transported from the eye to the gun).
+function gunPose(pitch = state.pitch) {
+  const C = camFrame(pitch), R = state.R;
+  const g = [GUN.right, GUN.up, -GUN.fwd], gl = Math.hypot(...g), r = gl / R, gh = g.map(x => x / gl);
+  const sn = Math.sin(r), cs = Math.cos(r), fpar = -gh[2];
+  const G = [gh[0] * sn, gh[1] * sn, gh[2] * sn, cs];
+  const Vl = [fpar * (cs - 1) * gh[0], fpar * (cs - 1) * gh[1], -1 + fpar * (cs - 1) * gh[2], -fpar * sn];
+  return { P: apply(C, G), V: apply(C, Vl) };
+}
+function pinLaser(pitch) {
+  state.pins.push({ ...gunPose(pitch), res: null });
+  while (state.pins.length > LASER.maxPins) state.pins.shift();
+}
+function laserFan() {                         // emitters from 40° up to 20° down, then step aside to watch the arcs
+  for (let i = 0; i < 7; i++) pinLaser((40 - 10 * i) * Math.PI / 180);
+  state.B = renorm(mul(mul(state.B, rot(W, X, 12 / state.R)), rot(X, Z, -Math.PI / 2 + 0.25)));
+  if (state.h > 3) setFly(true);              // up high (e.g. on the spawn tower): hover there instead of dropping
+  state.pitch = 0.1;
+}
+function setLaser(on) { state.laser = on; $('bLaser').textContent = 'Laser: ' + (on ? 'on' : 'off'); $('bLaser').classList.toggle('laseron', on); }
+function setLaserGravity(v) {
+  state.lg = v; $('lgval').textContent = v;
+  for (const p of state.pins) p.res = null;
+  $('lgnote').textContent = v > 0
+    ? `A level beam starts curving down along a circle of radius ${(1 / laserK()).toFixed(0)} blocks (as if fired at ${(LASER_SPEED / Math.sqrt(v)).toFixed(0)} blocks/s). Without gravity a level shot lands πR/2 = ${(Math.PI * state.R / 2).toFixed(1)} blocks away; with it, sooner.`
+    : `The laser ignores gravity: a level shot lands πR/2 = ${(Math.PI * state.R / 2).toFixed(1)} blocks away.`;
+}
+
+// ---- your body: a 0.5-wide column from your feet to just above your head
+const PROBES = [[0, 0.02, 0], [0.25, 0.3, 0], [-0.25, 0.3, 0], [0, 0.3, 0.25], [0, 0.3, -0.25], [0, 0.8, 0], [0, EYE + 0.15, 0]];   // relative to your feet
+function bodySolid(B, h, near) {
+  const R = state.R;
+  for (const [dx, dy, dz] of PROBES) {
+    const y = h - EYE + dy;
+    if (y < 0) return true;                                // the ground (it holds you up even when hidden)
+    const x = apply(mul(B, rot(W, Y, y / R)), snorm([dx / R, 0, dz / R, 1]));
+    if (wallAt(x)) return true;
+    for (const st of near) if (voxAt(apply(st.inv, x), st)) return true;
+  }
+  return false;
+}
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  if (!e.repeat) {
+    if (e.code === 'KeyF') toggleAuto();
+    if (e.code === 'KeyL') setLaser(!state.laser);
+    if (e.code === 'KeyR') pinLaser();
+    if (e.code === 'KeyV') laserFan();
+    if (e.code === 'KeyZ') state.pins = [];
+    if (e.code === 'KeyH') setFly(!state.fly);
+  }
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+const SENS = 0.0025;
+let dragging = false;
+function look(dx, dy) {
+  state.B = mul(state.B, rot(X, Z, dx * SENS));
+  state.pitch = Math.max(-1.55, Math.min(1.55, state.pitch - dy * SENS));
+}
+canvas.addEventListener('pointerdown', e => {
+  if (document.pointerLockElement === canvas) { if (e.button === 0) pinLaser(); return; }   // captured: click leaves an emitter
+  dragging = true;
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === 'mouse') {
+    try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+  }
+});
+canvas.addEventListener('pointerup', () => { dragging = false; });
+canvas.addEventListener('pointermove', e => {
+  if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0);
+});
+
+// UI
+const $ = id => document.getElementById(id);
+$('rslider').addEventListener('input', e => {
+  state.R = +e.target.value; $('rval').textContent = state.R;
+  rebuild(); setLaserGravity(state.lg);
+});
+$('tGround').addEventListener('change', e => { state.ground = e.target.checked; applyVisibility(); for (const p of state.pins) p.res = null; });
+$('tFog').addEventListener('change', e => { state.fog = e.target.checked; });
+$('tSecond').addEventListener('change', e => { state.second = e.target.checked; applyVisibility(); });
+$('bSpawn').addEventListener('click', () => spawn());
+$('bHouse').addEventListener('click', () => {
+  // house frame's local +z points at the door; turn around to face it, then step back 1.5 blocks
+  state.B = renorm(mul(mul(frameAt(HOUSE_CENTER, SPAWN_CORNER), rot(X, Z, Math.PI)), rot(W, Z, 1.5 / state.R)));
+  state.h = 2.7; state.pitch = 0; setFly(false);
+});
+$('bPole').addEventListener('click', () => { state.h = 0.9 * Math.PI * state.R / 2; state.pitch = -0.6; setFly(true); });
+function toggleAuto() { state.auto = !state.auto; $('bAuto').textContent = 'Auto-walk: ' + (state.auto ? 'on' : 'off'); $('bAuto').classList.toggle('on', state.auto); }
+$('bAuto').addEventListener('click', toggleAuto);
+$('bLaser').addEventListener('click', () => setLaser(!state.laser));
+$('bPin').addEventListener('click', () => pinLaser());
+$('bFan').addEventListener('click', laserFan);
+$('bUnpin').addEventListener('click', () => { state.pins = []; });
+$('lg').addEventListener('input', e => setLaserGravity(+e.target.value));
+$('tFly').addEventListener('change', e => setFly(e.target.checked));
+$('tipsToggle').addEventListener('click', () => {
+  const b = $('tipsBody'), hidden = b.style.display === 'none';
+  b.style.display = hidden ? '' : 'none'; $('tipsToggle').textContent = hidden ? 'hide' : 'show';
+});
+
+function step(dt) {
+  let f = 0, s = 0, turn = 0;
+  if (keys.KeyW) f += 1; if (keys.KeyS) f -= 1; if (keys.KeyD) s += 1; if (keys.KeyA) s -= 1;
+  if (keys.ArrowUp) f += 1; if (keys.ArrowDown) f -= 1; if (keys.ArrowLeft) turn -= 1; if (keys.ArrowRight) turn += 1;
+  if (state.auto && f === 0 && s === 0) f = 1;
+  const R = state.R, speed = (keys.ShiftLeft || keys.ShiftRight) ? 16 : 6, len = Math.hypot(f, s), hMax = 0.97 * Math.PI * R / 2;
+  if (turn) state.B = renorm(mul(state.B, rot(X, Z, turn * 2.0 * dt)));
+  let Bn = state.B;
+  if (len > 0) { const d = speed * dt / R; Bn = renorm(mul(mul(state.B, rot(W, Z, -(f / len) * d)), rot(W, X, (s / len) * d))); }
+  if (state.fly) {                            // the original free flight
+    state.B = Bn;
+    if (keys.KeyE || keys.Space) state.h += 5 * dt; if (keys.KeyQ) state.h -= 5 * dt;
+    state.h = Math.max(0.6, Math.min(hMax, state.h));
+    return;
+  }
+  const near = nearStructs(col(state.B, 3), 4);
+  for (let k = 0; k < 160 && bodySolid(state.B, state.h, near); k++) { state.h += 0.25; state.vh = 0; }   // stuck inside something: pop up
+  if (Bn !== state.B) {
+    if (!bodySolid(Bn, state.h, near)) state.B = Bn;
+    else if (state.onGround && !bodySolid(Bn, state.h + 1.05, near)) { state.B = Bn; state.h += 1.05; }   // climb single-block steps
+  }
+  // fall; Space/E jumps from the ground and works as a jetpack (net upward pull of 1 g) in the air
+  const jet = keys.Space || keys.KeyE;
+  if (jet && state.onGround) state.vh = 5.5;
+  state.vh = Math.max(-40, Math.min(8, state.vh + ((jet ? 2 * GRAVITY : 0) - GRAVITY) * dt));
+  const h0 = state.h, dh = state.vh * dt;
+  state.h = Math.min(hMax, h0 + dh); state.onGround = false;
+  if (bodySolid(state.B, state.h, near)) {    // landed (or bumped your head): stop at the contact point
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 8; i++) { const m = (lo + hi) / 2; if (bodySolid(state.B, h0 + dh * m, near)) hi = m; else lo = m; }
+    state.h = h0 + dh * lo; state.onGround = dh < 0; state.vh = 0;
+  }
+}
+
+let last = performance.now(), hudT = 0, frames = 0, fpsT0 = performance.now(), liveRes = null;
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, now - last) / 1000); last = now;
+  step(dt);
+  const C = camFrame(), Vm = transpose(C);
+  shared.uView.value.fromArray(Float32Array.from(Vm));
+  shared.uR.value = state.R;
+  shared.uFog.value = state.fog ? 2.5 * state.R : 0;
+  for (const p of state.pins) if (!p.res) p.res = traceLaser(p.P, p.V);
+  liveRes = null;
+  if (state.laser) { const g = gunPose(); liveRes = traceLaser(g.P, g.V); }
+  showBeams([liveRes, ...state.pins.map(p => p.res)].filter(Boolean), Vm);
+  renderer.render(scene, dummyCam);
+  frames++;
+  hudT += dt;
+  if (hudT > 0.1) {
+    hudT = 0;
+    const d = Math.acos(Math.max(-1, Math.min(1, dot(col(state.B, 3), col(state.B0, 3))))) * state.R;
+    $('sDist').textContent = d.toFixed(1);
+    $('sCirc').textContent = (TAU * state.R).toFixed(1);
+    $('sH').textContent = state.h.toFixed(1);
+    $('sPole').textContent = (Math.PI * state.R / 2).toFixed(1);
+    $('sLaser').textContent = laserText(liveRes); $('sE').textContent = state.pins.length;
+    if (now - fpsT0 > 500) { $('sFps').textContent = (frames * 1000 / (now - fpsT0)).toFixed(0); frames = 0; fpsT0 = now; }
+  }
+  requestAnimationFrame(frame);
+}
+resize();
+rebuild();
+setLaserGravity(state.lg);
+requestAnimationFrame(frame);
+window.__demo = { state, spawn, rebuild, applyVisibility, look, keys, traceLaser, gunPose, pinLaser, laserFan, camFrame, frame, renderer, scene, dummyCam, geoS, apply, dot, rot, mul, renorm, setLaserGravity, setFly, bodySolid, nearStructs, col };
+</script>
+</body>
+</html>
