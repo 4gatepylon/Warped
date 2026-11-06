@@ -11,10 +11,28 @@ an ID.
 
 ## Routes
 
+There are two resources, `/game-servers` and `/game-servers/{game_server_id}/players`. The path
+parameters `game_server_id` and `player_id` are UUIDs that the management server assigns.
+
 ### `POST /game-servers`
 
 Called by clients. Starts a game server with a configuration (empty for now) and a maximum number
 of players, and returns its ID and the address clients connect to.
+
+### `GET /game-servers`
+
+Called by clients. Lists game servers, oldest first, so a player can find one to join. It never
+reveals player IDs, since a player ID is what lets a client in.
+
+Query parameters, all optional:
+
+- `has_open_place`: if `true`, lists only game servers that aren't full.
+- `limit`: lists at most this many game servers (default 50, at most 100).
+- `after`: a game server ID from the previous page; lists only game servers created after it.
+
+### `GET /game-servers/{game_server_id}`
+
+Called by clients. Returns one game server, or fails with "not found".
 
 ### `DELETE /game-servers/{game_server_id}`
 
