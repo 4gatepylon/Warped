@@ -1,14 +1,6 @@
 # Clients
 
-Each subfolder is the game client for one platform, in that platform's own languages and
-graphics API. macOS (`mac/`) is the first platform supported.
-
-What goes in each client:
-
-- Rendering the curved space and reading the player's input.
-- Finding, creating and joining rooms through the management server.
-- The real-time connection to the room's game server (`common/protocol/`).
-- Whatever parts of `common/physics/` the client needs, implemented in its own language: for
-  example, to show the player's own movement before the game server confirms it.
-
-A client knows only what the game server sends it, so it never holds the room's full state.
+One folder per platform, each in its own languages; macOS (`mac/`) first. A client renders, reads
+input, joins rooms through the management server and plays through a game server. It may implement
+parts of `common/physics/` (e.g. to predict the player's own movement), but knows only what the
+game server sends it.
