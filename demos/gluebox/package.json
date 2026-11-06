@@ -1,0 +1,10 @@
+{
+  "name": "gluebox",
+  "private": true,
+  "type": "module",
+  "description": "Glue the faces of a cube together and fly around inside the 3D space you made.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "serve": "python3 -m http.server 8123"
+  }
+}
