@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hyperbolic Space + Laser — H³ demo</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc8f0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(15, 20, 30, 0.72); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 280px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; text-align: right; max-width: 360px; }
+  #tips { bottom: 10px; right: 10px; width: 340px; max-height: calc(100vh - 160px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #4f7a3a; border-color: #7bb35d; }
+  button.laseron { background: #7a2c2c; border-color: #c35a5a; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .laser { color: #ffb4a8; }
+  #sLaser { color: #ff9a8a; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 2px 0; }
+  #tipsToggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+
+<div id="controls" class="panel">
+  <h1>Hyperbolic space (H³) + laser</h1>
+  <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint · <kbd>E</kbd>/<kbd>Q</kbd> fly up/down · <kbd>F</kbd> auto-walk</div>
+  <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
+    <kbd>Click</kbd> (mouse captured) or <kbd>R</kbd>: leave an emitter here that keeps firing<br>
+    <kbd>V</kbd> fire a fan of emitters (level to steeply down) and step aside to watch<br>
+    <kbd>Z</kbd> remove all emitters</div>
+  <div class="row">
+    <label>Curvature radius R = <b id="rval">8</b> blocks</label>
+    <input id="rslider" type="range" min="5" max="12" step="1" value="8">
+    <div class="muted">Smaller R = stronger curvature (applied on release; removes emitters).</div>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="tFog" checked> Fog (distance haze)</label>
+  </div>
+  <div class="row">
+    <button id="bLaser" class="laseron">Laser: on</button>
+    <button id="bPin">Leave emitter</button>
+    <button id="bFan">Laser fan</button>
+    <button id="bUnpin">Remove emitters</button>
+  </div>
+  <div class="row">
+    <button id="bSpawn">Spawn</button>
+    <button id="bRails">Above the rails</button>
+    <button id="bHouse">Inside house</button>
+    <button id="bHigh">Fly way up</button>
+    <button id="bAuto">Auto-walk: off</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Distance from start: <b id="sDist">0.0</b> blocks · eye height <span id="sH">1.7</span></div>
+  <div class="muted">A circle of radius <span id="sR1">0</span> around the start has</div>
+  <div class="muted">circumference <b id="sC1">0</b> blocks (flat space: <span id="sC0">0</span>)</div>
+  <div>Laser: <span id="sLaser">–</span></div>
+  <div class="muted">emitters: <span id="sE">0</span> · <span id="sFps">–</span> fps</div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tipsToggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tipsBody">
+  <ol>
+    <li><b>The laser</b> goes perfectly straight (along a geodesic), so from behind it always looks straight. <b>Aim level</b> and it never comes down: the ground falls away from a straight line faster than the line can drop. You have to aim down by more than a few degrees to hit the ground at all (the stats show where it lands). Press <b>Laser fan</b> (<kbd>V</kbd>) to see a whole range of angles from the side.</li>
+    <li><b>The rails.</b> The coloured walls all start at right angles to the same straight cobblestone wall, 3 blocks apart. In flat space they'd be parallel forever. Here every wall is perfectly straight and they still fan apart, exponentially. Press <b>Above the rails</b>. Leave emitters on two neighbouring rails, pointing along them: the beams spread apart too.</li>
+    <li><b>Square tiles, but five at a corner.</b> The stone roads outline identical square tiles. Each one has 72° corners, so <i>five</i> meet at every crossing instead of four.</li>
+    <li><b>Room grows exponentially.</b> Watch the circumference readout as you walk away from the start. Distant things shrink exponentially, and there's far more "world" at each distance than in flat space.</li>
+    <li><b>Fly way up</b> (<kbd>E</kbd>). The ground is an infinite plane, yet from high up it shrinks to a small disk below you, and the horizon sinks far below eye level.</li>
+    <li><b>Slide R</b> to 12 for a gentler curvature.</li>
+  </ol>
+  <div class="muted" style="margin-top:6px">Laser choices: a beam that hits nothing fades out slowly (it never comes back in hyperbolic space) and is drawn out to 10R, by which point it has shrunk to a point on the horizon.</div>
+  </div>
+</div>
+<div id="err"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+// ---------------------------------------------------------------------------
+// Hyperboloid model: H³ = { x ∈ R^{3,1} : <x,x> = -1, w > 0 } with <a,b> = ax bx + ay by + az bz - aw bw.
+// Isometries are Lorentz transformations SO+(3,1); "moving" = boosting.
+// 4x4 matrices are column-major (m[c*4 + r]); coordinates are (x, y, z, w).
+// ---------------------------------------------------------------------------
+const X = 0, Y = 1, Z = 2, W = 3, TAU = Math.PI * 2;
+const id4 = () => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; };
+function mul(a, b) {
+  const o = new Float64Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; }
+  return o;
+}
+function apply(m, v) { const o = [0, 0, 0, 0]; for (let r = 0; r < 4; r++) o[r] = m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2] + m[12 + r] * v[3]; return o; }
+function rot(i, j, a) { const m = id4(), c = Math.cos(a), s = Math.sin(a); m[i * 4 + i] = c; m[i * 4 + j] = s; m[j * 4 + i] = -s; m[j * 4 + j] = c; return m; }
+// boost along spatial axis i: e_w -> cosh a e_w + sinh a e_i
+function boost(i, a) { const m = id4(), c = Math.cosh(a), s = Math.sinh(a); m[W * 4 + W] = c; m[W * 4 + i] = s; m[i * 4 + W] = s; m[i * 4 + i] = c; return m; }
+// inverse of a Lorentz matrix: J Cᵀ J
+function lorentzInv(C) { const o = new Float64Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { const sg = ((r === W) !== (c === W)) ? -1 : 1; o[c * 4 + r] = sg * C[r * 4 + c]; } return o; }
+const col = (m, c) => [m[c * 4], m[c * 4 + 1], m[c * 4 + 2], m[c * 4 + 3]];
+function fromCols(a, b, c, d) { const m = new Float64Array(16); [a, b, c, d].forEach((v, ci) => { for (let r = 0; r < 4; r++) m[ci * 4 + r] = v[r]; }); return m; }
+const mdot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] - a[3] * b[3];
+const scale = (a, s) => a.map(x => x * s);
+const add = (a, b) => a.map((x, i) => x + b[i]);
+const lin = (a, s, b, t) => a.map((x, i) => s * x + t * b[i]);
+const mnorm = a => { const n = Math.sqrt(Math.abs(mdot(a, a))); return a.map(x => x / n); };
+// Minkowski "cross product" inside the (x, z, w) slice (the ground plane y = 0)
+function crossM(a, b) {
+  const ax = a[X], az = a[Z], aw = a[W], bx = b[X], bz = b[Z], bw = b[W];
+  return [az * bw - aw * bz, 0, aw * bx - ax * bw, -(ax * bz - az * bx)];
+}
+function det4(m) {
+  const a = (r, c) => m[c * 4 + r]; let det = 0;
+  for (let c = 0; c < 4; c++) {
+    const s = []; for (let r = 1; r < 4; r++) for (let cc = 0; cc < 4; cc++) if (cc !== c) s.push(a(r, cc));
+    det += (c % 2 ? -1 : 1) * a(0, c) * (s[0] * (s[4] * s[8] - s[5] * s[7]) - s[1] * (s[3] * s[8] - s[5] * s[6]) + s[2] * (s[3] * s[7] - s[4] * s[6]));
+  }
+  return det;
+}
+const EY = [0, 1, 0, 0], EW = [0, 0, 0, 1];
+const hdist = (a, b) => Math.acosh(Math.max(1, -mdot(a, b)));
+
+// An isometry that fixes e_y (so it maps the ground plane y=0 to itself), sends e_w to g and
+// local +z toward `toward`.
+function frameAt(g, toward) {
+  g = mnorm(g);
+  const t = mnorm(add(toward, scale(g, mdot(toward, g))));
+  const r = mnorm(crossM(t, g));
+  let M = fromCols(r, EY, t, g);
+  if (det4(M) < 0) M = fromCols(scale(r, -1), EY, t, g);
+  return M;
+}
+function renorm(B) {
+  let g = col(B, 3); g[Y] = 0; g = mnorm(g); if (g[W] < 0) g = scale(g, -1);
+  let t = col(B, 2); t[Y] = 0; t = mnorm(add(t, scale(g, mdot(t, g))));
+  let r = mnorm(crossM(t, g));
+  const old = col(B, 0);
+  if (r[0] * old[0] + r[2] * old[2] + r[3] * old[3] < 0) r = scale(r, -1);
+  return fromCols(r, EY, t, g);
+}
+
+// ---------------------------------------------------------------------------
+// Geometry. Besides the meshes, buildWorld records what the laser can hit: voxel structures
+// (with their placement and cells), walls, and the ground tiles.
+// ---------------------------------------------------------------------------
+let structs = [], walls = [], tiles = [];
+const vkey = (i, j, k) => ((i + 512) * 1024 + (j + 512)) * 1024 + (k + 512);
+class Builder {
+  constructor() { this.pos = []; this.col = []; this.uv = []; this.seed = []; this.idx = []; }
+  quad(p0, p1, p2, p3, c, seed) {
+    const base = this.pos.length / 4;
+    for (const p of [p0, p1, p2, p3]) this.pos.push(p[0], p[1], p[2], p[3]);
+    this.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let k = 0; k < 4; k++) { this.col.push(c[0], c[1], c[2]); this.seed.push(seed); }
+    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  geometry() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 4));
+    g.setAttribute('col', new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    g.setAttribute('seed', new THREE.Float32BufferAttribute(this.seed, 1));
+    g.setIndex(this.idx);
+    return g;
+  }
+}
+const COLORS = {
+  planks: [0.74, 0.57, 0.34], log: [0.42, 0.31, 0.19], cobble: [0.55, 0.55, 0.55], glass: [0.70, 0.87, 0.96],
+  roof: [0.64, 0.25, 0.20], brick: [0.58, 0.30, 0.25], leaves: [0.24, 0.52, 0.20],
+  red: [0.80, 0.20, 0.18], blue: [0.20, 0.35, 0.80], yellow: [0.92, 0.80, 0.20], purple: [0.55, 0.25, 0.70],
+  orange: [0.92, 0.50, 0.15], white: [0.92, 0.92, 0.92], lime: [0.45, 0.80, 0.20], cyan: [0.20, 0.70, 0.75], gold: [0.95, 0.78, 0.25]
+};
+const SHADE = { px: 0.82, nx: 0.82, py: 1.0, ny: 0.55, pz: 0.68, nz: 0.68 };
+
+// Local structures are built in block coordinates and mapped into H³ with the exponential map
+// at their base (distances from the base point are preserved), then moved by an isometry M.
+function expMap(p, R) {
+  const r = Math.hypot(p[0], p[1], p[2]) / R;
+  if (r < 1e-9) return [0, 0, 0, 1];
+  const s = Math.sinh(r) / (r * R);
+  return [p[0] * s, p[1] * s, p[2] * s, Math.cosh(r)];
+}
+function addVoxels(b, vox, M, R, off, name) {
+  const dirs = [[1, 0, 0, 'px'], [-1, 0, 0, 'nx'], [0, 1, 0, 'py'], [0, -1, 0, 'ny'], [0, 0, 1, 'pz'], [0, 0, -1, 'nz']];
+  const toH = p => apply(M, expMap([p[0] - off[0], p[1] - off[1], p[2] - off[2]], R));
+  const cells = new Map(); let maxD = 0;
+  for (const [key, type] of vox) {
+    const [i, j, k] = key.split(',').map(Number);
+    cells.set(vkey(i, j, k), type);
+    for (let c = 0; c < 8; c++) maxD = Math.max(maxD, Math.hypot(i + (c & 1) - off[0], j + (c >> 1 & 1) - off[1], k + (c >> 2 & 1) - off[2]));
+    for (const [dx, dy, dz, name] of dirs) {
+      if (vox.has(`${i + dx},${j + dy},${k + dz}`)) continue;
+      if (dy < 0 && j === 0) continue;
+      const a = dx ? 0 : dy ? 1 : 2, s = dx + dy + dz, u = (a + 1) % 3, v = (a + 2) % 3;
+      const cs = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([cu, cv]) => { const p = [i, j, k]; if (s > 0) p[a] += 1; p[u] += cu; p[v] += cv; return toH(p); });
+      b.quad(cs[0], cs[1], cs[2], cs[3], COLORS[type].map(x => x * SHADE[name]), ((i * 73.1 + j * 19.7 + k * 41.3 + a * 7.9) % 97 + 97) % 97);
+    }
+  }
+  // for the laser: base point, bounding radius (curvature units), and the inverse placement
+  structs.push({ name, inv: lorentzInv(M), off, cells, c: apply(M, EW), rad: (maxD + 0.2) / R });
+}
+function houseVoxels() {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t), del = (x, y, z) => v.delete(`${x},${y},${z}`);
+  for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) set(x, 0, z, (Math.abs(x) === 4 || Math.abs(z) === 3) ? 'cobble' : 'planks');
+  for (let y = 1; y <= 4; y++) for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) {
+    const ex = Math.abs(x) === 4, ez = Math.abs(z) === 3; if (ex || ez) set(x, y, z, ex && ez ? 'log' : 'planks');
+  }
+  del(0, 1, 3); del(0, 2, 3);
+  for (const y of [2, 3]) { for (const x of [-2, 2]) { set(x, y, 3, 'glass'); set(x, y, -3, 'glass'); } set(4, y, 0, 'glass'); set(-4, y, 0, 'glass'); }
+  for (let k = 0; k <= 4; k++) {
+    const y = 5 + k, zr = 4 - k;
+    for (let x = -5; x <= 5; x++) { set(x, y, zr, 'roof'); set(x, y, -zr, 'roof'); if (zr >= 1) { set(x, y, zr - 1, 'roof'); set(x, y, -(zr - 1), 'roof'); } }
+    for (const x of [-4, 4]) for (let z = -(zr - 2); z <= zr - 2; z++) set(x, y, z, 'planks');
+  }
+  for (let y = 6; y <= 10; y++) set(2, y, -1, 'brick');
+  return v;
+}
+function treeVoxels(rng) {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t);
+  const hgt = 4 + Math.floor(rng() * 2);
+  for (let y = hgt - 1; y <= hgt; y++) for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) { if (Math.abs(x) === 2 && Math.abs(z) === 2 && rng() < 0.7) continue; set(x, y, z, 'leaves'); }
+  for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) set(x, hgt + 1, z, 'leaves');
+  for (const [x, z] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) set(x, hgt + 2, z, 'leaves');
+  for (let y = 0; y < hgt; y++) set(0, y, 0, 'log');
+  return v;
+}
+
+// Ground: the {4,5} tiling of the hyperbolic plane y=0 (regular squares, five around each vertex),
+// generated by repeatedly reflecting a central square across its edges. Each square is subdivided
+// in Klein (projective) coordinates so all grid lines are geodesics.
+function makeTiles(rMax) {
+  const rho = Math.acosh(1 / Math.tan(Math.PI / 4) / Math.tan(Math.PI / 5));    // circumradius
+  const d = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([a, c]) => [a / Math.SQRT2, 0, c / Math.SQRT2, 0]);
+  const first = { c: EW.slice(), v: d.map(dd => lin(EW, Math.cosh(rho), dd, Math.sinh(rho))) };
+  const key = t => `${Math.round(t.c[X] * 1e3)},${Math.round(t.c[Z] * 1e3)}`;
+  const tiles = [first], seen = new Set([key(first)]);
+  for (let qi = 0; qi < tiles.length; qi++) {
+    const t = tiles[qi];
+    for (let e = 0; e < 4; e++) {
+      const a = t.v[e], b = t.v[(e + 1) % 4];
+      const n = mnorm(crossM(a, b));
+      const refl = x => { const k = 2 * mdot(x, n); return mnorm(x.map((xi, i) => xi - k * n[i])); };
+      const nt = { c: refl(t.c), v: t.v.map(refl) };
+      if (Math.acosh(Math.max(1, nt.c[W])) > rMax) continue;
+      const kk = key(nt); if (seen.has(kk)) continue;
+      seen.add(kk); tiles.push(nt);
+    }
+  }
+  return { tiles, edge: hdist(first.v[0], first.v[1]) };
+}
+function addGround(b, tiles, nSub) {
+  let cell = 0;
+  tiles.forEach((t, ti) => {
+    const K = t.v.map(p => [p[X] / p[W], p[Z] / p[W]]);
+    const Q = (s, u) => {
+      const x = (1 - s) * (1 - u) * K[0][0] + s * (1 - u) * K[1][0] + s * u * K[2][0] + (1 - s) * u * K[3][0];
+      const z = (1 - s) * (1 - u) * K[0][1] + s * (1 - u) * K[1][1] + s * u * K[2][1] + (1 - s) * u * K[3][1];
+      return [x, 0, z, 1];
+    };
+    const tint = 0.95 + 0.1 * ((Math.sin(ti * 91.7) * 43758.5) % 1 + 1) % 1;
+    for (let i = 0; i < nSub; i++) for (let j = 0; j < nSub; j++) {
+      const h = Math.sin(cell * 12.9898) * 43758.5453, r = h - Math.floor(h);
+      const border = i === 0 || j === 0 || i === nSub - 1 || j === nSub - 1;
+      let c;
+      if (border) c = [0.58, 0.58, 0.60].map(x => x * (0.93 + 0.1 * r));
+      else if (r < 0.04) c = [0.55, 0.42, 0.27];
+      else c = (((i + j) & 1) ? [0.36, 0.60, 0.25] : [0.40, 0.65, 0.28]).map(x => x * tint * (0.95 + 0.08 * r));
+      b.quad(Q(i / nSub, j / nSub), Q((i + 1) / nSub, j / nSub), Q((i + 1) / nSub, (j + 1) / nSub), Q(i / nSub, (j + 1) / nSub), c, (cell * 0.37) % 97);
+      cell++;
+    }
+  });
+}
+// A wall along the geodesic u -> cosh(u) P + sinh(u) T, u in [u0, u1] (blocks), with in-plane side normal S.
+function addWall(b, P, T, S, u0, u1, R, height, width, color, name) {
+  const n = Math.max(2, Math.round(u1 - u0));
+  const pt = (u, off, h) => {
+    const g = lin(P, Math.cosh(u / R), T, Math.sinh(u / R));
+    const s = lin(g, Math.cosh(off / R), S, Math.sinh(off / R));
+    return lin(s, Math.cosh(h / R), EY, Math.sinh(h / R));
+  };
+  const w = width / 2;
+  for (let k = 0; k < n; k++) {
+    const a = u0 + (u1 - u0) * k / n, c = u0 + (u1 - u0) * (k + 1) / n, sd = (k * 3.7) % 97;
+    b.quad(pt(a, -w, height), pt(c, -w, height), pt(c, w, height), pt(a, w, height), color, sd);
+    b.quad(pt(a, w, 0), pt(c, w, 0), pt(c, w, height), pt(a, w, height), color.map(x => x * 0.78), sd + 1);
+    b.quad(pt(a, -w, 0), pt(c, -w, 0), pt(c, -w, height), pt(a, -w, height), color.map(x => x * 0.68), sd + 2);
+    if (k === 0) b.quad(pt(a, -w, 0), pt(a, w, 0), pt(a, w, height), pt(a, -w, height), color.map(x => x * 0.85), sd + 3);
+    if (k === n - 1) b.quad(pt(c, -w, 0), pt(c, w, 0), pt(c, w, height), pt(c, -w, height), color.map(x => x * 0.85), sd + 3);
+  }
+  walls.push({ name, P, T, S, u0: u0 / R, u1: u1 / R, top: height / R, hw: width / 2 / R });
+}
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+const RAIL_START = 5, RAIL_SPACING = 3, RAIL_LEN = 60, RAIL_K = 3;
+let layout = {};
+function buildWorld(R) {
+  structs = []; walls = [];
+  const ground = new Builder(), world = new Builder();
+  const mt = makeTiles(5.2), edge = mt.edge;
+  tiles = mt.tiles;
+  const nSub = Math.max(3, Math.min(16, Math.round(edge * R)));
+  addGround(ground, tiles, nSub);
+
+  // Rails: a straight base wall crossing in front of the spawn point, and straight walls leaving it at
+  // right angles every RAIL_SPACING blocks. In flat space these would be parallel.
+  const s0 = RAIL_START / R;
+  const P0 = col(boost(Z, -s0), W);                 // point RAIL_START blocks ahead
+  const N0 = scale(col(boost(Z, -s0), Z), -1);      // unit normal pointing away from spawn
+  const EX = [1, 0, 0, 0];
+  addWall(world, P0, EX, N0, -RAIL_SPACING * RAIL_K - 6, RAIL_SPACING * RAIL_K + 6, R, 1, 1, COLORS.cobble, 'cobblestone wall');
+  const railColors = ['red', 'orange', 'yellow', 'lime', 'cyan', 'blue', 'purple'];
+  const rungs = [];
+  for (let k = -RAIL_K; k <= RAIL_K; k++) {
+    const s = k * RAIL_SPACING / R;
+    const Bk = lin(P0, Math.cosh(s), EX, Math.sinh(s));
+    const Tk = lin(P0, Math.sinh(s), EX, Math.cosh(s));      // base wall direction at Bk = rung's side normal
+    addWall(world, Bk, N0, Tk, 0.5, RAIL_LEN, R, 1, 1, COLORS[railColors[k + RAIL_K]], railColors[k + RAIL_K] + ' rail');
+    rungs.push({ Bk, Tk });
+  }
+  // House to the right of spawn, door facing spawn
+  const HC = col(boost(X, 14 / R), W);
+  addVoxels(world, houseVoxels(), frameAt(HC, EW), R, [0.5, 0, 0.5], 'house');
+
+  // Trees on tile centres, away from rails, house and spawn
+  const rng = mulberry32(99);
+  for (const t of tiles) {
+    if (rng() > 0.6) continue;
+    const off = [(rng() - 0.5) * 0.5 * edge, (rng() - 0.5) * 0.5 * edge];
+    const q = apply(mul(frameAt(t.c, t.v[0]), mul(boost(X, off[0]), boost(Z, off[1]))), EW);
+    if (hdist(q, EW) * R < 5 || hdist(q, HC) * R < 9) continue;
+    if (Math.asinh(Math.abs(mdot(q, N0))) * R < 3) continue;                         // base wall line
+    const ahead = mdot(q, N0) > 0;                                                     // beyond the base wall
+    if (ahead && rungs.some(r => Math.asinh(Math.abs(mdot(q, r.Tk))) * R < 3)) continue;
+    const ref = hdist(q, EW) > 0.05 ? EW : col(boost(X, 1), W);
+    addVoxels(world, treeVoxels(rng), mul(frameAt(q, ref), rot(X, Z, rng() * TAU)), R, [0.5, 0, 0.5], 'tree');
+  }
+  layout = { HC, P0, N0 };
+  return { ground: ground.geometry(), world: world.geometry() };
+}
+
+// ---------------------------------------------------------------------------
+// Laser. Light goes along geodesics γ(t) = cosh t · P + sinh t · V (t in curvature units, P the
+// start point, V the unit direction). The ground plane and walls are tested with formulas; the voxel
+// structures by marching through their bounding balls in small steps and refining by bisection.
+// A beam that hits nothing never returns in H³: it is traced (and drawn, fading) out to 10R.
+// ---------------------------------------------------------------------------
+const LASER = { beamR: 0.012, spotR: 0.12, step: 0.04, tMax: 10, fade: 3, maxPins: 10 };   // lengths in blocks, except tMax and fade (in R)
+const GUN = { right: 0.22, up: -0.2, fwd: 0.3 };       // where the beam leaves, relative to your eye (blocks)
+const geoH = (P, V, t) => { const c = Math.cosh(t), s = Math.sinh(t); return [c * P[0] + s * V[0], c * P[1] + s * V[1], c * P[2] + s * V[2], c * P[3] + s * V[3]]; };
+function onGround(g) {                                  // is this point of the plane y=0 inside a generated tile?
+  let best = null, bd = Infinity;
+  for (const t of tiles) { const d = -mdot(g, t.c); if (d < bd) { bd = d; best = t; } }
+  if (!best) return false;
+  for (let e = 0; e < 4; e++) { const n = crossM(best.v[e], best.v[(e + 1) % 4]); if (mdot(g, n) * mdot(best.c, n) < 0) return false; }
+  return true;
+}
+function voxAt(x, st) {                                 // x in the structure's own frame -> voxel type (log map)
+  const R = state.R, r = Math.acosh(Math.max(1, x[3])), sh = Math.hypot(x[0], x[1], x[2]), sc = sh > 1e-12 ? r * R / sh : R;
+  return st.cells.get(vkey(Math.floor(x[0] * sc + st.off[0]), Math.floor(x[1] * sc + st.off[1]), Math.floor(x[2] * sc + st.off[2])));
+}
+function wallAt(x) {
+  if (x[Y] < 0) return null;
+  const h = Math.asinh(x[Y]), ch = Math.cosh(h), g = [x[0] / ch, 0, x[2] / ch, x[3] / ch];   // foot point on the ground
+  for (const w of walls) {
+    if (h > w.top || Math.abs(Math.asinh(mdot(g, w.S))) > w.hw) continue;
+    const u = Math.atanh(mdot(g, w.T) / -mdot(g, w.P));
+    if (u >= w.u0 && u <= w.u1) return w;
+  }
+  return null;
+}
+// walk t over [a, b] until test(point) is truthy, then refine the entry point by bisection.
+// A beam that starts inside something (you can fly through blocks) first leaves it.
+function march(P, V, a, b, test, skip) {
+  const dt = LASER.step / state.R;
+  let prev = a, t = a, leaving = a === 0;
+  for (let n = 0; n < 100000; n++) {
+    let hit = test(geoH(P, V, t));
+    if (leaving) { if (hit) hit = null; else leaving = false; }
+    if (hit) {
+      let lo = prev, hi = t, hh = hit;
+      for (let k = 0; k < 10; k++) { const m = 0.5 * (lo + hi), hm = test(geoH(P, V, m)); if (hm) { hi = m; hh = hm; } else lo = m; }
+      return { t: hi, hit: hh };
+    }
+    if (t >= b) return null;
+    prev = t; t = Math.min(b, t + Math.max(dt, skip ? skip(P, V, t) : 0));
+  }
+  return null;
+}
+function traceLaser(P, V) {
+  let tEnd = LASER.tMax, hit = null, below = Infinity;
+  if (V[Y] < 0 && P[Y] < -V[Y]) {                      // the line crosses the ground plane here
+    below = Math.atanh(-P[Y] / V[Y]);
+    if (below < tEnd && onGround(geoH(P, V, below))) { tEnd = below; hit = { what: 'grass', where: 'the ground' }; }
+  }
+  const lim = Math.min(tEnd, below);                    // everything else stands on the ground
+  for (const st of structs) {
+    const a0 = -mdot(P, st.c), b0 = -mdot(V, st.c);    // cosh(distance to centre) = a0 cosh t + b0 sinh t
+    const m = Math.sqrt(Math.max(a0 * a0 - b0 * b0, 1e-12)), cr = Math.cosh(st.rad);
+    if (m > cr) continue;
+    const tc = -Math.atanh(b0 / a0), hw = Math.acosh(cr / m);
+    const a = Math.max(0, tc - hw), b = Math.min(lim, tEnd, tc + hw);
+    if (a >= b) continue;
+    const r = march(apply(st.inv, P), apply(st.inv, V), a, b, x => voxAt(x, st));
+    if (r && r.t < tEnd) { tEnd = r.t; hit = { what: r.hit, where: st.name }; }
+  }
+  const top = Math.max(...walls.map(w => w.top));
+  const wr = march(P, V, 0, Math.min(tEnd, below), wallAt, (P, V, t) => Math.asinh(geoH(P, V, t)[Y]) - top);
+  if (wr && wr.t < tEnd) { tEnd = wr.t; hit = { what: 'stone', where: wr.hit.name }; }
+  return { P, V, tEnd, hit, below };
+}
+function laserText(r) {
+  if (!r) return 'off';
+  const L = (r.tEnd * state.R).toFixed(1);
+  if (r.hit) return r.hit.where === 'the ground' ? `hits the ground after ${L} blocks` : `hits the ${r.hit.where} (${r.hit.what}) after ${L} blocks`;
+  if (r.below < LASER.tMax) return 'misses the tiled ground and flies off below the edge of the world';
+  return 'never comes down: flies off to infinity';
+}
+
+// ---------------------------------------------------------------------------
+// Shaders. Camera at e_w looking down -z. The geodesic direction to a point x is x.xyz, so a
+// standard perspective projection of x.xyz is exact. Distance d = atanh(|x.xyz| / x.w) is
+// scale-invariant, so it also works for points on flat chords (which project to geodesic faces).
+// ---------------------------------------------------------------------------
+const vert = `
+precision highp float;
+uniform mat4 uView; uniform mat4 uProj;
+in vec4 position; in vec3 col; in vec2 uv; in float seed;
+out vec4 vX; out vec3 vCol; out vec2 vUv; out float vSeed;
+void main() {
+  vec4 x = uView * position;
+  vX = x; vCol = col; vUv = uv; vSeed = seed;
+  vec4 clip = uProj * vec4(x.xyz, 1.0);
+  clip.z = 0.0;
+  gl_Position = clip;
+}`;
+const frag = `
+precision highp float;
+uniform float uR; uniform float uFog; uniform vec3 uSky;
+in vec4 vX; in vec3 vCol; in vec2 vUv; in float vSeed;
+out vec4 outColor;
+float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+void main() {
+  float q = min(length(vX.xyz) / vX.w, 0.9999999);
+  float d = 0.5 * log((1.0 + q) / (1.0 - q));     // atanh: hyperbolic distance in curvature units
+  gl_FragDepth = d / (d + 1.0);
+  vec2 cell = floor(clamp(vUv, 0.0, 0.999) * 8.0);
+  vec3 c = vCol * (0.86 + 0.22 * hash(vec3(cell, vSeed)));
+  vec2 e2 = min(vUv, 1.0 - vUv);
+  c *= mix(0.55, 1.0, smoothstep(0.0, 0.045, min(e2.x, e2.y)));
+  float f = uFog > 0.0 ? exp(-d * uR / uFog) : 1.0;
+  outColor = vec4(mix(uSky, c, f), 1.0);
+}`;
+// Laser beam: a camera-facing ribbon along the geodesic, computed in the vertex shader from the
+// camera-relative start point uP and direction uV. Its width is the real beam width, clamped to a
+// sensible range of on-screen sizes (so it never vanishes in the distance).
+const beamVert = `
+precision highp float;
+uniform mat4 uProj; uniform vec4 uP, uV; uniform float uTEnd, uBeamR, uAMin, uAMax;
+in vec3 position;                 // x: fraction along the beam, y: side (-1..1)
+out vec4 vX; out float vSide; out float vT;
+void main() {
+  float t = position.x * uTEnd;
+  float c = cosh(t), s = sinh(t);
+  vec4 A = c * uP + s * uV, T = s * uP + c * uV;     // point and tangent
+  vec3 n = cross(A.xyz, T.xyz); float nl = length(n);
+  n = nl > 1e-20 ? n / nl : vec3(0.0);             // ⟂ to the beam and to the line of sight
+  float sl = length(A.xyz);                         // sinh(distance from the eye)
+  float alpha = clamp(uBeamR / max(sl, 1e-9), uAMin, uAMax);
+  float rho = 3.0 * alpha * sl;                     // ribbon half-width, halo included
+  vec4 X = cosh(rho) * A + sinh(rho) * position.y * vec4(n, 0.0);
+  vX = X; vSide = position.y; vT = t;
+  vec4 clip = uProj * vec4(X.xyz, 1.0);
+  clip.z = 0.0;
+  gl_Position = clip;
+}`;
+const beamFrag = `
+precision highp float;
+uniform float uR, uFog, uFade;
+in vec4 vX; in float vSide; in float vT;
+out vec4 outColor;
+void main() {
+  float q = min(length(vX.xyz) / vX.w, 0.9999999);
+  float d = 0.5 * log((1.0 + q) / (1.0 - q));
+  gl_FragDepth = d / (d + 1.0);
+  float u = abs(vSide) * 3.0;
+  float core = exp(-u * u), halo = exp(-u * u / 4.8) * (1.0 - smoothstep(0.75, 1.0, abs(vSide)));
+  float f = (uFog > 0.0 ? exp(-d * uR / (1.5 * uFog)) : 1.0) * exp(-vT * uR / uFade);
+  float a = clamp(0.9 * halo * f, 0.0, 1.0);
+  outColor = vec4(vec3(1.0, 0.06, 0.03) * a + vec3(1.0, 0.62, 0.52) * core * f, a);   // premultiplied
+}`;
+// Where a beam hits something: a glowing camera-facing disc, pulled slightly toward you in depth.
+const spotVert = `
+precision highp float;
+uniform mat4 uProj; uniform vec4 uC; uniform float uSpotR, uAMin;
+in vec3 position; out vec2 vQ;
+void main() {
+  vec3 a = uC.xyz; float sl = length(a);
+  vec3 dir = sl > 1e-9 ? a / sl : vec3(0.0, 0.0, -1.0);
+  vec3 e1 = normalize(abs(dir.y) < 0.9 ? cross(dir, vec3(0.0, 1.0, 0.0)) : cross(dir, vec3(1.0, 0.0, 0.0)));
+  vec3 e2 = cross(e1, dir);
+  float alpha = clamp(uSpotR / max(sl, 1e-9), 5.0 * uAMin, 0.3);
+  float rho = alpha * sl;
+  vec4 X = cosh(rho) * uC + sinh(rho) * vec4(position.x * e1 + position.y * e2, 0.0);
+  vQ = position.xy;
+  vec4 clip = uProj * vec4(X.xyz, 1.0);
+  clip.z = 0.0;
+  gl_Position = clip;
+}`;
+const spotFrag = `
+precision highp float;
+uniform vec4 uC; uniform float uR, uFog, uBias;
+in vec2 vQ; out vec4 outColor;
+void main() {
+  float q = min(length(uC.xyz) / uC.w, 0.9999999);
+  float d = max(0.5 * log((1.0 + q) / (1.0 - q)) - uBias, 0.0);
+  gl_FragDepth = d / (d + 1.0);
+  float r2 = dot(vQ, vQ);
+  float core = exp(-r2 * 16.0), halo = exp(-r2 * 4.0) * (1.0 - smoothstep(0.6, 1.0, sqrt(r2)));
+  float f = uFog > 0.0 ? exp(-d * uR / (1.5 * uFog)) : 1.0;
+  float a = clamp(halo * f, 0.0, 1.0);
+  outColor = vec4(vec3(1.0, 0.08, 0.04) * a + vec3(1.0, 0.75, 0.65) * core * f, a);
+}`;
+
+const canvas = document.getElementById('c');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = 'WebGL2 is required: ' + e.message; throw e; }
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const SKY = new THREE.Color(0.62, 0.80, 0.95);
+renderer.setClearColor(SKY);
+const scene = new THREE.Scene(), dummyCam = new THREE.Camera();
+const mat = new THREE.RawShaderMaterial({
+  uniforms: { uView: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() }, uR: { value: 8 }, uFog: { value: 20 }, uSky: { value: new THREE.Vector3(SKY.r, SKY.g, SKY.b) } },
+  vertexShader: vert, fragmentShader: frag, glslVersion: THREE.GLSL3, side: THREE.DoubleSide
+});
+let meshes = [];
+function rebuild() {
+  for (const m of meshes) { scene.remove(m); m.geometry.dispose(); }
+  const geo = buildWorld(state.R);
+  meshes = [geo.ground, geo.world].map(g => { const m = new THREE.Mesh(g, mat); m.frustumCulled = false; scene.add(m); return m; });
+  state.pins = [];
+}
+const laserU = { uAMin: { value: 0.002 } };            // shared: one pixel, in radians
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  const f = 1 / Math.tan(75 * Math.PI / 360), P = new Float32Array(16);
+  P[0] = f / (window.innerWidth / window.innerHeight); P[5] = f; P[11] = -1;
+  mat.uniforms.uProj.value.fromArray(P);
+  laserU.uAMin.value = 1.2 * 2 / f / Math.max(1, window.innerHeight);   // beam core never thinner than ~1 CSS pixel
+}
+window.addEventListener('resize', resize);
+
+// Beam meshes: a shared ribbon (fractions along the beam × two sides) and a shared quad for hit spots;
+// each beam gets its own materials so its uniforms can differ.
+const BEAM_N = 512;
+const beamGeo = (() => {
+  const pos = new Float32Array(BEAM_N * 6), idx = [];
+  for (let i = 0; i < BEAM_N; i++) { const u = i / (BEAM_N - 1); pos.set([u, -1, 0, u, 1, 0], i * 6); if (i < BEAM_N - 1) { const a = 2 * i; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); } }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(idx); return g;
+})();
+const spotGeo = (() => {
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3)); g.setIndex([0, 1, 2, 0, 2, 3]); return g;
+})();
+const glow = { glslVersion: THREE.GLSL3, transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide,
+  blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendEquation: THREE.AddEquation };
+const beamViews = [];
+function makeBeamView() {
+  const shared = { uProj: mat.uniforms.uProj, uR: mat.uniforms.uR, uFog: mat.uniforms.uFog, uAMin: laserU.uAMin };
+  const bm = new THREE.RawShaderMaterial({ ...glow, vertexShader: beamVert, fragmentShader: beamFrag, uniforms: { ...shared,
+    uP: { value: new THREE.Vector4() }, uV: { value: new THREE.Vector4() }, uTEnd: { value: 1 }, uBeamR: { value: 0.001 }, uAMax: { value: 0.008 }, uFade: { value: 24 } } });
+  const sm = new THREE.RawShaderMaterial({ ...glow, vertexShader: spotVert, fragmentShader: spotFrag, uniforms: { ...shared,
+    uC: { value: new THREE.Vector4() }, uSpotR: { value: 0.01 }, uBias: { value: 0.03 } } });
+  const ribbon = new THREE.Mesh(beamGeo, bm), spot = new THREE.Mesh(spotGeo, sm);
+  for (const m of [ribbon, spot]) { m.frustumCulled = false; m.renderOrder = 2; scene.add(m); }
+  return { ribbon, spot, bm, sm };
+}
+function showBeams(list, Vm) {
+  while (beamViews.length < list.length) beamViews.push(makeBeamView());
+  const R = state.R;
+  beamViews.forEach((bv, i) => {
+    const res = list[i];
+    bv.ribbon.visible = !!res; bv.spot.visible = !!(res && res.hit);
+    if (!res) return;
+    const u = bv.bm.uniforms;
+    u.uP.value.fromArray(apply(Vm, res.P)); u.uV.value.fromArray(apply(Vm, res.V));
+    u.uTEnd.value = res.tEnd; u.uBeamR.value = LASER.beamR / R; u.uFade.value = LASER.fade * R;
+    if (res.hit) {
+      const s = bv.sm.uniforms;
+      s.uC.value.fromArray(apply(Vm, geoH(res.P, res.V, Math.max(0, res.tEnd - 0.05 / R))));
+      s.uSpotR.value = LASER.spotR / R; s.uBias.value = 0.3 / R;
+    }
+  });
+}
+
+// Player: body frame B fixes e_y, so you always stand on the plane y = 0.
+const state = { R: 8, h: 4.5, pitch: 0, B: id4(), B0: id4(), fog: true, auto: false, laser: true, pins: [] };
+function spawn() { state.B = boost(Z, 2 / state.R); state.h = 4.5; state.pitch = -0.3; }
+spawn();
+function camFrame(pitch = state.pitch) { return mul(mul(state.B, boost(Y, state.h / state.R)), rot(Z, Y, -pitch)); }
+// The gun sits GUN blocks from your eye; the beam leaves it parallel to your view direction
+// (the view direction parallel-transported from the eye to the gun).
+function gunPose(pitch = state.pitch) {
+  const C = camFrame(pitch), R = state.R;
+  const g = [GUN.right, GUN.up, -GUN.fwd], gl = Math.hypot(...g), r = gl / R, gh = g.map(x => x / gl);
+  const sh = Math.sinh(r), ch = Math.cosh(r), fpar = -gh[2];
+  const G = [gh[0] * sh, gh[1] * sh, gh[2] * sh, ch];
+  const Vl = [fpar * (ch - 1) * gh[0], fpar * (ch - 1) * gh[1], -1 + fpar * (ch - 1) * gh[2], fpar * sh];
+  return { P: apply(C, G), V: apply(C, Vl) };
+}
+function pinLaser(pitch) {
+  const g = gunPose(pitch);
+  state.pins.push({ ...g, res: traceLaser(g.P, g.V) });
+  while (state.pins.length > LASER.maxPins) state.pins.shift();
+}
+function laserFan() {                         // emitters from level to 35° down, then step aside to watch
+  for (let i = 0; i < 7; i++) pinLaser(-i * 0.1);
+  // step 9 blocks to the right, face back toward the emitters, then turn a little to look along the beams
+  state.B = renorm(mul(mul(state.B, boost(X, 9 / state.R)), rot(X, Z, -Math.PI / 2 + 0.25)));
+  state.h = Math.max(state.h, 3); state.pitch = -0.2;
+}
+function setLaser(on) { state.laser = on; $('bLaser').textContent = 'Laser: ' + (on ? 'on' : 'off'); $('bLaser').classList.toggle('laseron', on); }
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  if (!e.repeat) {
+    if (e.code === 'KeyF') toggleAuto();
+    if (e.code === 'KeyL') setLaser(!state.laser);
+    if (e.code === 'KeyR') pinLaser();
+    if (e.code === 'KeyV') laserFan();
+    if (e.code === 'KeyZ') state.pins = [];
+  }
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+const SENS = 0.0025; let dragging = false;
+function look(dx, dy) { state.B = mul(state.B, rot(X, Z, dx * SENS)); state.pitch = Math.max(-1.55, Math.min(1.55, state.pitch - dy * SENS)); }
+canvas.addEventListener('pointerdown', e => {
+  if (document.pointerLockElement === canvas) { if (e.button === 0) pinLaser(); return; }   // captured: click leaves an emitter
+  dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === 'mouse') { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+});
+canvas.addEventListener('pointerup', () => { dragging = false; });
+canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0); });
+
+const $ = id => document.getElementById(id);
+$('rslider').addEventListener('input', e => { $('rval').textContent = e.target.value; });
+$('rslider').addEventListener('change', e => { state.R = +e.target.value; rebuild(); });
+$('tFog').addEventListener('change', e => { state.fog = e.target.checked; });
+$('bSpawn').addEventListener('click', spawn);
+$('bRails').addEventListener('click', () => { state.B = boost(Z, -12 / state.R); state.h = 1.1 * state.R; state.pitch = -1.2; });
+$('bHouse').addEventListener('click', () => { state.B = renorm(mul(mul(frameAt(layout.HC, EW), rot(X, Z, Math.PI)), boost(Z, 1.5 / state.R))); state.h = 2.6; state.pitch = 0; });
+$('bHigh').addEventListener('click', () => { state.B = id4(); state.h = 1.7 * state.R; state.pitch = -1.45; });
+function toggleAuto() { state.auto = !state.auto; $('bAuto').textContent = 'Auto-walk: ' + (state.auto ? 'on' : 'off'); $('bAuto').classList.toggle('on', state.auto); }
+$('bAuto').addEventListener('click', toggleAuto);
+$('bLaser').addEventListener('click', () => setLaser(!state.laser));
+$('bPin').addEventListener('click', () => pinLaser());
+$('bFan').addEventListener('click', laserFan);
+$('bUnpin').addEventListener('click', () => { state.pins = []; });
+$('tipsToggle').addEventListener('click', () => { const b = $('tipsBody'), hidden = b.style.display === 'none'; b.style.display = hidden ? '' : 'none'; $('tipsToggle').textContent = hidden ? 'hide' : 'show'; });
+
+function step(dt) {
+  let f = 0, s = 0, turn = 0;
+  if (keys.KeyW || keys.ArrowUp) f += 1; if (keys.KeyS || keys.ArrowDown) f -= 1; if (keys.KeyD) s += 1; if (keys.KeyA) s -= 1;
+  if (keys.ArrowLeft) turn -= 1; if (keys.ArrowRight) turn += 1;
+  if (state.auto && f === 0 && s === 0) f = 1;
+  const speed = (keys.ShiftLeft || keys.ShiftRight) ? 16 : 6, len = Math.hypot(f, s);
+  if (len > 0) { const d = speed * dt / state.R; state.B = mul(state.B, boost(Z, -(f / len) * d)); state.B = mul(state.B, boost(X, (s / len) * d)); }
+  if (turn) state.B = mul(state.B, rot(X, Z, turn * 2 * dt));
+  if (keys.KeyE) state.h += Math.max(5, state.h) * 0.8 * dt; if (keys.KeyQ) state.h -= Math.max(5, state.h) * 0.8 * dt;
+  state.h = Math.max(0.6, Math.min(6 * state.R, state.h));
+  state.B = renorm(state.B);
+}
+let last = performance.now(), hudT = 0, frames = 0, fpsT0 = performance.now(), liveRes = null;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  step(dt);
+  const C = camFrame(), Vm = lorentzInv(C);
+  mat.uniforms.uView.value.fromArray(Float32Array.from(Vm));
+  mat.uniforms.uR.value = state.R;
+  mat.uniforms.uFog.value = state.fog ? 2.6 * state.R : 0;
+  liveRes = null;
+  if (state.laser) { const g = gunPose(); liveRes = traceLaser(g.P, g.V); }
+  showBeams([liveRes, ...state.pins.map(p => p.res)].filter(Boolean), Vm);
+  renderer.render(scene, dummyCam);
+  frames++;
+  if ((hudT += dt) > 0.1) {
+    hudT = 0;
+    const d = hdist(col(state.B, 3), col(state.B0, 3)) * state.R;
+    $('sDist').textContent = d.toFixed(1); $('sH').textContent = state.h.toFixed(1);
+    const r = Math.max(d, 1);
+    $('sR1').textContent = r.toFixed(1);
+    $('sC1').textContent = (TAU * state.R * Math.sinh(r / state.R)).toFixed(0);
+    $('sC0').textContent = (TAU * r).toFixed(0);
+    $('sLaser').textContent = laserText(liveRes); $('sE').textContent = state.pins.length;
+    if (now - fpsT0 > 500) { $('sFps').textContent = (frames * 1000 / (now - fpsT0)).toFixed(0); frames = 0; fpsT0 = now; }
+  }
+  requestAnimationFrame(frame);
+}
+resize(); rebuild(); requestAnimationFrame(frame);
+window.__demo = { state, spawn, look, keys, traceLaser, gunPose, pinLaser, laserFan, camFrame, frame, renderer, scene, dummyCam, geoH, apply, mdot, boost, rot, mul, renorm };
+</script>
+</body>
+</html>
