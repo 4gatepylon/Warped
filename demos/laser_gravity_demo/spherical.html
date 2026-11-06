@@ -89,7 +89,7 @@
   <h1>Things to try</h1>
   <div id="tipsBody">
   <ol>
-    <li><b>Gravity</b> pulls you and the laser toward the ground under your feet (not the ground you see overhead), along the shortest way down, at Earth strength (1 block = 1 m). Real light falls far too little to see, so the laser falls as if fired at 20 blocks/s. The slider changes that, down to off.</li>
+    <li><b>Gravity</b> pulls you and the laser toward the ground under your feet (not the ground you see overhead), along the shortest way down, at about three times Earth's pull (30 blocks/s², 1 block = 1 m). Real light falls far too little to see, so the laser falls as if fired at 20 blocks/s. The slider changes that, down to off.</li>
     <li><b>Gravity and the geometry pull the same way here.</b> Even with no gravity, a level shot lands exactly πR/2 blocks away from any height. Gravity makes it land sooner. Press <b>Laser fan</b> (<kbd>V</kbd>) on the spawn tower to see a range of angles from the side.</li>
     <li><b>Turn the ground off</b> (it only hides it from the laser and from view; you still stand on it). Now a beam falls through where the ground was, gets pulled back from the other side, and keeps swinging back and forth across it, never repeating. It would go on forever, so it fades slowly and is cut off once it is dim. With the gravity slider at 0 it instead goes all the way around the universe and comes back to your gun from behind after exactly 2πR, drawn once around.</li>
     <li><b>The triangle.</b> You start on top of the red tower (walk off the edge to come down). The cobblestone walls are perfectly straight (they're geodesics), and they meet here at 90°. Walk to the blue or yellow tower: those corners are 90° too. One triangle, three right angles.</li>
@@ -371,9 +371,11 @@ function buildWorld(R) {
 // ---------------------------------------------------------------------------
 const LASER = { beamR: 0.012, spotR: 0.12, sub: 0.04, fade: 1.5, cutoff: 0.1, maxPins: 10, maxPts: 4000 };   // blocks; fade in loop lengths
 const GUN = { right: 0.22, up: -0.2, fwd: 0.3 };       // where the beam leaves, relative to your eye (blocks)
-// Gravity: Earth strength. Real light falls far too little to see, so the laser falls as if it moved at
-// LASER_SPEED (only its direction bends; its speed never changes).
-const GRAVITY = 9.8, LASER_SPEED = 20, EYE = 1.6;      // blocks/s², blocks/s, eye height above your feet
+// Gravity: about three times Earth's pull (snappy, game-like), for you and for the laser. Real light falls far
+// too little to see, so the laser falls as if it moved at LASER_SPEED (only its direction bends; its speed never
+// changes). You also fall FALL_BOOST times harder on the way down than on the way up, for snappier jumps.
+const GRAVITY = 30, LASER_SPEED = 20, EYE = 1.6;       // blocks/s², blocks/s, eye height above your feet
+const JUMP = 8.5, FALL_BOOST = 1.6;                    // jump speed (blocks/s): about a 1.2-block hop
 const laserK = () => state.lg * GRAVITY / (LASER_SPEED * LASER_SPEED);   // how sharply gravity turns the beam (1/blocks)
 const geoS = (P, V, t) => { const c = Math.cos(t), s = Math.sin(t); return [c * P[0] + s * V[0], c * P[1] + s * V[1], c * P[2] + s * V[2], c * P[3] + s * V[3]]; };
 function voxAt(x, st) {                                 // x in the structure's own frame -> voxel type (gnomonic chart)
@@ -694,7 +696,7 @@ function showBeams(list, Vm) {
 // ---------------------------------------------------------------------------
 // Player. B is the body frame: an isometry fixing e_y, so it stands on the ground; h is your eye height.
 // Walking = rotating R⁴ in a (direction, w) plane of the body frame. Gravity pulls you straight down
-// toward the ground under you at Earth strength; the ground (even when hidden), blocks and walls hold you
+// toward the ground under you (GRAVITY above); the ground (even when hidden), blocks and walls hold you
 // up and stop you walking through them. Fly mode turns gravity off for you.
 // ---------------------------------------------------------------------------
 const state = { R: 16, h: 1.7, vh: 0, onGround: false, fly: false, lg: 1, pitch: 0, B: id4(), B0: null, fog: true, ground: true, second: true, auto: false, laser: true, pins: [] };
@@ -837,8 +839,9 @@ function step(dt) {
   }
   // fall; Space/E jumps from the ground and works as a jetpack (net upward pull of 1 g) in the air
   const jet = keys.Space || keys.KeyE;
-  if (jet && state.onGround) state.vh = 5.5;
-  state.vh = Math.max(-40, Math.min(8, state.vh + ((jet ? 2 * GRAVITY : 0) - GRAVITY) * dt));
+  if (jet && state.onGround) state.vh = JUMP;
+  const g = GRAVITY * (state.vh < 0 && !jet ? FALL_BOOST : 1);
+  state.vh = Math.max(-60, Math.min(12, state.vh + ((jet ? 2 * GRAVITY : 0) - g) * dt));
   const h0 = state.h, dh = state.vh * dt;
   state.h = Math.min(hMax, h0 + dh); state.onGround = false;
   if (bodySolid(state.B, state.h, near)) {    // landed (or bumped your head): stop at the contact point
