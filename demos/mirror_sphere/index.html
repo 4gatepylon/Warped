@@ -73,7 +73,7 @@
 
 <div id="stats" class="panel">
   <div>Laser: <span id="sLaser">–</span></div>
-  <div class="muted">Height above the mirror: <span id="sH">0.0</span> · gravity <span id="sG">100</span>%</div>
+  <div class="muted">Height above the mirror: <span id="sH">0.0</span> · gravity 32 blocks/s²</div>
   <div class="muted">emitters: <span id="sE">0</span> · <span id="sFps">–</span> fps</div>
 </div>
 
@@ -87,9 +87,9 @@
     <li><b>It fades as it goes.</b> Its power drops linearly with distance travelled (and by a fixed amount per reflection, if you set a loss). When the power reaches zero the beam stops and nothing more is computed.</li>
     <li><b>Try different heights.</b> Aim along the floor and the beam skims round close to the wall, many short hops (a "whispering gallery"). Jump or fly toward the centre and the hops become long chords right across the sphere. Aim at the sun and it's absorbed.</li>
     <li><b>Everything is ray traced</b>, beam included, so you see the beam, the pillars and the sun reflected again and again in the curved mirror.</li>
-    <li><b>Use the jetpack</b> (<kbd>E</kbd>). Gravity weakens toward the centre, so the closer you get the more you float; keep going and you fly straight through the middle (and the sun) and fall onto the opposite side.</li>
+    <li><b>Use the jetpack</b> (<kbd>E</kbd>). Gravity pulls you outward just as hard everywhere, but the jetpack is stronger: hold it and you speed up toward the centre, fly straight through the middle (and the sun) and come down on the opposite side.</li>
   </ol>
-  <div class="muted" style="margin-top:6px">Game rules: a real hollow shell has no gravity inside it (Newton's shell theorem); here the pull is outward and proportional to your distance from the centre. The mirror reflects 82% of light, so repeated reflections darken. Light travels in straight lines. Beams stop at pillars, orbs and the sun, and at 256 segments as a safety cap. You can walk through objects and fly through the sun.</div>
+  <div class="muted" style="margin-top:6px">Game rules: a real hollow shell has no gravity inside it (Newton's shell theorem); here the pull is outward with the same strength everywhere (a constant 32 blocks/s², like mg on Earth). The mirror reflects 82% of light, so repeated reflections darken. Light travels in straight lines. Beams stop at pillars, orbs and the sun, and at 256 segments as a safety cap. You can walk through objects and fly through the sun.</div>
   </div>
 </div>
 <div id="err"></div>
@@ -484,10 +484,10 @@ function laserText(r) {
 
 // ---------------------------------------------------------------------------
 // Player. Your feet are at distance rf from the centre in direction u; "up" is -u (toward the
-// centre). Gravity pulls outward with strength proportional to rf (zero at the centre). Walking moves
+// centre). Gravity pulls outward with the same strength everywhere (a constant acceleration, like mg). Walking moves
 // u along the sphere of radius rf; hf is your horizontal facing, kept tangent as u changes.
 // ---------------------------------------------------------------------------
-const EYE = 1.7, G0 = 18, JUMP = 9, THRUST = 26, SENS = 0.0025, GUN = { right: 0.22, up: -0.2, fwd: 0.3 };
+const EYE = 1.7, G = 32, JUMP = 9, THRUST = 48, SENS = 0.0025, GUN = { right: 0.22, up: -0.2, fwd: 0.3 };
 const state = { u: new V3(0, -1, 0), rf: 30, vr: 0, hf: new V3(0, 0, -1), pitch: 0, grounded: true,
   range: 300, loss: 0, laser: true, pins: [] };
 function resetPlayer() { state.u.set(0, -1, 0); state.rf = world.R; state.vr = 0; state.hf.set(0, 0, -1); state.pitch = 0.35; }
@@ -517,7 +517,7 @@ function step(dt) {
     state.u.multiplyScalar(Math.max(state.rf, 0.5)).add(m).normalize(); keepTangent();
   }
   // outward gravity, jumping and the jetpack act along the radius
-  state.vr += G0 * (state.rf / R) * dt;
+  state.vr += G * dt;
   if (keys.KeyE) state.vr -= THRUST * dt; if (keys.KeyQ) state.vr += THRUST * dt;
   if (keys.Space && state.grounded) state.vr = -JUMP;
   state.rf += state.vr * dt;
@@ -597,7 +597,7 @@ function frame(now) {
   if ((hudT += dt) > 0.2) {
     hudT = 0;
     $('sLaser').textContent = laserText(liveRes);
-    $('sH').textContent = (world.R - state.rf).toFixed(1); $('sG').textContent = Math.round(100 * state.rf / world.R);
+    $('sH').textContent = (world.R - state.rf).toFixed(1);
     $('sE').textContent = state.pins.length;
     if (now - fpsT0 > 500) { $('sFps').textContent = (frames * 1000 / (now - fpsT0)).toFixed(0); frames = 0; fpsT0 = now; }
   }

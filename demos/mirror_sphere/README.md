@@ -27,9 +27,9 @@ drops, and tracing stops once the power reaches zero. Pillars, orbs and the sun 
 
 ## Game rules (not real physics)
 
-- A real hollow shell has no gravity inside it (Newton's shell theorem). Here gravity pulls outward, in proportion to your
-  distance from the centre, so it fades to zero at the centre. With the jetpack you can fly through the middle and land on
-  the opposite side.
+- A real hollow shell has no gravity inside it (Newton's shell theorem). Here gravity pulls outward with the same strength
+  everywhere, a constant 32 blocks/s² (like mg). The jetpack is stronger than that, so with it you can fly through the
+  middle and land on the opposite side.
 - Light travels in straight lines; gravity doesn't bend it.
 - No collisions: you can walk through pillars and fly through the sun.
 
