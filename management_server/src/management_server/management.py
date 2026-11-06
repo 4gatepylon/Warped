@@ -22,6 +22,9 @@ import uuid
 from management_server import errors, launcher, models
 
 _SEQUENCE_BEFORE_FIRST: int = -1
+_JOINABLE_STATES: frozenset[models.GameServerState] = frozenset(
+    {models.GameServerState.STARTING, models.GameServerState.RUNNING}
+)
 
 
 @dataclasses.dataclass
@@ -149,6 +152,78 @@ class Management:
             self._getRecord(game_server_id)
             self._game_server_launcher.stop(game_server_id)
             del self._records[game_server_id]
+
+    def addPlayer(self, game_server_id: uuid.UUID, request: models.PlayerCreate) -> models.Player:
+        """`addPlayer` adds a player to a game server that is starting or running and has room.
+
+        Args:
+            game_server_id: The game server to add the player to.
+            request: The player's details; there are none yet.
+
+        Raises:
+            NotFoundError: There is no such game server.
+            UnavailableError: The game server is full, stopped or failed.
+
+        Example:
+            >>> player = management_api.addPlayer(game_server_id, models.PlayerCreate())
+        """
+        with self._lock:
+            record: _GameServerRecord = self._getRecord(game_server_id)
+            state: models.GameServerState = self._game_server_launcher.get(game_server_id).state
+            if state not in _JOINABLE_STATES:
+                raise errors.UnavailableError(f"game server {game_server_id} is {state}")
+            if len(record.player_ids) >= record.max_player_count:
+                raise errors.UnavailableError(f"game server {game_server_id} is full")
+            player_id: uuid.UUID = uuid.uuid4()
+            record.player_ids.add(player_id)
+            return models.Player(player_id=player_id, game_server_id=game_server_id)
+
+    def getPlayer(self, game_server_id: uuid.UUID, player_id: uuid.UUID) -> models.Player:
+        """`getPlayer` returns a player who was added to a game server and not removed.
+
+        Args:
+            game_server_id: The game server the player was added to.
+            player_id: The player to return.
+
+        Raises:
+            NotFoundError: There is no such game server, or no such player in it.
+
+        Example:
+            >>> player = management_api.getPlayer(game_server_id, player_id)
+        """
+        with self._lock:
+            self._checkPlayer(self._getRecord(game_server_id), player_id)
+            return models.Player(player_id=player_id, game_server_id=game_server_id)
+
+    def removePlayer(self, game_server_id: uuid.UUID, player_id: uuid.UUID) -> None:
+        """`removePlayer` removes a player from a game server, freeing their place.
+
+        Args:
+            game_server_id: The game server the player was added to.
+            player_id: The player to remove.
+
+        Raises:
+            NotFoundError: There is no such game server, or no such player in it.
+
+        Example:
+            >>> management_api.removePlayer(game_server_id, player_id)
+        """
+        with self._lock:
+            record: _GameServerRecord = self._getRecord(game_server_id)
+            self._checkPlayer(record, player_id)
+            record.player_ids.remove(player_id)
+
+    def _checkPlayer(self, record: _GameServerRecord, player_id: uuid.UUID) -> None:
+        """`_checkPlayer` checks that a player was added to a game server and not removed.
+
+        Raises:
+            NotFoundError: The player isn't in the game server.
+
+        Example:
+            >>> self._checkPlayer(record, player_id)
+        """
+        if player_id not in record.player_ids:
+            raise errors.NotFoundError(f"no player {player_id} in {record.game_server_id}")
 
     def _parsePageToken(self, page_token: str | None) -> int:
         """`_parsePageToken` returns the sequence number after which a page starts.
