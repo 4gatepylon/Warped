@@ -46,7 +46,7 @@ not the fix you guess at. E.g. `tooling: make test passes when a test crashes`.
 Every section is always present. What goes in **Context** depends on the type:
 
 - **bug**: steps to reproduce (exact command), expected vs. actual, error output in a code block,
-  and the setup that matters (hardware, OS, driver and toolchain versions, commit).
+  and the setup that matters (machine, OS, browser or toolchain versions, commit).
 - **experiment**: the question and the options being compared. **Done when** includes "decisions
   recorded per the `experiment-decisions` skill".
 - **enhancement / documentation / question**: what exists now and what's missing.
@@ -59,7 +59,7 @@ Exactly one **type** label and at least one **area** label.
 | --- | --- |
 | `bug` | something is wrong: crash, wrong result, failing test, broken build |
 | `enhancement` | new code or a feature: a game mechanic, a server endpoint, a tool |
-| `experiment` | a benchmark, evaluation or ablation that answers a question |
+| `experiment` | a benchmark, comparison or playtest that answers a question |
 | `documentation` | READMEs, CLAUDE.md, skills |
 | `question` | needs an answer or a decision before work can start |
 
@@ -87,6 +87,6 @@ gh issue close <n> --reason "not planned"  # or "completed"; close, don't delete
   user, who can run or approve:
 
 ```bash
-gh label create experiment       --color 5319e7 --description "Benchmark, evaluation or ablation"
+gh label create experiment       --color 5319e7 --description "Benchmark, comparison or playtest"
 gh label create area:tooling     --color bfd4f2 --description "Build, scripts, environment, repo rules"
 ```
