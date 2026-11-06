@@ -2,6 +2,8 @@ This is the contents from https://claude.ai/share/eea2bc43-667d-4f29-887c-e32806
 
 It should be possible to play these games but the code won't be super elegant.
 
+`conversations.json` should contain the relevant conversation. It may contain spurious other stuff too.
+
 ## Laser versions
 
 `blackholes_laser.html`, `hyperbolic_laser.html` and `spherical_laser.html` are copies of the three demos with a laser added.
