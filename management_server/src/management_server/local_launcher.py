@@ -11,17 +11,24 @@ Must know:
     Limitations:
         - It isn't thread-safe; `Management` makes one call at a time.
     Gotchas:
-        - Nothing checks game servers in the background: `get` checks when it is called.
+        - Nothing checks game servers in the background: `get` and `list` check when called.
 """
 
+import builtins
 import collections.abc
 import dataclasses
+import socket
 import subprocess
+import time
+import urllib.request
 import uuid
 
 from management_server import errors, models
 
+DEFAULT_HEALTH_TIMEOUT_S: float = 30.0
 STOP_TIMEOUT_S: float = 5.0
+_HEALTH_PROBE_TIMEOUT_S: float = 0.2
+_HTTP_OK: int = 200
 
 
 @dataclasses.dataclass
@@ -31,17 +38,48 @@ class _GameServerProcess:
     Attributes:
         process: The process, running or exited.
         port: The port the game server listens on.
+        started_at_s: When the process started, from `time.monotonic`.
         state: The game server's state when it was last checked.
         failure_reason: Why it failed, if it did.
 
     Example:
-        >>> game_server_process = _GameServerProcess(process, 20000)
+        >>> game_server_process = _GameServerProcess(process, 20000, time.monotonic())
     """
 
     process: subprocess.Popen[bytes]
     port: int
+    started_at_s: float
     state: models.GameServerState = models.GameServerState.STARTING
     failure_reason: str | None = None
+
+
+def _is_port_free(port: int) -> bool:
+    """`_is_port_free` checks whether a TCP port on this machine can be listened on.
+
+    Example:
+        >>> _is_port_free(20000)
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe_socket:
+        try:
+            probe_socket.bind(("0.0.0.0", port))
+        except OSError:
+            return False
+    return True
+
+
+def _is_healthy(port: int) -> bool:
+    """`_is_healthy` checks whether the game server on a local port answers `GET /health`.
+
+    Example:
+        >>> _is_healthy(20000)
+    """
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health", timeout=_HEALTH_PROBE_TIMEOUT_S
+        ) as response:
+            return response.status == _HTTP_OK
+    except OSError:
+        return False
 
 
 class LocalProcessLauncher:
@@ -52,6 +90,7 @@ class LocalProcessLauncher:
         ports: The ports to pick from, one per game server.
         command: The game server command, without the contract's flags.
         management_server_url: Where game servers check players.
+        health_timeout_s: How long a game server may take to answer `GET /health`.
 
     Example:
         >>> game_server_launcher = LocalProcessLauncher(host, ports, command, url)
@@ -63,20 +102,22 @@ class LocalProcessLauncher:
         ports: range,
         command: collections.abc.Sequence[str],
         management_server_url: str,
+        health_timeout_s: float = DEFAULT_HEALTH_TIMEOUT_S,
     ) -> None:
         self._advertised_host: str = advertised_host
         self._ports: range = ports
         self._command: collections.abc.Sequence[str] = command
         self._management_server_url: str = management_server_url
+        self._health_timeout_s: float = health_timeout_s
         self._game_server_processes: dict[uuid.UUID, _GameServerProcess] = {}
 
     def launch(
         self, game_server_id: uuid.UUID, config: models.GameServerConfig, max_player_count: int
     ) -> None:
-        """`launch` implements `Launcher.launch` by running `command` on an unused port.
+        """`launch` implements `Launcher.launch` by running `command` on a free port.
 
         Raises:
-            RuntimeError: Every port in `ports` has a running game server.
+            RuntimeError: No port in `ports` is free.
 
         Example:
             >>> game_server_launcher.launch(game_server_id, models.GameServerConfig(), 4)
@@ -90,20 +131,25 @@ class LocalProcessLauncher:
                 *("--management-server-url", self._management_server_url, "--port", str(port)),
             ]
         )
-        self._game_server_processes[game_server_id] = _GameServerProcess(process, port)
+        self._game_server_processes[game_server_id] = _GameServerProcess(
+            process, port, time.monotonic()
+        )
 
     def get(self, game_server_id: uuid.UUID) -> models.LaunchedGameServer:
-        """`get` implements `Launcher.get`, after checking the game server's process.
+        """`get` implements `Launcher.get`, after checking the process and its health.
 
         Example:
             >>> game_server_launcher.get(game_server_id).state
         """
         game_server_process: _GameServerProcess = self._getProcess(game_server_id)
         self._refresh(game_server_process)
+        is_running: bool = game_server_process.state is models.GameServerState.RUNNING
         return models.LaunchedGameServer(
             game_server_id=game_server_id,
             state=game_server_process.state,
-            address=None,
+            address=models.Address(host=self._advertised_host, port=game_server_process.port)
+            if is_running
+            else None,
             failure_reason=game_server_process.failure_reason,
         )
 
@@ -124,6 +170,18 @@ class LocalProcessLauncher:
             game_server_process.process.wait()
         game_server_process.state = models.GameServerState.STOPPED
 
+    def list(self) -> builtins.list[models.LaunchedGameServer]:
+        """`list` implements `Launcher.list`.
+
+        Example:
+            >>> game_server_launcher.list()
+        """
+        return [
+            self.get(game_server_id)
+            for game_server_id, game_server_process in self._game_server_processes.items()
+            if game_server_process.state is not models.GameServerState.STOPPED
+        ]
+
     def _getProcess(self, game_server_id: uuid.UUID) -> _GameServerProcess:
         """`_getProcess` returns a game server's process.
 
@@ -138,10 +196,10 @@ class LocalProcessLauncher:
         return self._game_server_processes[game_server_id]
 
     def _pickPort(self) -> int:
-        """`_pickPort` returns a port in `ports` that no running game server listens on.
+        """`_pickPort` returns a port in `ports` that no game server or other program uses.
 
         Raises:
-            RuntimeError: Every port in `ports` has a running game server.
+            RuntimeError: No port in `ports` is free.
 
         Example:
             >>> port = self._pickPort()
@@ -152,19 +210,33 @@ class LocalProcessLauncher:
             if game_server_process.process.poll() is None
         }
         for port in self._ports:
-            if port not in used_ports:
+            if port not in used_ports and _is_port_free(port):
                 return port
         raise RuntimeError(f"no free port in {self._ports}")
 
     def _refresh(self, game_server_process: _GameServerProcess) -> None:
-        """`_refresh` marks a starting game server whose process exited as failed.
+        """`_refresh` updates a starting or running game server's state from its process.
 
         Example:
             >>> self._refresh(game_server_process)
         """
-        if game_server_process.state is not models.GameServerState.STARTING:
+        if game_server_process.state in (
+            models.GameServerState.STOPPED,
+            models.GameServerState.FAILED,
+        ):
             return
         exit_code: int | None = game_server_process.process.poll()
+        is_starting: bool = game_server_process.state is models.GameServerState.STARTING
+        starting_s: float = time.monotonic() - game_server_process.started_at_s
         if exit_code is not None:
             game_server_process.state = models.GameServerState.FAILED
             game_server_process.failure_reason = f"exited with code {exit_code}"
+        elif is_starting and _is_healthy(game_server_process.port):
+            game_server_process.state = models.GameServerState.RUNNING
+        elif is_starting and starting_s > self._health_timeout_s:
+            game_server_process.process.kill()
+            game_server_process.process.wait()
+            game_server_process.state = models.GameServerState.FAILED
+            game_server_process.failure_reason = (
+                f"didn't answer GET /health within {self._health_timeout_s} s"
+            )
