@@ -46,3 +46,23 @@ class Launcher(typing.Protocol):
         Example:
             >>> game_server_launcher.get(game_server_id).address
         """
+
+    def stop(self, game_server_id: uuid.UUID) -> None:
+        """`stop` stops a game server and frees what it ran on, unless it already stopped.
+
+        Args:
+            game_server_id: The game server to stop.
+
+        Raises:
+            NotFoundError: This launcher never started the game server.
+
+        Example:
+            >>> game_server_launcher.stop(game_server_id)
+        """
+
+    def list(self) -> list[models.LaunchedGameServer]:
+        """`list` returns every game server that this launcher started and hasn't stopped.
+
+        Example:
+            >>> game_server_launcher.list()
+        """
