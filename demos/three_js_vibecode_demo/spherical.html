@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blocks in a 3-Sphere — curved space demo</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #87bff2; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(15, 20, 30, 0.72); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 270px; }
+  #stats { top: 10px; right: 10px; text-align: right; }
+  #tips { bottom: 10px; right: 10px; width: 340px; max-height: calc(100vh - 110px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #4f7a3a; border-color: #7bb35d; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 2px 0; }
+  #tipsToggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+
+<div id="controls" class="panel">
+  <h1>Blocks in a 3-sphere (S³)</h1>
+  <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint · <kbd>E</kbd>/<kbd>Q</kbd> fly up/down · <kbd>F</kbd> auto-walk</div>
+  <div class="row">
+    <label>Sphere radius R = <b id="rval">16</b> blocks</label>
+    <input id="rslider" type="range" min="8" max="64" step="1" value="16">
+    <div class="muted">Smaller R = stronger curvature. Bigger R looks flatter.</div>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="tGround" checked> Ground</label>
+    <label><input type="checkbox" id="tFog" checked> Fog (distance haze)</label>
+    <label><input type="checkbox" id="tSecond" checked> Light that goes all the way around (2nd image)</label>
+  </div>
+  <div class="row">
+    <button id="bSpawn">Spawn corner</button>
+    <button id="bHouse">Inside house</button>
+    <button id="bPole">Fly to the pole</button>
+    <button id="bAuto">Auto-walk: off</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Distance from start: <b id="sDist">0.0</b> blocks</div>
+  <div class="muted">Straight-line loop length 2πR = <span id="sCirc">100.5</span></div>
+  <div class="muted">Eye height: <span id="sH">1.7</span> · pole at πR/2 = <span id="sPole">25.1</span></div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tipsToggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tipsBody">
+  <ol>
+    <li><b>The triangle.</b> You start on top of the red tower (<kbd>Q</kbd> to come down). The cobblestone walls are perfectly straight (they're geodesics), and they meet here at 90°. Walk to the blue or yellow tower: those corners are 90° too. One triangle, three right angles.</li>
+    <li><b>Look up.</b> The ground wraps around over your head. The upside-down trees up there are on the far side of the world.</li>
+    <li><b>Walk away from the house</b> (or watch the far towers). In flat space things shrink with distance. Here they shrink until πR/2 away, then grow again.</li>
+    <li><b>Auto-walk</b> (<kbd>F</kbd>) in a straight line: after 2πR blocks you're back where you started.</li>
+    <li><b>Ground off</b>, then look behind you. Light circles the whole universe, so you see the back of every object in the opposite direction.</li>
+    <li><b>Slide R</b> up to 64 and the same house looks almost normal.</li>
+  </ol>
+  </div>
+</div>
+
+<div id="err"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+// ---------------------------------------------------------------------------
+// 4x4 matrix helpers (column-major, m[c*4 + r]); coordinates are (x, y, z, w)
+// The universe is the unit 3-sphere S³ ⊂ R⁴, scaled so its radius is R blocks.
+// Isometries of S³ are rotations of R⁴ (SO(4)).
+// ---------------------------------------------------------------------------
+const X = 0, Y = 1, Z = 2, W = 3, TAU = Math.PI * 2;
+const id4 = () => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; };
+function mul(a, b) {
+  const o = new Float64Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+    o[c * 4 + r] = s;
+  }
+  return o;
+}
+function transpose(a) { const o = new Float64Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[r * 4 + c] = a[c * 4 + r]; return o; }
+function apply(m, v) { const o = [0, 0, 0, 0]; for (let r = 0; r < 4; r++) o[r] = m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2] + m[12 + r] * v[3]; return o; }
+// rotation in the (i, j) plane: e_i -> cos a e_i + sin a e_j
+function rot(i, j, a) { const m = id4(), c = Math.cos(a), s = Math.sin(a); m[i * 4 + i] = c; m[i * 4 + j] = s; m[j * 4 + i] = -s; m[j * 4 + j] = c; return m; }
+const col = (m, c) => [m[c * 4], m[c * 4 + 1], m[c * 4 + 2], m[c * 4 + 3]];
+function fromCols(a, b, c, d) { const m = new Float64Array(16); [a, b, c, d].forEach((v, ci) => { for (let r = 0; r < 4; r++) m[ci * 4 + r] = v[r]; }); return m; }
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+const scale = (a, s) => a.map(x => x * s);
+const sub = (a, b) => a.map((x, i) => x - b[i]);
+const norm = a => { const l = Math.hypot(...a); return a.map(x => x / l); };
+// cross product inside the (x, z, w) 3-space (y = 0): used for frames on the ground
+function cross3(a, b) {
+  const ax = a[X], az = a[Z], aw = a[W], bx = b[X], bz = b[Z], bw = b[W];
+  return [az * bw - aw * bz, 0, aw * bx - ax * bw, ax * bz - az * bx];
+}
+function det4(m) {
+  const a = (r, c) => m[c * 4 + r]; let det = 0;
+  for (let c = 0; c < 4; c++) {
+    const s = []; for (let r = 1; r < 4; r++) for (let cc = 0; cc < 4; cc++) if (cc !== c) s.push(a(r, cc));
+    const d3 = s[0] * (s[4] * s[8] - s[5] * s[7]) - s[1] * (s[3] * s[8] - s[5] * s[6]) + s[2] * (s[3] * s[7] - s[4] * s[6]);
+    det += (c % 2 ? -1 : 1) * a(0, c) * d3;
+  }
+  return det;
+}
+const EY = [0, 1, 0, 0];
+
+// The ground is the great 2-sphere {y = 0}. A "frame on the ground" is an isometry that keeps
+// e_y fixed, so it maps the local ground plane y=0 onto the world ground.
+function frameAt(g, toward) {
+  g = norm(g);
+  let t = norm(sub(toward, scale(g, dot(toward, g))));   // local +z
+  let r = cross3(t, g);                                     // local +x
+  let M = fromCols(r, EY, t, g);
+  if (det4(M) < 0) M = fromCols(scale(r, -1), EY, t, g);
+  return M;
+}
+// Re-orthonormalise the player's body frame (keeps it exactly on SO(4) and upright).
+function renorm(B) {
+  let g = col(B, 3); g[Y] = 0; g = norm(g);
+  let t = col(B, 2); t[Y] = 0; t = norm(sub(t, scale(g, dot(t, g))));
+  let r = cross3(t, g);
+  if (dot(r, col(B, 0)) < 0) r = scale(r, -1);
+  return fromCols(r, EY, t, g);
+}
+
+// ---------------------------------------------------------------------------
+// Mesh building. Every vertex is stored directly as a point of R⁴ on (or, for
+// flat chords, just inside) the unit sphere; the shader only needs the view.
+// ---------------------------------------------------------------------------
+class Builder {
+  constructor() { this.pos = []; this.col = []; this.uv = []; this.seed = []; this.idx = []; }
+  quad(p0, p1, p2, p3, c, seed) {
+    const base = this.pos.length / 4;
+    for (const p of [p0, p1, p2, p3]) this.pos.push(p[0], p[1], p[2], p[3]);
+    this.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let k = 0; k < 4; k++) { this.col.push(c[0], c[1], c[2]); this.seed.push(seed); }
+    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  geometry() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 4));
+    g.setAttribute('col', new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    g.setAttribute('seed', new THREE.Float32BufferAttribute(this.seed, 1));
+    g.setIndex(this.idx);
+    return g;
+  }
+}
+
+const COLORS = {
+  planks: [0.74, 0.57, 0.34], log: [0.42, 0.31, 0.19], cobble: [0.55, 0.55, 0.55],
+  glass: [0.70, 0.87, 0.96], roof: [0.64, 0.25, 0.20], brick: [0.58, 0.30, 0.25],
+  leaves: [0.24, 0.52, 0.20], door: [0.36, 0.24, 0.13],
+  red: [0.80, 0.20, 0.18], blue: [0.20, 0.35, 0.80], yellow: [0.92, 0.80, 0.20],
+  purple: [0.55, 0.25, 0.70], orange: [0.92, 0.50, 0.15], white: [0.92, 0.92, 0.92],
+  gold: [0.95, 0.78, 0.25]
+};
+const SHADE = { px: 0.82, nx: 0.82, py: 1.0, ny: 0.55, pz: 0.68, nz: 0.68 };
+
+// Local structures are built in ordinary block coordinates and then mapped into S³ with the
+// gnomonic chart p -> normalize(p, R). That chart sends straight lines to geodesics and flat
+// faces to totally-geodesic surfaces, so every block edge is a true "straight line" of S³.
+function addVoxels(b, vox, M, R, off) {
+  const dirs = [[1, 0, 0, 'px'], [-1, 0, 0, 'nx'], [0, 1, 0, 'py'], [0, -1, 0, 'ny'], [0, 0, 1, 'pz'], [0, 0, -1, 'nz']];
+  const toS3 = p => apply(M, norm([p[0] - off[0], p[1] - off[1], p[2] - off[2], R]));
+  for (const [key, type] of vox) {
+    const [i, j, k] = key.split(',').map(Number);
+    for (const [dx, dy, dz, name] of dirs) {
+      if (vox.has(`${i + dx},${j + dy},${k + dz}`)) continue;
+      if (dy < 0 && j === 0) continue;               // bottom faces resting on the ground
+      const a = dx ? 0 : dy ? 1 : 2, s = dx + dy + dz;
+      const u = (a + 1) % 3, v = (a + 2) % 3;
+      const corners = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([cu, cv]) => {
+        const p = [i, j, k]; if (s > 0) p[a] += 1; p[u] += cu; p[v] += cv; return toS3(p);
+      });
+      const c = COLORS[type].map(x => x * SHADE[name]);
+      const seed = ((i * 73.1 + j * 19.7 + k * 41.3 + a * 7.9) % 97 + 97) % 97;
+      b.quad(corners[0], corners[1], corners[2], corners[3], c, seed);
+    }
+  }
+}
+
+function houseVoxels() {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t), del = (x, y, z) => v.delete(`${x},${y},${z}`);
+  for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++)
+    set(x, 0, z, (Math.abs(x) === 4 || Math.abs(z) === 3) ? 'cobble' : 'planks');
+  for (let y = 1; y <= 4; y++) for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) {
+    const edgeX = Math.abs(x) === 4, edgeZ = Math.abs(z) === 3;
+    if (edgeX || edgeZ) set(x, y, z, edgeX && edgeZ ? 'log' : 'planks');
+  }
+  del(0, 1, 3); del(0, 2, 3);                                   // door opening
+  for (const y of [2, 3]) {
+    for (const x of [-2, 2]) { set(x, y, 3, 'glass'); set(x, y, -3, 'glass'); }
+    set(4, y, 0, 'glass'); set(-4, y, 0, 'glass');
+  }
+  for (let k = 0; k <= 4; k++) {                                // gable roof, ridge along x
+    const y = 5 + k, zr = 4 - k;
+    for (let x = -5; x <= 5; x++) {
+      set(x, y, zr, 'roof'); set(x, y, -zr, 'roof');
+      if (zr >= 1) { set(x, y, zr - 1, 'roof'); set(x, y, -(zr - 1), 'roof'); }
+    }
+    for (const x of [-4, 4]) for (let z = -(zr - 2); z <= zr - 2; z++) set(x, y, z, 'planks');
+  }
+  for (let y = 6; y <= 10; y++) set(2, y, -1, 'brick');         // chimney
+  return v;
+}
+function towerVoxels(color) {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t);
+  for (let y = 0; y <= 6; y++) for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) set(x, y, z, color);
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) set(x, 7, z, color);
+  set(0, 7, 0, 'gold'); set(0, 8, 0, 'gold');
+  return v;
+}
+function treeVoxels(rng) {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t);
+  const hgt = 4 + Math.floor(rng() * 2);
+  for (let y = hgt - 1; y <= hgt; y++) for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) {
+    if (Math.abs(x) === 2 && Math.abs(z) === 2 && rng() < 0.7) continue;
+    set(x, y, z, 'leaves');
+  }
+  for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) set(x, hgt + 1, z, 'leaves');
+  for (const [x, z] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) set(x, hgt + 2, z, 'leaves');
+  for (let y = 0; y < hgt; y++) set(0, y, 0, 'log');
+  return v;
+}
+
+// Ground: the great sphere {y=0} as an equiangular cube-sphere in (x, z, w). Grid lines are great circles.
+function addGround(b, R) {
+  const N = Math.max(8, Math.min(64, Math.round(Math.PI * R / 2)));
+  const axes = [X, Z, W];
+  let cell = 0;
+  for (const A of axes) for (const s of [1, -1]) {
+    const [U, V] = axes.filter(q => q !== A);
+    const P = (a, bb) => { const p = [0, 0, 0, 0]; p[A] = s; p[U] = Math.tan(a); p[V] = Math.tan(bb); return p; };
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const a0 = -Math.PI / 4 + (i / N) * Math.PI / 2, a1 = -Math.PI / 4 + ((i + 1) / N) * Math.PI / 2;
+      const b0 = -Math.PI / 4 + (j / N) * Math.PI / 2, b1 = -Math.PI / 4 + ((j + 1) / N) * Math.PI / 2;
+      const h = Math.sin(cell * 12.9898) * 43758.5453; const r = h - Math.floor(h);
+      let c = ((i + j) & 1) ? [0.36, 0.60, 0.25] : [0.40, 0.65, 0.28];
+      if (r < 0.04) c = [0.55, 0.42, 0.27];                       // a few dirt patches
+      else c = c.map(x => x * (0.94 + 0.1 * r));
+      b.quad(P(a0, b0), P(a1, b0), P(a1, b1), P(a0, b1), c, (cell * 0.37) % 97);
+      cell++;
+    }
+  }
+}
+
+// A wall along the great circle spanned by e_a, e_b (normal direction e_c inside the ground).
+function addWall(b, a, bb, c, R, height, width, color) {
+  const N = Math.max(24, Math.round(TAU * R));
+  const P = (t, off, h) => {
+    const base = [0, 0, 0, 0]; base[a] = Math.cos(t); base[bb] = Math.sin(t);
+    const side = base.map((x, i) => x * Math.cos(off) + (i === c ? Math.sin(off) : 0));
+    return side.map((x, i) => x * Math.cos(h) + (i === Y ? Math.sin(h) : 0));
+  };
+  const w = width / 2 / R, H = height / R;
+  for (let k = 0; k < N; k++) {
+    const t0 = TAU * k / N, t1 = TAU * (k + 1) / N, sd = (k * 3.7) % 97;
+    b.quad(P(t0, -w, H), P(t1, -w, H), P(t1, w, H), P(t0, w, H), color.map(x => x * 1.0), sd);
+    b.quad(P(t0, w, 0), P(t1, w, 0), P(t1, w, H), P(t0, w, H), color.map(x => x * 0.78), sd + 1);
+    b.quad(P(t0, -w, 0), P(t1, -w, 0), P(t1, -w, H), P(t0, -w, H), color.map(x => x * 0.68), sd + 2);
+  }
+}
+
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// World layout. The three walls lie on the great circles x=0, z=0, w=0 of the ground sphere,
+// cutting it into 8 triangles, each with three 90° corners. Towers mark the 6 corners.
+const HOUSE_CENTER = norm([1, 0, -1, 1]);
+const SPAWN_CORNER = [0, 0, 0, 1];
+function buildWorld(R) {
+  const ground = new Builder(), world = new Builder();
+  addGround(ground, R);
+  addWall(world, Z, W, X, R, 1, 1, COLORS.cobble);   // circle x = 0
+  addWall(world, X, W, Z, R, 1, 1, COLORS.cobble);   // circle z = 0
+  addWall(world, X, Z, W, R, 1, 1, COLORS.cobble);   // circle w = 0
+  const towers = [
+    [[0, 0, 0, 1], 'red'], [[0, 0, 0, -1], 'white'], [[1, 0, 0, 0], 'blue'],
+    [[-1, 0, 0, 0], 'orange'], [[0, 0, -1, 0], 'yellow'], [[0, 0, 1, 0], 'purple']
+  ];
+  for (const [g, colr] of towers) {
+    const toward = g[W] !== 0 ? [1, 0, 0, 0] : [0, 0, 0, 1];
+    addVoxels(world, towerVoxels(colr), frameAt(g, toward), R, [0.5, 0, 0.5]);
+  }
+  addVoxels(world, houseVoxels(), frameAt(HOUSE_CENTER, SPAWN_CORNER), R, [0.5, 0, 0.5]);
+
+  const rng = mulberry32(1234);
+  const nTrees = Math.max(20, Math.min(220, Math.round(0.018 * 4 * Math.PI * R * R)));
+  let placed = 0, tries = 0;
+  while (placed < nTrees && tries < 5000) {
+    tries++;
+    const gauss = () => Math.sqrt(-2 * Math.log(rng() + 1e-12)) * Math.cos(TAU * rng());
+    const g = norm([gauss(), 0, gauss(), gauss()]);
+    if ([X, Z, W].some(i => Math.asin(Math.min(1, Math.abs(g[i]))) * R < 3.2)) continue;
+    if (Math.acos(Math.min(1, dot(g, HOUSE_CENTER))) * R < 9) continue;
+    const toward = norm([rng() - 0.5, 0, rng() - 0.5, rng() - 0.5]);
+    if (Math.abs(dot(toward, g)) > 0.99) continue;
+    addVoxels(world, treeVoxels(rng), frameAt(g, toward), R, [0.5, 0, 0.5]);
+    placed++;
+  }
+  return { ground: ground.geometry(), world: world.geometry() };
+}
+
+// ---------------------------------------------------------------------------
+// Shaders. Light travels along great circles. A point x (in camera coordinates, camera at
+// e_w looking down -z) is seen in direction x.xyz at distance d = atan2(|x.xyz|, x.w), and,
+// because light can also go the long way round, in direction -x.xyz at distance 2π - d.
+// Screen position only depends on direction, so a standard perspective matrix applied to
+// x.xyz gives exact apparent sizes (∝ 1/sin d). Depth is written per-fragment from d.
+// ---------------------------------------------------------------------------
+const vert = `
+precision highp float;
+uniform mat4 uView; uniform mat4 uProj; uniform float uImage;
+in vec4 position; in vec3 col; in vec2 uv; in float seed;
+out vec4 vX; out vec3 vCol; out vec2 vUv; out float vSeed;
+void main() {
+  vec4 x = uView * position;
+  vX = x; vCol = col; vUv = uv; vSeed = seed;
+  vec3 v = uImage > 0.5 ? -x.xyz : x.xyz;
+  vec4 clip = uProj * vec4(v, 1.0);
+  clip.z = 0.0;            // depth comes from gl_FragDepth; this clips exactly at the eye plane
+  gl_Position = clip;
+}`;
+const frag = `
+precision highp float;
+uniform float uImage; uniform float uR; uniform float uFog; uniform vec3 uSky;
+in vec4 vX; in vec3 vCol; in vec2 vUv; in float vSeed;
+out vec4 outColor;
+float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+void main() {
+  float d = atan(length(vX.xyz), vX.w);          // geodesic distance (radians), in [0, π]
+  if (uImage > 0.5) d = 6.28318530718 - d;       // the long way round
+  gl_FragDepth = d / 6.28318530718;
+  vec2 cell = floor(clamp(vUv, 0.0, 0.999) * 8.0);
+  float n = hash(vec3(cell, vSeed));
+  vec3 c = vCol * (0.86 + 0.22 * n);
+  vec2 e2 = min(vUv, 1.0 - vUv); float e = min(e2.x, e2.y);
+  c *= mix(0.55, 1.0, smoothstep(0.0, 0.045, e));
+  float D = d * uR;
+  float f = uFog > 0.0 ? exp(-D / uFog) : 1.0;
+  outColor = vec4(mix(uSky, c, f), 1.0);
+}`;
+
+// ---------------------------------------------------------------------------
+// Renderer & scene
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('c');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+} catch (e) {
+  const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = 'WebGL2 is required for this demo: ' + e.message; throw e;
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const SKY = new THREE.Color(0.55, 0.76, 0.95);
+renderer.setClearColor(SKY);
+const scene = new THREE.Scene();
+const dummyCam = new THREE.Camera();
+
+const uniformsBase = () => ({
+  uView: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() },
+  uImage: { value: 0 }, uR: { value: 16 }, uFog: { value: 40 }, uSky: { value: new THREE.Vector3(SKY.r, SKY.g, SKY.b) }
+});
+const mats = [0, 1].map(img => {
+  const u = uniformsBase(); u.uImage.value = img;
+  return new THREE.RawShaderMaterial({ uniforms: u, vertexShader: vert, fragmentShader: frag, glslVersion: THREE.GLSL3, side: THREE.DoubleSide });
+});
+
+let meshes = [];
+function rebuild() {
+  for (const m of meshes) { scene.remove(m); m.geometry.dispose(); }
+  meshes = [];
+  const geo = buildWorld(state.R);
+  for (const [name, g] of [['ground', geo.ground], ['world', geo.world]]) {
+    for (const img of [0, 1]) {
+      const m = new THREE.Mesh(img ? g.clone() : g, mats[img]);
+      m.frustumCulled = false; m.userData = { name, img };
+      scene.add(m); meshes.push(m);
+    }
+  }
+  applyVisibility();
+}
+function applyVisibility() {
+  for (const m of meshes) m.visible = (m.userData.name !== 'ground' || state.ground) && (m.userData.img === 0 || state.second);
+}
+
+function perspective(fovDeg, aspect) {
+  const f = 1 / Math.tan(fovDeg * Math.PI / 360), m = new Float32Array(16);
+  m[0] = f / aspect; m[5] = f; m[11] = -1;                   // clip.w = -z ; z row unused
+  return m;
+}
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  const P = perspective(75, window.innerWidth / window.innerHeight);
+  for (const m of mats) m.uniforms.uProj.value.fromArray(P);
+}
+window.addEventListener('resize', resize);
+
+// ---------------------------------------------------------------------------
+// Player. B is the body frame: an isometry fixing e_y, so you always stand on the ground.
+// Walking = rotating R⁴ in a (direction, w) plane of the body frame.
+// ---------------------------------------------------------------------------
+const state = { R: 16, h: 1.7, pitch: 0, B: id4(), B0: null, fog: true, ground: true, second: true, auto: false };
+function spawn() {
+  // stand on top of the red corner tower, facing along the corner's bisector into the triangle
+  state.B = renorm(rot(X, Z, Math.PI / 4)); state.B0 = state.B; state.h = 10.6; state.pitch = -0.32;
+}
+spawn();
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  if (e.code === 'KeyF') toggleAuto();
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+const SENS = 0.0025;
+let dragging = false;
+function look(dx, dy) {
+  state.B = mul(state.B, rot(X, Z, dx * SENS));
+  state.pitch = Math.max(-1.55, Math.min(1.55, state.pitch - dy * SENS));
+}
+canvas.addEventListener('pointerdown', e => {
+  dragging = true;
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === 'mouse' && document.pointerLockElement !== canvas) {
+    try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+  }
+});
+canvas.addEventListener('pointerup', () => { dragging = false; });
+canvas.addEventListener('pointermove', e => {
+  if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0);
+});
+
+// UI
+const $ = id => document.getElementById(id);
+$('rslider').addEventListener('input', e => {
+  state.R = +e.target.value; $('rval').textContent = state.R;
+  rebuild();
+});
+$('tGround').addEventListener('change', e => { state.ground = e.target.checked; applyVisibility(); });
+$('tFog').addEventListener('change', e => { state.fog = e.target.checked; });
+$('tSecond').addEventListener('change', e => { state.second = e.target.checked; applyVisibility(); });
+$('bSpawn').addEventListener('click', () => spawn());
+$('bHouse').addEventListener('click', () => {
+  // house frame's local +z points at the door; turn around to face it, then step back 1.5 blocks
+  state.B = renorm(mul(mul(frameAt(HOUSE_CENTER, SPAWN_CORNER), rot(X, Z, Math.PI)), rot(W, Z, 1.5 / state.R)));
+  state.h = 2.6; state.pitch = 0;
+});
+$('bPole').addEventListener('click', () => { state.h = 0.9 * Math.PI * state.R / 2; state.pitch = -0.6; });
+function toggleAuto() { state.auto = !state.auto; $('bAuto').textContent = 'Auto-walk: ' + (state.auto ? 'on' : 'off'); $('bAuto').classList.toggle('on', state.auto); }
+$('bAuto').addEventListener('click', toggleAuto);
+$('tipsToggle').addEventListener('click', () => {
+  const b = $('tipsBody'), hidden = b.style.display === 'none';
+  b.style.display = hidden ? '' : 'none'; $('tipsToggle').textContent = hidden ? 'hide' : 'show';
+});
+
+function step(dt) {
+  let f = 0, s = 0, turn = 0;
+  if (keys.KeyW) f += 1; if (keys.KeyS) f -= 1; if (keys.KeyD) s += 1; if (keys.KeyA) s -= 1;
+  if (keys.ArrowUp) f += 1; if (keys.ArrowDown) f -= 1; if (keys.ArrowLeft) turn -= 1; if (keys.ArrowRight) turn += 1;
+  if (state.auto && f === 0 && s === 0) f = 1;
+  const speed = (keys.ShiftLeft || keys.ShiftRight) ? 16 : 6;
+  const len = Math.hypot(f, s);
+  if (len > 0) {
+    const d = speed * dt / state.R;
+    state.B = mul(state.B, rot(W, Z, -(f / len) * d));
+    state.B = mul(state.B, rot(W, X, (s / len) * d));
+  }
+  if (turn) state.B = mul(state.B, rot(X, Z, turn * 2.0 * dt));
+  if (keys.KeyE) state.h += 5 * dt; if (keys.KeyQ) state.h -= 5 * dt;
+  state.h = Math.max(0.6, Math.min(0.97 * Math.PI * state.R / 2, state.h));
+  state.B = renorm(state.B);
+}
+
+let last = performance.now(), hudT = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  step(dt);
+  const C = mul(mul(state.B, rot(W, Y, state.h / state.R)), rot(Z, Y, -state.pitch));
+  const V = Float32Array.from(transpose(C));
+  for (const m of mats) {
+    m.uniforms.uView.value.fromArray(V);
+    m.uniforms.uR.value = state.R;
+    m.uniforms.uFog.value = state.fog ? 2.5 * state.R : 0;
+  }
+  renderer.render(scene, dummyCam);
+  hudT += dt;
+  if (hudT > 0.1) {
+    hudT = 0;
+    const d = Math.acos(Math.max(-1, Math.min(1, dot(col(state.B, 3), col(state.B0, 3))))) * state.R;
+    $('sDist').textContent = d.toFixed(1);
+    $('sCirc').textContent = (TAU * state.R).toFixed(1);
+    $('sH').textContent = state.h.toFixed(1);
+    $('sPole').textContent = (Math.PI * state.R / 2).toFixed(1);
+  }
+  requestAnimationFrame(frame);
+}
+resize();
+rebuild();
+requestAnimationFrame(frame);
+window.__demo = { state, spawn, rebuild, applyVisibility, look, keys };
+</script>
+</body>
+</html>

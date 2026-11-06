@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blocks in Hyperbolic Space — H³ demo</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc8f0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(15, 20, 30, 0.72); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 270px; }
+  #stats { top: 10px; right: 10px; text-align: right; }
+  #tips { bottom: 10px; right: 10px; width: 340px; max-height: calc(100vh - 120px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #4f7a3a; border-color: #7bb35d; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 2px 0; }
+  #tipsToggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+
+<div id="controls" class="panel">
+  <h1>Blocks in hyperbolic space (H³)</h1>
+  <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint · <kbd>E</kbd>/<kbd>Q</kbd> fly up/down · <kbd>F</kbd> auto-walk</div>
+  <div class="row">
+    <label>Curvature radius R = <b id="rval">8</b> blocks</label>
+    <input id="rslider" type="range" min="5" max="12" step="1" value="8">
+    <div class="muted">Smaller R = stronger curvature (applied on release).</div>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="tFog" checked> Fog (distance haze)</label>
+  </div>
+  <div class="row">
+    <button id="bSpawn">Spawn</button>
+    <button id="bRails">Above the rails</button>
+    <button id="bHouse">Inside house</button>
+    <button id="bHigh">Fly way up</button>
+    <button id="bAuto">Auto-walk: off</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Distance from start: <b id="sDist">0.0</b> blocks · eye height <span id="sH">1.7</span></div>
+  <div class="muted">A circle of radius <span id="sR1">0</span> around the start has</div>
+  <div class="muted">circumference <b id="sC1">0</b> blocks (flat space: <span id="sC0">0</span>)</div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tipsToggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tipsBody">
+  <ol>
+    <li><b>The rails.</b> The coloured walls all start at right angles to the same straight cobblestone wall, 3 blocks apart. In flat space they'd be parallel forever. Here every wall is perfectly straight and they still fan apart, exponentially. Press <b>Above the rails</b>.</li>
+    <li><b>Square tiles, but five at a corner.</b> The stone roads outline identical square tiles. Each one has 72° corners, so <i>five</i> meet at every crossing instead of four.</li>
+    <li><b>Room grows exponentially.</b> Watch the circumference readout as you walk away from the start. Distant things shrink exponentially, and there's far more "world" at each distance than in flat space.</li>
+    <li><b>Fly way up</b> (<kbd>E</kbd>). The ground is an infinite plane, yet from high up it shrinks to a small disk below you, and the horizon sinks far below eye level.</li>
+    <li><b>Slide R</b> to 12 for a gentler curvature.</li>
+  </ol>
+  </div>
+</div>
+<div id="err"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+// ---------------------------------------------------------------------------
+// Hyperboloid model: H³ = { x ∈ R^{3,1} : <x,x> = -1, w > 0 } with <a,b> = ax bx + ay by + az bz - aw bw.
+// Isometries are Lorentz transformations SO+(3,1); "moving" = boosting.
+// 4x4 matrices are column-major (m[c*4 + r]); coordinates are (x, y, z, w).
+// ---------------------------------------------------------------------------
+const X = 0, Y = 1, Z = 2, W = 3, TAU = Math.PI * 2;
+const id4 = () => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; };
+function mul(a, b) {
+  const o = new Float64Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; }
+  return o;
+}
+function apply(m, v) { const o = [0, 0, 0, 0]; for (let r = 0; r < 4; r++) o[r] = m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2] + m[12 + r] * v[3]; return o; }
+function rot(i, j, a) { const m = id4(), c = Math.cos(a), s = Math.sin(a); m[i * 4 + i] = c; m[i * 4 + j] = s; m[j * 4 + i] = -s; m[j * 4 + j] = c; return m; }
+// boost along spatial axis i: e_w -> cosh a e_w + sinh a e_i
+function boost(i, a) { const m = id4(), c = Math.cosh(a), s = Math.sinh(a); m[W * 4 + W] = c; m[W * 4 + i] = s; m[i * 4 + W] = s; m[i * 4 + i] = c; return m; }
+// inverse of a Lorentz matrix: J Cᵀ J
+function lorentzInv(C) { const o = new Float64Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { const sg = ((r === W) !== (c === W)) ? -1 : 1; o[c * 4 + r] = sg * C[r * 4 + c]; } return o; }
+const col = (m, c) => [m[c * 4], m[c * 4 + 1], m[c * 4 + 2], m[c * 4 + 3]];
+function fromCols(a, b, c, d) { const m = new Float64Array(16); [a, b, c, d].forEach((v, ci) => { for (let r = 0; r < 4; r++) m[ci * 4 + r] = v[r]; }); return m; }
+const mdot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] - a[3] * b[3];
+const scale = (a, s) => a.map(x => x * s);
+const add = (a, b) => a.map((x, i) => x + b[i]);
+const lin = (a, s, b, t) => a.map((x, i) => s * x + t * b[i]);
+const mnorm = a => { const n = Math.sqrt(Math.abs(mdot(a, a))); return a.map(x => x / n); };
+// Minkowski "cross product" inside the (x, z, w) slice (the ground plane y = 0)
+function crossM(a, b) {
+  const ax = a[X], az = a[Z], aw = a[W], bx = b[X], bz = b[Z], bw = b[W];
+  return [az * bw - aw * bz, 0, aw * bx - ax * bw, -(ax * bz - az * bx)];
+}
+function det4(m) {
+  const a = (r, c) => m[c * 4 + r]; let det = 0;
+  for (let c = 0; c < 4; c++) {
+    const s = []; for (let r = 1; r < 4; r++) for (let cc = 0; cc < 4; cc++) if (cc !== c) s.push(a(r, cc));
+    det += (c % 2 ? -1 : 1) * a(0, c) * (s[0] * (s[4] * s[8] - s[5] * s[7]) - s[1] * (s[3] * s[8] - s[5] * s[6]) + s[2] * (s[3] * s[7] - s[4] * s[6]));
+  }
+  return det;
+}
+const EY = [0, 1, 0, 0], EW = [0, 0, 0, 1];
+const hdist = (a, b) => Math.acosh(Math.max(1, -mdot(a, b)));
+
+// An isometry that fixes e_y (so it maps the ground plane y=0 to itself), sends e_w to g and
+// local +z toward `toward`.
+function frameAt(g, toward) {
+  g = mnorm(g);
+  const t = mnorm(add(toward, scale(g, mdot(toward, g))));
+  const r = mnorm(crossM(t, g));
+  let M = fromCols(r, EY, t, g);
+  if (det4(M) < 0) M = fromCols(scale(r, -1), EY, t, g);
+  return M;
+}
+function renorm(B) {
+  let g = col(B, 3); g[Y] = 0; g = mnorm(g); if (g[W] < 0) g = scale(g, -1);
+  let t = col(B, 2); t[Y] = 0; t = mnorm(add(t, scale(g, mdot(t, g))));
+  let r = mnorm(crossM(t, g));
+  const old = col(B, 0);
+  if (r[0] * old[0] + r[2] * old[2] + r[3] * old[3] < 0) r = scale(r, -1);
+  return fromCols(r, EY, t, g);
+}
+
+// ---------------------------------------------------------------------------
+// Geometry
+// ---------------------------------------------------------------------------
+class Builder {
+  constructor() { this.pos = []; this.col = []; this.uv = []; this.seed = []; this.idx = []; }
+  quad(p0, p1, p2, p3, c, seed) {
+    const base = this.pos.length / 4;
+    for (const p of [p0, p1, p2, p3]) this.pos.push(p[0], p[1], p[2], p[3]);
+    this.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let k = 0; k < 4; k++) { this.col.push(c[0], c[1], c[2]); this.seed.push(seed); }
+    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  geometry() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 4));
+    g.setAttribute('col', new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    g.setAttribute('seed', new THREE.Float32BufferAttribute(this.seed, 1));
+    g.setIndex(this.idx);
+    return g;
+  }
+}
+const COLORS = {
+  planks: [0.74, 0.57, 0.34], log: [0.42, 0.31, 0.19], cobble: [0.55, 0.55, 0.55], glass: [0.70, 0.87, 0.96],
+  roof: [0.64, 0.25, 0.20], brick: [0.58, 0.30, 0.25], leaves: [0.24, 0.52, 0.20],
+  red: [0.80, 0.20, 0.18], blue: [0.20, 0.35, 0.80], yellow: [0.92, 0.80, 0.20], purple: [0.55, 0.25, 0.70],
+  orange: [0.92, 0.50, 0.15], white: [0.92, 0.92, 0.92], lime: [0.45, 0.80, 0.20], cyan: [0.20, 0.70, 0.75], gold: [0.95, 0.78, 0.25]
+};
+const SHADE = { px: 0.82, nx: 0.82, py: 1.0, ny: 0.55, pz: 0.68, nz: 0.68 };
+
+// Local structures are built in block coordinates and mapped into H³ with the exponential map
+// at their base (distances from the base point are preserved), then moved by an isometry M.
+function expMap(p, R) {
+  const r = Math.hypot(p[0], p[1], p[2]) / R;
+  if (r < 1e-9) return [0, 0, 0, 1];
+  const s = Math.sinh(r) / (r * R);
+  return [p[0] * s, p[1] * s, p[2] * s, Math.cosh(r)];
+}
+function addVoxels(b, vox, M, R, off) {
+  const dirs = [[1, 0, 0, 'px'], [-1, 0, 0, 'nx'], [0, 1, 0, 'py'], [0, -1, 0, 'ny'], [0, 0, 1, 'pz'], [0, 0, -1, 'nz']];
+  const toH = p => apply(M, expMap([p[0] - off[0], p[1] - off[1], p[2] - off[2]], R));
+  for (const [key, type] of vox) {
+    const [i, j, k] = key.split(',').map(Number);
+    for (const [dx, dy, dz, name] of dirs) {
+      if (vox.has(`${i + dx},${j + dy},${k + dz}`)) continue;
+      if (dy < 0 && j === 0) continue;
+      const a = dx ? 0 : dy ? 1 : 2, s = dx + dy + dz, u = (a + 1) % 3, v = (a + 2) % 3;
+      const cs = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([cu, cv]) => { const p = [i, j, k]; if (s > 0) p[a] += 1; p[u] += cu; p[v] += cv; return toH(p); });
+      b.quad(cs[0], cs[1], cs[2], cs[3], COLORS[type].map(x => x * SHADE[name]), ((i * 73.1 + j * 19.7 + k * 41.3 + a * 7.9) % 97 + 97) % 97);
+    }
+  }
+}
+function houseVoxels() {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t), del = (x, y, z) => v.delete(`${x},${y},${z}`);
+  for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) set(x, 0, z, (Math.abs(x) === 4 || Math.abs(z) === 3) ? 'cobble' : 'planks');
+  for (let y = 1; y <= 4; y++) for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) {
+    const ex = Math.abs(x) === 4, ez = Math.abs(z) === 3; if (ex || ez) set(x, y, z, ex && ez ? 'log' : 'planks');
+  }
+  del(0, 1, 3); del(0, 2, 3);
+  for (const y of [2, 3]) { for (const x of [-2, 2]) { set(x, y, 3, 'glass'); set(x, y, -3, 'glass'); } set(4, y, 0, 'glass'); set(-4, y, 0, 'glass'); }
+  for (let k = 0; k <= 4; k++) {
+    const y = 5 + k, zr = 4 - k;
+    for (let x = -5; x <= 5; x++) { set(x, y, zr, 'roof'); set(x, y, -zr, 'roof'); if (zr >= 1) { set(x, y, zr - 1, 'roof'); set(x, y, -(zr - 1), 'roof'); } }
+    for (const x of [-4, 4]) for (let z = -(zr - 2); z <= zr - 2; z++) set(x, y, z, 'planks');
+  }
+  for (let y = 6; y <= 10; y++) set(2, y, -1, 'brick');
+  return v;
+}
+function treeVoxels(rng) {
+  const v = new Map(), set = (x, y, z, t) => v.set(`${x},${y},${z}`, t);
+  const hgt = 4 + Math.floor(rng() * 2);
+  for (let y = hgt - 1; y <= hgt; y++) for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) { if (Math.abs(x) === 2 && Math.abs(z) === 2 && rng() < 0.7) continue; set(x, y, z, 'leaves'); }
+  for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) set(x, hgt + 1, z, 'leaves');
+  for (const [x, z] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) set(x, hgt + 2, z, 'leaves');
+  for (let y = 0; y < hgt; y++) set(0, y, 0, 'log');
+  return v;
+}
+
+// Ground: the {4,5} tiling of the hyperbolic plane y=0 (regular squares, five around each vertex),
+// generated by repeatedly reflecting a central square across its edges. Each square is subdivided
+// in Klein (projective) coordinates so all grid lines are geodesics.
+function makeTiles(rMax) {
+  const rho = Math.acosh(1 / Math.tan(Math.PI / 4) / Math.tan(Math.PI / 5));    // circumradius
+  const d = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([a, c]) => [a / Math.SQRT2, 0, c / Math.SQRT2, 0]);
+  const first = { c: EW.slice(), v: d.map(dd => lin(EW, Math.cosh(rho), dd, Math.sinh(rho))) };
+  const key = t => `${Math.round(t.c[X] * 1e3)},${Math.round(t.c[Z] * 1e3)}`;
+  const tiles = [first], seen = new Set([key(first)]);
+  for (let qi = 0; qi < tiles.length; qi++) {
+    const t = tiles[qi];
+    for (let e = 0; e < 4; e++) {
+      const a = t.v[e], b = t.v[(e + 1) % 4];
+      const n = mnorm(crossM(a, b));
+      const refl = x => { const k = 2 * mdot(x, n); return mnorm(x.map((xi, i) => xi - k * n[i])); };
+      const nt = { c: refl(t.c), v: t.v.map(refl) };
+      if (Math.acosh(Math.max(1, nt.c[W])) > rMax) continue;
+      const kk = key(nt); if (seen.has(kk)) continue;
+      seen.add(kk); tiles.push(nt);
+    }
+  }
+  return { tiles, edge: hdist(first.v[0], first.v[1]) };
+}
+function addGround(b, tiles, nSub) {
+  let cell = 0;
+  tiles.forEach((t, ti) => {
+    const K = t.v.map(p => [p[X] / p[W], p[Z] / p[W]]);
+    const Q = (s, u) => {
+      const x = (1 - s) * (1 - u) * K[0][0] + s * (1 - u) * K[1][0] + s * u * K[2][0] + (1 - s) * u * K[3][0];
+      const z = (1 - s) * (1 - u) * K[0][1] + s * (1 - u) * K[1][1] + s * u * K[2][1] + (1 - s) * u * K[3][1];
+      return [x, 0, z, 1];
+    };
+    const tint = 0.95 + 0.1 * ((Math.sin(ti * 91.7) * 43758.5) % 1 + 1) % 1;
+    for (let i = 0; i < nSub; i++) for (let j = 0; j < nSub; j++) {
+      const h = Math.sin(cell * 12.9898) * 43758.5453, r = h - Math.floor(h);
+      const border = i === 0 || j === 0 || i === nSub - 1 || j === nSub - 1;
+      let c;
+      if (border) c = [0.58, 0.58, 0.60].map(x => x * (0.93 + 0.1 * r));
+      else if (r < 0.04) c = [0.55, 0.42, 0.27];
+      else c = (((i + j) & 1) ? [0.36, 0.60, 0.25] : [0.40, 0.65, 0.28]).map(x => x * tint * (0.95 + 0.08 * r));
+      b.quad(Q(i / nSub, j / nSub), Q((i + 1) / nSub, j / nSub), Q((i + 1) / nSub, (j + 1) / nSub), Q(i / nSub, (j + 1) / nSub), c, (cell * 0.37) % 97);
+      cell++;
+    }
+  });
+}
+// A wall along the geodesic u -> cosh(u) P + sinh(u) T, u in [u0, u1] (blocks), with in-plane side normal S.
+function addWall(b, P, T, S, u0, u1, R, height, width, color) {
+  const n = Math.max(2, Math.round(u1 - u0));
+  const pt = (u, off, h) => {
+    const g = lin(P, Math.cosh(u / R), T, Math.sinh(u / R));
+    const s = lin(g, Math.cosh(off / R), S, Math.sinh(off / R));
+    return lin(s, Math.cosh(h / R), EY, Math.sinh(h / R));
+  };
+  const w = width / 2;
+  for (let k = 0; k < n; k++) {
+    const a = u0 + (u1 - u0) * k / n, c = u0 + (u1 - u0) * (k + 1) / n, sd = (k * 3.7) % 97;
+    b.quad(pt(a, -w, height), pt(c, -w, height), pt(c, w, height), pt(a, w, height), color, sd);
+    b.quad(pt(a, w, 0), pt(c, w, 0), pt(c, w, height), pt(a, w, height), color.map(x => x * 0.78), sd + 1);
+    b.quad(pt(a, -w, 0), pt(c, -w, 0), pt(c, -w, height), pt(a, -w, height), color.map(x => x * 0.68), sd + 2);
+    if (k === 0) b.quad(pt(a, -w, 0), pt(a, w, 0), pt(a, w, height), pt(a, -w, height), color.map(x => x * 0.85), sd + 3);
+    if (k === n - 1) b.quad(pt(c, -w, 0), pt(c, w, 0), pt(c, w, height), pt(c, -w, height), color.map(x => x * 0.85), sd + 3);
+  }
+}
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+const RAIL_START = 5, RAIL_SPACING = 3, RAIL_LEN = 60, RAIL_K = 3;
+let layout = {};
+function buildWorld(R) {
+  const ground = new Builder(), world = new Builder();
+  const { tiles, edge } = makeTiles(5.2);
+  const nSub = Math.max(3, Math.min(16, Math.round(edge * R)));
+  addGround(ground, tiles, nSub);
+
+  // Rails: a straight base wall crossing in front of the spawn point, and straight walls leaving it at
+  // right angles every RAIL_SPACING blocks. In flat space these would be parallel.
+  const s0 = RAIL_START / R;
+  const P0 = col(boost(Z, -s0), W);                 // point RAIL_START blocks ahead
+  const N0 = scale(col(boost(Z, -s0), Z), -1);      // unit normal pointing away from spawn
+  const EX = [1, 0, 0, 0];
+  addWall(world, P0, EX, N0, -RAIL_SPACING * RAIL_K - 6, RAIL_SPACING * RAIL_K + 6, R, 1, 1, COLORS.cobble);
+  const railColors = ['red', 'orange', 'yellow', 'lime', 'cyan', 'blue', 'purple'];
+  const rungs = [];
+  for (let k = -RAIL_K; k <= RAIL_K; k++) {
+    const s = k * RAIL_SPACING / R;
+    const Bk = lin(P0, Math.cosh(s), EX, Math.sinh(s));
+    const Tk = lin(P0, Math.sinh(s), EX, Math.cosh(s));      // base wall direction at Bk = rung's side normal
+    addWall(world, Bk, N0, Tk, 0.5, RAIL_LEN, R, 1, 1, COLORS[railColors[k + RAIL_K]]);
+    rungs.push({ Bk, Tk });
+  }
+  // House to the right of spawn, door facing spawn
+  const HC = col(boost(X, 14 / R), W);
+  addVoxels(world, houseVoxels(), frameAt(HC, EW), R, [0.5, 0, 0.5]);
+
+  // Trees on tile centres, away from rails, house and spawn
+  const rng = mulberry32(99);
+  for (const t of tiles) {
+    if (rng() > 0.6) continue;
+    const off = [(rng() - 0.5) * 0.5 * edge, (rng() - 0.5) * 0.5 * edge];
+    const q = apply(mul(frameAt(t.c, t.v[0]), mul(boost(X, off[0]), boost(Z, off[1]))), EW);
+    if (hdist(q, EW) * R < 5 || hdist(q, HC) * R < 9) continue;
+    if (Math.asinh(Math.abs(mdot(q, N0))) * R < 3) continue;                         // base wall line
+    const ahead = mdot(q, N0) > 0;                                                     // beyond the base wall
+    if (ahead && rungs.some(r => Math.asinh(Math.abs(mdot(q, r.Tk))) * R < 3)) continue;
+    const ref = hdist(q, EW) > 0.05 ? EW : col(boost(X, 1), W);
+    addVoxels(world, treeVoxels(rng), mul(frameAt(q, ref), rot(X, Z, rng() * TAU)), R, [0.5, 0, 0.5]);
+  }
+  layout = { HC, P0, N0 };
+  return { ground: ground.geometry(), world: world.geometry() };
+}
+
+// ---------------------------------------------------------------------------
+// Shaders. Camera at e_w looking down -z. The geodesic direction to a point x is x.xyz, so a
+// standard perspective projection of x.xyz is exact. Distance d = atanh(|x.xyz| / x.w) is
+// scale-invariant, so it also works for points on flat chords (which project to geodesic faces).
+// ---------------------------------------------------------------------------
+const vert = `
+precision highp float;
+uniform mat4 uView; uniform mat4 uProj;
+in vec4 position; in vec3 col; in vec2 uv; in float seed;
+out vec4 vX; out vec3 vCol; out vec2 vUv; out float vSeed;
+void main() {
+  vec4 x = uView * position;
+  vX = x; vCol = col; vUv = uv; vSeed = seed;
+  vec4 clip = uProj * vec4(x.xyz, 1.0);
+  clip.z = 0.0;
+  gl_Position = clip;
+}`;
+const frag = `
+precision highp float;
+uniform float uR; uniform float uFog; uniform vec3 uSky;
+in vec4 vX; in vec3 vCol; in vec2 vUv; in float vSeed;
+out vec4 outColor;
+float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+void main() {
+  float q = min(length(vX.xyz) / vX.w, 0.9999999);
+  float d = 0.5 * log((1.0 + q) / (1.0 - q));     // atanh: hyperbolic distance in curvature units
+  gl_FragDepth = d / (d + 1.0);
+  vec2 cell = floor(clamp(vUv, 0.0, 0.999) * 8.0);
+  vec3 c = vCol * (0.86 + 0.22 * hash(vec3(cell, vSeed)));
+  vec2 e2 = min(vUv, 1.0 - vUv);
+  c *= mix(0.55, 1.0, smoothstep(0.0, 0.045, min(e2.x, e2.y)));
+  float f = uFog > 0.0 ? exp(-d * uR / uFog) : 1.0;
+  outColor = vec4(mix(uSky, c, f), 1.0);
+}`;
+
+const canvas = document.getElementById('c');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = 'WebGL2 is required: ' + e.message; throw e; }
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const SKY = new THREE.Color(0.62, 0.80, 0.95);
+renderer.setClearColor(SKY);
+const scene = new THREE.Scene(), dummyCam = new THREE.Camera();
+const mat = new THREE.RawShaderMaterial({
+  uniforms: { uView: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() }, uR: { value: 8 }, uFog: { value: 20 }, uSky: { value: new THREE.Vector3(SKY.r, SKY.g, SKY.b) } },
+  vertexShader: vert, fragmentShader: frag, glslVersion: THREE.GLSL3, side: THREE.DoubleSide
+});
+let meshes = [];
+function rebuild() {
+  for (const m of meshes) { scene.remove(m); m.geometry.dispose(); }
+  const geo = buildWorld(state.R);
+  meshes = [geo.ground, geo.world].map(g => { const m = new THREE.Mesh(g, mat); m.frustumCulled = false; scene.add(m); return m; });
+}
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  const f = 1 / Math.tan(75 * Math.PI / 360), P = new Float32Array(16);
+  P[0] = f / (window.innerWidth / window.innerHeight); P[5] = f; P[11] = -1;
+  mat.uniforms.uProj.value.fromArray(P);
+}
+window.addEventListener('resize', resize);
+
+// Player: body frame B fixes e_y, so you always stand on the plane y = 0.
+const state = { R: 8, h: 4.5, pitch: 0, B: id4(), B0: id4(), fog: true, auto: false };
+function spawn() { state.B = boost(Z, 2 / state.R); state.h = 4.5; state.pitch = -0.3; }
+spawn();
+
+const keys = {};
+window.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; keys[e.code] = true; if (e.code === 'KeyF') toggleAuto(); if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault(); });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+const SENS = 0.0025; let dragging = false;
+function look(dx, dy) { state.B = mul(state.B, rot(X, Z, dx * SENS)); state.pitch = Math.max(-1.55, Math.min(1.55, state.pitch - dy * SENS)); }
+canvas.addEventListener('pointerdown', e => {
+  dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === 'mouse' && document.pointerLockElement !== canvas) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+});
+canvas.addEventListener('pointerup', () => { dragging = false; });
+canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0); });
+
+const $ = id => document.getElementById(id);
+$('rslider').addEventListener('input', e => { $('rval').textContent = e.target.value; });
+$('rslider').addEventListener('change', e => { state.R = +e.target.value; rebuild(); });
+$('tFog').addEventListener('change', e => { state.fog = e.target.checked; });
+$('bSpawn').addEventListener('click', spawn);
+$('bRails').addEventListener('click', () => { state.B = boost(Z, -12 / state.R); state.h = 1.1 * state.R; state.pitch = -1.2; });
+$('bHouse').addEventListener('click', () => { state.B = renorm(mul(mul(frameAt(layout.HC, EW), rot(X, Z, Math.PI)), boost(Z, 1.5 / state.R))); state.h = 2.6; state.pitch = 0; });
+$('bHigh').addEventListener('click', () => { state.B = id4(); state.h = 1.7 * state.R; state.pitch = -1.45; });
+function toggleAuto() { state.auto = !state.auto; $('bAuto').textContent = 'Auto-walk: ' + (state.auto ? 'on' : 'off'); $('bAuto').classList.toggle('on', state.auto); }
+$('bAuto').addEventListener('click', toggleAuto);
+$('tipsToggle').addEventListener('click', () => { const b = $('tipsBody'), hidden = b.style.display === 'none'; b.style.display = hidden ? '' : 'none'; $('tipsToggle').textContent = hidden ? 'hide' : 'show'; });
+
+function step(dt) {
+  let f = 0, s = 0, turn = 0;
+  if (keys.KeyW || keys.ArrowUp) f += 1; if (keys.KeyS || keys.ArrowDown) f -= 1; if (keys.KeyD) s += 1; if (keys.KeyA) s -= 1;
+  if (keys.ArrowLeft) turn -= 1; if (keys.ArrowRight) turn += 1;
+  if (state.auto && f === 0 && s === 0) f = 1;
+  const speed = (keys.ShiftLeft || keys.ShiftRight) ? 16 : 6, len = Math.hypot(f, s);
+  if (len > 0) { const d = speed * dt / state.R; state.B = mul(state.B, boost(Z, -(f / len) * d)); state.B = mul(state.B, boost(X, (s / len) * d)); }
+  if (turn) state.B = mul(state.B, rot(X, Z, turn * 2 * dt));
+  if (keys.KeyE) state.h += Math.max(5, state.h) * 0.8 * dt; if (keys.KeyQ) state.h -= Math.max(5, state.h) * 0.8 * dt;
+  state.h = Math.max(0.6, Math.min(6 * state.R, state.h));
+  state.B = renorm(state.B);
+}
+let last = performance.now(), hudT = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  step(dt);
+  const C = mul(mul(state.B, boost(Y, state.h / state.R)), rot(Z, Y, -state.pitch));
+  mat.uniforms.uView.value.fromArray(Float32Array.from(lorentzInv(C)));
+  mat.uniforms.uR.value = state.R;
+  mat.uniforms.uFog.value = state.fog ? 2.6 * state.R : 0;
+  renderer.render(scene, dummyCam);
+  if ((hudT += dt) > 0.1) {
+    hudT = 0;
+    const d = hdist(col(state.B, 3), col(state.B0, 3)) * state.R;
+    $('sDist').textContent = d.toFixed(1); $('sH').textContent = state.h.toFixed(1);
+    const r = Math.max(d, 1);
+    $('sR1').textContent = r.toFixed(1);
+    $('sC1').textContent = (TAU * state.R * Math.sinh(r / state.R)).toFixed(0);
+    $('sC0').textContent = (TAU * r).toFixed(0);
+  }
+  requestAnimationFrame(frame);
+}
+resize(); rebuild(); requestAnimationFrame(frame);
+window.__demo = { state, spawn, look, keys };
+</script>
+</body>
+</html>
