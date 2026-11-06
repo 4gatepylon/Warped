@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wormholes + Laser — ray-traced traversable wormholes</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; image-rendering: auto; }
+  .panel { position: fixed; background: rgba(12, 16, 26, 0.74); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 300px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; text-align: right; max-width: 340px; }
+  #tips { bottom: 10px; right: 10px; width: 350px; max-height: calc(100vh - 170px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #7a2c2c; border-color: #c35a5a; }
+  button.go { background: #2f5a7a; border-color: #5a95c3; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .laser { color: #ffb4a8; }
+  .worm { color: #a8d8ff; }
+  #sLaser { color: #ff9a8a; }
+  #sMsg { color: #a8d8ff; min-height: 1.45em; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 3px 0; }
+  #tipsToggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+
+<div id="controls" class="panel">
+  <h1>Wormholes + laser</h1>
+  <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>W</kbd>/<kbd>S</kbd> fly where you look · <kbd>A</kbd>/<kbd>D</kbd> sideways · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>Shift</kbd> fast<br>
+    <kbd>F</kbd> keep flying forward · <kbd>G</kbd> aim through the middle of the mouth you're facing</div>
+  <div class="row worm"><b>Wormholes</b> · <kbd>B</kbd> place a mouth 6 blocks ahead (press twice: entrance, then exit)<br>
+    <kbd>X</kbd> remove the wormhole nearest the crosshair · <kbd>C</kbd> clear all<br>
+    <kbd>T</kbd> throw a ball</div>
+  <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
+    <kbd>Click</kbd> (mouse captured) or <kbd>R</kbd>: leave an emitter here that keeps firing<br>
+    <kbd>V</kbd> fire a fan of emitters and rise up to watch · <kbd>Z</kbd> remove emitters</div>
+  <div class="row">
+    <label>Mouth size r<sub>s</sub> = <b id="rsval">1.4</b> blocks</label>
+    <input id="rs" type="range" min="0.8" max="3" step="0.05" value="1.4">
+    <div class="muted">Like a black hole's horizon radius. Applies to new wormholes and the one you placed last.</div>
+  </div>
+  <div class="row">
+    <label>Render quality <select id="quality"><option value="auto" selected>auto</option><option value="0.35">low</option><option value="0.5">medium</option><option value="0.75">high</option><option value="1">full</option></select></label>
+  </div>
+  <div class="row">
+    <button id="bFly" class="go">Fly forward: off</button>
+    <button id="bAim">Aim at mouth</button>
+    <button id="bPlace">Place mouth</button>
+    <button id="bThrow">Throw ball</button>
+    <button id="bClear">Clear</button>
+    <button id="bReset">Reset view</button>
+  </div>
+  <div class="row">
+    <button id="bLaser" class="on">Laser: on</button>
+    <button id="bPin">Leave emitter</button>
+    <button id="bFan">Laser fan</button>
+    <button id="bUnpin">Remove emitters</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Wormholes: <b id="sN">2</b> · balls: <b id="sB">0</b> · emitters: <b id="sE">0</b></div>
+  <div>Laser: <span id="sLaser">–</span></div>
+  <div class="muted">Your clock rate vs far away: <span id="sLapse">1.000</span></div>
+  <div class="muted"><span id="sFps">–</span> fps</div>
+  <div id="sMsg"></div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tipsToggle">hide</button>
+  <h1>What you're seeing</h1>
+  <div id="tipsBody">
+  <ol>
+    <li><b>Each wormhole has two mouths.</b> From outside, a mouth bends light just like a black hole of the same size: straight lines curve around it and there's a bright Einstein ring. But where a black hole's shadow would be black, you see the world around the <i>other</i> mouth. That light came through the throat.</li>
+    <li><b>Go through.</b> From the start, the mouth ahead leads to the house door: press <kbd>F</kbd> (or hold <kbd>W</kbd>). You fly along the same bent paths light takes, so whatever is in the middle of your screen is where you end up. You come out of the other mouth facing the way the middle of the disk showed. The throat magnifies small aiming errors a lot, so <kbd>G</kbd> lines you up exactly.</li>
+    <li><b>The mouth on the left</b> leads to a spot high above the plaza, looking down. Look into it to see the plaza, and the first wormhole, from above.</li>
+    <li><b>Go in off-centre</b> or from the side and you come out tilted: the throat is a sphere, not a flat doorway. You level out after a moment.</li>
+    <li><b>Shoot the laser into a mouth</b> and watch it come out of the other one. Leave an emitter and fly round to see the beam's two halves.</li>
+    <li><b>Throw a ball</b> (<kbd>T</kbd>) into a mouth from a few blocks away. It speeds up as it falls in, comes out of the other mouth as fast as it went in, and slows down as it climbs away.</li>
+    <li><b>Place your own</b> with <kbd>B</kbd>: the first press places the entrance, the second its exit. Each mouth is entered cleanly along the direction you faced when you placed it. Until it has an exit, an entrance leads into itself: you come out of its far side.</li>
+  </ol>
+  <div class="muted" style="margin-top:6px">Physics choices: each wormhole is a "black hole foil" (Damour &amp; Solodukhin 2007). Outside, its geometry is close to a black hole's; in place of the horizon there is a throat to the other mouth. Light paths are exact for a single wormhole; with several, their effects are combined (an approximation). Clocks at the throat run at 45% of the far-away rate, so the outside looks bluer while you pass through. Lasers stop at a block or after 600 blocks. Balls use game-scaled gravity.</div>
+  </div>
+</div>
+<div id="err"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+// ---------------------------------------------------------------------------
+// Voxel world (stored in a 3D texture that the ray tracer reads)
+// ---------------------------------------------------------------------------
+const NX = 64, NY = 24, NZ = 64;
+const M = { air: 0, grass: 1, dirt: 2, stone: 3, planks: 4, log: 5, leaves: 6, glass: 7, roof: 8, brick: 9, quartz: 10, obsidian: 11,
+  red: 12, blue: 13, yellow: 14, purple: 15, orange: 16, gold: 17, cobble: 18 };
+const MAT_NAME = Object.fromEntries(Object.entries(M).map(([k, v]) => [v, k]));
+const vox = new Uint8Array(NX * NY * NZ);
+const inGrid = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < NX && y < NY && z < NZ;
+const set = (x, y, z, m) => { if (inGrid(x, y, z)) vox[x + y * NX + z * NX * NY] = m; };
+const get = (x, y, z) => inGrid(x, y, z) ? vox[x + y * NX + z * NX * NY] : (y < 1 ? M.grass : 0);
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+function buildWorld() {
+  vox.fill(0);
+  for (let x = 0; x < NX; x++) for (let z = 0; z < NZ; z++) set(x, 0, z, M.grass);
+  // checkerboard plaza
+  for (let x = 20; x < 44; x++) for (let z = 20; z < 44; z++) set(x, 0, z, ((x + z) & 1) ? M.quartz : M.obsidian);
+  // ring of pillars
+  const cols = [M.red, M.orange, M.yellow, M.blue, M.purple];
+  for (let k = 0; k < 12; k++) {
+    const a = k / 12 * Math.PI * 2, px = Math.round(32 + 15 * Math.cos(a)), pz = Math.round(32 + 15 * Math.sin(a));
+    for (let y = 1; y <= 7; y++) set(px, y, pz, cols[k % cols.length]);
+    set(px, 8, pz, M.gold);
+  }
+  // a long straight wall (straight lines make lensing obvious)
+  for (let x = 4; x < 60; x++) for (let y = 1; y <= 3; y++) set(x, y, 10, (y === 3) ? M.stone : M.cobble);
+  // house (door faces +z)
+  const hx = 12, hz = 52;
+  for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) set(hx + x, 0, hz + z, (Math.abs(x) === 4 || Math.abs(z) === 3) ? M.cobble : M.planks);
+  for (let y = 1; y <= 4; y++) for (let x = -4; x <= 4; x++) for (let z = -3; z <= 3; z++) {
+    const ex = Math.abs(x) === 4, ez = Math.abs(z) === 3; if (ex || ez) set(hx + x, y, hz + z, ex && ez ? M.log : M.planks);
+  }
+  set(hx, 1, hz + 3, 0); set(hx, 2, hz + 3, 0);
+  for (const y of [2, 3]) { for (const x of [-2, 2]) { set(hx + x, y, hz + 3, M.glass); set(hx + x, y, hz - 3, M.glass); } set(hx + 4, y, hz, M.glass); set(hx - 4, y, hz, M.glass); }
+  for (let k = 0; k <= 4; k++) {
+    const y = 5 + k, zr = 4 - k;
+    for (let x = -5; x <= 5; x++) { for (const zz of [zr, -zr, zr - 1, -(zr - 1)]) if (Math.abs(zz) <= zr) set(hx + x, y, hz + zz, M.roof); }
+    for (const x of [-4, 4]) for (let z = -(zr - 2); z <= zr - 2; z++) set(hx + x, y, hz + z, M.planks);
+  }
+  for (let y = 6; y <= 10; y++) set(hx + 2, y, hz - 1, M.brick);
+  // a few coloured blocks inside the house, so looking through the door shows something
+  set(hx - 2, 1, hz - 1, M.red); set(hx + 2, 1, hz - 1, M.blue); set(hx, 1, hz - 2, M.gold); set(hx, 2, hz - 2, M.gold);
+  // trees
+  const rng = mulberry32(7);
+  let placed = 0;
+  for (let tries = 0; tries < 400 && placed < 26; tries++) {
+    const tx = 2 + Math.floor(rng() * (NX - 4)), tz = 2 + Math.floor(rng() * (NZ - 4));
+    if (tx > 15 && tx < 49 && tz > 15 && tz < 49) continue;          // plaza + pillar ring
+    if (Math.abs(tx - hx) < 8 && Math.abs(tz - hz) < 12) continue;    // house and the space in front of its door
+    if (Math.abs(tz - 10) < 3) continue;                               // wall
+    const h = 4 + Math.floor(rng() * 2);
+    for (let y = h - 1; y <= h; y++) for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) { if (Math.abs(x) === 2 && Math.abs(z) === 2 && rng() < 0.7) continue; set(tx + x, y, tz + z, M.leaves); }
+    for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) set(tx + x, h + 1, tz + z, M.leaves);
+    for (let y = 1; y < h; y++) set(tx, y, tz, M.log);
+    placed++;
+  }
+}
+buildWorld();
+
+// ---------------------------------------------------------------------------
+// Wormhole geometry. Each wormhole is a "black hole foil" (Damour & Solodukhin 2007):
+//   ds² = -A dt² + dr²/B + r² dΩ²,   A = (1 - r_s/r + λ²)/(1 + λ²),   B = 1 - r_s/r,   r ≥ r_s.
+// For λ → 0 this is a black hole outside, but r = r_s is a throat (no horizon) leading to a second
+// copy of the outside. In isotropic coordinates (r = ρ (1 + ρ_t/ρ)², throat at ρ_t = r_s/4) light
+// moves as if through glass with refractive index n(ρ) = (1 + ρ_t/ρ)² / sqrt(A), and the two sides
+// are swapped by inversion in the throat sphere, ρ -> ρ_t²/ρ. So the world uses ordinary (isotropic)
+// coordinates; rays bend by ∇ln n; a ray that gets inside a throat sphere is inverted through it and
+// moved to the partner mouth by an orthogonal map Q (det -1, so the whole crossing keeps handedness).
+// ---------------------------------------------------------------------------
+const L2 = 0.25;                     // λ²: clock rate at the throat is sqrt(λ²/(1+λ²)) ≈ 0.45
+const MAXM = 8;                      // mouths (4 wormholes)
+const LASER_MAX = 600, MAXPTS = 2048, MAXCH = 64, MAXSPOTS = 8, MAXPINS = 10;
+
+// ---------------------------------------------------------------------------
+// Ray tracer. For each pixel, a ray is marched backwards from the eye, bending by the refractive-index
+// gradient of every mouth, crossing throats to the partner mouth, and walking the voxel grid.
+// Each straight step is also tested against the laser beams (as in the black hole demo), so beams are
+// seen wherever their light reaches you, including through wormholes.
+// ---------------------------------------------------------------------------
+const vert = `
+precision highp float;
+in vec3 position; out vec2 vNdc;
+void main() { vNdc = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+const frag = `
+precision highp float; precision highp int; precision highp sampler3D; precision highp sampler2D;
+uniform sampler3D uVox; uniform ivec3 uDim;
+uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd; uniform float uTanHalf, uAspect;
+uniform vec4 uM[${MAXM}]; uniform vec3 uMTo[${MAXM}]; uniform mat3 uMQ[${MAXM}]; uniform int uNM;   // mouth centre + ρ_t, partner centre, gluing map
+uniform float uL2;
+uniform vec4 uBalls[16]; uniform vec3 uBallCol[16]; uniform int uNB;
+uniform float uTime, uCamLapse; uniform vec3 uSun;
+uniform sampler2D uBPts;
+uniform vec4 uBCA[${MAXCH}]; uniform vec4 uBCB[${MAXCH}]; uniform int uNC;
+uniform vec4 uSpots[${MAXSPOTS}]; uniform int uNS;
+uniform float uBeamR, uPix;
+in vec2 vNdc; out vec4 outColor;
+
+const vec3 PAL[19] = vec3[19](vec3(0.0), vec3(0.40,0.65,0.28), vec3(0.55,0.40,0.26), vec3(0.55,0.55,0.57), vec3(0.74,0.57,0.34),
+  vec3(0.42,0.31,0.19), vec3(0.24,0.52,0.20), vec3(0.70,0.87,0.96), vec3(0.64,0.25,0.20), vec3(0.58,0.30,0.25), vec3(0.90,0.89,0.86),
+  vec3(0.13,0.11,0.17), vec3(0.80,0.20,0.18), vec3(0.20,0.35,0.80), vec3(0.92,0.80,0.20), vec3(0.55,0.25,0.70), vec3(0.92,0.50,0.15),
+  vec3(0.95,0.78,0.25), vec3(0.50,0.50,0.50));
+
+float hash3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  return mix(mix(hash2(i), hash2(i+vec2(1,0)), f.x), mix(hash2(i+vec2(0,1)), hash2(i+vec2(1,1)), f.x), f.y); }
+float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; } return s; }
+
+int voxAt(ivec3 c) {
+  if (c.y < 0) return 1;
+  if (c.x < 0 || c.z < 0 || c.x >= uDim.x || c.y >= uDim.y || c.z >= uDim.z) return c.y < 1 ? 1 : 0;   // endless grass plane
+  return int(texelFetch(uVox, c, 0).r * 255.0 + 0.5);
+}
+// clock rate A(ρ) and d ln n / dρ for one mouth (see the notes above the shader)
+float mouthA(float rho, float pt) { float psi = 1.0 + pt / rho; return (1.0 - 4.0 * pt / (rho * psi * psi) + uL2) / (1.0 + uL2); }
+float dlnN(float rho, float pt) {
+  float ir = 1.0 / rho, psi = 1.0 + pt * ir, ir2 = ir / (psi * psi), rs = 4.0 * pt;   // ir2 = 1/r
+  return -2.0 * pt * ir * ir / psi - rs * psi * (1.0 - pt * ir) * ir2 * ir2 / (2.0 * (1.0 + uL2 - rs * ir2));
+}
+// sideways bending of a ray moving along v at p (sum over mouths), and the distance to the nearest mouth
+vec3 bendAcc(vec3 p, vec3 v, out float rNear) {
+  vec3 g = vec3(0.0); rNear = 1e9;
+  for (int k = 0; k < ${MAXM}; k++) {
+    if (k >= uNM) break;
+    vec3 d = p - uM[k].xyz; float rho = max(length(d), 1e-4), pt = uM[k].w;
+    // far away (> 12 r_s) the leading term is accurate to well under a percent and much cheaper
+    float gk = rho > 48.0 * pt ? -2.0 * (1.0 + 1.0 / (1.0 + uL2)) * pt / (rho * rho) : dlnN(rho, pt);
+    g += gk * d / rho;
+    rNear = min(rNear, rho);
+  }
+  return g - dot(g, v) * v;
+}
+float lapseAt(vec3 p) {        // sqrt(Π A): rate of a static clock relative to one far away
+  float a = 1.0;
+  for (int k = 0; k < ${MAXM}; k++) { if (k >= uNM) break; a *= mouthA(max(length(p - uM[k].xyz), uM[k].w), uM[k].w); }
+  return sqrt(max(a, 0.0));
+}
+vec3 shift(vec3 c, float g) {  // g = received / emitted frequency
+  g = clamp(g, 0.0, 3.0);
+  vec3 s = g < 1.0 ? vec3(c.r, c.g * g, c.b * g * g) : vec3(c.r / (g * g), c.g / g, c.b);
+  return s * g * g * g;
+}
+vec3 sky(vec3 d) {
+  vec3 hor = vec3(0.78, 0.86, 0.95);
+  vec3 c = mix(hor, vec3(0.30, 0.52, 0.88), pow(max(d.y, 0.0), 0.55));
+  if (d.y < 0.0) c = mix(hor, vec3(0.42, 0.56, 0.38), min(-d.y * 5.0, 1.0));
+  if (d.y > 0.01) {
+    vec2 uv = d.xz / (d.y + 0.1) * 0.9 + vec2(uTime * 0.01, 0.0);
+    float n = fbm(uv * 1.6);
+    c = mix(c, vec3(1.0), smoothstep(0.52, 0.78, n) * 0.85 * smoothstep(0.01, 0.15, d.y));
+  }
+  float sd = dot(d, uSun);
+  c += vec3(1.0, 0.92, 0.75) * (smoothstep(0.99955, 0.9998, sd) * 3.0 + pow(max(sd, 0.0), 300.0) * 0.4);
+  return c;
+}
+vec3 shadeVox(int m, vec3 hp, vec3 n, ivec3 cell) {
+  vec3 base = PAL[m];
+  if (m == 1 && n.y < 0.5) base = fract(hp.y) > 0.8 ? PAL[1] : PAL[2];        // grass block sides
+  vec2 uv = abs(n.x) > 0.5 ? hp.zy : (abs(n.y) > 0.5 ? hp.xz : hp.xy);
+  vec2 f = fract(uv);
+  base *= 0.86 + 0.22 * hash3(vec3(floor(f * 8.0), float(cell.x * 7 + cell.y * 131 + cell.z * 29)));
+  vec2 e2 = min(f, 1.0 - f);
+  base *= mix(0.6, 1.0, smoothstep(0.0, 0.04, min(e2.x, e2.y)));
+  if (m == 7) base = mix(base, vec3(0.95), 0.15);
+  float face = n.y > 0.5 ? 1.0 : (n.y < -0.5 ? 0.5 : (abs(n.x) > 0.5 ? 0.82 : 0.68));
+  return base * face * (0.78 + 0.22 * max(dot(n, uSun), 0.0));
+}
+
+// --- laser helpers (same as the black hole demo)
+float distPS(vec3 p, vec3 a, vec3 b) {
+  vec3 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
+  return length(p - a - ab * t);
+}
+float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s) {
+  vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), t;
+  s = 0.0;
+  if (e < 1e-10) { t = 0.0; s = a > 1e-10 ? clamp(-dot(d1, r) / a, 0.0, 1.0) : 0.0; }
+  else if (a < 1e-10) { t = clamp(f / e, 0.0, 1.0); }
+  else {
+    float b = dot(d1, d2), c = dot(d1, r), den = a * e - b * b;
+    s = den > 1e-7 * a * e ? clamp((b * f - c * e) / den, 0.0, 1.0) : 0.0;
+    t = (b * s + f) / e;
+    if (t < 0.0) { t = 0.0; s = clamp(-c / a, 0.0, 1.0); }
+    else if (t > 1.0) { t = 1.0; s = clamp((b - c) / a, 0.0, 1.0); }
+  }
+  vec3 w = p1 + d1 * s - p2 - d2 * t;
+  return dot(w, w);
+}
+const float REACH = 4.8;
+float beamChunk(int c, vec3 a, vec3 b, float len, float reach, float t0, float trans, inout float core, inout float halo) {
+  vec4 A = uBCA[c], B = uBCB[c];
+  vec3 rm = 0.5 * (a + b);
+  float dc = distPS(rm, A.xyz, B.xyz) - A.w;
+  if (dc > 0.5 * len + reach) return dc - 0.5 * len;
+  if (len > 2.0) { float s0; if (sqrt(segSeg(a, b, A.xyz, B.xyz, s0)) - A.w > reach) return dc - 0.5 * len; }
+  int pk = int(B.w + 0.5), first = pk >> 5, cnt = pk & 31;
+  vec3 q0 = texelFetch(uBPts, ivec2(first, 0), 0).xyz;
+  for (int j = 0; j < 16; j++) {
+    if (j >= cnt) break;
+    vec3 q1 = texelFetch(uBPts, ivec2(first + j + 1, 0), 0).xyz;
+    // cheap reject (stays tight even for the long straight run to the sky): the beam segment's midpoint is
+    // too far from the ray piece for any of it to be within reach
+    if (distPS(0.5 * (q0 + q1), a, b) - 0.5 * length(q1 - q0) > reach) { q0 = q1; continue; }
+    float s; float d2 = segSeg(a, b, q0, q1, s);
+    float tc = t0 + s * len;
+    float sg = max(uBeamR, uPix * tc);
+    float f = trans * exp(-tc / 260.0);
+    core = max(core, f * exp(-d2 / (sg * sg)));
+    halo = max(halo, f * exp(-d2 / (4.8 * sg * sg)));
+    q0 = q1;
+  }
+  return dc - 0.5 * len;
+}
+float beamScan(vec3 a, vec3 b, float t0, float trans, inout float core, inout float halo) {
+  float len = length(b - a), reach = REACH * max(uBeamR, uPix * (t0 + len)), dmin = 1e9;
+  for (int c = 0; c < ${MAXCH}; c++) {
+    if (c >= uNC) break;
+    dmin = min(dmin, beamChunk(c, a, b, len, reach, t0, trans, core, halo));
+  }
+  return dmin;
+}
+float laserSpot(vec3 hp, float t) {
+  float g = 0.0, rr = max(0.07, 2.5 * uPix * t);
+  for (int k = 0; k < ${MAXSPOTS}; k++) {
+    if (k >= uNS) break;
+    vec3 d = hp - uSpots[k].xyz;
+    g = max(g, uSpots[k].w * exp(-dot(d, d) / (rr * rr)));
+  }
+  return g * exp(-t / 260.0);
+}
+
+void main() {
+  vec3 v = normalize(uCamFwd + vNdc.x * uTanHalf * uAspect * uCamRight + vNdc.y * uTanHalf * uCamUp);
+  vec3 p = uCamPos;
+  float trans = 1.0; float travelled = 0.0;
+  ivec3 cell = ivec3(floor(p));
+  vec3 surf = vec3(0.0); int outcome = 0;      // 0 escaped, 1 surface
+  vec3 bmin = vec3(0.0), bmax = vec3(uDim);
+  float bNext = 0.0, bCore = 0.0, bHalo = 0.0;
+  int nearC[16]; int nNear = 0;
+  vec3 bA = p, bDir = v; float bT = 0.0;      // laser: start, direction and travel of the not-yet-tested chord
+
+  for (int it = 0; it < 900; it++) {
+    // --- bending by the mouths' refractive index, and step size
+    // (midpoint method: bending at the start sets a half-step direction, bending at the middle sets the step)
+    float rNear;
+    vec3 acc = bendAcc(p, v, rNear);
+    float bendStep = max(0.12 * rNear, 0.01);  // bending changes on the scale of the distance to the nearest mouth
+
+    bool inBox = all(greaterThanEqual(p, bmin)) && all(lessThan(p, bmax));
+    float ds;
+    bool gone = false;
+    if (inBox || p.y < 1.0) {
+      // voxel DDA: distance to the next cell boundary, or less near a mouth
+      vec3 bnd = vec3(cell) + step(0.0, v);
+      vec3 tt = (bnd - p) / v;
+      // already on a boundary and heading back across it (e.g. the camera at x = 32.0): aim for the next one,
+      // otherwise a tiny nudge can be lost to float rounding and the ray never moves
+      tt = mix(tt, tt + 1.0 / abs(v), lessThanEqual(tt, vec3(0.0)));
+      tt = mix(tt, vec3(1e9), lessThan(abs(v), vec3(1e-7)));
+      ds = min(min(tt.x, min(tt.y, tt.z)) + 1e-4, bendStep);
+    } else {
+      ds = min(max(1.0, 0.35 * rNear), bendStep);
+      if (v.y < 0.0) ds = min(ds, (p.y - 1.0) / -v.y + 1e-3);
+      vec3 t0 = (bmin - p) / v, t1 = (bmax - p) / v;
+      vec3 tmin = min(t0, t1), tmax = max(t0, t1);
+      float tn = max(max(tmin.x, tmin.y), tmin.z), tf = min(min(tmax.x, tmax.y), tmax.z);
+      if (tn > 0.0 && tn < tf) ds = min(ds, tn + 1e-3);
+      bool leaving = (tn <= 0.0 || tn >= tf) && v.y >= 0.0;
+      gone = (leaving && rNear > 60.0) || travelled > 600.0;
+    }
+    if (gone) {
+      if (uNC > 0) {
+        if (travelled > bT + 1e-4) beamScan(bA, p, bT, trans, bCore, bHalo);       // the untested end of the path
+        beamScan(p, p + v * max(620.0 - travelled, 1.0), travelled, trans, bCore, bHalo);
+      }
+      outcome = 0; break;
+    }
+    vec3 vh = normalize(v + acc * (0.5 * ds));
+    vec3 acc2 = acc;                           // short steps far from mouths: one bending evaluation is plenty
+    if (ds > 0.04 * rNear) { float rMid; acc2 = bendAcc(p + v * (0.5 * ds), vh, rMid); }
+    vec3 p0 = p, pn = p + vh * ds; float t0 = travelled; float hitFrac = 1.0;
+
+    // --- balls
+    float bestT = 2.0; int bestB = -1;
+    for (int b = 0; b < 16; b++) {
+      if (b >= uNB) break;
+      vec3 c = uBalls[b].xyz; float rad = uBalls[b].w;
+      vec3 A = (p - c) / rad, dd = (pn - p) / rad;
+      float aa = dot(dd, dd), bb = dot(A, dd), cc = dot(A, A) - 1.0;
+      float disc = bb * bb - aa * cc;
+      if (disc < 0.0 || aa < 1e-12) continue;
+      float t = (-bb - sqrt(disc)) / aa;
+      if (t >= 0.0 && t <= 1.0 && t < bestT) { bestT = t; bestB = b; }
+    }
+    if (bestB >= 0) {
+      vec3 hp = mix(p, pn, bestT);
+      vec3 n = normalize(hp - uBalls[bestB].xyz);
+      float l = 0.45 + 0.55 * max(dot(n, uSun), 0.0);
+      float spec = pow(max(dot(reflect(-uSun, n), -v), 0.0), 24.0) * 0.35;
+      surf = shift(uBallCol[bestB] * l + spec, lapseAt(hp) / uCamLapse);
+      travelled = t0 + ds * bestT; outcome = 1; hitFrac = bestT;
+    } else {
+      // --- bend, advance, test the voxel we moved into
+      v = normalize(v + acc2 * ds);
+      p = pn; travelled += ds;
+      ivec3 nc = ivec3(floor(p));
+      if (nc != cell) {
+        int m = voxAt(nc);
+        if (m > 0) {
+          float best = 2.0; int ax = 0; vec3 seg = p - p0;
+          for (int i = 0; i < 3; i++) {
+            if (nc[i] != cell[i] && abs(seg[i]) > 1e-9) {
+              float b = seg[i] > 0.0 ? float(cell[i] + 1) : float(cell[i]);
+              float t = (b - p0[i]) / seg[i];
+              if (t < best) { best = t; ax = i; }
+            }
+          }
+          vec3 n = vec3(0.0); n[ax] = seg[ax] > 0.0 ? -1.0 : 1.0;
+          hitFrac = clamp(best, 0.0, 1.0);
+          vec3 hp = p0 + seg * hitFrac;
+          surf = shift(shadeVox(m, hp, n, nc), lapseAt(hp) / uCamLapse);
+          if (uNS > 0) { float sp = trans * laserSpot(hp, travelled); bHalo = max(bHalo, sp); bCore = max(bCore, sp * sp); }
+          outcome = 1;
+        }
+        cell = nc;
+      }
+    }
+
+    // --- did this step end inside a throat?
+    int tk = -1;
+    if (outcome == 0) {
+      for (int k = 0; k < ${MAXM}; k++) {
+        if (k >= uNM) break;
+        vec3 d = p - uM[k].xyz;
+        if (dot(d, d) < uM[k].w * uM[k].w) { tk = k; break; }
+      }
+    }
+
+    // --- laser beams (as in the black hole demo, but per chord). Near a throat the steps are tiny, so the
+    // beams are tested against the chord of the path since the last test, once the path is about to bend
+    // away from that chord by more than ~0.3 beam widths, or at a surface or a throat.
+    if (uNC > 0) {
+      vec3 bEnd = mix(p0, pn, hitFrac); float tEnd = t0 + ds * hitFrac, len = tEnd - bT;
+      float tol = 0.3 * max(uBeamR, uPix * bT), turn = 1.0 - dot(bDir, v);      // sagitta² ≈ len² turn / 32
+      if (outcome == 1 || tk >= 0 || len > 2.0 || len * len * turn > 32.0 * tol * tol) {
+        float reach = REACH * max(uBeamR, uPix * tEnd);
+        if (tEnd >= bNext) {
+          float reach0 = REACH * max(uBeamR, uPix * bT), near = reach0 + clamp(10.0 * len, 0.3, 2.5), far = 1e9;
+          bool overflow = false; nNear = 0;
+          for (int c = 0; c < ${MAXCH}; c++) {
+            if (c >= uNC) break;
+            float dc = beamChunk(c, bA, bEnd, len, reach, bT, trans, bCore, bHalo);
+            if (dc < near) { if (nNear < 16) { nearC[nNear] = c; nNear++; } else overflow = true; }
+            else far = min(far, dc);
+          }
+          bNext = overflow ? bT : bT + max(far - reach0, 0.0) / (1.0 + REACH * uPix);
+        } else {
+          for (int k = 0; k < 16; k++) {
+            if (k >= nNear) break;
+            beamChunk(nearC[k], bA, bEnd, len, reach, bT, trans, bCore, bHalo);
+          }
+        }
+        bA = bEnd; bT = tEnd; bDir = v;
+      }
+    }
+    if (outcome == 1) break;
+
+    // --- through a throat: invert in the throat sphere, then hop to the partner mouth
+    if (tk >= 0) {
+      for (int k = 0; k < ${MAXM}; k++) {
+        if (k != tk) continue;
+        vec3 d = p - uM[k].xyz; float r2 = dot(d, d), pt = uM[k].w;
+        vec3 nrm = d * inversesqrt(r2);
+        p = uMTo[k] + uMQ[k] * (d * (pt * pt / r2));
+        v = normalize(uMQ[k] * (v - 2.0 * dot(v, nrm) * nrm));
+        cell = ivec3(floor(p));
+        bNext = 0.0; nNear = 0; bA = p; bT = travelled; bDir = v;   // the ray jumped: restart the laser bookkeeping
+        break;
+      }
+    }
+  }
+
+  vec3 col;
+  vec3 haze = vec3(0.78, 0.86, 0.95);
+  if (outcome == 1) col = mix(haze, surf, exp(-travelled / 170.0));
+  else col = shift(sky(v), 1.0 / uCamLapse);
+  col = trans * col;
+  col = mix(col, vec3(1.0, 0.06, 0.03), clamp(0.9 * bHalo, 0.0, 1.0)) + vec3(1.0, 0.62, 0.52) * bCore;   // laser
+  col = col / (1.0 + max(col - 1.0, 0.0) * 0.6);
+  outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+// ---------------------------------------------------------------------------
+// Three.js setup
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('c');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false }); }
+catch (e) { const el = document.getElementById('err'); el.style.display = 'flex'; el.textContent = 'WebGL2 is required: ' + e.message; throw e; }
+const tex = new THREE.Data3DTexture(vox, NX, NY, NZ);
+tex.format = THREE.RedFormat; tex.type = THREE.UnsignedByteType;
+tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.unpackAlignment = 1; tex.needsUpdate = true;
+const beamData = new Float32Array(MAXPTS * 4);
+const beamTex = new THREE.DataTexture(beamData, MAXPTS, 1, THREE.RGBAFormat, THREE.FloatType);
+beamTex.minFilter = beamTex.magFilter = THREE.NearestFilter; beamTex.needsUpdate = true;
+
+const uniforms = {
+  uVox: { value: tex }, uDim: { value: new Int32Array([NX, NY, NZ]) },
+  uCamPos: { value: new THREE.Vector3() }, uCamRight: { value: new THREE.Vector3() }, uCamUp: { value: new THREE.Vector3() }, uCamFwd: { value: new THREE.Vector3() },
+  uTanHalf: { value: Math.tan(37.5 * Math.PI / 180) }, uAspect: { value: 1 },
+  uM: { value: Array.from({ length: MAXM }, () => new THREE.Vector4()) }, uMTo: { value: Array.from({ length: MAXM }, () => new THREE.Vector3()) },
+  uMQ: { value: Array.from({ length: MAXM }, () => new THREE.Matrix3()) }, uNM: { value: 0 }, uL2: { value: L2 },
+  uBalls: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, uBallCol: { value: Array.from({ length: 16 }, () => new THREE.Vector3()) }, uNB: { value: 0 },
+  uTime: { value: 0 }, uCamLapse: { value: 1 }, uSun: { value: new THREE.Vector3(0.45, 0.62, 0.35).normalize() },
+  uBPts: { value: beamTex }, uBCA: { value: Array.from({ length: MAXCH }, () => new THREE.Vector4()) }, uBCB: { value: Array.from({ length: MAXCH }, () => new THREE.Vector4()) },
+  uNC: { value: 0 }, uSpots: { value: Array.from({ length: MAXSPOTS }, () => new THREE.Vector4()) }, uNS: { value: 0 },
+  uBeamR: { value: 0.012 }, uPix: { value: 0.002 }
+};
+const mat = new THREE.RawShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
+const scene = new THREE.Scene(); scene.add(quad);
+const cam = new THREE.Camera();
+
+// "auto" renders about autoBudget pixels and lowers it if frames stay slow (see the main loop)
+let quality = 'auto', autoBudget = 380000;
+const bufSize = new THREE.Vector2();
+function resize() {
+  const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
+  let q = quality === 'auto' ? Math.min(1, Math.sqrt(autoBudget / (w * h * dpr * dpr))) : +quality;
+  renderer.setPixelRatio(dpr * q);
+  renderer.setSize(w, h, false);
+  uniforms.uAspect.value = w / h;
+  renderer.getDrawingBufferSize(bufSize);
+  uniforms.uPix.value = 2 * uniforms.uTanHalf.value / Math.max(1, bufSize.y);
+}
+window.addEventListener('resize', resize);
+
+// ---------------------------------------------------------------------------
+// State. The camera is a full orientation (fwd, up): going through a throat off-centre can tilt you,
+// and the view then levels itself out.
+// ---------------------------------------------------------------------------
+const V3 = THREE.Vector3, WORLD_UP = new V3(0, 1, 0);
+const state = { pos: new V3(), fwd: new V3(0, 0, -1), up: new V3(0, 1, 0), pairs: [], balls: [], rs: 1.4, laser: true, pins: [], fly: false, msg: '', msgT: 0 };
+const lookDir = (yaw, pitch) => new V3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+function setLook(yaw, pitch) {
+  state.fwd.copy(lookDir(yaw, pitch));
+  const right = new V3(Math.cos(yaw), 0, Math.sin(yaw));
+  state.up.crossVectors(right, state.fwd).normalize();
+}
+const yawOf = f => Math.atan2(f.x, -f.z);
+function resetView() {                                 // facing the plaza mouth, aimed through its middle
+  state.pos.set(32, 4.5, 47); setLook(0, 0);
+  if (typeof aimThrough === 'function') aimThrough(mouths.find(m => m.name === '1A'));
+}
+function camBasis() {
+  const fwd = state.fwd.clone().normalize(), up = state.up.clone().addScaledVector(fwd, -state.up.dot(fwd)).normalize();
+  return { fwd, up, right: new V3().crossVectors(fwd, up) };
+}
+
+// --- wormholes: pairs of mouths. A mouth has a centre c and a frame F = [right, up, back]; you pass
+// through it cleanly when moving along -back. Q (det -1) maps the inverted inside of mouth A onto the
+// outside of mouth B: Q = F_B · diag(1, 1, -1) · F_Aᵀ. A mouth without a partner leads into itself.
+function frameFor(fwd) {
+  const f = fwd.clone().normalize(), right = new V3().crossVectors(f, Math.abs(f.y) > 0.99 ? new V3(0, 0, -1) : WORLD_UP).normalize();
+  const up = new V3().crossVectors(right, f), back = f.clone().negate();
+  return new THREE.Matrix3().set(right.x, up.x, back.x, right.y, up.y, back.y, right.z, up.z, back.z);
+}
+const FLIP = new THREE.Matrix3().set(1, 0, 0, 0, 1, 0, 0, 0, -1);
+let mouths = [];                                       // flattened, rebuilt whenever pairs change
+function rebuildMouths() {
+  mouths = [];
+  state.pairs.forEach((pr, i) => {
+    const pt = pr.rs / 4;
+    if (pr.b) {
+      const Q = new THREE.Matrix3().multiplyMatrices(pr.b.F, FLIP).multiply(pr.a.F.clone().transpose());
+      mouths.push({ c: pr.a.c, pt, to: pr.b.c, Q, name: `${i + 1}A`, pair: i });
+      mouths.push({ c: pr.b.c, pt, to: pr.a.c, Q: Q.clone().transpose(), name: `${i + 1}B`, pair: i });
+    } else {
+      mouths.push({ c: pr.a.c, pt, to: pr.a.c, Q: new THREE.Matrix3().set(-1, 0, 0, 0, -1, 0, 0, 0, -1), name: `${i + 1}A`, pair: i });
+    }
+  });
+  mouths.forEach((m, k) => { carve(m.c, m.pt + 0.8); });
+}
+function carve(c, rad) {                               // nothing may poke into a throat
+  let changed = false;
+  const r = Math.ceil(rad) + 1;
+  for (let x = Math.floor(c.x) - r; x <= Math.floor(c.x) + r; x++)
+    for (let y = Math.floor(c.y) - r; y <= Math.floor(c.y) + r; y++)
+      for (let z = Math.floor(c.z) - r; z <= Math.floor(c.z) + r; z++) {
+        if (!inGrid(x, y, z) || !vox[x + y * NX + z * NX * NY]) continue;
+        const dx = Math.max(x - c.x, 0, c.x - x - 1), dy = Math.max(y - c.y, 0, c.y - y - 1), dz = Math.max(z - c.z, 0, c.z - z - 1);
+        if (Math.hypot(dx, dy, dz) < rad) { set(x, y, z, 0); changed = true; }
+      }
+  if (changed) tex.needsUpdate = true;
+}
+function addPair(ca, fa, cb, fb, rs) {
+  if (state.pairs.length >= MAXM / 2) state.pairs.shift();
+  state.pairs.push({ a: { c: ca.clone(), F: frameFor(fa) }, b: cb ? { c: cb.clone(), F: frameFor(fb) } : null, rs });
+  rebuildMouths();
+}
+function placeMouth() {
+  const { fwd } = camBasis(), c = state.pos.clone().addScaledVector(fwd, 6);
+  const flat = new V3(fwd.x, 0, fwd.z); if (flat.lengthSq() < 1e-6) flat.set(0, 0, -1);
+  const last = state.pairs[state.pairs.length - 1];
+  if (last && !last.b) { last.b = { c, F: frameFor(flat) }; rebuildMouths(); say(`Wormhole ${state.pairs.length} connected`); }
+  else { addPair(c, flat, null, null, state.rs); say(`Entrance placed: press B again to place its exit`); }
+}
+function removeAimed() {
+  if (!mouths.length) return;
+  const { fwd } = camBasis(); let best = -2, bi = -1;
+  mouths.forEach(m => { const d = m.c.clone().sub(state.pos).normalize().dot(fwd); if (d > best) { best = d; bi = m.pair; } });
+  state.pairs.splice(bi, 1); rebuildMouths();
+}
+
+// index field (JS copy of the shader's)
+function dlnN(rho, pt) {
+  const psi = 1 + pt / rho, r = rho * psi * psi, rs = 4 * pt, A = (1 - rs / r + L2) / (1 + L2);
+  return -2 * pt / (rho * rho * psi) - rs * psi * (1 - pt / rho) / (2 * r * r * (1 + L2) * A);
+}
+function lapseAt(p) {
+  let a = 1;
+  for (const m of mouths) { const rho = Math.max(p.distanceTo(m.c), m.pt), psi = 1 + m.pt / rho; a *= (1 - 4 * m.pt / (rho * psi * psi) + L2) / (1 + L2); }
+  return Math.sqrt(Math.max(a, 0));
+}
+const _g = new V3();
+function bendOf(p, v) {                                // sideways part of ∇ln n: how fast direction v turns at p
+  _g.set(0, 0, 0);
+  for (const m of mouths) { const d = p.clone().sub(m.c), rho = Math.max(d.length(), 1e-4); _g.addScaledVector(d, dlnN(rho, m.pt) / rho); }
+  return _g.addScaledVector(v, -_g.dot(v)).clone();
+}
+// If p is inside a throat: move it (and the direction vectors) through to the partner mouth.
+function throughThroat(p, vecs) {
+  for (const m of mouths) {
+    const d = p.clone().sub(m.c), r2 = d.lengthSq();
+    if (r2 < m.pt * m.pt) {
+      const n = d.clone().divideScalar(Math.sqrt(r2));
+      p.copy(m.to).add(d.multiplyScalar(m.pt * m.pt / r2).applyMatrix3(m.Q));
+      for (const v of vecs) v.addScaledVector(n, -2 * v.dot(n)).applyMatrix3(m.Q);
+      return m;
+    }
+  }
+  return null;
+}
+function nearestMouth(p) { let best = Infinity, bm = null; for (const m of mouths) { const r = p.distanceTo(m.c) / m.pt; if (r < best) { best = r; bm = m; } } return { m: bm, ratio: best }; }
+
+// ---------------------------------------------------------------------------
+// Flying follows light rays: the move direction bends exactly like a ray, and the view turns with it
+// (parallel transport), so what is in the middle of the screen is where you are heading.
+// Distances are proper distances (space is stretched near a mouth), so you slow down in coordinates.
+// ---------------------------------------------------------------------------
+function rotateMinimal(from, to, vecs) {               // rotate vecs by the rotation taking unit `from` to unit `to`
+  const axis = new V3().crossVectors(from, to), s = axis.length(), c = from.dot(to);
+  if (s < 1e-12) return;
+  axis.divideScalar(s); const ang = Math.atan2(s, c);
+  for (const v of vecs) v.applyAxisAngle(axis, ang);
+}
+function fly(dir, dist) {
+  const m = dir.clone().normalize();
+  let left = dist;
+  for (let n = 0; n < 400 && left > 1e-6; n++) {
+    let psi = 1, minRho = Infinity;
+    for (const mo of mouths) { const rho = state.pos.distanceTo(mo.c); psi += mo.pt / rho; minRho = Math.min(minRho, rho); }
+    const h = Math.min(left / (psi * psi), 0.05 * minRho, 0.5);            // coordinate step
+    const m0 = m.clone();
+    const a1 = bendOf(state.pos, m), mid = m.clone().addScaledVector(a1, 0.5 * h).normalize();
+    const a2 = bendOf(state.pos.clone().addScaledVector(m, 0.5 * h), mid);
+    state.pos.addScaledVector(mid, h);
+    m.addScaledVector(a2, h).normalize();
+    rotateMinimal(m0, m, [state.fwd, state.up]);
+    left -= h * psi * psi;
+    const through = throughThroat(state.pos, [m, state.fwd, state.up]);
+    if (through) { m.normalize(); state.fwd.normalize(); state.up.normalize(); say(`Through wormhole ${through.pair + 1}: out of mouth ${mouths.find(x => x.pair === through.pair && x !== through)?.name || through.name}`); }
+  }
+}
+function levelOut(dt) {                                // remove roll gradually, keeping the view direction
+  const { fwd, up } = camBasis();
+  if (Math.abs(fwd.y) > 0.98) return;
+  const target = WORLD_UP.clone().addScaledVector(fwd, -fwd.y).normalize();
+  const ang = Math.atan2(new V3().crossVectors(up, target).dot(fwd), up.dot(target));
+  state.up.copy(up).applyAxisAngle(fwd, ang * (1 - Math.exp(-2.5 * dt)));
+}
+function say(t) { state.msg = t; state.msgT = 3; }
+
+// Aim so that the light ray through the crosshair goes through the very middle of a mouth's throat
+// (other mouths bend the way there). Gauss-Newton on yaw/pitch; the miss is the ray's offset from the
+// mouth centre, sideways to the ray, at its closest approach (or where it enters the throat).
+function missOf(yaw, pitch, target) {
+  const p = state.pos.clone(), v = lookDir(yaw, pitch);
+  let best = Infinity, miss = null;
+  for (let i = 0; i < 6000; i++) {
+    const d = p.clone().sub(target.c), rho = d.length();
+    if (rho < best) { best = rho; miss = d.addScaledVector(v, -d.dot(v)); } else if (rho > best + 1) break;
+    if (rho < target.pt) break;
+    let minRho = Infinity; for (const m of mouths) minRho = Math.min(minRho, p.distanceTo(m.c));
+    const h = Math.min(0.25, 0.05 * minRho);
+    const a1 = bendOf(p, v), vh = v.clone().addScaledVector(a1, 0.5 * h).normalize();
+    const a2 = bendOf(p.clone().addScaledVector(v, 0.5 * h), vh);
+    p.addScaledVector(vh, h); v.addScaledVector(a2, h).normalize();
+  }
+  const right = new V3(Math.cos(yaw), 0, Math.sin(yaw)), up = new V3().crossVectors(right, lookDir(yaw, pitch));
+  return [miss.dot(right), miss.dot(up)];
+}
+function aimThrough(target) {
+  if (!target) return;
+  const f = camBasis().fwd;
+  let yaw = yawOf(f), pitch = Math.asin(Math.max(-1, Math.min(1, f.y)));
+  for (let it = 0; it < 10; it++) {
+    const m0 = missOf(yaw, pitch, target);
+    if (Math.hypot(m0[0], m0[1]) < 1e-3) break;
+    const e = 1e-3, my = missOf(yaw + e, pitch, target), mp = missOf(yaw, pitch + e, target);
+    const J = [[(my[0] - m0[0]) / e, (mp[0] - m0[0]) / e], [(my[1] - m0[1]) / e, (mp[1] - m0[1]) / e]];
+    const det = J[0][0] * J[1][1] - J[0][1] * J[1][0];
+    if (Math.abs(det) < 1e-12) break;
+    const dy = (J[1][1] * m0[0] - J[0][1] * m0[1]) / det, dp = (-J[1][0] * m0[0] + J[0][0] * m0[1]) / det;
+    const k = Math.min(1, 0.2 / Math.hypot(dy, dp));                   // damped: never turn more than ~11° at once
+    yaw -= k * dy; pitch = Math.max(-1.5, Math.min(1.5, pitch - k * dp));
+  }
+  setLook(yaw, pitch);
+}
+function aimAtNearest() {                              // the mouth closest to the crosshair direction
+  const { fwd } = camBasis(); let best = -2, bm = null;
+  for (const m of mouths) { const d = m.c.clone().sub(state.pos).normalize().dot(fwd); if (d > best) { best = d; bm = m; } }
+  aimThrough(bm);
+}
+
+// ---------------------------------------------------------------------------
+// Balls: game-scaled pull toward each mouth, slowed by the mouths' clock rate, and through throats.
+// ---------------------------------------------------------------------------
+const BALL_COLS = [[0.95, 0.25, 0.25], [0.25, 0.55, 0.95], [0.95, 0.85, 0.25], [0.35, 0.85, 0.35], [0.85, 0.4, 0.9], [1, 1, 1]];
+let ballCount = 0;
+function throwBall() {
+  const { fwd } = camBasis();
+  if (state.balls.length >= 16) state.balls.shift();
+  state.balls.push({ p: state.pos.clone().addScaledVector(fwd, 1.2), v: fwd.clone().multiplyScalar(11).add(new V3(0, 2, 0)), rad: 0.3,
+    col: BALL_COLS[ballCount++ % BALL_COLS.length], age: 0 });
+}
+const solid = (x, y, z) => get(Math.floor(x), Math.floor(y), Math.floor(z)) > 0;
+const GRAV_K = 22;   // game-scaled (as in the black hole demo)
+function stepBalls(dt) {
+  for (const b of state.balls) {
+    let left = dt;
+    for (let it = 0; it < 400 && left > 1e-6; it++) {
+      let rmin = Infinity; for (const m of mouths) rmin = Math.min(rmin, b.p.distanceTo(m.c));
+      const h = Math.min(left, dt / 6, 0.08 * rmin / (b.v.length() + 1e-3));   // fine steps near a throat
+      left -= h;
+      // pull from the potential Φ = -K r_s / (r - 0.9 r_s), with r = ρ + 2ρ_t + ρ_t²/ρ the areal radius:
+      // Newtonian far away, a deep well near the mouth, and (like the geometry) the same seen from either
+      // side, so the force vanishes at the throat and a ball comes out as fast as it went in
+      const a = new V3(0, -9.8, 0);
+      for (const m of mouths) {
+        const d = b.p.clone().sub(m.c), rho = Math.max(d.length(), 1e-4), pt = m.pt, rs = 4 * pt;
+        const r = rho + 2 * pt + pt * pt / rho, drdrho = 1 - pt * pt / (rho * rho);
+        a.addScaledVector(d, -GRAV_K * rs * drdrho / ((r - 0.9 * rs) ** 2 * rho));
+      }
+      const dte = h * lapseAt(b.p);                      // clocks run slow near a mouth
+      b.v.addScaledVector(a, dte);
+      for (let i = 0; i < 3; i++) {
+        const k = ['x', 'y', 'z'][i];
+        b.p[k] += b.v[k] * dte;
+        const probe = b.p.clone(); probe[k] += Math.sign(b.v[k]) * b.rad;
+        if (solid(probe.x, probe.y, probe.z)) {
+          b.p[k] -= b.v[k] * dte; b.v[k] *= -0.4;
+          if (k === 'y') { b.v.x *= 0.92; b.v.z *= 0.92; }
+        }
+      }
+      if (throughThroat(b.p, [b.v])) b.through = (b.through || 0) + 1;
+    }
+    b.age += dt;
+  }
+  state.balls = state.balls.filter(b => b.p.y > -20 && b.age < 120);
+}
+
+// ---------------------------------------------------------------------------
+// Laser: traced on the CPU with the same optics (RK4 in arc length, direction bent by ∇ln n), split
+// into pieces where it goes through a throat. Stops at a block or after LASER_MAX blocks.
+// ---------------------------------------------------------------------------
+const GUN = { right: 0.22, up: -0.2, fwd: 0.3 };
+function entersBox(px, py, pz, vx, vy, vz) {
+  const slab = (p, v, hi) => { const iv = Math.abs(v) < 1e-12 ? (v < 0 ? -1e12 : 1e12) : 1 / v, a = -p * iv, b = (hi - p) * iv; return [Math.min(a, b), Math.max(a, b)]; };
+  const X = slab(px, vx, NX), Y = slab(py, vy, NY), Z = slab(pz, vz, NZ);
+  const tn = Math.max(X[0], Y[0], Z[0]), tf = Math.min(X[1], Y[1], Z[1]);
+  return tn > 0 && tn < tf;
+}
+const _vh = { t: 0, m: 0 };
+function voxelHit(ax, ay, az, bx, by, bz) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az;
+  let ix = Math.floor(ax), iy = Math.floor(ay), iz = Math.floor(az);
+  const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+  const ddx = dx !== 0 ? Math.abs(1 / dx) : Infinity, ddy = dy !== 0 ? Math.abs(1 / dy) : Infinity, ddz = dz !== 0 ? Math.abs(1 / dz) : Infinity;
+  let tx = dx !== 0 ? ((dx > 0 ? ix + 1 : ix) - ax) / dx : Infinity;
+  let ty = dy !== 0 ? ((dy > 0 ? iy + 1 : iy) - ay) / dy : Infinity;
+  let tz = dz !== 0 ? ((dz > 0 ? iz + 1 : iz) - az) / dz : Infinity;
+  for (let n = 0; n < 256; n++) {
+    let t;
+    if (tx <= ty && tx <= tz) { t = tx; ix += sx; tx += ddx; }
+    else if (ty <= tz) { t = ty; iy += sy; ty += ddy; }
+    else { t = tz; iz += sz; tz += ddz; }
+    if (t > 1) return null;
+    const m = get(ix, iy, iz);
+    if (m) { _vh.t = t; _vh.m = m; return _vh; }
+  }
+  return null;
+}
+function traceLaser(o, d) {
+  const ms = mouths.map(m => ({ x: m.c.x, y: m.c.y, z: m.c.z, pt: m.pt }));
+  let px = o.x, py = o.y, pz = o.z;
+  const l0 = Math.hypot(d.x, d.y, d.z);
+  let vx = d.x / l0, vy = d.y / l0, vz = d.z / l0;
+  const pieces = [[[px, py, pz]]];
+  let pts = pieces[0];
+  let lx = vx, ly = vy, lz = vz, since = 0, s = 0, outcome = 'far', mat = 0, through = [];
+  let ax = 0, ay = 0, az = 0;
+  function accel(x, y, z, ux, uy, uz) {
+    let gx = 0, gy = 0, gz = 0;
+    for (const m of ms) {
+      const ex = x - m.x, ey = y - m.y, ez = z - m.z, rho = Math.max(Math.hypot(ex, ey, ez), 1e-4), g = dlnN(rho, m.pt) / rho;
+      gx += g * ex; gy += g * ey; gz += g * ez;
+    }
+    const t = (gx * ux + gy * uy + gz * uz) / (ux * ux + uy * uy + uz * uz);
+    ax = gx - t * ux; ay = gy - t * uy; az = gz - t * uz;
+  }
+  for (let it = 0; it < 60000; it++) {
+    let h = 0.25, rNear = Infinity, away = true;
+    for (const m of ms) {
+      const ex = px - m.x, ey = py - m.y, ez = pz - m.z, rho = Math.hypot(ex, ey, ez);
+      if (rho < rNear) rNear = rho;
+      if (ex * vx + ey * vy + ez * vz < 0) away = false;
+      if (rho < 40 * m.pt + 4) h = Math.min(h, Math.max(0.002, 0.02 * rho));
+    }
+    if (h >= 0.25 && py >= 1 && (px < 0 || pz < 0 || px > NX || pz > NZ || py > NY)) {
+      if (rNear > 60 && away && vy >= 0 && !entersBox(px, py, pz, vx, vy, vz)) {
+        const L = Math.max(0, LASER_MAX - s); px += vx * L; py += vy * L; pz += vz * L; s += L; since += L; outcome = 'sky'; break;
+      }
+      h = Math.min(8, Math.max(0.25, 0.25 * rNear));
+    }
+    accel(px, py, pz, vx, vy, vz); const a1x = ax, a1y = ay, a1z = az;
+    const u2x = vx + 0.5 * h * a1x, u2y = vy + 0.5 * h * a1y, u2z = vz + 0.5 * h * a1z;
+    accel(px + 0.5 * h * vx, py + 0.5 * h * vy, pz + 0.5 * h * vz, u2x, u2y, u2z); const a2x = ax, a2y = ay, a2z = az;
+    const u3x = vx + 0.5 * h * a2x, u3y = vy + 0.5 * h * a2y, u3z = vz + 0.5 * h * a2z;
+    accel(px + 0.5 * h * u2x, py + 0.5 * h * u2y, pz + 0.5 * h * u2z, u3x, u3y, u3z); const a3x = ax, a3y = ay, a3z = az;
+    const u4x = vx + h * a3x, u4y = vy + h * a3y, u4z = vz + h * a3z;
+    accel(px + h * u3x, py + h * u3y, pz + h * u3z, u4x, u4y, u4z);
+    const nx = px + h / 6 * (vx + 2 * u2x + 2 * u3x + u4x), ny = py + h / 6 * (vy + 2 * u2y + 2 * u3y + u4y), nz = pz + h / 6 * (vz + 2 * u2z + 2 * u3z + u4z);
+    let wx = vx + h / 6 * (a1x + 2 * a2x + 2 * a3x + ax), wy = vy + h / 6 * (a1y + 2 * a2y + 2 * a3y + ay), wz = vz + h / 6 * (a1z + 2 * a2z + 2 * a3z + az);
+    const wl = Math.hypot(wx, wy, wz); wx /= wl; wy /= wl; wz /= wl;
+    const hv = voxelHit(px, py, pz, nx, ny, nz);
+    if (hv) { const f = hv.t; px += (nx - px) * f; py += (ny - py) * f; pz += (nz - pz) * f; s += h * f; since += h * f; outcome = 'hit'; mat = hv.m; break; }
+    px = nx; py = ny; pz = nz; vx = wx; vy = wy; vz = wz; s += h; since += h;
+    // through a throat? end this piece and start a new one at the partner mouth
+    const P = new V3(px, py, pz), Vv = new V3(vx, vy, vz), went = throughThroat(P, [Vv]);
+    if (went) {
+      pts.push([px, py, pz]);
+      Vv.normalize(); px = P.x; py = P.y; pz = P.z; vx = Vv.x; vy = Vv.y; vz = Vv.z;
+      pts = [[px, py, pz]]; pieces.push(pts); lx = vx; ly = vy; lz = vz; since = 0; through.push(went.pair);
+      continue;
+    }
+    const turn = 2 * Math.asin(Math.min(1, 0.5 * Math.hypot(vx - lx, vy - ly, vz - lz)));
+    if (turn * since > 0.1 || turn > 0.2 || since > 50) { pts.push([px, py, pz]); lx = vx; ly = vy; lz = vz; since = 0; }
+    if (s >= LASER_MAX) break;
+  }
+  if (since > 1e-6) pts.push([px, py, pz]);
+  return { pieces, outcome, len: s, mat, end: [px, py, pz], through };
+}
+function distPS3(p, a, b) {
+  const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2], l2 = abx * abx + aby * aby + abz * abz;
+  let t = l2 > 1e-12 ? ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby + (p[2] - a[2]) * abz) / l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p[0] - a[0] - abx * t, p[1] - a[1] - aby * t, p[2] - a[2] - abz * t);
+}
+function chunkify(pts, maxR) {
+  const out = [], n = pts.length;
+  let i = 0;
+  while (i < n - 1) {
+    let j = i + 1, r = 0;
+    while (j + 1 < n && j + 1 - i <= 16) {
+      let rr = 0;
+      for (let k = i + 1; k <= j; k++) rr = Math.max(rr, distPS3(pts[k], pts[i], pts[j + 1]));
+      if (rr > maxR) break;
+      j++; r = rr;
+    }
+    out.push({ i, j, r }); i = j;
+  }
+  return out;
+}
+function uploadBeams(list) {
+  let np = 0, nc = 0, ns = 0;
+  outer: for (const b of list) {
+    for (let pts of b.pieces) {
+      if (pts.length < 2) continue;
+      if (pts.length > 900) { const k = Math.ceil(pts.length / 900); pts = pts.filter((_, i) => i % k === 0 || i === pts.length - 1); }
+      let ch, maxR = 0.6;   // big chunks are cheap: the per-segment reject is tight
+      for (;;) { ch = chunkify(pts, maxR); if (nc + ch.length <= MAXCH || maxR > 100) break; maxR *= 2; }
+      if (np + pts.length > MAXPTS || nc + ch.length > MAXCH) break outer;
+      for (let i = 0; i < pts.length; i++) { const o = (np + i) * 4; beamData[o] = pts[i][0]; beamData[o + 1] = pts[i][1]; beamData[o + 2] = pts[i][2]; beamData[o + 3] = 1; }
+      for (const c of ch) {
+        const A = pts[c.i], B = pts[c.j];
+        uniforms.uBCA.value[nc].set(A[0], A[1], A[2], c.r + 1e-3);
+        uniforms.uBCB.value[nc].set(B[0], B[1], B[2], (np + c.i) * 32 + (c.j - c.i));
+        nc++;
+      }
+      np += pts.length;
+    }
+    if (b.outcome === 'hit' && ns < MAXSPOTS) uniforms.uSpots.value[ns++].set(b.end[0], b.end[1], b.end[2], 1);
+  }
+  uniforms.uNC.value = nc; uniforms.uNS.value = ns;
+  beamTex.needsUpdate = true;
+}
+function gunPose(fwdOverride) {
+  const { fwd, right, up } = camBasis();
+  const o = state.pos.clone().addScaledVector(right, GUN.right).addScaledVector(up, GUN.up).addScaledVector(fwd, GUN.fwd);
+  return { o, d: (fwdOverride || fwd).clone() };
+}
+function pinLaser() {
+  const g = gunPose();
+  state.pins.push({ o: g.o, d: g.d, res: null });
+  while (state.pins.length > MAXPINS) state.pins.shift();
+}
+function laserFan() {
+  const { fwd, right } = camBasis(), g = gunPose();
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 6 - 0.5) * 0.7;
+    state.pins.push({ o: g.o.clone(), d: fwd.clone().multiplyScalar(Math.cos(a)).addScaledVector(right, Math.sin(a)), res: null });
+  }
+  while (state.pins.length > MAXPINS) state.pins.shift();
+  const yaw = yawOf(fwd), flat = new V3(Math.sin(yaw), 0, -Math.cos(yaw));
+  state.pos.addScaledVector(flat, -6).add(new V3(0, 14, 0)); setLook(yaw, -0.62);
+}
+function setLaser(on) { state.laser = on; $('bLaser').textContent = 'Laser: ' + (on ? 'on' : 'off'); $('bLaser').classList.toggle('on', on); }
+function setFly(on) { state.fly = on; $('bFly').textContent = 'Fly forward: ' + (on ? 'on' : 'off'); }
+let mouthSig = '', liveRes = null;
+function updateLaser() {
+  const sig = state.pairs.map(p => `${p.a.c.x},${p.a.c.y},${p.a.c.z},${p.b ? p.b.c.x + ',' + p.b.c.y + ',' + p.b.c.z : '-'},${p.rs}`).join(';');
+  if (sig !== mouthSig) { mouthSig = sig; for (const p of state.pins) p.res = null; }
+  for (const p of state.pins) if (!p.res) p.res = traceLaser(p.o, p.d);
+  liveRes = null;
+  if (state.laser) { const g = gunPose(); liveRes = traceLaser(g.o, g.d); }
+  const list = liveRes ? [liveRes] : [];
+  for (let i = state.pins.length - 1; i >= 0; i--) list.push(state.pins[i].res);
+  uploadBeams(list);
+}
+function laserText(r) {
+  if (!r) return 'off';
+  const via = r.through.length ? `goes through wormhole ${r.through.map(i => i + 1).join(' then ')}, ` : '';
+  if (r.outcome === 'hit') return `${via}hits ${MAT_NAME[r.mat]} after ${r.len.toFixed(1)} blocks`;
+  return `${via}escapes into the sky`;
+}
+
+// ---------------------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------------------
+const keys = {};
+const $ = id => document.getElementById(id);
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  keys[e.code] = true;
+  if (e.repeat) return;
+  if (e.code === 'KeyB') placeMouth();
+  if (e.code === 'KeyX') removeAimed();
+  if (e.code === 'KeyC') { state.pairs = []; state.balls = []; rebuildMouths(); }
+  if (e.code === 'KeyT') throwBall();
+  if (e.code === 'KeyF') setFly(!state.fly);
+  if (e.code === 'KeyG') aimAtNearest();
+  if (e.code === 'KeyL') setLaser(!state.laser);
+  if (e.code === 'KeyR') pinLaser();
+  if (e.code === 'KeyV') laserFan();
+  if (e.code === 'KeyZ') state.pins = [];
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+const SENS = 0.0025; let dragging = false;
+function look(dx, dy) {
+  const { fwd, up, right } = camBasis();
+  // turn about the world vertical, then tilt about your own right-hand axis
+  fwd.applyAxisAngle(WORLD_UP, -dx * SENS); up.applyAxisAngle(WORLD_UP, -dx * SENS); right.applyAxisAngle(WORLD_UP, -dx * SENS);
+  const f2 = fwd.clone().applyAxisAngle(right, -dy * SENS);
+  if (Math.abs(f2.y) < 0.995) { fwd.copy(f2); up.applyAxisAngle(right, -dy * SENS); }
+  state.fwd.copy(fwd); state.up.copy(up);
+}
+canvas.addEventListener('pointerdown', e => {
+  if (document.pointerLockElement === canvas) { if (e.button === 0) pinLaser(); return; }
+  dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === 'mouse') { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+});
+canvas.addEventListener('pointerup', () => { dragging = false; });
+canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0); });
+
+$('rs').addEventListener('input', e => {
+  state.rs = +e.target.value; $('rsval').textContent = state.rs.toFixed(2);
+  const last = state.pairs[state.pairs.length - 1]; if (last) { last.rs = state.rs; rebuildMouths(); }
+});
+$('quality').addEventListener('change', e => { quality = e.target.value; resize(); });
+$('bFly').addEventListener('click', () => setFly(!state.fly));
+$('bAim').addEventListener('click', aimAtNearest);
+$('bPlace').addEventListener('click', placeMouth);
+$('bThrow').addEventListener('click', throwBall);
+$('bClear').addEventListener('click', () => { state.pairs = []; state.balls = []; rebuildMouths(); });
+$('bReset').addEventListener('click', () => { resetView(); setFly(false); });
+$('bLaser').addEventListener('click', () => setLaser(!state.laser));
+$('bPin').addEventListener('click', pinLaser);
+$('bFan').addEventListener('click', laserFan);
+$('bUnpin').addEventListener('click', () => { state.pins = []; });
+$('tipsToggle').addEventListener('click', () => { const b = $('tipsBody'), hidden = b.style.display === 'none'; b.style.display = hidden ? '' : 'none'; $('tipsToggle').textContent = hidden ? 'hide' : 'show'; });
+
+// ---------------------------------------------------------------------------
+// Scene: wormhole 1 from the plaza (straight ahead at the start) to just outside the house door;
+// wormhole 2 from the left of the plaza to high above it, looking down.
+// ---------------------------------------------------------------------------
+function defaultScene() {
+  state.pairs = [];
+  addPair(new V3(32, 4.5, 34), new V3(0, 0, -1), new V3(12.5, 2.2, 62), new V3(0, 0, -1), 1.4);
+  const toA2 = new V3(24 - 32, 0, 37 - 47).normalize();     // faces the starting spot
+  addPair(new V3(24, 4.5, 37), toA2, new V3(36, 19, 44), lookDir(0, -1.05), 1.4);
+}
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+defaultScene();
+resetView();
+let last = performance.now(), hudT = 0, frames = 0, t0 = performance.now(), perfT = 0, perfN = 0, perfLast = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const { fwd, right } = camBasis();
+  const speed = (keys.ShiftLeft || keys.ShiftRight) ? 18 : 7;
+  const mv = new V3();
+  if (keys.KeyW || keys.ArrowUp || state.fly) mv.add(fwd); if (keys.KeyS || keys.ArrowDown) mv.sub(fwd);
+  if (keys.KeyD) mv.add(right); if (keys.KeyA) mv.sub(right);
+  if (keys.KeyE || keys.Space) mv.y += 1; if (keys.KeyQ) mv.y -= 1;
+  if (keys.ArrowLeft) look(-800 * dt, 0); if (keys.ArrowRight) look(800 * dt, 0);
+  if (mv.lengthSq() > 0) fly(mv, speed * dt);
+  levelOut(dt);
+  stepBalls(dt);
+  updateLaser();
+
+  const camLapse = Math.max(lapseAt(state.pos), 0.01);
+  const cb = camBasis();
+  uniforms.uCamPos.value.copy(state.pos); uniforms.uCamFwd.value.copy(cb.fwd); uniforms.uCamRight.value.copy(cb.right); uniforms.uCamUp.value.copy(cb.up);
+  uniforms.uNM.value = mouths.length;
+  mouths.forEach((m, i) => { uniforms.uM.value[i].set(m.c.x, m.c.y, m.c.z, m.pt); uniforms.uMTo.value[i].copy(m.to); uniforms.uMQ.value[i].copy(m.Q); });
+  uniforms.uNB.value = state.balls.length;
+  state.balls.forEach((b, i) => { uniforms.uBalls.value[i].set(b.p.x, b.p.y, b.p.z, b.rad); uniforms.uBallCol.value[i].set(...b.col); });
+  uniforms.uTime.value = now / 1000;
+  uniforms.uCamLapse.value = camLapse;
+  renderer.render(scene, cam);
+
+  frames++;
+  const fdt = (now - perfLast) / 1000; perfLast = now;
+  if (fdt > 0 && fdt < 0.2) { perfT += fdt; perfN++; }  // ignore pauses (hidden tab etc.)
+  if (perfT > 2) {                                     // auto quality: step down while below ~40 fps
+    if (quality === 'auto' && perfT / perfN > 1 / 40 && autoBudget > 120000) { autoBudget *= 0.75; resize(); }
+    perfT = 0; perfN = 0;
+  }
+  state.msgT -= dt;
+  if ((hudT += dt) > 0.25) {
+    hudT = 0;
+    $('sN').textContent = state.pairs.length; $('sB').textContent = state.balls.length; $('sE').textContent = state.pins.length;
+    $('sLaser').textContent = laserText(liveRes);
+    $('sLapse').textContent = camLapse.toFixed(3);
+    $('sMsg').textContent = state.msgT > 0 ? state.msg : '';
+    $('sFps').textContent = (frames * 1000 / (now - t0)).toFixed(0); frames = 0; t0 = now;
+  }
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+window.__demo = { state, look, setLook, resetView, V3, keys, traceLaser, pinLaser, laserFan, gunPose, camBasis, uniforms, renderer, scene, cam, frame,
+  fly, throughThroat, rebuildMouths, addPair, placeMouth, throwBall, stepBalls, lapseAt, aimThrough, aimAtNearest, missOf, get mouths() { return mouths; } };
+</script>
+</body>
+</html>
