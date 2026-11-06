@@ -17,7 +17,8 @@ parameters `game_server_id` and `player_id` are UUIDs that the management server
 ### `POST /game-servers`
 
 Called by clients. Starts a game server with a configuration (empty for now) and a maximum number
-of players, and returns its ID and the address clients connect to.
+of players, and returns its ID without waiting for it to run, since starting may take minutes.
+Once it is running, looking it up gives the address clients connect to.
 
 ### `GET /game-servers`
 
@@ -32,7 +33,8 @@ Query parameters, all optional:
 
 ### `GET /game-servers/{game_server_id}`
 
-Called by clients. Returns one game server, or fails with "not found".
+Called by clients. Returns one game server, including whether it is running yet and, once it is,
+its address. Fails with "not found" if there is no such game server.
 
 ### `DELETE /game-servers/{game_server_id}`
 
