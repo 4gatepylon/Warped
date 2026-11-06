@@ -1,6 +1,6 @@
 ---
 name: clis
-description: Design command-line interfaces in this repo - Python scripts (click) and C, C++ and CUDA mains (getopt_long) - so they are safe by default and use the same flags everywhere. Use whenever you write or change a script's or main's arguments, flags, prompts or output, or add a destructive, expensive or cached operation (including a Makefile target that wraps one).
+description: Design command-line interfaces in this repo - Python scripts and servers (click) and C and C++ mains (getopt_long) - so they are safe by default and use the same flags everywhere. Use whenever you write or change a script's or main's arguments, flags, prompts or output, or add a destructive or expensive operation (including a Makefile target that wraps one).
 ---
 
 # CLIs
@@ -14,8 +14,7 @@ and this skill differ, this skill wins.
 ## Libraries
 
 - **Python:** always [click](https://click.palletsprojects.com/), never `argparse` or `sys.argv`.
-- **C, C++ and CUDA mains:** always `getopt_long` (`<getopt.h>`, part of glibc), with long
-  options. No other parser.
+- **C and C++ mains:** always `getopt_long` (`<getopt.h>`), with long options. No other parser.
 
 ## Defaults
 
@@ -24,30 +23,30 @@ and this skill differ, this skill wins.
 - **Idempotent:** running a command twice with the same arguments gives the same result and
   destroys nothing. A new run writes a new run folder (`.artifacts/<script>/<run_id>/`, see
   "Uncommitted files" in the root `CLAUDE.md`) and never replaces an old one.
-- **No cache:** a run computes everything fresh unless it gets `--reuse-cache` (see Caching).
 - **Bounded output:** see Output.
 
 ## Validate first
 
-- A CLI validates every argument before any side effect: before it writes a file, starts GPU
-  work or downloads anything.
+- A CLI validates every argument before any side effect: before it writes a file, starts a
+  process or a server, or sends a request.
 - Each check is a click type (`click.IntRange`, `click.Choice`, `click.Path(exists=True)`) or its
   own `_validate_<argument>` function, so checks are small, reusable and testable.
-- Checks that involve several arguments (e.g. `--min-batch-size` ≤ `--max-batch-size`) go in one
-  `_validate_args` that `main` calls first.
+- Checks that involve several arguments (e.g. `--min-player-count` ≤ `--max-player-count`) go in
+  one `_validate_args` that `main` calls first.
 - An error names the argument, says what was wrong, lists the valid values or range (all of them
   when it is a set), and shows a working invocation.
 
 ## Destructive actions
 
-A destructive action deletes or overwrites something that is costly to recreate: a dataset,
-weights, a cache, a results folder.
+A destructive action deletes, overwrites or stops something that is costly or impossible to get
+back: a folder of benchmark results, or game servers that players are in.
 
 - Each destructive action has its own kebab-case flag, `--yes-to-<action>`:
-  `--yes-to-overwrite-dataset`, `--yes-to-delete-checkpoints`. There is no blanket `--yes` or
+  `--yes-to-overwrite-results`, `--yes-to-stop-game-servers`. There is no blanket `--yes` or
   `--force`.
-- The warning says exactly what will happen (which paths, how many files, what recreating them
-  costs) and names the `--yes-to-<action>` flag that skips the question.
+- The warning says exactly what will happen (which paths or game servers, how many files or
+  players, what recreating them costs) and names the `--yes-to-<action>` flag that skips the
+  question.
 - Without its flag and without `--interactive`, the CLI prints the warning and fails before doing
   anything.
 - With `--interactive`, the CLI prints the warning and asks yes/no. Any answer but yes aborts it
@@ -73,7 +72,7 @@ def _confirm_destructive_action(
         click.Abort: The user answered no (exit code 1).
 
     Example:
-        >>> _confirm_destructive_action(warning, "--yes-to-overwrite-dataset", False, True)
+        >>> _confirm_destructive_action(warning, "--yes-to-stop-game-servers", False, True)
     """
     message: str = f"{warning}\nTo skip this question, pass {yes_flag}."
     if is_confirmed:
@@ -84,9 +83,9 @@ def _confirm_destructive_action(
 
 
 _confirm_destructive_action(
-    f"This deletes {dataset_dir} ({file_count} files) and downloads it again (about 2 h).",
-    "--yes-to-overwrite-dataset",
-    yes_to_overwrite_dataset,
+    f"This stops {game_server_count} game servers and disconnects their {player_count} players.",
+    "--yes-to-stop-game-servers",
+    yes_to_stop_game_servers,
     interactive,
 )
 ```
@@ -100,8 +99,8 @@ A Makefile target that wraps a destructive action takes the same switches as var
   terminal.
 - Every command that returns data takes `--json`, which prints the same results as a single JSON
   object on stdout instead of the human-readable table.
-- Every command that creates something prints its identifier (run ID, cache handle or output
-  path), also in its `--json` output.
+- Every command that creates something prints its identifier (a run ID, a game server ID or an
+  output path), also in its `--json` output.
 - Output is bounded. A list prints at most `--limit` rows (with a default), and when it truncates
   it says so and how to see more.
 - Output that is long by nature goes to a file in the run folder, and stdout gets a summary plus
@@ -109,16 +108,6 @@ A Makefile target that wraps a destructive action takes the same switches as var
   of it to stdout.
 - Exit codes: 0 on success, 1 when the work fails or a prompt is declined, 2 on a usage error (bad
   arguments, or a missing `--yes-to-<action>`). These match click's defaults.
-
-## Caching
-
-- A cache is never used by default: every run computes fresh.
-- A run whose result can be reused keeps it in its run folder and prints a cache handle: its run
-  ID (`cache_handle` in `--json`).
-- `--reuse-cache <handle>` uses that run's result instead of computing it. It fails if the
-  handle doesn't exist or the run's arguments (its `command.txt`) differ from this call's.
-- `--overwrite-cache <handle>` recomputes into that run's folder. That's destructive, so it also
-  needs `--yes-to-overwrite-cache` or `--interactive`.
 
 ## Vocabulary
 
@@ -130,15 +119,13 @@ The same concept has the same name in every CLI:
 | Skip one confirmation | `--yes-to-<action>` | `--yes`, `-y`, `--force`, `--skip-confirmations` |
 | Show the plan, change nothing | `--dry-run` | `-n`, `--plan`, `--simulate` |
 | Structured output | `--json` | `--format json`, `--output json` |
-| Reuse a cached result | `--reuse-cache <handle>` | `--cache`, `--use-cache` |
-| Recompute a cached result | `--overwrite-cache <handle>` | `--refresh`, `--no-cache` |
 | Cap the rows printed | `--limit <count>` | `--max`, `--top`, `--head` |
 | Print long output in full | `--allow-long-output` | `--all`, `--full`, `--verbose` |
 | Write output to a file | `--output-file <path>` | `-o`, `--out` |
 | Subcommand verbs | `get`, `list`, `create`, `update`, `delete` | `info`, `ls`, `new`, `rm` |
 
 - Flags are kebab-case long options. The only short options are `-h` and the math letters of
-  the root `CLAUDE.md` (`-N`, `-K`).
+  the root `CLAUDE.md`, such as `-N`.
 - A new concept needs the user's agreement; add its row to this table in the same change.
 
 ## Help

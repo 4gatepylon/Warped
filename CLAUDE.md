@@ -18,37 +18,37 @@ These rules apply to the whole repository. Folders can add their own rules in th
 Open, format, label and split GitHub issues with the `github-issue` skill
 (`.claude/skills/github-issue/`). Every issue uses its title format, template and labels.
 
-## Experiments, evaluations and benchmarks
+## Experiments and benchmarks
 
-For experiments, evaluations and benchmarks (anything that compares options or ablates
-something), let the user make the important decisions: ask rather than choose. Whatever you do
-decide, list in the PR with a short rationale. Follow the `experiment-decisions` skill
-(`.claude/skills/experiment-decisions/`) for when to ask, the template, and where the list goes
-(PR description or a per-experiment `DECISIONS.md`).
+For experiments and benchmarks (anything that compares options or measures how well something
+works, such as two physics integrators or the game server's time per tick), let the user make the
+important decisions: ask rather than choose. Whatever you do decide, list in the PR with a short
+rationale. Follow the `experiment-decisions` skill (`.claude/skills/experiment-decisions/`) for
+when to ask, the template, and where the list goes (PR description or a per-experiment
+`DECISIONS.md`).
 
 ## Uncommitted files
 
-Everything that must not be committed (compiler output, generated code, datasets, weights, run
-outputs) goes in one of these git-ignored folders at the root of its project folder (e.g.
-`<project>/.build/`), never at the repository root or next to the sources. Any other
-git-ignored folder a project needs is dot-prefixed too. Each project's `.gitignore` lists its
-folders, and its README says which scripts write to them.
+Everything that must not be committed (compiler output, generated code, logs and other run
+outputs) goes in one of these git-ignored folders at the root of its component folder (e.g.
+`game_server/.build/`), never at the repository root or next to the sources. Any other git-ignored
+folder a component needs is dot-prefixed too. Each component's `.gitignore` lists its folders, and
+its README says which scripts write to them.
 
 | Folder | Holds | Recreated by | Removed by |
 | --- | --- | --- | --- |
-| `.build/` | compiler output and generated code: binaries, object files, code written by scripts | rebuilding | `make clean` |
-| `.data/` | datasets, downloaded or preprocessed, one `.data/<dataset>/` each | the download or prepare script the README names | by hand only |
-| `.artifacts/` | run outputs: weights, checkpoints, logs, profiler reports, raw benchmark output, plots | rerunning, which may be costly | `make reset-artifacts` |
+| `.build/` | compiler output and generated code: binaries, bundles, code generated from `.proto` files | rebuilding | `make clean` |
+| `.artifacts/` | run outputs: logs, benchmark results, profiler reports, plots | rerunning | `make reset-artifacts` |
 
 - **Runs:** a script writes each run to `.artifacts/<script>/<run_id>/`. `<script>` is the
-  script's file stem (`bench`, `train`), and `<run_id>` is the UTC start time, `YYYYMMDD-HHMMSS`,
+  script's file stem (`bench_physics`), and `<run_id>` is the UTC start time, `YYYYMMDD-HHMMSS`,
   optionally followed by `-<label>`, so the newest run sorts last.
 - **Provenance:** each run folder has a `command.txt` with the exact command line and the git
   commit (`git describe --always --dirty`), so a past result can be found, read and reproduced.
-- **Paths:** scripts build these paths from the project folder (`Path(__file__)`), not from the
+- **Paths:** scripts build these paths from the component folder (`Path(__file__)`), not from the
   current directory.
-- **Which folders:** a project has only the folders it needs. Before creating a git-ignored folder
-  that isn't in the table, ask the user.
+- **Which folders:** a component has only the folders it needs. Before creating a git-ignored
+  folder that isn't in the table, ask the user.
 - **Reset:** `make reset-artifacts` deletes `.artifacts/`. Like every destructive command, it fails
   with a warning unless it gets `YES_TO_RESET_ARTIFACTS=1`, or `INTERACTIVE=1` and the user types
   `yes`.
@@ -70,87 +70,84 @@ A name should say what a value is without making the reader look at the code aro
 name's length to its scope: `i`, `j` and `x` are fine for a few lines, but a name that lives across
 a function or a file, or that a decision depends on, spells out its meaning.
 
-- **Intent:** say what the value is for, not what type it is: `active_user_count`, not `count`.
-- **Number:** collections are plural, scalars singular: `for kernel in kernels`.
+- **Intent:** say what the value is for, not what type it is: `connected_player_count`, not
+  `count`.
+- **Number:** collections are plural, scalars singular: `for player in players`.
 - **Units:** every quantity that has a unit carries a suffix from the table below: `timeout_ms`,
-  `tile_bytes`.
+  `message_bytes`.
 - **Ratios:** a value that is one quantity per another, such as a conversion factor, is named
-  `<numerator>_per_<denominator>`: `bytes_per_bf16` and `meters_per_mile`, not `bf16_bytes`,
-  `bytes_bf16`, `mile_meters` or `meters_in_mile`.
+  `<numerator>_per_<denominator>`: `bytes_per_float32` and `meters_per_mile`, not
+  `float32_bytes`, `bytes_float32`, `mile_meters` or `meters_in_mile`.
 - **Source:** a measured value, or one taken from a spec or other document, says where it comes
   from with `_according_to_<source>`, and `<source>` makes clear whether it is a spec or a
-  measurement: `elapsed_ms_according_to_cuda_events`,
-  `PEAK_DENSE_BF16_TFLOPS_ACCORDING_TO_NVIDIA_SPEC`, not `_according_to_nvidia`.
+  measurement: `tick_ms_according_to_perf_counter`, `MAX_REFRESH_HZ_ACCORDING_TO_APPLE_SPEC`, not
+  `_according_to_apple`.
 - **Maker:** when it matters what made a thing, say so with `_created_by_<maker>`:
-  `plan_created_by_autotuner`.
-- **Range bounds:** an index or pointer that starts or ends a range (other than a loop variable)
-  carries `_incl` or `_excl`: `end_excl`, `last_row_incl`.
+  `player_id_created_by_management_server`.
+- **Range bounds:** an index, pointer or port that starts or ends a range (other than a loop
+  variable) carries `_incl` or `_excl`: `end_excl`, `last_port_incl`.
 - **Booleans:** read as a yes/no question, starting with a verb such as `is_`, `has_`, `can_` or
-  `should_`: `is_too_big`, not `too_big`.
+  `should_`: `is_full`, not `full`.
 - **Temporaries:** a throwaway value starts with `temp_`: `temp_sum`.
 - **Functions:** `<verb>_<noun>`, the action and what it acts on, optionally followed by context:
-  `copy_to_device`, `move_box_outside`. Interchangeable implementations of one operation may be
-  `<operation>_<variant>`: `matmul_cublas`.
+  `add_player`, `move_box_outside`. Interchangeable implementations of one operation may be
+  `<operation>_<variant>`: `integrate_rk4`.
 - **Dangerous functions:** a function that is dangerous to call ends in
   `_DANGEROUS_DANGEROUS_DANGEROUS_BECAUSE_<REASON>`:
-  `free_buffer_DANGEROUS_DANGEROUS_DANGEROUS_BECAUSE_KERNELS_MAY_STILL_READ_IT`.
-- **Types:** classes and structs are nouns for the object, not the action: `Dataloader`, not
-  `Dataload`. Type aliases end in `_t`: `bf16_t`, `matmul_fn_t`.
-- **Math letters:** where code follows a formula or a standard algorithm (kernels, linear algebra),
-  use the standard letters. Arrays, matrices and tensors are capitals (`A`, `B`, `C`, `D`); vectors
-  are lowercase (`x`, `b`); sizes and lengths are capitals (`N`, `M`, `K`); loop indices are `i`,
-  `j`, `k`, or the lowercase of the size they run over (`m` over `M`, `n` over `N`, `k` over `K`);
-  spatial coordinates and quaternion parts are `x`, `y`, `z`, `w`. There these letters override the
-  length, intent and unit rules, so a matrix size stays `N` across a whole file. Elsewhere, name
-  arrays and sizes by what they hold: `kernels`, `sample_count`.
-- **Location:** an array, tensor or buffer, or a pointer to one, says where it lives with `_host` or
-  `_device` (`A_host`, `A_device`), with `_device0`, `_device1`, ... when there are several devices
-  and it matters which. Plain scalars, and code that never touches a device, don't take it.
+  `forget_game_server_DANGEROUS_DANGEROUS_DANGEROUS_BECAUSE_IT_KEEPS_RUNNING`.
+- **Types:** classes and structs are nouns for the object, not the action: `Launcher`, not
+  `Launch`. Type aliases end in `_t`: `player_id_t`, `tick_fn_t`.
+- **Math letters:** where code follows a formula or a standard algorithm (physics, geometry,
+  linear algebra), use the formula's letters: `x`, `v` and `a` for position, velocity and
+  acceleration, and `dt` for the time step. Matrices are capitals (`A`, `R`); vectors are
+  lowercase (`x`, `b`); sizes and lengths are capitals (`N`); loop indices are `i`, `j`, `k`, or
+  the lowercase of the size they run over (`n` over `N`); spatial coordinates and quaternion parts
+  are `x`, `y`, `z`, `w`. There these letters override the length, intent and unit rules, so a
+  time step stays `dt` across a whole file. Elsewhere, name arrays and sizes by what they hold:
+  `players`, `bullet_count`.
+- **Location:** a GPU buffer, or a pointer to one, ends in `_device`, and its copy in CPU memory
+  in `_host`: `positions_device`, `positions_host`. Plain scalars, and code that never touches a
+  GPU, don't take it.
 - **Order:** when a name takes several suffixes, they go `<what>_<unit>`, then `_incl`/`_excl`,
   then `_according_to_<source>` or `_created_by_<maker>`, then the location:
-  `elapsed_ms_according_to_cuda_events`, `end_offset_bytes_excl_device`.
+  `tick_ms_according_to_perf_counter`, `end_offset_bytes_excl_device`.
 - **Case:** snake_case for variables and free functions, in every language. Classes are the
   exception, and their rules take precedence: class and struct names are UpperCamelCase
-  (`Dataloader`), methods are lowerCamelCase (`moveBoxOutside`), and static constructors are
-  UpperCamelCase (`Dataloader::FromFiles`). Globals, global constants, macros and environment
-  variables are UPPER_SNAKE_CASE (`KERNELS`, `DEFAULT_N`). The math letters above keep their case.
-  A Python script's work goes in a `main()` function, so its working variables are locals and only
-  constants sit at module level.
+  (`Launcher`), methods are lowerCamelCase (`moveBoxOutside`), and static constructors are
+  UpperCamelCase (`Launcher::FromConfig`). Globals, global constants, macros and environment
+  variables are UPPER_SNAKE_CASE (`DEFAULT_PORT`, `MAX_PLAYER_COUNT`). The math letters above keep
+  their case. A Python script's work goes in a `main()` function, so its working variables are
+  locals and only constants sit at module level.
 - **No magic numbers:** every literal with a meaning gets a named constant: `constexpr` in C++, a
   module-level constant in Python, `#define` only where a constant can't work. Bare `0` and `1` as
   start values, identities or increments are fine.
 - **Macros:** a `#define` goes at the top of its file, after the includes, unless there is a good
   reason to put it elsewhere. A macro anywhere else gets a one-line comment right above it that
   says why it is there and where it is used:
-  `// TILE_SIZE is here because only tile_rows uses it; no other file includes it.`
+  `// MAX_BULLET_COUNT is here because only spawn_bullet uses it; no other file includes it.`
 - **Privacy:** everything that is not part of the interface of a module, file or class is private,
   so that only the interface can be imported. Keep as much private as possible.
-  - Python: private module names, attributes and methods start with `_`: `_load_batch`.
-  - C++ and CUDA: names used by only one `.cc` or `.cu` file go in an anonymous namespace there,
-    headers declare only the interface, and class members outside the interface are `private:`,
-    with data members ending in `_` (Google style): `batch_count_`.
+  - Python: private module names, attributes and methods start with `_`: `_pick_port`.
+  - C++: names used by only one `.cc` file go in an anonymous namespace there, headers declare
+    only the interface, and class members outside the interface are `private:`, with data members
+    ending in `_` (Google style): `player_count_`.
 - **Declared types:** write the type when declaring a variable, in Python too
   (`timeout_ms: float = ...`). Use C++ `auto` only where the type can't be written (lambdas).
 
 | Quantity | Suffixes | Meaning |
 | --- | --- | --- |
 | Time | `_ns`, `_us`, `_ms`, `_s` | |
-| Clock | `_cycles` | clock cycles, e.g. from `clock64()` |
-| Frequency | `_mhz`, `_ghz` | 10^6, 10^9 Hz |
+| Frequency | `_hz` | per second, e.g. a tick rate |
 | Data | `_bits`, `_bytes` | |
-| Data, decimal | `_kbytes`, `_mbytes`, `_gbytes`, `_tbytes` | 10^3, 10^6, 10^9, 10^12 bytes |
-| Data, decimal bits | `_kbits`, `_mbits`, `_gbits` | 10^3, 10^6, 10^9 bits |
-| Data, binary | `_kibytes`, `_mibytes`, `_gibytes`, `_tibytes` | 2^10, 2^20, 2^30, 2^40 bytes |
-| Bandwidth | `_gbytes_per_s`, `_tbytes_per_s`, `_gbits_per_s` | not `_gbps`: bits or bytes? |
-| Work | `_flop`, `_gflop`, `_tflop` | 1, 10^9, 10^12 floating-point operations; never `_flops` |
-| Throughput | `_gflops`, `_tflops` | 10^9, 10^12 FLOP per second: the `s` means per second |
-| Arithmetic intensity | `_flop_per_byte` | |
-| Power | `_w` | watts |
-| Count | `_count` | a number of items: `element_count` |
+| Data, decimal | `_kbytes`, `_mbytes`, `_gbytes` | 10^3, 10^6, 10^9 bytes |
+| Data, decimal bits | `_kbits`, `_mbits` | 10^3, 10^6 bits |
+| Data, binary | `_kibytes`, `_mibytes`, `_gibytes` | 2^10, 2^20, 2^30 bytes |
+| Bandwidth | `_kbits_per_s`, `_mbits_per_s`, `_mbytes_per_s` | not `_mbps`: bits or bytes? |
+| Count | `_count` | a number of items: `player_count` |
 | Fraction | `_frac`, `_pct` | 0 to 1, 0 to 100 |
 
 For a unit the table lacks, build the suffix the same way, from lowercase unit names joined with
-`_per_` (`_hz`, `_flop_per_cycle`), and add its row here in the same change.
+`_per_` (`_rad`, `_rad_per_s`), and add its row here in the same change.
 
 ### Comments
 
@@ -165,9 +162,9 @@ directives such as `// NOLINT(...)`, `# noqa`, `#pragma` and shebangs aren't com
   `// DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN <CONSEQUENCE> WILL HAPPEN` (`#` in
   Python). In a dangerous section, every line gets one. A DANGEROUS comment longer than one line
   needs the user's approval. Nothing else gets a comment.
-- **Phrasing:** every sentence names its subject and uses the active voice: "`copy_to_device`
-  copies a host array to the device.", not "Copies a host array to the device.". Write directly,
-  clearly and briefly. Separate points are bullets; a line of reasoning is a paragraph.
+- **Phrasing:** every sentence names its subject and uses the active voice: "`add_player` lets one
+  more player join a game server.", not "Lets one more player join a game server.". Write
+  directly, clearly and briefly. Separate points are bullets; a line of reasoning is a paragraph.
 - **Sections:** a docstring's sections come in the template's order. A section with nothing to say
   is left out, except Example, which every docstring has except a test's.
 - **Interface:** a function's interface is its arguments, return value and errors. A file's is its
@@ -183,110 +180,113 @@ directives such as `// NOLINT(...)`, `# noqa`, `#pragma` and shebangs aren't com
 Python docstrings use the Google style:
 
 ```python
-"""`bench.py` times every kernel and prints a table of time, TFLOPS and roofline share.
+"""`serve.py` runs the management server until it gets SIGINT or SIGTERM.
 
 Interface:
-    -N: Matrix size (default 8192).
-    --warmup-iterations: Untimed calls per kernel before the timed one (default 1).
+    --port: The management server's HTTP port (default 8000).
+    --advertised-host: The host clients reach game servers at (default 127.0.0.1).
 
 Example:
-    $ uv run scripts/bench.py -N 4096
+    $ uv run management-server --advertised-host 10.0.0.5
 
 Must know:
-    Gotchas:
-        - `bench.py` reads the roofline peaks from `.env`, so `source .env` must run first.
+    Side effects:
+        - When it exits, `serve.py` stops every game server it started.
 """
 
 
-class Dataloader:
-    """`Dataloader` loads batches of samples from files on disk.
+class Room:
+    """`Room` holds the players and bullets of one game server's map.
 
     Args:
-        paths: Files that the `Dataloader` reads, in order.
+        max_player_count: How many players the `Room` holds at once.
 
     Attributes:
-        batch_count: Number of batches loaded so far.
+        player_count: Number of players in the `Room` now.
 
     Example:
-        >>> dataloader = Dataloader.FromFiles(paths)
+        >>> room = Room.FromConfig(config)
 
     Must know:
         Limitations:
-            - A `Dataloader` is not thread-safe.
+            - A `Room` is not thread-safe.
     """
 
 
-def copy_to_device(X_host: np.ndarray) -> DeviceArray:
-    """`copy_to_device` copies a host array into a new device buffer.
+def step_bullet(bullet: Bullet, black_holes: list[BlackHole], dt: float) -> Bullet:
+    """`step_bullet` moves a bullet one time step along its path, bent by black holes.
 
     Args:
-        X_host: The array to copy.
+        bullet: The bullet to move.
+        black_holes: The black holes that pull on the bullet.
+        dt: The time step, in seconds.
 
     Returns:
-        A new device buffer that holds a copy of `X_host`.
+        A new bullet, `dt` seconds later.
 
     Raises:
-        MemoryError: The device has no room for the copy.
+        ValueError: `dt` isn't positive.
 
     Example:
-        >>> X_device = copy_to_device(X_host)
+        >>> bullet = step_bullet(bullet, black_holes, 1 / 60)
 
     Must know:
-        Side effects:
-            - The caller owns the new buffer and must free it.
+        Limitations:
+            - `step_bullet` loses accuracy when a bullet passes very close to a black hole.
     """
 ```
 
-C++ and CUDA docstrings use Doxygen's Javadoc style:
+C++ docstrings (and those in Metal Shading Language, which is based on C++) use Doxygen's Javadoc
+style:
 
 ```cpp
 /**
  * @file
- * @brief `bench.cc` times one call of each kernel and prints one CSV line per kernel.
+ * @brief `replay.cc` replays a recorded match and prints one CSV line per tick.
  *
  * @par Interface
- * - Arguments: `N warmup_iterations`.
- * - Output: one `name,milliseconds` line per kernel on stdout.
+ * - Flags: `--recording-file <path>`, `--tick-count <count>`.
+ * - Output: one `tick,player_count` line per tick on stdout.
  *
  * @par Example
  * @code
- * .build/bench 8192 1
+ * .build/replay --recording-file match.bin --tick-count 600
  * @endcode
  *
  * @par Must know
  * - Gotchas:
- *   - The timed call includes cuBLAS setup when `warmup_iterations` is 0.
+ *   - `replay` stops early when the recording has fewer than `--tick-count` ticks.
  */
 
 /**
- * @brief `Dataloader` loads batches of samples from files on disk.
+ * @brief `Room` holds the players and bullets of one game server's map.
  *
  * @par Example
  * @code
- * Dataloader dataloader = Dataloader::FromFiles(paths);
+ * Room room = Room::FromConfig(config);
  * @endcode
  *
  * @par Must know
  * - Limitations:
- *   - A `Dataloader` is not thread-safe.
+ *   - A `Room` is not thread-safe.
  */
 
 /**
- * @brief `matmul_cublas` computes C = A * B for N x N row-major bf16 matrices with cuBLAS.
+ * @brief `step_bullets` moves N bullets one time step along their paths, bent by black holes.
  *
- * @param[in] A_device Left factor, N x N, in device memory.
- * @param[in] B_device Right factor, N x N, in device memory.
- * @param[out] C_device Product, N x N, in device memory.
- * @param[in] N Matrix size.
+ * @param[in,out] bullets The bullets to move.
+ * @param[in] black_holes The black holes that pull on the bullets.
+ * @param[in] dt The time step, in seconds.
+ * @param[in] N Number of bullets.
  *
  * @par Example
  * @code
- * matmul_cublas(A_device, B_device, C_device, N);
+ * step_bullets(bullets, black_holes, dt, N);
  * @endcode
  *
  * @par Must know
  * - Performance:
- *   - The first call creates the cuBLAS handle, so it is much slower than later calls.
+ *   - The first call builds a table of the black holes' pull, so it is slower than later calls.
  */
 ```
 
@@ -320,16 +320,16 @@ here, ask the user whether to set one, so that conventions don't drift apart.
 Choose unit tests by partitioning the input space, so that what they cover is deliberate and easy
 to check.
 
-1. **Input space:** write down everything the code under test takes as input. For a matmul, that's
-   the sizes `M`, `N` and `K` and the values in `A` and `B`.
-2. **Partitionings:** split the input space along a small number of properties at a time. Usually this will
-   be along one or two properties at most at a time. Each partitioning is a
-   set of parts that don't overlap and together cover the whole space, usually a tree or a grid of
-   conditions. For a matmul, one partitioning is the sign of the values: all zero, non-negative,
-   non-positive, or mixed.
+1. **Input space:** write down everything the code under test takes as input. For a function that
+   moves a bullet, that's the bullet's position and velocity, the black holes and the time step.
+2. **Partitionings:** split the input space along a small number of properties at a time. Usually
+   this will be along one or two properties at most at a time. Each partitioning is a set of parts
+   that don't overlap and together cover the whole space, usually a tree or a grid of conditions.
+   For moving a bullet, one partitioning is the number of black holes: none, one, or several.
 3. **Coverage:** pick tests (exemplars) so that every part of every partitioning is covered by at
-   least one test. One test might cover multiple parts (from multiple partitionings) at once, so the minimum number
-   of tests is the largest partitioning's part count, not the size of their Cartesian product.
+   least one test. One test might cover multiple parts (from multiple partitionings) at once, so
+   the minimum number of tests is the largest partitioning's part count, not the size of their
+   Cartesian product.
 4. **Coverage table:** the test file's docstring lists each partitioning, its parts, and which tests
    cover each part, so a reviewer can check that no part is missing.
 5. **One partitioning per PR:** for a large set of tests, add the partitionings one at a time, as
@@ -341,16 +341,16 @@ This repo is used from several machines, so don't write a workaround for one mac
 broken `gh` command) as if it held everywhere. In `CLAUDE.md` files and skills, write it as a
 condition, a one-line note on where it was seen, and the fix. Keep it to a line or two:
 
-> If `gh pr edit` fails with a Projects (classic) error (seen once with gh 2.55 on align-4,
+> If `gh pr edit` fails with a Projects (classic) error (seen once with gh 2.55 on a Linux machine,
 > 2026-10-30), set the body with `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f body=...`.
 
 ## Documenting the system
 
-Documentation of the system (GPU model, compute capability, clocks, power limit, driver and toolkit
-versions, OS, and so on) exists so that results can be reproduced. Record the settings that
-determine or explain a result. Don't record observations that are likely temporary or that don't
-matter for reproducing results, such as a tool failing to run, a permission or install quirk, or
-which GPUs are busy right now. If something like that gets in your way, tell the user instead of
-writing it into the docs.
+Documentation of the system (machine and chip, OS, browser, network such as Wi-Fi or wired, and
+toolchain versions such as Xcode, Python and uv) exists so that results, such as benchmark numbers,
+can be reproduced. Record the settings that determine or explain a result. Don't record
+observations that are likely temporary or that don't matter for reproducing results, such as a tool
+failing to run, a permission or install quirk, or which other programs are running right now. If
+something like that gets in your way, tell the user instead of writing it into the docs.
 
 > NOTE: if any of this is outdated notify the user.

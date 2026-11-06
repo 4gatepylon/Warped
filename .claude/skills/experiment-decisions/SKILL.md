@@ -1,12 +1,12 @@
 ---
 name: experiment-decisions
-description: Record the decisions behind an experiment, evaluation or benchmark in a standard template, in the PR description or in a per-experiment DECISIONS.md. Use whenever you build or change anything that compares options or measures something - a performance benchmark, a model evaluation, an A/B test, or an ablation of a kernel, algorithm, model architecture, training scheme, training data, hyperparameters and so on - and you open or update a PR for it.
+description: Record the decisions behind an experiment or benchmark in a standard template, in the PR description or in a per-experiment DECISIONS.md. Use whenever you build or change anything that compares options or measures something - a performance benchmark (tick time, frame time, latency, bandwidth), a comparison of physics integrators or network transports, a playtest of two mechanics, and so on - and you open or update a PR for it.
 ---
 
 # Experiment decisions
 
-An experiment is only as trustworthy as the choices behind it: which baselines, which sizes, how
-many repeats, which metric, what to hold fixed.
+An experiment is only as trustworthy as the choices behind it: which baselines, which scenarios,
+how many repeats, which metric, what to hold fixed.
 
 **The user makes the decisions.** Be as eager as possible to let them decide: before building,
 ask about every choice that matters, with your suggested option and the alternatives. Decide
@@ -19,10 +19,10 @@ Every decision you do make must be visible to the reviewer, so every such PR lis
 
 ## When this applies
 
-Any PR that adds or changes an experiment, evaluation or benchmark: anything that compares two or
-more options or measures how well something works. Examples: timing kernel implementations,
-comparing algorithms, ablating model architecture, a training scheme or training data, sweeping
-hyperparameters, evaluating a model on a task.
+Any PR that adds or changes an experiment or benchmark: anything that compares two or more options
+or measures how well something works. Examples: timing the game server's tick, measuring latency
+over Wi-Fi, comparing physics integrators or network transports, a demo that compares two
+mechanics or weapons.
 
 ## What counts as a decision
 
@@ -31,20 +31,23 @@ state exactly. Typical ones:
 
 - **Scope**: which options are compared, which are left out, and the question being answered.
 - **Baselines**: what each option is compared against.
-- **Workload / data**: problem sizes, shapes, dtypes, datasets, splits, preprocessing.
-- **Procedure**: warmup, repeats, seeds, stopping criteria, hyperparameters, what is held fixed.
-- **Metrics**: what is measured, how it is aggregated (mean, median, min), and the units.
-- **Environment**: hardware, clocks, library versions, anything pinned or assumed.
+- **Workload**: scenarios, maps, black holes, player and bullet counts, recorded inputs, network
+  conditions.
+- **Procedure**: warmup, repeats, random seeds, durations, what is held fixed.
+- **Metrics**: what is measured, how it is aggregated (mean, median, percentiles), and the units;
+  for a playtest, what players are asked.
+- **Environment**: machine, OS, browser, network (Wi-Fi or wired), library versions, anything
+  pinned or assumed.
 - **Analysis**: how results are summarized, plotted or judged, and why we believe a
-  difference is statistically significant (repeats, variance, confidence intervals, tests).
+  difference is real rather than noise (repeats, variance, confidence intervals).
 
 Don't list choices the user made explicitly; put those in the **Given** bullet instead. Don't list
 pure implementation details that can't affect the results (file names, variable names).
 
 ## Where the decisions go
 
-- **One folder per experiment** (the PR adds or changes experiment folders, e.g.
-  `experiments/<name>/`): write the decisions to `DECISIONS.md` in each experiment's folder. The PR
+- **One folder per experiment** (the PR adds or changes experiment folders, such as
+  `demos/<name>/`): write the decisions to `DECISIONS.md` in each experiment's folder. The PR
   description gets only a `## Decisions` section that links each file, one line per experiment.
 - **Otherwise**: put the decisions in the PR description under `## Decisions`.
 
@@ -64,7 +67,7 @@ In `DECISIONS.md`, the top heading is `# Decisions: <experiment name>`; in a PR 
 - **Outcomes:** <what we're looking for: the numbers reported and the results they could show,
   e.g. faster or slower than a reference, better on one axis and worse on another>
 
-## <Category, e.g. Scope, Baselines, Workload / data, Procedure, Metrics, Environment, Analysis>
+## <Category, e.g. Scope, Baselines, Workload, Procedure, Metrics, Environment, Analysis>
 
 ### D1. <short name of the decision>
 
@@ -91,35 +94,36 @@ Rules for filling it in:
 ```markdown
 ## Decisions
 
-- **Question:** Is the tiled SGEMM kernel faster than the naive one, and how far is it from cuBLAS?
-- **Given:** compare naive, tiled and cuBLAS; FP32.
-- **Outcomes:** GFLOP/s per size for each kernel. Tiled may beat naive at all sizes, only at large
-  sizes (where reuse matters), or not at all; its fraction of cuBLAS shows the remaining headroom.
+- **Question:** Which integrator keeps bullets that pass a black hole on their true path at the
+  game server's 60 Hz tick: explicit Euler, semi-implicit Euler or RK4?
+- **Given:** compare those three at 60 Hz.
+- **Outcomes:** each integrator's position error after 5 s. Semi-implicit Euler may be accurate
+  enough everywhere, RK4 may be needed only for close passes, or all three may drift too far.
 
-### Workload / data
+### Baselines
 
-#### D1. Square sizes 256-8192, powers of two
+#### D1. RK4 at 6000 Hz as the true path
 
-- **Choice:** M = N = K in {256, 512, ..., 8192}.
-- **Alternatives:** non-square shapes; sizes that aren't multiples of the tile.
-- **Rationale:** covers launch-bound to compute-bound; odd shapes are a separate question.
-- **Revisit if:** the tiled kernel is meant for real model shapes.
+- **Choice:** the reference path is RK4 with a time step 100 times smaller.
+- **Alternatives:** an analytic path (exists only for a single black hole).
+- **Rationale:** it works for any map, and its own error is far below the errors compared.
 
-### Procedure
+### Workload
 
-#### D2. 10 warmup runs, median of 50 timed runs
+#### D2. 100 random shots past one black hole
 
-- **Choice:** time with CUDA events; report the median.
-- **Alternatives:** mean; min.
-- **Rationale:** the median ignores one-off stalls from other jobs on the GPU.
+- **Choice:** random positions and directions, with closest approaches of 1 to 10 times the
+  black hole's radius.
+- **Alternatives:** several black holes; hand-picked shots.
+- **Rationale:** one black hole isolates the integrator's error; several is a separate question.
+- **Revisit if:** maps usually have black holes close together.
 
 ### Analysis
 
-#### D3. A difference counts only if it is larger than the run-to-run spread
+#### D3. Accurate enough means a 95th-percentile error below a player's radius
 
-- **Choice:** report the median and interquartile range (IQR) of the 50 runs; call two kernels
-  different only if their medians differ by more than the larger IQR.
-- **Alternatives:** t-test; bootstrap confidence intervals.
-- **Rationale:** GPU timings are skewed rather than normal, and with 50 runs this simple check is
-  conservative.
+- **Choice:** report the median and 95th percentile of the error over the 100 shots.
+- **Alternatives:** the mean; the maximum.
+- **Rationale:** a bullet that misses by less than a player's radius still hits what it should,
+  and the 95th percentile shows close passes without one outlier deciding.
 ```
