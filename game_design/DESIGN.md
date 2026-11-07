@@ -66,6 +66,7 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 | Control to deactivate a console | Hold E |
 | Time to deactivate one console | 10 s |
 | While deactivating | The player must face the pylon and can't use a weapon. |
+| Letting go of E | Resets that console's progress to zero. |
 
 ### Wavefront
 
@@ -79,6 +80,7 @@ Each team defends its own levels and attacks the other team's. A match is a sequ
    attacker that wins the defender's deepest level wins the match.
 4. If the defender wins, the teams swap roles, and the next round is on the new attacker's
    wavefront, where it left off.
+5. A match lasts at most 30 minutes. If no team has won by then, the match is a tie.
 
 Each team's wavefront only moves deeper, and every level but City Sphere can be played many times.
 For example:
@@ -103,8 +105,9 @@ a round goes on, so dying costs more late in a round than early on.
 | Time between steps | 5 min |
 
 Respawn time = 20 s + 10 s × ⌊t / 5 min⌋, where t is the time since the round started. For
-example, a player who dies 12 minutes into a round waits 40 s. These values are configurable
-starting points and may change after playtests.
+example, a player who dies 12 minutes into a round waits 40 s. A match lasts at most 30 minutes,
+so the respawn time never goes above 70 s. These values are configurable starting points and may
+change after playtests.
 
 ## Levels
 
@@ -114,7 +117,7 @@ starting points and may change after playtests.
 | Depth | 2 | 1 | 0 | 1 | 2 |
 | Theme | Dust (desert) planet | Snow planet | City, or space station | Dark forest planet | Lunar surface |
 | Space | Hyperbolic | T² × ℝ | Inside a sphere | T² × ℝ | Hyperbolic |
-| Gravity | TBD | Down | Outward, onto the sphere | Down | TBD |
+| Gravity | Down, onto the ground | Down | Outward, onto the sphere | Down | Down, onto the ground |
 | Warp objects | Yes | Yes | No | Yes | Yes |
 | Size | Very large | Large | Smallest | Large | Very large |
 | Consoles per pylon | 5 | 4 | 4 | 4 | 5 |
@@ -128,8 +131,9 @@ starting points and may change after playtests.
   pulls them outward onto its surface. With no warp objects, light travels in straight lines.
 - **T² × ℝ:** flat space whose two horizontal axes loop back around (a torus) and whose vertical
   axis goes on forever. The loops are large. The warp objects curve space around them.
-- **Hyperbolic:** hyperbolic space with warp objects. The pylons are far apart. The topology and
-  the direction of gravity are TBD.
+- **Hyperbolic:** hyperbolic space with warp objects. The pylons are far apart. Gravity pulls
+  players down onto the ground, along the ground's normal under them; players never get far above
+  the ground, so that simple rule is enough. The topology is TBD.
 
 ### Combat focus
 
@@ -222,14 +226,11 @@ time to kill.
 
 ## Open questions
 
-- **Match length:** whether a match has a time or round limit, since it goes back and forth for as
-  long as defenders keep winning.
-- **Consoles:** whether progress on a console resets when a player lets go of E or is hit, whether
-  several players can deactivate consoles at once, and whether deactivated consoles come back on.
-- **Respawning:** where a player respawns, and whether the respawn time stops growing at a cap.
+- **Consoles:** whether being hit interrupts a deactivation, whether several players can deactivate
+  consoles at once, and whether deactivated consoles come back on.
 - **Sprinting:** how fast sprinting is, whether players spawn with full energy, and whether a
   player can shoot while sprinting.
-- **Hyperbolic levels:** their topology and the direction of gravity.
+- **Hyperbolic levels:** their topology.
 - **Warp objects:** how many black holes and wormholes each level has, and where.
 - **Weapons:** exact fire rates, how fast an overheated weapon cools down, and how much and for how
   long a hit slows a player.

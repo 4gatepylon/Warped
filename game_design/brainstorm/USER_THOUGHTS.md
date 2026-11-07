@@ -27,3 +27,6 @@ There is an ability to sprint, but that uses up energy for running. This is like
 
 # Addendum: configurable numbers
 All numbers for the game design will, or almost all numbers will be configurable. So, for example, the number of consoles, the time to deactivate one console, parameters like pylons per level, etc. All these should be configurable. The default map, in fact, should not be the only map. It should be possible to configure maps, but that will not be done yet.
+
+# Addendum: answers to open questions
+The match length will be at most 30 minutes, and if nobody has won by 30 minutes, there will be a tie. Progress does reset when a human lets go of the console. For the hyperbolic levels, gravity always pulls you down to the ground. Because the player is not going very far up, you can just like look at orthogonal vectors to the ground. It should be fairly simple. The warp objects will be defined later, and the weapons' exact fire rates will also be decided later. These things will be decided, but they will be configurable.
