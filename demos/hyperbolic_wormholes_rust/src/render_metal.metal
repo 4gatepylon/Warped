@@ -51,6 +51,7 @@ constant float FAR_STEP_PER_NEAREST = 0.25;
 constant float NEAR_ZONE_PER_THROAT = 10.0;
 constant float MIN_STEP_M = 0.005;
 constant float RK4_STEP_PER_NEAREST = 0.5;
+constant float OUTER_RK4_STEP_PER_NEAREST = 0.35;
 constant float RK4_ZONE_START_PER_THROAT = 3.0;
 constant float JUMP_OVERSHOOT_M = 0.002;
 constant int THROAT_TABLE_SIZE = __THROAT_TABLE_SIZE__;
@@ -340,6 +341,28 @@ static float4 get_bend_split(thread const Scene &scene, int row, float4 x, float
     }
     g_others = g - g_nearest;
     return g - mdot(g, v) * v;
+}
+
+/**
+ * @brief `step_rk4_full` moves a ray `ds_m` blocks with the classical fourth-order Runge-Kutta method, as
+ * `step_rk4` does, but sums every mouth's bending at every stage, for steps long enough that the other mouths'
+ * gradient changes along them.
+ * @par Example
+ * @code
+ * step_rk4_full(scene, row, x, v, bend, ds_m);
+ * @endcode
+ */
+static void step_rk4_full(thread const Scene &scene, int row, thread float4 &x, thread float4 &v, float4 bend, float ds_m) {
+    float r = scene.u.curvature_radius_m, unused_q;
+    float4 kx1 = v / r, kv1 = x / r + bend;
+    float4 x2 = x + 0.5 * ds_m * kx1, v2 = v + 0.5 * ds_m * kv1;
+    float4 kx2 = v2 / r, kv2 = x2 / r + get_bend(scene, row, x2, v2, unused_q);
+    float4 x3 = x + 0.5 * ds_m * kx2, v3 = v + 0.5 * ds_m * kv2;
+    float4 kx3 = v3 / r, kv3 = x3 / r + get_bend(scene, row, x3, v3, unused_q);
+    float4 x4 = x + ds_m * kx3, v4 = v + ds_m * kv3;
+    float4 kx4 = v4 / r, kv4 = x4 / r + get_bend(scene, row, x4, v4, unused_q);
+    x = to_point(x + ds_m / 6.0 * (kx1 + 2.0 * kx2 + 2.0 * kx3 + kx4));
+    v = to_tangent(x, v + ds_m / 6.0 * (kv1 + 2.0 * kv2 + 2.0 * kv3 + kv4));
 }
 
 /**
@@ -1294,15 +1317,17 @@ static RayEnd trace_ray(thread const Scene &scene, float2 ndc) {
         bool is_far = q_nearest > scene.q_cutoff;
         float4 vh = v;
         float tau_max, ds_m;
-        bool is_near = q_nearest < scene.q_near_zone && q_nearest > scene.q_rk4_start;
+        bool is_near = q_nearest > scene.q_rk4_start;
+        bool is_outer = q_nearest >= scene.q_near_zone;
         float4 x_next = x, v_next = v;
         if (is_far) {
             tau_max = get_cutoff_entry_tau(scene, row, x, v);
             ds_m = tau_max < 1.0 ? atanh(tau_max) * r : max_travel_m;
         } else if (is_near) {
-            ds_m = max(get_distance_of_q(q_nearest) * r * RK4_STEP_PER_NEAREST, MIN_STEP_M);
+            ds_m = max(get_distance_of_q(q_nearest) * r * (is_outer ? OUTER_RK4_STEP_PER_NEAREST : RK4_STEP_PER_NEAREST), MIN_STEP_M);
             if (q_nearest >= scene.q_jump) ds_m = min(ds_m, get_jump_entry_m(scene, row, x, v) + JUMP_OVERSHOOT_M);
-            step_rk4(scene, row, x_next, v_next, bend, g_others, fetch(scene, row, TEXEL_MOUTHS + nearest), ds_m);
+            if (is_outer) step_rk4_full(scene, row, x_next, v_next, bend, ds_m);
+            else step_rk4(scene, row, x_next, v_next, bend, g_others, fetch(scene, row, TEXEL_MOUTHS + nearest), ds_m);
             float q_next;
             get_nearest_mouth(scene, row, x_next, q_next);
             if (q_nearest >= scene.q_jump && q_next < scene.q_jump) {

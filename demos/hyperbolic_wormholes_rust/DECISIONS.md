@@ -81,19 +81,23 @@
 - **Alternatives:** the separate check each step that the WebGL demo does.
 - **Rationale:** it was pure overhead.
 
-### D13. Step sizes (needs input)
+### D13. Step sizes
 
-- **Choice:** not changed: the steps stay 0.12 and 0.25 of the nearest mouth's distance outside the RK4 zone (D22),
-  as in the WebGL demo. Against a reference with eight times smaller steps, these put image features about 3 pixels
-  (median, at 2560×1600; 0.14° of view) from the converged light paths at spawn, and 2 to 3 pixels near a mouth.
-  - Smaller steps outside 10 throat radii would cut that at spawn: midpoint steps of 0.125 to 1.1 pixels (50% more
-    GPU time), RK4 steps of 0.35 to 1.4 pixels (23% more) or 0.25 to 1.1 pixels (50% more). Near a mouth the shift
-    stays 2.3 to 2.7 pixels, which comes from the steps closer in.
-  - Larger steps go the other way. Measured before D21 to D23, steps of 0.18 and 0.40 took spawn from 30 to 21 ms
-    at 2560×1600, and 0.25 and 0.50 to 17.5 ms; 15% and 22% of spawn's pixels changed by more than 30 of 765.
-- **Alternatives:** any of these as the default, or as a quality setting.
-- **Rationale:** it changes the picture (a shift of a few pixels you can't see without the reference beside it) and
-  trades against how often the window has to upscale, so it is your call.
+- **Choice:** the steps outside 10 throat radii of a mouth are now RK4 steps of 0.35 of the distance to it (D22),
+  instead of the WebGL demo's midpoint steps of 0.25; elsewhere the step sizes are unchanged. Against a reference
+  with eight times smaller steps, features at spawn now sit 1.4 pixels (median, at 2560×1600; 0.07° of view) from
+  the converged light paths instead of 3.2, for 23% more GPU time when tracing every pixel.
+- **Alternatives:**
+  - the demo's steps (3.2 pixels);
+  - midpoint steps of 0.125 (1.1 pixels, 50% more time) or RK4 steps of 0.25 (1.1 pixels, 50% more);
+  - shorter RK4 steps near a mouth (0.35 or 0.25 instead of 0.5): the view 2.5 blocks from 1A goes only from 2.8 to
+    2.2 or 2.1 pixels, for 12% to 25% more time there;
+  - larger steps everywhere (measured before D21 to D23: spawn 30 to 21 ms at 0.18 and 0.40, with 15% of pixels
+    changed).
+- **Rationale:** you asked for high fidelity at 60 fps; this halves the error in ordinary views at a cost the
+  window's automatic scale absorbs (D19). Near a mouth the lens magnifies what error is left, and shorter steps
+  there buy little.
+- **Revisit if:** you want the demo's exact picture back, or more speed.
 
 ### D14. Tried and dropped
 
@@ -108,9 +112,11 @@
   - growing the midpoint steps with distance beyond 10 throat radii (as √distance, up to 0.5 or 0.8 of it): 10% faster
     at spawn, but 16 to 22% of its pixels changed against the reference instead of 12%;
   - summing only the nearest mouth's bending inside its near zone: slower, and 24% of the throat view changed;
-  - RK4 steps out to the bending cutoff (0.5 of the distance: no faster, and less accurate high above spawn; 0.7:
-    faster but 18 to 36% of pixels changed), and keeping the other mouths' gradient fixed within midpoint steps (22%
-    of the aimed view changed instead of 10%);
+  - RK4 steps of 0.5 or 0.7 of the distance out to the bending cutoff (no faster, or faster but 18 to 36% of pixels
+    changed), and keeping the other mouths' gradient fixed within midpoint steps (22% of the aimed view changed
+    instead of 10%);
+  - a lookup table, in log q, for each mouth's bending factor instead of computing it: no faster;
+  - a four times finer throat table: no change in accuracy;
   - kick-drift-kick (Heun-like) steps that reuse each step's end bending as the next step's start, so each step
     sums the bending once instead of twice: 17% faster at spawn, but its error is larger than the midpoint
     method's. Against a reference with four times smaller steps, 43% of the throat view's pixels changed by more than
@@ -154,15 +160,15 @@
     during the first frame, so a change of scale costs nothing (each first use cost 20 ms or more).
   - `--bench-views` and `--autopilot` render at full resolution unless `--render-scale` is given.
 - **Alternatives:**
-  - always full resolution: 8 of 719 frames of the scripted legs over 1/60 s, the worst 18.7 ms;
+  - always full resolution: 10 of 719 frames of the scripted legs over 1/60 s, the worst 20.2 ms;
   - moving 2% a frame both ways: 1.3 to 1.5% of the mouth tour's frames late;
   - dropping all the way at once: the scale fell to 0.5 and full resolution held in 92.5% of the legs' frames;
   - MetalFX's temporal scaler, which needs motion vectors and jittered frames;
   - the first version's start at 0.5 with a 12 ms target.
-- **Rationale:** in a full-screen window, no frame of the scripted legs took over 1/60 s in two runs, with 95.9% at
-  full resolution; on the mouth tour, 2 and 5 of 1795 did, with 89% at full resolution. Upscaling loses detail (SSIM
-  0.85 to 0.96 against full resolution at 0.8 scale, features within 0.4 pixel), so it is kept for those frames;
-  14 ms leaves room for the CPU's part of a 60 Hz frame.
+- **Rationale:** in a full-screen window, 1 frame of the scripted legs took over 1/60 s in each of two runs (17.1 and
+  17.2 ms), with 94.9% at full resolution; on the mouth tour, 5 of 1795 did in each run, with 83% at full
+  resolution. Upscaling loses detail (SSIM 0.85 to 0.96 against full resolution at 0.8 scale, features within 0.4
+  pixel), so it is kept for those frames; 14 ms leaves room for the CPU's part of a 60 Hz frame.
 - **Revisit if:** a 120 Hz display needs a lower target.
 
 ### D21. Trace a coarse grid, and interpolate where that is exact enough
@@ -185,10 +191,12 @@
 
 ### D22. Fourth-order steps away from the throat
 
-- **Choice:** between 3 and 10 throat radii of a mouth, a ray takes classical Runge-Kutta steps of 0.5 of the
-  distance to the mouth's centre, instead of midpoint steps of 0.12; within 3 throat radii it keeps midpoint steps.
-  The later stages of a step re-evaluate only the nearest mouth, keeping the other mouths' gradient from the
-  step's start, as they are at least a few blocks away (10% faster near a mouth, no change in accuracy).
+- **Choice:** from 3 throat radii of a mouth out to the bending cutoff, a ray takes classical Runge-Kutta steps:
+  0.5 of the distance to the mouth's centre up to 10 throat radii (instead of midpoint steps of 0.12), and 0.35
+  beyond (instead of midpoint steps of 0.25, D13); within 3 throat radii it keeps midpoint steps.
+  Within 10 throat radii, the later stages of a step re-evaluate only the nearest mouth, keeping the other mouths'
+  gradient from the step's start, as they are at least a few blocks away (10% faster near a mouth, no change in
+  accuracy); beyond, every stage sums every mouth.
 - **Alternatives:** RK4 all the way to the throat (its stages land inside the throat sphere, and 21% of the throat
   view's pixels changed by more than 30 against a reference with four times smaller steps, however small the
   steps); Heun-like steps (D14); larger midpoint steps (D13).
