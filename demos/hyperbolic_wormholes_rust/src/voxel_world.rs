@@ -39,6 +39,9 @@ const MIN_FLY_HEIGHT_M: f64 = 0.4;
 const MAX_FLY_HEIGHT_M: f64 = 240.0;
 const UNSTICK_STEP_M: f64 = 0.25;
 const UNSTICK_MAX_STEPS: usize = 160;
+const PUSH_OUT_STEP_M: f64 = 0.05;
+const PUSH_OUT_STEP_COUNT: usize = 6;
+const PUSH_OUT_DIRECTION_COUNT: usize = 16;
 const LANDING_BISECTIONS: usize = 10;
 const STAND_SEARCH_STEP_M: f64 = 0.05;
 const STAND_SEARCH_MAX_STEPS: usize = 400;
@@ -524,6 +527,27 @@ impl VoxelWorld {
                         * map_exp(DVec3::new(dx, 0.0, dz), self.r),
                     nearby,
                 ) != 0
+        })
+    }
+
+    /// `push_out_sideways` gives the nearest body, moved along the ground by up to
+    /// `PUSH_OUT_STEP_COUNT` × `PUSH_OUT_STEP_M` in one of `PUSH_OUT_DIRECTION_COUNT` directions,
+    /// that is clear of blocks at eye height `h_m`, or `None`. A body grazing a wall (turned so a
+    /// probe swings into it) gets out this way instead of being lifted to the wall's top.
+    ///
+    /// Example: `if let Some(body) = world.push_out_sideways(body, h_m, &nearby) { ... }`
+    fn push_out_sideways(&self, body: DMat4, h_m: f64, nearby: &[usize]) -> Option<DMat4> {
+        (1..=PUSH_OUT_STEP_COUNT).find_map(|n| {
+            let distance: f64 = n as f64 * PUSH_OUT_STEP_M / self.r;
+            (0..PUSH_OUT_DIRECTION_COUNT).find_map(|k| {
+                let angle_rad: f64 =
+                    std::f64::consts::TAU * k as f64 / PUSH_OUT_DIRECTION_COUNT as f64;
+                let moved: DMat4 = renormalize_frame(
+                    body * make_boost(AXIS_Z, angle_rad.sin() * distance)
+                        * make_boost(AXIS_X, angle_rad.cos() * distance),
+                );
+                (!self.is_body_blocked(moved, h_m, nearby)).then_some(moved)
+            })
         })
     }
 
@@ -1080,8 +1104,9 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to spawn),
-    /// colliding with blocks and the boundary, stepping up single blocks, jumping and falling. It
-    /// returns messages for the HUD.
+    /// colliding with blocks and the boundary, stepping up single blocks, jumping and falling. A
+    /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
+    /// level does) only if that fails. It returns messages for the HUD.
     ///
     /// Example: `for message in player.step(&world, &input, 1.0 / 60.0, 0) { ... }`
     pub fn step(
@@ -1145,6 +1170,11 @@ impl VoxelPlayer {
         }
         let nearby: Vec<usize> =
             world.find_nearby_structures(self.body.col(AXIS_W), NEARBY_REACH_M);
+        if world.is_body_blocked(self.body, self.h_m, &nearby)
+            && let Some(body) = world.push_out_sideways(self.body, self.h_m, &nearby)
+        {
+            self.body = body;
+        }
         for _ in 0..UNSTICK_MAX_STEPS {
             if !world.is_body_blocked(self.body, self.h_m, &nearby) {
                 break;
@@ -1201,6 +1231,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
+    //! | Obstacle walked into | one block (stepped onto), a wall turned along after touching it at an angle (not climbed) | `walking_steps_onto_a_single_block`, `turning_along_a_wall_does_not_climb_it` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -1209,6 +1240,103 @@ mod tests {
     const STAND_TOLERANCE_M: f64 = 0.06;
     const PYLON_DISTANCE_M: f64 = 42.4;
     const DISTANCE_TOLERANCE_M: f64 = 0.5;
+    const WALL_CELLS: usize = 3;
+    const CLEAR_CELLS: usize = 4;
+    const START_OUT_CELLS: f64 = 0.6;
+    const DIAGONAL_CELLS: f64 = 1.5;
+    const STEP_S: f64 = 1.0 / 60.0;
+    const WALK_STEP_COUNT: usize = 90;
+    const MAX_RISE_ALONG_WALL_M: f64 = 0.5;
+    const MIN_RISE_ONTO_BLOCK_M: f64 = 0.9;
+    const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
+
+    /// `find_columns` finds, on structures standing upright on the ground, columns of cells (x, z)
+    /// solid from the ground up to `solid_cells` (and, with `is_top_open`, empty for
+    /// `CLEAR_CELLS` above), the same at (x, z + 1), with the `CLEAR_CELLS` columns beyond their +x
+    /// faces empty from the ground up (outside the grid counts as empty). For each it gives a map
+    /// point on the ground `START_OUT_CELLS` cells out from the face and one a player there faces,
+    /// toward the face and `along_cells` cells along it (map points are (u, v) in meters, as
+    /// `VoxelPlayer::AtView` takes them).
+    ///
+    /// Example: `let walls = find_columns(&world, 3, false, 1.5);`
+    fn find_columns(
+        world: &VoxelWorld,
+        solid_cells: usize,
+        is_top_open: bool,
+        along_cells: f64,
+    ) -> Vec<([f64; 2], [f64; 2])> {
+        let height: usize = solid_cells + CLEAR_CELLS;
+        let mut found: Vec<([f64; 2], [f64; 2])> = Vec::new();
+        for st in &world.structures[..world.static_structure_count] {
+            let frame: DMat4 = invert_lorentz(st.inverse);
+            let is_upright: bool = frame.col(AXIS_W).y.abs() < TINY
+                && (frame.col(AXIS_Y) - DVec4::Y).length() < TINY
+                && st.origin[1] == 0.0;
+            if !is_upright {
+                continue;
+            }
+            let [nx, ny, nz] = st.size;
+            let is_solid = |x: usize, y: usize, z: usize| {
+                x < nx && y < ny && z < nz && world.voxels[st.offset + x + nx * (y + ny * z)] != 0
+            };
+            let to_map = |g: DVec3| -> [f64; 2] {
+                let p: DVec4 =
+                    frame * map_klein((g - DVec3::from_array(st.origin)) * st.cell_m / world.r);
+                let v_m: f64 = world.r * p.x.asinh();
+                [-world.r * (p.z / (v_m / world.r).cosh()).asinh(), v_m]
+            };
+            for z in 0..nz.saturating_sub(1) {
+                for x in 0..nx {
+                    let is_column = |z: usize| {
+                        (0..solid_cells).all(|y| is_solid(x, y, z))
+                            && (!is_top_open || (solid_cells..height).all(|y| !is_solid(x, y, z)))
+                    };
+                    let is_clear: bool = (1..=CLEAR_CELLS).all(|dx| {
+                        (0..height).all(|y| !is_solid(x + dx, y, z) && !is_solid(x + dx, y, z + 1))
+                    });
+                    if is_column(z) && is_column(z + 1) && is_clear {
+                        let face: f64 = (x + 1) as f64;
+                        let at_m: [f64; 2] =
+                            to_map(DVec3::new(face + START_OUT_CELLS, 0.0, z as f64 + 0.5));
+                        let target_m: [f64; 2] = to_map(DVec3::new(
+                            face + START_OUT_CELLS - DIAGONAL_CELLS,
+                            0.0,
+                            z as f64 + 0.5 + along_cells,
+                        ));
+                        found.push((at_m, target_m));
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    /// `place_on_ground` makes a player at the first of `spots` (from `find_columns`) where they
+    /// stand on the ground, not on a block.
+    ///
+    /// Example: `let player = place_on_ground(&world, &walls);`
+    fn place_on_ground(world: &VoxelWorld, spots: &[([f64; 2], [f64; 2])]) -> VoxelPlayer {
+        spots
+            .iter()
+            .map(|&(at_m, target_m)| VoxelPlayer::AtView(world, at_m, target_m, None, 0.0))
+            .find(|player| (player.h_m - world.player.eye_height_m).abs() < STAND_TOLERANCE_M)
+            .expect("a spot on the ground beside the column")
+    }
+
+    /// `walk_forward` steps a player walking forward `count` times and gives the highest eye height
+    /// reached.
+    ///
+    /// Example: `let top_m = walk_forward(&world, &mut player, 90);`
+    fn walk_forward(world: &VoxelWorld, player: &mut VoxelPlayer, count: usize) -> f64 {
+        let input: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        (0..count).fold(player.h_m, |top_m, _| {
+            player.step(world, &input, STEP_S, 0);
+            top_m.max(player.h_m)
+        })
+    }
 
     /// `load_lunar_surface` loads the shipped Lunar Surface map as a voxel world.
     ///
@@ -1239,5 +1367,33 @@ mod tests {
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
         assert_eq!(world.structures[hit].name, "red pylon");
         assert!((shot.length_m - PYLON_DISTANCE_M).abs() < DISTANCE_TOLERANCE_M);
+    }
+
+    #[test]
+    fn walking_steps_onto_a_single_block() {
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer = place_on_ground(&world, &find_columns(&world, 1, true, 0.0));
+        let start_m: f64 = player.h_m;
+        assert!(
+            walk_forward(&world, &mut player, WALK_STEP_COUNT) - start_m > MIN_RISE_ONTO_BLOCK_M
+        );
+    }
+
+    #[test]
+    fn turning_along_a_wall_does_not_climb_it() {
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer = place_on_ground(
+            &world,
+            &find_columns(&world, WALL_CELLS, false, DIAGONAL_CELLS),
+        );
+        let start_m: f64 = player.h_m;
+        walk_forward(&world, &mut player, WALK_STEP_COUNT);
+        player.look(QUARTER_TURN_RAD / LOOK_RAD_PER_PX, 0.0);
+        let top_m: f64 = walk_forward(&world, &mut player, WALK_STEP_COUNT);
+        assert!(
+            top_m - start_m < MAX_RISE_ALONG_WALL_M,
+            "rose {} m along a wall",
+            top_m - start_m
+        );
     }
 }
