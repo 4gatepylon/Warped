@@ -50,8 +50,9 @@ carries on through the other mouth. "Auto" quality renders about 380k pixels and
 
 ## Optics lab (flat space)
 
-`optics.html` is a ray-traced, flat-space lab for trying out optical elements with a laser. For now it is an empty lab: drag
-to look around.
+`optics.html` is a ray-traced, flat-space lab for trying out optical elements with a laser. For now it is an empty lab.
+
+Click the scene to capture the mouse (or drag to look), `WASD` to fly and `E`/`Q` to go up and down.
 
 ## Running
 
