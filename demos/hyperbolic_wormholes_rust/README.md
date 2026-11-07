@@ -101,7 +101,9 @@ make run-autopilot
   the frame times (median, 99th percentile, worst, how many took longer than 1/60 s) and the render scale it used
   (`cargo run --release -- --play-route --width-px 2560 --height-px 1440`). `--route mouth-tour` plays a harder
   tour instead: the eye circles each of the six mouths from 5 blocks to 0.45 (inside its jump sphere, just outside
-  the throat) and back, while the view swings up to 46° sideways and 23° up and down.
+  the throat) and back, while the view swings up to 46° sideways and 23° up and down. On `--map lunar-surface`,
+  `--route warp-tour` circles the black hole and both wormhole mouths the same way, from 80% of each one's reach to
+  10% (19 m to 2.4 m from the black hole, 12 m to 1.5 m from a mouth) and back, over 600 frames each.
 
 ## How it works
 
@@ -243,6 +245,11 @@ resolution but the wormhole exit, at render scales 0.96 to 0.98: blue spawn 181 
 overview 118, black hole 108, wormhole 91, wormhole exit 73. At that size and full resolution every view takes under 11
 ms of GPU time but the wormhole exit (13.7) and the laser view with its beam (14.9). After 90 iterations a ray's steps
 are three times longer (D40); that changes only the most compressed rings inside a mouth.
+
+Playing the warp tour in that window (`--map lunar-surface --play-route --route warp-tour --width-px 2560 --height-px
+1600`), twice: 84.5 and 85.4 fps on average, frame times median 11.7 to 11.8 ms, 99th percentile 14.7 to 15.3 ms,
+worst 17.2 to 21.0 ms, 3 and 4 frames of 1,795 (0.2%) over 1/60 s; render scale 0.98 on average, at full resolution
+in 78% of frames, down to 0.70 at the closest approach to a mouth.
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s
