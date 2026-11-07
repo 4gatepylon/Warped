@@ -249,6 +249,22 @@ struct Hit {
     int3 cell;
 };
 
+/**
+ * @brief `VoxelRayEnd` is where a ray ended, with what shading needs: the hit point (or the sky direction at the
+ * origin, with w = 0), the ray's unit tangent there, the hit's grid point in its structure with the distance
+ * travelled, the hit cell with its material (`MAT_GROUND` for the ground), the outcome with the structure (-1 for the
+ * ground), face axis and laser team (1 for red), and the face's side with the glass count and the laser's core and
+ * halo.
+ */
+struct VoxelRayEnd {
+    float4 point;
+    float4 view;
+    float4 grid;
+    int4 cell;
+    int4 surface;
+    float4 glow;
+};
+
 /** @brief `Scene` bundles a frame's buffers for the functions below. */
 struct Scene {
     constant VoxelUniforms &u;
@@ -629,12 +645,16 @@ static float sample_star_layer(thread const Scene &scene, float3 d, float grid, 
     return (STAR_FAINT + STAR_BRIGHT * pow(h / density, STAR_BRIGHTNESS_POWER)) * exp(-angle * angle / (radius * radius));
 }
 
-/** @brief `sample_sky` gives the sky along an escaping ray (carried to the eye, then to the origin): stars, Milky Way, sun, planet. @par Example @code float3 c = sample_sky(scene, x, v); @endcode */
-static float3 sample_sky(thread const Scene &scene, float4 x, float4 v) {
-    constant VoxelUniforms &u = scene.u;
-    float4 cam = u.camera[3];
+/** @brief `get_sky_direction` gives an escaping ray's direction, carried to the eye, then to the origin. @par Example @code float3 d = get_sky_direction(scene, x, v); @endcode */
+static float3 get_sky_direction(thread const Scene &scene, float4 x, float4 v) {
+    float4 cam = scene.u.camera[3];
     float4 w = v + mdot(cam, v) / (1.0 - mdot(x, cam)) * (x + cam);
-    float3 d = normalize(w.xyz - w.w / (1.0 + cam.w) * cam.xyz);
+    return normalize(w.xyz - w.w / (1.0 + cam.w) * cam.xyz);
+}
+
+/** @brief `sample_sky` gives the sky in direction d at the origin: stars, Milky Way, sun, planet. @par Example @code float3 c = sample_sky(scene, d); @endcode */
+static float3 sample_sky(thread const Scene &scene, float3 d) {
+    constant VoxelUniforms &u = scene.u;
     float3 sun_dir = u.sun.xyz, planet = u.planet.xyz, e1 = u.planet_e1.xyz, e2 = u.planet_e2.xyz;
     float sd = dot(d, sun_dir);
     float3 sun = SUN_COLOR * (smoothstep(SUN_COS_OUTER, SUN_COS_INNER, sd) * SUN_DISC_BRIGHTNESS + pow(max(sd, 0.0), SUN_GLARE_POWER) * SUN_GLARE
@@ -659,8 +679,8 @@ static float3 sample_sky(thread const Scene &scene, float4 x, float4 v) {
     return color + sun;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form). @par Example @code scan_beams(scene, x, v, s, t, core, halo, color); @endcode */
-static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float3 &color) {
+/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form), with the brightest halo's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */
+static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &team) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
     for (int i = 0; i < scene.u.beam_count; i++) {
         float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
@@ -679,36 +699,31 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float q = d_m * d_m / (width_m * width_m);
         core = max(core, info.z * exp(-q));
         float hl = info.z * exp(-q / BEAM_REACH);
-        if (hl > halo) { halo = hl; color = info.w > 0.5 ? RED_COLOR : BLUE_COLOR; }
+        if (hl > halo) { halo = hl; team = info.w; }
     }
 }
 
 /**
- * @brief `trace_voxel_pixels` traces one pixel's ray backwards from the eye: straight chords between warp objects,
- * bent steps inside their reach, through wormhole throats, until a surface, the sky or a horizon, and writes its
- * colour.
+ * @brief `trace_ray` traces a ray backwards from the eye through a point of the image (in pixels from its top left
+ * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
+ * surface, the sky or a horizon.
  * @par Example
  * @code
- * dispatched by render_voxel.rs, one thread per pixel.
+ * VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
  * @endcode
  */
-kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device const VoxelStructure *structures [[buffer(1)]],
-                               device const uchar *voxels [[buffer(2)]], device const VoxelWarp *warps [[buffer(3)]],
-                               device const float4 *warp_lists [[buffer(4)]], device const VoxelLight *lights [[buffer(5)]],
-                               device const float4 *palette [[buffer(6)]], device const BeamSegment *beams [[buffer(7)]],
-                               texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
-    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
+    constant VoxelUniforms &u = scene.u;
+    device const VoxelWarp *warps = scene.warps;
     float r = u.curvature_radius_m;
-    float2 ndc = float2(2.0 * (float(id.x) + 0.5) / float(u.width_px) - 1.0, 1.0 - 2.0 * (float(id.y) + 0.5) / float(u.height_px));
+    float2 ndc = float2(2.0 * pixel.x / float(u.width_px) - 1.0, 1.0 - 2.0 * pixel.y / float(u.height_px));
     float3 d_cam = normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0));
     float4 x = u.camera[3], v = u.camera[0] * d_cam.x + u.camera[1] * d_cam.y + u.camera[2] * d_cam.z;
     int inside = -1;
     for (int w = 0; w < u.warp_count; w++) {
         if (-mdot(x, warps[w].centre) < cosh(warps[w].params.z)) inside = w;
     }
-    float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0;
-    float3 beam_color = float3(0.0);
+    float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, team = 0.0;
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
     int outcome = OUTCOME_LOST;
@@ -732,7 +747,7 @@ kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device c
             float glass_s = NO_HIT_S;
             trace_scene(scene, x, v, -1, 0.0, hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
-            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, beam_color);
+            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (entering < 0) { outcome = OUTCOME_SKY; break; }
             float4 xn = geodesic_point(x, v, s_end);
@@ -750,7 +765,7 @@ kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device c
         float glass_s = NO_HIT_S;
         trace_scene(scene, x, v, inside, rho, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
-        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, beam_color);
+        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
         float4 xn = geodesic_point(x, v, ds), vn = geodesic_tangent(x, v, ds);
         x = xn * rsqrt(-mdot(xn, xn));
@@ -764,15 +779,69 @@ kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device c
         if (prm.x > HALF_KIND && rho < prm.y) { cross_throat(scene, inside, x, v); inside = int(prm.w + 0.5); has_gradient = false; continue; }
         if (rho > prm.z) { inside = -1; has_gradient = false; }
     }
-    float3 color = float3(0.0);
+    VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0), int4(outcome, -1, -1, team > HALF_KIND ? 1 : 0),
+                       float4(0.0, glass, core, halo)};
     if (outcome == OUTCOME_HIT) {
-        float4 xh = geodesic_point(hit_x, hit_v, hit.s), vh = geodesic_tangent(hit_x, hit_v, hit.s);
-        color = hit.mat == MAT_GROUND ? shade_ground(scene, xh, vh, hit_travelled + hit.s) : shade_block(scene, hit, xh, vh, hit_travelled + hit.s);
+        end.point = geodesic_point(hit_x, hit_v, hit.s);
+        end.view = geodesic_tangent(hit_x, hit_v, hit.s);
+        end.grid.w = hit_travelled + hit.s;
+        end.cell.w = hit.mat;
+        if (hit.mat != MAT_GROUND) {
+            end.grid.xyz = hit.g;
+            end.cell.xyz = hit.cell;
+            end.surface.yz = int2(hit.k, hit.axis);
+            end.glow.x = hit.sgn;
+        }
     } else if (outcome == OUTCOME_SKY) {
-        color = sample_sky(scene, x, v);
+        end.point = float4(get_sky_direction(scene, x, v), 0.0);
     }
+    return end;
+}
+
+/**
+ * @brief `shade_ray_end` gives a ray's final colour from where it ended: the lit surface or the sky, tinted by the
+ * glass it crossed, with the laser's glow and the highlight roll-off; a lost ray is black.
+ * @par Example
+ * @code
+ * float3 color = shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5));
+ * @endcode
+ */
+static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
+    float3 color = float3(0.0);
+    if (end.surface.x == OUTCOME_HIT && end.cell.w == MAT_GROUND) {
+        color = shade_ground(scene, end.point, end.view, end.grid.w);
+    } else if (end.surface.x == OUTCOME_HIT) {
+        Hit hit = {0.0, end.cell.w, end.surface.y, end.surface.z, end.glow.x, end.grid.xyz, end.cell.xyz};
+        color = shade_block(scene, hit, end.point, end.view, end.grid.w);
+    } else if (end.surface.x == OUTCOME_SKY) {
+        color = sample_sky(scene, end.point.xyz);
+    }
+    float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
+    float3 beam_color = end.surface.w > 0 ? RED_COLOR : BLUE_COLOR;
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + GLASS_SHEEN;
     color = mix(color, beam_color, clamp(BEAM_HALO_OPACITY * halo, 0.0, 1.0)) + mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * core;
     color = color / (1.0 + max(color - 1.0, 0.0) * TONEMAP_KNEE);
-    image.write(float4(clamp(color, 0.0, 1.0), 1.0), id);
+    return clamp(color, 0.0, 1.0);
+}
+
+/** @brief `write_pixel` shades a ray end into pixel `id`. @par Example @code write_pixel(scene, end, id, image); @endcode */
+static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, texture2d<float, access::write> image) {
+    image.write(float4(shade_ray_end(scene, end), 1.0), id);
+}
+
+/**
+ * @brief `trace_voxel_pixels` traces every pixel's ray and writes its colour (`--sampling every-pixel`).
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs, one thread per pixel.
+ * @endcode
+ */
+kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device const VoxelStructure *structures [[buffer(1)]],
+                               device const uchar *voxels [[buffer(2)]], device const VoxelWarp *warps [[buffer(3)]],
+                               device const float4 *warp_lists [[buffer(4)]], device const VoxelLight *lights [[buffer(5)]],
+                               device const float4 *palette [[buffer(6)]], device const BeamSegment *beams [[buffer(7)]],
+                               texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
