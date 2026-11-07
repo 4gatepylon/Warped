@@ -31,6 +31,7 @@ mod render_cpu;
 mod render_metal;
 mod render_voxel;
 mod scene_data;
+mod voxel_clearance;
 mod voxel_world;
 mod world;
 

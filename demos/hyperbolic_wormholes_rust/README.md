@@ -126,6 +126,8 @@ make run-autopilot
 - `map.rs`: reads a map of the portable format; `map_export.rs` writes the house as one (`--export-map`).
 - `voxel_world.rs`: a voxel map on the CPU, ported from the Lunar Surface level: structures, warps, the voxel walk,
   the laser's light path, and walking on the map. `render_voxel.metal` and `render_voxel.rs` draw it on the GPU.
+- `voxel_clearance.rs`: each warp's clearance grid, a lower bound on the distance to the nearest block, so the GPU
+  skips blocks a bent step can't reach.
 - `main.rs`: the command line, the SDL3 window and HUD, and the benchmark and autopilot runs.
 
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the

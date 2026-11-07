@@ -9,6 +9,7 @@
 
 use std::error::Error;
 use std::ptr::NonNull;
+use std::sync::Arc;
 
 use glam::{DMat4, DVec4};
 use objc2::rc::Retained;
@@ -23,6 +24,7 @@ use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
 };
+use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld};
 
 /// `Result` is this module's result type.
@@ -31,7 +33,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const SHADER_SOURCE: &str = include_str!("render_voxel.metal");
 const KERNEL_NAME: &str = "trace_voxel_pixels";
 const UNIFORMS_BUFFER_INDEX: usize = 16;
-const SCENE_BUFFER_COUNT: usize = 7;
+const SCENE_BUFFER_COUNT: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
@@ -95,6 +97,7 @@ struct GpuWarp {
     centre: [f32; 4],
     params: [f32; 4],
     list: [i32; 4],
+    grid: [f32; 4],
 }
 
 /// `GpuLight` is the shader's `VoxelLight`.
@@ -124,6 +127,7 @@ pub struct VoxelFrame {
     lights: Vec<GpuLight>,
     palette: Vec<[f32; 4]>,
     beams: Vec<GpuBeam>,
+    clearance: Arc<ClearanceGrids>,
 }
 
 /// `to_f32` converts a double 4-vector to floats.
@@ -131,6 +135,20 @@ pub struct VoxelFrame {
 /// Example: `let v = to_f32(x);`
 fn to_f32(v: DVec4) -> [f32; 4] {
     v.as_vec4().to_array()
+}
+
+/// `pack_grid` gives the shader's `VoxelWarp.grid` for a clearance grid: its half size, cells per
+/// axis, cells per unit of the chart, and curvature radii per stored unit.
+///
+/// Example: `let grid = pack_grid(&world.clearance.grids[0], world.r);`
+fn pack_grid(grid: &ClearanceGrid, r: f64) -> [f32; 4] {
+    let n: f64 = grid.cell_count as f64;
+    [
+        grid.half_size as f32,
+        n as f32,
+        (n / (2.0 * grid.half_size)) as f32,
+        (STORED_M_PER_UNIT / r) as f32,
+    ]
 }
 
 /// `to_columns` converts a double matrix to float columns.
@@ -182,7 +200,8 @@ impl VoxelFrame {
         let warps: Vec<GpuWarp> = world
             .warps
             .iter()
-            .map(|w| {
+            .zip(&world.clearance.grids)
+            .map(|(w, grid)| {
                 let first: usize = lists.len();
                 lists.extend(w.list.iter().map(|&k| {
                     let structure = &world.structures[k];
@@ -204,7 +223,13 @@ impl VoxelFrame {
                         w.reach as f32,
                         if w.is_mouth { w.partner as f32 } else { -1.0 },
                     ],
-                    list: [first as i32, w.list.len() as i32, 0, 0],
+                    list: [
+                        first as i32,
+                        w.list.len() as i32,
+                        grid.static_entry_count as i32,
+                        grid.offset as i32,
+                    ],
+                    grid: pack_grid(grid, r),
                 }
             })
             .collect();
@@ -288,6 +313,7 @@ impl VoxelFrame {
             lights,
             palette: world.palette.clone(),
             beams: gpu_beams,
+            clearance: Arc::clone(&world.clearance),
         }
     }
 
@@ -406,6 +432,7 @@ impl VoxelGpu {
             as_bytes(&frame.lights),
             as_bytes(&frame.palette),
             as_bytes(&frame.beams),
+            &frame.clearance.values,
         ];
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN

@@ -2,11 +2,13 @@
 //! the CPU, ported from the Lunar Surface level's JavaScript: structures with bounding spheres, warp
 //! objects with the structures in their reach, a voxel walk, the laser's light path, and walking on
 //! the map (collisions, stepping up blocks, gravity, jumping, flying, and moving along light paths
-//! near a wormhole mouth). `render_voxel.metal` draws the same world.
+//! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelPlayer`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
+
+use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
 
@@ -16,11 +18,12 @@ use crate::geometry::{
 };
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::physics::Input;
+use crate::voxel_clearance::ClearanceGrids;
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
 const BOUND_MARGIN_M: f64 = 0.2;
-const BEND_STEP_FRAC: f64 = 0.08;
+pub(crate) const BEND_STEP_FRAC: f64 = 0.08;
 const MIN_BEND_STEP_M: f64 = 0.004;
 const MAX_BEND_STEP_M: f64 = 3.0;
 const HORIZON_CAPTURE_FRAC: f64 = 1.02;
@@ -120,6 +123,7 @@ pub struct VoxelWorld {
     pub gravity_m_per_s2: f64,
     pub spawns: Vec<DMat4>,
     pub static_structure_count: usize,
+    pub clearance: Arc<ClearanceGrids>,
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -171,7 +175,7 @@ fn geodesic_tangent(x: DVec4, v: DVec4, s: f64) -> DVec4 {
 /// `map_klein` maps Klein coordinates (|k| < 1) to the hyperboloid.
 ///
 /// Example: `let p = map_klein(DVec3::new(0.1, 0.0, 0.0));`
-fn map_klein(k: DVec3) -> DVec4 {
+pub(crate) fn map_klein(k: DVec3) -> DVec4 {
     let f: f64 = 1.0 / (1.0 - k.length_squared()).sqrt();
     (k * f).extend(f)
 }
@@ -361,7 +365,7 @@ impl VoxelWorld {
             let boundary = regions.boundary.as_ref()?;
             Some([edge_m, boundary.u_m, boundary.v_m])
         });
-        Ok(VoxelWorld {
+        let mut world: VoxelWorld = VoxelWorld {
             name: map.name.clone(),
             r,
             static_structure_count: structures.len(),
@@ -385,7 +389,10 @@ impl VoxelWorld {
             player: map.player,
             gravity_m_per_s2: map.gravity_m_per_s2,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
-        })
+            clearance: Arc::new(ClearanceGrids::default()),
+        };
+        world.clearance = Arc::new(ClearanceGrids::Build(&world));
+        Ok(world)
     }
 
     /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame
