@@ -54,7 +54,9 @@ make run-autopilot
   GPU time and render scale.
 - `--play-route` plays the scripted route in the real window, one 1/60 s step per frame, then closes it and prints
   the frame times (median, 99th percentile, worst, how many took longer than 1/60 s) and the render scale it used
-  (`cargo run --release -- --play-route --width-px 2560 --height-px 1440`).
+  (`cargo run --release -- --play-route --width-px 2560 --height-px 1440`). `--route mouth-tour` plays a harder
+  tour instead: the eye circles each of the six mouths from 5 blocks to 0.45 (inside its jump sphere, just outside
+  the throat) and back, while the view swings up to 46° sideways and 23° up and down.
 
 ## How it works
 
@@ -104,15 +106,20 @@ The Metal shader then takes three shortcuts the CPU renderer doesn't, so the CPU
 Run on an Apple M3 Pro (6 performance and 6 efficiency cores), macOS 15.7.3, Rust 1.98.1, release build, on a
 2560×1440 display at 1× scaling. The machine was also running other work, so treat the times as rough.
 
-In the real window at full-screen size (macOS makes it 2560×1336), playing the scripted route
-(`--play-route`, three runs, after 5 warm-up frames):
+In the real window at full-screen size (macOS makes it 2560×1336), playing a route (`--play-route`, after 5 warm-up
+frames; the automatic scale is the default):
 
-| Render scale | Average | Median frame | 99th percentile | Worst frame | Frames over 1/60 s | At full resolution |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| automatic (the default) | 165 fps | 5.6 ms | 14.9 ms | 16.2 ms | 0 of 719 | 97.5% of frames (never below 0.80) |
-| always full | 164 fps | 5.5 ms | 16.9 ms | 18.7 ms | 8 of 719 | 100% |
+| Route and render scale | Average | Median frame | 99th percentile | Frames over 1/60 s | At full resolution |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| scripted legs, automatic (2 runs) | 166 fps | 5.5 ms | 14.0 ms | 0 of 719 | 95.9% of frames (never below 0.80) |
+| scripted legs, always full | 164 fps | 5.5 ms | 16.9 ms | 8 of 719 (worst 18.7 ms) | 100% |
+| mouth tour, automatic (2 runs) | 113 fps | 8.4 ms | 14.9 ms | 2 and 5 of 1795 (worst 18.6, 36.9 ms) | 89% of frames (never below 0.70) |
 
-Standing at spawn (`--exit-after-s 8`), the same window runs at 129 fps at full resolution.
+- The frames that drop below full resolution are those within about a block of a mouth, looking past it, where
+  neighbouring rays scatter in every direction and the GPU's thread groups diverge (about 24 ms at full resolution).
+  The automatic scale drops at once to the scale its time model predicts, by up to a fifth a frame, so only the
+  first frame of a sudden spike is late.
+- Standing at spawn (`--exit-after-s 8`), the window runs at 129 fps at full resolution.
 
 Median milliseconds per frame at full resolution (`make bench-views`, 20 frames for WebGL and Metal, 3 to 5 for the
 CPU):
@@ -136,20 +143,25 @@ CPU):
 - Tracing every pixel (`--sampling every-pixel`), Metal at 2560×1600 takes 24 ms at spawn, 32 ms 2.5 blocks from 1A
   and 27 ms at the throat.
 
-How close the images are, at 2560×1600, as the share of pixels that change by more than 30 of 765 and as the
-structural similarity (SSIM, on brightness, 1 is identical):
+How close the images are, at 2560×1600, against a reference traced like PR 70 but with steps eight times smaller
+(itself within 0.03 to 0.2 pixel, median, of one with four times smaller steps, and 1 pixel at the throat). The first numbers are how far image
+features moved, in pixels, from phase correlation of 48×48 textured patches (median, 90th percentile); then the
+share of pixels that changed by more than 30 of 765, and the structural similarity (SSIM, on brightness):
 
-| View | PR 70 against the reference | Now against the reference | Adaptive against every pixel |
-| --- | --- | --- | --- |
-| spawn | 12.3%, 0.826 | 11.6%, 0.833 | 0.1%, 0.997 |
-| aimed at mouth 1A | 9.7%, 0.858 | 9.3%, 0.863 | 0.1%, 0.997 |
-| 2.5 blocks from 1A | 17.0%, 0.699 | 18.4%, 0.702 | 0.9%, 0.982 |
-| 0.8 blocks from 1A's throat | 10.1%, 0.865 | 8.5%, 0.873 | 0.2%, 0.996 |
-| laser through 1A | 10.0%, 0.863 | 9.8%, 0.867 | 0.1%, 0.997 |
+| View | PR 70 | Now |
+| --- | --- | --- |
+| spawn | 3.2 px, 5.8 px; 12.3%, 0.826 | 3.2 px, 6.1 px; 11.6%, 0.833 |
+| aimed at mouth 1A | 3.1 px, 5.4 px; 9.7%, 0.858 | 3.0 px, 5.6 px; 9.3%, 0.863 |
+| 2.5 blocks from 1A | 2.2 px, 7.1 px; 17.0%, 0.699 | 2.8 px, 8.1 px; 18.4%, 0.702 |
+| 0.8 blocks from 1A's throat | 2.5 px, 9.1 px; 10.1%, 0.865 | 2.4 px, 7.1 px; 8.5%, 0.873 |
+| above the rails | 1.0 px, 2.3 px; 1.8%, 0.957 | 1.0 px, 2.3 px; 1.8%, 0.957 |
 
-The reference is PR 70's tracer with four times smaller steps; its own default steps differ from it by about as
-much as the image does now, mostly by moving lensed edges by about a pixel. Larger integration steps near mouths
-would be faster but less exact; they are not on (D13 in `DECISIONS.md`).
+(The percentages and SSIM are against the four-times reference.) So the shortcuts leave the light paths as exact as
+PR 70's and the WebGL demo's: their step sizes put features about 3 pixels (0.14° of view) from the converged
+paths, and the jump, the RK4 steps and adaptive sampling stay within that. Adaptive sampling on its own moves
+features by under 0.01 pixel (median; SSIM 0.98 to 0.998 against tracing every pixel). Frames the window upscales
+with MetalFX keep features in place (0.2 to 0.4 pixel) but lose fine detail (SSIM 0.85 to 0.96 at 0.8 scale).
+Smaller steps would bring the paths closer to the reference at a cost; see D13 in `DECISIONS.md`.
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s

@@ -81,15 +81,19 @@
 - **Alternatives:** the separate check each step that the WebGL demo does.
 - **Rationale:** it was pure overhead.
 
-### D13. Larger integration steps (needs input)
+### D13. Step sizes (needs input)
 
-- **Choice:** not applied. Measured before D21 to D23: steps of 0.18 and 0.40 of the nearest mouth's distance
-  (instead of 0.12 and 0.25) took the spawn view from 30 to 21 ms, and 0.25 and 0.50 took it to 17.5 ms (Metal,
-  2560×1600; the throat view went from 51 to 37 and 29 ms). They move edges inside the lensed areas by about a pixel: 15% and
-  22% of the spawn view's pixels change by more than 30 of 765. For scale, today's steps already differ that much
-  from steps four times smaller on 12% of the spawn view's pixels.
-- **Alternatives:** turning one of them on by default, or offering it as a quality setting.
-- **Rationale:** it changes the picture, so it is your call.
+- **Choice:** not changed: the steps stay 0.12 and 0.25 of the nearest mouth's distance outside the RK4 zone (D22),
+  as in the WebGL demo. Against a reference with eight times smaller steps, these put image features about 3 pixels
+  (median, at 2560×1600; 0.14° of view) from the converged light paths at spawn, and 2 to 3 pixels near a mouth.
+  - Smaller steps outside 10 throat radii would cut that at spawn: midpoint steps of 0.125 to 1.1 pixels (50% more
+    GPU time), RK4 steps of 0.35 to 1.4 pixels (23% more) or 0.25 to 1.1 pixels (50% more). Near a mouth the shift
+    stays 2.3 to 2.7 pixels, which comes from the steps closer in.
+  - Larger steps go the other way. Measured before D21 to D23, steps of 0.18 and 0.40 took spawn from 30 to 21 ms
+    at 2560×1600, and 0.25 and 0.50 to 17.5 ms; 15% and 22% of spawn's pixels changed by more than 30 of 765.
+- **Alternatives:** any of these as the default, or as a quality setting.
+- **Rationale:** it changes the picture (a shift of a few pixels you can't see without the reference beside it) and
+  trades against how often the window has to upscale, so it is your call.
 
 ### D14. Tried and dropped
 
@@ -141,19 +145,24 @@
 
 ### D19. Upscale with MetalFX only when a frame is too slow
 
-- **Choice:** Metal can ray-trace fewer pixels and upscale them with MetalFX's spatial scaler (`--render-scale`). In
-  the window it starts at full resolution, and each frame moves the scale a little toward 14 ms of GPU time, between
-  0.5 and 1, in steps of 0.05 of the window's size; `-` and `=` set it by hand. The scaler, its textures and the
-  sampling buffers are made once for the window's size, and the scaler runs once during the first frame, so a change
-  of scale costs nothing (each first use cost 20 ms or more). `--bench-views` and `--autopilot` render at full
-  resolution unless `--render-scale` is given.
-- **Alternatives:** always full resolution (8 of 719 route frames over 1/60 s, the worst 18.7 ms); a lower floor;
-  MetalFX's temporal scaler, which needs motion vectors and jittered frames; the first version's start at 0.5 with
-  a 12 ms target, updated four times a second.
-- **Rationale:** playing the route in a full-screen window, no frame took over 1/60 s in three runs, and 97.5% of
-  frames stayed at full resolution (the rest at 0.80 to 0.95, walking into a mouth). Upscaling loses detail (SSIM
-  0.85 to 0.96 against full resolution at 0.85), so it is kept for those few frames; 14 ms leaves room for the
-  CPU's part of a 60 Hz frame.
+- **Choice:** Metal can ray-trace fewer pixels and upscale them with MetalFX's spatial scaler (`--render-scale`).
+  - In the window it starts at full resolution. Each frame it moves the render scale toward the one that would
+    take 14 ms of GPU time (time grows with the scale's square, from the scale actually used): down at once, by up
+    to a fifth a frame, and up by at most 2% a frame.
+  - The scale stays between 0.5 and 1, rounded down to steps of 0.05; `-` and `=` set it by hand.
+  - The scaler, its textures and the sampling buffers are made once for the window's size, and the scaler runs once
+    during the first frame, so a change of scale costs nothing (each first use cost 20 ms or more).
+  - `--bench-views` and `--autopilot` render at full resolution unless `--render-scale` is given.
+- **Alternatives:**
+  - always full resolution: 8 of 719 frames of the scripted legs over 1/60 s, the worst 18.7 ms;
+  - moving 2% a frame both ways: 1.3 to 1.5% of the mouth tour's frames late;
+  - dropping all the way at once: the scale fell to 0.5 and full resolution held in 92.5% of the legs' frames;
+  - MetalFX's temporal scaler, which needs motion vectors and jittered frames;
+  - the first version's start at 0.5 with a 12 ms target.
+- **Rationale:** in a full-screen window, no frame of the scripted legs took over 1/60 s in two runs, with 95.9% at
+  full resolution; on the mouth tour, 2 and 5 of 1795 did, with 89% at full resolution. Upscaling loses detail (SSIM
+  0.85 to 0.96 against full resolution at 0.8 scale, features within 0.4 pixel), so it is kept for those frames;
+  14 ms leaves room for the CPU's part of a 60 Hz frame.
 - **Revisit if:** a 120 Hz display needs a lower target.
 
 ### D21. Trace a coarse grid, and interpolate where that is exact enough
@@ -247,7 +256,9 @@
 - **Choice:** `--exit-after-s <seconds>` opens the real window, plays without input for that long, closes it and
   prints the frame rate, GPU time and render scale. `--play-route` plays the scripted route in the window, one
   1/60 s step per frame, and prints the frame times (median, 99th percentile, worst, how many took over 1/60 s,
-  after 5 warm-up frames) and the render scale used. `--width-px` and `--height-px` set the window's starting size.
+  after 5 warm-up frames) and the render scale used. `--route mouth-tour` plays a harder tour: the eye circles each
+  of the six mouths once, from 5 blocks to 0.45 and back, with the view swinging up to 46° sideways and 23° up and
+  down, over 300 frames per mouth. `--width-px` and `--height-px` set the window's starting size.
 - **Alternatives:** only the windowless benchmarks, which leave out presenting, MetalFX in the window, and the
   automatic scale.
 - **Rationale:** it measures what you see when you play, in motion, and needs no screen recording.
@@ -280,7 +291,10 @@
   the lensing and every surface match.
   In the third layer, writing to a texture rounds where the second layer's byte conversion truncated (at most 1 of
   255 per channel), and D17 and D18 left every pixel the same, on both renderers. D21 to D23 are Metal's alone: the
-  CPU renderer still traces every pixel with midpoint steps, so it stays the reference they are measured against
-  (with four times smaller steps, in `.artifacts/bench_views/*-ref-fine7`).
+  CPU renderer still traces every pixel with midpoint steps, so it stays the reference they are measured against:
+  that tracer with four and eight times smaller steps (`.artifacts/bench_views/*-ref-fine7` and `*-ref-fine8`), which
+  differ from each other by 0.03 to 0.2 pixel (median; 1 pixel at the throat) and from the default steps by 1 to 3
+  pixels. Shifts are
+  measured by phase correlation of 48×48 textured patches, besides the share of pixels changed and SSIM.
 - **Alternatives:** a GPU-stable integer hash, so the images match exactly.
 - **Rationale:** the noise only decorates; matching it wasn't worth changing the look.

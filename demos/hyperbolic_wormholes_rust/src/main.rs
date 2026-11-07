@@ -41,7 +41,7 @@ use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
 
-use geometry::{AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
+use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use physics::{Input, LaserReport, Player};
 use scene_data::{Beam, SceneData};
 use world::{DEFAULT_CURVATURE_RADIUS_M, World};
@@ -55,13 +55,22 @@ const METAL_RENDER_SCALE: f64 = 1.0;
 const MIN_AUTO_RENDER_SCALE: f64 = 0.5;
 const AUTO_SCALE_TARGET_GPU_MS: f64 = 14.0;
 const AUTO_SCALE_MAX_STEP: f64 = 1.02;
+const AUTO_SCALE_MAX_DROP: f64 = 0.8;
 const RENDER_SCALE_QUANTUM: f64 = 0.05;
+const RENDER_SCALE_ROUNDING: f64 = 1e-6;
 const RENDER_SCALE_STEP: f64 = 1.25;
 const MIN_RENDER_SCALE: f64 = 0.05;
 const MAX_FRAME_DT_S: f64 = 0.05;
 const AUTOPILOT_DT_S: f64 = 1.0 / 60.0;
 const HUD_PERIOD_S: f64 = 0.25;
 const ROUTE_WARMUP_FRAME_COUNT: usize = 5;
+const TOUR_FRAMES_PER_MOUTH: usize = 300;
+const TOUR_FAR_M: f64 = 5.0;
+const TOUR_NEAR_M: f64 = 0.45;
+const TOUR_YAW_RAD: f64 = 0.8;
+const TOUR_PITCH_RAD: f64 = 0.4;
+const TOUR_YAW_TURNS: f64 = 2.0;
+const TOUR_PITCH_TURNS: f64 = 3.0;
 const FRAME_BUDGET_MS: f64 = 1000.0 / 60.0;
 const HUD_TEXT_SCALE: f32 = 2.0;
 const HUD_LINE_PX: f32 = 10.0;
@@ -91,6 +100,14 @@ enum RendererKind {
 enum Sampling {
     Adaptive,
     EveryPixel,
+}
+
+/// `RouteKind` is which route `--play-route` plays: the scripted legs, or a tour around every
+/// mouth from 5 blocks to just outside its throat and back.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum RouteKind {
+    Legs,
+    MouthTour,
 }
 
 /// `Arguments` is the command line.
@@ -145,6 +162,10 @@ struct Arguments {
     /// then close it and print frame-time statistics (to check the window's frame rate in motion).
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot"])]
     play_route: bool,
+    /// Which route --play-route plays: the scripted legs, or a tour circling every mouth from 5
+    /// blocks to just outside its throat and back while the view swings around.
+    #[arg(long, value_enum, default_value_t = RouteKind::Legs)]
+    route: RouteKind,
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -834,6 +855,43 @@ fn simulate_route(world: &World) -> Result<Route> {
     })
 }
 
+/// `make_mouth_tour` makes a tour of every mouth: for each, the eye circles it once at its own
+/// height, from `TOUR_FAR_M` blocks to `TOUR_NEAR_M` (inside its jump sphere, just outside the
+/// throat) and back, looking at it with the view swinging up to `TOUR_YAW_RAD` sideways and
+/// `TOUR_PITCH_RAD` up and down, over `TOUR_FRAMES_PER_MOUTH` frames.
+///
+/// Example: `let tour = make_mouth_tour(&world);`
+fn make_mouth_tour(world: &World) -> Vec<RouteFrame> {
+    let r: f64 = world.curvature_radius_m;
+    let mut frames: Vec<RouteFrame> = Vec::new();
+    for (k, mouth) in world.mouths.iter().enumerate() {
+        for n in 0..TOUR_FRAMES_PER_MOUTH {
+            let turn: f64 = std::f64::consts::TAU * n as f64 / (TOUR_FRAMES_PER_MOUTH - 1) as f64;
+            let distance_m: f64 =
+                TOUR_NEAR_M + (TOUR_FAR_M - TOUR_NEAR_M) * (0.5 + 0.5 * turn.cos());
+            let frame: DMat4 = mouth.frame
+                * make_rotation(AXIS_X, AXIS_Z, turn)
+                * make_boost(AXIS_Z, distance_m / r)
+                * make_rotation(AXIS_X, AXIS_Z, TOUR_YAW_RAD * (TOUR_YAW_TURNS * turn).sin())
+                * make_rotation(
+                    AXIS_Y,
+                    AXIS_Z,
+                    TOUR_PITCH_RAD * (TOUR_PITCH_TURNS * turn).sin(),
+                );
+            frames.push(RouteFrame {
+                leg: k,
+                frame,
+                is_laser_on: false,
+                height_m: r * frame.col(AXIS_W)[AXIS_Y].asinh(),
+                is_flying: true,
+                is_on_ground: false,
+                messages: Vec::new(),
+            });
+        }
+    }
+    frames
+}
+
 /// `run_autopilot` plays the scripted route without a window at a fixed 1/60 s time step,
 /// rendering every frame. It records each frame (time, render time, height, events) in
 /// `frames.csv`, saves every n-th frame as a PNG, and reports each leg: how long it took, whether
@@ -983,6 +1041,7 @@ struct Session {
     world: World,
     player: Player,
     render_scale: f64,
+    last_used_scale: f64,
     is_auto_scale: bool,
     exit_after_s: Option<f64>,
     route: Vec<RouteFrame>,
@@ -1016,10 +1075,10 @@ impl Session {
     fn New(arguments: &Arguments) -> Result<Session> {
         let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
         let player: Player = Player::AtSpawn(&world);
-        let route: Vec<RouteFrame> = if arguments.play_route {
-            simulate_route(&world)?.frames
-        } else {
-            Vec::new()
+        let route: Vec<RouteFrame> = match (arguments.play_route, arguments.route) {
+            (false, _) => Vec::new(),
+            (true, RouteKind::Legs) => simulate_route(&world)?.frames,
+            (true, RouteKind::MouthTour) => make_mouth_tour(&world),
         };
         Ok(Session {
             world,
@@ -1027,6 +1086,7 @@ impl Session {
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
+            last_used_scale: 1.0,
             is_auto_scale: arguments.renderer == RendererKind::Metal
                 && arguments.render_scale.is_none(),
             exit_after_s: arguments.exit_after_s,
@@ -1161,10 +1221,13 @@ impl Session {
     fn get_render_size(&mut self, window_px: (u32, u32)) -> (u32, u32) {
         self.last_output_px = window_px;
         let quantized_scale: f64 = if self.is_auto_scale {
-            (self.render_scale / RENDER_SCALE_QUANTUM).round() * RENDER_SCALE_QUANTUM
+            ((self.render_scale / RENDER_SCALE_QUANTUM + RENDER_SCALE_ROUNDING).floor()
+                * RENDER_SCALE_QUANTUM)
+                .max(MIN_AUTO_RENDER_SCALE)
         } else {
             self.render_scale
         };
+        self.last_used_scale = quantized_scale;
         if !self.route.is_empty() {
             self.render_scales.push(quantized_scale);
         }
@@ -1187,10 +1250,12 @@ impl Session {
     }
 
     /// `record_frame` adds one frame's render time to the HUD's averages, which refresh every
-    /// `HUD_PERIOD_S`. With automatic resolution, each frame also moves the render scale a little
-    /// toward the one whose GPU time is `AUTO_SCALE_TARGET_GPU_MS` (time grows with the pixel
-    /// count, the scale's square), between `MIN_AUTO_RENDER_SCALE` and 1; the render size follows
-    /// it in steps of `RENDER_SCALE_QUANTUM`, so the upscaler is rarely remade.
+    /// `HUD_PERIOD_S`. With automatic resolution, each frame also sets the render scale to the one
+    /// whose GPU time would be `AUTO_SCALE_TARGET_GPU_MS` (time grows with the pixel count, the
+    /// scale's square), by down to `AUTO_SCALE_MAX_DROP` a frame when that is lower and by at most
+    /// `AUTO_SCALE_MAX_STEP` a frame when it is higher, between `MIN_AUTO_RENDER_SCALE` and 1; the
+    /// render size follows it,
+    /// rounded down to steps of `RENDER_SCALE_QUANTUM`.
     ///
     /// Example: `session.record_frame(12.5, renderer.gpu_ms());`
     fn record_frame(&mut self, render_ms: f64, gpu_ms: Option<f64>) {
@@ -1202,10 +1267,15 @@ impl Session {
         if let Some(ms) = gpu_ms
             && self.is_auto_scale
         {
-            let step: f64 = (AUTO_SCALE_TARGET_GPU_MS / ms)
-                .sqrt()
-                .clamp(1.0 / AUTO_SCALE_MAX_STEP, AUTO_SCALE_MAX_STEP);
-            self.render_scale = (self.render_scale * step).clamp(MIN_AUTO_RENDER_SCALE, 1.0);
+            let wanted: f64 = self.last_used_scale * (AUTO_SCALE_TARGET_GPU_MS / ms).sqrt();
+            let raised: f64 = (self.render_scale * AUTO_SCALE_MAX_STEP).min(wanted);
+            let lowered: f64 = wanted.max(self.last_used_scale * AUTO_SCALE_MAX_DROP);
+            self.render_scale = if wanted < self.render_scale {
+                lowered
+            } else {
+                raised
+            }
+            .clamp(MIN_AUTO_RENDER_SCALE, 1.0);
         }
         if self.hud_time_s <= HUD_PERIOD_S {
             return;
