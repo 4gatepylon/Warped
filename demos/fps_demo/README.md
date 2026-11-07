@@ -91,10 +91,14 @@ right arm only) and animates the whole viewmodel procedurally.
 
 ## Frame time
 
-On the development VM (Apple M4 Pro virtual machine, macOS 26.6.2, Xcode 26.6, Rust 1.99.1),
-1600×1000 px at render scale 1.0 with vsync, 4 bots, 40 s of autopilot: mean 16.9 ms (vsync at
-60 Hz), p99 21.5 ms, GPU time 5.9 ms per frame. A virtual GPU isn't representative of a real
-MacBook Pro.
+Autopilot with 4 bots, render scale 1.0, vsync on:
+
+| Machine | Pixels | Mean | p99 | GPU |
+| --- | --- | --- | --- | --- |
+| MacBook Pro (Mac15,6, M3 Pro 11-core, 36 GB), Liquid Retina XDR, macOS 26.5.2, Rust 1.98.0, 12 s | 3024×1834 | 8.44 ms (vsync at 120 Hz) | 12.9 ms | 5.9 ms |
+| Development VM (Apple M4 Pro virtual machine), macOS 26.6.2, Xcode 26.6, Rust 1.99.1, 40 s | 1600×1000 | 16.9 ms (vsync at 60 Hz) | 21.5 ms | 5.9 ms |
+
+A virtual GPU isn't representative of a real MacBook Pro.
 
 ## Limitations
 
