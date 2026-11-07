@@ -30,3 +30,10 @@ On each player's Mac, with Rust installed (or with a copy of the built client):
 make -C clients/starter run-client MANAGEMENT_SERVER_URL=http://<that URL's IP>:8000
 ```
 
+## Rough checklist to full game
+1. [ ] Get working minecraft-like visuals game on a single level with good physics without multiplayer.
+2. [ ] Get working minecraft-like visuals game on all levels for the map without multiplayer.
+3. [ ] Get (2) working with multiplayer.
+4. [ ] Get (3) working with proper (realistic, ideally AAA-looking) graphics.
+5. [ ] Make sure the CRUD systems work correctly to enable players to spin up game servers. Integrate with AWS (if needed).
+6. [ ] Set up website (etc...) so anyone can easily download and join. Make sure it works on a few different systems.
