@@ -9,7 +9,7 @@ document.body.insertAdjacentHTML('afterbegin', `
 
 <div id="controls" class="panel">
   <h1>Optics lab (flat space)</h1>
-  <div>Demo: <a href="mirrors.html">mirrors</a> · <a href="splitters.html">splitters</a> · <a href="diffraction.html">diffraction</a> · <a href="heat_haze.html">heat haze</a> · <a href="refraction.html">refraction</a></div>
+  <div>Demo: <a href="mirrors.html">mirrors</a> · <a href="splitters.html">splitters</a> · <a href="diffraction.html">diffraction</a> · <a href="heat_haze.html">heat haze</a> · <a href="refraction.html">refraction</a> · <a href="refraction_glow.html">refraction + glow</a></div>
   <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
   <div class="row"><kbd>WASD</kbd> fly · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>Shift</kbd> fast</div>
   <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
@@ -66,7 +66,7 @@ if (!window.THREE) {
 }
 
 // ---------------------------------------------------------------------------
-// Five demos, one page each, each adding an optical element to the previous one.
+// Six demos, one page each, each adding an optical element to the previous one.
 // ---------------------------------------------------------------------------
 const MODES = {
   mirrors: { splitter: false, grating: false },
@@ -74,6 +74,7 @@ const MODES = {
   diffraction: { splitter: true, grating: true },
   heat_haze: { splitter: true, grating: true, heat: true },
   refraction: { splitter: true, grating: true, heat: true, glass: true },
+  refraction_glow: { splitter: true, grating: true, heat: true, glass: true },
 };
 const TIPS = {
   mirrors: `<ol>
@@ -114,6 +115,12 @@ const TIPS = {
     <li><b>Total internal reflection</b> (right): inside glass, a beam meeting a face more than about 38° from its normal can't get out and is reflected completely. The long bar guides the beam along like an optical fibre.</li>
     <li>Some light always reflects off a glass face: about 6% head-on, more at a glancing angle. Look for the faint reflected beams.</li>
     <li><kbd>5</kbd> places a glass block, <kbd>6</kbd> a prism. Shine red, green and blue lasers (<kbd>N</kbd>) through a prism and compare.</li>
+  </ol>`,
+  refraction_glow: `<ol>
+    <li><b>Hot air, then glass.</b> Each beam first crosses the hot air above a heater, which spreads it into a widening soft glow, then goes through glass, which bends the glow like any other beam.</li>
+    <li><b>Soft rainbow</b> (left): white light softened by hot air goes through a prism. Each colour is bent by a different amount, but each is now a wide glow, so the colours overlap into a blurred rainbow on the screen.</li>
+    <li><b>Glowing bar</b> (right): a softened beam enters a long glass bar and is trapped by total internal reflection, so the bar fills with glow.</li>
+    <li>Aim at a heater and press <kbd>4</kbd> to take it away and compare with a sharp beam. <kbd>4</kbd> on the floor puts one back.</li>
   </ol>`,
 };
 
@@ -862,12 +869,17 @@ function loadScene(mode) {
     // a beam through the hot air just above a heater, one higher up the same plume, and a green one off-centre
     H.push([18, 1, 32], [36, 1, 32]);
     emit([18, 2.4, 44], [0, 0, -1]); emit([18, 6, 44], [0, 0, -1]); emit([37, 2.4, 44], [0, 0, -1], 532);
-  } else {
+  } else if (mode === 'refraction') {
     // a glass block turned 60° to the beam; white light through a prism at minimum deviation; a long bar that guides
     // a beam by total internal reflection
     emit([12, 2.5, 46], [0, 0, -1]); P.push(makePanel(3, at([12, 2.5, 40]), [0.866, 0, 0.5], 1.2, 1));
     emit([24.69, 3, 36.57], [0.758, 0, -0.652], 0); P.push(makePanel(4, at([30, 3, 32]), [0.909, 0, 0.417], 1, 1));
     emit([37.85, 3.46, 30], [0.766, -0.643, 0]); P.push(makePanel(3, at([44, 2.5, 30]), [0, 0, 1], 5, 0.4));
+  } else {
+    // white light softened by hot air, then through a prism at minimum deviation; a softened beam into a glass bar
+    H.push([16, 1, 31], [37, 1, 28]);
+    emit([16, 6, 36], [0, 0, -1], 0); P.push(makePanel(4, at([16, 6, 26]), [-0.909, 0, -0.417], 1, 1));
+    emit([35.94, 5.07, 28], [0.766, -0.643, 0]); P.push(makePanel(3, at([44, 2.5, 28]), [0, 0, 1], 5, 0.4));
   }
   setHeaters(H);
   state.panels = P;
