@@ -171,6 +171,19 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.92em
 </section>
 
 <section class="slide">
+  <p class="kicker">Players</p>
+  <h1>Respawns and sprinting</h1>
+  <p class="sub">Dying costs more as a round goes on, and sprinting runs on energy (not tied to the guns' heat) that a kill refills at once. Hover a chart to read its values.</p>
+  <div class="row">
+    <div class="panel"><h3>Respawn wait <span>· steps up every 5 min</span></h3><svg id="respawn-svg" viewBox="0 0 540 290"></svg>
+      <p class="caption">20 s at the start of a round, then 10 s more every 5 minutes. A match lasts at most 30 minutes, so the wait never passes 70 s.</p></div>
+    <div class="panel"><h3>Sprint energy <span>· one example</span></h3><svg id="energy-svg" viewBox="0 0 540 290"></svg>
+      <p class="caption">30 s of sprinting empties a full bar, and 60 s without sprinting refills an empty one. A kill refills it at once; it never goes above full.</p></div>
+  </div>
+  <p class="note">All of these values are configurable and may change after playtests.</p>
+</section>
+
+<section class="slide">
   <p class="kicker">Level template</p>
   <h1>Blue zone, middle zone, red zone</h1>
   <p class="sub">Every level splits lengthwise into three zones. The middle zone is the biggest, with 2–3 routes across; the side zones are easy to cross widthwise, so a team can rotate between routes.</p>
@@ -960,6 +973,139 @@ function draw_shot_hyperbolic() {
 }
 
 /**
+ * `make_scale` maps a data interval linearly onto a pixel interval.
+ * @param {number} domain_start The data value drawn at `range_start`.
+ * @param {number} domain_end The data value drawn at `range_end`.
+ * @param {number} range_start The pixel position of `domain_start`.
+ * @param {number} range_end The pixel position of `domain_end`.
+ * @return {function(number): number} A function from a data value to its pixel position.
+ * @example const x_px = make_scale(0, 30, 56, 520);
+ */
+function make_scale(domain_start, domain_end, range_start, range_end) {
+  return (value) => range_start + (value - domain_start) / (domain_end - domain_start) * (range_end - range_start);
+}
+
+/**
+ * `draw_chart_axes` draws a chart's recessive grid, tick labels and axis titles.
+ * @param {Element} svg The chart's SVG.
+ * @param {{left: number, right: number, top: number, bottom: number}} box The plot area, in pixels.
+ * @param {{x_ticks: Array<number>, y_ticks: Array<number>, x_title: string, y_title: string, y_suffix: string}} axes The ticks and titles.
+ * @param {function(number): number} x_scale Data x to pixels.
+ * @param {function(number): number} y_scale Data y to pixels.
+ * @example draw_chart_axes(svg, box, { x_ticks: [0, 5], y_ticks: [0, 20], x_title: 'min', y_title: 's', y_suffix: '' }, x_scale, y_scale);
+ */
+function draw_chart_axes(svg, box, axes, x_scale, y_scale) {
+  for (const tick of axes.y_ticks) {
+    add_svg(svg, 'line', { x1: box.left, y1: y_scale(tick), x2: box.right, y2: y_scale(tick), stroke: LINE_COLOR, 'stroke-width': 1 });
+    add_svg(svg, 'text', { x: box.left - 8, y: y_scale(tick) + 4, 'text-anchor': 'end', class: 'small' }, `${tick}${axes.y_suffix}`);
+  }
+  for (const tick of axes.x_ticks) add_label(svg, x_scale(tick), box.bottom + 18, String(tick), { class: 'small' });
+  add_svg(svg, 'line', { x1: box.left, y1: box.bottom, x2: box.right, y2: box.bottom, stroke: FAINT_COLOR });
+  add_label(svg, (box.left + box.right) / 2, box.bottom + 40, axes.x_title, { class: 'small' });
+  const title_x = box.left - 44, title_y = (box.top + box.bottom) / 2;
+  add_label(svg, title_x, title_y, axes.y_title, { class: 'small', transform: `rotate(-90 ${title_x} ${title_y})` });
+}
+
+/**
+ * `add_chart_hover` shows a crosshair, a dot and the value under the pointer on a one-series line chart.
+ * @param {SVGSVGElement} svg The chart's SVG.
+ * @param {{left: number, right: number, top: number, bottom: number}} box The plot area, in pixels.
+ * @param {number} x_max The largest data x; the smallest is 0.
+ * @param {function(number): number} y_scale Data y to pixels.
+ * @param {function(number): number} value_at The series' value at a data x.
+ * @param {function(number, number): string} format_text The tooltip for a data x and its value.
+ * @example add_chart_hover(svg, box, 30, y_scale, (t) => 20, (t, v) => `${t} min: ${v} s`);
+ */
+function add_chart_hover(svg, box, x_max, y_scale, value_at, format_text) {
+  const layer = add_svg(svg, 'g', { opacity: 0, 'pointer-events': 'none' });
+  const rule = add_svg(layer, 'line', { y1: box.top, y2: box.bottom, stroke: MUTED_COLOR, 'stroke-dasharray': '3 3' });
+  const dot = add_svg(layer, 'circle', { r: 5, fill: TEAM_COLORS.blue, stroke: SURFACE_COLOR, 'stroke-width': 2 });
+  const tip = add_svg(layer, 'text', { y: box.top + 12, 'font-size': 13, 'font-weight': 600 });
+  const target = add_svg(svg, 'rect', { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, fill: 'transparent' });
+  target.addEventListener('pointermove', (event) => {
+    const pointer = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    const x_value = Math.max(0, Math.min(x_max, (pointer.x - box.left) / (box.right - box.left) * x_max));
+    const value = value_at(x_value);
+    const is_near_right = pointer.x > (box.left + box.right) / 2;
+    for (const [name, position] of [['x1', pointer.x], ['x2', pointer.x]]) rule.setAttribute(name, position);
+    dot.setAttribute('cx', pointer.x);
+    dot.setAttribute('cy', y_scale(value));
+    tip.setAttribute('x', pointer.x + (is_near_right ? -8 : 8));
+    tip.setAttribute('text-anchor', is_near_right ? 'end' : 'start');
+    tip.textContent = format_text(x_value, value);
+    layer.setAttribute('opacity', 1);
+  });
+  target.addEventListener('pointerleave', () => layer.setAttribute('opacity', 0));
+}
+
+/**
+ * `draw_respawn_chart` draws the respawn wait against the time into a round, as a step line.
+ * @example draw_respawn_chart();
+ */
+function draw_respawn_chart() {
+  const svg = document.getElementById('respawn-svg');
+  const RESPAWN_START_S = 20, RESPAWN_STEP_S = 10, STEP_MIN = 5, MATCH_MAX_MIN = 30, EXAMPLE_DEATH_MIN = 12;
+  const box = { left: 60, right: 524, top: 14, bottom: 232 };
+  const x_scale = make_scale(0, MATCH_MAX_MIN, box.left, box.right);
+  const y_scale = make_scale(0, 90, box.bottom, box.top);
+  const respawn_s_at = (t_min) => RESPAWN_START_S + RESPAWN_STEP_S * Math.min(MATCH_MAX_MIN / STEP_MIN - 1, Math.floor(t_min / STEP_MIN));
+  draw_chart_axes(svg, box, { x_ticks: [0, 5, 10, 15, 20, 25, 30], y_ticks: [0, 20, 40, 60, 80], x_title: 'minutes into the round', y_title: 'respawn wait (s)', y_suffix: '' }, x_scale, y_scale);
+  const points = [];
+  for (let start_min = 0; start_min < MATCH_MAX_MIN; start_min += STEP_MIN) {
+    points.push([x_scale(start_min), y_scale(respawn_s_at(start_min))], [x_scale(start_min + STEP_MIN), y_scale(respawn_s_at(start_min))]);
+  }
+  add_svg(svg, 'line', { x1: x_scale(MATCH_MAX_MIN), y1: box.top, x2: x_scale(MATCH_MAX_MIN), y2: box.bottom, stroke: MUTED_COLOR, 'stroke-dasharray': '4 4' });
+  add_svg(svg, 'text', { x: x_scale(MATCH_MAX_MIN) - 6, y: y_scale(84), 'text-anchor': 'end', class: 'small' }, 'match ends at 30 min');
+  add_svg(svg, 'polyline', { points: format_points(points), fill: 'none', stroke: TEAM_COLORS.blue, 'stroke-width': 2, 'stroke-linejoin': 'round' });
+  add_svg(svg, 'text', { x: x_scale(0) + 6, y: y_scale(RESPAWN_START_S) - 8, 'font-weight': 600 }, '20 s');
+  add_svg(svg, 'text', { x: x_scale(27.5), y: y_scale(70) - 8, 'text-anchor': 'middle', 'font-weight': 600 }, '70 s');
+  add_svg(svg, 'circle', { cx: x_scale(EXAMPLE_DEATH_MIN), cy: y_scale(respawn_s_at(EXAMPLE_DEATH_MIN)), r: 5, fill: TEAM_COLORS.blue, stroke: SURFACE_COLOR, 'stroke-width': 2 });
+  add_svg(svg, 'text', { x: x_scale(EXAMPLE_DEATH_MIN) + 10, y: y_scale(respawn_s_at(EXAMPLE_DEATH_MIN)) + 20, fill: MUTED_COLOR }, 'dies at 12 min → waits 40 s');
+  add_chart_hover(svg, box, MATCH_MAX_MIN, y_scale, respawn_s_at, (t_min, wait_s) => `${t_min.toFixed(1)} min: waits ${wait_s} s`);
+}
+
+/**
+ * `draw_energy_chart` draws one player's sprint energy over an example minute: sprints, rests and a kill.
+ * @example draw_energy_chart();
+ */
+function draw_energy_chart() {
+  const svg = document.getElementById('energy-svg');
+  const FULL_PCT = 100, DRAIN_S = 30, REFILL_S = 60, DURATION_S = 70;
+  const phases = [['sprint', 18], ['rest', 12], ['sprint', 18], ['rest', 6], ['kill', 0], ['sprint', 16]];
+  const box = { left: 60, right: 524, top: 14, bottom: 232 };
+  const x_scale = make_scale(0, DURATION_S, box.left, box.right);
+  const y_scale = make_scale(0, FULL_PCT, box.bottom, box.top);
+  const samples = [[0, FULL_PCT]];
+  const sprint_spans = [];
+  for (const [kind, duration_s] of phases) {
+    const [t, energy_pct] = samples[samples.length - 1];
+    if (kind === 'kill') samples.push([t, FULL_PCT]);
+    if (kind === 'sprint') { samples.push([t + duration_s, Math.max(0, energy_pct - FULL_PCT / DRAIN_S * duration_s)]); sprint_spans.push([t, t + duration_s]); }
+    if (kind === 'rest') samples.push([t + duration_s, Math.min(FULL_PCT, energy_pct + FULL_PCT / REFILL_S * duration_s)]);
+  }
+  const energy_pct_at = (t) => {
+    let i = samples.length - 1;
+    while (i > 0 && samples[i - 1][0] >= t) i--;
+    if (i === 0) return samples[0][1];
+    const [t0, e0] = samples[i - 1], [t1, e1] = samples[i];
+    return t1 === t0 ? e1 : e0 + (e1 - e0) * (t - t0) / (t1 - t0);
+  };
+  for (const [start_s, end_s] of sprint_spans) {
+    add_svg(svg, 'rect', { x: x_scale(start_s), y: box.top, width: x_scale(end_s) - x_scale(start_s), height: box.bottom - box.top, fill: 'rgba(79,141,255,0.07)' });
+    add_label(svg, x_scale((start_s + end_s) / 2), box.top + 12, 'sprinting', { class: 'small' });
+  }
+  draw_chart_axes(svg, box, { x_ticks: [0, 10, 20, 30, 40, 50, 60, 70], y_ticks: [0, 25, 50, 75, 100], x_title: 'seconds', y_title: 'energy', y_suffix: '%' }, x_scale, y_scale);
+  add_svg(svg, 'polyline', { points: format_points(samples.map(([t, e]) => [x_scale(t), y_scale(e)])), fill: 'none', stroke: TEAM_COLORS.blue, 'stroke-width': 2, 'stroke-linejoin': 'round' });
+  const empty_t = samples[3][0], kill_t = samples[5][0];
+  add_svg(svg, 'line', { x1: x_scale(empty_t), y1: y_scale(0), x2: x_scale(empty_t), y2: y_scale(22), stroke: MUTED_COLOR });
+  add_label(svg, x_scale(empty_t), y_scale(25), 'empty', { fill: MUTED_COLOR });
+  add_svg(svg, 'circle', { cx: x_scale(empty_t), cy: y_scale(0), r: 5, fill: TEAM_COLORS.blue, stroke: SURFACE_COLOR, 'stroke-width': 2 });
+  add_svg(svg, 'text', { x: x_scale(kill_t) - 8, y: y_scale(FULL_PCT) + 4, 'text-anchor': 'end', fill: MUTED_COLOR }, 'kill: full');
+  add_svg(svg, 'circle', { cx: x_scale(kill_t), cy: y_scale(FULL_PCT), r: 5, fill: TEAM_COLORS.blue, stroke: SURFACE_COLOR, 'stroke-width': 2 });
+  add_chart_hover(svg, box, DURATION_S, y_scale, energy_pct_at, (t, energy_pct) => `${t.toFixed(0)} s: ${energy_pct.toFixed(0)}%`);
+}
+
+/**
  * `fit_stage` scales the 1280×720 stage to fit the window.
  * @example window.addEventListener('resize', fit_stage);
  */
@@ -1002,6 +1148,8 @@ let current_slide_index = 0;
 draw_map_slide();
 draw_wavefront_slide();
 draw_pylon_slide();
+draw_respawn_chart();
+draw_energy_chart();
 draw_zone_flat();
 draw_zone_sphere();
 draw_zone_torus();
