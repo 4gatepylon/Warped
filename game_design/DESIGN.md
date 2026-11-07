@@ -86,6 +86,21 @@ For example:
 | 4 | Snow Planet | Red | Blue | Blue attacks again, at Lunar Surface, where it left off. |
 | 5 | Lunar Surface | Blue | Blue | None: blue won red's deepest level, so blue wins the match. |
 
+### Respawning
+
+A player who dies waits out a respawn time before coming back. The respawn time grows in steps as
+a round goes on, so dying costs more late in a round than early on.
+
+| Parameter | Value |
+| --- | --- |
+| Respawn time at the start of a round | 20 s |
+| Increase per step | 10 s |
+| Time between steps | 5 min |
+
+Respawn time = 20 s + 10 s × ⌊t / 5 min⌋, where t is the time since the round started. For
+example, a player who dies 12 minutes into a round waits 40 s. These values are configurable
+starting points and may change after playtests.
+
 ## Levels
 
 | Parameter | Dust | Snow Planet | City Sphere | Dark Forest | Lunar Surface |
@@ -185,7 +200,7 @@ time to kill.
   long as defenders keep winning.
 - **Consoles:** whether progress on a console resets when a player lets go of E or is hit, whether
   several players can deactivate consoles at once, and whether deactivated consoles come back on.
-- **Respawning:** how long a player waits to respawn, and where.
+- **Respawning:** where a player respawns, and whether the respawn time stops growing at a cap.
 - **Hyperbolic levels:** their topology and the direction of gravity.
 - **Warp objects:** how many black holes and wormholes each level has, and where.
 - **Weapons:** exact fire rates, how fast an overheated weapon cools down, and how much and for how
