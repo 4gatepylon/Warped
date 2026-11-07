@@ -49,13 +49,31 @@ enum CameraView {
     Firing,
 }
 
+const YARD_VIEW_FEET_M: Vec3 = Vec3::new(20.0, 0.0, -6.0);
+const YARD_VIEW_YAW_RAD: f32 = 2.4;
+const YARD_VIEW_PITCH_RAD: f32 = -0.05;
+const INDOOR_VIEW_FEET_M: Vec3 = Vec3::new(-9.0, 0.06, -9.5);
+const INDOOR_VIEW_YAW_RAD: f32 = 0.95;
+const INDOOR_VIEW_PITCH_RAD: f32 = 0.0;
+const FIRING_VIEW_FEET_M: Vec3 = Vec3::new(-2.0, 0.0, 30.0);
+const FIRING_VIEW_YAW_RAD: f32 = 0.0;
+const FIRING_VIEW_PITCH_RAD: f32 = 0.02;
+
 impl CameraView {
     /// `pose` returns the view's feet position, yaw and pitch.
     fn pose(self) -> (Vec3, f32, f32) {
         match self {
-            CameraView::Yard => (Vec3::new(20.0, 0.0, -6.0), 2.4, -0.05),
-            CameraView::Indoor => (Vec3::new(-9.0, 0.06, -9.5), 0.95, 0.0),
-            CameraView::Firing => (Vec3::new(-2.0, 0.0, 30.0), 0.0, 0.02),
+            CameraView::Yard => (YARD_VIEW_FEET_M, YARD_VIEW_YAW_RAD, YARD_VIEW_PITCH_RAD),
+            CameraView::Indoor => (
+                INDOOR_VIEW_FEET_M,
+                INDOOR_VIEW_YAW_RAD,
+                INDOOR_VIEW_PITCH_RAD,
+            ),
+            CameraView::Firing => (
+                FIRING_VIEW_FEET_M,
+                FIRING_VIEW_YAW_RAD,
+                FIRING_VIEW_PITCH_RAD,
+            ),
         }
     }
 }
@@ -105,8 +123,9 @@ struct Args {
     /// Use the CC0 Poly Haven rifle even if the Sketchfab revolver is present.
     #[arg(long)]
     rifle: bool,
-    /// Hold the camera at a fixed view (no autopilot, no mouse look); `firing` holds the trigger.
-    #[arg(long, value_enum)]
+    /// Hold the camera at a fixed view (no autopilot, no mouse look); `firing` holds the trigger
+    /// and reloads when the magazine is empty.
+    #[arg(long, value_enum, conflicts_with = "autopilot")]
     camera_view: Option<CameraView>,
     /// Turn an effect off at start (repeatable); the F keys still toggle it.
     #[arg(long, value_enum)]
@@ -332,9 +351,12 @@ fn main() {
                 session.player = Player::new(feet_m, yaw_rad);
                 session.player.pitch_rad = pitch_rad;
                 session.player.is_on_ground = true;
+                session.is_autopilot = false;
+                let is_firing_view: bool = view == CameraView::Firing;
                 Controls {
                     weapon: WeaponInput {
-                        is_trigger_held: view == CameraView::Firing,
+                        is_trigger_held: is_firing_view,
+                        is_reload_pressed: is_firing_view && session.weapon.ammo == 0,
                         ..WeaponInput::default()
                     },
                     ..Controls::default()
