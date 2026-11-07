@@ -642,3 +642,48 @@ It cut the mean steps per ray from 42 to 33 (black hole) and 48 to 29 (Einstein 
 neighbours just outside the sphere, or in the bands near an orbit, carry the level's step error (up to 2 pixels), so
 cells along those edges stopped being smooth and were traced. Jumping pays only if the stepping around it is as
 accurate as the table, which the level's steps are not; it was dropped.
+
+### 8.4 Skipping blocks a step can't reach
+
+With adaptive sampling, the traced rays are the costly ones, and testing structures along their bent steps was a third
+of the time (the wormhole exit 29.2 → 18.3 ms without it). Per ray in the wormhole exit, 69 bounding spheres passed
+and 38 voxel walks started, though most steps were in open air: the big terrain structures' bounding spheres (up to
+17 m) hold most of each warp's reach.
+
+Each warp now has a clearance grid over its reach, in its local chart $p$ (the spatial part of a point in the warp's
+frame, $|p| = \sinh\rho$), with cells of 0.5 m out to 1.1 times the reach. A cell stores a lower bound $D_c$, in steps
+of 0.1 m, on the distance from its centre $c$ to any solid cell of a static structure. For each exposed solid cell (one
+with an empty face neighbour), it is the straight distance in that structure's cell coordinates from $c$ to the cell's
+box, times the cell size: in Klein coordinates $k$ the metric is
+
+```math
+ds^2 = \frac{|dk|^2}{1 - |k|^2} + \frac{(k \cdot dk)^2}{(1 - |k|^2)^2} \ge |dk|^2,
+```
+
+and geodesics are straight, so the hyperbolic distance is at least the Klein one. A cell outside an exposed cell's
+window keeps the cap (the warp's longest step plus 0.5 m): in the chart $ds^2 = |dp|^2 - (p \cdot dp)^2 / (1 + |p|^2)$,
+between $|dp|^2 / \cosh^2 \rho$ and $|dp|^2$ out to the further point's radius $\rho$.
+
+A step from a point at $p$ in cell $c$ can't reach a block when
+
+```math
+D_c - |p - p_c| \ge \Delta s,
+```
+
+as the distance from $p$ to $p_c$ is at most $|p - p_c|$ (the metric is at most $|dp|$). Then the step tests only the
+ground and any avatars (which follow the static structures in each warp's list). Unit tests check the bound against
+the distance to points spread over the blocks' faces, at 300 points in each warp's reach, and that it is within 1 m of
+it near blocks.
+
+The grids take 18 ms to build at load (2.1 MB in all). Every picture is unchanged. Per ray in the wormhole exit, 12
+bounding spheres pass and 10 walks start (69 and 38 before); around the black hole, 2.2 spheres pass (31). GPU ms at
+2560×1600, adaptive sampling, before → after:
+
+| View | Before | After |
+| --- | ---: | ---: |
+| black hole | 16.6 | 12.3 |
+| Einstein ring | 15.6 | 11.3 |
+| wormhole | 17.5 | 13.6 |
+| wormhole exit | 29.3 | 21.2 |
+| laser into the wormhole | 26.7 | 21.6 |
+| overview | 12.9 | 10.2 |

@@ -15,7 +15,8 @@ using namespace metal;
 
 #define SCENE_BUFFERS constant VoxelUniforms &u [[buffer(16)]], device const VoxelStructure *structures [[buffer(17)]], \
     device const uchar *voxels [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
-    device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]]
+    device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]], \
+    device const uchar *clearances [[buffer(24)]]
 
 constant int MAX_ITERATIONS = 240;
 constant int MAX_DDA_STEPS = 80;
@@ -222,8 +223,10 @@ struct VoxelStructure {
 
 /**
  * @brief `VoxelWarp` is one warp object: its inverse and forward frames, its centre, its kind, m and reach (curvature
- * units) and partner, and where its list of structures within reach starts and how long it is. Each list entry is
- * (structure, nearest and farthest distance of its bounding sphere from the centre, unused).
+ * units) and partner, where its list of structures within reach starts, how long it is, how many of its entries are
+ * static structures (avatars follow) and where its clearance grid starts, and the grid's half size, cells per axis,
+ * cells per unit and curvature radii per stored unit (`voxel_clearance.rs`). Each list entry is (structure, nearest
+ * and farthest distance of its bounding sphere from the centre, unused).
  */
 struct VoxelWarp {
     float4x4 inverse;
@@ -231,6 +234,7 @@ struct VoxelWarp {
     float4 centre;
     float4 params;
     int4 list;
+    float4 grid;
 };
 
 /** @brief `VoxelLight` is a lamp: its position, and its colour with its radius in meters. */
@@ -284,6 +288,7 @@ struct Scene {
     device const VoxelLight *lights;
     device const float4 *palette;
     device const BeamSegment *beams;
+    device const uchar *clearances;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -400,22 +405,43 @@ static void trace_ground(float4 x, float4 v, thread Hit &hit) {
 }
 
 /**
- * @brief `trace_scene` finds the first surface along a chord: the ground and every structure, or the structures in a
- * warp's list whose distance from its centre the chord can reach (the chord starts `rho` from the centre and is
- * `hit.s` long, so it stays within [rho - hit.s, rho + hit.s]).
+ * @brief `is_clear_of_blocks` says whether no static structure's solid cell is within `s` of the point whose spatial
+ * part in warp w's frame is `local`, so a chord of length `s` from it can't reach one: its clearance grid cell's value
+ * less its chart distance from the cell's centre (the metric is at most |dp|) is at least `s`. False outside the grid.
  * @par Example
  * @code
- * trace_scene(scene, x, v, -1, 0.0, hit, glass_s);
+ * if (is_clear_of_blocks(scene, w, local, hit.s)) first = list.z;
  * @endcode
  */
-static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, thread Hit &hit, thread float &glass_s) {
+static bool is_clear_of_blocks(thread const Scene &scene, int w, float3 local, float s) {
+    device const VoxelWarp &warp = scene.warps[w];
+    float4 grid = warp.grid;
+    int n = int(grid.y);
+    float3 g = (local + grid.x) * grid.z;
+    int3 c = int3(floor(g));
+    if (any(c < int3(0)) || any(c >= int3(n))) return false;
+    float off_centre = length(g - float3(c) - 0.5) / grid.z;
+    return float(scene.clearances[warp.list.w + c.x + n * (c.y + n * c.z)]) * grid.w - off_centre >= s;
+}
+
+/**
+ * @brief `trace_scene` finds the first surface along a chord: the ground and every structure, or the structures in a
+ * warp's list whose distance from its centre the chord can reach (the chord starts `rho` from the centre and is
+ * `hit.s` long, so it stays within [rho - hit.s, rho + hit.s]), only its avatars where the warp's clearance grid shows
+ * no static block within reach.
+ * @par Example
+ * @code
+ * trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
+ * @endcode
+ */
+static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, thread Hit &hit, thread float &glass_s) {
     trace_ground(x, v, hit);
     if (warp < 0) {
         for (int k = 0; k < scene.u.structure_count; k++) trace_structure(scene, k, x, v, 0.0, false, hit, glass_s);
     } else {
         int4 list = scene.warps[warp].list;
         float reach = hit.s;
-        for (int j = 0; j < list.y; j++) {
+        for (int j = is_clear_of_blocks(scene, warp, local, reach) ? list.z : 0; j < list.y; j++) {
             float4 entry = scene.warp_lists[list.x + j];
             if (rho + reach < entry.y || rho - reach > entry.z) continue;
             trace_structure(scene, int(entry.x), x, v, 0.0, false, hit, glass_s);
@@ -452,10 +478,18 @@ static float get_log_index(thread const Scene &scene, int w, float rho) {
     return 2.0 * log(psi) - 0.5 * log((1.0 - 4.0 * pt / r + FOIL_LAMBDA_SQ) / (1.0 + FOIL_LAMBDA_SQ));
 }
 
-/** @brief `compute_gradient` gives ∇ln n of warp w at x (not yet projected across a direction), ln n tapered by (1 - (ρ/reach)²)². @par Example @code float4 g = compute_gradient(scene, w, x, rho); @endcode */
-static float4 compute_gradient(thread const Scene &scene, int w, float4 x, thread float &rho) {
+/**
+ * @brief `compute_gradient` gives ∇ln n of warp w at x (not yet projected across a direction), ln n tapered by
+ * (1 - (ρ/reach)²)², with x's distance ρ from the warp's centre and its spatial part `local` in the warp's frame.
+ * @par Example
+ * @code
+ * float4 g = compute_gradient(scene, w, x, rho, local);
+ * @endcode
+ */
+static float4 compute_gradient(thread const Scene &scene, int w, float4 x, thread float &rho, thread float3 &local) {
     device const VoxelWarp &warp = scene.warps[w];
     float4 p = warp.inverse * x;
+    local = p.xyz;
     rho = asinh(length(p.xyz));
     float ch = cosh(rho), sh = max(sinh(rho), TINY), reach = warp.params.z;
     float f = rho / reach, window = (1.0 - f * f) * (1.0 - f * f), window_slope = -4.0 * f * (1.0 - f * f) / reach;
@@ -740,6 +774,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float hit_travelled = 0.0;
     float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
     float4 gradient = float4(0.0);
+    float3 local = float3(0.0);
     bool has_gradient = false;
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         if (inside < 0) {
@@ -754,7 +789,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
-            trace_scene(scene, x, v, -1, 0.0, hit, glass_s);
+            trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
             if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
@@ -766,13 +801,13 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             inside = entering;
             continue;
         }
-        if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho);
+        if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho, local);
         float ds = clamp(BEND_STEP_FRAC * rho, min_step, max_step);
         v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
         hit.s = ds;
         hit.mat = 0;
         float glass_s = NO_HIT_S;
-        trace_scene(scene, x, v, inside, rho, hit, glass_s);
+        trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
@@ -780,7 +815,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         x = xn * rsqrt(-mdot(xn, xn));
         v = normalize_tangent(x, vn);
         travelled += ds;
-        gradient = compute_gradient(scene, inside, x, rho);
+        gradient = compute_gradient(scene, inside, x, rho, local);
         v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
         has_gradient = true;
         float4 prm = warps[inside].params;
@@ -847,7 +882,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -960,7 +995,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -984,7 +1019,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -1021,7 +1056,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -1076,7 +1111,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1095,7 +1130,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {

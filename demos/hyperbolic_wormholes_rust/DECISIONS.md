@@ -394,6 +394,20 @@
   than a pixel; against steps eight times smaller the median feature shift matches tracing every pixel within 0.05
   pixel (but 4.1 against 3.7 at the wormhole exit).
 
+### D38. Lunar Surface skips blocks a bent step can't reach
+
+- **Choice:** a clearance grid per warp (0.5 m cells in the warp's local chart, out to 1.1 times its reach; one byte
+  per cell in 0.1 m steps, capped at the warp's longest step plus 0.5 m), holding a lower bound on the distance from
+  the cell's centre to a static block. A bent step shorter than that bound, less the step's start's distance from the
+  cell's centre, tests only the ground and avatars. Exact: every picture is unchanged.
+- **Alternatives:**
+  - a cheaper test per structure (bounding sphere within the step's reach): no faster (OPTIMIZATIONS.md, 8.1);
+  - bounds from each block's bounding sphere and the cell's half-diagonal: 1.3 m looser near blocks, and the wormhole
+    exit 0.5 ms slower;
+  - 0.25 m cells (not tried): 8 times the memory and build time for the black hole's grid.
+- **Rationale:** near the black hole and the wormhole it takes a quarter off the frame (29.3 → 21.2 ms for the
+  wormhole exit at 2560×1600); it costs 18 ms at load and 2.1 MB.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
