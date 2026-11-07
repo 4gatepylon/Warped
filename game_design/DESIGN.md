@@ -17,6 +17,10 @@ for every column.
 | Map | A line of levels: the blue levels, one purple level in the middle, then the red levels. |
 | Level | One playable space. A blue or red level belongs to that team; the purple level to neither. |
 | Depth | How far a level is from the purple level: 0 for purple, then 1, 2, … outward. |
+| Round | One play of one level, which one team wins. |
+| Wavefront | A team's next level to win on the other team's side. It only moves deeper. |
+| Attacker | The team whose wavefront is being played. |
+| Defender | The team that owns the level being played. |
 | Spawn | Where a team's players enter a level. |
 | Pylon | A team's objective in a level, near its spawn. |
 | Console | One part of a pylon. The opposing team deactivates consoles to win the level. |
@@ -47,7 +51,7 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 
 - Each team has a spawn and, near it, a pylon. The two spawns are on opposite sides of the level.
 - A team wins a level by deactivating every console on the opposing team's pylon, as in capture
-  the flag. The match then moves on to the next level.
+  the flag. The [wavefront](#wavefront) then decides which level is played next.
 - A pylon with more consoles takes longer to deactivate.
 
 | Parameter | Value |
@@ -57,6 +61,30 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 | Control to deactivate a console | Hold E |
 | Time to deactivate one console | 10 s |
 | While deactivating | The player must face the pylon and can't use a weapon. |
+
+### Wavefront
+
+Each team defends its own levels and attacks the other team's. A match is a sequence of rounds:
+
+1. The first round is on City Sphere, the only level that is played exactly once. Its winner
+   becomes the attacker, and the loser the defender.
+2. Each team's wavefront starts at the other team's depth 1 level. Every later round is on the
+   attacker's wavefront.
+3. If the attacker wins, its wavefront moves one level deeper and the next round is there. An
+   attacker that wins the defender's deepest level wins the match.
+4. If the defender wins, the teams swap roles, and the next round is on the new attacker's
+   wavefront, where it left off.
+
+Each team's wavefront only moves deeper, and every level but City Sphere can be played many times.
+For example:
+
+| Round | Level | Attacker | Winner | Next round |
+| --- | --- | --- | --- | --- |
+| 1 | City Sphere | None | Blue | Blue attacks its wavefront, Dark Forest. |
+| 2 | Dark Forest | Blue | Blue | Blue's wavefront moves deeper, to Lunar Surface. |
+| 3 | Lunar Surface | Blue | Red | Red attacks its wavefront, Snow Planet. |
+| 4 | Snow Planet | Red | Blue | Blue attacks again, at Lunar Surface, where it left off. |
+| 5 | Lunar Surface | Blue | Blue | None: blue won red's deepest level, so blue wins the match. |
 
 ## Levels
 
@@ -153,8 +181,8 @@ time to kill.
 
 ## Open questions
 
-- **Match flow:** which level a match starts on, which level comes next after a level is won, and
-  what wins the match.
+- **Match length:** whether a match has a time or round limit, since it goes back and forth for as
+  long as defenders keep winning.
 - **Consoles:** whether progress on a console resets when a player lets go of E or is hit, whether
   several players can deactivate consoles at once, and whether deactivated consoles come back on.
 - **Respawning:** how long a player waits to respawn, and where.
