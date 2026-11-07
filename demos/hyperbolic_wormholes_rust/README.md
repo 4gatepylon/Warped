@@ -52,6 +52,9 @@ make run-autopilot
 - `--sampling every-pixel` makes Metal trace every pixel instead of interpolating where it can (see below).
 - `--exit-after-s 8` opens the real window, plays for 8 seconds without input, closes it and prints the frame rate,
   GPU time and render scale.
+- `--play-route` plays the scripted route in the real window, one 1/60 s step per frame, then closes it and prints
+  the frame times (median, 99th percentile, worst, how many took longer than 1/60 s) and the render scale it used
+  (`cargo run --release -- --play-route --width-px 2560 --height-px 1440`).
 
 ## How it works
 
@@ -84,54 +87,69 @@ another could matter, so most steps test no boxes at all. All of these leave eve
 
 The Metal shader then takes three shortcuts the CPU renderer doesn't, so the CPU stays the reference:
 
-- Adaptive sampling: it traces every other pixel each way. Where the samples around a 2×2 cell hit the same surface
-  and their hit points vary almost linearly, it interpolates the other three pixels' hit points and shades them,
-  so textures stay sharp. It traces the rest exactly, in a separate pass (D21).
+- Adaptive sampling: it traces every fourth pixel each way, fills in every second pixel by interpolation where
+  those samples hit the same surface and their hit points vary almost linearly (tracing the rest), then does the
+  same for the remaining pixels. Interpolated pixels are still shaded one by one, so textures stay sharp, and
+  whatever can't be interpolated is traced exactly in separate, densely packed passes (D21).
 - Fourth-order (Runge-Kutta) steps between 3 and 10 throat radii of a mouth, three times longer than the midpoint
   steps they replace and as accurate (D22).
-- A jump across each mouth's inner sphere (1.6 blocks across): there the bending is taken to be that mouth's alone,
-  so a ray's path depends only on its angle. A table traced once gives where each ray comes out, through the throat
-  or not (D23). This is an approximation: the image you see through a throat comes out a few per cent larger or
-  smaller than with full stepping.
+- A jump across each mouth's inner sphere (1.6 blocks in radius): the mouth's own field there looks the same about
+  every axis through its centre, so a ray's path depends only on its angle (and, for the eye inside the sphere, on
+  the eye's distance). Tables traced once at start-up give where each ray comes out, through the throat or not,
+  and how much a uniform extra field would move it; the other mouths' bending is added from that, to first order
+  (D23). Against a reference with four times smaller steps, the images are as close as with full stepping.
 
 ## Results
 
-Run on an Apple M3 Pro (6 performance and 6 efficiency cores), macOS 15.7.3, Rust 1.98.1, release build. The machine
-was also running other work, so treat the times as rough.
+Run on an Apple M3 Pro (6 performance and 6 efficiency cores), macOS 15.7.3, Rust 1.98.1, release build, on a
+2560×1440 display at 1× scaling. The machine was also running other work, so treat the times as rough.
+
+In the real window at full-screen size (macOS makes it 2560×1336), playing the scripted route
+(`--play-route`, three runs, after 5 warm-up frames):
+
+| Render scale | Average | Median frame | 99th percentile | Worst frame | Frames over 1/60 s | At full resolution |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| automatic (the default) | 165 fps | 5.6 ms | 14.9 ms | 16.2 ms | 0 of 719 | 97.5% of frames (never below 0.80) |
+| always full | 164 fps | 5.5 ms | 16.9 ms | 18.7 ms | 8 of 719 | 100% |
+
+Standing at spawn (`--exit-after-s 8`), the same window runs at 129 fps at full resolution.
 
 Median milliseconds per frame at full resolution (`make bench-views`, 20 frames for WebGL and Metal, 3 to 5 for the
 CPU):
 
 | View | WebGL 1280×800 | Metal 1280×800 | CPU 1280×800 | WebGL 2560×1600 | Metal 2560×1600 | CPU 2560×1600 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| spawn | 35 | 4.0 (23) | 838 | 106 | 12 (81) | 3484 |
-| aimed at mouth 1A | 34 | 3.8 (18) | 783 | 99 | 11 (64) | 3027 |
-| 2.5 blocks from 1A | - | 7.7 | - | - | 23 | - |
-| 0.8 blocks from 1A's throat | 75 | 6.8 (37) | 1403 | 235 | 18 (134) | 5719 |
-| above the rails | 9 | 2.0 (6) | 441 | 32 | 6.7 (25) | 1776 |
-| high above spawn | 33 | 3.1 (15) | 631 | 95 | 9.8 (52) | 2624 |
-| laser through 1A | - | 4.9 (25) | 853 | - | 15 (88) | 3510 |
+| spawn | 35 | 3.7 (23) | 838 | 106 | 10 (81) | 3484 |
+| aimed at mouth 1A | 34 | 3.7 (18) | 783 | 99 | 9.6 (64) | 3027 |
+| 2.5 blocks from 1A | - | 7.5 | - | - | 22 | - |
+| 0.8 blocks from 1A's throat | 75 | 3.8 (37) | 1403 | 235 | 11 (134) | 5719 |
+| above the rails | 9 | 1.9 (6) | 441 | 32 | 5.7 (25) | 1776 |
+| high above spawn | 33 | 3.0 (15) | 631 | 95 | 8.5 (52) | 2624 |
+| laser through 1A | - | 4.5 (25) | 853 | - | 12 (88) | 3510 |
 
 - In brackets: Metal before the third layer's changes (PR 70).
 - WebGL is the browser demo at the same drawing-buffer sizes, in the Claude desktop app's built-in browser (Chromium
   152, ANGLE on Metal), timed with `readPixels`. Its scene differs a little: its mouths and eye are 4.5 blocks up,
   not 1.7, and it has no laser.
-- So Metal is now 4.5 to 13 times faster than WebGL, and 3 to 7.5 times faster than before the third layer. The
-  CPU, which got the bounding boxes but none of Metal's shortcuts, is 170 to 320 times slower than Metal.
-- Tracing every pixel (`--sampling every-pixel`), Metal at 2560×1600 takes 24 ms at spawn, 34 ms 2.5 blocks from 1A
-  and 28 ms at the throat; adaptive sampling changes at most 0.6% of pixels by more than 30 of 765 against that.
+- So Metal is now 5 to 22 times faster than WebGL, and 3 to 12 times faster than before the third layer. The CPU,
+  which got the bounding boxes but none of Metal's shortcuts, is 190 to 530 times slower than Metal.
+- Tracing every pixel (`--sampling every-pixel`), Metal at 2560×1600 takes 24 ms at spawn, 32 ms 2.5 blocks from 1A
+  and 27 ms at the throat.
 
-At 2560×1440, the size of a full-screen window on this machine's 2560×1440 display (at 1× scaling):
+How close the images are, at 2560×1600, as the share of pixels that change by more than 30 of 765 and as the
+structural similarity (SSIM, on brightness, 1 is identical):
 
-- The windowless benchmark takes 4 to 12 ms of GPU time per frame at full resolution in every view except 2.5
-  blocks from a mouth (19 ms) and at a throat (15 ms).
-- The scripted route at full resolution averages 73 to 197 fps on each leg. 90% of its frames take under 16.7 ms
-  (60 fps); the others, all while walking or flying into a mouth, take up to 30 ms. In the window, those frames
-  lower the render scale a little instead (D19).
-- The real window (`--exit-after-s 8`, standing at spawn; macOS makes it 2560×1336) runs at 110 fps at full
-  resolution.
+| View | PR 70 against the reference | Now against the reference | Adaptive against every pixel |
+| --- | --- | --- | --- |
+| spawn | 12.3%, 0.826 | 11.6%, 0.833 | 0.1%, 0.997 |
+| aimed at mouth 1A | 9.7%, 0.858 | 9.3%, 0.863 | 0.1%, 0.997 |
+| 2.5 blocks from 1A | 17.0%, 0.699 | 18.4%, 0.702 | 0.9%, 0.982 |
+| 0.8 blocks from 1A's throat | 10.1%, 0.865 | 8.5%, 0.873 | 0.2%, 0.996 |
+| laser through 1A | 10.0%, 0.863 | 9.8%, 0.867 | 0.1%, 0.997 |
 
-- Larger integration steps near mouths would be faster but less exact; they are not on (D13 in `DECISIONS.md`).
+The reference is PR 70's tracer with four times smaller steps; its own default steps differ from it by about as
+much as the image does now, mostly by moving lensed edges by about a pixel. Larger integration steps near mouths
+would be faster but less exact; they are not on (D13 in `DECISIONS.md`).
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s

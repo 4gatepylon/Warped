@@ -59,10 +59,14 @@ type Frame = (
 /// `Pipeline` is a compiled compute kernel.
 type Pipeline = Retained<ProtocolObject<dyn MTLComputePipelineState>>;
 
-/// `SampleBuffers` holds adaptive sampling's buffers for one sample grid size: the samples, the
-/// cell marks, the list of cells to refine, the list's length followed by the refinement's
-/// indirect dispatch arguments, and the grid's size.
+/// `SampleBuffers` holds adaptive sampling's buffers for render sizes up to one size: the coarse samples,
+/// the list of fine samples to trace and its length (followed by that pass's indirect dispatch
+/// arguments), the fine samples, the cell marks, the list of cells to refine and its length (also
+/// followed by dispatch arguments), and the largest fine grid they hold.
 struct SampleBuffers {
+    coarse: Retained<ProtocolObject<dyn MTLBuffer>>,
+    fill_list: Retained<ProtocolObject<dyn MTLBuffer>>,
+    fill_count: Retained<ProtocolObject<dyn MTLBuffer>>,
     samples: Retained<ProtocolObject<dyn MTLBuffer>>,
     cells: Retained<ProtocolObject<dyn MTLBuffer>>,
     refine_cells: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -78,6 +82,9 @@ const REFINE_COUNT_BYTES: usize = 16;
 const DISPATCH_ARGUMENTS_BYTES: usize = 12;
 const REFINE_GROUP_SIZE: usize = 64;
 const THROAT_TABLE_SIZE: usize = 4096;
+const CAMERA_TABLE_SIZE: usize = 2048;
+const CAMERA_TABLE_ROWS: usize = 64;
+const TEXELS_PER_TABLE_ENTRY: usize = 4;
 const BYTES_PER_PIXEL: usize = 4;
 const BYTES_PER_TEXEL: usize = 16;
 const THREADGROUP_SIDE: usize = 8;
@@ -94,7 +101,10 @@ pub struct MetalRenderer {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     trace_pixels: Pipeline,
-    trace_samples: Pipeline,
+    trace_coarse: Pipeline,
+    fill_samples: Pipeline,
+    prepare_fill: Pipeline,
+    trace_listed_samples: Pipeline,
     classify_cells: Pipeline,
     prepare_refinement: Pipeline,
     resolve_pixels: Pipeline,
@@ -104,6 +114,7 @@ pub struct MetalRenderer {
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
+    is_scaler_warm: bool,
     is_adaptive: bool,
     sample_buffers: Option<SampleBuffers>,
     rows: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -120,7 +131,9 @@ pub struct MetalRenderer {
 ///
 /// Example: `let source = fill_shader_constants(SHADER_SOURCE);`
 fn fill_shader_constants(source: &str) -> String {
-    let constants: [(&str, usize); 23] = [
+    let constants: [(&str, usize); 25] = [
+        ("CAMERA_TABLE_SIZE", CAMERA_TABLE_SIZE),
+        ("CAMERA_TABLE_ROWS", CAMERA_TABLE_ROWS),
         ("THROAT_TABLE_SIZE", THROAT_TABLE_SIZE),
         ("REFINE_GROUP_SIZE", REFINE_GROUP_SIZE),
         ("BYTES_PER_RAY_END", BYTES_PER_RAY_END),
@@ -184,6 +197,15 @@ fn get_sample_grid(render_px: (usize, usize)) -> (usize, usize) {
     (render_px.0 / 2 + 2, render_px.1 / 2 + 2)
 }
 
+/// `get_coarse_grid` gives the size of adaptive sampling's coarse grid for a render size: one
+/// sample per fourth pixel each way, and enough past each far edge to cover the fine grid (the
+/// shader's `get_coarse_columns` matches it).
+///
+/// Example: `let coarse_grid = get_coarse_grid((2560, 1600));`
+fn get_coarse_grid(render_px: (usize, usize)) -> (usize, usize) {
+    (render_px.0 / 4 + 3, render_px.1 / 4 + 3)
+}
+
 impl MetalRenderer {
     /// `New` opens the default GPU, compiles the ray tracer and allocates the scene buffer. With
     /// `is_adaptive`, it traces every other pixel each way and interpolates where that is exact
@@ -216,9 +238,14 @@ impl MetalRenderer {
                     )
                 })?)
         };
-        let (trace_pixels, trace_samples, classify_cells) = (
+        let (trace_pixels, trace_coarse, fill_samples) = (
             make_pipeline("trace_pixels")?,
-            make_pipeline("trace_samples")?,
+            make_pipeline("trace_coarse")?,
+            make_pipeline("fill_samples")?,
+        );
+        let (prepare_fill, trace_listed_samples, classify_cells) = (
+            make_pipeline("prepare_fill")?,
+            make_pipeline("trace_listed_samples")?,
             make_pipeline("classify_cells")?,
         );
         let (prepare_refinement, resolve_pixels, refine_pixels) = (
@@ -230,15 +257,18 @@ impl MetalRenderer {
             make_pipeline("build_throat_table")?,
             make_pipeline("build_camera_table")?,
         );
-        let make_table = || {
+        let make_table = |entry_count: usize| {
             device
                 .newBufferWithLength_options(
-                    THROAT_TABLE_SIZE * BYTES_PER_TEXEL,
+                    entry_count * BYTES_PER_TEXEL,
                     MTLResourceOptions::StorageModePrivate,
                 )
                 .ok_or("Metal: no memory for a jump table")
         };
-        let (throat_table, camera_table) = (make_table()?, make_table()?);
+        let (throat_table, camera_table) = (
+            make_table(THROAT_TABLE_SIZE * TEXELS_PER_TABLE_ENTRY)?,
+            make_table(CAMERA_TABLE_SIZE * CAMERA_TABLE_ROWS * TEXELS_PER_TABLE_ENTRY)?,
+        );
         let queue: Retained<ProtocolObject<dyn MTLCommandQueue>> =
             device.newCommandQueue().ok_or("Metal: no command queue")?;
         let rows: Retained<ProtocolObject<dyn MTLBuffer>> = device
@@ -251,7 +281,10 @@ impl MetalRenderer {
             device,
             queue,
             trace_pixels,
-            trace_samples,
+            trace_coarse,
+            fill_samples,
+            prepare_fill,
+            trace_listed_samples,
             classify_cells,
             prepare_refinement,
             resolve_pixels,
@@ -261,6 +294,7 @@ impl MetalRenderer {
             throat_table,
             camera_table,
             has_throat_table: false,
+            is_scaler_warm: false,
             is_adaptive,
             sample_buffers: None,
             rows,
@@ -304,19 +338,16 @@ impl MetalRenderer {
         Ok((texture, size_px))
     }
 
-    /// `prepare_upscaling` makes the MetalFX scaler and its output texture for a pair of sizes, if
-    /// the current ones are for another pair.
+    /// `prepare_upscaling` makes the MetalFX scaler and its output texture for an output size, if
+    /// the current ones are for another. The scaler takes any input up to that size (its input
+    /// content size is set each frame), so changing the render scale needs no new scaler.
     ///
-    /// Example: `self.prepare_upscaling((1280, 800), (2560, 1600))?;`
-    fn prepare_upscaling(
-        &mut self,
-        render_px: (usize, usize),
-        output_px: (usize, usize),
-    ) -> Result<()> {
+    /// Example: `self.prepare_upscaling((2560, 1600))?;`
+    fn prepare_upscaling(&mut self, output_px: (usize, usize)) -> Result<()> {
         if self
             .scaler
             .as_ref()
-            .is_some_and(|(_, input, output)| *input == render_px && *output == output_px)
+            .is_some_and(|(_, _, output)| *output == output_px)
         {
             return Ok(());
         }
@@ -324,8 +355,8 @@ impl MetalRenderer {
             unsafe { MTLFXSpatialScalerDescriptor::new() };
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A SCALER THAT DOESN'T MATCH ITS TEXTURES WILL HAPPEN
         let scaler = unsafe {
-            descriptor.setInputWidth(render_px.0);
-            descriptor.setInputHeight(render_px.1);
+            descriptor.setInputWidth(output_px.0);
+            descriptor.setInputHeight(output_px.1);
             descriptor.setOutputWidth(output_px.0);
             descriptor.setOutputHeight(output_px.1);
             descriptor.setColorTextureFormat(PIXEL_FORMAT);
@@ -337,7 +368,7 @@ impl MetalRenderer {
         let usage: MTLTextureUsage =
             unsafe { scaler.outputTextureUsage() } | MTLTextureUsage::ShaderRead;
         self.output_texture = Some(self.make_texture(output_px, usage)?);
-        self.scaler = Some((scaler, render_px, output_px));
+        self.scaler = Some((scaler, output_px, output_px));
         Ok(())
     }
 
@@ -351,21 +382,23 @@ impl MetalRenderer {
             data.uniforms.height_px as usize,
         );
         let is_upscaled: bool = output_px != render_px;
+        assert!(
+            render_px.0 <= output_px.0 && render_px.1 <= output_px.1,
+            "Metal: the render size {render_px:?} is larger than the output {output_px:?}"
+        );
         if self
             .render_texture
             .as_ref()
-            .is_none_or(|(_, size)| *size != render_px)
+            .is_none_or(|(_, size)| *size != output_px)
         {
             self.render_texture = Some(self.make_texture(
-                render_px,
+                output_px,
                 MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
             )?);
         }
-        if is_upscaled {
-            self.prepare_upscaling(render_px, output_px)?;
-        }
+        self.prepare_upscaling(output_px)?;
         if self.is_adaptive {
-            self.prepare_sample_buffers(render_px)?;
+            self.prepare_sample_buffers(output_px)?;
         }
         let row_bytes: usize = data.rows.len() * BYTES_PER_TEXEL;
         assert!(
@@ -405,10 +438,8 @@ impl MetalRenderer {
         if should_build_table {
             encoder.setComputePipelineState(&self.build_throat_table);
             dispatch_grid(&encoder, (THROAT_TABLE_SIZE, 1));
-        }
-        if data.uniforms.camera_mouth >= 0 {
             encoder.setComputePipelineState(&self.build_camera_table);
-            dispatch_grid(&encoder, (THROAT_TABLE_SIZE, 1));
+            dispatch_grid(&encoder, (CAMERA_TABLE_SIZE, CAMERA_TABLE_ROWS));
         }
         if self.is_adaptive {
             self.encode_adaptive_sampling(&encoder, render_px);
@@ -417,7 +448,7 @@ impl MetalRenderer {
             dispatch_grid(&encoder, render_px);
         }
         encoder.endEncoding();
-        if !is_upscaled {
+        if !is_upscaled && self.is_scaler_warm {
             return Ok((command_buffer, render_texture.clone()));
         }
         let (scaler, _, _) = self.scaler.as_ref().expect("the scaler was just made");
@@ -427,11 +458,19 @@ impl MetalRenderer {
             .expect("the output texture was just made");
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN MetalFX READING OR WRITING THE WRONG TEXTURE WILL HAPPEN
         unsafe {
+            scaler.setInputContentWidth(render_px.0);
+            scaler.setInputContentHeight(render_px.1);
             scaler.setColorTexture(Some(render_texture));
             scaler.setOutputTexture(Some(output_texture));
             scaler.encodeToCommandBuffer(&command_buffer);
         }
-        Ok((command_buffer, output_texture.clone()))
+        let output: Retained<ProtocolObject<dyn MTLTexture>> = if is_upscaled {
+            output_texture.clone()
+        } else {
+            render_texture.clone()
+        };
+        self.is_scaler_warm = true;
+        Ok((command_buffer, output))
     }
 
     /// `encode_adaptive_sampling` encodes adaptive sampling's passes into an encoder that already
@@ -449,8 +488,8 @@ impl MetalRenderer {
         let buffers: &SampleBuffers = self
             .sample_buffers
             .as_ref()
-            .filter(|buffers| buffers.grid == grid)
-            .expect("prepare_sample_buffers made the buffers for this size");
+            .filter(|buffers| buffers.grid.0 >= grid.0 && buffers.grid.1 >= grid.1)
+            .expect("prepare_sample_buffers made buffers big enough for this size");
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
         unsafe {
             encoder.setBuffer_offset_atIndex(Some(&buffers.samples), 0, 2);
@@ -458,9 +497,31 @@ impl MetalRenderer {
             encoder.setBuffer_offset_atIndex(Some(&buffers.refine_cells), 0, 4);
             encoder.setBuffer_offset_atIndex(Some(&buffers.refine_count), 0, 5);
             encoder.setBuffer_offset_atIndex(Some(&buffers.refine_count), REFINE_COUNT_BYTES, 6);
+            encoder.setBuffer_offset_atIndex(Some(&buffers.coarse), 0, 9);
+            encoder.setBuffer_offset_atIndex(Some(&buffers.fill_list), 0, 11);
+            encoder.setBuffer_offset_atIndex(Some(&buffers.fill_count), 0, 12);
+            encoder.setBuffer_offset_atIndex(Some(&buffers.fill_count), REFINE_COUNT_BYTES, 13);
         }
-        encoder.setComputePipelineState(&self.trace_samples);
+        encoder.setComputePipelineState(&self.trace_coarse);
+        dispatch_grid(encoder, get_coarse_grid(render_px));
+        encoder.setComputePipelineState(&self.fill_samples);
         dispatch_grid(encoder, grid);
+        encoder.setComputePipelineState(&self.prepare_fill);
+        dispatch_grid(encoder, (1, 1));
+        encoder.setComputePipelineState(&self.trace_listed_samples);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DISPATCH SIZED FROM THE WRONG BYTES WILL HAPPEN
+        unsafe {
+            encoder
+                .dispatchThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerThreadgroup(
+                    &buffers.fill_count,
+                    REFINE_COUNT_BYTES,
+                    MTLSize {
+                        width: REFINE_GROUP_SIZE,
+                        height: 1,
+                        depth: 1,
+                    },
+                );
+        }
         encoder.setComputePipelineState(&self.classify_cells);
         dispatch_grid(encoder, grid);
         encoder.setComputePipelineState(&self.prepare_refinement);
@@ -483,12 +544,12 @@ impl MetalRenderer {
         }
     }
 
-    /// `prepare_sample_buffers` makes adaptive sampling's buffers for a render size, if the current
-    /// ones are for another size.
+    /// `prepare_sample_buffers` makes adaptive sampling's buffers big enough for any render size up
+    /// to `max_px`, if the current ones are for another size.
     ///
     /// Example: `self.prepare_sample_buffers((2560, 1600))?;`
-    fn prepare_sample_buffers(&mut self, render_px: (usize, usize)) -> Result<()> {
-        let grid: (usize, usize) = get_sample_grid(render_px);
+    fn prepare_sample_buffers(&mut self, max_px: (usize, usize)) -> Result<()> {
+        let grid: (usize, usize) = get_sample_grid(max_px);
         if self
             .sample_buffers
             .as_ref()
@@ -505,7 +566,11 @@ impl MetalRenderer {
                 ))
         };
         let cell_count: usize = grid.0 * grid.1;
+        let coarse_grid: (usize, usize) = get_coarse_grid(max_px);
         self.sample_buffers = Some(SampleBuffers {
+            coarse: make_buffer(coarse_grid.0 * coarse_grid.1 * BYTES_PER_RAY_END)?,
+            fill_list: make_buffer(cell_count * BYTES_PER_CELL_INDEX)?,
+            fill_count: make_buffer(REFINE_COUNT_BYTES + DISPATCH_ARGUMENTS_BYTES)?,
             samples: make_buffer(cell_count * BYTES_PER_RAY_END)?,
             cells: make_buffer(cell_count * BYTES_PER_CELL_MARK)?,
             refine_cells: make_buffer(cell_count * BYTES_PER_CELL_INDEX)?,

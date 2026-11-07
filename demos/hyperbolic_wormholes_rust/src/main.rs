@@ -61,6 +61,8 @@ const MIN_RENDER_SCALE: f64 = 0.05;
 const MAX_FRAME_DT_S: f64 = 0.05;
 const AUTOPILOT_DT_S: f64 = 1.0 / 60.0;
 const HUD_PERIOD_S: f64 = 0.25;
+const ROUTE_WARMUP_FRAME_COUNT: usize = 5;
+const FRAME_BUDGET_MS: f64 = 1000.0 / 60.0;
 const HUD_TEXT_SCALE: f32 = 2.0;
 const HUD_LINE_PX: f32 = 10.0;
 const HUD_MARGIN_PX: f32 = 4.0;
@@ -139,6 +141,10 @@ struct Arguments {
     /// Close the window after this many seconds and print its frame rate (to check the window).
     #[arg(long)]
     exit_after_s: Option<f64>,
+    /// Play the scripted route in the window, one 1/60 s step per frame, instead of taking input,
+    /// then close it and print frame-time statistics (to check the window's frame rate in motion).
+    #[arg(long, conflicts_with_all = ["bench_views", "autopilot"])]
+    play_route: bool,
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -749,6 +755,85 @@ fn make_route() -> Vec<Leg> {
     ]
 }
 
+/// `RouteFrame` is one `AUTOPILOT_DT_S` step of the scripted route: its leg, the player's camera
+/// and state after the step, and the messages (wormhole crossings) the step produced.
+struct RouteFrame {
+    leg: usize,
+    frame: DMat4,
+    is_laser_on: bool,
+    height_m: f64,
+    is_flying: bool,
+    is_on_ground: bool,
+    messages: Vec<String>,
+}
+
+/// `Route` is the scripted route played without rendering: its legs, every step, and when each
+/// leg's ending event happened.
+struct Route {
+    legs: Vec<Leg>,
+    frames: Vec<RouteFrame>,
+    ended_at_s: Vec<Option<f64>>,
+}
+
+/// `simulate_route` plays the scripted route's physics at a fixed `AUTOPILOT_DT_S` step, without
+/// rendering.
+///
+/// Example: `let route = simulate_route(&world)?;`
+fn simulate_route(world: &World) -> Result<Route> {
+    let legs: Vec<Leg> = make_route();
+    let mut player: Player = Player::AtSpawn(world);
+    let mut frames: Vec<RouteFrame> = Vec::new();
+    let mut ended: Vec<Option<f64>> = Vec::new();
+    for (index, leg) in legs.iter().enumerate() {
+        if leg.is_reset_to_spawn {
+            player = Player::AtSpawn(world);
+        }
+        player.is_flying = leg.is_flying;
+        if let Some(name) = leg.aim_at_mouth {
+            let mouth = world
+                .mouths
+                .iter()
+                .find(|m| m.name == name)
+                .ok_or(format!("no mouth named {name}"))?;
+            physics::aim_through_mouth(world, &mut player.frame, mouth);
+        }
+        let (mut leg_time_s, mut ended_at_s): (f64, Option<f64>) = (0.0, None);
+        while leg_time_s < leg.max_s && ended_at_s.is_none_or(|t| leg_time_s < t + leg.after_end_s)
+        {
+            let input: Input = if ended_at_s.is_some() && leg.end == LegEnd::Landing {
+                Input::default()
+            } else {
+                leg.input
+            };
+            let messages: Vec<String> =
+                physics::update_player(world, &mut player, &input, AUTOPILOT_DT_S);
+            physics::level_out(&mut player.frame, AUTOPILOT_DT_S);
+            leg_time_s += AUTOPILOT_DT_S;
+            if ended_at_s.is_none()
+                && ((leg.end == LegEnd::Crossing && !messages.is_empty())
+                    || (leg.end == LegEnd::Landing && player.is_on_ground))
+            {
+                ended_at_s = Some(leg_time_s);
+            }
+            frames.push(RouteFrame {
+                leg: index,
+                frame: player.frame,
+                is_laser_on: leg.is_laser_on,
+                height_m: player.get_height_m(world),
+                is_flying: player.is_flying,
+                is_on_ground: player.is_on_ground,
+                messages,
+            });
+        }
+        ended.push(ended_at_s);
+    }
+    Ok(Route {
+        legs,
+        frames,
+        ended_at_s: ended,
+    })
+}
+
 /// `run_autopilot` plays the scripted route without a window at a fixed 1/60 s time step,
 /// rendering every frame. It records each frame (time, render time, height, events) in
 /// `frames.csv`, saves every n-th frame as a PNG, and reports each leg: how long it took, whether
@@ -761,114 +846,81 @@ fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Resu
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("autopilot", arguments.label.as_deref())?;
     let mut pixels: Vec<u8> = vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL];
-    let mut player: Player = Player::AtSpawn(&world);
     let mut csv: String =
         String::from("frame,time_s,leg,render_ms,height_m,is_flying,is_on_ground,event\n");
-    let mut legs: Vec<Value> = Vec::new();
-    let mut frame_index: u64 = 0;
     eprintln!(
         "Running the autopilot at {}x{} with the {} renderer...",
         size_px.0,
         size_px.1,
         renderer.name()
     );
-    for leg in make_route() {
-        if leg.is_reset_to_spawn {
-            player = Player::AtSpawn(&world);
+    let Route {
+        legs: route,
+        frames,
+        ended_at_s: ended,
+    } = simulate_route(&world)?;
+    let mut render_totals_ms: Vec<f64> = vec![0.0; route.len()];
+    let mut frame_counts: Vec<u64> = vec![0; route.len()];
+    let mut max_heights_m: Vec<f64> = vec![0.0; route.len()];
+    let mut events: Vec<Vec<String>> = vec![Vec::new(); route.len()];
+    let mut laser_texts: Vec<Option<String>> = vec![None; route.len()];
+    for (frame_index, step) in frames.iter().enumerate() {
+        let leg: &Leg = &route[step.leg];
+        let start: Instant = Instant::now();
+        let report: Option<LaserReport> = render_view(
+            &world,
+            step.frame,
+            step.is_laser_on,
+            render_px,
+            size_px,
+            frame_index as f64 * AUTOPILOT_DT_S,
+            renderer.as_mut(),
+            &mut pixels,
+        )?;
+        let render_ms: f64 = start.elapsed().as_secs_f64() * MS_PER_S;
+        if let Some(report) = report {
+            laser_texts[step.leg] = Some(describe_laser(&report));
         }
-        player.is_flying = leg.is_flying;
-        if let Some(name) = leg.aim_at_mouth {
-            let mouth = world
-                .mouths
-                .iter()
-                .find(|m| m.name == name)
-                .ok_or(format!("no mouth named {name}"))?;
-            physics::aim_through_mouth(&world, &mut player.frame, mouth);
-        }
-        let (
-            mut leg_time_s,
-            mut ended_at_s,
-            mut events,
-            mut render_total_ms,
-            mut leg_frame_count,
-            mut max_height_m,
-        ) = (
-            0.0f64,
-            None::<f64>,
-            Vec::<String>::new(),
-            0.0f64,
-            0u64,
-            0.0f64,
-        );
-        let mut laser_text: Option<String> = None;
-        while leg_time_s < leg.max_s && ended_at_s.is_none_or(|t| leg_time_s < t + leg.after_end_s)
+        render_totals_ms[step.leg] += render_ms;
+        frame_counts[step.leg] += 1;
+        max_heights_m[step.leg] = max_heights_m[step.leg].max(step.height_m);
+        events[step.leg].extend(step.messages.iter().cloned());
+        csv.push_str(&format!(
+            "{frame_index},{:.4},{},{render_ms:.2},{:.3},{},{},{}\n",
+            frame_index as f64 * AUTOPILOT_DT_S,
+            leg.name,
+            step.height_m,
+            step.is_flying,
+            step.is_on_ground,
+            step.messages.join(" / "),
+        ));
+        if (frame_index as u64).is_multiple_of(u64::from(arguments.snapshot_every))
+            || !step.messages.is_empty()
         {
-            let input: Input = if ended_at_s.is_some() && leg.end == LegEnd::Landing {
-                Input::default()
-            } else {
-                leg.input
-            };
-            let messages: Vec<String> =
-                physics::update_player(&world, &mut player, &input, AUTOPILOT_DT_S);
-            physics::level_out(&mut player.frame, AUTOPILOT_DT_S);
-            leg_time_s += AUTOPILOT_DT_S;
-            let is_crossing: bool = !messages.is_empty();
-            if ended_at_s.is_none()
-                && ((leg.end == LegEnd::Crossing && is_crossing)
-                    || (leg.end == LegEnd::Landing && player.is_on_ground))
-            {
-                ended_at_s = Some(leg_time_s);
-            }
-            events.extend(messages.iter().cloned());
-            let start: Instant = Instant::now();
-            let report: Option<LaserReport> = render_view(
-                &world,
-                player.frame,
-                leg.is_laser_on,
-                render_px,
-                size_px,
-                frame_index as f64 * AUTOPILOT_DT_S,
-                renderer.as_mut(),
-                &mut pixels,
+            save_png(
+                &folder.join(format!("frame_{frame_index:05}_{}.png", leg.name)),
+                &pixels,
+                size_px.0,
+                size_px.1,
             )?;
-            let render_ms: f64 = start.elapsed().as_secs_f64() * MS_PER_S;
-            if let Some(report) = report {
-                laser_text = Some(describe_laser(&report));
-            }
-            render_total_ms += render_ms;
-            leg_frame_count += 1;
-            max_height_m = max_height_m.max(player.get_height_m(&world));
-            csv.push_str(&format!(
-                "{frame_index},{:.4},{},{render_ms:.2},{:.3},{},{},{}\n",
-                frame_index as f64 * AUTOPILOT_DT_S,
-                leg.name,
-                player.get_height_m(&world),
-                player.is_flying,
-                player.is_on_ground,
-                messages.join(" / "),
-            ));
-            if frame_index.is_multiple_of(u64::from(arguments.snapshot_every)) || is_crossing {
-                save_png(
-                    &folder.join(format!("frame_{frame_index:05}_{}.png", leg.name)),
-                    &pixels,
-                    size_px.0,
-                    size_px.1,
-                )?;
-            }
-            frame_index += 1;
         }
-        let is_as_planned: bool = leg.end == LegEnd::Time || ended_at_s.is_some();
-        legs.push(json!({
-            "leg": leg.name,
-            "is_as_planned": is_as_planned,
-            "ended_at_s": ended_at_s,
-            "frame_count": leg_frame_count,
-            "mean_render_ms": render_total_ms / leg_frame_count.max(1) as f64,
-            "max_height_m": max_height_m,
-            "events": events,
-            "laser": laser_text,
-        }));
     }
+    let legs: Vec<Value> = route
+        .iter()
+        .enumerate()
+        .map(|(k, leg)| {
+            json!({
+                "leg": leg.name,
+                "is_as_planned": leg.end == LegEnd::Time || ended[k].is_some(),
+                "ended_at_s": ended[k],
+                "frame_count": frame_counts[k],
+                "mean_render_ms": render_totals_ms[k] / frame_counts[k].max(1) as f64,
+                "max_height_m": max_heights_m[k],
+                "events": events[k],
+                "laser": laser_texts[k],
+            })
+        })
+        .collect();
     fs::write(folder.join("frames.csv"), csv)?;
     let summary: Value = json!({
         "run_folder": folder.display().to_string(),
@@ -933,6 +985,10 @@ struct Session {
     render_scale: f64,
     is_auto_scale: bool,
     exit_after_s: Option<f64>,
+    route: Vec<RouteFrame>,
+    route_index: usize,
+    frame_times_ms: Vec<f64>,
+    render_scales: Vec<f64>,
     total_frame_count: u64,
     total_gpu_ms: f64,
     last_output_px: (u32, u32),
@@ -957,10 +1013,15 @@ impl Session {
     ///
     /// Example: `let mut session = Session::New(&arguments);`
     #[allow(non_snake_case)]
-    fn New(arguments: &Arguments) -> Session {
+    fn New(arguments: &Arguments) -> Result<Session> {
         let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
         let player: Player = Player::AtSpawn(&world);
-        Session {
+        let route: Vec<RouteFrame> = if arguments.play_route {
+            simulate_route(&world)?.frames
+        } else {
+            Vec::new()
+        };
+        Ok(Session {
             world,
             player,
             render_scale: arguments
@@ -969,6 +1030,10 @@ impl Session {
             is_auto_scale: arguments.renderer == RendererKind::Metal
                 && arguments.render_scale.is_none(),
             exit_after_s: arguments.exit_after_s,
+            route,
+            route_index: 0,
+            frame_times_ms: Vec::new(),
+            render_scales: Vec::new(),
             total_frame_count: 0,
             total_gpu_ms: 0.0,
             last_output_px: (0, 0),
@@ -986,7 +1051,7 @@ impl Session {
             hud_time_s: 0.0,
             hud_frame_count: 0,
             hud_render_ms: 0.0,
-        }
+        })
     }
 
     /// `handle_event` reacts to one window event and returns false when the player quits: Esc
@@ -1060,8 +1125,17 @@ impl Session {
     ///
     /// Example: `session.update(&event_pump.keyboard_state());`
     fn update(&mut self, keys: &sdl3::keyboard::KeyboardState) {
-        let dt_s: f64 = self.last.elapsed().as_secs_f64().min(MAX_FRAME_DT_S);
+        let frame_s: f64 = self.last.elapsed().as_secs_f64();
+        let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
         self.last = Instant::now();
+        if self.route_index < self.route.len() {
+            self.frame_times_ms.push(frame_s * MS_PER_S);
+            let step: &RouteFrame = &self.route[self.route_index];
+            (self.player.frame, self.is_laser_on) = (step.frame, step.is_laser_on);
+            self.route_index += 1;
+            self.hud_time_s += dt_s;
+            return;
+        }
         let input: Input = Input {
             forward: keys.is_scancode_pressed(Scancode::W) || self.is_auto_forward,
             back: keys.is_scancode_pressed(Scancode::S),
@@ -1091,6 +1165,9 @@ impl Session {
         } else {
             self.render_scale
         };
+        if !self.route.is_empty() {
+            self.render_scales.push(quantized_scale);
+        }
         scale_size(window_px, quantized_scale)
     }
 
@@ -1138,11 +1215,49 @@ impl Session {
         (self.hud_time_s, self.hud_frame_count, self.hud_render_ms) = (0.0, 0, 0.0);
     }
 
+    /// `print_route_statistics` prints how the window kept up while playing the route, after its
+    /// first `ROUTE_WARMUP_FRAME_COUNT` frames: the time between frames (median, 99th percentile,
+    /// worst, and how many took longer than a 60 Hz frame) and the render scale it used.
+    ///
+    /// Example: `session.print_route_statistics();`
+    fn print_route_statistics(&self) {
+        let mut times_ms: Vec<f64> = self.frame_times_ms[ROUTE_WARMUP_FRAME_COUNT..].to_vec();
+        times_ms.sort_by(f64::total_cmp);
+        let scales: &[f64] = &self.render_scales[ROUTE_WARMUP_FRAME_COUNT..];
+        let percentile =
+            |fraction: f64| times_ms[((times_ms.len() - 1) as f64 * fraction).round() as usize];
+        let over_count: usize = times_ms.iter().filter(|&&ms| ms > FRAME_BUDGET_MS).count();
+        println!(
+            "{} route frames in a {}x{} window: {:.1} fps on average; frame times median {:.1} ms, 99th percentile {:.1} ms, worst {:.1} ms; {} frames ({:.1}%) over {:.1} ms; render scale mean {:.2}, lowest {:.2}, full in {:.1}% of frames",
+            times_ms.len(),
+            self.last_output_px.0,
+            self.last_output_px.1,
+            MS_PER_S * times_ms.len() as f64 / times_ms.iter().sum::<f64>(),
+            percentile(0.5),
+            percentile(0.99),
+            times_ms[times_ms.len() - 1],
+            over_count,
+            100.0 * over_count as f64 / times_ms.len() as f64,
+            FRAME_BUDGET_MS,
+            scales.iter().sum::<f64>() / scales.len() as f64,
+            scales.iter().copied().fold(1.0, f64::min),
+            100.0 * scales.iter().filter(|&&scale| scale >= 1.0).count() as f64
+                / scales.len() as f64,
+        );
+    }
+
     /// `is_finished` says whether `--exit-after-s` has run out; if so it prints the window's
     /// average frame rate, GPU time and last render scale.
     ///
     /// Example: `if session.is_finished() { return Ok(()); }`
     fn is_finished(&self) -> bool {
+        if !self.route.is_empty() {
+            if self.route_index < self.route.len() {
+                return false;
+            }
+            self.print_route_statistics();
+            return true;
+        }
         let Some(limit_s) = self.exit_after_s else {
             return false;
         };
@@ -1232,7 +1347,7 @@ fn scale_size(size_px: (u32, u32), scale: f64) -> (u32, u32) {
 fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     let sdl: sdl3::Sdl = sdl3::init()?;
     let video: sdl3::VideoSubsystem = sdl.video()?;
-    let mut session: Session = Session::New(arguments);
+    let mut session: Session = Session::New(arguments)?;
     let window_size: (u32, u32) = (arguments.width_px, arguments.height_px);
     match renderer.as_metal() {
         Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),

@@ -104,6 +104,9 @@
   - growing the midpoint steps with distance beyond 10 throat radii (as √distance, up to 0.5 or 0.8 of it): 10% faster
     at spawn, but 16 to 22% of its pixels changed against the reference instead of 12%;
   - summing only the nearest mouth's bending inside its near zone: slower, and 24% of the throat view changed;
+  - RK4 steps out to the bending cutoff (0.5 of the distance: no faster, and less accurate high above spawn; 0.7:
+    faster but 18 to 36% of pixels changed), and keeping the other mouths' gradient fixed within midpoint steps (22%
+    of the aimed view changed instead of 10%);
   - kick-drift-kick (Heun-like) steps that reuse each step's end bending as the next step's start, so each step
     sums the bending once instead of twice: 17% faster at spawn, but its error is larger than the midpoint
     method's. Against a reference with four times smaller steps, 43% of the throat view's pixels changed by more than
@@ -140,59 +143,75 @@
 
 - **Choice:** Metal can ray-trace fewer pixels and upscale them with MetalFX's spatial scaler (`--render-scale`). In
   the window it starts at full resolution, and each frame moves the scale a little toward 14 ms of GPU time, between
-  0.5 and 1, in steps of 0.05 of the window's size; `-` and `=` set it by hand. `--bench-views` and `--autopilot`
-  render at full resolution unless `--render-scale` is given.
-- **Alternatives:** always full resolution; a lower floor; MetalFX's temporal scaler, which looks better but needs
-  motion vectors and jittered frames; the first version's start at 0.5 with a 12 ms target, updated four times a
-  second.
-- **Rationale:** with D21 to D23, most frames at 2560×1440 take 4 to 12 ms at full resolution, so upscaling is only
-  for the frames close to a mouth (up to about 30 ms), where its grain in squeezed textures shows most; 14 ms leaves
-  room for the CPU's part of a 60 Hz frame, and the 0.5 floor keeps the image from getting coarse.
-- **Revisit if:** a 120 Hz display needs a lower target, or the grain near mouths is too visible.
+  0.5 and 1, in steps of 0.05 of the window's size; `-` and `=` set it by hand. The scaler, its textures and the
+  sampling buffers are made once for the window's size, and the scaler runs once during the first frame, so a change
+  of scale costs nothing (each first use cost 20 ms or more). `--bench-views` and `--autopilot` render at full
+  resolution unless `--render-scale` is given.
+- **Alternatives:** always full resolution (8 of 719 route frames over 1/60 s, the worst 18.7 ms); a lower floor;
+  MetalFX's temporal scaler, which needs motion vectors and jittered frames; the first version's start at 0.5 with
+  a 12 ms target, updated four times a second.
+- **Rationale:** playing the route in a full-screen window, no frame took over 1/60 s in three runs, and 97.5% of
+  frames stayed at full resolution (the rest at 0.80 to 0.95, walking into a mouth). Upscaling loses detail (SSIM
+  0.85 to 0.96 against full resolution at 0.85), so it is kept for those few frames; 14 ms leaves room for the
+  CPU's part of a 60 Hz frame.
+- **Revisit if:** a 120 Hz display needs a lower target.
 
-### D21. Trace every other pixel, and interpolate where that is exact enough
+### D21. Trace a coarse grid, and interpolate where that is exact enough
 
-- **Choice:** `--sampling adaptive` (the default) traces every other pixel each way, marks each 2×2 cell smooth when
-  the twelve samples around it ended on the same surface, in the same row, without laser glow, and their second
-  differences stay under 1.6 times the first (an interpolation error of about 0.4 pixel), interpolates the hit point
-  of the other three pixels and shades them at full resolution, and traces the rest in a separate, densely packed
-  pass. `--sampling every-pixel` traces every pixel.
-- **Alternatives:** a threshold of 0.4 (0.1 pixel; the near view 29 instead of 20 ms) or 0.8; tracing the rest in the
-  same pass (about 9 ms slower at spawn, as a thread group waits on its slowest ray); interpolating each sample's
-  state where it leaves a mouth's near zone, which covered only 4 to 6% of cells and slowed the sample pass.
-- **Rationale:** against tracing every pixel, at most 0.6% of pixels change by more than 30 of 765 (the near view;
-  0.1% elsewhere), and textures stay sharp because every pixel is still shaded; spawn at 2560×1600 goes from 22 to
-  10.5 ms.
+- **Choice:** `--sampling adaptive` (the default) works in three levels. It traces every fourth pixel each way. It
+  fills in every second pixel by interpolating the hit points of four of those samples, where the twelve around the
+  cell ended on the same surface, in the same row, without laser glow, and their second differences stay under 0.8
+  of the first; it traces the rest. Then it interpolates the remaining pixels the same way with a threshold of 1.6.
+  Both thresholds bound the interpolation error by about 0.4 pixel. Interpolated pixels are still shaded one by one.
+  Whatever can't be interpolated is traced in separate passes that pack the listed rays densely, with indirect
+  dispatches. `--sampling every-pixel` traces every pixel.
+- **Alternatives:**
+  - a single level (every second pixel; spawn 9.4 instead of 7.7 ms at 2560×1440);
+  - thresholds of 0.4 (0.1 pixel; the near view 29 instead of 20 ms) or 0.8;
+  - tracing the rest in the same pass (about 9 ms slower at spawn, as a thread group waits on its slowest ray);
+  - interpolating each pixel of a cell on its own row or column (no faster);
+  - interpolating each sample's state where it leaves a mouth's near zone, which covered only 4 to 6% of cells.
+- **Rationale:** against tracing every pixel, at most 0.9% of pixels change by more than 30 of 765 (the near view;
+  0.2% or less elsewhere), and SSIM is 0.98 to 0.998; spawn at 2560×1600 goes from 22 to 8.5 ms of GPU time.
 
 ### D22. Fourth-order steps away from the throat
 
 - **Choice:** between 3 and 10 throat radii of a mouth, a ray takes classical Runge-Kutta steps of 0.5 of the
   distance to the mouth's centre, instead of midpoint steps of 0.12; within 3 throat radii it keeps midpoint steps.
+  The later stages of a step re-evaluate only the nearest mouth, keeping the other mouths' gradient from the
+  step's start, as they are at least a few blocks away (10% faster near a mouth, no change in accuracy).
 - **Alternatives:** RK4 all the way to the throat (its stages land inside the throat sphere, and 21% of the throat
   view's pixels changed by more than 30 against a reference with four times smaller steps, however small the
   steps); Heun-like steps (D14); larger midpoint steps (D13).
 - **Rationale:** it is at least as accurate as the midpoint steps against that reference (spawn 11.5% of pixels
   changed against 12.3%), and about 10% faster.
 
-### D23. Cross each mouth's inner sphere in one jump (a heuristic)
+### D23. Cross each mouth's inner sphere in one jump
 
 - **Choice:** within 4.5 throat radii (1.6 blocks) of a mouth, which holds no boxes or ground (a test checks it),
-  the field is taken to be that mouth's alone, which looks the same about every axis through its centre, so a ray's
-  path there depends only on its angle. A table, traced once on the GPU with fine steps, gives for 4096 entry angles
-  where a ray leaves the sphere again, through the throat or not, and how far it went; a ray that reaches the
-  sphere jumps there in one step. Steps that would end deep inside the sphere are redone shorter, so rays enter it
-  near its edge. When the eye itself is inside a sphere, a second table for the eye's distance is traced each frame
-  (about 2 ms).
-- **Alternatives:** stepping through (the near view 65 ms instead of 32 at 2560×1600, tracing every pixel); giving
-  the other mouths' bending as two half kicks around the jump, which made the near view worse (40% of pixels
-  changed instead of 27%).
-- **Rationale:** it makes looking into and walking through a mouth about twice as fast. It is an approximation: the
-  other entrances, 3 to 5 blocks away, still bend the rays a little near the throat, so the image seen through a
-  throat comes out a few per cent larger or smaller. Against the fine-step reference, 27% of the near view's pixels
-  and 17% of the throat view's change by more than 30 of 765, against 17% and 10% for midpoint steps without the
-  jump; ignoring the other mouths in the same sphere without the jump gives the same 26% and 21%. Elsewhere the
-  images are as close to the reference as before.
-- **Revisit if:** the size of what you see through a throat matters, or mouths are placed closer together.
+  the mouth's own field looks the same about every axis through its centre, so a ray's path there depends only on
+  its angle.
+  - A throat table, traced once on the GPU with fine steps, gives for 4096 entry angles where a ray leaves the
+    sphere again, through the throat or not, and how far it went.
+  - A camera table gives the same for 64 eye distances inside the sphere by 2048 angles, for the eye inside a
+    sphere.
+  - Each entry also stores how its exit would move per unit of a uniform extra field, along the ray's plane and
+    across it, on each side of the throat, from six extra rays with a small field. At runtime the other mouths'
+    gradient at each mouth's centre gives that field, so their bending inside the sphere is included to first order.
+  - A ray that reaches the sphere jumps to its exit in one step. Steps that would end deep inside are redone
+    shorter, so rays enter near the sphere's edge.
+  - Both tables take 0.4 s in all at start-up.
+- **Alternatives:**
+  - stepping through (the near view 65 ms instead of 30 at 2560×1600, tracing every pixel);
+  - leaving the other mouths out: 27% of the near view's pixels and 17% of the throat view's changed against the
+    reference instead of 17% and 10%. Leaving them out even within 1.5 throat radii lost accuracy, as the throat
+    magnifies small deflections;
+  - two half kicks around the jump (40% changed);
+  - a camera table traced each frame (2 to 6 ms a frame).
+- **Rationale:** it makes looking into and walking through a mouth about twice as fast, and the images are as close
+  to the reference as full stepping's: at the throat 8.5% of pixels changed (SSIM 0.873) against 10.1% (0.865),
+  2.5 blocks away 18.4% (0.702) against 17.0% (0.699).
+- **Revisit if:** mouths are placed so close that their fields vary a lot across a jump sphere.
 
 ## Baselines
 
@@ -223,12 +242,15 @@
 
 ## Procedure
 
-### D20. Check the window with a timed run
+### D20. Check the window with a timed run and with the route
 
 - **Choice:** `--exit-after-s <seconds>` opens the real window, plays without input for that long, closes it and
-  prints the frame rate, GPU time and render scale; `--width-px` and `--height-px` set the window's starting size.
-- **Alternatives:** only the windowless benchmarks, which leave out presenting and MetalFX in the window.
-- **Rationale:** it measures what you see when you play, and needs no screen recording.
+  prints the frame rate, GPU time and render scale. `--play-route` plays the scripted route in the window, one
+  1/60 s step per frame, and prints the frame times (median, 99th percentile, worst, how many took over 1/60 s,
+  after 5 warm-up frames) and the render scale used. `--width-px` and `--height-px` set the window's starting size.
+- **Alternatives:** only the windowless benchmarks, which leave out presenting, MetalFX in the window, and the
+  automatic scale.
+- **Rationale:** it measures what you see when you play, in motion, and needs no screen recording.
 
 ### D9. What a frame's time includes
 
