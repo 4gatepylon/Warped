@@ -2,7 +2,8 @@
 #
 # Interface:
 #     management_server package: src/management_server/.
-#     dev dependency group: pytest and ruff.
+#     management-server command: runs the management server (src/management_server/serve.py).
+#     dev dependency group: httpx2 (for FastAPI's test client), pytest and ruff.
 #
 # Example:
 #     uv run pytest
@@ -11,10 +12,22 @@ name = "management-server"
 version = "0.1.0"
 description = "Starts and stops Warped game servers and tracks who may join them"
 requires-python = ">=3.13"
-dependencies = ["pydantic>=2.9"]
+dependencies = [
+    "click>=8.1",
+    "fastapi>=0.115",
+    "pydantic>=2.9",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+management-server = "management_server.serve:main"
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff>=0.7"]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
 
 [build-system]
 requires = ["uv_build>=0.8"]

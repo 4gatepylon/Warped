@@ -7,6 +7,7 @@ Example:
     >>> game_server_launcher.launch(game_server_id, models.GameServerConfig(), 4)
 """
 
+import builtins
 import typing
 import uuid
 
@@ -60,7 +61,7 @@ class Launcher(typing.Protocol):
             >>> game_server_launcher.stop(game_server_id)
         """
 
-    def list(self) -> list[models.LaunchedGameServer]:
+    def list(self) -> builtins.list[models.LaunchedGameServer]:
         """`list` returns every game server that this launcher started and hasn't stopped.
 
         Example:
