@@ -1,6 +1,7 @@
 //! `render_voxel.rs` draws voxel maps on the GPU with `render_voxel.metal`: it packs a
-//! `VoxelWorld` (with any avatars) and the laser beams into buffers each frame and dispatches one
-//! thread per pixel into the render texture that `render_metal.rs` upscales and presents.
+//! `VoxelWorld` (with any avatars) and the laser beams into buffers each frame and traces them
+//! into the render texture that `render_metal.rs` upscales and presents, every pixel or with the
+//! house's adaptive sampling (`render_metal.rs`'s `encode_adaptive_sampling`).
 //!
 //! Interface: `VoxelUniforms`, `VoxelFrame::Build`, `VoxelGpu`.
 //!
@@ -14,11 +15,14 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
-    MTLBuffer, MTLComputeCommandEncoder, MTLComputePipelineState, MTLDevice, MTLLibrary,
-    MTLResourceOptions, MTLSize,
+    MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
 };
 
 use crate::geometry::get_distance;
+use crate::render_metal::{
+    AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
+    encode_adaptive_sampling, make_pipeline,
+};
 use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld};
 
 /// `Result` is this module's result type.
@@ -26,6 +30,8 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const SHADER_SOURCE: &str = include_str!("render_voxel.metal");
 const KERNEL_NAME: &str = "trace_voxel_pixels";
+const UNIFORMS_BUFFER_INDEX: usize = 16;
+const SCENE_BUFFER_COUNT: usize = 7;
 const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
@@ -345,9 +351,10 @@ fn as_bytes<T: Copy>(values: &[T]) -> &[u8] {
     }
 }
 
-/// `VoxelGpu` is the voxel renderer's pipeline and buffers.
+/// `VoxelGpu` is the voxel renderer's pipelines (every pixel, and adaptive sampling's) and buffers.
 pub struct VoxelGpu {
-    pipeline: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    trace_pixels: Pipeline,
+    adaptive: AdaptivePipelines,
     buffers: Vec<GrowableBuffer>,
 }
 
@@ -357,43 +364,41 @@ impl VoxelGpu {
     /// Example: `let gpu = VoxelGpu::New(&device)?;`
     #[allow(non_snake_case)]
     pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<VoxelGpu> {
+        let source: String = SHADER_SOURCE
+            .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
+            .replace(
+                "__BYTES_PER_RAY_END__",
+                &VOXEL_BYTES_PER_RAY_END.to_string(),
+            );
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
-            .newLibraryWithSource_options_error(&NSString::from_str(SHADER_SOURCE), None)
+            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|error| {
                 format!(
                     "Metal: the voxel shader didn't compile: {}",
                     error.localizedDescription()
                 )
             })?;
-        let function = library
-            .newFunctionWithName(&NSString::from_str(KERNEL_NAME))
-            .ok_or(format!(
-                "Metal: the voxel shader has no kernel named {KERNEL_NAME}"
-            ))?;
-        let pipeline = device
-            .newComputePipelineStateWithFunction_error(&function)
-            .map_err(|error| {
-                format!(
-                    "Metal: the voxel pipeline failed: {}",
-                    error.localizedDescription()
-                )
-            })?;
         Ok(VoxelGpu {
-            pipeline,
-            buffers: (0..7).map(|_| GrowableBuffer { buffer: None }).collect(),
+            trace_pixels: make_pipeline(device, &library, KERNEL_NAME)?,
+            adaptive: AdaptivePipelines::FromLibrary(device, &library)?,
+            buffers: (0..SCENE_BUFFER_COUNT)
+                .map(|_| GrowableBuffer { buffer: None })
+                .collect(),
         })
     }
 
-    /// `encode` uploads a frame and dispatches the voxel kernel into the encoder's texture 0.
+    /// `encode` uploads a frame and traces it into the encoder's texture 0: with `samples`, by
+    /// adaptive sampling into those buffers, otherwise one ray per pixel.
     ///
-    /// Example: `gpu.encode(&device, &encoder, &frame)?;`
-    pub fn encode(
+    /// Example: `gpu.encode(&device, &encoder, &frame, None)?;`
+    pub(crate) fn encode(
         &mut self,
         device: &ProtocolObject<dyn MTLDevice>,
         encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
         frame: &VoxelFrame,
+        samples: Option<&SampleBuffers>,
     ) -> Result<()> {
-        let contents: [&[u8]; 7] = [
+        let contents: [&[u8]; SCENE_BUFFER_COUNT] = [
             as_bytes(&frame.structures),
             &frame.voxels,
             as_bytes(&frame.warps),
@@ -402,22 +407,34 @@ impl VoxelGpu {
             as_bytes(&frame.palette),
             as_bytes(&frame.beams),
         ];
-        encoder.setComputePipelineState(&self.pipeline);
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
         unsafe {
             encoder.setBytes_length_atIndex(
                 uniforms.cast(),
                 std::mem::size_of::<VoxelUniforms>(),
-                0,
+                UNIFORMS_BUFFER_INDEX,
             )
         };
         for (k, bytes) in contents.iter().enumerate() {
             let buffer: &ProtocolObject<dyn MTLBuffer> = self.buffers[k].write(device, bytes)?;
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
-            unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, k + 1) };
+            unsafe {
+                encoder.setBuffer_offset_atIndex(Some(buffer), 0, UNIFORMS_BUFFER_INDEX + k + 1)
+            };
         }
         let (width, height) = frame.get_render_size();
+        if let Some(buffers) = samples {
+            encode_adaptive_sampling(
+                encoder,
+                &self.adaptive,
+                buffers,
+                VOXEL_BYTES_PER_RAY_END,
+                (width, height),
+            );
+            return Ok(());
+        }
+        encoder.setComputePipelineState(&self.trace_pixels);
         encoder.dispatchThreads_threadsPerThreadgroup(
             MTLSize {
                 width,

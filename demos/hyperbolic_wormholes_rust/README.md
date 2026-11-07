@@ -42,7 +42,8 @@ cargo run --release -- --map lunar-surface --view black_hole
   `house-demo` (the default: the house, rails and three wormholes, R = 8) or `lunar-surface` (the Lunar Surface level of
   [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m, with its black hole and wormhole).
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
-  steps, lighting with sun shadows, lamps, ground, stars and planet, so it looks like the level. Walking, jumping,
+  steps, lighting with sun shadows, lamps, ground, stars and planet, so it looks like the level, with the house's
+  adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
   flying, the laser and multiplayer follow the level's rules there (6 m/s² gravity, stepping up single blocks, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
@@ -222,20 +223,22 @@ mouth's lens, which magnifies small errors, within 1 to 1.5 pixels. Adaptive sam
 under 0.01 pixel (median; SSIM 0.98 to 0.998 against tracing every pixel). Frames the window upscales with MetalFX
 keep features in place (0.2 to 0.4 pixel) but lose fine detail (SSIM 0.85 to 0.96 at 0.8 scale).
 
-Lunar Surface (`--map lunar-surface --bench-views`), GPU milliseconds per frame at 2560×1600 and full resolution:
+Lunar Surface (`--map lunar-surface --bench-views`), GPU milliseconds per frame at 2560×1600 and full resolution,
+with adaptive sampling (and tracing every pixel):
 
 | View | GPU ms | View | GPU ms |
 | --- | ---: | --- | ---: |
-| blue spawn | 8.7 | red spawn | 7.5 |
-| overview (from 46 m up) | 21.9 | middle | 23.4 |
-| black hole | 41.7 | Einstein ring | 44.1 |
-| wormhole | 33.3 | wormhole exit | 57.4 |
-| red pylon | 6.2 | ridge | 9.0 |
-| overlook | 5.3 | habitat row | 7.3 |
-| laser into the wormhole | 44.1 | | |
+| blue spawn | 8.4 (5.8) | red spawn | 7.5 (6.9) |
+| overview (from 46 m up) | 12.9 (21.9) | middle | 11.9 (23.5) |
+| black hole | 16.6 (41.9) | Einstein ring | 15.6 (44.3) |
+| wormhole | 17.5 (33.4) | wormhole exit | 29.2 (57.6) |
+| red pylon | 5.8 (6.0) | ridge | 8.4 (9.0) |
+| overlook | 6.5 (5.3) | habitat row | 7.5 (7.3) |
+| laser into the wormhole | 26.6 (44.0) | | |
 
-In a full-screen window (2560×1336, automatic scale, `--view`), the blue spawn runs at 192 fps at full resolution, and
-the black hole, wormhole exit and Einstein ring views at 74, 76 and 71 fps at render scales 0.62, 0.53 and 0.61.
+In a full-screen window (2560×1336, automatic scale, `--view`), every view runs at 72 fps or more: the blue spawn at
+167 fps, the overview, middle and Einstein ring at full resolution, the black hole, wormhole and laser views at render
+scales 0.95 to 0.98, and the wormhole exit at 0.69, where most rays wind near the throat.
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s
