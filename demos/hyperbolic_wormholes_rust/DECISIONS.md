@@ -9,7 +9,8 @@
   measuring speed, not a general engine; benchmarking and scripted playtesting done by Claude before a manual test.
   Then a third layer that makes Rust + MSL as fast as it can, free to use other native app code, staying on this
   Mac, reaching at least 60 fps locally at full-screen size while looking realistic and high-fidelity, with
-  heuristics allowed for speed.
+  heuristics allowed for speed. Then lighter layers: light paths close to converged ones, and play on one local
+  network with lasers that remove whoever they hit (who rejoins), tested by playing against bots.
 - **Outcomes:** milliseconds per frame for fixed views at fixed resolutions, per renderer, compared with the WebGL
   demo; and whether a scripted route through every wormhole works, and at what frame rate. The CPU is expected to be
   much slower than the GPU; the question is by how much, and how much Metal gains over WebGL.
@@ -230,6 +231,148 @@
   2.5 blocks away 18.4% (0.702) against 17.0% (0.699).
 - **Revisit if:** mouths are placed so close that their fields vary a lot across a jump sphere.
 
+### D24. Measure accuracy where the reference has converged
+
+- **Choice:** the reference is now the PR 70 tracer with steps 32 times smaller, and a view's shift is the median
+  over the 48×48 patches where it agrees with the 16-times reference within 0.5 pixel (61% of the throat view's
+  textured patches, 90 to 99.8% elsewhere). The two agree to 0.01 to 0.12 pixel.
+- **Alternatives:** the eight-times reference against the four-times one, as in D16, whose 1 pixel at the throat
+  turned out to be the four-times reference's own error.
+- **Rationale:** a shift is only meaningful where the truth is known to better than it.
+
+### D25. Test hits closer to the curved path
+
+- **Choice:** when a step's chord hits something farther off the curved path than 1e-4 radians seen from the eye
+  (`get_chord_limit_m`), the ray steps again from the step's start, lands just before the hit and crosses it in
+  short steps (OPTIMIZATIONS.md 7.2). RK4 steps are also capped at 2 blocks (7.3).
+- **Alternatives:** capping every step by the same bound (spawn 0.07 pixel but twice the time); capping steps at 0.3
+  of the distance travelled; testing the step's Hermite curve in up to 16 chords (slower); ending steps on the
+  cutoff spheres; a cap of 3 blocks, or a bound of 2e-4.
+- **Rationale:** most of the 1.4 pixels left in ordinary views came from these chords and long outer steps; together
+  they now sit 0.05 to 0.14 pixel from the converged paths.
+
+### D26. Whole RK4 steps near a mouth, and the jump's tidal correction
+
+- **Choice:** every RK4 stage sums every mouth, with steps of 0.35 of the distance from 3 throat radii out to the
+  cutoff (one rule instead of D22's two). The jump tables also store the response to a linear extra field, and each
+  frame a kernel stores the other mouths' gradient and its change at each mouth, so a jump adds their tidal part to
+  first order; the throat table uses the near side's part only (OPTIMIZATIONS.md 7.5). The step entering a jump
+  sphere is cut by three rounds of regula falsi.
+- **Alternatives:** D22 and D23 as they were; one round at the entry (near view 2.02 pixels instead of 1.50); the far
+  side's tidal part with the throat table too (near view 1.98 instead of 1.44); the entry taken from the step's
+  Hermite curve; larger or finer tables.
+- **Rationale:** the jump's uniform-field assumption was most of the error left near a mouth. The near view goes from
+  2.64 to 1.50 pixels and the throat view from 1.99 to 1.02. Why the far side's part hurts with the throat table is
+  not understood; it was chosen by measurement.
+
+### D27. Paint trapped rays from their surroundings
+
+- **Choice:** rays that stay trapped circling a throat (a wide band looking sideways just outside one) are painted
+  with a pull–push fill of the pixels around them instead of black. `side_at_throat_1A`, an eighth benchmark view,
+  shows it.
+- **Alternatives:** black, as the CPU renderer still draws them; a longer step budget (20,000 steps and ten times
+  the path length still leave them trapped).
+- **Rationale:** you asked for something simple that doesn't look all black; the lensing law traps them, so no
+  colour is physically right.
+
+### D28. Accept slower frames near mouths for the accuracy
+
+- **Choice:** D25 and D26 cost GPU time (spawn 9.7 to 13.6 ms at 2560×1600, 2.5 blocks from 1A 21.6 to 33.3), so in
+  a full-screen window more frames near a mouth are upscaled: full resolution in 77% of the legs' frames instead of
+  93%, and 44% of the mouth tour's instead of 69%, with about as many frames over 1/60 s (5 and 30 against 4 and 15,
+  under load).
+- **Alternatives:** keeping PR 72's paths, 5 to 20 times further from the converged ones in ordinary views.
+- **Rationale:** I decided it under the goal's "high fidelity"; say if you'd rather have full resolution near
+  mouths.
+- **Revisit if:** the upscaled frames near mouths look worse to you than the old paths did.
+
+### D29. Play together over UDP, each player trusted with its own moves and hits
+
+- **Choice:** a server keeps each player's eye frame (16 doubles) and laser switch and sends everyone a snapshot 60
+  times a second; each client moves its own player and decides when its own laser hits someone (it traces the beam
+  every frame anyway), and the server removes the victim and tells everyone. Plain UDP from the standard library,
+  joins resent until welcomed, players dropped after 3 s of silence. The host runs the server on a thread in its
+  game (`--host`); `--serve` runs it alone. The server announces itself by broadcast every 0.5 s so `--join auto`
+  finds it.
+- **Alternatives:** a server that simulates everyone from their inputs (fairer, but laggier and much more code);
+  TCP; a networking crate.
+- **Rationale:** you asked for a demo on one local network, where latency is low and players trust each other.
+- **Revisit if:** it is played over the internet or with strangers.
+
+### D30. Players are boxes in the ray-traced world
+
+- **Choice:** each other player is a coloured box (0.6 × 1.9 × 0.6 blocks, upright, around their eye) added to a
+  copy of the world every frame, so it is lensed through wormholes, casts nothing, and stops lasers like any box;
+  each player with a laser on has their beam traced through the same world and drawn. Up to 8 players, which the
+  shader's 32 clusters and 96 boxes leave room for.
+- **Alternatives:** drawing players on top of the ray-traced image, which can't show them through a wormhole.
+- **Rationale:** the same reason the laser is a light ray (D6). It costs no measurable frame time with three
+  players (a hosted window at 1280×800: 88 fps alone, 91 with two bots, 84 single-player, all under the same load).
+- **Revisit if:** a player standing inside a mouth's jump sphere should be visible (rays jump across it, D23).
+
+### D31. Lasers aim at the crosshair 10 blocks out
+
+- **Choice:** the beam leaves the hand toward the point 10 blocks straight ahead of the eye, not parallel to the line
+  of sight.
+- **Alternatives:** parallel to the line of sight, as before: in hyperbolic space a line 0.25 blocks to the side
+  drifts away (0.32 blocks off after 5.7 blocks), so a laser aimed straight at a player missed them.
+- **Rationale:** a laser should hit what the crosshair is on. The laser through 1A still goes through it.
+
+### D32. Test games with bots
+
+- **Choice:** `--bot` plays without a window: it walks and turns until another player is within 12 blocks, turns
+  toward them with its laser on, rejoins 2 s after being hit, and saves its view at each hit.
+- **Alternatives:** only playing by hand.
+- **Rationale:** you suggested playing against myself. Three bots for 30 s: 25 hits, and each bot's count of hits
+  and times hit matched the server's log.
+
+### D33. Load the house from its map, and add Lunar Surface
+
+- **Choice:** `--map house-demo` (the default) builds the world from `common/maps/house_demo` (boxes grouped by
+  name, mouths, spawn), and draws pixel for pixel as the world built in code did (checked on all eight views, and by a
+  test that the loaded world's boxes, clusters, mouths and spawn equal the built one's). `--map lunar-surface` loads
+  the Lunar Surface level's map and draws it with a Metal port of that level's WebGL shader.
+- **Alternatives:** porting Lunar Surface's look onto the house renderer (boxes, the house's jump tables), which
+  would not match the level; a renderer that draws both kinds of map.
+- **Rationale:** you asked for maps chosen by name, with lunar_surface matching the level; porting the level's own
+  shader is the surest match. Side by side with the WebGL level in the built-in browser, the blue spawn, black hole,
+  wormhole and overview views show the same scene, and the laser fired into the wormhole hits the red pylon 42.4 m
+  away, as the level's README says (42 m).
+
+### D34. Lunar Surface keeps the level's light paths
+
+- **Choice:** the same kick–drift–kick steps of 8% of the distance to a warp as the level, with each step's end
+  bending reused for the next step's start (10% faster, the same picture), and each step testing only the structures
+  in the warp's reach whose distance from its centre the step can reach (another 5 to 15% near warps, every pixel the
+  same).
+- **Alternatives:** steps of 12% or 16% (30% and 45% less GPU time near warps, but features up to 0.5 pixel further
+  from converged paths: against the level's steps eight times smaller, the level's own steps are 0.3 to 2.1 pixels
+  off near warps at 2560×1600, 12% steps 0.8 to 2.2, 16% steps 0.9 to 2.3); steps up to three times longer where the
+  bending is weak (no faster, as the time goes to rays winding close to the black hole and the throats, where steps
+  must stay short; up to 0.9 pixel further off); the house's RK4 steps and jump tables
+  (much more code, with chord errors to handle near the structures inside the warps' reach).
+- **Rationale:** the map should look like the level; the window's automatic scale keeps 60 fps (D36).
+- **Revisit if:** the upscaled frames near the black hole and wormhole look too soft.
+
+### D35. Lunar Surface plays by the level's rules
+
+- **Choice:** the level's player (a body frame on the ground, an eye height, probes for collisions, stepping up single
+  blocks, 6 m/s² gravity, flying), its laser trace (from the eye, drawn from the gun) and its falling into the black
+  hole, ported to Rust. The laser stays this demo's toggle (`L`) rather than the level's single shots, so the
+  multiplayer rule (a laser that reaches a player removes them) is the same on both maps. Other players are 0.5 ×
+  2 × 0.5 m voxel bodies in their colour; players alternate between the blue and red spawns.
+- **Alternatives:** the house demo's movement on the lunar map; the level's single shots that fade.
+- **Rationale:** the map should play like the level, and both maps should share one multiplayer rule.
+
+### D36. Speed on Lunar Surface
+
+- **Choice:** the same automatic render scale as the house (D19). At 2560×1600 and full resolution the views away
+  from warps take 5 to 9 ms of GPU time, those across the crater 22 to 24 ms and those near the black hole and wormhole
+  33 to 57 ms; in a full-screen window (2560×1336) the spawn runs at 192 fps at full resolution, and the black hole,
+  wormhole exit and Einstein ring views at 74, 76 and 71 fps at render scales 0.62, 0.53 and 0.61.
+- **Alternatives:** larger steps (D34); adaptive sampling or jump tables as in the house, left for later.
+- **Rationale:** it keeps 60 fps with the level's picture; the views near warps are where it costs resolution.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
@@ -242,11 +385,12 @@
 
 ## Workload
 
-### D7. Seven fixed views
+### D7. Eight fixed views
 
 - **Choice:** spawn, aimed at mouth 1A, 2.5 blocks from 1A's centre, 0.8 blocks from 1A's throat, above the rails,
-  high above spawn, and the laser through 1A; the same kinds of views as the WebGL timings in PR 58, plus the
-  2.5-block view, added in the third layer because walking into a mouth was the slowest part of the route.
+  high above spawn, the laser through 1A, and looking sideways 0.4 blocks from 1A's centre; the same kinds of views
+  as the WebGL timings in PR 58, plus the 2.5-block view, added in the third layer because walking into a mouth was
+  the slowest part of the route, and the sideways view, added in the fourth because it showed the trapped band.
 - **Alternatives:** a recorded flight.
 - **Rationale:** they cover cheap (above the rails), typical (spawn) and worst (at a throat) cases.
 

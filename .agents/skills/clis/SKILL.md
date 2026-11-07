@@ -137,6 +137,10 @@ The same concept has the same name in every CLI:
 | Print long output in full | `--allow-long-output` | `--all`, `--full`, `--verbose` |
 | Write output to a file | `--output-file <path>` | `-o`, `--out` |
 | Subcommand verbs | `get`, `list`, `create`, `update`, `delete` | `info`, `ls`, `new`, `rm` |
+| Host a game and play in it | `--host` | `--server`, `--listen` |
+| Join a game | `--join <address>` (`auto` to find one) | `--connect`, `--client` |
+| Run only a game server | `--serve` | `--dedicated`, `--headless` |
+| A network port | `--port <port>` | `-p`, `--listen-port` |
 
 - Flags are kebab-case long options. The only short options are `-h` and the math letters of
   the root `AGENTS.md`, such as `-N`.

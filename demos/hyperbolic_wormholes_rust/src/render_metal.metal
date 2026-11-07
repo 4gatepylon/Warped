@@ -40,6 +40,8 @@ constant int TEXEL_SPOT = __TEXEL_SPOT__;
 constant int TEXEL_BEAM_CHUNKS = __TEXEL_BEAM_CHUNKS__;
 constant int TEXELS_PER_BEAM_CHUNK = __TEXELS_PER_BEAM_CHUNK__;
 constant int TEXEL_BEAM_POINTS = __TEXEL_BEAM_POINTS__;
+constant int TEXEL_MOUTH_FIELDS = __TEXEL_MOUTH_FIELDS__;
+constant int TEXELS_PER_MOUTH_FIELD = __TEXELS_PER_MOUTH_FIELD__;
 constant int MATERIAL_GLASS = __MATERIAL_GLASS__;
 constant int MATERIAL_GLOW = __MATERIAL_GLOW__;
 constant float LAMBDA_SQUARED = 0.25;
@@ -50,12 +52,20 @@ constant float NEAR_STEP_PER_NEAREST = 0.12;
 constant float FAR_STEP_PER_NEAREST = 0.25;
 constant float NEAR_ZONE_PER_THROAT = 10.0;
 constant float MIN_STEP_M = 0.005;
-constant float RK4_STEP_PER_NEAREST = 0.5;
-constant float OUTER_RK4_STEP_PER_NEAREST = 0.35;
+constant float RK4_STEP_PER_NEAREST = 0.35;
+constant float MAX_RK4_STEP_M = 2.0;
 constant float RK4_ZONE_START_PER_THROAT = 3.0;
-constant float JUMP_OVERSHOOT_M = 0.002;
+constant float JUMP_OVERSHOOT_M = 0.0005;
+constant int JUMP_ENTRY_ITERATION_COUNT = 3;
+constant float CHORD_ANGLE_TOLERANCE_RAD = 1e-4;
+constant int MAX_HIT_REFINE_COUNT = 3;
+constant float FINE_LEAD_PER_STEP = 0.75;
+constant float FINE_TRAIL_PER_STEP = 2.0;
 constant int THROAT_TABLE_SIZE = __THROAT_TABLE_SIZE__;
-constant int TEXELS_PER_TABLE_ENTRY = 4;
+constant int TEXELS_PER_TABLE_ENTRY = __TEXELS_PER_TABLE_ENTRY__;
+constant int TEXELS_PER_TIDAL_RESPONSE = 6;
+constant float TIDAL_FIELD_PROBE = 0.02;
+constant float TIDAL_STEP_PER_R = 0.01;
 constant float TABLE_FIELD_PROBE = 0.004;
 constant float THROAT_TABLE_STEP_PER_NEAREST = 0.01;
 constant float CAMERA_TABLE_STEP_PER_NEAREST = 0.015;
@@ -320,39 +330,36 @@ static float4 get_mouth_gradient(thread const Scene &scene, float4 x, float4 c) 
 }
 
 /**
- * @brief `get_bend_split` is `get_bend`, and also gives the nearest mouth's index and the other mouths' part of
- * the gradient (unprojected), for `step_rk4`.
+ * @brief `get_bend_nearest` is `get_bend`, and also gives the nearest mouth's index.
  * @par Example
  * @code
- * float4 bend = get_bend_split(scene, row, x, v, q_nearest, nearest, g_others);
+ * float4 bend = get_bend_nearest(scene, row, x, v, q_nearest, nearest);
  * @endcode
  */
-static float4 get_bend_split(thread const Scene &scene, int row, float4 x, float4 v, thread float &q_nearest, thread int &nearest,
-                             thread float4 &g_others) {
-    float4 g = float4(0.0), g_nearest = float4(0.0);
+static float4 get_bend_nearest(thread const Scene &scene, int row, float4 x, float4 v, thread float &q_nearest, thread int &nearest) {
+    float4 g = float4(0.0);
     q_nearest = 3.4e38;
     nearest = 0;
     for (int k = 0; k < scene.u.mouth_count; k++) {
         float4 c = fetch(scene, row, TEXEL_MOUTHS + k);
-        float4 gk = get_mouth_gradient(scene, x, c);
         float q = get_q(x, c);
-        if (q < q_nearest) { q_nearest = q; nearest = k; g_nearest = gk; }
-        g += gk;
+        if (q < q_nearest) { q_nearest = q; nearest = k; }
+        g += get_mouth_gradient(scene, x, c);
     }
-    g_others = g - g_nearest;
     return g - mdot(g, v) * v;
 }
 
 /**
- * @brief `step_rk4_full` moves a ray `ds_m` blocks with the classical fourth-order Runge-Kutta method, as
- * `step_rk4` does, but sums every mouth's bending at every stage, for steps long enough that the other mouths'
- * gradient changes along them.
+ * @brief `step_rk4` moves a ray `ds_m` blocks with the classical fourth-order Runge-Kutta method, for
+ * x' = v / R and v' = x / R + bend(x, v) (a geodesic of H³ plus the bending), starting from the bending
+ * `bend` already known at `x`, summing every mouth's bending at every stage, and puts the result back on the
+ * hyperboloid.
  * @par Example
  * @code
- * step_rk4_full(scene, row, x, v, bend, ds_m);
+ * step_rk4(scene, row, x, v, bend, ds_m);
  * @endcode
  */
-static void step_rk4_full(thread const Scene &scene, int row, thread float4 &x, thread float4 &v, float4 bend, float ds_m) {
+static void step_rk4(thread const Scene &scene, int row, thread float4 &x, thread float4 &v, float4 bend, float ds_m) {
     float r = scene.u.curvature_radius_m, unused_q;
     float4 kx1 = v / r, kv1 = x / r + bend;
     float4 x2 = x + 0.5 * ds_m * kx1, v2 = v + 0.5 * ds_m * kv1;
@@ -366,30 +373,32 @@ static void step_rk4_full(thread const Scene &scene, int row, thread float4 &x, 
 }
 
 /**
- * @brief `step_rk4` moves a ray `ds_m` blocks with the classical fourth-order Runge-Kutta method, for
- * x' = v / R and v' = x / R + bend(x, v) (a geodesic of H³ plus the bending), starting from the bending
- * `bend` already known at `x`, and puts the result back on the hyperboloid. The later stages re-evaluate only
- * the nearest mouth (centre `c`), keeping the other mouths' gradient `g_others` from the start, as they are at
- * least a few blocks away.
+ * @brief `get_chord_limit_m` gives the longest step whose chord, tested for hits in place of the curved path,
+ * puts a hit `travelled_m` blocks from the eye at most `CHORD_ANGLE_TOLERANCE_RAD` off as seen from the eye: a
+ * path bending by |bend| per block strays from a chord h long by up to |bend| h² / 8, and the bound
+ * |bend| h² / (2 (4L + h)) ≤ ε covers both a hit far away (L ≫ h) and one in the first step (L = 0).
  * @par Example
  * @code
- * step_rk4(scene, row, x, v, bend, g_others, c, ds_m);
+ * float limit_m = get_chord_limit_m(bend, travelled_m + hit_m);
  * @endcode
  */
-static void step_rk4(thread const Scene &scene, int row, thread float4 &x, thread float4 &v, float4 bend, float4 g_others, float4 c, float ds_m) {
-    float r = scene.u.curvature_radius_m;
-    float4 kx1 = v / r, kv1 = x / r + bend;
-    float4 x2 = x + 0.5 * ds_m * kx1, v2 = v + 0.5 * ds_m * kv1;
-    float4 g2 = g_others + get_mouth_gradient(scene, x2, c);
-    float4 kx2 = v2 / r, kv2 = x2 / r + g2 - mdot(g2, v2) * v2;
-    float4 x3 = x + 0.5 * ds_m * kx2, v3 = v + 0.5 * ds_m * kv2;
-    float4 g3 = g_others + get_mouth_gradient(scene, x3, c);
-    float4 kx3 = v3 / r, kv3 = x3 / r + g3 - mdot(g3, v3) * v3;
-    float4 x4 = x + ds_m * kx3, v4 = v + ds_m * kv3;
-    float4 g4 = g_others + get_mouth_gradient(scene, x4, c);
-    float4 kx4 = v4 / r, kv4 = x4 / r + g4 - mdot(g4, v4) * v4;
-    x = to_point(x + ds_m / 6.0 * (kx1 + 2.0 * kx2 + 2.0 * kx3 + kx4));
-    v = to_tangent(x, v + ds_m / 6.0 * (kv1 + 2.0 * kv2 + 2.0 * kv3 + kv4));
+static float get_chord_limit_m(float4 bend, float travelled_m) {
+    float curvature = sqrt(max(mdot(bend, bend), 0.0)), e = CHORD_ANGLE_TOLERANCE_RAD;
+    return curvature > 0.0 ? (e + sqrt(e * e + 8.0 * e * curvature * travelled_m)) / curvature : 3.4e38;
+}
+
+/**
+ * @brief `get_capped_step_m` shortens a step around a hit being refined: up to `fine_start_m` along the ray it
+ * lands exactly there, and from there to `fine_end_m` it is at most `fine_step_m`.
+ * @par Example
+ * @code
+ * ds_m = get_capped_step_m(ds_m, travelled_m, fine_start_m, fine_end_m, fine_step_m);
+ * @endcode
+ */
+static float get_capped_step_m(float ds_m, float travelled_m, float fine_start_m, float fine_end_m, float fine_step_m) {
+    if (travelled_m < fine_start_m - MIN_STEP_M) return min(ds_m, fine_start_m - travelled_m);
+    if (travelled_m < fine_end_m) return max(min(ds_m, fine_step_m), MIN_STEP_M);
+    return ds_m;
 }
 
 /**
@@ -878,6 +887,7 @@ struct TableEntry {
     float4 response_in;
     float4 response_out;
     float4 tilt_response;
+    float4 tidal[TEXELS_PER_TIDAL_RESPONSE];
 };
 
 /**
@@ -890,11 +900,10 @@ struct TableEntry {
  */
 static TableEntry read_table_entry(device const float4 *row, int i, float f) {
     device const float4 *low = row + i * TEXELS_PER_TABLE_ENTRY, *high = low + TEXELS_PER_TABLE_ENTRY;
-    if (low[0].w != high[0].w) {
-        device const float4 *nearest = f < 0.5 ? low : high;
-        return {nearest[0], nearest[1], nearest[2], nearest[3]};
-    }
-    return {mix(low[0], high[0], f), mix(low[1], high[1], f), mix(low[2], high[2], f), mix(low[3], high[3], f)};
+    float g = low[0].w != high[0].w ? step(0.5, f) : f;
+    TableEntry entry = {mix(low[0], high[0], g), mix(low[1], high[1], g), mix(low[2], high[2], g), mix(low[3], high[3], g)};
+    for (int k = 0; k < TEXELS_PER_TIDAL_RESPONSE; k++) entry.tidal[k] = mix(low[4 + k], high[4 + k], g);
+    return entry;
 }
 
 /**
@@ -906,9 +915,11 @@ static TableEntry read_table_entry(device const float4 *row, int i, float f) {
  * @endcode
  */
 static TableEntry blend_table_entries(TableEntry first, TableEntry second, float g) {
-    if (first.base.w != second.base.w) return g < 0.5 ? first : second;
-    return {mix(first.base, second.base, g), mix(first.response_in, second.response_in, g), mix(first.response_out, second.response_out, g),
-            mix(first.tilt_response, second.tilt_response, g)};
+    if (first.base.w != second.base.w) g = step(0.5, g);
+    TableEntry entry = {mix(first.base, second.base, g), mix(first.response_in, second.response_in, g),
+                        mix(first.response_out, second.response_out, g), mix(first.tilt_response, second.tilt_response, g)};
+    for (int k = 0; k < TEXELS_PER_TIDAL_RESPONSE; k++) entry.tidal[k] = mix(first.tidal[k], second.tidal[k], g);
+    return entry;
 }
 
 /**
@@ -984,20 +995,41 @@ static float4 get_others_gradient(thread const Scene &scene, int row, float4 x, 
 }
 
 /**
+ * @brief `get_others_tidal` gives how the other mouths' gradient changes across mouth `mouth`'s centre within a
+ * ray's plane (axes `a` and `b`, normal `n`), from the matrix `build_mouth_fields` stored: `in_plane` is its
+ * in-plane part (aa, bb and the symmetric ab component) and `across` is how its component along `n` changes
+ * along `a` and `b`.
+ * @par Example
+ * @code
+ * get_others_tidal(scene, row, nearest, a, b, n, tidal_in, across_in);
+ * @endcode
+ */
+static void get_others_tidal(thread const Scene &scene, int row, int mouth, float4 a, float4 b, float4 n, thread float3 &in_plane,
+                             thread float2 &across) {
+    int first = TEXEL_MOUTH_FIELDS + TEXELS_PER_MOUTH_FIELD * mouth;
+    float4x4 change = float4x4(fetch(scene, row, first + 1), fetch(scene, row, first + 2), fetch(scene, row, first + 3), fetch(scene, row, first + 4));
+    float4 da = change * a, db = change * b;
+    in_plane = float3(mdot(da, a), mdot(db, b), 0.5 * (mdot(db, a) + mdot(da, b)));
+    across = float2(mdot(da, n), mdot(db, n));
+}
+
+/**
  * @brief `jump_through_mouth` carries a ray inside the nearest mouth's jump sphere straight to where it leaves
  * the sphere (through the throat into the partner mouth's row, or back out), from a jump table: the field
  * inside is the mouth's alone, which is the same about every axis through its centre, so the path depends only
  * on the angle. The other mouths' bending inside is added to first order: their gradient at the centre, on each
- * side of the throat, times the table's response to a uniform field. The laser glow inside is taken along
- * straight chords through the centre.
+ * side of the throat, times the table's response to a uniform field, and that gradient's change across the
+ * centre (`get_others_tidal`) times the response to a linear field. The far side's linear part is used only with
+ * `has_far_tidal` (the camera table), as it moved images further from the converged paths with the throat table.
+ * The laser glow inside is taken along straight chords through the centre.
  * @return Whether the ray jumped (not if its angle is past the table's); `is_lost` is set if the table says
  * the ray never leaves.
  * @par Example
  * @code
- * if (jump_through_mouth(scene, scene.throat_table, THROAT_TABLE_SIZE, 1, 0.0, M_PI_2_F, row, x, v, travelled_m, core, halo, has_beam, is_lost)) { ... }
+ * if (jump_through_mouth(scene, scene.throat_table, THROAT_TABLE_SIZE, 1, 0.0, false, M_PI_2_F, row, x, v, travelled_m, core, halo, has_beam, is_lost)) { ... }
  * @endcode
  */
-static bool jump_through_mouth(thread const Scene &scene, device const float4 *table, int size, int row_count, float row_position,
+static bool jump_through_mouth(thread const Scene &scene, device const float4 *table, int size, int row_count, float row_position, bool has_far_tidal,
                                float angle_range, thread int &row, thread float4 &x, thread float4 &v, thread float &travelled_m,
                                thread float &core, thread float &halo, bool has_beam, thread bool &is_lost) {
     float q_nearest;
@@ -1006,9 +1038,11 @@ static bool jump_through_mouth(thread const Scene &scene, device const float4 *t
     TableEntry entry = look_up_jump_table(table, size, row_count, row_position, angle_range, c, x, v, a, b);
     if (entry.base.w > 1.5) return false;
     if (entry.base.w < 0.0) { is_lost = true; return true; }
-    float4 n = get_plane_normal(c, a, b), g_in = get_others_gradient(scene, row, c, nearest);
+    float4 n = get_plane_normal(c, a, b), g_in = fetch(scene, row, TEXEL_MOUTH_FIELDS + TEXELS_PER_MOUTH_FIELD * nearest);
     float4 c_out = c, a_out = a, b_out = b, n_out = n;
-    float3 field_out = float3(0.0);
+    float3 field_out = float3(0.0), tidal_in, tidal_out = float3(0.0);
+    float2 across_in, across_out = float2(0.0);
+    get_others_tidal(scene, row, nearest, a, b, n, tidal_in, across_in);
     int row_out = row;
     if (entry.base.w > 0.5) {
         float4x4 gluing = fetch_matrix(scene, row, TEXEL_GLUINGS + TEXELS_PER_GLUING * nearest);
@@ -1018,14 +1052,20 @@ static bool jump_through_mouth(thread const Scene &scene, device const float4 *t
         n_out = gluing * n;
         row_out = scene.u.next_rows[nearest];
         float unused_q;
-        float4 g_out = get_others_gradient(scene, row_out, c_out, get_nearest_mouth(scene, row_out, c_out, unused_q));
+        int nearest_out = get_nearest_mouth(scene, row_out, c_out, unused_q);
+        float4 g_out = fetch(scene, row_out, TEXEL_MOUTH_FIELDS + TEXELS_PER_MOUTH_FIELD * nearest_out);
         field_out = float3(mdot(g_out, a_out), mdot(g_out, b_out), mdot(g_out, n_out));
+        if (has_far_tidal) get_others_tidal(scene, row_out, nearest_out, a_out, b_out, n_out, tidal_out, across_out);
     }
     float3 field_in = float3(mdot(g_in, a), mdot(g_in, b), mdot(g_in, n));
-    float angle = entry.base.x + dot(entry.response_in.xy, field_in.xy) + dot(entry.response_out.xy, field_out.xy);
-    float exit_angle = entry.base.z + dot(entry.response_in.zw, field_in.xy) + dot(entry.response_out.zw, field_out.xy);
-    float tilt_position = entry.tilt_response.x * field_in.z + entry.tilt_response.z * field_out.z;
-    float tilt_direction = entry.tilt_response.y * field_in.z + entry.tilt_response.w * field_out.z;
+    float angle = entry.base.x + dot(entry.response_in.xy, field_in.xy) + dot(entry.response_out.xy, field_out.xy)
+                + dot(entry.tidal[0].xyz, tidal_in) + dot(entry.tidal[3].xyz, tidal_out);
+    float exit_angle = entry.base.z + dot(entry.response_in.zw, field_in.xy) + dot(entry.response_out.zw, field_out.xy)
+                     + dot(entry.tidal[1].xyz, tidal_in) + dot(entry.tidal[4].xyz, tidal_out);
+    float tilt_position = entry.tilt_response.x * field_in.z + entry.tilt_response.z * field_out.z + dot(entry.tidal[2].xy, across_in)
+                        + dot(entry.tidal[5].xy, across_out);
+    float tilt_direction = entry.tilt_response.y * field_in.z + entry.tilt_response.w * field_out.z + dot(entry.tidal[2].zw, across_in)
+                         + dot(entry.tidal[5].zw, across_out);
     float jump_cosh = 1.0 + 0.5 * scene.q_jump, jump_sinh = sqrt(scene.q_jump * (1.0 + 0.25 * scene.q_jump));
     float4 e = cos(angle) * a_out + sin(angle) * b_out + tilt_position * n_out;
     e = e * rsqrt(mdot(e, e));
@@ -1080,6 +1120,19 @@ static float3 get_table_exit_values(float4 x, float4 v) {
 }
 
 /**
+ * @brief `get_table_field` gives a table ray's extra field at `x`: a uniform part `field` plus a linear part
+ * `tidal` times x's spatial coordinates (its offset from the centre), as a tangent vector at `x`.
+ * @par Example
+ * @code
+ * float4 g = get_table_field(field, tidal, x);
+ * @endcode
+ */
+static float4 get_table_field(float4 field, float3x3 tidal, float4 x) {
+    float4 f = field + float4(tidal * x.xyz, 0.0);
+    return f + mdot(f, x) * x;
+}
+
+/**
  * @brief `trace_table_ray` traces one jump-table ray: it starts `start_m` blocks from a mouth's centre at
  * `angle_in` from straight in, in the mouth's field plus a uniform extra field (`field_in` before it crosses the
  * throat, `field_out` after, both as vectors at the centre), with midpoint steps of `step_per_nearest` of the
@@ -1091,7 +1144,7 @@ static float3 get_table_exit_values(float4 x, float4 v) {
  * @endcode
  */
 static TableExit trace_table_ray(float r, float throat_m, float jump_m, float start_m, float angle_in, float step_per_nearest,
-                                 int max_step_count, float4 field_in, float4 field_out) {
+                                 int max_step_count, float4 field_in, float4 field_out, float3x3 tidal_in, float3x3 tidal_out) {
     float jump_rho = jump_m / r, start_rho = start_m / r;
     float4 c = float4(0.0, 0.0, 0.0, 1.0), a = float4(1.0, 0.0, 0.0, 0.0), b = float4(0.0, 1.0, 0.0, 0.0);
     float4 x = cosh(start_rho) * c + sinh(start_rho) * a;
@@ -1122,15 +1175,16 @@ static TableExit trace_table_ray(float r, float throat_m, float jump_m, float st
             return {mix(angle_before, angle, f), mix(travelled_before_m, travelled_m, f), values.x, parity, values.y, values.z};
         }
         float4 field = parity < 0.5 ? field_in : field_out;
+        float3x3 tidal = parity < 0.5 ? tidal_in : tidal_out;
         float ds_m = max(step_per_nearest * rho * r, TABLE_MIN_STEP_PER_STEP * step_per_nearest * throat_m);
-        float4 g = get_dln_n_flat(rho_effective_m, throat_m) * e_rho * e_rho * radial + field + mdot(field, x) * x;
+        float4 g = get_dln_n_flat(rho_effective_m, throat_m) * e_rho * e_rho * radial + get_table_field(field, tidal, x);
         float4 bend = g - mdot(g, v) * v;
         float4 vh = to_tangent(x, v + bend * (0.5 * ds_m));
         float4 xm = x, vm = vh;
         advance_geodesic(xm, vm, 0.5 * ds_m / r);
         float qm = get_q(xm, c);
         float cosh_m = 1.0 + 0.5 * qm, sinh_m = sqrt(qm * (1.0 + 0.25 * qm)), e_m = cosh_m + sinh_m;
-        float4 gm = get_dln_n_flat(r * sinh_m * e_m, throat_m) * e_m * e_m * (cosh_m * xm - c) / sinh_m + field + mdot(field, xm) * xm;
+        float4 gm = get_dln_n_flat(r * sinh_m * e_m, throat_m) * e_m * e_m * (cosh_m * xm - c) / sinh_m + get_table_field(field, tidal, xm);
         x_before = x;
         v_before = v;
         rho_before = rho;
@@ -1152,9 +1206,12 @@ static TableExit trace_table_ray(float r, float throat_m, float jump_m, float st
  * @brief `write_table_entry` traces one jump-table entry and its first-order response to a uniform extra field,
  * and writes it as `TEXELS_PER_TABLE_ENTRY` texels: (angle swept, path length, exit angle, parity); the changes
  * of the swept and exit angles per unit field along the plane's two axes before the throat; the same after it;
- * and the exit point's and direction's tilts per unit field along the plane's normal, before and after. The
- * responses come from extra rays with a small field (`TABLE_FIELD_PROBE` per block) and are zero where a
- * probe changes whether the ray crosses.
+ * and the exit point's and direction's tilts per unit field along the plane's normal, before and after. Then, for
+ * each side, three texels of the response to a linear field (zero at the centre, along the plane's axes a, b and
+ * normal n): the swept angle's and the exit angle's per unit of its aa, bb and ab parts, and the tilts per unit
+ * of its na and nb parts. The responses come from extra rays with a small field (`TABLE_FIELD_PROBE` per block,
+ * `TIDAL_FIELD_PROBE` per curvature radius for the linear ones) and are zero where a probe changes whether the
+ * ray crosses.
  * @par Example
  * @code
  * write_table_entry(throat_table + i * TEXELS_PER_TABLE_ENTRY, u.curvature_radius_m, u.throat_m, u.jump_m, u.jump_m, 0.3, 0.01, 40000);
@@ -1163,14 +1220,15 @@ static TableExit trace_table_ray(float r, float throat_m, float jump_m, float st
 static void write_table_entry(device float4 *entry, float r, float throat_m, float jump_m, float start_m, float angle_in,
                               float step_per_nearest, int max_step_count) {
     float4 zero = float4(0.0);
-    TableExit base = trace_table_ray(r, throat_m, jump_m, start_m, angle_in, step_per_nearest, max_step_count, zero, zero);
+    float3x3 none = float3x3(0.0);
+    TableExit base = trace_table_ray(r, throat_m, jump_m, start_m, angle_in, step_per_nearest, max_step_count, zero, zero, none, none);
     entry[0] = float4(base.angle, base.travelled_m, base.exit_angle, base.parity);
     float responses[12];
     for (int k = 0; k < 6; k++) {
         float4 field = float4(0.0);
         field[k % 3] = TABLE_FIELD_PROBE;
-        TableExit probe = k < 3 ? trace_table_ray(r, throat_m, jump_m, start_m, angle_in, step_per_nearest, max_step_count, field, zero)
-                                : trace_table_ray(r, throat_m, jump_m, start_m, angle_in, step_per_nearest, max_step_count, zero, field);
+        TableExit probe = k < 3 ? trace_table_ray(r, throat_m, jump_m, start_m, angle_in, step_per_nearest, max_step_count, field, zero, none, none)
+                                : trace_table_ray(r, throat_m, jump_m, start_m, angle_in, step_per_nearest, max_step_count, zero, field, none, none);
         bool is_valid = base.parity >= 0.0 && probe.parity == base.parity;
         float2 change = is_valid ? float2(probe.angle - base.angle, probe.exit_angle - base.exit_angle) / TABLE_FIELD_PROBE : float2(0.0);
         float2 tilt = is_valid ? float2(probe.tilt_position, probe.tilt_direction) / TABLE_FIELD_PROBE : float2(0.0);
@@ -1180,6 +1238,25 @@ static void write_table_entry(device float4 *entry, float r, float throat_m, flo
     entry[1] = float4(responses[0], responses[2], responses[1], responses[3]);
     entry[2] = float4(responses[6], responses[8], responses[7], responses[9]);
     entry[3] = float4(responses[4], responses[5], responses[10], responses[11]);
+    float3 e0 = float3(1.0, 0.0, 0.0), e1 = float3(0.0, 1.0, 0.0), e2 = float3(0.0, 0.0, 1.0), o = float3(0.0);
+    float3x3 tidal_probes[5] = {float3x3(e0, o, o), float3x3(o, e1, o), float3x3(e1, e0, o), float3x3(e2, o, e0), float3x3(o, e2, e1)};
+    for (int side = 0; side < 2; side++) {
+        float tidal[10];
+        for (int k = 0; k < 5; k++) {
+            float3x3 probe_tidal = tidal_probes[k] * TIDAL_FIELD_PROBE;
+            TableExit probe = side == 0 ? trace_table_ray(r, throat_m, jump_m, start_m, angle_in, step_per_nearest, max_step_count, zero, zero, probe_tidal, none)
+                                        : trace_table_ray(r, throat_m, jump_m, start_m, angle_in, step_per_nearest, max_step_count, zero, zero, none, probe_tidal);
+            bool is_valid = base.parity >= 0.0 && probe.parity == base.parity;
+            float2 change = is_valid ? (k < 3 ? float2(probe.angle - base.angle, probe.exit_angle - base.exit_angle) : float2(probe.tilt_position, probe.tilt_direction))
+                                           / TIDAL_FIELD_PROBE
+                                     : float2(0.0);
+            tidal[2 * k] = change.x;
+            tidal[2 * k + 1] = change.y;
+        }
+        entry[4 + 3 * side] = float4(tidal[0], tidal[2], tidal[4], 0.0);
+        entry[5 + 3 * side] = float4(tidal[1], tidal[3], tidal[5], 0.0);
+        entry[6 + 3 * side] = float4(tidal[6], tidal[8], tidal[7], tidal[9]);
+    }
 }
 
 /**
@@ -1272,7 +1349,9 @@ static float2 get_ndc(thread const Scene &scene, float2 pixel) {
 
 /**
  * @brief `trace_ray` follows the light ray through a point of the screen backwards from the eye, as
- * `render_cpu.rs`'s `render_pixel` does, and says where it ended.
+ * `render_cpu.rs`'s `render_pixel` does, and says where it ended. Where a step's chord finds a hit further off the
+ * curved path than `get_chord_limit_m` allows, it steps again from the step's start, landing just before the hit
+ * and taking short steps across it.
  * @par Example
  * @code
  * RayEnd end = trace_ray(scene, get_ndc(scene, float2(id) + 0.5));
@@ -1291,26 +1370,27 @@ static RayEnd trace_ray(thread const Scene &scene, float2 ndc) {
     RayEnd end = {float4(0.0), 0.0, 0.0, 0.0, LOST_HIT, 0, 0, 1.0};
     if (u.camera_mouth >= 0) {
         bool is_lost = false;
-        jump_through_mouth(scene, scene.camera_table, CAMERA_TABLE_SIZE, CAMERA_TABLE_ROWS, get_camera_table_row(u), M_PI_F, row, x, v,
+        jump_through_mouth(scene, scene.camera_table, CAMERA_TABLE_SIZE, CAMERA_TABLE_ROWS, get_camera_table_row(u), true, M_PI_F, row, x, v,
                            travelled_m, core, halo, has_beam, is_lost);
         if (is_lost) return end;
         reset_box_cache(scene, cache, x, travelled_m);
     }
+    float fine_start_m = -1.0, fine_end_m = -1.0, fine_step_m = 3.4e38;
+    int refine_count = 0;
     for (int step = 0; step < MAX_STEP_COUNT; step++) {
         float q_nearest;
         int nearest;
-        float4 g_others;
-        float4 bend = get_bend_split(scene, row, x, v, q_nearest, nearest, g_others);
+        float4 bend = get_bend_nearest(scene, row, x, v, q_nearest, nearest);
         if (q_nearest < scene.q_throat && cross_throat(scene, row, x, v)) {
             reset_box_cache(scene, cache, x, travelled_m);
-            bend = get_bend_split(scene, row, x, v, q_nearest, nearest, g_others);
+            bend = get_bend_nearest(scene, row, x, v, q_nearest, nearest);
         }
         if (q_nearest < scene.q_jump && was_outside_jump) {
             bool is_lost = false;
-            if (jump_through_mouth(scene, scene.throat_table, THROAT_TABLE_SIZE, 1, 0.0, M_PI_2_F, row, x, v, travelled_m, core, halo, has_beam, is_lost)) {
+            if (jump_through_mouth(scene, scene.throat_table, THROAT_TABLE_SIZE, 1, 0.0, false, M_PI_2_F, row, x, v, travelled_m, core, halo, has_beam, is_lost)) {
                 if (is_lost) break;
                 reset_box_cache(scene, cache, x, travelled_m);
-                bend = get_bend_split(scene, row, x, v, q_nearest, nearest, g_others);
+                bend = get_bend_nearest(scene, row, x, v, q_nearest, nearest);
             }
         }
         was_outside_jump = q_nearest >= scene.q_jump;
@@ -1318,30 +1398,41 @@ static RayEnd trace_ray(thread const Scene &scene, float2 ndc) {
         float4 vh = v;
         float tau_max, ds_m;
         bool is_near = q_nearest > scene.q_rk4_start;
-        bool is_outer = q_nearest >= scene.q_near_zone;
         float4 x_next = x, v_next = v;
         if (is_far) {
             tau_max = get_cutoff_entry_tau(scene, row, x, v);
             ds_m = tau_max < 1.0 ? atanh(tau_max) * r : max_travel_m;
         } else if (is_near) {
-            ds_m = max(get_distance_of_q(q_nearest) * r * (is_outer ? OUTER_RK4_STEP_PER_NEAREST : RK4_STEP_PER_NEAREST), MIN_STEP_M);
+            ds_m = max(get_distance_of_q(q_nearest) * r * RK4_STEP_PER_NEAREST, MIN_STEP_M);
+            ds_m = get_capped_step_m(ds_m, travelled_m, fine_start_m, fine_end_m, fine_step_m);
+            ds_m = min(ds_m, MAX_RK4_STEP_M);
             if (q_nearest >= scene.q_jump) ds_m = min(ds_m, get_jump_entry_m(scene, row, x, v) + JUMP_OVERSHOOT_M);
-            if (is_outer) step_rk4_full(scene, row, x_next, v_next, bend, ds_m);
-            else step_rk4(scene, row, x_next, v_next, bend, g_others, fetch(scene, row, TEXEL_MOUTHS + nearest), ds_m);
+            step_rk4(scene, row, x_next, v_next, bend, ds_m);
             float q_next;
             get_nearest_mouth(scene, row, x_next, q_next);
             if (q_nearest >= scene.q_jump && q_next < scene.q_jump) {
-                float rho_now = get_distance_of_q(q_nearest), rho_next = get_distance_of_q(q_next), rho_jump = get_distance_of_q(scene.q_jump);
-                ds_m = ds_m * clamp((rho_now - rho_jump) / max(rho_now - rho_next, 1e-6), 0.0, 1.0) + JUMP_OVERSHOOT_M;
+                float4 c = fetch(scene, row, TEXEL_MOUTHS + nearest);
+                float rho_jump = get_distance_of_q(scene.q_jump), outside_m = 0.0, inside_m = ds_m;
+                float rho_outside = get_distance_of_q(q_nearest), rho_inside = get_distance_of_q(q_next);
+                for (int i = 0; i < JUMP_ENTRY_ITERATION_COUNT; i++) {
+                    float try_m = mix(outside_m, inside_m, clamp((rho_outside - rho_jump) / max(rho_outside - rho_inside, 1e-6), 0.0, 1.0));
+                    x_next = x;
+                    v_next = v;
+                    step_rk4(scene, row, x_next, v_next, bend, try_m);
+                    float rho_try = get_distance_of_q(get_q(x_next, c));
+                    if (rho_try < rho_jump) { inside_m = try_m; rho_inside = rho_try; } else { outside_m = try_m; rho_outside = rho_try; }
+                }
+                ds_m = inside_m + JUMP_OVERSHOOT_M;
                 x_next = x;
                 v_next = v;
-                step_rk4(scene, row, x_next, v_next, bend, g_others, fetch(scene, row, TEXEL_MOUTHS + nearest), ds_m);
+                step_rk4(scene, row, x_next, v_next, bend, ds_m);
             }
             vh = to_tangent(x, x_next);
             tau_max = tanh(get_distance_of_q(get_q(x, x_next)));
         } else {
             float nearest_m = get_distance_of_q(q_nearest) * r;
             ds_m = max(nearest_m * (q_nearest < scene.q_near_zone ? NEAR_STEP_PER_NEAREST : FAR_STEP_PER_NEAREST), MIN_STEP_M);
+            ds_m = get_capped_step_m(ds_m, travelled_m, fine_start_m, fine_end_m, fine_step_m);
             vh = to_tangent(x, v + bend * (0.5 * ds_m));
             tau_max = tanh(ds_m / r);
         }
@@ -1350,6 +1441,16 @@ static RayEnd trace_ray(thread const Scene &scene, float2 ndc) {
         float ground_a = mdot(x, ground), ground_b = mdot(vh, ground);
         if (ground_a > 0.0 && ground_b < 0.0 && -ground_a / ground_b < hit.tau) { hit.tau = -ground_a / ground_b; hit.index = GROUND_HIT; }
         test_boxes(scene, row, x, vh, travelled_m, ds_m, hit, cache);
+        if (hit.index != NO_HIT && !is_far && refine_count < MAX_HIT_REFINE_COUNT) {
+            float hit_m = atanh(hit.tau) * r, limit_m = get_chord_limit_m(bend, travelled_m + hit_m);
+            if (ds_m > limit_m) {
+                refine_count++;
+                fine_start_m = travelled_m + max(hit_m - FINE_LEAD_PER_STEP * limit_m, 0.0);
+                fine_end_m = travelled_m + hit_m + FINE_TRAIL_PER_STEP * limit_m;
+                fine_step_m = limit_m;
+                continue;
+            }
+        }
         if (hit.index != NO_HIT) {
             float4 point = to_point(x + hit.tau * vh);
             float end_m = travelled_m + atanh(hit.tau) * r;
@@ -1415,6 +1516,19 @@ static float3 shade_ray_end(thread const Scene &scene, RayEnd end) {
 }
 
 /**
+ * @brief `write_pixel` shades a ray end into pixel `id` of the image, and marks in `lost` (one byte per pixel of
+ * the render size) whether the ray was lost, for `fill_holes`.
+ * @par Example
+ * @code
+ * write_pixel(scene, trace_ray(scene, ndc), id, lost, image);
+ * @endcode
+ */
+static void write_pixel(thread const Scene &scene, RayEnd end, uint2 id, device uchar *lost, texture2d<float, access::write> image) {
+    image.write(float4(shade_ray_end(scene, end), 1.0), id);
+    lost[int(id.y) * scene.u.width_px + int(id.x)] = end.kind == LOST_HIT ? 1 : 0;
+}
+
+/**
  * @brief `trace_pixels` traces every pixel's ray and writes its colour.
  * @par Example
  * @code
@@ -1423,10 +1537,10 @@ static float3 shade_ray_end(thread const Scene &scene, RayEnd end) {
  */
 kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]], device const float4 *throat_table [[buffer(7)]],
                          device const float4 *camera_table [[buffer(8)]],
-                         texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+                         device uchar *lost [[buffer(14)]], texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
     Scene scene = make_scene(rows, u, throat_table, camera_table);
-    image.write(float4(shade_ray_end(scene, trace_ray(scene, get_ndc(scene, float2(id) + 0.5))), 1.0), id);
+    write_pixel(scene, trace_ray(scene, get_ndc(scene, float2(id) + 0.5)), id, lost, image);
 }
 
 /**
@@ -1650,14 +1764,14 @@ kernel void prepare_refinement(device atomic_uint *refine_count [[buffer(5)]], d
 kernel void refine_pixels(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]], device const float4 *throat_table [[buffer(7)]],
                          device const float4 *camera_table [[buffer(8)]],
                           device const uint *refine_cells [[buffer(4)]], device atomic_uint *refine_count [[buffer(5)]],
-                          texture2d<float, access::write> image [[texture(0)]], uint t [[thread_position_in_grid]]) {
+                          device uchar *lost [[buffer(14)]], texture2d<float, access::write> image [[texture(0)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(refine_count, memory_order_relaxed) * REFINED_PIXELS_PER_CELL) return;
     int columns = get_sample_columns(u);
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
     Scene scene = make_scene(rows, u, throat_table, camera_table);
-    image.write(float4(shade_ray_end(scene, trace_ray(scene, get_ndc(scene, float2(id) + 0.5))), 1.0), id);
+    write_pixel(scene, trace_ray(scene, get_ndc(scene, float2(id) + 0.5)), id, lost, image);
 }
 
 /**
@@ -1672,7 +1786,7 @@ kernel void refine_pixels(device const float4 *rows [[buffer(0)]], constant Unif
 kernel void resolve_pixels(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]], device const float4 *throat_table [[buffer(7)]],
                          device const float4 *camera_table [[buffer(8)]],
                            device const RayEnd *samples [[buffer(2)]], device const uchar *smooth_cells [[buffer(3)]],
-                           texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+                           device uchar *lost [[buffer(14)]], texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
     Scene scene = make_scene(rows, u, throat_table, camera_table);
     int columns = get_sample_columns(u);
@@ -1686,5 +1800,160 @@ kernel void resolve_pixels(device const float4 *rows [[buffer(0)]], constant Uni
             return;
         }
     }
-    image.write(float4(shade_ray_end(scene, end), 1.0), id);
+    write_pixel(scene, end, id, lost, image);
+}
+
+/**
+ * @brief `PyramidLevels` is one step of the hole-filling pyramid: the sizes in pixels of a finer level (`low`) and
+ * the next coarser one (`high`, half the size, rounded up), and where each starts in the pyramid buffer (level 1
+ * starts at 0; level 0 is the image). Each pyramid texel is a colour premultiplied by its weight, and the weight.
+ */
+struct PyramidLevels {
+    int2 low_size;
+    int2 high_size;
+    int low_offset;
+    int high_offset;
+};
+
+/**
+ * @brief `read_pyramid` reads texel `p` of a pyramid level, clamped to the level's edges.
+ * @par Example
+ * @code
+ * float4 texel = read_pyramid(pyramid, levels.high_offset, levels.high_size, int2(3, 4));
+ * @endcode
+ */
+static float4 read_pyramid(device const half4 *pyramid, int offset, int2 size, int2 p) {
+    p = clamp(p, int2(0), size - 1);
+    return float4(pyramid[offset + p.y * size.x + p.x]);
+}
+
+/**
+ * @brief `sample_pyramid` samples a pyramid level bilinearly at a position in its texels (texel centres at whole
+ * numbers).
+ * @par Example
+ * @code
+ * float4 coarse = sample_pyramid(pyramid, levels.high_offset, levels.high_size, (float2(id) + 0.5) * 0.5 - 0.5);
+ * @endcode
+ */
+static float4 sample_pyramid(device const half4 *pyramid, int offset, int2 size, float2 position) {
+    float2 base = floor(position), f = position - base;
+    int2 p = int2(base);
+    return mix(mix(read_pyramid(pyramid, offset, size, p), read_pyramid(pyramid, offset, size, p + int2(1, 0)), f.x),
+               mix(read_pyramid(pyramid, offset, size, p + int2(0, 1)), read_pyramid(pyramid, offset, size, p + int2(1, 1)), f.x), f.y);
+}
+
+/**
+ * @brief `average_children` turns the sum of up to four premultiplied texels (colour times weight, and weight)
+ * into their parent: their weighted average colour, with a weight of their total weight, at most 1.
+ * @par Example
+ * @code
+ * pyramid[index] = average_children(sum);
+ * @endcode
+ */
+static half4 average_children(float4 sum) {
+    float weight = min(sum.a, 1.0);
+    return half4(sum.a > 0.0 ? float4(sum.rgb / sum.a * weight, weight) : float4(0.0));
+}
+
+/**
+ * @brief `pull_holes_from_image` makes pyramid level 1 from the image: each texel averages the pixels of its 2×2
+ * block whose rays weren't lost.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per texel of level 1.
+ * @endcode
+ */
+kernel void pull_holes_from_image(constant Uniforms &u [[buffer(1)]], device const uchar *lost [[buffer(14)]], device half4 *pyramid [[buffer(15)]],
+                                  constant PyramidLevels &levels [[buffer(16)]], texture2d<float, access::read> image [[texture(0)]],
+                                  uint2 id [[thread_position_in_grid]]) {
+    if (int(id.x) >= levels.high_size.x || int(id.y) >= levels.high_size.y) return;
+    float4 sum = float4(0.0);
+    for (int k = 0; k < 4; k++) {
+        int2 p = int2(id) * 2 + int2(k & 1, k >> 1);
+        if (p.x < levels.low_size.x && p.y < levels.low_size.y && lost[p.y * u.width_px + p.x] == 0) sum += float4(image.read(uint2(p)).rgb, 1.0);
+    }
+    pyramid[levels.high_offset + int(id.y) * levels.high_size.x + int(id.x)] = average_children(sum);
+}
+
+/**
+ * @brief `pull_holes` makes the next coarser pyramid level: each texel averages its 2×2 block by weight.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per texel of the coarser level.
+ * @endcode
+ */
+kernel void pull_holes(device half4 *pyramid [[buffer(15)]], constant PyramidLevels &levels [[buffer(16)]], uint2 id [[thread_position_in_grid]]) {
+    if (int(id.x) >= levels.high_size.x || int(id.y) >= levels.high_size.y) return;
+    float4 sum = float4(0.0);
+    for (int k = 0; k < 4; k++) {
+        int2 p = int2(id) * 2 + int2(k & 1, k >> 1);
+        if (p.x < levels.low_size.x && p.y < levels.low_size.y) sum += float4(pyramid[levels.low_offset + p.y * levels.low_size.x + p.x]);
+    }
+    pyramid[levels.high_offset + int(id.y) * levels.high_size.x + int(id.x)] = average_children(sum);
+}
+
+/**
+ * @brief `push_holes` fills in a finer pyramid level from the coarser one already filled: a texel of weight w keeps
+ * its own colour and takes 1 - w of the coarser level's, sampled bilinearly, so holes fade smoothly into the
+ * colours around them.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per texel of the finer level, from the coarsest level down.
+ * @endcode
+ */
+kernel void push_holes(device half4 *pyramid [[buffer(15)]], constant PyramidLevels &levels [[buffer(16)]], uint2 id [[thread_position_in_grid]]) {
+    if (int(id.x) >= levels.low_size.x || int(id.y) >= levels.low_size.y) return;
+    int index = levels.low_offset + int(id.y) * levels.low_size.x + int(id.x);
+    float4 own = float4(pyramid[index]);
+    if (own.a >= 1.0) return;
+    float4 coarse = sample_pyramid(pyramid, levels.high_offset, levels.high_size, (float2(id) + 0.5) * 0.5 - 0.5);
+    pyramid[index] = half4(float4(own.rgb + (1.0 - own.a) * coarse.rgb, 1.0));
+}
+
+/**
+ * @brief `fill_holes` paints each pixel whose ray was lost (trapped circling a throat) with filled pyramid level 1,
+ * sampled bilinearly, instead of black.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per pixel of the render size.
+ * @endcode
+ */
+kernel void fill_holes(constant Uniforms &u [[buffer(1)]], device const uchar *lost [[buffer(14)]], device const half4 *pyramid [[buffer(15)]],
+                       constant PyramidLevels &levels [[buffer(16)]], texture2d<float, access::write> image [[texture(0)]],
+                       uint2 id [[thread_position_in_grid]]) {
+    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px || lost[int(id.y) * u.width_px + int(id.x)] == 0) return;
+    float4 coarse = sample_pyramid(pyramid, levels.high_offset, levels.high_size, (float2(id) + 0.5) * 0.5 - 0.5);
+    image.write(float4(coarse.rgb, 1.0), id);
+}
+
+/**
+ * @brief `build_mouth_fields` stores, each frame, for each mouth `id.x` in each row `id.y`, the other mouths'
+ * gradient at its centre and the matrix that gives that gradient's change along any tangent vector there (by
+ * central differences along an orthonormal basis), for the jumps' first-order corrections.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs first in each frame, one thread per mouth and row.
+ * @endcode
+ */
+kernel void build_mouth_fields(device float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]], uint2 id [[thread_position_in_grid]]) {
+    int mouth = int(id.x), row = int(id.y);
+    if (mouth >= u.mouth_count || row > u.mouth_count) return;
+    Scene scene = make_scene(rows, u, rows, rows);
+    float4 c = fetch(scene, row, TEXEL_MOUTHS + mouth);
+    device float4 *field = rows + row * ROW_TEXEL_COUNT + TEXEL_MOUTH_FIELDS + TEXELS_PER_MOUTH_FIELD * mouth;
+    float step_cosh = cosh(TIDAL_STEP_PER_R), step_sinh = sinh(TIDAL_STEP_PER_R);
+    float4x4 change = float4x4(0.0);
+    float4 basis[3];
+    for (int j = 0; j < 3; j++) {
+        float4 e = float4(0.0);
+        e[j] = 1.0;
+        e = e + mdot(e, c) * c;
+        for (int i = 0; i < j; i++) e = e - mdot(e, basis[i]) * basis[i];
+        basis[j] = e * rsqrt(mdot(e, e));
+        float4 d = (get_others_gradient(scene, row, step_cosh * c + step_sinh * basis[j], mouth)
+                    - get_others_gradient(scene, row, step_cosh * c - step_sinh * basis[j], mouth)) / (2.0 * step_sinh);
+        change = change + float4x4(d * basis[j].x, d * basis[j].y, d * basis[j].z, -d * basis[j].w);
+    }
+    field[0] = get_others_gradient(scene, row, c, mouth);
+    for (int i = 0; i < 4; i++) field[1 + i] = change[i];
 }

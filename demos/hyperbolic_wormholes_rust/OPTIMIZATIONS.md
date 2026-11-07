@@ -445,5 +445,123 @@ In a full-screen window (2560×1336) with the automatic scale, the scripted legs
 Feature shift against the eight-times reference (median, px): spawn 1.4, aimed at 1A 1.4, above the rails 0.1, at
 the throat 2.3, 2.5 blocks from 1A 2.6 (PR 70: 3.2, 3.1, 1.0, 2.5 and 2.2).
 
-Left to do: views dominated by a mouth's lens are still 2 to 3 pixels from the converged paths, and the frames
-within about a block of a mouth, looking past it, are the ones the window renders below full resolution.
+Left to do after PR 72: views dominated by a mouth's lens were still 2 to 3 pixels from the converged paths, and
+the frames within about a block of a mouth, looking past it, were the ones the window rendered below full
+resolution. Section 7 takes up the first.
+
+## 7. Accuracy fixes (the layer after PR 72)
+
+### 7.1 A converged reference
+
+The references of section 4 were rebuilt with the same tracer and steps 16 and 32 times smaller than PR 70's (no RK4,
+no jump, every pixel; `*-ref-fine16`, `*-ref-fine32`). They agree to 0.01 to 0.12 pixel (median) in every view, and
+the eight-times reference is within 0.02 to 0.28 pixel of the 32-times one, so the 1 pixel at the throat in section
+4 was the four-times reference's error. From here on, shifts are against the 32-times reference, over the patches
+where the 16- and 32-times references agree within 0.5 pixel (61% of the throat view's textured patches, 90 to
+99.8% elsewhere), so a view is judged only where the truth is known to that accuracy.
+
+Against it, PR 72 was at: spawn 1.38, aimed at 1A 1.34, high above spawn 1.04, laser 1.35, above the rails 0.13, 2.5
+blocks from 1A 2.64 and at the throat 1.99 pixels.
+
+### 7.2 Hits tested along chords
+
+A step tests the ground and boxes along the geodesic chord from its start to its end, not along the curved path.
+A path bending by $\kappa = |b|$ per block strays from a chord $h$ long by up to $\kappa h^2/8$. Seen from the eye,
+a hit $L$ blocks away is off by about $\kappa h^2/(8L)$, and a hit in the eye's first step, $t$ along it, by
+$\kappa (h - t)/2$, half the step's turn, however close the hit. Both are bounded by
+
+```math
+\frac{\kappa h^2}{2(4L + h)} \le \varepsilon
+\quad\Longleftrightarrow\quad
+h \le \lambda(L) = \frac{\varepsilon + \sqrt{\varepsilon^2 + 8\varepsilon\kappa L}}{\kappa} .
+```
+
+Capping every step at $\lambda$ with $\varepsilon = 10^{-4}$ (0.2 pixel) took spawn from 1.38 to 0.07 pixels and
+aimed at 1A from 1.34 to 0.04, but doubled the time, as it shortens steps that hit nothing. So only the step that
+hits is redone: when its chord hits at $L^*$ and the step is longer than $\lambda(L^*)$, the ray steps again from
+the step's start to $0.75\,\lambda$ before the hit and then in steps of at most $\lambda$ until $2\lambda$ past it, up
+to three times per ray. That gave spawn 0.39, aimed at 1A 0.10 and the throat view 1.42, at no measurable cost at
+first; with the later changes, turning it off saves about 1.1 of spawn's 13.4 ms of GPU time.
+
+Tried: capping steps at 0.3 of the distance travelled (spawn 1.05, +35% time); a looser $\varepsilon = 2 \cdot
+10^{-4}$ (spawn 0.33); testing the hitting step along up to 16 shorter chords of its cubic Hermite curve instead of
+re-stepping (as accurate, but slower: every hit ran up to 16 box tests).
+
+### 7.3 Outer steps and the curvature scale
+
+The view from high above stayed at 1.03 pixels. RK4 steps of $0.35\,d$ grow to 5.6 blocks near the 16-block cutoff,
+but the field there varies on the scale of the curvature radius too (its $e^{2\rho}$ factor doubles every $R/2 = 4$
+blocks), which the step rule doesn't see. Capping RK4 steps at 2 blocks took the high view to 0.06 and spawn to 0.23
+pixels (3 blocks: 0.13 and 0.36), for about 10% more time. Ending steps exactly on the cutoff spheres, where the field drops to zero, gave
+nothing.
+
+### 7.4 Near a mouth: whole RK4 steps
+
+Within 10 throat radii, RK4 stages re-evaluated only the nearest mouth (3.2). Summing every mouth in every stage, and
+steps of $0.35\,d$ instead of $0.5\,d$ from 3 throat radii out (so one rule from there to the cutoff), took the view
+2.5 blocks from 1A from 2.06 to 1.59 pixels (with 7.5's changes), and the ordinary views to 0.05 to 0.14.
+
+### 7.5 The jump
+
+Replacing the jump by fine stepping showed it was most of what was left near a mouth: the throat view went from 1.43
+to 0.18 pixels and the near view from 2.22 to 1.44. Stepping through the sphere with the other mouths' field frozen
+at its value at the centre (the table's assumption) gave 0.99 and 1.57, so that assumption was the error; adding the
+field's first-order change across the sphere gave 0.12 and 1.07.
+
+**Tidal response.** The other mouths' gradient near the centre is $g(c) + T\,\xi$, where $\xi$ is the offset from
+the centre ($\xi_j = \langle x, e_j \rangle$ in an orthonormal frame at $c$) and $T_{ij} = \langle \partial_j g, e_i
+\rangle$ is symmetric. A ray in the plane $(\hat a, \hat b)$ only feels, to first order, $T_{aa}$, $T_{bb}$ and
+$T_{ab}$ in its plane and $T_{na}$, $T_{nb}$ across it. Each table entry now also stores the response of $\varphi$ and
+$\beta$ to the three in-plane parts and of the two tilts to the two across parts, on each side of the throat, from
+ten more probe rays with $T$ = 0.02 (0.005 and 0.08 gave the same images, so the response is linear): 10 texels per
+entry instead of 4. Each frame a small kernel stores, for each mouth in each row, $g(c)$ and a matrix $M$ with
+$M e = \sum_j D_j \langle e_j, e \rangle$, where $D_j$ is the central difference of $g$ along $e_j$ (0.01 curvature
+radii), so a jump reads $T_{ab} = \tfrac12(\langle M\hat b, \hat a\rangle + \langle M\hat a, \hat b\rangle)$ and the rest
+with two matrix products.
+
+With the camera table, the far side's tidal term took the throat view from 1.38 to 1.03 pixels. With the throat
+table it moved the near view the wrong way (1.61 to 1.98), while the near side's term helped (1.44); the cause isn't
+found, so the throat table uses the near side's term only.
+
+**Entering.** The step that ends inside the sphere is cut by three rounds of regula falsi on $\rho$, each a new RK4
+step from the step's start, so the ray enters within a fraction of a millimetre of the sphere where the table
+starts. With one round the near view was 2.02 pixels instead of 1.50. Taking the entry point and direction from the
+step's Hermite curve instead was slower and less accurate: regula falsi on the cubic sometimes stopped deep inside.
+
+Also tried: a four times larger throat table, or table rays with four times smaller steps (no change); the other
+mouths' field averaged over the entry, centre and exit points instead of the centre (no change).
+
+### 7.6 Rays that never come out
+
+Just outside a throat, a band of directions around the tangent one stays trapped: traced with 20,000 fine steps and
+ten times the usual path length, those rays still circle the throat. The demo's lensing law holds them there, so
+they carry no light and the band is black (a wide black band, looking sideways inside a mouth). The shader now
+paints those pixels from the image around them, with a pull–push fill. Level 0 is the image, with weight $W = 0$
+for lost pixels and 1 for the rest; each coarser level averages $2\times2$ blocks by weight,
+
+```math
+P_{k+1} = \frac{\sum P_k}{\sum W_k}\, W_{k+1}, \qquad W_{k+1} = \min\!\left(1, \sum W_k\right),
+```
+
+with colours premultiplied by weight, down to $1\times1$; then, coarsest first, each level fills its gaps from the one
+above, sampled bilinearly, $C_k = P_k + (1 - W_k)\, C_{k+1}$, and lost pixels take $C_1$. The band becomes a soft blend
+of the colours around it. It is about 24 small dispatches a frame and costs no measurable time.
+
+### 7.7 Where it stands
+
+Feature shift against the 32-times reference, over converged patches (pixels):
+
+| View | PR 72 | Now |
+| --- | ---: | ---: |
+| spawn | 1.38 | 0.14 |
+| aimed at mouth 1A | 1.34 | 0.07 |
+| 2.5 blocks from 1A | 2.64 | 1.50 |
+| 0.8 blocks from 1A's throat | 1.99 | 1.02 |
+| above the rails | 0.13 | 0.08 |
+| high above spawn | 1.04 | 0.05 |
+| laser through 1A | 1.35 | 0.07 |
+
+It costs GPU time: at 2560×1600, spawn 9.7 → 13.6 ms of GPU time, 2.5 blocks from 1A 21.6 → 33.3 and at the throat
+10.6 → 14.5 (measured alternately, under load). In a full-screen window the automatic scale keeps about the same
+share of frames under 1/60 s (scripted legs 5 of 724 against 4; mouth tour 30 of 1795 against 15), but renders more
+frames near a mouth below full resolution (legs 77% at full resolution against 93%, mouth tour 44% against 69%).

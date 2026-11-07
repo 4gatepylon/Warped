@@ -26,6 +26,12 @@ that applies only to some kinds of work goes in a skill, and this file points to
 Open, format, label and split GitHub issues with the `github-issue` skill
 (`.agents/skills/github-issue/`). Every issue uses its title format, template and labels.
 
+## Maps
+
+A level's layout (space, ground, structures, warp objects, lights, sky, spawns) is a map in the portable format of
+`common/maps/` (spec in its README), not code in one program: programs read the map files, and a program that
+generates a layout exports it there.
+
 ## Experiments and benchmarks
 
 For experiments and benchmarks (anything that compares options or measures how well something

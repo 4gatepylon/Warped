@@ -34,16 +34,17 @@ pub const TEXELS_PER_BEAM_CHUNK: usize = 2;
 pub const MAX_BEAM_POINT_COUNT: usize = 256;
 pub const TEXEL_BEAM_POINTS: usize =
     TEXEL_BEAM_CHUNKS + TEXELS_PER_BEAM_CHUNK * MAX_BEAM_CHUNK_COUNT;
-pub const ROW_TEXEL_COUNT: usize = TEXEL_BEAM_POINTS + MAX_BEAM_POINT_COUNT;
+pub const TEXEL_MOUTH_FIELDS: usize = TEXEL_BEAM_POINTS + MAX_BEAM_POINT_COUNT;
+pub const TEXELS_PER_MOUTH_FIELD: usize = 5;
+pub const ROW_TEXEL_COUNT: usize = TEXEL_MOUTH_FIELDS + TEXELS_PER_MOUTH_FIELD * MAX_MOUTH_COUNT;
 pub const BEAM_POINTS_PER_CHUNK: usize = 4;
 pub const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
-const BEND_CUTOFF_PER_R: f64 = 2.0;
-const FOG_PER_R: f64 = 3.0;
+pub const FOG_PER_R: f64 = 3.0;
 const MIN_TILE_CELL_COUNT: i32 = 3;
 const MAX_TILE_CELL_COUNT: i32 = 15;
 const TILE_SIDE_COUNT: f64 = 4.0;
 const TILES_PER_VERTEX: f64 = 5.0;
-const SUN_DIRECTION: DVec3 = DVec3::new(0.45, 0.62, 0.35);
+pub const SUN_DIRECTION: DVec3 = DVec3::new(0.45, 0.62, 0.35);
 
 /// `Uniforms` is everything per frame that isn't in the rows. Its layout matches the Metal
 /// shader's `Uniforms` struct, so it is `repr(C)` and padded to a multiple of 16 bytes.
@@ -338,7 +339,7 @@ fn make_uniforms(
         tan_half_fov: tan_half_fov as f32,
         aspect: size_px.0 as f32 / size_px.1 as f32,
         throat_m: world.get_throat_m() as f32,
-        bend_cutoff_m: (BEND_CUTOFF_PER_R * r) as f32,
+        bend_cutoff_m: world.bend_cutoff_m as f32,
         fog_m: if is_fog_on {
             (FOG_PER_R * r) as f32
         } else {
