@@ -6,13 +6,12 @@
 //! Example: `let mut session = connect(&address.host, address.port, &player.player_id)?;`
 
 use std::io::ErrorKind;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 
 use serde::Deserialize;
-use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
-use crate::management::Result;
+use crate::management::{CONNECT_TIMEOUT, READ_TIMEOUT, Result};
 
 /// `PlayerState` is one living player in a `state` message.
 #[derive(Deserialize)]
@@ -49,19 +48,26 @@ pub enum ServerMessage {
 
 /// `Session` is an open WebSocket to a game server, read without blocking.
 pub struct Session {
-    socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    socket: WebSocket<TcpStream>,
 }
 
-/// `connect` opens a WebSocket to a game server as a player the management server added.
+/// `connect` opens a WebSocket to a game server as a player the management server added, giving
+/// up after `CONNECT_TIMEOUT` to connect and `READ_TIMEOUT` for the handshake.
 ///
 /// Example: `let mut session = connect("10.0.0.5", 20000, &player_id)?;`
 pub fn connect(host: &str, port: u16, player_id: &str) -> Result<Session> {
-    let (socket, _) =
-        tungstenite::connect(format!("ws://{host}:{port}/play?player_id={player_id}"))?;
-    match socket.get_ref() {
-        MaybeTlsStream::Plain(stream) => stream.set_nonblocking(true)?,
-        _ => return Err("expected a plain ws:// connection".into()),
-    }
+    let address = (host, port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| format!("{host} has no address"))?;
+    let stream: TcpStream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)?;
+    stream.set_read_timeout(Some(READ_TIMEOUT))?;
+    let (socket, _) = tungstenite::client(
+        format!("ws://{host}:{port}/play?player_id={player_id}"),
+        stream,
+    )
+    .map_err(|error| error.to_string())?;
+    socket.get_ref().set_nonblocking(true)?;
     Ok(Session { socket })
 }
 
