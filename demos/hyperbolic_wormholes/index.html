@@ -1,0 +1,2132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hyperbolic Wormholes</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9cc8f0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(12, 16, 26, 0.74); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 300px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; text-align: right; max-width: 340px; }
+  #tips { bottom: 10px; right: 10px; width: 360px; max-height: calc(100vh - 190px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  input[type=range] { width: 100%; }
+  select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #4f7a3a; border-color: #7bb35d; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .worm { color: #a8d8ff; }
+  #message { color: #a8d8ff; min-height: 1.45em; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 3px 0; }
+  #tips_toggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255, 255, 255, 0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #error { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+  @media (max-width: 700px) { #tips { display: none; } #controls { width: calc(100vw - 52px); max-height: 45vh; } #stats { top: auto; bottom: 10px; } }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="cross"></div>
+
+<div id="controls" class="panel">
+  <h1>Wormholes in hyperbolic space (H³)</h1>
+  <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>W</kbd>/<kbd>S</kbd> fly where you look · <kbd>A</kbd>/<kbd>D</kbd> sideways · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>Shift</kbd> fast<br>
+    <kbd>F</kbd> keep flying forward · <kbd>G</kbd> aim through the middle of the mouth you're facing</div>
+  <div class="row worm"><kbd>B</kbd> place a mouth 6 blocks ahead (press twice: entrance, then exit)<br>
+    <kbd>X</kbd> remove the wormhole nearest the crosshair · <kbd>C</kbd> clear all</div>
+  <div class="row">
+    <label>Curvature radius R = <b id="curvature_value">8</b> blocks</label>
+    <input id="curvature_slider" type="range" min="5" max="14" step="1" value="8">
+    <div class="muted">Smaller R = stronger curvature. Applied on release; resets the scene.</div>
+  </div>
+  <div class="row">
+    <label>Mouth size r<sub>s</sub> = <b id="mouth_value">1.4</b> blocks</label>
+    <input id="mouth_slider" type="range" min="0.8" max="3" step="0.05" value="1.4">
+    <div class="muted">Like a black hole's horizon radius. Applies to every mouth.</div>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="fog_toggle" checked> Fog (distance haze)</label>
+    <label>Render quality <select id="quality"><option value="auto" selected>auto</option><option value="0.35">low</option><option value="0.5">medium</option><option value="0.75">high</option><option value="1">full</option></select></label>
+  </div>
+  <div class="row">
+    <button id="button_spawn">Spawn</button>
+    <button id="button_rails">Above the rails</button>
+    <button id="button_high">Fly way up</button>
+    <button id="button_fly">Fly forward: off</button>
+    <button id="button_aim">Aim at mouth</button>
+    <button id="button_place">Place mouth</button>
+    <button id="button_clear">Clear</button>
+    <button id="button_default">Default wormholes</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Distance from spawn along the ground: <b id="stat_distance">0.0</b> blocks · height <span id="stat_height">0.0</span></div>
+  <div class="muted">A circle of that radius has circumference <b id="stat_circumference">0</b> blocks (flat space: <span id="stat_flat">0</span>)</div>
+  <div>Wormholes: <b id="stat_wormholes">3</b> · <span id="stat_fps">–</span> fps</div>
+  <div id="message"></div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tips_toggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tips_body">
+  <ol>
+    <li><b>The rails.</b> The coloured walls all leave the long cobblestone wall at right angles, 3 blocks apart. In flat space they'd stay parallel. Here every wall is straight and they still fan apart, exponentially. Press <b>Above the rails</b>.</li>
+    <li><b>Five squares at every corner.</b> The stone roads outline identical square tiles with 72° corners, so five meet at every crossing.</li>
+    <li><b>The mouth ahead on the left</b> bends light like a black hole of the same size, but where its shadow would be you see the house door, through the other mouth. Press <kbd>G</kbd> then <kbd>F</kbd> to fly through.</li>
+    <li><b>Turn around.</b> The mouth by the blue pylon shows the red pylon. That pylon is about 50 blocks away down the rails, where hyperbolic space has room for hundreds of blocks between neighbouring rails. The wormhole makes it a few seconds' flight.</li>
+    <li><b>The mouth on the far left</b> comes out high above the rails, looking down. From up there the infinite ground shrinks to a disk below you.</li>
+    <li><b>Go in off-centre</b> or from the side and you come out tilted: the throat is a sphere, not a doorway. The view levels out after a moment.</li>
+    <li><b>Place your own</b> with <kbd>B</kbd>. Until it has an exit, an entrance leads into itself: you come out of its far side.</li>
+    <li><b>Slide R</b> to 14 for gentler curvature, or 5 for much stronger.</li>
+  </ol>
+  <div class="muted" style="margin-top:6px">Physics choices: light follows straight lines (geodesics) of H³. Near each mouth it bends by the flat wormhole demo's lensing law, written with hyperbolic space's own version of 1/distance (the potential of a point mass in H³). So a mouth looks like the flat one up close, and its pull fades exponentially beyond R. Each mouth bends light only within 2R, and several mouths' bending is added up, which is an approximation. You fly along light rays, so the crosshair shows where you will go.</div>
+  </div>
+</div>
+<div id="error"></div>
+
+<script type="module">
+/**
+ * @file
+ * `index.html` ray-traces a block world in hyperbolic space (H³) with traversable wormholes, using three.js for the
+ * full-screen shader pass.
+ *
+ * Interface:
+ * - Keys: `W`/`S`/`A`/`D` fly, `E`/`Q` up and down, `Shift` fast, `F` keep flying, `G` aim through the nearest mouth,
+ *   `B` place a mouth, `X` remove the aimed wormhole, `C` clear wormholes, arrow keys turn.
+ * - Panel: curvature radius and mouth size sliders, fog, render quality, viewpoint and wormhole buttons.
+ * - `window.__demo` exposes the state and main functions for testing from the console.
+ *
+ * Example: `python3 -m http.server --directory demos`, then open `http://localhost:8000/hyperbolic_wormholes/`.
+ *
+ * Must know:
+ * - Limitations: several mouths' bending is added up, which is only exact for one mouth at a time.
+ * - Gotchas: positions are 4-vectors on the hyperboloid model, so distances use the Minkowski product, not `dot`.
+ * - Performance: the shader traces each pixel in the frame of the camera or of the mouth it came out of, so far-away
+ *   coordinates never lose float precision.
+ */
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const AXIS_X = 0;
+const AXIS_Y = 1;
+const AXIS_Z = 2;
+const AXIS_W = 3;
+const FULL_TURN_RAD = 2 * Math.PI;
+const QUARTER_TURN_RAD = Math.PI / 2;
+const UP_VECTOR = [0, 1, 0, 0];
+const ORIGIN_POINT = [0, 0, 0, 1];
+
+const MAX_MOUTH_COUNT = 8;
+const MAX_BOX_COUNT = 96;
+const ROW_COUNT = 1 + MAX_MOUTH_COUNT;
+const TEXEL_TO_WORLD = 0;
+const TEXEL_GROUND = 4;
+const TEXEL_SUN = 5;
+const TEXEL_MOUTHS = 6;
+const TEXEL_GLUINGS = TEXEL_MOUTHS + MAX_MOUTH_COUNT;
+const TEXELS_PER_GLUING = 4;
+const TEXEL_BOXES = TEXEL_GLUINGS + TEXELS_PER_GLUING * MAX_MOUTH_COUNT;
+const TEXELS_PER_BOX = 6;
+const MAX_CLUSTER_COUNT = 32;
+const TEXEL_CLUSTERS = TEXEL_BOXES + TEXELS_PER_BOX * MAX_BOX_COUNT;
+const TEXELS_PER_CLUSTER = 2;
+const ROW_TEXEL_COUNT = TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * MAX_CLUSTER_COUNT;
+const FLOATS_PER_TEXEL = 4;
+
+const MATERIAL_SOLID = 0;
+const MATERIAL_GLASS = 1;
+const MATERIAL_GLOW = 2;
+
+const LAMBDA_SQUARED = 0.25;
+const THROAT_PER_HORIZON = 0.25;
+const BEND_CUTOFF_PER_R = 2;
+const FOG_PER_R = 3;
+const MAX_TRAVEL_PER_R = 24;
+const DEFAULT_CURVATURE_RADIUS_M = 8;
+const DEFAULT_HORIZON_RADIUS_M = 1.4;
+const HALF_FOV_RAD = 37.5 * Math.PI / 180;
+const SUN_DIRECTION = [0.45, 0.62, 0.35];
+
+const TILE_SIDE_COUNT = 4;
+const TILES_PER_VERTEX = 5;
+const TILE_INRADIUS = Math.acosh(Math.cos(Math.PI / TILES_PER_VERTEX) / Math.sin(Math.PI / TILE_SIDE_COUNT));
+const TILE_HALF_EDGE = Math.acosh(Math.cos(Math.PI / TILE_SIDE_COUNT) / Math.sin(Math.PI / TILES_PER_VERTEX));
+const TILE_KLEIN_HALF_WIDTH = Math.tanh(TILE_INRADIUS);
+const MIN_TILE_CELL_COUNT = 3;
+const MAX_TILE_CELL_COUNT = 15;
+
+const SPAWN_X_M = 0;
+const SPAWN_Z_M = 3;
+const SPAWN_HEADING_RAD = -0.3;
+const SPAWN_PITCH_UP_RAD = -0.45;
+const EYE_HEIGHT_M = 4.5;
+const MOUTH_HEIGHT_M = 4.5;
+const EXIT_PITCH_DOWN_RAD = 0.3;
+const DEFAULT_ENTRANCES = [
+  { bearing_rad: -0.5, distance_m: 7.5 },
+  { bearing_rad: 2.7, distance_m: 9 },
+  { bearing_rad: -1.5, distance_m: 12 }
+];
+const RAIL_START_M = 5;
+const RAIL_SPACING_M = 3;
+const RAIL_LENGTH_M = 50;
+const RAIL_HALF_COUNT = 3;
+const RAIL_HALF_WIDTH_M = 0.5;
+const RAIL_HEIGHT_M = 1;
+const BASE_WALL_HALF_LENGTH_M = 15;
+const HOUSE_DISTANCE_M = 14;
+const RED_PYLON_DISTANCE_M = 42;
+const RED_PYLON_OFFSET_M = 8;
+const BLUE_PYLON_BEARING_RAD = 2.3;
+const BLUE_PYLON_DISTANCE_M = 13;
+const CONSOLES_PER_PYLON = 5;
+const CONSOLE_RING_RADIUS_M = 2.6;
+const TREE_SEED = 99;
+const TREE_COUNT = 9;
+const TREE_ATTEMPT_COUNT = 400;
+const TREE_MIN_DISTANCE_M = 7;
+const TREE_MAX_DISTANCE_M = 32;
+const TREE_CLEARANCE_FROM_BOXES_M = 3.5;
+const TREE_CLEARANCE_FROM_POINTS_M = 8;
+const TREE_MIN_HEIGHT_M = 4;
+const TREE_HEIGHT_CHOICE_COUNT = 2;
+
+const SHADOW_PER_HORIZON = 1.5 * Math.sqrt(3);
+const PLACE_DISTANCE_M = 6;
+const WALK_SPEED_M_PER_S = 6;
+const SPRINT_SPEED_M_PER_S = 16;
+const LOOK_RAD_PER_PX = 0.0025;
+const KEY_TURN_PX_PER_S = 800;
+const MAX_PITCH_RAD = 1.55;
+const LEVEL_OUT_RATE_PER_S = 2.5;
+const LEVEL_OUT_MAX_UP_DOT = 0.98;
+const FLY_MAX_SUBSTEP_COUNT = 400;
+const FLY_MAX_STEP_M = 0.5;
+const FLY_STEP_PER_NEAREST = 0.05;
+const AIM_MAX_ITERATION_COUNT = 10;
+const AIM_TOLERANCE_M = 1e-3;
+const AIM_FINITE_DIFFERENCE = 1e-3;
+const AIM_MAX_TURN = 0.2;
+const AIM_MAX_STEP_COUNT = 4000;
+const AIM_MAX_TRAVEL_M = 120;
+const AIM_MAX_STEP_M = 0.5;
+const AIM_STEP_PER_NEAREST = 0.05;
+const AIM_GIVE_UP_PAST_CLOSEST_M = 1;
+const MESSAGE_DURATION_S = 3;
+const HUD_PERIOD_S = 0.25;
+const MAX_FRAME_DT_S = 0.05;
+const AUTO_PIXEL_BUDGET = 380000;
+const AUTO_MIN_PIXEL_BUDGET = 120000;
+const AUTO_BUDGET_STEP = 0.75;
+const AUTO_TARGET_FPS = 40;
+const AUTO_WINDOW_S = 2;
+const MAX_COUNTED_FRAME_S = 0.2;
+const MS_PER_S = 1000;
+
+const COLORS = {
+  planks: [0.74, 0.57, 0.34], log: [0.42, 0.31, 0.19], cobble: [0.55, 0.55, 0.55], glass: [0.70, 0.87, 0.96],
+  roof: [0.64, 0.25, 0.20], brick: [0.58, 0.30, 0.25], leaves: [0.24, 0.52, 0.20], stone: [0.62, 0.62, 0.64],
+  red: [0.80, 0.20, 0.18], blue: [0.20, 0.35, 0.80], yellow: [0.92, 0.80, 0.20], purple: [0.55, 0.25, 0.70],
+  orange: [0.92, 0.50, 0.15], lime: [0.45, 0.80, 0.20], cyan: [0.20, 0.70, 0.75], gold: [0.95, 0.78, 0.25],
+  console: [0.78, 0.80, 0.84], team_blue: [0.30, 0.60, 1.00], team_red: [1.00, 0.32, 0.26]
+};
+const RAIL_COLOR_NAMES = ['red', 'orange', 'yellow', 'lime', 'cyan', 'blue', 'purple'];
+
+/**
+ * `make_identity` makes the 4×4 identity matrix, column-major like every matrix here.
+ * @return {Float64Array} The identity.
+ * @example const m = make_identity();
+ */
+function make_identity() {
+  const m = new Float64Array(16);
+  m[0] = m[5] = m[10] = m[15] = 1;
+  return m;
+}
+
+/**
+ * `multiply_matrices` multiplies two 4×4 matrices.
+ * @param {Float64Array} a The left matrix.
+ * @param {Float64Array} b The right matrix.
+ * @return {Float64Array} The product a·b.
+ * @example const c = multiply_matrices(a, b);
+ */
+function multiply_matrices(a, b) {
+  const product = new Float64Array(16);
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+      product[c * 4 + r] = sum;
+    }
+  }
+  return product;
+}
+
+/**
+ * `multiply_all` multiplies any number of 4×4 matrices from left to right.
+ * @param {...Float64Array} matrices The matrices.
+ * @return {Float64Array} Their product.
+ * @example const m = multiply_all(a, b, c);
+ */
+function multiply_all(...matrices) {
+  return matrices.reduce(multiply_matrices);
+}
+
+/**
+ * `apply_matrix` applies a 4×4 matrix to a 4-vector.
+ * @param {Float64Array} m The matrix.
+ * @param {number[]} v The vector.
+ * @return {number[]} m·v.
+ * @example const p = apply_matrix(frame, ORIGIN_POINT);
+ */
+function apply_matrix(m, v) {
+  const out = [0, 0, 0, 0];
+  for (let r = 0; r < 4; r++) out[r] = m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2] + m[12 + r] * v[3];
+  return out;
+}
+
+/**
+ * `make_rotation` makes a rotation in the plane of two spatial axes.
+ * @param {number} i The axis that turns toward `j`.
+ * @param {number} j The second axis.
+ * @param {number} angle_rad The angle.
+ * @return {Float64Array} The rotation.
+ * @example const turn = make_rotation(AXIS_X, AXIS_Z, QUARTER_TURN_RAD);
+ */
+function make_rotation(i, j, angle_rad) {
+  const m = make_identity(), c = Math.cos(angle_rad), s = Math.sin(angle_rad);
+  m[i * 4 + i] = c; m[i * 4 + j] = s; m[j * 4 + i] = -s; m[j * 4 + j] = c;
+  return m;
+}
+
+/**
+ * `make_boost` makes the hyperbolic translation along a spatial axis: it moves the origin by `s` curvature radii.
+ * @param {number} i The axis.
+ * @param {number} s The distance, in curvature radii.
+ * @return {Float64Array} The Lorentz boost.
+ * @example const ahead = make_boost(AXIS_Z, -6 / curvature_radius_m);
+ */
+function make_boost(i, s) {
+  const m = make_identity(), c = Math.cosh(s), sh = Math.sinh(s);
+  m[AXIS_W * 4 + AXIS_W] = c; m[AXIS_W * 4 + i] = sh; m[i * 4 + AXIS_W] = sh; m[i * 4 + i] = c;
+  return m;
+}
+
+/**
+ * `make_boost_along` makes the hyperbolic translation along any spatial unit direction.
+ * @param {number[]} direction The unit 3-vector to move along.
+ * @param {number} s The distance, in curvature radii.
+ * @return {Float64Array} The Lorentz boost.
+ * @example const step = make_boost_along([0, 0, -1], 0.1);
+ */
+function make_boost_along(direction, s) {
+  const m = make_identity(), c = Math.cosh(s), sh = Math.sinh(s);
+  for (let col = 0; col < 3; col++) {
+    for (let r = 0; r < 3; r++) m[col * 4 + r] += (c - 1) * direction[col] * direction[r];
+    m[col * 4 + AXIS_W] = sh * direction[col];
+    m[AXIS_W * 4 + col] = sh * direction[col];
+  }
+  m[AXIS_W * 4 + AXIS_W] = c;
+  return m;
+}
+
+/**
+ * `make_rotation_about` makes a spatial rotation about a unit axis (Rodrigues' formula).
+ * @param {number[]} axis The unit 3-vector to turn about.
+ * @param {number} angle_rad The angle, counter-clockwise looking down the axis.
+ * @return {Float64Array} The rotation.
+ * @example const yaw = make_rotation_about([0, 1, 0], 0.1);
+ */
+function make_rotation_about(axis, angle_rad) {
+  const m = make_identity(), c = Math.cos(angle_rad), s = Math.sin(angle_rad), [kx, ky, kz] = axis;
+  const cross = [[0, -kz, ky], [kz, 0, -kx], [-ky, kx, 0]];
+  for (let col = 0; col < 3; col++) {
+    for (let r = 0; r < 3; r++) m[col * 4 + r] = (r === col ? c : 0) + s * cross[r][col] + (1 - c) * axis[r] * axis[col];
+  }
+  return m;
+}
+
+/**
+ * `make_rotation_between` makes the smallest spatial rotation that turns one unit 3-vector into another.
+ * @param {number[]} from The unit 3-vector to turn.
+ * @param {number[]} to The unit 3-vector it should become.
+ * @return {Float64Array} The rotation (the identity if they already match).
+ * @example const turn = make_rotation_between([0, 0, -1], new_forward);
+ */
+function make_rotation_between(from, to) {
+  const axis = cross_3(from, to), sine = Math.hypot(...axis), cosine = dot_3(from, to);
+  if (sine < 1e-12) return make_identity();
+  return make_rotation_about(axis.map(a => a / sine), Math.atan2(sine, cosine));
+}
+
+/**
+ * `invert_lorentz` inverts a Lorentz matrix as J·Mᵀ·J, with J = diag(1, 1, 1, -1).
+ * @param {Float64Array} m The Lorentz matrix.
+ * @return {Float64Array} Its inverse.
+ * @example const world_to_camera = invert_lorentz(camera_frame);
+ */
+function invert_lorentz(m) {
+  const inverse = new Float64Array(16);
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      const sign = ((r === AXIS_W) !== (c === AXIS_W)) ? -1 : 1;
+      inverse[c * 4 + r] = sign * m[r * 4 + c];
+    }
+  }
+  return inverse;
+}
+
+/**
+ * `get_column` reads one column of a 4×4 matrix.
+ * @param {Float64Array} m The matrix.
+ * @param {number} c The column index.
+ * @return {number[]} The column.
+ * @example const position = get_column(frame, AXIS_W);
+ */
+function get_column(m, c) {
+  return [m[c * 4], m[c * 4 + 1], m[c * 4 + 2], m[c * 4 + 3]];
+}
+
+/**
+ * `make_from_columns` builds a 4×4 matrix from four columns.
+ * @param {number[][]} columns The four 4-vectors.
+ * @return {Float64Array} The matrix.
+ * @example const frame = make_from_columns([right, up, back, position]);
+ */
+function make_from_columns(columns) {
+  const m = new Float64Array(16);
+  columns.forEach((column, c) => { for (let r = 0; r < 4; r++) m[c * 4 + r] = column[r]; });
+  return m;
+}
+
+/**
+ * `get_determinant` computes the determinant of a 4×4 matrix.
+ * @param {Float64Array} m The matrix.
+ * @return {number} Its determinant.
+ * @example if (get_determinant(frame) < 0) flip_right_axis();
+ */
+function get_determinant(m) {
+  const at = (r, c) => m[c * 4 + r];
+  let determinant = 0;
+  for (let c = 0; c < 4; c++) {
+    const s = [];
+    for (let r = 1; r < 4; r++) for (let cc = 0; cc < 4; cc++) if (cc !== c) s.push(at(r, cc));
+    const minor = s[0] * (s[4] * s[8] - s[5] * s[7]) - s[1] * (s[3] * s[8] - s[5] * s[6]) + s[2] * (s[3] * s[7] - s[4] * s[6]);
+    determinant += (c % 2 ? -1 : 1) * at(0, c) * minor;
+  }
+  return determinant;
+}
+
+/**
+ * `minkowski_dot` computes the Minkowski product ax bx + ay by + az bz - aw bw.
+ * @param {number[]} a The first 4-vector.
+ * @param {number[]} b The second 4-vector.
+ * @return {number} The product.
+ * @example const cosh_distance = -minkowski_dot(p, q);
+ */
+function minkowski_dot(a, b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] - a[3] * b[3];
+}
+
+/**
+ * `combine_vectors` computes s·a + t·b.
+ * @param {number[]} a The first vector.
+ * @param {number} s Its weight.
+ * @param {number[]} b The second vector.
+ * @param {number} t Its weight.
+ * @return {number[]} The combination.
+ * @example const midpoint_direction = combine_vectors(v, 1, bend, 0.5 * step_m);
+ */
+function combine_vectors(a, s, b, t) {
+  return a.map((ai, i) => s * ai + t * b[i]);
+}
+
+/**
+ * `dot_3` computes the Euclidean dot product of two 3-vectors.
+ * @param {number[]} a The first vector.
+ * @param {number[]} b The second vector.
+ * @return {number} The dot product.
+ * @example const cosine = dot_3(forward, target);
+ */
+function dot_3(a, b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/**
+ * `cross_3` computes the cross product of two 3-vectors.
+ * @param {number[]} a The first vector.
+ * @param {number[]} b The second vector.
+ * @return {number[]} a × b.
+ * @example const axis = cross_3(from, to);
+ */
+function cross_3(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+/**
+ * `normalize_3` scales a 3-vector to unit length.
+ * @param {number[]} a A non-zero 3-vector.
+ * @return {number[]} The unit vector.
+ * @example const direction = normalize_3([1, 0, -1]);
+ */
+function normalize_3(a) {
+  const length = Math.hypot(a[0], a[1], a[2]);
+  if (!(length > 0)) throw new Error(`normalize_3 needs a non-zero vector, got ${a}`);
+  return a.map(ai => ai / length);
+}
+
+/**
+ * `normalize_point` puts a 4-vector back on the hyperboloid <x, x> = -1.
+ * @param {number[]} x A 4-vector close to a point of H³.
+ * @return {number[]} The point.
+ * @example position = normalize_point(position);
+ */
+function normalize_point(x) {
+  const n = Math.sqrt(-minkowski_dot(x, x));
+  return x.map(xi => xi / n);
+}
+
+/**
+ * `normalize_tangent` projects a 4-vector onto the tangent space at a point and scales it to unit length.
+ * @param {number[]} x The point of H³.
+ * @param {number[]} w The vector to project; it must not be parallel to `x`.
+ * @return {number[]} The unit tangent vector.
+ * @example const up = normalize_tangent(position, UP_VECTOR);
+ */
+function normalize_tangent(x, w) {
+  const t = combine_vectors(w, 1, x, minkowski_dot(w, x));
+  const n = Math.sqrt(minkowski_dot(t, t));
+  return t.map(ti => ti / n);
+}
+
+/**
+ * `get_distance` computes the hyperbolic distance between two points, accurately even when they are close.
+ * @param {number[]} a The first point.
+ * @param {number[]} b The second point.
+ * @return {number} The distance, in curvature radii.
+ * @example const distance_m = get_distance(p, q) * curvature_radius_m;
+ */
+function get_distance(a, b) {
+  const d = combine_vectors(a, 1, b, -1);
+  return 2 * Math.asinh(0.5 * Math.sqrt(Math.max(minkowski_dot(d, d), 0)));
+}
+
+/**
+ * `orthonormalize_frame` repairs rounding drift in a frame: its last column becomes a point of H³ and the other three
+ * an orthonormal basis of the tangent space there.
+ * @param {Float64Array} m A frame whose columns are right, up, back and position.
+ * @return {Float64Array} The repaired frame.
+ * @example camera_frame = orthonormalize_frame(camera_frame);
+ */
+function orthonormalize_frame(m) {
+  const x = normalize_point(get_column(m, AXIS_W));
+  const basis = [];
+  for (let c = 0; c < 3; c++) {
+    let e = get_column(m, c);
+    e = combine_vectors(e, 1, x, minkowski_dot(e, x));
+    for (const f of basis) e = combine_vectors(e, 1, f, -minkowski_dot(e, f));
+    basis.push(normalize_tangent(x, e));
+  }
+  return make_from_columns([...basis, x]);
+}
+
+/**
+ * `make_mulberry32` makes a small seeded random number generator.
+ * @param {number} seed The seed.
+ * @return {function(): number} A function returning numbers in [0, 1).
+ * @example const random = make_mulberry32(7);
+ */
+function make_mulberry32(seed) {
+  let a = seed;
+  return function get_random() {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+const state = {
+  curvature_radius_m: DEFAULT_CURVATURE_RADIUS_M, horizon_radius_m: DEFAULT_HORIZON_RADIUS_M,
+  camera_frame: make_identity(), spawn_point: ORIGIN_POINT.slice(), boxes: [], clusters: [], wormholes: [], mouths: [],
+  is_fog_on: true, is_auto_flying: false, message: '', message_time_s: 0, is_scene_dirty: true
+};
+
+/**
+ * `get_throat_m` gives the throat's radius in the coordinates the lensing law uses: a quarter of the mouth size.
+ * @return {number} The throat radius, in blocks.
+ * @example if (areal_radius_m < get_throat_m()) cross();
+ */
+function get_throat_m() {
+  return THROAT_PER_HORIZON * state.horizon_radius_m;
+}
+
+/**
+ * `make_ground_frame` makes a frame on the ground: it walks `x_m` blocks along the x axis, then `z_m` blocks along
+ * the geodesic at right angles to it (Fermi coordinates), then turns by `heading_rad`.
+ * @param {number} x_m Distance along the x axis (east).
+ * @param {number} z_m Distance at right angles to it (negative is north, ahead from spawn).
+ * @param {number} heading_rad Turn from facing north toward east.
+ * @return {Float64Array} A frame that keeps the ground plane y = 0 in place.
+ * @example const house_frame = make_ground_frame(14, 0, QUARTER_TURN_RAD);
+ */
+function make_ground_frame(x_m, z_m, heading_rad) {
+  const r = state.curvature_radius_m;
+  return multiply_all(make_boost(AXIS_X, x_m / r), make_boost(AXIS_Z, z_m / r), make_rotation(AXIS_X, AXIS_Z, heading_rad));
+}
+
+/**
+ * `offset_frame` moves a frame by local Fermi offsets: along x, then z, then up.
+ * @param {Float64Array} frame The frame to start from.
+ * @param {number} x_m Offset along its x axis.
+ * @param {number} y_m Offset up, after the horizontal moves.
+ * @param {number} z_m Offset along its z axis.
+ * @return {Float64Array} The moved frame.
+ * @example const lintel_frame = offset_frame(house_frame, 0, 3, 3);
+ */
+function offset_frame(frame, x_m, y_m, z_m) {
+  const r = state.curvature_radius_m;
+  return multiply_all(frame, make_boost(AXIS_X, x_m / r), make_boost(AXIS_Z, z_m / r), make_boost(AXIS_Y, y_m / r));
+}
+
+/**
+ * `add_box` adds a hyperbolic box: the points within half_m[i] blocks of three perpendicular planes through the
+ * centre of `frame`, so its faces are surfaces at a constant distance from those planes.
+ * @param {Float64Array} frame The box's centre and axes.
+ * @param {number[]} half_m Half the size along each axis, in blocks.
+ * @param {number[]} color The colour.
+ * @param {number} material MATERIAL_SOLID, MATERIAL_GLASS or MATERIAL_GLOW.
+ * @example add_box(frame, [0.5, 1, 25], COLORS.red, MATERIAL_SOLID);
+ */
+function add_box(frame, half_m, color, material) {
+  if (state.boxes.length >= MAX_BOX_COUNT) throw new Error(`add_box: the scene already has ${MAX_BOX_COUNT} boxes`);
+  state.boxes.push({ normals: [0, 1, 2].map(i => get_column(frame, i)), center: get_column(frame, AXIS_W), half_m, color, material });
+}
+
+/**
+ * `add_standing_box` adds a box standing on the ground: its centre plane is the ground itself, so it is exactly
+ * `height_m` tall everywhere, however long it is (its hidden half lies below the ground).
+ * @param {Float64Array} frame A ground frame.
+ * @param {number} x_m Offset of the box along the frame's x axis.
+ * @param {number} z_m Offset along its z axis.
+ * @param {number} half_x_m Half the size along x.
+ * @param {number} height_m Height above the ground.
+ * @param {number} half_z_m Half the size along z.
+ * @param {number[]} color The colour.
+ * @param {number} [material] The material (solid by default).
+ * @example add_standing_box(house_frame, 0, -3, 4.6, 4, 0.5, COLORS.planks);
+ */
+function add_standing_box(frame, x_m, z_m, half_x_m, height_m, half_z_m, color, material = MATERIAL_SOLID) {
+  add_box(offset_frame(frame, x_m, 0, z_m), [half_x_m, height_m, half_z_m], color, material);
+}
+
+/**
+ * `add_floating_box` adds a box centred above the ground.
+ * @param {Float64Array} frame A ground frame.
+ * @param {number[]} center_m The centre's offsets (x, height, z).
+ * @param {number[]} half_m Half the size along each axis.
+ * @param {number[]} color The colour.
+ * @param {number} [material] The material (solid by default).
+ * @example add_floating_box(house_frame, [0, 3, 3], [0.5, 1, 0.5], COLORS.planks);
+ */
+function add_floating_box(frame, center_m, half_m, color, material = MATERIAL_SOLID) {
+  add_box(offset_frame(frame, center_m[0], center_m[1], center_m[2]), half_m, color, material);
+}
+
+/**
+ * `group_boxes` runs a builder and records the boxes it adds as one cluster, with a sphere around its first box's
+ * centre that holds them all, so the shader can skip the whole cluster when a ray is far from it.
+ * @param {function(): void} build The builder, which adds at least one box.
+ * @example group_boxes(() => build_house(get_house_frame()));
+ */
+function group_boxes(build) {
+  if (state.clusters.length >= MAX_CLUSTER_COUNT) throw new Error(`group_boxes: the scene already has ${MAX_CLUSTER_COUNT} clusters`);
+  const r = state.curvature_radius_m, first_box = state.boxes.length;
+  build();
+  if (state.boxes.length === first_box) throw new Error('group_boxes: the builder added no boxes');
+  const center = state.boxes[first_box].center;
+  let radius_m = 0;
+  for (let b = first_box; b < state.boxes.length; b++) {
+    const box = state.boxes[b];
+    const box_radius_m = r * Math.acosh(box.half_m.reduce((product, h) => product * Math.cosh(h / r), 1));
+    radius_m = Math.max(radius_m, get_distance(center, box.center) * r + box_radius_m);
+  }
+  state.clusters.push({ center, radius_m, first_box, box_count: state.boxes.length - first_box });
+}
+
+/**
+ * `get_box_lower_bound_m` gives a distance that a point is at least from a box: the largest of its distances past
+ * each of the box's three slabs.
+ * @param {Object} box The box.
+ * @param {number[]} x The point.
+ * @return {number} The lower bound, in blocks (negative inside the box).
+ * @example if (get_box_lower_bound_m(box, tree_point) < 3) skip_tree();
+ */
+function get_box_lower_bound_m(box, x) {
+  const r = state.curvature_radius_m;
+  return Math.max(...box.normals.map((n, i) => r * Math.asinh(Math.abs(minkowski_dot(x, n))) - box.half_m[i]));
+}
+
+/**
+ * `build_rails` adds the straight cobblestone wall ahead of spawn and seven straight walls leaving it at right angles,
+ * which would stay parallel in flat space.
+ * @example build_rails();
+ */
+function build_rails() {
+  const base_frame = make_ground_frame(0, -RAIL_START_M, 0);
+  group_boxes(() => add_standing_box(base_frame, 0, 0, BASE_WALL_HALF_LENGTH_M, RAIL_HEIGHT_M, RAIL_HALF_WIDTH_M, COLORS.cobble));
+  for (let k = -RAIL_HALF_COUNT; k <= RAIL_HALF_COUNT; k++) {
+    const rail_frame = offset_frame(base_frame, k * RAIL_SPACING_M, 0, 0);
+    const half_length_m = RAIL_LENGTH_M / 2;
+    group_boxes(() => add_standing_box(rail_frame, 0, -(RAIL_HALF_WIDTH_M + half_length_m), RAIL_HALF_WIDTH_M, RAIL_HEIGHT_M,
+      half_length_m, COLORS[RAIL_COLOR_NAMES[k + RAIL_HALF_COUNT]]));
+  }
+}
+
+/**
+ * `build_house` adds a small house whose door faces the frame's +z axis: walls, windows, a stepped roof, a chimney
+ * and three coloured blocks inside. Each wall's pieces are placed along the wall's own line, so they stay in one
+ * plane.
+ * @param {Float64Array} frame The house's ground frame.
+ * @example build_house(make_ground_frame(14, 0, QUARTER_TURN_RAD));
+ */
+function build_house(frame) {
+  const front_frame = offset_frame(frame, 0, 0, 3), back_frame = offset_frame(frame, 0, 0, -3);
+  const side_frames = [offset_frame(frame, -4, 0, 0), offset_frame(frame, 4, 0, 0)];
+  add_standing_box(frame, 0, 0, 4.6, 0.1, 3.6, COLORS.planks);
+  add_standing_box(back_frame, 0, 0, 4.6, 4, 0.5, COLORS.planks);
+  for (const side_frame of side_frames) add_standing_box(side_frame, 0, 0, 0.5, 4, 3.6, COLORS.planks);
+  add_standing_box(front_frame, -2.6, 0, 2.1, 4, 0.5, COLORS.planks);
+  add_standing_box(front_frame, 2.6, 0, 2.1, 4, 0.5, COLORS.planks);
+  add_floating_box(front_frame, [0, 3, 0], [0.5, 1, 0.5], COLORS.planks);
+  for (const side of [-1, 1]) {
+    add_floating_box(front_frame, [side * 2.3, 2.5, 0], [0.6, 0.6, 0.56], COLORS.glass, MATERIAL_GLASS);
+    add_floating_box(back_frame, [side * 2.3, 2.5, 0], [0.6, 0.6, 0.56], COLORS.glass, MATERIAL_GLASS);
+  }
+  for (const side_frame of side_frames) add_floating_box(side_frame, [0, 2.5, 0], [0.56, 0.6, 0.6], COLORS.glass, MATERIAL_GLASS);
+  const roof_half_depths_m = [4.4, 3.4, 2.4, 1.4, 0.5];
+  roof_half_depths_m.forEach((half_depth_m, step) => add_floating_box(frame, [0, 4.5 + step, 0], [5.4, 0.5, half_depth_m], COLORS.roof));
+  add_floating_box(frame, [2, 8, -1.5], [0.5, 2, 0.5], COLORS.brick);
+  add_standing_box(frame, -2, -1.5, 0.5, 1, 0.5, COLORS.red);
+  add_standing_box(frame, 2, -1.5, 0.5, 1, 0.5, COLORS.blue);
+  add_standing_box(frame, 0, -2, 0.5, 2, 0.5, COLORS.gold);
+}
+
+/**
+ * `build_tree` adds a blocky tree: a trunk, a wide layer of leaves and a smaller one on top.
+ * @param {Float64Array} frame The tree's ground frame.
+ * @param {number} height_m The trunk's height.
+ * @example build_tree(make_ground_frame(-16, 4, 0), 4);
+ */
+function build_tree(frame, height_m) {
+  add_standing_box(frame, 0, 0, 0.5, height_m, 0.5, COLORS.log);
+  add_floating_box(frame, [0, height_m - 0.5, 0], [2.5, 1, 2.5], COLORS.leaves);
+  add_floating_box(frame, [0, height_m + 1, 0], [1.5, 0.5, 1.5], COLORS.leaves);
+}
+
+/**
+ * `build_pylon` adds a team's pylon: a glowing core on a stone base, ringed by its consoles.
+ * @param {Float64Array} frame The pylon's ground frame.
+ * @param {number[]} team_color The team's colour.
+ * @example build_pylon(make_ground_frame(-6, 21, 0), COLORS.team_blue);
+ */
+function build_pylon(frame, team_color) {
+  add_standing_box(frame, 0, 0, 1.5, 0.4, 1.5, COLORS.stone);
+  add_standing_box(frame, 0, 0, 0.6, 6, 0.6, team_color, MATERIAL_GLOW);
+  for (let i = 0; i < CONSOLES_PER_PYLON; i++) {
+    const angle_rad = i * FULL_TURN_RAD / CONSOLES_PER_PYLON;
+    add_standing_box(frame, CONSOLE_RING_RADIUS_M * Math.sin(angle_rad), CONSOLE_RING_RADIUS_M * Math.cos(angle_rad), 0.4, 1.1, 0.4, COLORS.console);
+  }
+}
+
+/**
+ * `get_red_pylon_frame` gives the frame of the red pylon: 42 blocks down the middle rail, then 8 blocks to its right.
+ * @return {Float64Array} The frame.
+ * @example build_pylon(get_red_pylon_frame(), COLORS.team_red);
+ */
+function get_red_pylon_frame() {
+  const r = state.curvature_radius_m;
+  return multiply_all(make_ground_frame(0, -RAIL_START_M, 0), make_boost(AXIS_Z, -RED_PYLON_DISTANCE_M / r), make_boost(AXIS_X, RED_PYLON_OFFSET_M / r));
+}
+
+/**
+ * `make_frame_from_spawn` makes the ground frame reached by turning at spawn and walking straight: its forward axis
+ * (-z) continues the walk.
+ * @param {number} bearing_rad The turn from the spawn view's heading, toward the right.
+ * @param {number} distance_m How far to walk.
+ * @return {Float64Array} The frame.
+ * @example const pylon_frame = make_frame_from_spawn(2.3, 13);
+ */
+function make_frame_from_spawn(bearing_rad, distance_m) {
+  return multiply_all(make_ground_frame(SPAWN_X_M, SPAWN_Z_M, SPAWN_HEADING_RAD), make_rotation(AXIS_X, AXIS_Z, bearing_rad),
+    make_boost(AXIS_Z, -distance_m / state.curvature_radius_m));
+}
+
+/**
+ * `get_house_frame` gives the house's frame, with its door facing spawn.
+ * @return {Float64Array} The frame.
+ * @example build_house(get_house_frame());
+ */
+function get_house_frame() {
+  return make_ground_frame(HOUSE_DISTANCE_M, 0, QUARTER_TURN_RAD);
+}
+
+/**
+ * `place_trees` adds trees at random spots near spawn that are clear of the other boxes and of the given points.
+ * @param {number[][]} avoided_points Points (such as mouths) that trees must stay away from.
+ * @example place_trees([state.spawn_point]);
+ */
+function place_trees(avoided_points) {
+  const r = state.curvature_radius_m, get_random = make_mulberry32(TREE_SEED);
+  let placed_count = 0;
+  for (let attempt = 0; attempt < TREE_ATTEMPT_COUNT && placed_count < TREE_COUNT; attempt++) {
+    const angle_rad = get_random() * FULL_TURN_RAD;
+    const distance_m = TREE_MIN_DISTANCE_M + get_random() * (TREE_MAX_DISTANCE_M - TREE_MIN_DISTANCE_M);
+    const spin_rad = get_random() * FULL_TURN_RAD, height_m = TREE_MIN_HEIGHT_M + Math.floor(get_random() * TREE_HEIGHT_CHOICE_COUNT);
+    const frame = multiply_all(make_rotation(AXIS_X, AXIS_Z, angle_rad), make_boost(AXIS_Z, distance_m / r), make_rotation(AXIS_X, AXIS_Z, spin_rad));
+    const point = get_column(frame, AXIS_W);
+    if (avoided_points.some(p => get_distance(p, point) * r < TREE_CLEARANCE_FROM_POINTS_M)) continue;
+    if (state.boxes.some(box => get_box_lower_bound_m(box, point) < TREE_CLEARANCE_FROM_BOXES_M)) continue;
+    group_boxes(() => build_tree(frame, height_m));
+    placed_count++;
+  }
+}
+
+/**
+ * `make_mouth_frame` makes a mouth's frame from a ground frame and local offsets. You pass through the mouth cleanly
+ * when moving along its forward axis (-back), which `heading_rad` and `pitch_down_rad` turn.
+ * @param {Float64Array} frame The ground frame to start from.
+ * @param {number} x_m Offset along x.
+ * @param {number} y_m Height.
+ * @param {number} z_m Offset along z.
+ * @param {number} heading_rad Turn of the forward axis from the frame's -z toward its +x.
+ * @param {number} pitch_down_rad Tilt of the forward axis below horizontal.
+ * @return {Float64Array} The mouth frame (columns right, up, back, centre).
+ * @example const mouth = make_mouth_frame(make_identity(), -7, 3, 2, 0, 0);
+ */
+function make_mouth_frame(frame, x_m, y_m, z_m, heading_rad, pitch_down_rad) {
+  return multiply_all(offset_frame(frame, x_m, y_m, z_m), make_rotation(AXIS_X, AXIS_Z, heading_rad), make_rotation(AXIS_Z, AXIS_Y, pitch_down_rad));
+}
+
+/**
+ * `make_default_wormholes` makes the three starting wormholes: ahead-left of spawn to the house door, behind spawn
+ * (by the blue pylon) to the red pylon far away, and far left to high above the rails. Each entrance lies on a
+ * straight line from spawn and faces along it, so flying straight in from spawn enters it cleanly.
+ * @return {Object[]} Pairs of mouth frames, `{ a, b }`.
+ * @example state.wormholes = make_default_wormholes();
+ */
+function make_default_wormholes() {
+  const base_frame = make_ground_frame(0, -RAIL_START_M, 0);
+  const make_entrance = ({ bearing_rad, distance_m }) => offset_frame(make_frame_from_spawn(bearing_rad, distance_m), 0, MOUTH_HEIGHT_M, 0);
+  const exits = [
+    make_mouth_frame(get_house_frame(), 0, MOUTH_HEIGHT_M, 8, 0, EXIT_PITCH_DOWN_RAD),
+    make_mouth_frame(get_red_pylon_frame(), 0, MOUTH_HEIGHT_M, 10, 0, EXIT_PITCH_DOWN_RAD),
+    make_mouth_frame(base_frame, 0, 12, -6, 0, 1.1)
+  ];
+  return DEFAULT_ENTRANCES.map((entrance, i) => ({ a: make_entrance(entrance), b: exits[i] }));
+}
+
+/**
+ * `rebuild_mouths` turns the wormhole pairs into the flat list of mouths, each with its gluing map: the isometry that
+ * takes the space around this mouth to the space around its partner, with the mouth's back axis flipped. A mouth
+ * without a partner leads into itself, so its gluing map turns everything around its centre.
+ * @example state.wormholes.pop(); rebuild_mouths();
+ */
+function rebuild_mouths() {
+  state.mouths = [];
+  state.wormholes.forEach((pair, pair_index) => {
+    const first_index = state.mouths.length;
+    state.mouths.push({ frame: pair.a, pair_index, name: `${pair_index + 1}A`, partner_index: pair.b ? first_index + 1 : first_index });
+    if (pair.b) state.mouths.push({ frame: pair.b, pair_index, name: `${pair_index + 1}B`, partner_index: first_index });
+  });
+  for (const mouth of state.mouths) {
+    const is_paired = state.mouths[mouth.partner_index] !== mouth;
+    mouth.flip = make_identity();
+    if (is_paired) mouth.flip[AXIS_Z * 4 + AXIS_Z] = -1;
+    else for (let i = 0; i < 3; i++) mouth.flip[i * 4 + i] = -1;
+    mouth.center = get_column(mouth.frame, AXIS_W);
+    mouth.to_local = invert_lorentz(mouth.frame);
+    mouth.gluing = multiply_all(state.mouths[mouth.partner_index].frame, mouth.flip, mouth.to_local);
+  }
+  state.is_scene_dirty = true;
+}
+
+/**
+ * `rebuild_world` builds the whole scene for the current curvature radius: boxes, default wormholes and the camera
+ * back at spawn.
+ * @example state.curvature_radius_m = 12; rebuild_world();
+ */
+function rebuild_world() {
+  state.boxes = [];
+  state.clusters = [];
+  state.spawn_point = get_column(make_ground_frame(SPAWN_X_M, SPAWN_Z_M, 0), AXIS_W);
+  build_rails();
+  group_boxes(() => build_house(get_house_frame()));
+  group_boxes(() => build_pylon(make_frame_from_spawn(BLUE_PYLON_BEARING_RAD, BLUE_PYLON_DISTANCE_M), COLORS.team_blue));
+  group_boxes(() => build_pylon(get_red_pylon_frame(), COLORS.team_red));
+  state.wormholes = make_default_wormholes();
+  rebuild_mouths();
+  place_trees([state.spawn_point, ...state.mouths.map(m => m.center)]);
+  move_to_spawn();
+  state.is_scene_dirty = true;
+}
+
+/**
+ * `get_dln_n_flat` gives how fast the log of the flat wormhole's refractive index changes with the isotropic radius,
+ * for the "black hole foil" ds² = -A dt² + dr²/B + r² dΩ² (Damour & Solodukhin 2007), with n = (1 + ρ_t/ρ)²/√A.
+ * @param {number} rho_m The isotropic radius, in blocks.
+ * @param {number} throat_m The throat's isotropic radius ρ_t, in blocks.
+ * @return {number} d ln n / dρ, per block (negative: n grows toward the mouth).
+ * @example const gradient = get_dln_n_flat(3, 0.35);
+ */
+function get_dln_n_flat(rho_m, throat_m) {
+  const psi = 1 + throat_m / rho_m, r_m = rho_m * psi * psi, rs_m = 4 * throat_m;
+  const A = (1 - rs_m / r_m + LAMBDA_SQUARED) / (1 + LAMBDA_SQUARED);
+  return -2 * throat_m / (rho_m * rho_m * psi) - rs_m * psi * (1 - throat_m / rho_m) / (2 * r_m * r_m * (1 + LAMBDA_SQUARED) * A);
+}
+
+/**
+ * `get_effective_radius_m` gives the flat radius whose 1/radius matches the hyperbolic version of 1/radius at a
+ * distance ρ: (coth(ρ) - 1)/R, the potential of a point mass in H³ (the Green's function of its Laplacian). It is
+ * about ρ close to a mouth and grows like e^(2ρ) far away, so a mouth's pull fades exponentially.
+ * @param {number} rho The distance from the mouth's centre, in curvature radii.
+ * @return {number} The effective radius, in blocks: (R/2)(e^(2ρ) - 1).
+ * @example const rho_effective_m = get_effective_radius_m(0.5);
+ */
+function get_effective_radius_m(rho) {
+  return state.curvature_radius_m * Math.sinh(rho) * Math.exp(rho);
+}
+
+/**
+ * `get_light_bend` gives how fast a light ray at `x` moving along `v` turns, summed over the mouths within the bending
+ * cutoff: each mouth's refractive index is the flat law at the effective radius of `get_effective_radius_m`. The
+ * shader's `get_bend` is the same formula.
+ * @param {number[]} x The point.
+ * @param {number[]} v The unit tangent direction.
+ * @return {{acceleration: number[], nearest_m: number}} The turning rate (a tangent vector, per block, at right
+ *   angles to `v`) and the distance to the nearest mouth.
+ * @example const { acceleration } = get_light_bend(position, direction);
+ */
+function get_light_bend(x, v) {
+  const r = state.curvature_radius_m, cutoff_m = BEND_CUTOFF_PER_R * r, throat_m = get_throat_m();
+  let acceleration = [0, 0, 0, 0], nearest_m = Infinity;
+  for (const mouth of state.mouths) {
+    const rho = get_distance(x, mouth.center), rho_m = rho * r;
+    nearest_m = Math.min(nearest_m, rho_m);
+    if (rho_m > cutoff_m) continue;
+    const cosh_rho = Math.cosh(rho), sinh_rho = Math.sinh(rho);
+    const gradient = get_dln_n_flat(get_effective_radius_m(rho), throat_m) * Math.exp(2 * rho);
+    const radial = combine_vectors(x, cosh_rho / sinh_rho, mouth.center, -1 / sinh_rho);
+    acceleration = combine_vectors(acceleration, 1, radial, gradient);
+  }
+  return { acceleration: combine_vectors(acceleration, 1, v, -minkowski_dot(acceleration, v)), nearest_m };
+}
+
+/**
+ * `get_space_stretch` gives how many blocks of proper length one block of the lensing coordinates is at `x`, so that
+ * flying at a steady speed slows down near a mouth, where space is stretched.
+ * @param {number[]} x The point.
+ * @return {number} The stretch factor ψ², at least 1.
+ * @example left_m -= step_m * get_space_stretch(position);
+ */
+function get_space_stretch(x) {
+  const throat_m = get_throat_m();
+  let psi = 1;
+  for (const mouth of state.mouths) psi += throat_m / get_effective_radius_m(get_distance(x, mouth.center));
+  return psi * psi;
+}
+
+/**
+ * `cross_throat_if_inside` moves a frame through a throat if its position is inside one: the position is reflected
+ * through the throat sphere and carried to the partner mouth, and each axis keeps its sideways part and flips its
+ * part along the radius.
+ * @param {Float64Array} frame The frame (columns right, up, back, position).
+ * @return {{frame: Float64Array, mouth: Object}|null} The frame on the far side and the mouth entered, or null.
+ * @example const crossing = cross_throat_if_inside(camera_frame);
+ */
+function cross_throat_if_inside(frame) {
+  const r = state.curvature_radius_m, throat_m = get_throat_m(), x = get_column(frame, AXIS_W);
+  for (const mouth of state.mouths) {
+    const rho = get_distance(x, mouth.center), sinh_rho = Math.sinh(rho), cosh_rho = Math.cosh(rho);
+    const rho_effective_m = get_effective_radius_m(rho);
+    if (rho_effective_m >= throat_m) continue;
+    const radial = combine_vectors(x, cosh_rho / sinh_rho, mouth.center, -1 / sinh_rho);
+    const outward = combine_vectors(x, 1 / sinh_rho, mouth.center, -cosh_rho / sinh_rho);
+    const new_rho = 0.5 * Math.log1p(2 * throat_m * throat_m / rho_effective_m / r);
+    const new_center = apply_matrix(mouth.gluing, mouth.center), new_outward = apply_matrix(mouth.gluing, outward);
+    const new_x = combine_vectors(new_center, Math.cosh(new_rho), new_outward, Math.sinh(new_rho));
+    const new_radial = combine_vectors(new_center, Math.sinh(new_rho), new_outward, Math.cosh(new_rho));
+    const new_axes = [0, 1, 2].map(c => {
+      const axis = get_column(frame, c), along = minkowski_dot(axis, radial);
+      const sideways = apply_matrix(mouth.gluing, combine_vectors(axis, 1, radial, -along));
+      return combine_vectors(sideways, 1, new_radial, -along);
+    });
+    return { frame: orthonormalize_frame(make_from_columns([...new_axes, new_x])), mouth };
+  }
+  return null;
+}
+
+/**
+ * `get_local_direction` expresses a world tangent vector at the camera in the camera's own axes.
+ * @param {Float64Array} frame The camera frame.
+ * @param {number[]} w The world tangent vector.
+ * @return {number[]} The 3-vector (right, up, back components).
+ * @example const up_local = get_local_direction(camera_frame, up_world);
+ */
+function get_local_direction(frame, w) {
+  return apply_matrix(invert_lorentz(frame), w).slice(0, 3);
+}
+
+/**
+ * `get_world_up_local` gives the direction straight up, away from the ground, in the camera's axes.
+ * @return {number[]} The unit 3-vector.
+ * @example const up_local = get_world_up_local();
+ */
+function get_world_up_local() {
+  const frame = state.camera_frame, x = get_column(frame, AXIS_W);
+  return normalize_3(get_local_direction(frame, normalize_tangent(x, UP_VECTOR)));
+}
+
+/**
+ * `say` shows a short message in the stats panel.
+ * @param {string} text The message.
+ * @example say('Through wormhole 1');
+ */
+function say(text) {
+  state.message = text;
+  state.message_time_s = MESSAGE_DURATION_S;
+}
+
+/**
+ * `fly_along_light` moves the camera the way light moves: the path bends near mouths and passes through throats,
+ * and the view turns with the path, so the crosshair stays where you are heading.
+ * @param {number[]} local_direction The direction to move in the camera's axes (unit 3-vector).
+ * @param {number} distance_m The proper distance to move.
+ * @example fly_along_light([0, 0, -1], WALK_SPEED_M_PER_S * dt_s);
+ */
+function fly_along_light(local_direction, distance_m) {
+  const r = state.curvature_radius_m, m = normalize_3(local_direction), m_4 = [...m, 0];
+  let left_m = distance_m;
+  for (let n = 0; n < FLY_MAX_SUBSTEP_COUNT && left_m > 1e-6; n++) {
+    const x = get_column(state.camera_frame, AXIS_W), stretch = get_space_stretch(x);
+    const v = apply_matrix(state.camera_frame, m_4);
+    const first = get_light_bend(x, v);
+    const step_m = Math.min(left_m / stretch, FLY_STEP_PER_NEAREST * first.nearest_m, FLY_MAX_STEP_M);
+    const midpoint_direction = normalize_tangent(x, combine_vectors(v, 1, first.acceleration, 0.5 * step_m));
+    state.camera_frame = multiply_matrices(state.camera_frame, make_rotation_between(m, normalize_3(get_local_direction(state.camera_frame, midpoint_direction))));
+    const middle_frame = multiply_matrices(state.camera_frame, make_boost_along(m, 0.5 * step_m / r));
+    const middle = get_light_bend(get_column(middle_frame, AXIS_W), apply_matrix(middle_frame, m_4));
+    state.camera_frame = multiply_matrices(state.camera_frame, make_boost_along(m, step_m / r));
+    const end_x = get_column(state.camera_frame, AXIS_W);
+    const end_correction = combine_vectors(middle.acceleration, step_m, first.acceleration, -0.5 * step_m);
+    const end_direction = normalize_tangent(end_x, combine_vectors(apply_matrix(state.camera_frame, m_4), 1, end_correction, 1));
+    state.camera_frame = orthonormalize_frame(multiply_matrices(state.camera_frame, make_rotation_between(m, normalize_3(get_local_direction(state.camera_frame, end_direction)))));
+    left_m -= step_m * stretch;
+    const crossing = cross_throat_if_inside(state.camera_frame);
+    if (crossing) {
+      state.camera_frame = crossing.frame;
+      say(`Through wormhole ${crossing.mouth.pair_index + 1}: out of mouth ${state.mouths[crossing.mouth.partner_index].name}`);
+    }
+  }
+}
+
+/**
+ * `level_out` removes the camera's roll a little at a time, keeping the view direction.
+ * @param {number} dt_s The frame time.
+ * @example level_out(1 / 60);
+ */
+function level_out(dt_s) {
+  remove_roll(1 - Math.exp(-LEVEL_OUT_RATE_PER_S * dt_s));
+}
+
+/**
+ * `remove_roll` turns the camera about its view direction to remove part of its roll, unless it looks almost straight
+ * up or down.
+ * @param {number} fraction How much of the roll to remove, from 0 to 1.
+ * @example remove_roll(1);
+ */
+function remove_roll(fraction) {
+  const up_local = get_world_up_local();
+  if (Math.abs(up_local[2]) > LEVEL_OUT_MAX_UP_DOT) return;
+  const roll_rad = Math.atan2(-up_local[0], up_local[1]);
+  state.camera_frame = multiply_matrices(state.camera_frame, make_rotation_about([0, 0, 1], roll_rad * fraction));
+}
+
+/**
+ * `look_around` turns the view: left and right about the up direction, up and down about the camera's right axis,
+ * never past straight up or down.
+ * @param {number} dx_px Horizontal mouse movement.
+ * @param {number} dy_px Vertical mouse movement.
+ * @example look_around(event.movementX, event.movementY);
+ */
+function look_around(dx_px, dy_px) {
+  const up_local = get_world_up_local();
+  state.camera_frame = multiply_matrices(state.camera_frame, make_rotation_about(up_local, -dx_px * LOOK_RAD_PER_PX));
+  const pitch_rad = Math.asin(Math.max(-1, Math.min(1, -up_local[2])));
+  const new_pitch_rad = Math.max(-MAX_PITCH_RAD, Math.min(MAX_PITCH_RAD, pitch_rad - dy_px * LOOK_RAD_PER_PX));
+  state.camera_frame = orthonormalize_frame(multiply_matrices(state.camera_frame, make_rotation_about([1, 0, 0], new_pitch_rad - pitch_rad)));
+}
+
+/**
+ * `set_camera` puts the camera on a ground frame at a height, looking forward with a pitch.
+ * @param {Float64Array} ground_frame The ground frame under the camera.
+ * @param {number} height_m The eye height.
+ * @param {number} pitch_up_rad How far above horizontal to look.
+ * @example set_camera(make_identity(), 13.6, -1.45);
+ */
+function set_camera(ground_frame, height_m, pitch_up_rad) {
+  state.camera_frame = multiply_all(ground_frame, make_boost(AXIS_Y, height_m / state.curvature_radius_m), make_rotation(AXIS_Z, AXIS_Y, -pitch_up_rad));
+}
+
+/**
+ * `move_to_spawn` puts the camera at spawn, facing the rails.
+ * @example move_to_spawn();
+ */
+function move_to_spawn() {
+  set_camera(make_ground_frame(SPAWN_X_M, SPAWN_Z_M, SPAWN_HEADING_RAD), EYE_HEIGHT_M, SPAWN_PITCH_UP_RAD);
+}
+
+/**
+ * `trace_miss` follows the light ray leaving the camera along a local direction and measures by how much it misses a
+ * mouth's centre: the offset from the centre at right angles to the ray, in the mouth's axes. A ray that falls into
+ * the throat is measured where it crosses the throat (interpolated between steps, so the miss changes smoothly with
+ * the aim); any other ray is measured at its closest approach.
+ * @param {number[]} local_direction The ray's direction in the camera's axes.
+ * @param {Object} target The mouth.
+ * @return {number[]} The miss 3-vector, in blocks (zero when the ray goes through the exact middle).
+ * @example const miss = trace_miss([0, 0, -1], state.mouths[0]);
+ */
+function trace_miss(local_direction, target) {
+  const r = state.curvature_radius_m, throat_m = get_throat_m();
+  let x = get_column(state.camera_frame, AXIS_W), v = apply_matrix(state.camera_frame, [...normalize_3(local_direction), 0]);
+  let closest_m = Infinity, closest_miss = [0, 0, 0], previous = null, travelled_m = 0;
+  for (let i = 0; i < AIM_MAX_STEP_COUNT && travelled_m < AIM_MAX_TRAVEL_M; i++) {
+    const rho = get_distance(x, target.center), rho_m = rho * r, excess_m = get_effective_radius_m(rho) - throat_m;
+    const local_x = apply_matrix(target.to_local, x).slice(0, 3), local_v = apply_matrix(target.to_local, v).slice(0, 3);
+    const along = dot_3(local_x, local_v) / dot_3(local_v, local_v);
+    const miss = local_x.map((xi, k) => r * (xi - along * local_v[k]));
+    if (excess_m < 0) {
+      if (previous === null) return miss;
+      const fraction = previous.excess_m / (previous.excess_m - excess_m);
+      return previous.miss.map((m, k) => m + fraction * (miss[k] - m));
+    }
+    if (rho_m < closest_m) { closest_m = rho_m; closest_miss = miss; }
+    else if (rho_m > closest_m + AIM_GIVE_UP_PAST_CLOSEST_M) break;
+    previous = { miss, excess_m };
+    const first = get_light_bend(x, v);
+    const step_m = Math.min(AIM_MAX_STEP_M, AIM_STEP_PER_NEAREST * first.nearest_m);
+    const s = step_m / r;
+    const vh = normalize_tangent(x, combine_vectors(v, 1, first.acceleration, 0.5 * step_m));
+    const xm = combine_vectors(x, Math.cosh(0.5 * s), vh, Math.sinh(0.5 * s)), vm = combine_vectors(x, Math.sinh(0.5 * s), vh, Math.cosh(0.5 * s));
+    const middle = get_light_bend(xm, vm);
+    const xn = normalize_point(combine_vectors(x, Math.cosh(s), vh, Math.sinh(s)));
+    const vn = combine_vectors(x, Math.sinh(s), vh, Math.cosh(s));
+    v = normalize_tangent(xn, combine_vectors(vn, 1, combine_vectors(middle.acceleration, step_m, first.acceleration, -0.5 * step_m), 1));
+    x = xn;
+    travelled_m += step_m;
+  }
+  return closest_miss;
+}
+
+/**
+ * `aim_through_mouth` turns the view so the light ray through the crosshair passes through the exact middle of a
+ * mouth: first straight at its centre with the horizon level, then Gauss-Newton on the view direction to allow for
+ * bending, damped so it never turns far at once.
+ * @param {Object} target The mouth.
+ * @example aim_through_mouth(state.mouths[0]);
+ */
+function aim_through_mouth(target) {
+  const x = get_column(state.camera_frame, AXIS_W);
+  const toward_local = normalize_3(get_local_direction(state.camera_frame, normalize_tangent(x, target.center)));
+  state.camera_frame = orthonormalize_frame(multiply_matrices(state.camera_frame, make_rotation_between([0, 0, -1], toward_local)));
+  remove_roll(1);
+  let alpha = 0, beta = 0;
+  const direction_of = (a, b) => [a, b, -1];
+  for (let iteration = 0; iteration < AIM_MAX_ITERATION_COUNT; iteration++) {
+    const miss = trace_miss(direction_of(alpha, beta), target);
+    if (Math.hypot(...miss) < AIM_TOLERANCE_M) break;
+    const miss_alpha = trace_miss(direction_of(alpha + AIM_FINITE_DIFFERENCE, beta), target);
+    const miss_beta = trace_miss(direction_of(alpha, beta + AIM_FINITE_DIFFERENCE), target);
+    const j_alpha = miss_alpha.map((m, k) => (m - miss[k]) / AIM_FINITE_DIFFERENCE);
+    const j_beta = miss_beta.map((m, k) => (m - miss[k]) / AIM_FINITE_DIFFERENCE);
+    const a11 = dot_3(j_alpha, j_alpha), a12 = dot_3(j_alpha, j_beta), a22 = dot_3(j_beta, j_beta);
+    const b1 = -dot_3(j_alpha, miss), b2 = -dot_3(j_beta, miss), determinant = a11 * a22 - a12 * a12;
+    if (Math.abs(determinant) < 1e-12) break;
+    const d_alpha = (a22 * b1 - a12 * b2) / determinant, d_beta = (a11 * b2 - a12 * b1) / determinant;
+    const damping = Math.min(1, AIM_MAX_TURN / Math.hypot(d_alpha, d_beta));
+    alpha += damping * d_alpha;
+    beta += damping * d_beta;
+  }
+  const turn = make_rotation_between([0, 0, -1], normalize_3(direction_of(alpha, beta)));
+  state.camera_frame = orthonormalize_frame(multiply_matrices(state.camera_frame, turn));
+}
+
+/**
+ * `find_aimed_mouth` finds the mouth whose dark disk is closest to the crosshair: the angle from the crosshair to its
+ * centre, less the disk's apparent radius, is smallest. So a big nearby mouth beats a small far one behind it.
+ * @return {Object|null} The mouth, or null if there are none.
+ * @example const mouth = find_aimed_mouth();
+ */
+function find_aimed_mouth() {
+  const r = state.curvature_radius_m, x = get_column(state.camera_frame, AXIS_W);
+  let best_score_rad = Infinity, best_mouth = null;
+  for (const mouth of state.mouths) {
+    const distance = get_distance(x, mouth.center);
+    if (distance < 1e-9) continue;
+    const local = normalize_3(get_local_direction(state.camera_frame, normalize_tangent(x, mouth.center)));
+    const angle_rad = Math.acos(Math.max(-1, Math.min(1, -local[2])));
+    const disk_radius_rad = Math.atan(SHADOW_PER_HORIZON * state.horizon_radius_m / (r * Math.sinh(distance)));
+    if (angle_rad - disk_radius_rad < best_score_rad) { best_score_rad = angle_rad - disk_radius_rad; best_mouth = mouth; }
+  }
+  return best_mouth;
+}
+
+/**
+ * `aim_at_nearest_mouth` aims through the middle of the mouth closest to the crosshair.
+ * @example aim_at_nearest_mouth();
+ */
+function aim_at_nearest_mouth() {
+  const mouth = find_aimed_mouth();
+  if (mouth) aim_through_mouth(mouth);
+}
+
+/**
+ * `place_mouth` places a mouth 6 blocks ahead, upright, entered cleanly along the direction you face (levelled). The
+ * first press places an entrance; the next press gives it an exit.
+ * @example place_mouth();
+ */
+function place_mouth() {
+  const ahead = multiply_matrices(state.camera_frame, make_boost(AXIS_Z, -PLACE_DISTANCE_M / state.curvature_radius_m));
+  const center = get_column(ahead, AXIS_W), up = normalize_tangent(center, UP_VECTOR);
+  let back = get_column(ahead, AXIS_Z);
+  back = combine_vectors(back, 1, up, -minkowski_dot(back, up));
+  if (minkowski_dot(back, back) < 1e-6) back = combine_vectors(get_column(ahead, AXIS_Y), -1, up, 0);
+  back = normalize_tangent(center, combine_vectors(back, 1, up, -minkowski_dot(back, up)));
+  const frame = make_from_columns([cross_tangent(center, up, back), up, back, center]);
+  const last_pair = state.wormholes[state.wormholes.length - 1];
+  if (last_pair && !last_pair.b) {
+    last_pair.b = frame;
+    say(`Wormhole ${state.wormholes.length} connected`);
+  } else {
+    if (state.wormholes.length >= MAX_MOUTH_COUNT / 2) state.wormholes.shift();
+    state.wormholes.push({ a: frame, b: null });
+    say('Entrance placed: press B again to place its exit');
+  }
+  rebuild_mouths();
+}
+
+/**
+ * `cross_tangent` finds the unit tangent vector at a point that completes `up` and `back` to a right-handed frame.
+ * @param {number[]} x The point.
+ * @param {number[]} up The unit up vector there.
+ * @param {number[]} back The unit back vector there, at right angles to `up`.
+ * @return {number[]} The right vector.
+ * @example const right = cross_tangent(center, up, back);
+ */
+function cross_tangent(x, up, back) {
+  for (let c = 0; c < 3; c++) {
+    let candidate = [0, 0, 0, 0];
+    candidate[c] = 1;
+    candidate = combine_vectors(candidate, 1, x, minkowski_dot(candidate, x));
+    candidate = combine_vectors(candidate, 1, up, -minkowski_dot(candidate, up));
+    candidate = combine_vectors(candidate, 1, back, -minkowski_dot(candidate, back));
+    if (minkowski_dot(candidate, candidate) < 1e-6) continue;
+    const right = normalize_tangent(x, candidate);
+    return get_determinant(make_from_columns([right, up, back, x])) > 0 ? right : right.map(ri => -ri);
+  }
+  throw new Error('cross_tangent: up and back do not span a plane');
+}
+
+/**
+ * `remove_aimed_wormhole` removes the wormhole of the mouth closest to the crosshair.
+ * @example remove_aimed_wormhole();
+ */
+function remove_aimed_wormhole() {
+  const mouth = find_aimed_mouth();
+  if (!mouth) return;
+  state.wormholes.splice(mouth.pair_index, 1);
+  rebuild_mouths();
+}
+
+/**
+ * `clear_wormholes` removes every wormhole.
+ * @example clear_wormholes();
+ */
+function clear_wormholes() {
+  state.wormholes = [];
+  rebuild_mouths();
+}
+
+/**
+ * `get_tile_cell_count` picks how many cells each side of a ground tile has: about one per block, odd so that the
+ * checker pattern is the same however a tile is reached.
+ * @return {number} The cell count.
+ * @example const cell_count = get_tile_cell_count();
+ */
+function get_tile_cell_count() {
+  const edge_m = 2 * TILE_HALF_EDGE * state.curvature_radius_m;
+  return Math.max(MIN_TILE_CELL_COUNT, Math.min(MAX_TILE_CELL_COUNT, 2 * Math.round((edge_m - 1) / 2) + 1));
+}
+
+const vertex_shader = `
+precision highp float;
+in vec3 position;
+out vec2 v_ndc;
+/**
+ * main passes the full-screen quad's corners through and hands the fragment shader its screen position.
+ * @example drawn once per frame by three.js.
+ */
+void main() {
+  v_ndc = position.xy;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}`;
+
+const fragment_shader = `
+precision highp float; precision highp int; precision highp sampler2D;
+uniform sampler2D u_scene;
+uniform float u_curvature_radius_m, u_tan_half_fov, u_aspect, u_throat_m, u_bend_cutoff_m, u_fog_m, u_time_s;
+uniform int u_mouth_count, u_cluster_count, u_tile_cell_count;
+uniform int u_next_rows[${MAX_MOUTH_COUNT}];
+uniform mat4 u_world_to_camera;
+uniform mat3 u_sky_basis;
+uniform float u_ground_edge_elevation_rad;
+uniform vec4 u_sun_ideal_world;
+in vec2 v_ndc;
+out vec4 out_color;
+
+const int MAX_MOUTH_COUNT = ${MAX_MOUTH_COUNT};
+const int MAX_CLUSTER_COUNT = ${MAX_CLUSTER_COUNT};
+const int TEXEL_CLUSTERS = ${TEXEL_CLUSTERS};
+const int TEXELS_PER_CLUSTER = ${TEXELS_PER_CLUSTER};
+const int TEXEL_TO_WORLD = ${TEXEL_TO_WORLD};
+const int TEXEL_GROUND = ${TEXEL_GROUND};
+const int TEXEL_SUN = ${TEXEL_SUN};
+const int TEXEL_MOUTHS = ${TEXEL_MOUTHS};
+const int TEXEL_GLUINGS = ${TEXEL_GLUINGS};
+const int TEXELS_PER_GLUING = ${TEXELS_PER_GLUING};
+const int TEXEL_BOXES = ${TEXEL_BOXES};
+const int TEXELS_PER_BOX = ${TEXELS_PER_BOX};
+const int MATERIAL_GLASS = ${MATERIAL_GLASS};
+const int MATERIAL_GLOW = ${MATERIAL_GLOW};
+const float LAMBDA_SQUARED = ${LAMBDA_SQUARED.toFixed(4)};
+const float HALF_PI = 1.5707963;
+const float MAX_TRAVEL_PER_R = ${MAX_TRAVEL_PER_R.toFixed(1)};
+const int MAX_STEP_COUNT = 700;
+const int MAX_FOLD_COUNT = 64;
+const int NO_HIT = -2;
+const int GROUND_HIT = -1;
+const float NEAR_STEP_PER_NEAREST = 0.12;
+const float FAR_STEP_PER_NEAREST = 0.25;
+const float NEAR_ZONE_PER_THROAT = 10.0;
+const float MIN_STEP_M = 0.005;
+const float CUTOFF_ENTRY_SHRINK = 0.98;
+const float TILE_KLEIN_HALF_WIDTH = ${TILE_KLEIN_HALF_WIDTH.toFixed(7)};
+const float TILE_COSH = ${Math.cosh(TILE_INRADIUS).toFixed(7)};
+const float TILE_SINH = ${Math.sinh(TILE_INRADIUS).toFixed(7)};
+const vec4 TILE_EDGES[4] = vec4[4](vec4(TILE_COSH, 0.0, 0.0, TILE_SINH), vec4(-TILE_COSH, 0.0, 0.0, TILE_SINH),
+  vec4(0.0, 0.0, TILE_COSH, TILE_SINH), vec4(0.0, 0.0, -TILE_COSH, TILE_SINH));
+const vec3 SKY_HORIZON_COLOR = vec3(0.78, 0.86, 0.95);
+const vec3 HAZE_COLOR = SKY_HORIZON_COLOR;
+const vec3 SKY_ZENITH_COLOR = vec3(0.30, 0.52, 0.88);
+const vec3 SKY_BELOW_COLOR = vec3(0.42, 0.56, 0.38);
+const vec3 CLOUD_COLOR = vec3(1.0);
+const vec3 SUN_COLOR = vec3(1.0, 0.92, 0.75);
+const vec3 LOST_COLOR = vec3(0.02, 0.02, 0.03);
+const vec3 ROAD_COLOR = vec3(0.58, 0.58, 0.60);
+const vec3 DIRT_COLOR = vec3(0.55, 0.42, 0.27);
+const vec3 GRASS_DARK_COLOR = vec3(0.36, 0.60, 0.25);
+const vec3 GRASS_LIGHT_COLOR = vec3(0.40, 0.65, 0.28);
+const vec3 GLASS_SHEEN_COLOR = vec3(0.95);
+const float DIRT_FRACTION = 0.04;
+const float TEXTURE_CELLS_PER_BLOCK = 8.0;
+const float TEXTURE_MIN = 0.86;
+const float TEXTURE_RANGE = 0.22;
+const float EDGE_DARKEST = 0.55;
+const float EDGE_WIDTH = 0.045;
+const float AMBIENT_LIGHT = 0.68;
+const float SUN_LIGHT = 0.32;
+const float TOP_SHADE = 1.0;
+const float BOTTOM_SHADE = 0.5;
+const float X_SIDE_SHADE = 0.82;
+const float Z_SIDE_SHADE = 0.68;
+const float GLASS_SHEEN = 0.2;
+const float GLOW_BRIGHTNESS = 1.25;
+const float SUN_DISK_INNER_COSINE = 0.99955;
+const float SUN_DISK_OUTER_COSINE = 0.9998;
+const float SUN_DISK_BRIGHTNESS = 3.0;
+const float SUN_GLOW_POWER = 300.0;
+const float SUN_GLOW_BRIGHTNESS = 0.4;
+const float SKY_GRADIENT_POWER = 0.55;
+const float SKY_BELOW_FADE = 5.0;
+const float CLOUD_SCALE = 1.6;
+const float CLOUD_DRIFT_PER_S = 0.01;
+const float HIGHLIGHT_ROLLOFF = 0.6;
+
+/**
+ * mdot computes the Minkowski product of two 4-vectors.
+ * @param a The first vector.
+ * @param b The second vector.
+ * @return ax bx + ay by + az bz - aw bw.
+ * @example float cosh_d = -mdot(x, c);
+ */
+float mdot(vec4 a, vec4 b) { return dot(a.xyz, b.xyz) - a.w * b.w; }
+
+/**
+ * to_tangent projects a vector onto the tangent space at a point of H³ and scales it to unit length.
+ * @param x The point.
+ * @param w The vector.
+ * @return The unit tangent vector.
+ * @example vec4 up = to_tangent(x, ground);
+ */
+vec4 to_tangent(vec4 x, vec4 w) { vec4 t = w + mdot(w, x) * x; return t * inversesqrt(max(mdot(t, t), 1e-30)); }
+
+/**
+ * to_point puts a 4-vector back on the hyperboloid.
+ * @param x A vector close to a point of H³.
+ * @return The point.
+ * @example x = to_point(x);
+ */
+vec4 to_point(vec4 x) { return x * inversesqrt(max(-mdot(x, x), 1e-30)); }
+
+/**
+ * advance_geodesic moves a point and its direction along their geodesic.
+ * @param x The point, moved in place.
+ * @param v The unit direction, carried along in place.
+ * @param s The distance, in curvature radii.
+ * @example advance_geodesic(x, v, ds_m / u_curvature_radius_m);
+ */
+void advance_geodesic(inout vec4 x, inout vec4 v, float s) {
+  float c = cosh(s), sh = sinh(s);
+  vec4 moved = c * x + sh * v;
+  v = sh * x + c * v;
+  x = moved;
+}
+
+/**
+ * fetch_texel reads one texel of a scene row: a row holds the whole scene in the frame of the camera (row 0) or of
+ * one mouth (row 1 + its index).
+ * @param row The row.
+ * @param texel The texel within it.
+ * @return The texel.
+ * @example vec4 ground = fetch_texel(row, TEXEL_GROUND);
+ */
+vec4 fetch_texel(int row, int texel) { return texelFetch(u_scene, ivec2(texel, row), 0); }
+
+/**
+ * fetch_matrix reads four texels of a row as the columns of a matrix.
+ * @param row The row.
+ * @param first_texel The first column's texel.
+ * @return The matrix.
+ * @example mat4 to_world = fetch_matrix(row, TEXEL_TO_WORLD);
+ */
+mat4 fetch_matrix(int row, int first_texel) {
+  return mat4(fetch_texel(row, first_texel), fetch_texel(row, first_texel + 1), fetch_texel(row, first_texel + 2), fetch_texel(row, first_texel + 3));
+}
+
+/**
+ * get_close_distance gives the hyperbolic distance between two points from their difference, which stays accurate
+ * when they are close.
+ * @param a The first point.
+ * @param b The second point.
+ * @param q Set to the Minkowski square of a - b, 4 sinh²(d/2).
+ * @return The distance, in curvature radii.
+ * @example float q; float rho = get_close_distance(x, c, q);
+ */
+float get_close_distance(vec4 a, vec4 b, out float q) {
+  vec4 d = a - b;
+  q = max(mdot(d, d), 0.0);
+  return 2.0 * asinh(0.5 * sqrt(q));
+}
+
+/**
+ * get_dln_n_flat gives d ln n / dρ for the flat "black hole foil" wormhole (Damour & Solodukhin 2007), with
+ * n = (1 + ρ_t/ρ)² / sqrt(A) in isotropic coordinates.
+ * @param rho_m The isotropic radius, in blocks.
+ * @param throat_m The throat radius ρ_t, in blocks.
+ * @return The derivative, per block.
+ * @example float g = get_dln_n_flat(3.0, 0.35);
+ */
+float get_dln_n_flat(float rho_m, float throat_m) {
+  float psi = 1.0 + throat_m / rho_m, r_m = rho_m * psi * psi, rs_m = 4.0 * throat_m;
+  float A = (1.0 - rs_m / r_m + LAMBDA_SQUARED) / (1.0 + LAMBDA_SQUARED);
+  return -2.0 * throat_m / (rho_m * rho_m * psi) - rs_m * psi * (1.0 - throat_m / rho_m) / (2.0 * r_m * r_m * (1.0 + LAMBDA_SQUARED) * A);
+}
+
+/**
+ * get_bend gives how fast a light ray turns: the sum over mouths within the cutoff of the flat law at the effective
+ * radius R e^ρ sinh(ρ), whose inverse is H³'s point-mass potential (coth(ρ) - 1)/R, with the part along the ray
+ * removed.
+ * @param row The scene row the ray is in.
+ * @param x The point.
+ * @param v The unit direction.
+ * @param nearest_m Set to the distance to the nearest mouth, in blocks.
+ * @return The turning rate, per block, at right angles to v.
+ * @example float near_m; vec4 bend = get_bend(row, x, v, near_m);
+ */
+vec4 get_bend(int row, vec4 x, vec4 v, out float nearest_m) {
+  float R = u_curvature_radius_m;
+  vec4 g = vec4(0.0);
+  nearest_m = 1e9;
+  for (int k = 0; k < MAX_MOUTH_COUNT; k++) {
+    if (k >= u_mouth_count) break;
+    vec4 c = fetch_texel(row, TEXEL_MOUTHS + k);
+    float q;
+    float rho = get_close_distance(x, c, q), rho_m = rho * R;
+    nearest_m = min(nearest_m, rho_m);
+    if (rho_m > u_bend_cutoff_m || rho < 1e-6) continue;
+    float cosh_rho = 1.0 + 0.5 * q, sinh_rho = sqrt(q * (1.0 + 0.25 * q)), e_rho = cosh_rho + sinh_rho;
+    g += get_dln_n_flat(R * sinh_rho * e_rho, u_throat_m) * e_rho * e_rho * (cosh_rho * x - c) / sinh_rho;
+  }
+  return g - mdot(g, v) * v;
+}
+
+/**
+ * get_cutoff_entry_tau finds where a geodesic first comes within (slightly less than) the bending cutoff of any mouth.
+ * @param row The scene row.
+ * @param x The start point, outside every cutoff.
+ * @param v The unit direction.
+ * @return tanh of the distance there, in curvature radii, or 1.0 if it never does.
+ * @example float tau_max = get_cutoff_entry_tau(row, x, v);
+ */
+float get_cutoff_entry_tau(int row, vec4 x, vec4 v) {
+  float K = cosh(CUTOFF_ENTRY_SHRINK * u_bend_cutoff_m / u_curvature_radius_m), best = 1.0;
+  for (int k = 0; k < MAX_MOUTH_COUNT; k++) {
+    if (k >= u_mouth_count) break;
+    vec4 c = fetch_texel(row, TEXEL_MOUTHS + k);
+    float A = -mdot(x, c), B = -mdot(v, c), discriminant = K * K + B * B - A * A;
+    if (B >= 0.0 || discriminant < 0.0) continue;
+    float tau = (-A * B - K * sqrt(discriminant)) / (B * B + K * K);
+    if (tau > 0.0) best = min(best, tau);
+  }
+  return best;
+}
+
+/**
+ * cross_throat moves a ray through a throat if it is inside one: the point is reflected through the throat sphere
+ * and carried to the partner mouth, whose row the ray continues in, with its partner's centre at the origin.
+ * @param row The scene row, switched to the partner's row.
+ * @param x The point, moved in place.
+ * @param v The direction: its part along the radius flips, its sideways part is carried across.
+ * @return Whether the ray went through.
+ * @example if (cross_throat(row, x, v)) box_clear_until_m = -1.0;
+ */
+bool cross_throat(inout int row, inout vec4 x, inout vec4 v) {
+  float R = u_curvature_radius_m;
+  for (int k = 0; k < MAX_MOUTH_COUNT; k++) {
+    if (k >= u_mouth_count) break;
+    vec4 c = fetch_texel(row, TEXEL_MOUTHS + k);
+    float q;
+    get_close_distance(x, c, q);
+    float sinh_rho = sqrt(q * (1.0 + 0.25 * q)), cosh_rho = 1.0 + 0.5 * q;
+    float rho_effective_m = R * sinh_rho * (cosh_rho + sinh_rho);
+    if (rho_effective_m >= u_throat_m) continue;
+    vec4 outward = (x - cosh_rho * c) / sinh_rho;
+    vec4 radial = (cosh_rho * x - c) / sinh_rho;
+    float along = mdot(v, radial);
+    mat4 gluing = fetch_matrix(row, TEXEL_GLUINGS + TEXELS_PER_GLUING * k);
+    float new_rho = 0.5 * log(1.0 + 2.0 * u_throat_m * u_throat_m / rho_effective_m / R);
+    vec4 new_outward = gluing * outward, sideways = gluing * (v - along * radial);
+    vec4 origin = vec4(0.0, 0.0, 0.0, 1.0);
+    x = to_point(cosh(new_rho) * origin + sinh(new_rho) * new_outward);
+    v = to_tangent(x, sideways - along * (sinh(new_rho) * origin + cosh(new_rho) * new_outward));
+    row = u_next_rows[k];
+    return true;
+  }
+  return false;
+}
+
+/**
+ * test_box finds where a geodesic first enters a box, if within the segment, and how far the start is from it. A box
+ * is the set where |<x, N_i>| <= sinh(h_i / R) for its three planes N_i; along x cosh s + v sinh s, with tau = tanh s,
+ * each condition is a quadratic inequality in tau, so the box is an interval of tau.
+ * @param row The scene row.
+ * @param b The box index.
+ * @param x The start point.
+ * @param v The unit direction.
+ * @param reach_m The segment's length; boxes farther than this are not tested.
+ * @param best_tau The nearest hit so far, as tanh of its distance; lowered on a nearer hit.
+ * @param hit_index Set to b on a nearer hit.
+ * @param hit_face Set to the entered face's axis on a nearer hit.
+ * @param hit_side Set to the entered face's side (+1 or -1) on a nearer hit.
+ * @return A lower bound on the start's distance from the box, in blocks.
+ * @example float lower_m = test_box(row, b, x, v, ds_m, hit_tau, hit_index, hit_face, hit_side);
+ */
+float test_box(int row, int b, vec4 x, vec4 v, float reach_m, inout float best_tau, inout int hit_index, inout int hit_face, inout float hit_side) {
+  int first = TEXEL_BOXES + TEXELS_PER_BOX * b;
+  vec4 half_m = fetch_texel(row, first + 4);
+  vec4 n0 = fetch_texel(row, first), n1 = fetch_texel(row, first + 1), n2 = fetch_texel(row, first + 2);
+  vec3 a = vec3(mdot(x, n0), mdot(x, n1), mdot(x, n2));
+  vec3 lower = u_curvature_radius_m * asinh(abs(a)) - half_m.xyz;
+  float lower_m = max(lower.x, max(lower.y, lower.z));
+  if (lower_m > reach_m) return lower_m;
+  vec4 sigma = fetch_texel(row, first + 3);
+  vec3 bb = vec3(mdot(v, n0), mdot(v, n1), mdot(v, n2));
+  float tau_in = -1.0, tau_out = 1.0, side = 1.0;
+  int face = 0;
+  for (int i = 0; i < 3; i++) {
+    float s = sigma[i], discriminant = s * s + bb[i] * bb[i] - a[i] * a[i];
+    if (discriminant < 0.0) return lower_m;
+    float root = s * sqrt(discriminant), denominator = bb[i] * bb[i] + s * s;
+    float tau_0 = (-a[i] * bb[i] - root) / denominator, tau_1 = (-a[i] * bb[i] + root) / denominator;
+    if (tau_0 > tau_in) { tau_in = tau_0; face = i; side = a[i] + bb[i] * tau_0 >= 0.0 ? 1.0 : -1.0; }
+    tau_out = min(tau_out, tau_1);
+  }
+  if (tau_in <= tau_out && tau_in >= 0.0 && tau_in < best_tau) { best_tau = tau_in; hit_index = b; hit_face = face; hit_side = side; }
+  return lower_m;
+}
+
+/**
+ * test_boxes tests a geodesic segment against every box, skipping each cluster of boxes whose bounding sphere is
+ * out of reach. A cluster of one box (a long rail, say) uses the box's own tighter bound instead of a sphere.
+ * @param row The scene row.
+ * @param x The start point.
+ * @param v The unit direction.
+ * @param reach_m The segment's length.
+ * @param best_tau The nearest hit so far, as tanh of its distance; lowered on a nearer hit.
+ * @param hit_index Set to the box index on a nearer hit.
+ * @param hit_face Set to the entered face's axis on a nearer hit.
+ * @param hit_side Set to the entered face's side on a nearer hit.
+ * @return A lower bound on the start's distance from every box, in blocks.
+ * @example float clear_m = test_boxes(row, x, vh, ds_m, hit_tau, hit_index, hit_face, hit_side);
+ */
+float test_boxes(int row, vec4 x, vec4 v, float reach_m, inout float best_tau, inout int hit_index, inout int hit_face, inout float hit_side) {
+  float nearest_m = 1e9;
+  for (int k = 0; k < MAX_CLUSTER_COUNT; k++) {
+    if (k >= u_cluster_count) break;
+    vec4 info = fetch_texel(row, TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k + 1);
+    int first_box = int(info.y + 0.5), box_count = int(info.z + 0.5), end_box = first_box + box_count;
+    if (box_count > 1) {
+      float q;
+      float sphere_m = get_close_distance(x, fetch_texel(row, TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k), q) * u_curvature_radius_m - info.x;
+      if (sphere_m > reach_m) { nearest_m = min(nearest_m, sphere_m); continue; }
+    }
+    for (int b = first_box; b < end_box; b++) nearest_m = min(nearest_m, test_box(row, b, x, v, reach_m, best_tau, hit_index, hit_face, hit_side));
+  }
+  return nearest_m;
+}
+
+/**
+ * hash_3 gives a pseudo-random number for a 3-vector.
+ * @param p The input.
+ * @return A number in [0, 1).
+ * @example float r = hash_3(vec3(cell, seed));
+ */
+float hash_3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+
+/**
+ * hash_2 gives a pseudo-random number for a 2-vector.
+ * @param p The input.
+ * @return A number in [0, 1).
+ * @example float r = hash_2(floor(uv));
+ */
+float hash_2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+/**
+ * get_value_noise gives smooth 2D value noise.
+ * @param p The input.
+ * @return A number in [0, 1).
+ * @example float n = get_value_noise(uv * 4.0);
+ */
+float get_value_noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash_2(i), hash_2(i + vec2(1, 0)), f.x), mix(hash_2(i + vec2(0, 1)), hash_2(i + vec2(1, 1)), f.x), f.y);
+}
+
+/**
+ * get_fractal_noise sums five octaves of value noise, for clouds.
+ * @param p The input.
+ * @return A number in about [0, 1).
+ * @example float cloud = get_fractal_noise(uv);
+ */
+float get_fractal_noise(vec2 p) {
+  float sum = 0.0, amplitude = 0.5;
+  for (int i = 0; i < 5; i++) { sum += amplitude * get_value_noise(p); p *= 2.03; amplitude *= 0.5; }
+  return sum;
+}
+
+/**
+ * get_sky_direction gives where the sky's colours are looked up for a point at infinity: its direction as seen from
+ * the camera, with the elevation stretched so the ground's edge (well below eye level in H³) becomes the horizon.
+ * So the sky looks the same from anywhere, while the sun and clouds stay at fixed points at infinity.
+ * @param ideal_world The point at infinity, as a light-like 4-vector in world coordinates.
+ * @return A unit direction whose y is up.
+ * @example vec3 d = get_sky_direction(to_world * (x + v));
+ */
+vec3 get_sky_direction(vec4 ideal_world) {
+  vec3 d = u_sky_basis * normalize((u_world_to_camera * ideal_world).xyz);
+  float elevation_rad = asin(clamp(d.y, -1.0, 1.0));
+  float height = clamp((elevation_rad - u_ground_edge_elevation_rad) / (HALF_PI - u_ground_edge_elevation_rad), 0.0, 1.0) * HALF_PI;
+  vec2 horizontal = length(d.xz) > 1e-6 ? normalize(d.xz) : vec2(1.0, 0.0);
+  return vec3(cos(height) * horizontal.x, sin(height), cos(height) * horizontal.y);
+}
+
+/**
+ * get_sky_color gives the colour of the sky in a direction from get_sky_direction, with clouds and the sun.
+ * @param d The unit direction (y up).
+ * @return The colour.
+ * @example vec3 sky = get_sky_color(get_sky_direction(world));
+ */
+vec3 get_sky_color(vec3 d) {
+  vec3 c = mix(SKY_HORIZON_COLOR, SKY_ZENITH_COLOR, pow(max(d.y, 0.0), SKY_GRADIENT_POWER));
+  if (d.y < 0.0) c = mix(SKY_HORIZON_COLOR, SKY_BELOW_COLOR, min(-d.y * SKY_BELOW_FADE, 1.0));
+  if (d.y > 0.01) {
+    vec2 uv = d.xz / (d.y + 0.1) * 0.9 + vec2(u_time_s * CLOUD_DRIFT_PER_S, 0.0);
+    c = mix(c, CLOUD_COLOR, smoothstep(0.52, 0.78, get_fractal_noise(uv * CLOUD_SCALE)) * 0.85 * smoothstep(0.01, 0.15, d.y));
+  }
+  float sun_cosine = dot(d, get_sky_direction(u_sun_ideal_world));
+  c += SUN_COLOR * (smoothstep(SUN_DISK_INNER_COSINE, SUN_DISK_OUTER_COSINE, sun_cosine) * SUN_DISK_BRIGHTNESS + pow(max(sun_cosine, 0.0), SUN_GLOW_POWER) * SUN_GLOW_BRIGHTNESS);
+  return c;
+}
+
+/**
+ * get_block_texture gives a block face's brightness pattern: speckles in an 8 × 8 grid and dark block edges.
+ * @param uv The position on the face, in blocks.
+ * @param seed A number that varies the speckles between faces.
+ * @return The brightness factor.
+ * @example base *= get_block_texture(uv, float(b));
+ */
+float get_block_texture(vec2 uv, float seed) {
+  vec2 f = fract(uv);
+  float speckle = TEXTURE_MIN + TEXTURE_RANGE * hash_3(vec3(floor(f * TEXTURE_CELLS_PER_BLOCK) + floor(uv) * 17.0, seed));
+  vec2 edge = min(f, 1.0 - f);
+  return speckle * mix(EDGE_DARKEST, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y)));
+}
+
+/**
+ * get_ground_color gives the ground's colour at a point of the {4,5} tiling: the point is folded into the central
+ * square by reflecting it across that square's edges, the reflections run backwards give its tile's centre (for a
+ * per-tile tint), and its Klein coordinates in the square pick a cell: stone roads round the edge, grass inside.
+ * @param p The ground point, in world coordinates.
+ * @return The colour.
+ * @example vec3 ground_color = get_ground_color(to_world * xh);
+ */
+vec3 get_ground_color(vec4 p) {
+  int edges[MAX_FOLD_COUNT];
+  int fold_count = 0;
+  for (int i = 0; i < MAX_FOLD_COUNT; i++) {
+    float worst = 0.0;
+    int edge = -1;
+    for (int e = 0; e < 4; e++) { float d = mdot(p, TILE_EDGES[e]); if (d > worst) { worst = d; edge = e; } }
+    if (edge < 0) break;
+    p -= 2.0 * worst * TILE_EDGES[edge];
+    edges[i] = edge;
+    fold_count = i + 1;
+  }
+  vec4 center = vec4(0.0, 0.0, 0.0, 1.0);
+  for (int i = MAX_FOLD_COUNT - 1; i >= 0; i--) {
+    if (i >= fold_count) continue;
+    vec4 n = TILE_EDGES[edges[i]];
+    center -= 2.0 * mdot(center, n) * n;
+  }
+  float tile_seed = hash_3(floor(center.xyz * 64.0 + 0.5));
+  float cell_count = float(u_tile_cell_count);
+  vec2 cell_position = (p.xz / p.w / TILE_KLEIN_HALF_WIDTH * 0.5 + 0.5) * cell_count;
+  vec2 cell = clamp(floor(cell_position), vec2(0.0), vec2(cell_count - 1.0));
+  bool is_road = cell.x == 0.0 || cell.y == 0.0 || cell.x == cell_count - 1.0 || cell.y == cell_count - 1.0;
+  float r = hash_3(vec3(cell, tile_seed * 97.0));
+  vec3 c;
+  if (is_road) c = ROAD_COLOR * (0.93 + 0.1 * r);
+  else if (r < DIRT_FRACTION) c = DIRT_COLOR;
+  else c = (mod(cell.x + cell.y, 2.0) > 0.5 ? GRASS_DARK_COLOR : GRASS_LIGHT_COLOR) * (0.95 + 0.1 * tile_seed) * (0.95 + 0.08 * r);
+  return c * get_block_texture(cell_position, tile_seed);
+}
+
+/**
+ * shade_hit gives the lit colour of the surface a ray hit.
+ * @param row The scene row the hit is in.
+ * @param hit_index The box index, or GROUND_HIT.
+ * @param face The axis of the box face that was hit.
+ * @param side The side of that face (+1 or -1).
+ * @param xh The hit point.
+ * @return The colour, before fog.
+ * @example vec3 c = shade_hit(row, hit_index, hit_face, hit_side, xh);
+ */
+vec3 shade_hit(int row, int hit_index, int face, float side, vec4 xh) {
+  float R = u_curvature_radius_m;
+  vec4 up = to_tangent(xh, fetch_texel(row, TEXEL_GROUND));
+  vec4 sun = to_tangent(xh, fetch_texel(row, TEXEL_SUN));
+  vec3 base;
+  vec4 n;
+  float shade = TOP_SHADE;
+  if (hit_index == GROUND_HIT) {
+    base = get_ground_color(fetch_matrix(row, TEXEL_TO_WORLD) * xh);
+    n = up;
+  } else {
+    int first = TEXEL_BOXES + TEXELS_PER_BOX * hit_index;
+    vec4 material = fetch_texel(row, first + 3), half_m = fetch_texel(row, first + 4), color = fetch_texel(row, first + 5);
+    n = side * to_tangent(xh, fetch_texel(row, first + face));
+    int axis_a = face == 0 ? 1 : 0, axis_b = face == 2 ? 1 : 2;
+    vec2 uv = vec2(R * asinh(mdot(xh, fetch_texel(row, first + axis_a))) + half_m[axis_a], R * asinh(mdot(xh, fetch_texel(row, first + axis_b))) + half_m[axis_b]);
+    base = color.rgb * get_block_texture(uv, float(hit_index * 3 + face));
+    int material_id = int(material.w + 0.5);
+    if (material_id == MATERIAL_GLOW) return color.rgb * GLOW_BRIGHTNESS * mix(1.0, get_block_texture(uv, 0.0), 0.3);
+    if (material_id == MATERIAL_GLASS) base = mix(base, GLASS_SHEEN_COLOR, GLASS_SHEEN);
+    float up_dot = mdot(n, up);
+    shade = up_dot > 0.5 ? TOP_SHADE : (up_dot < -0.5 ? BOTTOM_SHADE : (face == 0 ? X_SIDE_SHADE : Z_SIDE_SHADE));
+  }
+  return base * shade * (AMBIENT_LIGHT + SUN_LIGHT * max(mdot(n, sun), 0.0));
+}
+
+/**
+ * main traces one pixel's light ray backwards from the eye. Far from every mouth the ray is a single geodesic tested
+ * exactly against the ground and the boxes; near a mouth it takes short midpoint steps that bend it and can carry it
+ * through a throat into the partner mouth's row.
+ * @example drawn once per frame by three.js.
+ */
+void main() {
+  float R = u_curvature_radius_m, max_travel_m = MAX_TRAVEL_PER_R * R;
+  vec4 x = vec4(0.0, 0.0, 0.0, 1.0);
+  vec4 v = vec4(normalize(vec3(v_ndc.x * u_tan_half_fov * u_aspect, v_ndc.y * u_tan_half_fov, -1.0)), 0.0);
+  int row = 0;
+  float travelled_m = 0.0, box_clear_until_m = -1.0;
+  vec3 color = LOST_COLOR;
+  bool is_surface = false;
+  for (int step_index = 0; step_index < MAX_STEP_COUNT; step_index++) {
+    float nearest_m;
+    vec4 bend = get_bend(row, x, v, nearest_m);
+    bool is_far = nearest_m > u_bend_cutoff_m;
+    vec4 vh = v;
+    float tau_max, ds_m;
+    if (is_far) {
+      tau_max = get_cutoff_entry_tau(row, x, v);
+      ds_m = tau_max < 1.0 ? atanh(tau_max) * R : max_travel_m;
+    } else {
+      ds_m = max(nearest_m * (nearest_m < NEAR_ZONE_PER_THROAT * u_throat_m ? NEAR_STEP_PER_NEAREST : FAR_STEP_PER_NEAREST), MIN_STEP_M);
+      vh = to_tangent(x, v + bend * (0.5 * ds_m));
+      tau_max = tanh(ds_m / R);
+    }
+    float hit_tau = tau_max, hit_side = 1.0;
+    int hit_index = NO_HIT, hit_face = 0;
+    vec4 ground = fetch_texel(row, TEXEL_GROUND);
+    float ground_a = mdot(x, ground), ground_b = mdot(vh, ground);
+    if (ground_a > 0.0 && ground_b < 0.0 && -ground_a / ground_b < hit_tau) { hit_tau = -ground_a / ground_b; hit_index = GROUND_HIT; }
+    if (travelled_m + ds_m > box_clear_until_m) box_clear_until_m = travelled_m + test_boxes(row, x, vh, ds_m, hit_tau, hit_index, hit_face, hit_side);
+    if (hit_index != NO_HIT) {
+      vec4 xh = to_point(x + hit_tau * vh);
+      travelled_m += atanh(hit_tau) * R;
+      color = shade_hit(row, hit_index, hit_face, hit_side, xh);
+      is_surface = true;
+      break;
+    }
+    if (tau_max >= 1.0 || travelled_m > max_travel_m) {
+      color = get_sky_color(get_sky_direction(fetch_matrix(row, TEXEL_TO_WORLD) * (x + vh)));
+      break;
+    }
+    if (is_far) {
+      advance_geodesic(x, v, atanh(tau_max));
+    } else {
+      vec4 xm = x, vm = vh;
+      advance_geodesic(xm, vm, 0.5 * ds_m / R);
+      float middle_nearest_m;
+      vec4 bend_middle = get_bend(row, xm, vm, middle_nearest_m);
+      v = vh;
+      advance_geodesic(x, v, ds_m / R);
+      v += (bend_middle - 0.5 * bend) * ds_m;
+    }
+    x = to_point(x);
+    v = to_tangent(x, v);
+    travelled_m += ds_m;
+    if (cross_throat(row, x, v)) box_clear_until_m = -1.0;
+  }
+  if (is_surface && u_fog_m > 0.0) color = mix(HAZE_COLOR, color, exp(-travelled_m / u_fog_m));
+  color = color / (1.0 + max(color - 1.0, 0.0) * HIGHLIGHT_ROLLOFF);
+  out_color = vec4(clamp(color, 0.0, 1.0), 1.0);
+}`;
+
+const canvas = document.getElementById('canvas');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+} catch (error) {
+  const panel = document.getElementById('error');
+  panel.style.display = 'flex';
+  panel.textContent = `WebGL2 is required: ${error.message}`;
+  throw error;
+}
+const scene_data = new Float32Array(ROW_TEXEL_COUNT * ROW_COUNT * FLOATS_PER_TEXEL);
+const scene_texture = new THREE.DataTexture(scene_data, ROW_TEXEL_COUNT, ROW_COUNT, THREE.RGBAFormat, THREE.FloatType);
+scene_texture.minFilter = scene_texture.magFilter = THREE.NearestFilter;
+scene_texture.needsUpdate = true;
+const uniforms = {
+  u_scene: { value: scene_texture }, u_curvature_radius_m: { value: DEFAULT_CURVATURE_RADIUS_M }, u_tan_half_fov: { value: Math.tan(HALF_FOV_RAD) },
+  u_aspect: { value: 1 }, u_throat_m: { value: 0 }, u_bend_cutoff_m: { value: 0 }, u_fog_m: { value: 0 }, u_time_s: { value: 0 },
+  u_mouth_count: { value: 0 }, u_cluster_count: { value: 0 }, u_tile_cell_count: { value: MIN_TILE_CELL_COUNT },
+  u_next_rows: { value: new Array(MAX_MOUTH_COUNT).fill(0) }, u_world_to_camera: { value: new THREE.Matrix4() },
+  u_sky_basis: { value: new THREE.Matrix3() }, u_ground_edge_elevation_rad: { value: 0 },
+  u_sun_ideal_world: { value: new THREE.Vector4(...normalize_3(SUN_DIRECTION), 1) }
+};
+const material = new THREE.RawShaderMaterial({ uniforms, vertexShader: vertex_shader, fragmentShader: fragment_shader, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+quad.frustumCulled = false;
+const scene = new THREE.Scene();
+scene.add(quad);
+const dummy_camera = new THREE.Camera();
+const sun_ideal_point = [...normalize_3(SUN_DIRECTION), 1];
+
+/**
+ * `write_texel` writes one 4-vector into the scene texture's data.
+ * @param {number} row The row.
+ * @param {number} texel The texel within the row.
+ * @param {number[]} values The four values.
+ * @example write_texel(0, TEXEL_GROUND, ground_normal);
+ */
+function write_texel(row, texel, values) {
+  scene_data.set(values, (row * ROW_TEXEL_COUNT + texel) * FLOATS_PER_TEXEL);
+}
+
+/**
+ * `fill_scene_row` writes the whole scene, as seen in one frame's coordinates, into a row of the scene texture: the
+ * map back to the world, the ground, the sun, every mouth with its gluing map into its partner's frame, and every box.
+ * @param {number} row The row (0 for the camera, 1 + k for mouth k).
+ * @param {Float64Array} frame The frame whose coordinates the row uses.
+ * @example fill_scene_row(0, state.camera_frame);
+ */
+function fill_scene_row(row, frame) {
+  const to_frame = invert_lorentz(frame), r = state.curvature_radius_m;
+  for (let c = 0; c < 4; c++) write_texel(row, TEXEL_TO_WORLD + c, get_column(frame, c));
+  write_texel(row, TEXEL_GROUND, apply_matrix(to_frame, UP_VECTOR));
+  write_texel(row, TEXEL_SUN, apply_matrix(to_frame, sun_ideal_point));
+  state.mouths.forEach((mouth, k) => {
+    write_texel(row, TEXEL_MOUTHS + k, apply_matrix(to_frame, mouth.center));
+    const gluing = multiply_all(mouth.flip, mouth.to_local, frame);
+    for (let c = 0; c < 4; c++) write_texel(row, TEXEL_GLUINGS + TEXELS_PER_GLUING * k + c, get_column(gluing, c));
+  });
+  state.boxes.forEach((box, b) => {
+    const first = TEXEL_BOXES + TEXELS_PER_BOX * b;
+    box.normals.forEach((n, i) => write_texel(row, first + i, apply_matrix(to_frame, n)));
+    write_texel(row, first + 3, [...box.half_m.map(h => Math.sinh(h / r)), box.material]);
+    write_texel(row, first + 4, [...box.half_m, 0]);
+    write_texel(row, first + 5, [...box.color, 0]);
+  });
+  state.clusters.forEach((cluster, k) => {
+    const first = TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k;
+    write_texel(row, first, apply_matrix(to_frame, cluster.center));
+    write_texel(row, first + 1, [cluster.radius_m, cluster.first_box, cluster.box_count, 0]);
+  });
+}
+
+/**
+ * `upload_scene` refreshes the scene texture and uniforms for this frame: the camera row always, and the mouth rows
+ * when the scene has changed.
+ * @param {number} time_s The time, for drifting clouds.
+ * @example upload_scene(performance.now() / 1000);
+ */
+function upload_scene(time_s) {
+  if (state.is_scene_dirty) {
+    state.mouths.forEach((mouth, k) => fill_scene_row(1 + k, mouth.frame));
+    uniforms.u_next_rows.value = Array.from({ length: MAX_MOUTH_COUNT }, (_, k) => k < state.mouths.length ? 1 + state.mouths[k].partner_index : 0);
+    state.is_scene_dirty = false;
+  }
+  fill_scene_row(0, state.camera_frame);
+  scene_texture.needsUpdate = true;
+  const r = state.curvature_radius_m;
+  uniforms.u_curvature_radius_m.value = r;
+  uniforms.u_throat_m.value = get_throat_m();
+  uniforms.u_bend_cutoff_m.value = BEND_CUTOFF_PER_R * r;
+  uniforms.u_fog_m.value = state.is_fog_on ? FOG_PER_R * r : 0;
+  uniforms.u_mouth_count.value = state.mouths.length;
+  uniforms.u_cluster_count.value = state.clusters.length;
+  uniforms.u_tile_cell_count.value = get_tile_cell_count();
+  uniforms.u_time_s.value = time_s;
+  update_sky_uniforms();
+}
+
+/**
+ * `update_sky_uniforms` gives the shader what it needs to draw the sky around the camera: the map into camera
+ * coordinates, a level basis there (right, up, back), and the elevation of the ground's edge, which in H³ lies well
+ * below eye level: the angle of parallelism 2·atan(e^(-h/R)) from straight down.
+ * @example update_sky_uniforms();
+ */
+function update_sky_uniforms() {
+  const r = state.curvature_radius_m, x = get_column(state.camera_frame, AXIS_W), up = get_world_up_local();
+  let right = combine_vectors([1, 0, 0], 1, up, -up[0]);
+  if (Math.hypot(...right) < 1e-6) right = combine_vectors([0, 0, 1], 1, up, -up[2]);
+  right = normalize_3(right);
+  const back = cross_3(right, up), height_m = r * Math.asinh(Math.max(x[AXIS_Y], 0));
+  uniforms.u_world_to_camera.value.fromArray(invert_lorentz(state.camera_frame));
+  uniforms.u_sky_basis.value.set(...right, ...up, ...back);
+  uniforms.u_ground_edge_elevation_rad.value = 2 * Math.atan(Math.exp(-height_m / r)) - QUARTER_TURN_RAD;
+}
+
+let quality = 'auto', auto_pixel_budget = AUTO_PIXEL_BUDGET;
+
+/**
+ * `resize_canvas` sizes the drawing buffer: "auto" quality renders about `auto_pixel_budget` pixels.
+ * @example window.addEventListener('resize', resize_canvas);
+ */
+function resize_canvas() {
+  const pixel_ratio = window.devicePixelRatio || 1, width_px = window.innerWidth, height_px = window.innerHeight;
+  const scale = quality === 'auto' ? Math.min(1, Math.sqrt(auto_pixel_budget / (width_px * height_px * pixel_ratio * pixel_ratio))) : +quality;
+  renderer.setPixelRatio(pixel_ratio * scale);
+  renderer.setSize(width_px, height_px, false);
+  uniforms.u_aspect.value = width_px / height_px;
+}
+window.addEventListener('resize', resize_canvas);
+
+const pressed_keys = {};
+const get_element = id => document.getElementById(id);
+
+/**
+ * `set_auto_fly` turns flying forward on or off and updates its button.
+ * @param {boolean} is_on Whether to keep flying forward.
+ * @example set_auto_fly(!state.is_auto_flying);
+ */
+function set_auto_fly(is_on) {
+  state.is_auto_flying = is_on;
+  get_element('button_fly').textContent = `Fly forward: ${is_on ? 'on' : 'off'}`;
+  get_element('button_fly').classList.toggle('on', is_on);
+}
+
+window.addEventListener('keydown', event => {
+  if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT') return;
+  pressed_keys[event.code] = true;
+  if (event.repeat) return;
+  if (event.code === 'KeyF') set_auto_fly(!state.is_auto_flying);
+  if (event.code === 'KeyG') aim_at_nearest_mouth();
+  if (event.code === 'KeyB') place_mouth();
+  if (event.code === 'KeyX') remove_aimed_wormhole();
+  if (event.code === 'KeyC') clear_wormholes();
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(event.code)) event.preventDefault();
+});
+window.addEventListener('keyup', event => { pressed_keys[event.code] = false; });
+window.addEventListener('blur', () => { for (const code in pressed_keys) pressed_keys[code] = false; });
+let is_dragging = false;
+canvas.addEventListener('pointerdown', event => {
+  is_dragging = true;
+  canvas.setPointerCapture(event.pointerId);
+  if (event.pointerType === 'mouse' && document.pointerLockElement !== canvas) {
+    const request = canvas.requestPointerLock();
+    if (request && request.catch) request.catch(() => say('Drag to look: the mouse could not be captured'));
+  }
+});
+canvas.addEventListener('pointerup', () => { is_dragging = false; });
+canvas.addEventListener('pointermove', event => {
+  if (document.pointerLockElement === canvas || is_dragging) look_around(event.movementX || 0, event.movementY || 0);
+});
+get_element('curvature_slider').addEventListener('input', event => { get_element('curvature_value').textContent = event.target.value; });
+get_element('curvature_slider').addEventListener('change', event => {
+  state.curvature_radius_m = +event.target.value;
+  rebuild_world();
+  set_auto_fly(false);
+});
+get_element('mouth_slider').addEventListener('input', event => {
+  state.horizon_radius_m = +event.target.value;
+  get_element('mouth_value').textContent = state.horizon_radius_m.toFixed(2);
+});
+get_element('fog_toggle').addEventListener('change', event => { state.is_fog_on = event.target.checked; });
+get_element('quality').addEventListener('change', event => { quality = event.target.value; resize_canvas(); });
+get_element('button_spawn').addEventListener('click', () => { move_to_spawn(); set_auto_fly(false); });
+get_element('button_rails').addEventListener('click', () => {
+  set_camera(make_ground_frame(0, -12, 0), 1.1 * state.curvature_radius_m, -1.2);
+  set_auto_fly(false);
+});
+get_element('button_high').addEventListener('click', () => {
+  set_camera(make_identity(), 1.7 * state.curvature_radius_m, -1.45);
+  set_auto_fly(false);
+});
+get_element('button_fly').addEventListener('click', () => set_auto_fly(!state.is_auto_flying));
+get_element('button_aim').addEventListener('click', aim_at_nearest_mouth);
+get_element('button_place').addEventListener('click', place_mouth);
+get_element('button_clear').addEventListener('click', clear_wormholes);
+get_element('button_default').addEventListener('click', () => { state.wormholes = make_default_wormholes(); rebuild_mouths(); });
+get_element('tips_toggle').addEventListener('click', () => {
+  const body = get_element('tips_body'), is_hidden = body.style.display === 'none';
+  body.style.display = is_hidden ? '' : 'none';
+  get_element('tips_toggle').textContent = is_hidden ? 'hide' : 'show';
+});
+
+/**
+ * `move_from_keys` flies the camera by the held keys (or forward when auto-flying) and turns it by the arrow keys.
+ * @param {number} dt_s The frame time.
+ * @example move_from_keys(1 / 60);
+ */
+function move_from_keys(dt_s) {
+  const up_local = get_world_up_local(), move = [0, 0, 0];
+  const add_move = (direction, sign) => { for (let i = 0; i < 3; i++) move[i] += sign * direction[i]; };
+  if (pressed_keys.KeyW || pressed_keys.ArrowUp || state.is_auto_flying) add_move([0, 0, -1], 1);
+  if (pressed_keys.KeyS || pressed_keys.ArrowDown) add_move([0, 0, -1], -1);
+  if (pressed_keys.KeyD) add_move([1, 0, 0], 1);
+  if (pressed_keys.KeyA) add_move([1, 0, 0], -1);
+  if (pressed_keys.KeyE || pressed_keys.Space) add_move(up_local, 1);
+  if (pressed_keys.KeyQ) add_move(up_local, -1);
+  if (pressed_keys.ArrowLeft) look_around(-KEY_TURN_PX_PER_S * dt_s, 0);
+  if (pressed_keys.ArrowRight) look_around(KEY_TURN_PX_PER_S * dt_s, 0);
+  const speed_m_per_s = (pressed_keys.ShiftLeft || pressed_keys.ShiftRight) ? SPRINT_SPEED_M_PER_S : WALK_SPEED_M_PER_S;
+  if (Math.hypot(...move) > 1e-9) fly_along_light(move, speed_m_per_s * dt_s);
+}
+
+/**
+ * `update_hud` refreshes the stats panel.
+ * @param {number} fps The measured frame rate.
+ * @example update_hud(60);
+ */
+function update_hud(fps) {
+  const r = state.curvature_radius_m, x = get_column(state.camera_frame, AXIS_W);
+  const foot = normalize_point([x[AXIS_X], 0, x[AXIS_Z], x[AXIS_W]]);
+  const distance_m = get_distance(foot, state.spawn_point) * r, radius_m = Math.max(distance_m, 1);
+  get_element('stat_distance').textContent = distance_m.toFixed(1);
+  get_element('stat_height').textContent = (r * Math.asinh(x[AXIS_Y])).toFixed(1);
+  get_element('stat_circumference').textContent = (FULL_TURN_RAD * r * Math.sinh(radius_m / r)).toFixed(0);
+  get_element('stat_flat').textContent = (FULL_TURN_RAD * radius_m).toFixed(0);
+  get_element('stat_wormholes').textContent = `${state.wormholes.length}`;
+  get_element('stat_fps').textContent = fps.toFixed(0);
+  get_element('message').textContent = state.message_time_s > 0 ? state.message : '';
+}
+
+let last_time_ms = performance.now(), hud_time_s = 0, hud_frame_count = 0, slow_window_s = 0, slow_window_frame_count = 0;
+
+/**
+ * `render_frame` runs one frame: input, movement, levelling out, upload, render, auto quality and the HUD.
+ * @param {number} now_ms The frame's timestamp.
+ * @example requestAnimationFrame(render_frame);
+ */
+function render_frame(now_ms) {
+  const frame_s = (now_ms - last_time_ms) / MS_PER_S, dt_s = Math.min(MAX_FRAME_DT_S, frame_s);
+  last_time_ms = now_ms;
+  move_from_keys(dt_s);
+  level_out(dt_s);
+  upload_scene(now_ms / MS_PER_S);
+  renderer.render(scene, dummy_camera);
+  if (frame_s > 0 && frame_s < MAX_COUNTED_FRAME_S) { slow_window_s += frame_s; slow_window_frame_count++; }
+  if (slow_window_s > AUTO_WINDOW_S) {
+    if (quality === 'auto' && slow_window_s / slow_window_frame_count > 1 / AUTO_TARGET_FPS && auto_pixel_budget > AUTO_MIN_PIXEL_BUDGET) {
+      auto_pixel_budget *= AUTO_BUDGET_STEP;
+      resize_canvas();
+    }
+    slow_window_s = 0;
+    slow_window_frame_count = 0;
+  }
+  state.message_time_s -= dt_s;
+  hud_frame_count++;
+  if ((hud_time_s += dt_s) > HUD_PERIOD_S) {
+    update_hud(hud_frame_count / hud_time_s);
+    hud_time_s = 0;
+    hud_frame_count = 0;
+  }
+  requestAnimationFrame(render_frame);
+}
+
+rebuild_world();
+resize_canvas();
+requestAnimationFrame(render_frame);
+window.__demo = {
+  state, uniforms, renderer, scene, dummy_camera, rebuild_world, rebuild_mouths, move_to_spawn, set_camera, make_ground_frame, make_identity,
+  make_mouth_frame, make_default_wormholes, multiply_all, make_rotation, make_boost, get_light_bend, fly_along_light, look_around, aim_at_nearest_mouth, aim_through_mouth, trace_miss, place_mouth, clear_wormholes,
+  get_distance, get_column, get_world_up_local, upload_scene, render_frame, resize_canvas
+};
+</script>
+</body>
+</html>
