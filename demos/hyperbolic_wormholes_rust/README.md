@@ -52,7 +52,8 @@ cargo run --release -- --map lunar-surface --view black_hole
 
 ## Play together
 
-Everyone on the same network can play in one game. One player hosts and the others join:
+Everyone on the same network can play in one game. One player hosts and the others join. [`PLAYTEST.md`](PLAYTEST.md)
+has the steps for a fresh Mac, the commands for each player and the known caveats.
 
 ```bash
 make host-game

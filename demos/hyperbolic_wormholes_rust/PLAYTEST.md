@@ -1,0 +1,74 @@
+# Playtest: play together on one Wi-Fi
+
+How to get a few people into one game of the Rust wormholes demo, and what is known to be rough. Report anything
+else you notice.
+
+## Set up each Mac (once)
+
+You need a Mac with Apple silicon (the game draws with Metal and upscales with MetalFX).
+
+```bash
+xcode-select --install
+brew install cmake
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+git clone https://github.com/4gatepylon/Warped.git
+```
+
+- `xcode-select --install` gives the C compiler, and CMake builds SDL3 (the window library) from source. Skip
+  whichever you already have.
+- The repository is private: each player needs read access on GitHub to clone it.
+- Until the demo's stack of pull requests is merged into `main`, check out its newest branch:
+  `git -C Warped checkout claude/hyperbolic-wormholes-rust-playtest`.
+- The first build takes a few minutes (SDL3 compiles from source); later ones take seconds.
+
+## Play
+
+Everyone joins the same Wi-Fi and uses the same `MAP`. One person hosts; everyone else joins:
+
+```bash
+cd Warped/demos/hyperbolic_wormholes_rust
+make host-game MAP=lunar-surface
+make join-game MAP=lunar-surface
+make join-game MAP=lunar-surface SERVER=192.168.1.20
+```
+
+- The host runs `make host-game`; the others run `make join-game`, which finds the host on the network. If it
+  doesn't within a few seconds, join by the host's IP address (the host can get it with `ipconfig getifaddr en0`).
+- When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
+  connections. Without that, nobody can reach the game.
+- `MAP=house-demo` (the default) plays the house with its three wormholes instead.
+- Up to 8 players. A laser that reaches another player removes them; they press `Enter` to rejoin at their spawn.
+
+Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints,
+`Space` jumps (hold it for the jetpack), `H` toggles flying (`Space`/`E` and `Q` go up and down), `L` toggles your
+laser, `G` aims through the nearest mouth, `R` respawns, `-` and `=` change the render resolution.
+
+## Known caveats
+
+Multiplayer:
+
+- Tested on one Mac only: a host, two bots and a window joined over loopback, on both maps (lasers hit, players
+  rejoin). Not yet tried across two computers on Wi-Fi.
+- The game doesn't check that everyone uses the same map; a player on another map sees the others in the wrong
+  places.
+- Each computer is trusted with its own moves and hits, so there is no protection against cheating.
+- Local network only: no play over the internet. Networks that keep devices apart (many guest and office Wi-Fi
+  networks) stop players from reaching each other; a home network or a phone's hotspot works.
+- The game uses UDP port 47800 and announces itself on UDP port 47801 (`PORT=` changes the first).
+
+Graphics on Lunar Surface, to fix in later pull requests:
+
+- Rays still going after 90 iterations take steps three times longer (`DECISIONS.md` D40), so the thinnest rings
+  just inside a wormhole mouth differ slightly from the WebGL level's.
+- The sky seen through the lenses differs slightly from the WebGL level's: escaping rays read it where their bending
+  ends, not where their last step ended (D39).
+- Neighbouring pixels on one surface are interpolated rather than traced (D37); textures smaller than a pixel
+  shimmer, as they do when every pixel is traced.
+- Frames that take more than about 15.5 ms of GPU time are drawn at a lower resolution and upscaled (D19, D41), so
+  very close approaches to a mouth look softer.
+- Rays that never come out (trapped near a throat or out of iterations) are black on Lunar Surface; the house paints
+  them from the pixels around them.
+- The laser is traced on the CPU with the level's steps; where the picture uses longer steps (D40) the drawn beam
+  can sit a few pixels off in the most lensed rings.
+- Near the wormhole's throat the picture is about 4 pixels from a converged reference (a known cost of the level's
+  steps, D34).
