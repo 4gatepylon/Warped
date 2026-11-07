@@ -59,6 +59,48 @@
 - **Alternatives:** drawing the beam as screen-space lines, which can't show it through a wormhole.
 - **Rationale:** it matches how the earlier laser demos drew beams.
 
+### D11. Metal draws into a buffer that SDL shows
+
+- **Choice:** the Metal shader writes RGBA pixels into a shared buffer; each frame waits for the GPU, copies the
+  pixels out and hands them to SDL's renderer, which also draws the HUD.
+- **Alternatives:** drawing straight into the window's Metal layer, which saves two copies but needs SDL's renderer
+  and Metal to share a layer, and the HUD drawn some other way.
+- **Rationale:** the copies cost about half a millisecond at 1280×800, against 6 to 37 ms of GPU work.
+- **Revisit if:** the GPU time drops to a few milliseconds.
+
+### D12. Check for throats only when the bending sum finds a mouth that close
+
+- **Choice:** the bending sum already measures every mouth each step, so a ray only runs the throat check when the
+  nearest mouth is inside the throat's radius; in both renderers. Every pixel stays the same, and Metal got about 30%
+  faster.
+- **Alternatives:** the separate check each step that the WebGL demo does.
+- **Rationale:** it was pure overhead.
+
+### D13. Larger integration steps (needs input)
+
+- **Choice:** not applied. Steps of 0.18 and 0.40 of the nearest mouth's distance (instead of 0.12 and 0.25) took
+  the spawn view from 23 to 17 ms; 0.25 and 0.50 took it to 14 ms (Metal, 1280×800). They moved edges inside the
+  lensed areas by about a pixel: 15% and 22% of pixels changed by more than 30 of 765.
+- **Alternatives:** turning one of them on by default, or offering it as a quality setting.
+- **Rationale:** it changes the picture, so it is your call.
+
+### D14. Tried and dropped
+
+- **Choice:** a 300-step cap per ray (instead of 700) and 16×16 or 32×32 thread groups (instead of 8×8): the cap
+  changed nothing and gained nothing in these views, and larger groups were slower.
+- **Alternatives:** none.
+- **Rationale:** measured, no gain.
+
+## Baselines
+
+### D15. WebGL at the same drawing-buffer sizes
+
+- **Choice:** the browser demo from PR 58, unchanged, in the Claude desktop app's built-in browser (Chromium 152,
+  ANGLE on Metal), with its drawing buffer set to 1280×800 and 2560×1600 and frames timed with `readPixels`. Its
+  scene differs a little: its mouths and eye are 4.5 blocks up, and it has no laser.
+- **Alternatives:** moving the WebGL demo's mouths to match first.
+- **Rationale:** it is the version you found too slow.
+
 ## Workload
 
 ### D7. Six fixed views
@@ -80,7 +122,8 @@
 ### D9. What a frame's time includes
 
 - **Choice:** packing the scene, tracing the laser (when on) and rendering, not showing the image; median and
-  fastest of N frames (N = 5 at 1280×800, 3 at 2560×1600) after one warm-up frame.
+  fastest of N frames after one warm-up frame (for the CPU, N = 5 at 1280×800 and 3 at 2560×1600; for Metal and
+  WebGL, N = 20).
 - **Alternatives:** render time only.
 - **Rationale:** that is what a frame costs the game loop.
 
@@ -93,3 +136,13 @@
 - **Alternatives:** an idle machine.
 - **Rationale:** none was available; differences under about 15% are noise.
 - **Revisit if:** two renderers come out within that margin.
+
+## Analysis
+
+### D16. Metal's images are checked against the CPU's
+
+- **Choice:** each benchmark view from both renderers was compared pixel by pixel; they differ only in the clouds and
+  block speckles, whose pseudo-random hash (`fract(sin(x) · 43758.5)`) comes out differently on the GPU. The laser,
+  the lensing and every surface match.
+- **Alternatives:** a GPU-stable integer hash, so the images match exactly.
+- **Rationale:** the noise only decorates; matching it wasn't worth changing the look.

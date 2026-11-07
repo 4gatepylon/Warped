@@ -3,7 +3,8 @@
 //! hyperbolic space (H³) with gravity, fly, go through three wormholes and fire a laser.
 //!
 //! Interface:
-//! - `--renderer cpu`: which renderer draws the frames.
+//! - `--renderer metal|cpu`: which renderer draws the frames: the GPU with Metal (the default) or
+//!   every CPU core.
 //! - `--render-scale <fraction>`: fraction of the window's pixels (per side) to render.
 //! - `--bench-views`: render fixed views without a window, time them, and save them under
 //!   `.artifacts/bench_views/<run_id>/`. `--frame-count`, `--width-px`, `--height-px` set it up.
@@ -19,6 +20,7 @@
 mod geometry;
 mod physics;
 mod render_cpu;
+mod render_metal;
 mod scene_data;
 mod world;
 
@@ -47,6 +49,7 @@ const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
 const BYTES_PER_PIXEL: usize = 4;
 const CPU_RENDER_SCALE: f64 = 0.35;
+const METAL_RENDER_SCALE: f64 = 1.0;
 const RENDER_SCALE_STEP: f64 = 1.25;
 const MIN_RENDER_SCALE: f64 = 0.05;
 const MAX_FRAME_DT_S: f64 = 0.05;
@@ -67,19 +70,20 @@ const SECONDS_PER_DAY: u64 = 86_400;
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum RendererKind {
     Cpu,
+    Metal,
 }
 
 /// `Arguments` is the command line.
 #[derive(Parser)]
 #[command(
     about = "Walk, fly and fire a laser through wormholes in hyperbolic space.",
-    after_help = "Example: hyperbolic-wormholes --bench-views --width-px 2560 --height-px 1600"
+    after_help = "Example: hyperbolic-wormholes --renderer cpu --bench-views --width-px 2560 --height-px 1600"
 )]
 struct Arguments {
-    /// Which renderer draws the frames.
-    #[arg(long, value_enum, default_value_t = RendererKind::Cpu)]
+    /// Which renderer draws the frames: the GPU with Metal, or every CPU core.
+    #[arg(long, value_enum, default_value_t = RendererKind::Metal)]
     renderer: RendererKind,
-    /// Fraction of the window's pixels per side to render (default 0.35 on the CPU).
+    /// Fraction of the window's pixels per side to render (default 0.35 on the CPU, 1 with Metal).
     #[arg(long)]
     render_scale: Option<f64>,
     /// Render fixed views without a window, time them and save them under .artifacts/bench_views/.
@@ -119,6 +123,13 @@ trait Renderer {
     ///
     /// Example: `println!("{}", renderer.name());`
     fn name(&self) -> &'static str;
+
+    /// `gpu_ms` gives the GPU's own time for the last frame, for renderers that use one.
+    ///
+    /// Example: `if let Some(ms) = renderer.gpu_ms() { println!("{ms}"); }`
+    fn gpu_ms(&self) -> Option<f64> {
+        None
+    }
 }
 
 /// `CpuRenderer` is the rayon ray tracer of `render_cpu.rs`.
@@ -141,6 +152,21 @@ impl Renderer for CpuRenderer {
 fn make_renderer(kind: RendererKind) -> Result<Box<dyn Renderer>> {
     match kind {
         RendererKind::Cpu => Ok(Box::new(CpuRenderer)),
+        RendererKind::Metal => Ok(Box::new(render_metal::MetalRenderer::New()?)),
+    }
+}
+
+impl Renderer for render_metal::MetalRenderer {
+    fn render(&mut self, data: &SceneData, pixels: &mut [u8]) -> Result<()> {
+        render_metal::MetalRenderer::render(self, data, pixels)
+    }
+
+    fn name(&self) -> &'static str {
+        "metal"
+    }
+
+    fn gpu_ms(&self) -> Option<f64> {
+        Some(self.last_gpu_ms)
     }
 }
 
@@ -150,6 +176,7 @@ fn make_renderer(kind: RendererKind) -> Result<Box<dyn Renderer>> {
 fn get_default_render_scale(kind: RendererKind) -> f64 {
     match kind {
         RendererKind::Cpu => CPU_RENDER_SCALE,
+        RendererKind::Metal => METAL_RENDER_SCALE,
     }
 }
 
@@ -421,6 +448,7 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
             &mut pixels,
         )?;
         let mut times_ms: Vec<f64> = Vec::new();
+        let mut gpu_times_ms: Vec<f64> = Vec::new();
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
             render_view(
@@ -433,8 +461,10 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
                 &mut pixels,
             )?;
             times_ms.push(start.elapsed().as_secs_f64() * 1000.0);
+            gpu_times_ms.extend(renderer.gpu_ms());
         }
         times_ms.sort_by(f64::total_cmp);
+        gpu_times_ms.sort_by(f64::total_cmp);
         save_png(
             &folder.join(format!("{}.png", view.name)),
             &pixels,
@@ -445,6 +475,7 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
             "view": view.name,
             "median_ms": times_ms[times_ms.len() / 2],
             "fastest_ms": times_ms[0],
+            "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
             "laser": report.as_ref().map(describe_laser),
         }));
     }
@@ -464,15 +495,18 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
         println!("{summary}");
     } else {
         println!(
-            "{:<18} {:>10} {:>10}  laser",
-            "view", "median ms", "fastest ms"
+            "{:<18} {:>10} {:>10} {:>10}  laser",
+            "view", "median ms", "fastest ms", "GPU ms"
         );
         for view in &results {
             println!(
-                "{:<18} {:>10.1} {:>10.1}  {}",
+                "{:<18} {:>10.1} {:>10.1} {:>10}  {}",
                 view["view"].as_str().unwrap_or_default(),
                 view["median_ms"].as_f64().unwrap_or_default(),
                 view["fastest_ms"].as_f64().unwrap_or_default(),
+                view["median_gpu_ms"]
+                    .as_f64()
+                    .map_or("-".to_string(), |ms| format!("{ms:.1}")),
                 view["laser"].as_str().unwrap_or("-"),
             );
         }
@@ -771,6 +805,7 @@ fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Resu
 struct Hud {
     fps: f64,
     render_ms: f64,
+    gpu_ms: Option<f64>,
     message: String,
     message_time_s: f64,
     laser: Option<String>,
@@ -805,6 +840,7 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     let mut hud: Hud = Hud {
         fps: 0.0,
         render_ms: 0.0,
+        gpu_ms: None,
         message: String::new(),
         message_time_s: 0.0,
         laser: None,
@@ -895,6 +931,7 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
         )?;
         hud_render_ms += render_start.elapsed().as_secs_f64() * 1000.0;
         hud.laser = report.as_ref().map(describe_laser);
+        hud.gpu_ms = renderer.gpu_ms();
         if texture.as_ref().is_none_or(|(_, size)| *size != size_px) {
             texture = Some((
                 texture_creator.create_texture_streaming(
@@ -948,8 +985,13 @@ fn draw_hud(
     canvas.set_draw_color(HUD_COLOR);
     let mut lines: Vec<String> = vec![
         format!(
-            "{:.0} fps, {:.1} ms render, {renderer_name} at {}x{}",
-            hud.fps, hud.render_ms, size_px.0, size_px.1
+            "{:.0} fps, {:.1} ms render{}, {renderer_name} at {}x{}",
+            hud.fps,
+            hud.render_ms,
+            hud.gpu_ms
+                .map_or(String::new(), |ms| format!(" ({ms:.1} ms on the GPU)")),
+            size_px.0,
+            size_px.1
         ),
         format!(
             "{}, height {:.1} blocks",

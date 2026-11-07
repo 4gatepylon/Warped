@@ -88,6 +88,7 @@ pub struct Scene<'a> {
     tile_edges: [Vec4; 4],
     tile_klein_half_width: f32,
     q_cutoff: f32,
+    q_throat: f32,
 }
 
 /// `Reach` is cosh and sinh of how far a straight piece of a ray reaches, in curvature radii, so a
@@ -344,6 +345,7 @@ impl<'a> Scene<'a> {
             ],
             tile_klein_half_width: inradius.tanh(),
             q_cutoff: get_q_of_distance(u.bend_cutoff_m / u.curvature_radius_m),
+            q_throat: get_q_of_distance(0.5 * (2.0 * u.throat_m / u.curvature_radius_m).ln_1p()),
         }
     }
 
@@ -768,7 +770,11 @@ pub fn trace_ray(
     let (mut x, mut v, mut row) = (start, direction, 0usize);
     let (mut travelled_m, mut box_clear_until_m) = (0.0f32, -1.0f32);
     for _ in 0..MAX_STEP_COUNT {
-        let (bend, q_nearest) = scene.get_bend(row, x, v);
+        let (mut bend, mut q_nearest) = scene.get_bend(row, x, v);
+        if q_nearest < scene.q_throat && scene.cross_throat(&mut row, &mut x, &mut v) {
+            box_clear_until_m = -1.0;
+            (bend, q_nearest) = scene.get_bend(row, x, v);
+        }
         let is_far: bool = q_nearest > scene.q_cutoff;
         let (vh, tau_max, ds_m) = if is_far {
             let tau: f32 = scene.get_cutoff_entry_tau(row, x, v);
@@ -842,9 +848,6 @@ pub fn trace_ray(
         v = to_tangent(x, v);
         visit(row, x_before, x, travelled_m, travelled_m + ds_m);
         travelled_m += ds_m;
-        if scene.cross_throat(&mut row, &mut x, &mut v) {
-            box_clear_until_m = -1.0;
-        }
     }
     TraceEnd::Lost
 }

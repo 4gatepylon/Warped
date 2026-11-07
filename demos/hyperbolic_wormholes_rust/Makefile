@@ -3,17 +3,17 @@
 #
 # Interface:
 #     make help: list the targets.
-#     make run-demo RENDERER=<cpu>: open the window and play.
-#     make bench-views RENDERER=<cpu> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
-#     make run-autopilot RENDERER=<cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
+#     make run-demo RENDERER=<metal|cpu>: open the window and play.
+#     make bench-views RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
+#     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
 #     make clean: remove .build/.
 #     make reset-artifacts YES_TO_RESET_ARTIFACTS=1: delete .artifacts/.
 #
 # Example:
-#     make bench-views WIDTH_PX=2560 HEIGHT_PX=1600
-RENDERER ?= cpu
+#     make bench-views RENDERER=cpu WIDTH_PX=2560 HEIGHT_PX=1600
+RENDERER ?= metal
 WIDTH_PX ?= 1280
 HEIGHT_PX ?= 800
 FRAME_COUNT ?= 10
@@ -28,17 +28,17 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
 
 help:
 	@echo "Targets:"
-	@echo "  make run-demo RENDERER=cpu                       Open the window and play"
-	@echo "  make bench-views RENDERER=cpu WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
+	@echo "  make run-demo RENDERER=metal                     Open the window and play (RENDERER=cpu for the CPU)"
+	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
-	@echo "  make run-autopilot RENDERER=cpu AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
+	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
 	@echo "                                                   Play a scripted route without a window (.artifacts/autopilot/)"
 	@echo "  make test                                        Run the tests"
 	@echo "  make fmt                                         Format with rustfmt and lint with clippy"
 	@echo "  make clean                                       Remove .build/"
 	@echo "  make reset-artifacts YES_TO_RESET_ARTIFACTS=1    Delete .artifacts/ (or INTERACTIVE=1 to be asked)"
 	@echo ""
-	@echo "Example: make bench-views WIDTH_PX=2560 HEIGHT_PX=1600"
+	@echo "Example: make bench-views RENDERER=cpu WIDTH_PX=2560 HEIGHT_PX=1600"
 
 run-demo:
 	cargo run --release -- --renderer $(RENDERER)
