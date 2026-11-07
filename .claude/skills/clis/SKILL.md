@@ -1,6 +1,6 @@
 ---
 name: clis
-description: Design command-line interfaces in this repo - Python scripts and servers (click) and C and C++ mains (getopt_long) - so they are safe by default and use the same flags everywhere. Use whenever you write or change a script's or main's arguments, flags, prompts or output, or add a destructive or expensive operation (including a Makefile target that wraps one).
+description: Design command-line interfaces in this repo - Python scripts and servers (click) and C and C++ mains (getopt_long) - so they are safe by default and use the same flags everywhere. Use whenever you write or change a script's or main's arguments, flags, prompts or output, or add a destructive, expensive or cached operation (including a Makefile target that wraps one).
 ---
 
 # CLIs
@@ -23,6 +23,7 @@ and this skill differ, this skill wins.
 - **Idempotent:** running a command twice with the same arguments gives the same result and
   destroys nothing. A new run writes a new run folder (`.artifacts/<script>/<run_id>/`, see
   "Uncommitted files" in the root `CLAUDE.md`) and never replaces an old one.
+- **No cache:** a run computes everything fresh unless it gets `--reuse-cache` (see Caching).
 - **Bounded output:** see Output.
 
 ## Validate first
@@ -39,7 +40,7 @@ and this skill differ, this skill wins.
 ## Destructive actions
 
 A destructive action deletes, overwrites or stops something that is costly or impossible to get
-back: a folder of benchmark results, or game servers that players are in.
+back: a folder of benchmark results, a cache, or game servers that players are in.
 
 - Each destructive action has its own kebab-case flag, `--yes-to-<action>`:
   `--yes-to-overwrite-results`, `--yes-to-stop-game-servers`. There is no blanket `--yes` or
@@ -99,8 +100,8 @@ A Makefile target that wraps a destructive action takes the same switches as var
   terminal.
 - Every command that returns data takes `--json`, which prints the same results as a single JSON
   object on stdout instead of the human-readable table.
-- Every command that creates something prints its identifier (a run ID, a game server ID or an
-  output path), also in its `--json` output.
+- Every command that creates something prints its identifier (a run ID, a cache handle, a game
+  server ID or an output path), also in its `--json` output.
 - Output is bounded. A list prints at most `--limit` rows (with a default), and when it truncates
   it says so and how to see more.
 - Output that is long by nature goes to a file in the run folder, and stdout gets a summary plus
@@ -108,6 +109,17 @@ A Makefile target that wraps a destructive action takes the same switches as var
   of it to stdout.
 - Exit codes: 0 on success, 1 when the work fails or a prompt is declined, 2 on a usage error (bad
   arguments, or a missing `--yes-to-<action>`). These match click's defaults.
+
+## Caching
+
+- A cache is never used by default: every run computes fresh.
+- A run whose result is slow to compute and can be reused, such as reference bullet paths
+  computed with a tiny time step, keeps it in its run folder and prints a cache handle: its run
+  ID (`cache_handle` in `--json`).
+- `--reuse-cache <handle>` uses that run's result instead of computing it. It fails if the
+  handle doesn't exist or the run's arguments (its `command.txt`) differ from this call's.
+- `--overwrite-cache <handle>` recomputes into that run's folder. That's destructive, so it also
+  needs `--yes-to-overwrite-cache` or `--interactive`.
 
 ## Vocabulary
 
@@ -119,6 +131,8 @@ The same concept has the same name in every CLI:
 | Skip one confirmation | `--yes-to-<action>` | `--yes`, `-y`, `--force`, `--skip-confirmations` |
 | Show the plan, change nothing | `--dry-run` | `-n`, `--plan`, `--simulate` |
 | Structured output | `--json` | `--format json`, `--output json` |
+| Reuse a cached result | `--reuse-cache <handle>` | `--cache`, `--use-cache` |
+| Recompute a cached result | `--overwrite-cache <handle>` | `--refresh`, `--no-cache` |
 | Cap the rows printed | `--limit <count>` | `--max`, `--top`, `--head` |
 | Print long output in full | `--allow-long-output` | `--all`, `--full`, `--verbose` |
 | Write output to a file | `--output-file <path>` | `-o`, `--out` |
