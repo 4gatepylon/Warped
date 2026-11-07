@@ -21,3 +21,9 @@ I want to describe in more detail how this wavefront stuff works. So there is on
 
 # Addendum: respawns
 Respawns will happen on a cadence, and every n steps, it will increase in time linearly so that it takes longer to respawn as time progresses. This means that as time progresses, the stakes get basically higher to dying versus earlier on. The respawn rates should start at you being stuck dead for 20 seconds, and they should go up linearly every five minutes by 10 seconds on a given level in the map.
+
+# Addendum: sprinting
+There is an ability to sprint, but that uses up energy for running. This is like different from anything related to the guns. This is just a typical, you know, head bobbing, sprinting sort of experience that you would experience in any other first person shooter. However, if you kill somebody, you gain energy. So if you run and then you kill somebody, you immediately get back to full energy. You cannot get above full energy. Energy is depleted linearly when you run and recovered linearly when you do not run. When you run, it goes down at a rate of roughly. You know, 1% every, maybe 3% per second. And it goes up at a rate of roughly 1.5% per second. It should take 30 seconds to run out of energy, and it should take 60 seconds to regain full energy from being out of energy. These numbers may change.
+
+# Addendum: configurable numbers
+All numbers for the game design will, or almost all numbers will be configurable. So, for example, the number of consoles, the time to deactivate one console, parameters like pylons per level, etc. All these should be configurable. The default map, in fact, should not be the only map. It should be possible to configure maps, but that will not be done yet.
