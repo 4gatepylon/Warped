@@ -454,6 +454,14 @@
 - **Rationale:** you asked for click to shoot; a quarter of a second is long enough to see the shot and short enough
   that each click is one shot. `L` stays for showing the light paths.
 
+### D43. Jump to get onto blocks
+
+- **Choice:** on Lunar Surface, a block stops a walking player like a wall; `Space` jumps onto it (a jump clears about
+  2.25 m). Bots jump when a block stops them.
+- **Alternatives:** the level's automatic step onto single blocks; stepping up only after pushing into a block for a
+  moment; stepping up smoothly over a fraction of a second.
+- **Rationale:** you chose jumping: walking into a block popped the player onto it at once.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

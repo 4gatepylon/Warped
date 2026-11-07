@@ -34,7 +34,6 @@ const HEAD_CLEARANCE_M: f64 = 0.15;
 const PROBE_LOW_M: f64 = 0.02;
 const PROBE_KNEE_M: f64 = 0.3;
 const PROBE_WAIST_M: f64 = 1.1;
-const STEP_UP_M: f64 = 1.05;
 const MIN_FLY_HEIGHT_M: f64 = 0.4;
 const MAX_FLY_HEIGHT_M: f64 = 240.0;
 const UNSTICK_STEP_M: f64 = 0.25;
@@ -1104,7 +1103,7 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to spawn),
-    /// colliding with blocks and the boundary, stepping up single blocks, jumping and falling. A
+    /// colliding with blocks and the boundary, jumping (the only way onto a block) and falling. A
     /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
     /// level does) only if that fails. It returns messages for the HUD.
     ///
@@ -1189,10 +1188,6 @@ impl VoxelPlayer {
                 world.find_nearby_structures(body_new.col(AXIS_W), NEARBY_REACH_M);
             if !world.is_body_blocked(body_new, h_new, &nearby_new) {
                 (self.body, self.h_m) = (body_new, h_new);
-            } else if self.is_on_ground
-                && !world.is_body_blocked(body_new, h_new + STEP_UP_M, &nearby_new)
-            {
-                (self.body, self.h_m) = (body_new, h_new + STEP_UP_M);
             }
         }
         if input.up && self.is_on_ground {
@@ -1231,7 +1226,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
-    //! | Obstacle walked into | one block (stepped onto), a wall turned along after touching it at an angle (not climbed) | `walking_steps_onto_a_single_block`, `turning_along_a_wall_does_not_climb_it` |
+    //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -1248,6 +1243,7 @@ mod tests {
     const WALK_STEP_COUNT: usize = 90;
     const MAX_RISE_ALONG_WALL_M: f64 = 0.5;
     const MIN_RISE_ONTO_BLOCK_M: f64 = 0.9;
+    const MAX_RISE_ONTO_BLOCK_M: f64 = 1.2;
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
 
     /// `find_columns` finds, on structures standing upright on the ground, columns of cells (x, z)
@@ -1370,13 +1366,31 @@ mod tests {
     }
 
     #[test]
-    fn walking_steps_onto_a_single_block() {
+    fn walking_into_a_block_does_not_climb_it() {
         let world: VoxelWorld = load_lunar_surface();
         let mut player: VoxelPlayer = place_on_ground(&world, &find_columns(&world, 1, true, 0.0));
         let start_m: f64 = player.h_m;
         assert!(
-            walk_forward(&world, &mut player, WALK_STEP_COUNT) - start_m > MIN_RISE_ONTO_BLOCK_M
+            walk_forward(&world, &mut player, WALK_STEP_COUNT) - start_m < MAX_RISE_ALONG_WALL_M
         );
+    }
+
+    #[test]
+    fn jumping_climbs_onto_a_block() {
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer = place_on_ground(&world, &find_columns(&world, 1, true, 0.0));
+        let start_m: f64 = player.h_m;
+        let input: Input = Input {
+            forward: true,
+            up: true,
+            ..Input::default()
+        };
+        let has_stood_on_block: bool = (0..WALK_STEP_COUNT).any(|_| {
+            player.step(&world, &input, STEP_S, 0);
+            let rise_m: f64 = player.h_m - start_m;
+            player.is_on_ground && rise_m > MIN_RISE_ONTO_BLOCK_M && rise_m < MAX_RISE_ONTO_BLOCK_M
+        });
+        assert!(has_stood_on_block);
     }
 
     #[test]
