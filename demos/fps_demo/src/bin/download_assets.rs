@@ -16,7 +16,7 @@ mod asset_manifest;
 
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use clap::Parser;
@@ -91,6 +91,13 @@ fn plan_model(assets_dir: &Path, model: &PolyHavenModel) -> Vec<PlannedFile> {
         .as_object()
         .unwrap_or_else(|| panic!("model {} has no include list", model.id));
     for (relative_path, entry) in includes {
+        assert!(
+            Path::new(relative_path)
+                .components()
+                .all(|component| matches!(component, Component::Normal(_))),
+            "model {} include path {relative_path:?} must stay inside its folder",
+            model.id
+        );
         let path: PathBuf = asset_manifest::model_dir(assets_dir, model).join(relative_path);
         planned_files.push(plan_file(entry, path));
     }
