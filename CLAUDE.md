@@ -143,6 +143,8 @@ a function or a file, or that a decision depends on, spells out its meaning.
 | Data, decimal bits | `_kbits`, `_mbits` | 10^3, 10^6 bits |
 | Data, binary | `_kibytes`, `_mibytes`, `_gibytes` | 2^10, 2^20, 2^30 bytes |
 | Bandwidth | `_kbits_per_s`, `_mbits_per_s`, `_mbytes_per_s` | not `_mbps`: bits or bytes? |
+| Distance | `_m` | meters, also in game maps |
+| Speed | `_m_per_s` | |
 | Count | `_count` | a number of items: `player_count` |
 | Fraction | `_frac`, `_pct` | 0 to 1, 0 to 100 |
 
