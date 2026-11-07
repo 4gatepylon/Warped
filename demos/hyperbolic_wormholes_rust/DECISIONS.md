@@ -366,12 +366,13 @@
 
 ### D36. Speed on Lunar Surface
 
-- **Choice:** adaptive sampling (D37), clearance grids (D38), escaping rays read where their bending ends (D39), and
-  the same automatic render scale as the house (D19). At 2560×1600 and full resolution the views away from warps take
+- **Choice:** adaptive sampling (D37), clearance grids (D38), escaping rays read where their bending ends (D39), longer
+  steps after 90 iterations (D40), and the same automatic render scale as the house (D19). At 2560×1600 and full resolution the views away from warps take
   6 to 8 ms of GPU time, those across the crater 7 to 10 ms and those near the black hole and wormhole 8 to 20 ms (33
   to 58 ms when this layer stack started). At the full-screen window's size (2560×1336) every view takes under 11 ms
   but the wormhole exit and the laser view, 16.4. In the window, every view runs at 74 fps or more, all at full
-  resolution but the wormhole exit, at 0.88 (0.53 to 0.62 for the views near warps at the start).
+  resolution but the wormhole exit, at 0.88 (0.53 to 0.62 for the views near warps at the start). With D40 the
+  wormhole exit takes 13.7 ms at the window's size and full resolution and runs at render scales 0.96 to 0.98.
 - **Alternatives:** larger steps (D34); jump tables (D37); a higher scale target (the window measured 78 fps for the
   wormhole exit at full resolution with a 16 ms target, but the views run then differ from run to run, as the player
   moves differently; left as it is, at 14 ms, D19).
@@ -421,6 +422,16 @@
 - **Rationale:** it is the picture the level's steps converge to, and closer to it (black hole 0.57 → 0.11 pixel
   against steps eight times smaller; Einstein ring 1.33 → 1.00), and a third faster on the Einstein ring view. The
   picture differs from the level's along the lensed sky (SSIM 0.96 to 1.0).
+
+### D40. Longer steps after 90 iterations
+
+- **Choice:** after 90 iterations a ray's bent steps are 24% of the distance to the warp instead of the level's 8%.
+- **Alternatives:** after 120 or 80 iterations; a budget per warp visit; ending rays at 120 or 160 iterations (the
+  photon ring turns black); see OPTIMIZATIONS.md 8.7.
+- **Rationale:** the wormhole exit gets 12% faster (19.8 → 17.4 ms at 2560×1600), close enough to the window's 14 ms
+  target to run within a few percent of full resolution. Only rays in the lens's most compressed, aliased rings take
+  that long; 2.9% of that view's pixels change, and their distance from a converged reference doesn't.
+- **Revisit if:** the rings inside a mouth look different when played.
 
 ## Baselines
 
