@@ -50,19 +50,22 @@ carries on through the other mouth. "Auto" quality renders about 380k pixels and
 
 ## Optics lab (flat space)
 
-`optics.html` is a ray-traced, flat-space lab for trying out optical elements with a laser. It has two demos, picked from the
-dropdown or the URL. Each adds one element to the previous one:
+`optics.html` is a ray-traced, flat-space lab for trying out optical elements with a laser. It has three demos, picked from
+the dropdown or the URL. Each adds one element to the previous one:
 
 - `optics.html?demo=mirrors`: mirrors. The scene has a zigzag, a periscope, two facing mirrors and a corner reflector.
 - `optics.html?demo=splitters`: adds beam splitters (half-silvered mirrors). The scene has a 1-into-4 cascade and a
   Mach–Zehnder layout.
+- `optics.html?demo=diffraction`: adds diffraction gratings. Red, green, blue or white light; adjustable lines per mm.
 
 Click the scene to capture the mouse (or drag to look), `WASD` to fly and `E`/`Q` to go up and down. The laser controls are
-the same as above (`L`, click or `R`, `Z`). `1`/`2` place a mirror or splitter facing you. Aim at one and hold `T` (or the
-right mouse button) and move the mouse to turn it, or use `J`/`K`/`U`/`I` for 5° steps. `X` deletes it.
+the same as above (`L`, click or `R`, `Z`). `1`/`2`/`3` place a mirror, splitter or grating facing you. Aim at one and hold
+`T` (or the right mouse button) and move the mouse to turn it, or use `J`/`K`/`U`/`I` for 5° steps. `X` deletes it.
 
-Mirrors and splitters really reflect what you see, laser beams included. Splitters halve the light each way. Limitation:
-beams are rays, so there is no interference.
+Mirrors and splitters really reflect what you see, laser beams included. Splitters halve the light each way. Gratings send
+order m to sin θ = sin θ<sub>in</sub> + mλ/d, with brightness from a thin sinusoidal phase grating (about 30% straight
+through, 30% per first order, 4.6% per second). Limitations: beams are rays, so there is no interference; looking through a
+grating shows only the straight-through view.
 
 ## Running
 
