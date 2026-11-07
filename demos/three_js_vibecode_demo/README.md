@@ -48,7 +48,13 @@ gravity that is the same seen from either mouth, so a ball comes out as fast as 
 Speed: the ray tracer does more work per pixel than the black hole demo, because light that would end at a horizon here
 carries on through the other mouth. "Auto" quality renders about 380k pixels and steps down while it runs below ~40 fps.
 
+## Optics lab (flat space)
+
+`optics.html` is a ray-traced, flat-space lab for trying out optical elements with a laser. For now it is an empty lab: drag
+to look around.
+
 ## Running
 
 To serve them locally: `python3 -m http.server --directory demos/three_js_vibecode_demo`, then open e.g.
-`http://localhost:8000/blackholes_laser.html` or `http://localhost:8000/wormholes.html`.
+`http://localhost:8000/blackholes_laser.html`, `http://localhost:8000/wormholes.html` or
+`http://localhost:8000/optics.html`.
