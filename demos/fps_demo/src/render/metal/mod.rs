@@ -907,16 +907,19 @@ impl MetalRenderer {
             self.bind_scene_inputs(&encoder, &buffers, targets);
             set_vertex_bytes(&encoder, as_bytes(&world_pass), 2);
             encoder.setDepthStencilState(Some(&self.pipelines.depth_states.greater_equal_write));
-            let mut solid: Vec<&DrawItem> = opaque.clone();
-            solid.extend(masked.iter().copied());
-            self.draw_meshes(
-                &encoder,
-                &self.pipelines.forward_opaque,
-                &solid,
-                ScenePass::Forward,
-                &buffers,
-                false,
-            );
+            for (pipeline_pair, draws) in [
+                (&self.pipelines.forward_opaque, &opaque),
+                (&self.pipelines.forward_masked, &masked),
+            ] {
+                self.draw_meshes(
+                    &encoder,
+                    pipeline_pair,
+                    draws,
+                    ScenePass::Forward,
+                    &buffers,
+                    false,
+                );
+            }
 
             encoder.setCullMode(MTLCullMode::None);
             encoder.setDepthStencilState(Some(&self.pipelines.depth_states.greater_equal_read));
@@ -995,25 +998,30 @@ impl MetalRenderer {
             };
             set_vertex_bytes(&encoder, as_bytes(&viewmodel_pass), 2);
             encoder.setDepthStencilState(Some(&self.pipelines.depth_states.greater_equal_write));
-            let viewmodel_solid: Vec<&DrawItem> = frame
+            let (viewmodel_masked, viewmodel_opaque): (Vec<&DrawItem>, Vec<&DrawItem>) = frame
                 .viewmodel_draws
                 .iter()
                 .filter(|draw| alpha_mode_of(draw) != AlphaMode::Blend)
-                .collect();
+                .partition(|draw| alpha_mode_of(draw) == AlphaMode::Mask);
             let mut viewmodel_blended: Vec<&DrawItem> = frame
                 .viewmodel_draws
                 .iter()
                 .filter(|draw| alpha_mode_of(draw) == AlphaMode::Blend)
                 .collect();
             sort_back_to_front(&mut viewmodel_blended);
-            self.draw_meshes(
-                &encoder,
-                &self.pipelines.forward_opaque,
-                &viewmodel_solid,
-                ScenePass::Forward,
-                &buffers,
-                true,
-            );
+            for (pipeline_pair, draws) in [
+                (&self.pipelines.forward_opaque, &viewmodel_opaque),
+                (&self.pipelines.forward_masked, &viewmodel_masked),
+            ] {
+                self.draw_meshes(
+                    &encoder,
+                    pipeline_pair,
+                    draws,
+                    ScenePass::Forward,
+                    &buffers,
+                    true,
+                );
+            }
             encoder.setCullMode(MTLCullMode::None);
             encoder.setDepthStencilState(Some(&self.pipelines.depth_states.greater_equal_read));
             self.draw_meshes(

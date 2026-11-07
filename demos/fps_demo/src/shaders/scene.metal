@@ -123,6 +123,40 @@ inline Surface read_surface(SceneVertexOut in, constant MaterialUniforms& materi
     return surface;
 }
 
+// FORWARD_FRAGMENT_PARAMS is here because only forward_fragment and forward_masked_fragment below use it.
+#define FORWARD_FRAGMENT_PARAMS                                                                 \
+    SceneVertexOut in [[stage_in]], constant FrameUniforms &frame [[buffer(1)]],                \
+        constant DrawUniforms &draw [[buffer(3)]],                                              \
+        constant MaterialUniforms &material [[buffer(4)]],                                      \
+        device const GpuPointLight *point_lights [[buffer(5)]],                                 \
+        MaterialTextures material_textures, depth2d_array<float> shadow_map [[texture(4)]],     \
+        texture3d<float> sky_visibility [[texture(5)]],                                         \
+        texturecube<float> prefiltered [[texture(6)]], texture2d<float> brdf_lut [[texture(7)]], \
+        texture2d<float> ssao [[texture(8)]], bool is_front_face [[front_facing]]
+
+/**
+ * @brief `shade_forward` shades one forward fragment, optionally cutting out masked texels.
+ * @par Example
+ * @code
+ * return shade_forward(in, frame, draw, material, point_lights, material_textures, textures,
+ *                      is_front_face, false);
+ * @endcode
+ */
+inline float4 shade_forward(SceneVertexOut in, constant FrameUniforms& frame,
+                            constant DrawUniforms& draw, constant MaterialUniforms& material,
+                            device const GpuPointLight* point_lights,
+                            MaterialTextures material_textures, SceneTextures textures,
+                            bool is_front_face, bool should_alpha_test) {
+    float alpha = 1.0;
+    Surface surface = read_surface(in, material, draw, material_textures, is_front_face, alpha);
+    if (should_alpha_test && alpha < material.params.z) {
+        discard_fragment();
+    }
+    float3 color = shade_surface(frame, surface, textures, point_lights);
+    color = apply_fog(frame, color, in.world_position);
+    return float4(color, alpha);
+}
+
 /**
  * @brief `forward_fragment` shades one fragment of an opaque or blended mesh.
  * @par Example
@@ -130,27 +164,24 @@ inline Surface read_surface(SceneVertexOut in, constant MaterialUniforms& materi
  * pipeline(scene_vertex, forward_fragment) into the HDR target
  * @endcode
  */
-fragment float4 forward_fragment(SceneVertexOut in [[stage_in]],
-                                 constant FrameUniforms& frame [[buffer(1)]],
-                                 constant DrawUniforms& draw [[buffer(3)]],
-                                 constant MaterialUniforms& material [[buffer(4)]],
-                                 device const GpuPointLight* point_lights [[buffer(5)]],
-                                 MaterialTextures material_textures,
-                                 depth2d_array<float> shadow_map [[texture(4)]],
-                                 texture3d<float> sky_visibility [[texture(5)]],
-                                 texturecube<float> prefiltered [[texture(6)]],
-                                 texture2d<float> brdf_lut [[texture(7)]],
-                                 texture2d<float> ssao [[texture(8)]],
-                                 bool is_front_face [[front_facing]]) {
-    float alpha = 1.0;
-    Surface surface = read_surface(in, material, draw, material_textures, is_front_face, alpha);
-    if (alpha < material.params.z) {
-        discard_fragment();
-    }
+fragment float4 forward_fragment(FORWARD_FRAGMENT_PARAMS) {
     SceneTextures textures = {shadow_map, sky_visibility, prefiltered, brdf_lut, ssao};
-    float3 color = shade_surface(frame, surface, textures, point_lights);
-    color = apply_fog(frame, color, in.world_position);
-    return float4(color, alpha);
+    return shade_forward(in, frame, draw, material, point_lights, material_textures, textures,
+                         is_front_face, false);
+}
+
+/**
+ * @brief `forward_masked_fragment` shades one fragment of an alpha-masked mesh, discarding texels
+ * below the material's alpha cutoff.
+ * @par Example
+ * @code
+ * pipeline(scene_vertex, forward_masked_fragment) into the HDR target
+ * @endcode
+ */
+fragment float4 forward_masked_fragment(FORWARD_FRAGMENT_PARAMS) {
+    SceneTextures textures = {shadow_map, sky_visibility, prefiltered, brdf_lut, ssao};
+    return shade_forward(in, frame, draw, material, point_lights, material_textures, textures,
+                         is_front_face, true);
 }
 
 /**

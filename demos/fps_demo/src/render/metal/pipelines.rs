@@ -90,6 +90,7 @@ pub struct Pipelines {
     pub shadow_masked: PipelinePair,
     pub prepass: PipelinePair,
     pub forward_opaque: PipelinePair,
+    pub forward_masked: PipelinePair,
     pub forward_blend: PipelinePair,
     pub sky: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub decal: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
@@ -326,6 +327,14 @@ impl Pipelines {
                 Some(HDR_FORMAT),
                 Blend::None,
                 "forward_opaque",
+            ),
+            forward_masked: scene_pair(
+                device,
+                &library,
+                Some("forward_masked_fragment"),
+                Some(HDR_FORMAT),
+                Blend::None,
+                "forward_masked",
             ),
             forward_blend: scene_pair(
                 device,
