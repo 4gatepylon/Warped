@@ -48,7 +48,36 @@ gravity that is the same seen from either mouth, so a ball comes out as fast as 
 Speed: the ray tracer does more work per pixel than the black hole demo, because light that would end at a horizon here
 carries on through the other mouth. "Auto" quality renders about 380k pixels and steps down while it runs below ~40 fps.
 
+## Optics lab (flat space)
+
+`optics/` is a ray-traced, flat-space lab for trying out optical elements with a laser. It has six demos, one page each
+(`optics/index.html` lists them), and each adds one element to the previous one. The pages share `optics/lab.js` and
+`optics/lab.css`, and also work when opened straight from disk:
+
+- `optics/mirrors.html`: mirrors. The scene has a zigzag, a periscope, two facing mirrors and a corner reflector.
+- `optics/splitters.html`: adds beam splitters (half-silvered mirrors). The scene has a 1-into-4 cascade and a
+  Mach–Zehnder layout.
+- `optics/diffraction.html`: adds diffraction gratings. Red, green, blue or white light; adjustable lines per mm.
+- `optics/heat_haze.html`: adds heaters. Hot air rising off a heater bends a beam outward and upward, and its turbulence
+  spreads the beam into a widening, soft glow. The effect is about 1000× stronger than real hot air, and a slider sets how
+  fast beams spread (0× to 6×).
+- `optics/refraction.html`: adds glass blocks and prisms. Beams bend by Snell's law, partly reflect off every face, can be
+  trapped by total internal reflection, and white light splits into a rainbow in a prism.
+- `optics/refraction_glow.html`: hot air and glass together. White light softened by hot air blurs into a soft rainbow
+  through a prism, and a softened beam fills a glass bar with glow.
+
+Click the scene to capture the mouse (or drag to look), `WASD` to fly and `E`/`Q` to go up and down. The laser controls are
+the same as above (`L`, click or `R`, `Z`). `1`/`2`/`3`/`5`/`6` place a mirror, splitter, grating, glass block or prism
+facing you. Aim at one and hold `T` (or the right mouse button) and move the mouse to turn it, or use `J`/`K`/`U`/`I` for 5°
+steps. `X` deletes it. `4` puts a heater on the block you aim at, or takes away the heater you aim at.
+
+Mirrors and splitters really reflect what you see, laser beams included. Splitters halve the light each way. Gratings send
+order m to sin θ = sin θ<sub>in</sub> + mλ/d, with brightness from a thin sinusoidal phase grating (about 30% straight
+through, 30% per first order, 4.6% per second). Limitations: beams are rays, so there is no interference; looking through a
+grating shows only the straight-through view.
+
 ## Running
 
 To serve them locally: `python3 -m http.server --directory demos/three_js_vibecode_demo`, then open e.g.
-`http://localhost:8000/blackholes_laser.html` or `http://localhost:8000/wormholes.html`.
+`http://localhost:8000/blackholes_laser.html`, `http://localhost:8000/wormholes.html` or
+`http://localhost:8000/optics/`.

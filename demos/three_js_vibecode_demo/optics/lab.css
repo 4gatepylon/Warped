@@ -1,0 +1,30 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+.panel { position: fixed; background: rgba(12, 16, 26, 0.74); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+#controls { top: 10px; left: 10px; width: 310px; max-height: calc(100vh - 40px); overflow: auto; }
+#stats { top: 10px; right: 10px; text-align: right; max-width: 360px; }
+#tips { bottom: 10px; right: 10px; width: 350px; max-height: calc(100vh - 170px); overflow: auto; }
+h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+input[type=range] { width: 100%; }
+select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
+button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+button:hover { background: #42527a; }
+button.on { background: #7a2c2c; border-color: #c35a5a; }
+.row { margin-top: 8px; }
+.muted { color: #9fb0c8; }
+.laser { color: #ffb4a8; }
+#sLaser { color: #ff9a8a; }
+#sMsg { color: #ffd27a; }
+#tips ol { margin: 4px 0 0 18px; padding: 0; }
+#tips li { margin: 3px 0; }
+#tipsToggle { float: right; margin-top: -2px; }
+#cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+#cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+#cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+#cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+#err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+body.no-split .f-split, body.no-grat .f-grat, body.no-heat .f-heat, body.no-glass .f-glass { display: none; }
+a { color: #9fd0ff; }
+a.cur { color: #fff; font-weight: bold; text-decoration: none; }

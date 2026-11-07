@@ -1,0 +1,2348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dark Forest — Warped level demo</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(10, 14, 22, 0.76); color: #e3e9f2; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 300px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; width: 270px; }
+  #tips { bottom: 10px; right: 10px; width: 360px; max-height: calc(100vh - 260px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 4px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  select, button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
+  button { padding: 2px 6px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  .row { margin-top: 7px; }
+  .muted { color: #9fb0c8; }
+  .red { color: #ff8a7a; } .blue { color: #8ab8ff; }
+  .bar { height: 7px; background: #26303f; border-radius: 4px; overflow: hidden; margin: 2px 0 4px; }
+  .fill { height: 100%; width: 0; background: #e3c34a; }
+  #s_progress { background: #7be0c4; }
+  #s_msg { color: #a8d8ff; min-height: 1.45em; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 3px 0; }
+  #tips_toggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #banner { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); font-size: 34px; font-weight: 700; color: #fff; text-shadow: 0 0 18px #000; display: none; pointer-events: none; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+<div id="banner"></div>
+
+<div id="controls" class="panel">
+  <h1>Dark Forest</h1>
+  <div class="muted">Red level, depth 1. Space T² × ℝ: x loops every 112 m, z every 160 m, up is endless. Black holes and wormholes bend light.</div>
+  <div class="row">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br>
+    <kbd>H</kbd> fly mode (<kbd>Space</kbd> up, <kbd>C</kbd> down)<br>
+    <kbd>E</kbd> (hold) deactivate a console of the other team's pylon<br>
+    Click (captured) or <kbd>R</kbd> fire the laser<br>
+    <kbd>T</kbd> play as the other team</div>
+  <div class="row"><b>Viewpoints</b> (<kbd>1</kbd>–<kbd>9</kbd>)<br><span id="view_buttons"></span></div>
+  <div class="row"><label>Render quality <select id="quality"><option value="auto" selected>auto</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="full">full</option></select></label></div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Team: <b id="s_team">red</b> · <span id="s_mode">walking</span></div>
+  <div>Zone: <b id="s_zone">–</b></div>
+  <div class="muted" id="s_route">–</div>
+  <div class="row">Energy <span id="s_energy_pct" class="muted"></span><div class="bar"><div id="s_energy" class="fill"></div></div></div>
+  <div id="s_consoles">–</div>
+  <div class="bar"><div id="s_progress" class="fill"></div></div>
+  <div>Laser: <span id="s_laser">–</span></div>
+  <div class="muted"><span id="s_fps">–</span> fps · <span id="s_pos">–</span></div>
+  <div id="s_msg"></div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tips_toggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tips_body">
+  <ol>
+    <li><b>The level loops.</b> Red spawns at z = 0 and blue halfway round, at z = 80. Leave the red base north into the <i>Glade side</i> or south into the <i>Bog side</i>: both reach blue. The road through each base goes all the way round in x. View <kbd>3</kbd> (overview) and the <code>#view=loop</code> view show the copies of the level that light brings back round.</li>
+    <li><b>Black holes</b> hang over the two open areas, the Glade and the Bog. They bend sight lines across them, show a black shadow with a glowing disk and an Einstein ring, and you can't get closer than about 2 m. View <kbd>5</kbd>.</li>
+    <li><b>Wormholes are the fast routes.</b> Each team has a <i>Glade–Bog gate</i> near its side of the middle: it switches you between the two ways to the other side. The <i>Trench gate</i> jumps from the west trench, near red, to the east trench, near blue (and back). Look into a mouth to see the far side; walk into its middle and you follow the same bent path as light. View <kbd>6</kbd> and <kbd>7</kbd>.</li>
+    <li><b>Shoot the laser</b> (<kbd>R</kbd>) into a gate or past a black hole: it bends and goes through, and you see it lensed.</li>
+    <li><b>Capture.</b> Each pylon has 4 consoles. Go to the other team's pylon (<code>#view=blue_pylon</code>), face it and hold <kbd>E</kbd> for 10 s per console.</li>
+    <li><b>Fly</b> (<kbd>H</kbd>) above the canopy to see the zones: red moss and red lights in the red zone, blue in the blue zone, neutral amber lamps in the middle.</li>
+  </ol>
+  </div>
+</div>
+<div id="err"></div>
+
+<script type="module">
+/**
+ * @file
+ * `index.html` is a playable demo of Dark Forest, Warped's red level at depth 1: a dark forest planet in the
+ * flat space T² × ℝ, whose two horizontal axes loop (x every 112 m, z every 160 m), with black holes and
+ * wormholes that bend light. A WebGL2 fragment shader ray traces one period of a voxel grid with periodic wrapping.
+ *
+ * Interface:
+ * - Keys and mouse: see the controls panel (WASD, Shift, Space, C, H, E, R, T, 1–9; a click captures the pointer).
+ * - URL hash: `view=<name>` (a key of `VIEWS`), `quality=low|medium|high|full`, `panels=off`, `team=blue`, `test=laser`.
+ * - `window.__demo`: the state and the functions `set_view`, `fire_laser`, `trace_laser`, `step_player`, `switch_team`.
+ *
+ * Example: `python3 -m http.server --directory demos`, then open
+ * `http://localhost:8000/levels/dark_forest/index.html#view=overview&quality=medium`.
+ *
+ * Must know:
+ * - Gotchas: the level is symmetric under a 180° turn about (56, 40), which swaps the red and blue halves, so every feature is built twice (`Frame`).
+ * - Gotchas: light, lasers and players feel only the nearest copy of each warp object, faded out between 28 and 44 m.
+ * - Performance: the ray tracer renders about 320k pixels in auto quality and lowers that while it runs below 40 fps.
+ */
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const PERIOD_X_M = 112, PERIOD_Z_M = 160, GRID_HEIGHT_M = 32;
+const GRID_X = PERIOD_X_M, GRID_Y = GRID_HEIGHT_M, GRID_Z = PERIOD_Z_M;
+const ROTATION_CENTER_X_M = 56, ROTATION_CENTER_Z_M = 40;
+const ROTATION_CELL_X = 2 * ROTATION_CENTER_X_M - 1, ROTATION_CELL_Z = 2 * ROTATION_CENTER_Z_M - 1;
+const BLUE_HALF_END_Z_M = ROTATION_CENTER_Z_M + PERIOD_Z_M / 2;
+const GROUND_TOP_Y = 4, SOIL_DEPTH_M = 3;
+const RED_ZONE_HALF_DEPTH_M = 16, BAND_RAMP_M = 4, ROAD_HALF_WIDTH_M = 2.5;
+const GLADE_X_M = 56, GLADE_HALF_WIDTH_M = 18;
+const WEST_TRENCH_X_M = 18, EAST_TRENCH_X_M = 94, TRENCH_FLOOR_HALF_WIDTH_M = 5, TRENCH_HALF_WIDTH_M = 8, TRENCH_DEPTH_M = 2;
+const BOG_X_M = 0, BOG_HALF_WIDTH_M = 22, FOREST_X_M = 56, FOREST_HALF_WIDTH_M = 18;
+const RIDGE_BASE_HEIGHT_M = 5, RIDGE_EXTRA_HEIGHT_M = 4;
+const GLADE_MOUND_NOISE_FRAC = 0.8, FOREST_MOUND_NOISE_FRAC = 0.85, ISLAND_NOISE_FRAC = 0.62, TEAM_MOSS_NOISE_FRAC = 0.3, GRAVEL_NOISE_FRAC = 0.5;
+const COARSE_NOISE_CELL_M = 8, FINE_NOISE_CELL_M = 4, ROUGH_NOISE_OFFSET_M = 31;
+const TRENCH_CHAMBER = { x: 10, z: 26, size_x: 16, size_z: 9 };
+const GLADE_CONNECTOR = { x: 26, z: 28, size_x: 12, size_z: 5 };
+const ROOT_TUNNEL = { x: 22, z: -31, size_x: 16, size_z: 5 };
+const DECK_Y = 13;
+
+const EYE_HEIGHT_M = 1.6, HEAD_CLEARANCE_M = 0.15, BODY_HALF_WIDTH_M = 0.25, FOOT_CLEARANCE_M = 0.02;
+const GRAVITY_M_PER_S_PER_S = 25, FALL_GRAVITY_GAIN = 1.5, JUMP_SPEED_M_PER_S = 8.2, MAX_FALL_SPEED_M_PER_S = 50;
+const WALK_SPEED_M_PER_S = 6, SPRINT_SPEED_M_PER_S = 9.5, FLY_SPEED_M_PER_S = 12, FLY_SPRINT_SPEED_M_PER_S = 30;
+const ENERGY_DRAIN_S = 30, ENERGY_REFILL_S = 60, STEP_UP_M = 1.05, POP_UP_STEP_M = 0.25, POP_UP_TRY_COUNT = 160;
+const LANDING_BISECTION_COUNT = 8, HEAD_BOB_M = 0.06, HEAD_BOB_RAD_PER_M = 1.9;
+const LOOK_RAD_PER_PX = 0.0025, MAX_LOOK_UP_COS = 0.995, LEVEL_OUT_RATE_HZ = 2.5, MAX_LEVEL_OUT_FWD_Y = 0.98, MAX_DT_S = 0.05;
+
+const BLACK_HOLE_RS_M = 1.0, MOUTH_RS_M = 1.0, LAMBDA_SQ = 0.25, RHO_PER_RS = 0.25;
+const FADE_START_M = 28, FADE_END_M = 44, MIN_RHO_M = 1e-4, MAX_HORIZON_FRAC = 0.999;
+const CAPTURE_RADIUS_PER_HORIZON_RADIUS = 2, BLACK_HOLE_KEEP_OUT_M = 2.2, BLOCK_CLEARANCE_M = 0.8, BLACK_HOLE_CLEAR_M = 2.5;
+const TRANSIT_RADIUS_M = 3, TRANSIT_MAX_S = 3, TRANSIT_MIN_SPEED_M_PER_S = 0.5, TRANSIT_STEP_FRAC = 0.05, TRANSIT_MAX_STEP_M = 0.5, TRANSIT_MAX_SUBSTEPS = 400;
+
+const LASER_MAX_M = 320, LASER_STEP_M = 0.25, LASER_MIN_STEP_M = 0.002, LASER_FINE_STEP_FRAC = 0.02, LASER_FINE_RADIUS_PER_RHO = 40, LASER_FINE_MARGIN_M = 4;
+const LASER_MAX_ITERATIONS = 60000, LASER_TURN_TOLERANCE_RAD_M = 0.1, LASER_MAX_TURN_RAD = 0.2, MAX_SEGMENT_M = 20, LASER_SKY_STEP_M = 20;
+const BEAM_LIFETIME_S = 2, MAX_BEAM_POINTS = 1024, MAX_CHUNKS = 48, MAX_SEGMENTS_PER_CHUNK = 16, MAX_CHUNK_LENGTH_M = 40;
+const CHUNK_START_RADIUS_M = 0.6, CHUNK_MAX_RADIUS_M = 100, CHUNK_PACK_STRIDE = 32, CHUNK_RADIUS_PAD_M = 1e-3;
+const GUN_OFFSET_RIGHT_M = 0.22, GUN_OFFSET_UP_M = -0.2, GUN_OFFSET_FWD_M = 0.3, MAX_VOXEL_STEPS = 256;
+const TEAM_COLORS = { red: [1.0, 0.16, 0.1], blue: [0.22, 0.5, 1.0] };
+
+const CONSOLES_PER_PYLON = 4, DEACTIVATE_S = 10, PYLON_REACH_M = 4.5, PYLON_FACING_MAX_RAD = 0.7, PYLON_HEIGHT_M = 5;
+const BUNKER_HEIGHT_M = 3, DOOR_HEIGHT_M = 3, WINDOW_SPACING_M = 3, TOWER_DECK_HEIGHT_M = 9, TOWER_ROOF_ABOVE_DECK_M = 4;
+const GATE_PILLAR_HEIGHT_M = 5, GATE_PIT_HALF_WIDTH_M = 2, GATE_PIT_DEPTH_M = 2, GATE_PILLAR_DX = [4, -5], GATE_PILLAR_DZ = [2, -3];
+const STAIR_HEADROOM_M = 3, PLATFORM_HALF_WIDTH_M = 4, BRIDGE_HALF_WIDTH_M = 1, WALL_HEIGHT_M = 2, LAMP_POST_HEIGHT_M = 3;
+const THICK_TRUNK_CANOPY_M = 5, CANOPY_HALF_HEIGHT_M = 2.6, CANOPY_LAYERS_BELOW = 2, CANOPY_LAYERS_ABOVE = 2, CANOPY_RAGGED_M = 1.2, CANOPY_DEEP_FRAC = 0.35;
+const ROOT_SKIP_FRAC = 0.25, ROOT_MIN_M = 2, ROOT_EXTRA_M = 2, FUNGUS_FRAC = 0.08;
+const TREE_GRID_M = 7, TREE_JITTER_M = 5, CANOPY_TOP_MARGIN_M = 3, WALKWAY_TREE_CLEAR_M = 7, ROAD_TREE_MARGIN_M = 3;
+const RED_ZONE_TREE_DENSITY = 0.3, RIDGE_TREE_DENSITY = 0.95, FOREST_TREE_DENSITY = 0.55;
+const TRUNK_MIN_M = 8, TRUNK_EXTRA_M = 6, TALL_TRUNK_MIN_M = 16, TALL_TRUNK_EXTRA_M = 4, CANOPY_MIN_M = 4, CANOPY_EXTRA_M = 2;
+const EDGE_TREE_TRUNK_M = 11, EDGE_TREE_CANOPY_M = 5, WALKWAY_TRUNK_M = 19, WALKWAY_CANOPY_M = 5.5;
+const DEAD_TREE_BRANCH_COUNT = 3, DEAD_TREE_BRANCH_MIN_M = 3, RING_HALF_THICKNESS_M = 0.6, ROOT_ARCH_GAP_PERIOD = 3, CHANNELS_PER_TEXEL = 4;
+const TOWER_FOOTPRINT_M = 5, PLINTH_SIZE_M = 4;
+const CONSOLE_CELLS = [[[-4, -1], [-4, 0]], [[3, -1], [3, 0]], [[-1, -4], [0, -4]], [[-1, 3], [0, 3]]];
+const GLOW_CAP_FRAC = 0.7, BOULDER_FLATTEN_GAIN = 1.3, BOULDER_RAGGED_M = 0.6, BOULDER_MOSS_FRAC = 0.4, RUIN_HEIGHT_M = 3;
+const BANNER_LENGTH_M = 3, BANNER_SPACING_M = 4, TRENCH_LAMP_SPACING_M = 6, GLADE_BLACK_HOLE_HEIGHT_M = 5.5, BOG_BLACK_HOLE_HEIGHT_M = 6;
+const LIGHT_LEVEL_MAX = 15, LIGHT_BYTE_PER_LEVEL = 17, LEAF_LIGHT_COST = 2, OPAQUE_BYTE = 255;
+const FOV_Y_DEG = 75, AUTO_PIXEL_BUDGET = 320000, MIN_AUTO_PIXEL_BUDGET = 100000, AUTO_TARGET_FPS = 40, AUTO_STEP_FRAC = 0.75, AUTO_WINDOW_S = 2, MAX_FRAME_GAP_S = 0.2;
+const QUALITY_SCALES = { low: 0.35, medium: 0.5, high: 0.75, full: 1 };
+const HUD_PERIOD_S = 0.25, MESSAGE_S = 3;
+const RNG_SEED = 20261106;
+
+const MATERIALS = { air: 0, moss: 1, dirt: 2, stone: 3, bark: 4, leaves: 5, leaves_deep: 6, root: 7, stem: 8, cap_pale: 9, cap_glow: 10,
+  glow_plant: 11, concrete: 12, concrete_dark: 13, metal: 14, planks: 15, lamp: 16, red_light: 17, blue_light: 18, red_paint: 19,
+  blue_paint: 20, bog: 21, moss_stone: 22, gravel: 23, console_red: 24, console_blue: 25, console_off: 26, pylon_red: 27,
+  pylon_blue: 28, red_moss: 29, blue_moss: 30, bedrock: 31, glow_fungus: 32 };
+const MATERIAL_COUNT = Object.keys(MATERIALS).length;
+const MATERIAL_NAMES = Object.fromEntries(Object.entries(MATERIALS).map(([name, id]) => [id, name.replace('_', ' ')]));
+const TEAM_PAIRS = [[MATERIALS.red_light, MATERIALS.blue_light], [MATERIALS.red_paint, MATERIALS.blue_paint], [MATERIALS.console_red, MATERIALS.console_blue], [MATERIALS.pylon_red, MATERIALS.pylon_blue], [MATERIALS.red_moss, MATERIALS.blue_moss]];
+const TEAM_SWAP = new Uint8Array(MATERIAL_COUNT).map((_, id) => id);
+for (const [red, blue] of TEAM_PAIRS) { TEAM_SWAP[red] = blue; TEAM_SWAP[blue] = red; }
+const PALETTE = {
+  moss: [0.16, 0.29, 0.15], dirt: [0.24, 0.18, 0.13], stone: [0.3, 0.31, 0.33], bark: [0.21, 0.16, 0.12], leaves: [0.1, 0.21, 0.12],
+  leaves_deep: [0.07, 0.16, 0.16], root: [0.27, 0.2, 0.14], stem: [0.72, 0.68, 0.58], cap_pale: [0.72, 0.66, 0.5], cap_glow: [0.22, 0.55, 0.52],
+  glow_plant: [0.3, 0.7, 0.42], concrete: [0.46, 0.46, 0.47], concrete_dark: [0.27, 0.27, 0.29], metal: [0.22, 0.24, 0.27], planks: [0.42, 0.3, 0.19],
+  lamp: [1.0, 0.85, 0.6], red_light: [1.0, 0.3, 0.25], blue_light: [0.3, 0.55, 1.0], red_paint: [0.55, 0.08, 0.07], blue_paint: [0.1, 0.22, 0.6],
+  bog: [0.07, 0.1, 0.06], moss_stone: [0.24, 0.29, 0.24], gravel: [0.33, 0.31, 0.29], console_red: [1.0, 0.3, 0.2], console_blue: [0.3, 0.6, 1.0],
+  console_off: [0.16, 0.16, 0.18], pylon_red: [1.0, 0.35, 0.25], pylon_blue: [0.35, 0.6, 1.0], red_moss: [0.3, 0.12, 0.1], blue_moss: [0.11, 0.17, 0.33],
+  bedrock: [0.1, 0.1, 0.1], glow_fungus: [0.3, 0.7, 0.9] };
+const EMISSION = {
+  lamp: [1.5, 1.05, 0.55], red_light: [1.7, 0.3, 0.2], blue_light: [0.4, 0.75, 1.8], cap_glow: [0.14, 0.62, 0.56], glow_plant: [0.25, 0.75, 0.38],
+  glow_fungus: [0.3, 0.75, 1.0], cap_pale: [0.22, 0.18, 0.1], console_red: [1.6, 0.35, 0.2], console_blue: [0.35, 0.7, 1.7],
+  pylon_red: [1.9, 0.45, 0.3], pylon_blue: [0.45, 0.8, 2.0] };
+const WARM_SOURCES = { lamp: 15, red_light: 14, pylon_red: 15, cap_pale: 6 };
+const COOL_SOURCES = { blue_light: 14, pylon_blue: 15, cap_glow: 11, glow_plant: 8, glow_fungus: 7 };
+const LEAF_MATERIALS = new Set([MATERIALS.leaves, MATERIALS.leaves_deep]);
+const NATURAL_GROUND = new Set([MATERIALS.moss, MATERIALS.red_moss, MATERIALS.blue_moss, MATERIALS.moss_stone, MATERIALS.bog, MATERIALS.dirt]);
+
+const LAYOUT = {
+  red_spawn: [32.5, 0.5], red_pylon: [56, 0],
+  courtyard: { x: 48, z: -8, size_x: 16, size_z: 16, road_gate_z: -2, road_gate_width: 4, band_gate_x: 53, band_gate_width: 6 },
+  spawn_bunker: { x: 28, z: -5, size_x: 9, size_z: 10, doors: [['x0', 3, 4], ['x1', 3, 4], ['z0', 3, 3], ['z1', 3, 3]] },
+  west_exit_bunker: { x: 13, z: 9, size_x: 10, size_z: 5, doors: [['z0', 3, 4], ['z1', 3, 4], ['x0', 1, 3], ['x1', 1, 3]] },
+  towers: [[65, 10, [1, 0]], [41, -15, [-1, 0]], [2, -15, [1, 0]], [90, 9, [-1, 0]]],
+  road_lamps: [[6, 3], [20, -4], [44, 3], [70, -4], [84, 3], [98, -4]],
+  defence_walls: [[36, 12, 8], [68, -12, 8], [24, -11, 6], [80, 12, 6]],
+  spawn_pad: { x: 31, z: -1, size: 3 }, courtyard_cover: [[51, -5], [59, 4]],
+  zone_marker_rows: [RED_ZONE_HALF_DEPTH_M, -RED_ZONE_HALF_DEPTH_M - 1], zone_marker_spacing: 5,
+  glade_boulders: [[45, 21, 2.2], [67, 25, 2.6], [51, 30, 1.6], [62, 35, 2.0], [41, 38, 1.8]],
+  glade_logs: [[58, 21, 8, [1, 0]], [47, 34, 6, [0, 1]]],
+  glade_mushrooms: [[39, 25, 2], [72, 31, 2], [53, 24, 1]], glade_edge_trees: [[38, 18], [72, 18]],
+  crater_center: [56, 40], crater_radius: 7,
+  glade_gate: [44, 32], bog_gate: [12, -32], trench_gate: [18, 30],
+  west_bunker: { x: 13, z: 18, size_x: 10, size_z: 5, doors: [['z0', 3, 4], ['z1', 3, 4]] },
+  east_bunker: { x: 89, z: 31, size_x: 10, size_z: 6, doors: [['z0', 3, 4], ['z1', 3, 4], ['x0', 2, 2]] },
+  east_sandbags: [[89, 20, 5], [94, 24, 5], [89, 28, 5]],
+  trench_steps_z: [24, 37], revetment_x: [12, 23, 88, 99], connector_log: { x: 31, y: 7, z: 27, length: 8 },
+  bog_dead_trees: [[98, -22, 8], [9, -20, 7], [106, -30, 9], [17, -37, 6], [94, -36, 7], [4, -26, 6]],
+  bog_ruins: [[100, -25, 5, [1, 0]], [7, -36, 4, [1, 0]], [108, -31, 4, [0, 1]]],
+  bog_ring_center: [0, -40], bog_ring_radius: 6.5,
+  walkway_trees: [[56, -24], [45, -31], [55, -41], [66, -33]], walkway_bridges: [[0, 1], [0, 3], [1, 2], [3, 2]],
+  walkway_stairs: { tree: 0, dir: [0, 1] }, connector_stairs: { tree: 1, dir: [-1, 0] },
+  root_arch: { x: 23, z: -31, size_x: 9, y: 9 },
+  tree_exclusions: [[56, 0, 13], [32, 0, 9], [67, 12, 8], [43, -13, 8], [4, -13, 8], [92, 11, 8], [18, 11, 7], [57, -12, 5], [26, 30, 4]],
+  decor_counts: { giant_mushrooms: 8, glow_plants: 60, small_mushrooms: 40, bog_reeds: 40 },
+  glade_ring_gap_frac: 0.45
+};
+
+const voxels = new Uint8Array(GRID_X * GRID_Y * GRID_Z);
+const ground_tops = new Int16Array(GRID_X * GRID_Z);
+
+/**
+ * `wrap_index` wraps an integer (or a coordinate) into [0, n).
+ * @param {number} i The value to wrap.
+ * @param {number} n The period.
+ * @return {number} The wrapped value.
+ * @example wrap_index(-1, 112); // 111
+ */
+function wrap_index(i, n) { return ((i % n) + n) % n; }
+
+/**
+ * `cell_index` returns a cell's index in `voxels`, wrapping x and z.
+ * @param {number} x The cell's x. @param {number} y The cell's y (0 to GRID_Y - 1). @param {number} z The cell's z.
+ * @return {number} The index.
+ * @example voxels[cell_index(3, 4, 5)] = MATERIALS.stone;
+ */
+function cell_index(x, y, z) { return wrap_index(x, GRID_X) + y * GRID_X + wrap_index(z, GRID_Z) * GRID_X * GRID_Y; }
+
+/**
+ * `get_block` returns the material of a cell: bedrock below the grid, air above it, wrapped in x and z.
+ * @param {number} x The cell's x. @param {number} y The cell's y. @param {number} z The cell's z.
+ * @return {number} The material id.
+ * @example get_block(0, 4, 0); // the ground at the red spawn's road
+ */
+function get_block(x, y, z) { return y < 0 ? MATERIALS.bedrock : y >= GRID_Y ? MATERIALS.air : voxels[cell_index(x, y, z)]; }
+
+/**
+ * `set_block` sets the material of a cell (ignored above or below the grid).
+ * @param {number} x The cell's x. @param {number} y The cell's y. @param {number} z The cell's z. @param {number} m The material id.
+ * @return {void}
+ * @example set_block(10, 5, 10, MATERIALS.lamp);
+ */
+function set_block(x, y, z, m) { if (y >= 0 && y < GRID_Y) voxels[cell_index(x, y, z)] = m; }
+
+/**
+ * `mulberry32` returns a seeded pseudo-random generator of numbers in [0, 1).
+ * @param {number} seed The seed.
+ * @return {function(): number} The generator.
+ * @example const rng = mulberry32(7); rng();
+ */
+function mulberry32(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+/**
+ * `lattice_hash` returns a pseudo-random number in [0, 1) for an integer lattice point.
+ * @param {number} i The lattice x. @param {number} k The lattice z.
+ * @return {number} The hash.
+ * @example lattice_hash(3, -2);
+ */
+function lattice_hash(i, k) { let h = Math.imul(i, 374761393) ^ Math.imul(k, 668265263); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+
+/**
+ * `value_noise` returns smooth noise in [0, 1) that repeats every PERIOD_X_M in x.
+ * @param {number} x The x, in metres. @param {number} z The z, in metres. @param {number} cell_m The lattice spacing; it must divide PERIOD_X_M.
+ * @return {number} The noise value.
+ * @example value_noise(10.5, -3.5, 8);
+ */
+function value_noise(x, z, cell_m) {
+  const period = GRID_X / cell_m, gx = x / cell_m, gz = z / cell_m, i = Math.floor(gx), k = Math.floor(gz);
+  const fx = (gx - i) * (gx - i) * (3 - 2 * (gx - i)), fz = (gz - k) * (gz - k) * (3 - 2 * (gz - k));
+  const i0 = wrap_index(i, period), i1 = wrap_index(i + 1, period);
+  const a = lattice_hash(i0, k) + (lattice_hash(i1, k) - lattice_hash(i0, k)) * fx;
+  const b = lattice_hash(i0, k + 1) + (lattice_hash(i1, k + 1) - lattice_hash(i0, k + 1)) * fx;
+  return a + (b - a) * fz;
+}
+
+/**
+ * `abs_dx` returns the shortest distance in x between two coordinates, across the x loop.
+ * @param {number} a The first x. @param {number} b The second x.
+ * @return {number} The distance, in metres.
+ * @example abs_dx(1, 111); // 2
+ */
+function abs_dx(a, b) { return Math.abs(wrap_index(a - b + PERIOD_X_M / 2, PERIOD_X_M) - PERIOD_X_M / 2); }
+
+/**
+ * `is_in_box` says whether a design-space point is inside a box given by its corner and size.
+ * @param {number} x The x. @param {number} z The z. @param {{x: number, z: number, size_x: number, size_z: number}} box The box.
+ * @return {boolean} Whether the point is inside.
+ * @example is_in_box(30, 30, GLADE_CONNECTOR);
+ */
+function is_in_box(x, z, box) { return wrap_index(x - box.x, PERIOD_X_M) < box.size_x && z >= box.z && z < box.z + box.size_z; }
+
+/**
+ * `column_profile` returns the terrain of one column of the red half, in design coordinates: zones are bands
+ * across z (the red zone |z| ≤ 16, the Glade side z > 16, the Bog side z < -16) and routes are lanes in x.
+ * @param {number} x The cell's x, 0 to 111. @param {number} z The cell's z, -40 to 39.
+ * @return {Array<number>} The top solid cell's y and its material.
+ * @example const [top_y, surface] = column_profile(56, 30);
+ */
+function column_profile(x, z) {
+  const xc = x + 0.5, zc = z + 0.5, bump = value_noise(xc, zc, COARSE_NOISE_CELL_M), rough = value_noise(xc + ROUGH_NOISE_OFFSET_M, zc - ROUGH_NOISE_OFFSET_M, FINE_NOISE_CELL_M);
+  if (Math.abs(zc) <= RED_ZONE_HALF_DEPTH_M) {
+    if (Math.abs(zc) <= ROAD_HALF_WIDTH_M) return [GROUND_TOP_Y, MATERIALS.gravel];
+    return [GROUND_TOP_Y, rough > TEAM_MOSS_NOISE_FRAC ? MATERIALS.red_moss : MATERIALS.moss];
+  }
+  const ramp = Math.min(1, (Math.abs(zc) - RED_ZONE_HALF_DEPTH_M) / BAND_RAMP_M);
+  const ridge_top = GROUND_TOP_Y + Math.round(ramp * (RIDGE_BASE_HEIGHT_M + RIDGE_EXTRA_HEIGHT_M * bump));
+  const ridge_surface = rough > GRAVEL_NOISE_FRAC ? MATERIALS.moss : MATERIALS.moss_stone;
+  if (zc > 0) {
+    if (abs_dx(xc, GLADE_X_M) <= GLADE_HALF_WIDTH_M) return [GROUND_TOP_Y + (bump > GLADE_MOUND_NOISE_FRAC ? 1 : 0), MATERIALS.moss];
+    if (is_in_box(x, z, TRENCH_CHAMBER)) return [GROUND_TOP_Y - TRENCH_DEPTH_M, MATERIALS.gravel];
+    if (is_in_box(x, z, GLADE_CONNECTOR)) return [x === GLADE_CONNECTOR.x ? GROUND_TOP_Y - 1 : GROUND_TOP_Y, MATERIALS.moss];
+    const trench_dx = Math.min(abs_dx(xc, WEST_TRENCH_X_M), abs_dx(xc, EAST_TRENCH_X_M));
+    if (trench_dx <= TRENCH_FLOOR_HALF_WIDTH_M) return [GROUND_TOP_Y - Math.round(ramp * TRENCH_DEPTH_M), rough > GRAVEL_NOISE_FRAC ? MATERIALS.gravel : MATERIALS.dirt];
+    if (trench_dx <= TRENCH_HALF_WIDTH_M) return [GROUND_TOP_Y, MATERIALS.moss];
+    return [ridge_top, ridge_surface];
+  }
+  if (abs_dx(xc, BOG_X_M) <= BOG_HALF_WIDTH_M) {
+    const is_island = bump > ISLAND_NOISE_FRAC;
+    return [GROUND_TOP_Y - (is_island ? 0 : Math.round(ramp)), is_island ? MATERIALS.moss : MATERIALS.bog];
+  }
+  if (abs_dx(xc, FOREST_X_M) <= FOREST_HALF_WIDTH_M) return [GROUND_TOP_Y + (rough > FOREST_MOUND_NOISE_FRAC ? 1 : 0), MATERIALS.moss];
+  if (is_in_box(x, z, ROOT_TUNNEL)) return [GROUND_TOP_Y, MATERIALS.moss];
+  return [ridge_top, ridge_surface];
+}
+
+/**
+ * `to_design_cell` maps a world column to the red-half design column it is a copy of.
+ * @param {number} x The world cell's x, 0 to 111. @param {number} z The world cell's z, 0 to 159.
+ * @return {Array} The design x, the design z and whether the column is in the blue half.
+ * @example to_design_cell(56, 80); // [55, -1, true]
+ */
+function to_design_cell(x, z) {
+  if (z >= ROTATION_CENTER_Z_M && z < BLUE_HALF_END_Z_M) return [ROTATION_CELL_X - x, ROTATION_CELL_Z - z, true];
+  return [x, z >= BLUE_HALF_END_Z_M ? z - PERIOD_Z_M : z, false];
+}
+
+/**
+ * `Frame` places design-space blocks into the world: as given (the red half), or turned by 180° about
+ * (56, 40) with the team materials swapped (the blue half). Building every feature in both frames makes the
+ * level fair: the blue team's half is exactly the red team's.
+ */
+class Frame {
+  /**
+   * `Frame` makes a frame for one team's half.
+   * @param {boolean} is_rotated Whether this is the blue half.
+   * @example const blue_frame = new Frame(true);
+   */
+  constructor(is_rotated) { this.is_rotated = is_rotated; this.team = is_rotated ? 'blue' : 'red'; }
+  /**
+   * `mapCell` maps a design cell to its world cell.
+   * @param {number} x The design x. @param {number} z The design z.
+   * @return {Array<number>} The world x and z (not wrapped).
+   * @example frame.mapCell(56, 0);
+   */
+  mapCell(x, z) { return this.is_rotated ? [ROTATION_CELL_X - x, ROTATION_CELL_Z - z] : [x, z]; }
+  /**
+   * `put` sets a block given in design coordinates.
+   * @param {number} x The design x. @param {number} y The y. @param {number} z The design z. @param {number} m The (red-team) material.
+   * @return {void}
+   * @example frame.put(56, 5, 0, MATERIALS.pylon_red);
+   */
+  put(x, y, z, m) { const [wx, wz] = this.mapCell(x, z); set_block(wx, y, wz, this.is_rotated ? TEAM_SWAP[m] : m); }
+  /**
+   * `get` returns the block at a design cell, as the red team's material.
+   * @param {number} x The design x. @param {number} y The y. @param {number} z The design z.
+   * @return {number} The material id.
+   * @example frame.get(56, 5, 0);
+   */
+  get(x, y, z) { const [wx, wz] = this.mapCell(x, z), m = get_block(wx, y, wz); return this.is_rotated ? TEAM_SWAP[m] : m; }
+  /**
+   * `groundTop` returns the terrain's top solid y at a design column.
+   * @param {number} x The design x. @param {number} z The design z.
+   * @return {number} The top y.
+   * @example frame.groundTop(56, 30);
+   */
+  groundTop(x, z) { const [wx, wz] = this.mapCell(x, z); return ground_tops[wrap_index(wx, GRID_X) + wrap_index(wz, GRID_Z) * GRID_X]; }
+}
+const FRAMES = [new Frame(false), new Frame(true)];
+
+/**
+ * `fill_box` fills a box of cells given by its corner and size.
+ * @param {Frame} f The frame. @param {number} x @param {number} y @param {number} z The corner.
+ * @param {number} size_x @param {number} size_y @param {number} size_z The size, in cells. @param {number} m The material.
+ * @return {void}
+ * @example fill_box(f, 48, 4, -8, 16, 1, 16, MATERIALS.concrete);
+ */
+function fill_box(f, x, y, z, size_x, size_y, size_z, m) {
+  for (let i = 0; i < size_x; i++) for (let j = 0; j < size_y; j++) for (let k = 0; k < size_z; k++) f.put(x + i, y + j, z + k, m);
+}
+
+/**
+ * `clear_leaves` replaces leaves (and only leaves) in a box with air, so paths stay open under canopies.
+ * @param {Frame} f The frame. @param {number} x @param {number} y @param {number} z The corner.
+ * @param {number} size_x @param {number} size_y @param {number} size_z The size.
+ * @return {void}
+ * @example clear_leaves(f, 50, 14, -20, 3, 3, 3);
+ */
+function clear_leaves(f, x, y, z, size_x, size_y, size_z) {
+  for (let i = 0; i < size_x; i++) for (let j = 0; j < size_y; j++) for (let k = 0; k < size_z; k++) if (LEAF_MATERIALS.has(f.get(x + i, y + j, z + k))) f.put(x + i, y + j, z + k, MATERIALS.air);
+}
+
+/**
+ * `build_tree` grows a dark tree: roots, a trunk (2×2 when the canopy is wide), fungus and a wide, flat canopy.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The trunk's corner cell. @param {function(): number} rng The generator.
+ * @param {number} trunk_height_m The trunk's height. @param {number} canopy_radius_m The canopy's radius.
+ * @return {void}
+ * @example build_tree(f, 30, 20, rng, 12, 5);
+ */
+function build_tree(f, x, z, rng, trunk_height_m, canopy_radius_m) {
+  const base = f.groundTop(x, z), width = canopy_radius_m >= THICK_TRUNK_CANOPY_M ? 2 : 1;
+  const top = Math.min(base + trunk_height_m, GRID_Y - CANOPY_TOP_MARGIN_M);
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    if (rng() < ROOT_SKIP_FRAC) continue;
+    const length = ROOT_MIN_M + Math.floor(rng() * (ROOT_EXTRA_M + 1)), lane = Math.floor(rng() * width);
+    for (let k = 1; k <= length; k++) {
+      const rx = dx > 0 ? x + width - 1 + k : dx < 0 ? x - k : x + lane, rz = dz > 0 ? z + width - 1 + k : dz < 0 ? z - k : z + lane;
+      f.put(rx, k === length ? base : base + 1, rz, MATERIALS.root);
+    }
+  }
+  for (let y = base + 1; y <= top; y++) for (let i = 0; i < width; i++) for (let k = 0; k < width; k++) f.put(x + i, y, z + k, MATERIALS.bark);
+  const fungus_sides = [[-1, 0], [width, 0], [0, -1], [0, width]];
+  for (let y = base + 2; y < top; y++) if (rng() < FUNGUS_FRAC) { const [dx, dz] = fungus_sides[Math.floor(rng() * fungus_sides.length)]; f.put(x + dx, y, z + dz, MATERIALS.glow_fungus); }
+  const cx = x + width / 2, cz = z + width / 2, reach = Math.ceil(canopy_radius_m);
+  for (let dy = -CANOPY_LAYERS_BELOW; dy <= CANOPY_LAYERS_ABOVE; dy++) {
+    const radius = canopy_radius_m * Math.sqrt(Math.max(0, 1 - (dy / CANOPY_HALF_HEIGHT_M) ** 2));
+    for (let i = -reach - 1; i <= reach; i++) for (let k = -reach - 1; k <= reach; k++) {
+      const px = Math.floor(cx) + i, pz = Math.floor(cz) + k, r = Math.hypot(px + 0.5 - cx, pz + 0.5 - cz);
+      if (r > radius - rng() * CANOPY_RAGGED_M || f.get(px, top + dy, pz) !== MATERIALS.air) continue;
+      f.put(px, top + dy, pz, rng() < CANOPY_DEEP_FRAC ? MATERIALS.leaves_deep : MATERIALS.leaves);
+    }
+  }
+}
+
+/**
+ * `build_dead_tree` places a bare trunk with a few branch stubs, for the bog.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The trunk cell. @param {function(): number} rng The generator. @param {number} height_m The height.
+ * @return {void}
+ * @example build_dead_tree(f, 9, -20, rng, 7);
+ */
+function build_dead_tree(f, x, z, rng, height_m) {
+  const base = f.groundTop(x, z);
+  for (let y = base + 1; y <= base + height_m; y++) f.put(x, y, z, MATERIALS.bark);
+  const directions = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (let k = 0; k < DEAD_TREE_BRANCH_COUNT; k++) {
+    const y = base + DEAD_TREE_BRANCH_MIN_M + Math.floor(rng() * (height_m - DEAD_TREE_BRANCH_MIN_M)), [dx, dz] = directions[Math.floor(rng() * directions.length)];
+    f.put(x + dx, y, z + dz, MATERIALS.root); f.put(x + 2 * dx, y + 1, z + 2 * dz, MATERIALS.root);
+  }
+}
+
+/**
+ * `build_mushroom` places a giant mushroom: a pale stem and a glowing (or red) cap.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The stem cell. @param {function(): number} rng The generator. @param {number} cap_radius The cap's radius, in cells.
+ * @return {void}
+ * @example build_mushroom(f, 39, 25, rng, 2);
+ */
+function build_mushroom(f, x, z, rng, cap_radius) {
+  const base = f.groundTop(x, z), top = base + 2 + cap_radius + Math.floor(rng() * 2), cap = rng() < GLOW_CAP_FRAC ? MATERIALS.cap_glow : MATERIALS.cap_pale;
+  for (let y = base + 1; y < top; y++) f.put(x, y, z, MATERIALS.stem);
+  for (let i = -cap_radius; i <= cap_radius; i++) for (let k = -cap_radius; k <= cap_radius; k++) {
+    if (Math.abs(i) === cap_radius && Math.abs(k) === cap_radius) continue;
+    f.put(x + i, top, z + k, cap);
+    if (Math.max(Math.abs(i), Math.abs(k)) === cap_radius) f.put(x + i, top - 1, z + k, cap);
+  }
+}
+
+/**
+ * `build_lamp_post` places a metal post with a light on top.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The cell. @param {number} light_m The light's material.
+ * @return {void}
+ * @example build_lamp_post(f, 6, 3, MATERIALS.red_light);
+ */
+function build_lamp_post(f, x, z, light_m) {
+  const base = f.groundTop(x, z);
+  for (let y = base + 1; y < base + LAMP_POST_HEIGHT_M; y++) f.put(x, y, z, MATERIALS.metal);
+  f.put(x, base + LAMP_POST_HEIGHT_M, z, light_m);
+}
+
+/**
+ * `build_boulder` places a rough sphere of stone and mossy stone on the ground.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The centre. @param {number} radius_m The radius. @param {function(): number} rng The generator.
+ * @return {void}
+ * @example build_boulder(f, 45, 21, 2.2, rng);
+ */
+function build_boulder(f, x, z, radius_m, rng) {
+  const base = f.groundTop(Math.floor(x), Math.floor(z)), reach = Math.ceil(radius_m);
+  for (let i = -reach; i <= reach; i++) for (let j = 0; j <= reach; j++) for (let k = -reach; k <= reach; k++) {
+    if (Math.hypot(i, j * BOULDER_FLATTEN_GAIN, k) <= radius_m - rng() * BOULDER_RAGGED_M) f.put(Math.floor(x) + i, base + 1 + j, Math.floor(z) + k, j === reach || rng() < BOULDER_MOSS_FRAC ? MATERIALS.moss_stone : MATERIALS.stone);
+  }
+}
+
+/**
+ * `build_log` places a fallen log (root material) along x or z on the ground.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The first cell. @param {number} length_m The length. @param {Array<number>} dir The direction, [1, 0] or [0, 1].
+ * @return {void}
+ * @example build_log(f, 58, 21, 8, [1, 0]);
+ */
+function build_log(f, x, z, length_m, dir) {
+  for (let k = 0; k < length_m; k++) { const px = x + dir[0] * k, pz = z + dir[1] * k; f.put(px, f.groundTop(px, pz) + 1, pz, MATERIALS.root); }
+}
+
+/**
+ * `build_wall` places a straight wall, optionally broken by random gaps.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The first cell. @param {number} length_m The length. @param {Array<number>} dir The direction.
+ * @param {number} height_m The height. @param {number} m The material. @param {function(): number} [rng] A generator; with it, the wall is ruined.
+ * @return {void}
+ * @example build_wall(f, 36, 12, 8, [1, 0], 2, MATERIALS.concrete);
+ */
+function build_wall(f, x, z, length_m, dir, height_m, m, rng) {
+  for (let k = 0; k < length_m; k++) {
+    const px = x + dir[0] * k, pz = z + dir[1] * k, base = f.groundTop(px, pz), h = rng ? Math.floor(rng() * (height_m + 1)) : height_m;
+    for (let y = base + 1; y <= base + h; y++) f.put(px, y, pz, m);
+  }
+}
+
+/**
+ * `build_bunker` builds a concrete room: floor, walls with slit windows, doors, a roof with a coloured stripe and a lamp.
+ * @param {Frame} f The frame. @param {{x: number, z: number, size_x: number, size_z: number}} box The footprint.
+ * @param {number} floor_y The floor's y. @param {Array<Array>} doors Each [side, offset, width]; side is 'x0', 'x1', 'z0' or 'z1'.
+ * @param {number} stripe_m The stripe's material.
+ * @return {void}
+ * @example build_bunker(f, LAYOUT.spawn_bunker, 4, [['x0', 3, 4]], MATERIALS.red_paint);
+ */
+function build_bunker(f, box, floor_y, doors, stripe_m) {
+  const { x, z, size_x, size_z } = box, roof_y = floor_y + BUNKER_HEIGHT_M + 1;
+  fill_box(f, x, floor_y, z, size_x, 1, size_z, MATERIALS.concrete);
+  fill_box(f, x, roof_y, z, size_x, 1, size_z, MATERIALS.concrete_dark);
+  for (let i = 0; i < size_x; i++) for (let k = 0; k < size_z; k++) {
+    const is_wall = i === 0 || k === 0 || i === size_x - 1 || k === size_z - 1;
+    for (let y = floor_y + 1; y < roof_y; y++) {
+      const is_window = is_wall && y === floor_y + 2 && (i + k) % WINDOW_SPACING_M === 0 && !((i === 0 || i === size_x - 1) && (k === 0 || k === size_z - 1));
+      f.put(x + i, y, z + k, is_wall && !is_window ? (y === roof_y - 1 ? stripe_m : MATERIALS.concrete) : MATERIALS.air);
+    }
+  }
+  for (const [side, offset, width] of doors) for (let w = 0; w < width; w++) for (let y = floor_y + 1; y <= floor_y + DOOR_HEIGHT_M; y++) {
+    const px = side === 'x0' ? x : side === 'x1' ? x + size_x - 1 : x + offset + w, pz = side === 'z0' ? z : side === 'z1' ? z + size_z - 1 : z + offset + w;
+    f.put(px, y, pz, MATERIALS.air);
+  }
+  f.put(x + (size_x >> 1), roof_y, z + (size_z >> 1), MATERIALS.lamp);
+}
+
+/**
+ * `build_stairs` builds a 2-wide staircase from a deck down to the ground, one block down per block out, with headroom.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The cell just outside the deck's edge.
+ * @param {Array<number>} dir The way down, e.g. [0, 1]. @param {number} deck_y The deck's y.
+ * @return {void}
+ * @example build_stairs(f, 56, -19, [0, 1], DECK_Y);
+ */
+function build_stairs(f, x, z, dir, deck_y) {
+  const side = [Math.abs(dir[1]), Math.abs(dir[0])];
+  for (let k = 0; k < deck_y; k++) for (let w = 0; w < 2; w++) {
+    const px = x + dir[0] * k + side[0] * w, pz = z + dir[1] * k + side[1] * w, y = deck_y - 1 - k;
+    if (y <= f.groundTop(px, pz)) return;
+    f.put(px, y, pz, MATERIALS.planks);
+    for (let h = 1; h <= STAIR_HEADROOM_M; h++) if (f.get(px, y + h, pz) !== MATERIALS.bark) f.put(px, y + h, pz, MATERIALS.air);
+  }
+}
+
+/**
+ * `build_watchtower` builds a red-team watchtower: four legs, a railed deck, a roof with lights, banners and stairs.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The 5×5 footprint's corner. @param {Array<number>} stair_dir The stairs' way down, [1, 0] or [-1, 0].
+ * @return {void}
+ * @example build_watchtower(f, 65, 10, [1, 0]);
+ */
+function build_watchtower(f, x, z, stair_dir) {
+  const base = f.groundTop(x + 2, z + 2), deck = base + TOWER_DECK_HEIGHT_M, roof = deck + TOWER_ROOF_ABOVE_DECK_M;
+  const last = TOWER_FOOTPRINT_M - 1, mid = last >> 1, rim = TOWER_FOOTPRINT_M;
+  for (const [i, k] of [[0, 0], [last, 0], [0, last], [last, last]]) for (let y = base + 1; y < deck; y++) f.put(x + i, y, z + k, MATERIALS.metal);
+  for (let i = -1; i <= rim; i++) for (let k = -1; k <= rim; k++) {
+    const is_edge = i === -1 || i === rim || k === -1 || k === rim, is_corner = (i === -1 || i === rim) && (k === -1 || k === rim);
+    f.put(x + i, deck, z + k, MATERIALS.planks);
+    f.put(x + i, roof, z + k, MATERIALS.metal);
+    if (is_corner) for (let y = deck + 1; y < roof; y++) f.put(x + i, y, z + k, MATERIALS.metal);
+    else if (is_edge && (i + k) % 2 === 0) f.put(x + i, deck + 1, z + k, MATERIALS.concrete_dark);
+  }
+  f.put(x + mid, roof - 1, z + mid, MATERIALS.red_light); f.put(x + mid, roof + 1, z + mid, MATERIALS.red_light);
+  for (let y = deck - BANNER_LENGTH_M; y < deck; y++) { f.put(x + mid, y, z - 1, MATERIALS.red_paint); f.put(x + mid, y, z + rim, MATERIALS.red_paint); }
+  const edge_x = stair_dir[0] > 0 ? x + rim + 1 : x - 2;
+  for (let k = 0; k < 2; k++) f.put(stair_dir[0] > 0 ? x + rim : x - 1, deck + 1, z + 1 + k, MATERIALS.air);
+  build_stairs(f, edge_x, z + 1, stair_dir, deck + 1);
+}
+
+/**
+ * `build_gate` builds the surroundings of a wormhole mouth: a glowing pit below it, clear air around it and four lit pillars.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The mouth's centre (a cell corner). @param {number} floor_y The walking floor's top y.
+ * @return {void}
+ * @example build_gate(f, 44, 32, 4);
+ */
+function build_gate(f, x, z, floor_y) {
+  const reach = Math.ceil(TRANSIT_RADIUS_M + 1);
+  for (let i = -reach; i < reach; i++) for (let k = -reach; k < reach; k++) {
+    if (Math.hypot(i + 0.5, k + 0.5) > TRANSIT_RADIUS_M + 0.5) continue;
+    for (let y = floor_y + 1; y <= floor_y + 1 + EYE_HEIGHT_M + TRANSIT_RADIUS_M; y++) f.put(x + i, y, z + k, MATERIALS.air);
+  }
+  for (let i = -GATE_PIT_HALF_WIDTH_M; i < GATE_PIT_HALF_WIDTH_M; i++) for (let k = -GATE_PIT_HALF_WIDTH_M; k < GATE_PIT_HALF_WIDTH_M; k++) {
+    for (let y = floor_y - GATE_PIT_DEPTH_M + 1; y <= floor_y; y++) f.put(x + i, y, z + k, MATERIALS.air);
+    f.put(x + i, floor_y - GATE_PIT_DEPTH_M, z + k, MATERIALS.glow_plant);
+  }
+  for (const i of GATE_PILLAR_DX) for (const k of GATE_PILLAR_DZ) {
+    const base = f.groundTop(x + i, z + k);
+    for (let y = base + 1; y < base + GATE_PILLAR_HEIGHT_M; y++) f.put(x + i, y, z + k, MATERIALS.moss_stone);
+    f.put(x + i, base + GATE_PILLAR_HEIGHT_M, z + k, MATERIALS.lamp);
+  }
+}
+
+/**
+ * `build_pylon` builds a team's pylon (a glowing crystal on a plinth) with its consoles on posts, and records the consoles.
+ * @param {Frame} f The frame. @param {number} x @param {number} z The pylon's centre (a cell corner).
+ * @return {void}
+ * @example build_pylon(f, 56, 0);
+ */
+function build_pylon(f, x, z) {
+  const base = GROUND_TOP_Y;
+  fill_box(f, x - PLINTH_SIZE_M / 2, base + 1, z - PLINTH_SIZE_M / 2, PLINTH_SIZE_M, 1, PLINTH_SIZE_M, MATERIALS.concrete_dark);
+  fill_box(f, x - 1, base + 2, z - 1, 2, PYLON_HEIGHT_M, 2, MATERIALS.pylon_red);
+  fill_box(f, x - 1, base + 2 + PYLON_HEIGHT_M, z - 1, 2, 1, 2, MATERIALS.metal);
+  for (const cells of CONSOLE_CELLS.slice(0, CONSOLES_PER_PYLON)) {
+    for (const [dx, dz] of cells) f.put(x + dx, base + 1, z + dz, MATERIALS.console_red);
+    state.consoles[f.team].push({ cells: cells.map(([dx, dz]) => { const [wx, wz] = f.mapCell(x + dx, z + dz); return [wrap_index(wx, GRID_X), base + 1, wrap_index(wz, GRID_Z)]; }), is_active: true });
+  }
+}
+
+/**
+ * `build_red_base` builds the red zone (design |z| ≤ 16): the pylon courtyard, the spawn bunker, watchtowers, bunkers,
+ * walls, red lamps along the road and the posts that mark the zone's edges.
+ * @param {Frame} f The frame.
+ * @return {void}
+ * @example build_red_base(FRAMES[0]);
+ */
+function build_red_base(f) {
+  const c = LAYOUT.courtyard;
+  fill_box(f, c.x, GROUND_TOP_Y, c.z, c.size_x, 1, c.size_z, MATERIALS.concrete);
+  for (let i = 0; i < c.size_x; i++) for (let k = 0; k < c.size_z; k++) {
+    const is_x_edge = i === 0 || i === c.size_x - 1, is_z_edge = k === 0 || k === c.size_z - 1;
+    if (!is_x_edge && !is_z_edge) continue;
+    const is_road_gate = is_x_edge && c.z + k >= c.road_gate_z && c.z + k < c.road_gate_z + c.road_gate_width;
+    const is_band_gate = is_z_edge && c.x + i >= c.band_gate_x && c.x + i < c.band_gate_x + c.band_gate_width;
+    if (is_road_gate || is_band_gate) continue;
+    for (let y = 1; y <= WALL_HEIGHT_M; y++) f.put(c.x + i, GROUND_TOP_Y + y, c.z + k, (i + k) % BANNER_SPACING_M === 0 ? MATERIALS.red_paint : MATERIALS.concrete);
+    if (is_x_edge && is_z_edge) { f.put(c.x + i, GROUND_TOP_Y + WALL_HEIGHT_M + 1, c.z + k, MATERIALS.concrete_dark); f.put(c.x + i, GROUND_TOP_Y + WALL_HEIGHT_M + 2, c.z + k, MATERIALS.red_light); }
+  }
+  for (const [x, z] of LAYOUT.courtyard_cover) fill_box(f, x, GROUND_TOP_Y + 1, z, 2, 1, 1, MATERIALS.concrete_dark);
+  build_pylon(f, ...LAYOUT.red_pylon);
+  build_bunker(f, LAYOUT.spawn_bunker, GROUND_TOP_Y, LAYOUT.spawn_bunker.doors, MATERIALS.red_paint);
+  const pad = LAYOUT.spawn_pad;
+  fill_box(f, pad.x, GROUND_TOP_Y, pad.z, pad.size, 1, pad.size, MATERIALS.red_paint);
+  build_bunker(f, LAYOUT.west_exit_bunker, GROUND_TOP_Y, LAYOUT.west_exit_bunker.doors, MATERIALS.red_paint);
+  for (const [x, z, dir] of LAYOUT.towers) build_watchtower(f, x, z, dir);
+  for (const [x, z, length] of LAYOUT.defence_walls) build_wall(f, x, z, length, [1, 0], WALL_HEIGHT_M, MATERIALS.concrete);
+  for (const [x, z] of LAYOUT.road_lamps) build_lamp_post(f, x, z, MATERIALS.red_light);
+  for (const z of LAYOUT.zone_marker_rows) for (let x = 0; x < GRID_X; x += LAYOUT.zone_marker_spacing) {
+    if (f.groundTop(x, z) !== GROUND_TOP_Y || f.get(x, GROUND_TOP_Y + 1, z) !== MATERIALS.air) continue;
+    f.put(x, GROUND_TOP_Y + 1, z, MATERIALS.red_paint); f.put(x, GROUND_TOP_Y + 2, z, MATERIALS.red_light);
+  }
+}
+
+/**
+ * `build_glade` builds the Glade, the big open area of the Glade side: boulders, fallen logs, mushrooms, a broken
+ * stone ring under the black hole and the Glade–Bog gate.
+ * @param {Frame} f The frame. @param {function(): number} rng The generator.
+ * @return {void}
+ * @example build_glade(f, mulberry32(1));
+ */
+function build_glade(f, rng) {
+  for (const [x, z, r] of LAYOUT.glade_boulders) build_boulder(f, x, z, r, rng);
+  for (const [x, z, length, dir] of LAYOUT.glade_logs) build_log(f, x, z, length, dir);
+  for (const [x, z, r] of LAYOUT.glade_mushrooms) build_mushroom(f, x, z, rng, r);
+  for (const [x, z] of LAYOUT.glade_edge_trees) build_tree(f, x, z, rng, EDGE_TREE_TRUNK_M, EDGE_TREE_CANOPY_M);
+  const [cx, cz] = LAYOUT.crater_center, ring_r = LAYOUT.crater_radius;
+  for (let i = -ring_r - 1; i <= ring_r; i++) for (let k = -ring_r - 1; k <= 0; k++) {
+    const r = Math.hypot(cx + i + 0.5 - cx, cz + k + 0.5 - cz);
+    if (Math.abs(r - ring_r) < RING_HALF_THICKNESS_M && rng() > LAYOUT.glade_ring_gap_frac) f.put(cx + i, f.groundTop(cx + i, cz + k) + 1, cz + k, MATERIALS.moss_stone);
+  }
+  build_gate(f, ...LAYOUT.glade_gate, GROUND_TOP_Y);
+}
+
+/**
+ * `build_trenches` builds the two trench routes of the Glade side: plank walls, lamps, steps up to the ledges,
+ * bunker rooms and sandbags, and the Trench gate in its widened chamber.
+ * @param {Frame} f The frame. @param {function(): number} rng The generator.
+ * @return {void}
+ * @example build_trenches(f, mulberry32(2));
+ */
+function build_trenches(f, rng) {
+  const floor_y = GROUND_TOP_Y - TRENCH_DEPTH_M;
+  for (const x of LAYOUT.revetment_x) for (let z = RED_ZONE_HALF_DEPTH_M + 2; z < ROTATION_CENTER_Z_M; z++) {
+    if (f.groundTop(x, z) !== GROUND_TOP_Y) continue;
+    f.put(x, GROUND_TOP_Y - 1, z, MATERIALS.planks); f.put(x, GROUND_TOP_Y, z, z % TRENCH_LAMP_SPACING_M === 0 ? MATERIALS.lamp : MATERIALS.planks);
+  }
+  for (const x of LAYOUT.revetment_x) for (const z of LAYOUT.trench_steps_z) for (let k = 0; k < 2; k++) if (f.groundTop(x, z + k) === GROUND_TOP_Y) f.put(x, GROUND_TOP_Y, z + k, MATERIALS.air);
+  build_bunker(f, LAYOUT.west_bunker, floor_y, LAYOUT.west_bunker.doors, MATERIALS.concrete_dark);
+  build_bunker(f, LAYOUT.east_bunker, floor_y, LAYOUT.east_bunker.doors, MATERIALS.concrete_dark);
+  for (const [x, z, length] of LAYOUT.east_sandbags) build_wall(f, x, z, length, [1, 0], 1, MATERIALS.concrete_dark);
+  build_gate(f, ...LAYOUT.trench_gate, floor_y);
+  const log = LAYOUT.connector_log;
+  for (let k = 0; k < log.length; k++) { f.put(log.x, log.y, log.z + k, MATERIALS.root); f.put(log.x + 1, log.y + 1, log.z + k, MATERIALS.root); }
+}
+
+/**
+ * `build_bog` builds the Bog, the big open area of the Bog side: dead trees, ruined walls, glowing reeds, a broken
+ * stone ring under the black hole, the Glade–Bog gate's other mouth and the root arch over the tunnel to the forest.
+ * @param {Frame} f The frame. @param {function(): number} rng The generator.
+ * @return {void}
+ * @example build_bog(f, mulberry32(3));
+ */
+function build_bog(f, rng) {
+  for (const [x, z, h] of LAYOUT.bog_dead_trees) build_dead_tree(f, x, z, rng, h);
+  for (const [x, z, length, dir] of LAYOUT.bog_ruins) build_wall(f, x, z, length, dir, RUIN_HEIGHT_M, MATERIALS.concrete_dark, rng);
+  const [cx, cz] = LAYOUT.bog_ring_center, ring_r = LAYOUT.bog_ring_radius;
+  for (let i = -Math.ceil(ring_r) - 1; i <= ring_r; i++) for (let k = 0; k <= ring_r; k++) {
+    const r = Math.hypot(i + 0.5, k + 0.5);
+    if (Math.abs(r - ring_r) < RING_HALF_THICKNESS_M && rng() > LAYOUT.glade_ring_gap_frac) { const px = cx + i, pz = cz + k; f.put(px, f.groundTop(px, pz) + 1, pz, MATERIALS.moss_stone); f.put(px, f.groundTop(px, pz) + 2, pz, MATERIALS.moss_stone); }
+  }
+  build_gate(f, ...LAYOUT.bog_gate, GROUND_TOP_Y - 1);
+  const arch = LAYOUT.root_arch;
+  for (let i = 0; i < arch.size_x; i++) for (let k = 0; k < ROOT_TUNNEL.size_z; k++) if ((i + k) % ROOT_ARCH_GAP_PERIOD !== 0) f.put(arch.x + i, arch.y + (k === 0 || k === ROOT_TUNNEL.size_z - 1 ? -1 : 0), arch.z + k, MATERIALS.root);
+}
+
+/**
+ * `build_walkway` builds the canopy walkway of the Bog side: tall trees with decks, plank bridges between them, railings,
+ * hanging lanterns, stairs down to the red zone and stairs down to the root tunnel that leads to the Bog.
+ * @param {Frame} f The frame. @param {function(): number} rng The generator.
+ * @return {void}
+ * @example build_walkway(f, mulberry32(4));
+ */
+function build_walkway(f, rng) {
+  const trees = LAYOUT.walkway_trees;
+  for (const [x, z] of trees) build_tree(f, x, z, rng, WALKWAY_TRUNK_M, WALKWAY_CANOPY_M);
+  for (const [x, z] of trees) {
+    for (let i = -PLATFORM_HALF_WIDTH_M; i <= PLATFORM_HALF_WIDTH_M + 1; i++) for (let k = -PLATFORM_HALF_WIDTH_M; k <= PLATFORM_HALF_WIDTH_M + 1; k++) {
+      if (f.get(x + i, DECK_Y, z + k) === MATERIALS.bark) continue;
+      const is_edge = Math.abs(i - 0.5) > PLATFORM_HALF_WIDTH_M || Math.abs(k - 0.5) > PLATFORM_HALF_WIDTH_M;
+      f.put(x + i, DECK_Y, z + k, MATERIALS.planks);
+      clear_leaves(f, x + i, DECK_Y + 1, z + k, 1, STAIR_HEADROOM_M, 1);
+      if (is_edge && (i + k) % 2 === 0) f.put(x + i, DECK_Y + 1, z + k, MATERIALS.planks);
+      if (is_edge && Math.abs(i - 0.5) > PLATFORM_HALF_WIDTH_M && Math.abs(k - 0.5) > PLATFORM_HALF_WIDTH_M) f.put(x + i, DECK_Y - 1, z + k, MATERIALS.lamp);
+    }
+  }
+  for (const [a, b] of LAYOUT.walkway_bridges) {
+    const [ax, az] = trees[a].map(v => v + 1), [bx, bz] = trees[b].map(v => v + 1), steps = Math.ceil(Math.hypot(bx - ax, bz - az) * 2);
+    for (let s = 0; s <= steps; s++) {
+      const cx = Math.floor(ax + (bx - ax) * s / steps), cz = Math.floor(az + (bz - az) * s / steps);
+      for (let i = -BRIDGE_HALF_WIDTH_M; i <= BRIDGE_HALF_WIDTH_M; i++) for (let k = -BRIDGE_HALF_WIDTH_M; k <= BRIDGE_HALF_WIDTH_M; k++) {
+        if (f.get(cx + i, DECK_Y, cz + k) === MATERIALS.bark) continue;
+        f.put(cx + i, DECK_Y, cz + k, MATERIALS.planks);
+        for (let h = 1; h <= STAIR_HEADROOM_M; h++) if (f.get(cx + i, DECK_Y + h, cz + k) !== MATERIALS.bark) f.put(cx + i, DECK_Y + h, cz + k, MATERIALS.air);
+      }
+    }
+  }
+  for (const stairs of [LAYOUT.walkway_stairs, LAYOUT.connector_stairs]) {
+    const [x, z] = trees[stairs.tree], dir = stairs.dir;
+    const start_x = dir[0] > 0 ? x + PLATFORM_HALF_WIDTH_M + 2 : dir[0] < 0 ? x - PLATFORM_HALF_WIDTH_M - 1 : x;
+    const start_z = dir[1] > 0 ? z + PLATFORM_HALF_WIDTH_M + 2 : dir[1] < 0 ? z - PLATFORM_HALF_WIDTH_M - 1 : z;
+    for (let w = 0; w < 2; w++) f.put(start_x - dir[0] + Math.abs(dir[1]) * w, DECK_Y + 1, start_z - dir[1] + Math.abs(dir[0]) * w, MATERIALS.air);
+    build_stairs(f, start_x, start_z, dir, DECK_Y);
+  }
+}
+
+/**
+ * `tree_density` returns the chance that a forest tree grows at a design point: high on the ridges between routes,
+ * lower in the forest under the walkway and in the red zone, zero on the open routes and near buildings.
+ * @param {number} x The design x. @param {number} z The design z.
+ * @return {number} The chance, 0 to 1.
+ * @example tree_density(32, 30); // a separator ridge
+ */
+function tree_density(x, z) {
+  for (const [ex, ez, r] of LAYOUT.tree_exclusions) if (Math.hypot(abs_dx(x, ex), z - ez) < r) return 0;
+  for (const [tx, tz] of LAYOUT.walkway_trees) if (Math.hypot(abs_dx(x, tx), z - tz) < WALKWAY_TREE_CLEAR_M) return 0;
+  if (Math.abs(z) <= RED_ZONE_HALF_DEPTH_M) return Math.abs(z) <= ROAD_HALF_WIDTH_M + ROAD_TREE_MARGIN_M ? 0 : RED_ZONE_TREE_DENSITY;
+  if (z > 0) {
+    if (abs_dx(x, GLADE_X_M) <= GLADE_HALF_WIDTH_M + 1 || is_in_box(x, z, GLADE_CONNECTOR) || is_in_box(x, z, TRENCH_CHAMBER)) return 0;
+    if (Math.min(abs_dx(x, WEST_TRENCH_X_M), abs_dx(x, EAST_TRENCH_X_M)) <= TRENCH_HALF_WIDTH_M + 1) return 0;
+    return RIDGE_TREE_DENSITY;
+  }
+  if (abs_dx(x, BOG_X_M) <= BOG_HALF_WIDTH_M + 1 || is_in_box(x, z, ROOT_TUNNEL)) return 0;
+  return abs_dx(x, FOREST_X_M) <= FOREST_HALF_WIDTH_M ? FOREST_TREE_DENSITY : RIDGE_TREE_DENSITY;
+}
+
+/**
+ * `build_forest` grows the forest on a jittered grid, with taller trees under the walkway so their canopies clear it.
+ * @param {Frame} f The frame. @param {function(): number} rng The generator.
+ * @return {void}
+ * @example build_forest(f, mulberry32(5));
+ */
+function build_forest(f, rng) {
+  for (let gz = -ROTATION_CENTER_Z_M; gz < ROTATION_CENTER_Z_M; gz += TREE_GRID_M) for (let gx = 0; gx < GRID_X; gx += TREE_GRID_M) {
+    const x = gx + Math.floor(rng() * TREE_JITTER_M), z = gz + Math.floor(rng() * TREE_JITTER_M), roll = rng(), size = rng();
+    if (roll >= tree_density(x, z)) continue;
+    const is_under_walkway = z < -RED_ZONE_HALF_DEPTH_M && abs_dx(x, FOREST_X_M) <= FOREST_HALF_WIDTH_M;
+    const trunk_m = is_under_walkway ? TALL_TRUNK_MIN_M + Math.floor(size * TALL_TRUNK_EXTRA_M) : TRUNK_MIN_M + Math.floor(size * TRUNK_EXTRA_M);
+    build_tree(f, x, z, rng, trunk_m, CANOPY_MIN_M + size * CANOPY_EXTRA_M);
+  }
+}
+
+/**
+ * `scatter_decor` scatters mushrooms and glowing plants over natural ground, avoiding the road and buildings.
+ * @param {Frame} f The frame. @param {function(): number} rng The generator.
+ * @return {void}
+ * @example scatter_decor(f, mulberry32(6));
+ */
+function scatter_decor(f, rng) {
+  const counts = LAYOUT.decor_counts;
+  /**
+   * `random_spot` picks a random design column on natural ground with air above it.
+   * @param {boolean} is_bog Whether the spot must be in the Bog.
+   * @return {Array<number>|null} The x, z and ground top y, or null when the pick failed.
+   * @example random_spot(false);
+   */
+  function random_spot(is_bog) {
+    const x = Math.floor(rng() * GRID_X), z = Math.floor(rng() * 2 * ROTATION_CENTER_Z_M) - ROTATION_CENTER_Z_M, top = f.groundTop(x, z);
+    if (Math.abs(z) <= ROAD_HALF_WIDTH_M + 1 || !NATURAL_GROUND.has(f.get(x, top, z)) || f.get(x, top + 1, z) !== MATERIALS.air) return null;
+    if (is_bog !== (f.get(x, top, z) === MATERIALS.bog)) return null;
+    return [x, z, top];
+  }
+  for (let n = 0; n < counts.giant_mushrooms; n++) { const spot = random_spot(false); if (spot && tree_density(spot[0], spot[1]) > 0) build_mushroom(f, spot[0], spot[1], rng, 1 + Math.floor(rng() * 2)); }
+  for (let n = 0; n < counts.glow_plants; n++) { const spot = random_spot(false); if (spot) f.put(spot[0], spot[2] + 1, spot[1], MATERIALS.glow_plant); }
+  for (let n = 0; n < counts.small_mushrooms; n++) { const spot = random_spot(false); if (spot) f.put(spot[0], spot[2] + 1, spot[1], rng() < GLOW_CAP_FRAC ? MATERIALS.cap_glow : MATERIALS.cap_pale); }
+  for (let n = 0; n < counts.bog_reeds; n++) { const spot = random_spot(true); if (spot) f.put(spot[0], spot[2] + 1, spot[1], MATERIALS.glow_plant); }
+}
+
+const state = {
+  eye: new THREE.Vector3(), fwd: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0), vel_y_m_per_s: 0, is_on_ground: false,
+  is_flying: false, transit: null, team: 'red', energy_frac: 1, bob_phase_rad: 0, is_sprinting: false,
+  consoles: { red: [], blue: [] }, deactivation_s: 0, winner: null, beam: null, message: '', message_s: 0, view: 'red_spawn'
+};
+
+/**
+ * `build_world` builds the whole level: the terrain of every column, then each feature pass in both frames.
+ * @return {void}
+ * @example build_world();
+ */
+function build_world() {
+  for (let z = 0; z < GRID_Z; z++) for (let x = 0; x < GRID_X; x++) {
+    const [xd, zd, is_blue] = to_design_cell(x, z), [top, surface] = column_profile(xd, zd);
+    ground_tops[x + z * GRID_X] = top;
+    set_block(x, 0, z, MATERIALS.bedrock);
+    for (let y = 1; y < top; y++) set_block(x, y, z, y < top - SOIL_DEPTH_M ? MATERIALS.stone : MATERIALS.dirt);
+    set_block(x, top, z, is_blue ? TEAM_SWAP[surface] : surface);
+  }
+  const passes = [build_forest, build_walkway, scatter_decor, build_red_base, build_glade, build_trenches, build_bog];
+  passes.forEach((pass, k) => { for (const f of FRAMES) pass(f, mulberry32(RNG_SEED + k)); });
+}
+
+const V3 = THREE.Vector3, WORLD_UP = new V3(0, 1, 0), FLIP = new THREE.Matrix3().set(1, 0, 0, 0, 1, 0, 0, 0, -1);
+const warp_objects = [];
+
+/**
+ * `frame_for` returns a mouth's frame [right, up, back] for the direction you enter it cleanly along.
+ * @param {THREE.Vector3} fwd The clean entry direction.
+ * @return {THREE.Matrix3} The frame, as columns.
+ * @example frame_for(new V3(0, 0, 1));
+ */
+function frame_for(fwd) {
+  const f = fwd.clone().normalize(), right = new V3().crossVectors(f, WORLD_UP).normalize(), up = new V3().crossVectors(right, f), back = f.clone().negate();
+  return new THREE.Matrix3().set(right.x, up.x, back.x, right.y, up.y, back.y, right.z, up.z, back.z);
+}
+
+/**
+ * `add_black_hole` adds a black hole. In isotropic coordinates its horizon is the sphere ρ = r_s / 4.
+ * @param {string} name The name shown in the HUD. @param {THREE.Vector3} c The centre.
+ * @return {void}
+ * @example add_black_hole('Glade black hole', new V3(56, 10.5, 40));
+ */
+function add_black_hole(name, c) { warp_objects.push({ kind: 'black_hole', name, c, rho0: RHO_PER_RS * BLACK_HOLE_RS_M }); }
+
+/**
+ * `add_wormhole` adds a wormhole as two mouths. Q = F_B · diag(1, 1, -1) · F_Aᵀ glues the inverted inside of mouth A
+ * to the outside of mouth B, so moving along fwd_a into A you come out of B moving along fwd_b.
+ * @param {string} name The name. @param {THREE.Vector3} ca @param {THREE.Vector3} fwd_a Mouth A's centre and clean entry direction.
+ * @param {THREE.Vector3} cb @param {THREE.Vector3} fwd_b Mouth B's centre and clean exit direction.
+ * @return {void}
+ * @example add_wormhole('Trench gate', new V3(18, 4.6, 30), new V3(0, 0, 1), new V3(94, 4.6, 50), new V3(0, 0, 1));
+ */
+function add_wormhole(name, ca, fwd_a, cb, fwd_b) {
+  const Q = new THREE.Matrix3().multiplyMatrices(frame_for(fwd_b), FLIP).multiply(frame_for(fwd_a).transpose()), rho0 = RHO_PER_RS * MOUTH_RS_M;
+  warp_objects.push({ kind: 'mouth', name, c: ca, rho0, to: cb, Q, partner_name: `${name} (far mouth)` });
+  warp_objects.push({ kind: 'mouth', name: `${name} (far mouth)`, c: cb, rho0, to: ca, Q: Q.clone().transpose(), partner_name: name });
+}
+
+/**
+ * `rotate_point` turns a world point by 180° about the level's centre of symmetry (56, 40), mapping red's half to blue's.
+ * @param {number} x @param {number} y @param {number} z The point.
+ * @return {THREE.Vector3} The turned point, wrapped into the grid.
+ * @example rotate_point(44, 6.6, 32); // (68, 6.6, 48)
+ */
+function rotate_point(x, y, z) { return new V3(wrap_index(2 * ROTATION_CENTER_X_M - x, PERIOD_X_M), y, wrap_index(2 * ROTATION_CENTER_Z_M - z, PERIOD_Z_M)); }
+
+/**
+ * `add_warp_objects` places the level's warp objects: a black hole over each open area, a Glade–Bog gate on each team's
+ * side of the middle, and the Trench gate from the west trench (near red) to the east trench (near blue).
+ * @return {void}
+ * @example add_warp_objects();
+ */
+function add_warp_objects() {
+  const eye_above = 1 + EYE_HEIGHT_M, plus_z = new V3(0, 0, 1), minus_z = new V3(0, 0, -1);
+  add_black_hole('Glade black hole', new V3(ROTATION_CENTER_X_M, GROUND_TOP_Y + 1 + GLADE_BLACK_HOLE_HEIGHT_M, ROTATION_CENTER_Z_M));
+  add_black_hole('Bog black hole', new V3(BOG_X_M, GROUND_TOP_Y + BOG_BLACK_HOLE_HEIGHT_M, ROTATION_CENTER_Z_M + PERIOD_Z_M / 2));
+  const [gx, gz] = LAYOUT.glade_gate, [bx, bz] = LAYOUT.bog_gate, [tx, tz] = LAYOUT.trench_gate;
+  const glade_y = GROUND_TOP_Y + eye_above, bog_y = GROUND_TOP_Y - 1 + eye_above, trench_y = GROUND_TOP_Y - TRENCH_DEPTH_M + eye_above;
+  add_wormhole('Red Glade–Bog gate', new V3(gx, glade_y, gz), plus_z, new V3(bx, bog_y, wrap_index(bz, PERIOD_Z_M)), minus_z);
+  add_wormhole('Blue Glade–Bog gate', rotate_point(gx, glade_y, gz), minus_z, rotate_point(bx, bog_y, bz), plus_z);
+  add_wormhole('Trench gate', new V3(tx, trench_y, tz), plus_z, rotate_point(tx, trench_y, tz), plus_z);
+  for (const o of warp_objects) {
+    const clear_m = o.kind === 'black_hole' ? BLACK_HOLE_CLEAR_M : o.rho0 + BLOCK_CLEARANCE_M, reach = Math.ceil(clear_m) + 1;
+    for (let i = -reach; i <= reach; i++) for (let j = -reach; j <= reach; j++) for (let k = -reach; k <= reach; k++) {
+      const x = Math.floor(o.c.x) + i, y = Math.floor(o.c.y) + j, z = Math.floor(o.c.z) + k;
+      if (Math.hypot(Math.max(x - o.c.x, 0, o.c.x - x - 1), Math.max(y - o.c.y, 0, o.c.y - y - 1), Math.max(z - o.c.z, 0, o.c.z - z - 1)) < clear_m) set_block(x, y, z, MATERIALS.air);
+    }
+  }
+}
+
+/**
+ * `compute_light` computes Minecraft-style light for every cell, in three channels: sky light (15 straight down through
+ * air, dimmed by leaves, then spreading one level per block), warm block light (lamps, red lights) and cool block light
+ * (blue lights, glowing plants). Solid blocks stop light; leaves cost two levels per block.
+ * @return {Uint8Array} RGBA bytes per cell: sky, warm, cool, 255.
+ * @example const light_bytes = compute_light();
+ */
+function compute_light() {
+  const cell_count = GRID_X * GRID_Y * GRID_Z, layer = GRID_X * GRID_Y;
+  /**
+   * `cost_of` returns how many light levels a block costs to pass: 1 for air, LEAF_LIGHT_COST for leaves, 0 (blocked) otherwise.
+   * @param {number} m The material.
+   * @return {number} The cost.
+   * @example cost_of(MATERIALS.air); // 1
+   */
+  function cost_of(m) { return m === MATERIALS.air ? 1 : LEAF_MATERIALS.has(m) ? LEAF_LIGHT_COST : 0; }
+  /**
+   * `spread` floods light levels outward from the cells already in the buckets, one level lower per step.
+   * @param {Uint8Array} levels The levels per cell. @param {Array<Array<number>>} buckets The cells to spread from, by level.
+   * @return {void}
+   * @example spread(sky, buckets);
+   */
+  function spread(levels, buckets) {
+    for (let level = LIGHT_LEVEL_MAX; level >= 1; level--) {
+      const bucket = buckets[level];
+      for (let n = 0; n < bucket.length; n++) {
+        const i = bucket[n];
+        if (levels[i] !== level) continue;
+        const x = i % GRID_X, y = Math.floor(i / GRID_X) % GRID_Y, z = Math.floor(i / layer);
+        const neighbours = [cell_index(x + 1, y, z), cell_index(x - 1, y, z), cell_index(x, y, z + 1), cell_index(x, y, z - 1)];
+        if (y + 1 < GRID_Y) neighbours.push(i + GRID_X); if (y > 0) neighbours.push(i - GRID_X);
+        for (const j of neighbours) {
+          const cost = cost_of(voxels[j]);
+          if (cost === 0 || level - cost <= levels[j]) continue;
+          levels[j] = level - cost; buckets[level - cost].push(j);
+        }
+      }
+    }
+  }
+  /**
+   * `make_buckets` returns one empty list of cells per light level.
+   * @return {Array<Array<number>>} The buckets.
+   * @example const buckets = make_buckets();
+   */
+  function make_buckets() { return Array.from({ length: LIGHT_LEVEL_MAX + 1 }, () => []); }
+  const sky = new Uint8Array(cell_count), sky_buckets = make_buckets();
+  for (let z = 0; z < GRID_Z; z++) for (let x = 0; x < GRID_X; x++) {
+    let level = LIGHT_LEVEL_MAX, is_direct = true;
+    for (let y = GRID_Y - 1; y >= 0; y--) {
+      const i = cell_index(x, y, z), cost = cost_of(voxels[i]);
+      if (cost === 0) break;
+      if (cost > 1) is_direct = false;
+      if (!is_direct) level = Math.max(level - cost, 0);
+      sky[i] = level; if (level > 0) sky_buckets[level].push(i);
+    }
+  }
+  spread(sky, sky_buckets);
+  const channels = [WARM_SOURCES, COOL_SOURCES].map(sources => {
+    const levels = new Uint8Array(cell_count), buckets = make_buckets(), emit_by_id = new Uint8Array(MATERIAL_COUNT);
+    for (const [name, level] of Object.entries(sources)) emit_by_id[MATERIALS[name]] = level;
+    for (let i = 0; i < cell_count; i++) {
+      const level = emit_by_id[voxels[i]];
+      if (!level) continue;
+      const x = i % GRID_X, y = Math.floor(i / GRID_X) % GRID_Y, z = Math.floor(i / layer);
+      for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+        if (y + dy < 0 || y + dy >= GRID_Y) continue;
+        const j = cell_index(x + dx, y + dy, z + dz), cost = cost_of(voxels[j]);
+        if (cost && level - cost > levels[j]) { levels[j] = level - cost; buckets[level - cost].push(j); }
+      }
+    }
+    spread(levels, buckets);
+    return levels;
+  });
+  const bytes = new Uint8Array(cell_count * CHANNELS_PER_TEXEL);
+  for (let i = 0; i < cell_count; i++) bytes.set([sky[i] * LIGHT_BYTE_PER_LEVEL, channels[0][i] * LIGHT_BYTE_PER_LEVEL, channels[1][i] * LIGHT_BYTE_PER_LEVEL, OPAQUE_BYTE], CHANNELS_PER_TEXEL * i);
+  return bytes;
+}
+
+/**
+ * `glsl_float` writes a number as a GLSL float literal.
+ * @param {number} x The number.
+ * @return {string} The literal.
+ * @example glsl_float(3); // "3.0"
+ */
+function glsl_float(x) { return Number.isInteger(x) ? `${x}.0` : `${x}`; }
+
+/**
+ * `glsl_vec3_table` writes a per-material colour table as a GLSL const array.
+ * @param {string} name The array's name. @param {Object<string, Array<number>>} table Colours by material name (missing ones are black).
+ * @return {string} The GLSL declaration.
+ * @example glsl_vec3_table('PALETTE', PALETTE);
+ */
+function glsl_vec3_table(name, table) {
+  const rows = Object.keys(MATERIALS).map(key => { const c = table[key] || [0, 0, 0]; return `vec3(${c.map(glsl_float).join(', ')})`; });
+  return `const vec3 ${name}[${MATERIAL_COUNT}] = vec3[${MATERIAL_COUNT}](${rows.join(', ')});`;
+}
+
+const MAX_WARP_OBJECTS = 8;
+const VERTEX_SHADER = `
+precision highp float;
+in vec3 position; out vec2 v_ndc;
+/**
+ * \`main\` passes the full-screen quad's corners through, with their normalised device coordinates.
+ * @example main();
+ */
+void main() { v_ndc = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+const FRAGMENT_SHADER = `
+precision highp float; precision highp int; precision highp sampler3D; precision highp sampler2D;
+uniform sampler3D u_voxels;
+uniform sampler3D u_light;
+uniform vec3 u_cam_pos, u_cam_right, u_cam_up, u_cam_fwd;
+uniform float u_tan_half_fov, u_aspect, u_time_s;
+uniform vec4 u_objects[${MAX_WARP_OBJECTS}];
+uniform vec4 u_links[${MAX_WARP_OBJECTS}];
+uniform mat3 u_maps[${MAX_WARP_OBJECTS}];
+uniform int u_object_count;
+uniform sampler2D u_beam_points;
+uniform vec4 u_chunk_a[${MAX_CHUNKS}];
+uniform vec4 u_chunk_b[${MAX_CHUNKS}];
+uniform int u_chunk_count;
+uniform vec4 u_beam_spot;
+uniform vec3 u_beam_color;
+uniform float u_beam_fade, u_pixel_rad;
+in vec2 v_ndc;
+out vec4 out_color;
+
+const float PERIOD_X_M = ${glsl_float(PERIOD_X_M)};
+const float PERIOD_Z_M = ${glsl_float(PERIOD_Z_M)};
+const vec3 GRID_M = vec3(${glsl_float(GRID_X)}, ${glsl_float(GRID_Y)}, ${glsl_float(GRID_Z)});
+${Object.entries(MATERIALS).map(([name, id]) => `const int MAT_${name.toUpperCase()} = ${id};`).join('\n')}
+${glsl_vec3_table('PALETTE', PALETTE)}
+${glsl_vec3_table('EMISSION', EMISSION)}
+const float LAMBDA_SQ = ${glsl_float(LAMBDA_SQ)};
+const float FADE_START_M = ${glsl_float(FADE_START_M)};
+const float FADE_END_M = ${glsl_float(FADE_END_M)};
+const float MIN_RHO_M = ${MIN_RHO_M};
+const float MAX_HORIZON_FRAC = ${MAX_HORIZON_FRAC};
+const float CAPTURE_RADIUS_PER_HORIZON_RADIUS = ${glsl_float(CAPTURE_RADIUS_PER_HORIZON_RADIUS)};
+const int MAX_STEP_COUNT = 700;
+const float BEND_STEP_FRAC = 0.12;
+const float MIN_STEP_M = 0.01;
+const float MIDPOINT_REEVAL_FRAC = 0.04;
+const float DDA_NUDGE_M = 1e-4;
+const float BIG_M = 1e9;
+const float TINY = 1e-7;
+const float ABOVE_GRID_STEP_M = 8.0;
+const float MAX_RAY_M = 600.0;
+const float TAU_MAX = 4.6;
+const float FOG_DENSITY_PER_M = 0.016;
+const float FOG_BASE_Y_M = 6.0;
+const float FOG_SCALE_HEIGHT_M = 12.0;
+const vec3 FOG_COLOR = vec3(0.07, 0.085, 0.12);
+const vec3 SKY_HORIZON = vec3(0.16, 0.13, 0.2);
+const vec3 SKY_ZENITH = vec3(0.015, 0.025, 0.07);
+const float SKY_GRADIENT_POWER = 0.45;
+const vec2 DUSK_DIR_XZ = vec2(0.8, -0.6);
+const vec3 DUSK_GLOW = vec3(0.55, 0.22, 0.12);
+const float DUSK_SPREAD_POWER = 3.0;
+const float DUSK_HEIGHT_FALLOFF = 7.0;
+const float STAR_GRID = 160.0;
+const float STAR_THRESHOLD = 0.985;
+const float STAR_RADIUS = 0.32;
+const float STAR_JITTER_FRAC = 0.3;
+const float STAR_FADE_HEIGHT = 0.2;
+const float BELOW_HORIZON_FADE_GAIN = 6.0;
+const float BYTE_MAX = 255.0;
+const vec3 STAR_COLOR = vec3(0.9, 0.92, 1.0);
+const vec3 PLANET_DIR = vec3(-0.55, 0.42, 0.72);
+const float PLANET_RADIUS_RAD = 0.2;
+const vec3 PLANET_LIGHT_DIR = vec3(0.8, -0.15, -0.6);
+const vec3 PLANET_COLOR_A = vec3(0.78, 0.66, 0.52);
+const vec3 PLANET_COLOR_B = vec3(0.46, 0.55, 0.6);
+const float PLANET_BAND_FREQ = 9.0;
+const float PLANET_BAND_WARP = 2.0;
+const float PLANET_NOISE_SCALE = 4.0;
+const float PLANET_BRIGHTNESS = 0.7;
+const float PLANET_LIMB_FRAC = 0.97;
+const float PLANET_NIGHT_FRAC = 0.06;
+const vec3 AMBIENT_LIGHT = vec3(0.035, 0.04, 0.06);
+const vec3 SKY_LIGHT = vec3(0.3, 0.36, 0.55);
+const vec3 WARM_LIGHT = vec3(1.0, 0.55, 0.3);
+const vec3 COOL_LIGHT = vec3(0.28, 0.72, 0.9);
+const float PLANET_SHINE_GAIN = 0.35;
+const float FACE_TOP = 0.75;
+const float FACE_BOTTOM = 0.35;
+const float FACE_SIDE_X = 0.6;
+const float FACE_SIDE_Z = 0.5;
+const float TEXELS_PER_BLOCK = 8.0;
+const float NOISE_BASE = 0.84;
+const float NOISE_RANGE = 0.26;
+const float EDGE_DARK_FRAC = 0.6;
+const float NATURAL_EDGE_DARK_FRAC = 0.86;
+const float EDGE_WIDTH_FRAC = 0.04;
+const float MOSS_SIDE_BAND_FRAC = 0.8;
+const float LEAF_SPECKLE_FRAC = 0.35;
+const float BARK_STRIPES_PER_M = 4.0;
+const float BARK_DARK_FRAC = 0.75;
+const float BARK_PHASE_GAIN = 0.37;
+const float PLANK_GAP_FRAC = 0.15;
+const float LEAF_SPECKLE_THRESHOLD = 0.7;
+const float PLANK_LINES_PER_M = 4.0;
+const float PLANK_DARK_FRAC = 0.82;
+const float BOG_SHEEN_GAIN = 0.25;
+const float BOG_SHEEN_POWER = 5.0;
+const float GLOW_PULSE_FRAC = 0.12;
+const float GLOW_PULSE_RAD_PER_S = 1.7;
+const vec3 DISK_COLOR = vec3(1.0, 0.42, 0.16);
+const float DISK_INNER_PER_RS = 2.5;
+const float DISK_OUTER_PER_RS = 6.5;
+const float DISK_REACH_M = DISK_OUTER_PER_RS * ${glsl_float(BLACK_HOLE_RS_M)};
+const float CORE_REACH_M = CAPTURE_RADIUS_PER_HORIZON_RADIUS * ${glsl_float(Math.max(BLACK_HOLE_RS_M, MOUTH_RS_M) * RHO_PER_RS)};
+const float DISK_INNER_SPEED_FRAC = 0.45;
+const float DISK_HEAT_POWER = 0.75;
+const float DISK_OPACITY = 0.85;
+const float DISK_EDGE_GAIN = 1.15;
+const float DISK_FADE_FRAC = 0.7;
+const float DISK_NOISE_PER_M = 2.2;
+const float DISK_SPIN_RAD_PER_S = 0.6;
+const float DISK_SWIRL_BASE = 0.55;
+const float DISK_SWIRL_RANGE = 0.45;
+const float DISK_BRIGHTNESS = 1.6;
+const float DISK_LIGHT_GAIN = 2.5;
+const float DISK_LIGHT_SOFT_M2 = 9.0;
+const float TONE_KNEE_GAIN = 0.6;
+const float BEAM_RADIUS_M = 0.02;
+const float BEAM_REACH = 4.8;
+const float BEAM_HALO_SPREAD = 4.8;
+const float BEAM_HAZE_M = 160.0;
+const float BEAM_TOL_FRAC = 0.3;
+const float BEAM_SAGITTA_FACTOR = 32.0;
+const float BEAM_CHORD_MAX_M = 2.0;
+const float BEAM_NEAR_GAIN = 10.0;
+const float BEAM_NEAR_MIN_M = 0.3;
+const float BEAM_NEAR_MAX_M = 2.5;
+const float BEAM_TAIL_M = 40.0;
+const int BEAM_TAIL_COUNT = 3;
+const int NEAR_SLOTS = 16;
+const int CHUNK_PACK_STRIDE = ${CHUNK_PACK_STRIDE};
+const float BEAM_HALO_GAIN = 0.9;
+const float BEAM_CORE_WHITE_FRAC = 0.55;
+const float SPOT_MIN_RADIUS_M = 0.07;
+const float SPOT_PIXEL_GAIN = 2.5;
+const int OUTCOME_FOG = 0;
+const int OUTCOME_SKY = 1;
+const int OUTCOME_SURFACE = 2;
+const int OUTCOME_HORIZON = 3;
+
+/**
+ * \`hash3\` returns a pseudo-random number in [0, 1) for a point.
+ * @param p The point.
+ * @return The hash.
+ * @example float h = hash3(vec3(cell));
+ */
+float hash3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+
+/**
+ * \`vnoise\` returns smooth 2D value noise in [0, 1).
+ * @param p The point.
+ * @return The noise.
+ * @example float n = vnoise(uv * 3.0);
+ */
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash3(vec3(i, 0.0)), hash3(vec3(i + vec2(1, 0), 0.0)), f.x), mix(hash3(vec3(i + vec2(0, 1), 0.0)), hash3(vec3(i + vec2(1, 1), 0.0)), f.x), f.y);
+}
+
+/**
+ * \`min_image\` returns the copy of an offset that is shortest across the two looping axes.
+ * @param d The offset.
+ * @return The shortest copy.
+ * @example vec3 d = min_image(p - centre);
+ */
+vec3 min_image(vec3 d) { d.x -= PERIOD_X_M * round(d.x / PERIOD_X_M); d.z -= PERIOD_Z_M * round(d.z / PERIOD_Z_M); return d; }
+
+/**
+ * \`wrap_cell\` wraps a cell into the grid's period in x and z.
+ * @param c The cell.
+ * @return The wrapped cell.
+ * @example ivec3 w = wrap_cell(ivec3(-1, 4, 170));
+ */
+ivec3 wrap_cell(ivec3 c) { return ivec3(c.x - ${GRID_X} * int(floor(float(c.x) / PERIOD_X_M)), c.y, c.z - ${GRID_Z} * int(floor(float(c.z) / PERIOD_Z_M))); }
+
+/**
+ * \`block_at\` returns the material of a cell: bedrock below the grid, air above it, periodic in x and z.
+ * @param c The cell.
+ * @return The material id.
+ * @example int m = block_at(ivec3(floor(p)));
+ */
+int block_at(ivec3 c) {
+  if (c.y < 0) return MAT_BEDROCK;
+  if (c.y >= ${GRID_Y}) return MAT_AIR;
+  return int(texelFetch(u_voxels, wrap_cell(c), 0).r * BYTE_MAX + 0.5);
+}
+
+/**
+ * \`dln_black_hole\` returns d ln n / dρ for a black hole, whose isotropic refractive index is n = (1 + u)³ / (1 - u), u = ρ_h / ρ.
+ * @param rho The distance from the centre. @param rho_h The horizon's radius.
+ * @return The derivative.
+ * @example float g = dln_black_hole(5.0, 0.25);
+ */
+float dln_black_hole(float rho, float rho_h) { float u = min(rho_h / rho, MAX_HORIZON_FRAC); return -(u / rho) * (3.0 / (1.0 + u) + 1.0 / (1.0 - u)); }
+
+/**
+ * \`dln_mouth\` returns d ln n / dρ for a wormhole mouth (a "black hole foil"): n = (1 + ρ_t/ρ)² / sqrt(A), A = (1 - r_s/r + λ²)/(1 + λ²).
+ * @param rho The distance from the centre. @param rho_t The throat's radius.
+ * @return The derivative.
+ * @example float g = dln_mouth(5.0, 0.25);
+ */
+float dln_mouth(float rho, float rho_t) {
+  float ir = 1.0 / rho, psi = 1.0 + rho_t * ir, ir2 = ir / (psi * psi), r_s = 4.0 * rho_t;
+  return -2.0 * rho_t * ir * ir / psi - r_s * psi * (1.0 - rho_t * ir) * ir2 * ir2 / (2.0 * (1.0 + LAMBDA_SQ - r_s * ir2));
+}
+
+/**
+ * \`bend_of\` returns how fast a ray's direction turns: the part of ∇ln n across the ray, summed over the nearest copy of
+ * each warp object, and faded to zero between FADE_START_M and FADE_END_M. Inside FADE_START_M paths are those of the object
+ * itself with the impact parameter scaled by n at the fade (about 1.03), so a ray feels a single object, never a sum of copies.
+ * @param p The point. @param v The ray's unit direction. @param rho_near Set to the distance to the nearest object.
+ * @param rho_near_hole Set to the distance to the nearest black hole.
+ * @return The turning rate (per metre).
+ * @example float r, rh; vec3 acc = bend_of(p, v, r, rh);
+ */
+vec3 bend_of(vec3 p, vec3 v, out float rho_near, out float rho_near_hole) {
+  vec3 g = vec3(0.0); rho_near = BIG_M; rho_near_hole = BIG_M;
+  for (int k = 0; k < ${MAX_WARP_OBJECTS}; k++) {
+    if (k >= u_object_count) break;
+    vec3 d = min_image(p - u_objects[k].xyz); float rho = max(length(d), MIN_RHO_M), rho0 = u_objects[k].w;
+    bool is_mouth = u_links[k].w > 0.5;
+    rho_near = min(rho_near, rho);
+    if (!is_mouth) rho_near_hole = min(rho_near_hole, rho);
+    if (rho > FADE_END_M) continue;
+    float slope = is_mouth ? dln_mouth(rho, rho0) : dln_black_hole(rho, rho0);
+    g += slope * (1.0 - smoothstep(FADE_START_M, FADE_END_M, rho)) * d / rho;
+  }
+  return g - dot(g, v) * v;
+}
+
+/**
+ * \`fog_density\` returns the fog's density at a height: thick near the forest floor, thinning above it.
+ * @param y The height.
+ * @return The density, per metre.
+ * @example tau += fog_density(p.y) * ds;
+ */
+float fog_density(float y) { return FOG_DENSITY_PER_M * exp(-max(y - FOG_BASE_Y_M, 0.0) / FOG_SCALE_HEIGHT_M); }
+
+/**
+ * \`sky_color\` returns the dusk sky in a direction: a dark gradient, an orange glow low in one direction, stars and a banded gas giant.
+ * @param d The direction.
+ * @return The colour.
+ * @example vec3 c = sky_color(v);
+ */
+vec3 sky_color(vec3 d) {
+  float h = d.y;
+  vec3 c = mix(SKY_HORIZON, SKY_ZENITH, pow(clamp(h, 0.0, 1.0), SKY_GRADIENT_POWER));
+  vec2 flat_dir = normalize(d.xz + vec2(TINY));
+  c += DUSK_GLOW * pow(max(dot(flat_dir, DUSK_DIR_XZ), 0.0), DUSK_SPREAD_POWER) * exp(-max(h, 0.0) * DUSK_HEIGHT_FALLOFF);
+  vec3 q = d * STAR_GRID, cell = floor(q); float s = hash3(cell);
+  if (s > STAR_THRESHOLD) {
+    vec3 star = cell + 0.5 + STAR_JITTER_FRAC * (vec3(hash3(cell + 1.7), hash3(cell + 3.1), hash3(cell + 5.3)) - 0.5);
+    c += STAR_COLOR * smoothstep(STAR_RADIUS, 0.0, length(q - star)) * smoothstep(0.0, STAR_FADE_HEIGHT, h) * (s - STAR_THRESHOLD) / (1.0 - STAR_THRESHOLD);
+  }
+  vec3 pd = normalize(PLANET_DIR); float cos_p = dot(d, pd);
+  if (cos_p > cos(PLANET_RADIUS_RAD)) {
+    vec3 across = normalize(d - pd * cos_p + vec3(TINY));
+    float x = clamp(sqrt(max(1.0 - cos_p * cos_p, 0.0)) / sin(PLANET_RADIUS_RAD), 0.0, 1.0);
+    vec3 n = across * x - pd * sqrt(1.0 - x * x);
+    float band = 0.5 + 0.5 * sin(n.y * PLANET_BAND_FREQ + PLANET_BAND_WARP * vnoise(n.xz * PLANET_NOISE_SCALE));
+    float lit = max(dot(n, normalize(PLANET_LIGHT_DIR)), 0.0);
+    c = mix(PLANET_COLOR_B, PLANET_COLOR_A, band) * (PLANET_NIGHT_FRAC + lit) * PLANET_BRIGHTNESS * (1.0 - smoothstep(PLANET_LIMB_FRAC, 1.0, x)) + c * smoothstep(PLANET_LIMB_FRAC, 1.0, x);
+  }
+  if (h < 0.0) c = mix(c, FOG_COLOR, min(-h * BELOW_HORIZON_FADE_GAIN, 1.0));
+  return c;
+}
+
+/**
+ * \`light_curve\` turns a light level (0 to 1) into brightness the way Minecraft does: f / (4 - 3f).
+ * @param f The level, as a fraction of 15.
+ * @return The brightness.
+ * @example float b = light_curve(0.5); // 0.2
+ */
+float light_curve(float f) { return f / (4.0 - 3.0 * f); }
+
+/**
+ * \`disk_light\` returns the light that the black holes' glowing disks cast on a face (no shadows; the caller scales it by sky light).
+ * @param hp The point. @param n The face normal.
+ * @return The light.
+ * @example vec3 l = disk_light(hp, n);
+ */
+vec3 disk_light(vec3 hp, vec3 n) {
+  vec3 total = vec3(0.0);
+  for (int k = 0; k < ${MAX_WARP_OBJECTS}; k++) {
+    if (k >= u_object_count) break;
+    if (u_links[k].w > 0.5) continue;
+    vec3 d = min_image(u_objects[k].xyz - hp); float d2 = dot(d, d);
+    total += DISK_COLOR * DISK_LIGHT_GAIN * max(dot(n, d) * inversesqrt(d2), 0.0) / (d2 + DISK_LIGHT_SOFT_M2);
+  }
+  return total;
+}
+
+/**
+ * \`shade_block\` returns the colour of a block face: its blocky texture with darkened edges, lit by smoothly interpolated
+ * sky, warm and cool light, the disks' glow and its own emission.
+ * @param m The material. @param hp The hit point. @param n The face normal. @param cell The block's (unwrapped) cell. @param v The ray direction.
+ * @return The colour.
+ * @example vec3 c = shade_block(MAT_MOSS, hp, vec3(0, 1, 0), cell, v);
+ */
+vec3 shade_block(int m, vec3 hp, vec3 n, ivec3 cell, vec3 v) {
+  ivec3 w = wrap_cell(cell);
+  float seed = float(w.x * 7 + w.y * 131 + w.z * 29);
+  vec2 uv = abs(n.x) > 0.5 ? hp.zy : (abs(n.y) > 0.5 ? hp.xz : hp.xy);
+  vec2 f = fract(uv);
+  vec3 albedo = PALETTE[m];
+  bool is_moss = m == MAT_MOSS || m == MAT_RED_MOSS || m == MAT_BLUE_MOSS;
+  if (is_moss && n.y < 0.5) albedo = fract(hp.y) > MOSS_SIDE_BAND_FRAC ? albedo : PALETTE[MAT_DIRT];
+  if ((m == MAT_BARK || m == MAT_ROOT || m == MAT_STEM) && abs(n.y) < 0.5) albedo *= mix(BARK_DARK_FRAC, 1.0, step(0.5, fract(uv.x * BARK_STRIPES_PER_M + BARK_PHASE_GAIN * hash3(vec3(floor(uv.x * BARK_STRIPES_PER_M), seed, 1.0)))));
+  if (m == MAT_PLANKS) albedo *= mix(PLANK_DARK_FRAC, 1.0, step(PLANK_GAP_FRAC, fract(uv.y * PLANK_LINES_PER_M)));
+  float grain = hash3(vec3(floor(f * TEXELS_PER_BLOCK), seed));
+  albedo *= NOISE_BASE + NOISE_RANGE * grain;
+  if (m == MAT_LEAVES || m == MAT_LEAVES_DEEP) albedo *= 1.0 - LEAF_SPECKLE_FRAC * step(LEAF_SPECKLE_THRESHOLD, grain);
+  vec2 edge = min(f, 1.0 - f);
+  bool is_natural = is_moss || m == MAT_DIRT || m == MAT_BOG || m == MAT_LEAVES || m == MAT_LEAVES_DEEP || m == MAT_GRAVEL;
+  float edge_frac = mix(is_natural ? NATURAL_EDGE_DARK_FRAC : EDGE_DARK_FRAC, 1.0, smoothstep(0.0, EDGE_WIDTH_FRAC, min(edge.x, edge.y)));
+  albedo *= edge_frac;
+  vec3 light = texture(u_light, (hp + 0.5 * n) / GRID_M).rgb;
+  float sky = light_curve(light.r), warm = light_curve(light.g), cool = light_curve(light.b);
+  float face = n.y > 0.5 ? FACE_TOP : (n.y < -0.5 ? FACE_BOTTOM : (abs(n.x) > 0.5 ? FACE_SIDE_X : FACE_SIDE_Z));
+  vec3 illum = AMBIENT_LIGHT + SKY_LIGHT * sky * (face + PLANET_SHINE_GAIN * max(dot(n, normalize(PLANET_DIR)), 0.0)) + WARM_LIGHT * warm + COOL_LIGHT * cool + disk_light(hp, n) * sky;
+  vec3 col = albedo * illum;
+  if (m == MAT_BOG && n.y > 0.5) col += SKY_LIGHT * sky * BOG_SHEEN_GAIN * pow(1.0 - abs(v.y), BOG_SHEEN_POWER);
+  float pulse = 1.0 + GLOW_PULSE_FRAC * sin(u_time_s * GLOW_PULSE_RAD_PER_S + seed);
+  return col + EMISSION[m] * pulse * (NOISE_BASE + NOISE_RANGE * grain) * edge_frac;
+}
+
+/**
+ * \`add_disks\` adds the glow of any black hole's thin accretion disk that the straight piece a→b crosses, with Doppler
+ * brightening on the side that turns toward you, and dims what lies behind by the disk's opacity.
+ * @param a The piece's start. @param b Its end. @param v The ray direction. @param tau The fog's optical depth so far.
+ * @param trans The light still passing (updated). @param emit The light gathered (updated).
+ * @return Nothing.
+ * @example add_disks(p, pn, v, tau, trans, emit);
+ */
+void add_disks(vec3 a, vec3 b, vec3 v, float tau, inout float trans, inout vec3 emit) {
+  for (int k = 0; k < ${MAX_WARP_OBJECTS}; k++) {
+    if (k >= u_object_count) break;
+    if (u_links[k].w > 0.5) continue;
+    vec3 d0 = min_image(a - u_objects[k].xyz), d1 = d0 + (b - a);
+    if (d0.y * d1.y >= 0.0) continue;
+    vec3 q = mix(d0, d1, d0.y / (d0.y - d1.y)); float r = length(q.xz), r_s = 4.0 * u_objects[k].w;
+    float r_in = DISK_INNER_PER_RS * r_s, r_out = DISK_OUTER_PER_RS * r_s;
+    if (r < r_in || r > r_out) continue;
+    vec3 tangent = normalize(vec3(-q.z, 0.0, q.x));
+    float beta = DISK_INNER_SPEED_FRAC * sqrt(r_in / r), doppler = 1.0 / (1.0 - beta * dot(tangent, -v)), heat = pow(r_in / r, DISK_HEAT_POWER);
+    float spin = -u_time_s * DISK_SPIN_RAD_PER_S * heat;
+    vec2 swirl_p = mat2(cos(spin), -sin(spin), sin(spin), cos(spin)) * q.xz;
+    float swirl = DISK_SWIRL_BASE + DISK_SWIRL_RANGE * vnoise(swirl_p * DISK_NOISE_PER_M + vec2(r * DISK_NOISE_PER_M));
+    float alpha = DISK_OPACITY * smoothstep(r_in, r_in * DISK_EDGE_GAIN, r) * (1.0 - smoothstep(r_out * DISK_FADE_FRAC, r_out, r));
+    emit += trans * exp(-tau) * DISK_COLOR * DISK_BRIGHTNESS * heat * heat * doppler * doppler * doppler * swirl * alpha;
+    trans *= 1.0 - alpha;
+  }
+}
+
+/**
+ * \`dist_point_segment\` returns the distance from a point to a segment.
+ * @param p The point. @param a @param b The segment's ends.
+ * @return The distance.
+ * @example float d = dist_point_segment(p, a, b);
+ */
+float dist_point_segment(vec3 p, vec3 a, vec3 b) { vec3 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0); return length(p - a - ab * t); }
+
+/**
+ * \`dist2_segments\` returns the squared distance between segments p1-q1 and p2-q2.
+ * @param p1 @param q1 The first segment. @param p2 @param q2 The second. @param s Set to the closest point's parameter on the first.
+ * @return The squared distance.
+ * @example float s; float d2 = dist2_segments(a, b, c, d, s);
+ */
+float dist2_segments(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s) {
+  vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), t;
+  s = 0.0;
+  if (e < 1e-10) { t = 0.0; s = a > 1e-10 ? clamp(-dot(d1, r) / a, 0.0, 1.0) : 0.0; }
+  else if (a < 1e-10) { t = clamp(f / e, 0.0, 1.0); }
+  else {
+    float b = dot(d1, d2), c = dot(d1, r), den = a * e - b * b;
+    s = den > 1e-7 * a * e ? clamp((b * f - c * e) / den, 0.0, 1.0) : 0.0;
+    t = (b * s + f) / e;
+    if (t < 0.0) { t = 0.0; s = clamp(-c / a, 0.0, 1.0); }
+    else if (t > 1.0) { t = 1.0; s = clamp((b - c) / a, 0.0, 1.0); }
+  }
+  vec3 w = p1 + d1 * s - p2 - d2 * t;
+  return dot(w, w);
+}
+
+/**
+ * \`beam_chunk\` adds the glow of laser chunk c (its nearest periodic copy) near the straight ray piece a→b.
+ * @param c The chunk. @param a @param b The ray piece. @param len Its length. @param reach The glow's reach. @param t0 The travel before a.
+ * @param trans The light still passing. @param core @param halo The glow so far (updated).
+ * @return A lower bound on the distance from the piece to the chunk.
+ * @example float dc = beam_chunk(0, a, b, len, reach, t0, trans, core, halo);
+ */
+float beam_chunk(int c, vec3 a, vec3 b, float len, float reach, float t0, float trans, inout float core, inout float halo) {
+  vec3 rm = 0.5 * (a + b), chunk_mid = 0.5 * (u_chunk_a[c].xyz + u_chunk_b[c].xyz), shift = rm - min_image(rm - chunk_mid) - chunk_mid;
+  vec3 A = u_chunk_a[c].xyz + shift, B = u_chunk_b[c].xyz + shift; float radius = u_chunk_a[c].w;
+  float dc = dist_point_segment(rm, A, B) - radius;
+  if (dc > 0.5 * len + reach) return dc - 0.5 * len;
+  if (len > BEAM_CHORD_MAX_M) { float s0; if (sqrt(dist2_segments(a, b, A, B, s0)) - radius > reach) return dc - 0.5 * len; }
+  int packed = int(u_chunk_b[c].w + 0.5), first = packed / CHUNK_PACK_STRIDE, count = packed - first * CHUNK_PACK_STRIDE;
+  vec3 q0 = texelFetch(u_beam_points, ivec2(first, 0), 0).xyz + shift;
+  for (int j = 0; j < ${MAX_SEGMENTS_PER_CHUNK}; j++) {
+    if (j >= count) break;
+    vec3 q1 = texelFetch(u_beam_points, ivec2(first + j + 1, 0), 0).xyz + shift;
+    if (dist_point_segment(0.5 * (q0 + q1), a, b) - 0.5 * length(q1 - q0) > reach) { q0 = q1; continue; }
+    float s; float d2 = dist2_segments(a, b, q0, q1, s);
+    float tc = t0 + s * len, sigma = max(BEAM_RADIUS_M, u_pixel_rad * tc), fade = trans * exp(-tc / BEAM_HAZE_M);
+    core = max(core, fade * exp(-d2 / (sigma * sigma)));
+    halo = max(halo, fade * exp(-d2 / (BEAM_HALO_SPREAD * sigma * sigma)));
+    q0 = q1;
+  }
+  return dc - 0.5 * len;
+}
+
+/**
+ * \`beam_scan\` tests every laser chunk against one straight ray piece.
+ * @param a @param b The piece. @param t0 The travel before a. @param trans The light still passing. @param core @param halo The glow (updated).
+ * @return Nothing.
+ * @example beam_scan(p, p + v * 40.0, travelled, trans, core, halo);
+ */
+void beam_scan(vec3 a, vec3 b, float t0, float trans, inout float core, inout float halo) {
+  float len = length(b - a), reach = BEAM_REACH * max(BEAM_RADIUS_M, u_pixel_rad * (t0 + len));
+  for (int c = 0; c < ${MAX_CHUNKS}; c++) { if (c >= u_chunk_count) break; beam_chunk(c, a, b, len, reach, t0, trans, core, halo); }
+}
+
+/**
+ * \`main\` traces one pixel's ray backwards from the eye: bent by the warp objects, through throats, across the periodic
+ * voxel grid and through the fog, gathering the laser's glow on the way.
+ * @example main();
+ */
+void main() {
+  vec3 v = normalize(u_cam_fwd + v_ndc.x * u_tan_half_fov * u_aspect * u_cam_right + v_ndc.y * u_tan_half_fov * u_cam_up);
+  vec3 p = u_cam_pos;
+  ivec3 cell = ivec3(floor(p));
+  float travelled = 0.0, tau = 0.0, trans = 1.0;
+  vec3 emit = vec3(0.0), surf = vec3(0.0);
+  int outcome = OUTCOME_FOG;
+  float b_next = 0.0, b_core = 0.0, b_halo = 0.0;
+  int near_chunks[NEAR_SLOTS]; int near_count = 0;
+  vec3 b_start = p, b_dir = v; float b_t = 0.0;
+  for (int it = 0; it < MAX_STEP_COUNT; it++) {
+    if (travelled > MAX_RAY_M || tau > TAU_MAX) break;
+    float rho_near, rho_near_hole;
+    vec3 acc = bend_of(p, v, rho_near, rho_near_hole);
+    float bend_step = max(BEND_STEP_FRAC * rho_near, MIN_STEP_M), ds;
+    if (p.y < GRID_M.y) {
+      vec3 boundary = vec3(cell) + step(0.0, v), tt = (boundary - p) / v;
+      tt = mix(tt, tt + 1.0 / abs(v), lessThanEqual(tt, vec3(0.0)));
+      tt = mix(tt, vec3(BIG_M), lessThan(abs(v), vec3(TINY)));
+      ds = min(min(tt.x, min(tt.y, tt.z)) + DDA_NUDGE_M, bend_step);
+    } else {
+      if (v.y >= 0.0 && rho_near > FADE_END_M) { outcome = OUTCOME_SKY; break; }
+      ds = min(v.y < 0.0 ? (p.y - GRID_M.y) / -v.y + DDA_NUDGE_M : ABOVE_GRID_STEP_M, bend_step);
+    }
+    vec3 vh = normalize(v + acc * (0.5 * ds)), acc2 = acc;
+    if (ds > MIDPOINT_REEVAL_FRAC * rho_near) { float r_mid, rh_mid; acc2 = bend_of(p + v * (0.5 * ds), vh, r_mid, rh_mid); }
+    vec3 p0 = p, pn = p + vh * ds; float t0 = travelled, hit_frac = 1.0;
+    if (rho_near_hole - ds < DISK_REACH_M) add_disks(p, pn, v, tau, trans, emit);
+    tau += fog_density(0.5 * (p.y + pn.y)) * ds;
+    v = normalize(v + acc2 * ds);
+    p = pn; travelled += ds;
+    ivec3 nc = ivec3(floor(p));
+    if (nc != cell) {
+      ivec3 dc = nc - cell, hit_cell = nc; int m = 0, ax = -1;
+      if (abs(dc.x) + abs(dc.y) + abs(dc.z) > 1) {
+        for (int i = 0; i < 3; i++) {
+          if (dc[i] == 0 || m > 0) continue;
+          ivec3 side = cell; side[i] += dc[i] > 0 ? 1 : -1;
+          int side_m = block_at(side);
+          if (side_m > 0) { m = side_m; hit_cell = side; ax = i; }
+        }
+      }
+      if (m == 0) m = block_at(nc);
+      if (m > 0) {
+        vec3 seg = p - p0, lo = vec3(hit_cell); float best = -BIG_M;
+        if (ax < 0) {
+          for (int i = 0; i < 3; i++) {
+            if (abs(seg[i]) > 1e-9) { float t = ((seg[i] > 0.0 ? lo[i] : lo[i] + 1.0) - p0[i]) / seg[i]; if (t > best) { best = t; ax = i; } }
+          }
+        } else best = ((seg[ax] > 0.0 ? lo[ax] : lo[ax] + 1.0) - p0[ax]) / seg[ax];
+        vec3 n = vec3(0.0); n[ax] = seg[ax] > 0.0 ? -1.0 : 1.0;
+        hit_frac = clamp(best, 0.0, 1.0);
+        vec3 hp = p0 + seg * hit_frac;
+        surf = shade_block(m, hp, n, hit_cell, v);
+        if (u_beam_spot.w > 0.0) {
+          vec3 dspot = min_image(hp - u_beam_spot.xyz); float rr = max(SPOT_MIN_RADIUS_M, SPOT_PIXEL_GAIN * u_pixel_rad * travelled);
+          float spot = u_beam_spot.w * exp(-dot(dspot, dspot) / (rr * rr)) * exp(-travelled / BEAM_HAZE_M) * trans;
+          b_halo = max(b_halo, spot); b_core = max(b_core, spot * spot);
+        }
+        outcome = OUTCOME_SURFACE;
+      }
+      cell = nc;
+    }
+    int throat = -1; bool is_swallowed = false;
+    if (outcome != OUTCOME_SURFACE && rho_near - ds < CORE_REACH_M) {
+      for (int k = 0; k < ${MAX_WARP_OBJECTS}; k++) {
+        if (k >= u_object_count) break;
+        vec3 d = min_image(p - u_objects[k].xyz); float r2 = dot(d, d), rho0 = u_objects[k].w;
+        if (u_links[k].w > 0.5) { if (r2 < rho0 * rho0) { throat = k; break; } }
+        else if (r2 < CAPTURE_RADIUS_PER_HORIZON_RADIUS * CAPTURE_RADIUS_PER_HORIZON_RADIUS * rho0 * rho0) { is_swallowed = true; break; }
+      }
+    }
+    if (u_chunk_count > 0) {
+      vec3 b_end = mix(p0, pn, hit_frac); float t_end = t0 + ds * hit_frac, len = t_end - b_t;
+      float tol = BEAM_TOL_FRAC * max(BEAM_RADIUS_M, u_pixel_rad * b_t), turn = 1.0 - dot(b_dir, v);
+      if (outcome == OUTCOME_SURFACE || throat >= 0 || is_swallowed || len > BEAM_CHORD_MAX_M || len * len * turn > BEAM_SAGITTA_FACTOR * tol * tol) {
+        float reach = BEAM_REACH * max(BEAM_RADIUS_M, u_pixel_rad * t_end);
+        if (t_end >= b_next) {
+          float reach0 = BEAM_REACH * max(BEAM_RADIUS_M, u_pixel_rad * b_t), near = reach0 + clamp(BEAM_NEAR_GAIN * len, BEAM_NEAR_MIN_M, BEAM_NEAR_MAX_M), far = BIG_M;
+          bool is_overflow = false; near_count = 0;
+          for (int c = 0; c < ${MAX_CHUNKS}; c++) {
+            if (c >= u_chunk_count) break;
+            float dc = beam_chunk(c, b_start, b_end, len, reach, b_t, trans, b_core, b_halo);
+            if (dc < near) { if (near_count < NEAR_SLOTS) { near_chunks[near_count] = c; near_count++; } else is_overflow = true; }
+            else far = min(far, dc);
+          }
+          b_next = is_overflow ? b_t : b_t + max(far - reach0, 0.0) / (1.0 + BEAM_REACH * u_pixel_rad);
+        } else {
+          for (int k = 0; k < NEAR_SLOTS; k++) { if (k >= near_count) break; beam_chunk(near_chunks[k], b_start, b_end, len, reach, b_t, trans, b_core, b_halo); }
+        }
+        b_start = b_end; b_t = t_end; b_dir = v;
+      }
+    }
+    if (outcome == OUTCOME_SURFACE) break;
+    if (is_swallowed) { outcome = OUTCOME_HORIZON; break; }
+    if (throat >= 0) {
+      for (int k = 0; k < ${MAX_WARP_OBJECTS}; k++) {
+        if (k != throat) continue;
+        vec3 d = min_image(p - u_objects[k].xyz); float r2 = dot(d, d), rho0 = u_objects[k].w;
+        vec3 nrm = d * inversesqrt(r2);
+        p = u_links[k].xyz + u_maps[k] * (d * (rho0 * rho0 / r2));
+        v = normalize(u_maps[k] * (v - 2.0 * dot(v, nrm) * nrm));
+        cell = ivec3(floor(p));
+        b_next = 0.0; near_count = 0; b_start = p; b_t = travelled; b_dir = v;
+        break;
+      }
+    }
+  }
+  if (outcome == OUTCOME_SKY && u_chunk_count > 0) {
+    if (travelled > b_t) beam_scan(b_start, p, b_t, trans, b_core, b_halo);
+    for (int i = 0; i < BEAM_TAIL_COUNT; i++) beam_scan(p + v * (BEAM_TAIL_M * float(i)), p + v * (BEAM_TAIL_M * float(i + 1)), travelled + BEAM_TAIL_M * float(i), trans, b_core, b_halo);
+  }
+  vec3 col = outcome == OUTCOME_SURFACE ? surf : (outcome == OUTCOME_SKY ? sky_color(v) : (outcome == OUTCOME_HORIZON ? vec3(0.0) : FOG_COLOR));
+  float fog_t = exp(-tau);
+  col = emit + trans * (col * fog_t + FOG_COLOR * (1.0 - fog_t));
+  col = mix(col, u_beam_color, clamp(BEAM_HALO_GAIN * b_halo * u_beam_fade, 0.0, 1.0)) + mix(u_beam_color, vec3(1.0), BEAM_CORE_WHITE_FRAC) * b_core * u_beam_fade;
+  col = col / (1.0 + max(col - 1.0, 0.0) * TONE_KNEE_GAIN);
+  out_color = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+const canvas = document.getElementById('c');
+/**
+ * `get_element` returns the page element with an id.
+ * @param {string} id The id.
+ * @return {HTMLElement} The element.
+ * @example get_element('s_zone').textContent = 'red zone';
+ */
+function get_element(id) { return document.getElementById(id); }
+
+/**
+ * `show_error` shows a full-screen error message and rethrows the error.
+ * @param {Error} error The error.
+ * @return {never}
+ * @example show_error(new Error('WebGL2 is required'));
+ */
+function show_error(error) { const el = get_element('err'); el.style.display = 'flex'; el.textContent = error.message; throw error; }
+window.addEventListener('error', e => { const el = get_element('err'); el.style.display = 'flex'; el.textContent = String(e.message); });
+
+build_world();
+add_warp_objects();
+const light_bytes = compute_light();
+
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false }); } catch (error) { show_error(new Error('WebGL2 is required: ' + error.message)); }
+const voxel_texture = new THREE.Data3DTexture(voxels, GRID_X, GRID_Y, GRID_Z);
+voxel_texture.format = THREE.RedFormat; voxel_texture.type = THREE.UnsignedByteType;
+voxel_texture.minFilter = voxel_texture.magFilter = THREE.NearestFilter; voxel_texture.unpackAlignment = 1; voxel_texture.needsUpdate = true;
+const light_texture = new THREE.Data3DTexture(light_bytes, GRID_X, GRID_Y, GRID_Z);
+light_texture.format = THREE.RGBAFormat; light_texture.type = THREE.UnsignedByteType;
+light_texture.minFilter = light_texture.magFilter = THREE.LinearFilter;
+light_texture.wrapS = light_texture.wrapR = THREE.RepeatWrapping; light_texture.wrapT = THREE.ClampToEdgeWrapping; light_texture.needsUpdate = true;
+const beam_data = new Float32Array(MAX_BEAM_POINTS * CHANNELS_PER_TEXEL);
+const beam_texture = new THREE.DataTexture(beam_data, MAX_BEAM_POINTS, 1, THREE.RGBAFormat, THREE.FloatType);
+beam_texture.minFilter = beam_texture.magFilter = THREE.NearestFilter; beam_texture.needsUpdate = true;
+
+const uniforms = {
+  u_voxels: { value: voxel_texture }, u_light: { value: light_texture },
+  u_cam_pos: { value: new V3() }, u_cam_right: { value: new V3() }, u_cam_up: { value: new V3() }, u_cam_fwd: { value: new V3() },
+  u_tan_half_fov: { value: Math.tan(FOV_Y_DEG / 2 * Math.PI / 180) }, u_aspect: { value: 1 }, u_time_s: { value: 0 },
+  u_objects: { value: Array.from({ length: MAX_WARP_OBJECTS }, () => new THREE.Vector4()) },
+  u_links: { value: Array.from({ length: MAX_WARP_OBJECTS }, () => new THREE.Vector4()) },
+  u_maps: { value: Array.from({ length: MAX_WARP_OBJECTS }, () => new THREE.Matrix3()) }, u_object_count: { value: 0 },
+  u_beam_points: { value: beam_texture },
+  u_chunk_a: { value: Array.from({ length: MAX_CHUNKS }, () => new THREE.Vector4()) }, u_chunk_b: { value: Array.from({ length: MAX_CHUNKS }, () => new THREE.Vector4()) },
+  u_chunk_count: { value: 0 }, u_beam_spot: { value: new THREE.Vector4() }, u_beam_color: { value: new V3(...TEAM_COLORS.red) },
+  u_beam_fade: { value: 0 }, u_pixel_rad: { value: 0 }
+};
+const material = new THREE.RawShaderMaterial({ uniforms, vertexShader: VERTEX_SHADER, fragmentShader: FRAGMENT_SHADER, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material); quad.frustumCulled = false;
+const scene = new THREE.Scene(); scene.add(quad);
+const camera = new THREE.Camera();
+
+/**
+ * `upload_warp_objects` copies the warp objects into the shader's uniforms.
+ * @return {void}
+ * @example upload_warp_objects();
+ */
+function upload_warp_objects() {
+  if (warp_objects.length > MAX_WARP_OBJECTS) throw new Error(`warp_objects has ${warp_objects.length} objects; the shader takes at most ${MAX_WARP_OBJECTS}`);
+  uniforms.u_object_count.value = warp_objects.length;
+  warp_objects.forEach((o, k) => {
+    uniforms.u_objects.value[k].set(o.c.x, o.c.y, o.c.z, o.rho0);
+    if (o.kind === 'mouth') { uniforms.u_links.value[k].set(o.to.x, o.to.y, o.to.z, 1); uniforms.u_maps.value[k].copy(o.Q); }
+    else uniforms.u_links.value[k].set(0, 0, 0, 0);
+  });
+}
+upload_warp_objects();
+
+let quality = 'auto', auto_pixel_budget = AUTO_PIXEL_BUDGET;
+const buffer_size = new THREE.Vector2();
+
+/**
+ * `resize` sizes the drawing buffer for the window and the render quality ("auto" renders about auto_pixel_budget pixels).
+ * @return {void}
+ * @example resize();
+ */
+function resize() {
+  const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
+  const scale = quality === 'auto' ? Math.min(1, Math.sqrt(auto_pixel_budget / (w * h * dpr * dpr))) : QUALITY_SCALES[quality];
+  renderer.setPixelRatio(dpr * scale);
+  renderer.setSize(w, h, false);
+  uniforms.u_aspect.value = w / h;
+  renderer.getDrawingBufferSize(buffer_size);
+  uniforms.u_pixel_rad.value = 2 * uniforms.u_tan_half_fov.value / Math.max(1, buffer_size.y);
+}
+window.addEventListener('resize', resize);
+
+/**
+ * `min_image` replaces an offset by its shortest copy across the looping axes.
+ * @param {THREE.Vector3} d The offset (changed in place).
+ * @return {THREE.Vector3} The same vector.
+ * @example min_image(p.clone().sub(c));
+ */
+function min_image(d) { d.x -= PERIOD_X_M * Math.round(d.x / PERIOD_X_M); d.z -= PERIOD_Z_M * Math.round(d.z / PERIOD_Z_M); return d; }
+
+/**
+ * `wrap_position` wraps a position into the grid's period in x and z.
+ * @param {THREE.Vector3} p The position (changed in place).
+ * @return {THREE.Vector3} The same vector.
+ * @example wrap_position(state.eye);
+ */
+function wrap_position(p) { p.x = wrap_index(p.x, PERIOD_X_M); p.z = wrap_index(p.z, PERIOD_Z_M); return p; }
+
+/**
+ * `dln_black_hole` is the JavaScript copy of the shader's: d ln n / dρ for a black hole.
+ * @param {number} rho The distance from the centre. @param {number} rho_h The horizon's radius.
+ * @return {number} The derivative.
+ * @example dln_black_hole(5, 0.25);
+ */
+function dln_black_hole(rho, rho_h) { const u = Math.min(rho_h / rho, MAX_HORIZON_FRAC); return -(u / rho) * (3 / (1 + u) + 1 / (1 - u)); }
+
+/**
+ * `dln_mouth` is the JavaScript copy of the shader's: d ln n / dρ for a wormhole mouth.
+ * @param {number} rho The distance from the centre. @param {number} rho_t The throat's radius.
+ * @return {number} The derivative.
+ * @example dln_mouth(5, 0.25);
+ */
+function dln_mouth(rho, rho_t) {
+  const psi = 1 + rho_t / rho, r = rho * psi * psi, r_s = 4 * rho_t, A = (1 - r_s / r + LAMBDA_SQ) / (1 + LAMBDA_SQ);
+  return -2 * rho_t / (rho * rho * psi) - r_s * psi * (1 - rho_t / rho) / (2 * r * r * (1 + LAMBDA_SQ) * A);
+}
+
+/**
+ * `faded_slope` returns d ln n / dρ for one warp object, faded to zero between FADE_START_M and FADE_END_M (the shader's `bend_of`).
+ * @param {number} rho The distance from the centre. @param {Object} o The warp object.
+ * @return {number} The faded slope.
+ * @example faded_slope(30, warp_objects[0]);
+ */
+function faded_slope(rho, o) {
+  const slope = o.kind === 'mouth' ? dln_mouth(rho, o.rho0) : dln_black_hole(rho, o.rho0), t = Math.min(1, Math.max(0, (rho - FADE_START_M) / (FADE_END_M - FADE_START_M)));
+  return slope * (1 - t * t * (3 - 2 * t));
+}
+
+/**
+ * `bend_at` returns how fast a light ray at p moving along v turns (the shader's `bend_of`).
+ * @param {THREE.Vector3} p The point. @param {THREE.Vector3} v The direction.
+ * @return {THREE.Vector3} The turning rate, per metre.
+ * @example bend_at(state.eye, state.fwd);
+ */
+function bend_at(p, v) {
+  const g = new V3();
+  for (const o of warp_objects) {
+    const d = min_image(new V3().subVectors(p, o.c)), rho = Math.max(d.length(), MIN_RHO_M);
+    if (rho > FADE_END_M) continue;
+    g.addScaledVector(d, faded_slope(rho, o) / rho);
+  }
+  return g.addScaledVector(v, -g.dot(v) / v.lengthSq());
+}
+
+/**
+ * `step_ray` moves a light ray one step of length h along its bent path (RK4 on dx/ds = v, dv/ds = bend).
+ * @param {THREE.Vector3} p The position (changed). @param {THREE.Vector3} v The unit direction (changed). @param {number} h The step.
+ * @return {void}
+ * @example step_ray(p, v, 0.25);
+ */
+function step_ray(p, v, h) {
+  const a1 = bend_at(p, v), v2 = v.clone().addScaledVector(a1, h / 2), a2 = bend_at(p.clone().addScaledVector(v, h / 2), v2);
+  const v3 = v.clone().addScaledVector(a2, h / 2), a3 = bend_at(p.clone().addScaledVector(v2, h / 2), v3);
+  const v4 = v.clone().addScaledVector(a3, h), a4 = bend_at(p.clone().addScaledVector(v3, h), v4);
+  p.addScaledVector(v, h / 6).addScaledVector(v2, h / 3).addScaledVector(v3, h / 3).addScaledVector(v4, h / 6);
+  v.addScaledVector(a1, h / 6).addScaledVector(a2, h / 3).addScaledVector(a3, h / 3).addScaledVector(a4, h / 6).normalize();
+}
+
+/**
+ * `through_throat` moves a point that is inside a throat (of the nearest copy of a mouth) through to the partner mouth:
+ * inversion in the throat sphere, then the gluing map Q. Direction vectors get the inversion's reflection and Q.
+ * @param {THREE.Vector3} p The point (changed). @param {Array<THREE.Vector3>} vectors Direction vectors (changed).
+ * @return {Object|null} The mouth gone through, or null.
+ * @example through_throat(p, [v]);
+ */
+function through_throat(p, vectors) {
+  for (const o of warp_objects) {
+    if (o.kind !== 'mouth') continue;
+    const d = min_image(p.clone().sub(o.c)), r2 = d.lengthSq();
+    if (r2 >= o.rho0 * o.rho0) continue;
+    const n = d.clone().divideScalar(Math.sqrt(r2));
+    p.copy(o.to).add(d.multiplyScalar(o.rho0 * o.rho0 / r2).applyMatrix3(o.Q));
+    for (const vec of vectors) vec.addScaledVector(n, -2 * vec.dot(n)).applyMatrix3(o.Q);
+    return o;
+  }
+  return null;
+}
+
+/**
+ * `is_swallowed` says whether a point is so close to a black hole that light there cannot escape.
+ * @param {THREE.Vector3} p The point.
+ * @return {boolean} Whether it is inside the capture radius.
+ * @example is_swallowed(p);
+ */
+function is_swallowed(p) {
+  return warp_objects.some(o => o.kind === 'black_hole' && min_image(p.clone().sub(o.c)).length() < CAPTURE_RADIUS_PER_HORIZON_RADIUS * o.rho0);
+}
+
+/**
+ * `voxel_hit` returns the first solid cell entered on the segment a→b (3D DDA, periodic grid).
+ * A segment that starts inside a solid cell (a gun pushed into a wall) hits it at once, so shots never pass through.
+ * @param {THREE.Vector3} a The start. @param {THREE.Vector3} b The end.
+ * @return {{t: number, m: number}|null} The fraction along the segment and the material, or null.
+ * @example voxel_hit(p0, p1);
+ */
+function voxel_hit(a, b) {
+  const d = [b.x - a.x, b.y - a.y, b.z - a.z], start = [a.x, a.y, a.z], cell = start.map(Math.floor);
+  const step_dir = d.map(x => x > 0 ? 1 : -1), delta = d.map(x => x !== 0 ? Math.abs(1 / x) : Infinity);
+  const next = d.map((x, i) => x !== 0 ? ((x > 0 ? cell[i] + 1 : cell[i]) - start[i]) / x : Infinity);
+  const start_material = get_block(cell[0], cell[1], cell[2]);
+  if (start_material !== MATERIALS.air) return { t: 0, m: start_material };
+  for (let n = 0; n < MAX_VOXEL_STEPS; n++) {
+    const axis = next[0] <= next[1] && next[0] <= next[2] ? 0 : next[1] <= next[2] ? 1 : 2, t = next[axis];
+    if (t > 1) return null;
+    cell[axis] += step_dir[axis]; next[axis] += delta[axis];
+    const m = get_block(cell[0], cell[1], cell[2]);
+    if (m !== MATERIALS.air) return { t, m };
+  }
+  return null;
+}
+
+/**
+ * `trace_laser` traces a laser along the true light path: bent by the warp objects' nearest copies, through throats,
+ * across the loops, stopped by a block, a horizon or LASER_MAX_M. The path is split into pieces where it jumps.
+ * @param {THREE.Vector3} origin The start. @param {THREE.Vector3} dir The direction.
+ * @return {{pieces: Array<Array<Array<number>>>, outcome: string, length_m: number, material: number, end: Array<number>, throughs: Array<string>}} The path.
+ * @example trace_laser(state.eye, state.fwd);
+ */
+function trace_laser(origin, dir) {
+  const p = origin.clone(), v = dir.clone().normalize(), pieces = [[p.toArray()]], throughs = [];
+  let points = pieces[0], last_dir = v.clone(), since_m = 0, length_m = 0, outcome = 'far', material = 0;
+  for (let it = 0; it < LASER_MAX_ITERATIONS && length_m < LASER_MAX_M; it++) {
+    let h = LASER_STEP_M, rho_near = Infinity;
+    for (const o of warp_objects) {
+      const rho = min_image(p.clone().sub(o.c)).length();
+      rho_near = Math.min(rho_near, rho);
+      if (rho < LASER_FINE_RADIUS_PER_RHO * o.rho0 + LASER_FINE_MARGIN_M) h = Math.min(h, Math.max(LASER_MIN_STEP_M, LASER_FINE_STEP_FRAC * rho));
+    }
+    if (p.y >= GRID_Y && v.y >= 0 && rho_near > FADE_END_M) {
+      while (length_m < LASER_MAX_M) { const s = Math.min(LASER_SKY_STEP_M, LASER_MAX_M - length_m); p.addScaledVector(v, s); length_m += s; points.push(p.toArray()); }
+      outcome = 'sky'; since_m = 0; break;
+    }
+    const p0 = p.clone();
+    step_ray(p, v, h);
+    const hit = voxel_hit(p0, p);
+    if (hit) { p.lerpVectors(p0, p, hit.t); length_m += h * hit.t; since_m += h * hit.t; outcome = 'hit'; material = hit.m; break; }
+    length_m += h; since_m += h;
+    if (is_swallowed(p)) { outcome = 'horizon'; break; }
+    const before = p.toArray(), mouth = through_throat(p, [v]);
+    if (mouth) { points.push(before); v.normalize(); points = [p.toArray()]; pieces.push(points); last_dir.copy(v); since_m = 0; throughs.push(mouth.name); continue; }
+    const turn_rad = 2 * Math.asin(Math.min(1, 0.5 * v.distanceTo(last_dir)));
+    if (turn_rad * since_m > LASER_TURN_TOLERANCE_RAD_M || turn_rad > LASER_MAX_TURN_RAD || since_m > MAX_SEGMENT_M) { points.push(p.toArray()); last_dir.copy(v); since_m = 0; }
+  }
+  if (since_m > 1e-6) points.push(p.toArray());
+  return { pieces, outcome, length_m, material, end: p.toArray(), throughs };
+}
+
+/**
+ * `distance_to_segment` returns the distance from a point to a segment.
+ * @param {Array<number>} p The point. @param {Array<number>} a @param {Array<number>} b The segment's ends.
+ * @return {number} The distance.
+ * @example distance_to_segment([0, 1, 0], [0, 0, 0], [1, 0, 0]); // 1
+ */
+function distance_to_segment(p, a, b) {
+  const ab = new V3(...b).sub(new V3(...a)), ap = new V3(...p).sub(new V3(...a)), t = Math.max(0, Math.min(1, ab.lengthSq() > 0 ? ap.dot(ab) / ab.lengthSq() : 0));
+  return ap.sub(ab.multiplyScalar(t)).length();
+}
+
+/**
+ * `chunkify` groups a polyline's points into chunks of up to MAX_SEGMENTS_PER_CHUNK segments that stay within max_radius_m
+ * of their chord and are at most MAX_CHUNK_LENGTH_M long, so each chunk has one nearest periodic copy.
+ * @param {Array<Array<number>>} points The polyline. @param {number} max_radius_m The largest allowed bulge.
+ * @return {Array<{i: number, j: number, r: number}>} The chunks: first and last point, and bulge.
+ * @example chunkify(points, 0.6);
+ */
+function chunkify(points, max_radius_m) {
+  const chunks = [], count = points.length;
+  let i = 0;
+  while (i < count - 1) {
+    let j = i + 1, r = 0;
+    while (j + 1 < count && j + 1 - i <= MAX_SEGMENTS_PER_CHUNK && new V3(...points[i]).distanceTo(new V3(...points[j + 1])) <= MAX_CHUNK_LENGTH_M) {
+      let rr = 0;
+      for (let k = i + 1; k <= j; k++) rr = Math.max(rr, distance_to_segment(points[k], points[i], points[j + 1]));
+      if (rr > max_radius_m) break;
+      j++; r = rr;
+    }
+    chunks.push({ i, j, r }); i = j;
+  }
+  return chunks;
+}
+
+/**
+ * `upload_beam` hands a traced laser path to the shader: points in a float texture, chunk capsules in uniforms.
+ * @param {Object|null} result A `trace_laser` result, or null to clear the beam.
+ * @return {void}
+ * @example upload_beam(trace_laser(o, d));
+ */
+function upload_beam(result) {
+  let point_count = 0, chunk_count = 0;
+  uniforms.u_beam_spot.value.set(0, 0, 0, 0);
+  if (result) {
+    for (const points of result.pieces) {
+      if (points.length < 2) continue;
+      let chunks, max_radius_m = CHUNK_START_RADIUS_M;
+      for (;;) { chunks = chunkify(points, max_radius_m); if (chunk_count + chunks.length <= MAX_CHUNKS || max_radius_m > CHUNK_MAX_RADIUS_M) break; max_radius_m *= 2; }
+      if (point_count + points.length > MAX_BEAM_POINTS || chunk_count + chunks.length > MAX_CHUNKS) break;
+      points.forEach((q, i) => beam_data.set([q[0], q[1], q[2], 1], (point_count + i) * CHANNELS_PER_TEXEL));
+      for (const c of chunks) {
+        const a = points[c.i], b = points[c.j];
+        uniforms.u_chunk_a.value[chunk_count].set(a[0], a[1], a[2], c.r + CHUNK_RADIUS_PAD_M);
+        uniforms.u_chunk_b.value[chunk_count].set(b[0], b[1], b[2], (point_count + c.i) * CHUNK_PACK_STRIDE + (c.j - c.i));
+        chunk_count++;
+      }
+      point_count += points.length;
+    }
+    if (result.outcome === 'hit') uniforms.u_beam_spot.value.set(...result.end, 1);
+  }
+  uniforms.u_chunk_count.value = chunk_count;
+  beam_texture.needsUpdate = true;
+}
+
+/**
+ * `camera_basis` returns the camera's orthonormal forward, up and right vectors.
+ * @return {{fwd: THREE.Vector3, up: THREE.Vector3, right: THREE.Vector3}} The basis.
+ * @example const { fwd, right } = camera_basis();
+ */
+function camera_basis() {
+  const fwd = state.fwd.clone().normalize(), up = state.up.clone().addScaledVector(fwd, -state.up.dot(fwd)).normalize();
+  return { fwd, up, right: new V3().crossVectors(fwd, up) };
+}
+
+/**
+ * `fire_laser` fires a shot from the gun (just below and right of the eye) along the view, and shows its beam for BEAM_LIFETIME_S.
+ * @return {Object} The traced path.
+ * @example fire_laser();
+ */
+function fire_laser() {
+  const { fwd, up, right } = camera_basis();
+  const origin = state.eye.clone().addScaledVector(right, GUN_OFFSET_RIGHT_M).addScaledVector(up, GUN_OFFSET_UP_M).addScaledVector(fwd, GUN_OFFSET_FWD_M);
+  const result = trace_laser(origin, fwd);
+  state.beam = { result, age_s: 0, is_held: false };
+  upload_beam(result);
+  uniforms.u_beam_color.value.set(...TEAM_COLORS[state.team]);
+  get_element('s_laser').textContent = describe_laser(result);
+  return result;
+}
+
+/**
+ * `describe_laser` turns a laser result into a short sentence for the HUD.
+ * @param {Object} r A `trace_laser` result.
+ * @return {string} The sentence.
+ * @example describe_laser(fire_laser());
+ */
+function describe_laser(r) {
+  const via = r.throughs.length ? `through ${r.throughs.join(', then ')}, ` : '';
+  if (r.outcome === 'hit') return `${via}hits ${MATERIAL_NAMES[r.material]} after ${r.length_m.toFixed(1)} m`;
+  if (r.outcome === 'horizon') return `${via}falls into a black hole after ${r.length_m.toFixed(1)} m`;
+  if (r.outcome === 'sky') return `${via}escapes into the sky`;
+  return `${via}still going after ${LASER_MAX_M} m`;
+}
+
+/**
+ * `step_beam` ages the beam, fading it out over BEAM_LIFETIME_S, then clears it.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_beam(1 / 60);
+ */
+function step_beam(dt) {
+  if (!state.beam) { uniforms.u_beam_fade.value = 0; return; }
+  if (state.beam.is_held) { uniforms.u_beam_fade.value = 1; return; }
+  state.beam.age_s += dt;
+  uniforms.u_beam_fade.value = Math.max(0, 1 - state.beam.age_s / BEAM_LIFETIME_S);
+  if (state.beam.age_s >= BEAM_LIFETIME_S) { state.beam = null; upload_beam(null); }
+}
+
+/**
+ * `set_look` points the camera by yaw (0 looks along -z, π/2 along +x) and pitch, with no roll.
+ * @param {number} yaw_rad The yaw. @param {number} pitch_rad The pitch.
+ * @return {void}
+ * @example set_look(Math.PI / 2, 0);
+ */
+function set_look(yaw_rad, pitch_rad) {
+  state.fwd.set(Math.sin(yaw_rad) * Math.cos(pitch_rad), Math.sin(pitch_rad), -Math.cos(yaw_rad) * Math.cos(pitch_rad));
+  state.up.crossVectors(new V3(Math.cos(yaw_rad), 0, Math.sin(yaw_rad)), state.fwd).normalize();
+}
+
+/**
+ * `look` turns the view by a mouse movement: about the world's vertical, then about the camera's right.
+ * @param {number} dx_px @param {number} dy_px The movement, in pixels.
+ * @return {void}
+ * @example look(10, 0);
+ */
+function look(dx_px, dy_px) {
+  const { fwd, up, right } = camera_basis(), yaw = -dx_px * LOOK_RAD_PER_PX, pitch = -dy_px * LOOK_RAD_PER_PX;
+  fwd.applyAxisAngle(WORLD_UP, yaw); up.applyAxisAngle(WORLD_UP, yaw); right.applyAxisAngle(WORLD_UP, yaw);
+  const tilted = fwd.clone().applyAxisAngle(right, pitch);
+  if (Math.abs(tilted.y) < MAX_LOOK_UP_COS) { fwd.copy(tilted); up.applyAxisAngle(right, pitch); }
+  state.fwd.copy(fwd); state.up.copy(up);
+}
+
+/**
+ * `level_out` removes the camera's roll (left by going through a mouth off-centre) gradually.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example level_out(1 / 60);
+ */
+function level_out(dt) {
+  const { fwd, up } = camera_basis();
+  if (Math.abs(fwd.y) > MAX_LEVEL_OUT_FWD_Y) return;
+  const target = WORLD_UP.clone().addScaledVector(fwd, -fwd.y).normalize();
+  const angle = Math.atan2(new V3().crossVectors(up, target).dot(fwd), up.dot(target));
+  state.up.copy(up).applyAxisAngle(fwd, angle * (1 - Math.exp(-LEVEL_OUT_RATE_HZ * dt)));
+}
+
+/**
+ * `rotate_minimal` rotates vectors by the smallest rotation that takes unit vector `from` to unit vector `to`.
+ * @param {THREE.Vector3} from @param {THREE.Vector3} to The two directions. @param {Array<THREE.Vector3>} vectors The vectors (changed).
+ * @return {void}
+ * @example rotate_minimal(v0, v1, [state.fwd, state.up]);
+ */
+function rotate_minimal(from, to, vectors) {
+  const axis = new V3().crossVectors(from, to), s = axis.length();
+  if (s < 1e-12) return;
+  axis.divideScalar(s);
+  for (const vec of vectors) vec.applyAxisAngle(axis, Math.atan2(s, from.dot(to)));
+}
+
+/**
+ * `nearest_mouth` returns the nearest copy of the nearest wormhole mouth.
+ * @param {THREE.Vector3} p The point.
+ * @return {{mouth: Object, offset: THREE.Vector3, distance_m: number}} The mouth, the offset from p to it and the distance.
+ * @example nearest_mouth(state.eye).distance_m;
+ */
+function nearest_mouth(p) {
+  let best = null;
+  for (const o of warp_objects) {
+    if (o.kind !== 'mouth') continue;
+    const offset = min_image(o.c.clone().sub(p)), distance_m = offset.length();
+    if (!best || distance_m < best.distance_m) best = { mouth: o, offset, distance_m };
+  }
+  return best;
+}
+
+/**
+ * `say` shows a message in the stats panel for a few seconds.
+ * @param {string} text The message.
+ * @return {void}
+ * @example say('Console deactivated');
+ */
+function say(text) { state.message = text; state.message_s = MESSAGE_S; }
+
+/**
+ * `step_transit` moves the player along the light ray they are on near a wormhole mouth (the same path light takes,
+ * so the crosshair shows where they end up), turning the view with the path and going through the throat. The step is
+ * a proper distance, so the player slows down in coordinates near a mouth, where space is stretched.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_transit(1 / 60);
+ */
+function step_transit(dt) {
+  const transit = state.transit;
+  transit.age_s += dt;
+  let left_m = transit.speed_m_per_s * dt;
+  for (let n = 0; n < TRANSIT_MAX_SUBSTEPS && left_m > 1e-6; n++) {
+    let psi = 1, rho_min = Infinity;
+    for (const o of warp_objects) if (o.kind === 'mouth') { const rho = min_image(state.eye.clone().sub(o.c)).length(); psi += o.rho0 / rho; rho_min = Math.min(rho_min, rho); }
+    const h = Math.min(left_m / (psi * psi), TRANSIT_STEP_FRAC * rho_min, TRANSIT_MAX_STEP_M), dir0 = transit.dir.clone();
+    step_ray(state.eye, transit.dir, h);
+    rotate_minimal(dir0, transit.dir, [state.fwd, state.up]);
+    left_m -= h * psi * psi;
+    const mouth = through_throat(state.eye, [transit.dir, state.fwd, state.up]);
+    if (mouth) { transit.dir.normalize(); state.fwd.normalize(); state.up.normalize(); transit.went_through = mouth.name; say(`Through the ${mouth.name}: out of the ${mouth.partner_name}`); }
+  }
+  wrap_position(state.eye);
+  if (nearest_mouth(state.eye).distance_m > TRANSIT_RADIUS_M || transit.age_s > TRANSIT_MAX_S) {
+    state.vel_y_m_per_s = Math.max(-MAX_FALL_SPEED_M_PER_S, transit.dir.y * transit.speed_m_per_s);
+    state.transit = null;
+  }
+}
+
+/**
+ * `is_solid_at` says whether the point is inside a solid block.
+ * @param {number} x @param {number} y @param {number} z The point.
+ * @return {boolean} Whether it is solid.
+ * @example is_solid_at(10.5, 4.5, 10.5);
+ */
+function is_solid_at(x, y, z) { return get_block(Math.floor(x), Math.floor(y), Math.floor(z)) !== MATERIALS.air; }
+
+/**
+ * `body_hits` says whether the player's body, a 0.5 m square column from the feet to just above the eye, overlaps a block.
+ * @param {number} x @param {number} y @param {number} z The eye position.
+ * @return {boolean} Whether it overlaps.
+ * @example body_hits(state.eye.x, state.eye.y, state.eye.z);
+ */
+function body_hits(x, y, z) {
+  for (const yy of [y - EYE_HEIGHT_M + FOOT_CLEARANCE_M, y - EYE_HEIGHT_M / 2, y + HEAD_CLEARANCE_M])
+    for (const dx of [-BODY_HALF_WIDTH_M, BODY_HALF_WIDTH_M]) for (const dz of [-BODY_HALF_WIDTH_M, BODY_HALF_WIDTH_M]) if (is_solid_at(x + dx, yy, z + dz)) return true;
+  return false;
+}
+
+/**
+ * `keep_out_of_black_holes` pushes the eye out to BLACK_HOLE_KEEP_OUT_M from every black hole; they don't pull on players.
+ * @param {THREE.Vector3} p The eye (changed).
+ * @return {void}
+ * @example keep_out_of_black_holes(state.eye);
+ */
+function keep_out_of_black_holes(p) {
+  for (const o of warp_objects) {
+    if (o.kind !== 'black_hole') continue;
+    const d = min_image(p.clone().sub(o.c)), r = d.length();
+    if (r < BLACK_HOLE_KEEP_OUT_M) p.addScaledVector(d, (BLACK_HOLE_KEEP_OUT_M - r) / Math.max(r, MIN_RHO_M));
+  }
+}
+
+const keys = {};
+
+/**
+ * `step_player` moves the player one time step: input, sprint energy, wormhole transit, then fly mode (no gravity, no
+ * collisions) or walking (gravity, jumping, landing, collisions with blocks, stepping up single blocks).
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_player(1 / 60);
+ */
+function step_player(dt) {
+  const p = state.eye, { fwd } = camera_basis();
+  const flat_fwd = new V3(fwd.x, 0, fwd.z).normalize(), flat_right = new V3(-flat_fwd.z, 0, flat_fwd.x), input = new V3();
+  if (keys.KeyW) input.add(flat_fwd); if (keys.KeyS) input.sub(flat_fwd); if (keys.KeyD) input.add(flat_right); if (keys.KeyA) input.sub(flat_right);
+  const is_moving = input.lengthSq() > 0;
+  state.is_sprinting = (keys.ShiftLeft || keys.ShiftRight) && is_moving && state.energy_frac > 0 && !state.transit;
+  state.energy_frac = Math.min(1, Math.max(0, state.energy_frac + (state.is_sprinting ? -dt / ENERGY_DRAIN_S : dt / ENERGY_REFILL_S)));
+  if (state.transit) { step_transit(dt); return; }
+  const speed = state.is_flying ? (state.is_sprinting ? FLY_SPRINT_SPEED_M_PER_S : FLY_SPEED_M_PER_S) : (state.is_sprinting ? SPRINT_SPEED_M_PER_S : WALK_SPEED_M_PER_S);
+  if (is_moving) input.normalize().multiplyScalar(speed);
+  if (state.is_flying) input.y = ((keys.Space ? 1 : 0) - (keys.KeyC ? 1 : 0)) * speed;
+  const velocity = new V3(input.x, state.is_flying ? input.y : state.vel_y_m_per_s, input.z), nearest = nearest_mouth(p);
+  if (nearest.distance_m < TRANSIT_RADIUS_M && velocity.length() > TRANSIT_MIN_SPEED_M_PER_S && velocity.dot(nearest.offset) > 0) {
+    state.transit = { dir: velocity.clone().normalize(), speed_m_per_s: velocity.length(), age_s: 0, went_through: null };
+    step_transit(dt); return;
+  }
+  if (state.is_flying) { p.addScaledVector(input, dt); keep_out_of_black_holes(p); wrap_position(p); return; }
+  for (let k = 0; k < POP_UP_TRY_COUNT && body_hits(p.x, p.y, p.z); k++) { p.y += POP_UP_STEP_M; state.vel_y_m_per_s = 0; }
+  for (const axis of ['x', 'z']) {
+    const move = input[axis] * dt;
+    if (!move) continue;
+    p[axis] += move;
+    if (body_hits(p.x, p.y, p.z)) { if (state.is_on_ground && !body_hits(p.x, p.y + STEP_UP_M, p.z)) p.y += STEP_UP_M; else p[axis] -= move; }
+  }
+  if (keys.Space && state.is_on_ground) state.vel_y_m_per_s = JUMP_SPEED_M_PER_S;
+  const gravity = GRAVITY_M_PER_S_PER_S * (state.vel_y_m_per_s < 0 ? FALL_GRAVITY_GAIN : 1);
+  state.vel_y_m_per_s = Math.max(-MAX_FALL_SPEED_M_PER_S, state.vel_y_m_per_s - gravity * dt);
+  const dy = state.vel_y_m_per_s * dt, y0 = p.y;
+  p.y += dy; state.is_on_ground = false;
+  if (body_hits(p.x, p.y, p.z)) {
+    let lo = 0, hi = 1;
+    for (let i = 0; i < LANDING_BISECTION_COUNT; i++) { const mid = (lo + hi) / 2; if (body_hits(p.x, y0 + dy * mid, p.z)) hi = mid; else lo = mid; }
+    p.y = y0 + dy * lo; state.is_on_ground = dy < 0; state.vel_y_m_per_s = 0;
+  }
+  if (state.is_on_ground && is_moving) state.bob_phase_rad += speed * dt * HEAD_BOB_RAD_PER_M;
+  keep_out_of_black_holes(p); wrap_position(p);
+}
+
+const PYLON_CENTERS = { red: new V3(LAYOUT.red_pylon[0], GROUND_TOP_Y + 1, LAYOUT.red_pylon[1]), blue: rotate_point(LAYOUT.red_pylon[0], GROUND_TOP_Y + 1, LAYOUT.red_pylon[1]) };
+
+/**
+ * `other_team` returns the team that isn't the given one.
+ * @param {string} team 'red' or 'blue'.
+ * @return {string} The other team.
+ * @example other_team('red'); // 'blue'
+ */
+function other_team(team) { return team === 'red' ? 'blue' : 'red'; }
+
+/**
+ * `is_at_enemy_pylon` says whether the player is within PYLON_REACH_M of the other team's pylon and facing it.
+ * @return {boolean} Whether a console can be deactivated from here.
+ * @example is_at_enemy_pylon();
+ */
+function is_at_enemy_pylon() {
+  const to_pylon = min_image(PYLON_CENTERS[other_team(state.team)].clone().sub(state.eye)); to_pylon.y = 0;
+  if (to_pylon.length() > PYLON_REACH_M) return false;
+  const { fwd } = camera_basis(), flat = new V3(fwd.x, 0, fwd.z).normalize();
+  return flat.angleTo(to_pylon.normalize()) < PYLON_FACING_MAX_RAD;
+}
+
+/**
+ * `is_deactivating` says whether the player is holding E at the other team's pylon, which keeps them from firing.
+ * @return {boolean} Whether a console is being deactivated.
+ * @example if (!is_deactivating()) fire_laser();
+ */
+function is_deactivating() { return !!keys.KeyE && is_at_enemy_pylon(); }
+
+/**
+ * `step_consoles` advances deactivation while E is held at the other team's pylon; letting go resets that console.
+ * A deactivated console turns grey; when all are off, the level is won.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_consoles(1 / 60);
+ */
+function step_consoles(dt) {
+  const enemy = other_team(state.team), target = state.consoles[enemy].find(c => c.is_active);
+  if (!keys.KeyE || !target || !is_at_enemy_pylon()) { state.deactivation_s = 0; return; }
+  state.deactivation_s += dt;
+  if (state.deactivation_s < DEACTIVATE_S) return;
+  state.deactivation_s = 0; target.is_active = false;
+  for (const [x, y, z] of target.cells) set_block(x, y, z, MATERIALS.console_off);
+  voxel_texture.needsUpdate = true;
+  const left = state.consoles[enemy].filter(c => c.is_active).length;
+  say(`Console deactivated: ${left} left on the ${enemy} pylon`);
+  if (left === 0) { state.winner = state.team; get_element('banner').textContent = `Level won by ${state.team}`; get_element('banner').style.display = 'block'; }
+}
+
+/**
+ * `describe_location` names the zone and route of a world position.
+ * @param {THREE.Vector3} p The position.
+ * @return {{zone: string, route: string}} The names.
+ * @example describe_location(state.eye).zone;
+ */
+function describe_location(p) {
+  const x = wrap_index(p.x, PERIOD_X_M), z = wrap_index(p.z, PERIOD_Z_M), is_blue_half = z >= ROTATION_CENTER_Z_M && z < BLUE_HALF_END_Z_M;
+  const zd = is_blue_half ? 2 * ROTATION_CENTER_Z_M - z : (z >= BLUE_HALF_END_Z_M ? z - PERIOD_Z_M : z);
+  if (Math.abs(zd) <= RED_ZONE_HALF_DEPTH_M) return { zone: is_blue_half ? 'blue zone' : 'red zone', route: is_blue_half ? 'blue base' : 'red base' };
+  if (zd > 0) {
+    const route = abs_dx(x, GLADE_X_M) <= GLADE_HALF_WIDTH_M ? 'the Glade (open area)' : abs_dx(x, WEST_TRENCH_X_M) <= TRENCH_HALF_WIDTH_M + 2 ? 'west trench' : abs_dx(x, EAST_TRENCH_X_M) <= TRENCH_HALF_WIDTH_M + 2 ? 'east trench' : 'ridge';
+    return { zone: 'middle, Glade side', route };
+  }
+  const route = abs_dx(x, BOG_X_M) <= BOG_HALF_WIDTH_M ? 'the Bog (open area)' : abs_dx(x, FOREST_X_M) <= FOREST_HALF_WIDTH_M ? (p.y > DECK_Y + 1 ? 'canopy walkway' : 'forest floor') : 'ridge';
+  return { zone: 'middle, Bog side', route };
+}
+
+const RED_VIEWS = {
+  red_spawn: { at: [32.5, 6.6, 0.5], yaw_rad: Math.PI / 2, pitch_rad: 0, is_flying: false },
+  overview: { at: [56, 92, 126], yaw_rad: Math.PI, pitch_rad: -0.85, is_flying: true },
+  middle: { at: [60, 6.6, 19.5], look_at: [56, 8.5, 40], is_flying: false },
+  black_hole: { at: [56, 9.5, 33.5], look_at: [56, 10.5, 40], is_flying: true },
+  wormhole: { at: [44, 6.6, 25], yaw_rad: Math.PI, pitch_rad: 0, is_flying: false },
+  trench: { at: [18, 4.6, 24.6], yaw_rad: Math.PI, pitch_rad: 0, is_flying: false },
+  canopy: { at: [57, 15.6, 133], yaw_rad: 0, pitch_rad: -0.05, is_flying: false },
+  bog: { at: [4, 5.6, 140], yaw_rad: 0.12, pitch_rad: 0.05, is_flying: false },
+  red_pylon: { at: [52.6, 6.6, -2.4], look_at: [56, 6.5, 0], is_flying: false },
+  loop: { at: [56, 34, 8], yaw_rad: -Math.PI / 2, pitch_rad: -0.12, is_flying: true }
+};
+const VIEWS = { ...RED_VIEWS,
+  blue_spawn: { ...RED_VIEWS.red_spawn, at: rotate_point(...RED_VIEWS.red_spawn.at).toArray(), yaw_rad: RED_VIEWS.red_spawn.yaw_rad + Math.PI },
+  blue_pylon: { ...RED_VIEWS.red_pylon, at: rotate_point(...RED_VIEWS.red_pylon.at).toArray(), look_at: rotate_point(...RED_VIEWS.red_pylon.look_at).toArray() } };
+const VIEW_KEYS = ['red_spawn', 'blue_spawn', 'overview', 'middle', 'black_hole', 'wormhole', 'trench', 'canopy', 'bog'];
+
+/**
+ * `set_view` moves the player to a named viewpoint.
+ * @param {string} name A key of VIEWS.
+ * @return {void}
+ * @example set_view('overview');
+ */
+function set_view(name) {
+  const view = VIEWS[name];
+  if (!view) throw new Error(`Unknown view "${name}"; expected one of ${Object.keys(VIEWS).join(', ')}`);
+  state.eye.set(...view.at);
+  if (view.look_at) { const d = new V3(...view.look_at).sub(state.eye).normalize(); set_look(Math.atan2(d.x, -d.z), Math.asin(d.y)); }
+  else set_look(view.yaw_rad, view.pitch_rad);
+  state.is_flying = view.is_flying; state.vel_y_m_per_s = 0; state.transit = null; state.view = name;
+}
+
+/**
+ * `switch_team` makes the player play for the other team and moves them to that team's spawn.
+ * @return {void}
+ * @example switch_team();
+ */
+function switch_team() {
+  state.team = other_team(state.team); state.deactivation_s = 0;
+  set_view(`${state.team}_spawn`);
+  say(`Playing as ${state.team}`);
+}
+
+/**
+ * `parse_hash` reads the URL hash parameters and checks them.
+ * @return {{view: string|null, quality: string, has_panels: boolean, team: string, test: string|null}} The parameters.
+ * @example parse_hash().view;
+ */
+function parse_hash() {
+  const params = new URLSearchParams(location.hash.slice(1)), known = ['view', 'quality', 'panels', 'team', 'test'];
+  for (const key of params.keys()) if (!known.includes(key)) throw new Error(`Unknown hash parameter "${key}"; expected one of ${known.join(', ')}`);
+  const q = params.get('quality') || 'auto';
+  if (q !== 'auto' && !(q in QUALITY_SCALES)) throw new Error(`Unknown quality "${q}"; expected auto, ${Object.keys(QUALITY_SCALES).join(', ')}`);
+  const team = params.get('team') || 'red';
+  if (!(team in TEAM_COLORS)) throw new Error(`Unknown team "${team}"; expected red or blue`);
+  const test = params.get('test');
+  if (test !== null && test !== 'laser') throw new Error(`Unknown test "${test}"; expected laser`);
+  return { view: params.get('view'), quality: q, has_panels: params.get('panels') !== 'off', team, test };
+}
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT') return;
+  keys[e.code] = true;
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (e.repeat) return;
+  if (e.code === 'KeyH') { state.is_flying = !state.is_flying; state.vel_y_m_per_s = 0; }
+  if (e.code === 'KeyR' && !is_deactivating()) fire_laser();
+  if (e.code === 'KeyT') switch_team();
+  const digit = e.code.match(/^Digit([1-9])$/);
+  if (digit) set_view(VIEW_KEYS[+digit[1] - 1]);
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+let is_dragging = false;
+canvas.addEventListener('pointerdown', e => {
+  if (document.pointerLockElement === canvas) { if (e.button === 0 && !is_deactivating()) fire_laser(); return; }
+  is_dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === 'mouse') { try { const lock = canvas.requestPointerLock(); if (lock && lock.catch) lock.catch(() => {}); } catch (_) {} }
+});
+canvas.addEventListener('pointerup', () => { is_dragging = false; });
+canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || is_dragging) look(e.movementX || 0, e.movementY || 0); });
+get_element('quality').addEventListener('change', e => { quality = e.target.value; resize(); });
+get_element('tips_toggle').addEventListener('click', () => { const body = get_element('tips_body'), is_hidden = body.style.display === 'none'; body.style.display = is_hidden ? '' : 'none'; get_element('tips_toggle').textContent = is_hidden ? 'hide' : 'show'; });
+VIEW_KEYS.concat(['red_pylon', 'blue_pylon', 'loop']).forEach((name, k) => {
+  const button = document.createElement('button'); button.textContent = k < VIEW_KEYS.length ? `${k + 1} ${name}` : name;
+  button.addEventListener('click', () => set_view(name)); get_element('view_buttons').appendChild(button);
+});
+
+/**
+ * `update_hud` refreshes the stats panel: team, zone, energy, consoles, fps and the message line.
+ * @param {number} fps The measured frame rate.
+ * @return {void}
+ * @example update_hud(60);
+ */
+function update_hud(fps) {
+  const where = describe_location(state.eye), enemy = other_team(state.team), off_count = state.consoles[enemy].filter(c => !c.is_active).length;
+  get_element('s_team').textContent = state.team; get_element('s_team').className = state.team;
+  get_element('s_mode').textContent = state.transit ? 'in a wormhole' : state.is_flying ? 'flying (H)' : 'walking';
+  get_element('s_zone').textContent = where.zone; get_element('s_route').textContent = where.route;
+  get_element('s_energy').style.width = `${(state.energy_frac * 100).toFixed(0)}%`; get_element('s_energy_pct').textContent = `${(state.energy_frac * 100).toFixed(0)}%`;
+  get_element('s_consoles').textContent = state.winner ? `Level won by ${state.winner}` : `${enemy} pylon: ${off_count}/${CONSOLES_PER_PYLON} consoles off${is_at_enemy_pylon() ? ' · hold E' : ''}`;
+  get_element('s_progress').style.width = `${(state.deactivation_s / DEACTIVATE_S * 100).toFixed(0)}%`;
+  get_element('s_fps').textContent = fps.toFixed(0);
+  get_element('s_pos').textContent = `x ${state.eye.x.toFixed(1)} y ${state.eye.y.toFixed(1)} z ${state.eye.z.toFixed(1)}`;
+  get_element('s_msg').textContent = state.message_s > 0 ? state.message : '';
+}
+
+const hash = parse_hash();
+quality = hash.quality; get_element('quality').value = quality;
+if (!hash.has_panels) for (const id of ['controls', 'stats', 'tips']) get_element(id).style.display = 'none';
+state.team = hash.team;
+set_view(hash.view || `${state.team}_spawn`);
+if (hash.test === 'laser') { fire_laser(); state.beam.is_held = true; }
+update_hud(0);
+
+let last_ms = performance.now(), hud_s = 0, frame_count = 0, fps_start_ms = performance.now(), perf_s = 0, perf_count = 0;
+
+/**
+ * `frame` advances the game one frame and renders it.
+ * @param {number} now_ms The frame time, in milliseconds.
+ * @return {void}
+ * @example requestAnimationFrame(frame);
+ */
+function frame(now_ms) {
+  const real_dt_s = (now_ms - last_ms) / 1000, dt = Math.min(MAX_DT_S, real_dt_s); last_ms = now_ms;
+  step_player(dt); level_out(dt); step_consoles(dt); step_beam(dt);
+  const { fwd, up, right } = camera_basis(), bob_m = state.is_sprinting && state.is_on_ground ? HEAD_BOB_M * Math.sin(state.bob_phase_rad) : 0;
+  uniforms.u_cam_pos.value.copy(state.eye).addScaledVector(WORLD_UP, bob_m);
+  uniforms.u_cam_fwd.value.copy(fwd); uniforms.u_cam_up.value.copy(up); uniforms.u_cam_right.value.copy(right);
+  uniforms.u_time_s.value = now_ms / 1000;
+  renderer.render(scene, camera);
+  frame_count++;
+  if (real_dt_s > 0 && real_dt_s < MAX_FRAME_GAP_S) { perf_s += real_dt_s; perf_count++; }
+  if (perf_s > AUTO_WINDOW_S) {
+    if (quality === 'auto' && perf_s / perf_count > 1 / AUTO_TARGET_FPS && auto_pixel_budget > MIN_AUTO_PIXEL_BUDGET) { auto_pixel_budget *= AUTO_STEP_FRAC; resize(); }
+    perf_s = 0; perf_count = 0;
+  }
+  state.message_s -= dt;
+  if ((hud_s += dt) > HUD_PERIOD_S) { hud_s = 0; update_hud(frame_count * 1000 / (now_ms - fps_start_ms)); frame_count = 0; fps_start_ms = now_ms; }
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+window.__demo = { state, VIEWS, warp_objects, uniforms, set_view, fire_laser, trace_laser, step_player, step_transit, step_consoles, is_at_enemy_pylon, switch_team, get_block,
+  body_hits, bend_at, step_ray, through_throat, describe_location, min_image, keys, frame, renderer, compute_light, ground_tops, LAYOUT, MATERIALS };
+</script>
+</body>
+</html>
