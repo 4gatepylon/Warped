@@ -50,6 +50,15 @@ constant float NEAR_STEP_PER_NEAREST = 0.12;
 constant float FAR_STEP_PER_NEAREST = 0.25;
 constant float NEAR_ZONE_PER_THROAT = 10.0;
 constant float MIN_STEP_M = 0.005;
+constant float RK4_STEP_PER_NEAREST = 0.5;
+constant float RK4_ZONE_START_PER_THROAT = 3.0;
+constant float JUMP_OVERSHOOT_M = 0.002;
+constant int THROAT_TABLE_SIZE = __THROAT_TABLE_SIZE__;
+constant float THROAT_TABLE_STEP_PER_NEAREST = 0.01;
+constant float CAMERA_TABLE_STEP_PER_NEAREST = 0.03;
+constant float TABLE_MIN_STEP_PER_STEP = 0.07;
+constant int THROAT_TABLE_MAX_STEP_COUNT = 40000;
+constant int CAMERA_TABLE_MAX_STEP_COUNT = 8000;
 constant float CUTOFF_ENTRY_SHRINK = 0.98;
 constant float HALF_PI = 1.5707963;
 constant float3 SKY_HORIZON_COLOR = float3(0.78, 0.86, 0.95);
@@ -96,6 +105,13 @@ constant float SPOT_PIXELS = 2.5;
 constant float CANDIDATE_WINDOW_M = 3.0;
 constant int NO_HIT = -2;
 constant int GROUND_HIT = -1;
+constant int SKY_HIT = -3;
+constant int LOST_HIT = -4;
+constant int BYTES_PER_RAY_END = __BYTES_PER_RAY_END__;
+constant float GLOW_FLOOR = 1.0 / 1024.0;
+constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
+constant int REFINED_PIXELS_PER_CELL = 3;
+constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
 constant float TILE_SIDE_COUNT = 4.0;
 constant float TILES_PER_VERTEX = 5.0;
 
@@ -120,18 +136,43 @@ struct Uniforms {
     int beam_chunk_count;
     int width_px;
     int height_px;
-    int padding[5];
+    int camera_mouth;
+    float camera_distance_m;
+    float jump_m;
+    int padding[2];
 };
 
 /** @brief `Scene` is one frame's rows and uniforms, with values every ray reuses. */
 struct Scene {
     device const float4 *rows;
     constant Uniforms &u;
+    device const float4 *throat_table;
+    device const float4 *camera_table;
     float q_cutoff;
     float q_throat;
+    float q_near_zone;
+    float q_rk4_start;
+    float q_jump;
     float tile_klein_half_width;
     float4 tile_edges[4];
 };
+
+/**
+ * @brief `RayEnd` is where one pixel's ray ended: the surface it hit (`kind` is a box index, `GROUND_HIT`,
+ * `SKY_HIT` or `LOST_HIT`) in row `row`, the hit point in that row's coordinates (for the sky, the sky lookup
+ * direction), how far the ray travelled, and the laser glow gathered along it.
+ */
+struct RayEnd {
+    float4 point;
+    float end_m;
+    float core;
+    float halo;
+    int kind;
+    int row;
+    int face;
+    float side;
+};
+static_assert(sizeof(RayEnd) == BYTES_PER_RAY_END, "render_metal.rs sizes the sample buffer by BYTES_PER_RAY_END");
 
 /** @brief `Hit` is the nearest surface so far along one straight piece of a ray. */
 struct Hit {
@@ -255,6 +296,28 @@ static float4 get_bend(thread const Scene &scene, int row, float4 x, float4 v, t
         g += get_dln_n_flat(r * sinh_rho * e_rho, scene.u.throat_m) * e_rho * e_rho * (cosh_rho * x - c) / sinh_rho;
     }
     return g - mdot(g, v) * v;
+}
+
+/**
+ * @brief `step_rk4` moves a ray `ds_m` blocks with the classical fourth-order Runge-Kutta method, for
+ * x' = v / R and v' = x / R + bend(x, v) (a geodesic of H³ plus the bending), starting from the bending
+ * `bend` already known at `x`, and puts the result back on the hyperboloid.
+ * @par Example
+ * @code
+ * step_rk4(scene, row, x, v, bend, ds_m);
+ * @endcode
+ */
+static void step_rk4(thread const Scene &scene, int row, thread float4 &x, thread float4 &v, float4 bend, float ds_m) {
+    float r = scene.u.curvature_radius_m, unused_q;
+    float4 kx1 = v / r, kv1 = x / r + bend;
+    float4 x2 = x + 0.5 * ds_m * kx1, v2 = v + 0.5 * ds_m * kv1;
+    float4 kx2 = v2 / r, kv2 = x2 / r + get_bend(scene, row, x2, v2, unused_q);
+    float4 x3 = x + 0.5 * ds_m * kx2, v3 = v + 0.5 * ds_m * kv2;
+    float4 kx3 = v3 / r, kv3 = x3 / r + get_bend(scene, row, x3, v3, unused_q);
+    float4 x4 = x + ds_m * kx3, v4 = v + ds_m * kv3;
+    float4 kx4 = v4 / r, kv4 = x4 / r + get_bend(scene, row, x4, v4, unused_q);
+    x = to_point(x + ds_m / 6.0 * (kx1 + 2.0 * kx2 + 2.0 * kx3 + kx4));
+    v = to_tangent(x, v + ds_m / 6.0 * (kv1 + 2.0 * kv2 + 2.0 * kv3 + kv4));
 }
 
 /**
@@ -699,23 +762,254 @@ static float get_spot_glow(thread const Scene &scene, int row, float4 xh, float 
 }
 
 /**
- * @brief `trace_pixels` traces one pixel's light ray backwards from the eye and writes its colour, as
- * `render_cpu.rs`'s `render_pixel` does.
+ * @brief `get_nearest_mouth` gives the index of the mouth nearest a point, and sets `q_nearest` to its q.
  * @par Example
  * @code
- * dispatched by render_metal.rs, one thread per pixel.
+ * float q; int k = get_nearest_mouth(scene, row, x, q);
  * @endcode
  */
-kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]],
-                         texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
-    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
+static int get_nearest_mouth(thread const Scene &scene, int row, float4 x, thread float &q_nearest) {
+    int nearest = 0;
+    q_nearest = 3.4e38;
+    for (int k = 0; k < scene.u.mouth_count; k++) {
+        float q = get_q(x, fetch(scene, row, TEXEL_MOUTHS + k));
+        if (q < q_nearest) { q_nearest = q; nearest = k; }
+    }
+    return nearest;
+}
+
+/**
+ * @brief `get_jump_entry_m` finds how far a geodesic goes before it enters any mouth's jump sphere (within
+ * the uniforms' `jump_m` of its centre), in blocks, or a large distance if it never does.
+ * @par Example
+ * @code
+ * ds_m = min(ds_m, get_jump_entry_m(scene, row, x, v) + JUMP_OVERSHOOT_M);
+ * @endcode
+ */
+static float get_jump_entry_m(thread const Scene &scene, int row, float4 x, float4 v) {
+    float k_cosh = 1.0 + 0.5 * scene.q_jump, best = 1.0;
+    for (int k = 0; k < scene.u.mouth_count; k++) {
+        float4 c = fetch(scene, row, TEXEL_MOUTHS + k);
+        float a = -mdot(x, c), b = -mdot(v, c), discriminant = k_cosh * k_cosh + b * b - a * a;
+        if (b >= 0.0 || discriminant < 0.0) continue;
+        float tau = (-a * b - k_cosh * sqrt(discriminant)) / (b * b + k_cosh * k_cosh);
+        if (tau > 0.0) best = min(best, tau);
+    }
+    return best < 1.0 ? atanh(best) * scene.u.curvature_radius_m : 3.4e38;
+}
+
+/**
+ * @brief `look_up_jump_table` reads a jump table (`THROAT_TABLE_SIZE` entries spread over angles 0 to
+ * `angle_range` from straight in) for a ray at a mouth's centre `c`, point `x` and direction `v`, and sets the
+ * plane's axes: `a` from the centre toward `x`, and `b` toward the ray's sideways motion. Neighbouring entries
+ * are interpolated unless one crosses the throat and the other doesn't.
+ * @return The entry (angle swept, path length, exit angle, crossing parity), or w = 2 if the ray's angle is
+ * past `angle_range`.
+ * @par Example
+ * @code
+ * float4 entry = look_up_jump_table(scene.throat_table, M_PI_2_F, c, x, v, a, b);
+ * @endcode
+ */
+static float4 look_up_jump_table(device const float4 *table, float angle_range, float4 c, float4 x, float4 v, thread float4 &a, thread float4 &b) {
+    float q = get_q(x, c);
+    float cosh_rho = 1.0 + 0.5 * q, sinh_rho = sqrt(q * (1.0 + 0.25 * q));
+    float4 radial = (cosh_rho * x - c) / sinh_rho;
+    a = (x - cosh_rho * c) / sinh_rho;
+    float along = mdot(v, radial);
+    float4 sideways = v - along * radial;
+    float sideways_length = sqrt(max(mdot(sideways, sideways), 0.0));
+    if (sideways_length > 1e-6) {
+        b = sideways / sideways_length;
+    } else {
+        b = abs(a.x) < 0.9 ? float4(1.0, 0.0, 0.0, 0.0) : float4(0.0, 1.0, 0.0, 0.0);
+        b = b + mdot(b, c) * c - mdot(b, a) * a;
+        b = b * rsqrt(mdot(b, b));
+    }
+    float angle = atan2(sideways_length, -along);
+    if (angle >= angle_range) return float4(0.0, 0.0, 0.0, 2.0);
+    float position = angle / angle_range * float(THROAT_TABLE_SIZE - 1);
+    int i = min(int(position), THROAT_TABLE_SIZE - 2);
+    float4 low = table[i], high = table[i + 1];
+    return low.w == high.w ? mix(low, high, position - float(i)) : (position - float(i) < 0.5 ? low : high);
+}
+
+/**
+ * @brief `jump_through_mouth` carries a ray inside the nearest mouth's jump sphere straight to where it leaves
+ * the sphere (through the throat into the partner mouth's row, or back out), from a jump table: the field
+ * inside is the mouth's alone, which is the same about every axis through its centre, so the path depends only
+ * on the angle (the other mouths' bending inside is left out). The laser glow inside is taken along straight
+ * chords through the centre.
+ * @return Whether the ray jumped (not if its angle is past the table's); `is_lost` is set if the table says
+ * the ray never leaves.
+ * @par Example
+ * @code
+ * if (jump_through_mouth(scene, scene.throat_table, M_PI_2_F, row, x, v, travelled_m, core, halo, has_beam, is_lost)) { ... }
+ * @endcode
+ */
+static bool jump_through_mouth(thread const Scene &scene, device const float4 *table, float angle_range, thread int &row,
+                               thread float4 &x, thread float4 &v, thread float &travelled_m, thread float &core,
+                               thread float &halo, bool has_beam, thread bool &is_lost) {
+    float q_nearest;
+    int nearest = get_nearest_mouth(scene, row, x, q_nearest);
+    float4 c = fetch(scene, row, TEXEL_MOUTHS + nearest), a, b;
+    float4 entry = look_up_jump_table(table, angle_range, c, x, v, a, b);
+    if (entry.w > 1.5) return false;
+    if (entry.w < 0.0) { is_lost = true; return true; }
+    float4 c_out = c, a_out = a, b_out = b;
+    int row_out = row;
+    if (entry.w > 0.5) {
+        float4x4 gluing = fetch_matrix(scene, row, TEXEL_GLUINGS + TEXELS_PER_GLUING * nearest);
+        c_out = float4(0.0, 0.0, 0.0, 1.0);
+        a_out = gluing * a;
+        b_out = gluing * b;
+        row_out = scene.u.next_rows[nearest];
+    }
+    float jump_cosh = 1.0 + 0.5 * scene.q_jump, jump_sinh = sqrt(scene.q_jump * (1.0 + 0.25 * scene.q_jump));
+    float4 e = cos(entry.x) * a_out + sin(entry.x) * b_out;
+    float4 x_out = to_point(jump_cosh * c_out + jump_sinh * e);
+    float4 v_out = to_tangent(x_out, cos(entry.z) * (jump_sinh * c_out + jump_cosh * e) + sin(entry.z) * (-sin(entry.x) * a_out + cos(entry.x) * b_out));
+    if (has_beam) {
+        if (entry.w > 0.5) {
+            add_beam_glow(scene, row, x, c, travelled_m, travelled_m + 0.5 * entry.y, core, halo);
+            add_beam_glow(scene, row_out, c_out, x_out, travelled_m + 0.5 * entry.y, travelled_m + entry.y, core, halo);
+        } else {
+            add_beam_glow(scene, row, x, x_out, travelled_m, travelled_m + entry.y, core, halo);
+        }
+    }
+    x = x_out;
+    v = v_out;
+    row = row_out;
+    travelled_m += entry.y;
+    return true;
+}
+
+/**
+ * @brief `trace_table_ray` traces one jump-table ray: it starts `start_m` blocks from a mouth's centre at
+ * `angle` from straight in, in the mouth's field alone, with midpoint steps of `step_per_nearest` of the distance
+ * to the centre (and at most `max_step_count` of them), crossing the throat as
+ * `cross_throat` does (into a copy of the same mouth), until it leaves the jump sphere (radius `jump_m`).
+ * @return The angle swept around the centre, the path length in blocks, the exit angle from straight out, and
+ * 1 if it crossed an odd number of times (0 if not, -1 if it never left).
+ * @par Example
+ * @code
+ * table[i] = trace_table_ray(u.curvature_radius_m, u.throat_m, u.jump_m, u.jump_m, 0.3, 0.01, 40000);
+ * @endcode
+ */
+static float4 trace_table_ray(float r, float throat_m, float jump_m, float start_m, float angle_in, float step_per_nearest, int max_step_count) {
+    float jump_rho = jump_m / r, start_rho = start_m / r;
+    float4 c = float4(0.0, 0.0, 0.0, 1.0), a = float4(1.0, 0.0, 0.0, 0.0), b = float4(0.0, 1.0, 0.0, 0.0);
+    float4 x = cosh(start_rho) * c + sinh(start_rho) * a;
+    float4 v = -cos(angle_in) * (sinh(start_rho) * c + cosh(start_rho) * a) + sin(angle_in) * b;
+    float travelled_m = 0.0, angle = 0.0, parity = 0.0;
+    for (int n = 0; n < max_step_count; n++) {
+        float q = get_q(x, c);
+        float cosh_rho = 1.0 + 0.5 * q, sinh_rho = sqrt(q * (1.0 + 0.25 * q)), e_rho = cosh_rho + sinh_rho;
+        float rho_effective_m = r * sinh_rho * e_rho;
+        float4 radial = (cosh_rho * x - c) / sinh_rho, outward = (x - cosh_rho * c) / sinh_rho;
+        float along = mdot(v, radial);
+        if (rho_effective_m < throat_m) {
+            float new_rho = 0.5 * log(1.0 + 2.0 * throat_m * throat_m / rho_effective_m / r);
+            x = to_point(cosh(new_rho) * c + sinh(new_rho) * outward);
+            v = to_tangent(x, v - along * radial - along * (sinh(new_rho) * c + cosh(new_rho) * outward));
+            parity = 1.0 - parity;
+            continue;
+        }
+        float rho = get_distance_of_q(q);
+        if (rho >= jump_rho && along > 0.0) {
+            return float4(angle, travelled_m, atan2(mdot(v, -outward.y * a + outward.x * b), along), parity);
+        }
+        float ds_m = max(step_per_nearest * rho * r, TABLE_MIN_STEP_PER_STEP * step_per_nearest * throat_m);
+        float4 g = get_dln_n_flat(rho_effective_m, throat_m) * e_rho * e_rho * radial;
+        float4 bend = g - mdot(g, v) * v;
+        float4 vh = to_tangent(x, v + bend * (0.5 * ds_m));
+        float4 xm = x, vm = vh;
+        advance_geodesic(xm, vm, 0.5 * ds_m / r);
+        float qm = get_q(xm, c);
+        float cosh_m = 1.0 + 0.5 * qm, sinh_m = sqrt(qm * (1.0 + 0.25 * qm)), e_m = cosh_m + sinh_m;
+        float4 gm = get_dln_n_flat(r * sinh_m * e_m, throat_m) * e_m * e_m * (cosh_m * xm - c) / sinh_m;
+        float4 x_before = x;
+        v = vh;
+        advance_geodesic(x, v, ds_m / r);
+        v += (gm - mdot(gm, vm) * vm - 0.5 * bend) * ds_m;
+        x = to_point(x);
+        v = to_tangent(x, v);
+        float4 before = x_before - (1.0 + 0.5 * get_q(x_before, c)) * c, after = x - (1.0 + 0.5 * get_q(x, c)) * c;
+        angle += atan2(before.x * after.y - before.y * after.x, before.x * after.x + before.y * after.y);
+        travelled_m += ds_m;
+    }
+    return float4(0.0, 0.0, 0.0, -1.0);
+}
+
+/**
+ * @brief `build_throat_table` fills the throat table once: rays entering a jump sphere from its edge at angles
+ * 0 (straight in) to π/2 (grazing).
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs once, one thread per entry.
+ * @endcode
+ */
+kernel void build_throat_table(constant Uniforms &u [[buffer(1)]], device float4 *throat_table [[buffer(7)]], uint i [[thread_position_in_grid]]) {
+    if (int(i) >= THROAT_TABLE_SIZE) return;
+    throat_table[i] = trace_table_ray(u.curvature_radius_m, u.throat_m, u.jump_m, u.jump_m, M_PI_2_F * float(i) / float(THROAT_TABLE_SIZE - 1),
+                                      THROAT_TABLE_STEP_PER_NEAREST, THROAT_TABLE_MAX_STEP_COUNT);
+}
+
+/**
+ * @brief `build_camera_table` fills the camera table each frame the eye is inside a jump sphere: rays leaving
+ * the eye at angles 0 (straight in toward the mouth) to π (straight out).
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per entry, when the uniforms' camera_mouth is set.
+ * @endcode
+ */
+kernel void build_camera_table(constant Uniforms &u [[buffer(1)]], device float4 *camera_table [[buffer(8)]], uint i [[thread_position_in_grid]]) {
+    if (int(i) >= THROAT_TABLE_SIZE) return;
+    camera_table[i] = trace_table_ray(u.curvature_radius_m, u.throat_m, u.jump_m, u.camera_distance_m, M_PI_F * float(i) / float(THROAT_TABLE_SIZE - 1),
+                                      CAMERA_TABLE_STEP_PER_NEAREST, CAMERA_TABLE_MAX_STEP_COUNT);
+}
+
+/**
+ * @brief `make_scene` wraps one frame's rows, uniforms and jump tables with the values every ray reuses.
+ * @par Example
+ * @code
+ * Scene scene = make_scene(rows, u, throat_table, camera_table);
+ * @endcode
+ */
+static Scene make_scene(device const float4 *rows, constant Uniforms &u, device const float4 *throat_table, device const float4 *camera_table) {
     float inradius = acosh(cos(M_PI_F / TILES_PER_VERTEX) / sin(M_PI_F / TILE_SIDE_COUNT));
     float tile_cosh = cosh(inradius), tile_sinh = sinh(inradius);
     float half_cutoff = sinh(0.5 * u.bend_cutoff_m / u.curvature_radius_m);
+    float half_near_zone = sinh(0.5 * NEAR_ZONE_PER_THROAT * u.throat_m / u.curvature_radius_m);
+    float half_rk4_start = sinh(0.5 * RK4_ZONE_START_PER_THROAT * u.throat_m / u.curvature_radius_m);
+    float half_jump = sinh(0.5 * u.jump_m / u.curvature_radius_m);
     float half_throat = sinh(0.25 * log(1.0 + 2.0 * u.throat_m / u.curvature_radius_m));
-    Scene scene = {rows, u, 4.0 * half_cutoff * half_cutoff, 4.0 * half_throat * half_throat, tanh(inradius),
+    return {rows, u, throat_table, camera_table, 4.0 * half_cutoff * half_cutoff, 4.0 * half_throat * half_throat, 4.0 * half_near_zone * half_near_zone,
+        4.0 * half_rk4_start * half_rk4_start, 4.0 * half_jump * half_jump, tanh(inradius),
         {float4(tile_cosh, 0.0, 0.0, tile_sinh), float4(-tile_cosh, 0.0, 0.0, tile_sinh), float4(0.0, 0.0, tile_cosh, tile_sinh), float4(0.0, 0.0, -tile_cosh, tile_sinh)}};
-    float2 ndc = float2(2.0 * (float(id.x) + 0.5) / float(u.width_px) - 1.0, 1.0 - 2.0 * (float(id.y) + 0.5) / float(u.height_px));
+}
+
+/**
+ * @brief `get_ndc` gives a pixel position's normalized device coordinates (-1 to 1, y up), for any pixel
+ * position, inside the image or not.
+ * @par Example
+ * @code
+ * float2 ndc = get_ndc(scene, float2(id) + 0.5);
+ * @endcode
+ */
+static float2 get_ndc(thread const Scene &scene, float2 pixel) {
+    return float2(2.0 * pixel.x / float(scene.u.width_px) - 1.0, 1.0 - 2.0 * pixel.y / float(scene.u.height_px));
+}
+
+/**
+ * @brief `trace_ray` follows the light ray through a point of the screen backwards from the eye, as
+ * `render_cpu.rs`'s `render_pixel` does, and says where it ended.
+ * @par Example
+ * @code
+ * RayEnd end = trace_ray(scene, get_ndc(scene, float2(id) + 0.5));
+ * @endcode
+ */
+static RayEnd trace_ray(thread const Scene &scene, float2 ndc) {
+    constant Uniforms &u = scene.u;
     float r = u.curvature_radius_m, max_travel_m = MAX_TRAVEL_PER_R * r;
     float4 x = float4(0.0, 0.0, 0.0, 1.0);
     float4 v = float4(normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0)), 0.0);
@@ -723,8 +1017,14 @@ kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Unifo
     float travelled_m = 0.0, core = 0.0, halo = 0.0;
     BoxCache cache;
     reset_box_cache(scene, cache, x, 0.0);
-    bool has_beam = u.beam_chunk_count > 0;
-    float3 color = LOST_COLOR;
+    bool has_beam = u.beam_chunk_count > 0, was_outside_jump = false;
+    RayEnd end = {float4(0.0), 0.0, 0.0, 0.0, LOST_HIT, 0, 0, 1.0};
+    if (u.camera_mouth >= 0) {
+        bool is_lost = false;
+        jump_through_mouth(scene, scene.camera_table, M_PI_F, row, x, v, travelled_m, core, halo, has_beam, is_lost);
+        if (is_lost) return end;
+        reset_box_cache(scene, cache, x, travelled_m);
+    }
     for (int step = 0; step < MAX_STEP_COUNT; step++) {
         float q_nearest;
         float4 bend = get_bend(scene, row, x, v, q_nearest);
@@ -732,15 +1032,41 @@ kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Unifo
             reset_box_cache(scene, cache, x, travelled_m);
             bend = get_bend(scene, row, x, v, q_nearest);
         }
+        if (q_nearest < scene.q_jump && was_outside_jump) {
+            bool is_lost = false;
+            if (jump_through_mouth(scene, scene.throat_table, M_PI_2_F, row, x, v, travelled_m, core, halo, has_beam, is_lost)) {
+                if (is_lost) break;
+                reset_box_cache(scene, cache, x, travelled_m);
+                bend = get_bend(scene, row, x, v, q_nearest);
+            }
+        }
+        was_outside_jump = q_nearest >= scene.q_jump;
         bool is_far = q_nearest > scene.q_cutoff;
         float4 vh = v;
         float tau_max, ds_m;
+        bool is_near = q_nearest < scene.q_near_zone && q_nearest > scene.q_rk4_start;
+        float4 x_next = x, v_next = v;
         if (is_far) {
             tau_max = get_cutoff_entry_tau(scene, row, x, v);
             ds_m = tau_max < 1.0 ? atanh(tau_max) * r : max_travel_m;
+        } else if (is_near) {
+            ds_m = max(get_distance_of_q(q_nearest) * r * RK4_STEP_PER_NEAREST, MIN_STEP_M);
+            if (q_nearest >= scene.q_jump) ds_m = min(ds_m, get_jump_entry_m(scene, row, x, v) + JUMP_OVERSHOOT_M);
+            step_rk4(scene, row, x_next, v_next, bend, ds_m);
+            float q_next;
+            get_nearest_mouth(scene, row, x_next, q_next);
+            if (q_nearest >= scene.q_jump && q_next < scene.q_jump) {
+                float rho_now = get_distance_of_q(q_nearest), rho_next = get_distance_of_q(q_next), rho_jump = get_distance_of_q(scene.q_jump);
+                ds_m = ds_m * clamp((rho_now - rho_jump) / max(rho_now - rho_next, 1e-6), 0.0, 1.0) + JUMP_OVERSHOOT_M;
+                x_next = x;
+                v_next = v;
+                step_rk4(scene, row, x_next, v_next, bend, ds_m);
+            }
+            vh = to_tangent(x, x_next);
+            tau_max = tanh(get_distance_of_q(get_q(x, x_next)));
         } else {
             float nearest_m = get_distance_of_q(q_nearest) * r;
-            ds_m = max(nearest_m * (nearest_m < NEAR_ZONE_PER_THROAT * u.throat_m ? NEAR_STEP_PER_NEAREST : FAR_STEP_PER_NEAREST), MIN_STEP_M);
+            ds_m = max(nearest_m * (q_nearest < scene.q_near_zone ? NEAR_STEP_PER_NEAREST : FAR_STEP_PER_NEAREST), MIN_STEP_M);
             vh = to_tangent(x, v + bend * (0.5 * ds_m));
             tau_max = tanh(ds_m / r);
         }
@@ -753,21 +1079,21 @@ kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Unifo
             float4 point = to_point(x + hit.tau * vh);
             float end_m = travelled_m + atanh(hit.tau) * r;
             if (has_beam) add_beam_glow(scene, row, x, point, travelled_m, end_m, core, halo);
-            color = shade_hit(scene, row, hit, point);
-            if (u.fog_m > 0.0) color = mix(HAZE_COLOR, color, exp(-end_m / u.fog_m));
-            float spot = get_spot_glow(scene, row, point, end_m);
-            halo = max(halo, spot);
-            core = max(core, spot * spot);
-            break;
+            end = {point, end_m, core, halo, hit.index, row, hit.face, hit.side};
+            return end;
         }
         if (tau_max >= 1.0 || travelled_m > max_travel_m) {
             if (has_beam) add_beam_glow(scene, row, x, x + vh, travelled_m, travelled_m + max_travel_m, core, halo);
-            color = get_sky_color(scene, get_sky_direction(scene, fetch_matrix(scene, row, TEXEL_TO_WORLD) * (x + vh)));
-            break;
+            float3 direction = get_sky_direction(scene, fetch_matrix(scene, row, TEXEL_TO_WORLD) * (x + vh));
+            end = {float4(direction, 0.0), travelled_m, core, halo, SKY_HIT, row, 0, 1.0};
+            return end;
         }
         float4 x_before = x;
         if (is_far) {
             advance_geodesic(x, v, atanh(tau_max));
+        } else if (is_near) {
+            x = x_next;
+            v = v_next;
         } else {
             float4 xm = x, vm = vh;
             advance_geodesic(xm, vm, 0.5 * ds_m / r);
@@ -782,7 +1108,211 @@ kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Unifo
         if (has_beam) add_beam_glow(scene, row, x_before, x, travelled_m, travelled_m + ds_m, core, halo);
         travelled_m += ds_m;
     }
+    end.core = core;
+    end.halo = halo;
+    return end;
+}
+
+/**
+ * @brief `shade_ray_end` gives the final colour of a ray from where it ended: the lit surface with fog and
+ * the laser's spot, or the sky, with the laser's glow and the highlight roll-off.
+ * @par Example
+ * @code
+ * float3 color = shade_ray_end(scene, trace_ray(scene, ndc));
+ * @endcode
+ */
+static float3 shade_ray_end(thread const Scene &scene, RayEnd end) {
+    float3 color = LOST_COLOR;
+    float core = end.core, halo = end.halo;
+    if (end.kind == SKY_HIT) {
+        color = get_sky_color(scene, end.point.xyz);
+    } else if (end.kind != LOST_HIT) {
+        Hit hit = {0.0, end.kind, end.face, end.side};
+        color = shade_hit(scene, end.row, hit, end.point);
+        if (scene.u.fog_m > 0.0) color = mix(HAZE_COLOR, color, exp(-end.end_m / scene.u.fog_m));
+        float spot = get_spot_glow(scene, end.row, end.point, end.end_m);
+        halo = max(halo, spot);
+        core = max(core, spot * spot);
+    }
     color = mix(color, LASER_HALO_COLOR, clamp(0.9 * halo, 0.0, 1.0)) + LASER_CORE_COLOR * core;
     color = color / (1.0 + max(color - 1.0, 0.0) * HIGHLIGHT_ROLLOFF);
-    image.write(float4(clamp(color, 0.0, 1.0), 1.0), id);
+    return clamp(color, 0.0, 1.0);
+}
+
+/**
+ * @brief `trace_pixels` traces every pixel's ray and writes its colour.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per pixel.
+ * @endcode
+ */
+kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]], device const float4 *throat_table [[buffer(7)]],
+                         device const float4 *camera_table [[buffer(8)]],
+                         texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
+    Scene scene = make_scene(rows, u, throat_table, camera_table);
+    image.write(float4(shade_ray_end(scene, trace_ray(scene, get_ndc(scene, float2(id) + 0.5))), 1.0), id);
+}
+
+/**
+ * @brief `get_sample_columns` gives how many samples a row of the sample grid has: one per even pixel
+ * column, and one more past the image's edge, so every pixel lies between samples.
+ * @par Example
+ * @code
+ * int columns = get_sample_columns(u);
+ * @endcode
+ */
+static int get_sample_columns(constant Uniforms &u) { return u.width_px / 2 + 2; }
+
+/**
+ * @brief `trace_samples` traces the rays of every even pixel (sample (i, j) is pixel (2i, 2j)), the first
+ * pass of adaptive sampling.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per sample.
+ * @endcode
+ */
+kernel void trace_samples(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]], device const float4 *throat_table [[buffer(7)]],
+                         device const float4 *camera_table [[buffer(8)]],
+                          device RayEnd *samples [[buffer(2)]], device atomic_uint *refine_count [[buffer(5)]],
+                          uint2 id [[thread_position_in_grid]]) {
+    int columns = get_sample_columns(u), sample_rows = u.height_px / 2 + 2;
+    if (id.x == 0 && id.y == 0) atomic_store_explicit(refine_count, 0, memory_order_relaxed);
+    if (int(id.x) >= columns || int(id.y) >= sample_rows) return;
+    Scene scene = make_scene(rows, u, throat_table, camera_table);
+    samples[int(id.y) * columns + int(id.x)] = trace_ray(scene, get_ndc(scene, 2.0 * float2(id) + 0.5));
+}
+
+/**
+ * @brief `is_same_surface` says whether two samples ended on the same surface, in the same row, without
+ * laser glow, so the pixels between them can be interpolated.
+ * @par Example
+ * @code
+ * if (!is_same_surface(a, b)) return false;
+ * @endcode
+ */
+static bool is_same_surface(RayEnd a, RayEnd b) {
+    return a.kind == b.kind && a.row == b.row && a.face == b.face && a.side == b.side && b.kind != LOST_HIT
+        && b.halo < GLOW_FLOOR && b.core < GLOW_FLOOR;
+}
+
+/**
+ * @brief `is_line_smooth` says whether four samples in a line map screen to scene nearly linearly between the
+ * middle two: the second differences, which are 8 times the midpoint's interpolation error, stay under
+ * `SMOOTH_SECOND_DIFFERENCE_PER_FIRST` of the first difference (an error of about 0.1 pixel at 0.4).
+ * @par Example
+ * @code
+ * bool is_smooth = is_line_smooth(p0, p1, p2, p3);
+ * @endcode
+ */
+static bool is_line_smooth(float4 p0, float4 p1, float4 p2, float4 p3) {
+    float limit = SMOOTH_SECOND_DIFFERENCE_PER_FIRST * length(p2 - p1);
+    return length(p0 - 2.0 * p1 + p2) <= limit && length(p1 - 2.0 * p2 + p3) <= limit;
+}
+
+/**
+ * @brief `classify_cells` marks each cell between four samples smooth (1) when the twelve samples around it
+ * ended on one surface and map nearly linearly, the second pass of adaptive sampling, and lists every other
+ * cell that covers pixels, for `refine_pixels`. Cells at the grid's border are never smooth.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per cell (sample (i, j) to (i + 1, j + 1)).
+ * @endcode
+ */
+kernel void classify_cells(constant Uniforms &u [[buffer(1)]], device const RayEnd *samples [[buffer(2)]],
+                           device uchar *smooth_cells [[buffer(3)]], device uint *refine_cells [[buffer(4)]],
+                           device atomic_uint *refine_count [[buffer(5)]], uint2 id [[thread_position_in_grid]]) {
+    int columns = get_sample_columns(u), sample_rows = u.height_px / 2 + 2;
+    int i = int(id.x), j = int(id.y);
+    if (i >= columns || j >= sample_rows) return;
+    uchar is_smooth = 0;
+    if (i >= 1 && j >= 1 && i + 2 < columns && j + 2 < sample_rows) {
+        RayEnd corner = samples[j * columns + i];
+        bool is_same = true;
+        float4 p[4][4];
+        for (int b = 0; b < 4; b++) {
+            for (int a = 0; a < 4; a++) {
+                if ((a == 0 || a == 3) && (b == 0 || b == 3)) continue;
+                RayEnd s = samples[(j - 1 + b) * columns + (i - 1 + a)];
+                is_same = is_same && is_same_surface(corner, s);
+                p[b][a] = s.point;
+            }
+        }
+        if (is_same && is_line_smooth(p[1][0], p[1][1], p[1][2], p[1][3]) && is_line_smooth(p[2][0], p[2][1], p[2][2], p[2][3])
+            && is_line_smooth(p[0][1], p[1][1], p[2][1], p[3][1]) && is_line_smooth(p[0][2], p[1][2], p[2][2], p[3][2])) {
+            is_smooth = 1;
+        }
+    }
+    smooth_cells[j * columns + i] = is_smooth;
+    if (is_smooth == 0 && 2 * i < u.width_px && 2 * j < u.height_px) {
+        refine_cells[atomic_fetch_add_explicit(refine_count, 1, memory_order_relaxed)] = uint(j * columns + i);
+    }
+}
+
+/**
+ * @brief `prepare_refinement` sets the thread-group count of `refine_pixels`'s indirect dispatch from how many
+ * cells `classify_cells` listed.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs as a single thread.
+ * @endcode
+ */
+kernel void prepare_refinement(device atomic_uint *refine_count [[buffer(5)]], device uint *dispatch_groups [[buffer(6)]]) {
+    uint pixel_count = atomic_load_explicit(refine_count, memory_order_relaxed) * REFINED_PIXELS_PER_CELL;
+    dispatch_groups[0] = (pixel_count + REFINE_GROUP_SIZE - 1) / REFINE_GROUP_SIZE;
+    dispatch_groups[1] = 1;
+    dispatch_groups[2] = 1;
+}
+
+/**
+ * @brief `refine_pixels` traces the three odd pixels of each listed cell, the last pass of adaptive sampling,
+ * packed densely so that the GPU's thread groups don't wait on the few pixels that need a full trace.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs indirectly, one thread per listed pixel.
+ * @endcode
+ */
+kernel void refine_pixels(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]], device const float4 *throat_table [[buffer(7)]],
+                         device const float4 *camera_table [[buffer(8)]],
+                          device const uint *refine_cells [[buffer(4)]], device atomic_uint *refine_count [[buffer(5)]],
+                          texture2d<float, access::write> image [[texture(0)]], uint t [[thread_position_in_grid]]) {
+    if (t >= atomic_load_explicit(refine_count, memory_order_relaxed) * REFINED_PIXELS_PER_CELL) return;
+    int columns = get_sample_columns(u);
+    int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
+    uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
+    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
+    Scene scene = make_scene(rows, u, throat_table, camera_table);
+    image.write(float4(shade_ray_end(scene, trace_ray(scene, get_ndc(scene, float2(id) + 0.5))), 1.0), id);
+}
+
+/**
+ * @brief `resolve_pixels` writes the pixels that need no new ray, the third pass of adaptive sampling: an even
+ * pixel takes its sample, and a pixel in a smooth cell interpolates the cell's corner samples and shades the
+ * result. `refine_pixels` writes the rest.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per pixel.
+ * @endcode
+ */
+kernel void resolve_pixels(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]], device const float4 *throat_table [[buffer(7)]],
+                         device const float4 *camera_table [[buffer(8)]],
+                           device const RayEnd *samples [[buffer(2)]], device const uchar *smooth_cells [[buffer(3)]],
+                           texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
+    Scene scene = make_scene(rows, u, throat_table, camera_table);
+    int columns = get_sample_columns(u);
+    int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1;
+    RayEnd end = samples[j * columns + i];
+    if (di + dj > 0) {
+        if (smooth_cells[j * columns + i] != 0) {
+            RayEnd b = samples[j * columns + i + di], c = samples[(j + dj) * columns + i], d = samples[(j + dj) * columns + i + di];
+            float wx = 0.5 * float(di), wy = 0.5 * float(dj);
+            float4 point = mix(mix(end.point, b.point, wx), mix(c.point, d.point, wx), wy);
+            end.point = end.kind == SKY_HIT ? float4(normalize(point.xyz), 0.0) : to_point(point);
+            end.end_m = mix(mix(end.end_m, b.end_m, wx), mix(c.end_m, d.end_m, wx), wy);
+        } else {
+            return;
+        }
+    }
+    image.write(float4(shade_ray_end(scene, end), 1.0), id);
 }

@@ -51,10 +51,11 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const BYTES_PER_PIXEL: usize = 4;
 const CPU_RENDER_SCALE: f64 = 0.35;
-const METAL_RENDER_SCALE: f64 = 0.5;
-const MIN_AUTO_RENDER_SCALE: f64 = 0.35;
-const AUTO_SCALE_TARGET_GPU_MS: f64 = 12.0;
-const AUTO_SCALE_MAX_STEP: f64 = 1.1;
+const METAL_RENDER_SCALE: f64 = 1.0;
+const MIN_AUTO_RENDER_SCALE: f64 = 0.5;
+const AUTO_SCALE_TARGET_GPU_MS: f64 = 14.0;
+const AUTO_SCALE_MAX_STEP: f64 = 1.02;
+const RENDER_SCALE_QUANTUM: f64 = 0.05;
 const RENDER_SCALE_STEP: f64 = 1.25;
 const MIN_RENDER_SCALE: f64 = 0.05;
 const MAX_FRAME_DT_S: f64 = 0.05;
@@ -70,6 +71,7 @@ const MESSAGE_DURATION_S: f64 = 3.0;
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
+const NEAR_VIEW_DISTANCE_M: f64 = 2.5;
 const THROAT_APPROACH_STEP_M: f64 = 0.1;
 const MAX_APPROACH_STEP_COUNT: usize = 2000;
 const SECONDS_PER_DAY: u64 = 86_400;
@@ -79,6 +81,14 @@ const SECONDS_PER_DAY: u64 = 86_400;
 enum RendererKind {
     Cpu,
     Metal,
+}
+
+/// `Sampling` is which pixels Metal traces: every other pixel each way, interpolating the rest
+/// where that is exact enough, or every pixel.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum Sampling {
+    Adaptive,
+    EveryPixel,
 }
 
 /// `Arguments` is the command line.
@@ -91,9 +101,14 @@ struct Arguments {
     /// Which renderer draws the frames: the GPU with Metal, or every CPU core.
     #[arg(long, value_enum, default_value_t = RendererKind::Metal)]
     renderer: RendererKind,
+    /// Which pixels Metal traces: every other pixel each way, interpolating the others where the
+    /// image is smooth enough (adaptive), or every pixel (every-pixel).
+    #[arg(long, value_enum, default_value_t = Sampling::Adaptive)]
+    sampling: Sampling,
     /// Fraction of the output's pixels per side to ray-trace, upscaled with MetalFX (Metal) or by
     /// repeating pixels (CPU). In the window it defaults to 0.35 on the CPU, and with Metal it
-    /// starts at 0.5 and adjusts itself to about 12 ms of GPU time per frame; otherwise 1.
+    /// starts at 1 and lowers itself (to no less than 0.5) when a frame takes more than about
+    /// 14 ms of GPU time; otherwise 1.
     #[arg(long)]
     render_scale: Option<f64>,
     /// Render fixed views without a window, time them and save them under .artifacts/bench_views/.
@@ -194,11 +209,13 @@ impl Renderer for CpuRenderer {
 
 /// `make_renderer` makes the renderer the command line asked for.
 ///
-/// Example: `let mut renderer = make_renderer(RendererKind::Cpu)?;`
-fn make_renderer(kind: RendererKind) -> Result<Box<dyn Renderer>> {
+/// Example: `let mut renderer = make_renderer(RendererKind::Cpu, Sampling::Adaptive)?;`
+fn make_renderer(kind: RendererKind, sampling: Sampling) -> Result<Box<dyn Renderer>> {
     match kind {
         RendererKind::Cpu => Ok(Box::new(CpuRenderer)),
-        RendererKind::Metal => Ok(Box::new(render_metal::MetalRenderer::New()?)),
+        RendererKind::Metal => Ok(Box::new(render_metal::MetalRenderer::New(
+            sampling == Sampling::Adaptive,
+        )?)),
     }
 }
 
@@ -217,6 +234,17 @@ impl Renderer for render_metal::MetalRenderer {
 
     fn gpu_ms(&self) -> Option<f64> {
         Some(self.last_gpu_ms)
+    }
+}
+
+/// `get_sampling_name` names which pixels the renderer traces, for results: the CPU always traces
+/// every pixel.
+///
+/// Example: `let name = get_sampling_name(&arguments);`
+fn get_sampling_name(arguments: &Arguments) -> &'static str {
+    match (arguments.renderer, arguments.sampling) {
+        (RendererKind::Metal, Sampling::Adaptive) => "adaptive",
+        _ => "every-pixel",
     }
 }
 
@@ -284,7 +312,7 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
 fn main() -> Result<()> {
     let arguments: Arguments = Arguments::parse();
     validate_arguments(&arguments)?;
-    let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer)?;
+    let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
     if arguments.bench_views {
         bench_views(&arguments, renderer)
     } else if arguments.autopilot {
@@ -439,8 +467,8 @@ struct View {
     is_laser_on: bool,
 }
 
-/// `make_bench_views` makes the benchmark's cameras: spawn, aimed at mouth 1A, right at its throat,
-/// above the rails, high above spawn, and aimed at 1A with the laser on.
+/// `make_bench_views` makes the benchmark's cameras: spawn, aimed at mouth 1A, a few blocks from it,
+/// right at its throat, above the rails, high above spawn, and aimed at 1A with the laser on.
 ///
 /// Example: `let views = make_bench_views(&world);`
 fn make_bench_views(world: &World) -> Vec<View> {
@@ -448,16 +476,17 @@ fn make_bench_views(world: &World) -> Vec<View> {
     let spawn: Player = Player::AtSpawn(world);
     let mut aimed: Player = spawn.clone();
     physics::aim_through_mouth(world, &mut aimed.frame, &world.mouths[0]);
-    let mut at_throat: Player = aimed.clone();
-    at_throat.is_flying = true;
-    for _ in 0..MAX_APPROACH_STEP_COUNT {
-        if get_distance(at_throat.get_position(), world.mouths[0].center) * r
-            < THROAT_VIEW_DISTANCE_M
-        {
-            break;
+    let approach = |distance_m: f64| -> DMat4 {
+        let mut player: Player = aimed.clone();
+        player.is_flying = true;
+        for _ in 0..MAX_APPROACH_STEP_COUNT {
+            if get_distance(player.get_position(), world.mouths[0].center) * r < distance_m {
+                break;
+            }
+            physics::fly_along_light(world, &mut player, DVec3::NEG_Z, THROAT_APPROACH_STEP_M);
         }
-        physics::fly_along_light(world, &mut at_throat, DVec3::NEG_Z, THROAT_APPROACH_STEP_M);
-    }
+        player.frame
+    };
     let above_rails: DMat4 = world.make_ground_frame(0.0, -12.0, 0.0)
         * make_boost(AXIS_Y, 1.1)
         * make_rotation(AXIS_Z, AXIS_Y, 1.2);
@@ -474,8 +503,13 @@ fn make_bench_views(world: &World) -> Vec<View> {
             is_laser_on: false,
         },
         View {
+            name: "near_1A",
+            frame: approach(NEAR_VIEW_DISTANCE_M),
+            is_laser_on: false,
+        },
+        View {
             name: "at_throat_1A",
-            frame: at_throat.frame,
+            frame: approach(THROAT_VIEW_DISTANCE_M),
             is_laser_on: false,
         },
         View {
@@ -507,15 +541,17 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
     let mut pixels: Vec<u8> = vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL];
     let mut results: Vec<Value> = Vec::new();
+    let views: Vec<View> = make_bench_views(&world);
     eprintln!(
-        "Benchmarking 6 views at {}x{} (rendered at {}x{}) with the {} renderer...",
+        "Benchmarking {} views at {}x{} (rendered at {}x{}) with the {} renderer...",
+        views.len(),
         size_px.0,
         size_px.1,
         render_px.0,
         render_px.1,
         renderer.name()
     );
-    for view in make_bench_views(&world) {
+    for view in views {
         let report: Option<LaserReport> = render_view(
             &world,
             view.frame,
@@ -562,6 +598,7 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
     let summary: Value = json!({
         "run_folder": folder.display().to_string(),
         "renderer": renderer.name(),
+        "sampling": get_sampling_name(arguments),
         "width_px": size_px.0,
         "height_px": size_px.1,
         "render_width_px": render_px.0,
@@ -836,6 +873,7 @@ fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Resu
     let summary: Value = json!({
         "run_folder": folder.display().to_string(),
         "renderer": renderer.name(),
+        "sampling": get_sampling_name(arguments),
         "width_px": size_px.0,
         "height_px": size_px.1,
         "render_width_px": render_px.0,
@@ -1048,7 +1086,12 @@ impl Session {
     /// Example: `let render_px = session.get_render_size((2560, 1600));`
     fn get_render_size(&mut self, window_px: (u32, u32)) -> (u32, u32) {
         self.last_output_px = window_px;
-        scale_size(window_px, self.render_scale)
+        let quantized_scale: f64 = if self.is_auto_scale {
+            (self.render_scale / RENDER_SCALE_QUANTUM).round() * RENDER_SCALE_QUANTUM
+        } else {
+            self.render_scale
+        };
+        scale_size(window_px, quantized_scale)
     }
 
     /// `pack` packs this frame's scene (and laser) at a render size.
@@ -1067,9 +1110,10 @@ impl Session {
     }
 
     /// `record_frame` adds one frame's render time to the HUD's averages, which refresh every
-    /// `HUD_PERIOD_S`. With automatic resolution, each refresh also moves the render scale toward
-    /// the one whose GPU time is `AUTO_SCALE_TARGET_GPU_MS` (time grows with the pixel count, the
-    /// scale's square), between `MIN_AUTO_RENDER_SCALE` and 1.
+    /// `HUD_PERIOD_S`. With automatic resolution, each frame also moves the render scale a little
+    /// toward the one whose GPU time is `AUTO_SCALE_TARGET_GPU_MS` (time grows with the pixel
+    /// count, the scale's square), between `MIN_AUTO_RENDER_SCALE` and 1; the render size follows
+    /// it in steps of `RENDER_SCALE_QUANTUM`, so the upscaler is rarely remade.
     ///
     /// Example: `session.record_frame(12.5, renderer.gpu_ms());`
     fn record_frame(&mut self, render_ms: f64, gpu_ms: Option<f64>) {
@@ -1078,12 +1122,6 @@ impl Session {
         self.gpu_ms = gpu_ms;
         self.total_frame_count += 1;
         self.total_gpu_ms += gpu_ms.unwrap_or(render_ms);
-        if self.hud_time_s <= HUD_PERIOD_S {
-            return;
-        }
-        self.fps = f64::from(self.hud_frame_count) / self.hud_time_s;
-        self.render_ms = self.hud_render_ms / f64::from(self.hud_frame_count);
-        (self.hud_time_s, self.hud_frame_count, self.hud_render_ms) = (0.0, 0, 0.0);
         if let Some(ms) = gpu_ms
             && self.is_auto_scale
         {
@@ -1092,6 +1130,12 @@ impl Session {
                 .clamp(1.0 / AUTO_SCALE_MAX_STEP, AUTO_SCALE_MAX_STEP);
             self.render_scale = (self.render_scale * step).clamp(MIN_AUTO_RENDER_SCALE, 1.0);
         }
+        if self.hud_time_s <= HUD_PERIOD_S {
+            return;
+        }
+        self.fps = f64::from(self.hud_frame_count) / self.hud_time_s;
+        self.render_ms = self.hud_render_ms / f64::from(self.hud_frame_count);
+        (self.hud_time_s, self.hud_frame_count, self.hud_render_ms) = (0.0, 0, 0.0);
     }
 
     /// `is_finished` says whether `--exit-after-s` has run out; if so it prints the window's

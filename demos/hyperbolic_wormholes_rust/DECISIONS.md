@@ -8,7 +8,8 @@
   and a toggle to fly; a laser to turn on, as in the earlier laser demos; no balls or other extras; a demo for
   measuring speed, not a general engine; benchmarking and scripted playtesting done by Claude before a manual test.
   Then a third layer that makes Rust + MSL as fast as it can, free to use other native app code, staying on this
-  Mac.
+  Mac, reaching at least 60 fps locally at full-screen size while looking realistic and high-fidelity, with
+  heuristics allowed for speed.
 - **Outcomes:** milliseconds per frame for fixed views at fixed resolutions, per renderer, compared with the WebGL
   demo; and whether a scripted route through every wormhole works, and at what frame rate. The CPU is expected to be
   much slower than the GPU; the question is by how much, and how much Metal gains over WebGL.
@@ -82,9 +83,9 @@
 
 ### D13. Larger integration steps (needs input)
 
-- **Choice:** not applied. Steps of 0.18 and 0.40 of the nearest mouth's distance (instead of 0.12 and 0.25) take
-  the spawn view from 30 to 21 ms, and 0.25 and 0.50 take it to 17.5 ms (Metal, 2560×1600, after the third layer;
-  the throat view goes from 51 to 37 and 29 ms). They move edges inside the lensed areas by about a pixel: 15% and
+- **Choice:** not applied. Measured before D21 to D23: steps of 0.18 and 0.40 of the nearest mouth's distance
+  (instead of 0.12 and 0.25) took the spawn view from 30 to 21 ms, and 0.25 and 0.50 took it to 17.5 ms (Metal,
+  2560×1600; the throat view went from 51 to 37 and 29 ms). They move edges inside the lensed areas by about a pixel: 15% and
   22% of the spawn view's pixels change by more than 30 of 765. For scale, today's steps already differ that much
   from steps four times smaller on 12% of the spawn view's pixels.
 - **Alternatives:** turning one of them on by default, or offering it as a quality setting.
@@ -100,6 +101,9 @@
   - compiling the laser code out when the laser is off, or skipping the glow's `exp`s for far beam pieces: no gain;
   - doing a full pass over the clusters in sinh space with one `asinh` instead of three per cluster: 4% slower;
   - candidate windows (D17) of 1 to 6 blocks gave the same times, and 12 and 24 blocks were slower;
+  - growing the midpoint steps with distance beyond 10 throat radii (as √distance, up to 0.5 or 0.8 of it): 10% faster
+    at spawn, but 16 to 22% of its pixels changed against the reference instead of 12%;
+  - summing only the nearest mouth's bending inside its near zone: slower, and 24% of the throat view changed;
   - kick-drift-kick (Heun-like) steps that reuse each step's end bending as the next step's start, so each step
     sums the bending once instead of twice: 17% faster at spawn, but its error is larger than the midpoint
     method's. Against a reference with four times smaller steps, 43% of the throat view's pixels changed by more than
@@ -132,19 +136,63 @@
 - **Alternatives:** 8 segments (44 ms) or 2 (48 ms).
 - **Rationale:** measured, the fastest.
 
-### D19. Upscale with MetalFX, and pick the window's resolution from the GPU time
+### D19. Upscale with MetalFX only when a frame is too slow
 
 - **Choice:** Metal can ray-trace fewer pixels and upscale them with MetalFX's spatial scaler (`--render-scale`). In
-  the window it starts at 0.5 of the window's pixels per side and adjusts itself each frame toward 12 ms of GPU time,
-  between 0.35 and 1; `-` and `=` set it by hand. `--bench-views` and `--autopilot` render at full resolution unless
-  `--render-scale` is given.
-- **Alternatives:** always full resolution; MetalFX's temporal scaler, which looks better but needs motion vectors
-  and jittered frames; a fixed scale.
-- **Rationale:** at 2560×1600, half the pixels per side runs the spawn view in 11 ms instead of 32. The upscaled image
-  keeps edges sharp, but the squeezed textures near mouths turn grainy. The 12 ms target is arbitrary: it leaves
-  room for a 60 Hz display with some headroom.
-- **Revisit if:** the grain is too visible (raise the target or pass `--render-scale 1`), or a 120 Hz display needs
-  a lower target.
+  the window it starts at full resolution, and each frame moves the scale a little toward 14 ms of GPU time, between
+  0.5 and 1, in steps of 0.05 of the window's size; `-` and `=` set it by hand. `--bench-views` and `--autopilot`
+  render at full resolution unless `--render-scale` is given.
+- **Alternatives:** always full resolution; a lower floor; MetalFX's temporal scaler, which looks better but needs
+  motion vectors and jittered frames; the first version's start at 0.5 with a 12 ms target, updated four times a
+  second.
+- **Rationale:** with D21 to D23, most frames at 2560×1440 take 4 to 12 ms at full resolution, so upscaling is only
+  for the frames close to a mouth (up to about 30 ms), where its grain in squeezed textures shows most; 14 ms leaves
+  room for the CPU's part of a 60 Hz frame, and the 0.5 floor keeps the image from getting coarse.
+- **Revisit if:** a 120 Hz display needs a lower target, or the grain near mouths is too visible.
+
+### D21. Trace every other pixel, and interpolate where that is exact enough
+
+- **Choice:** `--sampling adaptive` (the default) traces every other pixel each way, marks each 2×2 cell smooth when
+  the twelve samples around it ended on the same surface, in the same row, without laser glow, and their second
+  differences stay under 1.6 times the first (an interpolation error of about 0.4 pixel), interpolates the hit point
+  of the other three pixels and shades them at full resolution, and traces the rest in a separate, densely packed
+  pass. `--sampling every-pixel` traces every pixel.
+- **Alternatives:** a threshold of 0.4 (0.1 pixel; the near view 29 instead of 20 ms) or 0.8; tracing the rest in the
+  same pass (about 9 ms slower at spawn, as a thread group waits on its slowest ray); interpolating each sample's
+  state where it leaves a mouth's near zone, which covered only 4 to 6% of cells and slowed the sample pass.
+- **Rationale:** against tracing every pixel, at most 0.6% of pixels change by more than 30 of 765 (the near view;
+  0.1% elsewhere), and textures stay sharp because every pixel is still shaded; spawn at 2560×1600 goes from 22 to
+  10.5 ms.
+
+### D22. Fourth-order steps away from the throat
+
+- **Choice:** between 3 and 10 throat radii of a mouth, a ray takes classical Runge-Kutta steps of 0.5 of the
+  distance to the mouth's centre, instead of midpoint steps of 0.12; within 3 throat radii it keeps midpoint steps.
+- **Alternatives:** RK4 all the way to the throat (its stages land inside the throat sphere, and 21% of the throat
+  view's pixels changed by more than 30 against a reference with four times smaller steps, however small the
+  steps); Heun-like steps (D14); larger midpoint steps (D13).
+- **Rationale:** it is at least as accurate as the midpoint steps against that reference (spawn 11.5% of pixels
+  changed against 12.3%), and about 10% faster.
+
+### D23. Cross each mouth's inner sphere in one jump (a heuristic)
+
+- **Choice:** within 4.5 throat radii (1.6 blocks) of a mouth, which holds no boxes or ground (a test checks it),
+  the field is taken to be that mouth's alone, which looks the same about every axis through its centre, so a ray's
+  path there depends only on its angle. A table, traced once on the GPU with fine steps, gives for 4096 entry angles
+  where a ray leaves the sphere again, through the throat or not, and how far it went; a ray that reaches the
+  sphere jumps there in one step. Steps that would end deep inside the sphere are redone shorter, so rays enter it
+  near its edge. When the eye itself is inside a sphere, a second table for the eye's distance is traced each frame
+  (about 2 ms).
+- **Alternatives:** stepping through (the near view 65 ms instead of 32 at 2560×1600, tracing every pixel); giving
+  the other mouths' bending as two half kicks around the jump, which made the near view worse (40% of pixels
+  changed instead of 27%).
+- **Rationale:** it makes looking into and walking through a mouth about twice as fast. It is an approximation: the
+  other entrances, 3 to 5 blocks away, still bend the rays a little near the throat, so the image seen through a
+  throat comes out a few per cent larger or smaller. Against the fine-step reference, 27% of the near view's pixels
+  and 17% of the throat view's change by more than 30 of 765, against 17% and 10% for midpoint steps without the
+  jump; ignoring the other mouths in the same sphere without the jump gives the same 26% and 21%. Elsewhere the
+  images are as close to the reference as before.
+- **Revisit if:** the size of what you see through a throat matters, or mouths are placed closer together.
 
 ## Baselines
 
@@ -158,10 +206,11 @@
 
 ## Workload
 
-### D7. Six fixed views
+### D7. Seven fixed views
 
-- **Choice:** spawn, aimed at mouth 1A, 0.8 blocks from 1A's throat, above the rails, high above spawn, and the
-  laser through 1A; the same kinds of views as the WebGL timings in PR 58.
+- **Choice:** spawn, aimed at mouth 1A, 2.5 blocks from 1A's centre, 0.8 blocks from 1A's throat, above the rails,
+  high above spawn, and the laser through 1A; the same kinds of views as the WebGL timings in PR 58, plus the
+  2.5-block view, added in the third layer because walking into a mouth was the slowest part of the route.
 - **Alternatives:** a recorded flight.
 - **Rationale:** they cover cheap (above the rails), typical (spawn) and worst (at a throat) cases.
 
@@ -207,8 +256,9 @@
 - **Choice:** each benchmark view from both renderers was compared pixel by pixel; they differ only in the clouds and
   block speckles, whose pseudo-random hash (`fract(sin(x) · 43758.5)`) comes out differently on the GPU. The laser,
   the lensing and every surface match.
-  The third layer's Metal images differ from the second's by at most 1 of 255 per channel, as writing to a texture
-  rounds where the second layer's byte conversion truncated; every other change in the third layer left every pixel
-  the same, on both renderers.
+  In the third layer, writing to a texture rounds where the second layer's byte conversion truncated (at most 1 of
+  255 per channel), and D17 and D18 left every pixel the same, on both renderers. D21 to D23 are Metal's alone: the
+  CPU renderer still traces every pixel with midpoint steps, so it stays the reference they are measured against
+  (with four times smaller steps, in `.artifacts/bench_views/*-ref-fine7`).
 - **Alternatives:** a GPU-stable integer hash, so the images match exactly.
 - **Rationale:** the noise only decorates; matching it wasn't worth changing the look.

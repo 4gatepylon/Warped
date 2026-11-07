@@ -10,7 +10,7 @@
 use glam::{DMat4, DVec3, DVec4, Vec4};
 
 use crate::geometry::{
-    AXIS_W, AXIS_Y, UP_VECTOR, get_local_direction, invert_lorentz, normalize_tangent,
+    AXIS_W, AXIS_Y, UP_VECTOR, get_distance, get_local_direction, invert_lorentz, normalize_tangent,
 };
 use crate::world::{MAX_BOX_COUNT, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT, World};
 
@@ -69,7 +69,10 @@ pub struct Uniforms {
     pub beam_chunk_count: i32,
     pub width_px: i32,
     pub height_px: i32,
-    pub padding: [i32; 5],
+    pub camera_mouth: i32,
+    pub camera_distance_m: f32,
+    pub jump_m: f32,
+    pub padding: [i32; 2],
 }
 
 const _: () = assert!(std::mem::size_of::<Uniforms>().is_multiple_of(16));
@@ -317,6 +320,15 @@ fn make_uniforms(
         next_rows[k] = (1 + mouth.partner_index) as i32;
     }
     let tan_half_fov: f64 = HALF_FOV_RAD.tan();
+    let (mut camera_mouth, mut camera_distance_m): (i32, f64) = (-1, 0.0);
+    for (k, mouth) in world.mouths.iter().enumerate() {
+        let distance_m: f64 = get_distance(x, mouth.center) * r;
+        if distance_m < world.get_jump_radius_m()
+            && (camera_mouth < 0 || distance_m < camera_distance_m)
+        {
+            (camera_mouth, camera_distance_m) = (k as i32, distance_m);
+        }
+    }
     Uniforms {
         world_to_camera: invert_lorentz(camera_frame).as_mat4().to_cols_array_2d(),
         sky_basis: [right, up, back].map(|v| v.as_vec3().extend(0.0).to_array()),
@@ -342,6 +354,9 @@ fn make_uniforms(
         beam_chunk_count: beam_chunk_count as i32,
         width_px: size_px.0 as i32,
         height_px: size_px.1 as i32,
-        padding: [0; 5],
+        camera_mouth,
+        camera_distance_m: camera_distance_m as f32,
+        jump_m: world.get_jump_radius_m() as f32,
+        padding: [0; 2],
     }
 }

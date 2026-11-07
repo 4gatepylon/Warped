@@ -20,6 +20,7 @@ use crate::geometry::{
 pub const DEFAULT_CURVATURE_RADIUS_M: f64 = 8.0;
 pub const HORIZON_RADIUS_M: f64 = 1.4;
 pub const THROAT_PER_HORIZON: f64 = 0.25;
+pub const JUMP_RADIUS_PER_THROAT: f64 = 4.5;
 pub const EYE_HEIGHT_M: f64 = 1.7;
 pub const MAX_MOUTH_COUNT: usize = 8;
 pub const MAX_BOX_COUNT: usize = 96;
@@ -171,6 +172,14 @@ impl World {
     /// Example: `if rho_effective_m < world.get_throat_m() { cross(); }`
     pub fn get_throat_m(&self) -> f64 {
         THROAT_PER_HORIZON * HORIZON_RADIUS_M
+    }
+
+    /// `get_jump_radius_m` gives the radius of the sphere around each mouth that the Metal shader
+    /// crosses in one jump: nothing but the mouth may lie inside it.
+    ///
+    /// Example: `let jump_m = world.get_jump_radius_m();`
+    pub fn get_jump_radius_m(&self) -> f64 {
+        JUMP_RADIUS_PER_THROAT * self.get_throat_m()
     }
 
     /// `get_effective_radius_m` gives (R/2)(e^(2ρ) - 1) for a distance ρ in curvature radii: the
@@ -677,6 +686,7 @@ mod tests {
     //! | Box against a bounding plane | straddling it, wholly on one side | `slab_bound_is_exact_for_a_centred_box`, `every_box_is_inside_its_cluster_bound` |
     //! | Box orientation against the plane | same frame, rotated and moved | `slab_bound_is_exact_for_a_centred_box`, `slab_bound_is_tight_for_a_moved_box` |
     //! | Cluster | house, pylon, tree | `every_box_is_inside_its_cluster_bound` |
+    //! | Mouth | each of the demo's mouths | `jump_spheres_hold_no_boxes_or_ground` |
 
     use super::*;
     use crate::geometry::{make_rotation_about, minkowski_dot};
@@ -744,6 +754,20 @@ mod tests {
                 for x in sample_box(b, r) {
                     assert!(world.get_box_lower_bound_m(&cluster.bound, x) <= TOLERANCE);
                 }
+            }
+        }
+    }
+
+    /// `jump_spheres_hold_no_boxes_or_ground` checks that every box and the ground lie outside each
+    /// mouth's jump sphere, which the Metal shader crosses without testing them.
+    #[test]
+    fn jump_spheres_hold_no_boxes_or_ground() {
+        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+        let jump_m: f64 = world.get_jump_radius_m();
+        for mouth in &world.mouths {
+            assert!(world.curvature_radius_m * mouth.center[AXIS_Y].asinh() > jump_m);
+            for b in &world.boxes {
+                assert!(world.get_box_lower_bound_m(b, mouth.center) > jump_m);
             }
         }
     }

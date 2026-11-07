@@ -56,8 +56,28 @@ type Frame = (
     Retained<ProtocolObject<dyn MTLTexture>>,
 );
 
+/// `Pipeline` is a compiled compute kernel.
+type Pipeline = Retained<ProtocolObject<dyn MTLComputePipelineState>>;
+
+/// `SampleBuffers` holds adaptive sampling's buffers for one sample grid size: the samples, the
+/// cell marks, the list of cells to refine, the list's length followed by the refinement's
+/// indirect dispatch arguments, and the grid's size.
+struct SampleBuffers {
+    samples: Retained<ProtocolObject<dyn MTLBuffer>>,
+    cells: Retained<ProtocolObject<dyn MTLBuffer>>,
+    refine_cells: Retained<ProtocolObject<dyn MTLBuffer>>,
+    refine_count: Retained<ProtocolObject<dyn MTLBuffer>>,
+    grid: (usize, usize),
+}
+
 const SHADER_SOURCE: &str = include_str!("render_metal.metal");
-const KERNEL_NAME: &str = "trace_pixels";
+const BYTES_PER_RAY_END: usize = 48;
+const BYTES_PER_CELL_MARK: usize = 1;
+const BYTES_PER_CELL_INDEX: usize = 4;
+const REFINE_COUNT_BYTES: usize = 16;
+const DISPATCH_ARGUMENTS_BYTES: usize = 12;
+const REFINE_GROUP_SIZE: usize = 64;
+const THROAT_TABLE_SIZE: usize = 4096;
 const BYTES_PER_PIXEL: usize = 4;
 const BYTES_PER_TEXEL: usize = 16;
 const THREADGROUP_SIDE: usize = 8;
@@ -73,7 +93,19 @@ const _: () = assert!(
 pub struct MetalRenderer {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
-    pipeline: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    trace_pixels: Pipeline,
+    trace_samples: Pipeline,
+    classify_cells: Pipeline,
+    prepare_refinement: Pipeline,
+    resolve_pixels: Pipeline,
+    refine_pixels: Pipeline,
+    build_throat_table: Pipeline,
+    build_camera_table: Pipeline,
+    throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
+    camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
+    has_throat_table: bool,
+    is_adaptive: bool,
+    sample_buffers: Option<SampleBuffers>,
     rows: Retained<ProtocolObject<dyn MTLBuffer>>,
     render_texture: Option<Texture>,
     output_texture: Option<Texture>,
@@ -88,7 +120,10 @@ pub struct MetalRenderer {
 ///
 /// Example: `let source = fill_shader_constants(SHADER_SOURCE);`
 fn fill_shader_constants(source: &str) -> String {
-    let constants: [(&str, usize); 20] = [
+    let constants: [(&str, usize); 23] = [
+        ("THROAT_TABLE_SIZE", THROAT_TABLE_SIZE),
+        ("REFINE_GROUP_SIZE", REFINE_GROUP_SIZE),
+        ("BYTES_PER_RAY_END", BYTES_PER_RAY_END),
         ("MAX_MOUTH_COUNT", MAX_MOUTH_COUNT),
         ("ROW_TEXEL_COUNT", ROW_TEXEL_COUNT),
         ("TEXEL_TO_WORLD", TEXEL_TO_WORLD),
@@ -121,12 +156,42 @@ fn fill_shader_constants(source: &str) -> String {
     filled
 }
 
+/// `dispatch_grid` runs the encoder's current kernel once per point of a 2D grid, in square
+/// thread groups.
+///
+/// Example: `dispatch_grid(&encoder, (1280, 800));`
+fn dispatch_grid(encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>, size: (usize, usize)) {
+    encoder.dispatchThreads_threadsPerThreadgroup(
+        MTLSize {
+            width: size.0,
+            height: size.1,
+            depth: 1,
+        },
+        MTLSize {
+            width: THREADGROUP_SIDE,
+            height: THREADGROUP_SIDE,
+            depth: 1,
+        },
+    );
+}
+
+/// `get_sample_grid` gives the size of adaptive sampling's sample grid for a render size: one
+/// sample per even pixel each way, and one more past each far edge, so every pixel lies between
+/// samples (the shader's `get_sample_columns` matches it).
+///
+/// Example: `let grid = get_sample_grid((2560, 1600));`
+fn get_sample_grid(render_px: (usize, usize)) -> (usize, usize) {
+    (render_px.0 / 2 + 2, render_px.1 / 2 + 2)
+}
+
 impl MetalRenderer {
-    /// `New` opens the default GPU, compiles the ray tracer and allocates the scene buffer.
+    /// `New` opens the default GPU, compiles the ray tracer and allocates the scene buffer. With
+    /// `is_adaptive`, it traces every other pixel each way and interpolates where that is exact
+    /// enough (see `resolve_pixels` in the shader); otherwise it traces every pixel.
     ///
-    /// Example: `let renderer = MetalRenderer::New()?;`
+    /// Example: `let renderer = MetalRenderer::New(true)?;`
     #[allow(non_snake_case)]
-    pub fn New() -> Result<MetalRenderer> {
+    pub fn New(is_adaptive: bool) -> Result<MetalRenderer> {
         let device: Retained<ProtocolObject<dyn MTLDevice>> =
             MTLCreateSystemDefaultDevice().ok_or("Metal: this machine has no GPU Metal can use")?;
         let source: Retained<NSString> = NSString::from_str(&fill_shader_constants(SHADER_SOURCE));
@@ -138,19 +203,42 @@ impl MetalRenderer {
                     error.localizedDescription()
                 )
             })?;
-        let function = library
-            .newFunctionWithName(&NSString::from_str(KERNEL_NAME))
-            .ok_or(format!(
-                "Metal: the shader has no kernel named {KERNEL_NAME}"
-            ))?;
-        let pipeline: Retained<ProtocolObject<dyn MTLComputePipelineState>> = device
-            .newComputePipelineStateWithFunction_error(&function)
-            .map_err(|error| {
-                format!(
-                    "Metal: the pipeline failed: {}",
-                    error.localizedDescription()
+        let make_pipeline = |name: &str| -> Result<Pipeline> {
+            let function = library
+                .newFunctionWithName(&NSString::from_str(name))
+                .ok_or(format!("Metal: the shader has no kernel named {name}"))?;
+            Ok(device
+                .newComputePipelineStateWithFunction_error(&function)
+                .map_err(|error| {
+                    format!(
+                        "Metal: the {name} pipeline failed: {}",
+                        error.localizedDescription()
+                    )
+                })?)
+        };
+        let (trace_pixels, trace_samples, classify_cells) = (
+            make_pipeline("trace_pixels")?,
+            make_pipeline("trace_samples")?,
+            make_pipeline("classify_cells")?,
+        );
+        let (prepare_refinement, resolve_pixels, refine_pixels) = (
+            make_pipeline("prepare_refinement")?,
+            make_pipeline("resolve_pixels")?,
+            make_pipeline("refine_pixels")?,
+        );
+        let (build_throat_table, build_camera_table) = (
+            make_pipeline("build_throat_table")?,
+            make_pipeline("build_camera_table")?,
+        );
+        let make_table = || {
+            device
+                .newBufferWithLength_options(
+                    THROAT_TABLE_SIZE * BYTES_PER_TEXEL,
+                    MTLResourceOptions::StorageModePrivate,
                 )
-            })?;
+                .ok_or("Metal: no memory for a jump table")
+        };
+        let (throat_table, camera_table) = (make_table()?, make_table()?);
         let queue: Retained<ProtocolObject<dyn MTLCommandQueue>> =
             device.newCommandQueue().ok_or("Metal: no command queue")?;
         let rows: Retained<ProtocolObject<dyn MTLBuffer>> = device
@@ -162,7 +250,19 @@ impl MetalRenderer {
         Ok(MetalRenderer {
             device,
             queue,
-            pipeline,
+            trace_pixels,
+            trace_samples,
+            classify_cells,
+            prepare_refinement,
+            resolve_pixels,
+            refine_pixels,
+            build_throat_table,
+            build_camera_table,
+            throat_table,
+            camera_table,
+            has_throat_table: false,
+            is_adaptive,
+            sample_buffers: None,
             rows,
             render_texture: None,
             output_texture: None,
@@ -264,6 +364,9 @@ impl MetalRenderer {
         if is_upscaled {
             self.prepare_upscaling(render_px, output_px)?;
         }
+        if self.is_adaptive {
+            self.prepare_sample_buffers(render_px)?;
+        }
         let row_bytes: usize = data.rows.len() * BYTES_PER_TEXEL;
         assert!(
             row_bytes <= self.rows.length(),
@@ -284,8 +387,9 @@ impl MetalRenderer {
         let encoder = command_buffer
             .computeCommandEncoder()
             .ok_or("Metal: no compute encoder")?;
-        encoder.setComputePipelineState(&self.pipeline);
         let uniforms: NonNull<Uniforms> = NonNull::from(&data.uniforms);
+        let should_build_table: bool = !self.has_throat_table;
+        self.has_throat_table = true;
         let (render_texture, _) = self
             .render_texture
             .as_ref()
@@ -295,19 +399,23 @@ impl MetalRenderer {
             encoder.setBuffer_offset_atIndex(Some(&self.rows), 0, 0);
             encoder.setBytes_length_atIndex(uniforms.cast(), std::mem::size_of::<Uniforms>(), 1);
             encoder.setTexture_atIndex(Some(render_texture), 0);
+            encoder.setBuffer_offset_atIndex(Some(&self.throat_table), 0, 7);
+            encoder.setBuffer_offset_atIndex(Some(&self.camera_table), 0, 8);
         }
-        encoder.dispatchThreads_threadsPerThreadgroup(
-            MTLSize {
-                width: render_px.0,
-                height: render_px.1,
-                depth: 1,
-            },
-            MTLSize {
-                width: THREADGROUP_SIDE,
-                height: THREADGROUP_SIDE,
-                depth: 1,
-            },
-        );
+        if should_build_table {
+            encoder.setComputePipelineState(&self.build_throat_table);
+            dispatch_grid(&encoder, (THROAT_TABLE_SIZE, 1));
+        }
+        if data.uniforms.camera_mouth >= 0 {
+            encoder.setComputePipelineState(&self.build_camera_table);
+            dispatch_grid(&encoder, (THROAT_TABLE_SIZE, 1));
+        }
+        if self.is_adaptive {
+            self.encode_adaptive_sampling(&encoder, render_px);
+        } else {
+            encoder.setComputePipelineState(&self.trace_pixels);
+            dispatch_grid(&encoder, render_px);
+        }
         encoder.endEncoding();
         if !is_upscaled {
             return Ok((command_buffer, render_texture.clone()));
@@ -324,6 +432,87 @@ impl MetalRenderer {
             scaler.encodeToCommandBuffer(&command_buffer);
         }
         Ok((command_buffer, output_texture.clone()))
+    }
+
+    /// `encode_adaptive_sampling` encodes adaptive sampling's passes into an encoder that already
+    /// has the scene rows, uniforms and render texture: trace every even pixel, mark the smooth
+    /// cells and list the others, size the refinement, write the pixels that need no new ray, and
+    /// trace the listed ones.
+    ///
+    /// Example: `self.encode_adaptive_sampling(&encoder, (2560, 1600))?;`
+    fn encode_adaptive_sampling(
+        &self,
+        encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
+        render_px: (usize, usize),
+    ) {
+        let grid: (usize, usize) = get_sample_grid(render_px);
+        let buffers: &SampleBuffers = self
+            .sample_buffers
+            .as_ref()
+            .filter(|buffers| buffers.grid == grid)
+            .expect("prepare_sample_buffers made the buffers for this size");
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
+        unsafe {
+            encoder.setBuffer_offset_atIndex(Some(&buffers.samples), 0, 2);
+            encoder.setBuffer_offset_atIndex(Some(&buffers.cells), 0, 3);
+            encoder.setBuffer_offset_atIndex(Some(&buffers.refine_cells), 0, 4);
+            encoder.setBuffer_offset_atIndex(Some(&buffers.refine_count), 0, 5);
+            encoder.setBuffer_offset_atIndex(Some(&buffers.refine_count), REFINE_COUNT_BYTES, 6);
+        }
+        encoder.setComputePipelineState(&self.trace_samples);
+        dispatch_grid(encoder, grid);
+        encoder.setComputePipelineState(&self.classify_cells);
+        dispatch_grid(encoder, grid);
+        encoder.setComputePipelineState(&self.prepare_refinement);
+        dispatch_grid(encoder, (1, 1));
+        encoder.setComputePipelineState(&self.resolve_pixels);
+        dispatch_grid(encoder, render_px);
+        encoder.setComputePipelineState(&self.refine_pixels);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DISPATCH SIZED FROM THE WRONG BYTES WILL HAPPEN
+        unsafe {
+            encoder
+                .dispatchThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerThreadgroup(
+                    &buffers.refine_count,
+                    REFINE_COUNT_BYTES,
+                    MTLSize {
+                        width: REFINE_GROUP_SIZE,
+                        height: 1,
+                        depth: 1,
+                    },
+                );
+        }
+    }
+
+    /// `prepare_sample_buffers` makes adaptive sampling's buffers for a render size, if the current
+    /// ones are for another size.
+    ///
+    /// Example: `self.prepare_sample_buffers((2560, 1600))?;`
+    fn prepare_sample_buffers(&mut self, render_px: (usize, usize)) -> Result<()> {
+        let grid: (usize, usize) = get_sample_grid(render_px);
+        if self
+            .sample_buffers
+            .as_ref()
+            .is_some_and(|buffers| buffers.grid == grid)
+        {
+            return Ok(());
+        }
+        let make_buffer = |bytes: usize| {
+            self.device
+                .newBufferWithLength_options(bytes, MTLResourceOptions::StorageModePrivate)
+                .ok_or(format!(
+                    "Metal: no memory for a {}x{} sample grid",
+                    grid.0, grid.1
+                ))
+        };
+        let cell_count: usize = grid.0 * grid.1;
+        self.sample_buffers = Some(SampleBuffers {
+            samples: make_buffer(cell_count * BYTES_PER_RAY_END)?,
+            cells: make_buffer(cell_count * BYTES_PER_CELL_MARK)?,
+            refine_cells: make_buffer(cell_count * BYTES_PER_CELL_INDEX)?,
+            refine_count: make_buffer(REFINE_COUNT_BYTES + DISPATCH_ARGUMENTS_BYTES)?,
+            grid,
+        });
+        Ok(())
     }
 
     /// `finish` commits a command buffer, waits for it, checks it worked and records its GPU time.
