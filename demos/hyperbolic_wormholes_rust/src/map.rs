@@ -5,6 +5,12 @@
 //! Interface: `Map::Load`, `get_map_folder`, and the types of the manifest's parts.
 //!
 //! Example: `let map = Map::Load(&get_map_folder("lunar_surface"))?;`
+//!
+//! Must know:
+//! - Every field of the format is read, so any valid map parses (`deny_unknown_fields`), even the
+//!   ones this demo doesn't use; hence `dead_code` is allowed here.
+
+#![allow(dead_code)]
 
 use std::error::Error;
 use std::fs;
@@ -279,8 +285,12 @@ impl Map {
         let manifest_path: PathBuf = folder.join(MANIFEST_NAME);
         let text: String = fs::read_to_string(&manifest_path)
             .map_err(|error| format!("map: can't read {}: {error}", manifest_path.display()))?;
-        let mut map: Map = serde_json::from_str(&text)
-            .map_err(|error| format!("map: {} breaks the format: {error}", manifest_path.display()))?;
+        let mut map: Map = serde_json::from_str(&text).map_err(|error| {
+            format!(
+                "map: {} breaks the format: {error}",
+                manifest_path.display()
+            )
+        })?;
         if map.format != FORMAT || map.version != VERSION {
             return Err(format!(
                 "map: {} is {:?} version {}, not {FORMAT:?} version {VERSION}",
@@ -334,6 +344,12 @@ impl Map {
         self.materials
             .iter()
             .find(|material| material.id == id)
-            .ok_or_else(|| format!("map: {} uses material {id}, which isn't in its palette", self.name).into())
+            .ok_or_else(|| {
+                format!(
+                    "map: {} uses material {id}, which isn't in its palette",
+                    self.name
+                )
+                .into()
+            })
     }
 }

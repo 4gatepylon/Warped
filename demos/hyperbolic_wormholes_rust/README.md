@@ -31,6 +31,24 @@ make run-demo RENDERER=cpu
 The three wormholes start ahead on the left (to the house door), behind you by the blue pylon (to the red pylon
 about 50 blocks down the rails), and far left (to high above the rails, where you fall back to the ground).
 
+## Maps
+
+```bash
+make run-demo MAP=lunar-surface
+cargo run --release -- --map lunar-surface --view black_hole
+```
+
+- The demo reads its maps from [`common/maps/`](../../common/maps/README.md) (the portable map format):
+  `house-demo` (the default: the house, rails and three wormholes, R = 8) or `lunar-surface` (the Lunar Surface level of
+  [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m, with its black hole and wormhole).
+- Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
+  steps, lighting with sun shadows, lamps, ground, stars and planet, so it looks like the level. Walking, jumping,
+  flying, the laser and multiplayer follow the level's rules there (6 m/s² gravity, stepping up single blocks, moving
+  along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
+  team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
+- `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
+  `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
+
 ## Play together
 
 Everyone on the same network can play in one game. One player hosts and the others join:
@@ -104,6 +122,9 @@ make run-autopilot
   an announcement on the network for `--join auto`.
 - `multiplayer.rs`: the other players as boxes in a per-frame copy of the world, everyone's laser, hits, spawn
   points, and the test bot.
+- `map.rs`: reads a map of the portable format; `map_export.rs` writes the house as one (`--export-map`).
+- `voxel_world.rs`: a voxel map on the CPU, ported from the Lunar Surface level: structures, warps, the voxel walk,
+  the laser's light path, and walking on the map. `render_voxel.metal` and `render_voxel.rs` draw it on the GPU.
 - `main.rs`: the command line, the SDL3 window and HUD, and the benchmark and autopilot runs.
 
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the
@@ -200,6 +221,21 @@ So ordinary views now sit within about a tenth of a pixel of the converged light
 mouth's lens, which magnifies small errors, within 1 to 1.5 pixels. Adaptive sampling on its own moves features by
 under 0.01 pixel (median; SSIM 0.98 to 0.998 against tracing every pixel). Frames the window upscales with MetalFX
 keep features in place (0.2 to 0.4 pixel) but lose fine detail (SSIM 0.85 to 0.96 at 0.8 scale).
+
+Lunar Surface (`--map lunar-surface --bench-views`), GPU milliseconds per frame at 2560×1600 and full resolution:
+
+| View | GPU ms | View | GPU ms |
+| --- | ---: | --- | ---: |
+| blue spawn | 7.7 | red spawn | 8.1 |
+| overview (from 46 m up) | 21.7 | middle | 23.9 |
+| black hole | 46.1 | Einstein ring | 52.2 |
+| wormhole | 33.9 | wormhole exit | 59.5 |
+| red pylon | 6.1 | ridge | 8.9 |
+| overlook | 5.4 | habitat row | 7.5 |
+| laser into the wormhole | 44.7 | | |
+
+In a full-screen window (2560×1336, automatic scale, `--view`), the blue spawn runs at 192 fps at full resolution, and
+the black hole, wormhole exit and Einstein ring views at 80, 74 and 71 fps at render scales 0.59, 0.52 and 0.56.
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s

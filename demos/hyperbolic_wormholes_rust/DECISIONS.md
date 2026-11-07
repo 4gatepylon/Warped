@@ -326,6 +326,50 @@
 - **Rationale:** you suggested playing against myself. Three bots for 30 s: 25 hits, and each bot's count of hits
   and times hit matched the server's log.
 
+### D33. Load the house from its map, and add Lunar Surface
+
+- **Choice:** `--map house-demo` (the default) builds the world from `common/maps/house_demo` (boxes grouped by
+  name, mouths, spawn), and draws pixel for pixel as the world built in code did (checked on all eight views, and by a
+  test that the loaded world's boxes, clusters, mouths and spawn equal the built one's). `--map lunar-surface` loads
+  the Lunar Surface level's map and draws it with a Metal port of that level's WebGL shader.
+- **Alternatives:** porting Lunar Surface's look onto the house renderer (boxes, the house's jump tables), which
+  would not match the level; a renderer that draws both kinds of map.
+- **Rationale:** you asked for maps chosen by name, with lunar_surface matching the level; porting the level's own
+  shader is the surest match. Side by side with the WebGL level in the built-in browser, the blue spawn, black hole,
+  wormhole and overview views show the same scene, and the laser fired into the wormhole hits the red pylon 42.4 m
+  away, as the level's README says (42 m).
+
+### D34. Lunar Surface keeps the level's light paths
+
+- **Choice:** the same kick–drift–kick steps of 8% of the distance to a warp as the level, with each step's end
+  bending reused for the next step's start (10% faster, the same picture).
+- **Alternatives:** steps of 12% or 16% (30% and 45% less GPU time near warps, but features up to 0.5 pixel further
+  from converged paths: against the level's steps eight times smaller, the level's own steps are 0.3 to 2.1 pixels
+  off near warps at 2560×1600, 12% steps 0.8 to 2.2, 16% steps 0.9 to 2.3); the house's RK4 steps and jump tables
+  (much more code, with chord errors to handle near the structures inside the warps' reach).
+- **Rationale:** the map should look like the level; the window's automatic scale keeps 60 fps (D36).
+- **Revisit if:** the upscaled frames near the black hole and wormhole look too soft.
+
+### D35. Lunar Surface plays by the level's rules
+
+- **Choice:** the level's player (a body frame on the ground, an eye height, probes for collisions, stepping up single
+  blocks, 6 m/s² gravity, flying), its laser trace (from the eye, drawn from the gun) and its falling into the black
+  hole, ported to Rust. The laser stays this demo's toggle (`L`) rather than the level's single shots, so the
+  multiplayer rule (a laser that reaches a player removes them) is the same on both maps. Other players are 0.5 ×
+  2 × 0.5 m voxel bodies in their colour; players alternate between the blue and red spawns.
+- **Alternatives:** the house demo's movement on the lunar map; the level's single shots that fade.
+- **Rationale:** the map should play like the level, and both maps should share one multiplayer rule.
+
+### D36. Speed on Lunar Surface
+
+- **Choice:** the same automatic render scale as the house (D19). At 2560×1600 and full resolution the views away
+  from warps take 5 to 9 ms of GPU time, those across the crater 22 to 24 ms and those near the black hole and wormhole
+  34 to 60 ms; in a full-screen window
+  (2560×1336) the spawn runs at 192 fps at full resolution, and the black hole, wormhole exit and Einstein ring views
+  at 80, 74 and 71 fps at render scales 0.59, 0.52 and 0.56.
+- **Alternatives:** larger steps (D34); adaptive sampling or jump tables as in the house, left for later.
+- **Rationale:** it keeps 60 fps with the level's picture; the views near warps are where it costs resolution.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

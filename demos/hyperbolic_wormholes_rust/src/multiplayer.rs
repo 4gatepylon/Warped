@@ -22,8 +22,8 @@ use crate::geometry::{
 };
 use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
-use crate::scene_data::{Beam, SceneData};
 use crate::render_voxel::VoxelFrame;
+use crate::scene_data::{Beam, SceneData};
 use crate::voxel_world::{BeamSegment, LOOK_RAD_PER_PX, Shot, VoxelPlayer, VoxelWorld};
 use crate::world::{Color, EYE_HEIGHT_M, World};
 
@@ -107,7 +107,12 @@ pub fn pack_shared_view(
     for player in players {
         let color: Color = AVATAR_COLORS[player.id as usize % AVATAR_COLORS.len()];
         let name: String = format!("player {}", player.id);
-        shared.add_avatar(get_avatar_frame(world, player.frame), &name, AVATAR_HALF_M, color);
+        shared.add_avatar(
+            get_avatar_frame(world, player.frame),
+            &name,
+            AVATAR_HALF_M,
+            color,
+        );
     }
     let trace_from = |eye: DMat4| {
         let data: SceneData =
@@ -233,7 +238,8 @@ pub fn run_bot(
 pub fn get_voxel_spawn(world: &VoxelWorld, id: u32) -> VoxelPlayer {
     let spawn: VoxelPlayer = VoxelPlayer::AtSpawn(world, id as usize);
     let turn: DMat4 = make_rotation(AXIS_X, AXIS_Z, f64::from(id) * SPAWN_TURN_RAD);
-    let body: DMat4 = spawn.body * turn * make_boost(AXIS_Z, -VOXEL_SPAWN_RING_M / world.r) * turn.inverse();
+    let body: DMat4 =
+        spawn.body * turn * make_boost(AXIS_Z, -VOXEL_SPAWN_RING_M / world.r) * turn.inverse();
     VoxelPlayer::Standing(world, body)
 }
 
@@ -268,7 +274,12 @@ pub fn pack_shared_voxel_view(
     let colors: Vec<[f32; 3]> = AVATAR_COLORS.to_vec();
     let bodies: Vec<(DMat4, usize)> = players
         .iter()
-        .map(|p| (VoxelPlayer::FromEye(world, p.frame).get_feet_frame(world), p.id as usize))
+        .map(|p| {
+            (
+                VoxelPlayer::FromEye(world, p.frame).get_feet_frame(world),
+                p.id as usize,
+            )
+        })
         .collect();
     let shared: VoxelWorld = world.with_avatars(&bodies, &colors);
     let mut beams: Vec<(Vec<BeamSegment>, u32)> = Vec::new();
@@ -284,7 +295,10 @@ pub fn pack_shared_voxel_view(
         shot = Some(own);
     }
     for player in players.iter().filter(|p| p.is_laser_on) {
-        beams.push((shared.trace_laser(player.frame).segments, get_team(player.id)));
+        beams.push((
+            shared.trace_laser(player.frame).segments,
+            get_team(player.id),
+        ));
     }
     SharedVoxelView {
         frame: VoxelFrame::Build(&shared, camera, &beams, spot, render_px),
@@ -318,7 +332,11 @@ pub fn run_voxel_bot(
                     (player, my_id) = (get_voxel_spawn(world, id), id);
                     println!("bot joined as player {id}");
                 }
-                NetEvent::Eliminated { victim_id, shooter_id, is_self } => {
+                NetEvent::Eliminated {
+                    victim_id,
+                    shooter_id,
+                    is_self,
+                } => {
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {
                         eliminated_count += 1;
@@ -343,8 +361,12 @@ pub fn run_voxel_bot(
             let mut input: Input = Input::default();
             let mut is_laser_on: bool = false;
             if let Some((other, distance_m)) = target {
-                let local: DVec3 = get_local_direction(camera, normalize_tangent(eye, other.frame.col(AXIS_W)));
-                player.look(local.x.atan2(-local.z) / LOOK_RAD_PER_PX, -local.y.clamp(-1.0, 1.0).asin() / LOOK_RAD_PER_PX);
+                let local: DVec3 =
+                    get_local_direction(camera, normalize_tangent(eye, other.frame.col(AXIS_W)));
+                player.look(
+                    local.x.atan2(-local.z) / LOOK_RAD_PER_PX,
+                    -local.y.clamp(-1.0, 1.0).asin() / LOOK_RAD_PER_PX,
+                );
                 input.forward = distance_m > VOXEL_SPAWN_RING_M * 2.0;
                 is_laser_on = distance_m < VOXEL_BOT_LASER_RANGE_M;
             } else {
@@ -353,7 +375,14 @@ pub fn run_voxel_bot(
             }
             player.step(world, &input, BOT_STEP_S, my_id as usize);
             let camera: DMat4 = player.get_camera_frame(world);
-            let view: SharedVoxelView = pack_shared_voxel_view(world, camera, is_laser_on, get_team(my_id), &client.players, BOT_VIEW_PX);
+            let view: SharedVoxelView = pack_shared_voxel_view(
+                world,
+                camera,
+                is_laser_on,
+                get_team(my_id),
+                &client.players,
+                BOT_VIEW_PX,
+            );
             if let Some(victim_id) = view.hit_player_id {
                 client.send_hit(victim_id)?;
                 if last_victim != Some(victim_id) {

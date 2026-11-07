@@ -139,7 +139,13 @@ impl VoxelFrame {
     ///
     /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, (1280, 800));`
     #[allow(non_snake_case)]
-    pub fn Build(world: &VoxelWorld, camera: DMat4, beams: &[(Vec<BeamSegment>, u32)], spot: Option<(DVec4, u32)>, size_px: (u32, u32)) -> VoxelFrame {
+    pub fn Build(
+        world: &VoxelWorld,
+        camera: DMat4,
+        beams: &[(Vec<BeamSegment>, u32)],
+        spot: Option<(DVec4, u32)>,
+        size_px: (u32, u32),
+    ) -> VoxelFrame {
         let r: f64 = world.r;
         let structures: Vec<GpuStructure> = world
             .structures
@@ -149,8 +155,18 @@ impl VoxelFrame {
                 GpuStructure {
                     rows,
                     centre: to_f32(s.centre),
-                    bound: [s.radius.cosh() as f32, s.origin[0] as f32, s.origin[1] as f32, s.origin[2] as f32],
-                    size: [s.size[0] as i32, s.size[1] as i32, s.size[2] as i32, s.offset as i32],
+                    bound: [
+                        s.radius.cosh() as f32,
+                        s.origin[0] as f32,
+                        s.origin[1] as f32,
+                        s.origin[2] as f32,
+                    ],
+                    size: [
+                        s.size[0] as i32,
+                        s.size[1] as i32,
+                        s.size[2] as i32,
+                        s.offset as i32,
+                    ],
                     scale: [(r / s.cell_m) as f32, 0.0, 0.0, 0.0],
                 }
             })
@@ -166,7 +182,12 @@ impl VoxelFrame {
                     inverse: to_columns(w.inverse),
                     forward: to_columns(w.frame),
                     centre: to_f32(w.centre),
-                    params: [f32::from(u8::from(w.is_mouth)), w.m as f32, w.reach as f32, if w.is_mouth { w.partner as f32 } else { -1.0 }],
+                    params: [
+                        f32::from(u8::from(w.is_mouth)),
+                        w.m as f32,
+                        w.reach as f32,
+                        if w.is_mouth { w.partner as f32 } else { -1.0 },
+                    ],
                     list: [first as i32, w.list.len() as i32, 0, 0],
                 }
             })
@@ -174,12 +195,19 @@ impl VoxelFrame {
         let lights: Vec<GpuLight> = world
             .lights
             .iter()
-            .map(|&(x, color, radius_m)| GpuLight { position: to_f32(x), color_radius: [color[0], color[1], color[2], radius_m as f32] })
+            .map(|&(x, color, radius_m)| GpuLight {
+                position: to_f32(x),
+                color_radius: [color[0], color[1], color[2], radius_m as f32],
+            })
             .collect();
         let gpu_beams: Vec<GpuBeam> = beams
             .iter()
             .flat_map(|(segments, team)| {
-                segments.iter().map(move |s| GpuBeam { a: to_f32(s.a), b: to_f32(s.b), info: [s.length as f32, 0.0, BEAM_BRIGHTNESS, *team as f32] })
+                segments.iter().map(move |s| GpuBeam {
+                    a: to_f32(s.a),
+                    b: to_f32(s.b),
+                    info: [s.length as f32, 0.0, BEAM_BRIGHTNESS, *team as f32],
+                })
             })
             .collect();
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
@@ -226,9 +254,15 @@ impl VoxelFrame {
                 let c: [f32; 3] = team_colors[team as usize % 2];
                 [c[0], c[1], c[2], SPOT_BRIGHTNESS]
             }),
-            regions: world.regions.map_or([0.0; 4], |[edge, u_m, v_m]| [edge as f32, u_m as f32, v_m as f32, 0.0]),
+            regions: world.regions.map_or([0.0; 4], |[edge, u_m, v_m]| {
+                [edge as f32, u_m as f32, v_m as f32, 0.0]
+            }),
         };
-        assert_eq!(world.palette.len(), MAX_MATERIAL_COUNT, "VoxelFrame: the palette has 256 entries");
+        assert_eq!(
+            world.palette.len(),
+            MAX_MATERIAL_COUNT,
+            "VoxelFrame: the palette has 256 entries"
+        );
         VoxelFrame {
             uniforms,
             structures,
@@ -245,7 +279,10 @@ impl VoxelFrame {
     ///
     /// Example: `let (w, h) = frame.get_render_size();`
     pub fn get_render_size(&self) -> (usize, usize) {
-        (self.uniforms.width_px as usize, self.uniforms.height_px as usize)
+        (
+            self.uniforms.width_px as usize,
+            self.uniforms.height_px as usize,
+        )
     }
 }
 
@@ -258,18 +295,32 @@ impl GrowableBuffer {
     /// `write` copies `bytes` into the buffer (making a bigger one first if needed) and returns it.
     ///
     /// Example: `let buffer = self.voxels.write(device, &frame.voxels)?;`
-    fn write(&mut self, device: &ProtocolObject<dyn MTLDevice>, bytes: &[u8]) -> Result<&ProtocolObject<dyn MTLBuffer>> {
+    fn write(
+        &mut self,
+        device: &ProtocolObject<dyn MTLDevice>,
+        bytes: &[u8],
+    ) -> Result<&ProtocolObject<dyn MTLBuffer>> {
         let needed: usize = bytes.len().max(MIN_BUFFER_BYTES);
         if self.buffer.as_ref().is_none_or(|b| b.length() < needed) {
             self.buffer = Some(
                 device
-                    .newBufferWithLength_options(needed.next_power_of_two(), MTLResourceOptions::StorageModeShared)
+                    .newBufferWithLength_options(
+                        needed.next_power_of_two(),
+                        MTLResourceOptions::StorageModeShared,
+                    )
                     .ok_or("Metal: no memory for a voxel buffer")?,
             );
         }
-        let buffer: &ProtocolObject<dyn MTLBuffer> = self.buffer.as_ref().expect("the buffer was just made");
+        let buffer: &ProtocolObject<dyn MTLBuffer> =
+            self.buffer.as_ref().expect("the buffer was just made");
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A WRITE PAST THE BUFFER WILL HAPPEN
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer.contents().as_ptr().cast::<u8>(), bytes.len()) };
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                buffer.contents().as_ptr().cast::<u8>(),
+                bytes.len(),
+            )
+        };
         Ok(buffer)
     }
 }
@@ -279,7 +330,9 @@ impl GrowableBuffer {
 /// Example: `let bytes = as_bytes(&frame.lights);`
 fn as_bytes<T: Copy>(values: &[T]) -> &[u8] {
     // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN READING PAST THE SLICE WILL HAPPEN
-    unsafe { std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values)) }
+    unsafe {
+        std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values))
+    }
 }
 
 /// `VoxelGpu` is the voxel renderer's pipeline and buffers.
@@ -296,20 +349,40 @@ impl VoxelGpu {
     pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<VoxelGpu> {
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&NSString::from_str(SHADER_SOURCE), None)
-            .map_err(|error| format!("Metal: the voxel shader didn't compile: {}", error.localizedDescription()))?;
+            .map_err(|error| {
+                format!(
+                    "Metal: the voxel shader didn't compile: {}",
+                    error.localizedDescription()
+                )
+            })?;
         let function = library
             .newFunctionWithName(&NSString::from_str(KERNEL_NAME))
-            .ok_or(format!("Metal: the voxel shader has no kernel named {KERNEL_NAME}"))?;
+            .ok_or(format!(
+                "Metal: the voxel shader has no kernel named {KERNEL_NAME}"
+            ))?;
         let pipeline = device
             .newComputePipelineStateWithFunction_error(&function)
-            .map_err(|error| format!("Metal: the voxel pipeline failed: {}", error.localizedDescription()))?;
-        Ok(VoxelGpu { pipeline, buffers: (0..7).map(|_| GrowableBuffer { buffer: None }).collect() })
+            .map_err(|error| {
+                format!(
+                    "Metal: the voxel pipeline failed: {}",
+                    error.localizedDescription()
+                )
+            })?;
+        Ok(VoxelGpu {
+            pipeline,
+            buffers: (0..7).map(|_| GrowableBuffer { buffer: None }).collect(),
+        })
     }
 
     /// `encode` uploads a frame and dispatches the voxel kernel into the encoder's texture 0.
     ///
     /// Example: `gpu.encode(&device, &encoder, &frame)?;`
-    pub fn encode(&mut self, device: &ProtocolObject<dyn MTLDevice>, encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>, frame: &VoxelFrame) -> Result<()> {
+    pub fn encode(
+        &mut self,
+        device: &ProtocolObject<dyn MTLDevice>,
+        encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
+        frame: &VoxelFrame,
+    ) -> Result<()> {
         let contents: [&[u8]; 7] = [
             as_bytes(&frame.structures),
             &frame.voxels,
@@ -322,7 +395,13 @@ impl VoxelGpu {
         encoder.setComputePipelineState(&self.pipeline);
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
-        unsafe { encoder.setBytes_length_atIndex(uniforms.cast(), std::mem::size_of::<VoxelUniforms>(), 0) };
+        unsafe {
+            encoder.setBytes_length_atIndex(
+                uniforms.cast(),
+                std::mem::size_of::<VoxelUniforms>(),
+                0,
+            )
+        };
         for (k, bytes) in contents.iter().enumerate() {
             let buffer: &ProtocolObject<dyn MTLBuffer> = self.buffers[k].write(device, bytes)?;
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
@@ -330,8 +409,16 @@ impl VoxelGpu {
         }
         let (width, height) = frame.get_render_size();
         encoder.dispatchThreads_threadsPerThreadgroup(
-            MTLSize { width, height, depth: 1 },
-            MTLSize { width: THREADGROUP_SIDE, height: THREADGROUP_SIDE, depth: 1 },
+            MTLSize {
+                width,
+                height,
+                depth: 1,
+            },
+            MTLSize {
+                width: THREADGROUP_SIDE,
+                height: THREADGROUP_SIDE,
+                depth: 1,
+            },
         );
         Ok(())
     }

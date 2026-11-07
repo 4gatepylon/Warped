@@ -221,11 +221,19 @@ impl World {
     /// Example: `let world = World::FromMap(&Map::Load(&get_map_folder("house_demo"))?)?;`
     #[allow(non_snake_case)]
     pub fn FromMap(map: &Map) -> Result<World, String> {
-        let unsupported = |what: &str| format!("map {}: this renderer draws boxes and foil mouths; {what}", map.name);
+        let unsupported = |what: &str| {
+            format!(
+                "map {}: this renderer draws boxes and foil mouths; {what}",
+                map.name
+            )
+        };
         if !map.structures.is_empty() {
             return Err(unsupported("it has voxel structures"));
         }
-        let mouth: &Warp = map.warps.first().ok_or_else(|| unsupported("it has no wormhole mouths"))?;
+        let mouth: &Warp = map
+            .warps
+            .first()
+            .ok_or_else(|| unsupported("it has no wormhole mouths"))?;
         for warp in &map.warps {
             let is_like_first: bool = warp.kind == "wormhole_mouth"
                 && warp.law == "foil"
@@ -235,10 +243,16 @@ impl World {
                 && warp.schwarzschild_radius_m == mouth.schwarzschild_radius_m
                 && warp.reach_m == mouth.reach_m;
             if !is_like_first {
-                return Err(unsupported(&format!("warp {:?} isn't a mouth like the first one", warp.name)));
+                return Err(unsupported(&format!(
+                    "warp {:?} isn't a mouth like the first one",
+                    warp.name
+                )));
             }
         }
-        let spawn: &Spawn = map.spawns.first().ok_or_else(|| unsupported("it has no spawn point"))?;
+        let spawn: &Spawn = map
+            .spawns
+            .first()
+            .ok_or_else(|| unsupported("it has no spawn point"))?;
         let mut world: World = World {
             curvature_radius_m: map.get_curvature_radius_m(),
             boxes: Vec::new(),
@@ -257,14 +271,26 @@ impl World {
         for group in groups {
             let first_box: usize = world.boxes.len();
             for map_box in map.boxes.iter().filter(|b| b.group == group) {
-                let material: &crate::map::Material = map.get_material(map_box.material).map_err(|e| e.to_string())?;
+                let material: &crate::map::Material = map
+                    .get_material(map_box.material)
+                    .map_err(|e| e.to_string())?;
                 let kind: u32 = match material.kind.as_str() {
                     "glass" => MATERIAL_GLASS,
                     "light" => MATERIAL_GLOW,
                     "solid" => MATERIAL_SOLID,
-                    other => return Err(format!("map {}: box {:?} is made of {other:?}", map.name, map_box.name)),
+                    other => {
+                        return Err(format!(
+                            "map {}: box {:?} is made of {other:?}",
+                            map.name, map_box.name
+                        ));
+                    }
                 };
-                world.add_box(to_frame(&map_box.frame), map_box.half_size_m, material.color, kind);
+                world.add_box(
+                    to_frame(&map_box.frame),
+                    map_box.half_size_m,
+                    material.color,
+                    kind,
+                );
             }
             let frame: DMat4 = DMat4::from_cols(
                 world.boxes[first_box].normals[0],
@@ -279,7 +305,8 @@ impl World {
             .iter()
             .enumerate()
             .map(|(k, warp)| {
-                let partner_index: usize = warp.partner.expect("the format requires a mouth's partner");
+                let partner_index: usize =
+                    warp.partner.expect("the format requires a mouth's partner");
                 let frame: DMat4 = to_frame(&warp.frame);
                 let mut flip: DMat4 = DMat4::IDENTITY;
                 flip.col_mut(AXIS_Z)[AXIS_Z] = -1.0;
@@ -297,7 +324,8 @@ impl World {
             .collect();
         for k in 0..world.mouths.len() {
             let partner_frame: DMat4 = world.mouths[world.mouths[k].partner_index].frame;
-            world.mouths[k].gluing = partner_frame * world.mouths[k].flip * world.mouths[k].to_local;
+            world.mouths[k].gluing =
+                partner_frame * world.mouths[k].flip * world.mouths[k].to_local;
         }
         Ok(world)
     }
@@ -972,17 +1000,29 @@ mod tests {
         let loaded: World = World::FromMap(&map).expect("a world of boxes and mouths");
         assert_eq!(loaded.curvature_radius_m, built.curvature_radius_m);
         assert_eq!(loaded.spawn_frame, built.spawn_frame);
-        assert_eq!((loaded.throat_m, loaded.bend_cutoff_m), (built.throat_m, built.bend_cutoff_m));
+        assert_eq!(
+            (loaded.throat_m, loaded.bend_cutoff_m),
+            (built.throat_m, built.bend_cutoff_m)
+        );
         assert_eq!(loaded.boxes.len(), built.boxes.len());
         for (a, b) in loaded.boxes.iter().zip(&built.boxes) {
-            assert_eq!((a.normals, a.center, a.half_m, a.color, a.material), (b.normals, b.center, b.half_m, b.color, b.material));
+            assert_eq!(
+                (a.normals, a.center, a.half_m, a.color, a.material),
+                (b.normals, b.center, b.half_m, b.color, b.material)
+            );
         }
         let members = |w: &World| -> Vec<(String, usize, usize)> {
-            w.clusters.iter().map(|c| (c.name.clone(), c.first_box, c.box_count)).collect()
+            w.clusters
+                .iter()
+                .map(|c| (c.name.clone(), c.first_box, c.box_count))
+                .collect()
         };
         assert_eq!(members(&loaded), members(&built));
         for (a, b) in loaded.mouths.iter().zip(&built.mouths) {
-            assert_eq!((a.frame, a.gluing, a.partner_index, a.pair_index), (b.frame, b.gluing, b.partner_index, b.pair_index));
+            assert_eq!(
+                (a.frame, a.gluing, a.partner_index, a.pair_index),
+                (b.frame, b.gluing, b.partner_index, b.pair_index)
+            );
         }
     }
 }

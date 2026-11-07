@@ -191,7 +191,12 @@ fn map_exp(q_m: DVec3, r: f64) -> DVec4 {
 ///
 /// Example: `let right = cross_ground(t, g);`
 fn cross_ground(a: DVec4, b: DVec4) -> DVec4 {
-    DVec4::new(a.z * b.w - a.w * b.z, 0.0, a.w * b.x - a.x * b.w, -(a.x * b.z - a.z * b.x))
+    DVec4::new(
+        a.z * b.w - a.w * b.z,
+        0.0,
+        a.w * b.x - a.x * b.w,
+        -(a.x * b.z - a.z * b.x),
+    )
 }
 
 /// `make_ground_frame` gives the orientation-preserving isometry fixing e_y that sends the origin
@@ -260,11 +265,14 @@ impl VoxelWorld {
                 let origin: [f64; 3] = s.voxels.origin.map(f64::from);
                 let cell_m: f64 = s.voxels.cell_m;
                 let lo: DVec3 = DVec3::from_array(origin.map(|o| -o * cell_m));
-                let hi: DVec3 = DVec3::from_array([0, 1, 2].map(|a| (size[a] as f64 - origin[a]) * cell_m));
+                let hi: DVec3 =
+                    DVec3::from_array([0, 1, 2].map(|a| (size[a] as f64 - origin[a]) * cell_m));
                 let centre_local: DVec4 = map_klein((lo + hi) / (2.0 * r));
                 let radius: f64 = (0..8)
                     .map(|c: usize| {
-                        let q: DVec3 = DVec3::from_array([0, 1, 2].map(|a| if c >> a & 1 == 1 { hi[a] } else { lo[a] }));
+                        let q: DVec3 = DVec3::from_array(
+                            [0, 1, 2].map(|a| if c >> a & 1 == 1 { hi[a] } else { lo[a] }),
+                        );
                         get_distance(map_klein(q / r), centre_local)
                     })
                     .fold(0.0, f64::max);
@@ -286,7 +294,10 @@ impl VoxelWorld {
                 && warp.falloff == "taper"
                 && (warp.law != "foil" || warp.lambda_squared == Some(SUPPORTED_LAMBDA_SQUARED));
             if !is_supported {
-                return Err(format!("map {}: the voxel renderer draws warps with the distance radius, a taper and λ² = 0.25; {:?} differs", map.name, warp.name));
+                return Err(format!(
+                    "map {}: the voxel renderer draws warps with the distance radius, a taper and λ² = 0.25; {:?} differs",
+                    map.name, warp.name
+                ));
             }
             let frame: DMat4 = to_frame(&warp.frame);
             let centre: DVec4 = frame.col(AXIS_W);
@@ -301,14 +312,21 @@ impl VoxelWorld {
                 reach,
                 partner: warp.partner.unwrap_or(usize::MAX),
                 list: (0..structures.len())
-                    .filter(|&k| get_distance(structures[k].centre, centre) < structures[k].radius + reach)
+                    .filter(|&k| {
+                        get_distance(structures[k].centre, centre) < structures[k].radius + reach
+                    })
                     .collect(),
             });
         }
         let mut palette: Vec<[f32; 4]> = vec![[0.0; 4]; MAX_MATERIAL_COUNT];
         for material in &map.materials {
             let glow: f32 = if material.kind == "light" { 1.0 } else { 0.0 };
-            palette[usize::from(material.id)] = [material.color[0], material.color[1], material.color[2], glow];
+            palette[usize::from(material.id)] = [
+                material.color[0],
+                material.color[1],
+                material.color[2],
+                glow,
+            ];
         }
         let consoles: Vec<i32> = map
             .materials
@@ -317,7 +335,11 @@ impl VoxelWorld {
             .map(|m| i32::from(m.id))
             .collect();
         let special: SpecialMaterials = SpecialMaterials {
-            glass: map.materials.iter().find(|m| m.kind == "glass").map_or(-1, |m| i32::from(m.id)),
+            glass: map
+                .materials
+                .iter()
+                .find(|m| m.kind == "glass")
+                .map_or(-1, |m| i32::from(m.id)),
             regolith: i32::from(map.ground.material),
             dark_regolith: find_material(map, "dark regolith"),
             basalt: find_material(map, "basalt"),
@@ -330,7 +352,12 @@ impl VoxelWorld {
             console_count: consoles.len() as i32,
         };
         let regions: Option<[f64; 3]> = map.regions.as_ref().and_then(|regions| {
-            let edge_m: f64 = regions.zones.as_ref()?.iter().filter_map(|z| z.u_max_m).fold(f64::NEG_INFINITY, f64::max);
+            let edge_m: f64 = regions
+                .zones
+                .as_ref()?
+                .iter()
+                .filter_map(|z| z.u_max_m)
+                .fold(f64::NEG_INFINITY, f64::max);
             let boundary = regions.boundary.as_ref()?;
             Some([edge_m, boundary.u_m, boundary.v_m])
         });
@@ -341,12 +368,20 @@ impl VoxelWorld {
             structures,
             voxels: map.voxels.clone(),
             warps,
-            lights: map.lights.iter().map(|l| (to_point(&l.position), l.color, l.radius_m)).collect(),
+            lights: map
+                .lights
+                .iter()
+                .map(|l| (to_point(&l.position), l.color, l.radius_m))
+                .collect(),
             palette,
             special,
             regions,
             sun: to_direction(&map.sky.sun.direction),
-            planet: map.sky.planet.as_ref().map(|p| (to_direction(&p.direction), p.angular_radius_rad)),
+            planet: map
+                .sky
+                .planet
+                .as_ref()
+                .map(|p| (to_direction(&p.direction), p.angular_radius_rad)),
             player: map.player,
             gravity_m_per_s2: map.gravity_m_per_s2,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
@@ -365,10 +400,15 @@ impl VoxelWorld {
             let color: [f32; 3] = colors[color_index % colors.len()];
             shared.palette[material] = [color[0], color[1], color[2], 0.0];
             let offset: usize = shared.voxels.len();
-            shared.voxels.extend(std::iter::repeat_n(material as u8, AVATAR_SIZE.iter().product()));
+            shared.voxels.extend(std::iter::repeat_n(
+                material as u8,
+                AVATAR_SIZE.iter().product(),
+            ));
             let r: f64 = self.r;
             let lo: DVec3 = DVec3::from_array(AVATAR_ORIGIN.map(|o| -o * AVATAR_CELL_M));
-            let hi: DVec3 = DVec3::from_array([0, 1, 2].map(|a| (AVATAR_SIZE[a] as f64 - AVATAR_ORIGIN[a]) * AVATAR_CELL_M));
+            let hi: DVec3 = DVec3::from_array(
+                [0, 1, 2].map(|a| (AVATAR_SIZE[a] as f64 - AVATAR_ORIGIN[a]) * AVATAR_CELL_M),
+            );
             let centre_local: DVec4 = map_klein((lo + hi) / (2.0 * r));
             shared.structures.push(VoxelStructure {
                 name: "player".to_string(),
@@ -382,7 +422,9 @@ impl VoxelWorld {
             });
             for warp in &mut shared.warps {
                 let k: usize = shared.structures.len() - 1;
-                if get_distance(shared.structures[k].centre, warp.centre) < shared.structures[k].radius + warp.reach {
+                if get_distance(shared.structures[k].centre, warp.centre)
+                    < shared.structures[k].radius + warp.reach
+                {
                     warp.list.push(k);
                 }
             }
@@ -397,7 +439,8 @@ impl VoxelWorld {
         for &k in candidates {
             let s: &VoxelStructure = &self.structures[k];
             let p: DVec4 = s.inverse * x;
-            let cell: [f64; 3] = [0, 1, 2].map(|a| (p[a] / p.w * self.r / s.cell_m + s.origin[a]).floor());
+            let cell: [f64; 3] =
+                [0, 1, 2].map(|a| (p[a] / p.w * self.r / s.cell_m + s.origin[a]).floor());
             if (0..3).any(|a| cell[a] < 0.0 || cell[a] >= s.size[a] as f64) {
                 continue;
             }
@@ -416,7 +459,10 @@ impl VoxelWorld {
     fn find_nearby_structures(&self, x: DVec4, reach_m: f64) -> Vec<usize> {
         let reach: f64 = reach_m / self.r;
         (0..self.structures.len())
-            .filter(|&k| -minkowski_dot(x, self.structures[k].centre) < (self.structures[k].radius + reach).cosh())
+            .filter(|&k| {
+                -minkowski_dot(x, self.structures[k].centre)
+                    < (self.structures[k].radius + reach).cosh()
+            })
             .collect()
     }
 
@@ -425,7 +471,11 @@ impl VoxelWorld {
     /// Example: `let [u_m, v_m, h_m] = world.get_fermi_coordinates(x);`
     fn get_fermi_coordinates(&self, x: DVec4) -> [f64; 3] {
         let cosh_h: f64 = (1.0 + x.y * x.y).sqrt();
-        [-self.r * (x.z / x.w).atanh(), self.r * (x.x / cosh_h).asinh(), self.r * x.y.asinh()]
+        [
+            -self.r * (x.z / x.w).atanh(),
+            self.r * (x.x / cosh_h).asinh(),
+            self.r * x.y.asinh(),
+        ]
     }
 
     /// `is_outside_boundary` says whether a point is outside the playable ellipse (never, without one).
@@ -462,7 +512,11 @@ impl VoxelWorld {
         probes.iter().any(|&[dx, dy, dz]| {
             let y_m: f64 = h_m - eye_m + dy;
             y_m < 0.0
-                || self.get_material_at(body * make_boost(AXIS_Y, y_m / self.r) * map_exp(DVec3::new(dx, 0.0, dz), self.r), nearby) != 0
+                || self.get_material_at(
+                    body * make_boost(AXIS_Y, y_m / self.r)
+                        * map_exp(DVec3::new(dx, 0.0, dz), self.r),
+                    nearby,
+                ) != 0
         })
     }
 
@@ -499,17 +553,28 @@ impl VoxelWorld {
             let ir2: f64 = ir / (psi * psi);
             let rs: f64 = 4.0 * pt;
             let slope: f64 = -2.0 * pt * ir * ir / psi
-                - rs * psi * (1.0 - pt * ir) * ir2 * ir2 / (2.0 * (1.0 + SUPPORTED_LAMBDA_SQUARED - rs * ir2));
+                - rs * psi * (1.0 - pt * ir) * ir2 * ir2
+                    / (2.0 * (1.0 + SUPPORTED_LAMBDA_SQUARED - rs * ir2));
             let r_s: f64 = rho * psi * psi;
             let log: f64 = 2.0 * psi.ln()
-                - 0.5 * ((1.0 - 4.0 * pt / r_s + SUPPORTED_LAMBDA_SQUARED) / (1.0 + SUPPORTED_LAMBDA_SQUARED)).ln();
+                - 0.5
+                    * ((1.0 - 4.0 * pt / r_s + SUPPORTED_LAMBDA_SQUARED)
+                        / (1.0 + SUPPORTED_LAMBDA_SQUARED))
+                        .ln();
             (slope, log)
         } else {
             let q: f64 = warp.m / rho;
             let guard: f64 = (1.0 - q).max(1e-4);
-            (-warp.m / (rho * rho) * (3.0 / (1.0 + q) + 1.0 / guard), 3.0 * (1.0 + q).ln() - guard.ln())
+            (
+                -warp.m / (rho * rho) * (3.0 / (1.0 + q) + 1.0 / guard),
+                3.0 * (1.0 + q).ln() - guard.ln(),
+            )
         };
-        let slope: f64 = if f >= 1.0 { 0.0 } else { slope_n * window + log_n * window_slope };
+        let slope: f64 = if f >= 1.0 {
+            0.0
+        } else {
+            slope_n * window + log_n * window_slope
+        };
         let g: DVec4 = slope * (ch * x - warp.centre) / sh;
         (g - minkowski_dot(g, v) * v, rho)
     }
@@ -537,7 +602,9 @@ impl VoxelWorld {
     ///
     /// Example: `let inside = world.find_warp_inside(eye);`
     fn find_warp_inside(&self, x: DVec4) -> Option<usize> {
-        self.warps.iter().position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
+        self.warps
+            .iter()
+            .position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
     }
 
     /// `find_warp_entry` finds where a straight ray first enters a warp's reach sphere.
@@ -551,7 +618,8 @@ impl VoxelWorld {
             if b <= 0.0 || closest_sq >= reach_cosh * reach_cosh {
                 continue;
             }
-            let s_in: f64 = ((b / a).atanh() - (reach_cosh / closest_sq.max(1.0).sqrt()).acosh()).max(0.0);
+            let s_in: f64 =
+                ((b / a).atanh() - (reach_cosh / closest_sq.max(1.0).sqrt()).acosh()).max(0.0);
             if s_in < s_end {
                 (s_end, entering) = (s_in, Some(k));
             }
@@ -575,7 +643,13 @@ impl VoxelWorld {
         let q: DVec4 = (n * flip * rho_out.sinh()).extend(rho_out.cosh());
         let g: f64 = q.truncate().dot(tt) / (1.0 + q.w);
         let x_out: DVec4 = partner.frame * q;
-        (x_out, normalize_tangent(x_out, partner.frame * (tt + g * q.truncate()).extend(g * (1.0 + q.w))))
+        (
+            x_out,
+            normalize_tangent(
+                x_out,
+                partner.frame * (tt + g * q.truncate()).extend(g * (1.0 + q.w)),
+            ),
+        )
     }
 
     /// `trace_structure` finds where a chord first enters a solid cell of structure k, by a voxel walk.
@@ -590,7 +664,10 @@ impl VoxelWorld {
         }
         let s_star: f64 = (b / a).atanh();
         let half_window: f64 = (bound_cosh / closest_sq.max(1.0).sqrt()).acosh();
-        let (s_lo, s_hi) = (s_min.max(s_star - half_window), s_max.min(s_star + half_window));
+        let (s_lo, s_hi) = (
+            s_min.max(s_star - half_window),
+            s_max.min(s_star + half_window),
+        );
         if s_lo >= s_hi {
             return None;
         }
@@ -620,11 +697,13 @@ impl VoxelWorld {
             ((g0[i] + d[i] * mu_in + nudge).floor() as i64).clamp(0, st.size[i] as i64 - 1)
         });
         let step: [i64; 3] = d.map(|c| if c > 0.0 { 1 } else { -1 });
-        let mut mu_next: [f64; 3] = [0, 1, 2].map(|i| (cell[i] as f64 + if d[i] > 0.0 { 1.0 } else { 0.0 } - g0[i]) / d[i]);
+        let mut mu_next: [f64; 3] =
+            [0, 1, 2].map(|i| (cell[i] as f64 + if d[i] > 0.0 { 1.0 } else { 0.0 } - g0[i]) / d[i]);
         let mu_delta: [f64; 3] = d.map(|c| (1.0 / c).abs());
         let mut mu: f64 = mu_in;
         for _ in 0..st.size.iter().sum::<usize>() + 3 {
-            let index: usize = cell[0] as usize + st.size[0] * (cell[1] as usize + st.size[1] * cell[2] as usize);
+            let index: usize =
+                cell[0] as usize + st.size[0] * (cell[1] as usize + st.size[1] * cell[2] as usize);
             if self.voxels[st.offset + index] != 0 {
                 let lam: f64 = mu * p.w * p.w / (1.0 - mu * p.w * t.w);
                 return Some(s_star + lam.atanh());
@@ -669,7 +748,10 @@ impl VoxelWorld {
         for &k in candidates {
             let limit: f64 = best.map_or(s_max, |hit| hit.s);
             if let Some(s) = self.trace_structure(k, x, v, 0.0, limit) {
-                best = Some(Hit { structure: Some(k), s });
+                best = Some(Hit {
+                    structure: Some(k),
+                    s,
+                });
             }
         }
         best
@@ -694,7 +776,10 @@ impl VoxelWorld {
             let Some(w) = inside else {
                 let (s_end, entering) = self.find_warp_entry(x, v, max_s - travelled);
                 if let Some(found) = self.trace_scene(x, v, s_end, None) {
-                    pieces.last_mut().expect("a piece").push(geodesic_point(x, v, found.s));
+                    pieces
+                        .last_mut()
+                        .expect("a piece")
+                        .push(geodesic_point(x, v, found.s));
                     travelled += found.s;
                     hit = Some(found);
                     break;
@@ -713,7 +798,10 @@ impl VoxelWorld {
             let ds: f64 = self.choose_bend_step(self.compute_bend(w, x, v).1);
             let (v0, x1, v1, rho) = self.step_bent(w, x, v, ds);
             if let Some(found) = self.trace_scene(x, v0, ds, Some(w)) {
-                pieces.last_mut().expect("a piece").push(geodesic_point(x, v0, found.s));
+                pieces
+                    .last_mut()
+                    .expect("a piece")
+                    .push(geodesic_point(x, v0, found.s));
                 travelled += found.s;
                 hit = Some(found);
                 break;
@@ -740,14 +828,23 @@ impl VoxelWorld {
         let first: &mut Vec<DVec4> = &mut pieces[0];
         if first.len() > 1 && get_distance(first[0], first[1]) * self.r > LASER_MUZZLE_M {
             let t: DVec4 = first[1] + minkowski_dot(first[1], first[0]) * first[0];
-            let muzzle: DVec4 = geodesic_point(first[0], normalize_minkowski(t), LASER_MUZZLE_M / self.r);
+            let muzzle: DVec4 =
+                geodesic_point(first[0], normalize_minkowski(t), LASER_MUZZLE_M / self.r);
             first.splice(0..1, [gun, muzzle]);
         } else {
             first[0] = gun;
         }
-        let spot: Option<DVec4> = hit.map(|_| *pieces.last().and_then(|p| p.last()).expect("a hit ends a piece"));
+        let spot: Option<DVec4> = hit.map(|_| {
+            *pieces
+                .last()
+                .and_then(|p| p.last())
+                .expect("a hit ends a piece")
+        });
         Shot {
-            segments: pieces.iter().flat_map(|piece| self.simplify_path(piece)).collect(),
+            segments: pieces
+                .iter()
+                .flat_map(|piece| self.simplify_path(piece))
+                .collect(),
             spot,
             hit_structure: hit.and_then(|h| h.structure),
             is_hit: hit.is_some(),
@@ -762,10 +859,15 @@ impl VoxelWorld {
     fn simplify_path(&self, points: &[DVec4]) -> Vec<BeamSegment> {
         let make_segment = |p: DVec4, q: DVec4| -> Option<BeamSegment> {
             let length: f64 = get_distance(p, q);
-            (length > 1e-9).then(|| BeamSegment { a: p, b: (q - length.cosh() * p) / length.sinh(), length })
+            (length > 1e-9).then(|| BeamSegment {
+                a: p,
+                b: (q - length.cosh() * p) / length.sinh(),
+                length,
+            })
         };
         let offset = |p: DVec4, segment: &BeamSegment| -> f64 {
-            let perp: DVec4 = p + minkowski_dot(p, segment.a) * segment.a - minkowski_dot(p, segment.b) * segment.b;
+            let perp: DVec4 = p + minkowski_dot(p, segment.a) * segment.a
+                - minkowski_dot(p, segment.b) * segment.b;
             minkowski_dot(perp, perp).max(0.0).sqrt().asinh()
         };
         let mut segments: Vec<BeamSegment> = Vec::new();
@@ -773,8 +875,13 @@ impl VoxelWorld {
         while i + 1 < points.len() {
             let mut j: usize = i + 1;
             while j + 1 < points.len() {
-                let Some(trial) = make_segment(points[i], points[j + 1]) else { break };
-                if points[i + 1..=j].iter().any(|p| offset(*p, &trial) * self.r > BEAM_TOLERANCE_M) {
+                let Some(trial) = make_segment(points[i], points[j + 1]) else {
+                    break;
+                };
+                if points[i + 1..=j]
+                    .iter()
+                    .any(|p| offset(*p, &trial) * self.r > BEAM_TOLERANCE_M)
+                {
                     break;
                 }
                 j += 1;
@@ -840,11 +947,20 @@ impl VoxelPlayer {
     ///
     /// Example: `let player = VoxelPlayer::AtView(&world, [-107.0, 0.0], [0.0, 0.0], None, 0.0);`
     #[allow(non_snake_case)]
-    pub fn AtView(world: &VoxelWorld, at_m: [f64; 2], target_m: [f64; 2], h_m: Option<f64>, pitch_rad: f64) -> VoxelPlayer {
+    pub fn AtView(
+        world: &VoxelWorld,
+        at_m: [f64; 2],
+        target_m: [f64; 2],
+        h_m: Option<f64>,
+        pitch_rad: f64,
+    ) -> VoxelPlayer {
         let make_frame = |[u_m, v_m]: [f64; 2], yaw_rad: f64| -> DMat4 {
-            make_boost(AXIS_Z, -u_m / world.r) * make_boost(AXIS_X, v_m / world.r) * make_rotation(AXIS_X, AXIS_Z, yaw_rad)
+            make_boost(AXIS_Z, -u_m / world.r)
+                * make_boost(AXIS_X, v_m / world.r)
+                * make_rotation(AXIS_X, AXIS_Z, yaw_rad)
         };
-        let p: DVec4 = invert_lorentz(make_frame(at_m, 0.0)) * make_frame(target_m, 0.0).col(AXIS_W);
+        let p: DVec4 =
+            invert_lorentz(make_frame(at_m, 0.0)) * make_frame(target_m, 0.0).col(AXIS_W);
         let body: DMat4 = make_frame(at_m, p.x.atan2(-p.z));
         VoxelPlayer {
             body,
@@ -887,7 +1003,9 @@ impl VoxelPlayer {
     ///
     /// Example: `let camera = player.get_camera_frame(&world);`
     pub fn get_camera_frame(&self, world: &VoxelWorld) -> DMat4 {
-        self.body * make_boost(AXIS_Y, self.h_m / world.r) * make_rotation(AXIS_Z, AXIS_Y, -self.pitch_rad)
+        self.body
+            * make_boost(AXIS_Y, self.h_m / world.r)
+            * make_rotation(AXIS_Z, AXIS_Y, -self.pitch_rad)
     }
 
     /// `get_feet_frame` gives the frame at the player's feet (for their avatar).
@@ -902,14 +1020,21 @@ impl VoxelPlayer {
     /// Example: `player.look(12.0, -3.0);`
     pub fn look(&mut self, dx_px: f64, dy_px: f64) {
         self.body *= make_rotation(AXIS_X, AXIS_Z, dx_px * LOOK_RAD_PER_PX);
-        self.pitch_rad = (self.pitch_rad - dy_px * LOOK_RAD_PER_PX).clamp(-MAX_PITCH_RAD, MAX_PITCH_RAD);
+        self.pitch_rad =
+            (self.pitch_rad - dy_px * LOOK_RAD_PER_PX).clamp(-MAX_PITCH_RAD, MAX_PITCH_RAD);
     }
 
     /// `move_optically` moves the body `distance_m` along light paths (bent by warp w and through
     /// its throat), returning the new body, eye height and the mouth gone through, if any.
     ///
     /// Example: `let (body, h_m, crossed) = player.move_optically(&world, [0.0, -1.0], 0.1, 1);`
-    fn move_optically(&self, world: &VoxelWorld, dir: [f64; 2], distance_m: f64, warp: usize) -> (DMat4, f64, Option<String>) {
+    fn move_optically(
+        &self,
+        world: &VoxelWorld,
+        dir: [f64; 2],
+        distance_m: f64,
+        warp: usize,
+    ) -> (DMat4, f64, Option<String>) {
         let c0: DMat4 = self.body * make_boost(AXIS_Y, self.h_m / world.r);
         let (mut x, mut t) = (c0.col(AXIS_W), c0 * DVec4::new(dir[0], 0.0, dir[1], 0.0));
         let (mut left, mut inside, mut crossed) = (distance_m / world.r, Some(warp), None);
@@ -941,7 +1066,8 @@ impl VoxelPlayer {
         let up: DVec4 = sinh_h * g + cosh_h * DVec4::Y;
         let heading: DVec4 = normalize_minkowski(t - minkowski_dot(t, up) * up);
         let frame: DMat4 = make_ground_frame(g, -heading);
-        let body: DMat4 = renormalize_frame(frame * make_rotation(AXIS_X, AXIS_Z, -dir[0].atan2(-dir[1])));
+        let body: DMat4 =
+            renormalize_frame(frame * make_rotation(AXIS_X, AXIS_Z, -dir[0].atan2(-dir[1])));
         (body, world.r * sinh_h.asinh(), crossed)
     }
 
@@ -951,7 +1077,13 @@ impl VoxelPlayer {
     /// returns messages for the HUD.
     ///
     /// Example: `for message in player.step(&world, &input, 1.0 / 60.0, 0) { ... }`
-    pub fn step(&mut self, world: &VoxelWorld, input: &Input, dt_s: f64, spawn_index: usize) -> Vec<String> {
+    pub fn step(
+        &mut self,
+        world: &VoxelWorld,
+        input: &Input,
+        dt_s: f64,
+        spawn_index: usize,
+    ) -> Vec<String> {
         let r: f64 = world.r;
         let forward: f64 = f64::from(u8::from(input.forward)) - f64::from(u8::from(input.back));
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
@@ -967,7 +1099,8 @@ impl VoxelPlayer {
         let warp: Option<usize> = world.find_warp_inside(eye);
         if let Some(w) = warp
             && !world.warps[w].is_mouth
-            && world.compute_bend(w, eye, self.body.col(AXIS_X)).1 < FALL_IN_PER_HORIZON * world.warps[w].m
+            && world.compute_bend(w, eye, self.body.col(AXIS_X)).1
+                < FALL_IN_PER_HORIZON * world.warps[w].m
         {
             *self = VoxelPlayer::AtSpawn(world, spawn_index);
             return vec!["You fell into the black hole".to_string()];
@@ -980,10 +1113,17 @@ impl VoxelPlayer {
             if let Some(w) = warp.filter(|&w| world.warps[w].is_mouth) {
                 (body_new, h_new, crossed) = self.move_optically(world, dir, distance_m, w);
             } else {
-                body_new = renormalize_frame(self.body * make_boost(AXIS_Z, dir[1] * distance_m / r) * make_boost(AXIS_X, dir[0] * distance_m / r));
+                body_new = renormalize_frame(
+                    self.body
+                        * make_boost(AXIS_Z, dir[1] * distance_m / r)
+                        * make_boost(AXIS_X, dir[0] * distance_m / r),
+                );
             }
         }
-        let messages: Vec<String> = crossed.iter().map(|name| format!("Through {name}")).collect();
+        let messages: Vec<String> = crossed
+            .iter()
+            .map(|name| format!("Through {name}"))
+            .collect();
         if self.is_flying {
             (self.body, self.h_m) = (body_new, h_new);
             let climb_m_per_s: f64 = MIN_FLY_CLIMB_M_PER_S.max(self.h_m) * FLY_CLIMB_PER_S;
@@ -996,7 +1136,8 @@ impl VoxelPlayer {
             self.h_m = self.h_m.clamp(MIN_FLY_HEIGHT_M, MAX_FLY_HEIGHT_M);
             return messages;
         }
-        let nearby: Vec<usize> = world.find_nearby_structures(self.body.col(AXIS_W), NEARBY_REACH_M);
+        let nearby: Vec<usize> =
+            world.find_nearby_structures(self.body.col(AXIS_W), NEARBY_REACH_M);
         for _ in 0..UNSTICK_MAX_STEPS {
             if !world.is_body_blocked(self.body, self.h_m, &nearby) {
                 break;
@@ -1007,18 +1148,23 @@ impl VoxelPlayer {
         if crossed.is_some() {
             (self.body, self.h_m) = (body_new, h_new);
         } else if has_moved && !world.is_outside_boundary(body_new.col(AXIS_W)) {
-            let nearby_new: Vec<usize> = world.find_nearby_structures(body_new.col(AXIS_W), NEARBY_REACH_M);
+            let nearby_new: Vec<usize> =
+                world.find_nearby_structures(body_new.col(AXIS_W), NEARBY_REACH_M);
             if !world.is_body_blocked(body_new, h_new, &nearby_new) {
                 (self.body, self.h_m) = (body_new, h_new);
-            } else if self.is_on_ground && !world.is_body_blocked(body_new, h_new + STEP_UP_M, &nearby_new) {
+            } else if self.is_on_ground
+                && !world.is_body_blocked(body_new, h_new + STEP_UP_M, &nearby_new)
+            {
                 (self.body, self.h_m) = (body_new, h_new + STEP_UP_M);
             }
         }
         if input.up && self.is_on_ground {
             self.vertical_m_per_s = settings.jump_m_per_s;
         }
-        self.vertical_m_per_s = (self.vertical_m_per_s - world.gravity_m_per_s2 * dt_s).max(-MAX_FALL_SPEED_M_PER_S);
-        let nearby_now: Vec<usize> = world.find_nearby_structures(self.body.col(AXIS_W), NEARBY_REACH_M);
+        self.vertical_m_per_s =
+            (self.vertical_m_per_s - world.gravity_m_per_s2 * dt_s).max(-MAX_FALL_SPEED_M_PER_S);
+        let nearby_now: Vec<usize> =
+            world.find_nearby_structures(self.body.col(AXIS_W), NEARBY_REACH_M);
         let (h0, dh) = (self.h_m, self.vertical_m_per_s * dt_s);
         self.h_m = h0 + dh;
         self.is_on_ground = false;
@@ -1037,5 +1183,52 @@ impl VoxelPlayer {
             self.vertical_m_per_s = 0.0;
         }
         messages
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests of the voxel world against the Lunar Surface level's own numbers.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
+    //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
+
+    use super::*;
+    use crate::map::{Map, get_map_folder};
+
+    const LANDER_DECK_M: f64 = 1.0;
+    const STAND_TOLERANCE_M: f64 = 0.06;
+    const PYLON_DISTANCE_M: f64 = 42.4;
+    const DISTANCE_TOLERANCE_M: f64 = 0.5;
+
+    /// `load_lunar_surface` loads the shipped Lunar Surface map as a voxel world.
+    ///
+    /// Example: `let world = load_lunar_surface();`
+    fn load_lunar_surface() -> VoxelWorld {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
+        VoxelWorld::FromMap(&map).expect("a voxel world")
+    }
+
+    #[test]
+    fn players_stand_where_the_level_puts_them() {
+        let world: VoxelWorld = load_lunar_surface();
+        let eye_m: f64 = world.player.eye_height_m;
+        let on_lander: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
+        assert!((on_lander.h_m - (LANDER_DECK_M + eye_m)).abs() < STAND_TOLERANCE_M);
+        let on_ground: VoxelPlayer = VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+        assert!((on_ground.h_m - eye_m).abs() < STAND_TOLERANCE_M);
+    }
+
+    #[test]
+    fn the_laser_into_the_wormhole_hits_the_red_pylon() {
+        let world: VoxelWorld = load_lunar_surface();
+        let player: VoxelPlayer = VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0);
+        let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
+        assert_eq!(shot.through, vec!["wormhole mouth A".to_string()]);
+        let hit: usize = shot.hit_structure.expect("the laser hits a structure");
+        assert_eq!(world.structures[hit].name, "red pylon");
+        assert!((shot.length_m - PYLON_DISTANCE_M).abs() < DISTANCE_TOLERANCE_M);
     }
 }

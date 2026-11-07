@@ -636,7 +636,8 @@ pub fn find_aimed_mouth(world: &World, frame: DMat4) -> Option<usize> {
         let local: DVec3 =
             get_local_direction(frame, normalize_tangent(x, mouth.center)).normalize();
         let angle_rad: f64 = (-local.z).clamp(-1.0, 1.0).acos();
-        let disk_rad: f64 = (SHADOW_PER_HORIZON * world.get_throat_m() / crate::world::THROAT_PER_HORIZON
+        let disk_rad: f64 = (SHADOW_PER_HORIZON * world.get_throat_m()
+            / crate::world::THROAT_PER_HORIZON
             / (world.curvature_radius_m * distance.sinh()))
         .atan();
         if best.is_none_or(|(_, score)| angle_rad - disk_rad < score) {

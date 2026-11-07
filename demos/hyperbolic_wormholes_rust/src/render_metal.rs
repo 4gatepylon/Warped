@@ -28,13 +28,13 @@ use objc2_metal::{
 use objc2_metal_fx::{MTLFXSpatialScaler, MTLFXSpatialScalerBase, MTLFXSpatialScalerDescriptor};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
+use crate::render_voxel::{VoxelFrame, VoxelGpu};
 use crate::scene_data::{
     ROW_COUNT, ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS, TEXEL_BOXES,
     TEXEL_CLUSTER_INFO, TEXEL_CLUSTER_ORDER, TEXEL_CLUSTERS, TEXEL_GLUINGS, TEXEL_GROUND,
     TEXEL_MOUTH_FIELDS, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD, TEXELS_PER_BEAM_CHUNK,
     TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING, TEXELS_PER_MOUTH_FIELD, Uniforms,
 };
-use crate::render_voxel::{VoxelFrame, VoxelGpu};
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
 /// `Result` is this module's result type.
@@ -130,7 +130,10 @@ impl FrameData<'_> {
     /// Example: `let render_px = frame_data.get_render_size();`
     pub fn get_render_size(&self) -> (usize, usize) {
         match self {
-            FrameData::House(data) => (data.uniforms.width_px as usize, data.uniforms.height_px as usize),
+            FrameData::House(data) => (
+                data.uniforms.width_px as usize,
+                data.uniforms.height_px as usize,
+            ),
             FrameData::Voxel(frame) => frame.get_render_size(),
         }
     }
@@ -553,7 +556,11 @@ impl MetalRenderer {
     /// then upscaling if needed.
     ///
     /// Example: `let (command_buffer, texture) = self.encode_voxel_frame(&frame, (2560, 1600))?;`
-    fn encode_voxel_frame(&mut self, frame: &VoxelFrame, output_px: (usize, usize)) -> Result<Frame> {
+    fn encode_voxel_frame(
+        &mut self,
+        frame: &VoxelFrame,
+        output_px: (usize, usize),
+    ) -> Result<Frame> {
         let render_px: (usize, usize) = frame.get_render_size();
         if self.voxel_gpu.is_none() {
             self.voxel_gpu = Some(VoxelGpu::New(&self.device)?);

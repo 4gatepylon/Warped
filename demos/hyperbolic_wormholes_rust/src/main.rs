@@ -57,8 +57,8 @@ use serde_json::{Value, json};
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use physics::{Input, LaserReport, Player};
 use render_metal::FrameData;
-use scene_data::{Beam, SceneData};
 use render_voxel::VoxelFrame;
+use scene_data::{Beam, SceneData};
 use voxel_world::{VoxelPlayer, VoxelWorld};
 use world::{DEFAULT_CURVATURE_RADIUS_M, World};
 
@@ -225,6 +225,10 @@ struct Arguments {
     /// Which map to play, from common/maps/.
     #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
     map: MapName,
+    /// With --map lunar-surface: start the window at one of the level's viewpoints (as
+    /// --bench-views names them), e.g. black_hole.
+    #[arg(long)]
+    view: Option<String>,
     /// Write the world as a map in the portable format of common/maps/ (map.json) into this folder,
     /// replacing the folder's map.json, and exit.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
@@ -266,7 +270,10 @@ struct CpuRenderer;
 impl Renderer for CpuRenderer {
     fn render(&mut self, frame: FrameData, output_px: (u32, u32), pixels: &mut [u8]) -> Result<()> {
         let FrameData::House(data) = frame else {
-            return Err("the CPU renderer draws the house demo only; use --renderer metal for voxel maps".into());
+            return Err(
+                "the CPU renderer draws the house demo only; use --renderer metal for voxel maps"
+                    .into(),
+            );
         };
         let render_px: (u32, u32) = (
             data.uniforms.width_px as u32,
@@ -383,6 +390,11 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
     if arguments.frame_count == 0 || arguments.snapshot_every == 0 {
         return Err(
             "--frame-count and --snapshot-every must be at least 1; e.g. --frame-count 10".into(),
+        );
+    }
+    if arguments.view.is_some() && arguments.map != MapName::LunarSurface {
+        return Err(
+            "--view needs --map lunar-surface; e.g. --map lunar-surface --view black_hole".into(),
         );
     }
     if arguments.map == MapName::LunarSurface && (arguments.play_route || arguments.autopilot) {
@@ -556,7 +568,13 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         view("habitat_row", [-46.0, -36.0], [0.0, -42.0], None, 0.0),
         VoxelView {
             is_laser_on: true,
-            ..view("laser_into_wormhole", [-22.0, 40.0], [-14.0, 40.0], None, 0.0)
+            ..view(
+                "laser_into_wormhole",
+                [-22.0, 40.0],
+                [-14.0, 40.0],
+                None,
+                0.0,
+            )
         },
     ]
 }
@@ -668,10 +686,14 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
     };
     let (hit_count, eliminated_count) = if map.structures.is_empty() {
         let world: World = World::FromMap(&map)?;
-        multiplayer::run_bot(&world, &mut client, duration_s, |data, id| save(FrameData::House(data), id))?
+        multiplayer::run_bot(&world, &mut client, duration_s, |data, id| {
+            save(FrameData::House(data), id)
+        })?
     } else {
         let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
-        multiplayer::run_voxel_bot(&world, &mut client, duration_s, |frame, id| save(FrameData::Voxel(frame), id))?
+        multiplayer::run_voxel_bot(&world, &mut client, duration_s, |frame, id| {
+            save(FrameData::Voxel(frame), id)
+        })?
     };
     if arguments.json {
         println!(
@@ -1492,8 +1514,23 @@ impl Session {
             None
         } else {
             let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
-            let player: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
-            Some(VoxelState { world, player, spawn_index: 0 })
+            let player: VoxelPlayer = match &arguments.view {
+                Some(name) => {
+                    let view: VoxelView = make_voxel_bench_views()
+                        .into_iter()
+                        .find(|v| v.name == name)
+                        .ok_or_else(|| {
+                            format!("--view {name:?} isn't a viewpoint; see --bench-views")
+                        })?;
+                    VoxelPlayer::AtView(&world, view.at_m, view.target_m, view.h_m, view.pitch_rad)
+                }
+                None => VoxelPlayer::AtSpawn(&world, 0),
+            };
+            Some(VoxelState {
+                world,
+                player,
+                spawn_index: 0,
+            })
         };
         let world: World = match voxel {
             Some(_) => World::Empty(map.get_curvature_radius_m()),
@@ -1633,12 +1670,12 @@ impl Session {
                 self.is_captured = true;
                 mouse.set_relative_mouse_mode(window, true);
             }
-            Event::MouseMotion { xrel, yrel, .. } if self.is_captured => {
-                match &mut self.voxel {
-                    Some(voxel) => voxel.player.look(f64::from(xrel), f64::from(yrel)),
-                    None => physics::look_around(&mut self.player.frame, f64::from(xrel), f64::from(yrel)),
+            Event::MouseMotion { xrel, yrel, .. } if self.is_captured => match &mut self.voxel {
+                Some(voxel) => voxel.player.look(f64::from(xrel), f64::from(yrel)),
+                None => {
+                    physics::look_around(&mut self.player.frame, f64::from(xrel), f64::from(yrel))
                 }
-            }
+            },
             _ => {}
         }
         true
@@ -1675,9 +1712,12 @@ impl Session {
                 || keys.is_scancode_pressed(Scancode::RShift),
         };
         let messages: Vec<String> = match &mut self.voxel {
-            Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, voxel.spawn_index),
+            Some(voxel) => voxel
+                .player
+                .step(&voxel.world, &input, dt_s, voxel.spawn_index),
             None => {
-                let messages: Vec<String> = physics::update_player(&self.world, &mut self.player, &input, dt_s);
+                let messages: Vec<String> =
+                    physics::update_player(&self.world, &mut self.player, &input, dt_s);
                 physics::level_out(&mut self.player.frame, dt_s);
                 messages
             }
@@ -1796,10 +1836,19 @@ impl Session {
     fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
         if let Some(voxel) = &self.voxel {
             let camera: DMat4 = voxel.player.get_camera_frame(&voxel.world);
-            let players: Vec<net::RemotePlayer> = self.multiplayer.as_ref().map_or(Vec::new(), |m| m.client.players.clone());
+            let players: Vec<net::RemotePlayer> = self
+                .multiplayer
+                .as_ref()
+                .map_or(Vec::new(), |m| m.client.players.clone());
             let team: u32 = voxel.spawn_index as u32 % 2;
-            let view: multiplayer::SharedVoxelView =
-                multiplayer::pack_shared_voxel_view(&voxel.world, camera, self.is_laser_on, team, &players, render_px);
+            let view: multiplayer::SharedVoxelView = multiplayer::pack_shared_voxel_view(
+                &voxel.world,
+                camera,
+                self.is_laser_on,
+                team,
+                &players,
+                render_px,
+            );
             let shared: VoxelWorld = voxel.world.clone();
             self.laser = view.shot.as_ref().map(|shot| describe_shot(&shared, shot));
             if let Some(victim_id) = view.hit_player_id {
@@ -1955,8 +2004,16 @@ impl Session {
             format!(" upscaled to {}x{}", output_px.0, output_px.1)
         };
         let (is_flying, is_on_ground, height_m) = match &self.voxel {
-            Some(voxel) => (voxel.player.is_flying, voxel.player.is_on_ground, voxel.player.h_m - voxel.world.player.eye_height_m),
-            None => (self.player.is_flying, self.player.is_on_ground, self.player.get_height_m(&self.world)),
+            Some(voxel) => (
+                voxel.player.is_flying,
+                voxel.player.is_on_ground,
+                voxel.player.h_m - voxel.world.player.eye_height_m,
+            ),
+            None => (
+                self.player.is_flying,
+                self.player.is_on_ground,
+                self.player.get_height_m(&self.world),
+            ),
         };
         let movement: &str = if is_flying {
             "flying"
@@ -1975,10 +2032,7 @@ impl Session {
                 render_px.0,
                 render_px.1
             ),
-            format!(
-                "{movement}, height {:.1} blocks",
-                height_m
-            ),
+            format!("{movement}, height {:.1} blocks", height_m),
         ];
         if let Some(laser) = &self.laser {
             lines.push(format!("laser {laser}"));

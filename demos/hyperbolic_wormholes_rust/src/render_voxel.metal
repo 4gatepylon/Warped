@@ -413,16 +413,15 @@ static float get_log_index(thread const Scene &scene, int w, float rho) {
     return 2.0 * log(psi) - 0.5 * log((1.0 - 4.0 * pt / r + FOIL_LAMBDA_SQ) / (1.0 + FOIL_LAMBDA_SQ));
 }
 
-/** @brief `compute_bend` gives the part of ∇ln n across v, ln n tapered by (1 - (ρ/reach)²)². @par Example @code float4 b = compute_bend(scene, w, x, v, rho); @endcode */
-static float4 compute_bend(thread const Scene &scene, int w, float4 x, float4 v, thread float &rho) {
+/** @brief `compute_gradient` gives ∇ln n of warp w at x (not yet projected across a direction), ln n tapered by (1 - (ρ/reach)²)². @par Example @code float4 g = compute_gradient(scene, w, x, rho); @endcode */
+static float4 compute_gradient(thread const Scene &scene, int w, float4 x, thread float &rho) {
     device const VoxelWarp &warp = scene.warps[w];
     float4 p = warp.inverse * x;
     rho = asinh(length(p.xyz));
     float ch = cosh(rho), sh = max(sinh(rho), TINY), reach = warp.params.z;
     float f = rho / reach, window = (1.0 - f * f) * (1.0 - f * f), window_slope = -4.0 * f * (1.0 - f * f) / reach;
     float slope = f >= 1.0 ? 0.0 : get_index_slope(scene, w, rho) * window + get_log_index(scene, w, rho) * window_slope;
-    float4 g = slope * (ch * x - warp.centre) / sh;
-    return g - mdot(g, v) * v;
+    return slope * (ch * x - warp.centre) / sh;
 }
 
 /** @brief `cross_throat` carries a ray inside mouth w's throat to its partner (inversion, then diag(1, 1, -1)). @par Example @code cross_throat(scene, w, x, v); @endcode */
@@ -701,7 +700,9 @@ kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device c
     int outcome = OUTCOME_LOST;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
-    float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r;
+    float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
+    float4 gradient = float4(0.0);
+    bool has_gradient = false;
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         if (inside < 0) {
             float s_end = FAR_S;
@@ -727,10 +728,9 @@ kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device c
             inside = entering;
             continue;
         }
-        float rho;
-        float4 bend = compute_bend(scene, inside, x, v, rho);
+        if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho);
         float ds = clamp(BEND_STEP_FRAC * rho, min_step, max_step);
-        v = normalize_tangent(x, v + bend * (0.5 * ds));
+        v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
         hit.s = ds;
         hit.mat = 0;
         float glass_s = NO_HIT_S;
@@ -742,12 +742,13 @@ kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device c
         x = xn * rsqrt(-mdot(xn, xn));
         v = normalize_tangent(x, vn);
         travelled += ds;
-        bend = compute_bend(scene, inside, x, v, rho);
-        v = normalize_tangent(x, v + bend * (0.5 * ds));
+        gradient = compute_gradient(scene, inside, x, rho);
+        v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
+        has_gradient = true;
         float4 prm = warps[inside].params;
         if (prm.x < HALF_KIND && rho < prm.y * HORIZON_CAPTURE_FRAC) { outcome = OUTCOME_LOST; break; }
-        if (prm.x > HALF_KIND && rho < prm.y) { cross_throat(scene, inside, x, v); inside = int(prm.w + 0.5); continue; }
-        if (rho > prm.z) inside = -1;
+        if (prm.x > HALF_KIND && rho < prm.y) { cross_throat(scene, inside, x, v); inside = int(prm.w + 0.5); has_gradient = false; continue; }
+        if (rho > prm.z) { inside = -1; has_gradient = false; }
     }
     float3 color = float3(0.0);
     if (outcome == OUTCOME_HIT) {
