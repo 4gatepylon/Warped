@@ -31,8 +31,8 @@ make -C clients/starter run-client MANAGEMENT_SERVER_URL=http://<that URL's IP>:
 ```
 
 ## Rough checklist to full game
-1. [ ] Get working minecraft-like visuals game on a single level with good physics without multiplayer.
-2. [ ] Get working minecraft-like visuals game on all levels for the map without multiplayer.
+1. [ ] Get working minecraft-like visuals game on a single level with good physics without multiplayer. This will involve defining one actual level with real obstacles, etc...
+2. [ ] Get working minecraft-like visuals game on all levels for the map without multiplayer. This will involve actually finalizing the design for _all_ the levels on the map.
 3. [ ] Get (2) working with multiplayer.
 4. [ ] Get (3) working with proper (realistic, ideally AAA-looking) graphics.
 5. [ ] Make sure the CRUD systems work correctly to enable players to spin up game servers. Integrate with AWS (if needed).
