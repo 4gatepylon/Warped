@@ -307,6 +307,43 @@ pub fn pack_shared_voxel_view(
     }
 }
 
+/// `describe_shot` turns a voxel laser shot traced in `world` (without avatars) into one line for
+/// the HUD or the results.
+///
+/// Example: `let text = describe_shot(&world, &shot);`
+pub fn describe_shot(world: &VoxelWorld, shot: &Shot) -> String {
+    let through: String = shot
+        .through
+        .iter()
+        .map(|name| format!("through {name}, "))
+        .collect();
+    let what: String = match (shot.is_hit, shot.hit_structure) {
+        (true, Some(k)) => world
+            .structures
+            .get(k)
+            .unwrap_or_else(|| panic!("describe_shot: structure {k} isn't in this world (an avatar?); use describe_voxel_laser"))
+            .name
+            .clone(),
+        (true, None) => "the ground".to_string(),
+        (false, _) => "nothing".to_string(),
+    };
+    format!("{through}hits {what} after {:.1} m", shot.length_m)
+}
+
+/// `describe_voxel_laser` gives the HUD's line for this player's laser in a shared view: the
+/// player it hit, or what else it hit in `world` (the map without avatars), or `None` with the
+/// laser off. A shot that hit an avatar is always a hit on a player, so the map's structures are
+/// only looked up for shots that hit the map.
+///
+/// Example: `let line = multiplayer::describe_voxel_laser(&world, &view);`
+pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Option<String> {
+    match (view.hit_player_id, view.shot.as_ref()) {
+        (Some(victim_id), _) => Some(format!("hits player {victim_id}")),
+        (None, Some(shot)) => Some(describe_shot(world, shot)),
+        (None, None) => None,
+    }
+}
+
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player, faces
 /// them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
 /// view) and rejoins `BOT_REJOIN_S` after being hit. It returns how many players it hit and how
@@ -410,12 +447,15 @@ mod tests {
     //! | --- | --- | --- |
     //! | Player id | each id up to `MAX_PLAYER_COUNT` | `spawn_points_are_apart_and_clear_of_mouths` |
     //! | Laser aim | at another player, past them | `a_laser_hits_the_player_it_points_at` |
+    //! | Map | the house, Lunar Surface (a hit on another player's body, described for the HUD) | `a_laser_hits_the_player_it_points_at`, `a_lunar_laser_hit_on_a_player_is_described` |
 
     use super::*;
     use crate::net::MAX_PLAYER_COUNT;
     use crate::world::DEFAULT_CURVATURE_RADIUS_M;
 
     const MIN_SPAWN_GAP_M: f64 = 1.0;
+    const LUNAR_SHOOTER_M: [f64; 2] = [-27.0, 0.0];
+    const LUNAR_TARGET_M: [f64; 2] = [-20.0, 0.0];
 
     #[test]
     fn spawn_points_are_apart_and_clear_of_mouths() {
@@ -452,5 +492,30 @@ mod tests {
         let away: DMat4 = aimed * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
         let view: SharedView = pack_shared_view(&world, away, true, &[other], (64, 40), 0.0);
         assert_eq!(view.hit_player_id, None);
+    }
+
+    #[test]
+    fn a_lunar_laser_hit_on_a_player_is_described() {
+        let map: crate::map::Map =
+            crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
+                .expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let shooter: VoxelPlayer =
+            VoxelPlayer::AtView(&world, LUNAR_SHOOTER_M, LUNAR_TARGET_M, None, 0.0);
+        let target: VoxelPlayer =
+            VoxelPlayer::AtView(&world, LUNAR_TARGET_M, LUNAR_SHOOTER_M, None, 0.0);
+        let other: RemotePlayer = RemotePlayer {
+            id: 2,
+            frame: target.get_camera_frame(&world),
+            is_laser_on: false,
+        };
+        let camera: DMat4 = shooter.get_camera_frame(&world);
+        let view: SharedVoxelView =
+            pack_shared_voxel_view(&world, camera, true, 0, &[other], (64, 40));
+        assert_eq!(view.hit_player_id, Some(2));
+        assert_eq!(
+            describe_voxel_laser(&world, &view),
+            Some("hits player 2".to_string())
+        );
     }
 }

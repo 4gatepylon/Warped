@@ -597,23 +597,6 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
     ]
 }
 
-/// `describe_shot` turns a voxel laser shot into one line for the results.
-///
-/// Example: `let text = describe_shot(&world, &shot);`
-fn describe_shot(world: &VoxelWorld, shot: &voxel_world::Shot) -> String {
-    let through: String = shot
-        .through
-        .iter()
-        .map(|name| format!("through {name}, "))
-        .collect();
-    let what: String = match (shot.is_hit, shot.hit_structure) {
-        (true, Some(k)) => world.structures[k].name.clone(),
-        (true, None) => "the ground".to_string(),
-        (false, _) => "nothing".to_string(),
-    };
-    format!("{through}hits {what} after {:.1} m", shot.length_m)
-}
-
 /// `bench_voxel_views` renders a voxel map's viewpoints without a window, timing each, as
 /// `bench_views` does for the house.
 ///
@@ -668,7 +651,7 @@ fn bench_voxel_views(
             "median_ms": times_ms[times_ms.len() / 2],
             "fastest_ms": times_ms[0],
             "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
-            "laser": shot.as_ref().map(|s| describe_shot(world, s)),
+            "laser": shot.as_ref().map(|s| multiplayer::describe_shot(world, s)),
         }));
     }
     report_bench(arguments, &folder, renderer.name(), render_px, results)
@@ -1942,15 +1925,12 @@ impl Session {
                 &players,
                 render_px,
             );
-            let shared: VoxelWorld = voxel.world.clone();
-            self.laser = view.shot.as_ref().map(|shot| describe_shot(&shared, shot));
-            if let Some(victim_id) = view.hit_player_id {
-                self.laser = Some(format!("hits player {victim_id}"));
-                if let Some(multiplayer) = &mut self.multiplayer
-                    && let Err(error) = multiplayer.client.send_hit(victim_id)
-                {
-                    self.show_message(format!("Couldn't reach the server: {error}"));
-                }
+            self.laser = multiplayer::describe_voxel_laser(&voxel.world, &view);
+            if let Some(victim_id) = view.hit_player_id
+                && let Some(multiplayer) = &mut self.multiplayer
+                && let Err(error) = multiplayer.client.send_hit(victim_id)
+            {
+                self.show_message(format!("Couldn't reach the server: {error}"));
             }
             return PackedFrame::Voxel(view.frame);
         }
