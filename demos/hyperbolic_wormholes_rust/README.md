@@ -39,8 +39,9 @@ make bench-views RENDERER=cpu
 make run-autopilot
 ```
 
-- `bench-views` renders seven fixed views without a window (spawn, aimed at mouth 1A, 2.5 blocks from its centre,
-  0.8 blocks from its throat, above the rails, high above spawn, and the laser through 1A), times each frame, and
+- `bench-views` renders eight fixed views without a window (spawn, aimed at mouth 1A, 2.5 blocks from its centre,
+  0.8 blocks from its throat, above the rails, high above spawn, looking sideways 0.4 blocks from 1A's centre, and
+  the laser through 1A), times each frame, and
   writes the median and fastest times and a PNG of each view to `.artifacts/bench_views/<run_id>/`.
 - `run-autopilot` plays a scripted route without a window at a fixed 1/60 s step: walk into 1A, jetpack and land,
   fly into 2A, walk into 3A and fall from above the rails, and fire the laser through 1A. It writes every frame's
@@ -93,13 +94,19 @@ The Metal shader then takes three shortcuts the CPU renderer doesn't, so the CPU
   those samples hit the same surface and their hit points vary almost linearly (tracing the rest), then does the
   same for the remaining pixels. Interpolated pixels are still shaded one by one, so textures stay sharp, and
   whatever can't be interpolated is traced exactly in separate, densely packed passes (D21).
-- Fourth-order (Runge-Kutta) steps from 3 throat radii of a mouth out to the bending cutoff: 0.5 of the distance to
-  the mouth near it, 0.35 farther out, more accurate than the midpoint steps they replace (D22).
+- Fourth-order (Runge-Kutta) steps from 3 throat radii of a mouth out to the bending cutoff: 0.35 of the distance to
+  the nearest mouth, at most 2 blocks, more accurate than the midpoint steps they replace (D22, D26). Where a step's
+  straight chord finds a hit further off the curved path than 1e-4 radians seen from the eye, the ray steps again
+  in short steps across the hit (D25).
 - A jump across each mouth's inner sphere (1.6 blocks in radius): the mouth's own field there looks the same about
   every axis through its centre, so a ray's path depends only on its angle (and, for the eye inside the sphere, on
   the eye's distance). Tables traced once at start-up give where each ray comes out, through the throat or not,
-  and how much a uniform extra field would move it; the other mouths' bending is added from that, to first order
-  (D23). Against a reference with four times smaller steps, the images are as close as with full stepping.
+  and how much a uniform or linear extra field would move it; the other mouths' bending (their gradient and its
+  change across the sphere, computed per frame) is added from that, to first order (D23, D26).
+
+Rays sent sideways just outside a throat can stay trapped circling it for good; the Metal shader paints them from
+the pixels around them, with a pull–push fill, instead of black (D27). `OPTIMIZATIONS.md` sets out the maths of
+every optimization tried, and how close the light paths are to converged ones.
 
 ## Results
 
@@ -107,62 +114,63 @@ Run on an Apple M3 Pro (6 performance and 6 efficiency cores), macOS 15.7.3, Rus
 2560×1440 display at 1× scaling. The machine was also running other work, so treat the times as rough.
 
 In the real window at full-screen size (macOS makes it 2560×1336), playing a route (`--play-route`, after 5 warm-up
-frames; the automatic scale is the default):
+frames; the automatic scale is the default), this layer and PR 72's run one after the other, on a busier machine than
+PR 72's own timings (155 fps on the legs then):
 
-| Route and render scale | Average | Median frame | 99th percentile | Frames over 1/60 s | At full resolution |
+| Route | Average | Median frame | 99th percentile | Frames over 1/60 s | At full resolution |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| scripted legs, automatic (2 runs) | 155 fps | 6.0 ms | 14.2 ms | 1 and 1 of 719 (17.1, 17.2 ms) | 94.9% of frames (never below 0.75) |
-| scripted legs, always full | 153 fps | 6.0 ms | 17.5 ms | 10 of 719 (worst 20.2 ms) | 100% |
-| mouth tour, automatic (2 runs) | 106 fps | 8.8 ms | 15.0 ms | 5 and 5 of 1795 (worst 18.6, 18.7 ms) | 83% of frames (never below 0.65) |
+| scripted legs, now | 90 fps | 10.7 ms | 15.1 ms | 5 of 724 (worst 21.3 ms) | 77% of frames (never below 0.55) |
+| scripted legs, PR 72 | 95 fps | 10.4 ms | 15.4 ms | 4 of 724 (worst 20.4 ms) | 93% (never below 0.75) |
+| mouth tour, now | 82 fps | 12.3 ms | 18.5 ms | 30 of 1795 (worst 43.9 ms) | 44% (never below 0.5) |
+| mouth tour, PR 72 | 88 fps | 11.1 ms | 16.5 ms | 15 of 1795 (worst 25.5 ms) | 69% (never below 0.65) |
 
 - The frames that drop below full resolution are those within about a block of a mouth, looking past it, where
-  neighbouring rays scatter in every direction and the GPU's thread groups diverge (about 24 ms at full resolution).
-  The automatic scale drops at once to the scale its time model predicts, by up to a fifth a frame, so only the
-  first frame of a sudden spike is late.
-- Standing at spawn (`--exit-after-s 8`), the window runs at 120 fps at full resolution.
+  neighbouring rays scatter in every direction and the GPU's thread groups diverge. This layer's more accurate
+  light paths (below) cost GPU time, so more of them are upscaled. The automatic scale drops at once to the scale
+  its time model predicts, by up to a fifth a frame, so mostly only the first frame of a sudden spike is late.
 
 Median milliseconds per frame at full resolution (`make bench-views`, 20 frames for WebGL and Metal, 3 to 5 for the
 CPU):
 
 | View | WebGL 1280×800 | Metal 1280×800 | CPU 1280×800 | WebGL 2560×1600 | Metal 2560×1600 | CPU 2560×1600 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| spawn | 35 | 4.2 (23) | 838 | 106 | 11 (81) | 3484 |
-| aimed at mouth 1A | 34 | 4.0 (18) | 783 | 99 | 10 (64) | 3027 |
-| 2.5 blocks from 1A | - | 7.8 | - | - | 23 | - |
-| 0.8 blocks from 1A's throat | 75 | 4.1 (37) | 1403 | 235 | 12 (134) | 5719 |
-| above the rails | 9 | 2.1 (6) | 441 | 32 | 6.2 (25) | 1776 |
-| high above spawn | 33 | 3.2 (15) | 631 | 95 | 9.1 (52) | 2624 |
-| laser through 1A | - | 4.7 (25) | 853 | - | 13 (88) | 3510 |
+| spawn | 35 | 5.7 (4.1) | 838 | 106 | 17 (12) | 3484 |
+| aimed at mouth 1A | 34 | 5.8 (3.8) | 783 | 99 | 15 (11) | 3027 |
+| 2.5 blocks from 1A | - | 13 (8.2) | - | - | 36 (24) | - |
+| 0.8 blocks from 1A's throat | 75 | 6.5 (4.3) | 1403 | 235 | 17 (14) | 5719 |
+| looking sideways 0.4 blocks from 1A | - | 8.6 | - | - | 23 | - |
+| above the rails | 9 | 3.0 (2.2) | 441 | 32 | 8.4 (6.7) | 1776 |
+| high above spawn | 33 | 5.1 (3.4) | 631 | 95 | 13 (9.6) | 2624 |
+| laser through 1A | - | 7.1 (4.9) | 853 | - | 20 (15) | 3510 |
 
-- In brackets: Metal before the third layer's changes (PR 70).
+- In brackets: PR 72's Metal, run just before under the same load. PR 70 took 23, 18, 37, 6, 15 and 25 ms at
+  1280×800 and 81, 64, 134, 25, 52 and 88 ms at 2560×1600 for spawn, aimed, the throat, above the rails, high above
+  and the laser.
 - WebGL is the browser demo at the same drawing-buffer sizes, in the Claude desktop app's built-in browser (Chromium
   152, ANGLE on Metal), timed with `readPixels`. Its scene differs a little: its mouths and eye are 4.5 blocks up,
   not 1.7, and it has no laser.
-- So Metal is now 4 to 20 times faster than WebGL, and 3 to 12 times faster than before the third layer. The CPU,
-  which got the bounding boxes but none of Metal's shortcuts, is 180 to 500 times slower than Metal.
-- Tracing every pixel (`--sampling every-pixel`), Metal at 2560×1600 takes 29 ms at spawn, 35 ms 2.5 blocks from 1A
-  and 30 ms at the throat.
+- So Metal is 3 to 14 times faster than WebGL and 2 to 8 times faster than PR 70. The CPU, which got the bounding
+  boxes but none of Metal's shortcuts, is 150 to 330 times slower than Metal.
 
-How close the images are, at 2560×1600, against a reference traced like PR 70 but with steps eight times smaller
-(itself within 0.03 to 0.2 pixel, median, of one with four times smaller steps, and 1 pixel at the throat). The first numbers are how far image
-features moved, in pixels, from phase correlation of 48×48 textured patches (median, 90th percentile); then the
-share of pixels that changed by more than 30 of 765, and the structural similarity (SSIM, on brightness):
+How close the images are, at 2560×1600: how far image features moved, in pixels, from phase correlation of 48×48
+textured patches (median), against a reference traced like PR 70 but with steps 32 times smaller, over the patches
+where it agrees with a 16-times reference within 0.5 pixel (the two agree to 0.01 to 0.12 pixel; 1 pixel is about
+0.05° of view):
 
-| View | PR 70 | Now |
-| --- | --- | --- |
-| spawn | 3.2 px, 5.8 px; 12.3%, 0.826 | 1.4 px, 5.7 px; 6.6%, 0.896 |
-| aimed at mouth 1A | 3.1 px, 5.4 px; 9.7%, 0.858 | 1.4 px, 5.9 px; 6.5%, 0.908 |
-| 2.5 blocks from 1A | 2.2 px, 7.1 px; 17.0%, 0.699 | 2.6 px, 8.0 px; 18.4%, 0.702 |
-| 0.8 blocks from 1A's throat | 2.5 px, 9.1 px; 10.1%, 0.865 | 2.3 px, 6.9 px; 8.1%, 0.877 |
-| above the rails | 1.0 px, 2.3 px; 1.8%, 0.957 | 0.1 px, 2.0 px; 0.8%, 0.977 |
+| View | PR 72 | Now |
+| --- | ---: | ---: |
+| spawn | 1.38 | 0.14 |
+| aimed at mouth 1A | 1.34 | 0.07 |
+| 2.5 blocks from 1A | 2.64 | 1.50 |
+| 0.8 blocks from 1A's throat | 1.99 | 1.02 |
+| above the rails | 0.13 | 0.08 |
+| high above spawn | 1.04 | 0.05 |
+| laser through 1A | 1.35 | 0.07 |
 
-(The percentages and SSIM are against the four-times reference.) So the light paths are now closer to the converged
-ones than PR 70's and the WebGL demo's in every view but the one 2.5 blocks from a mouth, where they are as close:
-features sit about 1.4 pixels (0.07° of view) from the converged paths in ordinary views and 2 to 3 pixels in views
-dominated by a mouth's lens, which magnifies small errors (even the four-times reference is 1 pixel off at the
-throat). Adaptive sampling on its own moves features by under 0.01 pixel (median; SSIM 0.98 to 0.998 against tracing
-every pixel). Frames the window upscales with MetalFX keep features in place (0.2 to 0.4 pixel) but lose fine detail
-(SSIM 0.85 to 0.96 at 0.8 scale).
+So ordinary views now sit within about a tenth of a pixel of the converged light paths, and views dominated by a
+mouth's lens, which magnifies small errors, within 1 to 1.5 pixels. Adaptive sampling on its own moves features by
+under 0.01 pixel (median; SSIM 0.98 to 0.998 against tracing every pixel). Frames the window upscales with MetalFX
+keep features in place (0.2 to 0.4 pixel) but lose fine detail (SSIM 0.85 to 0.96 at 0.8 scale).
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s

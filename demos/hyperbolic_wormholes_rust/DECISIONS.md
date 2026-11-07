@@ -230,6 +230,61 @@
   2.5 blocks away 18.4% (0.702) against 17.0% (0.699).
 - **Revisit if:** mouths are placed so close that their fields vary a lot across a jump sphere.
 
+### D24. Measure accuracy where the reference has converged
+
+- **Choice:** the reference is now the PR 70 tracer with steps 32 times smaller, and a view's shift is the median
+  over the 48×48 patches where it agrees with the 16-times reference within 0.5 pixel (61% of the throat view's
+  textured patches, 90 to 99.8% elsewhere). The two agree to 0.01 to 0.12 pixel.
+- **Alternatives:** the eight-times reference against the four-times one, as in D16, whose 1 pixel at the throat
+  turned out to be the four-times reference's own error.
+- **Rationale:** a shift is only meaningful where the truth is known to better than it.
+
+### D25. Test hits closer to the curved path
+
+- **Choice:** when a step's chord hits something farther off the curved path than 1e-4 radians seen from the eye
+  (`get_chord_limit_m`), the ray steps again from the step's start, lands just before the hit and crosses it in
+  short steps (OPTIMIZATIONS.md 7.2). RK4 steps are also capped at 2 blocks (7.3).
+- **Alternatives:** capping every step by the same bound (spawn 0.07 pixel but twice the time); capping steps at 0.3
+  of the distance travelled; testing the step's Hermite curve in up to 16 chords (slower); ending steps on the
+  cutoff spheres; a cap of 3 blocks, or a bound of 2e-4.
+- **Rationale:** most of the 1.4 pixels left in ordinary views came from these chords and long outer steps; together
+  they now sit 0.05 to 0.14 pixel from the converged paths.
+
+### D26. Whole RK4 steps near a mouth, and the jump's tidal correction
+
+- **Choice:** every RK4 stage sums every mouth, with steps of 0.35 of the distance from 3 throat radii out to the
+  cutoff (one rule instead of D22's two). The jump tables also store the response to a linear extra field, and each
+  frame a kernel stores the other mouths' gradient and its change at each mouth, so a jump adds their tidal part to
+  first order; the throat table uses the near side's part only (OPTIMIZATIONS.md 7.5). The step entering a jump
+  sphere is cut by three rounds of regula falsi.
+- **Alternatives:** D22 and D23 as they were; one round at the entry (near view 2.02 pixels instead of 1.50); the far
+  side's tidal part with the throat table too (near view 1.98 instead of 1.44); the entry taken from the step's
+  Hermite curve; larger or finer tables.
+- **Rationale:** the jump's uniform-field assumption was most of the error left near a mouth. The near view goes from
+  2.64 to 1.50 pixels and the throat view from 1.99 to 1.02. Why the far side's part hurts with the throat table is
+  not understood; it was chosen by measurement.
+
+### D27. Paint trapped rays from their surroundings
+
+- **Choice:** rays that stay trapped circling a throat (a wide band looking sideways just outside one) are painted
+  with a pull–push fill of the pixels around them instead of black. `side_at_throat_1A`, an eighth benchmark view,
+  shows it.
+- **Alternatives:** black, as the CPU renderer still draws them; a longer step budget (20,000 steps and ten times
+  the path length still leave them trapped).
+- **Rationale:** you asked for something simple that doesn't look all black; the lensing law traps them, so no
+  colour is physically right.
+
+### D28. Accept slower frames near mouths for the accuracy
+
+- **Choice:** D25 and D26 cost GPU time (spawn 9.7 to 13.6 ms at 2560×1600, 2.5 blocks from 1A 21.6 to 33.3), so in
+  a full-screen window more frames near a mouth are upscaled: full resolution in 77% of the legs' frames instead of
+  93%, and 44% of the mouth tour's instead of 69%, with about as many frames over 1/60 s (5 and 30 against 4 and 15,
+  under load).
+- **Alternatives:** keeping PR 72's paths, 5 to 20 times further from the converged ones in ordinary views.
+- **Rationale:** I decided it under the goal's "high fidelity"; say if you'd rather have full resolution near
+  mouths.
+- **Revisit if:** the upscaled frames near mouths look worse to you than the old paths did.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
@@ -242,11 +297,12 @@
 
 ## Workload
 
-### D7. Seven fixed views
+### D7. Eight fixed views
 
 - **Choice:** spawn, aimed at mouth 1A, 2.5 blocks from 1A's centre, 0.8 blocks from 1A's throat, above the rails,
-  high above spawn, and the laser through 1A; the same kinds of views as the WebGL timings in PR 58, plus the
-  2.5-block view, added in the third layer because walking into a mouth was the slowest part of the route.
+  high above spawn, the laser through 1A, and looking sideways 0.4 blocks from 1A's centre; the same kinds of views
+  as the WebGL timings in PR 58, plus the 2.5-block view, added in the third layer because walking into a mouth was
+  the slowest part of the route, and the sideways view, added in the fourth because it showed the trapped band.
 - **Alternatives:** a recorded flight.
 - **Rationale:** they cover cheap (above the rails), typical (spawn) and worst (at a throat) cases.
 

@@ -31,8 +31,8 @@ use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use crate::scene_data::{
     ROW_COUNT, ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS, TEXEL_BOXES,
     TEXEL_CLUSTER_INFO, TEXEL_CLUSTER_ORDER, TEXEL_CLUSTERS, TEXEL_GLUINGS, TEXEL_GROUND,
-    TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD, TEXELS_PER_BEAM_CHUNK, TEXELS_PER_BOX,
-    TEXELS_PER_CLUSTER, TEXELS_PER_GLUING, Uniforms,
+    TEXEL_MOUTH_FIELDS, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD, TEXELS_PER_BEAM_CHUNK,
+    TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING, TEXELS_PER_MOUTH_FIELD, Uniforms,
 };
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
@@ -74,6 +74,25 @@ struct SampleBuffers {
     grid: (usize, usize),
 }
 
+/// `HoleBuffers` holds the hole filling's buffers for render sizes up to one size: one byte per
+/// pixel saying whether its ray was lost, the pyramid (every level above the image, half the size
+/// of the one below), and the largest render size they hold.
+struct HoleBuffers {
+    lost: Retained<ProtocolObject<dyn MTLBuffer>>,
+    pyramid: Retained<ProtocolObject<dyn MTLBuffer>>,
+    max_px: (usize, usize),
+}
+
+/// `PyramidLevels` is the shader's `PyramidLevels`: the sizes of a finer and a coarser pyramid level
+/// and where each starts in the pyramid buffer.
+#[repr(C)]
+struct PyramidLevels {
+    low_size: [i32; 2],
+    high_size: [i32; 2],
+    low_offset: i32,
+    high_offset: i32,
+}
+
 const SHADER_SOURCE: &str = include_str!("render_metal.metal");
 const BYTES_PER_RAY_END: usize = 48;
 const BYTES_PER_CELL_MARK: usize = 1;
@@ -84,9 +103,11 @@ const REFINE_GROUP_SIZE: usize = 64;
 const THROAT_TABLE_SIZE: usize = 4096;
 const CAMERA_TABLE_SIZE: usize = 2048;
 const CAMERA_TABLE_ROWS: usize = 64;
-const TEXELS_PER_TABLE_ENTRY: usize = 4;
+const TEXELS_PER_TABLE_ENTRY: usize = 10;
 const BYTES_PER_PIXEL: usize = 4;
 const BYTES_PER_TEXEL: usize = 16;
+const BYTES_PER_LOST_FLAG: usize = 1;
+const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
 const MS_PER_S: f64 = 1000.0;
 const PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
@@ -111,6 +132,12 @@ pub struct MetalRenderer {
     refine_pixels: Pipeline,
     build_throat_table: Pipeline,
     build_camera_table: Pipeline,
+    build_mouth_fields: Pipeline,
+    pull_holes_from_image: Pipeline,
+    pull_holes: Pipeline,
+    push_holes: Pipeline,
+    fill_holes: Pipeline,
+    hole_buffers: Option<HoleBuffers>,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -131,7 +158,10 @@ pub struct MetalRenderer {
 ///
 /// Example: `let source = fill_shader_constants(SHADER_SOURCE);`
 fn fill_shader_constants(source: &str) -> String {
-    let constants: [(&str, usize); 25] = [
+    let constants: [(&str, usize); 28] = [
+        ("TEXEL_MOUTH_FIELDS", TEXEL_MOUTH_FIELDS),
+        ("TEXELS_PER_MOUTH_FIELD", TEXELS_PER_MOUTH_FIELD),
+        ("TEXELS_PER_TABLE_ENTRY", TEXELS_PER_TABLE_ENTRY),
         ("CAMERA_TABLE_SIZE", CAMERA_TABLE_SIZE),
         ("CAMERA_TABLE_ROWS", CAMERA_TABLE_ROWS),
         ("THROAT_TABLE_SIZE", THROAT_TABLE_SIZE),
@@ -206,6 +236,23 @@ fn get_coarse_grid(render_px: (usize, usize)) -> (usize, usize) {
     (render_px.0 / 4 + 3, render_px.1 / 4 + 3)
 }
 
+/// `get_pyramid_levels` gives the hole-filling pyramid's levels for a render size, as (size, offset
+/// in the pyramid buffer): level 0 is the image itself (offset 0, unused), and each level above
+/// is half the one below, rounded up, down to 1×1, stored one after another from level 1.
+///
+/// Example: `let levels = get_pyramid_levels((2560, 1600));`
+fn get_pyramid_levels(render_px: (usize, usize)) -> Vec<((usize, usize), usize)> {
+    let mut levels: Vec<((usize, usize), usize)> = vec![(render_px, 0)];
+    let mut offset: usize = 0;
+    let mut size: (usize, usize) = render_px;
+    while size != (1, 1) {
+        size = (size.0.div_ceil(2), size.1.div_ceil(2));
+        levels.push((size, offset));
+        offset += size.0 * size.1;
+    }
+    levels
+}
+
 impl MetalRenderer {
     /// `New` opens the default GPU, compiles the ray tracer and allocates the scene buffer. With
     /// `is_adaptive`, it traces every other pixel each way and interpolates where that is exact
@@ -257,6 +304,12 @@ impl MetalRenderer {
             make_pipeline("build_throat_table")?,
             make_pipeline("build_camera_table")?,
         );
+        let (pull_holes_from_image, pull_holes) = (
+            make_pipeline("pull_holes_from_image")?,
+            make_pipeline("pull_holes")?,
+        );
+        let (push_holes, fill_holes) = (make_pipeline("push_holes")?, make_pipeline("fill_holes")?);
+        let build_mouth_fields: Pipeline = make_pipeline("build_mouth_fields")?;
         let make_table = |entry_count: usize| {
             device
                 .newBufferWithLength_options(
@@ -291,6 +344,12 @@ impl MetalRenderer {
             refine_pixels,
             build_throat_table,
             build_camera_table,
+            build_mouth_fields,
+            pull_holes_from_image,
+            pull_holes,
+            push_holes,
+            fill_holes,
+            hole_buffers: None,
             throat_table,
             camera_table,
             has_throat_table: false,
@@ -400,6 +459,7 @@ impl MetalRenderer {
         if self.is_adaptive {
             self.prepare_sample_buffers(output_px)?;
         }
+        self.prepare_hole_buffers(output_px)?;
         let row_bytes: usize = data.rows.len() * BYTES_PER_TEXEL;
         assert!(
             row_bytes <= self.rows.length(),
@@ -435,6 +495,17 @@ impl MetalRenderer {
             encoder.setBuffer_offset_atIndex(Some(&self.throat_table), 0, 7);
             encoder.setBuffer_offset_atIndex(Some(&self.camera_table), 0, 8);
         }
+        let hole_buffers: &HoleBuffers = self
+            .hole_buffers
+            .as_ref()
+            .expect("prepare_hole_buffers just made them");
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
+        unsafe {
+            encoder.setBuffer_offset_atIndex(Some(&hole_buffers.lost), 0, 14);
+            encoder.setBuffer_offset_atIndex(Some(&hole_buffers.pyramid), 0, 15);
+        }
+        encoder.setComputePipelineState(&self.build_mouth_fields);
+        dispatch_grid(&encoder, (MAX_MOUTH_COUNT, ROW_COUNT));
         if should_build_table {
             encoder.setComputePipelineState(&self.build_throat_table);
             dispatch_grid(&encoder, (THROAT_TABLE_SIZE, 1));
@@ -447,6 +518,7 @@ impl MetalRenderer {
             encoder.setComputePipelineState(&self.trace_pixels);
             dispatch_grid(&encoder, render_px);
         }
+        self.encode_hole_filling(&encoder, render_px);
         encoder.endEncoding();
         if !is_upscaled && self.is_scaler_warm {
             return Ok((command_buffer, render_texture.clone()));
@@ -542,6 +614,85 @@ impl MetalRenderer {
                     },
                 );
         }
+    }
+
+    /// `encode_hole_filling` encodes the passes that paint lost pixels (rays trapped circling a
+    /// throat) from the pixels around them instead of black: average the other pixels into a
+    /// pyramid of ever coarser levels, fill each level's gaps from the one above, coarsest first,
+    /// then paint the lost pixels from the first level.
+    ///
+    /// Example: `self.encode_hole_filling(&encoder, (2560, 1600));`
+    fn encode_hole_filling(
+        &self,
+        encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
+        render_px: (usize, usize),
+    ) {
+        let levels: Vec<((usize, usize), usize)> = get_pyramid_levels(render_px);
+        let set_levels = |low: ((usize, usize), usize), high: ((usize, usize), usize)| {
+            let step: PyramidLevels = PyramidLevels {
+                low_size: [low.0.0 as i32, low.0.1 as i32],
+                high_size: [high.0.0 as i32, high.0.1 as i32],
+                low_offset: low.1 as i32,
+                high_offset: high.1 as i32,
+            };
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG LEVELS WILL HAPPEN
+            unsafe {
+                encoder.setBytes_length_atIndex(
+                    NonNull::from(&step).cast(),
+                    std::mem::size_of::<PyramidLevels>(),
+                    16,
+                )
+            };
+        };
+        for k in 0..levels.len() - 1 {
+            set_levels(levels[k], levels[k + 1]);
+            encoder.setComputePipelineState(if k == 0 {
+                &self.pull_holes_from_image
+            } else {
+                &self.pull_holes
+            });
+            dispatch_grid(encoder, levels[k + 1].0);
+        }
+        for k in (1..levels.len() - 1).rev() {
+            set_levels(levels[k], levels[k + 1]);
+            encoder.setComputePipelineState(&self.push_holes);
+            dispatch_grid(encoder, levels[k].0);
+        }
+        set_levels(levels[0], levels[1]);
+        encoder.setComputePipelineState(&self.fill_holes);
+        dispatch_grid(encoder, render_px);
+    }
+
+    /// `prepare_hole_buffers` makes the hole filling's buffers big enough for any render size up to
+    /// `max_px`, if the current ones are for another size.
+    ///
+    /// Example: `self.prepare_hole_buffers((2560, 1600))?;`
+    fn prepare_hole_buffers(&mut self, max_px: (usize, usize)) -> Result<()> {
+        if self
+            .hole_buffers
+            .as_ref()
+            .is_some_and(|buffers| buffers.max_px == max_px)
+        {
+            return Ok(());
+        }
+        let (top_size, top_offset): ((usize, usize), usize) = *get_pyramid_levels(max_px)
+            .last()
+            .expect("a pyramid has at least the image");
+        let pyramid_texel_count: usize = top_offset + top_size.0 * top_size.1;
+        let make_buffer = |bytes: usize| {
+            self.device
+                .newBufferWithLength_options(bytes, MTLResourceOptions::StorageModePrivate)
+                .ok_or(format!(
+                    "Metal: no memory to fill holes at {}x{}",
+                    max_px.0, max_px.1
+                ))
+        };
+        self.hole_buffers = Some(HoleBuffers {
+            lost: make_buffer(max_px.0 * max_px.1 * BYTES_PER_LOST_FLAG)?,
+            pyramid: make_buffer(pyramid_texel_count * BYTES_PER_PYRAMID_TEXEL)?,
+            max_px,
+        });
+        Ok(())
     }
 
     /// `prepare_sample_buffers` makes adaptive sampling's buffers big enough for any render size up

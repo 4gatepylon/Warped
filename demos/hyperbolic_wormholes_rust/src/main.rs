@@ -83,6 +83,8 @@ const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
 const NEAR_VIEW_DISTANCE_M: f64 = 2.5;
+const SIDE_VIEW_DISTANCE_M: f64 = 0.4;
+const SIDE_VIEW_YAW_RAD: f64 = std::f64::consts::FRAC_PI_2;
 const THROAT_APPROACH_STEP_M: f64 = 0.1;
 const MAX_APPROACH_STEP_COUNT: usize = 2000;
 const SECONDS_PER_DAY: u64 = 86_400;
@@ -495,7 +497,8 @@ struct View {
 }
 
 /// `make_bench_views` makes the benchmark's cameras: spawn, aimed at mouth 1A, a few blocks from it,
-/// right at its throat, above the rails, high above spawn, and aimed at 1A with the laser on.
+/// right at its throat, above the rails, high above spawn, looking sideways just outside 1A's
+/// throat (where some rays stay trapped circling it), and aimed at 1A with the laser on.
 ///
 /// Example: `let views = make_bench_views(&world);`
 fn make_bench_views(world: &World) -> Vec<View> {
@@ -547,6 +550,12 @@ fn make_bench_views(world: &World) -> Vec<View> {
         View {
             name: "fly_way_up",
             frame: way_up,
+            is_laser_on: false,
+        },
+        View {
+            name: "side_at_throat_1A",
+            frame: approach(SIDE_VIEW_DISTANCE_M)
+                * make_rotation(AXIS_Z, AXIS_X, SIDE_VIEW_YAW_RAD),
             is_laser_on: false,
         },
         View {
