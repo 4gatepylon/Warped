@@ -27,6 +27,9 @@ use crate::render::{
 const GROUND_ALBEDO: Vec3 = Vec3::new(0.11, 0.1, 0.09);
 /// `MIDDLE_EXPOSURE` is the exposed brightness of a white surface in full daylight.
 const MIDDLE_EXPOSURE: f32 = 1.9;
+/// `MIN_SUN_PER_SKY_IRRADIANCE_FRAC` is the least ratio of sun to sky light on flat ground; a
+/// clear day is about 3 to 5, and HDRIs with a clipped sun come out near 1.
+const MIN_SUN_PER_SKY_IRRADIANCE_FRAC: f32 = 3.5;
 /// `ROBOT_HEIGHT_M` is the height the robot model is scaled to.
 const ROBOT_HEIGHT_M: f32 = 1.85;
 /// `SURFACE_TEXTURE_SIZE_PX` is the size limit of arena textures.
@@ -199,9 +202,12 @@ fn environment_from_sky(sky: Sky) -> (EnvironmentData, f32) {
             .sum::<Vec3>()
     };
     let luminance = |color: Vec3| color.dot(Vec3::new(0.2126, 0.7152, 0.0722));
-    let daylight_radiance: f32 = luminance(sky.sun_illuminance_rgb) * sky.sun_direction.y
-        / std::f32::consts::PI
-        + luminance(up_irradiance_rgb);
+    let sun_radiance: f32 =
+        luminance(sky.sun_illuminance_rgb) * sky.sun_direction.y / std::f32::consts::PI;
+    let ibl_intensity_frac: f32 = (sun_radiance
+        / (MIN_SUN_PER_SKY_IRRADIANCE_FRAC * luminance(up_irradiance_rgb)).max(1e-4))
+    .min(1.0);
+    let daylight_radiance: f32 = sun_radiance + luminance(up_irradiance_rgb) * ibl_intensity_frac;
     println!(
         "sky: sun {:?} illuminance {:.1}, sky irradiance/pi {:.2}, white-surface radiance {:.2}",
         sky.sun_direction,
@@ -212,7 +218,7 @@ fn environment_from_sky(sky: Sky) -> (EnvironmentData, f32) {
     let fog_color_rgb: Vec3 = up_irradiance_rgb * Vec3::new(0.95, 0.98, 1.05);
     let atmosphere: Atmosphere = Atmosphere {
         exposure: MIDDLE_EXPOSURE / daylight_radiance.max(1e-4),
-        ibl_intensity_frac: 1.0,
+        ibl_intensity_frac,
         fog_color_rgb,
         fog_density_per_m: 0.0035,
         fog_height_falloff_per_m: 0.12,

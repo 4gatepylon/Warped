@@ -153,7 +153,8 @@ inline float4 shade_forward(SceneVertexOut in, constant FrameUniforms& frame,
         discard_fragment();
     }
     float3 color = shade_surface(frame, surface, textures, point_lights);
-    color = apply_fog(frame, color, in.world_position);
+    color = apply_shadowed_fog(frame, color, in.world_position, textures.shadow_map,
+                               textures.sky_visibility, in.position.xy);
     return float4(color, alpha);
 }
 
@@ -234,7 +235,9 @@ vertex SkyVertexOut sky_vertex(uint vertex_id [[vertex_id]]) {
  */
 fragment float4 sky_fragment(SkyVertexOut in [[stage_in]],
                              constant FrameUniforms& frame [[buffer(1)]],
-                             texturecube<float> environment [[texture(0)]]) {
+                             texturecube<float> environment [[texture(0)]],
+                             depth2d_array<float> shadow_map [[texture(4)]],
+                             texture3d<float> sky_visibility [[texture(5)]]) {
     constexpr sampler cube_sampler(coord::normalized, filter::linear, mip_filter::linear);
     float4 world = frame.inv_view_proj * float4(in.ndc, 1.0, 1.0);
     float3 direction = normalize(world.xyz / world.w - frame.camera_position_m.xyz);
@@ -248,7 +251,8 @@ fragment float4 sky_fragment(SkyVertexOut in [[stage_in]],
     color += frame.sun_illuminance.rgb / sun_solid_angle * disk * SUN_DISK_RADIANCE_SCALE;
     color += frame.sun_illuminance.rgb * SUN_GLOW_STRENGTH * pow(saturate(cos_sun), 600.0);
     float3 far_point = frame.camera_position_m.xyz + direction * FOG_MAX_DISTANCE_M;
-    color = apply_fog(frame, color, far_point);
+    color = apply_shadowed_fog(frame, color, far_point, shadow_map, sky_visibility,
+                               in.position.xy);
     return float4(color, 1.0);
 }
 
@@ -335,7 +339,8 @@ fragment float4 decal_fragment(DecalVertexOut in [[stage_in]],
     surface.should_use_ssao = true;
     SceneTextures textures = {shadow_map, sky_visibility, prefiltered, brdf_lut, ssao};
     float3 color = shade_surface(frame, surface, textures, point_lights);
-    color = apply_fog(frame, color, in.world_position);
+    color = apply_shadowed_fog(frame, color, in.world_position, textures.shadow_map,
+                               textures.sky_visibility, in.position.xy);
     return float4(color, alpha);
 }
 

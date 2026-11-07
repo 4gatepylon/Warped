@@ -573,6 +573,24 @@ impl MetalRenderer {
                 frame.point_lights.len().min(MAX_POINT_LIGHT_COUNT) as f32,
             ),
             bounce_color: atmosphere.bounce_color_rgb.extend(0.0),
+            effect_params: Vec4::new(
+                if settings.is_color_grade_enabled {
+                    1.0
+                } else {
+                    0.0
+                },
+                if settings.is_volumetric_haze_enabled {
+                    1.0
+                } else {
+                    0.0
+                },
+                if settings.is_material_response_enabled {
+                    1.0
+                } else {
+                    0.0
+                },
+                BLOOM_LEVEL_COUNT as f32,
+            ),
         }
     }
 

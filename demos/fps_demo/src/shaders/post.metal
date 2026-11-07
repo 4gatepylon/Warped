@@ -22,6 +22,12 @@ constant int SSAO_BLUR_RADIUS_TEXELS = 4;
 constant float SSAO_BLUR_DEPTH_SHARPNESS = 12.0;
 constant float VIGNETTE_STRENGTH = 0.28;
 constant float GRAIN_STRENGTH = 0.025;
+constant float GRADE_MIDDLE_GREY = 0.18;
+constant float GRADE_CONTRAST = 1.18;
+constant float GRADE_SATURATION = 1.12;
+constant float3 GRADE_WHITE_BALANCE = float3(1.04, 1.0, 0.94);
+constant float3 GRADE_SHADOW_TINT = float3(0.94, 1.0, 1.07);
+constant float3 GRADE_HIGHLIGHT_TINT = float3(1.04, 1.0, 0.95);
 constant float FXAA_EDGE_THRESHOLD = 0.125;
 constant float FXAA_EDGE_THRESHOLD_MIN = 0.0312;
 constant uint FXAA_SEARCH_STEP_COUNT = 10;
@@ -244,8 +250,41 @@ inline float3 linear_to_srgb(float3 color) {
 }
 
 /**
+ * @brief `grade_scene` is the scene-linear part of the color grade: white balance, contrast
+ * around middle grey in log space, and saturation.
+ * @par Example
+ * @code
+ * float3 graded = grade_scene(color * exposure);
+ * @endcode
+ */
+inline float3 grade_scene(float3 color) {
+    color *= GRADE_WHITE_BALANCE;
+    float luminance = max(dot(color, float3(0.2126, 0.7152, 0.0722)), 1e-6);
+    float graded_luminance = GRADE_MIDDLE_GREY * pow(luminance / GRADE_MIDDLE_GREY, GRADE_CONTRAST);
+    color *= graded_luminance / luminance;
+    return max(mix(float3(graded_luminance), color, GRADE_SATURATION), 0.0);
+}
+
+/**
+ * @brief `grade_display` is the display-linear part of the color grade: cool shadows and warm
+ * highlights.
+ * @par Example
+ * @code
+ * float3 graded = grade_display(aces_fitted(color));
+ * @endcode
+ */
+inline float3 grade_display(float3 color) {
+    float luminance = saturate(dot(color, float3(0.2126, 0.7152, 0.0722)));
+    float3 tint = mix(GRADE_SHADOW_TINT, GRADE_HIGHLIGHT_TINT, smoothstep(0.05, 0.6, luminance));
+    return saturate(color * tint);
+}
+
+/**
  * @brief `tonemap_fragment` adds bloom, exposes, tone maps with ACES, grades, and stores luma
  * in alpha for FXAA.
+ * @par Interface
+ * `frame.effect_params.x` turns the color grade on, and `frame.effect_params.w` is the number of
+ * bloom levels summed into `bloom`.
  * @par Example
  * @code
  * pipeline(fullscreen_vertex, tonemap_fragment) into the RGBA8 LDR target
@@ -257,12 +296,16 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
                                  texture2d<float> bloom [[texture(1)]]) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float3 color = hdr.sample(linear_sampler, in.uv).rgb;
-    float3 bloom_color = bloom.sample(linear_sampler, in.uv).rgb;
+    float3 bloom_color = bloom.sample(linear_sampler, in.uv).rgb / frame.effect_params.w;
     color = mix(color, bloom_color, frame.render_params.y);
     color *= frame.render_params.x;
-    float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
-    color = max(mix(float3(luminance), color, 1.08), 0.0);
-    color = aces_fitted(color);
+    bool is_color_grade_enabled = frame.effect_params.x > 0.5;
+    if (is_color_grade_enabled) {
+        color = grade_display(aces_fitted(grade_scene(color)));
+    } else {
+        float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
+        color = aces_fitted(max(mix(float3(luminance), color, 1.08), 0.0));
+    }
     float2 centered = in.uv - 0.5;
     float vignette = 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length(centered * float2(1.1, 1.0)));
     color *= vignette;

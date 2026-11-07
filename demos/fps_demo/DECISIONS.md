@@ -18,6 +18,15 @@
   person, but its path depends on the bots, so two runs aren't identical.
 - **Revisit if:** runs vary too much to compare a change; then add a fixed flythrough.
 
+### D4. Fixed camera views for lighting comparisons
+
+- **Choice:** `--camera-view yard|indoor|firing` holds the player at one pose each (outdoor yard,
+  inside the warehouse under the roof gap, and the yard with the trigger held), with
+  `--bot-count 0`, for before/after screenshots and per-effect GPU costs.
+- **Alternatives:** the autopilot route (D1), which mixes all three kinds of view.
+- **Rationale:** a fixed view makes screenshots comparable and removes the route's variance from
+  a per-effect difference.
+
 ## Procedure
 
 ### D2. 30 s by default, vsync on
@@ -26,6 +35,19 @@
 - **Alternatives:** `--no-vsync` to measure the uncapped frame time.
 - **Rationale:** vsync matches how it is played; the GPU time shows the headroom under the cap.
   The duration is arbitrary; anything from 20 to 60 s gives stable means.
+
+### D5. Per-effect cost is all-on minus one-off, no vsync, 3 interleaved repeats
+
+- **Choice:** each new effect's GPU cost is the mean GPU time with every effect on minus the mean
+  with only that effect off (`--disable-effect`), 8 s per run with `--no-vsync`, for each fixed
+  view, repeated 3 times with the configurations interleaved; the median of the repeats is
+  reported.
+- **Alternatives:** per-pass timing in an Xcode Metal capture; vsync on (D2).
+- **Rationale:** on the development VM, vsync-on GPU times varied between 3 and 16 ms for the same
+  view, so the difference between effects was hidden; without vsync the GPU stays busy and runs
+  agree to about 0.5 ms.
+- **Revisit if:** the numbers are measured on a real MacBook Pro, where per-pass Metal capture
+  gives each effect's cost directly.
 
 ## Metrics
 

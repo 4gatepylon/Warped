@@ -17,13 +17,13 @@ mod scene;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use clap::Parser;
-use glam::Vec2;
+use clap::{Parser, ValueEnum};
+use glam::{Vec2, Vec3};
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
 
 use game::audio::Audio;
-use game::player::PlayerInput;
+use game::player::{Player, PlayerInput};
 use game::session::{Controls, FrameData, Session};
 use game::weapon::WeaponInput;
 use game::world::Arena;
@@ -40,6 +40,54 @@ const MAX_FRAME_S: f32 = 0.05;
 const REPORT_INTERVAL_S: f32 = 5.0;
 /// `RENDER_SCALE_STEP_FRAC` is how much `[` and `]` change the render scale.
 const RENDER_SCALE_STEP_FRAC: f32 = 0.1;
+
+/// `CameraView` is a fixed camera pose for screenshots and repeatable frame-time comparisons.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+enum CameraView {
+    Yard,
+    Indoor,
+    Firing,
+}
+
+const YARD_VIEW_FEET_M: Vec3 = Vec3::new(20.0, 0.0, -6.0);
+const YARD_VIEW_YAW_RAD: f32 = 2.4;
+const YARD_VIEW_PITCH_RAD: f32 = -0.05;
+const INDOOR_VIEW_FEET_M: Vec3 = Vec3::new(-9.0, 0.06, -9.5);
+const INDOOR_VIEW_YAW_RAD: f32 = 0.95;
+const INDOOR_VIEW_PITCH_RAD: f32 = 0.0;
+const FIRING_VIEW_FEET_M: Vec3 = Vec3::new(-2.0, 0.0, 30.0);
+const FIRING_VIEW_YAW_RAD: f32 = 0.0;
+const FIRING_VIEW_PITCH_RAD: f32 = 0.02;
+
+impl CameraView {
+    /// `pose` returns the view's feet position, yaw and pitch.
+    fn pose(self) -> (Vec3, f32, f32) {
+        match self {
+            CameraView::Yard => (YARD_VIEW_FEET_M, YARD_VIEW_YAW_RAD, YARD_VIEW_PITCH_RAD),
+            CameraView::Indoor => (
+                INDOOR_VIEW_FEET_M,
+                INDOOR_VIEW_YAW_RAD,
+                INDOOR_VIEW_PITCH_RAD,
+            ),
+            CameraView::Firing => (
+                FIRING_VIEW_FEET_M,
+                FIRING_VIEW_YAW_RAD,
+                FIRING_VIEW_PITCH_RAD,
+            ),
+        }
+    }
+}
+
+/// `Effect` is a render effect that `--disable-effect` can turn off at start.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+enum Effect {
+    Ssao,
+    Bloom,
+    Fxaa,
+    ColorGrade,
+    VolumetricHaze,
+    MaterialResponse,
+}
 
 /// `Args` are the command-line flags.
 #[derive(Parser, Debug)]
@@ -75,6 +123,13 @@ struct Args {
     /// Use the CC0 Poly Haven rifle even if the Sketchfab revolver is present.
     #[arg(long)]
     rifle: bool,
+    /// Hold the camera at a fixed view (no autopilot, no mouse look); `firing` holds the trigger
+    /// and reloads when the magazine is empty.
+    #[arg(long, value_enum, conflicts_with = "autopilot")]
+    camera_view: Option<CameraView>,
+    /// Turn an effect off at start (repeatable); the F keys still toggle it.
+    #[arg(long, value_enum)]
+    disable_effect: Vec<Effect>,
     /// Directory holding the downloaded assets.
     #[arg(long)]
     assets_dir: Option<PathBuf>,
@@ -177,9 +232,12 @@ fn main() {
     let mut session: Session = Session::new(arena, args.bot_count, args.autopilot);
     let mut settings: RenderSettings = RenderSettings {
         render_scale_frac: args.render_scale,
-        is_ssao_enabled: true,
-        is_bloom_enabled: true,
-        is_fxaa_enabled: true,
+        is_ssao_enabled: !args.disable_effect.contains(&Effect::Ssao),
+        is_bloom_enabled: !args.disable_effect.contains(&Effect::Bloom),
+        is_fxaa_enabled: !args.disable_effect.contains(&Effect::Fxaa),
+        is_color_grade_enabled: !args.disable_effect.contains(&Effect::ColorGrade),
+        is_volumetric_haze_enabled: !args.disable_effect.contains(&Effect::VolumetricHaze),
+        is_material_response_enabled: !args.disable_effect.contains(&Effect::MaterialResponse),
         is_vsync_enabled: !args.no_vsync,
     };
     let mut is_showing_frame_time: bool = args.show_frame_time;
@@ -219,6 +277,16 @@ fn main() {
                     Scancode::F3 => settings.is_fxaa_enabled = !settings.is_fxaa_enabled,
                     Scancode::F4 => is_showing_frame_time = !is_showing_frame_time,
                     Scancode::F5 => session.is_autopilot = !session.is_autopilot,
+                    Scancode::F6 => {
+                        settings.is_color_grade_enabled = !settings.is_color_grade_enabled
+                    }
+                    Scancode::F7 => {
+                        settings.is_volumetric_haze_enabled = !settings.is_volumetric_haze_enabled
+                    }
+                    Scancode::F8 => {
+                        settings.is_material_response_enabled =
+                            !settings.is_material_response_enabled
+                    }
                     Scancode::LeftBracket => {
                         settings.render_scale_frac =
                             (settings.render_scale_frac - RENDER_SCALE_STEP_FRAC).max(0.3);
@@ -276,6 +344,25 @@ fn main() {
                 is_reload_pressed,
                 is_aim_held: is_mouse_captured && mouse_state.right(),
             },
+        };
+        let controls: Controls = match args.camera_view {
+            Some(view) => {
+                let (feet_m, yaw_rad, pitch_rad) = view.pose();
+                session.player = Player::new(feet_m, yaw_rad);
+                session.player.pitch_rad = pitch_rad;
+                session.player.is_on_ground = true;
+                session.is_autopilot = false;
+                let is_firing_view: bool = view == CameraView::Firing;
+                Controls {
+                    weapon: WeaponInput {
+                        is_trigger_held: is_firing_view,
+                        is_reload_pressed: is_firing_view && session.weapon.ammo == 0,
+                        ..WeaponInput::default()
+                    },
+                    ..Controls::default()
+                }
+            }
+            None => controls,
         };
         session.update(&controls, &scene, &audio, dt_s);
 
