@@ -1,4 +1,6 @@
-These rules apply to the whole repository. Folders can add their own rules in their own `CLAUDE.md`.
+These rules apply to the whole repository. Codex and Devin read them here, in `AGENTS.md`;
+Claude Code reads them through `CLAUDE.md`, which imports this file. Folders can add their own
+rules in their own `AGENTS.md`, with a `CLAUDE.md` beside it that imports it the same way.
 
 ## Pull requests
 
@@ -348,7 +350,7 @@ When the user tests a game or other visual work you made:
 ## Machine-specific workarounds
 
 This repo is used from several machines, so don't write a workaround for one machine (e.g. a
-broken `gh` command) as if it held everywhere. In `CLAUDE.md` files and skills, write it as a
+broken `gh` command) as if it held everywhere. In `AGENTS.md` files and skills, write it as a
 condition, a one-line note on where it was seen, and the fix. Keep it to a line or two:
 
 > If `gh pr edit` fails with a Projects (classic) error (seen once with gh 2.55 on a Linux machine,

@@ -7,7 +7,7 @@ description: Write or update a pull request description using this repo's standa
 
 Every PR description in this repo uses the template below, exactly: the same sections, in the same
 order, with the same headings. Never drop a section; if it has nothing to say, write `None.`. This
-covers only the description (and title); the PR size rule is in the root `CLAUDE.md`, and how to
+covers only the description (and title); the PR size rule is in the root `AGENTS.md`, and how to
 split and stack PRs is in the `stacked-prs` skill (`.claude/skills/stacked-prs/`).
 
 > NOTE: The template is a living document: it may change, but at any point in time every PR uses
@@ -59,7 +59,7 @@ Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
   test passed unless you ran it in this change.
 - **Stack**: link the PR below (and above, once it exists) by number. Layer 1's base is `main`.
 - **Size**: the count of reviewable, hand-written code lines under the PR size rule in the root
-  `CLAUDE.md` (generated code, lockfiles, verbatim copies and prose don't count).
+  `AGENTS.md` (generated code, lockfiles, verbatim copies and prose don't count).
 - Keep the attribution line last. If the session gives a different attribution line, use that one.
 
 ## Updating
