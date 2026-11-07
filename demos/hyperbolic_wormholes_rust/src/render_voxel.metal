@@ -35,6 +35,8 @@ constant float SURFACE_OFFSET_M = 0.02;
 constant float FOIL_LAMBDA_SQ = 0.25;
 constant float HORIZON_CAPTURE_FRAC = 1.02;
 constant float BEND_STEP_FRAC = 0.08;
+constant int LATE_STEP_COUNT = 90;
+constant float LATE_BEND_STEP_FRAC = 0.24;
 constant float MIN_BEND_STEP_M = 0.004;
 constant float MAX_BEND_STEP_M = 3.0;
 constant float GROUND_DETAIL_S = 7.0;
@@ -768,7 +770,8 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
 /**
  * @brief `trace_ray` traces a ray backwards from the eye through a point of the image (in pixels from its top left
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
- * surface, the sky or a horizon.
+ * surface, the sky or a horizon. After `LATE_STEP_COUNT` iterations (rays winding near a throat or the black hole,
+ * which land in the lens's most compressed, aliased images) its bent steps are three times longer.
  * @par Example
  * @code
  * VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
@@ -825,7 +828,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             continue;
         }
         if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho, local);
-        float ds = clamp(BEND_STEP_FRAC * rho, min_step, max_step);
+        float ds = clamp((it < LATE_STEP_COUNT ? BEND_STEP_FRAC : LATE_BEND_STEP_FRAC) * rho, min_step, max_step);
         v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
         hit.s = ds;
         hit.mat = 0;

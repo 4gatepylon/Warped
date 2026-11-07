@@ -726,3 +726,27 @@ Its remaining cost is the rays that wind near the throat: the last refinement pa
 is 9 of its 20 ms. What else was measured there: shading 3 ms (the sky 0.3, the ground 1.1, blocks 1.7), one gradient
 evaluation per step about 3 ms, sample buffers (96 bytes a ray end) no measurable share, and packing the refined rays
 in groups of 32, 64 or 128 the same.
+
+### 8.7 Longer steps for rays still going after 90 iterations
+
+The wormhole exit's remaining cost is rays that wind near the throat or travel far through both mouths' reaches. Rays
+that need more than 90 iterations land in the lens's most compressed images: thin, aliased rings where neighbouring
+pixels already show unrelated texels. After 90 iterations a ray's bent steps are now 24% of the distance to the warp
+instead of 8%.
+
+GPU ms at 2560×1600 with adaptive sampling: wormhole exit 19.8 → 17.4, laser view 20.4 → 18.7, wormhole 12.8 →
+12.1; at the full-screen window's size and full resolution (minimum over alternating runs on a busy machine), the
+wormhole exit takes 13.7 ms and the laser view 14.9. 2.9% of the wormhole exit's pixels change, all in the
+compressed rim inside the mouth, and against steps eight times smaller the feature shifts stay where they were
+(median 3.99 → 3.90 pixels, 90th percentile 11.24 → 11.31; the other views within 0.01).
+
+Tried as well:
+- After 120 iterations (5.5% faster on the wormhole exit, 1% of pixels) or 80 (another 2%, but 4% of pixels and a
+  worse 90th percentile).
+- Counting steps per visit to a warp instead (from entering its reach or crossing a throat): a ray's way out through
+  the partner's reach alone takes about 45 steps, so budgets of 45 or 60 changed 3 to 10% of the pixels for less gain.
+- Ending rays at 160 or 120 iterations: 11% and 25% faster, but the photon ring's pixels turn black.
+- Sampling d(ln n)/dρ from a table (4,096 rows per warp, linear in ln ρ) instead of evaluating it: no measurable gain.
+
+In the full-screen window, the wormhole exit now runs at 72 to 73 fps at render scales 0.96 to 0.98, as its frame time
+sits at the scale's 14 ms target; every other view runs at full resolution.
