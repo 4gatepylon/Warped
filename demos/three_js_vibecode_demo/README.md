@@ -50,7 +50,7 @@ carries on through the other mouth. "Auto" quality renders about 380k pixels and
 
 ## Optics lab (flat space)
 
-`optics/` is a ray-traced, flat-space lab for trying out optical elements with a laser. It has four demos, one page each
+`optics/` is a ray-traced, flat-space lab for trying out optical elements with a laser. It has five demos, one page each
 (`optics/index.html` lists them), and each adds one element to the previous one. The pages share `optics/lab.js` and
 `optics/lab.css`, and also work when opened straight from disk:
 
@@ -60,11 +60,13 @@ carries on through the other mouth. "Auto" quality renders about 380k pixels and
 - `optics/diffraction.html`: adds diffraction gratings. Red, green, blue or white light; adjustable lines per mm.
 - `optics/heat_haze.html`: adds heaters. Hot air rising off a heater bends a beam outward and upward, and its turbulence
   spreads the beam into a widening, shimmering cone. The effect is about 1000× stronger than real hot air.
+- `optics/refraction.html`: adds glass blocks and prisms. Beams bend by Snell's law, partly reflect off every face, can be
+  trapped by total internal reflection, and white light splits into a rainbow in a prism.
 
 Click the scene to capture the mouse (or drag to look), `WASD` to fly and `E`/`Q` to go up and down. The laser controls are
-the same as above (`L`, click or `R`, `Z`). `1`/`2`/`3` place a mirror, splitter or grating facing you. Aim at one and hold
-`T` (or the right mouse button) and move the mouse to turn it, or use `J`/`K`/`U`/`I` for 5° steps. `X` deletes it. `4` puts
-a heater on the block you aim at, or takes away the heater you aim at.
+the same as above (`L`, click or `R`, `Z`). `1`/`2`/`3`/`5`/`6` place a mirror, splitter, grating, glass block or prism
+facing you. Aim at one and hold `T` (or the right mouse button) and move the mouse to turn it, or use `J`/`K`/`U`/`I` for 5°
+steps. `X` deletes it. `4` puts a heater on the block you aim at, or takes away the heater you aim at.
 
 Mirrors and splitters really reflect what you see, laser beams included. Splitters halve the light each way. Gratings send
 order m to sin θ = sin θ<sub>in</sub> + mλ/d, with brightness from a thin sinusoidal phase grating (about 30% straight

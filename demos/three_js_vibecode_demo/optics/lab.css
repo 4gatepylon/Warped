@@ -25,6 +25,6 @@ button.on { background: #7a2c2c; border-color: #c35a5a; }
 #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
 #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
 #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
-body.no-split .f-split, body.no-grat .f-grat, body.no-heat .f-heat { display: none; }
+body.no-split .f-split, body.no-grat .f-grat, body.no-heat .f-heat, body.no-glass .f-glass { display: none; }
 a { color: #9fd0ff; }
 a.cur { color: #fff; font-weight: bold; text-decoration: none; }
