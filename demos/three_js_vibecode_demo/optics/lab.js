@@ -19,7 +19,9 @@ document.body.insertAdjacentHTML('afterbegin', `
     Aim at a panel, then hold <kbd>T</kbd> or the right mouse button and move the mouse to turn it.
     <kbd>J</kbd>/<kbd>K</kbd> turn 5°, <kbd>U</kbd>/<kbd>I</kbd> tilt 5° (with <kbd>Shift</kbd>: 1°).
     <kbd>X</kbd> delete it · <kbd>C</kbd> delete all panels</div>
-  <div class="row f-heat"><b>Heaters</b> · <kbd>4</kbd> put a heater on the block you aim at, or take away the heater you aim at</div>
+  <div class="row f-heat"><b>Heaters</b> · <kbd>4</kbd> put a heater on the block you aim at, or take away the heater you aim at
+    <label>Hot air spread: <b id="spreadval">1×</b></label>
+    <input id="spread" type="range" min="0" max="6" step="0.25" value="1"></div>
   <div class="row f-grat">
     <label>Laser colour <select id="colour">
       <option value="650">red (650 nm)</option>
@@ -102,7 +104,7 @@ const TIPS = {
   </ol>`,
   heat_haze: `<ol>
     <li><b>Hot air bends light.</b> Warm air is thinner, so its refractive index is lower. Light bends toward the cooler, denser air: outward from the middle of the plume rising off a heater, and upward, because the air is hottest near the heater.</li>
-    <li><b>Turbulence spreads the beam.</b> The rising air churns, so different parts of the beam are bent different ways, and it leaves as a widening, soft glow (left: a beam through the air just above a heater). Its spot is wide and dim: the same light is spread over a bigger area.</li>
+    <li><b>Turbulence spreads the beam.</b> The rising air churns, so different parts of the beam are bent different ways, and it leaves as a widening, soft glow (left: a beam through the air just above a heater). The <i>Hot air spread</i> slider makes it widen faster or slower, down to 0× for no spreading at all. Its spot is wide and dim: the same light is spread over a bigger area.</li>
     <li><b>Higher up is cooler:</b> the beam above it crosses the same plume higher up and spreads much less.</li>
     <li><b>Off-centre</b> (right, green): a beam through the edge of a plume is mostly pushed aside rather than spread.</li>
     <li>Look through the hot air: the world behind it shimmers too. <kbd>4</kbd> puts a heater where you aim, or takes one away.</li>
@@ -722,7 +724,7 @@ function traceLaser(o, d, lam) {
       if (r.depth >= LASER.maxDepth) { leaf('hot air'); continue; }
       const e1 = norm3(cross3(r.d, [0, 1, 0])), e2 = cross3(e1, r.d), a = 0.7 * state.time, wob = 0.3 * PLUME.turb * H.s;
       const dir = norm3(add3(add3(r.d, H.bend), add3(mul3(e1, wob * Math.cos(a)), mul3(e2, wob * Math.sin(a)))));
-      stack.push({ ...r, o: hp, d: dir, len, depth: r.depth + 1, skip: 100 + H.i, w0: w1, g: Math.hypot(r.g || 0, PLUME.glow * H.s) });
+      stack.push({ ...r, o: hp, d: dir, len, depth: r.depth + 1, skip: 100 + H.i, w0: w1, g: Math.hypot(r.g || 0, PLUME.glow * H.s * state.spread) });
       continue;
     }
     if (!P) { leaf(null); continue; }
@@ -890,7 +892,7 @@ function loadScene(mode) {
 // State, camera
 // ---------------------------------------------------------------------------
 const V3 = THREE.Vector3;
-const state = { mode: 'mirrors', pos: new V3(), yaw: 0, pitch: 0, laser: true, pins: [], panels: [], lam: 650, lpm: 600, heaters: [], time: 0, grab: -1, aimed: -1, msg: '', msgT: 0 };
+const state = { mode: 'mirrors', pos: new V3(), yaw: 0, pitch: 0, laser: true, pins: [], panels: [], lam: 650, lpm: 600, heaters: [], spread: 1, time: 0, grab: -1, aimed: -1, msg: '', msgT: 0 };
 function resetView() { state.pos.set(32.5, 7, 55); state.yaw = 0; state.pitch = -0.32; }
 function camBasis() {
   const cp = Math.cos(state.pitch), sp = Math.sin(state.pitch), cy = Math.cos(state.yaw), sy = Math.sin(state.yaw);
@@ -1013,6 +1015,7 @@ canvas.addEventListener('pointermove', e => { if (document.pointerLockElement ==
 
 $('colour').addEventListener('change', e => { state.lam = +e.target.value; });
 $('lpm').addEventListener('input', e => { state.lpm = +e.target.value; $('lpmval').textContent = state.lpm; });
+$('spread').addEventListener('input', e => { state.spread = +e.target.value; $('spreadval').textContent = state.spread + '×'; });
 $('quality').addEventListener('change', e => { quality = e.target.value; resize(); });
 $('bLaser').addEventListener('click', () => setLaser(!state.laser));
 $('bPin').addEventListener('click', pinLaser);
