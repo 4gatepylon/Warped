@@ -83,6 +83,22 @@ const TEAM_RED: Color = [1.00, 0.32, 0.26];
 const RED: Color = [0.80, 0.20, 0.18];
 const BLUE: Color = [0.20, 0.35, 0.80];
 const GOLD: Color = [0.95, 0.78, 0.25];
+pub const NAMED_COLORS: [(&str, Color); 14] = [
+    ("planks", PLANKS),
+    ("log", LOG),
+    ("cobblestone", COBBLE),
+    ("glass", GLASS),
+    ("roof", ROOF),
+    ("brick", BRICK),
+    ("leaves", LEAVES),
+    ("stone", STONE),
+    ("console", CONSOLE),
+    ("team blue", TEAM_BLUE),
+    ("team red", TEAM_RED),
+    ("red", RED),
+    ("blue", BLUE),
+    ("gold", GOLD),
+];
 const RAIL_COLORS: [Color; 7] = [
     [0.80, 0.20, 0.18],
     [0.92, 0.50, 0.15],

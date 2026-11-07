@@ -111,6 +111,16 @@ python3 -m http.server --directory demos
 
 Then open `http://localhost:8000/levels/lunar_surface/index.html`. three.js loads from a CDN.
 
+## Exporting the map
+
+```bash
+node demos/levels/lunar_surface/export_map.mjs
+```
+
+writes the level's layout (structures, black hole, wormhole, lamps, sky, spawns) to `common/maps/lunar_surface/` in the
+portable map format (`common/maps/README.md`), by running this page's own layout code in Node. Rerun it after changing
+the layout, then `make -C common/maps validate-maps`.
+
 ## Known limitations
 
 - The frame rate was only tested in headless Chrome with SwiftShader (a software renderer), not on a real GPU. Auto

@@ -39,13 +39,13 @@ pub const TEXELS_PER_MOUTH_FIELD: usize = 5;
 pub const ROW_TEXEL_COUNT: usize = TEXEL_MOUTH_FIELDS + TEXELS_PER_MOUTH_FIELD * MAX_MOUTH_COUNT;
 pub const BEAM_POINTS_PER_CHUNK: usize = 4;
 pub const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
-const BEND_CUTOFF_PER_R: f64 = 2.0;
-const FOG_PER_R: f64 = 3.0;
+pub const BEND_CUTOFF_PER_R: f64 = 2.0;
+pub const FOG_PER_R: f64 = 3.0;
 const MIN_TILE_CELL_COUNT: i32 = 3;
 const MAX_TILE_CELL_COUNT: i32 = 15;
 const TILE_SIDE_COUNT: f64 = 4.0;
 const TILES_PER_VERTEX: f64 = 5.0;
-const SUN_DIRECTION: DVec3 = DVec3::new(0.45, 0.62, 0.35);
+pub const SUN_DIRECTION: DVec3 = DVec3::new(0.45, 0.62, 0.35);
 
 /// `Uniforms` is everything per frame that isn't in the rows. Its layout matches the Metal
 /// shader's `Uniforms` struct, so it is `repr(C)` and padded to a multiple of 16 bytes.

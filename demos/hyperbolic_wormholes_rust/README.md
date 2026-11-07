@@ -74,6 +74,8 @@ make run-autopilot
   upscales them with MetalFX), and add `--json` and `--label <name>` when run directly (`cargo run --release --
   --help`).
 - `--sampling every-pixel` makes Metal trace every pixel instead of interpolating where it can (see below).
+- `--export-map <folder>` writes the world as a portable map (`common/maps/house_demo/` is its output; see
+  `common/maps/README.md`).
 - `--exit-after-s 8` opens the real window, plays for 8 seconds without input, closes it and prints the frame rate,
   GPU time and render scale.
 - `--play-route` plays the scripted route in the real window, one 1/60 s step per frame, then closes it and prints

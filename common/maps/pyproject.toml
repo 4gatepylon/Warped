@@ -1,0 +1,35 @@
+# `pyproject.toml` defines the map format's uv project: the validator's dependencies and tools.
+#
+# Interface:
+#     validate_map.py: checks map folders against README.md and map.schema.json.
+#     dev dependency group: pytest and ruff.
+#     ruff: SIM401 is off, as this repository reads optional keys with an explicit `in` check,
+#     never `dict.get` (AGENTS.md, Failing fast).
+#
+# Example:
+#     uv run python validate_map.py house_demo lunar_surface
+[project]
+name = "warped-maps"
+version = "0.1.0"
+description = "Checks Warped maps against the map format"
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.1",
+    "jsonschema>=4.23",
+    "numpy>=2.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.7",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+extend-ignore = ["SIM401"]

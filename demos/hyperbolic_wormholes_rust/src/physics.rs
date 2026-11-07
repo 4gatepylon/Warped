@@ -22,12 +22,12 @@ use crate::render_cpu::{Scene, TraceEnd, trace_ray};
 use crate::scene_data::{Beam, ROW_TEXEL_COUNT, SceneData, TEXEL_TO_WORLD};
 use crate::world::{EYE_HEIGHT_M, Mouth, World};
 
-const GRAVITY_M_PER_S2: f64 = 30.0;
+pub const GRAVITY_M_PER_S2: f64 = 30.0;
 const FALL_GRAVITY_FACTOR: f64 = 1.6;
-const JUMP_SPEED_M_PER_S: f64 = 7.0;
+pub const JUMP_SPEED_M_PER_S: f64 = 7.0;
 const JETPACK_M_PER_S2: f64 = 34.0;
-const WALK_SPEED_M_PER_S: f64 = 6.0;
-const SPRINT_SPEED_M_PER_S: f64 = 14.0;
+pub const WALK_SPEED_M_PER_S: f64 = 6.0;
+pub const SPRINT_SPEED_M_PER_S: f64 = 14.0;
 const AIR_CONTROL_PER_S: f64 = 4.0;
 const ON_GROUND_TOLERANCE_M: f64 = 0.02;
 const MAX_SUBSTEP_COUNT: usize = 400;
@@ -724,7 +724,7 @@ pub fn trace_laser(world: &World, data: &SceneData) -> (Beam, LaserReport) {
 /// `describe_box` names what a box is part of, for the laser report.
 ///
 /// Example: `let name = describe_box(&world, 3);`
-fn describe_box(world: &World, index: usize) -> String {
+pub fn describe_box(world: &World, index: usize) -> String {
     let cluster: usize = world
         .clusters
         .iter()

@@ -14,6 +14,7 @@
 //! - `--exit-after-s <seconds>`: close the window after that long and print its frame rate.
 //! - `--host`, `--join auto|<address>`, `--serve`, `--bot`, `--port`: play with others on the local
 //!   network (see `net.rs` and `multiplayer.rs`).
+//! - `--export-map <folder>`: write the world as a portable map (`common/maps/`).
 //!
 //! Example: `cargo run --release -- --bench-views --width-px 2560 --height-px 1600`
 //!
@@ -21,6 +22,7 @@
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
 mod geometry;
+mod map_export;
 mod multiplayer;
 mod net;
 mod physics;
@@ -195,6 +197,10 @@ struct Arguments {
     /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
+    /// Write the world as a map in the portable format of common/maps/ (map.json) into this folder,
+    /// replacing the folder's map.json, and exit.
+    #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
+    export_map: Option<PathBuf>,
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -383,6 +389,12 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
 fn main() -> Result<()> {
     let arguments: Arguments = Arguments::parse();
     validate_arguments(&arguments)?;
+    if let Some(folder) = &arguments.export_map {
+        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+        let path: PathBuf = map_export::export_map(&world, folder)?;
+        println!("Wrote {}", path.display());
+        return Ok(());
+    }
     if arguments.serve {
         return serve_only(&arguments);
     }
