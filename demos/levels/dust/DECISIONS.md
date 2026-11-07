@@ -153,3 +153,27 @@
   sunlight is a fixed direction in each structure's frame and a constant brightness on the sand, with no shadows.
 - **Alternatives:** a sun at an ideal point (its elevation would change by tens of degrees across the level).
 - **Rationale:** a seam-free lensed sky (Einstein rings) and even lighting across a level 4 R long.
+
+## Precision
+
+### D17. The shader works relative to a render anchor near the player
+
+- **Choice:** the CPU, in double precision, hands the shader the camera, structures, warp objects, beams and sky
+  relative to a render anchor: the level's centre while the player is within 100 m of it, otherwise the Fermi frame of
+  the ground point under the player, moved each time they get 200 m from it. The ground shader rebuilds (s, t) from
+  the anchor's, with a sign-safe asinh (the GPU's returns −∞ for large negative arguments).
+- **Alternatives:** moving the anchor every frame (more uploads, same result); emulated double precision in the
+  shader; exact tiles plus a small local offset, as HyperRogue stores positions.
+- **Rationale:** coordinates grow like cosh(d/R), so in the level's own coordinates single precision ran out about 300
+  m from the centre: the world shook, the sky turned to noise and the ground pattern smeared. In a headless test,
+  moving the camera 2 mm changed 7–78% of the pixels at 400–600 m before, and at most 0.01% after, the same as at the
+  centre. Keeping the anchor at the centre while the player walks the level leaves its rendering unchanged.
+
+### D18. Flying stops 500 m (10 R) from the centre **(needs input)**
+
+- **Choice:** fly mode won't take the player more than 500 m from the level's centre ("Edge of the flight area").
+- **Alternatives:** no limit, with the player's frame on the CPU also kept relative to the anchor; a limit just past
+  the boundary cliffs.
+- **Rationale:** the CPU keeps the player's frame in the level's coordinates in double precision, which loses digits
+  from about 15 R (the view broke up at 900 m in the test). Beyond about 8 R the level is a few pixels across anyway.
+- **Revisit if:** the game needs flying or spectating far from a level.
