@@ -1,0 +1,2689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lunar Surface — Warped level demo (hyperbolic space)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(12, 14, 22, 0.76); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 300px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; width: 280px; }
+  #tips { bottom: 10px; right: 10px; width: 370px; max-height: calc(100vh - 300px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 4px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  button.on { background: #7a2c2c; border-color: #c35a5a; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .blue { color: #8fbcff; }
+  .red { color: #ff8f86; }
+  .bar { height: 7px; background: #2a3040; border-radius: 3px; overflow: hidden; margin: 2px 0 5px; }
+  .bar > div { height: 100%; width: 0%; }
+  #energy_fill { background: #7fd0ff; }
+  #console_fill { background: #ffd36b; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 3px 0; }
+  #tips_toggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255, 255, 255, 0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #banner { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); font-size: 36px; font-weight: 700; color: #fff; text-shadow: 0 0 18px #000; display: none; pointer-events: none; }
+  #message { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%); color: #ffe9a8; font-size: 13px; text-shadow: 0 0 6px #000; pointer-events: none; }
+  #error { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+  body.no_panels .panel, body.no_panels #message { display: none; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="cross"></div>
+<div id="banner">Level won</div>
+<div id="message"></div>
+
+<div id="controls" class="panel">
+  <h1>Lunar Surface</h1>
+  <div class="muted">Red level, depth 2. A lunar base on a plain in hyperbolic space H³ (R = 40 m), with a black hole over the crater and a wormhole to the red base.</div>
+  <div class="row">Click to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.<br>
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br>
+    <kbd>H</kbd> fly mode (<kbd>Space</kbd> up, <kbd>C</kbd> down)<br>
+    <kbd>E</kbd> (hold) deactivate a console of the other team's pylon<br>
+    Click (captured) or <kbd>R</kbd> fire the laser · <kbd>T</kbd> switch team<br>
+    <kbd>1</kbd>–<kbd>9</kbd> viewpoints</div>
+  <div class="row" id="view_buttons"></div>
+  <div class="row">
+    <label>Render quality <select id="quality"><option value="auto" selected>auto</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="full">full</option></select></label>
+    <button id="fly_button">Fly: off</button>
+  </div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Team: <b id="team_text">–</b> · zone: <b id="zone_text">–</b></div>
+  <div class="muted" id="mode_text">–</div>
+  <div>Energy</div>
+  <div class="bar"><div id="energy_fill"></div></div>
+  <div>Blue pylon <span id="blue_consoles" class="blue">–</span> · red pylon <span id="red_consoles" class="red">–</span></div>
+  <div id="console_text" class="muted">–</div>
+  <div class="bar"><div id="console_fill"></div></div>
+  <div>Laser: <span id="laser_text">–</span></div>
+  <div class="muted"><span id="position_text">–</span> · <span id="fps_text">–</span> fps</div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tips_toggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tips_body">
+  <ol>
+    <li><b>The black hole over the crater</b> (<kbd>5</kbd>, or walk in from <kbd>4</kbd>). Light bends around it: the crater rim behind it curves into an arc, a thin Einstein ring wraps the black shadow, and sight lines across the crater bend upward. Shoot the laser past it: the beam bends exactly as the light you see does, so you hit what the crosshair covers.</li>
+    <li><b>The wormhole on the ridge route</b> (<kbd>6</kbd>). Its disc shows the red landing pad, 116 m away. Walk into it (you move along light paths near a mouth, so aim at the disc) and you come out on that pad, 30 m from the red pylon, in full view of the red watchtower (<kbd>7</kbd> looks back at the exit). Fast, but exposed. Shoot into it and the beam comes out there too.</li>
+    <li><b>Far more room than it looks.</b> From the overview (<kbd>3</kbd>) the whole infinite plain shrinks to a disc: the crater fills the middle and both spawns, 227 m apart, are squeezed against its rim. Distances along the flanks stretch by cosh(v/R): the ridge, 57 m off the centre line, is 211 m long though it spans only 96 m of the centre line, and a flank route that bows out 36 m is 36% longer than the 90 m centre route (28% in flat space).</li>
+    <li><b>Long sight lines.</b> Climb the ridge (<kbd>9</kbd>) and look across the crater. Things shrink faster with distance than in flat space (by R·sinh(d/R)/d: 2.4 times at 100 m), so a player 100 m away looks like one 240 m away would on Earth. Aim low: a level shot is a geodesic and the ground curves away beneath it, so 100 m out it passes 10 m up.</li>
+    <li><b>Harsh light, long shadows.</b> The sun hangs 17° above the horizon at the same height everywhere on the level, so every building throws a shadow three times its height. The planet low over the red base lights the shadows faintly.</li>
+    <li><b>Take the red pylon</b> (<kbd>8</kbd>): hold <kbd>E</kbd> near a console, facing the pylon, for 10 s per console; letting go resets it. <kbd>T</kbd> switches team to attack the blue pylon.</li>
+    <li><b>Fly</b> (<kbd>H</kbd>) and climb: the horizon sinks below eye level, and the infinite ground closes into a shrinking disc under you.</li>
+  </ol>
+  </div>
+</div>
+<div id="error"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+/**
+ * @file
+ * `index.html` is a playable demo of Lunar Surface, Warped's deepest red level: a lunar base on a plain in hyperbolic
+ * space H³, ray traced along H³ geodesics that a black hole and a wormhole bend.
+ *
+ * Interface:
+ * - Keys and mouse: listed in the controls panel and in README.md.
+ * - URL hash: `#view=<name>` (a key of `VIEWS`), `#pitch=<degrees>` (overrides the view's pitch),
+ *   `#quality=low|medium|high|full`, `#panels=off`, `#team=red`,
+ *   `#test=laser` (fires once after the first frame and holds the beam), `&after=<view>` (switches view after that
+ *   shot), `#test=physics` (logs numerical checks to the console).
+ * - `window.__demo`: the state and `set_view`, `fire_laser`, `run_physics_checks`, `step_player`, `trace_laser`.
+ *
+ * Example: open `http://localhost:8000/levels/lunar_surface/index.html#view=black_hole&quality=medium`.
+ *
+ * Must know:
+ * - Points are 4-vectors on the hyperboloid <x, x> = -1 in curvature units (R = 1); `CURVATURE_RADIUS_M` converts.
+ *   Matrices are column-major 4×4 Lorentz matrices, as in `demos/three_js_vibecode_demo/hyperbolic.html`.
+ * - Every structure has its own frame, and its blocks are a grid in that frame's Klein coordinates, so block faces are
+ *   geodesic planes and a ray crosses a structure as a straight line (a voxel DDA).
+ * - Warp objects bend rays only inside their reach sphere, so outside every sphere a ray is one geodesic.
+ */
+
+const CURVATURE_RADIUS_M = 40;
+const GRAVITY_M_PER_S_PER_S = 6;
+const JUMP_SPEED_M_PER_S = 5.2;
+const WALK_SPEED_M_PER_S = 5;
+const SPRINT_SPEED_M_PER_S = 9;
+const FLY_SPEED_M_PER_S = 14;
+const FLY_SPRINT_SPEED_M_PER_S = 40;
+const FLY_CLIMB_PER_S = 0.8;
+const MIN_FLY_CLIMB_M_PER_S = 5;
+const MAX_FALL_SPEED_M_PER_S = 40;
+const EYE_HEIGHT_M = 1.6;
+const BODY_RADIUS_M = 0.25;
+const HEAD_CLEARANCE_M = 0.15;
+const STEP_UP_M = 1.05;
+const MIN_FLY_HEIGHT_M = 0.4;
+const MAX_FLY_HEIGHT_M = 240;
+const UNSTICK_STEP_M = 0.25;
+const UNSTICK_MAX_STEPS = 160;
+const LANDING_BISECTIONS = 10;
+const STAND_SEARCH_STEP_M = 0.05;
+const STAND_SEARCH_MAX_STEPS = 400;
+const ENERGY_DRAIN_S = 30;
+const ENERGY_REFILL_S = 60;
+const CONSOLES_PER_PYLON = 5;
+const CONSOLE_TIME_S = 10;
+const CONSOLE_REACH_M = 3;
+const CONSOLE_FACING_RAD = 1.0;
+const PYLON_CONSOLE_RADIUS_M = 3.6;
+const PYLON_CORE_HEIGHT_M = 5;
+const LOOK_RAD_PER_PX = 0.0025;
+const MAX_PITCH_RAD = 1.55;
+const MAX_FRAME_S = 0.05;
+const FIELD_OF_VIEW_RAD = 75 * Math.PI / 180;
+const HUD_PERIOD_S = 0.1;
+const MESSAGE_S = 3;
+
+const ZONE_EDGE_U_M = 45;
+const BOUNDARY_U_M = 128;
+const BOUNDARY_V_M = 72;
+const LEVEL_SEED = 20261106;
+
+const CRATER_RIM_RADIUS_M = 24;
+const CRATER_FLOOR_RADIUS_M = 19;
+const CRATER_SEGMENT_COUNT = 8;
+const SEAM_OVERLAP_M = 0.8;
+const CRATER_GAP_HALF_WIDTH_M = 5;
+const CRATER_GAP_ANGLES_RAD = [Math.PI, 0, -Math.PI / 2];
+const RIM_INNER_WIDTH_M = 6;
+const RIM_OUTER_WIDTH_M = 9;
+const RIM_CREST_M = 3.6;
+const RIM_WAVES = [[1.1, 3, 0.7], [0.7, 7, 2.1]];
+const RIM_ROCKY_CREST_M = 4.4;
+const CENTRAL_PEAK_RADIUS_M = 7;
+const CENTRAL_PEAK_HEIGHT_M = 5;
+const CENTRAL_PEAK_SHAPE_POWER = 0.7;
+const RIDGE_V_M = 57;
+const RIDGE_HALF_LENGTH_M = 48;
+const RIDGE_CHUNK_LENGTH_M = 22;
+const RIDGE_END_TAPER_M = 10;
+const RIDGE_MEANDER_M = 3;
+const RIDGE_MEANDER_LENGTH_M = 17;
+const RIDGE_INNER_WIDTH_M = 7;
+const RIDGE_OUTER_WIDTH_M = 5;
+const RIDGE_CREST_M = 7;
+const RIDGE_WAVES = [[2, 9, 0], [1.5, 4.3, 1]];
+
+const BLACK_HOLE_RS_M = 1.2;
+const BLACK_HOLE_HEIGHT_M = 13;
+const BLACK_HOLE_REACH_M = 24;
+const WORMHOLE_RS_M = 1.6;
+const WORMHOLE_REACH_M = 15;
+const MOUTH_HEIGHT_M = 1.7;
+const PAD_HEIGHT_M = 1;
+const MOUTH_A = { u_m: -14, v_m: 40 };
+const MOUTH_B = { u_m: 78, v_m: 30 };
+const FOIL_LAMBDA_SQ = 0.25;
+const ISOTROPIC_RADIUS_PER_RS = 0.25;
+const HORIZON_CAPTURE_FRAC = 1.02;
+const BEND_STEP_FRAC = 0.08;
+const MIN_BEND_STEP_M = 0.004;
+const MAX_BEND_STEP_M = 3;
+const KIND_BLACK_HOLE = 0;
+const KIND_MOUTH = 1;
+
+const SUN_ELEVATION_RAD = 17 * Math.PI / 180;
+const SUN_AZIMUTH_RAD = -120 * Math.PI / 180;
+const PLANET_ELEVATION_RAD = 7 * Math.PI / 180;
+const PLANET_AZIMUTH_RAD = 22 * Math.PI / 180;
+const PLANET_RADIUS_RAD = 8.5 * Math.PI / 180;
+
+const LASER_FADE_S = 2;
+const LASER_MAX_LENGTH_M = 480;
+const LASER_MAX_ITERATIONS = 4000;
+const LASER_MUZZLE_M = 3;
+const GUN_OFFSET_M = [0.22, -0.25, -0.1];
+const BEAM_TOLERANCE_M = 0.02;
+const START_INSIDE_FRAC = 0.999;
+const MAX_BEAMS = 3;
+const TEAM_COLORS = [[0.30, 0.62, 1.0], [1.0, 0.16, 0.08]];
+const LAMP_BRIGHTNESS = 0.55;
+
+const MAX_STRUCTS = 64;
+const MAX_WARPS = 4;
+const WARP_LIST_LENGTH = 16;
+const MAX_LIGHTS = 16;
+const MAX_BEAM_SEGMENTS = 96;
+const MAX_SPOTS = 4;
+const STRUCT_TEXELS = 8;
+const ATLAS_WIDTH = 256;
+const BOUND_MARGIN_M = 0.2;
+const NEARBY_REACH_M = 6;
+const FAR_S = 12;
+const SHADOW_M = 80;
+const TILE_CELLS_PER_HALF = 18;
+const QUALITY_SCALES = { low: 0.35, medium: 0.5, high: 0.75, full: 1 };
+const AUTO_PIXEL_BUDGET = 400000;
+const MIN_AUTO_PIXEL_BUDGET = 100000;
+const AUTO_STEP_FRAC = 0.75;
+const AUTO_TARGET_FRAME_S = 1 / 34;
+const AUTO_WINDOW_S = 2;
+const MAX_PAUSE_FRAME_S = 0.2;
+
+const X = 0, Y = 1, Z = 2, W = 3;
+const E_Y = [0, 1, 0, 0], E_W = [0, 0, 0, 1];
+const BLUE = 0, RED = 1;
+
+const MAT = { AIR: 0, REGOLITH: 1, DARK_REGOLITH: 2, BASALT: 3, BOULDER: 4, HULL: 5, METAL: 6, GLASS: 7, RED_LIGHT: 8,
+  BLUE_LIGHT: 9, SOLAR: 10, RED_PAINT: 11, BLUE_PAINT: 12, PAD: 13, HAZARD: 14, GOLD_FOIL: 15, FLOOR: 16,
+  WHITE_LIGHT: 17, BLUE_CORE: 18, RED_CORE: 19, BLUE_CONSOLE: 20, RED_CONSOLE: 25 };
+const MATERIALS = [
+  ['air', [0, 0, 0], 0], ['regolith', [0.55, 0.55, 0.53], 0], ['dark regolith', [0.42, 0.42, 0.41], 0],
+  ['basalt', [0.30, 0.30, 0.32], 0], ['boulder', [0.52, 0.49, 0.45], 0], ['hull', [0.86, 0.87, 0.88], 0],
+  ['metal', [0.46, 0.48, 0.52], 0], ['glass', [0.55, 0.75, 0.85], 0], ['red light', [1.0, 0.16, 0.10], 1],
+  ['blue light', [0.25, 0.55, 1.0], 1], ['solar panel', [0.10, 0.16, 0.36], 0], ['red paint', [0.72, 0.12, 0.10], 0],
+  ['blue paint', [0.14, 0.30, 0.74], 0], ['landing pad', [0.70, 0.69, 0.66], 0], ['hazard paint', [0.88, 0.70, 0.12], 0],
+  ['gold foil', [0.86, 0.66, 0.24], 0], ['floor', [0.22, 0.22, 0.25], 0], ['white light', [1.0, 0.94, 0.82], 1],
+  ['blue pylon core', [0.40, 0.75, 1.0], 1], ['red pylon core', [1.0, 0.30, 0.22], 1],
+  ...Array.from({ length: CONSOLES_PER_PYLON }, (_, i) => [`blue console ${i + 1}`, [0.30, 0.65, 1.0], 1]),
+  ...Array.from({ length: CONSOLES_PER_PYLON }, (_, i) => [`red console ${i + 1}`, [1.0, 0.28, 0.18], 1])
+];
+const TEAMS = [
+  { name: 'blue', light: MAT.BLUE_LIGHT, paint: MAT.BLUE_PAINT, core: MAT.BLUE_CORE, console: MAT.BLUE_CONSOLE, color: TEAM_COLORS[BLUE] },
+  { name: 'red', light: MAT.RED_LIGHT, paint: MAT.RED_PAINT, core: MAT.RED_CORE, console: MAT.RED_CONSOLE, color: TEAM_COLORS[RED] }
+];
+const SPAWNS = [{ u_m: -107, v_m: 0 }, { u_m: 120, v_m: 0 }];
+const LAYOUT = {
+  blue_lander: [-114, 0], blue_pylon: [-96, -16], blue_mast: [-104, 18], blue_crates: [[-80, 12], [-74, -22]], blue_solar: [-90, 28],
+  blue_boulders: [[-62, -4], [-58, 30], [-66, -38]], crater_boulders: [[-9, 9], [10, -8]],
+  derelict_modules: [[-30, -40], [24, -41]], comms_dome: [-2, -45], crater_walkway: [0, -32], relay_mast: [-18, -53], row_solar: [40, -31], row_crates: [8, -36],
+  flank_boulders: [[-34, 31], [2, 31], [24, 38], [42, 26]],
+  red_barriers: [[56, -15], [56, 15]], red_module: [68, -37], red_dome: [98, -25], red_pylon: [94, 6], red_hangar: [121, 0], red_watchtower: [91, 31],
+  red_mast: [108, 22], red_walkway: [108, -12], red_walkway_toward: [108, -30], red_crates: [86, -8], red_solar: [82, -30]
+};
+
+/**
+ * `make_identity` returns the 4×4 identity matrix.
+ * @return {Float64Array} The identity, column-major.
+ * @example const B = make_identity();
+ */
+function make_identity() { const M = new Float64Array(16); M[0] = M[5] = M[10] = M[15] = 1; return M; }
+
+/**
+ * `multiply_matrices` multiplies two column-major 4×4 matrices.
+ * @param {Float64Array} A The left factor.
+ * @param {Float64Array} B The right factor.
+ * @return {Float64Array} The product A·B.
+ * @example const C = multiply_matrices(B, make_boost(Y, 0.04));
+ */
+function multiply_matrices(A, B) {
+  const C = new Float64Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let sum = 0; for (let k = 0; k < 4; k++) sum += A[k * 4 + r] * B[c * 4 + k]; C[c * 4 + r] = sum; }
+  return C;
+}
+
+/**
+ * `apply_matrix` multiplies a column-major 4×4 matrix by a 4-vector.
+ * @param {Float64Array} M The matrix.
+ * @param {Array<number>} x The 4-vector.
+ * @return {Array<number>} M·x.
+ * @example const eye = apply_matrix(C, E_W);
+ */
+function apply_matrix(M, x) { const y = [0, 0, 0, 0]; for (let r = 0; r < 4; r++) y[r] = M[r] * x[0] + M[4 + r] * x[1] + M[8 + r] * x[2] + M[12 + r] * x[3]; return y; }
+
+/**
+ * `make_rotation` returns the rotation by an angle in the plane of spatial axes i and j.
+ * @param {number} i The first axis (X, Y or Z).
+ * @param {number} j The second axis.
+ * @param {number} angle_rad The angle.
+ * @return {Float64Array} The rotation matrix.
+ * @example const turn = make_rotation(X, Z, 0.1);
+ */
+function make_rotation(i, j, angle_rad) { const M = make_identity(), c = Math.cos(angle_rad), s = Math.sin(angle_rad); M[i * 4 + i] = c; M[i * 4 + j] = s; M[j * 4 + i] = -s; M[j * 4 + j] = c; return M; }
+
+/**
+ * `make_boost` returns the translation (Lorentz boost) by a distance along spatial axis i, which moves e_w to cosh(s) e_w + sinh(s) e_i.
+ * @param {number} i The axis (X, Y or Z).
+ * @param {number} s The distance, in curvature units.
+ * @return {Float64Array} The boost matrix.
+ * @example const up = make_boost(Y, 1.6 / CURVATURE_RADIUS_M);
+ */
+function make_boost(i, s) { const M = make_identity(), c = Math.cosh(s), sh = Math.sinh(s); M[W * 4 + W] = c; M[W * 4 + i] = sh; M[i * 4 + W] = sh; M[i * 4 + i] = c; return M; }
+
+/**
+ * `invert_lorentz` inverts a Lorentz matrix as J Mᵀ J.
+ * @param {Float64Array} M A matrix in O(3,1).
+ * @return {Float64Array} Its inverse.
+ * @example const view = invert_lorentz(C);
+ */
+function invert_lorentz(M) { const N = new Float64Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) N[c * 4 + r] = ((r === W) !== (c === W) ? -1 : 1) * M[r * 4 + c]; return N; }
+
+/**
+ * `get_column` returns one column of a matrix.
+ * @param {Float64Array} M The matrix.
+ * @param {number} c The column index.
+ * @return {Array<number>} The column as a 4-vector.
+ * @example const foot = get_column(B, W);
+ */
+function get_column(M, c) { return [M[c * 4], M[c * 4 + 1], M[c * 4 + 2], M[c * 4 + 3]]; }
+
+/**
+ * `make_matrix` builds a matrix from four columns.
+ * @param {Array<number>} a The first column.
+ * @param {Array<number>} b The second column.
+ * @param {Array<number>} c The third column.
+ * @param {Array<number>} d The fourth column.
+ * @return {Float64Array} The matrix.
+ * @example const F = make_matrix(r, E_Y, t, g);
+ */
+function make_matrix(a, b, c, d) { const M = new Float64Array(16); [a, b, c, d].forEach((v, k) => { for (let r = 0; r < 4; r++) M[k * 4 + r] = v[r]; }); return M; }
+
+/**
+ * `dot_minkowski` returns the Minkowski product <a, b> = ax bx + ay by + az bz - aw bw.
+ * @param {Array<number>} a A 4-vector.
+ * @param {Array<number>} b A 4-vector.
+ * @return {number} The product.
+ * @example const cosh_d = -dot_minkowski(x, c);
+ */
+function dot_minkowski(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] - a[3] * b[3]; }
+
+/**
+ * `combine_vectors` returns s a + t b.
+ * @param {Array<number>} a A 4-vector.
+ * @param {number} s Its weight.
+ * @param {Array<number>} b A 4-vector.
+ * @param {number} t Its weight.
+ * @return {Array<number>} The combination.
+ * @example const x1 = combine_vectors(x, Math.cosh(s), v, Math.sinh(s));
+ */
+function combine_vectors(a, s, b, t) { return [s * a[0] + t * b[0], s * a[1] + t * b[1], s * a[2] + t * b[2], s * a[3] + t * b[3]]; }
+
+/**
+ * `normalize_minkowski` scales a timelike or spacelike 4-vector to Minkowski length 1.
+ * @param {Array<number>} a The vector.
+ * @return {Array<number>} The scaled vector.
+ * @example const g = normalize_minkowski(g_raw);
+ */
+function normalize_minkowski(a) { const n = Math.sqrt(Math.abs(dot_minkowski(a, a))); return a.map(x => x / n); }
+
+/**
+ * `normalize_tangent` makes v tangent to the hyperboloid at x and of unit length.
+ * @param {Array<number>} x A point.
+ * @param {Array<number>} v A vector near the tangent space at x.
+ * @return {Array<number>} The unit tangent.
+ * @example v = normalize_tangent(x, v);
+ */
+function normalize_tangent(x, v) { return normalize_minkowski(combine_vectors(v, 1, x, dot_minkowski(v, x))); }
+
+/**
+ * `cross_ground` is the Minkowski cross product inside the (x, z, w) slice, the ground plane's span.
+ * @param {Array<number>} a A vector with y = 0.
+ * @param {Array<number>} b A vector with y = 0.
+ * @return {Array<number>} A vector with y = 0 Minkowski-orthogonal to both.
+ * @example const r = cross_ground(t, g);
+ */
+function cross_ground(a, b) { return [a[Z] * b[W] - a[W] * b[Z], 0, a[W] * b[X] - a[X] * b[W], -(a[X] * b[Z] - a[Z] * b[X])]; }
+
+/**
+ * `compute_determinant` returns the determinant of a 4×4 matrix.
+ * @param {Float64Array} M The matrix.
+ * @return {number} Its determinant.
+ * @example if (compute_determinant(F) < 0) flip();
+ */
+function compute_determinant(M) {
+  const at = (r, c) => M[c * 4 + r]; let det = 0;
+  for (let c = 0; c < 4; c++) {
+    const s = []; for (let r = 1; r < 4; r++) for (let k = 0; k < 4; k++) if (k !== c) s.push(at(r, k));
+    det += (c % 2 ? -1 : 1) * at(0, c) * (s[0] * (s[4] * s[8] - s[5] * s[7]) - s[1] * (s[3] * s[8] - s[5] * s[6]) + s[2] * (s[3] * s[7] - s[4] * s[6]));
+  }
+  return det;
+}
+
+/**
+ * `make_ground_frame` returns an orientation-preserving isometry that fixes e_y (so it maps the ground to itself), sends e_w to the ground point g and local +z toward `toward`.
+ * @param {Array<number>} g A point on the ground plane y = 0.
+ * @param {Array<number>} toward A point, or a tangent vector at g, giving the local +z direction.
+ * @return {Float64Array} The frame.
+ * @example const B = make_ground_frame(foot, scale_vector(heading, -1));
+ */
+function make_ground_frame(g, toward) {
+  g = normalize_minkowski(g);
+  const t = normalize_minkowski(combine_vectors(toward, 1, g, dot_minkowski(toward, g)));
+  const r = normalize_minkowski(cross_ground(t, g));
+  const F = make_matrix(r, E_Y, t, g);
+  return compute_determinant(F) < 0 ? make_matrix(r.map(c => -c), E_Y, t, g) : F;
+}
+
+/**
+ * `renormalize_frame` removes rounding drift from a body frame, keeping it on the ground plane with e_y as its up axis.
+ * @param {Float64Array} B A body frame.
+ * @return {Float64Array} The cleaned frame.
+ * @example state.B = renormalize_frame(state.B);
+ */
+function renormalize_frame(B) {
+  let g = get_column(B, W); g[Y] = 0; g = normalize_minkowski(g); if (g[W] < 0) g = g.map(c => -c);
+  let t = get_column(B, Z); t[Y] = 0; t = normalize_minkowski(combine_vectors(t, 1, g, dot_minkowski(t, g)));
+  let r = normalize_minkowski(cross_ground(t, g));
+  const old = get_column(B, X);
+  if (r[0] * old[0] + r[2] * old[2] + r[3] * old[3] < 0) r = r.map(c => -c);
+  return make_matrix(r, E_Y, t, g);
+}
+
+/**
+ * `measure_distance` returns the hyperbolic distance between two points.
+ * @param {Array<number>} a A point.
+ * @param {Array<number>} b A point.
+ * @return {number} The distance, in curvature units.
+ * @example const d_m = measure_distance(eye, core) * CURVATURE_RADIUS_M;
+ */
+function measure_distance(a, b) { return Math.acosh(Math.max(1, -dot_minkowski(a, b))); }
+
+/**
+ * `get_geodesic_point` returns the point a distance s along the geodesic from x with unit tangent v.
+ * @param {Array<number>} x The start point.
+ * @param {Array<number>} v The unit tangent at x.
+ * @param {number} s The distance, in curvature units.
+ * @return {Array<number>} cosh(s) x + sinh(s) v.
+ * @example const hit = get_geodesic_point(x, v, s_hit);
+ */
+function get_geodesic_point(x, v, s) { return combine_vectors(x, Math.cosh(s), v, Math.sinh(s)); }
+
+/**
+ * `get_geodesic_tangent` returns the unit tangent a distance s along the geodesic from x with unit tangent v.
+ * @param {Array<number>} x The start point.
+ * @param {Array<number>} v The unit tangent at x.
+ * @param {number} s The distance, in curvature units.
+ * @return {Array<number>} sinh(s) x + cosh(s) v.
+ * @example v = get_geodesic_tangent(x, v, s);
+ */
+function get_geodesic_tangent(x, v, s) { return combine_vectors(x, Math.sinh(s), v, Math.cosh(s)); }
+
+/**
+ * `map_klein` maps Klein coordinates (dimensionless, |k| < 1) to the hyperboloid.
+ * @param {Array<number>} k The Klein coordinates (3 numbers).
+ * @return {Array<number>} The point (k, 1) / sqrt(1 - |k|²).
+ * @example const p = map_klein([0.1, 0, 0]);
+ */
+function map_klein(k) { const n2 = k[0] * k[0] + k[1] * k[1] + k[2] * k[2]; if (n2 >= 1) throw new Error(`map_klein: |k|² = ${n2} is not below 1`); const f = 1 / Math.sqrt(1 - n2); return [k[0] * f, k[1] * f, k[2] * f, f]; }
+
+/**
+ * `map_local` maps a structure's local block coordinates (meters) to a global point through its Klein grid.
+ * @param {Float64Array} frame The structure's frame.
+ * @param {Array<number>} q_m The local coordinates, in meters.
+ * @return {Array<number>} The global point.
+ * @example const lamp = map_local(frame, [0, 4, 0]);
+ */
+function map_local(frame, q_m) { const R = CURVATURE_RADIUS_M; return apply_matrix(frame, map_klein([q_m[0] / R, q_m[1] / R, q_m[2] / R])); }
+
+/**
+ * `map_exp` maps a local offset in meters to the hyperboloid by the exponential map at e_w (distances from the origin are kept).
+ * @param {Array<number>} q_m The offset, in meters.
+ * @return {Array<number>} The point.
+ * @example const probe = apply_matrix(F, map_exp([0.25, 0, 0]));
+ */
+function map_exp(q_m) {
+  const R = CURVATURE_RADIUS_M, n = Math.hypot(q_m[0], q_m[1], q_m[2]) / R;
+  if (n < 1e-12) return E_W.slice();
+  const f = Math.sinh(n) / (n * R);
+  return [q_m[0] * f, q_m[1] * f, q_m[2] * f, Math.cosh(n)];
+}
+
+/**
+ * `make_frame` returns the isometry that puts an origin on the ground at Fermi coordinates (u, v) of the level's axis and turns it by a yaw; at yaw 0 its local -z points along +u (toward red) and +x along +v.
+ * @param {number} u_m Distance along the level's axis, from blue (-) to red (+).
+ * @param {number} v_m Signed distance from the axis (+ is right when facing red).
+ * @param {number} yaw_rad The turn, from local -z toward local +x.
+ * @return {Float64Array} The frame.
+ * @example const F = make_frame(94, 6, get_facing_yaw(94, 6, 0, 0));
+ */
+function make_frame(u_m, v_m, yaw_rad) {
+  const R = CURVATURE_RADIUS_M;
+  return multiply_matrices(multiply_matrices(make_boost(Z, -u_m / R), make_boost(X, v_m / R)), make_rotation(X, Z, yaw_rad));
+}
+
+/**
+ * `get_fermi_coordinates` returns a point's Fermi coordinates: u along the level's axis, v from it, and h above the ground.
+ * @param {Array<number>} x A point.
+ * @return {{u_m: number, v_m: number, h_m: number}} The coordinates, in meters.
+ * @example const { u_m } = get_fermi_coordinates(foot);
+ */
+function get_fermi_coordinates(x) {
+  const R = CURVATURE_RADIUS_M, cosh_h = Math.sqrt(1 + x[Y] * x[Y]);
+  return { u_m: -R * Math.atanh(x[Z] / x[W]), v_m: R * Math.asinh(x[X] / cosh_h), h_m: R * Math.asinh(x[Y]) };
+}
+
+/**
+ * `get_facing_yaw` returns the yaw that makes a frame at (u, v) face a target ground point along the geodesic to it.
+ * @param {number} u_m The frame's u.
+ * @param {number} v_m The frame's v.
+ * @param {number} target_u_m The target's u.
+ * @param {number} target_v_m The target's v.
+ * @return {number} The yaw, in radians.
+ * @example const yaw = get_facing_yaw(-107, 0, 0, 0);
+ */
+function get_facing_yaw(u_m, v_m, target_u_m, target_v_m) {
+  const p = apply_matrix(invert_lorentz(make_frame(u_m, v_m, 0)), get_column(make_frame(target_u_m, target_v_m, 0), W));
+  return Math.atan2(p[X], -p[Z]);
+}
+
+/**
+ * `wrap_angle` wraps an angle into [-π, π).
+ * @param {number} angle_rad The angle.
+ * @return {number} The wrapped angle.
+ * @example const d = Math.abs(wrap_angle(a - b));
+ */
+function wrap_angle(angle_rad) { return angle_rad - 2 * Math.PI * Math.floor((angle_rad + Math.PI) / (2 * Math.PI)); }
+
+/**
+ * `make_rng` returns a seeded pseudo-random number generator (mulberry32).
+ * @param {number} seed The seed.
+ * @return {function(): number} A function returning numbers in [0, 1).
+ * @example const rng = make_rng(LEVEL_SEED);
+ */
+function make_rng(seed) {
+  let a = seed;
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+
+/**
+ * `VoxelModel` collects the blocks of one structure in local block coordinates (1 block = 1 m near its origin; y = 0 is the first layer above the ground), with its lamps and consoles.
+ * @example const model = new VoxelModel('red dome'); model.fillBox(-1, 0, -1, 1, 0, 1, MAT.METAL);
+ */
+class VoxelModel {
+  /**
+   * `constructor` starts an empty model.
+   * @param {string} name The name shown when the laser hits it.
+   */
+  constructor(name) { this.name = name; this.blocks = new Map(); this.lamps = []; this.consoles = []; }
+
+  /**
+   * `setBlock` sets one block (material 0 removes it).
+   * @param {number} x Local x.
+   * @param {number} y Local y (0 = first layer above the ground).
+   * @param {number} z Local z.
+   * @param {number} material A `MAT` value.
+   * @example model.setBlock(0, 3, 0, MAT.RED_LIGHT);
+   */
+  setBlock(x, y, z, material) {
+    if (y < 0) throw new Error(`setBlock: y = ${y} is below the ground in ${this.name}`);
+    const key = ((x + 512) * 1024 + y) * 1024 + (z + 512);
+    if (material) this.blocks.set(key, material); else this.blocks.delete(key);
+  }
+
+  /**
+   * `getBlock` returns the material of one block (0 for air).
+   * @param {number} x Local x.
+   * @param {number} y Local y.
+   * @param {number} z Local z.
+   * @return {number} The material.
+   * @example if (!model.getBlock(0, 1, 0)) model.setBlock(0, 1, 0, MAT.METAL);
+   */
+  getBlock(x, y, z) { return this.blocks.get(((x + 512) * 1024 + y) * 1024 + (z + 512)) || 0; }
+
+  /**
+   * `fillBox` sets every block in an inclusive box.
+   * @param {number} x0 First x.
+   * @param {number} y0 First y.
+   * @param {number} z0 First z.
+   * @param {number} x1 Last x.
+   * @param {number} y1 Last y.
+   * @param {number} z1 Last z.
+   * @param {number} material A `MAT` value (0 clears).
+   * @example model.fillBox(-2, 1, -2, 1, 3, 1, MAT.AIR);
+   */
+  fillBox(x0, y0, z0, x1, y1, z1, material) { for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) this.setBlock(x, y, z, material); }
+
+  /**
+   * `addLamp` adds a point light in local block coordinates.
+   * @param {Array<number>} q_m The lamp position, in meters.
+   * @param {Array<number>} color The light's color and brightness.
+   * @param {number} radius_m The distance at which the light falls to half.
+   * @example model.addLamp([0, 4, 0], TEAM_COLORS[RED], 12);
+   */
+  addLamp(q_m, color, radius_m) { this.lamps.push({ q_m, color, radius_m }); }
+
+  /**
+   * `toGrid` packs the blocks into a dense grid.
+   * @return {{dims: Array<number>, off: Array<number>, cells: Uint8Array}} The grid, its size and the offset from local coordinates to grid indices.
+   * @example const { dims } = model.toGrid();
+   */
+  toGrid() {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], entries = [];
+    for (const [key, material] of this.blocks) {
+      const p = [Math.floor(key / 1048576) - 512, Math.floor(key / 1024) % 1024, key % 1024 - 512];
+      for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); }
+      entries.push([p, material]);
+    }
+    if (!entries.length) throw new Error(`toGrid: ${this.name} has no blocks`);
+    lo[1] = 0;
+    const dims = [hi[0] - lo[0] + 1, hi[1] + 1, hi[2] - lo[2] + 1], cells = new Uint8Array(dims[0] * dims[1] * dims[2]);
+    for (const [p, material] of entries) cells[(p[0] - lo[0]) + dims[0] * (p[1] + dims[1] * (p[2] - lo[2]))] = material;
+    return { dims, off: [-lo[0], 0, -lo[2]], cells };
+  }
+}
+
+const structures = [], warps = [], lamps = [], pylons = [];
+
+/**
+ * `add_structure` registers a structure: its frame, its grid (cropped to the occupied cells), its bounding sphere, lamps and consoles.
+ * @param {string} name The structure's name.
+ * @param {Float64Array} frame Local-to-global isometry (fixes e_y).
+ * @param {Array<number>} dims Grid size (nx, ny, nz).
+ * @param {Array<number>} off Offset from local block coordinates to grid indices.
+ * @param {Uint8Array} cells Materials, index x + nx (y + ny z).
+ * @param {Array<Object>} model_lamps Lamps in local coordinates.
+ * @return {number} The structure's index, or -1 if the grid is empty.
+ * @example add_structure('crate', F, [1, 1, 1], [0, 0, 0], new Uint8Array([MAT.METAL]), []);
+ */
+function add_structure(name, frame, dims, off, cells, model_lamps) {
+  const R = CURVATURE_RADIUS_M, lo = [Infinity, Infinity, Infinity], hi = [-1, -1, -1];
+  for (let k = 0; k < dims[2]; k++) for (let j = 0; j < dims[1]; j++) for (let i = 0; i < dims[0]; i++) {
+    if (!cells[i + dims[0] * (j + dims[1] * k)]) continue;
+    const p = [i, j, k]; for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], p[a]); hi[a] = Math.max(hi[a], p[a]); }
+  }
+  if (hi[0] < 0) return -1;
+  lo[1] = 0;
+  const new_dims = [hi[0] - lo[0] + 1, hi[1] + 1, hi[2] - lo[2] + 1], new_cells = new Uint8Array(new_dims[0] * new_dims[1] * new_dims[2]);
+  for (let k = 0; k < new_dims[2]; k++) for (let j = 0; j < new_dims[1]; j++) for (let i = 0; i < new_dims[0]; i++)
+    new_cells[i + new_dims[0] * (j + new_dims[1] * k)] = cells[(i + lo[0]) + dims[0] * ((j + lo[1]) + dims[1] * (k + lo[2]))];
+  const new_off = [off[0] - lo[0], 0, off[2] - lo[2]];
+  const corner_lo = new_off.map(o => -o), corner_hi = new_dims.map((n, a) => n - new_off[a]);
+  const centre_local = map_klein(corner_lo.map((c, a) => (c + corner_hi[a]) / (2 * R)));
+  let radius = 0;
+  for (let c = 0; c < 8; c++) {
+    const q = [0, 1, 2].map(a => ((c >> a) & 1 ? corner_hi[a] : corner_lo[a]) / R);
+    radius = Math.max(radius, measure_distance(map_klein(q), centre_local));
+  }
+  if (structures.length >= MAX_STRUCTS) throw new Error(`add_structure: more than ${MAX_STRUCTS} structures`);
+  structures.push({ name, frame, inv: invert_lorentz(frame), dims: new_dims, off: new_off, cells: new_cells,
+    centre: apply_matrix(frame, centre_local), radius: radius + BOUND_MARGIN_M / R, atlas: [0, 0, 0] });
+  for (const lamp of model_lamps) lamps.push({ x: map_local(frame, lamp.q_m), color: lamp.color.map(c => c * LAMP_BRIGHTNESS), radius_m: lamp.radius_m });
+  return structures.length - 1;
+}
+
+/**
+ * `place_model` puts a voxel model on the ground at Fermi coordinates (u, v), turned by a yaw.
+ * @param {VoxelModel} model The model.
+ * @param {number} u_m Its origin's u.
+ * @param {number} v_m Its origin's v.
+ * @param {number} yaw_rad Its yaw (0 faces +u).
+ * @return {number} The structure's index.
+ * @example place_model(build_dome('red dome', 7, RED), 98, -25, 0);
+ */
+function place_model(model, u_m, v_m, yaw_rad) {
+  const frame = make_frame(u_m, v_m, yaw_rad), grid = model.toGrid();
+  return add_structure(model.name, frame, grid.dims, grid.off, grid.cells, model.lamps);
+}
+
+/**
+ * `add_terrain_chunk` builds one chunk of terrain by sampling a height function over a box of local columns.
+ * @param {string} name The chunk's name.
+ * @param {Float64Array} frame The chunk's frame.
+ * @param {Array<number>} box Local column range [x0, x1, z0, z1] (inclusive) and height in blocks [.., .., .., .., ny].
+ * @param {function(Array<number>): ?Object} sample Returns {height_m, top, body} for a global ground point, or null.
+ * @return {number} The structure's index, or -1 if the chunk is empty.
+ * @example add_terrain_chunk('ridge', F, [-13, 9, -11, 10, 12], sample_ridge_column);
+ */
+function add_terrain_chunk(name, frame, box, sample) {
+  const R = CURVATURE_RADIUS_M, [x0, x1, z0, z1, ny] = box, nx = x1 - x0 + 1, nz = z1 - z0 + 1, cells = new Uint8Array(nx * ny * nz);
+  for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
+    const qx = x0 + i + 0.5, qz = z0 + k + 0.5, column = sample(apply_matrix(frame, map_klein([qx / R, 0, qz / R])));
+    if (!column) continue;
+    for (let j = 0; j < ny; j++) {
+      const height_m = R * Math.asinh(map_klein([qx / R, (j + 0.5) / R, qz / R])[Y]);
+      if (height_m >= column.height_m) break;
+      cells[i + nx * (j + ny * k)] = height_m + 1 >= column.height_m ? column.top : column.body;
+    }
+  }
+  return add_structure(name, frame, [nx, ny, nz], [-x0, 0, -z0], cells, []);
+}
+
+/**
+ * `sample_crater_column` gives the height and materials of the big crater's rim and central peak at a ground point.
+ * @param {Array<number>} g A ground point (the crater's centre is e_w).
+ * @return {?Object} {height_m, top, body}, or null where there is no rim.
+ * @example const column = sample_crater_column(get_column(make_frame(0, 24, 0), W));
+ */
+function sample_crater_column(g) {
+  const R = CURVATURE_RADIUS_M, r_m = Math.acosh(Math.max(1, g[W])) * R, theta_rad = Math.atan2(g[X], -g[Z]);
+  if (r_m < CENTRAL_PEAK_RADIUS_M) return { height_m: CENTRAL_PEAK_HEIGHT_M * Math.pow(1 - r_m / CENTRAL_PEAK_RADIUS_M, CENTRAL_PEAK_SHAPE_POWER), top: MAT.REGOLITH, body: MAT.BASALT };
+  for (const gap_rad of CRATER_GAP_ANGLES_RAD) if (Math.abs(wrap_angle(theta_rad - gap_rad)) * R * Math.sinh(r_m / R) < CRATER_GAP_HALF_WIDTH_M) return null;
+  const offset_m = r_m - CRATER_RIM_RADIUS_M, width_m = offset_m < 0 ? RIM_INNER_WIDTH_M : RIM_OUTER_WIDTH_M, profile = 1 - (offset_m / width_m) ** 2;
+  if (profile <= 0) return null;
+  const crest_m = RIM_WAVES.reduce((sum, [amplitude_m, count, phase_rad]) => sum + amplitude_m * Math.sin(count * theta_rad + phase_rad), RIM_CREST_M);
+  return { height_m: crest_m * profile, top: crest_m > RIM_ROCKY_CREST_M ? MAT.BASALT : MAT.REGOLITH, body: MAT.DARK_REGOLITH };
+}
+
+/**
+ * `sample_ridge_column` gives the height and materials of the long ridge on the right flank at a ground point.
+ * @param {Array<number>} g A ground point.
+ * @return {?Object} {height_m, top, body}, or null off the ridge.
+ * @example const column = sample_ridge_column(get_column(make_frame(0, 57, 0), W));
+ */
+function sample_ridge_column(g) {
+  const { u_m, v_m } = get_fermi_coordinates(g), end_frac = (RIDGE_HALF_LENGTH_M - Math.abs(u_m)) / RIDGE_END_TAPER_M;
+  if (end_frac <= 0) return null;
+  const offset_m = v_m - (RIDGE_V_M + RIDGE_MEANDER_M * Math.sin(u_m / RIDGE_MEANDER_LENGTH_M));
+  const width_m = offset_m < 0 ? RIDGE_INNER_WIDTH_M : RIDGE_OUTER_WIDTH_M, profile = 1 - (offset_m / width_m) ** 2;
+  if (profile <= 0) return null;
+  const crest_m = RIDGE_WAVES.reduce((sum, [amplitude_m, length_m, phase_rad]) => sum + amplitude_m * Math.sin(u_m / length_m + phase_rad), RIDGE_CREST_M);
+  return { height_m: crest_m * profile * Math.min(1, end_frac), top: MAT.REGOLITH, body: MAT.BASALT };
+}
+
+/**
+ * `build_lander` builds the blue spawn: a landing pad with a lunar lander.
+ * @return {VoxelModel} The model.
+ * @example place_model(build_lander(), -114, 0, 0);
+ */
+function build_lander() {
+  const model = new VoxelModel('blue lander'), pad_r = 8, ring_r = 6.6, cross_r = 4;
+  for (let x = -pad_r; x < pad_r; x++) for (let z = -pad_r; z < pad_r; z++) {
+    const r = Math.hypot(x + 0.5, z + 0.5);
+    if (r >= pad_r) continue;
+    const is_cross = r < cross_r && (Math.abs(x + 0.5) < 1 || Math.abs(z + 0.5) < 1);
+    model.setBlock(x, 0, z, r >= ring_r ? MAT.HAZARD : is_cross ? MAT.BLUE_PAINT : MAT.PAD);
+  }
+  for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    model.setBlock(sx > 0 ? 2 : -3, 1, sz > 0 ? 2 : -3, MAT.METAL);
+    model.setBlock(sx > 0 ? 1 : -2, 2, sz > 0 ? 1 : -2, MAT.METAL);
+  }
+  model.fillBox(-1, 2, -1, 0, 2, 0, MAT.METAL);
+  model.fillBox(-2, 3, -2, 1, 5, 1, MAT.GOLD_FOIL);
+  model.fillBox(-2, 6, -2, 1, 8, 1, MAT.HULL);
+  for (let x = -2; x <= 1; x++) for (let z = -2; z <= 1; z++) if (x === -2 || x === 1 || z === -2 || z === 1) model.setBlock(x, 6, z, MAT.BLUE_PAINT);
+  model.fillBox(-1, 7, -2, 0, 7, -2, MAT.GLASS);
+  model.fillBox(0, 9, 0, 0, 10, 0, MAT.METAL);
+  model.setBlock(0, 11, 0, MAT.BLUE_LIGHT);
+  for (const [x, z] of [[5, 5], [-6, 5], [5, -6], [-6, -6]]) model.setBlock(x, 1, z, MAT.BLUE_LIGHT);
+  model.addLamp([0, 6, -4], TEAM_COLORS[BLUE], 14);
+  return model;
+}
+
+/**
+ * `build_pylon` builds a team's pylon: a glowing core on a pad, ringed by its consoles.
+ * @param {number} team BLUE or RED.
+ * @return {VoxelModel} The model; `consoles` lists the console blocks' centres.
+ * @example const model = build_pylon(RED);
+ */
+function build_pylon(team) {
+  const t = TEAMS[team], model = new VoxelModel(`${t.name} pylon`), half = 6;
+  for (let x = -half; x < half; x++) for (let z = -half; z < half; z++) model.setBlock(x, 0, z, (x === -half || x === half - 1 || z === -half || z === half - 1) ? t.paint : MAT.PAD);
+  model.fillBox(-2, 1, -2, 1, 1, 1, MAT.METAL);
+  model.fillBox(-1, 2, -1, 0, 8, 0, t.core);
+  for (const [x, z] of [[-2, -2], [1, -2], [-2, 1], [1, 1]]) model.fillBox(x, 2, z, x, 8, z, MAT.METAL);
+  model.fillBox(-2, 9, -2, 1, 9, 1, MAT.METAL);
+  model.fillBox(-1, 10, -1, 0, 10, 0, t.light);
+  for (let i = 0; i < CONSOLES_PER_PYLON; i++) {
+    const angle_rad = Math.PI / 2 + i * 2 * Math.PI / CONSOLES_PER_PYLON;
+    const x = Math.floor(PYLON_CONSOLE_RADIUS_M * Math.cos(angle_rad)), z = Math.floor(PYLON_CONSOLE_RADIUS_M * Math.sin(angle_rad));
+    model.setBlock(x, 1, z, MAT.METAL);
+    model.setBlock(x, 2, z, t.console + i);
+    model.consoles.push([x + 0.5, 2.5, z + 0.5]);
+  }
+  for (const [x, z] of [[-half, -half], [half - 1, half - 1]]) { model.fillBox(x, 1, z, x, 5, z, MAT.METAL); model.fillBox(x, 4, z + (z < 0 ? 1 : -1), x, 5, z + (z < 0 ? 2 : -2), t.paint); }
+  model.addLamp([0, PYLON_CORE_HEIGHT_M, 0], t.color, 10);
+  return model;
+}
+
+/**
+ * `build_habitat` builds a habitat module: a hollow hull box with windows, a team or hazard stripe, end doors and solar roof panels.
+ * @param {string} name The module's name.
+ * @param {number} length_m Its length along local z.
+ * @param {number} stripe The stripe material.
+ * @param {number} light The door-light material.
+ * @return {VoxelModel} The model.
+ * @example build_habitat('red habitat module', 12, MAT.RED_PAINT, MAT.RED_LIGHT);
+ */
+function build_habitat(name, length_m, stripe, light) {
+  const model = new VoxelModel(name), z0 = -Math.floor(length_m / 2), z1 = z0 + length_m - 1, window_period = 3;
+  model.fillBox(-3, 0, z0, 2, 4, z1, MAT.HULL);
+  model.fillBox(-2, 1, z0 + 1, 1, 3, z1 - 1, MAT.AIR);
+  model.fillBox(-2, 0, z0 + 1, 1, 0, z1 - 1, MAT.FLOOR);
+  for (let z = z0 + 1; z < z1; z++) {
+    for (const x of [-3, 2]) { model.setBlock(x, 1, z, stripe); if ((z - z0) % window_period === 1) model.setBlock(x, 2, z, MAT.GLASS); }
+    if ((z - z0) % 2 === 0) model.fillBox(-2, 4, z, 1, 4, z, MAT.SOLAR);
+  }
+  for (const z of [z0, z1]) { model.fillBox(-1, 1, z, 0, 2, z, MAT.AIR); model.setBlock(-3, 3, z, light); model.setBlock(2, 3, z, light); }
+  return model;
+}
+
+/**
+ * `build_dome` builds a hollow blocky dome with a glass cap, a ring of lights, two doors and a lit console inside.
+ * @param {string} name The dome's name.
+ * @param {number} radius_m Its radius in blocks.
+ * @param {number} light The light material.
+ * @return {VoxelModel} The model.
+ * @example build_dome('red dome', 7, MAT.RED_LIGHT);
+ */
+function build_dome(name, radius_m, light) {
+  const model = new VoxelModel(name), r = radius_m, glass_frac = 0.62, light_period = 4;
+  for (let x = -r; x < r; x++) for (let y = 0; y < r; y++) for (let z = -r; z < r; z++) {
+    const d = Math.hypot(x + 0.5, y + 0.5, z + 0.5);
+    if (d >= r) continue;
+    if (y === 0) { model.setBlock(x, 0, z, d >= r - 1 ? MAT.HULL : MAT.FLOOR); continue; }
+    if (d < r - 1) continue;
+    model.setBlock(x, y, z, y + 0.5 > glass_frac * r ? MAT.GLASS : (y === 1 && ((x + z) % light_period + light_period) % light_period === 0 ? light : MAT.HULL));
+  }
+  model.fillBox(-1, 1, -r, 0, 2, -r + 2, MAT.AIR);
+  model.fillBox(-1, 1, r - 3, 0, 2, r - 1, MAT.AIR);
+  model.fillBox(-1, 1, -1, 0, 1, 0, MAT.METAL);
+  model.fillBox(-1, 2, -1, 0, 2, 0, light);
+  return model;
+}
+
+/**
+ * `build_antenna` builds an antenna mast with a dish and a beacon.
+ * @param {string} name The mast's name.
+ * @param {number} height_m The mast's height in blocks.
+ * @param {number} light The beacon material.
+ * @return {VoxelModel} The model.
+ * @example build_antenna('red antenna', 12, MAT.RED_LIGHT);
+ */
+function build_antenna(name, height_m, light) {
+  const model = new VoxelModel(name), dish_r = 2;
+  model.fillBox(-1, 0, -1, 1, 0, 1, MAT.METAL);
+  model.fillBox(0, 1, 0, 0, height_m, 0, MAT.METAL);
+  model.fillBox(-dish_r, height_m - 2, 0, dish_r, height_m - 2, 0, MAT.METAL);
+  for (let x = -dish_r; x <= dish_r; x++) for (let z = -dish_r; z <= dish_r; z++) {
+    if (x || z) model.setBlock(x, height_m + 1, z, MAT.HULL);
+    if (Math.max(Math.abs(x), Math.abs(z)) === dish_r) model.setBlock(x, height_m + 2, z, MAT.HULL);
+  }
+  model.setBlock(0, height_m + 3, 0, light);
+  return model;
+}
+
+/**
+ * `build_walkway` builds a covered walkway tube along local z, open at both ends, with windows.
+ * @param {string} name The walkway's name.
+ * @param {number} length_m Its length.
+ * @return {VoxelModel} The model.
+ * @example build_walkway('crater walkway', 10);
+ */
+function build_walkway(name, length_m) {
+  const model = new VoxelModel(name), z0 = -Math.floor(length_m / 2), z1 = z0 + length_m - 1;
+  model.fillBox(-2, 0, z0, 2, 3, z1, MAT.HULL);
+  model.fillBox(-1, 1, z0, 1, 2, z1, MAT.AIR);
+  model.fillBox(-1, 0, z0, 1, 0, z1, MAT.METAL);
+  for (let z = z0; z <= z1; z++) if ((z - z0) % 2 === 1) { model.setBlock(-2, 2, z, MAT.GLASS); model.setBlock(2, 2, z, MAT.GLASS); }
+  for (const z of [z0, z1]) model.fillBox(-2, 3, z, 2, 3, z, MAT.HAZARD);
+  return model;
+}
+
+/**
+ * `build_landing_pad` builds an open landing pad with corner lights and a few crates (the wormhole's red exit).
+ * @param {string} name The pad's name.
+ * @param {number} team The team whose colours it wears.
+ * @return {VoxelModel} The model.
+ * @example build_landing_pad('red landing pad', RED);
+ */
+function build_landing_pad(name, team) {
+  const t = TEAMS[team], model = new VoxelModel(name), half = 7, ring_lo = 3.5, ring_hi = 4.5;
+  for (let x = -half; x < half; x++) for (let z = -half; z < half; z++) {
+    const r = Math.hypot(x + 0.5, z + 0.5), is_border = x === -half || z === -half || x === half - 1 || z === half - 1;
+    model.setBlock(x, 0, z, is_border ? MAT.HAZARD : (r >= ring_lo && r < ring_hi) ? t.paint : MAT.PAD);
+  }
+  for (const [x, z] of [[-half, -half], [half - 1, -half], [-half, half - 1], [half - 1, half - 1]]) { model.fillBox(x, 1, z, x, 2, z, MAT.METAL); model.setBlock(x, 3, z, t.light); }
+  model.fillBox(3, 1, 4, 4, 2, 5, MAT.METAL);
+  model.setBlock(-5, 1, 4, MAT.HAZARD);
+  model.addLamp([0, 3, 0], t.color, 9);
+  return model;
+}
+
+/**
+ * `build_watchtower` builds a tower with a railed platform at 7 m and a straight stair of single steps.
+ * @param {string} name The tower's name.
+ * @param {number} team The team whose lights it carries.
+ * @return {VoxelModel} The model.
+ * @example build_watchtower('red watchtower', RED);
+ */
+function build_watchtower(name, team) {
+  const t = TEAMS[team], model = new VoxelModel(name), top = 6;
+  for (const [x, z] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) model.fillBox(x, 0, z, x, top, z, MAT.METAL);
+  model.fillBox(-2, top, -2, 2, top, 2, MAT.METAL);
+  for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) if (Math.max(Math.abs(x), Math.abs(z)) === 2) model.setBlock(x, top + 1, z, (Math.abs(x) === 2 && Math.abs(z) === 2) ? t.light : MAT.HULL);
+  model.setBlock(2, top + 1, 1, MAT.AIR);
+  model.setBlock(2, top + 1, 2, MAT.AIR);
+  for (let k = 0; k <= top; k++) model.setBlock(3, k, k - 4, MAT.METAL);
+  model.addLamp([0, top + 2, 0], t.color, 9);
+  return model;
+}
+
+/**
+ * `build_hangar` builds the red spawn hangar: a large hull with a wide door at local -z and lit strips.
+ * @param {string} name The hangar's name.
+ * @param {number} team The team whose colours it wears.
+ * @return {VoxelModel} The model.
+ * @example build_hangar('red spawn hangar', RED);
+ */
+function build_hangar(name, team) {
+  const t = TEAMS[team], model = new VoxelModel(name);
+  model.fillBox(-7, 0, -6, 6, 6, 5, MAT.HULL);
+  model.fillBox(-6, 1, -5, 5, 5, 4, MAT.AIR);
+  model.fillBox(-6, 0, -5, 5, 0, 4, MAT.FLOOR);
+  model.fillBox(-4, 1, -6, 3, 4, -6, MAT.AIR);
+  for (let z = -6; z <= 5; z++) { model.setBlock(-7, 2, z, t.paint); model.setBlock(6, 2, z, t.paint); model.fillBox(-1, 6, z, 0, 6, z, t.paint); }
+  for (let x = -6; x <= 5; x += 2) model.setBlock(x, 4, 5, t.light);
+  model.fillBox(-4, 5, -6, 3, 5, -6, t.light);
+  model.addLamp([0, 3, 0], t.color, 12);
+  model.addLamp([0, 5, -8], t.color, 12);
+  return model;
+}
+
+/**
+ * `build_barrier` builds a 2-block-high barrier along local x with a gap in the middle and a team stripe.
+ * @param {string} name The barrier's name.
+ * @param {number} length_m Its length.
+ * @param {number} team The team whose stripe it wears.
+ * @return {VoxelModel} The model.
+ * @example build_barrier('red barrier', 16, RED);
+ */
+function build_barrier(name, length_m, team) {
+  const model = new VoxelModel(name), x0 = -Math.floor(length_m / 2), gap_half_m = 1.5;
+  for (let x = x0; x < x0 + length_m; x++) {
+    if (Math.abs(x + 0.5) < gap_half_m) continue;
+    model.fillBox(x, 0, 0, x, 0, 1, MAT.METAL);
+    model.fillBox(x, 1, 0, x, 1, 1, x % 2 ? TEAMS[team].paint : MAT.HULL);
+  }
+  return model;
+}
+
+/**
+ * `build_crates` builds a cluster of 1- and 2-block crates, some stacked.
+ * @param {string} name The cluster's name.
+ * @param {function(): number} rng The random generator.
+ * @param {number} count How many crates.
+ * @return {VoxelModel} The model.
+ * @example build_crates('supply crates', rng, 8);
+ */
+function build_crates(name, rng, count) {
+  const model = new VoxelModel(name), spread = 6, kinds = [MAT.METAL, MAT.HAZARD, MAT.HULL];
+  for (let i = 0; i < count; i++) {
+    const size = rng() < 0.4 ? 2 : 1, x = Math.floor(rng() * spread) - spread / 2, z = Math.floor(rng() * spread) - spread / 2;
+    let y = 0; while (model.getBlock(x, y, z) || model.getBlock(x + size - 1, y, z + size - 1)) y++;
+    model.fillBox(x, y, z, x + size - 1, y + size - 1, z + size - 1, kinds[Math.floor(rng() * kinds.length)]);
+  }
+  return model;
+}
+
+/**
+ * `build_solar_array` builds rows of solar panels on posts: low cover you can't walk under.
+ * @param {string} name The array's name.
+ * @param {number} rows How many rows.
+ * @param {number} length_m Each row's length.
+ * @return {VoxelModel} The model.
+ * @example build_solar_array('blue solar array', 3, 10);
+ */
+function build_solar_array(name, rows, length_m) {
+  const model = new VoxelModel(name), row_pitch = 4, post_period = 4;
+  for (let r = 0; r < rows; r++) {
+    const z = r * row_pitch - Math.floor(rows * row_pitch / 2);
+    for (let x = -Math.floor(length_m / 2); x < length_m - Math.floor(length_m / 2); x++) {
+      model.fillBox(x, 1, z, x, 1, z + 1, MAT.SOLAR);
+      if (((x % post_period) + post_period) % post_period === 0) model.setBlock(x, 0, z, MAT.METAL);
+    }
+  }
+  return model;
+}
+
+/**
+ * `build_boulders` builds a cluster of blocky boulders (squashed ellipsoids).
+ * @param {string} name The cluster's name.
+ * @param {function(): number} rng The random generator.
+ * @param {number} count How many boulders.
+ * @param {number} spread_m How far from the origin their centres may be.
+ * @return {VoxelModel} The model.
+ * @example build_boulders('boulders', rng, 4, 5);
+ */
+function build_boulders(name, rng, count, spread_m) {
+  const model = new VoxelModel(name), min_r = 1.0, extra_r = 1.8, min_squash = 0.6, extra_squash = 0.5, roughness = 0.15;
+  for (let i = 0; i < count; i++) {
+    const cx = (rng() * 2 - 1) * spread_m, cz = (rng() * 2 - 1) * spread_m, r = min_r + rng() * extra_r, hr = r * (min_squash + rng() * extra_squash);
+    for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) for (let y = 0; y <= Math.ceil(hr); y++) for (let z = Math.floor(cz - r); z <= Math.ceil(cz + r); z++) {
+      const e = ((x + 0.5 - cx) / r) ** 2 + ((y + 0.5) / hr) ** 2 + ((z + 0.5 - cz) / r) ** 2;
+      if (e < 1 - roughness * rng()) model.setBlock(x, y, z, y + 1.5 > hr ? MAT.BOULDER : MAT.BASALT);
+    }
+  }
+  return model;
+}
+
+/**
+ * `add_warp` registers a warp object (a black hole or a wormhole mouth) with its frame and reach.
+ * @param {Object} warp {kind, name, frame, size_c, reach_c, partner}.
+ * @return {number} Its index.
+ * @example add_warp({ kind: KIND_BLACK_HOLE, name: 'black hole', frame: F, size_c: 0.0075, reach_c: 0.6, partner: -1 });
+ */
+function add_warp(warp) {
+  if (warps.length >= MAX_WARPS) throw new Error(`add_warp: more than ${MAX_WARPS} warp objects`);
+  warps.push({ ...warp, centre: get_column(warp.frame, W), inv: invert_lorentz(warp.frame), list: [] });
+  return warps.length - 1;
+}
+
+/**
+ * `build_level` builds Lunar Surface: the structures of the three zones, the terrain chunks, the warp objects and the pylons.
+ * @return {{black_hole: number, mouth_a: number, mouth_b: number}} The warp objects' indices.
+ * @example const level = build_level();
+ */
+function build_level() {
+  const R = CURVATURE_RADIUS_M, rng = make_rng(LEVEL_SEED), toward_centre = (u_m, v_m) => get_facing_yaw(u_m, v_m, 0, 0);
+  const add_pylon = (team, u_m, v_m) => {
+    const model = build_pylon(team), yaw_rad = toward_centre(u_m, v_m), frame = make_frame(u_m, v_m, yaw_rad);
+    place_model(model, u_m, v_m, yaw_rad);
+    pylons[team] = { team, u_m, v_m, core: map_local(frame, [0, PYLON_CORE_HEIGHT_M, 0]), consoles: model.consoles.map(q => ({ x: map_local(frame, q), is_off: false })), progress_s: 0 };
+  };
+
+  const place_at = (model, [u_m, v_m], yaw_rad) => place_model(model, u_m, v_m, yaw_rad);
+  place_at(build_lander(), LAYOUT.blue_lander, 0);
+  add_pylon(BLUE, ...LAYOUT.blue_pylon);
+  place_at(build_antenna('blue relay mast', 9, MAT.BLUE_LIGHT), LAYOUT.blue_mast, 0);
+  for (const [k, at] of LAYOUT.blue_crates.entries()) place_at(build_crates('blue supply crates', rng, 9 - 2 * k), at, rng() * Math.PI);
+  place_at(build_solar_array('blue solar array', 3, 10), LAYOUT.blue_solar, Math.PI / 2);
+  for (const at of LAYOUT.blue_boulders) place_at(build_boulders('boulders', rng, 4, 5), at, 0);
+
+  for (let k = 0; k < CRATER_SEGMENT_COUNT; k++) {
+    const sector_rad = 2 * Math.PI / CRATER_SEGMENT_COUNT, theta_rad = (k + 0.5) * sector_rad - Math.PI, r_c = CRATER_RIM_RADIUS_M / R;
+    const centre = [Math.sinh(r_c) * Math.sin(theta_rad), 0, -Math.sinh(r_c) * Math.cos(theta_rad), Math.cosh(r_c)];
+    const { u_m, v_m } = get_fermi_coordinates(centre);
+    const owns = g => { const d = wrap_angle(Math.atan2(g[X], -g[Z]) - theta_rad), overlap_rad = SEAM_OVERLAP_M / (R * Math.sinh(Math.acosh(g[W]))); return Math.abs(d) < sector_rad / 2 + overlap_rad; };
+    add_terrain_chunk('crater rim', make_frame(u_m, v_m, toward_centre(u_m, v_m)), [-14, 13, -9, 8, 8], g => owns(g) && Math.acosh(g[W]) * R > CENTRAL_PEAK_RADIUS_M + 1 ? sample_crater_column(g) : null);
+  }
+  add_terrain_chunk('central peak', make_frame(0, 0, 0), [-8, 7, -8, 7, 6], g => Math.acosh(Math.max(1, g[W])) * R < CENTRAL_PEAK_RADIUS_M ? sample_crater_column(g) : null);
+  for (const at of LAYOUT.crater_boulders) place_at(build_boulders('boulders', rng, 2, 2), at, 0);
+
+  for (const at of LAYOUT.derelict_modules) place_at(build_habitat('derelict habitat module', 12, MAT.HAZARD, MAT.WHITE_LIGHT), at, 0);
+  const dome_model = build_dome('comms dome', 6, MAT.WHITE_LIGHT); dome_model.addLamp([0, 3, 0], [0.9, 0.85, 0.7], 10);
+  place_at(dome_model, LAYOUT.comms_dome, toward_centre(...LAYOUT.comms_dome));
+  place_at(build_walkway('crater walkway', 10), LAYOUT.crater_walkway, toward_centre(...LAYOUT.crater_walkway));
+  place_at(build_antenna('relay mast', 11, MAT.WHITE_LIGHT), LAYOUT.relay_mast, 0);
+  place_at(build_solar_array('solar array', 2, 12), LAYOUT.row_solar, 0);
+  place_at(build_crates('crates', rng, 8), LAYOUT.row_crates, rng() * Math.PI);
+  for (const at of LAYOUT.flank_boulders) place_at(build_boulders('boulders', rng, 3, 4), at, 0);
+  const ridge_chunk_count = Math.ceil(2 * RIDGE_HALF_LENGTH_M * Math.cosh(RIDGE_V_M / R) / RIDGE_CHUNK_LENGTH_M);
+  for (let k = 0; k < ridge_chunk_count; k++) {
+    const chunk_m = 2 * RIDGE_HALF_LENGTH_M / ridge_chunk_count, u_k = -RIDGE_HALF_LENGTH_M + (k + 0.5) * chunk_m;
+    add_terrain_chunk('ridge', make_frame(u_k, RIDGE_V_M, 0), [-13, 10, -13, 13, 12], g => { const { u_m } = get_fermi_coordinates(g); return Math.abs(u_m - u_k) < chunk_m / 2 + SEAM_OVERLAP_M ? sample_ridge_column(g) : null; });
+  }
+
+  for (const at of LAYOUT.red_barriers) place_at(build_barrier('red barrier', 16, RED), at, toward_centre(...at));
+  const module_model = build_habitat('red habitat module', 12, MAT.RED_PAINT, MAT.RED_LIGHT); module_model.addLamp([0, 2, -7], TEAM_COLORS[RED], 8);
+  place_at(module_model, LAYOUT.red_module, 0);
+  const red_dome = build_dome('red dome', 7, MAT.RED_LIGHT); red_dome.addLamp([0, 3, 0], TEAM_COLORS[RED], 12);
+  place_at(red_dome, LAYOUT.red_dome, toward_centre(...LAYOUT.red_dome));
+  add_pylon(RED, ...LAYOUT.red_pylon);
+  place_at(build_hangar('red spawn hangar', RED), LAYOUT.red_hangar, toward_centre(...LAYOUT.red_hangar));
+  place_at(build_watchtower('red watchtower', RED), LAYOUT.red_watchtower, get_facing_yaw(...LAYOUT.red_watchtower, MOUTH_B.u_m, MOUTH_B.v_m));
+  const pad_yaw = get_facing_yaw(MOUTH_B.u_m, MOUTH_B.v_m, ...LAYOUT.red_pylon);
+  place_model(build_landing_pad('red landing pad', RED), MOUTH_B.u_m, MOUTH_B.v_m, pad_yaw);
+  const mast = build_antenna('red antenna', 12, MAT.RED_LIGHT); mast.addLamp([0, 15, 0], TEAM_COLORS[RED], 8);
+  place_at(mast, LAYOUT.red_mast, 0);
+  place_at(build_walkway('red walkway', 8), LAYOUT.red_walkway, get_facing_yaw(...LAYOUT.red_walkway, ...LAYOUT.red_walkway_toward));
+  place_at(build_crates('red crates', rng, 8), LAYOUT.red_crates, rng() * Math.PI);
+  place_at(build_solar_array('red solar array', 2, 10), LAYOUT.red_solar, 0);
+
+  const black_hole = add_warp({ kind: KIND_BLACK_HOLE, name: 'black hole', frame: multiply_matrices(make_frame(0, 0, 0), make_boost(Y, BLACK_HOLE_HEIGHT_M / R)),
+    size_c: ISOTROPIC_RADIUS_PER_RS * BLACK_HOLE_RS_M / R, reach_c: BLACK_HOLE_REACH_M / R, partner: -1 });
+  const mouth_a = add_warp({ kind: KIND_MOUTH, name: 'wormhole mouth A', frame: multiply_matrices(make_frame(MOUTH_A.u_m, MOUTH_A.v_m, 0), make_boost(Y, MOUTH_HEIGHT_M / R)),
+    size_c: ISOTROPIC_RADIUS_PER_RS * WORMHOLE_RS_M / R, reach_c: WORMHOLE_REACH_M / R, partner: -1 });
+  const mouth_b = add_warp({ kind: KIND_MOUTH, name: 'wormhole mouth B', frame: multiply_matrices(make_frame(MOUTH_B.u_m, MOUTH_B.v_m, pad_yaw), make_boost(Y, (PAD_HEIGHT_M + MOUTH_HEIGHT_M) / R)),
+    size_c: ISOTROPIC_RADIUS_PER_RS * WORMHOLE_RS_M / R, reach_c: WORMHOLE_REACH_M / R, partner: mouth_a });
+  warps[mouth_a].partner = mouth_b;
+  warps.forEach((warp, w) => {
+    warps.forEach((other, o) => { if (o !== w && measure_distance(warp.centre, other.centre) < warp.reach_c + other.reach_c) throw new Error(`build_level: the reach spheres of ${warp.name} and ${other.name} overlap`); });
+    structures.forEach((s, k) => { if (measure_distance(s.centre, warp.centre) < s.radius + warp.reach_c) warp.list.push(k); });
+    if (warp.list.length > WARP_LIST_LENGTH) throw new Error(`build_level: ${warp.list.length} structures in the reach of ${warp.name}, more than ${WARP_LIST_LENGTH}`);
+  });
+  if (lamps.length > MAX_LIGHTS) throw new Error(`build_level: ${lamps.length} lamps, more than ${MAX_LIGHTS}`);
+  return { black_hole, mouth_a, mouth_b };
+}
+
+const level = build_level();
+
+/**
+ * `pack_atlas` packs every structure's grid into one 3D texture (shelves along x, rows along z).
+ * @return {{data: Uint8Array, size: Array<number>}} The atlas and its size.
+ * @example const atlas = pack_atlas();
+ */
+function pack_atlas() {
+  const height = Math.max(...structures.map(s => s.dims[1])), order = structures.map((_, k) => k).sort((a, b) => structures[b].dims[2] - structures[a].dims[2]);
+  let cursor_x = 0, cursor_z = 0, shelf_depth = 0;
+  for (const k of order) {
+    const s = structures[k];
+    if (s.dims[0] > ATLAS_WIDTH) throw new Error(`pack_atlas: ${s.name} is wider than the atlas`);
+    if (cursor_x + s.dims[0] > ATLAS_WIDTH) { cursor_x = 0; cursor_z += shelf_depth; shelf_depth = 0; }
+    s.atlas = [cursor_x, 0, cursor_z];
+    cursor_x += s.dims[0]; shelf_depth = Math.max(shelf_depth, s.dims[2]);
+  }
+  const size = [ATLAS_WIDTH, height, cursor_z + shelf_depth], data = new Uint8Array(size[0] * size[1] * size[2]);
+  for (const s of structures) for (let k = 0; k < s.dims[2]; k++) for (let j = 0; j < s.dims[1]; j++) for (let i = 0; i < s.dims[0]; i++)
+    data[(s.atlas[0] + i) + size[0] * (j + size[1] * (s.atlas[2] + k))] = s.cells[i + s.dims[0] * (j + s.dims[1] * k)];
+  return { data, size };
+}
+
+/**
+ * `get_index_slope` returns d ln n / dρ for a warp object's refractive index at distance ρ from its centre (the isotropic Schwarzschild index for a black hole, the black hole foil's for a wormhole mouth).
+ * @param {Object} warp The warp object.
+ * @param {number} rho The distance, in curvature units.
+ * @return {number} The slope, per curvature unit.
+ * @example const slope = get_index_slope(warps[0], 0.2);
+ */
+function get_index_slope(warp, rho) {
+  if (warp.kind === KIND_BLACK_HOLE) { const m = warp.size_c, q = m / rho; return -m / (rho * rho) * (3 / (1 + q) + 1 / Math.max(1 - q, 1e-4)); }
+  const pt = warp.size_c, ir = 1 / rho, psi = 1 + pt * ir, ir2 = ir / (psi * psi), rs = 4 * pt;
+  return -2 * pt * ir * ir / psi - rs * psi * (1 - pt * ir) * ir2 * ir2 / (2 * (1 + FOIL_LAMBDA_SQ - rs * ir2));
+}
+
+/**
+ * `get_log_index` returns ln n for a warp object's refractive index at distance ρ (the functions whose slopes `get_index_slope` gives).
+ * @param {Object} warp The warp object.
+ * @param {number} rho The distance, in curvature units.
+ * @return {number} ln n.
+ * @example const ln_n = get_log_index(warps[0], 0.2);
+ */
+function get_log_index(warp, rho) {
+  if (warp.kind === KIND_BLACK_HOLE) { const q = warp.size_c / rho; return 3 * Math.log(1 + q) - Math.log(Math.max(1 - q, 1e-4)); }
+  const pt = warp.size_c, psi = 1 + pt / rho, r = rho * psi * psi;
+  return 2 * Math.log(psi) - 0.5 * Math.log((1 - 4 * pt / r + FOIL_LAMBDA_SQ) / (1 + FOIL_LAMBDA_SQ));
+}
+
+/**
+ * `compute_bend` returns how fast a ray's direction turns at x: the part of ∇ln n across v, where ln n is tapered by w = (1 - (ρ/reach)²)², so n is nearly exact near the object, exactly 1 from the reach on, and the bending fades smoothly to zero at the reach.
+ * @param {Object} warp The warp object.
+ * @param {Array<number>} x The point.
+ * @param {Array<number>} v The unit tangent.
+ * @return {{a: Array<number>, rho: number}} The bending (a tangent vector) and the distance to the centre.
+ * @example const { a, rho } = compute_bend(warps[0], x, v);
+ */
+function compute_bend(warp, x, v) {
+  const p = apply_matrix(warp.inv, x), rho = Math.asinh(Math.hypot(p[X], p[Y], p[Z])), ch = Math.cosh(rho), sh = Math.sinh(rho);
+  const f = rho / warp.reach_c, window = (1 - f * f) ** 2, window_slope = -4 * f * (1 - f * f) / warp.reach_c;
+  const away = combine_vectors(x, ch / sh, warp.centre, -1 / sh), slope = f >= 1 ? 0 : get_index_slope(warp, rho) * window + get_log_index(warp, rho) * window_slope;
+  const g = away.map(c => c * slope);
+  return { a: combine_vectors(g, 1, v, -dot_minkowski(g, v)), rho };
+}
+
+/**
+ * `cross_throat` moves a point that is inside a mouth's throat sphere, and tangent vectors at it, through to the partner mouth: inversion in the throat sphere, then the gluing map diag(1, 1, -1) between the mouths' frames.
+ * @param {Object} warp The mouth entered.
+ * @param {Array<number>} x The point (inside the throat sphere).
+ * @param {Array<Array<number>>} vectors Tangent vectors at x.
+ * @return {{x: Array<number>, vectors: Array<Array<number>>}} The point and vectors at the partner mouth.
+ * @example const out = cross_throat(warps[1], x, [v]);
+ */
+function cross_throat(warp, x, vectors) {
+  const partner = warps[warp.partner], p = apply_matrix(warp.inv, x), len = Math.hypot(p[X], p[Y], p[Z]), rho = Math.asinh(len);
+  const n = [p[X] / len, p[Y] / len, p[Z] / len], rho_out = warp.size_c * warp.size_c / rho, flip = [1, 1, -1];
+  const q = [n[0] * Math.sinh(rho_out), n[1] * Math.sinh(rho_out), -n[2] * Math.sinh(rho_out), Math.cosh(rho_out)];
+  const out_vectors = vectors.map(vec => {
+    const t = apply_matrix(warp.inv, vec), f = t[W] / (1 + p[W]);
+    let tt = [t[X] - f * p[X], t[Y] - f * p[Y], t[Z] - f * p[Z]];
+    const dn = tt[0] * n[0] + tt[1] * n[1] + tt[2] * n[2];
+    tt = tt.map((c, i) => (c - 2 * dn * n[i]) * flip[i]);
+    const g = (q[X] * tt[0] + q[Y] * tt[1] + q[Z] * tt[2]) / (1 + q[W]);
+    return apply_matrix(partner.frame, [tt[0] + g * q[X], tt[1] + g * q[Y], tt[2] + g * q[Z], g * (1 + q[W])]);
+  });
+  return { x: apply_matrix(partner.frame, q), vectors: out_vectors };
+}
+
+/**
+ * `step_bent` advances a ray one step inside a warp object's reach: a half kick of bending, a geodesic drift, a half kick (second order).
+ * @param {Object} warp The warp object.
+ * @param {Array<number>} x The point.
+ * @param {Array<number>} v The unit tangent.
+ * @param {number} ds The step, in curvature units.
+ * @return {{x0: Array<number>, v0: Array<number>, x: Array<number>, v: Array<number>, rho: number}} The chord (start, direction) and the new state.
+ * @example const step = step_bent(warps[0], x, v, 0.01);
+ */
+function step_bent(warp, x, v, ds) {
+  const v0 = normalize_tangent(x, combine_vectors(v, 1, compute_bend(warp, x, v).a, 0.5 * ds));
+  const x1 = normalize_minkowski(get_geodesic_point(x, v0, ds));
+  let v1 = normalize_tangent(x1, get_geodesic_tangent(x, v0, ds));
+  const bend = compute_bend(warp, x1, v1);
+  v1 = normalize_tangent(x1, combine_vectors(v1, 1, bend.a, 0.5 * ds));
+  return { x0: x, v0, x: x1, v: v1, rho: bend.rho };
+}
+
+/**
+ * `choose_bend_step` picks the step inside a warp object's reach: a fixed fraction of the distance to its centre.
+ * @param {number} rho The distance to the centre, in curvature units.
+ * @return {number} The step, in curvature units.
+ * @example const ds = choose_bend_step(rho);
+ */
+function choose_bend_step(rho) { const R = CURVATURE_RADIUS_M; return Math.min(Math.max(BEND_STEP_FRAC * rho, MIN_BEND_STEP_M / R), MAX_BEND_STEP_M / R); }
+
+/**
+ * `find_warp_inside` returns the warp object whose reach sphere contains x, or -1.
+ * @param {Array<number>} x A point.
+ * @return {number} The warp index, or -1.
+ * @example let inside = find_warp_inside(eye);
+ */
+function find_warp_inside(x) { return warps.findIndex(w => -dot_minkowski(x, w.centre) < Math.cosh(w.reach_c)); }
+
+/**
+ * `find_warp_entry` finds where a straight ray first enters a warp object's reach sphere.
+ * @param {Array<number>} x The start point (outside every sphere).
+ * @param {Array<number>} v The unit tangent.
+ * @param {number} s_max The longest distance to look, in curvature units.
+ * @return {{s_end: number, entering: number}} The distance to the entry (or s_max) and the warp index (or -1).
+ * @example const { s_end, entering } = find_warp_entry(x, v, FAR_S);
+ */
+function find_warp_entry(x, v, s_max) {
+  let s_end = s_max, entering = -1;
+  warps.forEach((w, k) => {
+    const a = -dot_minkowski(x, w.centre), b = dot_minkowski(v, w.centre), closest_sq = a * a - b * b, reach_cosh = Math.cosh(w.reach_c);
+    if (b <= 0 || closest_sq >= reach_cosh * reach_cosh) return;
+    const s_in = Math.max(0, Math.atanh(b / a) - Math.acosh(reach_cosh / Math.sqrt(Math.max(closest_sq, 1))));
+    if (s_in < s_end) { s_end = s_in; entering = k; }
+  });
+  return { s_end, entering };
+}
+
+/**
+ * `trace_structure_cpu` finds where a geodesic segment first enters a solid block of one structure (glass counts as solid), by a voxel DDA in the structure's Klein coordinates.
+ * @param {number} k The structure index.
+ * @param {Array<number>} x The segment's start.
+ * @param {Array<number>} v Its unit tangent.
+ * @param {number} s_min Where the segment starts, in curvature units.
+ * @param {number} s_max Where it ends.
+ * @return {?{s: number, k: number, material: number}} The hit, or null.
+ * @example const hit = trace_structure_cpu(3, x, v, 0, 1);
+ */
+function trace_structure_cpu(k, x, v, s_min, s_max) {
+  const st = structures[k], R = CURVATURE_RADIUS_M, a = -dot_minkowski(x, st.centre), b = dot_minkowski(v, st.centre);
+  const closest_sq = a * a - b * b, bound_cosh = Math.cosh(st.radius);
+  if (closest_sq >= bound_cosh * bound_cosh) return null;
+  const s_star = Math.atanh(b / a), half_window = Math.acosh(bound_cosh / Math.sqrt(Math.max(closest_sq, 1)));
+  const s_lo = Math.max(s_min, s_star - half_window), s_hi = Math.min(s_max, s_star + half_window);
+  if (s_lo >= s_hi) return null;
+  const p = apply_matrix(st.inv, get_geodesic_point(x, v, s_star)), t = apply_matrix(st.inv, get_geodesic_tangent(x, v, s_star));
+  const mu_of = s => { const lam = Math.tanh(s - s_star); return lam / (p[W] * (p[W] + lam * t[W])); };
+  const g0 = [0, 1, 2].map(i => p[i] / p[W] * R + st.off[i]), d = [0, 1, 2].map(i => { const c = (t[i] * p[W] - p[i] * t[W]) * R; return Math.abs(c) < 1e-12 ? 1e-12 : c; });
+  let mu_in = mu_of(s_lo), mu_out = mu_of(s_hi);
+  for (let i = 0; i < 3; i++) { const m0 = -g0[i] / d[i], m1 = (st.dims[i] - g0[i]) / d[i]; mu_in = Math.max(mu_in, Math.min(m0, m1)); mu_out = Math.min(mu_out, Math.max(m0, m1)); }
+  if (mu_in >= mu_out) return null;
+  const cell = [0, 1, 2].map(i => Math.min(st.dims[i] - 1, Math.max(0, Math.floor(g0[i] + d[i] * mu_in + (d[i] > 0 ? 1e-9 : -1e-9)))));
+  const step = d.map(c => c > 0 ? 1 : -1), mu_next = [0, 1, 2].map(i => (cell[i] + (d[i] > 0 ? 1 : 0) - g0[i]) / d[i]), mu_delta = d.map(c => Math.abs(1 / c));
+  let mu = mu_in;
+  for (let n = 0; n < st.dims[0] + st.dims[1] + st.dims[2] + 3; n++) {
+    const material = st.cells[cell[0] + st.dims[0] * (cell[1] + st.dims[1] * cell[2])];
+    if (material) { const lam = mu * p[W] * p[W] / (1 - mu * p[W] * t[W]); return { s: s_star + Math.atanh(lam), k, material }; }
+    const i = mu_next[0] < mu_next[1] ? (mu_next[0] < mu_next[2] ? 0 : 2) : (mu_next[1] < mu_next[2] ? 1 : 2);
+    mu = mu_next[i]; cell[i] += step[i]; mu_next[i] += mu_delta[i];
+    if (mu > mu_out || cell[i] < 0 || cell[i] >= st.dims[i]) return null;
+  }
+  return null;
+}
+
+/**
+ * `trace_scene_cpu` finds the first thing a geodesic segment hits: the ground or a block.
+ * @param {Array<number>} x The start point.
+ * @param {Array<number>} v The unit tangent.
+ * @param {number} s_max The segment's length, in curvature units.
+ * @param {number} warp_index -1 to test every structure, or a warp object whose list to test.
+ * @return {?{s: number, k: number, material: number}} The hit (k = -1 for the ground), or null.
+ * @example const hit = trace_scene_cpu(eye, forward, FAR_S, -1);
+ */
+function trace_scene_cpu(x, v, s_max, warp_index) {
+  let best = null;
+  if (x[Y] >= 0 && v[Y] < 0 && x[Y] / -v[Y] < 1) { const s = Math.atanh(x[Y] / -v[Y]); if (s < s_max) best = { s, k: -1, material: MAT.REGOLITH }; }
+  const candidates = warp_index < 0 ? structures.map((_, k) => k) : warps[warp_index].list;
+  for (const k of candidates) { const hit = trace_structure_cpu(k, x, v, 0, best ? best.s : s_max); if (hit && (!best || hit.s < best.s)) best = hit; }
+  return best;
+}
+
+/**
+ * `trace_laser` traces a laser shot along the true light path: straight geodesics, bent inside warp objects' reach, through wormhole throats, until a block, the ground, a horizon or LASER_MAX_LENGTH_M.
+ * @param {Array<number>} x0 The start point.
+ * @param {Array<number>} v0 The unit direction.
+ * @return {Object} {pieces (lists of points, split at throats), hit, outcome, length_m, through}.
+ * @example const shot = trace_laser(eye, forward);
+ */
+function trace_laser(x0, v0) {
+  const R = CURVATURE_RADIUS_M, max_s = LASER_MAX_LENGTH_M / R;
+  let x = x0, v = v0, travelled = 0, inside = find_warp_inside(x), piece = [x0], outcome = 'escaped', hit = null;
+  const pieces = [piece], through = [];
+  for (let it = 0; it < LASER_MAX_ITERATIONS && travelled < max_s; it++) {
+    if (inside < 0) {
+      const { s_end, entering } = find_warp_entry(x, v, max_s - travelled), found = trace_scene_cpu(x, v, s_end, -1);
+      if (found) { piece.push(get_geodesic_point(x, v, found.s)); travelled += found.s; hit = found; outcome = 'hit'; break; }
+      const xn = get_geodesic_point(x, v, s_end); v = get_geodesic_tangent(x, v, s_end); x = xn; travelled += s_end; piece.push(x);
+      if (entering < 0) break;
+      inside = entering;
+      continue;
+    }
+    const warp = warps[inside], ds = choose_bend_step(compute_bend(warp, x, v).rho), step = step_bent(warp, x, v, ds);
+    const found = trace_scene_cpu(step.x0, step.v0, ds, inside);
+    if (found) { piece.push(get_geodesic_point(step.x0, step.v0, found.s)); travelled += found.s; hit = found; outcome = 'hit'; break; }
+    x = step.x; v = step.v; travelled += ds; piece.push(x);
+    if (warp.kind === KIND_BLACK_HOLE && step.rho < warp.size_c * HORIZON_CAPTURE_FRAC) { outcome = 'absorbed'; break; }
+    if (warp.kind === KIND_MOUTH && step.rho < warp.size_c) {
+      const out = cross_throat(warp, x, [v]); x = out.x; v = normalize_tangent(x, out.vectors[0]);
+      through.push(warp.name); piece = [x]; pieces.push(piece); inside = warp.partner;
+      continue;
+    }
+    if (step.rho > warp.reach_c) inside = -1;
+  }
+  return { pieces, hit, outcome, length_m: travelled * R, through };
+}
+
+/**
+ * `measure_offset` returns the distance from a point to the geodesic through a with unit tangent b, computed from the orthogonal part so it stays accurate for tiny distances.
+ * @param {Array<number>} p The point.
+ * @param {Array<number>} a A point on the geodesic.
+ * @param {Array<number>} b The unit tangent at a.
+ * @return {number} The distance, in curvature units.
+ * @example const off = measure_offset(p, a, b);
+ */
+function measure_offset(p, a, b) { const perp = combine_vectors(combine_vectors(p, 1, a, dot_minkowski(p, a)), 1, b, -dot_minkowski(p, b)); return Math.asinh(Math.sqrt(Math.max(0, dot_minkowski(perp, perp)))); }
+
+/**
+ * `simplify_path` turns a traced polyline into geodesic segments that stay within BEAM_TOLERANCE_M of it.
+ * @param {Array<Array<number>>} points The polyline.
+ * @param {number} tolerance_m The allowed deviation.
+ * @return {Array<{a: Array<number>, b: Array<number>, length: number}>} Segments: start, unit tangent, length (curvature units).
+ * @example const segments = simplify_path(piece, BEAM_TOLERANCE_M);
+ */
+function simplify_path(points, tolerance_m) {
+  const R = CURVATURE_RADIUS_M, segments = [];
+  const make_segment = (p, q) => { const length = measure_distance(p, q); return length > 1e-9 ? { a: p, b: combine_vectors(q, 1 / Math.sinh(length), p, -Math.cosh(length) / Math.sinh(length)), length } : null; };
+  let i = 0;
+  while (i < points.length - 1) {
+    let j = i + 1;
+    while (j + 1 < points.length) {
+      const trial = make_segment(points[i], points[j + 1]);
+      if (!trial || points.slice(i + 1, j + 1).some(p => measure_offset(p, trial.a, trial.b) * R > tolerance_m)) break;
+      j++;
+    }
+    const segment = make_segment(points[i], points[j]);
+    if (segment) segments.push(segment);
+    i = j;
+  }
+  return segments;
+}
+
+const canvas = document.getElementById('canvas');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false }); }
+catch (error) { const el = document.getElementById('error'); el.style.display = 'flex'; el.textContent = 'WebGL2 is required: ' + error.message; throw error; }
+
+const atlas = pack_atlas();
+const atlas_texture = new THREE.Data3DTexture(atlas.data, atlas.size[0], atlas.size[1], atlas.size[2]);
+atlas_texture.format = THREE.RedFormat; atlas_texture.type = THREE.UnsignedByteType;
+atlas_texture.minFilter = atlas_texture.magFilter = THREE.NearestFilter; atlas_texture.unpackAlignment = 1; atlas_texture.needsUpdate = true;
+const struct_data = new Float32Array(STRUCT_TEXELS * MAX_STRUCTS * 4);
+structures.forEach((s, k) => {
+  const base = k * STRUCT_TEXELS * 4;
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) struct_data[base + r * 4 + c] = s.inv[c * 4 + r];
+  struct_data.set(s.centre, base + 16);
+  struct_data.set([Math.cosh(s.radius), ...s.off], base + 20);
+  struct_data.set([...s.atlas, 0], base + 24);
+  struct_data.set([...s.dims, 0], base + 28);
+});
+const struct_texture = new THREE.DataTexture(struct_data, STRUCT_TEXELS, MAX_STRUCTS, THREE.RGBAFormat, THREE.FloatType);
+struct_texture.minFilter = struct_texture.magFilter = THREE.NearestFilter; struct_texture.needsUpdate = true;
+const beam_data = new Float32Array(3 * MAX_BEAM_SEGMENTS * 4);
+const beam_texture = new THREE.DataTexture(beam_data, 3 * MAX_BEAM_SEGMENTS, 1, THREE.RGBAFormat, THREE.FloatType);
+beam_texture.minFilter = beam_texture.magFilter = THREE.NearestFilter; beam_texture.needsUpdate = true;
+
+/**
+ * `make_sky_direction` returns a unit direction at the level's centre from an elevation and an azimuth (from +u toward +v).
+ * @param {number} elevation_rad Angle above the ground plane.
+ * @param {number} azimuth_rad Angle from +u toward +v.
+ * @return {THREE.Vector3} The direction (x = +v, z = -u).
+ * @example const sun = make_sky_direction(SUN_ELEVATION_RAD, SUN_AZIMUTH_RAD);
+ */
+function make_sky_direction(elevation_rad, azimuth_rad) { return new THREE.Vector3(Math.cos(elevation_rad) * Math.sin(azimuth_rad), Math.sin(elevation_rad), -Math.cos(elevation_rad) * Math.cos(azimuth_rad)); }
+const sun_direction = make_sky_direction(SUN_ELEVATION_RAD, SUN_AZIMUTH_RAD), planet_direction = make_sky_direction(PLANET_ELEVATION_RAD, PLANET_AZIMUTH_RAD);
+const planet_e1 = new THREE.Vector3().crossVectors(planet_direction, new THREE.Vector3(0, 1, 0)).normalize(), planet_e2 = new THREE.Vector3().crossVectors(planet_e1, planet_direction);
+
+/**
+ * `glsl` writes a number as a GLSL float literal.
+ * @param {number} x The number.
+ * @return {string} The literal, e.g. "2.0".
+ * @example glsl(2) === '2.0';
+ */
+function glsl(x) { const s = String(x); return /[.e]/.test(s) ? s : s + '.0'; }
+const tile_klein_half = Math.tanh(Math.acosh(Math.cos(Math.PI / 5) / Math.sin(Math.PI / 4)));
+const shader_constants = `
+const int MAX_STRUCTS = ${MAX_STRUCTS};
+const int MAX_WARPS = ${MAX_WARPS};
+const int WARP_LIST_LENGTH = ${WARP_LIST_LENGTH};
+const int WARP_LIST_VEC4S = ${WARP_LIST_LENGTH / 4};
+const int MAX_LIGHTS = ${MAX_LIGHTS};
+const int MAX_BEAM_SEGMENTS = ${MAX_BEAM_SEGMENTS};
+const int MAX_SPOTS = ${MAX_SPOTS};
+const int MATERIAL_COUNT = ${MATERIALS.length};
+const int MAT_GLASS = ${MAT.GLASS};
+const int MAT_REGOLITH = ${MAT.REGOLITH};
+const int MAT_DARK_REGOLITH = ${MAT.DARK_REGOLITH};
+const int MAT_BASALT = ${MAT.BASALT};
+const int MAT_SOLAR = ${MAT.SOLAR};
+const int MAT_HAZARD = ${MAT.HAZARD};
+const int MAT_PAD = ${MAT.PAD};
+const int MAT_HULL = ${MAT.HULL};
+const int MAT_GOLD_FOIL = ${MAT.GOLD_FOIL};
+const int MAT_CONSOLE_FIRST = ${MAT.BLUE_CONSOLE};
+const int CONSOLE_COUNT = ${2 * CONSOLES_PER_PYLON};
+const float FAR_S = ${glsl(FAR_S)};
+const float SHADOW_S = ${glsl(SHADOW_M / CURVATURE_RADIUS_M)};
+const float SURFACE_OFFSET_S = ${glsl(0.02 / CURVATURE_RADIUS_M)};
+const float FOIL_LAMBDA_SQ = ${glsl(FOIL_LAMBDA_SQ)};
+const float HORIZON_CAPTURE_FRAC = ${glsl(HORIZON_CAPTURE_FRAC)};
+const float BEND_STEP_FRAC = ${glsl(BEND_STEP_FRAC)};
+const float MIN_BEND_STEP_S = ${glsl(MIN_BEND_STEP_M / CURVATURE_RADIUS_M)};
+const float MAX_BEND_STEP_S = ${glsl(MAX_BEND_STEP_M / CURVATURE_RADIUS_M)};
+const float TILE_KLEIN_HALF = ${glsl(tile_klein_half)};
+const float TILE_NORMAL_SCALE = ${glsl(1 / Math.sqrt(1 - tile_klein_half * tile_klein_half))};
+const float CELL_S = ${glsl(Math.atanh(tile_klein_half) / TILE_CELLS_PER_HALF)};
+const float TILE_INRADIUS_S = ${glsl(Math.atanh(tile_klein_half))};
+const float ZONE_EDGE_U_M = ${glsl(ZONE_EDGE_U_M)};
+const float BOUNDARY_U_M = ${glsl(BOUNDARY_U_M)};
+const float BOUNDARY_V_M = ${glsl(BOUNDARY_V_M)};
+const float CRATER_FLOOR_RADIUS_M = ${glsl(CRATER_FLOOR_RADIUS_M)};
+const float CRATER_RIM_RADIUS_M = ${glsl(CRATER_RIM_RADIUS_M)};
+const float PLANET_RADIUS_RAD = ${glsl(PLANET_RADIUS_RAD)};
+const vec3 BLUE_COLOR = vec3(${TEAM_COLORS[BLUE].map(glsl).join(', ')});
+const vec3 RED_COLOR = vec3(${TEAM_COLORS[RED].map(glsl).join(', ')});
+const vec3 PALETTE[MATERIAL_COUNT] = vec3[MATERIAL_COUNT](${MATERIALS.map(m => `vec3(${m[1].map(glsl).join(', ')})`).join(', ')});
+const float GLOW[MATERIAL_COUNT] = float[MATERIAL_COUNT](${MATERIALS.map(m => glsl(m[2])).join(', ')});
+`;
+
+const vertex_shader = `
+precision highp float;
+in vec3 position; out vec2 v_ndc;
+/**
+ * \`main\` passes a full-screen quad through and hands its NDC position to the fragment shader.
+ */
+void main() { v_ndc = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+const fragment_shader = `
+precision highp float; precision highp int; precision highp sampler3D; precision highp sampler2D;
+${shader_constants}
+const int MAX_ITERATIONS = 240;
+const int MAX_DDA_STEPS = 80;
+const int MAX_FOLDS = 26;
+const int OUTCOME_LOST = 0;
+const int OUTCOME_SKY = 1;
+const int OUTCOME_HIT = 2;
+const int MAT_GROUND = 255;
+const float NO_HIT_S = 1.0e9;
+const float LAMBDA_LIMIT = 0.99999994;
+const float TINY = 1.0e-9;
+const float GROUND_DETAIL_S = 7.0;
+const float SUN_INTENSITY = 1.45;
+const float LUNAR_LAMBERT_FRAC = 0.7;
+const float AMBIENT = 0.11;
+const float EARTHSHINE = 0.08;
+const float SHADOW_FLOOR = 0.0;
+const vec3 SUN_COLOR = vec3(1.0, 0.96, 0.88);
+const vec3 EARTHSHINE_COLOR = vec3(0.55, 0.7, 1.0);
+const float LIGHT_CUTOFF_FRAC = 3.0;
+const float LIGHT_WRAP = 0.3;
+const float BLOCK_NOISE = 0.18;
+const float TEXEL_NOISE = 0.12;
+const float EDGE_DARKEN = 0.55;
+const float EDGE_WIDTH = 0.05;
+const float SUBTEXELS = 8.0;
+const float DETAIL_FOOTPRINT_M = 0.9;
+const float GLASS_TINT = 0.8;
+const vec3 GLASS_SHEEN = vec3(0.05, 0.07, 0.09);
+const float BEAM_RADIUS_M = 0.02;
+const float BEAM_REACH = 4.8;
+const float SPOT_RADIUS_M = 0.15;
+const vec3 HASH_DIRECTION = vec3(12.9898, 78.233, 37.719);
+const float HASH_SCALE = 43758.5453;
+const int FBM_OCTAVES = 4;
+const float FBM_LACUNARITY = 2.03;
+const float STAR_DENSITY_COARSE = 0.03;
+const float STAR_DENSITY_FINE = 0.012;
+const float STAR_PIXELS = 0.8;
+const float STAR_GRID_COARSE = 60.0;
+const float STAR_GRID_FINE = 170.0;
+const vec3 MILKY_WAY_NORMAL = vec3(0.35, 0.55, 0.76);
+const float MILKY_WAY_WIDTH = 0.2;
+const float SUN_COS_INNER = 0.99996;
+const float SUN_COS_OUTER = 0.99990;
+const float SUN_GLARE_POWER = 900.0;
+const float SUN_DISC_BRIGHTNESS = 6.0;
+const vec3 OCEAN_COLOR = vec3(0.07, 0.2, 0.48);
+const vec3 LAND_COLOR = vec3(0.32, 0.38, 0.2);
+const vec3 CLOUD_COLOR = vec3(0.95);
+const vec3 ATMOSPHERE_COLOR = vec3(0.35, 0.6, 1.0);
+const float CRATERLET_MAX_M = 6.0;
+const float CRATERLET_CHANCE = 0.55;
+const float EJECTA_INNER_M = 27.0;
+const float EJECTA_OUTER_M = 80.0;
+const float ZONE_STRIP_M = 0.8;
+const float ZONE_TINT_GAIN = 1.5;
+const float ZONE_TINT_FRAC = 0.07;
+const float BOUNDARY_STRIP_FRAC = 0.04;
+const float CELL_HASH_SCALE = 4096.0;
+const float HASH_SHRINK = 0.001;
+const float MARIA_BASE = 0.93;
+const float MARIA_CONTRAST = 0.12;
+const float MARIA_PER_M = 0.03;
+const float FLOOR_RING_M = 3.0;
+const float FLOOR_RING_DARKEN = 0.25;
+const float EJECTA_RAY_COUNT = 9.0;
+const vec2 EJECTA_RAY_EDGES = vec2(0.62, 0.8);
+const vec3 EJECTA_COLOR = vec3(0.78, 0.78, 0.76);
+const float EJECTA_STRENGTH = 0.6;
+const float CRATERLET_CLEARANCE_M = 12.0;
+const float CRATERLET_SPACING_FRAC = 0.5;
+const float CRATERLET_HASH_SCALE = 512.0;
+const float CRATERLET_MIN_FRAC = 0.35;
+const float CRATERLET_SIZE_SEED = 7.31;
+const float CRATERLET_RIM_FRAC = 0.75;
+const float CRATERLET_RIM_BRIGHTEN = 1.18;
+const float CRATERLET_FLOOR_DARKEN = 0.72;
+const float CRATERLET_FLOOR_SLOPE = 0.1;
+const float ZONE_STRIP_GLOW = 0.55;
+const float OUTSIDE_DARKEN = 0.72;
+const float HAZARD_STRIPE_M = 1.5;
+const vec3 HAZARD_DARK_COLOR = vec3(0.1);
+const float GROUND_EDGE_FRAC = 0.6;
+const float CELL_SEED = 97.0;
+const float STRUCT_SEED = 17.31;
+const float TEXEL_SEED = 131.0;
+const vec3 CONSOLE_OFF_COLOR = vec3(0.12);
+const float CONSOLE_STRIPE_DARKEN = 0.25;
+const float STRIPES_PER_BLOCK = 2.0;
+const vec3 SOLAR_GRID_COLOR = vec3(0.45, 0.5, 0.62);
+const vec2 SOLAR_CELLS = vec2(4.0, 2.0);
+const float SOLAR_GRID_EDGE = 0.88;
+const vec3 HAZARD_STRIPE_COLOR = vec3(0.08);
+const float FOIL_CRINKLES = 5.0;
+const float FOIL_VARIATION = 0.4;
+const float PANEL_SEAMS = 2.0;
+const float PANEL_SEAM_EDGE = 0.94;
+const float PANEL_SEAM_DARKEN = 0.12;
+const float GLOW_BRIGHTNESS = 1.2;
+const float GLOW_RIM = 0.3;
+const float DETAIL_FADE_START_FRAC = 0.3;
+const float LIGHT_FADE_START_FRAC = 0.6;
+const float DDA_NUDGE = 1.0e-5;
+const float HORIZON_GUARD = 1.0e-4;
+const float SUN_GLARE = 0.6;
+const float SUN_HALO_POWER = 40.0;
+const float SUN_HALO = 0.04;
+const vec2 LAND_EDGES = vec2(0.52, 0.56);
+const float LAND_SCALE = 2.2;
+const vec3 LAND_OFFSET = vec3(3.0);
+const vec2 CLOUD_EDGES = vec2(0.5, 0.75);
+const float CLOUD_SCALE = 4.5;
+const vec3 CLOUD_OFFSET = vec3(9.0, 1.0, 4.0);
+const float PLANET_SUNLIT = 1.15;
+const float PLANET_NIGHT = 0.015;
+const float LIMB_POWER = 6.0;
+const float LIMB_GLOW = 0.6;
+const float LIMB_WRAP = 0.2;
+const float HALO_RADIUS_SQ = 1.12;
+const float HALO_GLOW = 0.25;
+const float HALO_WRAP = 0.3;
+const float STAR_FAINT = 0.15;
+const float STAR_BRIGHT = 1.5;
+const float STAR_BRIGHTNESS_POWER = 4.0;
+const float STAR_JITTER = 0.6;
+const vec2 STAR_SEEDS = vec2(7.1, 3.7);
+const float FINE_STAR_BRIGHTNESS = 0.5;
+const vec3 MILKY_WAY_COLOR = vec3(0.75, 0.8, 1.0);
+const float MILKY_WAY_BRIGHTNESS = 0.05;
+const float MILKY_WAY_DETAIL = 6.0;
+const float BEAM_HALO_OPACITY = 0.9;
+const float BEAM_CORE_WHITENESS = 0.6;
+const float TONEMAP_KNEE = 0.6;
+
+uniform highp sampler3D u_atlas; uniform highp sampler2D u_structs; uniform highp sampler2D u_beams;
+uniform int u_struct_count, u_warp_count, u_light_count, u_beam_count, u_spot_count;
+uniform mat4 u_cam;
+uniform float u_tan_half, u_aspect, u_R, u_pix;
+uniform vec4 u_warp_c[MAX_WARPS]; uniform vec4 u_warp_p[MAX_WARPS];
+uniform mat4 u_warp_inv[MAX_WARPS]; uniform mat4 u_warp_fwd[MAX_WARPS];
+uniform ivec4 u_warp_list[MAX_WARPS * WARP_LIST_VEC4S];
+uniform vec3 u_sun, u_planet, u_planet_e1, u_planet_e2;
+uniform vec4 u_light_x[MAX_LIGHTS]; uniform vec4 u_light_col[MAX_LIGHTS];
+uniform vec4 u_spots[MAX_SPOTS]; uniform vec4 u_spot_col[MAX_SPOTS];
+uniform vec4 u_console_off[3];
+in vec2 v_ndc; out vec4 out_color;
+
+/** \`Hit\` is the first surface found along a ray chord: distance s along the chord, material, structure (-1 for the ground), entry face and grid position. */
+struct Hit { float s; int mat; int k; int axis; float sgn; vec3 g; ivec3 cell; };
+
+/**
+ * \`dot_minkowski\` returns <a, b> = a.xyz·b.xyz - a.w b.w.
+ * @param a A 4-vector.
+ * @param b A 4-vector.
+ * @return The product.
+ */
+float dot_minkowski(vec4 a, vec4 b) { return dot(a.xyz, b.xyz) - a.w * b.w; }
+
+/**
+ * \`get_geodesic_point\` returns cosh(s) x + sinh(s) v, the point s along the geodesic from x with unit tangent v.
+ * @param x The start.
+ * @param v The unit tangent.
+ * @param s The distance (curvature units).
+ * @return The point.
+ */
+vec4 get_geodesic_point(vec4 x, vec4 v, float s) { return cosh(s) * x + sinh(s) * v; }
+
+/**
+ * \`get_geodesic_tangent\` returns sinh(s) x + cosh(s) v, the unit tangent s along the geodesic.
+ * @param x The start.
+ * @param v The unit tangent.
+ * @param s The distance (curvature units).
+ * @return The tangent.
+ */
+vec4 get_geodesic_tangent(vec4 x, vec4 v, float s) { return sinh(s) * x + cosh(s) * v; }
+
+/**
+ * \`normalize_tangent\` projects v onto the tangent space at x and scales it to unit length.
+ * @param x The point.
+ * @param v The vector.
+ * @return The unit tangent.
+ */
+vec4 normalize_tangent(vec4 x, vec4 v) { v += dot_minkowski(v, x) * x; return v * inversesqrt(max(dot_minkowski(v, v), TINY)); }
+
+/**
+ * \`clamp_atanh\` is atanh with its argument kept inside (-1, 1).
+ * @param t The argument.
+ * @return atanh(t).
+ */
+float clamp_atanh(float t) { return atanh(clamp(t, -LAMBDA_LIMIT, LAMBDA_LIMIT)); }
+
+/**
+ * \`measure_gap\` returns the distance between two nearby points from their chord, accurate for tiny distances.
+ * @param a A point.
+ * @param b A point.
+ * @return The distance (curvature units).
+ */
+float measure_gap(vec4 a, vec4 b) { vec4 d = a - b; return 2.0 * asinh(0.5 * sqrt(max(dot_minkowski(d, d), 0.0))); }
+
+/**
+ * \`transport_from_centre\` parallel-transports a direction at the level's centre e_w to the point x along the geodesic between them.
+ * @param d The direction at the centre (spatial unit vector).
+ * @param x The point.
+ * @return The transported unit tangent at x.
+ */
+vec4 transport_from_centre(vec3 d, vec4 x) { return vec4(d, 0.0) + dot(x.xyz, d) / (1.0 + x.w) * (vec4(0.0, 0.0, 0.0, 1.0) + x); }
+
+/**
+ * \`hash_3d\` returns a pseudo-random number in [0, 1) for a 3D point.
+ * @param p The point.
+ * @return The number.
+ */
+float hash_3d(vec3 p) { return fract(sin(dot(p, HASH_DIRECTION)) * HASH_SCALE); }
+
+/**
+ * \`sample_noise_3d\` is smooth value noise.
+ * @param p The point.
+ * @return Noise in [0, 1].
+ */
+float sample_noise_3d(vec3 p) {
+  vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash_3d(i), hash_3d(i + vec3(1, 0, 0)), f.x), mix(hash_3d(i + vec3(0, 1, 0)), hash_3d(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash_3d(i + vec3(0, 0, 1)), hash_3d(i + vec3(1, 0, 1)), f.x), mix(hash_3d(i + vec3(0, 1, 1)), hash_3d(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+
+/**
+ * \`sample_fbm_3d\` sums octaves of value noise.
+ * @param p The point.
+ * @return Noise in about [0, 1].
+ */
+float sample_fbm_3d(vec3 p) { float sum = 0.0, amplitude = 0.5; for (int i = 0; i < FBM_OCTAVES; i++) { sum += amplitude * sample_noise_3d(p); p *= FBM_LACUNARITY; amplitude *= 0.5; } return sum; }
+
+/**
+ * \`fetch_struct\` reads one texel of a structure's record (0-3: rows of its inverse frame, 4: bounding centre, 5: cosh of bounding radius and grid offset, 6: atlas position, 7: grid size).
+ * @param k The structure.
+ * @param texel The texel.
+ * @return The texel.
+ */
+vec4 fetch_struct(int k, int texel) { return texelFetch(u_structs, ivec2(texel, k), 0); }
+
+/**
+ * \`trace_structure\` finds where a geodesic chord first enters a solid block of structure k, by a voxel DDA along the chord's straight line in the structure's Klein coordinates (taken at the chord's closest approach for precision).
+ * @param k The structure.
+ * @param x The chord's start.
+ * @param v Its unit tangent.
+ * @param s_min Where to start looking (curvature units).
+ * @param is_shadow True for shadow rays (glass casts no shadow).
+ * @param hit In: hit.s limits the search. Out: the hit, if nearer.
+ * @param glass_s Out: the nearest glass entry, if nearer.
+ */
+void trace_structure(int k, vec4 x, vec4 v, float s_min, bool is_shadow, inout Hit hit, inout float glass_s) {
+  vec4 c = fetch_struct(k, 4), info = fetch_struct(k, 5);
+  float a = -dot_minkowski(x, c), b = dot_minkowski(v, c), closest_sq = a * a - b * b;
+  if (closest_sq >= info.x * info.x) return;
+  float s_star = clamp_atanh(b / a), half_window = acosh(info.x * inversesqrt(max(closest_sq, 1.0)));
+  float s_lo = max(s_min, s_star - half_window), s_hi = min(hit.s, s_star + half_window);
+  if (s_lo >= s_hi) return;
+  vec4 xs = get_geodesic_point(x, v, s_star), vs = get_geodesic_tangent(x, v, s_star);
+  vec4 r0 = fetch_struct(k, 0), r1 = fetch_struct(k, 1), r2 = fetch_struct(k, 2), r3 = fetch_struct(k, 3);
+  vec4 p = vec4(dot(r0, xs), dot(r1, xs), dot(r2, xs), dot(r3, xs)), t = vec4(dot(r0, vs), dot(r1, vs), dot(r2, vs), dot(r3, vs));
+  float lam_lo = tanh(s_lo - s_star), lam_hi = tanh(s_hi - s_star);
+  float mu_lo = lam_lo / (p.w * (p.w + lam_lo * t.w)), mu_hi = lam_hi / (p.w * (p.w + lam_hi * t.w));
+  vec3 g0 = p.xyz / p.w * u_R + info.yzw, d = (t.xyz * p.w - p.xyz * t.w) * u_R;
+  d = mix(d, vec3(TINY), lessThan(abs(d), vec3(TINY)));
+  vec3 inv_d = 1.0 / d, size = fetch_struct(k, 7).xyz;
+  vec3 m0 = -g0 * inv_d, m1 = (size - g0) * inv_d, m_near = min(m0, m1), m_far = max(m0, m1);
+  float mu_in = max(max(m_near.x, m_near.y), m_near.z);
+  int axis = mu_in == m_near.x ? 0 : (mu_in == m_near.y ? 1 : 2);
+  if (mu_lo > mu_in) { mu_in = mu_lo; axis = -1; }
+  float mu_out = min(min(min(m_far.x, m_far.y), m_far.z), mu_hi);
+  if (mu_in >= mu_out) return;
+  ivec3 atlas = ivec3(fetch_struct(k, 6).xyz), dims = ivec3(size);
+  ivec3 step_dir = ivec3(sign(d));
+  ivec3 cell = clamp(ivec3(floor(g0 + d * mu_in + sign(d) * DDA_NUDGE)), ivec3(0), dims - 1);
+  vec3 mu_next = (vec3(cell) + step(vec3(0.0), d) - g0) * inv_d, mu_delta = abs(inv_d);
+  float mu = mu_in;
+  bool in_glass = false;
+  for (int i = 0; i < MAX_DDA_STEPS; i++) {
+    int m = int(texelFetch(u_atlas, atlas + cell, 0).r * 255.0 + 0.5);
+    if (m != 0) {
+      float lam = mu * p.w * p.w / (1.0 - mu * p.w * t.w), s_hit = s_star + clamp_atanh(lam);
+      if (m == MAT_GLASS && !is_shadow) { if (!in_glass) glass_s = min(glass_s, s_hit); in_glass = true; }
+      else if (m != MAT_GLASS) {
+        if (s_hit < hit.s) { hit.s = s_hit; hit.mat = m; hit.k = k; hit.axis = axis; hit.sgn = axis >= 0 ? -float(step_dir[axis]) : 0.0; hit.g = g0 + d * mu; hit.cell = cell; }
+        return;
+      }
+    } else in_glass = false;
+    if (mu_next.x < mu_next.y && mu_next.x < mu_next.z) { axis = 0; mu = mu_next.x; cell.x += step_dir.x; mu_next.x += mu_delta.x; }
+    else if (mu_next.y < mu_next.z) { axis = 1; mu = mu_next.y; cell.y += step_dir.y; mu_next.y += mu_delta.y; }
+    else { axis = 2; mu = mu_next.z; cell.z += step_dir.z; mu_next.z += mu_delta.z; }
+    if (mu > mu_out || any(lessThan(cell, ivec3(0))) || any(greaterThanEqual(cell, dims))) return;
+  }
+}
+
+/**
+ * \`trace_ground\` intersects a chord with the ground plane y = 0 (a single plane test: y is cosh(s) x.y + sinh(s) v.y).
+ * @param x The chord's start.
+ * @param v Its unit tangent.
+ * @param hit In: hit.s limits the search. Out: the ground hit, if nearer.
+ */
+void trace_ground(vec4 x, vec4 v, inout Hit hit) {
+  if (x.y < 0.0 || v.y >= 0.0) return;
+  float lam = x.y / -v.y;
+  if (lam >= LAMBDA_LIMIT) return;
+  float s = atanh(lam);
+  if (s < hit.s) { hit.s = s; hit.mat = MAT_GROUND; hit.k = -1; }
+}
+
+/**
+ * \`trace_scene\` finds the first surface along a chord: the ground and either every structure or one warp object's list.
+ * @param x The chord's start.
+ * @param v Its unit tangent.
+ * @param warp -1 for every structure, or the warp object whose list to test.
+ * @param hit In: hit.s is the chord's length. Out: the hit.
+ * @param glass_s Out: the nearest glass entry.
+ */
+void trace_scene(vec4 x, vec4 v, int warp, inout Hit hit, inout float glass_s) {
+  trace_ground(x, v, hit);
+  if (warp < 0) {
+    for (int k = 0; k < MAX_STRUCTS; k++) { if (k >= u_struct_count) break; trace_structure(k, x, v, 0.0, false, hit, glass_s); }
+  } else {
+    for (int j = 0; j < WARP_LIST_LENGTH; j++) {
+      int k = u_warp_list[warp * WARP_LIST_VEC4S + j / 4][j % 4];
+      if (k < 0) break;
+      trace_structure(k, x, v, 0.0, false, hit, glass_s);
+    }
+  }
+}
+
+/**
+ * \`trace_shadow\` returns 1 if nothing blocks the straight path from x toward the sun within SHADOW_S, else 0 (warp objects don't bend shadow rays).
+ * @param x The surface point, already lifted off the surface.
+ * @param l The unit tangent toward the sun.
+ * @return The sun's visibility.
+ */
+float trace_shadow(vec4 x, vec4 l) {
+  Hit h; h.s = SHADOW_S; h.mat = 0; float glass_s = NO_HIT_S;
+  for (int k = 0; k < MAX_STRUCTS; k++) {
+    if (k >= u_struct_count) break;
+    trace_structure(k, x, l, 0.0, true, h, glass_s);
+    if (h.mat != 0) return SHADOW_FLOOR;
+  }
+  return 1.0;
+}
+
+/**
+ * \`get_index_slope\` returns d ln n / dρ of warp object w's refractive index (isotropic Schwarzschild for a black hole, the black hole foil for a wormhole mouth).
+ * @param w The warp object.
+ * @param rho The distance to its centre (curvature units).
+ * @return The slope.
+ */
+float get_index_slope(int w, float rho) {
+  vec4 prm = u_warp_p[w];
+  if (prm.x < 0.5) { float m = prm.y, q = m / rho; return -m / (rho * rho) * (3.0 / (1.0 + q) + 1.0 / max(1.0 - q, HORIZON_GUARD)); }
+  float pt = prm.y, ir = 1.0 / rho, psi = 1.0 + pt * ir, ir2 = ir / (psi * psi), rs = 4.0 * pt;
+  return -2.0 * pt * ir * ir / psi - rs * psi * (1.0 - pt * ir) * ir2 * ir2 / (2.0 * (1.0 + FOIL_LAMBDA_SQ - rs * ir2));
+}
+
+/**
+ * \`get_log_index\` returns ln n of warp object w's refractive index.
+ * @param w The warp object.
+ * @param rho The distance to its centre (curvature units).
+ * @return ln n.
+ */
+float get_log_index(int w, float rho) {
+  vec4 prm = u_warp_p[w];
+  if (prm.x < 0.5) { float q = prm.y / rho; return 3.0 * log(1.0 + q) - log(max(1.0 - q, HORIZON_GUARD)); }
+  float pt = prm.y, psi = 1.0 + pt / rho, r = rho * psi * psi;
+  return 2.0 * log(psi) - 0.5 * log((1.0 - 4.0 * pt / r + FOIL_LAMBDA_SQ) / (1.0 + FOIL_LAMBDA_SQ));
+}
+
+/**
+ * \`compute_bend\` returns the part of ∇ln n across v at x (the rate the ray turns), where ln n is tapered by w = (1 - (ρ/reach)²)², so bending fades smoothly to zero at the reach.
+ * @param w The warp object.
+ * @param x The point.
+ * @param v The unit tangent.
+ * @param rho Out: the distance to the centre.
+ * @return The bending, a tangent vector at x.
+ */
+vec4 compute_bend(int w, vec4 x, vec4 v, out float rho) {
+  vec4 p = u_warp_inv[w] * x;
+  rho = asinh(length(p.xyz));
+  float ch = cosh(rho), sh = max(sinh(rho), TINY);
+  float f = rho / u_warp_p[w].z, window = (1.0 - f * f) * (1.0 - f * f), window_slope = -4.0 * f * (1.0 - f * f) / u_warp_p[w].z;
+  float slope = f >= 1.0 ? 0.0 : get_index_slope(w, rho) * window + get_log_index(w, rho) * window_slope;
+  vec4 g = slope * (ch * x - u_warp_c[w]) / sh;
+  return g - dot_minkowski(g, v) * v;
+}
+
+/**
+ * \`cross_throat\` moves a ray inside mouth w's throat sphere to the partner mouth: log map at the mouth, inversion in the throat sphere, the gluing map diag(1, 1, -1), exp map at the partner.
+ * @param w The mouth.
+ * @param x In: the point. Out: the point at the partner.
+ * @param v In: the tangent. Out: the tangent at the partner.
+ */
+void cross_throat(int w, inout vec4 x, inout vec4 v) {
+  vec4 prm = u_warp_p[w], p = u_warp_inv[w] * x, t = u_warp_inv[w] * v;
+  int partner = int(prm.w + 0.5);
+  float len = max(length(p.xyz), TINY), rho_out = prm.y * prm.y / asinh(len);
+  vec3 n = p.xyz / len, flip = vec3(1.0, 1.0, -1.0);
+  vec3 tt = t.xyz - t.w / (1.0 + p.w) * p.xyz;
+  tt = (tt - 2.0 * dot(tt, n) * n) * flip;
+  vec4 q = vec4(n * flip * sinh(rho_out), cosh(rho_out));
+  float g = dot(q.xyz, tt) / (1.0 + q.w);
+  x = u_warp_fwd[partner] * q;
+  v = normalize_tangent(x, u_warp_fwd[partner] * vec4(tt + g * q.xyz, g * (1.0 + q.w)));
+}
+
+/**
+ * \`gather_lights\` sums the lamps' light at a surface point (falloff with hyperbolic distance, wrap-around Lambert).
+ * @param x The point.
+ * @param n The unit normal at x.
+ * @return The light.
+ */
+vec3 gather_lights(vec4 x, vec4 n) {
+  vec3 sum = vec3(0.0);
+  for (int i = 0; i < MAX_LIGHTS; i++) {
+    if (i >= u_light_count) break;
+    vec4 lx = u_light_x[i];
+    float d_m = measure_gap(lx, x) * u_R, radius_m = u_light_col[i].w;
+    if (d_m > LIGHT_CUTOFF_FRAC * radius_m) continue;
+    vec4 toward = lx + dot_minkowski(lx, x) * x;
+    float facing = dot_minkowski(n, toward) * inversesqrt(max(dot_minkowski(toward, toward), TINY));
+    float falloff = 1.0 / (1.0 + (d_m / radius_m) * (d_m / radius_m)) * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
+    sum += u_light_col[i].rgb * falloff * (LIGHT_WRAP + (1.0 - LIGHT_WRAP) * max(facing, 0.0));
+  }
+  return sum;
+}
+
+/**
+ * \`light_surface\` lights a surface point: the low sun (lunar-Lambert reflectance, a mix of Lambert and Lommel-Seeliger 2μ0/(μ0+μ), with a shadow ray), earthshine from the planet, the lamps and laser spots.
+ * @param albedo The surface colour.
+ * @param x The point.
+ * @param n The unit normal at x.
+ * @param v The ray's direction arriving at x.
+ * @return The lit colour.
+ */
+vec3 light_surface(vec3 albedo, vec4 x, vec4 n, vec4 v) {
+  vec4 l = transport_from_centre(u_sun, x);
+  float mu0 = dot_minkowski(n, l), mu = max(-dot_minkowski(n, v), 0.0), sun = 0.0;
+  if (mu0 > 0.0) sun = mix(mu0, 2.0 * mu0 / (mu0 + mu), LUNAR_LAMBERT_FRAC) * trace_shadow(get_geodesic_point(x, n, SURFACE_OFFSET_S), l);
+  float earth = max(dot_minkowski(n, transport_from_centre(u_planet, x)), 0.0);
+  vec3 light = vec3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR + SUN_INTENSITY * sun * SUN_COLOR + gather_lights(x, n);
+  vec3 color = albedo * light;
+  for (int i = 0; i < MAX_SPOTS; i++) {
+    if (i >= u_spot_count) break;
+    float d_m = measure_gap(u_spots[i], x) * u_R;
+    color += u_spot_col[i].rgb * u_spot_col[i].a * exp(-d_m * d_m / (SPOT_RADIUS_M * SPOT_RADIUS_M));
+  }
+  return color;
+}
+
+/**
+ * \`detail_fraction\` returns how much per-block detail to keep at a distance: 1 near, fading to 0 where a pixel covers about a block.
+ * @param dist_s The distance travelled (curvature units).
+ * @return The fraction.
+ */
+float detail_fraction(float dist_s) { return 1.0 - smoothstep(DETAIL_FADE_START_FRAC * DETAIL_FOOTPRINT_M, DETAIL_FOOTPRINT_M, u_pix * u_R * sinh(min(dist_s, FAR_S))); }
+
+/**
+ * \`shade_ground\` shades the ground plane at x: the {4,5} tiling folded into the central tile gives block cells (grid lines are geodesics), and cell centres decide the regolith, crater floor, ejecta, craterlets, zone tints and the level boundary.
+ * @param x The ground point.
+ * @param v The ray's direction there.
+ * @param dist_s The distance travelled to it.
+ * @return The colour.
+ */
+vec3 shade_ground(vec4 x, vec4 v, float dist_s) {
+  float detail = detail_fraction(dist_s);
+  vec3 y = vec3(x.x, x.z, x.w);
+  mat3 N = mat3(1.0);
+  if (dist_s < GROUND_DETAIL_S) {
+    for (int i = 0; i < MAX_FOLDS; i++) {
+      float kx = y.x / y.z, kz = y.y / y.z, ex = abs(kx) - TILE_KLEIN_HALF, ez = abs(kz) - TILE_KLEIN_HALF;
+      if (max(ex, ez) <= 0.0) break;
+      vec3 n = (ex > ez ? vec3(sign(kx), 0.0, TILE_KLEIN_HALF) : vec3(0.0, sign(kz), TILE_KLEIN_HALF)) * TILE_NORMAL_SCALE;
+      vec3 jn = vec3(n.xy, -n.z);
+      y -= 2.0 * dot(y, jn) * n;
+      N -= 2.0 * outerProduct(N * n, jn);
+    }
+  }
+  vec2 a = vec2(clamp_atanh(y.x / y.z), clamp_atanh(y.y / y.z)) / CELL_S;
+  vec2 cell = floor(a), uv = a - cell, kc = tanh((cell + 0.5) * CELL_S);
+  vec3 centre = N * (vec3(kc, 1.0) * inversesqrt(max(1.0 - dot(kc, kc), TINY)));
+  if (dist_s >= GROUND_DETAIL_S) centre = y;
+  float u_m = -u_R * clamp_atanh(centre.y / centre.z), v_m = u_R * asinh(centre.x), r_m = acosh(max(centre.z, 1.0)) * u_R;
+  float h = hash_3d(floor(centre * CELL_HASH_SCALE) * HASH_SHRINK);
+  vec3 albedo = PALETTE[MAT_REGOLITH] * (MARIA_BASE + MARIA_CONTRAST * sample_fbm_3d(vec3(u_m, v_m, 0.0) * MARIA_PER_M));
+  if (r_m < CRATER_FLOOR_RADIUS_M) albedo = mix(PALETTE[MAT_DARK_REGOLITH], PALETTE[MAT_BASALT], FLOOR_RING_DARKEN * step(0.5, fract(r_m / FLOOR_RING_M)));
+  else if (r_m < EJECTA_OUTER_M) {
+    float theta = atan(centre.x, -centre.y);
+    float ray = smoothstep(EJECTA_RAY_EDGES.x, EJECTA_RAY_EDGES.y, sample_noise_3d(vec3(theta * EJECTA_RAY_COUNT, 0.0, 1.0))) * (1.0 - smoothstep(EJECTA_INNER_M, EJECTA_OUTER_M, r_m));
+    albedo = mix(albedo, EJECTA_COLOR, EJECTA_STRENGTH * ray);
+  }
+  if (dist_s < GROUND_DETAIL_S && r_m > CRATER_RIM_RADIUS_M + CRATERLET_CLEARANCE_M) {
+    vec2 local = (cell + 0.5) * CELL_S, best = vec2(NO_HIT_S, 0.0);
+    for (int i = 0; i < 9; i++) {
+      vec2 cand = (vec2(float(i % 3), float(i / 3)) - 1.0) * TILE_INRADIUS_S * CRATERLET_SPACING_FRAC;
+      float d_m = length(local - cand) * u_R;
+      if (d_m > CRATERLET_MAX_M) continue;
+      vec2 kk = tanh(cand);
+      vec3 cg = N * (vec3(kk, 1.0) * inversesqrt(1.0 - dot(kk, kk)));
+      float hc = hash_3d(floor(cg * CRATERLET_HASH_SCALE) * HASH_SHRINK);
+      float radius_m = CRATERLET_MAX_M * (CRATERLET_MIN_FRAC + (1.0 - CRATERLET_MIN_FRAC) * fract(hc * CRATERLET_SIZE_SEED));
+      if (hc < CRATERLET_CHANCE && d_m < radius_m) best = vec2(d_m / radius_m, 1.0);
+    }
+    if (best.y > 0.5) albedo = best.x > CRATERLET_RIM_FRAC ? albedo * CRATERLET_RIM_BRIGHTEN : albedo * (CRATERLET_FLOOR_DARKEN + CRATERLET_FLOOR_SLOPE * best.x);
+  }
+  if (abs(u_m) > ZONE_EDGE_U_M) albedo *= mix(vec3(1.0), (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_TINT_GAIN, ZONE_TINT_FRAC);
+  vec3 glow = vec3(0.0);
+  if (abs(abs(u_m) - ZONE_EDGE_U_M) < ZONE_STRIP_M && abs(v_m) < BOUNDARY_V_M) glow = (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
+  float e = (u_m / BOUNDARY_U_M) * (u_m / BOUNDARY_U_M) + (v_m / BOUNDARY_V_M) * (v_m / BOUNDARY_V_M);
+  if (e > 1.0) albedo *= OUTSIDE_DARKEN;
+  else if (e > 1.0 - BOUNDARY_STRIP_FRAC) albedo = mod(floor(u_m / HAZARD_STRIPE_M) + floor(v_m / HAZARD_STRIPE_M), 2.0) < 0.5 ? PALETTE[MAT_HAZARD] : HAZARD_DARK_COLOR;
+  float texel = hash_3d(vec3(floor(uv * SUBTEXELS), h * CELL_SEED));
+  albedo *= 1.0 + detail * (BLOCK_NOISE * (h - 0.5) + TEXEL_NOISE * (texel - 0.5));
+  vec2 edge = min(uv, 1.0 - uv);
+  albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * GROUND_EDGE_FRAC);
+  return light_surface(albedo, x, vec4(0.0, 1.0, 0.0, 0.0), v) + glow;
+}
+
+/**
+ * \`shade_block\` shades a block face hit at x: its material, per-block and per-texel noise, darkened edges, and lighting with the face's true normal (the geodesic plane's normal, moved to global coordinates).
+ * @param h The hit.
+ * @param x The hit point.
+ * @param v The ray's direction there.
+ * @param dist_s The distance travelled to it.
+ * @return The colour.
+ */
+vec3 shade_block(Hit h, vec4 x, vec4 v, float dist_s) {
+  vec4 r0 = fetch_struct(h.k, 0), r1 = fetch_struct(h.k, 1), r2 = fetch_struct(h.k, 2), r3 = fetch_struct(h.k, 3);
+  vec4 p = vec4(dot(r0, x), dot(r1, x), dot(r2, x), dot(r3, x));
+  int axis = h.axis < 0 ? 1 : h.axis;
+  float c = p[axis] / p.w;
+  vec4 n_local = vec4(0.0); n_local[axis] = 1.0; n_local.w = c;
+  n_local *= (h.axis < 0 ? 1.0 : h.sgn) * inversesqrt(max(1.0 - c * c, TINY));
+  vec4 n = r0 * n_local.x + r1 * n_local.y + r2 * n_local.z - r3 * n_local.w;
+  n.w = -n.w;
+  vec2 uv = fract(vec2(h.g[(axis + 1) % 3], h.g[(axis + 2) % 3]));
+  int m = h.mat;
+  vec3 albedo = PALETTE[m];
+  float glow = GLOW[m], block = hash_3d(vec3(h.cell) + float(h.k) * STRUCT_SEED), detail = detail_fraction(dist_s);
+  float stripe = step(0.5, fract((uv.x + uv.y) * STRIPES_PER_BLOCK));
+  if (m >= MAT_CONSOLE_FIRST && m < MAT_CONSOLE_FIRST + CONSOLE_COUNT) {
+    int i = m - MAT_CONSOLE_FIRST;
+    if (u_console_off[i / 4][i % 4] > 0.5) { albedo = CONSOLE_OFF_COLOR; glow = 0.0; }
+    else albedo *= 1.0 - CONSOLE_STRIPE_DARKEN * (1.0 - stripe);
+  }
+  if (m == MAT_SOLAR) albedo = mix(albedo, SOLAR_GRID_COLOR, step(SOLAR_GRID_EDGE, max(fract(uv.x * SOLAR_CELLS.x), fract(uv.y * SOLAR_CELLS.y))));
+  if (m == MAT_HAZARD) albedo = mix(albedo, HAZARD_STRIPE_COLOR, stripe);
+  if (m == MAT_GOLD_FOIL) albedo *= 1.0 - FOIL_VARIATION * (0.5 - hash_3d(vec3(floor(uv * FOIL_CRINKLES), block)));
+  if (m == MAT_HULL || m == MAT_PAD) albedo *= 1.0 - PANEL_SEAM_DARKEN * step(PANEL_SEAM_EDGE, max(fract(uv.x * PANEL_SEAMS), fract(uv.y * PANEL_SEAMS)));
+  float texel = hash_3d(vec3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
+  albedo *= 1.0 + detail * (BLOCK_NOISE * (block - 0.5) + TEXEL_NOISE * (texel - 0.5));
+  vec2 edge = min(uv, 1.0 - uv);
+  albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * (1.0 - glow));
+  if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM * smoothstep(0.0, GLOW_RIM, min(edge.x, edge.y)));
+  return light_surface(albedo, x, n, v);
+}
+
+/**
+ * \`sample_star_layer\` draws one layer of stars from a grid on the cube around the sky.
+ * @param d The sky direction.
+ * @param grid Cells per cube-face half-width.
+ * @param density The fraction of cells with a star.
+ * @return The star brightness.
+ */
+float sample_star_layer(vec3 d, float grid, float density) {
+  vec3 ad = abs(d);
+  vec2 uv; float face;
+  if (ad.x >= ad.y && ad.x >= ad.z) { uv = d.yz / ad.x; face = d.x > 0.0 ? 0.0 : 1.0; }
+  else if (ad.y >= ad.z) { uv = d.xz / ad.y; face = d.y > 0.0 ? 2.0 : 3.0; }
+  else { uv = d.xy / ad.z; face = d.z > 0.0 ? 4.0 : 5.0; }
+  vec2 cell = floor(uv * grid);
+  float h = hash_3d(vec3(cell, face + grid));
+  if (h > density) return 0.0;
+  vec2 star = (cell + 0.5 * (1.0 - STAR_JITTER) + STAR_JITTER * vec2(hash_3d(vec3(cell, face + STAR_SEEDS.x)), hash_3d(vec3(cell, face + STAR_SEEDS.y)))) / grid;
+  float angle = length(uv - star) / (1.0 + dot(uv, uv)), radius = u_pix * STAR_PIXELS;
+  return (STAR_FAINT + STAR_BRIGHT * pow(h / density, STAR_BRIGHTNESS_POWER)) * exp(-angle * angle / (radius * radius));
+}
+
+/**
+ * \`sample_sky\` returns the sky seen along a ray that escapes: stars, the Milky Way, the sun and the planet. The sky is fixed to the level centre's frame: the ray's direction is carried back to the camera and then to the centre by parallel transport.
+ * @param x The ray's last point.
+ * @param v Its direction there.
+ * @return The colour.
+ */
+vec3 sample_sky(vec4 x, vec4 v) {
+  vec4 cam = u_cam[3];
+  vec4 w = v + dot_minkowski(cam, v) / (1.0 - dot_minkowski(x, cam)) * (x + cam);
+  vec3 d = normalize(w.xyz - w.w / (1.0 + cam.w) * cam.xyz);
+  float sd = dot(d, u_sun);
+  vec3 sun = SUN_COLOR * (smoothstep(SUN_COS_OUTER, SUN_COS_INNER, sd) * SUN_DISC_BRIGHTNESS + pow(max(sd, 0.0), SUN_GLARE_POWER) * SUN_GLARE + pow(max(sd, 0.0), SUN_HALO_POWER) * SUN_HALO);
+  vec2 q = vec2(dot(d, u_planet_e1), dot(d, u_planet_e2)) / sin(PLANET_RADIUS_RAD);
+  float r2 = dot(q, q);
+  if (dot(d, u_planet) > 0.0 && r2 < 1.0) {
+    vec3 nrm = q.x * u_planet_e1 + q.y * u_planet_e2 - sqrt(1.0 - r2) * u_planet;
+    float lit = dot(nrm, u_sun), land = smoothstep(LAND_EDGES.x, LAND_EDGES.y, sample_fbm_3d(nrm * LAND_SCALE + LAND_OFFSET)), cloud = smoothstep(CLOUD_EDGES.x, CLOUD_EDGES.y, sample_fbm_3d(nrm * CLOUD_SCALE + CLOUD_OFFSET));
+    vec3 surface = mix(mix(OCEAN_COLOR, LAND_COLOR, land), CLOUD_COLOR, cloud);
+    vec3 color = surface * (max(lit, 0.0) * PLANET_SUNLIT + PLANET_NIGHT) + ATMOSPHERE_COLOR * pow(r2, LIMB_POWER) * max(lit + LIMB_WRAP, 0.0) * LIMB_GLOW;
+    return color + sun;
+  }
+  vec3 color = vec3(sample_star_layer(d, STAR_GRID_COARSE, STAR_DENSITY_COARSE) + FINE_STAR_BRIGHTNESS * sample_star_layer(d, STAR_GRID_FINE, STAR_DENSITY_FINE));
+  float band = exp(-pow(dot(d, normalize(MILKY_WAY_NORMAL)) / MILKY_WAY_WIDTH, 2.0));
+  color += MILKY_WAY_COLOR * band * MILKY_WAY_BRIGHTNESS * sample_fbm_3d(d * MILKY_WAY_DETAIL);
+  if (dot(d, u_planet) > 0.0 && r2 < HALO_RADIUS_SQ) color += ATMOSPHERE_COLOR * HALO_GLOW * (1.0 - smoothstep(1.0, HALO_RADIUS_SQ, r2)) * max(dot(normalize(q.x * u_planet_e1 + q.y * u_planet_e2), u_sun) + HALO_WRAP, 0.0);
+  return color + sun;
+}
+
+/**
+ * \`scan_beams\` adds the glow of laser beam segments near a ray chord: closest approach of the chord to each segment's geodesic in closed form (cosh² of the distance is K0 + K1 cosh 2s + K2 sinh 2s), then a Gaussian in the distance, widened to at least a pixel.
+ * @param x The chord's start.
+ * @param v Its unit tangent.
+ * @param s_end The chord's length.
+ * @param travelled The distance travelled before the chord.
+ * @param core In/out: the brightest beam core so far.
+ * @param halo In/out: the brightest halo so far.
+ * @param color In/out: the colour of the brightest halo.
+ */
+void scan_beams(vec4 x, vec4 v, float s_end, float travelled, inout float core, inout float halo, inout vec3 color) {
+  for (int i = 0; i < MAX_BEAM_SEGMENTS; i++) {
+    if (i >= u_beam_count) break;
+    vec4 a = texelFetch(u_beams, ivec2(3 * i, 0), 0), b = texelFetch(u_beams, ivec2(3 * i + 1, 0), 0), info = texelFetch(u_beams, ivec2(3 * i + 2, 0), 0);
+    float half_len = 0.5 * info.x;
+    vec4 mid = get_geodesic_point(a, b, half_len);
+    float am = -dot_minkowski(x, mid), bm = dot_minkowski(v, mid), reach = half_len + BEAM_REACH * max(BEAM_RADIUS_M, u_pix * u_R * sinh(min(travelled + s_end, FAR_S))) / u_R;
+    if (am * am - bm * bm > cosh(reach) * cosh(reach)) continue;
+    float al = dot_minkowski(x, a), be = dot_minkowski(v, a), ga = dot_minkowski(x, b), et = dot_minkowski(v, b);
+    float k1 = 0.5 * ((al * al - ga * ga) + (be * be - et * et)), k2 = al * be - ga * et;
+    float s_c = k1 > abs(k2) ? 0.5 * clamp_atanh(-k2 / k1) : (k2 < 0.0 ? s_end : 0.0);
+    s_c = clamp(s_c, 0.0, min(s_end, FAR_S));
+    vec4 xc = get_geodesic_point(x, v, s_c);
+    float sigma = clamp(clamp_atanh(dot_minkowski(xc, b) / -dot_minkowski(xc, a)), 0.0, info.x);
+    float d_m = measure_gap(xc, get_geodesic_point(a, b, sigma)) * u_R;
+    float width_m = max(BEAM_RADIUS_M, u_pix * u_R * sinh(min(travelled + s_c, FAR_S)));
+    float q = d_m * d_m / (width_m * width_m);
+    core = max(core, info.z * exp(-q));
+    float hl = info.z * exp(-q / BEAM_REACH);
+    if (hl > halo) { halo = hl; color = info.w > 0.5 ? RED_COLOR : BLUE_COLOR; }
+  }
+}
+
+/**
+ * \`main\` traces one pixel's ray backwards from the eye: straight geodesics between warp objects (one chord each), bent steps inside their reach, through wormhole throats, until a surface, the sky or a horizon.
+ */
+void main() {
+  vec3 d_cam = normalize(vec3(v_ndc.x * u_tan_half * u_aspect, v_ndc.y * u_tan_half, -1.0));
+  vec4 x = u_cam[3], v = u_cam[0] * d_cam.x + u_cam[1] * d_cam.y + u_cam[2] * d_cam.z;
+  int inside = -1;
+  for (int w = 0; w < MAX_WARPS; w++) { if (w >= u_warp_count) break; if (-dot_minkowski(x, u_warp_c[w]) < cosh(u_warp_p[w].z)) inside = w; }
+  float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0;
+  vec3 beam_color = vec3(0.0);
+  Hit hit; hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = vec3(0.0); hit.cell = ivec3(0);
+  int outcome = OUTCOME_LOST;
+  vec4 hit_x = x, hit_v = v; float hit_travelled = 0.0;
+  for (int it = 0; it < MAX_ITERATIONS; it++) {
+    if (inside < 0) {
+      float s_end = FAR_S; int entering = -1;
+      for (int w = 0; w < MAX_WARPS; w++) {
+        if (w >= u_warp_count) break;
+        float a = -dot_minkowski(x, u_warp_c[w]), b = dot_minkowski(v, u_warp_c[w]), closest_sq = a * a - b * b, reach_cosh = cosh(u_warp_p[w].z);
+        if (b <= 0.0 || closest_sq >= reach_cosh * reach_cosh) continue;
+        float s_in = max(clamp_atanh(b / a) - acosh(reach_cosh * inversesqrt(max(closest_sq, 1.0))), 0.0);
+        if (s_in < s_end) { s_end = s_in; entering = w; }
+      }
+      hit.s = s_end; hit.mat = 0; float glass_s = NO_HIT_S;
+      trace_scene(x, v, -1, hit, glass_s);
+      if (glass_s < hit.s) glass += 1.0;
+      if (u_beam_count > 0) scan_beams(x, v, hit.s, travelled, core, halo, beam_color);
+      if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+      if (entering < 0) { outcome = OUTCOME_SKY; break; }
+      vec4 xn = get_geodesic_point(x, v, s_end); v = get_geodesic_tangent(x, v, s_end); x = xn;
+      travelled += s_end; inside = entering;
+      continue;
+    }
+    float rho;
+    vec4 bend = compute_bend(inside, x, v, rho);
+    float ds = clamp(BEND_STEP_FRAC * rho, MIN_BEND_STEP_S, MAX_BEND_STEP_S);
+    v = normalize_tangent(x, v + bend * (0.5 * ds));
+    hit.s = ds; hit.mat = 0; float glass_s = NO_HIT_S;
+    trace_scene(x, v, inside, hit, glass_s);
+    if (glass_s < hit.s) glass += 1.0;
+    if (u_beam_count > 0) scan_beams(x, v, hit.s, travelled, core, halo, beam_color);
+    if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+    vec4 xn = get_geodesic_point(x, v, ds), vn = get_geodesic_tangent(x, v, ds);
+    x = xn * inversesqrt(-dot_minkowski(xn, xn)); v = normalize_tangent(x, vn); travelled += ds;
+    bend = compute_bend(inside, x, v, rho);
+    v = normalize_tangent(x, v + bend * (0.5 * ds));
+    vec4 prm = u_warp_p[inside];
+    if (prm.x < 0.5 && rho < prm.y * HORIZON_CAPTURE_FRAC) { outcome = OUTCOME_LOST; break; }
+    if (prm.x > 0.5 && rho < prm.y) { cross_throat(inside, x, v); inside = int(prm.w + 0.5); continue; }
+    if (rho > prm.z) inside = -1;
+  }
+  vec3 color = vec3(0.0);
+  if (outcome == OUTCOME_HIT) {
+    vec4 xh = get_geodesic_point(hit_x, hit_v, hit.s), vh = get_geodesic_tangent(hit_x, hit_v, hit.s);
+    color = hit.mat == MAT_GROUND ? shade_ground(xh, vh, hit_travelled + hit.s) : shade_block(hit, xh, vh, hit_travelled + hit.s);
+  } else if (outcome == OUTCOME_SKY) color = sample_sky(x, v);
+  if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + GLASS_SHEEN;
+  color = mix(color, beam_color, clamp(BEAM_HALO_OPACITY * halo, 0.0, 1.0)) + mix(beam_color, vec3(1.0), BEAM_CORE_WHITENESS) * core;
+  color = color / (1.0 + max(color - 1.0, 0.0) * TONEMAP_KNEE);
+  out_color = vec4(clamp(color, 0.0, 1.0), 1.0);
+}`;
+
+const uniforms = {
+  u_atlas: { value: atlas_texture }, u_structs: { value: struct_texture }, u_beams: { value: beam_texture },
+  u_struct_count: { value: structures.length }, u_warp_count: { value: warps.length }, u_light_count: { value: lamps.length },
+  u_beam_count: { value: 0 }, u_spot_count: { value: 0 },
+  u_cam: { value: new THREE.Matrix4() }, u_tan_half: { value: Math.tan(FIELD_OF_VIEW_RAD / 2) }, u_aspect: { value: 1 },
+  u_R: { value: CURVATURE_RADIUS_M }, u_pix: { value: 0.002 },
+  u_warp_c: { value: Array.from({ length: MAX_WARPS }, (_, w) => new THREE.Vector4(...(warps[w] ? warps[w].centre : [0, 0, 0, 1]))) },
+  u_warp_p: { value: Array.from({ length: MAX_WARPS }, (_, w) => warps[w] ? new THREE.Vector4(warps[w].kind, warps[w].size_c, warps[w].reach_c, warps[w].partner) : new THREE.Vector4()) },
+  u_warp_inv: { value: Array.from({ length: MAX_WARPS }, (_, w) => new THREE.Matrix4().fromArray(warps[w] ? Float32Array.from(warps[w].inv) : new Float32Array(16))) },
+  u_warp_fwd: { value: Array.from({ length: MAX_WARPS }, (_, w) => new THREE.Matrix4().fromArray(warps[w] ? Float32Array.from(warps[w].frame) : new Float32Array(16))) },
+  u_warp_list: { value: Int32Array.from({ length: MAX_WARPS * WARP_LIST_LENGTH }, (_, i) => { const w = Math.floor(i / WARP_LIST_LENGTH), j = i % WARP_LIST_LENGTH; return warps[w] && j < warps[w].list.length ? warps[w].list[j] : -1; }) },
+  u_sun: { value: sun_direction }, u_planet: { value: planet_direction }, u_planet_e1: { value: planet_e1 }, u_planet_e2: { value: planet_e2 },
+  u_light_x: { value: Array.from({ length: MAX_LIGHTS }, (_, i) => new THREE.Vector4(...(lamps[i] ? lamps[i].x : [0, 0, 0, 1]))) },
+  u_light_col: { value: Array.from({ length: MAX_LIGHTS }, (_, i) => lamps[i] ? new THREE.Vector4(...lamps[i].color, lamps[i].radius_m) : new THREE.Vector4(0, 0, 0, 1)) },
+  u_spots: { value: Array.from({ length: MAX_SPOTS }, () => new THREE.Vector4(0, 0, 0, 1)) },
+  u_spot_col: { value: Array.from({ length: MAX_SPOTS }, () => new THREE.Vector4()) },
+  u_console_off: { value: Array.from({ length: 3 }, () => new THREE.Vector4()) }
+};
+const material = new THREE.RawShaderMaterial({ uniforms, vertexShader: vertex_shader, fragmentShader: fragment_shader, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material); quad.frustumCulled = false;
+const scene = new THREE.Scene(); scene.add(quad);
+const camera = new THREE.Camera();
+
+const state = {
+  B: make_frame(SPAWNS[BLUE].u_m, SPAWNS[BLUE].v_m, 0), h_m: EYE_HEIGHT_M, vh_m_per_s: 0, pitch_rad: 0, is_on_ground: false,
+  is_flying: false, team: BLUE, energy_frac: 1, beams: [], is_laser_held: false, is_won: false, message: '', message_s: 0,
+  quality: 'auto', pixel_budget: AUTO_PIXEL_BUDGET, view: '', last_shot: null, console_hint: ''
+};
+const keys = {};
+
+/**
+ * `resize` sets the render resolution from the quality setting and updates the projection uniforms.
+ * @return {void}
+ * @example resize();
+ */
+function resize() {
+  const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
+  const scale = state.quality === 'auto' ? Math.min(1, Math.sqrt(state.pixel_budget / (w * h * dpr * dpr))) : QUALITY_SCALES[state.quality];
+  if (scale === undefined) throw new Error(`resize: unknown quality ${state.quality}`);
+  renderer.setPixelRatio(dpr * scale);
+  renderer.setSize(w, h, false);
+  uniforms.u_aspect.value = w / h;
+  const size = new THREE.Vector2(); renderer.getDrawingBufferSize(size);
+  uniforms.u_pix.value = 2 * uniforms.u_tan_half.value / Math.max(1, size.y);
+}
+
+/**
+ * `get_camera_frame` returns the camera's frame: the body frame, lifted to eye height, tilted by the pitch.
+ * @return {Float64Array} Columns right, up, back, eye.
+ * @example const eye = get_column(get_camera_frame(), W);
+ */
+function get_camera_frame() { return multiply_matrices(multiply_matrices(state.B, make_boost(Y, state.h_m / CURVATURE_RADIUS_M)), make_rotation(Z, Y, -state.pitch_rad)); }
+
+/**
+ * `find_nearby_structures` lists the structures whose bounding spheres come within a reach of a point.
+ * @param {Array<number>} x The point.
+ * @param {number} reach_m The reach.
+ * @return {Array<number>} Structure indices.
+ * @example const nearby = find_nearby_structures(foot, NEARBY_REACH_M);
+ */
+function find_nearby_structures(x, reach_m) { const reach = reach_m / CURVATURE_RADIUS_M; return structures.map((_, k) => k).filter(k => -dot_minkowski(x, structures[k].centre) < Math.cosh(structures[k].radius + reach)); }
+
+/**
+ * `get_material_at` returns the block material at a global point (0 for air), looking in the given structures.
+ * @param {Array<number>} x The point.
+ * @param {Array<number>} candidates Structure indices.
+ * @return {number} The material.
+ * @example if (get_material_at(probe, nearby)) blocked = true;
+ */
+function get_material_at(x, candidates) {
+  const R = CURVATURE_RADIUS_M;
+  for (const k of candidates) {
+    const s = structures[k], p = apply_matrix(s.inv, x), cell = [0, 1, 2].map(i => Math.floor(p[i] / p[W] * R + s.off[i]));
+    if (cell.some((c, i) => c < 0 || c >= s.dims[i])) continue;
+    const material = s.cells[cell[0] + s.dims[0] * (cell[1] + s.dims[1] * cell[2])];
+    if (material) return material;
+  }
+  return 0;
+}
+
+/**
+ * `is_outside_boundary` tells whether a point's foot is outside the level's boundary ellipse in Fermi coordinates.
+ * @param {Array<number>} x A point.
+ * @return {boolean} True outside.
+ * @example if (is_outside_boundary(foot)) reject();
+ */
+function is_outside_boundary(x) { const { u_m, v_m } = get_fermi_coordinates(x); return (u_m / BOUNDARY_U_M) ** 2 + (v_m / BOUNDARY_V_M) ** 2 > 1; }
+
+const PROBES_M = [[0, 0.02, 0], [BODY_RADIUS_M, 0.3, 0], [-BODY_RADIUS_M, 0.3, 0], [0, 0.3, BODY_RADIUS_M], [0, 0.3, -BODY_RADIUS_M],
+  [BODY_RADIUS_M, 1.1, 0], [-BODY_RADIUS_M, 1.1, 0], [0, 1.1, BODY_RADIUS_M], [0, 1.1, -BODY_RADIUS_M], [0, EYE_HEIGHT_M + HEAD_CLEARANCE_M, 0]];
+
+/**
+ * `is_body_blocked` tells whether the player's body (a 0.5 m column from the feet to just above the head) overlaps the ground or a block.
+ * @param {Float64Array} B The body frame.
+ * @param {number} h_m The eye height above the ground.
+ * @param {Array<number>} nearby Structures to test.
+ * @return {boolean} True if blocked.
+ * @example if (!is_body_blocked(B, state.h_m, nearby)) state.B = B;
+ */
+function is_body_blocked(B, h_m, nearby) {
+  const R = CURVATURE_RADIUS_M;
+  for (const [dx, dy, dz] of PROBES_M) {
+    const y_m = h_m - EYE_HEIGHT_M + dy;
+    if (y_m < 0) return true;
+    if (get_material_at(apply_matrix(multiply_matrices(B, make_boost(Y, y_m / R)), map_exp([dx, 0, dz])), nearby)) return true;
+  }
+  return false;
+}
+
+/**
+ * `find_standing_height` returns the lowest eye height at which the player's body fits, searching up from the ground (so a player inside a building stands on its floor).
+ * @param {Float64Array} B The body frame.
+ * @return {number} The eye height.
+ * @example state.h_m = find_standing_height(state.B);
+ */
+function find_standing_height(B) {
+  const nearby = find_nearby_structures(get_column(B, W), NEARBY_REACH_M);
+  let h_m = EYE_HEIGHT_M;
+  for (let k = 0; k < STAND_SEARCH_MAX_STEPS && is_body_blocked(B, h_m, nearby); k++) h_m += STAND_SEARCH_STEP_M;
+  return h_m;
+}
+
+/**
+ * `move_optically` moves the eye along a light path near a wormhole mouth (bent like light, through the throat), then rebuilds the body frame and eye height from where it ends, turning the body by the same angle as the path.
+ * @param {Float64Array} B The body frame.
+ * @param {number} h_m The eye height.
+ * @param {Array<number>} dir The walking direction in the body frame (x, z), unit.
+ * @param {number} distance_m How far to move.
+ * @param {number} warp_index The mouth whose reach the eye is in.
+ * @return {{B: Float64Array, h_m: number, crossed: ?string}} The new body frame and eye height, and the mouth crossed.
+ * @example const moved = move_optically(state.B, state.h_m, [0, -1], 0.1, level.mouth_a);
+ */
+function move_optically(B, h_m, dir, distance_m, warp_index) {
+  const R = CURVATURE_RADIUS_M, C0 = multiply_matrices(B, make_boost(Y, h_m / R));
+  let x = get_column(C0, W), t = apply_matrix(C0, [dir[0], 0, dir[1], 0]), left = distance_m / R, inside = warp_index, crossed = null;
+  for (let it = 0; it < LASER_MAX_ITERATIONS && left > 1e-12; it++) {
+    if (inside < 0) { const xn = get_geodesic_point(x, t, left); t = get_geodesic_tangent(x, t, left); x = xn; break; }
+    const warp = warps[inside], ds = Math.min(left, choose_bend_step(compute_bend(warp, x, t).rho)), step = step_bent(warp, x, t, ds);
+    x = step.x; t = step.v; left -= ds;
+    if (warp.kind === KIND_MOUTH && step.rho < warp.size_c) { const out = cross_throat(warp, x, [t]); x = out.x; t = normalize_tangent(x, out.vectors[0]); crossed = warp.name; inside = warp.partner; }
+    else if (step.rho > warp.reach_c) inside = -1;
+  }
+  const cosh_h = Math.sqrt(1 + x[Y] * x[Y]), sinh_h = x[Y], g = [x[X] / cosh_h, 0, x[Z] / cosh_h, x[W] / cosh_h];
+  const up = combine_vectors(g, sinh_h, E_Y, cosh_h), heading = normalize_minkowski(combine_vectors(t, 1, up, -dot_minkowski(t, up)));
+  const F = make_ground_frame(g, heading.map(c => -c));
+  return { B: renormalize_frame(multiply_matrices(F, make_rotation(X, Z, -Math.atan2(dir[0], -dir[1])))), h_m: R * Math.asinh(sinh_h), crossed };
+}
+
+/**
+ * `say` shows a message for a few seconds.
+ * @param {string} text The message.
+ * @return {void}
+ * @example say('Through the wormhole');
+ */
+function say(text) { state.message = text; state.message_s = MESSAGE_S; }
+
+/**
+ * `step_player` moves the player one time step: walking or sprinting (with energy), light-path moves near wormhole mouths, collisions with blocks and the boundary, stepping up single blocks, jumping and moon-like gravity toward the ground, or fly mode.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_player(1 / 60);
+ */
+function step_player(dt) {
+  const R = CURVATURE_RADIUS_M;
+  let forward = 0, side = 0;
+  if (keys.KeyW || keys.ArrowUp) forward += 1; if (keys.KeyS || keys.ArrowDown) forward -= 1; if (keys.KeyD) side += 1; if (keys.KeyA) side -= 1;
+  const len = Math.hypot(forward, side), wants_sprint = (keys.ShiftLeft || keys.ShiftRight) && len > 0;
+  const is_sprinting = wants_sprint && state.energy_frac > 0;
+  state.energy_frac = Math.min(1, Math.max(0, state.energy_frac + (is_sprinting ? -dt / ENERGY_DRAIN_S : dt / ENERGY_REFILL_S)));
+  const speed_m_per_s = state.is_flying ? (is_sprinting ? FLY_SPRINT_SPEED_M_PER_S : FLY_SPEED_M_PER_S) : (is_sprinting ? SPRINT_SPEED_M_PER_S : WALK_SPEED_M_PER_S);
+  const eye = get_column(multiply_matrices(state.B, make_boost(Y, state.h_m / R)), W), warp_index = find_warp_inside(eye);
+  if (warp_index >= 0 && warps[warp_index].kind === KIND_BLACK_HOLE && compute_bend(warps[warp_index], eye, get_column(state.B, X)).rho < 2 * warps[warp_index].size_c) {
+    set_spawn(state.team); say('You fell into the black hole'); return;
+  }
+  let B_new = state.B, h_new = state.h_m, crossed = null;
+  if (len > 0) {
+    const dir = [side / len, -forward / len], distance_m = speed_m_per_s * dt;
+    if (warp_index >= 0 && warps[warp_index].kind === KIND_MOUTH) ({ B: B_new, h_m: h_new, crossed } = move_optically(state.B, state.h_m, dir, distance_m, warp_index));
+    else B_new = renormalize_frame(multiply_matrices(multiply_matrices(state.B, make_boost(Z, dir[1] * distance_m / R)), make_boost(X, dir[0] * distance_m / R)));
+  }
+  if (state.is_flying) {
+    state.B = B_new; state.h_m = h_new;
+    const climb_m_per_s = Math.max(MIN_FLY_CLIMB_M_PER_S, state.h_m) * FLY_CLIMB_PER_S;
+    if (keys.Space) state.h_m += climb_m_per_s * dt; if (keys.KeyC) state.h_m -= climb_m_per_s * dt;
+    state.h_m = Math.min(MAX_FLY_HEIGHT_M, Math.max(MIN_FLY_HEIGHT_M, state.h_m));
+    if (crossed) say(`Through ${crossed}`);
+    return;
+  }
+  const nearby = find_nearby_structures(get_column(state.B, W), NEARBY_REACH_M);
+  for (let k = 0; k < UNSTICK_MAX_STEPS && is_body_blocked(state.B, state.h_m, nearby); k++) { state.h_m += UNSTICK_STEP_M; state.vh_m_per_s = 0; }
+  if (crossed) { state.B = B_new; state.h_m = h_new; say(`Through ${crossed}`); }
+  else if (B_new !== state.B && !is_outside_boundary(get_column(B_new, W))) {
+    const nearby_new = find_nearby_structures(get_column(B_new, W), NEARBY_REACH_M);
+    if (!is_body_blocked(B_new, h_new, nearby_new)) { state.B = B_new; state.h_m = h_new; }
+    else if (state.is_on_ground && !is_body_blocked(B_new, h_new + STEP_UP_M, nearby_new)) { state.B = B_new; state.h_m = h_new + STEP_UP_M; }
+  }
+  if (keys.Space && state.is_on_ground) state.vh_m_per_s = JUMP_SPEED_M_PER_S;
+  state.vh_m_per_s = Math.max(-MAX_FALL_SPEED_M_PER_S, state.vh_m_per_s - GRAVITY_M_PER_S_PER_S * dt);
+  const nearby_now = find_nearby_structures(get_column(state.B, W), NEARBY_REACH_M), h0 = state.h_m, dh = state.vh_m_per_s * dt;
+  state.h_m = h0 + dh; state.is_on_ground = false;
+  if (is_body_blocked(state.B, state.h_m, nearby_now)) {
+    let lo = 0, hi = 1;
+    for (let i = 0; i < LANDING_BISECTIONS; i++) { const mid = (lo + hi) / 2; if (is_body_blocked(state.B, h0 + dh * mid, nearby_now)) hi = mid; else lo = mid; }
+    state.h_m = h0 + dh * lo; state.is_on_ground = dh < 0; state.vh_m_per_s = 0;
+  }
+}
+
+/**
+ * `look` turns the view: yaw turns the body frame, pitch tilts the camera.
+ * @param {number} dx_px Horizontal mouse movement.
+ * @param {number} dy_px Vertical mouse movement.
+ * @return {void}
+ * @example look(10, 0);
+ */
+function look(dx_px, dy_px) { state.B = multiply_matrices(state.B, make_rotation(X, Z, dx_px * LOOK_RAD_PER_PX)); state.pitch_rad = Math.max(-MAX_PITCH_RAD, Math.min(MAX_PITCH_RAD, state.pitch_rad - dy_px * LOOK_RAD_PER_PX)); }
+
+const VIEWS = {
+  blue_spawn: { label: 'Blue spawn', u_m: -107, v_m: 0, target: [0, 0], pitch_rad: 0 },
+  red_spawn: { label: 'Red spawn', u_m: 120, v_m: 0, target: [0, 0], pitch_rad: 0, team: RED },
+  overview: { label: 'Overview', u_m: 0, v_m: 0, yaw_rad: -Math.PI / 2, h_m: 46, pitch_rad: -MAX_PITCH_RAD, is_flying: true },
+  middle: { label: 'Middle', u_m: -27, v_m: 0, target: [40, 0], pitch_rad: 0.1 },
+  black_hole: { label: 'Black hole', u_m: -12, v_m: 4, target: [0, 0], h_m: 19, pitch_rad: -0.42, is_flying: true },
+  wormhole: { label: 'Wormhole', u_m: MOUTH_A.u_m - 8, v_m: MOUTH_A.v_m, target: [MOUTH_A.u_m, MOUTH_A.v_m], pitch_rad: 0 },
+  wormhole_exit: { label: 'Wormhole exit', u_m: 81, v_m: 26, target: [MOUTH_B.u_m, MOUTH_B.v_m], pitch_rad: 0 },
+  red_pylon: { label: 'Red pylon', u_m: 82, v_m: -1, target: [94, 6], pitch_rad: 0.05 },
+  ridge: { label: 'Ridge', u_m: 10, v_m: 58.5, target: [45, -5], pitch_rad: -0.12 },
+  einstein_ring: { label: 'Einstein ring', u_m: -10, v_m: -3, target: [0, 0], h_m: 11, pitch_rad: 0.15, is_flying: true },
+  overlook: { label: 'Overlook', u_m: -85, v_m: 0, target: [0, 0], h_m: 28, pitch_rad: -0.7, is_flying: true },
+  habitat_row: { label: 'Habitat row', u_m: -46, v_m: -36, target: [0, -42], pitch_rad: 0 }
+};
+
+/**
+ * `set_view` jumps to a named viewpoint.
+ * @param {string} name A key of VIEWS.
+ * @return {void}
+ * @example set_view('black_hole');
+ */
+function set_view(name) {
+  const view = VIEWS[name];
+  if (!view) throw new Error(`set_view: unknown view "${name}"; known: ${Object.keys(VIEWS).join(', ')}`);
+  if (view.team !== undefined) state.team = view.team;
+  const yaw_rad = view.target ? get_facing_yaw(view.u_m, view.v_m, ...view.target) : view.yaw_rad;
+  state.B = make_frame(view.u_m, view.v_m, yaw_rad); state.pitch_rad = view.pitch_rad; state.vh_m_per_s = 0;
+  state.is_flying = !!view.is_flying;
+  state.h_m = view.h_m !== undefined ? view.h_m : find_standing_height(state.B);
+  state.view = name;
+  update_fly_button();
+}
+
+/**
+ * `set_spawn` moves the player to a team's spawn, facing the level's centre.
+ * @param {number} team BLUE or RED.
+ * @return {void}
+ * @example set_spawn(RED);
+ */
+function set_spawn(team) {
+  const spawn = SPAWNS[team];
+  state.team = team; state.is_flying = false; state.vh_m_per_s = 0; state.pitch_rad = 0;
+  state.B = make_frame(spawn.u_m, spawn.v_m, get_facing_yaw(spawn.u_m, spawn.v_m, 0, 0));
+  state.h_m = find_standing_height(state.B);
+  update_fly_button();
+}
+
+/**
+ * `fire_laser` fires a shot from the eye along the crosshair, traced along the true light path; the drawn beam starts at a gun beside the eye and joins the path LASER_MUZZLE_M ahead.
+ * @return {Object} The traced shot.
+ * @example const shot = fire_laser();
+ */
+function fire_laser() {
+  const R = CURVATURE_RADIUS_M, C = get_camera_frame(), eye = get_column(C, W), forward = get_column(C, Z).map(c => -c);
+  const shot = trace_laser(eye, forward), gun = apply_matrix(C, map_exp(GUN_OFFSET_M)), first = shot.pieces[0];
+  if (first.length > 1 && measure_distance(first[0], first[1]) * R > LASER_MUZZLE_M) {
+    const t = combine_vectors(first[1], 1, first[0], dot_minkowski(first[1], first[0])), muzzle = get_geodesic_point(first[0], normalize_minkowski(t), LASER_MUZZLE_M / R);
+    first.splice(0, 1, gun, muzzle);
+  } else first[0] = gun;
+  const segments = shot.pieces.flatMap(piece => simplify_path(piece, BEAM_TOLERANCE_M));
+  const last_piece = shot.pieces[shot.pieces.length - 1];
+  state.beams.push({ segments, team: state.team, age_s: 0, spot: shot.hit ? last_piece[last_piece.length - 1] : null });
+  while (state.beams.length > MAX_BEAMS) state.beams.shift();
+  state.last_shot = shot;
+  return shot;
+}
+
+/**
+ * `upload_beams` writes the live beams' segments and impact spots, with their fading brightness, to the shader.
+ * @return {void}
+ * @example upload_beams();
+ */
+function upload_beams() {
+  let n = 0, spots = 0;
+  for (let b = state.beams.length - 1; b >= 0; b--) {
+    const beam = state.beams[b], brightness = state.is_laser_held ? 1 : Math.max(0, 1 - beam.age_s / LASER_FADE_S);
+    if (brightness <= 0) continue;
+    for (const segment of beam.segments) {
+      if (n >= MAX_BEAM_SEGMENTS) break;
+      beam_data.set(segment.a, n * 12); beam_data.set(segment.b, n * 12 + 4); beam_data.set([segment.length, 0, brightness, beam.team], n * 12 + 8);
+      n++;
+    }
+    if (beam.spot && spots < MAX_SPOTS) { uniforms.u_spots.value[spots].set(...beam.spot); uniforms.u_spot_col.value[spots].set(...TEAM_COLORS[beam.team], 4 * brightness); spots++; }
+  }
+  uniforms.u_beam_count.value = n; uniforms.u_spot_count.value = spots;
+  beam_texture.needsUpdate = true;
+}
+
+/**
+ * `describe_shot` turns a traced shot into a line for the stats panel.
+ * @param {?Object} shot The shot.
+ * @return {string} The description.
+ * @example laser_text.textContent = describe_shot(state.last_shot);
+ */
+function describe_shot(shot) {
+  if (!shot) return '–';
+  const via = shot.through.length ? `through ${shot.through.join(', then ')}, ` : '';
+  if (shot.outcome === 'hit') return `${via}hits ${shot.hit.k < 0 ? 'the ground' : `${structures[shot.hit.k].name} (${MATERIALS[shot.hit.material][0]})`} after ${shot.length_m.toFixed(0)} m`;
+  if (shot.outcome === 'absorbed') return `${via}falls into the black hole after ${shot.length_m.toFixed(0)} m`;
+  return `${via}hits nothing within ${shot.length_m.toFixed(0)} m`;
+}
+
+/**
+ * `update_consoles` runs console deactivation: holding E within CONSOLE_REACH_M of an active console of the other team's pylon, facing the pylon, deactivates it in CONSOLE_TIME_S; anything else resets its progress.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example update_consoles(1 / 60);
+ */
+function update_consoles(dt) {
+  const pylon = pylons[1 - state.team], C = get_camera_frame(), eye = get_column(C, W), forward = get_column(C, Z).map(c => -c);
+  const active = pylon.consoles.filter(c => !c.is_off);
+  const nearest = active.reduce((best, c) => { const d_m = measure_distance(eye, c.x) * CURVATURE_RADIUS_M; return d_m < best.d_m ? { c, d_m } : best; }, { c: null, d_m: Infinity });
+  const toward = combine_vectors(pylon.core, 1, eye, dot_minkowski(pylon.core, eye));
+  const facing_rad = Math.acos(Math.max(-1, Math.min(1, dot_minkowski(forward, toward) / Math.sqrt(dot_minkowski(toward, toward)))));
+  state.console_hint = !active.length ? 'all consoles deactivated' : nearest.d_m > CONSOLE_REACH_M ? `nearest ${TEAMS[pylon.team].name} console ${nearest.d_m.toFixed(0)} m away` : facing_rad > CONSOLE_FACING_RAD ? 'face the pylon' : 'hold E';
+  if (!keys.KeyE || !nearest.c || nearest.d_m > CONSOLE_REACH_M || facing_rad > CONSOLE_FACING_RAD || state.is_won) { pylon.progress_s = 0; return; }
+  pylon.progress_s += dt;
+  if (pylon.progress_s < CONSOLE_TIME_S) return;
+  nearest.c.is_off = true; pylon.progress_s = 0;
+  const index = pylon.team * CONSOLES_PER_PYLON + pylon.consoles.indexOf(nearest.c);
+  uniforms.u_console_off.value[Math.floor(index / 4)].setComponent(index % 4, 1);
+  say(`${TEAMS[pylon.team].name} console deactivated`);
+  if (pylon.consoles.every(c => c.is_off)) { state.is_won = true; document.getElementById('banner').style.display = 'block'; document.getElementById('banner').textContent = `Level won by ${TEAMS[state.team].name}`; }
+}
+
+/**
+ * `update_fly_button` shows the fly mode on its button.
+ * @return {void}
+ * @example update_fly_button();
+ */
+function update_fly_button() { const el = document.getElementById('fly_button'); el.textContent = 'Fly: ' + (state.is_flying ? 'on' : 'off'); el.classList.toggle('on', state.is_flying); }
+
+/**
+ * `compute_schwarzschild_deflection` returns the exact deflection of light passing a Schwarzschild black hole in flat space (the integral 2∫du / sqrt(1/b² - u²(1 - r_s u)) - π from the closest approach), as a reference for the ray tracer's bending.
+ * @param {number} b_m The impact parameter.
+ * @param {number} rs_m The horizon radius.
+ * @return {number} The deflection, in radians.
+ * @example compute_schwarzschild_deflection(10, 1.2);
+ */
+function compute_schwarzschild_deflection(b_m, rs_m) {
+  const bisections = 200, samples = 20000, photon_sphere_m = 1.5 * rs_m;
+  let lo = photon_sphere_m, hi = b_m;
+  for (let i = 0; i < bisections; i++) { const mid = (lo + hi) / 2; if (mid / Math.sqrt(1 - rs_m / mid) > b_m) hi = mid; else lo = mid; }
+  const u0 = 2 / (lo + hi);
+  let sum = 0;
+  for (let i = 0; i < samples; i++) { const t = (i + 0.5) / samples, u = u0 * (1 - t * t); sum += 2 * u0 * t / samples / Math.sqrt(Math.max(1 / (b_m * b_m) - u * u * (1 - rs_m * u), 1e-300)); }
+  return 2 * sum - Math.PI;
+}
+
+/**
+ * `run_physics_checks` measures the warp objects' optics and the player physics and logs them: black hole deflection against the flat-space formula, the shadow's edge, a ray through the wormhole, standing, walking into a wall and jump height.
+ * @return {Object} The results.
+ * @example console.log(run_physics_checks());
+ */
+function run_physics_checks() {
+  const R = CURVATURE_RADIUS_M, results = {}, bh = warps[level.black_hole], rs_c = BLACK_HOLE_RS_M / R;
+  const integrate = (warp_index, x, v) => {
+    let inside = warp_index, through = null;
+    for (let it = 0; it < LASER_MAX_ITERATIONS; it++) {
+      const warp = warps[inside], step = step_bent(warp, x, v, choose_bend_step(compute_bend(warp, x, v).rho));
+      x = step.x; v = step.v;
+      if (warp.kind === KIND_BLACK_HOLE && step.rho < warp.size_c * HORIZON_CAPTURE_FRAC) return { captured: true };
+      if (warp.kind === KIND_MOUTH && step.rho < warp.size_c) { const out = cross_throat(warp, x, [v]); x = out.x; v = normalize_tangent(x, out.vectors[0]); through = warp.name; inside = warp.partner; continue; }
+      if (step.rho > warp.reach_c * 1.001) return { x, v, through };
+    }
+    return { captured: true };
+  };
+  const pass_ray = b_m => {
+    const P = [Math.sinh(b_m / R), 0, 0, Math.cosh(b_m / R)], T = [0, 0, -1, 0], s0 = START_INSIDE_FRAC * Math.acosh(Math.cosh(bh.reach_c) / Math.cosh(b_m / R));
+    const out = integrate(level.black_hole, apply_matrix(bh.frame, get_geodesic_point(P, T, -s0)), apply_matrix(bh.frame, get_geodesic_tangent(P, T, -s0)));
+    if (out.captured) return null;
+    const q = apply_matrix(bh.inv, combine_vectors(out.x, 1, out.v, 1)), q0 = combine_vectors(P, 1, T, 1);
+    const a = [q[0], q[1], q[2]], b = [q0[0], q0[1], q0[2]], dot = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b));
+    return Math.acos(Math.min(1, dot));
+  };
+  results.black_hole_deflection_deg = [4, 6, 10, 16, 22].map(b_m => ({ b_m, measured: +(pass_ray(b_m) * 180 / Math.PI).toFixed(2),
+    schwarzschild_flat_space: +(compute_schwarzschild_deflection(b_m, BLACK_HOLE_RS_M) * 180 / Math.PI).toFixed(2) }));
+  let lo = 1, hi = 6;
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (pass_ray(mid) === null) lo = mid; else hi = mid; }
+  results.shadow_edge_per_rs = { measured: +(lo / BLACK_HOLE_RS_M).toFixed(3), schwarzschild: +(1.5 * Math.sqrt(3)).toFixed(3) };
+  const a = warps[level.mouth_a], b = warps[level.mouth_b], start = map_exp([0.3, 0.2, 8]);
+  const v0 = normalize_tangent(start, combine_vectors(E_W, 1, start, dot_minkowski(E_W, start)));
+  const through = integrate(level.mouth_a, apply_matrix(a.frame, start), apply_matrix(a.frame, v0));
+  if (through.captured) results.wormhole = 'captured';
+  else {
+    const p = apply_matrix(b.inv, through.x), t = apply_matrix(b.inv, through.v);
+    results.wormhole = { through: through.through, exit_distance_from_mouth_b_m: +(Math.asinh(Math.hypot(p[X], p[Y], p[Z])) * R).toFixed(2), exit_direction_in_mouth_b_frame: [t[X], t[Y], t[Z]].map(c => +c.toFixed(3)) };
+  }
+  const saved = { B: state.B, h_m: state.h_m, vh: state.vh_m_per_s, fly: state.is_flying, pitch: state.pitch_rad, team: state.team };
+  set_spawn(BLUE); for (let i = 0; i < 120; i++) step_player(1 / 60);
+  results.standing_at_blue_spawn = { eye_height_m: +state.h_m.toFixed(3), is_on_ground: state.is_on_ground, expected_m: PAD_HEIGHT_M + EYE_HEIGHT_M };
+  const wall_test = { u_m: 68, v_m: -29, module_v_m: -37, wall_face_m: 5 };
+  state.B = make_frame(wall_test.u_m, wall_test.v_m, get_facing_yaw(wall_test.u_m, wall_test.v_m, wall_test.u_m, wall_test.module_v_m)); state.h_m = find_standing_height(state.B); state.vh_m_per_s = 0;
+  const before = get_column(state.B, W); keys.KeyW = true; for (let i = 0; i < 180; i++) step_player(1 / 60); keys.KeyW = false;
+  results.walk_into_habitat_wall = { moved_m: +(measure_distance(before, get_column(state.B, W)) * R).toFixed(2), wall_face_at_m: wall_test.wall_face_m - BODY_RADIUS_M, eye_height_m: +state.h_m.toFixed(2) };
+  set_spawn(BLUE); for (let i = 0; i < 30; i++) step_player(1 / 60);
+  const ground_h = state.h_m; let apex = ground_h; keys.Space = true; step_player(1 / 60); keys.Space = false;
+  for (let i = 0; i < 180; i++) { step_player(1 / 60); apex = Math.max(apex, state.h_m); }
+  results.jump_apex_m = { measured: +(apex - ground_h).toFixed(3), formula: +(JUMP_SPEED_M_PER_S ** 2 / (2 * GRAVITY_M_PER_S_PER_S)).toFixed(3) };
+  results.circumference_at_100_m = { hyperbolic_m: +(2 * Math.PI * R * Math.sinh(100 / R)).toFixed(0), flat_m: +(2 * Math.PI * 100).toFixed(0) };
+  Object.assign(state, { B: saved.B, h_m: saved.h_m, vh_m_per_s: saved.vh, is_flying: saved.fly, pitch_rad: saved.pitch, team: saved.team });
+  return results;
+}
+
+/**
+ * `$` returns the element with an id.
+ * @param {string} id The id.
+ * @return {HTMLElement} The element.
+ * @example $('fps_text').textContent = '60';
+ */
+function $(id) { const el = document.getElementById(id); if (!el) throw new Error(`$: no element #${id}`); return el; }
+Object.keys(VIEWS).forEach((name, i) => {
+  const button = document.createElement('button'); button.textContent = (i < 9 ? `${i + 1} ` : '') + VIEWS[name].label;
+  button.addEventListener('click', () => set_view(name)); $('view_buttons').appendChild(button);
+});
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  keys[e.code] = true;
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (e.repeat) return;
+  if (e.code === 'KeyH') { state.is_flying = !state.is_flying; state.vh_m_per_s = 0; update_fly_button(); }
+  if (e.code === 'KeyR' && !keys.KeyE) fire_laser();
+  if (e.code === 'KeyT') { set_spawn(1 - state.team); say(`Playing as ${TEAMS[state.team].name}`); }
+  const digit = e.code.startsWith('Digit') ? +e.code.slice(5) : 0;
+  if (digit >= 1 && digit <= 9 && digit <= Object.keys(VIEWS).length) set_view(Object.keys(VIEWS)[digit - 1]);
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+let is_dragging = false;
+canvas.addEventListener('pointerdown', e => {
+  if (document.pointerLockElement === canvas) { if (e.button === 0 && !keys.KeyE) fire_laser(); return; }
+  is_dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) { is_dragging = true; }
+  if (e.pointerType === 'mouse') { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (_) { is_dragging = true; } }
+});
+canvas.addEventListener('pointerup', () => { is_dragging = false; });
+canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || is_dragging) look(e.movementX || 0, e.movementY || 0); });
+$('quality').addEventListener('change', e => { state.quality = e.target.value; resize(); });
+$('fly_button').addEventListener('click', () => { state.is_flying = !state.is_flying; state.vh_m_per_s = 0; update_fly_button(); });
+$('tips_toggle').addEventListener('click', () => { const body = $('tips_body'), is_hidden = body.style.display === 'none'; body.style.display = is_hidden ? '' : 'none'; $('tips_toggle').textContent = is_hidden ? 'hide' : 'show'; });
+window.addEventListener('resize', resize);
+
+const params = new URLSearchParams(location.hash.slice(1));
+if (params.has('quality')) { state.quality = params.get('quality'); if (!(state.quality in QUALITY_SCALES)) throw new Error(`#quality=${state.quality} is not one of ${Object.keys(QUALITY_SCALES).join(', ')}`); $('quality').value = state.quality; }
+if (params.get('panels') === 'off') document.body.classList.add('no_panels');
+if (params.has('team') && !['blue', 'red'].includes(params.get('team'))) throw new Error(`#team=${params.get('team')} is not blue or red`);
+set_spawn(params.get('team') === 'red' ? RED : BLUE);
+if (params.has('view')) set_view(params.get('view'));
+if (params.has('pitch')) { const pitch_deg = Number(params.get('pitch')); if (!Number.isFinite(pitch_deg)) throw new Error(`#pitch=${params.get('pitch')} is not a number`); state.pitch_rad = pitch_deg * Math.PI / 180; }
+const test = params.get('test');
+if (test && test !== 'laser' && test !== 'physics') throw new Error(`#test=${test} is not laser or physics`);
+if (test === 'physics') console.log('[physics] ' + JSON.stringify(run_physics_checks()));
+
+let last_ms = performance.now(), hud_s = 0, frames = 0, fps_t0 = performance.now(), perf_s = 0, perf_n = 0, is_first_frame = true;
+
+/**
+ * `render_frame` runs one frame: input, physics, consoles, beams, the camera uniforms, rendering, the HUD and auto quality.
+ * @param {number} now_ms The frame time.
+ * @return {void}
+ * @example requestAnimationFrame(render_frame);
+ */
+function render_frame(now_ms) {
+  const frame_s = Math.max(0, now_ms - last_ms) / 1000, dt = Math.min(MAX_FRAME_S, frame_s); last_ms = now_ms;
+  if (keys.ArrowLeft) look(-dt / LOOK_RAD_PER_PX, 0); if (keys.ArrowRight) look(dt / LOOK_RAD_PER_PX, 0);
+  step_player(dt);
+  update_consoles(dt);
+  state.beams.forEach(beam => { beam.age_s += dt; });
+  state.beams = state.beams.filter(beam => state.is_laser_held || beam.age_s < LASER_FADE_S);
+  upload_beams();
+  uniforms.u_cam.value.fromArray(Float32Array.from(get_camera_frame()));
+  renderer.render(scene, camera);
+  if (is_first_frame) {
+    is_first_frame = false;
+    if (test === 'laser') { state.is_laser_held = true; fire_laser(); console.log('[laser] ' + describe_shot(state.last_shot)); if (params.has('after')) set_view(params.get('after')); }
+  }
+  frames++;
+  if (frame_s > 0 && frame_s < MAX_PAUSE_FRAME_S) { perf_s += frame_s; perf_n++; }
+  if (perf_s > AUTO_WINDOW_S) {
+    if (state.quality === 'auto' && perf_s / perf_n > AUTO_TARGET_FRAME_S && state.pixel_budget > MIN_AUTO_PIXEL_BUDGET) { state.pixel_budget *= AUTO_STEP_FRAC; resize(); }
+    perf_s = 0; perf_n = 0;
+  }
+  state.message_s -= dt;
+  if ((hud_s += dt) > HUD_PERIOD_S) {
+    hud_s = 0;
+    const { u_m, v_m } = get_fermi_coordinates(get_column(state.B, W)), other = pylons[1 - state.team];
+    $('team_text').textContent = TEAMS[state.team].name; $('team_text').className = TEAMS[state.team].name;
+    $('zone_text').textContent = u_m < -ZONE_EDGE_U_M ? 'blue' : u_m > ZONE_EDGE_U_M ? 'red' : 'middle';
+    $('mode_text').textContent = `${state.is_flying ? 'flying' : state.is_on_ground ? 'walking' : 'in the air'} · eye ${state.h_m.toFixed(1)} m above the ground`;
+    $('energy_fill').style.width = `${(100 * state.energy_frac).toFixed(0)}%`;
+    for (const team of [BLUE, RED]) $(`${TEAMS[team].name}_consoles`).textContent = pylons[team].consoles.map(c => c.is_off ? '○' : '●').join('');
+    $('console_text').textContent = `Attack the ${TEAMS[other.team].name} pylon: ${state.console_hint || ''}`;
+    $('console_fill').style.width = `${(100 * other.progress_s / CONSOLE_TIME_S).toFixed(0)}%`;
+    $('laser_text').textContent = describe_shot(state.last_shot);
+    $('position_text').textContent = `u ${u_m.toFixed(0)} m, v ${v_m.toFixed(0)} m`;
+    $('message').textContent = state.message_s > 0 ? state.message : '';
+    if (now_ms - fps_t0 > 500) { $('fps_text').textContent = (frames * 1000 / (now_ms - fps_t0)).toFixed(0); frames = 0; fps_t0 = now_ms; }
+  }
+  requestAnimationFrame(render_frame);
+}
+resize();
+requestAnimationFrame(render_frame);
+window.__demo = { update_consoles, state, structures, warps, pylons, lamps, uniforms, set_view, set_spawn, fire_laser, trace_laser, run_physics_checks, step_player, look, keys, get_camera_frame, describe_shot, VIEWS };
+</script>
+</body>
+</html>

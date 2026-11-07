@@ -157,6 +157,10 @@ a function or a file, or that a decision depends on, spells out its meaning.
 | Bandwidth | `_kbits_per_s`, `_mbits_per_s`, `_mbytes_per_s` | not `_mbps`: bits or bytes? |
 | Distance | `_m` | meters, also in game maps |
 | Speed | `_m_per_s` | |
+| Acceleration | `_m_per_s_per_s` | |
+| Angle | `_rad`, `_deg` | |
+| Angular speed | `_rad_per_s` | |
+| Screen distance | `_px` | pixels |
 | Count | `_count` | a number of items: `player_count` |
 | Fraction | `_frac`, `_pct` | 0 to 1, 0 to 100 |
 

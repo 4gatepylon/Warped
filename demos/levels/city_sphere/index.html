@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>City Sphere — Warped level demo</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(12, 16, 26, 0.74); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 300px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; width: 290px; }
+  #tips { bottom: 10px; right: 10px; width: 360px; max-height: calc(100vh - 260px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .blue { color: #7fb0ff; } .red { color: #ff8f80; } .middle { color: #c9a8ff; }
+  .bar { height: 8px; background: #2c3446; border-radius: 4px; overflow: hidden; margin: 3px 0 6px; }
+  .bar > div { height: 100%; width: 0; background: #6fd08c; }
+  #s_progress_bar { background: #ffd166; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 3px 0; }
+  #tips_toggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #banner { position: fixed; top: 28%; width: 100%; text-align: center; color: #fff; font-size: 44px; font-weight: 700; display: none; text-shadow: 0 0 18px #000; pointer-events: none; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+<div id="banner">Level won</div>
+
+<div id="controls" class="panel">
+  <h1>City Sphere <span class="middle">(purple level, depth 0)</span></h1>
+  <div class="muted">A city on the inside of a hollow sphere. Gravity pulls outward, and a glass sphere is the second floor.</div>
+  <div class="row"><kbd>Click</kbd> capture the mouse (<kbd>Esc</kbd> releases), or drag to look<br>
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br>
+    <kbd>H</kbd> fly mode (<kbd>Space</kbd> up, <kbd>C</kbd> down)<br>
+    <kbd>Click</kbd> (captured) or <kbd>R</kbd> fire the laser<br>
+    hold <kbd>E</kbd> at the other team's pylon: deactivate a console<br>
+    <kbd>T</kbd> play as the other team · <kbd>1</kbd>–<kbd>9</kbd> viewpoints</div>
+  <div class="row" id="view_buttons"></div>
+  <div class="row muted">In the overview, drag to turn the cut-open sphere.</div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Team: <b id="s_team"></b></div>
+  <div>Zone: <b id="s_zone"></b> · floor: <span id="s_floor"></span></div>
+  <div>Energy <span id="s_energy"></span></div>
+  <div class="bar"><div id="s_energy_bar"></div></div>
+  <div id="s_consoles"></div>
+  <div class="bar"><div id="s_progress_bar"></div></div>
+  <div class="muted" id="s_hint"></div>
+  <div class="muted" id="s_laser">Laser: not fired yet</div>
+  <div class="muted"><span id="s_fps">–</span> fps</div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tips_toggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tips_body">
+  <ol>
+    <li><b>Look up</b> (view 1). The glass roof, the glowing core at the centre and, through two layers of glass, the far side of the city hanging upside down overhead.</li>
+    <li><b>Walk down a street.</b> The ground curves up in front of you; a level sight line meets the floor about 11 m ahead. The glass roof stops every shot along the outer floor within about 40 m.</li>
+    <li><b>Climb to the glass floor</b> (view 7): the stairs go up through a hole in the glass. On the glass you stand on the inside of a smaller sphere and look down at the streets.</li>
+    <li><b>Shoot through the glass</b> (view 4, the plaza): a red figure stands on the glass above you. You can see it, but the beam stops at the glass.</li>
+    <li><b>Deactivate red's pylon</b> (view 8): hold <kbd>E</kbd> facing it for 10 s per console, four times.</li>
+    <li><b>The overview</b> (view 3) cuts the sphere open. Blue's zone is the cap round the bottom pole, red's the cap round the top, and the middle zone is the wide band between them: the plaza, the alleys, and the street along the equator that joins them.</li>
+  </ol>
+  <div class="muted" style="margin-top:6px">Blocks sit on a cube-sphere grid: each block is a piece of a spherical shell, and the layers get thinner toward the centre so blocks stay cube-shaped. The red half is blue's half turned 180° about an axis through the equator, so both teams play the same map.</div>
+  </div>
+</div>
+<div id="err"></div>
+
+<script type="module">
+/**
+ * @file
+ * `index.html` is a playable demo of City Sphere, Warped's purple level: a city on the inside of a
+ * hollow sphere, with gravity pulling outward, and a smaller concentric glass sphere as a second floor.
+ *
+ * Interface:
+ * - Keys and mouse: WASD, Shift, Space, C, H, E, R, T and 1-9, as listed in the controls panel.
+ * - URL hash: `#view=<name>` (see `VIEWS`), `#panels=off`, `#test=laser` (fires once after load),
+ *   joined with `&`. `#quality=` is accepted and ignored, since this demo rasterizes.
+ * - `window.__demo`: the state, and `set_view`, `fire_laser`, `trace_laser`, `step_player`,
+ *   `is_body_blocked`, `solid_kind_at` and `cell_of_point`.
+ *
+ * Example: `python3 -m http.server --directory demos`, then open
+ * `http://localhost:8000/levels/city_sphere/index.html#view=overview`.
+ *
+ * Must know:
+ * - Grid: the sphere is cut into a cube-sphere grid (each cube face projected onto the sphere with
+ *   equal angles per cell). The blue hemisphere is drawn as one unfolded net, `NET_ROWS`, around the
+ *   blue spawn; the red hemisphere is the same net turned 180° about the z axis.
+ * - Layers: layer k spans radii R e^(-(k+1)Δ) to R e^(-kΔ), so blocks stay cube-shaped at any radius.
+ * - Gravity pulls outward, so "up" is always toward the centre.
+ */
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+const V3 = THREE.Vector3;
+/**
+ * `$` finds a page element by id.
+ * @param {string} id The element's id.
+ * @return {HTMLElement} The element.
+ * @example $('s_fps').textContent = '60';
+ */
+function $(id) { return document.getElementById(id); }
+window.addEventListener('error', (event) => { $('err').style.display = 'flex'; $('err').textContent = event.message; });
+
+const CELLS_PER_FACE_COUNT = 56;
+const NET_CELL_COUNT = 2 * CELLS_PER_FACE_COUNT;
+const NET_HALF_CELL_COUNT = CELLS_PER_FACE_COUNT;
+const NET_QUARTER_CELL_COUNT = CELLS_PER_FACE_COUNT / 2;
+const NET_CELLS_PER_CHAR = 2;
+const NET_CHAR_COUNT = NET_CELL_COUNT / NET_CELLS_PER_CHAR;
+const NET_POINT_COUNT = NET_CELL_COUNT + 1;
+const HEMISPHERE_CELL_COUNT = NET_CELL_COUNT * NET_CELL_COUNT;
+const CELL_COUNT = 2 * HEMISPHERE_CELL_COUNT;
+const CELL_ANGLE_RAD = Math.PI / 2 / CELLS_PER_FACE_COUNT;
+const FACE_HALF_ANGLE_RAD = Math.PI / 4;
+const R_OUTER_M = 36;
+const GLASS_LAYER_COUNT = 8;
+const R_GLASS_M = R_OUTER_M * Math.exp(-GLASS_LAYER_COUNT * CELL_ANGLE_RAD);
+const GLASS_THICKNESS_M = 0.2;
+const R_CORE_M = 5;
+const CORE_HALO_RADIUS_FRAC = 1.7;
+const ZONE_BORDER_RAD = Math.PI / 4;
+const STRIPE_HALF_WIDTH_RAD = 0.55 * CELL_ANGLE_RAD;
+const STAIR_FIRST_HOLE_STEP = 5;
+const RAILING_LAYER_COUNT = 2;
+const NEIGHBOR_PROBE_FRAC = 0.2;
+
+const EYE_HEIGHT_M = 1.7;
+const HEAD_CLEARANCE_M = 0.15;
+const BODY_RADIUS_M = 0.3;
+const BODY_HALF_ANGLE_RAD = BODY_RADIUS_M / R_OUTER_M;
+const FOOT_EPSILON_M = 0.02;
+const BODY_SAMPLE_LIFTS_M = [FOOT_EPSILON_M, 0.6, 1.2, EYE_HEIGHT_M + HEAD_CLEARANCE_M];
+const GRAVITY_M_PER_S_PER_S = 30;
+const JUMP_SPEED_M_PER_S = 8.5;
+const WALK_SPEED_M_PER_S = 6;
+const SPRINT_SPEED_M_PER_S = 9.5;
+const FLY_SPEED_M_PER_S = 10;
+const FLY_SPRINT_SPEED_M_PER_S = 25;
+const MAX_RADIAL_SPEED_M_PER_S = 40;
+const STEP_UP_M = 1.05;
+const STEP_UP_INCREMENT_M = 0.05;
+const UNSTICK_STEP_M = 0.1;
+const UNSTICK_MAX_M = 12;
+const MIN_FLY_RADIUS_M = 1;
+const PHYSICS_HZ = 240;
+const MAX_FRAME_S = 0.05;
+const SETTLE_ITERATION_COUNT = 12;
+const BOB_AMPLITUDE_M = 0.035;
+const SPRINT_BOB_AMPLITUDE_M = 0.06;
+const BOB_RAD_PER_M = 1.9;
+const LOOK_RAD_PER_PX = 0.0025;
+const MAX_PITCH_RAD = 1.55;
+const ENERGY_DRAIN_S = 30;
+const ENERGY_REFILL_S = 60;
+
+const CONSOLE_COUNT = 4;
+const CONSOLE_TIME_S = 10;
+const CONSOLE_RANGE_M = 3;
+const CONSOLE_FACING_COS = Math.cos(Math.PI / 3);
+const CONSOLE_HEIGHT_M = 1.3;
+const CONSOLE_HALF_SIZES_M = [0.35, 0.25, 0.12];
+const PYLON_NET_POINT = [44, 56];
+const PYLON_CELLS = { cx0: 43, cy0: 55, size: 2, layer_count: 5 };
+const BEACON_RADIUS_M = 0.3;
+const BEACON_OPACITY = 0.3;
+const SPAWN_NET_POINT = [56, 56];
+const SPAWN_PAD_CELLS = { cx0: 54, cy0: 54, size: 4 };
+const SPAWN_LOOK_NET_POINT = [56, 90];
+
+const LASER_STEP_M = 0.05;
+const LASER_MAX_M = 2 * R_OUTER_M;
+const LASER_REFINE_COUNT = 12;
+const LASER_FADE_S = 2;
+const BEAM_LAYERS = [[0.025, 1.0], [0.09, 0.35]];
+const SPARK_RADIUS_M = 0.14;
+const MUZZLE_OFFSETS_M = { right: 0.22, down: 0.18, forward: 0.35 };
+const TEAM_BEAM_COLORS = { blue: 0x5a9bff, red: 0xff5a48 };
+
+const FOV_DEG = 75;
+const NEAR_M = 0.05;
+const FAR_M = 250;
+const FOG_COLOR = [0.13, 0.12, 0.19];
+const FOG_DENSITY_PER_M = 0.011;
+const CUTAWAY_DISTANCE_M = 54;
+const CUTAWAY_FOG_DENSITY_PER_M = 0.003;
+const CUTAWAY_MAX_PITCH_RAD = 1.45;
+const HUD_PERIOD_S = 0.1;
+const MAX_DEVICE_PIXEL_RATIO = 2;
+const AO_BY_SOLID_COUNT = [1, 0.8, 0.68, 0.6];
+const AO_SAMPLE_OFFSET_FRAC = 0.35;
+const WALL_FOOT_AO = 0.72;
+const SIDE_SHADES = [0.8, 0.66, 0.8, 0.66];
+const BOTTOM_SHADE = 0.5;
+const SEED_MODULUS = 9973;
+const SEED_HASH_PRIMES = [73856093, 19349663];
+const TOP_FACE_SEED_SALT = 99;
+const BOTTOM_FACE_SEED_SALT = 98;
+const FIGURE_SEED_STRIDE = 17;
+const CONSOLE_SEED_STRIDE = 31;
+const TINT_PATCH_CELL_COUNT = 8;
+const TINT_ROW_STRIDE = 3;
+const COVER_MAX_LAYER_COUNT = 3;
+const TRIM_MIN_LAYER_COUNT = 4;
+const DECK_FLOOR_TEAM_TINT_FRAC = 0.25;
+const CONSOLE_COLOR_BOOST = 1.3;
+const DEACTIVATED_CONSOLE_BRIGHTNESS = 0.18;
+const WORKING_CONSOLE_BLINK_DEPTH = 0.5;
+const WORKING_CONSOLE_BLINK_RAD_PER_S = 12;
+const BACKGROUND_COLOR = 0x05060a;
+const CORE_SEGMENT_COUNTS = [48, 32];
+const BEAM_SEGMENT_COUNT = 10;
+const SPARK_SEGMENT_COUNTS = [12, 8];
+const BEACON_SEGMENT_COUNT = 12;
+const FPS_WINDOW_MS = 500;
+const MS_PER_S = 1000;
+const PARALLEL_EPSILON = 1e-12;
+const DEGENERATE_LENGTH_SQ = 1e-8;
+
+const KIND_EMPTY = 0, KIND_BLOCK = 1, KIND_GLASS = 2, KIND_CORE = 3, KIND_SHELL = 4;
+const KIND_NAMES = ['nothing', 'a block', 'the glass', 'the core', 'the ground'];
+const STYLE_PLAIN = 0, STYLE_WINDOWS = 1, STYLE_GLOW = 2;
+const MATERIALS = [
+  ['street', [0.30, 0.31, 0.35], STYLE_PLAIN], ['plaza', [0.64, 0.61, 0.55], STYLE_PLAIN],
+  ['blue_floor', [0.36, 0.42, 0.55], STYLE_PLAIN], ['red_floor', [0.55, 0.38, 0.36], STYLE_PLAIN],
+  ['blue_stripe', [0.30, 0.55, 1.00], STYLE_GLOW], ['red_stripe', [1.00, 0.38, 0.30], STYLE_GLOW],
+  ['blue_pad', [0.35, 0.65, 1.00], STYLE_GLOW], ['red_pad', [1.00, 0.45, 0.35], STYLE_GLOW],
+  ['tower', [0.40, 0.43, 0.50], STYLE_WINDOWS], ['building', [0.62, 0.58, 0.52], STYLE_WINDOWS],
+  ['cover', [0.48, 0.50, 0.54], STYLE_PLAIN], ['stairs', [0.74, 0.67, 0.45], STYLE_PLAIN],
+  ['blue_pylon', [0.25, 0.50, 1.00], STYLE_GLOW], ['red_pylon', [1.00, 0.32, 0.26], STYLE_GLOW],
+  ['roof', [0.40, 0.40, 0.43], STYLE_PLAIN], ['deck_floor', [0.68, 0.70, 0.74], STYLE_PLAIN],
+  ['deck', [0.84, 0.86, 0.90], STYLE_PLAIN], ['railing', [0.92, 0.74, 0.25], STYLE_PLAIN],
+  ['blue_trim', [0.28, 0.48, 0.95], STYLE_PLAIN], ['red_trim', [0.95, 0.30, 0.25], STYLE_PLAIN],
+].map(([name, color, style]) => ({ name, color, style }));
+const MATERIAL = Object.fromEntries(MATERIALS.map((material, index) => [material.name, index]));
+const BUILDING_TINTS = [[1, 1, 1], [0.88, 0.94, 1.06], [1.06, 0.95, 0.88], [0.92, 1.0, 0.92]];
+const ZONES = ['blue', 'middle', 'red'];
+const GLASS_TINTS = { blue: [0.55, 0.75, 1.0], middle: [0.80, 0.72, 1.0], red: [1.0, 0.66, 0.62] };
+const OTHER_TEAM = { blue: 'red', red: 'blue' };
+
+/** The blue hemisphere, unfolded around the blue spawn: one character per 2 × 2 cells. */
+const NET_ROWS = [
+  '              ............................              ',
+  '              ....2..................2....              ',
+  '              77777777.##.#######.77777777              ',
+  '              77777777.##.#######.77777777              ',
+  '              ########.##.####....########              ',
+  '              ########.##......##.########              ',
+  '              ########.##..22..##....#####              ',
+  '              ####.....##......#####.#####              ',
+  '              ####.######......#####.#####              ',
+  '              ####...........#######.#####              ',
+  '              ####.########..#######.#####              ',
+  '              ####....................####              ',
+  '              #############..#############              ',
+  '              #############..#############              ',
+  '..666666###################..###################666666..',
+  '..666666###################..###################666666..',
+  '..666666#########6666666666..66666666666##############..',
+  '..###############6666666666..66666666666##############..',
+  '..###############.......................########777777..',
+  '..777777#########.......................########777777..',
+  '.2777777#########..7777.555..555.66666..###########.....',
+  '..777777#########..7777.555..555.66666..###########.....',
+  '..###############..7777.555..555.66666..##############..',
+  '..###############.......555..555.66666..#########55555..',
+  '.....############...............666666..#########55555..',
+  '.....############...............666666..##############..',
+  '..###############...............######..##############..',
+  '..55555##########....................#..########666666..',
+  '..55555##########....................#..########666666..',
+  '..###############...............######..##############..',
+  '..###############...............666666..##############2.',
+  '.....############...............666666..###########.....',
+  '.....############.......55....55666666..###########.....',
+  '..###############..7777755....55.66666..##############..',
+  '.2666666#########..7777755....55.66666..########777777..',
+  '..666666#########..7777755....55.66666..########777777..',
+  '..666666#########.......................##############..',
+  '..###############.......................##############..',
+  '..###############666666666....6666666666#########55555..',
+  '..777777#########666666666....6666666666#########55555..',
+  '..777777##################....########################..',
+  '..777777##################....########################..',
+  '              #####6666666....6666666#####              ',
+  '              #####6666666....6666666#####              ',
+  '              ####77777777....77777777####              ',
+  '              ####77777777....77777777####              ',
+  '              ##7777777###....###7777777##              ',
+  '              ######,,,,,,,,,,,,,,,,,,####              ',
+  '              ######,,,,,,,,,,33,,,,,,####              ',
+  '              ####..,,,,,,,,,,33,,,,,,####              ',
+  '              ####..,,,33,,,,,,,,,,,,,####              ',
+  '              ####..,,,33,,,,,,,,,22,,####              ',
+  '              ####..,,,,,,,1,,,,,,,,,,####              ',
+  '              ####,,,,,,,,,,,,,,,,,,,,####              ',
+  '              ....,,,,,,,,,,,,,,,,,,,,....              ',
+  '              ....,,,,,,,,,,,,,,,,,,,,....              ',
+];
+const STAIRS = [
+  { cx0: 66, cy0: 54, dcx: 1, dcy: 0, width: 4 },
+  { cx0: 36, cy0: 105, dcx: 0, dcy: -1, width: 4 },
+];
+const DECK_WALLS = [
+  [32, 48, 32, 50, 3], [28, 54, 29, 55, 2],
+  [38, 24, 39, 24, 3], [38, 31, 39, 31, 3], [24, 22, 25, 22, 2],
+  [30, 4, 33, 4, 2], [16, 7, 17, 7, 3], [0, 27, 1, 28, 3], [54, 20, 55, 21, 3],
+];
+const FIGURES = [
+  { team: 'red', cx: 60, cy: 100, is_red: false, floor: 'deck', look: [56, 80] },
+  { team: 'blue', cx: 66, cy: 98, is_red: false, floor: 'outer', look: [56, 110] },
+  { team: 'red', cx: 37, cy: 15, is_red: false, floor: 'outer', look: [44, 15] },
+  { team: 'blue', cx: 78, cy: 70, is_red: false, floor: 'deck', look: [56, 56] },
+];
+const FIGURE_PARTS = [[0.45, 0.22, 0.45, 0.12], [1.25, 0.28, 0.38, 0.16], [1.78, 0.16, 0.16, 0.16]];
+const FIGURE_BOX_HALF_SIZES_M = [0.3, 0.97, 0.2];
+const VIEWS = {
+  blue_spawn: { cx: 58, cy: 58.5, is_red: false, floor: 'outer', look: [44, 56, false, R_OUTER_M - 3] },
+  red_spawn: { cx: 58, cy: 58.5, is_red: true, floor: 'outer', look: [44, 56, true, R_OUTER_M - 3] },
+  overview: { is_cutaway: true, yaw_rad: Math.PI, pitch_rad: 1.15 },
+  middle: { cx: 57, cy: 104, is_red: false, floor: 'outer', look: [56, 124, false, R_OUTER_M - 2] },
+  alleys: { cx: 37, cy: 21, is_red: false, floor: 'outer', look: [37, 14, false, R_OUTER_M - 1.7] },
+  deck: { cx: 48, cy: 97, is_red: false, floor: 'deck', look: [62, 112, false, R_GLASS_M + 3] },
+  stairs: { cx: 62, cy: 56, is_red: false, floor: 'outer', look: [76, 56, false, R_GLASS_M - 1] },
+  red_pylon: { cx: 40.5, cy: 56, is_red: true, floor: 'outer', look: [44, 56, true, R_OUTER_M - 1.3], team: 'blue' },
+  core: { cx: 56, cy: 76, is_red: false, floor: 16, look: [56, 40, false, 4], is_flying: true },
+};
+
+const outer_layer_counts = new Uint8Array(CELL_COUNT);
+const outer_materials = new Uint8Array(CELL_COUNT);
+const floor_materials = new Uint8Array(CELL_COUNT);
+const deck_layer_counts = new Uint8Array(CELL_COUNT);
+const deck_materials = new Uint8Array(CELL_COUNT);
+const glass_flags = new Uint8Array(CELL_COUNT);
+const hole_flags = new Uint8Array(CELL_COUNT);
+const valid_flags = new Uint8Array(CELL_COUNT);
+const zone_codes = new Uint8Array(CELL_COUNT);
+const tint_codes = new Uint8Array(CELL_COUNT);
+const neighbor_ids = new Int32Array(4 * CELL_COUNT);
+const cell_axes = new Float32Array(6 * CELL_COUNT);
+const corner_directions = new Float32Array(2 * NET_POINT_COUNT * NET_POINT_COUNT * 3);
+
+/**
+ * `net_direction` maps a point of the unfolded net to a unit direction from the sphere's centre.
+ * @param {number} cx The net x coordinate, in cells (0 to 112; may run past the net's edge).
+ * @param {number} cy The net y coordinate, in cells.
+ * @param {boolean} is_red Whether the point is on the red hemisphere (the net turned 180° about z).
+ * @param {THREE.Vector3} out The vector to write.
+ * @return {THREE.Vector3} `out`, a unit vector.
+ * @example net_direction(56, 56, false, new V3()); // (0, -1, 0): the blue spawn
+ */
+function net_direction(cx, cy, is_red, out) {
+  const a = (cx - NET_HALF_CELL_COUNT) * CELL_ANGLE_RAD, b = (cy - NET_HALF_CELL_COUNT) * CELL_ANGLE_RAD;
+  if (Math.abs(a) <= FACE_HALF_ANGLE_RAD && Math.abs(b) <= FACE_HALF_ANGLE_RAD) out.set(Math.tan(a), -1, Math.tan(b));
+  else if (Math.abs(a) >= Math.abs(b)) out.set(Math.sign(a), Math.tan(Math.abs(a) - Math.PI / 2), Math.tan(b));
+  else out.set(Math.tan(a), Math.tan(Math.abs(b) - Math.PI / 2), Math.sign(b));
+  out.normalize();
+  if (is_red) out.set(-out.x, -out.y, out.z);
+  return out;
+}
+
+/**
+ * `cell_of_point` finds the grid cell (column) that a point lies over.
+ * @param {number} x The point's x, in metres from the centre.
+ * @param {number} y The point's y.
+ * @param {number} z The point's z.
+ * @return {number} The cell id: hemisphere × 112² + cy × 112 + cx.
+ * @example cell_of_point(0, -30, 0); // the cell at the blue spawn's corner
+ */
+function cell_of_point(x, y, z) {
+  const is_red = y > 0;
+  if (is_red) { x = -x; y = -y; }
+  const ax = Math.abs(x), ay = -y, az = Math.abs(z);
+  let a, b;
+  if (ay >= ax && ay >= az) { a = Math.atan(x / ay); b = Math.atan(z / ay); }
+  else if (ax >= az) { b = Math.atan(z / ax); a = Math.sign(x) * (Math.atan(y / ax) + Math.PI / 2); }
+  else { a = Math.atan(x / az); b = Math.sign(z) * (Math.atan(y / az) + Math.PI / 2); }
+  const cx = Math.min(NET_CELL_COUNT - 1, Math.max(0, Math.floor(a / CELL_ANGLE_RAD) + NET_HALF_CELL_COUNT));
+  const cy = Math.min(NET_CELL_COUNT - 1, Math.max(0, Math.floor(b / CELL_ANGLE_RAD) + NET_HALF_CELL_COUNT));
+  return (is_red ? HEMISPHERE_CELL_COUNT : 0) + cy * NET_CELL_COUNT + cx;
+}
+
+/**
+ * `layer_radius_m` gives the radius of the boundary below layer k (layer 0 rests on the outer floor).
+ * @param {number} k The layer index; k = 8 is the glass floor.
+ * @return {number} The radius, in metres.
+ * @example layer_radius_m(GLASS_LAYER_COUNT) === R_GLASS_M;
+ */
+function layer_radius_m(k) { return R_OUTER_M * Math.exp(-k * CELL_ANGLE_RAD); }
+
+/**
+ * `solid_kind_at` says what fills a point: nothing, a block, the glass, the core or the ground.
+ * @param {number} x The point's x, in metres.
+ * @param {number} y The point's y.
+ * @param {number} z The point's z.
+ * @return {number} One of KIND_EMPTY, KIND_BLOCK, KIND_GLASS, KIND_CORE, KIND_SHELL.
+ * @example solid_kind_at(0, -36.5, 0) === KIND_SHELL;
+ */
+function solid_kind_at(x, y, z) {
+  const r = Math.hypot(x, y, z);
+  if (r >= R_OUTER_M) return KIND_SHELL;
+  if (r < R_CORE_M) return KIND_CORE;
+  const id = cell_of_point(x, y, z), k = Math.floor(Math.log(R_OUTER_M / r) / CELL_ANGLE_RAD);
+  if (k < outer_layer_counts[id]) return KIND_BLOCK;
+  if (r >= R_GLASS_M && r < R_GLASS_M + GLASS_THICKNESS_M && glass_flags[id]) return KIND_GLASS;
+  if (k >= GLASS_LAYER_COUNT && k - GLASS_LAYER_COUNT < deck_layer_counts[id]) return KIND_BLOCK;
+  return KIND_EMPTY;
+}
+
+/**
+ * `cell_id` packs a hemisphere and net cell coordinates into a cell id.
+ * @param {number} hemisphere 0 for blue, 1 for red.
+ * @param {number} cx The net x cell, 0 to 111.
+ * @param {number} cy The net y cell, 0 to 111.
+ * @return {number} The cell id.
+ * @example cell_id(1, 43, 55); // a cell of red's pylon
+ */
+function cell_id(hemisphere, cx, cy) { return hemisphere * HEMISPHERE_CELL_COUNT + cy * NET_CELL_COUNT + cx; }
+
+/**
+ * `is_net_corner` says whether a net cell lies in one of the net's four unused corners.
+ * @param {number} cx The net x cell.
+ * @param {number} cy The net y cell.
+ * @return {boolean} True outside the cross-shaped net.
+ * @example is_net_corner(0, 0) === true;
+ */
+function is_net_corner(cx, cy) {
+  const is_x_out = cx < NET_QUARTER_CELL_COUNT || cx >= NET_CELL_COUNT - NET_QUARTER_CELL_COUNT;
+  return is_x_out && (cy < NET_QUARTER_CELL_COUNT || cy >= NET_CELL_COUNT - NET_QUARTER_CELL_COUNT);
+}
+
+/**
+ * `corner_direction` reads the cached unit direction of a grid point.
+ * @param {number} hemisphere 0 for blue, 1 for red.
+ * @param {number} i The net x point, 0 to 112.
+ * @param {number} j The net y point, 0 to 112.
+ * @param {THREE.Vector3} out The vector to write.
+ * @return {THREE.Vector3} `out`.
+ * @example corner_direction(0, 56, 56, new V3()); // (0, -1, 0)
+ */
+function corner_direction(hemisphere, i, j, out) {
+  const index = ((hemisphere * NET_POINT_COUNT + j) * NET_POINT_COUNT + i) * 3;
+  return out.set(corner_directions[index], corner_directions[index + 1], corner_directions[index + 2]);
+}
+
+/**
+ * `zone_of_direction` names the zone over a direction: blue within 45° of the blue spawn, red within
+ * 45° of the red spawn, middle between.
+ * @param {THREE.Vector3} direction A unit vector from the centre.
+ * @return {string} `blue`, `middle` or `red`.
+ * @example zone_of_direction(new V3(1, 0, 0)) === 'middle';
+ */
+function zone_of_direction(direction) {
+  const polar_rad = Math.acos(Math.max(-1, Math.min(1, -direction.y)));
+  return polar_rad < ZONE_BORDER_RAD ? 'blue' : polar_rad > Math.PI - ZONE_BORDER_RAD ? 'red' : 'middle';
+}
+
+/**
+ * `for_both_hemispheres` calls a function on a net cell's id in each hemisphere.
+ * @param {number} cx The net x cell.
+ * @param {number} cy The net y cell.
+ * @param {function(number, number): void} visit Called with (id, hemisphere).
+ * @return {void}
+ * @example for_both_hemispheres(43, 55, (id) => { outer_layer_counts[id] = 5; });
+ */
+function for_both_hemispheres(cx, cy, visit) { for (let hemisphere = 0; hemisphere < 2; hemisphere++) visit(cell_id(hemisphere, cx, cy), hemisphere); }
+
+/**
+ * `build_level` fills the per-cell arrays from `NET_ROWS` and the placed features (spawn pads,
+ * pylons, stairs and their holes and railings, deck walls), then the neighbours and axes.
+ * @return {void}
+ * @example build_level();
+ */
+function build_level() {
+  if (NET_ROWS.length !== NET_CHAR_COUNT) throw new Error(`NET_ROWS has ${NET_ROWS.length} rows; expected ${NET_CHAR_COUNT}.`);
+  NET_ROWS.forEach((row, index) => { if (row.length !== NET_CHAR_COUNT) throw new Error(`NET_ROWS[${index}] has ${row.length} characters; expected ${NET_CHAR_COUNT}.`); });
+  const direction = new V3();
+  for (let hemisphere = 0; hemisphere < 2; hemisphere++) for (let j = 0; j < NET_POINT_COUNT; j++) for (let i = 0; i < NET_POINT_COUNT; i++) {
+    net_direction(i, j, hemisphere === 1, direction);
+    corner_directions.set([direction.x, direction.y, direction.z], ((hemisphere * NET_POINT_COUNT + j) * NET_POINT_COUNT + i) * 3);
+  }
+  for (let hemisphere = 0; hemisphere < 2; hemisphere++) for (let cy = 0; cy < NET_CELL_COUNT; cy++) for (let cx = 0; cx < NET_CELL_COUNT; cx++) {
+    const char = NET_ROWS[Math.floor(cy / NET_CELLS_PER_CHAR)][Math.floor(cx / NET_CELLS_PER_CHAR)];
+    if (is_net_corner(cx, cy) !== (char === ' ')) throw new Error(`NET_ROWS has "${char}" at cell (${cx}, ${cy}); spaces belong exactly in the corners.`);
+    if (char === ' ') continue;
+    const id = cell_id(hemisphere, cx, cy);
+    valid_flags[id] = 1;
+    net_direction(cx + 0.5, cy + 0.5, hemisphere === 1, direction);
+    const zone = zone_of_direction(direction);
+    zone_codes[id] = ZONES.indexOf(zone);
+    tint_codes[id] = (Math.floor(cx / TINT_PATCH_CELL_COUNT) + TINT_ROW_STRIDE * Math.floor(cy / TINT_PATCH_CELL_COUNT)) % BUILDING_TINTS.length;
+    if (char === '#') { outer_layer_counts[id] = GLASS_LAYER_COUNT; outer_materials[id] = MATERIAL.tower; }
+    else if (char >= '1' && char <= '7') { outer_layer_counts[id] = +char; outer_materials[id] = +char <= COVER_MAX_LAYER_COUNT ? MATERIAL.cover : MATERIAL.building; }
+    else if (char !== '.' && char !== ',') throw new Error(`NET_ROWS has unknown character "${char}" at cell (${cx}, ${cy}).`);
+    const polar_rad = Math.acos(-direction.y);
+    if (Math.abs(polar_rad - ZONE_BORDER_RAD) < STRIPE_HALF_WIDTH_RAD) floor_materials[id] = MATERIAL.blue_stripe;
+    else if (Math.abs(polar_rad - (Math.PI - ZONE_BORDER_RAD)) < STRIPE_HALF_WIDTH_RAD) floor_materials[id] = MATERIAL.red_stripe;
+    else if (char === ',') floor_materials[id] = MATERIAL.plaza;
+    else floor_materials[id] = zone === 'middle' ? MATERIAL.street : MATERIAL[`${zone}_floor`];
+  }
+  const team_of = (hemisphere) => (hemisphere === 0 ? 'blue' : 'red');
+  for (let dy = 0; dy < SPAWN_PAD_CELLS.size; dy++) for (let dx = 0; dx < SPAWN_PAD_CELLS.size; dx++)
+    for_both_hemispheres(SPAWN_PAD_CELLS.cx0 + dx, SPAWN_PAD_CELLS.cy0 + dy, (id, hemisphere) => { floor_materials[id] = MATERIAL[`${team_of(hemisphere)}_pad`]; });
+  for (let dy = 0; dy < PYLON_CELLS.size; dy++) for (let dx = 0; dx < PYLON_CELLS.size; dx++)
+    for_both_hemispheres(PYLON_CELLS.cx0 + dx, PYLON_CELLS.cy0 + dy, (id, hemisphere) => { outer_layer_counts[id] = PYLON_CELLS.layer_count; outer_materials[id] = MATERIAL[`${team_of(hemisphere)}_pylon`]; });
+  const hole_cells = new Set(), exit_cells = new Set();
+  for (const stair of STAIRS) for (let step = 1; step <= GLASS_LAYER_COUNT; step++) for (let w = 0; w < stair.width; w++) {
+    const cx = stair.cx0 + (step - 1) * stair.dcx + (stair.dcx ? 0 : w), cy = stair.cy0 + (step - 1) * stair.dcy + (stair.dcx ? w : 0);
+    for_both_hemispheres(cx, cy, (id) => { outer_layer_counts[id] = step; outer_materials[id] = MATERIAL.stairs; });
+    if (step >= STAIR_FIRST_HOLE_STEP && step < GLASS_LAYER_COUNT) hole_cells.add(cy * NET_CELL_COUNT + cx);
+    if (step === GLASS_LAYER_COUNT) exit_cells.add(cy * NET_CELL_COUNT + cx);
+  }
+  for (const key of hole_cells) {
+    const cx = key % NET_CELL_COUNT, cy = Math.floor(key / NET_CELL_COUNT);
+    for_both_hemispheres(cx, cy, (id) => { hole_flags[id] = 1; });
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const neighbor_key = (cy + dy) * NET_CELL_COUNT + cx + dx;
+      if (hole_cells.has(neighbor_key) || exit_cells.has(neighbor_key)) continue;
+      for_both_hemispheres(cx + dx, cy + dy, (id) => { deck_layer_counts[id] = RAILING_LAYER_COUNT; deck_materials[id] = MATERIAL.railing; });
+    }
+  }
+  for (const [col0, row0, col1, row1, layer_count] of DECK_WALLS)
+    for (let cy = row0 * NET_CELLS_PER_CHAR; cy < (row1 + 1) * NET_CELLS_PER_CHAR; cy++) for (let cx = col0 * NET_CELLS_PER_CHAR; cx < (col1 + 1) * NET_CELLS_PER_CHAR; cx++)
+      for_both_hemispheres(cx, cy, (id) => { deck_layer_counts[id] = layer_count; deck_materials[id] = MATERIAL.deck; });
+  const corners = [new V3(), new V3(), new V3(), new V3()], center = new V3(), probe = new V3(), t1 = new V3(), t2 = new V3();
+  for (let id = 0; id < CELL_COUNT; id++) {
+    if (!valid_flags[id]) continue;
+    glass_flags[id] = outer_layer_counts[id] < GLASS_LAYER_COUNT && !hole_flags[id] ? 1 : 0;
+    read_cell_corners(id, corners);
+    center.set(0, 0, 0).add(corners[0]).add(corners[1]).add(corners[2]).add(corners[3]).normalize();
+    for (let edge = 0; edge < 4; edge++) {
+      probe.addVectors(corners[edge], corners[(edge + 1) % 4]).multiplyScalar(0.5);
+      probe.addScaledVector(center, -probe.dot(center) / center.dot(center)).multiplyScalar(1 + NEIGHBOR_PROBE_FRAC).addScaledVector(center, 1);
+      neighbor_ids[4 * id + edge] = cell_of_point(probe.x, probe.y, probe.z);
+    }
+    t1.subVectors(corners[1], corners[0]).add(corners[2]).sub(corners[3]);
+    t1.addScaledVector(center, -t1.dot(center)).normalize();
+    t2.crossVectors(center, t1).normalize();
+    cell_axes.set([t1.x, t1.y, t1.z, t2.x, t2.y, t2.z], 6 * id);
+  }
+}
+
+/**
+ * `read_cell_corners` writes a cell's four corner directions, in order around the cell.
+ * @param {number} id The cell id.
+ * @param {Array<THREE.Vector3>} out Four vectors: (cx, cy), (cx+1, cy), (cx+1, cy+1), (cx, cy+1).
+ * @return {Array<THREE.Vector3>} `out`.
+ * @example read_cell_corners(cell_id(0, 56, 56), [new V3(), new V3(), new V3(), new V3()]);
+ */
+function read_cell_corners(id, out) {
+  const hemisphere = id >= HEMISPHERE_CELL_COUNT ? 1 : 0, local = id - hemisphere * HEMISPHERE_CELL_COUNT;
+  const cx = local % NET_CELL_COUNT, cy = Math.floor(local / NET_CELL_COUNT);
+  corner_direction(hemisphere, cx, cy, out[0]); corner_direction(hemisphere, cx + 1, cy, out[1]);
+  corner_direction(hemisphere, cx + 1, cy + 1, out[2]); corner_direction(hemisphere, cx, cy + 1, out[3]);
+  return out;
+}
+
+const QUAD_UVS = [0, 0, 1, 0, 1, 1, 0, 1];
+/** `QuadBuilder` collects block-face quads (position, colour, block uv, seed, style) into one geometry. */
+class QuadBuilder {
+  /**
+   * `QuadBuilder` starts with no quads.
+   * @example const builder = new QuadBuilder();
+   */
+  constructor() { this.positions = []; this.colors = []; this.uvs = []; this.seeds = []; this.styles = []; this.indices = []; this.temp_a = new V3(); this.temp_b = new V3(); }
+
+  /**
+   * `addQuad` adds one quad, wound so that its front faces `outward`.
+   * @param {Array<THREE.Vector3>} points The four corners in order; their uvs are (0,0), (1,0), (1,1), (0,1).
+   * @param {THREE.Vector3} outward Any vector on the side the quad should face.
+   * @param {Array<number>} color The base colour, RGB in 0 to 1.
+   * @param {Array<number>} corner_shades A brightness factor per corner (face shade × ambient occlusion).
+   * @param {number} seed The block's noise seed.
+   * @param {number} style STYLE_PLAIN, STYLE_WINDOWS or STYLE_GLOW.
+   * @param {Array<number>} [uvs] Eight numbers, the corners' uvs, if not the default unit square.
+   * @return {void}
+   * @example builder.addQuad(points, up, [0.5, 0.5, 0.5], [1, 1, 1, 1], 7, STYLE_PLAIN);
+   */
+  addQuad(points, outward, color, corner_shades, seed, style, uvs = QUAD_UVS) {
+    this.temp_a.subVectors(points[1], points[0]).cross(this.temp_b.subVectors(points[2], points[0]));
+    const is_flipped = this.temp_a.dot(outward) < 0, base = this.positions.length / 3;
+    points.forEach((p, i) => {
+      this.positions.push(p.x, p.y, p.z);
+      this.colors.push(color[0] * corner_shades[i], color[1] * corner_shades[i], color[2] * corner_shades[i]);
+      this.uvs.push(uvs[2 * i], uvs[2 * i + 1]); this.seeds.push(seed); this.styles.push(style);
+    });
+    for (const k of (is_flipped ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3])) this.indices.push(base + k);
+  }
+
+  /**
+   * `addBox` adds the six faces of an oriented box.
+   * @param {THREE.Vector3} center The box's centre.
+   * @param {Array<THREE.Vector3>} axes Three orthonormal axes.
+   * @param {Array<number>} half_sizes_m The half sizes along the axes, in metres.
+   * @param {Array<number>} color The base colour.
+   * @param {number} style The shader style.
+   * @param {number} seed The noise seed.
+   * @return {void}
+   * @example builder.addBox(center, [ex, ey, ez], [0.3, 0.5, 0.2], [1, 0, 0], STYLE_PLAIN, 3);
+   */
+  addBox(center, axes, half_sizes_m, color, style, seed) {
+    for (let axis = 0; axis < 3; axis++) for (const sign of [-1, 1]) {
+      const n = axes[axis].clone().multiplyScalar(sign * half_sizes_m[axis]);
+      const u = axes[(axis + 1) % 3].clone().multiplyScalar(half_sizes_m[(axis + 1) % 3]), v = axes[(axis + 2) % 3].clone().multiplyScalar(half_sizes_m[(axis + 2) % 3]);
+      const points = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([su, sv]) => center.clone().add(n).addScaledVector(u, su).addScaledVector(v, sv));
+      const shade = axis === 1 ? (sign > 0 ? 1 : BOTTOM_SHADE) : SIDE_SHADES[axis];
+      this.addQuad(points, n, color, [shade, shade, shade, shade], seed + axis * 2 + (sign > 0 ? 1 : 0), style);
+    }
+  }
+
+  /**
+   * `toGeometry` packs the quads into a BufferGeometry.
+   * @return {THREE.BufferGeometry} The geometry, with attributes position, a_color, a_uv, a_seed and a_style.
+   * @example const mesh = new THREE.Mesh(builder.toGeometry(), material);
+   */
+  toGeometry() {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
+    geometry.setAttribute('a_color', new THREE.Float32BufferAttribute(this.colors, 3));
+    geometry.setAttribute('a_uv', new THREE.Float32BufferAttribute(this.uvs, 2));
+    geometry.setAttribute('a_seed', new THREE.Float32BufferAttribute(this.seeds, 1));
+    geometry.setAttribute('a_style', new THREE.Float32BufferAttribute(this.styles, 1));
+    geometry.setIndex(this.indices);
+    geometry.computeBoundingSphere();
+    return geometry;
+  }
+}
+
+/**
+ * `block_seed` hashes a block's cell and layer into a noise seed.
+ * @param {number} id The cell id.
+ * @param {number} k The layer.
+ * @return {number} A seed in 0 to SEED_MODULUS.
+ * @example block_seed(1234, 3);
+ */
+function block_seed(id, k) { return ((Math.imul(id, SEED_HASH_PRIMES[0]) ^ Math.imul(k + 1, SEED_HASH_PRIMES[1])) >>> 0) % SEED_MODULUS; }
+
+/**
+ * `corner_occlusion` darkens a top-face corner by how many of the four cells around it are solid just above the face.
+ * @param {THREE.Vector3} corner The corner's unit direction.
+ * @param {number} radius_m The face's radius.
+ * @param {number} id The face's cell, whose axes orient the samples.
+ * @return {number} A brightness factor from AO_BY_SOLID_COUNT.
+ * @example corner_occlusion(corner, R_OUTER_M, id);
+ */
+function corner_occlusion(corner, radius_m, id) {
+  const sample_radius_m = radius_m * Math.exp(-CELL_ANGLE_RAD / 2), offset_m = AO_SAMPLE_OFFSET_FRAC * radius_m * CELL_ANGLE_RAD;
+  let solid_count = 0;
+  for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) {
+    const x = corner.x * sample_radius_m + (s1 * cell_axes[6 * id] + s2 * cell_axes[6 * id + 3]) * offset_m;
+    const y = corner.y * sample_radius_m + (s1 * cell_axes[6 * id + 1] + s2 * cell_axes[6 * id + 4]) * offset_m;
+    const z = corner.z * sample_radius_m + (s1 * cell_axes[6 * id + 2] + s2 * cell_axes[6 * id + 5]) * offset_m;
+    if (solid_kind_at(x, y, z) === KIND_BLOCK) solid_count++;
+  }
+  return AO_BY_SOLID_COUNT[Math.min(solid_count, AO_BY_SOLID_COUNT.length - 1)];
+}
+
+/**
+ * `build_level_geometries` meshes every exposed block face of both floors, and the glass panes.
+ * @return {{blocks: THREE.BufferGeometry, glass: THREE.BufferGeometry}} The opaque and glass geometries.
+ * @example const { blocks, glass } = build_level_geometries();
+ */
+function build_level_geometries() {
+  const blocks = new QuadBuilder(), glass = new QuadBuilder();
+  const corners = [new V3(), new V3(), new V3(), new V3()], center = new V3(), inward = new V3(), outward = new V3();
+  const scaled = (direction, radius_m) => direction.clone().multiplyScalar(radius_m);
+  const add_top = (id, radius_m, material, color, is_occluded) => {
+    const shades = corners.map((corner) => (is_occluded ? corner_occlusion(corner, radius_m, id) : 1));
+    blocks.addQuad(corners.map((corner) => scaled(corner, radius_m)), inward, color, shades, block_seed(id, TOP_FACE_SEED_SALT), MATERIALS[material].style);
+  };
+  const deck_top_layers = deck_layer_counts.map((count) => count + GLASS_LAYER_COUNT);
+  const add_sides = (id, k0, k1, top_layers, material, color_of_layer, foot_layer) => {
+    for (let edge = 0; edge < 4; edge++) {
+      const a = corners[edge], b = corners[(edge + 1) % 4], neighbor = neighbor_ids[4 * id + edge];
+      outward.addVectors(a, b).multiplyScalar(0.5).sub(center);
+      for (let k = Math.max(k0, top_layers[neighbor]); k < k1; k++) {
+        const r0 = layer_radius_m(k), r1 = layer_radius_m(k + 1), foot = k === foot_layer ? WALL_FOOT_AO : 1;
+        const shade = SIDE_SHADES[edge];
+        blocks.addQuad([scaled(a, r0), scaled(b, r0), scaled(b, r1), scaled(a, r1)], outward, color_of_layer(k), [shade * foot, shade * foot, shade, shade], block_seed(id, k), MATERIALS[material].style);
+      }
+    }
+  };
+  for (let id = 0; id < CELL_COUNT; id++) {
+    if (!valid_flags[id]) continue;
+    read_cell_corners(id, corners);
+    center.set(0, 0, 0).add(corners[0]).add(corners[1]).add(corners[2]).add(corners[3]).normalize();
+    inward.copy(center).negate();
+    const zone = ZONES[zone_codes[id]], tint = BUILDING_TINTS[tint_codes[id]];
+    const outer_count = outer_layer_counts[id], deck_count = deck_layer_counts[id], material = outer_materials[id];
+    const base_color = MATERIALS[material].color.map((c, i) => c * (material === MATERIAL.tower || material === MATERIAL.building ? tint[i] : 1));
+    const is_building = material === MATERIAL.tower || material === MATERIAL.building;
+    const has_trim = zone !== 'middle' && outer_count >= TRIM_MIN_LAYER_COUNT && is_building;
+    if (outer_count < GLASS_LAYER_COUNT || deck_count === 0) {
+      const top_material = outer_count === 0 ? floor_materials[id] : outer_count === GLASS_LAYER_COUNT ? MATERIAL.deck_floor : is_building ? MATERIAL.roof : material;
+      const top_color = MATERIALS[top_material].color.map((c, i) => (zone !== 'middle' && top_material === MATERIAL.deck_floor ? c + DECK_FLOOR_TEAM_TINT_FRAC * (MATERIALS[MATERIAL[`${zone}_trim`]].color[i] - c) : c));
+      add_top(id, layer_radius_m(outer_count), top_material, top_color, true);
+    }
+    add_sides(id, 0, outer_count, outer_layer_counts, material, (k) => (has_trim && k === outer_count - 1 ? MATERIALS[MATERIAL[`${zone}_trim`]].color : base_color), 0);
+    if (deck_count > 0) {
+      const deck_color = MATERIALS[deck_materials[id]].color;
+      add_top(id, layer_radius_m(GLASS_LAYER_COUNT + deck_count), deck_materials[id], deck_color, false);
+      add_sides(id, GLASS_LAYER_COUNT, GLASS_LAYER_COUNT + deck_count, deck_top_layers, deck_materials[id], () => deck_color, GLASS_LAYER_COUNT);
+      if (glass_flags[id]) blocks.addQuad(corners.map((corner) => scaled(corner, R_GLASS_M)), center, deck_color, [BOTTOM_SHADE, BOTTOM_SHADE, BOTTOM_SHADE, BOTTOM_SHADE], block_seed(id, BOTTOM_FACE_SEED_SALT), STYLE_PLAIN);
+    } else if (glass_flags[id]) {
+      const local = id % HEMISPHERE_CELL_COUNT, u0 = (local % NET_CELL_COUNT) % 2 / 2, v0 = Math.floor(local / NET_CELL_COUNT) % 2 / 2;
+      glass.addQuad(corners.map((corner) => scaled(corner, R_GLASS_M)), inward, GLASS_TINTS[zone], [1, 1, 1, 1], 0, STYLE_PLAIN, [u0, v0, u0 + 0.5, v0, u0 + 0.5, v0 + 0.5, u0, v0 + 0.5]);
+    }
+  }
+  return { blocks: blocks.toGeometry(), glass: glass.toGeometry() };
+}
+const BLOCK_VERTEX_SHADER = `
+attribute vec3 a_color; attribute vec2 a_uv; attribute float a_seed; attribute float a_style;
+varying vec3 v_world; varying vec3 v_color; varying vec2 v_uv; varying float v_seed; varying float v_style;
+/** \`main\` passes the block attributes on and projects the vertex. */
+void main() {
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  v_world = world.xyz; v_color = a_color; v_uv = a_uv; v_seed = a_seed; v_style = a_style;
+  gl_Position = projectionMatrix * viewMatrix * world;
+}`;
+const SHARED_FRAGMENT_HEAD = `
+uniform vec3 u_fog_color; uniform float u_fog_density_per_m; uniform vec4 u_clip_plane; uniform float u_time_s; uniform vec3 u_tint;
+varying vec3 v_world; varying vec3 v_color; varying vec2 v_uv; varying float v_seed; varying float v_style;
+/** \`fog_keep\` gives how much of a surface's own colour survives the haze between it and the eye (0 to 1). */
+float fog_keep() { return exp(-length(v_world - cameraPosition) * u_fog_density_per_m); }
+/** \`hash3\` turns a 3D point into a pseudo-random number in 0 to 1. */
+float hash3(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }`;
+const BLOCK_FRAGMENT_SHADER = SHARED_FRAGMENT_HEAD + `
+const float NOISE_PIXEL_COUNT = 8.0;
+const float EDGE_WIDTH_FRAC = 0.05;
+const float EDGE_BRIGHTNESS = 0.62;
+const vec2 WINDOW_CENTER = vec2(0.5, 0.55);
+const vec2 WINDOW_HALF_SIZE = vec2(0.2, 0.2);
+const float WINDOW_FRAC = 0.7;
+const float LIT_WINDOW_FRAC = 0.3;
+const vec3 LIT_WINDOW_COLOR = vec3(1.0, 0.82, 0.5);
+const vec3 DARK_WINDOW_COLOR = vec3(0.09, 0.12, 0.2);
+const float GLOW_PULSE_RAD_PER_S = 3.0;
+const float NOISE_BRIGHTNESS_MIN = 0.88;
+const float NOISE_BRIGHTNESS_RANGE = 0.2;
+const vec2 WINDOW_HASH_SALT = vec2(3.1, 7.7);
+const float DARK_WINDOW_VARIATION = 0.3;
+const float LIT_WINDOW_HAZE_CUT = 0.4;
+const float GLOW_BRIGHTNESS = 1.15;
+const float GLOW_PULSE_DEPTH = 0.2;
+const float GLOW_HAZE_CUT = 0.5;
+/** \`main\` shades a block face: per-block noise, darkened edges, windows or a pulsing glow, then haze. */
+void main() {
+  if (dot(v_world, u_clip_plane.xyz) > u_clip_plane.w) discard;
+  float seed = floor(v_seed + 0.5);
+  float noise = hash3(vec3(floor(v_uv * NOISE_PIXEL_COUNT), seed));
+  vec3 color = v_color * u_tint * (NOISE_BRIGHTNESS_MIN + NOISE_BRIGHTNESS_RANGE * noise);
+  vec2 edge = min(v_uv, 1.0 - v_uv);
+  color *= mix(EDGE_BRIGHTNESS, 1.0, smoothstep(0.0, EDGE_WIDTH_FRAC, min(edge.x, edge.y)));
+  float keep = fog_keep();
+  if (v_style > 0.5 && v_style < 1.5) {
+    vec2 window = abs(v_uv - WINDOW_CENTER);
+    float window_roll = hash3(vec3(seed, WINDOW_HASH_SALT));
+    if (window.x < WINDOW_HALF_SIZE.x && window.y < WINDOW_HALF_SIZE.y && window_roll < WINDOW_FRAC) {
+      bool is_lit = window_roll < LIT_WINDOW_FRAC;
+      color = is_lit ? LIT_WINDOW_COLOR : DARK_WINDOW_COLOR * (1.0 + DARK_WINDOW_VARIATION * window_roll);
+      if (is_lit) keep = mix(keep, 1.0, LIT_WINDOW_HAZE_CUT);
+    }
+  } else if (v_style > 1.5) {
+    color *= GLOW_BRIGHTNESS + GLOW_PULSE_DEPTH * sin(u_time_s * GLOW_PULSE_RAD_PER_S + seed);
+    keep = mix(keep, 1.0, GLOW_HAZE_CUT);
+  }
+  gl_FragColor = vec4(mix(u_fog_color, color, keep), 1.0);
+}`;
+const GLASS_FRAGMENT_SHADER = SHARED_FRAGMENT_HEAD + `
+const float FRAME_INNER_FRAC = 0.02;
+const float FRAME_OUTER_FRAC = 0.05;
+const float BASE_ALPHA = 0.06;
+const float FRAME_ALPHA = 0.4;
+const float GRAZING_ALPHA = 0.35;
+const float GRAZING_POWER = 4.0;
+const float GLASS_BRIGHTNESS = 0.75;
+const float FRAME_BRIGHTNESS_BOOST = 0.45;
+const float FAR_GLASS_ALPHA_FRAC = 0.35;
+/** \`main\` shades a glass pane: faint tint, a brighter frame, and more reflection at grazing angles. */
+void main() {
+  if (dot(v_world, u_clip_plane.xyz) > u_clip_plane.w) discard;
+  vec2 edge = min(v_uv, 1.0 - v_uv);
+  float frame = 1.0 - smoothstep(FRAME_INNER_FRAC, FRAME_OUTER_FRAC, min(edge.x, edge.y));
+  float grazing = pow(1.0 - abs(dot(normalize(v_world), normalize(v_world - cameraPosition))), GRAZING_POWER);
+  float keep = fog_keep();
+  vec3 color = mix(u_fog_color, v_color * (GLASS_BRIGHTNESS + FRAME_BRIGHTNESS_BOOST * frame), keep);
+  gl_FragColor = vec4(color, (BASE_ALPHA + FRAME_ALPHA * frame + GRAZING_ALPHA * grazing) * mix(FAR_GLASS_ALPHA_FRAC, 1.0, keep));
+}`;
+const CORE_VERTEX_SHADER = `
+varying vec3 v_world; varying vec3 v_normal;
+/** \`main\` passes the world position and normal on and projects the vertex. */
+void main() {
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  v_world = world.xyz; v_normal = normalize(mat3(modelMatrix) * normal);
+  gl_Position = projectionMatrix * viewMatrix * world;
+}`;
+const CORE_FRAGMENT_SHADER = `
+uniform float u_time_s; uniform float u_is_halo;
+varying vec3 v_world; varying vec3 v_normal;
+const vec3 CORE_HOT_COLOR = vec3(1.0, 0.93, 0.78);
+const vec3 CORE_EDGE_COLOR = vec3(1.0, 0.45, 0.15);
+const float BAND_COUNT = 18.0;
+const float BAND_RAD_PER_S = 1.5;
+const float HALO_POWER = 3.0;
+const float HALO_ALPHA = 0.55;
+const float BAND_BRIGHTNESS_MIN = 0.85;
+const float BAND_BRIGHTNESS_RANGE = 0.25;
+/** \`main\` shades the glowing core (bright centre, orange limb, drifting bands) or its halo. */
+void main() {
+  float facing = abs(dot(normalize(v_normal), normalize(cameraPosition - v_world)));
+  if (u_is_halo > 0.5) { gl_FragColor = vec4(CORE_EDGE_COLOR, pow(facing, HALO_POWER) * HALO_ALPHA); return; }
+  float band = 0.5 + 0.5 * sin(asin(clamp(normalize(v_world).y, -1.0, 1.0)) * BAND_COUNT + u_time_s * BAND_RAD_PER_S);
+  gl_FragColor = vec4(mix(CORE_EDGE_COLOR, CORE_HOT_COLOR, facing) * (BAND_BRIGHTNESS_MIN + BAND_BRIGHTNESS_RANGE * band), 1.0);
+}`;
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BACKGROUND_COLOR);
+const camera = new THREE.PerspectiveCamera(FOV_DEG, 1, NEAR_M, FAR_M);
+const shared_uniforms = {
+  u_fog_color: { value: new V3(...FOG_COLOR) }, u_fog_density_per_m: { value: FOG_DENSITY_PER_M },
+  u_clip_plane: { value: new THREE.Vector4(0, 0, 0, 1) }, u_time_s: { value: 0 },
+};
+
+/**
+ * `make_block_material` makes a block material that shares the fog, clip and time uniforms.
+ * @param {Array<number>} tint An RGB multiplier, so one mesh (a console) can change colour.
+ * @return {THREE.ShaderMaterial} The material; its tint is `material.uniforms.u_tint.value`.
+ * @example const material = make_block_material([1, 1, 1]);
+ */
+function make_block_material(tint) {
+  return new THREE.ShaderMaterial({ uniforms: { ...shared_uniforms, u_tint: { value: new V3(...tint) } }, vertexShader: BLOCK_VERTEX_SHADER, fragmentShader: BLOCK_FRAGMENT_SHADER });
+}
+
+/**
+ * `grid_axes_at` gives the grid's two unit tangent axes at a point (the directions walls run in).
+ * @param {THREE.Vector3} point Any point inside the sphere.
+ * @return {Array<THREE.Vector3>} [t1, t2].
+ * @example const [t1, t2] = grid_axes_at(state.x_feet);
+ */
+function grid_axes_at(point) {
+  const index = 6 * cell_of_point(point.x, point.y, point.z);
+  return [new V3(cell_axes[index], cell_axes[index + 1], cell_axes[index + 2]), new V3(cell_axes[index + 3], cell_axes[index + 4], cell_axes[index + 5])];
+}
+
+/**
+ * `ray_box_distance` intersects a ray with an oriented box.
+ * @param {THREE.Vector3} origin The ray's start.
+ * @param {THREE.Vector3} direction The ray's unit direction.
+ * @param {{center: THREE.Vector3, axes: Array<THREE.Vector3>, half_sizes_m: Array<number>}} box The box.
+ * @return {number} The distance to the box, in metres, or Infinity if the ray misses it.
+ * @example ray_box_distance(eye, forward, figure.box);
+ */
+function ray_box_distance(origin, direction, box) {
+  const offset = origin.clone().sub(box.center);
+  let near_m = -Infinity, far_m = Infinity;
+  for (let axis = 0; axis < 3; axis++) {
+    const o = offset.dot(box.axes[axis]), d = direction.dot(box.axes[axis]), h = box.half_sizes_m[axis];
+    if (Math.abs(d) < PARALLEL_EPSILON) { if (Math.abs(o) > h) return Infinity; continue; }
+    const t0 = (-h - o) / d, t1 = (h - o) / d;
+    near_m = Math.max(near_m, Math.min(t0, t1)); far_m = Math.min(far_m, Math.max(t0, t1));
+  }
+  return near_m <= far_m && near_m > 0 ? near_m : Infinity;
+}
+
+/**
+ * `tangent_toward` gives the unit direction along the ground at `from` that points toward `to`.
+ * @param {THREE.Vector3} from A point.
+ * @param {THREE.Vector3} to Another point.
+ * @return {THREE.Vector3} The tangent direction (perpendicular to the radius at `from`).
+ * @example tangent_toward(feet, pylon_point);
+ */
+function tangent_toward(from, to) {
+  const radial = from.clone().normalize(), along = to.clone().sub(from);
+  return along.addScaledVector(radial, -along.dot(radial)).normalize();
+}
+
+build_level();
+const level_geometries = build_level_geometries();
+scene.add(new THREE.Mesh(level_geometries.blocks, make_block_material([1, 1, 1])));
+const glass_material = new THREE.ShaderMaterial({ uniforms: { ...shared_uniforms, u_tint: { value: new V3(1, 1, 1) } }, vertexShader: BLOCK_VERTEX_SHADER, fragmentShader: GLASS_FRAGMENT_SHADER, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+const glass_mesh = new THREE.Mesh(level_geometries.glass, glass_material);
+glass_mesh.renderOrder = 2;
+scene.add(glass_mesh);
+const core_meshes = [0, 1].map((is_halo) => {
+  const material = new THREE.ShaderMaterial({ uniforms: { u_time_s: shared_uniforms.u_time_s, u_is_halo: { value: is_halo } }, vertexShader: CORE_VERTEX_SHADER, fragmentShader: CORE_FRAGMENT_SHADER,
+    transparent: is_halo === 1, depthWrite: is_halo === 0, side: is_halo ? THREE.BackSide : THREE.FrontSide, blending: is_halo ? THREE.AdditiveBlending : THREE.NormalBlending });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(R_CORE_M * (is_halo ? CORE_HALO_RADIUS_FRAC : 1), ...CORE_SEGMENT_COUNTS), material);
+  mesh.renderOrder = is_halo ? 3 : 0;
+  scene.add(mesh);
+  return mesh;
+});
+
+const TEAM_FIGURE_COLORS = { blue: [0.25, 0.45, 0.95], red: [0.92, 0.28, 0.22] };
+const figure_builder = new QuadBuilder();
+const figures = FIGURES.map((figure, index) => {
+  const direction = net_direction(figure.cx, figure.cy, figure.is_red, new V3()), up = direction.clone().negate();
+  const feet = direction.clone().multiplyScalar(figure.floor === 'deck' ? R_GLASS_M : R_OUTER_M);
+  const forward = tangent_toward(feet, net_direction(figure.look[0], figure.look[1], figure.is_red, new V3()).multiplyScalar(R_OUTER_M));
+  const axes = [new V3().crossVectors(forward, up).normalize(), up, forward];
+  for (const [lift_m, ...half_sizes_m] of FIGURE_PARTS) figure_builder.addBox(feet.clone().addScaledVector(up, lift_m), axes, half_sizes_m, TEAM_FIGURE_COLORS[figure.team], STYLE_PLAIN, index * FIGURE_SEED_STRIDE);
+  return { ...figure, box: { center: feet.clone().addScaledVector(up, FIGURE_BOX_HALF_SIZES_M[1]), axes, half_sizes_m: FIGURE_BOX_HALF_SIZES_M } };
+});
+scene.add(new THREE.Mesh(figure_builder.toGeometry(), make_block_material([1, 1, 1])));
+
+/**
+ * `make_pylon` describes a team's pylon and builds a mesh per console around it.
+ * @param {string} team `blue` or `red`.
+ * @return {{team: string, direction: THREE.Vector3, half_width_m: number, consoles: Array<Object>}} The pylon.
+ * @example const pylon = make_pylon('red');
+ */
+function make_pylon(team) {
+  const direction = net_direction(PYLON_NET_POINT[0], PYLON_NET_POINT[1], team === 'red', new V3()), up = direction.clone().negate();
+  const [t1, t2] = grid_axes_at(direction.clone().multiplyScalar(R_OUTER_M - 1));
+  const half_width_m = PYLON_CELLS.size / 2 * R_OUTER_M * CELL_ANGLE_RAD;
+  const color = MATERIALS[MATERIAL[`${team}_pylon`]].color;
+  const consoles = [[t1, t2], [t2, t1], [t1.clone().negate(), t2], [t2.clone().negate(), t1]].map(([out_axis, along_axis], index) => {
+    const builder = new QuadBuilder(), material = make_block_material([1, 1, 1]);
+    const center = direction.clone().multiplyScalar(R_OUTER_M - CONSOLE_HEIGHT_M).addScaledVector(out_axis, half_width_m + CONSOLE_HALF_SIZES_M[2]);
+    builder.addBox(center, [along_axis, up, out_axis], CONSOLE_HALF_SIZES_M, color.map((c) => Math.min(1, c * CONSOLE_COLOR_BOOST)), STYLE_GLOW, index * CONSOLE_SEED_STRIDE);
+    const mesh = new THREE.Mesh(builder.toGeometry(), material);
+    scene.add(mesh);
+    return { center, material, is_active: true };
+  });
+  const beacon_bottom_m = layer_radius_m(PYLON_CELLS.layer_count), beacon = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, BEACON_SEGMENT_COUNT, 1, true),
+    new THREE.MeshBasicMaterial({ color: TEAM_BEAM_COLORS[team], transparent: true, opacity: BEACON_OPACITY, blending: THREE.AdditiveBlending, depthWrite: false }));
+  beacon.scale.set(BEACON_RADIUS_M, beacon_bottom_m - R_GLASS_M, BEACON_RADIUS_M);
+  beacon.position.copy(direction).multiplyScalar((beacon_bottom_m + R_GLASS_M) / 2);
+  beacon.quaternion.setFromUnitVectors(new V3(0, 1, 0), direction);
+  beacon.renderOrder = 4;
+  scene.add(beacon);
+  return { team, direction, half_width_m, consoles };
+}
+const pylons = { blue: make_pylon('blue'), red: make_pylon('red') };
+
+const beam_geometry = new THREE.CylinderGeometry(1, 1, 1, BEAM_SEGMENT_COUNT, 1, true);
+const spark_geometry = new THREE.SphereGeometry(1, ...SPARK_SEGMENT_COUNTS);
+const state = {
+  x_feet: new V3(0, -R_OUTER_M, 0), heading: new V3(0, 0, 1), pitch_rad: 0, v_r_m_per_s: 0,
+  is_grounded: false, is_flying: false, team: 'blue', energy_frac: 1, is_sprinting: false, bob_phase_rad: 0,
+  is_cutaway: false, cutaway_yaw_rad: 0, cutaway_pitch_rad: 0, view: 'blue_spawn',
+  console_index: -1, console_progress_s: 0, console_hint: '', is_won: false, beams: [], last_shot: null,
+};
+const keys = {};
+
+/**
+ * `is_body_blocked` checks whether a player standing at `feet` would overlap anything solid. The body
+ * is a square column along the grid axes, from the feet to just above the eye, whose corners lie on
+ * radial lines a fixed angle apart (0.6 m wide on the outer floor), so moving up or down never
+ * changes what it overlaps sideways.
+ * @param {THREE.Vector3} feet The feet position.
+ * @return {boolean} True if any sample point of the body is in a block, the glass, the core or the ground.
+ * @example is_body_blocked(state.x_feet);
+ */
+function is_body_blocked(feet) {
+  const r = feet.length(), [t1, t2] = grid_axes_at(feet), corner = new V3(), p = new V3();
+  const is_spanning_glass = r > R_GLASS_M && r - EYE_HEIGHT_M - HEAD_CLEARANCE_M < R_GLASS_M + GLASS_THICKNESS_M;
+  const lifts_m = is_spanning_glass ? [...BODY_SAMPLE_LIFTS_M, r - R_GLASS_M - GLASS_THICKNESS_M / 2] : BODY_SAMPLE_LIFTS_M;
+  for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) {
+    corner.copy(feet).normalize().addScaledVector(t1, s1 * Math.tan(BODY_HALF_ANGLE_RAD)).addScaledVector(t2, s2 * Math.tan(BODY_HALF_ANGLE_RAD)).normalize();
+    for (const lift_m of lifts_m) {
+      p.copy(corner).multiplyScalar(r - lift_m);
+      if (solid_kind_at(p.x, p.y, p.z) !== KIND_EMPTY) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * `try_walk` tries to move the feet along the ground by a tangent step, climbing one block if needed.
+ * @param {THREE.Vector3} step The tangent displacement, in metres.
+ * @return {THREE.Vector3|null} The new feet position, or null if the way is blocked.
+ * @example try_walk(new V3(0.02, 0, 0));
+ */
+function try_walk(step) {
+  const r = state.x_feet.length(), moved = state.x_feet.clone().add(step).setLength(r);
+  if (!is_body_blocked(moved)) return moved;
+  if (!state.is_grounded) return null;
+  for (let lift_m = STEP_UP_INCREMENT_M; lift_m <= STEP_UP_M; lift_m += STEP_UP_INCREMENT_M) {
+    if (is_body_blocked(state.x_feet.clone().setLength(r - lift_m))) return null;
+    if (is_body_blocked(moved.clone().setLength(r - lift_m))) continue;
+    let blocked_m = lift_m - STEP_UP_INCREMENT_M, free_m = lift_m;
+    for (let i = 0; i < SETTLE_ITERATION_COUNT; i++) {
+      const mid_m = (free_m + blocked_m) / 2;
+      if (is_body_blocked(moved.clone().setLength(r - mid_m))) blocked_m = mid_m; else free_m = mid_m;
+    }
+    return moved.setLength(r - free_m);
+  }
+  return null;
+}
+
+/**
+ * `step_player_once` advances the player by one physics substep: input, energy, walking with
+ * collisions and step-ups, then outward gravity and jumping (or free flight in fly mode).
+ * @param {number} dt The substep, in seconds.
+ * @return {void}
+ * @example step_player_once(1 / PHYSICS_HZ);
+ */
+function step_player_once(dt) {
+  const x = state.x_feet, up = x.clone().normalize().negate();
+  const right = new V3().crossVectors(state.heading, up).normalize();
+  const forward_input = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), right_input = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  const is_moving = forward_input !== 0 || right_input !== 0, wants_sprint = keys.ShiftLeft || keys.ShiftRight;
+  state.is_sprinting = !state.is_flying && wants_sprint && is_moving && state.energy_frac > 0;
+  state.energy_frac = Math.min(1, Math.max(0, state.energy_frac + (state.is_sprinting ? -dt / ENERGY_DRAIN_S : dt / ENERGY_REFILL_S)));
+  const speed_m_per_s = state.is_flying ? (wants_sprint ? FLY_SPRINT_SPEED_M_PER_S : FLY_SPEED_M_PER_S) : (state.is_sprinting ? SPRINT_SPEED_M_PER_S : WALK_SPEED_M_PER_S);
+  const step = state.heading.clone().multiplyScalar(forward_input).addScaledVector(right, right_input);
+  if (step.lengthSq() > 0) step.setLength(speed_m_per_s * dt);
+  if (state.is_flying) {
+    const r = x.length();
+    x.add(step).setLength(r - ((keys.Space ? 1 : 0) - (keys.KeyC ? 1 : 0)) * speed_m_per_s * dt);
+    x.setLength(Math.min(R_OUTER_M - FOOT_EPSILON_M, Math.max(MIN_FLY_RADIUS_M, x.length())));
+  } else {
+    if (step.lengthSq() > 0) {
+      const [t1, t2] = grid_axes_at(x);
+      const moved = try_walk(step) || try_walk(t1.clone().multiplyScalar(step.dot(t1))) || try_walk(t2.clone().multiplyScalar(step.dot(t2)));
+      if (moved) x.copy(moved);
+      if (state.is_grounded) state.bob_phase_rad += speed_m_per_s * dt * BOB_RAD_PER_M;
+    }
+    if (keys.Space && state.is_grounded) { state.v_r_m_per_s = -JUMP_SPEED_M_PER_S; state.is_grounded = false; }
+    state.v_r_m_per_s = Math.min(MAX_RADIAL_SPEED_M_PER_S, state.v_r_m_per_s + GRAVITY_M_PER_S_PER_S * dt);
+    const r = x.length(), dr = state.v_r_m_per_s * dt;
+    if (is_body_blocked(x.clone().setLength(r + dr))) {
+      let free_frac = 0, blocked_frac = 1;
+      for (let i = 0; i < SETTLE_ITERATION_COUNT; i++) {
+        const mid_frac = (free_frac + blocked_frac) / 2;
+        if (is_body_blocked(x.clone().setLength(r + mid_frac * dr))) blocked_frac = mid_frac; else free_frac = mid_frac;
+      }
+      x.setLength(r + free_frac * dr);
+      state.is_grounded = dr > 0;
+      state.v_r_m_per_s = 0;
+    } else { x.setLength(r + dr); state.is_grounded = false; }
+  }
+  const radial = x.clone().normalize();
+  state.heading.addScaledVector(radial, -state.heading.dot(radial));
+  if (state.heading.lengthSq() < DEGENERATE_LENGTH_SQ) state.heading.copy(grid_axes_at(x)[0]);
+  state.heading.normalize();
+}
+
+/**
+ * `unstick_player` lifts the player toward the centre until the body is free (after a teleport or
+ * after leaving fly mode inside a block).
+ * @return {void}
+ * @example unstick_player();
+ */
+function unstick_player() {
+  for (let lifted_m = 0; lifted_m < UNSTICK_MAX_M && is_body_blocked(state.x_feet); lifted_m += UNSTICK_STEP_M)
+    state.x_feet.setLength(state.x_feet.length() - UNSTICK_STEP_M);
+}
+
+/**
+ * `step_player` advances the player by one frame, in fixed substeps of at most 1/PHYSICS_HZ.
+ * @param {number} dt_s The frame time, in seconds.
+ * @return {void}
+ * @example step_player(1 / 60);
+ */
+function step_player(dt_s) {
+  if (state.is_cutaway) return;
+  if (!state.is_flying) unstick_player();
+  const substep_count = Math.max(1, Math.ceil(dt_s * PHYSICS_HZ));
+  for (let i = 0; i < substep_count; i++) step_player_once(dt_s / substep_count);
+}
+
+/**
+ * `camera_basis` gives the eye position and the camera's forward, right and up vectors.
+ * @return {{eye: THREE.Vector3, forward: THREE.Vector3, right: THREE.Vector3, up: THREE.Vector3}} The basis.
+ * @example const { eye, forward } = camera_basis();
+ */
+function camera_basis() {
+  const up = state.x_feet.clone().normalize().negate();
+  const is_bobbing = state.is_grounded && !state.is_flying && (keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD);
+  const bob_m = is_bobbing ? Math.sin(state.bob_phase_rad) * (state.is_sprinting ? SPRINT_BOB_AMPLITUDE_M : BOB_AMPLITUDE_M) : 0;
+  const eye = state.x_feet.clone().addScaledVector(up, EYE_HEIGHT_M + bob_m);
+  const forward = state.heading.clone().multiplyScalar(Math.cos(state.pitch_rad)).addScaledVector(up, Math.sin(state.pitch_rad));
+  const right = new V3().crossVectors(state.heading, up).normalize();
+  return { eye, forward, right, up: new V3().crossVectors(right, forward).normalize() };
+}
+
+/**
+ * `cutaway_direction` gives the unit direction from the centre to the overview camera.
+ * @return {THREE.Vector3} The direction; the half of the level on this side is cut away.
+ * @example cutaway_direction();
+ */
+function cutaway_direction() {
+  const p = state.cutaway_pitch_rad, y = state.cutaway_yaw_rad;
+  return new V3(Math.cos(p) * Math.sin(y), Math.sin(p), Math.cos(p) * Math.cos(y));
+}
+
+/**
+ * `update_camera` places the camera at the eye (or outside the sphere, in the overview) and sets the clip plane.
+ * @return {void}
+ * @example update_camera();
+ */
+function update_camera() {
+  if (state.is_cutaway) {
+    const direction = cutaway_direction();
+    camera.position.copy(direction).multiplyScalar(CUTAWAY_DISTANCE_M);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0, 0);
+    shared_uniforms.u_clip_plane.value.set(direction.x, direction.y, direction.z, 0);
+    shared_uniforms.u_fog_density_per_m.value = CUTAWAY_FOG_DENSITY_PER_M;
+    core_meshes.forEach((mesh) => { mesh.visible = false; });
+    return;
+  }
+  shared_uniforms.u_clip_plane.value.set(0, 0, 0, 1);
+  shared_uniforms.u_fog_density_per_m.value = FOG_DENSITY_PER_M;
+  core_meshes.forEach((mesh) => { mesh.visible = true; });
+  const { eye, forward, right, up } = camera_basis();
+  camera.position.copy(eye);
+  camera.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, forward.negate()));
+}
+
+/**
+ * `look` turns the view by a mouse movement (or turns the cut-open sphere in the overview).
+ * @param {number} dx_px The horizontal movement, in pixels.
+ * @param {number} dy_px The vertical movement, in pixels.
+ * @return {void}
+ * @example look(10, 0);
+ */
+function look(dx_px, dy_px) {
+  if (state.is_cutaway) {
+    state.cutaway_yaw_rad -= dx_px * LOOK_RAD_PER_PX;
+    state.cutaway_pitch_rad = Math.max(-CUTAWAY_MAX_PITCH_RAD, Math.min(CUTAWAY_MAX_PITCH_RAD, state.cutaway_pitch_rad + dy_px * LOOK_RAD_PER_PX));
+    return;
+  }
+  state.heading.applyAxisAngle(state.x_feet.clone().normalize().negate(), -dx_px * LOOK_RAD_PER_PX);
+  state.pitch_rad = Math.max(-MAX_PITCH_RAD, Math.min(MAX_PITCH_RAD, state.pitch_rad - dy_px * LOOK_RAD_PER_PX));
+}
+
+/**
+ * `place_player` puts the player at a net point, facing a target point.
+ * @param {number} cx The net x, in cells.
+ * @param {number} cy The net y, in cells.
+ * @param {boolean} is_red Whether the net point is on the red hemisphere.
+ * @param {number} feet_radius_m The radius of the feet.
+ * @param {THREE.Vector3} target The point to look at.
+ * @return {void}
+ * @example place_player(56, 56, false, R_OUTER_M, new V3(0, 0, 0));
+ */
+function place_player(cx, cy, is_red, feet_radius_m, target) {
+  state.x_feet.copy(net_direction(cx, cy, is_red, new V3())).multiplyScalar(feet_radius_m);
+  state.v_r_m_per_s = 0; state.is_grounded = false; state.is_cutaway = false;
+  if (!state.is_flying) unstick_player();
+  const up = state.x_feet.clone().normalize().negate(), eye = state.x_feet.clone().addScaledVector(up, EYE_HEIGHT_M);
+  const to_target = target.clone().sub(eye), rise_m = to_target.dot(up);
+  state.heading.copy(tangent_toward(state.x_feet, target));
+  state.pitch_rad = Math.atan2(rise_m, Math.sqrt(Math.max(0, to_target.lengthSq() - rise_m * rise_m)));
+}
+
+/**
+ * `set_view` jumps to a named viewpoint from `VIEWS`.
+ * @param {string} name The viewpoint's name.
+ * @return {void}
+ * @example set_view('overview');
+ */
+function set_view(name) {
+  if (!(name in VIEWS)) throw new Error(`Unknown view "${name}"; expected one of: ${Object.keys(VIEWS).join(', ')}.`);
+  const view = VIEWS[name];
+  state.view = name;
+  if (view.team) state.team = view.team;
+  if (view.is_cutaway) { state.is_cutaway = true; state.cutaway_yaw_rad = view.yaw_rad; state.cutaway_pitch_rad = view.pitch_rad; return; }
+  state.is_flying = Boolean(view.is_flying);
+  const feet_radius_m = view.floor === 'outer' ? R_OUTER_M - FOOT_EPSILON_M : view.floor === 'deck' ? R_GLASS_M - FOOT_EPSILON_M : view.floor;
+  const [look_cx, look_cy, is_look_red, look_radius_m] = view.look;
+  place_player(view.cx, view.cy, view.is_red, feet_radius_m, net_direction(look_cx, look_cy, is_look_red, new V3()).multiplyScalar(look_radius_m));
+}
+
+/**
+ * `go_to_spawn` puts the player on their team's spawn pad, facing the plaza.
+ * @return {void}
+ * @example go_to_spawn();
+ */
+function go_to_spawn() {
+  const is_red = state.team === 'red';
+  state.is_flying = false;
+  place_player(SPAWN_NET_POINT[0], SPAWN_NET_POINT[1], is_red, R_OUTER_M - FOOT_EPSILON_M, net_direction(SPAWN_LOOK_NET_POINT[0], SPAWN_LOOK_NET_POINT[1], is_red, new V3()).multiplyScalar(R_OUTER_M - EYE_HEIGHT_M));
+}
+
+/**
+ * `trace_laser` follows a straight beam until it stops at a block, the glass, the core, the ground or a figure.
+ * @param {THREE.Vector3} origin The start (the eye).
+ * @param {THREE.Vector3} direction The unit direction.
+ * @return {{end: THREE.Vector3, length_m: number, what: string}} Where and on what the beam stops.
+ * @example trace_laser(eye, forward).what; // 'the glass'
+ */
+function trace_laser(origin, direction) {
+  let figure_m = Infinity, figure_team = '';
+  for (const figure of figures) { const t = ray_box_distance(origin, direction, figure.box); if (t < figure_m) { figure_m = t; figure_team = figure.team; } }
+  const p = new V3();
+  for (let t = LASER_STEP_M; t <= LASER_MAX_M; t += LASER_STEP_M) {
+    if (t > figure_m) return { end: origin.clone().addScaledVector(direction, figure_m), length_m: figure_m, what: `a ${figure_team} figure` };
+    p.copy(origin).addScaledVector(direction, t);
+    const kind = solid_kind_at(p.x, p.y, p.z);
+    if (kind === KIND_EMPTY) continue;
+    let free_m = t - LASER_STEP_M, hit_m = t;
+    for (let i = 0; i < LASER_REFINE_COUNT; i++) {
+      const mid_m = (free_m + hit_m) / 2;
+      p.copy(origin).addScaledVector(direction, mid_m);
+      if (solid_kind_at(p.x, p.y, p.z) === KIND_EMPTY) free_m = mid_m; else hit_m = mid_m;
+    }
+    return { end: origin.clone().addScaledVector(direction, hit_m), length_m: hit_m, what: KIND_NAMES[kind] };
+  }
+  return { end: origin.clone().addScaledVector(direction, LASER_MAX_M), length_m: LASER_MAX_M, what: KIND_NAMES[KIND_EMPTY] };
+}
+
+/**
+ * `fire_laser` fires one shot from the eye along the crosshair and draws its beam in the team colour.
+ * @return {Object|null} The `trace_laser` result, or null if the player can't fire now.
+ * @example fire_laser().what;
+ */
+function fire_laser() {
+  if (state.is_cutaway || state.console_index >= 0) return null;
+  const { eye, forward, right, up } = camera_basis(), shot = trace_laser(eye, forward);
+  const muzzle = eye.clone().addScaledVector(right, MUZZLE_OFFSETS_M.right).addScaledVector(up, -MUZZLE_OFFSETS_M.down).addScaledVector(forward, MUZZLE_OFFSETS_M.forward);
+  const along = shot.end.clone().sub(muzzle), group = new THREE.Group(), materials = [];
+  for (const [radius_m, opacity] of BEAM_LAYERS) {
+    const material = new THREE.MeshBasicMaterial({ color: TEAM_BEAM_COLORS[state.team], transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false });
+    const beam = new THREE.Mesh(beam_geometry, material);
+    beam.scale.set(radius_m, along.length(), radius_m);
+    beam.position.copy(muzzle).addScaledVector(along, 0.5);
+    beam.quaternion.setFromUnitVectors(new V3(0, 1, 0), along.clone().normalize());
+    group.add(beam); materials.push([material, opacity]);
+  }
+  const spark_material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+  const spark = new THREE.Mesh(spark_geometry, spark_material);
+  spark.position.copy(shot.end); spark.scale.setScalar(SPARK_RADIUS_M);
+  group.add(spark); materials.push([spark_material, 1]);
+  group.renderOrder = 4;
+  scene.add(group);
+  state.beams.push({ group, materials, age_s: 0 });
+  state.last_shot = shot;
+  return shot;
+}
+
+/**
+ * `update_beams` fades the beams over LASER_FADE_S and removes the faded ones.
+ * @param {number} dt_s The frame time, in seconds.
+ * @return {void}
+ * @example update_beams(1 / 60);
+ */
+function update_beams(dt_s) {
+  for (const beam of state.beams) {
+    beam.age_s += dt_s;
+    const fade_frac = Math.max(0, 1 - beam.age_s / LASER_FADE_S);
+    for (const [material, opacity] of beam.materials) material.opacity = opacity * fade_frac;
+  }
+  for (const beam of state.beams.filter((b) => b.age_s >= LASER_FADE_S)) { scene.remove(beam.group); beam.materials.forEach(([material]) => material.dispose()); }
+  state.beams = state.beams.filter((b) => b.age_s < LASER_FADE_S);
+}
+
+/**
+ * `update_consoles` runs the deactivation: holding E within CONSOLE_RANGE_M of the other team's
+ * pylon, facing it, deactivates its nearest active console after CONSOLE_TIME_S; letting go resets.
+ * @param {number} dt_s The frame time, in seconds.
+ * @return {void}
+ * @example update_consoles(1 / 60);
+ */
+function update_consoles(dt_s) {
+  const pylon = pylons[OTHER_TEAM[state.team]], { eye, forward } = camera_basis();
+  const axis_point = pylon.direction.clone().multiplyScalar(eye.length()), distance_m = eye.distanceTo(axis_point) - pylon.half_width_m;
+  const is_facing = forward.dot(tangent_toward(eye, axis_point)) >= CONSOLE_FACING_COS;
+  const is_in_range = !state.is_cutaway && distance_m <= CONSOLE_RANGE_M && eye.length() > R_GLASS_M;
+  const active_consoles = pylon.consoles.filter((c) => c.is_active);
+  state.console_hint = state.is_won ? 'Level won. Press T to play the other side.' : !is_in_range ? `Walk to ${pylon.team}'s pylon and hold E (within ${CONSOLE_RANGE_M} m, facing it).`
+    : !is_facing ? `Face ${pylon.team}'s pylon to deactivate a console.` : keys.KeyE ? 'Deactivating: keep holding E.' : 'Hold E to deactivate a console.';
+  if (!keys.KeyE || !is_in_range || !is_facing || state.is_won) { state.console_index = -1; state.console_progress_s = 0; }
+  else {
+    if (state.console_index < 0) {
+      const nearest = active_consoles.reduce((best, c) => (!best || c.center.distanceTo(eye) < best.center.distanceTo(eye) ? c : best), null);
+      state.console_index = pylon.consoles.indexOf(nearest);
+    }
+    state.console_progress_s += dt_s;
+    if (state.console_progress_s >= CONSOLE_TIME_S) {
+      pylon.consoles[state.console_index].is_active = false;
+      state.console_index = -1; state.console_progress_s = 0;
+      state.is_won = pylon.consoles.every((c) => !c.is_active);
+    }
+  }
+  for (const team of ['blue', 'red']) pylons[team].consoles.forEach((c, index) => {
+    const is_working = team === pylon.team && index === state.console_index;
+    const brightness = !c.is_active ? DEACTIVATED_CONSOLE_BRIGHTNESS : is_working ? 1 + WORKING_CONSOLE_BLINK_DEPTH * Math.sin(shared_uniforms.u_time_s.value * WORKING_CONSOLE_BLINK_RAD_PER_S) : 1;
+    c.material.uniforms.u_tint.value.setScalar(brightness);
+  });
+}
+
+/**
+ * `switch_team` plays as the other team: moves to that team's spawn, attacking the other pylon.
+ * @return {void}
+ * @example switch_team();
+ */
+function switch_team() {
+  state.team = OTHER_TEAM[state.team];
+  state.is_won = pylons[OTHER_TEAM[state.team]].consoles.every((c) => !c.is_active);
+  go_to_spawn();
+}
+
+const VIEW_NAMES = Object.keys(VIEWS);
+VIEW_NAMES.forEach((name, index) => {
+  const button = document.createElement('button');
+  button.textContent = `${index + 1} ${name}`;
+  button.addEventListener('click', () => set_view(name));
+  $('view_buttons').appendChild(button);
+});
+window.addEventListener('keydown', (event) => {
+  keys[event.code] = true;
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(event.code)) event.preventDefault();
+  if (event.repeat) return;
+  if (event.code === 'KeyH') { state.is_flying = !state.is_flying; state.v_r_m_per_s = 0; state.is_cutaway = false; }
+  if (event.code === 'KeyR') fire_laser();
+  if (event.code === 'KeyT') switch_team();
+  const digit = /^Digit([1-9])$/.exec(event.code);
+  if (digit && Number(digit[1]) <= VIEW_NAMES.length) set_view(VIEW_NAMES[Number(digit[1]) - 1]);
+});
+window.addEventListener('keyup', (event) => { keys[event.code] = false; });
+window.addEventListener('blur', () => { for (const code in keys) keys[code] = false; });
+let is_dragging = false;
+canvas.addEventListener('pointerdown', (event) => {
+  if (document.pointerLockElement === canvas) { if (event.button === 0) fire_laser(); return; }
+  is_dragging = true;
+  canvas.setPointerCapture(event.pointerId);
+  if (event.pointerType === 'mouse' && !state.is_cutaway) { const request = canvas.requestPointerLock(); if (request && request.catch) request.catch(() => {}); }
+});
+canvas.addEventListener('pointerup', () => { is_dragging = false; });
+canvas.addEventListener('pointermove', (event) => { if (document.pointerLockElement === canvas || is_dragging) look(event.movementX || 0, event.movementY || 0); });
+$('tips_toggle').addEventListener('click', () => {
+  const is_hidden = $('tips_body').style.display === 'none';
+  $('tips_body').style.display = is_hidden ? '' : 'none';
+  $('tips_toggle').textContent = is_hidden ? 'hide' : 'show';
+});
+window.addEventListener('hashchange', () => apply_hash_options(read_hash_options()));
+
+/**
+ * `read_hash_options` parses the URL hash (`#view=overview&panels=off&test=laser`).
+ * @return {{view: string, panels: string, test: string, quality: string}} The options, with defaults filled in.
+ * @example read_hash_options().view;
+ */
+function read_hash_options() {
+  const options = { view: 'blue_spawn', panels: 'on', test: 'none', quality: 'auto' };
+  for (const part of location.hash.replace(/^#/, '').split('&').filter(Boolean)) {
+    const [key, value] = part.split('=');
+    if (!(key in options)) throw new Error(`Unknown hash parameter "${key}"; expected one of: ${Object.keys(options).join(', ')}.`);
+    options[key] = value;
+  }
+  if (!['on', 'off'].includes(options.panels)) throw new Error(`Unknown panels value "${options.panels}"; expected on or off.`);
+  if (!['none', 'laser'].includes(options.test)) throw new Error(`Unknown test "${options.test}"; expected laser.`);
+  return options;
+}
+
+/**
+ * `apply_hash_options` applies parsed hash options: the viewpoint and whether the panels show.
+ * @param {{view: string, panels: string}} options The options from `read_hash_options`.
+ * @return {void}
+ * @example apply_hash_options({ view: 'overview', panels: 'off' });
+ */
+function apply_hash_options(options) {
+  set_view(options.view);
+  for (const id of ['controls', 'stats', 'tips']) $(id).style.display = options.panels === 'off' ? 'none' : '';
+}
+
+/**
+ * `resize` matches the renderer and camera to the window.
+ * @return {void}
+ * @example resize();
+ */
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+/**
+ * `update_hud` writes the team, zone, floor, energy, console progress, last shot and fps to the stats panel.
+ * @param {number} fps The measured frames per second.
+ * @return {void}
+ * @example update_hud(60);
+ */
+function update_hud(fps) {
+  const target_team = OTHER_TEAM[state.team], radius_m = state.x_feet.length();
+  $('s_team').innerHTML = `<span class="${state.team}">${state.team.toUpperCase()}</span> <span class="muted">attacking ${target_team}'s pylon</span>`;
+  const zone = state.is_cutaway ? 'middle' : zone_of_direction(state.x_feet.clone().normalize());
+  $('s_zone').innerHTML = state.is_cutaway ? 'overview' : `<span class="${zone}">${zone}</span>`;
+  $('s_floor').textContent = state.is_cutaway ? '–' : state.is_flying ? 'flying' : radius_m > R_GLASS_M + GLASS_THICKNESS_M ? 'outer (streets)' : 'inner (glass)';
+  $('s_energy').textContent = `${Math.round(state.energy_frac * 100)}%${state.is_sprinting ? ' · sprinting' : ''}`;
+  $('s_energy_bar').style.width = `${state.energy_frac * 100}%`;
+  const active_count = pylons[target_team].consoles.filter((c) => c.is_active).length;
+  $('s_consoles').innerHTML = `${target_team}'s pylon: <b>${active_count} of ${CONSOLE_COUNT}</b> consoles active` + (state.console_index >= 0 ? ` · ${state.console_progress_s.toFixed(1)} / ${CONSOLE_TIME_S} s` : '');
+  $('s_progress_bar').style.width = `${state.console_progress_s / CONSOLE_TIME_S * 100}%`;
+  $('s_hint').textContent = state.console_hint;
+  if (state.last_shot) $('s_laser').textContent = `Laser: stopped by ${state.last_shot.what} after ${state.last_shot.length_m.toFixed(1)} m`;
+  $('s_fps').textContent = fps.toFixed(0);
+  $('banner').style.display = state.is_won ? 'block' : 'none';
+}
+
+const hash_options = read_hash_options();
+apply_hash_options(hash_options);
+resize();
+let last_ms = performance.now(), hud_s = 0, frame_count = 0, fps_start_ms = last_ms, fps = 0, is_test_pending = hash_options.test === 'laser';
+
+/**
+ * `frame` runs one frame: physics, consoles, beams, camera, render and (now and then) the HUD.
+ * @param {number} now_ms The time from requestAnimationFrame, in milliseconds.
+ * @return {void}
+ * @example requestAnimationFrame(frame);
+ */
+function frame(now_ms) {
+  const dt_s = Math.min(MAX_FRAME_S, Math.max(0, (now_ms - last_ms) / MS_PER_S));
+  last_ms = now_ms;
+  shared_uniforms.u_time_s.value = now_ms / MS_PER_S;
+  step_player(dt_s);
+  update_consoles(dt_s);
+  update_camera();
+  if (is_test_pending) { is_test_pending = false; fire_laser(); }
+  update_beams(dt_s);
+  renderer.render(scene, camera);
+  frame_count++;
+  if (now_ms - fps_start_ms > FPS_WINDOW_MS) { fps = frame_count * MS_PER_S / (now_ms - fps_start_ms); frame_count = 0; fps_start_ms = now_ms; }
+  if ((hud_s += dt_s) > HUD_PERIOD_S) { hud_s = 0; update_hud(fps); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__demo = { state, keys, pylons, figures, set_view, fire_laser, trace_laser, step_player, look, is_body_blocked, solid_kind_at, cell_of_point, net_direction, camera_basis, switch_team, update_consoles, renderer, scene, camera, R_OUTER_M, R_GLASS_M, CELL_ANGLE_RAD, V3 };
+</script>
+</body>
+</html>

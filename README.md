@@ -12,6 +12,7 @@ game_server/        # runs one room in real time; the authority on its state
 common/protocol/    # every message and API between components
 common/physics/     # the physics spec and the test cases every implementation passes
 demos/              # experiments that de-risk mechanics, weapons and physics before we build them
+notes/              # notes to keep for future reference: knowledge, thoughts, background reading
 ```
 
 Components may use different languages, so `common/` holds specifications, not shared code.
