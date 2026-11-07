@@ -18,7 +18,7 @@ git clone https://github.com/4gatepylon/Warped.git
   whichever you already have.
 - The repository is private: each player needs read access on GitHub to clone it.
 - Until the demo's stack of pull requests is merged into `main`, check out its newest branch:
-  `git -C Warped checkout claude/hyperbolic-wormholes-rust-playtest`.
+  `git -C Warped checkout claude/hyperbolic-wormholes-rust-click-to-shoot`.
 - The first build takes a few minutes (SDL3 compiles from source); later ones take seconds.
 
 ## Play
@@ -40,8 +40,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Up to 8 players. A laser that reaches another player removes them; they press `Enter` to rejoin at their spawn.
 
 Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints,
-`Space` jumps (hold it for the jetpack), `H` toggles flying (`Space`/`E` and `Q` go up and down), `L` toggles your
-laser, `G` aims through the nearest mouth, `R` respawns, `-` and `=` change the render resolution.
+`Space` jumps (hold it for the jetpack), `H` toggles flying (`Space`/`E` and `Q` go up and down), click to shoot (a
+quarter-second laser shot), `L` toggles a laser that stays on, `G` aims through the nearest mouth, `R` respawns, `-`
+and `=` change the render resolution.
 
 ## Known caveats
 

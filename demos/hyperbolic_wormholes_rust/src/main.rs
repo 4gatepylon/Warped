@@ -51,6 +51,7 @@ use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use sdl3::keyboard::{Keycode, Scancode};
+use sdl3::mouse::MouseButton;
 use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
@@ -100,6 +101,7 @@ const WINDOW_TITLE: &str = "Hyperbolic wormholes (Rust)";
 const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
+const SHOT_DURATION_S: f64 = 0.25;
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
@@ -1491,6 +1493,7 @@ struct Session {
     total_gpu_ms: f64,
     last_output_px: (u32, u32),
     is_laser_on: bool,
+    shot_time_s: f64,
     is_auto_forward: bool,
     is_captured: bool,
     message: String,
@@ -1635,6 +1638,7 @@ impl Session {
             total_gpu_ms: 0.0,
             last_output_px: (0, 0),
             is_laser_on: false,
+            shot_time_s: 0.0,
             is_auto_forward: false,
             is_captured: false,
             message: String::new(),
@@ -1654,8 +1658,9 @@ impl Session {
     }
 
     /// `handle_event` reacts to one window event and returns false when the player quits: Esc
-    /// releases the mouse (or quits if it is free), a click captures it, the mouse looks, and H,
-    /// L, F, R, G, - and = toggle flying, the laser, moving forward, respawn, aim and render scale.
+    /// releases the mouse (or quits if it is free), a click captures it (and once captured, a left
+    /// click fires a laser shot for `SHOT_DURATION_S`), the mouse looks, and H, L, F, R, G, - and =
+    /// toggle flying, the laser, moving forward, respawn, aim and render scale.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
     fn handle_event(
@@ -1731,6 +1736,12 @@ impl Session {
                 self.is_captured = true;
                 mouse.set_relative_mouse_mode(window, true);
             }
+            Event::MouseButtonDown {
+                mouse_btn: MouseButton::Left,
+                ..
+            } if !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated) => {
+                self.shot_time_s = SHOT_DURATION_S;
+            }
             Event::MouseMotion { xrel, yrel, .. } if self.is_captured => match &mut self.voxel {
                 Some(voxel) => voxel.player.look(f64::from(xrel), f64::from(yrel)),
                 None => {
@@ -1757,6 +1768,7 @@ impl Session {
             self.hud_time_s += dt_s;
             return;
         }
+        self.shot_time_s = (self.shot_time_s - dt_s).max(0.0);
         if self.update_multiplayer() {
             self.message_time_s -= dt_s;
             self.hud_time_s += dt_s;
@@ -1788,14 +1800,23 @@ impl Session {
             self.message_time_s = MESSAGE_DURATION_S;
         }
         let eye: DMat4 = self.get_eye_frame();
+        let is_firing: bool = self.is_firing();
         if let Some(multiplayer) = &mut self.multiplayer
-            && let Err(error) = multiplayer.client.send_state(eye, self.is_laser_on)
+            && let Err(error) = multiplayer.client.send_state(eye, is_firing)
         {
             self.message = format!("Couldn't reach the server: {error}");
             self.message_time_s = MESSAGE_DURATION_S;
         }
         self.message_time_s -= dt_s;
         self.hud_time_s += dt_s;
+    }
+
+    /// `is_firing` says whether this player's laser is on: toggled on with L, or a shot fired by a
+    /// click in the last `SHOT_DURATION_S`.
+    ///
+    /// Example: `let is_firing = self.is_firing();`
+    fn is_firing(&self) -> bool {
+        self.is_laser_on || self.shot_time_s > 0.0
     }
 
     /// `get_eye_frame` gives the eye's frame: the house player's frame, or the voxel player's camera.
@@ -1853,6 +1874,7 @@ impl Session {
                     if is_self {
                         multiplayer.is_eliminated = true;
                         self.is_laser_on = false;
+                        self.shot_time_s = 0.0;
                     }
                     messages.push(if is_self {
                         format!("You were hit by player {shooter_id}; press Enter to rejoin")
@@ -1900,6 +1922,7 @@ impl Session {
     ///
     /// Example: `let data = session.pack((1280, 800));`
     fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
+        let is_firing: bool = self.is_firing();
         if let Some(voxel) = &self.voxel {
             let camera: DMat4 = if self.route.is_empty() {
                 voxel.player.get_camera_frame(&voxel.world)
@@ -1914,7 +1937,7 @@ impl Session {
             let view: multiplayer::SharedVoxelView = multiplayer::pack_shared_voxel_view(
                 &voxel.world,
                 camera,
-                self.is_laser_on,
+                is_firing,
                 team,
                 &players,
                 render_px,
@@ -1935,7 +1958,7 @@ impl Session {
             let view: multiplayer::SharedView = multiplayer::pack_shared_view(
                 &self.world,
                 self.player.frame,
-                self.is_laser_on,
+                is_firing,
                 &multiplayer.client.players,
                 render_px,
                 self.start.elapsed().as_secs_f64(),
@@ -1951,7 +1974,7 @@ impl Session {
         let (data, report) = pack_view(
             &self.world,
             self.player.frame,
-            self.is_laser_on,
+            is_firing,
             render_px,
             self.start.elapsed().as_secs_f64(),
         );
@@ -2118,7 +2141,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Space jump/jetpack, H fly, G aim, L laser, R respawn, -/= scale, Esc release".to_string()
+            "WASD move, Space jump/jetpack, H fly, click shoot, L laser, G aim, R respawn, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });

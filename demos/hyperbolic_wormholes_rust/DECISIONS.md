@@ -445,6 +445,15 @@
   90% of frames (78% before), 0.3% over 1/60 s; the house's mouth tour full in 60% (52%), 1.2% over 1/60 s (2.1%).
 - **Revisit if:** frames near 15 ms stutter when played.
 
+### D42. Click to shoot
+
+- **Choice:** once the mouse is captured, a left click fires the laser for 0.25 s: it is drawn, sent to the other
+  players and hits during that time, as the toggled laser does. `L` still toggles a laser that stays on. An eliminated
+  player can't shoot until they rejoin.
+- **Alternatives:** holding the button to fire (closer to the toggle); dropping `L`.
+- **Rationale:** you asked for click to shoot; a quarter of a second is long enough to see the shot and short enough
+  that each click is one shot. `L` stays for showing the light paths.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
