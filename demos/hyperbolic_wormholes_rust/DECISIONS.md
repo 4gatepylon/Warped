@@ -372,7 +372,9 @@
   to 58 ms when this layer stack started). At the full-screen window's size (2560×1336) every view takes under 11 ms
   but the wormhole exit and the laser view, 16.4. In the window, every view runs at 74 fps or more, all at full
   resolution but the wormhole exit, at 0.88 (0.53 to 0.62 for the views near warps at the start). With D40 the
-  wormhole exit takes 13.7 ms at the window's size and full resolution and runs at render scales 0.96 to 0.98.
+  wormhole exit takes 13.7 ms at the window's size and full resolution and runs at render scales 0.96 to 0.98. On the
+  warp tour (D20), in motion down to 1.5 m from each mouth, the window averages 85 fps, 0.2% of frames take longer
+  than 1/60 s, and 78% are at full resolution.
 - **Alternatives:** larger steps (D34); jump tables (D37); a higher scale target (the window measured 78 fps for the
   wormhole exit at full resolution with a 16 ms target, but the views run then differ from run to run, as the player
   moves differently; left as it is, at 14 ms, D19).
@@ -470,7 +472,8 @@
   1/60 s step per frame, and prints the frame times (median, 99th percentile, worst, how many took over 1/60 s,
   after 5 warm-up frames) and the render scale used. `--route mouth-tour` plays a harder tour: the eye circles each
   of the six mouths once, from 5 blocks to 0.45 and back, with the view swinging up to 46° sideways and 23° up and
-  down, over 300 frames per mouth. `--width-px` and `--height-px` set the window's starting size.
+  down, over 300 frames per mouth. On a voxel map, `--route warp-tour` circles each warp object the same way, from 80%
+  of its reach to 10% and back, over 600 frames each. `--width-px` and `--height-px` set the window's starting size.
 - **Alternatives:** only the windowless benchmarks, which leave out presenting, MetalFX in the window, and the
   automatic scale.
 - **Rationale:** it measures what you see when you play, in motion, and needs no screen recording.

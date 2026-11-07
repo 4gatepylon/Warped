@@ -88,6 +88,9 @@ const TOUR_YAW_RAD: f64 = 0.8;
 const TOUR_PITCH_RAD: f64 = 0.4;
 const TOUR_YAW_TURNS: f64 = 2.0;
 const TOUR_PITCH_TURNS: f64 = 3.0;
+const WARP_TOUR_FRAMES_PER_WARP: usize = 600;
+const WARP_TOUR_NEAR_PER_REACH: f64 = 0.1;
+const WARP_TOUR_FAR_PER_REACH: f64 = 0.8;
 const FRAME_BUDGET_MS: f64 = 1000.0 / 60.0;
 const HUD_TEXT_SCALE: f32 = 2.0;
 const HUD_LINE_PX: f32 = 10.0;
@@ -142,12 +145,14 @@ impl MapName {
     }
 }
 
-/// `RouteKind` is which route `--play-route` plays: the scripted legs, or a tour around every
-/// mouth from 5 blocks to just outside its throat and back.
+/// `RouteKind` is which route `--play-route` plays: the house's scripted legs, a tour around each
+/// of its mouths from 5 blocks to just outside its throat and back, or (on a voxel map) a tour
+/// around each warp object.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum RouteKind {
     Legs,
     MouthTour,
+    WarpTour,
 }
 
 /// `Arguments` is the command line.
@@ -203,7 +208,8 @@ struct Arguments {
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot"])]
     play_route: bool,
     /// Which route --play-route plays: the scripted legs, or a tour circling every mouth from 5
-    /// blocks to just outside its throat and back while the view swings around.
+    /// blocks to just outside its throat and back while the view swings around (both on the
+    /// house), or on a voxel map a tour circling each warp object the same way (`warp-tour`).
     #[arg(long, value_enum, default_value_t = RouteKind::Legs)]
     route: RouteKind,
     /// Host a game on the local network: run a server in this program and play in it.
@@ -398,8 +404,16 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
             "--view needs --map lunar-surface; e.g. --map lunar-surface --view black_hole".into(),
         );
     }
-    if arguments.map == MapName::LunarSurface && (arguments.play_route || arguments.autopilot) {
-        return Err("--play-route and --autopilot follow the house demo's route; use them with --map house-demo".into());
+    if arguments.map == MapName::LunarSurface
+        && (arguments.autopilot || (arguments.play_route && arguments.route != RouteKind::WarpTour))
+    {
+        return Err("--autopilot and the house's routes need --map house-demo; on lunar-surface use --play-route --route warp-tour".into());
+    }
+    if arguments.map == MapName::HouseDemo
+        && arguments.play_route
+        && arguments.route == RouteKind::WarpTour
+    {
+        return Err("--route warp-tour is for voxel maps; use --map lunar-surface".into());
     }
     if arguments.bot && (arguments.join.is_none() || arguments.exit_after_s.is_none()) {
         return Err(
@@ -1277,6 +1291,45 @@ fn make_mouth_tour(world: &World) -> Vec<RouteFrame> {
     frames
 }
 
+/// `make_warp_tour` makes a tour of a voxel map's warp objects: for each, the eye circles it once
+/// at its centre's height, from `WARP_TOUR_FAR_PER_REACH` of its reach to `WARP_TOUR_NEAR_PER_REACH`
+/// and back (19 m to 2.4 m around the black hole, 12 m to 1.5 m around a mouth), looking at it with
+/// the view swinging as in `make_mouth_tour`, over `WARP_TOUR_FRAMES_PER_WARP` frames.
+///
+/// Example: `let tour = make_warp_tour(&world);`
+fn make_warp_tour(world: &VoxelWorld) -> Vec<RouteFrame> {
+    let mut frames: Vec<RouteFrame> = Vec::new();
+    for (k, warp) in world.warps.iter().enumerate() {
+        for n in 0..WARP_TOUR_FRAMES_PER_WARP {
+            let turn: f64 =
+                std::f64::consts::TAU * n as f64 / (WARP_TOUR_FRAMES_PER_WARP - 1) as f64;
+            let distance: f64 = warp.reach
+                * (WARP_TOUR_NEAR_PER_REACH
+                    + (WARP_TOUR_FAR_PER_REACH - WARP_TOUR_NEAR_PER_REACH)
+                        * (0.5 + 0.5 * turn.cos()));
+            let frame: DMat4 = warp.frame
+                * make_rotation(AXIS_X, AXIS_Z, turn)
+                * make_boost(AXIS_Z, distance)
+                * make_rotation(AXIS_X, AXIS_Z, TOUR_YAW_RAD * (TOUR_YAW_TURNS * turn).sin())
+                * make_rotation(
+                    AXIS_Y,
+                    AXIS_Z,
+                    TOUR_PITCH_RAD * (TOUR_PITCH_TURNS * turn).sin(),
+                );
+            frames.push(RouteFrame {
+                leg: k,
+                frame,
+                is_laser_on: false,
+                height_m: world.r * frame.col(AXIS_W)[AXIS_Y].asinh(),
+                is_flying: true,
+                is_on_ground: false,
+                messages: Vec::new(),
+            });
+        }
+    }
+    frames
+}
+
 /// `run_autopilot` plays the scripted route without a window at a fixed 1/60 s time step,
 /// rendering every frame. It records each frame (time, render time, height, events) in
 /// `frames.csv`, saves every n-th frame as a PNG, and reports each leg: how long it took, whether
@@ -1542,6 +1595,12 @@ impl Session {
             (false, _) => Vec::new(),
             (true, RouteKind::Legs) => simulate_route(&world)?.frames,
             (true, RouteKind::MouthTour) => make_mouth_tour(&world),
+            (true, RouteKind::WarpTour) => make_warp_tour(
+                &voxel
+                    .as_ref()
+                    .ok_or("--route warp-tour needs a voxel map")?
+                    .world,
+            ),
         };
         let multiplayer: Option<Multiplayer> = if arguments.host || arguments.join.is_some() {
             let server: Option<(Arc<AtomicBool>, JoinHandle<()>)> = if arguments.host {
@@ -1836,7 +1895,11 @@ impl Session {
     /// Example: `let data = session.pack((1280, 800));`
     fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
         if let Some(voxel) = &self.voxel {
-            let camera: DMat4 = voxel.player.get_camera_frame(&voxel.world);
+            let camera: DMat4 = if self.route.is_empty() {
+                voxel.player.get_camera_frame(&voxel.world)
+            } else {
+                self.player.frame
+            };
             let players: Vec<net::RemotePlayer> = self
                 .multiplayer
                 .as_ref()
