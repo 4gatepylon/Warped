@@ -9,13 +9,13 @@ document.body.insertAdjacentHTML('afterbegin', `
 
 <div id="controls" class="panel">
   <h1>Optics lab (flat space)</h1>
-  <div>Demo: <a href="mirrors.html">mirrors</a> · <a href="splitters.html">splitters</a> · <a href="diffraction.html">diffraction</a> · <a href="heat_haze.html">heat haze</a></div>
+  <div>Demo: <a href="mirrors.html">mirrors</a> · <a href="splitters.html">splitters</a> · <a href="diffraction.html">diffraction</a> · <a href="heat_haze.html">heat haze</a> · <a href="refraction.html">refraction</a> · <a href="refraction_glow.html">refraction + glow</a></div>
   <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
   <div class="row"><kbd>WASD</kbd> fly · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>Shift</kbd> fast</div>
   <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
     <kbd>Click</kbd> (mouse captured) or <kbd>R</kbd>: leave an emitter here that keeps firing<br>
     <kbd>Z</kbd> remove all emitters</div>
-  <div class="row"><b>Panels</b> · <kbd>1</kbd> place a mirror<span class="f-split"> · <kbd>2</kbd> a beam splitter</span><span class="f-grat"> · <kbd>3</kbd> a grating</span><br>
+  <div class="row"><b>Panels</b> · <kbd>1</kbd> place a mirror<span class="f-split"> · <kbd>2</kbd> a beam splitter</span><span class="f-grat"> · <kbd>3</kbd> a grating</span><span class="f-glass"> · <kbd>5</kbd> a glass block · <kbd>6</kbd> a prism</span><br>
     Aim at a panel, then hold <kbd>T</kbd> or the right mouse button and move the mouse to turn it.
     <kbd>J</kbd>/<kbd>K</kbd> turn 5°, <kbd>U</kbd>/<kbd>I</kbd> tilt 5° (with <kbd>Shift</kbd>: 1°).
     <kbd>X</kbd> delete it · <kbd>C</kbd> delete all panels</div>
@@ -66,13 +66,15 @@ if (!window.THREE) {
 }
 
 // ---------------------------------------------------------------------------
-// Four demos, one page each, each adding an optical element to the previous one.
+// Six demos, one page each, each adding an optical element to the previous one.
 // ---------------------------------------------------------------------------
 const MODES = {
   mirrors: { splitter: false, grating: false },
   splitters: { splitter: true, grating: false },
   diffraction: { splitter: true, grating: true },
   heat_haze: { splitter: true, grating: true, heat: true },
+  refraction: { splitter: true, grating: true, heat: true, glass: true },
+  refraction_glow: { splitter: true, grating: true, heat: true, glass: true },
 };
 const TIPS = {
   mirrors: `<ol>
@@ -100,11 +102,25 @@ const TIPS = {
   </ol>`,
   heat_haze: `<ol>
     <li><b>Hot air bends light.</b> Warm air is thinner, so its refractive index is lower. Light bends toward the cooler, denser air: outward from the middle of the plume rising off a heater, and upward, because the air is hottest near the heater.</li>
-    <li><b>Turbulence spreads the beam.</b> The rising air churns, so different parts of the beam are bent different ways, and it leaves as a widening, shimmering cone (left: a beam through the air just above a heater).</li>
+    <li><b>Turbulence spreads the beam.</b> The rising air churns, so different parts of the beam are bent different ways, and it leaves as a widening, soft glow (left: a beam through the air just above a heater). Its spot is wide and dim: the same light is spread over a bigger area.</li>
     <li><b>Higher up is cooler:</b> the beam above it crosses the same plume higher up and spreads much less.</li>
     <li><b>Off-centre</b> (right, green): a beam through the edge of a plume is mostly pushed aside rather than spread.</li>
     <li>Look through the hot air: the world behind it shimmers too. <kbd>4</kbd> puts a heater where you aim, or takes one away.</li>
     <li>Exaggerated: real hot air changes the refractive index by about 0.0001, so real heat shimmer bends light by hundredths of a degree. Here the change is about 1000× bigger, so you can see it across the lab.</li>
+  </ol>`,
+  refraction: `<ol>
+    <li><b>Snell's law.</b> Light is slower in glass, by its refractive index (about 1.63 here), so a beam entering at an angle bends toward the face's normal, and away from it on the way out: sin θ<sub>air</sub> = n sin θ<sub>glass</sub>.</li>
+    <li><b>Glass block</b> (left): the beam leaves parallel to how it came in, shifted sideways. Turn the block (hold <kbd>T</kbd>) and the shift grows with the angle.</li>
+    <li><b>Prism</b> (middle): blue light is slowed more than red (dispersion), so it bends more, and white light fans out into a rainbow on the screen.</li>
+    <li><b>Total internal reflection</b> (right): inside glass, a beam meeting a face more than about 38° from its normal can't get out and is reflected completely. The long bar guides the beam along like an optical fibre.</li>
+    <li>Some light always reflects off a glass face: about 6% head-on, more at a glancing angle. Look for the faint reflected beams.</li>
+    <li><kbd>5</kbd> places a glass block, <kbd>6</kbd> a prism. Shine red, green and blue lasers (<kbd>N</kbd>) through a prism and compare.</li>
+  </ol>`,
+  refraction_glow: `<ol>
+    <li><b>Hot air, then glass.</b> Each beam first crosses the hot air above a heater, which spreads it into a widening soft glow, then goes through glass, which bends the glow like any other beam.</li>
+    <li><b>Soft rainbow</b> (left): white light softened by hot air goes through a prism. Each colour is bent by a different amount, but each is now a wide glow, so the colours overlap into a blurred rainbow on the screen.</li>
+    <li><b>Glowing bar</b> (right): a softened beam enters a long glass bar and is trapped by total internal reflection, so the bar fills with glow.</li>
+    <li>Aim at a heater and press <kbd>4</kbd> to take it away and compare with a sharp beam. <kbd>4</kbd> on the floor puts one back.</li>
   </ol>`,
 };
 
@@ -153,10 +169,14 @@ buildWorld();
 // ---------------------------------------------------------------------------
 const MAXP = 16, MAXSEG = 256, MAXG = MAXSEG / 8, MAXS = 48, MAXE = 16, MAXPINS = 12, MAXH = 8;
 // Hot-air plume above a heater: index drop A at the bottom of a plume of radius R (blocks) that cools with height
-// scale H and ends at height top. turb sets how wide turbulence spreads a beam, which leaves as `rays` rays.
-const PLUME = { R: 1, H: 3.5, top: 10, A: 0.08, turb: 2.2, rays: 12 };
+// scale H and ends at height top. turb sets how much turbulence wobbles the view through it, and glow how fast a
+// beam that crossed it widens (its width grows by glow × the index drop it crossed, per block travelled).
+const PLUME = { R: 1, H: 3.5, top: 10, A: 0.08, turb: 2.2, glow: 1.3 };
+// Glass (panel types 3 and 4): dense flint, refractive index n(λ) = A + B/λ² (λ in nm), so blue bends more than red.
+// d is a glass block's half thickness; the view through glass uses the single index `view`.
+const GLASS = { A: 1.6, B: 9500, d: 0.4, view: 1.625 };
 const FRAME = 0.06;                     // panel frame width (blocks); the frame is opaque
-const TYPE_NAME = ['mirror', 'beam splitter', 'grating'];
+const TYPE_NAME = ['mirror', 'beam splitter', 'grating', 'glass block', 'prism'];
 
 // ---------------------------------------------------------------------------
 // Ray tracer. Each pixel's ray walks the voxel grid. Panels (mirrors, splitters, gratings) are flat
@@ -183,6 +203,7 @@ in vec2 vNdc; out vec4 outColor;
 
 const vec3 HAZE = vec3(0.78, 0.86, 0.95);
 const float FRAME = ${FRAME}, REACH = 4.8, MAXT = 700.0;
+const float GLASS_N = ${GLASS.view.toFixed(3)}, GLASS_D = ${GLASS.d.toFixed(3)};
 const float PR = ${PLUME.R.toFixed(3)}, PH = ${PLUME.H.toFixed(3)}, PTOP = ${PLUME.top.toFixed(3)}, PA = ${PLUME.A.toFixed(3)}, PTURB = ${PLUME.turb.toFixed(3)};
 const vec3 PAL[20] = vec3[20](vec3(0.0), vec3(0.40,0.65,0.28), vec3(0.55,0.40,0.26), vec3(0.55,0.55,0.57), vec3(0.74,0.57,0.34),
   vec3(0.42,0.31,0.19), vec3(0.24,0.52,0.20), vec3(0.70,0.87,0.96), vec3(0.64,0.25,0.20), vec3(0.58,0.30,0.25), vec3(0.90,0.89,0.86),
@@ -265,12 +286,48 @@ int traceVox(vec3 o, vec3 d, float tmax, out float tHit, out vec3 nrm, out ivec3
   }
   return 0;
 }
+// Glass solids are convex. A block (type 3) has 6 faces; a prism (type 4) is a triangle of side 2·hu pointing along n,
+// with 2 caps. Face k of panel i: outward normal, and its distance from the centre.
+vec4 solidFace(int i, int k) {
+  vec3 n = uPN[i].xyz, u = uPU[i].xyz, v = cross(n, u);
+  if (k < 2) return vec4(k == 0 ? v : -v, uPN[i].w);
+  if (int(uPC[i].w + 0.5) == 3) return k < 4 ? vec4(k == 2 ? u : -u, uPU[i].w) : vec4(k == 4 ? n : -n, GLASS_D);
+  float r = uPU[i].w / 1.7320508;                     // the triangle's inradius
+  return k == 2 ? vec4(-n, r) : vec4(n * 0.5 + u * (k == 3 ? 0.8660254 : -0.8660254), r);
+}
+// From outside: where the ray enters solid i. From inside: where it leaves. n = that face's outward normal.
+float solidHit(int i, vec3 o, vec3 d, bool inside, out vec3 n) {
+  float t0 = -1e9, t1 = 1e9; vec3 n0 = vec3(0.0), n1 = vec3(0.0);
+  int nf = int(uPC[i].w + 0.5) == 3 ? 6 : 5;
+  for (int k = 0; k < 6; k++) {
+    if (k >= nf) break;
+    vec4 f = solidFace(i, k);
+    float dn = dot(d, f.xyz), dist = f.w - dot(o - uPC[i].xyz, f.xyz);
+    if (abs(dn) < 1e-9) { if (dist < 0.0) t1 = -1e9; continue; }
+    float t = dist / dn;
+    if (dn < 0.0) { if (t > t0) { t0 = t; n0 = f.xyz; } } else if (t < t1) { t1 = t; n1 = f.xyz; }
+  }
+  n = inside ? n1 : n0;
+  return inside ? t1 : (t0 < t1 && t0 > 1e-4 ? t0 : -1.0);
+}
+// Snell's law into or out of glass across a face with outward normal n. R = Fresnel reflectance (unpolarised); R = 1
+// is total internal reflection.
+vec3 refractF(vec3 d, vec3 n, bool goingIn, out float R) {
+  float eta = goingIn ? 1.0 / GLASS_N : GLASS_N;
+  vec3 nf = goingIn ? n : -n;
+  float ci = -dot(d, nf), k = 1.0 - eta * eta * (1.0 - ci * ci);
+  if (k < 0.0) { R = 1.0; return reflect(d, nf); }
+  float ct = sqrt(k), m = 1.0 / eta, rs = (ci - m * ct) / (ci + m * ct), rp = (m * ci - ct) / (m * ci + ct);
+  R = 0.5 * (rs * rs + rp * rp);
+  return eta * d + (eta * ci - ct) * nf;
+}
 // Nearest panel along the ray (not counting the one it just left). ab = position on the panel.
 int hitPanel(vec3 o, vec3 d, int skip, float tmax, out float tHit, out vec2 ab) {
   int best = -1; tHit = tmax; ab = vec2(0.0);
   for (int i = 0; i < ${MAXP}; i++) {
     if (i >= uNP) break;
     if (i == skip) continue;
+    if (int(uPC[i].w + 0.5) >= 3) { vec3 gn; float t = solidHit(i, o, d, false, gn); if (t > 0.0 && t < tHit) { best = i; tHit = t; ab = vec2(0.0); } continue; }
     vec3 n = uPN[i].xyz; float den = dot(d, n);
     if (abs(den) < 1e-7) continue;
     float t = dot(uPC[i].xyz - o, n) / den;
@@ -329,9 +386,9 @@ float distPS(vec3 p, vec3 a, vec3 b) {
   vec3 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
   return length(p - a - ab * t);
 }
-float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s) {   // squared distance between two segments
+float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s, out float t) {   // squared distance between two segments
   vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
-  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), t;
+  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r);
   s = 0.0;
   if (e < 1e-10) { t = 0.0; s = a > 1e-10 ? clamp(-dot(d1, r) / a, 0.0, 1.0) : 0.0; }
   else if (a < 1e-10) { t = clamp(f / e, 0.0, 1.0); }
@@ -346,7 +403,7 @@ float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s) {   // squared dis
   return dot(w, w);
 }
 // Glow from laser segments near the straight piece a->b of a pixel's ray (which has travelled t0 so far).
-void beamGlow(vec3 a, vec3 b, float t0, float w, inout float hA, inout vec3 hC, inout vec3 core) {
+void beamGlow(vec3 a, vec3 b, float t0, float w, inout float hA, inout vec4 hC, inout vec3 core) {
   float len = length(b - a);
   float reach = REACH * max(uBeamR, uPix * (t0 + len));
   vec3 rm = 0.5 * (a + b);
@@ -356,26 +413,27 @@ void beamGlow(vec3 a, vec3 b, float t0, float w, inout float hA, inout vec3 hC, 
     for (int j = 0; j < 8; j++) {
       int i = g * 8 + j;
       if (i >= uNSeg) break;
-      vec4 A = texelFetch(uSeg, ivec2(i, 0), 0), B = texelFetch(uSeg, ivec2(i, 1), 0);
-      if (length(0.5 * (A.xyz + B.xyz) - rm) > 0.5 * (length(B.xyz - A.xyz) + len) + reach) continue;
-      float s; float d2 = segSeg(a, b, A.xyz, B.xyz, s);
-      float tc = t0 + s * len, sg = max(uBeamR, uPix * tc);
-      float f = A.w * w * exp(-tc / 300.0);
-      float h = f * exp(-d2 / (4.8 * sg * sg));
+      vec4 A = texelFetch(uSeg, ivec2(i, 0), 0), B = texelFetch(uSeg, ivec2(i, 1), 0), C = texelFetch(uSeg, ivec2(i, 2), 0);
+      float sl = length(B.xyz - A.xyz);
+      if (length(0.5 * (A.xyz + B.xyz) - rm) > 0.5 * (sl + len) + reach + C.w + B.w * sl) continue;
+      float s, sb; float d2 = segSeg(a, b, A.xyz, B.xyz, s, sb);
+      float tc = t0 + s * len, wb = C.w + B.w * sb * sl, sg = max(max(uBeamR, uPix * tc), wb);
+      bool soft = wb > uBeamR;                         // widened by hot air: a soft glow, dimmer the wider it gets
+      float f = A.w * w * exp(-tc / 300.0) * (soft ? min(1.0, 0.3 / wb) : 1.0);
+      float h = f * exp(-d2 / ((soft ? 1.0 : 4.8) * sg * sg));
       if (h < 0.002) continue;
-      vec3 c = texelFetch(uSeg, ivec2(i, 2), 0).rgb;
-      if (h > hA) { hA = h; hC = c; }
-      core = max(core, c * f * exp(-d2 / (sg * sg)));
+      hA = max(hA, h); hC += vec4(C.rgb, 1.0) * h;       // halo colour: overlapping beams blend by strength
+      core = max(core, C.rgb * f * (soft ? 0.0 : exp(-d2 / (sg * sg))));
     }
   }
 }
-void spotGlow(vec3 hp, float t, float w, inout float hA, inout vec3 hC, inout vec3 core) {   // where beams touch a surface
-  float rr = max(0.07, 2.5 * uPix * t), fade = w * exp(-t / 300.0);
+void spotGlow(vec3 hp, float t, float w, inout float hA, inout vec4 hC, inout vec3 core) {   // where beams touch a surface
+  float rr0 = max(0.07, 2.5 * uPix * t), fade = w * exp(-t / 300.0);
   for (int k = 0; k < ${MAXS}; k++) {
     if (k >= uNS) break;
-    vec3 d = hp - uSpot[k].xyz;
-    float g = uSpot[k].w * fade * exp(-dot(d, d) / (rr * rr));
-    if (g > hA) { hA = g; hC = uSpotC[k].rgb; }
+    vec3 d = hp - uSpot[k].xyz; float rr = max(rr0, uSpotC[k].w);    // a soft beam's spot is as wide as the beam
+    float g = uSpot[k].w * fade * min(1.0, 0.8 / rr) * exp(-dot(d, d) / (rr * rr));
+    hA = max(hA, g); hC += vec4(uSpotC[k].rgb, 1.0) * g;
     core = max(core, uSpotC[k].rgb * g * g);
   }
 }
@@ -387,12 +445,22 @@ void main() {
   Ray st[6];
   st[0] = Ray(uCamPos, dir, vec3(1.0), 0.0, -1);
   int sp = 1;
-  vec3 col = vec3(0.0), core = vec3(0.0), hC = vec3(0.0); float hA = 0.0;
+  vec3 col = vec3(0.0), core = vec3(0.0); vec4 hC = vec4(0.0); float hA = 0.0;
   for (int k = 0; k < 10; k++) {
     if (sp <= 0) break;
     sp--;
     Ray r = st[sp];
     float wm = max(r.w.r, max(r.w.g, r.w.b));
+    if (r.skip >= 200) {                               // inside glass: on to the far face, then out or reflected back in
+      int gi = r.skip - 200; vec3 gn; float R;
+      float tg = solidHit(gi, r.o, r.d, true, gn);
+      if (uNSeg > 0) beamGlow(r.o, r.o + r.d * tg, r.t, wm, hA, hC, core);
+      vec3 hp = r.o + r.d * tg, tr = refractF(r.d, gn, false, R);
+      if (R > 0.999) { if (sp < 6) { st[sp] = Ray(hp, tr, r.w, r.t + tg, r.skip); sp++; } continue; }
+      if (R * wm > 0.03 && sp < 5) { st[sp] = Ray(hp, reflect(r.d, gn), r.w * R, r.t + tg, r.skip); sp++; }
+      if (sp < 6) { st[sp] = Ray(hp, tr, r.w * (1.0 - R), r.t + tg, gi); sp++; }
+      continue;
+    }
     float tp; vec2 ab;
     int ip = hitPanel(r.o, r.d, r.skip, MAXT, tp, ab);
     float te; vec3 en;
@@ -420,6 +488,13 @@ void main() {
       vec3 hp = r.o + r.d * tp, n = uPN[ip].xyz;
       int type = int(uPC[ip].w + 0.5);
       if (uNS > 0) spotGlow(hp, tt, wm, hA, hC, core);
+      if (type >= 3) {                                   // glass: partly reflected, the rest refracted in
+        vec3 gn; float R; solidHit(ip, r.o, r.d, false, gn);
+        vec3 tr = refractF(r.d, gn, true, R), tint = ip == uSel ? vec3(1.0, 0.85, 0.5) : vec3(0.92, 0.98, 0.96);
+        if (R * wm > 0.03 && sp < 5) { st[sp] = Ray(hp, reflect(r.d, gn), r.w * R, tt, ip); sp++; }
+        if (sp < 6) { st[sp] = Ray(hp, tr, r.w * (1.0 - R) * tint, tt, 200 + ip); sp++; }
+        continue;
+      }
       if (abs(ab.x) > uPU[ip].w - FRAME || abs(ab.y) > uPN[ip].w - FRAME) {     // the frame is opaque
         vec3 fc = ip == uSel ? vec3(1.0, 0.78, 0.25) : (type == 0 ? vec3(0.34, 0.35, 0.38) : (type == 1 ? vec3(0.25, 0.48, 0.58) : vec3(0.5, 0.32, 0.6)));
         col += r.w * mix(HAZE, fc * (0.65 + 0.35 * abs(dot(n, uSun))), fog);
@@ -441,7 +516,7 @@ void main() {
     }
   }
   for (int i = 0; i < 6; i++) { if (i >= sp) break; col += st[i].w * HAZE; }   // out of budget: approximate
-  col = mix(col, hC, clamp(0.9 * hA, 0.0, 1.0));                                // laser halo
+  col = mix(col, hC.rgb / max(hC.a, 1e-6), clamp(0.9 * hA, 0.0, 1.0));                                // laser halo
   col += mix(core, vec3(max(core.r, max(core.g, core.b))), 0.6);               // white-hot core
   col = col / (1.0 + max(col - 1.0, 0.0) * 0.6);
   outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
@@ -533,10 +608,34 @@ function makePanel(type, c, n, hu = 0.8, hv = 0.8) {
   n = norm3(n);
   return orient({ type, c, hu, hv, pitch: Math.asin(Math.max(-1, Math.min(1, n[1]))), yaw: Math.atan2(n[0], -n[2]) });
 }
+// Glass solids, as in the shader: solidFaces lists [outward normal, distance from the centre].
+const glassN = lam => GLASS.A + GLASS.B / (lam || 550) ** 2;
+function solidFaces(p) {
+  const f = [[p.v, p.hv], [mul3(p.v, -1), p.hv]], r = p.hu / Math.sqrt(3);
+  if (p.type === 3) return f.concat([[p.u, p.hu], [mul3(p.u, -1), p.hu], [p.n, GLASS.d], [mul3(p.n, -1), GLASS.d]]);
+  return f.concat([[mul3(p.n, -1), r], [add3(mul3(p.n, 0.5), mul3(p.u, 0.8660254)), r], [add3(mul3(p.n, 0.5), mul3(p.u, -0.8660254)), r]]);
+}
+function solidHit(p, o, d, inside) {   // from outside: where the ray enters; from inside: where it leaves
+  let t0 = -1e9, t1 = 1e9, n0 = null, n1 = null;
+  for (const [N, w] of solidFaces(p)) {
+    const dn = dot3(d, N), dist = w - dot3(sub3(o, p.c), N);
+    if (Math.abs(dn) < 1e-12) { if (dist < 0) t1 = -1e9; continue; }
+    const t = dist / dn;
+    if (dn < 0) { if (t > t0) { t0 = t; n0 = N; } } else if (t < t1) { t1 = t; n1 = N; }
+  }
+  return inside ? { t: t1, n: n1 } : (t0 < t1 && t0 > 1e-4 ? { t: t0, n: n0 } : null);
+}
+function refractF(d, n, goingIn, N) {   // Snell's law and Fresnel reflectance R; dir is null for total internal reflection
+  const eta = goingIn ? 1 / N : N, nf = goingIn ? n : mul3(n, -1), ci = -dot3(d, nf), k = 1 - eta * eta * (1 - ci * ci);
+  if (k < 0) return { dir: null, R: 1 };
+  const ct = Math.sqrt(k), m = 1 / eta, rs = (ci - m * ct) / (ci + m * ct), rp = (m * ci - ct) / (m * ci + ct);
+  return { dir: norm3(add3(mul3(d, eta), mul3(nf, eta * ci - ct))), R: (rs * rs + rp * rp) / 2 };
+}
 function nearestPanel(o, d, skip, tmax) {
   let best = null;
   state.panels.forEach((p, i) => {
     if (i === skip) return;
+    if (p.type >= 3) { const h = solidHit(p, o, d, false); if (h && h.t < (best ? best.t : tmax)) best = { i, t: h.t, a: 0, b: 0 }; return; }
     const den = dot3(d, p.n);
     if (Math.abs(den) < 1e-9) return;
     const t = dot3(sub3(p.c, o), p.n) / den;
@@ -594,7 +693,7 @@ function nearestPlume(o, d, skip, tmax) {
   });
   return best;
 }
-// Follow one laser through mirrors, splitters, gratings and hot air. Returns the straight segments, the points
+// Follow one laser through mirrors, splitters, gratings, hot air and glass. Returns the straight segments, the points
 // where light touches something (spots), and where each branch ends (leaves).
 function traceLaser(o, d, lam) {
   const segs = [], spots = [], leaves = [];
@@ -603,34 +702,47 @@ function traceLaser(o, d, lam) {
   while (stack.length) {
     if (segs.length >= MAXSEG) { full = true; break; }
     const r = stack.pop();
+    if (r.glass >= 0) {          // inside glass: on to the far face, then out (refracted) and partly reflected back in
+      const g = state.panels[r.glass], h = solidHit(g, r.o, r.d, true), hp = add3(r.o, mul3(r.d, h.t)), len = r.len + h.t;
+      const w1 = (r.w0 || 0) + (r.g || 0) * h.t;
+      segs.push({ a: r.o, b: hp, I: r.I, col: r.col, w0: r.w0 || 0, g: r.g || 0 });
+      const f = refractF(r.d, h.n, false, glassN(r.lam)), more = r.depth < LASER.maxDepth;
+      if (more && r.I * f.R >= LASER.minI) stack.push({ ...r, o: hp, d: reflect3(r.d, h.n), I: r.I * f.R, len, depth: r.depth + 1, w0: w1 });
+      if (more && f.dir && r.I * (1 - f.R) >= LASER.minI) stack.push({ ...r, o: hp, d: f.dir, I: r.I * (1 - f.R), len, depth: r.depth + 1, glass: -1, skip: r.glass, w0: w1 });
+      continue;
+    }
     const P = nearestPanel(r.o, r.d, r.skip, LASER.maxLen - r.len);
     const H = nearestPlume(r.o, r.d, r.skip, P ? P.t : LASER.maxLen - r.len);
     const lim = H ? H.t : (P ? P.t : LASER.maxLen - r.len), V = voxelRay(r.o, r.d, lim);
-    const t = V ? V.t : lim, hp = add3(r.o, mul3(r.d, t)), len = r.len + t;
-    segs.push({ a: r.o, b: hp, I: r.I, col: r.col });
+    const t = V ? V.t : lim, hp = add3(r.o, mul3(r.d, t)), len = r.len + t, w1 = (r.w0 || 0) + (r.g || 0) * t;
+    segs.push({ a: r.o, b: hp, I: r.I, col: r.col, w0: r.w0 || 0, g: r.g || 0 });
     const leaf = what => { leaves.push({ I: r.I, depth: r.depth, len, what }); };
-    if (V) { spots.push({ p: hp, I: r.I, col: r.col }); leaf(MAT_NAME[V.m]); continue; }
-    if (H) {                    // bent, and the first time spread by turbulence into a cone of PLUME.rays rays
-      const n = r.fan ? 1 : PLUME.rays, e1 = norm3(cross3(r.d, [0, 1, 0])), e2 = cross3(e1, r.d);
-      if (r.I / n < LASER.minI || r.depth >= LASER.maxDepth) { leaf('hot air'); continue; }
-      for (let k = 0; k < n; k++) {
-        const a = 2.39996 * k + 0.7 * state.time, rad = PLUME.turb * H.s * Math.sqrt((k + 0.5) / n);
-        const dir = norm3(add3(add3(r.d, H.bend), add3(mul3(e1, rad * Math.cos(a)), mul3(e2, rad * Math.sin(a)))));
-        stack.push({ ...r, o: hp, d: dir, I: r.I / n, len, depth: r.depth + 1, skip: 100 + H.i, fan: true });
-      }
+    if (V) { spots.push({ p: hp, I: r.I, col: r.col, w: w1 }); leaf(MAT_NAME[V.m]); continue; }
+    if (H) {      // bent, and widened by turbulence into a soft glow (spreads from several plumes add in quadrature)
+      if (r.depth >= LASER.maxDepth) { leaf('hot air'); continue; }
+      const e1 = norm3(cross3(r.d, [0, 1, 0])), e2 = cross3(e1, r.d), a = 0.7 * state.time, wob = 0.3 * PLUME.turb * H.s;
+      const dir = norm3(add3(add3(r.d, H.bend), add3(mul3(e1, wob * Math.cos(a)), mul3(e2, wob * Math.sin(a)))));
+      stack.push({ ...r, o: hp, d: dir, len, depth: r.depth + 1, skip: 100 + H.i, w0: w1, g: Math.hypot(r.g || 0, PLUME.glow * H.s) });
       continue;
     }
     if (!P) { leaf(null); continue; }
     const p = state.panels[P.i];
-    if (Math.abs(P.a) > p.hu - FRAME || Math.abs(P.b) > p.hv - FRAME) { spots.push({ p: hp, I: r.I, col: r.col }); leaf('a panel frame'); continue; }
-    spots.push({ p: hp, I: r.I * 0.3, col: r.col });
+    if (Math.abs(P.a) > p.hu - FRAME || Math.abs(P.b) > p.hv - FRAME) { spots.push({ p: hp, I: r.I, col: r.col, w: w1 }); leaf('a panel frame'); continue; }
+    spots.push({ p: hp, I: r.I * 0.3, col: r.col, w: w1 });
     const next = (dir, I, extra) => {
       if (I < LASER.minI || r.depth >= LASER.maxDepth) return;
-      stack.push({ ...r, o: hp, d: dir, I, len, depth: r.depth + 1, skip: P.i, ...extra });
+      stack.push({ ...r, o: hp, d: dir, I, len, depth: r.depth + 1, skip: P.i, w0: w1, ...extra });
     };
     if (p.type === 0) next(reflect3(r.d, p.n), r.I * LASER.mirror);
     else if (p.type === 1) { next(r.d, r.I * 0.5); next(reflect3(r.d, p.n), r.I * 0.5); }
-    else {
+    else if (p.type >= 3) {      // glass: partly reflected; the rest refracted in, white light splitting by colour
+      const h = solidHit(p, r.o, r.d, false);
+      next(reflect3(r.d, h.n), r.I * refractF(r.d, h.n, true, glassN(r.lam)).R);
+      for (const l of r.lam ? [r.lam] : WHITE) {
+        const f = refractF(r.d, h.n, true, glassN(l));
+        next(f.dir, r.I * (1 - f.R) / (r.lam ? 1 : WHITE.length), { glass: P.i, lam: l, col: laserRGB(l) });
+      }
+    } else {
       for (let m = -4; m <= 4; m++) {
         const e = r.I * EFF[Math.abs(m)];
         if (e < LASER.minI) continue;
@@ -649,19 +761,20 @@ function traceLaser(o, d, lam) {
 // Displayed brightness is intensity^0.6, so faint branches stay visible.
 function uploadLasers(results, emitters) {
   let ns = 0, nsp = 0;
+  const wid = [];                                     // each segment's widest point, for the bounding spheres
   for (const res of results) {
     for (const s of res.segs) {
       if (ns >= MAXSEG) break;
       const I = Math.pow(s.I, 0.6);
       segData.set([s.a[0], s.a[1], s.a[2], I], ns * 4);
-      segData.set([s.b[0], s.b[1], s.b[2], 0], (MAXSEG + ns) * 4);
-      segData.set([s.col[0], s.col[1], s.col[2], 0], (2 * MAXSEG + ns) * 4);
-      ns++;
+      segData.set([s.b[0], s.b[1], s.b[2], s.g], (MAXSEG + ns) * 4);              // width grows by g per block
+      segData.set([s.col[0], s.col[1], s.col[2], s.w0], (2 * MAXSEG + ns) * 4);   // from w0 at the start
+      wid[ns++] = s.w0 + s.g * Math.hypot(...sub3(s.b, s.a));
     }
     for (const s of res.spots) {
       if (nsp >= MAXS) break;
       uniforms.uSpot.value[nsp].set(s.p[0], s.p[1], s.p[2], Math.pow(s.I, 0.6));
-      uniforms.uSpotC.value[nsp].set(s.col[0], s.col[1], s.col[2], 0);
+      uniforms.uSpotC.value[nsp].set(s.col[0], s.col[1], s.col[2], s.w || 0);
       nsp++;
     }
   }
@@ -674,6 +787,7 @@ function uploadLasers(results, emitters) {
     }
     const c = mul3(add3(lo, hi), 0.5);
     let rad = 0; for (const q of pts) rad = Math.max(rad, Math.hypot(...sub3(q, c)));
+    rad += Math.max(...wid.slice(g * 8, g * 8 + 8));
     uniforms.uGS.value[g].set(c[0], c[1], c[2], rad + 1e-3);
   }
   const ne = Math.min(MAXE, emitters.length);
@@ -751,10 +865,21 @@ function loadScene(mode) {
     // a green laser through a grating turned on its side, which spreads light up and down instead
     emit([31, 2, 30], [0, 0, -1], 532);
     const g = makePanel(2, at([31, 2, 26]), [0, 0, 1]); g.sideways = true; P.push(orient(g));
-  } else {
+  } else if (mode === 'heat_haze') {
     // a beam through the hot air just above a heater, one higher up the same plume, and a green one off-centre
     H.push([18, 1, 32], [36, 1, 32]);
     emit([18, 2.4, 44], [0, 0, -1]); emit([18, 6, 44], [0, 0, -1]); emit([37, 2.4, 44], [0, 0, -1], 532);
+  } else if (mode === 'refraction') {
+    // a glass block turned 60° to the beam; white light through a prism at minimum deviation; a long bar that guides
+    // a beam by total internal reflection
+    emit([12, 2.5, 46], [0, 0, -1]); P.push(makePanel(3, at([12, 2.5, 40]), [0.866, 0, 0.5], 1.2, 1));
+    emit([24.69, 3, 36.57], [0.758, 0, -0.652], 0); P.push(makePanel(4, at([30, 3, 32]), [0.909, 0, 0.417], 1, 1));
+    emit([37.85, 3.46, 30], [0.766, -0.643, 0]); P.push(makePanel(3, at([44, 2.5, 30]), [0, 0, 1], 5, 0.4));
+  } else {
+    // white light softened by hot air, then through a prism at minimum deviation; a softened beam into a glass bar
+    H.push([16, 1, 31], [37, 1, 28]);
+    emit([16, 6, 36], [0, 0, -1], 0); P.push(makePanel(4, at([16, 6, 26]), [-0.909, 0, -0.417], 1, 1));
+    emit([35.94, 5.07, 28], [0.766, -0.643, 0]); P.push(makePanel(3, at([44, 2.5, 28]), [0, 0, 1], 5, 0.4));
   }
   setHeaters(H);
   state.panels = P;
@@ -787,6 +912,7 @@ function say(text) { state.msg = text; state.msgT = 3; }
 function placePanel(type) {
   if (type === 1 && !MODES[state.mode].splitter) return;
   if (type === 2 && !MODES[state.mode].grating) return;
+  if (type >= 3 && !MODES[state.mode].glass) return;
   if (state.panels.length >= MAXP) { say(`At most ${MAXP} panels: delete one first (X).`); return; }
   const { fwd } = camBasis(), o = arr(state.pos), d = arr(fwd);
   const P = nearestPanel(o, d, -1, 10), V = voxelRay(o, d, 10);
@@ -813,6 +939,7 @@ function setMode(mode) {
   document.body.classList.toggle('no-split', !MODES[mode].splitter);
   document.body.classList.toggle('no-grat', !MODES[mode].grating);
   document.body.classList.toggle('no-heat', !MODES[mode].heat);
+  document.body.classList.toggle('no-glass', !MODES[mode].glass);
   document.querySelector(`a[href="${mode}.html"]`).classList.add('cur');
   $('tipsBody').innerHTML = TIPS[mode];
   if (!MODES[mode].grating) { state.lam = 650; $('colour').value = '650'; }
@@ -862,6 +989,8 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyR') pinLaser();
   if (e.code === 'KeyZ') state.pins = [];
   if (e.code === 'Digit4' && MODES[state.mode].heat) toggleHeater();
+  if (e.code === 'Digit5') placePanel(3);
+  if (e.code === 'Digit6') placePanel(4);
   if (e.code === 'KeyN' && MODES[state.mode].grating) { const s = $('colour'); s.selectedIndex = (s.selectedIndex + 1) % s.options.length; state.lam = +s.value; }
   if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
 });
