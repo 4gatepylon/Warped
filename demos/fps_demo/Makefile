@@ -15,6 +15,7 @@
 #
 # Example:
 #     make download-assets && make run-fps-demo RENDER_SCALE=0.8
+SHELL := /bin/bash
 RENDER_SCALE ?= 1.0
 BOT_COUNT ?= 4
 BENCH_SECONDS ?= 30
@@ -49,7 +50,7 @@ run-fps-demo:
 
 bench-fps-demo:
 	cargo build --release --bin warped-fps-demo
-	@run_dir="$(BENCH_RUN_DIR)"; mkdir -p "$$run_dir"; \
+	@set -o pipefail; run_dir="$(BENCH_RUN_DIR)"; mkdir -p "$$run_dir"; \
 	  printf '%s\n%s\n' "$(BENCH_COMMAND)" "$$(git describe --always --dirty)" > "$$run_dir/command.txt"; \
 	  $(BENCH_COMMAND) 2>&1 | tee "$$run_dir/output.txt"; \
 	  echo "wrote $$run_dir"
