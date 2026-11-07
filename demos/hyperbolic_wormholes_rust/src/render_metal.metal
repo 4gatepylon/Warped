@@ -6,7 +6,7 @@
  *
  * @par Interface
  * - Kernel `trace_pixels`: buffer 0 holds the scene rows (`ROW_COUNT` rows of `ROW_TEXEL_COUNT`
- *   float4s), buffer 1 the `Uniforms`, buffer 2 the RGBA8 output, top row first.
+ *   float4s), buffer 1 the `Uniforms`, texture 0 the output image, top row first.
  * - `render_metal.rs` replaces each placeholder (a constant's name between double underscores) with the
  *   Rust constant of that name before compiling.
  *
@@ -34,6 +34,8 @@ constant int TEXEL_BOXES = __TEXEL_BOXES__;
 constant int TEXELS_PER_BOX = __TEXELS_PER_BOX__;
 constant int TEXEL_CLUSTERS = __TEXEL_CLUSTERS__;
 constant int TEXELS_PER_CLUSTER = __TEXELS_PER_CLUSTER__;
+constant int TEXEL_CLUSTER_INFO = __TEXEL_CLUSTER_INFO__;
+constant int TEXEL_CLUSTER_ORDER = __TEXEL_CLUSTER_ORDER__;
 constant int TEXEL_SPOT = __TEXEL_SPOT__;
 constant int TEXEL_BEAM_CHUNKS = __TEXEL_BEAM_CHUNKS__;
 constant int TEXELS_PER_BEAM_CHUNK = __TEXELS_PER_BEAM_CHUNK__;
@@ -91,6 +93,7 @@ constant float BEAM_REACH = 4.8;
 constant float BEAM_FADE_M = 260.0;
 constant float SPOT_RADIUS_M = 0.07;
 constant float SPOT_PIXELS = 2.5;
+constant float CANDIDATE_WINDOW_M = 3.0;
 constant int NO_HIT = -2;
 constant int GROUND_HIT = -1;
 constant float TILE_SIDE_COUNT = 4.0;
@@ -279,7 +282,7 @@ static float get_cutoff_entry_tau(thread const Scene &scene, int row, float4 x, 
  * @return Whether the ray went through.
  * @par Example
  * @code
- * if (cross_throat(scene, row, x, v)) box_clear_until_m = -1.0;
+ * if (cross_throat(scene, row, x, v)) cache.global_clear_until_m = -1.0;
  * @endcode
  */
 static bool cross_throat(thread const Scene &scene, thread int &row, thread float4 &x, thread float4 &v) {
@@ -306,20 +309,25 @@ static bool cross_throat(thread const Scene &scene, thread int &row, thread floa
 }
 
 /**
- * @brief `test_box` finds where a geodesic first enters a box within reach (cosh and sinh of the reach in
- * curvature radii), lowering `hit` if nearer.
+ * @brief `test_slabs` intersects a geodesic with a box stored as a box's first five texels (three normals,
+ * sinh of the half sizes, half sizes), within reach (cosh and sinh of the reach in curvature radii). Along
+ * x cosh s + v sinh s, with τ = tanh s, each slab |⟨x, N⟩| ≤ σ is a quadratic inequality in τ, so the box
+ * is an interval of τ, which it sets (`tau_in` > `tau_out` when the geodesic misses or is out of reach),
+ * with the face and side entered.
  * @return A lower bound on the start's distance from the box, in blocks.
  * @par Example
  * @code
- * float lower_m = test_box(scene, row, b, x, v, reach_cosh, reach_sinh, hit);
+ * float lower_m = test_slabs(scene, row, first, x, v, reach_cosh, reach_sinh, tau_in, tau_out, face, side);
  * @endcode
  */
-static float test_box(thread const Scene &scene, int row, int b, float4 x, float4 v, float reach_cosh, float reach_sinh, thread Hit &hit) {
+static float test_slabs(thread const Scene &scene, int row, int first, float4 x, float4 v, float reach_cosh, float reach_sinh,
+                        thread float &tau_in, thread float &tau_out, thread int &face, thread float &side) {
     float r = scene.u.curvature_radius_m;
-    int first = TEXEL_BOXES + TEXELS_PER_BOX * b;
     float4 sigma = fetch(scene, row, first + 3);
     float4 normals[3] = {fetch(scene, row, first), fetch(scene, row, first + 1), fetch(scene, row, first + 2)};
     float3 a = float3(mdot(x, normals[0]), mdot(x, normals[1]), mdot(x, normals[2]));
+    tau_in = 1.0;
+    tau_out = -1.0;
     for (int i = 0; i < 3; i++) {
         float sinh_limit = sigma[i] * reach_cosh + sqrt(1.0 + sigma[i] * sigma[i]) * reach_sinh;
         if (abs(a[i]) > sinh_limit) return r * asinh(abs(a[i])) - fetch(scene, row, first + 4)[i];
@@ -327,42 +335,152 @@ static float test_box(thread const Scene &scene, int row, int b, float4 x, float
     float4 half_m = fetch(scene, row, first + 4);
     float3 lower = r * asinh(abs(a)) - half_m.xyz;
     float lower_m = max(lower.x, max(lower.y, lower.z));
-    float tau_in = -1.0, tau_out = 1.0, side = 1.0;
-    int face = 0;
+    float temp_in = -1.0, temp_out = 1.0;
     for (int i = 0; i < 3; i++) {
         float ai = a[i], bi = mdot(v, normals[i]), s = sigma[i];
         float discriminant = s * s + bi * bi - ai * ai;
         if (discriminant < 0.0) return lower_m;
         float root = s * sqrt(discriminant), denominator = bi * bi + s * s;
         float tau_0 = (-ai * bi - root) / denominator, tau_1 = (-ai * bi + root) / denominator;
-        if (tau_0 > tau_in) { tau_in = tau_0; face = i; side = ai + bi * tau_0 >= 0.0 ? 1.0 : -1.0; }
-        tau_out = min(tau_out, tau_1);
+        if (tau_0 > temp_in) { temp_in = tau_0; face = i; side = ai + bi * tau_0 >= 0.0 ? 1.0 : -1.0; }
+        temp_out = min(temp_out, tau_1);
     }
+    tau_in = temp_in;
+    tau_out = temp_out;
+    return lower_m;
+}
+
+/**
+ * @brief `test_box` finds where a geodesic first enters a box within reach, lowering `hit` if nearer.
+ * @return A lower bound on the start's distance from the box, in blocks.
+ * @par Example
+ * @code
+ * float lower_m = test_box(scene, row, b, x, v, reach_cosh, reach_sinh, hit);
+ * @endcode
+ */
+static float test_box(thread const Scene &scene, int row, int b, float4 x, float4 v, float reach_cosh, float reach_sinh, thread Hit &hit) {
+    float tau_in, tau_out, side = 1.0;
+    int face = 0;
+    float lower_m = test_slabs(scene, row, TEXEL_BOXES + TEXELS_PER_BOX * b, x, v, reach_cosh, reach_sinh, tau_in, tau_out, face, side);
     if (tau_in <= tau_out && tau_in >= 0.0 && tau_in < hit.tau) { hit.tau = tau_in; hit.index = b; hit.face = face; hit.side = side; }
     return lower_m;
 }
 
 /**
- * @brief `test_boxes` tests a geodesic piece against every cluster, skipping clusters out of reach.
- * @return A lower bound on the distance to every box, in blocks.
+ * @brief `test_cluster` tests a geodesic piece against one cluster's boxes, skipping them all unless the piece
+ * reaches the cluster's bounding box before the nearest hit so far (a one-box cluster tests its box directly).
+ * @return A lower bound on the distance to the cluster, in blocks.
  * @par Example
  * @code
- * float clear_m = test_boxes(scene, row, x, vh, ds_m, hit);
+ * float lower_m = test_cluster(scene, row, k, x, vh, reach_cosh, reach_sinh, hit);
  * @endcode
  */
-static float test_boxes(thread const Scene &scene, int row, float4 x, float4 v, float reach_m, thread Hit &hit) {
+static float test_cluster(thread const Scene &scene, int row, int k, float4 x, float4 v, float reach_cosh, float reach_sinh, thread Hit &hit) {
+    int first = TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k;
+    float4 info = fetch(scene, row, first + TEXEL_CLUSTER_INFO);
+    int first_box = int(info.x + 0.5), box_count = int(info.y + 0.5);
+    if (box_count > 1) {
+        float tau_in, tau_out, side;
+        int face;
+        float lower_m = test_slabs(scene, row, first, x, v, reach_cosh, reach_sinh, tau_in, tau_out, face, side);
+        if (tau_in > tau_out || tau_out < 0.0 || tau_in >= hit.tau) return lower_m;
+    }
+    float nearest_m = 1e9;
+    for (int b = first_box; b < first_box + box_count; b++) nearest_m = min(nearest_m, test_box(scene, row, b, x, v, reach_cosh, reach_sinh, hit));
+    return nearest_m;
+}
+
+/**
+ * @brief `get_cluster_lower_bound` gives a distance a point at `height_m` is at least from a cluster: past its
+ * bounding box's slabs, and no less than its height above the cluster's top.
+ * @return The lower bound, in blocks (negative inside).
+ * @par Example
+ * @code
+ * float lower_m = get_cluster_lower_bound(scene, row, k, x, height_m);
+ * @endcode
+ */
+static float get_cluster_lower_bound(thread const Scene &scene, int row, int k, float4 x, float height_m) {
+    float r = scene.u.curvature_radius_m;
+    int first = TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k;
+    float above_top_m = height_m - fetch(scene, row, first + TEXEL_CLUSTER_INFO).z;
+    float3 a = float3(mdot(x, fetch(scene, row, first)), mdot(x, fetch(scene, row, first + 1)), mdot(x, fetch(scene, row, first + 2)));
+    float3 lower = r * asinh(abs(a)) - fetch(scene, row, first + 4).xyz;
+    return max(above_top_m, max(lower.x, max(lower.y, lower.z)));
+}
+
+/**
+ * @brief `BoxCache` is one ray's memory of the clusters near it: how many clusters of the row's distance order
+ * it has reached (`activated_count`), where its row's distances are measured from (`row_start_m`, how far along
+ * the ray the row's origin effectively was), a bit mask of the candidates from the last full pass, and how far
+ * the ray can go before another full pass (`global_clear_until_m`) or before a candidate could be reached
+ * (`local_clear_until_m`).
+ */
+struct BoxCache {
+    int activated_count;
+    float row_start_m;
+    uint candidates;
+    float global_clear_until_m;
+    float local_clear_until_m;
+};
+
+/**
+ * @brief `reset_box_cache` starts a ray's memory of nearby clusters afresh in a row, at point `x`.
+ * @par Example
+ * @code
+ * reset_box_cache(scene, cache, x, travelled_m);
+ * @endcode
+ */
+static void reset_box_cache(thread const Scene &scene, thread BoxCache &cache, float4 x, float travelled_m) {
+    cache.activated_count = 0;
+    cache.row_start_m = travelled_m - get_distance_of_q(get_q(x, float4(0.0, 0.0, 0.0, 1.0))) * scene.u.curvature_radius_m;
+    cache.candidates = 0;
+    cache.global_clear_until_m = -1.0;
+    cache.local_clear_until_m = -1.0;
+}
+
+/**
+ * @brief `test_boxes` tests a geodesic piece starting `travelled_m` along the ray against the boxes it might
+ * reach. A full pass looks only at clusters the ray could have reached by now, by the row's distance order
+ * (cluster k is at least D_k from the row's origin, so it is out of reach until the ray has gone D_k), bounds
+ * their distances, keeps those within `CANDIDATE_WINDOW_M` (or the piece's reach) in the mask, and notes when
+ * any other could matter; until then only the candidates are tested, and
+ * only once one could be within reach. A piece that climbs from above a cluster's top skips that cluster: along
+ * a geodesic sinh(height) = a cosh s + b sinh s, which only grows when a and b are not negative.
+ * @par Example
+ * @code
+ * test_boxes(scene, row, x, vh, travelled_m, ds_m, hit, cache);
+ * @endcode
+ */
+static void test_boxes(thread const Scene &scene, int row, float4 x, float4 v, float travelled_m, float reach_m, thread Hit &hit, thread BoxCache &cache) {
+    if (travelled_m + reach_m <= cache.local_clear_until_m) return;
+    float4 ground = fetch(scene, row, TEXEL_GROUND);
+    float ground_a = mdot(x, ground), ground_b = mdot(v, ground);
+    float height_m = scene.u.curvature_radius_m * asinh(ground_a);
+    bool is_climbing = ground_a > 0.0 && ground_b >= 0.0;
+    if (travelled_m + reach_m > cache.global_clear_until_m) {
+        float window_m = max(reach_m, CANDIDATE_WINDOW_M), row_travel_m = travelled_m - cache.row_start_m, other_m = 1e9;
+        while (cache.activated_count < scene.u.cluster_count && fetch(scene, row, TEXEL_CLUSTER_ORDER + cache.activated_count).y <= row_travel_m + window_m) {
+            cache.activated_count++;
+        }
+        if (cache.activated_count < scene.u.cluster_count) other_m = fetch(scene, row, TEXEL_CLUSTER_ORDER + cache.activated_count).y - row_travel_m;
+        cache.candidates = 0;
+        for (int i = 0; i < cache.activated_count; i++) {
+            int k = int(fetch(scene, row, TEXEL_CLUSTER_ORDER + i).x + 0.5);
+            float lower_m = get_cluster_lower_bound(scene, row, k, x, height_m);
+            if (lower_m <= window_m) cache.candidates |= 1u << k;
+            else other_m = min(other_m, lower_m);
+        }
+        cache.global_clear_until_m = travelled_m + other_m;
+    }
     float r = scene.u.curvature_radius_m, nearest_m = 1e9;
     float reach_cosh = cosh(reach_m / r), reach_sinh = sinh(reach_m / r);
-    for (int k = 0; k < scene.u.cluster_count; k++) {
-        float4 info = fetch(scene, row, TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k + 1);
-        int first_box = int(info.y + 0.5), box_count = int(info.z + 0.5);
-        if (box_count > 1) {
-            float sphere_m = get_distance_of_q(get_q(x, fetch(scene, row, TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k))) * r - info.x;
-            if (sphere_m > reach_m) { nearest_m = min(nearest_m, sphere_m); continue; }
-        }
-        for (int b = first_box; b < first_box + box_count; b++) nearest_m = min(nearest_m, test_box(scene, row, b, x, v, reach_cosh, reach_sinh, hit));
+    for (uint left = cache.candidates; left != 0; left &= left - 1) {
+        int k = int(ctz(left));
+        float above_top_m = height_m - fetch(scene, row, TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k + TEXEL_CLUSTER_INFO).z;
+        if (is_climbing && above_top_m > 0.0) { nearest_m = min(nearest_m, above_top_m); continue; }
+        nearest_m = min(nearest_m, test_cluster(scene, row, k, x, v, reach_cosh, reach_sinh, hit));
     }
-    return nearest_m;
+    cache.local_clear_until_m = min(travelled_m + nearest_m, cache.global_clear_until_m);
 }
 
 /** @brief `hash_3` gives a pseudo-random number in [0, 1) for a 3-vector. @par Example @code float h = hash_3(p); @endcode */
@@ -589,7 +707,7 @@ static float get_spot_glow(thread const Scene &scene, int row, float4 xh, float 
  * @endcode
  */
 kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Uniforms &u [[buffer(1)]],
-                         device uchar4 *pixels [[buffer(2)]], uint2 id [[thread_position_in_grid]]) {
+                         texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
     float inradius = acosh(cos(M_PI_F / TILES_PER_VERTEX) / sin(M_PI_F / TILE_SIDE_COUNT));
     float tile_cosh = cosh(inradius), tile_sinh = sinh(inradius);
@@ -602,14 +720,16 @@ kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Unifo
     float4 x = float4(0.0, 0.0, 0.0, 1.0);
     float4 v = float4(normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0)), 0.0);
     int row = 0;
-    float travelled_m = 0.0, box_clear_until_m = -1.0, core = 0.0, halo = 0.0;
+    float travelled_m = 0.0, core = 0.0, halo = 0.0;
+    BoxCache cache;
+    reset_box_cache(scene, cache, x, 0.0);
     bool has_beam = u.beam_chunk_count > 0;
     float3 color = LOST_COLOR;
     for (int step = 0; step < MAX_STEP_COUNT; step++) {
         float q_nearest;
         float4 bend = get_bend(scene, row, x, v, q_nearest);
         if (q_nearest < scene.q_throat && cross_throat(scene, row, x, v)) {
-            box_clear_until_m = -1.0;
+            reset_box_cache(scene, cache, x, travelled_m);
             bend = get_bend(scene, row, x, v, q_nearest);
         }
         bool is_far = q_nearest > scene.q_cutoff;
@@ -628,7 +748,7 @@ kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Unifo
         float4 ground = fetch(scene, row, TEXEL_GROUND);
         float ground_a = mdot(x, ground), ground_b = mdot(vh, ground);
         if (ground_a > 0.0 && ground_b < 0.0 && -ground_a / ground_b < hit.tau) { hit.tau = -ground_a / ground_b; hit.index = GROUND_HIT; }
-        if (travelled_m + ds_m > box_clear_until_m) box_clear_until_m = travelled_m + test_boxes(scene, row, x, vh, ds_m, hit);
+        test_boxes(scene, row, x, vh, travelled_m, ds_m, hit, cache);
         if (hit.index != NO_HIT) {
             float4 point = to_point(x + hit.tau * vh);
             float end_m = travelled_m + atanh(hit.tau) * r;
@@ -664,6 +784,5 @@ kernel void trace_pixels(device const float4 *rows [[buffer(0)]], constant Unifo
     }
     color = mix(color, LASER_HALO_COLOR, clamp(0.9 * halo, 0.0, 1.0)) + LASER_CORE_COLOR * core;
     color = color / (1.0 + max(color - 1.0, 0.0) * HIGHLIGHT_ROLLOFF);
-    color = clamp(color, 0.0, 1.0) * 255.0;
-    pixels[id.y * uint(u.width_px) + id.x] = uchar4(uchar(color.x), uchar(color.y), uchar(color.z), 255);
+    image.write(float4(clamp(color, 0.0, 1.0), 1.0), id);
 }

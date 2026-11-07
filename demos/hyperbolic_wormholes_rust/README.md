@@ -20,9 +20,13 @@ make run-demo RENDERER=cpu
   moving forward.
 - `L` toggles the laser: a light ray from your hand that bends near mouths and goes through them. The HUD says what
   it hits.
-- `R` respawns. `-` and `=` lower and raise the render resolution (Metal starts at the window's full resolution, the
-  CPU at 0.35 of its pixels per side). The HUD shows the frame rate, the render time and, with Metal, the GPU's own
-  time.
+- `R` respawns. `-` and `=` lower and raise the render resolution. Metal ray-traces fewer pixels than the window has
+  and upscales them with MetalFX: it starts at half the window's pixels per side and adjusts the scale itself to
+  about 12 ms of GPU time per frame, until you press `-` or `=`. The CPU starts at 0.35 per side.
+- The HUD shows the frame rate, the render time and, with Metal, the GPU's own time and the render scale; with Metal
+  it is in the window's title.
+- `--width-px` and `--height-px` set the window's starting size (`cargo run --release -- --width-px 2560
+  --height-px 1400`); `--render-scale 1` turns upscaling off.
 
 The three wormholes start ahead on the left (to the house door), behind you by the blue pylon (to the red pylon
 about 50 blocks down the rails), and far left (to high above the rails, where you fall back to the ground).
@@ -42,7 +46,11 @@ make run-autopilot
   fly into 2A, walk into 3A and fall from above the rails, and fire the laser through 1A. It writes every frame's
   time, render time, height and events to `frames.csv`, every 30th frame as a PNG, and a summary of each leg to
   `.artifacts/autopilot/<run_id>/`.
-- Both add `--json` and `--label <name>` when run directly (`cargo run --release -- --help`).
+- Both render at full resolution unless given `--render-scale` (`0.5` ray-traces half the pixels per side and
+  upscales them with MetalFX), and add `--json` and `--label <name>` when run directly (`cargo run --release --
+  --help`).
+- `--exit-after-s 8` opens the real window, plays for 8 seconds without input, closes it and prints the frame rate,
+  GPU time and render scale.
 
 ## How it works
 
@@ -55,8 +63,9 @@ make run-autopilot
   draws the laser: each straight piece of a ray is tested against the beam's pieces in Klein coordinates, where
   geodesics are straight lines.
 - `render_metal.metal` and `render_metal.rs`: the same ray tracer in Metal Shading Language, one GPU thread per pixel,
-  compiled when the program starts. Each frame copies the scene rows to the GPU, waits for it, and copies the pixels
-  back for SDL to show. Its images match the CPU's except for the clouds and block speckles, whose pseudo-random hash
+  compiled when the program starts. Each frame copies the scene rows to the GPU, ray-traces into a texture,
+  upscales it with MetalFX when the render scale is below 1, and copies it into the window's Metal layer, without
+  waiting for the GPU. Its images match the CPU's except for the clouds and block speckles, whose pseudo-random hash
   (`fract(sin(x) · 43758.5)`) comes out differently on the GPU.
 - `physics.rs`: walking, gravity, the jetpack and flying, crossing throats, aiming, and tracing the laser (with the
   renderer's own ray tracer, so the laser hits exactly what you see).
@@ -65,40 +74,65 @@ make run-autopilot
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the
 distance itself, which saves most of the `asinh` calls that dominated the first CPU profile. And a ray only checks
 whether it is inside a throat when the bending sum, which already measures every mouth, finds one that close, which
-made the Metal shader about 30% faster. Both changes leave every pixel the same.
+made the Metal shader about 30% faster.
+
+Most of the rest of the speed-up comes from not testing boxes a ray can't reach. Each cluster of boxes (the house,
+a pylon, a tree) has a bounding box in its own frame, and a ray skips the whole cluster unless it reaches that box.
+The Metal shader also keeps, per ray, a bit mask of the clusters within 3 blocks and how far the ray can go before
+another could matter, so most steps test no boxes at all. All of these leave every pixel the same; see `DECISIONS.md`
+(D12, D17, D18) for what each gained.
 
 ## Results
 
 Run on an Apple M3 Pro (6 performance and 6 efficiency cores), macOS 15.7.3, Rust 1.98.1, release build. The machine
 was also running other work, so treat the times as rough.
 
-Median milliseconds per frame (`make bench-views`, 20 frames for WebGL and Metal):
+Median milliseconds per frame at full resolution (`make bench-views`, 20 frames for WebGL and Metal, 3 to 5 for the
+CPU):
 
 | View | WebGL 1280×800 | Metal 1280×800 | CPU 1280×800 | WebGL 2560×1600 | Metal 2560×1600 | CPU 2560×1600 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| spawn | 35 | 23 | 957 | 106 | 81 | 4212 |
-| aimed at mouth 1A | 34 | 18 | 770 | 99 | 64 | 3238 |
-| 0.8 blocks from 1A's throat | 75 | 37 | 1897 | 235 | 134 | 8980 |
-| above the rails | 9 | 6 | 360 | 32 | 25 | 1485 |
-| high above spawn | 33 | 15 | 747 | 95 | 52 | 2487 |
-| laser through 1A | - | 25 | 1474 | - | 88 | 5231 |
+| spawn | 35 | 9.1 (23) | 838 | 106 | 32 (81) | 3484 |
+| aimed at mouth 1A | 34 | 7.7 (18) | 783 | 99 | 27 (64) | 3027 |
+| 0.8 blocks from 1A's throat | 75 | 14 (37) | 1403 | 235 | 53 (134) | 5719 |
+| above the rails | 9 | 3.3 (6) | 441 | 32 | 13 (25) | 1776 |
+| high above spawn | 33 | 6.0 (15) | 631 | 95 | 21 (52) | 2624 |
+| laser through 1A | - | 11 (25) | 853 | - | 38 (88) | 3510 |
 
+- In brackets: Metal before the third layer's changes (PR 70).
 - WebGL is the browser demo at the same drawing-buffer sizes, in the Claude desktop app's built-in browser (Chromium
   152, ANGLE on Metal), timed with `readPixels`. Its scene differs a little: its mouths and eye are 4.5 blocks up,
   not 1.7, and it has no laser.
-- Metal's time is almost all GPU time; packing the scene and copying the pixels back cost about half a millisecond
-  at 1280×800.
-- So Metal is 1.3 to 2.2 times faster than WebGL here, and the CPU 40 to 70 times slower than Metal (its times are from the first layer, before the
-  throat check change, which doesn't speed up the CPU). At 2560×1600
-  Metal still runs the spawn view at only about 12 fps: the ray tracer's own work, not the browser, is what makes
-  full resolution slow.
-- Larger integration steps near mouths are faster but less exact. 1.5 times longer steps took the spawn view from
-  23 to 17 ms and 2 times longer to 14 ms (Metal, 1280×800), moving edges inside the lensed areas by about a pixel
-  (15% and 22% of pixels changed by more than 30 of 765). They are not on; see `DECISIONS.md`.
+- So Metal is now 2.5 to 5.5 times faster than WebGL, and about 2.4 times faster than before the third layer (1.9
+  above the rails, where there is least to skip). The CPU, which got the bounding boxes too, is 80 to 140 times
+  slower than Metal.
+
+With MetalFX upscaling to 2560×1600 (`--render-scale`):
+
+| View | half the pixels per side (0.5) | 0.75 per side | full (1) |
+| --- | ---: | ---: | ---: |
+| spawn | 11 | 20 | 32 |
+| aimed at mouth 1A | 9.8 | 18 | 27 |
+| 0.8 blocks from 1A's throat | 16 | 32 | 53 |
+| above the rails | 5.5 | 8.8 | 13 |
+| high above spawn | 8.0 | 14 | 21 |
+| laser through 1A | 13 | 24 | 38 |
+
+The upscaled image keeps edges sharp, but the squeezed textures near mouths turn grainy.
+
+In the real window (`--exit-after-s 8`, standing at spawn, on a 2560×1440 display at 1× scaling):
+
+| Window | full resolution | half per side | adjusting itself (the default) |
+| --- | ---: | ---: | ---: |
+| 1280×800 | - | - | 138 fps (stays at full resolution) |
+| 2560×1336 | 40 fps | 128 fps | 83 fps (settles at 0.66 per side) |
+
+- Larger integration steps near mouths would be faster but less exact; they are not on (D13 in `DECISIONS.md`).
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s
 of flying, through 3A after 2.4 s of walking and down from 12 blocks in 0.6 s, and the laser through 1A to the
-ground beyond. With Metal at 1280×800 its legs run at 29 to 158 fps.
+ground beyond. With Metal, its legs run at 87 to 372 fps at 1280×800, and at 73 to 213 fps at 2560×1600 with half the
+pixels per side upscaled.
 
 See [`DECISIONS.md`](DECISIONS.md) for how the benchmark was chosen.

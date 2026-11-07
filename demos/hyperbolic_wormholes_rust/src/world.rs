@@ -14,6 +14,7 @@ use glam::{DMat4, DVec4};
 
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
+    minkowski_dot,
 };
 
 pub const DEFAULT_CURVATURE_RADIUS_M: f64 = 8.0;
@@ -57,6 +58,8 @@ const TREE_CLEARANCE_FROM_POINTS_M: f64 = 8.0;
 const TREE_MIN_HEIGHT_M: f64 = 4.0;
 const TREE_HEIGHT_CHOICE_COUNT: f64 = 2.0;
 const FULL_TURN_RAD: f64 = std::f64::consts::TAU;
+const STANDING_TOLERANCE: f64 = 1e-9;
+const BOX_CORNER_COUNT: usize = 8;
 const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_2;
 /// `DEFAULT_ENTRANCES` is each starting wormhole's entrance: its bearing from the spawn view and
 /// its distance along the ground from spawn.
@@ -100,13 +103,14 @@ pub struct HyperbolicBox {
     pub material: u32,
 }
 
-/// `Cluster` is a run of boxes inside one sphere, which a ray can skip at once.
+/// `Cluster` is a run of boxes inside one bounding box (`bound`, the box itself for a one-box
+/// cluster), which a ray can skip at once.
 #[derive(Clone)]
 pub struct Cluster {
-    pub center: DVec4,
-    pub radius_m: f64,
+    pub bound: HyperbolicBox,
     pub first_box: usize,
     pub box_count: usize,
+    pub top_m: f64,
 }
 
 /// `Mouth` is one end of a wormhole. Its frame's columns are right, up, back and centre; you pass
@@ -149,12 +153,12 @@ impl World {
         world.spawn_frame = world.make_ground_frame(SPAWN_X_M, SPAWN_Z_M, SPAWN_HEADING_RAD);
         world.build_rails();
         let house_frame: DMat4 = world.get_house_frame();
-        world.group_boxes(|w| w.build_house(house_frame));
+        world.group_boxes(house_frame, |w| w.build_house(house_frame));
         let blue_frame: DMat4 =
             world.make_frame_from_spawn(BLUE_PYLON_BEARING_RAD, BLUE_PYLON_DISTANCE_M);
-        world.group_boxes(|w| w.build_pylon(blue_frame, TEAM_BLUE));
+        world.group_boxes(blue_frame, |w| w.build_pylon(blue_frame, TEAM_BLUE));
         let red_frame: DMat4 = world.get_red_pylon_frame();
-        world.group_boxes(|w| w.build_pylon(red_frame, TEAM_RED));
+        world.group_boxes(red_frame, |w| w.build_pylon(red_frame, TEAM_RED));
         let pairs: Vec<(DMat4, DMat4)> = world.make_default_wormholes();
         world.set_wormholes(&pairs);
         world.place_trees();
@@ -258,40 +262,95 @@ impl World {
         self.add_box(box_frame, half_m, color, material);
     }
 
-    /// `group_boxes` runs a builder and records the boxes it adds as one cluster, with a sphere
-    /// around its first box's centre that holds them all.
+    /// `group_boxes` runs a builder and records the boxes it adds as one cluster, bounded by a box
+    /// around `frame`'s planes that holds them all (or by its only box).
     ///
-    /// Example: `world.group_boxes(|w| w.build_house(frame));`
-    fn group_boxes(&mut self, build: impl FnOnce(&mut World)) {
+    /// Example: `world.group_boxes(frame, |w| w.build_house(frame));`
+    fn group_boxes(&mut self, frame: DMat4, build: impl FnOnce(&mut World)) {
         assert!(
             self.clusters.len() < MAX_CLUSTER_COUNT,
             "group_boxes: too many clusters"
         );
-        let (r, first_box): (f64, usize) = (self.curvature_radius_m, self.boxes.len());
+        let first_box: usize = self.boxes.len();
         build(self);
-        assert!(
-            self.boxes.len() > first_box,
-            "group_boxes: the builder added no boxes"
-        );
-        let center: DVec4 = self.boxes[first_box].center;
-        let radius_m: f64 = self.boxes[first_box..]
-            .iter()
-            .map(|b| {
-                let box_radius_m: f64 = r * b
-                    .half_m
+        let boxes: &[HyperbolicBox] = &self.boxes[first_box..];
+        assert!(!boxes.is_empty(), "group_boxes: the builder added no boxes");
+        let bound: HyperbolicBox = if boxes.len() == 1 {
+            boxes[0].clone()
+        } else {
+            let half_m: [f64; 3] = [AXIS_X, AXIS_Y, AXIS_Z].map(|axis| {
+                let sinh_max: f64 = boxes
                     .iter()
-                    .map(|h| (h / r).cosh())
-                    .product::<f64>()
-                    .acosh();
-                get_distance(center, b.center) * r + box_radius_m
-            })
+                    .map(|b| self.get_slab_sinh(b, frame.col(axis)))
+                    .fold(0.0, f64::max);
+                self.curvature_radius_m * sinh_max.asinh()
+            });
+            HyperbolicBox {
+                normals: [frame.col(AXIS_X), frame.col(AXIS_Y), frame.col(AXIS_Z)],
+                center: frame.col(AXIS_W),
+                half_m,
+                color: [0.0; 3],
+                material: MATERIAL_SOLID,
+            }
+        };
+        let top_m: f64 = boxes
+            .iter()
+            .map(|b| self.get_box_top_m(b))
             .fold(0.0, f64::max);
         self.clusters.push(Cluster {
-            center,
-            radius_m,
+            bound,
             first_box,
             box_count: self.boxes.len() - first_box,
+            top_m,
         });
+    }
+
+    /// `get_slab_sinh` gives a bound on |⟨x, n⟩| over the points x of a box, for a plane's unit
+    /// normal n: the sinh of the box's greatest distance from the plane, in curvature radii. In the
+    /// box's own coordinates p, where the box is |p_i| ≤ sinh(h_i/R) and p_w = √(1 + |p|²),
+    /// ⟨x, n⟩ = a·p + a_w p_w is convex for one sign and concave for the other. The convex sign
+    /// peaks at a corner, and the concave sign stays below Σ|a_i| sinh(h_i/R) - |a_w|, as p_w ≥ 1.
+    ///
+    /// Example: `let sinh_max = world.get_slab_sinh(&world.boxes[0], frame.col(AXIS_Y));`
+    fn get_slab_sinh(&self, b: &HyperbolicBox, n: DVec4) -> f64 {
+        let r: f64 = self.curvature_radius_m;
+        let a: [f64; 3] = b.normals.map(|normal| minkowski_dot(normal, n));
+        let a_w: f64 = minkowski_dot(b.center, n);
+        let sinh_half: [f64; 3] = b.half_m.map(|h| (h / r).sinh());
+        let linear_max: f64 = (0..3).map(|i| a[i].abs() * sinh_half[i]).sum();
+        let corner_max: f64 = (0..BOX_CORNER_COUNT)
+            .map(|corner: usize| {
+                let p: [f64; 3] = [0, 1, 2].map(|i| {
+                    if corner >> i & 1 == 1 {
+                        sinh_half[i]
+                    } else {
+                        -sinh_half[i]
+                    }
+                });
+                let p_w: f64 = (1.0 + p.iter().map(|c| c * c).sum::<f64>()).sqrt();
+                ((0..3).map(|i| a[i] * p[i]).sum::<f64>() + a_w * p_w).abs()
+            })
+            .fold(0.0, f64::max);
+        corner_max.max(linear_max - a_w.abs())
+    }
+
+    /// `get_box_top_m` gives a height above the ground that no point of a box exceeds: exactly its
+    /// height for a box standing on the ground (its top is at a constant height), and its centre's
+    /// height plus its bounding radius otherwise.
+    ///
+    /// Example: `let top_m = world.get_box_top_m(&world.boxes[0]);`
+    fn get_box_top_m(&self, b: &HyperbolicBox) -> f64 {
+        let r: f64 = self.curvature_radius_m;
+        if b.center[AXIS_Y].abs() < STANDING_TOLERANCE {
+            return b.half_m[1];
+        }
+        let box_radius_m: f64 = r * b
+            .half_m
+            .iter()
+            .map(|h| (h / r).cosh())
+            .product::<f64>()
+            .acosh();
+        r * b.center[AXIS_Y].asinh() + box_radius_m
     }
 
     /// `get_box_lower_bound_m` gives a distance a point is at least from a box: the largest of its
@@ -301,12 +360,7 @@ impl World {
     pub fn get_box_lower_bound_m(&self, b: &HyperbolicBox, x: DVec4) -> f64 {
         let r: f64 = self.curvature_radius_m;
         (0..3)
-            .map(|i| {
-                r * crate::geometry::minkowski_dot(x, b.normals[i])
-                    .abs()
-                    .asinh()
-                    - b.half_m[i]
-            })
+            .map(|i| r * minkowski_dot(x, b.normals[i]).abs().asinh() - b.half_m[i])
             .fold(f64::NEG_INFINITY, f64::max)
     }
 
@@ -316,7 +370,7 @@ impl World {
     /// Example: `world.build_rails();`
     fn build_rails(&mut self) {
         let base_frame: DMat4 = self.make_ground_frame(0.0, -RAIL_START_M, 0.0);
-        self.group_boxes(|w| {
+        self.group_boxes(base_frame, |w| {
             w.add_standing_box(
                 base_frame,
                 0.0,
@@ -331,7 +385,7 @@ impl World {
                 self.offset_frame(base_frame, f64::from(k) * RAIL_SPACING_M, 0.0, 0.0);
             let half_length_m: f64 = RAIL_LENGTH_M / 2.0;
             let color: Color = RAIL_COLORS[(k + RAIL_HALF_COUNT) as usize];
-            self.group_boxes(|w| {
+            self.group_boxes(rail_frame, |w| {
                 w.add_standing_box(
                     rail_frame,
                     0.0,
@@ -591,7 +645,7 @@ impl World {
             {
                 continue;
             }
-            self.group_boxes(|w| w.build_tree(frame, height_m));
+            self.group_boxes(frame, |w| w.build_tree(frame, height_m));
             placed_count += 1;
         }
     }
@@ -611,5 +665,121 @@ impl Mulberry32 {
         let mut t: u32 = (self.state ^ (self.state >> 15)).wrapping_mul(1 | self.state);
         t = t.wrapping_add((t ^ (t >> 7)).wrapping_mul(61 | t)) ^ t;
         f64::from(t ^ (t >> 14)) / 4_294_967_296.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests of the clusters' bounding boxes.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Box against a bounding plane | straddling it, wholly on one side | `slab_bound_is_exact_for_a_centred_box`, `every_box_is_inside_its_cluster_bound` |
+    //! | Box orientation against the plane | same frame, rotated and moved | `slab_bound_is_exact_for_a_centred_box`, `slab_bound_is_tight_for_a_moved_box` |
+    //! | Cluster | house, pylon, tree | `every_box_is_inside_its_cluster_bound` |
+
+    use super::*;
+    use crate::geometry::{make_rotation_about, minkowski_dot};
+    use glam::DVec3;
+
+    const SAMPLE_COUNT_PER_SIDE: usize = 9;
+    const TOLERANCE: f64 = 1e-9;
+    const TIGHTNESS: f64 = 0.02;
+
+    /// `sample_box` gives points spread over a box, corners and faces included, from its own
+    /// coordinates p (the box is |p_i| ≤ sinh(h_i/R)).
+    fn sample_box(b: &HyperbolicBox, r: f64) -> Vec<DVec4> {
+        let sinh_half: [f64; 3] = b.half_m.map(|h| (h / r).sinh());
+        let fraction =
+            |n: usize| -> f64 { 2.0 * n as f64 / (SAMPLE_COUNT_PER_SIDE - 1) as f64 - 1.0 };
+        let mut points: Vec<DVec4> = Vec::new();
+        for i in 0..SAMPLE_COUNT_PER_SIDE {
+            for j in 0..SAMPLE_COUNT_PER_SIDE {
+                for k in 0..SAMPLE_COUNT_PER_SIDE {
+                    let p: [f64; 3] = [
+                        fraction(i) * sinh_half[0],
+                        fraction(j) * sinh_half[1],
+                        fraction(k) * sinh_half[2],
+                    ];
+                    let p_w: f64 = (1.0 + p.iter().map(|c| c * c).sum::<f64>()).sqrt();
+                    points.push(
+                        p[0] * b.normals[0]
+                            + p[1] * b.normals[1]
+                            + p[2] * b.normals[2]
+                            + p_w * b.center,
+                    );
+                }
+            }
+        }
+        points
+    }
+
+    /// `get_sampled_slab_sinh` gives the largest |⟨x, n⟩| over a box's sample points.
+    fn get_sampled_slab_sinh(b: &HyperbolicBox, n: DVec4, r: f64) -> f64 {
+        sample_box(b, r)
+            .iter()
+            .map(|x| minkowski_dot(*x, n).abs())
+            .fold(0.0, f64::max)
+    }
+
+    /// `make_box` gives a box in `frame` with half sizes `half_m`.
+    fn make_box(frame: DMat4, half_m: [f64; 3]) -> HyperbolicBox {
+        HyperbolicBox {
+            normals: [frame.col(AXIS_X), frame.col(AXIS_Y), frame.col(AXIS_Z)],
+            center: frame.col(AXIS_W),
+            half_m,
+            color: [0.0; 3],
+            material: MATERIAL_SOLID,
+        }
+    }
+
+    /// `every_box_is_inside_its_cluster_bound` checks that every sample point of every box of each
+    /// cluster in the demo's world is inside the cluster's bounding box.
+    #[test]
+    fn every_box_is_inside_its_cluster_bound() {
+        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+        let r: f64 = world.curvature_radius_m;
+        for cluster in world.clusters.iter().filter(|c| c.box_count > 1) {
+            for b in &world.boxes[cluster.first_box..cluster.first_box + cluster.box_count] {
+                for x in sample_box(b, r) {
+                    assert!(world.get_box_lower_bound_m(&cluster.bound, x) <= TOLERANCE);
+                }
+            }
+        }
+    }
+
+    /// `slab_bound_is_exact_for_a_centred_box` checks that a box centred on the planes, in their
+    /// own frame, is bounded by exactly its own half sizes.
+    #[test]
+    fn slab_bound_is_exact_for_a_centred_box() {
+        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+        let r: f64 = world.curvature_radius_m;
+        let frame: DMat4 = world.spawn_frame;
+        let b: HyperbolicBox = make_box(frame, [4.6, 4.0, 0.5]);
+        for (axis, half_m) in [AXIS_X, AXIS_Y, AXIS_Z].into_iter().zip(b.half_m) {
+            let sinh_max: f64 = world.get_slab_sinh(&b, frame.col(axis));
+            assert!((sinh_max - (half_m / r).sinh()).abs() < TOLERANCE);
+        }
+    }
+
+    /// `slab_bound_is_tight_for_a_moved_box` checks a rotated box moved off the planes on each
+    /// side: the bound holds every sample point and is no more than `TIGHTNESS` above them.
+    #[test]
+    fn slab_bound_is_tight_for_a_moved_box() {
+        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+        let r: f64 = world.curvature_radius_m;
+        let frame: DMat4 = world.spawn_frame;
+        for offset_m in [[3.0, 5.0, -2.0], [-4.0, -1.0, 6.0]] {
+            let box_frame: DMat4 = world.offset_frame(frame, offset_m[0], offset_m[1], offset_m[2])
+                * make_rotation_about(DVec3::new(0.3, 0.8, 0.5).normalize(), 0.9);
+            let b: HyperbolicBox = make_box(box_frame, [2.5, 1.0, 0.6]);
+            for axis in [AXIS_X, AXIS_Y, AXIS_Z] {
+                let n: DVec4 = frame.col(axis);
+                let (bound, sampled) =
+                    (world.get_slab_sinh(&b, n), get_sampled_slab_sinh(&b, n, r));
+                assert!(bound >= sampled - TOLERANCE);
+                assert!(bound <= sampled + TIGHTNESS);
+            }
+        }
     }
 }
