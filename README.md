@@ -15,3 +15,18 @@ demos/              # experiments that de-risk mechanics, weapons and physics be
 ```
 
 Components may use different languages, so `common/` holds specifications, not shared code.
+
+## Play the starter game on your Wi-Fi
+
+On one Mac, start the servers; the first line it prints is the management server's URL:
+
+```bash
+make -C management_server run-management-server
+```
+
+On each player's Mac, with Rust installed (or with a copy of the built client):
+
+```bash
+make -C clients/starter run-client MANAGEMENT_SERVER_URL=http://<that URL's IP>:8000
+```
+
