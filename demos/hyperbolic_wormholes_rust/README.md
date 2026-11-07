@@ -18,8 +18,8 @@ make run-demo RENDERER=cpu
 - Your path bends near a mouth like light does, and the view turns with it, so walking or flying at a mouth's
   dark disk takes you through. `G` aims through the exact middle of the mouth nearest the crosshair; `F` keeps
   moving forward.
-- `L` toggles the laser: a light ray from your hand that bends near mouths and goes through them. The HUD says what
-  it hits.
+- Click (once the mouse is captured) to fire a laser shot for a quarter of a second; `L` toggles a laser that stays on.
+  The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
 - `R` respawns. `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
