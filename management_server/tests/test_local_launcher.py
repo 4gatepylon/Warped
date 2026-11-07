@@ -24,6 +24,7 @@ import time
 import uuid
 
 import pytest
+import stand_ins
 
 from management_server import errors, local_launcher, models
 
@@ -32,28 +33,7 @@ _STATE_DEADLINE_S: float = 10.0
 _POLL_INTERVAL_S: float = 0.05
 _SLEEPING_GAME_SERVER: list[str] = [sys.executable, "-c", "import time; time.sleep(60)"]
 _EXITING_GAME_SERVER: list[str] = [sys.executable, "-c", "raise SystemExit(3)"]
-_HEALTHY_GAME_SERVER: list[str] = [
-    sys.executable,
-    "-c",
-    "import http.server, sys\n"
-    "class Handler(http.server.BaseHTTPRequestHandler):\n"
-    "    def do_GET(self): self.send_response(200 if self.path == '/health' else 404); "
-    "self.end_headers()\n"
-    "port = int(sys.argv[sys.argv.index('--port') + 1])\n"
-    "http.server.HTTPServer(('0.0.0.0', port), Handler).serve_forever()\n",
-]
 _SHORT_HEALTH_TIMEOUT_S: float = 0.3
-
-
-def _free_port() -> int:
-    """`_free_port` returns a TCP port that nothing on this machine listens on right now.
-
-    Example:
-        >>> port = _free_port()
-    """
-    with socket.socket() as probe_socket:
-        probe_socket.bind(("127.0.0.1", 0))
-        return probe_socket.getsockname()[1]
 
 
 def _wait_for_state(
@@ -107,9 +87,9 @@ def test_fails_when_process_exits() -> None:
 
 def test_runs_healthy_game_server() -> None:
     """`test_runs_healthy_game_server` checks that a healthy game server runs at its address."""
-    port: int = _free_port()
+    port: int = stand_ins.free_port()
     game_server_launcher: local_launcher.LocalProcessLauncher = local_launcher.LocalProcessLauncher(
-        "10.0.0.5", range(port, port + 1), _HEALTHY_GAME_SERVER, "http://127.0.0.1:8000"
+        "10.0.0.5", range(port, port + 1), stand_ins.HEALTHY_GAME_SERVER, "http://127.0.0.1:8000"
     )
     game_server_id: uuid.UUID = uuid.uuid4()
     game_server_launcher.launch(game_server_id, models.GameServerConfig(), 4)
