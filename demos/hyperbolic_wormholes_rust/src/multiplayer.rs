@@ -48,6 +48,7 @@ const BOT_STEP_S: f64 = 1.0 / 60.0;
 const BOT_RANGE_M: f64 = 12.0;
 const BOT_WANDER_PX_PER_S: f64 = 120.0;
 const BOT_REJOIN_S: f64 = 2.0;
+const BOT_STUCK_FRAC: f64 = 0.5;
 const BOT_VIEW_PX: (u32, u32) = (1280, 800);
 const VOXEL_SPAWN_RING_M: f64 = 3.0;
 const VOXEL_BOT_LASER_RANGE_M: f64 = 120.0;
@@ -373,8 +374,8 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
     }
 }
 
-/// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player, faces
-/// them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
+/// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
+/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
 /// view) and rejoins `BOT_REJOIN_S` after being hit. It returns how many players it hit and how
 /// often it was hit.
 ///
@@ -390,6 +391,7 @@ pub fn run_voxel_bot(
     let (mut hit_count, mut eliminated_count, mut my_id) = (0, 0, 0);
     let mut rejoin_at: Option<Instant> = None;
     let mut last_victim: Option<u32> = None;
+    let mut is_stuck: bool = false;
     while start.elapsed().as_secs_f64() < duration_s {
         let tick: Instant = Instant::now();
         for event in client.poll()? {
@@ -439,7 +441,12 @@ pub fn run_voxel_bot(
                 input.forward = true;
                 player.look(BOT_WANDER_PX_PER_S * BOT_STEP_S, 0.0);
             }
+            input.up = input.forward && is_stuck;
+            let before: DVec4 = player.body.col(AXIS_W);
             player.step(world, &input, BOT_STEP_S, my_id as usize);
+            is_stuck = input.forward
+                && get_distance(before, player.body.col(AXIS_W)) * world.r
+                    < BOT_STUCK_FRAC * world.player.walk_m_per_s * BOT_STEP_S;
             let camera: DMat4 = player.get_camera_frame(world);
             let view: SharedVoxelView = pack_shared_voxel_view(
                 world,
