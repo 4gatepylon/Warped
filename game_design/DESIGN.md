@@ -8,6 +8,10 @@ for every column.
 - **≈** marks a first guess, to be tuned in playtests.
 - **TBD** marks something not designed yet.
 
+> NOTE: Almost every number in this document is configurable, such as consoles per pylon, the time
+> to deactivate a console and pylons per team per level, and may change after playtests. The
+> default map won't be the only map either: maps will be configurable too, though not yet.
+
 ## Terms
 
 | Term | Meaning |
@@ -28,6 +32,7 @@ for every column.
 | Route | One way across the middle zone, from one side to the other. |
 | Floor | One walkable layer inside a level. |
 | Warp object | A black hole or a wormhole. Level designers place them; players can't. |
+| Energy | What sprinting uses up. It refills over time, and fully on a kill. |
 
 ## Match
 
@@ -165,6 +170,27 @@ Every level follows these rules:
 | Paired bands | The zones are bands across one looping axis. Going all the way around that axis passes every zone twice, so each zone is a pair of bands: the two halves of a team's zone meet at its spawn, and the two middle bands are two separate ways to the other side. |
 | Open | The zones have no set shape yet. They cover the space, with the spawns far apart, and walls, obstacles and mountains shape the routes. |
 
+## Movement
+
+### Sprinting
+
+Players can sprint, with head bob, as in other first-person shooters. Sprinting uses up energy,
+which has nothing to do with the guns' heat.
+
+- Energy drains at a steady rate while a player sprints, and refills at a steady rate while they
+  don't.
+- A kill refills the killer's energy to full at once.
+- Energy never goes above full. A player who runs out of energy can't sprint.
+
+| Parameter | Value |
+| --- | --- |
+| Time to drain full energy while sprinting | 30 s (≈3.3% per second) |
+| Time to refill from empty while not sprinting | 60 s (≈1.7% per second) |
+| Energy after a kill | Full |
+| Sprint speed | TBD |
+
+These values are configurable and may change after playtests.
+
 ## Bullets, lasers and light
 
 - Warp objects bend light, so players see the world bent around them.
@@ -201,6 +227,8 @@ time to kill.
 - **Consoles:** whether progress on a console resets when a player lets go of E or is hit, whether
   several players can deactivate consoles at once, and whether deactivated consoles come back on.
 - **Respawning:** where a player respawns, and whether the respawn time stops growing at a cap.
+- **Sprinting:** how fast sprinting is, whether players spawn with full energy, and whether a
+  player can shoot while sprinting.
 - **Hyperbolic levels:** their topology and the direction of gravity.
 - **Warp objects:** how many black holes and wormholes each level has, and where.
 - **Weapons:** exact fire rates, how fast an overheated weapon cools down, and how much and for how
