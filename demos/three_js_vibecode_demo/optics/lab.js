@@ -1,52 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Optics Lab — mirrors, beam splitters, diffraction, heat haze</title>
-<style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
-  .panel { position: fixed; background: rgba(12, 16, 26, 0.74); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
-  #controls { top: 10px; left: 10px; width: 310px; max-height: calc(100vh - 40px); overflow: auto; }
-  #stats { top: 10px; right: 10px; text-align: right; max-width: 360px; }
-  #tips { bottom: 10px; right: 10px; width: 350px; max-height: calc(100vh - 170px); overflow: auto; }
-  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
-  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
-  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
-  input[type=range] { width: 100%; }
-  select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
-  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
-  button:hover { background: #42527a; }
-  button.on { background: #7a2c2c; border-color: #c35a5a; }
-  .row { margin-top: 8px; }
-  .muted { color: #9fb0c8; }
-  .laser { color: #ffb4a8; }
-  #sLaser { color: #ff9a8a; }
-  #sMsg { color: #ffd27a; }
-  #tips ol { margin: 4px 0 0 18px; padding: 0; }
-  #tips li { margin: 3px 0; }
-  #tipsToggle { float: right; margin-top: -2px; }
-  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
-  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
-  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
-  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
-  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
-  body.no-split .f-split, body.no-grat .f-grat, body.no-heat .f-heat { display: none; }
-</style>
-</head>
-<body>
+// Optics lab: the code shared by the demo pages in this folder. Each page loads three.js as a module into
+// window.THREE and then this file as an ordinary deferred script, so the pages also work when opened straight from
+// disk. The page's <body data-demo="..."> picks the demo.
+(() => {
+'use strict';
+document.body.insertAdjacentHTML('afterbegin', `
 <canvas id="c"></canvas>
 <div id="cross"></div>
 
 <div id="controls" class="panel">
   <h1>Optics lab (flat space)</h1>
-  <label>Demo <select id="demo">
-    <option value="mirrors">1 · Mirrors</option>
-    <option value="splitters">2 · Beam splitters</option>
-    <option value="diffraction">3 · Diffraction</option>
-    <option value="heat">4 · Heat haze</option>
-  </select></label>
+  <div>Demo: <a href="mirrors.html">mirrors</a> · <a href="splitters.html">splitters</a> · <a href="diffraction.html">diffraction</a> · <a href="heat_haze.html">heat haze</a></div>
   <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
   <div class="row"><kbd>WASD</kbd> fly · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>Shift</kbd> fast</div>
   <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
@@ -95,18 +58,21 @@
   <div id="tipsBody"></div>
 </div>
 <div id="err"></div>
-
-<script type="module">
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+`);
+if (!window.THREE) {
+  const el = document.getElementById('err'); el.style.display = 'flex';
+  el.textContent = 'three.js could not be loaded from cdn.jsdelivr.net, so the lab cannot start.';
+  throw new Error('three.js is missing');
+}
 
 // ---------------------------------------------------------------------------
-// Four demos on one page, each adding an optical element to the previous one.
+// Four demos, one page each, each adding an optical element to the previous one.
 // ---------------------------------------------------------------------------
 const MODES = {
   mirrors: { splitter: false, grating: false },
   splitters: { splitter: true, grating: false },
   diffraction: { splitter: true, grating: true },
-  heat: { splitter: true, grating: true, heat: true },
+  heat_haze: { splitter: true, grating: true, heat: true },
 };
 const TIPS = {
   mirrors: `<ol>
@@ -132,7 +98,7 @@ const TIPS = {
     <li>Brightness per order (a thin sinusoidal phase grating): about 30% straight through, 30% in each first order, 4.6% in each second order, less beyond.</li>
     <li>Limitation: looking <i>through</i> a grating you only see the straight-through view, not the shifted rainbow copies a real one shows.</li>
   </ol>`,
-  heat: `<ol>
+  heat_haze: `<ol>
     <li><b>Hot air bends light.</b> Warm air is thinner, so its refractive index is lower. Light bends toward the cooler, denser air: outward from the middle of the plume rising off a heater, and upward, because the air is hottest near the heater.</li>
     <li><b>Turbulence spreads the beam.</b> The rising air churns, so different parts of the beam are bent different ways, and it leaves as a widening, shimmering cone (left: a beam through the air just above a heater).</li>
     <li><b>Higher up is cooler:</b> the beam above it crosses the same plume higher up and spreads much less.</li>
@@ -847,10 +813,9 @@ function setMode(mode) {
   document.body.classList.toggle('no-split', !MODES[mode].splitter);
   document.body.classList.toggle('no-grat', !MODES[mode].grating);
   document.body.classList.toggle('no-heat', !MODES[mode].heat);
-  $('demo').value = mode;
+  document.querySelector(`a[href="${mode}.html"]`).classList.add('cur');
   $('tipsBody').innerHTML = TIPS[mode];
   if (!MODES[mode].grating) { state.lam = 650; $('colour').value = '650'; }
-  const url = new URL(location.href); url.searchParams.set('demo', mode); history.replaceState(null, '', url);
   loadScene(mode); resetView();
 }
 let liveRes = null;
@@ -917,7 +882,6 @@ canvas.addEventListener('pointerdown', e => {
 window.addEventListener('pointerup', e => { if (e.button === 2) { rmb = false; endGrab(); } dragging = false; });
 canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0); });
 
-$('demo').addEventListener('change', e => setMode(e.target.value));
 $('colour').addEventListener('change', e => { state.lam = +e.target.value; });
 $('lpm').addEventListener('input', e => { state.lpm = +e.target.value; $('lpmval').textContent = state.lpm; });
 $('quality').addEventListener('change', e => { quality = e.target.value; resize(); });
@@ -971,10 +935,8 @@ function frame(now) {
   }
   requestAnimationFrame(frame);
 }
-setMode(new URLSearchParams(location.search).get('demo') || 'mirrors');
+setMode(document.body.dataset.demo);
 resize();
 requestAnimationFrame(frame);
 window.__demo = { state, traceLaser, loadScene, setMode, setHeaters, toggleHeater, placePanel, rotatePanel, pinLaser, resetView, camBasis, uniforms, renderer, scene, cam, frame, EFF };
-</script>
-</body>
-</html>
+})();

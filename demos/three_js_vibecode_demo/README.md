@@ -50,14 +50,15 @@ carries on through the other mouth. "Auto" quality renders about 380k pixels and
 
 ## Optics lab (flat space)
 
-`optics.html` is a ray-traced, flat-space lab for trying out optical elements with a laser. It has four demos, picked from
-the dropdown or the URL. Each adds one element to the previous one:
+`optics/` is a ray-traced, flat-space lab for trying out optical elements with a laser. It has four demos, one page each
+(`optics/index.html` lists them), and each adds one element to the previous one. The pages share `optics/lab.js` and
+`optics/lab.css`, and also work when opened straight from disk:
 
-- `optics.html?demo=mirrors`: mirrors. The scene has a zigzag, a periscope, two facing mirrors and a corner reflector.
-- `optics.html?demo=splitters`: adds beam splitters (half-silvered mirrors). The scene has a 1-into-4 cascade and a
+- `optics/mirrors.html`: mirrors. The scene has a zigzag, a periscope, two facing mirrors and a corner reflector.
+- `optics/splitters.html`: adds beam splitters (half-silvered mirrors). The scene has a 1-into-4 cascade and a
   Mach–Zehnder layout.
-- `optics.html?demo=diffraction`: adds diffraction gratings. Red, green, blue or white light; adjustable lines per mm.
-- `optics.html?demo=heat`: adds heaters. Hot air rising off a heater bends a beam outward and upward, and its turbulence
+- `optics/diffraction.html`: adds diffraction gratings. Red, green, blue or white light; adjustable lines per mm.
+- `optics/heat_haze.html`: adds heaters. Hot air rising off a heater bends a beam outward and upward, and its turbulence
   spreads the beam into a widening, shimmering cone. The effect is about 1000× stronger than real hot air.
 
 Click the scene to capture the mouse (or drag to look), `WASD` to fly and `E`/`Q` to go up and down. The laser controls are
@@ -74,4 +75,4 @@ grating shows only the straight-through view.
 
 To serve them locally: `python3 -m http.server --directory demos/three_js_vibecode_demo`, then open e.g.
 `http://localhost:8000/blackholes_laser.html`, `http://localhost:8000/wormholes.html` or
-`http://localhost:8000/optics.html`.
+`http://localhost:8000/optics/`.
