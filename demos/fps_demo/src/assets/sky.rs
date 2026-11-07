@@ -201,6 +201,14 @@ pub fn load_sky(path: &Path, ground_albedo: Vec3) -> Sky {
     }
 }
 
+/// `tests` checks the equirectangular mapping and the irradiance projection.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | texture v | top edge (zenith) | `test_direction_from_uv` |
+/// | texture v | bottom edge (nadir) | `test_direction_from_uv` |
+/// | texture v | middle (horizon, forward) | `test_direction_from_uv` |
+/// | sky radiance | uniform | `test_constant_sky_irradiance` |
 #[cfg(test)]
 mod tests {
     use super::*;

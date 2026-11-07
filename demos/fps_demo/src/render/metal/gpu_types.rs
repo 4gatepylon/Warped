@@ -144,6 +144,11 @@ pub struct GpuSkyVisibilityParams {
     pub counts: UVec4,
 }
 
+/// `tests` checks that the GPU structs match the shaders' layouts.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | struct | each struct shared with MSL | `test_layouts_match_shaders` |
 #[cfg(test)]
 mod tests {
     use super::*;

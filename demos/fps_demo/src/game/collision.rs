@@ -192,6 +192,15 @@ pub fn move_body(
     }
 }
 
+/// `tests` checks ray casts and body movement against boxes.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | ray direction | toward the box | `test_ray_hits_box_face` |
+/// | ray direction | away from the box | `test_ray_hits_box_face` |
+/// | body motion | falling onto a floor | `test_body_lands_on_floor` |
+/// | body motion | horizontal into a wall taller than a step | `test_body_stops_at_wall_and_climbs_step` |
+/// | body motion | horizontal into a ledge lower than a step | `test_body_stops_at_wall_and_climbs_step` |
 #[cfg(test)]
 mod tests {
     use super::*;

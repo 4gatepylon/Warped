@@ -160,6 +160,15 @@ pub fn fit_cascades(
     }
 }
 
+/// `tests` checks frustum culling and the shadow cascades.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | sphere position | inside the frustum | `test_frustum_contains_sphere` |
+/// | sphere position | behind the camera | `test_frustum_contains_sphere` |
+/// | sphere position | beside the frustum | `test_frustum_contains_sphere` |
+/// | cascade | split distances, first to last | `test_cascade_splits_increase` |
+/// | cascade | a point inside the first cascade's slice | `test_cascades_cover_their_slice` |
 #[cfg(test)]
 mod tests {
     use super::*;

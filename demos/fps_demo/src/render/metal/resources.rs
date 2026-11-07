@@ -223,6 +223,13 @@ pub fn upload_texture_2d(
     texture
 }
 
+/// `tests` checks texture mip-chain lengths.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | texture size | 1x1 | `test_mip_count_for` |
+/// | texture size | non-square | `test_mip_count_for` |
+/// | texture size | large square | `test_mip_count_for` |
 #[cfg(test)]
 mod tests {
     use super::*;

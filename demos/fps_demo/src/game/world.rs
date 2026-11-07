@@ -412,6 +412,11 @@ fn append_box(mesh: &mut MeshData, aabb: &Aabb, tile_size_m: f32) {
     }
 }
 
+/// `tests` checks the arena's box meshes.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | box face | each of the six faces | `test_box_faces_wind_outward` |
 #[cfg(test)]
 mod tests {
     use super::*;

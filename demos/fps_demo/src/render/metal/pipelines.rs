@@ -381,6 +381,11 @@ impl Pipelines {
     }
 }
 
+/// `tests` checks that the shaders compile into pipelines.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | pipeline | every pipeline in `Pipelines` | `test_shaders_compile` |
 #[cfg(test)]
 mod tests {
     use super::*;
