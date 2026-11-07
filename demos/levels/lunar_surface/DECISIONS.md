@@ -160,3 +160,29 @@
 - **Rationale:** no GPU was available to the agent; the per-pixel work (about 100 bounding-sphere tests and a few
   short DDAs) should fit an Apple-silicon GPU, but this is unmeasured.
 - **Revisit if:** it runs below 30 fps on a Mac: cull structures per frame on the CPU, or skip shadow rays far away.
+
+## Precision
+
+### D19. The shader works relative to a render anchor near the player
+
+- **Choice:** the CPU, in double precision, hands the shader the camera, structures, warp objects, lamps, beams and
+  the sky's parallel transport to the centre relative to a render anchor: the level's centre while the player is
+  within 80 m of it, otherwise the symmetry of the ground's {4,5} tiling that takes the central tile to the player's
+  (found by the same folding the shader uses), moved each time they get 160 m from it. The ground's u and v use a
+  sign-safe asinh (the GPU's returns −∞ for large negative arguments, which blacked out ground cells far out on the −v
+  side).
+- **Alternatives:** an anchor at the player's own Fermi frame (then the shader can't fold the tiling in its
+  coordinates); moving it every frame; emulated double precision in the shader.
+- **Rationale:** coordinates grow like cosh(d/R), so in the level's own coordinates single precision ran out by 300 m
+  from the centre. In a headless test, moving the camera 2 mm changed 3–10% of the pixels at 300–900 m before, and at
+  most 0.05% up to 450 m after, the same as at the centre. A new anchor rounds each ground cell's centre a little
+  differently, which re-rolls the per-cell noise of about a fifth of the nearby cells, so the anchor stays at the
+  centre while the player walks the level (whose rendering is unchanged) and moves only when they fly out.
+
+### D20. Flying stops 400 m (10 R) from the centre **(needs input)**
+
+- **Choice:** fly mode won't take the player more than 400 m from the level's centre ("Edge of the flight area").
+- **Alternatives:** no limit, with the player's frame on the CPU also kept relative to the anchor.
+- **Rationale:** the CPU keeps the player's frame in the level's coordinates in double precision, which loses digits
+  from about 15 R. Beyond about 8 R the base is a few pixels across anyway.
+- **Revisit if:** the game needs flying or spectating far from a level.

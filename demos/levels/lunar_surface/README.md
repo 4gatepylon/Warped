@@ -49,7 +49,7 @@ first try at the README checklist's first item for this level; the layout is a p
 | `Shift` | sprint (energy drains in 30 s, refills in 60 s) |
 | `Space` | jump; in fly mode, up |
 | `C` | in fly mode, down |
-| `H` | toggle fly mode |
+| `H` | toggle fly mode (at most 400 m from the centre) |
 | `E` (hold) | deactivate a console of the other team's pylon |
 | Click (captured) or `R` | fire the laser |
 | `T` | play as the other team (moves you to its spawn) |
@@ -102,6 +102,14 @@ Also: `#quality=low|medium|high|full` (default auto), `#pitch=<degrees>`, `#pane
   gun beside the eye that joins the path 3 m out. The ray tracer tests each ray chord against the beam's geodesic
   segments in closed form (cosh² of the distance from the chord to a segment's geodesic is K0 + K1 cosh 2s + K2 sinh
   2s), so you see beams bent and lensed too.
+- **Precision.** Hyperboloid coordinates grow like cosh(d/R) and the GPU computes in single precision, so in the
+  level's own coordinates everything near you lost its last digits by 300 m out: the ground broke into noise and the
+  stars jittered. The shader works relative to a render anchor instead: the level's centre while you are within 80 m
+  of it, otherwise the symmetry of the ground's tiling that takes the central tile to yours, moved each time you get
+  160 m from it. Because the anchor maps the tiling to itself, the shader folds the ground exactly as at the centre.
+  The CPU hands the shader the camera, structures, warp objects, lamps, beams and the sky's transport to the centre
+  relative to the anchor, in double precision. Fly mode stops 400 m (10 R) from the centre, where double precision on
+  the CPU is still exact and the base is a few pixels across.
 
 ## Running
 

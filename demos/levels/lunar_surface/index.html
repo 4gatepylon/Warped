@@ -113,6 +113,9 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
  * - Every structure has its own frame, and its blocks are a grid in that frame's Klein coordinates, so block faces are
  *   geodesic planes and a ray crosses a structure as a straight line (a voxel DDA).
  * - Warp objects bend rays only inside their reach sphere, so outside every sphere a ray is one geodesic.
+ * - Precision: hyperboloid coordinates grow like cosh(d / R), and the shader computes in single precision, so it works
+ *   relative to a render anchor near the player, a symmetry of the ground's tiling (`set_render_anchor`). Flying stops
+ *   MAX_FLY_DISTANCE_M from the level's centre, where the CPU's double-precision frames are still exact.
  */
 
 const CURVATURE_RADIUS_M = 40;
@@ -131,6 +134,10 @@ const HEAD_CLEARANCE_M = 0.15;
 const STEP_UP_M = 1.05;
 const MIN_FLY_HEIGHT_M = 0.4;
 const MAX_FLY_HEIGHT_M = 240;
+const MAX_FLY_DISTANCE_M = 400;
+const RECENTRE_DISTANCE_M = 160;
+const HOME_DISTANCE_M = 80;
+const MAX_ANCHOR_FOLD_COUNT = 64;
 const UNSTICK_STEP_M = 0.25;
 const UNSTICK_MAX_STEPS = 160;
 const LANDING_BISECTIONS = 10;
@@ -1375,15 +1382,26 @@ const atlas = pack_atlas();
 const atlas_texture = new THREE.Data3DTexture(atlas.data, atlas.size[0], atlas.size[1], atlas.size[2]);
 atlas_texture.format = THREE.RedFormat; atlas_texture.type = THREE.UnsignedByteType;
 atlas_texture.minFilter = atlas_texture.magFilter = THREE.NearestFilter; atlas_texture.unpackAlignment = 1; atlas_texture.needsUpdate = true;
+const RENDER_ANCHOR = { A: make_identity(), A_inv: make_identity() };
 const struct_data = new Float32Array(STRUCT_TEXELS * MAX_STRUCTS * 4);
-structures.forEach((s, k) => {
-  const base = k * STRUCT_TEXELS * 4;
-  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) struct_data[base + r * 4 + c] = s.inv[c * 4 + r];
-  struct_data.set(s.centre, base + 16);
-  struct_data.set([Math.cosh(s.radius), ...s.off], base + 20);
-  struct_data.set([...s.atlas, 0], base + 24);
-  struct_data.set([...s.dims, 0], base + 28);
-});
+
+/**
+ * `fill_struct_data` writes every structure's record for the shader, with its inverse frame and bounding centre taken
+ * relative to the render anchor.
+ * @return {void}
+ * @example fill_struct_data();
+ */
+function fill_struct_data() {
+  structures.forEach((s, k) => {
+    const base = k * STRUCT_TEXELS * 4, inv = multiply_matrices(s.inv, RENDER_ANCHOR.A);
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) struct_data[base + r * 4 + c] = inv[c * 4 + r];
+    struct_data.set(apply_matrix(RENDER_ANCHOR.A_inv, s.centre), base + 16);
+    struct_data.set([Math.cosh(s.radius), ...s.off], base + 20);
+    struct_data.set([...s.atlas, 0], base + 24);
+    struct_data.set([...s.dims, 0], base + 28);
+  });
+}
+fill_struct_data();
 const struct_texture = new THREE.DataTexture(struct_data, STRUCT_TEXELS, MAX_STRUCTS, THREE.RGBAFormat, THREE.FloatType);
 struct_texture.minFilter = struct_texture.magFilter = THREE.NearestFilter; struct_texture.needsUpdate = true;
 const beam_data = new Float32Array(3 * MAX_BEAM_SEGMENTS * 4);
@@ -1409,6 +1427,28 @@ const planet_e1 = new THREE.Vector3().crossVectors(planet_direction, new THREE.V
  */
 function glsl(x) { const s = String(x); return /[.e]/.test(s) ? s : s + '.0'; }
 const tile_klein_half = Math.tanh(Math.acosh(Math.cos(Math.PI / 5) / Math.sin(Math.PI / 4)));
+
+/**
+ * `find_tile_symmetry` returns the symmetry of the ground's {4,5} tiling that maps the central tile onto the tile
+ * holding ground point x, found as the shader folds the ground: reflect in the central tile's edge the point lies beyond
+ * until it lies inside.
+ * @param {Array<number>} x A ground point.
+ * @return {Float64Array} The symmetry A (A⁻¹ x lies in the central tile).
+ * @example const A = find_tile_symmetry(get_column(state.B, W));
+ */
+function find_tile_symmetry(x) {
+  const normal_scale = 1 / Math.sqrt(1 - tile_klein_half * tile_klein_half);
+  let y = x, A = make_identity();
+  for (let i = 0; i < MAX_ANCHOR_FOLD_COUNT; i++) {
+    const kx = y[X] / y[W], kz = y[Z] / y[W], ex = Math.abs(kx) - tile_klein_half, ez = Math.abs(kz) - tile_klein_half;
+    if (Math.max(ex, ez) <= 0) return A;
+    const n = (ex > ez ? [Math.sign(kx), 0, 0, tile_klein_half] : [0, 0, Math.sign(kz), tile_klein_half]).map(c => c * normal_scale);
+    const reflection = make_identity();
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) reflection[c * 4 + r] -= 2 * n[r] * n[c] * (c === W ? -1 : 1);
+    y = apply_matrix(reflection, y); A = multiply_matrices(A, reflection);
+  }
+  throw new Error(`find_tile_symmetry: (${x.join(', ')}) is more than ${MAX_ANCHOR_FOLD_COUNT} folds from the central tile`);
+}
 const shader_constants = `
 const int MAX_STRUCTS = ${MAX_STRUCTS};
 const int MAX_WARPS = ${MAX_WARPS};
@@ -1609,6 +1649,8 @@ uniform vec3 u_sun, u_planet, u_planet_e1, u_planet_e2;
 uniform vec4 u_light_x[MAX_LIGHTS]; uniform vec4 u_light_col[MAX_LIGHTS];
 uniform vec4 u_spots[MAX_SPOTS]; uniform vec4 u_spot_col[MAX_SPOTS];
 uniform vec4 u_console_off[3];
+uniform mat4 u_origin, u_anchor;
+uniform vec4 u_sky_axes[3];
 in vec2 v_ndc; out vec4 out_color;
 
 /** \`Hit\` is the first surface found along a ray chord: distance s along the chord, material, structure (-1 for the ground), entry face and grid position. */
@@ -1621,6 +1663,14 @@ struct Hit { float s; int mat; int k; int axis; float sgn; vec3 g; ivec3 cell; }
  * @return The product.
  */
 float dot_minkowski(vec4 a, vec4 b) { return dot(a.xyz, b.xyz) - a.w * b.w; }
+
+/**
+ * \`compute_signed_asinh\` returns asinh(t) as sign(t) asinh(|t|): GPUs compute asinh as log(t + sqrt(t² + 1)), which
+ * cancels to log(0) for large negative t (ground points far out on the level's negative side).
+ * @param t The argument.
+ * @return asinh(t).
+ */
+float compute_signed_asinh(float t) { return sign(t) * asinh(abs(t)); }
 
 /**
  * \`get_geodesic_point\` returns cosh(s) x + sinh(s) v, the point s along the geodesic from x with unit tangent v.
@@ -1664,12 +1714,21 @@ float clamp_atanh(float t) { return atanh(clamp(t, -LAMBDA_LIMIT, LAMBDA_LIMIT))
 float measure_gap(vec4 a, vec4 b) { vec4 d = a - b; return 2.0 * asinh(0.5 * sqrt(max(dot_minkowski(d, d), 0.0))); }
 
 /**
- * \`transport_from_centre\` parallel-transports a direction at the level's centre e_w to the point x along the geodesic between them.
- * @param d The direction at the centre (spatial unit vector).
+ * \`transport_from_centre\` parallel-transports a direction at the level's centre (u_origin[3], with its axes u_origin's
+ * other columns) to the point x along the geodesic between them.
+ * @param d The direction at the centre (spatial unit vector in the centre's axes).
  * @param x The point.
  * @return The transported unit tangent at x.
  */
-vec4 transport_from_centre(vec3 d, vec4 x) { return vec4(d, 0.0) + dot(x.xyz, d) / (1.0 + x.w) * (vec4(0.0, 0.0, 0.0, 1.0) + x); }
+vec4 transport_from_centre(vec3 d, vec4 x) { vec4 o = u_origin[3], u = u_origin * vec4(d, 0.0); return u + dot_minkowski(u, x) / (1.0 - dot_minkowski(o, x)) * (o + x); }
+
+/**
+ * \`to_level_ground\` takes a ground point (x, z, w) from the shader's coordinates, which are relative to the render
+ * anchor, to the level's own.
+ * @param p The ground point's x, z and w in the shader's coordinates.
+ * @return Its x, z and w in the level's coordinates.
+ */
+vec3 to_level_ground(vec3 p) { vec4 q = u_anchor * vec4(p.x, 0.0, p.y, p.z); return vec3(q.x, q.z, q.w); }
 
 /**
  * \`hash_3d\` returns a pseudo-random number in [0, 1) for a 3D point.
@@ -1677,6 +1736,7 @@ vec4 transport_from_centre(vec3 d, vec4 x) { return vec4(d, 0.0) + dot(x.xyz, d)
  * @return The number.
  */
 float hash_3d(vec3 p) { return fract(sin(dot(p, HASH_DIRECTION)) * HASH_SCALE); }
+
 
 /**
  * \`sample_noise_3d\` is smooth value noise.
@@ -1948,7 +2008,8 @@ vec3 shade_ground(vec4 x, vec4 v, float dist_s) {
   vec2 cell = floor(a), uv = a - cell, kc = tanh((cell + 0.5) * CELL_S);
   vec3 centre = N * (vec3(kc, 1.0) * inversesqrt(max(1.0 - dot(kc, kc), TINY)));
   if (dist_s >= GROUND_DETAIL_S) centre = y;
-  float u_m = -u_R * clamp_atanh(centre.y / centre.z), v_m = u_R * asinh(centre.x), r_m = acosh(max(centre.z, 1.0)) * u_R;
+  centre = to_level_ground(centre);
+  float u_m = -u_R * compute_signed_asinh(centre.y * inversesqrt(1.0 + centre.x * centre.x)), v_m = u_R * compute_signed_asinh(centre.x), r_m = acosh(max(centre.z, 1.0)) * u_R;
   float h = hash_3d(floor(centre * CELL_HASH_SCALE) * HASH_SHRINK);
   vec3 albedo = PALETTE[MAT_REGOLITH] * (MARIA_BASE + MARIA_CONTRAST * sample_fbm_3d(vec3(u_m, v_m, 0.0) * MARIA_PER_M));
   if (r_m < CRATER_FLOOR_RADIUS_M) albedo = mix(PALETTE[MAT_DARK_REGOLITH], PALETTE[MAT_BASALT], FLOOR_RING_DARKEN * step(0.5, fract(r_m / FLOOR_RING_M)));
@@ -1964,7 +2025,7 @@ vec3 shade_ground(vec4 x, vec4 v, float dist_s) {
       float d_m = length(local - cand) * u_R;
       if (d_m > CRATERLET_MAX_M) continue;
       vec2 kk = tanh(cand);
-      vec3 cg = N * (vec3(kk, 1.0) * inversesqrt(1.0 - dot(kk, kk)));
+      vec3 cg = to_level_ground(N * (vec3(kk, 1.0) * inversesqrt(1.0 - dot(kk, kk))));
       float hc = hash_3d(floor(cg * CRATERLET_HASH_SCALE) * HASH_SHRINK);
       float radius_m = CRATERLET_MAX_M * (CRATERLET_MIN_FRAC + (1.0 - CRATERLET_MIN_FRAC) * fract(hc * CRATERLET_SIZE_SEED));
       if (hc < CRATERLET_CHANCE && d_m < radius_m) best = vec2(d_m / radius_m, 1.0);
@@ -2045,7 +2106,7 @@ float sample_star_layer(vec3 d, float grid, float density) {
 }
 
 /**
- * \`sample_sky\` returns the sky seen along a ray that escapes: stars, the Milky Way, the sun and the planet. The sky is fixed to the level centre's frame: the ray's direction is carried back to the camera and then to the centre by parallel transport.
+ * \`sample_sky\` returns the sky seen along a ray that escapes: stars, the Milky Way, the sun and the planet. The sky is fixed to the level centre's frame: the ray's direction is carried back to the camera by parallel transport, and u_sky_axes carry it on to the centre and read it in the centre's axes.
  * @param x The ray's last point.
  * @param v Its direction there.
  * @return The colour.
@@ -2053,7 +2114,7 @@ float sample_star_layer(vec3 d, float grid, float density) {
 vec3 sample_sky(vec4 x, vec4 v) {
   vec4 cam = u_cam[3];
   vec4 w = v + dot_minkowski(cam, v) / (1.0 - dot_minkowski(x, cam)) * (x + cam);
-  vec3 d = normalize(w.xyz - w.w / (1.0 + cam.w) * cam.xyz);
+  vec3 d = normalize(vec3(dot_minkowski(w, u_sky_axes[0]), dot_minkowski(w, u_sky_axes[1]), dot_minkowski(w, u_sky_axes[2])));
   float sd = dot(d, u_sun);
   vec3 sun = SUN_COLOR * (smoothstep(SUN_COS_OUTER, SUN_COS_INNER, sd) * SUN_DISC_BRIGHTNESS + pow(max(sd, 0.0), SUN_GLARE_POWER) * SUN_GLARE + pow(max(sd, 0.0), SUN_HALO_POWER) * SUN_HALO);
   vec2 q = vec2(dot(d, u_planet_e1), dot(d, u_planet_e2)) / sin(PLANET_RADIUS_RAD);
@@ -2183,8 +2244,63 @@ const uniforms = {
   u_light_col: { value: Array.from({ length: MAX_LIGHTS }, (_, i) => lamps[i] ? new THREE.Vector4(...lamps[i].color, lamps[i].radius_m) : new THREE.Vector4(0, 0, 0, 1)) },
   u_spots: { value: Array.from({ length: MAX_SPOTS }, () => new THREE.Vector4(0, 0, 0, 1)) },
   u_spot_col: { value: Array.from({ length: MAX_SPOTS }, () => new THREE.Vector4()) },
-  u_console_off: { value: Array.from({ length: 3 }, () => new THREE.Vector4()) }
+  u_console_off: { value: Array.from({ length: 3 }, () => new THREE.Vector4()) },
+  u_origin: { value: new THREE.Matrix4() }, u_anchor: { value: new THREE.Matrix4() },
+  u_sky_axes: { value: [X, Y, Z].map(i => new THREE.Vector4(...get_column(make_identity(), i))) }
 };
+
+/**
+ * `set_sky_axes` hands the shader the three covectors that turn a direction at the camera into the sky's direction:
+ * parallel transport along the geodesic to the level's centre, read in the centre's axes (for a tangent w at the
+ * camera, component i is <w, f_i + c_i o> with o the centre, f_i its axes and c_i = <cam, f_i> / (1 - <cam, o>)).
+ * Working them out here in double precision keeps the stars still however far the camera is from the centre.
+ * @param {Array<number>} cam The camera's position, in the render anchor's coordinates.
+ * @return {void}
+ * @example set_sky_axes(get_column(camera_frame, W));
+ */
+function set_sky_axes(cam) {
+  const origin = get_column(RENDER_ANCHOR.A_inv, W), scale = 1 / (1 - dot_minkowski(cam, origin));
+  [X, Y, Z].forEach(i => {
+    const axis = get_column(RENDER_ANCHOR.A_inv, i), covector = combine_vectors(axis, 1, origin, dot_minkowski(cam, axis) * scale);
+    uniforms.u_sky_axes.value[i].set(...combine_vectors(covector, 1, cam, dot_minkowski(covector, cam)));
+  });
+}
+
+/**
+ * `set_render_anchor` re-centres the shader's coordinates on a symmetry A of the ground's tiling: the shader then sees
+ * the camera, structures, warp objects, lamps, beams and sky through A⁻¹. Hyperboloid coordinates grow like
+ * cosh(d / R), so in the level's own coordinates single precision loses everything near a player far from the centre;
+ * relative to an anchor near the player the numbers stay small, and since A maps the tiling to itself the shader folds
+ * the ground into the central tile as before.
+ * @param {Float64Array} A The new anchor.
+ * @return {void}
+ * @example set_render_anchor(find_tile_symmetry(get_column(state.B, W)));
+ */
+function set_render_anchor(A) {
+  const A_inv = invert_lorentz(A);
+  Object.assign(RENDER_ANCHOR, { A, A_inv });
+  fill_struct_data(); struct_texture.needsUpdate = true;
+  warps.forEach((warp, w) => {
+    uniforms.u_warp_c.value[w].set(...apply_matrix(A_inv, warp.centre));
+    uniforms.u_warp_inv.value[w].fromArray(Float32Array.from(multiply_matrices(warp.inv, A)));
+    uniforms.u_warp_fwd.value[w].fromArray(Float32Array.from(multiply_matrices(A_inv, warp.frame)));
+  });
+  lamps.forEach((lamp, i) => uniforms.u_light_x.value[i].set(...apply_matrix(A_inv, lamp.x)));
+  uniforms.u_origin.value.fromArray(Float32Array.from(A_inv)); uniforms.u_anchor.value.fromArray(Float32Array.from(A));
+}
+
+/**
+ * `update_render_anchor` moves the render anchor home to the level's centre once the player is within HOME_DISTANCE_M
+ * of it, and otherwise to the player's tile once they stray RECENTRE_DISTANCE_M from it, so it never moves while they
+ * walk the level (a new anchor rounds the ground's per-cell noise differently, which would make some cells flicker).
+ * @return {void}
+ * @example update_render_anchor();
+ */
+function update_render_anchor() {
+  const R = CURVATURE_RADIUS_M, foot = get_column(state.B, W), anchor = get_column(RENDER_ANCHOR.A, W);
+  if (measure_distance(foot, E_W) * R < HOME_DISTANCE_M) { if (measure_distance(anchor, E_W) > 0) set_render_anchor(make_identity()); }
+  else if (measure_distance(foot, anchor) * R > RECENTRE_DISTANCE_M) set_render_anchor(find_tile_symmetry(foot));
+}
 const material = new THREE.RawShaderMaterial({ uniforms, vertexShader: vertex_shader, fragmentShader: fragment_shader, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
 const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material); quad.frustumCulled = false;
 const scene = new THREE.Scene(); scene.add(quad);
@@ -2348,6 +2464,7 @@ function step_player(dt) {
     else B_new = renormalize_frame(multiply_matrices(multiply_matrices(state.B, make_boost(Z, dir[1] * distance_m / R)), make_boost(X, dir[0] * distance_m / R)));
   }
   if (state.is_flying) {
+    if (measure_distance(get_column(B_new, W), E_W) * R > MAX_FLY_DISTANCE_M) { B_new = state.B; say('Edge of the flight area'); }
     state.B = B_new; state.h_m = h_new;
     const climb_m_per_s = Math.max(MIN_FLY_CLIMB_M_PER_S, state.h_m) * FLY_CLIMB_PER_S;
     if (keys.Space) state.h_m += climb_m_per_s * dt; if (keys.KeyC) state.h_m -= climb_m_per_s * dt;
@@ -2451,7 +2568,8 @@ function fire_laser() {
 }
 
 /**
- * `upload_beams` writes the live beams' segments and impact spots, with their fading brightness, to the shader.
+ * `upload_beams` writes the live beams' segments and impact spots, relative to the render anchor and with their fading
+ * brightness, to the shader.
  * @return {void}
  * @example upload_beams();
  */
@@ -2462,10 +2580,10 @@ function upload_beams() {
     if (brightness <= 0) continue;
     for (const segment of beam.segments) {
       if (n >= MAX_BEAM_SEGMENTS) break;
-      beam_data.set(segment.a, n * 12); beam_data.set(segment.b, n * 12 + 4); beam_data.set([segment.length, 0, brightness, beam.team], n * 12 + 8);
+      beam_data.set(apply_matrix(RENDER_ANCHOR.A_inv, segment.a), n * 12); beam_data.set(apply_matrix(RENDER_ANCHOR.A_inv, segment.b), n * 12 + 4); beam_data.set([segment.length, 0, brightness, beam.team], n * 12 + 8);
       n++;
     }
-    if (beam.spot && spots < MAX_SPOTS) { uniforms.u_spots.value[spots].set(...beam.spot); uniforms.u_spot_col.value[spots].set(...TEAM_COLORS[beam.team], 4 * brightness); spots++; }
+    if (beam.spot && spots < MAX_SPOTS) { uniforms.u_spots.value[spots].set(...apply_matrix(RENDER_ANCHOR.A_inv, beam.spot)); uniforms.u_spot_col.value[spots].set(...TEAM_COLORS[beam.team], 4 * brightness); spots++; }
   }
   uniforms.u_beam_count.value = n; uniforms.u_spot_count.value = spots;
   beam_texture.needsUpdate = true;
@@ -2638,7 +2756,8 @@ if (test === 'physics') console.log('[physics] ' + JSON.stringify(run_physics_ch
 let last_ms = performance.now(), hud_s = 0, frames = 0, fps_t0 = performance.now(), perf_s = 0, perf_n = 0, is_first_frame = true;
 
 /**
- * `render_frame` runs one frame: input, physics, consoles, beams, the camera uniforms, rendering, the HUD and auto quality.
+ * `render_frame` runs one frame: input, physics, consoles, the render anchor, beams, the camera uniforms, rendering, the
+ * HUD and auto quality.
  * @param {number} now_ms The frame time.
  * @return {void}
  * @example requestAnimationFrame(render_frame);
@@ -2650,8 +2769,10 @@ function render_frame(now_ms) {
   update_consoles(dt);
   state.beams.forEach(beam => { beam.age_s += dt; });
   state.beams = state.beams.filter(beam => state.is_laser_held || beam.age_s < LASER_FADE_S);
+  update_render_anchor();
   upload_beams();
-  uniforms.u_cam.value.fromArray(Float32Array.from(get_camera_frame()));
+  const camera_frame = multiply_matrices(RENDER_ANCHOR.A_inv, get_camera_frame());
+  uniforms.u_cam.value.fromArray(Float32Array.from(camera_frame)); set_sky_axes(get_column(camera_frame, W));
   renderer.render(scene, camera);
   if (is_first_frame) {
     is_first_frame = false;
@@ -2683,7 +2804,7 @@ function render_frame(now_ms) {
 }
 resize();
 requestAnimationFrame(render_frame);
-window.__demo = { update_consoles, state, structures, warps, pylons, lamps, uniforms, set_view, set_spawn, fire_laser, trace_laser, run_physics_checks, step_player, look, keys, get_camera_frame, describe_shot, VIEWS };
+window.__demo = { update_consoles, state, structures, warps, pylons, lamps, uniforms, set_render_anchor, find_tile_symmetry, RENDER_ANCHOR, make_frame, set_view, set_spawn, fire_laser, trace_laser, run_physics_checks, step_player, look, keys, get_camera_frame, describe_shot, VIEWS };
 </script>
 </body>
 </html>
