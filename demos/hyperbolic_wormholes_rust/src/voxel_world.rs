@@ -1217,14 +1217,16 @@ mod tests {
         let eye_m: f64 = world.player.eye_height_m;
         let on_lander: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
         assert!((on_lander.h_m - (LANDER_DECK_M + eye_m)).abs() < STAND_TOLERANCE_M);
-        let on_ground: VoxelPlayer = VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+        let on_ground: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
         assert!((on_ground.h_m - eye_m).abs() < STAND_TOLERANCE_M);
     }
 
     #[test]
     fn the_laser_into_the_wormhole_hits_the_red_pylon() {
         let world: VoxelWorld = load_lunar_surface();
-        let player: VoxelPlayer = VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0);
+        let player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0);
         let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
         assert_eq!(shot.through, vec!["wormhole mouth A".to_string()]);
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");

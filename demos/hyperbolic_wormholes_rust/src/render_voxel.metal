@@ -214,7 +214,8 @@ struct VoxelStructure {
 
 /**
  * @brief `VoxelWarp` is one warp object: its inverse and forward frames, its centre, its kind, m and reach (curvature
- * units) and partner, and where its list of structures within reach starts and how long it is.
+ * units) and partner, and where its list of structures within reach starts and how long it is. Each list entry is
+ * (structure, nearest and farthest distance of its bounding sphere from the centre, unused).
  */
 struct VoxelWarp {
     float4x4 inverse;
@@ -254,7 +255,7 @@ struct Scene {
     device const VoxelStructure *structures;
     device const uchar *voxels;
     device const VoxelWarp *warps;
-    device const int *warp_lists;
+    device const float4 *warp_lists;
     device const VoxelLight *lights;
     device const float4 *palette;
     device const BeamSegment *beams;
@@ -373,14 +374,27 @@ static void trace_ground(float4 x, float4 v, thread Hit &hit) {
     if (s < hit.s) { hit.s = s; hit.mat = MAT_GROUND; hit.k = -1; }
 }
 
-/** @brief `trace_scene` finds the first surface along a chord: the ground and every structure, or a warp's list. @par Example @code trace_scene(scene, x, v, -1, hit, glass_s); @endcode */
-static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, thread Hit &hit, thread float &glass_s) {
+/**
+ * @brief `trace_scene` finds the first surface along a chord: the ground and every structure, or the structures in a
+ * warp's list whose distance from its centre the chord can reach (the chord starts `rho` from the centre and is
+ * `hit.s` long, so it stays within [rho - hit.s, rho + hit.s]).
+ * @par Example
+ * @code
+ * trace_scene(scene, x, v, -1, 0.0, hit, glass_s);
+ * @endcode
+ */
+static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, thread Hit &hit, thread float &glass_s) {
     trace_ground(x, v, hit);
     if (warp < 0) {
         for (int k = 0; k < scene.u.structure_count; k++) trace_structure(scene, k, x, v, 0.0, false, hit, glass_s);
     } else {
         int4 list = scene.warps[warp].list;
-        for (int j = 0; j < list.y; j++) trace_structure(scene, scene.warp_lists[list.x + j], x, v, 0.0, false, hit, glass_s);
+        float reach = hit.s;
+        for (int j = 0; j < list.y; j++) {
+            float4 entry = scene.warp_lists[list.x + j];
+            if (rho + reach < entry.y || rho - reach > entry.z) continue;
+            trace_structure(scene, int(entry.x), x, v, 0.0, false, hit, glass_s);
+        }
     }
 }
 
@@ -680,7 +694,7 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
  */
 kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device const VoxelStructure *structures [[buffer(1)]],
                                device const uchar *voxels [[buffer(2)]], device const VoxelWarp *warps [[buffer(3)]],
-                               device const int *warp_lists [[buffer(4)]], device const VoxelLight *lights [[buffer(5)]],
+                               device const float4 *warp_lists [[buffer(4)]], device const VoxelLight *lights [[buffer(5)]],
                                device const float4 *palette [[buffer(6)]], device const BeamSegment *beams [[buffer(7)]],
                                texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
@@ -716,7 +730,7 @@ kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device c
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
-            trace_scene(scene, x, v, -1, hit, glass_s);
+            trace_scene(scene, x, v, -1, 0.0, hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
             if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, beam_color);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
@@ -734,7 +748,7 @@ kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device c
         hit.s = ds;
         hit.mat = 0;
         float glass_s = NO_HIT_S;
-        trace_scene(scene, x, v, inside, hit, glass_s);
+        trace_scene(scene, x, v, inside, rho, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, beam_color);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }

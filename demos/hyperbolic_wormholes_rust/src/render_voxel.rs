@@ -18,6 +18,7 @@ use objc2_metal::{
     MTLResourceOptions, MTLSize,
 };
 
+use crate::geometry::get_distance;
 use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld};
 
 /// `Result` is this module's result type.
@@ -113,7 +114,7 @@ pub struct VoxelFrame {
     structures: Vec<GpuStructure>,
     voxels: Vec<u8>,
     warps: Vec<GpuWarp>,
-    lists: Vec<i32>,
+    lists: Vec<[f32; 4]>,
     lights: Vec<GpuLight>,
     palette: Vec<[f32; 4]>,
     beams: Vec<GpuBeam>,
@@ -171,13 +172,22 @@ impl VoxelFrame {
                 }
             })
             .collect();
-        let mut lists: Vec<i32> = Vec::new();
+        let mut lists: Vec<[f32; 4]> = Vec::new();
         let warps: Vec<GpuWarp> = world
             .warps
             .iter()
             .map(|w| {
                 let first: usize = lists.len();
-                lists.extend(w.list.iter().map(|&k| k as i32));
+                lists.extend(w.list.iter().map(|&k| {
+                    let structure = &world.structures[k];
+                    let distance: f64 = get_distance(structure.centre, w.centre);
+                    [
+                        k as f32,
+                        (distance - structure.radius).max(0.0) as f32,
+                        (distance + structure.radius) as f32,
+                        0.0,
+                    ]
+                }));
                 GpuWarp {
                     inverse: to_columns(w.inverse),
                     forward: to_columns(w.frame),

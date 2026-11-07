@@ -226,16 +226,16 @@ Lunar Surface (`--map lunar-surface --bench-views`), GPU milliseconds per frame 
 
 | View | GPU ms | View | GPU ms |
 | --- | ---: | --- | ---: |
-| blue spawn | 7.7 | red spawn | 8.1 |
-| overview (from 46 m up) | 21.7 | middle | 23.9 |
-| black hole | 46.1 | Einstein ring | 52.2 |
-| wormhole | 33.9 | wormhole exit | 59.5 |
-| red pylon | 6.1 | ridge | 8.9 |
-| overlook | 5.4 | habitat row | 7.5 |
-| laser into the wormhole | 44.7 | | |
+| blue spawn | 8.7 | red spawn | 7.5 |
+| overview (from 46 m up) | 21.9 | middle | 23.4 |
+| black hole | 41.7 | Einstein ring | 44.1 |
+| wormhole | 33.3 | wormhole exit | 57.4 |
+| red pylon | 6.2 | ridge | 9.0 |
+| overlook | 5.3 | habitat row | 7.3 |
+| laser into the wormhole | 44.1 | | |
 
 In a full-screen window (2560×1336, automatic scale, `--view`), the blue spawn runs at 192 fps at full resolution, and
-the black hole, wormhole exit and Einstein ring views at 80, 74 and 71 fps at render scales 0.59, 0.52 and 0.56.
+the black hole, wormhole exit and Einstein ring views at 74, 76 and 71 fps at render scales 0.62, 0.53 and 0.61.
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s

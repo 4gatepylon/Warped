@@ -342,10 +342,14 @@
 ### D34. Lunar Surface keeps the level's light paths
 
 - **Choice:** the same kick–drift–kick steps of 8% of the distance to a warp as the level, with each step's end
-  bending reused for the next step's start (10% faster, the same picture).
+  bending reused for the next step's start (10% faster, the same picture), and each step testing only the structures
+  in the warp's reach whose distance from its centre the step can reach (another 5 to 15% near warps, every pixel the
+  same).
 - **Alternatives:** steps of 12% or 16% (30% and 45% less GPU time near warps, but features up to 0.5 pixel further
   from converged paths: against the level's steps eight times smaller, the level's own steps are 0.3 to 2.1 pixels
-  off near warps at 2560×1600, 12% steps 0.8 to 2.2, 16% steps 0.9 to 2.3); the house's RK4 steps and jump tables
+  off near warps at 2560×1600, 12% steps 0.8 to 2.2, 16% steps 0.9 to 2.3); steps up to three times longer where the
+  bending is weak (no faster, as the time goes to rays winding close to the black hole and the throats, where steps
+  must stay short; up to 0.9 pixel further off); the house's RK4 steps and jump tables
   (much more code, with chord errors to handle near the structures inside the warps' reach).
 - **Rationale:** the map should look like the level; the window's automatic scale keeps 60 fps (D36).
 - **Revisit if:** the upscaled frames near the black hole and wormhole look too soft.
@@ -364,9 +368,8 @@
 
 - **Choice:** the same automatic render scale as the house (D19). At 2560×1600 and full resolution the views away
   from warps take 5 to 9 ms of GPU time, those across the crater 22 to 24 ms and those near the black hole and wormhole
-  34 to 60 ms; in a full-screen window
-  (2560×1336) the spawn runs at 192 fps at full resolution, and the black hole, wormhole exit and Einstein ring views
-  at 80, 74 and 71 fps at render scales 0.59, 0.52 and 0.56.
+  33 to 57 ms; in a full-screen window (2560×1336) the spawn runs at 192 fps at full resolution, and the black hole,
+  wormhole exit and Einstein ring views at 74, 76 and 71 fps at render scales 0.62, 0.53 and 0.61.
 - **Alternatives:** larger steps (D34); adaptive sampling or jump tables as in the house, left for later.
 - **Rationale:** it keeps 60 fps with the level's picture; the views near warps are where it costs resolution.
 
