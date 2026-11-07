@@ -10,7 +10,7 @@
 use glam::{DMat4, DVec3, DVec4, Vec4};
 
 use crate::geometry::{
-    AXIS_W, AXIS_Y, UP_VECTOR, get_local_direction, invert_lorentz, normalize_tangent,
+    AXIS_W, AXIS_Y, UP_VECTOR, get_distance, get_local_direction, invert_lorentz, normalize_tangent,
 };
 use crate::world::{MAX_BOX_COUNT, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT, World};
 
@@ -24,16 +24,18 @@ pub const TEXELS_PER_GLUING: usize = 4;
 pub const TEXEL_BOXES: usize = TEXEL_GLUINGS + TEXELS_PER_GLUING * MAX_MOUTH_COUNT;
 pub const TEXELS_PER_BOX: usize = 6;
 pub const TEXEL_CLUSTERS: usize = TEXEL_BOXES + TEXELS_PER_BOX * MAX_BOX_COUNT;
-pub const TEXELS_PER_CLUSTER: usize = 2;
-pub const TEXEL_SPOT: usize = TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * MAX_CLUSTER_COUNT;
-pub const MAX_BEAM_CHUNK_COUNT: usize = 32;
+pub const TEXELS_PER_CLUSTER: usize = 6;
+pub const TEXEL_CLUSTER_INFO: usize = 5;
+pub const TEXEL_CLUSTER_ORDER: usize = TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * MAX_CLUSTER_COUNT;
+pub const TEXEL_SPOT: usize = TEXEL_CLUSTER_ORDER + MAX_CLUSTER_COUNT;
+pub const MAX_BEAM_CHUNK_COUNT: usize = 64;
 pub const TEXEL_BEAM_CHUNKS: usize = TEXEL_SPOT + 1;
 pub const TEXELS_PER_BEAM_CHUNK: usize = 2;
 pub const MAX_BEAM_POINT_COUNT: usize = 256;
 pub const TEXEL_BEAM_POINTS: usize =
     TEXEL_BEAM_CHUNKS + TEXELS_PER_BEAM_CHUNK * MAX_BEAM_CHUNK_COUNT;
 pub const ROW_TEXEL_COUNT: usize = TEXEL_BEAM_POINTS + MAX_BEAM_POINT_COUNT;
-pub const BEAM_POINTS_PER_CHUNK: usize = 16;
+pub const BEAM_POINTS_PER_CHUNK: usize = 4;
 pub const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const BEND_CUTOFF_PER_R: f64 = 2.0;
 const FOG_PER_R: f64 = 3.0;
@@ -67,7 +69,10 @@ pub struct Uniforms {
     pub beam_chunk_count: i32,
     pub width_px: i32,
     pub height_px: i32,
-    pub padding: [i32; 5],
+    pub camera_mouth: i32,
+    pub camera_distance_m: f32,
+    pub jump_m: f32,
+    pub padding: [i32; 2],
 }
 
 const _: () = assert!(std::mem::size_of::<Uniforms>().is_multiple_of(16));
@@ -151,8 +156,17 @@ fn fill_row(rows: &mut [Vec4], row: usize, world: &World, frame: DMat4, beam: &B
             );
         }
     }
-    for (b, hyperbolic_box) in world.boxes.iter().enumerate() {
-        let first: usize = TEXEL_BOXES + TEXELS_PER_BOX * b;
+    let box_slabs = world
+        .boxes
+        .iter()
+        .enumerate()
+        .map(|(b, hyperbolic_box)| (TEXEL_BOXES + TEXELS_PER_BOX * b, hyperbolic_box));
+    let cluster_slabs = world
+        .clusters
+        .iter()
+        .enumerate()
+        .map(|(k, cluster)| (TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k, &cluster.bound));
+    for (first, hyperbolic_box) in box_slabs.chain(cluster_slabs) {
         for i in 0..3 {
             write(first + i, to_vec4(to_frame * hyperbolic_box.normals[i]));
         }
@@ -166,20 +180,32 @@ fn fill_row(rows: &mut [Vec4], row: usize, world: &World, frame: DMat4, beam: &B
             first + 4,
             Vec4::new(h[0] as f32, h[1] as f32, h[2] as f32, 0.0),
         );
+    }
+    for (b, hyperbolic_box) in world.boxes.iter().enumerate() {
         let color: [f32; 3] = hyperbolic_box.color;
-        write(first + 5, Vec4::new(color[0], color[1], color[2], 0.0));
+        write(
+            TEXEL_BOXES + TEXELS_PER_BOX * b + 5,
+            Vec4::new(color[0], color[1], color[2], 0.0),
+        );
     }
     for (k, cluster) in world.clusters.iter().enumerate() {
-        let first: usize = TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k;
-        write(first, to_vec4(to_frame * cluster.center));
         write(
-            first + 1,
+            TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k + TEXEL_CLUSTER_INFO,
             Vec4::new(
-                cluster.radius_m as f32,
                 cluster.first_box as f32,
                 cluster.box_count as f32,
+                cluster.top_m as f32,
                 0.0,
             ),
+        );
+    }
+    for (i, (k, distance_m)) in order_clusters(world, frame.col(AXIS_W))
+        .into_iter()
+        .enumerate()
+    {
+        write(
+            TEXEL_CLUSTER_ORDER + i,
+            Vec4::new(k as f32, distance_m as f32, 0.0, 0.0),
         );
     }
     let to_klein = |point: DVec4| -> Vec4 {
@@ -232,6 +258,28 @@ fn fill_row(rows: &mut [Vec4], row: usize, world: &World, frame: DMat4, beam: &B
     chunk_count
 }
 
+/// `order_clusters` lists the clusters by a distance each is at least from `origin` (past its
+/// bounding box's slabs, and no less than the origin's height above its top),
+/// nearest first. A ray that starts at the origin can't reach cluster k before travelling that far,
+/// so the shader only looks at clusters in this order as its ray travels.
+///
+/// Example: `let order = order_clusters(&world, camera_frame.col(AXIS_W));`
+fn order_clusters(world: &World, origin: DVec4) -> Vec<(usize, f64)> {
+    let r: f64 = world.curvature_radius_m;
+    let height_m: f64 = r * origin[AXIS_Y].asinh();
+    let mut order: Vec<(usize, f64)> = world
+        .clusters
+        .iter()
+        .enumerate()
+        .map(|(k, cluster)| {
+            let shape_m: f64 = world.get_box_lower_bound_m(&cluster.bound, origin);
+            (k, shape_m.max(height_m - cluster.top_m).max(0.0))
+        })
+        .collect();
+    order.sort_by(|a, b| a.1.total_cmp(&b.1));
+    order
+}
+
 /// `get_tile_cell_count` picks how many cells each side of a ground tile has: about one per
 /// block, odd so that the checker pattern is the same however a tile is reached.
 ///
@@ -272,6 +320,15 @@ fn make_uniforms(
         next_rows[k] = (1 + mouth.partner_index) as i32;
     }
     let tan_half_fov: f64 = HALF_FOV_RAD.tan();
+    let (mut camera_mouth, mut camera_distance_m): (i32, f64) = (-1, 0.0);
+    for (k, mouth) in world.mouths.iter().enumerate() {
+        let distance_m: f64 = get_distance(x, mouth.center) * r;
+        if distance_m < world.get_jump_radius_m()
+            && (camera_mouth < 0 || distance_m < camera_distance_m)
+        {
+            (camera_mouth, camera_distance_m) = (k as i32, distance_m);
+        }
+    }
     Uniforms {
         world_to_camera: invert_lorentz(camera_frame).as_mat4().to_cols_array_2d(),
         sky_basis: [right, up, back].map(|v| v.as_vec3().extend(0.0).to_array()),
@@ -297,6 +354,9 @@ fn make_uniforms(
         beam_chunk_count: beam_chunk_count as i32,
         width_px: size_px.0 as i32,
         height_px: size_px.1 as i32,
-        padding: [0; 5],
+        camera_mouth,
+        camera_distance_m: camera_distance_m as f32,
+        jump_m: world.get_jump_radius_m() as f32,
+        padding: [0; 2],
     }
 }

@@ -15,9 +15,10 @@ use glam::{Mat3, Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 use rayon::prelude::*;
 
 use crate::scene_data::{
-    ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS, TEXEL_BOXES, TEXEL_CLUSTERS,
-    TEXEL_GLUINGS, TEXEL_GROUND, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD,
-    TEXELS_PER_BEAM_CHUNK, TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING, Uniforms,
+    ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS, TEXEL_BOXES,
+    TEXEL_CLUSTER_INFO, TEXEL_CLUSTERS, TEXEL_GLUINGS, TEXEL_GROUND, TEXEL_MOUTHS, TEXEL_SPOT,
+    TEXEL_SUN, TEXEL_TO_WORLD, TEXELS_PER_BEAM_CHUNK, TEXELS_PER_BOX, TEXELS_PER_CLUSTER,
+    TEXELS_PER_GLUING, Uniforms,
 };
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_MOUTH_COUNT};
 
@@ -105,6 +106,16 @@ struct Reach {
 struct Hit {
     tau: f32,
     index: i32,
+    face: usize,
+    side: f32,
+}
+
+/// `SlabEntry` is where a geodesic is inside a box: from τ = tanh s = `tau_in` to `tau_out` (none
+/// when `tau_in` > `tau_out`), entering through slab `face` on `side`.
+#[derive(Clone, Copy)]
+struct SlabEntry {
+    tau_in: f32,
+    tau_out: f32,
     face: usize,
     side: f32,
 }
@@ -452,14 +463,21 @@ impl<'a> Scene<'a> {
         false
     }
 
-    /// `test_box` finds where a geodesic first enters a box within `reach`, lowering `hit` if
-    /// nearer. Along x cosh s + v sinh s, with τ = tanh s, each slab |⟨x, N⟩| ≤ σ is a quadratic
-    /// inequality in τ, so the box is an interval of τ.
+    /// `test_slabs` intersects a geodesic with a box stored as a box's first five texels (three
+    /// normals, sinh of the half sizes, half sizes), within `reach`. Along x cosh s + v sinh s, with
+    /// τ = tanh s, each slab |⟨x, N⟩| ≤ σ is a quadratic inequality in τ, so the box is an interval
+    /// of τ. It returns a lower bound on the start's distance from the box, and the interval.
     ///
-    /// Example: `let lower_m = scene.test_box(row, b, x, v, ds_m, &mut hit);`
-    fn test_box(&self, row: usize, b: usize, x: Vec4, v: Vec4, reach: Reach, hit: &mut Hit) -> f32 {
+    /// Example: `let (lower_m, entry) = scene.test_slabs(row, first, x, v, reach);`
+    fn test_slabs(
+        &self,
+        row: usize,
+        first: usize,
+        x: Vec4,
+        v: Vec4,
+        reach: Reach,
+    ) -> (f32, SlabEntry) {
         let r: f32 = self.u.curvature_radius_m;
-        let first: usize = TEXEL_BOXES + TEXELS_PER_BOX * b;
         let sigma: Vec4 = self.fetch(row, first + 3);
         let normals: [Vec4; 3] = [
             self.fetch(row, first),
@@ -471,23 +489,32 @@ impl<'a> Scene<'a> {
             mdot(x, normals[1]),
             mdot(x, normals[2]),
         );
+        let mut entry: SlabEntry = SlabEntry {
+            tau_in: 1.0,
+            tau_out: -1.0,
+            face: 0,
+            side: 1.0,
+        };
         for i in 0..3 {
             let sinh_limit: f32 =
                 sigma[i] * reach.cosh + (1.0 + sigma[i] * sigma[i]).sqrt() * reach.sinh;
             if a[i].abs() > sinh_limit {
-                return r * a[i].abs().asinh() - self.fetch(row, first + 4)[i];
+                return (
+                    r * a[i].abs().asinh() - self.fetch(row, first + 4)[i],
+                    entry,
+                );
             }
         }
         let half_m: Vec4 = self.fetch(row, first + 4);
         let lower_m: f32 = (Vec3::new(a.x.abs().asinh(), a.y.abs().asinh(), a.z.abs().asinh()) * r
             - half_m.truncate())
         .max_element();
-        let (mut tau_in, mut tau_out, mut side, mut face) = (-1.0f32, 1.0f32, 1.0f32, 0usize);
+        let (mut tau_in, mut tau_out) = (-1.0f32, 1.0f32);
         for i in 0..3 {
             let (ai, bi, s) = (a[i], mdot(v, normals[i]), sigma[i]);
             let discriminant: f32 = s * s + bi * bi - ai * ai;
             if discriminant < 0.0 {
-                return lower_m;
+                return (lower_m, entry);
             }
             let (root, denominator) = (s * discriminant.sqrt(), bi * bi + s * s);
             let (tau_0, tau_1) = (
@@ -496,25 +523,36 @@ impl<'a> Scene<'a> {
             );
             if tau_0 > tau_in {
                 tau_in = tau_0;
-                face = i;
-                side = if ai + bi * tau_0 >= 0.0 { 1.0 } else { -1.0 };
+                entry.face = i;
+                entry.side = if ai + bi * tau_0 >= 0.0 { 1.0 } else { -1.0 };
             }
             tau_out = tau_out.min(tau_1);
         }
-        if tau_in <= tau_out && tau_in >= 0.0 && tau_in < hit.tau {
+        entry.tau_in = tau_in;
+        entry.tau_out = tau_out;
+        (lower_m, entry)
+    }
+
+    /// `test_box` finds where a geodesic first enters a box within `reach`, lowering `hit` if
+    /// nearer.
+    ///
+    /// Example: `let lower_m = scene.test_box(row, b, x, v, reach, &mut hit);`
+    fn test_box(&self, row: usize, b: usize, x: Vec4, v: Vec4, reach: Reach, hit: &mut Hit) -> f32 {
+        let (lower_m, entry) = self.test_slabs(row, TEXEL_BOXES + TEXELS_PER_BOX * b, x, v, reach);
+        if entry.tau_in <= entry.tau_out && entry.tau_in >= 0.0 && entry.tau_in < hit.tau {
             *hit = Hit {
-                tau: tau_in,
+                tau: entry.tau_in,
                 index: b as i32,
-                face,
-                side,
+                face: entry.face,
+                side: entry.side,
             };
         }
         lower_m
     }
 
-    /// `test_cluster` tests a geodesic piece against one cluster's boxes, skipping them all if the
-    /// cluster's sphere is out of reach (a one-box cluster uses the box's own tighter bound), and
-    /// returns a lower bound on the distance to the cluster.
+    /// `test_cluster` tests a geodesic piece against one cluster's boxes, skipping them all unless
+    /// the piece reaches the cluster's bounding box before the nearest hit so far (a one-box
+    /// cluster tests its box directly). It returns a lower bound on the distance to the cluster.
     ///
     /// Example: `let lower_m = scene.test_cluster(row, k, x, vh, ds_m, &mut hit);`
     fn test_cluster(
@@ -526,22 +564,19 @@ impl<'a> Scene<'a> {
         reach_m: f32,
         hit: &mut Hit,
     ) -> f32 {
-        let info: Vec4 = self.fetch(row, TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k + 1);
-        let (first_box, box_count) = (info.y as usize, info.z as usize);
-        if box_count > 1 {
-            let distance: f32 = get_distance_of_q(get_q(
-                x,
-                self.fetch(row, TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k),
-            ));
-            let sphere_m: f32 = distance * self.u.curvature_radius_m - info.x;
-            if sphere_m > reach_m {
-                return sphere_m;
-            }
-        }
+        let first: usize = TEXEL_CLUSTERS + TEXELS_PER_CLUSTER * k;
+        let info: Vec4 = self.fetch(row, first + TEXEL_CLUSTER_INFO);
+        let (first_box, box_count) = (info.x as usize, info.y as usize);
         let reach: Reach = Reach {
             cosh: (reach_m / self.u.curvature_radius_m).cosh(),
             sinh: (reach_m / self.u.curvature_radius_m).sinh(),
         };
+        if box_count > 1 {
+            let (lower_m, entry) = self.test_slabs(row, first, x, v, reach);
+            if entry.tau_in > entry.tau_out || entry.tau_out < 0.0 || entry.tau_in >= hit.tau {
+                return lower_m;
+            }
+        }
         (first_box..first_box + box_count)
             .map(|b| self.test_box(row, b, x, v, reach, hit))
             .fold(1e9, f32::min)
