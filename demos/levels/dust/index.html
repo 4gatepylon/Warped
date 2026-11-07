@@ -101,6 +101,9 @@
  * - Blocks: every block belongs to a structure, a voxel grid in the structure's own Klein coordinates (meters),
  *   so its faces are geodesic planes and a geodesic step crosses its cells like a straight ray in flat space.
  * - The shader and the CPU tracer (laser, collisions) implement the same light paths and must stay in step.
+ * - Precision: hyperboloid coordinates grow like cosh(d / R_M), and the shader computes in single precision, so it
+ *   works relative to a render anchor near the player (`set_render_anchor`). Flying stops MAX_FLY_DISTANCE_M from
+ *   the level's centre, where the CPU's double-precision frames are still exact.
  */
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
@@ -114,6 +117,8 @@ const GROUND_MATERIAL = -1;
 const X = 0, Y = 1, Z = 2, W = 3;
 const E_W = [0, 0, 0, 1];
 const E_Y = [0, 1, 0, 0];
+const IDEAL_NORTH = [0, 0, 1, 1];
+const IDEAL_EAST = [1, 0, 0, 1];
 
 const WALK_SPEED_M_PER_S = 5.5;
 const SPRINT_SPEED_M_PER_S = 9.5;
@@ -122,6 +127,9 @@ const FLY_SPRINT_SPEED_M_PER_S = 55;
 const FLY_CLIMB_SPEED_M_PER_S = 12;
 const MAX_FLY_HEIGHT_M = 140;
 const MIN_FLY_HEIGHT_M = 0.4;
+const MAX_FLY_DISTANCE_M = 500;
+const RECENTRE_DISTANCE_M = 200;
+const HOME_DISTANCE_M = 100;
 const GRAVITY_M_PER_S_PER_S = 30;
 const JUMP_SPEED_M_PER_S = 8.5;
 const FALL_GRAVITY_PER_RISE_GRAVITY = 1.6;
@@ -1495,6 +1503,7 @@ const STATE = {
   console_progress_frac: 0, busy_console: -1, winner: null, beams: [], laser_text: '–', view: 'blue_spawn', quality: 'auto',
   auto_pixel_budget: AUTO_PIXEL_BUDGET, message: '', message_s: 0, time_s: 0, crossings: 0,
 };
+const RENDER_ANCHOR = { s_m: 0, t_m: 0, A: make_identity(), A_inv: make_identity() };
 
 /**
  * `get_camera_frame` returns the camera's isometry (it looks down its local -z).
@@ -1595,6 +1604,7 @@ function step_player(dt) {
     STATE.h_m = Math.max(MIN_FLY_HEIGHT_M, Math.min(MAX_FLY_HEIGHT_M, STATE.h_m));
     const eye = get_column(get_camera_frame(), W);
     if (get_distance(eye, WARPS[0].center) * R_M < BLACK_HOLE_KEEP_OUT_PER_RS * WARPS[0].rs_m) { STATE.B = B_before; STATE.h_m = h_before_m; say('Too close to the black hole'); }
+    if (get_distance(get_column(STATE.B, W), E_W) * R_M > MAX_FLY_DISTANCE_M) { STATE.B = B_before; say('Edge of the flight area'); }
     cross_player_through_throat();
     return;
   }
@@ -1740,7 +1750,8 @@ function subdivide_piece(points) {
 }
 
 /**
- * `upload_beams` packs the live beams into the shader's point texture and bounding-ball chunks.
+ * `upload_beams` packs the live beams, relative to the render anchor, into the shader's point texture and
+ * bounding-ball chunks.
  * @example upload_beams();
  */
 function upload_beams() {
@@ -1748,7 +1759,7 @@ function upload_beams() {
   STATE.beams.forEach((beam, beam_index) => {
     for (const piece of beam.pieces) {
       if (piece.length < 2) continue;
-      const points = subdivide_piece(piece);
+      const points = subdivide_piece(piece).map(p => apply_matrix(RENDER_ANCHOR.A_inv, p));
       for (let first = 0; first < points.length - 1; first += MAX_CHUNK_SEGMENTS) {
         const last = Math.min(first + MAX_CHUNK_SEGMENTS, points.length - 1), count = last - first;
         if (point_count + count + 1 > MAX_BEAM_POINTS || chunk_count >= MAX_BEAM_CHUNKS) return;
@@ -1779,7 +1790,7 @@ function update_beams() {
     const beam = STATE.beams[i], brightness = beam ? (1 - (STATE.time_s - beam.born_s) / LASER_FADE_S) ** 2 : 0;
     const color = beam ? TEAM_LASER_COLORS[beam.team] : [0, 0, 0];
     UNIFORMS.BEAM_COLORS.value[i].set(color[0], color[1], color[2], brightness);
-    const end = beam && beam.path.outcome === 'hit' ? beam.path.end : [0, 0, 0, 1];
+    const end = beam && beam.path.outcome === 'hit' ? apply_matrix(RENDER_ANCHOR.A_inv, beam.path.end) : E_W;
     UNIFORMS.BEAM_SPOTS.value[i].set(end[0], end[1], end[2], beam && beam.path.outcome === 'hit' ? brightness : 0);
   }
 }
@@ -1939,6 +1950,9 @@ uniform vec4 BEAM_CHUNK_INFO[MAX_BEAM_CHUNKS];
 uniform int BEAM_CHUNK_COUNT;
 uniform vec4 BEAM_COLORS[MAX_BEAMS];
 uniform vec4 BEAM_SPOTS[MAX_BEAMS];
+uniform vec4 SKY_NORTH, SKY_EAST;
+uniform float ANCHOR_S_M;
+uniform mat4 ANCHOR_BOOST_X;
 in vec2 ndc;
 out vec4 out_color;
 
@@ -1955,6 +1969,15 @@ struct Hit { float tau; int material; int axis; float face_sign; vec3 grid_point
  * @example dot_minkowski(x, x) == -1.0
  */
 float dot_minkowski(vec4 a, vec4 b) { return dot(a.xyz, b.xyz) - a.w * b.w; }
+
+/**
+ * \`compute_signed_asinh\` returns asinh(t) as sign(t) asinh(|t|): GPUs compute asinh as log(t + sqrt(t² + 1)), which
+ * cancels to log(0) for large negative t (ground points far out on the level's negative side).
+ * @param t The argument.
+ * @return asinh(t).
+ * @example compute_signed_asinh(-1500.0)
+ */
+float compute_signed_asinh(float t) { return sign(t) * asinh(abs(t)); }
 
 /**
  * \`complete_point\` rebuilds a hyperboloid point from its spatial part.
@@ -2252,7 +2275,7 @@ void add_beam_glow(vec4 A, vec4 B, float tau_end, float travelled, inout vec3 co
 
 /**
  * \`get_local_basis\` returns the east, up and north directions at a point (up away from the ground plane, north toward
- * the ideal point of the level's +s end).
+ * SKY_NORTH, the ideal point of the level's +s end, and east toward SKY_EAST, that of its +t end).
  * @param x The point.
  * @param east Set to east.
  * @param up Set to up.
@@ -2261,7 +2284,7 @@ void add_beam_glow(vec4 A, vec4 B, float tau_end, float travelled, inout vec3 co
  */
 void get_local_basis(vec4 x, out vec4 east, out vec4 up, out vec4 north) {
   up = (vec4(0.0, 1.0, 0.0, 0.0) + x.y * x) * inversesqrt(1.0 + x.y * x.y);
-  vec4 zi = vec4(0.0, 0.0, 1.0, 1.0), xi = vec4(1.0, 0.0, 0.0, 1.0);
+  vec4 zi = SKY_NORTH, xi = SKY_EAST;
   north = zi + dot_minkowski(zi, x) * x; north -= dot_minkowski(north, up) * up; north *= inversesqrt(max(dot_minkowski(north, north), TINY));
   east = xi + dot_minkowski(xi, x) * x; east -= dot_minkowski(east, up) * up + dot_minkowski(east, north) * north; east *= inversesqrt(max(dot_minkowski(east, east), TINY));
 }
@@ -2302,14 +2325,17 @@ float get_detail(float dist_m) { return 1.0 - smoothstep(DETAIL_START_M, DETAIL_
 
 /**
  * \`shade_ground\` returns the colour of the sand at a ground point: the ground map, blocks of GROUND_BLOCK_M laid in
- * rows along the axis (each row's blocks stretched by cosh(t/R) so they stay square), noise and edges.
+ * rows along the axis (each row's blocks stretched by cosh(t/R) so they stay square), noise and edges. The point's
+ * Fermi coordinates come from the render anchor's: ANCHOR_BOOST_X undoes the anchor's t, leaving a point whose s is
+ * its offset from ANCHOR_S_M, so no step loses precision far from the level's centre.
  * @param x The ground point.
  * @param dist_m Its distance.
  * @return The colour.
  * @example shade_ground(x, 40.0)
  */
 vec3 shade_ground(vec4 x, float dist_m) {
-  float s_m = R_M * atanh(clamp(x.z / x.w, -TAU_MAX, TAU_MAX)), t_m = R_M * asinh(x.x);
+  vec4 q = ANCHOR_BOOST_X * x;
+  float t_m = R_M * compute_signed_asinh(q.x), s_m = ANCHOR_S_M + R_M * compute_signed_asinh(q.z * inversesqrt(1.0 + q.x * q.x));
   vec2 uv = (vec2(s_m, t_m) + GROUND_MAP_HALF_M) / (2.0 * GROUND_MAP_HALF_M);
   vec3 base = all(greaterThan(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0))) ? texture(GROUND_MAP, uv).rgb : SAND_COLOR;
   float row = floor(t_m / GROUND_BLOCK_M), along = s_m * cosh((row + 0.5) * GROUND_BLOCK_M / R_M) / GROUND_BLOCK_M, cell = floor(along);
@@ -2502,8 +2528,8 @@ function pack_atlas() {
 }
 
 /**
- * `make_struct_data` packs each structure's inverse frame, tight box, origin, atlas offset and sunlight direction
- * into rows of STRUCT_TEXELS float texels.
+ * `make_struct_data` packs each structure's inverse frame (from the render anchor's coordinates), tight box, origin,
+ * atlas offset and sunlight direction into rows of STRUCT_TEXELS float texels.
  * @return {Float32Array} The texture data.
  * @example make_struct_data();
  */
@@ -2511,7 +2537,7 @@ function make_struct_data() {
   const data = new Float32Array(STRUCTURES.length * STRUCT_TEXELS * 4);
   STRUCTURES.forEach((st, k) => {
     const row = k * STRUCT_TEXELS * 4;
-    data.set(Float32Array.from(st.M_inv), row);
+    data.set(Float32Array.from(multiply_matrices(st.M_inv, RENDER_ANCHOR.A)), row);
     data.set([...st.lo, 0, ...st.hi, 0, st.ox, st.oz, st.atlas[0], st.atlas[1], ...st.sun_local, 0], row + 16);
   });
   return data;
@@ -2602,6 +2628,8 @@ const UNIFORMS = {
   CONSOLE_OFF_MASK: { value: 0 }, CONSOLE_BUSY: { value: -1 },
   BEAM_CHUNK_BALLS: { value: make_vec4_array(MAX_BEAM_CHUNKS) }, BEAM_CHUNK_INFO: { value: make_vec4_array(MAX_BEAM_CHUNKS) }, BEAM_CHUNK_COUNT: { value: 0 },
   BEAM_COLORS: { value: make_vec4_array(MAX_BEAMS) }, BEAM_SPOTS: { value: make_vec4_array(MAX_BEAMS) },
+  SKY_NORTH: { value: new THREE.Vector4(...IDEAL_NORTH) }, SKY_EAST: { value: new THREE.Vector4(...IDEAL_EAST) },
+  ANCHOR_S_M: { value: 0 }, ANCHOR_BOOST_X: { value: new THREE.Matrix4() },
 };
 const MATERIAL_3 = new THREE.RawShaderMaterial({ uniforms: UNIFORMS, vertexShader: VERTEX_SHADER, fragmentShader: FRAGMENT_SHADER, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
 const SCENE = new THREE.Scene();
@@ -2708,11 +2736,49 @@ function update_hud(fps) {
 }
 
 /**
- * `update_uniforms` hands the camera, consoles and time to the shader.
+ * `set_render_anchor` re-centres the shader's coordinates on the ground point (s, t): the shader then sees the camera,
+ * structures, warp objects, beams and sky through the inverse of that point's Fermi frame. Hyperboloid coordinates
+ * grow like cosh(d / R_M), so in the level's own coordinates single precision loses everything near a player far
+ * from the centre; relative to an anchor near the player the numbers stay small.
+ * @param {number} s_m The anchor's s.
+ * @param {number} t_m The anchor's t.
+ * @example set_render_anchor(-300, 12);
+ */
+function set_render_anchor(s_m, t_m) {
+  const A = make_fermi_frame(s_m, t_m), A_inv = invert_lorentz(A);
+  Object.assign(RENDER_ANCHOR, { s_m, t_m, A, A_inv });
+  STRUCT_TEXTURE.image.data.set(make_struct_data()); STRUCT_TEXTURE.needsUpdate = true;
+  STRUCTURES.forEach((st, k) => { const c = apply_matrix(A_inv, st.ball); UNIFORMS.STRUCT_BALLS.value[k].set(c[X], c[Y], c[Z], st.ball_cosh); });
+  WARPS.forEach((warp, w) => {
+    UNIFORMS.WARP_CENTERS.value[w].set(...apply_matrix(A_inv, warp.center));
+    UNIFORMS.WARP_FRAMES.value[w].fromArray(Float32Array.from(multiply_matrices(A_inv, warp.F)));
+    UNIFORMS.WARP_FRAMES_INV.value[w].fromArray(Float32Array.from(multiply_matrices(warp.F_inv, A)));
+  });
+  const north = apply_matrix(A_inv, IDEAL_NORTH), east = apply_matrix(A_inv, IDEAL_EAST);
+  UNIFORMS.SKY_NORTH.value.set(...north.map(c => c / north[W])); UNIFORMS.SKY_EAST.value.set(...east.map(c => c / east[W]));
+  UNIFORMS.ANCHOR_S_M.value = s_m; UNIFORMS.ANCHOR_BOOST_X.value.fromArray(Float32Array.from(make_boost(X, t_m / R_M)));
+  upload_beams();
+}
+
+/**
+ * `update_render_anchor` moves the render anchor home to the level's centre once the player is within HOME_DISTANCE_M
+ * of it, and otherwise to the player once they stray RECENTRE_DISTANCE_M from it, so it never moves while they walk the
+ * level.
+ * @example update_render_anchor();
+ */
+function update_render_anchor() {
+  const foot = get_column(STATE.B, W), is_anchor_home = RENDER_ANCHOR.s_m === 0 && RENDER_ANCHOR.t_m === 0;
+  if (get_distance(foot, E_W) * R_M < HOME_DISTANCE_M) { if (!is_anchor_home) set_render_anchor(0, 0); }
+  else if (get_distance(foot, get_column(RENDER_ANCHOR.A, W)) * R_M > RECENTRE_DISTANCE_M) { const { s_m, t_m } = get_fermi_coords(foot); set_render_anchor(s_m, t_m); }
+}
+
+/**
+ * `update_uniforms` hands the camera (relative to the render anchor), consoles and time to the shader.
  * @example update_uniforms();
  */
 function update_uniforms() {
-  UNIFORMS.CAMERA_FRAME.value.fromArray(Float32Array.from(get_camera_frame()));
+  update_render_anchor();
+  UNIFORMS.CAMERA_FRAME.value.fromArray(Float32Array.from(multiply_matrices(RENDER_ANCHOR.A_inv, get_camera_frame())));
   let mask = 0;
   ['blue', 'red'].forEach((team, t) => STATE.consoles[team].forEach((is_off, i) => { if (is_off) mask |= 1 << (t * CONSOLE_COUNT + i); }));
   UNIFORMS.CONSOLE_OFF_MASK.value = mask;
@@ -2762,7 +2828,7 @@ function start() {
   requestAnimationFrame(run_frame);
 }
 
-window.__demo = { sample_terrain_column, SCENE, CAMERA, join_beam_to_gun, step_light, advance_light, trace_segment, STATE, LEVEL, STRUCTURES, WARPS, PYLONS, VIEWPOINTS, set_view, fire_laser, trace_light_path, get_camera_frame, get_gun_pose, step_player, step_consoles, switch_team, get_fermi_coords, make_fermi_point, get_distance, get_material_at, get_nearby_structures, cross_throat, get_bend, get_d_ln_n, look, KEYS, RENDERER, UNIFORMS, resize, run_frame, get_column, apply_matrix, combine, project_tangent, move_along_geodesic, normalize_point, dot_minkowski };
+window.__demo = { sample_terrain_column, set_render_anchor, RENDER_ANCHOR, SCENE, CAMERA, join_beam_to_gun, step_light, advance_light, trace_segment, STATE, LEVEL, STRUCTURES, WARPS, PYLONS, VIEWPOINTS, set_view, fire_laser, trace_light_path, get_camera_frame, get_gun_pose, step_player, step_consoles, switch_team, get_fermi_coords, make_fermi_point, get_distance, get_material_at, get_nearby_structures, cross_throat, get_bend, get_d_ln_n, look, KEYS, RENDERER, UNIFORMS, resize, run_frame, get_column, apply_matrix, combine, project_tangent, move_along_geodesic, normalize_point, dot_minkowski };
 try { start(); } catch (error) { show_error(`${error.message}`); throw error; }
 </script>
 </body>

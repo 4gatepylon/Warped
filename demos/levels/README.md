@@ -27,7 +27,7 @@ flagged).
 | `Shift` | sprint (uses energy: drains in 30 s, refills in 60 s) |
 | `Space` | jump; in fly mode, up |
 | `C` | in fly mode, down |
-| `H` | toggle fly mode |
+| `H` | toggle fly mode (in Dust and Lunar Surface, up to 10 curvature radii from the centre) |
 | `E` (hold) | deactivate a console of the other team's pylon (10 s each) |
 | Click (captured) or `R` | fire the laser |
 | `T` | play as the other team |

@@ -43,7 +43,7 @@ B): red's fastest way in, but its exit is in the open, under blue's walls.
 | `Shift` | sprint (energy drains in 30 s, refills in 60 s) |
 | `Space` | jump; in fly mode, up |
 | `C` | in fly mode, down |
-| `H` | toggle fly mode (no gravity, no collisions) |
+| `H` | toggle fly mode (no gravity, no collisions, at most 500 m from the centre) |
 | `E` (hold) | deactivate a console of the other team's pylon (within 4.5 m of its axis, facing it) |
 | Click (captured) or `R` | fire the laser |
 | `T` | play as the other team (moves you to its spawn) |
@@ -74,6 +74,12 @@ B): red's fastest way in, but its exit is in the open, under blue's walls.
 - **Walking.** Gravity pulls toward the ground plane along its normal (30 m/s², as in the laser gravity demos);
   collisions use the same Klein grids. Within 8 m of a wormhole mouth your walking direction bends like light, so you
   walk in where you see the disk. The black hole doesn't pull you, and fly mode stops you 6 m from it.
+- **Precision.** Hyperboloid coordinates grow like cosh(d/R) and the GPU computes in single precision, so in the
+  level's own coordinates everything near you lost its last digits from about 300 m out: the world shook and the sky
+  turned to noise. The shader works relative to a render anchor instead: the level's centre while you are within 100 m
+  of it, otherwise the ground point under you, moved each time you get 200 m from it. The CPU hands it the camera,
+  structures, warp objects, beams and sky relative to the anchor, in double precision. Fly mode stops 500 m (10 R)
+  from the centre, where double precision on the CPU is still exact and the level is a few pixels across.
 
 ## Running
 
