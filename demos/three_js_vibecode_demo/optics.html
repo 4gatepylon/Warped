@@ -16,19 +16,28 @@
   select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
   button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
   button:hover { background: #42527a; }
+  button.on { background: #7a2c2c; border-color: #c35a5a; }
   .row { margin-top: 8px; }
   .muted { color: #9fb0c8; }
+  .laser { color: #ffb4a8; }
+  #sLaser { color: #ff9a8a; }
   #sMsg { color: #ffd27a; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
   #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="cross"></div>
 
 <div id="controls" class="panel">
   <h1>Optics lab (flat space)</h1>
   <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
   <div class="row"><kbd>WASD</kbd> fly · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>Shift</kbd> fast</div>
+  <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off</div>
   <div class="row"><b>Panels</b> · <kbd>1</kbd> place a mirror<br>
     Aim at a panel, then hold <kbd>T</kbd> or the right mouse button and move the mouse to turn it.
     <kbd>J</kbd>/<kbd>K</kbd> turn 5°, <kbd>U</kbd>/<kbd>I</kbd> tilt 5° (with <kbd>Shift</kbd>: 1°).
@@ -37,12 +46,16 @@
     <label>Render quality <select id="quality"><option value="auto" selected>auto</option><option value="0.35">low</option><option value="0.5">medium</option><option value="0.75">high</option><option value="1">full</option></select></label>
   </div>
   <div class="row">
+    <button id="bLaser" class="on">Laser: on</button>
+  </div>
+  <div class="row">
     <button id="bView">Reset view</button>
   </div>
 </div>
 
 <div id="stats" class="panel">
   <div>Panels: <b id="sP">0</b></div>
+  <div>Laser: <span id="sLaser">–</span></div>
   <div class="muted">Aimed at: <span id="sAim">–</span></div>
   <div id="sMsg"></div>
   <div class="muted"><span id="sFps">–</span> fps</div>
@@ -59,6 +72,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 const NX = 64, NY = 24, NZ = 64;
 const M = { air: 0, grass: 1, dirt: 2, stone: 3, planks: 4, log: 5, leaves: 6, glass: 7, roof: 8, brick: 9, quartz: 10, obsidian: 11,
   red: 12, blue: 13, yellow: 14, purple: 15, orange: 16, gold: 17, cobble: 18 };
+const MAT_NAME = Object.fromEntries(Object.entries(M).map(([k, v]) => [v, k]));
 const vox = new Uint8Array(NX * NY * NZ);
 const inGrid = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < NX && y < NY && z < NZ;
 const set = (x, y, z, m) => { if (inGrid(x, y, z)) vox[x + y * NX + z * NX * NY] = m; };
@@ -90,13 +104,15 @@ buildWorld();
 // ---------------------------------------------------------------------------
 // Limits shared by the CPU tracer and the shader
 // ---------------------------------------------------------------------------
-const MAXP = 16;
+const MAXP = 16, MAXSEG = 256, MAXG = MAXSEG / 8, MAXS = 48;
 const FRAME = 0.06;                     // panel frame width (blocks); the frame is opaque
 const TYPE_NAME = ['mirror'];
 
 // ---------------------------------------------------------------------------
 // Ray tracer. Each pixel's ray walks the voxel grid. Mirrors are flat rectangles that send the ray
 // on reflected. Pending rays go on a small stack, so panels added later can send a ray two ways.
+// Every straight piece of a pixel's ray path is tested against the laser segments, so beams also
+// show up in mirrors.
 // ---------------------------------------------------------------------------
 const vert = `
 precision highp float;
@@ -107,10 +123,13 @@ precision highp float; precision highp int; precision highp sampler3D; precision
 uniform sampler3D uVox; uniform ivec3 uDim;
 uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd; uniform float uTanHalf, uAspect, uTime; uniform vec3 uSun;
 uniform vec4 uPC[${MAXP}]; uniform vec4 uPN[${MAXP}]; uniform vec4 uPU[${MAXP}]; uniform int uNP, uSel;   // panel centre+type, normal+half height, u axis+half width
+uniform sampler2D uSeg; uniform vec4 uGS[${MAXG}]; uniform int uNSeg, uNG;                              // laser segments, bounding sphere per 8
+uniform vec4 uSpot[${MAXS}]; uniform vec4 uSpotC[${MAXS}]; uniform int uNS;                             // where beams touch things
+uniform float uBeamR, uPix;
 in vec2 vNdc; out vec4 outColor;
 
 const vec3 HAZE = vec3(0.78, 0.86, 0.95);
-const float FRAME = ${FRAME}, MAXT = 700.0;
+const float FRAME = ${FRAME}, REACH = 4.8, MAXT = 700.0;
 const vec3 PAL[19] = vec3[19](vec3(0.0), vec3(0.40,0.65,0.28), vec3(0.55,0.40,0.26), vec3(0.55,0.55,0.57), vec3(0.74,0.57,0.34),
   vec3(0.42,0.31,0.19), vec3(0.24,0.52,0.20), vec3(0.70,0.87,0.96), vec3(0.64,0.25,0.20), vec3(0.58,0.30,0.25), vec3(0.90,0.89,0.86),
   vec3(0.13,0.11,0.17), vec3(0.80,0.20,0.18), vec3(0.20,0.35,0.80), vec3(0.92,0.80,0.20), vec3(0.55,0.25,0.70), vec3(0.92,0.50,0.15),
@@ -207,6 +226,62 @@ int hitPanel(vec3 o, vec3 d, int skip, float tmax, out float tHit, out vec2 ab) 
   return best;
 }
 
+// --- laser helpers
+float distPS(vec3 p, vec3 a, vec3 b) {
+  vec3 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
+  return length(p - a - ab * t);
+}
+float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s) {   // squared distance between two segments
+  vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), t;
+  s = 0.0;
+  if (e < 1e-10) { t = 0.0; s = a > 1e-10 ? clamp(-dot(d1, r) / a, 0.0, 1.0) : 0.0; }
+  else if (a < 1e-10) { t = clamp(f / e, 0.0, 1.0); }
+  else {
+    float b = dot(d1, d2), c = dot(d1, r), den = a * e - b * b;
+    s = den > 1e-7 * a * e ? clamp((b * f - c * e) / den, 0.0, 1.0) : 0.0;
+    t = (b * s + f) / e;
+    if (t < 0.0) { t = 0.0; s = clamp(-c / a, 0.0, 1.0); }
+    else if (t > 1.0) { t = 1.0; s = clamp((b - c) / a, 0.0, 1.0); }
+  }
+  vec3 w = p1 + d1 * s - p2 - d2 * t;
+  return dot(w, w);
+}
+// Glow from laser segments near the straight piece a->b of a pixel's ray (which has travelled t0 so far).
+void beamGlow(vec3 a, vec3 b, float t0, float w, inout float hA, inout vec3 hC, inout vec3 core) {
+  float len = length(b - a);
+  float reach = REACH * max(uBeamR, uPix * (t0 + len));
+  vec3 rm = 0.5 * (a + b);
+  for (int g = 0; g < ${MAXG}; g++) {
+    if (g >= uNG) break;
+    if (distPS(uGS[g].xyz, a, b) > uGS[g].w + reach) continue;
+    for (int j = 0; j < 8; j++) {
+      int i = g * 8 + j;
+      if (i >= uNSeg) break;
+      vec4 A = texelFetch(uSeg, ivec2(i, 0), 0), B = texelFetch(uSeg, ivec2(i, 1), 0);
+      if (length(0.5 * (A.xyz + B.xyz) - rm) > 0.5 * (length(B.xyz - A.xyz) + len) + reach) continue;
+      float s; float d2 = segSeg(a, b, A.xyz, B.xyz, s);
+      float tc = t0 + s * len, sg = max(uBeamR, uPix * tc);
+      float f = A.w * w * exp(-tc / 300.0);
+      float h = f * exp(-d2 / (4.8 * sg * sg));
+      if (h < 0.002) continue;
+      vec3 c = texelFetch(uSeg, ivec2(i, 2), 0).rgb;
+      if (h > hA) { hA = h; hC = c; }
+      core = max(core, c * f * exp(-d2 / (sg * sg)));
+    }
+  }
+}
+void spotGlow(vec3 hp, float t, float w, inout float hA, inout vec3 hC, inout vec3 core) {   // where beams touch a surface
+  float rr = max(0.07, 2.5 * uPix * t), fade = w * exp(-t / 300.0);
+  for (int k = 0; k < ${MAXS}; k++) {
+    if (k >= uNS) break;
+    vec3 d = hp - uSpot[k].xyz;
+    float g = uSpot[k].w * fade * exp(-dot(d, d) / (rr * rr));
+    if (g > hA) { hA = g; hC = uSpotC[k].rgb; }
+    core = max(core, uSpotC[k].rgb * g * g);
+  }
+}
+
 struct Ray { vec3 o; vec3 d; vec3 w; float t; int skip; };
 
 void main() {
@@ -214,22 +289,26 @@ void main() {
   Ray st[6];
   st[0] = Ray(uCamPos, dir, vec3(1.0), 0.0, -1);
   int sp = 1;
-  vec3 col = vec3(0.0);
+  vec3 col = vec3(0.0), core = vec3(0.0), hC = vec3(0.0); float hA = 0.0;
   for (int k = 0; k < 10; k++) {
     if (sp <= 0) break;
     sp--;
     Ray r = st[sp];
+    float wm = max(r.w.r, max(r.w.g, r.w.b));
     float tp; vec2 ab;
     int ip = hitPanel(r.o, r.d, r.skip, MAXT, tp, ab);
     float tv; vec3 nrm; ivec3 hc;
     int m = traceVox(r.o, r.d, tp, tv, nrm, hc);
     float tEnd = m > 0 ? tv : tp;
+    if (uNSeg > 0) beamGlow(r.o, r.o + r.d * tEnd, r.t, wm, hA, hC, core);
     float tt = r.t + tEnd, fog = exp(-tt / 170.0);
     if (m > 0) {
       vec3 hp = r.o + r.d * tv;
+      if (uNS > 0) spotGlow(hp, tt, wm, hA, hC, core);
       col += r.w * mix(HAZE, shadeVox(m, hp, nrm, hc), fog);
     } else if (ip >= 0) {
       vec3 hp = r.o + r.d * tp, n = uPN[ip].xyz;
+      if (uNS > 0) spotGlow(hp, tt, wm, hA, hC, core);
       if (abs(ab.x) > uPU[ip].w - FRAME || abs(ab.y) > uPN[ip].w - FRAME) {     // the frame is opaque
         vec3 fc = ip == uSel ? vec3(1.0, 0.78, 0.25) : vec3(0.34, 0.35, 0.38);
         col += r.w * mix(HAZE, fc * (0.65 + 0.35 * abs(dot(n, uSun))), fog);
@@ -241,6 +320,9 @@ void main() {
     }
   }
   for (int i = 0; i < 6; i++) { if (i >= sp) break; col += st[i].w * HAZE; }   // out of budget: approximate
+  col = mix(col, hC, clamp(0.9 * hA, 0.0, 1.0));                                // laser halo
+  col += mix(core, vec3(max(core.r, max(core.g, core.b))), 0.6);               // white-hot core
+  col = col / (1.0 + max(col - 1.0, 0.0) * 0.6);
   outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }`;
 
@@ -255,12 +337,18 @@ catch (e) { const el = document.getElementById('err'); el.style.display = 'flex'
 const tex = new THREE.Data3DTexture(vox, NX, NY, NZ);
 tex.format = THREE.RedFormat; tex.type = THREE.UnsignedByteType;
 tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.unpackAlignment = 1; tex.needsUpdate = true;
+const segData = new Float32Array(MAXSEG * 3 * 4);
+const segTex = new THREE.DataTexture(segData, MAXSEG, 3, THREE.RGBAFormat, THREE.FloatType);
+segTex.minFilter = segTex.magFilter = THREE.NearestFilter; segTex.needsUpdate = true;
 const v4s = n => Array.from({ length: n }, () => new THREE.Vector4());
 const uniforms = {
   uVox: { value: tex }, uDim: { value: new Int32Array([NX, NY, NZ]) },
   uCamPos: { value: new THREE.Vector3() }, uCamRight: { value: new THREE.Vector3() }, uCamUp: { value: new THREE.Vector3() }, uCamFwd: { value: new THREE.Vector3() },
   uTanHalf: { value: Math.tan(37.5 * Math.PI / 180) }, uAspect: { value: 1 }, uTime: { value: 0 }, uSun: { value: new THREE.Vector3(0.45, 0.62, 0.35).normalize() },
   uPC: { value: v4s(MAXP) }, uPN: { value: v4s(MAXP) }, uPU: { value: v4s(MAXP) }, uNP: { value: 0 }, uSel: { value: -1 },
+  uSeg: { value: segTex }, uGS: { value: v4s(MAXG) }, uNSeg: { value: 0 }, uNG: { value: 0 },
+  uSpot: { value: v4s(MAXS) }, uSpotC: { value: v4s(MAXS) }, uNS: { value: 0 },
+  uBeamR: { value: 0.012 }, uPix: { value: 0.002 }
 };
 const mat = new THREE.RawShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag, glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
 const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
@@ -268,12 +356,15 @@ const scene = new THREE.Scene(); scene.add(quad);
 const cam = new THREE.Camera();
 
 let quality = 'auto';
+const bufSize = new THREE.Vector2();
 function resize() {
   const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
   const q = quality === 'auto' ? Math.min(1, Math.sqrt(520000 / (w * h * dpr * dpr))) : +quality;
   renderer.setPixelRatio(dpr * q);
   renderer.setSize(w, h, false);
   uniforms.uAspect.value = w / h;
+  renderer.getDrawingBufferSize(bufSize);
+  uniforms.uPix.value = 2 * uniforms.uTanHalf.value / Math.max(1, bufSize.y);
 }
 window.addEventListener('resize', resize);
 
@@ -286,7 +377,16 @@ const mul3 = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const norm3 = a => mul3(a, 1 / Math.hypot(a[0], a[1], a[2]));
+const reflect3 = (d, n) => sub3(d, mul3(n, 2 * dot3(d, n)));
 const DEG = Math.PI / 180;
+
+// ---------------------------------------------------------------------------
+// The laser. A beam starts at intensity 1 and loses some at every mirror; it stops when it gets too
+// faint, after too many bounces or after LASER.maxLen blocks.
+// ---------------------------------------------------------------------------
+const RED = [1, 0.06, 0.03];
+const LASER = { maxLen: 400, minI: 0.012, maxDepth: 40, mirror: 0.95 };
+const GUN = { right: 0.22, up: -0.2, fwd: 0.3 };      // where your beam leaves, relative to your eye
 
 // Panels: flat rectangles. Orientation as yaw/pitch of the normal (same convention as the camera);
 // u is the horizontal edge direction, v the other edge.
@@ -330,7 +430,69 @@ function voxelRay(o, d, tmax) {                      // same walk as the shader'
   if (d[1] < -1e-9) { const tg = (1 - o[1]) / d[1]; if (tg > 0 && tg < tmax) return { t: tg, m: M.grass }; }
   return null;
 }
+// Follow one laser through mirrors. Returns the straight segments, the points where light touches
+// something (spots), and where the beam ends (leaves). Pending beams go on a stack, so panels added
+// later can send a beam two ways.
+function traceLaser(o, d) {
+  const segs = [], spots = [], leaves = [];
+  let full = false;
+  const stack = [{ o, d: norm3(d), I: 1, col: RED, len: 0, depth: 0, skip: -1 }];
+  while (stack.length) {
+    if (segs.length >= MAXSEG) { full = true; break; }
+    const r = stack.pop();
+    const P = nearestPanel(r.o, r.d, r.skip, LASER.maxLen - r.len);
+    const V = voxelRay(r.o, r.d, P ? P.t : LASER.maxLen - r.len);
+    const t = V ? V.t : (P ? P.t : LASER.maxLen - r.len), hp = add3(r.o, mul3(r.d, t)), len = r.len + t;
+    segs.push({ a: r.o, b: hp, I: r.I, col: r.col });
+    const leaf = what => { leaves.push({ I: r.I, depth: r.depth, len, what }); };
+    if (V) { spots.push({ p: hp, I: r.I, col: r.col }); leaf(MAT_NAME[V.m]); continue; }
+    if (!P) { leaf(null); continue; }
+    const p = state.panels[P.i];
+    if (Math.abs(P.a) > p.hu - FRAME || Math.abs(P.b) > p.hv - FRAME) { spots.push({ p: hp, I: r.I, col: r.col }); leaf('a panel frame'); continue; }
+    spots.push({ p: hp, I: r.I * 0.3, col: r.col });
+    const next = (dir, I) => {
+      if (I < LASER.minI || r.depth >= LASER.maxDepth) return;
+      stack.push({ ...r, o: hp, d: dir, I, len, depth: r.depth + 1, skip: P.i });
+    };
+    next(reflect3(r.d, p.n), r.I * LASER.mirror);
+  }
+  return { segs, spots, leaves, full };
+}
 
+// Hand the beams to the shader: segments (texture, bounding sphere per 8) and spots.
+// Displayed brightness is intensity^0.6, so faint branches stay visible.
+function uploadLasers(results) {
+  let ns = 0, nsp = 0;
+  for (const res of results) {
+    for (const s of res.segs) {
+      if (ns >= MAXSEG) break;
+      const I = Math.pow(s.I, 0.6);
+      segData.set([s.a[0], s.a[1], s.a[2], I], ns * 4);
+      segData.set([s.b[0], s.b[1], s.b[2], 0], (MAXSEG + ns) * 4);
+      segData.set([s.col[0], s.col[1], s.col[2], 0], (2 * MAXSEG + ns) * 4);
+      ns++;
+    }
+    for (const s of res.spots) {
+      if (nsp >= MAXS) break;
+      uniforms.uSpot.value[nsp].set(s.p[0], s.p[1], s.p[2], Math.pow(s.I, 0.6));
+      uniforms.uSpotC.value[nsp].set(s.col[0], s.col[1], s.col[2], 0);
+      nsp++;
+    }
+  }
+  const ng = Math.ceil(ns / 8);
+  for (let g = 0; g < ng; g++) {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], pts = [];
+    for (let i = g * 8; i < Math.min(ns, g * 8 + 8); i++) for (const row of [0, 1]) {
+      const o = (row * MAXSEG + i) * 4, q = [segData[o], segData[o + 1], segData[o + 2]];
+      pts.push(q); for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
+    }
+    const c = mul3(add3(lo, hi), 0.5);
+    let rad = 0; for (const q of pts) rad = Math.max(rad, Math.hypot(...sub3(q, c)));
+    uniforms.uGS.value[g].set(c[0], c[1], c[2], rad + 1e-3);
+  }
+  uniforms.uNSeg.value = ns; uniforms.uNG.value = ng; uniforms.uNS.value = nsp;
+  segTex.needsUpdate = true;
+}
 function uploadPanels() {
   const n = Math.min(MAXP, state.panels.length);
   for (let i = 0; i < n; i++) {
@@ -346,7 +508,7 @@ function uploadPanels() {
 // State, camera
 // ---------------------------------------------------------------------------
 const V3 = THREE.Vector3;
-const state = { pos: new V3(), yaw: 0, pitch: 0, panels: [], grab: -1, aimed: -1, msg: '', msgT: 0 };
+const state = { pos: new V3(), yaw: 0, pitch: 0, laser: true, panels: [], grab: -1, aimed: -1, msg: '', msgT: 0 };
 function resetView() { state.pos.set(32.5, 7, 55); state.yaw = 0; state.pitch = -0.32; }
 function camBasis() {
   const cp = Math.cos(state.pitch), sp = Math.sin(state.pitch), cy = Math.cos(state.yaw), sy = Math.sin(state.yaw);
@@ -354,6 +516,10 @@ function camBasis() {
   return { fwd, right, up };
 }
 const arr = v => [v.x, v.y, v.z];
+function gunPose() {
+  const { fwd, right, up } = camBasis();
+  return { o: arr(state.pos.clone().addScaledVector(right, GUN.right).addScaledVector(up, GUN.up).addScaledVector(fwd, GUN.fwd)), d: arr(fwd) };
+}
 function aimedPanel() {
   const { fwd } = camBasis(), o = arr(state.pos), d = arr(fwd);
   const P = nearestPanel(o, d, -1, 80);
@@ -375,6 +541,15 @@ function rotatePanel(i, dyaw, dpitch) {
   if (!p) return;
   p.yaw += dyaw; p.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, p.pitch + dpitch));
   orient(p);
+}
+function setLaser(on) { state.laser = on; $('bLaser').textContent = 'Laser: ' + (on ? 'on' : 'off'); $('bLaser').classList.toggle('on', on); }
+let liveRes = null;
+function laserText(r) {
+  if (!r) return 'off';
+  const L = r.leaves;
+  if (!L.length) return 'fades out';
+  const end = l => l.what ? `hits ${l.what} after ${l.len.toFixed(1)} blocks` : 'flies off into the sky';
+  const n = L[0].depth; return `${n ? `${n} bounce${n > 1 ? 's' : ''}, then ` : ''}${end(L[0])}`;
 }
 function aimText(i) {
   const p = state.panels[i];
@@ -404,6 +579,7 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Digit1') placePanel(0);
   if (e.code === 'KeyX' && state.aimed >= 0) { state.panels.splice(state.aimed, 1); state.grab = -1; }
   if (e.code === 'KeyC') { state.panels = []; state.grab = -1; }
+  if (e.code === 'KeyL') setLaser(!state.laser);
   if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'KeyT') endGrab(); });
@@ -424,6 +600,7 @@ window.addEventListener('pointerup', e => { if (e.button === 2) { rmb = false; e
 canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0); });
 
 $('quality').addEventListener('change', e => { quality = e.target.value; resize(); });
+$('bLaser').addEventListener('click', () => setLaser(!state.laser));
 $('bView').addEventListener('click', resetView);
 
 // ---------------------------------------------------------------------------
@@ -444,6 +621,9 @@ function frame(now) {
 
   state.aimed = aimedPanel();
   uploadPanels();
+  liveRes = null;
+  if (state.laser) { const g = gunPose(); liveRes = traceLaser(g.o, g.d); }
+  uploadLasers(liveRes ? [liveRes] : []);
 
   const cb = camBasis();
   uniforms.uCamPos.value.copy(state.pos); uniforms.uCamFwd.value.copy(cb.fwd); uniforms.uCamRight.value.copy(cb.right); uniforms.uCamUp.value.copy(cb.up);
@@ -456,6 +636,7 @@ function frame(now) {
   if ((hudT += dt) > 0.2) {
     hudT = 0;
     $('sP').textContent = state.panels.length;
+    $('sLaser').textContent = laserText(liveRes);
     $('sAim').textContent = aimText(state.grab >= 0 ? state.grab : state.aimed);
     $('sMsg').textContent = state.msgT > 0 ? state.msg : '';
     if (now - t0 > 500) { $('sFps').textContent = (frames * 1000 / (now - t0)).toFixed(0); frames = 0; t0 = now; }
@@ -465,7 +646,7 @@ function frame(now) {
 resetView();
 resize();
 requestAnimationFrame(frame);
-window.__demo = { state, placePanel, rotatePanel, resetView, camBasis, uniforms, renderer, scene, cam, frame };
+window.__demo = { state, traceLaser, placePanel, rotatePanel, resetView, camBasis, uniforms, renderer, scene, cam, frame };
 </script>
 </body>
 </html>

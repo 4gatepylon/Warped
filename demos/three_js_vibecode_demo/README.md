@@ -52,11 +52,11 @@ carries on through the other mouth. "Auto" quality renders about 380k pixels and
 
 `optics.html` is a ray-traced, flat-space lab for trying out optical elements with a laser.
 
-Click the scene to capture the mouse (or drag to look), `WASD` to fly and `E`/`Q` to go up and down. `1` places a mirror
-facing you. Aim at one and hold `T` (or the right mouse button) and move the mouse to turn it, or use `J`/`K`/`U`/`I` for 5°
-steps. `X` deletes it.
+Click the scene to capture the mouse (or drag to look), `WASD` to fly and `E`/`Q` to go up and down. `L` turns your laser on
+and off. `1` places a mirror facing you. Aim at one and hold `T` (or the right mouse button) and move the mouse to turn it,
+or use `J`/`K`/`U`/`I` for 5° steps. `X` deletes it.
 
-Mirrors are ray traced, so they really reflect what you see.
+Mirrors really reflect what you see, laser beams included. Each one loses 5% of the light.
 
 ## Running
 
