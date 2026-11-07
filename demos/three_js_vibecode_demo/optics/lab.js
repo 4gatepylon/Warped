@@ -101,7 +101,7 @@ const TIPS = {
   </ol>`,
   heat_haze: `<ol>
     <li><b>Hot air bends light.</b> Warm air is thinner, so its refractive index is lower. Light bends toward the cooler, denser air: outward from the middle of the plume rising off a heater, and upward, because the air is hottest near the heater.</li>
-    <li><b>Turbulence spreads the beam.</b> The rising air churns, so different parts of the beam are bent different ways, and it leaves as a widening, shimmering cone (left: a beam through the air just above a heater).</li>
+    <li><b>Turbulence spreads the beam.</b> The rising air churns, so different parts of the beam are bent different ways, and it leaves as a widening, soft glow (left: a beam through the air just above a heater). Its spot is wide and dim: the same light is spread over a bigger area.</li>
     <li><b>Higher up is cooler:</b> the beam above it crosses the same plume higher up and spreads much less.</li>
     <li><b>Off-centre</b> (right, green): a beam through the edge of a plume is mostly pushed aside rather than spread.</li>
     <li>Look through the hot air: the world behind it shimmers too. <kbd>4</kbd> puts a heater where you aim, or takes one away.</li>
@@ -162,8 +162,9 @@ buildWorld();
 // ---------------------------------------------------------------------------
 const MAXP = 16, MAXSEG = 256, MAXG = MAXSEG / 8, MAXS = 48, MAXE = 16, MAXPINS = 12, MAXH = 8;
 // Hot-air plume above a heater: index drop A at the bottom of a plume of radius R (blocks) that cools with height
-// scale H and ends at height top. turb sets how wide turbulence spreads a beam, which leaves as `rays` rays.
-const PLUME = { R: 1, H: 3.5, top: 10, A: 0.08, turb: 2.2, rays: 12 };
+// scale H and ends at height top. turb sets how much turbulence wobbles the view through it, and glow how fast a
+// beam that crossed it widens (its width grows by glow × the index drop it crossed, per block travelled).
+const PLUME = { R: 1, H: 3.5, top: 10, A: 0.08, turb: 2.2, glow: 1.3 };
 // Glass (panel types 3 and 4): dense flint, refractive index n(λ) = A + B/λ² (λ in nm), so blue bends more than red.
 // d is a glass block's half thickness; the view through glass uses the single index `view`.
 const GLASS = { A: 1.6, B: 9500, d: 0.4, view: 1.625 };
@@ -378,9 +379,9 @@ float distPS(vec3 p, vec3 a, vec3 b) {
   vec3 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
   return length(p - a - ab * t);
 }
-float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s) {   // squared distance between two segments
+float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s, out float t) {   // squared distance between two segments
   vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
-  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), t;
+  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r);
   s = 0.0;
   if (e < 1e-10) { t = 0.0; s = a > 1e-10 ? clamp(-dot(d1, r) / a, 0.0, 1.0) : 0.0; }
   else if (a < 1e-10) { t = clamp(f / e, 0.0, 1.0); }
@@ -405,25 +406,26 @@ void beamGlow(vec3 a, vec3 b, float t0, float w, inout float hA, inout vec3 hC, 
     for (int j = 0; j < 8; j++) {
       int i = g * 8 + j;
       if (i >= uNSeg) break;
-      vec4 A = texelFetch(uSeg, ivec2(i, 0), 0), B = texelFetch(uSeg, ivec2(i, 1), 0);
-      if (length(0.5 * (A.xyz + B.xyz) - rm) > 0.5 * (length(B.xyz - A.xyz) + len) + reach) continue;
-      float s; float d2 = segSeg(a, b, A.xyz, B.xyz, s);
-      float tc = t0 + s * len, sg = max(uBeamR, uPix * tc);
-      float f = A.w * w * exp(-tc / 300.0);
-      float h = f * exp(-d2 / (4.8 * sg * sg));
+      vec4 A = texelFetch(uSeg, ivec2(i, 0), 0), B = texelFetch(uSeg, ivec2(i, 1), 0), C = texelFetch(uSeg, ivec2(i, 2), 0);
+      float sl = length(B.xyz - A.xyz);
+      if (length(0.5 * (A.xyz + B.xyz) - rm) > 0.5 * (sl + len) + reach + C.w + B.w * sl) continue;
+      float s, sb; float d2 = segSeg(a, b, A.xyz, B.xyz, s, sb);
+      float tc = t0 + s * len, wb = C.w + B.w * sb * sl, sg = max(max(uBeamR, uPix * tc), wb);
+      bool soft = wb > uBeamR;                         // widened by hot air: a soft glow, dimmer the wider it gets
+      float f = A.w * w * exp(-tc / 300.0) * (soft ? min(1.0, 0.2 / wb) : 1.0);
+      float h = f * exp(-d2 / ((soft ? 1.0 : 4.8) * sg * sg));
       if (h < 0.002) continue;
-      vec3 c = texelFetch(uSeg, ivec2(i, 2), 0).rgb;
-      if (h > hA) { hA = h; hC = c; }
-      core = max(core, c * f * exp(-d2 / (sg * sg)));
+      if (h > hA) { hA = h; hC = C.rgb; }
+      core = max(core, C.rgb * f * (soft ? 0.0 : exp(-d2 / (sg * sg))));
     }
   }
 }
 void spotGlow(vec3 hp, float t, float w, inout float hA, inout vec3 hC, inout vec3 core) {   // where beams touch a surface
-  float rr = max(0.07, 2.5 * uPix * t), fade = w * exp(-t / 300.0);
+  float rr0 = max(0.07, 2.5 * uPix * t), fade = w * exp(-t / 300.0);
   for (int k = 0; k < ${MAXS}; k++) {
     if (k >= uNS) break;
-    vec3 d = hp - uSpot[k].xyz;
-    float g = uSpot[k].w * fade * exp(-dot(d, d) / (rr * rr));
+    vec3 d = hp - uSpot[k].xyz; float rr = max(rr0, uSpotC[k].w);    // a soft beam's spot is as wide as the beam
+    float g = uSpot[k].w * fade * min(1.0, 0.6 / rr) * exp(-dot(d, d) / (rr * rr));
     if (g > hA) { hA = g; hC = uSpotC[k].rgb; }
     core = max(core, uSpotC[k].rgb * g * g);
   }
@@ -695,36 +697,34 @@ function traceLaser(o, d, lam) {
     const r = stack.pop();
     if (r.glass >= 0) {          // inside glass: on to the far face, then out (refracted) and partly reflected back in
       const g = state.panels[r.glass], h = solidHit(g, r.o, r.d, true), hp = add3(r.o, mul3(r.d, h.t)), len = r.len + h.t;
-      segs.push({ a: r.o, b: hp, I: r.I, col: r.col });
+      const w1 = (r.w0 || 0) + (r.g || 0) * h.t;
+      segs.push({ a: r.o, b: hp, I: r.I, col: r.col, w0: r.w0 || 0, g: r.g || 0 });
       const f = refractF(r.d, h.n, false, glassN(r.lam)), more = r.depth < LASER.maxDepth;
-      if (more && r.I * f.R >= LASER.minI) stack.push({ ...r, o: hp, d: reflect3(r.d, h.n), I: r.I * f.R, len, depth: r.depth + 1 });
-      if (more && f.dir && r.I * (1 - f.R) >= LASER.minI) stack.push({ ...r, o: hp, d: f.dir, I: r.I * (1 - f.R), len, depth: r.depth + 1, glass: -1, skip: r.glass });
+      if (more && r.I * f.R >= LASER.minI) stack.push({ ...r, o: hp, d: reflect3(r.d, h.n), I: r.I * f.R, len, depth: r.depth + 1, w0: w1 });
+      if (more && f.dir && r.I * (1 - f.R) >= LASER.minI) stack.push({ ...r, o: hp, d: f.dir, I: r.I * (1 - f.R), len, depth: r.depth + 1, glass: -1, skip: r.glass, w0: w1 });
       continue;
     }
     const P = nearestPanel(r.o, r.d, r.skip, LASER.maxLen - r.len);
     const H = nearestPlume(r.o, r.d, r.skip, P ? P.t : LASER.maxLen - r.len);
     const lim = H ? H.t : (P ? P.t : LASER.maxLen - r.len), V = voxelRay(r.o, r.d, lim);
-    const t = V ? V.t : lim, hp = add3(r.o, mul3(r.d, t)), len = r.len + t;
-    segs.push({ a: r.o, b: hp, I: r.I, col: r.col });
+    const t = V ? V.t : lim, hp = add3(r.o, mul3(r.d, t)), len = r.len + t, w1 = (r.w0 || 0) + (r.g || 0) * t;
+    segs.push({ a: r.o, b: hp, I: r.I, col: r.col, w0: r.w0 || 0, g: r.g || 0 });
     const leaf = what => { leaves.push({ I: r.I, depth: r.depth, len, what }); };
-    if (V) { spots.push({ p: hp, I: r.I, col: r.col }); leaf(MAT_NAME[V.m]); continue; }
-    if (H) {                    // bent, and the first time spread by turbulence into a cone of PLUME.rays rays
-      const n = r.fan ? 1 : PLUME.rays, e1 = norm3(cross3(r.d, [0, 1, 0])), e2 = cross3(e1, r.d);
-      if (r.I / n < LASER.minI || r.depth >= LASER.maxDepth) { leaf('hot air'); continue; }
-      for (let k = 0; k < n; k++) {
-        const a = 2.39996 * k + 0.7 * state.time, rad = PLUME.turb * H.s * Math.sqrt((k + 0.5) / n);
-        const dir = norm3(add3(add3(r.d, H.bend), add3(mul3(e1, rad * Math.cos(a)), mul3(e2, rad * Math.sin(a)))));
-        stack.push({ ...r, o: hp, d: dir, I: r.I / n, len, depth: r.depth + 1, skip: 100 + H.i, fan: true });
-      }
+    if (V) { spots.push({ p: hp, I: r.I, col: r.col, w: w1 }); leaf(MAT_NAME[V.m]); continue; }
+    if (H) {      // bent, and widened by turbulence into a soft glow (spreads from several plumes add in quadrature)
+      if (r.depth >= LASER.maxDepth) { leaf('hot air'); continue; }
+      const e1 = norm3(cross3(r.d, [0, 1, 0])), e2 = cross3(e1, r.d), a = 0.7 * state.time, wob = 0.3 * PLUME.turb * H.s;
+      const dir = norm3(add3(add3(r.d, H.bend), add3(mul3(e1, wob * Math.cos(a)), mul3(e2, wob * Math.sin(a)))));
+      stack.push({ ...r, o: hp, d: dir, len, depth: r.depth + 1, skip: 100 + H.i, w0: w1, g: Math.hypot(r.g || 0, PLUME.glow * H.s) });
       continue;
     }
     if (!P) { leaf(null); continue; }
     const p = state.panels[P.i];
-    if (Math.abs(P.a) > p.hu - FRAME || Math.abs(P.b) > p.hv - FRAME) { spots.push({ p: hp, I: r.I, col: r.col }); leaf('a panel frame'); continue; }
-    spots.push({ p: hp, I: r.I * 0.3, col: r.col });
+    if (Math.abs(P.a) > p.hu - FRAME || Math.abs(P.b) > p.hv - FRAME) { spots.push({ p: hp, I: r.I, col: r.col, w: w1 }); leaf('a panel frame'); continue; }
+    spots.push({ p: hp, I: r.I * 0.3, col: r.col, w: w1 });
     const next = (dir, I, extra) => {
       if (I < LASER.minI || r.depth >= LASER.maxDepth) return;
-      stack.push({ ...r, o: hp, d: dir, I, len, depth: r.depth + 1, skip: P.i, ...extra });
+      stack.push({ ...r, o: hp, d: dir, I, len, depth: r.depth + 1, skip: P.i, w0: w1, ...extra });
     };
     if (p.type === 0) next(reflect3(r.d, p.n), r.I * LASER.mirror);
     else if (p.type === 1) { next(r.d, r.I * 0.5); next(reflect3(r.d, p.n), r.I * 0.5); }
@@ -754,19 +754,20 @@ function traceLaser(o, d, lam) {
 // Displayed brightness is intensity^0.6, so faint branches stay visible.
 function uploadLasers(results, emitters) {
   let ns = 0, nsp = 0;
+  const wid = [];                                     // each segment's widest point, for the bounding spheres
   for (const res of results) {
     for (const s of res.segs) {
       if (ns >= MAXSEG) break;
       const I = Math.pow(s.I, 0.6);
       segData.set([s.a[0], s.a[1], s.a[2], I], ns * 4);
-      segData.set([s.b[0], s.b[1], s.b[2], 0], (MAXSEG + ns) * 4);
-      segData.set([s.col[0], s.col[1], s.col[2], 0], (2 * MAXSEG + ns) * 4);
-      ns++;
+      segData.set([s.b[0], s.b[1], s.b[2], s.g], (MAXSEG + ns) * 4);              // width grows by g per block
+      segData.set([s.col[0], s.col[1], s.col[2], s.w0], (2 * MAXSEG + ns) * 4);   // from w0 at the start
+      wid[ns++] = s.w0 + s.g * Math.hypot(...sub3(s.b, s.a));
     }
     for (const s of res.spots) {
       if (nsp >= MAXS) break;
       uniforms.uSpot.value[nsp].set(s.p[0], s.p[1], s.p[2], Math.pow(s.I, 0.6));
-      uniforms.uSpotC.value[nsp].set(s.col[0], s.col[1], s.col[2], 0);
+      uniforms.uSpotC.value[nsp].set(s.col[0], s.col[1], s.col[2], s.w || 0);
       nsp++;
     }
   }
@@ -779,6 +780,7 @@ function uploadLasers(results, emitters) {
     }
     const c = mul3(add3(lo, hi), 0.5);
     let rad = 0; for (const q of pts) rad = Math.max(rad, Math.hypot(...sub3(q, c)));
+    rad += Math.max(...wid.slice(g * 8, g * 8 + 8));
     uniforms.uGS.value[g].set(c[0], c[1], c[2], rad + 1e-3);
   }
   const ne = Math.min(MAXE, emitters.length);

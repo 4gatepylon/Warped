@@ -59,7 +59,7 @@ carries on through the other mouth. "Auto" quality renders about 380k pixels and
   Mach–Zehnder layout.
 - `optics/diffraction.html`: adds diffraction gratings. Red, green, blue or white light; adjustable lines per mm.
 - `optics/heat_haze.html`: adds heaters. Hot air rising off a heater bends a beam outward and upward, and its turbulence
-  spreads the beam into a widening, shimmering cone. The effect is about 1000× stronger than real hot air.
+  spreads the beam into a widening, soft glow. The effect is about 1000× stronger than real hot air.
 - `optics/refraction.html`: adds glass blocks and prisms. Beams bend by Snell's law, partly reflect off every face, can be
   trapped by total internal reflection, and white light splits into a rainbow in a prism.
 
