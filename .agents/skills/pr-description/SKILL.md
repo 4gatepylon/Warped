@@ -43,7 +43,7 @@ split and stack PRs is in the `stacked-prs` skill (`.agents/skills/stacked-prs/`
 
 Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+🤖 Generated with <agent>
 ```
 
 ## Filling it in
@@ -60,7 +60,22 @@ Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
 - **Stack**: link the PR below (and above, once it exists) by number. Layer 1's base is `main`.
 - **Size**: the count of reviewable, hand-written code lines under the PR size rule in the root
   `AGENTS.md` (generated code, lockfiles, verbatim copies and prose don't count).
-- Keep the attribution line last. If the session gives a different attribution line, use that one.
+- **Attribution**: keep the `🤖 Generated with <agent>` line last, with `<agent>` from the table
+  below for the agent that wrote the PR. If the session gives a different attribution line, use
+  that one.
+
+## Attribution lines
+
+Each agent puts its own name and link in the footer and keeps the lines it adds by default
+(checked against each agent's defaults on 2026-11-06).
+
+| Agent | `<agent>` | The agent's own lines, kept as they are |
+| --- | --- | --- |
+| Claude Code | `[Claude Code](https://claude.com/claude-code)` | Commit trailer `Co-Authored-By: Claude <model> <noreply@anthropic.com>`, e.g. `Claude Opus 5.5` |
+| Codex | `[Codex](https://openai.com/codex)` | Commit trailer `Co-authored-by: Codex <noreply@openai.com>` |
+| Devin | `[Devin](https://devin.ai)` | `Link to Devin session: <url>` and `Requested by: @<user>` after the footer, where Devin appends them; commits authored by `Devin AI` (`devin-ai-integration[bot]`) |
+
+An agent that isn't in the table adds a row for itself in the same PR.
 
 ## Updating
 
