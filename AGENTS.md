@@ -2,30 +2,33 @@ These rules apply to the whole repository. Codex and Devin read them here, in `A
 Claude Code reads them through `CLAUDE.md`, which imports this file. Folders can add their own
 rules in their own `AGENTS.md`, with a `CLAUDE.md` beside it that imports it the same way.
 
+Skills live in `.agents/skills/`, where Codex and Devin find them. `.claude/skills` is a symlink
+to that folder for Claude Code, so add new skills under `.agents/skills/`.
+
 ## Pull requests
 
 - Keep each PR small enough to review: at most 200 non-blank lines of hand-written code (source,
   scripts, build files and configs, comments included), counting added and changed lines. Prose
   such as READMEs doesn't count, but keep it minimal. Split larger changes into stacked PRs with
-  the `stacked-prs` skill (`.claude/skills/stacked-prs/`).
+  the `stacked-prs` skill (`.agents/skills/stacked-prs/`).
 - Lockfiles and verbatim copies of existing files don't count.
 - Generated code (output of a script or compiler) doesn't count either, but commit it only if the
   user agrees. A PR may go well over 200 lines this way: the limit is on what reviewers read.
 - State the reviewable line count in the PR description.
-- Write every PR description with the `pr-description` skill (`.claude/skills/pr-description/`).
+- Write every PR description with the `pr-description` skill (`.agents/skills/pr-description/`).
   Every PR uses its template unchanged.
 
 ## Issues
 
 Open, format, label and split GitHub issues with the `github-issue` skill
-(`.claude/skills/github-issue/`). Every issue uses its title format, template and labels.
+(`.agents/skills/github-issue/`). Every issue uses its title format, template and labels.
 
 ## Experiments and benchmarks
 
 For experiments and benchmarks (anything that compares options or measures how well something
 works, such as two physics integrators or the game server's time per tick), let the user make the
 important decisions: ask rather than choose. Whatever you do decide, list in the PR with a short
-rationale. Follow the `experiment-decisions` skill (`.claude/skills/experiment-decisions/`) for
+rationale. Follow the `experiment-decisions` skill (`.agents/skills/experiment-decisions/`) for
 when to ask, the template, and where the list goes (PR description or a per-experiment
 `DECISIONS.md`).
 
@@ -58,7 +61,7 @@ its README says which scripts write to them.
 ## Command-line interfaces
 
 Write every script's and main's command-line interface with the `clis` skill
-(`.claude/skills/clis/`): click in Python, `getopt_long` in C and C++, non-interactive and
+(`.agents/skills/clis/`): click in Python, `getopt_long` in C and C++, non-interactive and
 idempotent by default, `--yes-to-<action>` and `--interactive` for destructive actions, and one
 vocabulary of flags across the repo.
 

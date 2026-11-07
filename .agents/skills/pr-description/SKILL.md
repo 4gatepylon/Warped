@@ -8,7 +8,7 @@ description: Write or update a pull request description using this repo's standa
 Every PR description in this repo uses the template below, exactly: the same sections, in the same
 order, with the same headings. Never drop a section; if it has nothing to say, write `None.`. This
 covers only the description (and title); the PR size rule is in the root `AGENTS.md`, and how to
-split and stack PRs is in the `stacked-prs` skill (`.claude/skills/stacked-prs/`).
+split and stack PRs is in the `stacked-prs` skill (`.agents/skills/stacked-prs/`).
 
 > NOTE: The template is a living document: it may change, but at any point in time every PR uses
 > the current version. If a PR doesn't fit it (a section makes no sense, or something important
