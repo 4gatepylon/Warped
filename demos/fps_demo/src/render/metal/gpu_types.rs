@@ -36,6 +36,7 @@ pub struct GpuFrameUniforms {
     pub render_params: Vec4,
     pub post_params: Vec4,
     pub bounce_color: Vec4,
+    pub effect_params: Vec4,
 }
 
 /// `GpuPassUniforms` is the projection that one pass draws with.
@@ -156,7 +157,7 @@ mod tests {
     /// `test_layouts_match_shaders` checks the sizes that the shaders' structs have.
     #[test]
     fn test_layouts_match_shaders() {
-        assert_eq!(std::mem::size_of::<GpuFrameUniforms>(), 64 * 10 + 16 * 22);
+        assert_eq!(std::mem::size_of::<GpuFrameUniforms>(), 64 * 10 + 16 * 23);
         assert_eq!(std::mem::size_of::<GpuDrawUniforms>(), 96);
         assert_eq!(std::mem::size_of::<GpuParticle>(), 64);
         assert_eq!(std::mem::size_of::<crate::render::Vertex>(), 48);

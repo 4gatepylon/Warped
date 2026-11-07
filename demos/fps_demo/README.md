@@ -13,7 +13,10 @@ only.
 - Robot bots that hunt you, keep a fighting distance, strafe and shoot back, less accurately
   from far away. Health, regeneration, death and respawn for you and the bots.
 - Renderer: PBR materials with image-based lighting from the HDRI sky, cascaded shadow maps,
-  HDR with ACES tone mapping, bloom, SSAO, height fog, FXAA, procedural weapon sway, bob,
+  HDR with ACES tone mapping and a color grade (white balance, log contrast, split toning),
+  energy-conserving bloom, SSAO with multi-bounce occlusion, multi-scatter GGX specular, height
+  fog that scatters blue more than red, ray-marched sun shafts through the shadow cascades (with
+  dust in sheltered air), FXAA, procedural weapon sway, bob,
   recoil and reload motion. The internal render scale lowers the 3D resolution; the HUD stays
   at full resolution.
 
@@ -30,7 +33,9 @@ popd
 source). It downloads about 126 files into `.assets/` once; a second run downloads nothing.
 `make help` lists every target, e.g. `make run-fps-demo RENDER_SCALE=0.7 BOT_COUNT=6`.
 `warped-fps-demo --help` lists every flag (`--fullscreen`, `--no-vsync`, `--autopilot`,
-`--show-frame-time`, `--rifle`, ...).
+`--show-frame-time`, `--rifle`, ...). `--camera-view yard|indoor|firing` holds the camera at
+a fixed pose (firing holds the trigger), and `--disable-effect <name>` starts with an effect off,
+for screenshots and per-effect GPU costs.
 
 `make bench-fps-demo BENCH_SECONDS=30` lets the autopilot play and writes the frame-time
 summary to `.artifacts/bench_fps_demo/<run_id>/`. Its choices are in
@@ -48,6 +53,7 @@ summary to `.artifacts/bench_fps_demo/<run_id>/`. Its choices are in
 | `Esc` | release the mouse; a second `Esc` quits |
 | `F1` / `F2` / `F3` | SSAO / bloom / FXAA on or off |
 | `F4` / `F5` | frame-time readout / autopilot on or off |
+| `F6` / `F7` / `F8` | color grade / volumetric haze / multi-scatter materials on or off |
 | `[` / `]` | render scale down / up by 0.1 |
 
 ## Assets

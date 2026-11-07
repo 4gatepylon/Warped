@@ -66,6 +66,9 @@ enum Effect {
     Ssao,
     Bloom,
     Fxaa,
+    ColorGrade,
+    VolumetricHaze,
+    MaterialResponse,
 }
 
 /// `Args` are the command-line flags.
@@ -213,6 +216,9 @@ fn main() {
         is_ssao_enabled: !args.disable_effect.contains(&Effect::Ssao),
         is_bloom_enabled: !args.disable_effect.contains(&Effect::Bloom),
         is_fxaa_enabled: !args.disable_effect.contains(&Effect::Fxaa),
+        is_color_grade_enabled: !args.disable_effect.contains(&Effect::ColorGrade),
+        is_volumetric_haze_enabled: !args.disable_effect.contains(&Effect::VolumetricHaze),
+        is_material_response_enabled: !args.disable_effect.contains(&Effect::MaterialResponse),
         is_vsync_enabled: !args.no_vsync,
     };
     let mut is_showing_frame_time: bool = args.show_frame_time;
@@ -252,6 +258,16 @@ fn main() {
                     Scancode::F3 => settings.is_fxaa_enabled = !settings.is_fxaa_enabled,
                     Scancode::F4 => is_showing_frame_time = !is_showing_frame_time,
                     Scancode::F5 => session.is_autopilot = !session.is_autopilot,
+                    Scancode::F6 => {
+                        settings.is_color_grade_enabled = !settings.is_color_grade_enabled
+                    }
+                    Scancode::F7 => {
+                        settings.is_volumetric_haze_enabled = !settings.is_volumetric_haze_enabled
+                    }
+                    Scancode::F8 => {
+                        settings.is_material_response_enabled =
+                            !settings.is_material_response_enabled
+                    }
                     Scancode::LeftBracket => {
                         settings.render_scale_frac =
                             (settings.render_scale_frac - RENDER_SCALE_STEP_FRAC).max(0.3);

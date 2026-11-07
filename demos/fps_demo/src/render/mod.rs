@@ -241,6 +241,9 @@ pub struct RenderSettings {
     pub is_ssao_enabled: bool,
     pub is_bloom_enabled: bool,
     pub is_fxaa_enabled: bool,
+    pub is_color_grade_enabled: bool,
+    pub is_volumetric_haze_enabled: bool,
+    pub is_material_response_enabled: bool,
     pub is_vsync_enabled: bool,
 }
 
