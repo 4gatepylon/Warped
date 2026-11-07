@@ -75,6 +75,63 @@ struct SampleBuffers {
     grid: (usize, usize),
 }
 
+/// `AdaptivePipelines` is adaptive sampling's passes, compiled from a shader that has kernels of
+/// these names using the buffer indices `encode_adaptive_sampling` sets.
+struct AdaptivePipelines {
+    trace_coarse: Pipeline,
+    fill_samples: Pipeline,
+    prepare_fill: Pipeline,
+    trace_listed_samples: Pipeline,
+    classify_cells: Pipeline,
+    prepare_refinement: Pipeline,
+    resolve_pixels: Pipeline,
+    refine_pixels: Pipeline,
+}
+
+impl AdaptivePipelines {
+    /// `FromLibrary` compiles adaptive sampling's kernels from a shader library.
+    ///
+    /// Example: `let adaptive = AdaptivePipelines::FromLibrary(&device, &library)?;`
+    #[allow(non_snake_case)]
+    fn FromLibrary(
+        device: &ProtocolObject<dyn MTLDevice>,
+        library: &ProtocolObject<dyn MTLLibrary>,
+    ) -> Result<AdaptivePipelines> {
+        let make = |name: &str| make_pipeline(device, library, name);
+        Ok(AdaptivePipelines {
+            trace_coarse: make("trace_coarse")?,
+            fill_samples: make("fill_samples")?,
+            prepare_fill: make("prepare_fill")?,
+            trace_listed_samples: make("trace_listed_samples")?,
+            classify_cells: make("classify_cells")?,
+            prepare_refinement: make("prepare_refinement")?,
+            resolve_pixels: make("resolve_pixels")?,
+            refine_pixels: make("refine_pixels")?,
+        })
+    }
+}
+
+/// `make_pipeline` compiles the kernel `name` of a shader library.
+///
+/// Example: `let trace_pixels = make_pipeline(&device, &library, "trace_pixels")?;`
+fn make_pipeline(
+    device: &ProtocolObject<dyn MTLDevice>,
+    library: &ProtocolObject<dyn MTLLibrary>,
+    name: &str,
+) -> Result<Pipeline> {
+    let function = library
+        .newFunctionWithName(&NSString::from_str(name))
+        .ok_or(format!("Metal: the shader has no kernel named {name}"))?;
+    Ok(device
+        .newComputePipelineStateWithFunction_error(&function)
+        .map_err(|error| {
+            format!(
+                "Metal: the {name} pipeline failed: {}",
+                error.localizedDescription()
+            )
+        })?)
+}
+
 /// `HoleBuffers` holds the hole filling's buffers for render sizes up to one size: one byte per
 /// pixel saying whether its ray was lost, the pyramid (every level above the image, half the size
 /// of the one below), and the largest render size they hold.
@@ -145,14 +202,7 @@ pub struct MetalRenderer {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     trace_pixels: Pipeline,
-    trace_coarse: Pipeline,
-    fill_samples: Pipeline,
-    prepare_fill: Pipeline,
-    trace_listed_samples: Pipeline,
-    classify_cells: Pipeline,
-    prepare_refinement: Pipeline,
-    resolve_pixels: Pipeline,
-    refine_pixels: Pipeline,
+    adaptive: AdaptivePipelines,
     build_throat_table: Pipeline,
     build_camera_table: Pipeline,
     build_mouth_fields: Pipeline,
@@ -277,6 +327,77 @@ fn get_pyramid_levels(render_px: (usize, usize)) -> Vec<((usize, usize), usize)>
     levels
 }
 
+/// `encode_adaptive_sampling` encodes adaptive sampling's passes into an encoder that already has
+/// the scene's buffers and the render texture: trace every fourth pixel, fill in every second
+/// pixel (interpolating where that is exact enough, tracing the rest), mark the smooth cells and
+/// list the others, size the refinement, write the pixels that need no new ray, and trace the
+/// listed ones.
+///
+/// Example: `encode_adaptive_sampling(&encoder, &self.adaptive, buffers, (2560, 1600));`
+fn encode_adaptive_sampling(
+    encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
+    pipelines: &AdaptivePipelines,
+    buffers: &SampleBuffers,
+    render_px: (usize, usize),
+) {
+    let grid: (usize, usize) = get_sample_grid(render_px);
+    assert!(
+        buffers.grid.0 >= grid.0 && buffers.grid.1 >= grid.1,
+        "encode_adaptive_sampling: buffers for {:?} samples can't hold {grid:?}",
+        buffers.grid
+    );
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
+    unsafe {
+        encoder.setBuffer_offset_atIndex(Some(&buffers.samples), 0, 2);
+        encoder.setBuffer_offset_atIndex(Some(&buffers.cells), 0, 3);
+        encoder.setBuffer_offset_atIndex(Some(&buffers.refine_cells), 0, 4);
+        encoder.setBuffer_offset_atIndex(Some(&buffers.refine_count), 0, 5);
+        encoder.setBuffer_offset_atIndex(Some(&buffers.refine_count), REFINE_COUNT_BYTES, 6);
+        encoder.setBuffer_offset_atIndex(Some(&buffers.coarse), 0, 9);
+        encoder.setBuffer_offset_atIndex(Some(&buffers.fill_list), 0, 11);
+        encoder.setBuffer_offset_atIndex(Some(&buffers.fill_count), 0, 12);
+        encoder.setBuffer_offset_atIndex(Some(&buffers.fill_count), REFINE_COUNT_BYTES, 13);
+    }
+    encoder.setComputePipelineState(&pipelines.trace_coarse);
+    dispatch_grid(encoder, get_coarse_grid(render_px));
+    encoder.setComputePipelineState(&pipelines.fill_samples);
+    dispatch_grid(encoder, grid);
+    encoder.setComputePipelineState(&pipelines.prepare_fill);
+    dispatch_grid(encoder, (1, 1));
+    encoder.setComputePipelineState(&pipelines.trace_listed_samples);
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DISPATCH SIZED FROM THE WRONG BYTES WILL HAPPEN
+    unsafe {
+        encoder.dispatchThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerThreadgroup(
+            &buffers.fill_count,
+            REFINE_COUNT_BYTES,
+            MTLSize {
+                width: REFINE_GROUP_SIZE,
+                height: 1,
+                depth: 1,
+            },
+        );
+    }
+    encoder.setComputePipelineState(&pipelines.classify_cells);
+    dispatch_grid(encoder, grid);
+    encoder.setComputePipelineState(&pipelines.prepare_refinement);
+    dispatch_grid(encoder, (1, 1));
+    encoder.setComputePipelineState(&pipelines.resolve_pixels);
+    dispatch_grid(encoder, render_px);
+    encoder.setComputePipelineState(&pipelines.refine_pixels);
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DISPATCH SIZED FROM THE WRONG BYTES WILL HAPPEN
+    unsafe {
+        encoder.dispatchThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerThreadgroup(
+            &buffers.refine_count,
+            REFINE_COUNT_BYTES,
+            MTLSize {
+                width: REFINE_GROUP_SIZE,
+                height: 1,
+                depth: 1,
+            },
+        );
+    }
+}
+
 impl MetalRenderer {
     /// `New` opens the default GPU, compiles the ray tracer and allocates the scene buffer. With
     /// `is_adaptive`, it traces every other pixel each way and interpolates where that is exact
@@ -296,34 +417,9 @@ impl MetalRenderer {
                     error.localizedDescription()
                 )
             })?;
-        let make_pipeline = |name: &str| -> Result<Pipeline> {
-            let function = library
-                .newFunctionWithName(&NSString::from_str(name))
-                .ok_or(format!("Metal: the shader has no kernel named {name}"))?;
-            Ok(device
-                .newComputePipelineStateWithFunction_error(&function)
-                .map_err(|error| {
-                    format!(
-                        "Metal: the {name} pipeline failed: {}",
-                        error.localizedDescription()
-                    )
-                })?)
-        };
-        let (trace_pixels, trace_coarse, fill_samples) = (
-            make_pipeline("trace_pixels")?,
-            make_pipeline("trace_coarse")?,
-            make_pipeline("fill_samples")?,
-        );
-        let (prepare_fill, trace_listed_samples, classify_cells) = (
-            make_pipeline("prepare_fill")?,
-            make_pipeline("trace_listed_samples")?,
-            make_pipeline("classify_cells")?,
-        );
-        let (prepare_refinement, resolve_pixels, refine_pixels) = (
-            make_pipeline("prepare_refinement")?,
-            make_pipeline("resolve_pixels")?,
-            make_pipeline("refine_pixels")?,
-        );
+        let make_pipeline = |name: &str| make_pipeline(&device, &library, name);
+        let trace_pixels: Pipeline = make_pipeline("trace_pixels")?;
+        let adaptive: AdaptivePipelines = AdaptivePipelines::FromLibrary(&device, &library)?;
         let (build_throat_table, build_camera_table) = (
             make_pipeline("build_throat_table")?,
             make_pipeline("build_camera_table")?,
@@ -358,14 +454,7 @@ impl MetalRenderer {
             device,
             queue,
             trace_pixels,
-            trace_coarse,
-            fill_samples,
-            prepare_fill,
-            trace_listed_samples,
-            classify_cells,
-            prepare_refinement,
-            resolve_pixels,
-            refine_pixels,
+            adaptive,
             build_throat_table,
             build_camera_table,
             build_mouth_fields,
@@ -541,7 +630,11 @@ impl MetalRenderer {
             dispatch_grid(&encoder, (CAMERA_TABLE_SIZE, CAMERA_TABLE_ROWS));
         }
         if self.is_adaptive {
-            self.encode_adaptive_sampling(&encoder, render_px);
+            let buffers: &SampleBuffers = self
+                .sample_buffers
+                .as_ref()
+                .expect("prepare_sample_buffers just made them");
+            encode_adaptive_sampling(&encoder, &self.adaptive, buffers, render_px);
         } else {
             encoder.setComputePipelineState(&self.trace_pixels);
             dispatch_grid(&encoder, render_px);
@@ -621,77 +714,6 @@ impl MetalRenderer {
         };
         self.is_scaler_warm = true;
         Ok((command_buffer, output))
-    }
-
-    /// `encode_adaptive_sampling` encodes adaptive sampling's passes into an encoder that already
-    /// has the scene rows, uniforms and render texture: trace every even pixel, mark the smooth
-    /// cells and list the others, size the refinement, write the pixels that need no new ray, and
-    /// trace the listed ones.
-    ///
-    /// Example: `self.encode_adaptive_sampling(&encoder, (2560, 1600))?;`
-    fn encode_adaptive_sampling(
-        &self,
-        encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
-        render_px: (usize, usize),
-    ) {
-        let grid: (usize, usize) = get_sample_grid(render_px);
-        let buffers: &SampleBuffers = self
-            .sample_buffers
-            .as_ref()
-            .filter(|buffers| buffers.grid.0 >= grid.0 && buffers.grid.1 >= grid.1)
-            .expect("prepare_sample_buffers made buffers big enough for this size");
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
-        unsafe {
-            encoder.setBuffer_offset_atIndex(Some(&buffers.samples), 0, 2);
-            encoder.setBuffer_offset_atIndex(Some(&buffers.cells), 0, 3);
-            encoder.setBuffer_offset_atIndex(Some(&buffers.refine_cells), 0, 4);
-            encoder.setBuffer_offset_atIndex(Some(&buffers.refine_count), 0, 5);
-            encoder.setBuffer_offset_atIndex(Some(&buffers.refine_count), REFINE_COUNT_BYTES, 6);
-            encoder.setBuffer_offset_atIndex(Some(&buffers.coarse), 0, 9);
-            encoder.setBuffer_offset_atIndex(Some(&buffers.fill_list), 0, 11);
-            encoder.setBuffer_offset_atIndex(Some(&buffers.fill_count), 0, 12);
-            encoder.setBuffer_offset_atIndex(Some(&buffers.fill_count), REFINE_COUNT_BYTES, 13);
-        }
-        encoder.setComputePipelineState(&self.trace_coarse);
-        dispatch_grid(encoder, get_coarse_grid(render_px));
-        encoder.setComputePipelineState(&self.fill_samples);
-        dispatch_grid(encoder, grid);
-        encoder.setComputePipelineState(&self.prepare_fill);
-        dispatch_grid(encoder, (1, 1));
-        encoder.setComputePipelineState(&self.trace_listed_samples);
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DISPATCH SIZED FROM THE WRONG BYTES WILL HAPPEN
-        unsafe {
-            encoder
-                .dispatchThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerThreadgroup(
-                    &buffers.fill_count,
-                    REFINE_COUNT_BYTES,
-                    MTLSize {
-                        width: REFINE_GROUP_SIZE,
-                        height: 1,
-                        depth: 1,
-                    },
-                );
-        }
-        encoder.setComputePipelineState(&self.classify_cells);
-        dispatch_grid(encoder, grid);
-        encoder.setComputePipelineState(&self.prepare_refinement);
-        dispatch_grid(encoder, (1, 1));
-        encoder.setComputePipelineState(&self.resolve_pixels);
-        dispatch_grid(encoder, render_px);
-        encoder.setComputePipelineState(&self.refine_pixels);
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DISPATCH SIZED FROM THE WRONG BYTES WILL HAPPEN
-        unsafe {
-            encoder
-                .dispatchThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerThreadgroup(
-                    &buffers.refine_count,
-                    REFINE_COUNT_BYTES,
-                    MTLSize {
-                        width: REFINE_GROUP_SIZE,
-                        height: 1,
-                        depth: 1,
-                    },
-                );
-        }
     }
 
     /// `encode_hole_filling` encodes the passes that paint lost pixels (rays trapped circling a
