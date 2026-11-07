@@ -203,8 +203,7 @@ keep features in place (0.2 to 0.4 pixel) but lose fine detail (SSIM 0.85 to 0.9
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s
-of flying, through 3A after 2.4 s of walking and down from 12 blocks in 0.6 s, and the laser through 1A to the
-ground beyond.
+of flying, through 3A after 2.4 s of walking and down from 12 blocks in 0.6 s, and the laser through 1A to the house beyond 1B (17.5 blocks).
 
 See [`DECISIONS.md`](DECISIONS.md) for how the benchmark was chosen, and [`OPTIMIZATIONS.md`](OPTIMIZATIONS.md) for the
 maths of each optimization tried.

@@ -29,7 +29,9 @@ mod net;
 mod physics;
 mod render_cpu;
 mod render_metal;
+mod render_voxel;
 mod scene_data;
+mod voxel_world;
 mod world;
 
 use std::error::Error;
@@ -54,7 +56,10 @@ use serde_json::{Value, json};
 
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use physics::{Input, LaserReport, Player};
+use render_metal::FrameData;
 use scene_data::{Beam, SceneData};
+use render_voxel::VoxelFrame;
+use voxel_world::{VoxelPlayer, VoxelWorld};
 use world::{DEFAULT_CURVATURE_RADIUS_M, World};
 
 /// `Result` is this program's result type.
@@ -231,8 +236,8 @@ trait Renderer {
     /// `render` draws `data` (ray-traced at its own render size) into `pixels` at `output_px`
     /// (top row first, 4 bytes per pixel), upscaling it if `output_px` is larger.
     ///
-    /// Example: `renderer.render(&data, (2560, 1600), &mut pixels)?;`
-    fn render(&mut self, data: &SceneData, output_px: (u32, u32), pixels: &mut [u8]) -> Result<()>;
+    /// Example: `renderer.render(FrameData::House(&data), (2560, 1600), &mut pixels)?;`
+    fn render(&mut self, data: FrameData, output_px: (u32, u32), pixels: &mut [u8]) -> Result<()>;
 
     /// `name` names the renderer, for the HUD and results.
     ///
@@ -259,7 +264,10 @@ trait Renderer {
 struct CpuRenderer;
 
 impl Renderer for CpuRenderer {
-    fn render(&mut self, data: &SceneData, output_px: (u32, u32), pixels: &mut [u8]) -> Result<()> {
+    fn render(&mut self, frame: FrameData, output_px: (u32, u32), pixels: &mut [u8]) -> Result<()> {
+        let FrameData::House(data) = frame else {
+            return Err("the CPU renderer draws the house demo only; use --renderer metal for voxel maps".into());
+        };
         let render_px: (u32, u32) = (
             data.uniforms.width_px as u32,
             data.uniforms.height_px as u32,
@@ -305,7 +313,7 @@ fn make_renderer(kind: RendererKind, sampling: Sampling) -> Result<Box<dyn Rende
 }
 
 impl Renderer for render_metal::MetalRenderer {
-    fn render(&mut self, data: &SceneData, output_px: (u32, u32), pixels: &mut [u8]) -> Result<()> {
+    fn render(&mut self, data: FrameData, output_px: (u32, u32), pixels: &mut [u8]) -> Result<()> {
         self.render_to_pixels(data, (output_px.0 as usize, output_px.1 as usize), pixels)
     }
 
@@ -376,6 +384,9 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         return Err(
             "--frame-count and --snapshot-every must be at least 1; e.g. --frame-count 10".into(),
         );
+    }
+    if arguments.map == MapName::LunarSurface && (arguments.play_route || arguments.autopilot) {
+        return Err("--play-route and --autopilot follow the house demo's route; use them with --map house-demo".into());
     }
     if arguments.bot && (arguments.join.is_none() || arguments.exit_after_s.is_none()) {
         return Err(
@@ -506,35 +517,162 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
     Ok(())
 }
 
+/// `VoxelView` is a named viewpoint on a voxel map, from the Lunar Surface level's own list: where
+/// the eye stands (Fermi coordinates), what it faces, its height when flying and its pitch.
+struct VoxelView {
+    name: &'static str,
+    at_m: [f64; 2],
+    target_m: [f64; 2],
+    h_m: Option<f64>,
+    pitch_rad: f64,
+    is_laser_on: bool,
+}
+
+/// `make_voxel_bench_views` gives the voxel benchmark's viewpoints: the Lunar Surface level's
+/// views, and the laser fired into the wormhole from its viewpoint.
+///
+/// Example: `let views = make_voxel_bench_views();`
+fn make_voxel_bench_views() -> Vec<VoxelView> {
+    let view = |name, at_m, target_m, h_m, pitch_rad| VoxelView {
+        name,
+        at_m,
+        target_m,
+        h_m,
+        pitch_rad,
+        is_laser_on: false,
+    };
+    vec![
+        view("blue_spawn", [-107.0, 0.0], [0.0, 0.0], None, 0.0),
+        view("red_spawn", [120.0, 0.0], [0.0, 0.0], None, 0.0),
+        view("overview", [0.0, 0.0], [0.0, -10.0], Some(46.0), -1.55),
+        view("middle", [-27.0, 0.0], [40.0, 0.0], None, 0.1),
+        view("black_hole", [-12.0, 4.0], [0.0, 0.0], Some(19.0), -0.42),
+        view("wormhole", [-22.0, 40.0], [-14.0, 40.0], None, 0.0),
+        view("wormhole_exit", [81.0, 26.0], [78.0, 30.0], None, 0.0),
+        view("red_pylon", [82.0, -1.0], [94.0, 6.0], None, 0.05),
+        view("ridge", [10.0, 58.5], [45.0, -5.0], None, -0.12),
+        view("einstein_ring", [-10.0, -3.0], [0.0, 0.0], Some(11.0), 0.15),
+        view("overlook", [-85.0, 0.0], [0.0, 0.0], Some(28.0), -0.7),
+        view("habitat_row", [-46.0, -36.0], [0.0, -42.0], None, 0.0),
+        VoxelView {
+            is_laser_on: true,
+            ..view("laser_into_wormhole", [-22.0, 40.0], [-14.0, 40.0], None, 0.0)
+        },
+    ]
+}
+
+/// `describe_shot` turns a voxel laser shot into one line for the results.
+///
+/// Example: `let text = describe_shot(&world, &shot);`
+fn describe_shot(world: &VoxelWorld, shot: &voxel_world::Shot) -> String {
+    let through: String = shot
+        .through
+        .iter()
+        .map(|name| format!("through {name}, "))
+        .collect();
+    let what: String = match (shot.is_hit, shot.hit_structure) {
+        (true, Some(k)) => world.structures[k].name.clone(),
+        (true, None) => "the ground".to_string(),
+        (false, _) => "nothing".to_string(),
+    };
+    format!("{through}hits {what} after {:.1} m", shot.length_m)
+}
+
+/// `bench_voxel_views` renders a voxel map's viewpoints without a window, timing each, as
+/// `bench_views` does for the house.
+///
+/// Example: `bench_voxel_views(&arguments, renderer, &world)?;`
+fn bench_voxel_views(
+    arguments: &Arguments,
+    mut renderer: Box<dyn Renderer>,
+    world: &VoxelWorld,
+) -> Result<()> {
+    let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
+    let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
+    let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
+    let mut pixels: Vec<u8> = vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL];
+    let views: Vec<VoxelView> = make_voxel_bench_views();
+    eprintln!(
+        "Benchmarking {} views of {} at {}x{} with the {} renderer...",
+        views.len(),
+        world.name,
+        size_px.0,
+        size_px.1,
+        renderer.name()
+    );
+    let mut results: Vec<Value> = Vec::new();
+    for view in views {
+        let player: VoxelPlayer =
+            VoxelPlayer::AtView(world, view.at_m, view.target_m, view.h_m, view.pitch_rad);
+        let camera: DMat4 = player.get_camera_frame(world);
+        let shot: Option<voxel_world::Shot> = view.is_laser_on.then(|| world.trace_laser(camera));
+        let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> =
+            shot.iter().map(|s| (s.segments.clone(), 0)).collect();
+        let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
+        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, render_px);
+        renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
+        let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
+        for _ in 0..arguments.frame_count {
+            let start: Instant = Instant::now();
+            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, render_px);
+            renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
+            times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
+            gpu_times_ms.extend(renderer.gpu_ms());
+        }
+        times_ms.sort_by(f64::total_cmp);
+        gpu_times_ms.sort_by(f64::total_cmp);
+        save_png(
+            &folder.join(format!("{}.png", view.name)),
+            &pixels,
+            size_px.0,
+            size_px.1,
+        )?;
+        results.push(json!({
+            "view": view.name,
+            "median_ms": times_ms[times_ms.len() / 2],
+            "fastest_ms": times_ms[0],
+            "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
+            "laser": shot.as_ref().map(|s| describe_shot(world, s)),
+        }));
+    }
+    report_bench(arguments, &folder, renderer.name(), render_px, results)
+}
+
 /// `run_bot` plays as a bot without a window for `--exit-after-s` seconds (see
 /// `multiplayer::run_bot`), saving its view at each hit under `.artifacts/bot/<run_id>/`, and
 /// prints how many players it hit and how often it was hit.
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = load_world(arguments.map)?;
+    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
     let mut client: net::Client = net::Client::Connect(get_server_address(arguments)?)?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
     let duration_s: f64 = arguments
         .exit_after_s
         .expect("validate_arguments checked --bot");
-    let (hit_count, eliminated_count) =
-        multiplayer::run_bot(&world, &mut client, duration_s, |data, victim_id| {
-            let size: (u32, u32) = (
-                data.uniforms.width_px as u32,
-                data.uniforms.height_px as u32,
-            );
-            let mut pixels: Vec<u8> = vec![0; size.0 as usize * size.1 as usize * BYTES_PER_PIXEL];
-            renderer.render(data, size, &mut pixels)?;
-            saved_count += 1;
-            save_png(
-                &folder.join(format!("hit_{saved_count:03}_player_{victim_id}.png")),
-                &pixels,
-                size.0,
-                size.1,
-            )
-        })?;
+    let mut save = |frame: FrameData, victim_id: u32| -> Result<()> {
+        let size: (u32, u32) = {
+            let (w, h) = frame.get_render_size();
+            (w as u32, h as u32)
+        };
+        let mut pixels: Vec<u8> = vec![0; size.0 as usize * size.1 as usize * BYTES_PER_PIXEL];
+        renderer.render(frame, size, &mut pixels)?;
+        saved_count += 1;
+        save_png(
+            &folder.join(format!("hit_{saved_count:03}_player_{victim_id}.png")),
+            &pixels,
+            size.0,
+            size.1,
+        )
+    };
+    let (hit_count, eliminated_count) = if map.structures.is_empty() {
+        let world: World = World::FromMap(&map)?;
+        multiplayer::run_bot(&world, &mut client, duration_s, |data, id| save(FrameData::House(data), id))?
+    } else {
+        let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
+        multiplayer::run_voxel_bot(&world, &mut client, duration_s, |frame, id| save(FrameData::Voxel(frame), id))?
+    };
     if arguments.json {
         println!(
             "{}",
@@ -666,7 +804,7 @@ fn render_view(
     pixels: &mut [u8],
 ) -> Result<Option<LaserReport>> {
     let (data, report) = pack_view(world, frame, is_laser_on, render_px, time_s);
-    renderer.render(&data, output_px, pixels)?;
+    renderer.render(FrameData::House(&data), output_px, pixels)?;
     Ok(report)
 }
 
@@ -767,7 +905,11 @@ fn make_bench_views(world: &World) -> Vec<View> {
 ///
 /// Example: `bench_views(&arguments, renderer)?;`
 fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = load_world(arguments.map)?;
+    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    if !map.structures.is_empty() {
+        return bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?);
+    }
+    let world: World = World::FromMap(&map)?;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
@@ -827,9 +969,24 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
             "laser": report.as_ref().map(describe_laser),
         }));
     }
+    report_bench(arguments, &folder, renderer.name(), render_px, results)
+}
+
+/// `report_bench` writes a benchmark's results to `results.json` in its run folder and prints them
+/// (or `--json`).
+///
+/// Example: `report_bench(&arguments, &folder, "metal", (1280, 800), results)?;`
+fn report_bench(
+    arguments: &Arguments,
+    folder: &Path,
+    renderer_name: &str,
+    render_px: (u32, u32),
+    results: Vec<Value>,
+) -> Result<()> {
+    let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let summary: Value = json!({
         "run_folder": folder.display().to_string(),
-        "renderer": renderer.name(),
+        "renderer": renderer_name,
         "sampling": get_sampling_name(arguments),
         "width_px": size_px.0,
         "height_px": size_px.1,
@@ -1271,6 +1428,32 @@ struct Session {
     hud_frame_count: u32,
     hud_render_ms: f64,
     multiplayer: Option<Multiplayer>,
+    voxel: Option<VoxelState>,
+}
+
+/// `VoxelState` is a window's game on a voxel map: the map, the player and their spawn point.
+struct VoxelState {
+    world: VoxelWorld,
+    player: VoxelPlayer,
+    spawn_index: usize,
+}
+
+/// `PackedFrame` is one frame packed for the renderer: the house's rows or a voxel map's frame.
+enum PackedFrame {
+    House(SceneData),
+    Voxel(VoxelFrame),
+}
+
+impl PackedFrame {
+    /// `as_frame_data` lends the frame to a renderer.
+    ///
+    /// Example: `renderer.render(packed.as_frame_data(), size, &mut pixels)?;`
+    fn as_frame_data(&self) -> FrameData<'_> {
+        match self {
+            PackedFrame::House(data) => FrameData::House(data),
+            PackedFrame::Voxel(frame) => FrameData::Voxel(frame),
+        }
+    }
 }
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server it runs
@@ -1304,7 +1487,18 @@ impl Session {
     /// Example: `let mut session = Session::New(&arguments);`
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
-        let world: World = load_world(arguments.map)?;
+        let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+        let voxel: Option<VoxelState> = if map.structures.is_empty() {
+            None
+        } else {
+            let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
+            let player: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
+            Some(VoxelState { world, player, spawn_index: 0 })
+        };
+        let world: World = match voxel {
+            Some(_) => World::Empty(map.get_curvature_radius_m()),
+            None => World::FromMap(&map)?,
+        };
         let player: Player = Player::AtSpawn(&world);
         let route: Vec<RouteFrame> = match (arguments.play_route, arguments.route) {
             (false, _) => Vec::new(),
@@ -1357,6 +1551,7 @@ impl Session {
             hud_frame_count: 0,
             hud_render_ms: 0.0,
             multiplayer,
+            voxel,
         })
     }
 
@@ -1388,6 +1583,15 @@ impl Session {
                 repeat: false,
                 ..
             } => match key {
+                Keycode::H if self.voxel.is_some() => {
+                    let voxel: &mut VoxelState = self.voxel.as_mut().expect("checked by the guard");
+                    voxel.player.is_flying = !voxel.player.is_flying;
+                    voxel.player.vertical_m_per_s = 0.0;
+                }
+                Keycode::R if self.voxel.is_some() => {
+                    let voxel: &mut VoxelState = self.voxel.as_mut().expect("checked by the guard");
+                    voxel.player = VoxelPlayer::AtSpawn(&voxel.world, voxel.spawn_index);
+                }
                 Keycode::H => {
                     self.player.is_flying = !self.player.is_flying;
                     self.player.velocity = glam::DVec4::ZERO;
@@ -1430,7 +1634,10 @@ impl Session {
                 mouse.set_relative_mouse_mode(window, true);
             }
             Event::MouseMotion { xrel, yrel, .. } if self.is_captured => {
-                physics::look_around(&mut self.player.frame, f64::from(xrel), f64::from(yrel));
+                match &mut self.voxel {
+                    Some(voxel) => voxel.player.look(f64::from(xrel), f64::from(yrel)),
+                    None => physics::look_around(&mut self.player.frame, f64::from(xrel), f64::from(yrel)),
+                }
             }
             _ => {}
         }
@@ -1467,21 +1674,37 @@ impl Session {
             sprint: keys.is_scancode_pressed(Scancode::LShift)
                 || keys.is_scancode_pressed(Scancode::RShift),
         };
-        for message in physics::update_player(&self.world, &mut self.player, &input, dt_s) {
+        let messages: Vec<String> = match &mut self.voxel {
+            Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, voxel.spawn_index),
+            None => {
+                let messages: Vec<String> = physics::update_player(&self.world, &mut self.player, &input, dt_s);
+                physics::level_out(&mut self.player.frame, dt_s);
+                messages
+            }
+        };
+        for message in messages {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
-        physics::level_out(&mut self.player.frame, dt_s);
+        let eye: DMat4 = self.get_eye_frame();
         if let Some(multiplayer) = &mut self.multiplayer
-            && let Err(error) = multiplayer
-                .client
-                .send_state(self.player.frame, self.is_laser_on)
+            && let Err(error) = multiplayer.client.send_state(eye, self.is_laser_on)
         {
             self.message = format!("Couldn't reach the server: {error}");
             self.message_time_s = MESSAGE_DURATION_S;
         }
         self.message_time_s -= dt_s;
         self.hud_time_s += dt_s;
+    }
+
+    /// `get_eye_frame` gives the eye's frame: the house player's frame, or the voxel player's camera.
+    ///
+    /// Example: `let eye = session.get_eye_frame();`
+    fn get_eye_frame(&self) -> DMat4 {
+        match &self.voxel {
+            Some(voxel) => voxel.player.get_camera_frame(&voxel.world),
+            None => self.player.frame,
+        }
     }
 
     /// `show_message` shows a line in the HUD for `MESSAGE_DURATION_S`.
@@ -1512,7 +1735,13 @@ impl Session {
         for event in events {
             match event {
                 net::NetEvent::Joined(id) => {
-                    self.player = multiplayer::get_spawn_player(&self.world, id);
+                    match &mut self.voxel {
+                        Some(voxel) => {
+                            voxel.spawn_index = id as usize;
+                            voxel.player = multiplayer::get_voxel_spawn(&voxel.world, id);
+                        }
+                        None => self.player = multiplayer::get_spawn_player(&self.world, id),
+                    }
                     messages.push(format!("You joined as player {id}"));
                 }
                 net::NetEvent::Eliminated {
@@ -1564,7 +1793,25 @@ impl Session {
     /// `pack` packs this frame's scene (and laser) at a render size.
     ///
     /// Example: `let data = session.pack((1280, 800));`
-    fn pack(&mut self, render_px: (u32, u32)) -> SceneData {
+    fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
+        if let Some(voxel) = &self.voxel {
+            let camera: DMat4 = voxel.player.get_camera_frame(&voxel.world);
+            let players: Vec<net::RemotePlayer> = self.multiplayer.as_ref().map_or(Vec::new(), |m| m.client.players.clone());
+            let team: u32 = voxel.spawn_index as u32 % 2;
+            let view: multiplayer::SharedVoxelView =
+                multiplayer::pack_shared_voxel_view(&voxel.world, camera, self.is_laser_on, team, &players, render_px);
+            let shared: VoxelWorld = voxel.world.clone();
+            self.laser = view.shot.as_ref().map(|shot| describe_shot(&shared, shot));
+            if let Some(victim_id) = view.hit_player_id {
+                self.laser = Some(format!("hits player {victim_id}"));
+                if let Some(multiplayer) = &mut self.multiplayer
+                    && let Err(error) = multiplayer.client.send_hit(victim_id)
+                {
+                    self.show_message(format!("Couldn't reach the server: {error}"));
+                }
+            }
+            return PackedFrame::Voxel(view.frame);
+        }
         if let Some(multiplayer) = &mut self.multiplayer {
             let view: multiplayer::SharedView = multiplayer::pack_shared_view(
                 &self.world,
@@ -1580,7 +1827,7 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
-            return view.data;
+            return PackedFrame::House(view.data);
         }
         let (data, report) = pack_view(
             &self.world,
@@ -1590,7 +1837,7 @@ impl Session {
             self.start.elapsed().as_secs_f64(),
         );
         self.laser = report.as_ref().map(describe_laser);
-        data
+        PackedFrame::House(data)
     }
 
     /// `record_frame` adds one frame's render time to the HUD's averages, which refresh every
@@ -1707,9 +1954,13 @@ impl Session {
         } else {
             format!(" upscaled to {}x{}", output_px.0, output_px.1)
         };
-        let movement: &str = if self.player.is_flying {
+        let (is_flying, is_on_ground, height_m) = match &self.voxel {
+            Some(voxel) => (voxel.player.is_flying, voxel.player.is_on_ground, voxel.player.h_m - voxel.world.player.eye_height_m),
+            None => (self.player.is_flying, self.player.is_on_ground, self.player.get_height_m(&self.world)),
+        };
+        let movement: &str = if is_flying {
             "flying"
-        } else if self.player.is_on_ground {
+        } else if is_on_ground {
             "walking"
         } else {
             "in the air"
@@ -1726,7 +1977,7 @@ impl Session {
             ),
             format!(
                 "{movement}, height {:.1} blocks",
-                self.player.get_height_m(&self.world)
+                height_m
             ),
         ];
         if let Some(laser) = &self.laser {
@@ -1816,8 +2067,8 @@ fn play_on_canvas(
             0,
         );
         let render_start: Instant = Instant::now();
-        let data: SceneData = session.pack(render_px);
-        renderer.render(&data, render_px, &mut pixels)?;
+        let packed: PackedFrame = session.pack(render_px);
+        renderer.render(packed.as_frame_data(), render_px, &mut pixels)?;
         session.record_frame(
             render_start.elapsed().as_secs_f64() * MS_PER_S,
             renderer.gpu_ms(),
@@ -1902,8 +2153,8 @@ fn play_on_layer(
         });
         let render_px: (u32, u32) = session.get_render_size(window_px);
         let render_start: Instant = Instant::now();
-        let data: SceneData = session.pack(render_px);
-        if metal.render_to_layer(&data, layer)? {
+        let packed: PackedFrame = session.pack(render_px);
+        if metal.render_to_layer(packed.as_frame_data(), layer)? {
             session.record_frame(
                 render_start.elapsed().as_secs_f64() * MS_PER_S,
                 Some(metal.last_gpu_ms),

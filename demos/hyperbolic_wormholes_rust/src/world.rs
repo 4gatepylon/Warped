@@ -196,6 +196,22 @@ impl World {
         world
     }
 
+    /// `Empty` makes a world with nothing in it but the ground, for a window that draws a voxel map.
+    ///
+    /// Example: `let world = World::Empty(40.0);`
+    #[allow(non_snake_case)]
+    pub fn Empty(curvature_radius_m: f64) -> World {
+        World {
+            curvature_radius_m,
+            boxes: Vec::new(),
+            clusters: Vec::new(),
+            mouths: Vec::new(),
+            spawn_frame: DMat4::IDENTITY,
+            throat_m: THROAT_PER_HORIZON * HORIZON_RADIUS_M,
+            bend_cutoff_m: BEND_CUTOFF_PER_R * curvature_radius_m,
+        }
+    }
+
     /// `FromMap` builds the world from a map in the portable format (`common/maps/`): its boxes,
     /// grouped into clusters by `group` (each bounded around its first box's frame), its wormhole
     /// mouths and its first spawn point. This world draws boxes and `foil` mouths with the

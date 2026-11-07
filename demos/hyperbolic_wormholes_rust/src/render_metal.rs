@@ -34,6 +34,7 @@ use crate::scene_data::{
     TEXEL_MOUTH_FIELDS, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD, TEXELS_PER_BEAM_CHUNK,
     TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING, TEXELS_PER_MOUTH_FIELD, Uniforms,
 };
+use crate::render_voxel::{VoxelFrame, VoxelGpu};
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
 /// `Result` is this module's result type.
@@ -116,6 +117,25 @@ const _: () = assert!(
     "the shader keeps candidate clusters in a 32-bit mask"
 );
 
+/// `FrameData` is one frame to draw: the house demo's packed rows, or a voxel map's frame.
+#[derive(Clone, Copy)]
+pub enum FrameData<'a> {
+    House(&'a SceneData),
+    Voxel(&'a VoxelFrame),
+}
+
+impl FrameData<'_> {
+    /// `get_render_size` gives the frame's render size in pixels.
+    ///
+    /// Example: `let render_px = frame_data.get_render_size();`
+    pub fn get_render_size(&self) -> (usize, usize) {
+        match self {
+            FrameData::House(data) => (data.uniforms.width_px as usize, data.uniforms.height_px as usize),
+            FrameData::Voxel(frame) => frame.get_render_size(),
+        }
+    }
+}
+
 /// `MetalRenderer` holds the GPU, the compiled ray tracer, the scene buffer, and the textures and
 /// MetalFX scaler for the current render and output sizes.
 pub struct MetalRenderer {
@@ -138,6 +158,7 @@ pub struct MetalRenderer {
     push_holes: Pipeline,
     fill_holes: Pipeline,
     hole_buffers: Option<HoleBuffers>,
+    voxel_gpu: Option<VoxelGpu>,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -350,6 +371,7 @@ impl MetalRenderer {
             push_holes,
             fill_holes,
             hole_buffers: None,
+            voxel_gpu: None,
             throat_table,
             camera_table,
             has_throat_table: false,
@@ -435,11 +457,8 @@ impl MetalRenderer {
     /// at the scene's render size, and MetalFX upscales the result when `output_px` is larger.
     ///
     /// Example: `let (command_buffer, texture) = self.encode_frame(&data, (2560, 1600))?;`
-    fn encode_frame(&mut self, data: &SceneData, output_px: (usize, usize)) -> Result<Frame> {
-        let render_px: (usize, usize) = (
-            data.uniforms.width_px as usize,
-            data.uniforms.height_px as usize,
-        );
+    fn encode_frame(&mut self, frame_data: FrameData, output_px: (usize, usize)) -> Result<Frame> {
+        let render_px: (usize, usize) = frame_data.get_render_size();
         let is_upscaled: bool = output_px != render_px;
         assert!(
             render_px.0 <= output_px.0 && render_px.1 <= output_px.1,
@@ -456,6 +475,12 @@ impl MetalRenderer {
             )?);
         }
         self.prepare_upscaling(output_px)?;
+        if let FrameData::Voxel(voxel_frame) = frame_data {
+            return self.encode_voxel_frame(voxel_frame, output_px);
+        }
+        let FrameData::House(data) = frame_data else {
+            unreachable!("encode_frame: the voxel frame returned above")
+        };
         if self.is_adaptive {
             self.prepare_sample_buffers(output_px)?;
         }
@@ -520,8 +545,54 @@ impl MetalRenderer {
         }
         self.encode_hole_filling(&encoder, render_px);
         encoder.endEncoding();
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
+        self.finish_encoding(command_buffer, texture, render_px, is_upscaled)
+    }
+
+    /// `encode_voxel_frame` encodes a voxel map's frame: the voxel kernel into the render texture,
+    /// then upscaling if needed.
+    ///
+    /// Example: `let (command_buffer, texture) = self.encode_voxel_frame(&frame, (2560, 1600))?;`
+    fn encode_voxel_frame(&mut self, frame: &VoxelFrame, output_px: (usize, usize)) -> Result<Frame> {
+        let render_px: (usize, usize) = frame.get_render_size();
+        if self.voxel_gpu.is_none() {
+            self.voxel_gpu = Some(VoxelGpu::New(&self.device)?);
+        }
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or("Metal: no command buffer")?;
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .ok_or("Metal: no compute encoder")?;
+        let (render_texture, _) = self
+            .render_texture
+            .as_ref()
+            .expect("encode_frame made the render texture");
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
+        unsafe { encoder.setTexture_atIndex(Some(render_texture), 0) };
+        self.voxel_gpu
+            .as_mut()
+            .expect("the voxel pipeline was just made")
+            .encode(&self.device, &encoder, frame)?;
+        encoder.endEncoding();
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
+        self.finish_encoding(command_buffer, texture, render_px, output_px != render_px)
+    }
+
+    /// `finish_encoding` adds MetalFX upscaling to a frame's command buffer when the render size is
+    /// smaller than the output (or once, to warm the scaler up), and gives the texture to show.
+    ///
+    /// Example: `self.finish_encoding(command_buffer, texture, render_px, is_upscaled)`
+    fn finish_encoding(
+        &mut self,
+        command_buffer: Retained<ProtocolObject<dyn MTLCommandBuffer>>,
+        render_texture: Retained<ProtocolObject<dyn MTLTexture>>,
+        render_px: (usize, usize),
+        is_upscaled: bool,
+    ) -> Result<Frame> {
         if !is_upscaled && self.is_scaler_warm {
-            return Ok((command_buffer, render_texture.clone()));
+            return Ok((command_buffer, render_texture));
         }
         let (scaler, _, _) = self.scaler.as_ref().expect("the scaler was just made");
         let (output_texture, _) = self
@@ -532,14 +603,14 @@ impl MetalRenderer {
         unsafe {
             scaler.setInputContentWidth(render_px.0);
             scaler.setInputContentHeight(render_px.1);
-            scaler.setColorTexture(Some(render_texture));
+            scaler.setColorTexture(Some(&render_texture));
             scaler.setOutputTexture(Some(output_texture));
             scaler.encodeToCommandBuffer(&command_buffer);
         }
         let output: Retained<ProtocolObject<dyn MTLTexture>> = if is_upscaled {
             output_texture.clone()
         } else {
-            render_texture.clone()
+            render_texture
         };
         self.is_scaler_warm = true;
         Ok((command_buffer, output))
@@ -755,7 +826,7 @@ impl MetalRenderer {
     /// Example: `renderer.render_to_pixels(&data, (2560, 1600), &mut pixels)?;`
     pub fn render_to_pixels(
         &mut self,
-        data: &SceneData,
+        data: FrameData,
         output_px: (usize, usize),
         pixels: &mut [u8],
     ) -> Result<()> {
@@ -825,7 +896,7 @@ impl MetalRenderer {
     /// false if the layer had no drawable to give.
     ///
     /// Example: `renderer.render_to_layer(&data, &layer)?;`
-    pub fn render_to_layer(&mut self, data: &SceneData, layer: &CAMetalLayer) -> Result<bool> {
+    pub fn render_to_layer(&mut self, data: FrameData, layer: &CAMetalLayer) -> Result<bool> {
         let Some(drawable) = layer.nextDrawable() else {
             return Ok(false);
         };
