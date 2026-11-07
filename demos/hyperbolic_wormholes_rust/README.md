@@ -230,17 +230,18 @@ with adaptive sampling (and tracing every pixel):
 
 | View | GPU ms | View | GPU ms |
 | --- | ---: | --- | ---: |
-| blue spawn | 8.4 (5.8) | red spawn | 7.5 (6.9) |
-| overview (from 46 m up) | 12.9 (21.9) | middle | 11.9 (23.5) |
-| black hole | 16.6 (41.9) | Einstein ring | 15.6 (44.3) |
-| wormhole | 17.5 (33.4) | wormhole exit | 29.2 (57.6) |
-| red pylon | 5.8 (6.0) | ridge | 8.4 (9.0) |
-| overlook | 6.5 (5.3) | habitat row | 7.5 (7.3) |
-| laser into the wormhole | 26.6 (44.0) | | |
+| blue spawn | 8.4 (6.5) | red spawn | 6.6 (6.6) |
+| overview (from 46 m up) | 10.0 (14.5) | middle | 6.7 (15.4) |
+| black hole | 10.4 (25.7) | Einstein ring | 7.6 (27.4) |
+| wormhole | 12.8 (21.9) | wormhole exit | 19.8 (39.6) |
+| red pylon | 5.8 (6.1) | ridge | 6.5 (8.3) |
+| overlook | 6.1 (5.2) | habitat row | 6.2 (6.5) |
+| laser into the wormhole | 20.4 (32.6) | | |
 
-In a full-screen window (2560×1336, automatic scale, `--view`), every view runs at 72 fps or more: the blue spawn at
-167 fps, the overview, middle and Einstein ring at full resolution, the black hole, wormhole and laser views at render
-scales 0.95 to 0.98, and the wormhole exit at 0.69, where most rays wind near the throat.
+In a full-screen window (2560×1336, automatic scale, `--view`), every view runs at 74 fps or more, all at full
+resolution but the wormhole exit, at render scale 0.88: blue spawn 181 fps, middle 166, Einstein ring 152, overview
+118, black hole 108, wormhole 91, wormhole exit 75. At that size and full resolution every view takes under 11 ms of
+GPU time but the wormhole exit and the laser view, 16.4.
 
 The scripted route (`make run-autopilot`) completes every leg, with both renderers and the same timings: through 1A
 after 1.6 s of walking, a 1 s jetpack press peaks at 12 blocks and lands 1.1 s after release, through 2A after 1.9 s
