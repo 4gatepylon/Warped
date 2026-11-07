@@ -468,7 +468,10 @@ impl Session {
             controls.player.look_delta_rad,
             dt_s,
         ) {
-            Some(WeaponEvent::Fired) => self.fire_player_shot(scene, audio),
+            Some(WeaponEvent::Fired) => {
+                self.fire_player_shot(scene, audio);
+                self.weapon.apply_recoil(&mut self.player);
+            }
             Some(WeaponEvent::ReloadStarted) => audio.play(Sound::Reload, 0.6, 0.15),
             None => {}
         }

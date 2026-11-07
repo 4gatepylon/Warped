@@ -168,10 +168,15 @@ impl Weapon {
         self.ammo -= 1;
         self.since_shot_s = 0.0;
         self.kick_frac = 1.0;
+        Some(WeaponEvent::Fired)
+    }
+
+    /// `apply_recoil` kicks the view after a shot has been traced, so the shot itself goes where
+    /// the player aimed.
+    pub fn apply_recoil(&mut self, player: &mut Player) {
         let recoil_scale: f32 = 1.0 - self.ads_frac * 0.45;
         player.recoil_pitch_rad += RECOIL_PITCH_RAD * recoil_scale;
         player.yaw_rad += self.random_signed() * RECOIL_PITCH_RAD * 0.3 * recoil_scale;
-        Some(WeaponEvent::Fired)
     }
 
     /// `reload_frac` is how far through a reload the weapon is (0 when not reloading).
