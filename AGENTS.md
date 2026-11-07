@@ -5,6 +5,9 @@ rules in their own `AGENTS.md`, with a `CLAUDE.md` beside it that imports it the
 Skills live in `.agents/skills/`, where Codex and Devin find them. `.claude/skills` is a symlink
 to that folder for Claude Code, so add new skills under `.agents/skills/`.
 
+Keep this file under 16 KiB, because Devin reads only the first 16 KiB of an `AGENTS.md`. A rule
+that applies only to some kinds of work goes in a skill, and this file points to it.
+
 ## Pull requests
 
 - Keep each PR small enough to review: at most 200 non-blank lines of hand-written code (source,
@@ -57,6 +60,10 @@ its README says which scripts write to them.
 - **Reset:** `make reset-artifacts` deletes `.artifacts/`. Like every destructive command, it fails
   with a warning unless it gets `YES_TO_RESET_ARTIFACTS=1`, or `INTERACTIVE=1` and the user types
   `yes`.
+
+## Makefiles
+
+Write or change a component's Makefile with the `makefiles` skill (`.agents/skills/makefiles/`).
 
 ## Command-line interfaces
 
@@ -160,8 +167,8 @@ Code has no comments except docstrings, DANGEROUS comments and macro comments (s
 directives such as `// NOLINT(...)`, `# noqa`, `#pragma` and shebangs aren't comments for this rule.
 
 - **Docstrings:** every file, class and function has one docstring, in the template for its
-  language below. It gives the purpose, the interface, an example and, optionally, what a reader
-  must know.
+  language from the `docstrings` skill (`.agents/skills/docstrings/`). It gives the purpose, the
+  interface, an example and, optionally, what a reader must know.
 - **DANGEROUS comments:** a line that someone MUST know something about before changing it gets a
   one-line comment right above it:
   `// DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN <CONSEQUENCE> WILL HAPPEN` (`#` in
@@ -170,133 +177,6 @@ directives such as `// NOLINT(...)`, `# noqa`, `#pragma` and shebangs aren't com
 - **Phrasing:** every sentence names its subject and uses the active voice: "`add_player` lets one
   more player join a game server.", not "Lets one more player join a game server.". Write
   directly, clearly and briefly. Separate points are bullets; a line of reasoning is a paragraph.
-- **Sections:** a docstring's sections come in the template's order. A section with nothing to say
-  is left out, except Example, which every docstring has except a test's.
-- **Interface:** a function's interface is its arguments, return value and errors. A file's is its
-  command-line arguments (scripts and `main`s) or its public names (libraries). A Python class's is
-  its constructor arguments and attributes; a C++ class documents its interface on its public
-  methods and static constructors.
-- **Must know:** an optional list grouped under these categories, in this order: Limitations,
-  Gotchas, Side effects, Performance. Each item is one bullet of one sentence that fits on one
-  line. A new category needs the user's agreement.
-- **Files without docstrings:** Makefiles, shell scripts, TOML and `.env` files start with a `#`
-  block shaped like the Python file docstring.
-
-Python docstrings use the Google style:
-
-```python
-"""`serve.py` runs the management server until it gets SIGINT or SIGTERM.
-
-Interface:
-    --port: The management server's HTTP port (default 8000).
-    --advertised-host: The host clients reach game servers at (default 127.0.0.1).
-
-Example:
-    $ uv run management-server --advertised-host 10.0.0.5
-
-Must know:
-    Side effects:
-        - When it exits, `serve.py` stops every game server it started.
-"""
-
-
-class Room:
-    """`Room` holds the players and bullets of one game server's map.
-
-    Args:
-        max_player_count: How many players the `Room` holds at once.
-
-    Attributes:
-        player_count: Number of players in the `Room` now.
-
-    Example:
-        >>> room = Room.FromConfig(config)
-
-    Must know:
-        Limitations:
-            - A `Room` is not thread-safe.
-    """
-
-
-def step_bullet(bullet: Bullet, black_holes: list[BlackHole], dt: float) -> Bullet:
-    """`step_bullet` moves a bullet one time step along its path, bent by black holes.
-
-    Args:
-        bullet: The bullet to move.
-        black_holes: The black holes that pull on the bullet.
-        dt: The time step, in seconds.
-
-    Returns:
-        A new bullet, `dt` seconds later.
-
-    Raises:
-        ValueError: `dt` isn't positive.
-
-    Example:
-        >>> bullet = step_bullet(bullet, black_holes, 1 / 60)
-
-    Must know:
-        Limitations:
-            - `step_bullet` loses accuracy when a bullet passes very close to a black hole.
-    """
-```
-
-C++ docstrings (and those in Metal Shading Language, which is based on C++) use Doxygen's Javadoc
-style:
-
-```cpp
-/**
- * @file
- * @brief `replay.cc` replays a recorded match and prints one CSV line per tick.
- *
- * @par Interface
- * - Flags: `--recording-file <path>`, `--tick-count <count>`.
- * - Output: one `tick,player_count` line per tick on stdout.
- *
- * @par Example
- * @code
- * .build/replay --recording-file match.bin --tick-count 600
- * @endcode
- *
- * @par Must know
- * - Gotchas:
- *   - `replay` stops early when the recording has fewer than `--tick-count` ticks.
- */
-
-/**
- * @brief `Room` holds the players and bullets of one game server's map.
- *
- * @par Example
- * @code
- * Room room = Room::FromConfig(config);
- * @endcode
- *
- * @par Must know
- * - Limitations:
- *   - A `Room` is not thread-safe.
- */
-
-/**
- * @brief `step_bullets` moves N bullets one time step along their paths, bent by black holes.
- *
- * @param[in,out] bullets The bullets to move.
- * @param[in] black_holes The black holes that pull on the bullets.
- * @param[in] dt The time step, in seconds.
- * @param[in] N Number of bullets.
- *
- * @par Example
- * @code
- * step_bullets(bullets, black_holes, dt, N);
- * @endcode
- *
- * @par Must know
- * - Performance:
- *   - The first call builds a table of the black holes' pull, so it is slower than later calls.
- */
-```
-
-A C++ function that returns a value adds `@return <meaning>.` after its `@param` lines, and one that
-throws adds `@throws <type> <when>.`.
 
 ### Failing fast
 
@@ -322,33 +202,14 @@ here, ask the user whether to set one, so that conventions don't drift apart.
 
 ## Unit tests
 
-Choose unit tests by partitioning the input space, so that what they cover is deliberate and easy
-to check.
-
-1. **Input space:** write down everything the code under test takes as input. For a function that
-   moves a bullet, that's the bullet's position and velocity, the black holes and the time step.
-2. **Partitionings:** split the input space along a small number of properties at a time. Usually
-   this will be along one or two properties at most at a time. Each partitioning is a set of parts
-   that don't overlap and together cover the whole space, usually a tree or a grid of conditions.
-   For moving a bullet, one partitioning is the number of black holes: none, one, or several.
-3. **Coverage:** pick tests (exemplars) so that every part of every partitioning is covered by at
-   least one test. One test might cover multiple parts (from multiple partitionings) at once, so
-   the minimum number of tests is the largest partitioning's part count, not the size of their
-   Cartesian product.
-4. **Coverage table:** the test file's docstring lists each partitioning, its parts, and which tests
-   cover each part, so a reviewer can check that no part is missing.
-5. **One partitioning per PR:** for a large set of tests, add the partitionings one at a time, as
-   stacked PRs. Each PR adds or changes tests until its partitioning's parts are all covered.
+Choose unit tests by partitioning the input space, and list the partitionings and the tests
+that cover each part in the test file's docstring. Follow the `unit-tests` skill
+(`.agents/skills/unit-tests/`) for the steps.
 
 ## Playtesting
 
-When the user tests a game or other visual work you made:
-
-- **Commands:** give commands that enter a folder with `pushd`, not `cd`, so the user can get back
-  to where they were with `popd`.
-- **No screen sharing:** the user doesn't share their screen or microphone, so ask them to playtest
-  desktop apps and anything else you can't see yourself. Where you can, work with them to set up an
-  environment you can test in yourself, such as a browser page or a simulator.
+When the user tests a game or other visual work you made, follow the `playtesting` skill
+(`.agents/skills/playtesting/`).
 
 ## Machine-specific workarounds
 
@@ -361,11 +222,7 @@ condition, a one-line note on where it was seen, and the fix. Keep it to a line 
 
 ## Documenting the system
 
-Documentation of the system (machine and chip, OS, browser, network such as Wi-Fi or wired, and
-toolchain versions such as Xcode, Python and uv) exists so that results, such as benchmark numbers,
-can be reproduced. Record the settings that determine or explain a result. Don't record
-observations that are likely temporary or that don't matter for reproducing results, such as a tool
-failing to run, a permission or install quirk, or which other programs are running right now. If
-something like that gets in your way, tell the user instead of writing it into the docs.
+When you record the system a result came from (machine, OS, network, toolchain versions), follow
+the `system-docs` skill (`.agents/skills/system-docs/`).
 
 > NOTE: if any of this is outdated notify the user.
