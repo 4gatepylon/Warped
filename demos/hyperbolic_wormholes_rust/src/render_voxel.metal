@@ -747,6 +747,25 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
 }
 
 /**
+ * @brief `back_to_reach` moves a ray that has just left warp w's reach (by up to one step) back along its straight line
+ * to the reach's sphere, so that an escaping ray's direction is carried to the eye from where its bending ended rather
+ * than from wherever its last step happened to end, which jumps between neighbouring rays.
+ * @par Example
+ * @code
+ * back_to_reach(scene, last_warp, x, v);
+ * @endcode
+ */
+static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, thread float4 &v) {
+    float4 c = scene.warps[w].centre;
+    float a = -mdot(x, c), b = -mdot(v, c), closest_sq = a * a - b * b, reach_cosh = cosh(scene.warps[w].params.z);
+    if (b <= 0.0 || closest_sq >= reach_cosh * reach_cosh) return;
+    float s_back = max(clamp_atanh(b / a) - acosh(reach_cosh * rsqrt(max(closest_sq, 1.0))), 0.0);
+    float4 x_back = geodesic_point(x, -v, s_back);
+    v = -geodesic_tangent(x, -v, s_back);
+    x = x_back;
+}
+
+/**
  * @brief `trace_ray` traces a ray backwards from the eye through a point of the image (in pixels from its top left
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
  * surface, the sky or a horizon.
@@ -769,7 +788,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, team = 0.0;
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
-    int outcome = OUTCOME_LOST;
+    int outcome = OUTCOME_LOST, last_warp = -1;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
     float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
@@ -793,7 +812,11 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             if (glass_s < hit.s) glass += 1.0;
             if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
-            if (entering < 0) { outcome = OUTCOME_SKY; break; }
+            if (entering < 0) {
+                if (last_warp >= 0) back_to_reach(scene, last_warp, x, v);
+                outcome = OUTCOME_SKY;
+                break;
+            }
             float4 xn = geodesic_point(x, v, s_end);
             v = geodesic_tangent(x, v, s_end);
             x = xn;
@@ -821,7 +844,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         float4 prm = warps[inside].params;
         if (prm.x < HALF_KIND && rho < prm.y * HORIZON_CAPTURE_FRAC) { outcome = OUTCOME_LOST; break; }
         if (prm.x > HALF_KIND && rho < prm.y) { cross_throat(scene, inside, x, v); inside = int(prm.w + 0.5); has_gradient = false; continue; }
-        if (rho > prm.z) { inside = -1; has_gradient = false; }
+        if (rho > prm.z) { last_warp = inside; inside = -1; has_gradient = false; }
     }
     VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0), int4(outcome, -1, -1, team > HALF_KIND ? 1 : 0),
                        float4(0.0, glass, core, halo)};

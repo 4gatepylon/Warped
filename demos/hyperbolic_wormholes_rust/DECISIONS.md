@@ -366,15 +366,17 @@
 
 ### D36. Speed on Lunar Surface
 
-- **Choice:** adaptive sampling (D37) and the same automatic render scale as the house (D19). At 2560×1600 and full
-  resolution the views away from warps take 6 to 8 ms of GPU time, those across the crater 12 to 13 ms and those near
-  the black hole and wormhole 16 to 29 ms (33 to 58 ms tracing every pixel). In a full-screen window (2560×1336) every
-  view runs at 72 fps or more: the blue spawn at 167 fps, the overview and the Einstein ring at full resolution, the
-  black hole, wormhole and laser views at render scales 0.95 to 0.98, and the wormhole exit at 0.69 (0.53 to 0.62
-  before adaptive sampling).
-- **Alternatives:** larger steps (D34); jump tables (D37).
+- **Choice:** adaptive sampling (D37), clearance grids (D38), escaping rays read where their bending ends (D39), and
+  the same automatic render scale as the house (D19). At 2560×1600 and full resolution the views away from warps take
+  6 to 8 ms of GPU time, those across the crater 7 to 10 ms and those near the black hole and wormhole 8 to 20 ms (33
+  to 58 ms when this layer stack started). At the full-screen window's size (2560×1336) every view takes under 11 ms
+  but the wormhole exit and the laser view, 16.4. In the window, every view runs at 74 fps or more, all at full
+  resolution but the wormhole exit, at 0.88 (0.53 to 0.62 for the views near warps at the start).
+- **Alternatives:** larger steps (D34); jump tables (D37); a higher scale target (the window measured 78 fps for the
+  wormhole exit at full resolution with a 16 ms target, but the views run then differ from run to run, as the player
+  moves differently; left as it is, at 14 ms, D19).
 - **Rationale:** it keeps 60 fps with the level's picture; only the wormhole exit, where most rays wind near the
-  throat, still costs a third of the resolution.
+  throat, still costs an eighth of the resolution.
 
 ### D37. Lunar Surface interpolates ray ends on voxel faces
 
@@ -407,6 +409,18 @@
   - 0.25 m cells (not tried): 8 times the memory and build time for the black hole's grid.
 - **Rationale:** near the black hole and the wormhole it takes a quarter off the frame (29.3 → 21.2 ms for the
   wormhole exit at 2560×1600); it costs 18 ms at load and 2.1 MB.
+
+### D39. Escaping rays are read where their bending ends
+
+- **Choice:** a ray that leaves a warp's reach and escapes is moved back along its straight line to the reach's sphere,
+  and its direction is carried to the eye from there (the map format's `parallel` sky transport), not from wherever
+  its last step ended, up to one step further.
+- **Alternatives:** the level's last point (rings of jumps in the sky between rays taking different numbers of
+  steps, which also stop adaptive sampling from interpolating there); the same at the throat (slower, OPTIMIZATIONS.md
+  8.5).
+- **Rationale:** it is the picture the level's steps converge to, and closer to it (black hole 0.57 → 0.11 pixel
+  against steps eight times smaller; Einstein ring 1.33 → 1.00), and a third faster on the Einstein ring view. The
+  picture differs from the level's along the lensed sky (SSIM 0.96 to 1.0).
 
 ## Baselines
 

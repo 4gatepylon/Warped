@@ -687,3 +687,42 @@ bounding spheres pass and 10 walks start (69 and 38 before); around the black ho
 | wormhole exit | 29.3 | 21.2 |
 | laser into the wormhole | 26.7 | 21.6 |
 | overview | 12.9 | 10.2 |
+
+### 8.5 Reading the sky where the bending ends
+
+Thin rings of traced pixels crossed even smooth sky far from a warp, along the edges between bands of rays that take
+different numbers of steps. An escaping ray's direction is carried to the eye by parallel transport along the geodesic
+from the ray's last point $x$; the level takes $x$ where its last step ended, up to one step (8% of the reach,
+1.2 m at a mouth) past the reach. Transport in curved space depends on the base point: moving $x$ by $\delta$ along a
+geodesic whose closest approach to the eye is $b$ turns the transported direction by about the enclosed area over
+$R^2$, of order $b\,\delta/R^2$ (up to a few pixels). Neighbouring rays whose last steps end a step apart get directions
+that jump, so their cells stop interpolating.
+
+Now a ray that leaves a warp's reach and escapes is first moved back along its straight line to the reach's sphere
+(where the bending ends), solving $-\langle \gamma(s), c\rangle = \cosh L$ for the reach $L$, and its direction is
+carried from there. As steps shrink the level's last point tends to the same place, so this is the converged picture:
+against steps eight times smaller, the median feature shift goes from 0.57 to 0.11 pixel (black hole), 1.33 to 1.00
+(Einstein ring), 0.96 to 0.45 (laser view), 0.97 to 0.62 (wormhole) and 4.04 to 3.99 (wormhole exit). Images change
+along the lensed sky (SSIM 0.96 to 1.0 against before; 3% of the Einstein ring view's pixels, along the planet's
+lensed image).
+
+The traced share of pixels drops (Einstein ring 19.8 → 8.8%, black hole 21.5 → 16.1%, wormhole exit 21.7 → 18.9%), and
+GPU ms at 2560×1600 with adaptive sampling go: Einstein ring 11.3 → 7.6, black hole 12.3 → 10.4, middle 9.1 → 6.7,
+wormhole 13.6 → 12.8, wormhole exit 21.2 → 19.8, laser view 21.6 → 20.4.
+
+Also tried: moving rays back to the throat's sphere before crossing (the same idea at a throat). The wormhole exit got
+slower (20.1 → 26.5 ms), as rays put exactly on the throat recross it within a step or two, for a small gain in
+accuracy (3.99 → 3.64 pixels); dropped.
+
+### 8.6 Where it stands
+
+At the full-screen window's size (2560×1336) and full resolution, every view takes under 11 ms of GPU time, but the
+wormhole exit and the laser view (with its beam) take 16.4. In the window, with the automatic scale's 14 ms target,
+every view runs at 74 fps or more and all but the wormhole exit at full resolution; the wormhole exit settles at 0.88
+(75 fps). Upscaled from 0.88 by MetalFX, the wormhole exit keeps features within 0.9 pixel of full resolution (median)
+but loses texture detail (SSIM 0.88).
+
+Its remaining cost is the rays that wind near the throat: the last refinement pass, which traces 11% of its pixels,
+is 9 of its 20 ms. What else was measured there: shading 3 ms (the sky 0.3, the ground 1.1, blocks 1.7), one gradient
+evaluation per step about 3 ms, sample buffers (96 bytes a ray end) no measurable share, and packing the refined rays
+in groups of 32, 64 or 128 the same.
