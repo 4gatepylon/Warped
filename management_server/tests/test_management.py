@@ -19,6 +19,17 @@ Partitionings, and the tests that cover each part:
 | | at least 1 | `test_lists_in_pages`, `test_lists_open_game_servers` |
 | `has_open_place` | false | `test_lists_in_pages` |
 | | true | `test_lists_open_game_servers` |
+| game server, with `has_open_place` | has room | `test_lists_open_game_servers` |
+| | full | `test_adds_players_until_full` |
+| adding a player to | a created game server | `test_adds_players_until_full` |
+| | an unknown ID | `test_add_fails_for_unknown_game_server` |
+| game server's state when adding | starting or running | `test_add_depends_on_state` |
+| | stopped or failed | `test_add_depends_on_state` |
+| room when adding | some | `test_adds_players_until_full` |
+| | none | `test_adds_players_until_full` |
+| player ID | added | `test_gets_and_removes_player` |
+| | removed | `test_gets_and_removes_player` |
+| | never added | `test_get_and_remove_fail_for_unknown_player` |
 """
 
 import unittest.mock
@@ -148,3 +159,80 @@ def test_list_rejects_bad_arguments() -> None:
         management_api.listGameServers(False, 0, None)
     with pytest.raises(errors.InvalidPageTokenError):
         management_api.listGameServers(False, 50, "not-a-token")
+
+
+def test_adds_players_until_full() -> None:
+    """`test_adds_players_until_full` checks that a full game server takes no more players."""
+    management_api: management.Management = management.Management(
+        _make_launcher(models.GameServerState.RUNNING, _ADDRESS)
+    )
+    game_server_id: uuid.UUID = management_api.createGameServer(
+        models.GameServerCreate(max_player_count=2)
+    ).game_server_id
+    for _ in range(2):
+        management_api.addPlayer(game_server_id, models.PlayerCreate())
+    with pytest.raises(errors.UnavailableError):
+        management_api.addPlayer(game_server_id, models.PlayerCreate())
+    assert management_api.getGameServer(game_server_id).player_count == 2
+    assert management_api.listGameServers(True, 50, None).game_servers == []
+
+
+@pytest.mark.parametrize(
+    ("state", "is_joinable"),
+    [
+        (models.GameServerState.STARTING, True),
+        (models.GameServerState.RUNNING, True),
+        (models.GameServerState.STOPPED, False),
+        (models.GameServerState.FAILED, False),
+    ],
+)
+def test_add_depends_on_state(state: models.GameServerState, is_joinable: bool) -> None:
+    """`test_add_depends_on_state` checks that only starting and running servers take players."""
+    management_api: management.Management = management.Management(_make_launcher(state, None))
+    game_server_id: uuid.UUID = management_api.createGameServer(
+        models.GameServerCreate(max_player_count=2)
+    ).game_server_id
+    if is_joinable:
+        management_api.addPlayer(game_server_id, models.PlayerCreate())
+    else:
+        with pytest.raises(errors.UnavailableError):
+            management_api.addPlayer(game_server_id, models.PlayerCreate())
+
+
+def test_add_fails_for_unknown_game_server() -> None:
+    """`test_add_fails_for_unknown_game_server` checks that a player needs a game server."""
+    management_api: management.Management = management.Management(
+        _make_launcher(models.GameServerState.RUNNING, _ADDRESS)
+    )
+    with pytest.raises(errors.NotFoundError):
+        management_api.addPlayer(uuid.uuid4(), models.PlayerCreate())
+
+
+def test_gets_and_removes_player() -> None:
+    """`test_gets_and_removes_player` checks that a removed player is gone and frees a place."""
+    management_api: management.Management = management.Management(
+        _make_launcher(models.GameServerState.RUNNING, _ADDRESS)
+    )
+    game_server_id: uuid.UUID = management_api.createGameServer(
+        models.GameServerCreate(max_player_count=2)
+    ).game_server_id
+    player: models.Player = management_api.addPlayer(game_server_id, models.PlayerCreate())
+    assert management_api.getPlayer(game_server_id, player.player_id) == player
+    management_api.removePlayer(game_server_id, player.player_id)
+    with pytest.raises(errors.NotFoundError):
+        management_api.getPlayer(game_server_id, player.player_id)
+    assert management_api.getGameServer(game_server_id).player_count == 0
+
+
+def test_get_and_remove_fail_for_unknown_player() -> None:
+    """`test_get_and_remove_fail_for_unknown_player` checks that an unknown player isn't found."""
+    management_api: management.Management = management.Management(
+        _make_launcher(models.GameServerState.RUNNING, _ADDRESS)
+    )
+    game_server_id: uuid.UUID = management_api.createGameServer(
+        models.GameServerCreate(max_player_count=2)
+    ).game_server_id
+    with pytest.raises(errors.NotFoundError):
+        management_api.getPlayer(game_server_id, uuid.uuid4())
+    with pytest.raises(errors.NotFoundError):
+        management_api.removePlayer(game_server_id, uuid.uuid4())
