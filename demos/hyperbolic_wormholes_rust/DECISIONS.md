@@ -9,7 +9,8 @@
   measuring speed, not a general engine; benchmarking and scripted playtesting done by Claude before a manual test.
   Then a third layer that makes Rust + MSL as fast as it can, free to use other native app code, staying on this
   Mac, reaching at least 60 fps locally at full-screen size while looking realistic and high-fidelity, with
-  heuristics allowed for speed.
+  heuristics allowed for speed. Then lighter layers: light paths close to converged ones, and play on one local
+  network with lasers that remove whoever they hit (who rejoins), tested by playing against bots.
 - **Outcomes:** milliseconds per frame for fixed views at fixed resolutions, per renderer, compared with the WebGL
   demo; and whether a scripted route through every wormhole works, and at what frame rate. The CPU is expected to be
   much slower than the GPU; the question is by how much, and how much Metal gains over WebGL.
@@ -284,6 +285,46 @@
 - **Rationale:** I decided it under the goal's "high fidelity"; say if you'd rather have full resolution near
   mouths.
 - **Revisit if:** the upscaled frames near mouths look worse to you than the old paths did.
+
+### D29. Play together over UDP, each player trusted with its own moves and hits
+
+- **Choice:** a server keeps each player's eye frame (16 doubles) and laser switch and sends everyone a snapshot 60
+  times a second; each client moves its own player and decides when its own laser hits someone (it traces the beam
+  every frame anyway), and the server removes the victim and tells everyone. Plain UDP from the standard library,
+  joins resent until welcomed, players dropped after 3 s of silence. The host runs the server on a thread in its
+  game (`--host`); `--serve` runs it alone. The server announces itself by broadcast every 0.5 s so `--join auto`
+  finds it.
+- **Alternatives:** a server that simulates everyone from their inputs (fairer, but laggier and much more code);
+  TCP; a networking crate.
+- **Rationale:** you asked for a demo on one local network, where latency is low and players trust each other.
+- **Revisit if:** it is played over the internet or with strangers.
+
+### D30. Players are boxes in the ray-traced world
+
+- **Choice:** each other player is a coloured box (0.6 × 1.9 × 0.6 blocks, upright, around their eye) added to a
+  copy of the world every frame, so it is lensed through wormholes, casts nothing, and stops lasers like any box;
+  each player with a laser on has their beam traced through the same world and drawn. Up to 8 players, which the
+  shader's 32 clusters and 96 boxes leave room for.
+- **Alternatives:** drawing players on top of the ray-traced image, which can't show them through a wormhole.
+- **Rationale:** the same reason the laser is a light ray (D6). It costs no measurable frame time with three
+  players (a hosted window at 1280×800: 88 fps alone, 91 with two bots, 84 single-player, all under the same load).
+- **Revisit if:** a player standing inside a mouth's jump sphere should be visible (rays jump across it, D23).
+
+### D31. Lasers aim at the crosshair 10 blocks out
+
+- **Choice:** the beam leaves the hand toward the point 10 blocks straight ahead of the eye, not parallel to the line
+  of sight.
+- **Alternatives:** parallel to the line of sight, as before: in hyperbolic space a line 0.25 blocks to the side
+  drifts away (0.32 blocks off after 5.7 blocks), so a laser aimed straight at a player missed them.
+- **Rationale:** a laser should hit what the crosshair is on. The laser through 1A still goes through it.
+
+### D32. Test games with bots
+
+- **Choice:** `--bot` plays without a window: it walks and turns until another player is within 12 blocks, turns
+  toward them with its laser on, rejoins 2 s after being hit, and saves its view at each hit.
+- **Alternatives:** only playing by hand.
+- **Rationale:** you suggested playing against myself. Three bots for 30 s: 25 hits, and each bot's count of hits
+  and times hit matched the server's log.
 
 ## Baselines
 

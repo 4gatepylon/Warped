@@ -31,6 +31,29 @@ make run-demo RENDERER=cpu
 The three wormholes start ahead on the left (to the house door), behind you by the blue pylon (to the red pylon
 about 50 blocks down the rails), and far left (to high above the rails, where you fall back to the ground).
 
+## Play together
+
+Everyone on the same network can play in one game. One player hosts and the others join:
+
+```bash
+make host-game
+make join-game
+make join-game SERVER=192.168.1.20
+```
+
+- `make host-game` runs the game server inside the host's game (`--host`). `make join-game` finds a server on the
+  network by its announcement (`--join auto`); give the host's IP address if that fails. `--serve` runs only a
+  server, without a window.
+- On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
+  (the Terminal, say) when asked; without it, other computers can't reach the game and `auto` finds nothing.
+- Players start on a ring around spawn and see each other as coloured boxes, bent through the wormholes like
+  everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game; they
+  press `Enter` to rejoin at their spawn point.
+- Up to 8 players. The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
+- `--join <address> --bot --exit-after-s <seconds>` plays by itself without a window (it walks until another player
+  is within 12 blocks, then turns toward them and fires), to test a game; it saves its view at each hit under
+  `.artifacts/bot/<run_id>/`.
+
 ## Measure
 
 ```bash
@@ -75,6 +98,10 @@ make run-autopilot
   layer, without waiting for the GPU.
 - `physics.rs`: walking, gravity, the jetpack and flying, crossing throats, aiming, and tracing the laser (with the
   renderer's own ray tracer, so the laser hits exactly what you see).
+- `net.rs`: the game server and client, over UDP: joins, a snapshot of every player 60 times a second, hits, and
+  an announcement on the network for `--join auto`.
+- `multiplayer.rs`: the other players as boxes in a per-frame copy of the world, everyone's laser, hits, spawn
+  points, and the test bot.
 - `main.rs`: the command line, the SDL3 window and HUD, and the benchmark and autopilot runs.
 
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the

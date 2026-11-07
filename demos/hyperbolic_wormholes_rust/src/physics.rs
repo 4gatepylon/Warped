@@ -46,6 +46,7 @@ const AIM_MAX_TRAVEL_M: f64 = 120.0;
 const AIM_GIVE_UP_PAST_CLOSEST_M: f64 = 1.0;
 const SHADOW_PER_HORIZON: f64 = 2.598_076_211_353_316;
 const HAND_OFFSET_M: DVec3 = DVec3::new(0.25, -0.22, -0.35);
+const LASER_FOCUS_M: f64 = 10.0;
 const LASER_MAX_M: f64 = 150.0;
 const MIN_SPEED_M_PER_S: f64 = 1e-6;
 
@@ -77,6 +78,7 @@ pub struct Input {
 pub struct LaserReport {
     pub wormhole_count: usize,
     pub hit: Option<String>,
+    pub hit_box: Option<usize>,
     pub length_m: f64,
 }
 
@@ -477,6 +479,33 @@ pub fn look_around(frame: &mut DMat4, dx_px: f64, dy_px: f64) {
         orthonormalize_frame(*frame * make_rotation_about(DVec3::X, new_pitch_rad - pitch_rad));
 }
 
+/// `turn_toward` turns the view to look straight (along the geodesic, ignoring the bending) at
+/// `target`: first about the up direction, then up or down, within the usual pitch limits.
+///
+/// Example: `physics::turn_toward(&mut player.frame, other.frame.col(AXIS_W));`
+pub fn turn_toward(frame: &mut DMat4, target: DVec4) {
+    let to_target = |frame: DMat4| -> DVec3 {
+        get_local_direction(frame, normalize_tangent(frame.col(AXIS_W), target)).normalize()
+    };
+    let up_local: DVec3 = get_up_local(*frame);
+    let forward: DVec3 = DVec3::NEG_Z - up_local * -up_local.z;
+    let toward: DVec3 = to_target(*frame);
+    let toward_level: DVec3 = toward - up_local * toward.dot(up_local);
+    let yaw_rad: f64 = up_local
+        .dot(forward.cross(toward_level))
+        .atan2(forward.dot(toward_level));
+    *frame *= make_rotation_about(up_local, yaw_rad);
+    let up_local: DVec3 = get_up_local(*frame);
+    let pitch_rad: f64 = (-up_local.z).clamp(-1.0, 1.0).asin();
+    let wanted_pitch_rad: f64 = to_target(*frame)
+        .dot(up_local)
+        .clamp(-1.0, 1.0)
+        .asin()
+        .clamp(-MAX_PITCH_RAD, MAX_PITCH_RAD);
+    *frame =
+        orthonormalize_frame(*frame * make_rotation_about(DVec3::X, wanted_pitch_rad - pitch_rad));
+}
+
 /// `trace_miss` follows the light ray leaving the camera along a local direction and measures by
 /// how much it misses a mouth's centre (in blocks, in the mouth's axes, at right angles to the
 /// ray): where it crosses the throat if it falls in (interpolated, so the miss changes smoothly
@@ -617,9 +646,10 @@ pub fn find_aimed_mouth(world: &World, frame: DMat4) -> Option<usize> {
     best.map(|(k, _)| k)
 }
 
-/// `trace_laser` traces the laser from the hand along the view direction, as a light ray through
-/// the frame's packed scene (so it meets exactly what the renderer draws), and returns its path in
-/// world coordinates and a report.
+/// `trace_laser` traces the laser from the hand toward the point `LASER_FOCUS_M` straight ahead of
+/// the eye (in hyperbolic space a beam parallel to the line of sight would drift away from the
+/// crosshair), as a light ray through the frame's packed scene (so it meets exactly what the
+/// renderer draws), and returns its path in world coordinates and a report.
 ///
 /// Example: `let (beam, report) = trace_laser(&world, &data);`
 pub fn trace_laser(world: &World, data: &SceneData) -> (Beam, LaserReport) {
@@ -628,7 +658,9 @@ pub fn trace_laser(world: &World, data: &SceneData) -> (Beam, LaserReport) {
     let hand_distance: f64 = HAND_OFFSET_M.length() / r;
     let hand: DVec4 =
         (HAND_OFFSET_M.normalize() * hand_distance.sinh()).extend(hand_distance.cosh());
-    let direction: DVec4 = normalize_tangent(hand, DVec4::new(0.0, 0.0, -1.0, 0.0));
+    let focus_distance: f64 = LASER_FOCUS_M / r;
+    let focus: DVec4 = DVec4::new(0.0, 0.0, -focus_distance.sinh(), focus_distance.cosh());
+    let direction: DVec4 = normalize_tangent(hand, focus);
     let to_world = |row: usize, point: Vec4| -> DVec4 {
         let first: usize = row * ROW_TEXEL_COUNT + TEXEL_TO_WORLD;
         let m: DMat4 = DMat4::from_cols(
@@ -679,6 +711,7 @@ pub fn trace_laser(world: &World, data: &SceneData) -> (Beam, LaserReport) {
     } = end
     {
         beam.spot = Some(normalize_point(to_world(row, point)));
+        report.hit_box = usize::try_from(index).ok();
         report.hit = Some(if index < 0 {
             "the ground".to_string()
         } else {

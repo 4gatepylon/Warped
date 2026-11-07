@@ -130,6 +130,7 @@ pub struct Mouth {
 }
 
 /// `World` is the whole scene at one curvature radius.
+#[derive(Clone)]
 pub struct World {
     pub curvature_radius_m: f64,
     pub boxes: Vec<HyperbolicBox>,
@@ -220,6 +221,16 @@ impl World {
         self.spawn_frame
             * make_rotation(AXIS_X, AXIS_Z, bearing_rad)
             * make_boost(AXIS_Z, -distance_m / self.curvature_radius_m)
+    }
+
+    /// `add_avatar` adds another player's body: one box around `frame`'s centre and axes, in a
+    /// cluster of its own.
+    ///
+    /// Example: `world.add_avatar(frame, [0.3, 0.95, 0.3], [0.9, 0.3, 0.3]);`
+    pub fn add_avatar(&mut self, frame: DMat4, half_m: [f64; 3], color: Color) {
+        self.group_boxes(frame, |world| {
+            world.add_box(frame, half_m, color, MATERIAL_SOLID)
+        });
     }
 
     /// `add_box` adds a box around `frame`'s centre and axes.

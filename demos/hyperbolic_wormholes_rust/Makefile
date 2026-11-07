@@ -4,6 +4,8 @@
 # Interface:
 #     make help: list the targets.
 #     make run-demo RENDERER=<metal|cpu>: open the window and play.
+#     make host-game PORT=<n>: open the window and host a game for the local network.
+#     make join-game SERVER=<auto|address>: open the window and join a game on the local network.
 #     make bench-views RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
@@ -19,16 +21,20 @@ HEIGHT_PX ?= 800
 FRAME_COUNT ?= 10
 AUTOPILOT_WIDTH_PX ?= 640
 AUTOPILOT_HEIGHT_PX ?= 400
+PORT ?= 47800
+SERVER ?= auto
 
 RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilot frames and timings). \
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help run-demo bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help run-demo host-game join-game bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
 	@echo "  make run-demo RENDERER=metal                     Open the window and play (RENDERER=cpu for the CPU)"
+	@echo "  make host-game PORT=47800                        Open the window and host a game for the local network"
+	@echo "  make join-game SERVER=auto                       Open the window and join a game (SERVER=auto finds one)"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
 	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
@@ -42,6 +48,12 @@ help:
 
 run-demo:
 	cargo run --release -- --renderer $(RENDERER)
+
+host-game:
+	cargo run --release -- --host --port $(PORT)
+
+join-game:
+	cargo run --release -- --join $(SERVER) --port $(PORT)
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)

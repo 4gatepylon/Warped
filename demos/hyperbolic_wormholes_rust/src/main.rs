@@ -12,6 +12,8 @@
 //!   timings and events under `.artifacts/autopilot/<run_id>/`. `--snapshot-every` sets how often.
 //! - `--json`: print results as one JSON object. `--label`: suffix for the run folder.
 //! - `--exit-after-s <seconds>`: close the window after that long and print its frame rate.
+//! - `--host`, `--join auto|<address>`, `--serve`, `--bot`, `--port`: play with others on the local
+//!   network (see `net.rs` and `multiplayer.rs`).
 //!
 //! Example: `cargo run --release -- --bench-views --width-px 2560 --height-px 1600`
 //!
@@ -19,6 +21,8 @@
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
 mod geometry;
+mod multiplayer;
+mod net;
 mod physics;
 mod render_cpu;
 mod render_metal;
@@ -27,8 +31,12 @@ mod world;
 
 use std::error::Error;
 use std::fs;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, ValueEnum};
 use glam::{DMat4, DVec3};
@@ -88,6 +96,8 @@ const SIDE_VIEW_YAW_RAD: f64 = std::f64::consts::FRAC_PI_2;
 const THROAT_APPROACH_STEP_M: f64 = 0.1;
 const MAX_APPROACH_STEP_COUNT: usize = 2000;
 const SECONDS_PER_DAY: u64 = 86_400;
+const DISCOVERY_TIMEOUT_S: u64 = 5;
+const JOIN_AUTO: &str = "auto";
 
 /// `RendererKind` is which renderer draws the frames.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -168,6 +178,23 @@ struct Arguments {
     /// blocks to just outside its throat and back while the view swings around.
     #[arg(long, value_enum, default_value_t = RouteKind::Legs)]
     route: RouteKind,
+    /// Host a game on the local network: run a server in this program and play in it.
+    #[arg(long, conflicts_with_all = ["join", "serve", "bench_views", "autopilot", "play_route"])]
+    host: bool,
+    /// Join a game on the local network: `auto` to find one, or a server's IP address (with an
+    /// optional :port).
+    #[arg(long, conflicts_with_all = ["serve", "bench_views", "autopilot", "play_route"])]
+    join: Option<String>,
+    /// Run only a game server, without a window, until --exit-after-s (or until stopped).
+    #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route"])]
+    serve: bool,
+    /// With --join and --exit-after-s: play by itself without a window (walk, aim at the nearest
+    /// player and fire), to test a game; saves its view under .artifacts/bot/ at each hit.
+    #[arg(long)]
+    bot: bool,
+    /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
+    #[arg(long, default_value_t = net::DEFAULT_PORT)]
+    port: u16,
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -321,6 +348,21 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
             "--frame-count and --snapshot-every must be at least 1; e.g. --frame-count 10".into(),
         );
     }
+    if arguments.bot && (arguments.join.is_none() || arguments.exit_after_s.is_none()) {
+        return Err(
+            "--bot needs --join and --exit-after-s; e.g. --join auto --bot --exit-after-s 30"
+                .into(),
+        );
+    }
+    if let Some(join) = &arguments.join
+        && join != JOIN_AUTO
+        && parse_server_address(join, arguments.port).is_none()
+    {
+        return Err(format!(
+            "--join must be auto or an IP address with an optional :port, got {join:?}; e.g. --join 192.168.1.20"
+        )
+        .into());
+    }
     if let Some(label) = &arguments.label
         && (label.is_empty()
             || !label
@@ -341,14 +383,124 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
 fn main() -> Result<()> {
     let arguments: Arguments = Arguments::parse();
     validate_arguments(&arguments)?;
+    if arguments.serve {
+        return serve_only(&arguments);
+    }
     let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
-    if arguments.bench_views {
+    if arguments.bot {
+        run_bot(&arguments, renderer)
+    } else if arguments.bench_views {
         bench_views(&arguments, renderer)
     } else if arguments.autopilot {
         run_autopilot(&arguments, renderer)
     } else {
         play(&arguments, renderer)
     }
+}
+
+/// `parse_server_address` reads `--join`'s address: an IP address with an optional port (`port`
+/// when it has none).
+///
+/// Example: `let address = parse_server_address("192.168.1.20", 47800);`
+fn parse_server_address(text: &str, port: u16) -> Option<SocketAddr> {
+    text.parse::<SocketAddr>().ok().or_else(|| {
+        text.parse::<IpAddr>()
+            .ok()
+            .map(|ip| SocketAddr::new(ip, port))
+    })
+}
+
+/// `get_server_address` gives the server to join: found on the network for `--join auto`, the
+/// given address, or this computer for `--host`.
+///
+/// Example: `let address = get_server_address(&arguments)?;`
+fn get_server_address(arguments: &Arguments) -> Result<SocketAddr> {
+    match arguments.join.as_deref() {
+        Some(JOIN_AUTO) => net::find_server(Duration::from_secs(DISCOVERY_TIMEOUT_S)),
+        Some(text) => {
+            Ok(parse_server_address(text, arguments.port)
+                .expect("validate_arguments checked --join"))
+        }
+        None => Ok(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            arguments.port,
+        )),
+    }
+}
+
+/// `start_server` binds the server's port and runs the server on a thread until the returned flag
+/// is set.
+///
+/// Example: `let (should_stop, thread) = start_server(47800)?;`
+fn start_server(port: u16) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
+    let socket: std::net::UdpSocket = net::bind_server(port)?;
+    let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let flag: Arc<AtomicBool> = Arc::clone(&should_stop);
+    let thread: JoinHandle<()> = std::thread::spawn(move || {
+        if let Err(error) = net::serve(socket, &flag) {
+            eprintln!("The game server stopped: {error}");
+        }
+    });
+    Ok((should_stop, thread))
+}
+
+/// `serve_only` runs a game server without a window until `--exit-after-s` passes (or forever).
+///
+/// Example: `serve_only(&arguments)?;`
+fn serve_only(arguments: &Arguments) -> Result<()> {
+    let (should_stop, thread) = start_server(arguments.port)?;
+    match arguments.exit_after_s {
+        Some(seconds) => std::thread::sleep(Duration::from_secs_f64(seconds)),
+        None => loop {
+            std::thread::park();
+        },
+    }
+    should_stop.store(true, Ordering::Relaxed);
+    thread
+        .join()
+        .map_err(|_| "the game server's thread panicked")?;
+    Ok(())
+}
+
+/// `run_bot` plays as a bot without a window for `--exit-after-s` seconds (see
+/// `multiplayer::run_bot`), saving its view at each hit under `.artifacts/bot/<run_id>/`, and
+/// prints how many players it hit and how often it was hit.
+///
+/// Example: `run_bot(&arguments, renderer)?;`
+fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
+    let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+    let mut client: net::Client = net::Client::Connect(get_server_address(arguments)?)?;
+    let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
+    let mut saved_count: usize = 0;
+    let duration_s: f64 = arguments
+        .exit_after_s
+        .expect("validate_arguments checked --bot");
+    let (hit_count, eliminated_count) =
+        multiplayer::run_bot(&world, &mut client, duration_s, |data, victim_id| {
+            let size: (u32, u32) = (
+                data.uniforms.width_px as u32,
+                data.uniforms.height_px as u32,
+            );
+            let mut pixels: Vec<u8> = vec![0; size.0 as usize * size.1 as usize * BYTES_PER_PIXEL];
+            renderer.render(data, size, &mut pixels)?;
+            saved_count += 1;
+            save_png(
+                &folder.join(format!("hit_{saved_count:03}_player_{victim_id}.png")),
+                &pixels,
+                size.0,
+                size.1,
+            )
+        })?;
+    if arguments.json {
+        println!(
+            "{}",
+            json!({"hit_count": hit_count, "eliminated_count": eliminated_count, "run_folder": folder})
+        );
+    } else {
+        println!("The bot hit {hit_count} players and was hit {eliminated_count} times.");
+        println!("Run folder: {}", folder.display());
+    }
+    Ok(())
 }
 
 /// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder, with
@@ -1074,6 +1226,32 @@ struct Session {
     hud_time_s: f64,
     hud_frame_count: u32,
     hud_render_ms: f64,
+    multiplayer: Option<Multiplayer>,
+}
+
+/// `Multiplayer` is a window's game on the local network: its connection, the server it runs
+/// with `--host` (a stop flag and the thread), and whether this player was hit and waits to rejoin.
+struct Multiplayer {
+    client: net::Client,
+    server: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
+    is_eliminated: bool,
+}
+
+impl Drop for Multiplayer {
+    /// `drop` tells the server this player is leaving and stops the hosted server, if any.
+    ///
+    /// Example: `drop(multiplayer);`
+    fn drop(&mut self) {
+        if let Err(error) = self.client.leave() {
+            eprintln!("Couldn't tell the server this player left: {error}");
+        }
+        if let Some((should_stop, thread)) = self.server.take() {
+            should_stop.store(true, Ordering::Relaxed);
+            if thread.join().is_err() {
+                eprintln!("The game server's thread panicked");
+            }
+        }
+    }
 }
 
 impl Session {
@@ -1088,6 +1266,20 @@ impl Session {
             (false, _) => Vec::new(),
             (true, RouteKind::Legs) => simulate_route(&world)?.frames,
             (true, RouteKind::MouthTour) => make_mouth_tour(&world),
+        };
+        let multiplayer: Option<Multiplayer> = if arguments.host || arguments.join.is_some() {
+            let server: Option<(Arc<AtomicBool>, JoinHandle<()>)> = if arguments.host {
+                Some(start_server(arguments.port)?)
+            } else {
+                None
+            };
+            Some(Multiplayer {
+                client: net::Client::Connect(get_server_address(arguments)?)?,
+                server,
+                is_eliminated: false,
+            })
+        } else {
+            None
         };
         Ok(Session {
             world,
@@ -1120,6 +1312,7 @@ impl Session {
             hud_time_s: 0.0,
             hud_frame_count: 0,
             hud_render_ms: 0.0,
+            multiplayer,
         })
     }
 
@@ -1156,6 +1349,16 @@ impl Session {
                     self.player.velocity = glam::DVec4::ZERO;
                 }
                 Keycode::L => self.is_laser_on = !self.is_laser_on,
+                Keycode::Return => {
+                    if let Some(multiplayer) = &mut self.multiplayer
+                        && multiplayer.is_eliminated
+                    {
+                        multiplayer.is_eliminated = false;
+                        if let Err(error) = multiplayer.client.rejoin() {
+                            self.show_message(format!("Couldn't rejoin: {error}"));
+                        }
+                    }
+                }
                 Keycode::F => self.is_auto_forward = !self.is_auto_forward,
                 Keycode::R => self.player = Player::AtSpawn(&self.world),
                 Keycode::G => {
@@ -1205,6 +1408,11 @@ impl Session {
             self.hud_time_s += dt_s;
             return;
         }
+        if self.update_multiplayer() {
+            self.message_time_s -= dt_s;
+            self.hud_time_s += dt_s;
+            return;
+        }
         let input: Input = Input {
             forward: keys.is_scancode_pressed(Scancode::W) || self.is_auto_forward,
             back: keys.is_scancode_pressed(Scancode::S),
@@ -1220,8 +1428,74 @@ impl Session {
             self.message_time_s = MESSAGE_DURATION_S;
         }
         physics::level_out(&mut self.player.frame, dt_s);
+        if let Some(multiplayer) = &mut self.multiplayer
+            && let Err(error) = multiplayer
+                .client
+                .send_state(self.player.frame, self.is_laser_on)
+        {
+            self.message = format!("Couldn't reach the server: {error}");
+            self.message_time_s = MESSAGE_DURATION_S;
+        }
         self.message_time_s -= dt_s;
         self.hud_time_s += dt_s;
+    }
+
+    /// `show_message` shows a line in the HUD for `MESSAGE_DURATION_S`.
+    ///
+    /// Example: `self.show_message("player 3 was hit by player 2".to_string());`
+    fn show_message(&mut self, message: String) {
+        self.message = message;
+        self.message_time_s = MESSAGE_DURATION_S;
+    }
+
+    /// `update_multiplayer` reads the server's news: a welcome puts this player at its spawn
+    /// point, and a hit is announced (and, if this player was hit, it waits for Enter to rejoin).
+    /// It returns whether this player is out of the game for now.
+    ///
+    /// Example: `if session.update_multiplayer() { return; }`
+    fn update_multiplayer(&mut self) -> bool {
+        let Some(multiplayer) = &mut self.multiplayer else {
+            return false;
+        };
+        let events: Vec<net::NetEvent> = match multiplayer.client.poll() {
+            Ok(events) => events,
+            Err(error) => {
+                self.show_message(format!("Couldn't reach the server: {error}"));
+                return false;
+            }
+        };
+        let mut messages: Vec<String> = Vec::new();
+        for event in events {
+            match event {
+                net::NetEvent::Joined(id) => {
+                    self.player = multiplayer::get_spawn_player(&self.world, id);
+                    messages.push(format!("You joined as player {id}"));
+                }
+                net::NetEvent::Eliminated {
+                    victim_id,
+                    shooter_id,
+                    is_self,
+                } => {
+                    if is_self {
+                        multiplayer.is_eliminated = true;
+                        self.is_laser_on = false;
+                    }
+                    messages.push(if is_self {
+                        format!("You were hit by player {shooter_id}; press Enter to rejoin")
+                    } else {
+                        format!("Player {victim_id} was hit by player {shooter_id}")
+                    });
+                }
+            }
+        }
+        let is_out: bool = multiplayer.is_eliminated;
+        if !is_out && let Err(error) = multiplayer.client.keep_joining() {
+            messages.push(format!("Couldn't reach the server: {error}"));
+        }
+        if let Some(message) = messages.pop() {
+            self.show_message(message);
+        }
+        is_out
     }
 
     /// `get_render_size` gives the size to ray-trace for a window of `window_px` pixels.
@@ -1247,6 +1521,23 @@ impl Session {
     ///
     /// Example: `let data = session.pack((1280, 800));`
     fn pack(&mut self, render_px: (u32, u32)) -> SceneData {
+        if let Some(multiplayer) = &mut self.multiplayer {
+            let view: multiplayer::SharedView = multiplayer::pack_shared_view(
+                &self.world,
+                self.player.frame,
+                self.is_laser_on,
+                &multiplayer.client.players,
+                render_px,
+                self.start.elapsed().as_secs_f64(),
+            );
+            self.laser = view.report.as_ref().map(describe_laser);
+            if let Some(victim_id) = view.hit_player_id
+                && let Err(error) = multiplayer.client.send_hit(victim_id)
+            {
+                self.show_message(format!("Couldn't reach the server: {error}"));
+            }
+            return view.data;
+        }
         let (data, report) = pack_view(
             &self.world,
             self.player.frame,
@@ -1396,6 +1687,13 @@ impl Session {
         ];
         if let Some(laser) = &self.laser {
             lines.push(format!("laser {laser}"));
+        }
+        if let Some(multiplayer) = &self.multiplayer {
+            lines.push(match multiplayer.client.id {
+                Some(id) => format!("player {id}, {} others", multiplayer.client.players.len()),
+                None if multiplayer.is_eliminated => "hit; press Enter to rejoin".to_string(),
+                None => "joining".to_string(),
+            });
         }
         if self.message_time_s > 0.0 {
             lines.push(self.message.clone());
