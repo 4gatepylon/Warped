@@ -565,3 +565,80 @@ It costs GPU time: at 2560×1600, spawn 9.7 → 13.6 ms of GPU time, 2.5 blocks 
 10.6 → 14.5 (measured alternately, under load). In a full-screen window the automatic scale keeps about the same
 share of frames under 1/60 s (scripted legs 5 of 724 against 4; mouth tour 30 of 1795 against 15), but renders more
 frames near a mouth below full resolution (legs 77% at full resolution against 93%, mouth tour 44% against 69%).
+
+## 8. Lunar Surface: adaptive sampling on voxel faces
+
+The Lunar Surface renderer (`render_voxel.metal`) keeps the level's light paths (D34): kick–drift–kick steps of 8%
+of the distance to the warp, each step's chord tested against the structures in the warp's reach. Near the black hole
+and the wormhole mouths every ray takes 30 to 120 such steps, so at 2560×1600 those views took 33 to 57 ms of GPU
+time, and the window upscaled them from 0.53 to 0.62 of full resolution.
+
+### 8.1 Where the time went
+
+Measured by turning parts off, at 2560×1600 tracing every pixel:
+
+- Shading (materials, the sun's shadow ray, lamps, the ground's tiling) is 3 to 6 ms of each view; the sun's shadow
+  rays alone cost no measurable time.
+- Testing structures along the bent steps is about half of a view near a warp (the black hole 41.7 → 21.8 ms without
+  it). A cheaper test per structure (the step's start must lie within the structure's bounding sphere plus the step,
+  $-\langle x, c\rangle \le \cosh R \cosh s + \sinh R \sinh s$) and one call site for straight and bent chords were
+  no faster, so the cost is in the voxel walks themselves.
+- Per-pixel step counts: in the black hole view every ray takes 30 to 40 steps, as the eye is inside the hole's reach;
+  at the wormhole exit 94% of the steps are in rays taking over 40 steps, which wind near the throat.
+
+### 8.2 Adaptive sampling
+
+The house's adaptive sampling (3.1) now runs here too, with the same passes and buffers (`encode_adaptive_sampling`
+in `render_metal.rs`). A ray end $E$ (`VoxelRayEnd`) is the hit point and tangent, the hit's grid point
+$g \in \mathbb{R}^3$ in its structure's cell coordinates, the cell and its material, the path length, the glass
+count and the laser glow; or the escaping direction carried back to the origin, for the sky. Two samples are on the
+same surface when both are on one face plane, that is one structure $k$, one face axis $a$, one side
+$\sigma = \pm 1$ and the same layer of cells $\mathrm{cell}_a$ (a plane of the structure's Klein coordinates, so a
+geodesic plane); or both on the ground, both in the sky or both lost; behind the same number of glass faces, with no
+laser glow. With that, the twelve-sample test of 3.1 decides each cell, and a pixel in a smooth cell blends its four
+corners: the point and tangent bilinearly, put back on the hyperboloid and into its tangent space; $g$ and the path
+length bilinearly.
+
+A face plane may have holes or bumps smaller than the 4-pixel spacing. So an interpolated block hit takes its cell
+from the blended grid point, $\mathrm{cell}_b = \lfloor g_b \rfloor$ for $b \ne a$, and is kept only if that cell is
+solid (and not glass) and the cell in front of it, $\mathrm{cell} + \sigma e_a$, is empty or outside the grid; else
+the ray is traced. The material comes from that cell, so textures change at the right edges. Each pixel is still
+shaded on its own (sub-block texels, edges, stars), so interpolation doesn't blur them.
+
+Result, GPU ms at 2560×1600:
+
+| View | Every pixel | Adaptive |
+| --- | ---: | ---: |
+| black hole | 41.9 | 16.6 |
+| Einstein ring | 44.3 | 15.6 |
+| wormhole | 33.4 | 17.5 |
+| wormhole exit | 57.6 | 29.2 |
+| laser into the wormhole | 44.0 | 26.6 |
+| overview | 21.9 | 12.9 |
+| blue spawn | 5.8 | 8.4 |
+| overlook | 5.3 | 6.5 |
+
+Views with little bending pay about 1 ms for the extra passes, and still run far above 60 fps. Against tracing every
+pixel, 0.05 to 1.4% of pixels change by more than 30 of 765 and SSIM is 0.976 to 0.999; every change is texture
+noise where texels are smaller than a pixel (near the horizon and in lensed rims), where both images alias. Against
+a reference with steps eight times smaller, the median feature shift is the same as tracing every pixel's within
+0.05 pixel on every view but the wormhole exit (4.1 against 3.7 pixels, in that aliasing).
+
+### 8.3 Tried: jumping across each warp's empty middle
+
+Inside the largest sphere around a warp with no block or ground in it (7.5 m around the black hole, 1.34 m around the
+mouths, limited by the red landing pad and the ground), the index $n(\rho)$ is spherically symmetric, so a ray stays
+in the plane through the centre and its tangent, and $L = n(\rho) \sinh\rho \sin\alpha$ is conserved ($\alpha$ from
+the radial direction). Where it leaves then depends only on $\sin\alpha$ at entry. A table of 2,048 entries per warp,
+traced at load with steps four times smaller than the renderer's, stored the outcome (back out, through the throat,
+captured), the angle swept about the centre, the exit's tangential component and the path length. The shader landed
+each entering ray on the sphere, built the rotation $R = [\hat n, \hat e_\varphi, \hat n \times \hat e_\varphi]$
+taking the table's ray (entering on the $x$ axis in the plane $z = 0$) to this one, and placed the exit at
+$R(\cos\varphi, \sin\varphi, 0)$, or $F R F$ with $F = \mathrm{diag}(1, 1, -1)$ in the partner's frame after the
+throat's mirror. Entries whose neighbours disagree or sweep more than 0.02 rad (near an orbit) stepped as before.
+
+It cut the mean steps per ray from 42 to 33 (black hole) and 48 to 29 (Einstein ring), and tracing every pixel got
+7 to 30% faster. With adaptive sampling it was 10 to 35% slower: a jumped ray follows the fine path, while its
+neighbours just outside the sphere, or in the bands near an orbit, carry the level's step error (up to 2 pixels), so
+cells along those edges stopped being smooth and were traced. Jumping pays only if the stepping around it is as
+accurate as the table, which the level's steps are not; it was dropped.

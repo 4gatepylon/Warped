@@ -349,8 +349,8 @@
   from converged paths: against the level's steps eight times smaller, the level's own steps are 0.3 to 2.1 pixels
   off near warps at 2560×1600, 12% steps 0.8 to 2.2, 16% steps 0.9 to 2.3); steps up to three times longer where the
   bending is weak (no faster, as the time goes to rays winding close to the black hole and the throats, where steps
-  must stay short; up to 0.9 pixel further off); the house's RK4 steps and jump tables
-  (much more code, with chord errors to handle near the structures inside the warps' reach).
+  must stay short; up to 0.9 pixel further off); the house's RK4 steps (much more code, with chord errors to
+  handle near the structures inside the warps' reach); jump tables (D37).
 - **Rationale:** the map should look like the level; the window's automatic scale keeps 60 fps (D36).
 - **Revisit if:** the upscaled frames near the black hole and wormhole look too soft.
 
@@ -366,12 +366,33 @@
 
 ### D36. Speed on Lunar Surface
 
-- **Choice:** the same automatic render scale as the house (D19). At 2560×1600 and full resolution the views away
-  from warps take 5 to 9 ms of GPU time, those across the crater 22 to 24 ms and those near the black hole and wormhole
-  33 to 57 ms; in a full-screen window (2560×1336) the spawn runs at 192 fps at full resolution, and the black hole,
-  wormhole exit and Einstein ring views at 74, 76 and 71 fps at render scales 0.62, 0.53 and 0.61.
-- **Alternatives:** larger steps (D34); adaptive sampling or jump tables as in the house, left for later.
-- **Rationale:** it keeps 60 fps with the level's picture; the views near warps are where it costs resolution.
+- **Choice:** adaptive sampling (D37) and the same automatic render scale as the house (D19). At 2560×1600 and full
+  resolution the views away from warps take 6 to 8 ms of GPU time, those across the crater 12 to 13 ms and those near
+  the black hole and wormhole 16 to 29 ms (33 to 58 ms tracing every pixel). In a full-screen window (2560×1336) every
+  view runs at 72 fps or more: the blue spawn at 167 fps, the overview and the Einstein ring at full resolution, the
+  black hole, wormhole and laser views at render scales 0.95 to 0.98, and the wormhole exit at 0.69 (0.53 to 0.62
+  before adaptive sampling).
+- **Alternatives:** larger steps (D34); jump tables (D37).
+- **Rationale:** it keeps 60 fps with the level's picture; only the wormhole exit, where most rays wind near the
+  throat, still costs a third of the resolution.
+
+### D37. Lunar Surface interpolates ray ends on voxel faces
+
+- **Choice:** the house's adaptive sampling (D21), with the same passes and buffers: trace every fourth pixel, then
+  interpolate where the twelve samples around a cell ended on one face plane of one structure (same axis, side and
+  layer of cells), on the ground, in the sky or lost, behind the same glass and without laser glow, and map nearly
+  linearly. An interpolated block hit is kept only if the cell under it is solid and the one in front of its face
+  open; otherwise that ray is traced. `--sampling every-pixel` traces every pixel.
+- **Alternatives:**
+  - tracing every pixel (2 to 3 times slower near warps; about 1 ms faster in views with little bending);
+  - jump tables across each warp's empty middle, traced at load with finer steps: 7 to 30% faster tracing every
+    pixel, but 10 to 35% slower with adaptive sampling, as jumped rays and their stepped neighbours disagree by the
+    level's step error and cells along the sphere's edge stop interpolating (OPTIMIZATIONS.md, 8.3);
+  - a cheaper per-structure test on each bent step, or one call site for straight and bent chords (no faster).
+- **Rationale:** near the black hole and wormhole it takes 42 → 17, 44 → 16, 33 → 18 and 58 → 29 ms at 2560×1600.
+  Against tracing every pixel, SSIM is 0.976 to 0.999 and the changed pixels are texture noise where texels are smaller
+  than a pixel; against steps eight times smaller the median feature shift matches tracing every pixel within 0.05
+  pixel (but 4.1 against 3.7 at the wormhole exit).
 
 ## Baselines
 

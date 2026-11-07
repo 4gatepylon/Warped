@@ -58,13 +58,13 @@ type Frame = (
 );
 
 /// `Pipeline` is a compiled compute kernel.
-type Pipeline = Retained<ProtocolObject<dyn MTLComputePipelineState>>;
+pub(crate) type Pipeline = Retained<ProtocolObject<dyn MTLComputePipelineState>>;
 
 /// `SampleBuffers` holds adaptive sampling's buffers for render sizes up to one size: the coarse samples,
 /// the list of fine samples to trace and its length (followed by that pass's indirect dispatch
 /// arguments), the fine samples, the cell marks, the list of cells to refine and its length (also
-/// followed by dispatch arguments), and the largest fine grid they hold.
-struct SampleBuffers {
+/// followed by dispatch arguments), the largest fine grid they hold, and the size of one sample.
+pub(crate) struct SampleBuffers {
     coarse: Retained<ProtocolObject<dyn MTLBuffer>>,
     fill_list: Retained<ProtocolObject<dyn MTLBuffer>>,
     fill_count: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -73,11 +73,13 @@ struct SampleBuffers {
     refine_cells: Retained<ProtocolObject<dyn MTLBuffer>>,
     refine_count: Retained<ProtocolObject<dyn MTLBuffer>>,
     grid: (usize, usize),
+    bytes_per_ray_end: usize,
 }
 
 /// `AdaptivePipelines` is adaptive sampling's passes, compiled from a shader that has kernels of
-/// these names using the buffer indices `encode_adaptive_sampling` sets.
-struct AdaptivePipelines {
+/// these names using the buffer indices `encode_adaptive_sampling` sets (the house's and the voxel
+/// renderer's shaders both do).
+pub(crate) struct AdaptivePipelines {
     trace_coarse: Pipeline,
     fill_samples: Pipeline,
     prepare_fill: Pipeline,
@@ -93,7 +95,7 @@ impl AdaptivePipelines {
     ///
     /// Example: `let adaptive = AdaptivePipelines::FromLibrary(&device, &library)?;`
     #[allow(non_snake_case)]
-    fn FromLibrary(
+    pub(crate) fn FromLibrary(
         device: &ProtocolObject<dyn MTLDevice>,
         library: &ProtocolObject<dyn MTLLibrary>,
     ) -> Result<AdaptivePipelines> {
@@ -114,7 +116,7 @@ impl AdaptivePipelines {
 /// `make_pipeline` compiles the kernel `name` of a shader library.
 ///
 /// Example: `let trace_pixels = make_pipeline(&device, &library, "trace_pixels")?;`
-fn make_pipeline(
+pub(crate) fn make_pipeline(
     device: &ProtocolObject<dyn MTLDevice>,
     library: &ProtocolObject<dyn MTLLibrary>,
     name: &str,
@@ -153,11 +155,12 @@ struct PyramidLevels {
 
 const SHADER_SOURCE: &str = include_str!("render_metal.metal");
 const BYTES_PER_RAY_END: usize = 48;
+pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 96;
 const BYTES_PER_CELL_MARK: usize = 1;
 const BYTES_PER_CELL_INDEX: usize = 4;
 const REFINE_COUNT_BYTES: usize = 16;
 const DISPATCH_ARGUMENTS_BYTES: usize = 12;
-const REFINE_GROUP_SIZE: usize = 64;
+pub(crate) const REFINE_GROUP_SIZE: usize = 64;
 const THROAT_TABLE_SIZE: usize = 4096;
 const CAMERA_TABLE_SIZE: usize = 2048;
 const CAMERA_TABLE_ROWS: usize = 64;
@@ -331,15 +334,20 @@ fn get_pyramid_levels(render_px: (usize, usize)) -> Vec<((usize, usize), usize)>
 /// the scene's buffers and the render texture: trace every fourth pixel, fill in every second
 /// pixel (interpolating where that is exact enough, tracing the rest), mark the smooth cells and
 /// list the others, size the refinement, write the pixels that need no new ray, and trace the
-/// listed ones.
+/// listed ones. The buffers must hold samples of the shader's ray end size, `bytes_per_ray_end`.
 ///
-/// Example: `encode_adaptive_sampling(&encoder, &self.adaptive, buffers, (2560, 1600));`
-fn encode_adaptive_sampling(
+/// Example: `encode_adaptive_sampling(&encoder, &self.adaptive, buffers, BYTES_PER_RAY_END, (2560, 1600));`
+pub(crate) fn encode_adaptive_sampling(
     encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
     pipelines: &AdaptivePipelines,
     buffers: &SampleBuffers,
+    bytes_per_ray_end: usize,
     render_px: (usize, usize),
 ) {
+    assert_eq!(
+        buffers.bytes_per_ray_end, bytes_per_ray_end,
+        "encode_adaptive_sampling: the sample buffers were made for another ray end size"
+    );
     let grid: (usize, usize) = get_sample_grid(render_px);
     assert!(
         buffers.grid.0 >= grid.0 && buffers.grid.1 >= grid.1,
@@ -574,7 +582,7 @@ impl MetalRenderer {
             unreachable!("encode_frame: the voxel frame returned above")
         };
         if self.is_adaptive {
-            self.prepare_sample_buffers(output_px)?;
+            self.prepare_sample_buffers(output_px, BYTES_PER_RAY_END)?;
         }
         self.prepare_hole_buffers(output_px)?;
         let row_bytes: usize = data.rows.len() * BYTES_PER_TEXEL;
@@ -634,7 +642,13 @@ impl MetalRenderer {
                 .sample_buffers
                 .as_ref()
                 .expect("prepare_sample_buffers just made them");
-            encode_adaptive_sampling(&encoder, &self.adaptive, buffers, render_px);
+            encode_adaptive_sampling(
+                &encoder,
+                &self.adaptive,
+                buffers,
+                BYTES_PER_RAY_END,
+                render_px,
+            );
         } else {
             encoder.setComputePipelineState(&self.trace_pixels);
             dispatch_grid(&encoder, render_px);
@@ -658,6 +672,9 @@ impl MetalRenderer {
         if self.voxel_gpu.is_none() {
             self.voxel_gpu = Some(VoxelGpu::New(&self.device)?);
         }
+        if self.is_adaptive {
+            self.prepare_sample_buffers(output_px, VOXEL_BYTES_PER_RAY_END)?;
+        }
         let command_buffer = self
             .queue
             .commandBuffer()
@@ -674,7 +691,7 @@ impl MetalRenderer {
         self.voxel_gpu
             .as_mut()
             .expect("the voxel pipeline was just made")
-            .encode(&self.device, &encoder, frame)?;
+            .encode(&self.device, &encoder, frame, self.sample_buffers.as_ref())?;
         encoder.endEncoding();
         let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
         self.finish_encoding(command_buffer, texture, render_px, output_px != render_px)
@@ -798,14 +815,16 @@ impl MetalRenderer {
     /// `prepare_sample_buffers` makes adaptive sampling's buffers big enough for any render size up
     /// to `max_px`, if the current ones are for another size.
     ///
-    /// Example: `self.prepare_sample_buffers((2560, 1600))?;`
-    fn prepare_sample_buffers(&mut self, max_px: (usize, usize)) -> Result<()> {
+    /// Example: `self.prepare_sample_buffers((2560, 1600), BYTES_PER_RAY_END)?;`
+    fn prepare_sample_buffers(
+        &mut self,
+        max_px: (usize, usize),
+        bytes_per_ray_end: usize,
+    ) -> Result<()> {
         let grid: (usize, usize) = get_sample_grid(max_px);
-        if self
-            .sample_buffers
-            .as_ref()
-            .is_some_and(|buffers| buffers.grid == grid)
-        {
+        if self.sample_buffers.as_ref().is_some_and(|buffers| {
+            buffers.grid == grid && buffers.bytes_per_ray_end == bytes_per_ray_end
+        }) {
             return Ok(());
         }
         let make_buffer = |bytes: usize| {
@@ -819,14 +838,15 @@ impl MetalRenderer {
         let cell_count: usize = grid.0 * grid.1;
         let coarse_grid: (usize, usize) = get_coarse_grid(max_px);
         self.sample_buffers = Some(SampleBuffers {
-            coarse: make_buffer(coarse_grid.0 * coarse_grid.1 * BYTES_PER_RAY_END)?,
+            coarse: make_buffer(coarse_grid.0 * coarse_grid.1 * bytes_per_ray_end)?,
             fill_list: make_buffer(cell_count * BYTES_PER_CELL_INDEX)?,
             fill_count: make_buffer(REFINE_COUNT_BYTES + DISPATCH_ARGUMENTS_BYTES)?,
-            samples: make_buffer(cell_count * BYTES_PER_RAY_END)?,
+            samples: make_buffer(cell_count * bytes_per_ray_end)?,
             cells: make_buffer(cell_count * BYTES_PER_CELL_MARK)?,
             refine_cells: make_buffer(cell_count * BYTES_PER_CELL_INDEX)?,
             refine_count: make_buffer(REFINE_COUNT_BYTES + DISPATCH_ARGUMENTS_BYTES)?,
             grid,
+            bytes_per_ray_end,
         });
         Ok(())
     }

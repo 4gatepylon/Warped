@@ -13,6 +13,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
+#define SCENE_BUFFERS constant VoxelUniforms &u [[buffer(16)]], device const VoxelStructure *structures [[buffer(17)]], \
+    device const uchar *voxels [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
+    device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]]
+
 constant int MAX_ITERATIONS = 240;
 constant int MAX_DDA_STEPS = 80;
 constant int MAX_FOLDS = 26;
@@ -161,6 +165,10 @@ constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
 constant int TILE_CELLS_PER_HALF = 18;
 constant float KIND_BLACK_HOLE = 0.0;
 constant float HALF_KIND = 0.5;
+constant float GLOW_FLOOR = 1.0 / 1024.0;
+constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
+constant int REFINED_PIXELS_PER_CELL = 3;
+constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
 
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot and
@@ -264,6 +272,7 @@ struct VoxelRayEnd {
     int4 surface;
     float4 glow;
 };
+static_assert(sizeof(VoxelRayEnd) == __BYTES_PER_RAY_END__, "render_voxel.rs sizes the sample buffers by VOXEL_BYTES_PER_RAY_END");
 
 /** @brief `Scene` bundles a frame's buffers for the functions below. */
 struct Scene {
@@ -836,12 +845,261 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  * dispatched by render_voxel.rs, one thread per pixel.
  * @endcode
  */
-kernel void trace_voxel_pixels(constant VoxelUniforms &u [[buffer(0)]], device const VoxelStructure *structures [[buffer(1)]],
-                               device const uchar *voxels [[buffer(2)]], device const VoxelWarp *warps [[buffer(3)]],
-                               device const float4 *warp_lists [[buffer(4)]], device const VoxelLight *lights [[buffer(5)]],
-                               device const float4 *palette [[buffer(6)]], device const BeamSegment *beams [[buffer(7)]],
-                               texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
     Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
+}
+
+/**
+ * @brief `is_same_surface` says whether two samples ended the same way with no laser glow, so the pixels between them
+ * can be interpolated: both on one face plane of one structure (same axis, side and layer of cells), both on the
+ * ground, both in the sky or both lost, behind the same number of glass faces.
+ * @par Example
+ * @code
+ * if (!is_same_surface(a, b)) return false;
+ * @endcode
+ */
+static bool is_same_surface(VoxelRayEnd a, VoxelRayEnd b) {
+    int axis = a.surface.z;
+    bool is_inside_cell = a.surface.x == OUTCOME_HIT && a.surface.y >= 0 && axis < 0;
+    return all(a.surface.xyz == b.surface.xyz) && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
+        && (axis < 0 || a.cell[axis] == b.cell[axis]) && b.glow.z < GLOW_FLOOR && b.glow.w < GLOW_FLOOR;
+}
+
+/**
+ * @brief `is_line_smooth` says whether four samples in a line map screen to scene nearly linearly between the middle
+ * two: the second differences, which are 8 times the midpoint's interpolation error, stay under `ratio` of the first
+ * difference. For samples `h` pixels apart that bounds the error by `ratio` × h / 8 pixels.
+ * @par Example
+ * @code
+ * bool is_smooth = is_line_smooth(p0, p1, p2, p3, SMOOTH_SECOND_DIFFERENCE_PER_FIRST);
+ * @endcode
+ */
+static bool is_line_smooth(float4 p0, float4 p1, float4 p2, float4 p3, float ratio) {
+    float limit = ratio * length(p2 - p1);
+    return length(p0 - 2.0 * p1 + p2) <= limit && length(p1 - 2.0 * p2 + p3) <= limit;
+}
+
+/**
+ * @brief `is_cell_smooth` says whether the cell between samples (i, j) and (i + 1, j + 1) of a grid `columns` ×
+ * `grid_rows` can be interpolated: the twelve samples around it (a 4×4 block without its corners) ended on the
+ * corner's surface and map nearly linearly along the cell's two rows and two columns. Border cells never are.
+ * @par Example
+ * @code
+ * bool is_smooth = is_cell_smooth(samples, columns, sample_rows, i, j, SMOOTH_SECOND_DIFFERENCE_PER_FIRST);
+ * @endcode
+ */
+static bool is_cell_smooth(device const VoxelRayEnd *grid, int columns, int grid_rows, int i, int j, float ratio) {
+    if (i < 1 || j < 1 || i + 2 >= columns || j + 2 >= grid_rows) return false;
+    VoxelRayEnd corner = grid[j * columns + i];
+    float4 p[4][4];
+    for (int b = 0; b < 4; b++) {
+        for (int a = 0; a < 4; a++) {
+            if ((a == 0 || a == 3) && (b == 0 || b == 3)) continue;
+            VoxelRayEnd sample = grid[(j - 1 + b) * columns + (i - 1 + a)];
+            if (!is_same_surface(corner, sample)) return false;
+            p[b][a] = sample.point;
+        }
+    }
+    return is_line_smooth(p[1][0], p[1][1], p[1][2], p[1][3], ratio) && is_line_smooth(p[2][0], p[2][1], p[2][2], p[2][3], ratio)
+        && is_line_smooth(p[0][1], p[1][1], p[2][1], p[3][1], ratio) && is_line_smooth(p[0][2], p[1][2], p[2][2], p[3][2], ratio);
+}
+
+/**
+ * @brief `interpolate_ray_end` blends four samples around a point of a cell (`wx` and `wy` from 0 to 1 along it) into
+ * `end`: the point (back on the hyperboloid, or the unit sphere for the sky), tangent, grid point and distance blend,
+ * and the rest is the first sample's. On a block face the cell under the blended grid point gives the material, and
+ * the result is false (trace the ray instead) unless that cell is solid and the one in front of the face is open.
+ * @par Example
+ * @code
+ * if (!interpolate_ray_end(scene, a, b, c, d, 0.5, 0.0, end)) end = trace_ray(scene, pixel);
+ * @endcode
+ */
+static bool interpolate_ray_end(thread const Scene &scene, VoxelRayEnd a, VoxelRayEnd b, VoxelRayEnd c, VoxelRayEnd d, float wx, float wy,
+                                thread VoxelRayEnd &end) {
+    end = a;
+    float4 point = mix(mix(a.point, b.point, wx), mix(c.point, d.point, wx), wy);
+    end.grid = mix(mix(a.grid, b.grid, wx), mix(c.grid, d.grid, wx), wy);
+    if (a.surface.x == OUTCOME_SKY) end.point = float4(normalize(point.xyz), 0.0);
+    if (a.surface.x != OUTCOME_HIT) return true;
+    end.point = point * rsqrt(-mdot(point, point));
+    end.view = normalize_tangent(end.point, mix(mix(a.view, b.view, wx), mix(c.view, d.view, wx), wy));
+    if (a.surface.y < 0) return true;
+    device const VoxelStructure &st = scene.structures[a.surface.y];
+    int axis = a.surface.z;
+    int3 dims = st.size.xyz, cell = clamp(int3(floor(end.grid.xyz)), int3(0), dims - 1), front = cell;
+    cell[axis] = a.cell[axis];
+    front[axis] = cell[axis] + int(a.glow.x);
+    device const uchar *cells = scene.voxels + st.size.w;
+    int m = int(cells[cell.x + dims.x * (cell.y + dims.y * cell.z)]);
+    bool is_front_open = any(front < int3(0)) || any(front >= dims) || cells[front.x + dims.x * (front.y + dims.y * front.z)] == 0;
+    end.cell = int4(cell, m);
+    return m != 0 && m != scene.u.mat_glass && is_front_open;
+}
+
+/** @brief `get_sample_columns` gives how many samples a row of the fine grid has (one per even pixel column, one past the edge). @par Example @code int columns = get_sample_columns(u); @endcode */
+static int get_sample_columns(constant VoxelUniforms &u) { return u.width_px / 2 + 2; }
+
+/** @brief `get_coarse_columns` gives how many samples a row of the coarse grid has (one per fourth pixel column, enough past the edge to cover the fine grid). @par Example @code int columns = get_coarse_columns(u); @endcode */
+static int get_coarse_columns(constant VoxelUniforms &u) { return u.width_px / 4 + 3; }
+
+/**
+ * @brief `trace_coarse` traces the rays of every fourth pixel each way (coarse sample (i, j) is pixel (4i, 4j)), the
+ * first pass of adaptive sampling, and starts this frame's lists empty.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs's encode_adaptive_sampling, one thread per coarse sample.
+ * @endcode
+ */
+kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]], device atomic_uint *refine_count [[buffer(5)]],
+                         device atomic_uint *fill_count [[buffer(12)]], uint2 id [[thread_position_in_grid]]) {
+    int columns = get_coarse_columns(u), coarse_rows = u.height_px / 4 + 3;
+    if (id.x == 0 && id.y == 0) {
+        atomic_store_explicit(refine_count, 0, memory_order_relaxed);
+        atomic_store_explicit(fill_count, 0, memory_order_relaxed);
+    }
+    if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
+}
+
+/**
+ * @brief `fill_samples` fills the fine grid (sample (i, j) is pixel (2i, 2j)), the second pass of adaptive sampling:
+ * a sample on the coarse grid copies it, one inside a smooth coarse cell (with half the fine grid's threshold, for
+ * the same error in pixels) interpolates the cell's corners, and any other is listed for `trace_listed_samples`.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs's encode_adaptive_sampling, one thread per fine sample.
+ * @endcode
+ */
+kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]], device const VoxelRayEnd *coarse [[buffer(9)]],
+                         device uint *fill_list [[buffer(11)]], device atomic_uint *fill_count [[buffer(12)]], uint2 id [[thread_position_in_grid]]) {
+    int columns = get_sample_columns(u), sample_rows = u.height_px / 2 + 2;
+    int coarse_columns = get_coarse_columns(u), coarse_rows = u.height_px / 4 + 3;
+    int i = int(id.x), j = int(id.y);
+    if (i >= columns || j >= sample_rows) return;
+    int ci = i / 2, cj = j / 2, di = i & 1, dj = j & 1, k = cj * coarse_columns + ci;
+    if (di + dj == 0) {
+        samples[j * columns + i] = coarse[k];
+        return;
+    }
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    VoxelRayEnd end;
+    if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
+        && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
+                               0.5 * float(di), 0.5 * float(dj), end)) {
+        samples[j * columns + i] = end;
+    } else {
+        fill_list[atomic_fetch_add_explicit(fill_count, 1, memory_order_relaxed)] = uint(j * columns + i);
+    }
+}
+
+/**
+ * @brief `prepare_fill` sets the thread-group count of `trace_listed_samples`'s indirect dispatch from how many
+ * samples `fill_samples` listed.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs's encode_adaptive_sampling as a single thread.
+ * @endcode
+ */
+kernel void prepare_fill(device atomic_uint *fill_count [[buffer(12)]], device uint *dispatch_groups [[buffer(13)]]) {
+    uint count = atomic_load_explicit(fill_count, memory_order_relaxed);
+    dispatch_groups[0] = (count + REFINE_GROUP_SIZE - 1) / REFINE_GROUP_SIZE;
+    dispatch_groups[1] = 1;
+    dispatch_groups[2] = 1;
+}
+
+/**
+ * @brief `trace_listed_samples` traces the fine samples `fill_samples` couldn't interpolate, packed densely.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs's encode_adaptive_sampling indirectly, one thread per listed sample.
+ * @endcode
+ */
+kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]], device const uint *fill_list [[buffer(11)]],
+                                 device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
+    if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
+    int columns = get_sample_columns(u), k = int(fill_list[t]);
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
+}
+
+/**
+ * @brief `classify_cells` marks each cell between four fine samples smooth (1) when the twelve samples around it
+ * ended on one surface and map nearly linearly, and lists every other cell that covers pixels, for `refine_pixels`.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs's encode_adaptive_sampling, one thread per cell (sample (i, j) to (i + 1, j + 1)).
+ * @endcode
+ */
+kernel void classify_cells(constant VoxelUniforms &u [[buffer(16)]], device const VoxelRayEnd *samples [[buffer(2)]],
+                           device uchar *smooth_cells [[buffer(3)]], device uint *refine_cells [[buffer(4)]],
+                           device atomic_uint *refine_count [[buffer(5)]], uint2 id [[thread_position_in_grid]]) {
+    int columns = get_sample_columns(u), sample_rows = u.height_px / 2 + 2;
+    int i = int(id.x), j = int(id.y);
+    if (i >= columns || j >= sample_rows) return;
+    uchar is_smooth = is_cell_smooth(samples, columns, sample_rows, i, j, SMOOTH_SECOND_DIFFERENCE_PER_FIRST) ? 1 : 0;
+    smooth_cells[j * columns + i] = is_smooth;
+    if (is_smooth == 0 && 2 * i < u.width_px && 2 * j < u.height_px) {
+        refine_cells[atomic_fetch_add_explicit(refine_count, 1, memory_order_relaxed)] = uint(j * columns + i);
+    }
+}
+
+/**
+ * @brief `prepare_refinement` sets the thread-group count of `refine_pixels`'s indirect dispatch from how many cells
+ * `classify_cells` listed.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs's encode_adaptive_sampling as a single thread.
+ * @endcode
+ */
+kernel void prepare_refinement(device atomic_uint *refine_count [[buffer(5)]], device uint *dispatch_groups [[buffer(6)]]) {
+    uint pixel_count = atomic_load_explicit(refine_count, memory_order_relaxed) * REFINED_PIXELS_PER_CELL;
+    dispatch_groups[0] = (pixel_count + REFINE_GROUP_SIZE - 1) / REFINE_GROUP_SIZE;
+    dispatch_groups[1] = 1;
+    dispatch_groups[2] = 1;
+}
+
+/**
+ * @brief `refine_pixels` traces the three odd pixels of each listed cell, packed densely so that thread groups don't
+ * wait on the few pixels that need a full trace.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs's encode_adaptive_sampling indirectly, one thread per listed pixel.
+ * @endcode
+ */
+kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffer(4)]], device atomic_uint *refine_count [[buffer(5)]],
+                          texture2d<float, access::write> image [[texture(0)]], uint t [[thread_position_in_grid]]) {
+    if (t >= atomic_load_explicit(refine_count, memory_order_relaxed) * REFINED_PIXELS_PER_CELL) return;
+    int columns = get_sample_columns(u);
+    int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
+    uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
+    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
+}
+
+/**
+ * @brief `resolve_pixels` writes the pixels that need no listed ray: an even pixel takes its sample, and a pixel in a
+ * smooth cell interpolates the cell's corners and shades the result (tracing its own ray if the blended cell isn't a
+ * visible face). `refine_pixels` writes the rest.
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs's encode_adaptive_sampling, one thread per pixel.
+ * @endcode
+ */
+kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[buffer(2)]], device const uchar *smooth_cells [[buffer(3)]],
+                           texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
+    int columns = get_sample_columns(u);
+    int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
+    if (di + dj > 0 && smooth_cells[k] == 0) return;
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams};
+    VoxelRayEnd end = samples[k];
+    if (di + dj > 0
+        && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {
+        end = trace_ray(scene, float2(id) + 0.5);
+    }
+    write_pixel(scene, end, id, image);
 }
