@@ -335,6 +335,16 @@ to check.
 5. **One partitioning per PR:** for a large set of tests, add the partitionings one at a time, as
    stacked PRs. Each PR adds or changes tests until its partitioning's parts are all covered.
 
+## Playtesting
+
+When the user tests a game or other visual work you made:
+
+- **Commands:** give commands that enter a folder with `pushd`, not `cd`, so the user can get back
+  to where they were with `popd`.
+- **No screen sharing:** the user doesn't share their screen or microphone, so ask them to playtest
+  desktop apps and anything else you can't see yourself. Where you can, work with them to set up an
+  environment you can test in yourself, such as a browser page or a simulator.
+
 ## Machine-specific workarounds
 
 This repo is used from several machines, so don't write a workaround for one machine (e.g. a
