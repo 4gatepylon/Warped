@@ -7,3 +7,4 @@ mechanics and weapons to add, and how to handle bullets or lasers whose paths ne
 - [`hyperbolic_wormholes/`](hyperbolic_wormholes/README.md): wormholes in hyperbolic space, combining the hyperbolic and wormhole demos above: rails that fan apart, and mouths that bend light and lead to the house, a far pylon, and a view from above.
 - [`gluebox/`](gluebox/README.md): build a 3D space by gluing together the faces of a cube (3-torus, Klein bottle × circle, projective space, the 3-sphere, …) and fly around inside it. Based on the demos above.
 - [`mirror_sphere/`](mirror_sphere/README.md): walk on the inside of a hollow mirror sphere, with a laser that reflects off it and fades out.
+- [`levels/`](levels/README.md): one playable demo per level of the default map (Dust, Snow Planet, City Sphere, Dark Forest, Lunar Surface), plus City Sphere with wormholes, each with its layout, pylons and warp objects.

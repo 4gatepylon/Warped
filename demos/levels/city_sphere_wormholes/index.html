@@ -1,0 +1,2242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>City Sphere with wormholes — Warped level demo</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; background: rgba(12, 16, 26, 0.74); color: #e8eef7; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(4px); user-select: none; }
+  #controls { top: 10px; left: 10px; width: 300px; max-height: calc(100vh - 40px); overflow: auto; }
+  #stats { top: 10px; right: 10px; text-align: right; width: 330px; }
+  #tips { bottom: 10px; right: 10px; width: 360px; max-height: calc(100vh - 230px); overflow: auto; }
+  h1 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  kbd { background: #2c3446; border: 1px solid #4a556d; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  select { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; }
+  button { font: inherit; font-size: 11px; background: #33405a; color: #e8eef7; border: 1px solid #56658a; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; }
+  button:hover { background: #42527a; }
+  .row { margin-top: 8px; }
+  .muted { color: #9fb0c8; }
+  .worm { color: #9ff0ff; }
+  .bar { display: inline-block; width: 150px; height: 8px; background: #26304a; border-radius: 4px; overflow: hidden; vertical-align: middle; margin-left: 6px; }
+  .bar > div { height: 100%; width: 0; }
+  #s_energy { background: #8fe388; }
+  #s_console { background: #ffd36b; }
+  #s_msg { color: #9ff0ff; min-height: 1.45em; }
+  #tips ol { margin: 4px 0 0 18px; padding: 0; }
+  #tips li { margin: 3px 0; }
+  #tips_toggle { float: right; margin-top: -2px; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; }
+  #cross:before, #cross:after { content: ""; position: absolute; background: rgba(255,255,255,0.85); }
+  #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #banner { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); display: none; font-size: 30px; font-weight: bold; color: #fff; background: rgba(20, 14, 40, 0.8); padding: 14px 26px; border-radius: 10px; border: 2px solid #b07cff; pointer-events: none; }
+  #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+
+<div id="controls" class="panel">
+  <h1>City Sphere with wormholes</h1>
+  <div class="muted">Purple level, depth 0: a city on the inside of a hollow sphere, with a glass second floor and three wormholes. Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
+  <div class="row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br>
+    <kbd>H</kbd> fly mode (<kbd>Space</kbd>/<kbd>C</kbd> up/down) · <kbd>T</kbd> play as the other team</div>
+  <div class="row"><kbd>E</kbd> (hold) deactivate a console of the other team's pylon<br>
+    Click (mouse captured) or <kbd>R</kbd> fire the laser</div>
+  <div class="row">Viewpoints (<kbd>1</kbd>–<kbd>9</kbd>):<br><span id="view_buttons"></span></div>
+  <div class="row">
+    <label>Render quality <select id="quality"><option value="auto" selected>auto</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="full">full</option></select></label>
+  </div>
+  <div class="row"><button id="b_reset">Reset consoles</button></div>
+</div>
+
+<div id="stats" class="panel">
+  <div>Team <b id="s_team">–</b> · <span id="s_mode">–</span></div>
+  <div class="muted" id="s_zone">–</div>
+  <div>Energy<span class="bar"><div id="s_energy"></div></span></div>
+  <div>Console<span class="bar"><div id="s_console"></div></span></div>
+  <div class="muted" id="s_consoles">–</div>
+  <div>Laser: <span id="s_laser">–</span></div>
+  <div class="muted"><span id="s_fps">–</span> fps · <span id="s_res">–</span></div>
+  <div id="s_msg"></div>
+</div>
+
+<div id="tips" class="panel">
+  <button id="tips_toggle">hide</button>
+  <h1>Things to try</h1>
+  <div id="tips_body">
+  <ol>
+    <li><b>Look up.</b> You stand on the inside of a hollow sphere and gravity pulls you outward, so the floor curves up ahead of you and the far side of the city hangs overhead, around the glowing core. The glass ceiling 7 m up is the second floor.</li>
+    <li><b>Climb to the glass.</b> Four stairwells (<kbd>8</kbd>) lead up, toward the centre, through openings in the glass. Up there you stand on the inside of the glass sphere and look down through it at the streets. Both floors see each other, but the laser stops at the glass: fire up from the street and the beam ends on it.</li>
+    <li><b>Wormholes.</b> Each mouth sits in a dark doorway with a cyan frame (<kbd>5</kbd>, <kbd>6</kbd>). From outside it bends light like a black hole; its disk shows the world around the other mouth, wrapped into rings (the far gate's cyan frame among them). Walk through the doorway to go through.</li>
+    <li><b>Crosslink</b> (equator, <kbd>5</kbd>): joins the two street routes. Walk east through it and you come out of the other route's gate, still walking east.</li>
+    <li><b>Lifts</b> (<kbd>6</kbd>): from your own half of a street route straight onto the glass above the enemy zone. Fast, but defenders below see you through the glass, and you still have to come down a stairwell.</li>
+    <li><b>Through a mouth</b> you glide along a light ray (no gravity) until you are clear of it, then gravity takes over and your view rolls back upright in about a third of a second. Shoot the laser into a mouth and watch it come out of the other one.</li>
+    <li><b>Win.</b> Each pylon stands at its team's pole with 4 consoles. Press <kbd>9</kbd> (you play red next to the blue pylon) and hold <kbd>E</kbd> facing it: 10 s per console.</li>
+  </ol>
+  <div class="muted" style="margin-top:6px">Zones: the blue and red zones are the caps around each pole (blue floor and glass, red floor and glass); the middle zone is the wide band between them. The middle has two street routes (A and B, on opposite sides of the sphere) and the glass skyway above everything. The other two sides of the band are sealed habitat blocks.</div>
+  </div>
+</div>
+<div id="banner"></div>
+<div id="err"></div>
+
+<script id="fragment_shader" type="x-shader/x-fragment">
+/**
+ * @file
+ * The fragment shader ray traces City Sphere with wormholes, one ray per pixel.
+ *
+ * Interface:
+ * - Uniforms: the camera, the voxel texture, the wormhole mouths, the laser beams and spots.
+ *
+ * Example: built by `build_fragment_shader()`, which puts the generated constants in front of this text.
+ *
+ * Must know:
+ * - Limitations: light paths are exact for one mouth; with several, their bending is added up (as in wormholes.html).
+ */
+uniform highp sampler3D u_voxels;
+uniform highp sampler2D u_beam_points;
+uniform vec3 u_cam_pos, u_cam_right, u_cam_up, u_cam_fwd;
+uniform float u_tan_half_fov, u_aspect, u_pixel_angle, u_beam_radius, u_lambda_sq, u_time, u_cam_lapse;
+uniform float u_tan_bounds[CELLS_PER_FACE_EDGE + 1];
+uniform vec4 u_mouths[MAX_MOUTHS];
+uniform vec3 u_mouth_to[MAX_MOUTHS];
+uniform mat3 u_mouth_q[MAX_MOUTHS];
+uniform int u_mouth_count;
+uniform vec4 u_chunk_a[MAX_CHUNKS], u_chunk_b[MAX_CHUNKS], u_chunk_color[MAX_CHUNKS];
+uniform int u_chunk_count;
+uniform vec4 u_spots[MAX_SPOTS], u_spot_color[MAX_SPOTS];
+uniform int u_spot_count;
+uniform vec4 u_focus;
+in vec2 v_ndc;
+out vec4 out_color;
+
+const vec3 FACE_N[6] = vec3[6](vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0), vec3(0, 0, 1), vec3(0, 0, -1));
+const vec3 FACE_U[6] = vec3[6](vec3(0, 0, 1), vec3(0, 0, -1), vec3(1, 0, 0), vec3(1, 0, 0), vec3(-1, 0, 0), vec3(1, 0, 0));
+const vec3 FACE_V[6] = vec3[6](vec3(0, 1, 0), vec3(0, 1, 0), vec3(0, 0, -1), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 1, 0));
+const vec3 HAZE_COLOR = vec3(0.30, 0.26, 0.42);
+const float HAZE_M = 110.0;
+const vec3 CORE_COLOR = vec3(1.0, 0.86, 1.0);
+const vec3 CORE_GLOW_COLOR = vec3(0.85, 0.55, 1.0);
+const float CORE_GLOW_M = 2.2;
+const vec3 UNDER_GLASS_TINT = vec3(0.86, 0.90, 1.0);
+const vec3 GLASS_SHEEN = vec3(0.70, 0.76, 0.90);
+const vec3 GLASS_FRAME_COLOR = vec3(0.55, 0.62, 0.75);
+const vec3 GATE_GLOW = vec3(0.15, 0.9, 1.0);
+const vec3 WINDOW_WARM = vec3(1.0, 0.78, 0.45);
+const vec3 WINDOW_COOL = vec3(0.45, 0.9, 1.0);
+const float BEAM_REACH = 4.8;
+const float BEAM_HALO_SPREAD = 4.8;
+const float NEAR_MOUTH_M = 4.0;
+const float BEND_STEP_NEAR_FRAC = 0.12;
+const float BEND_STEP_FAR_FRAC = 0.25;
+const float MIN_BEND_STEP_M = 0.01;
+const float MIDPOINT_BEND_FRAC = 0.04;
+const float FAR_FIELD_RHO_PER_PT = 48.0;
+const int GLASS_PANEL_CELLS = 3;
+const float GLASS_FRAME_WIDTH = 0.035;
+const float GLASS_FRAME_GLOW = 0.6;
+const float GLASS_FRAME_OPACITY = 0.7;
+const float FRESNEL_BASE = 0.04;
+const float FRESNEL_GRAZING = 0.5;
+const vec3 HASH_DIR = vec3(12.9898, 78.233, 37.719);
+const float HASH_SCALE = 43758.5453;
+const float NOISE_TEXELS = 8.0;
+const float NOISE_BASE = 0.86;
+const float NOISE_SPAN = 0.22;
+const float EDGE_WIDTH = 0.05;
+const float EDGE_SHADE = 0.55;
+const vec3 ROOF_COLOR = vec3(0.33, 0.32, 0.37);
+const float FLOOR_CHECKER_SHADE = 0.9;
+const float GATE_LINE_WIDTH = 0.09;
+const float GATE_GLOW_GAIN = 1.4;
+const float WINDOW_FRAC = 0.24;
+const float COOL_WINDOW_FRAC = 0.08;
+const float WINDOW_GLOW = 0.7;
+const vec4 WINDOW_RECT = vec4(0.28, 0.72, 0.30, 0.66);
+const float EMISSIVE_GAIN = 0.8;
+const float PYLON_GLOW = 0.75;
+const float PYLON_PULSE = 0.45;
+const float PYLON_PULSE_RAD_PER_S = 3.0;
+const float TOP_FACE_LIGHT = 1.0;
+const float BOTTOM_FACE_LIGHT = 0.55;
+const float A_SIDE_LIGHT = 0.82;
+const float B_SIDE_LIGHT = 0.70;
+const float WALL_FOOT_SHADE = 0.6;
+const float WALL_FOOT_SHADE_M = 1.4;
+const float SPOT_MIN_RADIUS_M = 0.08;
+const float SPOT_PIXELS = 2.5;
+const vec3 FOCUS_GLOW = vec3(1.0, 0.85, 0.3);
+const float FOCUS_RADIUS_M = 0.9;
+const float FOCUS_BLINK_RAD_PER_S = 12.0;
+const float CORE_PULSE = 0.15;
+const float CORE_PULSE_RAD_PER_S = 1.7;
+const float CORE_GLOW_GAIN = 0.6;
+const float BEAM_HALO_OPACITY = 0.9;
+const float BEAM_CORE_WHITENESS = 0.55;
+const float TONE_KNEE = 0.6;
+const float MAX_COLOR_SHIFT = 3.0;
+
+/**
+ * `hash3` gives a pseudo-random number in [0, 1) for a 3D point.
+ * @param q The point.
+ * @return The number.
+ * @example float n = hash3(vec3(1.0, 2.0, 3.0));
+ */
+float hash3(vec3 q) { return fract(sin(dot(q, HASH_DIR)) * HASH_SCALE); }
+
+/**
+ * `face_of` finds which cube face a direction belongs to: the axis of its largest component.
+ * @param p A point or direction (not the origin).
+ * @return The face, 0..5 for +X, -X, +Y, -Y, +Z, -Z.
+ * @example int f = face_of(vec3(0.2, -1.0, 0.1));
+ */
+int face_of(vec3 p) {
+  vec3 a = abs(p);
+  if (a.x >= a.y && a.x >= a.z) return p.x > 0.0 ? 0 : 1;
+  if (a.y >= a.z) return p.y > 0.0 ? 2 : 3;
+  return p.z > 0.0 ? 4 : 5;
+}
+
+/**
+ * `cell_of` finds the voxel cell holding a point: face, the two angle indices on it, and the radial layer.
+ * @param p The point.
+ * @return (face, i, j, layer); layer < 0 is the empty interior, layer >= LAYER_COUNT lies beyond the floor.
+ * @example ivec4 c = cell_of(u_cam_pos);
+ */
+ivec4 cell_of(vec3 p) {
+  int f = face_of(p);
+  float X = dot(p, FACE_N[f]);
+  float a = atan(dot(p, FACE_U[f]) / X), b = atan(dot(p, FACE_V[f]) / X);
+  int i = clamp(int(floor((a + QUARTER_TURN_RAD * 0.5) / CELL_ANGLE_RAD)), 0, CELLS_PER_FACE_EDGE - 1);
+  int j = clamp(int(floor((b + QUARTER_TURN_RAD * 0.5) / CELL_ANGLE_RAD)), 0, CELLS_PER_FACE_EDGE - 1);
+  return ivec4(f, i, j, int(floor(length(p) - R_MIN_M)));
+}
+
+/**
+ * `material_of` reads a cell's material from the voxel texture.
+ * @param c The cell, from `cell_of`.
+ * @return The material id (M_AIR inside the empty interior, M_ROAD beyond the floor).
+ * @example int m = material_of(cell_of(p));
+ */
+int material_of(ivec4 c) {
+  if (c.w < 0) return M_AIR;
+  if (c.w >= LAYER_COUNT) return M_ROAD;
+  return int(texelFetch(u_voxels, ivec3(c.y, c.z, c.x * LAYER_COUNT + c.w), 0).r * 255.0 + 0.5);
+}
+
+/**
+ * `material_kind` gives a material's shading kind (plain, glass, emissive, building, floor, gate, pylon).
+ * @param m The material id.
+ * @return The kind.
+ * @example bool is_glass = material_kind(m) == KIND_GLASS;
+ */
+int material_kind(int m) { return int(MATERIAL_TABLE[m].w + 0.5); }
+
+/**
+ * `cell_exit` finds where a straight ray leaves a cell: two pairs of planes through the centre bound it on
+ * its face, and two spheres bound it radially.
+ * @param p The ray's start, inside the cell.
+ * @param v The ray's unit direction.
+ * @param c The cell.
+ * @param wall Set to the wall crossed: 0/1 the low/high angle-a plane, 2/3 angle b, 4/5 the inner/outer sphere.
+ * @return The distance to that wall.
+ * @example int wall; float t = cell_exit(p, v, cell, wall);
+ */
+float cell_exit(vec3 p, vec3 v, ivec4 c, out int wall) {
+  float b = dot(p, v), pp = dot(p, p);
+  wall = 5;
+  if (c.w < 0) return max(-b + sqrt(max(b * b - pp + R_MIN_M * R_MIN_M, 0.0)), 0.0);
+  vec3 n = FACE_N[c.x], u = FACE_U[c.x], w = FACE_V[c.x];
+  vec3 a0 = u - u_tan_bounds[c.y] * n, a1 = u - u_tan_bounds[c.y + 1] * n;
+  vec3 b0 = w - u_tan_bounds[c.z] * n, b1 = w - u_tan_bounds[c.z + 1] * n;
+  float r_lo = R_MIN_M + float(c.w), r_hi = r_lo + 1.0;
+  float t = -b + sqrt(max(b * b - pp + r_hi * r_hi, 0.0));
+  float k = dot(a0, v);
+  if (k < 0.0) { float tt = -dot(a0, p) / k; if (tt < t) { t = tt; wall = 0; } }
+  k = dot(a1, v);
+  if (k > 0.0) { float tt = -dot(a1, p) / k; if (tt < t) { t = tt; wall = 1; } }
+  k = dot(b0, v);
+  if (k < 0.0) { float tt = -dot(b0, p) / k; if (tt < t) { t = tt; wall = 2; } }
+  k = dot(b1, v);
+  if (k > 0.0) { float tt = -dot(b1, p) / k; if (tt < t) { t = tt; wall = 3; } }
+  float d_lo = b * b - pp + r_lo * r_lo;
+  if (b < 0.0 && d_lo > 0.0) { float tt = -b - sqrt(d_lo); if (tt < t) { t = tt; wall = 4; } }
+  return max(t, 0.0);
+}
+
+/**
+ * `wall_normal` gives the outward normal of the block face that a ray from cell c hit through a wall.
+ * @param c The cell the ray came from.
+ * @param wall The wall it crossed, as from `cell_exit`.
+ * @param hp The hit point.
+ * @return The unit normal, pointing back into cell c.
+ * @example vec3 n = wall_normal(c0, wall, hp);
+ */
+vec3 wall_normal(ivec4 c, int wall, vec3 hp) {
+  if (wall >= 4) return wall == 4 ? normalize(hp) : -normalize(hp);
+  vec3 n = FACE_N[c.x], axis = wall < 2 ? FACE_U[c.x] : FACE_V[c.x];
+  int k = wall < 2 ? c.y + (wall & 1) : c.z + (wall & 1);
+  vec3 plane = normalize(axis - u_tan_bounds[k] * n);
+  return (wall & 1) == 0 ? plane : -plane;
+}
+
+/**
+ * `face_uv` gives the hit point's position on the block face, from 0 to 1 across the face.
+ * @param c The cell the ray came from.
+ * @param wall The wall it crossed.
+ * @param hp The hit point.
+ * @return The two face coordinates; the second is radial on side faces.
+ * @example vec2 uv = face_uv(c0, wall, hp);
+ */
+vec2 face_uv(ivec4 c, int wall, vec3 hp) {
+  float X = dot(hp, FACE_N[c.x]);
+  float fa = fract((atan(dot(hp, FACE_U[c.x]) / X) + QUARTER_TURN_RAD * 0.5) / CELL_ANGLE_RAD);
+  float fb = fract((atan(dot(hp, FACE_V[c.x]) / X) + QUARTER_TURN_RAD * 0.5) / CELL_ANGLE_RAD);
+  float fr = fract(length(hp) - R_MIN_M);
+  if (wall < 2) return vec2(fb, fr);
+  if (wall < 4) return vec2(fa, fr);
+  return vec2(fa, fb);
+}
+
+/**
+ * `mouth_lapse` gives a mouth's clock rate squared, A(rho), relative to far away.
+ * @param rho The isotropic distance from the mouth's centre.
+ * @param pt The throat radius rho_t.
+ * @return A.
+ * @example float a = mouth_lapse(2.0, 0.175);
+ */
+float mouth_lapse(float rho, float pt) { float psi = 1.0 + pt / rho; return (1.0 - 4.0 * pt / (rho * psi * psi) + u_lambda_sq) / (1.0 + u_lambda_sq); }
+
+/**
+ * `dln_index` gives d(ln n)/d(rho) for one mouth's refractive index n = psi^2 / sqrt(A).
+ * @param rho The isotropic distance from the mouth's centre.
+ * @param pt The throat radius rho_t.
+ * @return The derivative.
+ * @example float g = dln_index(2.0, 0.175);
+ */
+float dln_index(float rho, float pt) {
+  float ir = 1.0 / rho, psi = 1.0 + pt * ir, ir2 = ir / (psi * psi), rs = 4.0 * pt;
+  return -2.0 * pt * ir * ir / psi - rs * psi * (1.0 - pt * ir) * ir2 * ir2 / (2.0 * (1.0 + u_lambda_sq - rs * ir2));
+}
+
+/**
+ * `bend_acc` gives how fast a ray's direction turns: the sideways part of the gradient of ln n, summed over mouths.
+ * @param p The ray's position.
+ * @param v The ray's unit direction.
+ * @param r_near Set to the distance to the nearest mouth.
+ * @return The turning rate, per metre.
+ * @example float r_near; vec3 acc = bend_acc(p, v, r_near);
+ */
+vec3 bend_acc(vec3 p, vec3 v, out float r_near) {
+  vec3 g = vec3(0.0); r_near = 1e9;
+  for (int k = 0; k < MAX_MOUTHS; k++) {
+    if (k >= u_mouth_count) break;
+    vec3 d = p - u_mouths[k].xyz; float rho = max(length(d), 1e-4), pt = u_mouths[k].w;
+    float gk = rho > FAR_FIELD_RHO_PER_PT * pt ? -2.0 * (1.0 + 1.0 / (1.0 + u_lambda_sq)) * pt / (rho * rho) : dln_index(rho, pt);
+    g += gk * d / rho;
+    r_near = min(r_near, rho);
+  }
+  return g - dot(g, v) * v;
+}
+
+/**
+ * `lapse_at` gives the rate of a clock at rest at p relative to one far from every mouth.
+ * @param p The point.
+ * @return The rate, sqrt of the product of the mouths' A.
+ * @example float rate = lapse_at(hp);
+ */
+float lapse_at(vec3 p) {
+  float a = 1.0;
+  for (int k = 0; k < MAX_MOUTHS; k++) { if (k >= u_mouth_count) break; a *= mouth_lapse(max(length(p - u_mouths[k].xyz), u_mouths[k].w), u_mouths[k].w); }
+  return sqrt(max(a, 0.0));
+}
+
+/**
+ * `shift_color` red- or blueshifts a colour by a frequency ratio (brighter and bluer above 1).
+ * @param c The colour as emitted.
+ * @param g The received over the emitted frequency.
+ * @return The colour as seen.
+ * @example vec3 seen = shift_color(c, 1.1);
+ */
+vec3 shift_color(vec3 c, float g) {
+  g = clamp(g, 0.0, MAX_COLOR_SHIFT);
+  vec3 s = g < 1.0 ? vec3(c.r, c.g * g, c.b * g * g) : vec3(c.r / (g * g), c.g / g, c.b);
+  return s * g * g * g;
+}
+
+/**
+ * `dist_point_segment` gives the distance from a point to a segment.
+ * @param p The point.
+ * @param a The segment's start.
+ * @param b The segment's end.
+ * @return The distance.
+ * @example float d = dist_point_segment(p, a, b);
+ */
+float dist_point_segment(vec3 p, vec3 a, vec3 b) {
+  vec3 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
+  return length(p - a - ab * t);
+}
+
+/**
+ * `dist2_segment_segment` gives the squared distance between two segments.
+ * @param p1 The first segment's start.
+ * @param q1 The first segment's end.
+ * @param p2 The second segment's start.
+ * @param q2 The second segment's end.
+ * @param s Set to the closest point's fraction along the first segment.
+ * @return The squared distance.
+ * @example float s; float d2 = dist2_segment_segment(a, b, q0, q1, s);
+ */
+float dist2_segment_segment(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s) {
+  vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+  float a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), t;
+  s = 0.0;
+  if (e < 1e-10) { t = 0.0; s = a > 1e-10 ? clamp(-dot(d1, r) / a, 0.0, 1.0) : 0.0; }
+  else if (a < 1e-10) { t = clamp(f / e, 0.0, 1.0); }
+  else {
+    float b = dot(d1, d2), c = dot(d1, r), den = a * e - b * b;
+    s = den > 1e-7 * a * e ? clamp((b * f - c * e) / den, 0.0, 1.0) : 0.0;
+    t = (b * s + f) / e;
+    if (t < 0.0) { t = 0.0; s = clamp(-c / a, 0.0, 1.0); }
+    else if (t > 1.0) { t = 1.0; s = clamp((b - c) / a, 0.0, 1.0); }
+  }
+  vec3 w = p1 + d1 * s - p2 - d2 * t;
+  return dot(w, w);
+}
+
+/**
+ * `scan_chunk` adds the glow of one chunk of laser beam seen along the straight ray piece a-b.
+ * @param c The chunk.
+ * @param a The ray piece's start.
+ * @param b The ray piece's end.
+ * @param len The piece's length.
+ * @param reach How far from the piece a beam still glows.
+ * @param t0 The ray's path length at a.
+ * @param trans How much light gets through to the camera from here.
+ * @param core The brightest beam core so far (updated).
+ * @param halo The brightest beam halo so far (updated).
+ * @param rgb The colour of that halo (updated).
+ * @return The chunk's distance from the piece, beyond its own radius.
+ * @example float d = scan_chunk(0, a, b, len, reach, t0, 1.0, core, halo, rgb);
+ */
+float scan_chunk(int c, vec3 a, vec3 b, float len, float reach, float t0, float trans, inout float core, inout float halo, inout vec3 rgb) {
+  vec4 ca = u_chunk_a[c], cb = u_chunk_b[c], cc = u_chunk_color[c];
+  float dc = dist_point_segment(0.5 * (a + b), ca.xyz, cb.xyz) - ca.w;
+  if (cc.w <= 0.0 || dc > 0.5 * len + reach) return dc - 0.5 * len;
+  if (len > 2.0) { float s0; if (sqrt(dist2_segment_segment(a, b, ca.xyz, cb.xyz, s0)) - ca.w > reach) return dc - 0.5 * len; }
+  int pk = int(cb.w + 0.5), first = pk >> 5, cnt = pk & 31;
+  vec3 q0 = texelFetch(u_beam_points, ivec2(first, 0), 0).xyz;
+  for (int j = 0; j < 16; j++) {
+    if (j >= cnt) break;
+    vec3 q1 = texelFetch(u_beam_points, ivec2(first + j + 1, 0), 0).xyz;
+    if (dist_point_segment(0.5 * (q0 + q1), a, b) - 0.5 * length(q1 - q0) > reach) { q0 = q1; continue; }
+    float s; float d2 = dist2_segment_segment(a, b, q0, q1, s);
+    float sg = max(u_beam_radius, u_pixel_angle * (t0 + s * len)), f = trans * cc.w;
+    core = max(core, f * exp(-d2 / (sg * sg)));
+    float hv = f * exp(-d2 / (BEAM_HALO_SPREAD * sg * sg));
+    if (hv > halo) { halo = hv; rgb = cc.rgb; }
+    q0 = q1;
+  }
+  return dc - 0.5 * len;
+}
+
+/**
+ * `laser_spot` gives the glow where a laser beam ends on a surface.
+ * @param hp The surface point.
+ * @param t The ray's path length to it.
+ * @param rgb Set to the spot's colour.
+ * @return The glow, 0 to 1.
+ * @example vec3 rgb; float g = laser_spot(hp, t, rgb);
+ */
+float laser_spot(vec3 hp, float t, out vec3 rgb) {
+  float g = 0.0, rr = max(SPOT_MIN_RADIUS_M, SPOT_PIXELS * u_pixel_angle * t); rgb = vec3(1.0);
+  for (int k = 0; k < MAX_SPOTS; k++) {
+    if (k >= u_spot_count) break;
+    vec3 d = hp - u_spots[k].xyz; float gk = u_spots[k].w * exp(-dot(d, d) / (rr * rr));
+    if (gk > g) { g = gk; rgb = u_spot_color[k].rgb; }
+  }
+  return g;
+}
+
+/**
+ * `shade_block` gives the colour of a block face: per-block noise, darkened edges, windows, glow and light from the core.
+ * @param m The block's material.
+ * @param c The block's cell.
+ * @param c0 The cell the ray came from.
+ * @param wall The wall of c0 the ray crossed.
+ * @param hp The hit point.
+ * @param t The ray's path length to it.
+ * @return The colour.
+ * @example vec3 col = shade_block(m, cell, c0, wall, hp, travelled);
+ */
+vec3 shade_block(int m, ivec4 c, ivec4 c0, int wall, vec3 hp, float t) {
+  vec4 entry = MATERIAL_TABLE[m];
+  int kind = int(entry.w + 0.5);
+  vec3 base = entry.rgb, emit = vec3(0.0);
+  vec2 uv = face_uv(c0, wall, hp);
+  float cell_id = float(c.x * 7919 + c.y * 131 + c.z * 29 + c.w * 7);
+  bool is_top = wall == 5, is_bottom = wall == 4;
+  if (kind == KIND_BUILDING && is_top) base = ROOF_COLOR;
+  if (kind == KIND_FLOOR && ((c.y + c.z) & 1) == 1) base *= FLOOR_CHECKER_SHADE;
+  base *= NOISE_BASE + NOISE_SPAN * hash3(vec3(floor(uv * NOISE_TEXELS), cell_id));
+  vec2 e2 = min(uv, 1.0 - uv);
+  float edge = smoothstep(0.0, EDGE_WIDTH, min(e2.x, e2.y));
+  if (kind == KIND_GATE) emit = GATE_GLOW * (1.0 - smoothstep(0.0, GATE_LINE_WIDTH, min(e2.x, e2.y))) * GATE_GLOW_GAIN;
+  base *= mix(EDGE_SHADE, 1.0, edge);
+  if (kind == KIND_BUILDING && !is_top && !is_bottom) {
+    float wh = hash3(vec3(cell_id, 3.1, 7.7));
+    if (wh < WINDOW_FRAC && uv.x > WINDOW_RECT.x && uv.x < WINDOW_RECT.y && uv.y > WINDOW_RECT.z && uv.y < WINDOW_RECT.w) emit = (wh < COOL_WINDOW_FRAC ? WINDOW_COOL : WINDOW_WARM) * WINDOW_GLOW;
+  }
+  if (kind == KIND_EMISSIVE) emit = base * EMISSIVE_GAIN;
+  if (kind == KIND_PYLON) emit = base * (PYLON_GLOW + PYLON_PULSE * sin(uv.y * 6.2832 + u_time * PYLON_PULSE_RAD_PER_S + float(c.w)));
+  float face = is_top ? TOP_FACE_LIGHT : (is_bottom ? BOTTOM_FACE_LIGHT : (wall < 2 ? A_SIDE_LIGHT : B_SIDE_LIGHT));
+  float r = length(hp), floor_r = r > GLASS_OUTER_M ? R_FLOOR_M : GLASS_INNER_M;
+  if (!is_top && !is_bottom) face *= mix(WALL_FOOT_SHADE, 1.0, smoothstep(0.0, WALL_FOOT_SHADE_M, floor_r - r));
+  vec3 col = base * face * (r > GLASS_OUTER_M ? UNDER_GLASS_TINT : vec3(1.0)) + emit;
+  vec3 spot_rgb; float g = laser_spot(hp, t, spot_rgb);
+  col = mix(col, spot_rgb, clamp(g, 0.0, 1.0)) + vec3(1.0) * g * g;
+  if (u_focus.w >= 0.0 && length(hp - u_focus.xyz) < FOCUS_RADIUS_M) col += FOCUS_GLOW * (0.5 + 0.5 * sin(u_time * FOCUS_BLINK_RAD_PER_S)) * (0.3 + u_focus.w);
+  return col;
+}
+
+/**
+ * `enter_glass` lets a ray into a run of glass blocks: a sheen that grows at grazing angles, frame lines (every
+ * GLASS_PANEL_CELLS blocks across the glass floor, at every edge of glass walls), and the glass's tint behind it.
+ * @param m The glass material.
+ * @param c The glass cell.
+ * @param c0 The cell the ray came from.
+ * @param wall The wall it crossed.
+ * @param hp Where it entered the glass.
+ * @param v The ray's direction.
+ * @param col The light gathered in front so far (updated).
+ * @param thr How much light from further on gets through (updated).
+ * @return Nothing.
+ * @example enter_glass(m, c0, wall, hp, v, col, thr);
+ */
+void enter_glass(int m, ivec4 c, ivec4 c0, int wall, vec3 hp, vec3 v, inout vec3 col, inout vec3 thr) {
+  vec2 uv = face_uv(c0, wall, hp), e2 = min(uv, 1.0 - uv);
+  if (wall >= 4) {
+    e2.x = min((c.y % GLASS_PANEL_CELLS == 0) ? uv.x : 1.0, ((c.y + 1) % GLASS_PANEL_CELLS == 0) ? 1.0 - uv.x : 1.0);
+    e2.y = min((c.z % GLASS_PANEL_CELLS == 0) ? uv.y : 1.0, ((c.z + 1) % GLASS_PANEL_CELLS == 0) ? 1.0 - uv.y : 1.0);
+  }
+  float frame = 1.0 - smoothstep(0.3 * GLASS_FRAME_WIDTH, GLASS_FRAME_WIDTH, min(e2.x, e2.y));
+  float fres = FRESNEL_BASE + FRESNEL_GRAZING * pow(1.0 - abs(dot(wall_normal(c0, wall, hp), v)), 5.0);
+  col += thr * (GLASS_SHEEN * fres + GLASS_FRAME_COLOR * frame * GLASS_FRAME_GLOW);
+  thr *= MATERIAL_TABLE[m].rgb * (1.0 - GLASS_FRAME_OPACITY * frame) * (1.0 - fres);
+}
+
+/**
+ * `shade_core` gives the colour of the glowing core at the centre of the sphere.
+ * @param n The unit normal at the hit point.
+ * @return The colour.
+ * @example vec3 col = shade_core(normalize(hp));
+ */
+vec3 shade_core(vec3 n) { return CORE_COLOR * (1.0 + CORE_PULSE * sin(u_time * CORE_PULSE_RAD_PER_S + 4.0 * n.x + 3.0 * n.y)); }
+
+/**
+ * `main` traces this pixel's ray: bent by the mouths, through throats, across the voxel cells (tinted by glass)
+ * until it hits a block or the core, testing laser beams along the way.
+ * @return Nothing; writes out_color.
+ * @example (called once per pixel by WebGL)
+ */
+void main() {
+  vec3 v = normalize(u_cam_fwd + v_ndc.x * u_tan_half_fov * u_aspect * u_cam_right + v_ndc.y * u_tan_half_fov * u_cam_up);
+  vec3 p = u_cam_pos;
+  vec3 thr = vec3(1.0), col = vec3(0.0), surf = HAZE_COLOR, core_thr = vec3(0.0);
+  float travelled = 0.0, core_dmin = 1e9;
+  ivec4 cell = cell_of(p);
+  bool is_in_glass = material_kind(material_of(cell)) == KIND_GLASS, is_hit = false;
+  float beam_next = 0.0, beam_core = 0.0, beam_halo = 0.0; vec3 beam_rgb = vec3(1.0);
+  int near_chunks[16]; int near_count = 0;
+  vec3 chord_a = p, chord_dir = v; float chord_t = 0.0;
+  for (int it = 0; it < MAX_STEPS; it++) {
+    float r_near; vec3 acc = bend_acc(p, v, r_near);
+    float bend_step = max((r_near < NEAR_MOUTH_M ? BEND_STEP_NEAR_FRAC : BEND_STEP_FAR_FRAC) * r_near, MIN_BEND_STEP_M);
+    float ds, core_t = -1.0; int wall;
+    if (cell.w < 0) {
+      float b = dot(p, v), pp = dot(p, p);
+      ds = min(-b + sqrt(max(b * b - pp + R_MIN_M * R_MIN_M, 0.0)) + STEP_EPS_M, bend_step);
+      float dc = length(p + v * clamp(-b, 0.0, ds));
+      if (dc < core_dmin) { core_dmin = dc; core_thr = thr; }
+      float disc = b * b - pp + R_CORE_M * R_CORE_M;
+      if (disc > 0.0 && b < 0.0 && -b - sqrt(disc) < ds) core_t = -b - sqrt(disc);
+    } else ds = min(cell_exit(p, v, cell, wall) + STEP_EPS_M, bend_step);
+    vec3 vh = normalize(v + acc * (0.5 * ds)), acc2 = acc;
+    if (ds > MIDPOINT_BEND_FRAC * r_near) { float r_mid; acc2 = bend_acc(p + v * (0.5 * ds), vh, r_mid); }
+    vec3 p0 = p, pn = p + vh * ds; float t0 = travelled, hit_frac = 1.0;
+    if (core_t >= 0.0) {
+      hit_frac = core_t / ds; travelled = t0 + core_t;
+      surf = shade_core(normalize(p0 + vh * core_t)); is_hit = true;
+    } else {
+      ivec4 c0 = cell;
+      v = normalize(v + acc2 * ds); p = pn; travelled += ds;
+      cell = cell_of(p);
+      if (cell != c0) {
+        int m = material_of(cell);
+        if (m != M_AIR) {
+          vec3 chord = pn - p0; float chord_len = max(length(chord), 1e-9); vec3 cd = chord / chord_len;
+          int hit_wall; float th = min(cell_exit(p0, cd, c0, hit_wall), chord_len);
+          vec3 hp = p0 + cd * th;
+          if (material_kind(m) == KIND_GLASS) {
+            if (!is_in_glass) enter_glass(m, cell, c0, hit_wall, hp, cd, col, thr);
+            is_in_glass = true;
+          } else {
+            hit_frac = th / chord_len; travelled = t0 + th; is_hit = true;
+            surf = shift_color(shade_block(m, cell, c0, hit_wall, hp, travelled), lapse_at(hp) / u_cam_lapse);
+          }
+        } else is_in_glass = false;
+      }
+    }
+    if (u_chunk_count > 0) {
+      vec3 b_end = mix(p0, pn, hit_frac); float t_end = t0 + ds * hit_frac, len = t_end - chord_t;
+      float tol = 0.3 * max(u_beam_radius, u_pixel_angle * chord_t), turn = 1.0 - dot(chord_dir, v);
+      bool is_in_throat = false;
+      for (int k = 0; k < MAX_MOUTHS; k++) { if (k >= u_mouth_count) break; vec3 d = p - u_mouths[k].xyz; if (dot(d, d) < u_mouths[k].w * u_mouths[k].w) is_in_throat = true; }
+      if (is_hit || is_in_throat || len > 2.0 || len * len * turn > 32.0 * tol * tol) {
+        float trans = dot(thr, vec3(1.0 / 3.0)), reach = BEAM_REACH * max(u_beam_radius, u_pixel_angle * t_end);
+        if (t_end >= beam_next) {
+          float reach0 = BEAM_REACH * max(u_beam_radius, u_pixel_angle * chord_t), near = reach0 + clamp(10.0 * len, 0.3, 2.5), far = 1e9;
+          bool is_overflow = false; near_count = 0;
+          for (int c = 0; c < MAX_CHUNKS; c++) {
+            if (c >= u_chunk_count) break;
+            float dc = scan_chunk(c, chord_a, b_end, len, reach, chord_t, trans, beam_core, beam_halo, beam_rgb);
+            if (dc < near) { if (near_count < 16) { near_chunks[near_count] = c; near_count++; } else is_overflow = true; }
+            else far = min(far, dc);
+          }
+          beam_next = is_overflow ? chord_t : chord_t + max(far - reach0, 0.0) / (1.0 + BEAM_REACH * u_pixel_angle);
+        } else {
+          for (int k = 0; k < 16; k++) { if (k >= near_count) break; scan_chunk(near_chunks[k], chord_a, b_end, len, reach, chord_t, trans, beam_core, beam_halo, beam_rgb); }
+        }
+        chord_a = b_end; chord_t = t_end; chord_dir = v;
+      }
+    }
+    if (is_hit) break;
+    for (int k = 0; k < MAX_MOUTHS; k++) {
+      if (k >= u_mouth_count) break;
+      vec3 d = p - u_mouths[k].xyz; float r2 = dot(d, d), pt = u_mouths[k].w;
+      if (r2 >= pt * pt) continue;
+      vec3 nrm = d * inversesqrt(r2);
+      p = u_mouth_to[k] + u_mouth_q[k] * (d * (pt * pt / r2));
+      v = normalize(u_mouth_q[k] * (v - 2.0 * dot(v, nrm) * nrm));
+      cell = cell_of(p); is_in_glass = material_kind(material_of(cell)) == KIND_GLASS;
+      beam_next = 0.0; near_count = 0; chord_a = p; chord_t = travelled; chord_dir = v;
+      break;
+    }
+  }
+  vec3 c_out = col + thr * (is_hit ? mix(HAZE_COLOR, surf, exp(-travelled / HAZE_M)) : HAZE_COLOR);
+  c_out += core_thr * CORE_GLOW_COLOR * exp(-max(core_dmin - R_CORE_M, 0.0) / CORE_GLOW_M) * CORE_GLOW_GAIN;
+  c_out = mix(c_out, beam_rgb, clamp(BEAM_HALO_OPACITY * beam_halo, 0.0, 1.0)) + mix(beam_rgb, vec3(1.0), BEAM_CORE_WHITENESS) * beam_core;
+  c_out = c_out / (1.0 + max(c_out - 1.0, 0.0) * TONE_KNEE);
+  out_color = vec4(clamp(c_out, 0.0, 1.0), 1.0);
+}
+</script>
+
+<script type="module">
+/**
+ * @file
+ * `index.html` is a playable demo of City Sphere with wormholes: Warped's purple level (a city on the inside of a
+ * hollow sphere, with a glass second floor) plus three traversable wormholes, ray traced on the GPU.
+ *
+ * Interface:
+ * - Keys: WASD move, Shift sprint, Space jump (fly: up), C fly down, H fly mode, E (hold) deactivate a console,
+ *   click (captured) or R fire, T other team, 1-9 viewpoints.
+ * - URL hash: `#view=<name>` (see VIEWS), `#quality=low|medium|high|full`, `#panels=off`, `#test=laser`
+ *   (fires once at load and keeps the beam), `#team=red`; combine with `&`.
+ * - `window.__demo`: state, player, keys, set_view, fire_laser, trace_laser, step_player, cell_of, material_at,
+ *   is_body_blocked, debug_map, mouths, uniforms.
+ *
+ * Example: `python3 -m http.server --directory demos`, then open
+ * `http://localhost:8000/levels/city_sphere_wormholes/index.html#view=wormhole`.
+ *
+ * Must know:
+ * - Limitations: several mouths bend light by the sum of their effects, which is exact only for one (as wormholes.html).
+ * - Gotchas: blocks live on an equiangular cubed-sphere grid, so a block is 1 m tall but 0.7-1.2 m wide.
+ * - Performance: the ray tracer scales its resolution down until it runs at about 40 fps ("auto" quality).
+ */
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const V3 = THREE.Vector3;
+const CELLS_PER_FACE_EDGE = 48;
+const LAYER_COUNT = 15;
+const FACE_COUNT = 6;
+const R_MIN_M = 22;
+const GLASS_INNER_M = 28;
+const GLASS_OUTER_M = 29;
+const R_FLOOR_M = 36;
+const R_CORE_M = 2.5;
+const GLASS_LAYER = 6;
+const FLOOR_LAYER = 14;
+const OUTER_ROOM_LAYER_COUNT = 7;
+const INNER_ROOM_LAYER_COUNT = 6;
+const QUARTER_TURN_RAD = Math.PI / 2;
+const CELL_ANGLE_RAD = QUARTER_TURN_RAD / CELLS_PER_FACE_EDGE;
+const STEP_EPS_M = 1e-3;
+const BLOCK_CELLS = 6;
+const MIN_BUILDING_LAYERS = 4;
+const F_PX = 0, F_MX = 1, F_PY = 2, F_MY = 3, F_PZ = 4, F_MZ = 5;
+const CANONICAL_FACES = [F_PX, F_MY, F_PZ];
+const FACE_NORMALS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+const FACE_US = [[0, 0, 1], [0, 0, -1], [1, 0, 0], [1, 0, 0], [-1, 0, 0], [1, 0, 0]];
+const FACE_VS = [[0, 1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [0, 1, 0], [0, 1, 0]];
+
+const KIND_PLAIN = 0, KIND_GLASS = 1, KIND_EMISSIVE = 2, KIND_BUILDING = 3, KIND_FLOOR = 4, KIND_GATE = 5, KIND_PYLON = 6;
+const MATERIALS = [
+  ['air', [0, 0, 0], KIND_PLAIN], ['clear glass', [0.74, 0.82, 0.90], KIND_GLASS], ['blue glass', [0.56, 0.70, 0.98], KIND_GLASS],
+  ['red glass', [0.98, 0.60, 0.60], KIND_GLASS], ['concrete', [0.64, 0.63, 0.67], KIND_BUILDING], ['panel', [0.46, 0.53, 0.63], KIND_BUILDING],
+  ['brick', [0.52, 0.41, 0.56], KIND_BUILDING], ['steel', [0.56, 0.58, 0.61], KIND_PLAIN], ['road', [0.22, 0.23, 0.26], KIND_FLOOR],
+  ['tile', [0.60, 0.60, 0.64], KIND_FLOOR], ['purple tile', [0.44, 0.34, 0.58], KIND_FLOOR], ['blue tile', [0.30, 0.43, 0.72], KIND_FLOOR],
+  ['red tile', [0.72, 0.30, 0.30], KIND_FLOOR], ['blue banner', [0.16, 0.38, 1.0], KIND_EMISSIVE], ['red banner', [1.0, 0.20, 0.16], KIND_EMISSIVE],
+  ['neon', [0.78, 0.38, 1.0], KIND_EMISSIVE], ['crate', [0.56, 0.43, 0.26], KIND_PLAIN], ['gate', [0.15, 0.17, 0.21], KIND_GATE],
+  ['blue pylon', [0.25, 0.55, 1.0], KIND_PYLON], ['red pylon', [1.0, 0.32, 0.26], KIND_PYLON], ['blue console', [0.45, 0.85, 1.0], KIND_EMISSIVE],
+  ['red console', [1.0, 0.58, 0.42], KIND_EMISSIVE], ['dead console', [0.17, 0.17, 0.19], KIND_PLAIN], ['blue spawn pad', [0.36, 0.62, 1.0], KIND_EMISSIVE],
+  ['red spawn pad', [1.0, 0.46, 0.40], KIND_EMISSIVE], ['core', [1.0, 0.86, 1.0], KIND_EMISSIVE], ['barrier', [0.70, 0.72, 0.80], KIND_PLAIN],
+];
+const M = Object.fromEntries(MATERIALS.map(([name], k) => [name.replace(/ /g, '_').toUpperCase(), k]));
+const TEAM_SWAPS = [['BLUE_GLASS', 'RED_GLASS'], ['BLUE_TILE', 'RED_TILE'], ['BLUE_BANNER', 'RED_BANNER'], ['BLUE_PYLON', 'RED_PYLON'],
+  ['BLUE_CONSOLE', 'RED_CONSOLE'], ['BLUE_SPAWN_PAD', 'RED_SPAWN_PAD']];
+const TEAM_SWAP = MATERIALS.map((_, k) => k);
+for (const [blue, red] of TEAM_SWAPS) { TEAM_SWAP[M[blue]] = M[red]; TEAM_SWAP[M[red]] = M[blue]; }
+
+const MOUTH_RS_M = 0.7;
+const LAMBDA_SQ = 0.25;
+const DOOR_HEIGHT_LAYERS = 4;
+const TRANSIT_ZONE_M = 2.2;
+const TRANSIT_CAPTURE_FRAC = 0.85;
+const TRANSIT_MIN_SPEED_M_PER_S = 0.5;
+const MIN_SPEED_SQ_M2_PER_S2 = 1e-8;
+const TRANSIT_MAX_S = 6;
+const TRANSIT_LIFT_M = 0.05;
+const RECOVER_S = 0.8;
+const TRANSIT_COOLDOWN_S = 0.5;
+const FAR_FIELD_RHO_PER_PT = 48;
+
+const GRAVITY_M_PER_S_PER_S = 25;
+const JUMP_SPEED_M_PER_S = 7.5;
+const MAX_FALL_SPEED_M_PER_S = 40;
+const WALK_SPEED_M_PER_S = 5;
+const SPRINT_SPEED_M_PER_S = 8;
+const FLY_SPEED_M_PER_S = 8;
+const FLY_FAST_SPEED_M_PER_S = 18;
+const AIR_CONTROL_PER_S = 3;
+const EYE_HEIGHT_M = 1.6;
+const MOUTH_HEIGHT_M = EYE_HEIGHT_M + TRANSIT_LIFT_M;
+const HEAD_ABOVE_EYE_M = 0.2;
+const BODY_HALF_WIDTH_M = 0.25;
+const STEP_HEIGHT_M = 1.05;
+const UNSTICK_STEP_M = 0.25;
+const UNSTICK_TRY_COUNT = 40;
+const BISECTION_STEP_COUNT = 10;
+const LEVEL_OUT_TIME_S = 0.35;
+const MAX_PITCH_RAD = 1.5;
+const MOUSE_RAD_PER_PX = 0.0025;
+const ARROW_TURN_RAD_PER_S = 2;
+const BOB_AMPLITUDE_M = 0.05;
+const BOB_RAD_PER_M = 2.4;
+
+const ENERGY_DRAIN_TIME_S = 30;
+const ENERGY_REFILL_TIME_S = 60;
+const CONSOLE_TIME_S = 10;
+const CONSOLE_REACH_M = 3;
+const PYLON_HALF_WIDTH_M = 1.2;
+const FACING_HALF_ANGLE_RAD = 0.8;
+const CONSOLE_CELLS = [[22, 23], [25, 24], [24, 22], [23, 25]];
+const PYLON_LAYERS = 5;
+
+const LASER_MAX_M = 300;
+const LASER_FADE_S = 2;
+const LASER_STEP_M = 0.5;
+const LASER_FAR_STEP_M = 4;
+const MAX_BEAMS = 4;
+const GUN_OFFSET_M = { right: 0.22, up: -0.2, fwd: 0.3 };
+const TEAM_COLORS = { blue: [0.25, 0.55, 1.0], red: [1.0, 0.22, 0.15] };
+const MAX_MOUTHS = 6;
+const MAX_POINTS = 2048;
+const MAX_CHUNKS = 64;
+const MAX_SPOTS = 8;
+const MAX_STEPS = 700;
+const MAX_CHUNK_POINTS = 16;
+const MAX_PIECE_POINTS = 900;
+const CHUNK_START_RADIUS_M = 0.6;
+const BEAM_RADIUS_M = 0.02;
+const HALF_FOV_RAD = 37.5 * Math.PI / 180;
+const AUTO_PIXEL_BUDGET = 380000;
+const MIN_AUTO_PIXEL_BUDGET = 110000;
+const AUTO_STEP_FRAC = 0.75;
+const AUTO_TARGET_FRAME_S = 1 / 40;
+const AUTO_WINDOW_S = 2;
+const QUALITY_SCALES = { low: 0.35, medium: 0.5, high: 0.75, full: 1 };
+const HUD_INTERVAL_S = 0.25;
+const MAX_FRAME_S = 0.05;
+const FINITE_DIFF_CELLS = 1e-3;
+const HASH_PRIMES = [73856093, 19349663, 83492791];
+const HASH_MIX = 0x5bd1e995;
+const SHADOW_SCAN_START_FRAC = 1.0001;
+const SHADOW_SCAN_END_PER_PT = 80;
+const SHADOW_SCAN_RATIO = 1.0005;
+const MOUTH_CHECK_SAMPLE_COUNT = 200;
+const MOUTH_CHECK_RADIUS_PER_PT = 1.5;
+const MOUTH_CHECK_EXTRA_M = 0.4;
+const MIN_RHO_M = 1e-4;
+const CHORD_MAX_CELL_COUNT = 256;
+const LASER_MAX_ITERATION_COUNT = 60000;
+const LASER_FINE_ZONE_PER_PT = 40;
+const LASER_FINE_ZONE_M = 4;
+const LASER_MIN_STEP_M = 0.002;
+const LASER_STEP_PER_RHO = 0.02;
+const LASER_FAR_STEP_PER_RHO = 0.25;
+const BEAM_POINT_SAG_RAD_M = 0.1;
+const BEAM_POINT_TURN_RAD = 0.2;
+const BEAM_POINT_SPACING_M = 50;
+const FOLLOW_MAX_SUBSTEP_COUNT = 400;
+const FOLLOW_STEP_PER_RHO = 0.05;
+const FOLLOW_MAX_STEP_M = 0.5;
+const FLOATS_PER_TEXEL = 4;
+const MIN_HORIZONTAL_SQ = 1e-3;
+const LEVEL_MAX_UP_DOT = 0.98;
+const TINY = 1e-12;
+const TINY_M = 1e-6;
+const MESSAGE_S = 3.5;
+
+const vox = new Uint8Array(CELLS_PER_FACE_EDGE * CELLS_PER_FACE_EDGE * FACE_COUNT * LAYER_COUNT);
+const TAN_BOUNDS = Array.from({ length: CELLS_PER_FACE_EDGE + 1 }, (_, k) => Math.tan(-QUARTER_TURN_RAD / 2 + k * CELL_ANGLE_RAD));
+
+/**
+ * `voxel_index` gives the index of a cell in `vox`, laid out like the 3D texture (i fastest, then j, then face and layer).
+ * @param {number} f The cube face, 0..5.
+ * @param {number} i The cell's index along the face's u axis.
+ * @param {number} j The cell's index along the face's v axis.
+ * @param {number} s The radial layer, 0 (innermost) to LAYER_COUNT - 1 (the floor).
+ * @return {number} The index.
+ * @example vox[voxel_index(F_MY, 24, 24, FLOOR_LAYER)] = M.TILE;
+ */
+function voxel_index(f, i, j, s) { return i + CELLS_PER_FACE_EDGE * (j + CELLS_PER_FACE_EDGE * (f * LAYER_COUNT + s)); }
+
+/**
+ * `cell_of` finds the cell holding a point, exactly as the shader's `cell_of` does.
+ * @param {number} x The point's x.
+ * @param {number} y The point's y.
+ * @param {number} z The point's z.
+ * @return {Array<number>} `[face, i, j, layer]`; layer < 0 is the empty interior, >= LAYER_COUNT beyond the floor.
+ * @example const [f, i, j, s] = cell_of(0, -30, 0);
+ */
+function cell_of(x, y, z) {
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  const f = ax >= ay && ax >= az ? (x > 0 ? F_PX : F_MX) : (ay >= az ? (y > 0 ? F_PY : F_MY) : (z > 0 ? F_PZ : F_MZ));
+  const n = FACE_NORMALS[f], u = FACE_US[f], w = FACE_VS[f], X = x * n[0] + y * n[1] + z * n[2];
+  const a = Math.atan((x * u[0] + y * u[1] + z * u[2]) / X), b = Math.atan((x * w[0] + y * w[1] + z * w[2]) / X);
+  const i = Math.min(CELLS_PER_FACE_EDGE - 1, Math.max(0, Math.floor((a + QUARTER_TURN_RAD / 2) / CELL_ANGLE_RAD)));
+  const j = Math.min(CELLS_PER_FACE_EDGE - 1, Math.max(0, Math.floor((b + QUARTER_TURN_RAD / 2) / CELL_ANGLE_RAD)));
+  return [f, i, j, Math.floor(Math.hypot(x, y, z) - R_MIN_M)];
+}
+
+/**
+ * `material_of_cell` reads a cell's material.
+ * @param {Array<number>} c The cell, from `cell_of`.
+ * @return {number} The material id.
+ * @example const m = material_of_cell(cell_of(0, -35, 0));
+ */
+function material_of_cell(c) {
+  if (c[3] < 0) return M.AIR;
+  if (c[3] >= LAYER_COUNT) return M.ROAD;
+  return vox[voxel_index(c[0], c[1], c[2], c[3])];
+}
+
+/**
+ * `material_at` gives the material at a point.
+ * @param {THREE.Vector3} p The point.
+ * @return {number} The material id.
+ * @example const is_solid = material_at(p) !== M.AIR;
+ */
+function material_at(p) { return material_of_cell(cell_of(p.x, p.y, p.z)); }
+
+/**
+ * `cell_exit` finds where a straight ray leaves a cell (JS twin of the shader's `cell_exit`).
+ * @param {number} px The ray's start x.
+ * @param {number} py The ray's start y.
+ * @param {number} pz The ray's start z.
+ * @param {number} vx The unit direction's x.
+ * @param {number} vy The unit direction's y.
+ * @param {number} vz The unit direction's z.
+ * @param {Array<number>} c The cell.
+ * @return {number} The distance to the cell's wall along the ray.
+ * @example const t = cell_exit(0, -30, 0, 0, -1, 0, cell_of(0, -30, 0));
+ */
+function cell_exit(px, py, pz, vx, vy, vz, c) {
+  const b = px * vx + py * vy + pz * vz, pp = px * px + py * py + pz * pz;
+  if (c[3] < 0) return Math.max(-b + Math.sqrt(Math.max(b * b - pp + R_MIN_M * R_MIN_M, 0)), 0);
+  const n = FACE_NORMALS[c[0]], u = FACE_US[c[0]], w = FACE_VS[c[0]];
+  const r_lo = R_MIN_M + c[3], r_hi = r_lo + 1;
+  let t = -b + Math.sqrt(Math.max(b * b - pp + r_hi * r_hi, 0));
+  const planes = [[u, TAN_BOUNDS[c[1]], -1], [u, TAN_BOUNDS[c[1] + 1], 1], [w, TAN_BOUNDS[c[2]], -1], [w, TAN_BOUNDS[c[2] + 1], 1]];
+  for (const [axis, tn, side] of planes) {
+    const qx = axis[0] - tn * n[0], qy = axis[1] - tn * n[1], qz = axis[2] - tn * n[2], k = qx * vx + qy * vy + qz * vz;
+    if (k * side > 0) t = Math.min(t, -(qx * px + qy * py + qz * pz) / k);
+  }
+  const d_lo = b * b - pp + r_lo * r_lo;
+  if (b < 0 && d_lo > 0) t = Math.min(t, -b - Math.sqrt(d_lo));
+  return Math.max(t, 0);
+}
+
+/**
+ * `dir_of` gives the unit direction at continuous face coordinates (cell i spans fi in [i, i + 1)).
+ * @param {number} f The cube face.
+ * @param {number} fi The coordinate along the face's u axis, 0 to CELLS_PER_FACE_EDGE.
+ * @param {number} fj The coordinate along the face's v axis.
+ * @return {THREE.Vector3} The direction from the centre.
+ * @example const pole = dir_of(F_MY, 24, 24);
+ */
+function dir_of(f, fi, fj) {
+  const a = Math.tan(-QUARTER_TURN_RAD / 2 + fi * CELL_ANGLE_RAD), b = Math.tan(-QUARTER_TURN_RAD / 2 + fj * CELL_ANGLE_RAD);
+  const n = FACE_NORMALS[f], u = FACE_US[f], w = FACE_VS[f];
+  return new V3(n[0] + a * u[0] + b * w[0], n[1] + a * u[1] + b * w[1], n[2] + a * u[2] + b * w[2]).normalize();
+}
+
+/**
+ * `face_tangent` gives the unit tangent at face coordinates pointing along +i, +j or any mix of them.
+ * @param {number} f The cube face.
+ * @param {number} fi The u coordinate.
+ * @param {number} fj The v coordinate.
+ * @param {Array<number>} heading `[di, dj]`, the direction in face coordinates.
+ * @return {THREE.Vector3} The tangent.
+ * @example const north = face_tangent(F_PX, 30, 20, [0, 1]);
+ */
+function face_tangent(f, fi, fj, heading) {
+  const d = FINITE_DIFF_CELLS, base = dir_of(f, fi, fj);
+  const t = dir_of(f, fi + heading[0] * d, fj + heading[1] * d).sub(dir_of(f, fi - heading[0] * d, fj - heading[1] * d));
+  return t.addScaledVector(base, -t.dot(base)).normalize();
+}
+
+/**
+ * `fill_layers` sets a box of cells: a face rectangle and a range of radial layers.
+ * @param {number} f The cube face.
+ * @param {number} i0 The first i.
+ * @param {number} i1 One past the last i.
+ * @param {number} j0 The first j.
+ * @param {number} j1 One past the last j.
+ * @param {number} s0 The first layer.
+ * @param {number} s1 One past the last layer.
+ * @param {number} m The material.
+ * @param {boolean} [is_paint] Only replace cells that are not air.
+ * @return {void}
+ * @example fill_layers(F_MY, 0, 48, 0, 48, FLOOR_LAYER, FLOOR_LAYER + 1, M.BLUE_TILE);
+ */
+function fill_layers(f, i0, i1, j0, j1, s0, s1, m, is_paint = false) {
+  for (let s = s0; s < s1; s++) for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+    const k = voxel_index(f, i, j, s);
+    if (!is_paint || vox[k] !== M.AIR) vox[k] = m;
+  }
+}
+
+/**
+ * `fill_outer` sets cells on the outer floor by height above it: height 0 stands on the floor, 7 is the glass.
+ * @param {number} f The cube face.
+ * @param {number} i0 The first i.
+ * @param {number} i1 One past the last i.
+ * @param {number} j0 The first j.
+ * @param {number} j1 One past the last j.
+ * @param {number} h0 The lowest height.
+ * @param {number} h1 One past the highest height.
+ * @param {number} m The material.
+ * @param {boolean} [is_paint] Only replace cells that are not air.
+ * @return {void}
+ * @example fill_outer(F_PX, 31, 33, 3, 4, 0, 1, M.CRATE);
+ */
+function fill_outer(f, i0, i1, j0, j1, h0, h1, m, is_paint = false) {
+  fill_layers(f, i0, i1, j0, j1, FLOOR_LAYER - h1, FLOOR_LAYER - h0, m, is_paint);
+}
+
+/**
+ * `fill_inner` sets cells on the inner (glass) floor by height above it, toward the centre.
+ * @param {number} f The cube face.
+ * @param {number} i0 The first i.
+ * @param {number} i1 One past the last i.
+ * @param {number} j0 The first j.
+ * @param {number} j1 One past the last j.
+ * @param {number} h0 The lowest height.
+ * @param {number} h1 One past the highest height.
+ * @param {number} m The material.
+ * @return {void}
+ * @example fill_inner(F_PX, 22, 30, 17, 18, 0, 1, M.PANEL);
+ */
+function fill_inner(f, i0, i1, j0, j1, h0, h1, m) { fill_layers(f, i0, i1, j0, j1, GLASS_LAYER - h1, GLASS_LAYER - h0, m); }
+
+/**
+ * `carve` clears the whole outer room (floor to glass) over a face rectangle: a street, plaza or room.
+ * @param {number} f The cube face.
+ * @param {Array<number>} rect `[i0, i1, j0, j1]`.
+ * @param {number} [floor_material] Paints the floor under it too.
+ * @return {void}
+ * @example carve(F_PX, [30, 35, 0, 18], M.ROAD);
+ */
+function carve(f, rect, floor_material) {
+  const [i0, i1, j0, j1] = rect;
+  fill_outer(f, i0, i1, j0, j1, 0, OUTER_ROOM_LAYER_COUNT, M.AIR);
+  if (floor_material !== undefined) fill_layers(f, i0, i1, j0, j1, FLOOR_LAYER, FLOOR_LAYER + 1, floor_material);
+}
+
+/**
+ * `hash_int` mixes integers into a pseudo-random integer (for building heights and materials).
+ * @param {number} a The first integer.
+ * @param {number} b The second integer.
+ * @param {number} c The third integer.
+ * @return {number} A non-negative integer.
+ * @example const h = hash_int(1, 2, 3) % 4;
+ */
+function hash_int(a, b, c) {
+  let h = Math.imul(a, HASH_PRIMES[0]) ^ Math.imul(b, HASH_PRIMES[1]) ^ Math.imul(c, HASH_PRIMES[2]);
+  h = Math.imul(h ^ (h >>> 13), HASH_MIX);
+  return (h ^ (h >>> 15)) >>> 0;
+}
+
+/**
+ * `fill_buildings` covers a canonical face with city blocks: every 6 x 6 cell block gets a height (4-7 layers,
+ * 7 touching the glass) and a facade material. Streets are carved out of it afterwards.
+ * @param {number} f The cube face.
+ * @param {number} floor_material The floor under everything.
+ * @param {number} glass_material The glass ceiling over it.
+ * @return {void}
+ * @example fill_buildings(F_PX, M.TILE, M.CLEAR_GLASS);
+ */
+function fill_buildings(f, floor_material, glass_material) {
+  const facades = [M.CONCRETE, M.PANEL, M.BRICK];
+  fill_layers(f, 0, CELLS_PER_FACE_EDGE, 0, CELLS_PER_FACE_EDGE, FLOOR_LAYER, FLOOR_LAYER + 1, floor_material);
+  fill_layers(f, 0, CELLS_PER_FACE_EDGE, 0, CELLS_PER_FACE_EDGE, GLASS_LAYER, GLASS_LAYER + 1, glass_material);
+  for (let j = 0; j < CELLS_PER_FACE_EDGE; j++) for (let i = 0; i < CELLS_PER_FACE_EDGE; i++) {
+    const h = hash_int(f, Math.floor(i / BLOCK_CELLS), Math.floor(j / BLOCK_CELLS));
+    const height = MIN_BUILDING_LAYERS + h % (OUTER_ROOM_LAYER_COUNT - MIN_BUILDING_LAYERS + 1);
+    fill_outer(f, i, i + 1, j, j + 1, 0, height, facades[(h >>> 8) % facades.length]);
+  }
+}
+
+/**
+ * `build_stair` builds a straight staircase of 8 one-metre steps from the outer floor up to the glass, the opening
+ * in the glass above its top steps, and a railing round that opening on the inner floor.
+ * @param {number} f The cube face.
+ * @param {number} i0 The first i of the stair's 2-cell width (when it rises along j) or of its first step.
+ * @param {number} j0 Likewise for j.
+ * @param {boolean} is_along_i Whether the stair rises along +i (else along +j).
+ * @return {void}
+ * @example build_stair(F_PX, 11, 25, false);
+ */
+function build_stair(f, i0, j0, is_along_i) {
+  const STEP_COUNT = OUTER_ROOM_LAYER_COUNT + 1, OPENING_FIRST_STEP = 5, WIDTH = 2;
+  /**
+   * `rect` turns stair-relative ranges (a along the stair, b across it) into a face rectangle.
+   * @param {number} a0 The first cell along the stair.
+   * @param {number} a1 One past the last.
+   * @param {number} b0 The first cell across it.
+   * @param {number} b1 One past the last.
+   * @return {Array<number>} `[i0, i1, j0, j1]`.
+   * @example rect(0, 9, 0, 2);
+   */
+  const rect = (a0, a1, b0, b1) => is_along_i ? [i0 + a0, i0 + a1, j0 + b0, j0 + b1] : [i0 + b0, i0 + b1, j0 + a0, j0 + a1];
+  carve(f, rect(0, STEP_COUNT + 1, 0, WIDTH), M.TILE);
+  for (let k = 1; k <= STEP_COUNT; k++) { const [a, b, c, d] = rect(k, k + 1, 0, WIDTH); fill_outer(f, a, b, c, d, 0, k, M.STEEL); }
+  const [ha, hb, hc, hd] = rect(OPENING_FIRST_STEP, STEP_COUNT, 0, WIDTH);
+  fill_layers(f, ha, hb, hc, hd, GLASS_LAYER, GLASS_LAYER + 1, M.AIR);
+  for (const r of [rect(OPENING_FIRST_STEP - 1, STEP_COUNT, -1, 0), rect(OPENING_FIRST_STEP - 1, STEP_COUNT, WIDTH, WIDTH + 1), rect(OPENING_FIRST_STEP - 1, OPENING_FIRST_STEP, -1, WIDTH + 1)])
+    fill_inner(f, r[0], r[1], r[2], r[3], 0, 1, M.STEEL);
+}
+
+/**
+ * `build_gate` builds a wormhole gate: a wall with a 2-cell doorway, 4 m high, where a mouth will sit.
+ * @param {number} f The cube face.
+ * @param {Array<number>} rect `[i0, i1, j0, j1]` of the wall.
+ * @param {Array<number>} door `[i0, i1, j0, j1]` of the doorway inside it.
+ * @param {boolean} is_inner Whether it stands on the inner (glass) floor.
+ * @return {void}
+ * @example build_gate(F_PX, [26, 27, 22, 26], [26, 27, 23, 25], false);
+ */
+function build_gate(f, rect, door, is_inner) {
+  const fill = is_inner ? fill_inner : fill_outer, wall_height = is_inner ? DOOR_HEIGHT_LAYERS + 1 : OUTER_ROOM_LAYER_COUNT;
+  fill(f, rect[0], rect[1], rect[2], rect[3], 0, wall_height, M.GATE);
+  fill(f, door[0], door[1], door[2], door[3], 0, DOOR_HEIGHT_LAYERS, M.AIR);
+}
+
+/**
+ * `design_street_route` lays out face +X, street route A: an avenue and an alley from the blue zone to the red zone,
+ * joined by two connectors and the equatorial cross street with the Crosslink gate, plus the Blue lift gate,
+ * a stairwell to the skyway, cover, banners and skyway cover on the glass above.
+ * @return {void}
+ * @example design_street_route();
+ */
+function design_street_route() {
+  const f = F_PX;
+  for (const r of [[30, 35, 0, 18], [30, 41, 14, 18], [36, 41, 14, 34], [30, 41, 30, 34], [30, 35, 30, 48]]) carve(f, r, M.ROAD);
+  for (const r of [[9, 12, 0, 15], [9, 16, 12, 15], [13, 16, 12, 36], [9, 16, 33, 36], [9, 12, 33, 48], [12, 30, 6, 9], [12, 30, 39, 42]]) carve(f, r, M.TILE);
+  carve(f, [16, 36, 22, 26], M.PURPLE_TILE);
+  carve(f, [35, 41, 4, 10], M.PURPLE_TILE); carve(f, [35, 41, 11, 14], M.PURPLE_TILE);
+  build_gate(f, [35, 41, 10, 11], [37, 39, 10, 11], false);
+  build_gate(f, [26, 27, 22, 26], [26, 27, 23, 25], false);
+  build_stair(f, 11, 25, false);
+  for (const [i0, i1, j0, j1, h] of [[31, 33, 3, 4, 1], [33, 35, 12, 13, 2], [38, 40, 19, 20, 1], [36, 37, 26, 28, 2], [39, 41, 31, 32, 1],
+    [31, 32, 40, 42, 2], [14, 15, 17, 19, 1], [20, 22, 22, 23, 1], [31, 33, 25, 26, 1], [10, 11, 3, 4, 1], [10, 11, 44, 45, 1], [32, 34, 45, 46, 1]])
+    fill_outer(f, i0, i1, j0, j1, 0, h, M.CRATE);
+  for (const i of [8, 12, 29, 35]) { fill_outer(f, i, i + 1, 0, 3, 2, 4, M.BLUE_BANNER, true); fill_outer(f, i, i + 1, 45, 48, 2, 4, M.RED_BANNER, true); }
+  fill_outer(f, 16, 36, 21, 22, 5, 6, M.NEON, true); fill_outer(f, 16, 36, 26, 27, 5, 6, M.NEON, true);
+  for (const [i0, i1, j0, j1, h, m] of [[22, 30, 17, 18, 1, M.BARRIER], [30, 31, 27, 35, 2, M.BARRIER], [4, 9, 20, 21, 3, M.CLEAR_GLASS],
+    [20, 21, 8, 9, 5, M.PANEL], [40, 41, 26, 27, 5, M.PANEL], [24, 25, 40, 41, 5, M.PANEL], [36, 42, 40, 41, 1, M.BARRIER], [16, 17, 30, 36, 3, M.CLEAR_GLASS]])
+    fill_inner(f, i0, i1, j0, j1, 0, h, m);
+  for (const [i, j] of [[20, 8], [40, 26], [24, 40]]) fill_inner(f, i, i + 1, j, j + 1, 4, 5, M.NEON);
+}
+
+/**
+ * `design_blue_zone` lays out face -Y, the blue zone: the pylon plaza at the pole with 4 consoles, the spawn room,
+ * a ring of streets to the four route entrances, a stairwell to the skyway, and the Red lift's gate on the glass.
+ * @return {void}
+ * @example design_blue_zone();
+ */
+function design_blue_zone() {
+  const f = F_MY;
+  carve(f, [19, 29, 3, 10], M.BLUE_TILE); carve(f, [22, 26, 10, 16], M.BLUE_TILE); carve(f, [16, 32, 16, 32], M.TILE);
+  for (const r of [[32, 36, 21, 27], [12, 16, 21, 27], [22, 26, 32, 36], [36, 40, 5, 39], [8, 12, 5, 39], [8, 40, 5, 8], [8, 40, 36, 39],
+    [40, 48, 9, 12], [40, 48, 30, 35], [0, 8, 13, 18], [0, 8, 36, 39], [24, 26, 39, 42]]) carve(f, r, M.BLUE_TILE);
+  build_stair(f, 25, 40, true);
+  fill_layers(f, 21, 27, 4, 9, FLOOR_LAYER, FLOOR_LAYER + 1, M.BLUE_SPAWN_PAD);
+  fill_outer(f, 19, 29, 2, 3, 2, 5, M.BLUE_BANNER, true);
+  fill_outer(f, 23, 25, 23, 25, 0, PYLON_LAYERS, M.BLUE_PYLON);
+  for (const [i, j] of CONSOLE_CELLS) fill_outer(f, i, i + 1, j, j + 1, 0, 1, M.BLUE_CONSOLE);
+  for (const [i0, i1, j0, j1, h, m] of [[17, 20, 19, 20, 1, M.CRATE], [28, 31, 28, 29, 1, M.CRATE], [18, 19, 26, 29, 2, M.CONCRETE], [29, 30, 19, 22, 2, M.CONCRETE],
+    [16, 17, 16, 17, 7, M.STEEL], [31, 32, 16, 17, 7, M.STEEL], [16, 17, 31, 32, 7, M.STEEL], [31, 32, 31, 32, 7, M.STEEL], [9, 10, 28, 30, 1, M.CRATE], [37, 39, 15, 16, 1, M.CRATE]])
+    fill_outer(f, i0, i1, j0, j1, 0, h, m);
+  for (let j = 6; j < 38; j += 6) { fill_outer(f, 7, 8, j, j + 2, 3, 5, M.BLUE_BANNER, true); fill_outer(f, 40, 41, j, j + 2, 3, 5, M.BLUE_BANNER, true); }
+  build_gate(f, [21, 27, 14, 15], [23, 25, 14, 15], true);
+  for (const [i0, i1, j0, j1, h, m] of [[30, 34, 20, 21, 1, M.BARRIER], [14, 15, 26, 31, 2, M.BARRIER], [19, 29, 33, 34, 3, M.BLUE_GLASS], [36, 37, 12, 13, 5, M.PANEL], [10, 11, 38, 39, 5, M.PANEL]])
+    fill_inner(f, i0, i1, j0, j1, 0, h, m);
+}
+
+/**
+ * `design_habitat` lays out face +Z, one of the two sealed habitat sides of the middle band: buildings with
+ * closed courtyards (seen only from the glass), and cover on the skyway above.
+ * @return {void}
+ * @example design_habitat();
+ */
+function design_habitat() {
+  const f = F_PZ;
+  for (const r of [[8, 16, 8, 16], [30, 40, 20, 28], [10, 18, 32, 40], [26, 32, 6, 12]]) carve(f, r, M.PURPLE_TILE);
+  fill_outer(f, 11, 13, 11, 13, 0, 3, M.NEON); fill_outer(f, 34, 36, 23, 25, 0, 2, M.CRATE);
+  for (const [i0, i1, j0, j1, h, m] of [[10, 30, 24, 25, 1, M.BARRIER], [36, 37, 36, 37, 5, M.PANEL], [12, 13, 12, 13, 4, M.PANEL], [20, 21, 30, 40, 3, M.CLEAR_GLASS], [30, 38, 10, 11, 2, M.BARRIER]])
+    fill_inner(f, i0, i1, j0, j1, 0, h, m);
+}
+
+/**
+ * `mirror_faces` makes the red half: each cell of faces -X, +Y and -Z copies the cell at the antipode (the point
+ * reflection through the centre), with blue and red materials swapped.
+ * @return {void}
+ * @example mirror_faces();
+ */
+function mirror_faces() {
+  for (const f of [F_MX, F_PY, F_MZ]) for (let j = 0; j < CELLS_PER_FACE_EDGE; j++) for (let i = 0; i < CELLS_PER_FACE_EDGE; i++) {
+    const d = dir_of(f, i + 0.5, j + 0.5).multiplyScalar(-R_FLOOR_M), [fs, is, js] = cell_of(d.x, d.y, d.z);
+    if (!CANONICAL_FACES.includes(fs)) throw new Error(`mirror_faces: face ${f} cell ${i},${j} maps to non-canonical face ${fs}`);
+    for (let s = 0; s < LAYER_COUNT; s++) vox[voxel_index(f, i, j, s)] = TEAM_SWAP[vox[voxel_index(fs, is, js, s)]];
+  }
+}
+
+/**
+ * `build_city` builds the whole level into `vox`: the three canonical faces, then their antipodal images.
+ * @return {void}
+ * @example build_city();
+ */
+function build_city() {
+  vox.fill(M.AIR);
+  fill_buildings(F_PX, M.TILE, M.CLEAR_GLASS); fill_buildings(F_MY, M.BLUE_TILE, M.BLUE_GLASS); fill_buildings(F_PZ, M.TILE, M.CLEAR_GLASS);
+  design_street_route(); design_blue_zone(); design_habitat();
+  mirror_faces();
+}
+
+/**
+ * `debug_map` draws one face of a floor as text, for tests: `.` walkable, digits building heights, `G` gate,
+ * `s` steel (stairs, pillars), `c` crate, `P` pylon, `o` console, `~` glass wall; on the inner floor ` ` is an opening.
+ * @param {number} f The cube face.
+ * @param {string} floor `outer` or `inner`.
+ * @return {string} 48 rows, j from 47 (top) down to 0, i left to right.
+ * @example console.log(debug_map(F_PX, 'outer'));
+ */
+function debug_map(f, floor) {
+  const symbols = { [M.GATE]: 'G', [M.STEEL]: 's', [M.CRATE]: 'c', [M.BLUE_PYLON]: 'P', [M.RED_PYLON]: 'P', [M.BLUE_CONSOLE]: 'o', [M.RED_CONSOLE]: 'o',
+    [M.DEAD_CONSOLE]: 'x', [M.CLEAR_GLASS]: '~', [M.BLUE_GLASS]: '~', [M.RED_GLASS]: '~', [M.BARRIER]: 'b' };
+  const rows = [];
+  for (let j = CELLS_PER_FACE_EDGE - 1; j >= 0; j--) {
+    let row = '';
+    for (let i = 0; i < CELLS_PER_FACE_EDGE; i++) {
+      if (floor === 'inner') {
+        const g = vox[voxel_index(f, i, j, GLASS_LAYER)], m = vox[voxel_index(f, i, j, GLASS_LAYER - 1)];
+        row += g === M.AIR ? ' ' : (m === M.AIR ? '.' : (symbols[m] || '#'));
+        continue;
+      }
+      const m = vox[voxel_index(f, i, j, FLOOR_LAYER - 1)];
+      let height = 0;
+      while (height < OUTER_ROOM_LAYER_COUNT && vox[voxel_index(f, i, j, FLOOR_LAYER - 1 - height)] !== M.AIR) height++;
+      row += m === M.AIR ? '.' : (symbols[m] || String(height));
+    }
+    rows.push(row);
+  }
+  return rows.join('\n');
+}
+
+const canvas = document.getElementById('c');
+
+/**
+ * `$` finds a page element by id.
+ * @param {string} id The element's id.
+ * @return {HTMLElement} The element.
+ * @example $('s_team').textContent = 'blue';
+ */
+function $(id) {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`$: no element with id "${id}"`);
+  return el;
+}
+
+/**
+ * `show_fatal` shows an error over the whole page and throws it, so a broken start is obvious.
+ * @param {string} message What went wrong.
+ * @return {never}
+ * @example show_fatal('WebGL2 is required');
+ */
+function show_fatal(message) {
+  const el = $('err'); el.style.display = 'flex'; el.textContent = message;
+  throw new Error(message);
+}
+
+build_city();
+
+const MOUTH_LIST = [];
+const PT_M = MOUTH_RS_M / 4;
+
+/**
+ * `index_of` gives one mouth's refractive index n = psi^2 / sqrt(A) at isotropic distance rho.
+ * @param {number} rho The distance from the mouth's centre.
+ * @param {number} pt The throat radius rho_t.
+ * @return {number} n.
+ * @example const n = index_of(2.2, PT_M);
+ */
+function index_of(rho, pt) {
+  const psi = 1 + pt / rho, r = rho * psi * psi, A = (1 - 4 * pt / r + LAMBDA_SQ) / (1 + LAMBDA_SQ);
+  return psi * psi / Math.sqrt(A);
+}
+
+/**
+ * `shadow_radius` gives a mouth's shadow radius (critical impact parameter), the minimum of n rho outside the throat.
+ * @param {number} pt The throat radius rho_t.
+ * @return {number} The radius, in metres.
+ * @example const b_c = shadow_radius(PT_M);
+ */
+function shadow_radius(pt) {
+  let best = Infinity;
+  for (let rho = pt * SHADOW_SCAN_START_FRAC; rho < SHADOW_SCAN_END_PER_PT * pt; rho *= SHADOW_SCAN_RATIO) best = Math.min(best, index_of(rho, pt) * rho);
+  return best;
+}
+const SHADOW_RADIUS_M = shadow_radius(PT_M);
+
+/**
+ * `frame_for` gives a mouth's frame, the columns right, up and back; a ray moving along -back goes through cleanly.
+ * @param {THREE.Vector3} fwd The mouth's forward direction.
+ * @param {THREE.Vector3} up Its up direction (toward the sphere's centre).
+ * @return {THREE.Matrix3} The frame.
+ * @example const F = frame_for(new V3(0, 0, 1), new V3(-1, 0, 0));
+ */
+function frame_for(fwd, up) {
+  const f = fwd.clone().normalize(), right = new V3().crossVectors(f, up).normalize(), u = new V3().crossVectors(right, f), back = f.clone().negate();
+  return new THREE.Matrix3().set(right.x, u.x, back.x, right.y, u.y, back.y, right.z, u.z, back.z);
+}
+
+/**
+ * `mouth_on_floor` places a mouth in a doorway: MOUTH_HEIGHT_M above a floor, facing along a face direction.
+ * @param {number} f The cube face.
+ * @param {number} fi The doorway centre's u coordinate.
+ * @param {number} fj Its v coordinate.
+ * @param {number} floor_r The floor's radius (R_FLOOR_M or GLASS_INNER_M).
+ * @param {Array<number>} heading `[di, dj]`, the way through it.
+ * @param {string} place Where it is, for messages.
+ * @return {Object} `{c, fwd, up, place}`.
+ * @example const m = mouth_on_floor(F_PX, 26.5, 24, R_FLOOR_M, [1, 0], 'route A');
+ */
+function mouth_on_floor(f, fi, fj, floor_r, heading, place) {
+  const d = dir_of(f, fi, fj);
+  return { c: d.clone().multiplyScalar(floor_r - MOUTH_HEIGHT_M), fwd: face_tangent(f, fi, fj, heading), up: d.clone().negate(), place };
+}
+
+/**
+ * `image_of_mouth` gives the point reflection of a mouth through the centre (the red team's copy of a blue place).
+ * @param {Object} m A mouth from `mouth_on_floor`.
+ * @param {string} place Where the image is, for messages.
+ * @return {Object} The reflected mouth.
+ * @example const b = image_of_mouth(a, 'route B');
+ */
+function image_of_mouth(m, place) { return { c: m.c.clone().negate(), fwd: m.fwd.clone().negate(), up: m.up.clone().negate(), place }; }
+
+const CROSSLINK_A = mouth_on_floor(F_PX, 26.5, 24, R_FLOOR_M, [1, 0], 'street route A, equator');
+const BLUE_LIFT_A = mouth_on_floor(F_PX, 38, 10.5, R_FLOOR_M, [0, 1], 'street route A, blue half');
+const RED_LIFT_B = mouth_on_floor(F_MY, 24, 14.5, GLASS_INNER_M, [0, 1], 'the glass above the blue zone');
+const PAIRS = [
+  { name: 'Crosslink', a: CROSSLINK_A, b: image_of_mouth(CROSSLINK_A, 'street route B, equator') },
+  { name: 'Blue lift', a: BLUE_LIFT_A, b: image_of_mouth(RED_LIFT_B, 'the glass above the red zone') },
+  { name: 'Red lift', a: image_of_mouth(BLUE_LIFT_A, 'street route B, red half'), b: RED_LIFT_B },
+];
+
+/**
+ * `build_mouths` turns the pairs into the flat mouth list the optics use: each mouth's centre, throat radius,
+ * partner centre and gluing map Q = F_partner diag(1, 1, -1) F_this^T (det -1, so a crossing keeps handedness).
+ * @return {void}
+ * @example build_mouths();
+ */
+function build_mouths() {
+  const FLIP = new THREE.Matrix3().set(1, 0, 0, 0, 1, 0, 0, 0, -1);
+  PAIRS.forEach((pair, k) => {
+    const Fa = frame_for(pair.a.fwd, pair.a.up), Fb = frame_for(pair.b.fwd, pair.b.up);
+    const Q = new THREE.Matrix3().multiplyMatrices(Fb, FLIP).multiply(Fa.clone().transpose());
+    MOUTH_LIST.push({ c: pair.a.c, pt: PT_M, to: pair.b.c, Q, pair: k, name: pair.name, place: pair.a.place, exit: pair.b.place });
+    MOUTH_LIST.push({ c: pair.b.c, pt: PT_M, to: pair.a.c, Q: Q.clone().transpose(), pair: k, name: pair.name, place: pair.b.place, exit: pair.a.place });
+  });
+  for (const m of MOUTH_LIST) for (let k = 0; k < MOUTH_CHECK_SAMPLE_COUNT; k++) {
+    const d = new V3().randomDirection().multiplyScalar(m.pt * MOUTH_CHECK_RADIUS_PER_PT + MOUTH_CHECK_EXTRA_M * Math.random()).add(m.c), [f, i, j, s] = cell_of(d.x, d.y, d.z);
+    if (s >= 0 && s < LAYER_COUNT && vox[voxel_index(f, i, j, s)] !== M.AIR) throw new Error(`build_mouths: a block pokes into the ${m.name} throat at ${m.place}`);
+  }
+}
+build_mouths();
+
+/**
+ * `bend_of` gives the sideways part of grad ln n at p: how fast direction v turns there (JS twin of `bend_acc`).
+ * @param {THREE.Vector3} p The position.
+ * @param {THREE.Vector3} v The unit direction.
+ * @return {THREE.Vector3} The turning rate, per metre.
+ * @example const acc = bend_of(p, v);
+ */
+function bend_of(p, v) {
+  const g = new V3();
+  for (const m of MOUTH_LIST) {
+    const d = p.clone().sub(m.c), rho = Math.max(d.length(), MIN_RHO_M), psi = 1 + m.pt / rho, r = rho * psi * psi, rs = 4 * m.pt;
+    const A = (1 - rs / r + LAMBDA_SQ) / (1 + LAMBDA_SQ);
+    g.addScaledVector(d, (-2 * m.pt / (rho * rho * psi) - rs * psi * (1 - m.pt / rho) / (2 * r * r * (1 + LAMBDA_SQ) * A)) / rho);
+  }
+  return g.addScaledVector(v, -g.dot(v));
+}
+
+/**
+ * `lapse_of` gives the rate of a clock at rest at p relative to one far from every mouth.
+ * @param {THREE.Vector3} p The position.
+ * @return {number} The rate.
+ * @example const rate = lapse_of(player.eye);
+ */
+function lapse_of(p) {
+  let a = 1;
+  for (const m of MOUTH_LIST) { const rho = Math.max(p.distanceTo(m.c), m.pt), psi = 1 + m.pt / rho; a *= (1 - 4 * m.pt / (rho * psi * psi) + LAMBDA_SQ) / (1 + LAMBDA_SQ); }
+  return Math.sqrt(Math.max(a, 0));
+}
+
+/**
+ * `through_throat` moves a point inside a throat through to the partner mouth (inversion in the throat sphere, then Q),
+ * and carries direction vectors along (reflected in the throat sphere, then Q).
+ * @param {THREE.Vector3} p The point (changed in place).
+ * @param {Array<THREE.Vector3>} vecs Direction vectors (changed in place).
+ * @return {Object|null} The mouth gone into, or null if p was in no throat.
+ * @example const m = through_throat(p, [v]);
+ */
+function through_throat(p, vecs) {
+  for (const m of MOUTH_LIST) {
+    const d = p.clone().sub(m.c), r2 = d.lengthSq();
+    if (r2 >= m.pt * m.pt) continue;
+    const n = d.clone().divideScalar(Math.sqrt(r2));
+    p.copy(m.to).add(d.multiplyScalar(m.pt * m.pt / r2).applyMatrix3(m.Q));
+    for (const v of vecs) v.addScaledVector(n, -2 * v.dot(n)).applyMatrix3(m.Q);
+    return m;
+  }
+  return null;
+}
+
+/**
+ * `nearest_mouth` finds the mouth closest to a point.
+ * @param {THREE.Vector3} p The point.
+ * @return {Object} `{m, rho}`: the mouth and its distance.
+ * @example const { m, rho } = nearest_mouth(player.eye);
+ */
+function nearest_mouth(p) {
+  let best = { m: null, rho: Infinity };
+  for (const m of MOUTH_LIST) { const rho = p.distanceTo(m.c); if (rho < best.rho) best = { m, rho }; }
+  return best;
+}
+
+/**
+ * `rotate_minimal` rotates vectors by the smallest rotation that takes unit vector `from` to unit vector `to`.
+ * @param {THREE.Vector3} from The start direction.
+ * @param {THREE.Vector3} to The end direction.
+ * @param {Array<THREE.Vector3>} vecs The vectors to rotate (changed in place).
+ * @return {void}
+ * @example rotate_minimal(u0, u1, [player.fwd, player.up]);
+ */
+function rotate_minimal(from, to, vecs) {
+  const axis = new V3().crossVectors(from, to), s = axis.length();
+  if (s < TINY) return;
+  axis.divideScalar(s);
+  const angle_rad = Math.atan2(s, from.dot(to));
+  for (const v of vecs) v.applyAxisAngle(axis, angle_rad);
+}
+
+/**
+ * `chord_hit` walks the voxel cells along a straight segment and finds the first solid one (glass and the core count).
+ * A segment that starts inside a solid cell (a gun pushed into a wall) hits it at once, so shots never pass through.
+ * @param {number} ax The start x.
+ * @param {number} ay The start y.
+ * @param {number} az The start z.
+ * @param {number} bx The end x.
+ * @param {number} by The end y.
+ * @param {number} bz The end z.
+ * @return {Object|null} `{frac, material}`: where along the segment (0-1) and what it hit, or null.
+ * @example const hit = chord_hit(0, -30, 0, 0, -40, 0);
+ */
+function chord_hit(ax, ay, az, bx, by, bz) {
+  let dx = bx - ax, dy = by - ay, dz = bz - az;
+  const L = Math.hypot(dx, dy, dz);
+  if (L < TINY) return null;
+  dx /= L; dy /= L; dz /= L;
+  let t = 0, cell = cell_of(ax, ay, az);
+  const start_material = material_of_cell(cell);
+  if (start_material !== M.AIR) return { frac: 0, material: start_material };
+  for (let k = 0; k < CHORD_MAX_CELL_COUNT; k++) {
+    const px = ax + dx * t, py = ay + dy * t, pz = az + dz * t;
+    if (cell[3] < 0) {
+      const b = px * dx + py * dy + pz * dz, disc = b * b - (px * px + py * py + pz * pz) + R_CORE_M * R_CORE_M;
+      if (disc > 0 && b < 0 && t - b - Math.sqrt(disc) <= L) return { frac: (t - b - Math.sqrt(disc)) / L, material: M.CORE };
+    }
+    const te = cell_exit(px, py, pz, dx, dy, dz, cell);
+    if (t + te > L) return null;
+    t += te + STEP_EPS_M;
+    cell = cell_of(ax + dx * t, ay + dy * t, az + dz * t);
+    const m = material_of_cell(cell);
+    if (m !== M.AIR) return { frac: Math.min(t / L, 1), material: m };
+  }
+  return null;
+}
+
+/**
+ * `trace_laser` traces a laser shot with the renderer's optics: RK4 in arc length with the direction bent by grad ln n,
+ * through throats (each crossing starts a new piece), until it hits a block, glass or the core, or LASER_MAX_M.
+ * @param {THREE.Vector3} o The muzzle.
+ * @param {THREE.Vector3} d The direction.
+ * @return {Object} `{pieces, outcome, material, length_m, end, through}`; pieces are polylines of `[x, y, z]`.
+ * @example const res = trace_laser(player.eye, player.fwd);
+ */
+function trace_laser(o, d) {
+  let px = o.x, py = o.y, pz = o.z;
+  const l0 = Math.hypot(d.x, d.y, d.z);
+  let vx = d.x / l0, vy = d.y / l0, vz = d.z / l0, lx = vx, ly = vy, lz = vz, since = 0, s = 0, outcome = 'far', material = M.AIR;
+  const pieces = [[[px, py, pz]]], through = [];
+  let pts = pieces[0], ax = 0, ay = 0, az = 0;
+  /**
+   * `accel` sets (ax, ay, az) to the ray's turning rate at a point and direction (bend_of on plain numbers).
+   * @param {number} x The x.
+   * @param {number} y The y.
+   * @param {number} z The z.
+   * @param {number} ux The direction's x.
+   * @param {number} uy The direction's y.
+   * @param {number} uz The direction's z.
+   * @return {void}
+   * @example accel(px, py, pz, vx, vy, vz);
+   */
+  const accel = (x, y, z, ux, uy, uz) => {
+    const a = bend_of(new V3(x, y, z), new V3(ux, uy, uz).normalize()); ax = a.x; ay = a.y; az = a.z;
+  };
+  for (let it = 0; it < LASER_MAX_ITERATION_COUNT; it++) {
+    let h = LASER_STEP_M, r_near = Infinity;
+    for (const m of MOUTH_LIST) {
+      const rho = Math.hypot(px - m.c.x, py - m.c.y, pz - m.c.z);
+      r_near = Math.min(r_near, rho);
+      if (rho < LASER_FINE_ZONE_PER_PT * m.pt + LASER_FINE_ZONE_M) h = Math.min(h, Math.max(LASER_MIN_STEP_M, LASER_STEP_PER_RHO * rho));
+    }
+    if (h >= LASER_STEP_M && Math.hypot(px, py, pz) < R_MIN_M - 1) h = Math.min(LASER_FAR_STEP_M, Math.max(LASER_STEP_M, LASER_FAR_STEP_PER_RHO * r_near));
+    accel(px, py, pz, vx, vy, vz); const a1x = ax, a1y = ay, a1z = az;
+    const u2x = vx + 0.5 * h * a1x, u2y = vy + 0.5 * h * a1y, u2z = vz + 0.5 * h * a1z;
+    accel(px + 0.5 * h * vx, py + 0.5 * h * vy, pz + 0.5 * h * vz, u2x, u2y, u2z); const a2x = ax, a2y = ay, a2z = az;
+    const u3x = vx + 0.5 * h * a2x, u3y = vy + 0.5 * h * a2y, u3z = vz + 0.5 * h * a2z;
+    accel(px + 0.5 * h * u2x, py + 0.5 * h * u2y, pz + 0.5 * h * u2z, u3x, u3y, u3z); const a3x = ax, a3y = ay, a3z = az;
+    const u4x = vx + h * a3x, u4y = vy + h * a3y, u4z = vz + h * a3z;
+    accel(px + h * u3x, py + h * u3y, pz + h * u3z, u4x, u4y, u4z);
+    const nx = px + h / 6 * (vx + 2 * u2x + 2 * u3x + u4x), ny = py + h / 6 * (vy + 2 * u2y + 2 * u3y + u4y), nz = pz + h / 6 * (vz + 2 * u2z + 2 * u3z + u4z);
+    let wx = vx + h / 6 * (a1x + 2 * a2x + 2 * a3x + ax), wy = vy + h / 6 * (a1y + 2 * a2y + 2 * a3y + ay), wz = vz + h / 6 * (a1z + 2 * a2z + 2 * a3z + az);
+    const wl = Math.hypot(wx, wy, wz); wx /= wl; wy /= wl; wz /= wl;
+    const hit = chord_hit(px, py, pz, nx, ny, nz);
+    if (hit) { px += (nx - px) * hit.frac; py += (ny - py) * hit.frac; pz += (nz - pz) * hit.frac; s += h * hit.frac; since += h * hit.frac; outcome = 'hit'; material = hit.material; break; }
+    px = nx; py = ny; pz = nz; vx = wx; vy = wy; vz = wz; s += h; since += h;
+    const P = new V3(px, py, pz), W = new V3(vx, vy, vz), went = through_throat(P, [W]);
+    if (went) {
+      pts.push([px, py, pz]);
+      W.normalize(); px = P.x; py = P.y; pz = P.z; vx = W.x; vy = W.y; vz = W.z;
+      pts = [[px, py, pz]]; pieces.push(pts); lx = vx; ly = vy; lz = vz; since = 0; through.push(went);
+      continue;
+    }
+    const turn = 2 * Math.asin(Math.min(1, 0.5 * Math.hypot(vx - lx, vy - ly, vz - lz)));
+    if (turn * since > BEAM_POINT_SAG_RAD_M || turn > BEAM_POINT_TURN_RAD || since > BEAM_POINT_SPACING_M) { pts.push([px, py, pz]); lx = vx; ly = vy; lz = vz; since = 0; }
+    if (s >= LASER_MAX_M) break;
+  }
+  if (since > TINY_M) pts.push([px, py, pz]);
+  return { pieces, outcome, material, length_m: s, end: [px, py, pz], through };
+}
+
+const tex = new THREE.Data3DTexture(vox, CELLS_PER_FACE_EDGE, CELLS_PER_FACE_EDGE, FACE_COUNT * LAYER_COUNT);
+tex.format = THREE.RedFormat; tex.type = THREE.UnsignedByteType;
+tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.unpackAlignment = 1; tex.needsUpdate = true;
+const beam_data = new Float32Array(MAX_POINTS * FLOATS_PER_TEXEL);
+const beam_tex = new THREE.DataTexture(beam_data, MAX_POINTS, 1, THREE.RGBAFormat, THREE.FloatType);
+beam_tex.minFilter = beam_tex.magFilter = THREE.NearestFilter; beam_tex.needsUpdate = true;
+/**
+ * `make_vec4s` makes an array of zero 4-vectors for a uniform array.
+ * @param {number} count How many.
+ * @return {Array<THREE.Vector4>} The vectors.
+ * @example const spots = make_vec4s(MAX_SPOTS);
+ */
+function make_vec4s(count) { return Array.from({ length: count }, () => new THREE.Vector4()); }
+const uniforms = {
+  u_voxels: { value: tex }, u_beam_points: { value: beam_tex },
+  u_cam_pos: { value: new V3() }, u_cam_right: { value: new V3() }, u_cam_up: { value: new V3() }, u_cam_fwd: { value: new V3() },
+  u_tan_half_fov: { value: Math.tan(HALF_FOV_RAD) }, u_aspect: { value: 1 }, u_pixel_angle: { value: 0 }, u_beam_radius: { value: BEAM_RADIUS_M },
+  u_lambda_sq: { value: LAMBDA_SQ }, u_time: { value: 0 }, u_cam_lapse: { value: 1 }, u_tan_bounds: { value: TAN_BOUNDS },
+  u_mouths: { value: make_vec4s(MAX_MOUTHS) }, u_mouth_to: { value: Array.from({ length: MAX_MOUTHS }, () => new V3()) },
+  u_mouth_q: { value: Array.from({ length: MAX_MOUTHS }, () => new THREE.Matrix3()) }, u_mouth_count: { value: 0 },
+  u_chunk_a: { value: make_vec4s(MAX_CHUNKS) }, u_chunk_b: { value: make_vec4s(MAX_CHUNKS) }, u_chunk_color: { value: make_vec4s(MAX_CHUNKS) }, u_chunk_count: { value: 0 },
+  u_spots: { value: make_vec4s(MAX_SPOTS) }, u_spot_color: { value: make_vec4s(MAX_SPOTS) }, u_spot_count: { value: 0 }, u_focus: { value: new THREE.Vector4(0, 0, 0, -1) },
+};
+MOUTH_LIST.forEach((m, k) => { uniforms.u_mouths.value[k].set(m.c.x, m.c.y, m.c.z, m.pt); uniforms.u_mouth_to.value[k].copy(m.to); uniforms.u_mouth_q.value[k].copy(m.Q); });
+uniforms.u_mouth_count.value = MOUTH_LIST.length;
+
+/**
+ * `format_float` writes a number as a GLSL float literal.
+ * @param {number} x The number.
+ * @return {string} For example `0.250000`.
+ * @example format_float(0.25) === '0.250000';
+ */
+function format_float(x) { return Number(x).toFixed(6); }
+
+/**
+ * `build_fragment_shader` puts the generated constants (sizes, radii, the material table) in front of the shader text.
+ * @return {string} The full fragment shader source.
+ * @example const src = build_fragment_shader();
+ */
+function build_fragment_shader() {
+  const f = format_float;
+  const table = MATERIALS.map(([, rgb, kind]) => `vec4(${f(rgb[0])}, ${f(rgb[1])}, ${f(rgb[2])}, ${f(kind)})`).join(', ');
+  const header = [
+    'precision highp float; precision highp int; precision highp sampler3D; precision highp sampler2D;',
+    `const int CELLS_PER_FACE_EDGE = ${CELLS_PER_FACE_EDGE};`, `const int LAYER_COUNT = ${LAYER_COUNT};`,
+    `const float R_MIN_M = ${f(R_MIN_M)}; const float R_CORE_M = ${f(R_CORE_M)}; const float R_FLOOR_M = ${f(R_FLOOR_M)};`,
+    `const float GLASS_INNER_M = ${f(GLASS_INNER_M)}; const float GLASS_OUTER_M = ${f(GLASS_OUTER_M)};`,
+    `const float QUARTER_TURN_RAD = ${f(QUARTER_TURN_RAD)}; const float CELL_ANGLE_RAD = ${CELL_ANGLE_RAD.toExponential(9)}; const float STEP_EPS_M = ${STEP_EPS_M.toExponential(3)};`,
+    `const int MAX_MOUTHS = ${MAX_MOUTHS}; const int MAX_CHUNKS = ${MAX_CHUNKS}; const int MAX_SPOTS = ${MAX_SPOTS}; const int MAX_STEPS = ${MAX_STEPS};`,
+    `const int M_AIR = ${M.AIR}; const int M_ROAD = ${M.ROAD};`,
+    `const int KIND_GLASS = ${KIND_GLASS}; const int KIND_EMISSIVE = ${KIND_EMISSIVE}; const int KIND_BUILDING = ${KIND_BUILDING}; const int KIND_FLOOR = ${KIND_FLOOR}; const int KIND_GATE = ${KIND_GATE}; const int KIND_PYLON = ${KIND_PYLON};`,
+    `const vec4 MATERIAL_TABLE[${MATERIALS.length}] = vec4[${MATERIALS.length}](${table});`,
+  ].join('\n');
+  return header + '\n' + $('fragment_shader').textContent;
+}
+
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false }); }
+catch (e) { show_fatal('WebGL2 is required: ' + e.message); }
+const VERTEX_SHADER = 'precision highp float; in vec3 position; out vec2 v_ndc; void main() { v_ndc = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+const material = new THREE.RawShaderMaterial({ uniforms, vertexShader: VERTEX_SHADER, fragmentShader: build_fragment_shader(), glslVersion: THREE.GLSL3, depthTest: false, depthWrite: false });
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material); quad.frustumCulled = false;
+const scene = new THREE.Scene(); scene.add(quad);
+const camera = new THREE.Camera();
+
+const state = {
+  quality: 'auto', auto_pixel_budget: AUTO_PIXEL_BUDGET, beams: [], last_laser: null, message: '', message_s: 0,
+  consoles: { blue: [], red: [] }, console_target: null, console_progress_frac: 0, can_deactivate: false, winner: null,
+  is_test_laser: false, time_s: 0,
+};
+const player = {
+  eye: new V3(), fwd: new V3(0, 0, 1), up: new V3(0, 1, 0), vel: new V3(), is_grounded: false, mode: 'walk',
+  transit_dir: new V3(), transit_speed_m_per_s: 0, transit_s: 0, transit_cooldown_s: 0, entry_pitch_rad: 0, recover_s: 0, energy_frac: 1, is_sprinting: false, team: 'blue', bob_phase_rad: 0,
+};
+const keys = {};
+
+/**
+ * `say` shows a message in the stats panel for a few seconds.
+ * @param {string} text The message.
+ * @return {void}
+ * @example say('Through the Crosslink');
+ */
+function say(text) { state.message = text; state.message_s = MESSAGE_S; }
+
+/**
+ * `radial_up` gives the local up at a point: toward the sphere's centre, since gravity pulls outward.
+ * @param {THREE.Vector3} p The point.
+ * @return {THREE.Vector3} The unit up direction.
+ * @example const up = radial_up(player.eye);
+ */
+function radial_up(p) { return p.clone().normalize().negate(); }
+
+/**
+ * `camera_basis` gives the camera's orthonormal forward, up and right.
+ * @return {Object} `{fwd, up, right}`.
+ * @example const { fwd, right } = camera_basis();
+ */
+function camera_basis() {
+  const fwd = player.fwd.clone().normalize(), up = player.up.clone().addScaledVector(fwd, -player.up.dot(fwd)).normalize();
+  return { fwd, up, right: new V3().crossVectors(fwd, up) };
+}
+
+/**
+ * `horizontal_forward` gives the walking direction: the view direction flattened onto the local floor.
+ * @return {THREE.Vector3} The unit tangent.
+ * @example const hf = horizontal_forward();
+ */
+function horizontal_forward() {
+  const up_local = radial_up(player.eye), { fwd, up } = camera_basis();
+  const h = fwd.clone().addScaledVector(up_local, -fwd.dot(up_local));
+  if (h.lengthSq() > MIN_HORIZONTAL_SQ) return h.normalize();
+  return up.clone().addScaledVector(up_local, -up.dot(up_local)).multiplyScalar(fwd.dot(up_local) > 0 ? -1 : 1).normalize();
+}
+
+/**
+ * `grid_axes` gives the local tangent directions of the block grid at a point (along increasing i and j).
+ * @param {THREE.Vector3} p The point.
+ * @return {Array<THREE.Vector3>} `[e_i, e_j]`, unit and orthogonal.
+ * @example const [ei, ej] = grid_axes(player.eye);
+ */
+function grid_axes(p) {
+  const [f] = cell_of(p.x, p.y, p.z), n = new V3(...FACE_NORMALS[f]), u = new V3(...FACE_US[f]), w = new V3(...FACE_VS[f]), X = p.dot(n);
+  const ei = u.clone().addScaledVector(n, -p.dot(u) / X).normalize(), ej = w.clone().addScaledVector(n, -p.dot(w) / X);
+  return [ei, ej.addScaledVector(ei, -ej.dot(ei)).normalize()];
+}
+
+/**
+ * `is_body_blocked` checks whether the player's body (a 0.5 m square column, feet to just above the eye) overlaps
+ * any solid or glass cell, sampling its corners at three heights.
+ * @param {THREE.Vector3} eye The eye position.
+ * @return {boolean} Whether it is blocked.
+ * @example if (is_body_blocked(candidate)) stop();
+ */
+function is_body_blocked(eye) {
+  const down = eye.clone().normalize(), [ei, ej] = grid_axes(eye), q = new V3();
+  for (const below_m of [EYE_HEIGHT_M, EYE_HEIGHT_M * 0.5, -HEAD_ABOVE_EYE_M])
+    for (const si of [-1, 1]) for (const sj of [-1, 1]) {
+      q.copy(eye).addScaledVector(down, below_m).addScaledVector(ei, si * BODY_HALF_WIDTH_M).addScaledVector(ej, sj * BODY_HALF_WIDTH_M);
+      if (material_at(q) !== M.AIR) return true;
+    }
+  return false;
+}
+
+/**
+ * `transport_to` moves the eye to a new point and turns the view and velocity with it (the rotation taking the
+ * old radial direction to the new one), so walking round the sphere keeps your heading.
+ * @param {THREE.Vector3} next The new eye position.
+ * @return {void}
+ * @example transport_to(candidate);
+ */
+function transport_to(next) {
+  rotate_minimal(player.eye.clone().normalize(), next.clone().normalize(), [player.fwd, player.up, player.vel]);
+  player.eye.copy(next);
+}
+
+/**
+ * `move_tangent_with_collisions` walks the eye along the floor by a tangent step: the full step, else the step slid
+ * along a grid-aligned wall; on the ground, a step blocked by a single block climbs it.
+ * @param {THREE.Vector3} m The tangent step, in metres.
+ * @return {boolean} Whether any move happened.
+ * @example move_tangent_with_collisions(vel.clone().multiplyScalar(dt));
+ */
+function move_tangent_with_collisions(m) {
+  const [ei, ej] = grid_axes(player.eye), r = player.eye.length();
+  for (const step of [m, m.clone().addScaledVector(ei, -m.dot(ei)), m.clone().addScaledVector(ej, -m.dot(ej))]) {
+    if (step.lengthSq() < TINY) continue;
+    const cand = player.eye.clone().add(step).normalize().multiplyScalar(r);
+    if (!is_body_blocked(cand)) { transport_to(cand); return true; }
+    if (!player.is_grounded) continue;
+    const raised = cand.clone().multiplyScalar((r - STEP_HEIGHT_M) / r), above = player.eye.clone().multiplyScalar((r - STEP_HEIGHT_M) / r);
+    if (!is_body_blocked(raised) && !is_body_blocked(above)) { transport_to(raised); return true; }
+  }
+  return false;
+}
+
+/**
+ * `move_radial` moves the eye along the radius (positive is outward, the way gravity pulls); on contact it stops
+ * there, and landing outward makes the player grounded.
+ * @param {number} dr_m The radial move, in metres.
+ * @return {void}
+ * @example move_radial(v_out * dt);
+ */
+function move_radial(dr_m) {
+  const r0 = player.eye.length(), up_local = radial_up(player.eye);
+  /**
+   * `at` gives the eye moved by a fraction of the radial move.
+   * @param {number} frac The fraction, 0 to 1.
+   * @return {THREE.Vector3} The moved eye.
+   * @example at(0.5);
+   */
+  const at = frac => player.eye.clone().multiplyScalar((r0 + dr_m * frac) / r0);
+  player.is_grounded = false;
+  if (!is_body_blocked(at(1))) { player.eye.copy(at(1)); return; }
+  let lo = 0, hi = 1;
+  for (let k = 0; k < BISECTION_STEP_COUNT; k++) { const mid = (lo + hi) / 2; if (is_body_blocked(at(mid))) hi = mid; else lo = mid; }
+  player.eye.copy(at(lo));
+  if (dr_m > 0) player.is_grounded = true;
+  player.vel.addScaledVector(up_local, -player.vel.dot(up_local));
+}
+
+/**
+ * `follow_light` moves a point a proper distance along a light ray, bending exactly as light does and crossing
+ * throats, and turns carried vectors (the view) with the ray, as wormholes.html's flying does.
+ * @param {THREE.Vector3} p The point (changed in place).
+ * @param {THREE.Vector3} m The unit ray direction (changed in place).
+ * @param {number} dist_m The proper distance to go.
+ * @param {Array<THREE.Vector3>} carried Vectors turned with the ray (changed in place).
+ * @param {boolean} should_collide Whether to stop where the point would enter a block (in a transit you ride the
+ *   ray as a point; the body is checked again when the transit ends).
+ * @return {Object} `{through, is_blocked}`: the mouth crossed (or null) and whether a block stopped it.
+ * @example follow_light(player.eye, dir, 0.1, [player.fwd, player.up], true);
+ */
+function follow_light(p, m, dist_m, carried, should_collide) {
+  let left = dist_m, through = null;
+  for (let n = 0; n < FOLLOW_MAX_SUBSTEP_COUNT && left > TINY_M; n++) {
+    let psi = 1, min_rho = Infinity;
+    for (const mo of MOUTH_LIST) { const rho = p.distanceTo(mo.c); psi += mo.pt / rho; min_rho = Math.min(min_rho, rho); }
+    const h = Math.min(left / (psi * psi), FOLLOW_STEP_PER_RHO * min_rho, FOLLOW_MAX_STEP_M), m0 = m.clone(), prev = p.clone();
+    const a1 = bend_of(p, m), mid = m.clone().addScaledVector(a1, 0.5 * h).normalize();
+    const a2 = bend_of(p.clone().addScaledVector(m, 0.5 * h), mid);
+    p.addScaledVector(mid, h);
+    m.addScaledVector(a2, h).normalize();
+    rotate_minimal(m0, m, carried);
+    left -= h * psi * psi;
+    const crossed = through_throat(p, [m, ...carried]);
+    if (crossed) { through = crossed; m.normalize(); for (const c of carried) c.normalize(); continue; }
+    if (should_collide && material_at(p) !== M.AIR) { p.copy(prev); return { through, is_blocked: true }; }
+  }
+  return { through, is_blocked: false };
+}
+
+/**
+ * `try_start_transit` starts a wormhole transit when the player moves into a mouth's zone aimed inside its shadow
+ * (impact parameter, scaled by the local index, below the shadow radius), so the light-ray path goes through. On the
+ * ground it uses the velocity along the floor, leaving out this frame's pull of gravity, and lifts the player 5 cm off
+ * it (light paths are straight lines, which would graze the curved floor).
+ * @return {boolean} Whether a transit started.
+ * @example if (try_start_transit()) return;
+ */
+function try_start_transit() {
+  const up_local = radial_up(player.eye), vel = player.is_grounded ? player.vel.clone().addScaledVector(up_local, -player.vel.dot(up_local)) : player.vel.clone();
+  const speed = vel.length();
+  if (speed < TRANSIT_MIN_SPEED_M_PER_S || player.transit_cooldown_s > 0) return false;
+  const dir = vel.divideScalar(speed);
+  for (const mo of MOUTH_LIST) {
+    const d = mo.c.clone().sub(player.eye), rho = d.length();
+    if (rho > TRANSIT_ZONE_M || d.dot(dir) <= 0) continue;
+    if (index_of(rho, mo.pt) * d.clone().cross(dir).length() > TRANSIT_CAPTURE_FRAC * SHADOW_RADIUS_M) continue;
+    player.mode = 'transit'; player.transit_dir.copy(dir); player.transit_speed_m_per_s = Math.max(speed, WALK_SPEED_M_PER_S); player.transit_s = 0;
+    player.eye.addScaledVector(up_local, TRANSIT_LIFT_M);
+    player.entry_pitch_rad = Math.asin(Math.max(-1, Math.min(1, camera_basis().fwd.dot(up_local))));
+    return true;
+  }
+  return false;
+}
+
+/**
+ * `step_transit` glides the player along the light ray through a mouth (no gravity), and hands back to walking once
+ * clear of every mouth's zone, keeping the velocity (gravity and the view's levelling then take over). A block in the
+ * way ends the transit, and a new one can't start for TRANSIT_COOLDOWN_S.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_transit(1 / 60);
+ */
+function step_transit(dt) {
+  const res = follow_light(player.eye, player.transit_dir, player.transit_speed_m_per_s * dt, [player.fwd, player.up], true);
+  player.transit_s += dt;
+  if (res.through) say(`Through the ${res.through.name}: out at ${res.through.exit}`);
+  if (res.is_blocked) { player.mode = 'walk'; player.vel.set(0, 0, 0); player.transit_cooldown_s = TRANSIT_COOLDOWN_S; player.recover_s = RECOVER_S; return; }
+  const near = nearest_mouth(player.eye), is_leaving = near.m.c.clone().sub(player.eye).dot(player.transit_dir) < 0;
+  if ((near.rho > TRANSIT_ZONE_M && is_leaving) || player.transit_s > TRANSIT_MAX_S) {
+    player.mode = 'walk'; player.vel.copy(player.transit_dir).multiplyScalar(player.transit_speed_m_per_s); player.is_grounded = false;
+    player.recover_s = RECOVER_S;
+  }
+}
+
+/**
+ * `step_walk` moves the walking player one time step: WASD on the local floor (sprinting uses energy), jumping,
+ * outward gravity, collisions with blocks, single-block steps, and wormhole transits (an eye that reaches a throat
+ * without a transit, e.g. after a blocked one, still crosses).
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_walk(1 / 60);
+ */
+function step_walk(dt) {
+  const up_local = radial_up(player.eye), hf = horizontal_forward(), right = new V3().crossVectors(hf, up_local), wish = new V3();
+  if (keys.KeyW || keys.ArrowUp) wish.add(hf); if (keys.KeyS || keys.ArrowDown) wish.sub(hf);
+  if (keys.KeyD) wish.add(right); if (keys.KeyA) wish.sub(right);
+  const is_moving = wish.lengthSq() > 0;
+  player.is_sprinting = is_moving && !!(keys.ShiftLeft || keys.ShiftRight) && player.energy_frac > 0;
+  if (is_moving) wish.normalize().multiplyScalar(player.is_sprinting ? SPRINT_SPEED_M_PER_S : WALK_SPEED_M_PER_S);
+  let v_out = -player.vel.dot(up_local);
+  const vt = player.vel.clone().addScaledVector(up_local, -player.vel.dot(up_local));
+  if (player.is_grounded) vt.copy(wish); else vt.lerp(wish, 1 - Math.exp(-AIR_CONTROL_PER_S * dt));
+  if (keys.Space && player.is_grounded) v_out = -JUMP_SPEED_M_PER_S;
+  v_out = Math.min(v_out + GRAVITY_M_PER_S_PER_S * dt, MAX_FALL_SPEED_M_PER_S);
+  player.vel.copy(vt).addScaledVector(up_local, -v_out);
+  if (try_start_transit()) return;
+  for (let k = 0; k < UNSTICK_TRY_COUNT && is_body_blocked(player.eye); k++) player.eye.multiplyScalar(1 - UNSTICK_STEP_M / player.eye.length());
+  const was_grounded = player.is_grounded;
+  if (vt.lengthSq() > MIN_SPEED_SQ_M2_PER_S2 && !move_tangent_with_collisions(vt.clone().multiplyScalar(dt))) {
+    const up_now = radial_up(player.eye); player.vel.copy(up_now.multiplyScalar(player.vel.dot(up_now)));
+  }
+  player.is_grounded = was_grounded;
+  move_radial(-player.vel.dot(radial_up(player.eye)) * dt);
+  const crossed = through_throat(player.eye, [player.fwd, player.up, player.vel]);
+  if (crossed) { say(`Through the ${crossed.name}: out at ${crossed.exit}`); player.recover_s = RECOVER_S; }
+  if (player.is_grounded && is_moving) player.bob_phase_rad += vt.length() * dt * BOB_RAD_PER_M;
+}
+
+/**
+ * `step_fly` moves the player in fly mode: no gravity and no collisions, along the view (WASD), up and down (Space, C),
+ * following light rays, so flying into a mouth goes through it.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_fly(1 / 60);
+ */
+function step_fly(dt) {
+  const { fwd, right } = camera_basis(), up_local = radial_up(player.eye), mv = new V3();
+  if (keys.KeyW || keys.ArrowUp) mv.add(fwd); if (keys.KeyS || keys.ArrowDown) mv.sub(fwd);
+  if (keys.KeyD) mv.add(right); if (keys.KeyA) mv.sub(right);
+  if (keys.Space) mv.add(up_local); if (keys.KeyC) mv.sub(up_local);
+  const speed = (keys.ShiftLeft || keys.ShiftRight) ? FLY_FAST_SPEED_M_PER_S : FLY_SPEED_M_PER_S;
+  if (mv.lengthSq() > 0) {
+    const res = follow_light(player.eye, mv.normalize(), speed * dt, [player.fwd, player.up], false);
+    if (res.through) say(`Through the ${res.through.name}: out at ${res.through.exit}`);
+  }
+}
+
+/**
+ * `level_out` rolls the view back upright (its up toward the sphere's centre), smoothly, after a wormhole tilted it;
+ * for RECOVER_S after a transit it also turns the view back to the pitch it had going in.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example level_out(1 / 60);
+ */
+function level_out(dt) {
+  const up_local = radial_up(player.eye), { fwd, up } = camera_basis(), ease_frac = 1 - Math.exp(-dt / LEVEL_OUT_TIME_S);
+  player.fwd.copy(fwd); player.up.copy(up);
+  if (player.recover_s > 0) {
+    player.recover_s -= dt;
+    const pitch_rad = Math.asin(Math.max(-1, Math.min(1, fwd.dot(up_local)))), right = new V3().crossVectors(horizontal_forward(), up_local);
+    player.fwd.applyAxisAngle(right, (player.entry_pitch_rad - pitch_rad) * ease_frac); player.up.applyAxisAngle(right, (player.entry_pitch_rad - pitch_rad) * ease_frac);
+  }
+  const f = player.fwd.clone().normalize(), u = player.up.clone().addScaledVector(f, -player.up.dot(f)).normalize();
+  if (Math.abs(f.dot(up_local)) > LEVEL_MAX_UP_DOT) return;
+  const target = up_local.clone().addScaledVector(f, -f.dot(up_local)).normalize();
+  const angle_rad = Math.atan2(new V3().crossVectors(u, target).dot(f), u.dot(target));
+  player.up.copy(u).applyAxisAngle(f, angle_rad * ease_frac);
+}
+
+/**
+ * `look` turns the view: left-right about the local up, up-down about the view's right, within MAX_PITCH_RAD.
+ * @param {number} dx_px The mouse's horizontal move, in pixels.
+ * @param {number} dy_px Its vertical move.
+ * @return {void}
+ * @example look(10, 0);
+ */
+function look(dx_px, dy_px) {
+  const up_local = radial_up(player.eye), yaw_rad = -dx_px * MOUSE_RAD_PER_PX, pitch_rad = -dy_px * MOUSE_RAD_PER_PX;
+  player.fwd.applyAxisAngle(up_local, yaw_rad); player.up.applyAxisAngle(up_local, yaw_rad);
+  const { fwd, right } = camera_basis(), f2 = fwd.clone().applyAxisAngle(right, pitch_rad);
+  if (Math.abs(f2.dot(up_local)) < Math.sin(MAX_PITCH_RAD) || Math.abs(f2.dot(up_local)) < Math.abs(fwd.dot(up_local))) {
+    player.fwd.copy(f2); player.up.applyAxisAngle(right, pitch_rad);
+  }
+}
+
+/**
+ * `step_player` advances the player one time step in its mode (walk, transit or fly), levels the view and
+ * drains or refills sprint energy.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example for (let k = 0; k < 60; k++) step_player(1 / 60);
+ */
+function step_player(dt) {
+  if (keys.ArrowLeft) look(-ARROW_TURN_RAD_PER_S * dt / MOUSE_RAD_PER_PX, 0);
+  if (keys.ArrowRight) look(ARROW_TURN_RAD_PER_S * dt / MOUSE_RAD_PER_PX, 0);
+  if (player.mode === 'fly') { step_fly(dt); level_out(dt); }
+  else if (player.mode === 'transit') step_transit(dt);
+  else { step_walk(dt); level_out(dt); }
+  player.transit_cooldown_s = Math.max(0, player.transit_cooldown_s - dt);
+  const is_draining = player.mode === 'walk' && player.is_sprinting;
+  player.energy_frac = Math.min(1, Math.max(0, player.energy_frac + dt * (is_draining ? -1 / ENERGY_DRAIN_TIME_S : 1 / ENERGY_REFILL_TIME_S)));
+}
+
+/**
+ * `other_team` gives the opposing team.
+ * @param {string} team `blue` or `red`.
+ * @return {string} The other one.
+ * @example other_team('blue') === 'red';
+ */
+function other_team(team) { return team === 'blue' ? 'red' : 'blue'; }
+
+/**
+ * `build_consoles` finds the four console cells of each pylon (red's are the antipodes of blue's) and their centres.
+ * @return {void}
+ * @example build_consoles();
+ */
+function build_consoles() {
+  const s = FLOOR_LAYER - 1;
+  for (const [i, j] of CONSOLE_CELLS) {
+    const centre = dir_of(F_MY, i + 0.5, j + 0.5).multiplyScalar(R_FLOOR_M - 0.5), image = centre.clone().negate(), [f, ri, rj] = cell_of(image.x, image.y, image.z);
+    state.consoles.blue.push({ index: voxel_index(F_MY, i, j, s), centre, is_on: true, on_material: M.BLUE_CONSOLE });
+    state.consoles.red.push({ index: voxel_index(f, ri, rj, s), centre: image, is_on: true, on_material: M.RED_CONSOLE });
+  }
+}
+
+/**
+ * `reset_consoles` switches every console of both pylons back on.
+ * @return {void}
+ * @example reset_consoles();
+ */
+function reset_consoles() {
+  for (const team of ['blue', 'red']) for (const c of state.consoles[team]) { c.is_on = true; vox[c.index] = c.on_material; }
+  tex.needsUpdate = true; state.winner = null; $('banner').style.display = 'none';
+}
+
+/**
+ * `step_consoles` runs deactivation: holding E within CONSOLE_REACH_M of the other team's pylon on the outer floor,
+ * facing it, fills the nearest live console's progress in CONSOLE_TIME_S; letting go resets it.
+ * @param {number} dt The time step, in seconds.
+ * @return {void}
+ * @example step_consoles(1 / 60);
+ */
+function step_consoles(dt) {
+  const enemy = other_team(player.team), axis = new V3(0, enemy === 'blue' ? -1 : 1, 0), eye_dir = player.eye.clone().normalize();
+  const gap_m = R_FLOOR_M * eye_dir.angleTo(axis) - PYLON_HALF_WIDTH_M, to_pylon = axis.clone().addScaledVector(eye_dir, -axis.dot(eye_dir));
+  const is_facing = to_pylon.lengthSq() > TINY && horizontal_forward().angleTo(to_pylon) < FACING_HALF_ANGLE_RAD;
+  const live = state.consoles[enemy].filter(c => c.is_on);
+  state.can_deactivate = player.mode === 'walk' && player.eye.length() > GLASS_OUTER_M && gap_m <= CONSOLE_REACH_M && is_facing && live.length > 0;
+  if (!keys.KeyE || !state.can_deactivate) { state.console_target = null; state.console_progress_frac = 0; return; }
+  const target = live.reduce((a, b) => (a.centre.distanceTo(player.eye) < b.centre.distanceTo(player.eye) ? a : b));
+  if (target !== state.console_target) state.console_progress_frac = 0;
+  state.console_target = target;
+  state.console_progress_frac += dt / CONSOLE_TIME_S;
+  if (state.console_progress_frac < 1) return;
+  target.is_on = false; vox[target.index] = M.DEAD_CONSOLE; tex.needsUpdate = true;
+  state.console_target = null; state.console_progress_frac = 0;
+  const left = state.consoles[enemy].filter(c => c.is_on).length;
+  say(left ? `Console deactivated: ${left} left on the ${enemy} pylon` : `Every console of the ${enemy} pylon is off`);
+  if (!left) { state.winner = player.team; $('banner').textContent = `Level won: ${player.team} wins`; $('banner').style.display = 'block'; }
+}
+
+/**
+ * `gun_pose` gives the laser's muzzle (just right of and below the eye) and its direction (the crosshair's).
+ * @return {Object} `{o, d}`.
+ * @example const { o, d } = gun_pose();
+ */
+function gun_pose() {
+  const { fwd, up, right } = camera_basis();
+  return { o: player.eye.clone().addScaledVector(right, GUN_OFFSET_M.right).addScaledVector(up, GUN_OFFSET_M.up).addScaledVector(fwd, GUN_OFFSET_M.fwd), d: fwd };
+}
+
+/**
+ * `chunkify` groups a beam polyline into chunks of up to 16 segments whose points stay within max_r of the chunk's chord.
+ * @param {Array<Array<number>>} pts The polyline.
+ * @param {number} max_r The largest allowed distance from the chord.
+ * @return {Array<Object>} `{i, j, r}`: first and last point and the radius.
+ * @example const chunks = chunkify(piece, 0.6);
+ */
+function chunkify(pts, max_r) {
+  const out = [];
+  let i = 0;
+  while (i < pts.length - 1) {
+    let j = i + 1, r = 0;
+    while (j + 1 < pts.length && j + 1 - i <= MAX_CHUNK_POINTS) {
+      let rr = 0;
+      for (let k = i + 1; k <= j; k++) rr = Math.max(rr, dist_point_segment_js(pts[k], pts[i], pts[j + 1]));
+      if (rr > max_r) break;
+      j++; r = rr;
+    }
+    out.push({ i, j, r }); i = j;
+  }
+  return out;
+}
+
+/**
+ * `dist_point_segment_js` gives the distance from a point to a segment, both as `[x, y, z]`.
+ * @param {Array<number>} p The point.
+ * @param {Array<number>} a The segment's start.
+ * @param {Array<number>} b The segment's end.
+ * @return {number} The distance.
+ * @example dist_point_segment_js([0, 1, 0], [0, 0, 0], [1, 0, 0]) === 1;
+ */
+function dist_point_segment_js(p, a, b) {
+  const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2], l2 = abx * abx + aby * aby + abz * abz;
+  const t = l2 > TINY ? Math.max(0, Math.min(1, ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby + (p[2] - a[2]) * abz) / l2)) : 0;
+  return Math.hypot(p[0] - a[0] - abx * t, p[1] - a[1] - aby * t, p[2] - a[2] - abz * t);
+}
+
+/**
+ * `upload_beams` writes the live beams' polylines and chunks into the shader's texture and uniforms, and records which
+ * beam each chunk and spot belongs to so their fading can be updated every frame.
+ * @return {void}
+ * @example upload_beams();
+ */
+function upload_beams() {
+  let np = 0, nc = 0, ns = 0;
+  state.chunk_owners = []; state.spot_owners = [];
+  outer: for (let b = state.beams.length - 1; b >= 0; b--) {
+    const beam = state.beams[b];
+    for (let pts of beam.res.pieces) {
+      if (pts.length < 2) continue;
+      if (pts.length > MAX_PIECE_POINTS) { const k = Math.ceil(pts.length / MAX_PIECE_POINTS); pts = pts.filter((_, i) => i % k === 0 || i === pts.length - 1); }
+      let chunks, max_r = CHUNK_START_RADIUS_M;
+      for (;;) { chunks = chunkify(pts, max_r); if (nc + chunks.length <= MAX_CHUNKS || max_r > 100) break; max_r *= 2; }
+      if (np + pts.length > MAX_POINTS || nc + chunks.length > MAX_CHUNKS) break outer;
+      pts.forEach((q, i) => beam_data.set([q[0], q[1], q[2], 1], (np + i) * FLOATS_PER_TEXEL));
+      for (const c of chunks) {
+        const A = pts[c.i], B = pts[c.j];
+        uniforms.u_chunk_a.value[nc].set(A[0], A[1], A[2], c.r + 1e-3);
+        uniforms.u_chunk_b.value[nc].set(B[0], B[1], B[2], (np + c.i) * 32 + (c.j - c.i));
+        state.chunk_owners[nc++] = beam;
+      }
+      np += pts.length;
+    }
+    if (beam.res.outcome === 'hit' && ns < MAX_SPOTS) { uniforms.u_spots.value[ns].set(...beam.res.end, 1); state.spot_owners[ns++] = beam; }
+  }
+  uniforms.u_chunk_count.value = nc; uniforms.u_spot_count.value = ns;
+  beam_tex.needsUpdate = true;
+}
+
+/**
+ * `update_beam_fades` fades every beam over LASER_FADE_S (test beams stay), drops faded ones and sets the shader's
+ * per-chunk and per-spot colour and brightness.
+ * @return {void}
+ * @example update_beam_fades();
+ */
+function update_beam_fades() {
+  for (const beam of state.beams) beam.fade_frac = beam.is_pinned ? 1 : Math.max(0, 1 - (state.time_s - beam.born_s) / LASER_FADE_S);
+  const kept = state.beams.filter(b => b.fade_frac > 0);
+  if (kept.length !== state.beams.length) { state.beams = kept; upload_beams(); }
+  (state.chunk_owners || []).forEach((beam, k) => uniforms.u_chunk_color.value[k].set(...beam.color, beam.fade_frac));
+  (state.spot_owners || []).forEach((beam, k) => { uniforms.u_spot_color.value[k].set(...beam.color, 1); uniforms.u_spots.value[k].w = beam.fade_frac; });
+}
+
+/**
+ * `fire_laser` fires one shot along the crosshair in the team's colour; it shows once and fades. Deactivating a console
+ * blocks firing, as in the design.
+ * @return {Object|null} The traced shot, or null if firing is blocked.
+ * @example const res = fire_laser();
+ */
+function fire_laser() {
+  if (state.console_target) { say("You can't fire while deactivating a console"); return null; }
+  const { o, d } = gun_pose(), res = trace_laser(o, d);
+  state.beams.push({ res, color: TEAM_COLORS[player.team], born_s: state.time_s, fade_frac: 1, is_pinned: state.is_test_laser });
+  while (state.beams.length > MAX_BEAMS) state.beams.shift();
+  state.last_laser = res;
+  upload_beams();
+  return res;
+}
+
+/**
+ * `laser_text` describes a shot for the stats panel.
+ * @param {Object|null} res A shot from `trace_laser`.
+ * @return {string} What it went through and hit.
+ * @example laser_text(state.last_laser);
+ */
+function laser_text(res) {
+  if (!res) return 'not fired yet';
+  const via = res.through.length ? `through the ${res.through.map(m => m.name).join(', then the ')}, ` : '';
+  const name = MATERIALS[res.material][0], what = MATERIALS[res.material][2] === KIND_GLASS ? `is stopped by the ${name}` : `hits ${name}`;
+  return res.outcome === 'hit' ? `${via}${what} after ${res.length_m.toFixed(1)} m` : `${via}fades out after ${res.length_m.toFixed(0)} m`;
+}
+
+/**
+ * `zone_text` names where a point is: zone, route and floor.
+ * @param {THREE.Vector3} p The point.
+ * @return {string} For example "Middle zone · street route A · outer floor".
+ * @example zone_text(player.eye);
+ */
+function zone_text(p) {
+  const [f] = cell_of(p.x, p.y, p.z), r = p.length();
+  const zone = f === F_MY ? 'Blue zone' : (f === F_PY ? 'Red zone' : 'Middle zone');
+  const floor = r > GLASS_OUTER_M ? 'outer floor' : (r > R_MIN_M ? 'inner floor (glass)' : 'mid-air');
+  const route = r <= GLASS_OUTER_M && r > R_MIN_M && zone === 'Middle zone' ? ' · skyway' : ({ [F_PX]: ' · street route A', [F_MX]: ' · street route B', [F_PZ]: ' · habitat blocks', [F_MZ]: ' · habitat blocks' })[f] || '';
+  return `${zone}${route} · ${floor}`;
+}
+
+const VIEWS = {
+  blue_spawn: { face: F_MY, at: [24, 6], floor: 'outer', heading: [0, 1], pitch_rad: 0.15, team: 'blue' },
+  red_spawn: { image_of: 'blue_spawn', team: 'red' },
+  overview: { pos: [-4, 4, 12], look_at: [25, -25, 2] },
+  middle: { face: F_PX, at: [38.5, 19], floor: 'outer', heading: [0, 1], pitch_rad: 0.25 },
+  wormhole: { face: F_PX, at: [21.5, 24], floor: 'outer', heading: [1, 0], pitch_rad: 0.02 },
+  lift: { face: F_PX, at: [38, 5.5], floor: 'outer', heading: [0, 1], pitch_rad: 0.02 },
+  skyway: { face: F_PX, at: [26, 9], floor: 'inner', heading: [0, 1], pitch_rad: 0.12 },
+  stairs: { face: F_PX, at: [12, 25.4], floor: 'outer', heading: [0, 1], pitch_rad: 0.45 },
+  blue_pylon: { face: F_MY, at: [25.6, 26.9], floor: 'outer', heading: [-1.6, -2.9], pitch_rad: 0.22, team: 'red' },
+};
+
+/**
+ * `set_view` moves the player to a named viewpoint (and team, where the viewpoint sets one).
+ * @param {string} name A key of VIEWS.
+ * @return {void}
+ * @example set_view('wormhole');
+ */
+function set_view(name) {
+  const view = VIEWS[name];
+  if (!view) throw new Error(`set_view: unknown view "${name}"; known views: ${Object.keys(VIEWS).join(', ')}`);
+  let eye, fwd;
+  if (view.image_of) {
+    set_view(view.image_of);
+    eye = player.eye.clone().negate(); fwd = player.fwd.clone().negate();
+  } else if (view.pos) {
+    eye = new V3(...view.pos); fwd = new V3(...view.look_at).sub(eye).normalize();
+  } else {
+    const d = dir_of(view.face, ...view.at), up_local = d.clone().negate();
+    eye = d.multiplyScalar((view.floor === 'outer' ? R_FLOOR_M : GLASS_INNER_M) - EYE_HEIGHT_M);
+    fwd = face_tangent(view.face, ...view.at, view.heading).multiplyScalar(Math.cos(view.pitch_rad)).addScaledVector(up_local, Math.sin(view.pitch_rad));
+  }
+  const up_local = radial_up(eye);
+  player.eye.copy(eye); player.fwd.copy(fwd);
+  player.up.copy(up_local).addScaledVector(fwd, -fwd.dot(up_local)).normalize();
+  player.vel.set(0, 0, 0); player.is_grounded = false; player.mode = view.pos ? 'fly' : 'walk';
+  if (view.team) player.team = view.team;
+  state.view = name;
+}
+
+/**
+ * `parse_hash` reads the URL hash parameters (`view`, `quality`, `panels`, `test`, `team`), failing on unknown values.
+ * @return {Object} The parameters.
+ * @example const params = parse_hash();
+ */
+function parse_hash() {
+  const params = Object.fromEntries(location.hash.replace(/^#/, '').split('&').filter(Boolean).map(kv => kv.split('=')));
+  if (params.quality && !(params.quality in QUALITY_SCALES) && params.quality !== 'auto') throw new Error(`parse_hash: unknown quality "${params.quality}"`);
+  if (params.team && !(params.team in TEAM_COLORS)) throw new Error(`parse_hash: unknown team "${params.team}"`);
+  if (params.panels && params.panels !== 'off' && params.panels !== 'on') throw new Error(`parse_hash: panels must be on or off, not "${params.panels}"`);
+  if (params.test && params.test !== 'laser') throw new Error(`parse_hash: unknown test "${params.test}"`);
+  return params;
+}
+
+const buffer_size = new THREE.Vector2();
+
+/**
+ * `resize` sizes the canvas and the ray tracer's resolution for the window and the render quality.
+ * @return {void}
+ * @example resize();
+ */
+function resize() {
+  const dpr = window.devicePixelRatio || 1, w = window.innerWidth, h = window.innerHeight;
+  const scale = state.quality === 'auto' ? Math.min(1, Math.sqrt(state.auto_pixel_budget / (w * h * dpr * dpr))) : QUALITY_SCALES[state.quality];
+  renderer.setPixelRatio(dpr * scale);
+  renderer.setSize(w, h, false);
+  uniforms.u_aspect.value = w / h;
+  renderer.getDrawingBufferSize(buffer_size);
+  uniforms.u_pixel_angle.value = 2 * uniforms.u_tan_half_fov.value / Math.max(1, buffer_size.y);
+  $('s_res').textContent = `${buffer_size.x}×${buffer_size.y} px`;
+}
+
+/**
+ * `on_key_down` handles the one-shot keys (fly, team, laser, viewpoints) and remembers held keys.
+ * @param {KeyboardEvent} e The event.
+ * @return {void}
+ * @example window.addEventListener('keydown', on_key_down);
+ */
+function on_key_down(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  keys[e.code] = true;
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (e.repeat) return;
+  if (e.code === 'KeyH' && player.mode !== 'transit') { player.mode = player.mode === 'fly' ? 'walk' : 'fly'; player.vel.set(0, 0, 0); }
+  if (e.code === 'KeyT') { const team = other_team(player.team); set_view(`${team}_spawn`); player.team = team; say(`You now play ${team}`); }
+  if (e.code === 'KeyR') fire_laser();
+  const digit = e.code.match(/^Digit([1-9])$/);
+  if (digit) set_view(Object.keys(VIEWS)[+digit[1] - 1]);
+}
+
+/**
+ * `build_ui` wires the panels: viewpoint buttons, quality select, reset, tips toggle, mouse look and firing.
+ * @return {void}
+ * @example build_ui();
+ */
+function build_ui() {
+  Object.keys(VIEWS).forEach((name, k) => {
+    const b = document.createElement('button'); b.textContent = `${k + 1} ${name}`; b.addEventListener('click', () => set_view(name)); $('view_buttons').appendChild(b);
+  });
+  window.addEventListener('keydown', on_key_down);
+  window.addEventListener('keyup', e => { keys[e.code] = false; });
+  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+  window.addEventListener('resize', resize);
+  let is_dragging = false;
+  canvas.addEventListener('pointerdown', e => {
+    if (document.pointerLockElement === canvas) { if (e.button === 0) fire_laser(); return; }
+    is_dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch (_) { is_dragging = true; }
+    if (e.pointerType === 'mouse') { const lock = canvas.requestPointerLock(); if (lock && lock.catch) lock.catch(() => { is_dragging = true; }); }
+  });
+  canvas.addEventListener('pointerup', () => { is_dragging = false; });
+  canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || is_dragging) look(e.movementX || 0, e.movementY || 0); });
+  $('quality').addEventListener('change', e => { state.quality = e.target.value; resize(); });
+  $('b_reset').addEventListener('click', reset_consoles);
+  $('tips_toggle').addEventListener('click', () => { const b = $('tips_body'), is_hidden = b.style.display === 'none'; b.style.display = is_hidden ? '' : 'none'; $('tips_toggle').textContent = is_hidden ? 'hide' : 'show'; });
+}
+
+/**
+ * `update_hud` refreshes the stats panel: team, mode, zone, energy, console progress, laser, fps and messages.
+ * @param {number} fps The measured frame rate.
+ * @return {void}
+ * @example update_hud(60);
+ */
+function update_hud(fps) {
+  const enemy = other_team(player.team), left = state.consoles[enemy].filter(c => c.is_on).length;
+  $('s_team').textContent = player.team; $('s_team').style.color = player.team === 'blue' ? '#7fb0ff' : '#ff8a7a';
+  $('s_mode').textContent = player.mode === 'fly' ? 'fly mode' : (player.mode === 'transit' ? 'in a wormhole' : (player.is_grounded ? 'walking' : 'in the air'));
+  $('s_zone').textContent = zone_text(player.eye);
+  $('s_consoles').textContent = `${enemy} pylon: ${left}/${state.consoles[enemy].length} consoles on` + (state.can_deactivate ? ' · hold E' : '');
+  $('s_laser').textContent = laser_text(state.last_laser);
+  $('s_fps').textContent = fps.toFixed(0);
+  $('s_msg').textContent = state.message_s > 0 ? state.message : '';
+}
+
+const perf = { last_ms: performance.now(), window_s: 0, window_frames: 0, hud_s: 0, hud_frames: 0, hud_ms: performance.now() };
+
+/**
+ * `frame` runs one frame: physics, consoles, beams, camera uniforms, render, auto quality and the HUD.
+ * @param {number} now_ms The frame time from requestAnimationFrame, in milliseconds.
+ * @return {void}
+ * @example requestAnimationFrame(frame);
+ */
+function frame(now_ms) {
+  const dt = Math.min(MAX_FRAME_S, Math.max(0, (now_ms - perf.last_ms) / 1000)); perf.last_ms = now_ms;
+  state.time_s += dt; state.message_s -= dt;
+  step_player(dt);
+  step_consoles(dt);
+  update_beam_fades();
+  const { fwd, up, right } = camera_basis(), bob_m = player.is_sprinting && player.is_grounded ? BOB_AMPLITUDE_M * Math.sin(player.bob_phase_rad) : 0;
+  uniforms.u_cam_pos.value.copy(player.eye).addScaledVector(radial_up(player.eye), bob_m);
+  uniforms.u_cam_fwd.value.copy(fwd); uniforms.u_cam_up.value.copy(up); uniforms.u_cam_right.value.copy(right);
+  uniforms.u_cam_lapse.value = Math.max(lapse_of(player.eye), 0.01);
+  uniforms.u_time.value = state.time_s;
+  if (state.console_target) uniforms.u_focus.value.set(...state.console_target.centre.toArray(), state.console_progress_frac); else uniforms.u_focus.value.w = -1;
+  $('s_energy').style.width = `${(player.energy_frac * 100).toFixed(1)}%`;
+  $('s_console').style.width = `${(state.console_progress_frac * 100).toFixed(1)}%`;
+  renderer.render(scene, camera);
+  if (dt > 0 && dt < MAX_FRAME_S * 4) { perf.window_s += dt; perf.window_frames++; }
+  if (perf.window_s > AUTO_WINDOW_S) {
+    if (state.quality === 'auto' && perf.window_s / perf.window_frames > AUTO_TARGET_FRAME_S && state.auto_pixel_budget > MIN_AUTO_PIXEL_BUDGET) { state.auto_pixel_budget *= AUTO_STEP_FRAC; resize(); }
+    perf.window_s = 0; perf.window_frames = 0;
+  }
+  perf.hud_frames++;
+  if ((perf.hud_s += dt) > HUD_INTERVAL_S) { update_hud(perf.hud_frames * 1000 / Math.max(1, now_ms - perf.hud_ms)); perf.hud_s = 0; perf.hud_frames = 0; perf.hud_ms = now_ms; }
+  requestAnimationFrame(frame);
+}
+
+const params = parse_hash();
+build_consoles();
+build_ui();
+state.quality = params.quality || 'auto'; $('quality').value = state.quality;
+if (params.panels === 'off') for (const id of ['controls', 'stats', 'tips']) $(id).style.display = 'none';
+set_view(params.view || 'blue_spawn');
+if (params.team) player.team = params.team;
+resize();
+if (params.test === 'laser') { state.is_test_laser = true; fire_laser(); }
+update_hud(0);
+requestAnimationFrame(frame);
+window.__demo = { state, player, keys, uniforms, renderer, scene, camera, VIEWS, MOUTH_LIST, PAIRS, M, MATERIALS, SHADOW_RADIUS_M, F: { F_PX, F_MX, F_PY, F_MY, F_PZ, F_MZ },
+  set_view, fire_laser, trace_laser, step_player, step_walk, step_consoles, cell_of, material_at, is_body_blocked, debug_map, dir_of, face_tangent, through_throat, follow_light,
+  bend_of, index_of, reset_consoles, camera_basis, radial_up, V3, vox, voxel_index };
+</script>
+</body>
+</html>
