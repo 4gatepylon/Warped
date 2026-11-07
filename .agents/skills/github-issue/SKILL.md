@@ -60,7 +60,7 @@ Exactly one **type** label and at least one **area** label.
 | `bug` | something is wrong: crash, wrong result, failing test, broken build |
 | `enhancement` | new code or a feature: a game mechanic, a server endpoint, a tool |
 | `experiment` | a benchmark, comparison or playtest that answers a question |
-| `documentation` | READMEs, CLAUDE.md, skills |
+| `documentation` | READMEs, AGENTS.md, CLAUDE.md, skills |
 | `question` | needs an answer or a decision before work can start |
 
 | Area | Covers |

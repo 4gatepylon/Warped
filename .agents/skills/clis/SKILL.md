@@ -22,7 +22,7 @@ and this skill differ, this skill wins.
   under an agent. Where it would have asked, it fails instead (see Destructive actions).
 - **Idempotent:** running a command twice with the same arguments gives the same result and
   destroys nothing. A new run writes a new run folder (`.artifacts/<script>/<run_id>/`, see
-  "Uncommitted files" in the root `CLAUDE.md`) and never replaces an old one.
+  "Uncommitted files" in the root `AGENTS.md`) and never replaces an old one.
 - **No cache:** a run computes everything fresh unless it gets `--reuse-cache` (see Caching).
 - **Bounded output:** see Output.
 
@@ -139,7 +139,7 @@ The same concept has the same name in every CLI:
 | Subcommand verbs | `get`, `list`, `create`, `update`, `delete` | `info`, `ls`, `new`, `rm` |
 
 - Flags are kebab-case long options. The only short options are `-h` and the math letters of
-  the root `CLAUDE.md`, such as `-N`.
+  the root `AGENTS.md`, such as `-N`.
 - A new concept needs the user's agreement; add its row to this table in the same change.
 
 ## Help
