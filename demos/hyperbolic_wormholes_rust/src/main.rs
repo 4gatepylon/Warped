@@ -74,6 +74,7 @@ const AUTO_SCALE_TARGET_GPU_MS: f64 = 14.0;
 const AUTO_SCALE_MAX_STEP: f64 = 1.02;
 const AUTO_SCALE_MAX_DROP: f64 = 0.8;
 const RENDER_SCALE_QUANTUM: f64 = 0.05;
+const FULL_RESOLUTION_FROM_SCALE: f64 = 0.95;
 const RENDER_SCALE_ROUNDING: f64 = 1e-6;
 const RENDER_SCALE_STEP: f64 = 1.25;
 const MIN_RENDER_SCALE: f64 = 0.05;
@@ -1871,17 +1872,22 @@ impl Session {
         is_out
     }
 
-    /// `get_render_size` gives the size to ray-trace for a window of `window_px` pixels.
+    /// `get_render_size` gives the size to ray-trace for a window of `window_px` pixels. With
+    /// automatic resolution, a scale of `FULL_RESOLUTION_FROM_SCALE` or more renders at full
+    /// resolution, as MetalFX costs about as much as those scales save and loses as much detail as
+    /// lower ones; others round down to steps of `RENDER_SCALE_QUANTUM`.
     ///
     /// Example: `let render_px = session.get_render_size((2560, 1600));`
     fn get_render_size(&mut self, window_px: (u32, u32)) -> (u32, u32) {
         self.last_output_px = window_px;
-        let quantized_scale: f64 = if self.is_auto_scale {
+        let quantized_scale: f64 = if !self.is_auto_scale {
+            self.render_scale
+        } else if self.render_scale >= FULL_RESOLUTION_FROM_SCALE {
+            1.0
+        } else {
             ((self.render_scale / RENDER_SCALE_QUANTUM + RENDER_SCALE_ROUNDING).floor()
                 * RENDER_SCALE_QUANTUM)
                 .max(MIN_AUTO_RENDER_SCALE)
-        } else {
-            self.render_scale
         };
         self.last_used_scale = quantized_scale;
         if !self.route.is_empty() {

@@ -435,6 +435,16 @@
   that long; 2.9% of that view's pixels change, and their distance from a converged reference doesn't.
 - **Revisit if:** the rings inside a mouth look different when played.
 
+### D41. Scales from 0.95 up render at full resolution
+
+- **Choice:** when the automatic scale would pick 0.95 or more, the window renders at full resolution.
+- **Alternatives:** the 0.95 step (D19's rounding).
+- **Rationale:** MetalFX costs about as much as that step saves (the wormhole exit 13.8 → 13.5 ms at 2560×1336) and
+  loses as much detail as 0.90 (SSIM 0.89 against full resolution). Full-resolution frames of up to about 15.5 ms of
+  GPU time still fit a 60 Hz frame. In the window: the wormhole exit at full resolution, 69 fps; the warp tour full in
+  90% of frames (78% before), 0.3% over 1/60 s; the house's mouth tour full in 60% (52%), 1.2% over 1/60 s (2.1%).
+- **Revisit if:** frames near 15 ms stutter when played.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
