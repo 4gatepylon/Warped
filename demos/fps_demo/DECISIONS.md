@@ -36,16 +36,6 @@
 - **Rationale:** vsync matches how it is played; the GPU time shows the headroom under the cap.
   The duration is arbitrary; anything from 20 to 60 s gives stable means.
 
-## Metrics
-
-### D3. Frame time from the CPU clock, GPU time from Metal
-
-- **Choice:** frame time is the time between frames; GPU time is the command buffer's
-  `GPUEndTime - GPUStartTime`. Reported every 5 s and for the whole run: mean, median, p99.
-- **Alternatives:** Xcode's Metal frame capture per pass.
-- **Rationale:** both numbers come from the demo itself, so any machine can reproduce them with
-  one command; per-pass profiling is for when we optimise.
-
 ### D5. Per-effect cost is all-on minus one-off, no vsync, 3 interleaved repeats
 
 - **Choice:** each new effect's GPU cost is the mean GPU time with every effect on minus the mean
@@ -58,3 +48,13 @@
   agree to about 0.5 ms.
 - **Revisit if:** the numbers are measured on a real MacBook Pro, where per-pass Metal capture
   gives each effect's cost directly.
+
+## Metrics
+
+### D3. Frame time from the CPU clock, GPU time from Metal
+
+- **Choice:** frame time is the time between frames; GPU time is the command buffer's
+  `GPUEndTime - GPUStartTime`. Reported every 5 s and for the whole run: mean, median, p99.
+- **Alternatives:** Xcode's Metal frame capture per pass.
+- **Rationale:** both numbers come from the demo itself, so any machine can reproduce them with
+  one command; per-pass profiling is for when we optimise.
