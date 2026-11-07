@@ -20,6 +20,8 @@ that applies only to some kinds of work goes in a skill, and this file points to
 - State the reviewable line count in the PR description.
 - Write every PR description with the `pr-description` skill (`.agents/skills/pr-description/`).
   Every PR uses its template unchanged.
+- Open every PR against `staging`. Agents may merge into `staging`; only humans merge into `main`,
+  or an agent when a human explicitly asks (details in the `pr-description` skill).
 
 ## Issues
 
