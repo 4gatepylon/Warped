@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Optics Lab — mirrors</title>
+<title>Optics Lab — mirrors, beam splitters</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
@@ -32,6 +32,7 @@
   #cross:before { left: 6px; top: 0; width: 2px; height: 14px; }
   #cross:after { top: 6px; left: 0; height: 2px; width: 14px; }
   #err { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #fff; background: #222; padding: 30px; text-align: center; }
+  body.no-split .f-split { display: none; }
 </style>
 </head>
 <body>
@@ -40,12 +41,16 @@
 
 <div id="controls" class="panel">
   <h1>Optics lab (flat space)</h1>
+  <label>Demo <select id="demo">
+    <option value="mirrors">1 · Mirrors</option>
+    <option value="splitters">2 · Beam splitters</option>
+  </select></label>
   <div class="muted">Click the scene to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.</div>
   <div class="row"><kbd>WASD</kbd> fly · <kbd>E</kbd>/<kbd>Q</kbd> up/down · <kbd>Shift</kbd> fast</div>
   <div class="row laser"><b>Laser</b> · <kbd>L</kbd> on/off<br>
     <kbd>Click</kbd> (mouse captured) or <kbd>R</kbd>: leave an emitter here that keeps firing<br>
     <kbd>Z</kbd> remove all emitters</div>
-  <div class="row"><b>Panels</b> · <kbd>1</kbd> place a mirror<br>
+  <div class="row"><b>Panels</b> · <kbd>1</kbd> place a mirror<span class="f-split"> · <kbd>2</kbd> a beam splitter</span><br>
     Aim at a panel, then hold <kbd>T</kbd> or the right mouse button and move the mouse to turn it.
     <kbd>J</kbd>/<kbd>K</kbd> turn 5°, <kbd>U</kbd>/<kbd>I</kbd> tilt 5° (with <kbd>Shift</kbd>: 1°).
     <kbd>X</kbd> delete it · <kbd>C</kbd> delete all panels</div>
@@ -82,8 +87,12 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
 // ---------------------------------------------------------------------------
-// "Things to try" for the test scene.
+// Two demos on one page, each adding an optical element to the previous one.
 // ---------------------------------------------------------------------------
+const MODES = {
+  mirrors: { splitter: false },
+  splitters: { splitter: true },
+};
 const TIPS = {
   mirrors: `<ol>
     <li><b>Angle in = angle out.</b> Aim your laser at a mirror and turn it (hold <kbd>T</kbd> and move the mouse): turning a mirror by some angle turns the reflected beam by twice that.</li>
@@ -92,6 +101,13 @@ const TIPS = {
     <li><b>Hall of mirrors</b> (middle): two facing mirrors. A beam fired in at an angle ricochets down the gap. Stand between them and look sideways to see reflections of reflections.</li>
     <li><b>Corner reflector</b> (front right, on the floor): three mirrors at right angles. Any beam that goes in comes straight back out, parallel to itself, offset by twice how far it went in from the corner. Aim your laser into it.</li>
     <li>Mirrors are real reflections in the renderer too, so you can see beams (and yourself... almost) in them.</li>
+  </ol>`,
+  splitters: `<ol>
+    <li><b>A beam splitter</b> is a half-silvered mirror: half the light reflects, half goes straight through. Every split halves the brightness.</li>
+    <li><b>Cascade</b> (left): three splitters and a mirror turn one beam into four, at 50%, 25%, 12.5% and 12.5% (the mirror loses a little).</li>
+    <li><b>Mach–Zehnder interferometer</b> (right): a beam splits, the two halves take different paths, and a second splitter recombines them into two outputs.</li>
+    <li>Looking through a splitter you see both what's behind it and a reflection, half each.</li>
+    <li>Limitation: beams here are rays, not waves, so the interferometer can't show interference. In a real one, the two outputs get brighter and darker as you change one path's length by fractions of a wavelength.</li>
   </ol>`,
 };
 
@@ -140,13 +156,13 @@ buildWorld();
 // ---------------------------------------------------------------------------
 const MAXP = 16, MAXSEG = 256, MAXG = MAXSEG / 8, MAXS = 48, MAXE = 16, MAXPINS = 12;
 const FRAME = 0.06;                     // panel frame width (blocks); the frame is opaque
-const TYPE_NAME = ['mirror'];
+const TYPE_NAME = ['mirror', 'beam splitter'];
 
 // ---------------------------------------------------------------------------
-// Ray tracer. Each pixel's ray walks the voxel grid. Mirrors are flat rectangles that send the ray
-// on reflected. Pending rays go on a small stack, so panels added later can send a ray two ways.
-// Every straight piece of a pixel's ray path is tested against the laser segments, so beams also
-// show up in mirrors.
+// Ray tracer. Each pixel's ray walks the voxel grid. Panels (mirrors, splitters) are flat rectangles:
+// a mirror sends the ray on reflected, a splitter sends it both ways at half weight (a small stack of
+// pending rays). Every straight piece of a pixel's ray path is tested against the laser segments, so
+// beams also show up in mirrors.
 // ---------------------------------------------------------------------------
 const vert = `
 precision highp float;
@@ -364,13 +380,21 @@ void main() {
       col += r.w * mix(HAZE, ec, fog);
     } else if (ip >= 0) {
       vec3 hp = r.o + r.d * tp, n = uPN[ip].xyz;
+      int type = int(uPC[ip].w + 0.5);
       if (uNS > 0) spotGlow(hp, tt, wm, hA, hC, core);
       if (abs(ab.x) > uPU[ip].w - FRAME || abs(ab.y) > uPN[ip].w - FRAME) {     // the frame is opaque
-        vec3 fc = ip == uSel ? vec3(1.0, 0.78, 0.25) : vec3(0.34, 0.35, 0.38);
+        vec3 fc = ip == uSel ? vec3(1.0, 0.78, 0.25) : (type == 0 ? vec3(0.34, 0.35, 0.38) : vec3(0.25, 0.48, 0.58));
         col += r.w * mix(HAZE, fc * (0.65 + 0.35 * abs(dot(n, uSun))), fog);
         continue;
       }
-      if (sp < 6) { st[sp] = Ray(hp, reflect(r.d, n), r.w * vec3(0.9, 0.92, 0.95), tt, ip); sp++; }   // mirror
+      vec3 rd = reflect(r.d, n);
+      if (type == 0) {                                   // mirror
+        if (sp < 6) { st[sp] = Ray(hp, rd, r.w * vec3(0.9, 0.92, 0.95), tt, ip); sp++; }
+      } else if (type == 1) {                            // half-silvered: both ways, half each
+        vec3 w2 = r.w * vec3(0.47, 0.49, 0.5);
+        if (sp < 6) { st[sp] = Ray(hp, r.d, w2, tt, ip); sp++; } else col += w2 * HAZE;
+        if (sp < 6) { st[sp] = Ray(hp, rd, w2, tt, ip); sp++; } else col += w2 * HAZE;
+      }
     } else {
       col += r.w * sky(r.d);
     }
@@ -438,8 +462,9 @@ const reflect3 = (d, n) => sub3(d, mul3(n, 2 * dot3(d, n)));
 const DEG = Math.PI / 180;
 
 // ---------------------------------------------------------------------------
-// The laser. A beam starts at intensity 1 and loses some at every mirror; it stops when it gets too
-// faint, after too many bounces or after LASER.maxLen blocks.
+// The laser. A beam starts at intensity 1, loses some at every mirror and is split in half by every
+// beam splitter. A branch stops when it gets too faint, after too many bounces or after LASER.maxLen
+// blocks.
 // ---------------------------------------------------------------------------
 const RED = [1, 0.06, 0.03];
 const LASER = { maxLen: 400, minI: 0.012, maxDepth: 40, mirror: 0.95 };
@@ -491,9 +516,8 @@ function voxelRay(o, d, tmax) {                      // same walk as the shader'
   if (d[1] < -1e-9) { const tg = (1 - o[1]) / d[1]; if (tg > 0 && tg < tmax) return { t: tg, m: M.grass }; }
   return null;
 }
-// Follow one laser through mirrors. Returns the straight segments, the points where light touches
-// something (spots), and where the beam ends (leaves). Pending beams go on a stack, so panels added
-// later can send a beam two ways.
+// Follow one laser through mirrors and splitters. Returns the straight segments, the points where light
+// touches something (spots), and where each branch ends (leaves).
 function traceLaser(o, d) {
   const segs = [], spots = [], leaves = [];
   let full = false;
@@ -515,7 +539,8 @@ function traceLaser(o, d) {
       if (I < LASER.minI || r.depth >= LASER.maxDepth) return;
       stack.push({ ...r, o: hp, d: dir, I, len, depth: r.depth + 1, skip: P.i });
     };
-    next(reflect3(r.d, p.n), r.I * LASER.mirror);
+    if (p.type === 0) next(reflect3(r.d, p.n), r.I * LASER.mirror);
+    else if (p.type === 1) { next(r.d, r.I * 0.5); next(reflect3(r.d, p.n), r.I * 0.5); }
   }
   return { segs, spots, leaves, full };
 }
@@ -570,25 +595,37 @@ function uploadPanels() {
 // ---------------------------------------------------------------------------
 // Scenes. Beams run at y = 2.5 unless noted; the white screen is at z = 12.
 // ---------------------------------------------------------------------------
-function loadScene() {
+function loadScene(mode) {
   const P = [], E = [];
   const at = p => [p[0] + 0.5, p[1], p[2] + 0.5];      // keep beams in the middle of blocks, not on their edges
   const mir = (c, n, hu, hv) => P.push(makePanel(0, at(c), n, hu, hv));
+  const spl = (c, n) => P.push(makePanel(1, at(c), n));
   const emit = (o, d) => E.push({ o: at(o), d: norm3(d) });
-  // zigzag of 45° mirrors ending on the screen
-  emit([14, 2.5, 46], [1, 0, 0]);
-  mir([20, 2.5, 46], [-1, 0, -1]); mir([20, 2.5, 40], [1, 0, 1]); mir([26, 2.5, 40], [-1, 0, -1]);
-  // periscope over the low wall
-  emit([44, 2, 28], [0, 0, -1]);
-  mir([44, 2, 24], [0, 1, 1], 0.6, 0.6); mir([44, 6, 24], [0, -1, -1], 0.6, 0.6);
-  // hall of mirrors: two big facing mirrors and a beam fired in at an angle
-  mir([29, 2.5, 29], [1, 0, 0], 7, 1.5); mir([35, 2.5, 29], [-1, 0, 0], 7, 1.5);
-  emit([30, 2.2, 37], [1, 0, -0.3]);
-  // corner reflector on the floor, open toward the spawn point
-  const C = [46.5, 1.05, 36.5], s = 2.6;
-  mir([C[0], C[1] + s / 2, C[2] + s / 2], [1, 0, 0], s / 2, s / 2);
-  mir([C[0] - s / 2, C[1], C[2] + s / 2], [0, 1, 0], s / 2, s / 2);
-  mir([C[0] - s / 2, C[1] + s / 2, C[2]], [0, 0, 1], s / 2, s / 2);
+  if (mode === 'mirrors') {
+    // zigzag of 45° mirrors ending on the screen
+    emit([14, 2.5, 46], [1, 0, 0]);
+    mir([20, 2.5, 46], [-1, 0, -1]); mir([20, 2.5, 40], [1, 0, 1]); mir([26, 2.5, 40], [-1, 0, -1]);
+    // periscope over the low wall
+    emit([44, 2, 28], [0, 0, -1]);
+    mir([44, 2, 24], [0, 1, 1], 0.6, 0.6); mir([44, 6, 24], [0, -1, -1], 0.6, 0.6);
+    // hall of mirrors: two big facing mirrors and a beam fired in at an angle
+    mir([29, 2.5, 29], [1, 0, 0], 7, 1.5); mir([35, 2.5, 29], [-1, 0, 0], 7, 1.5);
+    emit([30, 2.2, 37], [1, 0, -0.3]);
+    // corner reflector on the floor, open toward the spawn point
+    const C = [46.5, 1.05, 36.5], s = 2.6;
+    mir([C[0], C[1] + s / 2, C[2] + s / 2], [1, 0, 0], s / 2, s / 2);
+    mir([C[0] - s / 2, C[1], C[2] + s / 2], [0, 1, 0], s / 2, s / 2);
+    mir([C[0] - s / 2, C[1] + s / 2, C[2]], [0, 0, 1], s / 2, s / 2);
+  } else if (mode === 'splitters') {
+    // cascade: one beam into four
+    emit([10, 2.5, 46], [1, 0, 0]);
+    spl([14, 2.5, 46], [-1, 0, -1]); spl([19, 2.5, 46], [-1, 0, -1]); spl([24, 2.5, 46], [-1, 0, -1]);
+    mir([29, 2.5, 46], [-1, 0, -1]);
+    // Mach–Zehnder interferometer: split, two paths, recombine into two outputs (screen and a side post)
+    emit([32, 2.5, 34], [1, 0, 0]);
+    spl([35, 2.5, 34], [-1, 0, -1]); mir([39, 2.5, 34], [-1, 0, -1]);
+    mir([35, 2.5, 28], [1, 0, 1]); spl([39, 2.5, 28], [1, 0, 1]);
+  }
   state.panels = P;
   state.pins = E;
 }
@@ -597,7 +634,7 @@ function loadScene() {
 // State, camera
 // ---------------------------------------------------------------------------
 const V3 = THREE.Vector3;
-const state = { pos: new V3(), yaw: 0, pitch: 0, laser: true, pins: [], panels: [], grab: -1, aimed: -1, msg: '', msgT: 0 };
+const state = { mode: 'mirrors', pos: new V3(), yaw: 0, pitch: 0, laser: true, pins: [], panels: [], grab: -1, aimed: -1, msg: '', msgT: 0 };
 function resetView() { state.pos.set(32.5, 7, 55); state.yaw = 0; state.pitch = -0.32; }
 function camBasis() {
   const cp = Math.cos(state.pitch), sp = Math.sin(state.pitch), cy = Math.cos(state.yaw), sy = Math.sin(state.yaw);
@@ -617,6 +654,7 @@ function aimedPanel() {
 }
 function say(text) { state.msg = text; state.msgT = 3; }
 function placePanel(type) {
+  if (type === 1 && !MODES[state.mode].splitter) return;
   if (state.panels.length >= MAXP) { say(`At most ${MAXP} panels: delete one first (X).`); return; }
   const { fwd } = camBasis(), o = arr(state.pos), d = arr(fwd);
   const P = nearestPanel(o, d, -1, 10), V = voxelRay(o, d, 10);
@@ -637,13 +675,24 @@ function pinLaser() {
   while (state.pins.length > MAXPINS) state.pins.shift();
 }
 function setLaser(on) { state.laser = on; $('bLaser').textContent = 'Laser: ' + (on ? 'on' : 'off'); $('bLaser').classList.toggle('on', on); }
+function setMode(mode) {
+  if (!MODES[mode]) mode = 'mirrors';
+  state.mode = mode;
+  document.body.classList.toggle('no-split', !MODES[mode].splitter);
+  $('demo').value = mode;
+  $('tipsBody').innerHTML = TIPS[mode];
+  const url = new URL(location.href); url.searchParams.set('demo', mode); history.replaceState(null, '', url);
+  loadScene(mode); resetView();
+}
 let liveRes = null;
 function laserText(r) {
   if (!r) return 'off';
   const L = r.leaves;
   if (!L.length) return 'fades out';
   const end = l => l.what ? `hits ${l.what} after ${l.len.toFixed(1)} blocks` : 'flies off into the sky';
-  const n = L[0].depth; return `${n ? `${n} bounce${n > 1 ? 's' : ''}, then ` : ''}${end(L[0])}`;
+  if (L.length === 1) { const n = L[0].depth; return `${n ? `${n} bounce${n > 1 ? 's' : ''}, then ` : ''}${end(L[0])}`; }
+  const b = L.reduce((a, l) => l.I > a.I ? l : a, L[0]);
+  return `splits into ${L.length} beams${r.full ? ' (beam budget reached)' : ''}; the brightest (${(100 * b.I).toFixed(0)}%) ${end(b)}`;
 }
 function aimText(i) {
   const p = state.panels[i];
@@ -671,6 +720,7 @@ window.addEventListener('keydown', e => {
   if (e.repeat) return;
   if (e.code === 'KeyT') startGrab();
   if (e.code === 'Digit1') placePanel(0);
+  if (e.code === 'Digit2') placePanel(1);
   if (e.code === 'KeyX' && state.aimed >= 0) { state.panels.splice(state.aimed, 1); state.grab = -1; }
   if (e.code === 'KeyC') { state.panels = []; state.grab = -1; }
   if (e.code === 'KeyL') setLaser(!state.laser);
@@ -695,11 +745,12 @@ canvas.addEventListener('pointerdown', e => {
 window.addEventListener('pointerup', e => { if (e.button === 2) { rmb = false; endGrab(); } dragging = false; });
 canvas.addEventListener('pointermove', e => { if (document.pointerLockElement === canvas || dragging) look(e.movementX || 0, e.movementY || 0); });
 
+$('demo').addEventListener('change', e => setMode(e.target.value));
 $('quality').addEventListener('change', e => { quality = e.target.value; resize(); });
 $('bLaser').addEventListener('click', () => setLaser(!state.laser));
 $('bPin').addEventListener('click', pinLaser);
 $('bUnpin').addEventListener('click', () => { state.pins = []; });
-$('bScene').addEventListener('click', () => loadScene());
+$('bScene').addEventListener('click', () => loadScene(state.mode));
 $('bView').addEventListener('click', resetView);
 $('tipsToggle').addEventListener('click', () => { const b = $('tipsBody'), hidden = b.style.display === 'none'; b.style.display = hidden ? '' : 'none'; $('tipsToggle').textContent = hidden ? 'hide' : 'show'; });
 
@@ -745,11 +796,10 @@ function frame(now) {
   }
   requestAnimationFrame(frame);
 }
-$('tipsBody').innerHTML = TIPS.mirrors;
-loadScene(); resetView();
+setMode(new URLSearchParams(location.search).get('demo') || 'mirrors');
 resize();
 requestAnimationFrame(frame);
-window.__demo = { state, traceLaser, loadScene, placePanel, rotatePanel, pinLaser, resetView, camBasis, uniforms, renderer, scene, cam, frame };
+window.__demo = { state, traceLaser, loadScene, setMode, placePanel, rotatePanel, pinLaser, resetView, camBasis, uniforms, renderer, scene, cam, frame };
 </script>
 </body>
 </html>
