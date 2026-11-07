@@ -94,7 +94,8 @@ pub fn pack_shared_view(
     let first_avatar_box: usize = shared.boxes.len();
     for player in players {
         let color: Color = AVATAR_COLORS[player.id as usize % AVATAR_COLORS.len()];
-        shared.add_avatar(get_avatar_frame(world, player.frame), AVATAR_HALF_M, color);
+        let name: String = format!("player {}", player.id);
+        shared.add_avatar(get_avatar_frame(world, player.frame), &name, AVATAR_HALF_M, color);
     }
     let trace_from = |eye: DMat4| {
         let data: SceneData =

@@ -16,9 +16,10 @@ use serde_json::{Value, json};
 use crate::physics::{
     self, GRAVITY_M_PER_S2, JUMP_SPEED_M_PER_S, SPRINT_SPEED_M_PER_S, WALK_SPEED_M_PER_S,
 };
-use crate::scene_data::{BEND_CUTOFF_PER_R, FOG_PER_R, SUN_DIRECTION, get_tile_cell_count};
+use crate::scene_data::{FOG_PER_R, SUN_DIRECTION, get_tile_cell_count};
 use crate::world::{
-    Color, EYE_HEIGHT_M, MATERIAL_GLASS, MATERIAL_GLOW, NAMED_COLORS, THROAT_PER_HORIZON, World,
+    Color, EYE_HEIGHT_M, FOIL_LAMBDA_SQUARED, MATERIAL_GLASS, MATERIAL_GLOW, NAMED_COLORS,
+    THROAT_PER_HORIZON, World,
 };
 
 /// `Result` is this module's result type.
@@ -33,7 +34,6 @@ const ZENITH_COLOR: Color = [0.30, 0.52, 0.88];
 const HORIZON_COLOR: Color = [0.78, 0.86, 0.95];
 const AMBIENT_LIGHT: f64 = 0.68;
 const SUN_LIGHT: f64 = 0.32;
-const FOIL_LAMBDA_SQUARED: f64 = 0.25;
 const SCHWARZSCHILD_PER_THROAT: f64 = 1.0 / THROAT_PER_HORIZON;
 
 /// `get_frame_values` gives a frame's 16 numbers in column-major order.
@@ -116,7 +116,7 @@ pub fn export_map(world: &World, folder: &Path) -> Result<PathBuf> {
                 "schwarzschild_radius_m": SCHWARZSCHILD_PER_THROAT * world.get_throat_m(),
                 "lambda_squared": FOIL_LAMBDA_SQUARED,
                 "radial_coordinate": "flat_effective",
-                "reach_m": BEND_CUTOFF_PER_R * r,
+                "reach_m": world.bend_cutoff_m,
                 "falloff": "cutoff",
                 "partner": mouth.partner_index,
             })

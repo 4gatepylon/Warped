@@ -22,6 +22,7 @@
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
 mod geometry;
+mod map;
 mod map_export;
 mod multiplayer;
 mod net;
@@ -116,6 +117,25 @@ enum Sampling {
     EveryPixel,
 }
 
+/// `MapName` is which map to play, from `common/maps/`.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum MapName {
+    HouseDemo,
+    LunarSurface,
+}
+
+impl MapName {
+    /// `get_folder_name` gives the map's folder name in `common/maps/`.
+    ///
+    /// Example: `let name = MapName::HouseDemo.get_folder_name();`
+    fn get_folder_name(self) -> &'static str {
+        match self {
+            MapName::HouseDemo => "house_demo",
+            MapName::LunarSurface => "lunar_surface",
+        }
+    }
+}
+
 /// `RouteKind` is which route `--play-route` plays: the scripted legs, or a tour around every
 /// mouth from 5 blocks to just outside its throat and back.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -197,6 +217,9 @@ struct Arguments {
     /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
+    /// Which map to play, from common/maps/.
+    #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
+    map: MapName,
     /// Write the world as a map in the portable format of common/maps/ (map.json) into this folder,
     /// replacing the folder's map.json, and exit.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
@@ -410,6 +433,15 @@ fn main() -> Result<()> {
     }
 }
 
+/// `load_world` loads a map from `common/maps/` as the world of boxes and mouths this renderer
+/// draws.
+///
+/// Example: `let world = load_world(MapName::HouseDemo)?;`
+fn load_world(name: MapName) -> Result<World> {
+    let map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
+    Ok(World::FromMap(&map)?)
+}
+
 /// `parse_server_address` reads `--join`'s address: an IP address with an optional port (`port`
 /// when it has none).
 ///
@@ -480,7 +512,7 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+    let world: World = load_world(arguments.map)?;
     let mut client: net::Client = net::Client::Connect(get_server_address(arguments)?)?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
@@ -735,7 +767,7 @@ fn make_bench_views(world: &World) -> Vec<View> {
 ///
 /// Example: `bench_views(&arguments, renderer)?;`
 fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+    let world: World = load_world(arguments.map)?;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
@@ -1072,7 +1104,7 @@ fn make_mouth_tour(world: &World) -> Vec<RouteFrame> {
 ///
 /// Example: `run_autopilot(&arguments, renderer)?;`
 fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+    let world: World = load_world(arguments.map)?;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("autopilot", arguments.label.as_deref())?;
@@ -1272,7 +1304,7 @@ impl Session {
     /// Example: `let mut session = Session::New(&arguments);`
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
-        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+        let world: World = load_world(arguments.map)?;
         let player: Player = Player::AtSpawn(&world);
         let route: Vec<RouteFrame> = match (arguments.play_route, arguments.route) {
             (false, _) => Vec::new(),

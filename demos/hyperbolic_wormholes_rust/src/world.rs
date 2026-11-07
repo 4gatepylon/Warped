@@ -12,6 +12,8 @@
 
 use glam::{DMat4, DVec4};
 
+use crate::map::{Map, Spawn, Warp, to_frame};
+
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot,
@@ -20,6 +22,8 @@ use crate::geometry::{
 pub const DEFAULT_CURVATURE_RADIUS_M: f64 = 8.0;
 pub const HORIZON_RADIUS_M: f64 = 1.4;
 pub const THROAT_PER_HORIZON: f64 = 0.25;
+pub const BEND_CUTOFF_PER_R: f64 = 2.0;
+pub const FOIL_LAMBDA_SQUARED: f64 = 0.25;
 pub const JUMP_RADIUS_PER_THROAT: f64 = 4.5;
 pub const EYE_HEIGHT_M: f64 = 1.7;
 pub const MAX_MOUTH_COUNT: usize = 8;
@@ -124,6 +128,7 @@ pub struct HyperbolicBox {
 /// cluster), which a ray can skip at once.
 #[derive(Clone)]
 pub struct Cluster {
+    pub name: String,
     pub bound: HyperbolicBox,
     pub first_box: usize,
     pub box_count: usize,
@@ -153,6 +158,8 @@ pub struct World {
     pub clusters: Vec<Cluster>,
     pub mouths: Vec<Mouth>,
     pub spawn_frame: DMat4,
+    pub throat_m: f64,
+    pub bend_cutoff_m: f64,
 }
 
 impl World {
@@ -167,20 +174,116 @@ impl World {
             clusters: Vec::new(),
             mouths: Vec::new(),
             spawn_frame: DMat4::IDENTITY,
+            throat_m: THROAT_PER_HORIZON * HORIZON_RADIUS_M,
+            bend_cutoff_m: BEND_CUTOFF_PER_R * curvature_radius_m,
         };
         world.spawn_frame = world.make_ground_frame(SPAWN_X_M, SPAWN_Z_M, SPAWN_HEADING_RAD);
         world.build_rails();
         let house_frame: DMat4 = world.get_house_frame();
-        world.group_boxes(house_frame, |w| w.build_house(house_frame));
+        world.group_boxes(house_frame, "the house", |w| w.build_house(house_frame));
         let blue_frame: DMat4 =
             world.make_frame_from_spawn(BLUE_PYLON_BEARING_RAD, BLUE_PYLON_DISTANCE_M);
-        world.group_boxes(blue_frame, |w| w.build_pylon(blue_frame, TEAM_BLUE));
+        world.group_boxes(blue_frame, "the blue pylon", |w| {
+            w.build_pylon(blue_frame, TEAM_BLUE)
+        });
         let red_frame: DMat4 = world.get_red_pylon_frame();
-        world.group_boxes(red_frame, |w| w.build_pylon(red_frame, TEAM_RED));
+        world.group_boxes(red_frame, "the red pylon", |w| {
+            w.build_pylon(red_frame, TEAM_RED)
+        });
         let pairs: Vec<(DMat4, DMat4)> = world.make_default_wormholes();
         world.set_wormholes(&pairs);
         world.place_trees();
         world
+    }
+
+    /// `FromMap` builds the world from a map in the portable format (`common/maps/`): its boxes,
+    /// grouped into clusters by `group` (each bounded around its first box's frame), its wormhole
+    /// mouths and its first spawn point. This world draws boxes and `foil` mouths with the
+    /// `flat_effective` radius and a `cutoff`, all alike, so a map with voxel structures, black
+    /// holes or other laws fails.
+    ///
+    /// Example: `let world = World::FromMap(&Map::Load(&get_map_folder("house_demo"))?)?;`
+    #[allow(non_snake_case)]
+    pub fn FromMap(map: &Map) -> Result<World, String> {
+        let unsupported = |what: &str| format!("map {}: this renderer draws boxes and foil mouths; {what}", map.name);
+        if !map.structures.is_empty() {
+            return Err(unsupported("it has voxel structures"));
+        }
+        let mouth: &Warp = map.warps.first().ok_or_else(|| unsupported("it has no wormhole mouths"))?;
+        for warp in &map.warps {
+            let is_like_first: bool = warp.kind == "wormhole_mouth"
+                && warp.law == "foil"
+                && warp.radial_coordinate == "flat_effective"
+                && warp.falloff == "cutoff"
+                && warp.lambda_squared == Some(FOIL_LAMBDA_SQUARED)
+                && warp.schwarzschild_radius_m == mouth.schwarzschild_radius_m
+                && warp.reach_m == mouth.reach_m;
+            if !is_like_first {
+                return Err(unsupported(&format!("warp {:?} isn't a mouth like the first one", warp.name)));
+            }
+        }
+        let spawn: &Spawn = map.spawns.first().ok_or_else(|| unsupported("it has no spawn point"))?;
+        let mut world: World = World {
+            curvature_radius_m: map.get_curvature_radius_m(),
+            boxes: Vec::new(),
+            clusters: Vec::new(),
+            mouths: Vec::new(),
+            spawn_frame: to_frame(&spawn.frame),
+            throat_m: mouth.schwarzschild_radius_m * THROAT_PER_HORIZON,
+            bend_cutoff_m: mouth.reach_m,
+        };
+        let mut groups: Vec<&str> = Vec::new();
+        for map_box in &map.boxes {
+            if !groups.contains(&map_box.group.as_str()) {
+                groups.push(&map_box.group);
+            }
+        }
+        for group in groups {
+            let first_box: usize = world.boxes.len();
+            for map_box in map.boxes.iter().filter(|b| b.group == group) {
+                let material: &crate::map::Material = map.get_material(map_box.material).map_err(|e| e.to_string())?;
+                let kind: u32 = match material.kind.as_str() {
+                    "glass" => MATERIAL_GLASS,
+                    "light" => MATERIAL_GLOW,
+                    "solid" => MATERIAL_SOLID,
+                    other => return Err(format!("map {}: box {:?} is made of {other:?}", map.name, map_box.name)),
+                };
+                world.add_box(to_frame(&map_box.frame), map_box.half_size_m, material.color, kind);
+            }
+            let frame: DMat4 = DMat4::from_cols(
+                world.boxes[first_box].normals[0],
+                world.boxes[first_box].normals[1],
+                world.boxes[first_box].normals[2],
+                world.boxes[first_box].center,
+            );
+            world.close_cluster(frame, group, first_box);
+        }
+        world.mouths = map
+            .warps
+            .iter()
+            .enumerate()
+            .map(|(k, warp)| {
+                let partner_index: usize = warp.partner.expect("the format requires a mouth's partner");
+                let frame: DMat4 = to_frame(&warp.frame);
+                let mut flip: DMat4 = DMat4::IDENTITY;
+                flip.col_mut(AXIS_Z)[AXIS_Z] = -1.0;
+                Mouth {
+                    frame,
+                    to_local: invert_lorentz(frame),
+                    flip,
+                    gluing: DMat4::IDENTITY,
+                    center: frame.col(AXIS_W),
+                    partner_index,
+                    pair_index: k.min(partner_index) / 2,
+                    name: warp.name.clone(),
+                }
+            })
+            .collect();
+        for k in 0..world.mouths.len() {
+            let partner_frame: DMat4 = world.mouths[world.mouths[k].partner_index].frame;
+            world.mouths[k].gluing = partner_frame * world.mouths[k].flip * world.mouths[k].to_local;
+        }
+        Ok(world)
     }
 
     /// `get_throat_m` gives the throat's radius in the lensing law's coordinates: a quarter of the
@@ -188,7 +291,7 @@ impl World {
     ///
     /// Example: `if rho_effective_m < world.get_throat_m() { cross(); }`
     pub fn get_throat_m(&self) -> f64 {
-        THROAT_PER_HORIZON * HORIZON_RADIUS_M
+        self.throat_m
     }
 
     /// `get_jump_radius_m` gives the radius of the sphere around each mouth that the Metal shader
@@ -242,9 +345,9 @@ impl World {
     /// `add_avatar` adds another player's body: one box around `frame`'s centre and axes, in a
     /// cluster of its own.
     ///
-    /// Example: `world.add_avatar(frame, [0.3, 0.95, 0.3], [0.9, 0.3, 0.3]);`
-    pub fn add_avatar(&mut self, frame: DMat4, half_m: [f64; 3], color: Color) {
-        self.group_boxes(frame, |world| {
+    /// Example: `world.add_avatar(frame, "player 2", [0.3, 0.95, 0.3], [0.9, 0.3, 0.3]);`
+    pub fn add_avatar(&mut self, frame: DMat4, name: &str, half_m: [f64; 3], color: Color) {
+        self.group_boxes(frame, name, |world| {
             world.add_box(frame, half_m, color, MATERIAL_SOLID)
         });
     }
@@ -301,16 +404,24 @@ impl World {
     /// `group_boxes` runs a builder and records the boxes it adds as one cluster, bounded by a box
     /// around `frame`'s planes that holds them all (or by its only box).
     ///
-    /// Example: `world.group_boxes(frame, |w| w.build_house(frame));`
-    fn group_boxes(&mut self, frame: DMat4, build: impl FnOnce(&mut World)) {
-        assert!(
-            self.clusters.len() < MAX_CLUSTER_COUNT,
-            "group_boxes: too many clusters"
-        );
+    /// Example: `world.group_boxes(frame, "the house", |w| w.build_house(frame));`
+    fn group_boxes(&mut self, frame: DMat4, name: &str, build: impl FnOnce(&mut World)) {
         let first_box: usize = self.boxes.len();
         build(self);
+        self.close_cluster(frame, name, first_box);
+    }
+
+    /// `close_cluster` records the boxes from `first_box` on as one cluster named `name`, bounded
+    /// by a box around `frame`'s planes that holds them all (or by its only box).
+    ///
+    /// Example: `world.close_cluster(frame, "the house", first_box);`
+    fn close_cluster(&mut self, frame: DMat4, name: &str, first_box: usize) {
+        assert!(
+            self.clusters.len() < MAX_CLUSTER_COUNT,
+            "close_cluster: too many clusters"
+        );
         let boxes: &[HyperbolicBox] = &self.boxes[first_box..];
-        assert!(!boxes.is_empty(), "group_boxes: the builder added no boxes");
+        assert!(!boxes.is_empty(), "close_cluster: the cluster has no boxes");
         let bound: HyperbolicBox = if boxes.len() == 1 {
             boxes[0].clone()
         } else {
@@ -334,6 +445,7 @@ impl World {
             .map(|b| self.get_box_top_m(b))
             .fold(0.0, f64::max);
         self.clusters.push(Cluster {
+            name: name.to_string(),
             bound,
             first_box,
             box_count: self.boxes.len() - first_box,
@@ -406,7 +518,7 @@ impl World {
     /// Example: `world.build_rails();`
     fn build_rails(&mut self) {
         let base_frame: DMat4 = self.make_ground_frame(0.0, -RAIL_START_M, 0.0);
-        self.group_boxes(base_frame, |w| {
+        self.group_boxes(base_frame, "the cobblestone wall", |w| {
             w.add_standing_box(
                 base_frame,
                 0.0,
@@ -421,7 +533,8 @@ impl World {
                 self.offset_frame(base_frame, f64::from(k) * RAIL_SPACING_M, 0.0, 0.0);
             let half_length_m: f64 = RAIL_LENGTH_M / 2.0;
             let color: Color = RAIL_COLORS[(k + RAIL_HALF_COUNT) as usize];
-            self.group_boxes(rail_frame, |w| {
+            let name: String = format!("rail {}", k + RAIL_HALF_COUNT + 1);
+            self.group_boxes(rail_frame, &name, |w| {
                 w.add_standing_box(
                     rail_frame,
                     0.0,
@@ -681,7 +794,8 @@ impl World {
             {
                 continue;
             }
-            self.group_boxes(frame, |w| w.build_tree(frame, height_m));
+            let name: String = format!("tree {}", placed_count + 1);
+            self.group_boxes(frame, &name, |w| w.build_tree(frame, height_m));
             placed_count += 1;
         }
     }
@@ -714,6 +828,7 @@ mod tests {
     //! | Box orientation against the plane | same frame, rotated and moved | `slab_bound_is_exact_for_a_centred_box`, `slab_bound_is_tight_for_a_moved_box` |
     //! | Cluster | house, pylon, tree | `every_box_is_inside_its_cluster_bound` |
     //! | Mouth | each of the demo's mouths | `jump_spheres_hold_no_boxes_or_ground` |
+    //! | World's source | built in code, loaded from `common/maps/house_demo` | `the_house_map_loads_the_built_world` |
 
     use super::*;
     use crate::geometry::{make_rotation_about, minkowski_dot};
@@ -831,6 +946,27 @@ mod tests {
                 assert!(bound >= sampled - TOLERANCE);
                 assert!(bound <= sampled + TIGHTNESS);
             }
+        }
+    }
+
+    #[test]
+    fn the_house_map_loads_the_built_world() {
+        let built: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+        let map: Map = Map::Load(&crate::map::get_map_folder("house_demo")).expect("the house map");
+        let loaded: World = World::FromMap(&map).expect("a world of boxes and mouths");
+        assert_eq!(loaded.curvature_radius_m, built.curvature_radius_m);
+        assert_eq!(loaded.spawn_frame, built.spawn_frame);
+        assert_eq!((loaded.throat_m, loaded.bend_cutoff_m), (built.throat_m, built.bend_cutoff_m));
+        assert_eq!(loaded.boxes.len(), built.boxes.len());
+        for (a, b) in loaded.boxes.iter().zip(&built.boxes) {
+            assert_eq!((a.normals, a.center, a.half_m, a.color, a.material), (b.normals, b.center, b.half_m, b.color, b.material));
+        }
+        let members = |w: &World| -> Vec<(String, usize, usize)> {
+            w.clusters.iter().map(|c| (c.name.clone(), c.first_box, c.box_count)).collect()
+        };
+        assert_eq!(members(&loaded), members(&built));
+        for (a, b) in loaded.mouths.iter().zip(&built.mouths) {
+            assert_eq!((a.frame, a.gluing, a.partner_index, a.pair_index), (b.frame, b.gluing, b.partner_index, b.pair_index));
         }
     }
 }

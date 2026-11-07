@@ -118,7 +118,7 @@ impl Player {
 /// Example: `let (bend, nearest_m) = get_light_bend(&world, x, v);`
 pub fn get_light_bend(world: &World, x: DVec4, v: DVec4) -> (DVec4, f64) {
     let r: f64 = world.curvature_radius_m;
-    let (cutoff_m, throat_m) = (2.0 * r, world.get_throat_m());
+    let (cutoff_m, throat_m) = (world.bend_cutoff_m, world.get_throat_m());
     let mut acceleration: DVec4 = DVec4::ZERO;
     let mut nearest_m: f64 = f64::INFINITY;
     for mouth in &world.mouths {
@@ -636,7 +636,7 @@ pub fn find_aimed_mouth(world: &World, frame: DMat4) -> Option<usize> {
         let local: DVec3 =
             get_local_direction(frame, normalize_tangent(x, mouth.center)).normalize();
         let angle_rad: f64 = (-local.z).clamp(-1.0, 1.0).acos();
-        let disk_rad: f64 = (SHADOW_PER_HORIZON * crate::world::HORIZON_RADIUS_M
+        let disk_rad: f64 = (SHADOW_PER_HORIZON * world.get_throat_m() / crate::world::THROAT_PER_HORIZON
             / (world.curvature_radius_m * distance.sinh()))
         .atan();
         if best.is_none_or(|(_, score)| angle_rad - disk_rad < score) {
@@ -725,19 +725,13 @@ pub fn trace_laser(world: &World, data: &SceneData) -> (Beam, LaserReport) {
 ///
 /// Example: `let name = describe_box(&world, 3);`
 pub fn describe_box(world: &World, index: usize) -> String {
-    let cluster: usize = world
+    world
         .clusters
         .iter()
-        .position(|c| index >= c.first_box && index < c.first_box + c.box_count)
-        .expect("describe_box: every box is in a cluster");
-    match cluster {
-        0 => "the cobblestone wall".to_string(),
-        1..=7 => format!("rail {cluster}"),
-        8 => "the house".to_string(),
-        9 => "the blue pylon".to_string(),
-        10 => "the red pylon".to_string(),
-        _ => "a tree".to_string(),
-    }
+        .find(|c| index >= c.first_box && index < c.first_box + c.box_count)
+        .expect("describe_box: every box is in a cluster")
+        .name
+        .clone()
 }
 
 #[cfg(test)]

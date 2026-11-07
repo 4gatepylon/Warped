@@ -39,7 +39,6 @@ pub const TEXELS_PER_MOUTH_FIELD: usize = 5;
 pub const ROW_TEXEL_COUNT: usize = TEXEL_MOUTH_FIELDS + TEXELS_PER_MOUTH_FIELD * MAX_MOUTH_COUNT;
 pub const BEAM_POINTS_PER_CHUNK: usize = 4;
 pub const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
-pub const BEND_CUTOFF_PER_R: f64 = 2.0;
 pub const FOG_PER_R: f64 = 3.0;
 const MIN_TILE_CELL_COUNT: i32 = 3;
 const MAX_TILE_CELL_COUNT: i32 = 15;
@@ -340,7 +339,7 @@ fn make_uniforms(
         tan_half_fov: tan_half_fov as f32,
         aspect: size_px.0 as f32 / size_px.1 as f32,
         throat_m: world.get_throat_m() as f32,
-        bend_cutoff_m: (BEND_CUTOFF_PER_R * r) as f32,
+        bend_cutoff_m: world.bend_cutoff_m as f32,
         fog_m: if is_fog_on {
             (FOG_PER_R * r) as f32
         } else {
