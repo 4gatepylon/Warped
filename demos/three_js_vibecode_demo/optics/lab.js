@@ -396,7 +396,7 @@ float segSeg(vec3 p1, vec3 q1, vec3 p2, vec3 q2, out float s, out float t) {   /
   return dot(w, w);
 }
 // Glow from laser segments near the straight piece a->b of a pixel's ray (which has travelled t0 so far).
-void beamGlow(vec3 a, vec3 b, float t0, float w, inout float hA, inout vec3 hC, inout vec3 core) {
+void beamGlow(vec3 a, vec3 b, float t0, float w, inout float hA, inout vec4 hC, inout vec3 core) {
   float len = length(b - a);
   float reach = REACH * max(uBeamR, uPix * (t0 + len));
   vec3 rm = 0.5 * (a + b);
@@ -412,21 +412,21 @@ void beamGlow(vec3 a, vec3 b, float t0, float w, inout float hA, inout vec3 hC, 
       float s, sb; float d2 = segSeg(a, b, A.xyz, B.xyz, s, sb);
       float tc = t0 + s * len, wb = C.w + B.w * sb * sl, sg = max(max(uBeamR, uPix * tc), wb);
       bool soft = wb > uBeamR;                         // widened by hot air: a soft glow, dimmer the wider it gets
-      float f = A.w * w * exp(-tc / 300.0) * (soft ? min(1.0, 0.2 / wb) : 1.0);
+      float f = A.w * w * exp(-tc / 300.0) * (soft ? min(1.0, 0.3 / wb) : 1.0);
       float h = f * exp(-d2 / ((soft ? 1.0 : 4.8) * sg * sg));
       if (h < 0.002) continue;
-      if (h > hA) { hA = h; hC = C.rgb; }
+      hA = max(hA, h); hC += vec4(C.rgb, 1.0) * h;       // halo colour: overlapping beams blend by strength
       core = max(core, C.rgb * f * (soft ? 0.0 : exp(-d2 / (sg * sg))));
     }
   }
 }
-void spotGlow(vec3 hp, float t, float w, inout float hA, inout vec3 hC, inout vec3 core) {   // where beams touch a surface
+void spotGlow(vec3 hp, float t, float w, inout float hA, inout vec4 hC, inout vec3 core) {   // where beams touch a surface
   float rr0 = max(0.07, 2.5 * uPix * t), fade = w * exp(-t / 300.0);
   for (int k = 0; k < ${MAXS}; k++) {
     if (k >= uNS) break;
     vec3 d = hp - uSpot[k].xyz; float rr = max(rr0, uSpotC[k].w);    // a soft beam's spot is as wide as the beam
-    float g = uSpot[k].w * fade * min(1.0, 0.6 / rr) * exp(-dot(d, d) / (rr * rr));
-    if (g > hA) { hA = g; hC = uSpotC[k].rgb; }
+    float g = uSpot[k].w * fade * min(1.0, 0.8 / rr) * exp(-dot(d, d) / (rr * rr));
+    hA = max(hA, g); hC += vec4(uSpotC[k].rgb, 1.0) * g;
     core = max(core, uSpotC[k].rgb * g * g);
   }
 }
@@ -438,7 +438,7 @@ void main() {
   Ray st[6];
   st[0] = Ray(uCamPos, dir, vec3(1.0), 0.0, -1);
   int sp = 1;
-  vec3 col = vec3(0.0), core = vec3(0.0), hC = vec3(0.0); float hA = 0.0;
+  vec3 col = vec3(0.0), core = vec3(0.0); vec4 hC = vec4(0.0); float hA = 0.0;
   for (int k = 0; k < 10; k++) {
     if (sp <= 0) break;
     sp--;
@@ -509,7 +509,7 @@ void main() {
     }
   }
   for (int i = 0; i < 6; i++) { if (i >= sp) break; col += st[i].w * HAZE; }   // out of budget: approximate
-  col = mix(col, hC, clamp(0.9 * hA, 0.0, 1.0));                                // laser halo
+  col = mix(col, hC.rgb / max(hC.a, 1e-6), clamp(0.9 * hA, 0.0, 1.0));                                // laser halo
   col += mix(core, vec3(max(core.r, max(core.g, core.b))), 0.6);               // white-hot core
   col = col / (1.0 + max(col - 1.0, 0.0) * 0.6);
   outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
