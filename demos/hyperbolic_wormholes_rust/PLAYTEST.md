@@ -17,10 +17,12 @@ git clone https://github.com/4gatepylon/Warped.git
 - `xcode-select --install` gives the C compiler, and CMake builds SDL3 (the window library) from source. Skip
   whichever you already have.
 - The repository is private: each player needs read access on GitHub to clone it.
-- Play from the `staging` branch, which has the newest fixes (`main` gets them when a person merges `staging`
-  into it): `git -C Warped switch staging`, and `git -C Warped pull` to update later.
-- From a fork, take `staging` from this repository (GitHub's "Sync fork" only updates the fork's `main`):
-  `git -C Warped remote add upstream https://github.com/4gatepylon/Warped.git`, then
+- `main` is the official version; `staging` is the latest, with fixes that reach `main` when a person merges
+  them. Everyone in a game should be on the same one.
+- For the official version: `git -C Warped switch main && git -C Warped pull`. For the latest:
+  `git -C Warped switch staging && git -C Warped pull`.
+- From a fork, GitHub's "Sync fork" updates the fork's `main`. For the latest, take `staging` from this
+  repository: `git -C Warped remote add upstream https://github.com/4gatepylon/Warped.git`, then
   `git -C Warped fetch upstream staging && git -C Warped switch -c staging upstream/staging`, and
   `git -C Warped pull upstream staging` to update later.
 - The first build takes a few minutes (SDL3 compiles from source); later ones take seconds.
