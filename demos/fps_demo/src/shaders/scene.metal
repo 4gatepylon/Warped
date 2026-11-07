@@ -144,10 +144,33 @@ fragment float4 forward_fragment(SceneVertexOut in [[stage_in]],
                                  bool is_front_face [[front_facing]]) {
     float alpha = 1.0;
     Surface surface = read_surface(in, material, draw, material_textures, is_front_face, alpha);
+    if (alpha < material.params.z) {
+        discard_fragment();
+    }
     SceneTextures textures = {shadow_map, sky_visibility, prefiltered, brdf_lut, ssao};
     float3 color = shade_surface(frame, surface, textures, point_lights);
     color = apply_fog(frame, color, in.world_position);
     return float4(color, alpha);
+}
+
+/**
+ * @brief `shadow_mask_fragment` cuts alpha-masked casters out of the shadow map.
+ * @par Example
+ * @code
+ * pipeline(scene_vertex, shadow_mask_fragment) with only a depth attachment
+ * @endcode
+ */
+fragment void shadow_mask_fragment(SceneVertexOut in [[stage_in]],
+                                   constant DrawUniforms& draw [[buffer(3)]],
+                                   constant MaterialUniforms& material [[buffer(4)]],
+                                   texture2d<float> base_color [[texture(0)]]) {
+    constexpr sampler material_sampler(coord::normalized, filter::linear, mip_filter::linear,
+                                       address::repeat);
+    float alpha = base_color.sample(material_sampler, in.uv).a * material.base_color_factor.a *
+                  draw.tint.a;
+    if (alpha < material.params.z) {
+        discard_fragment();
+    }
 }
 
 /** @brief `SkyVertexOut` is a full-screen triangle's vertex with its clip-space position. */
@@ -372,5 +395,5 @@ fragment float4 particle_fragment(ParticleVertexOut in [[stage_in]],
     if (in.kind == 3) {
         glow *= exp(-in.local.y * in.local.y * 8.0);
     }
-    return float4(color.rgb * glow * color.a, 0.0);
+    return float4(color.rgb * glow, 0.0);
 }

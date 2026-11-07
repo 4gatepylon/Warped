@@ -476,7 +476,7 @@ impl MetalRenderer {
                     );
                 }
             }
-            if pass == ScenePass::Forward {
+            if pass != ScenePass::Prepass {
                 set_fragment_bytes(encoder, as_bytes(&uniforms), 3);
                 set_fragment_bytes(encoder, as_bytes(&material.uniforms), 4);
                 for (index, texture) in material.textures.iter().enumerate() {
@@ -1174,7 +1174,7 @@ impl MetalRenderer {
             set_vertex_bytes(&encoder, as_bytes(buffers.frame), 1);
             set_vertex_bytes(&encoder, as_bytes(&pass), 2);
             let frustum: Frustum = Frustum::from_view_proj(cascades.view_proj[cascade]);
-            let casters: Vec<&DrawItem> = frame
+            let (masked_casters, opaque_casters): (Vec<&DrawItem>, Vec<&DrawItem>) = frame
                 .world_draws
                 .iter()
                 .filter(|draw| {
@@ -1182,15 +1182,22 @@ impl MetalRenderer {
                         && self.materials[draw.material.0 as usize].alpha_mode != AlphaMode::Blend
                         && frustum.contains_sphere(draw.bounds_center_m, draw.bounds_radius_m)
                 })
-                .collect();
-            self.draw_meshes(
-                &encoder,
-                &self.pipelines.shadow,
-                &casters,
-                ScenePass::Shadow,
-                buffers,
-                false,
-            );
+                .partition(|draw| {
+                    self.materials[draw.material.0 as usize].alpha_mode == AlphaMode::Mask
+                });
+            for (pipeline_pair, casters) in [
+                (&self.pipelines.shadow, &opaque_casters),
+                (&self.pipelines.shadow_masked, &masked_casters),
+            ] {
+                self.draw_meshes(
+                    &encoder,
+                    pipeline_pair,
+                    casters,
+                    ScenePass::Shadow,
+                    buffers,
+                    false,
+                );
+            }
             encoder.endEncoding();
         }
     }

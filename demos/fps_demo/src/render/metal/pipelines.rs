@@ -87,6 +87,7 @@ pub struct DepthStates {
 ///     let pipelines: Pipelines = Pipelines::new(&device);
 pub struct Pipelines {
     pub shadow: PipelinePair,
+    pub shadow_masked: PipelinePair,
     pub prepass: PipelinePair,
     pub forward_opaque: PipelinePair,
     pub forward_blend: PipelinePair,
@@ -302,6 +303,14 @@ impl Pipelines {
             function(&library, "hud_fragment", None);
         Pipelines {
             shadow: scene_pair(device, &library, None, None, Blend::None, "shadow"),
+            shadow_masked: scene_pair(
+                device,
+                &library,
+                Some("shadow_mask_fragment"),
+                None,
+                Blend::None,
+                "shadow_masked",
+            ),
             prepass: scene_pair(
                 device,
                 &library,
