@@ -1,4 +1,4 @@
 # Management server
 
-Creates, lists, joins and shuts down rooms, starts and stops each room's game server, and tells
-clients how to reach it.
+Starts and stops game servers and keeps track of which players may join each one. Its HTTP API is
+specified in `common/protocol/management_server_api.md`.

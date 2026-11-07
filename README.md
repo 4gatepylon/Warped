@@ -7,9 +7,9 @@ players can place objects such as black holes that bend the space around them.
 
 ```
 clients/mac/        # the game client, one folder per platform (macOS first)
-management_server/  # creates, joins and shuts down rooms, and starts their game servers
+management_server/  # starts and stops game servers, and tracks who may join each
 game_server/        # runs one room in real time; the authority on its state
-common/protocol/    # every message, as Protocol Buffers
+common/protocol/    # every message and API between components
 common/physics/     # the physics spec and the test cases every implementation passes
 demos/              # experiments that de-risk mechanics, weapons and physics before we build them
 ```
