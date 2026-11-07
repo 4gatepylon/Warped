@@ -57,6 +57,7 @@ For a game, this means turning "play it and see" into checks a program can run.
   - Give it a headless mode that takes an input file and a tick count and writes frames to a
     folder.
   - Keep game logic out of the client.
+  - The same applies to the starter Rust + SDL3 client in `clients/starter/`.
   - For checks that need a window, Peter Steinberger's Peekaboo gives agents macOS screenshots. It
     needs the Screen Recording permission.
   - The three.js demos in [`demos/`](../demos/README.md) are already easy: an agent can drive them
@@ -119,7 +120,7 @@ For a game, this means turning "play it and see" into checks a program can run.
   harness or thresholds. Anthropic's agents could only flip a "passes" field in their feature list.
   Simon Willison says agents do best on problems with clear success criteria that need trial and
   error, and benchmark work like this fits. The
-  [`experiment-decisions`](../.claude/skills/experiment-decisions/SKILL.md) skill already fits
+  [`experiment-decisions`](../.agents/skills/experiment-decisions/SKILL.md) skill already fits
   this. Real Wi-Fi vs. wired runs still need two machines and a person.
 
 ## 4. Repo-level gaps
@@ -129,7 +130,8 @@ As of 2026-11-06:
 - **There's no CI.** `.github/` doesn't exist, so agent PRs merge with no automatic check. Add a
   `make check` per component plus one at the root, and run the same command locally, in a Claude
   Code Stop hook, and in CI.
-- **[`CLAUDE.md`](../CLAUDE.md) is 356 lines and loads into every session.** An ETH Zurich study
+- **[`AGENTS.md`](../AGENTS.md) is 230 lines and loads into every session** (Claude Code reads it
+  through `CLAUDE.md`). An ETH Zurich study
   (ICLR 2026) found:
   - Agents follow these files closely.
   - The files raise cost by over 20%.
@@ -145,8 +147,10 @@ As of 2026-11-06:
   telling agents to run tools deleted months earlier.
 - **Use a separate reviewer agent.** A second agent with a skeptical prompt, or `/code-review`,
   catches more than asking the author to double-check.
-- **Pick a game server language agents can build and test fast.** Ronacher favors boring,
-  well-known languages. Weigh how quick and scriptable the build and test commands are.
+- **Keep build and test loops fast.** Ronacher favors boring, well-known languages, and found that
+  Python's slow startup slowed the agent loop and that agents got confused running Rust's tests.
+  The Python game server and the Rust starter client each have a `make test`; keep those quick,
+  and weigh this when choosing the macOS client's toolchain.
 
 ## Sources
 
