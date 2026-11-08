@@ -3,8 +3,8 @@
 `play_all_levels.py` starts a match server on `e2e/match_levels_fast.yaml` and a bot for each team, steered with
 `--bot-round-winners` (the bot of the team that should lose a round joins no level in it), so the match visits every
 level in `_PLAN`. It logs each level's start, winner and duration, and when each of the loser's pylons (consoles) went
-off, and fails on a stall (a round longer than `--round-timeout-s`), a process that stops early, or a round, level
-result file, pylon count or outcome that differs from `_PLAN`.
+off, and fails on a stall (a round longer than `--round-timeout-s`), a process that stops early, a round, level
+result file, pylon count or outcome that differs from `_PLAN`, a level joined twice, or a panic or error in a log.
 
 Interface:
     --match-port: The match server's UDP port (default 48110, away from the game's 47850).
@@ -67,6 +67,8 @@ _MATCH_FOLDER_LINE: re.Pattern[str] = re.compile(r"^Run folder: (.+)$")
 _PICTURE_FOLDER_LINE: re.Pattern[str] = re.compile(r"^Run folder: (.+/progression_pictures/.+)$", re.MULTILINE)
 _PROGRAM_LINE: re.Pattern[str] = re.compile(r"^\s*program: (\S+)$", re.MULTILINE)
 _PYLON_OFF_LINE: re.Pattern[str] = re.compile(r"turned off console \d+")
+_JOIN_LINE: re.Pattern[str] = re.compile(r"joined the (?:blue|red) team")
+_FAILURE_LINE: re.Pattern[str] = re.compile(r"panicked at|^Error: ", re.MULTILINE)
 _ON_FOOT_NOTE: str = "console bots hold E on each pylon from where they stand (servers take their word): not on foot"
 
 
@@ -243,7 +245,7 @@ def _watch_match(
 
 
 def _check_match(match_folder: Path, rounds: list[tuple[str, str, str, list[float]]]) -> None:
-    """`_check_match` checks the rounds played, each level's result file, its pylons and the outcome against `_PLAN`.
+    """`_check_match` checks rounds, result files, pylons, one join a level and the outcome against `_PLAN`.
 
     Args:
         match_folder: The match server's run folder.
@@ -262,6 +264,9 @@ def _check_match(match_folder: Path, rounds: list[tuple[str, str, str, list[floa
         result_path: Path = match_folder / f"round_{number}.json"
         if not result_path.exists() or json.loads(result_path.read_text()) != {"winner": winner}:
             raise _MatchCheckFailed(f"{result_path} (round {number}, {level}) doesn't say {winner} won")
+        level_log: str = (match_folder / f"round_{number}_server.log").read_text()
+        if (join_count := len(_JOIN_LINE.findall(level_log))) != 1:
+            raise _MatchCheckFailed(f"{join_count} players joined {level} in round {number}, not the one bot")
     report: dict[str, Any] = json.loads((match_folder / "match.json").read_text())
     if report["outcome"] != _OUTCOME:
         raise _MatchCheckFailed(f"the match ended {report['outcome']}, not {_OUTCOME}")
@@ -353,6 +358,9 @@ def main(
         for team, bot in bots.items():
             if bot.wait(timeout=_START_TIMEOUT_S) != 0:
                 raise _MatchCheckFailed(f"{team}'s bot stopped ({bot.returncode}); see {team}.log")
+        logs: list[Path] = [*run_folder.glob("*.log"), *match_folder.glob("*.log")]
+        if failed_logs := [str(log) for log in logs if _FAILURE_LINE.search(log.read_text())]:
+            raise _MatchCheckFailed(f"{failed_logs} show a panic or an error")
         picture_folder_match: re.Match[str] | None = _PICTURE_FOLDER_LINE.search((run_folder / "blue.log").read_text())
         if picture_folder_match is None:
             raise _MatchCheckFailed("blue's bot didn't say where its progression pictures are; see blue.log")

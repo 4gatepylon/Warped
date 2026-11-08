@@ -806,6 +806,7 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
     }
     let mut client: match_flow::MatchClient = match_flow::MatchClient::Connect(server, team)?;
     let mut level: Option<(usize, Option<Child>)> = None;
+    let mut level_stopped_at: Option<Instant> = None;
     let window: Option<(sdl3::Sdl, sdl3::render::WindowCanvas)> = match arguments.bot {
         true => None,
         false => {
@@ -865,11 +866,18 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
         if let Some((round, Some(child))) = &mut level
             && let Some(status) = child.try_wait()?
         {
-            println!("round {round}'s level stopped ({status}); starting it again");
+            println!(
+                "round {round}'s level stopped ({status}); starting it again if the round goes on"
+            );
+            level = Some((*round, None));
+            level_stopped_at = Some(Instant::now());
+        }
+        if match_flow::is_level_restart_due(level_stopped_at, client.view_at, LEVEL_RESTART_S) {
             level = None;
-            std::thread::sleep(Duration::from_secs_f64(LEVEL_RESTART_S));
+            level_stopped_at = None;
         }
         if level.as_ref().map(|(round, _)| *round) != playing.map(|(round, _, _)| round) {
+            level_stopped_at = None;
             if let Some((_, mut child)) = level.take() {
                 match_flow::stop_child(&mut child);
             }

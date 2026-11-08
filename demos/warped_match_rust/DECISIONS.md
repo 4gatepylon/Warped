@@ -45,6 +45,11 @@ the user should check.
 - **Fix in the copied level code**: when both teams' last consoles went off in the same server
   update, nobody won and the round never ended (seen in the end-to-end match). Now the first one
   turned off wins. The same bug is in `demos/hyperbolic_wormholes_rust/` (not changed here).
+- **Fix in the match client: a level that stops by itself starts again only if a fresh view says
+  its round goes on.** City Sphere's console bot quits when its team wins; the match client then
+  slept 1 s without hearing the server and, on the view from before the win, started the level
+  again, so a second player joined a won level in every run (found by `make play-all-levels`,
+  which now fails when a level is joined twice). A level that stops mid-round still restarts.
 - **Ports**: this copy's levels moved to 47852 (game) and 47853 (discovery) so they don't clash
   with the hyperbolic demo's 47800/47801.
 - **Balance note, rules unchanged** (**weigh in**): in bot matches the defender usually wins.
