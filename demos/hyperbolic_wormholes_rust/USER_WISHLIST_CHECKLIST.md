@@ -38,12 +38,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
-- [~] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
-  fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
-  missing". The textures come from `make download-assets` in `demos/fps_demo` and aren't committed ("it's fine if
-  they are not committed"); the game fails when they are not there, and "the error (client side) should say what to
-  do to fix it". Claimed by Claude Code (session `61edc3fe-1e25-49a4-a003-782bb81c534d`), branch
-  `claude/require-textures`, 2026-11-07.
 - [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
   center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
@@ -197,3 +191,8 @@ is in [`AGENTS.md`](AGENTS.md).
   radius (the rest is slightly darker and blurred), and shows where they are on the map. #166.
 - [x] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
   different key. The right button zooms in; the flashlight is on `F`. #170.
+- [x] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
+  fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
+  missing". The game fails when they are not there ("it's fine if they are not committed"), and "the error (client
+  side) should say what to do to fix it". #168 committed them in `demos/fps_demo/assets/`; #173 stops the client at
+  start with the command that restores a missing one.
