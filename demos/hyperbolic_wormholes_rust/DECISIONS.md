@@ -1036,6 +1036,40 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D82. Spaceships flying over Lunar Surface
+
+- **Choice:**
+  - **Ships:** five, purely for looks: a container freighter, a ring ship whose ring turns, and three fighters
+    flying in a V. Each is a flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s
+    `draw_spaceship`) from boxes and tapered capsules (tables `HULL_*`), lit by the sun on the edges that face it
+    and from below by the sunlit ground, with glowing engines and a short plume, red lights to port and green to
+    starboard, a flashing white strobe, a pulsing red beacon and lit windows.
+  - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) to 300 s
+    (the ring ship), highest at 58° to 84° above the horizon, then comes back round below the horizon in a fifth of
+    that time. So a view straight up nearly always has a ship in it.
+  - **Shared time:** where the ships are depends only on the UTC clock (`spaceships.rs`), so every window whose
+    clock is set by the network shows the same ships in the same place, to within its clock's error (tens of
+    milliseconds, under a pixel). The game has no clock all clients share (the server sends no time). Fixed views
+    (`--bench-views`) show the sky at time 0, so their images stay the same from run to run.
+  - **Background only:** the ships are part of the sky. They show only where a ray escapes to the sky, behind
+    everything (and bent through the lenses, like the stars), and nothing else traces them, so they have no
+    collisions and no effect on lasers or play.
+  - **Style, not map:** like the stars, they belong to the shader's `lunar` appearance style, not to the map: a
+    map neither places them nor turns them off.
+  - **Cost:** each sky pixel rules a ship out with a few dot products; only pixels within 1.5 half lengths of a ship
+    shade its hull. On D10's shared machine, the window at 1280×800 ran 85.5 fps (11.1 ms on the GPU) with the
+    ships and 85.7 fps (11.1 ms) without; `--bench-views` at 2560×1600 moved by −4 to +4 ms per view (mean +1 ms),
+    within the noise, and views straight up with all five ships in sight took about 0.4 ms more on the GPU.
+- **Alternatives:**
+  - ships as structures traced like the blocks (properly shadowed, but every ray would pay for them, and they would
+    be in the game's world);
+  - a time sent by the server (exactly shared, but a protocol change for background art, and a window without a
+    server would still need a clock);
+  - whole orbits at a steady speed (half of each below the horizon, so looking up often showed an empty sky);
+  - ships described in the map format (`common/maps/`), which only this renderer would read.
+- **Rationale:** you asked for a few spaceships flying overhead in the sky, purely background world-building, to
+  look cool and pretty.
+
 ### D83. Aiming zooms in, and the flashlight moves to F
 
 - **Choice:**
@@ -1085,6 +1119,43 @@
     it).
 - **Rationale:** you asked that going through a wormhole turn your whole screen kind of cyan, simulating the
   relativistic effect on colour if possible.
+
+### D85. Slanted neon HUD bars that pulse (W-54)
+
+- **Choice:**
+  - **Look:** you picked, from four options rendered over Lunar Surface, B's shape with C's background, a bit more
+    translucent than C. Each segment leans like `/` (its sides shift 0.45 of its height) with corners rounded to
+    0.15% of the screen's height. An empty segment is a slot of dark glass (`[0.02, 0.04, 0.08]`, 38% opaque, C's was
+    45%) outlined faintly in the bar's colour (35%). A filled one is the bar's colour at 60% (C's was 70%), lighter
+    at the top and darker at the bottom (±20%), with a gloss over its top half (30%), an outline in its colour
+    lightened 35% toward white (85%), and a glow in its colour 0.6% of the screen's height wide. Bars are 1.6% of
+    the screen's height tall (1.8% before), with 0.35% of its width between segments. The console bar below the
+    crosshair has the same look, as one slot with a filled part.
+  - **Pulses:** a band of light (a Gaussian, 2% of the screen's width at half width, leaning with the segments)
+    crosses a bar from 2.5 half widths beyond one end to as far beyond the other:
+    - **Hit:** each hit sends one reddish-orange (`[1.0, 0.38, 0.12]`, 80%) pulse down the health bar, right to left,
+      in 0.5 s. Another hit restarts it.
+    - **Sprinting:** while you sprint, blue (`[0.15, 0.4, 1.0]`, 80%) pulses run down the energy bar, right to left,
+      in 0.5 s, one every 0.8 s.
+    - **Refilling:** while the energy refills, a fainter pulse (the bar's colour 65% of the way to white, 40%) runs up
+      it, left to right, in 1 s, one every 1.6 s. Health gets one when it rises (a respawn or a new game); it doesn't
+      regenerate. A sprint pulse cuts a refill pulse short; a refill pulse waits for a sprint pulse to finish.
+    - **Ammo:** the rifle's heat and the sniper's block get no pulse, not even while the rifle cools, as you said
+      ammo is normal.
+  - **Drawing:** each overlay rectangle carries a style (corner radius, outline, gloss, drop shadow, slant, glow,
+    shading) and a pulse. The overlay shader draws it from a rounded box's signed distance with half-pixel
+    antialiasing: first every rectangle's shadow and glow (the strongest of each at a pixel), then the rectangles in
+    order. The crosshair keeps a flat style. The look and the pulses are in `hud_bars.rs`. The CPU renderer's window
+    draws the same rectangles as flat boxes, without style or pulse.
+- **Alternatives:**
+  - the four options as they were: A, glass capsules (rounded pills, a strong gloss, drop shadows); B, slanted
+    tactical (on one dark panel); C, neon (upright slots); D, a slim track (thin segments in a dark rounded track);
+  - pulses lighting whole segments one after another, computed on the CPU (a coarser, stepped band);
+  - a refill pulse while the rifle cools (it would run nearly all the time while firing).
+- **Rationale:** you asked for bars that look more professional, at least slightly translucent, slightly shiny and
+  rounded, chose "slanted tactical but with the neo background", slightly more translucent than the neon example,
+  and asked for a reddish-orange pulse down the health bar when taking damage, a blue one down the energy bar while
+  running, none on ammo, and a much more subtle one while regaining things such as energy.
 
 ### D86. Ask before exiting on Escape
 
@@ -1160,6 +1231,30 @@
 - **Rationale:** you reported that a laser shot out of a window close up doesn't leave the room; it stops on the
   glass by design, so whether lasers should pass through windows is your call.
 
+### D91. A window says why it can't play on its server (W-72, W-78)
+
+- **Choice:**
+  - **No answer:** a window shows "NO ANSWER FROM THE SERVER" and the server's address when nothing has answered its
+    messages for 2 s, and prints a fuller hint in the terminal once. It counts only time with a message waiting for an
+    answer, so a long first frame, when the window sends nothing, doesn't count.
+  - **Another version:** "SERVER RUNS ANOTHER VERSION" shows when the server's snapshots have had the wrong length
+    for this game, and none the right one, for a second. A welcome whose settings this game can't read stops the
+    game with an error saying the server runs another version.
+  - **Full:** a full server now answers a join with a new `Full` message (kind 12, which old clients ignore). The
+    window shows "THE GAME IS FULL".
+  - **Joining:** after `1` or `2`, "JOINING THE GAME" shows until the welcome, instead of no banner.
+  - **Finding a server:** `--join auto` listens for 1 s after the first announcement and joins the server on
+    `DEFAULT_PORT` if one announced itself, else the first heard, printing the others.
+  - **Server log:** a join now prints the window's address as "their window's address", so it isn't mistaken for
+    the server's port.
+  - **Shooting (W-78):** a player in a game on a server can shoot only once welcomed: not from the team screen,
+    while joining, or while out after a hit.
+- **Alternatives:**
+  - a version number in the join message (part of W-58, another agent's);
+  - a list of servers to pick from, when several announce themselves (more than this needed).
+- **Rationale:** you couldn't join with `1` or `2`, which turned out to be a join sent to a port no server listened
+  on, and nothing said so. You asked to cover the cases where a server doesn't answer, and that you can't shoot
+  before leaving the team screen.
 
 ## Baselines
 
