@@ -107,8 +107,9 @@ that line is ignored.
 
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
 the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,
-in their team's colours. The menu's MAP page rings the same 60 m around you and darkens the rest. To move, resize
-or hide the minimap, change `minimap` in your `player_settings.yaml` (`corner: top_left`, `top_right`,
+in their team's colours. The menu's MAP page rings the same 60 m around you and darkens the rest, and shows every
+other player in the game, both teams, near or far, as a dot in their team's colour ringed in dark grey. To move,
+resize or hide the minimap, change `minimap` in your `player_settings.yaml` (`corner: top_left`, `top_right`,
 `bottom_left` or `bottom_right`).
 
 Look up on Lunar Surface: spaceships fly slowly across the sky, purely for looks. A ring ship with a turning ring and
