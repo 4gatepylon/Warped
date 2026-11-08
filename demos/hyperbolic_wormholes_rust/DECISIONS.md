@@ -660,6 +660,31 @@
   drifting back down by itself.
 - **Rationale:** you asked for recoil on the rifle.
 
+### D60. Game settings in a YAML file
+
+- **Choice:**
+  - **The file:** `game_settings.yaml` holds the numbers that tune play, in sections: movement, sprint energy,
+    head bob, the sniper (gun 1), the rifle (gun 2), consoles, respawn and display. Each key has a one-line note
+    beside it, because you asked for a file that is easy to understand; the repository's no-comments rule is for
+    code.
+  - **Distribution:** `--settings <file>` (`SETTINGS=` with `make serve-game`, `make host-game` and
+    `make run-demo`) gives a server its settings, and the server sends them in its welcome to every player who
+    joins. The window adopts them on joining, so everyone plays by the server's numbers. Without `--settings`, the
+    file as built in is used.
+  - **Checks:** every key is required, unknown keys fail, and every number must be above 0. Zero is allowed for
+    the bob depths, the recoil, the respawn delay and the motion blur. An error names the key.
+  - **Left out:** mouse sensitivity (each player's own preference, not the server's), the player limit and
+    timeouts (part of the protocol), and the wand's looks.
+  - **Bots:** they keep the built-in movement settings.
+- **Alternatives:**
+  - a file of overrides on top of the defaults (shorter files, but a typo in a key name would be silently
+    ignored unless checked separately);
+  - TOML (the Rust crates' usual format; you asked for YAML);
+  - each player reading their own file (players could play by different numbers).
+- **Rationale:** you asked for speed, head bob, shots per second and the other game parameters in a YAML file that
+  the server takes with a flag, so players can tune the game. The YAML parser is `serde_yaml` 0.9, which its author
+  has marked deprecated but which is stable and widely used.
+
 
 ## Baselines
 

@@ -1,11 +1,11 @@
 //! `net.rs` lets players on one local network share a game. A server (its own process, without a
 //! window) keeps every player's eye frame, laser switch and the console they hold `E` on, sends
 //! everyone a snapshot 60 times a second, removes a player another player's laser hit, turns off a
-//! console held for `CONSOLE_DISABLE_S`, ends the game when a team's consoles are all off, and
+//! console held for the settings' `consoles.hold_to_disable_s`, ends the game when a team's consoles are all off, and
 //! announces itself on the network so others can find it. A client joins, sends its own player
 //! each frame and receives the others and the game's state.
 //!
-//! Interface: `DEFAULT_PORT`, `MAX_PLAYER_COUNT`, `MAX_CONSOLE_COUNT`, `CONSOLE_DISABLE_S`,
+//! Interface: `DEFAULT_PORT`, `MAX_PLAYER_COUNT`, `MAX_CONSOLE_COUNT`,
 //! `TEAM_NAMES`, `get_team`, `bind_server`, `serve`, `find_server`, `Client`, `RemotePlayer`,
 //! `GameState`, `NetEvent`.
 //!
@@ -18,7 +18,8 @@
 //! - Each client decides when its own laser hits someone (it traces the laser anyway) and which
 //!   console it aims at, and the server takes its word.
 //! - A player keeps their id, and so their team, when they rejoin from the same address.
-//! - The server's welcome names its map; a client of another map fails rather than playing on.
+//! - The server's welcome names its map and carries its game settings; a client of another map
+//!   fails rather than playing on.
 
 use std::error::Error;
 use std::io::ErrorKind;
@@ -28,13 +29,14 @@ use std::time::{Duration, Instant};
 
 use glam::DMat4;
 
+use crate::settings::GameSettings;
+
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub const DEFAULT_PORT: u16 = 47_800;
 pub const MAX_PLAYER_COUNT: usize = 8;
 pub const MAX_CONSOLE_COUNT: usize = 32;
-pub const CONSOLE_DISABLE_S: f64 = 10.0;
 pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
 const NO_CONSOLE: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
@@ -242,6 +244,7 @@ struct Slot {
 struct Server {
     socket: UdpSocket,
     map_name: String,
+    settings: GameSettings,
     slots: Vec<Slot>,
     next_id: u32,
     known_ids: Vec<(SocketAddr, u32)>,
@@ -291,7 +294,9 @@ impl Server {
                     None => return Ok(()),
                 };
                 let mut welcome: Message = Message::New(Kind::Welcome).id(id);
+                welcome.0.push(self.map_name.len() as u8);
                 welcome.0.extend_from_slice(self.map_name.as_bytes());
+                welcome.0.extend_from_slice(&self.settings.to_json());
                 self.socket.send_to(&welcome.0, address)?;
             }
             Some(Kind::State) => {
@@ -371,7 +376,7 @@ impl Server {
             && self.game.off_mask >> index & 1 == 0
     }
 
-    /// `update_consoles` turns off each console a player has held `E` on for `CONSOLE_DISABLE_S`,
+    /// `update_consoles` turns off each console a player has held `E` on for `consoles.hold_to_disable_s`,
     /// and declares the other team the winner once all of a team's consoles are off.
     ///
     /// Example: `server.update_consoles();`
@@ -379,7 +384,7 @@ impl Server {
         for slot in &mut self.slots {
             if let (Some(console), Some(since)) =
                 (slot.player.disabling_console, slot.disabling_since)
-                && since.elapsed().as_secs_f64() >= CONSOLE_DISABLE_S
+                && since.elapsed().as_secs_f64() >= self.settings.consoles.hold_to_disable_s
             {
                 self.game.off_mask |= 1 << console;
                 (slot.player.disabling_console, slot.disabling_since) = (None, None);
@@ -449,17 +454,19 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
     Ok(socket)
 }
 
-/// `serve` runs a server for the map `map_name` on `socket` (from `bind_server`) until
-/// `should_stop` is set: it answers joins (naming the map), relays players, removes players who are hit or silent for `PLAYER_TIMEOUT_S`, turns off
+/// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
+/// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
+/// players, removes players who are hit or silent for `PLAYER_TIMEOUT_S`, turns off
 /// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
 /// starts a new game after that when `should_start_new_game` is set (clearing it), and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), vec![0, 1], &should_start_new_game)?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), GameSettings::Builtin(), vec![0, 1], &should_start_new_game)?;`
 pub fn serve(
     socket: UdpSocket,
     should_stop: &AtomicBool,
     map_name: String,
+    settings: GameSettings,
     console_teams: Vec<u32>,
     should_start_new_game: &AtomicBool,
 ) -> Result<()> {
@@ -477,6 +484,7 @@ pub fn serve(
     let mut server: Server = Server {
         socket,
         map_name,
+        settings,
         slots: Vec::new(),
         next_id: 0,
         known_ids: Vec::new(),
@@ -558,13 +566,14 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
     .into())
 }
 
-/// `Client` is this player's connection: its map's name, its id once welcomed, the other players
-/// and the game.
+/// `Client` is this player's connection: its map's name, its id and the server's game settings
+/// once welcomed, the other players and the game.
 pub struct Client {
     socket: UdpSocket,
     server: SocketAddr,
     map_name: String,
     pub id: Option<u32>,
+    pub settings: Option<GameSettings>,
     pub players: Vec<RemotePlayer>,
     pub game: GameState,
     last_join: Instant,
@@ -585,6 +594,7 @@ impl Client {
             server,
             map_name: map_name.to_string(),
             id: None,
+            settings: None,
             players: Vec::new(),
             game: GameState::default(),
             last_join: Instant::now(),
@@ -614,15 +624,18 @@ impl Client {
             let mut reader: Reader = Reader { bytes, position: 1 };
             match bytes.first().copied().and_then(Kind::FromByte) {
                 Some(Kind::Welcome) if self.id.is_none() => {
-                    if let Some(id) = reader.id() {
-                        let server_map: String =
-                            String::from_utf8_lossy(&bytes[reader.position..]).into();
+                    if let Some(id) = reader.id()
+                        && let Some(&[name_bytes]) = reader.take(1)
+                        && let Some(name) = reader.take(usize::from(name_bytes))
+                    {
+                        let server_map: String = String::from_utf8_lossy(name).into();
                         if server_map != self.map_name {
                             return Err(format!(
                                 "net: the server at {} plays the map {server_map}, but this game loaded {}; join with the server's map (MAP={})",
                                 self.server, self.map_name, server_map.replace('_', "-")
                             ).into());
                         }
+                        self.settings = Some(GameSettings::FromJson(&bytes[reader.position..])?);
                         self.id = Some(id);
                         events.push(NetEvent::Joined(id));
                     }
@@ -746,8 +759,9 @@ mod tests {
     //! | Datagram length | complete, cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
     //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
     //! | Hit | by a joined player, by a stranger, on a player who is gone | `only_joined_players_can_hit` |
+    //! | Welcome size | the built-in settings with the longest map name | `the_welcome_fits_a_datagram` |
     //! | Hits to kill | 1 (eliminated at once), several (eliminated at the last) | `only_joined_players_can_hit`, `rifle_hits_add_up` |
-    //! | Console held | the other team's (turned off after `CONSOLE_DISABLE_S`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
+    //! | Console held | the other team's (turned off after the settings' `hold_to_disable_s`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
 
     use super::*;
@@ -761,6 +775,7 @@ mod tests {
         Server {
             socket: UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port"),
             map_name: TEST_MAP_NAME.to_string(),
+            settings: GameSettings::Builtin(),
             slots: Vec::new(),
             next_id: 0,
             known_ids: Vec::new(),
@@ -770,7 +785,7 @@ mod tests {
     }
 
     /// `hold_console` sends player `id`'s state from `from` holding `E` on `console`, then makes
-    /// the server count it as held for `CONSOLE_DISABLE_S` and update the consoles.
+    /// the server count it as held for its settings' `hold_to_disable_s` and update the consoles.
     ///
     /// Example: `hold_console(&mut server, 1, address(50_001), 2);`
     fn hold_console(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
@@ -783,10 +798,11 @@ mod tests {
         server
             .handle(&Message::New(Kind::State).player(&player).0, from)
             .expect("a state");
+        let disable_s: f64 = server.settings.consoles.hold_to_disable_s;
         for slot in &mut server.slots {
             slot.disabling_since = slot
                 .disabling_since
-                .map(|since| since - Duration::from_secs_f64(CONSOLE_DISABLE_S));
+                .map(|since| since - Duration::from_secs_f64(disable_s));
         }
         server.update_consoles();
     }
@@ -917,6 +933,12 @@ mod tests {
             error.contains(TEST_MAP_NAME) && error.contains("house_demo"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn the_welcome_fits_a_datagram() {
+        let header_bytes: usize = 1 + BYTES_PER_ID + 1 + usize::from(u8::MAX);
+        assert!(header_bytes + GameSettings::Builtin().to_json().len() <= MAX_DATAGRAM_BYTES);
     }
 
     #[test]

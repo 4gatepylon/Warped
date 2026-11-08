@@ -43,6 +43,10 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   terminal; `Ctrl-C` ends the game.
 - `make host-game MAP=lunar-surface` does both in one terminal: it starts the same server as its own process, opens
   your window in it, and stops the server when your window closes.
+- To tune the game (speeds, jump, head bob, both guns, consoles, respawn delay, motion blur), copy
+  `game_settings.yaml`, change its numbers, and start the server with it:
+  `make host-game MAP=lunar-surface SETTINGS=my_settings.yaml` (or `make serve-game ... SETTINGS=...`). Everyone who
+  joins plays by the server's settings.
 - `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
   within a few seconds, use the address the server printed.
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming

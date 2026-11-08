@@ -1,0 +1,55 @@
+# `game_settings.yaml` holds the numbers that tune how the Rust demo plays. The game server reads it
+# and sends it to every player who joins, so everyone in a game plays by the same numbers; a game
+# without a server uses it too.
+#
+# Interface:
+#     Copy this file, change the numbers, and pass the copy to the server: `SETTINGS=` with
+#     `make serve-game` or `make host-game` (`--settings`). Every key is required, unknown keys
+#     fail, and numbers must be above 0 unless their note says 0 is allowed. Each name ends in its
+#     unit: `_m` meters, `_s` seconds, `_rad` radians, `_per_s` per second.
+#
+# Example:
+#     cp game_settings.yaml fast.yaml  # edit fast.yaml, then:
+#     make host-game MAP=lunar-surface SETTINGS=fast.yaml
+
+movement:
+  walk_speed_per_map_speed: 2.0  # Walking speed, times the map's (Lunar Surface: 5 m/s).
+  sprint_speed_per_map_speed: 2.0  # Sprinting speed, times the map's (Lunar Surface: 9 m/s).
+  jump_height_m: 1.25  # How high a jump rises. Blocks are 1 m tall.
+  jump_time_per_map_jump_time: 0.3333333333333333  # Time in the air, times the map's (1.73 s); sets gravity.
+
+sprint_energy:
+  drain_s: 7.5  # Seconds of sprinting that empty a full bar.
+  refill_s: 15.0  # Seconds to refill an empty bar while Shift is up.
+
+head_bob:
+  walk_depth_m: 0.08  # How far the eye dips at each step while walking (0 for none).
+  sprint_depth_m: 0.14  # How far the eye dips at each step while sprinting (0 for none).
+  walk_steps_per_s: 2.0  # Steps a second while walking.
+  sprint_steps_per_s: 2.8  # Steps a second while sprinting.
+  fade_s: 0.1667  # Seconds the bob takes to start or stop.
+
+sniper:  # Gun 1 (key 1): the thin laser wand, one shot per click.
+  shot_s: 0.25  # How long each shot's beam lasts.
+  hits_to_eliminate: 1  # Hits that eliminate a player.
+
+rifle:  # Gun 2 (key 2): the grey block, fires while the button is held.
+  shots_per_s: 8.0  # Shots a second while the button is held.
+  pulse_s: 0.06  # How long each shot's beam lasts.
+  shots_until_overheat: 20  # Shots in a row before it overheats.
+  cool_down_s: 2.0  # Seconds without firing to cool down fully.
+  head_hits_to_eliminate: 2  # Hits to the head (the top half-meter) that eliminate a player.
+  body_hits_to_eliminate: 12  # Hits to the body that eliminate a player.
+  recoil_up_rad: 0.0075  # How far each shot kicks the view up (0 for none).
+  recoil_sideways_rad: 0.0025  # How far each shot kicks the view left or right, alternately (0 for none).
+  recoil_settle_s: 0.08  # Seconds the gun takes to settle after a shot's jolt (0 for none).
+
+consoles:
+  hold_to_disable_s: 10.0  # Seconds of holding E that turn off one of the other team's consoles.
+  reach_m: 3.0  # How close a player must be to a console to turn it off.
+
+respawn:
+  delay_s: 3.0  # Seconds a player who was hit waits before coming back (0 for at once).
+
+display:
+  motion_blur_s: 0.01  # How long motion smears in the window (0 for none).
