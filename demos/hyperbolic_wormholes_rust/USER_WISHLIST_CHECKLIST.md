@@ -23,10 +23,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
   2026-11-07.
-- [~] **W-57 Laser stuck in a room.** In one of the rooms on the red side, the one with windows one block wide,
-  shooting out from close to a window hits some sort of hitbox (or looks like it) and the laser doesn't leave the
-  room.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/laser-room-fix`, 2026-11-07.
 - [~] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
   exit?", exits if the player presses OK, and otherwise doesn't.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/exit-confirm`, 2026-11-07.
@@ -191,6 +187,9 @@ is in [`AGENTS.md`](AGENTS.md).
   radius (the rest is slightly darker and blurred), and shows where they are on the map. #166.
 - [x] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
   different key. The right button zooms in; the flashlight is on `F`. #170.
+- [x] **W-57 Laser stuck in a room.** In one of the rooms on the red side, the one with windows one block wide,
+  shooting out from close to a window hits some sort of hitbox (or looks like it) and the laser doesn't leave the
+  room. Not a bug: the "hitbox" is the window's glass pane, and glass stops lasers by design (D88). #174.
 - [x] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
   fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
   missing". The game fails when they are not there ("it's fine if they are not committed"), and "the error (client
