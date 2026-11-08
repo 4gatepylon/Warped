@@ -11,6 +11,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox"). Claimed by Claude Code (subagent of
+  session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." Pictures first. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
@@ -120,7 +122,8 @@ are here too, since the user hadn't confirmed them.
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. #210.
 - [?] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
-  the blue spawn stands on it; W-94 replaces the pad with a model later. #210.
+  the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
+  #210.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
   #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
