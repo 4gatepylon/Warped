@@ -25,7 +25,7 @@ use crate::terrain::get_fermi_coordinates;
 use crate::voxel_world::{BeamSegment, geodesic_point};
 
 const MARGIN_FRAC: f64 = 0.03;
-const PLAYER_MARK_RADIUS_PX: f32 = 4.0;
+const PLAYER_MARK_RADIUS_PX: f32 = 8.0;
 const TEAM_COLORS: [[f32; 4]; 2] = [[0.35, 0.6, 1.0, 1.0], [1.0, 0.35, 0.3, 1.0]];
 const SAMPLES_PER_SEGMENT: usize = 6;
 

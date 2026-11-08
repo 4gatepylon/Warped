@@ -24,20 +24,22 @@ make join-game SERVER=127.0.0.1
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
   (`--player-settings`) to `make join-game`.
-- `Tab` opens a menu of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
+- `Tab` opens the menu on its SCORES page (below); `E` turns to the settings page, of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
   (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
   stands still while it is open, but the game goes on.
-- `Q` and `E` turn the menu's pages: SETTINGS (above) and MAP, the whole map from above with you on it as a disk in
+- `Q` and `E` turn the menu's pages: SCORES, SETTINGS (above), MAP and CREDITS. MAP is the whole map from above with you on it as a disk in
   your team's colour pointing the way you face: the ground's relief, structures brighter the higher they are,
   consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
   zones' edges (dashed) and the playable boundary. The map is drawn in its Fermi coordinates
   (`common/maps/README.md`), so things far above and below its middle line look squeezed from side to side: that is
-  the hyperbolic plane. The third page, SCORES, shows in a game on a server how many players there are and each
+  the hyperbolic plane. The SCORES page, where the menu opens, shows in a game on a server how many players there are and each
   one's team, kills and deaths in this game, sorted by team and then kills, with your line highlighted and each
   team's totals. The MAP page also rings everything within the minimap's reach of you (60 m by default); the rest is
   darker and blurred. The ring is a hyperbolic circle, so on the map it comes out lopsided. In a game on a server,
   every other player in the game shows as a smaller dot in their team's colour, ringed in dark grey, near or far.
+  The last page, CREDITS, says where the game's assets come from: their authors, sources and licenses
+  (`src/credits.rs`).
 - The minimap, in the top right, is a Poincaré disk of the ground within 60 m of you, turned so you face up (the
   white arrow in the middle): faint lines every 10 m and paths away from you bend into arcs, as straight lines do
   in that picture of the hyperbolic plane. Other players show as dots and laser shots as lines, in their team's
@@ -46,10 +48,11 @@ make join-game SERVER=127.0.0.1
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
-  you through. Coming out, your view blueshifts toward cyan, as if you moved at 15% of light speed (D84): red fades,
-  green takes red's light and blue green's, most of all straight ahead, then it fades back over 1.5 s.
-  `view.wormhole_tint_frac` (0 to 1, also in the menu) and `view.wormhole_tint_s` in `player_settings.yaml` set its
-  strength and length (0 for none). Only the player who goes through sees it (Metal renderer).
+  you through. For the split second you are inside the mouth (within about 2 m of its throat), moving, your view
+  flashes almost white, as if you moved near light speed (D84): a pale blue-white walking forward, a warm white
+  walking backward. It is strongest at the throat and with speed, none standing still, and gone once you are 2 m
+  out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for
+  none). Only you see your own flash (Metal renderer, voxel maps).
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
   `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
@@ -59,6 +62,11 @@ make join-game SERVER=127.0.0.1
   Each shot strays a little from the crosshair, by a random angle sampled for that shot (D89): with the sniper
   usually by a hair (3 mrad on average, at most 15), with the rifle by up to 2 mrad cold, growing with its heat to 20
   mrad and shrinking as it cools (`noise_*_rad` under `sniper` and `rifle` in `server_settings.yaml`).
+  The sniper's beam is a white lightsaber blade and the rifle's a laser in the team's colour (D99). Each shot's beam
+  also flickers with shot noise: every frame a random share of its pixels is speckled, 1 in 10 of them black, 1 in 10
+  white and 8 in 10 dropping out to show what is behind, while the rest is the normal beam. The share is random per
+  sniper shot (0.2 on average, at most half the beam) and rises with the rifle's heat, from none cold to half the beam
+  at full heat (`beam_speckle_*_frac` and `beam_speckle` in `server_settings.yaml`).
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
@@ -78,6 +86,17 @@ make join-game SERVER=127.0.0.1
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
+- `Q` throws your purple wormhole mouth, the next press your green one, then purple again, and so on, on both maps.
+  A throw is lobbed under its own gravity, drops to the floor below whatever it hits, and hovers there at eye
+  height facing back the way it flew; once both are down they link, and any player or laser that goes into one
+  comes out of the other (`wormholes` in `server_settings.yaml`). The view through a thrown mouth is tinted its
+  colour, and a mouth in the air, or down while its partner isn't, glows as a small ball. A throw fizzles if it
+  never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
+  A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
+  2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
+- On Lunar Surface the blue and red zones' edges are walls you see through (D103): faint sheets in the team's colour
+  straight above each edge, 6 m high above the ground, brightest at their foot and fading out at the top. They stop
+  neither you nor lasers. The map sets their height and opacity (`regions.zone_walls` in its `map.json`).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
@@ -130,7 +149,7 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
-  consoles, respawn, the hit slowdown, the flashlight); it sends them to every player who joins.
+  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes); it sends them to every player who joins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
@@ -182,6 +201,9 @@ make run-autopilot
 
 ## How it works
 
+- `thrown_wormholes.rs`: each player's purple and green mouths: the lobbed throw, where a mouth hovers once down,
+  and which colour is next. Each map adds the linked pairs as mouths of its own (after the map's), and
+  `net.rs` sends every player's mouths in each snapshot.
 - `geometry.rs`: Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
 - `world.rs`: the scene: hyperbolic boxes grouped in clusters, and the wormholes' mouths with their gluing maps.
 - `scene_data.rs`: each frame, packs the scene into rows of float 4-vectors, one row in the camera's coordinates and

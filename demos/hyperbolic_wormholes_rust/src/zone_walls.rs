@@ -65,19 +65,17 @@ impl ZoneWalls {
         let Some(look) = regions.zone_walls else {
             return Ok(None);
         };
-        if !(look.height_m > 0.0) {
+        if look.height_m <= 0.0 {
             return Err(format!(
                 "map: regions.zone_walls.height_m is {}, not positive",
                 look.height_m
-            )
-            .into());
+            ));
         }
         if !(look.opacity_frac > 0.0 && look.opacity_frac < 1.0) {
             return Err(format!(
                 "map: regions.zone_walls.opacity_frac is {}, not between 0 and 1",
                 look.opacity_frac
-            )
-            .into());
+            ));
         }
         let mut walls: Vec<ZoneWall> = Vec::new();
         for zone in regions.zones.iter().flatten() {
@@ -104,8 +102,7 @@ impl ZoneWalls {
             return Err(format!(
                 "map: its zones have {} edges with walls, more than {MAX_ZONE_WALL_COUNT}",
                 walls.len()
-            )
-            .into());
+            ));
         }
         Ok(Some(ZoneWalls {
             walls,
