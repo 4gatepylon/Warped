@@ -56,6 +56,16 @@ is in [`AGENTS.md`](AGENTS.md).
   The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
   commit the models with textures downscaled (about 20 MB).
   Claimed by Devin (session Devin Desktop 2026-11-07), branch `devin/models-prepare`, 2026-11-07.
+- [~] **W-106 Teal robot player model.** "Replace the player model with that [Teal V.2] and rig it with an animation":
+  the Sketchfab model "Teal V.2" by Lagst (`d6a54ff9468c451bbdbd879afa03f20a`, Sketchfab Standard) replaces the
+  1 × 4 voxel column drawn for every player's body (the others', and your own in the third-person view, W-61
+  (third-person view)). The user chose: idle, walk, run, jump and death clips, keyframed in Blender on the model's own
+  rig; lasers keep hitting the current box, not the triangles; the model is ray-traced with W-94 (Sketchfab models for
+  the voxel assets)'s triangle renderer. Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch
+  `claude/teal-player`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-teal` on
+    `leah`'s Mac, branch `claude/teal-player` (not pushed yet), to be stacked on W-94 (Sketchfab models for the voxel
+    assets)'s branch once that is pushed. State, 2026-11-08: started; the clips are made first.
 
 ## Open
 
