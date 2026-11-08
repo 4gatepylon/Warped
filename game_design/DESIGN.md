@@ -308,14 +308,16 @@ Every key here is the default. Each player can rebind any action, in the menu or
   turned so the player faces up, with other players as dots and shots as lines in their team's
   colours. Straight paths away from the player bend into arcs, as they do in that picture of the
   hyperbolic plane.
-- **Menu** (`Tab`), with three pages:
+- **Menu** (`Tab`), with four pages; it opens on SCORES:
+  - SCORES: the player count, and each player's team, kills and deaths, sorted by team and kills,
+    with each team's totals.
   - SETTINGS: the player's own settings (key bindings, mouse speed and view effects).
   - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole
     mouths, the black hole, the spawns, the zones' edges and the map edge, the player as a disk
     pointing the way they face, a circle of the minimap's reach around them (the rest darker and
     blurred), and every other player in the game, near or far, as a dot in their team's colour.
-  - SCORES: the player count, and each player's team, kills and deaths, sorted by team and kills,
-    with each team's totals.
+  - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
+    and the libraries the game is built on.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the
   screen shakes (each player's own setting).
 - **Motion blur:** a slight one (each player's own setting).
@@ -327,8 +329,9 @@ Every key here is the default. Each player can rebind any action, in the menu or
   250 m/s, and each point of it fades soon after the front passes.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
-- A player coming out of a wormhole sees the world blueshift toward cyan, as if moving at 15% of
-  light speed, fading back within 1.5 s. Only that player sees it.
+- A player moving through a wormhole's throat sees the world flash almost white for a split second, as if moving
+  near light speed: pale blue-white walking forward, warm white walking backward, stronger nearer the throat and
+  faster, none standing still or outside the throat's region. Only that player sees it.
 - A shot that hits the ground throws up dust and a puff of mist where it lands, which every player
   sees. The grains fly up a few meters and fall back, and all of it fades within 2 s.
 
@@ -342,6 +345,8 @@ Every weapon follows these rules:
   the shooter is.
 - A player who is hit is slowed (see [Movement](#movement)).
 - Each shot strays from the crosshair by a small random angle, sampled for that shot.
+- Each shot's beam flickers with noise: every frame, random pixels of it turn black, white or drop out to show
+  what is behind.
 - Aiming (right button) zooms in over 0.15 s and turns the view more slowly by the same factor.
 - The rules are a simplified version of those of tactical shooters such as CS:GO.
 - A player who carries two weapons switches between them with the mouse wheel (either way swaps
@@ -360,6 +365,8 @@ Every weapon follows these rules:
 | Shot lasts (hits what the crosshair crosses) | 0.25 s | 0.06 s per shot |
 | Laser | Shows once per shot; each point fades 0.25 s after the front passes | Pulses with each shot; each point fades after 0.05 s |
 | Shot noise (each shot strays at random) | Small: 3 mrad on average, sampled exponentially, at most 15 mrad | Up to 2 mrad cold, growing with the rifle's heat to 20 mrad and shrinking as it cools |
+| Beam look | A white lightsaber blade in a pale haze | A laser in the team's colour |
+| Beam noise (each frame, a share of the beam's pixels turns black, white or drops out, 1 : 1 : 8) | Random per shot: 0.2 on average, sampled exponentially, at most 0.5 | None cold, growing with the rifle's heat to 0.5 |
 | Recoil | None | Each shot kicks the view up 7.5 mrad and 2.5 mrad left or right, alternately, settling in 0.08 s |
 | Aim zoom | 2.5× | 1.5× |
 
