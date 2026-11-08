@@ -38,15 +38,6 @@ is in [`AGENTS.md`](AGENTS.md).
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`.
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: options and pictures done, no
     code; waiting for the user to pick a model (and approve any download).
-- [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
-  curvature by default (and at most twice). Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-ada9a91a495af6bb8` on the user's Mac, branch
-    `claude/stronger-curvature` (on this Mac only so far; to be pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-37/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building the setting and
-    rendering 1x, 1.5x and 2x; waits for the user's OK before merging.
 - [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
@@ -163,6 +154,8 @@ are here too, since the user hadn't confirmed them.
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
+- [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
+  curvature by default (and at most twice). #285.
 
 ## Done
 
