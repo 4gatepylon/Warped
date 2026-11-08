@@ -1092,14 +1092,20 @@
 ### D82. Spaceships flying over Lunar Surface
 
 - **Choice:**
-  - **Ships:** five, purely for looks: a container freighter, a ring ship whose ring turns, and three fighters
-    flying in a V. Each is a flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s
-    `draw_spaceship`) from boxes and tapered capsules (tables `HULL_*`), lit by the sun on the edges that face it
-    and from below by the sunlit ground, with glowing engines and a short plume, red lights to port and green to
-    starboard, a flashing white strobe, a pulsing red beacon and lit windows.
-  - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) to 300 s
-    (the ring ship), highest at 58° to 84° above the horizon, then comes back round below the horizon in a fifth of
-    that time. So a view straight up nearly always has a ship in it.
+  - **Ships:** four, purely for looks: a ring ship whose ring turns, and three fighters flying in a V. Each is a
+    flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s `draw_spaceship`) from boxes,
+    tapered capsules and triangles (tables `HULL_*`), lit by the sun on the edges that face it and from below by the
+    sunlit ground, with glowing engines and a short plume, red lights to port and green to starboard, a flashing
+    white strobe and lit windows.
+  - **Delta fighters (W-88):** each fighter is one flat triangle, about as wide as it is long, with a darker spine
+    and a dark glass canopy painted on (`HULL_INSETS`, which colour a hull without changing its outline), two
+    engines at the back and nearly plain panels. Until W-88 they had a thin fuselage, thin swept wings and engine
+    pods. You picked this wide delta over a slimmer one.
+  - **No freighter (W-87):** a fifth ship, a container freighter with coloured containers, a lit bridge and orange
+    engines, flew from #193 until W-87 removed it, with its hull tables and its pulsing red beacon.
+  - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) or 300 s
+    (the ring ship), highest at 84° and 74° above the horizon, then comes back round below the horizon in a fifth of
+    that time. So a view straight up often has a ship in it.
   - **Shared time:** where the ships are depends only on the UTC clock (`spaceships.rs`), so every window whose
     clock is set by the network shows the same ships in the same place, to within its clock's error (tens of
     milliseconds, under a pixel). The game has no clock all clients share (the server sends no time). Fixed views
@@ -1112,7 +1118,8 @@
   - **Cost:** each sky pixel rules a ship out with a few dot products; only pixels within 1.5 half lengths of a ship
     shade its hull. On D10's shared machine, the window at 1280×800 ran 85.5 fps (11.1 ms on the GPU) with the
     ships and 85.7 fps (11.1 ms) without; `--bench-views` at 2560×1600 moved by −4 to +4 ms per view (mean +1 ms),
-    within the noise, and views straight up with all five ships in sight took about 0.4 ms more on the GPU.
+    within the noise, and views straight up with all five ships of then (the freighter too) in sight took about
+    0.4 ms more on the GPU.
 - **Alternatives:**
   - ships as structures traced like the blocks (properly shadowed, but every ray would pay for them, and they would
     be in the game's world);
@@ -1121,7 +1128,9 @@
   - whole orbits at a steady speed (half of each below the horizon, so looking up often showed an empty sky);
   - ships described in the map format (`common/maps/`), which only this renderer would read.
 - **Rationale:** you asked for a few spaceships flying overhead in the sky, purely background world-building, to
-  look cool and pretty.
+  look cool and pretty; then, seeing them, that the colourful freighter go ("the freighter is indeed meant to be
+  deleted and is ugly") and the ring station stay; and that the fighters become simple, geometric deltas without
+  thin arms ("A wide delta").
 
 ### D83. Aiming zooms in, and the flashlight moves to F
 
@@ -1209,6 +1218,8 @@
   rounded, chose "slanted tactical but with the neo background", slightly more translucent than the neon example,
   and asked for a reddish-orange pulse down the health bar when taking damage, a blue one down the energy bar while
   running, none on ammo, and a much more subtle one while regaining things such as energy.
+- **Since D94 (W-80):** wide swells over the filled part, paced by the smoothed rate of change, replace these
+  pulses.
 
 ### D86. Ask before exiting on Escape
 
@@ -1418,7 +1429,55 @@
 - **Rationale:** you asked that crouching recharge the energy for running at the same rate as running uses it, and
   walking at half that, as YAML defaults that can be changed.
 
-## Baselines
+### D94. Soft swells along the bars' filled part, paced by how fast they change (W-80)
+
+- **Choice:** you picked variant D from four rendered samples (A quick glints, B rate-paced, C soft swells, D C's
+  swells made wider and rate-paced). It replaces D85's pulses:
+  - **Where:** the swells run over a bar's filled part only. Down from the end of the last filled segment (the last
+    hit point, or the last energy slot) toward the bar's start while the value falls; up from the start toward that
+    end while it rises. They fade in and out smoothly inside both ends, over half a half width (at most half the
+    filled part), so the empty slots stay dark.
+  - **Shape:** a wide Gaussian glow, 4.5% of the screen's width at half width (about a quarter of a bar) and 1.1 bar
+    heights tall, over segments and gaps alike. The overlay shader draws it after the segments (`get_pulse_glow`):
+    it tints toward the pulse's colour and adds 0.6 of that colour as light. Up to 4 swells run on a bar at once.
+  - **Rate:** each bar keeps an exponential moving average of its value (0.3 s time constant), and the average's rate
+    of change drives everything. Strength is that rate over 15% of the bar per second, at most 1. It sets the swells'
+    opacity (50% at full strength while falling, 45% while rising), their speed (0.8 to 2.2 bar widths a second) and
+    the time between them (0.9 s down to 0.45 s). A swell starts each period while the strength is at least 5%.
+  - **What that gives:**
+    - **Hit:** a burst of 2 or 3 swells over about a second, fast and strong at first, then slower and fainter.
+    - **Sprinting:** a steady train.
+    - **Refilling:** about half as strong, as the energy refills at half the rate it drains (faster while crouching,
+      D93).
+    - **Respawn:** a strong rising burst.
+    - **No change, no swell:** full health, full energy, or sprint held with no energy left.
+  - **Colours:** reddish-orange `[1.0, 0.45, 0.2]` on health; pale blue-white `[0.8, 0.94, 1.0]` on energy (lighter
+    than D85's deep blue, which looked dark); the bar's own colour 65% of the way to white while rising. Ammo still
+    never pulses.
+- **Alternatives:**
+  - A, B and C, as rendered (narrow glints, medium rate-paced glows, narrower swells at a fixed pace);
+  - the glow only over the segments (it read as whole segments lighting up);
+  - pulses started by events (a hit, the sprint key) rather than by the value changing (they would not follow how
+    fast it changes, and a server with endless sprint would pulse while the energy stays full).
+- **Rationale:** you asked that the pulsing start where the filled part ends, that the blue be less dark, that the
+  pulses look Gaussian, more subtle and faster, in proportion to the smoothed rate of change; then for "soft swell"
+  but rate based, "really wide gaussian like; think like smoother convolution vibes".
+
+### D95. A step up is searched from the bottom (W-85)
+
+- **Choice:** when a step forward is blocked, the walk tries lifts of 2, 4, 6 cm and so on up to 30 cm
+  (`MAX_WALK_RISE_M`), takes the first that clears, and bisects between it and the lift before it. It used to try 30
+  cm first and give up if that didn't clear.
+- **Why it got stuck:** a structure's floor is a geodesic plane, so a step toward a habitat module's door or along a
+  walkway lifts it 1 to 2 cm into the feet, and the walk needs a small lift. The doorways and walkways are only 2 m
+  high, so a 30 cm lift put the head (15 cm above the 1.6 m eye) into the lintel or the roof, and the walk gave up.
+  The player stopped about 1 m before a module's door and moved only 0.3 to 0.5 m in a walkway.
+- **Alternatives:**
+  - a smaller `MAX_WALK_RISE_M` (it would stop climbing the low curbs and plinths it climbs now);
+  - a lower head probe (the head would show inside low ceilings);
+  - a taller doorway in the map (only those doorways, and any low ceiling added later would trap players again).
+- **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
+  room for it, and costs at most 15 more checks, only on a blocked step.
 
 ### D15. WebGL at the same drawing-buffer sizes
 

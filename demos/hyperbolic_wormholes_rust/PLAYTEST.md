@@ -92,8 +92,10 @@ full speed. The server's `map_edge` settings set where the slowdown starts and s
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
 
 The bars in the bottom left (health, then the gun's ammo, then sprint energy) lean like `/` and glow in their
-colours. Each hit sends a reddish-orange pulse down the health bar, right to left. While you sprint, blue pulses run
-down the energy bar; while it refills, fainter ones run up it. The ammo bar doesn't pulse.
+colours. While one changes, soft swells of light run over its filled part, stronger and faster the faster it
+changes: after a hit, reddish-orange ones run down the health bar from your last hit point; while you sprint, pale
+blue ones run down the energy bar from its last filled slot; while it refills, fainter ones run up toward it. The
+ammo bar doesn't pulse.
 
 Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and your whole view turns
 cyan as you come out, as if blueshifted by moving fast toward what you see: reds turn green, greys turn cyan, the
@@ -107,9 +109,9 @@ in their team's colours. The menu's MAP page rings the same 60 m around you and 
 or hide the minimap, change `minimap` in your `player_settings.yaml` (`corner: top_left`, `top_right`,
 `bottom_left` or `bottom_right`).
 
-Look up on Lunar Surface: spaceships fly slowly across the sky, purely for looks. A container freighter, a ring ship
-with a turning ring, and three fighters in a V each cross from horizon to horizon in 2 to 5 minutes, with engine
-glow, red and green running lights and a flashing strobe. They follow the UTC clock, so everyone whose clock is right
+Look up on Lunar Surface: spaceships fly slowly across the sky, purely for looks. A ring ship with a turning ring and
+three delta-wing fighters in a V each cross from horizon to horizon in 2 to 5 minutes, with engine glow, red and green running
+lights and a flashing strobe. They follow the UTC clock, so everyone whose clock is right
 sees the same ships at the same moment. They are far away in the sky: lasers and players never touch them.
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add

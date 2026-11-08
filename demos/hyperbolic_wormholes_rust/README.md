@@ -69,9 +69,11 @@ make join-game SERVER=127.0.0.1
   2 s (D81).
 - The bars in the bottom left (health in a game on a server, the gun's ammo, and on Lunar Surface the sprint energy)
   are segments that lean like `/`: empty ones dark glass outlined in the bar's colour, filled ones translucent,
-  glossy and glowing (D85). A reddish-orange pulse runs down the health bar (right to left) at each hit, a blue one
-  down the energy bar while you sprint, and a fainter one up the energy bar while it refills; the ammo bar has none.
-  The CPU renderer's window draws them as flat boxes.
+  glossy and glowing (D85). While health or energy changes, soft, wide swells of light run over the bar's filled
+  part: reddish-orange down the health bar from the last hit point after a hit, pale blue down the energy bar from
+  the last filled slot while you sprint, and fainter ones up toward the filled end while it refills. They are as
+  strong, fast and frequent as the value's smoothed rate of change (D94); the ammo bar has none. The CPU renderer's
+  window draws the bars as flat boxes.
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
@@ -106,7 +108,7 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 7.5 s crouched or 15 s walking or standing, a head bob, jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
-- Spaceships fly over Lunar Surface, purely for looks (D82): a freighter, a ring ship and three fighters in a V, each
+- Spaceships fly over Lunar Surface, purely for looks (D82): a ring ship and three delta-wing fighters in a V, each
   crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
