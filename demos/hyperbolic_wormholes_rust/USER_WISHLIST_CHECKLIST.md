@@ -16,9 +16,6 @@ is in [`AGENTS.md`](AGENTS.md).
   `claude/minimap-one-laser`, 2026-11-07.
 - [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
-- [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
-  and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/delta-fighters`, 2026-11-07.
 - [~] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
   be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user wants to see it
   before it merges. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
@@ -270,6 +267,8 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-87 No colourful spaceship.** Remove the colourful spaceship from the sky (W-53, #193): "the circular space
   station one is fine and great, but the colourful ones look ugly". That is the container freighter; the ring station
   stays, and so do the grey fighters unless the user says otherwise. #232.
+- [?] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go
+  simple and geometric." Pictures first; the user picked "A wide delta". #242.
 
 ## Done
 
