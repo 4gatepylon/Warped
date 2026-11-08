@@ -1204,7 +1204,7 @@
   just the specific colors should be a bit more crisp". Then: "make a PR that makes it take slightly longer; ideally
   just double its radius or whatever (i.e. walking at same speed should take exactly twice as long of time showing
   me cyan or red)".
-- **Superseded in part by:** D100, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
+- **Superseded in part by:** D105, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
   backward, which you picked from the colour sheets; where and how long the shift shows stays as here.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
@@ -1729,7 +1729,7 @@
 - **Alternatives:** moving the WebGL demo's mouths to match first.
 - **Rationale:** it is the version you found too slow.
 
-### D100. The wormhole colour shift in the colours you picked, for W-82 (wormhole colour from motion)
+### D105. The wormhole colour shift in the colours you picked, for W-82 (wormhole colour from motion)
 
 - **Choice:** D84 keeps where, when and how long the shift shows (inside the mouth, × the speed along the view, no
   timer, 0.63 s walking through mouth A); its colours are now the two you picked from sheets made by an exact Python
