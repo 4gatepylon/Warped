@@ -1,0 +1,41 @@
+# The match's levels, blue's deepest first (game_design/DESIGN.md): Dust, Snow Planet, City Sphere,
+# Dark Forest, Lunar Surface. This file is the source of truth for which program plays each level;
+# see README.md, "Level interface". `program: self` is this demo's own binary; any other program
+# is a path from this folder, as is `map_picture` (the level's picture on the progression page;
+# this demo's own maps draw theirs). `stand_in_for` marks a level played on another map until its own
+# demo is plugged in.
+levels:
+  - name: Dust
+    folder: demos/dust_rust
+    branch: devin/dust-demo
+    status: plugged in (make levels links and builds devin/dust-demo in .levels/)
+    program: .levels/dust/demos/dust_rust/.build/release/hyperbolic-wormholes
+    map_picture: .levels/dust/demos/dust_rust/map_pictures/dust_r50m.png
+    map: dust
+  - name: Snow Planet
+    folder: demos/snow_planet_rust
+    branch: devin/snow-planet-demo
+    status: plugged in (make levels links and builds devin/snow-planet-demo in .levels/)
+    program: .levels/snow_planet/demos/snow_planet_rust/.build/release/snow-planet
+    map_picture: .levels/snow_planet/demos/snow_planet_rust/map_pictures/snow_planet.png
+    map: snow-planet
+  - name: City Sphere
+    folder: demos/city_sphere_rust
+    branch: devin/city-sphere-demo
+    status: plugged in (make levels links and builds devin/city-sphere-demo in .levels/)
+    program: .levels/city_sphere/demos/city_sphere_rust/.build/release/city-sphere
+    map_picture: .levels/city_sphere/demos/city_sphere_rust/assets/map_picture.png
+    map: city-sphere
+  - name: Dark Forest
+    folder: demos/dark_forest_rust
+    branch: devin/dark-forest-demo
+    status: plugged in (make levels links and builds devin/dark-forest-demo in .levels/)
+    program: .levels/dark_forest/demos/dark_forest_rust/.build/release/dark-forest
+    map_picture: .levels/dark_forest/demos/dark_forest_rust/assets/map_picture.png
+    takes_bot_label: false
+  - name: Lunar Surface
+    folder: demos/hyperbolic_wormholes_rust
+    branch: staging/user-4gatepylon
+    status: playable (copied into this demo)
+    program: self
+    map: lunar-surface
