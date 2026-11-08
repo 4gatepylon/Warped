@@ -11,6 +11,11 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-91 One laser on the minimap.** A bug: when you shoot, the minimap shows two lasers instead of one ("like
+  a triangle of some kind"). Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch
+  `claude/minimap-one-laser`, 2026-11-07.
+- [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
+  session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
 - [~] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
   be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user wants to see it
   before it merges. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
