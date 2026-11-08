@@ -10,6 +10,10 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-49 Menu with pages.** The menu where players change their hotkeys and the rest is a general menu with
+  pages: one page for the hotkeys, another showing a layout of the entire map. Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/menu-pages`, 2026-11-07.
+
 ## Open
 
 - [ ] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
@@ -31,8 +35,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
   least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
   doesn't show the entire map.
-- [ ] **W-49 Menu with pages.** The menu where players change their hotkeys and the rest is a general menu with
-  pages: one page for the hotkeys, another showing a layout of the entire map.
 - [ ] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
   and team.
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
