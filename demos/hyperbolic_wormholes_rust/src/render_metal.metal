@@ -26,6 +26,20 @@ constant float OVERLAY_TITLE_LEVEL = 0.75;
 constant float OVERLAY_TEXT_LEVEL = 0.25;
 constant float4 OVERLAY_TITLE_COLOR = float4(1.0, 0.35, 0.3, 1.0);
 constant float4 OVERLAY_TEXT_COLOR = float4(0.92, 0.94, 0.98, 1.0);
+constant float3 WAND_SHAFT_HALF_M = float3(0.011, 0.011, 0.16);
+constant float3 WAND_TIP_HALF_M = float3(0.016, 0.016, 0.028);
+constant float3 WAND_TIP_OFFSET_M = float3(0.0, 0.0, -0.188);
+constant float3 WAND_SHAFT_COLOR = float3(0.2, 0.17, 0.22);
+constant float3 WAND_LIGHT_DIRECTION = float3(-0.42, 0.78, 0.46);
+constant float WAND_AMBIENT = 0.3;
+constant float WAND_SPECULAR = 0.45;
+constant float WAND_SHININESS = 28.0;
+constant float WAND_EDGE_M = 0.003;
+constant float WAND_EDGE_DARKEN = 0.55;
+constant float WAND_TIP_GLOW = 1.25;
+constant float WAND_HALO_M = 0.012;
+constant float WAND_HALO_STRENGTH = 0.6;
+constant int WAND_SAMPLES_PER_SIDE = 2;
 
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
@@ -1965,7 +1979,7 @@ kernel void build_mouth_fields(device float4 *rows [[buffer(0)]], constant Unifo
 
 /**
  * @brief `OverlayParams` is how `apply_overlay` draws: how much to darken, mask pixels to screen pixels, the mask's top
- * left, how many rectangles there are, and whether there is a mask.
+ * left, how many rectangles there are, whether there is a mask and a wand, and the camera's tan(half vertical fov).
  */
 struct OverlayParams {
     float dim_frac;
@@ -1973,7 +1987,70 @@ struct OverlayParams {
     int2 origin;
     int rect_count;
     int has_mask;
+    int has_wand;
+    float tan_half_fov;
 };
+
+/**
+ * @brief `OverlayWand` is the wand in camera space (x right, y up, -z ahead, meters): its shaft's centre, its axes (its
+ * length along its own -z) and its tip's colour.
+ */
+struct OverlayWand {
+    float4 center_m;
+    float4 axes[3];
+    float4 tip_color;
+};
+
+/**
+ * @brief `hit_box` gives the distance along a ray from the eye (unit direction `d`) to a box (centre, axes, half sizes),
+ * or -1 if it misses, with the hit face's normal and how far the hit is from that face's nearest edge.
+ * @par Example
+ * @code
+ * float t = hit_box(d, center, axes, half_m, normal, edge_m);
+ * @endcode
+ */
+static float hit_box(float3 d, float3 center, float3x3 axes, float3 half_m, thread float3 &normal, thread float &edge_m) {
+    float3 o = transpose(axes) * -center, ld = transpose(axes) * d;
+    float3 inv = 1.0 / select(ld, float3(1e-7), abs(ld) < 1e-7);
+    float3 t0 = (-half_m - o) * inv, t1 = (half_m - o) * inv;
+    float3 t_lo = min(t0, t1), t_hi = max(t0, t1);
+    float t_near = max(max(t_lo.x, t_lo.y), t_lo.z), t_far = min(min(t_hi.x, t_hi.y), t_hi.z);
+    if (t_near > t_far || t_near < 0.0) return -1.0;
+    float3 face = select(float3(0.0), -sign(ld), t_lo == t_near);
+    float3 gap = half_m - abs(o + t_near * ld);
+    edge_m = min(min(face.x != 0.0 ? 1e3 : gap.x, face.y != 0.0 ? 1e3 : gap.y), face.z != 0.0 ? 1e3 : gap.z);
+    normal = axes * face;
+    return t_near;
+}
+
+/**
+ * @brief `shade_wand` gives the wand's colour and coverage (0 or 1) along one ray from the eye: a lit, dark shaft with a
+ * highlight and darkened edges, and a glowing tip; past them, the tip's halo with coverage 0.
+ * @par Example
+ * @code
+ * float4 c = shade_wand(d, wand);
+ * @endcode
+ */
+static float4 shade_wand(float3 d, constant OverlayWand &wand) {
+    float3x3 axes = float3x3(wand.axes[0].xyz, wand.axes[1].xyz, wand.axes[2].xyz);
+    float3 tip_center = wand.center_m.xyz + axes * WAND_TIP_OFFSET_M;
+    float3 shaft_normal, tip_normal;
+    float shaft_edge_m, tip_edge_m;
+    float t_shaft = hit_box(d, wand.center_m.xyz, axes, WAND_SHAFT_HALF_M, shaft_normal, shaft_edge_m);
+    float t_tip = hit_box(d, tip_center, axes, WAND_TIP_HALF_M, tip_normal, tip_edge_m);
+    float3 light = normalize(WAND_LIGHT_DIRECTION);
+    if (t_tip > 0.0 && (t_shaft < 0.0 || t_tip < t_shaft)) {
+        return float4(wand.tip_color.rgb * (WAND_TIP_GLOW + WAND_AMBIENT * max(dot(tip_normal, light), 0.0)), 1.0);
+    }
+    if (t_shaft > 0.0) {
+        float diffuse = max(dot(shaft_normal, light), 0.0);
+        float highlight = pow(max(dot(reflect(-light, shaft_normal), -d), 0.0), WAND_SHININESS);
+        float edge = mix(WAND_EDGE_DARKEN, 1.0, smoothstep(0.0, WAND_EDGE_M, shaft_edge_m));
+        return float4(WAND_SHAFT_COLOR * (WAND_AMBIENT + diffuse) * edge + WAND_SPECULAR * highlight, 1.0);
+    }
+    float miss_m = length(cross(d, tip_center));
+    return float4(wand.tip_color.rgb * WAND_HALO_STRENGTH * exp(-miss_m / WAND_HALO_M), 0.0);
+}
 
 /** @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), and its colour and opacity. */
 struct OverlayRect {
@@ -1985,8 +2062,8 @@ struct OverlayRect {
 /**
  * @brief `apply_overlay` copies a finished frame into `out` darkened by `dim_frac`, with a mask's text drawn over it at
  * `scale` screen pixels per mask pixel from `origin` (the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
- * the text's above `OVERLAY_TEXT_LEVEL`) and `rects` blended over that in order (render_metal.rs's `Overlay`: e.g.
- * "YOU DIED" and a countdown, and the energy bar).
+ * the text's above `OVERLAY_TEXT_LEVEL`), the wand (`shade_wand`, 2 × 2 rays a pixel) when `has_wand` is set, and `rects`
+ * blended over that in order (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
  * @par Example
  * @code
  * dispatched by render_metal.rs, one thread per output pixel.
@@ -1994,7 +2071,8 @@ struct OverlayRect {
  */
 kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], texture2d<float, access::read> mask [[texture(1)]],
                           texture2d<float, access::write> out [[texture(2)]], constant OverlayParams &p [[buffer(0)]],
-                          constant OverlayRect *rects [[buffer(1)]], uint2 id [[thread_position_in_grid]]) {
+                          constant OverlayRect *rects [[buffer(1)]], constant OverlayWand &wand [[buffer(2)]],
+                          uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
     float4 color = float4(frame.read(id).rgb * (1.0 - p.dim_frac), 1.0);
     int2 offset = int2(id) - p.origin;
@@ -2006,7 +2084,21 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
             else if (level > OVERLAY_TEXT_LEVEL) color = OVERLAY_TEXT_COLOR;
         }
     }
-    float2 uv = (float2(id) + 0.5) / float2(out.get_width(), out.get_height());
+    float2 size = float2(out.get_width(), out.get_height());
+    if (p.has_wand != 0) {
+        float3 glow = float3(0.0);
+        float4 sum = float4(0.0);
+        for (int k = 0; k < WAND_SAMPLES_PER_SIDE * WAND_SAMPLES_PER_SIDE; k++) {
+            float2 sub = (float2(k % WAND_SAMPLES_PER_SIDE, k / WAND_SAMPLES_PER_SIDE) + 0.5) / float(WAND_SAMPLES_PER_SIDE);
+            float2 ndc = float2(2.0, -2.0) * ((float2(id) + sub) / size) + float2(-1.0, 1.0);
+            float4 ray_color = shade_wand(normalize(float3(ndc.x * p.tan_half_fov * size.x / size.y, ndc.y * p.tan_half_fov, -1.0)), wand);
+            if (ray_color.a > 0.0) sum += ray_color;
+            else glow += ray_color.rgb;
+        }
+        float samples = float(WAND_SAMPLES_PER_SIDE * WAND_SAMPLES_PER_SIDE);
+        color.rgb = mix(color.rgb + glow / samples, sum.a > 0.0 ? sum.rgb / sum.a : color.rgb, sum.a / samples);
+    }
+    float2 uv = (float2(id) + 0.5) / size;
     for (int i = 0; i < p.rect_count; i++) {
         if (all(uv >= rects[i].min_frac) && all(uv < rects[i].max_frac)) color.rgb = mix(color.rgb, rects[i].color.rgb, rects[i].color.a);
     }

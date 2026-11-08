@@ -30,10 +30,11 @@ use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 use crate::render_voxel::{VoxelFrame, VoxelGpu};
 use crate::scene_data::{
-    ROW_COUNT, ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS, TEXEL_BOXES,
-    TEXEL_CLUSTER_INFO, TEXEL_CLUSTER_ORDER, TEXEL_CLUSTERS, TEXEL_GLUINGS, TEXEL_GROUND,
-    TEXEL_MOUTH_FIELDS, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD, TEXELS_PER_BEAM_CHUNK,
-    TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING, TEXELS_PER_MOUTH_FIELD, Uniforms,
+    HALF_FOV_RAD, ROW_COUNT, ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS,
+    TEXEL_BOXES, TEXEL_CLUSTER_INFO, TEXEL_CLUSTER_ORDER, TEXEL_CLUSTERS, TEXEL_GLUINGS,
+    TEXEL_GROUND, TEXEL_MOUTH_FIELDS, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD,
+    TEXELS_PER_BEAM_CHUNK, TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING,
+    TEXELS_PER_MOUTH_FIELD, Uniforms,
 };
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
@@ -45,12 +46,24 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 
 /// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
 /// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
-/// shader's `apply_overlay` for what its levels mean), and up to `MAX_OVERLAY_RECT_COUNT`
-/// rectangles (the HUD's energy bar and gun).
+/// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
+/// (the HUD's bars) and the player's wand.
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
     pub rects: &'a [OverlayRect],
+    pub wand: Option<OverlayWand>,
+}
+
+/// `OverlayWand` is the shader's `OverlayWand`: the wand's shaft centre in camera space (x right,
+/// y up, -z ahead, meters; w unused), its axes as columns (its length along its own -z) and its
+/// tip's RGB colour.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct OverlayWand {
+    pub center_m: [f32; 4],
+    pub axes: [[f32; 4]; 3],
+    pub tip_color: [f32; 4],
 }
 
 /// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0)
@@ -71,6 +84,8 @@ struct OverlayParams {
     origin: [i32; 2],
     rect_count: i32,
     has_mask: i32,
+    has_wand: i32,
+    tan_half_fov: f32,
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -1068,7 +1083,14 @@ impl MetalRenderer {
             ],
             rect_count: overlay.rects.len() as i32,
             has_mask: i32::from(overlay.mask.is_some()),
+            has_wand: i32::from(overlay.wand.is_some()),
+            tan_half_fov: HALF_FOV_RAD.tan() as f32,
         };
+        let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
+            center_m: [0.0; 4],
+            axes: [[0.0; 4]; 3],
+            tip_color: [0.0; 4],
+        });
         let mut rects: [OverlayRect; MAX_OVERLAY_RECT_COUNT] = [OverlayRect {
             min_frac: [0.0; 2],
             max_frac: [0.0; 2],
@@ -1097,6 +1119,11 @@ impl MetalRenderer {
                 NonNull::from(&rects).cast(),
                 std::mem::size_of_val(&rects),
                 1,
+            );
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&wand).cast(),
+                std::mem::size_of::<OverlayWand>(),
+                2,
             );
         }
         dispatch_grid(&encoder, output_px);

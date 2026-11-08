@@ -61,7 +61,7 @@ sees which team won, and a new game starts only when whoever started the server 
 
 Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), click to shoot (a
-quarter-second laser shot; not while running, when the gun in the bottom right jogs, nor in the air on Lunar Surface), `E` (held)
+quarter-second laser shot; not while running, when the wand in your hand swings low, nor in the air on Lunar Surface), `E` (held)
 turns off one of the other team's consoles, `R` respawns, `-` and `=` change the render resolution.
 
 ## Known caveats

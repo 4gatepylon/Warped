@@ -18,8 +18,9 @@ make run-demo RENDERER=cpu
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
   you through.
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second; not while running, nor in the air on Lunar Surface.
-  You can't shoot while running (sprinting while moving): the gun in the bottom right drops into a jogging pose, and
-  points ahead again when you walk.
+  You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
+  team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
+  walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
 - `R` respawns. `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
