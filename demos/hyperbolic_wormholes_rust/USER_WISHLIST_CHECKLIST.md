@@ -98,6 +98,8 @@ is in [`AGENTS.md`](AGENTS.md).
   of the ground, just barely translucent, to mark out the real zones.
 - [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
   shadows on the hills.
+- [ ] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
+  scene lighting.
 
 ## Done
 
