@@ -104,12 +104,16 @@ Apple M4 Pro (virtual machine, 12 cores, 16 GB), macOS 26.6.2, rustc 1.99.0, 202
 
 | View | GPU median (ms) | GPU p99 (ms) | Frame incl. readback, median (ms) | p99 (ms) |
 | --- | --- | --- | --- | --- |
-| street_spawn | 1.10 | 1.63 | 2.35 | 3.06 |
-| street_up_at_glass | 1.35 | 2.93 | 2.57 | 4.31 |
-| glass_across | 1.37 | 2.85 | 2.59 | 4.08 |
-| glass_edge_on | 1.29 | 2.71 | 2.53 | 3.97 |
-| lift_up | 1.49 | 3.75 | 2.69 | 5.02 |
-| glass_crowd_and_shots (8 robots, 8 reflected shots) | 6.17 | 6.83 | 12.43 | 14.24 |
+| street_spawn | 2.60 | 3.60 | 4.21 | 5.02 |
+| street_up_at_glass | 1.79 | 5.23 | 3.41 | 6.96 |
+| glass_across | 1.82 | 5.03 | 3.17 | 6.37 |
+| glass_edge_on | 1.83 | 4.83 | 3.09 | 6.14 |
+| lift_up | 2.14 | 6.26 | 3.39 | 7.56 |
+| glass_crowd_and_shots (8 robots, 8 reflected shots) | 6.34 | 8.50 | 13.44 | 16.05 |
+
+These are with the finished station look (commit `f3685df`); every view's median frame is under 16.7 ms, so no
+quality was cut. Match check: `--serve --level-result-file` with a blue `--bot --bot-objective consoles` and a red
+bot wrote `{"winner":"blue"}` (through `<path>.partial` and a rename) after 11 s.
 
 `--play-route` in a 1280x800 window (this VM's display has no Retina scaling), blue won. Frame interval in ms;
 Lunar Surface is the hyperbolic demo's `--map lunar-surface --play-route warp-tour` (adaptive render scale) on the same
@@ -135,7 +139,10 @@ say whether the vsync p99 meets 16.7 ms.
 
 - **Look**: a space station: steel deck plates (`metal_plate`) with lit cyan panel seams, buildings in Poly Haven CC0
   `metal_plate_02` and `blue_metal_plate` (`make download-assets` puts them in `assets/textures/`), metal highlights,
-  and the glass as a window with metal ribs. Blocks and covers are rounded-corner boxes (radius 0.35 m; collisions
+  and the glass as a window. Both shells are Goldberg grids (hexagons and 12 pentagons): the street's cells are
+  about 7 m wide with faint seams, the glass's about 3 m with crisp white frames. Wall panels have metal frames,
+  corner bolts, varied roughness, grime near the floor and a thin glowing strip 0.3 m up; lifts have hazard rings;
+  seeded screens and status lights glow on walls; a soft halo surrounds the core. Blocks and covers are rounded-corner boxes (radius 0.35 m; collisions
   still use the boxes). Metal looks reflective through a fake reflection (the core light and a dark station floor
   looked up along the mirrored view direction, with Fresnel), so it casts no extra rays; the pylons keep their own
   textures.

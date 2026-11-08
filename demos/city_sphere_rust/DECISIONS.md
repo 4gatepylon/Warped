@@ -77,7 +77,9 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
 23. **Station look on the existing renderer**: metal textures are desaturated to read as steel; panel seams are
     drawn in the shader, not textures. No brick: the user asked for metal only. Blocks are rounded-corner boxes for
     drawing only (collision keeps the boxes, at most 0.35 m inside the corners). Reflections are faked from the core
-    light and a station-floor colour with Fresnel, not traced; hazard stripes and metal frames are not done yet.
+    light and a station-floor colour with Fresnel, not traced. Panel frames, bolts, grime, hazard rings, floor strips, screens and LEDs are all shader or emissive
+    detail, with no extra lights; each step's cost was within this VM's noise. The look is frozen at the user's
+    request ("looks good enough").
 24. **`lasers` in the map format** is optional and either one colour or two team colours, so Dust and Dark Forest
     can be golden, Snow Planet green, and Lunar Surface and City Sphere red and blue.
 25. **Seeded variation in the map file** (`variation.seed`): the generator applies the same small jitter (positions
