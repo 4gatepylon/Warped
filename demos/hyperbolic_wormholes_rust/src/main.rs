@@ -2879,8 +2879,18 @@ impl Session {
                 Some(path) => path.display().to_string(),
                 None => "nowhere: HOME isn't set, pass --player-settings".to_string(),
             };
+            let scoreboard: menu::Scoreboard = match &self.multiplayer {
+                None => menu::Scoreboard::NoServer,
+                Some(Multiplayer { client, .. }) => match &client.scores {
+                    None => menu::Scoreboard::Waiting,
+                    Some(scores) => menu::Scoreboard::Scores {
+                        scores,
+                        own_id: client.welcomed_id,
+                    },
+                },
+            };
             return Some(OverlayText {
-                lines: menu.get_lines(&self.player_settings, &save_path),
+                lines: menu.get_lines(&self.player_settings, &save_path, scoreboard),
                 mask_px: MENU_MASK_PX,
                 height_frac: MENU_HEIGHT_FRAC,
                 is_centered: false,
@@ -3622,7 +3632,7 @@ mod tests {
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Bar fill | empty, a sliver (one segment), 11 of 12 after the network's byte rounding, full | `segmented_bars_count_whole_segments` |
     //! | Segment count | 12, 1 (the sniper's block, empty or full and as wide as the whole bar) | `segmented_bars_count_whole_segments` |
-    //! | Overlay text | a centred two-line banner, the left-aligned menu with a line too long for its mask | `overlay_text_fits_its_mask` |
+    //! | Overlay text | a centred two-line banner, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
 
@@ -3669,18 +3679,38 @@ mod tests {
         assert_eq!(placed[0].1.0 * 2.0 + title_px, DEATH_MASK_PX.0 as f32);
         assert!(placed[0].2 && !placed[1].2);
         let long_path: String = "/very/long".repeat(20);
-        let menu_text: OverlayText = OverlayText {
-            lines: menu::Menu::New().get_lines(&PerPlayerSettings::Builtin(), &long_path),
-            mask_px: MENU_MASK_PX,
-            height_frac: MENU_HEIGHT_FRAC,
-            is_centered: false,
-            dim_frac: MENU_DIM_FRAC,
-            picture: None,
+        let mut mine: PerPlayerSettings = PerPlayerSettings::Builtin();
+        let mut scores_menu: menu::Menu = menu::Menu::New();
+        scores_menu.handle(Control::Key(sdl3::keyboard::Scancode::Q), &mut mine);
+        let scores: Vec<net::Score> = (0..3 * net::MAX_PLAYER_COUNT as u32)
+            .map(|id| net::Score {
+                id: u32::MAX - id,
+                team: id % net::TEAM_NAMES.len() as u32,
+                kills: u32::from(u16::MAX),
+                deaths: u32::from(u16::MAX),
+            })
+            .collect();
+        let scoreboard = menu::Scoreboard::Scores {
+            scores: &scores,
+            own_id: Some(u32::MAX),
         };
         let max_char_count: usize = (MENU_MASK_PX.0 as f32 / DEBUG_GLYPH_PX) as usize;
-        for (line, (x, _), _) in get_text_positions(&menu_text) {
-            assert_eq!(x, MENU_LEFT_PX);
-            assert!(line.chars().count() <= max_char_count, "{line}");
+        for line in scores_menu.get_lines(&mine, &long_path, scoreboard) {
+            assert!(line.0.chars().count() <= max_char_count, "{}", line.0);
+        }
+        for menu in [menu::Menu::New(), scores_menu] {
+            let menu_text: OverlayText = OverlayText {
+                lines: menu.get_lines(&mine, &long_path, scoreboard),
+                mask_px: MENU_MASK_PX,
+                height_frac: MENU_HEIGHT_FRAC,
+                is_centered: false,
+                dim_frac: MENU_DIM_FRAC,
+                picture: None,
+            };
+            for (line, (x, _), _) in get_text_positions(&menu_text) {
+                assert_eq!(x, MENU_LEFT_PX);
+                assert!(line.chars().count() <= max_char_count, "{line}");
+            }
         }
     }
 

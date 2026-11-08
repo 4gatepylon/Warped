@@ -981,6 +981,35 @@
   with the slowdown starting where they climb the hill, and that their view warp as if they were being stretched
   ever further.
 
+### D79. A scores page in the menu
+
+- **Choice:**
+  - **The page:** the menu's third page, SCORES (`MENU  SETTINGS  MAP  [SCORES]`), shows how many players are in
+    the game and on each team, then a row per player (team, `player <id>`, kills, deaths) sorted by team, then by
+    most kills, then by id, with this player's row marked `(you)` and highlighted, then each team's totals. It shows
+    at most 16 rows (a server takes 8 players). Without a server it says there is no game on a server; before the
+    first scores arrive (in the lobby, or from an older server), that there are none yet.
+  - **Counting, on the server:** the server already decides eliminations, and each hit report names its shooter
+    (checked against the sender's address), so the killer is always known. An elimination counts a death for the
+    player hit and a kill for the shooter, unless they are teammates (friendly fire is on, D71): then it counts the
+    death only.
+  - **Who is in the game:** the joined players, and those eliminated less than `respawn.delay_s` plus the 3 s
+    timeout ago, so players don't drop off the page while they wait to respawn. A player who rejoins (same address,
+    so same id) keeps their counts. Every count goes back to 0 when the server starts a new game.
+  - **Protocol:** a new message, `Scores` (kind 11), sent 4 times a second to every player in the game, those
+    waiting to respawn included: a count, then per player the id (4 bytes), team (1) and kills and deaths (4 each).
+    Like every message, it is told apart by its kind byte: an older client ignores it, and an older server never
+    sends it.
+- **Alternatives:**
+  - the counts in every snapshot (60 times a second for numbers that change a few times a minute, and a respawning
+    player gets no snapshots);
+  - counting on each client from the `Eliminated` messages (a lost message, or a player who joins late, would make
+    the windows disagree);
+  - a kill for eliminating a teammate too (it would reward friendly fire);
+  - counts kept across games (the page then mixes games that were won or lost separately).
+- **Rationale:** you asked for a menu page that shows how many players there are, and each player's kills, deaths
+  and team.
+
 
 ## Baselines
 

@@ -2,12 +2,13 @@
 //! window) keeps every player's eye frame, laser switch and the console they hold `E` on, sends
 //! everyone a snapshot 60 times a second, removes a player another player's laser hit, turns off a
 //! console held for the settings' `consoles.hold_to_disable_s`, ends the game when a team's consoles are all off, and
-//! announces itself on the network so others can find it. A client joins, sends its own player
-//! each frame and receives the others and the game's state.
+//! announces itself on the network so others can find it. It counts each player's kills and deaths
+//! in the game and sends everyone the scores 4 times a second. A client joins, sends its own player
+//! each frame and receives the others, the game's state and the scores.
 //!
 //! Interface: `DEFAULT_PORT`, `MAX_PLAYER_COUNT`, `MAX_CONSOLE_COUNT`,
 //! `TEAM_NAMES`, `get_team`, `bind_server`, `serve`, `find_server`, `Client`, `RemotePlayer`,
-//! `GameState`, `NetEvent`.
+//! `GameState`, `Score`, `NetEvent`.
 //!
 //! Example: `let mut client = Client::Connect(net::find_server(Duration::from_secs(5))?)?;`
 //!
@@ -20,6 +21,8 @@
 //! - A player keeps their id, and so their team, when they rejoin from the same address.
 //! - The server's welcome names its map and carries its game settings; a client of another map
 //!   fails rather than playing on.
+//! - An elimination counts a death for the player hit and a kill for the shooter, unless they are on
+//!   the same team. Scores go back to 0 when a new game starts.
 
 use std::error::Error;
 use std::io::ErrorKind;
@@ -46,6 +49,7 @@ const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
 const DISCOVERY_PORT: u16 = 47_801;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
+const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
 const JOIN_RETRY_S: f64 = 0.5;
 const PLAYER_TIMEOUT_S: f64 = 3.0;
@@ -72,6 +76,7 @@ enum Kind {
     Leave = 8,
     LobbyQuery = 9,
     Lobby = 10,
+    Scores = 11,
 }
 
 impl Kind {
@@ -91,6 +96,7 @@ impl Kind {
             Kind::Leave,
             Kind::LobbyQuery,
             Kind::Lobby,
+            Kind::Scores,
         ]
         .into_iter()
         .find(|kind| *kind as u8 == byte)
@@ -117,6 +123,17 @@ pub struct GameState {
     pub number: u32,
     pub off_mask: u32,
     pub winner: Option<u32>,
+}
+
+/// `Score` is one player's line on the scoreboard: their id, team (an index into `TEAM_NAMES`),
+/// and the other team's players they eliminated (kills) and the times they were eliminated (deaths)
+/// in this game.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Score {
+    pub id: u32,
+    pub team: u32,
+    pub kills: u32,
+    pub deaths: u32,
 }
 
 /// `NetEvent` is something the server told this client.
@@ -174,6 +191,21 @@ impl Message {
         self.0.extend_from_slice(&game.off_mask.to_le_bytes());
         self.0
             .push(game.winner.map_or(NO_WINNER, |team| team as u8));
+        self
+    }
+
+    /// `scores` appends a count and that many scores: each player's id, team, kills and deaths.
+    ///
+    /// Example: `let message = Message::New(Kind::Scores).scores(&server.get_scores());`
+    fn scores(mut self, scores: &[Score]) -> Message {
+        self.0
+            .push(u8::try_from(scores.len()).expect("scores: at most 255 players are in a game"));
+        for score in scores {
+            self = self.id(score.id);
+            self.0.push(score.team as u8);
+            self.0.extend_from_slice(&score.kills.to_le_bytes());
+            self.0.extend_from_slice(&score.deaths.to_le_bytes());
+        }
         self
     }
 }
@@ -236,6 +268,30 @@ impl Reader<'_> {
             winner: (winner != NO_WINNER).then_some(u32::from(winner)),
         })
     }
+
+    /// `scores` reads the rest of a datagram as scores written by `Message::scores`, or `None` if
+    /// it is cut short, too long, or names a team that isn't in `TEAM_NAMES`.
+    ///
+    /// Example: `let scores = reader.scores()?;`
+    fn scores(&mut self) -> Option<Vec<Score>> {
+        let count: u8 = self.take(1)?[0];
+        let mut scores: Vec<Score> = Vec::new();
+        for _ in 0..count {
+            let id: u32 = self.id()?;
+            let team: u8 = self.take(1)?[0];
+            let (kills, deaths) = (self.id()?, self.id()?);
+            if usize::from(team) >= TEAM_NAMES.len() {
+                return None;
+            }
+            scores.push(Score {
+                id,
+                team: u32::from(team),
+                kills,
+                deaths,
+            });
+        }
+        (self.position == self.bytes.len()).then_some(scores)
+    }
 }
 
 /// `Slot` is a joined player on the server, since when they have held `E` on their console, and
@@ -248,8 +304,17 @@ struct Slot {
     damage_frac: f64,
 }
 
+/// `Tally` is a player's score in this game on the server, their address, and since when they wait
+/// to respawn after being eliminated, if they do.
+struct Tally {
+    score: Score,
+    address: SocketAddr,
+    eliminated_at: Option<Instant>,
+}
+
 /// `Server` is the server's state: its socket, its map's name, the joined players, the next id to
-/// give, the id each address had, each console's team and the game.
+/// give, the id each address had, each console's team, the game, and the tally of every player who
+/// joined this game.
 struct Server {
     socket: UdpSocket,
     map_name: String,
@@ -259,6 +324,7 @@ struct Server {
     known_ids: Vec<(SocketAddr, u32)>,
     console_teams: Vec<u32>,
     game: GameState,
+    tallies: Vec<Tally>,
 }
 
 impl Server {
@@ -301,6 +367,7 @@ impl Server {
                             disabling_since: None,
                             damage_frac: 0.0,
                         });
+                        self.start_tally(id, team, address);
                         println!(
                             "player {id} joined the {} team from {address}",
                             TEAM_NAMES[team as usize]
@@ -346,10 +413,11 @@ impl Server {
                 else {
                     return Ok(());
                 };
-                let is_shooter_here: bool = self
+                let shooter_team: Option<u32> = self
                     .slots
                     .iter()
-                    .any(|slot| slot.address == address && slot.player.id == shooter_id);
+                    .find(|slot| slot.address == address && slot.player.id == shooter_id)
+                    .map(|slot| slot.player.team);
                 let Some(victim) = self
                     .slots
                     .iter()
@@ -357,14 +425,17 @@ impl Server {
                 else {
                     return Ok(());
                 };
-                if !is_shooter_here || self.game.winner.is_some() || hits_to_kill == 0 {
+                if shooter_team.is_none() || self.game.winner.is_some() || hits_to_kill == 0 {
                     return Ok(());
                 }
                 self.slots[victim].damage_frac += 1.0 / f64::from(hits_to_kill);
                 if self.slots[victim].damage_frac < 1.0 - DAMAGE_TOLERANCE_FRAC {
                     return Ok(());
                 }
-                let victim_address: SocketAddr = self.slots.remove(victim).address;
+                let victim_slot: Slot = self.slots.remove(victim);
+                let victim_address: SocketAddr = victim_slot.address;
+                let is_enemy: bool = shooter_team != Some(victim_slot.player.team);
+                self.count_elimination(victim_id, shooter_id, is_enemy);
                 println!("player {victim_id} was hit by player {shooter_id}");
                 let message: Message = Message::New(Kind::Eliminated).id(victim_id).id(shooter_id);
                 for target in self
@@ -383,6 +454,93 @@ impl Server {
                 }
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// `start_tally` gives player `id` a tally of this game's kills and deaths if they have none, and
+    /// marks them as playing on `team` rather than waiting to respawn.
+    ///
+    /// Example: `server.start_tally(3, 1, address);`
+    fn start_tally(&mut self, id: u32, team: u32, address: SocketAddr) {
+        match self.tallies.iter_mut().find(|tally| tally.score.id == id) {
+            Some(tally) => (tally.score.team, tally.eliminated_at) = (team, None),
+            None => self.tallies.push(Tally {
+                score: Score {
+                    id,
+                    team,
+                    kills: 0,
+                    deaths: 0,
+                },
+                address,
+                eliminated_at: None,
+            }),
+        }
+    }
+
+    /// `get_tally_mut` lends player `id`'s tally, which every player who joined this game has.
+    ///
+    /// Example: `server.get_tally_mut(3).score.deaths += 1;`
+    fn get_tally_mut(&mut self, id: u32) -> &mut Tally {
+        self.tallies
+            .iter_mut()
+            .find(|tally| tally.score.id == id)
+            .unwrap_or_else(|| panic!("get_tally_mut: player {id} never joined this game"))
+    }
+
+    /// `count_elimination` counts a death for player `victim_id`, who now waits to respawn, and a
+    /// kill for player `shooter_id` if `is_enemy` (they are on different teams).
+    ///
+    /// Example: `server.count_elimination(2, 1, true);`
+    fn count_elimination(&mut self, victim_id: u32, shooter_id: u32, is_enemy: bool) {
+        let victim: &mut Tally = self.get_tally_mut(victim_id);
+        victim.score.deaths += 1;
+        victim.eliminated_at = Some(Instant::now());
+        if is_enemy {
+            self.get_tally_mut(shooter_id).score.kills += 1;
+        }
+    }
+
+    /// `is_waiting_to_respawn` says whether `tally`'s player was eliminated and may still rejoin:
+    /// less than the settings' `respawn.delay_s` and `PLAYER_TIMEOUT_S` ago.
+    ///
+    /// Example: `if server.is_waiting_to_respawn(tally) { ... }`
+    fn is_waiting_to_respawn(&self, tally: &Tally) -> bool {
+        let wait_s: f64 = self.settings.respawn.delay_s + PLAYER_TIMEOUT_S;
+        tally
+            .eliminated_at
+            .is_some_and(|time| time.elapsed().as_secs_f64() < wait_s)
+    }
+
+    /// `get_scores` gives the score of every player in the game: those joined and those waiting to
+    /// respawn.
+    ///
+    /// Example: `let scores = server.get_scores();`
+    fn get_scores(&self) -> Vec<Score> {
+        self.tallies
+            .iter()
+            .filter(|tally| {
+                self.slots
+                    .iter()
+                    .any(|slot| slot.player.id == tally.score.id)
+                    || self.is_waiting_to_respawn(tally)
+            })
+            .map(|tally| tally.score)
+            .collect()
+    }
+
+    /// `send_scores` sends the scores (`get_scores`) to every player in the game.
+    ///
+    /// Example: `server.send_scores()?;`
+    fn send_scores(&self) -> Result<()> {
+        let message: Message = Message::New(Kind::Scores).scores(&self.get_scores());
+        let waiting = self
+            .tallies
+            .iter()
+            .filter(|tally| self.is_waiting_to_respawn(tally))
+            .map(|tally| tally.address);
+        for address in self.slots.iter().map(|slot| slot.address).chain(waiting) {
+            self.socket.send_to(&message.0, address)?;
         }
         Ok(())
     }
@@ -459,8 +617,8 @@ impl Server {
         }
     }
 
-    /// `start_new_game` turns every console back on and clears the winner; clients see the game's
-    /// number change and go back to their spawn.
+    /// `start_new_game` turns every console back on, clears the winner and sets every player's kills
+    /// and deaths back to 0; clients see the game's number change and go back to their spawn.
     ///
     /// Example: `server.start_new_game();`
     fn start_new_game(&mut self) {
@@ -470,6 +628,9 @@ impl Server {
         };
         for slot in &mut self.slots {
             (slot.player.disabling_console, slot.disabling_since) = (None, None);
+        }
+        for tally in &mut self.tallies {
+            (tally.score.kills, tally.score.deaths) = (0, 0);
         }
         println!("Game {} started.", self.game.number);
     }
@@ -511,7 +672,8 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 
 /// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
 /// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
-/// players, removes players who are hit or silent for `PLAYER_TIMEOUT_S`, turns off
+/// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
+/// `PLAYER_TIMEOUT_S`, turns off
 /// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
 /// starts a new game after that when `should_start_new_game` is set (clearing it), and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
@@ -545,9 +707,11 @@ pub fn serve(
         known_ids: Vec::new(),
         console_teams,
         game: GameState::default(),
+        tallies: Vec::new(),
     };
     let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
     let (mut last_snapshot, mut last_beacon) = (Instant::now(), None::<Instant>);
+    let mut last_scores: Instant = Instant::now();
     let mut has_warned_about_beacon: bool = false;
     while !should_stop.load(Ordering::Relaxed) {
         match server.socket.recv_from(&mut buffer) {
@@ -572,6 +736,10 @@ pub fn serve(
         if last_snapshot.elapsed().as_secs_f64() >= SNAPSHOT_PERIOD_S {
             server.send_snapshot()?;
             last_snapshot = Instant::now();
+        }
+        if last_scores.elapsed().as_secs_f64() >= SCORES_PERIOD_S {
+            server.send_scores()?;
+            last_scores = Instant::now();
         }
         if last_beacon.is_none_or(|time| time.elapsed().as_secs_f64() >= BEACON_PERIOD_S) {
             if let Err(error) =
@@ -622,18 +790,22 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
 }
 
 /// `Client` is this player's connection: its map's name, its id and the server's game settings
-/// once welcomed, the other players, the game, and this player's health (1 full, from the server).
+/// once welcomed, the id of the latest welcome (kept while waiting to respawn), the other players,
+/// the game, this player's health (1 full, from the server), and the latest scores of every player
+/// in the game (`None` until the server sends them).
 pub struct Client {
     socket: UdpSocket,
     server: SocketAddr,
     map_name: String,
     pub id: Option<u32>,
+    pub welcomed_id: Option<u32>,
     pub team: Option<u32>,
     pub settings: Option<ServerSettings>,
     pub players: Vec<RemotePlayer>,
     pub game: GameState,
     pub health_frac: f64,
     pub lobby_counts: Option<[u32; TEAM_NAMES.len()]>,
+    pub scores: Option<Vec<Score>>,
     join_request: Option<u8>,
     last_join: Instant,
     pub last_heard: Instant,
@@ -654,20 +826,22 @@ impl Client {
             server,
             map_name: map_name.to_string(),
             id: None,
+            welcomed_id: None,
             team: None,
             settings: None,
             players: Vec::new(),
             game: GameState::default(),
             health_frac: 1.0,
             lobby_counts: None,
+            scores: None,
             join_request: None,
             last_join: Instant::now(),
             last_heard: Instant::now(),
         })
     }
 
-    /// `poll` reads every datagram that arrived, keeps the latest players (all but this one), and
-    /// returns what happened; while not yet welcomed it asks to join again every `JOIN_RETRY_S`. It
+    /// `poll` reads every datagram that arrived, keeps the latest players (all but this one) and
+    /// scores, and returns what happened; while not yet welcomed it asks to join again every `JOIN_RETRY_S`. It
     /// fails if the server plays another map.
     ///
     /// Example: `for event in client.poll()? { ... }`
@@ -702,6 +876,7 @@ impl Client {
                         }
                         self.settings = Some(ServerSettings::FromJson(&bytes[reader.position..])?);
                         self.id = Some(id);
+                        self.welcomed_id = Some(id);
                         self.team = Some(u32::from(team));
                         self.health_frac = 1.0;
                         events.push(NetEvent::Joined(id));
@@ -710,6 +885,11 @@ impl Client {
                 Some(Kind::Lobby) => {
                     if let Some(counts) = reader.take(TEAM_NAMES.len()) {
                         self.lobby_counts = Some(std::array::from_fn(|i| u32::from(counts[i])));
+                    }
+                }
+                Some(Kind::Scores) => {
+                    if let Some(scores) = reader.scores() {
+                        self.scores = Some(scores);
                     }
                 }
                 Some(Kind::Snapshot) => {
@@ -865,7 +1045,7 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the message encoding and the server's handling of joins and hits.
+    //! Tests of the message encoding and the server's handling of joins, hits and scores.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -877,6 +1057,11 @@ mod tests {
     //! | Hits to kill | 1 (eliminated at once), several (eliminated at the last) | `only_joined_players_can_hit`, `rifle_hits_add_up` |
     //! | Console held | the other team's (turned off after the settings' `hold_to_disable_s`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
+    //! | Scores datagram | complete (several players, none), cut short, too long, an unknown team | `scores_survive_encoding` |
+    //! | Who a hit eliminates | nobody (a hit short of the limit), the other team's player (a kill and a death), a teammate (a death only) | `eliminations_count_kills_and_deaths` |
+    //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
+    //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
+    //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
 
     use super::*;
 
@@ -907,7 +1092,32 @@ mod tests {
             known_ids: Vec::new(),
             console_teams: vec![0, 0, 1],
             game: GameState::default(),
+            tallies: Vec::new(),
         }
+    }
+
+    /// `hit` makes player `shooter_id`'s report of one hit on player `victim_id` with a weapon that
+    /// eliminates in `hits_to_kill` hits.
+    ///
+    /// Example: `server.handle(&hit(1, 2, 1), address(50_001))?;`
+    fn hit(shooter_id: u32, victim_id: u32, hits_to_kill: u8) -> Vec<u8> {
+        let mut message: Message = Message::New(Kind::Hit).id(shooter_id).id(victim_id);
+        message.0.push(hits_to_kill);
+        message.0
+    }
+
+    /// `get_kills_and_deaths` gives each player's `(id, kills, deaths)` in the server's scores,
+    /// by id.
+    ///
+    /// Example: `assert_eq!(get_kills_and_deaths(&server), vec![(1, 1, 0)]);`
+    fn get_kills_and_deaths(server: &Server) -> Vec<(u32, u32, u32)> {
+        let mut scores: Vec<(u32, u32, u32)> = server
+            .get_scores()
+            .iter()
+            .map(|score| (score.id, score.kills, score.deaths))
+            .collect();
+        scores.sort();
+        scores
     }
 
     /// `hold_console` sends player `id`'s state from `from` holding `E` on `console`, then makes
@@ -1140,6 +1350,113 @@ mod tests {
                 off_mask: 0,
                 winner: None
             }
+        );
+    }
+
+    #[test]
+    fn scores_survive_encoding() {
+        let sent: Vec<Score> = vec![
+            Score {
+                id: 1,
+                team: 1,
+                kills: 3,
+                deaths: 70_000,
+            },
+            Score {
+                id: 4,
+                team: 0,
+                kills: 0,
+                deaths: 2,
+            },
+        ];
+        let read = |bytes: &[u8]| Reader { bytes, position: 1 }.scores();
+        let message: Message = Message::New(Kind::Scores).scores(&sent);
+        assert_eq!(read(&message.0), Some(sent.clone()));
+        assert_eq!(
+            read(&Message::New(Kind::Scores).scores(&[]).0),
+            Some(Vec::new())
+        );
+        assert_eq!(read(&message.0[..message.0.len() - 1]), None);
+        let mut too_long: Vec<u8> = message.0.clone();
+        too_long.push(0);
+        assert_eq!(read(&too_long), None);
+        let unknown_team: Score = Score {
+            team: TEAM_NAMES.len() as u32,
+            ..sent[0]
+        };
+        assert_eq!(
+            read(&Message::New(Kind::Scores).scores(&[unknown_team]).0),
+            None
+        );
+    }
+
+    #[test]
+    fn eliminations_count_kills_and_deaths() {
+        const RIFLE_HITS_TO_KILL: u8 = 2;
+        let mut server: Server = make_server();
+        let (red_one, blue_two, red_three) = (address(50_001), address(50_002), address(50_003));
+        server.handle(&join_team(RED), red_one).expect("a join");
+        server.handle(&join_team(BLUE), blue_two).expect("a join");
+        server.handle(&join_team(RED), red_three).expect("a join");
+        server
+            .handle(&hit(1, 2, RIFLE_HITS_TO_KILL), red_one)
+            .expect("a hit short of the limit");
+        assert_eq!(
+            get_kills_and_deaths(&server),
+            vec![(1, 0, 0), (2, 0, 0), (3, 0, 0)]
+        );
+        server
+            .handle(&hit(1, 2, RIFLE_HITS_TO_KILL), red_one)
+            .expect("the last hit");
+        assert_eq!(server.slots.len(), 2);
+        assert_eq!(
+            get_kills_and_deaths(&server),
+            vec![(1, 1, 0), (2, 0, 1), (3, 0, 0)]
+        );
+        server
+            .handle(&hit(1, 3, 1), red_one)
+            .expect("a hit on a teammate");
+        assert_eq!(
+            get_kills_and_deaths(&server),
+            vec![(1, 1, 0), (2, 0, 1), (3, 0, 1)]
+        );
+        server.handle(&join_team(BLUE), blue_two).expect("a rejoin");
+        let wait_s: f64 = server.settings.respawn.delay_s + PLAYER_TIMEOUT_S;
+        server.get_tally_mut(3).eliminated_at =
+            Some(Instant::now() - Duration::from_secs_f64(wait_s));
+        assert_eq!(get_kills_and_deaths(&server), vec![(1, 1, 0), (2, 0, 1)]);
+        server.start_new_game();
+        assert_eq!(get_kills_and_deaths(&server), vec![(1, 0, 0), (2, 0, 0)]);
+    }
+
+    #[test]
+    fn clients_receive_scores() {
+        let mut server: Server = make_server();
+        let server_address: SocketAddr = server.socket.local_addr().expect("an address");
+        let mut client: Client = Client::Connect(server_address, TEST_MAP_NAME).expect("a socket");
+        client.join(Some(u32::from(RED))).expect("a join request");
+        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
+        for _ in 0..LOBBY_QUERY_AND_JOIN_COUNT {
+            let (length, from) = server.socket.recv_from(&mut buffer).expect("a datagram");
+            server
+                .handle(&buffer[..length], from)
+                .expect("a lobby query or join");
+        }
+        server.send_scores().expect("the scores");
+        let deadline: Instant = Instant::now() + Duration::from_secs(1);
+        while client.scores.is_none() {
+            assert!(Instant::now() < deadline, "the scores never arrived");
+            client.poll().expect("the welcome and the scores");
+        }
+        assert_eq!(client.welcomed_id, Some(1));
+        assert_eq!(
+            client.scores,
+            Some(vec![Score {
+                id: 1,
+                team: u32::from(RED),
+                kills: 0,
+                deaths: 0
+            }])
         );
     }
 }
