@@ -13,6 +13,9 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-49 Menu with pages.** The menu where players change their hotkeys and the rest is a general menu with
   pages: one page for the hotkeys, another showing a layout of the entire map. Claimed by Claude Code (session
   `wizardly-hamilton-23a121`), branch `claude/menu-pages`, 2026-11-07.
+- [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
+  throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
+  `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
 
 ## Open
 
@@ -84,8 +87,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-- [ ] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
-  throws the other. These are each player's linked wormholes.
 
 ## Done
 
