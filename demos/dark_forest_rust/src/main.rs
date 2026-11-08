@@ -503,7 +503,7 @@ fn main() {
     let mut args: Args = Args::parse();
     let map_path: PathBuf = args.map.clone().unwrap_or_else(map::default_map_path);
     if let Some(path) = &args.export_map {
-        let json: String = serde_json::to_string_pretty(&forest_layout::build()).expect("map JSON");
+        let json: String = serde_json::to_string(&forest_layout::build()).expect("map JSON");
         std::fs::write(path, json + "\n").expect("can't write the map");
         println!("wrote {}", path.display());
         return;

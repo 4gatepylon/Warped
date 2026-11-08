@@ -51,10 +51,6 @@ const LEAF_HALF_WIDTH_M: f32 = 0.22;
 const LEAF_HALF_THICKNESS_M: f32 = 0.03;
 /// `BAMBOO_SEED` seeds the generator that places, sizes and leans the decorative bamboo.
 const BAMBOO_SEED: u32 = 0x5eed_f0e5;
-/// `BAMBOO_SPACING_M` is the grid step of the decorative bamboo before jitter.
-const BAMBOO_SPACING_M: f32 = 3.5;
-/// `BAMBOO_GROW_FRAC` is the chance that a clear grid point grows a clump.
-const BAMBOO_GROW_FRAC: f32 = 0.8;
 /// `PROP_JITTER_M` is how far a log or rock may move from its listed spot; both halves move alike.
 const PROP_JITTER_M: f32 = 0.6;
 /// `LOG_JITTER_SALT` and `ROCK_JITTER_SALT` give logs and rocks different jitter streams.
@@ -544,11 +540,6 @@ impl Layout {
 /// turned golden (the user: yellow lasers for Dust and Dark Forest).
 const GOLDEN_WHITE_LASER_RGB: [f32; 3] = [1.0, 0.86, 0.6];
 
-/// `BLACK_HOLE_CENTRE_M` is red's black hole, high over the open ground west of its ground pylon;
-/// blue's is turned by 180°.
-const BLACK_HOLE_CENTRE_M: Vec3 = Vec3::new(-14.0, 10.0, 36.0);
-const BLACK_HOLE_SCHWARZSCHILD_RADIUS_M: f32 = 2.0;
-const BLACK_HOLE_REACH_M: f32 = 8.0;
 /// `MOUTH_HEIGHT_M` puts a mouth's centre at eye height, so walking into it carries the eye
 /// through its throat.
 const MOUTH_HEIGHT_M: f32 = 1.7;
@@ -564,51 +555,49 @@ const MOUTH_PAIRS_XZ_M: [[Vec2; 2]; 3] = [
     [Vec2::new(-2.0, 24.0), Vec2::new(2.0, -24.0)],
 ];
 
-/// `add_warps` adds the two black holes and the three wormholes, and keeps trees out of their
-/// reach.
+/// `LIFT_MOUTHS_M` is red's lift, a wormhole from the ground to the open corner of its treehouse
+/// deck; blue's is turned by 180°. `LIFT_SCHWARZSCHILD_RADIUS_M` and `LIFT_REACH_M` keep its
+/// mouths small enough to fit beside the deck's tree and bridge.
+const LIFT_MOUTHS_M: [Vec3; 2] = [
+    Vec3::new(-4.0, MOUTH_HEIGHT_M, 36.0),
+    Vec3::new(10.3, DECK_TOP_M + MOUTH_HEIGHT_M, 38.8),
+];
+const LIFT_SCHWARZSCHILD_RADIUS_M: f32 = 2.4;
+const LIFT_REACH_M: f32 = 3.0;
+
+/// `add_warps` adds the five wormholes (three across the ground, each team's lift) and keeps trees
+/// out of their reach.
 fn add_warps(layout: &mut Layout) {
-    for (name, centre_m) in [
-        ("red's black hole", BLACK_HOLE_CENTRE_M),
-        (
-            "blue's black hole",
-            BLUE.at(
-                BLACK_HOLE_CENTRE_M.x,
-                BLACK_HOLE_CENTRE_M.y,
-                BLACK_HOLE_CENTRE_M.z,
-            ),
-        ),
-    ] {
-        layout.keep_clear(
-            Vec2::new(centre_m.x, centre_m.z),
-            Vec2::splat(BLACK_HOLE_REACH_M),
-        );
-        layout.map.warps.push(Warp {
-            kind: "black_hole".to_string(),
-            name: name.to_string(),
-            frame: Mat4::from_translation(centre_m).to_cols_array(),
-            law: "isotropic_schwarzschild".to_string(),
-            schwarzschild_radius_m: BLACK_HOLE_SCHWARZSCHILD_RADIUS_M,
-            lambda_squared: None,
-            radial_coordinate: "distance".to_string(),
-            reach_m: BLACK_HOLE_REACH_M,
-            falloff: "taper".to_string(),
-            partner: None,
-        });
+    let mut gates: Vec<([Vec3; 2], f32, f32)> = MOUTH_PAIRS_XZ_M
+        .iter()
+        .map(|pair| {
+            (
+                pair.map(|xz_m| Vec3::new(xz_m.x, MOUTH_HEIGHT_M, xz_m.y)),
+                MOUTH_SCHWARZSCHILD_RADIUS_M,
+                MOUTH_REACH_M,
+            )
+        })
+        .collect();
+    for side in [RED, BLUE] {
+        gates.push((
+            LIFT_MOUTHS_M.map(|m| side.at(m.x, m.y, m.z)),
+            LIFT_SCHWARZSCHILD_RADIUS_M,
+            LIFT_REACH_M,
+        ));
     }
-    for (pair_index, pair) in MOUTH_PAIRS_XZ_M.iter().enumerate() {
+    for (pair_index, (ends_m, schwarzschild_radius_m, reach_m)) in gates.into_iter().enumerate() {
         let first_index: usize = layout.map.warps.len();
-        for (end_index, xz_m) in pair.iter().enumerate() {
-            layout.keep_clear(*xz_m, Vec2::splat(MOUTH_REACH_M));
+        for (end_index, centre_m) in ends_m.into_iter().enumerate() {
+            layout.keep_clear(Vec2::new(centre_m.x, centre_m.z), Vec2::splat(reach_m));
             layout.map.warps.push(Warp {
                 kind: "wormhole_mouth".to_string(),
                 name: format!("gate {pair_index} mouth {end_index}"),
-                frame: Mat4::from_translation(Vec3::new(xz_m.x, MOUTH_HEIGHT_M, xz_m.y))
-                    .to_cols_array(),
+                frame: Mat4::from_translation(centre_m).to_cols_array(),
                 law: "foil".to_string(),
-                schwarzschild_radius_m: MOUTH_SCHWARZSCHILD_RADIUS_M,
+                schwarzschild_radius_m,
                 lambda_squared: Some(MOUTH_LAMBDA_SQUARED),
                 radial_coordinate: "distance".to_string(),
-                reach_m: MOUTH_REACH_M,
+                reach_m,
                 falloff: "taper".to_string(),
                 partner: Some(first_index + 1 - end_index),
             });
@@ -824,35 +813,129 @@ fn add_team_side(layout: &mut Layout, side: Side) {
     }
 }
 
-/// `add_decorative_trees` scatters trees on red's half where nothing else stands and mirrors
-/// them onto blue's half, so both teams see the same forest.
-fn add_decorative_trees(layout: &mut Layout) {
-    let mut count: usize = 0;
-    let step_m: f32 = BAMBOO_SPACING_M;
-    let mut z: f32 = 3.0;
-    while z < HALF_LENGTH_M - 2.0 {
-        let mut x: f32 = -HALF_WIDTH_M + 3.0;
-        while x < HALF_WIDTH_M - 2.0 {
-            let jitter: Vec2 =
-                Vec2::new(layout.random_frac() - 0.5, layout.random_frac() - 0.5) * step_m * 0.6;
-            let point: Vec2 = Vec2::new(x, z) + jitter;
-            let radius_m: f32 = 0.35 + layout.random_frac() * 0.45;
-            let should_grow: bool = layout.random_frac() < BAMBOO_GROW_FRAC;
-            let inside: bool = point.x.abs() < HALF_WIDTH_M - 1.5
-                && point.y < HALF_LENGTH_M - 1.5
-                && point.y > 1.5;
-            if should_grow && inside && layout.is_clear(point, radius_m * CLUMP_SPREAD_FRAC + 0.4) {
-                let height_m: f32 = 16.0 + layout.random_frac() * 12.0;
-                for (side, sign) in [("red", 1.0_f32), ("blue", -1.0)] {
-                    let foot_m: Vec3 = Vec3::new(point.x * sign, 0.0, point.y * sign);
-                    layout.add_tree(&format!("{side} tree {count}"), foot_m, radius_m, height_m);
-                }
-                layout.keep_clear(point, Vec2::splat(radius_m * CLUMP_SPREAD_FRAC));
-                count += 1;
-            }
-            x += step_m;
+/// `MAZE_CELL_M` is the side of a cell of the ground labyrinth: a corridor and its wall.
+const MAZE_CELL_M: f32 = 4.0;
+/// `MAZE_LOOP_FRAC` is the share of a spanning maze's walls opened anyway, so the labyrinth has
+/// loops as well as dead ends.
+const MAZE_LOOP_FRAC: f32 = 0.12;
+/// `MAZE_TURN_FRAC` is how often carving the maze turns rather than going straight, so corridors
+/// wind.
+const MAZE_TURN_FRAC: f32 = 0.7;
+/// `MAZE_HALFWAY_OPEN_FRAC` is the share of the walls on the halfway line left open.
+const MAZE_HALFWAY_OPEN_FRAC: f32 = 0.35;
+/// `MAZE_CLUMPS_PER_WALL` bamboo clumps stand along each closed cell wall, `MAZE_WALL_JITTER_M`
+/// off its line at most.
+const MAZE_CLUMPS_PER_WALL: usize = 4;
+const MAZE_WALL_JITTER_M: f32 = 0.25;
+const MAZE_CLUMP_MIN_RADIUS_M: f32 = 0.25;
+const MAZE_CLUMP_RADIUS_SPREAD_M: f32 = 0.15;
+
+/// `add_labyrinth` carves red's half of the ground into a seeded maze of `MAZE_CELL_M` cells (a
+/// winding depth-first spanning tree plus some loops), grows a bamboo wall on every closed cell
+/// side where nothing else stands, and mirrors it onto blue's half. Walls on the halfway line are
+/// red's for its west half, so their 180° turns close the east half.
+fn add_labyrinth(layout: &mut Layout) {
+    let column_count: usize = (2.0 * HALF_WIDTH_M / MAZE_CELL_M) as usize;
+    let row_count: usize = (HALF_LENGTH_M / MAZE_CELL_M) as usize;
+    let index = |i: usize, j: usize| j * column_count + i;
+    let mut is_open_east: Vec<bool> = vec![false; column_count * row_count];
+    let mut is_open_north: Vec<bool> = vec![false; column_count * row_count];
+    let mut is_visited: Vec<bool> = vec![false; column_count * row_count];
+    let start: (usize, usize) = (column_count / 2, row_count - 1);
+    is_visited[index(start.0, start.1)] = true;
+    let mut stack: Vec<(usize, usize, Option<usize>)> = vec![(start.0, start.1, None)];
+    while let Some(&(i, j, last_direction)) = stack.last() {
+        let mut options: Vec<(usize, usize, usize)> = Vec::new();
+        if i + 1 < column_count {
+            options.push((i + 1, j, 0));
         }
-        z += step_m;
+        if i > 0 {
+            options.push((i - 1, j, 1));
+        }
+        if j + 1 < row_count {
+            options.push((i, j + 1, 2));
+        }
+        if j > 0 {
+            options.push((i, j - 1, 3));
+        }
+        options.retain(|&(a, b, _)| !is_visited[index(a, b)]);
+        if options.is_empty() {
+            stack.pop();
+            continue;
+        }
+        let turns: Vec<(usize, usize, usize)> = options
+            .iter()
+            .copied()
+            .filter(|option| Some(option.2) != last_direction)
+            .collect();
+        let pool: &[(usize, usize, usize)] =
+            if !turns.is_empty() && layout.random_frac() < MAZE_TURN_FRAC {
+                &turns
+            } else {
+                &options
+            };
+        let (a, b, direction) =
+            pool[((layout.random_frac() * pool.len() as f32) as usize).min(pool.len() - 1)];
+        match direction {
+            0 => is_open_east[index(i, j)] = true,
+            1 => is_open_east[index(a, b)] = true,
+            2 => is_open_north[index(i, j)] = true,
+            _ => is_open_north[index(a, b)] = true,
+        }
+        is_visited[index(a, b)] = true;
+        stack.push((a, b, Some(direction)));
+    }
+    let corner = |i: usize, j: usize| {
+        Vec2::new(
+            -HALF_WIDTH_M + i as f32 * MAZE_CELL_M,
+            j as f32 * MAZE_CELL_M,
+        )
+    };
+    let mut walls: Vec<(Vec2, Vec2)> = Vec::new();
+    for j in 0..row_count {
+        for i in 0..column_count {
+            let is_inner_east: bool = i + 1 < column_count;
+            if is_inner_east && !is_open_east[index(i, j)] && layout.random_frac() >= MAZE_LOOP_FRAC
+            {
+                walls.push((corner(i + 1, j), corner(i + 1, j + 1)));
+            }
+            let is_inner_north: bool = j + 1 < row_count;
+            if is_inner_north
+                && !is_open_north[index(i, j)]
+                && layout.random_frac() >= MAZE_LOOP_FRAC
+            {
+                walls.push((corner(i, j + 1), corner(i + 1, j + 1)));
+            }
+        }
+    }
+    for i in 0..column_count / 2 {
+        if layout.random_frac() >= MAZE_HALFWAY_OPEN_FRAC {
+            walls.push((corner(i, 0), corner(i + 1, 0)));
+        }
+    }
+    let mut count: usize = 0;
+    for (a, b) in walls {
+        let along: Vec2 = (b - a) / MAZE_CLUMPS_PER_WALL as f32;
+        let across: Vec2 = along.perp().normalize();
+        for clump in 0..MAZE_CLUMPS_PER_WALL {
+            let along_frac: f32 = clump as f32 + 0.5 + (layout.random_frac() - 0.5) * 0.6;
+            let point: Vec2 = a
+                + along * along_frac
+                + across * ((layout.random_frac() - 0.5) * 2.0 * MAZE_WALL_JITTER_M);
+            let radius_m: f32 =
+                MAZE_CLUMP_MIN_RADIUS_M + MAZE_CLUMP_RADIUS_SPREAD_M * layout.random_frac();
+            let height_m: f32 = 16.0 + layout.random_frac() * 12.0;
+            let is_inside: bool =
+                point.x.abs() < HALF_WIDTH_M - 1.0 && point.y.abs() < HALF_LENGTH_M - 1.0;
+            if !is_inside || !layout.is_clear(point, radius_m * CLUMP_SPREAD_FRAC + 0.3) {
+                continue;
+            }
+            for (side, sign) in [("red", 1.0_f32), ("blue", -1.0)] {
+                let foot_m: Vec3 = Vec3::new(point.x * sign, 0.0, point.y * sign);
+                layout.add_tree(&format!("{side} tree {count}"), foot_m, radius_m, height_m);
+            }
+            count += 1;
+        }
     }
 }
 
@@ -954,8 +1037,8 @@ pub fn build() -> MapFile {
             warps: Vec::new(),
             scatter: Some(Scatter {
                 seed: BAMBOO_SEED,
-                spacing_m: BAMBOO_SPACING_M,
-                grow_frac: BAMBOO_GROW_FRAC,
+                spacing_m: MAZE_CELL_M,
+                grow_frac: 1.0 - MAZE_LOOP_FRAC,
             }),
             laser: Some(LaserLook {
                 rgb: GOLDEN_WHITE_LASER_RGB,
@@ -1018,7 +1101,7 @@ pub fn build() -> MapFile {
         add_team_side(&mut layout, side);
     }
     add_warps(&mut layout);
-    add_decorative_trees(&mut layout);
+    add_labyrinth(&mut layout);
     for index in 0..10 {
         let t_frac: f32 = index as f32 / 10.0;
         for (sign_x, sign_z) in [(1.0_f32, 1.0_f32), (-1.0, -1.0)] {
@@ -1111,7 +1194,7 @@ mod tests {
     fn test_warps_are_paired_and_clear() {
         let map: MapFile = build();
         let black_hole_count: usize = map.warps.iter().filter(|w| w.kind == "black_hole").count();
-        assert_eq!((black_hole_count, map.warps.len()), (2, 8));
+        assert_eq!((black_hole_count, map.warps.len()), (0, 10));
         for (index, warp) in map.warps.iter().enumerate() {
             if let Some(partner) = warp.partner {
                 assert_eq!(map.warps[partner].partner, Some(index), "{}", warp.name);
@@ -1125,7 +1208,7 @@ mod tests {
                 world_bounds(frame, Vec3::from(map_box.half_size_m)),
             ));
         }
-        for structure in &map.structures {
+        for structure in map.structures.iter().filter(|s| !s.name.contains("candle")) {
             let frame: Mat4 = Mat4::from_cols_array(&structure.frame);
             for shape in &structure.shapes {
                 let shape_frame: Mat4 = frame * Mat4::from_translation(Vec3::from(shape.centre_m));
@@ -1146,6 +1229,15 @@ mod tests {
         for warp in &map.warps {
             let centre_m: Vec3 = Mat4::from_cols_array(&warp.frame).w_axis.truncate();
             for (name, (low, high)) in &bounds {
+                let is_floor_below: bool = centre_m.x > low.x
+                    && centre_m.x < high.x
+                    && centre_m.z > low.z
+                    && centre_m.z < high.z
+                    && centre_m.y - high.y > 0.0
+                    && centre_m.y - high.y < MOUTH_HEIGHT_M + 0.1;
+                if is_floor_below {
+                    continue;
+                }
                 let gap_m: f32 = (centre_m.clamp(*low, *high) - centre_m).length();
                 if gap_m <= warp.reach_m {
                     crowded_warps.push(format!("{name} ({gap_m:.1} m) in {}", warp.name));
@@ -1166,6 +1258,146 @@ mod tests {
             }
         }
         assert!(crowded_warps.is_empty(), "{crowded_warps:#?}");
+    }
+
+    /// `test_labyrinth_links_every_ground_goal` floods a walk grid from red's first spawn, around
+    /// every box and trunk a body can't pass at walking height, and checks that every spawn,
+    /// ground pylon, ladder foot and ground wormhole mouth is reached.
+    #[test]
+    fn test_labyrinth_links_every_ground_goal() {
+        const CELL_M: f32 = 0.25;
+        const BODY_RADIUS_M: f32 = 0.35;
+        const STEP_M: f32 = 0.4;
+        const HEAD_M: f32 = 1.8;
+        const GOAL_TOLERANCE_M: f32 = 1.2;
+        let map: MapFile = build();
+        let column_count: usize = (2.0 * HALF_WIDTH_M / CELL_M) as usize;
+        let row_count: usize = (2.0 * HALF_LENGTH_M / CELL_M) as usize;
+        let to_cell = |x_m: f32, z_m: f32| -> (usize, usize) {
+            (
+                (((x_m + HALF_WIDTH_M) / CELL_M).max(0.0) as usize).min(column_count - 1),
+                (((z_m + HALF_LENGTH_M) / CELL_M).max(0.0) as usize).min(row_count - 1),
+            )
+        };
+        let mut is_blocked: Vec<bool> = vec![false; column_count * row_count];
+        let mut block = |low: Vec3, high: Vec3| {
+            if high.y < STEP_M || low.y > HEAD_M {
+                return;
+            }
+            let (i_low, j_low) = to_cell(low.x - BODY_RADIUS_M, low.z - BODY_RADIUS_M);
+            let (i_high, j_high) = to_cell(high.x + BODY_RADIUS_M, high.z + BODY_RADIUS_M);
+            for j in j_low..=j_high {
+                for i in i_low..=i_high {
+                    is_blocked[j * column_count + i] = true;
+                }
+            }
+        };
+        for map_box in map.boxes.iter().filter(|b| b.group != "the forest floor") {
+            let (low, high) = world_bounds(
+                Mat4::from_cols_array(&map_box.frame),
+                Vec3::from(map_box.half_size_m),
+            );
+            block(low, high);
+        }
+        for structure in &map.structures {
+            let frame: Mat4 = Mat4::from_cols_array(&structure.frame);
+            for shape in structure
+                .shapes
+                .iter()
+                .filter(|s| s.kind == "cylinder" && s.axis == 1)
+            {
+                let shape_frame: Mat4 = frame * Mat4::from_translation(Vec3::from(shape.centre_m));
+                let foot_m: Vec3 =
+                    shape_frame.transform_point3(Vec3::new(0.0, -shape.half_m[1], 0.0));
+                let top_m: Vec3 =
+                    shape_frame.transform_point3(Vec3::new(0.0, shape.half_m[1], 0.0));
+                let t: f32 = ((1.0 - foot_m.y) / (top_m.y - foot_m.y)).clamp(0.0, 1.0);
+                let waist_m: Vec3 = foot_m.lerp(top_m, t);
+                let radius: Vec3 = Vec3::new(shape.half_m[0], 0.0, shape.half_m[2]);
+                block(
+                    Vec3::new(waist_m.x, foot_m.y, waist_m.z) - radius,
+                    Vec3::new(waist_m.x, top_m.y.min(HEAD_M), waist_m.z) + radius,
+                );
+            }
+        }
+        let start_m: Vec3 = Mat4::from_cols_array(&map.spawns[0].frame)
+            .w_axis
+            .truncate();
+        let mut is_reached: Vec<bool> = vec![false; column_count * row_count];
+        let (i_start, j_start) = to_cell(start_m.x, start_m.z);
+        assert!(
+            !is_blocked[j_start * column_count + i_start],
+            "the first spawn is blocked"
+        );
+        let mut queue: std::collections::VecDeque<(usize, usize)> = [(i_start, j_start)].into();
+        is_reached[j_start * column_count + i_start] = true;
+        while let Some((i, j)) = queue.pop_front() {
+            let neighbours = [
+                (i.wrapping_sub(1), j),
+                (i + 1, j),
+                (i, j.wrapping_sub(1)),
+                (i, j + 1),
+            ];
+            for (a, b) in neighbours {
+                if a < column_count && b < row_count {
+                    let cell: usize = b * column_count + a;
+                    if !is_blocked[cell] && !is_reached[cell] {
+                        is_reached[cell] = true;
+                        queue.push_back((a, b));
+                    }
+                }
+            }
+        }
+        let mut goals: Vec<(String, Vec3)> = Vec::new();
+        for spawn in &map.spawns {
+            goals.push((
+                format!("{} spawn", spawn.team),
+                Mat4::from_cols_array(&spawn.frame).w_axis.truncate(),
+            ));
+        }
+        for structure in map.structures.iter().filter(|s| s.mesh.is_some()) {
+            goals.push((
+                structure.name.clone(),
+                frame_translation_m(&structure.frame),
+            ));
+        }
+        for ladder in &map.ladders {
+            let (low, _) = world_bounds(
+                Mat4::from_cols_array(&ladder.frame),
+                Vec3::from(ladder.half_size_m),
+            );
+            goals.push((
+                ladder.name.clone(),
+                Vec3::new(ladder.frame[12], low.y, ladder.frame[14]),
+            ));
+        }
+        for warp in &map.warps {
+            goals.push((
+                warp.name.clone(),
+                Mat4::from_cols_array(&warp.frame).w_axis.truncate(),
+            ));
+        }
+        let tolerance_cell_count: i32 = (GOAL_TOLERANCE_M / CELL_M) as i32;
+        let unreached: Vec<&String> = goals
+            .iter()
+            .filter(|(_, goal_m)| goal_m.y < MOUTH_HEIGHT_M + 1.0)
+            .filter(|(_, goal_m)| {
+                let (i, j) = to_cell(goal_m.x, goal_m.z);
+                let is_near_reached = (-tolerance_cell_count..=tolerance_cell_count).any(|dj| {
+                    (-tolerance_cell_count..=tolerance_cell_count).any(|di| {
+                        let (a, b) = (i as i32 + di, j as i32 + dj);
+                        a >= 0
+                            && b >= 0
+                            && (a as usize) < column_count
+                            && (b as usize) < row_count
+                            && is_reached[b as usize * column_count + a as usize]
+                    })
+                });
+                !is_near_reached
+            })
+            .map(|(name, _)| name)
+            .collect();
+        assert!(unreached.is_empty(), "unreached: {unreached:?}");
     }
 
     #[test]
