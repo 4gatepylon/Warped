@@ -6,11 +6,17 @@ is in [`AGENTS.md`](AGENTS.md).
 
 - `[ ]` open: nobody has started it.
 - `[~]` claimed: someone is working on it; the line says who, on which branch, since when.
-- `[?]` pending user review: merged into `staging`; the line names the PR; the user hasn't confirmed it works yet.
+- `[?]` pending user review: merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`); the line names the PR; the user hasn't confirmed it works yet.
 - `[x]` done: the user tested it and confirmed it works.
 
 ## Claimed
 
+- [~] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
+  are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
+  Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched).
+  Claimed by Claude Code (session on `leah`'s Mac), branch `claude/shoot-when-still`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-shoot-still` on
+    `leah`'s Mac, branch `claude/shoot-when-still` (pushed to `origin` once it has commits). State, 2026-11-08: started.
 - [~] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
   more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
   time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere.
@@ -106,7 +112,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
-Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
+Merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`), waiting for the user to test and
+confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
 - [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the

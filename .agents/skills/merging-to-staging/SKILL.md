@@ -1,18 +1,47 @@
 ---
 name: merging-to-staging
-description: Bring a branch up to date with `staging`, resolve the conflicts that come up again and again in this repo (the wishlist checklist, DECISIONS.md numbers, shared Rust and Metal structs, network bits), check it, and merge its PR into `staging`. Use whenever you merge `staging` into a branch, resolve a merge conflict, or merge a PR into `staging`, especially while other agents are merging too.
+description: Use the staging branches - `staging/user-<username>` for each user, `staging/global` for the latest version of the game, `main` for the stable one - bring a branch up to date, resolve the conflicts that come up again and again in this repo (the wishlist checklist, DECISIONS.md numbers, shared Rust and Metal structs, network bits), check it, and merge its PR. Use whenever you open or merge a PR, merge a staging branch into a branch, resolve a merge conflict, or are asked to merge into `staging/global` or `main`, especially while other agents are merging too.
 ---
 
 # Merging to staging
 
-Many agents merge into `staging` at once, so `staging` moves while you work, and the same few files conflict every
-time. PRs go into `staging` only; never into `main` (the `pr-description` skill).
+## The branches
+
+Work moves up through three levels of branches:
+
+| Branch | What it is | Who merges into it |
+| --- | --- | --- |
+| `staging/user-<username>` | one user's newest work, theirs and their agents' | the user, or their agents on their own once the PR's tests pass |
+| `staging/global` | officially the latest version of the game, where every user's work meets | a human, or an agent only with explicit permission |
+| `main` | the stable version, which works | a human, or an agent only with explicit permission |
+
+- **`<username>`** is the GitHub login of the user you work for, from `gh api user -q .login`: `staging/user-4gatepylon`.
+- **PRs** go into your user's `staging/user-<username>`, never straight into `staging/global` or `main`. A stack's
+  layer 1 is based on it (the `stacked-prs` skill).
+- **Up to `staging/global`:** when the user's branch is ready, a PR from `staging/user-<username>` into
+  `staging/global`, after the loop below has merged `staging/global` into the user's branch and checked it.
+- **Up to `main`:** when `staging/global` is stable and works, a PR from `staging/global` into `main`.
+- **Explicit permission:** an agent never merges into `staging/global` or `main` on its own, even when its task says
+  to merge. Before such a merge it asks the user, naming the PR, the two branches and what goes in, and merges only
+  after the user says yes to that merge. A yes covers that one merge, not later ones. Opening the PR needs no
+  permission.
+- **Missing user branch:** if `origin/staging/user-<username>` doesn't exist, create it from `staging/global` with
+  `git push origin origin/staging/global:refs/heads/staging/user-<username>`, and tell the user.
+- **Staying current:** merge `origin/staging/global` into the user's branch often, so other users' work arrives in
+  small pieces.
+- **No `staging` beside `staging/...`:** git stores a branch as a file named after it, so a branch `staging` and a
+  branch `staging/global` can't both exist. If a fetch or a switch fails with "cannot lock ref ...
+  'refs/remotes/origin/staging' exists" (expected once per clone after `staging` moved to `staging/global`,
+  2026-11-08), run `git fetch --prune origin`, and rename a local `staging` with `git branch -m staging staging/global`.
 
 ## The loop
 
-1. **Fetch.** `git fetch origin staging`. If it fails with "cannot lock ref" (another session fetching at the same
-   moment), wait a few seconds and fetch again.
-2. **Merge `staging` in.** `git merge origin/staging` into your branch. Don't rebase a branch you have pushed.
+Many agents merge at once, so the staging branches move while you work, and the same few files conflict every time.
+The PR's base is `staging/user-<username>` for a feature branch and `staging/global` for a user's branch.
+
+1. **Fetch.** `git fetch origin staging/global staging/user-<username>`. If it fails with "cannot lock ref" (another
+   session fetching at the same moment), wait a few seconds and fetch again.
+2. **Merge the base in.** `git merge origin/<base>` into your branch. Don't rebase a branch you have pushed.
 3. **Resolve conflicts** with the recipes below, keeping everyone's work.
 4. **Check:**
    - the build passes, `fmt` is clean, the linter gives no warnings and every test passes, all on the merged tree;
@@ -25,8 +54,9 @@ time. PRs go into `staging` only; never into `main` (the `pr-description` skill)
 
    If the PR changes the design but not the doc, update the doc in the same PR, or ask the user before merging
    without it.
-6. **Push, then merge the PR.** `gh pr merge <n> --merge`.
-   - "not mergeable" or new conflicts mean `staging` moved: go back to step 1.
+6. **Push, then merge the PR.** `gh pr merge <n> --merge`, into `staging/user-<username>` on your own, into
+   `staging/global` or `main` only after the user's yes for this merge.
+   - "not mergeable" or new conflicts mean the base moved: go back to step 1.
    - "UNKNOWN" mergeability means GitHub is still computing it: wait a few seconds and ask again.
 7. **Report:** the merge commit, and pictures of anything visual.
 
@@ -54,11 +84,12 @@ time. PRs go into `staging` only; never into `main` (the `pr-description` skill)
 
 ## Small things that save time
 
-- **Fresh branches:** cut each new branch from `origin/staging`: `git checkout -b <branch> origin/staging`.
-- **Checklist-only changes** (add, claim, confirm) go in their own small PR, merged at once.
+- **Fresh branches:** cut each new branch from the user's branch:
+  `git checkout -b <branch> origin/staging/user-<username>`.
+- **Checklist-only changes** (add, claim, confirm) go in their own small PR into the user's branch, merged at once.
 - **Two steps for the PR number:** to mark your item pending with its PR number, open the PR first, then commit the
   number in a second commit.
-- **Someone else's linter warning:** a warning that comes in with `staging` gets fixed in its own small PR, not mixed
-  into yours.
+- **Someone else's linter warning:** a warning that comes in with `staging/global` gets fixed in its own small PR, not
+  mixed into yours.
 - **Shell habits:** start each shell command by changing into the folder you mean, since the working folder can reset
   between commands. Never run a bare `git stash`: the stash is shared with other worktrees.

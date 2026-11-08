@@ -13,10 +13,10 @@ user confirmed it).
   titles and descriptions, decisions, docs, the checklist's own cross-references, and every message to the user or to
   other agents, so the user never has to remember what a number means while tens or hundreds of items are in flight.
   For several ids, name each one: `wishlist: claim W-37 (stronger curvature) and W-64 (zone planes)`.
-- **Read it first.** Before starting work on this demo, read the checklist on the latest `staging` (`git fetch origin
-  staging`). Work only on items that are open, or that you have claimed.
+- **Read it first.** Before starting work on this demo, read the checklist on the latest `staging/global` and your user's
+  `staging/user-<username>` (`git fetch origin staging/global staging/user-<username>`). Work only on items that are open, or that you have claimed.
 - **Add requests at once.** As soon as the user asks for something new, add it under "Open" with the next id, in the
-  user's words (fixing only spelling), in its own `wishlist: add W-NN (<short name>)` PR into `staging` that you merge
+  user's words (fixing only spelling), in its own `wishlist: add W-NN (<short name>)` PR into your user's `staging/user-<username>` that you merge
   at once, even while doing other work; then do it when its turn comes. Ask the user before splitting or merging
   items.
 - **Claim before starting.** Change the item's `[ ]` to `[~]`, move it under "Claimed", and add who and where:
@@ -24,12 +24,13 @@ user confirmed it).
   work is**` sub-bullet that lets any other agent (Claude Code, Codex, Devin) pick the work up if you stop: the
   worktree's full path and machine, the branch and whether it is pushed, where pictures and other outputs are, and the
   state of the work with its date. Keep it current while you work, and push your branch to `origin` whenever it has
-  commits worth sharing, so the work survives your session. Put only that change in a PR into `staging` titled
-  `wishlist: claim W-NN (<short name>)` and merge it at once (agents may merge into `staging`), so other agents see
-  the claim before the work starts.
+  commits worth sharing, so the work survives your session. Put only that change in a PR into your user's
+  `staging/user-<username>` titled `wishlist: claim W-NN (<short name>)` and merge it at once (agents may merge into
+  their user's branch), so the user's other agents see the claim before the work starts, and other users' agents
+  once it reaches `staging/global`.
 - **Mark it pending user review, never done.** In the PR that delivers the item, change `[~]` to `[?]`, move it under
   "Pending user review", and replace the claim with the PR's number (`#NNN`; add it once the PR is open, before
-  merging). Tell the user it is on `staging` to test, with screenshots of anything visual (see "Graphical changes"
+  merging). Tell the user it is on `staging/user-<username>` to test, with screenshots of anything visual (see "Graphical changes"
   below). A fix for an item adds its PR number to that item and keeps it pending.
 - **Only the user's confirmation makes it done.** The user tests every claimed fix and every visual before it counts
   as finished. When the user says, in chat, that they tested an item and it works, change `[?]` to `[x]`, move it
