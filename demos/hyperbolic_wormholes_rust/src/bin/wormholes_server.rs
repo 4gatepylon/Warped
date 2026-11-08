@@ -2,7 +2,8 @@
 //! only hosts games, such as a Linux server in the cloud: it builds without Metal or SDL, plays a
 //! map built into the program, and starts a new game a few seconds after a team wins.
 //!
-//! Interface: `--port <port>`, `--map <house-demo|lunar-surface>`, `--server-settings <path>`.
+//! Interface: `--port <port>`, `--map <house-demo|lunar-surface>`, `--server-settings <path>`,
+//! `--game-password-file <path>`.
 //!
 //! Example: `.build/x86_64-unknown-linux-musl/release/wormholes_server --port 47810 --map lunar-surface`
 //!
@@ -61,6 +62,10 @@ struct Arguments {
     /// A copy of server_settings.yaml with the numbers that shape play (default: the built-in one).
     #[arg(long)]
     server_settings: Option<PathBuf>,
+    /// A file holding the game's password; only players who prove they know it may join (default:
+    /// no password, so anyone may).
+    #[arg(long)]
+    game_password_file: Option<PathBuf>,
 }
 
 /// `main` serves one game until the process is stopped, failing at once on a bad map, settings
@@ -75,6 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .filter_map(get_console_team)
         .collect();
+    let game_password: Vec<u8> = net::read_game_password(arguments.game_password_file.as_deref())?;
     let settings: ServerSettings = match &arguments.server_settings {
         Some(path) => ServerSettings::Load(path)?,
         None => ServerSettings::Builtin(),
@@ -89,5 +95,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         console_teams,
         &AtomicBool::new(false),
         Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
+        game_password,
     )
 }

@@ -303,6 +303,11 @@ struct Arguments {
     /// uses them.
     #[arg(long, conflicts_with = "join")]
     server_settings: Option<PathBuf>,
+    /// A file holding the game's password: a server (--serve, --host) admits only players who prove
+    /// they know it, and a player (--join, --host) proves it. Without it the password is empty, as
+    /// suits a local network.
+    #[arg(long)]
+    game_password_file: Option<PathBuf>,
     /// This player's own choices (keys, mouse speed, head bob, motion blur, how a hit looks), a YAML
     /// file with player_settings.yaml's keys (the default).
     #[arg(long)]
@@ -616,6 +621,7 @@ fn start_server(
     map_name: &str,
     settings: ServerSettings,
     console_teams: Vec<u32>,
+    game_password: Vec<u8>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -637,6 +643,7 @@ fn start_server(
             console_teams,
             &should_start_new_game,
             None,
+            game_password,
         ) {
             eprintln!("The game server stopped: {error}");
         }
@@ -661,6 +668,9 @@ fn start_server_process(arguments: &Arguments) -> Result<Child> {
     ]);
     if let Some(path) = &arguments.server_settings {
         command.arg("--server-settings").arg(path);
+    }
+    if let Some(path) = &arguments.game_password_file {
+        command.arg("--game-password-file").arg(path);
     }
     let mut server: Child = command.spawn()?;
     std::thread::sleep(Duration::from_secs_f64(SERVER_START_S));
@@ -715,6 +725,7 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         arguments.map.get_folder_name(),
         load_settings(arguments)?,
         consoles.iter().map(|c| c.team).collect(),
+        net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
     println!(
         "Server settings: {} (players who join get them).",
@@ -879,6 +890,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         arguments.map.get_folder_name(),
+        &net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
     client.join(None)?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
@@ -2027,6 +2039,7 @@ impl Session {
                 client: net::Client::Connect(
                     get_server_address(arguments)?,
                     arguments.map.get_folder_name(),
+                    &net::read_game_password(arguments.game_password_file.as_deref())?,
                 )?,
                 server,
                 is_eliminated: false,

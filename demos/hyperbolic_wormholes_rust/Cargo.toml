@@ -14,14 +14,17 @@ default-run = "hyperbolic-wormholes"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+getrandom = "0.4.3"
 glam = "0.34"
 gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_materials_transmission"] }
+hmac = "0.13.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 png = "0.18"
 rayon = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 serde_yaml = "0.9"
+sha2 = "0.11.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

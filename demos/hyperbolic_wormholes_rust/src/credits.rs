@@ -12,7 +12,7 @@
 //!   `main.rs`), which `overlay_text_fits_its_mask` checks; a long link goes over two lines.
 
 /// `CREDITS_LINES` is the CREDITS page's text, one menu line each.
-pub const CREDITS_LINES: [&str; 16] = [
+pub const CREDITS_LINES: [&str; 17] = [
     "Warped: hyperbolic wormholes",
     "",
     "SURFACES  Poly Haven textures, CC0 (polyhaven.com/a/<name>)",
@@ -25,7 +25,8 @@ pub const CREDITS_LINES: [&str; 16] = [
     "TEXT      SDL3's built-in 8x8 debug font (libsdl.org, zlib)",
     "CODE      Rust crates: sdl3, glam, gltf, image, png, rayon,",
     "  objc2 and objc2-metal (Metal, MetalFX), serde, serde_yaml,",
-    "  serde_json, clap: each under its own open-source license",
+    "  serde_json, clap, hmac, sha2, getrandom: each under its own",
+    "  open-source license",
     "",
     "Everything else (maps, terrain, sky, ships, bars) is made in",
     "code in this repository.",

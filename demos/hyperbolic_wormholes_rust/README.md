@@ -142,9 +142,14 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
   consoles, respawn, the hit slowdown, the flashlight, thrown wormholes); it sends them to every player who joins.
+- `GAME_PASSWORD_FILE=password.txt` (`--game-password-file`) gives a server a password, and players the same file:
+  the server challenges each join and admits only players who prove they know it, without the password crossing
+  the network, and refuses a game of another version with a clear message. Without it anyone can join, which
+  suits a local network.
 - `make build-server-bundle` builds the server alone (`wormholes_server`, from `src/bin/`) for x86-64 Linux into
   `.build/server_bundle.tar.gz`, one static program with the maps built in, to upload to a server in the cloud. It
-  takes `--port`, `--map` and `--server-settings` like `--serve`, and starts a new game 10 s after a team wins.
+  takes `--port`, `--map`, `--server-settings` and `--game-password-file` like `--serve`, and starts a new game
+  10 s after a team wins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
