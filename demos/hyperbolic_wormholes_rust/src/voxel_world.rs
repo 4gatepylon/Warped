@@ -5,8 +5,8 @@
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
-//! `VoxelWorld::find_aimed_material`, `VoxelWorld::is_sunlit`, `Console`, `VoxelPlayer`, `StepReport`,
-//! `Shot`, `BeamSegment`.
+//! `VoxelWorld::find_aimed_material`, `VoxelWorld::is_sunlit`, `VoxelWorld::get_mouth_depth_frac`,
+//! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
@@ -1042,6 +1042,22 @@ impl VoxelWorld {
             .position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
     }
 
+    /// `get_mouth_depth_frac` gives how deep x is in a wormhole mouth: 1 − (ρ / reach)², with ρ
+    /// the distance to the centre of the mouth whose reach holds x, so 1 at the throat and 0 at the
+    /// reach's edge, where the bending ends; 0 outside every mouth's reach and near a black hole.
+    ///
+    /// Example: `let depth_frac = world.get_mouth_depth_frac(eye);`
+    pub fn get_mouth_depth_frac(&self, x: DVec4) -> f64 {
+        match self.find_warp_inside(x) {
+            Some(w) if self.warps[w].is_mouth => {
+                let warp: &VoxelWarp = &self.warps[w];
+                let rho: f64 = (-minkowski_dot(x, warp.centre)).max(1.0).acosh();
+                1.0 - (rho / warp.reach).powi(2)
+            }
+            _ => 0.0,
+        }
+    }
+
     /// `find_warp_entry` finds where a straight ray first enters a warp's reach sphere.
     ///
     /// Example: `let (s_end, entering) = world.find_warp_entry(x, v, 12.0);`
@@ -1288,10 +1304,11 @@ impl VoxelWorld {
 }
 
 /// `StepReport` is what one `VoxelPlayer::step` did that the window shows: messages for the HUD,
-/// and whether the player went through a wormhole mouth.
+/// and how fast the player walked along the way they face (negative walking backwards; 0 standing
+/// still, only stepping sideways, or blocked).
 pub struct StepReport {
     pub messages: Vec<String>,
-    pub has_crossed_mouth: bool,
+    pub forward_m_per_s: f64,
 }
 
 /// `VoxelPlayer` is a player on a voxel map, as in the level: a body frame on the ground plane, the
@@ -1569,8 +1586,8 @@ impl VoxelPlayer {
     /// and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
     /// cells rise a little), jumping (the only way onto a block) and falling. A
     /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
-    /// level does) only if that fails. It returns messages for the HUD and whether the player went
-    /// through a mouth.
+    /// level does) only if that fails. It returns messages for the HUD and how fast the player
+    /// walked along the way they face.
     ///
     /// Example: `for message in player.step(&world, &input, 1.0 / 60.0, 0).messages { ... }`
     pub fn step(
@@ -1636,11 +1653,16 @@ impl VoxelPlayer {
             *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, 0, &[]);
             return StepReport {
                 messages: vec!["You fell into the black hole".to_string()],
-                has_crossed_mouth: false,
+                forward_m_per_s: 0.0,
             };
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
         let has_moved: bool = len > 0.0;
+        let walked_m_per_s: f64 = if has_moved {
+            speed_m_per_s * forward / len
+        } else {
+            0.0
+        };
         if has_moved {
             let dir: [f64; 2] = [side / len, -forward / len];
             let distance_m: f64 = speed_m_per_s * dt_s;
@@ -1661,13 +1683,10 @@ impl VoxelPlayer {
                 }
             }
         }
-        let report: StepReport = StepReport {
-            messages: crossed
-                .iter()
-                .map(|name| format!("Through {name}"))
-                .collect(),
-            has_crossed_mouth: crossed.is_some(),
-        };
+        let messages: Vec<String> = crossed
+            .iter()
+            .map(|name| format!("Through {name}"))
+            .collect();
         if self.is_flying {
             (self.body, self.h_m) = (body_new, h_new);
             let climb_m_per_s: f64 = MIN_FLY_CLIMB_M_PER_S.max(self.h_m) * FLY_CLIMB_PER_S;
@@ -1683,7 +1702,10 @@ impl VoxelPlayer {
                 .as_ref()
                 .map_or(0.0, |t| t.get_height_m(u_m, v_m));
             self.h_m = self.h_m.clamp(floor_m + MIN_FLY_HEIGHT_M, MAX_FLY_HEIGHT_M);
-            return report;
+            return StepReport {
+                messages,
+                forward_m_per_s: walked_m_per_s,
+            };
         }
         let nearby: Vec<usize> =
             world.find_nearby_structures(self.body.col(AXIS_W), NEARBY_REACH_M);
@@ -1736,7 +1758,14 @@ impl VoxelPlayer {
             self.is_on_ground = dh < 0.0;
             self.vertical_m_per_s = 0.0;
         }
-        report
+        StepReport {
+            messages,
+            forward_m_per_s: if self.body == body_new {
+                walked_m_per_s
+            } else {
+                0.0
+            },
+        }
     }
 }
 
@@ -1756,7 +1785,8 @@ mod tests {
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
     //! | Walking | upright, crouched (half as far, eye fully lowered) | `crouching_lowers_the_eye_and_slows_walking` |
-    //! | Step through a mouth | not yet (no crossing, no message), the step that goes through (one crossing and its message) | `walking_into_a_mouth_reports_the_crossing` |
+    //! | Speed a step reports | standing still (0), forward (walking speed), backward (minus it), sideways (0), forward and sideways (its forward part), into a block (0) | `steps_report_speed_along_the_facing` |
+    //! | Mouth depth at | a mouth's centre (1), halfway out its reach (3/4), just past its reach (0), inside the black hole's reach (0) | `mouth_depth_falls_from_the_throat_to_the_reach` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Refilling energy | crouched (at the crouched rate), walking upright (at the walking rate) | `crouching_refills_energy_faster` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
@@ -2101,25 +2131,84 @@ mod tests {
     }
 
     #[test]
-    fn walking_into_a_mouth_reports_the_crossing() {
-        const MOUTH_A_VIEW_M: [f64; 2] = [-22.0, 40.0];
-        const MOUTH_A_TARGET_M: [f64; 2] = [-14.0, 40.0];
-        const THROUGH_STEP_COUNT: usize = 150;
+    fn steps_report_speed_along_the_facing() {
         let world: VoxelWorld = load_lunar_surface();
-        let mut player: VoxelPlayer =
-            VoxelPlayer::AtView(&world, MOUTH_A_VIEW_M, MOUTH_A_TARGET_M, None, 0.0);
-        let walk: Input = Input {
+        let start: VoxelPlayer = VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+        let walk_m_per_s: f64 = world.player.walk_m_per_s;
+        for (input, expected_m_per_s) in [
+            (Input::default(), 0.0),
+            (
+                Input {
+                    forward: true,
+                    ..Input::default()
+                },
+                walk_m_per_s,
+            ),
+            (
+                Input {
+                    back: true,
+                    ..Input::default()
+                },
+                -walk_m_per_s,
+            ),
+            (
+                Input {
+                    right: true,
+                    ..Input::default()
+                },
+                0.0,
+            ),
+            (
+                Input {
+                    forward: true,
+                    left: true,
+                    ..Input::default()
+                },
+                walk_m_per_s / std::f64::consts::SQRT_2,
+            ),
+        ] {
+            let mut player: VoxelPlayer = start;
+            let report: StepReport = player.step(&world, &input, STEP_S, 0);
+            assert!((report.forward_m_per_s - expected_m_per_s).abs() < 1e-9);
+        }
+        let (block_world, at_m, target_m) = make_block_world(1.0, 0.0);
+        let mut blocked: VoxelPlayer = VoxelPlayer::AtView(&block_world, at_m, target_m, None, 0.0);
+        walk_forward(&block_world, &mut blocked, WALK_STEP_COUNT);
+        let into_block: Input = Input {
             forward: true,
             ..Input::default()
         };
-        let reports: Vec<StepReport> = (0..THROUGH_STEP_COUNT)
-            .map(|_| player.step(&world, &walk, STEP_S, 0))
-            .collect();
-        let (crossings, others): (Vec<&StepReport>, Vec<&StepReport>) =
-            reports.iter().partition(|report| report.has_crossed_mouth);
-        assert_eq!(crossings.len(), 1);
-        assert_eq!(crossings[0].messages, vec!["Through wormhole mouth A"]);
-        assert!(others.iter().all(|report| report.messages.is_empty()));
+        let report: StepReport = blocked.step(&block_world, &into_block, STEP_S, 0);
+        assert_eq!(report.forward_m_per_s, 0.0);
+    }
+
+    #[test]
+    fn mouth_depth_falls_from_the_throat_to_the_reach() {
+        const PAST_REACH_PER_REACH: f64 = 1.01;
+        const HALF_REACH_DEPTH_FRAC: f64 = 0.75;
+        let world: VoxelWorld = load_lunar_surface();
+        let at = |warp: &VoxelWarp, rho: f64| -> DVec4 {
+            (warp.frame * make_boost(AXIS_X, rho)).col(AXIS_W)
+        };
+        let mouth: &VoxelWarp = world
+            .warps
+            .iter()
+            .find(|warp| warp.is_mouth)
+            .expect("Lunar Surface has a mouth");
+        assert!((world.get_mouth_depth_frac(mouth.centre) - 1.0).abs() < 1e-9);
+        let half_way: f64 = world.get_mouth_depth_frac(at(mouth, mouth.reach / 2.0));
+        assert!((half_way - HALF_REACH_DEPTH_FRAC).abs() < 1e-9);
+        let past: DVec4 = at(mouth, mouth.reach * PAST_REACH_PER_REACH);
+        assert_eq!(world.get_mouth_depth_frac(past), 0.0);
+        let black_hole: &VoxelWarp = world
+            .warps
+            .iter()
+            .find(|warp| !warp.is_mouth)
+            .expect("Lunar Surface has a black hole");
+        assert_eq!(
+            world.get_mouth_depth_frac(at(black_hole, black_hole.reach / 2.0)),
+            0.0
+        );
     }
 
     #[test]
