@@ -5,6 +5,7 @@
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
+//! `VoxelWorld::set_thrown_wormholes`, `VoxelWorld::can_place_mouth`, `VoxelWorld::find_hit_s`,
 //! `VoxelWorld::find_aimed_material`, `VoxelWorld::is_sunlit`, `VoxelWorld::get_mouth_depth_frac`,
 //! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
@@ -24,6 +25,7 @@ use crate::physics::Input;
 use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
 use crate::shapes::{Shape, ShapeKind, find_hit_mu};
 use crate::terrain::{Terrain, get_fermi_coordinates};
+use crate::thrown_wormholes::{MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 
@@ -115,7 +117,7 @@ pub struct VoxelStructure {
 }
 
 /// `VoxelWarp` is a black hole or a wormhole mouth: its frame, m and reach in curvature units,
-/// its partner and the structures within its reach.
+/// its partner, the structures within its reach, and its colour if a player threw it.
 #[derive(Clone)]
 pub struct VoxelWarp {
     pub name: String,
@@ -127,6 +129,7 @@ pub struct VoxelWarp {
     pub reach: f64,
     pub partner: usize,
     pub list: Vec<usize>,
+    pub color: Option<WormholeColor>,
 }
 
 /// `SpecialMaterials` is the ids of the materials the `lunar` style draws in its own way (-1 when
@@ -285,6 +288,7 @@ pub struct VoxelWorld {
     pub head_bob: HeadBobSettings,
     pub spawns: Vec<DMat4>,
     pub static_structure_count: usize,
+    pub static_warp_count: usize,
     pub consoles: Vec<Console>,
     pub flashlight_eye: Option<DMat4>,
     pub sky_time_s: f64,
@@ -593,6 +597,7 @@ impl VoxelWorld {
                         get_distance(structures[k].centre, centre) < structures[k].radius + reach
                     })
                     .collect(),
+                color: None,
             });
         }
         let mut palette: Vec<[f32; 4]> = vec![[0.0; 4]; MAX_MATERIAL_COUNT];
@@ -645,6 +650,7 @@ impl VoxelWorld {
             r,
             terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
             static_structure_count: structures.len(),
+            static_warp_count: warps.len(),
             consoles: find_consoles(map),
             flashlight_eye: None,
             sky_time_s: 0.0,
@@ -747,6 +753,84 @@ impl VoxelWorld {
             }
         }
         shared
+    }
+
+    /// `get_thrown_size` gives a thrown mouth's m and reach, in curvature units, by the settings.
+    ///
+    /// Example: `let (m, reach) = world.get_thrown_size();`
+    fn get_thrown_size(&self) -> (f64, f64) {
+        let wormholes = &self.settings.wormholes;
+        (
+            wormholes.schwarzschild_radius_m / 4.0 / self.r,
+            wormholes.reach_m / self.r,
+        )
+    }
+
+    /// `set_thrown_wormholes` replaces the thrown mouths with `pairs`, each a purple and a green
+    /// place linked to each other, after the map's own warps and before any avatar is added.
+    ///
+    /// Example: `world.set_thrown_wormholes(&[[purple, green]]);`
+    pub fn set_thrown_wormholes(&mut self, pairs: &[[MouthPlace; 2]]) {
+        assert_eq!(
+            self.structures.len(),
+            self.static_structure_count,
+            "set_thrown_wormholes: the world has avatars"
+        );
+        self.warps.truncate(self.static_warp_count);
+        let (m, reach) = self.get_thrown_size();
+        for pair in pairs {
+            let first: usize = self.warps.len();
+            for (side, (place, color)) in pair
+                .iter()
+                .zip([WormholeColor::Purple, WormholeColor::Green])
+                .enumerate()
+            {
+                let frame: DMat4 = place.get_frame(self.r);
+                let centre: DVec4 = frame.col(AXIS_W);
+                self.warps.push(VoxelWarp {
+                    name: format!("the {} wormhole", color.get_name().to_lowercase()),
+                    is_mouth: true,
+                    frame,
+                    inverse: invert_lorentz(frame),
+                    centre,
+                    m,
+                    reach,
+                    partner: first + 1 - side,
+                    list: (0..self.structures.len())
+                        .filter(|&k| {
+                            let structure: &VoxelStructure = &self.structures[k];
+                            get_distance(structure.centre, centre) < structure.radius + reach
+                        })
+                        .collect(),
+                    color: Some(color),
+                });
+            }
+        }
+    }
+
+    /// `can_place_mouth` says whether a thrown mouth may hover at `place`: inside the map, with its
+    /// reach clear of every map warp's and of those of the thrown mouths at `others` (reaches that
+    /// taper may not overlap).
+    ///
+    /// Example: `if world.can_place_mouth(&place, &others) { ... }`
+    pub fn can_place_mouth(&self, place: &MouthPlace, others: &[MouthPlace]) -> bool {
+        let centre: DVec4 = place.get_centre(self.r);
+        let (_, reach) = self.get_thrown_size();
+        !self.is_outside_boundary(centre)
+            && self.warps[..self.static_warp_count]
+                .iter()
+                .all(|w| get_distance(centre, w.centre) >= reach + w.reach)
+            && others
+                .iter()
+                .all(|other| get_distance(centre, other.get_centre(self.r)) >= 2.0 * reach)
+    }
+
+    /// `find_hit_s` gives how far along a straight chord from x along unit v (at most `s_max`, in
+    /// curvature units) the ground or a structure is, for a thrown mouth's flight.
+    ///
+    /// Example: `let s = world.find_hit_s(x, v, 0.01);`
+    pub fn find_hit_s(&self, x: DVec4, v: DVec4, s_max: f64) -> Option<f64> {
+        self.trace_scene(x, v, s_max, None).map(|hit| hit.s)
     }
 
     /// `light_consoles` sets each console's light at `time_s` (seconds, never going back): dark
@@ -1796,6 +1880,8 @@ mod tests {
     //! | Target rate against the pulse's own | higher (reached at once), the same (kept), lower (eases down: barely after a frame, nearly there after a second, never below) | `the_pulse_eases_back_down` |
     //! | Rate while the light is watched | steady, ramping up over a whole hold, dropping when the hold stops (the light moves only as fast as the pulse, never jumps) | `the_light_never_jumps` |
     //! | Console | off (dark, unlit), on and not held (the normal pulse), on and held (its own faster pulse) | `consoles_pulse_by_their_own_progress` |
+    //! | Thrown pair | walked into (the walker comes out of the other mouth), shot into (the laser goes through) | `a_thrown_pair_carries_walkers_and_lasers` |
+    //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
 
     use super::*;
     use crate::geometry::orthonormalize_frame;
@@ -1843,6 +1929,12 @@ mod tests {
     const LEVEL_TOLERANCE_FRAC: f64 = 1e-6;
     const HELD_CONSOLE: usize = 1;
     const OFF_CONSOLE: usize = 2;
+    const OPEN_U_M: f64 = -60.0;
+    const OPEN_V_M: f64 = -30.0;
+    const OPEN_GAP_M: f64 = 30.0;
+    const WALK_IN_M: f64 = 4.0;
+    const WALK_THROUGH_STEP_COUNT: usize = 120;
+    const BLACK_HOLE_NEIGHBOUR_U_M: f64 = -20.0;
 
     /// `make_block_world` gives the Lunar Surface world with flat ground and nothing on it but a
     /// box `height_m` tall, 1 m deep and 6 m long at u = -80 m, and a spot on the ground
@@ -1943,6 +2035,69 @@ mod tests {
     fn load_lunar_surface() -> VoxelWorld {
         let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
         VoxelWorld::FromMap(&map).expect("a voxel world")
+    }
+
+    /// `make_open_world` gives the Lunar Surface world with flat ground and no structures, and a
+    /// purple and a green place far from its warps, 30 m apart across the line v = -30 m.
+    ///
+    /// Example: `let (world, [purple, green]) = make_open_world();`
+    fn make_open_world() -> (VoxelWorld, [MouthPlace; 2]) {
+        let mut world: VoxelWorld = load_lunar_surface();
+        world.terrain = None;
+        (world.structures, world.shapes, world.static_structure_count) =
+            (Vec::new(), Vec::new(), 0);
+        for warp in &mut world.warps {
+            warp.list.clear();
+        }
+        let eye_m: f64 = world.player.eye_height_m;
+        let place = |v_m: f64| MouthPlace {
+            u_m: OPEN_U_M,
+            v_m,
+            h_m: eye_m,
+            yaw_rad: 0.0,
+        };
+        (world, [place(OPEN_V_M), place(OPEN_V_M - OPEN_GAP_M)])
+    }
+
+    #[test]
+    fn a_thrown_pair_carries_walkers_and_lasers() {
+        let (mut world, pair) = make_open_world();
+        world.set_thrown_wormholes(&[pair]);
+        let start: [f64; 2] = [OPEN_U_M - WALK_IN_M, OPEN_V_M];
+        let mut player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, start, [OPEN_U_M, OPEN_V_M], None, 0.0);
+        let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
+        assert_eq!(shot.through, vec!["the purple wormhole".to_string()]);
+        let input: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        let messages: Vec<String> = (0..WALK_THROUGH_STEP_COUNT)
+            .flat_map(|_| player.step(&world, &input, STEP_S, 0).messages)
+            .collect();
+        assert!(
+            messages.contains(&"Through the purple wormhole".to_string()),
+            "{messages:?}"
+        );
+        let [_, v_m, _] = world.get_fermi_coordinates(player.body.col(AXIS_W));
+        assert!((v_m - pair[1].v_m).abs() < WALK_IN_M, "{v_m}");
+    }
+
+    #[test]
+    fn thrown_mouths_keep_clear_of_other_warps() {
+        let (world, [purple, green]) = make_open_world();
+        assert!(world.can_place_mouth(&purple, &[green]));
+        let near_black_hole: MouthPlace = MouthPlace {
+            u_m: BLACK_HOLE_NEIGHBOUR_U_M,
+            v_m: 0.0,
+            ..purple
+        };
+        assert!(!world.can_place_mouth(&near_black_hole, &[]));
+        let near_green: MouthPlace = MouthPlace {
+            v_m: green.v_m + WALK_IN_M,
+            ..green
+        };
+        assert!(!world.can_place_mouth(&near_green, &[green]));
     }
 
     #[test]
