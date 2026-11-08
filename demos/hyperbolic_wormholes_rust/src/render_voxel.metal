@@ -22,7 +22,7 @@ using namespace metal;
     device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]], \
     device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], device const float *mound_heights [[buffer(26)]], \
     constant float4 *means [[buffer(27)]], device const DustBurst *dust_bursts [[buffer(29)]], \
-    device const DustParticle *dust_particles [[buffer(30)]], \
+    device const DustParticle *dust_particles [[buffer(30)]], device const uint4 *map_cells [[buffer(15)]], \
     texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]], \
     texture2d<float> milky_way [[texture(3)]]
 #define HAS_BEND __HAS_BEND__
@@ -326,6 +326,11 @@ constant float BEND_SAG_PIXELS = 0.5;
 constant float CHORD_SQ_PER_SAG_RADIUS = 8.0;
 constant float MIN_BEND_PIECE_M = 0.5;
 constant float MAX_BEND_PIECE_M = 8.0;
+constant float MAP_CELL_M = __MAP_CELL_M__;
+constant int MAP_CELL_COUNT = __MAP_CELL_COUNT__;
+constant float MAP_CELL_REACH_M = __MAP_CELL_REACH_M__;
+constant int STRUCTURES_PER_WORD = 32;
+constant int MASK_WORD_COUNT = 2;
 constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
 constant int HULL_FIGHTER = 0;
 constant int HULL_RING_SHIP = 1;
@@ -696,6 +701,7 @@ struct Scene {
     device const DustBurst *dust_bursts;
     device const DustParticle *dust_particles;
     texture2d<float> milky_way;
+    device const uint4 *map_cells;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -1257,7 +1263,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
  * @endcode
  */
 kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, map_cells};
     float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
     float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
     float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
@@ -2051,8 +2057,33 @@ static float get_empty_s(thread const Scene &scene, float4 x) {
 }
 
 /**
+ * @brief `trace_map_chord` gives `trace_scene`'s hit, with no warp, for a chord of the map from x along v, `hit.s`
+ * long. When the chord is at most `MAP_CELL_REACH_M` long and starts in a map cell (map_cells.rs), it tests only the
+ * structures in the cell's mask, as it can't reach the others.
+ * @par Example
+ * @code
+ * trace_map_chord(scene, m0, chord_v, hit, glass_s);
+ * @endcode
+ */
+static void trace_map_chord(thread const Scene &scene, float4 x, float4 v, thread Hit &hit, thread float &glass_s) {
+    float r = scene.u.curvature_radius_m;
+    int2 c = int2(floor(get_fermi(x, r).xy / MAP_CELL_M + 0.5 * float(MAP_CELL_COUNT)));
+    if (scene.u.bend.w == 0.0 || hit.s * r > MAP_CELL_REACH_M || any(c < 0) || any(c >= MAP_CELL_COUNT)) {
+        trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
+        return;
+    }
+    uint4 cell = scene.map_cells[c.y * MAP_CELL_COUNT + c.x];
+    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, 0.0, hit); else trace_ground(x, v, hit);
+    for (int word = 0; word < MASK_WORD_COUNT; word++) {
+        for (uint bits = cell[word + 1]; bits != 0; bits &= bits - 1) {
+            trace_structure(scene, word * STRUCTURES_PER_WORD + int(ctz(bits)), x, v, 0.0, false, hit, glass_s);
+        }
+    }
+}
+
+/**
  * @brief `trace_bent_chord` finds the first surface along the map's chord from m0 to m1, the map points at the ends of
- * one short chord of a bent ray, testing every structure, and puts the map chord's start and unit tangent in `chord_x`
+ * one short chord of a bent ray (`trace_map_chord`), and puts the map chord's start and unit tangent in `chord_x`
  * and `chord_v`; a hit beyond the edge radius, which the bend cuts away, doesn't count. It returns the fraction of the
  * chord before the hit (1 without one).
  * @par Example
@@ -2067,7 +2098,7 @@ static float trace_bent_chord(thread const Scene &scene, float4 m0, float4 m1, t
     chord_v = normalize_tangent(m0, m1);
     hit.s = length_s;
     hit.mat = 0;
-    trace_scene(scene, m0, chord_v, -1, 0.0, float3(0.0), hit, glass_s);
+    trace_map_chord(scene, m0, chord_v, hit, glass_s);
     if (hit.mat != 0 && get_axis_distance_m(geodesic_point(m0, chord_v, hit.s), scene.u.curvature_radius_m) > scene.u.bend.y) hit.mat = 0;
     return hit.mat != 0 ? hit.s / max(length_s, TINY) : 1.0;
 }
@@ -2570,7 +2601,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, map_cells};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2677,7 +2708,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, map_cells};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -2701,7 +2732,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, map_cells};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -2738,7 +2769,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, map_cells};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -2793,7 +2824,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, map_cells};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2812,7 +2843,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, map_cells};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {

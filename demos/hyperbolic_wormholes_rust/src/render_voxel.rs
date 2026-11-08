@@ -3,7 +3,8 @@
 //! (`dust.rs`) into buffers each frame and traces them into the render texture that
 //! `render_metal.rs` upscales and presents, every pixel or with the house's adaptive sampling
 //! (`render_metal.rs`'s `encode_adaptive_sampling`). Under a reality bend (`bend.rs`, W-68) the
-//! rays and warp objects are in the bent world and everything else stays in the map.
+//! rays and warp objects are in the bent world and everything else stays in the map, and a short
+//! chord of the map tests only what its map cell can reach (`map_cells.rs`).
 //!
 //! Interface: `VoxelUniforms`, `VoxelFrame::Build`, `VoxelGpu`.
 //!
@@ -25,6 +26,7 @@ use objc2_metal::{
 use crate::bend::Bend;
 use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_Z, get_distance, invert_lorentz};
+use crate::map_cells::{MAP_CELL_COUNT, MAP_CELL_M, MAP_CELL_REACH_M, make_map_cells};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
@@ -54,7 +56,7 @@ const KERNEL_NAME: &str = "trace_voxel_pixels";
 const UNIFORMS_BUFFER_INDEX: usize = 16;
 const SCENE_BUFFER_COUNT: usize = 10;
 const MEANS_BUFFER_INDEX: usize = 27;
-const DUST_BUFFER_INDICES: [usize; 2] = [29, 30];
+const EXTRA_BUFFER_INDICES: [usize; 3] = [29, 30, 15];
 const HAND_LIGHT_BUFFER_INDEX: usize = 28;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
@@ -238,6 +240,7 @@ pub struct VoxelFrame {
     mound_grid: Option<Arc<MoundGrid>>,
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
+    map_cells: Vec<[u32; 4]>,
 }
 
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
@@ -270,10 +273,10 @@ fn pack_grid(grid: &ClearanceGrid, r: f64) -> [f32; 4] {
 
 /// `get_bend_uniform` gives the shader's `VoxelUniforms.bend`: the bend's curvature per meter
 /// (0 when flat), its edge radius, and the greatest height of any terrain or structure above or
-/// below the ground, all in meters.
+/// below the ground, all in meters, and 1 if the frame has map cells (`map_cells.rs`), else 0.
 ///
-/// Example: `let bend = get_bend_uniform(&world, Bend::FromStrength(0.5, 160.0, world.r));`
-fn get_bend_uniform(world: &VoxelWorld, bend: Bend) -> [f32; 4] {
+/// Example: `let bend = get_bend_uniform(&world, Bend::FromStrength(0.5, 160.0, world.r), true);`
+fn get_bend_uniform(world: &VoxelWorld, bend: Bend, has_map_cells: bool) -> [f32; 4] {
     if bend.is_flat() {
         return [0.0; 4];
     }
@@ -288,7 +291,7 @@ fn get_bend_uniform(world: &VoxelWorld, bend: Bend) -> [f32; 4] {
         bend.curvature_per_m,
         bend.edge_radius_m,
         content_height_m,
-        0.0,
+        f64::from(u8::from(has_map_cells)),
     ]
     .map(|x| x as f32)
 }
@@ -493,6 +496,11 @@ impl VoxelFrame {
         };
         let special = world.special;
         let team_colors: [[f32; 3]; 2] = [[0.30, 0.62, 1.0], [1.0, 0.16, 0.08]];
+        let map_cells: Vec<[u32; 4]> = if bend.is_flat() {
+            Vec::new()
+        } else {
+            make_map_cells(world)
+        };
         let uniforms: VoxelUniforms = VoxelUniforms {
             camera: to_columns(camera),
             tan_half_fov: tan_half_fov as f32,
@@ -567,7 +575,7 @@ impl VoxelFrame {
                     light.brightness_frac as f32,
                 ]
             }),
-            bend: get_bend_uniform(world, bend),
+            bend: get_bend_uniform(world, bend, !map_cells.is_empty()),
             spaceships: get_spaceships(world.sky_time_s),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
             beam_speckle: [
@@ -623,6 +631,7 @@ impl VoxelFrame {
             mound_grid: get_mound_grid(&world.terrain).cloned(),
             dust_bursts,
             dust_particles,
+            map_cells,
         }
     }
 
@@ -773,7 +782,10 @@ fn compile_library(
         .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
         .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
         .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR))
-        .replace("__HAS_BEND__", &u8::from(has_bend).to_string());
+        .replace("__HAS_BEND__", &u8::from(has_bend).to_string())
+        .replace("__MAP_CELL_M__", &MAP_CELL_M.to_string())
+        .replace("__MAP_CELL_COUNT__", &MAP_CELL_COUNT.to_string())
+        .replace("__MAP_CELL_REACH_M__", &MAP_CELL_REACH_M.to_string());
     Ok(device
         .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
         .map_err(|error| {
@@ -840,7 +852,7 @@ impl VoxelGpu {
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
             bake_milky_way: make_pipeline(device, &library, "bake_milky_way")?,
-            buffers: (0..SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len())
+            buffers: (0..SCENE_BUFFER_COUNT + EXTRA_BUFFER_INDICES.len())
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
             textures,
@@ -927,15 +939,16 @@ impl VoxelGpu {
                 encoder.setBuffer_offset_atIndex(Some(buffer), 0, UNIFORMS_BUFFER_INDEX + k + 1)
             };
         }
-        let dust: [&[u8]; DUST_BUFFER_INDICES.len()] = [
+        let extras: [&[u8]; EXTRA_BUFFER_INDICES.len()] = [
             as_bytes(&frame.dust_bursts),
             as_bytes(&frame.dust_particles),
+            as_bytes(&frame.map_cells),
         ];
-        for (k, bytes) in dust.iter().enumerate() {
+        for (k, bytes) in extras.iter().enumerate() {
             let buffer: &ProtocolObject<dyn MTLBuffer> =
                 self.buffers[SCENE_BUFFER_COUNT + k].write(device, bytes)?;
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
-            unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, DUST_BUFFER_INDICES[k]) };
+            unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, EXTRA_BUFFER_INDICES[k]) };
         }
         let (width, height) = frame.get_render_size();
         if self
