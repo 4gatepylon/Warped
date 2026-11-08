@@ -22,7 +22,9 @@ description: Split a change into stacked pull requests and manage the stack with
     adopts it instead of creating a new one.
   - `gh stack add <branch>` adds a branch on top of the stack. Commit the next piece there, and
     repeat for each piece.
-  - `gh stack submit` pushes every branch and opens the linked PRs.
+  - `gh stack submit` pushes every branch and opens the linked PRs. Then give each layer with a
+    graphical change its screenshots and videos with `gh pr edit <n> --body-file body.md --attach
+    <file>` (the `pr-description` skill).
   - To change a lower piece (e.g. after review), switch to its branch with
     `gh stack checkout <branch>` or `gh stack down`, and commit there rather than in a higher layer.
     Then run `gh stack rebase --upstack` and `gh stack push`.
