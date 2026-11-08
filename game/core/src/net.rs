@@ -9,7 +9,11 @@
 //!
 //! Interface: `DEFAULT_PORT`, `PROTOCOL_VERSION`, `MAX_PLAYER_COUNT`, `MAX_CONSOLE_COUNT`,
 //! `TEAM_NAMES`, `PasswordRefused`, `get_team`, `read_game_password`, `bind_server`, `serve`,
-//! `find_server`, `Client`, `RemotePlayer`, `GameState`, `Score`, `NetEvent`.
+//! `find_server`, `Client`, `RemotePlayer`, `GameState`, `Score`, `NetEvent`; and, for a server
+//! outside this crate (`warped-server`), the wire format: `Kind`, `Message`, `Reader`,
+//! `make_proof`, `is_proof_right`, `make_random_bytes`, `ANY_TEAM`, `DISCOVERY_PORT`,
+//! `MAX_DATAGRAM_BYTES`, `BEACON_MAGIC`, the `BYTES_PER_*` sizes a join carries and the
+//! `REFUSED_FOR_*` reasons.
 //!
 //! Example: `let mut client = Client::Connect(net::find_server(Duration::from_secs(5))?)?;`
 //!
@@ -57,10 +61,10 @@ const NO_CONSOLE: u8 = u8::MAX;
 const RIFLE_BIT: u8 = 1;
 const TEAM_BIT: u8 = 2;
 const SPECKLE_FIRST_BIT: u8 = 3;
-const ANY_TEAM: u8 = u8::MAX;
+pub const ANY_TEAM: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
-const DISCOVERY_PORT: u16 = 47_801;
+pub const DISCOVERY_PORT: u16 = 47_801;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
 const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
@@ -69,8 +73,8 @@ const PLAYER_TIMEOUT_S: f64 = 3.0;
 const BEACON_GATHER_S: f64 = 1.0;
 const OTHER_VERSION_WINDOW_S: f64 = 1.0;
 const SERVER_POLL_MS: u64 = 2;
-const MAX_DATAGRAM_BYTES: usize = 4096;
-const BEACON_MAGIC: &[u8; 8] = b"WORMHOLE";
+pub const MAX_DATAGRAM_BYTES: usize = 4096;
+pub const BEACON_MAGIC: &[u8; 8] = b"WORMHOLE";
 const FLOATS_PER_FRAME: usize = 16;
 const BYTES_PER_FLOAT: usize = 8;
 const BYTES_PER_ID: usize = 4;
@@ -86,20 +90,20 @@ const FLYING_GREEN_BIT: u8 = 3;
 const BYTES_PER_PLAYER: usize =
     BYTES_PER_ID + FLOATS_PER_FRAME * BYTES_PER_FLOAT + 3 + BYTES_PER_WORMHOLES;
 const BYTES_PER_GAME: usize = 2 * BYTES_PER_ID + 1;
-const BYTES_PER_VERSION: usize = 2;
-const BYTES_PER_COOKIE: usize = 16;
-const BYTES_PER_PROOF: usize = 32;
+pub const BYTES_PER_VERSION: usize = 2;
+pub const BYTES_PER_COOKIE: usize = 16;
+pub const BYTES_PER_PROOF: usize = 32;
 const BYTES_PER_TOKEN: usize = 8;
 const BYTES_PER_SECRET: usize = 32;
-const BYTES_PER_LOBBY: usize = 1 + TEAM_NAMES.len();
-const REFUSED_FOR_VERSION: u8 = 1;
-const REFUSED_FOR_PASSWORD: u8 = 2;
+pub const BYTES_PER_LOBBY: usize = 1 + TEAM_NAMES.len();
+pub const REFUSED_FOR_VERSION: u8 = 1;
+pub const REFUSED_FOR_PASSWORD: u8 = 2;
 const _: () =
     assert!(2 + MAX_PLAYER_COUNT * (BYTES_PER_PLAYER + 1) + BYTES_PER_GAME <= MAX_DATAGRAM_BYTES);
 
 /// `Kind` is a message's first byte.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub enum Kind {
     Join = 1,
     Welcome = 2,
     State = 3,
@@ -122,7 +126,7 @@ impl Kind {
     ///
     /// Example: `let kind = Kind::FromByte(bytes[0]);`
     #[allow(non_snake_case)]
-    fn FromByte(byte: u8) -> Option<Kind> {
+    pub fn FromByte(byte: u8) -> Option<Kind> {
         [
             Kind::Join,
             Kind::Welcome,
@@ -196,21 +200,21 @@ pub enum NetEvent {
 }
 
 /// `Message` builds a datagram.
-struct Message(Vec<u8>);
+pub struct Message(pub Vec<u8>);
 
 impl Message {
     /// `New` starts a message of a kind.
     ///
     /// Example: `let message = Message::New(Kind::Join);`
     #[allow(non_snake_case)]
-    fn New(kind: Kind) -> Message {
+    pub fn New(kind: Kind) -> Message {
         Message(vec![kind as u8])
     }
 
     /// `id` appends a player id.
     ///
     /// Example: `let message = Message::New(Kind::Leave).id(3);`
-    fn id(mut self, id: u32) -> Message {
+    pub fn id(mut self, id: u32) -> Message {
         self.0.extend_from_slice(&id.to_le_bytes());
         self
     }
@@ -218,7 +222,7 @@ impl Message {
     /// `token` appends the token a welcome gave a player.
     ///
     /// Example: `let message = Message::New(Kind::Leave).token(token).id(3);`
-    fn token(mut self, token: u64) -> Message {
+    pub fn token(mut self, token: u64) -> Message {
         self.0.extend_from_slice(&token.to_le_bytes());
         self
     }
@@ -228,7 +232,7 @@ impl Message {
     /// off they are (a byte, 255 for done), and their wormholes.
     ///
     /// Example: `let message = Message::New(Kind::State).player(&player);`
-    fn player(mut self, player: &RemotePlayer) -> Message {
+    pub fn player(mut self, player: &RemotePlayer) -> Message {
         self = self.id(player.id);
         for value in player.frame.to_cols_array() {
             self.0.extend_from_slice(&value.to_le_bytes());
@@ -277,7 +281,7 @@ impl Message {
     /// `game` appends the game's state.
     ///
     /// Example: `let message = message.game(&server.game);`
-    fn game(mut self, game: &GameState) -> Message {
+    pub fn game(mut self, game: &GameState) -> Message {
         self.0.extend_from_slice(&game.number.to_le_bytes());
         self.0.extend_from_slice(&game.off_mask.to_le_bytes());
         self.0
@@ -288,7 +292,7 @@ impl Message {
     /// `scores` appends a count and that many scores: each player's id, team, kills and deaths.
     ///
     /// Example: `let message = Message::New(Kind::Scores).scores(&server.get_scores());`
-    fn scores(mut self, scores: &[Score]) -> Message {
+    pub fn scores(mut self, scores: &[Score]) -> Message {
         self.0
             .push(u8::try_from(scores.len()).expect("scores: at most 255 players are in a game"));
         for score in scores {
@@ -312,16 +316,16 @@ fn encode_speckle_level(beam_speckle_frac: f64) -> u8 {
 }
 
 /// `Reader` reads a datagram's fields in order.
-struct Reader<'a> {
-    bytes: &'a [u8],
-    position: usize,
+pub struct Reader<'a> {
+    pub bytes: &'a [u8],
+    pub position: usize,
 }
 
 impl Reader<'_> {
     /// `take` gives the next `count` bytes, or `None` if the datagram is too short.
     ///
     /// Example: `let id_bytes = reader.take(4)?;`
-    fn take(&mut self, count: usize) -> Option<&[u8]> {
+    pub fn take(&mut self, count: usize) -> Option<&[u8]> {
         let slice: &[u8] = self.bytes.get(self.position..self.position + count)?;
         self.position += count;
         Some(slice)
@@ -330,7 +334,7 @@ impl Reader<'_> {
     /// `id` reads a player id.
     ///
     /// Example: `let id = reader.id()?;`
-    fn id(&mut self) -> Option<u32> {
+    pub fn id(&mut self) -> Option<u32> {
         Some(u32::from_le_bytes(
             self.take(BYTES_PER_ID)?.try_into().ok()?,
         ))
@@ -339,21 +343,21 @@ impl Reader<'_> {
     /// `array` reads the next `N` bytes as an array.
     ///
     /// Example: `let cookie: [u8; 16] = reader.array()?;`
-    fn array<const N: usize>(&mut self) -> Option<[u8; N]> {
+    pub fn array<const N: usize>(&mut self) -> Option<[u8; N]> {
         self.take(N)?.try_into().ok()
     }
 
     /// `token` reads a token written by `Message::token`.
     ///
     /// Example: `let token = reader.token()?;`
-    fn token(&mut self) -> Option<u64> {
+    pub fn token(&mut self) -> Option<u64> {
         Some(u64::from_le_bytes(self.array::<BYTES_PER_TOKEN>()?))
     }
 
     /// `player` reads a player written by `Message::player`.
     ///
     /// Example: `let player = reader.player()?;`
-    fn player(&mut self) -> Option<RemotePlayer> {
+    pub fn player(&mut self) -> Option<RemotePlayer> {
         let id: u32 = self.id()?;
         let mut values: [f64; FLOATS_PER_FRAME] = [0.0; FLOATS_PER_FRAME];
         for value in &mut values {
@@ -452,7 +456,7 @@ impl Reader<'_> {
 /// `make_proof` gives the keyed hash of a server's `cookie` that proves a player knows `password`.
 ///
 /// Example: `let proof = make_proof(b"secret", &cookie);`
-fn make_proof(password: &[u8], cookie: &[u8]) -> [u8; BYTES_PER_PROOF] {
+pub fn make_proof(password: &[u8], cookie: &[u8]) -> [u8; BYTES_PER_PROOF] {
     let mut mac: Hmac<Sha256> =
         Hmac::new_from_slice(password).expect("HMAC takes a key of any length");
     mac.update(cookie);
@@ -462,7 +466,7 @@ fn make_proof(password: &[u8], cookie: &[u8]) -> [u8; BYTES_PER_PROOF] {
 /// `is_proof_right` says, in constant time, whether `proof` is `make_proof(password, cookie)`.
 ///
 /// Example: `if is_proof_right(&server.password, &cookie, &proof) { ... }`
-fn is_proof_right(password: &[u8], cookie: &[u8], proof: &[u8]) -> bool {
+pub fn is_proof_right(password: &[u8], cookie: &[u8], proof: &[u8]) -> bool {
     let mut mac: Hmac<Sha256> =
         Hmac::new_from_slice(password).expect("HMAC takes a key of any length");
     mac.update(cookie);
@@ -472,7 +476,7 @@ fn is_proof_right(password: &[u8], cookie: &[u8], proof: &[u8]) -> bool {
 /// `make_random_bytes` gives `N` bytes from the operating system's random number generator.
 ///
 /// Example: `let token = u64::from_le_bytes(make_random_bytes());`
-fn make_random_bytes<const N: usize>() -> [u8; N] {
+pub fn make_random_bytes<const N: usize>() -> [u8; N] {
     let mut bytes: [u8; N] = [0; N];
     getrandom::fill(&mut bytes).expect("the operating system gives random bytes");
     bytes
