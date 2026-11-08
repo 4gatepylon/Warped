@@ -17,7 +17,7 @@ make run-demo RENDERER=cpu
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
   you through.
-- Click (once the mouse is captured) to fire a laser shot for a quarter of a second.
+- Click (once the mouse is captured) to fire a laser shot for a quarter of a second; not while running, nor in the air on Lunar Surface.
   You can't shoot while running (sprinting while moving): the gun in the bottom right drops into a jogging pose, and
   points ahead again when you walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.

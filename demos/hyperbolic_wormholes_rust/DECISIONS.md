@@ -524,6 +524,15 @@
   before running again.
 - **Rationale:** you asked that a player can run only while there is energy.
 
+### D50. No shooting in the air
+
+- **Choice:** on voxel maps a player can't shoot while jumping or falling (in the air and not flying), as while
+  running (D46): clicks don't shoot, and a shot in flight stops when the player leaves the ground. On the house,
+  `Space` is a jetpack rather than a jump, and shooting while on it is unchanged.
+- **Alternatives:** allowing a shot started on the ground to finish in the air; also blocking shots on the house's
+  jetpack.
+- **Rationale:** you asked that players can't shoot while jumping.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
