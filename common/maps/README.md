@@ -54,7 +54,7 @@ Both are exported from the programs that first built them; the map files are wha
 | `gravity_m_per_s2` | the acceleration toward the ground |
 | `player` | `{"eye_height_m", "walk_m_per_s", "sprint_m_per_s", "jump_m_per_s", "fly_m_per_s"}` |
 | `materials` | the palette (below); material 0 is always empty space |
-| `ground` | `{"material": id, "tiling": {...}}` (optional `tiling`, below) |
+| `ground` | `{"material": id, "tiling": {...}, "terrain": {...}}` (optional `tiling` and `terrain`, below) |
 | `structures` | voxel structures (below), optional |
 | `boxes` | boxes (below), optional |
 | `warps` | black holes and wormhole mouths (below), optional |
@@ -150,6 +150,11 @@ Fermi coordinates: a team's zone is a band of u, and the playable area is (u/u_m
 - `ground.tiling` (optional): `{"kind": "square_order_5", "cells_per_side": N}` in H³: the ground is tiled by squares
   with 72° corners (five at each vertex), the world origin at a tile's centre and its edges along x and z, each tile
   split into N × N cells for texture.
+- `ground.terrain` (optional; without it the ground is flat): `{"kind": "crater", "rim_u_m", "rim_v_m", "wall_m",
+  "rim_height_m", "relief_m", "relief_wavelength_m", "seed"}` raises the ground at Fermi (u, v) to height H(u, v) above
+  h = 0: a crater wall rising over `wall_m` inward of the rim ellipse (semi-axes `rim_u_m`, `rim_v_m`; inward measured as
+  (1 − e) · `rim_v_m`, e the ellipse's radius) to about `rim_height_m`, falling away outside, plus value-noise relief of
+  up to `relief_m` at `relief_wavelength_m`. `demos/hyperbolic_wormholes_rust/src/terrain.rs` defines H exactly.
 - `appearance.style` names how a renderer details surfaces and the sky beyond what the map fixes: noise on blocks,
   craterlets, star fields, clouds. Renderers implement each style they support and draw any other plainly with the
   materials' colours. Defined styles: `meadow` (the house demo's grass, roads and block textures) and `lunar` (Lunar

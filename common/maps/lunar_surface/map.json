@@ -323,6 +323,16 @@
   "tiling": {
    "kind": "square_order_5",
    "cells_per_side": 36
+  },
+  "terrain": {
+   "kind": "crater",
+   "rim_u_m": 160,
+   "rim_v_m": 90,
+   "wall_m": 30,
+   "rim_height_m": 22,
+   "relief_m": 1,
+   "relief_wavelength_m": 24,
+   "seed": 1
   }
  },
  "structures": [

@@ -66,12 +66,27 @@ pub struct Tiling {
     pub cells_per_side: u32,
 }
 
-/// `Ground` is the ground plane's material and tiling.
+/// `MapTerrain` is the ground's relief, a `crater` in the world's Fermi coordinates.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapTerrain {
+    pub kind: String,
+    pub rim_u_m: f64,
+    pub rim_v_m: f64,
+    pub wall_m: f64,
+    pub rim_height_m: f64,
+    pub relief_m: f64,
+    pub relief_wavelength_m: f64,
+    pub seed: u32,
+}
+
+/// `Ground` is the ground's material, tiling and relief.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ground {
     pub material: u8,
     pub tiling: Option<Tiling>,
+    pub terrain: Option<MapTerrain>,
 }
 
 /// `VoxelGrid` is where a structure's cells are and how big they are.

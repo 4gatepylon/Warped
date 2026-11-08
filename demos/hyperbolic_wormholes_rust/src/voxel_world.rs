@@ -21,6 +21,7 @@ use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
 use crate::settings::GameSettings;
+use crate::terrain::{Terrain, get_fermi_coordinates};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 
@@ -174,6 +175,7 @@ pub struct VoxelWorld {
     pub surfaces: Vec<[f32; 4]>,
     pub special: SpecialMaterials,
     pub regions: Option<[f64; 3]>,
+    pub terrain: Option<Terrain>,
     pub sun: DVec3,
     pub planet: Option<(DVec3, f64)>,
     pub player: PlayerSettings,
@@ -462,6 +464,7 @@ impl VoxelWorld {
         let mut world: VoxelWorld = VoxelWorld {
             name: map.name.clone(),
             r,
+            terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
             static_structure_count: structures.len(),
             consoles: find_consoles(map),
             structures,
@@ -646,12 +649,15 @@ impl VoxelWorld {
     ///
     /// Example: `let [u_m, v_m, h_m] = world.get_fermi_coordinates(x);`
     fn get_fermi_coordinates(&self, x: DVec4) -> [f64; 3] {
-        let cosh_h: f64 = (1.0 + x.y * x.y).sqrt();
-        [
-            -self.r * (x.z / x.w).atanh(),
-            self.r * (x.x / cosh_h).asinh(),
-            self.r * x.y.asinh(),
-        ]
+        get_fermi_coordinates(x, self.r)
+    }
+
+    /// `is_under_ground` says whether point x is below the ground (the terrain, or h = 0 without).
+    ///
+    /// Example: `if world.is_under_ground(x) { ... }`
+    fn is_under_ground(&self, x: DVec4) -> bool {
+        let [u_m, v_m, h_m] = self.get_fermi_coordinates(x);
+        h_m < self.terrain.map_or(0.0, |t| t.get_height_m(u_m, v_m))
     }
 
     /// `is_outside_boundary` says whether a point is outside the playable ellipse (never, without one).
@@ -687,12 +693,9 @@ impl VoxelWorld {
         ];
         probes.iter().any(|&[dx, dy, dz]| {
             let y_m: f64 = h_m - eye_m + dy;
-            y_m < 0.0
-                || self.get_material_at(
-                    body * make_boost(AXIS_Y, y_m / self.r)
-                        * map_exp(DVec3::new(dx, 0.0, dz), self.r),
-                    nearby,
-                ) != 0
+            let probe: DVec4 =
+                body * make_boost(AXIS_Y, y_m / self.r) * map_exp(DVec3::new(dx, 0.0, dz), self.r);
+            self.is_under_ground(probe) || self.get_material_at(probe, nearby) != 0
         })
     }
 
@@ -950,13 +953,14 @@ impl VoxelWorld {
     ///
     /// Example: `let hit = world.trace_scene(x, v, 1.0, None);`
     fn trace_scene(&self, x: DVec4, v: DVec4, s_max: f64, warp: Option<usize>) -> Option<Hit> {
-        let mut best: Option<Hit> = None;
-        if x.y >= 0.0 && v.y < 0.0 && x.y / -v.y < 1.0 {
-            let s: f64 = (x.y / -v.y).atanh();
-            if s < s_max {
-                best = Some(Hit { structure: None, s });
-            }
-        }
+        let ground_s: Option<f64> = match self.terrain {
+            Some(terrain) => terrain.find_hit_s(x, v, s_max, self.r),
+            None if x.y >= 0.0 && v.y < 0.0 && x.y / -v.y < 1.0 => Some((x.y / -v.y).atanh()),
+            None => None,
+        };
+        let mut best: Option<Hit> = ground_s
+            .filter(|&s| s < s_max)
+            .map(|s| Hit { structure: None, s });
         let all: Vec<usize>;
         let candidates: &[usize] = match warp {
             Some(w) => &self.warps[w].list,
@@ -1445,7 +1449,9 @@ impl VoxelPlayer {
             if input.down {
                 self.h_m -= climb_m_per_s * dt_s;
             }
-            self.h_m = self.h_m.clamp(MIN_FLY_HEIGHT_M, MAX_FLY_HEIGHT_M);
+            let [u_m, v_m, _] = world.get_fermi_coordinates(self.body.col(AXIS_W));
+            let floor_m: f64 = world.terrain.map_or(0.0, |t| t.get_height_m(u_m, v_m));
+            self.h_m = self.h_m.clamp(floor_m + MIN_FLY_HEIGHT_M, MAX_FLY_HEIGHT_M);
             return messages;
         }
         let nearby: Vec<usize> =
@@ -1534,6 +1540,7 @@ mod tests {
     const MAX_RISE_ALONG_WALL_M: f64 = 0.5;
     const MIN_RISE_ONTO_BLOCK_M: f64 = 0.9;
     const MAX_RISE_ONTO_BLOCK_M: f64 = 1.2;
+    const MIN_CLEARANCE_OVER_GROUND_M: f64 = 0.2;
     const DECK_WALK_STEP_COUNT: usize = 30;
     const MIN_DECK_WALK_FRAC: f64 = 0.5;
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
@@ -1612,8 +1619,19 @@ mod tests {
         spots
             .iter()
             .map(|&(at_m, target_m)| VoxelPlayer::AtView(world, at_m, target_m, None, 0.0))
-            .find(|player| (player.h_m - world.player.eye_height_m).abs() < STAND_TOLERANCE_M)
+            .find(|player| {
+                (get_eye_above_ground_m(world, player) - world.player.eye_height_m).abs()
+                    < STAND_TOLERANCE_M
+            })
             .expect("a spot on the ground beside the column")
+    }
+
+    /// `get_eye_above_ground_m` gives a player's eye height above the ground under them.
+    ///
+    /// Example: `let eye_m = get_eye_above_ground_m(&world, &player);`
+    fn get_eye_above_ground_m(world: &VoxelWorld, player: &VoxelPlayer) -> f64 {
+        let [u_m, v_m, _] = world.get_fermi_coordinates(player.body.col(AXIS_W));
+        player.h_m - world.terrain.map_or(0.0, |t| t.get_height_m(u_m, v_m))
     }
 
     /// `walk_forward` steps a player walking forward `count` times and gives the highest eye height
@@ -1647,14 +1665,15 @@ mod tests {
         assert!((on_lander.h_m - (LANDER_DECK_M + eye_m)).abs() < STAND_TOLERANCE_M);
         let on_ground: VoxelPlayer =
             VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
-        assert!((on_ground.h_m - eye_m).abs() < STAND_TOLERANCE_M);
+        assert!((get_eye_above_ground_m(&world, &on_ground) - eye_m).abs() < STAND_TOLERANCE_M);
     }
 
     #[test]
     fn the_laser_into_the_wormhole_hits_the_red_pylon() {
         let world: VoxelWorld = load_lunar_surface();
-        let player: VoxelPlayer =
+        let mut player: VoxelPlayer =
             VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0);
+        player.h_m = world.player.eye_height_m;
         let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
         assert_eq!(shot.through, vec!["wormhole mouth A".to_string()]);
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
@@ -1716,7 +1735,6 @@ mod tests {
     fn jumping_climbs_onto_a_block() {
         let world: VoxelWorld = load_lunar_surface();
         let mut player: VoxelPlayer = place_on_ground(&world, &find_columns(&world, 1, true, 0.0));
-        let start_m: f64 = player.h_m;
         let input: Input = Input {
             forward: true,
             up: true,
@@ -1724,8 +1742,13 @@ mod tests {
         };
         let has_stood_on_block: bool = (0..WALK_STEP_COUNT).any(|_| {
             player.step(&world, &input, STEP_S, 0);
-            let rise_m: f64 = player.h_m - start_m;
-            player.is_on_ground && rise_m > MIN_RISE_ONTO_BLOCK_M && rise_m < MAX_RISE_ONTO_BLOCK_M
+            let feet_m: f64 = player.h_m - world.player.eye_height_m;
+            let is_on_block: bool = get_eye_above_ground_m(&world, &player)
+                > world.player.eye_height_m + MIN_CLEARANCE_OVER_GROUND_M;
+            player.is_on_ground
+                && is_on_block
+                && feet_m > MIN_RISE_ONTO_BLOCK_M
+                && feet_m < MAX_RISE_ONTO_BLOCK_M
         });
         assert!(has_stood_on_block);
     }

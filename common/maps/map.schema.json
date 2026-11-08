@@ -67,6 +67,21 @@
             "kind": {"const": "square_order_5"},
             "cells_per_side": {"type": "integer", "minimum": 1}
           }
+        },
+        "terrain": {
+          "type": "object",
+          "required": ["kind", "rim_u_m", "rim_v_m", "wall_m", "rim_height_m", "relief_m", "relief_wavelength_m", "seed"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "crater"},
+            "rim_u_m": {"type": "number", "exclusiveMinimum": 0},
+            "rim_v_m": {"type": "number", "exclusiveMinimum": 0},
+            "wall_m": {"type": "number", "exclusiveMinimum": 0},
+            "rim_height_m": {"type": "number", "minimum": 0},
+            "relief_m": {"type": "number", "minimum": 0},
+            "relief_wavelength_m": {"type": "number", "exclusiveMinimum": 0},
+            "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+          }
         }
       }
     },

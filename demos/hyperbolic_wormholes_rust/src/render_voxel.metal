@@ -183,6 +183,18 @@ constant float3 BLUE_COLOR = float3(0.30, 0.62, 1.0);
 constant float3 RED_COLOR = float3(1.0, 0.16, 0.08);
 constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
 constant int TILE_CELLS_PER_HALF = 18;
+constant int TERRAIN_OCTAVES = 5;
+constant float TERRAIN_RIM_NOISE_M = 60.0;
+constant float TERRAIN_RIM_NOISE_FRAC = 0.5;
+constant float TERRAIN_OUTER_FLANK_PER_WALL = 3.0;
+constant float TERRAIN_WALL_RELIEF_GAIN = 3.0;
+constant uint TERRAIN_RIM_SEED = 9u;
+constant float TERRAIN_STEP_FRAC = 0.45;
+constant float TERRAIN_MIN_STEP_M = 0.03;
+constant float TERRAIN_STEP_PER_M = 0.01;
+constant int TERRAIN_MAX_STEPS = 200;
+constant int TERRAIN_BISECTIONS = 8;
+constant float TERRAIN_NORMAL_STEP_M = 0.1;
 constant float KIND_BLACK_HOLE = 0.0;
 constant float HALF_KIND = 0.5;
 constant float GLOW_FLOOR = 1.0 / 1024.0;
@@ -218,7 +230,8 @@ struct VoxelUniforms {
     int mat_console_first;
     int mat_console_count;
     int has_regions;
-    int padding[2];
+    int has_terrain;
+    uint terrain_seed;
     float4 sun;
     float4 planet;
     float4 planet_e1;
@@ -226,6 +239,8 @@ struct VoxelUniforms {
     float4 spot;
     float4 spot_color;
     float4 regions;
+    float4 terrain;
+    float4 relief;
 };
 
 /**
@@ -431,6 +446,96 @@ static void trace_ground(float4 x, float4 v, thread Hit &hit) {
     if (s < hit.s) { hit.s = s; hit.mat = MAT_GROUND; hit.k = -1; }
 }
 
+/** @brief `terrain_hash` is lattice point (i, j)'s value in [0, 1], as terrain.rs's `hash`. @par Example @code float h = terrain_hash(3, -2, 1u); @endcode */
+static float terrain_hash(int i, int j, uint seed) {
+    uint h = uint(i) * 0x8da6b343u ^ uint(j) * 0xd8163841u ^ seed * 0xcb1ab31fu;
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    h ^= h >> 15;
+    return float(h) * (1.0 / 4294967295.0);
+}
+
+/** @brief `smooth01` is the cubic smoothstep of t clamped to [0, 1]. @par Example @code float w = smooth01(t); @endcode */
+static float smooth01(float t) { t = clamp(t, 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
+
+/** @brief `terrain_noise` is terrain.rs's smooth value noise in [0, 1]. @par Example @code float n = terrain_noise(p, 1u); @endcode */
+static float terrain_noise(float2 p, uint seed) {
+    float2 c = floor(p), f = float2(smooth01(p.x - c.x), smooth01(p.y - c.y));
+    int i = int(c.x), j = int(c.y);
+    float bottom = mix(terrain_hash(i, j, seed), terrain_hash(i + 1, j, seed), f.x);
+    float top = mix(terrain_hash(i, j + 1, seed), terrain_hash(i + 1, j + 1, seed), f.x);
+    return mix(bottom, top, f.y);
+}
+
+/** @brief `terrain_height_m` is terrain.rs's `get_height_m`: the ground's height at Fermi (u, v). @par Example @code float h = terrain_height_m(scene, u_m, v_m); @endcode */
+static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
+    float4 t = scene.u.terrain, rl = scene.u.relief;
+    uint seed = scene.u.terrain_seed;
+    float inside_m = (1.0 - length(float2(u_m / t.x, v_m / t.y))) * t.y;
+    float wall = inside_m >= 0.0 ? smooth01(1.0 - inside_m / t.z) : 1.0 - smooth01(-inside_m / (TERRAIN_OUTER_FLANK_PER_WALL * t.z));
+    float rim_m = t.w * (1.0 + TERRAIN_RIM_NOISE_FRAC * (terrain_noise(float2(u_m, v_m) / TERRAIN_RIM_NOISE_M, seed ^ TERRAIN_RIM_SEED) - 0.5));
+    float2 p = float2(u_m, v_m) / rl.y;
+    float sum = 0.0, amplitude = 0.5;
+    for (uint o = 0; o < uint(TERRAIN_OCTAVES); o++) { sum += amplitude * terrain_noise(p, seed + o); amplitude *= 0.5; p *= 2.0; }
+    return rim_m * wall + rl.x * sum / (1.0 - exp2(-float(TERRAIN_OCTAVES))) * (1.0 + TERRAIN_WALL_RELIEF_GAIN * wall);
+}
+
+/** @brief `get_fermi` gives a point's Fermi (u, v, h) in meters. @par Example @code float3 f = get_fermi(x, r); @endcode */
+static float3 get_fermi(float4 x, float r) {
+    return float3(-r * clamp_atanh(x.z / x.w), r * asinh(x.x * rsqrt(1.0 + x.y * x.y)), r * asinh(x.y));
+}
+
+/**
+ * @brief `trace_terrain` is terrain.rs's `find_hit_s` on the chord from x along v within `hit.s`: steps of a fraction
+ * of the gap to the ground, at least a little more each meter out, then bisection of the step that went under.
+ * @par Example
+ * @code
+ * trace_terrain(scene, x, v, hit);
+ * @endcode
+ */
+static void trace_terrain(thread const Scene &scene, float4 x, float4 v, thread Hit &hit) {
+    float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = 0.0, previous = 0.0;
+    for (int i = 0; i < TERRAIN_MAX_STEPS; i++) {
+        float4 p = geodesic_point(x, v, s);
+        float3 f = get_fermi(p, r);
+        float gap = f.z - terrain_height_m(scene, f.x, f.y);
+        if (gap < 0.0) {
+            float lo = previous, hi = s;
+            for (int b = 0; b < TERRAIN_BISECTIONS; b++) {
+                float mid = 0.5 * (lo + hi);
+                float3 g = get_fermi(geodesic_point(x, v, mid), r);
+                if (g.z < terrain_height_m(scene, g.x, g.y)) hi = mid; else lo = mid;
+            }
+            if (hi < hit.s) { hit.s = hi; hit.mat = MAT_GROUND; hit.k = -1; }
+            return;
+        }
+        if (f.z > top_m && geodesic_tangent(x, v, s).y > 0.0) return;
+        previous = s;
+        s += max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * s * r) / r;
+        if (s > hit.s) return;
+    }
+}
+
+/**
+ * @brief `terrain_normal` is the unit normal of the terrain at Fermi (u, v, h): ∂h less the height's gradient along
+ * ∂u and ∂v, which are orthogonal with lengths cosh h cosh v and cosh h.
+ * @par Example
+ * @code
+ * float4 n = terrain_normal(scene, f);
+ * @endcode
+ */
+static float4 terrain_normal(thread const Scene &scene, float3 f) {
+    float r = scene.u.curvature_radius_m, d = TERRAIN_NORMAL_STEP_M;
+    float g_u = (terrain_height_m(scene, f.x + d, f.y) - terrain_height_m(scene, f.x - d, f.y)) / (2.0 * d);
+    float g_v = (terrain_height_m(scene, f.x, f.y + d) - terrain_height_m(scene, f.x, f.y - d)) / (2.0 * d);
+    float3 c = cosh(f / r), sh = sinh(f / r);
+    float4 du = float4(0.0, 0.0, -c.z * c.y * c.x, c.z * c.y * sh.x);
+    float4 dv = float4(c.z * c.y, 0.0, -c.z * sh.y * sh.x, c.z * sh.y * c.x);
+    float4 dh = float4(sh.z * sh.y, c.z, -sh.z * c.y * sh.x, sh.z * c.y * c.x);
+    float4 n = dh - g_u / (c.z * c.z * c.y * c.y) * du - g_v / (c.z * c.z) * dv;
+    return n * rsqrt(max(mdot(n, n), TINY));
+}
+
 /**
  * @brief `is_clear_of_blocks` says whether no static structure's solid cell is within `s` of the point whose spatial
  * part in warp w's frame is `local`, so a chord of length `s` from it can't reach one: its clearance grid cell's value
@@ -462,7 +567,7 @@ static bool is_clear_of_blocks(thread const Scene &scene, int w, float3 local, f
  * @endcode
  */
 static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, thread Hit &hit, thread float &glass_s) {
-    trace_ground(x, v, hit);
+    if (scene.u.has_terrain != 0) trace_terrain(scene, x, v, hit); else trace_ground(x, v, hit);
     if (warp < 0) {
         for (int k = 0; k < scene.u.structure_count; k++) trace_structure(scene, k, x, v, 0.0, false, hit, glass_s);
     } else {
@@ -482,6 +587,10 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
     h.s = SHADOW_M / scene.u.curvature_radius_m;
     h.mat = 0;
     float glass_s = NO_HIT_S;
+    if (scene.u.has_terrain != 0) {
+        trace_terrain(scene, x, l, h);
+        if (h.mat != 0) return SHADOW_FLOOR;
+    }
     for (int k = 0; k < scene.u.structure_count; k++) {
         trace_structure(scene, k, x, l, 0.0, true, h, glass_s);
         if (h.mat != 0) return SHADOW_FLOOR;
@@ -702,7 +811,11 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     float tile_normal_scale = rsqrt(1.0 - tile_klein_half * tile_klein_half);
     float tile_inradius_s = atanh(tile_klein_half), cell_s = tile_inradius_s / float(TILE_CELLS_PER_HALF);
     float detail = detail_fraction(scene, dist_s);
-    float3 y = float3(x.x, x.z, x.w);
+    bool has_terrain = u.has_terrain != 0;
+    float3 fermi = get_fermi(x, r);
+    float cosh_v = cosh(fermi.y / r);
+    float4 foot = has_terrain ? float4(sinh(fermi.y / r), 0.0, -cosh_v * sinh(fermi.x / r), cosh_v * cosh(fermi.x / r)) : x;
+    float3 y = float3(foot.x, foot.z, foot.w);
     float3x3 N = float3x3(1.0);
     if (dist_s < GROUND_DETAIL_S) {
         for (int i = 0; i < MAX_FOLDS; i++) {
@@ -719,6 +832,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     float2 cell = floor(a), uv = a - cell, kc = tanh((cell + 0.5) * cell_s);
     float3 centre = N * (float3(kc, 1.0) * rsqrt(max(1.0 - dot(kc, kc), TINY)));
     if (dist_s >= GROUND_DETAIL_S) centre = y;
+    if (has_terrain) centre = float3(foot.x, foot.z, foot.w);
     float u_m = -r * clamp_atanh(centre.y / centre.z), v_m = r * asinh(centre.x), r_m = acosh(max(centre.z, 1.0)) * r;
     float h = hash_3d(floor(centre * CELL_HASH_SCALE) * HASH_SHRINK);
     float3 albedo = get_palette(scene, u.mat_regolith).rgb * (MARIA_BASE + MARIA_CONTRAST * sample_fbm_3d(float3(u_m, v_m, 0.0) * MARIA_PER_M));
@@ -730,7 +844,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
                   * (1.0 - smoothstep(EJECTA_INNER_M, EJECTA_OUTER_M, r_m));
         albedo = mix(albedo, to_linear(EJECTA_COLOR), EJECTA_STRENGTH * ray);
     }
-    if (dist_s < GROUND_DETAIL_S && r_m > CRATER_RIM_RADIUS_M + CRATERLET_CLEARANCE_M) {
+    if (!has_terrain && dist_s < GROUND_DETAIL_S && r_m > CRATER_RIM_RADIUS_M + CRATERLET_CLEARANCE_M) {
         float2 local = (cell + 0.5) * cell_s, best = float2(NO_HIT_S, 0.0);
         for (int i = 0; i < 9; i++) {
             float2 cand = (float2(float(i % 3), float(i / 3)) - 1.0) * tile_inradius_s * CRATERLET_SPACING_FRAC;
@@ -752,7 +866,8 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
         if (abs(u_m) > zone_edge_u_m) albedo *= mix(float3(1.0), (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_TINT_GAIN, ZONE_TINT_FRAC);
         if (abs(abs(u_m) - zone_edge_u_m) < ZONE_STRIP_M && abs(v_m) < boundary_v_m) glow = (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
         float e = (u_m / boundary_u_m) * (u_m / boundary_u_m) + (v_m / boundary_v_m) * (v_m / boundary_v_m);
-        if (e > 1.0) {
+        if (has_terrain) {
+        } else if (e > 1.0) {
             albedo *= OUTSIDE_DARKEN;
         } else if (e > 1.0 - BOUNDARY_STRIP_FRAC) {
             float stripes = floor(u_m / HAZARD_STRIPE_M) + floor(v_m / HAZARD_STRIPE_M);
@@ -760,12 +875,19 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
         }
     }
     float texel = has_texture(scene, u.mat_regolith) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), h * CELL_SEED));
-    albedo *= 1.0 + detail * (BLOCK_NOISE * (h - 0.5) + TEXEL_NOISE * (texel - 0.5));
-    float2 edge = min(uv, 1.0 - uv);
-    albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * GROUND_EDGE_FRAC);
     float4 n = float4(0.0, 1.0, 0.0, 0.0);
+    if (has_terrain) {
+        n = terrain_normal(scene, fermi);
+    } else {
+        albedo *= 1.0 + detail * (BLOCK_NOISE * (h - 0.5) + TEXEL_NOISE * (texel - 0.5));
+        float2 edge = min(uv, 1.0 - uv);
+        albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * GROUND_EDGE_FRAC);
+    }
     float3 tx = N * (float3(1.0, 0.0, 0.0) + y.x * y), tz = N * (float3(0.0, 1.0, 0.0) + y.y * y);
-    float4 t = orthonormal(float4(tx.x, 0.0, tx.y, tx.z), n), b = -orthonormal(float4(tz.x, 0.0, tz.y, tz.z), n);
+    float4 t4 = float4(tx.x, 0.0, tx.y, tx.z), b4 = float4(tz.x, 0.0, tz.y, tz.z);
+    t4 += mdot(t4, x) * x;
+    b4 += mdot(b4, x) * x;
+    float4 t = orthonormal(t4, n), b = -orthonormal(b4, n);
     Surface s = sample_surface(scene, u.mat_regolith, albedo, a, cell_s * r, dist_s, x, n, t, b, v);
     return light_surface(scene, s, x, n, v) + glow;
 }

@@ -73,7 +73,8 @@ pub struct VoxelUniforms {
     pub mat_console_first: i32,
     pub mat_console_count: i32,
     pub has_regions: i32,
-    pub padding: [i32; 2],
+    pub has_terrain: i32,
+    pub terrain_seed: u32,
     pub sun: [f32; 4],
     pub planet: [f32; 4],
     pub planet_e1: [f32; 4],
@@ -81,6 +82,8 @@ pub struct VoxelUniforms {
     pub spot: [f32; 4],
     pub spot_color: [f32; 4],
     pub regions: [f32; 4],
+    pub terrain: [f32; 4],
+    pub relief: [f32; 4],
 }
 
 /// `GpuStructure` is the shader's `VoxelStructure`.
@@ -292,7 +295,8 @@ impl VoxelFrame {
             mat_console_first: special.console_first,
             mat_console_count: special.console_count,
             has_regions: i32::from(world.regions.is_some()),
-            padding: [0; 2],
+            has_terrain: i32::from(world.terrain.is_some()),
+            terrain_seed: world.terrain.map_or(0, |t| t.seed),
             sun: world.sun.as_vec3().extend(0.0).to_array(),
             planet: planet.0.as_vec3().extend(planet.1 as f32).to_array(),
             planet_e1: e1.as_vec3().extend(0.0).to_array(),
@@ -304,6 +308,12 @@ impl VoxelFrame {
             }),
             regions: world.regions.map_or([0.0; 4], |[edge, u_m, v_m]| {
                 [edge as f32, u_m as f32, v_m as f32, 0.0]
+            }),
+            terrain: world.terrain.map_or([0.0; 4], |t| {
+                [t.rim_m[0], t.rim_m[1], t.wall_m, t.rim_height_m].map(|x| x as f32)
+            }),
+            relief: world.terrain.map_or([0.0; 4], |t| {
+                [t.relief_m, t.wavelength_m, t.get_max_height_m(), 0.0].map(|x| x as f32)
             }),
         };
         assert_eq!(
