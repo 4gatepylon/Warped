@@ -26,22 +26,23 @@ use rayon::prelude::*;
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// `SURFACE_SETS` is the Poly Haven sets, in the order of the arrays' layers.
-const SURFACE_SETS: [&str; 7] = [
-    "asphalt_02",
+const SURFACE_SETS: [&str; 8] = [
+    "moon_01",
     "concrete_wall_008",
     "metal_plate",
     "corrugated_iron_02",
     "rusty_metal_02",
     "concrete_pavement_02",
     "concrete_floor_worn_001",
+    "moon_meteor_02",
 ];
 const SIZE_PX: u32 = 2048;
 const MEAN_LEVEL: usize = 7;
 
 /// `MATERIAL_SURFACES` is each textured material's name, layer, blocks per repeat and metalness.
 const MATERIAL_SURFACES: [(&str, usize, f32, f32); 13] = [
-    ("regolith", 0, 4.0, 0.0),
-    ("dark regolith", 0, 4.0, 0.0),
+    ("regolith", 0, 2.6, 0.0),
+    ("dark regolith", 7, 2.6, 0.0),
     ("basalt", 1, 2.0, 0.0),
     ("boulder", 1, 2.0, 0.0),
     ("hull", 2, 2.0, 0.25),

@@ -25,6 +25,7 @@ use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
 };
+use crate::terrain::MoundGrid;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
 use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld, clip_beam_to_map};
@@ -35,8 +36,9 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const SHADER_SOURCE: &str = include_str!("render_voxel.metal");
 const KERNEL_NAME: &str = "trace_voxel_pixels";
 const UNIFORMS_BUFFER_INDEX: usize = 16;
-const SCENE_BUFFER_COUNT: usize = 9;
-const MEANS_BUFFER_INDEX: usize = 26;
+const SCENE_BUFFER_COUNT: usize = 10;
+const MEANS_BUFFER_INDEX: usize = 27;
+const NO_MOUNDS: [f32; 1] = [0.0];
 const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
 const BLOOM_LEVELS: usize = 5;
 const FIRST_BLOOM_TEXTURE_INDEX: usize = 7;
@@ -48,7 +50,7 @@ const MIN_BUFFER_BYTES: usize = 256;
 
 /// `VoxelUniforms` is the shader's `VoxelUniforms`.
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct VoxelUniforms {
     pub camera: [[f32; 4]; 4],
     pub tan_half_fov: f32,
@@ -73,7 +75,8 @@ pub struct VoxelUniforms {
     pub mat_console_first: i32,
     pub mat_console_count: i32,
     pub has_regions: i32,
-    pub padding: [i32; 2],
+    pub has_terrain: i32,
+    pub terrain_seed: u32,
     pub sun: [f32; 4],
     pub planet: [f32; 4],
     pub planet_e1: [f32; 4],
@@ -81,10 +84,18 @@ pub struct VoxelUniforms {
     pub spot: [f32; 4],
     pub spot_color: [f32; 4],
     pub regions: [f32; 4],
+    pub terrain: [f32; 4],
+    pub relief: [f32; 4],
+    pub mound_grid: [f32; 4],
     pub flashlight_position: [f32; 4],
     pub flashlight_direction: [f32; 4],
     pub flashlight: [f32; 4],
 }
+
+const _: () = assert!(
+    std::mem::size_of::<VoxelUniforms>() <= 4096,
+    "VoxelUniforms fits setBytes"
+);
 
 /// `GpuStructure` is the shader's `VoxelStructure`.
 #[repr(C)]
@@ -95,6 +106,15 @@ struct GpuStructure {
     bound: [f32; 4],
     size: [i32; 4],
     scale: [f32; 4],
+}
+
+/// `GpuShape` is the shader's `Shape`: centre and kind, half sizes and rounding, material and axis.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GpuShape {
+    centre_kind: [f32; 4],
+    half_round: [f32; 4],
+    info: [i32; 4],
 }
 
 /// `GpuWarp` is the shader's `VoxelWarp`.
@@ -130,7 +150,7 @@ struct GpuBeam {
 pub struct VoxelFrame {
     pub uniforms: VoxelUniforms,
     structures: Vec<GpuStructure>,
-    voxels: Vec<u8>,
+    shapes: Vec<GpuShape>,
     warps: Vec<GpuWarp>,
     lists: Vec<[f32; 4]>,
     lights: Vec<GpuLight>,
@@ -138,6 +158,14 @@ pub struct VoxelFrame {
     beams: Vec<GpuBeam>,
     clearance: Arc<ClearanceGrids>,
     surfaces: Vec<[f32; 4]>,
+    mound_grid: Option<Arc<MoundGrid>>,
+}
+
+/// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
+///
+/// Example: `let grid = get_mound_grid(&world.terrain);`
+fn get_mound_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<MoundGrid>> {
+    terrain.as_ref().and_then(|t| t.mound_grid.as_ref())
 }
 
 /// `to_f32` converts a double 4-vector to floats.
@@ -191,19 +219,9 @@ impl VoxelFrame {
                 GpuStructure {
                     rows,
                     centre: to_f32(s.centre),
-                    bound: [
-                        s.radius.cosh() as f32,
-                        s.origin[0] as f32,
-                        s.origin[1] as f32,
-                        s.origin[2] as f32,
-                    ],
-                    size: [
-                        s.size[0] as i32,
-                        s.size[1] as i32,
-                        s.size[2] as i32,
-                        s.offset as i32,
-                    ],
-                    scale: [(r / s.cell_m) as f32, 0.0, 0.0, 0.0],
+                    bound: [s.radius.cosh() as f32, 0.0, 0.0, 0.0],
+                    size: [s.first_shape as i32, s.shape_count as i32, 0, 0],
+                    scale: [r as f32, 0.0, 0.0, 0.0],
                 }
             })
             .collect();
@@ -298,7 +316,8 @@ impl VoxelFrame {
             mat_console_first: special.console_first,
             mat_console_count: special.console_count,
             has_regions: i32::from(world.regions.is_some()),
-            padding: [0; 2],
+            has_terrain: i32::from(world.terrain.is_some()),
+            terrain_seed: world.terrain.as_ref().map_or(0, |t| t.seed),
             sun: world.sun.as_vec3().extend(0.0).to_array(),
             planet: planet.0.as_vec3().extend(planet.1 as f32).to_array(),
             planet_e1: e1.as_vec3().extend(0.0).to_array(),
@@ -310,6 +329,27 @@ impl VoxelFrame {
             }),
             regions: world.regions.map_or([0.0; 4], |[edge, u_m, v_m]| {
                 [edge as f32, u_m as f32, v_m as f32, 0.0]
+            }),
+            terrain: world.terrain.as_ref().map_or([0.0; 4], |t| {
+                [t.rim_m[0], t.rim_m[1], t.wall_m, t.rim_height_m].map(|x| x as f32)
+            }),
+            relief: world.terrain.as_ref().map_or([0.0; 4], |t| {
+                [
+                    t.relief_m,
+                    t.wavelength_m,
+                    t.get_max_height_m(),
+                    t.mound_grid.as_ref().map_or(0.0, |g| g.size[1] as f64),
+                ]
+                .map(|x| x as f32)
+            }),
+            mound_grid: get_mound_grid(&world.terrain).map_or([0.0; 4], |g| {
+                [
+                    g.origin_m[0],
+                    g.origin_m[1],
+                    1.0 / g.cell_m,
+                    g.size[0] as f64,
+                ]
+                .map(|x| x as f32)
             }),
             flashlight_position: world
                 .flashlight_eye
@@ -335,7 +375,25 @@ impl VoxelFrame {
         VoxelFrame {
             uniforms,
             structures,
-            voxels: world.voxels.clone(),
+            shapes: world
+                .shapes
+                .iter()
+                .map(|sh| GpuShape {
+                    centre_kind: [
+                        sh.centre.x as f32,
+                        sh.centre.y as f32,
+                        sh.centre.z as f32,
+                        sh.kind as i32 as f32,
+                    ],
+                    half_round: [
+                        sh.half.x as f32,
+                        sh.half.y as f32,
+                        sh.half.z as f32,
+                        sh.round_m as f32,
+                    ],
+                    info: [i32::from(sh.material), sh.axis as i32, 0, 0],
+                })
+                .collect(),
             warps,
             lists,
             lights,
@@ -343,6 +401,7 @@ impl VoxelFrame {
             beams: gpu_beams,
             clearance: Arc::clone(&world.clearance),
             surfaces: world.surfaces.clone(),
+            mound_grid: get_mound_grid(&world.terrain).cloned(),
         }
     }
 
@@ -523,7 +582,7 @@ impl VoxelGpu {
     ) -> Result<()> {
         let contents: [&[u8]; SCENE_BUFFER_COUNT] = [
             as_bytes(&frame.structures),
-            &frame.voxels,
+            as_bytes(&frame.shapes),
             as_bytes(&frame.warps),
             as_bytes(&frame.lists),
             as_bytes(&frame.lights),
@@ -531,6 +590,10 @@ impl VoxelGpu {
             as_bytes(&frame.beams),
             &frame.clearance.values,
             as_bytes(&frame.surfaces),
+            frame
+                .mound_grid
+                .as_ref()
+                .map_or(as_bytes(&NO_MOUNDS), |g| as_bytes(&g.heights)),
         ];
         let means: &[[f32; 4]] = &self.textures.means;
         let maps = [
