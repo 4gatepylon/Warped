@@ -57,7 +57,10 @@ The minimap (top right, placed by the player settings' `minimap`) shows the sphe
 way you face up, with straight Cartesian grid lines every 5 m: buildings, covers, each team's stairs in its colour,
 lifts and holes, consoles in team colours (grey when off), other players and shots in team colours, and you as the
 white arrow. The window's title shows your team, level, consoles still on, the gun's reload or heat and the frame
-rate.
+rate. Also as on Lunar Surface: `Q` throws your purple wormhole mouth, then your green one (walk or shoot through
+one to come out of the other; enemy shots destroy a pair), `F` shines the flashlight while held, `V` switches to third
+person, shots throw up dust where they hit a floor, and the sniper's beam is a white blade while the rifle's is a
+laser. `make play-route ROUTE=wormholes` throws both mouths, shoots and walks through them.
 
 ### Flags for the match (W-123)
 
@@ -188,5 +191,5 @@ noise; the crowd view's p99 frame is over 16.7 ms in both, from posing eight rob
   Results); not yet measured on a real Mac display.
 - Posing robots costs about 1 ms of CPU per clip each frame; a crowd of eight is the worst view's main cost.
 - No zone walls, thrown wormholes or shadows in City Sphere.
-- Still missing against Lunar Surface (W-126 (same play in every level)): thrown wormholes (`Q`), the flashlight, third
-  person (`V`), ground dust where shots hit, and Lunar's separate sniper and rifle beam looks.
+- Thrown wormholes are portals: a ring and a dark disc, not Lunar Surface's lensed view through the mouth (DECISIONS
+  30).
