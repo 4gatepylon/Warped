@@ -1204,6 +1204,8 @@
   just the specific colors should be a bit more crisp". Then: "make a PR that makes it take slightly longer; ideally
   just double its radius or whatever (i.e. walking at same speed should take exactly twice as long of time showing
   me cyan or red)".
+- **Superseded in part by:** D105, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
+  backward, which you picked from the colour sheets; where and how long the shift shows stays as here.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1774,6 +1776,34 @@
   scene differs a little: its mouths and eye are 4.5 blocks up, and it has no laser.
 - **Alternatives:** moving the WebGL demo's mouths to match first.
 - **Rationale:** it is the version you found too slow.
+
+### D105. The wormhole colour shift in the colours you picked, for W-82 (wormhole colour from motion)
+
+- **Choice:** D84 keeps where, when and how long the shift shows (inside the mouth, × the speed along the view, no
+  timer, 0.63 s walking through mouth A); its colours are now the two you picked from sheets made by an exact Python
+  copy of the shader. The real shader matches that copy to within 1 level in 255 on the `middle` and `red_pylon`
+  views.
+  - **The Doppler step:** each channel shows the light at D times its wavelength (the spectrum at 610, 550 and 465
+    nm, 0 at 400 and 700 nm), with D = √(1 − β²) / (1 − β cos θ′), cos θ′ = 1 − (1 − cos θ) / 2, θ the angle off
+    the middle of the screen. β is 0.09 forward and −0.3 backward at walking speed, growing with it beyond.
+  - **Forward, option 8 "toward light cyan":** D² as bright plus a blue glow (0, 0.12, 0.4) × (D² − 1); paled 30%
+    toward its grey (luminance 0.2126 R + 0.7152 G + 0.0722 B); moved 60% toward light cyan #E0FFFF at the same
+    luminance, so dark stays dark; × 1.5 through a shoulder that rolls the brightest channel off above 0.8 toward
+    1, so nothing clips to flat white; then green moved into blue and held to 0.95 of blue, so nothing turns green.
+    On the `middle` view the ground turns from #A8A295 to #B3E3EF.
+  - **Backward, R2 "darker":** D as bright plus the red glow (0.4, 0.04, 0) × |D − 1|, then × 0.7. On the `middle`
+    view the ground turns #540F00.
+  - **Below walking strength:** the picked colour fades in, the gain and the green cap with it.
+  - **Knobs:** named constants at the top of `render_metal.metal` (`BLUESHIFT_PALE_FRAC`, `BLUESHIFT_WHITE_FRAC`,
+    `BLUESHIFT_TINT`, `BLUESHIFT_GAIN`, `BLUESHIFT_SHOULDER_KNEE`, `BLUESHIFT_LIFT_FRAC` at 0,
+    `BLUESHIFT_MAX_GREEN_PER_BLUE`, `REDSHIFT_GAIN`). `view.wormhole_tint_frac` still fades the whole shift in.
+- **Alternatives:**
+  - the other forward options on the sheet: 1 to 7 (bluer or greener, less white), 9 to 12 (nearly white, #E0FFFF
+    to #F0FFFF, keeping less of the scene's texture), and lifting the blacks toward the tint (options 7 and 12);
+  - the redshift as it was (#259 and #289), or another darkness (R1, R3, R4);
+  - #289's forward look (β 0.16, D³, shown at 45%), chosen from side-by-side renders before your picks reached it.
+- **Rationale:** from the sheets you said "i like option 8 for the wormhole" and "for red i like r2"; after #272 you
+  asked for "the dark red and the light cyan almost white", crisp, "like the previous pictures I was shown".
 
 ## Workload
 
