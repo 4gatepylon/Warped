@@ -5,7 +5,9 @@
 //! benchmark's PNGs) or copied straight into a window's `CAMetalLayer` drawable.
 //!
 //! Interface: `MetalRenderer::New`, `MetalRenderer::render_to_pixels`,
-//! `MetalRenderer::render_to_layer`, `MetalRenderer::get_device`, `MetalRenderer::last_gpu_ms`.
+//! `MetalRenderer::render_to_layer`, `MetalRenderer::render_overlay_to_layer`,
+//! `MetalRenderer::load`, `LoadingStep`, `get_loading_steps`,
+//! `MetalRenderer::get_device`, `MetalRenderer::last_gpu_ms`.
 //!
 //! Example: `let mut renderer = MetalRenderer::New()?; renderer.render_to_pixels(&data, size, &mut pixels)?;`
 //!
@@ -37,6 +39,7 @@ use crate::scene_data::{
     TEXELS_PER_MOUTH_FIELD, Uniforms,
 };
 use crate::viewmodel::Viewmodel;
+use crate::voxel_textures::SurfaceTextures;
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
 /// `Result` is this module's result type.
@@ -45,6 +48,45 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 /// `Texture` is a Metal texture and its size in pixels.
 type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 
+/// `LoadingStep` is one part of what `MetalRenderer::load` reads and compiles before the first
+/// frame, so a window can show a loading bar between parts: the surface textures and the voxel
+/// shader (voxel maps only), and the revolver.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LoadingStep {
+    SurfaceTextures,
+    VoxelShader,
+    Revolver,
+}
+
+impl LoadingStep {
+    /// `get_label` says what the step loads, for the loading screen.
+    ///
+    /// Example: `let label: &str = LoadingStep::Revolver.get_label();`
+    pub fn get_label(self) -> &'static str {
+        match self {
+            LoadingStep::SurfaceTextures => "surface textures",
+            LoadingStep::VoxelShader => "voxel shader",
+            LoadingStep::Revolver => "revolver",
+        }
+    }
+}
+
+/// `get_loading_steps` gives the steps `MetalRenderer::load` takes before the first frame of a
+/// voxel map (`is_voxel_map`) or a house map, in order.
+///
+/// Example: `let steps: &[LoadingStep] = get_loading_steps(true);`
+pub fn get_loading_steps(is_voxel_map: bool) -> &'static [LoadingStep] {
+    if is_voxel_map {
+        &[
+            LoadingStep::SurfaceTextures,
+            LoadingStep::VoxelShader,
+            LoadingStep::Revolver,
+        ]
+    } else {
+        &[LoadingStep::Revolver]
+    }
+}
+
 /// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
 /// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
@@ -52,8 +94,9 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
 /// frame's height the mask's text may take, a picture under the text, how far the scene
 /// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), the
-/// minimap, and how far into the blueshift after a wormhole the scene is (the shader's
-/// `blueshift_scene`: 1 at its peak, 0 for none).
+/// minimap, and how far the scene blueshifts inside a wormhole mouth (the shader's
+/// `blueshift_scene`: 1 for walking straight ahead at the throat, negative for a redshift, 0 for
+/// none).
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
@@ -144,6 +187,17 @@ pub struct OverlayWand {
     pub shaft_color: [f32; 4],
     pub tip_half_m: [f32; 4],
     pub tip_color: [f32; 4],
+}
+
+impl OverlayWand {
+    /// `get_tip_m` gives the front of the wand's tip in camera space, where the gun's muzzle is.
+    ///
+    /// Example: `let muzzle_m = wand.get_tip_m();`
+    pub fn get_tip_m(&self) -> glam::Vec3 {
+        let reach_m: f32 = self.shaft_half_m[2] + 2.0 * self.tip_half_m[2];
+        glam::Vec4::from(self.center_m).truncate()
+            - glam::Vec4::from(self.axes[2]).truncate() * reach_m
+    }
 }
 
 /// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0),
@@ -417,7 +471,8 @@ impl FrameData<'_> {
 }
 
 /// `MetalRenderer` holds the GPU, the compiled ray tracer, the scene buffer, and the textures and
-/// MetalFX scaler for the current render and output sizes.
+/// MetalFX scaler for the current render and output sizes. It keeps the minimap's picture for
+/// where it lies (the shader's `Minimap.map`) and uploads it again when that changes.
 pub struct MetalRenderer {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
@@ -435,8 +490,10 @@ pub struct MetalRenderer {
     overlay_mask: Option<Texture>,
     overlay_picture: Option<Texture>,
     overlay_map: Option<Texture>,
+    overlay_map_placement: [f32; 4],
     blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
+    surface_textures: Option<SurfaceTextures>,
     voxel_gpu: Option<VoxelGpu>,
     viewmodel: Option<Viewmodel>,
     is_voxel_frame: bool,
@@ -759,7 +816,9 @@ impl MetalRenderer {
             overlay_mask: None,
             overlay_picture: None,
             overlay_map: None,
+            overlay_map_placement: [0.0; 4],
             hole_buffers: None,
+            surface_textures: None,
             voxel_gpu: None,
             viewmodel: None,
             is_voxel_frame: false,
@@ -810,6 +869,54 @@ impl MetalRenderer {
         Ok((texture, size_px))
     }
 
+    /// `prepare_render_texture` makes the render texture for an output size, if the current one is
+    /// for another.
+    ///
+    /// Example: `self.prepare_render_texture((2560, 1600))?;`
+    fn prepare_render_texture(&mut self, output_px: (usize, usize)) -> Result<()> {
+        if self
+            .render_texture
+            .as_ref()
+            .is_none_or(|(_, size)| *size != output_px)
+        {
+            self.render_texture = Some(self.make_texture(
+                output_px,
+                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
+            )?);
+        }
+        Ok(())
+    }
+
+    /// `load` reads or compiles `step`'s part unless it is already loaded, so that the first
+    /// frame doesn't wait for it; frames load what they need on their own when it wasn't.
+    ///
+    /// Example: `renderer.load(LoadingStep::Revolver)?;`
+    pub fn load(&mut self, step: LoadingStep) -> Result<()> {
+        match step {
+            LoadingStep::SurfaceTextures => {
+                if self.voxel_gpu.is_none() && self.surface_textures.is_none() {
+                    self.surface_textures = Some(SurfaceTextures::Load(&self.device)?);
+                }
+            }
+            LoadingStep::VoxelShader => {
+                if self.voxel_gpu.is_none() {
+                    self.load(LoadingStep::SurfaceTextures)?;
+                    let textures: SurfaceTextures = self
+                        .surface_textures
+                        .take()
+                        .expect("the surface textures were just loaded");
+                    self.voxel_gpu = Some(VoxelGpu::New(&self.device, textures)?);
+                }
+            }
+            LoadingStep::Revolver => {
+                if self.viewmodel.is_none() {
+                    self.viewmodel = Some(Viewmodel::Load(&self.device)?);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// `prepare_upscaling` makes the MetalFX scaler and its output texture for an output size, if
     /// the current ones are for another. The scaler takes any input up to that size (its input
     /// content size is set each frame), so changing the render scale needs no new scaler.
@@ -855,16 +962,7 @@ impl MetalRenderer {
             render_px.0 <= output_px.0 && render_px.1 <= output_px.1,
             "Metal: the render size {render_px:?} is larger than the output {output_px:?}"
         );
-        if self
-            .render_texture
-            .as_ref()
-            .is_none_or(|(_, size)| *size != output_px)
-        {
-            self.render_texture = Some(self.make_texture(
-                output_px,
-                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
-            )?);
-        }
+        self.prepare_render_texture(output_px)?;
         self.prepare_upscaling(output_px)?;
         self.is_voxel_frame = matches!(frame_data, FrameData::Voxel(_));
         if let FrameData::Voxel(voxel_frame) = frame_data {
@@ -961,9 +1059,7 @@ impl MetalRenderer {
         output_px: (usize, usize),
     ) -> Result<Frame> {
         let render_px: (usize, usize) = frame.get_render_size();
-        if self.voxel_gpu.is_none() {
-            self.voxel_gpu = Some(VoxelGpu::New(&self.device)?);
-        }
+        self.load(LoadingStep::VoxelShader)?;
         if self.is_adaptive {
             self.prepare_sample_buffers(output_px, VOXEL_BYTES_PER_RAY_END)?;
         }
@@ -1310,8 +1406,10 @@ impl MetalRenderer {
                 let is_uploaded: bool = self
                     .overlay_map
                     .as_ref()
-                    .is_some_and(|(_, size)| *size == minimap.map_size_px);
+                    .is_some_and(|(_, size)| *size == minimap.map_size_px)
+                    && self.overlay_map_placement == minimap.minimap.map;
                 if !is_uploaded {
+                    self.overlay_map_placement = minimap.minimap.map;
                     upload_texture(
                         &self.device,
                         &mut self.overlay_map,
@@ -1454,6 +1552,43 @@ impl MetalRenderer {
         let target: Retained<ProtocolObject<dyn MTLTexture>> = target.clone();
         self.blur_histories = self.blur_histories.take().map(|(a, b)| (b, a));
         Ok(target)
+    }
+
+    /// `render_overlay_to_layer` draws `overlay` alone into the next drawable of a window's
+    /// `CAMetalLayer`, over a scene its `dim_frac` of 1 turns black: the loading screen, shown
+    /// before any scene is ready. It returns false when the layer had no drawable free.
+    ///
+    /// Example: `renderer.render_overlay_to_layer(layer, &overlay)?;`
+    pub fn render_overlay_to_layer(
+        &mut self,
+        layer: &CAMetalLayer,
+        overlay: &Overlay,
+    ) -> Result<bool> {
+        let Some(drawable) = layer.nextDrawable() else {
+            return Ok(false);
+        };
+        let target = drawable.texture();
+        let output_px: (usize, usize) = (target.width(), target.height());
+        self.prepare_render_texture(output_px)?;
+        let (scene, _) = self
+            .render_texture
+            .clone()
+            .expect("the render texture was just made");
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or("Metal: no command buffer")?;
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+            self.encode_overlay(&command_buffer, &scene, overlay, output_px)?;
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .ok_or("Metal: no blit encoder")?;
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A COPY BETWEEN TEXTURES OF DIFFERENT SIZES WILL HAPPEN
+        unsafe { blit.copyFromTexture_toTexture(&texture, &target) };
+        blit.endEncoding();
+        command_buffer.presentDrawable(ProtocolObject::from_ref(&*drawable));
+        self.finish(&command_buffer)?;
+        Ok(true)
     }
 
     /// `render_to_layer` draws one frame straight into the next drawable of a window's

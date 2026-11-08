@@ -39,6 +39,7 @@ const SURFACE_SETS: [&str; 8] = [
     "moon_meteor_02",
 ];
 const SIZE_PX: u32 = 2048;
+const BYTES_PER_RGBA_PIXEL: usize = 4;
 const MEAN_LEVEL: usize = 7;
 
 /// `MATERIAL_SURFACES` is each textured material's name, layer, blocks per repeat and metalness.
@@ -144,10 +145,20 @@ pub(crate) fn make_array(
     for (slice, mips) in layers.iter().enumerate() {
         for (level, mip) in mips.iter().enumerate() {
             let w: usize = mip.width() as usize;
-            let bytes: Vec<u8> = mip
-                .pixels()
-                .flat_map(|p| p.0[..channels].to_vec())
-                .collect();
+            let packed_bytes: Vec<u8>;
+            let bytes: &[u8] = if channels == BYTES_PER_RGBA_PIXEL {
+                mip.as_raw()
+            } else {
+                packed_bytes = mip
+                    .as_raw()
+                    .as_chunks::<BYTES_PER_RGBA_PIXEL>()
+                    .0
+                    .iter()
+                    .flat_map(|p| &p[..channels])
+                    .copied()
+                    .collect();
+                &packed_bytes
+            };
             let region = MTLRegion {
                 origin: MTLOrigin { x: 0, y: 0, z: 0 },
                 size: MTLSize {
@@ -162,7 +173,7 @@ pub(crate) fn make_array(
                     region,
                     level,
                     slice,
-                    NonNull::new(bytes.as_ptr().cast_mut().cast()).expect("a Vec isn't null"),
+                    NonNull::new(bytes.as_ptr().cast_mut().cast()).expect("a slice isn't null"),
                     w * channels,
                     w * w * channels,
                 )

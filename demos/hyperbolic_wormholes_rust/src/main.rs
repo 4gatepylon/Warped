@@ -21,6 +21,7 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod credits;
 mod dust;
 mod exit_prompt;
 mod fps_demo_assets;
@@ -44,6 +45,8 @@ mod shapes;
 mod shot_noise;
 mod spaceships;
 mod terrain;
+mod third_person;
+mod thrown_wormholes;
 mod viewmodel;
 mod voxel_clearance;
 mod voxel_textures;
@@ -77,8 +80,11 @@ use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
 use settings::{PerPlayerSettings, ServerSettings};
+use thrown_wormholes::{
+    HIT_FLASH_COLOR, Marker, MouthPlace, PlayerWormholes, ThrownWormholes, fly_throw,
+};
 use voxel_world::{VoxelPlayer, VoxelWorld};
-use world::{DEFAULT_CURVATURE_RADIUS_M, World};
+use world::{DEFAULT_CURVATURE_RADIUS_M, EYE_HEIGHT_M, World};
 
 /// `Result` is this program's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -117,6 +123,7 @@ const WINDOW_TITLE: &str = "Hyperbolic wormholes (Rust)";
 const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
+const MAX_BLUESHIFT_FRAC: f64 = 1.25;
 const WAND_RECOIL_M: f32 = 0.035;
 const WAND_RECOIL_TILT_RAD: f32 = 0.12;
 const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
@@ -161,14 +168,17 @@ const ENERGY_PULSE_RGB: [f32; 3] = [0.8, 0.94, 1.0];
 const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
 const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
 const DISABLE_BAR_RGB: [f32; 3] = [1.0, 0.85, 0.3];
+const LOADING_DIM_FRAC: f32 = 1.0;
+const LOADING_TITLE: &str = "LOADING";
+const LOADING_DONE_LABEL: &str = "ready";
 const PERCENT_PER_FRAC: f64 = 100.0;
 const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
 const GUN_POSE_PER_S: f64 = 6.0;
 const WAND_JOG_CENTER_M: [f32; 3] = [0.22, -0.22, -0.34];
-const WAND_AIM_YAW_RAD: f32 = 0.06;
+const WAND_AIM_YAW_RAD: f32 = 0.076;
 const WAND_JOG_YAW_RAD: f32 = 0.35;
-const WAND_AIM_PITCH_RAD: f32 = 0.06;
+const WAND_AIM_PITCH_RAD: f32 = 0.064;
 const WAND_JOG_PITCH_RAD: f32 = -0.35;
 const WAND_JOG_ROLL_RAD: f32 = 0.5;
 const WAND_JOG_SWING_RAD: f32 = 0.18;
@@ -579,13 +589,26 @@ fn main() -> Result<()> {
     }
 }
 
-/// `load_world` loads a map from `common/maps/` as the world of boxes and mouths this renderer
-/// draws.
+/// `load_map` loads a map from `common/maps/` and, on a voxel map (one with structures, such as
+/// Lunar Surface), curves its space as `settings` say (`Map::scale_curvature`). The house demo
+/// keeps its own curvature: at twice it, its far pylon sits 13 curvature radii out, too far for
+/// the renderer's single precision, and its scripted route breaks.
 ///
-/// Example: `let world = load_world(MapName::HouseDemo)?;`
-fn load_world(name: MapName) -> Result<World> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
-    Ok(World::FromMap(&map)?)
+/// Example: `let map = load_map(MapName::LunarSurface, &ServerSettings::Builtin())?;`
+fn load_map(name: MapName, settings: &ServerSettings) -> Result<map::Map> {
+    let mut map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
+    if !map.structures.is_empty() {
+        map.scale_curvature(settings.space.curvature_per_map_curvature)?;
+    }
+    Ok(map)
+}
+
+/// `load_world` loads a map from `common/maps/` (`load_map`) as the world of boxes and mouths
+/// this renderer draws.
+///
+/// Example: `let world = load_world(MapName::HouseDemo, &ServerSettings::Builtin())?;`
+fn load_world(name: MapName, settings: &ServerSettings) -> Result<World> {
+    Ok(World::FromMap(&load_map(name, settings)?)?)
 }
 
 /// `parse_server_address` reads `--join`'s address: an IP address with an optional port (`port`
@@ -719,12 +742,13 @@ fn find_lan_address() -> Option<IpAddr> {
 ///
 /// Example: `serve_only(&arguments)?;`
 fn serve_only(arguments: &Arguments) -> Result<()> {
-    let map_data: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let settings: ServerSettings = load_settings(arguments)?;
+    let map_data: map::Map = load_map(arguments.map, &settings)?;
     let consoles: Vec<voxel_world::Console> = voxel_world::find_consoles(&map_data);
     let (should_stop, thread) = start_server(
         arguments.port,
         arguments.map.get_folder_name(),
-        load_settings(arguments)?,
+        settings,
         consoles.iter().map(|c| c.team).collect(),
     )?;
     println!(
@@ -848,8 +872,15 @@ fn bench_voxel_views(
             VoxelPlayer::AtView(world, view.at_m, view.target_m, view.h_m, view.pitch_rad);
         let camera: DMat4 = player.get_camera_frame(world);
         let shot: Option<voxel_world::Shot> = view.is_laser_on.then(|| world.trace_laser(camera));
-        let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> =
-            shot.iter().map(|s| (s.segments.clone(), 0)).collect();
+        let beams: Vec<render_voxel::LaserBeam> = shot
+            .iter()
+            .map(|s| render_voxel::LaserBeam {
+                segments: s.segments.clone(),
+                team: 0,
+                is_rifle: false,
+                speckle_frac: 0.0,
+            })
+            .collect();
         let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
         let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
@@ -886,7 +917,7 @@ fn bench_voxel_views(
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map: map::Map = load_map(arguments.map, &ServerSettings::Builtin())?;
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         arguments.map.get_folder_name(),
@@ -1166,7 +1197,7 @@ fn make_bench_views(world: &World) -> Vec<View> {
 ///
 /// Example: `bench_views(&arguments, renderer)?;`
 fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map: map::Map = load_map(arguments.map, &load_settings(arguments)?)?;
     if !map.structures.is_empty() {
         return bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?);
     }
@@ -1561,7 +1592,7 @@ fn make_warp_tour(world: &VoxelWorld) -> Vec<RouteFrame> {
 ///
 /// Example: `run_autopilot(&arguments, renderer)?;`
 fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = load_world(arguments.map)?;
+    let world: World = load_world(arguments.map, &load_settings(arguments)?)?;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("autopilot", arguments.label.as_deref())?;
@@ -1697,30 +1728,26 @@ fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Resu
     Ok(())
 }
 
-/// `fade_wormhole_tint` gives how much of the blueshift after a wormhole is left `dt_s` after
-/// `left_frac` was (1 just after going through, 0 none), fading linearly over `tint_s` (0 for none).
+/// `get_blueshift_frac` gives how far the scene blueshifts (the overlay's `blueshift_frac`: 1 for
+/// walking straight ahead at a mouth's throat, negative for a redshift, 0 for none): `strength_frac`
+/// times how deep the eye is in a mouth (`VoxelWorld::get_mouth_depth_frac`) times the speed
+/// along the view in walking speeds, held within ±`MAX_BLUESHIFT_FRAC`.
 ///
-/// Example: `let left_frac = fade_wormhole_tint(1.0, 1.0 / 60.0, 1.5);`
-fn fade_wormhole_tint(left_frac: f64, dt_s: f64, tint_s: f64) -> f64 {
-    if tint_s > 0.0 {
-        (left_frac - dt_s / tint_s).max(0.0)
-    } else {
-        0.0
-    }
+/// Example: `let blueshift_frac = get_blueshift_frac(0.5, -10.0, 10.0, 1.0);`
+fn get_blueshift_frac(
+    depth_frac: f64,
+    view_m_per_s: f64,
+    walk_m_per_s: f64,
+    strength_frac: f64,
+) -> f32 {
+    (strength_frac * depth_frac * view_m_per_s / walk_m_per_s)
+        .clamp(-MAX_BLUESHIFT_FRAC, MAX_BLUESHIFT_FRAC) as f32
 }
 
-/// `get_blueshift_frac` gives how far into its blueshift the scene is (the overlay's
-/// `blueshift_frac`) with `left_frac` of the fade left: `strength_frac` times the smoothstep
-/// 3x² − 2x³ of `left_frac`, so the tint lingers a moment at its peak and eases out at the end.
-///
-/// Example: `let blueshift_frac = get_blueshift_frac(0.5, 1.0);`
-fn get_blueshift_frac(left_frac: f64, strength_frac: f64) -> f32 {
-    (strength_frac * left_frac * left_frac * (3.0 - 2.0 * left_frac)) as f32
-}
-
-/// `Session` is the state of a played window: the world, the player, the toggles and the HUD's
-/// running averages.
+/// `Session` is the state of a played window: the map it loaded, the world, the player, the
+/// toggles and the HUD's running averages.
 struct Session {
+    map_name: MapName,
     world: World,
     player: Player,
     render_scale: f64,
@@ -1751,6 +1778,8 @@ struct Session {
     gun: Gun,
     is_trigger_held: bool,
     is_flashlight_on: bool,
+    view_switch: third_person::ViewSwitch,
+    is_own_body_shown: bool,
     rifle_next_shot_s: f64,
     rifle_heat_frac: f64,
     is_overheated: bool,
@@ -1763,11 +1792,12 @@ struct Session {
     recoil_frac: f64,
     shot_noise: shot_noise::ShotNoise,
     shot_offset: shot_noise::ShotOffset,
+    beam_speckle_frac: f64,
     gun_phase_rad: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
     hit_effect_frac: f64,
-    wormhole_tint_left_frac: f64,
+    blueshift_frac: f32,
     last_health_frac: f64,
     health_pulses: hud_bars::BarPulses,
     energy_pulses: hud_bars::BarPulses,
@@ -1785,6 +1815,12 @@ struct Session {
     hud_render_ms: f64,
     multiplayer: Option<Multiplayer>,
     voxel: Option<VoxelState>,
+    thrown: ThrownWormholes,
+    thrown_pairs: Vec<[MouthPlace; 2]>,
+    thrown_pair_owners: Vec<Option<u32>>,
+    wormhole_damages: Vec<(Option<u32>, f64)>,
+    wormhole_flashes: Vec<(Option<u32>, f64)>,
+    has_shot_hit_wormholes: bool,
 }
 
 /// `VoxelState` is a window's game on a voxel map: the map, the player and their spawn point.
@@ -1834,30 +1870,37 @@ impl PackedFrame {
 /// `Tracer` is a fired laser drawn as a beam flying out along its path (`segments`, traced when it
 /// was fired, `length_m` long): its front leaves the muzzle at `fired_s` (seconds into the session)
 /// and moves at `speed_m_per_s`, each point stays lit for `trail_s` after the front passes it, and
-/// `spot` glows where it hit while the trail is there.
+/// `spot` glows where it hit while the trail is there. It is drawn in its gun's style (`is_rifle`),
+/// and a share `speckle_frac` of its pixels speckles each frame (the shot's noise). This player's
+/// own shots (`is_own`) stay joined to the gun in hand while their trail still reaches the muzzle.
 struct Tracer {
     segments: Vec<voxel_world::BeamSegment>,
     length_m: f64,
     spot: Option<glam::DVec4>,
     team: u32,
+    is_rifle: bool,
+    speckle_frac: f64,
     fired_s: f64,
     speed_m_per_s: f64,
     trail_s: f64,
+    is_own: bool,
 }
 
 impl Tracer {
     /// `New` makes a tracer for `shot`, fired at `fired_s` by a player of `team` with the rifle
-    /// (`is_rifle`) or the sniper, whose beam speed and trail come from `settings`. A shot that hit
-    /// nothing flies only its first `SKY_TRACER_M`: farther out over the sky it is under a pixel
-    /// wide, and the shader's single precision makes its glow noisy (D64, D66).
+    /// (`is_rifle`) or the sniper, whose beam speed and trail come from `settings`, and whose
+    /// beam speckles a share `speckle_frac` of its pixels. A shot that hit nothing flies only its
+    /// first `SKY_TRACER_M`: farther out over the sky it is under a pixel wide, and the shader's
+    /// single precision makes its glow noisy (D64, D66).
     ///
-    /// Example: `let tracer = Tracer::New(&shot, 1, 12.5, false, &settings, world.r);`
+    /// Example: `let tracer = Tracer::New(&shot, 1, 12.5, false, 0.1, &settings, world.r);`
     #[allow(non_snake_case)]
     fn New(
         shot: &voxel_world::Shot,
         team: u32,
         fired_s: f64,
         is_rifle: bool,
+        speckle_frac: f64,
         settings: &ServerSettings,
         r: f64,
     ) -> Tracer {
@@ -1882,9 +1925,12 @@ impl Tracer {
             segments,
             spot: shot.spot,
             team,
+            is_rifle,
+            speckle_frac,
             fired_s,
             speed_m_per_s,
             trail_s,
+            is_own: false,
         }
     }
 
@@ -1970,8 +2016,8 @@ impl Session {
     /// Example: `let mut session = Session::New(&arguments);`
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
-        let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
         let settings: ServerSettings = load_settings(arguments)?;
+        let map: map::Map = load_map(arguments.map, &settings)?;
         let player_settings_path: Option<PathBuf> =
             arguments.player_settings.clone().or_else(|| {
                 std::env::var_os("HOME")
@@ -2045,6 +2091,7 @@ impl Session {
             None
         };
         Ok(Session {
+            map_name: arguments.map,
             world,
             player,
             settings,
@@ -2075,9 +2122,11 @@ impl Session {
             is_running: false,
             is_jumping: false,
             is_walking_upright: false,
-            gun: Gun::Laser,
+            gun: Gun::Rifle,
             is_trigger_held: false,
             is_flashlight_on: false,
+            view_switch: third_person::ViewSwitch::FirstPerson(),
+            is_own_body_shown: false,
             rifle_next_shot_s: 0.0,
             rifle_heat_frac: 0.0,
             is_overheated: false,
@@ -2090,11 +2139,12 @@ impl Session {
             recoil_frac: 0.0,
             shot_noise: shot_noise::ShotNoise::FromClock(),
             shot_offset: shot_noise::ShotOffset::NONE,
+            beam_speckle_frac: 0.0,
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
-            wormhole_tint_left_frac: 0.0,
+            blueshift_frac: 0.0,
             last_health_frac: 1.0,
             health_pulses: hud_bars::BarPulses::New(1.0),
             energy_pulses: hud_bars::BarPulses::New(1.0),
@@ -2112,6 +2162,12 @@ impl Session {
             hud_render_ms: 0.0,
             multiplayer,
             voxel,
+            thrown: ThrownWormholes::New(),
+            thrown_pairs: Vec::new(),
+            thrown_pair_owners: Vec::new(),
+            wormhole_damages: Vec::new(),
+            wormhole_flashes: Vec::new(),
+            has_shot_hit_wormholes: false,
         })
     }
 
@@ -2119,8 +2175,8 @@ impl Session {
     /// window's close button quits, Esc releases the mouse (or asks whether to exit if it is free,
     /// and while it asks every pressed control answers it), a click captures it (and once captured,
     /// a left click fires a shot), the mouse looks (more slowly while aiming zooms in, by the same
-    /// factor), `1`, `2` and the wheel switch guns, and - and = change the render scale. Players
-    /// can't respawn by choice.
+    /// factor), `1`, `2` and the wheel switch guns, `V` switches between first and third person,
+    /// and - and = change the render scale. Players can't respawn by choice.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
     fn handle_event(
@@ -2211,8 +2267,8 @@ impl Session {
 
     /// `handle_control` does what a pressed control (key, mouse button or wheel) is bound to:
     /// releasing the mouse (or asking whether to exit when it is free), the render resolution,
-    /// choosing a team in the lobby (before the guns, which may share its keys), the guns, and
-    /// firing the sniper.
+    /// choosing a team in the lobby (before the guns, which may share its keys), the guns, the
+    /// view (first or third person), and firing the sniper.
     ///
     /// Example: `self.handle_control(control, window, mouse);`
     fn handle_control(
@@ -2252,6 +2308,11 @@ impl Session {
                 Gun::Laser => Gun::Rifle,
                 Gun::Rifle => Gun::Laser,
             });
+        } else if is(Action::SwitchView) {
+            self.view_switch.toggle();
+        }
+        if is(Action::ThrowWormhole) && self.can_throw() {
+            self.throw_wormhole();
         }
         if is(Action::Shoot)
             && self.is_captured
@@ -2261,8 +2322,10 @@ impl Session {
             && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
         {
             self.shot_time_s = self.settings.sniper.shot_s;
+            self.has_shot_hit_wormholes = false;
             self.sniper_reload_s = self.settings.sniper.reload_s;
             self.shot_offset = self.shot_noise.sample_sniper(&self.settings.sniper);
+            self.beam_speckle_frac = self.shot_noise.sample_sniper_speckle(&self.settings.sniper);
         }
     }
 
@@ -2281,11 +2344,8 @@ impl Session {
         self.hit_effect_frac =
             (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
         self.update_bar_pulses(dt_s);
-        self.wormhole_tint_left_frac = fade_wormhole_tint(
-            self.wormhole_tint_left_frac,
-            dt_s,
-            self.player_settings.view.wormhole_tint_s,
-        );
+        self.view_switch.update(dt_s);
+        self.blueshift_frac = 0.0;
         self.motion_blur_frac = if blur_s > 0.0 {
             (-dt_s / blur_s).exp() as f32
         } else {
@@ -2345,36 +2405,47 @@ impl Session {
             (self.aim_frac + if is_aiming { aim_step } else { -aim_step }).clamp(0.0, 1.0);
         let is_holding_e: bool = held(Action::TurnOffConsole);
         let team: usize = self.get_team() as usize;
-        let report: voxel_world::StepReport = match &mut self.voxel {
-            Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, team),
+        let messages: Vec<String> = match &mut self.voxel {
+            Some(voxel) => {
+                let report: voxel_world::StepReport =
+                    voxel.player.step(&voxel.world, &input, dt_s, team);
+                let pitch_rad: f64 = voxel.player.pitch_rad;
+                let view_m_per_s: f64 = report.forward_m_per_s * pitch_rad.cos()
+                    + voxel.player.vertical_m_per_s * pitch_rad.sin();
+                let eye: DVec4 = voxel.player.get_camera_frame(&voxel.world).col(AXIS_W);
+                self.blueshift_frac = get_blueshift_frac(
+                    voxel.world.get_mouth_depth_frac(eye),
+                    view_m_per_s,
+                    voxel.world.player.walk_m_per_s,
+                    self.player_settings.view.wormhole_tint_frac,
+                );
+                report.messages
+            }
             None => {
                 let messages: Vec<String> =
                     physics::update_player(&self.world, &mut self.player, &input, dt_s);
                 physics::level_out(&mut self.player.frame, dt_s);
-                voxel_world::StepReport {
-                    has_crossed_mouth: !messages.is_empty(),
-                    messages,
-                }
+                messages
             }
         };
-        if report.has_crossed_mouth {
-            self.wormhole_tint_left_frac = 1.0;
-        }
-        for message in report.messages {
+        for message in messages {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
+        self.update_wormholes();
         self.update_disabling(is_holding_e, dt_s);
         self.update_gun(&input, dt_s);
         self.update_rifle(dt_s);
         let eye: DMat4 = self.get_eye_frame();
-        let laser_aim: Option<DMat4> = self.get_laser_aim(eye);
+        let laser_aim: Option<DMat4> = self.get_laser_aim(self.get_shot_eye());
         if let Some(multiplayer) = &mut self.multiplayer
             && let Err(error) = multiplayer.client.send_state(
                 laser_aim.unwrap_or(eye),
                 laser_aim.is_some(),
                 self.gun == Gun::Rifle,
                 multiplayer.disabling.map(|(console, _)| console),
+                self.beam_speckle_frac,
+                self.thrown.placed,
             )
         {
             self.message = format!("Couldn't reach the server: {error}");
@@ -2409,6 +2480,210 @@ impl Session {
         }
     }
 
+    /// `can_throw` says whether this player may throw a wormhole mouth now: playing, with the
+    /// mouse captured, and without a throw in the air.
+    ///
+    /// Example: `if self.can_throw() { self.throw_wormhole(); }`
+    fn can_throw(&self) -> bool {
+        self.is_captured
+            && self.route.is_empty()
+            && !self.is_in_lobby()
+            && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
+            && !self.thrown.is_flying()
+    }
+
+    /// `throw_wormhole` throws this player's next wormhole mouth from their eye.
+    ///
+    /// Example: `self.throw_wormhole();`
+    fn throw_wormhole(&mut self) {
+        let (camera, color) = (self.get_eye_frame(), self.thrown.get_next_color());
+        let settings = &self.settings.wormholes;
+        let flight = match &self.voxel {
+            Some(voxel) => fly_throw(camera, color, settings, voxel.world.r, |x, v, s| {
+                voxel.world.find_hit_s(x, v, s)
+            }),
+            None => fly_throw(
+                camera,
+                color,
+                settings,
+                self.world.curvature_radius_m,
+                |x, v, s| self.world.find_hit_s(x, v, s),
+            ),
+        };
+        self.thrown
+            .throw(flight, self.start.elapsed().as_secs_f64());
+    }
+
+    /// `update_wormholes` lands this player's throw once it comes down (where the map allows, clear
+    /// of the other mouths down, other players' too), flashes and destroys wormholes by the
+    /// server's damage (`update_wormhole_damage`), and puts every linked pair, this player's first,
+    /// into the world when they change, flashing red where they were just hit.
+    ///
+    /// Example: `self.update_wormholes();`
+    fn update_wormholes(&mut self) {
+        let now_s: f64 = self.start.elapsed().as_secs_f64();
+        let mut others: Vec<MouthPlace> = self.thrown.get_kept_places();
+        for (_, wormholes) in &self.get_all_wormholes()[1..] {
+            others.extend(wormholes.get_places());
+        }
+        let message: Option<String> = match &self.voxel {
+            Some(voxel) => {
+                let (eye_m, r) = (voxel.world.player.eye_height_m, voxel.world.r);
+                let world: &VoxelWorld = &voxel.world;
+                self.thrown
+                    .update(now_s, eye_m, r, |p| world.can_place_mouth(p, &others))
+            }
+            None => {
+                let (world, r) = (&self.world, self.world.curvature_radius_m);
+                self.thrown.update(now_s, EYE_HEIGHT_M, r, |p| {
+                    world.can_place_mouth(p, &others)
+                })
+            }
+        };
+        if let Some(message) = message {
+            self.show_message(message);
+        }
+        self.update_wormhole_damage(now_s);
+        let (owners, pairs): (Vec<Option<u32>>, Vec<[MouthPlace; 2]>) = self
+            .get_all_wormholes()
+            .into_iter()
+            .filter_map(|(owner, wormholes)| Some((owner, wormholes.get_pair()?)))
+            .unzip();
+        let flashing: Vec<bool> = owners.iter().map(|&o| self.is_flashing(o, now_s)).collect();
+        if pairs != self.thrown_pairs {
+            match &mut self.voxel {
+                Some(voxel) => voxel.world.set_thrown_wormholes(&pairs),
+                None => self.world.set_thrown_wormholes(&pairs),
+            }
+            (self.thrown_pairs, self.thrown_pair_owners) = (pairs, owners);
+        }
+        match &mut self.voxel {
+            Some(voxel) => voxel.world.set_flashing_pairs(&flashing),
+            None => self.world.set_flashing_pairs(&flashing),
+        }
+    }
+
+    /// `update_wormhole_damage` makes the wormholes of every player whose damage (from the server)
+    /// rose flash red for the settings' `wormholes.hit_flash_s` from `now_s`, and destroys this
+    /// player's once theirs reaches 1.
+    ///
+    /// Example: `self.update_wormhole_damage(now_s);`
+    fn update_wormhole_damage(&mut self, now_s: f64) {
+        let all: Vec<(Option<u32>, PlayerWormholes)> = self.get_all_wormholes();
+        for &(owner, wormholes) in &all {
+            let last_frac: f64 = match self.wormhole_damages.iter().find(|(o, _)| *o == owner) {
+                Some(&(_, frac)) => frac,
+                None => 0.0,
+            };
+            if wormholes.damage_frac > last_frac {
+                self.wormhole_flashes.retain(|(o, _)| *o != owner);
+                let until_s: f64 = now_s + self.settings.wormholes.hit_flash_s;
+                self.wormhole_flashes.push((owner, until_s));
+            }
+        }
+        self.wormhole_damages = all.iter().map(|&(o, w)| (o, w.damage_frac)).collect();
+        if all[0].1.damage_frac >= 1.0 && !self.thrown.placed.get_places().is_empty() {
+            self.thrown.clear();
+            self.show_message("Your wormholes were destroyed".to_string());
+        }
+    }
+
+    /// `is_flashing` says whether `owner`'s wormholes (`None` for this player's) flash red at `now_s`.
+    ///
+    /// Example: `let is_red = self.is_flashing(Some(3), now_s);`
+    fn is_flashing(&self, owner: Option<u32>, now_s: f64) -> bool {
+        self.wormhole_flashes
+            .iter()
+            .any(|&(o, until_s)| o == owner && until_s > now_s)
+    }
+
+    /// `get_all_wormholes` gives every player's wormholes with their owner: this player's first
+    /// (`None`, with the damage the server counts for them), then the others' by the last snapshot.
+    ///
+    /// Example: `let all = self.get_all_wormholes();`
+    fn get_all_wormholes(&self) -> Vec<(Option<u32>, PlayerWormholes)> {
+        let (own_damage_frac, remote) = self.multiplayer.as_ref().map_or((0.0, Vec::new()), |m| {
+            let remote = m.client.players.iter().map(|p| (Some(p.id), p.wormholes));
+            (m.client.wormhole_damage_frac, remote.collect())
+        });
+        let own: PlayerWormholes = PlayerWormholes {
+            damage_frac: own_damage_frac,
+            ..self.thrown.placed
+        };
+        std::iter::once((None, own)).chain(remote).collect()
+    }
+
+    /// `get_wormhole_markers` lists the glowing balls to draw for every player's thrown mouths, with
+    /// their owner (as `get_all_wormholes`): throws in the air, and mouths down whose partner isn't
+    /// (red while they flash).
+    ///
+    /// Example: `let markers = self.get_wormhole_markers();`
+    fn get_wormhole_markers(&self) -> Vec<(Option<u32>, Marker)> {
+        let r: f64 = match &self.voxel {
+            Some(voxel) => voxel.world.r,
+            None => self.world.curvature_radius_m,
+        };
+        let now_s: f64 = self.start.elapsed().as_secs_f64();
+        let mut markers: Vec<(Option<u32>, Marker)> = Vec::new();
+        for (owner, wormholes) in self.get_all_wormholes() {
+            for mut marker in wormholes.get_markers(r) {
+                if marker.is_mouth && self.is_flashing(owner, now_s) {
+                    marker.rgb = HIT_FLASH_COLOR;
+                }
+                markers.push((owner, marker));
+            }
+        }
+        markers
+    }
+
+    /// `report_wormhole_hits` tells the server, once per shot, whose enemy wormholes this player's
+    /// shot went into (`entered_pairs`, indices into the world's thrown pairs) or hit
+    /// (`hit_marker`, an index into `markers`, if it is a mouth's).
+    ///
+    /// Example: `self.report_wormhole_hits(&[0], None, &markers);`
+    fn report_wormhole_hits(
+        &mut self,
+        entered_pairs: &[usize],
+        hit_marker: Option<usize>,
+        markers: &[(Option<u32>, Marker)],
+    ) {
+        let Some(multiplayer) = &self.multiplayer else {
+            return;
+        };
+        let team: Option<u32> = multiplayer.client.team;
+        let is_enemy = |id: &u32| {
+            let player = multiplayer.client.players.iter().find(|p| p.id == *id);
+            player.is_some_and(|p| Some(p.team) != team)
+        };
+        let mut enemy_ids: Vec<u32> = entered_pairs
+            .iter()
+            .map(|&i| self.thrown_pair_owners[i])
+            .chain(
+                hit_marker
+                    .filter(|&k| markers[k].1.is_mouth)
+                    .map(|k| markers[k].0),
+            )
+            .flatten()
+            .filter(is_enemy)
+            .collect();
+        enemy_ids.dedup();
+        if self.has_shot_hit_wormholes || enemy_ids.is_empty() {
+            return;
+        }
+        self.has_shot_hit_wormholes = true;
+        let hits_to_destroy: u8 = match self.gun {
+            Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
+            Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
+        };
+        let multiplayer: &mut Multiplayer = self.multiplayer.as_mut().expect("checked above");
+        for id in enemy_ids {
+            if let Err(error) = multiplayer.client.send_wormhole_hit(id, hits_to_destroy) {
+                self.show_message(format!("Couldn't reach the server: {error}"));
+                return;
+            }
+        }
+    }
+
     /// `is_firing` says whether this player's laser is on: on for a scripted route, or a shot fired
     /// by a click in the last `sniper.shot_s` (the settings), and only while this player can shoot.
     ///
@@ -2418,12 +2693,57 @@ impl Session {
     }
 
     /// `get_laser_aim` gives the frame this player's laser fires from while it is on: `eye` (the
-    /// eye's frame) turned by this shot's noise (`shot_offset`), or `None` while it is off. The
-    /// window sends it instead of the eye's frame while firing, so others trace the same shot.
+    /// eye's frame, turned toward the crosshair's point in third person: `get_shot_eye`) turned by
+    /// this shot's noise (`shot_offset`), or `None` while it is off. The window sends it instead of
+    /// the eye's frame while firing, so others trace the same shot.
     ///
-    /// Example: `let laser_aim = self.get_laser_aim(self.get_eye_frame());`
+    /// Example: `let laser_aim = self.get_laser_aim(self.get_shot_eye());`
     fn get_laser_aim(&self, eye: DMat4) -> Option<DMat4> {
         self.is_firing().then(|| self.shot_offset.aim(eye))
+    }
+
+    /// `get_boom_frac` gives how far out along its boom this player's camera is now
+    /// (`third_person::ViewSwitch::get_boom_frac`): 0, at the eye, on the house and on a scripted
+    /// route.
+    ///
+    /// Example: `if self.get_boom_frac() > 0.0 { ... }`
+    fn get_boom_frac(&self) -> f64 {
+        if self.voxel.is_none() || !self.route.is_empty() {
+            return 0.0;
+        }
+        self.view_switch.get_boom_frac(self.aim_frac)
+    }
+
+    /// `get_third_person_view` gives, while the camera is out of the eye on a voxel map, where it
+    /// is (`third_person::place_camera`) and the eye turned toward what its crosshair covers
+    /// (`third_person::aim_at_crosshair`), both in the map with the other players' bodies; `None`
+    /// while the camera is at the eye.
+    ///
+    /// Example: `if let Some((placed, shot_eye)) = self.get_third_person_view() { ... }`
+    fn get_third_person_view(&self) -> Option<(third_person::ThirdPersonCamera, DMat4)> {
+        let boom_frac: f64 = self.get_boom_frac();
+        let voxel: &VoxelState = self.voxel.as_ref().filter(|_| boom_frac > 0.0)?;
+        let players: &[net::RemotePlayer] = self
+            .multiplayer
+            .as_ref()
+            .map_or(&[], |m| m.client.players.as_slice());
+        let world: VoxelWorld = multiplayer::with_bodies(&voxel.world, players);
+        let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
+        let placed: third_person::ThirdPersonCamera =
+            third_person::place_camera(&world, eye, boom_frac);
+        Some((
+            placed,
+            third_person::aim_at_crosshair(&world, eye, placed.frame),
+        ))
+    }
+
+    /// `get_shot_eye` gives the frame a shot leaves from before its noise: the eye's, turned toward
+    /// what the crosshair covers while the camera is out of the eye (`get_third_person_view`).
+    ///
+    /// Example: `let laser_aim = self.get_laser_aim(self.get_shot_eye());`
+    fn get_shot_eye(&self) -> DMat4 {
+        self.get_third_person_view()
+            .map_or_else(|| self.get_eye_frame(), |(_, shot_eye)| shot_eye)
     }
 
     /// `can_shoot` says whether this player may shoot: standing still or crouched (walking while
@@ -2478,7 +2798,10 @@ impl Session {
             self.shot_time_s = rifle.pulse_s;
             self.rifle_next_shot_s = 1.0 / rifle.shots_per_s;
             self.has_rifle_shot_hit = false;
+            self.has_shot_hit_wormholes = false;
             self.shot_offset = self.shot_noise.sample_rifle(&rifle, self.rifle_heat_frac);
+            self.beam_speckle_frac =
+                shot_noise::get_rifle_speckle_frac(&rifle, self.rifle_heat_frac);
             self.rifle_heat_frac += 1.0 / f64::from(rifle.shots_until_overheat);
             self.is_overheated = self.rifle_heat_frac >= 1.0;
             self.rifle_shot_count += 1;
@@ -2500,22 +2823,21 @@ impl Session {
     }
 
     /// `update_disabling` follows this player holding `E` (`is_holding_e`) on one of the other
-    /// team's consoles that is still on, within `CONSOLE_REACH_M` straight ahead: the seconds held
-    /// on that same console, or nothing. The server times it too, and turns the console off.
+    /// team's consoles that is still on, within `CONSOLE_REACH_M` straight ahead of the eye (toward
+    /// the crosshair's point in third person: `get_shot_eye`): the seconds held on that same
+    /// console, or nothing. The server times it too, and turns the console off.
     ///
     /// Example: `self.update_disabling(true, 1.0 / 60.0);`
     fn update_disabling(&mut self, is_holding_e: bool, dt_s: f64) {
+        let shot_eye: Option<DMat4> = is_holding_e.then(|| self.get_shot_eye());
         let (Some(voxel), Some(multiplayer)) = (&self.voxel, &mut self.multiplayer) else {
             return;
         };
         let game: net::GameState = multiplayer.client.game;
-        let aimed: Option<u8> = match multiplayer.client.team {
-            Some(team) if is_holding_e && game.winner.is_none() => voxel
+        let aimed: Option<u8> = match (multiplayer.client.team, shot_eye) {
+            (Some(team), Some(eye)) if game.winner.is_none() => voxel
                 .world
-                .find_aimed_material(
-                    voxel.player.get_camera_frame(&voxel.world),
-                    self.settings.consoles.reach_m,
-                )
+                .find_aimed_material(eye, self.settings.consoles.reach_m)
                 .and_then(|m| voxel.world.consoles.iter().position(|c| c.material == m))
                 .filter(|&i| voxel.world.consoles[i].team != team && game.off_mask >> i & 1 == 0)
                 .map(|i| i as u8),
@@ -2631,12 +2953,13 @@ impl Session {
     }
 
     /// `get_wand` gives this player's wand (`make_wand`, with its tip in the team's colour), or
-    /// `None` while text covers the view (`is_view_covered`).
+    /// `None` while text covers the view (`is_view_covered`) or this player's own body shows in
+    /// third person (the last frame packed).
     ///
     /// Example: `let wand = self.get_wand();`
     fn get_wand(&self) -> Option<render_metal::OverlayWand> {
         let team: u32 = self.get_team();
-        (!self.is_view_covered()).then(|| {
+        (!self.is_view_covered() && !self.is_own_body_shown).then(|| {
             make_wand(
                 self.run_pose_frac,
                 self.gun_phase_rad,
@@ -2665,8 +2988,9 @@ impl Session {
         self.message_time_s = MESSAGE_DURATION_S;
     }
 
-    /// `update_multiplayer` reads the server's news: a welcome puts this player at its spawn
-    /// point, and a hit is announced (and, if this player was hit, starts the respawn countdown).
+    /// `update_multiplayer` reads the server's news: a welcome rebuilds a voxel map at the server's
+    /// curvature if it differs from this window's and puts this player at its spawn point, and a
+    /// hit is announced (and, if this player was hit, starts the respawn countdown).
     /// It returns whether this player is out of the game for now, and fails if the server can't be
     /// read.
     ///
@@ -2682,11 +3006,27 @@ impl Session {
                 net::NetEvent::Joined(id) => {
                     let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
                     let team: u32 = multiplayer.client.team.expect("a welcome brings the team");
-                    self.settings = multiplayer
+                    let server_settings: ServerSettings = multiplayer
                         .client
                         .settings
                         .clone()
                         .expect("a welcome brings the server's settings");
+                    if server_settings.space != self.settings.space
+                        && let Some(voxel) = &mut self.voxel
+                    {
+                        let map: map::Map = load_map(self.map_name, &server_settings)?;
+                        self.map_layout =
+                            map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?;
+                        let head_bob: settings::HeadBobSettings = voxel.world.head_bob.clone();
+                        voxel.world = VoxelWorld::FromMap(&map)?;
+                        voxel.world.head_bob = head_bob;
+                        self.world = World::Empty(map.get_curvature_radius_m());
+                        messages.push(format!(
+                            "The server curves space {} times as much as the map",
+                            server_settings.space.curvature_per_map_curvature
+                        ));
+                    }
+                    self.settings = server_settings;
                     match &mut self.voxel {
                         Some(voxel) => {
                             voxel.world.set_settings(self.settings.clone());
@@ -2710,6 +3050,7 @@ impl Session {
                         multiplayer.disabling = None;
                         self.is_laser_on = false;
                         self.shot_time_s = 0.0;
+                        self.thrown.clear();
                     }
                     messages.push(if is_self {
                         format!("You died: hit by player {shooter_id}")
@@ -2782,6 +3123,8 @@ impl Session {
     /// Example: `let data = session.pack((1280, 800));`
     fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
         let is_firing: bool = self.is_firing();
+        let owned_markers: Vec<(Option<u32>, Marker)> = self.get_wormhole_markers();
+        let markers: Vec<Marker> = owned_markers.iter().map(|&(_, marker)| marker).collect();
         let (off_mask, disabling_fracs) = self.get_console_states();
         let time_s: f64 = self.start.elapsed().as_secs_f64();
         if let Some(voxel) = &mut self.voxel {
@@ -2793,16 +3136,25 @@ impl Session {
             voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }
         if let Some(voxel) = &self.voxel {
-            let camera: DMat4 = if self.route.is_empty() {
+            let eye: DMat4 = if self.route.is_empty() {
                 voxel.player.get_camera_frame(&voxel.world)
             } else {
                 self.player.frame
             };
+            let third_person_view: Option<(third_person::ThirdPersonCamera, DMat4)> =
+                self.get_third_person_view();
+            let camera: DMat4 = third_person_view.map_or(eye, |(placed, _)| placed.frame);
+            let laser_aim: Option<DMat4> =
+                self.get_laser_aim(third_person_view.map_or(eye, |(_, shot_eye)| shot_eye));
+            let team: u32 = self.get_team();
+            let own_body: Option<(DMat4, usize)> = third_person_view
+                .filter(|(placed, _)| placed.is_body_shown)
+                .map(|_| multiplayer::get_body(&voxel.world, laser_aim.unwrap_or(eye), team));
+            self.is_own_body_shown = own_body.is_some();
             let players: Vec<net::RemotePlayer> = self
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
-            let team: u32 = self.get_team();
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
@@ -2812,7 +3164,7 @@ impl Session {
                 .iter()
                 .filter_map(|burst| burst.get_cloud(now_s))
                 .collect();
-            let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> = self.get_lit_beams(r);
+            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
                 .iter()
@@ -2822,9 +3174,11 @@ impl Session {
             let view: multiplayer::SharedVoxelView = multiplayer::pack_shared_voxel_view(
                 &voxel.world,
                 camera,
-                self.get_laser_aim(camera),
+                laser_aim,
                 team,
                 &players,
+                &markers,
+                own_body,
                 self.route.is_empty().then_some(multiplayer::Tracers {
                     beams: &beams,
                     spot,
@@ -2837,7 +3191,11 @@ impl Session {
                 && let Some(shot) = &view.shot
             {
                 let is_rifle: bool = self.gun == Gun::Rifle;
-                let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                let speckle_frac: f64 = self.beam_speckle_frac;
+                let tracer = Tracer {
+                    is_own: true,
+                    ..Tracer::New(shot, team, now_s, is_rifle, speckle_frac, &self.settings, r)
+                };
                 add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                 self.tracers.push(tracer);
             }
@@ -2845,14 +3203,18 @@ impl Session {
             for (id, shot) in &view.other_shots {
                 if !self.remote_firing_ids.contains(id) {
                     let shooter: Option<&net::RemotePlayer> = players.iter().find(|p| p.id == *id);
-                    let (team, is_rifle) = shooter.map_or((0, false), |p| (p.team, p.is_rifle));
-                    let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                    let (team, is_rifle, speckle_frac) = shooter.map_or((0, false, 0.0), |p| {
+                        (p.team, p.is_rifle, p.beam_speckle_frac)
+                    });
+                    let tracer =
+                        Tracer::New(shot, team, now_s, is_rifle, speckle_frac, &self.settings, r);
                     add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                     self.tracers.push(tracer);
                 }
             }
             self.remote_firing_ids = view.other_shots.iter().map(|(id, _)| *id).collect();
             self.laser = multiplayer::describe_voxel_laser(&voxel.world, &view);
+            let first: usize = voxel.world.static_warp_count;
             if let Some(victim_id) = view.hit_player_id
                 && let Some(hits_to_kill) = take_hit_weight(
                     &self.settings,
@@ -2865,6 +3227,13 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
+            let entered: Vec<usize> = view.shot.as_ref().map_or(Vec::new(), |shot| {
+                shot.through_warps
+                    .iter()
+                    .filter_map(|w| w.checked_sub(first).map(|k| k / 2))
+                    .collect()
+            });
+            self.report_wormhole_hits(&entered, view.hit_marker, &owned_markers);
             return PackedFrame::Voxel(Box::new(view.frame));
         }
         let laser_aim: Option<DMat4> = self.get_laser_aim(self.player.frame);
@@ -2874,6 +3243,7 @@ impl Session {
                 self.player.frame,
                 laser_aim,
                 &multiplayer.client.players,
+                &markers,
                 render_px,
                 self.start.elapsed().as_secs_f64(),
             );
@@ -2889,10 +3259,21 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
+            let first: usize = self.world.static_mouth_count;
+            let entered: Vec<usize> = view.report.as_ref().map_or(Vec::new(), |report| {
+                report
+                    .mouths_entered
+                    .iter()
+                    .filter_map(|m| m.checked_sub(first).map(|k| k / 2))
+                    .collect()
+            });
+            self.report_wormhole_hits(&entered, view.hit_marker, &owned_markers);
             return PackedFrame::House(Box::new(view.data));
         }
+        let mut marked: World = self.world.clone();
+        marked.add_markers(&markers);
         let (data, report) = pack_view(
-            &self.world,
+            &marked,
             self.player.frame,
             laser_aim,
             render_px,
@@ -3108,21 +3489,55 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team, on a map of curvature radius `r`.
+    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r`. While the
+    /// trail of one of this player's own shots still reaches the muzzle, its beam starts at the
+    /// gun's tip as drawn now (`get_muzzle`), so it stays on the tip as the gun moves.
     ///
     /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
-    fn get_lit_beams(&self, r: f64) -> Vec<(Vec<voxel_world::BeamSegment>, u32)> {
+    fn get_lit_beams(&self, r: f64) -> Vec<render_voxel::LaserBeam> {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
+        let muzzle: Option<glam::DVec4> = self.get_muzzle(r);
         self.tracers
             .iter()
             .map(|tracer| {
                 let (tail_m, head_m) = tracer.get_lit_m(now_s);
-                (
-                    voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m),
-                    tracer.team,
-                )
+                let mut lit: Vec<voxel_world::BeamSegment> =
+                    voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m);
+                if tracer.is_own
+                    && tail_m <= 0.0
+                    && let (Some(muzzle), Some(first)) = (muzzle, lit.first_mut())
+                    && let Some(joined) = voxel_world::BeamSegment::Between(
+                        muzzle,
+                        voxel_world::geodesic_point(first.a, first.b, first.length),
+                    )
+                {
+                    *first = joined;
+                }
+                render_voxel::LaserBeam {
+                    segments: lit,
+                    team: tracer.team,
+                    is_rifle: tracer.is_rifle,
+                    speckle_frac: tracer.speckle_frac,
+                }
             })
             .collect()
+    }
+
+    /// `get_muzzle` gives where the tip of the gun in hand shows in the world, on a map of
+    /// curvature radius `r`: the wand's tip in camera space, moved toward the view's centre by the
+    /// aim zoom (which magnifies the scene but not the gun), or `None` with no gun in view.
+    ///
+    /// Example: `let muzzle = self.get_muzzle(voxel.world.r);`
+    fn get_muzzle(&self, r: f64) -> Option<glam::DVec4> {
+        let tip_m: glam::DVec3 = self.get_wand()?.get_tip_m().as_dvec3();
+        let zoom: f64 = self.get_zoom();
+        Some(
+            self.get_eye_frame()
+                * voxel_world::map_exp(
+                    glam::DVec3::new(tip_m.x / zoom, tip_m.y / zoom, tip_m.z),
+                    r,
+                ),
+        )
     }
 
     /// `make_overlay_minimap` gives the minimap for a window of `window_px` (`minimap.rs`): around
@@ -3140,7 +3555,10 @@ impl Session {
         let (feet, beams): (DMat4, Vec<(Vec<voxel_world::BeamSegment>, u32)>) = match &self.voxel {
             Some(voxel) => (
                 voxel.player.get_feet_frame(&voxel.world),
-                self.get_lit_beams(voxel.world.r),
+                self.get_lit_beams(voxel.world.r)
+                    .into_iter()
+                    .map(|beam| (beam.segments, beam.team))
+                    .collect(),
             ),
             None => (self.player.frame, Vec::new()),
         };
@@ -3907,6 +4325,54 @@ fn play_on_canvas(
     }
 }
 
+/// `draw_loading_screen` draws the loading screen on a window's layer: black, the banner
+/// `LOADING_TITLE` over `label` (what is loading), and a bar in the pylon-disabling bar's place and
+/// look, filled to `done_frac`.
+///
+/// Example: `draw_loading_screen(metal, layer, 0.5, "revolver")?;`
+fn draw_loading_screen(
+    metal: &mut render_metal::MetalRenderer,
+    layer: &CAMetalLayer,
+    done_frac: f32,
+    label: &str,
+) -> Result<()> {
+    let text: OverlayText = OverlayText {
+        lines: vec![
+            (LOADING_TITLE.to_string(), true),
+            (label.to_string(), false),
+        ],
+        mask_px: DEATH_MASK_PX,
+        height_frac: BANNER_HEIGHT_FRAC,
+        is_centered: true,
+        dim_frac: LOADING_DIM_FRAC,
+        picture: None,
+    };
+    let mask: Vec<u8> = make_text_mask(&text)?;
+    let rects: Vec<render_metal::OverlayRect> = hud_bars::make_progress_bar(
+        DISABLE_BAR_MIN_FRAC,
+        DISABLE_BAR_SIZE_FRAC,
+        done_frac,
+        DISABLE_BAR_RGB,
+    );
+    metal.render_overlay_to_layer(
+        layer,
+        &render_metal::Overlay {
+            dim_frac: text.dim_frac,
+            mask: Some((&mask, (text.mask_px.0 as usize, text.mask_px.1 as usize))),
+            rects: &rects,
+            wand: None,
+            blur_frac: 0.0,
+            hit: render_metal::HitEffect::default(),
+            mask_height_frac: text.height_frac,
+            picture: None,
+            stretch_frac: 0.0,
+            minimap: None,
+            blueshift_frac: 0.0,
+        },
+    )?;
+    Ok(())
+}
+
 /// `play_on_layer` runs the window with Metal presenting straight to the window's `CAMetalLayer`:
 /// no pixels go through the CPU, MetalFX upscales the ray-traced image to the window's size, and
 /// the HUD is shown in the window's title, since SDL's renderer can't draw on the same layer.
@@ -3938,6 +4404,9 @@ fn play_on_layer(
     layer.setFramebufferOnly(false);
     let mouse: sdl3::mouse::MouseUtil = sdl.mouse();
     let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
+    let loading_steps: &[render_metal::LoadingStep] =
+        render_metal::get_loading_steps(session.voxel.is_some());
+    let mut loading_step_index: usize = 0;
     let result: Result<()> = (|| loop {
         for event in event_pump.poll_iter() {
             if !session.handle_event(event, &window, &mouse) {
@@ -3953,6 +4422,18 @@ fn play_on_layer(
             width: f64::from(window_px.0),
             height: f64::from(window_px.1),
         });
+        if loading_step_index <= loading_steps.len() {
+            let step: Option<render_metal::LoadingStep> =
+                loading_steps.get(loading_step_index).copied();
+            let done_frac: f32 = loading_step_index as f32 / loading_steps.len() as f32;
+            let label: &str = step.map_or(LOADING_DONE_LABEL, render_metal::LoadingStep::get_label);
+            draw_loading_screen(metal, layer, done_frac, label)?;
+            if let Some(step) = step {
+                metal.load(step)?;
+            }
+            loading_step_index += 1;
+            continue;
+        }
         let render_px: (u32, u32) = session.get_render_size(window_px);
         let render_start: Instant = Instant::now();
         let mut packed: PackedFrame = session.pack(render_px);
@@ -3963,15 +4444,12 @@ fn play_on_layer(
         let wand: Option<render_metal::OverlayWand> = session.get_wand();
         let stretch_frac: f32 = session.get_edge_stretch_frac();
         let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
-        let blueshift_frac: f32 = get_blueshift_frac(
-            session.wormhole_tint_left_frac,
-            session.player_settings.view.wormhole_tint_frac,
-        );
+        let blueshift_frac: f32 = session.blueshift_frac;
         let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
             || !rects.is_empty()
             || wand.is_some()
             || stretch_frac > 0.0
-            || blueshift_frac > 0.0
+            || blueshift_frac != 0.0
             || minimap.is_some())
         .then(|| render_metal::Overlay {
             dim_frac: match &overlay_text {
@@ -4030,9 +4508,9 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Wormhole tint left | all (just through), part, none (stays none) | `wormhole_tint_peaks_and_fades` |
-    //! | Wormhole tint fade time | above 0 (fades over it), 0 (no tint) | `wormhole_tint_peaks_and_fades` |
-    //! | Wormhole tint strength | 1, between 0 and 1, 0 | `wormhole_tint_peaks_and_fades` |
+    //! | Depth in a mouth | at the throat (1), part way, outside (0) | `wormhole_shift_follows_depth_and_speed` |
+    //! | Speed along the view | forward (blueshift), backward (redshift), still (none), past the cap (held at it) | `wormhole_shift_follows_depth_and_speed` |
+    //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
@@ -4041,26 +4519,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wormhole_tint_peaks_and_fades() {
-        const TINT_S: f64 = 1.5;
-        const DT_S: f64 = 1.0 / 60.0;
+    fn wormhole_shift_follows_depth_and_speed() {
+        const WALK_M_PER_S: f64 = 10.0;
+        const SPRINT_M_PER_S: f64 = 18.0;
         const HALF_FRAC: f64 = 0.5;
         const WEAK_STRENGTH_FRAC: f64 = 0.4;
-        assert_eq!(get_blueshift_frac(1.0, 1.0), 1.0);
-        assert_eq!(get_blueshift_frac(1.0, 0.0), 0.0);
-        assert_eq!(get_blueshift_frac(0.0, 1.0), 0.0);
-        let half_way: f32 = get_blueshift_frac(HALF_FRAC, WEAK_STRENGTH_FRAC);
-        assert!((f64::from(half_way) - HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
-        let mut left_frac: f64 = 1.0;
-        let mut fade_frames: Vec<f64> = Vec::new();
-        while left_frac > 0.0 {
-            left_frac = fade_wormhole_tint(left_frac, DT_S, TINT_S);
-            fade_frames.push(left_frac);
-        }
-        assert!((fade_frames.len() as f64 * DT_S - TINT_S).abs() <= DT_S);
-        assert!(fade_frames.windows(2).all(|pair| pair[1] < pair[0]));
-        assert_eq!(fade_wormhole_tint(0.0, DT_S, TINT_S), 0.0);
-        assert_eq!(fade_wormhole_tint(1.0, DT_S, 0.0), 0.0);
+        let shift = |depth_frac: f64, view_m_per_s: f64, strength_frac: f64| -> f64 {
+            f64::from(get_blueshift_frac(
+                depth_frac,
+                view_m_per_s,
+                WALK_M_PER_S,
+                strength_frac,
+            ))
+        };
+        assert_eq!(shift(1.0, WALK_M_PER_S, 1.0), 1.0);
+        assert_eq!(shift(1.0, -WALK_M_PER_S, 1.0), -1.0);
+        assert_eq!(shift(1.0, 0.0, 1.0), 0.0);
+        assert_eq!(shift(0.0, WALK_M_PER_S, 1.0), 0.0);
+        assert_eq!(shift(1.0, WALK_M_PER_S, 0.0), 0.0);
+        let part_way: f64 = shift(HALF_FRAC, -WALK_M_PER_S, WEAK_STRENGTH_FRAC);
+        assert!((part_way + HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
+        assert!((shift(1.0, SPRINT_M_PER_S, 1.0) - MAX_BLUESHIFT_FRAC).abs() < 1e-6);
+        assert!((shift(1.0, -SPRINT_M_PER_S, 1.0) + MAX_BLUESHIFT_FRAC).abs() < 1e-6);
     }
 
     #[test]
@@ -4107,8 +4587,11 @@ mod tests {
         assert!(placed[0].2 && !placed[1].2);
         let long_path: String = "/very/long".repeat(20);
         let mut mine: PerPlayerSettings = PerPlayerSettings::Builtin();
-        let mut scores_menu: menu::Menu = menu::Menu::New();
-        scores_menu.handle(Control::Key(sdl3::keyboard::Scancode::Q), &mut mine);
+        let scores_menu: menu::Menu = menu::Menu::New();
+        let mut settings_menu: menu::Menu = menu::Menu::New();
+        settings_menu.handle(Control::Key(sdl3::keyboard::Scancode::E), &mut mine);
+        let mut credits_menu: menu::Menu = menu::Menu::New();
+        credits_menu.handle(Control::Key(sdl3::keyboard::Scancode::Q), &mut mine);
         let scores: Vec<net::Score> = (0..3 * net::MAX_PLAYER_COUNT as u32)
             .map(|id| net::Score {
                 id: u32::MAX - id,
@@ -4125,7 +4608,7 @@ mod tests {
         for line in scores_menu.get_lines(&mine, &long_path, scoreboard) {
             assert!(line.0.chars().count() <= max_char_count, "{}", line.0);
         }
-        for menu in [menu::Menu::New(), scores_menu] {
+        for menu in [settings_menu, scores_menu, credits_menu] {
             let menu_text: OverlayText = OverlayText {
                 lines: menu.get_lines(&mine, &long_path, scoreboard),
                 mask_px: MENU_MASK_PX,

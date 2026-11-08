@@ -1,8 +1,9 @@
 # `server_settings.yaml` holds the numbers that shape play in the Rust demo: movement, sprint energy, both
-# guns, consoles, respawning, how a hit slows a player, and the flashlight. The game server reads it and
-# sends it to every player who joins, so everyone in a game plays by the same numbers; a game without a
-# server uses it too. What only changes a player's own experience (keys, mouse speed, head bob, motion
-# blur, how a hit looks) is in `player_settings.yaml` instead.
+# guns and how their beams speckle, consoles, respawning, how a hit slows a player, the flashlight, aiming,
+# the map's edge, thrown wormholes and how curved space is. The game server reads it and sends it to every
+# player who joins, so everyone in a game plays by the same numbers; a game without a server uses it too.
+# What only changes a player's own experience (keys, mouse speed, head bob, motion blur, how a hit looks) is
+# in `player_settings.yaml` instead.
 #
 # Interface:
 #     Copy this file, change the numbers, and pass the copy to the server: `SERVER_SETTINGS=` with
@@ -36,6 +37,8 @@ sniper:  # Gun 1 (key 1): the thin laser wand, one shot per click.
   beam_trail_s: 0.25  # How long each point of the beam stays lit after the beam's front passes it.
   noise_mean_rad: 0.003  # Mean angle a shot strays from the crosshair, sampled per shot, exponentially (0 for none).
   noise_max_rad: 0.015  # The most a shot strays: a larger sampled angle is cut to this (0 for none).
+  beam_speckle_mean_frac: 0.2  # Mean share of beam pixels speckled each frame; exponential per shot (0 for none).
+  beam_speckle_max_frac: 0.5  # The most of the beam that speckles: a larger sampled share is cut to this (0 for none).
 
 rifle:  # Gun 2 (key 2): the grey block, fires while the button is held.
   shots_per_s: 8.0  # Shots a second while the button is held.
@@ -51,6 +54,13 @@ rifle:  # Gun 2 (key 2): the grey block, fires while the button is held.
   recoil_settle_s: 0.08  # Seconds the gun takes to settle after a shot's jolt (0 for none).
   noise_start_rad: 0.002  # Most a shot strays from the crosshair with the rifle cold, sampled per shot (0 for none).
   noise_max_rad: 0.02  # Most a shot strays at full heat; the limit grows in step with the heat (0 for none).
+  beam_speckle_start_frac: 0.0  # Share of the beam's pixels speckled each frame with the rifle cold (0 for none).
+  beam_speckle_max_frac: 0.5  # ...growing in step with the heat to this share at full heat (0 for none).
+
+beam_speckle:  # How a laser beam's speckled pixels look, with both guns: shares of them that add up to 1 (0 allowed).
+  black_frac: 0.1  # Share painted black where the beam shines.
+  white_frac: 0.1  # Share turned white where the beam shines.
+  dropout_frac: 0.8  # Share where the beam drops out, so what is behind it shows through.
 
 consoles:
   hold_to_disable_s: 10.0  # Seconds of holding E that turn off one of the other team's consoles.
@@ -77,3 +87,17 @@ aim:  # Holding the aim control (the right button) zooms in; the mouse turns the
 map_edge:  # On a map with a crater, its wall is the edge: climbing it, players slow down without end ("Zeno's paradox").
   start_wall_frac: 0.0  # How far up the wall players start to slow (0 at its foot, 1 at the rim).
   stop_wall_frac: 0.5  # How far up their speed would reach 0; each step outward is cut by the share of the way there.
+
+wormholes:  # Q throws your purple wormhole mouth, then your green one, and so on; once both are down they link.
+  throw_speed_m_per_s: 16.0  # How fast a mouth leaves your hand.
+  throw_up_rad: 0.3  # How far above the crosshair it leaves (0 for along it).
+  gravity_m_per_s_per_s: 20.0  # How fast its flight curves down (on the house, a fast throw upward escapes the curved ground).
+  max_flight_s: 4.0  # Seconds it may fly before it fizzles without landing.
+  schwarzschild_radius_m: 1.6  # Lunar Surface: the mouth's size (the house's mouths are all the house's size).
+  reach_m: 6.0  # Lunar Surface: how far its bending reaches; reaches of warps may not overlap.
+  sniper_hits_to_destroy: 2  # Sniper shots through an enemy's mouths (either one) that destroy both.
+  rifle_hits_to_destroy: 5  # Rifle shots through an enemy's mouths (either one) that destroy both.
+  hit_flash_s: 0.25  # Seconds both mouths of a pair flash red after a hit.
+
+space:  # How curved Lunar Surface is (the house demo keeps its own); a window that joins builds the map by the server's.
+  curvature_per_map_curvature: 1.5  # Times the map's own curvature (1 / its 40 m radius), from 1 to 2: 1.5 makes the radius 26.7 m.

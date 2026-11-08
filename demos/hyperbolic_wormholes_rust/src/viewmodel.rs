@@ -48,10 +48,10 @@ const TEXTURE_SIDE_PX: u32 = 1024;
 const SAMPLE_COUNT: usize = 4;
 const NEAR_M: f32 = 0.01;
 const FAR_M: f32 = 4.0;
-/// `ANCHOR_INSET_M` is how far the revolver's pivot sits below its top and ahead of its rear.
-const ANCHOR_INSET_M: Vec3 = Vec3::new(0.0, 0.02, 0.05);
-/// `PIVOT_FROM_WAND_M` is where the pivot sits in the wand's frame (+z is back toward the eye).
-const PIVOT_FROM_WAND_M: Vec3 = Vec3::new(0.0, 0.02, 0.12);
+/// `MUZZLE_SLICE_M` is how far behind the revolver's front its vertices count as the muzzle's face.
+const MUZZLE_SLICE_M: f32 = 0.01;
+/// `REVOLVER_SCALE` is how many times its modelled size the revolver is drawn.
+const REVOLVER_SCALE: f32 = 1.6;
 /// `TRANSMISSION_OPACITY` is how opaque the transmissive glass is drawn.
 const TRANSMISSION_OPACITY: f32 = 0.18;
 /// `SLOT_FORMATS` are the formats of a material's base colour, metallic-roughness, normal and
@@ -142,13 +142,14 @@ struct Targets {
     resolved: Texture,
 }
 
-/// `Viewmodel` is the revolver's mesh and materials on the GPU, its pipelines and targets.
+/// `Viewmodel` is the revolver's mesh and materials on the GPU, the transform that puts its muzzle
+/// at the origin pointing along -z, its pipelines and targets.
 pub struct Viewmodel {
     vertices: Retained<ProtocolObject<dyn MTLBuffer>>,
     indices: Retained<ProtocolObject<dyn MTLBuffer>>,
     parts: Vec<Part>,
     materials: Vec<Material>,
-    pivot_from_gltf: Mat4,
+    muzzle_from_gltf: Mat4,
     opaque: Pipeline,
     blended: Pipeline,
     depth_write: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
@@ -459,11 +460,15 @@ impl Viewmodel {
                 }
             })
             .collect();
-        let anchor_m: Vec3 = Vec3::new(
-            (min_m.x + max_m.x) * 0.5,
-            max_m.y - ANCHOR_INSET_M.y,
-            min_m.z + ANCHOR_INSET_M.z,
-        );
+        let (face_min_m, face_max_m) = vertices
+            .iter()
+            .map(|v| Vec3::new(v.position[0], v.position[1], v.position[2]))
+            .filter(|p| p.z > max_m.z - MUZZLE_SLICE_M)
+            .fold(
+                (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+                |(lo, hi), p| (lo.min(p), hi.max(p)),
+            );
+        let muzzle_m: Vec3 = ((face_min_m + face_max_m) * 0.5).with_z(max_m.z);
         let library = device
             .newLibraryWithSource_options_error(&NSString::from_str(SHADER_SOURCE), None)
             .map_err(|e| {
@@ -482,8 +487,9 @@ impl Viewmodel {
             indices: make_buffer(device, &indices)?,
             parts,
             materials,
-            pivot_from_gltf: Mat4::from_rotation_y(std::f32::consts::PI)
-                * Mat4::from_translation(-anchor_m),
+            muzzle_from_gltf: Mat4::from_rotation_y(std::f32::consts::PI)
+                * Mat4::from_scale(Vec3::splat(REVOLVER_SCALE))
+                * Mat4::from_translation(-muzzle_m),
             opaque: make_pipeline(device, &library, false)?,
             blended: make_pipeline(device, &library, true)?,
             depth_write: make_depth_state(device, true)?,
@@ -492,8 +498,8 @@ impl Viewmodel {
         })
     }
 
-    /// `encode` draws the revolver posed like `wand` into a `size` image (premultiplied sRGB, clear
-    /// where it isn't) for a camera of vertical half-angle tangent `tan_half_fov`, lit by
+    /// `encode` draws the revolver posed like `wand`, its muzzle at the wand's tip, into a `size`
+    /// image (premultiplied sRGB, clear where it isn't) for a camera of vertical half-angle tangent `tan_half_fov`, lit by
     /// `hand_light` (a GPU `HandLight` written earlier in `command_buffer`) or, if it is None, by
     /// `FIXED_HAND_LIGHT`, and returns it.
     ///
@@ -517,10 +523,8 @@ impl Viewmodel {
         }
         let targets: &Targets = self.targets.as_ref().expect("the targets were just made");
         let axes: Mat3 = Mat3::from_cols_array_2d(&wand.axes.map(|a| [a[0], a[1], a[2]]));
-        let pivot_m: Vec3 = Vec3::new(wand.center_m[0], wand.center_m[1], wand.center_m[2])
-            + axes * PIVOT_FROM_WAND_M;
         let camera_from_model: Mat4 =
-            Mat4::from_mat3_translation(axes, pivot_m) * self.pivot_from_gltf;
+            Mat4::from_mat3_translation(axes, wand.get_tip_m()) * self.muzzle_from_gltf;
         let aspect: f32 = size.0 as f32 / size.1.max(1) as f32;
         let draw = DrawUniforms {
             clip_from_model: (get_clip_from_camera(tan_half_fov, aspect) * camera_from_model)
