@@ -4,8 +4,8 @@
  * per pixel, as the Lunar Surface level's WebGL fragment shader does (`demos/levels/lunar_surface/index.html`):
  * straight geodesic chords between warp objects, kick–drift–kick steps inside their reach, a voxel walk through each
  * structure in its Klein coordinates, the ground's folded {4,5} tiling, lunar-Lambert light with soft sun shadows, lamps,
- * earthshine, a thin haze, laser beams, stars, a planet and bloom. Everything here belongs to the `lunar` appearance
- * style.
+ * earthshine, a thin haze, laser beams, stars, a planet, spaceships flying over and bloom. Everything here belongs to
+ * the `lunar` appearance style.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread per pixel of the render size.
@@ -218,10 +218,103 @@ constant float GLOW_FLOOR = 1.0 / 1024.0;
 constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
 constant int REFINED_PIXELS_PER_CELL = 3;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
+constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
+constant int HULL_FREIGHTER = 0;
+constant int HULL_FIGHTER = 1;
+constant int HULL_RING_SHIP = 2;
+constant int HULL_COUNT = 3;
+constant int LIGHT_NAV = 0;
+constant int LIGHT_STROBE = 1;
+constant int LIGHT_BEACON = 2;
+constant float SHIP_BOUND_HALF_LENGTHS = 1.5;
+constant float SHIP_BOUND_PIXELS = 4.0;
+constant float SHIP_ROUNDING_HALF_LENGTHS = 0.02;
+constant float SHIP_GRADIENT_PIXELS = 0.5;
+constant float SHIP_BEVEL_HALF_LENGTHS = 0.03;
+constant float SHIP_BEVEL_TILT_RAD = 1.2;
+constant float SHIP_SUNLIT = 1.1;
+constant float3 SHIP_GROUNDSHINE_COLOR = float3(0.5, 0.48, 0.46);
+constant float SHIP_PANELS_PER_HALF_LENGTH = 4.0;
+constant float SHIP_PANEL_VARIATION = 0.3;
+constant float SHIP_LIGHT_MIN_PIXELS = 1.0;
+constant float SHIP_ENGINE_BRIGHTNESS = 2.6;
+constant float SHIP_PLUME_BRIGHTNESS = 0.7;
+constant float SHIP_PLUME_WIDTH_PER_RADIUS = 0.8;
+constant float SHIP_PLUME_HALF_LENGTHS = 0.3;
+constant float3 PORT_COLOR = float3(1.6, 0.18, 0.12);
+constant float3 STARBOARD_COLOR = float3(0.25, 1.6, 0.5);
+constant float3 STROBE_COLOR = float3(3.0);
+constant float3 BEACON_COLOR = float3(1.8, 0.3, 0.12);
+constant float3 WINDOW_COLOR = float3(1.0, 0.8, 0.5);
+constant float RING_RADIUS_HALF_LENGTHS = 0.52;
+constant float RING_HALF_WIDTH_HALF_LENGTHS = 0.055;
+constant float RING_SPOKE_COUNT = 3.0;
+constant float RING_SPOKE_RADIUS_HALF_LENGTHS = 0.03;
+constant float3 RING_COLOR = float3(0.75, 0.74, 0.7);
+constant float RING_LIGHT_COUNT = 6.0;
+constant float RING_LIGHT_HALF_LENGTHS = 0.02;
+constant float3 RING_LIGHT_COLOR = float3(0.8, 1.1, 1.3);
+
+/** @brief `HULL_BOXES` are the spaceships' boxes (centre, half size; in half lengths, x to the nose, y to starboard), mirrored across the keel. */
+constant float4 HULL_BOXES[] = {
+    float4(-0.05, 0.0, 0.78, 0.075), float4(0.45, 0.19, 0.145, 0.105), float4(0.13, 0.19, 0.145, 0.105), float4(-0.19, 0.19, 0.145, 0.105),
+    float4(-0.51, 0.19, 0.145, 0.105), float4(0.8, 0.0, 0.11, 0.14), float4(-0.85, 0.0, 0.09, 0.25),
+    float4(0.82, 0.0, 0.1, 0.09), float4(-0.85, 0.0, 0.08, 0.14),
+};
+/** @brief `HULL_BOX_COLORS` are the colours of `HULL_BOXES`. */
+constant float3 HULL_BOX_COLORS[] = {
+    float3(0.55, 0.56, 0.58), float3(0.78, 0.45, 0.2), float3(0.25, 0.52, 0.56), float3(0.82, 0.8, 0.72),
+    float3(0.62, 0.25, 0.18), float3(0.7, 0.7, 0.72), float3(0.36, 0.36, 0.38),
+    float3(0.7, 0.7, 0.72), float3(0.36, 0.36, 0.38),
+};
+/** @brief `HULL_CAPSULES` are the spaceships' tapered capsules (the two ends of the axis), mirrored across the keel. */
+constant float4 HULL_CAPSULES[] = {
+    float4(0.88, 0.0, 0.99, 0.0), float4(-0.62, 0.3, -0.42, 0.44),
+    float4(-0.8, 0.0, 0.62, 0.0), float4(0.62, 0.0, 1.0, 0.0), float4(0.15, 0.08, -0.6, 0.8), float4(-0.95, 0.17, -0.38, 0.17),
+    float4(-0.8, 0.0, 0.8, 0.0), float4(-0.06, 0.0, 0.06, 0.0),
+};
+/** @brief `HULL_CAPSULE_RADII` are the radii of `HULL_CAPSULES` at their two ends. */
+constant float2 HULL_CAPSULE_RADII[] = {
+    float2(0.08, 0.035), float2(0.035, 0.03),
+    float2(0.12, 0.1), float2(0.1, 0.015), float2(0.2, 0.05), float2(0.065, 0.065),
+    float2(0.06, 0.05), float2(0.12, 0.12),
+};
+/** @brief `HULL_CAPSULE_COLORS` are the colours of `HULL_CAPSULES`. */
+constant float3 HULL_CAPSULE_COLORS[] = {
+    float3(0.7, 0.7, 0.72), float3(0.75, 0.76, 0.78),
+    float3(0.68, 0.7, 0.74), float3(0.68, 0.7, 0.74), float3(0.6, 0.62, 0.66), float3(0.4, 0.4, 0.44),
+    float3(0.58, 0.58, 0.6), float3(0.66, 0.66, 0.68),
+};
+/** @brief `HULL_PART_RANGES` gives each hull's first box, box count, first capsule and capsule count. */
+constant int4 HULL_PART_RANGES[HULL_COUNT] = {int4(0, 7, 0, 2), int4(9, 0, 2, 4), int4(7, 2, 6, 2)};
+/** @brief `HULL_ENGINES` are the spaceships' engine nozzles (centre, radius, unused), mirrored across the keel. */
+constant float4 HULL_ENGINES[] = {float4(-0.96, 0.0, 0.065, 0.0), float4(-0.96, 0.16, 0.055, 0.0), float4(-0.97, 0.17, 0.06, 0.0), float4(-0.95, 0.0, 0.09, 0.0)};
+/** @brief `HULL_ENGINE_COLORS` are each hull's engine colours. */
+constant float3 HULL_ENGINE_COLORS[HULL_COUNT] = {float3(1.0, 0.62, 0.3), float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
+/** @brief `HULL_LIGHTS` are the spaceships' lights (centre, `LIGHT_*` kind or else a window, radius), mirrored across the keel. */
+constant float4 HULL_LIGHTS[] = {
+    float4(0.6, 0.3, 0.0, 0.02), float4(-0.85, 0.26, 1.0, 0.022), float4(0.0, 0.0, 2.0, 0.02), float4(0.86, 0.05, 3.0, 0.012),
+    float4(0.86, 0.11, 3.0, 0.012), float4(0.76, 0.05, 3.0, 0.012), float4(0.76, 0.11, 3.0, 0.012),
+    float4(-0.63, 0.83, 0.0, 0.035), float4(-0.82, 0.0, 1.0, 0.04),
+    float4(0.85, 0.1, 0.0, 0.025), float4(-0.85, 0.15, 1.0, 0.03), float4(0.86, 0.0, 3.0, 0.015),
+};
+/** @brief `HULL_GLOW_RANGES` gives each hull's first engine, engine count, first light and light count. */
+constant int4 HULL_GLOW_RANGES[HULL_COUNT] = {int4(0, 2, 0, 7), int4(2, 1, 7, 2), int4(3, 1, 9, 3)};
+
+/**
+ * @brief `Spaceship` is one spaceship in the sky (`spaceships.rs`): its centre's direction at the origin with its half
+ * length in radians, its unit heading with its hull (`HULL_*`), and its strobe's and beacon's brightness, its engines'
+ * brightness and its ring's turn in radians.
+ */
+struct Spaceship {
+    float4 centre;
+    float4 heading;
+    float4 lights;
+};
 
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot and
- * regions, as `render_voxel.rs` writes them.
+ * regions, and the spaceships, as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -262,7 +355,9 @@ struct VoxelUniforms {
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
+    Spaceship spaceships[SPACESHIP_COUNT];
 };
+static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
 /** @brief `Shape` is one smooth solid in its structure's chart (meters): centre and kind, half sizes and rounding, material and axis. */
 struct Shape {
@@ -1069,8 +1164,8 @@ static float3 get_sky_direction(thread const Scene &scene, float4 x, float4 v) {
     return normalize(w.xyz - w.w / (1.0 + cam.w) * cam.xyz);
 }
 
-/** @brief `sample_sky` gives the sky in direction d at the origin: stars, Milky Way, sun, planet. @par Example @code float3 c = sample_sky(scene, d); @endcode */
-static float3 sample_sky(thread const Scene &scene, float3 d) {
+/** @brief `sample_sky_bodies` gives the sky in direction d at the origin: stars, Milky Way, sun, planet. @par Example @code float3 c = sample_sky_bodies(scene, d); @endcode */
+static float3 sample_sky_bodies(thread const Scene &scene, float3 d) {
     constant VoxelUniforms &u = scene.u;
     float3 sun_dir = u.sun.xyz, planet = u.planet.xyz, e1 = u.planet_e1.xyz, e2 = u.planet_e2.xyz;
     float sd = dot(d, sun_dir);
@@ -1094,6 +1189,138 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
         color += ATMOSPHERE_COLOR * HALO_GLOW * (1.0 - smoothstep(1.0, HALO_RADIUS_SQ, r2)) * max(dot(normalize(q.x * e1 + q.y * e2), sun_dir) + HALO_WRAP, 0.0);
     }
     return color + sun;
+}
+
+/** @brief `get_box_distance_2d` gives the signed distance from p to the box centred at `box.xy` with half size `box.zw`. @par Example @code float d = get_box_distance_2d(p, HULL_BOXES[0]); @endcode */
+static float get_box_distance_2d(float2 p, float4 box) {
+    float2 e = abs(p - box.xy) - box.zw;
+    return length(max(e, 0.0)) + min(max(e.x, e.y), 0.0);
+}
+
+/**
+ * @brief `get_capsule_distance_2d` nearly gives the signed distance from p to the segment from `ends.xy` to `ends.zw`,
+ * thickened by a radius running from `radii.x` to `radii.y`.
+ * @par Example
+ * @code
+ * float d = get_capsule_distance_2d(p, HULL_CAPSULES[0], HULL_CAPSULE_RADII[0]);
+ * @endcode
+ */
+static float get_capsule_distance_2d(float2 p, float4 ends, float2 radii) {
+    float2 pa = p - ends.xy, ba = ends.zw - ends.xy;
+    float t = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * t) - mix(radii.x, radii.y, t);
+}
+
+/** @brief `turn_into_sector` turns p by `-turn_rad`, then into the sector of `count` around the origin that holds the +x axis. @par Example @code float2 q = turn_into_sector(p, 0.3, 6.0); @endcode */
+static float2 turn_into_sector(float2 p, float turn_rad, float count) {
+    float sector_rad = 2.0 * M_PI_F / count, angle_rad = atan2(p.y, p.x) - turn_rad;
+    angle_rad -= sector_rad * round(angle_rad / sector_rad);
+    return length(p) * float2(cos(angle_rad), sin(angle_rad));
+}
+
+/**
+ * @brief `get_hull_distance` gives the signed distance from p to a spaceship's hull, in its half lengths, with the colour
+ * of the nearest part. p is in the ship's own frame (x to the nose, y to starboard), and a ring ship's ring and spokes
+ * are turned by `ring_rad`.
+ * @par Example
+ * @code
+ * float d = get_hull_distance(HULL_FIGHTER, p, 0.0, albedo);
+ * @endcode
+ */
+static float get_hull_distance(int hull, float2 p, float ring_rad, thread float3 &albedo) {
+    float2 m = float2(p.x, abs(p.y));
+    int4 range = HULL_PART_RANGES[hull];
+    float distance = INFINITY;
+    for (int i = range.x; i < range.x + range.y; i++) {
+        float d = get_box_distance_2d(m, HULL_BOXES[i]) - SHIP_ROUNDING_HALF_LENGTHS;
+        if (d < distance) { distance = d; albedo = HULL_BOX_COLORS[i]; }
+    }
+    for (int i = range.z; i < range.z + range.w; i++) {
+        float d = get_capsule_distance_2d(m, HULL_CAPSULES[i], HULL_CAPSULE_RADII[i]);
+        if (d < distance) { distance = d; albedo = HULL_CAPSULE_COLORS[i]; }
+    }
+    if (hull == HULL_RING_SHIP) {
+        float ring = abs(length(p) - RING_RADIUS_HALF_LENGTHS) - RING_HALF_WIDTH_HALF_LENGTHS;
+        float spoke = get_capsule_distance_2d(turn_into_sector(p, ring_rad, RING_SPOKE_COUNT), float4(0.0, 0.0, RING_RADIUS_HALF_LENGTHS, 0.0),
+                                              float2(RING_SPOKE_RADIUS_HALF_LENGTHS));
+        float d = min(ring, spoke);
+        if (d < distance) { distance = d; albedo = RING_COLOR; }
+    }
+    return distance;
+}
+
+/**
+ * @brief `get_spaceship_glow` gives the light a spaceship's engines and lights add at p (its own frame, in half lengths,
+ * with pixels `px` half lengths wide): glowing nozzles with a plume behind, red to port, green to starboard, a flashing
+ * strobe, a pulsing beacon, lit windows and a ring ship's ring lights.
+ * @par Example
+ * @code
+ * color += get_spaceship_glow(ship, HULL_FIGHTER, p, px);
+ * @endcode
+ */
+static float3 get_spaceship_glow(Spaceship ship, int hull, float2 p, float px) {
+    float2 m = float2(p.x, abs(p.y));
+    int4 range = HULL_GLOW_RANGES[hull];
+    float3 glow = float3(0.0);
+    for (int i = range.x; i < range.x + range.y; i++) {
+        float2 e = m - HULL_ENGINES[i].xy;
+        float r = max(HULL_ENGINES[i].z, SHIP_LIGHT_MIN_PIXELS * px), across = e.y / (r * SHIP_PLUME_WIDTH_PER_RADIUS), along = e.x / SHIP_PLUME_HALF_LENGTHS;
+        float plume = e.x < 0.0 ? exp(-across * across - along * along) : 0.0;
+        glow += HULL_ENGINE_COLORS[hull] * ship.lights.z * (SHIP_ENGINE_BRIGHTNESS * exp(-dot(e, e) / (r * r)) + SHIP_PLUME_BRIGHTNESS * plume);
+    }
+    for (int i = range.z; i < range.z + range.w; i++) {
+        float4 light = HULL_LIGHTS[i];
+        float2 e = m - light.xy;
+        float r = max(light.w, SHIP_LIGHT_MIN_PIXELS * px);
+        int kind = int(light.z);
+        float3 tint = kind == LIGHT_NAV ? (p.y < 0.0 ? PORT_COLOR : STARBOARD_COLOR)
+                      : kind == LIGHT_STROBE ? STROBE_COLOR * ship.lights.x : kind == LIGHT_BEACON ? BEACON_COLOR * ship.lights.y : WINDOW_COLOR;
+        glow += tint * exp(-dot(e, e) / (r * r));
+    }
+    if (hull == HULL_RING_SHIP) {
+        float2 e = turn_into_sector(p, ship.lights.w, RING_LIGHT_COUNT) - float2(RING_RADIUS_HALF_LENGTHS, 0.0);
+        float r = max(RING_LIGHT_HALF_LENGTHS, SHIP_LIGHT_MIN_PIXELS * px);
+        glow += RING_LIGHT_COLOR * exp(-dot(e, e) / (r * r));
+    }
+    return glow;
+}
+
+/**
+ * @brief `draw_spaceship` draws a spaceship over the sky colour `color` in direction d: its hull, lit by the sun on the
+ * edges that face it and from below by the sunlit ground, with its engines and lights on top. Directions far from the
+ * ship return `color` after a few dot products.
+ * @par Example
+ * @code
+ * color = draw_spaceship(scene, scene.u.spaceships[0], d, color);
+ * @endcode
+ */
+static float3 draw_spaceship(thread const Scene &scene, Spaceship ship, float3 d, float3 color) {
+    float3 c = ship.centre.xyz, h = ship.heading.xyz, side = cross(h, c);
+    float facing = dot(d, c), half_length = ship.centre.w, px = scene.u.pixel_angle_rad / half_length;
+    float2 p = float2(dot(d, h), dot(d, side)) / (max(facing, TINY) * half_length);
+    float bound = SHIP_BOUND_HALF_LENGTHS + SHIP_BOUND_PIXELS * px;
+    if (facing <= 0.0 || dot(p, p) > bound * bound) return color;
+    int hull = int(ship.heading.w);
+    float3 albedo = float3(0.0), unused;
+    float distance = get_hull_distance(hull, p, ship.lights.w, albedo), coverage = clamp(0.5 - distance / px, 0.0, 1.0);
+    if (coverage > 0.0) {
+        float step = SHIP_GRADIENT_PIXELS * px;
+        float2 g = float2(get_hull_distance(hull, p + float2(step, 0.0), ship.lights.w, unused), get_hull_distance(hull, p + float2(0.0, step), ship.lights.w, unused)) - distance;
+        g /= max(length(g), TINY);
+        float tilt_rad = SHIP_BEVEL_TILT_RAD * clamp(1.0 + distance / SHIP_BEVEL_HALF_LENGTHS, 0.0, 1.0);
+        float3 n = -c * cos(tilt_rad) + (g.x * h + g.y * side) * sin(tilt_rad);
+        float panel = 1.0 + SHIP_PANEL_VARIATION * (hash_3d(float3(floor(p * SHIP_PANELS_PER_HALF_LENGTH), float(hull) + sign(p.y))) - 0.5);
+        float3 light = SUN_COLOR * SHIP_SUNLIT * max(dot(n, scene.u.sun.xyz), 0.0) + SHIP_GROUNDSHINE_COLOR * max(-n.y, 0.0);
+        color = mix(color, albedo * panel * light, coverage);
+    }
+    return color + get_spaceship_glow(ship, hull, p, px);
+}
+
+/** @brief `sample_sky` gives the sky in direction d at the origin: stars, Milky Way, sun and planet, with the spaceships in front. @par Example @code float3 c = sample_sky(scene, d); @endcode */
+static float3 sample_sky(thread const Scene &scene, float3 d) {
+    float3 color = sample_sky_bodies(scene, d);
+    for (int i = 0; i < SPACESHIP_COUNT; i++) color = draw_spaceship(scene, scene.u.spaceships[i], d, color);
+    return color;
 }
 
 /** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form), with the brightest halo's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */

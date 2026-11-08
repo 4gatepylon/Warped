@@ -256,7 +256,9 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
     consoles
 }
 
-/// `VoxelWorld` is a whole voxel map, ready to trace and to walk on.
+/// `VoxelWorld` is a whole voxel map, ready to trace and to walk on, with the eye of the flashlight
+/// shining this frame and the time the sky shows (`sky_time_s`: the UTC clock in the window, 0 for
+/// fixed views; `spaceships.rs`).
 #[derive(Clone)]
 pub struct VoxelWorld {
     pub name: String,
@@ -282,6 +284,7 @@ pub struct VoxelWorld {
     pub static_structure_count: usize,
     pub consoles: Vec<Console>,
     pub flashlight_eye: Option<DMat4>,
+    pub sky_time_s: f64,
     pub clearance: Arc<ClearanceGrids>,
 }
 
@@ -626,6 +629,7 @@ impl VoxelWorld {
             static_structure_count: structures.len(),
             consoles: find_consoles(map),
             flashlight_eye: None,
+            sky_time_s: 0.0,
             structures,
             shapes,
             warps,
