@@ -410,7 +410,7 @@ impl VoxelFrame {
             .iter()
             .flat_map(|beam| {
                 let code: u32 = beam.team + RIFLE_BEAM_CODE * u32::from(beam.is_rifle);
-                clip_beam_to_map(&beam.segments)
+                clip_beam_to_map(&beam.segments, world.r)
                     .into_iter()
                     .map(move |s| GpuBeam {
                         a: to_f32(s.a),
@@ -689,11 +689,14 @@ pub struct VoxelGpu {
 }
 
 impl VoxelGpu {
-    /// `New` compiles `render_voxel.metal` and loads the surface textures on `device`.
+    /// `New` compiles `render_voxel.metal` on `device` and keeps the surface `textures`.
     ///
-    /// Example: `let gpu = VoxelGpu::New(&device)?;`
+    /// Example: `let gpu = VoxelGpu::New(&device, SurfaceTextures::Load(&device)?)?;`
     #[allow(non_snake_case)]
-    pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<VoxelGpu> {
+    pub fn New(
+        device: &ProtocolObject<dyn MTLDevice>,
+        textures: SurfaceTextures,
+    ) -> Result<VoxelGpu> {
         let source: String = SHADER_SOURCE
             .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
             .replace(
@@ -732,7 +735,7 @@ impl VoxelGpu {
             buffers: (0..SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len())
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
-            textures: SurfaceTextures::Load(device)?,
+            textures,
             post: None,
         })
     }

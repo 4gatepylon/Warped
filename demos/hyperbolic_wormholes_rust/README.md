@@ -94,9 +94,19 @@ make join-game SERVER=127.0.0.1
   never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
   A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
   2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
+- `V` switches between first and third person (on voxel maps). The camera eases out over 0.3 s to 3 m behind and
+  0.6 m above your head, looking where you look, and you see your own body as the others see it, without the gun in
+  hand. It pulls in toward your head when the ground or a wall is in the way (in a 2 m walkway it stays at your
+  head). Shots still leave your eye, turned toward the point under the crosshair, so the beam runs from your head to
+  the crosshair; holding the right button to aim brings the camera back to your eye (D104).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
+- Lunar Surface's space is 1.5 times as curved as its map file says: its curvature radius is 26.7 m, not 40 m
+  (`space.curvature_per_map_curvature` in `server_settings.yaml`, from 1 to 2, default 1.5). Buildings, players and
+  distances along the middle line keep their size in meters; far things shrink faster with distance, and the
+  structures away from the middle line spread apart along it. At 2, surfaces more than about 90 m from the middle
+  speckle. The house demo keeps its own curvature (D100).
 - `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
@@ -118,7 +128,8 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
 
 - The demo reads its maps from [`common/maps/`](../../common/maps/README.md) (the portable map format):
   `house-demo` (the default: the house, rails and three wormholes, R = 8) or `lunar-surface` (the Lunar Surface level of
-  [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m, with its black hole and wormhole).
+  [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m in its map file, played at 26.7 m: see
+  below, with its black hole and wormhole).
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
   steps, lighting with soft sun shadows, lamps, ground, stars and planet, so it looks like the level (plus a thin haze
   and stronger bloom, W-76), with the house's adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
@@ -146,7 +157,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
-  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes); it sends them to every player who joins.
+  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature); it sends them to every
+  player who joins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from

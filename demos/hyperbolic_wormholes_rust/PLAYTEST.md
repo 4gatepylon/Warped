@@ -42,7 +42,7 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   `make join-game` commands to give the others (`SERVER=127.0.0.1` on the same computer). Leave it running in its
   terminal; `Ctrl-C` ends the game.
 - To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight, thrown
-  wormholes), copy `server_settings.yaml`, change its numbers, and start the server with it:
+  wormholes, the curvature), copy `server_settings.yaml`, change its numbers, and start the server with it:
   `make serve-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml`.
   Everyone who joins plays by the server's settings.
 - Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`. The
@@ -91,6 +91,14 @@ each step outward is cut by how far you have already come, so you never get past
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
 
+Space on Lunar Surface is 1.5 times as curved as before: its curvature radius is 26.7 m instead of 40 m. Buildings
+and players keep their size, but far things shrink faster with distance, the crater's wall sinks toward the
+horizon, and the structures away from the middle line are further apart. The server's
+`space.curvature_per_map_curvature` sets it, from 1 (the old curvature) to 2, with 1.5 the default; a window that
+joins builds the map at the server's value. Known rough: at 2, surfaces more than about 90 m from the middle of the
+map (both spawns, the red pylon) speckle, because the renderer's single precision runs out that many curvature
+radii out; at 1.5 there is almost none.
+
 The bars in the bottom left (health, then the gun's ammo, then sprint energy) lean like `/` and glow in their
 colours. While one changes, soft swells of light run over its filled part, stronger and faster the faster it
 changes: after a hit, reddish-orange ones run down the health bar from your last hit point; while you sprint, pale
@@ -119,7 +127,7 @@ sees the same ships at the same moment. They are far away in the sky: lasers and
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
 `PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting; once you let go of `Shift` it refills in 7.5 s crouched (`Ctrl`) or 15 s walking or standing),
-`Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
+`Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `V` switches to a third-person view from 3 m behind and a little above your character and back (it pulls in when a wall or the ground is behind you; shots still leave your head toward the crosshair, and aiming looks from your eye again), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click, then 2 s to reload, shown by one block

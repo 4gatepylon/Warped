@@ -1639,6 +1639,88 @@
   the SPECKLE on top of that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for
   sniper."
 
+### D100. A stronger curvature, set in the server's settings, for W-37 (stronger curvature)
+
+- **Choice:**
+  - **Setting:** `space.curvature_per_map_curvature` in `server_settings.yaml`, from 1 to 2, default 1.5: the
+    curvature (1 over the curvature radius) as a multiple of the map's own. Lunar Surface's 40 m radius becomes
+    26.7 m (20 m at 2). A value outside 1 to 2 fails with the key's name. A curvature k times as strong in this sense
+    makes the Gaussian curvature, −1/R², k² times as strong.
+  - **Default 1.5, not 2:** the item asked for twice the curvature by default. After seeing pictures at 1, 1.5 and
+    2, with the speckle at 2 described below, you chose 1.5: "1.5x curvature is fine". 2 stays allowed.
+  - **What stays in meters:** every frame (structures, warps, spawns) and lamp keeps its Fermi coordinates (u, v, h)
+    and its turn against the Fermi axes there (`Map::scale_curvature`). Shapes in their charts, the terrain, the
+    zones, the warps' reach and the players' speeds and jump keep their meters. So distances along the middle line
+    (v = 0) and straight across it stay; along u away from it, a stretch Δu is cosh(v/R) Δu long, which at
+    v = 40 m grows from 1.5 Δu (at 1) to 2.4 Δu (at 1.5) and 3.8 Δu (at 2). A structure's chart must reach less
+    than R from its origin; Lunar Surface's furthest shape corner is 15.8 m, so it could go up to 2.5.
+  - **Where:** voxel maps only (Lunar Surface). The house demo keeps R = 8 m: at 2 its far pylon would sit 13
+    curvature radii out (coordinates near 2 × 10⁵), and its scripted route (`--autopilot`) flies back and forth
+    through wormhole 1 without end.
+  - **Networking:** the server sends its settings in the welcome (as before). A window that joins builds the map at
+    the built-in value; if the welcome's differs, it rebuilds the map, the minimap and the map page at the server's
+    and says so in the HUD. The renderer uploads the minimap's picture again when its placement changes. A bot
+    (`--bot`) fails with a clear error on a server with another value.
+  - **Beams:** they are drawn up to 160 m from the map's origin at any curvature, instead of 4 curvature radii (D64),
+    which at 1.5 would have hidden beams fired from either spawn (both lie beyond 4 radii, 107 m).
+- **Speckle at 2:** the renderer works in the map's coordinates in single precision, and a point's error there grows
+  as cosh² of its distance from the origin in curvature radii. Beyond about 90 m at 2 (both spawns, the red pylon
+  and the buildings around it) surfaces and shadows speckle; at 1.5 the limit is about 120 m (a faint grain at the
+  red spawn's roof), and at 1 about 170 m, outside the map. The cure is to trace relative to the camera, a larger
+  change to the shaders (D64 and D66 put it off too); until then, 2 speckles at the spawns.
+- **Tests at the map's own curvature:** the tests that aim or walk by the map's numbers load it at 1 (`Map::Load`
+  doesn't scale): at 2, the laser into the wormhole misses the red pylon, the walk into the mouth misses it, and
+  the dust test's shots land elsewhere.
+- **Alternatives:**
+  - a default of 2, as the item first asked (speckle at both spawns until the renderer traces relative to the
+    camera);
+  - keeping geodesic distance and direction from the map's origin instead of Fermi coordinates (spacing around the
+    origin would grow by sinh: 10 times at the spawns at 2, and structures would leave the terrain they stand on);
+  - scaling the curvature radius by 1/√k for k times the Gaussian curvature (you asked for the radius ÷ factor).
+- **Rationale:** you asked that the curvature be set in the YAML settings, higher than now, at most twice the
+  current curvature, and then chose 1.5 as the default after seeing the speckle at 2.
+
+### D104. A third-person view on `V`, W-61 (third-person view)
+
+- **Choice:**
+  - **Key:** `switch_view` in `player_settings.yaml`, `V` by default, switches between first and third person, on
+    voxel maps (on the house it does nothing).
+  - **Camera:** an L-shaped boom (`third_person.rs`): up 0.6 m along the vertical from the eye to a pivot above the
+    head (the body's head reaches 0.4 m above the eye), then 3 m back along the pivot's back axis, which tilts with
+    the view, so the camera swings around the pivot as you look up and down. It looks the way the eye does, carried
+    along the geodesics, so the crosshair passes just over your head and your body fills the lower middle.
+  - **Walls:** each leg is traced straight (glass stops it, though it doesn't stop lasers) and stops 0.25 m short of
+    the ground or a block. Where the pivot can't rise 0.45 m (the 2 m walkways and module doorways), the camera stays
+    at the pivot, inside the head: your body isn't drawn and the gun in hand shows, as in first person.
+  - **Switch:** the camera moves out along the boom (up first, then back) over 0.3 s, eased in and out, and back the
+    same way.
+  - **Your body:** the figure the others see you as (`multiplayer::get_body`, from the frame your window sends the
+    server, in your team's colour), drawn by the voxel renderer, with its shadow. Your own laser passes through it;
+    the other players' lasers stop at it, as they do in their windows. The gun in hand is hidden while it shows.
+  - **Aiming (right button):** brings the camera back to the eye while held, with the usual zoom, so aiming looks
+    from the eye and is exact.
+  - **Shots:** still leave the eye, as the other windows trace each shot from the frame sent (the server takes each
+    window's word for its hits). The eye turns toward the point the crosshair's straight ray meets
+    (`VoxelWorld::find_crosshair_point`: the ground or a block, through glass, ignoring the warps' bending), and
+    that turned frame, with the shot's noise, is what the window traces and sends, so every window draws and scores
+    the same beam, from your head to the crosshair. A point more than 0.6 rad off your view (behind you) doesn't
+    turn it. Holding `E` on a console uses the same turned eye.
+  - **Saved settings:** a `player_settings.yaml` saved before this, without `switch_view`, still loads and gets the
+    built-in `V`: `ADDED_PLAYER_KEYS` in `settings.rs` names the keys added since saves began, as
+    `REMOVED_PLAYER_KEYS` (#259) names those removed. Any other missing key still fails.
+- **Alternatives:**
+  - one straight boom back and up from the eye (pulled in toward the eye, the head covers the crosshair once the
+    camera is within about 2 m);
+  - an over-the-shoulder camera (you asked for straight behind);
+  - zooming in third person while aiming (the head grows over the view);
+  - easing the camera back out after a wall (it comes in and out at once, as the wall allows);
+  - tracing a shot through a wormhole several times until it lands on the crosshair (see the limitation).
+- **Limitation:** through a wormhole's mouth, rays 0.6 m apart come out far apart, so a third-person shot through one
+  lands only roughly where the crosshair points (19 m off in a test); aim to look from the eye. Elsewhere, under the
+  black hole's reach too, it lands within 5 cm (the unturned eye's shot lands 2.7 m off at 20 m).
+- **Rationale:** you asked for a way to switch to a third-person view, the camera slightly behind the character,
+  controlled from there, seeing your own character.
+
 ### D15. WebGL at the same drawing-buffer sizes
 
 - **Choice:** the browser demo from PR 58, unchanged, in the Claude desktop app's built-in browser (Chromium 152,

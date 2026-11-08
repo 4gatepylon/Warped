@@ -11,18 +11,28 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
+  wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac (the same agent as W-96 (a
+    different rifle model)), branch `claude/rifle-sway`, to be cut from `staging` once W-96 merges; pictures will be in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-102/`
+    (temporary, under `/private/tmp`). State, 2026-11-08: not started; starts after W-96 (a different rifle model) merges.
 - [~] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly. The user asked for the loading screen "in the same style as the progress
   bar while disabling a pylon". Claimed by Claude Code (worktree `Warped-loading`), branch `claude/loading-screen`,
-  2026-11-08.
+  2026-11-08. Loading screen: #292; saying when the server is connected is not done yet.
 - [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
   - **Where the work is** (for any agent picking it up): worktree
     `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, branch `claude/milky-way`
-    (on this Mac only so far; to be pushed to `origin`), pictures in
+    (pushed to `origin`: one WIP commit, `1b8ac4e`, with temporary `TEMP_MW*` mock-up hooks; not for merging),
+    pictures in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-98/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: making mock-up pictures of 3
-    styles; nothing to build until the user picks.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: mock-ups of three looks
+    (A subtle, B rich, C photo-like) and one alternative position for the band done, with GPU costs; the user asked
+    for images only for now; nothing built.
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." Pictures first. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
@@ -32,16 +42,6 @@ is in [`AGENTS.md`](AGENTS.md).
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`.
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: options and pictures done, no
     code; waiting for the user to pick a model (and approve any download).
-- [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
-  curvature by default (and at most twice). Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-ada9a91a495af6bb8` on the user's Mac, branch
-    `claude/stronger-curvature` (pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-37/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: PR #285 open, not merged;
-    waiting for the user's OK (keep the default at 2 despite speckle on surfaces beyond about 90 m from the map's
-    middle, or use 1.5).
 - [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
@@ -51,15 +51,6 @@ is in [`AGENTS.md`](AGENTS.md).
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering two
     levels of translucency; waits for the user's OK before merging.
-- [~] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
-  character, and the player controls it from there, seeing their own character. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-adb5321f113e35420` on the user's Mac, branch
-    `claude/third-person` (pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-61/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: done and tested, PR #286 open
-    into `staging` (`V` toggles; 150 tests pass); waits for the user's OK before merging.
 - [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
@@ -154,6 +145,9 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
+  curvature by default (and at most twice). After seeing 2x speckle far from the map's middle, the user chose 1.5x
+  as the default: "1.5x curvature is fine". #285.
 - [?] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
   player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
   page use team colours. The user said to add and fix it ("Yes, add and fix"). #290.
@@ -374,3 +368,7 @@ Confirmed by the user after testing.
     (`fix3_*`), which is temporary (it is under `/private/tmp`). State, 2026-11-08: merged into `staging`.
 - [x] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237. Confirmed by the user, 2026-11-07: "also stuck in bunker is fixed so mark that as done".
+- [x] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
+  character, and the player controls it from there, seeing their own character. `V` switches to a view from 3 m
+  behind and 0.6 m above the head, pulled in when a wall or the ground is behind it; shots go from the head into the
+  crosshair, and aiming looks from the eye again. #286. Confirmed by the user, 2026-11-08: "third person looks good its done mark at such".
