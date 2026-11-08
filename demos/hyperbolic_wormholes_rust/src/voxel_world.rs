@@ -71,7 +71,7 @@ const NEARBY_REACH_M: f64 = 6.0;
 const LASER_MAX_LENGTH_M: f64 = 480.0;
 const LASER_MAX_ITERATIONS: usize = 4000;
 const LASER_MUZZLE_M: f64 = 3.0;
-const GUN_OFFSET_M: DVec3 = DVec3::new(0.22, -0.25, -0.1);
+pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
 const BEAM_TOLERANCE_M: f64 = 0.02;
 pub const LOOK_RAD_PER_PX: f64 = 0.0025;
 const MAX_PITCH_RAD: f64 = 1.55;
@@ -936,7 +936,8 @@ impl VoxelWorld {
 
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between warps,
     /// bent inside them, through throats, to a block, the ground, a horizon or `LASER_MAX_LENGTH_M`.
-    /// The drawn beam starts at a gun beside the eye and joins the path `LASER_MUZZLE_M` ahead,
+    /// The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where the window draws the
+    /// tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
     ///
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
@@ -1001,7 +1002,7 @@ impl VoxelWorld {
                 inside = None;
             }
         }
-        let gun: DVec4 = camera * map_exp(GUN_OFFSET_M, self.r);
+        let gun: DVec4 = camera * map_exp(MUZZLE_M, self.r);
         let first: &mut Vec<DVec4> = &mut pieces[0];
         if first.len() > 1 && get_distance(first[0], first[1]) * self.r > LASER_MUZZLE_M {
             let t: DVec4 = first[1] + minkowski_dot(first[1], first[0]) * first[0];

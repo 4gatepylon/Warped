@@ -630,6 +630,15 @@
 - **Rationale:** you asked for a second gun, the rifle from the design, switched with the scroll wheel or `1`/`2`,
   looking different from the first.
 
+### D57. The laser leaves from the gun's tip
+
+- **Choice:** one muzzle point in camera space, `MUZZLE_M` = (0.187, -0.157, -0.555) m, is both where the drawn beam
+  starts and where the front of the gun's tip is drawn while aiming: each gun is placed back from it by its own
+  length. The beam still joins the crosshair's path 3 m ahead. The point is where the laser wand's tip already was,
+  so the wand doesn't move. Before, the beam started 0.1 m ahead of the eye, below and behind the tip.
+- **Alternatives:** moving the beam's start with the wand's small dip at each step (a few millimeters).
+- **Rationale:** you found that the laser didn't come out of the wand's tip.
+
 
 ## Baselines
 

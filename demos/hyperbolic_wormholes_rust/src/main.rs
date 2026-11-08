@@ -141,7 +141,6 @@ const PERCENT_PER_FRAC: f64 = 100.0;
 const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
 const GUN_POSE_PER_S: f64 = 6.0;
-const WAND_AIM_CENTER_M: [f32; 3] = [0.2, -0.17, -0.34];
 const WAND_JOG_CENTER_M: [f32; 3] = [0.22, -0.22, -0.34];
 const WAND_AIM_YAW_RAD: f32 = 0.06;
 const WAND_JOG_YAW_RAD: f32 = 0.35;
@@ -2615,8 +2614,8 @@ fn take_hit_weight(gun: Gun, has_rifle_shot_hit: &mut bool, is_head_hit: bool) -
     }
 }
 
-/// `make_wand` places the wand in camera space: held on the right with its tip toward the
-/// crosshair, dipping a little at each step (`phase_rad`), and, as `run_pose_frac` goes to 1
+/// `make_wand` places the wand in camera space: held on the right, aimed toward the crosshair with
+/// the front of its tip at the muzzle (`voxel_world::MUZZLE_M`, where the laser starts), dipping a little at each step (`phase_rad`), and, as `run_pose_frac` goes to 1
 /// (eased), lowered, tipped down and rolled, bouncing and swinging with each stride; its tip has
 /// `team`'s colour. The laser (`gun`) is a thin dark wand with a short glowing tip; the rifle is a
 /// thick grey block with a long, thin glowing barrel.
@@ -2627,9 +2626,15 @@ fn make_wand(run_pose_frac: f64, phase_rad: f64, team: u32, gun: Gun) -> render_
     let (step, swing) = (phase_rad.sin().abs() as f32, phase_rad.sin() as f32);
     let lerp = |aim: f32, run: f32| aim + (run - aim) * jog;
     let bob_m: f32 = lerp(WAND_WALK_BOB_M, WAND_JOG_BOB_M) * step;
-    let center: Vec3 =
-        Vec3::from([0, 1, 2].map(|a| lerp(WAND_AIM_CENTER_M[a], WAND_JOG_CENTER_M[a])))
-            - Vec3::Y * bob_m;
+    let (shaft_half_m, tip_half_m) = match gun {
+        Gun::Laser => (WAND_LASER_SHAFT_HALF_M, WAND_LASER_TIP_HALF_M),
+        Gun::Rifle => (WAND_RIFLE_SHAFT_HALF_M, WAND_RIFLE_TIP_HALF_M),
+    };
+    let aim_rotation: Mat3 =
+        Mat3::from_euler(EulerRot::YXZ, WAND_AIM_YAW_RAD, WAND_AIM_PITCH_RAD, 0.0);
+    let aim_center: Vec3 = voxel_world::MUZZLE_M.as_vec3()
+        + aim_rotation * (Vec3::Z * (shaft_half_m[2] + 2.0 * tip_half_m[2]));
+    let center: Vec3 = aim_center.lerp(Vec3::from(WAND_JOG_CENTER_M), jog) - Vec3::Y * bob_m;
     let rotation: Mat3 = Mat3::from_euler(
         EulerRot::YXZ,
         lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD),
@@ -2640,18 +2645,12 @@ fn make_wand(run_pose_frac: f64, phase_rad: f64, team: u32, gun: Gun) -> render_
         center_m: center.extend(0.0).to_array(),
         axes: [rotation.x_axis, rotation.y_axis, rotation.z_axis]
             .map(|axis| axis.extend(0.0).to_array()),
-        shaft_half_m: match gun {
-            Gun::Laser => WAND_LASER_SHAFT_HALF_M,
-            Gun::Rifle => WAND_RIFLE_SHAFT_HALF_M,
-        },
+        shaft_half_m,
         shaft_color: match gun {
             Gun::Laser => WAND_LASER_SHAFT_COLOR,
             Gun::Rifle => WAND_RIFLE_SHAFT_COLOR,
         },
-        tip_half_m: match gun {
-            Gun::Laser => WAND_LASER_TIP_HALF_M,
-            Gun::Rifle => WAND_RIFLE_TIP_HALF_M,
-        },
+        tip_half_m,
         tip_color: if team == 1 {
             WAND_RED_TIP_COLOR
         } else {
