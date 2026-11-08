@@ -19,6 +19,8 @@ make run-demo RENDERER=cpu
   dark disk takes you through. `G` aims through the exact middle of the mouth nearest the crosshair; `F` keeps
   moving forward.
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second; `L` toggles a laser that stays on.
+  You can't shoot while running (sprinting while moving): the gun in the bottom right drops into a jogging pose, and
+  points ahead again when you walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
 - `R` respawns. `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales

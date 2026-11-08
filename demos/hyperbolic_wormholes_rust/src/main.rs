@@ -115,6 +115,24 @@ const ENERGY_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.018];
 const ENERGY_BAR_BACK_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
 const ENERGY_BAR_FILL_COLOR: [f32; 4] = [0.5, 0.82, 1.0, 0.9];
 const PERCENT_PER_FRAC: f64 = 100.0;
+const GUN_WALK_HZ: f64 = 2.0;
+const GUN_JOG_HZ: f64 = 2.8;
+const GUN_POSE_PER_S: f64 = 6.0;
+const GUN_AIM_ANCHOR_FRAC: [f32; 2] = [0.66, 0.84];
+const GUN_JOG_ANCHOR_FRAC: [f32; 2] = [0.74, 0.97];
+const GUN_JOG_TILT: f32 = -0.6;
+const GUN_WALK_BOB_FRAC: f32 = 0.008;
+const GUN_JOG_BOB_FRAC: f32 = 0.03;
+const GUN_JOG_SWAY_FRAC: f32 = 0.01;
+const GUN_GRIP: [f32; 4] = [0.0, 0.05, 0.045, 0.25];
+const GUN_BODY: [f32; 4] = [-0.05, -0.03, 0.05, 0.06];
+const GUN_BARREL: [f32; 4] = [-0.018, -0.12, 0.018, -0.02];
+const GUN_MUZZLE: [f32; 4] = [-0.015, -0.135, 0.015, -0.115];
+const GUN_GRIP_COLOR: [f32; 4] = [0.15, 0.15, 0.17, 1.0];
+const GUN_BODY_COLOR: [f32; 4] = [0.32, 0.34, 0.38, 1.0];
+const GUN_BARREL_COLOR: [f32; 4] = [0.18, 0.19, 0.21, 1.0];
+const GUN_BLUE_COLOR: [f32; 4] = [0.30, 0.62, 1.0, 1.0];
+const GUN_RED_COLOR: [f32; 4] = [1.0, 0.16, 0.08, 1.0];
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
@@ -1491,6 +1509,9 @@ struct Session {
     is_laser_on: bool,
     shot_time_s: f64,
     is_auto_forward: bool,
+    is_running: bool,
+    gun_phase_rad: f64,
+    run_pose_frac: f64,
     is_captured: bool,
     message: String,
     message_time_s: f64,
@@ -1638,6 +1659,9 @@ impl Session {
             is_laser_on: false,
             shot_time_s: 0.0,
             is_auto_forward: false,
+            is_running: false,
+            gun_phase_rad: 0.0,
+            run_pose_frac: 0.0,
             is_captured: false,
             message: String::new(),
             message_time_s: 0.0,
@@ -1727,7 +1751,9 @@ impl Session {
             Event::MouseButtonDown {
                 mouse_btn: MouseButton::Left,
                 ..
-            } if !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated) => {
+            } if !self.is_running
+                && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated) =>
+            {
                 self.shot_time_s = SHOT_DURATION_S;
             }
             Event::MouseMotion { xrel, yrel, .. } if self.is_captured => match &mut self.voxel {
@@ -1799,6 +1825,7 @@ impl Session {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
+        self.update_gun(&input, dt_s);
         let eye: DMat4 = self.get_eye_frame();
         let is_firing: bool = self.is_firing();
         if let Some(multiplayer) = &mut self.multiplayer
@@ -1812,11 +1839,77 @@ impl Session {
     }
 
     /// `is_firing` says whether this player's laser is on: toggled on with L, or a shot fired by a
-    /// click in the last `SHOT_DURATION_S`.
+    /// click in the last `SHOT_DURATION_S`, and not running (no one shoots while running).
     ///
     /// Example: `let is_firing = self.is_firing();`
     fn is_firing(&self) -> bool {
-        self.is_laser_on || self.shot_time_s > 0.0
+        (self.is_laser_on || self.shot_time_s > 0.0) && !self.is_running
+    }
+
+    /// `update_gun` notes whether this player runs (sprints while moving), dropping a shot in flight
+    /// if so, and moves the gun: its step phase while walking or running on the ground, and its
+    /// pose toward jogging while running and back to aiming otherwise.
+    ///
+    /// Example: `self.update_gun(&input, dt_s);`
+    fn update_gun(&mut self, input: &Input, dt_s: f64) {
+        let is_moving: bool = input.forward || input.back || input.left || input.right;
+        let (is_running, is_on_ground) = match &self.voxel {
+            Some(voxel) => (
+                voxel.player.is_sprinting,
+                voxel.player.is_on_ground && !voxel.player.is_flying,
+            ),
+            None => (input.sprint && is_moving, self.player.is_on_ground),
+        };
+        self.is_running = is_running;
+        if is_running {
+            self.shot_time_s = 0.0;
+        }
+        if is_moving && is_on_ground {
+            let hz: f64 = if is_running { GUN_JOG_HZ } else { GUN_WALK_HZ };
+            self.gun_phase_rad =
+                (self.gun_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
+        }
+        let target: f64 = f64::from(u8::from(is_running));
+        self.run_pose_frac +=
+            (target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
+    }
+
+    /// `get_gun_rects` gives the gun drawn in the bottom right: grip, body, barrel and a muzzle in
+    /// this player's team colour. Aiming, it points ahead and sways a little with each step;
+    /// running, it drops, leans (higher parts further right) and bounces with each stride.
+    ///
+    /// Example: `let rects = self.get_gun_rects();`
+    fn get_gun_rects(&self) -> Vec<render_metal::OverlayRect> {
+        let jog: f32 =
+            (self.run_pose_frac * self.run_pose_frac * (3.0 - 2.0 * self.run_pose_frac)) as f32;
+        let step: f32 = self.gun_phase_rad.sin().abs() as f32;
+        let bob: f32 = GUN_WALK_BOB_FRAC + (GUN_JOG_BOB_FRAC - GUN_WALK_BOB_FRAC) * jog;
+        let sway: f32 = GUN_JOG_SWAY_FRAC * jog * self.gun_phase_rad.sin() as f32;
+        let anchor: [f32; 2] = [0, 1].map(|a| {
+            GUN_AIM_ANCHOR_FRAC[a] + (GUN_JOG_ANCHOR_FRAC[a] - GUN_AIM_ANCHOR_FRAC[a]) * jog
+        });
+        let muzzle_color: [f32; 4] = match &self.voxel {
+            Some(voxel) if voxel.spawn_index % 2 == 1 => GUN_RED_COLOR,
+            _ => GUN_BLUE_COLOR,
+        };
+        [
+            (GUN_GRIP, GUN_GRIP_COLOR),
+            (GUN_BODY, GUN_BODY_COLOR),
+            (GUN_BARREL, GUN_BARREL_COLOR),
+            (GUN_MUZZLE, muzzle_color),
+        ]
+        .into_iter()
+        .map(|([x0, y0, x1, y1], color)| {
+            let lean: f32 = GUN_JOG_TILT * jog * (y0 + y1) / 2.0;
+            let dx: f32 = anchor[0] + lean + sway;
+            let dy: f32 = anchor[1] + bob * step;
+            render_metal::OverlayRect {
+                min_frac: [x0 + dx, y0 + dy],
+                max_frac: [x1 + dx, y1 + dy],
+                color,
+            }
+        })
+        .collect()
     }
 
     /// `get_eye_frame` gives the eye's frame: the house player's frame, or the voxel player's camera.
@@ -2094,17 +2187,23 @@ impl Session {
         ])
     }
 
-    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: on a voxel map, the sprint
-    /// energy bar (its frame and its fill) in the bottom left corner.
+    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the gun (unless this player
+    /// is out after a hit) and, on a voxel map, the sprint energy bar (its frame and its fill) in
+    /// the bottom left corner.
     ///
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
+        let mut rects: Vec<render_metal::OverlayRect> = if self.get_death_lines().is_none() {
+            self.get_gun_rects()
+        } else {
+            Vec::new()
+        };
         let Some(voxel) = &self.voxel else {
-            return Vec::new();
+            return rects;
         };
         let [x, y] = ENERGY_BAR_MIN_FRAC;
         let [w, h] = ENERGY_BAR_SIZE_FRAC;
-        vec![
+        rects.extend([
             render_metal::OverlayRect {
                 min_frac: [x, y],
                 max_frac: [x + w, y + h],
@@ -2115,7 +2214,8 @@ impl Session {
                 max_frac: [x + w * voxel.player.energy_frac as f32, y + h],
                 color: ENERGY_BAR_FILL_COLOR,
             },
-        ]
+        ]);
+        rects
     }
 
     /// `get_hud_lines` gives the HUD's lines: speed, movement, laser, the last message and the
@@ -2187,7 +2287,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Space jump/jetpack, H fly, click shoot, L laser, G aim, R respawn, -/= scale, Esc release".to_string()
+            "WASD move, Space jump/jetpack, H fly, click shoot (not while running), L laser, G aim, R respawn, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
