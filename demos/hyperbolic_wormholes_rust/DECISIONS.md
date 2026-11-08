@@ -533,6 +533,20 @@
   jetpack.
 - **Rationale:** you asked that players can't shoot while jumping.
 
+### D51. A low, quick jump
+
+- **Choice:** on voxel maps a jump rises 1.25 m (enough to get onto a 1 m block, D43) and lands in a third of the
+  map's jump time: 0.58 s on Lunar Surface, against the level's 1.73 s and D45's 1.0 s. Gravity follows from those
+  two numbers, about 30 m/s² (five times the level's 6 m/s², up from D45's 18), with a jump speed of 8.7 m/s, so
+  falls are faster too. At 60 frames a second a jump peaks at about 1.18 m, as each step applies gravity before it
+  moves the player.
+- **Alternatives:** three times the level's gravity with the level's jump speed (the same 0.58 s, but a jump
+  would rise only 0.75 m, too low for a block); three times D45's gravity, 54 m/s², with a 1.25 m jump (0.43 s,
+  a hop).
+- **Rationale:** you found D45's jump too long (it still rose 2.25 m and lasted 1 s) and asked for gravity three
+  times as strong in the sense that a jump is snappy and falls are quick; a jump three times shorter than the
+  level's is that, and 1.25 m keeps jumping onto blocks (the same jump height as Minecraft's, for 1 m blocks).
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

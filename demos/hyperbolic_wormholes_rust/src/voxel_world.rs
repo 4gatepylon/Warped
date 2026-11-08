@@ -25,7 +25,8 @@ pub const AVATAR_FIRST_MATERIAL: usize = 240;
 const BOUND_MARGIN_M: f64 = 0.2;
 pub(crate) const BEND_STEP_FRAC: f64 = 0.08;
 const GAME_SPEED_PER_MAP_SPEED: f64 = 2.0;
-const GAME_GRAVITY_PER_MAP_GRAVITY: f64 = 3.0;
+const JUMP_TIME_PER_MAP_JUMP_TIME: f64 = 1.0 / 3.0;
+const JUMP_HEIGHT_M: f64 = 1.25;
 const ENERGY_DRAIN_S: f64 = 7.5;
 const ENERGY_REFILL_S: f64 = 15.0;
 const BOB_WALK_HZ: f64 = 2.0;
@@ -266,12 +267,24 @@ impl VoxelWorld {
     /// `FromMap` builds the world from a voxel map: each structure's bounding sphere (around its
     /// grid's corners, plus `BOUND_MARGIN_M`), each warp's list of structures within reach, the
     /// palette (with a glow for `light` materials) and the `lunar` style's special materials.
-    /// Warps must use the `distance` radius and the `taper` falloff, and foils λ² = 0.25.
+    /// Warps must use the `distance` radius and the `taper` falloff, and foils λ² = 0.25. The game
+    /// walks and sprints `GAME_SPEED_PER_MAP_SPEED` times as fast as the map, and its jump rises
+    /// `JUMP_HEIGHT_M` in `JUMP_TIME_PER_MAP_JUMP_TIME` of the map's jump time (gravity follows),
+    /// so the map's gravity and jump speed must be above 0.
     ///
     /// Example: `let world = VoxelWorld::FromMap(&map)?;`
     #[allow(non_snake_case)]
     pub fn FromMap(map: &Map) -> Result<VoxelWorld, String> {
         let r: f64 = map.get_curvature_radius_m();
+        if map.gravity_m_per_s2 <= 0.0 || map.player.jump_m_per_s <= 0.0 {
+            return Err(format!(
+                "map {}: the voxel game needs gravity and a jump speed above 0, not {} m/s² and {} m/s",
+                map.name, map.gravity_m_per_s2, map.player.jump_m_per_s
+            ));
+        }
+        let half_jump_s: f64 =
+            map.player.jump_m_per_s / map.gravity_m_per_s2 * JUMP_TIME_PER_MAP_JUMP_TIME;
+        let jump_m_per_s: f64 = 2.0 * JUMP_HEIGHT_M / half_jump_s;
         let structures: Vec<VoxelStructure> = map
             .structures
             .iter()
@@ -401,10 +414,10 @@ impl VoxelWorld {
             player: PlayerSettings {
                 walk_m_per_s: map.player.walk_m_per_s * GAME_SPEED_PER_MAP_SPEED,
                 sprint_m_per_s: map.player.sprint_m_per_s * GAME_SPEED_PER_MAP_SPEED,
-                jump_m_per_s: map.player.jump_m_per_s * GAME_GRAVITY_PER_MAP_GRAVITY.sqrt(),
+                jump_m_per_s,
                 ..map.player
             },
-            gravity_m_per_s2: map.gravity_m_per_s2 * GAME_GRAVITY_PER_MAP_GRAVITY,
+            gravity_m_per_s2: jump_m_per_s / half_jump_s,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
             clearance: Arc::new(ClearanceGrids::default()),
         };
@@ -1328,6 +1341,7 @@ mod tests {
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
+    //! | Jump on open ground | rises `JUMP_HEIGHT_M` and lands in a third of the map's jump time | `a_jump_is_low_and_quick` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
 
@@ -1351,6 +1365,9 @@ mod tests {
     const MIN_DECK_WALK_FRAC: f64 = 0.5;
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
     const EMPTY_SPRINT_STEP_COUNT: usize = 10;
+    const MAX_JUMP_STEP_COUNT: usize = 120;
+    const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
+    const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
 
     /// `find_columns` finds, on structures standing upright on the ground, columns of cells (x, z)
     /// solid from the ground up to `solid_cells` (and, with `is_top_open`, empty for
@@ -1568,5 +1585,40 @@ mod tests {
             );
         }
         assert!(player.energy_frac < STEP_S / ENERGY_DRAIN_S);
+    }
+
+    #[test]
+    fn a_jump_is_low_and_quick() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the map loads");
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+        let start_m: f64 = player.h_m;
+        let jump: Input = Input {
+            up: true,
+            ..Input::default()
+        };
+        player.step(&world, &jump, STEP_S, 0);
+        let mut apex_m: f64 = player.h_m - start_m;
+        let mut air_step_count: usize = 1;
+        while !player.is_on_ground {
+            assert!(
+                air_step_count < MAX_JUMP_STEP_COUNT,
+                "the jump never landed"
+            );
+            player.step(&world, &Input::default(), STEP_S, 0);
+            apex_m = apex_m.max(player.h_m - start_m);
+            air_step_count += 1;
+        }
+        let map_jump_s: f64 = 2.0 * map.player.jump_m_per_s / map.gravity_m_per_s2;
+        let jump_s: f64 = air_step_count as f64 * STEP_S;
+        assert!(
+            (apex_m - JUMP_HEIGHT_M).abs() < JUMP_HEIGHT_TOLERANCE_M,
+            "apex {apex_m} m"
+        );
+        assert!(
+            (jump_s - map_jump_s * JUMP_TIME_PER_MAP_JUMP_TIME).abs() < JUMP_TIME_TOLERANCE_S,
+            "jump took {jump_s} s"
+        );
     }
 }
