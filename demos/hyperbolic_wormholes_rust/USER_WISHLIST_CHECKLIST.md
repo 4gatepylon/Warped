@@ -29,15 +29,6 @@ is in [`AGENTS.md`](AGENTS.md).
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: mock-ups of three looks
     (A subtle, B rich, C photo-like) and one alternative position for the band done, with GPU costs; the user asked
     for images only for now; nothing built.
-- [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
-  of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac, branch `claude/zone-planes`
-    (on this Mac only so far; to be pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering two
-    levels of translucency; waits for the user's OK before merging.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -112,6 +103,15 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
+  of the ground, just barely translucent, to mark out the real zones. Then, from the pictures: "Level A, faint", and
+  "the blates should also have a little bit of thickness (rougly 1 player worth of thickenss)". #291.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/zone-planes` (pushed to
+    `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac,
+    pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`
+    (temporary, under `/private/tmp`; the `*_slab*` and `6*_recheck_*` files show the result). State, 2026-11-08: on
+    `staging`, waiting for the user to test it.
 - [?] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly. The user asked for the loading screen "in the same style as the progress
   bar while disabling a pylon". Loading screen: #292, #293; the user confirmed it ("i love hte loading screen"),

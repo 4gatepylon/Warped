@@ -38,6 +38,7 @@ use crate::voxel_textures::SurfaceTextures;
 use crate::voxel_world::{
     BeamSegment, MAX_MATERIAL_COUNT, VoxelWarp, VoxelWorld, clip_beam_to_map,
 };
+use crate::zone_walls::{GpuZoneWalls, MAX_ZONE_WALL_COUNT};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -118,6 +119,7 @@ pub struct VoxelUniforms {
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
     pub beam_speckle: [f32; 4],
+    pub zone_walls: GpuZoneWalls,
 }
 
 const _: () = assert!(
@@ -467,6 +469,15 @@ impl VoxelFrame {
             })
             .collect();
         let (dust_bursts, dust_particles) = pack_dust(dust);
+        let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
+            GpuZoneWalls {
+                walls: [[0.0; 4]; MAX_ZONE_WALL_COUNT],
+                look: [0.0; 4],
+                boundary: [0.0; 4],
+                counts: [0; 4],
+            },
+            |walls| walls.to_gpu(r),
+        );
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
         let (planet, e1, e2) = match world.planet {
             Some((d, radius_rad)) => {
@@ -560,6 +571,7 @@ impl VoxelFrame {
                 world.settings.beam_speckle.white_frac as f32,
                 0.0,
             ],
+            zone_walls,
         };
         assert_eq!(
             world.palette.len(),
@@ -740,6 +752,7 @@ fn compile_library(
         )
         .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
         .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+        .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
         .replace(
             "__BYTES_PER_VOXEL_UNIFORMS__",
             &std::mem::size_of::<VoxelUniforms>().to_string(),

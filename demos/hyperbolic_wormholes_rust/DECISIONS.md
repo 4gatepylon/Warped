@@ -1582,6 +1582,48 @@
 - **Rationale:** you asked that shooting enemy wormholes make them flash red, and that a few shots (5 rifle shots)
   destroy both.
 
+### D103. Zone walls: see-through slabs straight above the zones' edges (W-64 (zone planes))
+
+- **Choice:**
+  - **Where:** each edge of the blue and red zones (u = ±45 m on Lunar Surface) is a wall around the points
+    straight above the edge in Fermi height, from the ground up to `regions.zone_walls.height_m` (6 m) above it, so
+    its foot and its top follow the ground over the mounds and up the crater's wall. It ends at the playable ellipse
+    (`regions.boundary`), fading out over its last 4 m. The edge is a geodesic of the ground, so those points are part
+    of a geodesic plane.
+  - **Thickness:** the wall is the slab within half of `regions.zone_walls.thickness_m` (0.6 m, a player's width) of
+    that plane, ±0.3 m, the same thickness everywhere. A ray is inside it where |⟨x, n⟩| ≤ sinh(0.3 m / R), an
+    interval in tanh s found in closed form.
+  - **Look:** a glowing slab in the team's colour. Seen straight through, it is `regions.zone_walls.opacity_frac`
+    (0.25, level A, the user's pick) opaque at the ground, falling to 0.6 of that within about 0.4 m and on to about
+    0.36 of it near the top, then fading out over its top quarter: a soft top edge. Of that, 70% is in its two
+    faces, each thicker as you look along it (up to 4 times), and 30% is spread through the slab, so seen at a slant
+    the tint builds up with the way through it: edge-on and from above it shows as a band as wide as the slab, and
+    from beside it the feet of both faces show as two lines. Far away it thins in the haze. It is blended like the
+    dust of shots (into the ray end's `dust`), so the adaptive sampling refines where the wall meets the ground.
+  - **The painted line:** gone on maps with zone walls (the wall's brighter foot marks the edge); a map without them
+    keeps it.
+  - **Map format:** the height, thickness and opacity are map data, the optional `regions.zone_walls` (so the format
+    stays version 1); renderers choose the fade and the glow.
+  - **Physics:** the walls are only drawn: they stop neither players nor lasers.
+- **Alternatives:**
+  - opacity 0.5 at the ground (level B in the PR's first pictures);
+  - 8 m or 5 m tall (8 m fills much of the sky from 10 m away; 5 m hides behind the mounds);
+  - a slab 0.6 m wide in Fermi u (it would widen away from the middle line, to 1.4 m at the crater's edge);
+  - all of the tint in the faces, or all in the slab (the faces alone don't show the thickness; the slab alone
+    hardly shows the faces);
+  - a wall rising from h = 0 or to a fixed top (it would be buried by the crater's wall and float over hollows);
+  - walls along the whole edge, out to infinity (seen from above they would run out over the crater's rim);
+  - keeping the painted line under the wall, or a grid on the slab (more to look at than a plane);
+  - a separate ray-end field for the walls (16 more bytes per sample, where the dust's blending already fits).
+- **Rationale:** you asked that the painted lines become planes jutting out of the ground, just barely translucent,
+  to mark out the real zones, picked level A ("Level A, faint"), and then asked: "the blates should also have a little
+  bit of thickness (rougly 1 player worth of thickenss)". A point is in blue's zone exactly when its Fermi u is below
+  −45 m, at any height, so the slab around the plane straight above the edge marks the zone's real boundary. GPU
+  cost, in interleaved runs against `staging` at 2560 × 1600 on an Apple M3 Pro (macOS 15.7): with thin planes, 6
+  rounds of 7 views summed to 246.2 ms on `staging` and 244.3 ms with the walls (−0.8%); with the slabs, 4 rounds of
+  7 views facing the walls gave each view's least median GPU time 1% to 5% higher (about 1 ms in 26 ms) in 6 of
+  them; both are within the run-to-run noise (single views ±12%).
+
 ## Baselines
 
 ### D99. Shot noise in the beam, for W-84 (shot noise in the beam itself): pixels turn black, white or drop out

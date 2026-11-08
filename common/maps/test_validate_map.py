@@ -9,6 +9,7 @@
 | Mouth partners | paired, unpaired | `test_shipped_maps_are_valid`, `test_unpaired_mouths_are_caught` |
 | Tapered reaches | apart, overlapping | `test_shipped_maps_are_valid`, `test_overlapping_tapered_reaches_are_caught` |
 | Name | matches the folder, doesn't | `test_shipped_maps_are_valid`, `test_a_wrong_name_is_caught` |
+| Zone walls | absent (house_demo), valid (lunar_surface), height or thickness not positive, opacity 0, opacity 1, a field missing (height, thickness) | `test_shipped_maps_are_valid`, `test_bad_zone_walls_are_caught` |
 
 Example:
     uv run pytest
@@ -102,6 +103,32 @@ def test_overlapping_tapered_reaches_are_caught(tmp_path: Path) -> None:
 
     errors: list[str] = _validate_map(_copy_map("lunar_surface", tmp_path, overlap), SCHEMA)
     assert any("overlap" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda walls: walls.update(height_m=0.0),
+        lambda walls: walls.update(thickness_m=-0.1),
+        lambda walls: walls.update(opacity_frac=0.0),
+        lambda walls: walls.update(opacity_frac=1.0),
+        lambda walls: walls.pop("height_m"),
+        lambda walls: walls.pop("thickness_m"),
+    ],
+    ids=[
+        "height not positive",
+        "thickness not positive",
+        "opacity 0",
+        "opacity 1",
+        "height missing",
+        "thickness missing",
+    ],
+)
+def test_bad_zone_walls_are_caught(damage: Callable[[dict], None], tmp_path: Path) -> None:
+    errors: list[str] = _validate_map(
+        _copy_map("lunar_surface", tmp_path, lambda manifest: damage(manifest["regions"]["zone_walls"])), SCHEMA
+    )
+    assert errors != []
 
 
 def test_a_wrong_name_is_caught(tmp_path: Path) -> None:

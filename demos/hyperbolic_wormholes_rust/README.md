@@ -96,6 +96,10 @@ make join-game SERVER=127.0.0.1
   never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
   A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
   2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
+- On Lunar Surface the blue and red zones' edges are walls you see through (D103): faint slabs in the team's colour
+  straight above each edge, 6 m high above the ground and 0.6 m thick (a player's width), brightest at their foot
+  and fading out at the top. They stop neither you nor lasers. The map sets their height, thickness and opacity
+  (`regions.zone_walls` in its `map.json`).
 - `V` switches between first and third person (on voxel maps). The camera eases out over 0.3 s to 3 m behind and
   0.6 m above your head, looking where you look, and you see your own body as the others see it, without the gun in
   hand. It pulls in toward your head when the ground or a wall is in the way (in a 2 m walkway it stays at your

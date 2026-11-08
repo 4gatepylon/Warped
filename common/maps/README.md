@@ -144,8 +144,17 @@ ground or on a structure) and their eye `player.eye_height_m` above it, facing t
 
 ### Regions
 
-`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"}}`, in the world's
-Fermi coordinates: a team's zone is a band of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"},
+"zone_walls": {"height_m", "thickness_m", "opacity_frac"}}`, in the world's Fermi coordinates: a team's zone is a band
+of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+
+`zone_walls` (optional) marks each finite edge (`u_min_m` or `u_max_m`) of each blue or red zone with a wall in the
+team's colour that stops neither players nor lasers. Its middle is the points straight above the edge (Fermi u equal to
+the edge's, any v and h), from the ground (the terrain's height H(u, v), or h = 0 without terrain) up to `height_m`
+above it, within the boundary when there is one. The edge is a geodesic of the ground, so in H³ (and S³) that middle is
+part of a geodesic plane, and the wall is the slab of points within `thickness_m` / 2 of it. Seen straight through
+its thickness, it is `opacity_frac` opaque at the ground (0 < `opacity_frac` < 1) and fades out toward its top;
+renderers choose the fade and the glow.
 
 ### Ground tiling and appearance
 

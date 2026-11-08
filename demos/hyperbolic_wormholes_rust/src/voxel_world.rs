@@ -33,6 +33,7 @@ use crate::terrain::{Terrain, get_fermi_coordinates};
 use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
+use crate::zone_walls::ZoneWalls;
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
@@ -300,6 +301,7 @@ pub struct VoxelWorld {
     pub surfaces: Vec<[f32; 4]>,
     pub special: SpecialMaterials,
     pub regions: Option<[f64; 3]>,
+    pub zone_walls: Option<ZoneWalls>,
     pub terrain: Option<Terrain>,
     pub sun: DVec3,
     pub planet: Option<(DVec3, f64)>,
@@ -725,6 +727,10 @@ impl VoxelWorld {
             surfaces,
             special,
             regions,
+            zone_walls: match &map.regions {
+                Some(regions) => ZoneWalls::FromRegions(regions)?,
+                None => None,
+            },
             sun: to_direction(&map.sky.sun.direction),
             planet: map
                 .sky

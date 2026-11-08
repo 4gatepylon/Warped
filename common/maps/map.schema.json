@@ -246,6 +246,16 @@
             "u_m": {"type": "number", "exclusiveMinimum": 0},
             "v_m": {"type": "number", "exclusiveMinimum": 0}
           }
+        },
+        "zone_walls": {
+          "type": "object",
+          "required": ["height_m", "thickness_m", "opacity_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "height_m": {"type": "number", "exclusiveMinimum": 0},
+            "thickness_m": {"type": "number", "exclusiveMinimum": 0},
+            "opacity_frac": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+          }
         }
       }
     },
