@@ -385,7 +385,7 @@ fn normalize_minkowski(a: DVec4) -> DVec4 {
 /// `geodesic_point` gives cosh(s) x + sinh(s) v.
 ///
 /// Example: `let y = geodesic_point(x, v, 0.1);`
-fn geodesic_point(x: DVec4, v: DVec4, s: f64) -> DVec4 {
+pub(crate) fn geodesic_point(x: DVec4, v: DVec4, s: f64) -> DVec4 {
     s.cosh() * x + s.sinh() * v
 }
 
