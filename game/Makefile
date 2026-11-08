@@ -54,7 +54,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (test logs, benchmark result
 help:
 	@echo "Targets:"
 	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run a game server, without a window; prints how to join"
-	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of client/server_settings.yaml)"
+	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of core/server_settings.yaml)"
 	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
 	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of client/player_settings.yaml)"
 	@echo "  (serve-game and join-game take GAME_PASSWORD_FILE=password.txt: only players who know it join)"

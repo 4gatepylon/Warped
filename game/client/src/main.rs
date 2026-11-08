@@ -36,6 +36,7 @@ mod multiplayer;
 mod net;
 mod physics;
 mod play;
+mod player_settings;
 mod render_mesh;
 mod render_metal;
 mod render_voxel;
@@ -43,7 +44,6 @@ mod renderer;
 mod run_folder;
 mod server_process;
 mod session;
-mod settings;
 mod shot_noise;
 mod spaceships;
 mod third_person;
@@ -56,7 +56,7 @@ mod voxel_textures;
 mod voxel_world;
 mod zone_walls;
 
-use warped_core::{app_bundle, fps_demo_assets, geometry, map, mesh, shapes, terrain};
+use warped_core::{app_bundle, fps_demo_assets, geometry, map, mesh, settings, shapes, terrain};
 
 use std::error::Error;
 use std::process::ExitCode;

@@ -29,7 +29,8 @@ use crate::map::{Map, PlayerSettings, get_console_team, to_direction, to_frame, 
 use crate::mesh::MeshModel;
 use crate::net::MAX_CONSOLE_COUNT;
 use crate::physics::Input;
-use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
+use crate::player_settings::PerPlayerSettings;
+use crate::settings::{HeadBobSettings, ServerSettings};
 use crate::shapes::{Shape, ShapeKind, find_hit_mu};
 use crate::terrain::{Terrain, get_fermi_coordinates};
 use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};

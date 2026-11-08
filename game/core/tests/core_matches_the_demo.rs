@@ -1,6 +1,6 @@
 //! `core_matches_the_demo.rs` checks that the modules step A4 moved into `warped-core` give exactly
 //! the demo's results (through `legacy-oracle`) on the same inputs: Lunar Surface's map, its
-//! terrain and models, and the hyperbolic geometry under them.
+//! terrain and models, the hyperbolic geometry under them, and the built-in server settings.
 //!
 //! Partitions and the tests that cover each part:
 //!
@@ -10,6 +10,7 @@
 //! | | `terrain` | `terrain_heights_match_the_demo` |
 //! | | `mesh` | `model_distances_match_the_demo` |
 //! | | `geometry` | `boosts_and_distances_match_the_demo` |
+//! | | `settings` | `builtin_server_settings_match_the_demo` |
 //! | Curvature | the map's own | `lunar_surface_loads_as_in_the_demo` |
 //! | | halved | every test that loads a map |
 //! | Sample point | inside the map's bounds, on and above the ground | every test with points |
@@ -154,4 +155,12 @@ fn boosts_and_distances_match_the_demo() {
             }
         }
     }
+}
+
+#[test]
+fn builtin_server_settings_match_the_demo() {
+    assert_eq!(
+        core::settings::ServerSettings::Builtin().to_json(),
+        demo::settings::ServerSettings::Builtin().to_json()
+    );
 }

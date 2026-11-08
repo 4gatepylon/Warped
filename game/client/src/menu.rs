@@ -23,7 +23,7 @@ use sdl3::keyboard::Scancode;
 use crate::credits::CREDITS_LINES;
 use crate::key_bindings::{Action, Control, KeyBindings};
 use crate::net::{Score, TEAM_NAMES};
-use crate::settings::PerPlayerSettings;
+use crate::player_settings::PerPlayerSettings;
 
 const VISIBLE_ROW_COUNT: usize = 20;
 const PAGES: [(Page, &str); 4] = [

@@ -194,7 +194,7 @@ mod tests {
     use super::*;
     use crate::geometry::make_rotation;
     use crate::map::{Map, get_map_folder};
-    use crate::settings::PerPlayerSettings;
+    use crate::player_settings::PerPlayerSettings;
 
     const R_M: f64 = 40.0;
     const RANGE_M: f64 = 60.0;

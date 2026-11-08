@@ -13,16 +13,9 @@
 //!   the same protocol.
 //! - It exits on the first error, so a supervisor such as systemd can restart it.
 
-#[cfg(target_os = "macos")]
-#[allow(dead_code)]
-#[path = "../key_bindings.rs"]
-mod key_bindings;
 #[allow(dead_code)]
 #[path = "../net.rs"]
 mod net;
-#[allow(dead_code)]
-#[path = "../settings.rs"]
-mod settings;
 #[allow(dead_code)]
 #[path = "../shot_noise.rs"]
 mod shot_noise;
@@ -30,7 +23,7 @@ mod shot_noise;
 #[path = "../thrown_wormholes.rs"]
 mod thrown_wormholes;
 
-use warped_core::{geometry, map, terrain};
+use warped_core::{geometry, map, settings, terrain};
 
 use std::error::Error;
 use std::path::PathBuf;

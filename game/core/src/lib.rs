@@ -16,5 +16,6 @@ pub mod fps_demo_assets;
 pub mod geometry;
 pub mod map;
 pub mod mesh;
+pub mod settings;
 pub mod shapes;
 pub mod terrain;
