@@ -83,6 +83,7 @@ capture.
   (other agents' runs, the user's playtest), since the numbers are then only rough.
 - **Shared before finishing:** send them to the user before you call the work done, open the PR for review, mark a
   wishlist item pending or merge, and again whenever the look changes after the user's feedback.
+- **In the PR:** attach the final pictures to the PR description's Pictures section (the `pr-description` skill).
 
 ## Feedback in rounds
 
