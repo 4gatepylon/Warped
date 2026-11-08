@@ -4,10 +4,10 @@
 //! another player is a hit. It also has the windowless bot that `--bot` runs to test a game.
 //!
 //! On voxel maps the same happens with `VoxelWorld`: bodies are voxel structures and lasers are
-//! traced through the map (`pack_shared_voxel_view`, `get_voxel_spawn`, `run_voxel_bot`).
+//! traced through the map (`pack_shared_voxel_view`, `run_voxel_bot`).
 //!
 //! Interface: `get_spawn_player`, `SharedView`, `pack_shared_view`, `run_bot`,
-//! `get_voxel_spawn`, `SharedVoxelView`, `pack_shared_voxel_view`, `run_voxel_bot`.
+//! `SharedVoxelView`, `pack_shared_voxel_view`, `run_voxel_bot`.
 //!
 //! Example: `let view = multiplayer::pack_shared_view(&world, frame, true, &client.players, (1280, 800), 0.0);`
 
@@ -24,7 +24,9 @@ use crate::net::{Client, NetEvent, RemotePlayer, get_team};
 use crate::physics::{self, Input, LaserReport, Player};
 use crate::render_voxel::VoxelFrame;
 use crate::scene_data::{Beam, SceneData};
-use crate::voxel_world::{BeamSegment, LOOK_RAD_PER_PX, Shot, VoxelPlayer, VoxelWorld};
+use crate::voxel_world::{
+    BeamSegment, LOOK_RAD_PER_PX, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
+};
 use crate::world::{Color, EYE_HEIGHT_M, World};
 
 /// `Result` is this module's result type.
@@ -33,7 +35,6 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const AVATAR_HALF_M: [f64; 3] = [0.3, 0.95, 0.3];
 const AVATAR_DROP_M: f64 = 0.75;
 const SPAWN_RING_M: f64 = 3.0;
-const SPAWN_TURN_RAD: f64 = 2.399_963_229_728_653;
 const AVATAR_COLORS: [Color; 8] = [
     [0.95, 0.25, 0.2],
     [0.2, 0.55, 0.95],
@@ -52,17 +53,29 @@ const BOT_REJOIN_S: f64 = 2.0;
 const BOT_STUCK_FRAC: f64 = 0.5;
 const BOT_VIEW_PX: (u32, u32) = (1280, 800);
 const VOXEL_SPAWN_RING_M: f64 = 3.0;
+const SPAWN_SLOT_COUNT: u32 = 16;
 const VOXEL_BOT_LASER_RANGE_M: f64 = 120.0;
 
-/// `get_spawn_player` makes player `id`'s starting player: on a ring around spawn, each id at
-/// another bearing, facing the middle.
+/// `get_spawn_player` makes player `id`'s starting player on the house: on a ring around spawn,
+/// facing the middle, at the first bearing (starting from the id's own) at least
+/// `MIN_SPAWN_GAP_M` from every eye in `others`, or the last one tried.
 ///
-/// Example: `let player = multiplayer::get_spawn_player(&world, 3);`
-pub fn get_spawn_player(world: &World, id: u32) -> Player {
+/// Example: `let player = multiplayer::get_spawn_player(&world, 3, &other_eyes);`
+pub fn get_spawn_player(world: &World, id: u32, others: &[DVec4]) -> Player {
     let mut player: Player = Player::AtSpawn(world);
-    player.frame = world.make_frame_from_spawn(f64::from(id) * SPAWN_TURN_RAD, SPAWN_RING_M)
-        * make_boost(AXIS_Y, EYE_HEIGHT_M / world.curvature_radius_m)
-        * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
+    for k in 0..SPAWN_SLOT_COUNT {
+        player.frame = world
+            .make_frame_from_spawn(f64::from(id + k) * SPAWN_TURN_RAD, SPAWN_RING_M)
+            * make_boost(AXIS_Y, EYE_HEIGHT_M / world.curvature_radius_m)
+            * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
+        let eye: DVec4 = player.frame.col(AXIS_W);
+        if others
+            .iter()
+            .all(|&x| get_distance(eye, x) * world.curvature_radius_m >= MIN_SPAWN_GAP_M)
+        {
+            break;
+        }
+    }
     player
 }
 
@@ -165,7 +178,9 @@ pub fn run_bot(
         for event in client.poll()? {
             match event {
                 NetEvent::Joined(id) => {
-                    player = get_spawn_player(world, id);
+                    let others: Vec<DVec4> =
+                        client.players.iter().map(|p| p.frame.col(AXIS_W)).collect();
+                    player = get_spawn_player(world, id, &others);
                     println!("bot joined as player {id}");
                 }
                 NetEvent::Eliminated {
@@ -229,19 +244,6 @@ pub fn run_bot(
     }
     client.leave()?;
     Ok((hit_count, eliminated_count))
-}
-
-/// `get_voxel_spawn` gives player `id`'s starting player on a voxel map: on their team's spawn
-/// (ids alternate between the map's spawn points), moved a few meters around it so that players of
-/// a team don't start inside each other, standing where they are clear of blocks.
-///
-/// Example: `let player = multiplayer::get_voxel_spawn(&world, 3);`
-pub fn get_voxel_spawn(world: &VoxelWorld, id: u32) -> VoxelPlayer {
-    let spawn: VoxelPlayer = VoxelPlayer::AtSpawn(world, id as usize);
-    let turn: DMat4 = make_rotation(AXIS_X, AXIS_Z, f64::from(id) * SPAWN_TURN_RAD);
-    let body: DMat4 =
-        spawn.body * turn * make_boost(AXIS_Z, -VOXEL_SPAWN_RING_M / world.r) * turn.inverse();
-    VoxelPlayer::Standing(world, body)
 }
 
 /// `SharedVoxelView` is one frame of a voxel map with the other players, every laser, this
@@ -413,7 +415,9 @@ pub fn run_voxel_bot(
         for event in client.poll()? {
             match event {
                 NetEvent::Joined(id) => {
-                    (player, my_id) = (get_voxel_spawn(world, id), id);
+                    let others: Vec<DVec4> =
+                        client.players.iter().map(|p| p.frame.col(AXIS_W)).collect();
+                    (player, my_id) = (VoxelPlayer::NearSpawn(world, id, &others), id);
                     println!("bot joined as player {id}");
                 }
                 NetEvent::Eliminated {
@@ -507,7 +511,6 @@ mod tests {
     use crate::net::MAX_PLAYER_COUNT;
     use crate::world::DEFAULT_CURVATURE_RADIUS_M;
 
-    const MIN_SPAWN_GAP_M: f64 = 1.0;
     const LUNAR_SHOOTER_M: [f64; 2] = [-27.0, 0.0];
     const LUNAR_TARGET_M: [f64; 2] = [-20.0, 0.0];
     const MIN_OTHER_BEAM_M: f64 = 1.0;
@@ -516,12 +519,13 @@ mod tests {
     fn spawn_points_are_apart_and_clear_of_mouths() {
         let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
         let r: f64 = world.curvature_radius_m;
-        let points: Vec<DVec4> = (1..=MAX_PLAYER_COUNT as u32)
-            .map(|id| get_spawn_player(&world, id).frame.col(AXIS_W))
-            .collect();
+        let mut points: Vec<DVec4> = Vec::new();
+        for id in 1..=MAX_PLAYER_COUNT as u32 {
+            points.push(get_spawn_player(&world, id, &points).frame.col(AXIS_W));
+        }
         for (i, a) in points.iter().enumerate() {
             for b in &points[i + 1..] {
-                assert!(get_distance(*a, *b) * r > MIN_SPAWN_GAP_M);
+                assert!(get_distance(*a, *b) * r >= MIN_SPAWN_GAP_M);
             }
             for mouth in &world.mouths {
                 assert!(get_distance(*a, mouth.center) * r > world.get_jump_radius_m());
@@ -532,8 +536,8 @@ mod tests {
     #[test]
     fn a_laser_hits_the_player_it_points_at() {
         let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
-        let shooter: Player = get_spawn_player(&world, 1);
-        let mut target: Player = get_spawn_player(&world, 2);
+        let shooter: Player = get_spawn_player(&world, 1, &[]);
+        let mut target: Player = get_spawn_player(&world, 2, &[]);
         physics::turn_toward(&mut target.frame, shooter.frame.col(AXIS_W));
         let mut aimed: DMat4 = shooter.frame;
         physics::turn_toward(&mut aimed, target.frame.col(AXIS_W));

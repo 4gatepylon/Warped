@@ -33,6 +33,12 @@ const CONSOLE_PULSE_MIN_FRAC: f32 = 0.6;
 const CONSOLE_PULSE_MAX_FRAC: f32 = 2.0;
 const CONSOLE_OFF_FRAC: f32 = 0.12;
 const CONSOLE_PROBE_M: f64 = 0.05;
+pub const SPAWN_TURN_RAD: f64 = 2.399_963_229_728_653;
+pub const MIN_SPAWN_GAP_M: f64 = 1.5;
+const SPAWN_RING_M: f64 = 3.0;
+const SPAWN_RING_STEP_M: f64 = 2.0;
+const SPAWN_SLOTS_PER_RING: u32 = 8;
+const SPAWN_RING_COUNT: u32 = 3;
 const MIN_BEND_STEP_M: f64 = 0.004;
 const MAX_BEND_STEP_M: f64 = 3.0;
 const HORIZON_CAPTURE_FRAC: f64 = 1.02;
@@ -1146,6 +1152,35 @@ impl VoxelPlayer {
         }
     }
 
+    /// `NearSpawn` makes player `id` standing near their team's spawn point (ids alternate between
+    /// the map's spawns), clear of blocks, at the first slot at least `MIN_SPAWN_GAP_M` from every
+    /// eye in `others`: slots go around rings `SPAWN_RING_STEP_M` apart from `SPAWN_RING_M`,
+    /// `SPAWN_TURN_RAD` apart, starting from the id's own. If all are taken it uses the last.
+    ///
+    /// Example: `let player = VoxelPlayer::NearSpawn(&world, 3, &other_eyes);`
+    #[allow(non_snake_case)]
+    pub fn NearSpawn(world: &VoxelWorld, id: u32, others: &[DVec4]) -> VoxelPlayer {
+        let spawn: DMat4 = VoxelPlayer::AtSpawn(world, id as usize).body;
+        let slot_count: u32 = SPAWN_SLOTS_PER_RING * SPAWN_RING_COUNT;
+        let mut player: Option<VoxelPlayer> = None;
+        for k in 0..slot_count {
+            let turn: DMat4 = make_rotation(AXIS_X, AXIS_Z, f64::from(id + k) * SPAWN_TURN_RAD);
+            let ring_m: f64 =
+                SPAWN_RING_M + SPAWN_RING_STEP_M * f64::from(k / SPAWN_SLOTS_PER_RING);
+            let body: DMat4 = spawn * turn * make_boost(AXIS_Z, -ring_m / world.r) * turn.inverse();
+            let candidate: VoxelPlayer = VoxelPlayer::Standing(world, body);
+            let eye: DVec4 = candidate.get_camera_frame(world).col(AXIS_W);
+            if others
+                .iter()
+                .all(|&x| get_distance(eye, x) * world.r >= MIN_SPAWN_GAP_M)
+            {
+                return candidate;
+            }
+            player = Some(candidate);
+        }
+        player.expect("there is at least one spawn slot")
+    }
+
     /// `Standing` makes a player standing on `body` (a ground frame), clear of blocks.
     ///
     /// Example: `let player = VoxelPlayer::Standing(&world, body);`
@@ -1374,7 +1409,7 @@ impl VoxelPlayer {
             && world.compute_bend(w, eye, self.body.col(AXIS_X)).1
                 < FALL_IN_PER_HORIZON * world.warps[w].m
         {
-            *self = VoxelPlayer::AtSpawn(world, spawn_index);
+            *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, &[]);
             return vec!["You fell into the black hole".to_string()];
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
@@ -1471,6 +1506,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
+    //! | Players spawning | up to the player limit, and a late id whose own slot is next to player 1's (it moves on) | `players_spawn_apart` |
     //! | Beam clipped to | its middle (through the wormhole), before its start, past its end | `a_clipped_beam_keeps_its_middle` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
@@ -1497,6 +1533,7 @@ mod tests {
     const MIN_DECK_WALK_FRAC: f64 = 0.5;
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
     const EMPTY_SPRINT_STEP_COUNT: usize = 10;
+    const FAR_ID_NEAR_ONE: u32 = 35;
     const MAX_JUMP_STEP_COUNT: usize = 120;
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
     const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
@@ -1618,6 +1655,29 @@ mod tests {
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
         assert_eq!(world.structures[hit].name, "red pylon");
         assert!((shot.length_m - PYLON_DISTANCE_M).abs() < DISTANCE_TOLERANCE_M);
+    }
+
+    #[test]
+    fn players_spawn_apart() {
+        let world: VoxelWorld = load_lunar_surface();
+        let mut eyes: Vec<DVec4> = Vec::new();
+        for id in (1..=crate::net::MAX_PLAYER_COUNT as u32).chain([FAR_ID_NEAR_ONE]) {
+            let player: VoxelPlayer = VoxelPlayer::NearSpawn(&world, id, &eyes);
+            let nearby: Vec<usize> =
+                world.find_nearby_structures(player.body.col(AXIS_W), NEARBY_REACH_M);
+            assert!(
+                !world.is_body_blocked(player.body, player.h_m, &nearby),
+                "player {id}"
+            );
+            let eye: DVec4 = player.get_camera_frame(&world).col(AXIS_W);
+            for other in &eyes {
+                assert!(
+                    get_distance(eye, *other) * world.r >= MIN_SPAWN_GAP_M,
+                    "player {id}"
+                );
+            }
+            eyes.push(eye);
+        }
     }
 
     #[test]

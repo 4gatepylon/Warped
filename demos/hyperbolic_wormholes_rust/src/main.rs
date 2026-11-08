@@ -47,7 +47,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, ValueEnum};
-use glam::{DMat4, DVec3, EulerRot, Mat3, Vec3};
+use glam::{DMat4, DVec3, DVec4, EulerRot, Mat3, Vec3};
 use objc2_core_foundation::CGSize;
 use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
@@ -1952,11 +1952,26 @@ impl Session {
                 repeat: false,
                 ..
             } => match key {
-                Keycode::R if self.voxel.is_some() => {
-                    let voxel: &mut VoxelState = self.voxel.as_mut().expect("checked by the guard");
-                    voxel.player = VoxelPlayer::AtSpawn(&voxel.world, voxel.spawn_index);
+                Keycode::R => {
+                    let others: Vec<DVec4> = self
+                        .multiplayer
+                        .as_ref()
+                        .map_or(Vec::new(), |m| get_eyes(&m.client.players));
+                    match &mut self.voxel {
+                        Some(voxel) => {
+                            let id: u32 = voxel.spawn_index as u32;
+                            voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
+                        }
+                        None => {
+                            let id: u32 = self
+                                .multiplayer
+                                .as_ref()
+                                .and_then(|m| m.client.id)
+                                .unwrap_or(0);
+                            self.player = multiplayer::get_spawn_player(&self.world, id, &others);
+                        }
+                    }
                 }
-                Keycode::R => self.player = Player::AtSpawn(&self.world),
                 Keycode::Minus => {
                     self.is_auto_scale = false;
                     self.render_scale =
@@ -2304,6 +2319,7 @@ impl Session {
         for event in events {
             match event {
                 net::NetEvent::Joined(id) => {
+                    let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
                     self.settings = multiplayer
                         .client
                         .settings
@@ -2313,9 +2329,11 @@ impl Session {
                         Some(voxel) => {
                             voxel.world.set_settings(self.settings.clone());
                             voxel.spawn_index = id as usize;
-                            voxel.player = multiplayer::get_voxel_spawn(&voxel.world, id);
+                            voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
                         }
-                        None => self.player = multiplayer::get_spawn_player(&self.world, id),
+                        None => {
+                            self.player = multiplayer::get_spawn_player(&self.world, id, &others)
+                        }
                     }
                     messages.push(format!("You joined as player {id}"));
                 }
@@ -2342,7 +2360,8 @@ impl Session {
         if multiplayer.client.game.number != multiplayer.game_number {
             multiplayer.game_number = multiplayer.client.game.number;
             if let (Some(voxel), Some(id)) = (&mut self.voxel, multiplayer.client.id) {
-                voxel.player = multiplayer::get_voxel_spawn(&voxel.world, id);
+                let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
+                voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
             }
             messages.push(format!(
                 "Game {} started: every console is back on",
@@ -2801,6 +2820,16 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
         Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
         None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
     }
+}
+
+/// `get_eyes` gives where other players' eyes are, so spawning players can keep clear of them.
+///
+/// Example: `let others = get_eyes(&client.players);`
+fn get_eyes(players: &[net::RemotePlayer]) -> Vec<DVec4> {
+    players
+        .iter()
+        .map(|player| player.frame.col(AXIS_W))
+        .collect()
 }
 
 /// `take_hit_weight` gives how many hits like this one `gun` needs to eliminate someone by
