@@ -141,7 +141,7 @@ pub struct VoxelUniforms {
 }
 
 /// `MAX_BLIZZARD_COUNT` is how many blizzards the renderer draws (the rest only slow and freeze).
-pub const MAX_BLIZZARD_COUNT: usize = 8;
+pub const MAX_BLIZZARD_COUNT: usize = 32;
 
 /// `pack_blizzards` gives four numbers of each of the first `MAX_BLIZZARD_COUNT` blizzards, by `pick`.
 ///

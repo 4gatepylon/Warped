@@ -399,6 +399,84 @@ pub fn get_console_team(material: &Material) -> Option<u32> {
         .map(|team| team as u32)
 }
 
+/// `get_torus_mockup_copy_count` reads `TEMP_TORUS_MOCKUP_COPIES`, the torus mock-up's copies of
+/// the level each way from the middle (WIP for the looping-world plan, never merged); none
+/// without it.
+///
+/// Example: `if let Some(copy_count) = get_torus_mockup_copy_count() { ... }`
+pub fn get_torus_mockup_copy_count() -> Option<i64> {
+    std::env::var("TEMP_TORUS_MOCKUP_COPIES").ok().map(|text| {
+        text.parse()
+            .expect("TEMP_TORUS_MOCKUP_COPIES is a whole number of copies")
+    })
+}
+
+/// `tile_torus_mockup` copies a Euclidean torus map's structures, boxes, warps (each mouth paired
+/// within its copy), lamps and blizzards `copy_count` periods each way along u and v, so the
+/// renderer draws the repeated level a looping world would show, without wrapping anything.
+///
+/// Example: `let tiled = tile_torus_mockup(text, 2)?;`
+fn tile_torus_mockup(text: &str, copy_count: i64) -> Result<String> {
+    let mut manifest: serde_json::Value = serde_json::from_str(text)?;
+    let periods_m: Vec<f64> = manifest["space"]["torus_periods_m"]
+        .as_array()
+        .ok_or("the torus mock-up needs space.torus_periods_m")?
+        .iter()
+        .map(|period| period.as_f64().expect("a period is a number"))
+        .collect();
+    let offsets_m: Vec<(f64, f64)> = (-copy_count..=copy_count)
+        .flat_map(|i| (-copy_count..=copy_count).map(move |j| (i, j)))
+        .filter(|&(i, j)| (i, j) != (0, 0))
+        .map(|(i, j)| (i as f64 * periods_m[0], j as f64 * periods_m[1]))
+        .collect();
+    let add = |value: &mut serde_json::Value, delta: f64| {
+        *value = serde_json::json!(value.as_f64().expect("a coordinate is a number") + delta);
+    };
+    for key in ["structures", "boxes", "warps"] {
+        let Some(originals) = manifest[key].as_array().cloned() else {
+            continue;
+        };
+        let original_count: usize = originals.len();
+        for (cell, &(du_m, dv_m)) in offsets_m.iter().enumerate() {
+            for original in &originals {
+                let mut copy: serde_json::Value = original.clone();
+                add(&mut copy["frame"][12], dv_m);
+                add(&mut copy["frame"][14], -du_m);
+                if let Some(partner) = copy["partner"].as_u64() {
+                    copy["partner"] = serde_json::json!(partner as usize + (cell + 1) * original_count);
+                }
+                manifest[key]
+                    .as_array_mut()
+                    .expect("checked above")
+                    .push(copy);
+            }
+        }
+    }
+    let lights: Vec<serde_json::Value> = manifest["lights"].as_array().cloned().unwrap_or_default();
+    let blizzards: Vec<serde_json::Value> = manifest["regions"]["blizzards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for &(du_m, dv_m) in &offsets_m {
+        for light in &lights {
+            let mut copy: serde_json::Value = light.clone();
+            add(&mut copy["position"][0], dv_m);
+            add(&mut copy["position"][2], -du_m);
+            manifest["lights"].as_array_mut().expect("lights").push(copy);
+        }
+        for blizzard in &blizzards {
+            let mut copy: serde_json::Value = blizzard.clone();
+            add(&mut copy["u_m"], du_m);
+            add(&mut copy["v_m"], dv_m);
+            manifest["regions"]["blizzards"]
+                .as_array_mut()
+                .expect("blizzards")
+                .push(copy);
+        }
+    }
+    Ok(serde_json::to_string(&manifest)?)
+}
+
 /// `get_map_folder` gives a shipped map's folder, `common/maps/<name>/`, found from the crate's folder.
 ///
 /// Example: `let folder = get_map_folder("house_demo");`
@@ -504,6 +582,12 @@ impl Map {
             )
             .into());
         };
+        if let Some(copy_count) = get_torus_mockup_copy_count()
+            && name == "snow_planet"
+        {
+            let tiled: String = tile_torus_mockup(text, copy_count)?;
+            return Map::Parse(&tiled, &format!("the built-in {name}, tiled"));
+        }
         Map::Parse(text, &format!("the built-in {name}"))
     }
 

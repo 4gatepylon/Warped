@@ -1085,6 +1085,17 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         pitch_rad,
         is_laser_on: false,
     };
+    if map::get_torus_mockup_copy_count().is_some() {
+        return vec![
+            view("torus_long_axis", [-46.0, 0.0], [0.0, 0.0], None, 0.0),
+            view("torus_behind_blue", [-46.0, 0.0], [-100.0, 0.0], None, 0.0),
+            view("torus_short_axis", [-48.0, 0.0], [-48.0, 50.0], None, 0.0),
+            view("torus_diagonal", [-46.0, -6.0], [10.0, 30.0], None, 0.0),
+            view("torus_above", [-70.0, 0.0], [0.0, 0.0], Some(40.0), -0.35),
+            view("torus_top", [0.0, 0.0], [0.0, -10.0], Some(95.0), -1.57),
+            view("torus_seam", [-50.0, 20.0], [-56.0, 0.0], None, 0.0),
+        ];
+    }
     vec![
         view("blue_spawn", [-46.0, 0.0], [0.0, 0.0], None, 0.0),
         view("red_spawn", [46.0, 0.0], [0.0, 0.0], None, 0.0),
