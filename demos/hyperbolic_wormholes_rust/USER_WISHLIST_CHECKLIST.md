@@ -10,6 +10,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
+  staging at #225. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-bunker-exit`,
+  2026-11-07.
 - [~] **W-87 No colourful spaceship.** Remove the colourful spaceship from the sky (W-53, #193): "the circular space
   station one is fine and great, but the colourful ones look ugly". That is the container freighter; the ring station
   stays, and so do the grey fighters unless the user says otherwise. Claimed by Claude Code (subagent of session
@@ -114,7 +117,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code.
-- [ ] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck.
 
 ## Done
 
