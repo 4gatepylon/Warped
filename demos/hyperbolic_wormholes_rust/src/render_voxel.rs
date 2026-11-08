@@ -53,7 +53,6 @@ const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
-const BEAM_DROPOUT_CONTRAST_FRAC: f32 = 1.0;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const MS_PER_S: f64 = 1000.0;
 const MIN_BUFFER_BYTES: usize = 256;
@@ -105,7 +104,7 @@ pub struct VoxelUniforms {
     pub flashlight: [f32; 4],
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
-    pub beam_noise: [f32; 4],
+    pub beam_speckle: [f32; 4],
 }
 
 const _: () = assert!(
@@ -286,10 +285,10 @@ fn to_columns(m: DMat4) -> [[f32; 4]; 4] {
 
 impl VoxelFrame {
     /// `Build` packs `world` seen from `camera` at a render size, with laser segments of each team
-    /// (`beams`: segments, team, 0 blue or 1 red, and the share of the beam's pixels that drop out
+    /// (`beams`: segments, team, 0 blue or 1 red, and the share of the beam's pixels that speckle
     /// each frame; drawn as far as `clip_beam_to_map` allows), an optional laser spot and the dust
-    /// of shots into the ground. The dropout picks its pixels anew each millisecond of
-    /// `world.sky_time_s`, and with `BEAM_DROPOUT_CONTRAST_FRAC` the rest of the beam brightens.
+    /// of shots into the ground. The speckle picks its pixels anew each millisecond of
+    /// `world.sky_time_s`, and their kinds in the shares of `world.settings.beam_speckle`.
     ///
     /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &clouds, (1280, 800));`
     #[allow(non_snake_case)]
@@ -363,7 +362,7 @@ impl VoxelFrame {
             .collect();
         let gpu_beams: Vec<GpuBeam> = beams
             .iter()
-            .flat_map(|(segments, team, dropout_frac)| {
+            .flat_map(|(segments, team, speckle_frac)| {
                 clip_beam_to_map(segments)
                     .into_iter()
                     .map(move |s| GpuBeam {
@@ -371,7 +370,7 @@ impl VoxelFrame {
                         b: to_f32(s.b),
                         info: [
                             s.length as f32,
-                            *dropout_frac as f32,
+                            *speckle_frac as f32,
                             BEAM_BRIGHTNESS,
                             *team as f32,
                         ],
@@ -465,10 +464,10 @@ impl VoxelFrame {
             }),
             spaceships: get_spaceships(world.sky_time_s),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
-            beam_noise: [
+            beam_speckle: [
                 ((world.sky_time_s * MS_PER_S) as u64 % BEAM_SEED_PERIOD_MS) as f32,
-                BEAM_DROPOUT_CONTRAST_FRAC,
-                0.0,
+                world.settings.beam_speckle.black_frac as f32,
+                world.settings.beam_speckle.white_frac as f32,
                 0.0,
             ],
         };

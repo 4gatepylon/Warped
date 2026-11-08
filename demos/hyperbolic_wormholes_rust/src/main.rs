@@ -1763,7 +1763,7 @@ struct Session {
     recoil_frac: f64,
     shot_noise: shot_noise::ShotNoise,
     shot_offset: shot_noise::ShotOffset,
-    beam_dropout_frac: f64,
+    beam_speckle_frac: f64,
     gun_phase_rad: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
@@ -1835,14 +1835,14 @@ impl PackedFrame {
 /// `Tracer` is a fired laser drawn as a beam flying out along its path (`segments`, traced when it
 /// was fired, `length_m` long): its front leaves the muzzle at `fired_s` (seconds into the session)
 /// and moves at `speed_m_per_s`, each point stays lit for `trail_s` after the front passes it, and
-/// `spot` glows where it hit while the trail is there. A share `dropout_frac` of its pixels drops
+/// `spot` glows where it hit while the trail is there. A share `speckle_frac` of its pixels drops
 /// out each frame (the shot's noise).
 struct Tracer {
     segments: Vec<voxel_world::BeamSegment>,
     length_m: f64,
     spot: Option<glam::DVec4>,
     team: u32,
-    dropout_frac: f64,
+    speckle_frac: f64,
     fired_s: f64,
     speed_m_per_s: f64,
     trail_s: f64,
@@ -1851,7 +1851,7 @@ struct Tracer {
 impl Tracer {
     /// `New` makes a tracer for `shot`, fired at `fired_s` by a player of `team` with the rifle
     /// (`is_rifle`) or the sniper, whose beam speed and trail come from `settings`, and whose
-    /// beam drops out a share `dropout_frac` of its pixels. A shot that hit nothing flies only its
+    /// beam speckles a share `speckle_frac` of its pixels. A shot that hit nothing flies only its
     /// first `SKY_TRACER_M`: farther out over the sky it is under a pixel wide, and the shader's
     /// single precision makes its glow noisy (D64, D66).
     ///
@@ -1862,7 +1862,7 @@ impl Tracer {
         team: u32,
         fired_s: f64,
         is_rifle: bool,
-        dropout_frac: f64,
+        speckle_frac: f64,
         settings: &ServerSettings,
         r: f64,
     ) -> Tracer {
@@ -1887,7 +1887,7 @@ impl Tracer {
             segments,
             spot: shot.spot,
             team,
-            dropout_frac,
+            speckle_frac,
             fired_s,
             speed_m_per_s,
             trail_s,
@@ -2096,7 +2096,7 @@ impl Session {
             recoil_frac: 0.0,
             shot_noise: shot_noise::ShotNoise::FromClock(),
             shot_offset: shot_noise::ShotOffset::NONE,
-            beam_dropout_frac: 0.0,
+            beam_speckle_frac: 0.0,
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
@@ -2270,7 +2270,7 @@ impl Session {
             self.shot_time_s = self.settings.sniper.shot_s;
             self.sniper_reload_s = self.settings.sniper.reload_s;
             self.shot_offset = self.shot_noise.sample_sniper(&self.settings.sniper);
-            self.beam_dropout_frac = self.shot_noise.sample_sniper_dropout(&self.settings.sniper);
+            self.beam_speckle_frac = self.shot_noise.sample_sniper_speckle(&self.settings.sniper);
         }
     }
 
@@ -2383,7 +2383,7 @@ impl Session {
                 laser_aim.is_some(),
                 self.gun == Gun::Rifle,
                 multiplayer.disabling.map(|(console, _)| console),
-                self.beam_dropout_frac,
+                self.beam_speckle_frac,
             )
         {
             self.message = format!("Couldn't reach the server: {error}");
@@ -2488,8 +2488,8 @@ impl Session {
             self.rifle_next_shot_s = 1.0 / rifle.shots_per_s;
             self.has_rifle_shot_hit = false;
             self.shot_offset = self.shot_noise.sample_rifle(&rifle, self.rifle_heat_frac);
-            self.beam_dropout_frac =
-                shot_noise::get_rifle_dropout_frac(&rifle, self.rifle_heat_frac);
+            self.beam_speckle_frac =
+                shot_noise::get_rifle_speckle_frac(&rifle, self.rifle_heat_frac);
             self.rifle_heat_frac += 1.0 / f64::from(rifle.shots_until_overheat);
             self.is_overheated = self.rifle_heat_frac >= 1.0;
             self.rifle_shot_count += 1;
@@ -2848,9 +2848,9 @@ impl Session {
                 && let Some(shot) = &view.shot
             {
                 let is_rifle: bool = self.gun == Gun::Rifle;
-                let dropout_frac: f64 = self.beam_dropout_frac;
+                let speckle_frac: f64 = self.beam_speckle_frac;
                 let tracer =
-                    Tracer::New(shot, team, now_s, is_rifle, dropout_frac, &self.settings, r);
+                    Tracer::New(shot, team, now_s, is_rifle, speckle_frac, &self.settings, r);
                 add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                 self.tracers.push(tracer);
             }
@@ -2858,11 +2858,11 @@ impl Session {
             for (id, shot) in &view.other_shots {
                 if !self.remote_firing_ids.contains(id) {
                     let shooter: Option<&net::RemotePlayer> = players.iter().find(|p| p.id == *id);
-                    let (team, is_rifle, dropout_frac) = shooter.map_or((0, false, 0.0), |p| {
-                        (p.team, p.is_rifle, p.beam_dropout_frac)
+                    let (team, is_rifle, speckle_frac) = shooter.map_or((0, false, 0.0), |p| {
+                        (p.team, p.is_rifle, p.beam_speckle_frac)
                     });
                     let tracer =
-                        Tracer::New(shot, team, now_s, is_rifle, dropout_frac, &self.settings, r);
+                        Tracer::New(shot, team, now_s, is_rifle, speckle_frac, &self.settings, r);
                     add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                     self.tracers.push(tracer);
                 }
@@ -3124,7 +3124,7 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team and the shot's dropout share, on a map of curvature radius `r`.
+    /// shooter's team and the shot's speckle share, on a map of curvature radius `r`.
     ///
     /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
     fn get_lit_beams(&self, r: f64) -> Vec<(Vec<voxel_world::BeamSegment>, u32, f64)> {
@@ -3136,7 +3136,7 @@ impl Session {
                 (
                     voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m),
                     tracer.team,
-                    tracer.dropout_frac,
+                    tracer.speckle_frac,
                 )
             })
             .collect()

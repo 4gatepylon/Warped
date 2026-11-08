@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 use glam::DMat4;
 
 use crate::settings::ServerSettings;
-use crate::shot_noise::{self, BEAM_DROPOUT_LEVEL_COUNT};
+use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -47,7 +47,7 @@ pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
 const NO_CONSOLE: u8 = u8::MAX;
 const RIFLE_BIT: u8 = 1;
 const TEAM_BIT: u8 = 2;
-const DROPOUT_FIRST_BIT: u8 = 3;
+const SPECKLE_FIRST_BIT: u8 = 3;
 const ANY_TEAM: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
@@ -116,8 +116,8 @@ impl Kind {
 /// their laser is on and from which gun, their team (an index into `TEAM_NAMES`), the console they
 /// hold `E` on, if any, how far along turning it off they are, from 0 to 1, as the server times
 /// it (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it), and the
-/// share of their shot's beam pixels that drop out (`beam_dropout_frac`, in steps of
-/// 1 / `shot_noise::BEAM_DROPOUT_LEVEL_COUNT`).
+/// share of their shot's beam pixels that speckle (`beam_speckle_frac`, in steps of
+/// 1 / `shot_noise::BEAM_SPECKLE_LEVEL_COUNT`).
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
@@ -127,7 +127,7 @@ pub struct RemotePlayer {
     pub team: u32,
     pub disabling_console: Option<u8>,
     pub disabling_frac: f64,
-    pub beam_dropout_frac: f64,
+    pub beam_speckle_frac: f64,
 }
 
 /// `GameState` is the game as the server keeps it: which game this is (from 0, one more each new
@@ -181,7 +181,7 @@ impl Message {
     }
 
     /// `player` appends a player: id, eye frame, laser switch (with the gun, the team and the beam
-    /// dropout's level in its higher bits), the console they hold `E` on, and how far along turning
+    /// speckle's level in its higher bits), the console they hold `E` on, and how far along turning
     /// it off they are (a byte, 255 for done).
     ///
     /// Example: `let message = Message::New(Kind::State).player(&player);`
@@ -194,7 +194,7 @@ impl Message {
             u8::from(player.is_laser_on)
                 | u8::from(player.is_rifle) << RIFLE_BIT
                 | (player.team as u8) << TEAM_BIT
-                | encode_dropout_level(player.beam_dropout_frac) << DROPOUT_FIRST_BIT,
+                | encode_speckle_level(player.beam_speckle_frac) << SPECKLE_FIRST_BIT,
         );
         self.0.push(player.disabling_console.unwrap_or(NO_CONSOLE));
         self.0
@@ -229,13 +229,13 @@ impl Message {
     }
 }
 
-/// `encode_dropout_level` gives a beam dropout share's level, 0 to `BEAM_DROPOUT_LEVEL_COUNT`,
-/// which fits the laser byte's bits from `DROPOUT_FIRST_BIT` up; older windows read only the bits
+/// `encode_speckle_level` gives a beam speckle share's level, 0 to `BEAM_SPECKLE_LEVEL_COUNT`,
+/// which fits the laser byte's bits from `SPECKLE_FIRST_BIT` up; older windows read only the bits
 /// below, so they ignore it.
 ///
-/// Example: `let level = encode_dropout_level(0.12);`
-fn encode_dropout_level(beam_dropout_frac: f64) -> u8 {
-    (shot_noise::round_dropout_frac(beam_dropout_frac) * f64::from(BEAM_DROPOUT_LEVEL_COUNT))
+/// Example: `let level = encode_speckle_level(0.12);`
+fn encode_speckle_level(beam_speckle_frac: f64) -> u8 {
+    (shot_noise::round_speckle_frac(beam_speckle_frac) * f64::from(BEAM_SPECKLE_LEVEL_COUNT))
         .round() as u8
 }
 
@@ -284,8 +284,8 @@ impl Reader<'_> {
             team: u32::from(laser >> TEAM_BIT & 1),
             disabling_console: (console != NO_CONSOLE).then_some(console),
             disabling_frac: f64::from(disabling) / f64::from(u8::MAX),
-            beam_dropout_frac: f64::from(laser >> DROPOUT_FIRST_BIT)
-                / f64::from(BEAM_DROPOUT_LEVEL_COUNT),
+            beam_speckle_frac: f64::from(laser >> SPECKLE_FIRST_BIT)
+                / f64::from(BEAM_SPECKLE_LEVEL_COUNT),
         })
     }
 
@@ -395,7 +395,7 @@ impl Server {
                                 team,
                                 disabling_console: None,
                                 disabling_frac: 0.0,
-                                beam_dropout_frac: 0.0,
+                                beam_speckle_frac: 0.0,
                             },
                             address,
                             last_heard: Instant::now(),
@@ -1038,7 +1038,7 @@ impl Client {
     }
 
     /// `send_state` sends this player's eye frame, laser switch, whether the gun is the rifle, the
-    /// console they hold `E` on, and their shot's beam dropout, once joined. The server times the
+    /// console they hold `E` on, and their shot's beam speckle, once joined. The server times the
     /// hold itself, so the progress sent is 0.
     ///
     /// Example: `client.send_state(player.frame, is_laser_on, false, None, 0.0)?;`
@@ -1048,7 +1048,7 @@ impl Client {
         is_laser_on: bool,
         is_rifle: bool,
         disabling_console: Option<u8>,
-        beam_dropout_frac: f64,
+        beam_speckle_frac: f64,
     ) -> Result<()> {
         if let Some(id) = self.id {
             let player: RemotePlayer = RemotePlayer {
@@ -1059,7 +1059,7 @@ impl Client {
                 team: self.team.unwrap_or(0),
                 disabling_console,
                 disabling_frac: 0.0,
-                beam_dropout_frac,
+                beam_speckle_frac,
             };
             self.send(&Message::New(Kind::State).player(&player))?;
         }
@@ -1212,7 +1212,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Datagram length | complete (progress kept to a 255th; the beam dropout's top level beside the laser, rifle and red-team bits), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
+    //! | Datagram length | complete (progress kept to a 255th; the beam speckle's top level beside the laser, rifle and red-team bits), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
     //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
     //! | Servers announcing themselves | one, several with one on the default port (chosen), several without (the first) | `the_default_port_wins_among_servers` |
     //! | A server that can't take this player | full (says so), of another version (snapshots that don't fit) | `full_games_and_other_versions_are_noticed` |
@@ -1236,7 +1236,7 @@ mod tests {
     const BLUE: u8 = 0;
     const RED: u8 = 1;
     const SENT_DISABLING_FRAC: f64 = 0.37;
-    const SENT_DROPOUT_FRAC: f64 = 1.0;
+    const SENT_SPECKLE_FRAC: f64 = 1.0;
     const DISABLING_FRAC_STEP: f64 = 1.0 / u8::MAX as f64;
     const HALF: f64 = 0.5;
     const TWICE: f64 = 2.0;
@@ -1304,7 +1304,7 @@ mod tests {
             team: 0,
             disabling_console: Some(console),
             disabling_frac: 0.0,
-            beam_dropout_frac: 0.0,
+            beam_speckle_frac: 0.0,
         };
         server
             .handle(&Message::New(Kind::State).player(&player).0, from)
@@ -1399,7 +1399,7 @@ mod tests {
             team: 1,
             disabling_console: Some(3),
             disabling_frac: SENT_DISABLING_FRAC,
-            beam_dropout_frac: SENT_DROPOUT_FRAC,
+            beam_speckle_frac: SENT_SPECKLE_FRAC,
         };
         let game: GameState = GameState {
             number: 2,
@@ -1423,7 +1423,7 @@ mod tests {
             (7, frame, true, true, Some(3))
         );
         assert!((player.disabling_frac - SENT_DISABLING_FRAC).abs() <= DISABLING_FRAC_STEP);
-        assert_eq!(player.beam_dropout_frac, SENT_DROPOUT_FRAC);
+        assert_eq!(player.beam_speckle_frac, SENT_SPECKLE_FRAC);
         assert_eq!(player.team, 1);
         assert_eq!(reader.game(), Some(game));
     }
@@ -1438,7 +1438,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
-            beam_dropout_frac: 0.0,
+            beam_speckle_frac: 0.0,
         };
         let message: Message = Message::New(Kind::State).player(&player);
         let cut: &[u8] = &message.0[..message.0.len() - 1];
@@ -1709,7 +1709,7 @@ mod tests {
             team: u32::from(RED),
             disabling_console: Some(0),
             disabling_frac: 0.0,
-            beam_dropout_frac: 0.0,
+            beam_speckle_frac: 0.0,
         };
         server
             .handle(&Message::New(Kind::State).player(&holding).0, holder)

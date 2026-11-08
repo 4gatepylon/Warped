@@ -270,8 +270,9 @@ are here too, since the user hadn't confirmed them.
   itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
   (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
-  dropout: random beam pixels show the background each frame, "if you shoot in the air it gets dark and if you shoot
-  above ground it looks like ground specks". #249.
+  speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
+  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2".
+  #249.
 
 ## Done
 

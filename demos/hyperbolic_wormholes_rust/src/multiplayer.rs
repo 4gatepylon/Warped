@@ -259,7 +259,7 @@ pub struct SharedVoxelView {
 }
 
 /// `Tracers` is what to draw for lasers instead of every laser's whole path: beam pieces with
-/// their teams and dropout shares, an impact glow, and the dust of shots into the ground.
+/// their teams and speckle shares, an impact glow, and the dust of shots into the ground.
 pub struct Tracers<'a> {
     pub beams: &'a [(Vec<BeamSegment>, u32, f64)],
     pub spot: Option<(DVec4, u32)>,
@@ -302,7 +302,7 @@ fn trace_other_voxel_lasers(
 /// `players`, this player's laser (if on, fired from `laser_aim`, `camera` turned by the shot's
 /// noise, for team `team`) and the lasers of the players who have theirs on, all traced through
 /// the same map, so beams stop at players and bend like light. It draws every laser's whole path
-/// (this player's without dropout, the others' with their shots' dropout), or `tracers` instead
+/// (this player's without speckle, the others' with their shots' speckle), or `tracers` instead
 /// when given.
 ///
 /// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, None, (1280, 800));`
@@ -345,11 +345,11 @@ pub fn pack_shared_voxel_view(
     }
     let other_shots: Vec<(u32, Shot)> = trace_other_voxel_lasers(world, players, &bodies, &colors);
     for (id, other) in &other_shots {
-        let (team, dropout_frac) = players
+        let (team, speckle_frac) = players
             .iter()
             .find(|p| p.id == *id)
-            .map_or((0, 0.0), |p| (p.team, p.beam_dropout_frac));
-        beams.push((other.segments.clone(), team, dropout_frac));
+            .map_or((0, 0.0), |p| (p.team, p.beam_speckle_frac));
+        beams.push((other.segments.clone(), team, speckle_frac));
     }
     let no_dust: &[DustCloud] = &[];
     let (beams, spot, dust) = match tracers {
@@ -567,7 +567,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
-            beam_dropout_frac: 0.0,
+            beam_speckle_frac: 0.0,
         };
         let view: SharedView =
             pack_shared_view(&world, aimed, Some(aimed), &[other], (64, 40), 0.0);
@@ -595,7 +595,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
-            beam_dropout_frac: 0.0,
+            beam_speckle_frac: 0.0,
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
         let view: SharedVoxelView =
@@ -627,7 +627,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
-            beam_dropout_frac: 0.0,
+            beam_speckle_frac: 0.0,
         };
         let target_camera: DMat4 = target.get_camera_frame(&world);
         let shooters_view: SharedVoxelView = pack_shared_voxel_view(
@@ -676,7 +676,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
-            beam_dropout_frac: 0.0,
+            beam_speckle_frac: 0.0,
         };
         let bodies: Vec<(DMat4, usize)> = vec![(
             VoxelPlayer::FromEye(&world, firing.frame).get_feet_frame(&world),

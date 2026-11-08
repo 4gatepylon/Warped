@@ -58,9 +58,10 @@ make join-game SERVER=127.0.0.1
   Each shot strays a little from the crosshair, by a random angle sampled for that shot (D89): with the sniper
   usually by a hair (3 mrad on average, at most 15), with the rifle by up to 2 mrad cold, growing with its heat to 20
   mrad and shrinking as it cools (`noise_*_rad` under `sniper` and `rifle` in `server_settings.yaml`).
-  Each shot's beam also flickers with shot noise (D96): every frame a random share of its pixels drops out and shows
-  what is behind, while the rest brightens. The share is random per sniper shot (12% on average, at most 75%) and
-  rises with the rifle's heat, from 2% cold to 60% just before it overheats (`beam_dropout_*_frac`).
+  Each shot's beam also flickers with shot noise (D96): every frame a random share of its pixels is speckled, 1 in 10
+  of them black, 1 in 10 white and 8 in 10 dropping out to show what is behind, while the rest is the normal beam.
+  The share is random per sniper shot (0.2 on average, up to the whole beam) and rises with the rifle's heat, from
+  none cold to the whole beam at full heat (`beam_speckle_*_frac` and `beam_speckle` in `server_settings.yaml`).
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.

@@ -124,8 +124,9 @@ above the energy bar that empties when you fire; one hit eliminates), and gun 2,
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s). Each shot strays
 a little from the crosshair: the sniper's by a random few milliradians, the rifle's more and more as it heats up
-during a burst (`DECISIONS.md` D89). Each shot's beam also flickers: random pixels drop out each frame and show what
-is behind, a random share for each sniper shot and more and more as the rifle heats up (D96). A shot into the ground, from either gun and anyone, throws up dust and a puff
+during a burst (`DECISIONS.md` D89). Each shot's beam also flickers: each frame random pixels of it turn black, white
+or drop out to show what is behind (1 : 1 : 8), a random share for each sniper shot and more and more as the rifle
+heats up, from none to the whole beam (D96). A shot into the ground, from either gun and anyone, throws up dust and a puff
 of mist that fade within 2 s. `E` (held)
 turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu (`Q`/`E`
 turn between your settings, a map of the whole level with you on it, and SCORES: how many players there are and each

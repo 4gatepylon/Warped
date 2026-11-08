@@ -1479,43 +1479,49 @@
 - **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
   room for it, and costs at most 15 more checks, only on a blocked step.
 
-### D96. Shot noise in the beam: random pixels drop out (W-84)
+### D96. Shot noise in the beam: random pixels turn black, white or drop out (W-84)
 
 - **Choice:**
-  - **The look:** each frame, a share of the beam's screen pixels drops the beam entirely, so whatever is behind
-    shows through: the sky over the sky, ground specks over the ground. The pixels are picked anew each frame and
-    independently for each pixel (`hash_pixel` on the pixel and a seed from the frame's clock, in milliseconds), so
-    the holes flicker as single pixels. The rest of the beam is drawn as before, or brighter (below).
-  - **The share, per shot (`shot_noise.rs`):** the sniper's is exponential with mean `sniper.beam_dropout_mean_frac`
-    (12%), cut at `sniper.beam_dropout_max_frac` (75%), so most shots are nearly clean and the odd one is badly
-    broken. The rifle's grows in step with the heat, from `rifle.beam_dropout_start_frac` (2%) on a cold rifle to
-    `rifle.beam_dropout_max_frac` (60%) on the 20th shot in a row, like a weapon overheating; the heat is the one
-    before the shot adds its own, and it falls back as the rifle cools. Each is 0 for none, and a share above 1 or a
-    rifle start above its maximum fails.
+  - **The look:** each frame, a share of the beam's screen pixels is speckled, and the rest is the normal laser.
+    A speckled pixel is one of three kinds, picked by its own roll in the shares of `beam_speckle` in
+    `server_settings.yaml`, 1 : 1 : 8 by default:
+    - black (`black_frac`, 0.1): the colour darkened by the beam's glow there, black where the glow is full;
+    - white (`white_frac`, 0.1): the colour moved toward white by the glow, never brighter than white;
+    - dropout (`dropout_frac`, 0.8): the beam is left out, so what is behind shows through: the sky over the sky,
+      ground specks over the ground.
+    Only pixels where the glow is above 2% count as the beam's, so no specks show beyond its visible edge. The
+    pixels are picked anew each frame and independently for each pixel (`hash_pixel` on the pixel and a seed from
+    the frame's clock, in milliseconds), so they flicker as single pixels.
+  - **The share, per shot (`shot_noise.rs`):** the sniper's is exponential with mean `sniper.beam_speckle_mean_frac`
+    (0.2), cut at 1 (a whole beam of specks, for 0.7% of shots), so most shots are lightly speckled and the odd one
+    heavily. The rifle's grows in step with the heat, from `rifle.beam_speckle_start_frac` (0) on a cold rifle to
+    `rifle.beam_speckle_max_frac` (1) at full heat, like a weapon malfunctioning as it overheats: the heat is the
+    one before the shot adds its own, so a burst's first shot is clean and its 20th is 95% speckled, and it falls
+    back as the rifle cools. The shares are 0 for none; a share above 1, a rifle start above its maximum, or kinds
+    that don't add up to 1 fail.
   - **Every window draws a shot alike:** the share is rounded to steps of 1/31 and sent in the five unused high bits
     of the laser byte of the player record (bits 3 to 7; bits 0 to 2 are the laser, the rifle and the team), so the
     snapshot keeps its length. Older windows read only the low bits and draw plain beams; an older server drops the
-    bits, so others' beams show plain. Other windows start a tracer with the share they receive with the shot.
+    bits, so others' beams show plain. Other windows start a tracer with the share they receive with the shot; the
+    kinds' shares come with the server's settings.
   - **On the GPU:** each beam segment carries its share in `GpuBeam.info.y`; the ray keeps the share of the beam
-    whose halo is brightest, packed beside the team bit in `VoxelRayEnd.surface.w`, and `shade_ray_end` scales the
-    beam's light by `get_beam_gain` for its pixel.
-  - **Survivors brighter (for your pick):** with `BEAM_DROPOUT_CONTRAST_FRAC` at 1 (now), the surviving pixels
-    brighten by up to 1 / (1 - share), as if the dropped light gathered in what remains, and turn whiter toward the
-    beam's middle by twice the gain above 1 times the halo: pure white near the axis once a third of the pixels drop,
-    nearly the plain beam at 5%. At 0 it is pure dropout.
-  - **Kept:** #216's aim stray (D89), unchanged.
+    whose halo is brightest, packed beside the team bit in `VoxelRayEnd.surface.w`, and `shade_ray_end` hands the
+    pixel's colour with and without the beam to `speckle_beam`. The uniforms' `beam_speckle` carries the frame's
+    seed and the black and white shares.
+  - **Kept:** #216's aim stray (D89), unchanged: you called it neutral.
 - **Alternatives:**
-  - painting the chosen pixels black (it reads as noise only over a black background, such as the sky);
+  - dropout alone, with the surviving pixels brighter and whiter (the version this PR first had; you asked for the
+    beam otherwise to stay the normal laser);
+  - other ratios of black : white : dropout (1:1:4, 1:1:2, 2:1:7, 1:2:7, 1:1:18, in the samples);
   - grain inside the glow, bright motes around the beam, or a glitchy beam with gaps and jumps (the first samples);
   - deriving the share in each window from the shooter's id and shot count (the rifle's depends on its heat, which
     other windows don't know);
-  - a random share for the rifle too (you asked for it to rise with the shots in a burst);
   - picking pixels after MetalFX upscaling (the overlay pass doesn't know where beams are): at a render scale under 1
-    the holes are render pixels, up to 2 window pixels across.
-- **Rationale:** you asked that the laser beam itself have shot noise: random pixels of a normal beam blacked out,
-  shown as the background rather than black, with the number of them random per sniper shot and rising with the
-  rifle's shots like a weapon malfunctioning as it overheats; and then that the remaining pixels get brighter, for
-  more contrast.
+    the specks are render pixels, up to 2 window pixels across.
+- **Rationale:** you asked that the laser beam itself have shot noise, "a combination of black AND dropout AND
+  white": "i recommend the ratio is always 1 black to 1 white to 8 dropout and the total amount at this fixed ratio
+  is scaled as I had described" (random per sniper shot, rising with the rifle's shots). Then: "stick with 118 and goes from
+  amount 0 to 1 as you fire more, exponential average should be at 0.2".
 
 ### D15. WebGL at the same drawing-buffer sizes
 
