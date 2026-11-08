@@ -151,11 +151,12 @@ winner turned off (and the other team's with a lone bot): City Sphere 1, Dark Fo
 it stood, and the servers took its word).
 
 With walking console bots and the servers' reach check (W-126, same play in every level), `make play-all-levels`
-passed four runs in a row (the last on `43cc05d`, with `staging/user-4gatepylon` merged in): Lunar Surface 36.6 s to
-42.4 s, Snow Planet 13.0 s to 14.0 s and Dust 37.1 s to 40.6 s from a round's start to its win, every pylon reached on foot (City Sphere's and Dark Forest's own bots don't report their walks).
+passed five runs in a row (the last on `1aa771f`, with `staging/user-4gatepylon` merged in): Lunar Surface 35.9 s to
+42.4 s, Snow Planet 13.0 s to 14.0 s and Dust 30.8 s to 40.6 s from a round's start to its win, every pylon reached on foot (City Sphere's and Dark Forest's own bots don't report their walks).
 A lone walking bot of each team won each of those levels from its own spawn: Lunar Surface in 40 s (blue) and 42 s
-(red), Dust in 39 s and 40 s, Snow Planet in 15 s and 15 s; the longest walk, to the farthest pylon (192 m to 204 m
-away), took 22 s to 32 s with up to 11 sidesteps along walls on the way (Lunar Surface's hesco rows), the others 2 s to 10 s.
+(red), Dust in 33 s and 34 s, Snow Planet in 15 s and 13 s (Dust and Snow Planet after their W-126 parity changes);
+the longest walk, to the farthest pylon (192 m to 204 m away), took 22 s to 25 s with up to 7 sidesteps along walls on
+the way (Lunar Surface's hesco rows among them), the others 2 s to 10 s.
 
 The match takes no pylon or console count: each level program has its own (the column above
 follows `game_design/DESIGN.md`, 3-2-1-2-3 from the outside in) and reports only the winner.
