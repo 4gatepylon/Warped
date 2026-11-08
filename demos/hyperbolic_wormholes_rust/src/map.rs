@@ -213,12 +213,13 @@ pub struct Boundary {
     pub v_m: f64,
 }
 
-/// `ZoneWalls` is how the walls along the team zones' edges look: their height above the ground
-/// and their opacity at the ground.
+/// `ZoneWalls` is how the walls along the team zones' edges look: their height above the ground,
+/// their thickness and their opacity at the ground.
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct ZoneWalls {
     pub height_m: f64,
+    pub thickness_m: f64,
     pub opacity_frac: f64,
 }
 

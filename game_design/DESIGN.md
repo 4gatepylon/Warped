@@ -190,8 +190,8 @@ The level as the Rust game builds it, from the map
   the [map edge](#map-edge).
 - The zones are bands across its length: blue more than 45 m from the middle on blue's side, red
   more than 45 m on red's side, and the middle zone, 90 m long, between them. Each team zone's edge
-  is a faint see-through wall in the team's colour, 6 m high, that stops neither players nor
-  lasers.
+  is a faint see-through wall in the team's colour, 6 m high and 0.6 m thick, that stops neither
+  players nor lasers.
 - A black hole hangs about 17 m above the middle of the level; its pull reaches 24 m. A player who falls into
   it goes back to their spawn.
 - One wormhole joins a ridge to the red landing pad. Its mouths are 15 m in reach.

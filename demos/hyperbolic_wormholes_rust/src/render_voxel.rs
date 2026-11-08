@@ -36,7 +36,7 @@ use crate::voxel_textures::SurfaceTextures;
 use crate::voxel_world::{
     BeamSegment, MAX_MATERIAL_COUNT, VoxelWarp, VoxelWorld, clip_beam_to_map,
 };
-use crate::zone_walls::MAX_ZONE_WALL_COUNT;
+use crate::zone_walls::{GpuZoneWalls, MAX_ZONE_WALL_COUNT};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -116,9 +116,7 @@ pub struct VoxelUniforms {
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
     pub beam_speckle: [f32; 4],
-    pub zone_walls: [[f32; 4]; MAX_ZONE_WALL_COUNT],
-    pub zone_wall_look: [f32; 4],
-    pub zone_wall_counts: [i32; 4],
+    pub zone_walls: GpuZoneWalls,
 }
 
 const _: () = assert!(
@@ -429,8 +427,13 @@ impl VoxelFrame {
             })
             .collect();
         let (dust_bursts, dust_particles) = pack_dust(dust);
-        let (zone_walls, zone_wall_look, zone_wall_counts) = world.zone_walls.as_ref().map_or(
-            ([[0.0; 4]; MAX_ZONE_WALL_COUNT], [0.0; 4], [0; 4]),
+        let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
+            GpuZoneWalls {
+                walls: [[0.0; 4]; MAX_ZONE_WALL_COUNT],
+                look: [0.0; 4],
+                boundary: [0.0; 4],
+                counts: [0; 4],
+            },
             |walls| walls.to_gpu(r),
         );
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
@@ -526,8 +529,6 @@ impl VoxelFrame {
                 0.0,
             ],
             zone_walls,
-            zone_wall_look,
-            zone_wall_counts,
         };
         assert_eq!(
             world.palette.len(),

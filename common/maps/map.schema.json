@@ -249,10 +249,11 @@
         },
         "zone_walls": {
           "type": "object",
-          "required": ["height_m", "opacity_frac"],
+          "required": ["height_m", "thickness_m", "opacity_frac"],
           "additionalProperties": false,
           "properties": {
             "height_m": {"type": "number", "exclusiveMinimum": 0},
+            "thickness_m": {"type": "number", "exclusiveMinimum": 0},
             "opacity_frac": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
           }
         }

@@ -1,11 +1,12 @@
 //! `zone_walls.rs` is a map's `regions.zone_walls` (`common/maps/README.md`): the walls that mark
-//! the edges of the blue and red zones. Each wall is the set of points straight above one edge
-//! (their Fermi u is the edge's), which in H³ is a geodesic plane standing on the ground.
-//! `render_voxel.metal` draws it from the ground up to the map's height, faintly in the team's
-//! colour; it blocks neither players nor lasers.
+//! the edges of the blue and red zones. Each wall is a slab around the set of points straight above
+//! one edge (their Fermi u is the edge's), which in H³ is a geodesic plane standing on the ground:
+//! the points within half the wall's thickness of that plane. `render_voxel.metal` draws it from
+//! the ground up to the map's height, faintly in the team's colour; it blocks neither players nor
+//! lasers.
 //!
 //! Interface: `ZoneWalls::FromRegions`, `ZoneWalls::to_gpu`, `ZoneWall::get_plane`,
-//! `MAX_ZONE_WALL_COUNT`.
+//! `GpuZoneWalls`, `MAX_ZONE_WALL_COUNT`.
 //!
 //! Example: `let walls = ZoneWalls::FromRegions(regions)?;`
 
@@ -29,9 +30,9 @@ pub struct ZoneWall {
 }
 
 impl ZoneWall {
-    /// `get_plane` gives the wall's unit normal n on a map of curvature radius `r`: a point x is
-    /// on the wall where ⟨x, n⟩ = 0, and otherwise ⟨x, n⟩ is the sinh of its distance from the
-    /// wall, positive on the side of smaller u.
+    /// `get_plane` gives the unit normal n of the plane straight above the wall's edge, on a map
+    /// of curvature radius `r`: a point x is on that plane where ⟨x, n⟩ = 0, and otherwise
+    /// ⟨x, n⟩ is the sinh of its distance from it, positive on the side of smaller u.
     ///
     /// Example: `let n = wall.get_plane(40.0);`
     pub fn get_plane(&self, r: f64) -> DVec4 {
@@ -40,13 +41,26 @@ impl ZoneWall {
     }
 }
 
+/// `GpuZoneWalls` is `render_voxel.metal`'s `ZoneWalls`: per wall its plane's (n_z, -n_w, edge u
+/// in meters, team) (the rest zero), then (height, opacity, thickness, 0), then the boundary's
+/// (u, v) semi-axes (0 without a boundary), then (wall count, 0, 0, 0).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GpuZoneWalls {
+    pub walls: [[f32; 4]; MAX_ZONE_WALL_COUNT],
+    pub look: [f32; 4],
+    pub boundary: [f32; 4],
+    pub counts: [i32; 4],
+}
+
 /// `ZoneWalls` is a map's zone walls: one per finite edge of each blue or red zone, how high
-/// they rise above the ground and how opaque they are at its foot, and the playable boundary's
-/// semi-axes (Fermi u, v), which they stop at, if the map has one.
+/// they rise above the ground, how thick they are, how opaque they are at its foot, and the
+/// playable boundary's semi-axes (Fermi u, v), which they stop at, if the map has one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneWalls {
     pub walls: Vec<ZoneWall>,
     pub height_m: f64,
+    pub thickness_m: f64,
     pub opacity_frac: f64,
     pub boundary_m: Option<[f64; 2]>,
 }
@@ -56,8 +70,9 @@ impl ZoneWalls {
     /// `zone_walls`, else a wall for each finite `u_min_m` and `u_max_m` of each blue or red zone
     /// (the middle zone's edges get none of their own).
     ///
-    /// Errors: a zone's team isn't blue, red or middle; the height isn't positive; the opacity
-    /// isn't between 0 and 1 (both excluded); more than `MAX_ZONE_WALL_COUNT` walls.
+    /// Errors: a zone's team isn't blue, red or middle; the height or the thickness isn't
+    /// positive; the opacity isn't between 0 and 1 (both excluded); more than
+    /// `MAX_ZONE_WALL_COUNT` walls.
     ///
     /// Example: `let walls = ZoneWalls::FromRegions(map.regions.as_ref().unwrap())?;`
     #[allow(non_snake_case)]
@@ -65,11 +80,15 @@ impl ZoneWalls {
         let Some(look) = regions.zone_walls else {
             return Ok(None);
         };
-        if look.height_m <= 0.0 {
-            return Err(format!(
-                "map: regions.zone_walls.height_m is {}, not positive",
-                look.height_m
-            ));
+        for (name, value_m) in [
+            ("height_m", look.height_m),
+            ("thickness_m", look.thickness_m),
+        ] {
+            if value_m <= 0.0 {
+                return Err(format!(
+                    "map: regions.zone_walls.{name} is {value_m}, not positive"
+                ));
+            }
         }
         if !(look.opacity_frac > 0.0 && look.opacity_frac < 1.0) {
             return Err(format!(
@@ -107,33 +126,36 @@ impl ZoneWalls {
         Ok(Some(ZoneWalls {
             walls,
             height_m: look.height_m,
+            thickness_m: look.thickness_m,
             opacity_frac: look.opacity_frac,
             boundary_m: regions.boundary.as_ref().map(|b| [b.u_m, b.v_m]),
         }))
     }
 
     /// `to_gpu` gives the walls as `render_voxel.metal`'s `VoxelUniforms` holds them, on a map
-    /// of curvature radius `r`: per wall its plane's (n_z, -n_w, edge u in meters, team) (the
-    /// rest zero), then (height, opacity, boundary u and v semi-axes, 0 without a boundary),
-    /// then (wall count, 0, 0, 0).
+    /// of curvature radius `r` (see `GpuZoneWalls`).
     ///
-    /// Example: `let (walls, look, counts) = zone_walls.to_gpu(world.r);`
-    pub fn to_gpu(&self, r: f64) -> ([[f32; 4]; MAX_ZONE_WALL_COUNT], [f32; 4], [i32; 4]) {
-        let mut gpu_walls: [[f32; 4]; MAX_ZONE_WALL_COUNT] = [[0.0; 4]; MAX_ZONE_WALL_COUNT];
-        for (gpu_wall, wall) in gpu_walls.iter_mut().zip(&self.walls) {
+    /// Example: `let gpu_zone_walls = zone_walls.to_gpu(world.r);`
+    pub fn to_gpu(&self, r: f64) -> GpuZoneWalls {
+        let mut walls: [[f32; 4]; MAX_ZONE_WALL_COUNT] = [[0.0; 4]; MAX_ZONE_WALL_COUNT];
+        for (gpu_wall, wall) in walls.iter_mut().zip(&self.walls) {
             let n: DVec4 = wall.get_plane(r);
             *gpu_wall = [n.z, -n.w, wall.u_m, f64::from(wall.team)].map(|x| x as f32);
         }
         let [boundary_u_m, boundary_v_m] = self.boundary_m.unwrap_or([0.0; 2]);
-        let look: [f32; 4] =
-            [self.height_m, self.opacity_frac, boundary_u_m, boundary_v_m].map(|x| x as f32);
-        (gpu_walls, look, [self.walls.len() as i32, 0, 0, 0])
+        GpuZoneWalls {
+            walls,
+            look: [self.height_m, self.opacity_frac, self.thickness_m, 0.0].map(|x| x as f32),
+            boundary: [boundary_u_m, boundary_v_m, 0.0, 0.0].map(|x| x as f32),
+            counts: [self.walls.len() as i32, 0, 0, 0],
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    //! Tests of reading the zone walls and of where their planes lie.
+    //! Tests of reading the zone walls, of where their planes lie, and of the span of a geodesic
+    //! inside a wall's slab as `render_voxel.metal`'s `scan_zone_walls` finds it.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -141,9 +163,10 @@ mod tests {
     //! | A zone's edges | one finite (Lunar Surface's blue and red), both finite, none (both null) | `lunar_surface_has_a_wall_per_team`, `each_finite_edge_of_a_team_zone_gets_a_wall` |
     //! | A zone's team | blue, red, middle (no walls), another name (fails) | `lunar_surface_has_a_wall_per_team`, `bad_zone_walls_fail` |
     //! | Wall count | 0 to `MAX_ZONE_WALL_COUNT`, more (fails) | `each_finite_edge_of_a_team_zone_gets_a_wall`, `bad_zone_walls_fail` |
-    //! | Height and opacity | in range, height not positive, opacity 0 or 1 (each fails) | `lunar_surface_has_a_wall_per_team`, `bad_zone_walls_fail` |
+    //! | Height, thickness and opacity | in range, height or thickness not positive, opacity 0 or 1 (each fails) | `lunar_surface_has_a_wall_per_team`, `bad_zone_walls_fail` |
     //! | Boundary | present (passed on), absent (zeros on the GPU) | `lunar_surface_has_a_wall_per_team`, `each_finite_edge_of_a_team_zone_gets_a_wall` |
     //! | Point against a wall's plane | straight above the edge at any v and height (on it), along the u axis on either side (sinh of the distance, positive at smaller u) | `the_wall_is_straight_above_its_edge` |
+    //! | Geodesic against a slab | crossing it (in one face, out the other), dipping in and out of one face, passing by, starting inside, running inside along the plane | `the_slab_span_matches_brute_force` |
 
     use super::*;
     use crate::geometry::{make_fermi_point, minkowski_dot};
@@ -152,9 +175,13 @@ mod tests {
     const R_M: f64 = 40.0;
     const EDGE_U_M: f64 = 45.0;
     const HEIGHT_M: f64 = 8.0;
+    const THICKNESS_M: f64 = 0.6;
     const OPACITY_FRAC: f64 = 0.2;
     const TOLERANCE: f64 = 1e-9;
     const RED_TEAM: u32 = 1;
+    const BRUTE_FORCE_S_LIMIT: f64 = 3.0;
+    const BRUTE_FORCE_STEP_COUNT: i32 = 6000;
+    const SPAN_TOLERANCE: f64 = 1e-3;
 
     /// `make_zone` makes a zone of `team` between `u_min_m` and `u_max_m` (None for unbounded).
     ///
@@ -167,19 +194,35 @@ mod tests {
         }
     }
 
-    /// `make_regions` makes regions with `zones`, no boundary, and walls of `HEIGHT_M` and
-    /// `opacity_frac`.
+    /// `make_regions` makes regions with `zones`, no boundary, and walls of `height_m`,
+    /// `THICKNESS_M` and `opacity_frac`.
     ///
-    /// Example: `let regions = make_regions(vec![], 0.2);`
+    /// Example: `let regions = make_regions(vec![], 8.0, 0.2);`
     fn make_regions(zones: Vec<Zone>, height_m: f64, opacity_frac: f64) -> Regions {
         Regions {
             zones: Some(zones),
             boundary: None,
             zone_walls: Some(MapZoneWalls {
                 height_m,
+                thickness_m: THICKNESS_M,
                 opacity_frac,
             }),
         }
+    }
+
+    /// `get_slab_tanh_span` is `scan_zone_walls`'s span of a geodesic x cosh s + v sinh s inside
+    /// the slab |⟨x, n⟩| ≤ k, with a = ⟨x, n⟩ and b = ⟨v, n⟩: the (tanh s) interval where
+    /// (b² + k²) τ² + 2ab τ + a² − k² ≤ 0, or `None` when the geodesic stays outside.
+    ///
+    /// Example: `let span = get_slab_tanh_span(0.1, 0.5, 0.0075);`
+    fn get_slab_tanh_span(a: f64, b: f64, k: f64) -> Option<(f64, f64)> {
+        let discriminant: f64 = b * b - a * a + k * k;
+        if discriminant < 0.0 {
+            return None;
+        }
+        let root: f64 = k * discriminant.sqrt();
+        let denominator: f64 = b * b + k * k;
+        Some(((-a * b - root) / denominator, (-a * b + root) / denominator))
     }
 
     #[test]
@@ -198,15 +241,19 @@ mod tests {
             },
         ];
         assert_eq!(zone_walls.walls, expected);
-        assert!(zone_walls.height_m > 0.0);
+        assert!(zone_walls.height_m > 0.0 && zone_walls.thickness_m > 0.0);
         assert!(zone_walls.opacity_frac > 0.0 && zone_walls.opacity_frac < 1.0);
         let boundary: &Boundary = regions.boundary.as_ref().unwrap();
         assert_eq!(zone_walls.boundary_m, Some([boundary.u_m, boundary.v_m]));
-        let (gpu_walls, look, counts) = zone_walls.to_gpu(R_M);
-        assert_eq!(counts, [2, 0, 0, 0]);
-        assert_eq!(look[2..], [boundary.u_m as f32, boundary.v_m as f32]);
-        assert_eq!(gpu_walls[1][2..], [EDGE_U_M as f32, RED_TEAM as f32]);
-        assert_eq!(gpu_walls[2], [0.0; 4]);
+        let gpu: GpuZoneWalls = zone_walls.to_gpu(R_M);
+        assert_eq!(gpu.counts, [2, 0, 0, 0]);
+        assert_eq!(gpu.look[2], zone_walls.thickness_m as f32);
+        assert_eq!(
+            gpu.boundary,
+            [boundary.u_m as f32, boundary.v_m as f32, 0.0, 0.0]
+        );
+        assert_eq!(gpu.walls[1][2..], [EDGE_U_M as f32, RED_TEAM as f32]);
+        assert_eq!(gpu.walls[2], [0.0; 4]);
     }
 
     #[test]
@@ -244,9 +291,18 @@ mod tests {
             ]
         );
         assert_eq!(zone_walls.boundary_m, None);
-        let (_, look, counts) = zone_walls.to_gpu(R_M);
-        assert_eq!(look, [HEIGHT_M as f32, OPACITY_FRAC as f32, 0.0, 0.0]);
-        assert_eq!(counts[0], MAX_ZONE_WALL_COUNT as i32);
+        let gpu: GpuZoneWalls = zone_walls.to_gpu(R_M);
+        assert_eq!(
+            gpu.look,
+            [
+                HEIGHT_M as f32,
+                OPACITY_FRAC as f32,
+                THICKNESS_M as f32,
+                0.0
+            ]
+        );
+        assert_eq!(gpu.boundary, [0.0; 4]);
+        assert_eq!(gpu.counts[0], MAX_ZONE_WALL_COUNT as i32);
     }
 
     #[test]
@@ -255,8 +311,11 @@ mod tests {
         let too_many: Vec<Zone> = (0..=MAX_ZONE_WALL_COUNT)
             .map(|i| make_zone("red", Some(i as f64), None))
             .collect();
-        let cases: [(Regions, &str); 5] = [
+        let mut thin: Regions = make_regions(one_edge(), HEIGHT_M, OPACITY_FRAC);
+        thin.zone_walls.as_mut().unwrap().thickness_m = 0.0;
+        let cases: [(Regions, &str); 6] = [
             (make_regions(one_edge(), 0.0, OPACITY_FRAC), "height_m"),
+            (thin, "thickness_m"),
             (make_regions(one_edge(), HEIGHT_M, 0.0), "opacity_frac"),
             (make_regions(one_edge(), HEIGHT_M, 1.0), "opacity_frac"),
             (
@@ -296,6 +355,31 @@ mod tests {
                 (minkowski_dot(x, n) - expected).abs() < TOLERANCE,
                 "{offset_m}"
             );
+        }
+    }
+
+    #[test]
+    fn the_slab_span_matches_brute_force() {
+        let k: f64 = (THICKNESS_M / (2.0 * R_M)).sinh();
+        let cases: [(&str, f64, f64, bool); 5] = [
+            ("crossing", 0.1, -0.5, true),
+            ("dipping in", 0.02, -0.0195, true),
+            ("passing by", 0.05, -0.01, false),
+            ("starting inside", 0.5 * k, 0.3, true),
+            ("along the plane", 0.0, 0.0, true),
+        ];
+        for (name, a, b, is_met) in cases {
+            let span: Option<(f64, f64)> = get_slab_tanh_span(a, b, k);
+            assert_eq!(span.is_some(), is_met, "{name}");
+            for i in -BRUTE_FORCE_STEP_COUNT..=BRUTE_FORCE_STEP_COUNT {
+                let s: f64 = BRUTE_FORCE_S_LIMIT * f64::from(i) / f64::from(BRUTE_FORCE_STEP_COUNT);
+                let gap: f64 = (a * s.cosh() + b * s.sinh()).abs() - k;
+                let tau: f64 = s.tanh();
+                let is_in_span: bool = span.is_some_and(|(lo, hi)| tau >= lo && tau <= hi);
+                if gap.abs() > SPAN_TOLERANCE * k {
+                    assert_eq!(gap < 0.0, is_in_span, "{name} at s {s}");
+                }
+            }
         }
     }
 }

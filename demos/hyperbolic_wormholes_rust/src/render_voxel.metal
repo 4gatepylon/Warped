@@ -143,7 +143,10 @@ constant float ZONE_WALL_BODY_FRAC = 0.6;
 constant float ZONE_WALL_TOP_FADE_FRAC = 0.4;
 constant float ZONE_WALL_SOFT_TOP_FRAC = 0.25;
 constant float ZONE_WALL_END_M = 4.0;
-constant float ZONE_WALL_MAX_SLANT = 3.0;
+constant float ZONE_WALL_MAX_SLANT = 4.0;
+constant float ZONE_WALL_FACE_FRAC = 0.7;
+constant float ZONE_WALL_SAMPLE_M = 1.0;
+constant int ZONE_WALL_MAX_SAMPLES = 12;
 constant float BOUNDARY_STRIP_FRAC = 0.04;
 constant float CELL_HASH_SCALE = 4096.0;
 constant float HASH_SHRINK = 0.001;
@@ -344,6 +347,18 @@ struct Spaceship {
 };
 
 /**
+ * @brief `ZoneWalls` is `zone_walls.rs`'s `GpuZoneWalls`: per wall its plane's (n_z, -n_w, edge u in meters, team),
+ * then (height, opacity, thickness in meters, unused), the boundary's (u, v) semi-axes in meters (0 without one), and
+ * (wall count, unused).
+ */
+struct ZoneWalls {
+    float4 walls[MAX_ZONE_WALL_COUNT];
+    float4 look;
+    float4 boundary;
+    int4 counts;
+};
+
+/**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
  * regions, flashlight, the spaceships, the dust (how many bursts and particles), the beams' speckle (the frame's
  * seed and the shares of speckled pixels painted black and turned white) and the zone walls (`zone_walls.rs`'s
@@ -391,9 +406,7 @@ struct VoxelUniforms {
     Spaceship spaceships[SPACESHIP_COUNT];
     int4 dust_counts;
     float4 beam_speckle;
-    float4 zone_walls[MAX_ZONE_WALL_COUNT];
-    float4 zone_wall_look;
-    int4 zone_wall_counts;
+    ZoneWalls zone_walls;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -1213,7 +1226,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     if (u.has_regions != 0) {
         float zone_edge_u_m = u.regions.x, boundary_u_m = u.regions.y, boundary_v_m = u.regions.z;
         if (abs(u_m) > zone_edge_u_m) albedo *= mix(float3(1.0), (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_TINT_GAIN, ZONE_TINT_FRAC);
-        if (u.zone_wall_counts.x == 0 && abs(abs(u_m) - zone_edge_u_m) < ZONE_STRIP_M && abs(v_m) < boundary_v_m) glow = (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
+        if (u.zone_walls.counts.x == 0 && abs(abs(u_m) - zone_edge_u_m) < ZONE_STRIP_M && abs(v_m) < boundary_v_m) glow = (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
         float e = (u_m / boundary_u_m) * (u_m / boundary_u_m) + (v_m / boundary_v_m) * (v_m / boundary_v_m);
         if (has_terrain) {
         } else if (e > 1.0) {
@@ -1617,37 +1630,74 @@ static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end
 }
 
 /**
- * @brief `scan_zone_walls` adds the zone walls that the chord from x along v crosses before `s_end` (`travelled` from
- * the eye) to `dust`, as faint glowing sheets in their team's colour. A wall is the plane straight above its zone's
- * edge (`zone_walls.rs`), (n_z, -n_w) in `zone_walls[i].xy`, which the chord crosses where tanh s = -⟨x, n⟩ / ⟨v, n⟩.
- * Its opacity there is the map's at the ground, falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`,
- * then by `ZONE_WALL_TOP_FADE_FRAC` of that up to the wall's height above the ground, over whose top
- * `ZONE_WALL_SOFT_TOP_FRAC` it fades out; it also fades out over the last `ZONE_WALL_END_M` before the boundary. Its
- * optical depth grows as the chord grazes it (up to `ZONE_WALL_MAX_SLANT` times) and thins in the haze.
+ * @brief `get_zone_wall_depth` gives the optical depth of a zone wall seen face-on (straight through its thickness) at
+ * point p, `distance_s` from the eye, for the wall on the edge at Fermi u `wall_u_m`: the map's opacity at the ground,
+ * falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`, then by `ZONE_WALL_TOP_FADE_FRAC` of that up
+ * to the wall's height above the ground, over whose top `ZONE_WALL_SOFT_TOP_FRAC` it fades out; it also fades out over
+ * the last `ZONE_WALL_END_M` before the boundary, and thins in the haze.
+ * @par Example
+ * @code
+ * float depth = get_zone_wall_depth(scene, p, -45.0, s);
+ * @endcode
+ */
+static float get_zone_wall_depth(thread const Scene &scene, float4 p, float wall_u_m, float distance_s) {
+    constant ZoneWalls &walls = scene.u.zone_walls;
+    float r = scene.u.curvature_radius_m;
+    float4 look = walls.look, boundary = walls.boundary;
+    float3 f = get_fermi(p, r);
+    float v_end_m = boundary.y > 0.0 ? boundary.y * sqrt(max(1.0 - (wall_u_m / boundary.x) * (wall_u_m / boundary.x), 0.0)) : NO_HIT_S;
+    float above_m = max(f.z - (scene.u.has_terrain != 0 ? terrain_height_m(scene, f.x, f.y) : 0.0), 0.0);
+    float height_frac = above_m / look.x;
+    float profile = mix(ZONE_WALL_BODY_FRAC * (1.0 - ZONE_WALL_TOP_FADE_FRAC * height_frac), 1.0, exp(-above_m / ZONE_WALL_FOOT_M))
+                  * (1.0 - smoothstep(1.0 - ZONE_WALL_SOFT_TOP_FRAC, 1.0, height_frac));
+    float haze_frac = 1.0 - exp(-max(distance_s * r - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
+    float opacity = look.y * profile * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y)) * (1.0 - HAZE_MAX_FRAC * haze_frac);
+    return -log(1.0 - opacity);
+}
+
+/**
+ * @brief `scan_zone_walls` adds the zone walls that the chord from x along v passes through before `s_end` (`travelled`
+ * from the eye) to `dust`, as glowing slabs in their team's colour. A wall is the slab within half its thickness of
+ * the plane straight above its zone's edge (`zone_walls.rs`, the plane's (n_z, -n_w) in `walls[i].xy`): |⟨x, n⟩| ≤ k
+ * with k the sinh of half the thickness over R. Along the chord ⟨x, n⟩ = cosh s (a + b tanh s), so the chord is
+ * inside where (b² + k²) τ² + 2ab τ + a² − k² ≤ 0 for τ = tanh s, an interval found in closed form. Of the face-on
+ * depth (`get_zone_wall_depth`), `ZONE_WALL_FACE_FRAC` is in the two faces, each crossed face adding its half,
+ * thicker as the chord grazes it (up to `ZONE_WALL_MAX_SLANT` times), and the rest is spread through the slab,
+ * summed along the chord at most `ZONE_WALL_SAMPLE_M` apart (and at most `ZONE_WALL_MAX_SAMPLES` samples): face-on
+ * the wall looks as thin as the map says, and seen at a slant its tint builds up with the way through it.
  * @par Example
  * @code
  * scan_zone_walls(scene, x, v, s, t, dust);
  * @endcode
  */
 static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
-    constant VoxelUniforms &u = scene.u;
-    float r = u.curvature_radius_m;
-    float4 look = u.zone_wall_look;
-    for (int i = 0; i < u.zone_wall_counts.x; i++) {
-        float4 wall = u.zone_walls[i];
-        float a = x.z * wall.x + x.w * wall.y, b = v.z * wall.x + v.w * wall.y;
-        if (a * b >= 0.0 || abs(a) >= abs(b)) continue;
-        float s = atanh(-a / b);
-        if (s >= s_end) continue;
-        float3 f = get_fermi(geodesic_point(x, v, s), r);
-        float v_end_m = look.w > 0.0 ? look.w * sqrt(max(1.0 - (wall.z / look.z) * (wall.z / look.z), 0.0)) : NO_HIT_S;
-        float above_m = max(f.z - (u.has_terrain != 0 ? terrain_height_m(scene, wall.z, f.y) : 0.0), 0.0);
-        float height_frac = above_m / look.x;
-        float profile = mix(ZONE_WALL_BODY_FRAC * (1.0 - ZONE_WALL_TOP_FADE_FRAC * height_frac), 1.0, exp(-above_m / ZONE_WALL_FOOT_M))
-                      * (1.0 - smoothstep(1.0 - ZONE_WALL_SOFT_TOP_FRAC, 1.0, height_frac));
-        float haze_frac = 1.0 - exp(-max((travelled + s) * r - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
-        float opacity = look.y * profile * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y)) * (1.0 - HAZE_MAX_FRAC * haze_frac);
-        float depth = -log(1.0 - opacity) * min(rsqrt(max(b * b - a * a, TINY)), ZONE_WALL_MAX_SLANT);
+    constant ZoneWalls &walls = scene.u.zone_walls;
+    float r = scene.u.curvature_radius_m, thickness_m = walls.look.z;
+    float k = sinh(0.5 * thickness_m / r), t_end = tanh(min(s_end, FAR_S));
+    for (int i = 0; i < walls.counts.x; i++) {
+        float4 wall = walls.walls[i];
+        float a = x.z * wall.x + x.w * wall.y, b = v.z * wall.x + v.w * wall.y, discriminant = b * b - a * a + k * k;
+        if (discriminant < 0.0) continue;
+        float half_width = k * sqrt(discriminant) / (b * b + k * k), middle = -a * b / (b * b + k * k);
+        float t_in = middle - half_width, t_out = middle + half_width;
+        if (t_out <= 0.0 || t_in >= t_end) continue;
+        float s_in = clamp_atanh(max(t_in, 0.0)), s_out = clamp_atanh(min(t_out, t_end));
+        int sample_count = clamp(int(ceil((s_out - s_in) * r / ZONE_WALL_SAMPLE_M)), 1, ZONE_WALL_MAX_SAMPLES);
+        float ds = (s_out - s_in) / float(sample_count), depth = 0.0;
+        for (int j = 0; j < sample_count; j++) {
+            float s = s_in + (float(j) + 0.5) * ds;
+            depth += get_zone_wall_depth(scene, geodesic_point(x, v, s), wall.z, travelled + s) * ds * r / thickness_m;
+        }
+        depth *= 1.0 - ZONE_WALL_FACE_FRAC;
+        float face_cos_scale = rsqrt(1.0 + k * k);
+        if (t_in > 0.0) {
+            float slant = min(1.0 / max(abs(a * sinh(s_in) + b * cosh(s_in)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
+            depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_in), wall.z, travelled + s_in);
+        }
+        if (t_out < t_end) {
+            float slant = min(1.0 / max(abs(a * sinh(s_out) + b * cosh(s_out)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
+            depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_out), wall.z, travelled + s_out);
+        }
         dust += float4(to_linear(wall.w > HALF_KIND ? RED_COLOR : BLUE_COLOR) * ZONE_WALL_BRIGHTNESS * depth, depth);
     }
 }
@@ -1720,7 +1770,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             if (glass_s < hit.s) glass += 1.0;
             if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
-            if (u.zone_wall_counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
+            if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (entering < 0) {
                 if (last_warp >= 0) back_to_reach(scene, last_warp, x, v);
@@ -1744,7 +1794,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
-        if (u.zone_wall_counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
+        if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
         float4 xn = geodesic_point(x, v, ds), vn = geodesic_tangent(x, v, ds);
         x = xn * rsqrt(-mdot(xn, xn));

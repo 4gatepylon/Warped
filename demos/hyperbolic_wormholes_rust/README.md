@@ -94,9 +94,10 @@ make join-game SERVER=127.0.0.1
   never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
   A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
   2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
-- On Lunar Surface the blue and red zones' edges are walls you see through (D103): faint sheets in the team's colour
-  straight above each edge, 6 m high above the ground, brightest at their foot and fading out at the top. They stop
-  neither you nor lasers. The map sets their height and opacity (`regions.zone_walls` in its `map.json`).
+- On Lunar Surface the blue and red zones' edges are walls you see through (D103): faint slabs in the team's colour
+  straight above each edge, 6 m high above the ground and 0.6 m thick (a player's width), brightest at their foot
+  and fading out at the top. They stop neither you nor lasers. The map sets their height, thickness and opacity
+  (`regions.zone_walls` in its `map.json`).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.

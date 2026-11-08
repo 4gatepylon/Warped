@@ -85,11 +85,12 @@ The habitat modules (the red one stands near the red base, on the side away from
 have windows: glass in real 1 m openings at eye height. You see out of them, and a laser goes through them both ways,
 but you can't climb through.
 
-The edges of the blue and red zones are walls you can see through: faint sheets in the team's colour that rise 6 m
-straight up from the ground along each edge (45 m either side of the middle), brightest at their foot and fading out
-at the top. They follow the ground over the mounds and up the crater's wall, and end at the playable area's edge.
-They stop neither you nor lasers: walk through one to cross into a zone. Their height and opacity are in the map
-(`regions.zone_walls` in `common/maps/lunar_surface/map.json`).
+The edges of the blue and red zones are walls you can see through: faint slabs in the team's colour, 0.6 m thick (a
+player's width), that rise 6 m straight up from the ground along each edge (45 m either side of the middle),
+brightest at their foot and fading out at the top. Seen face-on they are a faint tint; looking along one, or down on
+it, you see its thickness as a stronger band. They follow the ground over the mounds and up the crater's wall, and end
+at the playable area's edge. They stop neither you nor lasers: walk through one to cross into a zone. Their height,
+thickness and opacity are in the map (`regions.zone_walls` in `common/maps/lunar_surface/map.json`).
 
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
 each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
