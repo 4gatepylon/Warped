@@ -17,6 +17,8 @@ is in [`AGENTS.md`](AGENTS.md).
   2026-11-08.
 ## Open
 
+- [ ] **W-109 Taller pylon beams.** "Make the lasers coming out of the pylons go higher into the sky". Today each
+  beacon's beam stops 160 m from the map's centre (`MAX_DRAWN_BEAM_DISTANCE_M`), about 75 to 95 m above its pylon.
 - [ ] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Found in #319: not vsync
   tearing (the window presents at vsync, one frame in flight) but bands and strips on far ground under the reality
   bend, from `BEND_SAG_PIXELS` = 0.5 in `render_voxel.metal`; 0.1 px removes them at 13% more GPU time (34% on the
