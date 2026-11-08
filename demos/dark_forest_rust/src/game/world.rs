@@ -156,6 +156,9 @@ const ACCRETION_DISK_RADIUS_FRAC: f32 = 2.6;
 /// divisions.
 const ELLIPSOID_RING_COUNT: usize = 4;
 const ELLIPSOID_SEGMENT_COUNT: usize = 6;
+/// `WARP_RING_COUNT` and `WARP_SEGMENT_COUNT` divide the smooth spheres and disks of warps.
+const WARP_RING_COUNT: usize = 16;
+const WARP_SEGMENT_COUNT: usize = 32;
 /// `BAMBOO_TILE_FRAC_AROUND_CULM` is how much of the bamboo texture's width (a row of about 30
 /// culms) wraps once around a culm, so each culm shows about two of the texture's.
 const BAMBOO_TILE_FRAC_AROUND_CULM: f32 = 0.06;
@@ -504,15 +507,19 @@ fn append_cylinder(mesh: &mut MeshData, shape: &WorldShape, axis: usize, tile_si
 
 /// `append_ellipsoid` adds a latitude-longitude ellipsoid, turned with its structure's frame.
 fn append_ellipsoid(mesh: &mut MeshData, shape: &WorldShape, tile_size_m: f32) {
+    let (ring_count, segment_count): (usize, usize) = if shape.surface == Surface::Leaves {
+        (ELLIPSOID_RING_COUNT, ELLIPSOID_SEGMENT_COUNT)
+    } else {
+        (WARP_RING_COUNT, WARP_SEGMENT_COUNT)
+    };
     let (rotation, half_m) = (shape.rotation, shape.local_half_m);
     let base: u32 = mesh.vertices.len() as u32;
-    let row_length: u32 = ELLIPSOID_SEGMENT_COUNT as u32 + 1;
+    let row_length: u32 = segment_count as u32 + 1;
     let around_m: f32 = std::f32::consts::TAU * (half_m.x + half_m.z) * 0.5;
-    for ring in 0..=ELLIPSOID_RING_COUNT {
-        let polar: f32 = ring as f32 / ELLIPSOID_RING_COUNT as f32 * std::f32::consts::PI;
-        for segment in 0..=ELLIPSOID_SEGMENT_COUNT {
-            let azimuth: f32 =
-                segment as f32 / ELLIPSOID_SEGMENT_COUNT as f32 * std::f32::consts::TAU;
+    for ring in 0..=ring_count {
+        let polar: f32 = ring as f32 / ring_count as f32 * std::f32::consts::PI;
+        for segment in 0..=segment_count {
+            let azimuth: f32 = segment as f32 / segment_count as f32 * std::f32::consts::TAU;
             let unit: Vec3 = Vec3::new(
                 polar.sin() * azimuth.cos(),
                 polar.cos(),
@@ -526,20 +533,20 @@ fn append_ellipsoid(mesh: &mut MeshData, shape: &WorldShape, tile_size_m: f32) {
                 normal: normal.to_array(),
                 tangent: tangent.extend(1.0).to_array(),
                 uv: [
-                    segment as f32 / ELLIPSOID_SEGMENT_COUNT as f32 * around_m / tile_size_m,
+                    segment as f32 / segment_count as f32 * around_m / tile_size_m,
                     polar * half_m.y / tile_size_m,
                 ],
             });
         }
     }
-    for ring in 0..ELLIPSOID_RING_COUNT as u32 {
-        for segment in 0..ELLIPSOID_SEGMENT_COUNT as u32 {
+    for ring in 0..ring_count as u32 {
+        for segment in 0..segment_count as u32 {
             let i0: u32 = base + ring * row_length + segment;
             let (i1, i2, i3) = (i0 + 1, i0 + row_length, i0 + row_length + 1);
             if ring > 0 {
                 push_outward(mesh, [i0, i1, i2], shape.centre_m);
             }
-            if ring + 1 < ELLIPSOID_RING_COUNT as u32 {
+            if ring + 1 < ring_count as u32 {
                 push_outward(mesh, [i1, i3, i2], shape.centre_m);
             }
         }
