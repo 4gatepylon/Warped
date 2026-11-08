@@ -2014,14 +2014,14 @@ enum Gun {
 }
 
 impl Gun {
-    /// `get_model` gives the model drawn in hand for this gun: the energy revolver for the laser
-    /// (the sniper) and the bolt-action rifle for the rifle.
+    /// `get_model` gives the model drawn in hand for this gun: the bolt-action rifle for the laser
+    /// (the sniper) and the energy revolver for the rifle.
     ///
     /// Example: `let model: viewmodel::GunModel = Gun::Rifle.get_model();`
     fn get_model(self) -> viewmodel::GunModel {
         match self {
-            Gun::Laser => viewmodel::GunModel::Revolver,
-            Gun::Rifle => viewmodel::GunModel::BoltActionRifle,
+            Gun::Laser => viewmodel::GunModel::BoltActionRifle,
+            Gun::Rifle => viewmodel::GunModel::Revolver,
         }
     }
 }
@@ -4591,7 +4591,7 @@ mod tests {
     //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
-    //! | Gun in hand | laser (the revolver), rifle (the bolt-action rifle) | `each_gun_holds_its_model` |
+    //! | Gun in hand | laser (the bolt-action rifle), rifle (the revolver) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
@@ -4625,8 +4625,8 @@ mod tests {
 
     #[test]
     fn each_gun_holds_its_model() {
-        assert_eq!(Gun::Laser.get_model(), viewmodel::GunModel::Revolver);
-        assert_eq!(Gun::Rifle.get_model(), viewmodel::GunModel::BoltActionRifle);
+        assert_eq!(Gun::Laser.get_model(), viewmodel::GunModel::BoltActionRifle);
+        assert_eq!(Gun::Rifle.get_model(), viewmodel::GunModel::Revolver);
         for is_voxel_map in [true, false] {
             let steps: &[render_metal::LoadingStep] = render_metal::get_loading_steps(is_voxel_map);
             for gun in [Gun::Laser, Gun::Rifle] {
