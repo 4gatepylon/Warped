@@ -476,8 +476,8 @@ fn steer(player: &mut CityPlayer, to: DVec3, dt_s: f64, input: &mut CityInput) {
 }
 
 /// `make_route` is the scripted route for blue: ride a lift to the glass level, shoot four shots
-/// that reflect or cross, walk across the glass to red's glass console and turn it off, drop
-/// through a hole to red's street console and turn it off (blue wins), then wait.
+/// that reflect or cross, walk across the glass to red's console (its only one) and turn it off
+/// (blue wins), then wait.
 fn make_route(world: &CityWorld) -> Vec<Step> {
     let console = |index: u8| world.consoles.iter().find(|c| c.index == index).map(|c| world.get_console_center(c));
     let mut steps: Vec<Step> = vec![
@@ -492,9 +492,10 @@ fn make_route(world: &CityWorld) -> Vec<Step> {
         Step::Shoot,
         Step::Aim { yaw_rad: 0.0, pitch_rad: 0.0 },
     ];
-    for (index, side) in [(3, Side::Glass), (2, Side::Street)] {
+    for target in world.consoles.iter().filter(|c| c.team == 1) {
+        let index: u8 = target.index;
         if let Some(center) = console(index) {
-            steps.push(Step::GoTo { direction: center, side, arrive_m: 1.8 });
+            steps.push(Step::GoTo { direction: center, side: Side::Glass, arrive_m: 1.8 });
             steps.push(Step::HoldConsole { index });
         }
     }
@@ -1796,7 +1797,9 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
         let origin: DVec3 = from + up * eye_m;
         (world.trace_shot(origin, (to - origin).normalize(), 90.0, 2, &[], None).points, team, 1.0)
     };
-    let blue_street: DVec3 = get_pylon_center(world, 0, false);
+    let blue_street: DVec3 = world.spawns.iter().find(|s| s.0 == 0).map_or(DVec3::X, |s| s.1.w_axis.truncate());
+    let blue_glass: DVec3 = get_pylon_center(world, 0, true);
+    let blue_glass_side: DVec3 = blue_glass.normalize().any_orthonormal_vector();
     let red_glass: DVec3 = get_pylon_center(world, 1, true);
     let side: DVec3 = blue_street.normalize().any_orthonormal_vector();
     let near_core: DVec3 = side * (world.street_radius_m * 0.3);
@@ -1832,7 +1835,7 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
             beams: Vec::new(),
         },
         PhotoView {
-            name: "street_fight_at_blue_pylon",
+            name: "street_fight_under_glass",
             eye: make_eye(camera_street + get_up(camera_street) * eye_m, blue_street + get_up(blue_street) * 1.5 - camera_street - get_up(camera_street) * eye_m, get_up(camera_street)),
             tan_half_fov: 0.55,
             robots: vec![robot(fighter_blue, fighter_red, 0, AvatarClip::Run), robot(fighter_red, fighter_blue, 1, AvatarClip::Run)],
@@ -1844,6 +1847,16 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
             tan_half_fov: 0.65,
             robots: vec![robot(glass_red, glass_blue, 1, AvatarClip::Run), robot(glass_blue, glass_red, 0, AvatarClip::Run)],
             beams: vec![shot(glass_blue, across, 0), shot(glass_red, glass_blue + get_up(glass_blue) * 1.5, 1)],
+        },
+        PhotoView {
+            name: "blue_pylon_exposed_on_glass",
+            eye: {
+                let camera: DVec3 = get_level_point(blue_glass, blue_glass_side, 6.0, glass_m);
+                make_eye(camera + get_up(camera) * eye_m, blue_glass + get_up(blue_glass) * 1.0 - camera - get_up(camera) * eye_m, get_up(camera))
+            },
+            tan_half_fov: 0.6,
+            robots: vec![robot(get_level_point(blue_glass, -blue_glass_side, 2.0, glass_m), blue_glass, 1, AvatarClip::Run)],
+            beams: vec![shot(get_level_point(blue_glass, -blue_glass_side, 2.0, glass_m), get_level_point(blue_glass, blue_glass_side, 6.0, glass_m) + get_up(blue_glass) * 1.2, 1)],
         },
         PhotoView {
             name: "glass_level_crowd_and_reflections",

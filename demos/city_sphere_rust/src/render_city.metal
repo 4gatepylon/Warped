@@ -6,6 +6,14 @@ using namespace metal;
 constant uint MAX_HOLE_COUNT = 8;
 constant float BEACON_FLAG = 2.0;
 constant float METAL_SPEC = 0.45;
+constant float METAL_REFLECT = 0.6;
+constant float WEAR_CELLS_PER_M = 0.5;
+constant float WEAR_FRAC = 0.3;
+constant float METAL_REFLECT_MIN = 0.25;
+constant float3 ENV_FLOOR_COLOR = float3(0.05, 0.06, 0.09);
+constant float ENV_CORE_GAIN = 0.35;
+constant float ENV_HIGHLIGHT_POWER = 48.0;
+constant float ENV_HIGHLIGHT_GAIN = 1.5;
 constant float RIB_WIDTH = 0.045;
 constant float RIB_ALPHA = 0.92;
 constant float3 RIB_COLOR = float3(0.62, 0.64, 0.7);
@@ -78,6 +86,11 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     if (in.layer >= 0.0) {
         float3 texel = albedo.sample(s, in.uv, uint(in.layer)).rgb;
         base *= is_beacon ? texel : mix(float3(dot(texel, float3(0.3, 0.59, 0.11))), texel, METAL_SATURATION);
+        if (!is_beacon) {
+            float3 cell = floor(in.world * WEAR_CELLS_PER_M);
+            float wear = fract(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+            base *= 1.0 - WEAR_FRAC * wear * wear;
+        }
     }
     float4 beacon = is_beacon ? u.beacons[min(uint(in.color.a - BEACON_FLAG + 0.5), BEACON_SLOT_COUNT - 1)] : float4(0.0);
     base *= is_beacon ? beacon.y : 1.0;
@@ -96,6 +109,14 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     float spec = pow(max(dot(n, h), 0.0), METAL_SPEC_POWER) * METAL_SPEC;
     float3 light = u.ambient.rgb * wrap + u.core_light.rgb * (lambert * falloff) + spec * u.core_light.rgb;
     float3 lit = base * light;
+    if (!is_beacon && in.layer >= 0.0) {
+        float3 mirror = reflect(-view, n);
+        float core_frac = dot(mirror, l);
+        float3 env = mix(ENV_FLOOR_COLOR, u.core_light.rgb * ENV_CORE_GAIN, smoothstep(-0.3, 1.0, core_frac))
+            + u.core_light.rgb * pow(max(core_frac, 0.0), ENV_HIGHLIGHT_POWER) * ENV_HIGHLIGHT_GAIN;
+        float fresnel = METAL_REFLECT_MIN + (1.0 - METAL_REFLECT_MIN) * pow(1.0 - max(dot(n, view), 0.0), 5.0);
+        lit += env * mix(base, float3(1.0), 0.3) * fresnel * METAL_REFLECT;
+    }
     if (abs(in.layer - STREET_LAYER) < 0.5) {
         float2 cell = fract(in.uv);
         float2 edge = min(cell, 1.0 - cell);

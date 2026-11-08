@@ -5,8 +5,8 @@ hollow sphere in Euclidean space. You walk on the inside of the sphere (gravity 
 glowing core at the centre) through streets of buildings, under a glass shell that roofs them. Lifts carry you up
 onto the glass level, the glass shell's inner side, where nothing is overhead: from there you can shoot straight
 across the sphere, and shots reflect off the glass about its normal, up to 2 times by default. Below the glass it
-is a normal shooter, and shots stop at the glass. Each team has two pylons, one on the street and one on the glass
-level, each with one console; a team wins when it has turned off both of the other team's consoles. Red's half is
+is a normal shooter, and shots stop at the glass. Each team has one pylon, standing exposed on the glass level with no
+cover right around it, with one console; a team wins when it has turned off the other team's console. Red's half is
 the antipode of blue's.
 
 This folder is a copy of [`../hyperbolic_wormholes_rust/`](../hyperbolic_wormholes_rust/README.md) with City Sphere
@@ -91,7 +91,7 @@ make play-route                                                # the scripted ro
 ```
 
 `--play-route` plays blue alone: ride a lift, fire four shots that reflect or cross, walk across the glass level to
-red's glass console and turn it off, drop through a hole to red's street console and turn it off (blue wins), then
+red's console and turn it off (blue wins), then
 print the frame times, GPU times, each part of the frame (`phases`) and winner as JSON. Its server doesn't announce
 itself on the network, so macOS doesn't ask for Local Network access during a recording. Add `--no-vsync` to the
 binary (`.build/release/city-sphere --play-route --no-vsync`) to time frames without waiting for the display.
@@ -135,7 +135,13 @@ say whether the vsync p99 meets 16.7 ms.
 
 - **Look**: a space station: steel deck plates (`metal_plate`) with lit cyan panel seams, buildings in Poly Haven CC0
   `metal_plate_02` and `blue_metal_plate` (`make download-assets` puts them in `assets/textures/`), metal highlights,
-  and the glass as a window with metal ribs.
+  and the glass as a window with metal ribs. Blocks and covers are rounded-corner boxes (radius 0.35 m; collisions
+  still use the boxes). Metal looks reflective through a fake reflection (the core light and a dark station floor
+  looked up along the mirrored view direction, with Fresnel), so it casts no extra rays; the pylons keep their own
+  textures.
+- **Variation**: the map's `variation.seed` jitters block and cover positions, headings and heights a little in
+  `tools/make_map.py` (the same jitter on each team's half, so it stays fair) and tints each block's panels; the
+  shader adds blocky panel wear.
 - **Pylons**: the hyperbolic demo's `scifi_beacon` (as on Lunar Surface) with its base colour and emissive textures,
   recoloured per team; it pulses while its console is being turned off and goes dark when off. Each console sits
   inside its pylon. The beacons are drawn once with the still scene; each console's state goes in the uniforms.
@@ -147,13 +153,16 @@ say whether the vsync p99 meets 16.7 ms.
 - **Rifle check**: `make play-route ROUTE=rifle` with `make run-bot SERVER=127.0.0.1 TEAM=red BOT_OBJECTIVE=target`:
   20 shots to overheat, 2.0 s to cool, the target eliminated by 2 head hits and then by 12 body hits.
 
-`make bench-views WIDTH_PX=2560 HEIGHT_PX=1440 FRAME_COUNT=60` with the station look and beacons: GPU median 1.35 to
-1.74 ms in the five plain views; eight robots and eight reflected shots 7.2 ms GPU, 14.8 ms frame (p99 15.8 ms).
+`make bench-views WIDTH_PX=2560 HEIGHT_PX=1440 FRAME_COUNT=60`, run back to back without and with the rounded blocks,
+fake reflections and variation: GPU median 1.33 to 1.77 ms before and 1.17 to 1.71 ms after in the five plain views
+(second run; a first run read 1.49 to 2.04 ms); eight robots and eight reflected shots 7.70 ms GPU and 15.87 ms
+frame (p99 21.8 ms) before, 7.82 ms and 15.73 ms (p99 21.5 ms) after. The difference is within this VM's run-to-run
+noise; the crowd view's p99 frame is over 16.7 ms in both, from posing eight robots on the CPU.
 
 ## Known limitations
 
 - On this VM the frame interval's p99 with vsync (21 to 28 ms) is over 16.7 ms because of the display's pacing (see
   Results); not yet measured on a real Mac display.
 - Posing robots costs about 1 ms of CPU per clip each frame; a crowd of eight is the worst view's main cost.
-- No zone walls, thrown wormholes or shadows in City Sphere. The menu's MAP page has no picture of City Sphere.
+- No zone walls, thrown wormholes or shadows in City Sphere.
 - Lifts instead of the WebGL version's stairs (see `DECISIONS.md`).

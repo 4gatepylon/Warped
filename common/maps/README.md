@@ -160,6 +160,12 @@ For maps inside a sphere (City Sphere), in Euclidean space with the origin at th
   missing within that angle of the unit `direction`, so players and shots pass. A shell with `thickness_m` equal to its
   `radius_m` is a solid ball.
 
+### Variation
+
+- `variation` (optional): `{"seed": N}`, the seed of a map's small random variation (block offsets and heights,
+  panel tint and wear), so the same map looks the same in every program. A generator applies the same variation to
+  each team's half, so it stays fair.
+
 ### Lasers
 
 - `lasers` (optional): the colour of every laser shot on this map, either `{"color": [r, g, b]}` for every team (a

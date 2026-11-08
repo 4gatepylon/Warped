@@ -3,7 +3,7 @@
 //! fps_demo's CC0 Poly Haven textures and lit by the glowing core; consoles, pylons and robots
 //! (per frame); the see-through glass shell with its lift holes; and laser beams.
 //!
-//! Interface: `CityVertex`, `CityScene`, `build_scene`, `CityFrame`, `CityGpu`, `push_box`,
+//! Interface: `CityVertex`, `CityScene`, `build_scene`, `CityFrame`, `CityGpu`, `push_rounded_box`,
 //! `push_mesh`, `push_beam`, `MAX_HOLE_COUNT`.
 
 use std::error::Error;
@@ -37,6 +37,10 @@ const SHADER_SOURCE: &str = include_str!("render_city.metal");
 pub const MAX_HOLE_COUNT: usize = 8;
 const TEXTURE_SIDE_PX: u32 = 1024;
 pub const BEACON_SLOT_COUNT: usize = 8;
+const ROUND_RADIUS_M: f64 = 0.35;
+const ROUND_MAX_FRAC: f64 = 0.45;
+const ROUND_STEP_COUNT: usize = 3;
+const PANEL_TINT_FRAC: f32 = 0.12;
 const BEACON_TEAM_COLORS: [[f32; 3]; 2] = [[0.3, 0.55, 1.0], [1.0, 0.3, 0.25]];
 const BEACON_FLAG: f32 = 2.0;
 const BEACON_LAYER: usize = TEXTURE_IDS.len();
@@ -155,29 +159,69 @@ fn push_quad(out: &mut Vec<CityVertex>, corners: [DVec3; 4], uvs: [[f32; 2]; 4],
     }
 }
 
-/// `push_box` adds a box's six faces, textures tiled every `WALL_TILE_M`.
+/// `get_variation_frac` gives a number from 0 to 1 that depends only on `seed` and `k`, for the
+/// map's seeded look variation.
 ///
-/// Example: `push_box(&mut vertices, center, axes, half_m, [1.0; 4], -1.0);`
-pub fn push_box(out: &mut Vec<CityVertex>, center: DVec3, axes: DMat3, half_m: DVec3, color: [f32; 4], layer: f32) {
+/// Example: `let frac: f32 = get_variation_frac(world.variation_seed, 3);`
+fn get_variation_frac(seed: u32, k: usize) -> f32 {
+    let mut x: u64 = (u64::from(seed) << 32 | k as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    ((x ^ (x >> 31)) >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// `push_rounded_box` adds a box (`center`, `axes`, `half_m`) of quads, its edges and corners rounded to radius
+/// `ROUND_RADIUS_M` (at most `ROUND_MAX_FRAC` of its smallest half size): each face is a grid whose
+/// points near an edge are pushed onto the rounding, with the rounding's normals.
+///
+/// Example: `push_rounded_box(&mut opaque, center, axes, half_m, color, LAYER_METAL);`
+pub fn push_rounded_box(out: &mut Vec<CityVertex>, center: DVec3, axes: DMat3, half_m: DVec3, color: [f32; 4], layer: f32) {
+    let r: f64 = ROUND_RADIUS_M.min(ROUND_MAX_FRAC * half_m.min_element());
+    let coords = |h: f64| -> Vec<f64> {
+        let mut c: Vec<f64> = (0..=ROUND_STEP_COUNT).map(|k| -h + r * k as f64 / ROUND_STEP_COUNT as f64).collect();
+        c.extend((0..=ROUND_STEP_COUNT).rev().map(|k| h - r * k as f64 / ROUND_STEP_COUNT as f64));
+        c
+    };
+    let inner: DVec3 = half_m - DVec3::splat(r);
+    let place = |q: DVec3| -> (DVec3, DVec3) {
+        let c: DVec3 = q.clamp(-inner, inner);
+        let n: DVec3 = (q - c).normalize();
+        (center + axes * (c + n * r), axes * n)
+    };
     for axis in 0..3 {
         for sign in [-1.0, 1.0] {
             let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
-            let n: DVec3 = axes.col(axis) * sign;
-            let du: DVec3 = axes.col(u) * half_m[u];
-            let dv: DVec3 = axes.col(v) * half_m[v];
-            let c: DVec3 = center + n * half_m[axis];
-            let (su, sv) = ((2.0 * half_m[u] / WALL_TILE_M) as f32, (2.0 * half_m[v] / WALL_TILE_M) as f32);
-            let corners: [DVec3; 4] = if sign > 0.0 {
-                [c - du - dv, c + du - dv, c + du + dv, c - du + dv]
-            } else {
-                [c - du - dv, c - du + dv, c + du + dv, c + du - dv]
+            let (us, vs) = (coords(half_m[u]), coords(half_m[v]));
+            let point = |a: f64, b: f64| -> DVec3 {
+                let mut q: DVec3 = DVec3::ZERO;
+                q[axis] = sign * half_m[axis];
+                q[u] = a;
+                q[v] = b;
+                q
             };
-            let uvs: [[f32; 2]; 4] = if sign > 0.0 {
-                [[0.0, 0.0], [su, 0.0], [su, sv], [0.0, sv]]
-            } else {
-                [[0.0, 0.0], [0.0, sv], [su, sv], [su, 0.0]]
-            };
-            push_quad(out, corners, uvs, n, color, layer);
+            for i in 0..us.len() - 1 {
+                for j in 0..vs.len() - 1 {
+                    let corners: [(f64, f64); 4] = if sign > 0.0 {
+                        [(us[i], vs[j]), (us[i + 1], vs[j]), (us[i + 1], vs[j + 1]), (us[i], vs[j + 1])]
+                    } else {
+                        [(us[i], vs[j]), (us[i], vs[j + 1]), (us[i + 1], vs[j + 1]), (us[i + 1], vs[j])]
+                    };
+                    let vertices: Vec<CityVertex> = corners
+                        .iter()
+                        .map(|&(a, b)| {
+                            let (position, normal) = place(point(a, b));
+                            CityVertex {
+                                position: position.as_vec3().to_array(),
+                                normal: normal.as_vec3().to_array(),
+                                uv: [((a + half_m[u]) / WALL_TILE_M) as f32, ((b + half_m[v]) / WALL_TILE_M) as f32],
+                                color,
+                                layer,
+                            }
+                        })
+                        .collect();
+                    out.extend([vertices[0], vertices[1], vertices[2], vertices[0], vertices[2], vertices[3]]);
+                }
+            }
         }
     }
 }
@@ -220,7 +264,7 @@ fn get_layer(name: &str) -> f32 {
     match name {
         "street" => LAYER_STREET,
         "building" => LAYER_CONCRETE,
-        "brick" => LAYER_BRICK,
+        "painted panel" => LAYER_BRICK,
         "glass obstacle" => LAYER_METAL,
         _ => NO_LAYER,
     }
@@ -235,13 +279,13 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     let street = &world.materials[world.street_material as usize];
     let street_color: [f32; 4] = [street.color[0] * 2.4, street.color[1] * 2.4, street.color[2] * 2.4, 0.0];
     push_sphere(&mut opaque, world.street_radius_m, true, (SPHERE_LON_COUNT, SPHERE_LAT_COUNT), STREET_TILE_M, street_color, LAYER_STREET);
-    for city_box in world.boxes.iter().filter(|b| b.group != "consoles" && b.group != "pylons") {
+    for (k, city_box) in world.boxes.iter().filter(|b| b.group != "consoles" && b.group != "pylons").enumerate() {
         let material = &world.materials[city_box.material as usize];
         let layer: f32 = get_layer(&material.name);
-        let tint: f32 = if layer >= 0.0 { 1.6 } else { 1.0 };
+        let tint: f32 = if layer >= 0.0 { 1.6 * (1.0 + PANEL_TINT_FRAC * (2.0 * get_variation_frac(world.variation_seed, k) - 1.0)) } else { 1.0 };
         let c = material.color;
         let color: [f32; 4] = [c[0] * tint, c[1] * tint, c[2] * tint, if material.is_light { 1.0 } else { 0.0 }];
-        push_box(&mut opaque, city_box.center, city_box.axes, city_box.half_m, color, layer);
+        push_rounded_box(&mut opaque, city_box.center, city_box.axes, city_box.half_m, color, layer);
     }
     let mut glass: Vec<CityVertex> = Vec::new();
     let mut holes: Vec<[f32; 4]> = Vec::new();

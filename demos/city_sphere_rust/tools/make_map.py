@@ -12,6 +12,7 @@ Example:
 
 import json
 import math
+import random
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +27,7 @@ MATERIALS: list[tuple[str, tuple[float, float, float], str]] = [
     ("air", (0.0, 0.0, 0.0), "empty"),
     ("street", (0.5, 0.52, 0.56), "solid"),
     ("building", (0.72, 0.74, 0.78), "solid"),
-    ("brick", (0.62, 0.68, 0.8), "solid"),
+    ("painted panel", (0.62, 0.68, 0.8), "solid"),
     ("glass", (0.55, 0.75, 0.95), "glass"),
     ("glass obstacle", (0.45, 0.47, 0.52), "solid"),
     ("core", (1.0, 0.75, 1.0), "light"),
@@ -34,9 +35,7 @@ MATERIALS: list[tuple[str, tuple[float, float, float], str]] = [
     ("blue pylon", (0.25, 0.45, 1.0), "light"),
     ("red pylon", (1.0, 0.28, 0.22), "light"),
     ("blue console 0", (0.3, 0.55, 1.0), "light"),
-    ("blue console 1", (0.3, 0.55, 1.0), "light"),
     ("red console 0", (1.0, 0.35, 0.3), "light"),
-    ("red console 1", (1.0, 0.35, 0.3), "light"),
 ]
 
 
@@ -111,35 +110,37 @@ def make_team_half(sign: float, team: str) -> tuple[list[dict], list[dict]]:
         2
     """
     s = lambda d: sign * d
+    rng: random.Random = random.Random(VARIATION_SEED)
     boxes: list[dict] = []
     city = [
         (0.35, 0.45, (2.2, 2.8, 1.6), "building", 0.3),
-        (0.35, -0.45, (1.8, 3.5, 2.0), "brick", -0.2),
+        (0.35, -0.45, (1.8, 3.5, 2.0), "painted panel", -0.2),
         (0.75, 0.2, (2.5, 2.2, 1.5), "building", 0.9),
         (0.7, -0.3, (1.5, 4.0, 1.5), "building", 0.0),
-        (1.1, 0.55, (2.0, 3.0, 2.0), "brick", 0.5),
+        (1.1, 0.55, (2.0, 3.0, 2.0), "painted panel", 0.5),
         (1.15, -0.1, (2.8, 2.5, 1.2), "building", 1.2),
         (0.2, 0.85, (2.5, 3.2, 2.0), "building", 0.0),
-        (0.25, -0.9, (2.0, 2.6, 2.4), "brick", 0.4),
+        (0.25, -0.9, (2.0, 2.6, 2.4), "painted panel", 0.4),
         (1.25, -0.65, (1.6, 3.8, 1.6), "building", 0.7),
-        (0.95, 0.95, (2.2, 2.4, 1.8), "brick", 0.2),
+        (0.95, 0.95, (2.2, 2.4, 1.8), "painted panel", 0.2),
     ]
     for k, (lon, lat, half, material, heading) in enumerate(city):
+        lon, lat, heading = lon + rng.uniform(-JITTER_RAD, JITTER_RAD), lat + rng.uniform(-JITTER_RAD, JITTER_RAD), heading + rng.uniform(-JITTER_HEADING_RAD, JITTER_HEADING_RAD)
+        half = (half[0], half[1] * rng.uniform(MIN_HEIGHT_FRAC, 1.0), half[2])
         boxes.append(make_box(f"{team} block {k}", "city", s(direction(lon, lat)), STREET_RADIUS_M, half, material, heading))
     glass = [
         (0.3, 0.3, (1.2, 1.1, 0.4), 0.0),
         (0.55, -0.25, (0.5, 1.4, 1.6), 0.4),
         (0.85, 0.45, (1.5, 1.0, 0.4), 1.0),
-        (1.0, -0.35, (0.4, 1.2, 1.4), 0.2),
-        (1.3, 0.15, (1.6, 1.3, 0.4), 0.8),
+        (1.05, -0.6, (0.4, 1.2, 1.4), 0.2),
+        (1.4, 0.35, (1.6, 1.3, 0.4), 0.8),
         (0.6, 0.85, (0.5, 1.2, 1.5), 0.0),
     ]
     for k, (lon, lat, half, heading) in enumerate(glass):
+        lon, lat, heading = lon + rng.uniform(-JITTER_RAD, JITTER_RAD), lat + rng.uniform(-JITTER_RAD, JITTER_RAD), heading + rng.uniform(-JITTER_HEADING_RAD, JITTER_HEADING_RAD)
         boxes.append(make_box(f"{team} glass cover {k}", "glass level", s(direction(lon, lat)), GLASS_RADIUS_M, half, "glass obstacle", heading))
-    boxes.append(make_box(f"{team} pylon street", "pylons", s(direction(0.5, 0.0)), STREET_RADIUS_M, (0.45, 2.6, 0.45), f"{team} pylon"))
-    boxes.append(make_box(f"{team} console street", "consoles", s(direction(0.5, 0.0)), STREET_RADIUS_M, (0.4, 0.55, 0.25), f"{team} console 0"))
-    boxes.append(make_box(f"{team} pylon glass", "pylons", s(direction(0.9, -0.2)), GLASS_RADIUS_M, (0.4, 2.0, 0.4), f"{team} pylon"))
-    boxes.append(make_box(f"{team} console glass", "consoles", s(direction(0.9, -0.2)), GLASS_RADIUS_M, (0.35, 0.5, 0.22), f"{team} console 1"))
+    boxes.append(make_box(f"{team} pylon", "pylons", s(direction(PYLON_LON_RAD, 0.0)), GLASS_RADIUS_M, (0.4, 2.0, 0.4), f"{team} pylon"))
+    boxes.append(make_box(f"{team} console", "consoles", s(direction(PYLON_LON_RAD, 0.0)), GLASS_RADIUS_M, (0.35, 0.5, 0.22), f"{team} console 0"))
     spawns = [
         {"team": team, "frame": make_frame(s(direction(0.0, 0.12)), STREET_RADIUS_M, math.pi / 2)},
         {"team": team, "frame": make_frame(s(direction(0.0, -0.12)), STREET_RADIUS_M, math.pi / 2)},
@@ -159,6 +160,11 @@ def get_lift_directions() -> list[np.ndarray]:
     return blue + [-d for d in blue]
 
 
+PYLON_LON_RAD = 0.95
+VARIATION_SEED = 1192
+JITTER_RAD = 0.04
+JITTER_HEADING_RAD = 0.15
+MIN_HEIGHT_FRAC = 0.85
 LASER_TEAM_COLORS = ((0.3, 0.55, 1.0), (1.0, 0.3, 0.25))
 
 
@@ -199,6 +205,7 @@ def main() -> None:
             },
             {"name": "core", "radius_m": CORE_RADIUS_M, "thickness_m": CORE_RADIUS_M, "material": material_id("core"), "walkable_side": "none", "laser": "stop", "holes": []},
         ],
+        "variation": {"seed": VARIATION_SEED},
         "lasers": {"team_colors": [list(c) for c in LASER_TEAM_COLORS]},
         "boxes": boxes,
         "lights": [{"position": [0.0, 0.0, 0.0, 1.0], "color": [1.0, 0.82, 1.0], "radius_m": 30.0}],

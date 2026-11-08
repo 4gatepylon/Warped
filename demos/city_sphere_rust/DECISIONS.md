@@ -35,8 +35,9 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
 8. **A small map first**: the street is a sphere of radius 24 m, the glass 17 m (7 m above the street), against the
    WebGL version's 36 m and 28.8 m. City Sphere is the smallest, close-quarters level, and the user asked to start
    small. Ten buildings and six glass-level covers a team.
-9. **Each team has one pylon on the street and one on the glass level**, both near its spawn (two pylons, one console
-   each, per the design), and every red thing is the antipode of a blue one, so the teams' halves are the same.
+9. **Each team has one pylon, exposed on the glass level** (the user's choice: pylons per team rise Dust 3, Snow 2,
+   City 1, Forest 2, Lunar 3), with no cover within about 6 m, and every red thing is the antipode of a blue one, so
+   the teams' halves are the same. Street pylons were removed.
 10. **The map extends the portable format compatibly**: optional `ground.sphere` and `shells` (documented in
     `common/maps/README.md`, in the schema, version still 1). `demos/city_sphere_rust/tools/make_map.py` writes the map.
 
@@ -74,8 +75,11 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
 22. **Map page picture from the centre, unrolled**: a sphere has no "from above"; from the centre every street and
     the glass level show at once, in the same projection as the live marks. It has no shadows (the renderer has none).
 23. **Station look on the existing renderer**: metal textures are desaturated to read as steel; panel seams are
-    drawn in the shader, not textures. Hazard stripes, grime, metal frames for blocks and per-panel roughness are
-    not done yet.
+    drawn in the shader, not textures. No brick: the user asked for metal only. Blocks are rounded-corner boxes for
+    drawing only (collision keeps the boxes, at most 0.35 m inside the corners). Reflections are faked from the core
+    light and a station-floor colour with Fresnel, not traced; hazard stripes and metal frames are not done yet.
 24. **`lasers` in the map format** is optional and either one colour or two team colours, so Dust and Dark Forest
     can be golden, Snow Planet green, and Lunar Surface and City Sphere red and blue.
-
+25. **Seeded variation in the map file** (`variation.seed`): the generator applies the same small jitter (positions
+    0.04 rad, headings 0.15 rad, heights down to 85 %) to each team's half, so the halves stay antipodal and fair;
+    the renderer uses the seed only for panel tint.

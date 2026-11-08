@@ -193,6 +193,7 @@
       },
       "oneOf": [{"required": ["color"]}, {"required": ["team_colors"]}]
     },
+    "variation": {"type": "object", "additionalProperties": false, "required": ["seed"], "properties": {"seed": {"type": "integer", "minimum": 0, "maximum": 4294967295}}},
     "shells": {
       "type": "array",
       "items": {

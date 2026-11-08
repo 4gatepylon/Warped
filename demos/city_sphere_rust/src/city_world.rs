@@ -106,9 +106,16 @@ struct JsonMap {
     spawns: Vec<JsonSpawn>,
     #[serde(default)]
     lasers: Option<JsonLasers>,
+    #[serde(default)]
+    variation: Option<JsonVariation>,
 }
 
 /// `JsonLasers` is the map's laser colour: one for every team, or one per team.
+#[derive(Deserialize)]
+struct JsonVariation {
+    seed: u32,
+}
+
 #[derive(Deserialize)]
 struct JsonLasers {
     color: Option<[f32; 3]>,
@@ -226,6 +233,8 @@ pub struct CityWorld {
     pub consoles: Vec<Console>,
     pub spawns: Vec<(u32, DMat4)>,
     pub laser_colors: [[f32; 3]; 2],
+    /// `variation_seed` seeds the map's small look variation (panel tint), 0 without one.
+    pub variation_seed: u32,
 }
 
 /// `Side` is which level a point is on: the street, under the glass, or the glass level, on the
@@ -397,6 +406,7 @@ impl CityWorld {
             boxes,
             consoles,
             spawns,
+            variation_seed: map.variation.as_ref().map_or(0, |v| v.seed),
             laser_colors: match &map.lasers {
                 Some(JsonLasers { team_colors: Some(colors), .. }) => *colors,
                 Some(JsonLasers { color: Some(color), .. }) => [*color; 2],
@@ -731,7 +741,7 @@ impl CityPlayer {
 mod tests {
     //! | Behaviour | Test |
     //! | --- | --- |
-    //! | The map loads with 2 consoles a team and antipodal spawns | `map_has_two_consoles_a_team_and_antipodal_spawns` |
+    //! | The map loads with 2 consoles a team and antipodal spawns | `map_has_one_console_a_team_and_antipodal_spawns` |
     //! | A player stands on the street and falls outward onto it | `players_fall_outward_onto_the_street` |
     //! | A lift carries a player up onto the glass level, and they stand on the glass | `lifts_carry_players_onto_the_glass` |
     //! | A shot from the glass level reflects off the glass, at most the set number of times | `shots_reflect_off_the_glass_up_to_the_limit` |
@@ -746,10 +756,10 @@ mod tests {
     }
 
     #[test]
-    fn map_has_two_consoles_a_team_and_antipodal_spawns() {
+    fn map_has_one_console_a_team_and_antipodal_spawns() {
         let world: CityWorld = world();
         for team in 0..2 {
-            assert_eq!(world.consoles.iter().filter(|c| c.team == team).count(), 2);
+            assert_eq!(world.consoles.iter().filter(|c| c.team == team).count(), 1);
         }
         let blue: DVec3 = world.spawns.iter().find(|s| s.0 == 0).unwrap().1.w_axis.truncate();
         let red: DVec3 = world.spawns.iter().find(|s| s.0 == 1).unwrap().1.w_axis.truncate();
