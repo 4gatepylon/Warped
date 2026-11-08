@@ -1,0 +1,32 @@
+# `Cargo.toml` builds legacy-oracle, the Rust demo's own source files compiled in place
+# (`../../demos/hyperbolic_wormholes_rust/src/`), so the game's tests can compare their results
+# with the demo's on the same inputs (REFACTOR_PLAN.md, section 7.3.1).
+#
+# Example:
+#     cargo test -p legacy-oracle
+#
+# Must know:
+#     - Limitations: macOS only, like the demo: its modules need SDL3 (built with CMake) and objc2-metal.
+#     - Gotchas: `test = false` keeps the demo's own unit tests out; the demo runs them itself.
+[package]
+name = "legacy-oracle"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+glam.workspace = true
+gltf.workspace = true
+image.workspace = true
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-metal.workspace = true
+rayon.workspace = true
+sdl3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true

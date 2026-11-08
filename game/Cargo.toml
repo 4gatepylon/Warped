@@ -12,7 +12,7 @@
 #     cargo build --release --workspace
 [workspace]
 resolver = "3"
-members = ["core", "client", "server"]
+members = ["core", "client", "server", "legacy_oracle"]
 
 [workspace.package]
 version = "0.1.0"
