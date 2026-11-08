@@ -12,8 +12,8 @@ const STAND_PROBE_STEP_M = 0.02;
 const TERRAIN_OCTAVES = 5, TERRAIN_RIM_NOISE_M = 60, TERRAIN_RIM_NOISE_FRAC = 0.5, TERRAIN_OUTER_FLANK = 3;
 const TERRAIN_WALL_RELIEF_GAIN = 3, TERRAIN_RIM_SEED = 9;
 const WINDOW_Y = 2;
-const KAZEMAT_HEIGHT_M = 6, GARAGE_HEIGHT_M = 9, FIELD_BUNKER_HEIGHT_M = 5.5, BEACON_HEIGHT_M = 4, HESCO_HEIGHT_M = 1.4;
-const HESCO_WIDTH_M = 1.55, HESCO_GAP_M = 3, HESCO_ROW_M = 16, BEACON_RADIUS_M = 0.45, RED_SPAWN_U_M = 119;
+const KAZEMAT_HEIGHT_M = 6, GARAGE_HEIGHT_M = 9, FIELD_BUNKER_HEIGHT_M = 5.5, BEACON_HEIGHT_M = 12, HESCO_HEIGHT_M = 1.4;
+const HESCO_WIDTH_M = 1.55, HESCO_GAP_M = 3, HESCO_ROW_M = 16, BEACON_RADIUS_M = 1.35, RED_SPAWN_U_M = 119;
 const MAX_EXPORTED_STRUCTURE_COUNT = 128, BUNKER_LAMP_COLOR = [1.0, 0.92, 0.8];
 const BLUE_HESCO_ROWS = [[-52, -14], [-52, 14], [-64, 0], [-66, -30], [-66, 32], [-84, -4], [-82, -44]];
 SPAWNS[RED].u_m = RED_SPAWN_U_M;
@@ -214,7 +214,7 @@ function build_pylon(team, pylon_index) {
   const t = TEAMS[team], model = make_mesh_model(`${t.name} pylon`, 'scifi_beacon', BEACON_HEIGHT_M, [], MAT.METAL);
   model.cylinder([0, BEACON_HEIGHT_M / 2, 0], BEACON_RADIUS_M, BEACON_HEIGHT_M / 2, t.console + pylon_index * CONSOLES_PER_PYLON);
   model.consoles.push([0, PYLON_CORE_HEIGHT_M / 2, 0]);
-  model.addLamp([0, BEACON_HEIGHT_M, 0], t.color, 10);
+  model.addLamp([0, BEACON_HEIGHT_M * 0.75, 0], t.color, 14);
   return model;
 }
 

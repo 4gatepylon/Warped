@@ -601,7 +601,7 @@ impl VoxelWorld {
 
     /// `find_hit_mu` gives where the chart line q0 + dq mu first meets structure k within
     /// [mu_lo, mu_hi] and which shape or triangle: its mesh's triangles if it has one, else its
-    /// shapes but those of material `see_through`.
+    /// shapes but those of material `see_through` (glass, as light and lasers pass it), if any.
     ///
     /// Example: `let hit = world.find_hit_mu(3, q0, dq, 0.0, 1.0, None);`
     pub fn find_hit_mu(

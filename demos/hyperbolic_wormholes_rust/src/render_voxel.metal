@@ -24,11 +24,11 @@ using namespace metal;
     constant float4 *means [[buffer(27)]], device const DustBurst *dust_bursts [[buffer(29)]], \
     device const DustParticle *dust_particles [[buffer(30)]], \
     texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]], \
+    texture2d<float> milky_way [[texture(3)]], \
     device const MeshTriangle *mesh_triangles [[buffer(0)]], device const BvhNode *mesh_nodes [[buffer(1)]], \
     device const MeshMaterial *mesh_materials [[buffer(7)]], texture2d_array<float> mesh_albedo [[texture(12)]], \
     texture2d_array<float> mesh_mr [[texture(13)]], texture2d_array<float> mesh_normal [[texture(14)]], texture2d_array<float> mesh_emissive [[texture(15)]], \
-    device const MeshTriangle *avatar_triangles [[buffer(8)]], device const BvhNode *avatar_nodes [[buffer(10)]], \
-    texture2d<float> milky_way [[texture(3)]]
+    device const MeshTriangle *avatar_triangles [[buffer(8)]], device const BvhNode *avatar_nodes [[buffer(10)]]
 #define HAS_BEND __HAS_BEND__
 
 constant int MAX_ITERATIONS = 240;
@@ -297,8 +297,6 @@ constant int BEAM_SPECKLE_FIRST_BIT = 4;
 constant int RIFLE_BEAM_CODE = 2;
 constant int BEACON_BEAM_CODE = 4;
 constant float BEACON_BEAM_RADIUS_M = 0.12;
-constant int DARK_FLAG = 1;
-constant int BEACON_FLAG = 2;
 constant float LASER_HALO_OPACITY = 0.9;
 constant float LASER_CORE_WHITENESS = 0.6;
 constant float MIN_SPECKLE_GLOW = 0.02;
@@ -573,9 +571,9 @@ struct Shape {
 
 /**
  * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
- * radius, its first shape, shape count, mesh root node (-1 for none; `FIRST_AVATAR_ROOT_CODE - root` for a posed body
- * in the avatar buffers), flags (`DARK_FLAG`: its glowing shapes are dark, a pylon whose console is off; `BEACON_FLAG`:
- * its first shape is a console, so its model glows with it), and R.
+ * radius, its first shape and shape count, whether its glowing shapes are dark (1: a pylon whose console is off) and
+ * its mesh's root node (-1 for none;
+ * `FIRST_AVATAR_ROOT_CODE - root` for a posed body in the avatar buffers), and R with whether its first shape is a console (1: a beacon).
  */
 struct VoxelStructure {
     float4 rows[4];
@@ -607,7 +605,7 @@ struct VoxelLight {
     float4 color_radius;
 };
 
-/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, speckle share, brightness, code: the team, 1 for red, plus `RIFLE_BEAM_CODE` for the rifle's or `BEACON_BEAM_CODE` for a beacon's beam). */
+/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, speckle share, brightness, code: the team, 1 for red, plus `RIFLE_BEAM_CODE` for the rifle's, or `BEACON_BEAM_CODE` for a beacon's). */
 struct BeamSegment {
     float4 a;
     float4 b;
@@ -733,6 +731,7 @@ struct Scene {
     texture2d_array<float> arm_maps;
     device const DustBurst *dust_bursts;
     device const DustParticle *dust_particles;
+    texture2d<float> milky_way;
     device const MeshTriangle *mesh_triangles;
     device const BvhNode *mesh_nodes;
     device const MeshMaterial *mesh_materials;
@@ -742,7 +741,6 @@ struct Scene {
     texture2d_array<float> mesh_emissive;
     device const MeshTriangle *avatar_triangles;
     device const BvhNode *avatar_nodes;
-    texture2d<float> milky_way;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -850,7 +848,7 @@ static float hit_mesh_triangle(device const MeshTriangle &t, float3 q0, float3 d
     return b1 >= 0.0 && b2 >= 0.0 && b1 + b2 <= 1.0 ? dot(e2, g) / det : INFINITY;
 }
 
-/** @brief `march_mesh` walks a model's BVH (in `nodes`, over `triangles`) from node `root` and gives where the chart line first meets a triangle within [mu_lo, mu_hi] (or INFINITY), and which. @par Example @code float mu = march_mesh(scene.mesh_triangles, scene.mesh_nodes, st.size.z, q0, dq, 0.0, 1.0, index); @endcode */
+/** @brief `march_mesh` walks a model's BVH (in `nodes`, over `triangles`) from node `root` and gives where the chart line first meets a triangle within [mu_lo, mu_hi] (or INFINITY), and which. @par Example @code float mu = march_mesh(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, 0.0, 1.0, index); @endcode */
 static float march_mesh(device const MeshTriangle *triangles, device const BvhNode *nodes, int root, float3 q0, float3 dq, float mu_lo, float mu_hi, thread int &index) {
     int stack[MESH_STACK_SIZE];
     int top = 0;
@@ -899,11 +897,11 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     float3 q0 = p.xyz / p.w * scale, dq = (t.xyz * p.w - p.xyz * t.w) * scale;
     int index = st.size.x;
     float mu;
-    bool is_avatar = st.size.z <= FIRST_AVATAR_ROOT_CODE, is_mesh = is_avatar || st.size.z >= 0;
+    bool is_avatar = st.size.w <= FIRST_AVATAR_ROOT_CODE, is_mesh = is_avatar || st.size.w >= 0;
     if (is_mesh) {
         index = -1;
-        mu = is_avatar ? march_mesh(scene.avatar_triangles, scene.avatar_nodes, FIRST_AVATAR_ROOT_CODE - st.size.z, q0, dq, mu_lo, mu_hi, index)
-                       : march_mesh(scene.mesh_triangles, scene.mesh_nodes, st.size.z, q0, dq, mu_lo, mu_hi, index);
+        mu = is_avatar ? march_mesh(scene.avatar_triangles, scene.avatar_nodes, FIRST_AVATAR_ROOT_CODE - st.size.w, q0, dq, mu_lo, mu_hi, index)
+                       : march_mesh(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, mu_lo, mu_hi, index);
     } else if (is_shadow) {
         float lam_from = -tanh(s_star), mu_from = lam_from / (p.w * (p.w + lam_from * t.w));
         mu = march_shapes<true>(scene, st, q0, dq, mu_lo, mu_hi, false, index, mu_from, hit.lit);
@@ -1341,7 +1339,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
  * @endcode
  */
 kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
     float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
     float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
@@ -1520,7 +1518,7 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     if (m == u.mat_hull || m == u.mat_pad) albedo *= 1.0 - PANEL_SEAM_DARKEN * step(PANEL_SEAM_EDGE, max(fract(uv.x * PANEL_SEAMS), fract(uv.y * PANEL_SEAMS)));
     float texel = has_texture(scene, m) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
     albedo *= 1.0 + detail * (BLOCK_NOISE * (block - 0.5) + TEXEL_NOISE * (texel - 0.5));
-    if (glow > 0.5 && (st.size.w & DARK_FLAG) != 0) { albedo *= DARK_PYLON_GLOW_FRAC; glow = 0.0; }
+    if (glow > 0.5 && st.size.z != 0) { albedo *= DARK_PYLON_GLOW_FRAC; glow = 0.0; }
     if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM);
     Surface s = sample_surface(scene, m, albedo, g, u.curvature_radius_m / st.scale.x, dist_s, x, n, t, b, v);
     return light_surface(scene, s, x, n, v);
@@ -1574,7 +1572,7 @@ static float3 shade_mesh(thread const Scene &scene, Hit h, float4 x, float4 v, f
         float2 bend = scene.mesh_normal.sample(wrap, uv, layers.z, level(lod)).rg * 2.0 - 1.0;
         s.n = normalize_tangent(x, t * bend.x + b * bend.y + n * sqrt(saturate(1.0 - dot(bend, bend))));
     }
-    if ((st.size.w & BEACON_FLAG) != 0) {
+    if (st.scale.y > HALF_KIND) {
         float4 entry = get_palette(scene, scene.shapes[st.size.x].info.x);
         emissive += entry.rgb * entry.a * BEACON_GLOW;
     }
@@ -2111,8 +2109,7 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
 /**
  * @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a
  * flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's
- * code (team and gun, or a beacon's) and speckle share. A beacon's beam (code `BEACON_BEAM_CODE` and up) is
- * `BEACON_BEAM_RADIUS_M` wide, drawn like the sniper's, without speckle. A chord that starts away from the eye (`travelled` above 0) and only moves away
+ * code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. A chord that starts away from the eye (`travelled` above 0) and only moves away
  * from a segment skips it: the chord before ends at that nearest point and counts it there.
  * @par Example
  * @code
@@ -2127,9 +2124,8 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
     for (int i = 0; i < scene.u.beam_count; i++) {
         float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
-        int kind = int(info.w + HALF_KIND);
-        bool is_beacon = kind >= BEACON_BEAM_CODE;
-        float half_len = 0.5 * info.x, radius_m = is_beacon ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
+        int beam_code = int(info.w + HALF_KIND);
+        float half_len = 0.5 * info.x, radius_m = beam_code >= BEACON_BEAM_CODE ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
         float4 mid = geodesic_point(a, b, half_len);
         float am = -mdot(x, mid), bm = mdot(v, mid), reach = half_len + BEAM_REACH * max(radius_m, pix * r * sinh(min(travelled + s_end, FAR_S))) / r;
         if (am * am - bm * bm > cosh(reach) * cosh(reach)) continue;
@@ -2143,10 +2139,10 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float d_m = measure_gap(xc, geodesic_point(a, b, sigma)) * r;
         float width_m = max(radius_m, pix * r * sinh(min(travelled + s_c, FAR_S)));
         float q = d_m * d_m / (width_m * width_m);
-        bool is_rifle = !is_beacon && kind >= RIFLE_BEAM_CODE;
+        bool is_rifle = (beam_code & RIFLE_BEAM_CODE) != 0;
         core = max(core, info.z * exp(is_rifle ? -q : -q * q * q));
         float hl = info.z * exp(-q / BEAM_REACH);
-        if (hl > halo) { halo = hl; code = info.w; speckle = is_beacon ? 0.0 : info.y; }
+        if (hl > halo) { halo = hl; code = info.w; speckle = info.y; }
     }
 }
 
@@ -2556,7 +2552,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     }
     int beam_code = int(code + HALF_KIND);
     VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0),
-                       int4(outcome, -1, -1, (beam_code & 1) | tint << THROWN_TINT_FIRST_BIT | (beam_code >= RIFLE_BEAM_CODE && beam_code < BEACON_BEAM_CODE ? 1 : 0) << BEAM_RIFLE_BIT
+                       int4(outcome, -1, -1, (beam_code & 1) | tint << THROWN_TINT_FIRST_BIT | ((beam_code & RIFLE_BEAM_CODE) != 0 ? 1 : 0) << BEAM_RIFLE_BIT
                                                  | int(round(speckle * BEAM_SPECKLE_STEPS)) << BEAM_SPECKLE_FIRST_BIT),
                        float4(0.0, glass, core, halo), dust};
     if (outcome == OUTCOME_HIT) {
@@ -2692,7 +2688,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2799,7 +2795,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -2823,7 +2819,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -2860,7 +2856,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -2915,7 +2911,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2934,7 +2930,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {

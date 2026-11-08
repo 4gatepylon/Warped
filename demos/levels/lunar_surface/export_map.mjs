@@ -25,7 +25,6 @@ const SUN_COLOR = [1.0, 0.96, 0.88];
 const LIGHTING = { model: 'lunar_lambert', lommel_seeliger_frac: 0.7, ambient: 0.11, earthshine: 0.08, sun_intensity: 1.45, shadows: true };
 const SPACE_COLOR = [0, 0, 0];
 const TEAM_NAMES = ['blue', 'red'];
-const CONSOLE_NAME_PATTERN = /^(blue|red) console \d+$/;
 const ZONE_WALLS = { height_m: 6, thickness_m: 0.6, opacity_frac: 0.25 };
 const TERRAIN = { kind: 'crater', rim_u_m: 190, rim_v_m: 90, wall_m: 30, rim_height_m: 22, relief_m: 2.5, relief_wavelength_m: 18, seed: 1 };
 const MILKY_WAY_POLE_ELEVATION_RAD = 0.2;
@@ -96,18 +95,16 @@ function make_milky_way(pole_elevation_rad, pole_azimuth_rad, core_along_band_ra
 }
 
 /**
- * `make_map` turns the level into a map manifest, keeping only the console materials a structure uses (a team loses
- * when all its consoles are off, so each must be reachable).
+ * `make_map` turns the level into a map manifest.
  * @param {Object} level What `run_level` returned.
  * @return {Object} The map manifest.
  * @example const manifest = make_map(level);
  */
 function make_map(level) {
   const R = level.CURVATURE_RADIUS_M;
-  const used_ids = new Set(level.structures.flatMap(structure => structure.shapes.map(shape => shape.material)));
   const materials = level.MATERIALS.map(([name, color, glow], id) => ({
     id, name, color, kind: id === 0 ? 'empty' : id === level.MAT.GLASS ? 'glass' : glow > 0 ? 'light' : 'solid'
-  })).filter(material => !CONSOLE_NAME_PATTERN.test(material.name) || used_ids.has(material.id));
+  }));
   const structures = level.structures.map(structure => ({ name: structure.name, frame: Array.from(structure.frame), ...(structure.mesh ? { mesh: structure.mesh } : {}), shapes: structure.shapes }));
   const warps = level.warps.map(warp => {
     const is_mouth = warp.kind === level.KIND_MOUTH;
