@@ -330,6 +330,21 @@ constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
 constant int REFINED_PIXELS_PER_CELL = 3;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
 constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
+constant int MAX_BLIZZARD_COUNT = __MAX_BLIZZARD_COUNT__;
+/** @brief The snow map's look (`snow.x` on): sky, distance fog, ground, and the blizzards' fog and flakes. */
+constant float3 SNOW_ZENITH = float3(0.42, 0.56, 0.74);
+constant float3 SNOW_HORIZON = float3(0.84, 0.88, 0.93);
+constant float3 SNOW_CLOUD = float3(0.9, 0.92, 0.95);
+constant float SNOW_FOG_START_M = 12.0;
+constant float SNOW_FOG_M = 110.0;
+constant float SNOW_FOG_MAX_FRAC = 0.82;
+constant float3 BLIZZARD_FOG = float3(0.86, 0.89, 0.93);
+constant float BLIZZARD_SKY_M = 400.0;
+constant float FLAKE_STEP_M = 0.7;
+constant int FLAKE_MAX_STEPS = 40;
+constant float FLAKE_RADIUS_M = 0.035;
+constant float3 FLAKE_FALL_M_PER_S = float3(2.5, -2.2, 1.0);
+constant float SNOW_GRAIN = 0.08;
 constant int HULL_FIGHTER = 0;
 constant int HULL_RING_SHIP = 1;
 constant int FLAT_HULL_COUNT = 2;
@@ -546,6 +561,9 @@ struct VoxelUniforms {
     ZoneWalls zone_walls;
     float4 milky_way_pole;
     float4 milky_way_core;
+    float4 snow;
+    float4 blizzards[MAX_BLIZZARD_COUNT];
+    float4 blizzard_air[MAX_BLIZZARD_COUNT];
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -1426,7 +1444,10 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     float u_m = -r * clamp_atanh(centre.y / centre.z), v_m = r * asinh(centre.x), r_m = acosh(max(centre.z, 1.0)) * r;
     float h = hash_3d(floor(centre * CELL_HASH_SCALE) * HASH_SHRINK);
     float3 albedo = get_palette(scene, u.mat_regolith).rgb * (MARIA_BASE + MARIA_CONTRAST * sample_fbm_3d(float3(u_m, v_m, 0.0) * MARIA_PER_M));
-    if (r_m < CRATER_FLOOR_RADIUS_M) {
+    bool is_snow = u.snow.x > 0.5;
+    if (is_snow) {
+        albedo = get_palette(scene, u.mat_regolith).rgb * (1.0 - SNOW_GRAIN + SNOW_GRAIN * sample_fbm_3d(float3(u_m, v_m, 0.0) * 0.35));
+    } else if (r_m < CRATER_FLOOR_RADIUS_M) {
         albedo = mix(get_palette(scene, u.mat_dark_regolith).rgb, get_palette(scene, u.mat_basalt).rgb, FLOOR_RING_DARKEN * step(0.5, fract(r_m / FLOOR_RING_M)));
     } else if (r_m < EJECTA_OUTER_M) {
         float theta = atan2(centre.x, -centre.y);
@@ -1434,7 +1455,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
                   * (1.0 - smoothstep(EJECTA_INNER_M, EJECTA_OUTER_M, r_m));
         albedo = mix(albedo, to_linear(EJECTA_COLOR), EJECTA_STRENGTH * ray);
     }
-    if (!has_terrain && dist_s < GROUND_DETAIL_S && r_m > CRATER_RIM_RADIUS_M + CRATERLET_CLEARANCE_M) {
+    if (!is_snow && !has_terrain && dist_s < GROUND_DETAIL_S && r_m > CRATER_RIM_RADIUS_M + CRATERLET_CLEARANCE_M) {
         float2 local = (cell + 0.5) * cell_s, best = float2(NO_HIT_S, 0.0);
         for (int i = 0; i < 9; i++) {
             float2 cand = (float2(float(i % 3), float(i / 3)) - 1.0) * tile_inradius_s * CRATERLET_SPACING_FRAC;
@@ -1464,7 +1485,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
             albedo = stripes - 2.0 * floor(stripes / 2.0) < 0.5 ? get_palette(scene, u.mat_hazard).rgb : to_linear(HAZARD_DARK_COLOR);
         }
     }
-    float texel = has_texture(scene, u.mat_regolith) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), h * CELL_SEED));
+    float texel = has_texture(scene, u.mat_regolith) || is_snow ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), h * CELL_SEED));
     float4 n = float4(0.0, 1.0, 0.0, 0.0);
     if (has_terrain) {
         n = terrain_normal(scene, fermi);
@@ -2122,6 +2143,13 @@ static float3 draw_spaceship(thread const Scene &scene, Spaceship ship, float3 d
 
 /** @brief `sample_sky` gives the sky in direction d at the origin: stars, Milky Way, sun and planet, with the spaceships in front. @par Example @code float3 c = sample_sky(scene, d); @endcode */
 static float3 sample_sky(thread const Scene &scene, float3 d) {
+    if (scene.u.snow.x > 0.5) {
+        float up = max(d.y, 0.0), sd = max(dot(d, scene.u.sun.xyz), 0.0);
+        float3 sky = mix(SNOW_HORIZON, SNOW_ZENITH, pow(up, 0.55));
+        float cloud = smoothstep(0.42, 0.78, sample_fbm_3d(float3(d.xz / (up + 0.12) * 1.6, 0.5)));
+        sky = mix(sky, SNOW_CLOUD * (0.82 + 0.18 * sd), cloud * smoothstep(0.0, 0.08, up));
+        return sky + SUN_COLOR * (pow(sd, 900.0) * 3.0 + pow(sd, 12.0) * 0.22);
+    }
     float3 color = sample_sky_bodies(scene, d);
     for (int i = 0; i < SPACESHIP_COUNT; i++) color = draw_spaceship(scene, scene.u.spaceships[i], d, color);
     return color;
@@ -2457,8 +2485,77 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
     } else {
         return color;
     }
+    if (scene.u.snow.x > 0.5) {
+        float far = end.surface.x == OUTCOME_HIT ? 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - SNOW_FOG_START_M, 0.0) / SNOW_FOG_M) : haze_frac;
+        float3 fog = to_linear(SNOW_HORIZON) + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
+        return mix(color, fog, SNOW_FOG_MAX_FRAC * far);
+    }
     float3 haze = HAZE_COLOR + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
     return mix(color, haze, HAZE_MAX_FRAC * haze_frac);
+}
+
+/**
+ * @brief `add_blizzards` fogs a pixel's colour by the blizzards its first ray crosses (straight in Fermi coordinates, as space is
+ * nearly flat on a snow map) and adds their falling flakes: a few hashed flakes per cubic meter, one cell a step along the ray.
+ * @par Example
+ * @code
+ * color = add_blizzards(scene, color, end, pixel);
+ * @endcode
+ */
+static float3 add_blizzards(thread const Scene &scene, float3 color, VoxelRayEnd end, float2 pixel) {
+    constant VoxelUniforms &u = scene.u;
+    int count = int(u.snow.y);
+    if (count == 0 || end.surface.x == OUTCOME_LOST) return color;
+    float r = u.curvature_radius_m;
+    float2 ndc = float2(2.0 * pixel.x / float(u.width_px) - 1.0, 1.0 - 2.0 * pixel.y / float(u.height_px));
+    float3 d_cam = normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0));
+    float4 x = u.camera[3], v = u.camera[0] * d_cam.x + u.camera[1] * d_cam.y + u.camera[2] * d_cam.z;
+    float3 a = get_fermi(x, r);
+    float3 dir = normalize(get_fermi(geodesic_point(x, v, 1.0 / r), r) - a);
+    float length_m = end.surface.x == OUTCOME_HIT ? length(get_fermi(end.point, r) - a) : BLIZZARD_SKY_M;
+    float3 snow_light = to_linear(BLIZZARD_FOG);
+    float transmit = 1.0;
+    float3 added = float3(0.0);
+    float now_s = u.snow.z;
+    for (int i = 0; i < min(count, MAX_BLIZZARD_COUNT); i++) {
+        float4 b = u.blizzards[i], air = u.blizzard_air[i];
+        float2 o = a.xy - b.xy, dd = dir.xy;
+        float qa = dot(dd, dd), qb = dot(o, dd), qc = dot(o, o) - b.z * b.z;
+        float t0 = 0.0, t1 = length_m;
+        if (qa > 1e-6) {
+            float disc = qb * qb - qa * qc;
+            if (disc <= 0.0) continue;
+            t0 = max(t0, (-qb - sqrt(disc)) / qa);
+            t1 = min(t1, (-qb + sqrt(disc)) / qa);
+        } else if (qc >= 0.0) {
+            continue;
+        }
+        if (abs(dir.z) > 1e-6) {
+            float t_top = (b.w - a.z) / dir.z;
+            if (dir.z > 0.0) t1 = min(t1, t_top); else t0 = max(t0, t_top);
+        } else if (a.z >= b.w) {
+            continue;
+        }
+        if (t1 <= t0) continue;
+        int steps = min(int((t1 - t0) / FLAKE_STEP_M), FLAKE_MAX_STEPS);
+        for (int k = 0; k < steps; k++) {
+            float t = t0 + (float(k) + 0.5) * FLAKE_STEP_M;
+            float3 p = a + dir * t - FLAKE_FALL_M_PER_S.xzy * now_s;
+            float3 cell = floor(p);
+            float h = hash_3d(cell);
+            if (h > air.y) continue;
+            float3 flake = cell + float3(hash_3d(cell + 17.0), hash_3d(cell + 31.0), hash_3d(cell + 47.0));
+            float3 q = p - flake;
+            float miss = length(q - dir * dot(q, dir));
+            float size_m = max(FLAKE_RADIUS_M, u.pixel_angle_rad * t * 0.7);
+            float cover = saturate(1.0 - miss / size_m) * min(1.0, FLAKE_RADIUS_M / size_m * 2.0);
+            added += transmit * exp(-air.x * (t - t0)) * cover * snow_light;
+        }
+        float fade = exp(-air.x * (t1 - t0));
+        added += transmit * (1.0 - fade) * snow_light;
+        transmit *= fade;
+    }
+    return color * transmit + added;
 }
 
 /**
@@ -2520,6 +2617,7 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id
         color = to_linear(sample_sky(scene, end.point.xyz));
     }
     color = add_haze(scene, color, end);
+    color = add_blizzards(scene, color, end, float2(id) + 0.5);
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
     float3 beam_color = to_linear((end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);

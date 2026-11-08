@@ -16,6 +16,7 @@
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
+use crate::map::Blizzard;
 use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
@@ -40,6 +41,10 @@ use crate::zone_walls::ZoneWalls;
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
 pub const MARKER_NAME: &str = "a thrown wormhole";
+/// `SNOW_STYLE` is the `appearance.style` of a snow map, which the renderer draws as snow.
+const SNOW_STYLE: &str = "snow";
+/// `BLIZZARD_CUT_ITERATIONS` is how many halvings find where a shot runs out of reach in a blizzard.
+const BLIZZARD_CUT_ITERATIONS: usize = 24;
 const MAX_MARKER_COUNT: usize = 16;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
@@ -335,6 +340,9 @@ pub struct VoxelWorld {
     pub sky_time_s: f64,
     pub clearance: Arc<ClearanceGrids>,
     growing_hole: Option<(usize, VoxelWarp)>,
+    pub blizzards: Vec<Blizzard>,
+    pub is_snow: bool,
+    pub torus_periods_m: Option<[f64; 2]>,
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -854,6 +862,9 @@ impl VoxelWorld {
             head_bob: PerPlayerSettings::Builtin().view.head_bob,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
             clearance: Arc::new(ClearanceGrids::default()),
+            blizzards: map.get_blizzards(),
+            is_snow: map.appearance.style == SNOW_STYLE,
+            torus_periods_m: map.space.torus_periods_m,
         };
         world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
@@ -1749,6 +1760,102 @@ impl VoxelWorld {
         best
     }
 
+    /// `find_blizzard` gives the blizzard point `x` is in (within its radius of its centre on the
+    /// ground, under its height), if any.
+    ///
+    /// Example: `let speed_frac = world.find_blizzard(eye).map_or(1.0, |b| b.speed_frac);`
+    pub fn find_blizzard(&self, x: DVec4) -> Option<&Blizzard> {
+        if self.blizzards.is_empty() {
+            return None;
+        }
+        let [u_m, v_m, h_m] = get_fermi_coordinates(x, self.r);
+        self.blizzards
+            .iter()
+            .find(|b| (u_m - b.u_m).hypot(v_m - b.v_m) < b.radius_m && h_m < b.height_m)
+    }
+
+    /// `get_blizzard_frac` gives how much of a shot's reach in blizzards the chord from `a` to `b`
+    /// uses up: the sum over blizzards of the length inside it over its `shot_reach_m`. Space is
+    /// so nearly flat on a blizzard map (`FLAT_CURVATURE_RADIUS_M`) that the chord is taken as
+    /// straight in Fermi coordinates.
+    ///
+    /// Example: `let frac = world.get_blizzard_frac(a, b);`
+    pub fn get_blizzard_frac(&self, a: DVec4, b: DVec4) -> f64 {
+        if self.blizzards.is_empty() {
+            return 0.0;
+        }
+        let pa: DVec3 = DVec3::from(get_fermi_coordinates(a, self.r));
+        let d: DVec3 = DVec3::from(get_fermi_coordinates(b, self.r)) - pa;
+        self.blizzards
+            .iter()
+            .map(|blizzard| {
+                let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+                let (ou, ov) = (pa.x - blizzard.u_m, pa.y - blizzard.v_m);
+                let qa: f64 = d.x * d.x + d.y * d.y;
+                let qb: f64 = ou * d.x + ov * d.y;
+                let qc: f64 = ou * ou + ov * ov - blizzard.radius_m * blizzard.radius_m;
+                if qa > f64::EPSILON {
+                    let disc: f64 = qb * qb - qa * qc;
+                    if disc <= 0.0 {
+                        return 0.0;
+                    }
+                    t0 = t0.max((-qb - disc.sqrt()) / qa);
+                    t1 = t1.min((-qb + disc.sqrt()) / qa);
+                } else if qc >= 0.0 {
+                    return 0.0;
+                }
+                if d.z.abs() > f64::EPSILON {
+                    let t_top: f64 = (blizzard.height_m - pa.z) / d.z;
+                    (t0, t1) = if d.z > 0.0 { (t0, t1.min(t_top)) } else { (t0.max(t_top), t1) };
+                } else if pa.z >= blizzard.height_m {
+                    return 0.0;
+                }
+                let inside_m: f64 = (t1 - t0).max(0.0) * d.length();
+                if blizzard.shot_reach_m > 0.0 {
+                    inside_m / blizzard.shot_reach_m
+                } else if inside_m > 0.0 {
+                    f64::INFINITY
+                } else {
+                    0.0
+                }
+            })
+            .sum()
+    }
+
+    /// `stop_in_blizzards` cuts a traced shot (its pieces, one per side of each throat) where it
+    /// has used up its reach in blizzards (`get_blizzard_frac`), and says whether it did.
+    ///
+    /// Example: `let is_stopped = world.stop_in_blizzards(&mut pieces);`
+    fn stop_in_blizzards(&self, pieces: &mut Vec<Vec<DVec4>>) -> bool {
+        let mut used: f64 = 0.0;
+        for p in 0..pieces.len() {
+            for k in 1..pieces[p].len() {
+                let (a, b) = (pieces[p][k - 1], pieces[p][k]);
+                let frac: f64 = self.get_blizzard_frac(a, b);
+                if used + frac < 1.0 {
+                    used += frac;
+                    continue;
+                }
+                let s: f64 = get_distance(a, b);
+                let toward: DVec4 = normalize_minkowski(b + minkowski_dot(b, a) * a);
+                let (mut lo, mut hi) = (0.0, s);
+                for _ in 0..BLIZZARD_CUT_ITERATIONS {
+                    let mid: f64 = 0.5 * (lo + hi);
+                    if used + self.get_blizzard_frac(a, geodesic_point(a, toward, mid)) < 1.0 {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                pieces[p].truncate(k);
+                pieces[p].push(geodesic_point(a, toward, lo));
+                pieces.truncate(p + 1);
+                return true;
+            }
+        }
+        false
+    }
+
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between the
     /// warps, bent inside them, through throats, to a block, the ground, a horizon or
     /// `LASER_MAX_LENGTH_M` (through glass). The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where
@@ -1819,6 +1926,16 @@ impl VoxelWorld {
             if rho > warp.reach {
                 inside = None;
             }
+        }
+        if self.stop_in_blizzards(&mut pieces) {
+            hit = None;
+            through.truncate(pieces.len() - 1);
+            through_warps.truncate(pieces.len() - 1);
+            travelled = pieces
+                .iter()
+                .flat_map(|piece| piece.windows(2))
+                .map(|pair| get_distance(pair[0], pair[1]))
+                .sum();
         }
         let gun: DVec4 = camera * map_exp(MUZZLE_M, self.r);
         let first: &mut Vec<DVec4> = &mut pieces[0];
@@ -2218,7 +2335,11 @@ impl VoxelPlayer {
             1.0
         };
         self.slowed_s = (self.slowed_s - dt_s).max(0.0);
+        let blizzard_frac: f64 = world
+            .find_blizzard(self.body.col(AXIS_W))
+            .map_or(1.0, |b| b.speed_frac);
         let speed_m_per_s: f64 = slow_frac
+            * blizzard_frac
             * match (self.is_flying, self.is_sprinting) {
                 (true, true) => settings.fly_m_per_s * FLY_SPRINT_PER_FLY,
                 (true, false) => settings.fly_m_per_s,

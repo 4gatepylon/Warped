@@ -21,6 +21,7 @@ use objc2_metal::{
     MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
+use crate::map::Blizzard;
 use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
 use crate::mesh::MeshModel;
@@ -46,6 +47,8 @@ use crate::zone_walls::{GpuZoneWalls, MAX_ZONE_WALL_COUNT};
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+/// `SNOW_CLOCK_PERIOD_S` is how often the falling snow's clock starts over, so single precision keeps it smooth.
+const SNOW_CLOCK_PERIOD_S: f64 = 3600.0;
 const NO_CLEARANCE_GRID: ClearanceGrid = ClearanceGrid {
     offset: 0,
     cell_count: 0,
@@ -131,6 +134,26 @@ pub struct VoxelUniforms {
     pub zone_walls: GpuZoneWalls,
     pub milky_way_pole: [f32; 4],
     pub milky_way_core: [f32; 4],
+    pub snow: [f32; 4],
+    pub blizzards: [[f32; 4]; MAX_BLIZZARD_COUNT],
+    pub blizzard_air: [[f32; 4]; MAX_BLIZZARD_COUNT],
+}
+
+/// `MAX_BLIZZARD_COUNT` is how many blizzards the renderer draws (the rest only slow and freeze).
+pub const MAX_BLIZZARD_COUNT: usize = 8;
+
+/// `pack_blizzards` gives four numbers of each of the first `MAX_BLIZZARD_COUNT` blizzards, by `pick`.
+///
+/// Example: `let places = pack_blizzards(&world.blizzards, |b| [b.u_m, b.v_m, b.radius_m, b.height_m]);`
+fn pack_blizzards(
+    blizzards: &[Blizzard],
+    pick: impl Fn(&Blizzard) -> [f64; 4],
+) -> [[f32; 4]; MAX_BLIZZARD_COUNT] {
+    let mut packed: [[f32; 4]; MAX_BLIZZARD_COUNT] = [[0.0; 4]; MAX_BLIZZARD_COUNT];
+    for (slot, blizzard) in packed.iter_mut().zip(blizzards) {
+        *slot = pick(blizzard).map(|value| value as f32);
+    }
+    packed
 }
 
 const _: () = assert!(
@@ -625,6 +648,16 @@ impl VoxelFrame {
             milky_way_core: world
                 .milky_way
                 .map_or([0.0; 4], |(_, core)| core.as_vec3().extend(0.0).to_array()),
+            snow: [
+                f32::from(u8::from(world.is_snow)),
+                world.blizzards.len().min(MAX_BLIZZARD_COUNT) as f32,
+                (world.sky_time_s % SNOW_CLOCK_PERIOD_S) as f32,
+                0.0,
+            ],
+            blizzards: pack_blizzards(&world.blizzards, |b| {
+                [b.u_m, b.v_m, b.radius_m, b.height_m]
+            }),
+            blizzard_air: pack_blizzards(&world.blizzards, |b| [b.fog_per_m, b.snow_per_m3, 0.0, 0.0]),
         };
         assert_eq!(
             world.palette.len(),
@@ -821,6 +854,7 @@ impl VoxelGpu {
             )
             .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
             .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+            .replace("__MAX_BLIZZARD_COUNT__", &MAX_BLIZZARD_COUNT.to_string())
             .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
             .replace(
                 "__BYTES_PER_VOXEL_UNIFORMS__",
