@@ -1,7 +1,7 @@
 //! `settings.rs` reads the game's two settings files, so players can tune it without rebuilding:
 //! `server_settings.yaml`, the numbers that shape play for everyone (movement, sprint energy, both
-//! guns, consoles, respawning, how a hit slows, the flashlight), which the game server sends to every
-//! player who joins; and `player_settings.yaml`, each player's own choices (keys, mouse speed, head
+//! guns, consoles, respawning, how a hit slows, the flashlight, how curved space is), which the game
+//! server sends to every player who joins; and `player_settings.yaml`, each player's own choices (keys, mouse speed, head
 //! bob, motion blur, how a hit looks).
 //!
 //! Interface: `ServerSettings` (`Builtin`, `Load`, `FromJson`, `to_json`), `PerPlayerSettings`
@@ -24,6 +24,8 @@ use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
+pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
+pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
 const SERVER_ZERO_ALLOWED_KEYS: [&str; 10] = [
     "map_edge.start_wall_frac",
     "sniper.reload_s",
@@ -193,6 +195,15 @@ pub struct MapEdgeSettings {
     pub stop_wall_frac: f64,
 }
 
+/// `SpaceSettings` is how curved space is: its curvature (1 over the curvature radius) as a multiple
+/// of the map's own, from `MIN_CURVATURE_PER_MAP_CURVATURE` to `MAX_CURVATURE_PER_MAP_CURVATURE`
+/// (`Map::scale_curvature`).
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct SpaceSettings {
+    pub curvature_per_map_curvature: f64,
+}
+
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
 /// blueshifts toward cyan just after going through a wormhole (0 to 1) and how long that takes to
@@ -262,6 +273,7 @@ pub struct ServerSettings {
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
     pub aim: AimSettings,
+    pub space: SpaceSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -313,7 +325,7 @@ fn read_text(path: &Path) -> Result<String> {
 
 impl ServerSettings {
     /// `FromYaml` reads server settings from YAML text, naming `source` in errors, and checks every
-    /// number (`check_numbers`).
+    /// number (`check_numbers`) and the numbers that bound each other or have a range.
     ///
     /// Example: `let settings = ServerSettings::FromYaml(&text, "fast.yaml")?;`
     #[allow(non_snake_case)]
@@ -346,6 +358,14 @@ impl ServerSettings {
             return Err(format!(
                 "settings {source}: map_edge needs start_wall_frac < stop_wall_frac <= 1, not {} and {}",
                 edge.start_wall_frac, edge.stop_wall_frac
+            )
+            .into());
+        }
+        let curvature: f64 = settings.space.curvature_per_map_curvature;
+        if !(MIN_CURVATURE_PER_MAP_CURVATURE..=MAX_CURVATURE_PER_MAP_CURVATURE).contains(&curvature)
+        {
+            return Err(format!(
+                "settings {source}: space.curvature_per_map_curvature must be from {MIN_CURVATURE_PER_MAP_CURVATURE} (the map's own curvature) to {MAX_CURVATURE_PER_MAP_CURVATURE} (twice it), not {curvature}"
             )
             .into());
         }
@@ -455,6 +475,7 @@ mod tests {
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise that shrinks with heat) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Wormhole tint strength | 0 (with a fade of 0 s), between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Curvature per map curvature | below 1, 1, between 1 and 2, 2 (built in), above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -554,5 +575,29 @@ mod tests {
             .expect("a tint above 1 fails")
             .to_string();
         assert!(error.contains("view.wormhole_tint_frac"), "{error}");
+    }
+
+    #[test]
+    fn curvature_takes_1_to_2() {
+        assert_eq!(
+            ServerSettings::Builtin().space.curvature_per_map_curvature,
+            MAX_CURVATURE_PER_MAP_CURVATURE
+        );
+        for (factor, is_valid) in [("1.0", true), ("1.5", true), ("0.5", false), ("2.5", false)] {
+            let yaml: String = BUILTIN_SERVER_YAML.replace(
+                "curvature_per_map_curvature: 2.0",
+                &format!("curvature_per_map_curvature: {factor}"),
+            );
+            let result: Result<ServerSettings> = ServerSettings::FromYaml(&yaml, "test");
+            assert_eq!(result.is_ok(), is_valid, "{factor}");
+            if let Err(error) = result {
+                assert!(
+                    error
+                        .to_string()
+                        .contains("space.curvature_per_map_curvature"),
+                    "{error}"
+                );
+            }
+        }
     }
 }

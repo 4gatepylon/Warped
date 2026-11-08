@@ -41,8 +41,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `make serve-game` runs only the server, without a window, and prints this computer's address and the exact
   `make join-game` commands to give the others (`SERVER=127.0.0.1` on the same computer). Leave it running in its
   terminal; `Ctrl-C` ends the game.
-- To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight), copy
-  `server_settings.yaml`, change its numbers, and start the server with it:
+- To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight, the
+  curvature), copy `server_settings.yaml`, change its numbers, and start the server with it:
   `make serve-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml`.
   Everyone who joins plays by the server's settings.
 - Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`. The
@@ -90,6 +90,14 @@ each step outward is cut by how far you have already come, so you never get past
 14 m high). Your view stretches out from the middle of the screen, more and more as you slow. Walking back in is at
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
+
+Space on Lunar Surface is twice as curved as before: its curvature radius is 20 m instead of 40 m. Buildings and
+players keep their size, but far things shrink much faster with distance, the crater's wall sinks toward the
+horizon, and the structures away from the middle line are further apart. The server's
+`space.curvature_per_map_curvature` sets it, from 1 (the old curvature) to 2 (the default); a window that joins
+builds the map at the server's value. Known rough: at 2, surfaces more than about 90 m from the middle of the map
+(both spawns, the red pylon) speckle, because the renderer's single precision runs out that many curvature radii
+out; at 1.5 there is almost none.
 
 The bars in the bottom left (health, then the gun's ammo, then sprint energy) lean like `/` and glow in their
 colours. While one changes, soft swells of light run over its filled part, stronger and faster the faster it

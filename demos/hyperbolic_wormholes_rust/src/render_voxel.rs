@@ -358,7 +358,7 @@ impl VoxelFrame {
         let gpu_beams: Vec<GpuBeam> = beams
             .iter()
             .flat_map(|(segments, team)| {
-                clip_beam_to_map(segments)
+                clip_beam_to_map(segments, world.r)
                     .into_iter()
                     .map(move |s| GpuBeam {
                         a: to_f32(s.a),

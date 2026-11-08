@@ -417,7 +417,8 @@ impl FrameData<'_> {
 }
 
 /// `MetalRenderer` holds the GPU, the compiled ray tracer, the scene buffer, and the textures and
-/// MetalFX scaler for the current render and output sizes.
+/// MetalFX scaler for the current render and output sizes. It keeps the minimap's picture for
+/// where it lies (the shader's `Minimap.map`) and uploads it again when that changes.
 pub struct MetalRenderer {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
@@ -435,6 +436,7 @@ pub struct MetalRenderer {
     overlay_mask: Option<Texture>,
     overlay_picture: Option<Texture>,
     overlay_map: Option<Texture>,
+    overlay_map_placement: [f32; 4],
     blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
@@ -759,6 +761,7 @@ impl MetalRenderer {
             overlay_mask: None,
             overlay_picture: None,
             overlay_map: None,
+            overlay_map_placement: [0.0; 4],
             hole_buffers: None,
             voxel_gpu: None,
             viewmodel: None,
@@ -1310,8 +1313,10 @@ impl MetalRenderer {
                 let is_uploaded: bool = self
                     .overlay_map
                     .as_ref()
-                    .is_some_and(|(_, size)| *size == minimap.map_size_px);
+                    .is_some_and(|(_, size)| *size == minimap.map_size_px)
+                    && self.overlay_map_placement == minimap.minimap.map;
                 if !is_uploaded {
+                    self.overlay_map_placement = minimap.minimap.map;
                     upload_texture(
                         &self.device,
                         &mut self.overlay_map,

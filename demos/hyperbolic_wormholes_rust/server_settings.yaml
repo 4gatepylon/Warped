@@ -1,8 +1,8 @@
 # `server_settings.yaml` holds the numbers that shape play in the Rust demo: movement, sprint energy, both
-# guns, consoles, respawning, how a hit slows a player, and the flashlight. The game server reads it and
-# sends it to every player who joins, so everyone in a game plays by the same numbers; a game without a
-# server uses it too. What only changes a player's own experience (keys, mouse speed, head bob, motion
-# blur, how a hit looks) is in `player_settings.yaml` instead.
+# guns, consoles, respawning, how a hit slows a player, the flashlight, and how curved space is. The game
+# server reads it and sends it to every player who joins, so everyone in a game plays by the same numbers;
+# a game without a server uses it too. What only changes a player's own experience (keys, mouse speed, head
+# bob, motion blur, how a hit looks) is in `player_settings.yaml` instead.
 #
 # Interface:
 #     Copy this file, change the numbers, and pass the copy to the server: `SERVER_SETTINGS=` with
@@ -77,3 +77,6 @@ aim:  # Holding the aim control (the right button) zooms in; the mouse turns the
 map_edge:  # On a map with a crater, its wall is the edge: climbing it, players slow down without end ("Zeno's paradox").
   start_wall_frac: 0.0  # How far up the wall players start to slow (0 at its foot, 1 at the rim).
   stop_wall_frac: 0.5  # How far up their speed would reach 0; each step outward is cut by the share of the way there.
+
+space:  # How curved Lunar Surface is (the house demo keeps its own); a window that joins builds the map by the server's.
+  curvature_per_map_curvature: 2.0  # Times the map's own curvature (1 / its 40 m radius), from 1 to 2: 2 makes the radius 20 m.

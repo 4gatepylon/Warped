@@ -579,13 +579,26 @@ fn main() -> Result<()> {
     }
 }
 
-/// `load_world` loads a map from `common/maps/` as the world of boxes and mouths this renderer
-/// draws.
+/// `load_map` loads a map from `common/maps/` and, on a voxel map (one with structures, such as
+/// Lunar Surface), curves its space as `settings` say (`Map::scale_curvature`). The house demo
+/// keeps its own curvature: at twice it, its far pylon sits 13 curvature radii out, too far for
+/// the renderer's single precision, and its scripted route breaks.
 ///
-/// Example: `let world = load_world(MapName::HouseDemo)?;`
-fn load_world(name: MapName) -> Result<World> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
-    Ok(World::FromMap(&map)?)
+/// Example: `let map = load_map(MapName::LunarSurface, &ServerSettings::Builtin())?;`
+fn load_map(name: MapName, settings: &ServerSettings) -> Result<map::Map> {
+    let mut map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
+    if !map.structures.is_empty() {
+        map.scale_curvature(settings.space.curvature_per_map_curvature)?;
+    }
+    Ok(map)
+}
+
+/// `load_world` loads a map from `common/maps/` (`load_map`) as the world of boxes and mouths
+/// this renderer draws.
+///
+/// Example: `let world = load_world(MapName::HouseDemo, &ServerSettings::Builtin())?;`
+fn load_world(name: MapName, settings: &ServerSettings) -> Result<World> {
+    Ok(World::FromMap(&load_map(name, settings)?)?)
 }
 
 /// `parse_server_address` reads `--join`'s address: an IP address with an optional port (`port`
@@ -719,12 +732,13 @@ fn find_lan_address() -> Option<IpAddr> {
 ///
 /// Example: `serve_only(&arguments)?;`
 fn serve_only(arguments: &Arguments) -> Result<()> {
-    let map_data: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let settings: ServerSettings = load_settings(arguments)?;
+    let map_data: map::Map = load_map(arguments.map, &settings)?;
     let consoles: Vec<voxel_world::Console> = voxel_world::find_consoles(&map_data);
     let (should_stop, thread) = start_server(
         arguments.port,
         arguments.map.get_folder_name(),
-        load_settings(arguments)?,
+        settings,
         consoles.iter().map(|c| c.team).collect(),
     )?;
     println!(
@@ -886,7 +900,7 @@ fn bench_voxel_views(
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map: map::Map = load_map(arguments.map, &ServerSettings::Builtin())?;
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         arguments.map.get_folder_name(),
@@ -1166,7 +1180,7 @@ fn make_bench_views(world: &World) -> Vec<View> {
 ///
 /// Example: `bench_views(&arguments, renderer)?;`
 fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map: map::Map = load_map(arguments.map, &load_settings(arguments)?)?;
     if !map.structures.is_empty() {
         return bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?);
     }
@@ -1561,7 +1575,7 @@ fn make_warp_tour(world: &VoxelWorld) -> Vec<RouteFrame> {
 ///
 /// Example: `run_autopilot(&arguments, renderer)?;`
 fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = load_world(arguments.map)?;
+    let world: World = load_world(arguments.map, &load_settings(arguments)?)?;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("autopilot", arguments.label.as_deref())?;
@@ -1718,9 +1732,10 @@ fn get_blueshift_frac(left_frac: f64, strength_frac: f64) -> f32 {
     (strength_frac * left_frac * left_frac * (3.0 - 2.0 * left_frac)) as f32
 }
 
-/// `Session` is the state of a played window: the world, the player, the toggles and the HUD's
-/// running averages.
+/// `Session` is the state of a played window: the map it loaded, the world, the player, the
+/// toggles and the HUD's running averages.
 struct Session {
+    map_name: MapName,
     world: World,
     player: Player,
     render_scale: f64,
@@ -1970,8 +1985,8 @@ impl Session {
     /// Example: `let mut session = Session::New(&arguments);`
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
-        let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
         let settings: ServerSettings = load_settings(arguments)?;
+        let map: map::Map = load_map(arguments.map, &settings)?;
         let player_settings_path: Option<PathBuf> =
             arguments.player_settings.clone().or_else(|| {
                 std::env::var_os("HOME")
@@ -2045,6 +2060,7 @@ impl Session {
             None
         };
         Ok(Session {
+            map_name: arguments.map,
             world,
             player,
             settings,
@@ -2665,8 +2681,9 @@ impl Session {
         self.message_time_s = MESSAGE_DURATION_S;
     }
 
-    /// `update_multiplayer` reads the server's news: a welcome puts this player at its spawn
-    /// point, and a hit is announced (and, if this player was hit, starts the respawn countdown).
+    /// `update_multiplayer` reads the server's news: a welcome rebuilds a voxel map at the server's
+    /// curvature if it differs from this window's and puts this player at its spawn point, and a
+    /// hit is announced (and, if this player was hit, starts the respawn countdown).
     /// It returns whether this player is out of the game for now, and fails if the server can't be
     /// read.
     ///
@@ -2682,11 +2699,27 @@ impl Session {
                 net::NetEvent::Joined(id) => {
                     let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
                     let team: u32 = multiplayer.client.team.expect("a welcome brings the team");
-                    self.settings = multiplayer
+                    let server_settings: ServerSettings = multiplayer
                         .client
                         .settings
                         .clone()
                         .expect("a welcome brings the server's settings");
+                    if server_settings.space != self.settings.space
+                        && let Some(voxel) = &mut self.voxel
+                    {
+                        let map: map::Map = load_map(self.map_name, &server_settings)?;
+                        self.map_layout =
+                            map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?;
+                        let head_bob: settings::HeadBobSettings = voxel.world.head_bob.clone();
+                        voxel.world = VoxelWorld::FromMap(&map)?;
+                        voxel.world.head_bob = head_bob;
+                        self.world = World::Empty(map.get_curvature_radius_m());
+                        messages.push(format!(
+                            "The server curves space {} times as much as the map",
+                            server_settings.space.curvature_per_map_curvature
+                        ));
+                    }
+                    self.settings = server_settings;
                     match &mut self.voxel {
                         Some(voxel) => {
                             voxel.world.set_settings(self.settings.clone());
