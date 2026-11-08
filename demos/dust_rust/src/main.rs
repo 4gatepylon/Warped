@@ -1136,6 +1136,27 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
                 -0.2,
             )
         },
+        VoxelView {
+            is_laser_on: true,
+            shooter_m: Some(([-70.0, -20.0], [70.0, -20.0])),
+            ..view(
+                "laser_across_wind_above",
+                [-30.0, -20.0],
+                [-30.0, -10.0],
+                Some(45.0),
+                -1.55,
+            )
+        },
+        VoxelView {
+            is_laser_on: true,
+            ..view(
+                "laser_across_wind_eye",
+                [-70.0, -20.0],
+                [70.0, -20.0],
+                None,
+                0.0,
+            )
+        },
     ]
 }
 
