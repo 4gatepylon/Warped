@@ -128,8 +128,9 @@ pub struct VoxelStructure {
 }
 
 /// `VoxelWarp` is a black hole or a wormhole mouth: its frame, m and reach in curvature units,
-/// its partner, the structures within its reach, its colour if a player threw it, and whether it
-/// flashes red (just hit).
+/// its partner, the structures within its reach, its colour if a player threw it, whether it
+/// flashes red (just hit), and a black hole's wide lens (`get_lens_log_index`): the most it turns
+/// a ray (radians, 0 for none) and its core radius (curvature units).
 #[derive(Clone)]
 pub struct VoxelWarp {
     pub name: String,
@@ -143,6 +144,8 @@ pub struct VoxelWarp {
     pub list: Vec<usize>,
     pub color: Option<WormholeColor>,
     pub is_flashing: bool,
+    pub lens_rad: f64,
+    pub lens_core: f64,
 }
 
 /// `SpecialMaterials` is the ids of the materials the `lunar` style draws in its own way (-1 when
@@ -448,6 +451,25 @@ pub(crate) fn map_klein(k: DVec3) -> DVec4 {
     (k * f).extend(f)
 }
 
+/// `get_lens_log_index` gives a black hole's wide lens at distance `rho` from its centre (W-107):
+/// d ln n / dρ and ln n, with ln n = h a / √(ρ² + a²) for the most it turns a ray h
+/// (`lens_rad`) and its core radius a (`lens_core`). It bends light over its whole core, most at
+/// a ray passing a from the centre, and adds no horizon, so the black part doesn't grow with it;
+/// both are 0 without a lens.
+///
+/// Example: `let (slope, log_n) = get_lens_log_index(&world.warps[0], 0.2);`
+fn get_lens_log_index(warp: &VoxelWarp, rho: f64) -> (f64, f64) {
+    if warp.lens_rad == 0.0 {
+        return (0.0, 0.0);
+    }
+    let a: f64 = warp.lens_core;
+    let root: f64 = (rho * rho + a * a).sqrt();
+    (
+        -warp.lens_rad * a * rho / (root * root * root),
+        warp.lens_rad * a / root,
+    )
+}
+
 /// `map_exp` maps a local offset in meters to the hyperboloid by the exponential map at the origin.
 ///
 /// Example: `let probe = map_exp(DVec3::new(0.25, 0.0, 0.0), 40.0);`
@@ -626,6 +648,8 @@ impl VoxelWorld {
                     .collect(),
                 color: None,
                 is_flashing: false,
+                lens_rad: 0.0,
+                lens_core: 0.0,
             });
         }
         if let Some(material) = map
@@ -928,6 +952,8 @@ impl VoxelWorld {
                         .collect(),
                     color: Some(color),
                     is_flashing: false,
+                    lens_rad: 0.0,
+                    lens_core: 0.0,
                 });
             }
         }
@@ -1019,7 +1045,9 @@ impl VoxelWorld {
 
     /// `grow_black_hole` grows the black hole to `strength_frac` (0 to 1) by the settings'
     /// `black_hole`: its Schwarzschild radius and reach grow from the map's to the settings'
-    /// maximum in proportion to the strength, and it stays where the map has it.
+    /// maximum in proportion to the strength, its wide lens from none to the settings'
+    /// `max_lens_rad` (with a core of `lens_core_per_reach` of its reach), and it stays where the
+    /// map has it.
     ///
     /// Example: `world.grow_black_hole(0.4);`
     pub fn grow_black_hole(&mut self, strength_frac: f64) {
@@ -1032,9 +1060,12 @@ impl VoxelWorld {
         let settings = &self.settings.black_hole;
         let full_strength_mass: f64 = settings.max_schwarzschild_radius_m / 4.0 / self.r;
         let full_strength_reach: f64 = settings.max_reach_m / self.r;
+        let reach: f64 = hole.reach + (full_strength_reach - hole.reach) * strength_frac;
         self.warps[index] = VoxelWarp {
             m: hole.m + (full_strength_mass - hole.m) * strength_frac,
-            reach: hole.reach + (full_strength_reach - hole.reach) * strength_frac,
+            reach,
+            lens_rad: settings.max_lens_rad * strength_frac,
+            lens_core: settings.lens_core_per_reach * reach,
             ..hole
         };
     }
@@ -1285,9 +1316,10 @@ impl VoxelWorld {
         } else {
             let q: f64 = warp.m / rho;
             let guard: f64 = (1.0 - q).max(1e-4);
+            let (lens_slope, lens_log) = get_lens_log_index(warp, rho);
             (
-                -warp.m / (rho * rho) * (3.0 / (1.0 + q) + 1.0 / guard),
-                3.0 * (1.0 + q).ln() - guard.ln(),
+                -warp.m / (rho * rho) * (3.0 / (1.0 + q) + 1.0 / guard) + lens_slope,
+                3.0 * (1.0 + q).ln() - guard.ln() + lens_log,
             )
         };
         let slope: f64 = if f >= 1.0 {
@@ -1331,9 +1363,10 @@ impl VoxelWorld {
     /// black hole. Near each black hole it is general relativity's rate for someone standing still,
     /// (1 − q) / (1 + q) in isotropic coordinates, with q = k m / ρ: ρ the distance to its centre,
     /// m its horizon's radius in those coordinates, and k the settings'
-    /// `black_hole.time_dilation_per_general_relativity` (1 for real). The rate's log fades to 0 at
-    /// the black hole's reach along the window its light bending uses, and the rate never drops
-    /// below `black_hole.min_time_rate_frac`.
+    /// `black_hole.time_dilation_per_general_relativity` (1 for real). Its wide lens slows time
+    /// too, as a weak field does: the rate's log falls by k times half the lens's ln n. The rate's
+    /// log fades to 0 at the black hole's reach along the window its light bending uses, and the
+    /// rate never drops below `black_hole.min_time_rate_frac`.
     ///
     /// Example: `let rate_frac = world.get_time_rate_frac(eye.col(AXIS_W));`
     pub fn get_time_rate_frac(&self, x: DVec4) -> f64 {
@@ -1345,11 +1378,15 @@ impl VoxelWorld {
             .map(|warp| {
                 let rho: f64 = (warp.inverse * x).truncate().length().asinh();
                 let f: f64 = rho / warp.reach;
-                let q: f64 = settings.time_dilation_per_general_relativity * warp.m / rho;
+                let k: f64 = settings.time_dilation_per_general_relativity;
+                let q: f64 = k * warp.m / rho;
+                let lens_log: f64 = get_lens_log_index(warp, rho).1;
                 match (f < 1.0, q < 1.0) {
                     (false, _) => 0.0,
                     (true, false) => f64::NEG_INFINITY,
-                    (true, true) => ((1.0 - q) / (1.0 + q)).ln() * (1.0 - f * f).powi(2),
+                    (true, true) => {
+                        (((1.0 - q) / (1.0 + q)).ln() - k * lens_log / 2.0) * (1.0 - f * f).powi(2)
+                    }
                 }
             })
             .sum();
@@ -2150,10 +2187,10 @@ mod tests {
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Low way walked out of | a habitat module's doors (each module, each way), a walkway's ends (each walkway, each way) | `players_walk_out_of_modules_and_walkways` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
-    //! | Black hole growth | 1 (the settings' maximum), back to 0 (the map's) | `the_black_hole_grows_in_place` |
+    //! | Black hole growth | 1 (the settings' maximum, with its wide lens), back to 0 (the map's, no lens) | `the_black_hole_grows_in_place` |
     //! | Distance from the black hole (time rate) | at its centre and inside k horizons (the floor), within its reach (between, slower closer in), at and past its reach (1) | `time_slows_near_the_black_hole` |
     //! | Black hole strength (time rate) | the map's, full (slower at the same place) | `time_slows_near_the_black_hole` |
-    //! | Time dilation setting k | 0 (1 everywhere), 1 (general relativity's rate, tapered) | `time_dilation_follows_the_setting` |
+    //! | Time dilation setting k | 0 (1 everywhere), 1 (general relativity's rate, tapered; with the wide lens at full strength) | `time_dilation_follows_the_setting` |
     //! | Warp | black hole (slows time), wormhole mouth (doesn't) | `time_dilation_follows_the_setting` |
     //! | Progress of turning off a console | none (the normal rate), part way (rising, faster each step), done (the frenzy), past done (fails) | `the_pulse_ramps_up_with_progress`, `progress_past_done_fails` |
     //! | Target rate against the pulse's own | higher (reached at once), the same (kept), lower (eases down: barely after a frame, nearly there after a second, never below) | `the_pulse_eases_back_down` |
@@ -2535,10 +2572,16 @@ mod tests {
         let settings = &world.settings.black_hole;
         assert!((hole.m * 4.0 * grown.r - settings.max_schwarzschild_radius_m).abs() < 1e-9);
         assert!((hole.reach * grown.r - settings.max_reach_m).abs() < 1e-9);
+        assert_eq!(hole.lens_rad, settings.max_lens_rad);
+        assert!((hole.lens_core - settings.lens_core_per_reach * hole.reach).abs() < 1e-12);
         grown.grow_black_hole(0.0);
         assert_eq!(
-            (grown.warps[0].m, grown.warps[0].reach),
-            (map_hole.m, map_hole.reach)
+            (
+                grown.warps[0].m,
+                grown.warps[0].reach,
+                grown.warps[0].lens_rad
+            ),
+            (map_hole.m, map_hole.reach, 0.0)
         );
     }
 
@@ -2585,10 +2628,13 @@ mod tests {
             .settings
             .black_hole
             .time_dilation_per_general_relativity = 1.0;
+        world.grow_black_hole(1.0);
         let hole: &VoxelWarp = &world.warps[0];
         let rho: f64 = hole.reach / 2.0;
         let q: f64 = hole.m / rho;
-        let expected_frac: f64 = ((1.0 - q) / (1.0 + q)).powf((1.0 - 0.25_f64).powi(2));
+        let lens_log_n: f64 = hole.lens_rad * hole.lens_core / rho.hypot(hole.lens_core);
+        let window: f64 = (1.0 - 0.25_f64).powi(2);
+        let expected_frac: f64 = ((((1.0 - q) / (1.0 + q)).ln() - lens_log_n / 2.0) * window).exp();
         let at_half_reach: DVec4 = get_point_from_hole(&world, 0, rho * world.r);
         assert!((world.get_time_rate_frac(at_half_reach) - expected_frac).abs() < 1e-9);
         let mouth: usize = (0..world.warps.len())

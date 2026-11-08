@@ -559,8 +559,9 @@ struct VoxelStructure {
  * @brief `VoxelWarp` is one warp object: its inverse and forward frames, its centre, its kind, m and reach (curvature
  * units) and partner, where its list of structures within reach starts, how long it is, how many of its entries are
  * static structures (avatars follow) and where its clearance grid starts, and the grid's half size, cells per axis,
- * cells per unit and curvature radii per stored unit (`voxel_clearance.rs`). Each list entry is (structure, nearest
- * and farthest distance of its bounding sphere from the centre, unused).
+ * cells per unit and curvature radii per stored unit (`voxel_clearance.rs`), and a black hole's wide lens (the most it
+ * turns a ray in radians, its core radius in curvature units; 0 for none). Each list entry is (structure, nearest and
+ * farthest distance of its bounding sphere from the centre, unused).
  */
 struct VoxelWarp {
     float4x4 inverse;
@@ -569,6 +570,7 @@ struct VoxelWarp {
     float4 params;
     int4 list;
     float4 grid;
+    float4 lens;
 };
 
 /** @brief `VoxelLight` is a lamp: its position, and its colour with its radius in meters. */
@@ -1010,10 +1012,26 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
     return smoothstep(0.0, 1.0, h.lit);
 }
 
-/** @brief `get_index_slope` gives d ln n / dρ of a warp's index (isotropic Schwarzschild or foil). @par Example @code float s = get_index_slope(scene, w, rho); @endcode */
+/**
+ * @brief `get_lens_log_index` gives a black hole's wide lens (voxel_world.rs's `get_lens_log_index`, W-107) at distance
+ * `rho`: (d ln n / dρ, ln n) with ln n = h a / √(ρ² + a²) for the most it turns a ray h (`lens.x`) and its core radius
+ * a (`lens.y`); none for a mouth.
+ * @par Example
+ * @code
+ * float2 lens = get_lens_log_index(scene, w, rho);
+ * @endcode
+ */
+static float2 get_lens_log_index(thread const Scene &scene, int w, float rho) {
+    float4 lens = scene.warps[w].lens;
+    if (lens.x == 0.0) return float2(0.0);
+    float root = sqrt(rho * rho + lens.y * lens.y);
+    return float2(-lens.x * lens.y * rho / (root * root * root), lens.x * lens.y / root);
+}
+
+/** @brief `get_index_slope` gives d ln n / dρ of a warp's index (isotropic Schwarzschild with its wide lens, or foil). @par Example @code float s = get_index_slope(scene, w, rho); @endcode */
 static float get_index_slope(thread const Scene &scene, int w, float rho) {
     float4 prm = scene.warps[w].params;
-    if (prm.x < HALF_KIND) { float m = prm.y, q = m / rho; return -m / (rho * rho) * (3.0 / (1.0 + q) + 1.0 / max(1.0 - q, HORIZON_GUARD)); }
+    if (prm.x < HALF_KIND) { float m = prm.y, q = m / rho; return -m / (rho * rho) * (3.0 / (1.0 + q) + 1.0 / max(1.0 - q, HORIZON_GUARD)) + get_lens_log_index(scene, w, rho).x; }
     float pt = prm.y, ir = 1.0 / rho, psi = 1.0 + pt * ir, ir2 = ir / (psi * psi), rs = 4.0 * pt;
     return -2.0 * pt * ir * ir / psi - rs * psi * (1.0 - pt * ir) * ir2 * ir2 / (2.0 * (1.0 + FOIL_LAMBDA_SQ - rs * ir2));
 }
@@ -1021,7 +1039,7 @@ static float get_index_slope(thread const Scene &scene, int w, float rho) {
 /** @brief `get_log_index` gives ln n of a warp's index. @par Example @code float ln_n = get_log_index(scene, w, rho); @endcode */
 static float get_log_index(thread const Scene &scene, int w, float rho) {
     float4 prm = scene.warps[w].params;
-    if (prm.x < HALF_KIND) { float q = prm.y / rho; return 3.0 * log(1.0 + q) - log(max(1.0 - q, HORIZON_GUARD)); }
+    if (prm.x < HALF_KIND) { float q = prm.y / rho; return 3.0 * log(1.0 + q) - log(max(1.0 - q, HORIZON_GUARD)) + get_lens_log_index(scene, w, rho).y; }
     float pt = prm.y, psi = 1.0 + pt / rho, r = rho * psi * psi;
     return 2.0 * log(psi) - 0.5 * log((1.0 - 4.0 * pt / r + FOIL_LAMBDA_SQ) / (1.0 + FOIL_LAMBDA_SQ));
 }

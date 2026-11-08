@@ -29,7 +29,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 19] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 20] = [
     "map_edge.start_wall_frac",
     "sniper.reload_s",
     "sniper.noise_mean_rad",
@@ -49,6 +49,7 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 19] = [
     "respawn.delay_s",
     "wormholes.throw_up_rad",
     "black_hole.time_dilation_per_general_relativity",
+    "black_hole.max_lens_rad",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
 const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
@@ -255,15 +256,18 @@ pub struct SpaceSettings {
 
 /// `BlackHoleSettings` is the black hole that grows as consoles turn off (W-68) and slows time
 /// near it (W-107): how long it eases to a new size, its Schwarzschild radius and reach at full
-/// strength, how many times stronger than in general relativity time slows near it (0 for not at
-/// all), and the slowest its time runs (a share of the time far away, above 0 so that nobody
-/// freezes).
+/// strength, its wide lens at full strength (the most it turns a ray, and its core radius as a
+/// share of the reach), how many times stronger than in general relativity time slows near it (0
+/// for not at all), and the slowest its time runs (a share of the time far away, above 0 so that
+/// nobody freezes).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct BlackHoleSettings {
     pub transition_s: f64,
     pub max_schwarzschild_radius_m: f64,
     pub max_reach_m: f64,
+    pub max_lens_rad: f64,
+    pub lens_core_per_reach: f64,
     pub time_dilation_per_general_relativity: f64,
     pub min_time_rate_frac: f64,
 }
@@ -633,8 +637,8 @@ mod tests {
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
     //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`) | present (built in), missing in an old save (gets the built-in `V` and 1), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
-    //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.15, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
-    //! | Time dilation per general relativity | 0 (allowed: none), 3 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -826,17 +830,17 @@ mod tests {
         let with_values = |rate_frac: &str, dilation: &str| -> Result<ServerSettings> {
             let yaml: String = BUILTIN_SERVER_YAML
                 .replace(
-                    "min_time_rate_frac: 0.15",
+                    "min_time_rate_frac: 0.1",
                     &format!("min_time_rate_frac: {rate_frac}"),
                 )
                 .replace(
-                    "time_dilation_per_general_relativity: 3.0",
+                    "time_dilation_per_general_relativity: 15.0",
                     &format!("time_dilation_per_general_relativity: {dilation}"),
                 );
             ServerSettings::FromYaml(&yaml, "test")
         };
         for (rate_frac, is_valid) in [("0.0", false), ("1.0", true), ("1.5", false)] {
-            let result: Result<ServerSettings> = with_values(rate_frac, "3.0");
+            let result: Result<ServerSettings> = with_values(rate_frac, "15.0");
             assert_eq!(result.is_ok(), is_valid, "{rate_frac}");
             if let Err(error) = result {
                 assert!(
@@ -845,7 +849,7 @@ mod tests {
                 );
             }
         }
-        assert!(with_values("0.15", "0.0").is_ok());
+        assert!(with_values("0.1", "0.0").is_ok());
     }
 
     #[test]

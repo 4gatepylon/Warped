@@ -1882,31 +1882,39 @@
     through the bent world, and the shader's `HAS_BEND` tracer. `reality_bend.rs` became `black_hole_growth.rs`,
     the `reality_bend` server settings became `black_hole` (without `edge_radius_m`), and `--bend-strength` became
     `--black-hole-strength`.
-  - **The black hole still grows:** as before, each console turned off grows its Schwarzschild radius (1.2 m to 6 m)
-    and reach (24 m to 40 m), easing over 4 s. It now stays where the map puts it, 17 m above the map's middle; it
-    used to rise toward the bent sphere's centre.
+  - **The black part grows a little, the distortion a lot:** each console turned off grows the black hole's
+    Schwarzschild radius from 1.2 m to only 2 m, its reach from 24 m to 28 m, and a wide lens around it from none to
+    one that turns a ray by up to 0.35 rad (`max_lens_rad`). The lens is ln n = h a / √(ρ² + a²), with a core a of
+    0.35 of the reach (`lens_core_per_reach`): it bends light across the whole reach, most for rays passing a from the
+    centre, and has no horizon, so it adds no black. The CPU (the laser) and the shader use the same index. The black
+    hole stays where the map puts it, 17 m above the map's middle; it used to rise toward the bent sphere's centre.
   - **How slow:** `VoxelWorld::get_time_rate_frac` is general relativity's clock rate for someone standing still
     near a black hole, (1 − q) / (1 + q) in isotropic coordinates with q = k m / ρ, with k =
-    `time_dilation_per_general_relativity` = 3. Its log fades to 0 at the black hole's reach, along the window
-    its light bending uses, and the rate never drops below `min_time_rate_frac` = 0.15, so a player near the horizon
-    crawls rather than freezes. On the ground under the black hole (15.4 m from its centre) time runs at 96% with no
-    console off, 78% with three off and 65% with five; 8 m from its centre it is 84%, 49% and 31%.
+    `time_dilation_per_general_relativity` = 15. The wide lens slows time too, as a weak field does: the rate's log
+    falls by k times half its ln n. The rate's log fades to 0 at the reach, along the window the light bending uses,
+    and never drops below `min_time_rate_frac` = 0.1, so a player near the horizon crawls rather than freezes. On the
+    ground under the black hole (15.4 m from its centre) time runs at 81% with no console off, 45% with three off and
+    25% with five.
   - **Whose time:** each player's own. Their window steps their movement (walking, gravity, jumping, sprint
     energy), turning off a console, both guns' firing, reload and heat, and the gun's sway by their own time.
     Looking around, the menus, the HUD and respawning keep the window's time. Bots step the same way. Other players
     see a slowed player move slowly, since each window sends where its player is.
   - **Shown:** the HUD's line `BLACK HOLE <n>%, your time runs at <n>%` replaces `REALITY <n>%`.
+  - **Reach at most 28 m:** mouth A is 46 m from the black hole with a 15 m reach, and reaches may not overlap; the
+    nearest structure (29.6 m) stays outside, since the black hole's list of structures is built at the map's reach.
 - **Alternatives:**
-  - k = 1, real general relativity: under the black hole at full strength time would run at 87%, too little to
-    feel;
+  - growing the Schwarzschild radius to 6 m (the first version): the black part filled the view; you asked for "the
+    black part grows a little but mostly the distortion area grows";
+  - k = 3 (the first version): 65% under the black hole at full strength and 96% with no console off, which you
+    didn't notice; k = 1, real general relativity, is weaker still;
   - no fade at the reach: everyone on the map would run a little slow, all the time;
   - slowing the whole game: impossible with several players, who are at different distances;
   - slowing looking around too: the mouse would feel broken rather than time slowed;
   - a colour cue (blueshift toward the black hole): left for later.
 - **Rationale:** you asked for the black hole to grow as pylons fall and for time to slow "time dilation style"
-  closer to it. The rate keeps general relativity's shape, so it slows ever faster toward the horizon, and k makes
-  the effect big enough to feel at the distances players can reach. Both numbers are server settings, to tune in a
-  playtest.
+  closer to it, then for "more intense" dilation "all around". The rate keeps general relativity's shape, so it
+  slows ever faster toward the horizon, and k makes it strong enough to feel at the distances players stand. All
+  the numbers are server settings, to tune in a playtest.
 
 ### D102. A photo-like Milky Way across the sky, W-98 (Milky Way)
 

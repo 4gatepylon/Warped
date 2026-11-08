@@ -164,6 +164,7 @@ struct GpuWarp {
     params: [f32; 4],
     list: [i32; 4],
     grid: [f32; 4],
+    lens: [f32; 4],
 }
 
 /// `GpuLight` is the shader's `VoxelLight`.
@@ -407,6 +408,7 @@ impl VoxelFrame {
                         grid.offset as i32,
                     ],
                     grid: pack_grid(grid, r),
+                    lens: [w.lens_rad as f32, w.lens_core as f32, 0.0, 0.0],
                 }
             })
             .collect();
