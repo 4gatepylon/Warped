@@ -1479,6 +1479,44 @@
 - **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
   room for it, and costs at most 15 more checks, only on a blocked step.
 
+### D96. Shot noise in the beam: random pixels drop out (W-84)
+
+- **Choice:**
+  - **The look:** each frame, a share of the beam's screen pixels drops the beam entirely, so whatever is behind
+    shows through: the sky over the sky, ground specks over the ground. The pixels are picked anew each frame and
+    independently for each pixel (`hash_pixel` on the pixel and a seed from the frame's clock, in milliseconds), so
+    the holes flicker as single pixels. The rest of the beam is drawn as before, or brighter (below).
+  - **The share, per shot (`shot_noise.rs`):** the sniper's is exponential with mean `sniper.beam_dropout_mean_frac`
+    (12%), cut at `sniper.beam_dropout_max_frac` (75%), so most shots are nearly clean and the odd one is badly
+    broken. The rifle's grows in step with the heat, from `rifle.beam_dropout_start_frac` (2%) on a cold rifle to
+    `rifle.beam_dropout_max_frac` (60%) on the 20th shot in a row, like a weapon overheating; the heat is the one
+    before the shot adds its own, and it falls back as the rifle cools. Each is 0 for none, and a share above 1 or a
+    rifle start above its maximum fails.
+  - **Every window draws a shot alike:** the share is rounded to steps of 1/31 and sent in the five unused high bits
+    of the laser byte of the player record (bits 3 to 7; bits 0 to 2 are the laser, the rifle and the team), so the
+    snapshot keeps its length. Older windows read only the low bits and draw plain beams; an older server drops the
+    bits, so others' beams show plain. Other windows start a tracer with the share they receive with the shot.
+  - **On the GPU:** each beam segment carries its share in `GpuBeam.info.y`; the ray keeps the share of the beam
+    whose halo is brightest, packed beside the team bit in `VoxelRayEnd.surface.w`, and `shade_ray_end` scales the
+    beam's light by `get_beam_gain` for its pixel.
+  - **Survivors brighter (for your pick):** with `BEAM_DROPOUT_CONTRAST_FRAC` at 1 (now), the surviving pixels
+    brighten by up to 1 / (1 - share), as if the dropped light gathered in what remains, and turn whiter toward the
+    beam's middle by twice the gain above 1 times the halo: pure white near the axis once a third of the pixels drop,
+    nearly the plain beam at 5%. At 0 it is pure dropout.
+  - **Kept:** #216's aim stray (D89), unchanged.
+- **Alternatives:**
+  - painting the chosen pixels black (it reads as noise only over a black background, such as the sky);
+  - grain inside the glow, bright motes around the beam, or a glitchy beam with gaps and jumps (the first samples);
+  - deriving the share in each window from the shooter's id and shot count (the rifle's depends on its heat, which
+    other windows don't know);
+  - a random share for the rifle too (you asked for it to rise with the shots in a burst);
+  - picking pixels after MetalFX upscaling (the overlay pass doesn't know where beams are): at a render scale under 1
+    the holes are render pixels, up to 2 window pixels across.
+- **Rationale:** you asked that the laser beam itself have shot noise: random pixels of a normal beam blacked out,
+  shown as the background rather than black, with the number of them random per sniper shot and rising with the
+  rifle's shots like a weapon malfunctioning as it overheats; and then that the remaining pixels get brighter, for
+  more contrast.
+
 ### D15. WebGL at the same drawing-buffer sizes
 
 - **Choice:** the browser demo from PR 58, unchanged, in the Claude desktop app's built-in browser (Chromium 152,
