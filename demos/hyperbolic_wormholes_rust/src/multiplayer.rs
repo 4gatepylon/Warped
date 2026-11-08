@@ -9,7 +9,7 @@
 //! Interface: `get_spawn_player`, `SharedView`, `pack_shared_view`, `run_bot`,
 //! `SharedVoxelView`, `pack_shared_voxel_view`, `run_voxel_bot`.
 //!
-//! Example: `let view = multiplayer::pack_shared_view(&world, frame, true, &client.players, (1280, 800), 0.0);`
+//! Example: `let view = multiplayer::pack_shared_view(&world, frame, Some(frame), &client.players, (1280, 800), 0.0);`
 
 use std::error::Error;
 use std::time::{Duration, Instant};
@@ -104,14 +104,15 @@ pub struct SharedView {
 }
 
 /// `pack_shared_view` packs the scene seen from `frame` with a box for each of `players`, this
-/// player's laser (if on) and the lasers of the players who have theirs on, each traced through the
-/// same scene, so beams stop at players and bend through wormholes.
+/// player's laser (if on, fired from `laser_aim`: `frame` turned by the shot's noise) and the lasers
+/// of the players who have theirs on, each traced through the same scene, so beams stop at players
+/// and bend through wormholes.
 ///
-/// Example: `let view = multiplayer::pack_shared_view(&world, frame, true, &players, (1280, 800), 0.0);`
+/// Example: `let view = multiplayer::pack_shared_view(&world, frame, Some(frame), &players, (1280, 800), 0.0);`
 pub fn pack_shared_view(
     world: &World,
     frame: DMat4,
-    is_laser_on: bool,
+    laser_aim: Option<DMat4>,
     players: &[RemotePlayer],
     render_px: (u32, u32),
     time_s: f64,
@@ -134,8 +135,8 @@ pub fn pack_shared_view(
         physics::trace_laser(&shared, &data)
     };
     let (mut beam, mut report, mut hit_player_id) = (Beam::default(), None, None);
-    if is_laser_on {
-        let (own_beam, mut own_report) = trace_from(frame);
+    if let Some(aim) = laser_aim {
+        let (own_beam, mut own_report) = trace_from(aim);
         hit_player_id = own_report
             .hit_box
             .and_then(|b| b.checked_sub(first_avatar_box))
@@ -222,7 +223,7 @@ pub fn run_bot(
             let view: SharedView = pack_shared_view(
                 world,
                 player.frame,
-                is_laser_on,
+                is_laser_on.then_some(player.frame),
                 &client.players,
                 BOT_VIEW_PX,
                 start.elapsed().as_secs_f64(),
@@ -296,15 +297,16 @@ fn trace_other_voxel_lasers(
 }
 
 /// `pack_shared_voxel_view` packs a voxel map seen from `camera` with a body for each of
-/// `players`, this player's laser (if on, for team `team`) and the lasers of the players who have
-/// theirs on, all traced through the same map, so beams stop at players and bend like light. It
-/// draws every laser's whole path, or `tracers` instead when given.
+/// `players`, this player's laser (if on, fired from `laser_aim`, `camera` turned by the shot's
+/// noise, for team `team`) and the lasers of the players who have theirs on, all traced through
+/// the same map, so beams stop at players and bend like light. It draws every laser's whole path,
+/// or `tracers` instead when given.
 ///
-/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, true, 1, &players, None, (1280, 800));`
+/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, None, (1280, 800));`
 pub fn pack_shared_voxel_view(
     world: &VoxelWorld,
     camera: DMat4,
-    is_laser_on: bool,
+    laser_aim: Option<DMat4>,
     team: u32,
     players: &[RemotePlayer],
     tracers: Option<Tracers>,
@@ -323,8 +325,8 @@ pub fn pack_shared_voxel_view(
     let shared: VoxelWorld = world.with_avatars(&bodies, &colors);
     let mut beams: Vec<(Vec<BeamSegment>, u32)> = Vec::new();
     let (mut shot, mut hit_player_id, mut spot, mut is_head_hit) = (None, None, None, false);
-    if is_laser_on {
-        let own: Shot = shared.trace_laser(camera);
+    if let Some(aim) = laser_aim {
+        let own: Shot = shared.trace_laser(aim);
         hit_player_id = own
             .hit_structure
             .and_then(|k| k.checked_sub(shared.static_structure_count))
@@ -474,7 +476,7 @@ pub fn run_voxel_bot(
             let view: SharedVoxelView = pack_shared_voxel_view(
                 world,
                 camera,
-                is_laser_on,
+                is_laser_on.then_some(camera),
                 team,
                 &client.players,
                 None,
@@ -506,17 +508,23 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Player id | each id up to `MAX_PLAYER_COUNT` | `spawn_points_are_apart_and_clear_of_mouths` |
-    //! | Laser aim | at another player, past them | `a_laser_hits_the_player_it_points_at` |
+    //! | Laser aim | at another player, past them, strayed past them by shot noise | `a_laser_hits_the_player_it_points_at`, `a_strayed_shot_misses_alike_in_both_windows` |
     //! | Map | the house, Lunar Surface (a hit on another player's body, described for the HUD) | `a_laser_hits_the_player_it_points_at`, `a_lunar_laser_hit_on_a_player_is_described` |
-    //! | Whose laser | this player's, another player's on Lunar Surface (drawn from their gun, out of their own body) | the tests above, `other_players_lasers_leave_their_bodies` |
+    //! | Whose laser | this player's, another player's on Lunar Surface (drawn from their gun, out of their own body; strayed as in its shooter's window) | the tests above, `other_players_lasers_leave_their_bodies`, `a_strayed_shot_misses_alike_in_both_windows` |
 
     use super::*;
     use crate::net::MAX_PLAYER_COUNT;
+    use crate::shot_noise::ShotOffset;
     use crate::world::DEFAULT_CURVATURE_RADIUS_M;
 
     const LUNAR_SHOOTER_M: [f64; 2] = [-27.0, 0.0];
     const LUNAR_TARGET_M: [f64; 2] = [-20.0, 0.0];
     const MIN_OTHER_BEAM_M: f64 = 1.0;
+    const STRAY_PAST_TARGET: ShotOffset = ShotOffset {
+        angle_rad: 0.15,
+        direction_rad: -std::f64::consts::FRAC_PI_4,
+    };
+    const SAME_SPOT_M: f64 = 1e-6;
 
     #[test]
     fn spawn_points_are_apart_and_clear_of_mouths() {
@@ -553,10 +561,11 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
         };
-        let view: SharedView = pack_shared_view(&world, aimed, true, &[other], (64, 40), 0.0);
+        let view: SharedView =
+            pack_shared_view(&world, aimed, Some(aimed), &[other], (64, 40), 0.0);
         assert_eq!(view.hit_player_id, Some(2));
         let away: DMat4 = aimed * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
-        let view: SharedView = pack_shared_view(&world, away, true, &[other], (64, 40), 0.0);
+        let view: SharedView = pack_shared_view(&world, away, Some(away), &[other], (64, 40), 0.0);
         assert_eq!(view.hit_player_id, None);
     }
 
@@ -581,12 +590,64 @@ mod tests {
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
         let view: SharedVoxelView =
-            pack_shared_voxel_view(&world, camera, true, 0, &[other], None, (64, 40));
+            pack_shared_voxel_view(&world, camera, Some(camera), 0, &[other], None, (64, 40));
         assert_eq!(view.hit_player_id, Some(2));
         assert_eq!(
             describe_voxel_laser(&world, &view),
             Some("hits player 2".to_string())
         );
+    }
+
+    #[test]
+    fn a_strayed_shot_misses_alike_in_both_windows() {
+        let map: crate::map::Map =
+            crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
+                .expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let shooter: VoxelPlayer =
+            VoxelPlayer::AtView(&world, LUNAR_SHOOTER_M, LUNAR_TARGET_M, None, 0.0);
+        let target: VoxelPlayer =
+            VoxelPlayer::AtView(&world, LUNAR_TARGET_M, LUNAR_SHOOTER_M, None, 0.0);
+        let camera: DMat4 = shooter.get_camera_frame(&world);
+        let aim: DMat4 = STRAY_PAST_TARGET.aim(camera);
+        let remote = |id: u32, frame: DMat4, is_laser_on: bool| RemotePlayer {
+            id,
+            frame,
+            is_laser_on,
+            is_rifle: false,
+            team: 0,
+            disabling_console: None,
+            disabling_frac: 0.0,
+        };
+        let target_camera: DMat4 = target.get_camera_frame(&world);
+        let shooters_view: SharedVoxelView = pack_shared_voxel_view(
+            &world,
+            camera,
+            Some(aim),
+            0,
+            &[remote(2, target_camera, false)],
+            None,
+            (64, 40),
+        );
+        assert_eq!(shooters_view.hit_player_id, None);
+        let own_spot: DVec4 = shooters_view
+            .shot
+            .and_then(|shot| shot.spot)
+            .expect("the strayed shot lands on the ground");
+        let targets_view: SharedVoxelView = pack_shared_voxel_view(
+            &world,
+            target_camera,
+            None,
+            0,
+            &[remote(1, aim, true)],
+            None,
+            (64, 40),
+        );
+        let seen_spot: DVec4 = targets_view.other_shots[0]
+            .1
+            .spot
+            .expect("the target's window sees the shot land");
+        assert!(get_distance(own_spot, seen_spot) * world.r < SAME_SPOT_M);
     }
 
     #[test]

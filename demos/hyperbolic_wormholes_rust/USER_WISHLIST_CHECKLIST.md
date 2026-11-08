@@ -37,10 +37,6 @@ is in [`AGENTS.md`](AGENTS.md).
   (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/see-through-windows`,
   2026-11-07.
-- [~] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
-  noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
-  All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/shot-noise`, 2026-11-07.
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
   2026-11-07.
@@ -235,3 +231,6 @@ is in [`AGENTS.md`](AGENTS.md).
   you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #209.
 - [x] **W-79 Only serve and join.** "Make a commit to disable everything except starting a server and connecting to
   a server; we will not be using the local demo etc." `make serve-game` and `make join-game` remain. #212.
+- [x] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
+  noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
+  All of it is in the YAML settings. #216.

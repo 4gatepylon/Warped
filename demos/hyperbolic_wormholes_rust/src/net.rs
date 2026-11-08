@@ -109,10 +109,11 @@ impl Kind {
     }
 }
 
-/// `RemotePlayer` is another player as the last snapshot gave them: their eye frame, whether their
-/// laser is on and from which gun, their team (an index into `TEAM_NAMES`), the console they hold
-/// `E` on, if any, and how far along turning it off they are, from 0 to 1, as the server times it
-/// (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it).
+/// `RemotePlayer` is another player as the last snapshot gave them: their eye frame (while their
+/// laser is on, turned by their shot's noise, so it is the frame their laser fires from), whether
+/// their laser is on and from which gun, their team (an index into `TEAM_NAMES`), the console they
+/// hold `E` on, if any, and how far along turning it off they are, from 0 to 1, as the server times
+/// it (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it).
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
