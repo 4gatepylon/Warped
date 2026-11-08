@@ -1,7 +1,7 @@
 //! `render_voxel.rs` draws voxel maps on the GPU with `render_voxel.metal`: it packs a
 //! `VoxelWorld` (with any avatars), the laser beams and the dust of shots into the ground
 //! (`dust.rs`) into buffers each frame and traces them into the render texture that
-//! `render_metal.rs` upscales and presents, every pixel or with the house's adaptive sampling
+//! `render_metal.rs` upscales and presents, every pixel or with adaptive sampling
 //! (`render_metal.rs`'s `encode_adaptive_sampling`).
 //!
 //! Interface: `VoxelUniforms`, `VoxelFrame::Build`, `VoxelGpu`.
@@ -70,7 +70,7 @@ const BAKE_TARGET_TEXTURE_INDEX: usize = 0;
 const BLOOM_LEVELS: usize = 5;
 const FIRST_BLOOM_TEXTURE_INDEX: usize = 7;
 const THREADGROUP_SIDE: usize = 8;
-const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
+pub(crate) const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
 const BEACON_BEAM_M: f64 = 400.0;

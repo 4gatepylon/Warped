@@ -27,7 +27,9 @@ use crate::render_voxel::{LaserBeam, VoxelFrame};
 use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{LOOK_RAD_PER_PX, MARKER_NAME, Shot, VoxelPlayer, VoxelWorld};
-use crate::world::Color;
+
+/// `Color` is a linear RGB colour.
+type Color = [f32; 3];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -430,7 +432,7 @@ mod tests {
     //! | Player id | each id up to `MAX_PLAYER_COUNT` | `spawn_points_are_apart_and_clear_of_mouths` |
     //! | Laser aim | at another player, past them, strayed past them by shot noise | `a_laser_hits_the_player_it_points_at`, `a_strayed_shot_misses_alike_in_both_windows` |
     //! | What a shot hits past the players | a thrown wormhole's marker (named by its index) | `a_shot_at_a_marker_names_it` |
-    //! | Map | the house, Lunar Surface (a hit on another player's body, described for the HUD) | `a_laser_hits_the_player_it_points_at`, `a_lunar_laser_hit_on_a_player_is_described` |
+    //! | Map | Lunar Surface (a hit on another player's body, described for the HUD) | `a_lunar_laser_hit_on_a_player_is_described` |
     //! | Body colour | players of both teams, with ids whose old per-id colours differ from their team's | `players_are_drawn_in_their_teams_colours` |
     //! | Whose laser | this player's, another player's on Lunar Surface (drawn from their gun, out of their own body; strayed as in its shooter's window) | the tests above, `other_players_lasers_leave_their_bodies`, `a_strayed_shot_misses_alike_in_both_windows` |
     //! | This player's own body | not drawn (first person), drawn (third person: others' lasers stop at it, this player's own passes it) | `an_own_body_stops_others_lasers_only` |

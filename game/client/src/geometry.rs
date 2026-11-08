@@ -3,13 +3,13 @@
 //! matrices (column-major, columns right, up, back, position for a frame).
 //!
 //! Interface: `minkowski_dot`, `make_rotation`, `make_boost`, `make_boost_along`,
-//! `make_rotation_about`, `make_rotation_between`, `invert_lorentz`, `normalize_point`,
+//! `make_rotation_between`, `invert_lorentz`, `normalize_point`,
 //! `normalize_tangent`, `get_distance`, `orthonormalize_frame`, `get_local_direction`,
 //! `make_fermi_point`, `transport_from_centre`.
 //!
 //! Example: `let ahead = make_boost(AXIS_Z, -6.0 / curvature_radius_m);`
 
-use glam::{DMat3, DMat4, DQuat, DVec3, DVec4};
+use glam::{DMat4, DQuat, DVec3, DVec4};
 
 pub const AXIS_X: usize = 0;
 pub const AXIS_Y: usize = 1;
@@ -68,14 +68,6 @@ pub fn make_boost_along(direction: DVec3, s: f64) -> DMat4 {
     }
     m.col_mut(AXIS_W)[AXIS_W] = c;
     m
-}
-
-/// `make_rotation_about` makes a spatial rotation about a unit axis, counter-clockwise looking
-/// down the axis.
-///
-/// Example: `let yaw = make_rotation_about(DVec3::Y, 0.1);`
-pub fn make_rotation_about(axis: DVec3, angle_rad: f64) -> DMat4 {
-    DMat4::from_mat3(DMat3::from_axis_angle(axis, angle_rad))
 }
 
 /// `make_rotation_between` makes the smallest spatial rotation that turns unit vector `from` into

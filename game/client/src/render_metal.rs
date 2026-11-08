@@ -1,8 +1,7 @@
-//! `render_metal.rs` ray-traces the scene on the GPU with Metal: it compiles `render_metal.metal`
-//! (a port of `render_cpu.rs`) at start-up, copies each frame's scene rows and uniforms to the
-//! GPU, runs one thread per pixel into a texture, and, when the output is larger than the render
-//! size, upscales it with MetalFX's spatial scaler. The result is either read back (for the
-//! benchmark's PNGs) or copied straight into a window's `CAMetalLayer` drawable.
+//! `render_metal.rs` draws frames on the GPU with Metal: the voxel ray tracer (`render_voxel.rs`)
+//! renders each frame into a texture, MetalFX's spatial scaler upscales it when the output is
+//! larger than the render size, and `overlay.metal` draws the HUD over it. The result is either
+//! read back (for the benchmark's PNGs) or copied straight into a window's `CAMetalLayer` drawable.
 //!
 //! Interface: `MetalRenderer::New`, `MetalRenderer::render_to_pixels`,
 //! `MetalRenderer::render_to_layer`, `MetalRenderer::render_overlay_to_layer`,
@@ -32,17 +31,9 @@ use objc2_metal::{
 use objc2_metal_fx::{MTLFXSpatialScaler, MTLFXSpatialScalerBase, MTLFXSpatialScalerDescriptor};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
-use crate::render_voxel::{VoxelFrame, VoxelGpu};
-use crate::scene_data::{
-    HALF_FOV_RAD, ROW_COUNT, ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS,
-    TEXEL_BOXES, TEXEL_CLUSTER_INFO, TEXEL_CLUSTER_ORDER, TEXEL_CLUSTERS, TEXEL_GLUINGS,
-    TEXEL_GROUND, TEXEL_MOUTH_FIELDS, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD,
-    TEXELS_PER_BEAM_CHUNK, TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING,
-    TEXELS_PER_MOUTH_FIELD, Uniforms,
-};
+use crate::render_voxel::{HALF_FOV_RAD, VoxelFrame, VoxelGpu};
 use crate::viewmodel::{GunModel, Viewmodel};
 use crate::voxel_textures::SurfaceTextures;
-use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -338,8 +329,8 @@ pub(crate) struct SampleBuffers {
 }
 
 /// `AdaptivePipelines` is adaptive sampling's passes, compiled from a shader that has kernels of
-/// these names using the buffer indices `encode_adaptive_sampling` sets (the house's and the voxel
-/// renderer's shaders both do).
+/// these names using the buffer indices `encode_adaptive_sampling` sets (the voxel renderer's
+/// shader does).
 pub(crate) struct AdaptivePipelines {
     trace_coarse: Pipeline,
     fill_samples: Pipeline,
@@ -395,41 +386,14 @@ pub(crate) fn make_pipeline(
         })?)
 }
 
-/// `HoleBuffers` holds the hole filling's buffers for render sizes up to one size: one byte per
-/// pixel saying whether its ray was lost, the pyramid (every level above the image, half the size
-/// of the one below), and the largest render size they hold.
-struct HoleBuffers {
-    lost: Retained<ProtocolObject<dyn MTLBuffer>>,
-    pyramid: Retained<ProtocolObject<dyn MTLBuffer>>,
-    max_px: (usize, usize),
-}
-
-/// `PyramidLevels` is the shader's `PyramidLevels`: the sizes of a finer and a coarser pyramid level
-/// and where each starts in the pyramid buffer.
-#[repr(C)]
-struct PyramidLevels {
-    low_size: [i32; 2],
-    high_size: [i32; 2],
-    low_offset: i32,
-    high_offset: i32,
-}
-
-const SHADER_SOURCE: &str = include_str!("render_metal.metal");
-const BYTES_PER_RAY_END: usize = 48;
+const SHADER_SOURCE: &str = include_str!("overlay.metal");
 pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 112;
 const BYTES_PER_CELL_MARK: usize = 1;
 const BYTES_PER_CELL_INDEX: usize = 4;
 const REFINE_COUNT_BYTES: usize = 16;
 const DISPATCH_ARGUMENTS_BYTES: usize = 12;
 pub(crate) const REFINE_GROUP_SIZE: usize = 64;
-const THROAT_TABLE_SIZE: usize = 4096;
-const CAMERA_TABLE_SIZE: usize = 2048;
-const CAMERA_TABLE_ROWS: usize = 64;
-const TEXELS_PER_TABLE_ENTRY: usize = 10;
 const BYTES_PER_PIXEL: usize = 4;
-const BYTES_PER_TEXEL: usize = 16;
-const BYTES_PER_LOST_FLAG: usize = 1;
-const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
 pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
@@ -441,17 +405,10 @@ const EMPTY_MASK_PX: (usize, usize) = (1, 1);
 const BYTES_PER_PICTURE_PIXEL: usize = 4;
 const MS_PER_S: f64 = 1000.0;
 const PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
-const _: () = assert!(
-    MAX_CLUSTER_COUNT <= 32,
-    "the shader keeps candidate clusters in a 32-bit mask"
-);
 
-/// `FrameData` is one frame to draw: the house demo's packed rows, or a voxel map's frame.
+/// `FrameData` is one frame to draw: a voxel map's frame.
 #[derive(Clone, Copy)]
 pub enum FrameData<'a> {
-    // The house engine's frame, deleted in the next layer.
-    #[allow(dead_code)]
-    House(&'a SceneData),
     Voxel(&'a VoxelFrame),
 }
 
@@ -461,30 +418,17 @@ impl FrameData<'_> {
     /// Example: `let render_px = frame_data.get_render_size();`
     pub fn get_render_size(&self) -> (usize, usize) {
         match self {
-            FrameData::House(data) => (
-                data.uniforms.width_px as usize,
-                data.uniforms.height_px as usize,
-            ),
             FrameData::Voxel(frame) => frame.get_render_size(),
         }
     }
 }
 
-/// `MetalRenderer` holds the GPU, the compiled ray tracer, the scene buffer, and the textures and
+/// `MetalRenderer` holds the GPU, the compiled overlay, the voxel renderer, and the textures and
 /// MetalFX scaler for the current render and output sizes. It keeps the minimap's picture for
 /// where it lies (the shader's `Minimap.map`) and uploads it again when that changes.
 pub struct MetalRenderer {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
-    trace_pixels: Pipeline,
-    adaptive: AdaptivePipelines,
-    build_throat_table: Pipeline,
-    build_camera_table: Pipeline,
-    build_mouth_fields: Pipeline,
-    pull_holes_from_image: Pipeline,
-    pull_holes: Pipeline,
-    push_holes: Pipeline,
-    fill_holes: Pipeline,
     apply_overlay: Pipeline,
     overlay_target: Option<Texture>,
     overlay_mask: Option<Texture>,
@@ -492,70 +436,18 @@ pub struct MetalRenderer {
     overlay_map: Option<Texture>,
     overlay_map_placement: [f32; 4],
     blur_histories: Option<(Texture, Texture)>,
-    hole_buffers: Option<HoleBuffers>,
     surface_textures: Option<SurfaceTextures>,
     voxel_gpu: Option<VoxelGpu>,
     viewmodels: HashMap<GunModel, Viewmodel>,
-    is_voxel_frame: bool,
-    throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
-    camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
-    has_throat_table: bool,
+    has_drawn_frame: bool,
     is_scaler_warm: bool,
     is_adaptive: bool,
     sample_buffers: Option<SampleBuffers>,
-    rows: Retained<ProtocolObject<dyn MTLBuffer>>,
     render_texture: Option<Texture>,
     output_texture: Option<Texture>,
     scaler: Option<Scaler>,
     readback: Option<(Retained<ProtocolObject<dyn MTLBuffer>>, usize)>,
     pub last_gpu_ms: f64,
-}
-
-/// `fill_shader_constants` replaces each placeholder in the shader source (a name between double
-/// underscores) with the Rust constant of that name, so the shader's row layout always matches
-/// `scene_data.rs`.
-///
-/// Example: `let source = fill_shader_constants(SHADER_SOURCE);`
-fn fill_shader_constants(source: &str) -> String {
-    let constants: [(&str, usize); 28] = [
-        ("TEXEL_MOUTH_FIELDS", TEXEL_MOUTH_FIELDS),
-        ("TEXELS_PER_MOUTH_FIELD", TEXELS_PER_MOUTH_FIELD),
-        ("TEXELS_PER_TABLE_ENTRY", TEXELS_PER_TABLE_ENTRY),
-        ("CAMERA_TABLE_SIZE", CAMERA_TABLE_SIZE),
-        ("CAMERA_TABLE_ROWS", CAMERA_TABLE_ROWS),
-        ("THROAT_TABLE_SIZE", THROAT_TABLE_SIZE),
-        ("REFINE_GROUP_SIZE", REFINE_GROUP_SIZE),
-        ("BYTES_PER_RAY_END", BYTES_PER_RAY_END),
-        ("MAX_MOUTH_COUNT", MAX_MOUTH_COUNT),
-        ("ROW_TEXEL_COUNT", ROW_TEXEL_COUNT),
-        ("TEXEL_TO_WORLD", TEXEL_TO_WORLD),
-        ("TEXEL_GROUND", TEXEL_GROUND),
-        ("TEXEL_SUN", TEXEL_SUN),
-        ("TEXEL_MOUTHS", TEXEL_MOUTHS),
-        ("TEXEL_GLUINGS", TEXEL_GLUINGS),
-        ("TEXELS_PER_GLUING", TEXELS_PER_GLUING),
-        ("TEXEL_BOXES", TEXEL_BOXES),
-        ("TEXELS_PER_BOX", TEXELS_PER_BOX),
-        ("TEXEL_CLUSTERS", TEXEL_CLUSTERS),
-        ("TEXELS_PER_CLUSTER", TEXELS_PER_CLUSTER),
-        ("TEXEL_CLUSTER_INFO", TEXEL_CLUSTER_INFO),
-        ("TEXEL_CLUSTER_ORDER", TEXEL_CLUSTER_ORDER),
-        ("TEXEL_SPOT", TEXEL_SPOT),
-        ("TEXEL_BEAM_CHUNKS", TEXEL_BEAM_CHUNKS),
-        ("TEXELS_PER_BEAM_CHUNK", TEXELS_PER_BEAM_CHUNK),
-        ("TEXEL_BEAM_POINTS", TEXEL_BEAM_POINTS),
-        ("MATERIAL_GLASS", MATERIAL_GLASS as usize),
-        ("MATERIAL_GLOW", MATERIAL_GLOW as usize),
-    ];
-    let mut filled: String = source.to_string();
-    for (name, value) in constants {
-        filled = filled.replace(&format!("__{name}__"), &value.to_string());
-    }
-    assert!(
-        !filled.contains("__"),
-        "render_metal.metal has a placeholder render_metal.rs doesn't fill"
-    );
-    filled
 }
 
 /// `upload_texture` copies `bytes` (rows top first, `bytes_per_pixel` a pixel) into the texture in
@@ -652,23 +544,6 @@ fn get_coarse_grid(render_px: (usize, usize)) -> (usize, usize) {
     (render_px.0 / 4 + 3, render_px.1 / 4 + 3)
 }
 
-/// `get_pyramid_levels` gives the hole-filling pyramid's levels for a render size, as (size, offset
-/// in the pyramid buffer): level 0 is the image itself (offset 0, unused), and each level above
-/// is half the one below, rounded up, down to 1×1, stored one after another from level 1.
-///
-/// Example: `let levels = get_pyramid_levels((2560, 1600));`
-fn get_pyramid_levels(render_px: (usize, usize)) -> Vec<((usize, usize), usize)> {
-    let mut levels: Vec<((usize, usize), usize)> = vec![(render_px, 0)];
-    let mut offset: usize = 0;
-    let mut size: (usize, usize) = render_px;
-    while size != (1, 1) {
-        size = (size.0.div_ceil(2), size.1.div_ceil(2));
-        levels.push((size, offset));
-        offset += size.0 * size.1;
-    }
-    levels
-}
-
 /// `encode_adaptive_sampling` encodes adaptive sampling's passes into an encoder that already has
 /// the scene's buffers and the render texture: trace every fourth pixel, fill in every second
 /// pixel (interpolating where that is exact enough, tracing the rest), mark the smooth cells and
@@ -755,7 +630,7 @@ impl MetalRenderer {
     pub fn New(is_adaptive: bool) -> Result<MetalRenderer> {
         let device: Retained<ProtocolObject<dyn MTLDevice>> =
             MTLCreateSystemDefaultDevice().ok_or("Metal: this machine has no GPU Metal can use")?;
-        let source: Retained<NSString> = NSString::from_str(&fill_shader_constants(SHADER_SOURCE));
+        let source: Retained<NSString> = NSString::from_str(SHADER_SOURCE);
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&source, None)
             .map_err(|error| {
@@ -764,52 +639,12 @@ impl MetalRenderer {
                     error.localizedDescription()
                 )
             })?;
-        let make_pipeline = |name: &str| make_pipeline(&device, &library, name);
-        let trace_pixels: Pipeline = make_pipeline("trace_pixels")?;
-        let adaptive: AdaptivePipelines = AdaptivePipelines::FromLibrary(&device, &library)?;
-        let (build_throat_table, build_camera_table) = (
-            make_pipeline("build_throat_table")?,
-            make_pipeline("build_camera_table")?,
-        );
-        let (pull_holes_from_image, pull_holes) = (
-            make_pipeline("pull_holes_from_image")?,
-            make_pipeline("pull_holes")?,
-        );
-        let (push_holes, fill_holes) = (make_pipeline("push_holes")?, make_pipeline("fill_holes")?);
-        let apply_overlay: Pipeline = make_pipeline("apply_overlay")?;
-        let build_mouth_fields: Pipeline = make_pipeline("build_mouth_fields")?;
-        let make_table = |entry_count: usize| {
-            device
-                .newBufferWithLength_options(
-                    entry_count * BYTES_PER_TEXEL,
-                    MTLResourceOptions::StorageModePrivate,
-                )
-                .ok_or("Metal: no memory for a jump table")
-        };
-        let (throat_table, camera_table) = (
-            make_table(THROAT_TABLE_SIZE * TEXELS_PER_TABLE_ENTRY)?,
-            make_table(CAMERA_TABLE_SIZE * CAMERA_TABLE_ROWS * TEXELS_PER_TABLE_ENTRY)?,
-        );
+        let apply_overlay: Pipeline = make_pipeline(&device, &library, "apply_overlay")?;
         let queue: Retained<ProtocolObject<dyn MTLCommandQueue>> =
             device.newCommandQueue().ok_or("Metal: no command queue")?;
-        let rows: Retained<ProtocolObject<dyn MTLBuffer>> = device
-            .newBufferWithLength_options(
-                ROW_COUNT * ROW_TEXEL_COUNT * BYTES_PER_TEXEL,
-                MTLResourceOptions::StorageModeShared,
-            )
-            .ok_or("Metal: no memory for the scene rows")?;
         Ok(MetalRenderer {
             device,
             queue,
-            trace_pixels,
-            adaptive,
-            build_throat_table,
-            build_camera_table,
-            build_mouth_fields,
-            pull_holes_from_image,
-            pull_holes,
-            push_holes,
-            fill_holes,
             apply_overlay,
             overlay_target: None,
             blur_histories: None,
@@ -817,18 +652,13 @@ impl MetalRenderer {
             overlay_picture: None,
             overlay_map: None,
             overlay_map_placement: [0.0; 4],
-            hole_buffers: None,
             surface_textures: None,
             voxel_gpu: None,
             viewmodels: HashMap::new(),
-            is_voxel_frame: false,
-            throat_table,
-            camera_table,
-            has_throat_table: false,
+            has_drawn_frame: false,
             is_scaler_warm: false,
             is_adaptive,
             sample_buffers: None,
-            rows,
             render_texture: None,
             output_texture: None,
             scaler: None,
@@ -951,102 +781,21 @@ impl MetalRenderer {
         Ok(())
     }
 
-    /// `encode_frame` encodes one frame: the scene rows are copied to the GPU, the ray tracer runs
-    /// at the scene's render size, and MetalFX upscales the result when `output_px` is larger.
+    /// `encode_frame` encodes one frame: the voxel ray tracer runs at the frame's render size, and
+    /// MetalFX upscales the result when `output_px` is larger.
     ///
     /// Example: `let (command_buffer, texture) = self.encode_frame(&data, (2560, 1600))?;`
     fn encode_frame(&mut self, frame_data: FrameData, output_px: (usize, usize)) -> Result<Frame> {
         let render_px: (usize, usize) = frame_data.get_render_size();
-        let is_upscaled: bool = output_px != render_px;
         assert!(
             render_px.0 <= output_px.0 && render_px.1 <= output_px.1,
             "Metal: the render size {render_px:?} is larger than the output {output_px:?}"
         );
         self.prepare_render_texture(output_px)?;
         self.prepare_upscaling(output_px)?;
-        self.is_voxel_frame = matches!(frame_data, FrameData::Voxel(_));
-        if let FrameData::Voxel(voxel_frame) = frame_data {
-            return self.encode_voxel_frame(voxel_frame, output_px);
-        }
-        let FrameData::House(data) = frame_data else {
-            unreachable!("encode_frame: the voxel frame returned above")
-        };
-        if self.is_adaptive {
-            self.prepare_sample_buffers(output_px, BYTES_PER_RAY_END)?;
-        }
-        self.prepare_hole_buffers(output_px)?;
-        let row_bytes: usize = data.rows.len() * BYTES_PER_TEXEL;
-        assert!(
-            row_bytes <= self.rows.length(),
-            "Metal: the scene rows don't fit their buffer"
-        );
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A WRITE PAST THE ROWS BUFFER WILL HAPPEN
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                data.rows.as_ptr().cast::<u8>(),
-                self.rows.contents().as_ptr().cast::<u8>(),
-                row_bytes,
-            )
-        };
-        let command_buffer = self
-            .queue
-            .commandBuffer()
-            .ok_or("Metal: no command buffer")?;
-        let encoder = command_buffer
-            .computeCommandEncoder()
-            .ok_or("Metal: no compute encoder")?;
-        let uniforms: NonNull<Uniforms> = NonNull::from(&data.uniforms);
-        let should_build_table: bool = !self.has_throat_table;
-        self.has_throat_table = true;
-        let (render_texture, _) = self
-            .render_texture
-            .as_ref()
-            .expect("the render texture was just made");
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
-        unsafe {
-            encoder.setBuffer_offset_atIndex(Some(&self.rows), 0, 0);
-            encoder.setBytes_length_atIndex(uniforms.cast(), std::mem::size_of::<Uniforms>(), 1);
-            encoder.setTexture_atIndex(Some(render_texture), 0);
-            encoder.setBuffer_offset_atIndex(Some(&self.throat_table), 0, 7);
-            encoder.setBuffer_offset_atIndex(Some(&self.camera_table), 0, 8);
-        }
-        let hole_buffers: &HoleBuffers = self
-            .hole_buffers
-            .as_ref()
-            .expect("prepare_hole_buffers just made them");
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
-        unsafe {
-            encoder.setBuffer_offset_atIndex(Some(&hole_buffers.lost), 0, 14);
-            encoder.setBuffer_offset_atIndex(Some(&hole_buffers.pyramid), 0, 15);
-        }
-        encoder.setComputePipelineState(&self.build_mouth_fields);
-        dispatch_grid(&encoder, (MAX_MOUTH_COUNT, ROW_COUNT));
-        if should_build_table {
-            encoder.setComputePipelineState(&self.build_throat_table);
-            dispatch_grid(&encoder, (THROAT_TABLE_SIZE, 1));
-            encoder.setComputePipelineState(&self.build_camera_table);
-            dispatch_grid(&encoder, (CAMERA_TABLE_SIZE, CAMERA_TABLE_ROWS));
-        }
-        if self.is_adaptive {
-            let buffers: &SampleBuffers = self
-                .sample_buffers
-                .as_ref()
-                .expect("prepare_sample_buffers just made them");
-            encode_adaptive_sampling(
-                &encoder,
-                &self.adaptive,
-                buffers,
-                BYTES_PER_RAY_END,
-                render_px,
-            );
-        } else {
-            encoder.setComputePipelineState(&self.trace_pixels);
-            dispatch_grid(&encoder, render_px);
-        }
-        self.encode_hole_filling(&encoder, render_px);
-        encoder.endEncoding();
-        let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
-        self.finish_encoding(command_buffer, texture, render_px, is_upscaled)
+        self.has_drawn_frame = true;
+        let FrameData::Voxel(voxel_frame) = frame_data;
+        self.encode_voxel_frame(voxel_frame, output_px)
     }
 
     /// `encode_voxel_frame` encodes a voxel map's frame: the voxel kernel into the render texture,
@@ -1123,85 +872,6 @@ impl MetalRenderer {
         };
         self.is_scaler_warm = true;
         Ok((command_buffer, output))
-    }
-
-    /// `encode_hole_filling` encodes the passes that paint lost pixels (rays trapped circling a
-    /// throat) from the pixels around them instead of black: average the other pixels into a
-    /// pyramid of ever coarser levels, fill each level's gaps from the one above, coarsest first,
-    /// then paint the lost pixels from the first level.
-    ///
-    /// Example: `self.encode_hole_filling(&encoder, (2560, 1600));`
-    fn encode_hole_filling(
-        &self,
-        encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
-        render_px: (usize, usize),
-    ) {
-        let levels: Vec<((usize, usize), usize)> = get_pyramid_levels(render_px);
-        let set_levels = |low: ((usize, usize), usize), high: ((usize, usize), usize)| {
-            let step: PyramidLevels = PyramidLevels {
-                low_size: [low.0.0 as i32, low.0.1 as i32],
-                high_size: [high.0.0 as i32, high.0.1 as i32],
-                low_offset: low.1 as i32,
-                high_offset: high.1 as i32,
-            };
-            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG LEVELS WILL HAPPEN
-            unsafe {
-                encoder.setBytes_length_atIndex(
-                    NonNull::from(&step).cast(),
-                    std::mem::size_of::<PyramidLevels>(),
-                    16,
-                )
-            };
-        };
-        for k in 0..levels.len() - 1 {
-            set_levels(levels[k], levels[k + 1]);
-            encoder.setComputePipelineState(if k == 0 {
-                &self.pull_holes_from_image
-            } else {
-                &self.pull_holes
-            });
-            dispatch_grid(encoder, levels[k + 1].0);
-        }
-        for k in (1..levels.len() - 1).rev() {
-            set_levels(levels[k], levels[k + 1]);
-            encoder.setComputePipelineState(&self.push_holes);
-            dispatch_grid(encoder, levels[k].0);
-        }
-        set_levels(levels[0], levels[1]);
-        encoder.setComputePipelineState(&self.fill_holes);
-        dispatch_grid(encoder, render_px);
-    }
-
-    /// `prepare_hole_buffers` makes the hole filling's buffers big enough for any render size up to
-    /// `max_px`, if the current ones are for another size.
-    ///
-    /// Example: `self.prepare_hole_buffers((2560, 1600))?;`
-    fn prepare_hole_buffers(&mut self, max_px: (usize, usize)) -> Result<()> {
-        if self
-            .hole_buffers
-            .as_ref()
-            .is_some_and(|buffers| buffers.max_px == max_px)
-        {
-            return Ok(());
-        }
-        let (top_size, top_offset): ((usize, usize), usize) = *get_pyramid_levels(max_px)
-            .last()
-            .expect("a pyramid has at least the image");
-        let pyramid_texel_count: usize = top_offset + top_size.0 * top_size.1;
-        let make_buffer = |bytes: usize| {
-            self.device
-                .newBufferWithLength_options(bytes, MTLResourceOptions::StorageModePrivate)
-                .ok_or(format!(
-                    "Metal: no memory to fill holes at {}x{}",
-                    max_px.0, max_px.1
-                ))
-        };
-        self.hole_buffers = Some(HoleBuffers {
-            lost: make_buffer(max_px.0 * max_px.1 * BYTES_PER_LOST_FLAG)?,
-            pyramid: make_buffer(pyramid_texel_count * BYTES_PER_PYRAMID_TEXEL)?,
-            max_px,
-        });
-        Ok(())
     }
 
     /// `prepare_sample_buffers` makes adaptive sampling's buffers big enough for any render size up
@@ -1439,7 +1109,7 @@ impl MetalRenderer {
                     Entry::Vacant(entry) => entry.insert(Viewmodel::Load(&self.device, model)?),
                 };
                 let hand_light: Option<&ProtocolObject<dyn MTLBuffer>> = match &self.voxel_gpu {
-                    Some(gpu) if self.is_voxel_frame => Some(gpu.get_hand_light()),
+                    Some(gpu) if self.has_drawn_frame => Some(gpu.get_hand_light()),
                     _ => None,
                 };
                 Some(viewmodel.encode(

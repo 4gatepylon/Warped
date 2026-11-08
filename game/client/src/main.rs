@@ -36,18 +36,10 @@ mod mesh;
 mod minimap;
 mod multiplayer;
 mod net;
-// The house engine, deleted in the next layer.
-#[allow(dead_code)]
 mod physics;
-// The house engine, deleted in the next layer.
-#[allow(dead_code)]
-mod render_cpu;
 mod render_mesh;
 mod render_metal;
 mod render_voxel;
-// The house engine, deleted in the next layer.
-#[allow(dead_code)]
-mod scene_data;
 mod settings;
 mod shapes;
 mod shot_noise;
@@ -60,9 +52,6 @@ mod viewmodel;
 mod voxel_clearance;
 mod voxel_textures;
 mod voxel_world;
-// The house engine, deleted in the next layer.
-#[allow(dead_code)]
-mod world;
 mod zone_walls;
 
 use std::error::Error;

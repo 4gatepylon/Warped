@@ -193,8 +193,8 @@ struct HandLight {
 /// `HAND_LIGHT_BYTES` is the size of a `HandLight`, for the buffer `probe_hand_light` writes.
 pub(crate) const HAND_LIGHT_BYTES: usize = std::mem::size_of::<HandLight>();
 
-/// `FIXED_HAND_LIGHT` lights the gun model on maps whose renderer doesn't probe their light (the
-/// house): a key light from the upper left, lit regolith below and black space above.
+/// `FIXED_HAND_LIGHT` lights the gun model before the voxel renderer has drawn a frame to probe
+/// its light: a key light from the upper left, lit regolith below and black space above.
 const FIXED_HAND_LIGHT: HandLight = HandLight {
     directions: [[-0.4208, 0.7814, 0.4608, 0.0], [0.0; 4], [0.0; 4]],
     colors: [[2.4, 2.35, 2.25, 0.0], [0.0; 4], [0.0; 4]],
