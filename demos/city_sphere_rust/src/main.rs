@@ -44,9 +44,9 @@ mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
+mod render_city;
 mod render_cpu;
 mod render_mesh;
-mod render_city;
 mod render_metal;
 mod render_voxel;
 mod scene_data;
@@ -252,7 +252,7 @@ enum RouteKind {
 /// `Arguments` is the command line.
 #[derive(Parser)]
 #[command(
-    about = "Walk, fly and fire a laser through wormholes in hyperbolic space.",
+    about = "City Sphere: fight inside a sphere with outward gravity, a glass shell and a glowing core.",
     after_help = "Example: city-sphere --bench-views --width-px 2560 --height-px 1600"
 )]
 struct Arguments {
@@ -2372,7 +2372,9 @@ impl Session {
                     .ok_or("--route warp-tour needs a voxel map")?
                     .world,
             ),
-            (true, RouteKind::Rifle) => return Err("--route rifle is only for --map city-sphere".into()),
+            (true, RouteKind::Rifle) => {
+                return Err("--route rifle is only for --map city-sphere".into());
+            }
         };
         let multiplayer: Option<Multiplayer> = if arguments.host || arguments.join.is_some() {
             let server: Option<Child> = if arguments.host {
@@ -4257,7 +4259,14 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     let mut session: Session = Session::New(arguments)?;
     let window_size: (u32, u32) = (arguments.width_px, arguments.height_px);
     match renderer.as_metal() {
-        Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal, arguments.no_vsync),
+        Some(metal) => play_on_layer(
+            &sdl,
+            &video,
+            window_size,
+            &mut session,
+            metal,
+            arguments.no_vsync,
+        ),
         None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
     }
 }

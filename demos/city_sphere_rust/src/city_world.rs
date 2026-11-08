@@ -280,7 +280,12 @@ pub fn get_up(point: DVec3) -> DVec3 {
 
 /// `find_sphere_hits_m` gives the distances along the unit `direction` from `origin` where the
 /// ray meets the sphere of `radius_m` about the centre, nearest first.
-fn find_sphere_hits_m(origin: DVec3, direction: DVec3, center: DVec3, radius_m: f64) -> Option<(f64, f64)> {
+fn find_sphere_hits_m(
+    origin: DVec3,
+    direction: DVec3,
+    center: DVec3,
+    radius_m: f64,
+) -> Option<(f64, f64)> {
     let o: DVec3 = origin - center;
     let b: f64 = o.dot(direction);
     let c: f64 = o.length_squared() - radius_m * radius_m;
@@ -379,7 +384,12 @@ impl CityWorld {
                 holes: s
                     .holes
                     .iter()
-                    .map(|h| (DVec3::from(h.direction).normalize(), h.angular_radius_rad.cos()))
+                    .map(|h| {
+                        (
+                            DVec3::from(h.direction).normalize(),
+                            h.angular_radius_rad.cos(),
+                        )
+                    })
                     .collect(),
             })
             .collect();
@@ -408,8 +418,13 @@ impl CityWorld {
             spawns,
             variation_seed: map.variation.as_ref().map_or(0, |v| v.seed),
             laser_colors: match &map.lasers {
-                Some(JsonLasers { team_colors: Some(colors), .. }) => *colors,
-                Some(JsonLasers { color: Some(color), .. }) => [*color; 2],
+                Some(JsonLasers {
+                    team_colors: Some(colors),
+                    ..
+                }) => *colors,
+                Some(JsonLasers {
+                    color: Some(color), ..
+                }) => [*color; 2],
                 Some(_) => return Err("map: lasers needs color or team_colors".into()),
                 None => DEFAULT_LASER_COLORS,
             },
@@ -459,7 +474,8 @@ impl CityWorld {
         shooter_id: Option<u32>,
     ) -> Shot {
         let mut points: Vec<DVec3> = vec![origin];
-        let (mut o, mut d, mut left_m, mut bounce_count) = (origin, direction.normalize(), range_m, 0);
+        let (mut o, mut d, mut left_m, mut bounce_count) =
+            (origin, direction.normalize(), range_m, 0);
         loop {
             let mut best: (f64, ShotHit, Option<DVec3>) = (left_m, ShotHit::Range, None);
             let mut consider = |t: f64, hit: ShotHit, reflect: Option<DVec3>| {
@@ -468,10 +484,17 @@ impl CityWorld {
                 }
             };
             if let Some((_, far)) = find_sphere_hits_m(o, d, DVec3::ZERO, self.street_radius_m) {
-                consider(far, ShotHit::Surface { material: self.street_material }, None);
+                consider(
+                    far,
+                    ShotHit::Surface {
+                        material: self.street_material,
+                    },
+                    None,
+                );
             }
             for shell in &self.shells {
-                let Some((near, far)) = find_sphere_hits_m(o, d, DVec3::ZERO, shell.radius_m) else {
+                let Some((near, far)) = find_sphere_hits_m(o, d, DVec3::ZERO, shell.radius_m)
+                else {
                     continue;
                 };
                 for t in [near, far] {
@@ -486,22 +509,42 @@ impl CityWorld {
                         && !shell.is_ball()
                         && bounce_count < max_bounce_count)
                         .then(|| d - 2.0 * d.dot(normal) * normal);
-                    consider(t, ShotHit::Surface { material: shell.material }, reflect);
+                    consider(
+                        t,
+                        ShotHit::Surface {
+                            material: shell.material,
+                        },
+                        reflect,
+                    );
                     break;
                 }
             }
             for city_box in &self.boxes {
                 if let Some((t, _)) = city_box.find_hit_m(o, d) {
-                    consider(t, ShotHit::Surface { material: city_box.material }, None);
+                    consider(
+                        t,
+                        ShotHit::Surface {
+                            material: city_box.material,
+                        },
+                        None,
+                    );
                 }
             }
             for target in targets.iter().filter(|t| Some(t.id) != shooter_id) {
-                for (height_m, radius_m, is_head) in
-                    [(TORSO_HEIGHT_M, TORSO_RADIUS_M, false), (HEAD_HEIGHT_M, HEAD_RADIUS_M, true)]
-                {
+                for (height_m, radius_m, is_head) in [
+                    (TORSO_HEIGHT_M, TORSO_RADIUS_M, false),
+                    (HEAD_HEIGHT_M, HEAD_RADIUS_M, true),
+                ] {
                     let center: DVec3 = target.feet + target.up * height_m;
                     if let Some((near, _)) = find_sphere_hits_m(o, d, center, radius_m) {
-                        consider(near, ShotHit::Player { id: target.id, is_head }, None);
+                        consider(
+                            near,
+                            ShotHit::Player {
+                                id: target.id,
+                                is_head,
+                            },
+                            None,
+                        );
                     }
                 }
             }
@@ -533,7 +576,8 @@ impl CityWorld {
     ///
     /// Example: `world.move_player(&mut player, &input, 1.0 / 60.0);`
     pub fn move_player(&self, player: &mut CityPlayer, input: &CityInput, dt_s: f64) {
-        let step_count: usize = ((player.velocity.length() * dt_s / MAX_STEP_M).ceil() as usize).clamp(1, 16);
+        let step_count: usize =
+            ((player.velocity.length() * dt_s / MAX_STEP_M).ceil() as usize).clamp(1, 16);
         let step_s: f64 = dt_s / step_count as f64;
         for k in 0..step_count {
             self.step_player(player, input, step_s, k == 0);
@@ -549,11 +593,18 @@ impl CityWorld {
         if wish.length_squared() > 1.0 {
             wish = wish.normalize();
         }
-        let speed_m_per_s: f64 = if input.is_sprinting { self.sprint_m_per_s } else { self.walk_m_per_s }
-            * input.speed_frac;
+        let speed_m_per_s: f64 = if input.is_sprinting {
+            self.sprint_m_per_s
+        } else {
+            self.walk_m_per_s
+        } * input.speed_frac;
         let v_up: f64 = player.velocity.dot(up);
         let tangent: DVec3 = player.velocity - up * v_up;
-        let control: f64 = if player.is_on_ground { 1.0 } else { AIR_CONTROL_FRAC };
+        let control: f64 = if player.is_on_ground {
+            1.0
+        } else {
+            AIR_CONTROL_FRAC
+        };
         let target: DVec3 = wish * speed_m_per_s;
         let new_tangent: DVec3 = tangent + (target - tangent) * (control * 12.0 * dt_s).min(1.0);
         let mut new_up: f64 = v_up - self.gravity_m_per_s2 * dt_s;
@@ -604,7 +655,11 @@ impl CityWorld {
             }
         }
         for city_box in &self.boxes {
-            for height_m in [BODY_RADIUS_M, BODY_HEIGHT_M / 2.0, BODY_HEIGHT_M - BODY_RADIUS_M] {
+            for height_m in [
+                BODY_RADIUS_M,
+                BODY_HEIGHT_M / 2.0,
+                BODY_HEIGHT_M - BODY_RADIUS_M,
+            ] {
                 let point: DVec3 = player.feet + up * height_m;
                 let local: DVec3 = city_box.to_local(point);
                 let closest: DVec3 = local.clamp(-city_box.half_m, city_box.half_m);
@@ -656,8 +711,15 @@ impl CityWorld {
     ///
     /// Example: `let player = world.make_player(0, 1);`
     pub fn make_player(&self, team: u32, index: usize) -> CityPlayer {
-        let spawns: Vec<&DMat4> = self.spawns.iter().filter(|(t, _)| *t == team).map(|(_, f)| f).collect();
-        let frame: DMat4 = **spawns.get(index % spawns.len().max(1)).unwrap_or(&&DMat4::IDENTITY);
+        let spawns: Vec<&DMat4> = self
+            .spawns
+            .iter()
+            .filter(|(t, _)| *t == team)
+            .map(|(_, f)| f)
+            .collect();
+        let frame: DMat4 = **spawns
+            .get(index % spawns.len().max(1))
+            .unwrap_or(&&DMat4::IDENTITY);
         CityPlayer {
             feet: frame.w_axis.truncate(),
             body: DMat3::from_mat4(frame),
@@ -699,7 +761,8 @@ impl CityPlayer {
 
     /// `align_to_ground` turns the body the least way that makes its up point at the centre.
     pub fn align_to_ground(&mut self) {
-        let rotation: DQuat = DQuat::from_rotation_arc(self.body.y_axis.normalize(), get_up(self.feet));
+        let rotation: DQuat =
+            DQuat::from_rotation_arc(self.body.y_axis.normalize(), get_up(self.feet));
         let m: DMat3 = DMat3::from_quat(rotation) * self.body;
         let y: DVec3 = m.y_axis.normalize();
         let x: DVec3 = (m.x_axis - y * m.x_axis.dot(y)).normalize();
@@ -761,8 +824,22 @@ mod tests {
         for team in 0..2 {
             assert_eq!(world.consoles.iter().filter(|c| c.team == team).count(), 1);
         }
-        let blue: DVec3 = world.spawns.iter().find(|s| s.0 == 0).unwrap().1.w_axis.truncate();
-        let red: DVec3 = world.spawns.iter().find(|s| s.0 == 1).unwrap().1.w_axis.truncate();
+        let blue: DVec3 = world
+            .spawns
+            .iter()
+            .find(|s| s.0 == 0)
+            .unwrap()
+            .1
+            .w_axis
+            .truncate();
+        let red: DVec3 = world
+            .spawns
+            .iter()
+            .find(|s| s.0 == 1)
+            .unwrap()
+            .1
+            .w_axis
+            .truncate();
         assert!((blue + red).length() < 1e-4);
     }
 
@@ -821,7 +898,8 @@ mod tests {
         let origin: DVec3 = DVec3::new(0.3, 0.2, 1.0).normalize() * (glass_r - 1.6);
         let direction: DVec3 = DVec3::new(0.2, 1.0, 0.4).normalize();
         for max_bounce_count in 0..=2 {
-            let shot: Shot = world.trace_shot(origin, direction, 500.0, max_bounce_count, &[], None);
+            let shot: Shot =
+                world.trace_shot(origin, direction, 500.0, max_bounce_count, &[], None);
             assert_eq!(shot.bounce_count, max_bounce_count);
             assert_eq!(shot.points.len() as u32, max_bounce_count + 2);
         }
@@ -839,9 +917,19 @@ mod tests {
         let mut player: CityPlayer = world.make_player(0, 0);
         player.pitch_rad = 1.4;
         let eye: DMat4 = player.get_eye_frame();
-        let shot: Shot = world.trace_shot(eye.w_axis.truncate(), -eye.z_axis.truncate(), 500.0, 2, &[], None);
+        let shot: Shot = world.trace_shot(
+            eye.w_axis.truncate(),
+            -eye.z_axis.truncate(),
+            500.0,
+            2,
+            &[],
+            None,
+        );
         assert_eq!(shot.bounce_count, 0);
-        assert!((shot.points[1].length() - glass.radius_m).abs() < 1e-6 || shot.points[1].length() > glass.radius_m);
+        assert!(
+            (shot.points[1].length() - glass.radius_m).abs() < 1e-6
+                || shot.points[1].length() > glass.radius_m
+        );
     }
 
     #[test]
@@ -850,10 +938,21 @@ mod tests {
         let glass_r: f64 = world.get_glass().unwrap().radius_m;
         let a: DVec3 = DVec3::new(0.0, 0.0, 1.0) * (glass_r - 1.6);
         let feet: DVec3 = DVec3::new(0.0, 1.0, -0.2).normalize() * glass_r;
-        let target = Target { id: 7, feet, up: get_up(feet) };
+        let target = Target {
+            id: 7,
+            feet,
+            up: get_up(feet),
+        };
         let aim: DVec3 = (feet + target.up * TORSO_HEIGHT_M - a).normalize();
         let shot: Shot = world.trace_shot(a, aim, 500.0, 2, &[target], Some(1));
-        assert_eq!(shot.hit, ShotHit::Player { id: 7, is_head: false }, "{shot:?}");
+        assert_eq!(
+            shot.hit,
+            ShotHit::Player {
+                id: 7,
+                is_head: false
+            },
+            "{shot:?}"
+        );
     }
 
     #[test]

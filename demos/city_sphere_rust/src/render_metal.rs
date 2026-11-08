@@ -893,7 +893,9 @@ impl MetalRenderer {
         {
             self.render_texture = Some(self.make_texture(
                 output_px,
-                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget,
+                MTLTextureUsage::ShaderWrite
+                    | MTLTextureUsage::ShaderRead
+                    | MTLTextureUsage::RenderTarget,
             )?);
         }
         Ok(())
@@ -1413,7 +1415,9 @@ impl MetalRenderer {
         {
             self.overlay_target = Some(self.make_texture(
                 output_px,
-                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget,
+                MTLTextureUsage::ShaderWrite
+                    | MTLTextureUsage::ShaderRead
+                    | MTLTextureUsage::RenderTarget,
             )?);
         }
         let is_blur_history_valid: bool = self

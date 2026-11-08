@@ -22,16 +22,24 @@ use sdl3::event::Event;
 use serde_json::json;
 
 use super::{
-    Arguments, RouteKind, Picture, MAP_AREA_MIN_MASK_PX, MAP_AREA_MAX_EXCL_MASK_PX, PICTURE_PX_PER_MASK_PX, BANNER_HEIGHT_FRAC, MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX, PLAYER_SETTINGS_HOME_PATH, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, Gun, MS_PER_S, OverlayText, Renderer,
-    RendererKind, Result, WINDOW_TITLE, find_lan_address, get_crosshair_rects, get_lobby_lines, get_server_address,
-    load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
+    Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, Gun,
+    MAP_AREA_MAX_EXCL_MASK_PX, MAP_AREA_MIN_MASK_PX, MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX,
+    MS_PER_S, OverlayText, PICTURE_PX_PER_MASK_PX, PLAYER_SETTINGS_HOME_PATH, Picture, Renderer,
+    RendererKind, Result, RouteKind, WINDOW_TITLE, find_lan_address, get_crosshair_rects,
+    get_lobby_lines, get_server_address, load_settings, make_renderer, make_run_folder,
+    make_text_mask, make_wand, save_png,
 };
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
-use crate::city_world::{CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target, get_up};
+use crate::city_world::{
+    CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,
+    get_up,
+};
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
-use crate::render_city::{CityFrame, CityScene, BEACON_SLOT_COUNT, build_scene, push_beam, push_core_halo, push_mesh};
+use crate::render_city::{
+    BEACON_SLOT_COUNT, CityFrame, CityScene, build_scene, push_beam, push_core_halo, push_mesh,
+};
 use crate::render_metal::{self, FrameData};
 use crate::settings::{PerPlayerSettings, ServerSettings};
 use crate::thrown_wormholes::PlayerWormholes;
@@ -94,7 +102,8 @@ const HUD_PERIOD_S: f64 = 0.25;
 const ROUTE_TIMEOUT_S: f64 = 240.0;
 const BENCH_ROBOT_COUNT: usize = 8;
 const PHASE_COUNT: usize = 5;
-const PHASE_NAMES: [&str; PHASE_COUNT] = ["events", "update", "pack", "overlay", "render_and_present"];
+const PHASE_NAMES: [&str; PHASE_COUNT] =
+    ["events", "update", "pack", "overlay", "render_and_present"];
 const WARMUP_FRAME_COUNT: usize = 30;
 const SLOW_FRAME_MS: f64 = 17.5;
 
@@ -148,7 +157,8 @@ pub fn run(arguments: &Arguments) -> Result<()> {
     if arguments.map_picture {
         return render_map_picture(arguments, renderer.as_mut());
     }
-    let metal: &mut render_metal::MetalRenderer = renderer.as_metal().ok_or("City Sphere needs Metal")?;
+    let metal: &mut render_metal::MetalRenderer =
+        renderer.as_metal().ok_or("City Sphere needs Metal")?;
     play(arguments, metal)
 }
 
@@ -214,13 +224,19 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         true,
     )?;
     let port: u16 = arguments.port;
-    let address: String = find_lan_address().map_or("<this computer's address>".to_string(), |a| a.to_string());
+    let address: String =
+        find_lan_address().map_or("<this computer's address>".to_string(), |a| a.to_string());
     println!("City Sphere game server on UDP port {port}, without a window. Stop it with Ctrl-C.");
     println!("Join from demos/city_sphere_rust/: make join-game SERVER={address} PORT={port}");
     println!("  (or SERVER=127.0.0.1 on this computer).");
     match &arguments.level_result_file {
-        Some(path) => println!("The winner goes to {} once a team has turned off the other's consoles.", path.display()),
-        None => println!("A team wins by turning off the other team's consoles; then press Enter here for a new game."),
+        Some(path) => println!(
+            "The winner goes to {} once a team has turned off the other's consoles.",
+            path.display()
+        ),
+        None => println!(
+            "A team wins by turning off the other team's consoles; then press Enter here for a new game."
+        ),
     }
     match arguments.exit_after_s {
         Some(seconds) => std::thread::sleep(Duration::from_secs_f64(seconds)),
@@ -229,7 +245,9 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         },
     }
     should_stop.store(true, Ordering::Relaxed);
-    thread.join().map_err(|_| "the game server's thread panicked")?;
+    thread
+        .join()
+        .map_err(|_| "the game server's thread panicked")?;
     Ok(())
 }
 
@@ -240,15 +258,29 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
 /// until a player is eliminated.
 #[derive(Clone, Copy, Debug)]
 enum Step {
-    GoTo { direction: DVec3, side: Side, arrive_m: f64 },
-    Aim { yaw_rad: f64, pitch_rad: f64 },
+    GoTo {
+        direction: DVec3,
+        side: Side,
+        arrive_m: f64,
+    },
+    Aim {
+        yaw_rad: f64,
+        pitch_rad: f64,
+    },
     Shoot,
-    HoldConsole { index: u8 },
-    Wait { s: f64 },
+    HoldConsole {
+        index: u8,
+    },
+    Wait {
+        s: f64,
+    },
     SelectRifle,
     Overheat,
     CoolDown,
-    FireAt { is_head: bool, timeout_s: f64 },
+    FireAt {
+        is_head: bool,
+        timeout_s: f64,
+    },
 }
 
 /// `BrainOutput` is what a brain does this frame.
@@ -307,7 +339,15 @@ impl Brain {
     }
 
     /// `drive` works on the current step for `dt_s`, moving to the next when it is done.
-    fn drive(&mut self, world: &CityWorld, player: &mut CityPlayer, dt_s: f64, game: &net::GameState, can_shoot: bool, sight: &BrainSight) -> BrainOutput {
+    fn drive(
+        &mut self,
+        world: &CityWorld,
+        player: &mut CityPlayer,
+        dt_s: f64,
+        game: &net::GameState,
+        can_shoot: bool,
+        sight: &BrainSight,
+    ) -> BrainOutput {
         let mut out = BrainOutput {
             input: CityInput {
                 speed_frac: 1.0,
@@ -325,7 +365,17 @@ impl Brain {
         }
         self.step_s += dt_s;
         let is_finished: bool = match step {
-            Step::GoTo { direction, side, arrive_m } => self.go_to(world, player, (direction, side, arrive_m), dt_s, &mut out.input),
+            Step::GoTo {
+                direction,
+                side,
+                arrive_m,
+            } => self.go_to(
+                world,
+                player,
+                (direction, side, arrive_m),
+                dt_s,
+                &mut out.input,
+            ),
             Step::Aim { yaw_rad, pitch_rad } => {
                 player.look_around(yaw_rad, 0.0);
                 player.pitch_rad = pitch_rad;
@@ -367,7 +417,14 @@ impl Brain {
 
     /// `go_to` walks toward a place, riding the nearest lift up or dropping through the nearest
     /// hole when the place is on the other level; true once there.
-    fn go_to(&mut self, world: &CityWorld, player: &mut CityPlayer, goal: (DVec3, Side, f64), dt_s: f64, input: &mut CityInput) -> bool {
+    fn go_to(
+        &mut self,
+        world: &CityWorld,
+        player: &mut CityPlayer,
+        goal: (DVec3, Side, f64),
+        dt_s: f64,
+        input: &mut CityInput,
+    ) -> bool {
         let (direction, side, arrive_m) = goal;
         let Some(glass) = world.get_glass() else {
             return true;
@@ -375,11 +432,17 @@ impl Brain {
         let r: f64 = player.feet.length();
         let side_now: Side = world.get_side(player.feet);
         let is_in_lift: bool = world.is_in_lift(player.feet);
-        let target: DVec3 = direction.normalize() * if side == Side::Street { world.street_radius_m } else { glass.radius_m };
+        let target: DVec3 = direction.normalize()
+            * if side == Side::Street {
+                world.street_radius_m
+            } else {
+                glass.radius_m
+            };
         if side == Side::Glass && is_in_lift {
             input.is_jumping = true;
         }
-        let is_riding: bool = side == Side::Glass && is_in_lift && r > glass.radius_m - RIDE_START_UNDER_GLASS_M;
+        let is_riding: bool =
+            side == Side::Glass && is_in_lift && r > glass.radius_m - RIDE_START_UNDER_GLASS_M;
         let from: DVec3 = player.feet.normalize();
         let hole: DVec3 = glass
             .holes
@@ -452,13 +515,25 @@ fn make_target_player(world: &CityWorld) -> CityPlayer {
 fn make_rifle_route() -> Vec<Step> {
     vec![
         Step::SelectRifle,
-        Step::Wait { s: RIFLE_ROUTE_SETTLE_S },
+        Step::Wait {
+            s: RIFLE_ROUTE_SETTLE_S,
+        },
         Step::Overheat,
         Step::CoolDown,
-        Step::FireAt { is_head: true, timeout_s: RIFLE_ROUTE_TIMEOUT_S },
-        Step::Wait { s: RIFLE_ROUTE_RESPAWN_WAIT_S },
-        Step::FireAt { is_head: false, timeout_s: RIFLE_ROUTE_TIMEOUT_S },
-        Step::Wait { s: RIFLE_ROUTE_SETTLE_S },
+        Step::FireAt {
+            is_head: true,
+            timeout_s: RIFLE_ROUTE_TIMEOUT_S,
+        },
+        Step::Wait {
+            s: RIFLE_ROUTE_RESPAWN_WAIT_S,
+        },
+        Step::FireAt {
+            is_head: false,
+            timeout_s: RIFLE_ROUTE_TIMEOUT_S,
+        },
+        Step::Wait {
+            s: RIFLE_ROUTE_SETTLE_S,
+        },
     ]
 }
 
@@ -480,23 +555,52 @@ fn steer(player: &mut CityPlayer, to: DVec3, dt_s: f64, input: &mut CityInput) {
 /// that reflect or cross, walk across the glass to red's console (its only one) and turn it off
 /// (blue wins), then wait.
 fn make_route(world: &CityWorld) -> Vec<Step> {
-    let console = |index: u8| world.consoles.iter().find(|c| c.index == index).map(|c| world.get_console_center(c));
+    let console = |index: u8| {
+        world
+            .consoles
+            .iter()
+            .find(|c| c.index == index)
+            .map(|c| world.get_console_center(c))
+    };
     let mut steps: Vec<Step> = vec![
-        Step::GoTo { direction: DVec3::new(0.95, 0.15, -0.25), side: Side::Glass, arrive_m: 1.0 },
-        Step::Aim { yaw_rad: 0.0, pitch_rad: -0.45 },
+        Step::GoTo {
+            direction: DVec3::new(0.95, 0.15, -0.25),
+            side: Side::Glass,
+            arrive_m: 1.0,
+        },
+        Step::Aim {
+            yaw_rad: 0.0,
+            pitch_rad: -0.45,
+        },
         Step::Shoot,
-        Step::Aim { yaw_rad: 1.3, pitch_rad: 0.25 },
+        Step::Aim {
+            yaw_rad: 1.3,
+            pitch_rad: 0.25,
+        },
         Step::Shoot,
-        Step::Aim { yaw_rad: 1.1, pitch_rad: -0.2 },
+        Step::Aim {
+            yaw_rad: 1.1,
+            pitch_rad: -0.2,
+        },
         Step::Shoot,
-        Step::Aim { yaw_rad: 2.0, pitch_rad: -0.8 },
+        Step::Aim {
+            yaw_rad: 2.0,
+            pitch_rad: -0.8,
+        },
         Step::Shoot,
-        Step::Aim { yaw_rad: 0.0, pitch_rad: 0.0 },
+        Step::Aim {
+            yaw_rad: 0.0,
+            pitch_rad: 0.0,
+        },
     ];
     for target in world.consoles.iter().filter(|c| c.team == 1) {
         let index: u8 = target.index;
         if let Some(center) = console(index) {
-            steps.push(Step::GoTo { direction: center, side: Side::Glass, arrive_m: 1.8 });
+            steps.push(Step::GoTo {
+                direction: center,
+                side: Side::Glass,
+                arrive_m: 1.8,
+            });
             steps.push(Step::HoldConsole { index });
         }
     }
@@ -576,26 +680,57 @@ fn make_frame(
     for robot in robots {
         if !posed_clips.iter().any(|(clip, _)| *clip == robot.clip) {
             let duration_s: f64 = body.get_duration_s(robot.clip).max(1e-3);
-            posed_clips.push((robot.clip, body.make_posed(robot.clip, now_s.rem_euclid(duration_s))));
+            posed_clips.push((
+                robot.clip,
+                body.make_posed(robot.clip, now_s.rem_euclid(duration_s)),
+            ));
         }
-        let posed = &posed_clips.iter().find(|(clip, _)| *clip == robot.clip).expect("posed above").1;
+        let posed = &posed_clips
+            .iter()
+            .find(|(clip, _)| *clip == robot.clip)
+            .expect("posed above")
+            .1;
         let up: DVec3 = get_up(robot.feet);
-        let tangent: DVec3 = (robot.forward - up * robot.forward.dot(up)).normalize_or(up.any_orthonormal_vector());
+        let tangent: DVec3 =
+            (robot.forward - up * robot.forward.dot(up)).normalize_or(up.any_orthonormal_vector());
         let back: DVec3 = -tangent;
         let right: DVec3 = up.cross(back);
-        let world_from_model: Mat4 = DMat4::from_cols(right.extend(0.0), up.extend(0.0), back.extend(0.0), robot.feet.extend(1.0)).as_mat4();
-        push_mesh(&mut dynamic, posed, body.get_materials(), world_from_model, TEAM_TINTS[robot.team as usize % 2]);
+        let world_from_model: Mat4 = DMat4::from_cols(
+            right.extend(0.0),
+            up.extend(0.0),
+            back.extend(0.0),
+            robot.feet.extend(1.0),
+        )
+        .as_mat4();
+        push_mesh(
+            &mut dynamic,
+            posed,
+            body.get_materials(),
+            world_from_model,
+            TEAM_TINTS[robot.team as usize % 2],
+        );
     }
     let camera: DVec3 = eye.w_axis.truncate();
     let mut beam_vertices = Vec::new();
     for (points, team, alpha) in beams {
         let c: [f32; 3] = world.laser_colors[*team as usize % 2];
         for pair in points.windows(2) {
-            push_beam(&mut beam_vertices, pair[0], pair[1], camera, BEAM_WIDTH_M, [c[0], c[1], c[2], (*alpha * 1.4) as f32]);
+            push_beam(
+                &mut beam_vertices,
+                pair[0],
+                pair[1],
+                camera,
+                BEAM_WIDTH_M,
+                [c[0], c[1], c[2], (*alpha * 1.4) as f32],
+            );
         }
     }
     if let Some(core) = world.shells.iter().find(|s| s.is_ball()) {
-        push_core_halo(&mut beam_vertices, core.radius_m * CORE_HALO_RADIUS_PER_CORE_RADIUS, camera);
+        push_core_halo(
+            &mut beam_vertices,
+            core.radius_m * CORE_HALO_RADIUS_PER_CORE_RADIUS,
+            camera,
+        );
     }
     CityFrame {
         render_px,
@@ -615,7 +750,12 @@ fn make_eye(position: DVec3, forward: DVec3, up: DVec3) -> DMat4 {
     let back: DVec3 = -forward.normalize();
     let right: DVec3 = up.cross(back).normalize_or(back.any_orthonormal_vector());
     let true_up: DVec3 = back.cross(right);
-    DMat4::from_cols(right.extend(0.0), true_up.extend(0.0), back.extend(0.0), position.extend(1.0))
+    DMat4::from_cols(
+        right.extend(0.0),
+        true_up.extend(0.0),
+        back.extend(0.0),
+        position.extend(1.0),
+    )
 }
 
 /// `CitySession` is the window's game: the level, this player and the network.
@@ -670,24 +810,37 @@ impl CitySession {
     fn New(arguments: &Arguments) -> Result<CitySession> {
         let world: CityWorld = CityWorld::Builtin()?;
         let settings: ServerSettings = load_settings(arguments)?;
-        let player_settings_path: Option<PathBuf> = arguments
-            .player_settings
-            .clone()
-            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(PLAYER_SETTINGS_HOME_PATH)));
+        let player_settings_path: Option<PathBuf> =
+            arguments.player_settings.clone().or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join(PLAYER_SETTINGS_HOME_PATH))
+            });
         let player_settings: PerPlayerSettings = match &player_settings_path {
-            Some(path) if arguments.player_settings.is_some() || path.exists() => PerPlayerSettings::Load(path)?,
+            Some(path) if arguments.player_settings.is_some() || path.exists() => {
+                PerPlayerSettings::Load(path)?
+            }
             _ => PerPlayerSettings::Builtin(),
         };
         let password: Vec<u8> = net::read_game_password(arguments.game_password_file.as_deref())?;
         let (server, address) = match &arguments.join {
             Some(_) => (None, get_server_address(arguments)?),
             None => (
-                Some(start_server(arguments.port, settings.clone(), &world, password.clone(), None, !arguments.play_route)?),
+                Some(start_server(
+                    arguments.port,
+                    settings.clone(),
+                    &world,
+                    password.clone(),
+                    None,
+                    !arguments.play_route,
+                )?),
                 SocketAddr::from((Ipv4Addr::LOCALHOST, arguments.port)),
             ),
         };
         let mut client: net::Client = net::Client::Connect(address, MAP_NAME, &password)?;
-        let team: Option<u32> = arguments.team.map(TeamName::get_index).or(arguments.play_route.then_some(0));
+        let team: Option<u32> = arguments
+            .team
+            .map(TeamName::get_index)
+            .or(arguments.play_route.then_some(0));
         if let Some(team) = team {
             client.join(Some(team))?;
         }
@@ -695,9 +848,13 @@ impl CitySession {
         Ok(CitySession {
             scene: Arc::new(build_scene(&world)),
             body: AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?,
-            brain: arguments
-                .play_route
-                .then(|| Brain::New(if arguments.route == RouteKind::Rifle { make_rifle_route() } else { make_route(&world) })),
+            brain: arguments.play_route.then(|| {
+                Brain::New(if arguments.route == RouteKind::Rifle {
+                    make_rifle_route()
+                } else {
+                    make_route(&world)
+                })
+            }),
             world,
             settings,
             player_settings,
@@ -761,7 +918,9 @@ impl CitySession {
         self.client
             .players
             .iter()
-            .filter(|p| Some(p.id) != self.client.id && enemies_of.is_none_or(|team| p.team != team))
+            .filter(|p| {
+                Some(p.id) != self.client.id && enemies_of.is_none_or(|team| p.team != team)
+            })
             .map(|p| {
                 let (feet, up) = CityPlayer::get_feet_up(p.frame, self.world.eye_height_m);
                 Target { id: p.id, feet, up }
@@ -834,7 +993,10 @@ impl CitySession {
                     self.rifle_log.body_hit_count += 1;
                 }
             }
-            self.show_message(format!("You hit player {id} ({} bounces)", shot.bounce_count));
+            self.show_message(format!(
+                "You hit player {id} ({} bounces)",
+                shot.bounce_count
+            ));
         }
         self.shots.push(LiveShot {
             shot,
@@ -882,9 +1044,15 @@ impl CitySession {
                     let team: &str = net::TEAM_NAMES[self.get_team() as usize % 2];
                     self.show_message(format!("You are player {id}, on the {team} team"));
                 }
-                net::NetEvent::Eliminated { victim_id, shooter_id, is_self } => {
+                net::NetEvent::Eliminated {
+                    victim_id,
+                    shooter_id,
+                    is_self,
+                } => {
                     if !is_self && Some(shooter_id) == self.client.id {
-                        self.rifle_log.kills.push([self.rifle_log.head_hit_count, self.rifle_log.body_hit_count]);
+                        self.rifle_log
+                            .kills
+                            .push([self.rifle_log.head_hit_count, self.rifle_log.body_hit_count]);
                         (self.rifle_log.head_hit_count, self.rifle_log.body_hit_count) = (0, 0);
                     }
                     if is_self {
@@ -913,7 +1081,8 @@ impl CitySession {
         self.laser_left_s = (self.laser_left_s - dt_s).max(0.0);
         self.recoil_left_s = (self.recoil_left_s - dt_s).max(0.0);
         if self.gun == Gun::Laser || !self.was_trigger_held || self.is_overheated {
-            self.rifle_heat_frac = (self.rifle_heat_frac - dt_s / self.settings.rifle.cool_down_s).max(0.0);
+            self.rifle_heat_frac =
+                (self.rifle_heat_frac - dt_s / self.settings.rifle.cool_down_s).max(0.0);
             self.is_overheated &= self.rifle_heat_frac > 0.0;
             if let Some(at_s) = self.rifle_log.overheated_at_s
                 && !self.is_overheated
@@ -931,7 +1100,14 @@ impl CitySession {
         let sight: BrainSight = self.get_brain_sight();
         if let Some(brain) = &mut self.brain {
             if self.is_spawned {
-                let out: BrainOutput = brain.drive(&self.world, &mut self.player, dt_s, &self.client.game, is_playing && self.reload_left_s <= 0.0, &sight);
+                let out: BrainOutput = brain.drive(
+                    &self.world,
+                    &mut self.player,
+                    dt_s,
+                    &self.client.game,
+                    is_playing && self.reload_left_s <= 0.0,
+                    &sight,
+                );
                 input = out.input;
                 if out.wants_rifle {
                     self.gun = Gun::Rifle;
@@ -941,7 +1117,9 @@ impl CitySession {
             }
         } else if self.is_spawned && self.menu.is_none() {
             let is = |action: Action| held.contains(&action);
-            let axis = |plus: Action, minus: Action| f64::from(u8::from(is(plus))) - f64::from(u8::from(is(minus)));
+            let axis = |plus: Action, minus: Action| {
+                f64::from(u8::from(is(plus))) - f64::from(u8::from(is(minus)))
+            };
             input.forward_frac = axis(Action::MoveForward, Action::MoveBack);
             input.right_frac = axis(Action::MoveRight, Action::MoveLeft);
             input.is_sprinting = is(Action::Sprint);
@@ -959,7 +1137,11 @@ impl CitySession {
             self.run_frac = (speed_m_per_s / self.world.sprint_m_per_s).min(1.0);
         }
         self.was_trigger_held = wants_shot;
-        if wants_shot && is_playing && self.reload_left_s <= 0.0 && !(self.gun == Gun::Rifle && self.is_overheated) {
+        if wants_shot
+            && is_playing
+            && self.reload_left_s <= 0.0
+            && !(self.gun == Gun::Rifle && self.is_overheated)
+        {
             self.fire()?;
         }
         match console.filter(|_| is_playing) {
@@ -980,7 +1162,11 @@ impl CitySession {
         }
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
         self.shots.retain(|shot| now_s - shot.start_s < life_s);
-        if self.message.as_ref().is_some_and(|(_, until_s)| now_s > *until_s) {
+        if self
+            .message
+            .as_ref()
+            .is_some_and(|(_, until_s)| now_s > *until_s)
+        {
             self.message = None;
         }
         Ok(())
@@ -989,11 +1175,23 @@ impl CitySession {
     /// `update_remote` traces the other players' new shots and follows their robots' motion.
     fn update_remote(&mut self, now_s: f64, dt_s: f64) {
         let mut new_shots: Vec<LiveShot> = Vec::new();
-        for p in self.client.players.iter().filter(|p| Some(p.id) != self.client.id) {
-            let was_on: bool = self.remote_lasers.insert(p.id, p.is_laser_on).unwrap_or(false);
+        for p in self
+            .client
+            .players
+            .iter()
+            .filter(|p| Some(p.id) != self.client.id)
+        {
+            let was_on: bool = self
+                .remote_lasers
+                .insert(p.id, p.is_laser_on)
+                .unwrap_or(false);
             let (feet, _) = CityPlayer::get_feet_up(p.frame, self.world.eye_height_m);
             if p.is_laser_on && !was_on {
-                let targets: Vec<Target> = self.get_targets(None).into_iter().filter(|t| t.id != p.id).collect();
+                let targets: Vec<Target> = self
+                    .get_targets(None)
+                    .into_iter()
+                    .filter(|t| t.id != p.id)
+                    .collect();
                 let shot: Shot = self.world.trace_shot(
                     p.frame.w_axis.truncate(),
                     -p.frame.z_axis.truncate(),
@@ -1002,9 +1200,17 @@ impl CitySession {
                     &targets,
                     Some(p.id),
                 );
-                new_shots.push(LiveShot { shot, start_s: now_s, team: p.team, is_own: false });
+                new_shots.push(LiveShot {
+                    shot,
+                    start_s: now_s,
+                    team: p.team,
+                    is_own: false,
+                });
             }
-            let motion: &mut Motion = self.remote_motion.entry(p.id).or_insert(Motion { feet, speed_m_per_s: 0.0 });
+            let motion: &mut Motion = self.remote_motion.entry(p.id).or_insert(Motion {
+                feet,
+                speed_m_per_s: 0.0,
+            });
             let speed: f64 = (feet - motion.feet).length() / dt_s.max(1e-6);
             motion.speed_m_per_s += (speed - motion.speed_m_per_s) * (dt_s * 8.0).min(1.0);
             motion.feet = feet;
@@ -1019,9 +1225,11 @@ impl CitySession {
             return self.player.get_eye_frame();
         }
         let angle: f64 = self.now_s() * LOBBY_ORBIT_RAD_PER_S;
-        let radius_m: f64 = self.world.get_glass().map_or(10.0, |g| g.radius_m) - self.world.eye_height_m;
+        let radius_m: f64 =
+            self.world.get_glass().map_or(10.0, |g| g.radius_m) - self.world.eye_height_m;
         let position: DVec3 = DVec3::new(angle.cos(), 0.25, angle.sin()).normalize() * radius_m;
-        let forward: DVec3 = (DVec3::new(-angle.sin(), 0.0, angle.cos()) * 0.6 - position.normalize()).normalize();
+        let forward: DVec3 =
+            (DVec3::new(-angle.sin(), 0.0, angle.cos()) * 0.6 - position.normalize()).normalize();
         make_eye(position, forward, get_up(position))
     }
 
@@ -1035,7 +1243,10 @@ impl CitySession {
             .iter()
             .filter(|p| Some(p.id) != self.client.id)
             .map(|p| {
-                let motion: Motion = self.remote_motion.get(&p.id).copied().unwrap_or(Motion { feet: p.frame.w_axis.truncate(), speed_m_per_s: 0.0 });
+                let motion: Motion = self.remote_motion.get(&p.id).copied().unwrap_or(Motion {
+                    feet: p.frame.w_axis.truncate(),
+                    speed_m_per_s: 0.0,
+                });
                 let clip: AvatarClip = if motion.speed_m_per_s > RUN_M_PER_S {
                     AvatarClip::Run
                 } else if motion.speed_m_per_s > WALK_M_PER_S {
@@ -1043,7 +1254,12 @@ impl CitySession {
                 } else {
                     AvatarClip::Idle
                 };
-                Robot { feet: motion.feet, forward: -p.frame.z_axis.truncate(), team: p.team, clip }
+                Robot {
+                    feet: motion.feet,
+                    forward: -p.frame.z_axis.truncate(),
+                    team: p.team,
+                    clip,
+                }
             })
             .collect();
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
@@ -1056,7 +1272,11 @@ impl CitySession {
                 if s.is_own && self.is_spawned {
                     points[0] = muzzle;
                 }
-                (points, s.team, (1.0 - (now_s - s.start_s) / life_s).clamp(0.0, 1.0))
+                (
+                    points,
+                    s.team,
+                    (1.0 - (now_s - s.start_s) / life_s).clamp(0.0, 1.0),
+                )
             })
             .collect();
         let disabling_mask: u32 = self
@@ -1066,7 +1286,17 @@ impl CitySession {
             .filter_map(|p| p.disabling_console)
             .chain(self.disabling)
             .fold(0, |mask, index| mask | 1 << index);
-        let mut frame: CityFrame = make_frame(&self.world, &self.scene, &self.body, eye, &robots, &beams, (self.client.game.off_mask, disabling_mask), now_s, render_px);
+        let mut frame: CityFrame = make_frame(
+            &self.world,
+            &self.scene,
+            &self.body,
+            eye,
+            &robots,
+            &beams,
+            (self.client.game.off_mask, disabling_mask),
+            now_s,
+            render_px,
+        );
         if self.is_spawned && self.brain.is_none() && self.is_aiming {
             frame.zoom_in(self.settings.aim.sniper_zoom);
         }
@@ -1081,13 +1311,20 @@ impl CitySession {
             return Some(get_lobby_lines(
                 self.client.lobby_counts,
                 self.client.get_server(),
-                format!("{} joins blue, {} joins red", keys.get_label(Action::JoinBlue), keys.get_label(Action::JoinRed)),
+                format!(
+                    "{} joins blue, {} joins red",
+                    keys.get_label(Action::JoinBlue),
+                    keys.get_label(Action::JoinRed)
+                ),
             ));
         }
         if let Some(winner) = self.client.game.winner {
             let loser: usize = (winner as usize + 1) % 2;
             return Some([
-                format!("{} TEAM WINS", net::TEAM_NAMES[winner as usize % 2].to_uppercase()),
+                format!(
+                    "{} TEAM WINS",
+                    net::TEAM_NAMES[winner as usize % 2].to_uppercase()
+                ),
                 format!("every {} console is off", net::TEAM_NAMES[loser]),
             ]);
         }
@@ -1095,13 +1332,25 @@ impl CitySession {
             return Some(["YOU WERE HIT".to_string(), format!("back in {left_s:.1} s")]);
         }
         if !self.is_spawned {
-            return Some(["JOINING THE GAME".to_string(), format!("server {}", self.client.get_server())]);
+            return Some([
+                "JOINING THE GAME".to_string(),
+                format!("server {}", self.client.get_server()),
+            ]);
         }
         if let Some(index) = self.disabling {
             let frac: f64 = (self.disabling_s / self.settings.consoles.hold_to_disable_s).min(1.0);
-            return Some([format!("TURNING OFF CONSOLE {index}"), format!("{:.0}% (keep holding {})", frac * 100.0, keys.get_label(Action::TurnOffConsole))]);
+            return Some([
+                format!("TURNING OFF CONSOLE {index}"),
+                format!(
+                    "{:.0}% (keep holding {})",
+                    frac * 100.0,
+                    keys.get_label(Action::TurnOffConsole)
+                ),
+            ]);
         }
-        self.message.as_ref().map(|(message, _)| [message.clone(), String::new()])
+        self.message
+            .as_ref()
+            .map(|(message, _)| [message.clone(), String::new()])
     }
 
     /// `get_hud_title` is the window title's status line.
@@ -1112,16 +1361,22 @@ impl CitySession {
             Side::Glass => "glass level",
         };
         let on = |team: u32| {
-            self.world.consoles.iter().filter(|c| c.team == team && self.client.game.off_mask >> c.index & 1 == 0).count()
+            self.world
+                .consoles
+                .iter()
+                .filter(|c| c.team == team && self.client.game.off_mask >> c.index & 1 == 0)
+                .count()
         };
         format!(
             "{WINDOW_TITLE}: {team} | {level} | consoles on: blue {} red {} | {} | {fps:.0} fps, GPU {gpu_ms:.2} ms at {}x{}",
             on(0),
             on(1),
             match self.gun {
-                Gun::Laser if self.reload_left_s > 0.0 => format!("laser reloading {:.1} s", self.reload_left_s),
+                Gun::Laser if self.reload_left_s > 0.0 =>
+                    format!("laser reloading {:.1} s", self.reload_left_s),
                 Gun::Laser => "laser ready".to_string(),
-                Gun::Rifle if self.is_overheated => format!("rifle overheated {:.0}%", self.rifle_heat_frac * 100.0),
+                Gun::Rifle if self.is_overheated =>
+                    format!("rifle overheated {:.0}%", self.rifle_heat_frac * 100.0),
                 Gun::Rifle => format!("rifle heat {:.0}%", self.rifle_heat_frac * 100.0),
             },
             render_px.0,
@@ -1153,7 +1408,10 @@ impl Drop for CitySession {
 fn get_percentile_ms(values: &[f64], frac: f64) -> f64 {
     let mut sorted: Vec<f64> = values.to_vec();
     sorted.sort_by(f64::total_cmp);
-    sorted.get(((sorted.len() as f64 - 1.0) * frac).round().max(0.0) as usize).copied().unwrap_or(0.0)
+    sorted
+        .get(((sorted.len() as f64 - 1.0) * frac).round().max(0.0) as usize)
+        .copied()
+        .unwrap_or(0.0)
 }
 
 /// `play` opens the window and runs the game until it closes (or the route ends).
@@ -1161,17 +1419,20 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
     let sdl: sdl3::Sdl = sdl3::init()?;
     let video: sdl3::VideoSubsystem = sdl.video()?;
     let mut session: CitySession = CitySession::New(arguments)?;
-    let mut builder: sdl3::video::WindowBuilder = video.window(WINDOW_TITLE, arguments.width_px, arguments.height_px);
+    let mut builder: sdl3::video::WindowBuilder =
+        video.window(WINDOW_TITLE, arguments.width_px, arguments.height_px);
     builder.high_pixel_density().resizable().position_centered();
     let flags: u32 = builder.window_flags() | sdl3::sys::video::SDL_WINDOW_METAL.0 as u32;
     let mut window: sdl3::video::Window = builder.set_window_flags(flags).build()?;
     // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
-    let view: sdl3::sys::metal::SDL_MetalView = unsafe { sdl3::sys::metal::SDL_Metal_CreateView(window.raw()) };
+    let view: sdl3::sys::metal::SDL_MetalView =
+        unsafe { sdl3::sys::metal::SDL_Metal_CreateView(window.raw()) };
     if view.is_null() {
         return Err(format!("SDL: couldn't make a Metal view: {}", sdl3::get_error()).into());
     }
     // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A DANGLING LAYER WILL HAPPEN
-    let layer: &CAMetalLayer = unsafe { &*sdl3::sys::metal::SDL_Metal_GetLayer(view).cast::<CAMetalLayer>() };
+    let layer: &CAMetalLayer =
+        unsafe { &*sdl3::sys::metal::SDL_Metal_GetLayer(view).cast::<CAMetalLayer>() };
     layer.setDevice(Some(metal.get_device()));
     layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
     layer.setFramebufferOnly(false);
@@ -1198,7 +1459,12 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
             KeyBindings::get_all()
                 .iter()
                 .map(|(action, _)| *action)
-                .filter(|action| session.player_settings.keys.is_held(*action, &keyboard, &mouse_state))
+                .filter(|action| {
+                    session
+                        .player_settings
+                        .keys
+                        .is_held(*action, &keyboard, &mouse_state)
+                })
                 .collect()
         };
         session.is_aiming = held.contains(&Action::Aim);
@@ -1206,7 +1472,9 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         session.update(&held)?;
         lap(1);
         let now_s: f64 = session.now_s();
-        if session.brain.as_ref().is_some_and(Brain::is_done) || now_s > ROUTE_TIMEOUT_S && session.brain.is_some() {
+        if session.brain.as_ref().is_some_and(Brain::is_done)
+            || now_s > ROUTE_TIMEOUT_S && session.brain.is_some()
+        {
             print_route_report(&session, arguments, window.size_in_pixels());
             return Ok(());
         }
@@ -1214,50 +1482,87 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
             return Ok(());
         }
         let window_px: (u32, u32) = window.size_in_pixels();
-        layer.setDrawableSize(CGSize { width: f64::from(window_px.0), height: f64::from(window_px.1) });
+        layer.setDrawableSize(CGSize {
+            width: f64::from(window_px.0),
+            height: f64::from(window_px.1),
+        });
         let render_px: (usize, usize) = (
             ((f64::from(window_px.0) * session.render_scale) as usize).max(1),
             ((f64::from(window_px.1) * session.render_scale) as usize).max(1),
         );
         let frame: CityFrame = session.pack(render_px);
         lap(2);
-        let text: Option<OverlayText> = get_menu_text(&session).or_else(|| session.get_banner_lines().map(|[title, detail]| OverlayText {
-            lines: vec![(title, true), (detail, false)],
-            mask_px: DEATH_MASK_PX,
-            height_frac: BANNER_HEIGHT_FRAC,
-            is_centered: true,
-            dim_frac: if session.respawn_in_s.is_some() { DEATH_DIM_FRAC } else { 0.0 },
-            picture: None,
-        }));
+        let text: Option<OverlayText> = get_menu_text(&session).or_else(|| {
+            session
+                .get_banner_lines()
+                .map(|[title, detail]| OverlayText {
+                    lines: vec![(title, true), (detail, false)],
+                    mask_px: DEATH_MASK_PX,
+                    height_frac: BANNER_HEIGHT_FRAC,
+                    is_centered: true,
+                    dim_frac: if session.respawn_in_s.is_some() {
+                        DEATH_DIM_FRAC
+                    } else {
+                        0.0
+                    },
+                    picture: None,
+                })
+        });
         let mask: Option<Vec<u8>> = text.as_ref().map(make_text_mask).transpose()?;
-        let mut rects: Vec<render_metal::OverlayRect> = if session.is_spawned { get_crosshair_rects(window_px) } else { Vec::new() };
-        if session.is_spawned && session.menu.is_none() && session.player_settings.minimap.is_shown {
+        let mut rects: Vec<render_metal::OverlayRect> = if session.is_spawned {
+            get_crosshair_rects(window_px)
+        } else {
+            Vec::new()
+        };
+        if session.is_spawned && session.menu.is_none() && session.player_settings.minimap.is_shown
+        {
             rects.extend(get_minimap_rects(&session, window_px));
         }
         let wand = session.is_spawned.then(|| {
             let recoil_frac: f64 = session.recoil_left_s / RECOIL_S;
-            (make_wand(session.run_frac, session.step_phase_rad, recoil_frac, session.get_team(), session.gun, (0.0, 0.0)), session.gun.get_model())
+            (
+                make_wand(
+                    session.run_frac,
+                    session.step_phase_rad,
+                    recoil_frac,
+                    session.get_team(),
+                    session.gun,
+                    (0.0, 0.0),
+                ),
+                session.gun.get_model(),
+            )
         });
         let overlay = render_metal::Overlay {
             dim_frac: text.as_ref().map_or(0.0, |t| t.dim_frac),
-            mask: mask.as_deref().zip(text.as_ref()).map(|(pixels, t)| (pixels, (t.mask_px.0 as usize, t.mask_px.1 as usize))),
+            mask: mask
+                .as_deref()
+                .zip(text.as_ref())
+                .map(|(pixels, t)| (pixels, (t.mask_px.0 as usize, t.mask_px.1 as usize))),
             mask_height_frac: text.as_ref().map_or(0.0, |t| t.height_frac),
-            picture: text.as_ref().and_then(|t| t.picture.as_ref()).map(|p| render_metal::OverlayPicture {
-                pixels: &p.pixels,
-                size_px: (p.size_px.0 as usize, p.size_px.1 as usize),
-                min_mask_px: p.min_mask_px,
-                max_excl_mask_px: p.max_excl_mask_px,
+            picture: text.as_ref().and_then(|t| t.picture.as_ref()).map(|p| {
+                render_metal::OverlayPicture {
+                    pixels: &p.pixels,
+                    size_px: (p.size_px.0 as usize, p.size_px.1 as usize),
+                    min_mask_px: p.min_mask_px,
+                    max_excl_mask_px: p.max_excl_mask_px,
+                }
             }),
             stretch_frac: 0.0,
             minimap: None,
             rects: &rects,
             wand,
             blur_frac: 0.0,
-            hit: render_metal::HitEffect { strength_frac: 0.0, red_frac: 0.0, blur_px: 0.0, shake_px: [0.0, 0.0] },
+            hit: render_metal::HitEffect {
+                strength_frac: 0.0,
+                red_frac: 0.0,
+                blur_px: 0.0,
+                shake_px: [0.0, 0.0],
+            },
             blueshift_frac: 0.0,
         };
         lap(3);
-        let is_shown: bool = metal.render_to_layer(FrameData::City(&frame), layer, Some(&overlay))?;
+        let is_shown: bool =
+            metal.render_to_layer(FrameData::City(&frame), layer, Some(&overlay))?;
         lap(4);
         session.phase_ms.push(phases);
         if is_shown {
@@ -1280,7 +1585,12 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
 }
 
 /// `handle_event` reacts to one window event; false to close.
-fn handle_event(session: &mut CitySession, event: Event, window: &sdl3::video::Window, mouse: &sdl3::mouse::MouseUtil) -> Result<bool> {
+fn handle_event(
+    session: &mut CitySession,
+    event: Event,
+    window: &sdl3::video::Window,
+    mouse: &sdl3::mouse::MouseUtil,
+) -> Result<bool> {
     match event {
         Event::Quit { .. } => return Ok(false),
         Event::MouseButtonDown { .. } if !session.is_captured => {
@@ -1288,10 +1598,18 @@ fn handle_event(session: &mut CitySession, event: Event, window: &sdl3::video::W
             mouse.set_relative_mouse_mode(window, true);
             return Ok(true);
         }
-        Event::MouseMotion { xrel, yrel, .. } if session.is_captured && session.is_spawned && session.brain.is_none() => {
-            let zoom: f64 = if session.is_aiming { session.settings.aim.sniper_zoom } else { 1.0 };
+        Event::MouseMotion { xrel, yrel, .. }
+            if session.is_captured && session.is_spawned && session.brain.is_none() =>
+        {
+            let zoom: f64 = if session.is_aiming {
+                session.settings.aim.sniper_zoom
+            } else {
+                1.0
+            };
             let rad_per_px: f64 = session.player_settings.view.look_rad_per_px / zoom;
-            session.player.look_around(-f64::from(xrel) * rad_per_px, -f64::from(yrel) * rad_per_px);
+            session
+                .player
+                .look_around(-f64::from(xrel) * rad_per_px, -f64::from(yrel) * rad_per_px);
         }
         _ => {}
     }
@@ -1321,7 +1639,9 @@ fn handle_event(session: &mut CitySession, event: Event, window: &sdl3::video::W
         } else {
             Gun::Laser
         };
-        session.reload_left_s = session.reload_left_s.min(1.0 / session.settings.rifle.shots_per_s);
+        session.reload_left_s = session
+            .reload_left_s
+            .min(1.0 / session.settings.rifle.shots_per_s);
     } else if is(Action::LowerResolution) {
         session.render_scale = (session.render_scale - RENDER_SCALE_STEP).max(MIN_RENDER_SCALE);
     } else if is(Action::RaiseResolution) {
@@ -1344,7 +1664,11 @@ fn handle_menu_control(session: &mut CitySession, control: key_bindings::Control
                 Ok(path) => format!("Saved to {path}"),
                 Err(error) => format!("Couldn't save: {error}"),
             };
-            session.menu.as_mut().expect("the menu is open").show_message(message);
+            session
+                .menu
+                .as_mut()
+                .expect("the menu is open")
+                .show_message(message);
         }
     }
 }
@@ -1376,9 +1700,13 @@ fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
     };
     let scoreboard: menu::Scoreboard = match &session.client.scores {
         None => menu::Scoreboard::Waiting,
-        Some(scores) => menu::Scoreboard::Scores { scores, own_id: session.client.welcomed_id },
+        Some(scores) => menu::Scoreboard::Scores {
+            scores,
+            own_id: session.client.welcomed_id,
+        },
     };
-    let mut lines: Vec<(String, bool)> = menu.get_lines(&session.player_settings, &save_path, scoreboard);
+    let mut lines: Vec<(String, bool)> =
+        menu.get_lines(&session.player_settings, &save_path, scoreboard);
     let picture: Option<Picture> = if menu.get_page() == menu::Page::Map {
         lines.truncate(1);
         lines.push((CITY_MAP_LEGEND.to_string(), false));
@@ -1399,7 +1727,8 @@ fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
 /// `get_map_picture_px` gives the map page's picture size: the sphere unrolled (longitude across,
 /// latitude down) at 2:1, as large as the page's map area holds.
 fn get_map_picture_px() -> (usize, usize) {
-    let [width_px, height_px] = [0, 1].map(|a| (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a]) * PICTURE_PX_PER_MASK_PX);
+    let [width_px, height_px] = [0, 1]
+        .map(|a| (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a]) * PICTURE_PX_PER_MASK_PX);
     let fitted_width_px: i32 = width_px.min(height_px * 2);
     (fitted_width_px as usize, (fitted_width_px / 2) as usize)
 }
@@ -1409,7 +1738,11 @@ fn get_map_picture_px() -> (usize, usize) {
 fn get_map_direction(x: usize, y: usize, size_px: (usize, usize)) -> DVec3 {
     let longitude_rad: f64 = ((x as f64 + 0.5) / size_px.0 as f64 - 0.5) * std::f64::consts::TAU;
     let latitude_rad: f64 = (0.5 - (y as f64 + 0.5) / size_px.1 as f64) * std::f64::consts::PI;
-    DVec3::new(latitude_rad.cos() * longitude_rad.cos(), latitude_rad.sin(), latitude_rad.cos() * longitude_rad.sin())
+    DVec3::new(
+        latitude_rad.cos() * longitude_rad.cos(),
+        latitude_rad.sin(),
+        latitude_rad.cos() * longitude_rad.sin(),
+    )
 }
 
 /// `get_map_pixel` gives the map picture's pixel that shows the unit direction `d` from the centre.
@@ -1418,7 +1751,10 @@ fn get_map_pixel(d: DVec3, size_px: (usize, usize)) -> (usize, usize) {
     let latitude_rad: f64 = d.y.clamp(-1.0, 1.0).asin();
     let x: f64 = (longitude_rad / std::f64::consts::TAU + 0.5) * size_px.0 as f64;
     let y: f64 = (0.5 - latitude_rad / std::f64::consts::PI) * size_px.1 as f64;
-    ((x as usize).min(size_px.0 - 1), (y as usize).min(size_px.1 - 1))
+    (
+        (x as usize).min(size_px.0 - 1),
+        (y as usize).min(size_px.1 - 1),
+    )
 }
 
 /// `make_map_base` draws the map picture's still part as seen from the centre: the street,
@@ -1437,7 +1773,9 @@ fn make_map_base(world: &CityWorld, size_px: (usize, usize)) -> Vec<u8> {
             let color: [u8; 4] = match nearest_m {
                 Some(t) if t < glass_radius_m + MAP_COVER_ABOVE_GLASS_M => MAP_COVER_COLOR,
                 Some(_) => MAP_BUILDING_COLOR,
-                None if world.get_glass().is_some_and(|glass| glass.is_in_hole(d)) => MAP_HOLE_COLOR,
+                None if world.get_glass().is_some_and(|glass| glass.is_in_hole(d)) => {
+                    MAP_HOLE_COLOR
+                }
                 None => MAP_STREET_COLOR,
             };
             pixels.extend_from_slice(&color);
@@ -1465,7 +1803,9 @@ fn load_map_picture(size_px: (usize, usize)) -> Option<Vec<u8>> {
 fn render_map_picture(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()> {
     let mut world: CityWorld = CityWorld::Builtin()?;
     let drawing: Vec<u8> = make_map_base(&world, get_map_picture_px());
-    world.shells.retain(|shell| shell.is_walkable_inside || shell.is_reflective_inside);
+    world
+        .shells
+        .retain(|shell| shell.is_walkable_inside || shell.is_reflective_inside);
     let scene: Arc<CityScene> = Arc::new(build_scene(&world));
     let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
     let face_px: usize = MAP_PICTURE_FACE_PX;
@@ -1480,10 +1820,24 @@ fn render_map_picture(arguments: &Arguments, renderer: &mut dyn Renderer) -> Res
     let mut face_pixels: Vec<(DMat4, Vec<u8>)> = Vec::new();
     for (forward, up) in faces {
         let eye: DMat4 = make_eye(DVec3::ZERO, forward, up);
-        let mut frame: CityFrame = make_frame(&world, &scene, &body, eye, &[], &[], (0, 0), 0.0, (face_px, face_px));
+        let mut frame: CityFrame = make_frame(
+            &world,
+            &scene,
+            &body,
+            eye,
+            &[],
+            &[],
+            (0, 0),
+            0.0,
+            (face_px, face_px),
+        );
         frame.tan_half_fov = 1.0;
         let mut pixels: Vec<u8> = vec![0; face_px * face_px * BYTES_PER_PIXEL];
-        renderer.render(FrameData::City(&frame), (face_px as u32, face_px as u32), &mut pixels)?;
+        renderer.render(
+            FrameData::City(&frame),
+            (face_px as u32, face_px as u32),
+            &mut pixels,
+        )?;
         face_pixels.push((eye, pixels));
     }
     let size_px: (usize, usize) = get_map_picture_px();
@@ -1497,7 +1851,10 @@ fn render_map_picture(arguments: &Arguments, renderer: &mut dyn Renderer) -> Res
                 let d: DVec3 = get_map_direction(x * n + k % n, y * n + k / n, fine_px);
                 let (eye, pixels) = face_pixels
                     .iter()
-                    .max_by(|a, b| d.dot(-a.0.z_axis.truncate()).total_cmp(&d.dot(-b.0.z_axis.truncate())))
+                    .max_by(|a, b| {
+                        d.dot(-a.0.z_axis.truncate())
+                            .total_cmp(&d.dot(-b.0.z_axis.truncate()))
+                    })
                     .expect("six faces");
                 let z: f64 = d.dot(-eye.z_axis.truncate());
                 let u: f64 = d.dot(eye.x_axis.truncate()) / z;
@@ -1519,9 +1876,23 @@ fn render_map_picture(arguments: &Arguments, renderer: &mut dyn Renderer) -> Res
     std::fs::create_dir_all(path.parent().ok_or("the map picture's folder")?)?;
     save_png(&path, &picture, size_px.0 as u32, size_px.1 as u32)?;
     let folder: PathBuf = make_run_folder("map_picture", arguments.label.as_deref())?;
-    save_png(&folder.join("photo.png"), &picture, size_px.0 as u32, size_px.1 as u32)?;
-    save_png(&folder.join("drawing.png"), &drawing, size_px.0 as u32, size_px.1 as u32)?;
-    println!("Map picture in {} (copies in {})", path.display(), folder.display());
+    save_png(
+        &folder.join("photo.png"),
+        &picture,
+        size_px.0 as u32,
+        size_px.1 as u32,
+    )?;
+    save_png(
+        &folder.join("drawing.png"),
+        &drawing,
+        size_px.0 as u32,
+        size_px.1 as u32,
+    )?;
+    println!(
+        "Map picture in {} (copies in {})",
+        path.display(),
+        folder.display()
+    );
     Ok(())
 }
 
@@ -1532,7 +1903,9 @@ fn make_map_picture(session: &CitySession) -> Picture {
     let size_px: (usize, usize) = get_map_picture_px();
     let mut pixels: Vec<u8> = session
         .map_base
-        .get_or_init(|| load_map_picture(size_px).unwrap_or_else(|| make_map_base(&session.world, size_px)))
+        .get_or_init(|| {
+            load_map_picture(size_px).unwrap_or_else(|| make_map_base(&session.world, size_px))
+        })
         .clone();
     let mut draw_square = |point: DVec3, half_px: i32, color: [f32; 4]| {
         let (center_x, center_y) = get_map_pixel(point.normalize_or(DVec3::X), size_px);
@@ -1548,16 +1921,36 @@ fn make_map_picture(session: &CitySession) -> Picture {
     };
     for console in &session.world.consoles {
         let is_off: bool = session.client.game.off_mask >> console.index & 1 == 1;
-        let color: [f32; 4] = if is_off { MINIMAP_OFF_COLOR } else { TEAM_COLORS[console.team as usize] };
-        draw_square(session.world.get_console_center(console), MAP_CONSOLE_HALF_PX, color);
+        let color: [f32; 4] = if is_off {
+            MINIMAP_OFF_COLOR
+        } else {
+            TEAM_COLORS[console.team as usize]
+        };
+        draw_square(
+            session.world.get_console_center(console),
+            MAP_CONSOLE_HALF_PX,
+            color,
+        );
     }
-    for player in session.client.players.iter().filter(|p| Some(p.id) != session.client.id) {
-        draw_square(player.frame.w_axis.truncate(), MAP_PLAYER_HALF_PX, TEAM_COLORS[player.team as usize % 2]);
+    for player in session
+        .client
+        .players
+        .iter()
+        .filter(|p| Some(p.id) != session.client.id)
+    {
+        draw_square(
+            player.frame.w_axis.truncate(),
+            MAP_PLAYER_HALF_PX,
+            TEAM_COLORS[player.team as usize % 2],
+        );
     }
     draw_square(session.player.feet, MAP_SELF_HALF_PX, MINIMAP_SELF_COLOR);
-    let size_mask_px: [i32; 2] = [size_px.0 as i32, size_px.1 as i32].map(|n| n / PICTURE_PX_PER_MASK_PX);
-    let min_mask_px: [i32; 2] =
-        [0, 1].map(|a| MAP_AREA_MIN_MASK_PX[a] + (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a] - size_mask_px[a]) / 2);
+    let size_mask_px: [i32; 2] =
+        [size_px.0 as i32, size_px.1 as i32].map(|n| n / PICTURE_PX_PER_MASK_PX);
+    let min_mask_px: [i32; 2] = [0, 1].map(|a| {
+        MAP_AREA_MIN_MASK_PX[a]
+            + (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a] - size_mask_px[a]) / 2
+    });
     Picture {
         pixels,
         size_px: (size_px.0 as u32, size_px.1 as u32),
@@ -1571,10 +1964,16 @@ fn make_map_picture(session: &CitySession) -> Picture {
 /// squares in their team's colour (dark once off) and players as dots, the player in white.
 ///
 /// Example: `rects.extend(get_minimap_rects(&session, window_px));`
-fn get_minimap_rects(session: &CitySession, window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> {
+fn get_minimap_rects(
+    session: &CitySession,
+    window_px: (u32, u32),
+) -> Vec<render_metal::OverlayRect> {
     let (width_px, height_px): (f64, f64) = (f64::from(window_px.0), f64::from(window_px.1));
     let radius_px: f64 = height_px * MINIMAP_RADIUS_FRAC;
-    let center_px: [f64; 2] = [width_px - radius_px - height_px * MINIMAP_MARGIN_FRAC, radius_px + height_px * MINIMAP_MARGIN_FRAC];
+    let center_px: [f64; 2] = [
+        width_px - radius_px - height_px * MINIMAP_MARGIN_FRAC,
+        radius_px + height_px * MINIMAP_MARGIN_FRAC,
+    ];
     let outward: DVec3 = session.player.feet.normalize();
     let right: DVec3 = session.player.body.x_axis;
     let forward: DVec3 = -session.player.body.z_axis;
@@ -1583,25 +1982,56 @@ fn get_minimap_rects(session: &CitySession, window_px: (u32, u32)) -> Vec<render
         let cos_angle: f64 = outward.dot(direction).clamp(-1.0, 1.0);
         let tangent: DVec3 = (direction - outward * cos_angle).normalize_or_zero();
         let r_px: f64 = radius_px * cos_angle.acos() / std::f64::consts::PI;
-        [center_px[0] + tangent.dot(right) * r_px, center_px[1] - tangent.dot(forward) * r_px]
+        [
+            center_px[0] + tangent.dot(right) * r_px,
+            center_px[1] - tangent.dot(forward) * r_px,
+        ]
     };
     let rect = |at_px: [f64; 2], half_px: f64, color: [f32; 4]| render_metal::OverlayRect {
-        min_frac: [((at_px[0] - half_px) / width_px) as f32, ((at_px[1] - half_px) / height_px) as f32],
-        max_frac: [((at_px[0] + half_px) / width_px) as f32, ((at_px[1] + half_px) / height_px) as f32],
+        min_frac: [
+            ((at_px[0] - half_px) / width_px) as f32,
+            ((at_px[1] - half_px) / height_px) as f32,
+        ],
+        max_frac: [
+            ((at_px[0] + half_px) / width_px) as f32,
+            ((at_px[1] + half_px) / height_px) as f32,
+        ],
         color,
         style: render_metal::FLAT_RECT_STYLE,
         pulse: render_metal::NO_RECT_PULSE,
     };
-    let mut rects: Vec<render_metal::OverlayRect> = vec![rect(center_px, radius_px, MINIMAP_BACKGROUND_COLOR)];
+    let mut rects: Vec<render_metal::OverlayRect> =
+        vec![rect(center_px, radius_px, MINIMAP_BACKGROUND_COLOR)];
     for console in &session.world.consoles {
         let is_off: bool = session.client.game.off_mask >> console.index & 1 == 1;
-        let color: [f32; 4] = if is_off { MINIMAP_OFF_COLOR } else { TEAM_COLORS[console.team as usize] };
-        rects.push(rect(place(session.world.get_console_center(console)), height_px * MINIMAP_CONSOLE_FRAC, color));
+        let color: [f32; 4] = if is_off {
+            MINIMAP_OFF_COLOR
+        } else {
+            TEAM_COLORS[console.team as usize]
+        };
+        rects.push(rect(
+            place(session.world.get_console_center(console)),
+            height_px * MINIMAP_CONSOLE_FRAC,
+            color,
+        ));
     }
-    for player in session.client.players.iter().filter(|p| Some(p.id) != session.client.welcomed_id) {
-        rects.push(rect(place(player.frame.w_axis.truncate()), height_px * MINIMAP_DOT_FRAC, TEAM_COLORS[player.team as usize % 2]));
+    for player in session
+        .client
+        .players
+        .iter()
+        .filter(|p| Some(p.id) != session.client.welcomed_id)
+    {
+        rects.push(rect(
+            place(player.frame.w_axis.truncate()),
+            height_px * MINIMAP_DOT_FRAC,
+            TEAM_COLORS[player.team as usize % 2],
+        ));
     }
-    rects.push(rect(center_px, height_px * MINIMAP_DOT_FRAC, MINIMAP_SELF_COLOR));
+    rects.push(rect(
+        center_px,
+        height_px * MINIMAP_DOT_FRAC,
+        MINIMAP_SELF_COLOR,
+    ));
     rects
 }
 
@@ -1611,7 +2041,9 @@ fn print_route_report(session: &CitySession, arguments: &Arguments, window_px: (
     let frame_ms: &[f64] = &session.frame_ms[start..];
     let gpu_ms: &[f64] = &session.gpu_ms[start..];
     let phases: &[[f64; PHASE_COUNT]] = &session.phase_ms[start.min(session.phase_ms.len())..];
-    let slow: Vec<usize> = (0..frame_ms.len().min(phases.len().saturating_sub(1))).filter(|&k| frame_ms[k] > SLOW_FRAME_MS).collect();
+    let slow: Vec<usize> = (0..frame_ms.len().min(phases.len().saturating_sub(1)))
+        .filter(|&k| frame_ms[k] > SLOW_FRAME_MS)
+        .collect();
     let phase_report: serde_json::Map<String, serde_json::Value> = PHASE_NAMES
         .iter()
         .enumerate()
@@ -1677,14 +2109,38 @@ fn make_bench_views(world: &CityWorld) -> Vec<BenchView> {
     lift.align_to_ground();
     let _ = eye_m;
     vec![
-        BenchView { name: "street_spawn", eye: view(&street, 0.0, 0.0), has_crowd: false },
-        BenchView { name: "street_up_at_glass", eye: view(&street, 0.5, 0.9), has_crowd: false },
-        BenchView { name: "glass_across", eye: view(&glass, 0.0, -0.35), has_crowd: false },
-        BenchView { name: "glass_edge_on", eye: view(&glass, 1.2, 0.0), has_crowd: false },
-        BenchView { name: "lift_up", eye: view(&lift, 0.0, 1.45), has_crowd: false },
+        BenchView {
+            name: "street_spawn",
+            eye: view(&street, 0.0, 0.0),
+            has_crowd: false,
+        },
+        BenchView {
+            name: "street_up_at_glass",
+            eye: view(&street, 0.5, 0.9),
+            has_crowd: false,
+        },
+        BenchView {
+            name: "glass_across",
+            eye: view(&glass, 0.0, -0.35),
+            has_crowd: false,
+        },
+        BenchView {
+            name: "glass_edge_on",
+            eye: view(&glass, 1.2, 0.0),
+            has_crowd: false,
+        },
+        BenchView {
+            name: "lift_up",
+            eye: view(&lift, 0.0, 1.45),
+            has_crowd: false,
+        },
         BenchView {
             name: "glass_crowd_and_shots",
-            eye: make_eye(glass.get_eye_frame().w_axis.truncate(), DVec3::new(-1.0, 0.25, 0.1) - glass.feet.normalize() * 0.2, glass.get_up()),
+            eye: make_eye(
+                glass.get_eye_frame().w_axis.truncate(),
+                DVec3::new(-1.0, 0.25, 0.1) - glass.feet.normalize() * 0.2,
+                glass.get_up(),
+            ),
             has_crowd: true,
         },
     ]
@@ -1699,10 +2155,26 @@ fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
     for k in 0..BENCH_ROBOT_COUNT {
         let angle: f64 = k as f64 / BENCH_ROBOT_COUNT as f64 * std::f64::consts::TAU;
         let d: DVec3 = DVec3::new(-0.6, angle.cos() * 0.8, angle.sin() * 0.8).normalize();
-        let feet: DVec3 = d * if k % 2 == 0 { glass_m } else { world.street_radius_m };
-        robots.push(Robot { feet, forward: DVec3::X, team: (k % 2) as u32, clip: AvatarClip::Run });
+        let feet: DVec3 = d * if k % 2 == 0 {
+            glass_m
+        } else {
+            world.street_radius_m
+        };
+        robots.push(Robot {
+            feet,
+            forward: DVec3::X,
+            team: (k % 2) as u32,
+            clip: AvatarClip::Run,
+        });
         let eye: DVec3 = d * (glass_m - world.eye_height_m);
-        let shot: Shot = world.trace_shot(eye, (DVec3::new(0.3, 0.2, 0.1) - d).normalize(), 90.0, 2, &[], None);
+        let shot: Shot = world.trace_shot(
+            eye,
+            (DVec3::new(0.3, 0.2, 0.1) - d).normalize(),
+            90.0,
+            2,
+            &[],
+            None,
+        );
         beams.push((shot.points, (k % 2) as u32, 1.0));
     }
     (robots, beams)
@@ -1724,19 +2196,38 @@ fn bench_views(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()>
     let (crowd, crowd_beams) = make_crowd(&world);
     let mut rows = Vec::new();
     for view in make_bench_views(&world) {
-        let (robots, beams): (&[Robot], &[Beam]) = if view.has_crowd { (&crowd, &crowd_beams) } else { (&[], &[]) };
+        let (robots, beams): (&[Robot], &[Beam]) = if view.has_crowd {
+            (&crowd, &crowd_beams)
+        } else {
+            (&[], &[])
+        };
         let mut frame_ms: Vec<f64> = Vec::new();
         let mut gpu_ms: Vec<f64> = Vec::new();
         for k in 0..=arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: CityFrame = make_frame(&world, &scene, &body, view.eye, robots, beams, (0b0100, 0b0001), k as f64 / 60.0, render_px);
+            let frame: CityFrame = make_frame(
+                &world,
+                &scene,
+                &body,
+                view.eye,
+                robots,
+                beams,
+                (0b0100, 0b0001),
+                k as f64 / 60.0,
+                render_px,
+            );
             renderer.render(FrameData::City(&frame), size, &mut pixels)?;
             if k > 0 {
                 frame_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
                 gpu_ms.push(renderer.gpu_ms().unwrap_or(0.0));
             }
         }
-        save_png(&folder.join(format!("{}.png", view.name)), &pixels, size.0, size.1)?;
+        save_png(
+            &folder.join(format!("{}.png", view.name)),
+            &pixels,
+            size.0,
+            size.1,
+        )?;
         let row = json!({
             "view": view.name,
             "gpu_ms_median": get_percentile_ms(&gpu_ms, 0.5),
@@ -1747,16 +2238,29 @@ fn bench_views(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()>
         if !arguments.json {
             println!(
                 "{:<24} GPU median {:6.2} ms, p99 {:6.2} ms | frame (CPU+GPU+readback) median {:6.2} ms, p99 {:6.2} ms",
-                view.name, row["gpu_ms_median"].as_f64().unwrap_or(0.0), row["gpu_ms_p99"].as_f64().unwrap_or(0.0),
-                row["frame_ms_median"].as_f64().unwrap_or(0.0), row["frame_ms_p99"].as_f64().unwrap_or(0.0)
+                view.name,
+                row["gpu_ms_median"].as_f64().unwrap_or(0.0),
+                row["gpu_ms_p99"].as_f64().unwrap_or(0.0),
+                row["frame_ms_median"].as_f64().unwrap_or(0.0),
+                row["frame_ms_p99"].as_f64().unwrap_or(0.0)
             );
         }
         rows.push(row);
     }
     if arguments.json {
-        println!("{}", json!({"size_px": [size.0, size.1], "render_px": [render_px.0, render_px.1], "views": rows, "run_folder": folder}));
+        println!(
+            "{}",
+            json!({"size_px": [size.0, size.1], "render_px": [render_px.0, render_px.1], "views": rows, "run_folder": folder})
+        );
     } else {
-        println!("{}x{} rendering {}x{}; pictures in {}", size.0, size.1, render_px.0, render_px.1, folder.display());
+        println!(
+            "{}x{} rendering {}x{}; pictures in {}",
+            size.0,
+            size.1,
+            render_px.0,
+            render_px.1,
+            folder.display()
+        );
     }
     Ok(())
 }
@@ -1796,13 +2300,28 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
     let glass_m: f64 = world.get_glass().map_or(10.0, |g| g.radius_m);
     let street_m: f64 = world.street_radius_m;
     let eye_m: f64 = world.eye_height_m;
-    let robot = |feet: DVec3, toward: DVec3, team: u32, clip: AvatarClip| Robot { feet, forward: toward - feet, team, clip };
+    let robot = |feet: DVec3, toward: DVec3, team: u32, clip: AvatarClip| Robot {
+        feet,
+        forward: toward - feet,
+        team,
+        clip,
+    };
     let shot = |from: DVec3, to: DVec3, team: u32| -> Beam {
         let up: DVec3 = get_up(from);
         let origin: DVec3 = from + up * eye_m;
-        (world.trace_shot(origin, (to - origin).normalize(), 90.0, 2, &[], None).points, team, 1.0)
+        (
+            world
+                .trace_shot(origin, (to - origin).normalize(), 90.0, 2, &[], None)
+                .points,
+            team,
+            1.0,
+        )
     };
-    let blue_street: DVec3 = world.spawns.iter().find(|s| s.0 == 0).map_or(DVec3::X, |s| s.1.w_axis.truncate());
+    let blue_street: DVec3 = world
+        .spawns
+        .iter()
+        .find(|s| s.0 == 0)
+        .map_or(DVec3::X, |s| s.1.w_axis.truncate());
     let blue_glass: DVec3 = get_pylon_center(world, 0, true);
     let blue_glass_side: DVec3 = blue_glass.normalize().any_orthonormal_vector();
     let red_glass: DVec3 = get_pylon_center(world, 1, true);
@@ -1829,43 +2348,89 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
             name: "far_side_from_core",
             eye: make_eye(near_core, blue_street - near_core, side),
             tan_half_fov: 0.9,
-            beams: vec![shot(far_robots[1].feet, far_robots[0].feet, 1), shot(far_robots[3].feet, near_core, 1)],
+            beams: vec![
+                shot(far_robots[1].feet, far_robots[0].feet, 1),
+                shot(far_robots[3].feet, near_core, 1),
+            ],
             robots: far_robots,
         },
         PhotoView {
             name: "sphere_from_centre",
-            eye: make_eye(blue_street.normalize() * PHOTO_CENTRE_EYE_M, blue_street, side),
+            eye: make_eye(
+                blue_street.normalize() * PHOTO_CENTRE_EYE_M,
+                blue_street,
+                side,
+            ),
             tan_half_fov: 1.6,
             robots: Vec::new(),
             beams: Vec::new(),
         },
         PhotoView {
             name: "street_fight_under_glass",
-            eye: make_eye(camera_street + get_up(camera_street) * eye_m, blue_street + get_up(blue_street) * 1.5 - camera_street - get_up(camera_street) * eye_m, get_up(camera_street)),
+            eye: make_eye(
+                camera_street + get_up(camera_street) * eye_m,
+                blue_street + get_up(blue_street) * 1.5
+                    - camera_street
+                    - get_up(camera_street) * eye_m,
+                get_up(camera_street),
+            ),
             tan_half_fov: 0.55,
-            robots: vec![robot(fighter_blue, fighter_red, 0, AvatarClip::Run), robot(fighter_red, fighter_blue, 1, AvatarClip::Run)],
-            beams: vec![shot(fighter_red, fighter_blue + get_up(fighter_blue) * 1.2, 1)],
+            robots: vec![
+                robot(fighter_blue, fighter_red, 0, AvatarClip::Run),
+                robot(fighter_red, fighter_blue, 1, AvatarClip::Run),
+            ],
+            beams: vec![shot(
+                fighter_red,
+                fighter_blue + get_up(fighter_blue) * 1.2,
+                1,
+            )],
         },
         PhotoView {
             name: "glass_level_across_to_red_pylon",
-            eye: make_eye(camera_glass + get_up(camera_glass) * eye_m, red_glass + get_up(red_glass) * 1.0 - camera_glass - get_up(camera_glass) * eye_m, get_up(camera_glass)),
+            eye: make_eye(
+                camera_glass + get_up(camera_glass) * eye_m,
+                red_glass + get_up(red_glass) * 1.0 - camera_glass - get_up(camera_glass) * eye_m,
+                get_up(camera_glass),
+            ),
             tan_half_fov: 0.65,
-            robots: vec![robot(glass_red, glass_blue, 1, AvatarClip::Run), robot(glass_blue, glass_red, 0, AvatarClip::Run)],
-            beams: vec![shot(glass_blue, across, 0), shot(glass_red, glass_blue + get_up(glass_blue) * 1.5, 1)],
+            robots: vec![
+                robot(glass_red, glass_blue, 1, AvatarClip::Run),
+                robot(glass_blue, glass_red, 0, AvatarClip::Run),
+            ],
+            beams: vec![
+                shot(glass_blue, across, 0),
+                shot(glass_red, glass_blue + get_up(glass_blue) * 1.5, 1),
+            ],
         },
         PhotoView {
             name: "blue_pylon_exposed_on_glass",
             eye: {
                 let camera: DVec3 = get_level_point(blue_glass, blue_glass_side, 6.0, glass_m);
-                make_eye(camera + get_up(camera) * eye_m, blue_glass + get_up(blue_glass) * 1.0 - camera - get_up(camera) * eye_m, get_up(camera))
+                make_eye(
+                    camera + get_up(camera) * eye_m,
+                    blue_glass + get_up(blue_glass) * 1.0 - camera - get_up(camera) * eye_m,
+                    get_up(camera),
+                )
             },
             tan_half_fov: 0.6,
-            robots: vec![robot(get_level_point(blue_glass, -blue_glass_side, 2.0, glass_m), blue_glass, 1, AvatarClip::Run)],
-            beams: vec![shot(get_level_point(blue_glass, -blue_glass_side, 2.0, glass_m), get_level_point(blue_glass, blue_glass_side, 6.0, glass_m) + get_up(blue_glass) * 1.2, 1)],
+            robots: vec![robot(
+                get_level_point(blue_glass, -blue_glass_side, 2.0, glass_m),
+                blue_glass,
+                1,
+                AvatarClip::Run,
+            )],
+            beams: vec![shot(
+                get_level_point(blue_glass, -blue_glass_side, 2.0, glass_m),
+                get_level_point(blue_glass, blue_glass_side, 6.0, glass_m)
+                    + get_up(blue_glass) * 1.2,
+                1,
+            )],
         },
         PhotoView {
             name: "glass_level_crowd_and_reflections",
-            eye: make_bench_views(world).last().map_or(DMat4::IDENTITY, |view| view.eye),
+            eye: make_bench_views(world)
+                .last()
+                .map_or(DMat4::IDENTITY, |view| view.eye),
             tan_half_fov: TAN_HALF_FOV,
             robots: crowd,
             beams: crowd_beams,
@@ -1884,10 +2449,25 @@ fn render_photos(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<(
     let render_px: (usize, usize) = (size.0 as usize, size.1 as usize);
     let mut pixels: Vec<u8> = vec![0; size.0 as usize * size.1 as usize * BYTES_PER_PIXEL];
     for view in make_photo_views(&world) {
-        let mut frame: CityFrame = make_frame(&world, &scene, &body, view.eye, &view.robots, &view.beams, (0, 0), PHOTO_TIME_S, render_px);
+        let mut frame: CityFrame = make_frame(
+            &world,
+            &scene,
+            &body,
+            view.eye,
+            &view.robots,
+            &view.beams,
+            (0, 0),
+            PHOTO_TIME_S,
+            render_px,
+        );
         frame.tan_half_fov = view.tan_half_fov;
         renderer.render(FrameData::City(&frame), size, &mut pixels)?;
-        save_png(&folder.join(format!("{}.png", view.name)), &pixels, size.0, size.1)?;
+        save_png(
+            &folder.join(format!("{}.png", view.name)),
+            &pixels,
+            size.0,
+            size.1,
+        )?;
     }
     println!("Photos in {}", folder.display());
     Ok(())
@@ -1922,8 +2502,11 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
     let mut settings: ServerSettings = ServerSettings::Builtin();
     let mut player: CityPlayer = world.make_player(0, 0);
     let (mut is_spawned, mut respawn_in_s, mut spawn_count) = (false, None::<f64>, 0);
-    let (mut hit_count, mut eliminated_count, mut reload_left_s, mut laser_left_s) = (0u32, 0u32, 0.0, 0.0);
-    let mut rng: Rng = Rng(0x9e37_79b9_7f4a_7c15 ^ u64::from(start.elapsed().subsec_nanos()) ^ u64::from(std::process::id()));
+    let (mut hit_count, mut eliminated_count, mut reload_left_s, mut laser_left_s) =
+        (0u32, 0u32, 0.0, 0.0);
+    let mut rng: Rng = Rng(0x9e37_79b9_7f4a_7c15
+        ^ u64::from(start.elapsed().subsec_nanos())
+        ^ u64::from(std::process::id()));
     let mut brain: Brain = Brain::New(Vec::new());
     let mut last_s: f64 = 0.0;
     while start.elapsed().as_secs_f64() < duration_s {
@@ -1968,16 +2551,39 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         laser_left_s = f64::max(laser_left_s - dt_s, 0.0);
         let mut disabling: Option<u8> = None;
         if arguments.bot_objective == Some(BotObjective::Consoles) {
-            disabling = world.consoles.iter().find(|c| c.team != team && client.game.off_mask >> c.index & 1 == 0).map(|c| c.index);
+            disabling = world
+                .consoles
+                .iter()
+                .find(|c| c.team != team && client.game.off_mask >> c.index & 1 == 0)
+                .map(|c| c.index);
         } else if arguments.bot_objective == Some(BotObjective::Target) {
             player = make_target_player(&world);
         } else if client.game.winner.is_none() {
             if brain.is_done() {
-                let side: Side = if rng.next_frac() < 0.5 { Side::Street } else { Side::Glass };
-                let direction: DVec3 = DVec3::new(rng.next_frac() - 0.5, rng.next_frac() - 0.5, rng.next_frac() - 0.5);
-                brain = Brain::New(vec![Step::GoTo { direction: direction.normalize_or(DVec3::X), side, arrive_m: 2.0 }]);
+                let side: Side = if rng.next_frac() < 0.5 {
+                    Side::Street
+                } else {
+                    Side::Glass
+                };
+                let direction: DVec3 = DVec3::new(
+                    rng.next_frac() - 0.5,
+                    rng.next_frac() - 0.5,
+                    rng.next_frac() - 0.5,
+                );
+                brain = Brain::New(vec![Step::GoTo {
+                    direction: direction.normalize_or(DVec3::X),
+                    side,
+                    arrive_m: 2.0,
+                }]);
             }
-            let out: BrainOutput = brain.drive(&world, &mut player, dt_s, &client.game, false, &BrainSight::default());
+            let out: BrainOutput = brain.drive(
+                &world,
+                &mut player,
+                dt_s,
+                &client.game,
+                false,
+                &BrainSight::default(),
+            );
             world.move_player(&mut player, &out.input, dt_s);
             let eye: DMat4 = player.get_eye_frame();
             let targets: Vec<Target> = client
@@ -1993,12 +2599,25 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 for target in &targets {
                     let origin: DVec3 = eye.w_axis.truncate();
                     let aim: DVec3 = (target.feet + target.up - origin).normalize();
-                    let shot: Shot = world.trace_shot(origin, aim, settings.glass.range_m, settings.glass.max_bounce_count, &targets, client.id);
+                    let shot: Shot = world.trace_shot(
+                        origin,
+                        aim,
+                        settings.glass.range_m,
+                        settings.glass.max_bounce_count,
+                        &targets,
+                        client.id,
+                    );
                     if let ShotHit::Player { id, .. } = shot.hit {
                         let up: DVec3 = player.get_up();
                         let flat: DVec3 = aim - up * aim.dot(up);
                         let forward: DVec3 = -player.body.z_axis;
-                        player.look_around(forward.cross(flat.normalize()).dot(up).atan2(forward.dot(flat.normalize())), 0.0);
+                        player.look_around(
+                            forward
+                                .cross(flat.normalize())
+                                .dot(up)
+                                .atan2(forward.dot(flat.normalize())),
+                            0.0,
+                        );
                         player.pitch_rad = aim.dot(up).asin();
                         client.send_hit(id, settings.sniper.hits_to_eliminate)?;
                         hit_count += 1;
@@ -2009,14 +2628,27 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 }
             }
         }
-        client.send_state(player.get_eye_frame(), laser_left_s > 0.0, false, disabling, 0.0, PlayerWormholes::default())?;
+        client.send_state(
+            player.get_eye_frame(),
+            laser_left_s > 0.0,
+            false,
+            disabling,
+            0.0,
+            PlayerWormholes::default(),
+        )?;
     }
-    let winner: Option<&str> = client.game.winner.map(|team| net::TEAM_NAMES[team as usize % 2]);
+    let winner: Option<&str> = client
+        .game
+        .winner
+        .map(|team| net::TEAM_NAMES[team as usize % 2]);
     let report = json!({"hit_count": hit_count, "eliminated_count": eliminated_count, "winner": winner, "off_mask": client.game.off_mask});
     if arguments.json {
         println!("{report}");
     } else {
-        println!("The bot hit {hit_count} players and was hit {eliminated_count} times; winner: {}.", winner.unwrap_or("none yet"));
+        println!(
+            "The bot hit {hit_count} players and was hit {eliminated_count} times; winner: {}.",
+            winner.unwrap_or("none yet")
+        );
     }
     let _ = client.leave();
     Ok(())
@@ -2042,7 +2674,14 @@ mod tests {
             let mut shooter: CityPlayer = world.make_player(0, 0);
             aim_at(&mut shooter, feet + up * height_m);
             let eye: DMat4 = shooter.get_eye_frame();
-            let shot: Shot = world.trace_shot(eye.w_axis.truncate(), -eye.z_axis.truncate(), 90.0, 2, &targets, Some(0));
+            let shot: Shot = world.trace_shot(
+                eye.w_axis.truncate(),
+                -eye.z_axis.truncate(),
+                90.0,
+                2,
+                &targets,
+                Some(0),
+            );
             assert_eq!(shot.hit, ShotHit::Player { id: 1, is_head }, "{shot:?}");
         }
     }
@@ -2051,7 +2690,10 @@ mod tests {
     fn map_pixels_and_directions_agree() {
         let size_px: (usize, usize) = get_map_picture_px();
         for (x, y) in [(size_px.0 / 3, size_px.1 / 2), (size_px.0 / 5, 2)] {
-            assert_eq!(get_map_pixel(get_map_direction(x, y, size_px), size_px), (x, y));
+            assert_eq!(
+                get_map_pixel(get_map_direction(x, y, size_px), size_px),
+                (x, y)
+            );
         }
     }
 }

@@ -913,7 +913,11 @@ impl Server {
             println!(
                 "The {} team won.{}",
                 TEAM_NAMES[winner as usize],
-                if self.result_path.is_some() { "" } else { " Press Enter here to start a new game." }
+                if self.result_path.is_some() {
+                    ""
+                } else {
+                    " Press Enter here to start a new game."
+                }
             );
         }
     }
@@ -1023,8 +1027,13 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 pub fn write_level_result(path: &std::path::Path, team: &str) {
     let partial: std::path::PathBuf = path.with_extension("partial");
     let text: String = serde_json::json!({ "winner": team }).to_string();
-    if let Err(error) = std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path)) {
-        eprintln!("Couldn't write the level result {}: {error}", path.display());
+    if let Err(error) =
+        std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path))
+    {
+        eprintln!(
+            "Couldn't write the level result {}: {error}",
+            path.display()
+        );
     }
 }
 
