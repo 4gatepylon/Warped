@@ -25,6 +25,7 @@ mod geometry;
 mod key_bindings;
 mod map;
 mod map_export;
+mod map_layout;
 mod menu;
 mod multiplayer;
 mod net;
@@ -142,6 +143,9 @@ const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const MENU_DIM_FRAC: f32 = 0.8;
+const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
+const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
+const PICTURE_PX_PER_MASK_PX: i32 = 2;
 const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
 const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
@@ -1684,6 +1688,7 @@ struct Session {
     player_settings: PerPlayerSettings,
     player_settings_path: Option<PathBuf>,
     menu: Option<menu::Menu>,
+    map_layout: map_layout::MapLayout,
     gun: Gun,
     is_trigger_held: bool,
     is_flashlight_on: bool,
@@ -1933,6 +1938,7 @@ impl Session {
             player_settings,
             player_settings_path,
             menu: None,
+            map_layout: map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?,
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
@@ -2858,6 +2864,7 @@ impl Session {
                 height_frac: MENU_HEIGHT_FRAC,
                 is_centered: false,
                 dim_frac: MENU_DIM_FRAC,
+                picture: (menu.get_page() == menu::Page::Map).then(|| self.make_map_picture()),
             });
         }
         let [title, detail] = self.get_banner_lines()?;
@@ -2867,7 +2874,32 @@ impl Session {
             height_frac: BANNER_HEIGHT_FRAC,
             is_centered: true,
             dim_frac: DEATH_DIM_FRAC,
+            picture: None,
         })
+    }
+
+    /// `make_map_picture` gives the map page's picture: the whole map from above
+    /// (`map_layout.rs`) with this player on it, centred in the page's area for it.
+    ///
+    /// Example: `let picture = self.make_map_picture();`
+    fn make_map_picture(&self) -> Picture {
+        let feet: glam::DMat4 = match &self.voxel {
+            Some(voxel) => voxel.player.get_feet_frame(&voxel.world),
+            None => self.player.frame,
+        };
+        let size_px: (u32, u32) = self.map_layout.get_size_px();
+        let size_mask_px: [i32; 2] =
+            [size_px.0 as i32, size_px.1 as i32].map(|n| n / PICTURE_PX_PER_MASK_PX);
+        let min_mask_px: [i32; 2] = [0, 1].map(|a| {
+            MAP_AREA_MIN_MASK_PX[a]
+                + (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a] - size_mask_px[a]) / 2
+        });
+        Picture {
+            pixels: self.map_layout.draw_player(feet, self.get_team()),
+            size_px,
+            min_mask_px,
+            max_excl_mask_px: [0, 1].map(|a| min_mask_px[a] + size_mask_px[a]),
+        }
     }
 
     /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the crosshair (unless
@@ -3195,13 +3227,33 @@ fn make_wand(
 /// `OverlayText` is text shown over the dimmed view: its lines, each with whether it is
 /// highlighted, the size of the mask it is drawn into (`make_text_mask`), how much of the window's
 /// height that mask may take, whether its lines are centred (a banner) or start at the left (the
-/// menu), and how much the view behind it is darkened.
+/// menu), how much the view behind it is darkened, and a picture under it.
 struct OverlayText {
     lines: Vec<(String, bool)>,
     mask_px: (u32, u32),
     height_frac: f32,
     is_centered: bool,
     dim_frac: f32,
+    picture: Option<Picture>,
+}
+
+/// `Picture` is an RGBA picture (rows top first) of `size_px` under overlay text, stretched
+/// between two corners in the text mask's pixels.
+struct Picture {
+    pixels: Vec<u8>,
+    size_px: (u32, u32),
+    min_mask_px: [i32; 2],
+    max_excl_mask_px: [i32; 2],
+}
+
+/// `get_map_picture_max_px` gives the largest map picture the map page holds, in pixels.
+///
+/// Example: `let layout = MapLayout::FromMap(&map, get_map_picture_max_px())?;`
+fn get_map_picture_max_px() -> (u32, u32) {
+    let [width, height] = [0, 1].map(|a| {
+        ((MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a]) * PICTURE_PX_PER_MASK_PX) as u32
+    });
+    (width, height)
 }
 
 /// `get_text_positions` places each of `text`'s lines in its mask: the line cut to the mask's
@@ -3311,6 +3363,26 @@ fn draw_text_overlay(canvas: &mut sdl3::render::WindowCanvas, text: &OverlayText
     canvas.set_scale(scale, scale)?;
     let left: f32 = (width as f32 / scale - mask_width as f32) / 2.0;
     let top: f32 = (height as f32 / scale - mask_height as f32) / 2.0;
+    if let Some(picture) = &text.picture {
+        let creator = canvas.texture_creator();
+        let mut texture = creator.create_texture_static(
+            PixelFormat::RGBA32,
+            picture.size_px.0,
+            picture.size_px.1,
+        )?;
+        texture.update(
+            None,
+            &picture.pixels,
+            picture.size_px.0 as usize * BYTES_PER_PIXEL,
+        )?;
+        let [min_x, min_y] = picture.min_mask_px.map(|n| n as f32);
+        let [max_x, max_y] = picture.max_excl_mask_px.map(|n| n as f32);
+        canvas.copy(
+            &texture,
+            None,
+            sdl3::render::FRect::new(left + min_x, top + min_y, max_x - min_x, max_y - min_y),
+        )?;
+    }
     for (line, (x, y), is_highlighted) in get_text_positions(text) {
         canvas.set_draw_color(if is_highlighted {
             Color::RGB(255, 90, 80)
@@ -3473,6 +3545,15 @@ fn play_on_layer(
                 Some(text) => text.height_frac,
                 None => 0.0,
             },
+            picture: overlay_text
+                .as_ref()
+                .and_then(|text| text.picture.as_ref())
+                .map(|picture| render_metal::OverlayPicture {
+                    pixels: &picture.pixels,
+                    size_px: (picture.size_px.0 as usize, picture.size_px.1 as usize),
+                    min_mask_px: picture.min_mask_px,
+                    max_excl_mask_px: picture.max_excl_mask_px,
+                }),
             rects: &rects,
             wand,
             blur_frac: session.motion_blur_frac,
@@ -3547,6 +3628,7 @@ mod tests {
             height_frac: BANNER_HEIGHT_FRAC,
             is_centered: true,
             dim_frac: DEATH_DIM_FRAC,
+            picture: None,
         };
         let placed = get_text_positions(&banner);
         let title_px: f32 = DEBUG_GLYPH_PX * "YOU DIED".len() as f32;
@@ -3559,6 +3641,7 @@ mod tests {
             height_frac: MENU_HEIGHT_FRAC,
             is_centered: false,
             dim_frac: MENU_DIM_FRAC,
+            picture: None,
         };
         let max_char_count: usize = (MENU_MASK_PX.0 as f32 / DEBUG_GLYPH_PX) as usize;
         for (line, (x, _), _) in get_text_positions(&menu_text) {

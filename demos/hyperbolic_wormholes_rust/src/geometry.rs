@@ -4,7 +4,8 @@
 //!
 //! Interface: `minkowski_dot`, `make_rotation`, `make_boost`, `make_boost_along`,
 //! `make_rotation_about`, `make_rotation_between`, `invert_lorentz`, `normalize_point`,
-//! `normalize_tangent`, `get_distance`, `orthonormalize_frame`, `get_local_direction`.
+//! `normalize_tangent`, `get_distance`, `orthonormalize_frame`, `get_local_direction`,
+//! `make_fermi_point`.
 //!
 //! Example: `let ahead = make_boost(AXIS_Z, -6.0 / curvature_radius_m);`
 
@@ -116,6 +117,21 @@ pub fn normalize_tangent(x: DVec4, w: DVec4) -> DVec4 {
 pub fn get_distance(a: DVec4, b: DVec4) -> f64 {
     let d: DVec4 = a - b;
     2.0 * (0.5 * minkowski_dot(d, d).max(0.0).sqrt()).asinh()
+}
+
+/// `make_fermi_point` gives the point at Fermi coordinates (u, v, h) in meters on a map of
+/// curvature radius `r_m`, the inverse of `terrain::get_fermi_coordinates`.
+///
+/// Example: `let x = make_fermi_point(12.0, -3.0, 0.0, 40.0);`
+pub fn make_fermi_point(u_m: f64, v_m: f64, h_m: f64, r_m: f64) -> DVec4 {
+    let (u, v, h) = (u_m / r_m, v_m / r_m, h_m / r_m);
+    let ground_w: f64 = v.cosh() * h.cosh();
+    DVec4::new(
+        v.sinh() * h.cosh(),
+        h.sinh(),
+        -u.sinh() * ground_w,
+        u.cosh() * ground_w,
+    )
 }
 
 /// `orthonormalize_frame` repairs rounding drift: the last column becomes a point of H³ and the

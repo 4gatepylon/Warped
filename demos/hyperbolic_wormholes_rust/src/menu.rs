@@ -1,15 +1,17 @@
-//! `menu.rs` is the in-game menu where a player changes their own settings (`player_settings.yaml`):
-//! every key binding, the mouse look speed, the head bob, motion blur and how a hit looks, and a row
-//! that saves them. It keeps no window state: the window feeds it pressed controls and draws its
-//! lines.
+//! `menu.rs` is the in-game menu, in pages under a tab bar: the settings page, where a player
+//! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
+//! head bob, motion blur and how a hit looks, and a row that saves them), and the map page, whose
+//! picture the window draws (`map_layout.rs`). It keeps no window state: the window feeds it pressed
+//! controls and draws its lines.
 //!
-//! Interface: `Menu` (`New`, `handle`, `get_lines`, `show_message`), `MenuOutcome`.
+//! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`, `show_message`), `MenuOutcome`,
+//! `Page`.
 //!
 //! Example: `if menu.handle(control, &mut mine) == MenuOutcome::Close { ... }`
 //!
 //! Must know:
-//! - Inside the menu the arrows, `Return` and `Escape` work whatever the key bindings say, so a bad
-//!   binding can always be fixed.
+//! - Inside the menu the arrows, `Return`, `Escape`, `Q` and `E` work whatever the key bindings
+//!   say, so a bad binding can always be fixed.
 
 use sdl3::keyboard::Scancode;
 
@@ -17,6 +19,8 @@ use crate::key_bindings::{Action, Control, KeyBindings};
 use crate::settings::PerPlayerSettings;
 
 const VISIBLE_ROW_COUNT: usize = 20;
+const PAGES: [(Page, &str); 2] = [(Page::Settings, "SETTINGS"), (Page::Map, "MAP")];
+const MAP_LEGEND: &str = "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
 const LABEL_WIDTH: usize = 24;
 const NUMBERS: [(Number, &str, f64, f64, f64); 7] = [
     (
@@ -33,6 +37,13 @@ const NUMBERS: [(Number, &str, f64, f64, f64); 7] = [
     (Number::HitShake, "hit shake px", 1.0, 0.0, 20.0),
     (Number::HitBlur, "hit blur px", 1.0, 0.0, 20.0),
 ];
+
+/// `Page` is one page of the menu.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Page {
+    Settings,
+    Map,
+}
 
 /// `Number` is one of the player's numeric settings that the menu changes.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -109,9 +120,11 @@ fn get_number_slot(settings: &mut PerPlayerSettings, number: Number) -> &mut f64
     }
 }
 
-/// `Menu` is the menu's state: the chosen row, whether it waits for the control to bind to that
-/// row's action, and a line of news (a saved file, a refused binding).
+/// `Menu` is the menu's state: the page shown (an index into `PAGES`), the settings page's chosen
+/// row, whether it waits for the control to bind to that row's action, and a line of news (a saved
+/// file, a refused binding).
 pub struct Menu {
+    page_index: usize,
     row: usize,
     is_waiting_for_control: bool,
     message: String,
@@ -124,10 +137,18 @@ impl Menu {
     #[allow(non_snake_case)]
     pub fn New() -> Menu {
         Menu {
+            page_index: 0,
             row: 0,
             is_waiting_for_control: false,
             message: String::new(),
         }
+    }
+
+    /// `get_page` gives the page shown.
+    ///
+    /// Example: `if menu.get_page() == Page::Map { ... }`
+    pub fn get_page(&self) -> Page {
+        PAGES[self.page_index].0
     }
 
     /// `show_message` sets the menu's line of news.
@@ -138,8 +159,9 @@ impl Menu {
     }
 
     /// `handle` reacts to a pressed control: while waiting, it binds the control to the chosen
-    /// action (`Escape` cancels); otherwise the arrows move between rows and change numbers,
-    /// `Return` starts a binding or saves, and `Escape` or the open-menu control closes the menu.
+    /// action (`Escape` cancels); otherwise `Q` and `E` turn to the previous and next page,
+    /// `Escape` or the open-menu control closes the menu, and on the settings page the arrows move
+    /// between rows and change numbers and `Return` starts a binding or saves.
     ///
     /// Example: `let outcome = menu.handle(Control::Key(Scancode::Down), &mut mine);`
     pub fn handle(&mut self, control: Control, settings: &mut PerPlayerSettings) -> MenuOutcome {
@@ -159,8 +181,20 @@ impl Menu {
         }
         let is_closing: bool = control == Control::Key(Scancode::Escape)
             || settings.keys.matches(Action::OpenMenu, control);
-        match (control, row) {
+        match control {
             _ if is_closing => return MenuOutcome::Close,
+            Control::Key(Scancode::Q) => {
+                self.page_index = (self.page_index + PAGES.len() - 1) % PAGES.len();
+                return MenuOutcome::Stay;
+            }
+            Control::Key(Scancode::E) => {
+                self.page_index = (self.page_index + 1) % PAGES.len();
+                return MenuOutcome::Stay;
+            }
+            _ if self.get_page() != Page::Settings => return MenuOutcome::Stay,
+            _ => {}
+        }
+        match (control, row) {
             (Control::Key(Scancode::Up), _) => self.row = (self.row + rows.len() - 1) % rows.len(),
             (Control::Key(Scancode::Down), _) => self.row = (self.row + 1) % rows.len(),
             (Control::Key(Scancode::Return), Row::Key(_, name)) => {
@@ -182,9 +216,10 @@ impl Menu {
         MenuOutcome::Stay
     }
 
-    /// `get_lines` gives the menu's text, each line with whether it is highlighted: a title, a
-    /// hint, the rows around the chosen one (`VISIBLE_ROW_COUNT` of them), and the line of news.
-    /// `save_path` is where saving writes.
+    /// `get_lines` gives the menu's text, each line with whether it is highlighted: the tab bar,
+    /// then on the settings page a hint, the rows around the chosen one (`VISIBLE_ROW_COUNT` of
+    /// them) and the line of news, or on the map page the map's legend. `save_path` is where saving
+    /// writes.
     ///
     /// Example: `let lines = menu.get_lines(&mine, "~/.config/warped/player_settings.yaml");`
     pub fn get_lines(&self, settings: &PerPlayerSettings, save_path: &str) -> Vec<(String, bool)> {
@@ -193,8 +228,20 @@ impl Menu {
             .row
             .saturating_sub(VISIBLE_ROW_COUNT / 2)
             .min(rows.len().saturating_sub(VISIBLE_ROW_COUNT));
+        let tabs: Vec<String> = PAGES
+            .iter()
+            .enumerate()
+            .map(|(i, (_, name))| match i == self.page_index {
+                true => format!("[{name}]"),
+                false => format!(" {name} "),
+            })
+            .collect();
+        let tab_bar: String = format!("MENU  {}     Q/E: page", tabs.join(" "));
+        if self.get_page() == Page::Map {
+            return vec![(tab_bar, true), (MAP_LEGEND.to_string(), false)];
+        }
         let mut lines: Vec<(String, bool)> = vec![
-            ("MENU: YOUR SETTINGS".to_string(), true),
+            (tab_bar, true),
             (
                 "Up/Down choose, Return change, Left/Right adjust, Esc closes".to_string(),
                 false,
@@ -230,6 +277,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Row kind | an action (rebound, or cancelled with Escape), a number (stepped, clamped), saving | `rows_rebind_step_and_save` |
     //! | Closing | Escape, the open-menu control | `escape_and_the_menu_key_close_it` |
+    //! | Page | turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
 
     use super::*;
 
@@ -266,6 +314,25 @@ mod tests {
         assert_eq!(
             menu.handle(Control::Key(Scancode::Return), &mut mine),
             MenuOutcome::Save
+        );
+    }
+
+    #[test]
+    fn q_and_e_turn_pages() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        for expected in [Page::Map, Page::Settings] {
+            menu.handle(Control::Key(Scancode::E), &mut mine);
+            assert_eq!(menu.get_page(), expected);
+        }
+        menu.handle(Control::Key(Scancode::Q), &mut mine);
+        assert_eq!(menu.get_page(), Page::Map);
+        menu.handle(Control::Key(Scancode::Down), &mut mine);
+        menu.handle(Control::Key(Scancode::Return), &mut mine);
+        assert!(!menu.is_waiting_for_control && menu.row == 0);
+        assert_eq!(menu.get_lines(&mine, "")[1].0, MAP_LEGEND);
+        assert_eq!(
+            menu.handle(Control::Key(Scancode::Escape), &mut mine),
+            MenuOutcome::Close
         );
     }
 

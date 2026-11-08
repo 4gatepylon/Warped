@@ -1995,6 +1995,8 @@ struct OverlayParams {
     float hit_red_frac;
     float hit_blur_px;
     float2 shake_px;
+    int2 picture_min_mask_px;
+    int2 picture_max_excl_mask_px;
 };
 
 /**
@@ -2099,7 +2101,9 @@ struct OverlayRect {
  * @brief `apply_overlay` copies a finished frame into `out`, blended with the previous frame's scene (`history_in`, by
  * `blur_frac`; the blend is kept in `history_out` for the next frame) and darkened by `dim_frac`, with a mask's text drawn over it at
  * `scale` screen pixels per mask pixel from `origin` (the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
- * the text's above `OVERLAY_TEXT_LEVEL`), the wand (`shade_wand`, 2 × 2 rays a pixel) when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), and `rects`
+ * the text's above `OVERLAY_TEXT_LEVEL`) over a picture (blended by its alpha) stretched from `picture_min_mask_px` to
+ * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel)
+ * when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), and `rects`
  * blended over that in order (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
  * @par Example
  * @code
@@ -2110,12 +2114,21 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
                           texture2d<float, access::write> out [[texture(2)]], constant OverlayParams &p [[buffer(0)]],
                           constant OverlayRect *rects [[buffer(1)]], constant OverlayWand &wand [[buffer(2)]],
                           texture2d<float, access::read> history_in [[texture(3)]],
-                          texture2d<float, access::write> history_out [[texture(4)]], uint2 id [[thread_position_in_grid]]) {
+                          texture2d<float, access::write> history_out [[texture(4)]],
+                          texture2d<float, access::read> picture [[texture(6)]], uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
     float3 scene = mix(read_hit_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
     history_out.write(float4(scene, 1.0), id);
     float4 color = float4(scene * (1.0 - p.dim_frac), 1.0);
     int2 offset = int2(id) - p.origin;
+    int2 picture_size_mask_px = p.picture_max_excl_mask_px - p.picture_min_mask_px;
+    if (all(picture_size_mask_px > int2(0)) && all(offset >= int2(0))) {
+        float2 picture_frac = (float2(offset) / float(p.scale) - float2(p.picture_min_mask_px)) / float2(picture_size_mask_px);
+        if (all(picture_frac >= 0.0) && all(picture_frac < 1.0)) {
+            float4 pixel = picture.read(uint2(picture_frac * float2(picture.get_width(), picture.get_height())));
+            color.rgb = mix(color.rgb, pixel.rgb, pixel.a);
+        }
+    }
     if (p.has_mask != 0 && all(offset >= int2(0))) {
         uint2 cell = uint2(offset / p.scale);
         if (cell.x < mask.get_width() && cell.y < mask.get_height()) {

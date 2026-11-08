@@ -49,8 +49,8 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
 /// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
-/// this one's (motion blur; 0 for none), what a recent hit does to the scene, and how much of the
-/// frame's height the mask's text may take.
+/// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
+/// frame's height the mask's text may take, and a picture under the text.
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
@@ -59,6 +59,16 @@ pub struct Overlay<'a> {
     pub blur_frac: f32,
     pub hit: HitEffect,
     pub mask_height_frac: f32,
+    pub picture: Option<OverlayPicture<'a>>,
+}
+
+/// `OverlayPicture` is an RGBA picture (rows top first) of `size_px`, drawn under the overlay's
+/// text and stretched between two corners given in the text mask's pixels.
+pub struct OverlayPicture<'a> {
+    pub pixels: &'a [u8],
+    pub size_px: (usize, usize),
+    pub min_mask_px: [i32; 2],
+    pub max_excl_mask_px: [i32; 2],
 }
 
 /// `HitEffect` is what a recent hit does to the scene (the shader's `read_hit_scene`): how much of
@@ -111,6 +121,8 @@ struct OverlayParams {
     hit_red_frac: f32,
     hit_blur_px: f32,
     shake_px: [f32; 2],
+    picture_min_mask_px: [i32; 2],
+    picture_max_excl_mask_px: [i32; 2],
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -245,6 +257,7 @@ pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
 /// `REVOLVER_WAND` is `has_wand` when the revolver (viewmodel.rs) is drawn in the wand's place.
 const REVOLVER_WAND: i32 = 2;
 const EMPTY_MASK_PX: (usize, usize) = (1, 1);
+const BYTES_PER_PICTURE_PIXEL: usize = 4;
 const MS_PER_S: f64 = 1000.0;
 const PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
 const _: () = assert!(
@@ -291,6 +304,7 @@ pub struct MetalRenderer {
     apply_overlay: Pipeline,
     overlay_target: Option<Texture>,
     overlay_mask: Option<Texture>,
+    overlay_picture: Option<Texture>,
     blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
@@ -354,6 +368,63 @@ fn fill_shader_constants(source: &str) -> String {
         "render_metal.metal has a placeholder render_metal.rs doesn't fill"
     );
     filled
+}
+
+/// `upload_texture` copies `bytes` (rows top first, `bytes_per_pixel` a pixel) into the texture in
+/// `slot`, first making a new one of `pixel_format` if the slot is empty or holds another size.
+///
+/// Example: `upload_texture(&device, &mut self.overlay_mask, mask, (240, 24), MTLPixelFormat::R8Unorm, 1)?;`
+fn upload_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    slot: &mut Option<Texture>,
+    bytes: &[u8],
+    size_px: (usize, usize),
+    pixel_format: MTLPixelFormat,
+    bytes_per_pixel: usize,
+) -> Result<()> {
+    assert_eq!(
+        bytes.len(),
+        size_px.0 * size_px.1 * bytes_per_pixel,
+        "upload_texture: the bytes aren't {}x{} pixels of {bytes_per_pixel} bytes",
+        size_px.0,
+        size_px.1
+    );
+    if slot.as_ref().is_none_or(|(_, size)| *size != size_px) {
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+        let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                pixel_format,
+                size_px.0,
+                size_px.1,
+                false,
+            )
+        };
+        descriptor.setUsage(MTLTextureUsage::ShaderRead);
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        let texture = device
+            .newTextureWithDescriptor(&descriptor)
+            .ok_or("Metal: no memory for an overlay texture")?;
+        *slot = Some((texture, size_px));
+    }
+    let (texture, _) = slot.as_ref().expect("the texture was just made");
+    let region: MTLRegion = MTLRegion {
+        origin: MTLOrigin { x: 0, y: 0, z: 0 },
+        size: MTLSize {
+            width: size_px.0,
+            height: size_px.1,
+            depth: 1,
+        },
+    };
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE BYTES WILL HAPPEN
+    unsafe {
+        texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+            region,
+            0,
+            NonNull::new(bytes.as_ptr() as *mut std::ffi::c_void).expect("a texture's bytes"),
+            size_px.0 * bytes_per_pixel,
+        )
+    };
+    Ok(())
 }
 
 /// `dispatch_grid` runs the encoder's current kernel once per point of a 2D grid, in square
@@ -555,6 +626,7 @@ impl MetalRenderer {
             overlay_target: None,
             blur_histories: None,
             overlay_mask: None,
+            overlay_picture: None,
             hole_buffers: None,
             voxel_gpu: None,
             viewmodel: None,
@@ -1034,7 +1106,8 @@ impl MetalRenderer {
     /// which it returns: the frame blended with the previous frame's scene (kept in one of two
     /// history textures, swapped each frame; none after a resize) and darkened, the mask (if any)
     /// scaled by a whole number to at most `mask_height_frac` of the frame's height (and at most
-    /// `OVERLAY_MAX_WIDTH_FRAC` of its width), centred, and the rectangles.
+    /// `OVERLAY_MAX_WIDTH_FRAC` of its width), centred, over the picture (if any), and the
+    /// rectangles.
     ///
     /// Example: `let shown = self.encode_overlay(&command_buffer, &frame, &overlay, (2560, 1600))?;`
     fn encode_overlay(
@@ -1051,11 +1124,6 @@ impl MetalRenderer {
         );
         let empty_mask: [u8; 1] = [0];
         let (mask_bytes, (mask_w, mask_h)) = overlay.mask.unwrap_or((&empty_mask, EMPTY_MASK_PX));
-        assert_eq!(
-            mask_bytes.len(),
-            mask_w * mask_h,
-            "encode_overlay: the mask isn't {mask_w}x{mask_h} bytes"
-        );
         if self
             .overlay_target
             .as_ref()
@@ -1077,46 +1145,36 @@ impl MetalRenderer {
                 self.make_texture(output_px, usage)?,
             ));
         }
-        if self
-            .overlay_mask
-            .as_ref()
-            .is_none_or(|(_, size)| *size != (mask_w, mask_h))
-        {
-            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A MASK TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
-            let descriptor: Retained<MTLTextureDescriptor> = unsafe {
-                MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                    MTLPixelFormat::R8Unorm,
-                    mask_w,
-                    mask_h,
-                    false,
-                )
-            };
-            descriptor.setUsage(MTLTextureUsage::ShaderRead);
-            descriptor.setStorageMode(MTLStorageMode::Shared);
-            let mask = self
-                .device
-                .newTextureWithDescriptor(&descriptor)
-                .ok_or("Metal: no memory for the overlay's mask")?;
-            self.overlay_mask = Some((mask, (mask_w, mask_h)));
-        }
+        let empty_picture: [u8; BYTES_PER_PICTURE_PIXEL] = [0; BYTES_PER_PICTURE_PIXEL];
+        let (picture_bytes, picture_px, picture_corners_mask_px) = match &overlay.picture {
+            Some(picture) => (
+                picture.pixels,
+                picture.size_px,
+                [picture.min_mask_px, picture.max_excl_mask_px],
+            ),
+            None => (&empty_picture[..], EMPTY_MASK_PX, [[0; 2]; 2]),
+        };
+        upload_texture(
+            &self.device,
+            &mut self.overlay_mask,
+            mask_bytes,
+            (mask_w, mask_h),
+            MTLPixelFormat::R8Unorm,
+            1,
+        )?;
+        upload_texture(
+            &self.device,
+            &mut self.overlay_picture,
+            picture_bytes,
+            picture_px,
+            MTLPixelFormat::RGBA8Unorm,
+            BYTES_PER_PICTURE_PIXEL,
+        )?;
         let (mask, _) = self.overlay_mask.as_ref().expect("the mask was just made");
-        let region: MTLRegion = MTLRegion {
-            origin: MTLOrigin { x: 0, y: 0, z: 0 },
-            size: MTLSize {
-                width: mask_w,
-                height: mask_h,
-                depth: 1,
-            },
-        };
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE MASK WILL HAPPEN
-        unsafe {
-            mask.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
-                region,
-                0,
-                NonNull::new(mask_bytes.as_ptr() as *mut std::ffi::c_void).expect("a mask's bytes"),
-                mask_w,
-            )
-        };
+        let (picture, _) = self
+            .overlay_picture
+            .as_ref()
+            .expect("the picture was just made");
         let tan_half_fov: f32 = HALF_FOV_RAD.tan() as f32;
         let revolver_image: Option<Retained<ProtocolObject<dyn MTLTexture>>> = match overlay.wand {
             Some(wand) => {
@@ -1163,6 +1221,8 @@ impl MetalRenderer {
             hit_red_frac: overlay.hit.red_frac,
             hit_blur_px: overlay.hit.blur_px,
             shake_px: overlay.hit.shake_px,
+            picture_min_mask_px: picture_corners_mask_px[0],
+            picture_max_excl_mask_px: picture_corners_mask_px[1],
         };
         let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
             center_m: [0.0; 4],
@@ -1198,6 +1258,7 @@ impl MetalRenderer {
             encoder.setTexture_atIndex(Some(history_in), 3);
             encoder.setTexture_atIndex(Some(history_out), 4);
             encoder.setTexture_atIndex(Some(revolver_image.as_deref().unwrap_or(frame)), 5);
+            encoder.setTexture_atIndex(Some(picture), 6);
             encoder.setBytes_length_atIndex(
                 NonNull::from(&params).cast(),
                 std::mem::size_of::<OverlayParams>(),

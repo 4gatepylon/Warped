@@ -10,9 +10,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-49 Menu with pages.** The menu where players change their hotkeys and the rest is a general menu with
-  pages: one page for the hotkeys, another showing a layout of the entire map. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/menu-pages`, 2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
@@ -159,6 +156,8 @@ is in [`AGENTS.md`](AGENTS.md).
   player's own, and `server_settings.yaml`, the server's. #140.
 - [x] **W-46 Settings menu.** A screen to exit to a menu where a player changes their own choices (hotkeys and the
   rest of the per-player settings): `Tab` opens it. #143.
+- [x] **W-49 Menu with pages.** The menu where players change their hotkeys and the rest is a general menu with
+  pages: one page for the hotkeys, another showing a layout of the entire map (`Q`/`E` turn pages). #149.
 - [x] **W-59 Smooth crater instead of voxels.** Get rid of voxels and replace them with a proper 3D world: an uneven
   lunar surface texture from an online source, the Lunar Surface level inside a crater whose walls are the level's
   walls, a smooth noise-based environment with no voxels at all, smooth shapes for the objects, and the ridge, peak
