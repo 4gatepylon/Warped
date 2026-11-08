@@ -557,6 +557,17 @@ fn find_material(map: &Map, name: &str) -> i32 {
         .map_or(-1, |m| i32::from(m.id))
 }
 
+/// `find_material_or` gives the id of the material called `name`, or `fallback` on a map without
+/// one (Snow Planet's ground has no darker regolith or basalt).
+///
+/// Example: `let basalt = find_material_or(map, "basalt", map.ground.material);`
+fn find_material_or(map: &Map, name: &str, fallback: u8) -> i32 {
+    match find_material(map, name) {
+        -1 => i32::from(fallback),
+        id => id,
+    }
+}
+
 /// `make_structure` gives a structure of `shapes` (starting at `first_shape` in the world's list)
 /// drawn as `mesh` (its index in the world's meshes and the model) if it has one, in `frame`,
 /// with a bounding sphere around the corners of their boxes plus `BOUND_MARGIN_M`.
@@ -759,8 +770,8 @@ impl VoxelWorld {
                 .find(|m| m.kind == "glass")
                 .map_or(-1, |m| i32::from(m.id)),
             regolith: i32::from(map.ground.material),
-            dark_regolith: find_material(map, "dark regolith"),
-            basalt: find_material(map, "basalt"),
+            dark_regolith: find_material_or(map, "dark regolith", map.ground.material),
+            basalt: find_material_or(map, "basalt", map.ground.material),
             solar: find_material(map, "solar panel"),
             hazard: find_material(map, "hazard paint"),
             pad: find_material(map, "landing pad"),

@@ -80,15 +80,15 @@ join-game:
 
 build-server-bundle:
 	rustup target add $(SERVER_TARGET)
-	cargo build --release --target $(SERVER_TARGET) --bin wormholes_server
-	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(SERVER_TARGET)/release wormholes_server
+	cargo build --release --target $(SERVER_TARGET) --bin snow_planet_server
+	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(SERVER_TARGET)/release snow_planet_server
 	@echo "Server bundle: $(SERVER_BUNDLE)"
 
 package-mac-app:
 	cargo build --release
 	rm -rf .build/Warped .build/AppIcon.iconset
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(APP_ICONSET)
-	cp .build/release/hyperbolic-wormholes $(APP)/Contents/MacOS/Warped
+	cp .build/release/snow-planet $(APP)/Contents/MacOS/Warped
 	sed 's/@VERSION@/$(APP_VERSION)/' app/Info.plist > $(APP)/Contents/Info.plist
 	for size in 16 32 128 256 512; do \
 		sips -z $$size $$size app/app_icon.png --out $(APP_ICONSET)/icon_$${size}x$${size}.png > /dev/null; \

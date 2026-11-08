@@ -35,7 +35,7 @@ use std::cell::Cell;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -1010,6 +1010,21 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 ///
 /// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
 #[allow(clippy::too_many_arguments)]
+/// `write_level_result` writes a level's winner (an index into `TEAM_NAMES`) to `path` for a match
+/// server (`--level-result-file`), as JSON such as `{"winner": "blue"}`, atomically: into
+/// `<path>.partial`, then renamed onto `path`.
+///
+/// Example: `write_level_result(Path::new("result.json"), 0)?;`
+pub fn write_level_result(path: &Path, winner: u32) -> Result<()> {
+    let mut partial = path.as_os_str().to_owned();
+    partial.push(".partial");
+    let partial: PathBuf = PathBuf::from(partial);
+    let json: String = serde_json::json!({"winner": TEAM_NAMES[winner as usize]}).to_string();
+    std::fs::write(&partial, json + "\n")?;
+    std::fs::rename(&partial, path)?;
+    Ok(())
+}
+
 pub fn serve(
     socket: UdpSocket,
     should_stop: &AtomicBool,
@@ -1018,6 +1033,7 @@ pub fn serve(
     console_teams: Vec<u32>,
     should_start_new_game: &AtomicBool,
     new_game_after_win: Option<Duration>,
+    level_result_file: Option<&Path>,
     game_password: Vec<u8>,
 ) -> Result<()> {
     assert!(
@@ -1049,6 +1065,7 @@ pub fn serve(
     let mut last_scores: Instant = Instant::now();
     let mut has_warned_about_beacon: bool = false;
     let mut won_at: Option<Instant> = None;
+    let mut has_written_result: bool = false;
     while !should_stop.load(Ordering::Relaxed) {
         match server.socket.recv_from(&mut buffer) {
             Ok((length, address)) => server.handle(&buffer[..length], address)?,
@@ -1064,13 +1081,24 @@ pub fn serve(
         });
         server.update_consoles();
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
-        if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
+        if let (Some(path), Some(winner)) = (level_result_file, server.game.winner)
+            && !has_written_result
+        {
+            write_level_result(path, winner)?;
+            has_written_result = true;
+            println!("Wrote the level's result to {}.", path.display());
+        }
+        if level_result_file.is_none()
+            && let (Some(delay), Some(time)) = (new_game_after_win, won_at)
             && time.elapsed() >= delay
         {
             server.start_new_game();
         }
         if should_start_new_game.swap(false, Ordering::Relaxed) {
             match server.game.winner {
+                Some(_) if level_result_file.is_some() => {
+                    println!("This level's result is written; the match server ends it.");
+                }
                 Some(_) => server.start_new_game(),
                 None => println!("No team has won yet, so the game goes on."),
             }
@@ -1454,6 +1482,17 @@ impl Client {
         Ok(())
     }
 
+    /// `send_freeze` tells the server this player froze by one `1 / freezes_to_kill` of their health
+    /// in a blizzard: a hit on themselves.
+    ///
+    /// Example: `client.send_freeze(50)?;`
+    pub fn send_freeze(&mut self, freezes_to_kill: u8) -> Result<()> {
+        match self.id {
+            Some(id) => self.send_hit(id, freezes_to_kill),
+            None => Ok(()),
+        }
+    }
+
     /// `get_server` gives the address of the server this client plays on.
     ///
     /// Example: `let server = client.get_server();`
@@ -1620,6 +1659,17 @@ mod tests {
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
 
     use super::*;
+
+    #[test]
+    fn level_result_is_written_whole() {
+        let folder: PathBuf = std::env::temp_dir().join(format!("level_result_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let path: PathBuf = folder.join("result.json");
+        write_level_result(&path, 1).expect("a result");
+        assert_eq!(std::fs::read_to_string(&path).expect("the result"), "{\"winner\":\"red\"}\n");
+        assert!(!folder.join("result.json.partial").exists());
+        std::fs::remove_dir_all(&folder).expect("cleaned up");
+    }
 
     const TEST_MAP_NAME: &str = "lunar_surface";
     const TEST_PASSWORD: &[u8] = b"correct horse";

@@ -235,6 +235,13 @@ enum Sampling {
     EveryPixel,
 }
 
+/// `TeamFlag` is the team `--team` joins at once.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum TeamFlag {
+    Blue,
+    Red,
+}
+
 /// `RouteKind` is which route `--play-route` plays: the house's scripted legs, a tour around each
 /// of its mouths from 5 blocks to just outside its throat and back, or (on a voxel map) a tour
 /// around each warp object.
@@ -249,7 +256,7 @@ enum RouteKind {
 #[derive(Parser)]
 #[command(
     about = "Walk, fly and fire a laser through wormholes in hyperbolic space.",
-    after_help = "Example: hyperbolic-wormholes --renderer cpu --bench-views --width-px 2560 --height-px 1600"
+    after_help = "Example: snow-planet --renderer cpu --bench-views --width-px 2560 --height-px 1600"
 )]
 struct Arguments {
     /// Which renderer draws the frames: the GPU with Metal, or every CPU core.
@@ -318,6 +325,17 @@ struct Arguments {
     /// player and fire), to test a game; saves its view under .artifacts/bot/ at each hit.
     #[arg(long)]
     bot: bool,
+    /// With --bot: `fight` (walk, aim at the nearest player and fire) or `consoles` (stand and hold
+    /// E on the other team's consoles, one after another, until its team wins).
+    #[arg(long, value_enum, default_value_t = multiplayer::BotObjective::Fight)]
+    bot_objective: multiplayer::BotObjective,
+    /// With --join (a window or --bot): join this team at once instead of choosing in the lobby.
+    #[arg(long, value_enum, requires = "join")]
+    team: Option<TeamFlag>,
+    /// With --serve: when a team wins, write `{"winner":"blue"}` (or red) to this file once,
+    /// atomically, for a match server (`demos/warped_match_rust`), and keep the won game (no new one).
+    #[arg(long, requires = "serve")]
+    level_result_file: Option<PathBuf>,
     /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
@@ -544,6 +562,9 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         && arguments.export_map.is_none();
     if is_window_without_server {
         return Err(LOCAL_PLAY_OFF.into());
+    }
+    if arguments.bot_objective != multiplayer::BotObjective::Fight && !arguments.bot {
+        return Err("--bot-objective needs --bot; e.g. --bot --bot-objective consoles".into());
     }
     if arguments.bot && (arguments.join.is_none() || arguments.exit_after_s.is_none()) {
         return Err(
@@ -869,6 +890,7 @@ fn start_server(
     settings: ServerSettings,
     console_teams: Vec<u32>,
     game_password: Vec<u8>,
+    level_result_file: Option<PathBuf>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -890,6 +912,7 @@ fn start_server(
             console_teams,
             &should_start_new_game,
             None,
+            level_result_file.as_deref(),
             game_password,
         ) {
             eprintln!("The game server stopped: {error}");
@@ -974,6 +997,7 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         settings,
         consoles.iter().map(|c| c.team).collect(),
         net::read_game_password(arguments.game_password_file.as_deref())?,
+        arguments.level_result_file.clone(),
     )?;
     println!(
         "Server settings: {} (players who join get them).",
@@ -999,10 +1023,15 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         "  make join-game MAP={map} PORT={port}  (finds this server on the network by itself)"
     );
     println!("  make join-game MAP={map} SERVER=127.0.0.1 PORT={port}  (on this computer)");
-    if !consoles.is_empty() {
-        println!(
+    match (&arguments.level_result_file, consoles.is_empty()) {
+        (_, true) => {}
+        (Some(path), false) => println!(
+            "A team wins by turning off the other team's consoles; the winner goes to {}.",
+            path.display()
+        ),
+        (None, false) => println!(
             "A team wins by turning off the other team's consoles; then press Enter here for a new game."
-        );
+        ),
     }
     match arguments.exit_after_s {
         Some(seconds) => std::thread::sleep(Duration::from_secs_f64(seconds)),
@@ -1169,7 +1198,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         arguments.map.get_folder_name(),
         &net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
-    client.join(None)?;
+    client.join(arguments.team.map(|team| team as u32))?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
     let duration_s: f64 = arguments
@@ -1202,6 +1231,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
             &mut client,
             duration_s,
             arguments.black_hole_strength,
+            arguments.bot_objective,
             |frame, id| save(FrameData::Voxel(frame), id),
         )?
     };
@@ -2344,12 +2374,16 @@ impl Session {
             } else {
                 None
             };
+            let mut client: net::Client = net::Client::Connect(
+                get_server_address(arguments)?,
+                arguments.map.get_folder_name(),
+                &net::read_game_password(arguments.game_password_file.as_deref())?,
+            )?;
+            if let Some(team) = arguments.team {
+                client.join(Some(team as u32))?;
+            }
             Some(Multiplayer {
-                client: net::Client::Connect(
-                    get_server_address(arguments)?,
-                    arguments.map.get_folder_name(),
-                    &net::read_game_password(arguments.game_password_file.as_deref())?,
-                )?,
+                client,
                 server,
                 is_eliminated: false,
                 respawn_in_s: 0.0,

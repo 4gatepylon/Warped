@@ -1,11 +1,11 @@
-//! `wormholes_server.rs` runs one game server of the Rust demo without a window, for a machine that
+//! `snow_planet_server.rs` runs one game server of the Rust demo without a window, for a machine that
 //! only hosts games, such as a Linux server in the cloud: it builds without Metal or SDL, plays a
 //! map built into the program, and starts a new game a few seconds after a team wins.
 //!
 //! Interface: `--port <port>`, `--map <house-demo|lunar-surface>`, `--server-settings <path>`,
 //! `--game-password-file <path>`.
 //!
-//! Example: `.build/x86_64-unknown-linux-musl/release/wormholes_server --port 47810 --map lunar-surface`
+//! Example: `.build/x86_64-unknown-linux-musl/release/snow_planet_server --port 47820 --map snow-planet`
 //!
 //! Must know:
 //! - It shares `net.rs` and the modules it needs (`map.rs`, `settings.rs`, `thrown_wormholes.rs`,
@@ -57,7 +57,7 @@ const NEW_GAME_AFTER_WIN_S: u64 = 10;
 #[derive(Parser)]
 #[command(
     about = "Run one game server of the Rust wormholes demo, without a window, until stopped.",
-    after_help = "Example: wormholes_server --port 47810 --map lunar-surface"
+    after_help = "Example: snow_planet_server --port 47820 --map snow-planet"
 )]
 struct Arguments {
     /// UDP port the server listens on.
@@ -102,6 +102,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         console_teams,
         &AtomicBool::new(false),
         Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
+        None,
         game_password,
     )
 }

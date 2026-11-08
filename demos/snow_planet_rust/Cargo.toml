@@ -1,16 +1,16 @@
-# `Cargo.toml` builds the Rust port of the hyperbolic wormholes demo (`../hyperbolic_wormholes/`).
+# `Cargo.toml` builds the Snow Planet level demo, a copy of `../hyperbolic_wormholes_rust/` drawing Snow Planet.
 #
 # Interface:
-#     hyperbolic-wormholes: the game (macOS only: Metal and SDL), what `cargo run` runs.
-#     wormholes_server: a game server alone (src/bin/wormholes_server.rs), which also builds for Linux.
+#     snow-planet: the game (macOS only: Metal and SDL), what `cargo run` runs.
+#     snow_planet_server: a game server alone (src/bin/snow_planet_server.rs), which also builds for Linux.
 #
 # Example:
 #     cargo run --release
 [package]
-name = "hyperbolic-wormholes"
+name = "snow-planet"
 version = "0.1.0"
 edition = "2024"
-default-run = "hyperbolic-wormholes"
+default-run = "snow-planet"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
@@ -36,5 +36,5 @@ objc2-quartz-core = "0.3"
 sdl3 = { version = "0.22", features = ["build-from-source-static"] }
 
 [[bin]]
-name = "wormholes_server"
+name = "snow_planet_server"
 test = false

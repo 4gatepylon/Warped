@@ -513,18 +513,28 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
     }
 }
 
+/// `BotObjective` is what a bot (`--bot`) plays for: fighting (walk, aim at the nearest player and
+/// fire), or the consoles (stand and hold E on the other team's consoles in turn, as the server
+/// takes a player's word for the console they hold).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum BotObjective {
+    Fight,
+    Consoles,
+}
+
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
 /// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
 /// view) and rejoins `BOT_REJOIN_S` after being hit. The black hole grows with the server's
 /// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. It returns how many players it hit and how often it was hit,
 /// and fails if the server curves space other than the built-in settings (`check_bot_space`).
 ///
-/// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, |frame, id| Ok(()))?;`
+/// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, BotObjective::Fight, |frame, id| Ok(()))?;`
 pub fn run_voxel_bot(
     world: &VoxelWorld,
     client: &mut Client,
     duration_s: f64,
     black_hole_strength: Option<f64>,
+    objective: BotObjective,
     mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
     let (mut grown_world, mut black_hole_growth) =
@@ -591,9 +601,21 @@ pub fn run_voxel_bot(
                 input.forward = true;
                 player.look(BOT_WANDER_PX_PER_S * BOT_STEP_S, 0.0);
             }
+            let team: u32 = client.team.unwrap_or(0);
+            let disabling: Option<u8> = match objective {
+                BotObjective::Fight => None,
+                BotObjective::Consoles => {
+                    (input, is_laser_on) = (Input::default(), false);
+                    world
+                        .consoles
+                        .iter()
+                        .enumerate()
+                        .find(|(i, c)| c.team != team && client.game.off_mask >> i & 1 == 0)
+                        .map(|(i, _)| i as u8)
+                }
+            };
             input.up = input.forward && is_stuck;
             let before: DVec4 = player.body.col(AXIS_W);
-            let team: u32 = client.team.unwrap_or(0);
             let own_step_s: f64 =
                 BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
             player.step(world, &input, own_step_s, team as usize);
@@ -627,7 +649,7 @@ pub fn run_voxel_bot(
                 camera,
                 is_laser_on,
                 false,
-                None,
+                disabling,
                 0.0,
                 PlayerWormholes::default(),
             )?;
