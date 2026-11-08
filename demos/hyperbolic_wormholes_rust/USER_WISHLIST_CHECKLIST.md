@@ -222,4 +222,4 @@ is in [`AGENTS.md`](AGENTS.md).
   you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #209.
 - [x] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
   scene lighting. On voxel maps the gun takes the light at the eye: the sun (dark in shadow), lamps, earthshine and
-  the ground. #PR.
+  the ground. #211.
