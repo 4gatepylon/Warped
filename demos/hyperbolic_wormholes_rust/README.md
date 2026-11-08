@@ -139,7 +139,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
-- On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).
+- On Lunar Surface a team wins by turning off the other team's beacon (hold `E` on it for 10 s within 3 m); a beacon glows
+  and beams its team colour up while it is on.
   Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
   just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
   go dark when off. After a win, `Enter` in the server's terminal starts a new game.

@@ -40,6 +40,7 @@ constant int MAT_MESH = 254;
 constant int MESH_STACK_SIZE = 48;
 constant float MESH_PARALLEL_DET = 1.0e-9;
 constant float MESH_TEXTURE_SIDE_PX = 1024.0;
+constant float BEACON_GLOW = 0.6;
 constant int NO_MATERIAL = -1;
 constant float NO_HIT_S = 1.0e9;
 constant float LAMBDA_LIMIT = 0.99999994;
@@ -380,7 +381,7 @@ struct Shape {
 
 /**
  * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
- * radius, its first shape and shape count, and R.
+ * radius, its first shape, shape count, mesh root node (-1 for none) and whether its first shape is a console, and R.
  */
 struct VoxelStructure {
     float4 rows[4];
@@ -1332,7 +1333,8 @@ static float4 to_world(device const VoxelStructure &st, float3 c, float w) {
 
 /**
  * @brief `shade_mesh` shades a model triangle hit at x: its material's base colour, metallic-roughness, normal and
- * emissive maps at the hit's texture coordinates, with the interpolated normal turned toward the viewer.
+ * emissive maps at the hit's texture coordinates, with the interpolated normal turned toward the viewer; a structure
+ * whose first shape is a console (a beacon) glows in the console's colour while the console is on.
  * @par Example
  * @code
  * float3 c = shade_mesh(scene, hit, x, v, s);
@@ -1369,6 +1371,10 @@ static float3 shade_mesh(thread const Scene &scene, Hit h, float4 x, float4 v, f
     if (layers.z >= 0) {
         float2 bend = scene.mesh_normal.sample(wrap, uv, layers.z, level(lod)).rg * 2.0 - 1.0;
         s.n = normalize_tangent(x, t * bend.x + b * bend.y + n * sqrt(saturate(1.0 - dot(bend, bend))));
+    }
+    if (st.size.w != 0) {
+        float4 entry = get_palette(scene, scene.shapes[st.size.x].info.x);
+        emissive += entry.rgb * entry.a * BEACON_GLOW;
     }
     return light_surface(scene, s, x, n, v) + emissive * GLOW_BRIGHTNESS;
 }
@@ -1598,14 +1604,14 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a flat-topped blade (`core`) and a soft haze (`halo`), with the brightest haze's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */
+/** @brief `scan_beams` adds the glow of laser segments (each `info.y` meters wide, at least `BEAM_RADIUS_M`) near a chord (closest approach in closed form): a flat-topped blade (`core`) and a soft haze (`halo`), with the brightest haze's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */
 static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &team) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
     for (int i = 0; i < scene.u.beam_count; i++) {
         float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
-        float half_len = 0.5 * info.x;
+        float half_len = 0.5 * info.x, radius_m = max(BEAM_RADIUS_M, info.y);
         float4 mid = geodesic_point(a, b, half_len);
-        float am = -mdot(x, mid), bm = mdot(v, mid), reach = half_len + BEAM_REACH * max(BEAM_RADIUS_M, pix * r * sinh(min(travelled + s_end, FAR_S))) / r;
+        float am = -mdot(x, mid), bm = mdot(v, mid), reach = half_len + BEAM_REACH * max(radius_m, pix * r * sinh(min(travelled + s_end, FAR_S))) / r;
         if (am * am - bm * bm > cosh(reach) * cosh(reach)) continue;
         float al = mdot(x, a), be = mdot(v, a), ga = mdot(x, b), et = mdot(v, b);
         float k1 = 0.5 * ((al * al - ga * ga) + (be * be - et * et)), k2 = al * be - ga * et;
@@ -1614,7 +1620,7 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float4 xc = geodesic_point(x, v, s_c);
         float sigma = clamp(clamp_atanh(mdot(xc, b) / -mdot(xc, a)), 0.0, info.x);
         float d_m = measure_gap(xc, geodesic_point(a, b, sigma)) * r;
-        float width_m = max(BEAM_RADIUS_M, pix * r * sinh(min(travelled + s_c, FAR_S)));
+        float width_m = max(radius_m, pix * r * sinh(min(travelled + s_c, FAR_S)));
         float q = d_m * d_m / (width_m * width_m);
         core = max(core, info.z * exp(-q * q * q));
         float hl = info.z * exp(-q / BEAM_REACH);

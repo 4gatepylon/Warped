@@ -127,10 +127,11 @@ node demos/levels/lunar_surface/export_map.mjs
 
 writes the level's layout (structures, black hole, wormhole, lamps, sky, spawns) to `common/maps/lunar_surface/` in the
 portable map format (`common/maps/README.md`), by running this page's own layout code in Node. `shape_builders.js` turns the
-blue lander into the Stekelvarken kazemat, the red hangar into the desert bunker garage, the derelict habitat modules into
-WW2 field bunkers, the pylons' cores into sci-fi beacons and the red barriers into rows of Hesco blocks, each drawn as its
-Sketchfab model (`common/maps/models/`, credits there) with boxes that stop players; the red spawn moves to u = 112 m,
-in front of the garage. Rerun it after changing
+blue lander into the Stekelvarken kazemat (6 m tall), the red hangar into the desert bunker garage (9 m), the derelict
+habitat modules into WW2 field bunkers (5.5 m), the pylons into sci-fi beacons, each one console that a team turns off to
+win, and the red barriers into rows of Hesco blocks, with seven more rows on the blue side. Each is drawn as its Sketchfab
+model (`common/maps/models/`, credits there), whose triangles stop players, so the bunkers can be walked into; the red
+spawn is inside the garage. Rerun it after changing
 the layout, then `make -C common/maps validate-maps`.
 
 ## Known limitations

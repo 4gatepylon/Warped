@@ -57,6 +57,7 @@ const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
 const BEACON_BEAM_M: f64 = 400.0;
+const BEACON_BEAM_RADIUS_M: f32 = 0.12;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -243,7 +244,12 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
         beams.extend(clip_beam_to_map(&[segment]).into_iter().map(|s| GpuBeam {
             a: to_f32(s.a),
             b: to_f32(s.b),
-            info: [s.length as f32, 0.0, BEAM_BRIGHTNESS * on_frac, team as f32],
+            info: [
+                s.length as f32,
+                BEACON_BEAM_RADIUS_M,
+                BEAM_BRIGHTNESS * on_frac,
+                team as f32,
+            ],
         }));
     }
     beams
@@ -353,7 +359,13 @@ impl VoxelFrame {
                         s.first_shape as i32,
                         s.shape_count as i32,
                         s.mesh.map_or(NO_MESH, |m| mesh_roots[m]),
-                        0,
+                        i32::from(
+                            s.shape_count > 0
+                                && world
+                                    .consoles
+                                    .iter()
+                                    .any(|c| c.material == world.shapes[s.first_shape].material),
+                        ),
                     ],
                     scale: [r as f32, 0.0, 0.0, 0.0],
                 }
@@ -873,7 +885,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | A team's consoles switched off | none, some, all | `beacon_beams_dim_as_consoles_go_off` |
+    //! | A team's consoles switched off | none, all (the other team's stay on) | `beacon_beams_dim_as_consoles_go_off` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -899,19 +911,10 @@ mod tests {
     fn beacon_beams_dim_as_consoles_go_off() {
         let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
         let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
-        let red_mask = |count: usize| -> u32 {
-            let red: Vec<usize> = (0..world.consoles.len())
-                .filter(|&i| world.consoles[i].team == 1)
-                .collect();
-            red[..count].iter().fold(0, |mask, &i| mask | 1 << i)
-        };
-        let (none, some, all) = (red_mask(0), red_mask(2), red_mask(5));
-        assert_eq!(get_brightness(&mut world, none), [BEAM_BRIGHTNESS; 2]);
-        let [blue, red] = get_brightness(&mut world, some);
-        assert!(
-            blue == BEAM_BRIGHTNESS && (red - 0.6 * BEAM_BRIGHTNESS).abs() < 1e-6,
-            "{red}"
-        );
-        assert_eq!(get_brightness(&mut world, all), [BEAM_BRIGHTNESS, 0.0]);
+        let red_mask: u32 = (0..world.consoles.len())
+            .filter(|&i| world.consoles[i].team == 1)
+            .fold(0, |mask, i| mask | 1 << i);
+        assert_eq!(get_brightness(&mut world, 0), [BEAM_BRIGHTNESS; 2]);
+        assert_eq!(get_brightness(&mut world, red_mask), [BEAM_BRIGHTNESS, 0.0]);
     }
 }
