@@ -162,7 +162,7 @@ pub struct OverlayRect {
 /// `RectPulse` is the shader's `RectPulse`, up to `MAX_RECT_PULSE_COUNT` soft glows running along
 /// a HUD bar, carried by the bar's first `OverlayRect`: their middles' x as fractions of the
 /// screen's width (measured along the rect's slant, at its middle row), their opacities (0 for
-/// none), the x span they show in (the bar's filled part; they fade out just beyond it), their
+/// none), the x span they show in (the bar's filled part; they fade out just inside its ends), their
 /// half width (of the screen's width) and half height (of its height), and their RGBA colour (A
 /// unused).
 #[repr(C)]

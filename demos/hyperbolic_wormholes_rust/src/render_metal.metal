@@ -2304,9 +2304,9 @@ struct RectStyle {
 /**
  * @brief `RectPulse` is render_metal.rs's `RectPulse`, up to `MAX_RECT_PULSE_COUNT` soft glows running along a HUD bar,
  * carried by the bar's first `OverlayRect`: their middles' x as fractions of the screen's width (measured along the rect's
- * slant, at its middle row), their opacities (0 for none), the x span they show in (the bar's filled part, faded over
- * `RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH` of a half width beyond it), their half width (of the screen's width) and half
- * height (of its height), and their colour (`.a` unused).
+ * slant, at its middle row), their opacities (0 for none), the x span they show in (the bar's filled part, fading out
+ * over `RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH` of a half width, at most half the span, inside each end), their half width
+ * (of the screen's width) and half height (of its height), and their colour (`.a` unused).
  */
 struct RectPulse {
     float4 centers_x_frac;
@@ -2406,8 +2406,8 @@ static float4 get_rect_halo(constant OverlayRect &rect, float2 at_px, float2 siz
 
 /**
  * @brief `get_pulse_glow` gives how much of `rect`'s pulse colour covers pixel centre `at_px` (0 to 1): the sum of its
- * pulses' Gaussians along the bar (leaning with its slant) times a Gaussian across it, faded out beyond its span. The
- * glow covers the segments and the gaps between them alike.
+ * pulses' Gaussians along the bar (leaning with its slant) times a Gaussian across it, faded out smoothly inside both
+ * ends of its span, so it never reaches the empty slots. The glow covers the segments and the gaps between them alike.
  * @par Example
  * @code
  * color.rgb = mix(color.rgb, rect.pulse.color.rgb, get_pulse_glow(rect, at_px, size_px));
@@ -2421,10 +2421,10 @@ static float get_pulse_glow(constant OverlayRect &rect, float2 at_px, float2 siz
     float across_px = at_px.y - (rect.min_frac.y + rect.max_frac.y) * 0.5 * size_px.y;
     if (abs(across_px) > RECT_PULSE_REACH_PER_HALF_SIZE * half_height_px) return 0.0;
     float along_px = at_px.x + rect.style.slant_x_per_y * across_px;
-    float soft_px = RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH * half_width_px;
     float min_px = pulse.min_x_frac * size_px.x;
     float max_px = pulse.max_x_frac * size_px.x;
-    float span = smoothstep(min_px - soft_px, min_px, along_px) * (1.0 - smoothstep(max_px, max_px + soft_px, along_px));
+    float soft_px = max(min(RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH * half_width_px, (max_px - min_px) * 0.5), 1.0);
+    float span = smoothstep(min_px, min_px + soft_px, along_px) * (1.0 - smoothstep(max_px - soft_px, max_px, along_px));
     if (span <= 0.0) return 0.0;
     float sum = 0.0;
     for (int k = 0; k < MAX_RECT_PULSE_COUNT; k++) {
