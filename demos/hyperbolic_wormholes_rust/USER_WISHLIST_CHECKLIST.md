@@ -111,14 +111,6 @@ Merged into `staging`, waiting for the user to test and confirm. Items done befo
 are here too, since the user hadn't confirmed them.
 
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
-- [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
-  #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
-  velocity: as long as you are in the wormhole and moving, it shows up blue (based on your velocity and your place in
-  the wormhole); it should NOT go down with a timer. Once you're out of the wormhole it should go away immediately.
-  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. After
-  testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
-  for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
-  BLUE but it has to be very close to white as I had asked". #272.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
@@ -315,3 +307,11 @@ Confirmed by the user after testing.
 - [x] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. #210. Confirmed by the user, 2026-11-07: "sharp edged shpes is done".
+- [x] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
+  #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
+  velocity: as long as you are in the wormhole and moving, it shows up blue (based on your velocity and your place in
+  the wormhole); it should NOT go down with a timer. Once you're out of the wormhole it should go away immediately.
+  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. After
+  testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
+  for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
+  BLUE but it has to be very close to white as I had asked". #272. Confirmed by the user, 2026-11-07: "wormhole color from motion is almost done: just mark it as done and make a PR that makes it take slightly longer; ideally just double its radius or wahtever (ioe walking at same speed should take exactly trwice as long of time showing me cyan or red)".
