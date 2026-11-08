@@ -60,6 +60,7 @@ const UNSTICK_STEP_M: f64 = 0.25;
 const UNSTICK_MAX_STEPS: usize = 160;
 const PUSH_OUT_STEP_M: f64 = 0.05;
 const MAX_WALK_RISE_M: f64 = 0.3;
+const WALK_RISE_STEP_M: f64 = 0.02;
 const SUN_SHADOW_M: f64 = 80.0;
 const PUSH_OUT_STEP_COUNT: usize = 6;
 const PUSH_OUT_DIRECTION_COUNT: usize = 16;
@@ -914,17 +915,20 @@ impl VoxelWorld {
     }
 
     /// `find_walk_rise_m` gives the smallest lift, up to `MAX_WALK_RISE_M`, that clears a body
-    /// standing on `body` with eye height `h_m`, or `None` if that much doesn't. Walking on a
-    /// structure needs it: its cells' tops are geodesic planes, which rise a little against the
-    /// ground's height away from the structure's centre, but a lift this small never climbs a
-    /// block.
+    /// standing on `body` with eye height `h_m`, or `None` if none does. Walking on a structure
+    /// needs it: its floors are geodesic planes, which rise a little against the ground's height
+    /// away from the structure's centre, but a lift this small never climbs a block. It tries lifts
+    /// upward in `WALK_RISE_STEP_M` steps and bisects below the first that clears, rather than
+    /// trying the largest first: under a low ceiling (a doorway's lintel, a walkway's roof) the
+    /// largest lift puts the head into it while a small one clears the floor.
     ///
     /// Example: `if let Some(rise_m) = world.find_walk_rise_m(body, h_m, &nearby) { ... }`
     fn find_walk_rise_m(&self, body: DMat4, h_m: f64, nearby: &[usize]) -> Option<f64> {
-        if self.is_body_blocked(body, h_m + MAX_WALK_RISE_M, nearby) {
-            return None;
-        }
-        let (mut lo_m, mut hi_m) = (0.0, MAX_WALK_RISE_M);
+        let step_count: usize = (MAX_WALK_RISE_M / WALK_RISE_STEP_M).ceil() as usize;
+        let first_clear_m: f64 = (1..=step_count)
+            .map(|i| (i as f64 * WALK_RISE_STEP_M).min(MAX_WALK_RISE_M))
+            .find(|&rise_m| !self.is_body_blocked(body, h_m + rise_m, nearby))?;
+        let (mut lo_m, mut hi_m) = ((first_clear_m - WALK_RISE_STEP_M).max(0.0), first_clear_m);
         for _ in 0..LANDING_BISECTIONS {
             let mid_m: f64 = (lo_m + hi_m) / 2.0;
             if self.is_body_blocked(body, h_m + mid_m, nearby) {
@@ -1748,6 +1752,7 @@ mod tests {
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Refilling energy | crouched (at the crouched rate), walking upright (at the walking rate) | `crouching_refills_energy_faster` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
+    //! | Low way walked out of | a habitat module's doors (each module, each way), a walkway's ends (each walkway, each way) | `players_walk_out_of_modules_and_walkways` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
     //! | Progress of turning off a console | none (the normal rate), part way (rising, faster each step), done (the frenzy), past done (fails) | `the_pulse_ramps_up_with_progress`, `progress_past_done_fails` |
     //! | Target rate against the pulse's own | higher (reached at once), the same (kept), lower (eases down: barely after a frame, nearly there after a second, never below) | `the_pulse_eases_back_down` |
@@ -2190,6 +2195,45 @@ mod tests {
             moved_m > MIN_DECK_WALK_FRAC * expected_m,
             "moved {moved_m} m of {expected_m} m"
         );
+    }
+
+    /// `players_walk_out_of_modules_and_walkways` checks that a player standing in the middle of
+    /// a habitat module's floor walks out through either of its doors, and one standing in a
+    /// walkway walks out of either end, though both are only 2 m high (W-85).
+    #[test]
+    fn players_walk_out_of_modules_and_walkways() {
+        const MODULE_OUT_M: f64 = 6.5;
+        const WALKWAY_OUT_M: f64 = 5.5;
+        const EXIT_WALK_M: f64 = 9.0;
+        let world: VoxelWorld = load_lunar_surface();
+        let step_count: usize =
+            (EXIT_WALK_M / (world.player.walk_m_per_s * STEP_S)).ceil() as usize;
+        let ways: Vec<(usize, f64)> = world
+            .structures
+            .iter()
+            .enumerate()
+            .filter_map(|(k, st)| match st.name.as_str() {
+                "red habitat module" | "derelict habitat module" => Some((k, MODULE_OUT_M)),
+                "red walkway" | "crater walkway" => Some((k, WALKWAY_OUT_M)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ways.len(), 5, "three habitat modules and two walkways");
+        for (k, out_m) in ways {
+            let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
+            for turn_rad in [0.0, std::f64::consts::PI] {
+                let mut player: VoxelPlayer =
+                    VoxelPlayer::Standing(&world, frame * make_rotation(AXIS_X, AXIS_Z, turn_rad));
+                walk_forward(&world, &mut player, step_count);
+                let p: DVec4 = world.structures[k].inverse * player.body.col(AXIS_W);
+                let z_m: f64 = p.z / p.w * world.r;
+                assert!(
+                    z_m.abs() > out_m,
+                    "{} #{k}, turned {turn_rad} rad: stopped at z = {z_m} m",
+                    world.structures[k].name
+                );
+            }
+        }
     }
 
     #[test]

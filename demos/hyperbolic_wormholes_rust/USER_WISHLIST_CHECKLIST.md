@@ -14,9 +14,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
   and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/delta-fighters`, 2026-11-07.
-- [~] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
-  staging at #225. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-bunker-exit`,
-  2026-11-07.
 - [~] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
   be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user wants to see it
   before it merges. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
@@ -119,6 +116,8 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
+  staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
   it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
   don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
