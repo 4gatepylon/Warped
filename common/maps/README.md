@@ -126,8 +126,8 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
 
 ### Sky
 
-`{"transport", "sun": {"direction": [x, y, z], "color": [r, g, b]}, "planet": {...}, "stars": bool, "clouds": bool,
-"zenith_color", "horizon_color", "fog_m"}`:
+`{"transport", "sun": {"direction": [x, y, z], "color": [r, g, b]}, "planet": {...}, "milky_way": {...}, "stars": bool,
+"clouds": bool, "zenith_color", "horizon_color", "fog_m"}`:
 
 - `transport` is how a ray that escapes finds its direction in the sky: `parallel` (the sky is fixed at the world
   origin like a skybox: the ray's last direction is carried by parallel transport along the geodesic to the eye, then
@@ -135,6 +135,10 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
   (the ray's direction at infinity, where its geodesic meets the sphere at infinity, read in the world frame).
 - `sun.direction` is a unit direction in the world origin's local frame.
 - `planet` (optional): `{"direction": [x, y, z], "angular_radius_rad"}`, another body in the sky.
+- `milky_way` (optional): `{"pole_direction": [x, y, z], "core_direction": [x, y, z]}`, where the galaxy's band lies:
+  along the great circle 90° from `pole_direction`, brightest and widest at `core_direction`, a direction on that
+  circle. Both are unit directions in the world origin's local frame, perpendicular to each other. How the band looks
+  (brightness, colour, dust) is the appearance style's.
 - `fog_m` (optional): a surface d meters away keeps e^(−d/`fog_m`) of its colour, and the rest is `horizon_color`.
 
 ### Spawns

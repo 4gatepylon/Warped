@@ -1,6 +1,6 @@
 ---
 name: graphical-changes
-description: Show the user screenshots, videos and clearly named options for every change to how something looks, before finishing it. Use whenever you add or change anything visual - a model, colour, shape, light, sky, effect, animation, HUD or menu, shader or render setting - in a game, demo or app; whenever a visual choice is uncertain or the user asks (or implies) a range of looks or parameters to explore; and whenever you make a collage or comparison sheet.
+description: Show the user screenshots, videos and clearly named options for every change to how something looks, before finishing it. Use whenever you add or change anything visual - a model, colour, shape, light, sky, effect, animation, HUD or menu, shader or render setting - in a game, demo or app; whenever a visual choice is uncertain or the user asks (or implies) a range of looks or parameters to explore; whenever you make a collage or comparison sheet; and whenever the user's words about a look allow more than one reading, or a look has edge cases to raise with the user.
 ---
 
 # Graphical changes
@@ -15,6 +15,25 @@ animation and motion (of the camera, the gun, other players), the HUD and menus,
 picture.
 
 ## Options before building
+
+- **Several readings: ask first.** When the user's words allow more than one reading of what they want, ask which
+  they mean before rendering any options: one line per reading, with at most one quick picture each if words can't
+  show the difference. Then make options only within the reading they pick. (W-69 (shot noise) was first built as a
+  stray in the aim when the user meant a visual effect in the beam, W-84 (shot noise in the beam itself), and its
+  "black pixels" could mean black or see-through.)
+- **Raise every edge case you can find.** Before building, and again when you show the result, list for the user as
+  many edge cases as you can, one line each, and ask about those whose answer changes the work. Raising too many is
+  better than the user finding one in play. Look for at least:
+  - **Viewpoints:** near, far, from above, edge-on, from inside, at real size and zoomed.
+  - **Who sees it:** you or every player, each team, another player's window, the spectator.
+  - **Motion:** standing, walking, sprinting, crouching, jumping, turning, aiming, during a hit or a respawn.
+  - **Places in this game:** through a wormhole mouth, near the black hole's lens, in the 2 m walkways and doorways,
+    inside a habitat module, at the map's soft edge, on the crater wall, from each spawn.
+  - **Settings and limits:** each setting at 0, its default and its maximum; the lowest render scale; another map
+    (the house).
+  - **Time:** the first frame, a long session, many at once (shots, players, effects).
+  - **Compatibility:** settings files saved before the change, older windows in the same game.
+  - **Cost:** frame time, at full resolution.
 
 - **An uncertain look gets options.** When the user's words don't settle the look (an opacity, a size, a colour, a
   style, a placement, a model), render 2 to 5 options, say which one you suggest and why, and ask which the user
@@ -36,14 +55,47 @@ picture.
 
 ## Screenshots and videos before finishing
 
+How to capture them in the Rust demo (offscreen views, temporary hooks, live games, sharing the machine with other
+agents and the user's game) is in [capturing-screenshots.md](capturing-screenshots.md); read it before your first
+capture.
+
 - **Screenshots, always:** render them from the game or app itself (in `demos/hyperbolic_wormholes_rust/`,
   `--bench-views` and `--view <name>`), at the resolution the user plays at, from several viewpoints: the usual
   player's view, near, far, and the edge cases of the change (edge-on, from inside, at its limits).
 - **Videos, ideally:** anything that moves or changes over time (motion, sway, an animation, a flicker, walking
   through something) also gets a short video, a GIF or MP4 of a few seconds.
 - **Before and after:** show today's look (`staging`) beside the change.
+- **Real renders first; label anything else.** Prefer pictures the game itself rendered. A picture that isn't one (a
+  plot of the data the shader draws, text rendered offscreen, a Python copy of a shader) says so on the image and in
+  its caption: "Not a game screenshot: the minimap's line data, plotted".
+- **Timing:** anything that happens over time also gets a strip of frames with timestamps (e.g. every 50 ms), its
+  duration in seconds ("on for 0.63 s at walking speed"), and a GIF labelled with its playback speed ("shown at 1/3
+  speed").
+- **Real size and zoom:** show it at real size, as a player sees it, beside any close-up, and label each close-up
+  with its zoom ("enlarged 7×").
+- **Whose view:** when players see the change differently (your own view against another player's, one team's against
+  the other's), show each view.
+- **Cost:** give each option's frame time from alternating runs against `staging`, and say when the machine was busy
+  (other agents' runs, the user's playtest), since the numbers are then only rough.
 - **Shared before finishing:** send them to the user before you call the work done, open the PR for review, mark a
   wishlist item pending or merge, and again whenever the look changes after the user's feedback.
+
+## Feedback in rounds
+
+- **Keep every round.** Keep the pictures of each round. When the user refers to earlier pictures ("like the previous
+  pictures I was shown"), show the new version beside those rounds.
+- **Their words:** quote the user's words from each round in the captions, the PR and the decision.
+- **Change only what they asked.** Keep what the user approved ("your throat timing looks good") exactly as it was.
+
+## Sending pictures to the user
+
+- **One message per decision.** Send each choice's pictures in their own message, and never mix two items' options
+  in one batch. Each caption starts with the item's id and short name, says which option each file is, and the
+  question goes in the same message.
+- **Options you can't render.** An option that can't be shown in the game (a model that needs a download or an
+  account) is marked "not rendered" in its name, with a link to its page and why, apart from the rendered options.
+- **Approved pictures aren't done.** The user's OK on pictures lets the work merge, but the item stays pending until
+  the user tests it in the game (this demo's `AGENTS.md`).
 
 ## Give the files' paths
 
@@ -74,6 +126,9 @@ picture.
 
 ## Tools
 
-- The game writes PNGs; assemble sheets and GIFs with Pillow: `uv run --with pillow python <script>`.
+- The game writes PNGs; assemble sheets and GIFs with Pillow, run as `python3 -I <script>` on a script in your
+  worktree or scratchpad, and label them with Pillow's `ImageFont.load_default()`. Don't download packages or fonts
+  (`uv run --with`, `pip install`) without asking the user first, and show the user any Python that reads outside
+  your worktree before running it.
 - If ImageMagick or ffmpeg is missing (seen on the user's Mac, 2026-11-08), use Pillow for sheets and GIFs, and ask
   the user before installing anything.

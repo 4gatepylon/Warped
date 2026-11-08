@@ -1,7 +1,7 @@
 # `player_settings.yaml` holds each player's own choices in the Rust demo: which keys do what, how fast the
-# mouse turns the view, the head bob, motion blur, the colour shift inside a wormhole, and how strongly a
-# hit reddens, shakes and blurs the screen. They change only that player's experience; the numbers that
-# shape play for everyone are the server's, in `server_settings.yaml`.
+# mouse turns the view, the head bob, motion blur, the colour shift inside a wormhole, how bright the Milky
+# Way is, and how strongly a hit reddens, shakes and blurs the screen. They change only that player's
+# experience; the numbers that shape play for everyone are the server's, in `server_settings.yaml`.
 #
 # Interface:
 #     Copy this file, change it, and start the game with the copy: `PLAYER_SETTINGS=` with
@@ -47,6 +47,7 @@ view:
   motion_blur_s: 0.01  # How long motion smears (0 for none).
   edge_stretch_frac: 1.0  # How strongly the view stretches as you slow down at the map's edge (0 for none).
   wormhole_tint_frac: 1.0  # How strongly the view turns light cyan (moving forward) or dark red (backward) in a wormhole's throat, 0 to 1 (0 for none).
+  milky_way_brightness_frac: 1.0  # How bright the Milky Way across the sky is, 0 to 1 (1 for the photo-like look, 0 for none).
   head_bob:
     walk_depth_m: 0.08  # How far the eye dips at each step while walking (0 for none).
     sprint_depth_m: 0.14  # How far the eye dips at each step while sprinting (0 for none).

@@ -58,9 +58,9 @@ make join-game SERVER=127.0.0.1
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
   bar, is empty until it can fire again.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
-  eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots. In hand, the sniper is the
-  energy revolver and the rifle a wooden bolt-action rifle with a scope (Poly Haven, CC0; D106, for W-96 (a
-  different rifle model)), drawn small so its scope, bolt and stock show in the corner.
+  eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots. In hand, the sniper is a
+  wooden bolt-action rifle with a scope (Poly Haven, CC0; D106, for W-96 (a different rifle model)), drawn small so
+  its scope, bolt and stock show in the corner, and the rifle is the energy revolver.
   Each shot strays a little from the crosshair, by a random angle sampled for that shot (D89): with the sniper
   usually by a hair (3 mrad on average, at most 15), with the rifle by up to 2 mrad cold, growing with its heat to 20
   mrad and shrinking as it cools (`noise_*_rad` under `sniper` and `rifle` in `server_settings.yaml`).
@@ -147,6 +147,9 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
 - Two giant ships hang far behind them (D101): a moon-sized battle station with a dish, hovering low over the horizon
   ahead of the blue spawn, and a long wedge-shaped capital ship with rows of lit windows, crossing the sky in 30
   minutes.
+- A photo-like Milky Way arches across Lunar Surface's sky from base to base (D102): where it lies is the map's
+  `sky.milky_way`, and how bright you see it is `view.milky_way_brightness_frac` in `player_settings.yaml` (0 for
+  none). It is drawn once into a texture when the map loads.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
 - `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and

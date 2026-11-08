@@ -79,8 +79,8 @@ const HAND_LIGHT_COUNT: usize = 3;
 const HAND_LIGHT_BUFFER_INDEX: usize = 1;
 const SLOT_FALLBACKS: [[u8; 4]; 4] = [[255; 4], [255; 4], [128, 128, 255, 255], [255; 4]];
 
-/// `GunModel` is a model drawn in the player's hand: the energy revolver (the sniper, gun 1) or
-/// the bolt-action rifle (the rifle, gun 2).
+/// `GunModel` is a model drawn in the player's hand: the bolt-action rifle (the sniper, gun 1) or
+/// the energy revolver (the rifle, gun 2).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum GunModel {
     Revolver,

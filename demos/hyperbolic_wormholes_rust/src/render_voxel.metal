@@ -23,7 +23,8 @@ using namespace metal;
     device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], device const float *mound_heights [[buffer(26)]], \
     constant float4 *means [[buffer(27)]], device const DustBurst *dust_bursts [[buffer(29)]], \
     device const DustParticle *dust_particles [[buffer(30)]], \
-    texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]]
+    texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]], \
+    texture2d<float> milky_way [[texture(3)]]
 #define HAS_BEND __HAS_BEND__
 
 constant int MAX_ITERATIONS = 240;
@@ -121,8 +122,60 @@ constant float STAR_DENSITY_FINE = 0.012;
 constant float STAR_PIXELS = 0.8;
 constant float STAR_GRID_COARSE = 60.0;
 constant float STAR_GRID_FINE = 170.0;
-constant float3 MILKY_WAY_NORMAL = float3(0.35, 0.55, 0.76);
-constant float MILKY_WAY_WIDTH = 0.2;
+constant float MILKY_WAY_MAX_LATITUDE_RAD = 0.7853982;
+constant float MILKY_WAY_DISK = 0.21;
+constant float MILKY_WAY_BULGE = 0.75;
+constant float MILKY_WAY_DISK_WIDTH = 0.18;
+constant float MILKY_WAY_CORE_WIDENING = 0.3;
+constant float2 MILKY_WAY_BULGE_SIZE = float2(0.5, 0.21);
+constant float MILKY_WAY_ANTICENTRE_FRAC = 0.5;
+constant float MILKY_WAY_EDGE_WARP = 0.11;
+constant float MILKY_WAY_WARP_SCALE = 2.3;
+constant float3 MILKY_WAY_WARP_SEEDS = float3(0.0, 5.2, 9.7);
+constant float3 MILKY_WAY_STRETCH = float3(1.0, 1.0, 1.7);
+constant float MILKY_WAY_STRETCH_WARP = 0.35;
+constant float MILKY_WAY_NOISE_CONTRAST = 2.5;
+constant float MILKY_WAY_DUST_CONTRAST = 3.0;
+constant int MILKY_WAY_COARSE_OCTAVES = 3;
+constant int MILKY_WAY_GRAIN_OCTAVES = 4;
+constant int MILKY_WAY_DARK_OCTAVES = 6;
+constant float MILKY_WAY_CLOUD_SCALE = 3.0;
+constant float MILKY_WAY_CLOUD_AMOUNT = 0.9;
+constant float2 MILKY_WAY_CLOUD_GAIN = float2(0.55, 0.9);
+constant float2 MILKY_WAY_BULGE_CLOUD_GAIN = float2(0.75, 0.5);
+constant float MILKY_WAY_GRAIN_SCALE = 16.0;
+constant float MILKY_WAY_GRAIN_SEED = 4.4;
+constant float MILKY_WAY_GRAIN_AMOUNT = 0.5;
+constant float2 MILKY_WAY_GRAIN_GAIN = float2(0.6, 0.8);
+constant float2 MILKY_WAY_BULGE_GRAIN_GAIN = float2(0.8, 0.4);
+constant float MILKY_WAY_LANE_WANDER = 0.06;
+constant float MILKY_WAY_LANE_WANDER_SCALE = 3.1;
+constant float MILKY_WAY_LANE_WANDER_SEED = 2.0;
+constant float MILKY_WAY_LANE_WIDTH_FRAC = 0.447;
+constant float MILKY_WAY_RIFT_SCALE = 2.6;
+constant float MILKY_WAY_RIFT_SEED = 3.1;
+constant float2 MILKY_WAY_RIFT_EDGES = float2(0.35, 0.8);
+constant float MILKY_WAY_RIFT_CORE_GAP = 0.45;
+constant float MILKY_WAY_RIFT_DEPTH = 2.6;
+constant float MILKY_WAY_DARK_SCALE = 9.0;
+constant float MILKY_WAY_DARK_WARP = 1.5;
+constant float MILKY_WAY_DARK_SEED = 7.7;
+constant float2 MILKY_WAY_DARK_EDGES = float2(0.5, 0.92);
+constant float2 MILKY_WAY_DARK_GRAIN_GAIN = float2(0.55, 0.45);
+constant float MILKY_WAY_DARK_DEPTH = 1.3;
+constant float3 MILKY_WAY_REDDENING = float3(0.9, 1.0, 1.12);
+constant float3 MILKY_WAY_DISK_COLOR = float3(0.8, 0.88, 1.0);
+constant float3 MILKY_WAY_BULGE_COLOR = float3(1.0, 0.8, 0.56);
+constant float3 MILKY_WAY_NEBULA_COLOR = float3(1.0, 0.32, 0.45);
+constant float MILKY_WAY_NEBULA = 0.5;
+constant float MILKY_WAY_NEBULA_SCALE = 20.0;
+constant float MILKY_WAY_NEBULA_SEED = 21.0;
+constant float2 MILKY_WAY_NEBULA_EDGES = float2(0.72, 0.9);
+constant float MILKY_WAY_STAR_BOOST = 4.0;
+constant float MILKY_WAY_MICRO_STAR_GRID = 420.0;
+constant float MILKY_WAY_MICRO_STAR_DENSITY = 0.3;
+constant float MILKY_WAY_MICRO_STAR_BRIGHTNESS = 0.35;
+constant float2 MILKY_WAY_TONE = float2(0.69, 0.46);
 constant float SUN_COS_INNER = 0.99996;
 constant float SUN_COS_OUTER = 0.99990;
 constant float SUN_GLARE_POWER = 900.0;
@@ -219,9 +272,6 @@ constant float STAR_BRIGHTNESS_POWER = 4.0;
 constant float STAR_JITTER = 0.6;
 constant float2 STAR_SEEDS = float2(7.1, 3.7);
 constant float FINE_STAR_BRIGHTNESS = 0.5;
-constant float3 MILKY_WAY_COLOR = float3(0.75, 0.8, 1.0);
-constant float MILKY_WAY_BRIGHTNESS = 0.05;
-constant float MILKY_WAY_DETAIL = 6.0;
 constant float BEAM_HAZE_BRIGHTNESS = 0.45;
 constant float BEAM_HAZE_WHITENESS = 0.45;
 constant float BEAM_CORE_BRIGHTNESS = 1.6;
@@ -493,6 +543,8 @@ struct VoxelUniforms {
     int4 dust_counts;
     float4 beam_speckle;
     ZoneWalls zone_walls;
+    float4 milky_way_pole;
+    float4 milky_way_core;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -643,6 +695,7 @@ struct Scene {
     texture2d_array<float> arm_maps;
     device const DustBurst *dust_bursts;
     device const DustParticle *dust_particles;
+    texture2d<float> milky_way;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -1204,7 +1257,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
  * @endcode
  */
 kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
     float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
     float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
     float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
@@ -1405,6 +1458,94 @@ static float sample_star_layer(thread const Scene &scene, float3 d, float grid, 
     return (STAR_FAINT + STAR_BRIGHT * pow(h / density, STAR_BRIGHTNESS_POWER)) * exp(-angle * angle / (radius * radius));
 }
 
+/** @brief `sample_fbm_normalized` sums `octaves` octaves of value noise, scaled back to [0, 1]. @par Example @code float n = sample_fbm_normalized(p, 3); @endcode */
+static float sample_fbm_normalized(float3 p, int octaves) {
+    float sum = 0.0, amplitude = 0.5, total = 0.0;
+    for (int i = 0; i < octaves; i++) { sum += amplitude * sample_noise_3d(p); total += amplitude; p *= FBM_LACUNARITY; amplitude *= 0.5; }
+    return sum / total;
+}
+
+/** @brief `stretch_noise` spreads noise in [0, 1] away from its middle by `contrast`, clamped to [0, 1]. @par Example @code float n = stretch_noise(sample_noise_3d(p), 2.5); @endcode */
+static float stretch_noise(float n, float contrast) { return saturate((n - 0.5) * contrast + 0.5); }
+
+/** @brief `get_gain` gives the factor `gain.x + gain.y * x`, applied by `amount` (0 leaves 1). @par Example @code float g = get_gain(MILKY_WAY_CLOUD_GAIN, clouds, MILKY_WAY_CLOUD_AMOUNT); @endcode */
+static float get_gain(float2 gain, float x, float amount) { return mix(1.0, gain.x + gain.y * x, amount); }
+
+/**
+ * @brief `get_milky_way_glow` gives the Milky Way in direction g of its own frame (x toward the core, z toward the
+ * pole): a band brighter and wider toward the core with a warm bulge there, mottled by star clouds and grain, dimmed
+ * and reddened by a dark rift along its middle and by dust clouds, with pink nebulae (rgb, an intensity
+ * `sample_sky_bodies` turns into colour), and how much it thickens the stars (a, 0 to 1).
+ * @par Example
+ * @code
+ * float4 glow = get_milky_way_glow(float3(1.0, 0.0, 0.0));
+ * @endcode
+ */
+static float4 get_milky_way_glow(float3 g) {
+    float lon = atan2(g.y, g.x);
+    float3 warp = float3(sample_noise_3d(g * MILKY_WAY_WARP_SCALE + MILKY_WAY_WARP_SEEDS.x), sample_noise_3d(g * MILKY_WAY_WARP_SCALE + MILKY_WAY_WARP_SEEDS.y),
+                         sample_noise_3d(g * MILKY_WAY_WARP_SCALE + MILKY_WAY_WARP_SEEDS.z)) - 0.5;
+    float lat = g.z + MILKY_WAY_EDGE_WARP * warp.x;
+    float toward_core = 0.5 + 0.5 * cos(lon);
+    float bulge_shape = exp(-lon * lon / (MILKY_WAY_BULGE_SIZE.x * MILKY_WAY_BULGE_SIZE.x));
+    float width = MILKY_WAY_DISK_WIDTH * (1.0 + MILKY_WAY_CORE_WIDENING * bulge_shape);
+    float band = exp(-lat * lat / (width * width));
+    float bulge = bulge_shape * exp(-lat * lat / (MILKY_WAY_BULGE_SIZE.y * MILKY_WAY_BULGE_SIZE.y));
+    float3 stretched = g * MILKY_WAY_STRETCH + warp * MILKY_WAY_STRETCH_WARP;
+    float clouds = stretch_noise(sample_fbm_normalized(stretched * MILKY_WAY_CLOUD_SCALE, MILKY_WAY_COARSE_OCTAVES), MILKY_WAY_NOISE_CONTRAST);
+    float grain = stretch_noise(sample_fbm_normalized(stretched * MILKY_WAY_GRAIN_SCALE + MILKY_WAY_GRAIN_SEED, MILKY_WAY_GRAIN_OCTAVES), MILKY_WAY_NOISE_CONTRAST);
+    float lane_lat = (lat - MILKY_WAY_LANE_WANDER * (sample_noise_3d(g * MILKY_WAY_LANE_WANDER_SCALE + MILKY_WAY_LANE_WANDER_SEED) - 0.5)) / (MILKY_WAY_LANE_WIDTH_FRAC * width);
+    float rift_noise = stretch_noise(sample_fbm_normalized(stretched * MILKY_WAY_RIFT_SCALE + MILKY_WAY_RIFT_SEED, MILKY_WAY_COARSE_OCTAVES), MILKY_WAY_DUST_CONTRAST);
+    float rift = exp(-lane_lat * lane_lat) * smoothstep(MILKY_WAY_RIFT_EDGES.x, MILKY_WAY_RIFT_EDGES.y, rift_noise) * (1.0 - MILKY_WAY_RIFT_CORE_GAP * bulge_shape);
+    float3 dust_at = stretched * MILKY_WAY_DARK_SCALE + warp * MILKY_WAY_DARK_WARP + MILKY_WAY_DARK_SEED;
+    float dark = band * smoothstep(MILKY_WAY_DARK_EDGES.x, MILKY_WAY_DARK_EDGES.y, stretch_noise(sample_fbm_normalized(dust_at, MILKY_WAY_DARK_OCTAVES), MILKY_WAY_DUST_CONTRAST))
+        * (MILKY_WAY_DARK_GRAIN_GAIN.x + MILKY_WAY_DARK_GRAIN_GAIN.y * grain);
+    float3 transmit = exp(-(MILKY_WAY_RIFT_DEPTH * rift + MILKY_WAY_DARK_DEPTH * dark) * MILKY_WAY_REDDENING);
+    float disk_gain = get_gain(MILKY_WAY_CLOUD_GAIN, clouds, MILKY_WAY_CLOUD_AMOUNT) * get_gain(MILKY_WAY_GRAIN_GAIN, grain, MILKY_WAY_GRAIN_AMOUNT);
+    float bulge_gain = get_gain(MILKY_WAY_BULGE_CLOUD_GAIN, clouds, MILKY_WAY_CLOUD_AMOUNT) * get_gain(MILKY_WAY_BULGE_GRAIN_GAIN, grain, MILKY_WAY_GRAIN_AMOUNT);
+    float3 intensity = MILKY_WAY_DISK_COLOR * MILKY_WAY_DISK * band * mix(MILKY_WAY_ANTICENTRE_FRAC, 1.0, toward_core * toward_core) * disk_gain
+                       + MILKY_WAY_BULGE_COLOR * MILKY_WAY_BULGE * bulge * bulge_gain;
+    float nebula_noise = stretch_noise(sample_fbm_normalized(g * MILKY_WAY_NEBULA_SCALE + MILKY_WAY_NEBULA_SEED, MILKY_WAY_COARSE_OCTAVES), MILKY_WAY_NOISE_CONTRAST);
+    intensity += MILKY_WAY_NEBULA_COLOR * MILKY_WAY_NEBULA * MILKY_WAY_DISK * band * smoothstep(MILKY_WAY_NEBULA_EDGES.x, MILKY_WAY_NEBULA_EDGES.y, nebula_noise);
+    return float4(intensity * transmit, saturate(band + bulge) * dot(transmit, LUMA));
+}
+
+/**
+ * @brief `bake_milky_way` draws the Milky Way (`get_milky_way_glow`) into texture 0 once, in its own frame: longitude
+ * across (from −π at the left edge), latitude up to ±`MILKY_WAY_MAX_LATITUDE_RAD` (bottom to top), beyond which it is
+ * too faint to matter.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs before the first frame, one thread per texel.
+ * @endcode
+ */
+kernel void bake_milky_way(texture2d<float, access::write> glow [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= glow.get_width() || id.y >= glow.get_height()) return;
+    float2 uv = (float2(id) + 0.5) / float2(glow.get_width(), glow.get_height());
+    float lon = (2.0 * uv.x - 1.0) * M_PI_F, lat = (2.0 * uv.y - 1.0) * MILKY_WAY_MAX_LATITUDE_RAD;
+    glow.write(get_milky_way_glow(float3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))), id);
+}
+
+/**
+ * @brief `sample_milky_way` reads the baked Milky Way in sky direction d (in the world origin's frame), turned by the
+ * map's pole and core and scaled by the player's brightness: 0 for a map without one or outside the baked latitudes.
+ * @par Example
+ * @code
+ * float4 galaxy = sample_milky_way(scene, d);
+ * @endcode
+ */
+static float4 sample_milky_way(thread const Scene &scene, float3 d) {
+    float4 pole = scene.u.milky_way_pole;
+    float3 core = scene.u.milky_way_core.xyz;
+    if (pole.w <= 0.0) return float4(0.0);
+    float3 g = float3(dot(d, core), dot(d, cross(pole.xyz, core)), dot(d, pole.xyz));
+    float lat = asin(clamp(g.z, -1.0, 1.0));
+    if (abs(lat) >= MILKY_WAY_MAX_LATITUDE_RAD) return float4(0.0);
+    constexpr sampler around(filter::linear, s_address::repeat, t_address::clamp_to_edge);
+    float2 uv = float2(0.5 + 0.5 * atan2(g.y, g.x) / M_PI_F, 0.5 + 0.5 * lat / MILKY_WAY_MAX_LATITUDE_RAD);
+    return scene.milky_way.sample(around, uv) * pole.w;
+}
+
 /** @brief `get_sky_direction` gives an escaping ray's direction, carried to the eye, then to the origin. @par Example @code float3 d = get_sky_direction(scene, x, v); @endcode */
 static float3 get_sky_direction(thread const Scene &scene, float4 x, float4 v) {
     float4 cam = scene.u.camera[3];
@@ -1430,9 +1571,14 @@ static float3 sample_sky_bodies(thread const Scene &scene, float3 d) {
         float3 color = surface * (max(lit, 0.0) * PLANET_SUNLIT + PLANET_NIGHT) + ATMOSPHERE_COLOR * pow(r2, LIMB_POWER) * max(lit + LIMB_WRAP, 0.0) * LIMB_GLOW;
         return color + sun;
     }
-    float3 color = float3(sample_star_layer(scene, d, STAR_GRID_COARSE, STAR_DENSITY_COARSE) + FINE_STAR_BRIGHTNESS * sample_star_layer(scene, d, STAR_GRID_FINE, STAR_DENSITY_FINE));
-    float band = exp(-pow(dot(d, normalize(MILKY_WAY_NORMAL)) / MILKY_WAY_WIDTH, 2.0));
-    color += MILKY_WAY_COLOR * band * MILKY_WAY_BRIGHTNESS * sample_fbm_3d(d * MILKY_WAY_DETAIL);
+    float4 galaxy = sample_milky_way(scene, d);
+    float star_boost = 1.0 + MILKY_WAY_STAR_BOOST * galaxy.a;
+    float3 color = float3(sample_star_layer(scene, d, STAR_GRID_COARSE, STAR_DENSITY_COARSE * star_boost)
+                          + FINE_STAR_BRIGHTNESS * sample_star_layer(scene, d, STAR_GRID_FINE, STAR_DENSITY_FINE * star_boost));
+    if (galaxy.a > 0.0) {
+        color += MILKY_WAY_MICRO_STAR_BRIGHTNESS * sample_star_layer(scene, d, MILKY_WAY_MICRO_STAR_GRID, MILKY_WAY_MICRO_STAR_DENSITY * galaxy.a);
+        color += MILKY_WAY_TONE.x * pow(galaxy.rgb, MILKY_WAY_TONE.y);
+    }
     if (dot(d, planet) > 0.0 && r2 < HALO_RADIUS_SQ) {
         color += ATMOSPHERE_COLOR * HALO_GLOW * (1.0 - smoothstep(1.0, HALO_RADIUS_SQ, r2)) * max(dot(normalize(q.x * e1 + q.y * e2), sun_dir) + HALO_WRAP, 0.0);
     }
@@ -1823,7 +1969,19 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
+/**
+ * @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a
+ * flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's
+ * code (team and gun) and speckle share. A chord that starts away from the eye (`travelled` above 0) and only moves away
+ * from a segment skips it: the chord before ends at that nearest point and counts it there.
+ * @par Example
+ * @code
+ * scan_beams(scene, x, v, s, t, core, halo, code, speckle);
+ * @endcode
+ * @par Must know
+ * - Gotchas:
+ *   - A far chord's start, where a pixel is metres wide, would light the whole sky with a near segment's glow.
+ */
 static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
                        thread float &speckle) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
@@ -1837,6 +1995,7 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float k1 = 0.5 * ((al * al - ga * ga) + (be * be - et * et)), k2 = al * be - ga * et;
         float s_c = k1 > abs(k2) ? 0.5 * clamp_atanh(-k2 / k1) : (k2 < 0.0 ? s_end : 0.0);
         s_c = clamp(s_c, 0.0, min(s_end, FAR_S));
+        if (s_c <= 0.0 && travelled > 0.0) continue;
         float4 xc = geodesic_point(x, v, s_c);
         float sigma = clamp(clamp_atanh(mdot(xc, b) / -mdot(xc, a)), 0.0, info.x);
         float d_m = measure_gap(xc, geodesic_point(a, b, sigma)) * r;
@@ -2121,7 +2280,8 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
  * surface, the sky or a horizon. After `LATE_STEP_COUNT` iterations (rays winding near a throat or the black hole,
  * which land in the lens's most compressed, aliased images) its bent steps are three times longer. With `HAS_BEND` the
- * ray travels the bent world in pieces (`trace_bent_piece`) between warp objects and within its bent steps, crosses
+ * ray travels the bent world in pieces (`trace_bent_piece`) between warp objects and within its bent steps, scans the
+ * laser beams once per straight chord between warp objects (as the flat tracer does), crosses
  * empty space (the void beyond the edge, the air high above the ground) in long untraced strides (`get_empty_s`), and
  * reaches the sky once it is past every surface and
  * moving away from the origin.
@@ -2168,12 +2328,14 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 if (s_in < s_end) { s_end = s_in; entering = w; }
             }
 #if HAS_BEND
+            float4 chord_x = x, chord_v = v;
+            float chord_travelled = travelled, chord_s = 0.0;
             while (s_end > 0.0 && bent_piece_count++ < MAX_BENT_PIECES) {
                 if (entering < 0 && x.w > sky_w && v.w > 0.0) { outcome = OUTCOME_SKY; break; }
                 float empty_s = get_empty_s(scene, x), s = min(empty_s, s_end), frac = 1.0;
                 float4 hx = x, hv = v;
                 if (empty_s <= nominal_s) s = trace_bent_piece(scene, x, v, min(nominal_s, s_end), travelled, hit, glass, hx, hv, frac, dust);
-                if (u.beam_count > 0) scan_beams(scene, x, v, s * frac, travelled, core, halo, code, speckle);
+                chord_s += s * frac;
                 if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
                 float4 xn = geodesic_point(x, v, s);
                 v = normalize_tangent(xn * rsqrt(-mdot(xn, xn)), geodesic_tangent(x, v, s));
@@ -2181,6 +2343,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 travelled += s;
                 s_end -= s;
             }
+            if (u.beam_count > 0) scan_beams(scene, chord_x, chord_v, chord_s, chord_travelled, core, halo, code, speckle);
             if (outcome == OUTCOME_SKY && last_warp >= 0) back_to_reach(scene, last_warp, x, v);
             if (s_end > 0.0 || outcome != OUTCOME_LOST) break;
             inside = entering;
@@ -2387,7 +2550,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2494,7 +2657,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -2518,7 +2681,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -2555,7 +2718,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -2610,7 +2773,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2629,7 +2792,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {
