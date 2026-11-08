@@ -10,6 +10,11 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
+  least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
+  doesn't show the entire map. It is a circle that shows just where the player is and what is around them (the
+  menu's map page, W-49, shows the whole map). Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/minimap`, 2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
@@ -33,10 +38,6 @@ is in [`AGENTS.md`](AGENTS.md).
   pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
 - [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
   play but has a dashboard where they can change or reset those settings.
-- [ ] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
-  least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
-  doesn't show the entire map. It is a circle that shows just where the player is and what is around them (the
-  menu's map page, W-49, shows the whole map).
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
 - [ ] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
