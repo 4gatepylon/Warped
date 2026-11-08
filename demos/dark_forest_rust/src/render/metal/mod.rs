@@ -110,6 +110,7 @@ struct Targets {
     hdr: Texture,
     bloom_levels: Vec<Texture>,
     ldr: Texture,
+    lens: Texture,
 }
 
 impl Targets {
@@ -161,6 +162,11 @@ impl Targets {
                 device,
                 &TextureSpec::render_target(LDR_FORMAT, width_px, height_px),
                 "ldr",
+            ),
+            lens: create_texture(
+                device,
+                &TextureSpec::render_target(LDR_FORMAT, half_width_px, half_height_px),
+                "lens",
             ),
         }
     }
@@ -1208,6 +1214,19 @@ impl MetalRenderer {
         } else {
             &targets.hdr
         };
+        if let Some((lens_atlas, lens_uniforms)) = &self.lens {
+            draw_fullscreen(
+                &command_buffer,
+                &targets.lens,
+                &self.pipelines.lens,
+                MTLLoadAction::DontCare,
+                |encoder: &Encoder| {
+                    set_fragment_bytes(encoder, as_bytes(&frame_uniforms), 1);
+                    set_fragment_bytes(encoder, as_bytes(lens_uniforms), 2);
+                    unsafe { encoder.setFragmentTexture_atIndex(Some(lens_atlas), 0) };
+                },
+            );
+        }
         draw_fullscreen(
             &command_buffer,
             &targets.ldr,
@@ -1223,15 +1242,11 @@ impl MetalRenderer {
                     });
                 lens_uniforms.params.y = if self.is_capturing { 1.0 } else { 0.0 };
                 set_fragment_bytes(encoder, as_bytes(&lens_uniforms), 2);
-                let lens_atlas: &Texture = self
-                    .lens
-                    .as_ref()
-                    .map_or(&self.white_texture, |(atlas, _)| atlas);
                 unsafe {
                     encoder.setFragmentTexture_atIndex(Some(&targets.hdr), 0);
                     encoder.setFragmentTexture_atIndex(Some(bloom_source), 1);
                     encoder.setFragmentTexture_atIndex(Some(&targets.depth), 2);
-                    encoder.setFragmentTexture_atIndex(Some(lens_atlas), 3);
+                    encoder.setFragmentTexture_atIndex(Some(&targets.lens), 3);
                 }
             },
         );

@@ -100,6 +100,7 @@ pub struct Pipelines {
     pub bloom_downsample: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub bloom_upsample: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub tonemap: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    pub lens: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub fxaa: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub hud: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub hud_image: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
@@ -365,6 +366,7 @@ impl Pipelines {
                 Blend::Additive,
             ),
             tonemap: fullscreen_pipeline("tonemap_fragment", LDR_FORMAT, Blend::None),
+            lens: fullscreen_pipeline("lens_fragment", LDR_FORMAT, Blend::None),
             fxaa: fullscreen_pipeline("fxaa_fragment", DRAWABLE_FORMAT, Blend::None),
             hud: render_pipeline(
                 device,

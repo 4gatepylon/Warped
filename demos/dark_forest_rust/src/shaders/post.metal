@@ -295,7 +295,7 @@ constant float LENS_VISIBLE_FRAC = 0.8;
 constant float LENS_FADE_FRAC = 0.6;
 /** @brief `LENS_PROXY_M` is the distance of the world around a mouth that its atlas lookups assume. */
 constant float LENS_PROXY_M = 12.0;
-constant int LENS_MAX_STEP_COUNT = 200;
+constant int LENS_MAX_STEP_COUNT = 64;
 
 /**
  * @brief `get_lens_bend` is ∇ln n of mouth w's foil lens at x, tapered by (1 − (ρ/reach)²)² to
@@ -356,34 +356,23 @@ static float3 sample_lens_atlas(constant LensUniforms& lens, texture2d<float> at
 }
 
 /**
- * @brief `get_lens_color` traces the eye ray through a pixel into the nearest wormhole mouth in
- * front of the scene: bent by its lens, through its throat to the partner (inversion, then the
- * mirror diag(1, 1, -1)), until it leaves a reach or meets the floor; it returns the atlas color
- * there (lined up on the floor or a `LENS_PROXY_M` sphere) and how much it covers the scene.
+ * @brief `find_lens_mouth` is the mouth whose visible lens the eye ray through `uv` meets first
+ * (−1 for none), with how far away it meets it, how close the ray passes its centre and the ray.
  * @par Example
  * @code
- * float4 lensed = get_lens_color(frame, lens, atlas, depth, in.uv);
+ * int w = find_lens_mouth(frame, lens, uv, entry_m, closest_m, dir);
  * @endcode
  */
-static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniforms& lens,
-                             texture2d<float> atlas, depth2d<float> depth, float2 uv) {
+static int find_lens_mouth(constant FrameUniforms& frame, constant LensUniforms& lens, float2 uv,
+                           thread float& entry_m, thread float& closest_m, thread float3& dir) {
     int count = int(lens.params.x + 0.5);
-    if (count == 0) {
-        return float4(0.0);
-    }
-    constexpr sampler point_sampler(coord::normalized, filter::nearest, address::clamp_to_edge);
     float3 eye = frame.camera_position_m.xyz;
     float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
     float4 near_point = frame.inv_view_proj * float4(ndc, 1.0, 1.0);
-    float3 dir = normalize(near_point.xyz / near_point.w - eye);
-    float scene_depth = depth.sample(point_sampler, uv);
-    float scene_m = 1e30;
-    if (scene_depth > 0.0) {
-        float4 p = frame.inv_view_proj * float4(ndc, scene_depth, 1.0);
-        scene_m = length(p.xyz / p.w - eye);
-    }
+    dir = normalize(near_point.xyz / near_point.w - eye);
     int w = -1;
-    float entry_m = 1e30, closest_m = 0.0;
+    entry_m = 1e30;
+    closest_m = 0.0;
     for (int i = 0; i < count; i++) {
         float3 oc = eye - lens.centres[i].xyz;
         float b = dot(oc, dir);
@@ -403,9 +392,28 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
             closest_m = sqrt(closest_sq);
         }
     }
-    if (w < 0 || entry_m >= scene_m) {
+    return w;
+}
+
+/**
+ * @brief `get_lens_color` traces the eye ray through `uv` into the nearest wormhole mouth: bent
+ * by its lens, through its throat to the partner (inversion, then the mirror diag(1, 1, -1)),
+ * until it leaves a reach or meets the floor; it returns the atlas color there (lined up on the
+ * floor or a `LENS_PROXY_M` sphere) and how much it covers the scene, before any depth test.
+ * @par Example
+ * @code
+ * float4 lensed = get_lens_color(frame, lens, atlas, in.uv);
+ * @endcode
+ */
+static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniforms& lens,
+                             texture2d<float> atlas, float2 uv) {
+    float entry_m, closest_m;
+    float3 dir;
+    int w = find_lens_mouth(frame, lens, uv, entry_m, closest_m, dir);
+    if (w < 0) {
         return float4(0.0);
     }
+    float3 eye = frame.camera_position_m.xyz;
     float reach = lens.shapes[w].x;
     float3 oc = eye - lens.centres[w].xyz;
     float b = dot(oc, dir);
@@ -431,7 +439,7 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
             current = partner;
             continue;
         }
-        float h = clamp(0.2 * (rho - 0.5 * pt), 0.02, reach_now / 10.0);
+        float h = clamp(0.3 * (rho - 0.5 * pt), 0.05, reach_now / 8.0);
         float3 g = get_lens_bend(lens, current, x);
         v = normalize(v + (g - dot(g, v) * v) * h);
         x += v * h;
@@ -446,6 +454,21 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
     float3 color = sample_lens_atlas(lens, atlas, current, normalize(x + v * max(t, 0.0) - c));
     float weight = 1.0 - smoothstep(LENS_FADE_FRAC * reach, LENS_VISIBLE_FRAC * reach, closest_m);
     return float4(color, weight);
+}
+
+/**
+ * @brief `lens_fragment` draws the wormhole lens at half resolution (color and coverage); the
+ * tonemap pass tests it against the scene's depth at full resolution.
+ * @par Example
+ * @code
+ * pipeline(fullscreen_vertex, lens_fragment) into the half-resolution lens target
+ * @endcode
+ */
+fragment float4 lens_fragment(FullscreenVertexOut in [[stage_in]],
+                              constant FrameUniforms& frame [[buffer(1)]],
+                              constant LensUniforms& lens [[buffer(2)]],
+                              texture2d<float> atlas [[texture(0)]]) {
+    return get_lens_color(frame, lens, atlas, in.uv);
 }
 
 /**
@@ -465,7 +488,7 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
                                  texture2d<float> bloom [[texture(1)]],
                                  constant LensUniforms& lens [[buffer(2)]],
                                  depth2d<float> depth [[texture(2)]],
-                                 texture2d<float> atlas [[texture(3)]]) {
+                                 texture2d<float> lens_picture [[texture(3)]]) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float3 color = hdr.sample(linear_sampler, in.uv).rgb;
     float is_kept_plain = lens.params.y;
@@ -488,7 +511,22 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
     float3 encoded = linear_to_srgb(saturate(color));
     float grain = interleaved_gradient_noise(in.position.xy + fract(frame.camera_position_m.w) * 97.0) - 0.5;
     encoded = saturate(encoded + grain * GRAIN_STRENGTH * (1.0 - is_kept_plain));
-    float4 lensed = get_lens_color(frame, lens, atlas, depth, in.uv);
+    float4 lensed = float4(0.0);
+    float entry_m, closest_m;
+    float3 dir;
+    if (lens.params.x > 0.5 && find_lens_mouth(frame, lens, in.uv, entry_m, closest_m, dir) >= 0) {
+        constexpr sampler point_sampler(coord::normalized, filter::nearest, address::clamp_to_edge);
+        float scene_depth = depth.sample(point_sampler, in.uv);
+        float scene_m = 1e30;
+        if (scene_depth > 0.0) {
+            float2 ndc = float2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
+            float4 p = frame.inv_view_proj * float4(ndc, scene_depth, 1.0);
+            scene_m = length(p.xyz / p.w - frame.camera_position_m.xyz);
+        }
+        if (entry_m < scene_m) {
+            lensed = lens_picture.sample(linear_sampler, in.uv);
+        }
+    }
     encoded = mix(encoded, lensed.rgb, lensed.a);
     float luma = dot(encoded, float3(0.299, 0.587, 0.114));
     return float4(encoded, luma);
