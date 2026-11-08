@@ -43,6 +43,12 @@ constant float MAX_BEND_STEP_M = 3.0;
 constant float GROUND_DETAIL_S = 7.0;
 constant float SUN_INTENSITY = 1.45;
 constant float LUNAR_LAMBERT_FRAC = 0.7;
+constant float TEXTURE_SIDE_PX = 2048.0;
+constant float UNTEXTURED_ROUGHNESS = 0.85;
+constant float MIN_ROUGHNESS = 0.045;
+constant float MIN_FACING = 0.05;
+constant float MIN_MEAN_ALBEDO = 0.02;
+constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);
 constant float AMBIENT = 0.11;
 constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
@@ -520,38 +526,146 @@ static void cross_throat(thread const Scene &scene, int w, thread float4 &x, thr
     v = normalize_tangent(x, scene.warps[partner].forward * float4(tt + g * q.xyz, g * (1.0 + q.w)));
 }
 
-/** @brief `gather_lights` sums the lamps' light at a surface point. @par Example @code float3 lamps = gather_lights(scene, x, n); @endcode */
-static float3 gather_lights(thread const Scene &scene, float4 x, float4 n) {
+/** @brief `Surface` is a shading point's material: albedo, perceptual roughness, metalness, ambient occlusion and normal. */
+struct Surface {
+    float3 albedo;
+    float roughness;
+    float metallic;
+    float ao;
+    float4 n;
+};
+
+/** @brief `orthonormal` makes tangent t at a point unit and perpendicular to n. @par Example @code float4 t = orthonormal(t, n); @endcode */
+static float4 orthonormal(float4 t, float4 n) { t -= mdot(t, n) * n; return t * rsqrt(max(mdot(t, t), TINY)); }
+
+/** @brief `has_texture` says whether material m has a loaded texture set. @par Example @code if (has_texture(scene, m)) ...; @endcode */
+static bool has_texture(thread const Scene &scene, int m) {
+    int layer = int(scene.surfaces[m].x);
+    return layer >= 0 && scene.means[layer].w > 0.0;
+}
+
+/**
+ * @brief `sample_surface` reads material m's texture set at uv (in blocks of block_m meters), at the level of detail of
+ * the pixel's footprint: the albedo is `tint` scaled by the texture's brightness over its mean, and the normal map bends n along tangents t, b.
+ * Untextured materials get `tint` with a rough, dielectric finish.
+ * @par Example
+ * @code
+ * Surface s = sample_surface(scene, m, albedo, uv, 1.0, dist_s, x, n, t, b, v);
+ * @endcode
+ */
+static Surface sample_surface(thread const Scene &scene, int m, float3 tint, float2 uv, float block_m, float dist_s,
+                              float4 x, float4 n, float4 t, float4 b, float4 v) {
+    Surface s = {tint, UNTEXTURED_ROUGHNESS, 0.0, 1.0, n};
+    if (!has_texture(scene, m)) return s;
+    constexpr sampler wrap(address::repeat, filter::linear, mip_filter::linear);
+    float4 info = scene.surfaces[m];
+    int layer = int(info.x);
+    float pixel_m = scene.u.pixel_angle_rad * scene.u.curvature_radius_m * sinh(min(dist_s, FAR_S)) * rsqrt(max(abs(mdot(n, v)), MIN_FACING));
+    float lod = log2(max(pixel_m * TEXTURE_SIDE_PX / (info.y * block_m), 1.0));
+    float2 tex = uv / info.y;
+    float3 albedo = scene.albedo_maps.sample(wrap, tex, layer, level(lod)).rgb;
+    float2 bend = scene.normal_maps.sample(wrap, tex, layer, level(lod)).rg * 2.0 - 1.0;
+    float3 arm = scene.arm_maps.sample(wrap, tex, layer, level(lod)).rgb;
+    s.albedo = tint * dot(albedo, LUMA) / max(dot(scene.means[layer].rgb, LUMA), MIN_MEAN_ALBEDO);
+    s.ao = arm.r;
+    s.roughness = max(arm.g, MIN_ROUGHNESS);
+    s.metallic = arm.b * info.z;
+    s.n = normalize_tangent(x, t * bend.x + b * bend.y + n * sqrt(saturate(1.0 - dot(bend, bend))));
+    return s;
+}
+
+/**
+ * @brief `evaluate_direct_light` is the fps_demo's GGX specular plus (lunar-Lambert) diffuse for one light, from the
+ * Minkowski products of the normal, view, light and half vectors at the surface point.
+ * @par Example
+ * @code
+ * float3 c = evaluate_direct_light(s, n_dot_l, n_dot_v, n_dot_h, v_dot_h, energy);
+ * @endcode
+ */
+static float3 evaluate_direct_light(Surface s, float n_dot_l, float n_dot_v, float n_dot_h, float v_dot_h, float3 energy) {
+    if (n_dot_l <= 0.0) return float3(0.0);
+    n_dot_h = saturate(n_dot_h);
+    v_dot_h = saturate(v_dot_h);
+    float alpha = s.roughness * s.roughness, alpha_squared = alpha * alpha;
+    float d_denominator = n_dot_h * n_dot_h * (alpha_squared - 1.0) + 1.0;
+    float d = alpha_squared / (M_PI_F * d_denominator * d_denominator);
+    float visibility = 0.5 / max(n_dot_l * sqrt(n_dot_v * n_dot_v * (1.0 - alpha_squared) + alpha_squared)
+                               + n_dot_v * sqrt(n_dot_l * n_dot_l * (1.0 - alpha_squared) + alpha_squared), 1e-5);
+    float3 f0 = mix(float3(0.04), s.albedo, s.metallic);
+    float3 f = f0 + (1.0 - f0) * pow(1.0 - v_dot_h, 5.0);
+    float lunar = mix(1.0, 2.0 / (n_dot_l + n_dot_v), LUNAR_LAMBERT_FRAC);
+    return ((1.0 - f) * (1.0 - s.metallic) * s.albedo / M_PI_F * lunar + d * visibility * f * energy) * n_dot_l;
+}
+
+/** @brief `light_from` is a surface's light from unit direction l, per unit of irradiance. @par Example @code float3 c = light_from(s, l, view, energy); @endcode */
+static float3 light_from(Surface s, float4 l, float4 view, float3 energy) {
+    float4 h = l + view;
+    h *= rsqrt(max(mdot(h, h), TINY));
+    return evaluate_direct_light(s, mdot(s.n, l), max(mdot(s.n, view), 1e-4), mdot(s.n, h), mdot(view, h), energy);
+}
+
+/** @brief `get_env_brdf` is Karis' fit of the split-sum specular scale and bias. @par Example @code float2 ab = get_env_brdf(0.5, n_dot_v); @endcode */
+static float2 get_env_brdf(float roughness, float n_dot_v) {
+    float4 r = roughness * float4(-1.0, -0.0275, -0.572, 0.022) + float4(1.0, 0.0425, 1.04, -0.04);
+    float a004 = min(r.x * r.x, exp2(-9.28 * n_dot_v)) * r.x + r.y;
+    return float2(-1.04, 1.04) * a004 + r.zw;
+}
+
+/** @brief `gather_lights` sums the lamps' light at a surface point. @par Example @code float3 lamps = gather_lights(scene, s, x, view, energy); @endcode */
+static float3 gather_lights(thread const Scene &scene, Surface s, float4 x, float4 view, float3 energy) {
     float3 sum = float3(0.0);
     for (int i = 0; i < scene.u.light_count; i++) {
         float4 lx = scene.lights[i].position;
         float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
         if (d_m > LIGHT_CUTOFF_FRAC * radius_m) continue;
         float4 toward = lx + mdot(lx, x) * x;
-        float facing = mdot(n, toward) * rsqrt(max(mdot(toward, toward), TINY));
+        toward *= rsqrt(max(mdot(toward, toward), TINY));
         float falloff = 1.0 / (1.0 + (d_m / radius_m) * (d_m / radius_m))
                       * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
-        sum += scene.lights[i].color_radius.rgb * falloff * (LIGHT_WRAP + (1.0 - LIGHT_WRAP) * max(facing, 0.0));
+        float3 wrap = LIGHT_WRAP * s.albedo * (1.0 - s.metallic);
+        sum += scene.lights[i].color_radius.rgb * falloff * (wrap + (1.0 - LIGHT_WRAP) * M_PI_F * light_from(s, toward, view, energy));
     }
     return sum;
 }
 
-/** @brief `light_surface` lights a surface point: the sun (lunar-Lambert, shadowed), earthshine, lamps and the laser spot. @par Example @code float3 c = light_surface(scene, albedo, x, n, v); @endcode */
-static float3 light_surface(thread const Scene &scene, float3 albedo, float4 x, float4 n, float4 v) {
-    float4 l = transport_from_centre(scene.u.sun.xyz, x);
-    float mu0 = mdot(n, l), mu = max(-mdot(n, v), 0.0), sun = 0.0;
-    if (mu0 > 0.0) {
-        sun = mix(mu0, 2.0 * mu0 / (mu0 + mu), LUNAR_LAMBERT_FRAC)
-            * trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / scene.u.curvature_radius_m), l);
+/**
+ * @brief `light_surface` lights a surface point with face normal n: the sun (GGX with lunar-Lambert diffuse, shadowed),
+ * earthshine and the ambient light (split-sum specular with multiple-scattering compensation), lamps and the laser spot.
+ * @par Example
+ * @code
+ * float3 c = light_surface(scene, s, x, n, v);
+ * @endcode
+ */
+static float3 light_surface(thread const Scene &scene, Surface s, float4 x, float4 n, float4 v) {
+    float4 l = transport_from_centre(scene.u.sun.xyz, x), view = -v;
+    float2 env = get_env_brdf(s.roughness, max(mdot(s.n, view), 1e-4));
+    float3 f0 = mix(float3(0.04), s.albedo, s.metallic);
+    float3 energy = 1.0 + f0 * (1.0 / max(env.x + env.y, 1e-3) - 1.0);
+    float3 color = float3(0.0);
+    if (mdot(n, l) > 0.0) {
+        float sun = trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / scene.u.curvature_radius_m), l);
+        if (sun > 0.0) color += M_PI_F * SUN_INTENSITY * sun * SUN_COLOR * light_from(s, l, view, energy);
     }
-    float earth = max(mdot(n, transport_from_centre(scene.u.planet.xyz, x)), 0.0);
-    float3 light = float3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR + SUN_INTENSITY * sun * SUN_COLOR + gather_lights(scene, x, n);
-    float3 color = albedo * light;
+    float earth = max(mdot(s.n, transport_from_centre(scene.u.planet.xyz, x)), 0.0);
+    float3 ambient = (float3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR) * s.ao;
+    color += ambient * (s.albedo * (1.0 - s.metallic) + (f0 * env.x + env.y) * energy) + gather_lights(scene, s, x, view, energy);
     if (scene.u.spot_color.a > 0.0) {
         float d_m = measure_gap(scene.u.spot, x) * scene.u.curvature_radius_m;
         color += scene.u.spot_color.rgb * scene.u.spot_color.a * exp(-d_m * d_m / (SPOT_RADIUS_M * SPOT_RADIUS_M));
     }
     return color;
+}
+
+/** @brief `grid_normal` is the unit normal, toward +axis, of the grid plane of structure st through local point p. @par Example @code float4 t = grid_normal(st, p, 0); @endcode */
+static float4 grid_normal(device const VoxelStructure &st, float4 p, int axis) {
+    float c = p[axis] / p.w;
+    float4 n_local = float4(0.0);
+    n_local[axis] = 1.0;
+    n_local.w = c;
+    n_local *= rsqrt(max(1.0 - c * c, TINY));
+    float4 n = st.rows[0] * n_local.x + st.rows[1] * n_local.y + st.rows[2] * n_local.z - st.rows[3] * n_local.w;
+    n.w = -n.w;
+    return n;
 }
 
 /** @brief `detail_fraction` gives how much per-block detail to keep at a distance. @par Example @code float d = detail_fraction(scene, s); @endcode */
@@ -632,11 +746,15 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
             albedo = stripes - 2.0 * floor(stripes / 2.0) < 0.5 ? get_palette(scene, u.mat_hazard).rgb : HAZARD_DARK_COLOR;
         }
     }
-    float texel = hash_3d(float3(floor(uv * SUBTEXELS), h * CELL_SEED));
+    float texel = has_texture(scene, u.mat_regolith) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), h * CELL_SEED));
     albedo *= 1.0 + detail * (BLOCK_NOISE * (h - 0.5) + TEXEL_NOISE * (texel - 0.5));
     float2 edge = min(uv, 1.0 - uv);
     albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * GROUND_EDGE_FRAC);
-    return light_surface(scene, albedo, x, float4(0.0, 1.0, 0.0, 0.0), v) + glow;
+    float4 n = float4(0.0, 1.0, 0.0, 0.0);
+    float3 tx = N * (float3(1.0, 0.0, 0.0) + y.x * y), tz = N * (float3(0.0, 1.0, 0.0) + y.y * y);
+    float4 t = orthonormal(float4(tx.x, 0.0, tx.y, tx.z), n), b = -orthonormal(float4(tz.x, 0.0, tz.y, tz.z), n);
+    Surface s = sample_surface(scene, u.mat_regolith, albedo, a, cell_s * r, dist_s, x, n, t, b, v);
+    return light_surface(scene, s, x, n, v) + glow;
 }
 
 /**
@@ -661,7 +779,8 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     n_local *= (h.axis < 0 ? 1.0 : h.sgn) * rsqrt(max(1.0 - c * c, TINY));
     float4 n = r0 * n_local.x + r1 * n_local.y + r2 * n_local.z - r3 * n_local.w;
     n.w = -n.w;
-    float2 uv = fract(float2(h.g[(axis + 1) % 3], h.g[(axis + 2) % 3]));
+    float4 t = orthonormal(grid_normal(st, p, (axis + 1) % 3), n), b = -orthonormal(grid_normal(st, p, (axis + 2) % 3), n);
+    float2 g = float2(h.g[(axis + 1) % 3], h.g[(axis + 2) % 3]), uv = fract(g);
     int m = h.mat;
     float4 entry = get_palette(scene, m);
     float3 albedo = entry.rgb;
@@ -672,12 +791,13 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     if (m == u.mat_hazard) albedo = mix(albedo, HAZARD_STRIPE_COLOR, stripe);
     if (m == u.mat_gold_foil) albedo *= 1.0 - FOIL_VARIATION * (0.5 - hash_3d(float3(floor(uv * FOIL_CRINKLES), block)));
     if (m == u.mat_hull || m == u.mat_pad) albedo *= 1.0 - PANEL_SEAM_DARKEN * step(PANEL_SEAM_EDGE, max(fract(uv.x * PANEL_SEAMS), fract(uv.y * PANEL_SEAMS)));
-    float texel = hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
+    float texel = has_texture(scene, m) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
     albedo *= 1.0 + detail * (BLOCK_NOISE * (block - 0.5) + TEXEL_NOISE * (texel - 0.5));
     float2 edge = min(uv, 1.0 - uv);
     albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * (1.0 - glow));
     if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM * smoothstep(0.0, GLOW_RIM, min(edge.x, edge.y)));
-    return light_surface(scene, albedo, x, n, v);
+    Surface s = sample_surface(scene, m, albedo, g, u.curvature_radius_m / st.scale.x, dist_s, x, n, t, b, v);
+    return light_surface(scene, s, x, n, v);
 }
 
 /** @brief `sample_star_layer` draws one layer of stars from a grid on the cube around the sky. @par Example @code float s = sample_star_layer(scene, d, 60.0, 0.03); @endcode */
