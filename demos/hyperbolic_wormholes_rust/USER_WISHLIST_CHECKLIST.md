@@ -10,6 +10,10 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
+  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user wants to see it
+  before it merges. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
+  `claude/dust-polyhedra`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
   itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
