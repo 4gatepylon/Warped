@@ -21,6 +21,7 @@ use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
 use crate::voxel_clearance::ClearanceGrids;
+use crate::voxel_textures::get_material_surface;
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
@@ -173,6 +174,7 @@ pub struct VoxelWorld {
     pub warps: Vec<VoxelWarp>,
     pub lights: Vec<(DVec4, [f32; 3], f64)>,
     pub palette: Vec<[f32; 4]>,
+    pub surfaces: Vec<[f32; 4]>,
     pub special: SpecialMaterials,
     pub regions: Option<[f64; 3]>,
     pub sun: DVec3,
@@ -394,7 +396,9 @@ impl VoxelWorld {
             });
         }
         let mut palette: Vec<[f32; 4]> = vec![[0.0; 4]; MAX_MATERIAL_COUNT];
+        let mut surfaces: Vec<[f32; 4]> = vec![get_material_surface(""); MAX_MATERIAL_COUNT];
         for material in &map.materials {
+            surfaces[usize::from(material.id)] = get_material_surface(&material.name);
             let glow: f32 = if material.kind == "light" { 1.0 } else { 0.0 };
             palette[usize::from(material.id)] = [
                 material.color[0],
@@ -450,6 +454,7 @@ impl VoxelWorld {
                 .map(|l| (to_point(&l.position), l.color, l.radius_m))
                 .collect(),
             palette,
+            surfaces,
             special,
             regions,
             sun: to_direction(&map.sky.sun.direction),

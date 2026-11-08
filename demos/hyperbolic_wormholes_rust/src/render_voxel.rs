@@ -25,6 +25,7 @@ use crate::render_metal::{
     encode_adaptive_sampling, make_pipeline,
 };
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
+use crate::voxel_textures::SurfaceTextures;
 use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld};
 
 /// `Result` is this module's result type.
@@ -33,7 +34,9 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const SHADER_SOURCE: &str = include_str!("render_voxel.metal");
 const KERNEL_NAME: &str = "trace_voxel_pixels";
 const UNIFORMS_BUFFER_INDEX: usize = 16;
-const SCENE_BUFFER_COUNT: usize = 8;
+const SCENE_BUFFER_COUNT: usize = 9;
+const MEANS_BUFFER_INDEX: usize = 26;
+const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
 const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
@@ -128,6 +131,7 @@ pub struct VoxelFrame {
     palette: Vec<[f32; 4]>,
     beams: Vec<GpuBeam>,
     clearance: Arc<ClearanceGrids>,
+    surfaces: Vec<[f32; 4]>,
 }
 
 /// `to_f32` converts a double 4-vector to floats.
@@ -314,6 +318,7 @@ impl VoxelFrame {
             palette: world.palette.clone(),
             beams: gpu_beams,
             clearance: Arc::clone(&world.clearance),
+            surfaces: world.surfaces.clone(),
         }
     }
 
@@ -377,15 +382,17 @@ fn as_bytes<T: Copy>(values: &[T]) -> &[u8] {
     }
 }
 
-/// `VoxelGpu` is the voxel renderer's pipelines (every pixel, and adaptive sampling's) and buffers.
+/// `VoxelGpu` is the voxel renderer's pipelines (every pixel, and adaptive sampling's), buffers
+/// and surface textures.
 pub struct VoxelGpu {
     trace_pixels: Pipeline,
     adaptive: AdaptivePipelines,
     buffers: Vec<GrowableBuffer>,
+    textures: SurfaceTextures,
 }
 
 impl VoxelGpu {
-    /// `New` compiles `render_voxel.metal` on `device`.
+    /// `New` compiles `render_voxel.metal` and loads the surface textures on `device`.
     ///
     /// Example: `let gpu = VoxelGpu::New(&device)?;`
     #[allow(non_snake_case)]
@@ -410,6 +417,7 @@ impl VoxelGpu {
             buffers: (0..SCENE_BUFFER_COUNT)
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
+            textures: SurfaceTextures::Load(device)?,
         })
     }
 
@@ -433,7 +441,25 @@ impl VoxelGpu {
             as_bytes(&frame.palette),
             as_bytes(&frame.beams),
             &frame.clearance.values,
+            as_bytes(&frame.surfaces),
         ];
+        let means: &[[f32; 4]] = &self.textures.means;
+        let maps = [
+            &self.textures.albedo,
+            &self.textures.normal,
+            &self.textures.arm,
+        ];
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURES WILL HAPPEN
+        unsafe {
+            encoder.setBytes_length_atIndex(
+                NonNull::from(means).cast(),
+                std::mem::size_of_val(means),
+                MEANS_BUFFER_INDEX,
+            );
+            for (k, map) in maps.iter().enumerate() {
+                encoder.setTexture_atIndex(Some(map), FIRST_SURFACE_TEXTURE_INDEX + k);
+            }
+        }
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
         unsafe {

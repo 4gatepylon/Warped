@@ -16,7 +16,8 @@ using namespace metal;
 #define SCENE_BUFFERS constant VoxelUniforms &u [[buffer(16)]], device const VoxelStructure *structures [[buffer(17)]], \
     device const uchar *voxels [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
     device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]], \
-    device const uchar *clearances [[buffer(24)]]
+    device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], constant float4 *means [[buffer(26)]], \
+    texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]]
 
 constant int MAX_ITERATIONS = 240;
 constant int MAX_DDA_STEPS = 80;
@@ -291,6 +292,11 @@ struct Scene {
     device const float4 *palette;
     device const BeamSegment *beams;
     device const uchar *clearances;
+    device const float4 *surfaces;
+    constant float4 *means;
+    texture2d_array<float> albedo_maps;
+    texture2d_array<float> normal_maps;
+    texture2d_array<float> arm_maps;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -908,7 +914,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1021,7 +1027,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -1045,7 +1051,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -1082,7 +1088,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -1137,7 +1143,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1156,7 +1162,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {
