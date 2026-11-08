@@ -12,8 +12,6 @@
 //! Must know:
 //! - Limitations: a throw flies straight through other warps' bending and throats.
 
-#![allow(dead_code)]
-
 use glam::{DMat4, DVec4};
 
 use crate::geometry::{
@@ -28,6 +26,8 @@ pub const GREEN_COLOR: [f32; 3] = [0.2, 1.0, 0.4];
 const FLIGHT_STEP_S: f64 = 1.0 / 120.0;
 const BACK_OFF_M: f64 = 0.05;
 const MAX_DROP_M: f64 = 200.0;
+const FLYING_MARKER_M: f64 = 0.15;
+const UNLINKED_MARKER_M: f64 = 0.3;
 
 /// `WormholeColor` is which of a player's two mouths: the purple one is thrown first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -223,6 +223,18 @@ impl PlayerWormholes {
         Some([self.purple?, self.green?])
     }
 
+    /// `get_markers` gives the glowing balls to draw for these wormholes (a centre, a colour and a
+    /// radius in meters): the throw in the air, and a mouth that is down while the other isn't.
+    ///
+    /// Example: `shared.add_markers(&wormholes.get_markers(40.0));`
+    pub fn get_markers(&self, r: f64) -> Vec<(DVec4, WormholeColor, f64)> {
+        let flying = self.flying.map(|(color, x)| (x, color, FLYING_MARKER_M));
+        let unlinked = self
+            .get_unlinked()
+            .map(|(color, place)| (place.get_centre(r), color, UNLINKED_MARKER_M));
+        flying.into_iter().chain(unlinked).collect()
+    }
+
     /// `get_unlinked` gives the place of a mouth that is down while the other isn't, with its colour.
     ///
     /// Example: `if let Some((color, place)) = wormholes.get_unlinked() { mark(color, place); }`
@@ -262,6 +274,18 @@ impl ThrownWormholes {
     /// Example: `let color = thrown.get_next_color();`
     pub fn get_next_color(&self) -> WormholeColor {
         self.next_color
+    }
+
+    /// `get_kept_places` lists the places of this player's mouths that the next throw won't move.
+    ///
+    /// Example: `let others = thrown.get_kept_places();`
+    pub fn get_kept_places(&self) -> Vec<MouthPlace> {
+        match self.next_color {
+            WormholeColor::Purple => self.placed.green,
+            WormholeColor::Green => self.placed.purple,
+        }
+        .into_iter()
+        .collect()
     }
 
     /// `is_flying` says whether a throw is in the air (a new one must wait for it).
@@ -338,6 +362,7 @@ mod tests {
     //! | Mouth place | round trip through its frame; facing back the way it flew | `a_place_survives_its_frame`, `a_landed_mouth_faces_back_along_its_flight` |
     //! | Throw | lands on the ground ahead; hits a wall and drops to the floor below it; flies off with nothing to hit (never lands) | `a_throw_lands_ahead_on_the_ground`, `a_throw_at_a_wall_drops_below_it`, `a_throw_that_never_lands_fizzles` |
     //! | Colours | purple then green then purple; a refused place keeps the colour; death clears both | `throws_alternate_purple_and_green`, `a_refused_place_fizzles`, `clearing_starts_over_with_purple` |
+    //! | What others see | none down (nothing kept), a throw in the air with one mouth down (two markers, that mouth kept), both down (no markers) | `markers_show_throws_and_unlinked_mouths` |
 
     use super::*;
     use crate::settings::ServerSettings;
@@ -483,6 +508,32 @@ mod tests {
         assert!(message.contains("too close"), "{message}");
         assert_eq!(thrown.get_next_color(), WormholeColor::Purple);
         assert!(thrown.placed.purple.is_none());
+    }
+
+    #[test]
+    fn markers_show_throws_and_unlinked_mouths() {
+        let mut thrown: ThrownWormholes = ThrownWormholes::New();
+        assert!(thrown.get_kept_places().is_empty());
+        thrown.throw(throw_from_eye(0.0, find_ground_hit), 0.0);
+        thrown
+            .update(LATE_S, EYE_M, R_M, |_| true)
+            .expect("it lands");
+        let purple: MouthPlace = thrown.placed.purple.expect("purple is down");
+        let settings: WormholeSettings = ServerSettings::Builtin().wormholes;
+        let color: WormholeColor = thrown.get_next_color();
+        thrown.throw(
+            fly_throw(get_eye(0.0), color, &settings, R_M, find_ground_hit),
+            0.0,
+        );
+        thrown.update(0.0, EYE_M, R_M, |_| true);
+        assert_eq!(thrown.get_kept_places(), [purple]);
+        let colors: Vec<WormholeColor> =
+            thrown.placed.get_markers(R_M).iter().map(|m| m.1).collect();
+        assert_eq!(colors, [WormholeColor::Green, WormholeColor::Purple]);
+        thrown
+            .update(LATE_S, EYE_M, R_M, |_| true)
+            .expect("it lands");
+        assert!(thrown.placed.get_markers(R_M).is_empty());
     }
 
     #[test]
