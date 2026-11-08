@@ -12,7 +12,7 @@
 //! `VoxelWorld::add_markers`, `VoxelWorld::find_aimed_material`, `VoxelWorld::find_clear_m`,
 //! `VoxelWorld::find_crosshair_point`, `VoxelWorld::is_sunlit`, `VoxelWorld::is_eye_supported`, `VoxelWorld::get_mouth_depth_frac`,
 //! `VoxelWorld::can_grow_black_hole`, `VoxelWorld::grow_black_hole`, `VoxelWorld::get_time_rate_frac`,
-//! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
+//! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`, `MARKER_NAME`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
@@ -39,6 +39,7 @@ use crate::zone_walls::ZoneWalls;
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
+pub const MARKER_NAME: &str = "a thrown wormhole";
 const MAX_MARKER_COUNT: usize = 16;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
@@ -1064,7 +1065,7 @@ impl VoxelWorld {
             };
             let frame: DMat4 =
                 orthonormalize_frame(DMat4::from_cols(DVec4::X, DVec4::Y, DVec4::Z, x));
-            self.add_structure("a thrown wormhole", frame, &[ball]);
+            self.add_structure(MARKER_NAME, frame, &[ball]);
         }
     }
 
