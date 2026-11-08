@@ -177,8 +177,6 @@ const TITLE_WINDOW_PX: (u32, u32) = (960, 600);
 const TITLE_FRAME_MS: u64 = 16;
 const LEVEL_RESTART_S: f64 = 1.0;
 const MATCH_WINDOW_PX: (u32, u32) = (1280, 800);
-const MATCH_MASK_PX: (u32, u32) = (728, 420);
-const MATCH_HEIGHT_FRAC: f32 = 0.95;
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
@@ -871,18 +869,9 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
         lines.truncate(match_menu::MAX_LINE_COUNT);
         match &mut canvas {
             Some(canvas) => {
-                canvas.set_draw_color(Color::RGB(0, 0, 0));
-                canvas.clear();
-                draw_text_overlay(
+                draw_shapes(
                     canvas,
-                    &OverlayText {
-                        lines,
-                        mask_px: MATCH_MASK_PX,
-                        height_frac: MATCH_HEIGHT_FRAC,
-                        is_centered: false,
-                        dim_frac: 0.0,
-                        picture: None,
-                    },
+                    &match_menu::get_progression_shapes(&view, client.team),
                 )?;
                 canvas.present();
             }
@@ -4926,6 +4915,49 @@ fn draw_text_overlay(canvas: &mut sdl3::render::WindowCanvas, text: &OverlayText
             HUD_COLOR
         });
         canvas.draw_debug_text(line.as_str(), (left + x, top + y))?;
+    }
+    Ok(())
+}
+
+/// `draw_shapes` clears the canvas and draws `shapes` (`match_menu::Shape`), scaling the page
+/// (`match_menu::PAGE_SIZE`) to fit the window and centring it.
+///
+/// Example: `draw_shapes(&mut canvas, &match_menu::get_progression_shapes(&view, None))?;`
+fn draw_shapes(
+    canvas: &mut sdl3::render::WindowCanvas,
+    shapes: &[match_menu::Shape],
+) -> Result<()> {
+    let (width, height) = canvas.window().size_in_pixels();
+    let [page_width, page_height] = match_menu::PAGE_SIZE;
+    let scale: f32 = (width as f32 / page_width).min(height as f32 / page_height);
+    let left: f32 = (width as f32 / scale - page_width) / 2.0;
+    let top: f32 = (height as f32 / scale - page_height) / 2.0;
+    canvas.set_scale(1.0, 1.0)?;
+    canvas.set_draw_color(Color::RGB(0, 0, 0));
+    canvas.clear();
+    canvas.set_scale(scale, scale)?;
+    canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
+    for shape in shapes {
+        match shape {
+            match_menu::Shape::Panel {
+                min,
+                size,
+                rgba,
+                border_rgb,
+            } => {
+                let rect = sdl3::render::FRect::new(left + min[0], top + min[1], size[0], size[1]);
+                canvas.set_draw_color(Color::RGBA(rgba[0], rgba[1], rgba[2], rgba[3]));
+                canvas.fill_rect(rect)?;
+                if let Some([r, g, b]) = border_rgb {
+                    canvas.set_draw_color(Color::RGB(*r, *g, *b));
+                    canvas.draw_rect(rect)?;
+                }
+            }
+            match_menu::Shape::Text { at, text, rgb } => {
+                canvas.set_draw_color(Color::RGB(rgb[0], rgb[1], rgb[2]));
+                canvas.draw_debug_text(text.as_str(), (left + at[0], top + at[1]))?;
+            }
+        }
     }
     Ok(())
 }

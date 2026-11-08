@@ -47,3 +47,9 @@ the user should check.
   turned off wins. The same bug is in `demos/hyperbolic_wormholes_rust/` (not changed here).
 - **Ports**: this copy's levels moved to 47852 (game) and 47853 (discovery) so they don't clash
   with the hyperbolic demo's 47800/47801.
+- **Balance note, rules unchanged** (**weigh in**): in bot matches the defender usually wins.
+  Rounds 2 to 6 of the five-level bot match were all held by the defender, so roles swapped every
+  round and neither wavefront moved; that match took 14 rounds. The bots are symmetric, so this
+  reads as a home-ground edge (shorter way to one's own consoles). With people it may differ. If it
+  holds, options are a time limit per round that the attacker wins, fewer consoles on the
+  defender's side, or a respawn delay for defenders; none is implemented.
