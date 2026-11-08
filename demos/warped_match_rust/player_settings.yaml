@@ -1,0 +1,72 @@
+# `player_settings.yaml` holds each player's own choices in the Rust demo: which keys do what, how fast the
+# mouse turns the view, the head bob, motion blur, the colour shift inside a wormhole, how bright the Milky
+# Way is, and how strongly a hit reddens, shakes and blurs the screen. They change only that player's
+# experience; the numbers that shape play for everyone are the server's, in `server_settings.yaml`.
+#
+# Interface:
+#     Copy this file, change it, and start the game with the copy: `PLAYER_SETTINGS=` with
+#     `make run-demo`, `make host-game` or `make join-game` (`--player-settings`). Every key is
+#     required and unknown keys fail. Each action under `keys` takes a list of one or more controls:
+#     - a key by SDL's name for it: W, Space, Left Shift, Right Ctrl, Escape, Return, Tab, Up,
+#       F1 and so on; digits and symbols in quotes ("1", "-", "=");
+#     - Mouse Left, Mouse Right, Mouse Middle, Mouse X1, Mouse X2;
+#     - Wheel (turning the mouse wheel either way), only for actions done once per press.
+#     Two actions can share a key; the lobby's team keys come before the gun keys. Numbers must be
+#     above 0 unless their note says 0 is allowed.
+#
+# Example:
+#     cp player_settings.yaml mine.yaml  # change keys.move_forward to [Up], then:
+#     make join-game MAP=lunar-surface PLAYER_SETTINGS=mine.yaml
+
+keys:
+  move_forward: [W]  # Walk forward (held).
+  move_back: [S]  # Walk back (held).
+  move_left: [A]  # Step left (held).
+  move_right: [D]  # Step right (held).
+  jump: [Space]  # Jump (held: on the house, the jetpack).
+  sprint: [Left Shift, Right Shift]  # Run while held, using sprint energy.
+  crouch: [Left Ctrl, Right Ctrl]  # Crouch while held.
+  shoot: [Mouse Left]  # Fire (the rifle fires while held).
+  aim: [Mouse Right]  # Aim while held: zoom in (more with the sniper) and turn more slowly.
+  flashlight: [F]  # Shine the flashlight while held.
+  turn_off_console: [E]  # Hold on one of the other team's consoles to turn it off.
+  throw_wormhole: [Q]  # Throw your purple wormhole mouth, then your green one, and so on.
+  gun_1: ["1"]  # Take the sniper.
+  gun_2: ["2"]  # Take the rifle.
+  switch_gun: [Wheel]  # Swap between the two guns.
+  switch_view: [V]  # Switch between first and third person (on voxel maps).
+  join_blue: ["1"]  # In the lobby, join the blue team.
+  join_red: ["2"]  # In the lobby, join the red team.
+  lower_resolution: ["-"]  # Render at a lower resolution.
+  raise_resolution: ["="]  # Render at a higher resolution.
+  release_mouse: [Escape]  # Free the mouse; again to ask whether to quit.
+  open_menu: [Tab]  # Open or close the menu (settings).
+
+view:
+  look_rad_per_px: 0.0025  # How far the view turns for each pixel the mouse moves (mouse sensitivity).
+  motion_blur_s: 0.01  # How long motion smears (0 for none).
+  edge_stretch_frac: 1.0  # How strongly the view stretches as you slow down at the map's edge (0 for none).
+  wormhole_tint_frac: 1.0  # How strongly the view turns light cyan (moving forward) or dark red (backward) in a wormhole's throat, 0 to 1 (0 for none).
+  milky_way_brightness_frac: 1.0  # How bright the Milky Way across the sky is, 0 to 1 (1 for the photo-like look, 0 for none).
+  head_bob:
+    walk_depth_m: 0.08  # How far the eye dips at each step while walking (0 for none).
+    sprint_depth_m: 0.14  # How far the eye dips at each step while sprinting (0 for none).
+    walk_steps_per_s: 2.0  # Steps a second while walking.
+    sprint_steps_per_s: 2.8  # Steps a second while sprinting.
+    fade_s: 0.1667  # Seconds the bob takes to start or stop.
+    gun_walk_sway_m: 0.02  # How far the gun in hand slides left and right with the steps while walking (0 for none).
+    gun_sprint_sway_m: 0.04  # How far the gun in hand slides left and right with the steps while sprinting (0 for none).
+    rifle_walk_swing_rad: 0.03  # How far a gun as long as the bolt-action rifle (1.23 m) swings left and right while walking, its muzzle lagging the slide; shorter guns swing in proportion (0 for none).
+    rifle_sprint_swing_rad: 0.06  # The same swing while sprinting (0 for none).
+
+hit_effects:  # How a hit looks to you (how much it slows you is the server's).
+  effect_s: 0.6  # Seconds the red, shake and blur take to fade.
+  red_frac: 0.6  # How red the screen's edges turn, 0 to 1 (0 for none).
+  shake_px: 6.0  # How far the screen shakes, in pixels (0 for none).
+  blur_px: 6.0  # How wide the blur from the edges is, in pixels (0 for none).
+
+minimap:  # The round map of what is around you, a Poincaré disk: straight paths away from you show as arcs.
+  is_shown: true  # Whether it shows.
+  corner: top_right  # Where it sits: top_left, top_right, bottom_left or bottom_right.
+  radius_frac: 0.14  # Its radius, as a fraction of the window's height.
+  range_m: 60.0  # How far from you it reaches, in meters (also the circle on the menu's map page).

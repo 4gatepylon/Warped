@@ -1,0 +1,17 @@
+Warped
+
+Warped needs a Mac with Apple silicon (M1 or later) and macOS 13 or later.
+
+1. Drag Warped.app into your Applications folder.
+2. Double-click it. The first time, macOS says it can't check Warped for malware, because the app
+   isn't notarized by Apple. Click Done, open System Settings, then Privacy & Security, scroll
+   down and click Open Anyway next to Warped. You only do this once.
+   (The install command on the download page skips this step.)
+3. Pick a game on the title screen with Up and Down, and start it with Return.
+   - Play online: asks once for the game's password; ask whoever runs the server.
+   - Host or join a game on this Wi-Fi: allow Local Network access when macOS asks.
+
+If the game stops, a pop-up says why, and its log is in ~/Library/Logs/Warped/.
+
+Credits: the revolver is "Sci-fi revolver" by Ramhat (https://sketchfab.com/Ramhat), under the Sketchfab
+Standard license; the surface textures are from Poly Haven (CC0).
