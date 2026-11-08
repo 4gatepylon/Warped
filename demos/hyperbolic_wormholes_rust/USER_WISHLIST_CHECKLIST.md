@@ -10,6 +10,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
+  scene lighting. Claimed by Claude Code (session
+  `5cf069f6-934c-466e-93ea-854879c2feaa`), branch `claude/gun-scene-lighting`, 2026-11-07.
 - [~] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
   Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-team-join`, 2026-11-07.
 - [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
@@ -98,8 +101,6 @@ is in [`AGENTS.md`](AGENTS.md).
   of the ground, just barely translucent, to mark out the real zones.
 - [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
   shadows on the hills.
-- [ ] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
-  scene lighting.
 
 ## Done
 
