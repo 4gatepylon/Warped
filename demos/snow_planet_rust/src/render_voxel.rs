@@ -138,7 +138,13 @@ pub struct VoxelUniforms {
     pub blizzards: [[f32; 4]; MAX_BLIZZARD_COUNT],
     pub blizzard_air: [[f32; 4]; MAX_BLIZZARD_COUNT],
     pub laser_color: [f32; 4],
+    pub torus: [f32; 4],
 }
+
+/// `MAX_COPY_DISTANCE_M` is how far a ray goes around a looping world before it stops being moved
+/// across the seams (DECISIONS S11, V1): past it, it sees only the empty snowfield, as before the
+/// world looped, so the copies of the level end there.
+const MAX_COPY_DISTANCE_M: f64 = 224.0;
 
 /// `MAX_BLIZZARD_COUNT` is how many blizzards the renderer draws (the rest only slow and freeze).
 pub const MAX_BLIZZARD_COUNT: usize = 8;
@@ -431,6 +437,7 @@ impl VoxelFrame {
         size_px: (u32, u32),
     ) -> VoxelFrame {
         let r: f64 = world.r;
+        let camera: DMat4 = world.torus.map_or(camera, |torus| torus.wrap_frame(camera));
         let mesh_roots: Vec<i32> = get_mesh_roots(&world.meshes);
         let body_first_material: i32 = get_first_materials(&world.meshes)[world.body_mesh];
         let (avatar_triangles, avatar_nodes, avatar_roots) =
@@ -666,6 +673,14 @@ impl VoxelFrame {
             laser_color: world
                 .laser_color
                 .map_or([0.0; 4], |[r, g, b]| [r, g, b, 1.0]),
+            torus: world.torus.map_or([0.0; 4], |torus| {
+                [
+                    (torus.periods_m[0] / r) as f32,
+                    (torus.periods_m[1] / r) as f32,
+                    (MAX_COPY_DISTANCE_M / r) as f32,
+                    1.0,
+                ]
+            }),
         };
         assert_eq!(
             world.palette.len(),
