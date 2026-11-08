@@ -60,6 +60,7 @@ mod terrain;
 mod third_person;
 mod thrown_wormholes;
 mod title;
+mod torus;
 mod viewmodel;
 mod voxel_clearance;
 mod voxel_textures;

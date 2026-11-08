@@ -263,3 +263,20 @@ seam.
   (`get_torus_distance`), and it still draws the same black holes.
 - **Not yet:** walking, seeing and shooting across the seams (S11's layers 2 to 6). The bench views keep their old
   viewpoints, so `blue_spawn` and `red_spawn` no longer stand at the spawns.
+
+## S14. Walking around the loop, layer 2
+
+Built on `claude/snow-planet-torus-walk`, 2026-11-08 (Claude Code), on layer 1 (S13).
+
+- **`src/torus.rs`:** the cell, the copy of a spot nearest another and the glue (`Torus::shift_frame`,
+  `wrap_frame`, `move_nearest`). The spot arithmetic (`get_cell_offset_m`, `get_nearest_offset_m`,
+  `get_ghost_offsets_m`) knows nothing of H³, so Dark Forest's flat world can reuse it; the frame glue is H³'s.
+- **Walking:** `VoxelPlayer::step` moves a body past a seam back into the cell by the glue, so positions stay within
+  56 m and 36 m of the middle. A looping world has no edge (`is_outside_boundary`); the map keeps its ellipse for
+  older programs. The spawn ring keeps players apart the short way round (`get_torus_distance_m`).
+- **Ghosts:** each structure within `GHOST_MARGIN_M` (12 m) plus its own size of a seam, and each warp within its
+  reach of one, is copied past the opposite seam when the world is built, so walkers and warps' lists meet it
+  from both sides. On Snow Planet that is 8 ghosts of the 4 mounds near a seam (1 each past the v seam,
+  3 for the two near a corner) and 2 of the north and south-east black holes, whose reach crosses the v seam.
+- **Not yet:** rays (the view still ends at the seam, past which the ghosts show), lasers, other players and thrown
+  mouths across the seams; the minimap and map page.

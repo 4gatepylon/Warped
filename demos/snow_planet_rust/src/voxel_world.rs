@@ -34,6 +34,7 @@ use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
 use crate::shapes::{Shape, ShapeKind, find_hit_mu};
 use crate::terrain::{Terrain, get_fermi_coordinates};
 use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
+use crate::torus::{Torus, get_ghost_offsets_m};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
@@ -95,6 +96,9 @@ const MIN_FLY_CLIMB_M_PER_S: f64 = 5.0;
 const FLY_SPRINT_PER_FLY: f64 = 40.0 / 14.0;
 const NEARBY_REACH_M: f64 = 6.0;
 const WAY_PROBE_STEP_M: f64 = 0.25;
+/// `GHOST_MARGIN_M` is how far past a structure's bounding sphere its ghost across a seam of the looping world
+/// must reach into the cell (`torus.rs`): past the widest warp's reach, so warps' lists and walkers near a seam meet it.
+const GHOST_MARGIN_M: f64 = 12.0;
 const INSIDE_MOUTH_PER_THROAT: f64 = 5.0;
 const INSIDE_MOUTH_SCALE: f64 = 1.8;
 const LASER_MAX_LENGTH_M: f64 = 480.0;
@@ -348,6 +352,7 @@ pub struct VoxelWorld {
     pub snow_fog_m: f64,
     pub snow_per_m3: f64,
     pub laser_color: Option<[f32; 3]>,
+    pub torus: Option<Torus>,
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -686,8 +691,13 @@ impl VoxelWorld {
                 map.name, map.gravity_m_per_s2, map.player.jump_m_per_s
             ));
         }
+        let torus: Option<Torus> = map
+            .space
+            .torus_periods_m
+            .map(|periods_m| Torus::New(periods_m, r));
         let (mut structures, mut shapes) = (Vec::new(), Vec::new());
         let (mut meshes, mut mesh_keys) = (Vec::<MeshModel>::new(), Vec::<(String, f64)>::new());
+        let mut ghost_sources: Vec<(DMat4, Option<usize>)> = Vec::new();
         for s in &map.structures {
             let first_shape: usize = shapes.len();
             for shape in &s.shapes {
@@ -713,6 +723,25 @@ impl VoxelWorld {
                 mesh.map(|m| (m, &meshes[m])),
                 r,
             ));
+            ghost_sources.push((frame, mesh));
+        }
+        if let Some(torus) = &torus {
+            for (k, &(frame, mesh)) in ghost_sources.iter().enumerate() {
+                let (name, first_shape) = (structures[k].name.clone(), structures[k].first_shape);
+                let reach_m: f64 = GHOST_MARGIN_M + structures[k].radius * r;
+                let spot_m: [f64; 2] = torus.get_spot_m(structures[k].centre);
+                for offset_m in get_ghost_offsets_m(spot_m, reach_m, torus.periods_m) {
+                    let ghost: VoxelStructure = make_structure(
+                        &name,
+                        torus.shift_frame(frame, offset_m),
+                        first_shape,
+                        &shapes[first_shape..first_shape + structures[k].shape_count],
+                        mesh.map(|m| (m, &meshes[m])),
+                        r,
+                    );
+                    structures.push(ghost);
+                }
+            }
         }
         let mut warps: Vec<VoxelWarp> = Vec::new();
         for warp in &map.warps {
@@ -747,6 +776,29 @@ impl VoxelWorld {
                 lens_rad: 0.0,
                 lens_core: 0.0,
             });
+        }
+        if let Some(torus) = &torus {
+            for w in 0..warps.len() {
+                let spot_m: [f64; 2] = torus.get_spot_m(warps[w].centre);
+                let reach_m: f64 = warps[w].reach * r;
+                for offset_m in get_ghost_offsets_m(spot_m, reach_m, torus.periods_m) {
+                    let frame: DMat4 = torus.shift_frame(warps[w].frame, offset_m);
+                    let centre: DVec4 = frame.col(AXIS_W);
+                    let reach: f64 = warps[w].reach;
+                    warps.push(VoxelWarp {
+                        frame,
+                        inverse: invert_lorentz(frame),
+                        centre,
+                        list: (0..structures.len())
+                            .filter(|&k| {
+                                get_distance(structures[k].centre, centre)
+                                    < structures[k].radius + reach
+                            })
+                            .collect(),
+                        ..warps[w].clone()
+                    });
+                }
+            }
         }
         if let Some(material) = map
             .materials
@@ -823,6 +875,7 @@ impl VoxelWorld {
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),
             consoles: team_consoles,
+            torus,
             flashlight_eye: None,
             growing_hole,
             sky_time_s: 0.0,
@@ -1409,12 +1462,24 @@ impl VoxelWorld {
             .clamp(0.0, 1.0)
     }
 
-    /// `is_outside_boundary` says whether a point is past the map's edge: on a map with terrain,
-    /// where the soft edge stops players (`get_edge_frac` reaches 1); otherwise outside the
-    /// playable ellipse (never, without one).
+    /// `get_torus_distance_m` gives the distance in meters from point a to point b, on a looping
+    /// world to b's copy nearest a (the short way around).
+    ///
+    /// Example: `let gap_m = world.get_torus_distance_m(eye, other_eye);`
+    pub fn get_torus_distance_m(&self, a: DVec4, b: DVec4) -> f64 {
+        let nearest: DVec4 = self.torus.map_or(b, |torus| torus.move_nearest(a, b));
+        get_distance(a, nearest) * self.r
+    }
+
+    /// `is_outside_boundary` says whether a point is past the map's edge: never on a looping world
+    /// (it has none); on a map with terrain, where the soft edge stops players (`get_edge_frac`
+    /// reaches 1); otherwise outside the playable ellipse (never, without one).
     ///
     /// Example: `if world.is_outside_boundary(x) { ... }`
     fn is_outside_boundary(&self, x: DVec4) -> bool {
+        if self.torus.is_some() {
+            return false;
+        }
         if self.terrain.is_some() {
             return self.get_edge_frac(x) >= 1.0;
         }
@@ -2122,7 +2187,7 @@ impl VoxelPlayer {
             let eye: DVec4 = candidate.get_camera_frame(world).col(AXIS_W);
             if others
                 .iter()
-                .all(|&x| get_distance(eye, x) * world.r >= MIN_SPAWN_GAP_M)
+                .all(|&x| world.get_torus_distance_m(eye, x) >= MIN_SPAWN_GAP_M)
             {
                 return candidate;
             }
@@ -2335,6 +2400,24 @@ impl VoxelPlayer {
     ///
     /// Example: `for message in player.step(&world, &input, 1.0 / 60.0, 0).messages { ... }`
     pub fn step(
+        &mut self,
+        world: &VoxelWorld,
+        input: &Input,
+        dt_s: f64,
+        spawn_index: usize,
+    ) -> StepReport {
+        let report: StepReport = self.step_in_place(world, input, dt_s, spawn_index);
+        if let Some(torus) = &world.torus {
+            self.body = torus.wrap_frame(self.body);
+        }
+        report
+    }
+
+    /// `step_in_place` is `step` before a body past a seam of a looping world is moved back into
+    /// the cell by the glue (`Torus::wrap_frame`).
+    ///
+    /// Example: `let report = self.step_in_place(world, input, 1.0 / 60.0, 0);`
+    fn step_in_place(
         &mut self,
         world: &VoxelWorld,
         input: &Input,
@@ -3952,7 +4035,9 @@ mod play_tests {
     //! | Gait | walking, sprinting, jumping, crouching | `walking_never_sticks_sinks_or_leaves` |
     //! | Wormhole | the level's pair, a thrown pair | `the_level_wormhole_carries_walkers_and_lasers`, `a_thrown_pair_carries_walkers_and_lasers` |
     //! | Way into a level mouth | each of `HEADING_COUNT`, from inside and past the edge | `the_level_wormhole_carries_walkers_and_lasers` |
-    //! | Past the edge, walking | inward (moves), outward (stays) | `a_player_past_the_edge_walks_back_in_only` |
+    //! | Past the edge of a bounded copy, walking | inward (moves), outward (stays) | `a_player_past_the_edge_walks_back_in_only` |
+    //! | Seam walked across | +u, −u, +v, −v, both at once (the corner) | `walking_across_each_seam_carries_on` |
+    //! | Way to an enemy pylon | the short way, across the u seam | `red_pylons_can_be_reached_the_short_way_round` |
 
     use super::*;
     use crate::map::{FLAT_CURVATURE_RADIUS_M, Map, get_map_folder};
@@ -3969,6 +4054,12 @@ mod play_tests {
     const WALK_THROUGH_STEP_COUNT: usize = 240;
     const NEAR_EXIT_M: f64 = 10.0;
     const MIN_WALK_ON_M: f64 = 3.0;
+    const WALK_ON_STEP_COUNT: usize = 30;
+    const SEAM_WALK_STEP_COUNT: usize = 120;
+    const SEAM_TOLERANCE_M: f64 = 0.5;
+    const GAP_TO_PYLON_M: f64 = 1.0;
+    const MAX_ROUND_STEP_COUNT: usize = 1200;
+    const TURN_BEFORE_PYLON_M: f64 = 5.0;
     const PAST_EDGE_V_M: f64 = 41.0;
     const EDGE_WALK_STEP_COUNT: usize = 30;
     const MIN_EDGE_WALK_M: f64 = 2.0;
@@ -4083,7 +4174,8 @@ mod play_tests {
 
     #[test]
     fn a_player_past_the_edge_walks_back_in_only() {
-        let world: VoxelWorld = load_snow_planet();
+        let mut world: VoxelWorld = load_snow_planet();
+        world.torus = None;
         for (target_m, should_move) in [([0.0, 0.0], true), ([0.0, PAST_EDGE_V_M * 2.0], false)] {
             let mut player: VoxelPlayer =
                 VoxelPlayer::AtView(&world, [0.0, PAST_EDGE_V_M], target_m, None, 0.0);
@@ -4098,6 +4190,94 @@ mod play_tests {
                 v_m < PAST_EDGE_V_M + STAND_TOLERANCE_M,
                 "toward {target_m:?}: {v_m}"
             );
+        }
+    }
+
+    #[test]
+    fn walking_across_each_seam_carries_on() {
+        let world: VoxelWorld = load_snow_planet();
+        let periods_m: [f64; 2] = world.torus.expect("Snow Planet loops").periods_m;
+        for (at_m, heading_m) in [
+            ([50.0, 0.0], [1.0, 0.0]),
+            ([-50.0, 0.0], [-1.0, 0.0]),
+            ([0.0, 30.0], [0.0, 1.0]),
+            ([-20.0, -30.0], [0.0, -1.0]),
+            ([50.0, 30.0], [1.0, 1.0]),
+        ] {
+            let target_m: [f64; 2] = [at_m[0] + heading_m[0], at_m[1] + heading_m[1]];
+            let mut player: VoxelPlayer = VoxelPlayer::AtView(&world, at_m, target_m, None, 0.0);
+            let eye_m: f64 = player.h_m;
+            walk(&world, &mut player, SEAM_WALK_STEP_COUNT);
+            let [u_m, v_m] = get_place_m(&world, &player);
+            assert!(
+                u_m.abs() <= periods_m[0] / 2.0 && v_m.abs() <= periods_m[1] / 2.0,
+                "from {at_m:?}: at ({u_m}, {v_m}), outside the cell"
+            );
+            let walked_m: f64 = world.player.walk_m_per_s * SEAM_WALK_STEP_COUNT as f64 * STEP_S;
+            let length: f64 = heading_m[0].hypot(heading_m[1]);
+            let expected_m: [f64; 2] = [0, 1].map(|i| {
+                let end_m: f64 = at_m[i] + heading_m[i] / length * walked_m;
+                end_m + crate::torus::get_cell_offset_m([end_m, end_m], periods_m)[i]
+            });
+            assert!(
+                (u_m - expected_m[0]).hypot(v_m - expected_m[1]) < SEAM_TOLERANCE_M,
+                "from {at_m:?}: at ({u_m}, {v_m}), not {expected_m:?}"
+            );
+            assert!(
+                (player.h_m - eye_m).abs() < STAND_TOLERANCE_M,
+                "from {at_m:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn red_pylons_can_be_reached_the_short_way_round() {
+        let world: VoxelWorld = load_snow_planet();
+        let periods_m: [f64; 2] = world.torus.expect("Snow Planet loops").periods_m;
+        let spawn: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
+        let start_m: [f64; 2] = get_place_m(&world, &spawn);
+        for console in world.consoles.iter().filter(|c| c.team == 1) {
+            let k: usize = console.pylon.expect("each console has its pylon");
+            let [u_m, v_m, _] = get_fermi_coordinates(world.structures[k].centre, world.r);
+            let gap_m: f64 = world.get_shapes(k)[0].half.x + GAP_TO_PYLON_M;
+            let mut player: VoxelPlayer =
+                VoxelPlayer::AtView(&world, start_m, [start_m[0] - 1.0, start_m[1]], None, 0.0);
+            let mut step_count: usize = 0;
+            let mut has_crossed: bool = false;
+            while !has_crossed || get_place_m(&world, &player)[0] > u_m + TURN_BEFORE_PYLON_M {
+                assert!(
+                    step_count < MAX_ROUND_STEP_COUNT,
+                    "never crossed to console {}",
+                    console.material
+                );
+                walk(&world, &mut player, 1);
+                has_crossed |= get_place_m(&world, &player)[0] > 0.0;
+                step_count += 1;
+            }
+            player =
+                VoxelPlayer::AtView(&world, get_place_m(&world, &player), [u_m, v_m], None, 0.0);
+            while {
+                let [u_now_m, v_now_m] = get_place_m(&world, &player);
+                (u_now_m - u_m).hypot(v_now_m - v_m) > gap_m
+            } {
+                assert!(
+                    step_count < MAX_ROUND_STEP_COUNT,
+                    "never reached console {}",
+                    console.material
+                );
+                walk(&world, &mut player, 1);
+                step_count += 1;
+            }
+            assert!(
+                step_count as f64 * STEP_S * world.player.walk_m_per_s
+                    < periods_m[0] / 2.0 + periods_m[1] / 2.0
+            );
+            let aimed: Option<u8> = world.find_aimed_material(
+                VoxelPlayer::AtView(&world, get_place_m(&world, &player), [u_m, v_m], None, 0.0)
+                    .get_camera_frame(&world),
+                world.settings.consoles.reach_m,
+            );
+            assert_eq!(aimed, Some(console.material));
         }
     }
 
@@ -4146,11 +4326,11 @@ mod play_tests {
                     "from {start_m:?}, came out at ({u_m}, {v_m})"
                 );
                 let exit_m: [f64; 2] = [u_m, v_m];
-                walk(&world, &mut player, WALK_THROUGH_STEP_COUNT);
+                let after_messages: Vec<String> = walk(&world, &mut player, WALK_ON_STEP_COUNT);
                 let [u_end_m, v_end_m] = get_place_m(&world, &player);
                 assert!(
                     (u_end_m - exit_m[0]).hypot(v_end_m - exit_m[1]) > MIN_WALK_ON_M,
-                    "from {start_m:?}, stuck at ({u_end_m}, {v_end_m}) after the throat"
+                    "from {start_m:?}, stuck at ({u_end_m}, {v_end_m}) after the throat: {after_messages:?}"
                 );
             }
         }
