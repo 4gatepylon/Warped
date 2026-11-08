@@ -384,7 +384,12 @@ impl VoxelFrame {
                     rows,
                     centre: to_f32(s.centre),
                     bound: [s.radius.cosh() as f32, 0.0, 0.0, 0.0],
-                    size: [s.first_shape as i32, s.shape_count as i32, 0, 0],
+                    size: [
+                        s.first_shape as i32,
+                        s.shape_count as i32,
+                        i32::from(s.is_dark),
+                        0,
+                    ],
                     scale: [r as f32, 0.0, 0.0, 0.0],
                 }
             })

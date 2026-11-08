@@ -76,6 +76,7 @@ use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
 
+use bend::Bend;
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use key_bindings::{Action, Control};
 use physics::{Input, LaserReport, Player};
@@ -3188,7 +3189,11 @@ impl Session {
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
-            let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
+            let (now_s, r, bend) = (
+                self.start.elapsed().as_secs_f64(),
+                voxel.world.r,
+                voxel.world.bend,
+            );
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
             self.dust_bursts.retain(|burst| !burst.is_over(now_s));
@@ -3197,7 +3202,7 @@ impl Session {
                 .iter()
                 .filter_map(|burst| burst.get_cloud(now_s))
                 .collect();
-            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r);
+            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r, bend);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
                 .iter()
@@ -3522,14 +3527,15 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r`. While the
-    /// trail of one of this player's own shots still reaches the muzzle, its beam starts at the
-    /// gun's tip as drawn now (`get_muzzle`), so it stays on the tip as the gun moves.
+    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r` under
+    /// the reality bend `bend`. While the trail of one of this player's own shots still reaches the
+    /// muzzle, its beam starts at the gun's tip as drawn now (`get_muzzle`), so it stays on the tip
+    /// as the gun moves.
     ///
-    /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
-    fn get_lit_beams(&self, r: f64) -> Vec<render_voxel::LaserBeam> {
+    /// Example: `let beams = self.get_lit_beams(voxel.world.r, voxel.world.bend);`
+    fn get_lit_beams(&self, r: f64, bend: Bend) -> Vec<render_voxel::LaserBeam> {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
-        let muzzle: Option<glam::DVec4> = self.get_muzzle(r);
+        let muzzle: Option<glam::DVec4> = self.get_muzzle(r, bend);
         self.tracers
             .iter()
             .map(|tracer| {
@@ -3556,16 +3562,17 @@ impl Session {
             .collect()
     }
 
-    /// `get_muzzle` gives where the tip of the gun in hand shows in the world, on a map of
-    /// curvature radius `r`: the wand's tip in camera space, moved toward the view's centre by the
-    /// aim zoom (which magnifies the scene but not the gun), or `None` with no gun in view.
+    /// `get_muzzle` gives where the tip of the gun in hand shows in the world (bent by `bend`, as
+    /// the beams are), on a map of curvature radius `r`: the wand's tip in camera space, moved
+    /// toward the view's centre by the aim zoom (which magnifies the scene but not the gun), or
+    /// `None` with no gun in view.
     ///
-    /// Example: `let muzzle = self.get_muzzle(voxel.world.r);`
-    fn get_muzzle(&self, r: f64) -> Option<glam::DVec4> {
+    /// Example: `let muzzle = self.get_muzzle(voxel.world.r, voxel.world.bend);`
+    fn get_muzzle(&self, r: f64, bend: Bend) -> Option<glam::DVec4> {
         let tip_m: glam::DVec3 = self.get_wand()?.get_tip_m().as_dvec3();
         let zoom: f64 = self.get_zoom();
         Some(
-            self.get_eye_frame()
+            bend.bend_frame(self.get_eye_frame())
                 * voxel_world::map_exp(
                     glam::DVec3::new(tip_m.x / zoom, tip_m.y / zoom, tip_m.z),
                     r,
@@ -3588,7 +3595,7 @@ impl Session {
         let (feet, beams): (DMat4, Vec<(Vec<voxel_world::BeamSegment>, u32)>) = match &self.voxel {
             Some(voxel) => (
                 voxel.player.get_feet_frame(&voxel.world),
-                self.get_lit_beams(voxel.world.r)
+                self.get_lit_beams(voxel.world.r, voxel.world.bend)
                     .into_iter()
                     .map(|beam| (beam.segments, beam.team))
                     .collect(),

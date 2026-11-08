@@ -120,7 +120,8 @@ const AVATAR_SHAPES: [Shape; 2] = [
 ];
 
 /// `VoxelStructure` is one structure: its frame (and inverse), its grid, where its cells start in
-/// the voxel bytes, and its bounding sphere (radius in curvature units).
+/// the voxel bytes, its bounding sphere (radius in curvature units), and whether its glowing
+/// shapes are dark (`is_dark`: a pylon whose console is off).
 #[derive(Clone)]
 pub struct VoxelStructure {
     pub name: String,
@@ -129,6 +130,7 @@ pub struct VoxelStructure {
     pub shape_count: usize,
     pub centre: DVec4,
     pub radius: f64,
+    pub is_dark: bool,
 }
 
 /// `VoxelWarp` is a black hole or a wormhole mouth: its frame, m and reach in curvature units,
@@ -174,6 +176,8 @@ pub struct Console {
     pub team: u32,
     color: [f32; 3],
     pulse: ConsolePulse,
+    pylon: Option<usize>,
+    lamp: Option<(usize, [f32; 3])>,
 }
 
 /// `ConsolePulse` is a console's pulse at `time_s`: how far through one pulse it is
@@ -267,6 +271,8 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
                 team: team as u32,
                 color: m.color,
                 pulse: ConsolePulse::Resting(),
+                pylon: None,
+                lamp: None,
             })
         })
         .collect();
@@ -549,6 +555,7 @@ fn make_structure(
         shape_count: shapes.len(),
         centre: frame * centre_local,
         radius: radius + BOUND_MARGIN_M / r,
+        is_dark: false,
     }
 }
 
@@ -735,7 +742,34 @@ impl VoxelWorld {
         };
         world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
+        world.find_console_pylons();
         Ok(world)
+    }
+
+    /// `find_console_pylons` gives each console its pylon, the structure with the console's
+    /// shape, and that pylon's lamp, the light nearest its centre within its bounding sphere, so
+    /// `light_consoles` can darken the whole pylon when its console is off.
+    ///
+    /// Example: `world.find_console_pylons();`
+    fn find_console_pylons(&mut self) {
+        for console in &mut self.consoles {
+            let pylon: Option<usize> = self.structures.iter().position(|s| {
+                self.shapes[s.first_shape..s.first_shape + s.shape_count]
+                    .iter()
+                    .any(|shape| shape.material == console.material)
+            });
+            console.pylon = pylon;
+            console.lamp = pylon.and_then(|k| {
+                let structure: &VoxelStructure = &self.structures[k];
+                self.lights
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &(x, color, _))| (i, color, get_distance(x, structure.centre)))
+                    .filter(|&(_, _, distance)| distance < structure.radius)
+                    .min_by(|a, b| a.2.total_cmp(&b.2))
+                    .map(|(i, color, _)| (i, color))
+            });
+        }
     }
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
@@ -955,7 +989,8 @@ impl VoxelWorld {
             console.pulse = console
                 .pulse
                 .advance(get_console_pulse_hz(disabling_fracs[i]), time_s);
-            let entry: [f32; 4] = if off_mask >> i & 1 == 1 {
+            let is_off: bool = off_mask >> i & 1 == 1;
+            let entry: [f32; 4] = if is_off {
                 let [r, g, b] = console.color.map(|c| c * CONSOLE_OFF_FRAC);
                 [r, g, b, 0.0]
             } else {
@@ -964,6 +999,16 @@ impl VoxelWorld {
                 [r, g, b, 1.0]
             };
             self.palette[usize::from(console.material)] = entry;
+            if let Some(k) = console.pylon {
+                self.structures[k].is_dark = is_off;
+            }
+            if let Some((light, color)) = console.lamp {
+                self.lights[light].1 = if is_off {
+                    color.map(|c| c * CONSOLE_OFF_FRAC)
+                } else {
+                    color
+                };
+            }
         }
     }
 
@@ -2211,6 +2256,7 @@ mod tests {
     //! | Target rate against the pulse's own | higher (reached at once), the same (kept), lower (eases down: barely after a frame, nearly there after a second, never below) | `the_pulse_eases_back_down` |
     //! | Rate while the light is watched | steady, ramping up over a whole hold, dropping when the hold stops (the light moves only as fast as the pulse, never jumps) | `the_light_never_jumps` |
     //! | Console | off (dark, unlit), on and not held (the normal pulse), on and held (its own faster pulse) | `consoles_pulse_by_their_own_progress` |
+    //! | Pylon of a console | console off (the whole pylon and its lamp dark), back on (lit again), another console's (untouched) | `a_pylon_goes_dark_with_its_console` |
     //! | Thrown pair | walked into (the walker comes out of the other mouth), shot into (the laser goes through, naming the mouth's warp), flashing (both mouths) | `a_thrown_pair_carries_walkers_and_lasers` |
     //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
     //! | Marker | inside a thrown mouth's reach (in its list, hit by a laser) | `a_marker_is_listed_and_hit` |
@@ -3126,6 +3172,36 @@ mod tests {
             level_frac = next_frac;
         }
         assert!(has_dropped);
+    }
+
+    #[test]
+    fn a_pylon_goes_dark_with_its_console() {
+        let mut world: VoxelWorld = load_lunar_surface();
+        let fracs: [f64; MAX_CONSOLE_COUNT] = [0.0; MAX_CONSOLE_COUNT];
+        let pylons: Vec<usize> = world
+            .consoles
+            .iter()
+            .map(|c| c.pylon.expect("a pylon"))
+            .collect();
+        let lamps: Vec<(usize, [f32; 3])> = world
+            .consoles
+            .iter()
+            .map(|c| c.lamp.expect("a lamp"))
+            .collect();
+        world.light_consoles(1 << OFF_CONSOLE, &fracs, STEP_S);
+        for (i, (&k, &(light, color))) in pylons.iter().zip(&lamps).enumerate() {
+            let is_off: bool = i == OFF_CONSOLE;
+            assert_eq!(world.structures[k].is_dark, is_off, "pylon of console {i}");
+            let expected: [f32; 3] = if is_off {
+                color.map(|c| c * CONSOLE_OFF_FRAC)
+            } else {
+                color
+            };
+            assert_eq!(world.lights[light].1, expected, "lamp of console {i}");
+        }
+        world.light_consoles(0, &fracs, 2.0 * STEP_S);
+        assert!(!world.structures[pylons[OFF_CONSOLE]].is_dark);
+        assert_eq!(world.lights[lamps[OFF_CONSOLE].0].1, lamps[OFF_CONSOLE].1);
     }
 
     #[test]

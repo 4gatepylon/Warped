@@ -215,6 +215,7 @@ constant float BEAM_HAZE_BRIGHTNESS = 0.45;
 constant float BEAM_HAZE_WHITENESS = 0.45;
 constant float BEAM_CORE_BRIGHTNESS = 1.6;
 constant float BEAM_CORE_WHITENESS = 0.9;
+constant float DARK_PYLON_GLOW_FRAC = 0.12;
 constant float BEAM_SPECKLE_STEPS = 1023.0;
 constant int THROWN_TINT_FIRST_BIT = 1;
 constant int THROWN_TINT_MASK = 3;
@@ -408,7 +409,8 @@ struct Shape {
 
 /**
  * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
- * radius, its first shape and shape count, and R.
+ * radius, its first shape and shape count and whether its glowing shapes are dark (1: a pylon whose console is off),
+ * and R.
  */
 struct VoxelStructure {
     float4 rows[4];
@@ -1284,6 +1286,7 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     if (m == u.mat_hull || m == u.mat_pad) albedo *= 1.0 - PANEL_SEAM_DARKEN * step(PANEL_SEAM_EDGE, max(fract(uv.x * PANEL_SEAMS), fract(uv.y * PANEL_SEAMS)));
     float texel = has_texture(scene, m) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
     albedo *= 1.0 + detail * (BLOCK_NOISE * (block - 0.5) + TEXEL_NOISE * (texel - 0.5));
+    if (glow > 0.5 && st.size.z != 0) { albedo *= DARK_PYLON_GLOW_FRAC; glow = 0.0; }
     if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM);
     Surface s = sample_surface(scene, m, albedo, g, u.curvature_radius_m / st.scale.x, dist_s, x, n, t, b, v);
     return light_surface(scene, s, x, n, v);
