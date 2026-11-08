@@ -1657,6 +1657,9 @@ struct Session {
     rifle_heat_frac: f64,
     is_overheated: bool,
     has_rifle_shot_hit: bool,
+    tracers: Vec<Tracer>,
+    was_firing: bool,
+    remote_firing_ids: Vec<u32>,
     rifle_shot_count: u64,
     recoil_frac: f64,
     gun_phase_rad: f64,
@@ -1700,6 +1703,66 @@ impl PackedFrame {
             PackedFrame::House(data) => FrameData::House(data),
             PackedFrame::Voxel(frame) => FrameData::Voxel(frame),
         }
+    }
+}
+
+/// `Tracer` is a fired laser drawn as a beam flying out along its path (`segments`, traced when it
+/// was fired, `length_m` long): its front leaves the muzzle at `fired_s` (seconds into the session)
+/// and moves at `speed_m_per_s`, each point stays lit for `trail_s` after the front passes it, and
+/// `spot` glows where it hit while the trail is there.
+struct Tracer {
+    segments: Vec<voxel_world::BeamSegment>,
+    length_m: f64,
+    spot: Option<glam::DVec4>,
+    team: u32,
+    fired_s: f64,
+    speed_m_per_s: f64,
+    trail_s: f64,
+}
+
+impl Tracer {
+    /// `New` makes a tracer for `shot`, fired at `fired_s` by a player of `team` with the rifle
+    /// (`is_rifle`) or the sniper, whose beam speed and trail come from `settings`.
+    ///
+    /// Example: `let tracer = Tracer::New(&shot, 1, 12.5, false, &settings, world.r);`
+    #[allow(non_snake_case)]
+    fn New(
+        shot: &voxel_world::Shot,
+        team: u32,
+        fired_s: f64,
+        is_rifle: bool,
+        settings: &GameSettings,
+        r: f64,
+    ) -> Tracer {
+        let (speed_m_per_s, trail_s) = if is_rifle {
+            (
+                settings.rifle.beam_speed_m_per_s,
+                settings.rifle.beam_trail_s,
+            )
+        } else {
+            (
+                settings.sniper.beam_speed_m_per_s,
+                settings.sniper.beam_trail_s,
+            )
+        };
+        Tracer {
+            segments: shot.segments.clone(),
+            length_m: shot.segments.iter().map(|s| s.length).sum::<f64>() * r,
+            spot: shot.spot,
+            team,
+            fired_s,
+            speed_m_per_s,
+            trail_s,
+        }
+    }
+
+    /// `get_lit_m` gives the lit stretch of the path at `now_s`, as meters from its start: from the
+    /// trail's end to the front.
+    ///
+    /// Example: `let (tail_m, head_m) = tracer.get_lit_m(13.0);`
+    fn get_lit_m(&self, now_s: f64) -> (f64, f64) {
+        let head_m: f64 = self.speed_m_per_s * (now_s - self.fired_s);
+        (head_m - self.speed_m_per_s * self.trail_s, head_m)
     }
 }
 
@@ -1835,6 +1898,9 @@ impl Session {
             rifle_heat_frac: 0.0,
             is_overheated: false,
             has_rifle_shot_hit: false,
+            tracers: Vec::new(),
+            was_firing: false,
+            remote_firing_ids: Vec::new(),
             rifle_shot_count: 0,
             recoil_frac: 0.0,
             gun_phase_rad: 0.0,
@@ -2013,6 +2079,7 @@ impl Session {
             && let Err(error) = multiplayer.client.send_state(
                 eye,
                 is_firing,
+                self.gun == Gun::Rifle,
                 multiplayer.disabling.map(|(console, _)| console),
             )
         {
@@ -2337,14 +2404,56 @@ impl Session {
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
             let team: u32 = voxel.spawn_index as u32 % 2;
+            let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
+            self.tracers
+                .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
+            let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> = self
+                .tracers
+                .iter()
+                .map(|tracer| {
+                    let (tail_m, head_m) = tracer.get_lit_m(now_s);
+                    (
+                        voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m),
+                        tracer.team,
+                    )
+                })
+                .collect();
+            let spot: Option<(glam::DVec4, u32)> = self
+                .tracers
+                .iter()
+                .rev()
+                .find(|tracer| tracer.get_lit_m(now_s).1 >= tracer.length_m)
+                .and_then(|tracer| tracer.spot.map(|x| (x, tracer.team)));
             let view: multiplayer::SharedVoxelView = multiplayer::pack_shared_voxel_view(
                 &voxel.world,
                 camera,
                 is_firing,
                 team,
                 &players,
+                self.route.is_empty().then_some(multiplayer::Tracers {
+                    beams: &beams,
+                    spot,
+                }),
                 render_px,
             );
+            if is_firing
+                && !self.was_firing
+                && let Some(shot) = &view.shot
+            {
+                let is_rifle: bool = self.gun == Gun::Rifle;
+                let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                self.tracers.push(tracer);
+            }
+            self.was_firing = is_firing;
+            for (id, shot) in &view.other_shots {
+                if !self.remote_firing_ids.contains(id) {
+                    let is_rifle: bool = players.iter().any(|p| p.id == *id && p.is_rifle);
+                    let tracer =
+                        Tracer::New(shot, net::get_team(*id), now_s, is_rifle, &self.settings, r);
+                    self.tracers.push(tracer);
+                }
+            }
+            self.remote_firing_ids = view.other_shots.iter().map(|(id, _)| *id).collect();
             self.laser = multiplayer::describe_voxel_laser(&voxel.world, &view);
             if let Some(victim_id) = view.hit_player_id
                 && let Some(hits_to_kill) = take_hit_weight(

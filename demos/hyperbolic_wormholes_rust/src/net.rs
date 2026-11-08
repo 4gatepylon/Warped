@@ -39,6 +39,7 @@ pub const MAX_PLAYER_COUNT: usize = 8;
 pub const MAX_CONSOLE_COUNT: usize = 32;
 pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
 const NO_CONSOLE: u8 = u8::MAX;
+const RIFLE_BIT: u8 = 1;
 const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
 const DISCOVERY_PORT: u16 = 47_801;
@@ -97,13 +98,14 @@ pub fn get_team(id: u32) -> u32 {
     id % TEAM_NAMES.len() as u32
 }
 
-/// `RemotePlayer` is another player as the last snapshot gave them, with the console they hold
-/// `E` on, if any.
+/// `RemotePlayer` is another player as the last snapshot gave them: their eye frame, whether their
+/// laser is on and from which gun, and the console they hold `E` on, if any.
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
     pub frame: DMat4,
     pub is_laser_on: bool,
+    pub is_rifle: bool,
     pub disabling_console: Option<u8>,
 }
 
@@ -154,7 +156,8 @@ impl Message {
         for value in player.frame.to_cols_array() {
             self.0.extend_from_slice(&value.to_le_bytes());
         }
-        self.0.push(u8::from(player.is_laser_on));
+        self.0
+            .push(u8::from(player.is_laser_on) | u8::from(player.is_rifle) << RIFLE_BIT);
         self.0.push(player.disabling_console.unwrap_or(NO_CONSOLE));
         self
     }
@@ -205,12 +208,13 @@ impl Reader<'_> {
         for value in &mut values {
             *value = f64::from_le_bytes(self.take(BYTES_PER_FLOAT)?.try_into().ok()?);
         }
-        let is_laser_on: bool = self.take(1)?[0] != 0;
+        let laser: u8 = self.take(1)?[0];
         let console: u8 = self.take(1)?[0];
         Some(RemotePlayer {
             id,
             frame: DMat4::from_cols_array(&values),
-            is_laser_on,
+            is_laser_on: laser & 1 == 1,
+            is_rifle: laser >> RIFLE_BIT & 1 == 1,
             disabling_console: (console != NO_CONSOLE).then_some(console),
         })
     }
@@ -281,6 +285,7 @@ impl Server {
                                 id,
                                 frame: DMat4::IDENTITY,
                                 is_laser_on: false,
+                                is_rifle: false,
                                 disabling_console: None,
                             },
                             address,
@@ -672,14 +677,15 @@ impl Client {
         Ok(events)
     }
 
-    /// `send_state` sends this player's eye frame, laser switch and the console they hold `E` on,
-    /// once joined.
+    /// `send_state` sends this player's eye frame, laser switch, whether the gun is the rifle, and
+    /// the console they hold `E` on, once joined.
     ///
-    /// Example: `client.send_state(player.frame, is_laser_on, None)?;`
+    /// Example: `client.send_state(player.frame, is_laser_on, false, None)?;`
     pub fn send_state(
         &mut self,
         frame: DMat4,
         is_laser_on: bool,
+        is_rifle: bool,
         disabling_console: Option<u8>,
     ) -> Result<()> {
         if let Some(id) = self.id {
@@ -687,6 +693,7 @@ impl Client {
                 id,
                 frame,
                 is_laser_on,
+                is_rifle,
                 disabling_console,
             };
             self.send(&Message::New(Kind::State).player(&player))?;
@@ -793,6 +800,7 @@ mod tests {
             id,
             frame: DMat4::IDENTITY,
             is_laser_on: false,
+            is_rifle: false,
             disabling_console: Some(console),
         };
         server
@@ -821,6 +829,7 @@ mod tests {
             id: 7,
             frame,
             is_laser_on: true,
+            is_rifle: true,
             disabling_console: Some(3),
         };
         let game: GameState = GameState {
@@ -839,9 +848,10 @@ mod tests {
                 player.id,
                 player.frame,
                 player.is_laser_on,
+                player.is_rifle,
                 player.disabling_console
             ),
-            (7, frame, true, Some(3))
+            (7, frame, true, true, Some(3))
         );
         assert_eq!(reader.game(), Some(game));
     }
@@ -852,6 +862,7 @@ mod tests {
             id: 7,
             frame: DMat4::IDENTITY,
             is_laser_on: false,
+            is_rifle: false,
             disabling_console: None,
         };
         let message: Message = Message::New(Kind::State).player(&player);

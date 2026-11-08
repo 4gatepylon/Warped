@@ -62,22 +62,26 @@ pub struct HeadBobSettings {
     pub fade_s: f64,
 }
 
-/// `SniperSettings` is gun 1, the laser wand: how long a click's shot lasts and how many hits
-/// eliminate a player.
+/// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how many hits
+/// eliminate a player, and how its beam flies (speed, and how long each point stays lit).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SniperSettings {
     pub shot_s: f64,
     pub hits_to_eliminate: u8,
+    pub beam_speed_m_per_s: f64,
+    pub beam_trail_s: f64,
 }
 
-/// `RifleSettings` is gun 2: its fire rate and beam pulse, overheating and cooling, the hits that
-/// eliminate a player, and each shot's recoil.
+/// `RifleSettings` is gun 2: its fire rate, how long a shot hits, how its beam flies, overheating
+/// and cooling, the hits that eliminate a player, and each shot's recoil.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RifleSettings {
     pub shots_per_s: f64,
     pub pulse_s: f64,
+    pub beam_speed_m_per_s: f64,
+    pub beam_trail_s: f64,
     pub shots_until_overheat: u32,
     pub cool_down_s: f64,
     pub head_hits_to_eliminate: u8,
