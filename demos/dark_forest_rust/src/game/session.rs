@@ -55,6 +55,19 @@ pub struct Controls {
     pub weapon: WeaponInput,
 }
 
+/// `RobotHold` holds robot 0 for pictures and benchmarks: it stands at `feet_m` facing `yaw_rad`,
+/// doesn't think or shoot, and walks straight ahead at `speed_m_s` (through any mouth it enters),
+/// starting again from `feet_m` every `ROBOT_HOLD_RESTART_S`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RobotHold {
+    pub feet_m: Vec3,
+    pub yaw_rad: f32,
+    pub speed_m_s: f32,
+}
+
+/// `ROBOT_HOLD_RESTART_S` is how long a held robot walks before it starts again from its pose.
+const ROBOT_HOLD_RESTART_S: f32 = 10.0;
+
 /// `SimParticle` is a simulated particle.
 #[derive(Clone, Copy, Debug)]
 struct SimParticle {
@@ -160,6 +173,8 @@ pub struct Session {
     pub winner: Option<u32>,
     pub laps_done: u32,
     pub is_trigger_down: bool,
+    robot_hold: Option<RobotHold>,
+    robot_hold_s: f32,
 }
 
 /// `RemoteBot` is another player of a network game, drawn as a robot in their team's colour.
@@ -244,6 +259,23 @@ impl Session {
             winner: None,
             laps_done: 0,
             is_trigger_down: false,
+            robot_hold: None,
+            robot_hold_s: 0.0,
+        }
+    }
+
+    /// `set_robot_hold` holds robot 0 from the next update on (`None` lets it think again); a new
+    /// hold starts at its pose.
+    ///
+    /// Example: `session.set_robot_hold(Some(hold));`
+    pub fn set_robot_hold(&mut self, hold: Option<RobotHold>) {
+        assert!(
+            hold.is_none() || !self.bots.is_empty(),
+            "a robot hold needs at least one robot"
+        );
+        if hold != self.robot_hold {
+            self.robot_hold = hold;
+            self.robot_hold_s = ROBOT_HOLD_RESTART_S;
         }
     }
 
@@ -662,11 +694,22 @@ impl Session {
             is_player_alive: self.player.is_alive(),
             is_player_crouched: self.player.height_m < 1.5,
         };
+        let held_count: usize = usize::from(self.robot_hold.is_some());
         let shots: Vec<BotShot> = self
             .bots
             .iter_mut()
+            .skip(held_count)
             .filter_map(|bot| bot.update(&context, dt_s))
             .collect();
+        if let Some(hold) = self.robot_hold {
+            self.robot_hold_s += dt_s;
+            if self.robot_hold_s > ROBOT_HOLD_RESTART_S {
+                self.robot_hold_s = 0.0;
+                self.bots[0] = Bot::new(hold.feet_m, 0);
+                self.bots[0].yaw_rad = hold.yaw_rad;
+            }
+            self.bots[0].walk_ahead(hold.speed_m_s, dt_s);
+        }
         for shot in shots {
             self.apply_bot_shot(shot, scene, audio);
         }

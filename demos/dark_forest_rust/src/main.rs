@@ -44,7 +44,7 @@ use sdl3::keyboard::Scancode;
 
 use game::audio::Audio;
 use game::player::{Player, PlayerInput};
-use game::session::{Controls, FrameData, Session};
+use game::session::{Controls, FrameData, RobotHold, Session};
 use game::weapon::WeaponInput;
 use game::world::Arena;
 use match_play::{MatchOptions, MatchPlay};
@@ -74,17 +74,36 @@ enum CameraView {
     Lookout,
     Treehouse,
     Firing,
+    Gate,
+    Lift,
 }
 
 impl CameraView {
     /// `ALL` is every view, in `--bench-views` order.
-    const ALL: [CameraView; 5] = [
+    const ALL: [CameraView; 7] = [
         CameraView::Spawn,
         CameraView::Bridge,
         CameraView::Lookout,
         CameraView::Treehouse,
         CameraView::Firing,
+        CameraView::Gate,
+        CameraView::Lift,
     ];
+
+    /// `robot_hold` is where the view holds robot 0, if it has robots: just beyond the partner of
+    /// the mouth that `Gate` and `Lift` look into, facing back through it.
+    fn robot_hold(self) -> Option<RobotHold> {
+        let feet_m: Vec3 = match self {
+            CameraView::Gate => Vec3::new(2.0, 0.0, -30.0),
+            CameraView::Lift => Vec3::new(10.3, forest_layout::DECK_TOP_M, 35.5),
+            _ => return None,
+        };
+        Some(RobotHold {
+            feet_m,
+            yaw_rad: 0.0,
+            speed_m_s: 0.0,
+        })
+    }
 
     /// `pose` returns the view's feet position, yaw and pitch (yaw 0 looks along -z, towards
     /// blue's base from red's).
@@ -99,6 +118,8 @@ impl CameraView {
                 -0.05,
             ),
             CameraView::Firing => (Vec3::new(-4.0, 0.0, 20.0), 0.1, 0.02),
+            CameraView::Gate => (Vec3::new(-2.0, 0.0, 30.5), 0.0, 0.0),
+            CameraView::Lift => (Vec3::new(-4.0, 0.0, 40.0), 0.0, 0.05),
         }
     }
 }
@@ -225,6 +246,16 @@ struct Args {
     /// How far from the camera the sun casts shadows, in meters.
     #[arg(long, default_value_t = 110.0)]
     shadow_distance_m: f32,
+    /// Hold robot 0 here (it doesn't think or shoot): feet x,y,z in meters and yaw in radians.
+    #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
+    robot_pose: Option<Vec<f32>>,
+    /// With --robot-pose, the held robot walks straight ahead at this speed (through mouths) and
+    /// starts again from its pose every 10 s.
+    #[arg(long, default_value_t = 0.0)]
+    robot_walk_m_per_s: f32,
+    /// Hold the trigger (and reload when the magazine is empty), for pictures of lasers.
+    #[arg(long)]
+    hold_trigger: bool,
     /// Leave out the tree canopies (for pictures from above).
     #[arg(long)]
     hide_canopy: bool,
@@ -453,6 +484,15 @@ fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
     if !(0.0..=3600.0).contains(&args.benchmark_seconds) {
         return Err(format!(
             "--benchmark-seconds must be in 0..=3600; {example}"
+        ));
+    }
+    if args
+        .robot_pose
+        .as_ref()
+        .is_some_and(|pose| pose.len() != 4 || args.bot_count == 0)
+    {
+        return Err(format!(
+            "--robot-pose takes x,y,z,yaw and needs --bot-count 1 or more; {example} --robot-pose 2,0,-30,0"
         ));
     }
     if !asset_manifest::hdri_path(assets_dir).exists() {
@@ -1030,6 +1070,17 @@ fn main() {
             session.player.is_on_ground = true;
             session.is_autopilot = false;
         }
+        let robot_hold: Option<RobotHold> = match &args.robot_pose {
+            Some(pose) => Some(RobotHold {
+                feet_m: Vec3::new(pose[0], pose[1], pose[2]),
+                yaw_rad: pose[3],
+                speed_m_s: args.robot_walk_m_per_s,
+            }),
+            None => camera_view.and_then(CameraView::robot_hold),
+        };
+        if !session.bots.is_empty() {
+            session.set_robot_hold(robot_hold);
+        }
         let controls: Controls = match camera_view {
             Some(view) => {
                 let (feet_m, yaw_rad, pitch_rad) = view.pose();
@@ -1048,6 +1099,18 @@ fn main() {
                 }
             }
             None => controls,
+        };
+        let controls: Controls = if args.hold_trigger {
+            Controls {
+                weapon: WeaponInput {
+                    is_trigger_held: true,
+                    is_reload_pressed: session.weapon.ammo == 0,
+                    ..controls.weapon
+                },
+                ..controls
+            }
+        } else {
+            controls
         };
         let sim_start: Instant = Instant::now();
         let waypoint_before: usize = session.autopilot_waypoint;
