@@ -1,7 +1,8 @@
 //! `asset_manifest` lists every downloaded asset of the demo, where it comes from, and where it is
 //! saved under `.assets/`, so that `download-assets` and the game agree on paths.
 //!
-//! Interface: `ASSETS_DIR_NAME`, `HDRI`, `SURFACE_TEXTURES`, `PROP_MODELS`, `RIFLE_MODEL`,
+//! Interface: `ASSETS_DIR_NAME`, `HDRI`, `SURFACE_TEXTURES`, `LUNAR_SURFACE_TEXTURES`,
+//! `PROP_MODELS`, `RIFLE_MODEL`,
 //! `ROBOT_MODEL`, `PolyHavenModel`, `PolyHavenTexture`, and the `*_path` functions.
 //!
 //! Example: `let path = hdri_path(&assets_dir);`
@@ -81,6 +82,19 @@ pub const SURFACE_TEXTURES: [PolyHavenTexture; 8] = [
     },
     PolyHavenTexture {
         id: "concrete_pavement_02",
+        resolution: "2k",
+    },
+];
+
+/// `LUNAR_SURFACE_TEXTURES` are the regolith sets of `../hyperbolic_wormholes_rust/`'s Lunar
+/// Surface ground (scans of about 3.1 m and 3.2 m of ground); the FPS demo doesn't load them.
+pub const LUNAR_SURFACE_TEXTURES: [PolyHavenTexture; 2] = [
+    PolyHavenTexture {
+        id: "moon_01",
+        resolution: "2k",
+    },
+    PolyHavenTexture {
+        id: "moon_meteor_02",
         resolution: "2k",
     },
 ];

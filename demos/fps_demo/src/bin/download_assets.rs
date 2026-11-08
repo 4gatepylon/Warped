@@ -23,8 +23,9 @@ use clap::Parser;
 use serde_json::Value;
 
 use asset_manifest::{
-    HDRI, POLY_HAVEN_FILES_API_URL, PROP_MODELS, PolyHavenModel, RIFLE_MODEL, ROBOT_MODEL,
-    SKETCHFAB_DOWNLOAD_API_URL, SKETCHFAB_MODELS, SURFACE_TEXTURES, SketchfabModel,
+    HDRI, LUNAR_SURFACE_TEXTURES, POLY_HAVEN_FILES_API_URL, PROP_MODELS, PolyHavenModel,
+    RIFLE_MODEL, ROBOT_MODEL, SKETCHFAB_DOWNLOAD_API_URL, SKETCHFAB_MODELS, SURFACE_TEXTURES,
+    SketchfabModel,
 };
 
 const USER_AGENT: &str = "warped-fps-demo-asset-downloader";
@@ -114,7 +115,7 @@ fn plan_downloads(assets_dir: &Path) -> Vec<PlannedFile> {
         &hdri_files["hdri"][HDRI.resolution]["hdr"],
         asset_manifest::hdri_path(assets_dir),
     ));
-    for texture in &SURFACE_TEXTURES {
+    for texture in SURFACE_TEXTURES.iter().chain(&LUNAR_SURFACE_TEXTURES) {
         let files: Value = fetch_json(&format!("{POLY_HAVEN_FILES_API_URL}/{}", texture.id));
         for (api_name, map_name) in TEXTURE_MAP_API_NAMES {
             planned_files.push(plan_file(
