@@ -2,7 +2,7 @@
 
 The Rust demo's cloud deploy on Google Cloud, in Terraform, so players can play over the internet (W-42): one small
 VM runs a game server for each line of [`games.txt`](games.txt), protected by the game's password, and a public bucket
-serves the download page (W-90).
+serves the download page (W-99).
 
 ## Set up once
 
