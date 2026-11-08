@@ -778,6 +778,22 @@
 - **Rationale:** you suggested special-casing far-off tracers, keeping gameplay the same when players shoot each
   other.
 
+### D67. Crouching, and shooting only standing still or crouched
+
+- **Choice:**
+  - **Crouching:** holding `Ctrl` (either one) lowers the eye to 60% of its standing height over 0.15 s and moves the player at
+    half walking speed, with no sprinting. The numbers are in `game_settings.yaml`'s `movement`.
+  - **Shooting:** a player can shoot only standing still or crouched (walking crouched included). Walking
+    upright, running and jumping stop a shot, as running already did.
+  - **Seen by others:** avatars hang the standing eye height below the eye, so a crouched player's box sinks
+    into the floor by the drop. They look shorter and their head moves down with them.
+  - **The house:** it has no crouch, so walking there stops shooting.
+- **Alternatives:** `C` to crouch (my first pick, as on a Mac `Ctrl`+click can mean a right-click; but SDL hands
+  the game `Ctrl`+click as a left click unless its `SDL_HINT_MAC_CTRL_CLICK_EMULATE_RIGHT_CLICK` hint is set, and
+  you asked for `Ctrl`); a lower collision body when crouched (to fit under things; nothing on the map needs it yet).
+- **Rationale:** you asked for crouching that slows walking, for shooting while crouched, and for no shooting while
+  walking.
+
 
 ## Baselines
 

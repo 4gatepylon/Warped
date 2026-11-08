@@ -17,6 +17,9 @@ movement:
   sprint_speed_per_map_speed: 2.0  # Sprinting speed, times the map's (Lunar Surface: 9 m/s).
   jump_height_m: 1.25  # How high a jump rises. Blocks are 1 m tall.
   jump_time_per_map_jump_time: 0.3333333333333333  # Time in the air, times the map's (1.73 s); sets gravity.
+  crouch_speed_frac: 0.5  # Speed while crouching (holding Ctrl), as a fraction of walking speed.
+  crouch_eye_height_frac: 0.6  # Eye height while crouching, as a fraction of standing eye height.
+  crouch_s: 0.15  # Seconds it takes to crouch down or stand up.
 
 sprint_energy:
   drain_s: 7.5  # Seconds of sprinting that empty a full bar.

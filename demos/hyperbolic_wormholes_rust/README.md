@@ -17,7 +17,8 @@ make run-demo RENDERER=cpu
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
   you through.
-- Click (once the mouse is captured) to fire a laser shot for a quarter of a second; not while running, nor in the air on Lunar Surface.
+- Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
+  `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
   eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots.
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
