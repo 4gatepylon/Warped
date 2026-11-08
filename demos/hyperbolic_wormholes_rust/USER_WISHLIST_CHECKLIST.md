@@ -11,8 +11,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
-  (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
 - [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
@@ -119,6 +117,7 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
   be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
   screenshots before it merged ("dust polyhedra looks good plz merge"). #234.
