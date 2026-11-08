@@ -40,3 +40,18 @@ Cargo writes to `.build/` (`make clean` removes it); test runs and benchmarks wr
 The messages between the window and the server are specified in [`common/protocol/`](../common/protocol/README.md),
 including how a server admits only the players who know its password
 ([`authentication.md`](../common/protocol/authentication.md)).
+
+## Security
+
+From step C1 of the plan, every game needs a generated password, and all traffic between the window and the server
+is encrypted (a Noise handshake, then ChaCha20-Poly1305). The case for that design, its assumptions and the
+questions for a security review are in [`common/protocol/security_case.md`](../common/protocol/security_case.md).
+
+Known limitations (the security case's section 7 lists them all):
+
+- **`snow` has had no formal audit.** The encryption uses the `snow` library, the most used Rust implementation of
+  Noise, whose own README warns that it hasn't been audited. Its ciphers come from widely used RustCrypto and dalek
+  crates. The user accepted this on 2026-11-08.
+- **One password per game, shared by everyone in it**, so any player could impersonate the server to the others,
+  and a removed player keeps access until the password is changed.
+- **Before step C1** the game uses the demo's v1 scheme: a password check without encryption.

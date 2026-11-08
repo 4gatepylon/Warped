@@ -4,6 +4,8 @@ The messages between the game window (`warped`) and the game server (`warped-ser
 
 - [`authentication.md`](authentication.md): how a server lets in only the players who know its password. It's
   decided, so the demo, the game, the Mac app and the cloud deployment all build the same bytes.
+- [`security_case.md`](security_case.md): why that design is secure enough, under which assumptions, with its
+  known limitations and the questions for a security review.
 - **Every other message:** single UDP datagrams in little-endian layouts, written and read by
   `demos/hyperbolic_wormholes_rust/src/net.rs`, whose docstrings are the specification until the game's copy is
   written up here.

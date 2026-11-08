@@ -2,7 +2,9 @@
 
 How a game server lets in only the players who know its password, and how every datagram between a window and the
 server is encrypted. Every implementation follows this page (the demo, the game in `game/`, the Mac app, the cloud
-deployment); change it only together with the code, and raise the protocol version when the bytes change.
+deployment); change it only together with the code, and raise the protocol version when the bytes change. Why this
+design is secure enough, and what it doesn't protect, is argued in [`security_case.md`](security_case.md), which
+changes with this page.
 
 There are two versions:
 
