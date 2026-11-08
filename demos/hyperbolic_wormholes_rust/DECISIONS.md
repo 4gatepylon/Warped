@@ -733,6 +733,23 @@
 - **Rationale:** you asked for a health bar so players know they were hit, and for the health, ammo and energy
   bars to be discrete.
 
+### D64. Beams stop being drawn past the map
+
+- **Choice:** a beam is drawn only up to where it first gets 4 curvature radii (160 m on Lunar Surface) from the
+  map's origin; the map lies within about 3.2.
+  - **Cause:** a shot into the sky flies on to 480 m, where its points' world coordinates reach 10⁵ (they grow as
+    cosh of the distance). The shader works out each pixel's nearness to a beam in single precision, and at that
+    size the maths turns to noise. Every sky pixel within reach of the far part of the beam got a noisy glow in the
+    team's colour, the pink blob you saw.
+  - **Before and after tracers:** before them, the far part came with the whole beam for a 0.06–0.25 s shot, the
+    flashing. Tracers (D61) drew the far stretch alone for about 2 s while it flew outward, which made it bloom.
+  - **Reproduction:** a sky shot's 300–312 m stretch drew a large noisy pink disk; with this change it draws
+    nothing, and the 100 m stretch and the whole beam look as before.
+- **Alternatives:** double precision in the shader (much slower on Apple GPUs); working out each beam relative to
+  the camera instead of the map's origin (a larger change to the shader).
+- **Rationale:** you found that shooting into the sky, and at the black hole's edge, flooded the sky with
+  flickering pink noise.
+
 
 ## Baselines
 

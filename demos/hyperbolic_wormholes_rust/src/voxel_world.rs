@@ -70,6 +70,8 @@ const LASER_MAX_ITERATIONS: usize = 4000;
 const LASER_MUZZLE_M: f64 = 3.0;
 pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
 const BEAM_TOLERANCE_M: f64 = 0.02;
+const MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS: f64 = 4.0;
+const BEAM_CLIP_BISECTION_COUNT: usize = 40;
 pub const LOOK_RAD_PER_PX: f64 = 0.0025;
 const MAX_PITCH_RAD: f64 = 1.55;
 const TINY: f64 = 1e-12;
@@ -231,6 +233,42 @@ pub fn clip_beam(segments: &[BeamSegment], r: f64, from_m: f64, to_m: f64) -> Ve
         start_m += length_m;
     }
     clipped
+}
+
+/// `clip_beam_to_map` gives a beam up to where it first gets farther than
+/// `MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS` curvature radii from the map's origin. Past
+/// there, out over the sky, the shader's single-precision maths of a beam's glow turns to noise
+/// (coordinates grow as cosh of that distance) that floods the sky; the map lies well inside.
+///
+/// Example: `let drawn = clip_beam_to_map(&shot.segments);`
+pub fn clip_beam_to_map(segments: &[BeamSegment]) -> Vec<BeamSegment> {
+    let max_w: f64 = MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS.cosh();
+    let mut drawn: Vec<BeamSegment> = Vec::new();
+    for segment in segments {
+        let get_w = |s: f64| geodesic_point(segment.a, segment.b, s).w;
+        if get_w(0.0) > max_w {
+            break;
+        }
+        if get_w(segment.length) <= max_w {
+            drawn.push(*segment);
+            continue;
+        }
+        let (mut lo, mut hi) = (0.0, segment.length);
+        for _ in 0..BEAM_CLIP_BISECTION_COUNT {
+            let mid: f64 = (lo + hi) / 2.0;
+            if get_w(mid) > max_w {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        drawn.push(BeamSegment {
+            length: lo,
+            ..*segment
+        });
+        break;
+    }
+    drawn
 }
 
 /// `normalize_minkowski` scales a vector to unit Minkowski length (either sign).
@@ -1507,6 +1545,7 @@ mod tests {
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Players spawning | up to the player limit, and a late id whose own slot is next to player 1's (it moves on) | `players_spawn_apart` |
+    //! | Beam drawn | inside the map (whole), out into the sky (stops 4 curvature radii from the origin) | `beams_into_the_sky_stop_near_the_map` |
     //! | Beam clipped to | its middle (through the wormhole), before its start, past its end | `a_clipped_beam_keeps_its_middle` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
@@ -1534,6 +1573,7 @@ mod tests {
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
     const EMPTY_SPRINT_STEP_COUNT: usize = 10;
     const FAR_ID_NEAR_ONE: u32 = 35;
+    const SKY_PITCH_RAD: f64 = 0.5;
     const MAX_JUMP_STEP_COUNT: usize = 120;
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
     const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
@@ -1695,6 +1735,28 @@ mod tests {
         assert!((length_m(&middle) - (to_m - from_m)).abs() < DISTANCE_TOLERANCE_M);
         assert!(clip_beam(&shot.segments, world.r, -2.0, -1.0).is_empty());
         assert!(clip_beam(&shot.segments, world.r, full_m + 1.0, full_m + 2.0).is_empty());
+    }
+
+    #[test]
+    fn beams_into_the_sky_stop_near_the_map() {
+        let world: VoxelWorld = load_lunar_surface();
+        let into_wormhole: Shot = world.trace_laser(
+            VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0)
+                .get_camera_frame(&world),
+        );
+        assert_eq!(
+            clip_beam_to_map(&into_wormhole.segments).len(),
+            into_wormhole.segments.len()
+        );
+        let into_sky: Shot = world.trace_laser(
+            VoxelPlayer::AtView(&world, [-107.0, 0.0], [0.0, 0.0], None, SKY_PITCH_RAD)
+                .get_camera_frame(&world),
+        );
+        let max_w: f64 = MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS.cosh();
+        let drawn: Vec<BeamSegment> = clip_beam_to_map(&into_sky.segments);
+        let end: &BeamSegment = drawn.last().expect("the beam starts inside the map");
+        let end_w: f64 = geodesic_point(end.a, end.b, end.length).w;
+        assert!(into_sky.hit_structure.is_none() && end_w <= max_w && end_w > max_w * 0.99);
     }
 
     #[test]

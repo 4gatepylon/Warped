@@ -25,7 +25,7 @@ use crate::render_metal::{
     encode_adaptive_sampling, make_pipeline,
 };
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
-use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld};
+use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld, clip_beam_to_map};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -160,7 +160,8 @@ fn to_columns(m: DMat4) -> [[f32; 4]; 4] {
 
 impl VoxelFrame {
     /// `Build` packs `world` seen from `camera` at a render size, with laser segments of each team
-    /// (`beams`: segments and team, 0 blue or 1 red) and an optional laser spot.
+    /// (`beams`: segments and team, 0 blue or 1 red; drawn as far as `clip_beam_to_map` allows)
+    /// and an optional laser spot.
     ///
     /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, (1280, 800));`
     #[allow(non_snake_case)]
@@ -244,11 +245,13 @@ impl VoxelFrame {
         let gpu_beams: Vec<GpuBeam> = beams
             .iter()
             .flat_map(|(segments, team)| {
-                segments.iter().map(move |s| GpuBeam {
-                    a: to_f32(s.a),
-                    b: to_f32(s.b),
-                    info: [s.length as f32, 0.0, BEAM_BRIGHTNESS, *team as f32],
-                })
+                clip_beam_to_map(segments)
+                    .into_iter()
+                    .map(move |s| GpuBeam {
+                        a: to_f32(s.a),
+                        b: to_f32(s.b),
+                        info: [s.length as f32, 0.0, BEAM_BRIGHTNESS, *team as f32],
+                    })
             })
             .collect();
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
