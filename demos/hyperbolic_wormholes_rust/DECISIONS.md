@@ -750,6 +750,20 @@
 - **Rationale:** you found that shooting into the sky, and at the black hole's edge, flooded the sky with
   flickering pink noise.
 
+### D65. What a hit feels like
+
+- **Choice:**
+  - **Trigger:** when a snapshot shows this player's health lower than before (D63), the window plays the hit.
+  - **Slowdown:** the player moves at half speed for 1 s (on voxel maps; the house's walking has no slowdown).
+  - **Screen:** the edges turn red (60% at the corners), blur over 6 px (an 8-tap ring), and the whole picture
+    shakes up to 6 px in a new direction each frame. All of it fades over 0.6 s, and the red and blur draw back
+    toward the corners as it fades. The HUD and the wand stay sharp.
+  - **Settings:** all six numbers are under `when_hit` in `game_settings.yaml`.
+- **Alternatives:** a hit message from the server (it could be lost, and health already arrives every snapshot);
+  blurring with a separate pass (more GPU time for an effect that lasts half a second).
+- **Rationale:** you asked that a player who is hit is slowed (set in the YAML), sees red and a blur come in from
+  the edges, and feels the screen shake.
+
 
 ## Baselines
 

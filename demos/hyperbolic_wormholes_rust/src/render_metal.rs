@@ -47,14 +47,26 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
 /// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
-/// (the HUD's bars), the player's wand, and how much of the previous frame's scene to blend into
-/// this one's (motion blur; 0 for none).
+/// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
+/// this one's (motion blur; 0 for none), and what a recent hit does to the scene.
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
     pub rects: &'a [OverlayRect],
     pub wand: Option<OverlayWand>,
     pub blur_frac: f32,
+    pub hit: HitEffect,
+}
+
+/// `HitEffect` is what a recent hit does to the scene (the shader's `read_hit_scene`): how much of
+/// the effect is left (1 just after the hit, 0 for none), how red the edges turn, how wide their
+/// blur is and how far the picture is shifted this frame.
+#[derive(Clone, Copy, Default)]
+pub struct HitEffect {
+    pub strength_frac: f32,
+    pub red_frac: f32,
+    pub blur_px: f32,
+    pub shake_px: [f32; 2],
 }
 
 /// `OverlayWand` is the shader's `OverlayWand`: the wand's shaft centre in camera space (x right,
@@ -92,6 +104,10 @@ struct OverlayParams {
     has_wand: i32,
     tan_half_fov: f32,
     blur_frac: f32,
+    hit_frac: f32,
+    hit_red_frac: f32,
+    hit_blur_px: f32,
+    shake_px: [f32; 2],
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -1110,6 +1126,10 @@ impl MetalRenderer {
             } else {
                 0.0
             },
+            hit_frac: overlay.hit.strength_frac,
+            hit_red_frac: overlay.hit.red_frac,
+            hit_blur_px: overlay.hit.blur_px,
+            shake_px: overlay.hit.shake_px,
         };
         let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
             center_m: [0.0; 4],

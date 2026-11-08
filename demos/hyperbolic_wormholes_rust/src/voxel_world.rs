@@ -1152,7 +1152,8 @@ impl VoxelWorld {
 /// `VoxelPlayer` is a player on a voxel map, as in the level: a body frame on the ground plane, the
 /// eye's height above it, the view's pitch, the vertical speed, whether they fly or stand, their
 /// sprint energy (1 full, 0 empty) and whether they sprinted on the last step, and the head bob's
-/// phase and how much of it shows (0 standing still, 1 walking).
+/// phase and how much of it shows (0 standing still, 1 walking), and the seconds left of being
+/// slowed after a hit (moving at the settings' `when_hit.slow_speed_frac`).
 #[derive(Clone, Copy)]
 pub struct VoxelPlayer {
     pub body: DMat4,
@@ -1165,6 +1166,7 @@ pub struct VoxelPlayer {
     pub is_sprinting: bool,
     pub bob_phase_rad: f64,
     pub bob_frac: f64,
+    pub slowed_s: f64,
 }
 
 impl VoxelPlayer {
@@ -1187,6 +1189,7 @@ impl VoxelPlayer {
             is_sprinting: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
+            slowed_s: 0.0,
         }
     }
 
@@ -1236,6 +1239,7 @@ impl VoxelPlayer {
             is_sprinting: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
+            slowed_s: 0.0,
         }
     }
 
@@ -1270,6 +1274,7 @@ impl VoxelPlayer {
             is_sprinting: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
+            slowed_s: 0.0,
         }
     }
 
@@ -1301,6 +1306,7 @@ impl VoxelPlayer {
             is_sprinting: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
+            slowed_s: 0.0,
         }
     }
 
@@ -1434,12 +1440,19 @@ impl VoxelPlayer {
             self.bob_phase_rad =
                 (self.bob_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
         }
-        let speed_m_per_s: f64 = match (self.is_flying, self.is_sprinting) {
-            (true, true) => settings.fly_m_per_s * FLY_SPRINT_PER_FLY,
-            (true, false) => settings.fly_m_per_s,
-            (false, true) => settings.sprint_m_per_s,
-            (false, false) => settings.walk_m_per_s,
+        let slow_frac: f64 = if self.slowed_s > 0.0 {
+            world.settings.when_hit.slow_speed_frac
+        } else {
+            1.0
         };
+        self.slowed_s = (self.slowed_s - dt_s).max(0.0);
+        let speed_m_per_s: f64 = slow_frac
+            * match (self.is_flying, self.is_sprinting) {
+                (true, true) => settings.fly_m_per_s * FLY_SPRINT_PER_FLY,
+                (true, false) => settings.fly_m_per_s,
+                (false, true) => settings.sprint_m_per_s,
+                (false, false) => settings.walk_m_per_s,
+            };
         let eye: DVec4 = (self.body * make_boost(AXIS_Y, self.h_m / r)).col(AXIS_W);
         let warp: Option<usize> = world.find_warp_inside(eye);
         if let Some(w) = warp

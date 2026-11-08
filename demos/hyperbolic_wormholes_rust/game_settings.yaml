@@ -55,5 +55,13 @@ consoles:
 respawn:
   delay_s: 3.0  # Seconds a player who was hit waits before coming back (0 for at once).
 
+when_hit:  # What a player feels each time a hit takes some of their health.
+  slow_speed_frac: 0.5  # Their walking and sprinting speed while slowed, as a fraction (1 for not slowed).
+  slow_s: 1.0  # Seconds they stay slowed.
+  effect_s: 0.6  # Seconds the red, shake and blur take to fade.
+  red_frac: 0.6  # How red the screen's edges turn, 0 to 1 (0 for none).
+  shake_px: 6.0  # How far the screen shakes, in pixels (0 for none).
+  blur_px: 6.0  # How wide the blur from the edges is, in pixels (0 for none).
+
 display:
   motion_blur_s: 0.01  # How long motion smears in the window (0 for none).
