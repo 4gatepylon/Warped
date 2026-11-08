@@ -88,7 +88,7 @@ is in [`AGENTS.md`](AGENTS.md).
   nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
   again and moves it. The user, 2026-11-08: "first click throws purple wormhole, second one throws green (causing
   them to connect and transform into real wormholes) and third doesnt do anything". Fixed on branch
-  `devin/no-third-throw`, merged locally into `staging/user-theaquarium` (no PR yet), 2026-11-08: once both mouths
+  `devin/no-third-throw`, merged locally into `staging/user-theaquarium`, #363, 2026-11-08: once both mouths
   are down `Q` does nothing until death or destruction clears them; `DESIGN.md` updated to match.
 - [?] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
   are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
