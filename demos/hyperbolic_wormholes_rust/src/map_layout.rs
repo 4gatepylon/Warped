@@ -23,6 +23,7 @@
 use std::error::Error;
 
 use glam::{DMat4, DVec3, DVec4};
+use rayon::prelude::*;
 use sdl3::pixels::{Color, PixelFormat};
 use sdl3::surface::Surface;
 
@@ -41,8 +42,10 @@ const GROUND_SHADE_FRAC: f32 = 0.45;
 const OUTSIDE_SHADE_FRAC: f32 = 0.4;
 const LOW_SHADE_FRAC: f32 = 0.6;
 const FULL_SHADE_HEIGHT_M: f64 = 12.0;
-const LIGHT_TOWARD: [f64; 3] = [-1.0, -1.0, 1.0];
-const MIN_RELIEF_SHADE_FRAC: f64 = 0.35;
+const SUPERSAMPLE_COUNT: usize = 2;
+const AMBIENT_FRAC: f64 = 0.35;
+const MIN_SUN_Z: f64 = 0.05;
+const MIN_SUN_ELEVATION_RAD: f64 = std::f64::consts::FRAC_PI_6;
 const MAX_RELIEF_SHADE_FRAC: f64 = 1.6;
 const COLUMN_TOP_MARGIN_M: f64 = 0.5;
 const GAMMA: f32 = 2.2;
@@ -73,6 +76,7 @@ const OTHER_PLAYER_OUTLINE_COLOR: [u8; 3] = [20, 20, 20];
 const WARP_KIND_BLACK_HOLE: &str = "black_hole";
 const MOUTH_NAME_PREFIX: &str = "wormhole mouth ";
 const MATERIAL_KIND_LIGHT: &str = "light";
+const MATERIAL_KIND_EMPTY: &str = "empty";
 const SPAWN_TEAM_ANY: &str = "any";
 const OUT_OF_RANGE_BLUR_PX: usize = 3;
 const OUT_OF_RANGE_SHADE_FRAC: f32 = 0.55;
@@ -431,9 +435,10 @@ impl MapLayout {
         ]
     }
 
-    /// `paint_tops` paints every pixel: the highest top of the footprints there above the ground in
-    /// its material's colour (lights at full brightness, the rest brighter the higher above the
-    /// ground), else the ground; then lit from the top left by the slope of those heights, darker
+    /// `paint_tops` paints every pixel like a photo from above, from `SUPERSAMPLE_COUNT` squared
+    /// samples: the highest top of the footprints there above the ground, else the ground, in its
+    /// material's colour (lights at full brightness, the rest brighter
+    /// the higher above the ground), lit by the map's sun on the slopes of those heights, darker
     /// outside the boundary, which gets a white outline.
     ///
     /// Example: `layout.paint_tops(&map, &footprints, Some([128.0, 72.0]))?;`
@@ -444,15 +449,16 @@ impl MapLayout {
         boundary_m: Option<[f64; 2]>,
     ) -> Result<()> {
         let (width, height) = (self.size_px.0 as usize, self.size_px.1 as usize);
-        let (corner_m, m_per_px, r_m) = (self.corner_m, self.m_per_px, self.r_m);
-        let get_point_m = |x: usize, y: usize| -> [f64; 2] {
+        let (sub_width, sub_height) = (width * SUPERSAMPLE_COUNT, height * SUPERSAMPLE_COUNT);
+        let (corner_m, r_m) = (self.corner_m, self.r_m);
+        let m_per_sub_px: f64 = self.m_per_px / SUPERSAMPLE_COUNT as f64;
+        let get_point_m = |x: usize, y: usize, m_per_px: f64| -> [f64; 2] {
             [
                 corner_m[0] + (x as f64 + 0.5) * m_per_px,
                 corner_m[1] + (y as f64 + 0.5) * m_per_px,
             ]
         };
-        let is_inside = |x: usize, y: usize| -> bool {
-            let [u_m, v_m] = get_point_m(x, y);
+        let is_inside = |[u_m, v_m]: [f64; 2]| -> bool {
             match boundary_m {
                 Some([u_max_m, v_max_m]) => {
                     (u_m / u_max_m).powi(2) + (v_m / v_max_m).powi(2) <= 1.0
@@ -460,64 +466,85 @@ impl MapLayout {
                 None => true,
             }
         };
-        let ground: [f32; 3] = map.get_material(map.ground.material)?.color;
+        let looks: Vec<Option<MaterialLook>> = make_material_looks(map);
+        let ground_id: u8 = map.ground.material;
+        if looks
+            .get(usize::from(ground_id))
+            .is_none_or(Option::is_none)
+        {
+            return Err(format!("map {}: no ground material {ground_id}", map.name).into());
+        }
         let terrain: Option<Terrain> = map.ground.terrain.as_ref().map(Terrain::FromMap);
-        let mut heights_m: Vec<f64> = vec![0.0; width * height];
-        let mut colors: Vec<[f32; 3]> = vec![[0.0; 3]; width * height];
-        for y in 0..height {
-            for x in 0..width {
-                let [u_m, v_m] = get_point_m(x, y);
-                let ground_m: f64 = match &terrain {
-                    Some(terrain) => terrain.get_height_m(u_m, v_m),
-                    None => 0.0,
-                };
+        let samples: Vec<(f64, [f32; 3], bool)> = (0..sub_width * sub_height)
+            .into_par_iter()
+            .map(|i| {
+                let [u_m, v_m] = get_point_m(i % sub_width, i / sub_width, m_per_sub_px);
+                let ground_m: f64 = terrain.as_ref().map_or(0.0, |t| t.get_height_m(u_m, v_m));
                 let top: Option<Top> = footprints
                     .iter()
                     .filter(|f| (u_m - f.center_m[0]).hypot(v_m - f.center_m[1]) <= f.radius_m)
                     .filter_map(|f| f.get_top(u_m, v_m, r_m))
-                    .filter(|(top_m, _)| *top_m > ground_m)
+                    .filter(|(top_m, id)| *top_m > ground_m && looks[usize::from(*id)].is_some())
                     .max_by(|a, b| a.0.total_cmp(&b.0));
-                heights_m[x + width * y] = ground_m;
-                colors[x + width * y] = match top {
-                    None => ground.map(|c| c * GROUND_SHADE_FRAC),
-                    Some((top_m, id)) => {
-                        heights_m[x + width * y] = top_m;
-                        let material = map.get_material(id)?;
-                        let shade_frac: f32 = if material.kind == MATERIAL_KIND_LIGHT {
-                            1.0
-                        } else {
-                            LOW_SHADE_FRAC
-                                + (1.0 - LOW_SHADE_FRAC)
-                                    * ((top_m - ground_m) / FULL_SHADE_HEIGHT_M).min(1.0) as f32
-                        };
-                        material.color.map(|c| c * shade_frac)
-                    }
+                let (h_m, id): (f64, u8) = top.unwrap_or((ground_m, ground_id));
+                let look: &MaterialLook = looks[usize::from(id)].as_ref().expect("checked above");
+                let shade_frac: f32 = if top.is_none() {
+                    GROUND_SHADE_FRAC
+                } else if look.is_light {
+                    1.0
+                } else {
+                    let height_frac: f32 = ((h_m - ground_m) / FULL_SHADE_HEIGHT_M).min(1.0) as f32;
+                    LOW_SHADE_FRAC + (1.0 - LOW_SHADE_FRAC) * height_frac
                 };
-            }
-        }
+                let rgb: [f32; 3] = look.color.map(|c| c * shade_frac);
+                (h_m, rgb, look.is_light)
+            })
+            .collect();
+        let heights_m: Vec<f64> = samples.iter().map(|s| s.0).collect();
+        let sun: [f64; 3] = map.sky.sun.direction;
+        let sun_flat: DVec3 = DVec3::new(-sun[2], sun[0], 0.0).normalize_or_zero();
+        let sun_elevation_rad: f64 = sun[1]
+            .atan2(sun[0].hypot(sun[2]))
+            .max(MIN_SUN_ELEVATION_RAD);
+        let toward_sun: DVec3 =
+            (sun_flat * sun_elevation_rad.cos() + DVec3::Z * sun_elevation_rad.sin()).normalize();
+        let sun_frac: f64 = (1.0 - AMBIENT_FRAC) / toward_sun.z.max(MIN_SUN_Z);
+        let sun_color: [f32; 3] = map.sky.sun.color;
+        let lit: Vec<[f32; 3]> = (0..sub_width * sub_height)
+            .into_par_iter()
+            .map(|i| {
+                let (x, y) = (i % sub_width, i / sub_width);
+                let (_, rgb, is_light) = samples[i];
+                if is_light {
+                    return rgb;
+                }
+                let get_slope = |before: usize, after: usize| -> f64 {
+                    (heights_m[after] - heights_m[before]) / (2.0 * m_per_sub_px)
+                };
+                let slope_x: f64 = get_slope(
+                    x.saturating_sub(1) + sub_width * y,
+                    (x + 1).min(sub_width - 1) + sub_width * y,
+                );
+                let slope_y: f64 = get_slope(
+                    x + sub_width * y.saturating_sub(1),
+                    x + sub_width * (y + 1).min(sub_height - 1),
+                );
+                let normal: DVec3 = DVec3::new(-slope_x, -slope_y, 1.0).normalize();
+                let light_frac: f64 = (AMBIENT_FRAC + sun_frac * normal.dot(toward_sun).max(0.0))
+                    .min(MAX_RELIEF_SHADE_FRAC);
+                let outside_frac: f32 = if is_inside(get_point_m(x, y, m_per_sub_px)) {
+                    1.0
+                } else {
+                    OUTSIDE_SHADE_FRAC
+                };
+                [0, 1, 2].map(|c| rgb[c] * sun_color[c] * light_frac as f32 * outside_frac)
+            })
+            .collect();
         for y in 0..height {
             for x in 0..width {
                 let i: usize = x + width * y;
-                let get_slope = |before: usize, after: usize| -> f64 {
-                    (heights_m[after] - heights_m[before]) / (2.0 * m_per_px)
-                };
-                let slope_x: f64 = get_slope(
-                    x.saturating_sub(1) + width * y,
-                    (x + 1).min(width - 1) + width * y,
-                );
-                let slope_y: f64 = get_slope(
-                    x + width * y.saturating_sub(1),
-                    x + width * (y + 1).min(height - 1),
-                );
-                let normal: DVec3 = DVec3::new(-slope_x, -slope_y, 1.0).normalize();
-                let toward_light: DVec3 = DVec3::from_array(LIGHT_TOWARD).normalize();
-                let mut frac: f32 = (normal.dot(toward_light) / toward_light.z)
-                    .clamp(MIN_RELIEF_SHADE_FRAC, MAX_RELIEF_SHADE_FRAC)
-                    as f32;
-                if !is_inside(x, y) {
-                    frac *= OUTSIDE_SHADE_FRAC;
-                }
-                let is_edge: bool = is_inside(x, y)
+                let point_m: [f64; 2] = get_point_m(x, y, self.m_per_px);
+                let is_edge: bool = is_inside(point_m)
                     && [
                         (x.wrapping_sub(1), y),
                         (x + 1, y),
@@ -525,11 +552,22 @@ impl MapLayout {
                         (x, y + 1),
                     ]
                     .into_iter()
-                    .any(|(nx, ny)| nx < width && ny < height && !is_inside(nx, ny));
+                    .any(|(nx, ny)| {
+                        nx < width && ny < height && !is_inside(get_point_m(nx, ny, self.m_per_px))
+                    });
                 let rgb: [u8; 3] = if is_edge {
                     BOUNDARY_COLOR
                 } else {
-                    colors[i].map(|c| encode_srgb(c * frac))
+                    let mut sum: [f32; 3] = [0.0; 3];
+                    for sy in 0..SUPERSAMPLE_COUNT {
+                        for sx in 0..SUPERSAMPLE_COUNT {
+                            let sample: [f32; 3] = lit[x * SUPERSAMPLE_COUNT
+                                + sx
+                                + sub_width * (y * SUPERSAMPLE_COUNT + sy)];
+                            sum = [0, 1, 2].map(|c| sum[c] + sample[c]);
+                        }
+                    }
+                    sum.map(|c| encode_srgb(c / (SUPERSAMPLE_COUNT * SUPERSAMPLE_COUNT) as f32))
                 };
                 self.pixels[i * BYTES_PER_PIXEL..][..BYTES_PER_PIXEL]
                     .copy_from_slice(&[rgb[0], rgb[1], rgb[2], OPAQUE]);
@@ -697,6 +735,36 @@ fn make_label_right(text: &str, center_px: [f64; 2], radius_px: f64) -> (String,
             center_px[1] - f64::from(DEBUG_GLYPH_PX) / 2.0,
         ],
     )
+}
+
+/// `MaterialLook` is how a material looks from above: its colour and whether it is a light.
+struct MaterialLook {
+    color: [f32; 3],
+    is_light: bool,
+}
+
+/// `make_material_looks` gives every material id's look (`None` for the empty material).
+///
+/// Example: `let looks = make_material_looks(&map);`
+fn make_material_looks(map: &Map) -> Vec<Option<MaterialLook>> {
+    let max_id: usize = map
+        .materials
+        .iter()
+        .map(|m| usize::from(m.id))
+        .max()
+        .unwrap_or(0);
+    let mut looks: Vec<Option<MaterialLook>> = (0..=max_id).map(|_| None).collect();
+    for material in map
+        .materials
+        .iter()
+        .filter(|m| m.kind != MATERIAL_KIND_EMPTY)
+    {
+        looks[usize::from(material.id)] = Some(MaterialLook {
+            color: material.color,
+            is_light: material.kind == MATERIAL_KIND_LIGHT,
+        });
+    }
+    looks
 }
 
 /// `encode_srgb` turns a linear colour channel (0 to 1, clamped) into a display byte.
@@ -1020,5 +1088,23 @@ mod tests {
         let pixels: Vec<u8> = layout.draw_players(DMat4::IDENTITY, 0, RANGE_M, &others);
         let [x, y] = layout.get_px([0.0, 0.0]).map(|p| p as usize);
         assert_eq!(get_rgb(&pixels, layout.size_px, x, y), TEAM_COLORS[0]);
+    }
+
+    #[test]
+    #[ignore = "writes the map pages' pictures for a person to look at"]
+    fn save_map_pictures() {
+        let folder: std::path::PathBuf =
+            crate::make_run_folder("map_pictures", None).expect("a run folder");
+        for name in ["lunar_surface", "house_demo"] {
+            let map: Map = Map::Load(&get_map_folder(name)).expect("the map loads");
+            let start: std::time::Instant = std::time::Instant::now();
+            let layout: MapLayout = MapLayout::FromMap(&map, MAX_SIZE_PX).expect("a layout");
+            println!("{name}: {:.0} ms", start.elapsed().as_secs_f64() * 1e3);
+            image::RgbaImage::from_raw(layout.size_px.0, layout.size_px.1, layout.pixels.clone())
+                .expect("a whole picture")
+                .save(folder.join(format!("{name}.png")))
+                .expect("the picture saves");
+        }
+        println!("saved under {}", folder.display());
     }
 }
