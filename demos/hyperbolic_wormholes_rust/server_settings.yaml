@@ -23,6 +23,7 @@ movement:
   crouch_speed_frac: 0.5  # Speed while crouching (holding Ctrl), as a fraction of walking speed.
   crouch_eye_height_frac: 0.6  # Eye height while crouching, as a fraction of standing eye height.
   crouch_s: 0.15  # Seconds it takes to crouch down or stand up.
+  shoot_after_moving_s: 0.25  # Seconds after the last movement key (moving upright, jumping) until a shot (0 for none).
 
 sprint_energy:
   drain_s: 7.5  # Seconds of sprinting that empty a full bar.

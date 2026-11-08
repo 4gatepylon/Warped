@@ -11,12 +11,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
-  are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
-  Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched).
-  Claimed by Claude Code (session on `leah`'s Mac), branch `claude/shoot-when-still`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-shoot-still` on
-    `leah`'s Mac, branch `claude/shoot-when-still` (pushed to `origin` once it has commits). State, 2026-11-08: started.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
@@ -78,6 +72,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
+- [?] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
+  are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
+  Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched). #331.
 Merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`), waiting for the user to test and
 confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.

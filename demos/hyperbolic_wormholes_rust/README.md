@@ -53,8 +53,9 @@ make join-game SERVER=127.0.0.1
   walking backward, crisp, with dark staying dark. It is strongest at the throat and with speed, none standing
   still, and gone once you are 3.6 m out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the
   menu) sets its strength (0 for none). Only you see your own shift (Metal renderer, voxel maps).
-- Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
-  `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
+- Click (once the mouse is captured) to fire a laser shot for a quarter of a second, once no movement key has been held
+  for 0.25 s (`movement.shoot_after_moving_s`): walking crouched (hold `Ctrl`: a lower view and half speed) is fine,
+  and so is the air with no key held; not while walking upright, running or holding `Space`. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
   bar, is empty until it can fire again.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
