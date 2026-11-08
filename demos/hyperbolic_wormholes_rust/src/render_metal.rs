@@ -43,13 +43,24 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 /// `Texture` is a Metal texture and its size in pixels.
 type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 
-/// `Overlay` is what to draw over a frame before it is shown (while a player is out after a hit):
-/// a mask, one byte a pixel (`mask_px` in size, rows top first; see the shader's
-/// `apply_overlay` for what its levels mean), and how much to darken the frame.
+/// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
+/// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
+/// shader's `apply_overlay` for what its levels mean), and up to `MAX_OVERLAY_RECT_COUNT`
+/// rectangles (the HUD's energy bar and gun).
 pub struct Overlay<'a> {
-    pub mask: &'a [u8],
-    pub mask_px: (usize, usize),
     pub dim_frac: f32,
+    pub mask: Option<(&'a [u8], (usize, usize))>,
+    pub rects: &'a [OverlayRect],
+}
+
+/// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0)
+/// and an RGBA colour, A the opacity.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct OverlayRect {
+    pub min_frac: [f32; 2],
+    pub max_frac: [f32; 2],
+    pub color: [f32; 4],
 }
 
 /// `OverlayParams` is the shader's `OverlayParams`.
@@ -58,6 +69,8 @@ struct OverlayParams {
     dim_frac: f32,
     scale: i32,
     origin: [i32; 2],
+    rect_count: i32,
+    has_mask: i32,
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -189,6 +202,8 @@ const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
 const OVERLAY_HEIGHT_PER_MASK: usize = 5;
 const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
+pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 16;
+const EMPTY_MASK_PX: (usize, usize) = (1, 1);
 const MS_PER_S: f64 = 1000.0;
 const PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
 const _: () = assert!(
@@ -967,8 +982,9 @@ impl MetalRenderer {
     }
 
     /// `encode_overlay` encodes drawing `overlay` over a finished frame into a texture of its own,
-    /// which it returns: the frame darkened, and the mask scaled by a whole number to about a fifth
-    /// of the frame's height (and at most `OVERLAY_MAX_WIDTH_FRAC` of its width), centred.
+    /// which it returns: the frame darkened, the mask (if any) scaled by a whole number to about a
+    /// fifth of the frame's height (and at most `OVERLAY_MAX_WIDTH_FRAC` of its width), centred,
+    /// and the rectangles.
     ///
     /// Example: `let shown = self.encode_overlay(&command_buffer, &frame, &overlay, (2560, 1600))?;`
     fn encode_overlay(
@@ -978,9 +994,15 @@ impl MetalRenderer {
         overlay: &Overlay,
         output_px: (usize, usize),
     ) -> Result<Retained<ProtocolObject<dyn MTLTexture>>> {
-        let (mask_w, mask_h) = overlay.mask_px;
+        assert!(
+            overlay.rects.len() <= MAX_OVERLAY_RECT_COUNT,
+            "encode_overlay: {} rectangles, more than {MAX_OVERLAY_RECT_COUNT}",
+            overlay.rects.len()
+        );
+        let empty_mask: [u8; 1] = [0];
+        let (mask_bytes, (mask_w, mask_h)) = overlay.mask.unwrap_or((&empty_mask, EMPTY_MASK_PX));
         assert_eq!(
-            overlay.mask.len(),
+            mask_bytes.len(),
             mask_w * mask_h,
             "encode_overlay: the mask isn't {mask_w}x{mask_h} bytes"
         );
@@ -997,7 +1019,7 @@ impl MetalRenderer {
         if self
             .overlay_mask
             .as_ref()
-            .is_none_or(|(_, size)| *size != overlay.mask_px)
+            .is_none_or(|(_, size)| *size != (mask_w, mask_h))
         {
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A MASK TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
             let descriptor: Retained<MTLTextureDescriptor> = unsafe {
@@ -1014,7 +1036,7 @@ impl MetalRenderer {
                 .device
                 .newTextureWithDescriptor(&descriptor)
                 .ok_or("Metal: no memory for the overlay's mask")?;
-            self.overlay_mask = Some((mask, overlay.mask_px));
+            self.overlay_mask = Some((mask, (mask_w, mask_h)));
         }
         let (mask, _) = self.overlay_mask.as_ref().expect("the mask was just made");
         let region: MTLRegion = MTLRegion {
@@ -1030,8 +1052,7 @@ impl MetalRenderer {
             mask.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
                 region,
                 0,
-                NonNull::new(overlay.mask.as_ptr() as *mut std::ffi::c_void)
-                    .expect("a mask's bytes"),
+                NonNull::new(mask_bytes.as_ptr() as *mut std::ffi::c_void).expect("a mask's bytes"),
                 mask_w,
             )
         };
@@ -1045,7 +1066,15 @@ impl MetalRenderer {
                 (output_px.0 as i32 - (mask_w * scale) as i32) / 2,
                 (output_px.1 as i32 - (mask_h * scale) as i32) / 2,
             ],
+            rect_count: overlay.rects.len() as i32,
+            has_mask: i32::from(overlay.mask.is_some()),
         };
+        let mut rects: [OverlayRect; MAX_OVERLAY_RECT_COUNT] = [OverlayRect {
+            min_frac: [0.0; 2],
+            max_frac: [0.0; 2],
+            color: [0.0; 4],
+        }; MAX_OVERLAY_RECT_COUNT];
+        rects[..overlay.rects.len()].copy_from_slice(overlay.rects);
         let (target, _) = self
             .overlay_target
             .as_ref()
@@ -1063,6 +1092,11 @@ impl MetalRenderer {
                 NonNull::from(&params).cast(),
                 std::mem::size_of::<OverlayParams>(),
                 0,
+            );
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&rects).cast(),
+                std::mem::size_of_val(&rects),
+                1,
             );
         }
         dispatch_grid(&encoder, output_px);

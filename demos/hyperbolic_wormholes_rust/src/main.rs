@@ -110,6 +110,11 @@ const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
+const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
+const ENERGY_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.018];
+const ENERGY_BAR_BACK_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
+const ENERGY_BAR_FILL_COLOR: [f32; 4] = [0.5, 0.82, 1.0, 0.9];
+const PERCENT_PER_FRAC: f64 = 100.0;
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
@@ -2089,6 +2094,30 @@ impl Session {
         ])
     }
 
+    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: on a voxel map, the sprint
+    /// energy bar (its frame and its fill) in the bottom left corner.
+    ///
+    /// Example: `let rects = session.get_overlay_rects();`
+    fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
+        let Some(voxel) = &self.voxel else {
+            return Vec::new();
+        };
+        let [x, y] = ENERGY_BAR_MIN_FRAC;
+        let [w, h] = ENERGY_BAR_SIZE_FRAC;
+        vec![
+            render_metal::OverlayRect {
+                min_frac: [x, y],
+                max_frac: [x + w, y + h],
+                color: ENERGY_BAR_BACK_COLOR,
+            },
+            render_metal::OverlayRect {
+                min_frac: [x, y],
+                max_frac: [x + w * voxel.player.energy_frac as f32, y + h],
+                color: ENERGY_BAR_FILL_COLOR,
+            },
+        ]
+    }
+
     /// `get_hud_lines` gives the HUD's lines: speed, movement, laser, the last message and the
     /// controls.
     ///
@@ -2104,6 +2133,12 @@ impl Session {
         } else {
             format!(" upscaled to {}x{}", output_px.0, output_px.1)
         };
+        let energy: String = self.voxel.as_ref().map_or(String::new(), |voxel| {
+            format!(
+                ", energy {:.0}%",
+                voxel.player.energy_frac * PERCENT_PER_FRAC
+            )
+        });
         let (is_flying, is_on_ground, height_m) = match &self.voxel {
             Some(voxel) => (
                 voxel.player.is_flying,
@@ -2133,7 +2168,7 @@ impl Session {
                 render_px.0,
                 render_px.1
             ),
-            format!("{movement}, height {:.1} blocks", height_m),
+            format!("{movement}, height {:.1} blocks{energy}", height_m),
         ];
         if let Some(laser) = &self.laser {
             lines.push(format!("laser {laser}"));
@@ -2212,6 +2247,30 @@ fn make_death_mask(lines: &[String; 2]) -> Result<Vec<u8>> {
             })
             .collect()
     }))
+}
+
+/// `draw_overlay_rects` draws the HUD's rectangles (`Session::get_overlay_rects`) on the canvas,
+/// for the SDL-renderer window.
+///
+/// Example: `draw_overlay_rects(&mut canvas, &session.get_overlay_rects())?;`
+fn draw_overlay_rects(
+    canvas: &mut sdl3::render::WindowCanvas,
+    rects: &[render_metal::OverlayRect],
+) -> Result<()> {
+    let (width, height) = canvas.window().size_in_pixels();
+    canvas.set_scale(1.0, 1.0)?;
+    canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
+    for rect in rects {
+        let [r, g, b, a] = rect.color.map(|c| (c * 255.0) as u8);
+        canvas.set_draw_color(Color::RGBA(r, g, b, a));
+        canvas.fill_rect(sdl3::render::FRect::new(
+            rect.min_frac[0] * width as f32,
+            rect.min_frac[1] * height as f32,
+            (rect.max_frac[0] - rect.min_frac[0]) * width as f32,
+            (rect.max_frac[1] - rect.min_frac[1]) * height as f32,
+        ))?;
+    }
+    Ok(())
 }
 
 /// `draw_death_overlay` dims the canvas and draws the death lines large in its middle, for the
@@ -2313,6 +2372,7 @@ fn play_on_canvas(
                 (HUD_MARGIN_PX, HUD_MARGIN_PX + HUD_LINE_PX * i as f32),
             )?;
         }
+        draw_overlay_rects(&mut canvas, &session.get_overlay_rects())?;
         if let Some(lines) = session.get_death_lines() {
             draw_death_overlay(&mut canvas, &lines)?;
         }
@@ -2373,11 +2433,18 @@ fn play_on_layer(
             .get_death_lines()
             .map(|lines| make_death_mask(&lines))
             .transpose()?;
-        let overlay: Option<render_metal::Overlay> =
-            death_mask.as_deref().map(|pixels| render_metal::Overlay {
-                mask: pixels,
-                mask_px: (DEATH_MASK_PX.0 as usize, DEATH_MASK_PX.1 as usize),
-                dim_frac: DEATH_DIM_FRAC,
+        let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
+        let overlay: Option<render_metal::Overlay> = (death_mask.is_some() || !rects.is_empty())
+            .then(|| render_metal::Overlay {
+                dim_frac: if death_mask.is_some() {
+                    DEATH_DIM_FRAC
+                } else {
+                    0.0
+                },
+                mask: death_mask
+                    .as_deref()
+                    .map(|pixels| (pixels, (DEATH_MASK_PX.0 as usize, DEATH_MASK_PX.1 as usize))),
+                rects: &rects,
             });
         if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(

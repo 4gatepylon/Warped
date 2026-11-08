@@ -46,7 +46,7 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Up to 8 players. A laser that reaches another player removes them: their view darkens, says "YOU DIED" with a
   countdown, and they come back at their spawn 3 seconds later.
 
-Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints,
+Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 30 s of sprinting, 60 s to refill),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), `H` toggles flying (`Space`/`E` and `Q` go up and down), click to shoot (a
 quarter-second laser shot), `L` toggles a laser that stays on, `G` aims through the nearest mouth, `R` respawns, `-`
 and `=` change the render resolution.

@@ -24,6 +24,15 @@ pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
 const BOUND_MARGIN_M: f64 = 0.2;
 pub(crate) const BEND_STEP_FRAC: f64 = 0.08;
+const GAME_SPEED_PER_MAP_SPEED: f64 = 2.0;
+const GAME_GRAVITY_PER_MAP_GRAVITY: f64 = 3.0;
+const ENERGY_DRAIN_S: f64 = 30.0;
+const ENERGY_REFILL_S: f64 = 60.0;
+const BOB_WALK_HZ: f64 = 2.0;
+const BOB_SPRINT_HZ: f64 = 2.8;
+const BOB_WALK_M: f64 = 0.04;
+const BOB_SPRINT_M: f64 = 0.07;
+const BOB_FADE_PER_S: f64 = 6.0;
 const MIN_BEND_STEP_M: f64 = 0.004;
 const MAX_BEND_STEP_M: f64 = 3.0;
 const HORIZON_CAPTURE_FRAC: f64 = 1.02;
@@ -389,8 +398,13 @@ impl VoxelWorld {
                 .planet
                 .as_ref()
                 .map(|p| (to_direction(&p.direction), p.angular_radius_rad)),
-            player: map.player,
-            gravity_m_per_s2: map.gravity_m_per_s2,
+            player: PlayerSettings {
+                walk_m_per_s: map.player.walk_m_per_s * GAME_SPEED_PER_MAP_SPEED,
+                sprint_m_per_s: map.player.sprint_m_per_s * GAME_SPEED_PER_MAP_SPEED,
+                jump_m_per_s: map.player.jump_m_per_s * GAME_GRAVITY_PER_MAP_GRAVITY.sqrt(),
+                ..map.player
+            },
+            gravity_m_per_s2: map.gravity_m_per_s2 * GAME_GRAVITY_PER_MAP_GRAVITY,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
             clearance: Arc::new(ClearanceGrids::default()),
         };
@@ -950,7 +964,9 @@ impl VoxelWorld {
 }
 
 /// `VoxelPlayer` is a player on a voxel map, as in the level: a body frame on the ground plane, the
-/// eye's height above it, the view's pitch, the vertical speed, and whether they fly or stand.
+/// eye's height above it, the view's pitch, the vertical speed, whether they fly or stand, their
+/// sprint energy (1 full, 0 empty) and whether they sprinted on the last step, and the head bob's
+/// phase and how much of it shows (0 standing still, 1 walking).
 #[derive(Clone, Copy)]
 pub struct VoxelPlayer {
     pub body: DMat4,
@@ -959,6 +975,10 @@ pub struct VoxelPlayer {
     pub vertical_m_per_s: f64,
     pub is_flying: bool,
     pub is_on_ground: bool,
+    pub energy_frac: f64,
+    pub is_sprinting: bool,
+    pub bob_phase_rad: f64,
+    pub bob_frac: f64,
 }
 
 impl VoxelPlayer {
@@ -977,6 +997,10 @@ impl VoxelPlayer {
             vertical_m_per_s: 0.0,
             is_flying: false,
             is_on_ground: true,
+            energy_frac: 1.0,
+            is_sprinting: false,
+            bob_phase_rad: 0.0,
+            bob_frac: 0.0,
         }
     }
 
@@ -993,6 +1017,10 @@ impl VoxelPlayer {
             vertical_m_per_s: 0.0,
             is_flying: false,
             is_on_ground: true,
+            energy_frac: 1.0,
+            is_sprinting: false,
+            bob_phase_rad: 0.0,
+            bob_frac: 0.0,
         }
     }
 
@@ -1023,6 +1051,10 @@ impl VoxelPlayer {
             vertical_m_per_s: 0.0,
             is_flying: h_m.is_some(),
             is_on_ground: h_m.is_none(),
+            energy_frac: 1.0,
+            is_sprinting: false,
+            bob_phase_rad: 0.0,
+            bob_frac: 0.0,
         }
     }
 
@@ -1050,16 +1082,33 @@ impl VoxelPlayer {
             vertical_m_per_s: 0.0,
             is_flying: false,
             is_on_ground: false,
+            energy_frac: 1.0,
+            is_sprinting: false,
+            bob_phase_rad: 0.0,
+            bob_frac: 0.0,
         }
     }
 
-    /// `get_camera_frame` gives the eye's frame: the body, raised to the eye and pitched.
+    /// `get_camera_frame` gives the eye's frame: the body, raised to the eye (with the head bob)
+    /// and pitched.
     ///
     /// Example: `let camera = player.get_camera_frame(&world);`
     pub fn get_camera_frame(&self, world: &VoxelWorld) -> DMat4 {
         self.body
-            * make_boost(AXIS_Y, self.h_m / world.r)
+            * make_boost(AXIS_Y, (self.h_m + self.get_bob_m()) / world.r)
             * make_rotation(AXIS_Z, AXIS_Y, -self.pitch_rad)
+    }
+
+    /// `get_bob_m` gives the head bob: the eye dips at each footstep, deeper when sprinting.
+    ///
+    /// Example: `let bob_m = player.get_bob_m();`
+    pub fn get_bob_m(&self) -> f64 {
+        let depth_m: f64 = if self.is_sprinting {
+            BOB_SPRINT_M
+        } else {
+            BOB_WALK_M
+        };
+        -self.bob_frac * depth_m * self.bob_phase_rad.sin().abs()
     }
 
     /// `get_feet_frame` gives the frame at the player's feet (for their avatar).
@@ -1145,7 +1194,28 @@ impl VoxelPlayer {
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
         let len: f64 = forward.hypot(side);
         let settings: PlayerSettings = world.player;
-        let speed_m_per_s: f64 = match (self.is_flying, input.sprint) {
+        self.is_sprinting = input.sprint && len > 0.0 && self.energy_frac > 0.0;
+        self.energy_frac = (self.energy_frac
+            + if self.is_sprinting {
+                -dt_s / ENERGY_DRAIN_S
+            } else {
+                dt_s / ENERGY_REFILL_S
+            })
+        .clamp(0.0, 1.0);
+        let is_walking: bool = len > 0.0 && !self.is_flying && self.is_on_ground;
+        let bob_target: f64 = f64::from(u8::from(is_walking));
+        self.bob_frac +=
+            (bob_target - self.bob_frac).clamp(-BOB_FADE_PER_S * dt_s, BOB_FADE_PER_S * dt_s);
+        if is_walking {
+            let hz: f64 = if self.is_sprinting {
+                BOB_SPRINT_HZ
+            } else {
+                BOB_WALK_HZ
+            };
+            self.bob_phase_rad =
+                (self.bob_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
+        }
+        let speed_m_per_s: f64 = match (self.is_flying, self.is_sprinting) {
             (true, true) => settings.fly_m_per_s * FLY_SPRINT_PER_FLY,
             (true, false) => settings.fly_m_per_s,
             (false, true) => settings.sprint_m_per_s,
@@ -1256,6 +1326,7 @@ mod tests {
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
+    //! | Sprint energy | full (sprints at sprint speed, drains), empty (walks), not sprinting (refills) | `sprinting_uses_energy` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
 
     use super::*;
@@ -1455,5 +1526,36 @@ mod tests {
             moved_m > MIN_DECK_WALK_FRAC * expected_m,
             "moved {moved_m} m of {expected_m} m"
         );
+    }
+
+    #[test]
+    fn sprinting_uses_energy() {
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+        let sprint: Input = Input {
+            forward: true,
+            sprint: true,
+            ..Input::default()
+        };
+        player.step(&world, &sprint, STEP_S, 0);
+        assert!(player.is_sprinting && player.energy_frac < 1.0);
+        player.energy_frac = 0.0;
+        player.step(&world, &sprint, STEP_S, 0);
+        assert!(!player.is_sprinting && player.energy_frac > 0.0);
+        let full_drain_steps: usize = (ENERGY_DRAIN_S / STEP_S).ceil() as usize;
+        player.energy_frac = 1.0;
+        for _ in 0..full_drain_steps {
+            player.step(
+                &world,
+                &Input {
+                    sprint: true,
+                    ..sprint
+                },
+                STEP_S,
+                0,
+            );
+        }
+        assert!(player.energy_frac < STEP_S / ENERGY_DRAIN_S);
     }
 }

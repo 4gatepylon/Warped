@@ -1963,17 +1963,30 @@ kernel void build_mouth_fields(device float4 *rows [[buffer(0)]], constant Unifo
     for (int i = 0; i < 4; i++) field[1 + i] = change[i];
 }
 
-/** @brief `OverlayParams` is how `apply_overlay` draws: how much to darken, mask pixels to screen pixels, and the mask's top left. */
+/**
+ * @brief `OverlayParams` is how `apply_overlay` draws: how much to darken, mask pixels to screen pixels, the mask's top
+ * left, how many rectangles there are, and whether there is a mask.
+ */
 struct OverlayParams {
     float dim_frac;
     int scale;
     int2 origin;
+    int rect_count;
+    int has_mask;
+};
+
+/** @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), and its colour and opacity. */
+struct OverlayRect {
+    float2 min_frac;
+    float2 max_frac;
+    float4 color;
 };
 
 /**
  * @brief `apply_overlay` copies a finished frame into `out` darkened by `dim_frac`, with a mask's text drawn over it at
- * `scale` screen pixels per mask pixel from `origin`: the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
- * the text's above `OVERLAY_TEXT_LEVEL` (render_metal.rs's `Overlay`, e.g. "YOU DIED" and a countdown).
+ * `scale` screen pixels per mask pixel from `origin` (the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
+ * the text's above `OVERLAY_TEXT_LEVEL`) and `rects` blended over that in order (render_metal.rs's `Overlay`: e.g.
+ * "YOU DIED" and a countdown, and the energy bar).
  * @par Example
  * @code
  * dispatched by render_metal.rs, one thread per output pixel.
@@ -1981,17 +1994,21 @@ struct OverlayParams {
  */
 kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], texture2d<float, access::read> mask [[texture(1)]],
                           texture2d<float, access::write> out [[texture(2)]], constant OverlayParams &p [[buffer(0)]],
-                          uint2 id [[thread_position_in_grid]]) {
+                          constant OverlayRect *rects [[buffer(1)]], uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
     float4 color = float4(frame.read(id).rgb * (1.0 - p.dim_frac), 1.0);
     int2 offset = int2(id) - p.origin;
-    if (all(offset >= int2(0))) {
+    if (p.has_mask != 0 && all(offset >= int2(0))) {
         uint2 cell = uint2(offset / p.scale);
         if (cell.x < mask.get_width() && cell.y < mask.get_height()) {
             float level = mask.read(cell).r;
             if (level > OVERLAY_TITLE_LEVEL) color = OVERLAY_TITLE_COLOR;
             else if (level > OVERLAY_TEXT_LEVEL) color = OVERLAY_TEXT_COLOR;
         }
+    }
+    float2 uv = (float2(id) + 0.5) / float2(out.get_width(), out.get_height());
+    for (int i = 0; i < p.rect_count; i++) {
+        if (all(uv >= rects[i].min_frac) && all(uv < rects[i].max_frac)) color.rgb = mix(color.rgb, rects[i].color.rgb, rects[i].color.a);
     }
     out.write(color, id);
 }
