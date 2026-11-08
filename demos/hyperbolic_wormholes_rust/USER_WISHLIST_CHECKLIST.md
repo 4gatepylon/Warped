@@ -11,6 +11,23 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-126 Same play in every level.** "it looks like in Space Station you don't have the same health bars and
+  stuff. All the different levels should have the health bars and the weapons and sort of the same stuff that we made
+  happen in Lunar, including even the speckled noise for the lasers and the head bobbing and stuff like that when
+  you're running, the way the gun moves. All that has to be the same throughout the entire game. The only things that
+  kind of change are, like I mentioned, of course, the laser colors. It's green for the snow planet, golden white for
+  dust, red and blue for both Lunar and for Space Station, and also golden white for the Dark Forest. For Dark Forest,
+  it can just be like golden, golden. They should all have their own mini maps that are nicely represented. All should
+  have their own maps. [...] They all need to be possible to win, which means it needs to be possible to get to the
+  pylon. They all have the same ability for the player to place two wormholes if the player wants. It should be
+  possible for all of them to press E when you're next to the pylon to disable it. The patterns for the pylons are
+  three for lunar and three for dust. Dark forest and two for snow, and then only one pylon for the space station."
+  And: "Respawn timers and all that stuff should be the same throughout." Claimed by Claude Code (session
+  `wizardly-hamilton-23a121` and its subagents), one branch per level, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): a parity audit of every level against Lunar Surface on
+    `claude/levels-checks`, then each level's fixes on its own agent's branch (`claude/city-sphere-fixes`,
+    `claude/dark-forest-lens-robots`, `claude/snow-planet-torus`, `claude/dust-wormhole-speed`), in worktrees under
+    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
