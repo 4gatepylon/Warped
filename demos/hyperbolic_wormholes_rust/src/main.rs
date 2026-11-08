@@ -1681,6 +1681,7 @@ struct Session {
     last_output_px: (u32, u32),
     is_laser_on: bool,
     shot_time_s: f64,
+    sniper_reload_s: f64,
     is_running: bool,
     is_jumping: bool,
     is_walking_upright: bool,
@@ -1955,6 +1956,7 @@ impl Session {
             last_output_px: (0, 0),
             is_laser_on: false,
             shot_time_s: 0.0,
+            sniper_reload_s: 0.0,
             is_running: false,
             is_jumping: false,
             is_walking_upright: false,
@@ -2124,10 +2126,12 @@ impl Session {
         if is(Action::Shoot)
             && self.is_captured
             && self.gun == Gun::Laser
+            && self.sniper_reload_s <= 0.0
             && self.can_shoot()
             && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
         {
             self.shot_time_s = self.settings.sniper.shot_s;
+            self.sniper_reload_s = self.settings.sniper.reload_s;
         }
         true
     }
@@ -2161,6 +2165,7 @@ impl Session {
             return Ok(());
         }
         self.shot_time_s = (self.shot_time_s - dt_s).max(0.0);
+        self.sniper_reload_s = (self.sniper_reload_s - dt_s).max(0.0);
         if let Some(multiplayer) = &mut self.multiplayer
             && multiplayer.is_eliminated
         {
@@ -2905,8 +2910,8 @@ impl Session {
     /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the crosshair (unless
     /// text covers the view) and, in the bottom left, as
     /// segmented bars (`make_segmented_bar`): this player's health in a game on a server (one segment
-    /// per rifle body hit), the rifle's shots left before it overheats (with the rifle in hand), and
-    /// on a voxel map the sprint energy. Below the middle, the progress of turning off a console
+    /// per rifle body hit), the gun in hand's ammo (the rifle's shots left before it overheats, or
+    /// the sniper's one block, empty while it reloads), and on a voxel map the sprint energy. Below the middle, the progress of turning off a console
     /// (while holding `E` on one).
     ///
     /// Example: `let rects = session.get_overlay_rects();`
@@ -2921,6 +2926,15 @@ impl Session {
                 u32::from(self.settings.rifle.body_hits_to_eliminate),
                 multiplayer.client.health_frac,
                 HEALTH_BAR_FILL_COLOR,
+            ));
+        }
+        if self.gun == Gun::Laser {
+            let is_loaded: bool = self.sniper_reload_s <= 0.0;
+            rects.extend(make_segmented_bar(
+                HEAT_BAR_MIN_FRAC,
+                1,
+                if is_loaded { 1.0 } else { 0.0 },
+                HEAT_BAR_FILL_COLOR,
             ));
         }
         if self.gun == Gun::Rifle {
@@ -3588,6 +3602,7 @@ mod tests {
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Bar fill | empty, a sliver (one segment), 11 of 12 after the network's byte rounding, full | `segmented_bars_count_whole_segments` |
+    //! | Segment count | 12, 1 (the sniper's block, empty or full and as wide as the whole bar) | `segmented_bars_count_whole_segments` |
     //! | Overlay text | a centred two-line banner, the left-aligned menu with a line too long for its mask | `overlay_text_fits_its_mask` |
 
     use super::*;
@@ -3665,5 +3680,11 @@ mod tests {
             [0.0, 0.01, eleven_twelfths_frac, 1.0].map(filled),
             [0, 1, 11, 12]
         );
+        for (frac, color) in [(0.0, ENERGY_BAR_BACK_COLOR), (1.0, HEAT_BAR_FILL_COLOR)] {
+            let block = make_segmented_bar([0.0, 0.0], 1, frac, HEAT_BAR_FILL_COLOR);
+            assert_eq!(block.len(), 1);
+            assert_eq!(block[0].color, color);
+            assert_eq!(block[0].max_frac[0], ENERGY_BAR_SIZE_FRAC[0]);
+        }
     }
 }

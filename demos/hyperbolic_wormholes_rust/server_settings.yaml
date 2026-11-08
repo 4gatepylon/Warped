@@ -29,6 +29,7 @@ sprint_energy:
 
 sniper:  # Gun 1 (key 1): the thin laser wand, one shot per click.
   shot_s: 0.25  # How long each shot hits whatever the crosshair crosses.
+  reload_s: 2.0  # Seconds from one shot until the next can fire (0 for none); its ammo bar is one block.
   hits_to_eliminate: 1  # Hits that eliminate a player.
   beam_speed_m_per_s: 250.0  # How fast the beam flies out from the tip.
   beam_trail_s: 0.25  # How long each point of the beam stays lit after the beam's front passes it.

@@ -76,7 +76,8 @@ Controls (the defaults; to change them, edit the `keys` in a copy of `player_set
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
-`1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click; one hit eliminates), and gun 2, the
+`1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click, then 2 s to reload, shown by one block
+above the energy bar that empties when you fire; one hit eliminates), and gun 2, the
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s), `E` (held)
 turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu (`Q`/`E`
