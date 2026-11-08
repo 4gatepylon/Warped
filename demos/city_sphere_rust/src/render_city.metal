@@ -6,6 +6,9 @@ using namespace metal;
 constant uint MAX_HOLE_COUNT = 8;
 constant float BEACON_FLAG = 2.0;
 constant float METAL_SPEC = 0.45;
+constant float RIB_WIDTH = 0.045;
+constant float RIB_ALPHA = 0.92;
+constant float3 RIB_COLOR = float3(0.62, 0.64, 0.7);
 constant float METAL_SATURATION = 0.3;
 constant float METAL_SPEC_POWER = 48.0;
 constant float STREET_LAYER = 0.0;
@@ -120,14 +123,16 @@ fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& 
     float fresnel = 0.05 + 0.55 * pow(1.0 - facing, 4.0);
     float2 cell = fract(in.uv);
     float2 edge = min(cell, 1.0 - cell);
-    float line = 1.0 - smoothstep(0.0, 0.025, min(edge.x, edge.y));
+    float line = 1.0 - smoothstep(RIB_WIDTH * 0.6, RIB_WIDTH, min(edge.x, edge.y));
     float rim = 0.0;
     for (uint i = 0; i < hole_count && i < MAX_HOLE_COUNT; i++) {
         float c = dot(d, u.holes[i].xyz);
         rim = max(rim, smoothstep(u.holes[i].w - 0.004, u.holes[i].w, c));
     }
-    float alpha = clamp(0.07 + fresnel + 0.35 * line + 0.6 * rim, 0.0, 0.9);
-    float3 tint = in.color.rgb * (0.6 + 0.4 * line) + float3(0.8, 0.6, 1.0) * rim;
+    float alpha = clamp(0.06 + fresnel * (1.0 - line) + RIB_ALPHA * line + 0.6 * rim, 0.0, 0.95);
+    float3 l = normalize(-in.world);
+    float rib_light = 0.35 + 0.65 * pow(max(dot(reflect(-view, n), l), 0.0), 8.0);
+    float3 tint = mix(in.color.rgb * 0.6, RIB_COLOR * rib_light, line) + float3(0.8, 0.6, 1.0) * rim;
     return float4(encode_srgb(tint) * alpha, alpha);
 }
 
