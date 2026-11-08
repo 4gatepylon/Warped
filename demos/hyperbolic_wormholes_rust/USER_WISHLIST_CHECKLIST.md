@@ -10,12 +10,12 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-Nothing yet.
+- [~] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then play
+  as that team. Lasers can hit teammates (friendly fire stays on), but only the enemy's consoles can be turned off. Claimed by Claude Code
+  (session `wizardly-hamilton-23a121`), branch `claude/lobby`, 2026-11-07.
 
 ## Open
 
-- [ ] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then play
-  as that team. Lasers can hit teammates (friendly fire stays on), but only the enemy's consoles can be turned off.
 - [ ] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice).
 - [ ] **W-38 Soft map edge.** Instead of a wall at the map's edge, players get slower and slower as they move off the
