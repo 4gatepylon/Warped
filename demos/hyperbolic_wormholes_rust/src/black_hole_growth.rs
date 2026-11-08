@@ -1,11 +1,11 @@
-//! `reality_bend.rs` sets the reality bend's strength (W-68) from the game's consoles: each console
-//! turned off strengthens the black hole, until with one console left the map closes into a
-//! sphere. The strength eases to each new target over the settings' `reality_bend.transition_s`,
-//! and a forced strength (`--bend-strength`) overrides it.
+//! `black_hole_growth.rs` sets the black hole's strength (W-68) from the game's consoles: each
+//! console turned off grows the black hole, up to full strength with one console left. The strength
+//! eases to each new target over the settings' `black_hole.transition_s`, and a forced strength
+//! (`--black-hole-strength`) overrides it.
 //!
-//! Interface: `get_target_strength_frac`, `RealityBend` (`New`, `update`, `strength_frac`).
+//! Interface: `get_target_strength_frac`, `BlackHoleGrowth` (`New`, `update`, `strength_frac`).
 //!
-//! Example: `reality_bend.update(&mut world, game.off_mask, now_s);`
+//! Example: `black_hole_growth.update(&mut world, game.off_mask, now_s);`
 
 use crate::voxel_world::VoxelWorld;
 
@@ -21,10 +21,10 @@ pub fn get_target_strength_frac(off_mask: u32, console_count: usize) -> f64 {
     (f64::from(off_mask.count_ones()) / (console_count - 1) as f64).min(1.0)
 }
 
-/// `RealityBend` is the bend's strength over time: the strength it eases from, the target it eases
+/// `BlackHoleGrowth` is the black hole's strength over time: the strength it eases from, the target it eases
 /// to and when that target was set (seconds on the caller's clock), the strength now
 /// (`strength_frac`), and a forced strength that replaces the eased one, if any.
-pub struct RealityBend {
+pub struct BlackHoleGrowth {
     forced_frac: Option<f64>,
     from_frac: f64,
     target_frac: f64,
@@ -32,13 +32,13 @@ pub struct RealityBend {
     pub strength_frac: f64,
 }
 
-impl RealityBend {
-    /// `New` gives an unbent strength, or always `forced_frac` (0 to 1) when given.
+impl BlackHoleGrowth {
+    /// `New` gives the map's own strength (0), or always `forced_frac` (0 to 1) when given.
     ///
-    /// Example: `let reality_bend = RealityBend::New(arguments.bend_strength);`
+    /// Example: `let black_hole_growth = BlackHoleGrowth::New(arguments.black_hole_strength);`
     #[allow(non_snake_case)]
-    pub fn New(forced_frac: Option<f64>) -> RealityBend {
-        RealityBend {
+    pub fn New(forced_frac: Option<f64>) -> BlackHoleGrowth {
+        BlackHoleGrowth {
             forced_frac,
             from_frac: 0.0,
             target_frac: 0.0,
@@ -56,16 +56,16 @@ impl RealityBend {
         self.from_frac + (self.target_frac - self.from_frac) * t * t * (3.0 - 2.0 * t)
     }
 
-    /// `update` sets the strength at `now_s` for the consoles in `off_mask` and bends `world` to it
-    /// (`VoxelWorld::set_bend_strength`); a new target starts easing from the strength now. A
-    /// world that can't bend stays as it is.
+    /// `update` sets the strength at `now_s` for the consoles in `off_mask` and grows `world`'s
+    /// black hole to it (`VoxelWorld::grow_black_hole`); a new target starts easing from the
+    /// strength now. A world whose black hole doesn't grow stays as it is.
     ///
-    /// Example: `reality_bend.update(&mut world, game.off_mask, now_s);`
+    /// Example: `black_hole_growth.update(&mut world, game.off_mask, now_s);`
     pub fn update(&mut self, world: &mut VoxelWorld, off_mask: u32, now_s: f64) {
-        if !world.can_bend() {
+        if !world.can_grow_black_hole() {
             return;
         }
-        let transition_s: f64 = world.settings.reality_bend.transition_s;
+        let transition_s: f64 = world.settings.black_hole.transition_s;
         let target_frac: f64 = get_target_strength_frac(off_mask, world.consoles.len());
         if target_frac != self.target_frac {
             self.from_frac = self.get_eased_frac(now_s, transition_s);
@@ -74,24 +74,25 @@ impl RealityBend {
         self.strength_frac = self
             .forced_frac
             .unwrap_or_else(|| self.get_eased_frac(now_s, transition_s));
-        world.set_bend_strength(self.strength_frac);
+        world.grow_black_hole(self.strength_frac);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the bend's strength schedule.
+    //! Tests of the black hole's strength schedule.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Consoles off | none, some, all but one, all | `the_target_counts_consoles_off` |
     //! | Time since the target changed | at once, during the transition (rising), after it | `the_strength_eases_without_jumps` |
     //! | Target change | up (consoles off), down to 0 (a new game), mid-transition | `the_strength_eases_without_jumps` |
-    //! | Map | bends (Lunar Surface), doesn't (no consoles) | `the_strength_eases_without_jumps`, `a_map_without_consoles_never_bends` |
+    //! | Map | grows (Lunar Surface), doesn't (no consoles) | `the_strength_eases_without_jumps`, `a_map_without_consoles_never_grows` |
     //! | Forced strength | none, given | `the_strength_eases_without_jumps`, `a_forced_strength_wins` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
+    use crate::voxel_world::VoxelWarp;
 
     const CONSOLE_COUNT: usize = 6;
     const TRANSITION_S: f64 = 4.0;
@@ -115,60 +116,64 @@ mod tests {
     #[test]
     fn the_strength_eases_without_jumps() {
         let mut world: VoxelWorld = load_lunar_surface();
-        assert_eq!(world.settings.reality_bend.transition_s, TRANSITION_S);
+        assert_eq!(world.settings.black_hole.transition_s, TRANSITION_S);
         let console_count: usize = world.consoles.len();
         let one_off_frac: f64 = 1.0 / (console_count - 1) as f64;
-        let mut bend: RealityBend = RealityBend::New(None);
-        bend.update(&mut world, 0b1, 0.0);
-        assert_eq!(bend.strength_frac, 0.0);
+        let map_hole_m: f64 = world.warps[0].m;
+        let mut growth: BlackHoleGrowth = BlackHoleGrowth::New(None);
+        growth.update(&mut world, 0b1, 0.0);
+        assert_eq!(growth.strength_frac, 0.0);
         let mut last_frac: f64 = 0.0;
         for i in 1..=SAMPLE_COUNT {
-            bend.update(
+            growth.update(
                 &mut world,
                 0b1,
                 TRANSITION_S * i as f64 / SAMPLE_COUNT as f64,
             );
-            assert!(bend.strength_frac >= last_frac);
-            assert!(bend.strength_frac - last_frac < MAX_STEP_FRAC * one_off_frac);
-            last_frac = bend.strength_frac;
+            assert!(growth.strength_frac >= last_frac);
+            assert!(growth.strength_frac - last_frac < MAX_STEP_FRAC * one_off_frac);
+            last_frac = growth.strength_frac;
         }
         assert!((last_frac - one_off_frac).abs() < TOLERANCE);
-        bend.update(&mut world, 0b11, 2.0 * TRANSITION_S);
-        bend.update(&mut world, 0, 2.5 * TRANSITION_S);
-        let turned_frac: f64 = bend.strength_frac;
+        growth.update(&mut world, 0b11, 2.0 * TRANSITION_S);
+        growth.update(&mut world, 0, 2.5 * TRANSITION_S);
+        let turned_frac: f64 = growth.strength_frac;
         assert!(turned_frac > one_off_frac && turned_frac < 2.0 * one_off_frac);
-        bend.update(
+        growth.update(
             &mut world,
             0,
             2.5 * TRANSITION_S + TRANSITION_S / SAMPLE_COUNT as f64,
         );
         assert!(
-            bend.strength_frac < turned_frac && turned_frac - bend.strength_frac < MAX_STEP_FRAC
+            growth.strength_frac < turned_frac
+                && turned_frac - growth.strength_frac < MAX_STEP_FRAC
         );
-        bend.update(&mut world, 0, 4.0 * TRANSITION_S);
-        assert_eq!(bend.strength_frac, 0.0);
-        assert!(world.bend.is_flat());
+        growth.update(&mut world, 0, 4.0 * TRANSITION_S);
+        assert_eq!(growth.strength_frac, 0.0);
+        assert_eq!(world.warps[0].m, map_hole_m);
     }
 
     #[test]
-    fn a_map_without_consoles_never_bends() {
+    fn a_map_without_consoles_never_grows() {
         let mut map: Map =
             Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
         map.materials.retain(|m| !m.name.contains(" console "));
         let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
-        assert!(!world.can_bend());
-        let mut bend: RealityBend = RealityBend::New(None);
-        bend.update(&mut world, 0, TRANSITION_S);
-        assert_eq!(bend.strength_frac, 0.0);
-        assert!(world.bend.is_flat());
+        assert!(!world.can_grow_black_hole());
+        let map_hole_m: f64 = world.warps[0].m;
+        let mut growth: BlackHoleGrowth = BlackHoleGrowth::New(None);
+        growth.update(&mut world, 0, TRANSITION_S);
+        assert_eq!(growth.strength_frac, 0.0);
+        assert_eq!(world.warps[0].m, map_hole_m);
     }
 
     #[test]
     fn a_forced_strength_wins() {
         let mut world: VoxelWorld = load_lunar_surface();
-        let mut bend: RealityBend = RealityBend::New(Some(0.6));
-        bend.update(&mut world, 0, 0.0);
-        assert_eq!(bend.strength_frac, 0.6);
-        assert!(!world.bend.is_flat());
+        let map_hole: VoxelWarp = world.warps[0].clone();
+        let mut growth: BlackHoleGrowth = BlackHoleGrowth::New(Some(0.6));
+        growth.update(&mut world, 0, 0.0);
+        assert_eq!(growth.strength_frac, 0.6);
+        assert!(world.warps[0].m > map_hole.m);
     }
 }

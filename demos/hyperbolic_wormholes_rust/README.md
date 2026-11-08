@@ -152,11 +152,9 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   none). It is drawn once into a texture when the map loads.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
-- `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and
-  `--view`: the map's edges curl up into a bowl, and at 1 it closes into the inside of a sphere. The Metal ray tracer
-  walks each ray through the bent world in short pieces, halved until each one's map chord follows the bent path within
-  2 cm (or half a pixel far away), and traces every piece through the unbent map; flat frames use the unchanged tracer
-  (`render_voxel.metal` is compiled with and without `HAS_BEND`).
+- `--black-hole-strength <0..1>` grows Lunar Surface's black hole to that strength in the window, `--bench-views`
+  and `--view` (1 is full strength, with one console left; W-68, `black_hole_growth.rs`); otherwise it follows the
+  consoles. Time runs slower near the black hole (W-107, D107): the HUD shows how fast yours runs.
 
 ## Play together
 

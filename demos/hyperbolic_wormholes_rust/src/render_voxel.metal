@@ -5,10 +5,7 @@
  * straight geodesic chords between warp objects, kick–drift–kick steps inside their reach, a voxel walk through each
  * structure in its Klein coordinates, the ground's folded {4,5} tiling, lunar-Lambert light with soft sun shadows, lamps,
  * earthshine, a thin haze, laser beams, the dust of shots into the ground, the zone walls, stars, a planet, spaceships
- * flying over and bloom. Everything here belongs to the `lunar` appearance style. Under a reality bend (`bend.rs`)
- * the rays and warp objects are in the bent world and every other thing stays in the map: each short chord of a ray
- * is traced through the map between its ends' map points. render_voxel.rs compiles this file twice, with `HAS_BEND` 0
- * for flat frames (the flat ray tracer, untouched) and 1 for bent ones.
+ * flying over and bloom. Everything here belongs to the `lunar` appearance style.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread per pixel of the render size.
@@ -25,7 +22,6 @@ using namespace metal;
     device const DustParticle *dust_particles [[buffer(30)]], \
     texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]], \
     texture2d<float> milky_way [[texture(3)]]
-#define HAS_BEND __HAS_BEND__
 
 constant int MAX_ITERATIONS = 240;
 constant int MAX_SHAPE_STEPS = 96;
@@ -319,13 +315,6 @@ constant float GLOW_FLOOR = 1.0 / 1024.0;
 constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
 constant int REFINED_PIXELS_PER_CELL = 3;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
-constant int MAX_BENT_PIECES = 512;
-constant int MAX_BEND_HALVINGS = 8;
-constant float BEND_SAG_M = 0.02;
-constant float BEND_SAG_PIXELS = 0.5;
-constant float CHORD_SQ_PER_SAG_RADIUS = 8.0;
-constant float MIN_BEND_PIECE_M = 0.5;
-constant float MAX_BEND_PIECE_M = 8.0;
 constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
 constant int HULL_FIGHTER = 0;
 constant int HULL_RING_SHIP = 1;
@@ -494,10 +483,9 @@ struct ZoneWalls {
 
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
- * regions, flashlight, the reality bend's curvature per meter (0 when flat), edge radius and greatest height of any
- * surface above or below the ground (meters), the spaceships, the dust (how many bursts and particles), the beams'
- * speckle (the frame's seed and the shares of speckled pixels painted black and turned white) and the zone walls
- * (`zone_walls.rs`'s `to_gpu`), as `render_voxel.rs` writes them.
+ * regions, flashlight, the spaceships, the dust (how many bursts and particles), the beams' speckle (the frame's seed
+ * and the shares of speckled pixels painted black and turned white) and the zone walls (`zone_walls.rs`'s `to_gpu`),
+ * as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -538,7 +526,6 @@ struct VoxelUniforms {
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
-    float4 bend;
     Spaceship spaceships[SPACESHIP_COUNT];
     int4 dust_counts;
     float4 beam_speckle;
@@ -1969,19 +1956,7 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/**
- * @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a
- * flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's
- * code (team and gun) and speckle share. A chord that starts away from the eye (`travelled` above 0) and only moves away
- * from a segment skips it: the chord before ends at that nearest point and counts it there.
- * @par Example
- * @code
- * scan_beams(scene, x, v, s, t, core, halo, code, speckle);
- * @endcode
- * @par Must know
- * - Gotchas:
- *   - A far chord's start, where a pixel is metres wide, would light the whole sky with a near segment's glow.
- */
+/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
 static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
                        thread float &speckle) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
@@ -1995,7 +1970,6 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float k1 = 0.5 * ((al * al - ga * ga) + (be * be - et * et)), k2 = al * be - ga * et;
         float s_c = k1 > abs(k2) ? 0.5 * clamp_atanh(-k2 / k1) : (k2 < 0.0 ? s_end : 0.0);
         s_c = clamp(s_c, 0.0, min(s_end, FAR_S));
-        if (s_c <= 0.0 && travelled > 0.0) continue;
         float4 xc = geodesic_point(x, v, s_c);
         float sigma = clamp(clamp_atanh(mdot(xc, b) / -mdot(xc, a)), 0.0, info.x);
         float d_m = measure_gap(xc, geodesic_point(a, b, sigma)) * r;
@@ -2006,70 +1980,6 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float hl = info.z * exp(-q / BEAM_REACH);
         if (hl > halo) { halo = hl; code = info.w; speckle = info.y; }
     }
-}
-
-/** @brief `get_axis_distance_m` gives a point's distance in meters from the origin's vertical axis, in the origin's normal coordinates. @par Example @code float out_m = get_axis_distance_m(p, r); @endcode */
-static float get_axis_distance_m(float4 p, float r) { float n = length(p.xyz); return n > 0.0 ? length(p.xz) * r * asinh(n) / n : 0.0; }
-
-/**
- * @brief `unbend_point` is bend.rs's `Bend::unbend_point` for curvature k per meter: the map point that the bent world
- * shows at x, with x's polar angle `theta` about the bend sphere's centre (0 straight below it) and k times its
- * distance from that centre, `k_rho`. It works in the origin's normal coordinates ξ (meters), in forms that stay exact as
- * k goes to 0.
- * @par Example
- * @code
- * float4 m = unbend_point(x, r, k, theta, k_rho);
- * @endcode
- */
-static float4 unbend_point(float4 x, float r, float k, thread float &theta, thread float &k_rho) {
-    float n = length(x.xyz);
-    float3 xi = n > 0.0 ? x.xyz * (r * asinh(n) / n) : float3(0.0);
-    float out_m = length(xi.xz), below = 1.0 - k * xi.y;
-    theta = atan2(k * out_m, below);
-    k_rho = length(float2(k * out_m, below));
-    float h_m = (2.0 * xi.y - k * dot(xi, xi)) / (1.0 + k_rho), scale = out_m > 0.0 ? theta / (k * out_m) : 0.0;
-    float3 q = float3(xi.x * scale, h_m, xi.z * scale);
-    float d = length(q) / r;
-    return d > 0.0 ? float4(q * (sinh(d) / (d * r)), cosh(d)) : float4(0.0, 0.0, 0.0, 1.0);
-}
-
-/**
- * @brief `get_empty_s` gives how far (curvature units) a point of the bent world is from every point that unbends within
- * the edge radius and below the greatest surface height, so from every surface (0 when it may be near one): the larger
- * of its distances, in the origin's normal coordinates, from the cone of polar angles up to the edge's about the bend
- * sphere's centre and from the outside of the sphere about that centre whose points unbend to that height; distances in
- * those coordinates bound distances in H³ from below.
- * @par Example
- * @code
- * float empty_s = get_empty_s(scene, x);
- * @endcode
- */
-static float get_empty_s(thread const Scene &scene, float4 x) {
-    float r = scene.u.curvature_radius_m, k = scene.u.bend.x, theta, k_rho;
-    unbend_point(x, r, k, theta, k_rho);
-    return max(k_rho * sin(clamp(theta - k * scene.u.bend.y, 0.0, M_PI_2_F)), 1.0 - k * scene.u.bend.z - k_rho) / (k * r);
-}
-
-/**
- * @brief `trace_bent_chord` finds the first surface along the map's chord from m0 to m1, the map points at the ends of
- * one short chord of a bent ray, testing every structure, and puts the map chord's start and unit tangent in `chord_x`
- * and `chord_v`; a hit beyond the edge radius, which the bend cuts away, doesn't count. It returns the fraction of the
- * chord before the hit (1 without one).
- * @par Example
- * @code
- * float frac = trace_bent_chord(scene, m, mn, hit, glass_s, chord_x, chord_v);
- * @endcode
- */
-static float trace_bent_chord(thread const Scene &scene, float4 m0, float4 m1, thread Hit &hit, thread float &glass_s, thread float4 &chord_x,
-                              thread float4 &chord_v) {
-    float length_s = measure_gap(m0, m1);
-    chord_x = m0;
-    chord_v = normalize_tangent(m0, m1);
-    hit.s = length_s;
-    hit.mat = 0;
-    trace_scene(scene, m0, chord_v, -1, 0.0, float3(0.0), hit, glass_s);
-    if (hit.mat != 0 && get_axis_distance_m(geodesic_point(m0, chord_v, hit.s), scene.u.curvature_radius_m) > scene.u.bend.y) hit.mat = 0;
-    return hit.mat != 0 ? hit.s / max(length_s, TINY) : 1.0;
 }
 
 /**
@@ -2143,40 +2053,6 @@ static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float
         }
         dust += float4(to_linear(wall.w > HALF_KIND ? RED_COLOR : BLUE_COLOR) * ZONE_WALL_BRIGHTNESS * depth, depth);
     }
-}
-
-/**
- * @brief `trace_bent_piece` traces the first piece of a bent ray from x along v, at most `s_max` long (curvature units),
- * through the map, as voxel_world.rs's laser does: it halves the piece (up to `MAX_BEND_HALVINGS` times) while the map
- * point of its midpoint strays from the midpoint of the map chord between its ends' map points by more than a tolerance
- * times the stretch of unbending there, the tolerance being `BEND_SAG_M` or, once the ray has travelled `travelled`
- * far enough, half a pixel's footprint there, whichever is larger. Then it traces that chord (`trace_bent_chord`, counting glass in `glass`, and adding the zone walls along it to
- * `dust`) unless both ends unbend beyond the edge radius. It returns the piece's length, and in `frac` the fraction of it before a hit.
- * @par Example
- * @code
- * float s = trace_bent_piece(scene, x, v, nominal_s, travelled, hit, glass, hx, hv, frac, dust);
- * @endcode
- */
-static float trace_bent_piece(thread const Scene &scene, float4 x, float4 v, float s_max, float travelled, thread Hit &hit, thread float &glass, thread float4 &chord_x,
-                              thread float4 &chord_v, thread float &frac, thread float4 &dust) {
-    float r = scene.u.curvature_radius_m, k = scene.u.bend.x, edge_rad = k * scene.u.bend.y, s = s_max, theta, theta_mid, theta_end, k_rho;
-    float4 m = unbend_point(x, r, k, theta, k_rho), mn;
-    float sag_m = max(BEND_SAG_M, BEND_SAG_PIXELS * scene.u.pixel_angle_rad * r * sinh(min(travelled, FAR_S)));
-    for (int i = 0;; i++) {
-        float4 xn = geodesic_point(x, v, s), xm = geodesic_point(x, v, 0.5 * s);
-        mn = unbend_point(xn * rsqrt(-mdot(xn, xn)), r, k, theta_end, k_rho);
-        float4 mm = unbend_point(xm * rsqrt(-mdot(xm, xm)), r, k, theta_mid, k_rho), mid = m + mn;
-        if (i == MAX_BEND_HALVINGS || measure_gap(mm, mid * rsqrt(-mdot(mid, mid))) * r * s <= sag_m * measure_gap(m, mn)) break;
-        s *= 0.5;
-    }
-    hit.mat = 0;
-    frac = 1.0;
-    if (theta > edge_rad && theta_end > edge_rad) return s;
-    float glass_s = NO_HIT_S;
-    frac = trace_bent_chord(scene, m, mn, hit, glass_s, chord_x, chord_v);
-    if (glass_s < hit.s) glass += 1.0;
-    if (scene.u.zone_walls.counts.x > 0) scan_zone_walls(scene, chord_x, chord_v, hit.s, travelled, dust);
-    return s;
 }
 
 /**
@@ -2279,12 +2155,7 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * @brief `trace_ray` traces a ray backwards from the eye through a point of the image (in pixels from its top left
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
  * surface, the sky or a horizon. After `LATE_STEP_COUNT` iterations (rays winding near a throat or the black hole,
- * which land in the lens's most compressed, aliased images) its bent steps are three times longer. With `HAS_BEND` the
- * ray travels the bent world in pieces (`trace_bent_piece`) between warp objects and within its bent steps, scans the
- * laser beams once per straight chord between warp objects (as the flat tracer does), crosses
- * empty space (the void beyond the edge, the air high above the ground) in long untraced strides (`get_empty_s`), and
- * reaches the sky once it is past every surface and
- * moving away from the origin.
+ * which land in the lens's most compressed, aliased images) its bent steps are three times longer.
  * @par Example
  * @code
  * VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
@@ -2312,11 +2183,6 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float4 gradient = float4(0.0);
     float3 local = float3(0.0);
     bool has_gradient = false;
-#if HAS_BEND
-    float k = u.bend.x, sky_w = cosh((u.bend.y + u.bend.z) / r);
-    float nominal_s = clamp(sqrt(CHORD_SQ_PER_SAG_RADIUS * BEND_SAG_M / k), MIN_BEND_PIECE_M, MAX_BEND_PIECE_M) / r;
-    int bent_piece_count = 0;
-#endif
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         if (inside < 0) {
             float s_end = FAR_S;
@@ -2327,28 +2193,6 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 float s_in = max(clamp_atanh(b / a) - acosh(reach_cosh * rsqrt(max(closest_sq, 1.0))), 0.0);
                 if (s_in < s_end) { s_end = s_in; entering = w; }
             }
-#if HAS_BEND
-            float4 chord_x = x, chord_v = v;
-            float chord_travelled = travelled, chord_s = 0.0;
-            while (s_end > 0.0 && bent_piece_count++ < MAX_BENT_PIECES) {
-                if (entering < 0 && x.w > sky_w && v.w > 0.0) { outcome = OUTCOME_SKY; break; }
-                float empty_s = get_empty_s(scene, x), s = min(empty_s, s_end), frac = 1.0;
-                float4 hx = x, hv = v;
-                if (empty_s <= nominal_s) s = trace_bent_piece(scene, x, v, min(nominal_s, s_end), travelled, hit, glass, hx, hv, frac, dust);
-                chord_s += s * frac;
-                if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
-                float4 xn = geodesic_point(x, v, s);
-                v = normalize_tangent(xn * rsqrt(-mdot(xn, xn)), geodesic_tangent(x, v, s));
-                x = xn * rsqrt(-mdot(xn, xn));
-                travelled += s;
-                s_end -= s;
-            }
-            if (u.beam_count > 0) scan_beams(scene, chord_x, chord_v, chord_s, chord_travelled, core, halo, code, speckle);
-            if (outcome == OUTCOME_SKY && last_warp >= 0) back_to_reach(scene, last_warp, x, v);
-            if (s_end > 0.0 || outcome != OUTCOME_LOST) break;
-            inside = entering;
-            continue;
-#endif
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
@@ -2376,24 +2220,12 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         hit.s = ds;
         hit.mat = 0;
         float glass_s = NO_HIT_S;
-#if HAS_BEND
-        float done = 0.0, frac = 1.0;
-        float4 hx = x, hv = v;
-        while (done < ds && hit.mat == 0 && bent_piece_count++ < MAX_BENT_PIECES) {
-            float4 xa = geodesic_point(x, v, done);
-            float piece = trace_bent_piece(scene, xa * rsqrt(-mdot(xa, xa)), geodesic_tangent(x, v, done), ds - done, travelled + done, hit, glass, hx, hv, frac, dust);
-            done += piece * frac;
-        }
-        if (u.beam_count > 0) scan_beams(scene, x, v, min(done, ds), travelled, core, halo, code, speckle);
-        if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
-#else
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
         if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
-#endif
         float4 xn = geodesic_point(x, v, ds), vn = geodesic_tangent(x, v, ds);
         x = xn * rsqrt(-mdot(xn, xn));
         v = normalize_tangent(x, vn);
