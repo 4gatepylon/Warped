@@ -2,11 +2,12 @@
 //! `VoxelWorld` (with any avatars), the laser beams and the dust of shots into the ground
 //! (`dust.rs`) into buffers each frame and traces them into the render texture that
 //! `render_metal.rs` upscales and presents, every pixel or with the house's adaptive sampling
-//! (`render_metal.rs`'s `encode_adaptive_sampling`).
+//! (`render_metal.rs`'s `encode_adaptive_sampling`). Under a reality bend (`bend.rs`, W-68) the
+//! rays and warp objects are in the bent world and everything else stays in the map.
 //!
 //! Interface: `VoxelUniforms`, `VoxelFrame::Build`, `VoxelGpu`.
 //!
-//! Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &[], (1280, 800));`
+//! Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &[], (1280, 800), bend);`
 
 use std::error::Error;
 use std::ptr::NonNull;
@@ -113,6 +114,7 @@ pub struct VoxelUniforms {
     pub flashlight_position: [f32; 4],
     pub flashlight_direction: [f32; 4],
     pub flashlight: [f32; 4],
+    pub bend: [f32; 4],
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
     pub beam_speckle: [f32; 4],
@@ -259,6 +261,31 @@ fn pack_grid(grid: &ClearanceGrid, r: f64) -> [f32; 4] {
     ]
 }
 
+/// `get_bend_uniform` gives the shader's `VoxelUniforms.bend`: the bend's curvature per meter
+/// (0 when flat), its edge radius, and the greatest height of any terrain or structure above or
+/// below the ground, all in meters.
+///
+/// Example: `let bend = get_bend_uniform(&world, Bend::FromStrength(0.5, 160.0, world.r));`
+fn get_bend_uniform(world: &VoxelWorld, bend: Bend) -> [f32; 4] {
+    if bend.is_flat() {
+        return [0.0; 4];
+    }
+    let r: f64 = world.r;
+    let terrain_top_m: f64 = world.terrain.as_ref().map_or(0.0, |t| t.get_max_height_m());
+    let content_height_m: f64 = world
+        .structures
+        .iter()
+        .map(|s| r * (s.centre.y.abs().asinh() + s.radius))
+        .fold(terrain_top_m, f64::max);
+    [
+        bend.curvature_per_m,
+        bend.edge_radius_m,
+        content_height_m,
+        0.0,
+    ]
+    .map(|x| x as f32)
+}
+
 /// `pack_dust` gives the shader's dust bursts and their particles for `clouds`: each burst's
 /// inverse frame rows, its sun, where its particles start and how many there are, and how far its
 /// farthest particle centre is (and its largest radius), in meters.
@@ -329,11 +356,14 @@ fn to_columns(m: DMat4) -> [[f32; 4]; 4] {
 impl VoxelFrame {
     /// `Build` packs `world` seen from `camera` at a render size, with laser segments of each team
     /// (`beams`, each drawn in its gun's style as far as `clip_beam_to_map` allows), an optional
-    /// laser spot and the dust of shots into the ground, all in the world bent by `_bend` (W-68;
-    /// not drawn bent yet). The speckle picks its pixels anew each millisecond of
-    /// `world.sky_time_s`, and their kinds in the shares of `world.settings.beam_speckle`.
+    /// laser spot, the dust of shots into the ground, and a reality bend. `camera`, `beams` and
+    /// `spot` are in the bent world (`bend.bend_frame` of the map's camera); the wormhole mouths
+    /// are bent here (the black hole stays on o's vertical axis, which the bend leaves alone); the
+    /// flashlight, the dust and everything else are in the map. A flat bend draws the map as it
+    /// is. The speckle picks its pixels anew each millisecond of `world.sky_time_s`, and their
+    /// kinds in the shares of `world.settings.beam_speckle`.
     ///
-    /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &clouds, (1280, 800), world.bend);`
+    /// Example: `let frame = VoxelFrame::Build(&world, bend.bend_frame(eye), &beams, spot, &clouds, (1280, 800), bend);`
     #[allow(non_snake_case)]
     pub fn Build(
         world: &VoxelWorld,
@@ -342,7 +372,7 @@ impl VoxelFrame {
         spot: Option<(DVec4, u32)>,
         dust: &[DustCloud],
         size_px: (u32, u32),
-        _bend: Bend,
+        bend: Bend,
     ) -> VoxelFrame {
         let r: f64 = world.r;
         let structures: Vec<GpuStructure> = world
@@ -369,6 +399,11 @@ impl VoxelFrame {
                     Some(_) => &NO_CLEARANCE_GRID,
                     None => &world.clearance.grids[k],
                 };
+                let frame: DMat4 = if w.is_mouth {
+                    bend.bend_frame(w.frame)
+                } else {
+                    w.frame
+                };
                 let first: usize = lists.len();
                 lists.extend(w.list.iter().map(|&k| {
                     let structure = &world.structures[k];
@@ -381,9 +416,9 @@ impl VoxelFrame {
                     ]
                 }));
                 GpuWarp {
-                    inverse: to_columns(w.inverse),
-                    forward: to_columns(w.frame),
-                    centre: to_f32(w.centre),
+                    inverse: to_columns(invert_lorentz(frame)),
+                    forward: to_columns(frame),
+                    centre: to_f32(frame.col(AXIS_W)),
                     params: [
                         get_warp_kind(w),
                         w.m as f32,
@@ -467,7 +502,7 @@ impl VoxelFrame {
             planet: planet.0.as_vec3().extend(planet.1 as f32).to_array(),
             planet_e1: e1.as_vec3().extend(0.0).to_array(),
             planet_e2: e2.as_vec3().extend(0.0).to_array(),
-            spot: spot.map_or([0.0, 0.0, 0.0, 1.0], |(x, _)| to_f32(x)),
+            spot: spot.map_or([0.0, 0.0, 0.0, 1.0], |(x, _)| to_f32(bend.unbend_point(x))),
             spot_color: spot.map_or([0.0; 4], |(_, team)| {
                 let c: [f32; 3] = team_colors[team as usize % 2];
                 [c[0], c[1], c[2], SPOT_BRIGHTNESS]
@@ -511,6 +546,7 @@ impl VoxelFrame {
                     light.brightness_frac as f32,
                 ]
             }),
+            bend: get_bend_uniform(world, bend),
             spaceships: get_spaceships(world.sky_time_s),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
             beam_speckle: [
@@ -676,13 +712,67 @@ fn dispatch(
     );
 }
 
-/// `VoxelGpu` is the voxel renderer's pipelines (every pixel, adaptive sampling's, the
+/// `TracePipelines` is the ray tracer's pipelines from one compile of `render_voxel.metal`: every
+/// pixel's and adaptive sampling's.
+struct TracePipelines {
+    trace_pixels: Pipeline,
+    adaptive: AdaptivePipelines,
+}
+
+/// `compile_library` compiles `render_voxel.metal` with the house's sizes, flat (`HAS_BEND` 0) or
+/// for a reality bend (1).
+///
+/// Example: `let library = compile_library(device, false)?;`
+fn compile_library(
+    device: &ProtocolObject<dyn MTLDevice>,
+    has_bend: bool,
+) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
+    let source: String = SHADER_SOURCE
+        .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
+        .replace(
+            "__BYTES_PER_RAY_END__",
+            &VOXEL_BYTES_PER_RAY_END.to_string(),
+        )
+        .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
+        .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+        .replace(
+            "__BYTES_PER_VOXEL_UNIFORMS__",
+            &std::mem::size_of::<VoxelUniforms>().to_string(),
+        )
+        .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
+        .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
+        .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR))
+        .replace("__HAS_BEND__", &u8::from(has_bend).to_string());
+    Ok(device
+        .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
+        .map_err(|error| {
+            format!(
+                "Metal: the voxel shader didn't compile: {}",
+                error.localizedDescription()
+            )
+        })?)
+}
+
+/// `make_trace_pipelines` makes the ray tracer's pipelines from a compile of `render_voxel.metal`.
+///
+/// Example: `let flat = make_trace_pipelines(device, &library)?;`
+fn make_trace_pipelines(
+    device: &ProtocolObject<dyn MTLDevice>,
+    library: &ProtocolObject<dyn MTLLibrary>,
+) -> Result<TracePipelines> {
+    Ok(TracePipelines {
+        trace_pixels: make_pipeline(device, library, KERNEL_NAME)?,
+        adaptive: AdaptivePipelines::FromLibrary(device, library)?,
+    })
+}
+
+/// `VoxelGpu` is the voxel renderer's pipelines (the flat and the bent ray tracer's, the
 /// post-processing's and the held gun's light probe), buffers, surface textures and HDR textures.
 pub struct VoxelGpu {
-    trace_pixels: Pipeline,
+    flat: TracePipelines,
+    bent: TracePipelines,
     probe_hand_light: Pipeline,
     hand_light: Retained<ProtocolObject<dyn MTLBuffer>>,
-    adaptive: AdaptivePipelines,
     bloom_down: Pipeline,
     tonemap: Pipeline,
     buffers: Vec<GrowableBuffer>,
@@ -691,7 +781,8 @@ pub struct VoxelGpu {
 }
 
 impl VoxelGpu {
-    /// `New` compiles `render_voxel.metal` on `device` and keeps the surface `textures`.
+    /// `New` compiles `render_voxel.metal` (flat and bent) on `device` and keeps the surface
+    /// `textures`.
     ///
     /// Example: `let gpu = VoxelGpu::New(&device, SurfaceTextures::Load(&device)?)?;`
     #[allow(non_snake_case)]
@@ -699,31 +790,11 @@ impl VoxelGpu {
         device: &ProtocolObject<dyn MTLDevice>,
         textures: SurfaceTextures,
     ) -> Result<VoxelGpu> {
-        let source: String = SHADER_SOURCE
-            .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
-            .replace(
-                "__BYTES_PER_RAY_END__",
-                &VOXEL_BYTES_PER_RAY_END.to_string(),
-            )
-            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
-            .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
-            .replace(
-                "__BYTES_PER_VOXEL_UNIFORMS__",
-                &std::mem::size_of::<VoxelUniforms>().to_string(),
-            )
-            .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
-            .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
-            .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR));
-        let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
-            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
-            .map_err(|error| {
-                format!(
-                    "Metal: the voxel shader didn't compile: {}",
-                    error.localizedDescription()
-                )
-            })?;
+        let library: Retained<ProtocolObject<dyn MTLLibrary>> = compile_library(device, false)?;
+        let bent_library: Retained<ProtocolObject<dyn MTLLibrary>> = compile_library(device, true)?;
         Ok(VoxelGpu {
-            trace_pixels: make_pipeline(device, &library, KERNEL_NAME)?,
+            flat: make_trace_pipelines(device, &library)?,
+            bent: make_trace_pipelines(device, &bent_library)?,
             probe_hand_light: make_pipeline(device, &library, "probe_hand_light")?,
             hand_light: device
                 .newBufferWithLength_options(
@@ -731,7 +802,6 @@ impl VoxelGpu {
                     MTLResourceOptions::StorageModePrivate,
                 )
                 .ok_or("Metal: no memory for the hand light")?,
-            adaptive: AdaptivePipelines::FromLibrary(device, &library)?,
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
             buffers: (0..SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len())
@@ -842,15 +912,20 @@ impl VoxelGpu {
         dispatch(encoder, &self.probe_hand_light, HAND_LIGHT_GRID);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
         unsafe { encoder.setTexture_atIndex(Some(&post.hdr), 0) };
+        let tracer: &TracePipelines = if frame.uniforms.bend[0] > 0.0 {
+            &self.bent
+        } else {
+            &self.flat
+        };
         match samples {
             Some(buffers) => encode_adaptive_sampling(
                 encoder,
-                &self.adaptive,
+                &tracer.adaptive,
                 buffers,
                 VOXEL_BYTES_PER_RAY_END,
                 (width, height),
             ),
-            None => dispatch(encoder, &self.trace_pixels, (width, height)),
+            None => dispatch(encoder, &tracer.trace_pixels, (width, height)),
         }
         for (k, level) in post.bloom.iter().enumerate() {
             let source: &Texture = if k == 0 {

@@ -379,7 +379,8 @@ fn trace_other_voxel_lasers(
 /// light. In third person it also draws this player's own body (`own_body`, from `get_body`),
 /// which the other players' lasers stop at but this player's own passes, as it leaves from inside
 /// it. It draws every laser's whole path (this player's as the sniper's, without speckle; the
-/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given.
+/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given,
+/// under the world's own bend.
 ///
 /// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &[], None, None, (1280, 800));`
 #[allow(clippy::too_many_arguments)]
