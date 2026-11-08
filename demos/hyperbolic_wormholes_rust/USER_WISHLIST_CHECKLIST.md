@@ -37,7 +37,8 @@ is in [`AGENTS.md`](AGENTS.md).
   - **Where the work is** (for any agent picking it up): a parity audit of every level against Lunar Surface on
     `claude/levels-checks`, then each level's fixes on its own agent's branch (`claude/city-sphere-fixes`,
     `claude/dark-forest-lens-robots`, `claude/snow-planet-torus`, `claude/dust-wormhole-speed`), in worktrees under
-    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. City Sphere: #429
+    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. Snow Planet: #421
+    (branch `claude/snow-planet-parity`, open). City Sphere: #429
     (HUD bars, hit effect, movement, jump, exit prompt, zoom, head bob, speckle, walking console bot); still missing
     there: thrown wormholes, flashlight, third person, ground dust.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":

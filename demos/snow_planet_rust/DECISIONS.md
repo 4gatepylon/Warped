@@ -92,7 +92,7 @@ with the seed `SCATTER_SEED` (7, named in the map's `source`), drawing again unt
 next so their 11 m reaches don't overlap, at least 12 m from every pylon and mound, 20 m from the wormhole mouths
 and 21 m from the white-out's centre. The user asked for this slight randomness on most maps. Blue's mounds move up
 to 2 m and turn up to 0.3 rad with the same seed, and red's are blue's turned half a turn, so cover stays fair. The wormhole pair moved to the corners, A at (−46, −26) by blue's
-south pylon and B at (46, 26) by red's north pylon, so it is a flank route of the same length for each team.
+south pylon and B at (46, 26) by red's north pylon, so it is a flank route of the same length for each team (moved in and down in S12).
 
 Fairness: the teams spawn west (blue) and east (red), so each sees the same three holes north and two south. The
 holes are not mirrored between the halves: blue's half has the north-west hole and the south one nearest the
@@ -111,3 +111,38 @@ For a future agent:
 - The looping flat torus (S1 option A) is not on this branch. Work in progress is on the unpushed local branch
   `devin/snow-planet-torus` (worktree `.devin/worktrees/snow-planet-torus`); the blizzard light bending is parked
   on `devin/snow-planet-swirl-parked`. Neither is in any PR.
+
+## S12. Same play as Lunar Surface, W-126 (same play in every level) (User: the mouths' move, the blizzard's look)
+
+Checked against Lunar Surface (`../hyperbolic_wormholes_rust/`), the reference, on 2026-11-08 (Claude Code, branch
+`claude/snow-planet-parity`):
+
+- **Same code.** Every source file Snow Planet shares with Lunar Surface is the same except the level's own
+  (`diff -rq`): the HUD, guns, lasers, minimap, menu, exit prompt, third person, thrown wormholes and consoles are
+  Lunar's code. Lunar's later title-screen choice "join a server by its address" (W-118 (join any server)) isn't
+  here; it isn't on W-126's list.
+- **Same settings.** `server_settings.yaml` and `player_settings.yaml` are Lunar's, line for line, except
+  `jump_time_per_map_jump_time` (`the_settings_files_match_lunar_surface`).
+- **Jump.** The settings set the jump's time in the air as a multiple of the map's own (2 × jump speed / gravity).
+  Snow Planet's map has Earth's 9.81 m/s² where Lunar's has 6, so its jumps lasted 0.35 s against Lunar's 0.58 s
+  (gravity 80 m/s² against 30). `jump_time_per_map_jump_time` is now 0.545 here, so a jump rises 1.25 m in 0.58 s as
+  on Lunar (`a_jump_matches_lunar_surface`). The map's gravity stays 9.81, so the snow puffs fall as before.
+- **The wormhole couldn't be walked through.** Its mouths hung at 2.4 m, 0.8 m above the eye, and a walker crosses
+  only within the 0.4 m throat; and both mouths stood just outside the playable ellipse (1.01 of it), so a walker
+  stopped at the invisible edge in front of A, and anyone who came out of B was stuck outside it. The mouths now sit
+  at eye height (1.6 m, as Lunar's sit at a walker's eye over its ridge), moved in to 0.83 of the ellipse with a
+  slight seeded scatter (`MOUTH_SEED`, B is A turned half a turn): A (−45.5, −20.1), B (45.5, 20.1). The black holes
+  didn't move. **User:** the mouths look 0.8 m lower and about 6 m nearer the middle.
+- **The edge doesn't trap.** A step past the playable ellipse is refused only when it goes further out
+  (`VoxelWorld::is_moving_out`), so a player put past it (by a mouth near the edge) walks back in. Lunar Surface's
+  soft edge is unchanged.
+- **The blizzard's damage** already shows Lunar's hit effects: the window turns them on whenever its health falls,
+  and freezing lowers it every 50 ms, so inside the white-out the red edges, blur and shake stay at full strength,
+  and the hit's slow (half speed for 1 s) stacks with the blizzard's own half: a quarter of walking speed inside.
+  **User:** keep that, or make freezing pulse once per hit's worth of health, or keep the blizzard at half speed.
+- **One blizzard.** The map has exactly one, the white-out (`points_find_their_blizzard`); the README and the map's
+  description said three.
+- **Scripted play** (`play_tests` in `src/voxel_world.rs`): eight players a team spawn on open snow facing 20 m of
+  clear view; walking, sprinting, jumping and crouching for 15 s in twelve directions from each spawn never sticks,
+  sinks or leaves the level; both level mouths and a thrown pair carry walkers and lasers from twelve directions;
+  every console is reachable on foot and `E` reaches it from eight sides (`every_console_can_be_turned_off_on_foot`).
