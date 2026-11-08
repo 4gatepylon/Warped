@@ -160,6 +160,12 @@ For maps inside a sphere (City Sphere), in Euclidean space with the origin at th
   missing within that angle of the unit `direction`, so players and shots pass. A shell with `thickness_m` equal to its
   `radius_m` is a solid ball.
 
+### Lasers
+
+- `lasers` (optional): the colour of every laser shot on this map, either `{"color": [r, g, b]}` for every team (a
+  golden-white map) or `{"team_colors": [[r, g, b], [r, g, b]]}`, blue's then red's. Without it, shots take the
+  game's team colours.
+
 ### Spawns
 
 `{"team": "blue" | "red" | "any", "frame"}`: a player starts standing with their feet at the frame's origin (on the

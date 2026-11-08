@@ -184,6 +184,15 @@
         ]
       }
     },
+    "lasers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "color": {"$ref": "#/$defs/color"},
+        "team_colors": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/color"}}
+      },
+      "oneOf": [{"required": ["color"]}, {"required": ["team_colors"]}]
+    },
     "shells": {
       "type": "array",
       "items": {

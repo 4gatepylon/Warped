@@ -4,6 +4,9 @@
 using namespace metal;
 
 constant uint MAX_HOLE_COUNT = 8;
+constant float BEACON_FLAG = 2.0;
+constant float BEACON_GLOW_BRIGHTNESS = 2.0;
+constant float BEACON_BODY_GLOW = 0.72;
 
 struct CityVertex {
     packed_float3 position;
@@ -60,10 +63,11 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
                               texture2d_array<float> albedo [[texture(0)]]) {
     constexpr sampler s(address::repeat, filter::linear, mip_filter::linear, max_anisotropy(8));
     float3 base = in.color.rgb;
+    bool is_beacon = in.color.a > BEACON_FLAG - 0.5;
     if (in.layer >= 0.0) {
         base *= albedo.sample(s, in.uv, uint(in.layer)).rgb;
     }
-    if (in.color.a > 0.5) {
+    if (!is_beacon && in.color.a > 0.5) {
         return float4(encode_srgb(apply_fog(base * 1.6, in.world, u)), 1.0);
     }
     float3 n = normalize(in.normal);
@@ -77,7 +81,13 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     float3 h = normalize(view + l);
     float spec = pow(max(dot(n, h), 0.0), 32.0) * 0.15;
     float3 light = u.ambient.rgb * wrap + u.core_light.rgb * (lambert * falloff) + spec * u.core_light.rgb;
-    return float4(encode_srgb(apply_fog(base * light, in.world, u)), 1.0);
+    float3 lit = base * light;
+    if (is_beacon) {
+        float3 strips = albedo.sample(s, in.uv, uint(in.layer) + 1).rgb;
+        float glow = in.color.a - BEACON_FLAG;
+        lit += (strips * mix(in.color.rgb, float3(1.0), 0.5) * BEACON_GLOW_BRIGHTNESS + in.color.rgb * BEACON_BODY_GLOW) * glow;
+    }
+    return float4(encode_srgb(apply_fog(lit, in.world, u)), 1.0);
 }
 
 fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& u [[buffer(1)]]) {

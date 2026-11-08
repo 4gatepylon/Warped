@@ -31,7 +31,8 @@ use crate::city_world::{CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, S
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
-use crate::render_city::{CityFrame, CityScene, build_scene, push_beam, push_box, push_mesh};
+use crate::mesh::MeshModel;
+use crate::render_city::{CityFrame, CityScene, build_scene, get_beacon, push_beacon, push_beam, push_mesh};
 use crate::render_metal::{self, FrameData};
 use crate::settings::{PerPlayerSettings, ServerSettings};
 use crate::thrown_wormholes::PlayerWormholes;
@@ -70,7 +71,6 @@ const MINIMAP_DOT_FRAC: f64 = 0.006;
 const MINIMAP_BACKGROUND_COLOR: [f32; 4] = [0.05, 0.05, 0.08, 0.55];
 const MINIMAP_OFF_COLOR: [f32; 4] = [0.25, 0.25, 0.28, 0.9];
 const MINIMAP_SELF_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-const OFF_COLOR: [f32; 4] = [0.1, 0.1, 0.12, 0.0];
 const PULSE_RAD_PER_S: f64 = 12.0;
 const RUN_M_PER_S: f64 = 6.0;
 const WALK_M_PER_S: f64 = 0.6;
@@ -559,28 +559,29 @@ fn make_frame(
     let (off_mask, disabling_mask) = masks;
     let mut dynamic = Vec::new();
     let pulse: f32 = (0.55 + 0.45 * (now_s * PULSE_RAD_PER_S).sin()) as f32;
-    for console in &world.consoles {
-        let b = &world.boxes[console.box_index];
-        let c: [f32; 4] = TEAM_COLORS[console.team as usize];
-        let color: [f32; 4] = if off_mask >> console.index & 1 == 1 {
-            OFF_COLOR
-        } else if disabling_mask >> console.index & 1 == 1 {
-            [c[0] * pulse, c[1] * pulse, c[2] * pulse, 1.0]
-        } else {
-            c
-        };
-        push_box(&mut dynamic, b.center, b.axes, b.half_m, color, -1.0);
-    }
+    let beacon: &MeshModel = get_beacon();
     for b in world.boxes.iter().filter(|b| b.group == "pylons") {
         let team: u32 = u32::from(b.name.starts_with("red"));
-        let is_off: bool = world
+        let console_index: Option<u8> = world
             .consoles
             .iter()
             .filter(|c| c.team == team)
             .min_by(|x, y| (world.get_console_center(x) - b.center).length().total_cmp(&(world.get_console_center(y) - b.center).length()))
-            .is_some_and(|c| off_mask >> c.index & 1 == 1);
-        let color: [f32; 4] = if is_off { OFF_COLOR } else { TEAM_COLORS[team as usize] };
-        push_box(&mut dynamic, b.center, b.axes, b.half_m, color, -1.0);
+            .map(|c| c.index);
+        let is_off: bool = console_index.is_some_and(|i| off_mask >> i & 1 == 1);
+        let level: f32 = if console_index.is_some_and(|i| disabling_mask >> i & 1 == 1) { pulse } else { 1.0 };
+        let up: DVec3 = get_up(b.center);
+        let height_m: f64 = 2.0 * b.half_m.y;
+        let back: DVec3 = (b.axes.z_axis - up * b.axes.z_axis.dot(up)).normalize_or(up.any_orthonormal_vector());
+        let right: DVec3 = up.cross(back);
+        let world_from_model: Mat4 = DMat4::from_cols(
+            (right * height_m).extend(0.0),
+            (up * height_m).extend(0.0),
+            (back * height_m).extend(0.0),
+            (b.center - up * b.half_m.y).extend(1.0),
+        )
+        .as_mat4();
+        push_beacon(&mut dynamic, beacon, world_from_model, TEAM_COLORS[team as usize], level, is_off);
     }
     let mut posed_clips: Vec<(AvatarClip, crate::mesh::MeshModel)> = Vec::new();
     for robot in robots {
@@ -599,7 +600,7 @@ fn make_frame(
     let camera: DVec3 = eye.w_axis.truncate();
     let mut beam_vertices = Vec::new();
     for (points, team, alpha) in beams {
-        let c: [f32; 4] = TEAM_COLORS[*team as usize % 2];
+        let c: [f32; 3] = world.laser_colors[*team as usize % 2];
         for pair in points.windows(2) {
             push_beam(&mut beam_vertices, pair[0], pair[1], camera, BEAM_WIDTH_M, [c[0], c[1], c[2], (*alpha * 1.4) as f32]);
         }

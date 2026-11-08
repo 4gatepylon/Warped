@@ -137,9 +137,9 @@ def make_team_half(sign: float, team: str) -> tuple[list[dict], list[dict]]:
     for k, (lon, lat, half, heading) in enumerate(glass):
         boxes.append(make_box(f"{team} glass cover {k}", "glass level", s(direction(lon, lat)), GLASS_RADIUS_M, half, "glass obstacle", heading))
     boxes.append(make_box(f"{team} pylon street", "pylons", s(direction(0.5, 0.0)), STREET_RADIUS_M, (0.45, 2.6, 0.45), f"{team} pylon"))
-    boxes.append(make_box(f"{team} console street", "consoles", s(direction(0.5, 0.0) + np.array([0, 0, -0.06])), STREET_RADIUS_M, (0.4, 0.55, 0.25), f"{team} console 0"))
+    boxes.append(make_box(f"{team} console street", "consoles", s(direction(0.5, 0.0)), STREET_RADIUS_M, (0.4, 0.55, 0.25), f"{team} console 0"))
     boxes.append(make_box(f"{team} pylon glass", "pylons", s(direction(0.9, -0.2)), GLASS_RADIUS_M, (0.4, 2.0, 0.4), f"{team} pylon"))
-    boxes.append(make_box(f"{team} console glass", "consoles", s(direction(0.9, -0.2) + np.array([0, 0, -0.08])), GLASS_RADIUS_M, (0.35, 0.5, 0.22), f"{team} console 1"))
+    boxes.append(make_box(f"{team} console glass", "consoles", s(direction(0.9, -0.2)), GLASS_RADIUS_M, (0.35, 0.5, 0.22), f"{team} console 1"))
     spawns = [
         {"team": team, "frame": make_frame(s(direction(0.0, 0.12)), STREET_RADIUS_M, math.pi / 2)},
         {"team": team, "frame": make_frame(s(direction(0.0, -0.12)), STREET_RADIUS_M, math.pi / 2)},
@@ -157,6 +157,9 @@ def get_lift_directions() -> list[np.ndarray]:
     """
     blue: list[np.ndarray] = [direction(0.15, 0.4), direction(0.15, -0.4), direction(math.pi / 2, 0.0)]
     return blue + [-d for d in blue]
+
+
+LASER_TEAM_COLORS = ((0.3, 0.55, 1.0), (1.0, 0.3, 0.25))
 
 
 def main() -> None:
@@ -196,6 +199,7 @@ def main() -> None:
             },
             {"name": "core", "radius_m": CORE_RADIUS_M, "thickness_m": CORE_RADIUS_M, "material": material_id("core"), "walkable_side": "none", "laser": "stop", "holes": []},
         ],
+        "lasers": {"team_colors": [list(c) for c in LASER_TEAM_COLORS]},
         "boxes": boxes,
         "lights": [{"position": [0.0, 0.0, 0.0, 1.0], "color": [1.0, 0.82, 1.0], "radius_m": 30.0}],
         "sky": {"transport": "parallel", "sun": {"direction": [0.0, 1.0, 0.0], "color": [1.0, 0.85, 1.0]}, "stars": False, "clouds": False, "zenith_color": [0.05, 0.03, 0.09], "horizon_color": [0.12, 0.08, 0.18]},

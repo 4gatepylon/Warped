@@ -90,6 +90,9 @@ struct JsonPlayer {
     jump_m_per_s: f64,
 }
 
+/// `DEFAULT_LASER_COLORS` are the shots' colours on a map without `lasers`: blue's, then red's.
+pub const DEFAULT_LASER_COLORS: [[f32; 3]; 2] = [[0.3, 0.55, 1.0], [1.0, 0.3, 0.25]];
+
 #[derive(Deserialize)]
 struct JsonMap {
     name: String,
@@ -101,6 +104,15 @@ struct JsonMap {
     shells: Vec<JsonShell>,
     boxes: Vec<JsonBox>,
     spawns: Vec<JsonSpawn>,
+    #[serde(default)]
+    lasers: Option<JsonLasers>,
+}
+
+/// `JsonLasers` is the map's laser colour: one for every team, or one per team.
+#[derive(Deserialize)]
+struct JsonLasers {
+    color: Option<[f32; 3]>,
+    team_colors: Option<[[f32; 3]; 2]>,
 }
 
 #[derive(Deserialize)]
@@ -213,6 +225,7 @@ pub struct CityWorld {
     pub boxes: Vec<CityBox>,
     pub consoles: Vec<Console>,
     pub spawns: Vec<(u32, DMat4)>,
+    pub laser_colors: [[f32; 3]; 2],
 }
 
 /// `Side` is which level a point is on: the street, under the glass, or the glass level, on the
@@ -384,6 +397,12 @@ impl CityWorld {
             boxes,
             consoles,
             spawns,
+            laser_colors: match &map.lasers {
+                Some(JsonLasers { team_colors: Some(colors), .. }) => *colors,
+                Some(JsonLasers { color: Some(color), .. }) => [*color; 2],
+                Some(_) => return Err("map: lasers needs color or team_colors".into()),
+                None => DEFAULT_LASER_COLORS,
+            },
         })
     }
 

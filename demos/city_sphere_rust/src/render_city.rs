@@ -36,6 +36,10 @@ type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
 const SHADER_SOURCE: &str = include_str!("render_city.metal");
 pub const MAX_HOLE_COUNT: usize = 8;
 const TEXTURE_SIDE_PX: u32 = 1024;
+const BEACON_OFF_FRAC: f32 = 0.25;
+const BEACON_FLAG: f32 = 2.0;
+const BEACON_LAYER: usize = TEXTURE_IDS.len();
+const BEACON_MODEL: &str = "scifi_beacon";
 const TEXTURE_IDS: [&str; 4] = ["asphalt_02", "concrete_wall_008", "brick_wall_02", "metal_plate"];
 const LAYER_STREET: f32 = 0.0;
 const LAYER_CONCRETE: f32 = 1.0;
@@ -288,6 +292,39 @@ pub fn push_mesh(out: &mut Vec<CityVertex>, model: &MeshModel, materials: &[Mesh
     }
 }
 
+/// `push_beacon` adds a pylon's beacon (the hyperbolic demo's `scifi_beacon` model, as on Lunar
+/// Surface) with its base colour and emissive textures, recoloured in the team's colour: while
+/// its console is on its glowing strips shine at `level` (0 to 1, pulsing while a player turns the
+/// console off); once off, the body darkens and the strips go out.
+///
+/// Example: `push_beacon(&mut dynamic, &beacon, world_from_model, [0.3, 0.55, 1.0, 1.0], 1.0, false);`
+pub fn push_beacon(out: &mut Vec<CityVertex>, model: &MeshModel, world_from_model: Mat4, team_color: [f32; 4], level: f32, is_off: bool) {
+    let normal_matrix: glam::Mat3 = glam::Mat3::from_mat4(world_from_model);
+    let body_frac: f32 = if is_off { BEACON_OFF_FRAC } else { 1.0 };
+    let glow: f32 = if is_off { 0.0 } else { level };
+    let color: [f32; 4] = [team_color[0] * body_frac, team_color[1] * body_frac, team_color[2] * body_frac, BEACON_FLAG + glow];
+    for triangle in &model.triangles {
+        for k in 0..3 {
+            out.push(CityVertex {
+                position: world_from_model.transform_point3(triangle.p[k]).to_array(),
+                normal: (normal_matrix * triangle.n[k]).normalize_or_zero().to_array(),
+                uv: triangle.uv[k].to_array(),
+                color,
+                layer: BEACON_LAYER as f32,
+            });
+        }
+    }
+}
+
+/// `get_beacon` gives the pylons' model, the hyperbolic demo's `scifi_beacon` (as on Lunar
+/// Surface), 1 m tall, loaded once.
+///
+/// Example: `let beacon = get_beacon();`
+pub fn get_beacon() -> &'static MeshModel {
+    static BEACON: std::sync::OnceLock<MeshModel> = std::sync::OnceLock::new();
+    BEACON.get_or_init(|| MeshModel::Load(BEACON_MODEL, 1.0).expect("the scifi_beacon model in common/maps/models/"))
+}
+
 /// `push_beam` adds a laser beam from `a` to `b`, `width_m` wide, facing `camera_m`, with colour
 /// and brightness (alpha).
 ///
@@ -373,10 +410,14 @@ impl CityGpu {
         let library = device
             .newLibraryWithSource_options_error(&NSString::from_str(SHADER_SOURCE), None)
             .map_err(|e| format!("Metal: render_city.metal failed: {}", e.localizedDescription()))?;
-        let layers: Vec<Vec<image::RgbaImage>> = TEXTURE_IDS
+        let mut layers: Vec<Vec<image::RgbaImage>> = TEXTURE_IDS
             .par_iter()
             .map(|id| make_mips(&get_asset_path(&format!("textures/{id}/{id}_diff_2k.jpg")), TEXTURE_SIDE_PX))
             .collect::<std::result::Result<_, String>>()?;
+        let beacon_material: &MeshMaterial = get_beacon().materials.first().ok_or("the beacon has no material")?;
+        for image in [&beacon_material.images[0], &beacon_material.images[3]] {
+            layers.push(make_mips(image.as_ref().ok_or("the beacon lacks its base colour or emissive image")?, TEXTURE_SIDE_PX)?);
+        }
         Ok(CityGpu {
             opaque: make_pipeline(device, &library, "city_fragment", None)?,
             glass: make_pipeline(device, &library, "glass_fragment", Some(false))?,
