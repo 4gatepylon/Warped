@@ -56,7 +56,7 @@ const NEW_GAME_AFTER_WIN_S: u64 = 10;
 /// `Arguments` is the command line.
 #[derive(Parser)]
 #[command(
-    about = "Run one game server of the Rust wormholes demo, without a window, until stopped.",
+    about = "Run one game server of the Snow Planet demo, without a window, until stopped.",
     after_help = "Example: snow_planet_server --port 47820 --map snow-planet"
 )]
 struct Arguments {
@@ -73,6 +73,10 @@ struct Arguments {
     /// no password, so anyone may).
     #[arg(long)]
     game_password_file: Option<PathBuf>,
+    /// Where to write the winner, once, as `{"winner": "blue"}` or `{"winner": "red"}`; with it, the
+    /// server starts no new game after a win (default: no file, and a new game after each win).
+    #[arg(long)]
+    level_result_file: Option<PathBuf>,
 }
 
 /// `main` serves one game until the process is stopped, failing at once on a bad map, settings
@@ -102,7 +106,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         console_teams,
         &AtomicBool::new(false),
         Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
-        None,
+        arguments.level_result_file.as_deref(),
         game_password,
         net::Freezing::FromMapName(map_name)?,
     )
