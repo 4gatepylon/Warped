@@ -1,5 +1,5 @@
 //! `fps_demo_assets.rs` finds the fps_demo's committed assets in `demos/fps_demo/assets/`, which
-//! the surface textures and the revolver come from, and fails with the command that restores one
+//! the surface textures and the gun models come from, and fails with the command that restores one
 //! that is missing.
 //!
 //! Interface: `get_asset_path`, `check_asset`.
