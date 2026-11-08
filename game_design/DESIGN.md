@@ -189,7 +189,9 @@ The level as the Rust game builds it, from the map
   ground. The playable area is an ellipse 256 m long and 144 m wide; the crater's wall around it is
   the [map edge](#map-edge).
 - The zones are bands across its length: blue more than 45 m from the middle on blue's side, red
-  more than 45 m on red's side, and the middle zone, 90 m long, between them.
+  more than 45 m on red's side, and the middle zone, 90 m long, between them. Each team zone's edge
+  is a faint see-through wall in the team's colour, 6 m high and 0.6 m thick, that stops neither
+  players nor lasers.
 - A black hole hangs about 17 m above the middle of the level; its pull reaches 24 m. A player who falls into
   it goes back to their spawn.
 - One wormhole joins a ridge to the red landing pad. Its mouths are 15 m in reach.
@@ -200,7 +202,7 @@ The level as the Rust game builds it, from the map
 - Structures have sharp edges. The habitat modules' and walkways' windows are glass: players see
   out of them and shoot through them, but can't climb through them.
 - The sky has the sun, a planet, stars, and spaceships that fly over, purely for looks, on the same
-  clock for every player.
+  clock for every player; far behind them hang a moon-sized battle station and a long capital ship.
 - Lighting has soft sun shadows, lamps, light from the planet, a thin haze and bloom.
 
 ## Zones and routes
@@ -357,7 +359,7 @@ Every weapon follows these rules:
 
 | Parameter | Sniper rifle (`1`) | Rifle (`2`) |
 | --- | --- | --- |
-| Looks | A thin wand with a tip in the team's colour | A grey block |
+| Looks | The energy revolver | A wooden bolt-action rifle with a scope, drawn small so its body shows |
 | Fire rate, at most | 1 shot every 2 s (a 2 s reload) | 8 shots/s while the button is held |
 | Overheats after | Never: it reloads after each shot | 20 shots in a row; cools down fully in 2 s without firing |
 | Hits to kill, head (the top half-meter) | 1 | 2 |

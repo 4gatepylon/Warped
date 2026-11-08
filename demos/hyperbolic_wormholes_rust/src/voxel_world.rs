@@ -3,11 +3,14 @@
 //! objects with the structures in their reach, a voxel walk, the laser's light path, and walking on
 //! the map (collisions, stepping up blocks, gravity, jumping, flying, and moving along light paths
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
+//! On a map that bends (W-68), players move in the map while the camera and the laser's light are
+//! in the bent world (`bend.rs`), and the black hole grows with the bend's strength.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
 //! `VoxelWorld::set_thrown_wormholes`, `VoxelWorld::can_place_mouth`, `VoxelWorld::find_hit_s`,
 //! `VoxelWorld::add_markers`, `VoxelWorld::find_aimed_material`, `VoxelWorld::find_clear_m`,
 //! `VoxelWorld::find_crosshair_point`, `VoxelWorld::is_sunlit`, `VoxelWorld::get_mouth_depth_frac`,
+//! `VoxelWorld::can_bend`, `VoxelWorld::set_bend_strength`,
 //! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
@@ -16,9 +19,10 @@ use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::bend::{Bend, DEFAULT_EDGE_RADIUS_M};
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
-    minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
+    minkowski_dot, normalize_point, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
@@ -29,6 +33,7 @@ use crate::terrain::{Terrain, get_fermi_coordinates};
 use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
+use crate::zone_walls::ZoneWalls;
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
@@ -86,6 +91,12 @@ pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
 const BEAM_TOLERANCE_M: f64 = 0.02;
 const MAX_DRAWN_BEAM_DISTANCE_M: f64 = 160.0;
 const BEAM_CLIP_BISECTION_COUNT: usize = 40;
+const BEND_SAG_M: f64 = 0.02;
+const MIN_BENT_CHORD_M: f64 = 0.5;
+const MAX_BENT_CHORD_M: f64 = 8.0;
+const MAX_BENT_CHORD_HALVINGS: usize = 8;
+const MIN_CHORD_LENGTH: f64 = 1e-9;
+const MAX_HOLE_OFF_AXIS_M: f64 = 1e-6;
 pub const LOOK_RAD_PER_PX: f64 = 0.0025;
 const MAX_PITCH_RAD: f64 = 1.55;
 const TINY: f64 = 1e-12;
@@ -110,7 +121,8 @@ const AVATAR_SHAPES: [Shape; 2] = [
 ];
 
 /// `VoxelStructure` is one structure: its frame (and inverse), its grid, where its cells start in
-/// the voxel bytes, and its bounding sphere (radius in curvature units).
+/// the voxel bytes, its bounding sphere (radius in curvature units), and whether its glowing
+/// shapes are dark (`is_dark`: a pylon whose console is off).
 #[derive(Clone)]
 pub struct VoxelStructure {
     pub name: String,
@@ -119,6 +131,7 @@ pub struct VoxelStructure {
     pub shape_count: usize,
     pub centre: DVec4,
     pub radius: f64,
+    pub is_dark: bool,
 }
 
 /// `VoxelWarp` is a black hole or a wormhole mouth: its frame, m and reach in curvature units,
@@ -164,6 +177,8 @@ pub struct Console {
     pub team: u32,
     color: [f32; 3],
     pulse: ConsolePulse,
+    pylon: Option<usize>,
+    lamp: Option<(usize, [f32; 3])>,
 }
 
 /// `ConsolePulse` is a console's pulse at `time_s`: how far through one pulse it is
@@ -257,6 +272,8 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
                 team: team as u32,
                 color: m.color,
                 pulse: ConsolePulse::Resting(),
+                pylon: None,
+                lamp: None,
             })
         })
         .collect();
@@ -285,6 +302,7 @@ pub struct VoxelWorld {
     pub surfaces: Vec<[f32; 4]>,
     pub special: SpecialMaterials,
     pub regions: Option<[f64; 3]>,
+    pub zone_walls: Option<ZoneWalls>,
     pub terrain: Option<Terrain>,
     pub sun: DVec3,
     pub planet: Option<(DVec3, f64)>,
@@ -303,6 +321,8 @@ pub struct VoxelWorld {
     pub flashlight_eye: Option<DMat4>,
     pub sky_time_s: f64,
     pub clearance: Arc<ClearanceGrids>,
+    pub bend: Bend,
+    bend_hole: Option<(usize, VoxelWarp)>,
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -335,11 +355,13 @@ impl BeamSegment {
     }
 }
 
-/// `Shot` is a laser's path: its drawn segments, where it hit (and what), and the mouths it went
-/// through, by name and by index in the world's warps.
+/// `Shot` is a laser's path: its drawn segments (in the bent world), where it hit in the map (and
+/// what) and where that is drawn, and the mouths it went through, by name and by index in the
+/// world's warps.
 pub struct Shot {
     pub segments: Vec<BeamSegment>,
     pub spot: Option<DVec4>,
+    pub drawn_spot: Option<DVec4>,
     pub hit_structure: Option<usize>,
     pub is_hit: bool,
     pub length_m: f64,
@@ -538,6 +560,7 @@ fn make_structure(
         shape_count: shapes.len(),
         centre: frame * centre_local,
         radius: radius + BOUND_MARGIN_M / r,
+        is_dark: false,
     }
 }
 
@@ -555,7 +578,8 @@ impl VoxelWorld {
     /// palette (with a glow for `light` materials) and the `lunar` style's special materials.
     /// Warps must use the `distance` radius and the `taper` falloff, and foils λ² = 0.25. The
     /// player moves by the built-in game settings (`set_settings`), so the map's gravity and jump
-    /// speed must be above 0.
+    /// speed must be above 0. A map with team consoles and one black hole bends (`can_bend`), and
+    /// its black hole must be on o's vertical axis.
     ///
     /// Example: `let world = VoxelWorld::FromMap(&map)?;`
     #[allow(non_snake_case)]
@@ -659,6 +683,20 @@ impl VoxelWorld {
             console_first: consoles.first().copied().unwrap_or(-1),
             console_count: consoles.len() as i32,
         };
+        let team_consoles: Vec<Console> = find_consoles(map);
+        let black_holes: Vec<usize> = (0..warps.len()).filter(|&w| !warps[w].is_mouth).collect();
+        let bend_hole: Option<(usize, VoxelWarp)> = match black_holes[..] {
+            [w] if !team_consoles.is_empty() => Some((w, warps[w].clone())),
+            _ => None,
+        };
+        if let Some((_, hole)) = &bend_hole
+            && hole.centre.x.hypot(hole.centre.z) * r > MAX_HOLE_OFF_AXIS_M
+        {
+            return Err(format!(
+                "map {}: a map that bends needs its black hole on o's vertical axis, not at {}",
+                map.name, hole.centre
+            ));
+        }
         let regions: Option<[f64; 3]> = map.regions.as_ref().and_then(|regions| {
             let edge_m: f64 = regions
                 .zones
@@ -675,8 +713,10 @@ impl VoxelWorld {
             terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),
-            consoles: find_consoles(map),
+            consoles: team_consoles,
             flashlight_eye: None,
+            bend: Bend::FromStrength(0.0, DEFAULT_EDGE_RADIUS_M, r),
+            bend_hole,
             sky_time_s: 0.0,
             structures,
             shapes,
@@ -690,6 +730,10 @@ impl VoxelWorld {
             surfaces,
             special,
             regions,
+            zone_walls: match &map.regions {
+                Some(regions) => ZoneWalls::FromRegions(regions)?,
+                None => None,
+            },
             sun: to_direction(&map.sky.sun.direction),
             planet: map
                 .sky
@@ -714,7 +758,34 @@ impl VoxelWorld {
         };
         world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
+        world.find_console_pylons();
         Ok(world)
+    }
+
+    /// `find_console_pylons` gives each console its pylon, the structure with the console's
+    /// shape, and that pylon's lamp, the light nearest its centre within its bounding sphere, so
+    /// `light_consoles` can darken the whole pylon when its console is off.
+    ///
+    /// Example: `world.find_console_pylons();`
+    fn find_console_pylons(&mut self) {
+        for console in &mut self.consoles {
+            let pylon: Option<usize> = self.structures.iter().position(|s| {
+                self.shapes[s.first_shape..s.first_shape + s.shape_count]
+                    .iter()
+                    .any(|shape| shape.material == console.material)
+            });
+            console.pylon = pylon;
+            console.lamp = pylon.and_then(|k| {
+                let structure: &VoxelStructure = &self.structures[k];
+                self.lights
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &(x, color, _))| (i, color, get_distance(x, structure.centre)))
+                    .filter(|&(_, _, distance)| distance < structure.radius)
+                    .min_by(|a, b| a.2.total_cmp(&b.2))
+                    .map(|(i, color, _)| (i, color))
+            });
+        }
     }
 
     /// `set_settings` makes `settings` the world's game settings and moves the player by them:
@@ -934,7 +1005,8 @@ impl VoxelWorld {
             console.pulse = console
                 .pulse
                 .advance(get_console_pulse_hz(disabling_fracs[i]), time_s);
-            let entry: [f32; 4] = if off_mask >> i & 1 == 1 {
+            let is_off: bool = off_mask >> i & 1 == 1;
+            let entry: [f32; 4] = if is_off {
                 let [r, g, b] = console.color.map(|c| c * CONSOLE_OFF_FRAC);
                 [r, g, b, 0.0]
             } else {
@@ -943,7 +1015,77 @@ impl VoxelWorld {
                 [r, g, b, 1.0]
             };
             self.palette[usize::from(console.material)] = entry;
+            if let Some(k) = console.pylon {
+                self.structures[k].is_dark = is_off;
+            }
+            if let Some((light, color)) = console.lamp {
+                self.lights[light].1 = if is_off {
+                    color.map(|c| c * CONSOLE_OFF_FRAC)
+                } else {
+                    color
+                };
+            }
         }
+    }
+
+    /// `can_bend` says whether this map bends (W-68): it has team consoles and one black hole.
+    ///
+    /// Example: `if world.can_bend() { world.set_bend_strength(0.4) }`
+    pub fn can_bend(&self) -> bool {
+        self.bend_hole.is_some()
+    }
+
+    /// `set_bend_strength` bends the world to `strength_frac` (0 to 1) by the settings'
+    /// `reality_bend`: the bend itself, and the black hole risen up o's vertical axis from the
+    /// map's height toward the bent sphere's centre, its Schwarzschild radius and reach growing
+    /// from the map's to the settings' maximum, all in proportion to the strength.
+    ///
+    /// Example: `world.set_bend_strength(0.4);`
+    pub fn set_bend_strength(&mut self, strength_frac: f64) {
+        let (index, hole) = self
+            .bend_hole
+            .clone()
+            .unwrap_or_else(|| panic!("set_bend_strength: map {} doesn't bend", self.name));
+        let settings = &self.settings.reality_bend;
+        self.bend = Bend::FromStrength(strength_frac, settings.edge_radius_m, self.r);
+        let height_m: f64 = self.r * hole.centre.y.asinh();
+        let rise_m: f64 =
+            (settings.edge_radius_m / std::f64::consts::PI - height_m) * strength_frac;
+        let frame: DMat4 = make_boost(AXIS_Y, rise_m / self.r) * hole.frame;
+        let full_strength_mass: f64 = settings.max_schwarzschild_radius_m / 4.0 / self.r;
+        let full_strength_reach: f64 = settings.max_reach_m / self.r;
+        self.warps[index] = VoxelWarp {
+            frame,
+            inverse: invert_lorentz(frame),
+            centre: frame.col(AXIS_W),
+            m: hole.m + (full_strength_mass - hole.m) * strength_frac,
+            reach: hole.reach + (full_strength_reach - hole.reach) * strength_frac,
+            ..hole
+        };
+    }
+
+    /// `get_bent_warps` gives the warps where the bent world has them: each mouth's frame moved by
+    /// `Bend::bend_frame`, and a black hole as it is (a bending map's black hole is on o's vertical
+    /// axis, which the bend leaves in place, and its field is the same in every direction).
+    ///
+    /// Example: `let warps = world.get_bent_warps();`
+    fn get_bent_warps(&self) -> Vec<VoxelWarp> {
+        self.warps
+            .iter()
+            .map(|warp| {
+                let frame: DMat4 = if warp.is_mouth {
+                    self.bend.bend_frame(warp.frame)
+                } else {
+                    warp.frame
+                };
+                VoxelWarp {
+                    frame,
+                    inverse: invert_lorentz(frame),
+                    centre: frame.col(AXIS_W),
+                    ..warp.clone()
+                }
+            })
+            .collect()
     }
 
     /// `find_aimed_material` gives the material of the block straight ahead of `camera`'s eye
@@ -1403,33 +1545,128 @@ impl VoxelWorld {
         best
     }
 
-    /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between warps,
-    /// bent inside them, through throats and glass, to a block, the ground, a horizon or
-    /// `LASER_MAX_LENGTH_M`.
-    /// The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where the window draws the
-    /// tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
+    /// `trace_bent_chord` finds the first thing the bent world's chord from x along v (up to
+    /// `s_max`) hits, and where in the map: with a flat bend, `trace_scene`'s hit; otherwise it
+    /// cuts the chord into pieces of the length whose sag on the bent sphere is `BEND_SAG_M`
+    /// (between `MIN_BENT_CHORD_M` and `MAX_BENT_CHORD_M`) and tests each with `trace_bent_piece`.
+    ///
+    /// Example: `let (hit, map_spot) = world.trace_bent_chord(x, v, 1.0, None)?;`
+    fn trace_bent_chord(
+        &self,
+        x: DVec4,
+        v: DVec4,
+        s_max: f64,
+        warp: Option<usize>,
+    ) -> Option<(Hit, DVec4)> {
+        if self.bend.is_flat() {
+            let hit: Hit = self.trace_scene(x, v, s_max, warp)?;
+            return Some((hit, geodesic_point(x, v, hit.s)));
+        }
+        let piece_m: f64 = (8.0 * BEND_SAG_M / self.bend.curvature_per_m)
+            .sqrt()
+            .clamp(MIN_BENT_CHORD_M, MAX_BENT_CHORD_M);
+        let count: usize = (s_max * self.r / piece_m).ceil().max(1.0) as usize;
+        let ends: Vec<(f64, DVec4)> = (0..=count)
+            .map(|i| {
+                let s: f64 = s_max * i as f64 / count as f64;
+                (s, self.bend.unbend_point(geodesic_point(x, v, s)))
+            })
+            .collect();
+        let halving_count: usize = MAX_BENT_CHORD_HALVINGS;
+        ends.windows(2)
+            .find_map(|pair| self.trace_bent_piece(x, v, pair[0], pair[1], halving_count))
+    }
+
+    /// `trace_bent_piece` tests the bent world's chord from x along v between parameters `start.0`
+    /// and `end.0` (whose map points are `start.1` and `end.1`) against the map, by the map's chord
+    /// between those points, halving it (up to `halving_count` times) while the map point of its
+    /// middle is off that chord's middle by more than `BEND_SAG_M`, scaled by how much longer the
+    /// map's chord is than the world's (the map stretches toward the edge). It skips hits beyond
+    /// the edge, and pieces whose ends and middle are all beyond it (cut away, or off the map).
+    ///
+    /// Example: `let found = world.trace_bent_piece(x, v, (0.0, a_map), (0.05, b_map), 8);`
+    fn trace_bent_piece(
+        &self,
+        x: DVec4,
+        v: DVec4,
+        start: (f64, DVec4),
+        end: (f64, DVec4),
+        halving_count: usize,
+    ) -> Option<(Hit, DVec4)> {
+        let s_mid: f64 = (start.0 + end.0) / 2.0;
+        let mid: DVec4 = self.bend.unbend_point(geodesic_point(x, v, s_mid));
+        if [start.1, mid, end.1]
+            .iter()
+            .all(|&p| self.bend.is_beyond_edge(p))
+        {
+            return None;
+        }
+        let length: f64 = get_distance(start.1, end.1);
+        let world_length: f64 = end.0 - start.0;
+        if halving_count > 0
+            && get_distance(mid, normalize_point(start.1 + end.1)) * world_length * self.r
+                > BEND_SAG_M * length
+        {
+            return self
+                .trace_bent_piece(x, v, start, (s_mid, mid), halving_count - 1)
+                .or_else(|| self.trace_bent_piece(x, v, (s_mid, mid), end, halving_count - 1));
+        }
+        if length < MIN_CHORD_LENGTH {
+            return None;
+        }
+        let t: DVec4 = (end.1 - length.cosh() * start.1) / length.sinh();
+        let hit: Hit = self.trace_scene(start.1, t, length, None)?;
+        let spot: DVec4 = geodesic_point(start.1, t, hit.s);
+        let s: f64 = start.0 + world_length * hit.s / length;
+        (!self.bend.is_beyond_edge(spot)).then_some((
+            Hit {
+                structure: hit.structure,
+                s,
+            },
+            spot,
+        ))
+    }
+
+    /// `trace_laser` follows a shot from the map camera `camera`'s eye along its crosshair, in the
+    /// bent world (`bend`; the map itself while flat): from the bent camera, straight between the
+    /// bent warps (`get_bent_warps`), bent inside them, through throats, to a block, the ground, a
+    /// horizon or `LASER_MAX_LENGTH_M` (through glass), each chord tested against the map by `trace_bent_chord`.
+    /// The drawn beam, in the bent world, starts at the muzzle (`MUZZLE_M` in camera space, where
+    /// the window draws the tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
     ///
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
     pub fn trace_laser(&self, camera: DMat4) -> Shot {
+        let bent: VoxelWorld;
+        let light: &VoxelWorld = if self.bend.is_flat() {
+            self
+        } else {
+            bent = VoxelWorld {
+                warps: self.get_bent_warps(),
+                ..self.clone()
+            };
+            &bent
+        };
+        let camera: DMat4 = self.bend.bend_frame(camera);
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
-        let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
+        let (mut travelled, mut inside) = (0.0, light.find_warp_inside(x));
         let mut pieces: Vec<Vec<DVec4>> = vec![vec![x]];
-        let (mut hit, mut through): (Option<Hit>, Vec<String>) = (None, Vec::new());
+        let mut hit: Option<(Hit, DVec4)> = None;
+        let mut through: Vec<String> = Vec::new();
         let mut through_warps: Vec<usize> = Vec::new();
         for _ in 0..LASER_MAX_ITERATIONS {
             if travelled >= max_s {
                 break;
             }
             let Some(w) = inside else {
-                let (s_end, entering) = self.find_warp_entry(x, v, max_s - travelled);
-                if let Some(found) = self.trace_scene(x, v, s_end, None) {
+                let (s_end, entering) = light.find_warp_entry(x, v, max_s - travelled);
+                if let Some(found) = self.trace_bent_chord(x, v, s_end, None) {
                     pieces
                         .last_mut()
                         .expect("a piece")
-                        .push(geodesic_point(x, v, found.s));
-                    travelled += found.s;
+                        .push(geodesic_point(x, v, found.0.s));
+                    travelled += found.0.s;
                     hit = Some(found);
                     break;
                 }
@@ -1444,26 +1681,26 @@ impl VoxelWorld {
                 inside = entering;
                 continue;
             };
-            let ds: f64 = self.choose_bend_step(self.compute_bend(w, x, v).1);
-            let (v0, x1, v1, rho) = self.step_bent(w, x, v, ds);
-            if let Some(found) = self.trace_scene(x, v0, ds, Some(w)) {
+            let ds: f64 = light.choose_bend_step(light.compute_bend(w, x, v).1);
+            let (v0, x1, v1, rho) = light.step_bent(w, x, v, ds);
+            if let Some(found) = self.trace_bent_chord(x, v0, ds, Some(w)) {
                 pieces
                     .last_mut()
                     .expect("a piece")
-                    .push(geodesic_point(x, v0, found.s));
-                travelled += found.s;
+                    .push(geodesic_point(x, v0, found.0.s));
+                travelled += found.0.s;
                 hit = Some(found);
                 break;
             }
             (x, v) = (x1, v1);
             travelled += ds;
             pieces.last_mut().expect("a piece").push(x);
-            let warp: &VoxelWarp = &self.warps[w];
+            let warp: &VoxelWarp = &light.warps[w];
             if !warp.is_mouth && rho < warp.m * HORIZON_CAPTURE_FRAC {
                 break;
             }
             if warp.is_mouth && rho < warp.m {
-                (x, v) = self.cross_throat(w, x, v);
+                (x, v) = light.cross_throat(w, x, v);
                 through.push(warp.name.clone());
                 through_warps.push(w);
                 pieces.push(vec![x]);
@@ -1484,7 +1721,7 @@ impl VoxelWorld {
         } else {
             first[0] = gun;
         }
-        let spot: Option<DVec4> = hit.map(|_| {
+        let drawn_spot: Option<DVec4> = hit.map(|_| {
             *pieces
                 .last()
                 .and_then(|p| p.last())
@@ -1495,8 +1732,9 @@ impl VoxelWorld {
                 .iter()
                 .flat_map(|piece| self.simplify_path(piece))
                 .collect(),
-            spot,
-            hit_structure: hit.and_then(|h| h.structure),
+            spot: hit.map(|(_, spot)| spot),
+            drawn_spot,
+            hit_structure: hit.and_then(|(h, _)| h.structure),
             is_hit: hit.is_some(),
             length_m: travelled * self.r,
             through,
@@ -2028,10 +2266,13 @@ mod tests {
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Low way walked out of | a habitat module's doors (each module, each way), a walkway's ends (each walkway, each way) | `players_walk_out_of_modules_and_walkways` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
+    //! | Bend strength | 0 after a bend (as never bent), between, 1 (black hole at the sphere's centre) | `a_flat_bend_traces_the_unbent_laser`, `a_bent_shot_along_the_ground_hits_what_is_ahead`, `a_shot_up_at_full_strength_lands_across_the_map` |
+    //! | Bent laser aimed | through a wormhole (flat), along the ground at a player, straight up from the middle (closes over to the far side) | the three tests above |
     //! | Progress of turning off a console | none (the normal rate), part way (rising, faster each step), done (the frenzy), past done (fails) | `the_pulse_ramps_up_with_progress`, `progress_past_done_fails` |
     //! | Target rate against the pulse's own | higher (reached at once), the same (kept), lower (eases down: barely after a frame, nearly there after a second, never below) | `the_pulse_eases_back_down` |
     //! | Rate while the light is watched | steady, ramping up over a whole hold, dropping when the hold stops (the light moves only as fast as the pulse, never jumps) | `the_light_never_jumps` |
     //! | Console | off (dark, unlit), on and not held (the normal pulse), on and held (its own faster pulse) | `consoles_pulse_by_their_own_progress` |
+    //! | Pylon of a console | console off (the whole pylon and its lamp dark), back on (lit again), another console's (untouched) | `a_pylon_goes_dark_with_its_console` |
     //! | Thrown pair | walked into (the walker comes out of the other mouth), shot into (the laser goes through, naming the mouth's warp), flashing (both mouths) | `a_thrown_pair_carries_walkers_and_lasers` |
     //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
     //! | Marker | inside a thrown mouth's reach (in its list, hit by a laser) | `a_marker_is_listed_and_hit` |
@@ -2071,6 +2312,11 @@ mod tests {
     const MAX_JUMP_STEP_COUNT: usize = 120;
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
     const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
+    const BENT_SHOOTER_M: [f64; 2] = [-27.0, 0.0];
+    const BENT_TARGET_M: [f64; 2] = [-20.0, 0.0];
+    const MAX_SPOT_FROM_TARGET_M: f64 = 1.0;
+    const UP_PITCH_RAD: f64 = 1.45;
+    const MIN_FAR_SIDE_PER_EDGE: f64 = 0.6;
     const HZ_TOLERANCE: f64 = 1e-9;
     const RAMP_STEP_COUNT: usize = 10;
     const HALF_FRAC: f64 = 0.5;
@@ -2395,6 +2641,71 @@ mod tests {
             world.special.glass,
             "the pane's middle is solid for players"
         );
+    }
+
+    #[test]
+    fn a_flat_bend_traces_the_unbent_laser() {
+        let world: VoxelWorld = load_lunar_surface();
+        let mut bent: VoxelWorld = world.clone();
+        bent.set_bend_strength(1.0);
+        let hole: &VoxelWarp = &bent.warps[0];
+        let centre_m: f64 = world.settings.reality_bend.edge_radius_m / std::f64::consts::PI;
+        assert!((bent.r * hole.centre.y.asinh() - centre_m).abs() < 1e-9);
+        assert!(
+            (hole.m * 4.0 * bent.r - 6.0).abs() < 1e-9 && (hole.reach * bent.r - 40.0).abs() < 1e-9
+        );
+        bent.set_bend_strength(0.0);
+        let camera: DMat4 = VoxelPlayer::AtView(&world, [-22.0, 40.5], [-14.0, 40.0], None, 0.0)
+            .get_camera_frame(&world);
+        let (old, new) = (world.trace_laser(camera), bent.trace_laser(camera));
+        assert_eq!(new.through, vec!["wormhole mouth A".to_string()]);
+        assert_eq!(
+            (new.spot, new.drawn_spot, new.length_m),
+            (old.spot, old.spot, old.length_m)
+        );
+        let ends = |shot: &Shot| -> Vec<(DVec4, DVec4)> {
+            shot.segments.iter().map(|s| (s.a, s.b)).collect()
+        };
+        assert_eq!(ends(&new), ends(&old));
+    }
+
+    #[test]
+    fn a_bent_shot_along_the_ground_hits_what_is_ahead() {
+        let world: VoxelWorld = load_lunar_surface();
+        let target: DMat4 = VoxelPlayer::AtView(&world, BENT_TARGET_M, BENT_SHOOTER_M, None, 0.0)
+            .get_feet_frame(&world);
+        let camera: DMat4 = VoxelPlayer::AtView(&world, BENT_SHOOTER_M, BENT_TARGET_M, None, 0.0)
+            .get_camera_frame(&world);
+        for strength_frac in [0.6, 1.0] {
+            let mut shared: VoxelWorld = world.with_avatars(&[(target, 0)], &[[1.0, 0.0, 0.0]]);
+            shared.set_bend_strength(strength_frac);
+            let shot: Shot = shared.trace_laser(camera);
+            assert_eq!(
+                shot.hit_structure,
+                Some(shared.static_structure_count),
+                "strength {strength_frac}"
+            );
+            let spot: DVec4 = shot.spot.expect("a hit");
+            let target_axis: DVec4 = (target
+                * make_boost(AXIS_Y, (invert_lorentz(target) * spot).y.asinh()))
+            .col(AXIS_W);
+            assert!(get_distance(spot, target_axis) * world.r < MAX_SPOT_FROM_TARGET_M);
+        }
+    }
+
+    #[test]
+    fn a_shot_up_at_full_strength_lands_across_the_map() {
+        let mut world: VoxelWorld = load_lunar_surface();
+        world.set_bend_strength(1.0);
+        world.warps.clear();
+        let camera: DMat4 =
+            VoxelPlayer::AtView(&world, [0.0, 0.0], [10.0, 0.0], None, UP_PITCH_RAD)
+                .get_camera_frame(&world);
+        let shot: Shot = world.trace_laser(camera);
+        let edge_m: f64 = world.settings.reality_bend.edge_radius_m;
+        let far: Bend = Bend::FromStrength(1.0, MIN_FAR_SIDE_PER_EDGE * edge_m, world.r);
+        assert!(far.is_beyond_edge(shot.spot.expect("the shot closes over onto the map")));
+        assert!(!world.bend.is_beyond_edge(shot.spot.expect("a hit")));
     }
 
     #[test]
@@ -2877,6 +3188,36 @@ mod tests {
             level_frac = next_frac;
         }
         assert!(has_dropped);
+    }
+
+    #[test]
+    fn a_pylon_goes_dark_with_its_console() {
+        let mut world: VoxelWorld = load_lunar_surface();
+        let fracs: [f64; MAX_CONSOLE_COUNT] = [0.0; MAX_CONSOLE_COUNT];
+        let pylons: Vec<usize> = world
+            .consoles
+            .iter()
+            .map(|c| c.pylon.expect("a pylon"))
+            .collect();
+        let lamps: Vec<(usize, [f32; 3])> = world
+            .consoles
+            .iter()
+            .map(|c| c.lamp.expect("a lamp"))
+            .collect();
+        world.light_consoles(1 << OFF_CONSOLE, &fracs, STEP_S);
+        for (i, (&k, &(light, color))) in pylons.iter().zip(&lamps).enumerate() {
+            let is_off: bool = i == OFF_CONSOLE;
+            assert_eq!(world.structures[k].is_dark, is_off, "pylon of console {i}");
+            let expected: [f32; 3] = if is_off {
+                color.map(|c| c * CONSOLE_OFF_FRAC)
+            } else {
+                color
+            };
+            assert_eq!(world.lights[light].1, expected, "lamp of console {i}");
+        }
+        world.light_consoles(0, &fracs, 2.0 * STEP_S);
+        assert!(!world.structures[pylons[OFF_CONSOLE]].is_dark);
+        assert_eq!(world.lights[lamps[OFF_CONSOLE].0].1, lamps[OFF_CONSOLE].1);
     }
 
     #[test]

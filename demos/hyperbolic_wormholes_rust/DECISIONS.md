@@ -1204,6 +1204,8 @@
   just the specific colors should be a bit more crisp". Then: "make a PR that makes it take slightly longer; ideally
   just double its radius or whatever (i.e. walking at same speed should take exactly twice as long of time showing
   me cyan or red)".
+- **Superseded in part by:** D105, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
+  backward, which you picked from the colour sheets; where and how long the shift shows stays as here.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1580,6 +1582,48 @@
 - **Rationale:** you asked that shooting enemy wormholes make them flash red, and that a few shots (5 rifle shots)
   destroy both.
 
+### D103. Zone walls: see-through slabs straight above the zones' edges (W-64 (zone planes))
+
+- **Choice:**
+  - **Where:** each edge of the blue and red zones (u = ±45 m on Lunar Surface) is a wall around the points
+    straight above the edge in Fermi height, from the ground up to `regions.zone_walls.height_m` (6 m) above it, so
+    its foot and its top follow the ground over the mounds and up the crater's wall. It ends at the playable ellipse
+    (`regions.boundary`), fading out over its last 4 m. The edge is a geodesic of the ground, so those points are part
+    of a geodesic plane.
+  - **Thickness:** the wall is the slab within half of `regions.zone_walls.thickness_m` (0.6 m, a player's width) of
+    that plane, ±0.3 m, the same thickness everywhere. A ray is inside it where |⟨x, n⟩| ≤ sinh(0.3 m / R), an
+    interval in tanh s found in closed form.
+  - **Look:** a glowing slab in the team's colour. Seen straight through, it is `regions.zone_walls.opacity_frac`
+    (0.25, level A, the user's pick) opaque at the ground, falling to 0.6 of that within about 0.4 m and on to about
+    0.36 of it near the top, then fading out over its top quarter: a soft top edge. Of that, 70% is in its two
+    faces, each thicker as you look along it (up to 4 times), and 30% is spread through the slab, so seen at a slant
+    the tint builds up with the way through it: edge-on and from above it shows as a band as wide as the slab, and
+    from beside it the feet of both faces show as two lines. Far away it thins in the haze. It is blended like the
+    dust of shots (into the ray end's `dust`), so the adaptive sampling refines where the wall meets the ground.
+  - **The painted line:** gone on maps with zone walls (the wall's brighter foot marks the edge); a map without them
+    keeps it.
+  - **Map format:** the height, thickness and opacity are map data, the optional `regions.zone_walls` (so the format
+    stays version 1); renderers choose the fade and the glow.
+  - **Physics:** the walls are only drawn: they stop neither players nor lasers.
+- **Alternatives:**
+  - opacity 0.5 at the ground (level B in the PR's first pictures);
+  - 8 m or 5 m tall (8 m fills much of the sky from 10 m away; 5 m hides behind the mounds);
+  - a slab 0.6 m wide in Fermi u (it would widen away from the middle line, to 1.4 m at the crater's edge);
+  - all of the tint in the faces, or all in the slab (the faces alone don't show the thickness; the slab alone
+    hardly shows the faces);
+  - a wall rising from h = 0 or to a fixed top (it would be buried by the crater's wall and float over hollows);
+  - walls along the whole edge, out to infinity (seen from above they would run out over the crater's rim);
+  - keeping the painted line under the wall, or a grid on the slab (more to look at than a plane);
+  - a separate ray-end field for the walls (16 more bytes per sample, where the dust's blending already fits).
+- **Rationale:** you asked that the painted lines become planes jutting out of the ground, just barely translucent,
+  to mark out the real zones, picked level A ("Level A, faint"), and then asked: "the blates should also have a little
+  bit of thickness (rougly 1 player worth of thickenss)". A point is in blue's zone exactly when its Fermi u is below
+  −45 m, at any height, so the slab around the plane straight above the edge marks the zone's real boundary. GPU
+  cost, in interleaved runs against `staging` at 2560 × 1600 on an Apple M3 Pro (macOS 15.7): with thin planes, 6
+  rounds of 7 views summed to 246.2 ms on `staging` and 244.3 ms with the walls (−0.8%); with the slabs, 4 rounds of
+  7 views facing the walls gave each view's least median GPU time 1% to 5% higher (about 1 ms in 26 ms) in 6 of
+  them; both are within the run-to-run noise (single views ±12%).
+
 ## Baselines
 
 ### D99. Shot noise in the beam, for W-84 (shot noise in the beam itself): pixels turn black, white or drop out
@@ -1678,6 +1722,54 @@
 - **Rationale:** you asked that the curvature be set in the YAML settings, higher than now, at most twice the
   current curvature, and then chose 1.5 as the default after seeing the speckle at 2.
 
+### D101. Giant ships far in the sky, for W-83 (giant ships in the distance)
+
+- **Choice:**
+  - **Ships:** two giants far behind D82's ships, purely for looks, as original designs in the spirit of the films'
+    (no copies, and no film names in the code, which calls them `battle_station` and `capital_ship`): a moon-sized
+    battle station and a long wedge-shaped capital ship. `spaceships.rs` flies them like the others, first in
+    `FLIGHTS`, so the shader draws them behind the small ships.
+  - **Battle station (`draw_battle_station`):** a sphere 8.6° across, about half the planet, 14° above the horizon at
+    azimuth 240°, ahead and a little left from the blue spawn. It has panel bands with thin seams, a dark trench round
+    its equator with 14 small pale lights, a concave dish in its upper half (a bowl cut out of the sphere, with two
+    rings and a dark lens), a few lit windows on its night side and a red beacon flashing on its pole. Its pole leans
+    17° toward the eye so the upper half shows. The sun is 90° away from it there, so it shows half lit. You picked the
+    dish in the upper half (option B) over one on the equator.
+  - **Hovering:** the station holds its place (`Path::Hovering`), swaying 0.5° along its great circle and back every
+    15 minutes, so it never sets and moves about a pixel every 15 s at 2560×1600.
+  - **Capital ship (`draw_capital_ship`):** a long flat wedge 7° long, with one deck block and a bridge tower at the
+    stern, three blue engines with plumes, red and green lights at the stern's corners and a white strobe on the
+    bridge. Rows of lit windows run along the superstructure's sides and the hull's two edges; once a window is
+    smaller than a pixel they show their mean light, so they don't flicker as the ship drifts. It crosses the sky like
+    D82's ships, highest at 30° (azimuth 290°, ahead and a little right from the blue spawn), in 30 minutes, then
+    comes back below the horizon in 6. You picked the plain hull (option A) over one with stepped tiers and panel
+    stripes, with lights like that one's.
+  - **Solids, not silhouettes:** D82's ships are flat silhouettes; the giants are shaded as solids, along parallel
+    rays since they are far: the station as a sphere, the capital ship as a convex wedge (five planes) and three boxes.
+    The capital ship is drawn tilted 52° from facing the eye, so its top and superstructure show, standing up toward
+    the top of the sky. Both are lit by the sun and, more faintly, by the sunlit ground, with a faint glow so their
+    night sides show against the stars.
+  - **Background only:** as in D82, they are part of the sky: behind everything, bent through the lenses like the
+    stars, on the UTC clock, and in the `lunar` appearance style rather than the map.
+  - **Cost:** as in D82, each sky pixel rules a giant out with a few dot products, and only pixels within 1.5 half
+    lengths of one shade it (about 19,000 for the station and 3,000 for the capital ship at 2560×1600, 0.5% of the
+    frame). On D10's shared machine, with other agents' work running, three alternating `--bench-views` runs at
+    2560×1600 against `staging`: by the best of the three, the fastest frames moved by −0.5 to +0.8 ms per view
+    (mean +0.2 ms), and the median GPU times by −0.2 to +0.5 ms, apart from two noisy views (+1.5 ms at the red spawn
+    and −14 ms at the wormhole's exit). The blue spawn, with both giants in sight, took 28.0 ms on the GPU against
+    27.5 ms. The window at 1280×800 ran 85.8 fps (10.0 ms on the GPU).
+- **Alternatives:**
+  - flat silhouettes like D82's ships (a sphere and a superstructure read as flat discs and blocks);
+  - the station crossing the sky like the others (it would set for a sixth of the time; a moon-sized station reads
+    better holding still);
+  - the station further from the sun, more fully lit (around azimuth 300° it would crowd the planet in the spawns'
+    view);
+  - the options not picked: the dish on the equator, and a detailed hull with three stepped tiers, panel stripes and
+    seven engines.
+- **Rationale:** you asked for a moon-sized battle station with a dish and a long wedge-shaped capital ship off in the
+  distance, as original designs in that spirit; seeing two options of each, you said "I like Death Star option B and
+  I like ship option A but you can add a bunch of lights on it like B".
+
 ### D104. A third-person view on `V`, W-61 (third-person view)
 
 - **Choice:**
@@ -1726,6 +1818,62 @@
   scene differs a little: its mouths and eye are 4.5 blocks up, and it has no laser.
 - **Alternatives:** moving the WebGL demo's mouths to match first.
 - **Rationale:** it is the version you found too slow.
+
+### D105. The wormhole colour shift in the colours you picked, for W-82 (wormhole colour from motion)
+
+- **Choice:** D84 keeps where, when and how long the shift shows (inside the mouth, × the speed along the view, no
+  timer, 0.63 s walking through mouth A); its colours are now the two you picked from sheets made by an exact Python
+  copy of the shader. The real shader matches that copy to within 1 level in 255 on the `middle` and `red_pylon`
+  views.
+  - **The Doppler step:** each channel shows the light at D times its wavelength (the spectrum at 610, 550 and 465
+    nm, 0 at 400 and 700 nm), with D = √(1 − β²) / (1 − β cos θ′), cos θ′ = 1 − (1 − cos θ) / 2, θ the angle off
+    the middle of the screen. β is 0.09 forward and −0.3 backward at walking speed, growing with it beyond.
+  - **Forward, option 8 "toward light cyan":** D² as bright plus a blue glow (0, 0.12, 0.4) × (D² − 1); paled 30%
+    toward its grey (luminance 0.2126 R + 0.7152 G + 0.0722 B); moved 60% toward light cyan #E0FFFF at the same
+    luminance, so dark stays dark; × 1.5 through a shoulder that rolls the brightest channel off above 0.8 toward
+    1, so nothing clips to flat white; then green moved into blue and held to 0.95 of blue, so nothing turns green.
+    On the `middle` view the ground turns from #A8A295 to #B3E3EF.
+  - **Backward, R2 "darker":** D as bright plus the red glow (0.4, 0.04, 0) × |D − 1|, then × 0.7. On the `middle`
+    view the ground turns #540F00.
+  - **Below walking strength:** the picked colour fades in, the gain and the green cap with it.
+  - **Knobs:** named constants at the top of `render_metal.metal` (`BLUESHIFT_PALE_FRAC`, `BLUESHIFT_WHITE_FRAC`,
+    `BLUESHIFT_TINT`, `BLUESHIFT_GAIN`, `BLUESHIFT_SHOULDER_KNEE`, `BLUESHIFT_LIFT_FRAC` at 0,
+    `BLUESHIFT_MAX_GREEN_PER_BLUE`, `REDSHIFT_GAIN`). `view.wormhole_tint_frac` still fades the whole shift in.
+- **Alternatives:**
+  - the other forward options on the sheet: 1 to 7 (bluer or greener, less white), 9 to 12 (nearly white, #E0FFFF
+    to #F0FFFF, keeping less of the scene's texture), and lifting the blacks toward the tint (options 7 and 12);
+  - the redshift as it was (#259 and #289), or another darkness (R1, R3, R4);
+  - #289's forward look (β 0.16, D³, shown at 45%), chosen from side-by-side renders before your picks reached it.
+- **Rationale:** from the sheets you said "i like option 8 for the wormhole" and "for red i like r2"; after #272 you
+  asked for "the dark red and the light cyan almost white", crisp, "like the previous pictures I was shown".
+
+### D106. The rifle is a bolt-action rifle in hand, W-96 (a different rifle model)
+
+- **Choice:**
+  - **Model:** gun 2, the rifle, is drawn as Poly Haven's "Bolt Action Rifle 7.62" by Mateusz Sadek (CC0), already
+    committed for the fps_demo in `demos/fps_demo/assets/models/bolt_action_rifle_7_62/`; nothing was downloaded. Gun
+    1, the sniper, keeps the energy revolver. `Gun::get_model` in `main.rs` picks the model, and `viewmodel.rs`
+    loads each model (`GunModel`) once, both before the first frame (two loading-screen steps, "revolver" and
+    "rifle").
+  - **Size:** `BOLT_ACTION_RIFLE_SCALE` = 0.28, so the 1.23 m rifle is drawn 0.34 m long. With its muzzle at the
+    wand's tip, at full size (or 1.6x like the revolver) only its barrel shows; at 0.28x its scope, bolt, magazine,
+    trigger and the start of its stock come into the lower right corner. 0.25x shows more of the stock but makes the
+    rifle look thin and far; 0.35x and up push the stock and then the scope off the bottom of the view.
+  - **Placement:** the model is turned a quarter turn about its up axis (its barrel lies along +x in its glTF), and
+    its muzzle (the middle of its front face) is put at the wand's tip, as the revolver's is, so the beam still
+    leaves the muzzle. The pose, bob and recoil are the wand's, unchanged.
+  - **Missing file:** the game checks both models at start and fails naming the file and the command that restores
+    the fps_demo's assets, as it did for the revolver.
+  - **Credit:** the CREDITS page names the rifle, its author, Poly Haven and its link.
+- **Alternatives:**
+  - a sci-fi rifle from Sketchfab under CC BY (AR-H470 by Frostoise, Sci-FI Sniper Rifle by Matija Švaco and
+    others): a closer match to the revolver's look, but it needs a download with a Sketchfab account;
+  - the Kenney Blaster Kit (CC0): toy-like low-poly blasters that clash with the textured revolver;
+  - drawing the rifle at the revolver's 1.6x or at full size (only the barrel shows), or moving the gun so a
+    full-size rifle fits (the beam's start would move).
+- **Rationale:** you asked for the rifle to be a different gun ("for the rifle the gun has to change to a different
+  one ideally; see if you can find something for that"), and chose the bolt-action from the pictures ("bolt action
+  is good"). The wooden rifle stands out from the sci-fi look, which also makes the two guns easy to tell apart.
 
 ## Workload
 

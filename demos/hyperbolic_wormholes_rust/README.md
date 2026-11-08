@@ -49,7 +49,7 @@ make join-game SERVER=127.0.0.1
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
   you through. For the moment you are inside the mouth (within about 3.6 m of its centre), moving, your view's
-  colours shift as if you moved near light speed (D84): a light cyan, almost white, walking forward, a dark red
+  colours shift as if you moved near light speed (D84, D105): a light cyan, almost white, walking forward, a dark red
   walking backward, crisp, with dark staying dark. It is strongest at the throat and with speed, none standing
   still, and gone once you are 3.6 m out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the
   menu) sets its strength (0 for none). Only you see your own shift (Metal renderer, voxel maps).
@@ -58,7 +58,9 @@ make join-game SERVER=127.0.0.1
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
   bar, is empty until it can fire again.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
-  eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots.
+  eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots. In hand, the sniper is the
+  energy revolver and the rifle a wooden bolt-action rifle with a scope (Poly Haven, CC0; D106, for W-96 (a
+  different rifle model)), drawn small so its scope, bolt and stock show in the corner.
   Each shot strays a little from the crosshair, by a random angle sampled for that shot (D89): with the sniper
   usually by a hair (3 mrad on average, at most 15), with the rifle by up to 2 mrad cold, growing with its heat to 20
   mrad and shrinking as it cools (`noise_*_rad` under `sniper` and `rifle` in `server_settings.yaml`).
@@ -94,6 +96,10 @@ make join-game SERVER=127.0.0.1
   never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
   A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
   2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
+- On Lunar Surface the blue and red zones' edges are walls you see through (D103): faint slabs in the team's colour
+  straight above each edge, 6 m high above the ground and 0.6 m thick (a player's width), brightest at their foot
+  and fading out at the top. They stop neither you nor lasers. The map sets their height, thickness and opacity
+  (`regions.zone_walls` in its `map.json`).
 - `V` switches between first and third person (on voxel maps). The camera eases out over 0.3 s to 3 m behind and
   0.6 m above your head, looking where you look, and you see your own body as the others see it, without the gun in
   hand. It pulls in toward your head when the ground or a wall is in the way (in a 2 m walkway it stays at your
@@ -138,8 +144,16 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
 - Spaceships fly over Lunar Surface, purely for looks (D82): a ring ship and three delta-wing fighters in a V, each
   crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
+- Two giant ships hang far behind them (D101): a moon-sized battle station with a dish, hovering low over the horizon
+  ahead of the blue spawn, and a long wedge-shaped capital ship with rows of lit windows, crossing the sky in 30
+  minutes.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
+- `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and
+  `--view`: the map's edges curl up into a bowl, and at 1 it closes into the inside of a sphere. The Metal ray tracer
+  walks each ray through the bent world in short pieces, halved until each one's map chord follows the bent path within
+  2 cm (or half a pixel far away), and traces every piece through the unbent map; flat frames use the unchanged tracer
+  (`render_voxel.metal` is compiled with and without `HAS_BEND`).
 
 ## Play together
 
@@ -167,7 +181,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
-- On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).
+- On Lunar Surface each team has three pylons with one console each, and a team wins by turning off all three of the
+  other team's consoles (hold `E` on one for 10 s within 3 m).
   Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
   just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
   go dark when off. After a win, `Enter` in the server's terminal starts a new game.

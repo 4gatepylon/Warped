@@ -15,12 +15,14 @@
 //! - `--host`, `--join auto|<address>`, `--serve`, `--bot`, `--port`: play with others on the local
 //!   network (see `net.rs` and `multiplayer.rs`).
 //! - `--export-map <folder>`: write the world as a portable map (`common/maps/`).
+//! - `--bend-strength <0..1>`: on lunar-surface, force the reality bend's strength (W-68).
 //!
 //! Example: `cargo run --release -- --bench-views --width-px 2560 --height-px 1600`
 //!
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod bend;
 mod credits;
 mod dust;
 mod exit_prompt;
@@ -36,6 +38,7 @@ mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
+mod reality_bend;
 mod render_cpu;
 mod render_metal;
 mod render_voxel;
@@ -52,6 +55,7 @@ mod voxel_clearance;
 mod voxel_textures;
 mod voxel_world;
 mod world;
+mod zone_walls;
 
 use std::error::Error;
 use std::fs;
@@ -73,9 +77,11 @@ use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
 
+use bend::Bend;
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use key_bindings::{Action, Control};
 use physics::{Input, LaserReport, Player};
+use reality_bend::RealityBend;
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
@@ -336,6 +342,10 @@ struct Arguments {
     /// --bench-views names them), e.g. black_hole.
     #[arg(long)]
     view: Option<String>,
+    /// On a map that bends (lunar-surface): force the reality bend's strength (0 to 1) instead of
+    /// following the consoles (W-68).
+    #[arg(long)]
+    bend_strength: Option<f64>,
     /// Write the world as a map in the portable format of common/maps/ (map.json) into this folder,
     /// replacing the folder's map.json, and exit.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
@@ -504,6 +514,14 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
             "--view needs --map lunar-surface; e.g. --map lunar-surface --view black_hole".into(),
         );
     }
+    if let Some(strength_frac) = arguments.bend_strength
+        && (!(0.0..=1.0).contains(&strength_frac) || arguments.map != MapName::LunarSurface)
+    {
+        return Err(format!(
+            "--bend-strength must be in [0, 1] with --map lunar-surface, got {strength_frac}; e.g. --map lunar-surface --bend-strength 0.6"
+        )
+        .into());
+    }
     if arguments.map == MapName::LunarSurface
         && (arguments.autopilot || (arguments.play_route && arguments.route != RouteKind::WarpTour))
     {
@@ -572,7 +590,7 @@ fn main() -> Result<()> {
         return serve_only(&arguments);
     }
     if arguments.renderer == RendererKind::Metal {
-        viewmodel::check_revolver()?;
+        viewmodel::check_gun_models()?;
         if arguments.map == MapName::LunarSurface {
             voxel_textures::check_surface_textures()?;
         }
@@ -853,6 +871,9 @@ fn bench_voxel_views(
     mut renderer: Box<dyn Renderer>,
     world: &VoxelWorld,
 ) -> Result<()> {
+    let mut bent_world: VoxelWorld = world.clone();
+    RealityBend::New(arguments.bend_strength).update(&mut bent_world, 0, 0.0);
+    let world: &VoxelWorld = &bent_world;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
@@ -881,13 +902,17 @@ fn bench_voxel_views(
                 speckle_frac: 0.0,
             })
             .collect();
-        let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
-        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+        let spot: Option<(glam::DVec4, u32)> =
+            shot.as_ref().and_then(|s| s.drawn_spot).map(|x| (x, 0));
+        let (camera, bend) = (world.bend.bend_frame(camera), world.bend);
+        let warm_up: VoxelFrame =
+            VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+            let frame: VoxelFrame =
+                VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());
@@ -950,9 +975,13 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         })?
     } else {
         let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
-        multiplayer::run_voxel_bot(&world, &mut client, duration_s, |frame, id| {
-            save(FrameData::Voxel(frame), id)
-        })?
+        multiplayer::run_voxel_bot(
+            &world,
+            &mut client,
+            duration_s,
+            arguments.bend_strength,
+            |frame, id| save(FrameData::Voxel(frame), id),
+        )?
     };
     if arguments.json {
         println!(
@@ -1823,11 +1852,13 @@ struct Session {
     has_shot_hit_wormholes: bool,
 }
 
-/// `VoxelState` is a window's game on a voxel map: the map, the player and their spawn point.
+/// `VoxelState` is a window's game on a voxel map: the map, the player, their spawn point and the
+/// reality bend's strength.
 struct VoxelState {
     world: VoxelWorld,
     player: VoxelPlayer,
     spawn_index: usize,
+    reality_bend: RealityBend,
 }
 
 /// `PackedFrame` is one frame packed for the renderer: the house's rows or a voxel map's frame.
@@ -1923,7 +1954,7 @@ impl Tracer {
         Tracer {
             length_m: segments.iter().map(|s| s.length).sum::<f64>() * r,
             segments,
-            spot: shot.spot,
+            spot: shot.drawn_spot,
             team,
             is_rifle,
             speckle_frac,
@@ -1980,6 +2011,19 @@ fn add_dust_burst(
 enum Gun {
     Laser,
     Rifle,
+}
+
+impl Gun {
+    /// `get_model` gives the model drawn in hand for this gun: the energy revolver for the laser
+    /// (the sniper) and the bolt-action rifle for the rifle.
+    ///
+    /// Example: `let model: viewmodel::GunModel = Gun::Rifle.get_model();`
+    fn get_model(self) -> viewmodel::GunModel {
+        match self {
+            Gun::Laser => viewmodel::GunModel::Revolver,
+            Gun::Rifle => viewmodel::GunModel::BoltActionRifle,
+        }
+    }
 }
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
@@ -2053,6 +2097,7 @@ impl Session {
                 world,
                 player,
                 spawn_index: 0,
+                reality_bend: RealityBend::New(arguments.bend_strength),
             })
         };
         let world: World = match voxel {
@@ -3137,6 +3182,9 @@ impl Session {
                 .world
                 .light_consoles(off_mask, &disabling_fracs, time_s);
             voxel.world.sky_time_s = spaceships::get_utc_s();
+            voxel
+                .reality_bend
+                .update(&mut voxel.world, off_mask, time_s);
             let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
             voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }
@@ -3160,7 +3208,11 @@ impl Session {
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
-            let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
+            let (now_s, r, bend) = (
+                self.start.elapsed().as_secs_f64(),
+                voxel.world.r,
+                voxel.world.bend,
+            );
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
             self.dust_bursts.retain(|burst| !burst.is_over(now_s));
@@ -3169,7 +3221,7 @@ impl Session {
                 .iter()
                 .filter_map(|burst| burst.get_cloud(now_s))
                 .collect();
-            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r);
+            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r, bend);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
                 .iter()
@@ -3423,8 +3475,8 @@ impl Session {
 
     /// `get_banner_lines` gives the two lines shown over the view: while the exit prompt shows,
     /// its question and keys; when this window can't play on its server
-    /// (`get_connection_problem`), what is wrong; in the lobby, each
-    /// team's head count and the keys that join a team; after asking to join, until welcomed, that
+    /// (`get_connection_problem`), what is wrong; in the lobby, whether it is connected to the
+    /// server yet (`get_lobby_lines`); after asking to join, until welcomed, that
     /// it is joining and the server's address; once a team has won, the winner and how to start a
     /// new game; while this player is out after a hit, "YOU DIED" and the countdown to respawning;
     /// or `None`.
@@ -3440,19 +3492,16 @@ impl Session {
             return Some(problem.get_lines(client.get_server()));
         }
         if multiplayer.client.is_in_lobby() {
-            let counts: String = match multiplayer.client.lobby_counts {
-                Some([blue, red]) => format!("BLUE {blue}   RED {red}"),
-                None => "LOOKING FOR THE GAME".to_string(),
-            };
             let keys = &self.player_settings.keys;
-            return Some([
-                counts,
+            return Some(get_lobby_lines(
+                client.lobby_counts,
+                client.get_server(),
                 format!(
                     "{} joins blue, {} joins red",
                     keys.get_label(Action::JoinBlue),
                     keys.get_label(Action::JoinRed)
                 ),
-            ]);
+            ));
         }
         if client.is_waiting_for_welcome() && !multiplayer.is_eliminated {
             return Some([
@@ -3494,14 +3543,15 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r`. While the
-    /// trail of one of this player's own shots still reaches the muzzle, its beam starts at the
-    /// gun's tip as drawn now (`get_muzzle`), so it stays on the tip as the gun moves.
+    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r` under
+    /// the reality bend `bend`. While the trail of one of this player's own shots still reaches the
+    /// muzzle, its beam starts at the gun's tip as drawn now (`get_muzzle`), so it stays on the tip
+    /// as the gun moves.
     ///
-    /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
-    fn get_lit_beams(&self, r: f64) -> Vec<render_voxel::LaserBeam> {
+    /// Example: `let beams = self.get_lit_beams(voxel.world.r, voxel.world.bend);`
+    fn get_lit_beams(&self, r: f64, bend: Bend) -> Vec<render_voxel::LaserBeam> {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
-        let muzzle: Option<glam::DVec4> = self.get_muzzle(r);
+        let muzzle: Option<glam::DVec4> = self.get_muzzle(r, bend);
         self.tracers
             .iter()
             .map(|tracer| {
@@ -3528,16 +3578,17 @@ impl Session {
             .collect()
     }
 
-    /// `get_muzzle` gives where the tip of the gun in hand shows in the world, on a map of
-    /// curvature radius `r`: the wand's tip in camera space, moved toward the view's centre by the
-    /// aim zoom (which magnifies the scene but not the gun), or `None` with no gun in view.
+    /// `get_muzzle` gives where the tip of the gun in hand shows in the world (bent by `bend`, as
+    /// the beams are), on a map of curvature radius `r`: the wand's tip in camera space, moved
+    /// toward the view's centre by the aim zoom (which magnifies the scene but not the gun), or
+    /// `None` with no gun in view.
     ///
-    /// Example: `let muzzle = self.get_muzzle(voxel.world.r);`
-    fn get_muzzle(&self, r: f64) -> Option<glam::DVec4> {
+    /// Example: `let muzzle = self.get_muzzle(voxel.world.r, voxel.world.bend);`
+    fn get_muzzle(&self, r: f64, bend: Bend) -> Option<glam::DVec4> {
         let tip_m: glam::DVec3 = self.get_wand()?.get_tip_m().as_dvec3();
         let zoom: f64 = self.get_zoom();
         Some(
-            self.get_eye_frame()
+            bend.bend_frame(self.get_eye_frame())
                 * voxel_world::map_exp(
                     glam::DVec3::new(tip_m.x / zoom, tip_m.y / zoom, tip_m.z),
                     r,
@@ -3560,7 +3611,7 @@ impl Session {
         let (feet, beams): (DMat4, Vec<(Vec<voxel_world::BeamSegment>, u32)>) = match &self.voxel {
             Some(voxel) => (
                 voxel.player.get_feet_frame(&voxel.world),
-                self.get_lit_beams(voxel.world.r)
+                self.get_lit_beams(voxel.world.r, voxel.world.bend)
                     .into_iter()
                     .map(|beam| (beam.segments, beam.team))
                     .collect(),
@@ -3837,6 +3888,10 @@ impl Session {
         if let Some(laser) = &self.laser {
             lines.push(format!("laser {laser}"));
         }
+        if let Some(voxel) = self.voxel.as_ref().filter(|voxel| voxel.world.can_bend()) {
+            let strength_pct: f64 = voxel.reality_bend.strength_frac * PERCENT_PER_FRAC;
+            lines.push(format!("REALITY {strength_pct:.0}%"));
+        }
         if let Some(multiplayer) = &self.multiplayer {
             lines.push(match multiplayer.client.id {
                 Some(id) => format!("player {id}, {} others", multiplayer.client.players.len()),
@@ -4106,6 +4161,22 @@ fn get_map_picture_max_px() -> (u32, u32) {
         ((MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a]) * PICTURE_PX_PER_MASK_PX) as u32
     });
     (width, height)
+}
+
+/// `get_lobby_lines` gives the lobby banner's two lines: until the server at `server` first
+/// answers, that this window is connecting to it; once it has (`lobby_counts`, each team's head
+/// count), that it is connected, the counts and `join_keys_line`.
+///
+/// Example: `let lines = get_lobby_lines(Some([1, 2]), server, "1 joins blue, 2 joins red".to_string());`
+fn get_lobby_lines(
+    lobby_counts: Option<[u32; net::TEAM_NAMES.len()]>,
+    server: SocketAddr,
+    join_keys_line: String,
+) -> [String; 2] {
+    match lobby_counts {
+        Some([blue, red]) => [format!("CONNECTED  BLUE {blue}  RED {red}"), join_keys_line],
+        None => ["CONNECTING".to_string(), format!("server {server}")],
+    }
 }
 
 /// `get_text_positions` places each of `text`'s lines in its mask: the line cut to the mask's
@@ -4446,7 +4517,9 @@ fn play_on_layer(
         let overlay_text: Option<OverlayText> = session.get_overlay_text();
         let text_mask: Option<Vec<u8>> = overlay_text.as_ref().map(make_text_mask).transpose()?;
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
-        let wand: Option<render_metal::OverlayWand> = session.get_wand();
+        let wand: Option<(render_metal::OverlayWand, viewmodel::GunModel)> = session
+            .get_wand()
+            .map(|wand| (wand, session.gun.get_model()));
         let stretch_frac: f32 = session.get_edge_stretch_frac();
         let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
         let blueshift_frac: f32 = session.blueshift_frac;
@@ -4508,8 +4581,8 @@ fn play_on_layer(
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the guns' hit rules, aiming's zoom, where overlay text goes and the tint after a
-    //! wormhole.
+    //! Tests of the guns' hit rules and models in hand, aiming's zoom, where overlay text goes and
+    //! the tint after a wormhole.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -4518,8 +4591,10 @@ mod tests {
     //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
+    //! | Gun in hand | laser (the revolver), rifle (the bolt-action rifle) | `each_gun_holds_its_model` |
+    //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
-    //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
+    //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
 
@@ -4546,6 +4621,20 @@ mod tests {
         assert!((part_way + HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
         assert!((shift(1.0, SPRINT_M_PER_S, 1.0) - MAX_BLUESHIFT_FRAC).abs() < 1e-6);
         assert!((shift(1.0, -SPRINT_M_PER_S, 1.0) + MAX_BLUESHIFT_FRAC).abs() < 1e-6);
+    }
+
+    #[test]
+    fn each_gun_holds_its_model() {
+        assert_eq!(Gun::Laser.get_model(), viewmodel::GunModel::Revolver);
+        assert_eq!(Gun::Rifle.get_model(), viewmodel::GunModel::BoltActionRifle);
+        for is_voxel_map in [true, false] {
+            let steps: &[render_metal::LoadingStep] = render_metal::get_loading_steps(is_voxel_map);
+            for gun in [Gun::Laser, Gun::Rifle] {
+                let step: render_metal::LoadingStep =
+                    render_metal::LoadingStep::Gun(gun.get_model());
+                assert_eq!(steps.iter().filter(|s| **s == step).count(), 1);
+            }
+        }
     }
 
     #[test]
@@ -4629,6 +4718,15 @@ mod tests {
         }
         let banner_char_count: usize = (DEATH_MASK_PX.0 as f32 / DEBUG_GLYPH_PX) as usize;
         for line in exit_prompt::get_lines() {
+            assert!(line.chars().count() <= banner_char_count, "{line}");
+        }
+        let longest_server: SocketAddr = "255.255.255.255:65535".parse().expect("an address");
+        let full_counts: [u32; 2] = [net::MAX_PLAYER_COUNT as u32; 2];
+        let keys_line: String = "1 joins blue, 2 joins red".to_string();
+        let connecting = get_lobby_lines(None, longest_server, keys_line.clone());
+        let connected = get_lobby_lines(Some(full_counts), longest_server, keys_line);
+        assert!(connecting[0].starts_with("CONNECTING") && connected[0].starts_with("CONNECTED "));
+        for line in connecting.iter().chain(&connected) {
             assert!(line.chars().count() <= banner_char_count, "{line}");
         }
     }

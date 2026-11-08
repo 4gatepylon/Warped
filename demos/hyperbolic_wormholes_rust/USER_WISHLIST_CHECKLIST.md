@@ -11,6 +11,16 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
+  frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
+  `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
+  2026-11-08.
+- [~] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
+  reality bending version). Claimed by Claude Code (subagent of a session on `leah`'s Mac in `Warped-main`), branch
+  `claude/shot-sky-flash`, worktree `/Users/leah/Documents/dev/Warped-rb-sky-flash`, 2026-11-08.
+- [~] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Claimed by Claude Code
+  (subagent of a session on `leah`'s Mac in `Warped-main`), branch `claude/screen-tearing`, worktree
+  `/Users/leah/Documents/dev/Warped-rb-tearing`, 2026-11-08.
 - [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
   wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
@@ -19,10 +29,6 @@ is in [`AGENTS.md`](AGENTS.md).
     different rifle model)), branch `claude/rifle-sway`, to be cut from `staging` once W-96 merges; pictures will be in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-102/`
     (temporary, under `/private/tmp`). State, 2026-11-08: not started; starts after W-96 (a different rifle model) merges.
-- [~] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
-  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
-  bar while disabling a pylon". Claimed by Claude Code (worktree `Warped-loading`), branch `claude/loading-screen`,
-  2026-11-08. Loading screen: #292; saying when the server is connected is not done yet.
 - [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
   - **Where the work is** (for any agent picking it up): worktree
@@ -33,44 +39,6 @@ is in [`AGENTS.md`](AGENTS.md).
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: mock-ups of three looks
     (A subtle, B rich, C photo-like) and one alternative position for the band done, with GPU costs; the user asked
     for images only for now; nothing built.
-- [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
-  can find something for that." Pictures first. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac, branch `claude/rifle-model`
-    (on this Mac only so far; to be pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: options and pictures done, no
-    code; waiting for the user to pick a model (and approve any download).
-- [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
-  of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac, branch `claude/zone-planes`
-    (on this Mac only so far; to be pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering two
-    levels of translucency; waits for the user's OK before merging.
-- [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
-  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
-  wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-a58a7f92ff135229f` on the user's Mac, branch `claude/giant-ships`
-    (pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-83/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: both ships drawn in the sky
-    shader with two options each (station: dish on the equator or in the upper half; capital ship: plain or detailed
-    hull), committed as WIP (`14d8ccb`) with temporary screenshot hooks; waiting for the user to pick, then remove the
-    hooks and the unpicked options, make the station hover, add tests, a decision, README and PLAYTEST, and open the
-    PR.
-- [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
-  center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
-  it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
-  pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
-  console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
-  down.
-  Claimed by Claude Code (session `08e70e8b-f763-4c5c-828c-f939a12fad13`), branch `reality-bend`, 2026-11-07.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -145,12 +113,51 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
+  of the ground, just barely translucent, to mark out the real zones. Then, from the pictures: "Level A, faint", and
+  "the blates should also have a little bit of thickness (rougly 1 player worth of thickenss)". #291.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/zone-planes` (pushed to
+    `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac,
+    pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`
+    (temporary, under `/private/tmp`; the `*_slab*` and `6*_recheck_*` files show the result). State, 2026-11-08: on
+    `staging`, waiting for the user to test it.
+- [?] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
+  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
+  bar while disabling a pylon". Loading screen: #292, #293; the user confirmed it ("i love hte loading screen"),
+  2026-11-08. Connected: the lobby says CONNECTING, then CONNECTED, #307.
+- [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
+  can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
+  good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
+  (D106). #304.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/rifle-model` (pushed to
+    `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac,
+    pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`
+    (temporary, under `/private/tmp`; the `W-96_final_*` files show the result). State, 2026-11-08: on `staging`,
+    waiting for the user to test it.
+- [?] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
+  center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
+  it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
+  pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
+  console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
+  down. #298, #299, #300, #301.
 - [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). After seeing 2x speckle far from the map's middle, the user chose 1.5x
   as the default: "1.5x curvature is fine". #285.
 - [?] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
   player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
   page use team colours. The user said to add and fix it ("Yes, add and fix"). #290.
+- [?] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
+  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
+  wedge-shaped capital ship), not copies of the films' models, and without their names in the code. From two options
+  of each, the user picked "Death Star option B" (the dish in the upper half) and "ship option A but you can add a
+  bunch of lights on it like B" (D101). #303.
+  - **Where the work is** (for any agent picking it up): merged into `staging` in #303 from branch
+    `claude/giant-ships` (pushed to `origin`; worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a58a7f92ff135229f`
+    on the user's Mac), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-83/`
+    (temporary, under `/private/tmp`). State, 2026-11-08: done and on `staging`; waiting for the user to test.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
@@ -357,7 +364,9 @@ Confirmed by the user after testing.
   After seeing #272's pictures: "for the "at the throat" thing you still need to have the dark red and the light
   cyan almost white instead of doing this "warm" stuff. It has to be CRISP (not like diffused by this white screen),
   like the previous pictures I was shown. Still fix the throat timing for the color though", "so overall your throat
-  timing looks good", and "its just the specific colors should be a bit more crisp". #289.
+  timing looks good", and "its just the specific colors should be a bit more crisp". #289. The user's picks from the
+  colour sheets: "i like option 8 for the wormhole", and "for red i like r2" (branch `claude/wormhole-doppler-picks`).
+  #271.
   - **Where the work is** (for any agent picking it up): branch `claude/wormhole-tint-crisp`, pushed to `origin`,
     PR #289 into `staging` (crisp colours, and the tint showing twice as long: 0.63 s against 0.32 s at walking
     speed). Worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-acc2c2d6bf5b447c3` on the user's Mac; pictures

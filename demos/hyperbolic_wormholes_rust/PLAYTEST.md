@@ -68,22 +68,30 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
 - Up to 8 players. A laser that reaches another player removes them: their view darkens, says "YOU DIED" with a
   countdown, and they come back at their spawn 3 seconds later.
-- Joining opens a lobby that shows how many players each team has: press `1` to join blue or `2` to join red. You
-  keep your team when you come back after being hit. Lasers hit teammates too, but you can only turn off the other
-  team's consoles. Bots join whichever team has fewer players.
+- Joining opens a lobby that says CONNECTING until the server answers, then CONNECTED with how many players each
+  team has: press `1` to join blue or `2` to join red. You keep your team when you come back after being hit. Lasers
+  hit teammates too, but you can only turn off the other team's consoles. Bots join whichever team has fewer
+  players.
 
-To win on Lunar Surface, turn off all five of the other team's consoles, the pulsing blocks around its pylon
-(the red pylon is past the wormhole on the ridge). Stand within 3 m, look straight at one and hold `E` for 10 s: a bar
-below the crosshair fills, the console pulses faster and faster for everyone (from once a second to a frenzy of 8
-times a second right before it turns off), and you can't shoot meanwhile. Looking away or letting go starts it over,
-and its pulse slows back down over about a second. A console that is off goes dark. When a team's consoles are all
-off, everyone sees which team won, and a new game starts only when whoever started the server presses `Enter` in its
-terminal: every console comes back on and everyone returns to their
-spawn.
+To win on Lunar Surface, turn off all three of the other team's consoles, the pulsing block beside each of its three
+pylons (one near its spawn, one on each flank; a red pylon is past the wormhole on the ridge). Stand within 3 m, look
+straight at one and hold `E` for 10 s: a bar below the crosshair fills, the console pulses faster and faster for
+everyone (from once a second to a frenzy of 8 times a second right before it turns off), and you can't shoot
+meanwhile. Looking away or letting go starts it over, and its pulse slows back down over about a second. A console
+that is off goes dark. When a team's consoles are all off, everyone sees which team won, and a new game starts only
+when whoever started the server presses `Enter` in its terminal (the `make host-game` terminal, for that command):
+every console comes back on and everyone returns to their spawn.
 
 The habitat modules (the red one stands near the red base, on the side away from the ridge) and the covered walkways
 have windows: glass in real 1 m openings at eye height. You see out of them, and a laser goes through them both ways,
 but you can't climb through.
+
+The edges of the blue and red zones are walls you can see through: faint slabs in the team's colour, 0.6 m thick (a
+player's width), that rise 6 m straight up from the ground along each edge (45 m either side of the middle),
+brightest at their foot and fading out at the top. Seen face-on they are a faint tint; looking along one, or down on
+it, you see its thickness as a stronger band. They follow the ground over the mounds and up the crater's wall, and end
+at the playable area's edge. They stop neither you nor lasers: walk through one to cross into a zone. Their height,
+thickness and opacity are in the map (`regions.zone_walls` in `common/maps/lunar_surface/map.json`).
 
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
 each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
@@ -107,10 +115,11 @@ ammo bar doesn't pulse.
 
 Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, for the moment you
 are inside it, within about 3.6 m of its centre on either side (about 0.6 s at walking speed), your view's colours
-shift as if you moved near light speed: a light cyan, almost white, walking forward, a dark red walking backward,
-crisp, with dark staying dark. It is strongest at the throat and with your speed, goes away the moment you stand
-still, and is gone 3.6 m out. Only you see your own shift. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off). A saved
-`player_settings.yaml` that still has the old `wormhole_tint_s` line loads as before; that line is ignored.
+shift as if you moved near light speed: a light cyan, almost white, walking forward, a dark red walking backward
+(option 8 and R2, which you picked), crisp, with dark staying dark. It is strongest at the throat and with your
+speed, goes away the moment you stand still, and is gone 3.6 m out. Only you see your own shift. In the menu,
+`wormhole tint 0-1` sets how strong it is (0 turns it off). A saved `player_settings.yaml` that still has the old
+`wormhole_tint_s` line loads as before; that line is ignored.
 
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
 the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,
@@ -124,6 +133,13 @@ three delta-wing fighters in a V each cross from horizon to horizon in 2 to 5 mi
 lights and a flashing strobe. They follow the UTC clock, so everyone whose clock is right
 sees the same ships at the same moment. They are far away in the sky: lasers and players never touch them.
 
+Far behind them hang two giants. From the blue spawn, look ahead and a little left: a moon-sized battle station
+hovers low over the horizon, half lit by the sun, with a dish in its upper half, a dark trench round its middle with
+small lights, a red beacon flashing on top and lit windows on its dark side. It barely moves and never sets. A long
+wedge-shaped capital ship with a bridge tower, blue engines and rows of lit windows crosses the sky slowly: 30
+minutes from horizon to horizon, then 6 below it. From the blue spawn it rises on the left and passes highest a
+little right of ahead, 30° up. Both show through the wormholes and around the black hole, like the stars.
+
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
 `PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting; once you let go of `Shift` it refills in 7.5 s crouched (`Ctrl`) or 15 s walking or standing),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `V` switches to a third-person view from 3 m behind and a little above your character and back (it pulls in when a wall or the ground is behind you; shots still leave your head toward the crosshair, and aiming looks from your eye again), `Ctrl` (held) crouches
@@ -131,7 +147,7 @@ Controls (the defaults; to change them, edit the `keys` in a copy of `player_set
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click, then 2 s to reload, shown by one block
 above the energy bar that empties when you fire; one hit eliminates), and gun 2, the
-rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
+rifle (a wooden bolt-action rifle with a scope, drawn small in the lower right; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s). Each shot strays
 a little from the crosshair: the sniper's by a random few milliradians, the rifle's more and more as it heats up
 during a burst (`DECISIONS.md` D89). The sniper's beam is a white lightsaber blade, the rifle's a laser. Each shot's
