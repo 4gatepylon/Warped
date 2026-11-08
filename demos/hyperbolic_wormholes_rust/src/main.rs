@@ -1945,8 +1945,8 @@ impl Session {
 
     /// `handle_event` reacts to one window event and returns false when the player quits: Esc
     /// releases the mouse (or quits if it is free), a click captures it (and once captured, a left
-    /// click fires a laser shot for the settings' `sniper.shot_s`), the mouse looks, R respawns, and - and =
-    /// change the render scale.
+    /// click fires a shot), the mouse looks, `1`, `2` and the wheel switch guns, and - and = change
+    /// the render scale. Players can't respawn by choice.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
     fn handle_event(
@@ -1972,26 +1972,6 @@ impl Session {
                 repeat: false,
                 ..
             } => match key {
-                Keycode::R => {
-                    let others: Vec<DVec4> = self
-                        .multiplayer
-                        .as_ref()
-                        .map_or(Vec::new(), |m| get_eyes(&m.client.players));
-                    match &mut self.voxel {
-                        Some(voxel) => {
-                            let id: u32 = voxel.spawn_index as u32;
-                            voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
-                        }
-                        None => {
-                            let id: u32 = self
-                                .multiplayer
-                                .as_ref()
-                                .and_then(|m| m.client.id)
-                                .unwrap_or(0);
-                            self.player = multiplayer::get_spawn_player(&self.world, id, &others);
-                        }
-                    }
-                }
                 Keycode::Minus => {
                     self.is_auto_scale = false;
                     self.render_scale =
@@ -2836,7 +2816,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Shift run, Space jump, click shoot (not while running), 1/2 or wheel switch gun, Ctrl crouch (shoot standing still or crouched), hold E on an enemy console to turn it off, R respawn, -/= scale, Esc release".to_string()
+            "WASD move, Shift run, Space jump, click shoot, 1/2 or wheel switch gun, Ctrl crouch (shoot standing still or crouched), hold E on an enemy console to turn it off, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
