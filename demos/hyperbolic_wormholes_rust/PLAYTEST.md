@@ -72,14 +72,14 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   keep your team when you come back after being hit. Lasers hit teammates too, but you can only turn off the other
   team's consoles. Bots join whichever team has fewer players.
 
-To win on Lunar Surface, turn off all five of the other team's consoles, the pulsing blocks around its pylon
-(the red pylon is past the wormhole on the ridge). Stand within 3 m, look straight at one and hold `E` for 10 s: a bar
-below the crosshair fills, the console pulses faster and faster for everyone (from once a second to a frenzy of 8
-times a second right before it turns off), and you can't shoot meanwhile. Looking away or letting go starts it over,
-and its pulse slows back down over about a second. A console that is off goes dark. When a team's consoles are all
-off, everyone sees which team won, and a new game starts only when whoever started the server presses `Enter` in its
-terminal: every console comes back on and everyone returns to their
-spawn.
+To win on Lunar Surface, turn off all three of the other team's consoles, the pulsing block beside each of its three
+pylons (one near its spawn, one on each flank; a red pylon is past the wormhole on the ridge). Stand within 3 m, look
+straight at one and hold `E` for 10 s: a bar below the crosshair fills, the console pulses faster and faster for
+everyone (from once a second to a frenzy of 8 times a second right before it turns off), and you can't shoot
+meanwhile. Looking away or letting go starts it over, and its pulse slows back down over about a second. A console
+that is off goes dark. When a team's consoles are all off, everyone sees which team won, and a new game starts only
+when whoever started the server presses `Enter` in its terminal (the `make host-game` terminal, for that command):
+every console comes back on and everyone returns to their spawn.
 
 The habitat modules (the red one stands near the red base, on the side away from the ridge) and the covered walkways
 have windows: glass in real 1 m openings at eye height. You see out of them, and a laser goes through them both ways,
