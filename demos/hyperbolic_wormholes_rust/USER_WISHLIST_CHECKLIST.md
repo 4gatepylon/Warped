@@ -10,6 +10,12 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
+  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
+  cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
+  `claude/square-shapes`, 2026-11-07.
+- [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
+  (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
 - [~] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
   scene lighting. Claimed by Claude Code (session
   `5cf069f6-934c-466e-93ea-854879c2feaa`), branch `claude/gun-scene-lighting`, 2026-11-07.
@@ -101,10 +107,6 @@ is in [`AGENTS.md`](AGENTS.md).
   of the ground, just barely translucent, to mark out the real zones.
 - [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
   shadows on the hills.
-- [ ] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
-  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
-  cylinder, just make it a cylinder.
-- [ ] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side.
 
 ## Done
 
