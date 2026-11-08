@@ -277,6 +277,11 @@ struct Arguments {
     /// .artifacts/photos/.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route"])]
     photos: bool,
+    /// City Sphere: render the menu's map picture (the whole sphere seen from its centre,
+    /// unrolled, supersampled) into assets/map_picture.png, with a copy and the old drawing under
+    /// .artifacts/map_picture/.
+    #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "photos"])]
+    map_picture: bool,
     /// Play a scripted route without a window and save frames and timings under .artifacts/autopilot/.
     #[arg(long)]
     autopilot: bool,
@@ -565,6 +570,7 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         && !arguments.serve
         && !arguments.bench_views
         && !arguments.photos
+        && !arguments.map_picture
         && !arguments.autopilot
         && !arguments.play_route
         && arguments.export_map.is_none();

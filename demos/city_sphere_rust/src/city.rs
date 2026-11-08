@@ -46,6 +46,9 @@ const TEAM_COLORS: [[f32; 4]; 2] = [[0.3, 0.55, 1.0, 1.0], [1.0, 0.3, 0.25, 1.0]
 const OVERHEAT_PITCH_RAD: f64 = 1.2;
 const PHOTO_TIME_S: f64 = 0.4;
 const PHOTO_CENTRE_EYE_M: f64 = 3.5;
+const MAP_PICTURE_PATH: &str = "assets/map_picture.png";
+const MAP_PICTURE_FACE_PX: usize = 1536;
+const MAP_PICTURE_SUPERSAMPLE: usize = 3;
 const RIFLE_ROUTE_SETTLE_S: f64 = 1.0;
 const RIFLE_ROUTE_TIMEOUT_S: f64 = 20.0;
 const RIFLE_ROUTE_RESPAWN_WAIT_S: f64 = 4.0;
@@ -140,6 +143,9 @@ pub fn run(arguments: &Arguments) -> Result<()> {
     }
     if arguments.photos {
         return render_photos(arguments, renderer.as_mut());
+    }
+    if arguments.map_picture {
+        return render_map_picture(arguments, renderer.as_mut());
     }
     let metal: &mut render_metal::MetalRenderer = renderer.as_metal().ok_or("City Sphere needs Metal")?;
     play(arguments, metal)
@@ -1445,12 +1451,94 @@ fn make_map_base(world: &CityWorld, size_px: (usize, usize)) -> Vec<u8> {
     pixels
 }
 
-/// `make_map_picture` gives the menu's map page picture: the whole sphere unrolled
-/// (`make_map_base`), with consoles as squares in their team's colour (dark once off), the other
+/// `get_map_picture_path` gives where `--map-picture` saves the map page's picture.
+fn get_map_picture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH)
+}
+
+/// `load_map_picture` reads the rendered map picture (`--map-picture`), or gives `None` when it is
+/// missing or not `size_px`, so the map page falls back to `make_map_base`'s drawing.
+fn load_map_picture(size_px: (usize, usize)) -> Option<Vec<u8>> {
+    let picture: image::RgbaImage = image::open(get_map_picture_path()).ok()?.to_rgba8();
+    (picture.dimensions() == (size_px.0 as u32, size_px.1 as u32)).then(|| picture.into_raw())
+}
+
+/// `render_map_picture` renders the six faces of a cube around the centre (without the core, so
+/// nothing blocks the view) with City Sphere's renderer, unrolls them into the map page's
+/// longitude-latitude picture with `MAP_PICTURE_SUPERSAMPLE`^2 samples a pixel, and saves it to
+/// `assets/map_picture.png`, with a copy and the old drawing under .artifacts/map_picture/.
+fn render_map_picture(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()> {
+    let mut world: CityWorld = CityWorld::Builtin()?;
+    let drawing: Vec<u8> = make_map_base(&world, get_map_picture_px());
+    world.shells.retain(|shell| shell.is_walkable_inside || shell.is_reflective_inside);
+    let scene: Arc<CityScene> = Arc::new(build_scene(&world));
+    let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
+    let face_px: usize = MAP_PICTURE_FACE_PX;
+    let faces: [(DVec3, DVec3); 6] = [
+        (DVec3::X, DVec3::Y),
+        (DVec3::NEG_X, DVec3::Y),
+        (DVec3::Y, DVec3::Z),
+        (DVec3::NEG_Y, DVec3::Z),
+        (DVec3::Z, DVec3::Y),
+        (DVec3::NEG_Z, DVec3::Y),
+    ];
+    let mut face_pixels: Vec<(DMat4, Vec<u8>)> = Vec::new();
+    for (forward, up) in faces {
+        let eye: DMat4 = make_eye(DVec3::ZERO, forward, up);
+        let mut frame: CityFrame = make_frame(&world, &scene, &body, eye, &[], &[], (0, 0), 0.0, (face_px, face_px));
+        frame.tan_half_fov = 1.0;
+        let mut pixels: Vec<u8> = vec![0; face_px * face_px * BYTES_PER_PIXEL];
+        renderer.render(FrameData::City(&frame), (face_px as u32, face_px as u32), &mut pixels)?;
+        face_pixels.push((eye, pixels));
+    }
+    let size_px: (usize, usize) = get_map_picture_px();
+    let n: usize = MAP_PICTURE_SUPERSAMPLE;
+    let fine_px: (usize, usize) = (size_px.0 * n, size_px.1 * n);
+    let mut picture: Vec<u8> = Vec::with_capacity(size_px.0 * size_px.1 * BYTES_PER_PIXEL);
+    for y in 0..size_px.1 {
+        for x in 0..size_px.0 {
+            let mut sum: [u32; 4] = [0; 4];
+            for k in 0..n * n {
+                let d: DVec3 = get_map_direction(x * n + k % n, y * n + k / n, fine_px);
+                let (eye, pixels) = face_pixels
+                    .iter()
+                    .max_by(|a, b| d.dot(-a.0.z_axis.truncate()).total_cmp(&d.dot(-b.0.z_axis.truncate())))
+                    .expect("six faces");
+                let z: f64 = d.dot(-eye.z_axis.truncate());
+                let u: f64 = d.dot(eye.x_axis.truncate()) / z;
+                let v: f64 = d.dot(eye.y_axis.truncate()) / z;
+                let column: usize = (((u + 1.0) / 2.0 * face_px as f64) as usize).min(face_px - 1);
+                let row: usize = (((1.0 - v) / 2.0 * face_px as f64) as usize).min(face_px - 1);
+                let i: usize = (row * face_px + column) * BYTES_PER_PIXEL;
+                for (channel, total) in sum.iter_mut().enumerate() {
+                    *total += u32::from(pixels[i + channel]);
+                }
+            }
+            picture.extend(sum.map(|total| (total / (n * n) as u32) as u8));
+        }
+    }
+    for pixel in picture.chunks_mut(BYTES_PER_PIXEL) {
+        pixel[3] = u8::MAX;
+    }
+    let path: PathBuf = get_map_picture_path();
+    std::fs::create_dir_all(path.parent().ok_or("the map picture's folder")?)?;
+    save_png(&path, &picture, size_px.0 as u32, size_px.1 as u32)?;
+    let folder: PathBuf = make_run_folder("map_picture", arguments.label.as_deref())?;
+    save_png(&folder.join("photo.png"), &picture, size_px.0 as u32, size_px.1 as u32)?;
+    save_png(&folder.join("drawing.png"), &drawing, size_px.0 as u32, size_px.1 as u32)?;
+    println!("Map picture in {} (copies in {})", path.display(), folder.display());
+    Ok(())
+}
+
+/// `make_map_picture` gives the menu's map page picture: the whole sphere unrolled (the
+/// rendered `assets/map_picture.png`, or else `make_map_base`'s drawing), with consoles as squares in their team's colour (dark once off), the other
 /// players as dots in their team's colour and this player in white, centred in the page's map area.
 fn make_map_picture(session: &CitySession) -> Picture {
     let size_px: (usize, usize) = get_map_picture_px();
-    let mut pixels: Vec<u8> = session.map_base.get_or_init(|| make_map_base(&session.world, size_px)).clone();
+    let mut pixels: Vec<u8> = session
+        .map_base
+        .get_or_init(|| load_map_picture(size_px).unwrap_or_else(|| make_map_base(&session.world, size_px)))
+        .clone();
     let mut draw_square = |point: DVec3, half_px: i32, color: [f32; 4]| {
         let (center_x, center_y) = get_map_pixel(point.normalize_or(DVec3::X), size_px);
         let rgba: [u8; 4] = color.map(|c| (c * 255.0) as u8);
