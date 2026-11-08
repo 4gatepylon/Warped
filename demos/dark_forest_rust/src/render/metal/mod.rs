@@ -26,8 +26,8 @@ use objc2_metal::{
     MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
     MTLCreateSystemDefaultDevice, MTLCullMode, MTLDevice, MTLDrawable, MTLIndexType, MTLLoadAction,
     MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLResourceOptions, MTLStoreAction, MTLTexture, MTLTextureType, MTLTextureUsage, MTLViewport,
-    MTLWinding,
+    MTLResourceOptions, MTLScissorRect, MTLStoreAction, MTLTexture, MTLTextureType,
+    MTLTextureUsage, MTLViewport, MTLWinding,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
@@ -51,7 +51,7 @@ use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
     LensMouth, MAX_LIVE_LENS_SLOT_COUNT, MaterialData, MaterialHandle, MeshData, MeshHandle,
     OccluderBox, Particle, RenderSettings, Renderer, TextureData, TextureHandle,
-    pick_live_lens_mouths,
+    overlay::get_overlay_regions_px, pick_live_lens_mouths,
 };
 
 /// `FRAMES_IN_FLIGHT` is how many frames the CPU may encode ahead of the GPU.
@@ -1629,12 +1629,34 @@ impl MetalRenderer {
                         overlay_offset_bytes,
                         0,
                     );
-                    encoder.drawPrimitives_vertexStart_vertexCount(
-                        MTLPrimitiveType::Triangle,
-                        0,
-                        FULLSCREEN_VERTEX_COUNT,
-                    );
                 }
+                let size_px: (u32, u32) = (
+                    drawable_texture.width() as u32,
+                    drawable_texture.height() as u32,
+                );
+                for [left, top, right, bottom] in
+                    get_overlay_regions_px(frame.overlay_rects, size_px)
+                {
+                    encoder.setScissorRect(MTLScissorRect {
+                        x: left as usize,
+                        y: top as usize,
+                        width: (right - left) as usize,
+                        height: (bottom - top) as usize,
+                    });
+                    unsafe {
+                        encoder.drawPrimitives_vertexStart_vertexCount(
+                            MTLPrimitiveType::Triangle,
+                            0,
+                            FULLSCREEN_VERTEX_COUNT,
+                        );
+                    }
+                }
+                encoder.setScissorRect(MTLScissorRect {
+                    x: 0,
+                    y: 0,
+                    width: size_px.0 as usize,
+                    height: size_px.1 as usize,
+                });
             }
             if !hud_images.is_empty() {
                 let window_size_px: Vec2 = Vec2::new(
