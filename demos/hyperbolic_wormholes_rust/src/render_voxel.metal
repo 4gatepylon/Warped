@@ -248,10 +248,6 @@ struct VoxelUniforms {
     float4 mound_groups[16];
 };
 
-/**
- * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
- * radius with the grid's origin, its size with the offset of its cells, and R over its cell size.
- */
 /** @brief `Shape` is one smooth solid in its structure's chart (meters): centre and kind, half sizes and rounding, material and axis. */
 struct Shape {
     float4 centre_kind;
@@ -259,6 +255,10 @@ struct Shape {
     int4 info;
 };
 
+/**
+ * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
+ * radius, its first shape and shape count, and R.
+ */
 struct VoxelStructure {
     float4 rows[4];
     float4 centre;
