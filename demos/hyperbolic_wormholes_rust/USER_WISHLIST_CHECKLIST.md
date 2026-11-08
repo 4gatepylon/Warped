@@ -10,6 +10,10 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
+  noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
+  All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
+  `claude/shot-noise`, 2026-11-07.
 - [~] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
   relativistic effect on colour if possible. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/wormhole-cyan`, 2026-11-07.
