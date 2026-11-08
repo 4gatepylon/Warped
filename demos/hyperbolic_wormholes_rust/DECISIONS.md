@@ -547,6 +547,18 @@
   times as strong in the sense that a jump is snappy and falls are quick; a jump three times shorter than the
   level's is that, and 1.25 m keeps jumping onto blocks (the same jump height as Minecraft's, for 1 m blocks).
 
+### D52. A game server without a window
+
+- **Choice:** the game server always runs as its own process, without a window, and every player is a client with a
+  window. `--serve` (`make serve-game`) runs only the server and prints this computer's address (the one its
+  default route uses) and the `make join-game` commands that join it. `--host` (`make host-game`) starts that
+  server as a child process, waits 0.3 s to fail fast if it stops (its port taken, say), joins it over loopback,
+  and stops it when the window closes. Before, `--host` ran the server on a thread inside the host's game.
+- **Alternatives:** keeping the server thread for `--host` and only adding the printout to `--serve`; starting the
+  server from the Makefile in the background (it would outlive a crashed window more often).
+- **Rationale:** you asked for a headless server that prints its address, with clients connecting to it directly,
+  and for the launcher to start its own client, so the server can later run in the cloud.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

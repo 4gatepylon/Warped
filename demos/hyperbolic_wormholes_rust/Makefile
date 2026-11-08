@@ -4,7 +4,8 @@
 # Interface:
 #     make help: list the targets.
 #     make run-demo RENDERER=<metal|cpu> MAP=<house-demo|lunar-surface>: open the window and play.
-#     make host-game PORT=<n> MAP=<map>: open the window and host a game for the local network.
+#     make serve-game PORT=<n> MAP=<map>: run only a game server, without a window, and print how to join it.
+#     make host-game PORT=<n> MAP=<map>: start a game server (its own process, no window) and play in it.
 #     make join-game SERVER=<auto|address> MAP=<map>: open the window and join a game on the local network.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
@@ -29,12 +30,13 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help run-demo host-game join-game bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help run-demo serve-game host-game join-game bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
 	@echo "  make run-demo RENDERER=metal MAP=house-demo     Open the window and play (MAP=lunar-surface; RENDERER=cpu: house only)"
-	@echo "  make host-game PORT=47800                        Open the window and host a game for the local network"
+	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run only a game server, without a window; prints how to join"
+	@echo "  make host-game PORT=47800                        Start a game server (no window) and play in it"
 	@echo "  make join-game SERVER=auto                       Open the window and join a game (SERVER=auto finds one)"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
@@ -49,6 +51,9 @@ help:
 
 run-demo:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP)
+
+serve-game:
+	cargo run --release -- --serve --port $(PORT) --map $(MAP)
 
 host-game:
 	cargo run --release -- --host --port $(PORT) --map $(MAP)
