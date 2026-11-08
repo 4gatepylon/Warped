@@ -1,53 +1,76 @@
-//! `world` lays out the arena: an asphalt yard inside concrete walls, a corrugated-iron
-//! warehouse with a loading dock, a brick block, shipping containers, and props. It builds the
-//! arena's meshes (with world-space UVs) and its collision boxes.
+//! `world` turns a portable map (`common/maps/dark_forest/map.json`) into the arena: its
+//! meshes (boxes, tree trunks, canopies, logs and rope ladders, with world-space UVs), its
+//! collision boxes, its ladders, its pylon consoles, its lights and its spawns.
 //!
 //! Example:
-//!     let arena: Arena = Arena::new();
+//!     let arena: Arena = Arena::from_map(&map::load(&path)?);
 //!     let meshes: Vec<(Surface, MeshData)> = arena.surface_meshes();
 
-use glam::{Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 
 use super::collision::Aabb;
+use crate::map::{self, MapFile};
 use crate::render::{MeshData, Vertex};
 
 /// `Surface` is one of the arena's PBR materials.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Surface {
-    Asphalt,
-    ConcreteFloor,
-    Brick,
-    ConcreteWall,
-    Corrugated,
-    MetalPlate,
-    RustyMetal,
-    Pavement,
+    Ground,
+    Bark,
+    Planks,
+    Leaves,
+    Rock,
+    Rope,
+    RedPaint,
+    BluePaint,
+    RedConsole,
+    BlueConsole,
 }
 
 impl Surface {
-    /// `ALL` lists every surface, in the order of `asset_manifest::SURFACE_TEXTURES`.
-    pub const ALL: [Surface; 8] = [
-        Surface::Asphalt,
-        Surface::ConcreteFloor,
-        Surface::Brick,
-        Surface::ConcreteWall,
-        Surface::Corrugated,
-        Surface::MetalPlate,
-        Surface::RustyMetal,
-        Surface::Pavement,
+    /// `ALL` lists every surface; the first `TEXTURED_COUNT` have their own texture sets, in
+    /// the order of `asset_manifest::SURFACE_TEXTURES`.
+    pub const ALL: [Surface; 10] = [
+        Surface::Ground,
+        Surface::Bark,
+        Surface::Planks,
+        Surface::Leaves,
+        Surface::Rock,
+        Surface::Rope,
+        Surface::RedPaint,
+        Surface::BluePaint,
+        Surface::RedConsole,
+        Surface::BlueConsole,
     ];
+    /// `TEXTURED_COUNT` is how many surfaces have their own texture sets.
+    pub const TEXTURED_COUNT: usize = 5;
 
-    /// `tile_size_m` is the world size that one repeat of the surface's texture covers.
-    fn tile_size_m(self) -> f32 {
+    /// `tile_size_m` is how many meters one repeat of the surface's texture covers.
+    pub fn tile_size_m(self) -> f32 {
         match self {
-            Surface::Asphalt => 4.0,
-            Surface::ConcreteFloor => 3.0,
-            Surface::Brick => 2.5,
-            Surface::ConcreteWall => 3.0,
-            Surface::Corrugated => 2.0,
-            Surface::MetalPlate => 2.0,
-            Surface::RustyMetal => 2.5,
-            Surface::Pavement => 2.0,
+            Surface::Ground => 4.0,
+            Surface::Bark => 2.0,
+            Surface::Planks | Surface::RedPaint | Surface::BluePaint => 2.0,
+            Surface::Leaves => 3.0,
+            Surface::Rock => 2.5,
+            Surface::Rope => 0.5,
+            Surface::RedConsole | Surface::BlueConsole => 1.0,
+        }
+    }
+
+    /// `from_material_name` maps a map palette name to a surface (planks for unknown names).
+    pub fn from_material_name(name: &str) -> Surface {
+        match name {
+            "forest floor" => Surface::Ground,
+            "bark" => Surface::Bark,
+            "leaves" => Surface::Leaves,
+            "rock" => Surface::Rock,
+            "rope" => Surface::Rope,
+            "red paint" => Surface::RedPaint,
+            "blue paint" => Surface::BluePaint,
+            "red console" => Surface::RedConsole,
+            "blue console" => Surface::BlueConsole,
+            _ => Surface::Planks,
         }
     }
 }
@@ -57,9 +80,10 @@ impl Surface {
 pub struct WorldBox {
     pub aabb: Aabb,
     pub surface: Surface,
+    pub is_drawn: bool,
 }
 
-/// `PropPlacement` is one placed prop model.
+/// `PropPlacement` is one placed prop model (the forest has none yet).
 #[derive(Clone, Copy, Debug)]
 pub struct PropPlacement {
     pub model_id: &'static str,
@@ -76,275 +100,223 @@ pub struct LightPlacement {
     pub color_rgb: Vec3,
 }
 
+/// `ShapeKind` is the kind of a smooth shape that is drawn as a mesh.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShapeKind {
+    Cylinder { axis: usize },
+    Ellipsoid,
+}
+
+/// `WorldShape` is one trunk, log or canopy, its centre and half size in world axes.
+#[derive(Clone, Copy, Debug)]
+pub struct WorldShape {
+    pub kind: ShapeKind,
+    pub centre_m: Vec3,
+    pub half_m: Vec3,
+    pub surface: Surface,
+}
+
+/// `LadderVolume` is a climbable rope ladder: where a player climbs, and which way they face.
+#[derive(Clone, Copy, Debug)]
+pub struct LadderVolume {
+    pub aabb: Aabb,
+    pub frame: Mat4,
+    pub half_m: Vec3,
+}
+
+/// `Console` is one pylon's console: its team (0 blue, 1 red, as `net::TEAM_NAMES`) and centre.
+#[derive(Clone, Copy, Debug)]
+pub struct Console {
+    pub team: u32,
+    pub centre_m: Vec3,
+}
+
 /// `Arena` is the whole level.
 pub struct Arena {
     pub boxes: Vec<WorldBox>,
+    pub shapes: Vec<WorldShape>,
+    pub ladders: Vec<LadderVolume>,
+    pub consoles: Vec<Console>,
     pub props: Vec<PropPlacement>,
     pub lights: Vec<LightPlacement>,
     pub player_spawns: Vec<(Vec3, f32)>,
+    pub team_spawns: [Vec<(Vec3, f32)>; 2],
     pub bot_spawns: Vec<Vec3>,
     pub bounds_min_m: Vec3,
     pub bounds_max_m: Vec3,
 }
 
-/// `HALF_SIZE_M` is half the width of the walled yard.
-const HALF_SIZE_M: f32 = 34.0;
-/// `PERIMETER_HEIGHT_M` is the height of the yard's walls.
-const PERIMETER_HEIGHT_M: f32 = 5.0;
-/// `WAREHOUSE_HEIGHT_M` is the height of the warehouse's walls.
-const WAREHOUSE_HEIGHT_M: f32 = 6.5;
-/// `CONTAINER_SIZE_M` is the size of a 20-foot shipping container.
-const CONTAINER_SIZE_M: Vec3 = Vec3::new(6.06, 2.59, 2.44);
-/// `DOOR_HEIGHT_M` is the height of the warehouse doors.
-const DOOR_HEIGHT_M: f32 = 3.6;
+/// `CYLINDER_SEGMENT_COUNT` is how many sides a trunk or log mesh has.
+const CYLINDER_SEGMENT_COUNT: usize = 14;
+/// `ELLIPSOID_RING_COUNT` and `ELLIPSOID_SEGMENT_COUNT` are a canopy's latitude and longitude
+/// divisions.
+const ELLIPSOID_RING_COUNT: usize = 8;
+const ELLIPSOID_SEGMENT_COUNT: usize = 14;
+/// `TRUNK_COLLISION_FRAC` is the share of a round shape's radius its collision box covers.
+const TRUNK_COLLISION_FRAC: f32 = 0.82;
+/// `CANOPY_COLLISION_FRAC` is the share of a canopy's half size its collision box covers.
+const CANOPY_COLLISION_FRAC: f32 = 0.6;
+/// `RUNG_SPACING_M` is the distance between a rope ladder's rungs.
+const RUNG_SPACING_M: f32 = 0.38;
 
-/// `boxed` makes a world box from its corners.
-fn boxed(min: [f32; 3], max: [f32; 3], surface: Surface) -> WorldBox {
-    WorldBox {
-        aabb: Aabb {
-            min_m: Vec3::from(min),
-            max_m: Vec3::from(max),
-        },
-        surface,
-    }
-}
-
-/// `container` makes a shipping container at a floor center, long along x or z.
-fn container(center: Vec2, base_y_m: f32, is_along_x: bool) -> WorldBox {
-    let size: Vec3 = if is_along_x {
-        CONTAINER_SIZE_M
-    } else {
-        Vec3::new(CONTAINER_SIZE_M.z, CONTAINER_SIZE_M.y, CONTAINER_SIZE_M.x)
-    };
-    let min: Vec3 = Vec3::new(center.x - size.x * 0.5, base_y_m, center.y - size.z * 0.5);
-    WorldBox {
-        aabb: Aabb {
-            min_m: min,
-            max_m: min + size,
-        },
-        surface: Surface::RustyMetal,
-    }
-}
-
-/// `prop` makes a prop placement.
-fn prop(model_id: &'static str, x: f32, z: f32, yaw_rad: f32, is_solid: bool) -> PropPlacement {
-    PropPlacement {
-        model_id,
-        position_m: Vec3::new(x, 0.0, z),
-        yaw_rad,
-        is_solid,
+/// `team_index` maps a map team name to `net::TEAM_NAMES`' index (blue 0, red 1).
+fn team_index(team: &str) -> Option<u32> {
+    match team {
+        "blue" => Some(0),
+        "red" => Some(1),
+        _ => None,
     }
 }
 
 impl Arena {
-    /// `new` builds the arena.
+    /// `from_map` builds the arena from a Euclidean map.
     ///
-    /// Example:
-    ///     let arena: Arena = Arena::new();
-    pub fn new() -> Arena {
-        let h: f32 = HALF_SIZE_M;
-        let wall: f32 = 1.0;
-        let mut boxes: Vec<WorldBox> = vec![
-            boxed(
-                [-h - 30.0, -1.0, -h - 30.0],
-                [h + 30.0, 0.0, h + 30.0],
-                Surface::Asphalt,
-            ),
-            boxed(
-                [-h - wall, 0.0, -h - wall],
-                [h + wall, PERIMETER_HEIGHT_M, -h],
-                Surface::ConcreteWall,
-            ),
-            boxed(
-                [-h - wall, 0.0, h],
-                [h + wall, PERIMETER_HEIGHT_M, h + wall],
-                Surface::ConcreteWall,
-            ),
-            boxed(
-                [-h - wall, 0.0, -h],
-                [-h, PERIMETER_HEIGHT_M, h],
-                Surface::ConcreteWall,
-            ),
-            boxed(
-                [h, 0.0, -h],
-                [h + wall, PERIMETER_HEIGHT_M, h],
-                Surface::ConcreteWall,
-            ),
-        ];
-
-        let (wx0, wx1, wz0, wz1) = (-28.0_f32, -6.0_f32, -28.0_f32, -6.0_f32);
-        let t: f32 = 0.4;
-        let top: f32 = WAREHOUSE_HEIGHT_M;
-        boxes.extend([
-            boxed([wx0, 0.0, wz0], [wx1, 0.06, wz1], Surface::ConcreteFloor),
-            boxed([wx0, 0.0, wz0], [wx1, top, wz0 + t], Surface::Corrugated),
-            boxed([wx0, 0.0, wz0], [wx0 + t, top, wz1], Surface::Corrugated),
-            boxed([wx0, 0.0, wz1 - t], [-22.0, top, wz1], Surface::Corrugated),
-            boxed([-14.0, 0.0, wz1 - t], [wx1, top, wz1], Surface::Corrugated),
-            boxed(
-                [-22.0, DOOR_HEIGHT_M + 1.0, wz1 - t],
-                [-14.0, top, wz1],
-                Surface::Corrugated,
-            ),
-            boxed([wx1 - t, 0.0, wz0], [wx1, top, -19.0], Surface::Corrugated),
-            boxed([wx1 - t, 0.0, -15.0], [wx1, top, wz1], Surface::Corrugated),
-            boxed(
-                [wx1 - t, DOOR_HEIGHT_M, -19.0],
-                [wx1, top, -15.0],
-                Surface::Corrugated,
-            ),
-            boxed(
-                [wx0, top, wz0],
-                [wx1, top + 0.35, -19.5],
-                Surface::MetalPlate,
-            ),
-            boxed(
-                [wx0, top, -16.5],
-                [wx1, top + 0.35, wz1],
-                Surface::MetalPlate,
-            ),
-            boxed(
-                [-22.0, 0.0, -22.5],
-                [-19.0, 1.2, -21.0],
-                Surface::MetalPlate,
-            ),
-            boxed([-13.0, 0.0, -25.0], [-9.0, 2.4, -23.6], Surface::RustyMetal),
-            boxed([-26.0, 0.0, -12.0], [-24.6, 1.6, -8.0], Surface::MetalPlate),
-        ]);
-
-        let (dx0, dx1, dz0, dz1) = (-6.0_f32, 0.0_f32, -27.0_f32, -21.0_f32);
-        boxes.push(boxed(
-            [dx0, 0.0, dz0],
-            [dx1, 1.2, dz1],
-            Surface::ConcreteWall,
-        ));
-        for step in 0..3 {
-            let step_height_m: f32 = 0.3 * (step + 1) as f32;
-            let step_x_m: f32 = dx1 + 0.4 * (3 - step) as f32;
-            boxes.push(boxed(
-                [dx1, 0.0, dz0 + 1.5],
-                [step_x_m, step_height_m, dz0 + 4.0],
-                Surface::ConcreteWall,
-            ));
+    /// Example: `let arena: Arena = Arena::from_map(&map);`
+    pub fn from_map(map: &MapFile) -> Arena {
+        let surface_of = |material: u8| -> Surface {
+            map.materials
+                .iter()
+                .find(|entry| entry.id == material)
+                .map_or(Surface::Planks, |entry| {
+                    Surface::from_material_name(&entry.name)
+                })
+        };
+        let mut boxes: Vec<WorldBox> = Vec::new();
+        let mut consoles: Vec<Console> = Vec::new();
+        for map_box in &map.boxes {
+            let centre_m: Vec3 = map::frame_translation_m(&map_box.frame);
+            let half_m: Vec3 =
+                map::frame_half_extent_m(&map_box.frame, Vec3::from(map_box.half_size_m));
+            let surface: Surface = surface_of(map_box.material);
+            boxes.push(WorldBox {
+                aabb: Aabb::from_center(centre_m, half_m),
+                surface,
+                is_drawn: true,
+            });
+            match surface {
+                Surface::RedConsole => consoles.push(Console { team: 1, centre_m }),
+                Surface::BlueConsole => consoles.push(Console { team: 0, centre_m }),
+                _ => {}
+            }
         }
-
-        let (bx0, bx1, bz0, bz1) = (10.0_f32, 26.0_f32, 12.0_f32, 26.0_f32);
-        boxes.extend([
-            boxed(
-                [bx0 - 2.0, 0.0, bz0 - 2.0],
-                [bx1, 0.15, bz0],
-                Surface::Pavement,
-            ),
-            boxed([bx0 - 2.0, 0.0, bz0], [bx0, 0.15, bz1], Surface::Pavement),
-            boxed([bx0, 0.0, bz0], [bx1, 9.0, bz1], Surface::Brick),
-            boxed(
-                [bx0 + 2.0, 9.0, bz0 + 2.0],
-                [bx0 + 6.0, 10.5, bz0 + 5.0],
-                Surface::MetalPlate,
-            ),
-            boxed([-4.0, 0.0, 6.0], [4.0, 1.3, 6.6], Surface::Brick),
-            boxed([-12.0, 0.0, 14.0], [-11.4, 1.3, 22.0], Surface::Brick),
-            boxed([18.0, 0.0, -2.0], [24.0, 1.3, -1.4], Surface::Brick),
-        ]);
-
-        boxes.extend([
-            container(Vec2::new(8.0, -20.0), 0.0, true),
-            container(Vec2::new(8.0, -20.0), CONTAINER_SIZE_M.y, true),
-            container(Vec2::new(8.6, -16.8), 0.0, true),
-            container(Vec2::new(24.0, -24.0), 0.0, false),
-            container(Vec2::new(-20.0, 8.0), 0.0, true),
-            container(Vec2::new(-24.0, 20.0), 0.0, false),
-            container(Vec2::new(28.0, 6.0), 0.0, false),
-            container(Vec2::new(0.0, 22.0), 0.0, true),
-        ]);
-
-        let props: Vec<PropPlacement> = vec![
-            prop("concrete_road_barrier", 2.0, -6.0, 0.1, true),
-            prop("concrete_road_barrier", 5.5, -5.0, -0.3, true),
-            prop("concrete_road_barrier", -3.0, 12.0, 1.4, true),
-            prop("concrete_road_barrier", 14.0, 4.0, 0.0, true),
-            prop("concrete_road_barrier", 20.0, -12.0, 1.57, true),
-            prop("concrete_road_barrier", -14.0, 2.0, 0.6, true),
-            prop("Barrel_01", -8.0, -4.0, 0.0, true),
-            prop("Barrel_01", -7.2, -3.4, 1.0, true),
-            prop("barrel_03", -26.5, -26.5, 0.4, true),
-            prop("barrel_03", -25.6, -26.8, 2.0, true),
-            prop("barrel_03", 12.4, -22.4, 0.0, true),
-            prop("old_military_crate", -16.0, -24.0, 0.2, true),
-            prop("old_military_crate", -18.0, -12.0, 1.2, true),
-            prop("wooden_crate_02", -10.0, -10.0, 0.3, true),
-            prop("wooden_crate_02", -10.2, -8.6, -0.2, true),
-            prop("wooden_crate_02", 4.0, 18.0, 0.7, true),
-            prop("metal_trash_can", 9.0, 9.5, 0.0, true),
-            prop("metal_trash_can", 7.6, 10.4, 1.0, true),
-            prop("utility_box_01", 9.6, 18.0, -1.57, true),
-            prop("fire_hydrant", 7.0, 13.0, 0.5, true),
-            prop("street_lamp_01", 7.0, 2.0, 0.0, true),
-            prop("street_lamp_01", -4.0, -1.0, std::f32::consts::PI, true),
-            prop("street_lamp_01", 16.0, -8.0, 1.57, true),
-            prop("exterior_aircon_unit", 9.6, 0.0, -1.57, false),
-            prop("old_tyre", 22.0, -20.0, 0.0, false),
-            prop("old_tyre", -2.0, 26.0, 0.0, false),
-            prop("portable_generator", -4.0, -24.0, 0.8, true),
-            prop("propane_tank", -9.0, -26.0, 0.0, true),
-            prop("propane_tank", -8.2, -26.2, 0.0, true),
-            prop("cardboard_box_01", -12.0, -19.0, 0.4, false),
-            prop("cardboard_box_01", -20.0, -24.0, 1.1, false),
-            prop("cardboard_box_01", 26.0, 9.0, 0.2, false),
-        ];
-
-        let fluorescent: Vec3 = Vec3::new(1.0, 0.95, 0.85);
-        let sodium: Vec3 = Vec3::new(1.0, 0.62, 0.3);
-        let mut lights: Vec<LightPlacement> = Vec::new();
-        for x in [-23.0, -11.0] {
-            for z in [-23.0, -11.0] {
-                lights.push(LightPlacement {
-                    position_m: Vec3::new(x, top - 0.6, z),
-                    radius_m: 14.0,
-                    color_rgb: fluorescent,
+        let mut shapes: Vec<WorldShape> = Vec::new();
+        for structure in &map.structures {
+            let frame: Mat4 = Mat4::from_cols_array(&structure.frame);
+            for shape in &structure.shapes {
+                let centre_m: Vec3 = frame.transform_point3(Vec3::from(shape.centre_m));
+                let half_m: Vec3 =
+                    map::frame_half_extent_m(&structure.frame, Vec3::from(shape.half_m));
+                let surface: Surface = surface_of(shape.material);
+                let (kind, collision_half_m) = match shape.kind.as_str() {
+                    "cylinder" => {
+                        let axis: usize = usize::from(shape.axis.min(2));
+                        let mut collision: Vec3 = half_m * TRUNK_COLLISION_FRAC;
+                        collision[axis] = half_m[axis];
+                        (ShapeKind::Cylinder { axis }, collision)
+                    }
+                    "ellipsoid" => (ShapeKind::Ellipsoid, half_m * CANOPY_COLLISION_FRAC),
+                    _ => {
+                        boxes.push(WorldBox {
+                            aabb: Aabb::from_center(centre_m, half_m),
+                            surface,
+                            is_drawn: true,
+                        });
+                        continue;
+                    }
+                };
+                shapes.push(WorldShape {
+                    kind,
+                    centre_m,
+                    half_m,
+                    surface,
+                });
+                boxes.push(WorldBox {
+                    aabb: Aabb::from_center(centre_m, collision_half_m),
+                    surface,
+                    is_drawn: false,
                 });
             }
         }
+        let ladders: Vec<LadderVolume> = map
+            .ladders
+            .iter()
+            .map(|ladder| {
+                let centre_m: Vec3 = map::frame_translation_m(&ladder.frame);
+                LadderVolume {
+                    aabb: Aabb::from_center(
+                        centre_m,
+                        map::frame_half_extent_m(&ladder.frame, Vec3::from(ladder.half_size_m)),
+                    ),
+                    frame: Mat4::from_cols_array(&ladder.frame),
+                    half_m: Vec3::from(ladder.half_size_m),
+                }
+            })
+            .collect();
+        let lights: Vec<LightPlacement> = map
+            .lights
+            .iter()
+            .map(|light| LightPlacement {
+                position_m: Vec3::new(light.position[0], light.position[1], light.position[2]),
+                radius_m: light.radius_m,
+                color_rgb: Vec3::from(light.color),
+            })
+            .collect();
+        let mut team_spawns: [Vec<(Vec3, f32)>; 2] = [Vec::new(), Vec::new()];
+        let mut player_spawns: Vec<(Vec3, f32)> = Vec::new();
+        for spawn in &map.spawns {
+            let pose: (Vec3, f32) = (
+                map::frame_translation_m(&spawn.frame),
+                map::frame_yaw_rad(&spawn.frame),
+            );
+            if let Some(team) = team_index(&spawn.team) {
+                team_spawns[team as usize].push(pose);
+            }
+            player_spawns.push(pose);
+        }
+        let bot_spawns: Vec<Vec3> = team_spawns[0].iter().map(|(p, _)| *p).collect();
+        let (mut bounds_min_m, mut bounds_max_m) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for world_box in &boxes {
+            bounds_min_m = bounds_min_m.min(world_box.aabb.min_m);
+            bounds_max_m = bounds_max_m.max(world_box.aabb.max_m);
+        }
+        for shape in &shapes {
+            bounds_min_m = bounds_min_m.min(shape.centre_m - shape.half_m);
+            bounds_max_m = bounds_max_m.max(shape.centre_m + shape.half_m);
+        }
         Arena {
             boxes,
-            props,
+            shapes,
+            ladders,
+            consoles,
+            props: Vec::new(),
             lights,
-            player_spawns: vec![
-                (Vec3::new(20.0, 0.0, -6.0), 2.4),
-                (Vec3::new(-2.0, 0.0, 30.0), 0.0),
-                (Vec3::new(30.0, 0.0, 28.0), 0.8),
-            ],
-            bot_spawns: vec![
-                Vec3::new(-18.0, 0.06, -18.0),
-                Vec3::new(-28.0, 0.0, 28.0),
-                Vec3::new(-3.0, 1.2, -24.0),
-                Vec3::new(30.0, 0.0, -30.0),
-                Vec3::new(-30.0, 0.0, -2.0),
-                Vec3::new(4.0, 0.0, 30.0),
-            ],
-            bounds_min_m: Vec3::new(-h - wall, -1.0, -h - wall),
-            bounds_max_m: Vec3::new(h + wall, 16.0, h + wall),
+            player_spawns,
+            team_spawns,
+            bot_spawns,
+            bounds_min_m,
+            bounds_max_m,
         }
-        .with_street_lights(sodium)
     }
 
-    /// `with_street_lights` adds a sodium lamp at the head of every street-lamp prop.
-    fn with_street_lights(mut self, color_rgb: Vec3) -> Arena {
-        for placement in self.props.iter().filter(|p| p.model_id == "street_lamp_01") {
-            self.lights.push(LightPlacement {
-                position_m: placement.position_m + Vec3::Y * 5.2,
-                radius_m: 16.0,
-                color_rgb,
-            });
-        }
-        self
-    }
-
-    /// `surface_meshes` builds one mesh per surface from the arena's boxes.
+    /// `surface_meshes` builds one mesh per surface from the arena's boxes, shapes and ladders.
+    /// The collision boxes of round shapes are not drawn.
     ///
     /// Example:
     ///     for (surface, mesh) in arena.surface_meshes() { ... }
     pub fn surface_meshes(&self) -> Vec<(Surface, MeshData)> {
+        let mut solid_boxes: Vec<(Surface, Aabb)> = self
+            .boxes
+            .iter()
+            .filter(|b| b.is_drawn)
+            .map(|b| (b.surface, b.aabb))
+            .collect();
+        for ladder in &self.ladders {
+            solid_boxes.extend(
+                ladder_parts(ladder)
+                    .into_iter()
+                    .map(|aabb| (Surface::Rope, aabb)),
+            );
+        }
         Surface::ALL
             .iter()
             .filter_map(|surface: &Surface| {
@@ -353,12 +325,201 @@ impl Arena {
                     skin_vertices: None,
                     indices: Vec::new(),
                 };
-                for world_box in self.boxes.iter().filter(|b| b.surface == *surface) {
-                    append_box(&mut mesh, &world_box.aabb, surface.tile_size_m());
+                for (_, aabb) in solid_boxes.iter().filter(|(s, _)| s == surface) {
+                    append_box(&mut mesh, aabb, surface.tile_size_m());
+                }
+                for shape in self.shapes.iter().filter(|s| s.surface == *surface) {
+                    match shape.kind {
+                        ShapeKind::Cylinder { axis } => {
+                            append_cylinder(&mut mesh, shape, axis, surface.tile_size_m())
+                        }
+                        ShapeKind::Ellipsoid => {
+                            append_ellipsoid(&mut mesh, shape, surface.tile_size_m())
+                        }
+                    }
                 }
                 (!mesh.indices.is_empty()).then_some((*surface, mesh))
             })
             .collect()
+    }
+
+    /// `occluders` are the boxes that block sky light: everything solid but the ground.
+    ///
+    /// Example: `let boxes: Vec<Aabb> = arena.occluders();`
+    pub fn occluders(&self) -> Vec<Aabb> {
+        self.boxes.iter().skip(1).map(|b| b.aabb).collect()
+    }
+
+    /// `ladder_at` gives the ladder a body overlaps, if any.
+    ///
+    /// Example: `let ladder = arena.ladder_at(&body);`
+    pub fn ladder_at(&self, body: &Aabb) -> Option<&LadderVolume> {
+        self.ladders
+            .iter()
+            .find(|ladder| ladder.aabb.overlaps(body))
+    }
+}
+
+/// `ladder_parts` are the boxes that draw a rope ladder: two side ropes and the rungs.
+fn ladder_parts(ladder: &LadderVolume) -> Vec<Aabb> {
+    let frame: Mat4 = ladder.frame;
+    let to_world = |centre: Vec3, half: Vec3| -> Aabb {
+        let world_half: Vec3 = frame.x_axis.truncate().abs() * half.x
+            + frame.y_axis.truncate().abs() * half.y
+            + frame.z_axis.truncate().abs() * half.z;
+        Aabb::from_center(frame.transform_point3(centre), world_half)
+    };
+    let half_height_m: f32 = ladder.half_m.y;
+    let rope_x_m: f32 = 0.32;
+    let mut parts: Vec<Aabb> = vec![
+        to_world(
+            Vec3::new(-rope_x_m, 0.0, 0.0),
+            Vec3::new(0.025, half_height_m, 0.025),
+        ),
+        to_world(
+            Vec3::new(rope_x_m, 0.0, 0.0),
+            Vec3::new(0.025, half_height_m, 0.025),
+        ),
+    ];
+    let mut y_m: f32 = -half_height_m + 0.3;
+    while y_m < half_height_m - 0.9 {
+        parts.push(to_world(
+            Vec3::new(0.0, y_m, 0.0),
+            Vec3::new(rope_x_m, 0.025, 0.035),
+        ));
+        y_m += RUNG_SPACING_M;
+    }
+    parts
+}
+
+/// `append_cylinder` adds a capped cylinder along a world axis, its UVs around and along it.
+fn append_cylinder(mesh: &mut MeshData, shape: &WorldShape, axis: usize, tile_size_m: f32) {
+    let along: Vec3 = Vec3::AXES[axis];
+    let (a, b) = (Vec3::AXES[(axis + 1) % 3], Vec3::AXES[(axis + 2) % 3]);
+    let radius_a_m: f32 = shape.half_m.dot(a);
+    let radius_b_m: f32 = shape.half_m.dot(b);
+    let half_length_m: f32 = shape.half_m.dot(along);
+    let circumference_m: f32 = std::f32::consts::TAU * (radius_a_m + radius_b_m) * 0.5;
+    let base: u32 = mesh.vertices.len() as u32;
+    for segment in 0..=CYLINDER_SEGMENT_COUNT {
+        let angle: f32 = segment as f32 / CYLINDER_SEGMENT_COUNT as f32 * std::f32::consts::TAU;
+        let (sin, cos) = angle.sin_cos();
+        let radial: Vec3 = a * cos * radius_a_m + b * sin * radius_b_m;
+        let normal: Vec3 = (a * cos / radius_a_m + b * sin / radius_b_m).normalize();
+        let tangent: Vec3 = (b * cos - a * sin).normalize();
+        for end in [-1.0_f32, 1.0] {
+            let position: Vec3 = shape.centre_m + radial + along * half_length_m * end;
+            let u: f32 =
+                segment as f32 / CYLINDER_SEGMENT_COUNT as f32 * circumference_m / tile_size_m;
+            let v: f32 = -(position.dot(along)) / tile_size_m;
+            mesh.vertices.push(Vertex {
+                position: position.to_array(),
+                normal: normal.to_array(),
+                tangent: tangent.extend(1.0).to_array(),
+                uv: [u, v],
+            });
+        }
+    }
+    for segment in 0..CYLINDER_SEGMENT_COUNT as u32 {
+        let (i0, i1, i2, i3) = (
+            base + segment * 2,
+            base + segment * 2 + 1,
+            base + segment * 2 + 2,
+            base + segment * 2 + 3,
+        );
+        push_outward(mesh, [i0, i2, i1], shape.centre_m);
+        push_outward(mesh, [i1, i2, i3], shape.centre_m);
+    }
+    for end in [-1.0_f32, 1.0] {
+        let normal: Vec3 = along * end;
+        let centre_index: u32 = mesh.vertices.len() as u32;
+        let centre: Vec3 = shape.centre_m + along * half_length_m * end;
+        mesh.vertices.push(Vertex {
+            position: centre.to_array(),
+            normal: normal.to_array(),
+            tangent: a.extend(1.0).to_array(),
+            uv: [0.0, 0.0],
+        });
+        for segment in 0..=CYLINDER_SEGMENT_COUNT {
+            let angle: f32 = segment as f32 / CYLINDER_SEGMENT_COUNT as f32 * std::f32::consts::TAU;
+            let offset: Vec3 = a * angle.cos() * radius_a_m + b * angle.sin() * radius_b_m;
+            mesh.vertices.push(Vertex {
+                position: (centre + offset).to_array(),
+                normal: normal.to_array(),
+                tangent: a.extend(1.0).to_array(),
+                uv: [offset.dot(a) / tile_size_m, offset.dot(b) / tile_size_m],
+            });
+        }
+        for segment in 0..CYLINDER_SEGMENT_COUNT as u32 {
+            let triangle: [u32; 3] = [
+                centre_index,
+                centre_index + 1 + segment,
+                centre_index + 2 + segment,
+            ];
+            push_facing(mesh, triangle, normal);
+        }
+    }
+}
+
+/// `append_ellipsoid` adds a latitude-longitude ellipsoid.
+fn append_ellipsoid(mesh: &mut MeshData, shape: &WorldShape, tile_size_m: f32) {
+    let base: u32 = mesh.vertices.len() as u32;
+    let row_length: u32 = ELLIPSOID_SEGMENT_COUNT as u32 + 1;
+    let around_m: f32 = std::f32::consts::TAU * (shape.half_m.x + shape.half_m.z) * 0.5;
+    for ring in 0..=ELLIPSOID_RING_COUNT {
+        let polar: f32 = ring as f32 / ELLIPSOID_RING_COUNT as f32 * std::f32::consts::PI;
+        for segment in 0..=ELLIPSOID_SEGMENT_COUNT {
+            let azimuth: f32 =
+                segment as f32 / ELLIPSOID_SEGMENT_COUNT as f32 * std::f32::consts::TAU;
+            let unit: Vec3 = Vec3::new(
+                polar.sin() * azimuth.cos(),
+                polar.cos(),
+                polar.sin() * azimuth.sin(),
+            );
+            let position: Vec3 = shape.centre_m + unit * shape.half_m;
+            let normal: Vec3 = (unit / shape.half_m).normalize();
+            let tangent: Vec3 = Vec3::new(-azimuth.sin(), 0.0, azimuth.cos());
+            mesh.vertices.push(Vertex {
+                position: position.to_array(),
+                normal: normal.to_array(),
+                tangent: tangent.extend(1.0).to_array(),
+                uv: [
+                    segment as f32 / ELLIPSOID_SEGMENT_COUNT as f32 * around_m / tile_size_m,
+                    polar * shape.half_m.y / tile_size_m,
+                ],
+            });
+        }
+    }
+    for ring in 0..ELLIPSOID_RING_COUNT as u32 {
+        for segment in 0..ELLIPSOID_SEGMENT_COUNT as u32 {
+            let i0: u32 = base + ring * row_length + segment;
+            let (i1, i2, i3) = (i0 + 1, i0 + row_length, i0 + row_length + 1);
+            if ring > 0 {
+                push_outward(mesh, [i0, i1, i2], shape.centre_m);
+            }
+            if ring + 1 < ELLIPSOID_RING_COUNT as u32 {
+                push_outward(mesh, [i1, i3, i2], shape.centre_m);
+            }
+        }
+    }
+}
+
+/// `push_outward` adds a triangle wound counter-clockwise as seen from away from a centre.
+fn push_outward(mesh: &mut MeshData, triangle: [u32; 3], centre_m: Vec3) {
+    let p: [Vec3; 3] = triangle.map(|index| Vec3::from(mesh.vertices[index as usize].position));
+    let mid: Vec3 = (p[0] + p[1] + p[2]) / 3.0;
+    let outward: Vec3 =
+        Vec3::from(mesh.vertices[triangle[0] as usize].normal) + (mid - centre_m) * 1e-3;
+    push_facing(mesh, triangle, outward);
+}
+
+/// `push_facing` adds a triangle wound counter-clockwise as seen from along `normal`.
+fn push_facing(mesh: &mut MeshData, triangle: [u32; 3], normal: Vec3) {
+    let p: [Vec3; 3] = triangle.map(|index| Vec3::from(mesh.vertices[index as usize].position));
+    if (p[1] - p[0]).cross(p[2] - p[0]).dot(normal) >= 0.0 {
+        mesh.indices.extend(triangle);
+    } else {
+        mesh.indices.extend([triangle[0], triangle[2], triangle[1]]);
     }
 }
 

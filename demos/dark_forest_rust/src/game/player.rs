@@ -8,6 +8,7 @@
 use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
 
 use super::collision::{Aabb, MoveResult, move_body};
+use super::world::LadderVolume;
 
 /// `WALK_SPEED_M_S` is the walking speed.
 const WALK_SPEED_M_S: f32 = 4.4;
@@ -47,6 +48,15 @@ const REGEN_DELAY_S: f32 = 5.0;
 const REGEN_RATE_PER_S: f32 = 12.0;
 /// `STRIDE_M` is the distance per footstep.
 const STRIDE_M: f32 = 1.9;
+/// `CLIMB_SPEED_M_S` is how fast a player climbs a rope ladder.
+const CLIMB_SPEED_M_S: f32 = 3.2;
+/// `CLIMB_HORIZONTAL_FRAC` is the share of walking speed a climber keeps sideways and forward.
+const CLIMB_HORIZONTAL_FRAC: f32 = 0.45;
+/// `CLIMB_DOWN_PITCH_RAD` is how far down a climber looks for forward to climb down.
+const CLIMB_DOWN_PITCH_RAD: f32 = -0.6;
+/// `LADDER_FACING_DOT` is how squarely a player on the ground must walk into a ladder to start
+/// climbing it.
+const LADDER_FACING_DOT: f32 = 0.3;
 
 /// `PlayerInput` is one frame's player controls.
 #[derive(Clone, Copy, Debug, Default)]
@@ -76,6 +86,7 @@ pub struct Player {
     pub landing_dip_m: f32,
     pub is_sprinting: bool,
     pub did_step: bool,
+    pub is_climbing: bool,
 }
 
 impl Player {
@@ -97,6 +108,7 @@ impl Player {
             landing_dip_m: 0.0,
             is_sprinting: false,
             did_step: false,
+            is_climbing: false,
         }
     }
 
@@ -155,7 +167,13 @@ impl Player {
     }
 
     /// `update` applies one frame of input and physics.
-    pub fn update(&mut self, input: &PlayerInput, solids: &[Aabb], dt_s: f32) {
+    pub fn update(
+        &mut self,
+        input: &PlayerInput,
+        solids: &[Aabb],
+        ladders: &[LadderVolume],
+        dt_s: f32,
+    ) {
         self.since_hit_s += dt_s;
         if let Some(time_s) = &mut self.dead_time_s {
             *time_s += dt_s;
@@ -217,6 +235,27 @@ impl Player {
         if input.is_jump_pressed && self.is_on_ground {
             self.velocity_m_s.y = JUMP_SPEED_M_S;
         }
+        let body: Aabb = Aabb {
+            min_m: self.feet_m - Vec3::new(BODY_RADIUS_M, 0.0, BODY_RADIUS_M),
+            max_m: self.feet_m + Vec3::new(BODY_RADIUS_M, self.height_m, BODY_RADIUS_M),
+        };
+        let ladder: Option<&LadderVolume> = ladders.iter().find(|l| l.aabb.overlaps(&body));
+        self.is_climbing = ladder.is_some_and(|ladder| {
+            let facing: Vec3 = -ladder.frame.z_axis.truncate();
+            let walking_in: bool = target_m_s.dot(facing) > LADDER_FACING_DOT * speed_m_s;
+            !input.is_jump_pressed && (self.is_climbing || !self.is_on_ground || walking_in)
+        });
+        if self.is_climbing {
+            let down_sign: f32 = if self.pitch_rad < CLIMB_DOWN_PITCH_RAD {
+                -1.0
+            } else {
+                1.0
+            };
+            let climb_m_s: f32 = axes.y * down_sign * CLIMB_SPEED_M_S
+                - f32::from(u8::from(input.is_crouch_held)) * CLIMB_SPEED_M_S;
+            self.velocity_m_s =
+                (target_m_s * CLIMB_HORIZONTAL_FRAC).with_y(climb_m_s.max(-CLIMB_SPEED_M_S * 1.5));
+        }
 
         let fall_speed_m_s: f32 = -self.velocity_m_s.y;
         let was_on_ground: bool = self.is_on_ground;
@@ -225,7 +264,7 @@ impl Player {
             self.feet_m,
             Player::half_extent_m(self.height_m),
             self.velocity_m_s * dt_s,
-            self.is_on_ground,
+            self.is_on_ground || self.is_climbing,
         );
         let moved_m: f32 = (result.position_m - self.feet_m).with_y(0.0).length();
         self.feet_m = result.position_m;

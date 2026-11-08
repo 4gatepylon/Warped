@@ -1,21 +1,36 @@
-//! `warped-fps-demo` is a single-player FPS demo: Rust, SDL3 for the window, input and audio,
-//! and Metal for rendering. It loads the assets that `download-assets` saved in `assets/`.
+//! `dark-forest` is the Dark Forest level: a bounded Euclidean forest with treehouses, rope
+//! ladders and bridges, two pylons per team with one console each. Rust, SDL3 for the window,
+//! input and audio, Metal for rendering. It plays alone against AI robots, or online against
+//! other players through a game server (`--serve`, `--host`, `--join`).
 //!
 //! Example:
-//!     cargo run --release --bin warped-fps-demo -- --render-scale 0.8
+//!     cargo run --release --bin dark-forest -- --host
 //!
 //! Interface: the command-line flags below; controls are in the README.
 
 #[allow(dead_code)]
 mod asset_manifest;
 mod assets;
+mod forest_layout;
 mod game;
+mod map;
+mod match_play;
+#[allow(dead_code)]
+mod net;
 mod platform;
 mod render;
 mod scene;
+mod server;
+#[allow(dead_code)]
+mod settings;
+#[allow(dead_code)]
+mod shot_noise;
+#[allow(dead_code)]
+mod thrown_wormholes;
 
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
 use glam::{Vec2, Vec3};
@@ -27,6 +42,7 @@ use game::player::{Player, PlayerInput};
 use game::session::{Controls, FrameData, Session};
 use game::weapon::WeaponInput;
 use game::world::Arena;
+use match_play::{MatchOptions, MatchPlay};
 use platform::Platform;
 use render::metal::MetalRenderer;
 use render::{FrameDescription, FrameTiming, RenderSettings, Renderer};
@@ -41,39 +57,40 @@ const REPORT_INTERVAL_S: f32 = 5.0;
 /// `RENDER_SCALE_STEP_FRAC` is how much `[` and `]` change the render scale.
 const RENDER_SCALE_STEP_FRAC: f32 = 0.1;
 
-/// `CameraView` is a fixed camera pose for screenshots and repeatable frame-time comparisons.
+/// `CameraView` is a fixed camera pose for screenshots and repeatable frame-time comparisons;
+/// `--bench-views` runs them all.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 enum CameraView {
-    Yard,
-    Indoor,
+    Spawn,
+    Bridge,
+    Lookout,
+    Treehouse,
     Firing,
 }
 
-const YARD_VIEW_FEET_M: Vec3 = Vec3::new(20.0, 0.0, -6.0);
-const YARD_VIEW_YAW_RAD: f32 = 2.4;
-const YARD_VIEW_PITCH_RAD: f32 = -0.05;
-const INDOOR_VIEW_FEET_M: Vec3 = Vec3::new(-9.0, 0.06, -9.5);
-const INDOOR_VIEW_YAW_RAD: f32 = 0.95;
-const INDOOR_VIEW_PITCH_RAD: f32 = 0.0;
-const FIRING_VIEW_FEET_M: Vec3 = Vec3::new(-2.0, 0.0, 30.0);
-const FIRING_VIEW_YAW_RAD: f32 = 0.0;
-const FIRING_VIEW_PITCH_RAD: f32 = 0.02;
-
 impl CameraView {
-    /// `pose` returns the view's feet position, yaw and pitch.
+    /// `ALL` is every view, in `--bench-views` order.
+    const ALL: [CameraView; 5] = [
+        CameraView::Spawn,
+        CameraView::Bridge,
+        CameraView::Lookout,
+        CameraView::Treehouse,
+        CameraView::Firing,
+    ];
+
+    /// `pose` returns the view's feet position, yaw and pitch (yaw 0 looks along -z, towards
+    /// blue's base from red's).
     fn pose(self) -> (Vec3, f32, f32) {
         match self {
-            CameraView::Yard => (YARD_VIEW_FEET_M, YARD_VIEW_YAW_RAD, YARD_VIEW_PITCH_RAD),
-            CameraView::Indoor => (
-                INDOOR_VIEW_FEET_M,
-                INDOOR_VIEW_YAW_RAD,
-                INDOOR_VIEW_PITCH_RAD,
+            CameraView::Spawn => (Vec3::new(0.0, 0.0, 50.0), 0.0, 0.0),
+            CameraView::Bridge => (Vec3::new(11.0, forest_layout::DECK_TOP_M, 30.0), 0.3, -0.1),
+            CameraView::Lookout => (Vec3::new(0.0, forest_layout::LOOKOUT_TOP_M, 2.0), 0.0, -0.3),
+            CameraView::Treehouse => (
+                Vec3::new(14.5, forest_layout::DECK_TOP_M, 46.0),
+                -0.8,
+                -0.05,
             ),
-            CameraView::Firing => (
-                FIRING_VIEW_FEET_M,
-                FIRING_VIEW_YAW_RAD,
-                FIRING_VIEW_PITCH_RAD,
-            ),
+            CameraView::Firing => (Vec3::new(-4.0, 0.0, 20.0), 0.1, 0.02),
         }
     }
 }
@@ -91,13 +108,16 @@ enum Effect {
 
 /// `Args` are the command-line flags.
 #[derive(Parser, Debug)]
-#[command(about = "Warped FPS demo (Rust + SDL3 + Metal)")]
+#[command(
+    about = "Dark Forest, a Warped level (Rust + SDL3 + Metal)",
+    after_help = "Examples:\n  dark-forest                     play alone against robots\n  dark-forest --host              serve and play; others --join auto\n  dark-forest --serve --level-result-file /tmp/r.json\n  dark-forest --join 127.0.0.1 --team blue --bot --bot-objective consoles --exit-after-s 60"
+)]
 struct Args {
     /// Internal render resolution as a fraction of the window's pixels (0.25 to 1.0).
     #[arg(long, default_value_t = 1.0)]
     render_scale: f32,
-    /// Number of enemy bots (0 to 6).
-    #[arg(long, default_value_t = 4)]
+    /// Number of AI robots when playing alone (0 to 6; none online).
+    #[arg(long, default_value_t = 3)]
     bot_count: usize,
     /// Window width in points.
     #[arg(long, default_value_t = 1600)]
@@ -130,14 +150,60 @@ struct Args {
     /// Turn an effect off at start (repeatable); the F keys still toggle it.
     #[arg(long, value_enum)]
     disable_effect: Vec<Effect>,
-    /// Directory holding the downloaded assets.
+    /// Run every camera view for this many seconds each, print its frame times, and quit.
+    #[arg(long)]
+    bench_views: Option<f32>,
+    /// Let the autopilot walk the vertical route (ladders, bridges, lookout) and print its laps.
+    #[arg(long)]
+    play_route: bool,
+    /// Directory holding the robot, gun, sound and sky assets (shared with ../fps_demo).
     #[arg(long)]
     assets_dir: Option<PathBuf>,
+    /// Directory holding the forest textures that `download-assets` saved.
+    #[arg(long)]
+    textures_dir: Option<PathBuf>,
+    /// The map file (default: common/maps/dark_forest/map.json).
+    #[arg(long)]
+    map: Option<PathBuf>,
+    /// Write the forest's map to this file and quit.
+    #[arg(long)]
+    export_map: Option<PathBuf>,
+    /// Run a game server without a window until killed.
+    #[arg(long, conflicts_with_all = ["join", "host"])]
+    serve: bool,
+    /// Run a game server in this process and join it.
+    #[arg(long, conflicts_with = "join")]
+    host: bool,
+    /// Join the game server at this address (or `auto` to find one on the network).
+    #[arg(long)]
+    join: Option<String>,
+    /// UDP port of the game server.
+    #[arg(long, default_value_t = net::DEFAULT_PORT)]
+    port: u16,
+    /// Join this team at once (`blue` or `red`); otherwise the server picks.
+    #[arg(long, value_parser = ["blue", "red"])]
+    team: Option<String>,
+    /// Let the autopilot play this window (a bot for tests).
+    #[arg(long)]
+    bot: bool,
+    /// What the bot does: `consoles` holds E on the other team's consoles until its team wins.
+    #[arg(long, value_parser = ["consoles"])]
+    bot_objective: Option<String>,
+    /// Quit after this many seconds.
+    #[arg(long)]
+    exit_after_s: Option<f32>,
+    /// With --serve: write {"winner": "blue"|"red"} here on a win, and start no new game.
+    #[arg(long)]
+    level_result_file: Option<PathBuf>,
 }
+
+/// `VERTICAL_ROUTE` is `--play-route`'s loop from red's spawn: up a ladder to the treehouse, over
+/// the bridges, up the lookout, down and back.
+const VERTICAL_ROUTE: [Vec3; 0] = [];
 
 /// `validate_args` checks every flag before anything starts.
 fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
-    let example: &str = "example: warped-fps-demo --render-scale 0.8 --bot-count 4";
+    let example: &str = "example: dark-forest --render-scale 0.8 --bot-count 4";
     if !(0.25..=1.0).contains(&args.render_scale) {
         return Err(format!(
             "--render-scale must be in 0.25..=1.0, got {}; {example}",
@@ -201,16 +267,97 @@ impl FrameStats {
 
 fn main() {
     let args: Args = Args::parse();
+    let map_path: PathBuf = args.map.clone().unwrap_or_else(map::default_map_path);
+    if let Some(path) = &args.export_map {
+        let json: String = serde_json::to_string_pretty(&forest_layout::build()).expect("map JSON");
+        std::fs::write(path, json + "\n").expect("can't write the map");
+        println!("wrote {}", path.display());
+        return;
+    }
+    if args.serve {
+        let options: server::ServerOptions = server::ServerOptions {
+            port: args.port,
+            map_path,
+            level_result_file: args.level_result_file.clone(),
+            game_password: Vec::new(),
+        };
+        if let Err(error) = server::run(&options, &AtomicBool::new(false)) {
+            eprintln!("error: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    let manifest_dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
     let assets_dir: PathBuf = args.assets_dir.clone().unwrap_or_else(|| {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join(asset_manifest::ASSETS_DIR_NAME)
+        manifest_dir
+            .join("../fps_demo")
+            .join(asset_manifest::ASSETS_DIR_NAME)
     });
+    let textures_dir: PathBuf = args
+        .textures_dir
+        .clone()
+        .unwrap_or_else(|| manifest_dir.join(asset_manifest::ASSETS_DIR_NAME));
+    let map_file: map::MapFile = map::load(&map_path).unwrap_or_else(|error| {
+        eprintln!(
+            "error: {error}; write it with --export-map {}",
+            map_path.display()
+        );
+        std::process::exit(2);
+    });
+    let client: Option<net::Client> = if args.host || args.join.is_some() {
+        if args.host {
+            let options: server::ServerOptions = server::ServerOptions {
+                port: args.port,
+                map_path: map_path.clone(),
+                level_result_file: args.level_result_file.clone(),
+                game_password: Vec::new(),
+            };
+            std::thread::spawn(move || {
+                if let Err(error) = server::run(&options, &AtomicBool::new(false)) {
+                    eprintln!("server error: {error}");
+                }
+            });
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let address: std::net::SocketAddr = match args.join.as_deref() {
+            None => ([127, 0, 0, 1], args.port).into(),
+            Some("auto") => net::find_server(Duration::from_secs(5)).unwrap_or_else(|error| {
+                eprintln!("error: no game server found ({error})");
+                std::process::exit(2);
+            }),
+            Some(host) => {
+                use std::net::ToSocketAddrs;
+                let with_port: String = if host.contains(':') {
+                    host.to_string()
+                } else {
+                    format!("{host}:{}", args.port)
+                };
+                with_port
+                    .to_socket_addrs()
+                    .ok()
+                    .and_then(|mut a| a.next())
+                    .unwrap_or_else(|| {
+                        eprintln!("error: can't resolve --join {host}");
+                        std::process::exit(2);
+                    })
+            }
+        };
+        Some(
+            net::Client::Connect(address, &map_file.name, b"").unwrap_or_else(|error| {
+                eprintln!("error: can't reach {address}: {error}");
+                std::process::exit(2);
+            }),
+        )
+    } else {
+        None
+    };
     if let Err(message) = validate_args(&args, &assets_dir) {
         eprintln!("error: {message}");
         std::process::exit(2);
     }
 
-    let platform: Platform = Platform::new(
-        "Warped FPS demo",
+    let mut platform: Platform = Platform::new(
+        "Dark Forest",
         args.width_pt,
         args.height_pt,
         args.fullscreen,
@@ -220,16 +367,42 @@ fn main() {
     let (mut width_px, mut height_px) = platform.window.size_in_pixels();
     renderer.resize(width_px, height_px);
     let audio: Audio = Audio::new(&platform.sdl);
-    let arena: Arena = Arena::new();
+    let arena: Arena = Arena::from_map(&map_file);
     let scene: Scene = Scene::load(
         &mut renderer,
         &assets_dir,
+        &textures_dir,
         &arena,
         &SceneOptions {
             should_use_rifle: args.rifle,
         },
     );
-    let mut session: Session = Session::new(arena, args.bot_count, args.autopilot);
+    let is_online: bool = client.is_some();
+    let bot_count: usize = if is_online { 0 } else { args.bot_count };
+    let mut session: Session = Session::new(
+        arena,
+        bot_count,
+        args.autopilot || args.bot || args.play_route,
+    );
+    if args.play_route {
+        session.route = VERTICAL_ROUTE.to_vec();
+    }
+    let mut play: MatchPlay = MatchPlay::New(
+        client,
+        MatchOptions {
+            team: args.team.as_deref().map(|team| u32::from(team == "red")),
+            is_console_bot: args.bot_objective.is_some(),
+        },
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("error: can't join: {error}");
+        std::process::exit(2);
+    });
+    let mut last_title: Instant = Instant::now();
+    let mut view_stats: Vec<FrameStats> = CameraView::ALL
+        .iter()
+        .map(|_| FrameStats::default())
+        .collect();
     let mut settings: RenderSettings = RenderSettings {
         render_scale_frac: args.render_scale,
         is_ssao_enabled: !args.disable_effect.contains(&Effect::Ssao),
@@ -345,7 +518,16 @@ fn main() {
                 is_aim_held: is_mouse_captured && mouse_state.right(),
             },
         };
-        let controls: Controls = match args.camera_view {
+        let bench_view: Option<usize> = args
+            .bench_views
+            .map(|seconds| (start.elapsed().as_secs_f32() / seconds) as usize);
+        if bench_view.is_some_and(|index| index >= CameraView::ALL.len()) {
+            break 'running;
+        }
+        let camera_view: Option<CameraView> = bench_view
+            .map(|index| CameraView::ALL[index])
+            .or(args.camera_view);
+        let controls: Controls = match camera_view {
             Some(view) => {
                 let (feet_m, yaw_rad, pitch_rad) = view.pose();
                 session.player = Player::new(feet_m, yaw_rad);
@@ -365,6 +547,14 @@ fn main() {
             None => controls,
         };
         session.update(&controls, &scene, &audio, dt_s);
+        let is_e_held: bool = keys.is_scancode_pressed(Scancode::E);
+        if let Err(error) = play.update(&mut session, &scene, is_e_held, dt_s) {
+            eprintln!("network error: {error}");
+        }
+        if last_title.elapsed().as_secs_f32() > 0.5 {
+            last_title = Instant::now();
+            let _ = platform.window.set_title(&play.status(&session));
+        }
 
         smoothed_frame_ms += (frame_s * 1000.0 - smoothed_frame_ms) * 0.05;
         session.show_frame_ms = is_showing_frame_time.then_some(smoothed_frame_ms);
@@ -392,6 +582,13 @@ fn main() {
             stats.gpu_ms.push(timing.gpu_ms as f32);
             report_stats.frame_ms.push(frame_s * 1000.0);
             report_stats.gpu_ms.push(timing.gpu_ms as f32);
+            if let Some(index) = bench_view {
+                let seconds: f32 = args.bench_views.unwrap_or(1.0);
+                if start.elapsed().as_secs_f32() - index as f32 * seconds > 1.0 {
+                    view_stats[index].frame_ms.push(frame_s * 1000.0);
+                    view_stats[index].gpu_ms.push(timing.gpu_ms as f32);
+                }
+            }
         }
         if elapsed_s - last_report_s > REPORT_INTERVAL_S {
             last_report_s = elapsed_s;
@@ -407,7 +604,27 @@ fn main() {
         if args.benchmark_seconds > 0.0 && elapsed_s > args.benchmark_seconds {
             break 'running;
         }
+        if args.exit_after_s.is_some_and(|seconds| elapsed_s > seconds) {
+            break 'running;
+        }
     }
     let _ = timing;
+    if args.bench_views.is_some() {
+        for (view, view_stat) in CameraView::ALL.iter().zip(&view_stats) {
+            println!(
+                "view {view:?} at {width_px}x{height_px} px: {}",
+                view_stat.summary()
+            );
+        }
+    }
+    if args.play_route {
+        println!(
+            "route laps done: {}; ended at {:?}",
+            session.laps_done, session.player.feet_m
+        );
+    }
+    if let Some(winner) = session.winner {
+        println!("winner: {}", ["blue", "red"][winner as usize % 2]);
+    }
     println!("session: {}", stats.summary());
 }

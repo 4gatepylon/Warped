@@ -120,24 +120,48 @@ pub struct Session {
     noise_state: u32,
     autopilot_waypoint: usize,
     autopilot_trigger_s: f32,
+    pub route: Vec<Vec3>,
+    pub remote_bots: Vec<RemoteBot>,
+    pub pending_hits: Vec<u32>,
+    pub team: u32,
+    pub console_off: Vec<bool>,
+    pub console_hold_frac: Option<f32>,
+    pub winner: Option<u32>,
+    pub laps_done: u32,
+    pub is_trigger_down: bool,
 }
 
-/// `AUTOPILOT_WAYPOINTS` is the loop the autopilot walks.
-const AUTOPILOT_WAYPOINTS: [Vec2; 8] = [
-    Vec2::new(16.0, -4.0),
-    Vec2::new(2.0, -12.0),
-    Vec2::new(-4.0, -17.0),
-    Vec2::new(-16.0, -17.0),
-    Vec2::new(-18.0, -2.0),
-    Vec2::new(-6.0, 16.0),
-    Vec2::new(4.0, 2.0),
-    Vec2::new(24.0, 2.0),
+/// `RemoteBot` is another player of a network game, drawn as a robot in their team's colour.
+pub struct RemoteBot {
+    pub id: u32,
+    pub team: u32,
+    pub bot: Bot,
+    pub is_firing: bool,
+    pub fire_cooldown_s: f32,
+}
+
+/// `TEAM_TINTS` are the robots' main colours per team (blue, red).
+const TEAM_TINTS: [Vec3; 2] = [Vec3::new(0.12, 0.25, 0.75), Vec3::new(0.75, 0.14, 0.1)];
+/// `REMOTE_FIRE_PERIOD_S` is how often a firing remote player's tracer is drawn.
+const REMOTE_FIRE_PERIOD_S: f32 = 0.11;
+
+/// `GROUND_PATROL` is the loop the autopilot walks by default, on the ground.
+const GROUND_PATROL: [Vec3; 6] = [
+    Vec3::new(0.0, 0.0, 40.0),
+    Vec3::new(-8.0, 0.0, 10.0),
+    Vec3::new(-6.0, 0.0, -20.0),
+    Vec3::new(8.0, 0.0, -36.0),
+    Vec3::new(8.0, 0.0, -10.0),
+    Vec3::new(6.0, 0.0, 20.0),
 ];
 
 impl Session {
     /// `new` starts a match with a number of bots.
     pub fn new(arena: Arena, bot_count: usize, is_autopilot: bool) -> Session {
-        let (spawn_m, yaw_rad) = arena.player_spawns[0];
+        let (spawn_m, yaw_rad) = arena.team_spawns[1]
+            .first()
+            .copied()
+            .unwrap_or(arena.player_spawns[0]);
         let bots: Vec<Bot> = (0..bot_count)
             .map(|index| {
                 Bot::new(
@@ -166,6 +190,15 @@ impl Session {
             noise_state: 0xdead_beef,
             autopilot_waypoint: 0,
             autopilot_trigger_s: 0.0,
+            route: GROUND_PATROL.to_vec(),
+            remote_bots: Vec::new(),
+            pending_hits: Vec::new(),
+            team: 1,
+            console_off: Vec::new(),
+            console_hold_frac: None,
+            winner: None,
+            laps_done: 0,
+            is_trigger_down: false,
         }
     }
 
@@ -291,8 +324,24 @@ impl Session {
                 }
             }
         }
+        let mut remote_hit: Option<(u32, Vec3)> = None;
+        for remote in self.remote_bots.iter().filter(|r| r.bot.is_alive()) {
+            for aabb in [remote.bot.head(), remote.bot.body()] {
+                if let Some(hit) = aabb.cast_ray(origin_m, direction, nearest_m) {
+                    nearest_m = hit.distance_m;
+                    remote_hit = Some((remote.id, hit.normal));
+                    bot_hit = None;
+                }
+            }
+        }
         let end_m: Vec3 = origin_m + direction * nearest_m;
         let muzzle_m: Vec3 = self.muzzle_world_m(scene);
+        if let Some((id, normal)) = remote_hit {
+            self.pending_hits.push(id);
+            self.add_impact(end_m, normal, PLAYER_BEAM_COLOR, scene.light_scale, false);
+            self.hit_marker_s = 0.25;
+            audio.play(Sound::HitMarker, 0.5, 0.0);
+        }
         self.beams.push(Beam {
             start_m: muzzle_m,
             end_m,
@@ -387,15 +436,26 @@ impl Session {
     /// `autopilot_controls` plays the game: walk the waypoint loop, aim at visible bots, fire.
     fn autopilot_controls(&mut self, scene: &Scene, dt_s: f32) -> Controls {
         let eye_m: Vec3 = self.player.eye_position_m();
-        let target: Vec2 = AUTOPILOT_WAYPOINTS[self.autopilot_waypoint];
+        let waypoint: Vec3 = self.route[self.autopilot_waypoint % self.route.len()];
+        let target: Vec2 = Vec2::new(waypoint.x, waypoint.z);
         let feet: Vec2 = Vec2::new(self.player.feet_m.x, self.player.feet_m.z);
-        if feet.distance(target) < 1.5 {
-            self.autopilot_waypoint = (self.autopilot_waypoint + 1) % AUTOPILOT_WAYPOINTS.len();
+        if feet.distance(target) < 1.0 && (self.player.feet_m.y - waypoint.y).abs() < 1.2 {
+            self.autopilot_waypoint = (self.autopilot_waypoint + 1) % self.route.len();
+            if self.autopilot_waypoint == 0 {
+                self.laps_done += 1;
+            }
         }
         let walk_direction: Vec2 = (target - feet).normalize_or_zero();
+        let my_team: u32 = self.team;
         let visible_bot: Option<Vec3> = self
             .bots
             .iter()
+            .chain(
+                self.remote_bots
+                    .iter()
+                    .filter(|r| r.team != my_team)
+                    .map(|r| &r.bot),
+            )
             .filter(|bot| bot.is_alive())
             .map(|bot| bot.feet_m + Vec3::Y * (BOT_HEIGHT_M * 0.65))
             .filter(|aim_m| {
@@ -452,9 +512,11 @@ impl Session {
         } else {
             *controls
         };
+        self.is_trigger_down = controls.weapon.is_trigger_held && self.weapon.ammo > 0;
         let mut player_input: PlayerInput = controls.player;
         player_input.is_aiming = controls.weapon.is_aim_held && self.weapon.reload_time_s.is_none();
-        self.player.update(&player_input, &scene.solids, dt_s);
+        self.player
+            .update(&player_input, &scene.solids, &self.arena.ladders, dt_s);
         if self.player.did_step {
             audio.play(
                 Sound::Footstep,
@@ -477,12 +539,11 @@ impl Session {
         }
         if self.player.should_respawn() {
             let bot_positions: Vec<Vec3> = self.bots.iter().map(|bot| bot.feet_m).collect();
-            let spawns: Vec<Vec3> = self.arena.player_spawns.iter().map(|(p, _)| *p).collect();
+            let team_spawns: &[(Vec3, f32)] = &self.arena.team_spawns[self.team as usize % 2];
+            let spawns: Vec<Vec3> = team_spawns.iter().map(|(p, _)| *p).collect();
             let spawn_m: Vec3 =
                 Session::farthest_spawn(&spawns, &bot_positions, self.spawn_counter);
-            let yaw_rad: f32 = self
-                .arena
-                .player_spawns
+            let yaw_rad: f32 = self.arena.team_spawns[self.team as usize % 2]
                 .iter()
                 .find(|(p, _)| *p == spawn_m)
                 .map_or(0.0, |(_, yaw)| *yaw);
@@ -518,6 +579,27 @@ impl Session {
             }
         }
 
+        let mut remote_beams: Vec<Beam> = Vec::new();
+        for remote in &mut self.remote_bots {
+            remote.fire_cooldown_s -= dt_s;
+            remote.bot.animation.advance(dt_s, 1.0);
+            if remote.is_firing && remote.bot.is_alive() && remote.fire_cooldown_s <= 0.0 {
+                remote.fire_cooldown_s = REMOTE_FIRE_PERIOD_S;
+                let origin_m: Vec3 = remote.bot.eye_m();
+                let direction: Vec3 = remote.bot.facing();
+                let distance_m: f32 = cast_ray(&scene.solids, origin_m, direction, SHOT_RANGE_M)
+                    .map_or(SHOT_RANGE_M, |(_, hit)| hit.distance_m);
+                remote_beams.push(Beam {
+                    start_m: origin_m,
+                    end_m: origin_m + direction * distance_m,
+                    age_s: 0.0,
+                    life_s: 0.12,
+                    color_rgb: BOT_BEAM_COLOR * scene.light_scale,
+                    width_m: 0.022,
+                });
+            }
+        }
+        self.beams.extend(remote_beams);
         for particle in &mut self.particles {
             particle.age_s += dt_s;
             particle.velocity_m_s.y -= 9.8 * particle.gravity_frac * dt_s;
@@ -583,6 +665,73 @@ impl Session {
             .collect()
     }
 
+    /// `objective_hud` draws the consoles (lit while on, in their team's colour), the hold
+    /// progress while `E` is held on one, and the winner's banner.
+    fn objective_hud(&self, width_px: f32, height_px: f32) -> Vec<HudRect> {
+        let scale: f32 = height_px / 1080.0;
+        let mut rects: Vec<HudRect> = Vec::new();
+        let colors: [Vec4; 2] = [
+            Vec4::new(0.2, 0.45, 1.0, 0.95),
+            Vec4::new(1.0, 0.25, 0.15, 0.95),
+        ];
+        let pip_px: f32 = 34.0 * scale;
+        let gap_px: f32 = 14.0 * scale;
+        let count: usize = self.arena.consoles.len();
+        let total_px: f32 = count as f32 * pip_px + count.saturating_sub(1) as f32 * gap_px;
+        for (index, console) in self.arena.consoles.iter().enumerate() {
+            let x_px: f32 = (width_px - total_px) * 0.5 + index as f32 * (pip_px + gap_px);
+            let is_off: bool = self.console_off.get(index).copied().unwrap_or(false);
+            rects.push(HudRect {
+                x_px: x_px - 3.0 * scale,
+                y_px: 24.0 * scale - 3.0 * scale,
+                width_px: pip_px + 6.0 * scale,
+                height_px: pip_px + 6.0 * scale,
+                color_rgba: Vec4::new(0.0, 0.0, 0.0, 0.5),
+            });
+            let color: Vec4 = colors[console.team as usize % 2];
+            rects.push(HudRect {
+                x_px,
+                y_px: 24.0 * scale,
+                width_px: pip_px,
+                height_px: pip_px,
+                color_rgba: if is_off {
+                    color * Vec4::new(0.2, 0.2, 0.2, 0.8)
+                } else {
+                    color
+                },
+            });
+        }
+        if let Some(frac) = self.console_hold_frac {
+            let bar_px: Vec2 = Vec2::new(320.0, 16.0) * scale;
+            let x_px: f32 = (width_px - bar_px.x) * 0.5;
+            let y_px: f32 = height_px * 0.5 + 70.0 * scale;
+            rects.push(HudRect {
+                x_px,
+                y_px,
+                width_px: bar_px.x,
+                height_px: bar_px.y,
+                color_rgba: Vec4::new(0.0, 0.0, 0.0, 0.55),
+            });
+            rects.push(HudRect {
+                x_px,
+                y_px,
+                width_px: bar_px.x * frac.clamp(0.0, 1.0),
+                height_px: bar_px.y,
+                color_rgba: Vec4::new(1.0, 0.85, 0.35, 0.95),
+            });
+        }
+        if let Some(winner) = self.winner {
+            rects.push(HudRect {
+                x_px: 0.0,
+                y_px: height_px * 0.28,
+                width_px,
+                height_px: 110.0 * scale,
+                color_rgba: colors[winner as usize % 2] * Vec4::new(1.0, 1.0, 1.0, 0.7),
+            });
+        }
+        rects
+    }
+
     /// `frame_data` turns the match into one frame for the renderer.
     pub fn frame_data(&self, scene: &Scene, width_px: f32, height_px: f32) -> FrameData {
         let camera_world: Mat4 = self.player.camera_world();
@@ -612,7 +761,16 @@ impl Session {
             })
             .collect();
         let mut world_particles: Vec<Particle> = Vec::new();
-        for bot in &self.bots {
+        let remote_entries = self
+            .remote_bots
+            .iter()
+            .map(|remote| (&remote.bot, TEAM_TINTS[remote.team as usize % 2]));
+        for (bot, main_tint) in self
+            .bots
+            .iter()
+            .map(|bot| (bot, TEAM_TINTS[(self.team as usize + 1) % 2]))
+            .chain(remote_entries)
+        {
             let sink_m: f32 = bot.dead_time_s.map_or(0.0, |time_s| {
                 ((time_s - (RESPAWN_DELAY_S - 1.5)) / 1.5).clamp(0.0, 1.0) * 1.2
             });
@@ -628,7 +786,7 @@ impl Session {
                     .and_then(|index| scene.robot_material_names.get(index))
                     .map_or("", String::as_str);
                 let tint: Vec3 = match name {
-                    "Main" => Vec3::new(0.32, 0.34, 0.38),
+                    "Main" => main_tint,
                     "Grey" => Vec3::new(0.75, 0.74, 0.72),
                     _ => Vec3::ONE,
                 };
@@ -762,7 +920,7 @@ impl Session {
         }
 
         let speed_frac: f32 = (self.player.velocity_m_s.with_y(0.0).length() / 7.0).min(1.0);
-        let hud_rects: Vec<HudRect> = build_hud(
+        let mut hud_rects: Vec<HudRect> = build_hud(
             &HudState {
                 health_frac: self.player.health / MAX_HEALTH,
                 ammo: self.weapon.ammo,
@@ -779,6 +937,7 @@ impl Session {
             width_px,
             height_px,
         );
+        hud_rects.extend(self.objective_hud(width_px, height_px));
         FrameData {
             camera,
             world_draws,

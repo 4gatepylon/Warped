@@ -1,33 +1,21 @@
-//! `wormholes_server.rs` runs one game server of the Rust demo without a window, for a machine that
-//! only hosts games, such as a Linux server in the cloud: it builds without Metal or SDL, plays a
-//! map built into the program, and starts a new game a few seconds after a team wins.
+//! `dark-forest-server` runs one Dark Forest game server without a window, until stopped.
 //!
-//! Interface: `--port <port>`, `--map <house-demo|lunar-surface>`, `--server-settings <path>`,
+//! Example: `dark-forest-server --port 47840 --level-result-file /tmp/result.json`
+//!
+//! Interface: `--port <port>`, `--map <path to map.json>`, `--level-result-file <path>`,
 //! `--game-password-file <path>`.
 //!
-//! Example: `.build/x86_64-unknown-linux-musl/release/wormholes_server --port 47810 --map lunar-surface`
-//!
-//! Must know:
-//! - It shares `net.rs` and the modules it needs (`map.rs`, `settings.rs`, `thrown_wormholes.rs`,
-//!   `shot_noise.rs`, `terrain.rs`, `geometry.rs`, `app_bundle.rs`) with the game, so both speak
-//!   the same protocol.
-//! - It exits on the first error, so a supervisor such as systemd can restart it.
+//! Must know: it shares `net.rs`, `server.rs`, `map.rs` and `settings.rs` with the game, so both
+//! speak the same protocol.
 
 #[allow(dead_code)]
-#[path = "../app_bundle.rs"]
-mod app_bundle;
-#[allow(dead_code)]
-#[path = "../geometry.rs"]
-mod geometry;
-#[cfg(target_os = "macos")]
-#[allow(dead_code)]
-#[path = "../key_bindings.rs"]
-mod key_bindings;
 #[path = "../map.rs"]
 mod map;
 #[allow(dead_code)]
 #[path = "../net.rs"]
 mod net;
+#[path = "../server.rs"]
+mod server;
 #[allow(dead_code)]
 #[path = "../settings.rs"]
 mod settings;
@@ -35,73 +23,46 @@ mod settings;
 #[path = "../shot_noise.rs"]
 mod shot_noise;
 #[allow(dead_code)]
-#[path = "../terrain.rs"]
-mod terrain;
-#[allow(dead_code)]
 #[path = "../thrown_wormholes.rs"]
 mod thrown_wormholes;
 
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
 
 use clap::Parser;
-
-use map::{Map, MapName, get_console_team};
-use settings::ServerSettings;
-
-const NEW_GAME_AFTER_WIN_S: u64 = 10;
 
 /// `Arguments` is the command line.
 #[derive(Parser)]
 #[command(
-    about = "Run one game server of the Rust wormholes demo, without a window, until stopped.",
-    after_help = "Example: wormholes_server --port 47810 --map lunar-surface"
+    about = "Run one Dark Forest game server, without a window, until stopped.",
+    after_help = "Example: dark-forest-server --port 47840 --level-result-file /tmp/result.json"
 )]
 struct Arguments {
-    /// UDP port the server listens on.
+    /// UDP port to serve on.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
-    /// Which built-in map the game is on; players must join with the same map.
-    #[arg(long, value_enum)]
-    map: MapName,
-    /// A copy of server_settings.yaml with the numbers that shape play (default: the built-in one).
+    /// The map file (default: common/maps/dark_forest/map.json).
     #[arg(long)]
-    server_settings: Option<PathBuf>,
-    /// A file holding the game's password; only players who prove they know it may join (default:
-    /// no password, so anyone may).
+    map: Option<PathBuf>,
+    /// Write {"winner": "blue"|"red"} here when a team wins, and start no new game.
+    #[arg(long)]
+    level_result_file: Option<PathBuf>,
+    /// A file holding the game password players must know.
     #[arg(long)]
     game_password_file: Option<PathBuf>,
 }
 
-/// `main` serves one game until the process is stopped, failing at once on a bad map, settings
-/// file or port.
-///
-/// Example: `main()`
+/// `main` serves until killed.
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments: Arguments = Arguments::parse();
-    let map_name: &str = arguments.map.get_folder_name();
-    let console_teams: Vec<u32> = Map::Builtin(map_name)?
-        .materials
-        .iter()
-        .filter_map(get_console_team)
-        .collect();
-    let game_password: Vec<u8> = net::read_game_password(arguments.game_password_file.as_deref())?;
-    let settings: ServerSettings = match &arguments.server_settings {
-        Some(path) => ServerSettings::Load(path)?,
-        None => ServerSettings::Builtin(),
-    };
-    let socket: std::net::UdpSocket = net::bind_server(arguments.port)?;
-    println!("Game server for {map_name} on UDP port {}.", arguments.port);
-    net::serve(
-        socket,
+    server::run(
+        &server::ServerOptions {
+            port: arguments.port,
+            map_path: arguments.map.unwrap_or_else(map::default_map_path),
+            level_result_file: arguments.level_result_file,
+            game_password: net::read_game_password(arguments.game_password_file.as_deref())?,
+        },
         &AtomicBool::new(false),
-        map_name.to_string(),
-        settings,
-        console_teams,
-        &AtomicBool::new(false),
-        Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
-        game_password,
     )
 }

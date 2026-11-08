@@ -50,7 +50,7 @@ use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-pub const DEFAULT_PORT: u16 = 47_800;
+pub const DEFAULT_PORT: u16 = 47_840;
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_PLAYER_COUNT: usize = 8;
 pub const MAX_CONSOLE_COUNT: usize = 32;
@@ -62,7 +62,7 @@ const SPECKLE_FIRST_BIT: u8 = 3;
 const ANY_TEAM: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
-const DISCOVERY_PORT: u16 = 47_801;
+const DISCOVERY_PORT: u16 = 47_841;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
 const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
@@ -1008,7 +1008,7 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 /// `game_password` (empty for anyone), and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, None, Vec::new())?;`
 #[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
@@ -1018,6 +1018,7 @@ pub fn serve(
     console_teams: Vec<u32>,
     should_start_new_game: &AtomicBool,
     new_game_after_win: Option<Duration>,
+    level_result_file: Option<&Path>,
     game_password: Vec<u8>,
 ) -> Result<()> {
     assert!(
@@ -1063,6 +1064,9 @@ pub fn serve(
             is_alive
         });
         server.update_consoles();
+        if let (Some(winner), None, Some(path)) = (server.game.winner, won_at, level_result_file) {
+            write_level_result(path, winner)?;
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
             && time.elapsed() >= delay
@@ -1096,6 +1100,25 @@ pub fn serve(
             last_beacon = Some(Instant::now());
         }
     }
+    Ok(())
+}
+
+/// `write_level_result` writes `{"winner": "<team>"}` to a level result file at once, by writing
+/// `<path>.partial` and renaming it, so a match server never reads half a file.
+///
+/// Example: `write_level_result(Path::new("result.json"), 1)?;`
+pub fn write_level_result(path: &Path, winner: u32) -> Result<()> {
+    let partial: std::path::PathBuf = path.with_extension("partial");
+    std::fs::write(
+        &partial,
+        format!("{{\"winner\": \"{}\"}}\n", TEAM_NAMES[winner as usize]),
+    )?;
+    std::fs::rename(&partial, path)?;
+    println!(
+        "wrote the level result ({} won) to {}",
+        TEAM_NAMES[winner as usize],
+        path.display()
+    );
     Ok(())
 }
 

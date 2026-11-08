@@ -50,54 +50,34 @@ pub const HDRI: PolyHavenHdri = PolyHavenHdri {
     resolution: "4k",
 };
 
-/// `SURFACE_TEXTURES` are the tiling materials of the arena's walls, floors and containers.
-pub const SURFACE_TEXTURES: [PolyHavenTexture; 8] = [
+/// `SURFACE_TEXTURES` are the forest's tiling materials, in the order of `Surface::ALL`:
+/// ground, bark, planks, leaves, rock (all CC0, Poly Haven, 1k so the whole set is about 10 MB).
+pub const SURFACE_TEXTURES: [PolyHavenTexture; 5] = [
     PolyHavenTexture {
-        id: "asphalt_02",
-        resolution: "2k",
+        id: "forest_ground_04",
+        resolution: "1k",
     },
     PolyHavenTexture {
-        id: "concrete_floor_worn_001",
-        resolution: "2k",
+        id: "bark_brown_02",
+        resolution: "1k",
     },
     PolyHavenTexture {
-        id: "brick_wall_02",
-        resolution: "2k",
+        id: "old_planks_02",
+        resolution: "1k",
     },
     PolyHavenTexture {
-        id: "concrete_wall_008",
-        resolution: "2k",
+        id: "forest_leaves_02",
+        resolution: "1k",
     },
     PolyHavenTexture {
-        id: "corrugated_iron_02",
-        resolution: "2k",
-    },
-    PolyHavenTexture {
-        id: "metal_plate",
-        resolution: "2k",
-    },
-    PolyHavenTexture {
-        id: "rusty_metal_02",
-        resolution: "2k",
-    },
-    PolyHavenTexture {
-        id: "concrete_pavement_02",
-        resolution: "2k",
+        id: "mossy_rock",
+        resolution: "1k",
     },
 ];
 
 /// `LUNAR_SURFACE_TEXTURES` are the regolith sets of `../hyperbolic_wormholes_rust/`'s Lunar
 /// Surface ground (scans of about 3.1 m and 3.2 m of ground); the FPS demo doesn't load them.
-pub const LUNAR_SURFACE_TEXTURES: [PolyHavenTexture; 2] = [
-    PolyHavenTexture {
-        id: "moon_01",
-        resolution: "2k",
-    },
-    PolyHavenTexture {
-        id: "moon_meteor_02",
-        resolution: "2k",
-    },
-];
+pub const LUNAR_SURFACE_TEXTURES: [PolyHavenTexture; 0] = [];
 
 /// `RIFLE_MODEL` is the first-person weapon.
 pub const RIFLE_MODEL: PolyHavenModel = PolyHavenModel {

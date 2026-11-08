@@ -74,22 +74,25 @@ fn surface_texture(surface: Surface) -> &'static PolyHavenTexture {
     &asset_manifest::SURFACE_TEXTURES[index]
 }
 
-/// `create_surface_materials` decodes the arena's texture sets and makes their materials.
+/// `create_surface_materials` decodes the forest's texture sets and makes the materials of
+/// every surface: the textured ones as they are, rope and paints as tinted bark and planks, and
+/// consoles as glowing, untextured.
 fn create_surface_materials(
     renderer: &mut dyn Renderer,
-    assets_dir: &Path,
+    textures_dir: &Path,
+    emissive_scale: f32,
 ) -> HashMap<Surface, MaterialHandle> {
     let maps: [(&str, TextureFormat); 3] = [
         ("diff", TextureFormat::Rgba8Srgb),
         ("nor_gl", TextureFormat::Rg8Linear),
         ("arm", TextureFormat::Rgba8Linear),
     ];
-    let requests: Vec<TextureRequest> = Surface::ALL
+    let requests: Vec<TextureRequest> = Surface::ALL[..Surface::TEXTURED_COUNT]
         .iter()
         .flat_map(|surface: &Surface| {
             maps.iter().map(move |(map_name, format)| TextureRequest {
                 source: TextureSource::File(asset_manifest::texture_map_path(
-                    assets_dir,
+                    textures_dir,
                     surface_texture(*surface),
                     map_name,
                 )),
@@ -102,18 +105,33 @@ fn create_surface_materials(
         .iter()
         .map(|texture| renderer.create_texture(texture))
         .collect();
+    let textured = |index: usize, base_color_factor: Vec4| MaterialData {
+        base_color_texture: Some(handles[index * 3]),
+        normal_texture: Some(handles[index * 3 + 1]),
+        occlusion_roughness_metal_texture: Some(handles[index * 3 + 2]),
+        has_occlusion_in_red: true,
+        base_color_factor,
+        ..MaterialData::default()
+    };
+    let glowing = |color: Vec3| MaterialData {
+        base_color_factor: (color * 0.2).extend(1.0),
+        emissive_factor: color * emissive_scale * 2.0,
+        roughness_factor: 0.4,
+        ..MaterialData::default()
+    };
     Surface::ALL
         .iter()
         .enumerate()
         .map(|(index, surface)| {
-            let material: MaterialHandle = renderer.create_material(&MaterialData {
-                base_color_texture: Some(handles[index * 3]),
-                normal_texture: Some(handles[index * 3 + 1]),
-                occlusion_roughness_metal_texture: Some(handles[index * 3 + 2]),
-                has_occlusion_in_red: true,
-                ..MaterialData::default()
-            });
-            (*surface, material)
+            let data: MaterialData = match surface {
+                Surface::Rope => textured(1, Vec4::new(1.9, 1.6, 1.1, 1.0)),
+                Surface::RedPaint => textured(2, Vec4::new(1.5, 0.35, 0.25, 1.0)),
+                Surface::BluePaint => textured(2, Vec4::new(0.35, 0.55, 1.6, 1.0)),
+                Surface::RedConsole => glowing(Vec3::new(1.0, 0.18, 0.1)),
+                Surface::BlueConsole => glowing(Vec3::new(0.15, 0.4, 1.0)),
+                _ => textured(index, Vec4::ONE),
+            };
+            (*surface, renderer.create_material(&data))
         })
         .collect()
 }
@@ -385,6 +403,7 @@ impl Scene {
     pub fn load(
         renderer: &mut dyn Renderer,
         assets_dir: &Path,
+        textures_dir: &Path,
         arena: &Arena,
         options: &SceneOptions,
     ) -> Scene {
@@ -400,7 +419,7 @@ impl Scene {
         );
 
         let surface_materials: HashMap<Surface, MaterialHandle> =
-            create_surface_materials(renderer, assets_dir);
+            create_surface_materials(renderer, textures_dir, emissive_scale);
         let mut static_draws: Vec<DrawItem> = Vec::new();
         for (surface, mesh_data) in arena.surface_meshes() {
             let mesh: MeshHandle = renderer.create_mesh(&mesh_data);
@@ -415,55 +434,18 @@ impl Scene {
                 does_cast_shadow: true,
             });
         }
-        let mut solids: Vec<Aabb> = arena.boxes.iter().map(|world_box| world_box.aabb).collect();
+        let solids: Vec<Aabb> = arena.boxes.iter().map(|world_box| world_box.aabb).collect();
         let occluders: Vec<OccluderBox> = arena
-            .boxes
+            .occluders()
             .iter()
-            .skip(1)
-            .map(|world_box| OccluderBox {
-                min_m: world_box.aabb.min_m,
-                max_m: world_box.aabb.max_m,
+            .map(|aabb| OccluderBox {
+                min_m: aabb.min_m,
+                max_m: aabb.max_m,
             })
             .collect();
         renderer.set_occluders(&occluders, arena.bounds_min_m, arena.bounds_max_m);
         println!("arena ready in {:.1}s", start.elapsed().as_secs_f32());
 
-        let mut props: HashMap<&str, Model> = HashMap::new();
-        for prop in &asset_manifest::PROP_MODELS {
-            let filter: Box<dyn Fn(&str) -> bool> = prop_mesh_filter(prop.id);
-            let model: Model = load_model(
-                renderer,
-                &asset_manifest::model_gltf_path(assets_dir, prop),
-                &ModelOptions {
-                    should_include_mesh_node: filter.as_ref(),
-                    max_texture_size_px: PROP_TEXTURE_SIZE_PX,
-                    emissive_scale: emissive_scale * 3.0,
-                    ..ModelOptions::default()
-                },
-            );
-            props.insert(prop.id, model);
-        }
-        for placement in &arena.props {
-            let model: &Model = &props[placement.model_id];
-            let world: Mat4 = Mat4::from_rotation_translation(
-                Quat::from_rotation_y(placement.yaw_rad),
-                placement.position_m,
-            );
-            static_draws.extend(draw_items_for(model, world, true));
-            if placement.is_solid {
-                solids.push(world_aabb(model, world));
-            }
-        }
-        let fluorescent: &Model = &props["mounted_fluorescent_lights"];
-        for light in &arena.lights {
-            if light.color_rgb.z > 0.6 {
-                let top_m: f32 = fluorescent.bounds_max_m.y;
-                let world: Mat4 =
-                    Mat4::from_translation(light.position_m + Vec3::Y * (0.6 - top_m))
-                        * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2);
-                static_draws.extend(draw_items_for(fluorescent, world, false));
-            }
-        }
         println!("props ready in {:.1}s", start.elapsed().as_secs_f32());
 
         let robot_path =

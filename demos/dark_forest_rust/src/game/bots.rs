@@ -58,7 +58,7 @@ pub struct AnimationState {
 
 impl AnimationState {
     /// `play` switches to a clip, cross-fading from the current one.
-    fn play(&mut self, clip: BotClip) {
+    pub fn play(&mut self, clip: BotClip) {
         if clip == self.clip {
             return;
         }
@@ -70,7 +70,7 @@ impl AnimationState {
     }
 
     /// `advance` moves time forward.
-    fn advance(&mut self, dt_s: f32, speed_frac: f32) {
+    pub fn advance(&mut self, dt_s: f32, speed_frac: f32) {
         self.time_s += dt_s * speed_frac;
         self.previous_time_s += dt_s * speed_frac;
         self.blend_frac = (self.blend_frac + dt_s / ANIMATION_BLEND_S).min(1.0);

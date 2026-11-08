@@ -1,5 +1,5 @@
 [package]
-name = "warped-fps-demo"
+name = "warped-dark-forest"
 version = "0.1.0"
 edition = "2024"
 
@@ -16,11 +16,19 @@ objc2-foundation = "0.3"
 objc2-metal = "0.3"
 objc2-quartz-core = "0.3"
 ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+hmac = "0.13.0"
+getrandom = "0.4.3"
+sha2 = "0.11.1"
 
 [[bin]]
-name = "warped-fps-demo"
+name = "dark-forest"
 path = "src/main.rs"
+
+[[bin]]
+name = "dark-forest-server"
+path = "src/bin/dark_forest_server.rs"
 
 [[bin]]
 name = "download-assets"
