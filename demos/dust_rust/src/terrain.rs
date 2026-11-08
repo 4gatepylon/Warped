@@ -14,7 +14,7 @@ use glam::DVec4;
 
 use crate::map::{MapMound, MapTerrain};
 
-const OCTAVE_COUNT: u32 = 5;
+const OCTAVE_COUNT: u32 = 3;
 const RIM_NOISE_M: f64 = 60.0;
 const RIM_NOISE_FRAC: f64 = 0.5;
 const OUTER_FLANK_PER_WALL: f64 = 3.0;

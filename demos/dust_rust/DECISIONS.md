@@ -37,3 +37,15 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
     longer shows where a long shot lands across the wind: players aim upwind. **User?** strength.
 16. **Storm sky in the shader**, only where a ray escapes (no texture, no geometry): haze bands, a brown storm
     wall and mesa silhouettes. Alternating runs with it off and on differ by 0–1.3 ms a frame. **User?** look.
+17. **Speed by cutting quality** (the user: "get something working as soon as possible and performantly"): the
+    Metal renderer starts at render scale 0.6 (`METAL_RENDER_SCALE`, also the `--bench-views` default; the window
+    still auto-scales), terrain relief uses 3 noise octaves, not 5 (`OCTAVE_COUNT` in `terrain.rs` and
+    `TERRAIN_OCTAVES` in the shader must match, or server hits and pictures part), and rays end 2 fog depths after
+    a wormhole crossing, not 3. 2560x1440 medians, 20 frames: overview 22.8 → 11.6 ms (p99 23.2 → 13.8), wormhole
+    28.9 → 17.8 (29.4 → 20.0), wormhole_exit 30.0 → 17.6 (30.5 → 20.2), laser_into_wormhole 39.1 → 19.3
+    (39.8 → 20.0); the other 20 views are 8.5–15.8 ms. Still over 16.7 ms: the two wormhole views and the laser
+    into the wormhole. This VM's runs vary by up to ±20%.
+    - **For a future agent:** the costs measured are terrain height (noise octaves, in the primary march, the
+      shadow march and normals) and per-pixel shading; wind chords, the sand, the storm sky and fog length cost
+      little. The next step would be baking the whole terrain height into the existing 0.25 m `MoundGrid` buffer
+      (CPU and GPU read it the same way), then lower `--render-scale` only for the wormhole views.
