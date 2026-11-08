@@ -152,7 +152,7 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
   From three looks, the user picked C, photo-like ("get milky way photo like merged"): drawn in code, arching across
   the sky from base to base (a placement chosen for the user), its brightness in `player_settings.yaml` (D102).
-  #PR_NUMBER.
+  #317.
   - **Where the work is** (for any agent picking it up): merged from branch `claude/milky-way` (pushed to `origin`),
     worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, built by Claude
     Code and finished by Devin; final pictures in
