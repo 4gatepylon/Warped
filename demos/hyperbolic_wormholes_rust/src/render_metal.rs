@@ -767,12 +767,16 @@ impl MetalRenderer {
             .render_texture
             .as_ref()
             .expect("encode_frame made the render texture");
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
-        unsafe { encoder.setTexture_atIndex(Some(render_texture), 0) };
         self.voxel_gpu
             .as_mut()
             .expect("the voxel pipeline was just made")
-            .encode(&self.device, &encoder, frame, self.sample_buffers.as_ref())?;
+            .encode(
+                &self.device,
+                &encoder,
+                frame,
+                self.sample_buffers.as_ref(),
+                render_texture,
+            )?;
         encoder.endEncoding();
         let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
         self.finish_encoding(command_buffer, texture, render_px, output_px != render_px)

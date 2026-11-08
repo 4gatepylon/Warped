@@ -10,6 +10,7 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 glam = "0.34"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 objc2 = "0.6"
 objc2-core-foundation = "0.3"
 objc2-foundation = "0.3"
