@@ -98,12 +98,6 @@ is in [`AGENTS.md`](AGENTS.md).
   game history and which team won what and what the wavefronts are, who has ownership, defensive ownership, offensive
   ownership, etc."
   Merged into `staging/user-4gatepylon` with #403, 2026-11-08.
-- [?] **W-125 Photo map page.** "I also really liked the 3 dimensional-looking visualization for the snow map, if
-  you can for all maps (including lunar base) make the map as shown when you click tab and then e to get to map look
-  not like some random 1950s drawing but instead a real like photo from the top that would be very nice (it could
-  have some shadows, etc...) of course, because it doesn't change (it's just the map) it should be cheap to make it
-  extremely beautiful". Here: the hyperbolic demo's maps (Lunar Surface and the others); the other levels do theirs
-  in W-119 (City Sphere demo) to W-122 (Dark Forest demo). #409.
 - [?] **W-118 Join any server.** "The client should be able to connect to any server": a player types a server's
   IP in the app ("I'm not entirely sure if it's possible to put the IP in the IP for the client"), so the
   downloaded app can join a local server now and the GCP server later. #405.
@@ -256,6 +250,12 @@ are here too, since the user hadn't confirmed them.
 
 Confirmed by the user after testing.
 
+- [x] **W-125 Photo map page.** "I also really liked the 3 dimensional-looking visualization for the snow map, if
+  you can for all maps (including lunar base) make the map as shown when you click tab and then e to get to map look
+  not like some random 1950s drawing but instead a real like photo from the top that would be very nice (it could
+  have some shadows, etc...) of course, because it doesn't change (it's just the map) it should be cheap to make it
+  extremely beautiful". Here: the hyperbolic demo's maps (Lunar Surface and the others); the other levels do theirs
+  in W-119 (City Sphere demo) to W-122 (Dark Forest demo). #410, #409. Confirmed by the user, 2026-11-08: "I like how you changed the lunar map, looks godo."
 - [x] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
   get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
   second touches the ground; shooting a ball before then crashes the game. The user, 2026-11-08: "you should be
