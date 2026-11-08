@@ -12,7 +12,24 @@ serves the download page (W-99).
 - `cp .env.example .env` and fill it in: the project's ID, region and zone, and the monthly budget. `.env` is
   git-ignored, and so is `.build/`, where Terraform keeps its working files (`TF_DATA_DIR`).
 
-## Make it
+## Deploy in one click
+
+```bash
+make deploy-everything
+make check-game-servers
+```
+
+- `deploy-everything` goes from an empty project to a download page: it writes a random `GAME_PASSWORD` into `.env`
+  if there is none, prepares the project, applies the Terraform, uploads the server bundle (built on this Mac for
+  Linux, so the VM never clones the repository) and restarts the VM, then builds the app with the online games at the
+  VM's IP and uploads it with the [download page](site/index.html) and its [install script](site/install.sh). It
+  prints the page's address; share it, and the password, with the players.
+- Each step is also its own target: `deploy-game-servers` after changing the server, `deploy-download-page` after
+  changing the app or the page.
+- `check-game-servers`, a minute after a deploy, joins every game in `games.txt` with a bot from this Mac.
+- Downloads are uploaded with `Cache-Control: no-store`, so a new deploy shows at once.
+
+## Make it step by step
 
 ```bash
 make prepare-gcp-project
