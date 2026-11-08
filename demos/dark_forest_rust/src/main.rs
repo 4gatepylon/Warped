@@ -236,6 +236,13 @@ struct Args {
     /// Downscale the --photo to this width (keeping its aspect), e.g. to supersample.
     #[arg(long)]
     photo_width_px: Option<u32>,
+    /// Save every frame, without the HUD, as frame_NNNN.png in this folder (which must exist), at
+    /// 30 simulated frames a second, for --video-seconds, then quit.
+    #[arg(long)]
+    video_frames: Option<PathBuf>,
+    /// How many simulated seconds --video-frames records.
+    #[arg(long, default_value_t = 8.0)]
+    video_seconds: f32,
     /// Hold the camera here: feet x,y,z in meters, yaw and pitch in radians.
     #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
     camera_pose: Option<Vec<f32>>,
@@ -268,8 +275,12 @@ struct Args {
     map_picture: Option<PathBuf>,
 }
 
-/// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle.
+/// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle, in simulated
+/// seconds.
 const PHOTO_SETTLE_S: f32 = 3.0;
+/// `RECORDING_DT_S` is the fixed step of --photo and --video-frames, so the same command gives the
+/// same picture.
+const RECORDING_DT_S: f32 = 1.0 / 30.0;
 
 /// `MAP_PICTURE_PATH` is where `make map-picture` saves the map page's picture, from this demo's
 /// folder.
@@ -793,7 +804,8 @@ fn main() {
         || args.play_route
         || args.bench_views.is_some()
         || args.camera_view.is_some()
-        || args.photo.is_some());
+        || args.photo.is_some()
+        || args.video_frames.is_some());
     if is_title_shown {
         match run_title_screen(
             &mut platform,
@@ -1023,7 +1035,12 @@ fn main() {
         let now: Instant = Instant::now();
         let frame_s: f32 = (now - last_frame).as_secs_f32();
         last_frame = now;
-        let dt_s: f32 = frame_s.min(MAX_FRAME_S);
+        let is_recording: bool = args.photo.is_some() || args.video_frames.is_some();
+        let dt_s: f32 = if is_recording {
+            RECORDING_DT_S
+        } else {
+            frame_s.min(MAX_FRAME_S)
+        };
         let keys = event_pump.keyboard_state();
         let mouse_state = event_pump.mouse_state();
         let axis = |positive: Scancode, negative: Scancode| -> f32 {
@@ -1153,7 +1170,7 @@ fn main() {
             frame.camera.far_m = f32::MAX;
             renderer.set_is_capturing(true);
         }
-        if args.photo.is_some() {
+        if is_recording {
             frame.viewmodel_draws.clear();
             frame.viewmodel_particles.clear();
         }
@@ -1222,8 +1239,18 @@ fn main() {
             timing.cpu_render_ms as f32,
         ];
         let elapsed_s: f32 = start.elapsed().as_secs_f32();
+        if let Some(directory) = &args.video_frames {
+            if session.time_s > args.video_seconds {
+                break 'running;
+            }
+            let frame_path: PathBuf = directory.join(format!(
+                "frame_{:04}.png",
+                (session.time_s / RECORDING_DT_S).round() as u32
+            ));
+            save_photo(&mut renderer, &frame_path, args.photo_width_px);
+        }
         if let Some(path) = &args.photo
-            && elapsed_s > PHOTO_SETTLE_S
+            && session.time_s > PHOTO_SETTLE_S
         {
             if args.map_picture.is_some() {
                 save_map_picture(&mut renderer, path, &session.arena);
