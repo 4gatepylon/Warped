@@ -31,7 +31,13 @@ make run-demo RENDERER=cpu
   (`common/maps/README.md`), so things far above and below its middle line look squeezed from side to side: that is
   the hyperbolic plane. The third page, SCORES, shows in a game on a server how many players there are and each
   one's team, kills and deaths in this game, sorted by team and then kills, with your line highlighted and each
-  team's totals.
+  team's totals. The MAP page also rings everything within the minimap's reach of you (60 m by default); the rest is
+  darker and blurred. The ring is a hyperbolic circle, so on the map it comes out lopsided.
+- The minimap, in the top right, is a Poincaré disk of the ground within 60 m of you, turned so you face up (the
+  white arrow in the middle): faint lines every 10 m and paths away from you bend into arcs, as straight lines do
+  in that picture of the hyperbolic plane. Other players show as dots and laser shots as lines, in their team's
+  colours. `minimap` in `player_settings.yaml` hides it, moves it to another corner (`top_left`, `top_right`,
+  `bottom_left` or `bottom_right`), or changes its size and reach.
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes

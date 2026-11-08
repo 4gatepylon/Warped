@@ -10,14 +10,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
-  radius (the rest is slightly darker and blurred), and shows where they are on the map. Claimed by Claude Code
-  (session `wizardly-hamilton-23a121`), branch `claude/minimap`, 2026-11-07, with W-48.
-- [~] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
-  least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
-  doesn't show the entire map. It is a circle that shows just where the player is and what is around them (the
-  menu's map page, W-49, shows the whole map). Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/minimap`, 2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
@@ -180,3 +172,9 @@ is in [`AGENTS.md`](AGENTS.md).
   should warp so it looks as if they are being stretched ever further. #159.
 - [x] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
   and team. #164.
+- [x] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
+  least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
+  doesn't show the entire map. It is a circle that shows just where the player is and what is around them (the
+  menu's map page, W-49, shows the whole map). #PR.
+- [x] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
+  radius (the rest is slightly darker and blurred), and shows where they are on the map. #PR.
