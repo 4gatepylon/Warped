@@ -8,7 +8,8 @@ Warped needs a Mac with Apple silicon (M1 or later) and macOS 13 or later.
    down and click Open Anyway next to Warped. You only do this once.
    (The install command on the download page skips this step.)
 3. Pick a game on the title screen with Up and Down, and start it with Return.
-   - Play online: asks once for the game's password; ask whoever runs the server.
+   - Play online, or Join a server by its address (its IP and port, such as 34.1.2.3:47810): asks once
+     for the game's password; ask whoever runs the server for both.
    - Host or join a game on this Wi-Fi: allow Local Network access when macOS asks.
 
 If the game stops, a pop-up says why, and its log is in ~/Library/Logs/Warped/.

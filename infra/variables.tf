@@ -3,10 +3,11 @@
 #
 # Interface:
 #     project_id, region, zone, monthly_budget_usd, game_password (see `.env.example`);
-#     games_file, the list of games (`games.txt` unless the Makefile's GAMES_FILE says otherwise).
+#     has_game_servers, whether to run game servers or only the download page; games_file, the
+#     list of games (`games.txt` unless the Makefile's GAMES_FILE says otherwise).
 #
 # Example:
-#     TF_VAR_project_id=warped-zq607d terraform plan
+#     TF_VAR_project_id=my-project terraform plan
 
 variable "project_id" {
   type = string
@@ -22,6 +23,10 @@ variable "zone" {
 
 variable "monthly_budget_usd" {
   type = number
+}
+
+variable "has_game_servers" {
+  type = bool
 }
 
 variable "games_file" {
