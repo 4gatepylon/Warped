@@ -54,7 +54,7 @@ pub const DEFAULT_PORT: u16 = 47_800;
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_PLAYER_COUNT: usize = 8;
 pub const MAX_CONSOLE_COUNT: usize = 32;
-pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
+pub use crate::map::TEAM_NAMES;
 const NO_CONSOLE: u8 = u8::MAX;
 const RIFLE_BIT: u8 = 1;
 const TEAM_BIT: u8 = 2;

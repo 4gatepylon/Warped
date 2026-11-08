@@ -18,7 +18,6 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
-mod app_bundle;
 mod avatar_animation;
 mod avatar_model;
 mod bench;
@@ -28,14 +27,10 @@ mod cli;
 mod credits;
 mod dust;
 mod exit_prompt;
-mod fps_demo_assets;
-mod geometry;
 mod hud_bars;
 mod key_bindings;
-mod map;
 mod map_layout;
 mod menu;
-mod mesh;
 mod minimap;
 mod multiplayer;
 mod net;
@@ -49,10 +44,8 @@ mod run_folder;
 mod server_process;
 mod session;
 mod settings;
-mod shapes;
 mod shot_noise;
 mod spaceships;
-mod terrain;
 mod third_person;
 mod thrown_wormholes;
 mod title;
@@ -62,6 +55,8 @@ mod voxel_clearance;
 mod voxel_textures;
 mod voxel_world;
 mod zone_walls;
+
+use warped_core::{app_bundle, fps_demo_assets, geometry, map, mesh, shapes, terrain};
 
 use std::error::Error;
 use std::process::ExitCode;

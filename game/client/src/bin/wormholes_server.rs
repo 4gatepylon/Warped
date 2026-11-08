@@ -13,18 +13,10 @@
 //!   the same protocol.
 //! - It exits on the first error, so a supervisor such as systemd can restart it.
 
-#[allow(dead_code)]
-#[path = "../app_bundle.rs"]
-mod app_bundle;
-#[allow(dead_code)]
-#[path = "../geometry.rs"]
-mod geometry;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)]
 #[path = "../key_bindings.rs"]
 mod key_bindings;
-#[path = "../map.rs"]
-mod map;
 #[allow(dead_code)]
 #[path = "../net.rs"]
 mod net;
@@ -35,11 +27,10 @@ mod settings;
 #[path = "../shot_noise.rs"]
 mod shot_noise;
 #[allow(dead_code)]
-#[path = "../terrain.rs"]
-mod terrain;
-#[allow(dead_code)]
 #[path = "../thrown_wormholes.rs"]
 mod thrown_wormholes;
+
+use warped_core::{geometry, map, terrain};
 
 use std::error::Error;
 use std::path::PathBuf;

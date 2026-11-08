@@ -996,6 +996,15 @@ dependencies = [
 [[package]]
 name = "warped-core"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "glam",
+ "gltf",
+ "image",
+ "legacy-oracle",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "warped-server"

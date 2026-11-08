@@ -26,8 +26,10 @@ use crate::app_bundle::MODELS;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, invert_lorentz, make_boost, make_fermi_point,
 };
-use crate::net::TEAM_NAMES;
 use crate::terrain::get_fermi_coordinates;
+
+/// `TEAM_NAMES` is the teams' names, by team index: the network sends the index.
+pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
