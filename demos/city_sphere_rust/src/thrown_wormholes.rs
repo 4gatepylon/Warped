@@ -349,6 +349,23 @@ impl ThrownWormholes {
         r: f64,
         can_place: impl Fn(&MouthPlace) -> bool,
     ) -> Option<String> {
+        self.update_placing(
+            now_s,
+            |x, velocity| MouthPlace::Landed(x, velocity, hover_m, r),
+            can_place,
+        )
+    }
+
+    /// `update_placing` is `update` for any space: `place_landing` turns the landing (the floor
+    /// point and the throw's velocity there) into the mouth's place.
+    ///
+    /// Example: `let message = thrown.update_placing(now_s, |x, v| land_city_mouth(x, v, 1.6), |_| true);`
+    pub fn update_placing(
+        &mut self,
+        now_s: f64,
+        place_landing: impl Fn(DVec4, DVec4) -> MouthPlace,
+        can_place: impl Fn(&MouthPlace) -> bool,
+    ) -> Option<String> {
         let (flight, thrown_s) = self.flight.as_ref()?;
         let elapsed_s: f64 = now_s - thrown_s;
         if elapsed_s < flight.get_duration_s() {
@@ -358,7 +375,7 @@ impl ThrownWormholes {
         let color: WormholeColor = flight.color;
         let place: Option<MouthPlace> = flight
             .landing
-            .map(|(x, velocity)| MouthPlace::Landed(x, velocity, hover_m, r));
+            .map(|(x, velocity)| place_landing(x, velocity));
         (self.flight, self.placed.flying) = (None, None);
         let name: &str = color.get_name();
         match place {

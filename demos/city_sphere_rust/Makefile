@@ -8,7 +8,7 @@
 #     (SERVER_SETTINGS: a copy of server_settings.yaml with the numbers that shape play; the server sends them to every player.)
 #     (PLAYER_SETTINGS: a copy of player_settings.yaml with this player's own keys, mouse speed and view.)
 #     make run-bot SERVER=<address> PORT=<n> TEAM=<blue|red> BOT_S=<s> BOT_OBJECTIVE=<consoles|target>: a bot without a window joins the game (target: stands still in front of blue's spawn for ROUTE=rifle).
-#     make play-route WIDTH_PX=<n> HEIGHT_PX=<n> ROUTE=<legs|rifle>: play the scripted route in the window (legs: lift, reflected shots, red's console, blue wins; rifle: overheat, cool, eliminate a BOT_OBJECTIVE=target bot by head and by body hits) and print its numbers.
+#     make play-route WIDTH_PX=<n> HEIGHT_PX=<n> ROUTE=<legs|rifle|stairs|wormholes>: play the scripted route in the window (legs: lift, reflected shots, red's console, blue wins; stairs: up the stairs to blue's pylon; wormholes: throw, shoot and walk through both mouths; rifle: overheat, cool, eliminate a BOT_OBJECTIVE=target bot by head and by body hits) and print its numbers.
 #     (GAME_PASSWORD_FILE, with serve-game and join-game: a file holding the game's password; only players who know it may join.)
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.

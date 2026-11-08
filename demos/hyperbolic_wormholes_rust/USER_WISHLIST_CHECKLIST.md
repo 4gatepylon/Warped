@@ -40,8 +40,9 @@ is in [`AGENTS.md`](AGENTS.md).
     `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. Dust: #427
     (`claude/dust-parity`, open). Snow Planet: #421
     (branch `claude/snow-planet-parity`, open). City Sphere: #429
-    (HUD bars, hit effect, movement, jump, exit prompt, zoom, head bob, speckle, walking console bot); still missing
-    there: thrown wormholes, flashlight, third person, ground dust. Lunar Surface, Dust and Snow Planet: #434 (servers
+    (HUD bars, hit effect, movement, jump, exit prompt, zoom, head bob, speckle, walking console bot) and #435
+    (thrown wormholes, flashlight, third person, ground dust, Lunar's beam looks; `claude/city-sphere-parity-2`,
+    open). Lunar Surface, Dust and Snow Planet: #434 (servers
     take a console hold only in reach and aimed at, console bots walk to every pylon, `claude/console-reach-walking-bots`,
     open). Dark Forest: #431 (Lunar's HUD, hit effect and
     "YOU DIED", `claude/dark-forest-parity-hud`, open); still missing there: both guns, settings and the Tab pages,

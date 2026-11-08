@@ -37,24 +37,30 @@ use crate::city_world::{
     CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,
     get_up,
 };
+use crate::city_wormholes::{
+    MOUTH_RADIUS_M, can_place_mouth, carry_through, find_crossing, fly_city_throw, get_mouth_frame,
+    land_city_mouth,
+};
+use crate::dust::{DustBurst, MAX_DUST_BURST_COUNT};
 use crate::exit_prompt;
 use crate::hud_bars;
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
 use crate::render_city::{
-    BEACON_SLOT_COUNT, CityFrame, CityScene, build_scene, push_beam, push_core_halo, push_mesh,
+    BEACON_SLOT_COUNT, BEAM_WIDTH_M, CityFrame, CityScene, build_scene, push_beam, push_core_halo,
+    push_dust_particle, push_glow_ball, push_mesh, push_mouth,
 };
 use crate::render_metal::{self, FrameData};
 use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
 use crate::shot_noise;
-use crate::thrown_wormholes::PlayerWormholes;
+use crate::third_person;
+use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor};
 use crate::viewmodel;
 use crate::voxel_world::{MUZZLE_M, SPAWN_TURN_RAD};
 
 const MAP_NAME: &str = "city_sphere";
 const TAN_HALF_FOV: f32 = 0.62;
-const BEAM_WIDTH_M: f64 = 0.06;
 const AVATAR_HEIGHT_M: f64 = 1.8;
 const TEAM_COLORS: [[f32; 4]; 2] = [[0.3, 0.55, 1.0, 1.0], [1.0, 0.3, 0.25, 1.0]];
 const OVERHEAT_PITCH_RAD: f64 = 1.2;
@@ -120,6 +126,15 @@ const STAIRS_ARRIVE_M: f64 = 0.5;
 const STAIRS_LEAD_IN_M: f64 = 2.0;
 const STEER_WALK_ERROR_RAD: f64 = 0.35;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
+const DUST_LIFT_M: f64 = 0.02;
+const BODY_MIDDLE_M: f64 = 0.9;
+const WORMHOLE_ROUTE_WAIT_S: f64 = 1.2;
+const WORMHOLE_ROUTE_THROW_PITCH_RAD: f64 = -0.15;
+const WORMHOLE_ROUTE_WALK_S: f64 = 1.6;
+const MAX_WORMHOLE_LEGS: usize = 2;
+const WORMHOLE_EXIT_M: f64 = 0.01;
+const UNLINKED_MOUTH_BALL_M: f64 = 0.3;
+const FLYING_MOUTH_BALL_M: f64 = 0.15;
 const CONSOLE_REPLAN_S: f64 = 3.0;
 const SERVE_POLL_MS: u64 = 50;
 const STAIRS_ROUTE_END_WAIT_S: f64 = 2.0;
@@ -345,6 +360,10 @@ enum Step {
         s: f64,
     },
     SelectRifle,
+    Throw,
+    WalkForward {
+        s: f64,
+    },
     Overheat,
     CoolDown,
     FireAt {
@@ -359,6 +378,7 @@ struct BrainOutput {
     is_shooting: bool,
     console: Option<u8>,
     wants_rifle: bool,
+    wants_throw: bool,
 }
 
 /// `BrainSight` is what a brain knows besides the world and its player: the rifle's heat, the
@@ -426,6 +446,7 @@ impl Brain {
             is_shooting: false,
             console: None,
             wants_rifle: false,
+            wants_throw: false,
         };
         let Some(&step) = self.steps.get(self.index) else {
             return out;
@@ -467,6 +488,14 @@ impl Brain {
                 game.off_mask >> index & 1 == 1 || game.winner.is_some()
             }
             Step::Wait { s } => self.step_s >= s,
+            Step::Throw => {
+                out.wants_throw = true;
+                true
+            }
+            Step::WalkForward { s } => {
+                out.input.forward_frac = 1.0;
+                self.step_s >= s
+            }
             Step::SelectRifle => {
                 out.wants_rifle = true;
                 true
@@ -635,6 +664,32 @@ fn make_stairs_route(world: &CityWorld, team: u32) -> Result<Vec<Step>> {
     Ok(steps)
 }
 
+/// `make_wormhole_route` is `--route wormholes` for blue at its spawn: turn around and throw the
+/// purple mouth onto the open street behind, turn a quarter and throw the green one, turn back to
+/// the purple one, shoot through it (the shot comes out of the green one), then walk through it.
+fn make_wormhole_route() -> Vec<Step> {
+    let turn = |yaw_rad: f64, pitch_rad: f64| Step::Aim { yaw_rad, pitch_rad };
+    let wait = || Step::Wait {
+        s: WORMHOLE_ROUTE_WAIT_S,
+    };
+    vec![
+        wait(),
+        turn(std::f64::consts::PI, WORMHOLE_ROUTE_THROW_PITCH_RAD),
+        Step::Throw,
+        wait(),
+        turn(std::f64::consts::FRAC_PI_2, WORMHOLE_ROUTE_THROW_PITCH_RAD),
+        Step::Throw,
+        wait(),
+        turn(-std::f64::consts::FRAC_PI_2, 0.0),
+        Step::Shoot,
+        wait(),
+        Step::WalkForward {
+            s: WORMHOLE_ROUTE_WALK_S,
+        },
+        wait(),
+    ]
+}
+
 /// `make_console_route` is `--bot-objective consoles`'s plan for a bot of `team`: walk on foot to
 /// each of the other team's consoles in turn (`make_walk_to_console`) and hold `E` on it, aiming
 /// at it, until it is off. The server counts the hold only within reach and while aiming, so the
@@ -782,9 +837,9 @@ fn make_route(world: &CityWorld) -> Vec<Step> {
     steps
 }
 
-/// `Beam` is a shot's corners, its team, its brightness (0 to 1) for one frame and the share of its
-/// pixels that speckle (0 for none).
-type Beam = (Vec<DVec3>, u32, f64, f64);
+/// `Beam` is a shot's corners, its team, its brightness (0 to 1) for one frame, the share of its
+/// pixels that speckle (0 for none), and whether the rifle fired it (else the sniper).
+type Beam = (Vec<DVec3>, u32, f64, f64, bool);
 
 /// `RifleLog` records the rifle check on the route: shots from cold until the rifle overheated,
 /// the seconds it took to cool down, and for each player this player eliminated, the rifle's head
@@ -801,14 +856,15 @@ struct RifleLog {
 }
 
 /// `LiveShot` is a shot being drawn: its path, when it was fired, by which team, whether it is
-/// this window's own (drawn from the gun's muzzle), and the share of its beam's pixels that
-/// speckle.
+/// this window's own (drawn from the gun's muzzle), the share of its beam's pixels that speckle,
+/// and whether the rifle fired it.
 struct LiveShot {
     shot: Shot,
     start_s: f64,
     team: u32,
     is_own: bool,
     speckle_frac: f64,
+    is_rifle: bool,
 }
 
 /// `Motion` is what a remote player's robot is doing: where its feet were and how fast it goes.
@@ -889,7 +945,7 @@ fn make_frame(
     }
     let camera: DVec3 = eye.w_axis.truncate();
     let mut beam_vertices = Vec::new();
-    for (points, team, alpha, speckle_frac) in beams {
+    for (points, team, alpha, speckle_frac, is_rifle) in beams {
         let c: [f32; 3] = world.laser_colors[*team as usize % 2];
         for pair in points.windows(2) {
             push_beam(
@@ -898,8 +954,9 @@ fn make_frame(
                 pair[1],
                 camera,
                 BEAM_WIDTH_M,
-                [c[0], c[1], c[2], (*alpha * 1.4) as f32],
+                [c[0], c[1], c[2], *alpha as f32],
                 *speckle_frac as f32,
+                *is_rifle,
             );
         }
     }
@@ -921,6 +978,19 @@ fn make_frame(
         dynamic,
         beams: beam_vertices,
         beam_speckle: [0.0; 4],
+        flashlight: [[0.0; 4]; 3],
+    }
+}
+
+/// `get_clip` gives the robot animation for a body moving at `speed_m_per_s`: running, walking or
+/// standing.
+fn get_clip(speed_m_per_s: f64) -> AvatarClip {
+    if speed_m_per_s > RUN_M_PER_S {
+        AvatarClip::Run
+    } else if speed_m_per_s > WALK_M_PER_S {
+        AvatarClip::Walk
+    } else {
+        AvatarClip::Idle
     }
 }
 
@@ -989,6 +1059,10 @@ struct CitySession {
     energy_pulses: hud_bars::BarPulses,
     shot_noise: shot_noise::ShotNoise,
     beam_speckle_frac: f64,
+    is_flashlight_on: bool,
+    view_switch: third_person::ViewSwitch,
+    dust: Vec<DustBurst>,
+    thrown: ThrownWormholes,
     hit_effect_frac: f64,
     last_health_frac: f64,
     slowed_s: f64,
@@ -1044,6 +1118,7 @@ impl CitySession {
                 (false, _) => None,
                 (true, RouteKind::Rifle) => Some(Brain::New(make_rifle_route())),
                 (true, RouteKind::Stairs) => Some(Brain::New(make_stairs_route(&world, 0)?)),
+                (true, RouteKind::Wormholes) => Some(Brain::New(make_wormhole_route())),
                 (true, _) => Some(Brain::New(make_route(&world))),
             },
             world,
@@ -1097,6 +1172,10 @@ impl CitySession {
             energy_pulses: hud_bars::BarPulses::New(1.0),
             shot_noise: shot_noise::ShotNoise::FromClock(),
             beam_speckle_frac: 0.0,
+            is_flashlight_on: false,
+            view_switch: third_person::ViewSwitch::FirstPerson(),
+            dust: Vec::new(),
+            thrown: ThrownWormholes::New(),
             hit_effect_frac: 0.0,
             last_health_frac: 1.0,
             slowed_s: 0.0,
@@ -1140,7 +1219,7 @@ impl CitySession {
     fn find_console(&self, index: Option<u8>) -> Option<u8> {
         find_aimed_console(
             &self.world,
-            self.player.get_eye_frame(),
+            self.get_shot_eye(),
             self.get_team(),
             &self.client.game,
             self.settings.consoles.reach_m,
@@ -1171,17 +1250,30 @@ impl CitySession {
 
     /// `fire` shoots from the eye along the crosshair, telling the server about a hit.
     fn fire(&mut self) -> Result<()> {
-        let eye: DMat4 = self.player.get_eye_frame();
+        let eye: DMat4 = self.get_shot_eye();
         let team: u32 = self.get_team();
         let targets: Vec<Target> = self.get_targets(Some(team));
-        let shot: Shot = self.world.trace_shot(
+        let (mut legs, owners) = self.trace_through_wormholes(
             eye.w_axis.truncate(),
             -eye.z_axis.truncate(),
-            self.settings.glass.range_m,
-            self.settings.glass.max_bounce_count,
             &targets,
             self.client.id,
         );
+        let shot: Shot = legs.pop().expect("a shot has a leg");
+        for owner in owners {
+            if self
+                .client
+                .players
+                .iter()
+                .any(|p| p.id == owner && p.team != team)
+            {
+                let hits_to_destroy: u8 = match self.gun {
+                    Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
+                    Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
+                };
+                self.client.send_wormhole_hit(owner, hits_to_destroy)?;
+            }
+        }
         if let ShotHit::Player { id, is_head } = shot.hit {
             let hits_to_kill: u8 = match (self.gun, is_head) {
                 (Gun::Laser, _) => self.settings.sniper.hits_to_eliminate,
@@ -1208,13 +1300,18 @@ impl CitySession {
                 shot_noise::get_rifle_speckle_frac(&self.settings.rifle, self.rifle_heat_frac)
             }
         });
-        self.shots.push(LiveShot {
-            shot,
-            start_s: self.now_s(),
-            team,
-            is_own: true,
-            speckle_frac: self.beam_speckle_frac,
-        });
+        self.add_dust(&shot, eye.w_axis.truncate(), self.gun == Gun::Rifle);
+        let now_s: f64 = self.now_s();
+        for (k, leg) in legs.into_iter().chain([shot]).enumerate() {
+            self.shots.push(LiveShot {
+                shot: leg,
+                start_s: now_s,
+                team,
+                is_own: k == 0,
+                speckle_frac: self.beam_speckle_frac,
+                is_rifle: self.gun == Gun::Rifle,
+            });
+        }
         match self.gun {
             Gun::Laser => {
                 self.reload_left_s = self.settings.sniper.reload_s;
@@ -1246,7 +1343,17 @@ impl CitySession {
         for event in self.client.poll()? {
             match event {
                 net::NetEvent::Joined(id) => {
-                    self.player = self.world.make_player(self.get_team(), self.spawn_count);
+                    let others: Vec<DVec3> = self
+                        .client
+                        .players
+                        .iter()
+                        .filter(|p| Some(p.id) != self.client.id)
+                        .map(|p| CityPlayer::get_feet_up(p.frame, self.world.eye_height_m).0)
+                        .collect();
+                    let spawn: usize =
+                        self.world
+                            .find_clear_spawn(self.get_team(), &others, self.spawn_count);
+                    self.player = self.world.make_player(self.get_team(), spawn);
                     self.spawn_count += 1;
                     self.is_spawned = true;
                     if let Some(brain) = &mut self.brain {
@@ -1270,6 +1377,7 @@ impl CitySession {
                         self.is_spawned = false;
                         self.respawn_in_s = Some(self.settings.respawn.delay_s);
                         self.disabling = None;
+                        self.thrown.clear();
                     }
                     self.show_message(format!("player {shooter_id} hit player {victim_id}"));
                 }
@@ -1317,6 +1425,15 @@ impl CitySession {
                     speed_frac: self.get_speed_frac(),
                     ..out.input
                 };
+                if out.wants_throw && self.thrown.can_throw() {
+                    let flight = fly_city_throw(
+                        &self.world,
+                        self.player.get_eye_frame(),
+                        self.thrown.get_next_color(),
+                        &self.settings.wormholes,
+                    );
+                    self.thrown.throw(flight, now_s);
+                }
                 if out.wants_rifle {
                     self.gun = Gun::Rifle;
                 }
@@ -1337,9 +1454,12 @@ impl CitySession {
                 console = self.find_console(None);
             }
         }
+        self.update_wormholes(now_s);
         if self.is_spawned {
+            let before: DVec3 = self.player.feet;
             self.world
                 .move_player(&mut self.player, &input, &self.settings, dt_s);
+            self.pass_through_wormholes(before);
             self.update_gun_motion(&input, dt_s);
         }
         self.health_pulses.update(
@@ -1375,11 +1495,12 @@ impl CitySession {
                 self.gun == Gun::Rifle,
                 self.disabling,
                 self.beam_speckle_frac,
-                PlayerWormholes::default(),
+                self.thrown.placed,
             )?;
         }
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
         self.shots.retain(|shot| now_s - shot.start_s < life_s);
+        self.dust.retain(|burst| !burst.is_over(now_s));
         if self
             .message
             .as_ref()
@@ -1413,6 +1534,70 @@ impl CitySession {
         let pose_target: f64 = f64::from(u8::from(self.player.is_sprinting && is_moving));
         self.run_pose_frac +=
             (pose_target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
+    }
+
+    /// `place_camera` puts the camera for the eye frame `eye`, as Lunar Surface's
+    /// `third_person::place_camera` does: out along its boom by the view switch (`V`, eased, and
+    /// back to the eye while aiming), up `PIVOT_UP_M` toward the centre to a pivot over the head,
+    /// then back `BOOM_BACK_M` along the pivot's own back axis, each leg stopping `WALL_GAP_M` short
+    /// of the street, the glass or a box. It gives the camera's frame and whether this player's own
+    /// body shows from there (the pivot cleared `MIN_PIVOT_UP_M`) rather than the gun.
+    fn place_camera(&self, eye: DMat4) -> (DMat4, bool) {
+        let boom_frac: f64 = self.view_switch.get_boom_frac(self.aim_frac);
+        let along_m: f64 = boom_frac * (third_person::PIVOT_UP_M + third_person::BOOM_BACK_M);
+        if along_m <= 0.0 {
+            return (eye, false);
+        }
+        let clear_m = |from: DVec3, direction: DVec3, wanted_m: f64| -> f64 {
+            let shot: Shot = self.world.trace_shot(
+                from,
+                direction,
+                wanted_m + third_person::WALL_GAP_M,
+                0,
+                &[],
+                None,
+            );
+            let reach_m: f64 = (shot.points[1] - from).length();
+            (reach_m - third_person::WALL_GAP_M).clamp(0.0, wanted_m)
+        };
+        let at: DVec3 = eye.w_axis.truncate();
+        let up: DVec3 = self.player.get_up();
+        let up_m: f64 = clear_m(at, up, along_m.min(third_person::PIVOT_UP_M));
+        let pivot: DVec3 = at + up * up_m;
+        let back: DVec3 = eye.z_axis.truncate();
+        let back_m: f64 = clear_m(pivot, back, (along_m - third_person::PIVOT_UP_M).max(0.0));
+        let mut camera: DMat4 = eye;
+        camera.w_axis = (pivot + back * back_m).extend(1.0);
+        (camera, up_m >= third_person::MIN_PIVOT_UP_M)
+    }
+
+    /// `get_shot_eye` gives the frame shots and `E` leave from, as Lunar Surface's
+    /// `third_person::aim_at_crosshair` does: the eye, turned in third person toward the point the
+    /// camera's crosshair meets, so a shot goes where the crosshair shows.
+    fn get_shot_eye(&self) -> DMat4 {
+        let eye: DMat4 = self.player.get_eye_frame();
+        let (camera, _) = self.place_camera(eye);
+        if camera == eye {
+            return eye;
+        }
+        let from: DVec3 = camera.w_axis.truncate();
+        let crosshair: Shot = self.world.trace_shot(
+            from,
+            -camera.z_axis.truncate(),
+            self.settings.glass.range_m,
+            0,
+            &[],
+            None,
+        );
+        let at: DVec3 = eye.w_axis.truncate();
+        let target: DVec3 = *crosshair.points.last().expect("a shot has an end");
+        make_eye(at, target - at, self.player.get_up())
+    }
+
+    /// `is_own_body_shown` says whether the camera is out far enough in third person to show this
+    /// player's own robot instead of the gun in hand.
+    fn is_own_body_shown(&self) -> bool {
+        self.is_spawned && self.place_camera(self.player.get_eye_frame()).1
     }
 
     /// `get_bob_m` gives the head bob, as on Lunar Surface: the eye dips at each footstep, deeper
@@ -1532,6 +1717,171 @@ impl CitySession {
         rects
     }
 
+    /// `get_mouth_pairs` gives every linked pair of wormhole mouths in the game, this player's and
+    /// the others', as (owner's id, purple mouth's frame, green mouth's frame).
+    fn get_mouth_pairs(&self) -> Vec<(u32, DMat4, DMat4)> {
+        let own = self.client.id.zip(self.thrown.placed.get_pair());
+        own.into_iter()
+            .chain(
+                self.client
+                    .players
+                    .iter()
+                    .filter(|p| Some(p.id) != self.client.id)
+                    .filter_map(|p| p.wormholes.get_pair().map(|pair| (p.id, pair))),
+            )
+            .map(|(id, [purple, green])| (id, get_mouth_frame(&purple), get_mouth_frame(&green)))
+            .collect()
+    }
+
+    /// `update_wormholes` lands this player's throw in the air, as Lunar Surface does: its mouth
+    /// stands at eye height over the floor below where it came down, unless it would be within a
+    /// few meters of another mouth or against a wall; and clears both mouths once enemy shots
+    /// have destroyed them (the server's tally).
+    fn update_wormholes(&mut self, now_s: f64) {
+        let mut others: Vec<MouthPlace> = self.thrown.get_kept_places();
+        others.extend(
+            self.client
+                .players
+                .iter()
+                .filter(|p| Some(p.id) != self.client.id)
+                .flat_map(|p| p.wormholes.get_places()),
+        );
+        let hover_m: f64 = self.world.eye_height_m;
+        let world: &CityWorld = &self.world;
+        if let Some(message) = self.thrown.update_placing(
+            now_s,
+            |floor, velocity| land_city_mouth(floor, velocity, hover_m),
+            |place| can_place_mouth(world, place, &others),
+        ) {
+            self.show_message(message);
+        }
+        if self.client.wormhole_damage_frac >= 1.0 && !self.thrown.placed.get_places().is_empty() {
+            self.thrown.clear();
+            self.show_message("Your wormholes were destroyed".to_string());
+        }
+    }
+
+    /// `pass_through_wormholes` carries this player through a linked mouth when the middle of their
+    /// body crossed its disc in the last move (from feet at `before`): out of the other mouth of
+    /// its pair, mirrored through it, with their facing and velocity carried along.
+    fn pass_through_wormholes(&mut self, before: DVec3) {
+        let middle = |feet: DVec3| feet + get_up(feet) * (BODY_MIDDLE_M);
+        let (a, b) = (middle(before), middle(self.player.feet));
+        let crossing = self
+            .get_mouth_pairs()
+            .into_iter()
+            .flat_map(|(_, purple, green)| [(purple, green), (green, purple)])
+            .find(|&(from, _)| find_crossing(from, a, b).is_some());
+        if let Some((from, to)) = crossing {
+            let carry: DMat4 = carry_through(from, to);
+            let rotation: DMat3 = DMat3::from_mat4(carry);
+            self.player.feet = carry.transform_point3(self.player.feet);
+            self.player.body = rotation * self.player.body;
+            self.player.velocity = rotation * self.player.velocity;
+            self.player.align_to_ground();
+        }
+    }
+
+    /// `trace_through_wormholes` traces a shot from `origin` along `direction` as
+    /// `CityWorld::trace_shot` does, but where a leg passes through a linked mouth's disc before it
+    /// ends, it stops there and goes on out of the other mouth of the pair, mirrored through it,
+    /// for the range left (at most `MAX_WORMHOLE_LEGS` mouths). It gives the shot's legs in order,
+    /// the last one ending where the shot ends, and the owners of the pairs it went through.
+    fn trace_through_wormholes(
+        &self,
+        origin: DVec3,
+        direction: DVec3,
+        targets: &[Target],
+        shooter_id: Option<u32>,
+    ) -> (Vec<Shot>, Vec<u32>) {
+        let pairs: Vec<(u32, DMat4, DMat4)> = self.get_mouth_pairs();
+        let (mut legs, mut owners) = (Vec::new(), Vec::new());
+        let (mut from, mut along, mut range_m) =
+            (origin, direction.normalize(), self.settings.glass.range_m);
+        loop {
+            let mut shot: Shot = self.world.trace_shot(
+                from,
+                along,
+                range_m,
+                self.settings.glass.max_bounce_count,
+                targets,
+                shooter_id,
+            );
+            let crossing = (legs.len() < MAX_WORMHOLE_LEGS)
+                .then(|| {
+                    shot.points.windows(2).enumerate().find_map(|(k, pair)| {
+                        pairs
+                            .iter()
+                            .flat_map(|&(owner, purple, green)| {
+                                [(owner, purple, green), (owner, green, purple)]
+                            })
+                            .filter_map(|(owner, near, far)| {
+                                find_crossing(near, pair[0], pair[1]).map(|t| (t, owner, near, far))
+                            })
+                            .min_by(|x, y| x.0.total_cmp(&y.0))
+                            .map(|(t, owner, near, far)| (k, t, owner, near, far))
+                    })
+                })
+                .flatten();
+            let Some((k, t, owner, near, far)) = crossing else {
+                legs.push(shot);
+                return (legs, owners);
+            };
+            let (a, b) = (shot.points[k], shot.points[k + 1]);
+            let at: DVec3 = a.lerp(b, t);
+            let used_m: f64 = shot.points[..=k]
+                .windows(2)
+                .map(|pair| (pair[1] - pair[0]).length())
+                .sum::<f64>()
+                + (at - a).length();
+            shot.points.truncate(k + 1);
+            shot.points.push(at);
+            shot.hit = ShotHit::Range;
+            legs.push(shot);
+            owners.push(owner);
+            let carry: DMat4 = carry_through(near, far);
+            along = carry.transform_vector3((b - a).normalize());
+            from = carry.transform_point3(at) + along * WORMHOLE_EXIT_M;
+            range_m = (range_m - used_m).max(0.0);
+        }
+    }
+
+    /// `add_dust` throws up Lunar Surface's dust (`dust.rs`) where `shot`, fired from `shooter` by
+    /// the rifle or the sniper, ended on a floor (the street, or the glass seen from the glass
+    /// level, not its underside), sprayed back toward the shooter; at most `MAX_DUST_BURST_COUNT` bursts are kept, the oldest dropped first.
+    fn add_dust(&mut self, shot: &Shot, shooter: DVec3, is_rifle: bool) {
+        let ShotHit::Surface { material } = shot.hit else {
+            return;
+        };
+        let is_floor: bool = material == self.world.street_material
+            || self.world.get_glass().is_some_and(|glass| {
+                glass.material == material && shooter.length() < glass.radius_m
+            });
+        let end: DVec3 = *shot.points.last().expect("a shot has an end");
+        if !is_floor {
+            return;
+        }
+        let up: DVec3 = get_up(end);
+        let toward: DVec3 = shooter - end;
+        let back: DVec3 = (toward - up * toward.dot(up)).normalize_or(up.any_orthonormal_vector());
+        let right: DVec3 = up.cross(back);
+        let frame: DMat4 = DMat4::from_cols(
+            right.extend(0.0),
+            up.extend(0.0),
+            back.extend(0.0),
+            (end + up * DUST_LIFT_M).extend(1.0),
+        );
+        if self.dust.len() >= MAX_DUST_BURST_COUNT {
+            self.dust.remove(0);
+        }
+        self.dust.push(DustBurst::FromFloor(
+            frame,
+            self.now_s(),
+            self.world.map_gravity_m_per_s2,
+            is_rifle,
+        ));
+    }
+
     /// `update_remote` traces the other players' new shots and follows their robots' motion.
     fn update_remote(&mut self, now_s: f64, dt_s: f64) {
         let mut new_shots: Vec<LiveShot> = Vec::new();
@@ -1552,21 +1902,20 @@ impl CitySession {
                     .into_iter()
                     .filter(|t| t.id != p.id)
                     .collect();
-                let shot: Shot = self.world.trace_shot(
+                let (legs, _) = self.trace_through_wormholes(
                     p.frame.w_axis.truncate(),
                     -p.frame.z_axis.truncate(),
-                    self.settings.glass.range_m,
-                    self.settings.glass.max_bounce_count,
                     &targets,
                     Some(p.id),
                 );
-                new_shots.push(LiveShot {
+                new_shots.extend(legs.into_iter().map(|shot| LiveShot {
                     shot,
                     start_s: now_s,
                     team: p.team,
                     is_own: false,
                     speckle_frac: p.beam_speckle_frac,
-                });
+                    is_rifle: p.is_rifle,
+                }));
             }
             let motion: &mut Motion = self.remote_motion.entry(p.id).or_insert(Motion {
                 feet,
@@ -1575,6 +1924,10 @@ impl CitySession {
             let speed: f64 = (feet - motion.feet).length() / dt_s.max(1e-6);
             motion.speed_m_per_s += (speed - motion.speed_m_per_s) * (dt_s * 8.0).min(1.0);
             motion.feet = feet;
+        }
+        for new_shot in &new_shots {
+            let shooter: DVec3 = new_shot.shot.points[0];
+            self.add_dust(&new_shot.shot, shooter, new_shot.is_rifle);
         }
         self.shots.extend(new_shots);
     }
@@ -1585,7 +1938,7 @@ impl CitySession {
         if self.is_spawned {
             let mut eye: DMat4 = self.player.get_eye_frame();
             eye.w_axis -= (self.player.get_up() * self.get_bob_m()).extend(0.0);
-            return eye;
+            return self.place_camera(eye).0;
         }
         let angle: f64 = self.now_s() * LOBBY_ORBIT_RAD_PER_S;
         let radius_m: f64 =
@@ -1600,6 +1953,15 @@ impl CitySession {
     fn pack(&self, render_px: (usize, usize)) -> CityFrame {
         let eye: DMat4 = self.get_eye();
         let now_s: f64 = self.now_s();
+        let own_speed_m_per_s: f64 = (self.player.velocity
+            - self.player.get_up() * self.player.velocity.dot(self.player.get_up()))
+        .length();
+        let own: Option<Robot> = self.is_own_body_shown().then(|| Robot {
+            feet: self.player.feet,
+            forward: -self.player.body.z_axis,
+            team: self.get_team(),
+            clip: get_clip(own_speed_m_per_s),
+        });
         let robots: Vec<Robot> = self
             .client
             .players
@@ -1610,23 +1972,22 @@ impl CitySession {
                     feet: p.frame.w_axis.truncate(),
                     speed_m_per_s: 0.0,
                 });
-                let clip: AvatarClip = if motion.speed_m_per_s > RUN_M_PER_S {
-                    AvatarClip::Run
-                } else if motion.speed_m_per_s > WALK_M_PER_S {
-                    AvatarClip::Walk
-                } else {
-                    AvatarClip::Idle
-                };
                 Robot {
                     feet: motion.feet,
                     forward: -p.frame.z_axis.truncate(),
                     team: p.team,
-                    clip,
+                    clip: get_clip(motion.speed_m_per_s),
                 }
             })
+            .chain(own)
             .collect();
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
-        let muzzle: DVec3 = (eye * MUZZLE_M.extend(1.0)).truncate();
+        let gun_eye: DMat4 = if self.is_own_body_shown() {
+            self.player.get_eye_frame()
+        } else {
+            eye
+        };
+        let muzzle: DVec3 = (gun_eye * MUZZLE_M.extend(1.0)).truncate();
         let beams: Vec<Beam> = self
             .shots
             .iter()
@@ -1640,6 +2001,7 @@ impl CitySession {
                     s.team,
                     (1.0 - (now_s - s.start_s) / life_s).clamp(0.0, 1.0),
                     s.speckle_frac,
+                    s.is_rifle,
                 )
             })
             .collect();
@@ -1663,6 +2025,79 @@ impl CitySession {
         );
         if self.is_spawned && self.brain.is_none() {
             frame.zoom_in(self.get_zoom());
+        }
+        let flashlight = &self.settings.flashlight;
+        let shot_eye: DMat4 = self.player.get_eye_frame();
+        frame.flashlight = [
+            shot_eye.w_axis.truncate().as_vec3().extend(1.0).to_array(),
+            (-shot_eye.z_axis.truncate())
+                .as_vec3()
+                .extend(0.0)
+                .to_array(),
+            [
+                flashlight.cone_half_angle_rad.cos() as f32,
+                (flashlight.cone_half_angle_rad + flashlight.soft_edge_rad).cos() as f32,
+                flashlight.range_m as f32,
+                if self.is_flashlight_on && self.is_spawned {
+                    flashlight.brightness_frac as f32
+                } else {
+                    0.0
+                },
+            ],
+        ];
+        let all_wormholes = [self.thrown.placed].into_iter().chain(
+            self.client
+                .players
+                .iter()
+                .filter(|p| Some(p.id) != self.client.id)
+                .map(|p| p.wormholes),
+        );
+        for wormholes in all_wormholes {
+            if let Some([purple, green]) = wormholes.get_pair() {
+                for (place, color) in [
+                    (purple, WormholeColor::Purple),
+                    (green, WormholeColor::Green),
+                ] {
+                    push_mouth(
+                        &mut frame.dynamic,
+                        &mut frame.beams,
+                        get_mouth_frame(&place),
+                        MOUTH_RADIUS_M,
+                        color.get_rgb(),
+                    );
+                }
+            }
+            if let Some((color, place)) = wormholes.get_unlinked() {
+                push_glow_ball(
+                    &mut frame.beams,
+                    get_mouth_frame(&place).w_axis.truncate(),
+                    UNLINKED_MOUTH_BALL_M,
+                    eye.w_axis.truncate(),
+                    color.get_rgb(),
+                );
+            }
+            if let Some((color, x)) = wormholes.flying {
+                push_glow_ball(
+                    &mut frame.beams,
+                    x.truncate(),
+                    FLYING_MOUTH_BALL_M,
+                    eye.w_axis.truncate(),
+                    color.get_rgb(),
+                );
+            }
+        }
+        for cloud in self.dust.iter().filter_map(|burst| burst.get_cloud(now_s)) {
+            for particle in &cloud.particles {
+                push_dust_particle(
+                    &mut frame.beams,
+                    (cloud.frame * particle.position_m.extend(1.0)).truncate(),
+                    particle.radius_m,
+                    eye.w_axis.truncate(),
+                    particle.albedo,
+                    particle.opacity_frac as f32,
+                    particle.shape != crate::dust::DustShape::Puff,
+                );
+            }
         }
         let kinds = &self.settings.beam_speckle;
         frame.beam_speckle = [
@@ -1845,6 +2280,13 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 })
                 .collect()
         };
+        session.is_flashlight_on = session.is_captured
+            && session.is_spawned
+            && session.menu.is_none()
+            && held.contains(&Action::Flashlight);
+        session
+            .view_switch
+            .update((session.now_s() - session.last_s).clamp(0.0, MAX_DT_S));
         session.is_aiming = session.is_captured
             && session.is_spawned
             && !session.exit_prompt.is_shown()
@@ -1915,7 +2357,7 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 map_size_px: MINIMAP_MAP_PX,
                 minimap: make_minimap(&session, window_px),
             });
-        let wand = session.is_spawned.then(|| {
+        let wand = (session.is_spawned && !session.is_own_body_shown()).then(|| {
             let recoil_frac: f64 = session.recoil_left_s / RECOIL_S;
             (
                 make_wand(
@@ -2045,6 +2487,17 @@ fn handle_event(
         session.reload_left_s = session
             .reload_left_s
             .min(1.0 / session.settings.rifle.shots_per_s);
+    } else if is(Action::SwitchView) {
+        session.view_switch.toggle();
+    } else if is(Action::ThrowWormhole) && session.is_spawned && session.thrown.can_throw() {
+        let flight = fly_city_throw(
+            &session.world,
+            session.get_shot_eye(),
+            session.thrown.get_next_color(),
+            &session.settings.wormholes,
+        );
+        let now_s: f64 = session.now_s();
+        session.thrown.throw(flight, now_s);
     } else if is(Action::LowerResolution) {
         session.render_scale = (session.render_scale - RENDER_SCALE_STEP).max(MIN_RENDER_SCALE);
     } else if is(Action::RaiseResolution) {
@@ -2695,7 +3148,7 @@ fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
             &[],
             None,
         );
-        beams.push((shot.points, (k % 2) as u32, 1.0, 0.0));
+        beams.push((shot.points, (k % 2) as u32, 1.0, 0.0, false));
     }
     (robots, beams)
 }
@@ -2836,6 +3289,7 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
             team,
             1.0,
             0.0,
+            false,
         )
     };
     let blue_street: DVec3 = world
@@ -3041,7 +3495,15 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         for event in client.poll()? {
             match event {
                 net::NetEvent::Joined(_) => {
-                    player = world.make_player(client.team.unwrap_or(0), spawn_count);
+                    let team: u32 = client.team.unwrap_or(0);
+                    let others: Vec<DVec3> = client
+                        .players
+                        .iter()
+                        .filter(|p| Some(p.id) != client.id)
+                        .map(|p| CityPlayer::get_feet_up(p.frame, world.eye_height_m).0)
+                        .collect();
+                    player =
+                        world.make_player(team, world.find_clear_spawn(team, &others, spawn_count));
                     spawn_count += 1;
                     is_spawned = true;
                     brain.restart();

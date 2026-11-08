@@ -11,7 +11,7 @@ use std::error::Error;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use glam::{DMat3, DVec3, Mat4, Vec3};
+use glam::{DMat3, DMat4, DVec3, Mat4, Vec3};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
@@ -37,6 +37,13 @@ type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
 
 const SHADER_SOURCE: &str = include_str!("render_city.metal");
 pub const MAX_HOLE_COUNT: usize = 8;
+const MOUTH_RING_SEGMENT_COUNT: usize = 32;
+const MOUTH_RING_WIDTH_FRAC: f64 = 0.12;
+const MOUTH_DISC_TINT: f32 = 0.25;
+const MOUTH_DISC_OPACITY: f32 = 0.85;
+/// `BEAM_WIDTH_M` is a beam quad's width, wide enough for Lunar Surface's haze around the beam.
+pub const BEAM_WIDTH_M: f64 = 0.16;
+const RIFLE_BEAM_MARK: f64 = 0.25;
 const TEXTURE_SIDE_PX: u32 = 1024;
 pub const BEACON_SLOT_COUNT: usize = 8;
 const ROUND_RADIUS_M: f64 = 0.35;
@@ -121,6 +128,9 @@ struct CityUniforms {
     beacons: [[f32; 4]; BEACON_SLOT_COUNT],
     hazard: [f32; 4],
     beam_speckle: [f32; 4],
+    flashlight_position: [f32; 4],
+    flashlight_direction: [f32; 4],
+    flashlight: [f32; 4],
 }
 
 /// `CityScene` is the geometry that never changes: opaque triangles and the glass's, with an id
@@ -151,6 +161,10 @@ pub struct CityFrame {
     /// `beam_speckle` is the beams' speckle this frame, as on Lunar Surface: a seed that changes
     /// every frame, then the shares of speckled pixels painted black and turned white.
     pub beam_speckle: [f32; 4],
+    /// `flashlight` is the player's flashlight, as on Lunar Surface: its position, its direction,
+    /// then the cosines of its cone's inner and outer edges, the distance at which it falls to half
+    /// and its brightness (0 when off).
+    pub flashlight: [[f32; 4]; 3],
 }
 
 impl CityFrame {
@@ -892,9 +906,12 @@ pub fn get_beacon() -> &'static MeshModel {
 }
 
 /// `push_beam` adds a laser beam from `a` to `b`, `width_m` wide, facing `camera_m`, with colour
-/// and brightness (alpha).
+/// and brightness (alpha), the share of its pixels that speckle, and the rifle's look if
+/// `is_rifle` (else the sniper's); the beam shader reads the share from the vertices' layer and the
+/// look from their normal (`RIFLE_BEAM_MARK`).
 ///
-/// Example: `push_beam(&mut beams, muzzle, hit, eye, 0.05, [1.0, 0.3, 0.2, 1.0]);`
+/// Example: `push_beam(&mut beams, muzzle, hit, eye, BEAM_WIDTH_M, [1.0, 0.3, 0.2, 1.0], 0.2, false);`
+#[allow(clippy::too_many_arguments)]
 pub fn push_beam(
     out: &mut Vec<CityVertex>,
     a: DVec3,
@@ -903,6 +920,7 @@ pub fn push_beam(
     width_m: f64,
     color: [f32; 4],
     speckle_frac: f32,
+    is_rifle: bool,
 ) {
     let along: DVec3 = b - a;
     let side: DVec3 = along.cross(camera_m - a).normalize_or_zero() * (width_m / 2.0);
@@ -913,9 +931,139 @@ pub fn push_beam(
         out,
         [a - side, a + side, b + side, b - side],
         [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-        DVec3::ZERO,
+        if is_rifle {
+            DVec3::Y * RIFLE_BEAM_MARK
+        } else {
+            DVec3::ZERO
+        },
         color,
         speckle_frac,
+    );
+}
+
+/// `push_dust_particle` adds one particle of a shot's dust (`dust.rs`) at `center_m`, of
+/// `radius_m`, as a quad facing `camera_m` for the beam pipeline: a soft puff of mist, or a small
+/// grain (`is_grain`) with a firmer edge, in `albedo` lit by the core, covering the scene by
+/// `opacity_frac` at its centre. Its normal along x tells the shader it is dust, and its layer
+/// whether it is a grain.
+///
+/// Example: `push_dust_particle(&mut beams, hit, 0.05, eye, [0.5, 0.5, 0.5], 0.8, true);`
+pub fn push_dust_particle(
+    out: &mut Vec<CityVertex>,
+    center_m: DVec3,
+    radius_m: f64,
+    camera_m: DVec3,
+    albedo: [f32; 3],
+    opacity_frac: f32,
+    is_grain: bool,
+) {
+    let forward: DVec3 = (camera_m - center_m).normalize_or(DVec3::Z);
+    let right: DVec3 = forward.any_orthonormal_vector() * radius_m;
+    let up: DVec3 = forward.cross(right);
+    push_quad(
+        out,
+        [
+            center_m - right - up,
+            center_m + right - up,
+            center_m + right + up,
+            center_m + up - right,
+        ],
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        DVec3::X,
+        [albedo[0], albedo[1], albedo[2], opacity_frac],
+        f32::from(u8::from(is_grain)),
+    );
+}
+
+/// `push_glow_ball` adds a glowing ball of `radius_m` at `centre_m` in `rgb` (a thrown wormhole
+/// mouth in the air, or one waiting for its partner), as a quad facing `camera_m` drawn by the beam
+/// shader's halo.
+///
+/// Example: `push_glow_ball(&mut beams, centre, 0.3, eye, [0.62, 0.22, 1.0]);`
+pub fn push_glow_ball(
+    out: &mut Vec<CityVertex>,
+    centre_m: DVec3,
+    radius_m: f64,
+    camera_m: DVec3,
+    rgb: [f32; 3],
+) {
+    let forward: DVec3 = (camera_m - centre_m).normalize_or(DVec3::Z);
+    let right: DVec3 = forward.any_orthonormal_vector() * radius_m;
+    let up: DVec3 = forward.cross(right);
+    push_quad(
+        out,
+        [
+            centre_m - right - up,
+            centre_m + right - up,
+            centre_m + right + up,
+            centre_m + up - right,
+        ],
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        DVec3::Z,
+        [rgb[0], rgb[1], rgb[2], 1.0],
+        NO_LAYER,
+    );
+}
+
+/// `push_mouth` adds a linked wormhole mouth with frame `frame` (columns right, up, back, centre)
+/// of `radius_m`: a glowing ring in `rgb` among the opaque triangles (`opaque`), and over it in
+/// the beam pass (`beams`) a dark disc that dims what is behind, a cheap stand-in for Lunar
+/// Surface's lensed view through the mouth.
+///
+/// Example: `push_mouth(&mut frame.dynamic, &mut frame.beams, mouth, 1.0, [0.2, 1.0, 0.4]);`
+pub fn push_mouth(
+    out_opaque: &mut Vec<CityVertex>,
+    out_beams: &mut Vec<CityVertex>,
+    frame: DMat4,
+    radius_m: f64,
+    rgb: [f32; 3],
+) {
+    let (right, up, back, centre) = (
+        frame.x_axis.truncate(),
+        frame.y_axis.truncate(),
+        frame.z_axis.truncate(),
+        frame.w_axis.truncate(),
+    );
+    let at = |angle: f64, r: f64| centre + (right * angle.cos() + up * angle.sin()) * r;
+    for k in 0..MOUTH_RING_SEGMENT_COUNT {
+        let (a0, a1) = (
+            k as f64 / MOUTH_RING_SEGMENT_COUNT as f64 * std::f64::consts::TAU,
+            (k + 1) as f64 / MOUTH_RING_SEGMENT_COUNT as f64 * std::f64::consts::TAU,
+        );
+        let inner_m: f64 = radius_m * (1.0 - MOUTH_RING_WIDTH_FRAC);
+        for normal in [back, -back] {
+            push_quad(
+                out_opaque,
+                [
+                    at(a0, inner_m),
+                    at(a1, inner_m),
+                    at(a1, radius_m),
+                    at(a0, radius_m),
+                ],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                normal,
+                [rgb[0], rgb[1], rgb[2], 1.0],
+                NO_LAYER,
+            );
+        }
+    }
+    push_quad(
+        out_beams,
+        [
+            centre - right * radius_m - up * radius_m,
+            centre + right * radius_m - up * radius_m,
+            centre + right * radius_m + up * radius_m,
+            centre - right * radius_m + up * radius_m,
+        ],
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        DVec3::X,
+        [
+            rgb[0] * MOUTH_DISC_TINT,
+            rgb[1] * MOUTH_DISC_TINT,
+            rgb[2] * MOUTH_DISC_TINT,
+            MOUTH_DISC_OPACITY,
+        ],
+        0.0,
     );
 }
 
@@ -1136,6 +1284,9 @@ impl CityGpu {
             beacons: frame.beacons,
             hazard: [frame.scene.lift_hole_count as f32, 0.0, 0.0, 0.0],
             beam_speckle: frame.beam_speckle,
+            flashlight_position: frame.flashlight[0],
+            flashlight_direction: frame.flashlight[1],
+            flashlight: frame.flashlight[2],
         };
         let dynamic: Buffer = make_buffer(device, &frame.dynamic)?;
         let beams: Buffer = make_buffer(device, &frame.beams)?;

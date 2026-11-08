@@ -120,3 +120,20 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
     sniper's sampled per shot, the rifle's growing with heat, sent to other windows as on Lunar), with Lunar's pixel
     hash and its 1 black : 1 white : 8 dropout kinds. City draws beams as camera-facing quads, so they now blend as
     premultiplied light (unchanged for unspeckled pixels) so that a black speckle can darken the scene behind.
+30. **Thrown wormholes in City Sphere are cheap portals** (W-126 (same play in every level); the user: "you can use
+    heuristics ... even if it might be sometimes physically incorrect slightly"): Lunar's throw, colours, two per
+    player, linking and destruction by enemy shots (the shared `thrown_wormholes.rs` and network), but in Euclidean
+    space a mouth is a 1 m disc standing at eye height, drawn as a glowing ring over a dark disc instead of Lunar's
+    lensed view through it (a second view per mouth would cost a render pass each). A player's middle or a shot
+    crossing the disc comes out of the partner, mirrored through it as Lunar's mouths mirror rays; a shot passes at
+    most 2 mouths. A mouth may not stand within 3 m of another or 0.6 m of a box.
+31. **Dust, flashlight and third person are Lunar's, simplified for the rasterizer**: dust bursts are Lunar's
+    (`dust.rs`, the same particles and timing) where a shot ends on the street or on the glass seen from the glass
+    level, lit from above, the grains drawn as round specks rather than polyhedra; the flashlight is Lunar's cone and
+    falloff added to each surface's light; the third-person camera is Lunar's boom (up 0.6 m, back 3 m), stopped
+    0.25 m short of whatever a ray from the eye meets, with shots aimed at the crosshair's point.
+32. **Lunar's beam looks**: the sniper's white blade (`exp(-q^3)`) in a team-coloured haze and the rifle's Gaussian
+    laser over a halo, Lunar's formulas and brightnesses on City's camera-facing beam quads, now 0.16 m wide so the
+    haze fits.
+33. **Players spawn clear of teammates**: a window or bot takes the team's spawn farthest from the other players (two
+    windows of one team both took the first spawn, on top of each other).

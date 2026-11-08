@@ -19,10 +19,10 @@ use crate::geometry::{
 };
 use crate::voxel_world::VoxelWorld;
 
-const PIVOT_UP_M: f64 = 0.6;
-const BOOM_BACK_M: f64 = 3.0;
-const MIN_PIVOT_UP_M: f64 = 0.45;
-const WALL_GAP_M: f64 = 0.25;
+pub(crate) const PIVOT_UP_M: f64 = 0.6;
+pub(crate) const BOOM_BACK_M: f64 = 3.0;
+pub(crate) const MIN_PIVOT_UP_M: f64 = 0.45;
+pub(crate) const WALL_GAP_M: f64 = 0.25;
 const SWITCH_S: f64 = 0.3;
 const MAX_AIM_TURN_RAD: f64 = 0.6;
 const MIN_AIM_DISTANCE_M: f64 = 0.01;

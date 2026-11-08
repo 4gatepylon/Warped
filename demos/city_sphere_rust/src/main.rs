@@ -28,6 +28,7 @@ mod avatar_model;
 mod black_hole_growth;
 mod city;
 mod city_world;
+mod city_wormholes;
 mod credits;
 mod dust;
 mod exit_prompt;
@@ -248,6 +249,7 @@ enum RouteKind {
     WarpTour,
     Rifle,
     Stairs,
+    Wormholes,
 }
 
 /// `Arguments` is the command line.
@@ -317,7 +319,8 @@ struct Arguments {
     /// house), or on a voxel map a tour circling each warp object the same way (`warp-tour`), or
     /// on City Sphere `rifle`: overheat the rifle, let it cool, then eliminate a `--bot-objective
     /// target` bot with head hits and again with body hits, or `stairs`: walk from blue's spawn
-    /// up its stairs onto the glass level and to its pylon.
+    /// up its stairs onto the glass level and to its pylon, or `wormholes`: throw both wormhole
+    /// mouths, shoot through them and walk through them.
     #[arg(long, value_enum, default_value_t = RouteKind::Legs)]
     route: RouteKind,
     /// Host a game on the local network: start a game server as its own process (as --serve,
@@ -2375,9 +2378,9 @@ impl Session {
                     .ok_or("--route warp-tour needs a voxel map")?
                     .world,
             ),
-            (true, RouteKind::Rifle | RouteKind::Stairs) => {
+            (true, RouteKind::Rifle | RouteKind::Stairs | RouteKind::Wormholes) => {
                 return Err(
-                    "--route rifle and --route stairs are only for --map city-sphere".into(),
+                    "--route rifle, stairs and wormholes are only for --map city-sphere".into(),
                 );
             }
         };

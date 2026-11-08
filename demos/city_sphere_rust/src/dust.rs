@@ -449,6 +449,39 @@ impl DustBurst {
         ))
     }
 
+    /// `FromFloor` makes the burst of a shot fired by the rifle (`is_rifle`) or the sniper into a
+    /// flat floor in a Euclidean level (City Sphere): `frame` is the hit point's rigid frame (y up
+    /// from the floor, z along it toward the shooter, the hit point its last column), lit from
+    /// straight above, starting at `start_s` and falling at the map's `gravity_m_per_s2`.
+    ///
+    /// Example: `let burst = DustBurst::FromFloor(frame, 12.5, 6.0, false);`
+    #[allow(non_snake_case)]
+    pub fn FromFloor(
+        frame: DMat4,
+        start_s: f64,
+        gravity_m_per_s2: f64,
+        is_rifle: bool,
+    ) -> DustBurst {
+        let impact: Impact = Impact {
+            frame,
+            normal: DVec3::Y,
+            sun: DVec3::Y,
+            sun_frac: 1.0,
+        };
+        let size: &BurstSize = if is_rifle {
+            &RIFLE_BURST
+        } else {
+            &SNIPER_BURST
+        };
+        DustBurst::New(
+            impact,
+            gravity_m_per_s2,
+            start_s,
+            size,
+            make_seed(frame.col(3), start_s),
+        )
+    }
+
     /// `New` makes a burst of `size` at `impact`, starting at `start_s` and falling at
     /// `gravity_m_per_s2`, its particles drawn from `seed`: grains then puffs, thrown around the
     /// ground's normal tilted `BACKSPRAY_FRAC` toward the shooter (+z).

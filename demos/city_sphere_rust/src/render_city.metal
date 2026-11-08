@@ -5,6 +5,22 @@ using namespace metal;
 
 constant uint MAX_HOLE_COUNT = 8;
 constant float MIN_SPECKLE_GLOW = 0.02;
+constant float3 FLASHLIGHT_COLOR = float3(1.0, 0.95, 0.85);
+constant float FLASHLIGHT_INTENSITY = 1.45;
+constant float FLASHLIGHT_TINY_M = 1e-3;
+constant float BEAM_HALF_WIDTH_M = 0.08;
+constant float DUST_GRAIN_EDGE = 0.6;
+constant float DUST_PUFF_FALLOFF = 3.0;
+constant float3 DUST_LIGHT = float3(0.95, 0.85, 1.0);
+constant float BEAM_RADIUS_M = 0.02;
+constant float BEAM_REACH = 4.8;
+constant float RIFLE_BEAM_MARK = 0.25;
+constant float BEAM_HAZE_BRIGHTNESS = 0.45;
+constant float BEAM_HAZE_WHITENESS = 0.45;
+constant float BEAM_CORE_BRIGHTNESS = 1.6;
+constant float BEAM_CORE_WHITENESS = 0.9;
+constant float LASER_HALO_OPACITY = 0.9;
+constant float LASER_CORE_WHITENESS = 0.6;
 constant uint SPECKLE_KIND_SALT = 0x9e3779b9u;
 constant uint3 PIXEL_HASH_PRIMES = uint3(73856093u, 19349663u, 2654435761u);
 constant uint2 PIXEL_HASH_MULTIPLIERS = uint2(0x7feb352du, 0x846ca68bu);
@@ -94,6 +110,9 @@ struct CityUniforms {
     float4 beacons[BEACON_SLOT_COUNT];
     float4 hazard;
     float4 beam_speckle;
+    float4 flashlight_position;
+    float4 flashlight_direction;
+    float4 flashlight;
 };
 
 struct Fragment {
@@ -159,6 +178,22 @@ static float3 apply_hazard(float3 base, float3 world, constant CityUniforms& u) 
         return mix(base, mix(HAZARD_DARK, HAZARD_YELLOW, stripe), inside);
     }
     return base;
+}
+
+// `light_flashlight` gives the light of the player's flashlight on a surface at `world` with normal
+// `n`, as on Lunar Surface: from `u.flashlight_position` along `u.flashlight_direction`, full inside
+// the cone and softening to nothing at its outer edge (`u.flashlight.x` and `.y`, their cosines),
+// falling to half at `u.flashlight.z` meters, as much as the surface faces it, times its brightness
+// `u.flashlight.w` (0 when off).
+static float3 light_flashlight(float3 world, float3 n, constant CityUniforms& u) {
+    float4 f = u.flashlight;
+    if (f.w <= 0.0) return float3(0.0);
+    float3 toward = world - u.flashlight_position.xyz;
+    float d_m = max(length(toward), FLASHLIGHT_TINY_M);
+    float cone = smoothstep(f.y, f.x, dot(toward / d_m, u.flashlight_direction.xyz));
+    float facing = max(dot(n, -toward / d_m), 0.0);
+    float falloff = d_m / f.z;
+    return FLASHLIGHT_INTENSITY * FLASHLIGHT_COLOR * f.w * cone * facing / (1.0 + falloff * falloff);
 }
 
 fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u [[buffer(1)]],
@@ -241,7 +276,8 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     float3 view = normalize(u.camera_m.xyz - in.world);
     float3 h = normalize(view + l);
     float spec = pow(max(dot(n, h), 0.0), mix(SMOOTH_SPEC_POWER, ROUGH_SPEC_POWER, rough)) * METAL_SPEC * (1.5 - rough);
-    float3 light = u.ambient.rgb * wrap + u.core_light.rgb * (lambert * falloff) + spec * u.core_light.rgb;
+    float3 light = u.ambient.rgb * wrap + u.core_light.rgb * (lambert * falloff) + spec * u.core_light.rgb
+        + light_flashlight(in.world, n, u);
     float3 lit = base * light;
     if (!is_beacon && in.layer >= 0.0) {
         float3 mirror = reflect(-view, n);
@@ -303,19 +339,48 @@ static float hash_pixel(uint2 id, uint seed) {
     return float(h >> PIXEL_HASH_DROPPED_BITS) * PIXEL_HASH_SCALE;
 }
 
-// `beam_fragment` draws a laser beam (or, with a normal of length 1, the core's halo) over the
-// scene, adding its glow (alpha 0). On the share `in.layer` of the beam's pixels, picked anew each
-// frame with `u.beam_speckle.x`, a pixel speckles as on Lunar Surface: black (the scene darkened
-// by the glow, through alpha), white (white light by the glow) in the shares `u.beam_speckle.y`
-// and `.z`, or else a dropout (nothing added, the scene shows through).
+// `beam_fragment` draws a laser beam (or, with a normal along z, the core's halo; along x, a dust
+// particle, `push_dust_particle`) over the scene as premultiplied light, in Lunar Surface's two looks (`render_voxel.metal`'s
+// `scan_beams` and `shade_ray_end`), its brightness `in.color.a`, from how far the pixel is from
+// the beam's line against `BEAM_RADIUS_M` (or a pixel, if wider): the sniper's a white blade
+// (`exp(-q^3)`) in a soft team-coloured haze, and the rifle's (a normal with y `RIFLE_BEAM_MARK`) a
+// team-coloured Gaussian laser over a halo that tints the scene. On the share `in.layer` of the
+// beam's pixels, picked anew each frame with `u.beam_speckle.x`, a pixel speckles as on Lunar
+// Surface: black (the scene darkened by the glow, through alpha), white (white light by the glow)
+// in the shares `u.beam_speckle.y` and `.z`, or else a dropout (the scene shows through).
 fragment float4 beam_fragment(Fragment in [[stage_in]], constant CityUniforms& u [[buffer(1)]]) {
+    if (in.normal.x > 0.5) {
+        float radial = length(in.uv * 2.0 - 1.0);
+        float shape = in.layer > 0.5 ? 1.0 - smoothstep(DUST_GRAIN_EDGE, 1.0, radial) : exp(-radial * radial * DUST_PUFF_FALLOFF);
+        float cover = saturate(in.color.a) * shape * step(radial, 1.0);
+        return float4(encode_srgb(in.color.rgb * DUST_LIGHT) * cover, cover);
+    }
     if (length(in.normal) > 0.5) {
         float halo = pow(saturate(1.0 - length(in.uv * 2.0 - 1.0)), CORE_HALO_POWER) * in.color.a;
         return float4(encode_srgb(in.color.rgb) * halo, 0.0);
     }
-    float across = 1.0 - abs(in.uv.x * 2.0 - 1.0);
-    float glow = pow(across, 1.5) * in.color.a;
-    float3 core = mix(in.color.rgb, float3(1.0), pow(across, 6.0));
+    float d_m = abs(in.uv.x * 2.0 - 1.0) * BEAM_HALF_WIDTH_M;
+    float width_m = max(BEAM_RADIUS_M, fwidth(d_m));
+    float q = d_m * d_m / (width_m * width_m);
+    float brightness = saturate(in.color.a);
+    float3 beam = in.color.rgb;
+    bool is_rifle = in.normal.y > RIFLE_BEAM_MARK * 0.5;
+    float halo = brightness * exp(-q / BEAM_REACH);
+    float core = brightness * exp(is_rifle ? -q : -q * q * q);
+    float3 light;
+    float cover;
+    float glow;
+    if (is_rifle) {
+        light = beam * LASER_HALO_OPACITY * halo + mix(beam, float3(1.0), LASER_CORE_WHITENESS) * core;
+        cover = saturate(LASER_HALO_OPACITY * halo);
+        glow = saturate(LASER_HALO_OPACITY * halo + core);
+    } else {
+        float c = saturate(core);
+        light = (1.0 - c) * mix(beam, float3(1.0), BEAM_HAZE_WHITENESS) * BEAM_HAZE_BRIGHTNESS * halo
+            + c * mix(beam, float3(1.0), BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS;
+        cover = c;
+        glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
+    }
     uint2 id = uint2(in.position.xy);
     uint seed = uint(u.beam_speckle.x);
     if (in.layer > 0.0 && glow > MIN_SPECKLE_GLOW && hash_pixel(id, seed) < in.layer) {
@@ -325,5 +390,5 @@ fragment float4 beam_fragment(Fragment in [[stage_in]], constant CityUniforms& u
         if (kind < u.beam_speckle.y + u.beam_speckle.z) return float4(float3(strength), 0.0);
         return float4(0.0);
     }
-    return float4(encode_srgb(core) * glow, 0.0);
+    return float4(encode_srgb(light), cover);
 }
