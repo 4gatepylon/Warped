@@ -59,6 +59,12 @@
       "additionalProperties": false,
       "properties": {
         "material": {"$ref": "#/$defs/material_id"},
+        "sphere": {
+          "type": "object",
+          "required": ["radius_m"],
+          "additionalProperties": false,
+          "properties": {"radius_m": {"type": "number", "exclusiveMinimum": 0}}
+        },
         "tiling": {
           "type": "object",
           "required": ["kind", "cells_per_side"],
@@ -176,6 +182,44 @@
           {"if": {"properties": {"kind": {"const": "black_hole"}}}, "then": {"not": {"required": ["partner"]}, "properties": {"law": {"const": "isotropic_schwarzschild"}}}},
           {"if": {"properties": {"law": {"const": "foil"}}}, "then": {"required": ["lambda_squared"]}}
         ]
+      }
+    },
+    "lasers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "color": {"$ref": "#/$defs/color"},
+        "team_colors": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/color"}}
+      },
+      "oneOf": [{"required": ["color"]}, {"required": ["team_colors"]}]
+    },
+    "variation": {"type": "object", "additionalProperties": false, "required": ["seed"], "properties": {"seed": {"type": "integer", "minimum": 0, "maximum": 4294967295}}},
+    "shells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "radius_m", "thickness_m", "material", "walkable_side", "laser", "holes"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "radius_m": {"type": "number", "exclusiveMinimum": 0},
+          "thickness_m": {"type": "number", "exclusiveMinimum": 0},
+          "material": {"$ref": "#/$defs/material_id"},
+          "walkable_side": {"enum": ["inside", "outside", "none"]},
+          "laser": {"enum": ["stop", "reflect_inside"]},
+          "holes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["direction", "angular_radius_rad"],
+              "additionalProperties": false,
+              "properties": {
+                "direction": {"$ref": "#/$defs/vector3"},
+                "angular_radius_rad": {"type": "number", "exclusiveMinimum": 0}
+              }
+            }
+          }
+        }
       }
     },
     "lights": {

@@ -1,0 +1,41 @@
+# `Cargo.toml` builds the Rust City Sphere demo (copied from `../hyperbolic_wormholes_rust/`, which
+# it still contains and can still play with `--map lunar-surface` or `--map house-demo`).
+#
+# Interface:
+#     city-sphere: the game (macOS only: Metal and SDL), what `cargo run` runs.
+#     city_sphere_server: a game server alone (src/bin/city_sphere_server.rs), which also builds for Linux.
+#
+# Example:
+#     cargo run --release
+[package]
+name = "city-sphere"
+version = "0.1.0"
+edition = "2024"
+default-run = "city-sphere"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+getrandom = "0.4.3"
+glam = "0.34"
+gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_materials_transmission"] }
+hmac = "0.13.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+png = "0.18"
+rayon = "1.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+serde_yaml = "0.9"
+sha2 = "0.11.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-foundation = "0.3"
+objc2-foundation = "0.3"
+objc2-metal = "0.3"
+objc2-metal-fx = "0.3"
+objc2-quartz-core = "0.3"
+sdl3 = { version = "0.22", features = ["build-from-source-static"] }
+
+[[bin]]
+name = "city_sphere_server"
+test = false

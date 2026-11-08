@@ -145,6 +145,33 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
   (brightness, colour, dust) is the appearance style's.
 - `fog_m` (optional): a surface d meters away keeps e^(−d/`fog_m`) of its colour, and the rest is `horizon_color`.
 
+### Sphere ground and shells
+
+For maps inside a sphere (City Sphere), in Euclidean space with the origin at the sphere's centre:
+
+- `ground.sphere` (optional): `{"radius_m"}` makes the ground the inside of the sphere of that radius instead of the
+  plane y = 0. Gravity points outward, away from the centre, so a player's up is toward the centre.
+- `shells` (optional): `[{"name", "radius_m", "thickness_m", "material", "walkable_side", "laser", "holes"}]`, thin
+  spherical shells about the centre, `thickness_m` thick, centred on `radius_m`. `walkable_side` is which face
+  players can stand on with gravity pulling them onto it (`inside`, the face toward the centre, `outside`, or `none`).
+  `laser` is what a shot that meets the shell does: `stop`, or `reflect_inside` (a shot coming from the side toward
+  the centre reflects about the shell's normal; one from outside stops). How many bounces and how far a shot goes are
+  the game's settings, not the map's. `holes` are `[{"direction": [x, y, z], "angular_radius_rad"}]`: the shell is
+  missing within that angle of the unit `direction`, so players and shots pass. A shell with `thickness_m` equal to its
+  `radius_m` is a solid ball.
+
+### Variation
+
+- `variation` (optional): `{"seed": N}`, the seed of a map's small random variation (block offsets and heights,
+  panel tint and wear), so the same map looks the same in every program. A generator applies the same variation to
+  each team's half, so it stays fair.
+
+### Lasers
+
+- `lasers` (optional): the colour of every laser shot on this map, either `{"color": [r, g, b]}` for every team (a
+  golden-white map) or `{"team_colors": [[r, g, b], [r, g, b]]}`, blue's then red's. Without it, shots take the
+  game's team colours.
+
 ### Spawns
 
 `{"team": "blue" | "red" | "any", "frame"}`: a player starts standing with their feet at the frame's origin (on the
