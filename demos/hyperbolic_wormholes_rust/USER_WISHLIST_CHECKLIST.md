@@ -15,12 +15,16 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-109 Taller pylon beams.** "Make the lasers coming out of the pylons go higher into the sky". Today each
-  beacon's beam stops 160 m from the map's centre (`MAX_DRAWN_BEAM_DISTANCE_M`), about 75 to 95 m above its pylon.
-  Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch `claude/taller-beacon-beams`, 2026-11-08.
+- [~] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
+  on W-68 (reality bend), which adds the pylons and the black hole.
+  The user's later requests, 2026-11-08: "Make the lasers coming out of the pylons go higher into the sky", filed as
+  W-109 (taller pylon beams), then "is it possible for you to make the beams from the pylons go up and arc through
+  the sky to the black hole in the center"; the user chose a high arch that replaces the straight beams, so W-109
+  (taller pylon beams) is folded into this item. Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`),
+  branch `claude/taller-beacon-beams`, 2026-11-08.
   - **Where the work is**: worktree `/Users/leah/Documents/dev/Warped-main` on `leah`'s Mac, branch
-    `claude/taller-beacon-beams` (pushed); screenshots under `demos/hyperbolic_wormholes_rust/.artifacts/bench_views/`.
-    State 2026-11-08: rendering height options for the user to pick from.
+    `claude/taller-beacon-beams`; screenshots under `demos/hyperbolic_wormholes_rust/.artifacts/bench_views/`.
+    State 2026-11-08: rendering arch heights for the user to pick from.
 - [~] **W-110 Team-coloured robots.** "is it possible for you to recolor the teal robot? to be other colors than
   teal?", then "yep team colors!": the players' body of W-106 (Teal robot player model) in each team's colour, blue
   or red, instead of teal. Claimed by Claude Code (session on `leah`'s Mac), branch `claude/team-color-robot`,
@@ -80,8 +84,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-- [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
-  on W-68 (reality bend), which adds the pylons and the black hole.
 
 ## Pending user review
 
