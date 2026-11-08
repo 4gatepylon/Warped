@@ -5,7 +5,7 @@
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
-//! `VoxelWorld::find_aimed_material`, `Console`, `VoxelPlayer`, `Shot`, `BeamSegment`.
+//! `VoxelWorld::find_aimed_material`, `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
@@ -256,7 +256,9 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
     consoles
 }
 
-/// `VoxelWorld` is a whole voxel map, ready to trace and to walk on.
+/// `VoxelWorld` is a whole voxel map, ready to trace and to walk on, with the eye of the flashlight
+/// shining this frame and the time the sky shows (`sky_time_s`: the UTC clock in the window, 0 for
+/// fixed views; `spaceships.rs`).
 #[derive(Clone)]
 pub struct VoxelWorld {
     pub name: String,
@@ -282,6 +284,7 @@ pub struct VoxelWorld {
     pub static_structure_count: usize,
     pub consoles: Vec<Console>,
     pub flashlight_eye: Option<DMat4>,
+    pub sky_time_s: f64,
     pub clearance: Arc<ClearanceGrids>,
 }
 
@@ -626,6 +629,7 @@ impl VoxelWorld {
             static_structure_count: structures.len(),
             consoles: find_consoles(map),
             flashlight_eye: None,
+            sky_time_s: 0.0,
             structures,
             shapes,
             warps,
@@ -1248,6 +1252,13 @@ impl VoxelWorld {
     }
 }
 
+/// `StepReport` is what one `VoxelPlayer::step` did that the window shows: messages for the HUD,
+/// and whether the player went through a wormhole mouth.
+pub struct StepReport {
+    pub messages: Vec<String>,
+    pub has_crossed_mouth: bool,
+}
+
 /// `VoxelPlayer` is a player on a voxel map, as in the level: a body frame on the ground plane, the
 /// eye's height above it, the view's pitch, the vertical speed, whether they fly or stand, their
 /// sprint energy (1 full, 0 empty) and whether they sprinted on the last step, and the head bob's
@@ -1523,16 +1534,17 @@ impl VoxelPlayer {
     /// and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
     /// cells rise a little), jumping (the only way onto a block) and falling. A
     /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
-    /// level does) only if that fails. It returns messages for the HUD.
+    /// level does) only if that fails. It returns messages for the HUD and whether the player went
+    /// through a mouth.
     ///
-    /// Example: `for message in player.step(&world, &input, 1.0 / 60.0, 0) { ... }`
+    /// Example: `for message in player.step(&world, &input, 1.0 / 60.0, 0).messages { ... }`
     pub fn step(
         &mut self,
         world: &VoxelWorld,
         input: &Input,
         dt_s: f64,
         spawn_index: usize,
-    ) -> Vec<String> {
+    ) -> StepReport {
         let r: f64 = world.r;
         let forward: f64 = f64::from(u8::from(input.forward)) - f64::from(u8::from(input.back));
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
@@ -1588,7 +1600,10 @@ impl VoxelPlayer {
                 < FALL_IN_PER_HORIZON * world.warps[w].m
         {
             *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, 0, &[]);
-            return vec!["You fell into the black hole".to_string()];
+            return StepReport {
+                messages: vec!["You fell into the black hole".to_string()],
+                has_crossed_mouth: false,
+            };
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
         let has_moved: bool = len > 0.0;
@@ -1612,10 +1627,13 @@ impl VoxelPlayer {
                 }
             }
         }
-        let messages: Vec<String> = crossed
-            .iter()
-            .map(|name| format!("Through {name}"))
-            .collect();
+        let report: StepReport = StepReport {
+            messages: crossed
+                .iter()
+                .map(|name| format!("Through {name}"))
+                .collect(),
+            has_crossed_mouth: crossed.is_some(),
+        };
         if self.is_flying {
             (self.body, self.h_m) = (body_new, h_new);
             let climb_m_per_s: f64 = MIN_FLY_CLIMB_M_PER_S.max(self.h_m) * FLY_CLIMB_PER_S;
@@ -1631,7 +1649,7 @@ impl VoxelPlayer {
                 .as_ref()
                 .map_or(0.0, |t| t.get_height_m(u_m, v_m));
             self.h_m = self.h_m.clamp(floor_m + MIN_FLY_HEIGHT_M, MAX_FLY_HEIGHT_M);
-            return messages;
+            return report;
         }
         let nearby: Vec<usize> =
             world.find_nearby_structures(self.body.col(AXIS_W), NEARBY_REACH_M);
@@ -1684,7 +1702,7 @@ impl VoxelPlayer {
             self.is_on_ground = dh < 0.0;
             self.vertical_m_per_s = 0.0;
         }
-        messages
+        report
     }
 }
 
@@ -1703,6 +1721,7 @@ mod tests {
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
     //! | Walking | upright, crouched (half as far, eye fully lowered) | `crouching_lowers_the_eye_and_slows_walking` |
+    //! | Step through a mouth | not yet (no crossing, no message), the step that goes through (one crossing and its message) | `walking_into_a_mouth_reports_the_crossing` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
@@ -2040,6 +2059,28 @@ mod tests {
         let full_drop_m: f64 = world.player.eye_height_m * (1.0 - movement.crouch_eye_height_frac);
         assert_eq!(upright.get_crouch_drop_m(&world), 0.0);
         assert!((crouched.get_crouch_drop_m(&world) - full_drop_m).abs() < 1e-9);
+    }
+
+    #[test]
+    fn walking_into_a_mouth_reports_the_crossing() {
+        const MOUTH_A_VIEW_M: [f64; 2] = [-22.0, 40.0];
+        const MOUTH_A_TARGET_M: [f64; 2] = [-14.0, 40.0];
+        const THROUGH_STEP_COUNT: usize = 150;
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, MOUTH_A_VIEW_M, MOUTH_A_TARGET_M, None, 0.0);
+        let walk: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        let reports: Vec<StepReport> = (0..THROUGH_STEP_COUNT)
+            .map(|_| player.step(&world, &walk, STEP_S, 0))
+            .collect();
+        let (crossings, others): (Vec<&StepReport>, Vec<&StepReport>) =
+            reports.iter().partition(|report| report.has_crossed_mouth);
+        assert_eq!(crossings.len(), 1);
+        assert_eq!(crossings[0].messages, vec!["Through wormhole mouth A"]);
+        assert!(others.iter().all(|report| report.messages.is_empty()));
     }
 
     #[test]

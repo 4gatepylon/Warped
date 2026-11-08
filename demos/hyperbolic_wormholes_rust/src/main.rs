@@ -24,6 +24,7 @@
 mod exit_prompt;
 mod fps_demo_assets;
 mod geometry;
+mod hud_bars;
 mod key_bindings;
 mod map;
 mod map_export;
@@ -39,6 +40,7 @@ mod render_voxel;
 mod scene_data;
 mod settings;
 mod shapes;
+mod spaceships;
 mod terrain;
 mod viewmodel;
 mod voxel_clearance;
@@ -116,19 +118,17 @@ const MESSAGE_DURATION_S: f64 = 3.0;
 const WAND_RECOIL_M: f32 = 0.035;
 const WAND_RECOIL_TILT_RAD: f32 = 0.12;
 const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
-const HEAT_BAR_FILL_COLOR: [f32; 4] = [1.0, 0.6, 0.2, 0.9];
+const HEAT_BAR_RGB: [f32; 3] = [1.0, 0.6, 0.2];
 const HEALTH_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.87];
-const HEALTH_BAR_FILL_COLOR: [f32; 4] = [0.35, 0.95, 0.45, 0.9];
+const HEALTH_BAR_RGB: [f32; 3] = [0.35, 0.95, 0.45];
+const HEALTH_PULSE_RGB: [f32; 3] = [1.0, 0.38, 0.12];
 const ENERGY_SEGMENT_COUNT: u32 = 10;
-const MAX_BAR_SEGMENT_COUNT: u32 = 20;
-const BAR_GAP_FRAC: f32 = 0.002;
-const BAR_FILL_TOLERANCE: f64 = 0.05;
 const SKY_TRACER_M: f64 = 80.0;
 const CROSSHAIR_GAP_FRAC: f32 = 0.006;
 const CROSSHAIR_ARM_FRAC: f32 = 0.012;
 const CROSSHAIR_THICKNESS_FRAC: f32 = 0.0025;
 const CROSSHAIR_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.85];
-const HEAT_BAR_OVERHEATED_COLOR: [f32; 4] = [1.0, 0.15, 0.1, 0.9];
+const HEAT_BAR_OVERHEATED_RGB: [f32; 3] = [1.0, 0.15, 0.1];
 const WAND_LASER_SHAFT_HALF_M: [f32; 4] = [0.011, 0.011, 0.16, 0.0];
 const WAND_LASER_SHAFT_COLOR: [f32; 4] = [0.2, 0.17, 0.22, 1.0];
 const WAND_LASER_TIP_HALF_M: [f32; 4] = [0.016, 0.016, 0.028, 0.0];
@@ -153,13 +153,11 @@ const PICTURE_PX_PER_MASK_PX: i32 = 2;
 const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
 const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
-const ENERGY_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.018];
-const ENERGY_BAR_BACK_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
-const ENERGY_BAR_FILL_COLOR: [f32; 4] = [0.5, 0.82, 1.0, 0.9];
+const ENERGY_BAR_RGB: [f32; 3] = [0.5, 0.82, 1.0];
+const ENERGY_PULSE_RGB: [f32; 3] = [0.15, 0.4, 1.0];
 const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
 const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
-const DISABLE_BAR_BACK_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.5];
-const DISABLE_BAR_FILL_COLOR: [f32; 4] = [1.0, 0.85, 0.3, 0.9];
+const DISABLE_BAR_RGB: [f32; 3] = [1.0, 0.85, 0.3];
 const PERCENT_PER_FRAC: f64 = 100.0;
 const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
@@ -1673,6 +1671,27 @@ fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Resu
     Ok(())
 }
 
+/// `fade_wormhole_tint` gives how much of the blueshift after a wormhole is left `dt_s` after
+/// `left_frac` was (1 just after going through, 0 none), fading linearly over `tint_s` (0 for none).
+///
+/// Example: `let left_frac = fade_wormhole_tint(1.0, 1.0 / 60.0, 1.5);`
+fn fade_wormhole_tint(left_frac: f64, dt_s: f64, tint_s: f64) -> f64 {
+    if tint_s > 0.0 {
+        (left_frac - dt_s / tint_s).max(0.0)
+    } else {
+        0.0
+    }
+}
+
+/// `get_blueshift_frac` gives how far into its blueshift the scene is (the overlay's
+/// `blueshift_frac`) with `left_frac` of the fade left: `strength_frac` times the smoothstep
+/// 3x² − 2x³ of `left_frac`, so the tint lingers a moment at its peak and eases out at the end.
+///
+/// Example: `let blueshift_frac = get_blueshift_frac(0.5, 1.0);`
+fn get_blueshift_frac(left_frac: f64, strength_frac: f64) -> f32 {
+    (strength_frac * left_frac * left_frac * (3.0 - 2.0 * left_frac)) as f32
+}
+
 /// `Session` is the state of a played window: the world, the player, the toggles and the HUD's
 /// running averages.
 struct Session {
@@ -1719,7 +1738,11 @@ struct Session {
     run_pose_frac: f64,
     motion_blur_frac: f32,
     hit_effect_frac: f64,
+    wormhole_tint_left_frac: f64,
     last_health_frac: f64,
+    health_pulse: hud_bars::BarPulse,
+    last_energy_frac: f64,
+    energy_pulse: hud_bars::BarPulse,
     is_captured: bool,
     message: String,
     message_time_s: f64,
@@ -2011,7 +2034,11 @@ impl Session {
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
+            wormhole_tint_left_frac: 0.0,
             last_health_frac: 1.0,
+            health_pulse: hud_bars::BarPulse::Idle(),
+            last_energy_frac: 1.0,
+            energy_pulse: hud_bars::BarPulse::Idle(),
             is_captured: false,
             message: String::new(),
             message_time_s: 0.0,
@@ -2193,6 +2220,12 @@ impl Session {
         let blur_s: f64 = self.player_settings.view.motion_blur_s;
         self.hit_effect_frac =
             (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
+        self.update_bar_pulses(dt_s);
+        self.wormhole_tint_left_frac = fade_wormhole_tint(
+            self.wormhole_tint_left_frac,
+            dt_s,
+            self.player_settings.view.wormhole_tint_s,
+        );
         self.motion_blur_frac = if blur_s > 0.0 {
             (-dt_s / blur_s).exp() as f32
         } else {
@@ -2252,16 +2285,22 @@ impl Session {
             (self.aim_frac + if is_aiming { aim_step } else { -aim_step }).clamp(0.0, 1.0);
         let is_holding_e: bool = held(Action::TurnOffConsole);
         let team: usize = self.get_team() as usize;
-        let messages: Vec<String> = match &mut self.voxel {
+        let report: voxel_world::StepReport = match &mut self.voxel {
             Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, team),
             None => {
                 let messages: Vec<String> =
                     physics::update_player(&self.world, &mut self.player, &input, dt_s);
                 physics::level_out(&mut self.player.frame, dt_s);
-                messages
+                voxel_world::StepReport {
+                    has_crossed_mouth: !messages.is_empty(),
+                    messages,
+                }
             }
         };
-        for message in messages {
+        if report.has_crossed_mouth {
+            self.wormhole_tint_left_frac = 1.0;
+        }
+        for message in report.messages {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
@@ -2284,6 +2323,29 @@ impl Session {
         self.message_time_s -= dt_s;
         self.hud_time_s += dt_s;
         Ok(())
+    }
+
+    /// `update_bar_pulses` ages the pulses running along the HUD's bars by `dt_s` (`hud_bars.rs`):
+    /// the health bar's (started by `update_multiplayer` when health falls or rises), and the
+    /// energy bar's, repeating while this player sprints (unless eliminated) or the energy refills.
+    ///
+    /// Example: `self.update_bar_pulses(dt_s);`
+    fn update_bar_pulses(&mut self, dt_s: f64) {
+        self.health_pulse.update(dt_s, None);
+        let Some(voxel) = &self.voxel else {
+            return;
+        };
+        let is_eliminated: bool = self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated);
+        let energy_frac: f64 = voxel.player.energy_frac;
+        self.energy_pulse.update(
+            dt_s,
+            hud_bars::get_energy_pulse_kind(
+                voxel.player.is_sprinting && !is_eliminated,
+                energy_frac,
+                self.last_energy_frac,
+            ),
+        );
+        self.last_energy_frac = energy_frac;
     }
 
     /// `is_firing` says whether this player's laser is on: on for a scripted route, or a shot fired
@@ -2585,6 +2647,11 @@ impl Session {
                 }
             }
         }
+        if let Some(kind) =
+            hud_bars::get_health_pulse_kind(multiplayer.client.health_frac, self.last_health_frac)
+        {
+            self.health_pulse.start(kind);
+        }
         if multiplayer.client.health_frac < self.last_health_frac {
             self.hit_effect_frac = 1.0;
             if let Some(voxel) = &mut self.voxel {
@@ -2654,6 +2721,7 @@ impl Session {
             voxel
                 .world
                 .light_consoles(off_mask, &disabling_fracs, time_s);
+            voxel.world.sky_time_s = spaceships::get_utc_s();
             let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
             voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }
@@ -3115,11 +3183,13 @@ impl Session {
     }
 
     /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the crosshair (unless
-    /// text covers the view) and, in the bottom left, as
-    /// segmented bars (`make_segmented_bar`): this player's health in a game on a server (one segment
-    /// per rifle body hit), the gun in hand's ammo (the rifle's shots left before it overheats, or
-    /// the sniper's one block, empty while it reloads), and on a voxel map the sprint energy. Below the middle, the progress of turning off a console
-    /// (while holding `E` on one).
+    /// text covers the view) and, in the bottom left, as segmented bars in the HUD's look
+    /// (`hud_bars.rs`): this player's health in a game on a server (one segment per rifle body
+    /// hit, with a pulse running down it at each hit), the gun in hand's ammo (the rifle's shots
+    /// left before it overheats, or the sniper's one block, empty while it reloads; no pulse), and
+    /// on a voxel map the sprint energy (a pulse running down it while sprinting, a fainter one up
+    /// it while it refills). Below the middle, the progress of turning off a console (while
+    /// holding `E` on one).
     ///
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
@@ -3128,59 +3198,64 @@ impl Session {
             rects.extend(get_crosshair_rects(self.last_output_px));
         }
         if let Some(multiplayer) = &self.multiplayer {
-            rects.extend(make_segmented_bar(
+            rects.extend(hud_bars::make_segmented_bar(
                 HEALTH_BAR_MIN_FRAC,
                 u32::from(self.settings.rifle.body_hits_to_eliminate),
                 multiplayer.client.health_frac,
-                HEALTH_BAR_FILL_COLOR,
+                HEALTH_BAR_RGB,
+                self.health_pulse.make_rect_pulse(
+                    HEALTH_BAR_MIN_FRAC[0],
+                    HEALTH_PULSE_RGB,
+                    HEALTH_BAR_RGB,
+                ),
             ));
         }
         if self.gun == Gun::Laser {
             let is_loaded: bool = self.sniper_reload_s <= 0.0;
-            rects.extend(make_segmented_bar(
+            rects.extend(hud_bars::make_segmented_bar(
                 HEAT_BAR_MIN_FRAC,
                 1,
                 if is_loaded { 1.0 } else { 0.0 },
-                HEAT_BAR_FILL_COLOR,
+                HEAT_BAR_RGB,
+                render_metal::NO_RECT_PULSE,
             ));
         }
         if self.gun == Gun::Rifle {
-            rects.extend(make_segmented_bar(
+            rects.extend(hud_bars::make_segmented_bar(
                 HEAT_BAR_MIN_FRAC,
                 self.settings.rifle.shots_until_overheat,
                 1.0 - self.rifle_heat_frac.min(1.0),
                 if self.is_overheated {
-                    HEAT_BAR_OVERHEATED_COLOR
+                    HEAT_BAR_OVERHEATED_RGB
                 } else {
-                    HEAT_BAR_FILL_COLOR
+                    HEAT_BAR_RGB
                 },
+                render_metal::NO_RECT_PULSE,
             ));
         }
         if let Some((_, held_s)) = self.multiplayer.as_ref().and_then(|m| m.disabling) {
-            let ([x, y], [w, h]) = (DISABLE_BAR_MIN_FRAC, DISABLE_BAR_SIZE_FRAC);
             let fill_frac: f32 =
                 (held_s / self.settings.consoles.hold_to_disable_s).min(1.0) as f32;
-            rects.extend([
-                render_metal::OverlayRect {
-                    min_frac: [x, y],
-                    max_frac: [x + w, y + h],
-                    color: DISABLE_BAR_BACK_COLOR,
-                },
-                render_metal::OverlayRect {
-                    min_frac: [x, y],
-                    max_frac: [x + w * fill_frac, y + h],
-                    color: DISABLE_BAR_FILL_COLOR,
-                },
-            ]);
+            rects.extend(hud_bars::make_progress_bar(
+                DISABLE_BAR_MIN_FRAC,
+                DISABLE_BAR_SIZE_FRAC,
+                fill_frac,
+                DISABLE_BAR_RGB,
+            ));
         }
         let Some(voxel) = &self.voxel else {
             return rects;
         };
-        rects.extend(make_segmented_bar(
+        rects.extend(hud_bars::make_segmented_bar(
             ENERGY_BAR_MIN_FRAC,
             ENERGY_SEGMENT_COUNT,
             voxel.player.energy_frac,
-            ENERGY_BAR_FILL_COLOR,
+            ENERGY_BAR_RGB,
+            self.energy_pulse.make_rect_pulse(
+                ENERGY_BAR_MIN_FRAC[0],
+                ENERGY_PULSE_RGB,
+                ENERGY_BAR_RGB,
+            ),
         ));
         rects
     }
@@ -3319,38 +3394,8 @@ fn get_crosshair_rects(window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> 
             min_frac: [0.5 + x0, 0.5 + y0],
             max_frac: [0.5 + x1, 0.5 + y1],
             color: CROSSHAIR_COLOR,
-        })
-        .collect()
-}
-
-/// `make_segmented_bar` gives a HUD bar of `segment_count` separate segments (at most
-/// `MAX_BAR_SEGMENT_COUNT`) from `min_frac`, `ENERGY_BAR_SIZE_FRAC` in all: enough of them in
-/// `fill_color` to cover `filled_frac` of the bar (a segment counts once it is more than
-/// `BAR_FILL_TOLERANCE` full), the rest in the bar's back colour.
-///
-/// Example: `let rects = make_segmented_bar([0.03, 0.87], 12, 0.5, [0.3, 1.0, 0.4, 0.9]);`
-fn make_segmented_bar(
-    min_frac: [f32; 2],
-    segment_count: u32,
-    filled_frac: f64,
-    fill_color: [f32; 4],
-) -> Vec<render_metal::OverlayRect> {
-    let n: u32 = segment_count.clamp(1, MAX_BAR_SEGMENT_COUNT);
-    let filled_count: f64 = (filled_frac * f64::from(n) - BAR_FILL_TOLERANCE).ceil();
-    let [w, h] = ENERGY_BAR_SIZE_FRAC;
-    let segment_w: f32 = (w - BAR_GAP_FRAC * (n - 1) as f32) / n as f32;
-    (0..n)
-        .map(|i| {
-            let x: f32 = min_frac[0] + i as f32 * (segment_w + BAR_GAP_FRAC);
-            render_metal::OverlayRect {
-                min_frac: [x, min_frac[1]],
-                max_frac: [x + segment_w, min_frac[1] + h],
-                color: if f64::from(i) < filled_count {
-                    fill_color
-                } else {
-                    ENERGY_BAR_BACK_COLOR
-                },
-            }
+            style: render_metal::FLAT_RECT_STYLE,
+            pulse: render_metal::NO_RECT_PULSE,
         })
         .collect()
 }
@@ -3604,7 +3649,8 @@ fn make_text_mask(text: &OverlayText) -> Result<Vec<u8>> {
 }
 
 /// `draw_overlay_rects` draws the HUD's rectangles (`Session::get_overlay_rects`) on the canvas,
-/// for the SDL-renderer window.
+/// for the SDL-renderer window: flat boxes in their colours, without the Metal overlay's style
+/// (slant, outline, gloss, glow) or pulses.
 ///
 /// Example: `draw_overlay_rects(&mut canvas, &session.get_overlay_rects())?;`
 fn draw_overlay_rects(
@@ -3815,10 +3861,15 @@ fn play_on_layer(
         let wand: Option<render_metal::OverlayWand> = session.get_wand();
         let stretch_frac: f32 = session.get_edge_stretch_frac();
         let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
+        let blueshift_frac: f32 = get_blueshift_frac(
+            session.wormhole_tint_left_frac,
+            session.player_settings.view.wormhole_tint_frac,
+        );
         let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
             || !rects.is_empty()
             || wand.is_some()
             || stretch_frac > 0.0
+            || blueshift_frac > 0.0
             || minimap.is_some())
         .then(|| render_metal::Overlay {
             dim_frac: match &overlay_text {
@@ -3848,6 +3899,7 @@ fn play_on_layer(
             wand,
             blur_frac: session.motion_blur_frac,
             hit: session.get_hit_effect(),
+            blueshift_frac,
         });
         if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(
@@ -3871,18 +3923,43 @@ fn play_on_layer(
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the guns' hit rules, the HUD's bars and where overlay text goes.
+    //! Tests of the guns' hit rules, aiming's zoom, where overlay text goes and the tint after a
+    //! wormhole.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
+    //! | Wormhole tint left | all (just through), part, none (stays none) | `wormhole_tint_peaks_and_fades` |
+    //! | Wormhole tint fade time | above 0 (fades over it), 0 (no tint) | `wormhole_tint_peaks_and_fades` |
+    //! | Wormhole tint strength | 1, between 0 and 1, 0 | `wormhole_tint_peaks_and_fades` |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
-    //! | Bar fill | empty, a sliver (one segment), 11 of 12 after the network's byte rounding, full | `segmented_bars_count_whole_segments` |
-    //! | Segment count | 12, 1 (the sniper's block, empty or full and as wide as the whole bar) | `segmented_bars_count_whole_segments` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
+
+    #[test]
+    fn wormhole_tint_peaks_and_fades() {
+        const TINT_S: f64 = 1.5;
+        const DT_S: f64 = 1.0 / 60.0;
+        const HALF_FRAC: f64 = 0.5;
+        const WEAK_STRENGTH_FRAC: f64 = 0.4;
+        assert_eq!(get_blueshift_frac(1.0, 1.0), 1.0);
+        assert_eq!(get_blueshift_frac(1.0, 0.0), 0.0);
+        assert_eq!(get_blueshift_frac(0.0, 1.0), 0.0);
+        let half_way: f32 = get_blueshift_frac(HALF_FRAC, WEAK_STRENGTH_FRAC);
+        assert!((f64::from(half_way) - HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
+        let mut left_frac: f64 = 1.0;
+        let mut fade_frames: Vec<f64> = Vec::new();
+        while left_frac > 0.0 {
+            left_frac = fade_wormhole_tint(left_frac, DT_S, TINT_S);
+            fade_frames.push(left_frac);
+        }
+        assert!((fade_frames.len() as f64 * DT_S - TINT_S).abs() <= DT_S);
+        assert!(fade_frames.windows(2).all(|pair| pair[1] < pair[0]));
+        assert_eq!(fade_wormhole_tint(0.0, DT_S, TINT_S), 0.0);
+        assert_eq!(fade_wormhole_tint(1.0, DT_S, 0.0), 0.0);
+    }
 
     #[test]
     fn hits_weigh_by_gun_and_place() {
@@ -3978,28 +4055,5 @@ mod tests {
             get_aim_zoom(0.1, FULL_ZOOM) - 1.0 < 0.1 * (FULL_ZOOM - 1.0),
             "eased in"
         );
-    }
-
-    #[test]
-    fn segmented_bars_count_whole_segments() {
-        const SEGMENT_COUNT: u32 = 12;
-        let filled = |frac: f64| -> usize {
-            make_segmented_bar([0.0, 0.0], SEGMENT_COUNT, frac, HEALTH_BAR_FILL_COLOR)
-                .iter()
-                .filter(|rect| rect.color == HEALTH_BAR_FILL_COLOR)
-                .count()
-        };
-        let eleven_twelfths_frac: f64 =
-            (11.0 / 12.0 * f64::from(u8::MAX)).round() / f64::from(u8::MAX);
-        assert_eq!(
-            [0.0, 0.01, eleven_twelfths_frac, 1.0].map(filled),
-            [0, 1, 11, 12]
-        );
-        for (frac, color) in [(0.0, ENERGY_BAR_BACK_COLOR), (1.0, HEAT_BAR_FILL_COLOR)] {
-            let block = make_segmented_bar([0.0, 0.0], 1, frac, HEAT_BAR_FILL_COLOR);
-            assert_eq!(block.len(), 1);
-            assert_eq!(block[0].color, color);
-            assert_eq!(block[0].max_frac[0], ENERGY_BAR_SIZE_FRAC[0]);
-        }
     }
 }

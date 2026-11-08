@@ -79,11 +79,26 @@ each step outward is cut by how far you have already come, so you never get past
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
 
+The bars in the bottom left (health, then the gun's ammo, then sprint energy) lean like `/` and glow in their
+colours. Each hit sends a reddish-orange pulse down the health bar, right to left. While you sprint, blue pulses run
+down the energy bar; while it refills, fainter ones run up it. The ammo bar doesn't pulse.
+
+Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and your whole view turns
+cyan as you come out, as if blueshifted by moving fast toward what you see: reds turn green, greys turn cyan, the
+sky gets a faint teal glow, most of all in the middle of the screen. It fades back within 1.5 s, and only the
+player who went through sees it. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off);
+`view.wormhole_tint_s` in `player_settings.yaml` sets how long it lasts.
+
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
 the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,
 in their team's colours. The menu's MAP page rings the same 60 m around you and darkens the rest. To move, resize
 or hide the minimap, change `minimap` in your `player_settings.yaml` (`corner: top_left`, `top_right`,
 `bottom_left` or `bottom_right`).
+
+Look up on Lunar Surface: spaceships fly slowly across the sky, purely for looks. A container freighter, a ring ship
+with a turning ring, and three fighters in a V each cross from horizon to horizon in 2 to 5 minutes, with engine
+glow, red and green running lights and a flashing strobe. They follow the UTC clock, so everyone whose clock is right
+sees the same ships at the same moment. They are far away in the sky: lasers and players never touch them.
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
 `PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
