@@ -19,6 +19,11 @@ make join-game SERVER=127.0.0.1
 - Playing is only on a game server: `make serve-game` runs one (Lunar Surface by default), and every player joins
   it with `make join-game` (`SERVER=127.0.0.1` on the same computer, or the address the server prints). There is no
   local demo or host-and-play command; without a server, only the tools below run.
+- Started without flags (a double-click on the app, or `cargo run --release`), the game opens on a title screen:
+  the online games (from the app's `online_games.txt`), or joining a game on this Wi-Fi on either map. It runs
+  the chosen game as itself with that game's flags, logs it to `~/Library/Logs/Warped/`, and shows a pop-up if
+  it fails. An online game asks once for the game's password and keeps it in
+  `~/Library/Application Support/Warped/game_password`; a server that refuses it makes the game ask again.
 - Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
   `Esc` or `N` goes back to the game). The window's close button quits at once.
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own

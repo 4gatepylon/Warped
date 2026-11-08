@@ -8,8 +8,8 @@
 //! each frame and receives the others, the game's state and the scores.
 //!
 //! Interface: `DEFAULT_PORT`, `PROTOCOL_VERSION`, `MAX_PLAYER_COUNT`, `MAX_CONSOLE_COUNT`,
-//! `TEAM_NAMES`, `get_team`, `read_game_password`, `bind_server`, `serve`, `find_server`, `Client`, `RemotePlayer`,
-//! `GameState`, `Score`, `NetEvent`.
+//! `TEAM_NAMES`, `PasswordRefused`, `get_team`, `read_game_password`, `bind_server`, `serve`,
+//! `find_server`, `Client`, `RemotePlayer`, `GameState`, `Score`, `NetEvent`.
 //!
 //! Example: `let mut client = Client::Connect(net::find_server(Duration::from_secs(5))?)?;`
 //!
@@ -1118,7 +1118,7 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
     }
     if found.is_empty() {
         return Err(format!(
-            "net: no server announced itself within {} s; start one with --host, or join with --join <address>",
+            "net: no server announced itself within {} s; start one with --serve, or join with --join <address>; if macOS asked whether this app may find devices on the local network, allow it in System Settings, Privacy & Security, Local Network",
             timeout.as_secs()
         )
         .into());

@@ -287,7 +287,7 @@ pub struct Map {
 }
 
 /// `MapName` is which map to play, from `common/maps/`.
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum MapName {
     HouseDemo,
     LunarSurface,
