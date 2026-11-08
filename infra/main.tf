@@ -9,6 +9,8 @@
 #     make apply-infra
 #
 # Must know:
+#     - With has_game_servers false, only the download page's bucket and the budget exist: no VM, IP,
+#       firewall or server bucket.
 #     - The VM's startup script (`startup.sh.tftpl`) runs on every boot and fetches the newest
 #       bundle, so resetting the VM deploys a new server.
 #     - The e2-micro VM, its 30 GB of standard disk and 200 GB a month of Standard-tier traffic are
@@ -33,6 +35,9 @@ provider "google" {
   zone                  = var.zone
   billing_project       = var.project_id
   user_project_override = true
+  default_labels = {
+    app = "warped"
+  }
 }
 
 locals {
@@ -40,19 +45,22 @@ locals {
     port = tonumber(split(" ", line)[0])
     map  = split(" ", line)[1]
   }]
-  game_server_tag = "warped-game-server"
+  game_server_tag   = "warped-game-server"
+  game_server_count = var.has_game_servers ? 1 : 0
 }
 
 data "google_project" "this" {}
 
 resource "google_compute_network" "warped" {
+  count                   = local.game_server_count
   name                    = "warped"
   auto_create_subnetworks = true
 }
 
 resource "google_compute_firewall" "games" {
+  count         = local.game_server_count
   name          = "warped-games"
-  network       = google_compute_network.warped.id
+  network       = google_compute_network.warped[0].id
   source_ranges = ["0.0.0.0/0"]
   target_tags   = [local.game_server_tag]
   allow {
@@ -62,8 +70,9 @@ resource "google_compute_firewall" "games" {
 }
 
 resource "google_compute_firewall" "ssh_through_iap" {
+  count         = local.game_server_count
   name          = "warped-ssh-through-iap"
-  network       = google_compute_network.warped.id
+  network       = google_compute_network.warped[0].id
   source_ranges = ["35.235.240.0/20"]
   target_tags   = [local.game_server_tag]
   allow {
@@ -73,6 +82,7 @@ resource "google_compute_firewall" "ssh_through_iap" {
 }
 
 resource "google_compute_address" "game_server" {
+  count        = local.game_server_count
   name         = "warped-game-server"
   region       = var.region
   network_tier = "STANDARD"
@@ -92,6 +102,7 @@ resource "google_storage_bucket_iam_member" "site_is_public" {
 }
 
 resource "google_storage_bucket" "server" {
+  count                       = local.game_server_count
   name                        = "${var.project_id}-server"
   location                    = var.region
   uniform_bucket_level_access = true
@@ -100,17 +111,20 @@ resource "google_storage_bucket" "server" {
 }
 
 resource "google_service_account" "game_server" {
+  count        = local.game_server_count
   account_id   = "warped-game-server"
   display_name = "Warped game server"
 }
 
 resource "google_storage_bucket_iam_member" "game_server_reads_bundle" {
-  bucket = google_storage_bucket.server.name
+  count  = local.game_server_count
+  bucket = google_storage_bucket.server[0].name
   role   = "roles/storage.objectViewer"
-  member = "serviceAccount:${google_service_account.game_server.email}"
+  member = "serviceAccount:${google_service_account.game_server[0].email}"
 }
 
 resource "google_compute_instance" "game_server" {
+  count                     = local.game_server_count
   name                      = "warped-game-server"
   machine_type              = "e2-micro"
   zone                      = var.zone
@@ -124,20 +138,20 @@ resource "google_compute_instance" "game_server" {
     }
   }
   network_interface {
-    network = google_compute_network.warped.id
+    network = google_compute_network.warped[0].id
     access_config {
-      nat_ip       = google_compute_address.game_server.address
+      nat_ip       = google_compute_address.game_server[0].address
       network_tier = "STANDARD"
     }
   }
   service_account {
-    email  = google_service_account.game_server.email
+    email  = google_service_account.game_server[0].email
     scopes = ["cloud-platform"]
   }
   metadata = {
     game-password = var.game_password
     startup-script = templatefile("${path.module}/startup.sh.tftpl", {
-      bucket = google_storage_bucket.server.name
+      bucket = google_storage_bucket.server[0].name
       games  = local.games
     })
   }
