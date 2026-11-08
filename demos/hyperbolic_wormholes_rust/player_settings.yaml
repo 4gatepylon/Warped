@@ -1,7 +1,7 @@
 # `player_settings.yaml` holds each player's own choices in the Rust demo: which keys do what, how fast the
-# mouse turns the view, the head bob, motion blur, the cyan tint after a wormhole, and how strongly a hit
-# reddens, shakes and blurs the screen. They change only that player's experience; the numbers that shape play for everyone are the
-# server's, in `server_settings.yaml`.
+# mouse turns the view, the head bob, motion blur, the colour shift inside a wormhole, and how strongly a
+# hit reddens, shakes and blurs the screen. They change only that player's experience; the numbers that
+# shape play for everyone are the server's, in `server_settings.yaml`.
 #
 # Interface:
 #     Copy this file, change it, and start the game with the copy: `PLAYER_SETTINGS=` with
@@ -44,8 +44,7 @@ view:
   look_rad_per_px: 0.0025  # How far the view turns for each pixel the mouse moves (mouse sensitivity).
   motion_blur_s: 0.01  # How long motion smears (0 for none).
   edge_stretch_frac: 1.0  # How strongly the view stretches as you slow down at the map's edge (0 for none).
-  wormhole_tint_frac: 1.0  # How strongly the view blueshifts toward cyan as you come out of a wormhole, 0 to 1 (0 for none).
-  wormhole_tint_s: 1.5  # Seconds that blueshift takes to fade (0 for none).
+  wormhole_tint_frac: 1.0  # How strongly the view blueshifts (moving forward) or redshifts (backward) inside a wormhole, 0 to 1 (0 for none).
   head_bob:
     walk_depth_m: 0.08  # How far the eye dips at each step while walking (0 for none).
     sprint_depth_m: 0.14  # How far the eye dips at each step while sprinting (0 for none).

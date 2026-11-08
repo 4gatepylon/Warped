@@ -219,8 +219,9 @@ These values are configurable and may change after playtests.
 - A shot fires a bullet (an energy pulse) with minimal drop, and shows a laser along its path with
   no drop.
 - Warp objects bend bullets and lasers as they bend light, and both pass through wormholes.
-- A player coming out of a wormhole sees the world blueshift toward cyan, as if moving at a good fraction of
-  light speed, fading back within about 1.5 s. Only that player sees it.
+- A player moving inside a wormhole mouth sees the world Doppler-shift, as if moving at a good fraction of light
+  speed: bluish cyan walking forward, red walking backward, stronger deeper in and faster, none standing still or
+  outside the mouth. Only that player sees it.
 
 ## Weapons
 

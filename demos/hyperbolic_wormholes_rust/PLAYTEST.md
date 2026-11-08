@@ -91,11 +91,13 @@ The bars in the bottom left (health, then the gun's ammo, then sprint energy) le
 colours. Each hit sends a reddish-orange pulse down the health bar, right to left. While you sprint, blue pulses run
 down the energy bar; while it refills, fainter ones run up it. The ammo bar doesn't pulse.
 
-Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and your whole view turns
-cyan as you come out, as if blueshifted by moving fast toward what you see: reds turn green, greys turn cyan, the
-sky gets a faint teal glow, most of all in the middle of the screen. It fades back within 1.5 s, and only the
-player who went through sees it. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off);
-`view.wormhole_tint_s` in `player_settings.yaml` sets how long it lasts.
+Walk into a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, within about 15 m of
+its centre, your view Doppler-shifts as if you moved near light speed. Walking forward it turns a bluish cyan, deep
+blue in the middle of the screen (reds turn green); walking backward it turns red. It grows toward the throat and
+with your speed (sprinting deepens it), goes away the moment you stand still, and is gone once you are out of the
+mouth's reach on the other side. Only you see your own shift. In the menu, `wormhole tint 0-1` sets how strong it
+is (0 turns it off). If your saved `~/.config/warped/player_settings.yaml` still has a `wormhole_tint_s` line, the
+game names it and stops: delete that line.
 
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
 the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,

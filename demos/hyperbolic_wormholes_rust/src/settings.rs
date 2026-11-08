@@ -36,11 +36,10 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 10] = [
     "rifle.recoil_settle_s",
     "respawn.delay_s",
 ];
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
     "view.wormhole_tint_frac",
-    "view.wormhole_tint_s",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
     "hit_effects.red_frac",
@@ -194,8 +193,7 @@ pub struct MapEdgeSettings {
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
-/// blueshifts toward cyan just after going through a wormhole (0 to 1) and how long that takes to
-/// fade, and the head bob.
+/// blue- or redshifts while moving inside a wormhole mouth (0 to 1), and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
@@ -203,7 +201,6 @@ pub struct ViewSettings {
     pub motion_blur_s: f64,
     pub edge_stretch_frac: f64,
     pub wormhole_tint_frac: f64,
-    pub wormhole_tint_s: f64,
     pub head_bob: HeadBobSettings,
 }
 
@@ -453,7 +450,7 @@ mod tests {
     //! | Keys | all present, one unknown, one missing | `builtin_settings_read_and_survive_json`, `unknown_and_missing_keys_fail` |
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise that shrinks with heat) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
-    //! | Wormhole tint strength | 0 (with a fade of 0 s), between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -539,9 +536,8 @@ mod tests {
 
     #[test]
     fn wormhole_tint_takes_0_to_1() {
-        let none: String = BUILTIN_PLAYER_YAML
-            .replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0")
-            .replace("wormhole_tint_s: 1.5", "wormhole_tint_s: 0");
+        let none: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0");
         assert!(PerPlayerSettings::FromYaml(&none, "test").is_ok());
         let half: String =
             BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0.5");
