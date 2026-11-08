@@ -491,17 +491,19 @@ pub fn describe_shot(world: &VoxelWorld, shot: &Shot) -> String {
 }
 
 /// `describe_voxel_laser` gives the HUD's line for this player's laser in a shared view: the
-/// player it hit, or what else it hit in `world` (the map without avatars), or `None` with the
-/// laser off. A shot that hit an avatar is always a hit on a player, so the map's structures are
-/// only looked up for shots that hit the map.
+/// player or thrown wormhole's ball it hit, or what else it hit in `world` (the map without
+/// avatars or balls), or `None` with the laser off. A shot that hit an avatar or a ball is always
+/// a hit on a player or a ball, so the map's structures are only looked up for shots that hit the
+/// map.
 ///
 /// Example: `let line = multiplayer::describe_voxel_laser(&world, &view);`
 pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Option<String> {
-    match (view.hit_player_id, view.shot.as_ref()) {
-        (Some(victim_id), _) => Some(format!("hits player {victim_id}")),
-        (None, Some(shot)) => Some(describe_shot(world, shot)),
-        (None, None) => None,
-    }
+    let shot: &Shot = view.shot.as_ref()?;
+    Some(match (view.hit_player_id, view.hit_marker) {
+        (Some(victim_id), _) => format!("hits player {victim_id}"),
+        (None, Some(_)) => format!("hits a thrown wormhole after {:.1} m", shot.length_m),
+        (None, None) => describe_shot(world, shot),
+    })
 }
 
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
@@ -639,7 +641,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Player id | each id up to `MAX_PLAYER_COUNT` | `spawn_points_are_apart_and_clear_of_mouths` |
     //! | Laser aim | at another player, past them, strayed past them by shot noise | `a_laser_hits_the_player_it_points_at`, `a_strayed_shot_misses_alike_in_both_windows` |
-    //! | What a shot hits past the players | a thrown wormhole's marker (named by its index) | `a_shot_at_a_marker_names_it` |
+    //! | What a shot hits past the players | a thrown wormhole's marker (named by its index, described for the HUD) | `a_shot_at_a_marker_names_it` |
     //! | Map | the house, Lunar Surface (a hit on another player's body, described for the HUD) | `a_laser_hits_the_player_it_points_at`, `a_lunar_laser_hit_on_a_player_is_described` |
     //! | Body colour | players of both teams, with ids whose old per-id colours differ from their team's | `players_are_drawn_in_their_teams_colours` |
     //! | Whose laser | this player's, another player's on Lunar Surface (drawn from their gun, out of their own body; strayed as in its shooter's window) | the tests above, `other_players_lasers_leave_their_bodies`, `a_strayed_shot_misses_alike_in_both_windows` |
@@ -737,6 +739,8 @@ mod tests {
             (64, 40),
         );
         assert_eq!((view.hit_player_id, view.hit_marker), (None, Some(0)));
+        let line: String = describe_voxel_laser(&world, &view).expect("the laser is on");
+        assert!(line.starts_with("hits a thrown wormhole"), "{line}");
     }
 
     #[test]
