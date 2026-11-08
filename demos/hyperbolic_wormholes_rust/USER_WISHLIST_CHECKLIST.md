@@ -11,6 +11,19 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
+  curvature by default (and at most twice). Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
+- [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
+  of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
+- [~] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
+  character, and the player controls it from there, seeing their own character. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
+- [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
+  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
+  wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
 - [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
   (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
 - [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
@@ -54,8 +67,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Open
 
-- [ ] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
-  curvature by default (and at most twice).
 - [ ] **W-40 Graphics caveats.** Fix the Lunar Surface graphics caveats listed in `PLAYTEST.md` ("Graphics on Lunar
   Surface, to fix in later pull requests"); slightly wrong graphics were accepted for playtesting "and we can fix
   them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
@@ -102,15 +113,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-- [ ] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
-  character, and the player controls it from there, seeing their own character.
-- [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
-  of the ground, just barely translucent, to mark out the real zones.
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
-- [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
-  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
-  wedge-shaped capital ship), not copies of the films' models, and without their names in the code.
 
 ## Pending user review
 
