@@ -41,8 +41,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `make serve-game` runs only the server, without a window, and prints this computer's address and the exact
   `make join-game` commands to give the others (`SERVER=127.0.0.1` on the same computer). Leave it running in its
   terminal; `Ctrl-C` ends the game.
-- To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight), copy
-  `server_settings.yaml`, change its numbers, and start the server with it:
+- To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight, thrown
+  wormholes), copy `server_settings.yaml`, change its numbers, and start the server with it:
   `make serve-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml`.
   Everyone who joins plays by the server's settings.
 - Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`. The
