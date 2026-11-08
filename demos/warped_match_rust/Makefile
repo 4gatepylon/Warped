@@ -151,7 +151,7 @@ endif
 # makes .levels/<name> a git worktree of the level's branch tip; LEVEL_SOURCE=checkout makes it a symlink to
 # this checkout, so the levels come from demos/<name>_rust/ here (e.g. once merged into staging/user-4gatepylon).
 LEVEL_BRANCHES := snow_planet:devin/snow-planet-demo dust:devin/dust-demo city_sphere:devin/city-sphere-demo dark_forest:devin/dark-forest-demo
-LEVEL_SOURCE ?= branches
+LEVEL_SOURCE ?= checkout
 
 levels:
 ifeq ($(LEVEL_SOURCE),checkout)

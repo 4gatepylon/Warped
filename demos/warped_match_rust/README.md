@@ -9,7 +9,9 @@ the progression in each player's match window. W-123.
 It is a copy of `demos/hyperbolic_wormholes_rust/` (first commit on the branch, verbatim) plus
 the match (`src/match_state.rs`, `src/match_flow.rs`, `src/match_menu.rs`, `match_levels.yaml`)
 and the level interface below added to the copied level code. All five levels are real: Lunar
-Surface is this copy; the other four are built from their branches by `make levels`.
+Surface is this copy; `make levels` builds the other four from this checkout's `demos/<level>_rust/`
+(`LEVEL_SOURCE=checkout`, the default since they were merged into `staging/user-4gatepylon`), or from
+their branches with `LEVEL_SOURCE=branches`.
 
 ## Play
 
@@ -33,13 +35,12 @@ stays open 5 s to show the win, closes, and the match window shows the progressi
 round. `make e2e-match` plays a whole match of two bots with consoles off in 1 s.
 
 `make levels` puts each branch level in `.levels/<name>/` and builds it there; `match_levels.yaml`
-reads `.levels/<name>/demos/<name>_rust/.build/release/<binary>` and its `map_picture`. With the
-default `LEVEL_SOURCE=branches`, `.levels/<name>` is a git worktree of the level's branch tip
-(`LEVEL_BRANCHES` in the Makefile). Once the levels are merged into `staging/user-4gatepylon`, use
-`make levels LEVEL_SOURCE=checkout` (and `make serve-match LEVEL_SOURCE=checkout`): `.levels/<name>`
-becomes a symlink to this checkout, so the match builds and runs `demos/<name>_rust/` from the same
-checkout, and the yaml needs no change. Make `checkout` the default then, and drop `branches`
-when no level is developed on its own branch any more.
+reads `.levels/<name>/demos/<name>_rust/.build/release/<binary>` and its `map_picture`. The default
+`LEVEL_SOURCE=checkout` makes `.levels/<name>` a symlink to this checkout, so the match builds and runs
+`demos/<name>_rust/` from the same checkout (the levels are merged into `staging/user-4gatepylon`).
+`LEVEL_SOURCE=branches` instead makes it a git worktree of the level's branch tip (`LEVEL_BRANCHES` in the
+Makefile), for a level developed on its own branch. Switching modes needs `git worktree remove .levels/<name>`
+first.
 
 ## The progression page
 
