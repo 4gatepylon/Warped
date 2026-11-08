@@ -10,6 +10,15 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom").
+  Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/scene-haze-soft-shadows`, 2026-11-07.
+- [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
+  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
+  cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
+  `claude/square-shapes`, 2026-11-07.
+- [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
+  (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
 - [~] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
   scene lighting. Claimed by Claude Code (session
   `5cf069f6-934c-466e-93ea-854879c2feaa`), branch `claude/gun-scene-lighting`, 2026-11-07.
