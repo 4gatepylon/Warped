@@ -1,0 +1,1169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warped preliminary design deck</title>
+<style>
+:root {
+  --bg: #090e1c; --surface: #111933; --surface-2: #19234a; --ink: #e8ecf6; --muted: #97a1bb;
+  --faint: #56617f; --line: #2a3560; --corridor: rgba(255, 255, 255, 0.09);
+  --blue: #4f8dff; --blue-soft: rgba(79, 141, 255, 0.16);
+  --red: #ff5d5d; --red-soft: rgba(255, 93, 93, 0.16);
+  --purple: #b07cff; --purple-soft: rgba(176, 124, 255, 0.16);
+  --glass: #7fd6ff; --worm: #4fe0c8; --gold: #ffc857;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #04060d; color: var(--ink);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+#stage { position: absolute; left: 50%; top: 50%; width: 1280px; height: 720px; transform-origin: 50% 50%; }
+.slide { position: absolute; inset: 0; display: none; flex-direction: column; padding: 38px 60px 54px;
+  overflow: hidden; border-radius: 6px;
+  background: radial-gradient(900px 520px at 88% -12%, #1b2756 0%, transparent 62%), var(--bg); }
+.slide.is-active { display: flex; }
+.kicker { margin: 0; color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+h1 { margin: 6px 0 8px; font-size: 38px; font-weight: 700; letter-spacing: -0.01em; }
+.sub { margin: 0 0 18px; max-width: 1060px; color: var(--muted); font-size: 18px; line-height: 1.4; }
+.sub b, .rules b { color: var(--ink); }
+.row { display: flex; gap: 28px; flex: 1; min-height: 0; }
+.col { display: flex; flex-direction: column; gap: 10px; }
+.panel { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line);
+  border-radius: 14px; background: rgba(17, 25, 51, 0.6); }
+.panel h3 { margin: 0; font-size: 16px; }
+.panel h3 span { color: var(--muted); font-weight: 500; }
+.caption { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.4; }
+.note { margin: 12px 0 0; color: var(--muted); font-size: 14px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { font-family: inherit; }
+svg text:not([fill]) { fill: var(--ink); }
+svg text:not([font-size]) { font-size: 13px; }
+svg text.label { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; }
+svg text.small { font-size: 11px; }
+svg text.label:not([fill]), svg text.small:not([fill]) { fill: var(--muted); }
+.blue { color: var(--blue); } .red { color: var(--red); } .purple { color: var(--purple); }
+.level-grid { display: grid; grid-template-columns: repeat(5, 1fr); text-align: center; margin-top: 10px; }
+.level-grid h2 { margin: 0; font-size: 20px; }
+.level-grid .meta { margin: 2px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.level-grid p { margin: 3px 0; color: var(--muted); font-size: 14px; }
+.rules { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 14px; font-size: 17px; line-height: 1.4; color: var(--muted); }
+.legend { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; font-size: 14px; color: var(--muted); }
+.console-table { display: grid; grid-template-columns: auto auto auto; gap: 10px 18px; align-items: center; font-size: 17px; }
+.console-table .head { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.pips i { display: inline-block; width: 16px; height: 16px; margin-right: 5px; border-radius: 4px; background: currentColor; }
+.facts { margin: 6px 0 0; padding-left: 20px; color: var(--muted); font-size: 16px; line-height: 1.5; }
+.weapon { gap: 16px; padding: 22px 24px; }
+.weapon h3 { font-size: 26px; }
+.weapon .silhouette { width: 340px; }
+.stats { display: grid; grid-template-columns: 170px 1fr; gap: 12px 12px; margin: 6px 0 0; font-size: 18px; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; }
+.heat i { display: inline-block; width: 7px; height: 15px; margin-right: 2px; border-radius: 2px; background: var(--gold); }
+.heat i.maybe { background: transparent; border: 1px solid var(--gold); }
+.chips { display: flex; gap: 12px; margin-top: 16px; }
+.chips span { flex: 1; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 14px; text-align: center; }
+.laser-fade { animation: laser-fade 2s ease-out infinite; }
+.laser-pulse { animation: laser-pulse 0.45s linear infinite; }
+@keyframes laser-fade { 0% { opacity: 1; } 80%, 100% { opacity: 0.06; } }
+@keyframes laser-pulse { to { stroke-dashoffset: -84; } }
+@media (prefers-reduced-motion: reduce) { .laser-fade, .laser-pulse { animation: none; } }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 16px; }
+.tile { margin: 0; }
+.tile .frame { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.tile img, .tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tile figcaption { margin-top: 6px; font-size: 14px; }
+.tile figcaption small { display: block; color: var(--faint); font-size: 11px; }
+.tile .empty-text { display: none; position: absolute; inset: 0; padding: 12px; align-items: center; justify-content: center;
+  text-align: center; color: var(--muted); font-size: 13px; border: 2px dashed var(--line); border-radius: 10px; }
+.tile.is-empty img, .tile.is-empty video { display: none; }
+.tile.is-empty .empty-text { display: flex; }
+.tile a { color: inherit; }
+.demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; width: 620px; }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.92em; }
+.nav { position: absolute; right: 22px; bottom: 14px; display: flex; gap: 10px; align-items: center; color: var(--faint); font-size: 13px; z-index: 2; }
+.nav button { width: 30px; height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.brand { position: absolute; left: 60px; bottom: 18px; color: var(--faint); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; z-index: 2; }
+@media print {
+  @page { size: 1280px 720px; margin: 0; }
+  html, body { overflow: visible; height: auto; }
+  #stage { position: static; transform: none !important; }
+  .slide { position: relative; display: flex; width: 1280px; height: 720px; break-after: page; border-radius: 0; }
+  .nav { display: none; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <filter id="glow" filterUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: #97a1bb"/></marker>
+    <marker id="arrow-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: #e8ecf6"/></marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: #4f8dff"/></marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: #ff5d5d"/></marker>
+    <marker id="arrow-glass" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: #7fd6ff"/></marker>
+    <linearGradient id="beam-fade" gradientUnits="userSpaceOnUse" x1="8" x2="512" y1="0" y2="0">
+      <stop offset="0" stop-color="#4f8dff" stop-opacity="1"/><stop offset="1" stop-color="#4f8dff" stop-opacity="0.2"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<div id="stage">
+
+<section class="slide">
+  <p class="kicker">Warped · game design</p>
+  <h1>One map, five levels</h1>
+  <p class="sub">Each level curves space its own way. Blue and red each own two levels, and City Sphere, in the middle, belongs to neither. Deeper levels are bigger, more complex and slightly easier for their owner to defend.</p>
+  <svg id="map-svg" viewBox="0 0 1160 236"></svg>
+  <div class="level-grid">
+    <div><h2>Dust</h2><p class="meta blue">Blue · depth 2</p><p>Hyperbolic space</p><p>Black holes, wormholes</p><p>Very large · long range</p><p>5 consoles</p></div>
+    <div><h2>Snow Planet</h2><p class="meta blue">Blue · depth 1</p><p>Flat, looping (T² × ℝ)</p><p>Black holes, wormholes</p><p>Large · mid range</p><p>4 consoles</p></div>
+    <div><h2>City Sphere</h2><p class="meta purple">Neutral · depth 0</p><p>Inside a hollow sphere</p><p>No warp objects</p><p>Smallest · close quarters</p><p>4 consoles</p></div>
+    <div><h2>Dark Forest</h2><p class="meta red">Red · depth 1</p><p>Flat, looping (T² × ℝ)</p><p>Black holes, wormholes</p><p>Large · mid range</p><p>4 consoles</p></div>
+    <div><h2>Lunar Surface</h2><p class="meta red">Red · depth 2</p><p>Hyperbolic space</p><p>Black holes, wormholes</p><p>Very large · long range</p><p>5 consoles</p></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">Match flow</p>
+  <h1>The wavefront</h1>
+  <p class="sub">Each team defends its own levels and attacks the other's. A team's <b>wavefront</b> is the next level it must win on the other side, and it only moves deeper.</p>
+  <div class="row">
+    <div class="col" style="width: 420px">
+      <ol class="rules">
+        <li><b>Round 1 is City Sphere</b>, the only level played once. The winner attacks first.</li>
+        <li>Every later round is on the <b>attacker's wavefront</b>.</li>
+        <li><b>Attacker wins:</b> its wavefront moves one level deeper. Winning the deepest level wins the match.</li>
+        <li><b>Defender wins:</b> the roles swap, and the new attacker picks up at its own wavefront.</li>
+      </ol>
+      <div class="legend">
+        <span><span class="blue">▼</span> <span class="red">▼</span> filled: the attacker's wavefront, played this round</span>
+        <span><span class="blue">▽</span> <span class="red">▽</span> hollow: the other team's wavefront, waiting</span>
+      </div>
+    </div>
+    <svg id="wavefront-svg" viewBox="0 0 700 440" style="flex: 1"></svg>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">Winning a level</p>
+  <h1>Take down the enemy pylon</h1>
+  <p class="sub">Each team has one pylon per level, next to its spawn. A team wins the level by deactivating every console on the other team's pylon.</p>
+  <div class="row">
+    <svg id="pylon-svg" viewBox="0 0 560 420" style="width: 560px; align-self: flex-start"></svg>
+    <div class="col" style="flex: 1; gap: 18px">
+      <div class="console-table">
+        <span class="head">Level</span><span class="head">Consoles</span><span class="head">Holding E</span>
+        <span>Dust</span><span class="pips blue"><i></i><i></i><i></i><i></i><i></i></span><span>50 s</span>
+        <span>Snow Planet</span><span class="pips blue"><i></i><i></i><i></i><i></i></span><span>40 s</span>
+        <span>City Sphere</span><span class="pips purple"><i></i><i></i><i></i><i></i></span><span>40 s</span>
+        <span>Dark Forest</span><span class="pips red"><i></i><i></i><i></i><i></i></span><span>40 s</span>
+        <span>Lunar Surface</span><span class="pips red"><i></i><i></i><i></i><i></i><i></i></span><span>50 s</span>
+      </div>
+      <ul class="facts">
+        <li>A player deactivates one console by holding <b>E</b> for <b>10 s</b>.</li>
+        <li>While holding E, the player must face the pylon and can't shoot.</li>
+        <li>More consoles mean a longer push: deeper levels have 5.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">Players</p>
+  <h1>Respawns and sprinting</h1>
+  <p class="sub">Dying costs more as a round goes on, and sprinting runs on energy (not tied to the guns' heat) that a kill refills at once. Hover a chart to read its values.</p>
+  <div class="row">
+    <div class="panel"><h3>Respawn wait <span>· steps up every 5 min</span></h3><svg id="respawn-svg" viewBox="0 0 540 290"></svg>
+      <p class="caption">20 s at the start of a round, then 10 s more every 5 minutes. A match lasts at most 30 minutes, so the wait never passes 70 s.</p></div>
+    <div class="panel"><h3>Sprint energy <span>· one example</span></h3><svg id="energy-svg" viewBox="0 0 540 290"></svg>
+      <p class="caption">30 s of sprinting empties a full bar, and 60 s without sprinting refills an empty one. A kill refills it at once; it never goes above full.</p></div>
+  </div>
+  <p class="note">All of these values are configurable and may change after playtests.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">Level template</p>
+  <h1>Blue zone, middle zone, red zone</h1>
+  <p class="sub">Every level splits lengthwise into three zones. The middle zone is the biggest, with 2–3 routes across; the side zones are easy to cross widthwise, so a team can rotate between routes.</p>
+  <div class="row">
+    <div class="panel"><h3>Template <span>· unrolled</span></h3><svg id="zone-flat-svg" viewBox="0 0 360 280"></svg>
+      <p class="caption">Spawn and pylon sit at each end. One middle route is usually a big open area, joined to another route.</p></div>
+    <div class="panel"><h3>Inside a sphere <span>· City Sphere</span></h3><svg id="zone-sphere-svg" viewBox="0 0 360 280"></svg>
+      <p class="caption">Spawns sit at antipodes. The middle zone is the wide band around the sphere between them.</p></div>
+    <div class="panel"><h3>T² × ℝ <span>· Snow Planet, Dark Forest</span></h3><svg id="zone-torus-svg" viewBox="0 0 360 280"></svg>
+      <p class="caption">Opposite edges are glued, so each zone is a pair of bands, and the middle zone gives two ways across.</p></div>
+  </div>
+  <p class="note">Hyperbolic levels (Dust, Lunar Surface) have no set zone shape yet: zones cover the space, with the spawns far apart.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">Example layout · a sketch, not a final design</p>
+  <h1>Snow Planet, blue spawn to red spawn</h1>
+  <p class="sub">Half of the looping level. Past the dashed edges, the level wraps around to its second middle band, a second way across.</p>
+  <svg id="example-svg" viewBox="0 0 1160 420"></svg>
+  <p class="note">Mid range: rooms, ridges and the black hole's lensing break up sight lines, and the wormhole pair is a fast way between the north and south routes.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">Look and feel</p>
+  <h1>Readable, competitive, sci-fi</h1>
+  <p class="sub">Graphics references: team-based multiplayer shooters, several set in space. Clean silhouettes and strong team colors, so lasers and players read at a glance.</p>
+  <div class="tiles">
+    <figure class="tile"><div class="frame"><img alt="Xonotic gameplay on the map Silent Siege" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b9/Xonotic_Game_Play_-_Silent_Siege.jpg/960px-Xonotic_Game_Play_-_Silent_Siege.jpg" onerror="this.closest('.tile').classList.add('is-empty')"><span class="empty-text">Image failed to load</span></div>
+      <figcaption>Xonotic · fast sci-fi arena<small>greewrfdsfsf, Xonotic developers · GPL · Wikimedia Commons</small></figcaption></figure>
+    <figure class="tile"><div class="frame"><img alt="Red Eclipse 2 gameplay" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/6/6d/Red_Eclipse_v2.0.0_Screenshot.png/960px-Red_Eclipse_v2.0.0_Screenshot.png" onerror="this.closest('.tile').classList.add('is-empty')"><span class="empty-text">Image failed to load</span></div>
+      <figcaption>Red Eclipse 2 · team arena, mobility<small>TucanHolmes · CC BY-SA 4.0 · Wikimedia Commons</small></figcaption></figure>
+    <figure class="tile"><div class="frame"><img alt="Unvanquished human team" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c4/Unvanquished-0.52-human-team.jpg/960px-Unvanquished-0.52-human-team.jpg" onerror="this.closest('.tile').classList.add('is-empty')"><span class="empty-text">Image failed to load</span></div>
+      <figcaption>Unvanquished · team-based, space colony<small>Unvanquished developers · CC BY-SA 2.5 · Wikimedia Commons</small></figcaption></figure>
+    <figure class="tile"><div class="frame"><img alt="Xonotic gameplay on the map Newtonian Nightmare" src="https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a5/Xonotic_gameplay_-_Newtonian_Nightmare.jpg/960px-Xonotic_gameplay_-_Newtonian_Nightmare.jpg" onerror="this.closest('.tile').classList.add('is-empty')"><span class="empty-text">Image failed to load</span></div>
+      <figcaption>Xonotic · arena map in space<small>greewrfdsfsf, Xonotic developers · GPLv3 · Wikimedia Commons</small></figcaption></figure>
+    <figure class="tile"><div class="frame"><img alt="Counter-Strike 2" src="images/references/counter_strike_2.jpg" onerror="this.closest('.tile').classList.add('is-empty')"><span class="empty-text">Add a screenshot at images/references/counter_strike_2.jpg</span></div>
+      <figcaption>Counter-Strike 2 · tactical 5v5</figcaption></figure>
+    <figure class="tile"><div class="frame"><img alt="Halo Infinite" src="images/references/halo_infinite.jpg" onerror="this.closest('.tile').classList.add('is-empty')"><span class="empty-text">Add a screenshot at images/references/halo_infinite.jpg</span></div>
+      <figcaption>Halo Infinite · sci-fi arena</figcaption></figure>
+    <figure class="tile"><div class="frame"><img alt="Splitgate" src="images/references/splitgate.jpg" onerror="this.closest('.tile').classList.add('is-empty')"><span class="empty-text">Add a screenshot at images/references/splitgate.jpg</span></div>
+      <figcaption>Splitgate · portals in an arena</figcaption></figure>
+    <figure class="tile"><div class="frame"><img alt="Destiny 2" src="images/references/destiny_2.jpg" onerror="this.closest('.tile').classList.add('is-empty')"><span class="empty-text">Add a screenshot at images/references/destiny_2.jpg</span></div>
+      <figcaption>Destiny 2 · space settings</figcaption></figure>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">Weapons</p>
+  <h1>Two guns, infinite ammo</h1>
+  <p class="sub">Every shot draws a laser in the shooter's team color, so firing gives away where you are. Fire too fast and the gun overheats.</p>
+  <div class="row">
+    <div class="panel weapon">
+      <svg class="silhouette" viewBox="0 0 260 60"><g style="fill: #97a1bb"><polygon points="0,30 40,24 60,24 60,40 40,40 8,46"/><rect x="60" y="22" width="70" height="18" rx="3"/><rect x="130" y="27" width="125" height="6" rx="2"/><rect x="78" y="9" width="52" height="9" rx="4"/><rect x="88" y="17" width="5" height="6"/><rect x="115" y="17" width="5" height="6"/><polygon points="95,40 108,40 102,56 92,56"/></g></svg>
+      <h3>Sniper rifle</h3>
+      <svg viewBox="0 0 520 24"><line class="laser-fade" x1="8" y1="12" x2="512" y2="12" style="stroke: url(#beam-fade); stroke-width: 4; stroke-linecap: round"/></svg>
+      <dl class="stats">
+        <dt>Fire rate</dt><dd>≈1 shot every 2 s</dd>
+        <dt>Overheats after</dt><dd><span class="heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span> ≈8 shots</dd>
+        <dt>Hits to kill</dt><dd>1, head or body</dd>
+        <dt>Laser</dt><dd>Shows once per shot, then fades slowly</dd>
+      </dl>
+    </div>
+    <div class="panel weapon">
+      <svg class="silhouette" viewBox="0 0 260 60"><g style="fill: #97a1bb"><polygon points="20,28 55,24 70,24 70,40 55,40 24,44"/><rect x="70" y="20" width="90" height="22" rx="3"/><rect x="160" y="26" width="70" height="7" rx="2"/><rect x="100" y="13" width="26" height="7" rx="2"/><polygon points="120,42 136,42 141,58 126,58"/><polygon points="88,42 101,42 96,56 85,56"/></g></svg>
+      <h3>Rifle</h3>
+      <svg viewBox="0 0 520 24"><line class="laser-pulse" x1="8" y1="12" x2="512" y2="12" style="stroke: #4f8dff; stroke-width: 4; stroke-dasharray: 26 16; stroke-linecap: round" filter="url(#glow)"/></svg>
+      <dl class="stats">
+        <dt>Fire rate</dt><dd>2–10 shots/s</dd>
+        <dt>Overheats after</dt><dd><span class="heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="maybe"></i><i class="maybe"></i><i class="maybe"></i><i class="maybe"></i><i class="maybe"></i><i class="maybe"></i><i class="maybe"></i><i class="maybe"></i><i class="maybe"></i><i class="maybe"></i></span> 15–25 shots</dd>
+        <dt>Hits to kill</dt><dd>2 to the head, or 10–20 to the body</dd>
+        <dt>Time to kill</dt><dd>At most ≈1–2 s of fire</dd>
+        <dt>Laser</dt><dd>Pulses on and off while firing</dd>
+      </dl>
+    </div>
+  </div>
+  <div class="chips"><span>Infinite ammo; guns overheat</span><span>Team-colored lasers give away the shooter</span><span>Getting hit slows you</span><span>Simplified tactical-shooter rules</span></div>
+</section>
+
+<section class="slide">
+  <p class="kicker">Shooting mechanics</p>
+  <h1>Lasers follow the curve of space</h1>
+  <p class="sub">Bullets (minimal drop) and their lasers (no drop) travel the same paths as light, so where you can see, you can shoot.</p>
+  <div class="row">
+    <div class="panel"><h3>Black holes <span>· depth 1 and 2</span></h3><svg id="shot-hole-svg" viewBox="0 0 360 330"></svg>
+      <p class="caption">One shooter fires a fan of lasers. Close passes curve around the hole, and the closest fall in. Wormholes carry shots to their other mouth.</p></div>
+    <div class="panel"><h3>Inside a sphere <span>· City Sphere</span></h3><svg id="shot-sphere-svg" viewBox="0 0 360 330"></svg>
+      <p class="caption">Gravity pulls outward onto the sphere. Nothing bends light, so lasers fly straight. The glass floor stops shots but not sight.</p></div>
+    <div class="panel"><h3>Hyperbolic <span>· Dust, Lunar Surface</span></h3><svg id="shot-hyperbolic-svg" viewBox="0 0 360 330"></svg>
+      <p class="caption">In the Poincaré disk, equal pillars shrink toward the edge, and two lasers fired side by side, in the same direction, spread apart.</p></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">Prototypes</p>
+  <h1>three.js demos</h1>
+  <p class="sub">Single-file demos in <code>demos/three_js_vibecode_demo/</code>, each shown in its "laser fan" view. Click a screenshot to open the live demo.</p>
+  <div class="row">
+    <div class="demo-grid">
+      <figure class="tile"><a class="frame" href="../../demos/three_js_vibecode_demo/blackholes_laser.html" style="display: block"><img alt="Black hole demo, laser fan" src="images/demo_black_holes.jpg"></a><figcaption>Black holes: lasers bend and fall in</figcaption></figure>
+      <figure class="tile"><a class="frame" href="../../demos/three_js_vibecode_demo/wormholes.html" style="display: block"><img alt="Wormhole demo, laser fan" src="images/demo_wormholes.jpg"></a><figcaption>Wormholes: lasers pass through</figcaption></figure>
+      <figure class="tile"><a class="frame" href="../../demos/three_js_vibecode_demo/hyperbolic_laser.html" style="display: block"><img alt="Hyperbolic demo, laser fan" src="images/demo_hyperbolic.jpg"></a><figcaption>Hyperbolic space: level shots never land</figcaption></figure>
+      <figure class="tile"><a class="frame" href="../../demos/three_js_vibecode_demo/spherical_laser.html" style="display: block"><img alt="Spherical space demo, laser fan" src="images/demo_spherical.jpg"></a><figcaption>Spherical space: lines loop around</figcaption></figure>
+    </div>
+    <figure class="tile" style="flex: 1"><div class="frame"><video src="videos/demo.mp4" controls muted loop playsinline onerror="this.closest('.tile').classList.add('is-empty')"></video><span class="empty-text">Video slot: add a recording at videos/demo.mp4, or present a live demo here.</span></div>
+      <figcaption>Gameplay recording</figcaption></figure>
+  </div>
+</section>
+
+<div class="brand">Warped · preliminary deck</div>
+<div class="nav"><button id="previous-button" aria-label="Previous slide">‹</button><span id="slide-counter"></span><button id="next-button" aria-label="Next slide">›</button></div>
+</div>
+
+<script>
+/**
+ * @file
+ * `index.html` presents Warped's preliminary game design (`../DESIGN.md` at the time) as a slide deck of HTML
+ * and SVG, kept for history; the official deck is `../slides/index.html`.
+ *
+ * Interface:
+ * - Keys: Right, Down, Space and Page Down go forward; Left, Up and Page Up go back; Home and End
+ *   jump to the first and last slide.
+ * - URL hash: `#3` opens the third slide, and the hash follows the current slide.
+ *
+ * Example: open `game_design/slides_preliminary/index.html` in a browser, or print it to get one PDF page per slide.
+ *
+ * Must know:
+ * - Gotchas: the reference tiles and the video slot stay empty until their files exist (see README.md).
+ */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const STAGE_WIDTH_PX = 1280;
+const STAGE_HEIGHT_PX = 720;
+const DEGREES_PER_HALF_TURN = 180;
+const RADIANS_PER_DEGREE = Math.PI / DEGREES_PER_HALF_TURN;
+const TEAM_COLORS = { blue: '#4f8dff', red: '#ff5d5d', purple: '#b07cff' };
+const TEAM_SOFT_COLORS = { blue: 'rgba(79,141,255,0.16)', red: 'rgba(255,93,93,0.16)', purple: 'rgba(176,124,255,0.16)' };
+const INK_COLOR = '#e8ecf6';
+const MUTED_COLOR = '#97a1bb';
+const FAINT_COLOR = '#56617f';
+const LINE_COLOR = '#2a3560';
+const SURFACE_COLOR = '#111933';
+const SURFACE_2_COLOR = '#19234a';
+const CORRIDOR_COLOR = 'rgba(255,255,255,0.09)';
+const GLASS_COLOR = '#7fd6ff';
+const WORM_COLOR = '#4fe0c8';
+const GOLD_COLOR = '#ffc857';
+const DISK_EDGE_T = 0.995;
+const DISK_SAMPLE_COUNT = 120;
+const PHOTON_SPHERE_PER_HORIZON = 1.5;
+const PHOTON_STEP_PX = 0.5;
+const PHOTON_MAX_STEP_COUNT = 4000;
+
+/**
+ * `add_svg` appends a new SVG element to a parent element.
+ * @param {Element} parent The element to append to.
+ * @param {string} tag The SVG tag, such as `circle`.
+ * @param {Object<string, string|number>} attributes The attributes to set on the new element.
+ * @param {string} [text] The text content, for `text` elements.
+ * @return {SVGElement} The new element.
+ * @example add_svg(svg, 'circle', { cx: 10, cy: 10, r: 4, fill: INK_COLOR });
+ */
+function add_svg(parent, tag, attributes, text) {
+  const element = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  if (text !== undefined) element.textContent = text;
+  parent.appendChild(element);
+  return element;
+}
+
+/**
+ * `add_label` appends a centered text label.
+ * @param {Element} parent The element to append to.
+ * @param {number} x The label's anchor x.
+ * @param {number} y The label's baseline y.
+ * @param {string} text The label's text.
+ * @param {Object<string, string|number>} [attributes] Extra attributes, such as `class` or `text-anchor`.
+ * @return {SVGElement} The new `text` element.
+ * @example add_label(svg, 50, 20, 'BLUE', { class: 'label' });
+ */
+function add_label(parent, x, y, text, attributes = {}) {
+  return add_svg(parent, 'text', { x, y, 'text-anchor': 'middle', ...attributes }, text);
+}
+
+/**
+ * `format_points` turns a list of points into an SVG `points` or path string.
+ * @param {Array<Array<number>>} points The points, as `[x, y]` pairs.
+ * @return {string} The points as `x,y x,y …`.
+ * @example add_svg(svg, 'polyline', { points: format_points([[0, 0], [5, 5]]) });
+ */
+function format_points(points) {
+  return points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+}
+
+/**
+ * `draw_spawn` draws a team's spawn as a lettered circle.
+ * @param {Element} parent The element to draw in.
+ * @param {number} x The center x.
+ * @param {number} y The center y.
+ * @param {string} team `blue` or `red`.
+ * @param {number} radius The circle's radius.
+ * @example draw_spawn(svg, 30, 130, 'blue', 11);
+ */
+function draw_spawn(parent, x, y, team, radius) {
+  add_svg(parent, 'circle', { cx: x, cy: y, r: radius, fill: TEAM_SOFT_COLORS[team], stroke: TEAM_COLORS[team], 'stroke-width': 2 });
+  add_label(parent, x, y + radius * 0.4, 'S', { 'font-size': radius * 1.1, 'font-weight': 700, fill: TEAM_COLORS[team] });
+}
+
+/**
+ * `draw_pylon` draws a team's pylon as a hexagon, optionally ringed by its consoles.
+ * @param {Element} parent The element to draw in.
+ * @param {number} x The center x.
+ * @param {number} y The center y.
+ * @param {string} team `blue` or `red`.
+ * @param {number} radius The hexagon's radius.
+ * @param {number} [console_count] How many console squares to draw around the pylon.
+ * @example draw_pylon(svg, 105, 230, 'blue', 14, 4);
+ */
+function draw_pylon(parent, x, y, team, radius, console_count = 0) {
+  const corners = [0, 1, 2, 3, 4, 5].map((k) => {
+    const angle = (60 * k + 30) * RADIANS_PER_DEGREE;
+    return [x + radius * Math.cos(angle), y + radius * Math.sin(angle)];
+  });
+  add_svg(parent, 'polygon', { points: format_points(corners), fill: TEAM_COLORS[team] });
+  for (let k = 0; k < console_count; k++) {
+    const angle = (360 * k / console_count + 45) * RADIANS_PER_DEGREE;
+    const console_x = x + radius * 1.9 * Math.cos(angle);
+    const console_y = y + radius * 1.9 * Math.sin(angle);
+    const half_size = radius * 0.32;
+    add_svg(parent, 'rect', { x: console_x - half_size, y: console_y - half_size, width: 2 * half_size, height: 2 * half_size, rx: 1.5, fill: TEAM_COLORS[team] });
+  }
+}
+
+/**
+ * `draw_black_hole` draws a black hole: its horizon, a faint glow and its photon sphere.
+ * @param {Element} parent The element to draw in.
+ * @param {number} x The center x.
+ * @param {number} y The center y.
+ * @param {number} radius The horizon radius.
+ * @example draw_black_hole(svg, 470, 230, 11);
+ */
+function draw_black_hole(parent, x, y, radius) {
+  add_svg(parent, 'circle', { cx: x, cy: y, r: radius * PHOTON_SPHERE_PER_HORIZON, fill: 'none', stroke: GOLD_COLOR, 'stroke-opacity': 0.45, 'stroke-width': 1, 'stroke-dasharray': '3 3' });
+  add_svg(parent, 'circle', { cx: x, cy: y, r: radius * 1.15, fill: 'none', stroke: GOLD_COLOR, 'stroke-opacity': 0.5, 'stroke-width': 2, filter: 'url(#glow)' });
+  add_svg(parent, 'circle', { cx: x, cy: y, r: radius, fill: '#000', stroke: '#000' });
+}
+
+/**
+ * `draw_wormhole` draws one mouth of a wormhole as a ring.
+ * @param {Element} parent The element to draw in.
+ * @param {number} x The center x.
+ * @param {number} y The center y.
+ * @param {number} radius The mouth's radius.
+ * @example draw_wormhole(svg, 396, 104, 9);
+ */
+function draw_wormhole(parent, x, y, radius) {
+  add_svg(parent, 'circle', { cx: x, cy: y, r: radius, fill: 'rgba(79,224,200,0.15)', stroke: WORM_COLOR, 'stroke-width': 2.5, filter: 'url(#glow)' });
+}
+
+/**
+ * `draw_arrow` draws a straight arrow between two points.
+ * @param {Element} parent The element to draw in.
+ * @param {Array<number>} start The start point, `[x, y]`.
+ * @param {Array<number>} end The end point, `[x, y]`, where the arrowhead is.
+ * @param {string} marker_color The marker's color name: `muted`, `ink`, `blue`, `red` or `glass`.
+ * @param {boolean} [is_double] Whether to also put an arrowhead at the start.
+ * @param {Object<string, string|number>} [attributes] Extra attributes for the line.
+ * @example draw_arrow(svg, [74, 66], [74, 198], 'blue', true);
+ */
+function draw_arrow(parent, start, end, marker_color, is_double = false, attributes = {}) {
+  const line_attributes = { x1: start[0], y1: start[1], x2: end[0], y2: end[1], 'marker-end': `url(#arrow-${marker_color})`, 'stroke-width': 1.6, ...attributes };
+  if (!('stroke' in line_attributes)) line_attributes.stroke = { muted: MUTED_COLOR, ink: INK_COLOR, blue: TEAM_COLORS.blue, red: TEAM_COLORS.red, glass: GLASS_COLOR }[marker_color];
+  if (is_double) line_attributes['marker-start'] = `url(#arrow-${marker_color})`;
+  add_svg(parent, 'line', line_attributes);
+}
+
+/**
+ * `draw_laser` draws a laser path with a glow.
+ * @param {Element} parent The element to draw in.
+ * @param {Array<Array<number>>} points The path's points, as `[x, y]` pairs.
+ * @param {string} team The shooter's team, which colors the laser.
+ * @param {Object<string, string|number>} [attributes] Extra attributes for the polyline.
+ * @example draw_laser(svg, [[0, 0], [100, 40]], 'blue');
+ */
+function draw_laser(parent, points, team, attributes = {}) {
+  add_svg(parent, 'polyline', { points: format_points(points), fill: 'none', stroke: TEAM_COLORS[team], 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', filter: 'url(#glow)', ...attributes });
+}
+
+/**
+ * `move_disk_point` applies to `z` the isometry of the Poincaré disk that takes 0 to `p`.
+ * @param {Array<number>} z A point of the unit disk, as `[x, y]`.
+ * @param {Array<number>} p The point that 0 moves to.
+ * @return {Array<number>} `(z + p) / (1 + conj(p) z)`, as `[x, y]`.
+ * @example move_disk_point([0.5, 0], [0, 0.2]);
+ */
+function move_disk_point(z, p) {
+  const numerator = [z[0] + p[0], z[1] + p[1]];
+  const denominator = [1 + p[0] * z[0] + p[1] * z[1], p[0] * z[1] - p[1] * z[0]];
+  const denominator_norm_squared = denominator[0] ** 2 + denominator[1] ** 2;
+  return [
+    (numerator[0] * denominator[0] + numerator[1] * denominator[1]) / denominator_norm_squared,
+    (numerator[1] * denominator[0] - numerator[0] * denominator[1]) / denominator_norm_squared,
+  ];
+}
+
+/**
+ * `trace_disk_geodesic` samples the Poincaré-disk geodesic through `p` in direction `angle_rad`.
+ * @param {Array<number>} p The start point, inside the unit disk.
+ * @param {number} angle_rad The direction at `p`, in radians.
+ * @param {boolean} is_both_ways Whether to sample backward from `p` too, for the whole line.
+ * @return {Array<Array<number>>} Points of the unit disk along the geodesic.
+ * @example trace_disk_geodesic([-0.5, 0], 0, false);
+ */
+function trace_disk_geodesic(p, angle_rad, is_both_ways) {
+  const points = [];
+  const t_start = is_both_ways ? -DISK_EDGE_T : 0;
+  for (let i = 0; i <= DISK_SAMPLE_COUNT; i++) {
+    const t = t_start + (DISK_EDGE_T - t_start) * i / DISK_SAMPLE_COUNT;
+    points.push(move_disk_point([t * Math.cos(angle_rad), t * Math.sin(angle_rad)], p));
+  }
+  return points;
+}
+
+/**
+ * `find_disk_circle` finds the Euclidean circle that draws a hyperbolic disk in the Poincaré disk.
+ * @param {number} distance The hyperbolic distance of the disk's center from the origin.
+ * @param {number} angle_rad The direction of the disk's center from the origin.
+ * @param {number} radius The disk's hyperbolic radius.
+ * @return {{x: number, y: number, r: number}} The circle's center and radius in the unit disk.
+ * @example find_disk_circle(1.2, Math.PI / 2, 0.3);
+ */
+function find_disk_circle(distance, angle_rad, radius) {
+  const near = Math.tanh((distance - radius) / 2);
+  const far = Math.tanh((distance + radius) / 2);
+  const center = (near + far) / 2;
+  return { x: center * Math.cos(angle_rad), y: center * Math.sin(angle_rad), r: (far - near) / 2 };
+}
+
+/**
+ * `trace_photon` traces a light ray past a black hole with RK4, using x'' = -1.5 r_s h² x / |x|⁵,
+ * whose orbits are exactly those of light in the Schwarzschild metric (u'' + u = 1.5 r_s u²).
+ * @param {Array<number>} start The ray's start, `[x, y]`.
+ * @param {number} angle_rad The ray's direction, in radians.
+ * @param {Array<number>} hole The black hole's center, `[x, y]`.
+ * @param {number} r_s The horizon radius, in the same units.
+ * @param {Array<number>} bounds The drawing's `[width, height]`; the ray stops when it leaves it.
+ * @return {Array<Array<number>>} The ray's points, ending at the horizon or the edge.
+ * @example trace_photon([30, 200], -0.3, [215, 170], 13, [360, 330]);
+ */
+function trace_photon(start, angle_rad, hole, r_s, bounds) {
+  let x = [start[0] - hole[0], start[1] - hole[1]];
+  let v = [Math.cos(angle_rad), Math.sin(angle_rad)];
+  const h_squared = (x[0] * v[1] - x[1] * v[0]) ** 2;
+  const a = (position) => {
+    const r = Math.hypot(position[0], position[1]);
+    const k = -1.5 * r_s * h_squared / r ** 5;
+    return [k * position[0], k * position[1]];
+  };
+  const points = [[...start]];
+  const dt = PHOTON_STEP_PX;
+  for (let step = 0; step < PHOTON_MAX_STEP_COUNT; step++) {
+    const k1x = v, k1v = a(x);
+    const k2x = [v[0] + dt / 2 * k1v[0], v[1] + dt / 2 * k1v[1]], k2v = a([x[0] + dt / 2 * k1x[0], x[1] + dt / 2 * k1x[1]]);
+    const k3x = [v[0] + dt / 2 * k2v[0], v[1] + dt / 2 * k2v[1]], k3v = a([x[0] + dt / 2 * k2x[0], x[1] + dt / 2 * k2x[1]]);
+    const k4x = [v[0] + dt * k3v[0], v[1] + dt * k3v[1]], k4v = a([x[0] + dt * k3x[0], x[1] + dt * k3x[1]]);
+    x = [0, 1].map((i) => x[i] + dt / 6 * (k1x[i] + 2 * k2x[i] + 2 * k3x[i] + k4x[i]));
+    v = [0, 1].map((i) => v[i] + dt / 6 * (k1v[i] + 2 * k2v[i] + 2 * k3v[i] + k4v[i]));
+    const point = [x[0] + hole[0], x[1] + hole[1]];
+    if (step % 4 === 0) points.push(point);
+    if (Math.hypot(x[0], x[1]) < r_s) { points.push(point); break; }
+    if (point[0] < 0 || point[0] > bounds[0] || point[1] < 0 || point[1] > bounds[1]) { points.push(point); break; }
+  }
+  return points;
+}
+
+/**
+ * `draw_sphere_icon` draws the inside-a-sphere space: shell, glass floor and outward gravity.
+ * @param {Element} parent The element to draw in.
+ * @param {number} cx The center x.
+ * @param {number} cy The center y.
+ * @param {number} radius The shell's radius.
+ * @example draw_sphere_icon(svg, 580, 134, 34);
+ */
+function draw_sphere_icon(parent, cx, cy, radius) {
+  add_svg(parent, 'circle', { cx, cy, r: radius, fill: 'none', stroke: MUTED_COLOR, 'stroke-width': 3 });
+  add_svg(parent, 'circle', { cx, cy, r: radius * 0.55, fill: 'none', stroke: GLASS_COLOR, 'stroke-width': 1.5, 'stroke-dasharray': '3 3' });
+  for (let k = 0; k < 6; k++) {
+    const angle = (60 * k + 30) * RADIANS_PER_DEGREE;
+    const direction = [Math.cos(angle), Math.sin(angle)];
+    draw_arrow(parent, [cx + radius * 0.62 * direction[0], cy + radius * 0.62 * direction[1]], [cx + radius * 0.88 * direction[0], cy + radius * 0.88 * direction[1]], 'muted', false, { 'stroke-width': 1.2 });
+  }
+}
+
+/**
+ * `draw_torus_icon` draws the T² × ℝ space: a square with glued edges, a black hole and a wormhole pair.
+ * @param {Element} parent The element to draw in.
+ * @param {number} cx The center x.
+ * @param {number} cy The center y.
+ * @param {number} radius Half the square's side.
+ * @example draw_torus_icon(svg, 348, 134, 40);
+ */
+function draw_torus_icon(parent, cx, cy, radius) {
+  const left = cx - radius, right = cx + radius, top = cy - radius, bottom = cy + radius;
+  add_svg(parent, 'rect', { x: left, y: top, width: 2 * radius, height: 2 * radius, rx: 3, fill: 'none', stroke: MUTED_COLOR, 'stroke-width': 2 });
+  const tick = radius * 0.18;
+  for (const x of [left, right]) draw_arrow(parent, [x, cy + tick], [x, cy - tick], 'ink', false, { 'stroke-width': 2 });
+  for (const y of [top, bottom]) {
+    draw_arrow(parent, [cx - 2 * tick, y], [cx - 0.2 * tick, y], 'ink', false, { 'stroke-width': 2 });
+    draw_arrow(parent, [cx - 0.6 * tick, y], [cx + 1.2 * tick, y], 'ink', false, { 'stroke-width': 2 });
+  }
+  draw_black_hole(parent, cx - radius * 0.35, cy + radius * 0.3, radius * 0.14);
+  draw_wormhole(parent, cx + radius * 0.4, cy - radius * 0.45, radius * 0.12);
+  draw_wormhole(parent, cx + radius * 0.45, cy + radius * 0.45, radius * 0.12);
+  add_svg(parent, 'path', { d: `M${cx + radius * 0.4},${cy - radius * 0.3} Q${cx + radius * 0.75},${cy} ${cx + radius * 0.45},${cy + radius * 0.3}`, fill: 'none', stroke: WORM_COLOR, 'stroke-opacity': 0.6, 'stroke-dasharray': '2 3' });
+}
+
+/**
+ * `draw_hyperbolic_icon` draws hyperbolic space as a Poincaré disk with a grid of geodesics.
+ * @param {Element} parent The element to draw in.
+ * @param {number} cx The center x.
+ * @param {number} cy The center y.
+ * @param {number} radius The disk's radius.
+ * @param {number} [line_count_per_side] How many grid lines to draw on each side of the center.
+ * @example draw_hyperbolic_icon(svg, 116, 134, 54);
+ */
+function draw_hyperbolic_icon(parent, cx, cy, radius, line_count_per_side = 3) {
+  const SPACING = 0.9;
+  add_svg(parent, 'circle', { cx, cy, r: radius, fill: 'rgba(255,255,255,0.03)', stroke: MUTED_COLOR, 'stroke-width': 2 });
+  for (let k = -line_count_per_side; k <= line_count_per_side; k++) {
+    const offset = Math.tanh(k * SPACING / 2);
+    for (const [p, angle] of [[[offset, 0], Math.PI / 2], [[0, offset], 0]]) {
+      const points = trace_disk_geodesic(p, angle, true).map(([x, y]) => [cx + radius * x, cy + radius * y]);
+      add_svg(parent, 'polyline', { points: format_points(points), fill: 'none', stroke: MUTED_COLOR, 'stroke-opacity': 0.55, 'stroke-width': 1 });
+    }
+  }
+}
+
+/**
+ * `draw_map_slide` draws the five levels in a line, grouped by territory.
+ * @example draw_map_slide();
+ */
+function draw_map_slide() {
+  const svg = document.getElementById('map-svg');
+  const NODE_Y = 134;
+  const COLUMN_WIDTH = 232;
+  const radius_by_depth = [44, 58, 72];
+  const levels = [
+    { team: 'blue', depth: 2, space: 'hyperbolic' }, { team: 'blue', depth: 1, space: 'torus' },
+    { team: 'purple', depth: 0, space: 'sphere' }, { team: 'red', depth: 1, space: 'torus' },
+    { team: 'red', depth: 2, space: 'hyperbolic' },
+  ];
+  add_svg(svg, 'rect', { x: 4, y: 4, width: 2 * COLUMN_WIDTH - 8, height: 228, rx: 16, fill: TEAM_SOFT_COLORS.blue });
+  add_svg(svg, 'rect', { x: 2 * COLUMN_WIDTH + 4, y: 4, width: COLUMN_WIDTH - 8, height: 228, rx: 16, fill: TEAM_SOFT_COLORS.purple });
+  add_svg(svg, 'rect', { x: 3 * COLUMN_WIDTH + 4, y: 4, width: 2 * COLUMN_WIDTH - 8, height: 228, rx: 16, fill: TEAM_SOFT_COLORS.red });
+  add_label(svg, COLUMN_WIDTH, 28, 'BLUE TERRITORY · NATURE AND DESOLATION', { class: 'label', fill: TEAM_COLORS.blue });
+  add_label(svg, 2.5 * COLUMN_WIDTH, 28, 'NEUTRAL · CITY', { class: 'label', fill: TEAM_COLORS.purple });
+  add_label(svg, 4 * COLUMN_WIDTH, 28, 'RED TERRITORY · BASES', { class: 'label', fill: TEAM_COLORS.red });
+  add_svg(svg, 'line', { x1: COLUMN_WIDTH / 2, y1: NODE_Y, x2: 4.5 * COLUMN_WIDTH, y2: NODE_Y, stroke: LINE_COLOR, 'stroke-width': 3 });
+  levels.forEach((level, i) => {
+    const cx = (i + 0.5) * COLUMN_WIDTH;
+    const radius = radius_by_depth[level.depth];
+    add_svg(svg, 'circle', { cx, cy: NODE_Y, r: radius, fill: SURFACE_COLOR, stroke: TEAM_COLORS[level.team], 'stroke-width': 3 });
+    if (level.space === 'hyperbolic') draw_hyperbolic_icon(svg, cx, NODE_Y, radius * 0.78);
+    if (level.space === 'torus') draw_torus_icon(svg, cx, NODE_Y, radius * 0.55);
+    if (level.space === 'sphere') draw_sphere_icon(svg, cx, NODE_Y, radius * 0.72);
+  });
+}
+
+/**
+ * `draw_wavefront_slide` draws an example match, one row per round, with each team's wavefront.
+ * @example draw_wavefront_slide();
+ */
+function draw_wavefront_slide() {
+  const svg = document.getElementById('wavefront-svg');
+  const BOX_WIDTH = 74, BOX_HEIGHT = 40, BOX_STEP = 84, FIRST_BOX_X = 56, FIRST_ROW_Y = 50, ROW_STEP = 80, TEXT_X = 486;
+  const level_names = ['Dust', 'Snow', 'City', 'Forest', 'Lunar'];
+  const level_teams = ['blue', 'blue', 'purple', 'red', 'red'];
+  const rounds = [
+    { played: 2, attacker: null, wavefronts: { blue: 3, red: 1 }, winner: 'blue', lines: ['Blue wins City Sphere', 'Blue attacks Dark Forest'] },
+    { played: 3, attacker: 'blue', wavefronts: { blue: 3, red: 1 }, winner: 'blue', lines: ['Blue wins as attacker', 'Its wavefront moves deeper'] },
+    { played: 4, attacker: 'blue', wavefronts: { blue: 4, red: 1 }, winner: 'red', lines: ['Red wins as defender', 'Roles swap: red attacks'] },
+    { played: 1, attacker: 'red', wavefronts: { blue: 4, red: 1 }, winner: 'blue', lines: ['Blue wins as defender', 'Blue picks up at Lunar Surface'] },
+    { played: 4, attacker: 'blue', wavefronts: { blue: 4, red: 1 }, winner: 'blue', lines: ['Blue takes the deepest level', 'Blue wins the match'] },
+  ];
+  level_names.forEach((name, i) => add_label(svg, FIRST_BOX_X + i * BOX_STEP + BOX_WIDTH / 2, 16, name.toUpperCase(), { class: 'label', fill: TEAM_COLORS[level_teams[i]] }));
+  rounds.forEach((round, row) => {
+    const top = FIRST_ROW_Y + row * ROW_STEP;
+    add_label(svg, 18, top + BOX_HEIGHT / 2 + 5, `R${row + 1}`, { fill: MUTED_COLOR, 'font-weight': 700, 'font-size': 15 });
+    level_names.forEach((name, i) => {
+      const x = FIRST_BOX_X + i * BOX_STEP;
+      const is_played = i === round.played;
+      const outline_color = is_played ? (round.attacker ? TEAM_COLORS[round.attacker] : INK_COLOR) : LINE_COLOR;
+      add_svg(svg, 'rect', { x, y: top, width: BOX_WIDTH, height: BOX_HEIGHT, rx: 8, fill: TEAM_SOFT_COLORS[level_teams[i]], stroke: outline_color, 'stroke-width': is_played ? 3 : 1, opacity: is_played ? 1 : 0.6 });
+      add_label(svg, x + BOX_WIDTH / 2, top + BOX_HEIGHT / 2 + 4, name, { 'font-size': 12, fill: is_played ? INK_COLOR : MUTED_COLOR });
+    });
+    for (const team of ['blue', 'red']) {
+      const center_x = FIRST_BOX_X + round.wavefronts[team] * BOX_STEP + BOX_WIDTH / 2;
+      const is_attacking = round.attacker === team;
+      add_svg(svg, 'polygon', { points: format_points([[center_x - 7, top - 13], [center_x + 7, top - 13], [center_x, top - 3]]), fill: is_attacking ? TEAM_COLORS[team] : 'none', stroke: TEAM_COLORS[team], 'stroke-width': 1.5 });
+    }
+    add_svg(svg, 'text', { x: TEXT_X, y: top + 16, fill: TEAM_COLORS[round.winner], 'font-weight': 700, 'font-size': 14 }, round.lines[0]);
+    add_svg(svg, 'text', { x: TEXT_X, y: top + 35, fill: MUTED_COLOR, 'font-size': 13 }, `→ ${round.lines[1]}`);
+  });
+}
+
+/**
+ * `draw_pylon_slide` draws a pylon with its consoles while a blue player deactivates one.
+ * @example draw_pylon_slide();
+ */
+function draw_pylon_slide() {
+  const svg = document.getElementById('pylon-svg');
+  const PYLON = [270, 215], PYLON_RADIUS = 38, CONSOLE_RING_RADIUS = 112, CONSOLE_HALF_SIZE = 13, PROGRESS_FRAC = 0.6;
+  add_svg(svg, 'rect', { x: 6, y: 6, width: 548, height: 408, rx: 18, fill: TEAM_SOFT_COLORS.red });
+  add_svg(svg, 'text', { x: 26, y: 34, class: 'label', fill: TEAM_COLORS.red }, 'RED ZONE');
+  draw_spawn(svg, 486, 66, 'red', 20);
+  add_label(svg, 486, 106, 'Red spawn', { class: 'small' });
+  const states = ['active', 'active', 'done', 'progress', 'done'];
+  states.forEach((state, k) => {
+    const angle = (-90 + 72 * k) * RADIANS_PER_DEGREE;
+    const x = PYLON[0] + CONSOLE_RING_RADIUS * Math.cos(angle), y = PYLON[1] + CONSOLE_RING_RADIUS * Math.sin(angle);
+    add_svg(svg, 'line', { x1: PYLON[0], y1: PYLON[1], x2: x, y2: y, stroke: state === 'done' ? FAINT_COLOR : TEAM_COLORS.red, 'stroke-opacity': 0.5, 'stroke-width': 2, 'stroke-dasharray': '4 4' });
+    const is_done = state === 'done';
+    add_svg(svg, 'rect', { x: x - CONSOLE_HALF_SIZE, y: y - CONSOLE_HALF_SIZE, width: 2 * CONSOLE_HALF_SIZE, height: 2 * CONSOLE_HALF_SIZE, rx: 5, fill: is_done ? SURFACE_2_COLOR : TEAM_COLORS.red, stroke: is_done ? FAINT_COLOR : TEAM_COLORS.red, filter: is_done ? '' : 'url(#glow)' });
+    if (is_done) {
+      add_svg(svg, 'path', { d: `M${x - 6},${y - 6} L${x + 6},${y + 6} M${x + 6},${y - 6} L${x - 6},${y + 6}`, stroke: MUTED_COLOR, 'stroke-width': 2 });
+    }
+    if (state === 'progress') {
+      const ring_radius = 22, circumference = 2 * Math.PI * ring_radius;
+      add_svg(svg, 'circle', { cx: x, cy: y, r: ring_radius, fill: 'none', stroke: LINE_COLOR, 'stroke-width': 4 });
+      add_svg(svg, 'circle', { cx: x, cy: y, r: ring_radius, fill: 'none', stroke: TEAM_COLORS.blue, 'stroke-width': 4, 'stroke-dasharray': `${PROGRESS_FRAC * circumference} ${circumference}`, transform: `rotate(-90 ${x} ${y})` });
+      const player = [PYLON[0] + 172 * Math.cos(angle), PYLON[1] + 172 * Math.sin(angle)];
+      const facing = angle + Math.PI;
+      const wedge = [-0.45, 0.45].map((spread) => [player[0] + 26 * Math.cos(facing + spread), player[1] + 26 * Math.sin(facing + spread)]);
+      add_svg(svg, 'path', { d: `M${player[0]},${player[1]} L${wedge[0][0]},${wedge[0][1]} L${wedge[1][0]},${wedge[1][1]} Z`, fill: TEAM_COLORS.blue, opacity: 0.3 });
+      add_svg(svg, 'circle', { cx: player[0], cy: player[1], r: 11, fill: TEAM_COLORS.blue });
+      add_svg(svg, 'text', { x: player[0] - 22, y: player[1] - 2, 'text-anchor': 'end', 'font-weight': 700, 'font-size': 15 }, 'Hold E · 10 s');
+      add_svg(svg, 'text', { x: player[0] - 22, y: player[1] + 16, 'text-anchor': 'end', fill: MUTED_COLOR }, "faces the pylon, can't shoot");
+    }
+  });
+  draw_pylon(svg, PYLON[0], PYLON[1], 'red', PYLON_RADIUS);
+  add_label(svg, PYLON[0], PYLON[1] + 4, 'PYLON', { 'font-size': 11, 'font-weight': 700, fill: '#2a0d12' });
+  const legend = [['Active console', TEAM_COLORS.red, false], ['Deactivated', SURFACE_2_COLOR, true]];
+  legend.forEach(([text, color, is_done], i) => {
+    const x = 360, y = 360 + i * 22;
+    add_svg(svg, 'rect', { x, y: y - 11, width: 14, height: 14, rx: 3, fill: color, stroke: is_done ? FAINT_COLOR : color });
+    add_svg(svg, 'text', { x: x + 22, y, fill: MUTED_COLOR }, text);
+  });
+}
+
+/**
+ * `draw_zone_flat` draws the unrolled zone template: zones, spawns, pylons, routes and rotation.
+ * @example draw_zone_flat();
+ */
+function draw_zone_flat() {
+  const svg = document.getElementById('zone-flat-svg');
+  const TOP = 24, HEIGHT = 216, MIDDLE_Y = 132;
+  add_svg(svg, 'rect', { x: 10, y: TOP, width: 76, height: HEIGHT, fill: TEAM_SOFT_COLORS.blue });
+  add_svg(svg, 'rect', { x: 86, y: TOP, width: 188, height: HEIGHT, fill: 'rgba(255,255,255,0.04)' });
+  add_svg(svg, 'rect', { x: 274, y: TOP, width: 76, height: HEIGHT, fill: TEAM_SOFT_COLORS.red });
+  add_svg(svg, 'rect', { x: 10, y: TOP, width: 340, height: HEIGHT, rx: 10, fill: 'none', stroke: LINE_COLOR, 'stroke-width': 2 });
+  add_label(svg, 48, TOP + 18, 'BLUE', { class: 'label', fill: TEAM_COLORS.blue });
+  add_label(svg, 180, TOP + 18, 'MIDDLE', { class: 'label' });
+  add_label(svg, 312, TOP + 18, 'RED', { class: 'label', fill: TEAM_COLORS.red });
+  for (const y of [82, 132, 182]) draw_arrow(svg, [100, y], [260, y], 'ink', true, { 'stroke-dasharray': '5 4', 'stroke-opacity': 0.8 });
+  add_label(svg, 180, 205, '2–3 routes', { class: 'small' });
+  draw_arrow(svg, [76, 64], [76, 200], 'blue', true);
+  draw_arrow(svg, [284, 64], [284, 200], 'red', true);
+  add_label(svg, 48, 228, 'rotate', { class: 'small' });
+  add_label(svg, 312, 228, 'rotate', { class: 'small' });
+  draw_spawn(svg, 30, MIDDLE_Y, 'blue', 11);
+  draw_pylon(svg, 56, MIDDLE_Y, 'blue', 9);
+  draw_spawn(svg, 330, MIDDLE_Y, 'red', 11);
+  draw_pylon(svg, 304, MIDDLE_Y, 'red', 9);
+  draw_arrow(svg, [120, 262], [240, 262], 'muted');
+  add_label(svg, 180, 256, 'lengthwise', { class: 'small' });
+}
+
+/**
+ * `draw_zone_sphere` draws City Sphere's zones as bands around the sphere, with antipodal spawns.
+ * @example draw_zone_sphere();
+ */
+function draw_zone_sphere() {
+  const svg = document.getElementById('zone-sphere-svg');
+  const CX = 180, CY = 138, R = 110, BLUE_EDGE_Y = 84, RED_EDGE_Y = 192;
+  const clip = add_svg(add_svg(svg, 'defs', {}), 'clipPath', { id: 'sphere-clip' });
+  add_svg(clip, 'circle', { cx: CX, cy: CY, r: R });
+  const bands = add_svg(svg, 'g', { 'clip-path': 'url(#sphere-clip)' });
+  add_svg(bands, 'rect', { x: CX - R, y: CY - R, width: 2 * R, height: BLUE_EDGE_Y - (CY - R), fill: TEAM_SOFT_COLORS.blue });
+  add_svg(bands, 'rect', { x: CX - R, y: BLUE_EDGE_Y, width: 2 * R, height: RED_EDGE_Y - BLUE_EDGE_Y, fill: 'rgba(255,255,255,0.04)' });
+  add_svg(bands, 'rect', { x: CX - R, y: RED_EDGE_Y, width: 2 * R, height: CY + R - RED_EDGE_Y, fill: TEAM_SOFT_COLORS.red });
+  for (const y of [BLUE_EDGE_Y, RED_EDGE_Y]) {
+    add_svg(svg, 'ellipse', { cx: CX, cy: y, rx: Math.sqrt(R ** 2 - (y - CY) ** 2), ry: 11, fill: 'none', stroke: MUTED_COLOR, 'stroke-opacity': 0.6 });
+  }
+  add_svg(svg, 'ellipse', { cx: CX, cy: CY, rx: R, ry: 15, fill: 'none', stroke: MUTED_COLOR, 'stroke-opacity': 0.3, 'stroke-dasharray': '3 4' });
+  add_svg(svg, 'circle', { cx: CX, cy: CY, r: R, fill: 'none', stroke: MUTED_COLOR, 'stroke-width': 2 });
+  add_label(svg, CX, CY - 22, 'MIDDLE', { class: 'label' });
+  add_label(svg, 128, 72, 'BLUE', { class: 'label', fill: TEAM_COLORS.blue });
+  add_label(svg, 232, 214, 'RED', { class: 'label', fill: TEAM_COLORS.red });
+  draw_spawn(svg, 180, 44, 'blue', 10);
+  draw_pylon(svg, 204, 64, 'blue', 8);
+  draw_spawn(svg, 180, 232, 'red', 10);
+  draw_pylon(svg, 156, 212, 'red', 8);
+  add_svg(svg, 'line', { x1: 180, y1: 56, x2: 180, y2: 220, stroke: INK_COLOR, 'stroke-opacity': 0.3, 'stroke-dasharray': '2 4' });
+  add_label(svg, CX, 268, 'spawns at antipodes, pylons reflected through the center', { class: 'small' });
+}
+
+/**
+ * `draw_zone_torus` draws the zones of a T² × ℝ level on its square, whose opposite edges are glued.
+ * @example draw_zone_torus();
+ */
+function draw_zone_torus() {
+  const svg = document.getElementById('zone-torus-svg');
+  const LEFT = 30, TOP = 24, WIDTH = 300, HEIGHT = 200, MID_Y = 124;
+  const bands = [[0, 0.12, 'blue'], [0.12, 0.38, 'middle'], [0.38, 0.62, 'red'], [0.62, 0.88, 'middle'], [0.88, 1, 'blue']];
+  const clip = add_svg(add_svg(svg, 'defs', {}), 'clipPath', { id: 'torus-clip' });
+  add_svg(clip, 'rect', { x: LEFT, y: TOP, width: WIDTH, height: HEIGHT });
+  const inside = add_svg(svg, 'g', { 'clip-path': 'url(#torus-clip)' });
+  for (const [start, end, zone] of bands) {
+    add_svg(inside, 'rect', { x: LEFT + start * WIDTH, y: TOP, width: (end - start) * WIDTH, height: HEIGHT, fill: zone === 'middle' ? 'rgba(255,255,255,0.04)' : TEAM_SOFT_COLORS[zone] });
+    if (zone === 'middle') add_label(inside, LEFT + (start + end) / 2 * WIDTH, TOP + 20, 'MIDDLE', { class: 'label' });
+  }
+  add_label(inside, LEFT + 0.5 * WIDTH, TOP + 20, 'RED', { class: 'label', fill: TEAM_COLORS.red });
+  for (const x of [LEFT, LEFT + WIDTH]) {
+    draw_spawn(inside, x, MID_Y, 'blue', 12);
+    draw_pylon(inside, x, MID_Y + 36, 'blue', 9);
+  }
+  draw_spawn(inside, LEFT + WIDTH / 2, MID_Y, 'red', 12);
+  draw_pylon(inside, LEFT + WIDTH / 2, MID_Y + 36, 'red', 9);
+  add_svg(svg, 'rect', { x: LEFT, y: TOP, width: WIDTH, height: HEIGHT, fill: 'none', stroke: LINE_COLOR, 'stroke-width': 2 });
+  for (const x of [LEFT, LEFT + WIDTH]) draw_arrow(svg, [x, 84], [x, 62], 'ink', false, { 'stroke-width': 2 });
+  for (const y of [TOP, TOP + HEIGHT]) {
+    draw_arrow(svg, [LEFT + 0.2 * WIDTH, y], [LEFT + 0.26 * WIDTH, y], 'ink', false, { 'stroke-width': 2 });
+    draw_arrow(svg, [LEFT + 0.24 * WIDTH, y], [LEFT + 0.3 * WIDTH, y], 'ink', false, { 'stroke-width': 2 });
+  }
+  add_label(svg, 180, 246, 'left edge = right edge, top edge = bottom edge', { class: 'small' });
+  add_label(svg, 180, 264, 'the vertical axis (up) does not loop', { class: 'small' });
+}
+
+/**
+ * `draw_example_slide` draws a sketch of Snow Planet from blue spawn to red spawn, with a legend.
+ * @example draw_example_slide();
+ */
+function draw_example_slide() {
+  const svg = document.getElementById('example-svg');
+  const TOP = 10, BOTTOM = 410, MID_Y = 230;
+  add_svg(svg, 'rect', { x: 10, y: TOP, width: 160, height: BOTTOM - TOP, fill: TEAM_SOFT_COLORS.blue });
+  add_svg(svg, 'rect', { x: 170, y: TOP, width: 600, height: BOTTOM - TOP, fill: 'rgba(255,255,255,0.035)' });
+  add_svg(svg, 'rect', { x: 770, y: TOP, width: 160, height: BOTTOM - TOP, fill: TEAM_SOFT_COLORS.red });
+  for (const y of [TOP, BOTTOM]) add_svg(svg, 'line', { x1: 10, y1: y, x2: 930, y2: y, stroke: LINE_COLOR, 'stroke-width': 2 });
+  for (const x of [10, 930]) add_svg(svg, 'line', { x1: x, y1: TOP, x2: x, y2: BOTTOM, stroke: MUTED_COLOR, 'stroke-width': 2, 'stroke-dasharray': '6 6' });
+  add_label(svg, 90, 32, 'BLUE ZONE', { class: 'label', fill: TEAM_COLORS.blue });
+  add_label(svg, 470, 32, 'MIDDLE ZONE', { class: 'label' });
+  add_label(svg, 850, 32, 'RED ZONE', { class: 'label', fill: TEAM_COLORS.red });
+  const corridors = add_svg(svg, 'g', { stroke: CORRIDOR_COLOR, 'stroke-width': 16, fill: 'none', 'stroke-linecap': 'round' });
+  add_svg(corridors, 'path', { d: 'M150,48 V392 M790,48 V392 M150,96 H770 M150,230 H770' });
+  add_svg(corridors, 'path', { d: 'M150,362 C230,330 260,330 320,355 S420,392 470,368 S560,330 620,352 S720,390 790,362' });
+  add_svg(corridors, 'path', { d: 'M470,128 V160' });
+  [190, 336, 482, 628].forEach((x) => add_svg(svg, 'rect', { x, y: 52, width: 120, height: 88, rx: 6, fill: SURFACE_2_COLOR, stroke: FAINT_COLOR }));
+  add_svg(svg, 'rect', { x: 250, y: 160, width: 440, height: 140, rx: 28, fill: 'rgba(255,255,255,0.04)', stroke: FAINT_COLOR, 'stroke-dasharray': '4 4' });
+  for (const [x, y, width, height] of [[300, 252, 34, 16], [378, 176, 16, 34], [566, 248, 34, 16], [620, 182, 22, 22], [420, 266, 26, 14], [520, 186, 26, 14]]) {
+    add_svg(svg, 'rect', { x, y, width, height, rx: 3, fill: SURFACE_2_COLOR, stroke: FAINT_COLOR });
+  }
+  for (const triangle of [[[226, 344], [262, 308], [298, 344]], [[396, 336], [436, 304], [476, 336]], [[640, 340], [676, 306], [712, 340]], [[322, 406], [356, 378], [390, 406]], [[548, 406], [584, 376], [620, 406]]]) {
+    add_svg(svg, 'polygon', { points: format_points(triangle), fill: '#2b3552', stroke: FAINT_COLOR });
+  }
+  draw_black_hole(svg, 470, 230, 11);
+  draw_wormhole(svg, 400, 110, 9);
+  draw_wormhole(svg, 540, 354, 9);
+  add_svg(svg, 'path', { d: 'M400,110 C300,210 640,250 540,354', fill: 'none', stroke: WORM_COLOR, 'stroke-opacity': 0.55, 'stroke-dasharray': '4 5', 'stroke-width': 1.5 });
+  add_svg(svg, 'text', { x: 202, y: 74, fill: MUTED_COLOR, 'font-weight': 700 }, 'North: rooms');
+  add_svg(svg, 'text', { x: 268, y: 184, fill: MUTED_COLOR, 'font-weight': 700 }, 'Open field');
+  add_svg(svg, 'text', { x: 480, y: 152, class: 'small' }, 'connector');
+  add_svg(svg, 'text', { x: 186, y: 398, fill: MUTED_COLOR, 'font-weight': 700 }, 'South: ridge path');
+  draw_arrow(svg, [150, 60], [150, 380], 'blue', true);
+  draw_arrow(svg, [790, 60], [790, 380], 'red', true);
+  draw_spawn(svg, 46, MID_Y, 'blue', 17);
+  draw_pylon(svg, 104, MID_Y, 'blue', 13, 4);
+  draw_spawn(svg, 894, MID_Y, 'red', 17);
+  draw_pylon(svg, 836, MID_Y, 'red', 13, 4);
+  const legend = add_svg(svg, 'g', { transform: 'translate(964 40)' });
+  add_svg(legend, 'text', { x: 0, y: 0, class: 'label' }, 'LEGEND');
+  const rows = [
+    ['Spawn', (g) => draw_spawn(g, 10, 0, 'blue', 10)],
+    ['Pylon, 4 consoles', (g) => draw_pylon(g, 10, 0, 'blue', 8, 4)],
+    ['Black hole', (g) => draw_black_hole(g, 10, 0, 7)],
+    ['Wormhole pair', (g) => { draw_wormhole(g, 4, 0, 6); draw_wormhole(g, 20, 0, 6); }],
+    ['Room, cover', (g) => add_svg(g, 'rect', { x: 0, y: -8, width: 22, height: 16, rx: 3, fill: SURFACE_2_COLOR, stroke: FAINT_COLOR })],
+    ['Mountain', (g) => add_svg(g, 'polygon', { points: '0,8 11,-9 22,8', fill: '#2b3552', stroke: FAINT_COLOR })],
+    ['Path', (g) => add_svg(g, 'line', { x1: 0, y1: 0, x2: 22, y2: 0, stroke: CORRIDOR_COLOR, 'stroke-width': 12, 'stroke-linecap': 'round' })],
+    ['Rotate between routes', (g) => draw_arrow(g, [10, -10], [10, 10], 'blue', true)],
+    ['Wraps to the other half', (g) => add_svg(g, 'line', { x1: 10, y1: -10, x2: 10, y2: 10, stroke: MUTED_COLOR, 'stroke-width': 2, 'stroke-dasharray': '4 4' })],
+  ];
+  rows.forEach(([text, draw_icon], i) => {
+    const row = add_svg(legend, 'g', { transform: `translate(0 ${32 + i * 40})` });
+    draw_icon(row);
+    add_svg(row, 'text', { x: 36, y: 5, fill: MUTED_COLOR }, text);
+  });
+}
+
+/**
+ * `draw_shot_hole` draws a fan of lasers bending around a black hole, traced as Schwarzschild light rays.
+ * @example draw_shot_hole();
+ */
+function draw_shot_hole() {
+  const svg = document.getElementById('shot-hole-svg');
+  const HOLE = [215, 165], R_S = 13, SHOOTER = [32, 196], BOUNDS = [360, 330];
+  const FIRST_ANGLE_DEG = -34, LAST_ANGLE_DEG = 18, ANGLE_STEP_DEG = 4;
+  for (let angle_deg = FIRST_ANGLE_DEG; angle_deg <= LAST_ANGLE_DEG; angle_deg += ANGLE_STEP_DEG) {
+    draw_laser(svg, trace_photon(SHOOTER, angle_deg * RADIANS_PER_DEGREE, HOLE, R_S, BOUNDS), 'blue', { 'stroke-width': 1.4, 'stroke-opacity': 0.85 });
+  }
+  draw_black_hole(svg, HOLE[0], HOLE[1], R_S);
+  add_svg(svg, 'circle', { cx: SHOOTER[0], cy: SHOOTER[1], r: 8, fill: TEAM_COLORS.blue });
+  add_svg(svg, 'text', { x: SHOOTER[0] - 6, y: SHOOTER[1] + 26, class: 'small' }, 'shooter');
+  add_svg(svg, 'text', { x: HOLE[0] + 26, y: HOLE[1] + 44, class: 'small' }, 'black hole');
+}
+
+/**
+ * `draw_shot_sphere` draws City Sphere in cross-section: straight shots, outward gravity and the glass floor.
+ * @example draw_shot_sphere();
+ */
+function draw_shot_sphere() {
+  const svg = document.getElementById('shot-sphere-svg');
+  const CX = 180, CY = 165, R_OUTER = 140, R_GLASS = 88, PLAYER_HEIGHT = 16, GUN_HEIGHT = 12;
+  const at = (radius, angle_deg) => [CX + radius * Math.cos(angle_deg * RADIANS_PER_DEGREE), CY + radius * Math.sin(angle_deg * RADIANS_PER_DEGREE)];
+  add_svg(svg, 'circle', { cx: CX, cy: CY, r: R_OUTER + 4, fill: 'none', stroke: MUTED_COLOR, 'stroke-width': 8 });
+  add_svg(svg, 'circle', { cx: CX, cy: CY, r: R_GLASS, fill: 'rgba(127,214,255,0.05)', stroke: GLASS_COLOR, 'stroke-width': 3, 'stroke-dasharray': '6 4' });
+  for (const angle_deg of [60, 110, 240, 335]) {
+    const [x1, y1] = at(R_OUTER, angle_deg), [x2, y2] = at(R_OUTER - 26, angle_deg);
+    add_svg(svg, 'line', { x1, y1, x2, y2, stroke: MUTED_COLOR, 'stroke-width': 6, 'stroke-linecap': 'round' });
+  }
+  for (const angle_deg of [20, 85, 160, 200, 300]) draw_arrow(svg, at(R_GLASS + 18, angle_deg), at(R_GLASS + 38, angle_deg), 'muted', false, { 'stroke-opacity': 0.8 });
+  const draw_player = (foot_radius, angle_deg, team) => {
+    const [fx, fy] = at(foot_radius, angle_deg), [hx, hy] = at(foot_radius - PLAYER_HEIGHT, angle_deg);
+    add_svg(svg, 'line', { x1: fx, y1: fy, x2: hx, y2: hy, stroke: TEAM_COLORS[team], 'stroke-width': 4, 'stroke-linecap': 'round' });
+    add_svg(svg, 'circle', { cx: hx, cy: hy, r: 5, fill: TEAM_COLORS[team] });
+  };
+  const SHOOTER_DEG = 205, TARGET_DEG = 280, GLASS_PLAYER_DEG = 150;
+  const gun = at(R_OUTER - GUN_HEIGHT, SHOOTER_DEG);
+  const target = at(R_OUTER - GUN_HEIGHT, TARGET_DEG);
+  draw_laser(svg, [gun, target], 'blue', { 'stroke-width': 2.4 });
+  const glass_player_chest = at(R_GLASS - GUN_HEIGHT, GLASS_PLAYER_DEG);
+  const direction = [glass_player_chest[0] - gun[0], glass_player_chest[1] - gun[1]];
+  const relative = [gun[0] - CX, gun[1] - CY];
+  const qa = direction[0] ** 2 + direction[1] ** 2, qb = 2 * (relative[0] * direction[0] + relative[1] * direction[1]);
+  const qc = relative[0] ** 2 + relative[1] ** 2 - R_GLASS ** 2;
+  const s = (-qb - Math.sqrt(qb ** 2 - 4 * qa * qc)) / (2 * qa);
+  const hit = [gun[0] + s * direction[0], gun[1] + s * direction[1]];
+  draw_laser(svg, [gun, hit], 'blue', { 'stroke-width': 2.4 });
+  add_svg(svg, 'line', { x1: hit[0], y1: hit[1], x2: glass_player_chest[0], y2: glass_player_chest[1], stroke: INK_COLOR, 'stroke-opacity': 0.6, 'stroke-dasharray': '3 4' });
+  add_svg(svg, 'path', { d: `M${hit[0] - 6},${hit[1] - 6} L${hit[0] + 6},${hit[1] + 6} M${hit[0] + 6},${hit[1] - 6} L${hit[0] - 6},${hit[1] + 6}`, stroke: GOLD_COLOR, 'stroke-width': 2.5 });
+  draw_player(R_OUTER, SHOOTER_DEG, 'blue');
+  draw_player(R_OUTER, TARGET_DEG, 'red');
+  draw_player(R_GLASS, GLASS_PLAYER_DEG, 'red');
+  add_label(svg, CX, CY - 6, 'glass floor', { fill: GLASS_COLOR, 'font-size': 12 });
+  add_label(svg, CX, CY + 10, '(2nd floor)', { class: 'small' });
+  add_label(svg, CX + 112, CY + 150, 'outer floor', { class: 'small' });
+  add_label(svg, CX + 128, CY - 120, 'gravity', { class: 'small' });
+}
+
+/**
+ * `draw_shot_hyperbolic` draws hyperbolic space in the Poincaré disk: equal pillars and two diverging lasers.
+ * @example draw_shot_hyperbolic();
+ */
+function draw_shot_hyperbolic() {
+  const svg = document.getElementById('shot-hyperbolic-svg');
+  const CX = 180, CY = 165, R = 150, PILLAR_RADIUS = 0.3, LINE_SPACING = 0.6, LINE_COUNT_PER_SIDE = 5;
+  const to_svg = ([x, y]) => [CX + R * x, CY + R * y];
+  add_svg(svg, 'circle', { cx: CX, cy: CY, r: R, fill: 'rgba(255,255,255,0.03)', stroke: MUTED_COLOR, 'stroke-width': 2 });
+  for (let k = -LINE_COUNT_PER_SIDE; k <= LINE_COUNT_PER_SIDE; k++) {
+    const points = trace_disk_geodesic([Math.tanh(k * LINE_SPACING / 2), 0], Math.PI / 2, true).map(to_svg);
+    add_svg(svg, 'polyline', { points: format_points(points), fill: 'none', stroke: MUTED_COLOR, 'stroke-opacity': 0.3 });
+  }
+  for (const angle_deg of [90, 270, 140, 220]) {
+    for (const distance of [1.2, 2.4, 3.6]) {
+      const circle = find_disk_circle(distance, angle_deg * RADIANS_PER_DEGREE, PILLAR_RADIUS);
+      const [x, y] = to_svg([circle.x, circle.y]);
+      add_svg(svg, 'circle', { cx: x, cy: y, r: R * circle.r, fill: '#3a4566', stroke: FAINT_COLOR });
+    }
+  }
+  const shooters = [[-0.55, -0.07], [-0.55, 0.07]];
+  for (const shooter of shooters) draw_laser(svg, trace_disk_geodesic(shooter, 0, false).map(to_svg), 'blue', { 'stroke-width': 2 });
+  for (const shooter of shooters) {
+    const [x, y] = to_svg(shooter);
+    add_svg(svg, 'circle', { cx: x, cy: y, r: 5, fill: TEAM_COLORS.blue });
+  }
+  add_label(svg, CX - 0.55 * R, CY + 34, 'side by side', { class: 'small' });
+  add_label(svg, CX + 0.8 * R, CY + 4, 'spread apart', { class: 'small' });
+  add_label(svg, CX, CY + R + 18, 'equal pillars look smaller near the edge', { class: 'small' });
+}
+
+/**
+ * `make_scale` maps a data interval linearly onto a pixel interval.
+ * @param {number} domain_start The data value drawn at `range_start`.
+ * @param {number} domain_end The data value drawn at `range_end`.
+ * @param {number} range_start The pixel position of `domain_start`.
+ * @param {number} range_end The pixel position of `domain_end`.
+ * @return {function(number): number} A function from a data value to its pixel position.
+ * @example const x_px = make_scale(0, 30, 56, 520);
+ */
+function make_scale(domain_start, domain_end, range_start, range_end) {
+  return (value) => range_start + (value - domain_start) / (domain_end - domain_start) * (range_end - range_start);
+}
+
+/**
+ * `draw_chart_axes` draws a chart's recessive grid, tick labels and axis titles.
+ * @param {Element} svg The chart's SVG.
+ * @param {{left: number, right: number, top: number, bottom: number}} box The plot area, in pixels.
+ * @param {{x_ticks: Array<number>, y_ticks: Array<number>, x_title: string, y_title: string, y_suffix: string}} axes The ticks and titles.
+ * @param {function(number): number} x_scale Data x to pixels.
+ * @param {function(number): number} y_scale Data y to pixels.
+ * @example draw_chart_axes(svg, box, { x_ticks: [0, 5], y_ticks: [0, 20], x_title: 'min', y_title: 's', y_suffix: '' }, x_scale, y_scale);
+ */
+function draw_chart_axes(svg, box, axes, x_scale, y_scale) {
+  for (const tick of axes.y_ticks) {
+    add_svg(svg, 'line', { x1: box.left, y1: y_scale(tick), x2: box.right, y2: y_scale(tick), stroke: LINE_COLOR, 'stroke-width': 1 });
+    add_svg(svg, 'text', { x: box.left - 8, y: y_scale(tick) + 4, 'text-anchor': 'end', class: 'small' }, `${tick}${axes.y_suffix}`);
+  }
+  for (const tick of axes.x_ticks) add_label(svg, x_scale(tick), box.bottom + 18, String(tick), { class: 'small' });
+  add_svg(svg, 'line', { x1: box.left, y1: box.bottom, x2: box.right, y2: box.bottom, stroke: FAINT_COLOR });
+  add_label(svg, (box.left + box.right) / 2, box.bottom + 40, axes.x_title, { class: 'small' });
+  const title_x = box.left - 44, title_y = (box.top + box.bottom) / 2;
+  add_label(svg, title_x, title_y, axes.y_title, { class: 'small', transform: `rotate(-90 ${title_x} ${title_y})` });
+}
+
+/**
+ * `add_chart_hover` shows a crosshair, a dot and the value under the pointer on a one-series line chart.
+ * @param {SVGSVGElement} svg The chart's SVG.
+ * @param {{left: number, right: number, top: number, bottom: number}} box The plot area, in pixels.
+ * @param {number} x_max The largest data x; the smallest is 0.
+ * @param {function(number): number} y_scale Data y to pixels.
+ * @param {function(number): number} value_at The series' value at a data x.
+ * @param {function(number, number): string} format_text The tooltip for a data x and its value.
+ * @example add_chart_hover(svg, box, 30, y_scale, (t) => 20, (t, v) => `${t} min: ${v} s`);
+ */
+function add_chart_hover(svg, box, x_max, y_scale, value_at, format_text) {
+  const layer = add_svg(svg, 'g', { opacity: 0, 'pointer-events': 'none' });
+  const rule = add_svg(layer, 'line', { y1: box.top, y2: box.bottom, stroke: MUTED_COLOR, 'stroke-dasharray': '3 3' });
+  const dot = add_svg(layer, 'circle', { r: 5, fill: TEAM_COLORS.blue, stroke: SURFACE_COLOR, 'stroke-width': 2 });
+  const tip = add_svg(layer, 'text', { y: box.top + 12, 'font-size': 13, 'font-weight': 600 });
+  const target = add_svg(svg, 'rect', { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, fill: 'transparent' });
+  target.addEventListener('pointermove', (event) => {
+    const pointer = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    const x_value = Math.max(0, Math.min(x_max, (pointer.x - box.left) / (box.right - box.left) * x_max));
+    const value = value_at(x_value);
+    const is_near_right = pointer.x > (box.left + box.right) / 2;
+    for (const [name, position] of [['x1', pointer.x], ['x2', pointer.x]]) rule.setAttribute(name, position);
+    dot.setAttribute('cx', pointer.x);
+    dot.setAttribute('cy', y_scale(value));
+    tip.setAttribute('x', pointer.x + (is_near_right ? -8 : 8));
+    tip.setAttribute('text-anchor', is_near_right ? 'end' : 'start');
+    tip.textContent = format_text(x_value, value);
+    layer.setAttribute('opacity', 1);
+  });
+  target.addEventListener('pointerleave', () => layer.setAttribute('opacity', 0));
+}
+
+/**
+ * `draw_respawn_chart` draws the respawn wait against the time into a round, as a step line.
+ * @example draw_respawn_chart();
+ */
+function draw_respawn_chart() {
+  const svg = document.getElementById('respawn-svg');
+  const RESPAWN_START_S = 20, RESPAWN_STEP_S = 10, STEP_MIN = 5, MATCH_MAX_MIN = 30, EXAMPLE_DEATH_MIN = 12;
+  const box = { left: 60, right: 524, top: 14, bottom: 232 };
+  const x_scale = make_scale(0, MATCH_MAX_MIN, box.left, box.right);
+  const y_scale = make_scale(0, 90, box.bottom, box.top);
+  const respawn_s_at = (t_min) => RESPAWN_START_S + RESPAWN_STEP_S * Math.min(MATCH_MAX_MIN / STEP_MIN - 1, Math.floor(t_min / STEP_MIN));
+  draw_chart_axes(svg, box, { x_ticks: [0, 5, 10, 15, 20, 25, 30], y_ticks: [0, 20, 40, 60, 80], x_title: 'minutes into the round', y_title: 'respawn wait (s)', y_suffix: '' }, x_scale, y_scale);
+  const points = [];
+  for (let start_min = 0; start_min < MATCH_MAX_MIN; start_min += STEP_MIN) {
+    points.push([x_scale(start_min), y_scale(respawn_s_at(start_min))], [x_scale(start_min + STEP_MIN), y_scale(respawn_s_at(start_min))]);
+  }
+  add_svg(svg, 'line', { x1: x_scale(MATCH_MAX_MIN), y1: box.top, x2: x_scale(MATCH_MAX_MIN), y2: box.bottom, stroke: MUTED_COLOR, 'stroke-dasharray': '4 4' });
+  add_svg(svg, 'text', { x: x_scale(MATCH_MAX_MIN) - 6, y: y_scale(84), 'text-anchor': 'end', class: 'small' }, 'match ends at 30 min');
+  add_svg(svg, 'polyline', { points: format_points(points), fill: 'none', stroke: TEAM_COLORS.blue, 'stroke-width': 2, 'stroke-linejoin': 'round' });
+  add_svg(svg, 'text', { x: x_scale(0) + 6, y: y_scale(RESPAWN_START_S) - 8, 'font-weight': 600 }, '20 s');
+  add_svg(svg, 'text', { x: x_scale(27.5), y: y_scale(70) - 8, 'text-anchor': 'middle', 'font-weight': 600 }, '70 s');
+  add_svg(svg, 'circle', { cx: x_scale(EXAMPLE_DEATH_MIN), cy: y_scale(respawn_s_at(EXAMPLE_DEATH_MIN)), r: 5, fill: TEAM_COLORS.blue, stroke: SURFACE_COLOR, 'stroke-width': 2 });
+  add_svg(svg, 'text', { x: x_scale(EXAMPLE_DEATH_MIN) + 10, y: y_scale(respawn_s_at(EXAMPLE_DEATH_MIN)) + 20, fill: MUTED_COLOR }, 'dies at 12 min → waits 40 s');
+  add_chart_hover(svg, box, MATCH_MAX_MIN, y_scale, respawn_s_at, (t_min, wait_s) => `${t_min.toFixed(1)} min: waits ${wait_s} s`);
+}
+
+/**
+ * `draw_energy_chart` draws one player's sprint energy over an example minute: sprints, rests and a kill.
+ * @example draw_energy_chart();
+ */
+function draw_energy_chart() {
+  const svg = document.getElementById('energy-svg');
+  const FULL_PCT = 100, DRAIN_S = 30, REFILL_S = 60, DURATION_S = 70;
+  const phases = [['sprint', 18], ['rest', 12], ['sprint', 18], ['rest', 6], ['kill', 0], ['sprint', 16]];
+  const box = { left: 60, right: 524, top: 14, bottom: 232 };
+  const x_scale = make_scale(0, DURATION_S, box.left, box.right);
+  const y_scale = make_scale(0, FULL_PCT, box.bottom, box.top);
+  const samples = [[0, FULL_PCT]];
+  const sprint_spans = [];
+  for (const [kind, duration_s] of phases) {
+    const [t, energy_pct] = samples[samples.length - 1];
+    if (kind === 'kill') samples.push([t, FULL_PCT]);
+    if (kind === 'sprint') { samples.push([t + duration_s, Math.max(0, energy_pct - FULL_PCT / DRAIN_S * duration_s)]); sprint_spans.push([t, t + duration_s]); }
+    if (kind === 'rest') samples.push([t + duration_s, Math.min(FULL_PCT, energy_pct + FULL_PCT / REFILL_S * duration_s)]);
+  }
+  const energy_pct_at = (t) => {
+    let i = samples.length - 1;
+    while (i > 0 && samples[i - 1][0] >= t) i--;
+    if (i === 0) return samples[0][1];
+    const [t0, e0] = samples[i - 1], [t1, e1] = samples[i];
+    return t1 === t0 ? e1 : e0 + (e1 - e0) * (t - t0) / (t1 - t0);
+  };
+  for (const [start_s, end_s] of sprint_spans) {
+    add_svg(svg, 'rect', { x: x_scale(start_s), y: box.top, width: x_scale(end_s) - x_scale(start_s), height: box.bottom - box.top, fill: 'rgba(79,141,255,0.07)' });
+    add_label(svg, x_scale((start_s + end_s) / 2), box.top + 12, 'sprinting', { class: 'small' });
+  }
+  draw_chart_axes(svg, box, { x_ticks: [0, 10, 20, 30, 40, 50, 60, 70], y_ticks: [0, 25, 50, 75, 100], x_title: 'seconds', y_title: 'energy', y_suffix: '%' }, x_scale, y_scale);
+  add_svg(svg, 'polyline', { points: format_points(samples.map(([t, e]) => [x_scale(t), y_scale(e)])), fill: 'none', stroke: TEAM_COLORS.blue, 'stroke-width': 2, 'stroke-linejoin': 'round' });
+  const empty_t = samples[3][0], kill_t = samples[5][0];
+  add_svg(svg, 'line', { x1: x_scale(empty_t), y1: y_scale(0), x2: x_scale(empty_t), y2: y_scale(22), stroke: MUTED_COLOR });
+  add_label(svg, x_scale(empty_t), y_scale(25), 'empty', { fill: MUTED_COLOR });
+  add_svg(svg, 'circle', { cx: x_scale(empty_t), cy: y_scale(0), r: 5, fill: TEAM_COLORS.blue, stroke: SURFACE_COLOR, 'stroke-width': 2 });
+  add_svg(svg, 'text', { x: x_scale(kill_t) - 8, y: y_scale(FULL_PCT) + 4, 'text-anchor': 'end', fill: MUTED_COLOR }, 'kill: full');
+  add_svg(svg, 'circle', { cx: x_scale(kill_t), cy: y_scale(FULL_PCT), r: 5, fill: TEAM_COLORS.blue, stroke: SURFACE_COLOR, 'stroke-width': 2 });
+  add_chart_hover(svg, box, DURATION_S, y_scale, energy_pct_at, (t, energy_pct) => `${t.toFixed(0)} s: ${energy_pct.toFixed(0)}%`);
+}
+
+/**
+ * `fit_stage` scales the 1280×720 stage to fit the window.
+ * @example window.addEventListener('resize', fit_stage);
+ */
+function fit_stage() {
+  const scale = Math.min(window.innerWidth / STAGE_WIDTH_PX, window.innerHeight / STAGE_HEIGHT_PX);
+  document.getElementById('stage').style.transform = `translate(-50%, -50%) scale(${scale})`;
+}
+
+/**
+ * `show_slide` shows one slide, hides the others, and updates the counter and the URL hash.
+ * @param {number} index The slide's index, from 0; out-of-range values are clamped.
+ * @example show_slide(2);
+ */
+function show_slide(index) {
+  const slides = document.querySelectorAll('.slide');
+  const clamped_index = Math.max(0, Math.min(slides.length - 1, index));
+  slides.forEach((slide, i) => slide.classList.toggle('is-active', i === clamped_index));
+  document.getElementById('slide-counter').textContent = `${clamped_index + 1} / ${slides.length}`;
+  history.replaceState(null, '', `#${clamped_index + 1}`);
+  current_slide_index = clamped_index;
+}
+
+/**
+ * `handle_key` moves between slides on navigation keys.
+ * @param {KeyboardEvent} event The key event.
+ * @example window.addEventListener('keydown', handle_key);
+ */
+function handle_key(event) {
+  const forward_keys = ['ArrowRight', 'ArrowDown', 'PageDown', ' '];
+  const backward_keys = ['ArrowLeft', 'ArrowUp', 'PageUp'];
+  if (forward_keys.includes(event.key)) show_slide(current_slide_index + 1);
+  else if (backward_keys.includes(event.key)) show_slide(current_slide_index - 1);
+  else if (event.key === 'Home') show_slide(0);
+  else if (event.key === 'End') show_slide(Infinity);
+  else return;
+  event.preventDefault();
+}
+
+let current_slide_index = 0;
+draw_map_slide();
+draw_wavefront_slide();
+draw_pylon_slide();
+draw_respawn_chart();
+draw_energy_chart();
+draw_zone_flat();
+draw_zone_sphere();
+draw_zone_torus();
+draw_example_slide();
+draw_shot_hole();
+draw_shot_sphere();
+draw_shot_hyperbolic();
+fit_stage();
+window.addEventListener('resize', fit_stage);
+window.addEventListener('keydown', handle_key);
+document.getElementById('previous-button').addEventListener('click', () => show_slide(current_slide_index - 1));
+document.getElementById('next-button').addEventListener('click', () => show_slide(current_slide_index + 1));
+show_slide(Number.parseInt(location.hash.slice(1), 10) - 1 || 0);
+</script>
+</body>
+</html>
