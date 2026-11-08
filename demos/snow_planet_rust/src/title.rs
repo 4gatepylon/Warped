@@ -22,7 +22,7 @@ use crate::map::MapName;
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const MAPS: [MapName; 2] = [MapName::LunarSurface, MapName::HouseDemo];
+const MAPS: [MapName; 3] = [MapName::SnowPlanet, MapName::LunarSurface, MapName::HouseDemo];
 const HEADER_LINES: [&str; 3] = [
     "WARPED",
     "Up and Down choose, Return starts, Escape quits.",
@@ -54,6 +54,7 @@ fn get_map_label(map: MapName) -> &'static str {
     match map {
         MapName::HouseDemo => "House",
         MapName::LunarSurface => "Lunar Surface",
+        MapName::SnowPlanet => "Snow Planet",
     }
 }
 

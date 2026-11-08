@@ -37,8 +37,13 @@ const MANIFEST_NAME: &str = "map.json";
 const FORMAT: &str = "warped-map";
 const VERSION: u32 = 1;
 const SPACE_HYPERBOLIC: &str = "hyperbolic";
+const SPACE_EUCLIDEAN: &str = "euclidean";
+/// `FLAT_CURVATURE_RADIUS_M` is the curvature radius a Euclidean map is drawn at (`Map::curve_flat`):
+/// so large that across the map lengths change by under 2 %, so small that the renderer's single
+/// precision still separates centimetres.
+pub const FLAT_CURVATURE_RADIUS_M: f64 = 160.0;
 const DIRECTION_TOLERANCE: f64 = 1e-6;
-const BUILTIN_MAPS: [(&str, &str); 2] = [
+const BUILTIN_MAPS: [(&str, &str); 3] = [
     (
         "house_demo",
         include_str!("../../../common/maps/house_demo/map.json"),
@@ -47,14 +52,20 @@ const BUILTIN_MAPS: [(&str, &str); 2] = [
         "lunar_surface",
         include_str!("../../../common/maps/lunar_surface/map.json"),
     ),
+    (
+        "snow_planet",
+        include_str!("../../../common/maps/snow_planet/map.json"),
+    ),
 ];
 
-/// `Space` is the map's space; this demo reads hyperbolic maps only.
+/// `Space` is the map's space: hyperbolic, or Euclidean with the ground's two axes (Fermi u and v)
+/// periodic when it has `torus_periods_m`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Space {
     pub kind: String,
     pub curvature_radius_m: Option<f64>,
+    pub torus_periods_m: Option<[f64; 2]>,
 }
 
 /// `PlayerSettings` is how a player moves on the map.
@@ -265,13 +276,34 @@ pub struct ZoneWalls {
     pub opacity_frac: f64,
 }
 
-/// `Regions` is the map's zones, boundary and zone walls.
+/// `Blizzard` is a snowstorm: an upright cylinder at Fermi (u, v) on the ground. Inside it a player
+/// moves at `speed_frac` of their speed and loses `freeze_health_per_s` of their health a second, a
+/// shot goes at most `shot_reach_m` inside blizzards, and the air holds `fog_per_m` of fog (optical
+/// depth per meter) and `snow_per_m3` flakes per cubic meter.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct Blizzard {
+    pub name: String,
+    pub u_m: f64,
+    pub v_m: f64,
+    pub radius_m: f64,
+    pub height_m: f64,
+    pub speed_frac: f64,
+    pub freeze_health_per_s: f64,
+    pub shot_reach_m: f64,
+    pub fog_per_m: f64,
+    pub snow_per_m3: f64,
+}
+
+/// `Regions` is the map's zones, boundary, zone walls and blizzards.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Regions {
     pub zones: Option<Vec<Zone>>,
     pub boundary: Option<Boundary>,
     pub zone_walls: Option<ZoneWalls>,
+    #[serde(default)]
+    pub blizzards: Vec<Blizzard>,
 }
 
 /// `Lighting` is the lighting model and its numbers (those of the model; the others are absent).
@@ -328,6 +360,7 @@ pub struct Map {
 pub enum MapName {
     HouseDemo,
     LunarSurface,
+    SnowPlanet,
 }
 
 impl MapName {
@@ -338,6 +371,7 @@ impl MapName {
         match self {
             MapName::HouseDemo => "house_demo",
             MapName::LunarSurface => "lunar_surface",
+            MapName::SnowPlanet => "snow_planet",
         }
     }
 }
@@ -488,9 +522,13 @@ impl Map {
             )
             .into());
         }
-        if map.space.kind != SPACE_HYPERBOLIC || map.space.curvature_radius_m.is_none() {
+        let is_hyperbolic: bool =
+            map.space.kind == SPACE_HYPERBOLIC && map.space.curvature_radius_m.is_some();
+        let is_euclidean: bool =
+            map.space.kind == SPACE_EUCLIDEAN && map.space.curvature_radius_m.is_none();
+        if !is_hyperbolic && !is_euclidean {
             return Err(format!(
-                "map: {} is in {} space; this demo draws hyperbolic maps only",
+                "map: {} is in {} space; this demo draws hyperbolic and Euclidean maps only",
                 map.name, map.space.kind
             )
             .into());
@@ -500,6 +538,58 @@ impl Map {
                 .map_err(|problem| format!("map: {}: sky.milky_way {problem}", map.name))?;
         }
         Ok(map)
+    }
+
+    /// `is_euclidean` says whether the map is in Euclidean space (until `curve_flat` draws it in
+    /// nearly flat hyperbolic space).
+    ///
+    /// Example: `if map.is_euclidean() { map.curve_flat(FLAT_CURVATURE_RADIUS_M); }`
+    pub fn is_euclidean(&self) -> bool {
+        self.space.kind == SPACE_EUCLIDEAN
+    }
+
+    /// `curve_flat` turns a Euclidean map into a hyperbolic one of curvature radius `r_m` that the
+    /// renderer draws: each frame and lamp goes to the Fermi coordinates (u, v, h) = (−z, x, y) of
+    /// its Euclidean place, turned the same way against the Fermi axes there. Sizes in meters
+    /// (shapes, warps' reach, regions) stay. The map keeps `torus_periods_m`.
+    ///
+    /// Example: `map.curve_flat(FLAT_CURVATURE_RADIUS_M);`
+    pub fn curve_flat(&mut self, r_m: f64) {
+        let curve = |values: &[f64; 16]| -> [f64; 16] {
+            let frame: DMat4 = to_frame(values);
+            let t: DVec4 = frame.col(AXIS_W);
+            let mut turn: DMat4 = frame;
+            turn.w_axis = DVec4::W;
+            let rotation: DQuat = DQuat::from_mat4(&turn).normalize();
+            (make_fermi_frame([-t.z, t.x, t.y], r_m) * DMat4::from_quat(rotation)).to_cols_array()
+        };
+        for structure in &mut self.structures {
+            structure.frame = curve(&structure.frame);
+        }
+        for map_box in &mut self.boxes {
+            map_box.frame = curve(&map_box.frame);
+        }
+        for warp in &mut self.warps {
+            warp.frame = curve(&warp.frame);
+        }
+        for spawn in &mut self.spawns {
+            spawn.frame = curve(&spawn.frame);
+        }
+        for light in &mut self.lights {
+            let [x, y, z, _] = light.position;
+            light.position = make_fermi_point(-z, x, y, r_m).to_array();
+        }
+        self.space.kind = SPACE_HYPERBOLIC.to_string();
+        self.space.curvature_radius_m = Some(r_m);
+    }
+
+    /// `get_blizzards` gives the map's blizzards (none without regions).
+    ///
+    /// Example: `let blizzards = map.get_blizzards();`
+    pub fn get_blizzards(&self) -> Vec<Blizzard> {
+        self.regions
+            .as_ref()
+            .map_or(Vec::new(), |regions| regions.blizzards.clone())
     }
 
     /// `get_curvature_radius_m` gives the space's curvature radius (`Load` checked it is there).

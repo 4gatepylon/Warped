@@ -336,7 +336,7 @@ struct Arguments {
     #[arg(long)]
     player_settings: Option<PathBuf>,
     /// Which map to play, from common/maps/.
-    #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
+    #[arg(long, value_enum, default_value_t = MapName::SnowPlanet)]
     map: MapName,
     /// With --map lunar-surface: start the window at one of the level's viewpoints (as
     /// --bench-views names them), e.g. black_hole.
@@ -509,20 +509,20 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
             "--frame-count and --snapshot-every must be at least 1; e.g. --frame-count 10".into(),
         );
     }
-    if arguments.view.is_some() && arguments.map != MapName::LunarSurface {
+    if arguments.view.is_some() && arguments.map == MapName::HouseDemo {
         return Err(
             "--view needs --map lunar-surface; e.g. --map lunar-surface --view black_hole".into(),
         );
     }
     if let Some(strength_frac) = arguments.black_hole_strength
-        && (!(0.0..=1.0).contains(&strength_frac) || arguments.map != MapName::LunarSurface)
+        && (!(0.0..=1.0).contains(&strength_frac) || arguments.map == MapName::HouseDemo)
     {
         return Err(format!(
             "--black-hole-strength must be in [0, 1] with --map lunar-surface, got {strength_frac}; e.g. --map lunar-surface --black-hole-strength 0.6"
         )
         .into());
     }
-    if arguments.map == MapName::LunarSurface
+    if arguments.map != MapName::HouseDemo
         && (arguments.autopilot || (arguments.play_route && arguments.route != RouteKind::WarpTour))
     {
         return Err("--autopilot and the house's routes need --map house-demo; on lunar-surface use --play-route --route warp-tour".into());
@@ -614,7 +614,7 @@ fn run(arguments: Arguments) -> Result<()> {
     }
     if arguments.renderer == RendererKind::Metal {
         viewmodel::check_gun_models()?;
-        if arguments.map == MapName::LunarSurface {
+        if arguments.map != MapName::HouseDemo {
             voxel_textures::check_surface_textures()?;
         }
     }
@@ -812,7 +812,9 @@ fn show_alert(message: &str) -> Result<()> {
 /// Example: `let map = load_map(MapName::LunarSurface, &ServerSettings::Builtin())?;`
 fn load_map(name: MapName, settings: &ServerSettings) -> Result<map::Map> {
     let mut map: map::Map = map::Map::Builtin(name.get_folder_name())?;
-    if !map.structures.is_empty() {
+    if map.is_euclidean() {
+        map.curve_flat(map::FLAT_CURVATURE_RADIUS_M);
+    } else if !map.structures.is_empty() {
         map.scale_curvature(settings.space.curvature_per_map_curvature)?;
     }
     Ok(map)
