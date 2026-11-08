@@ -230,7 +230,7 @@ When the user tests a game or other visual work you made, follow the `playtestin
 
 Coordinate agents working in parallel (subagents, other sessions, Codex, Devin) with the `managing-agents` skill
 (`.agents/skills/managing-agents/`), and merge with the `merging-to-staging` skill
-(`.agents/skills/merging-to-staging/`). Each Devin session works in its own worktree, like Claude Code's
+(`.agents/skills/merging-to-staging/`). Each Devin session and subagent works in its own worktree, like Claude Code's
 (`devin-worktrees` skill).
 
 ## Assets
