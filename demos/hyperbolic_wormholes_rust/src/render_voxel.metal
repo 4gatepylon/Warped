@@ -2276,6 +2276,19 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
 }
 
 /**
+ * @brief `get_s_to_w` gives how far along a geodesic, from a point whose w coordinate is `a` with a unit tangent whose
+ * w coordinate is `b` (above 0, so w grows), w reaches `target_w` (at least `a`): the root of a cosh s + b sinh s =
+ * `target_w`.
+ * @par Example
+ * @code
+ * float sky_s = get_s_to_w(x.w, v.w, sky_w);
+ * @endcode
+ */
+static float get_s_to_w(float a, float b, float target_w) {
+    return log((target_w + sqrt(max(target_w * target_w - a * a + b * b, 0.0))) / (a + b));
+}
+
+/**
  * @brief `trace_ray` traces a ray backwards from the eye through a point of the image (in pixels from its top left
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
  * surface, the sky or a horizon. After `LATE_STEP_COUNT` iterations (rays winding near a throat or the black hole,
@@ -2283,8 +2296,10 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * ray travels the bent world in pieces (`trace_bent_piece`) between warp objects and within its bent steps, scans the
  * laser beams once per straight chord between warp objects (as the flat tracer does), crosses
  * empty space (the void beyond the edge, the air high above the ground) in long untraced strides (`get_empty_s`), and
- * reaches the sky once it is past every surface and
- * moving away from the origin.
+ * reaches the sky once it is past every surface (outside the sphere about the origin as wide as the edge radius plus
+ * the greatest height) and moving away from the origin. A stride that would carry it past that sphere ends on it, and the sky's direction is carried from the start of the ray's last straight chord (moved back to
+ * the last warp's reach, as the flat tracer does), as points far out lose their place in float precision: strides
+ * overshooting by hundreds of meters gave NaN, and carrying the direction back from the sphere jittered it by pixels.
  * @par Example
  * @code
  * VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
@@ -2333,7 +2348,10 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             while (s_end > 0.0 && bent_piece_count++ < MAX_BENT_PIECES) {
                 if (entering < 0 && x.w > sky_w && v.w > 0.0) { outcome = OUTCOME_SKY; break; }
                 float empty_s = get_empty_s(scene, x), s = min(empty_s, s_end), frac = 1.0;
+                float sky_s = entering < 0 && v.w > 0.0 ? get_s_to_w(x.w, v.w, sky_w) : NO_HIT_S;
+                bool is_sky = empty_s > nominal_s && sky_s <= s;
                 float4 hx = x, hv = v;
+                if (is_sky) s = sky_s;
                 if (empty_s <= nominal_s) s = trace_bent_piece(scene, x, v, min(nominal_s, s_end), travelled, hit, glass, hx, hv, frac, dust);
                 chord_s += s * frac;
                 if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
@@ -2342,8 +2360,10 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 x = xn * rsqrt(-mdot(xn, xn));
                 travelled += s;
                 s_end -= s;
+                if (is_sky) { outcome = OUTCOME_SKY; break; }
             }
             if (u.beam_count > 0) scan_beams(scene, chord_x, chord_v, chord_s, chord_travelled, core, halo, code, speckle);
+            if (outcome == OUTCOME_SKY) { x = chord_x; v = chord_v; }
             if (outcome == OUTCOME_SKY && last_warp >= 0) back_to_reach(scene, last_warp, x, v);
             if (s_end > 0.0 || outcome != OUTCOME_LOST) break;
             inside = entering;
