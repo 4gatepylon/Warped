@@ -1498,6 +1498,7 @@ fn bench_voxel_views(
             "median_ms": times_ms[times_ms.len() / 2],
             "fastest_ms": times_ms[0],
             "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
+            "p99_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() * 99 / 100),
             "laser": shot.as_ref().map(|s| multiplayer::describe_shot(world, s)),
         }));
     }
