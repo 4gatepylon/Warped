@@ -113,15 +113,6 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
-- [?] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
-  of the ground, just barely translucent, to mark out the real zones. Then, from the pictures: "Level A, faint", and
-  "the blates should also have a little bit of thickness (rougly 1 player worth of thickenss)". #291.
-  - **Where the work is** (for any agent picking it up): merged from branch `claude/zone-planes` (pushed to
-    `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac,
-    pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`
-    (temporary, under `/private/tmp`; the `*_slab*` and `6*_recheck_*` files show the result). State, 2026-11-08: on
-    `staging`, waiting for the user to test it.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
   good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
@@ -379,3 +370,6 @@ Confirmed by the user after testing.
   character, and the player controls it from there, seeing their own character. `V` switches to a view from 3 m
   behind and 0.6 m above the head, pulled in when a wall or the ground is behind it; shots go from the head into the
   crosshair, and aiming looks from the eye again. #286. Confirmed by the user, 2026-11-08: "third person looks good its done mark at such".
+- [x] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
+  of the ground, just barely translucent, to mark out the real zones. Then, from the pictures: "Level A, faint", and
+  "the blates should also have a little bit of thickness (rougly 1 player worth of thickenss)". #291. Confirmed by the user, 2026-11-08: "please merge the fact that the walls are odne", "(zone planes are done)".
