@@ -17,10 +17,6 @@ is in [`AGENTS.md`](AGENTS.md).
   Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch `claude/time-dilation`, 2026-11-08.
   - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-time-dilation` on
     `leah`'s Mac, branch `claude/time-dilation` (pushed to `origin` once it has commits). State, 2026-11-08: started.
-- [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
-  frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
-  `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
-  2026-11-08.
 - [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
   wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
@@ -117,6 +113,10 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
+  frames under the reality bend (W-68 (reality bend)) are slow. #340, #334, #335 (a stack, drafts: W-107 (time
+  dilation) removed the bend from `staging/user-theaquarium` while this was measured, so they apply only if the bend
+  stays).
 - [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
   reality bending version). #316.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you

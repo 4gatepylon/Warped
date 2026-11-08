@@ -750,3 +750,121 @@ Tried as well:
 
 In the full-screen window, the wormhole exit now runs at 72 to 73 fps at render scales 0.96 to 0.98, as its frame time
 sits at the scale's 14 ms target; every other view runs at full resolution.
+
+## 9. The reality bend (W-103)
+
+Under the reality bend (W-68), `render_voxel.metal`'s `HAS_BEND` tracer walks each ray through the bent world in
+pieces, each traced as a chord of the unbent map (`trace_bent_piece`, `trace_bent_chord`), and crosses empty space in
+long strides (`get_empty_s`). Measured with `--bench-views --bend-strength 0.5` and `1` at 2560×1600 with adaptive
+sampling, on an Apple M3 Pro (14-core GPU, 36 GB, macOS 26.5.2, Rust 1.98.0) shared with other agents' game servers
+and bots, so each time below is the lowest of three alternating runs' median GPU time per frame (five frames a run).
+
+### 9.1 Where the time went
+
+Per-ray counters (a temporary atomic buffer, not committed) at 1280×800 found two things.
+
+- **Sky rays lost to float precision.** At strength 0.5, 2 to 9% of the black hole, Einstein ring, middle and overview
+  views' rays ran all 240 iterations as NaN and were drawn black. A stride through empty space could end hundreds of
+  meters past the sphere beyond which a ray is sky (the edge radius plus the greatest height, 202 m); out there
+  $x_w$ is in the tens of thousands and $\langle x, x\rangle = -1$ is lost to float32 cancellation, so `rsqrt` of a
+  negative number gave NaN and the ray kept stepping, tracing a piece per step, without escaping or being captured.
+  Rays that didn't turn NaN carried their direction back to the eye from that far point (`back_to_reach`, then
+  `get_sky_direction`), and the same cancellation jittered it by many pixels, so the stars, the Milky Way and the
+  planet were noise and adaptive sampling found no smooth cell in the sky: the Einstein ring view traced 663,000 rays
+  at 1280×800, where the flat one traces 81,000.
+- **Every chord tests every structure and the terrain.** Each chord tested all 29 structures' bounding spheres and
+  marched the terrain from its start (5 octaves of value noise a step), and a ray takes 25 to 80 chords. Turning either
+  off (tracing every pixel, so the work is comparable) saved about 15% (structures) and 25% (terrain) of a bent frame.
+
+The rest is the pieces themselves (unbending their ends and midpoints, set by `BEND_SAG_PIXELS`, which stays at half a
+pixel), and near surfaces whose hit points are noisier than the samples' spacing, which keeps adaptive sampling from
+interpolating them (9.5).
+
+### 9.2 Sky rays end on the sky sphere
+
+A stride whose ray moves away from the origin ($v_w > 0$) and would pass the sky sphere ($x_w = W = \cosh(202\,
+\text{m}/R)$) now ends on it, at
+
+```math
+s = \ln \frac{W + \sqrt{W^2 - x_w^2 + v_w^2}}{x_w + v_w},
+```
+
+the root of $x_w \cosh s + v_w \sinh s = W$, and the ray is sky. Its direction is carried from the start of its last
+straight chord (moved back to the last warp's reach), not from where it stopped: every piece of that chord is on one
+geodesic, so in exact arithmetic it is the same line, and this is what the flat tracer computes. Pixels change: lost
+(black) pixels become sky, and the stars, the Milky Way and the planet are where the lens puts them (at strength 0.5,
+up to 30% of a view's pixels, the Einstein ring's, change by more than 30 of 765, SSIM 0.57 to 1.0, all in the sky;
+strength 1 closes the map into a sphere, has no sky and is unchanged, and so is strength 0).
+
+### 9.3 Map cells
+
+`map_cells.rs` cuts the ground into 4 m cells of Fermi $(u, v)$, 88 per side. In Fermi coordinates
+
+```math
+ds^2 = \cosh^2 h \cosh^2 v \, du^2 + \cosh^2 h \, dv^2 + dh^2 \ge du^2 + dv^2 + dh^2,
+```
+
+so a chord of length at most $L = 10$ m from a point in a cell stays above the cell's square widened by $L$ (plus 5 cm
+for float rounding). Each cell holds:
+
+- a mask of the structures whose bounding sphere comes within that distance of its square. A chord meets a structure's
+  sphere only if some point of it is within the radius, so its start is within the radius plus $L$; a chord tests only
+  the structures in its start cell's mask, in the same order, and each one it skips would have returned before
+  touching anything.
+- a bound on the terrain's height over the widened square: the bowl at its highest there (`get_max_bowl_height_m`:
+  the rim at its noise's highest times the wall's highest smoothstep, which is 1 where the rim's ellipse crosses the
+  square as the wall rises to the rim and falls away outside it, plus the relief at its highest), plus the highest
+  mound grid sample that a bilinear read there can use. Along the chord $\sinh h = y = x_y \cosh s + v_y \sinh s$, which
+  is lowest at an end or, where $x_y > 0$ and $\tanh s = -v_y / x_y$ falls on the chord, at $\sqrt{x_y^2 - v_y^2}$. A
+  chord whose lowest height is above the bound skips the terrain march, which would have found the gap positive at
+  every sample.
+
+Longer chords, chords that start off the grid, and worlds with more than 64 structures (counting avatars) test
+everything as before. The terrain bounds take 2 ms at load; the masks are rebuilt each bent frame (avatars move) in
+0.02 ms and upload 124 KB. Every picture is bit-identical to the tracer without the cells, at strengths 0, 0.5 and 1,
+tracing every pixel and with adaptive sampling.
+
+GPU ms at 2560×1600 with adaptive sampling (staging is `f893757`):
+
+| View | Strength | Staging | Sky fix (9.2) | + structure masks | + terrain bounds |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Einstein ring | 0.5 | 1,188 | 100 | 86 | 77 |
+| black hole | 0.5 | 871 | 98 | 86 | 77 |
+| middle | 0.5 | 532 | 111 | 99 | 89 |
+| overview | 0.5 | 452 | 88 | 78 | 68 |
+| wormhole exit | 0.5 | 267 | 242 | 216 | 208 |
+| laser into the wormhole | 0.5 | 200 | 109 | 98 | 95 |
+| wormhole | 0.5 | 159 | 92 | 84 | 81 |
+| ridge | 0.5 | 132 | 66 | 62 | 60 |
+| blue spawn | 0.5 | 115 | 116 | 109 | 107 |
+| overview | 1 | 285 | 288 | 228 | 185 |
+| wormhole exit | 1 | 184 | 184 | 162 | 158 |
+| Einstein ring | 1 | 108 | 108 | 96 | 89 |
+| blue spawn | 1 | 100 | 98 | 95 | 92 |
+
+The other views at both strengths get 1 to 13% faster, and flat frames (strength 0) are unchanged (every view within
+2% of staging).
+
+### 9.4 Tried: reusing the midpoint when halving
+
+When `trace_bent_piece` halves a piece, the new end is the old midpoint, so its unbent point needn't be computed again.
+It saves about 5% of the unbending (few pieces are halved) and made no measurable difference, while the compiler's
+different rounding changed 1% of the wormhole exit's pixels (rays near the throat amplify any rounding); dropped.
+
+### 9.5 Left for the user
+
+Measured on top of the map cells (GPU ms, lowest of two alternating runs at 2560×1600, adaptive; pixels against the
+current tolerances), none applied, and none worth it so far:
+
+- **Refining shape hits** (up to 2 or 4 more sphere-tracing steps after a hit is within 3 mm, so near faces' hit points
+  are smoother): slower everywhere, up to 26% (red spawn at strength 0.5), and flat frames up to 12% slower; it didn't
+  let adaptive sampling interpolate more.
+- **A looser near tolerance for the pieces** (`BEND_SAG_M` 5 or 10 cm instead of 2 cm, which also lengthens the nominal
+  piece): mixed, from 15% faster (blue spawn at 0.5) to 20% slower (crater wall at 0.5), within the machine's noise on
+  most views, while 3 to 34% of the pixels change by more than 30 of 765 (SSIM down to 0.51), as near walls and ground
+  bend visibly less smoothly.
+- **A tighter far tolerance** (`BEND_SAG_PIXELS` 0.1 instead of 0.5) removes bands on the far ground for about 13%
+  more GPU time (measured for W-105 (screen tearing)); the user kept 0.5.
+
+What remains costly is close surfaces (the spawns, the overlook), where hit points are noisier than the samples'
+spacing and adaptive sampling traces most pixels even when flat, and the rays near the wormholes' throats.
