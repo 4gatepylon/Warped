@@ -1,7 +1,7 @@
 /**
  * `export_map.mjs` exports the Lunar Surface level to the portable map format of `common/maps/` (see its README): it
  * runs the level's own layout code from `index.html` (everything before the WebGL set-up, plus the functions that
- * find where a player stands) in a Node VM, then writes `map.json` and `voxels.bin` into
+ * find where a player stands) in a Node VM, then writes `map.json` into
  * `common/maps/lunar_surface/`, replacing what is there. The map files are generated: rerun this after changing the
  * level's layout.
  *
@@ -73,10 +73,10 @@ function make_sky_direction(elevation_rad, azimuth_rad) {
 }
 
 /**
- * `make_map` turns the level into a map manifest and its voxel bytes.
+ * `make_map` turns the level into a map manifest.
  * @param {Object} level What `run_level` returned.
- * @return {{manifest: Object, voxels: Uint8Array}} The map.
- * @example const { manifest, voxels } = make_map(level);
+ * @return {Object} The map manifest.
+ * @example const manifest = make_map(level);
  */
 function make_map(level) {
   const R = level.CURVATURE_RADIUS_M;
