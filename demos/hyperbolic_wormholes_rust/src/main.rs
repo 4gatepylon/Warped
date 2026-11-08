@@ -2345,22 +2345,32 @@ impl Session {
         };
     }
 
-    /// `get_console_masks` gives the consoles turned off and those someone holds `E` on (bit i for
-    /// console i), none without a server.
+    /// `get_console_states` gives the consoles turned off (bit i for console i), and how far along
+    /// turning off each console is, from 0 to 1: the most of everyone holding `E` on it, with this
+    /// player's own seconds held and the server's timing of the others. Without a server, every
+    /// console is on and nobody turns any off.
     ///
-    /// Example: `let (off_mask, disabling_mask) = self.get_console_masks();`
-    fn get_console_masks(&self) -> (u32, u32) {
+    /// Example: `let (off_mask, disabling_fracs) = self.get_console_states();`
+    fn get_console_states(&self) -> (u32, [f64; net::MAX_CONSOLE_COUNT]) {
+        let mut disabling_fracs: [f64; net::MAX_CONSOLE_COUNT] = [0.0; net::MAX_CONSOLE_COUNT];
         let Some(multiplayer) = &self.multiplayer else {
-            return (0, 0);
+            return (0, disabling_fracs);
         };
-        let disabling_mask: u32 = multiplayer
+        let hold_s: f64 = self.settings.consoles.hold_to_disable_s;
+        let own: Option<(u8, f64)> = multiplayer
+            .disabling
+            .map(|(console, held_s)| (console, (held_s / hold_s).min(1.0)));
+        for (console, frac) in multiplayer
             .client
             .players
             .iter()
-            .filter_map(|player| player.disabling_console)
-            .chain(multiplayer.disabling.map(|(console, _)| console))
-            .fold(0, |mask, console| mask | 1 << console);
-        (multiplayer.client.game.off_mask, disabling_mask)
+            .filter_map(|player| Some((player.disabling_console?, player.disabling_frac)))
+            .chain(own)
+        {
+            let most_frac: &mut f64 = &mut disabling_fracs[usize::from(console)];
+            *most_frac = most_frac.max(frac);
+        }
+        (multiplayer.client.game.off_mask, disabling_fracs)
     }
 
     /// `update_gun` notes whether this player runs (sprints while moving), walks upright (moves
@@ -2587,10 +2597,12 @@ impl Session {
     /// Example: `let data = session.pack((1280, 800));`
     fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
         let is_firing: bool = self.is_firing();
-        let (off_mask, disabling_mask) = self.get_console_masks();
+        let (off_mask, disabling_fracs) = self.get_console_states();
         let time_s: f64 = self.start.elapsed().as_secs_f64();
         if let Some(voxel) = &mut self.voxel {
-            voxel.world.light_consoles(off_mask, disabling_mask, time_s);
+            voxel
+                .world
+                .light_consoles(off_mask, &disabling_fracs, time_s);
             let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
             voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }

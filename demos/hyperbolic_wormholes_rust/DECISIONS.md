@@ -1036,6 +1036,35 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D87. Consoles pulse faster and faster while being turned off
+
+- **Choice:**
+  - **Ramp:** a console that someone holds `E` on pulses 8^p times a second at progress p (the seconds held over
+    `consoles.hold_to_disable_s`, from 0 to 1): from the normal 1 Hz up to a frenzy of 8 Hz right before it turns
+    off. Each equal step of progress multiplies the rate by the same factor (2.8 Hz halfway, 6.5 Hz at 90%), so the
+    rate climbs fastest at the end. This replaces D53's fixed double rate.
+  - **Easing back:** when the hold stops (letting go, looking away, the holder hit or gone from the server), the
+    rate falls exponentially toward the normal rate with a 0.3 s time constant: about half the way in 0.2 s, and
+    within 4% after 1 s. A rate that has to rise (a new hold) follows the progress at once.
+  - **No jumps:** each console keeps its own phase, which adds up its rate frame by frame instead of using
+    sin(2π f t), so its light never jumps when the rate changes. The other consoles keep their 1 Hz pulse.
+  - **Same in every window:** each player in the server's snapshot carries one more byte, how far along their hold
+    is by the server's own timer (in 255ths). A window lights each console by the furthest of its holders, using
+    its own seconds held for itself. The snapshot's length check drops snapshots between a server and a client of
+    different versions, so both must be rebuilt.
+- **Alternatives:**
+  - a linear ramp, 1 to 8 Hz evenly (most of the change comes early and the end feels flat);
+  - 10 Hz at the top (at 60 fps only 6 frames a pulse, and more flicker);
+  - each window timing other players' holds from when it sees them start (no protocol change, but a player who
+    joins mid-hold or a lost snapshot would put windows out of step);
+  - the progress of each console in the game's state (32 bytes a snapshot instead of 1 per player);
+  - easing down linearly over exactly 1 s (each console would need the rate and time its easing started).
+- **Rationale:** you asked that a console's pulse speed up continuously, reaching a fervor right before it turns
+  off, and slow down smoothly instead of jumping when the turning off stops.
+- **Revisit if:** the flashing bothers anyone. 8 Hz is above the 3 flashes a second that accessibility guidelines
+  (WCAG 2.3.1) allow for large, bright or red flashes. A console fills little of the screen, but
+  `CONSOLE_FRENZY_PULSE_HZ` in `voxel_world.rs` lowers the top rate.
+
 
 ## Baselines
 

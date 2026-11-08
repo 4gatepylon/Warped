@@ -115,8 +115,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
 - On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).
-  Consoles pulse while on, twice as fast while someone holds `E` on them, and go dark when off. After a win, `Enter`
-  in the server's terminal starts a new game.
+  Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
+  just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
+  go dark when off. After a win, `Enter` in the server's terminal starts a new game.
 - Up to 8 players. The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
 - `--join <address> --bot --exit-after-s <seconds>` plays by itself without a window (it walks until another player
   is within 12 blocks, then turns toward them and fires), to test a game; it saves its view at each hit under
