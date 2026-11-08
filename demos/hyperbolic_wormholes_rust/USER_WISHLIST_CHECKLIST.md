@@ -121,7 +121,7 @@ Merged into `staging`, waiting for the user to test and confirm. Items done befo
 are here too, since the user hadn't confirmed them.
 
 - [?] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
-  menu opens on the SCORES page. #PRNUM.
+  menu opens on the SCORES page. #265.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
   bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
