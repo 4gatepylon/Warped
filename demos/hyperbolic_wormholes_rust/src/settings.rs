@@ -24,15 +24,17 @@ use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 5] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 6] = [
+    "map_edge.start_wall_frac",
     "sniper.reload_s",
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
     "respawn.delay_s",
 ];
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 6] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 7] = [
     "view.motion_blur_s",
+    "view.edge_stretch_frac",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
     "hit_effects.red_frac",
@@ -156,13 +158,25 @@ pub struct FlashlightSettings {
     pub brightness_frac: f64,
 }
 
+/// `MapEdgeSettings` is the map's soft edge on a map with a crater: how far up the crater's wall
+/// (0 at its foot, 1 at the rim) players start to slow down, and how far up their speed would
+/// reach 0, which they never get to (each step outward is cut by the share of the way they have
+/// come).
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct MapEdgeSettings {
+    pub start_wall_frac: f64,
+    pub stop_wall_frac: f64,
+}
+
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
-/// long motion smears, and the head bob.
+/// long motion smears, how strongly the view stretches near the map's edge, and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
     pub look_rad_per_px: f64,
     pub motion_blur_s: f64,
+    pub edge_stretch_frac: f64,
     pub head_bob: HeadBobSettings,
 }
 
@@ -194,6 +208,7 @@ pub struct ServerSettings {
     pub respawn: RespawnSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
+    pub map_edge: MapEdgeSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -257,6 +272,14 @@ impl ServerSettings {
             &SERVER_ZERO_ALLOWED_KEYS,
             source,
         )?;
+        let edge: &MapEdgeSettings = &settings.map_edge;
+        if edge.start_wall_frac >= edge.stop_wall_frac || edge.stop_wall_frac > 1.0 {
+            return Err(format!(
+                "settings {source}: map_edge needs start_wall_frac < stop_wall_frac <= 1, not {} and {}",
+                edge.start_wall_frac, edge.stop_wall_frac
+            )
+            .into());
+        }
         Ok(settings)
     }
 
@@ -408,6 +431,12 @@ mod tests {
                     .to_string();
             assert!(error.contains(key), "{error}");
         }
+        let backward_edge: String =
+            BUILTIN_SERVER_YAML.replace("start_wall_frac: 0.0", "start_wall_frac: 0.6");
+        let error: String = ServerSettings::FromYaml(&backward_edge, "test")
+            .expect_err("a stop below the start fails")
+            .to_string();
+        assert!(error.contains("map_edge"), "{error}");
         let still_view: String =
             BUILTIN_PLAYER_YAML.replace("look_rad_per_px: 0.0025", "look_rad_per_px: 0");
         let error: String = PerPlayerSettings::FromYaml(&still_view, "test")

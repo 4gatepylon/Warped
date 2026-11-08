@@ -63,3 +63,7 @@ flashlight:  # It shines while the right button is held, lighting the scene in a
   soft_edge_rad: 0.08  # How wide the cone's soft edge is.
   range_m: 25.0  # Distance at which its light has fallen to half.
   brightness_frac: 2.0  # How bright it is, as a fraction of full sunlight.
+
+map_edge:  # On a map with a crater, its wall is the edge: climbing it, players slow down without end ("Zeno's paradox").
+  start_wall_frac: 0.0  # How far up the wall players start to slow (0 at its foot, 1 at the rim).
+  stop_wall_frac: 0.5  # How far up their speed would reach 0; each step outward is cut by the share of the way there.

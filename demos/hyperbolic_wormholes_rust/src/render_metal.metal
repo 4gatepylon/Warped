@@ -40,6 +40,10 @@ constant float WAND_HALO_M = 0.012;
 constant float WAND_HALO_STRENGTH = 0.6;
 constant int WAND_SAMPLES_PER_SIDE = 2;
 constant int REVOLVER_WAND = 2;
+constant int STRETCH_TAP_COUNT = 12;
+constant float STRETCH_ZOOM_GAIN = 1.5;
+constant float STRETCH_SMEAR_FRAC = 0.35;
+constant float STRETCH_FRINGE_FRAC = 0.03;
 
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
@@ -1997,6 +2001,7 @@ struct OverlayParams {
     float2 shake_px;
     int2 picture_min_mask_px;
     int2 picture_max_excl_mask_px;
+    float stretch_frac;
 };
 
 /**
@@ -2023,6 +2028,36 @@ static float3 read_hit_scene(texture2d<float, access::read> frame, uint2 id, con
     }
     float3 blurred = mix(sharp, sum / float(HIT_BLUR_TAP_COUNT + 1), edge);
     return mix(blurred, HIT_RED_COLOR, edge * p.hit_red_frac);
+}
+
+/**
+ * @brief `read_stretched_scene` reads a frame's pixel as a player slowed at the map's soft edge sees it (`stretch_frac`
+ * of the way to its stop, 0 for none): the scene pulled out from the middle of the screen (magnified up to
+ * 1 + `STRETCH_ZOOM_GAIN` times at the middle, not at all at the corners) and smeared along lines from the middle over
+ * `STRETCH_SMEAR_FRAC` of the way in (`STRETCH_TAP_COUNT` taps), red pulled a little further and blue a little less
+ * (`STRETCH_FRINGE_FRAC`); each tap is read as `read_hit_scene` reads it.
+ * @par Example
+ * @code
+ * float3 scene = read_stretched_scene(frame, id, p);
+ * @endcode
+ */
+static float3 read_stretched_scene(texture2d<float, access::read> frame, uint2 id, constant OverlayParams &p) {
+    if (p.stretch_frac <= 0.0) return read_hit_scene(frame, id, p);
+    float2 size = float2(frame.get_width(), frame.get_height());
+    float2 middle = size * 0.5;
+    float2 offset = float2(id) + 0.5 - middle;
+    float zoom = pow(1.0 + STRETCH_ZOOM_GAIN * p.stretch_frac, 1.0 - length(offset) / length(middle));
+    float fringe = STRETCH_FRINGE_FRAC * p.stretch_frac;
+    float3 sum = float3(0.0);
+    for (int k = 0; k < STRETCH_TAP_COUNT; k++) {
+        float pull = 1.0 - STRETCH_SMEAR_FRAC * p.stretch_frac * float(k) / float(STRETCH_TAP_COUNT - 1);
+        float3 pulls = pull * float3(1.0 + fringe, 1.0, 1.0 - fringe);
+        for (int c = 0; c < 3; c++) {
+            float2 source = clamp(middle + offset / zoom * pulls[c], float2(0.0), size - 1.0);
+            sum[c] += read_hit_scene(frame, uint2(source), p)[c];
+        }
+    }
+    return sum / float(STRETCH_TAP_COUNT);
 }
 
 /**
@@ -2117,7 +2152,7 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
                           texture2d<float, access::write> history_out [[texture(4)]],
                           texture2d<float, access::read> picture [[texture(6)]], uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
-    float3 scene = mix(read_hit_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
+    float3 scene = mix(read_stretched_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
     history_out.write(float4(scene, 1.0), id);
     float4 color = float4(scene * (1.0 - p.dim_frac), 1.0);
     int2 offset = int2(id) - p.origin;

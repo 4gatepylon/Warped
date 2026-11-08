@@ -3,8 +3,8 @@
 //! value noise and raised by round mounds (hills, a ridge, boulders) baked into a height grid,
 //! and where a chord first meets it. `render_voxel.metal` computes the same height.
 //!
-//! Interface: `Terrain::FromMap`, `Terrain::get_height_m`, `Terrain::find_hit_s`,
-//! `get_fermi_coordinates`.
+//! Interface: `Terrain::FromMap`, `Terrain::get_height_m`, `Terrain::get_wall_frac`,
+//! `Terrain::find_hit_s`, `get_fermi_coordinates`.
 //!
 //! Example: `let h_m = terrain.get_height_m(12.0, -3.5);`
 
@@ -218,8 +218,7 @@ impl Terrain {
     ///
     /// Example: `let h_m = terrain.get_height_m(0.0, 0.0);`
     pub fn get_height_m(&self, u_m: f64, v_m: f64) -> f64 {
-        let e: f64 = (u_m / self.rim_m[0]).hypot(v_m / self.rim_m[1]);
-        let inside_m: f64 = (1.0 - e) * self.rim_m[1];
+        let inside_m: f64 = self.get_inside_m(u_m, v_m);
         let wall: f64 = if inside_m >= 0.0 {
             smooth(1.0 - inside_m / self.wall_m)
         } else {
@@ -232,6 +231,22 @@ impl Terrain {
         rim_m * wall
             + self.get_mounds_height_m(u_m, v_m)
             + self.relief_m * relief * (1.0 + WALL_RELIEF_GAIN * wall)
+    }
+
+    /// `get_inside_m` gives how far inside the rim (u, v) is, along v's scale: negative outside.
+    ///
+    /// Example: `let inside_m = terrain.get_inside_m(0.0, 60.0);`
+    fn get_inside_m(&self, u_m: f64, v_m: f64) -> f64 {
+        let e: f64 = (u_m / self.rim_m[0]).hypot(v_m / self.rim_m[1]);
+        (1.0 - e) * self.rim_m[1]
+    }
+
+    /// `get_wall_frac` gives how far up the crater's wall (u, v) is, before smoothing: 0 on the
+    /// floor and at the wall's foot, 1 at the rim, more outside it.
+    ///
+    /// Example: `let wall_frac = terrain.get_wall_frac(0.0, 75.0);`
+    pub fn get_wall_frac(&self, u_m: f64, v_m: f64) -> f64 {
+        (1.0 - self.get_inside_m(u_m, v_m) / self.wall_m).max(0.0)
     }
 
     /// `find_hit_s` gives where the chord from x along unit tangent v first goes under the ground

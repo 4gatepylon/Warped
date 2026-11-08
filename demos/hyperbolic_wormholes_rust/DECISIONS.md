@@ -955,6 +955,32 @@
 - **Rationale:** you asked for an ammo bar for the sniper of only one block, which comes back when the timer
   resets, letting you shoot again.
 
+### D78. A soft map edge up the crater's wall
+
+- **Choice:**
+  - **Where:** on a map with terrain (Lunar Surface), the crater's wall is the edge, and the old invisible ellipse
+    (`regions.boundary`, 128 × 72 m) no longer stops anyone. That ellipse stopped players right at the wall's foot
+    along u, but partway up it along v. A map without terrain keeps the ellipse.
+  - **How far in:** a player's edge fraction runs from 0 at `map_edge.start_wall_frac` up the wall (0, its foot) to
+    1 at `map_edge.stop_wall_frac` (0.5, halfway to the rim, about 10 to 14 m up). "Up the wall" is the terrain's
+    own wall coordinate, before smoothing (`Terrain::get_wall_frac`).
+  - **Slowing:** a step that would take a player further out is cut by (1 − edge fraction). So the distance left
+    shrinks in proportion each step and is never covered: "Zeno's paradox". Measured walking out on the crater
+    floor at 8.2 m/s: 2.5 m/s 9 m up the wall, 0.36 m/s at 13 m, then ever slower toward about 14 m. Steps inward
+    or along the wall keep full speed, so nobody is stuck.
+  - **Stretch:** the overlay shader's `read_stretched_scene` pulls the scene out from the middle of the screen
+    (up to 2.5 times at the middle, not at all at the corners), smears it along lines from the middle and splits
+    red from blue a little. Its strength is the square of the edge fraction, so it starts gently and builds near
+    the stop, times each player's `view.edge_stretch_frac` (1; 0 turns it off).
+- **Alternatives:**
+  - slowing all motion near the edge, inward too (players far up the wall would take minutes to come back);
+  - the stop at the rim (players would see out over it, and the slowdown would stretch over 30 to 60 m);
+  - the stop at the old ellipse (along u it is only 1 m from the wall's foot, so it would act like a wall);
+  - a stretch growing in step with the edge fraction (already heavy at 0.4, while the player still moves at 60%).
+- **Rationale:** you asked that players slow down without end as they move off the map, instead of meeting a wall,
+  with the slowdown starting where they climb the hill, and that their view warp as if they were being stretched
+  ever further.
+
 
 ## Baselines
 

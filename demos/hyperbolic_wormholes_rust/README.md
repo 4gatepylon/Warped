@@ -46,6 +46,9 @@ make run-demo RENDERER=cpu
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
 - Holding the right button shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it
   yet).
+- On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
+  halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
+  (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
 - `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
