@@ -744,7 +744,7 @@ mod tests {
         let sky: Shot = shoot([-27.0, 0.0], [40.0, 0.0], SKY_PITCH_RAD);
         assert!(!sky.is_hit);
         assert!(DustBurst::FromShot(&world, &sky, START_S, false).is_none());
-        let pylon: Shot = shoot([-22.0, 40.5], [-14.0, 40.1], -0.007);
+        let pylon: Shot = shoot([-22.0, 40.5], [-14.0, 40.05], -0.004);
         assert!(pylon.hit_structure.is_some());
         assert!(DustBurst::FromShot(&world, &pylon, START_S, false).is_none());
         for (at_m, target_m, pitch_rad, is_wall) in [

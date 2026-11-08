@@ -2325,6 +2325,7 @@ mod tests {
     //! | Refilling energy | crouched (at the crouched rate), walking upright (at the walking rate) | `crouching_refills_energy_faster` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Low way walked out of | a habitat module's doors (each module, each way), a walkway's ends (each walkway, each way) | `players_walk_out_of_modules_and_walkways` |
+    //! | Bunker model walked out of | the kazemat's door, each of the garage's two doorways, the field bunker's room, forecourt and steps | `players_walk_out_of_bunkers` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
     //! | Bend strength | 0 after a bend (as never bent), between, 1 (black hole at the sphere's centre) | `a_flat_bend_traces_the_unbent_laser`, `a_bent_shot_along_the_ground_hits_what_is_ahead`, `a_shot_up_at_full_strength_lands_across_the_map` |
     //! | Bent laser aimed | through a wormhole (flat), along the ground at a player, straight up from the middle (closes over to the far side) | the three tests above |
@@ -2344,9 +2345,9 @@ mod tests {
     use crate::thrown_wormholes::GREEN_COLOR;
 
     const STAND_TOLERANCE_M: f64 = 0.06;
-    const PYLON_DISTANCE_M: f64 = 43.7;
-    const PYLON_AIM_M: [f64; 2] = [-14.0, 40.1];
-    const PYLON_AIM_PITCH_RAD: f64 = -0.007;
+    const PYLON_DISTANCE_M: f64 = 41.5;
+    const PYLON_AIM_M: [f64; 2] = [-14.0, 40.05];
+    const PYLON_AIM_PITCH_RAD: f64 = -0.004;
     const DISTANCE_TOLERANCE_M: f64 = 0.5;
     const BLOCK_U_M: f64 = -80.0;
     const BLOCK_DEPTH_M: f64 = 6.0;
@@ -2627,7 +2628,7 @@ mod tests {
         let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
         assert_eq!(shot.through, vec!["wormhole mouth A".to_string()]);
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
-        assert_eq!(world.structures[hit].name, "red pylon consoles");
+        assert_eq!(world.structures[hit].name, "red pylon");
         assert!((shot.length_m - PYLON_DISTANCE_M).abs() < DISTANCE_TOLERANCE_M);
     }
 
@@ -3074,6 +3075,91 @@ mod tests {
         }
     }
 
+    /// `BunkerRoute` is a walk out of a bunker: the structure's name, the start in its chart
+    /// (x, z), the turns before each leg, and the chart (x, z) the walk must end past.
+    struct BunkerRoute {
+        name: &'static str,
+        start_m: [f64; 2],
+        turns_rad: &'static [f64],
+        out_m: [f64; 2],
+    }
+
+    /// `players_walk_out_of_bunkers` checks that a player inside each bunker model walks out of
+    /// its door (the field bunker's through its forecourt and down its steps), as the mesh's
+    /// triangles, not boxes, stop players.
+    #[test]
+    fn players_walk_out_of_bunkers() {
+        const LEG_S: f64 = 6.0;
+        let world: VoxelWorld = load_lunar_surface();
+        let route = |name: &'static str,
+                     start_m: [f64; 2],
+                     turns_rad: &'static [f64],
+                     out_m: [f64; 2]| BunkerRoute {
+            name,
+            start_m,
+            turns_rad,
+            out_m,
+        };
+        let routes: [BunkerRoute; 4] = [
+            route(
+                "blue kazemat",
+                [-0.2, 0.0],
+                &[std::f64::consts::PI],
+                [f64::MIN, 4.2],
+            ),
+            route(
+                "red spawn hangar",
+                [-7.4, 0.0],
+                &[std::f64::consts::PI],
+                [f64::MIN, 7.8],
+            ),
+            route(
+                "red spawn hangar",
+                [1.5, 0.0],
+                &[std::f64::consts::PI],
+                [f64::MIN, 7.8],
+            ),
+            route(
+                "derelict field bunker",
+                [0.0, 3.85],
+                &[0.0, std::f64::consts::FRAC_PI_2],
+                [6.0, f64::MIN],
+            ),
+        ];
+        for BunkerRoute {
+            name,
+            start_m,
+            turns_rad,
+            out_m,
+        } in routes
+        {
+            let k: usize = world
+                .structures
+                .iter()
+                .position(|st| st.name == name)
+                .expect(name);
+            let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
+            let start: DVec4 = frame * map_klein(DVec3::new(start_m[0], 0.0, start_m[1]) / world.r);
+            let body: DMat4 = orthonormalize_frame(DMat4::from_cols(
+                frame.col(0),
+                frame.col(1),
+                frame.col(2),
+                start,
+            ));
+            let mut player: VoxelPlayer = VoxelPlayer::Standing(&world, body);
+            for &turn_rad in turns_rad {
+                player.body *= make_rotation(AXIS_X, AXIS_Z, turn_rad);
+                walk_forward(&world, &mut player, (LEG_S / STEP_S) as usize);
+            }
+            let p: DVec4 = world.structures[k].inverse * player.body.col(AXIS_W);
+            let (x_m, z_m) = (p.x / p.w * world.r, p.z / p.w * world.r);
+            assert!(
+                x_m > out_m[0] && z_m > out_m[1],
+                "{name} from {start_m:?}: stopped at ({x_m}, {z_m})"
+            );
+        }
+    }
+
     #[test]
     fn sprinting_uses_energy() {
         let world: VoxelWorld = load_lunar_surface();
@@ -3300,7 +3386,7 @@ mod tests {
         disabling_fracs[HELD_CONSOLE] = 1.0;
         world.light_consoles(1 << OFF_CONSOLE, &disabling_fracs, STEP_S);
         let rates_hz: Vec<f64> = world.consoles.iter().map(|c| c.pulse.hz).collect();
-        assert_eq!(rates_hz[0], CONSOLE_PULSE_HZ);
+        assert_eq!(rates_hz[OFF_CONSOLE], CONSOLE_PULSE_HZ);
         assert_eq!(rates_hz[HELD_CONSOLE], CONSOLE_FRENZY_PULSE_HZ);
         for (i, console) in world.consoles.iter().enumerate() {
             let entry: [f32; 4] = world.palette[usize::from(console.material)];
