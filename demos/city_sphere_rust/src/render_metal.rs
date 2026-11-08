@@ -130,9 +130,11 @@ pub struct OverlayMinimap<'a> {
 /// world; where it sits (the centre's x and y and the radius in pixels, then the Poincaré disk's
 /// radius at its rim, tanh of half its range in curvature radii); where the map's picture lies
 /// (the Fermi u and v of its top left corner, meters per pixel, then the curvature radius); how
-/// many marks and lines it has (then two zeros); the marks (other players: a point in the
-/// minimap's unit disk, x right and y down, then a radius in pixels and a zero; and a colour);
-/// and the lines (shots: two ends in the unit disk, then a colour).
+/// many marks and lines it has, then its kind (0 for the hyperbolic ground, `MINIMAP_KIND_SPHERE`
+/// for City Sphere's sphere, which uses `ground_frame`, `placement` and `map` its own way: see
+/// `city.rs`'s `make_minimap`) and a zero; the marks (other players: a point in the minimap's unit
+/// disk, x right and y down, then a radius in pixels and a zero; and a colour); and the lines
+/// (shots: two ends in the unit disk, then a colour).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Minimap {
@@ -442,6 +444,7 @@ const THREADGROUP_SIDE: usize = 8;
 pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
 pub(crate) const MAX_MINIMAP_MARK_COUNT: usize = 16;
+pub(crate) const MINIMAP_KIND_SPHERE: i32 = 1;
 pub(crate) const MAX_MINIMAP_LINE_COUNT: usize = 96;
 /// `GUN_MODEL_WAND` is `has_wand` when a gun model (viewmodel.rs) is drawn in the wand's place.
 const GUN_MODEL_WAND: i32 = 2;
