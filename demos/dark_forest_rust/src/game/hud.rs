@@ -15,6 +15,9 @@ use crate::render::overlay::{FLAT_RECT_STYLE, NO_RECT_PULSE, OverlayRect};
 
 /// `REFERENCE_HEIGHT_PX` is the window height at which the HUD is drawn at scale 1.
 const REFERENCE_HEIGHT_PX: f32 = 1080.0;
+/// `DEATH_DIM_FRAC` is how much the view darkens while dead, under "YOU DIED" (the Lunar Surface
+/// demo's).
+const DEATH_DIM_FRAC: f32 = 0.55;
 
 /// `HudState` is what the flat HUD rectangles show.
 pub struct HudState {
@@ -133,7 +136,13 @@ pub fn build_hud(state: &HudState, width_px: f32, height_px: f32) -> Vec<HudRect
         hud.number(margin + 92.0, margin, 26.0, tenths % 10, white.with_w(0.7));
     }
     if state.is_dead {
-        hud.rect(0.0, 0.0, width, height, Vec4::new(0.08, 0.0, 0.0, 0.35));
+        hud.rect(
+            0.0,
+            0.0,
+            width,
+            height,
+            Vec4::new(0.0, 0.0, 0.0, DEATH_DIM_FRAC),
+        );
     }
     hud.rects
 }

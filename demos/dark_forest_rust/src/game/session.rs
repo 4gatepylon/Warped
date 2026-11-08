@@ -866,7 +866,10 @@ impl Session {
             strength_frac: self.hit_effect_frac,
             red_frac: HIT_RED_FRAC,
             blur_px: HIT_BLUR_PX,
-            shake_px: [shake_rad.cos() as f32 * shake_px, shake_rad.sin() as f32 * shake_px],
+            shake_px: [
+                shake_rad.cos() as f32 * shake_px,
+                shake_rad.sin() as f32 * shake_px,
+            ],
         }
     }
 
