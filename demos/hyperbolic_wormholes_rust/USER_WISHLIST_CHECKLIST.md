@@ -92,6 +92,8 @@ is in [`AGENTS.md`](AGENTS.md).
   missing".
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
+- [ ] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
+  exit?", exits if the player presses OK, and otherwise doesn't.
 
 ## Done
 
