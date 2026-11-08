@@ -55,7 +55,8 @@ is in [`AGENTS.md`](AGENTS.md).
     (pushed to `origin`), pictures in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: built, tested and pictured
-    (levels A and B of translucency, a walk-through GIF); PR next, then it waits for the user's OK before merging.
+    (levels A and B of translucency, a walk-through GIF); PR #291 is open and waits for the user's OK (and pick of
+    level A or B) before merging.
 - [~] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
   character, and the player controls it from there, seeing their own character. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
