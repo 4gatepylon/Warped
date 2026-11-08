@@ -60,6 +60,23 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
   few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). Claimed by Claude Code
   (session `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/shoot-wormholes`, 2026-11-07.
+- [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
+  and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
+  1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
+     lander and its pad at the blue spawn, 3.5 m tall.
+  2. "Desert Planet Bunker Garage Thing" by eKross (`ebe3177a1c7947b98328d8cab6aa8600`) replaces the red spawn
+     hangar, 6 m tall.
+  3. "WW2 Field Bunker" by goldenblack4 (`6ea5cebdaa82455aa3aad26baa6e0375`) replaces the two derelict habitat
+     modules in the middle, 3.5 m tall.
+  4. "Sci-Fi Beacon/Way Point Marker Free Model" by AMMediaGames (`a1d91ebb3e2d41bba31c02b11423d97f`) replaces the
+     core and pad of both team pylons: 4 m tall on bare ground, the 5 consoles stay in a ring around it, and each
+     beacon shoots a team-coloured beam 400 m straight up that dims as consoles are switched off.
+  5. "Hesco Barrier PBR" by polbrainstorm (`ab21217481094e9a84f989e71fd56a59`) replaces the two red barriers in the
+     middle: each is a 16 m row of 1.4 m Hesco blocks, keeping the 3 m gap in the middle.
+
+  The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
+  commit the models with textures downscaled (about 20 MB).
+  Claimed by Devin (session Devin Desktop 2026-11-07), branch `devin/models-prepare`, 2026-11-07.
 
 ## Open
 
@@ -111,22 +128,6 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
-- [ ] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
-  and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
-  1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
-     lander and its pad at the blue spawn, 3.5 m tall.
-  2. "Desert Planet Bunker Garage Thing" by eKross (`ebe3177a1c7947b98328d8cab6aa8600`) replaces the red spawn
-     hangar, 6 m tall.
-  3. "WW2 Field Bunker" by goldenblack4 (`6ea5cebdaa82455aa3aad26baa6e0375`) replaces the two derelict habitat
-     modules in the middle, 3.5 m tall.
-  4. "Sci-Fi Beacon/Way Point Marker Free Model" by AMMediaGames (`a1d91ebb3e2d41bba31c02b11423d97f`) replaces the
-     core and pad of both team pylons: 4 m tall on bare ground, the 5 consoles stay in a ring around it, and each
-     beacon shoots a team-coloured beam 400 m straight up that dims as consoles are switched off.
-  5. "Hesco Barrier PBR" by polbrainstorm (`ab21217481094e9a84f989e71fd56a59`) replaces the two red barriers in the
-     middle: each is a 16 m row of 1.4 m Hesco blocks, keeping the 3 m gap in the middle.
-
-  The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
-  commit the models with textures downscaled (about 20 MB).
 
 ## Pending user review
 
