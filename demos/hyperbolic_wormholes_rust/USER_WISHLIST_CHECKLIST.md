@@ -10,7 +10,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-Nothing yet.
+- [~] **W-46 Settings menu.** A screen to exit to a menu where a player changes their own choices (hotkeys and the
+  rest of the per-player settings). Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/settings-menu`, 2026-11-07.
 
 ## Open
 
@@ -28,8 +30,6 @@ Nothing yet.
   Mac over loopback.
 - [ ] **W-44 Smooth wormhole interior.** Inside a wormhole, looking sideways shows a grainy texture; it should look
   pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
-- [ ] **W-46 Settings menu.** A screen to exit to a menu where a player changes their own choices (hotkeys and the
-  rest of the per-player settings).
 - [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
   play but has a dashboard where they can change or reset those settings.
 - [ ] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
