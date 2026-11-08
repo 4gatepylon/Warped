@@ -1132,7 +1132,7 @@ pub fn build() -> MapFile {
 /// | teams | red, blue | `test_each_team_has_two_consoles_and_spawns` |
 /// | ladders | to a deck, to a lookout | `test_ladders_reach_decks` |
 /// | symmetry | red's half against blue's | `test_halves_mirror` |
-/// | warps | 2 black holes and 3 paired wormholes, each reach clear of boxes, shapes, ladders and spawns | `test_warps_are_paired_and_clear` |
+/// | warps | no black holes and 5 paired wormholes, each reach clear of boxes, shapes, ladders and spawns | `test_warps_are_paired_and_clear` |
 /// | walking into a mouth | each of the 10 mouths, from 16 directions | `test_every_mouth_lets_out_onto_solid_ground` |
 #[cfg(test)]
 mod tests {
@@ -1246,7 +1246,7 @@ mod tests {
         assert!(problems.is_empty(), "{problems:#?}");
     }
 
-    /// `test_warps_are_paired_and_clear` checks the map has 2 black holes and 3 wormholes whose
+    /// `test_warps_are_paired_and_clear` checks the map has no black holes and 5 wormholes whose
     /// mouths point at each other, and that nothing but the ground is within any warp's reach.
     #[test]
     fn test_warps_are_paired_and_clear() {
