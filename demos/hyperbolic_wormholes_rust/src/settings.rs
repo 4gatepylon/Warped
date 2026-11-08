@@ -180,6 +180,28 @@ pub struct ViewSettings {
     pub head_bob: HeadBobSettings,
 }
 
+/// `MinimapCorner` is the corner of the window the minimap sits in.
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum MinimapCorner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+/// `MinimapSettings` is the minimap: whether it shows, the corner it sits in, its radius as a
+/// fraction of the window's height, and how far from the player it reaches (also the circle on
+/// the menu's map page).
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct MinimapSettings {
+    pub is_shown: bool,
+    pub corner: MinimapCorner,
+    pub radius_frac: f64,
+    pub range_m: f64,
+}
+
 /// `PlayerFile` is `player_settings.yaml` as written: the keys by name, the view and how a hit looks.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -187,6 +209,7 @@ struct PlayerFile {
     keys: BTreeMap<String, Vec<String>>,
     view: ViewSettings,
     hit_effects: HitEffectSettings,
+    minimap: MinimapSettings,
 }
 
 /// `PerPlayerSettings` is everything in `player_settings.yaml`, with the keys read into controls.
@@ -194,6 +217,7 @@ pub struct PerPlayerSettings {
     pub keys: KeyBindings,
     pub view: ViewSettings,
     pub hit_effects: HitEffectSettings,
+    pub minimap: MinimapSettings,
 }
 
 /// `ServerSettings` is everything in `server_settings.yaml`.
@@ -326,13 +350,13 @@ impl PerPlayerSettings {
     fn FromYaml(text: &str, source: &str) -> Result<PerPlayerSettings> {
         let file: PlayerFile =
             serde_yaml::from_str(text).map_err(|error| format!("settings {source}: {error}"))?;
-        let numbers: Value =
-            serde_json::json!({"view": file.view, "hit_effects": file.hit_effects});
+        let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         Ok(PerPlayerSettings {
             keys: KeyBindings::FromNames(&file.keys, source)?,
             view: file.view,
             hit_effects: file.hit_effects,
+            minimap: file.minimap,
         })
     }
 
@@ -353,6 +377,7 @@ impl PerPlayerSettings {
             keys: self.keys.to_names(),
             view: self.view.clone(),
             hit_effects: self.hit_effects.clone(),
+            minimap: self.minimap.clone(),
         };
         serde_yaml::to_string(&file).expect("player settings serialize to YAML")
     }

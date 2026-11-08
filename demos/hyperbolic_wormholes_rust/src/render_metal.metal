@@ -44,6 +44,21 @@ constant int STRETCH_TAP_COUNT = 12;
 constant float STRETCH_ZOOM_GAIN = 1.5;
 constant float STRETCH_SMEAR_FRAC = 0.35;
 constant float STRETCH_FRINGE_FRAC = 0.03;
+constant int MAX_MINIMAP_MARK_COUNT = 16;
+constant int MAX_MINIMAP_LINE_COUNT = 96;
+constant float MINIMAP_OPACITY = 0.88;
+constant float MINIMAP_RIM_PX = 2.0;
+constant float4 MINIMAP_RIM_COLOR = float4(0.9, 0.92, 0.95, 0.9);
+constant float3 MINIMAP_OFF_MAP_COLOR = float3(0.03, 0.03, 0.04);
+constant float MINIMAP_GRID_M = 10.0;
+constant float MINIMAP_GRID_HALF_WIDTH_PX = 0.6;
+constant float4 MINIMAP_GRID_COLOR = float4(1.0, 1.0, 1.0, 0.16);
+constant float MINIMAP_LINE_HALF_WIDTH_PX = 1.2;
+constant float MINIMAP_YOU_PX = 7.0;
+constant float MINIMAP_YOU_BASE_FRAC = 0.6;
+constant float MINIMAP_YOU_SPREAD = 0.5;
+constant float3 MINIMAP_YOU_COLOR = float3(1.0, 1.0, 1.0);
+constant float MINIMAP_TINY = 1e-6;
 
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
@@ -2125,6 +2140,81 @@ static float4 shade_wand(float3 d, constant OverlayWand &wand) {
     return float4(wand.tip_color.rgb * WAND_HALO_STRENGTH * exp(-miss_m / WAND_HALO_M), 0.0);
 }
 
+/** @brief `MinimapMark` is a mark on the minimap: a point in its unit disk (x right, y down), a radius in pixels and a zero; and a colour. */
+struct MinimapMark {
+    float4 disk;
+    float4 color;
+};
+
+/** @brief `MinimapLine` is a line on the minimap: its two ends in the unit disk (x right, y down), and a colour. */
+struct MinimapLine {
+    float4 ends;
+    float4 color;
+};
+
+/**
+ * @brief `Minimap` is render_metal.rs's `Minimap`: the frame taking the minimap's plane (y = 0, −z up the minimap) into
+ * the world; its centre and radius in pixels and the Poincaré disk's radius at its rim; the map picture's top left corner
+ * (Fermi u, v), meters per pixel and the curvature radius; the counts of marks and lines; the marks and the lines.
+ */
+struct Minimap {
+    float4x4 ground_frame;
+    float4 placement;
+    float4 map;
+    int4 counts;
+    MinimapMark marks[MAX_MINIMAP_MARK_COUNT];
+    MinimapLine lines[MAX_MINIMAP_LINE_COUNT];
+};
+
+/**
+ * @brief `draw_minimap` draws the minimap over `color` at pixel `id`: a disk of radius `placement.z` around
+ * `placement.xy`, a Poincaré disk of the ground around the player (out to `placement.w`, tanh of half its range in
+ * curvature radii), so geodesics away from the player bend into arcs. Each pixel's disk point goes onto the hyperboloid,
+ * through `ground_frame` into the world, to its Fermi (u, v) and so to the map's picture; then come faint lines every
+ * `MINIMAP_GRID_M` of u and v (as wide as a pixel, from the disk's metric 2R / (1 − |q|²)), the shots' lines, the other
+ * players' marks, and a white triangle for the player pointing up; inside a rim.
+ * @par Example
+ * @code
+ * color.rgb = draw_minimap(color.rgb, id, minimap, map);
+ * @endcode
+ */
+static float3 draw_minimap(float3 color, uint2 id, constant Minimap &m, texture2d<float, access::read> map) {
+    float radius_px = m.placement.z;
+    if (radius_px <= 0.0) return color;
+    float2 offset_px = float2(id) + 0.5 - m.placement.xy;
+    float distance_px = length(offset_px);
+    if (distance_px > radius_px + MINIMAP_RIM_PX) return color;
+    if (distance_px > radius_px) return mix(color, MINIMAP_RIM_COLOR.rgb, MINIMAP_RIM_COLOR.a);
+    float2 q = offset_px / radius_px * m.placement.w;
+    float qq = dot(q, q);
+    float4 local = float4(2.0 * q.x, 0.0, 2.0 * q.y, 1.0 + qq) / (1.0 - qq);
+    float4 x = m.ground_frame * local;
+    float r = m.map.w;
+    float2 fermi_m = float2(-r * atanh(x.z / x.w), r * asinh(x.x / sqrt(1.0 + x.y * x.y)));
+    float2 at_px = (fermi_m - m.map.xy) / m.map.z;
+    float3 ground = MINIMAP_OFF_MAP_COLOR;
+    if (all(at_px >= 0.0) && all(at_px < float2(map.get_width(), map.get_height()))) ground = map.read(uint2(at_px)).rgb;
+    float m_per_px = 2.0 * r * m.placement.w / radius_px / (1.0 - qq);
+    float2 to_grid_m = abs(fract(fermi_m / MINIMAP_GRID_M + 0.5) - 0.5) * MINIMAP_GRID_M;
+    if (min(to_grid_m.x, to_grid_m.y) < MINIMAP_GRID_HALF_WIDTH_PX * m_per_px) {
+        ground = mix(ground, MINIMAP_GRID_COLOR.rgb, MINIMAP_GRID_COLOR.a);
+    }
+    for (int i = 0; i < m.counts.y; i++) {
+        float2 a = m.lines[i].ends.xy * radius_px;
+        float2 ab = m.lines[i].ends.zw * radius_px - a;
+        float t = clamp(dot(offset_px - a, ab) / max(dot(ab, ab), MINIMAP_TINY), 0.0, 1.0);
+        if (length(offset_px - a - t * ab) < MINIMAP_LINE_HALF_WIDTH_PX) ground = m.lines[i].color.rgb;
+    }
+    for (int i = 0; i < m.counts.x; i++) {
+        if (length(offset_px - m.marks[i].disk.xy * radius_px) < m.marks[i].disk.z) ground = m.marks[i].color.rgb;
+    }
+    float2 you = offset_px / MINIMAP_YOU_PX;
+    if (you.y > -1.0 && you.y < MINIMAP_YOU_BASE_FRAC && abs(you.x) < (you.y + 1.0) * MINIMAP_YOU_SPREAD) {
+        ground = MINIMAP_YOU_COLOR;
+    }
+    return mix(color, ground, MINIMAP_OPACITY);
+}
+
 /** @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), and its colour and opacity. */
 struct OverlayRect {
     float2 min_frac;
@@ -2138,8 +2228,9 @@ struct OverlayRect {
  * `scale` screen pixels per mask pixel from `origin` (the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
  * the text's above `OVERLAY_TEXT_LEVEL`) over a picture (blended by its alpha) stretched from `picture_min_mask_px` to
  * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel)
- * when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), and `rects`
- * blended over that in order (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
+ * when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), the minimap
+ * (`draw_minimap`, from `minimap` and the map's picture `minimap_map`), and `rects` blended over that in order
+ * (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
  * @par Example
  * @code
  * dispatched by render_metal.rs, one thread per output pixel.
@@ -2150,7 +2241,8 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
                           constant OverlayRect *rects [[buffer(1)]], constant OverlayWand &wand [[buffer(2)]],
                           texture2d<float, access::read> history_in [[texture(3)]],
                           texture2d<float, access::write> history_out [[texture(4)]],
-                          texture2d<float, access::read> picture [[texture(6)]], uint2 id [[thread_position_in_grid]]) {
+                          texture2d<float, access::read> picture [[texture(6)]], constant Minimap &minimap [[buffer(3)]],
+                          texture2d<float, access::read> minimap_map [[texture(7)]], uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
     float3 scene = mix(read_stretched_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
     history_out.write(float4(scene, 1.0), id);
@@ -2189,6 +2281,7 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
         float samples = float(WAND_SAMPLES_PER_SIDE * WAND_SAMPLES_PER_SIDE);
         color.rgb = mix(color.rgb + glow / samples, sum.a > 0.0 ? sum.rgb / sum.a : color.rgb, sum.a / samples);
     }
+    color.rgb = draw_minimap(color.rgb, id, minimap, minimap_map);
     float2 uv = (float2(id) + 0.5) / size;
     for (int i = 0; i < p.rect_count; i++) {
         if (all(uv >= rects[i].min_frac) && all(uv < rects[i].max_frac)) color.rgb = mix(color.rgb, rects[i].color.rgb, rects[i].color.a);
