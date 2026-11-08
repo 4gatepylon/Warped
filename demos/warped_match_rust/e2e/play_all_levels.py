@@ -23,8 +23,8 @@ Example:
 Must know:
     Limitations:
         - The losing team's bot joins no level in a round, so each round tests one team's level client.
-        - Every level's console bot holds `E` on a pylon from where it stands (servers take its word), so the run
-          doesn't show that a pylon can be reached on foot.
+        - City Sphere's and Dark Forest's console bots still hold `E` from where they stand; the other levels'
+          bots walk to each pylon, and their servers take a hold only from within reach (`_WALKING_LEVELS`).
     Side effects:
         - When it exits, `play_all_levels.py` stops every process it started, with the levels they started.
 """
@@ -69,7 +69,10 @@ _PROGRAM_LINE: re.Pattern[str] = re.compile(r"^\s*program: (\S+)$", re.MULTILINE
 _PYLON_OFF_LINE: re.Pattern[str] = re.compile(r"turned off console \d+")
 _JOIN_LINE: re.Pattern[str] = re.compile(r"joined the (?:blue|red) team")
 _FAILURE_LINE: re.Pattern[str] = re.compile(r"panicked at|^Error: ", re.MULTILINE)
-_ON_FOOT_NOTE: str = "console bots hold E on each pylon from where they stand (servers take their word): not on foot"
+_WALKING_LEVELS: tuple[str, ...] = ("Lunar Surface", "Snow Planet", "Dust")
+_ROUND_COMMAND_LINE: re.Pattern[str] = re.compile(r'^round (\d+): "', re.MULTILINE)
+_REACHED_LINE: re.Pattern[str] = re.compile(r"^bot reached console (\d+) on foot in ([\d.]+) s", re.MULTILINE)
+_round_t = tuple[str, str, str, list[float], list[str]]
 
 
 class _MatchCheckFailed(Exception):
@@ -163,9 +166,33 @@ def _note_pylons_off(level_log_path: Path, offset_bytes: int, start_s: float, py
     return offset_bytes + len(whole_lines)
 
 
+def _find_walks(run_folder: Path, number: int, winner: str) -> list[str]:
+    """`_find_walks` gives each pylon the winner's bot reached on foot in round `number`, from its log.
+
+    Args:
+        run_folder: The run folder, with each team's bot log (`<team>.log`).
+        number: The round, from 1.
+        winner: The team that won it.
+
+    Returns:
+        One `console <i> in <t> s` per pylon its level bot walked to, in that order.
+
+    Example:
+        >>> walks = _find_walks(run_folder, 3, "red")
+    """
+    log: str = (run_folder / f"{winner}.log").read_text()
+    starts: list[tuple[int, int]] = [(int(line[1]), line.start()) for line in _ROUND_COMMAND_LINE.finditer(log)]
+    walks: list[str] = []
+    for index, (round_number, start) in enumerate(starts):
+        end: int = starts[index + 1][1] if index + 1 < len(starts) else len(log)
+        if round_number == number:
+            walks += [f"console {line[1]} in {line[2]} s" for line in _REACHED_LINE.finditer(log, start, end)]
+    return walks
+
+
 def _watch_match(
     server: subprocess.Popen[str], bots: dict[str, subprocess.Popen[str]], run_folder: Path, round_timeout_s: float
-) -> tuple[Path, list[tuple[str, str, str, list[float]]]]:
+) -> tuple[Path, list[_round_t]]:
     """`_watch_match` follows the match server's output until it exits, logging each round to `levels.log`.
 
     Args:
@@ -175,7 +202,8 @@ def _watch_match(
         round_timeout_s: Seconds a round may last before it counts as a stall.
 
     Returns:
-        The match server's run folder, and each round's level, attacker, winner and pylons' times off.
+        The match server's run folder, and each round's level, attacker, winner, pylons' times off and the pylons
+        its bot reached on foot (`_find_walks`).
 
     Raises:
         _MatchCheckFailed: A round stalled, or a process stopped before the match was over.
@@ -196,13 +224,12 @@ def _watch_match(
 
     threading.Thread(target=_read_server, daemon=True).start()
     match_folder: Path | None = None
-    rounds: list[tuple[str, str, str, list[float]]] = []
+    rounds: list[_round_t] = []
     started: tuple[str, str, float] | None = None
     pylon_off_s: list[float] = []
     offset_bytes: int = 0
     deadline_s: float = time.monotonic() + _START_TIMEOUT_S
     with (run_folder / "levels.log").open("w") as levels_log:
-        _log(levels_log, _ON_FOOT_NOTE)
         while True:
             if started is not None and match_folder is not None:
                 level_log_path: Path = match_folder / f"round_{len(rounds) + 1}_server.log"
@@ -230,13 +257,15 @@ def _watch_match(
                 duration_s: float = time.monotonic() - started[2]
                 level_log_path = match_folder / f"round_{won_match[1]}_server.log"
                 _note_pylons_off(level_log_path, offset_bytes, started[2], pylon_off_s)
-                rounds.append((started[0], started[1], won_match[2], pylon_off_s))
+                walks: list[str] = _find_walks(run_folder, int(won_match[1]), won_match[2])
+                rounds.append((started[0], started[1], won_match[2], pylon_off_s, walks))
                 deadline_s = time.monotonic() + _START_TIMEOUT_S
                 times: str = ", ".join(f"{off_s:.1f}" for off_s in pylon_off_s)
                 _log(
                     levels_log,
                     f"round {won_match[1]} won by {won_match[2]}: {started[0]} in {duration_s:.1f} s; "
-                    f"the other team's pylons off: {len(pylon_off_s)}, at {times} s",
+                    f"the other team's pylons off: {len(pylon_off_s)}, at {times} s; on foot: "
+                    f"{', '.join(walks) if walks else 'no (its bot holds E from where it stands)'}",
                 )
                 started = None
     if server.wait() != 0 or match_folder is None:
@@ -244,12 +273,13 @@ def _watch_match(
     return match_folder, rounds
 
 
-def _check_match(match_folder: Path, rounds: list[tuple[str, str, str, list[float]]]) -> None:
-    """`_check_match` checks rounds, result files, pylons, one join a level and the outcome against `_PLAN`.
+def _check_match(match_folder: Path, rounds: list[_round_t]) -> None:
+    """`_check_match` checks rounds, result files, pylons (on foot where bots walk), one join a level and the
+    outcome against `_PLAN`.
 
     Args:
         match_folder: The match server's run folder.
-        rounds: Each round's level, attacker, winner and pylons' times off, from `_watch_match`.
+        rounds: Each round's level, attacker, winner, pylons' times off and walks, from `_watch_match`.
 
     Raises:
         _MatchCheckFailed: Something differs from `_PLAN`.
@@ -258,6 +288,9 @@ def _check_match(match_folder: Path, rounds: list[tuple[str, str, str, list[floa
         >>> _check_match(match_folder, rounds)
     """
     played: list[tuple[str, str, str, int]] = [(*round_[:3], len(round_[3])) for round_ in rounds]
+    for level, _, _, pylon_off_s, walks in rounds:
+        if level in _WALKING_LEVELS and len(walks) != len(pylon_off_s):
+            raise _MatchCheckFailed(f"{level}'s bot reached {len(walks)} of {len(pylon_off_s)} pylons on foot")
     if played != _PLAN:
         raise _MatchCheckFailed(f"rounds (level, attacker, winner, pylons off) {played} differ from the plan {_PLAN}")
     for number, (level, _, winner, _) in enumerate(_PLAN, start=1):
@@ -346,7 +379,7 @@ def main(
     (run_folder / "command.txt").write_text(f"{' '.join(sys.argv)}\ncommit: {commit}\n")
     processes: list[subprocess.Popen[str]] = []
     failure: str | None = None
-    rounds: list[tuple[str, str, str, list[float]]] = []
+    rounds: list[_round_t] = []
     try:
         processes.append(_start(server_arguments, None))
         bots: dict[str, subprocess.Popen[str]] = {

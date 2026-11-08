@@ -39,9 +39,16 @@ the user should check.
   in `.levels/`, built there) rather than copying its folder, so the match always plays the
   level's latest pushed version and this branch stays small. `match_levels.yaml` names each
   level's binary.
-- **Console bots** (`--bot-objective consoles`) hold `E` on the other team's consoles in turn
-  and don't shoot while doing so; they don't walk to the console, because the copied server
-  doesn't check distance. Who wins a bot round is a race, which exercises both outcomes.
+- **Console bots** (`--bot-objective consoles`) walk to the other team's consoles in turn, nearest
+  first, and hold `E` once in reach, without shooting (`console_bot.rs`); the server takes a hold
+  only from within `consoles.reach_m` of the console, aimed at it (`console_reach.rs`, W-126). Who
+  wins an unsteered bot round is a race, which exercises both outcomes.
+- **Walking bots steer by sight, not by a map** (W-126): straight toward the pylon, around wormhole
+  mouths and black holes (and Snow Planet's blizzard), jumping and then sidestepping along a wall
+  (each sidestep twice as long as the last, ended as soon as the way toward the pylon is clear for
+  `PROBE_M`). A planner over a grid of the level would find shorter ways; this is enough to reach
+  every pylon of Lunar Surface, Dust and Snow Planet from both spawns, and a bot that can't reach
+  one says where it gave up. **Weigh in** if the walks should be faster.
 - **Fix in the copied level code**: when both teams' last consoles went off in the same server
   update, nobody won and the round never ended (seen in the end-to-end match). Now the first one
   turned off wins. The same bug is in `demos/hyperbolic_wormholes_rust/` (not changed here).

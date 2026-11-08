@@ -43,7 +43,10 @@ stops early, or a round, level result file or outcome off that plan, and writes
 `.artifacts/play_all_levels/<run>/`: `levels.log` (each level's start, winner and duration), the
 match server's and both bots' logs, `summary.json` and `pictures/` (blue's progression page at each
 round's start and at the end, `--progression-pictures` with `--match`). It uses UDP 48110 for the
-match and 48112 for the levels (`MATCH_PORT`, `LEVEL_PORT`), away from a running match's.
+match and 48112 for the levels (`MATCH_PORT`, `LEVEL_PORT`), away from a running match's. In Lunar
+Surface, Snow Planet and Dust the bot walks to each pylon and its server takes a hold only from
+within reach, so `levels.log` says when the bot reached each pylon on foot, and the test fails if it
+didn't reach them all (W-126, same play in every level).
 
 `make levels` puts each branch level in `.levels/<name>/` and builds it there; `match_levels.yaml`
 reads `.levels/<name>/demos/<name>_rust/.build/release/<binary>` and its `map_picture`. The default
@@ -95,9 +98,11 @@ Bot:    <program> --join <address> --port <port> [--map <map>] --team <team> --b
 ```
 
 `--team` joins that team at once, without the lobby. The match client kills the level when the
-round ends, so a level needs no exit logic. `--bot-objective consoles` holds `E` on the other
-team's consoles in turn until its team wins (the copy's bot doesn't walk there: the server, as in
-the hyperbolic demo, doesn't check a player's distance to a console).
+round ends, so a level needs no exit logic. `--bot-objective consoles` walks to the other team's
+consoles in turn and holds `E` on each once in reach, until its team wins: in this copy (Lunar
+Surface), Dust and Snow Planet the server takes a hold only from within the settings'
+`consoles.reach_m` of the console, aimed at it (`console_reach.rs`), so a bot win shows every
+pylon can be reached on foot (`console_bot.rs`).
 
 Ports: match server UDP 47850 (`--match-port`; 47851 reserved for its discovery, not used yet:
 join by address); each round's level server 47852 (`--port` with `--serve-match`), and this copy's
@@ -164,6 +169,7 @@ showed 61 fps and 3.3 GPU ms.
   (`hello <team>` datagrams answered with the state as JSON), level processes;
   `src/match_menu.rs`: the progression page; `match_levels.yaml`: the levels.
 - In the copied level code: `--level-result-file` (`net::write_level_result`), `--team`,
-  `--bot-objective consoles` (`multiplayer::get_console_to_disable`), `--serve-match`, `--match`.
+  `--bot-objective consoles` (`console_bot.rs`), the console reach check (`console_reach.rs`), hit
+  pictures saved on their own thread (`picture_saver.rs`), `--serve-match`, `--match`.
 - `e2e/`: settings and levels for the fast bot match.
 - Everything else is the hyperbolic demo; see its README for the level itself.
