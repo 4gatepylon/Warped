@@ -85,7 +85,7 @@ is in [`AGENTS.md`](AGENTS.md).
   second touches the ground; shooting a ball before then crashes the game. The user, 2026-11-08: "you should be
   able to shoot your own purple ball and have it do nothing", "if you shoot enemy purple ball its destroyed" (one
   hit, for a ball that is down), "document that in game mechanics for lunar base map". Fixed on branch
-  `devin/shoot-wormhole-ball` (stacked on `devin/no-third-throw`), 2026-11-08: the HUD's laser line no longer
+  `devin/shoot-wormhole-ball` (stacked on `devin/no-third-throw`), #364, 2026-11-08: the HUD's laser line no longer
   looks a ball up among the map's structures, and one hit destroys an enemy's lone mouth.
 - [?] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
   but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
