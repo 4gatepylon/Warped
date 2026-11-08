@@ -16,7 +16,8 @@ make run-demo
 make run-demo RENDERER=cpu
 ```
 
-- Click to capture the mouse (`Esc` releases it; `Esc` again quits).
+- Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
+  `Esc` or `N` goes back to the game). The window's close button quits at once.
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
   (`--player-settings`) to `make run-demo`, `host-game` or `join-game`.
@@ -41,7 +42,10 @@ make run-demo RENDERER=cpu
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
-  you through.
+  you through. Coming out, your view blueshifts toward cyan, as if you moved at 15% of light speed (D84): red fades,
+  green takes red's light and blue green's, most of all straight ahead, then it fades back over 1.5 s.
+  `view.wormhole_tint_frac` (0 to 1, also in the menu) and `view.wormhole_tint_s` in `player_settings.yaml` set its
+  strength and length (0 for none). Only the player who goes through sees it (Metal renderer).
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
   `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
@@ -52,8 +56,9 @@ make run-demo RENDERER=cpu
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
-- Holding the right button shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it
-  yet).
+- Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
+  (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
+- Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
@@ -117,8 +122,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
 - On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).
-  Consoles pulse while on, twice as fast while someone holds `E` on them, and go dark when off. After a win, `Enter`
-  in the server's terminal starts a new game.
+  Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
+  just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
+  go dark when off. After a win, `Enter` in the server's terminal starts a new game.
 - Up to 8 players. The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
 - `--join <address> --bot --exit-after-s <seconds>` plays by itself without a window (it walks until another player
   is within 12 blocks, then turns toward them and fires), to test a game; it saves its view at each hit under

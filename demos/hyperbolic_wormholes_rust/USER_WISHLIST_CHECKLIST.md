@@ -10,33 +10,37 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
-  relativistic effect on colour if possible. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/wormhole-cyan`, 2026-11-07.
+- [~] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
+  scene lighting. Claimed by Claude Code (session
+  `5cf069f6-934c-466e-93ea-854879c2feaa`), branch `claude/gun-scene-lighting`, 2026-11-07.
+- [~] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
+  Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-team-join`, 2026-11-07.
+- [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
+  windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
+  (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/see-through-windows`,
+  2026-11-07.
+- [~] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
+  noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
+  All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
+  `claude/shot-noise`, 2026-11-07.
 - [~] **W-54 Professional HUD bars.** Make the health, ammo and other bars look more professional: at the very least
   slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
   implementing. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/hud-bars`, 2026-11-07.
-- [~] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
-  different key. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/aiming`, 2026-11-07.
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
-  2026-11-07.
-- [~] **W-57 Laser stuck in a room.** In one of the rooms on the red side, the one with windows one block wide,
-  shooting out from close to a window hits some sort of hitbox (or looks like it) and the laser doesn't leave the
-  room.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/laser-room-fix`, 2026-11-07.
-- [~] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
-  exit?", exits if the player presses OK, and otherwise doesn't.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/exit-confirm`, 2026-11-07.
-- [~] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
-  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
-  pulsing slows down smoothly instead of jumping back.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/console-pulse-ramp`,
   2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
+- [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
+  center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
+  it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
+  pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
+  console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
+  down.
+  Claimed by Claude Code (session `08e70e8b-f763-4c5c-828c-f939a12fad13`), branch `reality-bend`, 2026-11-07.
 
 ## Open
 
@@ -90,11 +94,10 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
   character, and the player controls it from there, seeing their own character.
-- [ ] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
-  fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
-  missing".
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
+- [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills.
 
 ## Done
 
@@ -184,5 +187,22 @@ is in [`AGENTS.md`](AGENTS.md).
   menu's map page, W-49, shows the whole map). #166.
 - [x] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
   radius (the rest is slightly darker and blurred), and shows where they are on the map. #166.
+- [x] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
+  different key. The right button zooms in; the flashlight is on `F`. #170.
+- [x] **W-57 Laser stuck in a room.** In one of the rooms on the red side, the one with windows one block wide,
+  shooting out from close to a window hits some sort of hitbox (or looks like it) and the laser doesn't leave the
+  room. Not a bug: the "hitbox" is the window's glass pane, and glass stops lasers by design (D88). #174.
+- [x] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
+  fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
+  missing". The game fails when they are not there ("it's fine if they are not committed"), and "the error (client
+  side) should say what to do to fix it". #168 committed them in `demos/fps_demo/assets/`; #173 stops the client at
+  start with the command that restores a missing one.
+- [x] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
+  exit?", exits if the player presses OK, and otherwise doesn't. #175.
+- [x] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
+  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
+  pulsing slows down smoothly instead of jumping back. #176.
+- [x] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
+  relativistic effect on colour if possible. #178.
 - [x] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
   look cool and pretty. #193.

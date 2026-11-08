@@ -66,16 +66,24 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 
 To win on Lunar Surface, turn off all five of the other team's consoles, the pulsing blocks around its pylon
 (the red pylon is past the wormhole on the ridge). Stand within 3 m, look straight at one and hold `E` for 10 s: a bar
-below the crosshair fills, the console pulses twice as fast for everyone, and you can't shoot meanwhile. Looking
-away or letting go starts it over. A console that is off goes dark. When a team's consoles are all off, everyone
-sees which team won, and a new game starts only when whoever started the server presses `Enter` in its terminal
-(the `make host-game` terminal, for that command): every console comes back on and everyone returns to their spawn.
+below the crosshair fills, the console pulses faster and faster for everyone (from once a second to a frenzy of 8
+times a second right before it turns off), and you can't shoot meanwhile. Looking away or letting go starts it over,
+and its pulse slows back down over about a second. A console that is off goes dark. When a team's consoles are all
+off, everyone sees which team won, and a new game starts only when whoever started the server presses `Enter` in its
+terminal (the `make host-game` terminal, for that command): every console comes back on and everyone returns to their
+spawn.
 
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
 each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
 14 m high). Your view stretches out from the middle of the screen, more and more as you slow. Walking back in is at
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
+
+Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and your whole view turns
+cyan as you come out, as if blueshifted by moving fast toward what you see: reds turn green, greys turn cyan, the
+sky gets a faint teal glow, most of all in the middle of the screen. It fades back within 1.5 s, and only the
+player who went through sees it. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off);
+`view.wormhole_tint_s` in `player_settings.yaml` sets how long it lasts.
 
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
 the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,
@@ -89,8 +97,8 @@ glow, red and green running lights and a flashing strobe. They follow the UTC cl
 sees the same ships at the same moment. They are far away in the sky: lasers and players never touch them.
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
-`PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
-`Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
+`PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
+`Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click, then 2 s to reload, shown by one block
@@ -112,6 +120,8 @@ Multiplayer:
   map.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too. On the SCORES page, eliminating a teammate counts their death but no kill.
+- Lasers stop on glass, windows included, as in the WebGL level (`DECISIONS.md` D88). Since the smooth shapes
+  (#147), the habitat modules' and walkways' windows are panes on a solid wall, so they don't show the outside.
 - Health, shown in the bottom left, resets when a player respawns.
 - The menu doesn't pause the game: a player in it stands still and can still be hit.
 - A file saved from the menu has no comments. If a later version adds a setting, that file stops loading and the

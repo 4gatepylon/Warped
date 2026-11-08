@@ -32,9 +32,11 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 6] = [
     "rifle.recoil_settle_s",
     "respawn.delay_s",
 ];
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 7] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
+    "view.wormhole_tint_frac",
+    "view.wormhole_tint_s",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
     "hit_effects.red_frac",
@@ -158,6 +160,17 @@ pub struct FlashlightSettings {
     pub brightness_frac: f64,
 }
 
+/// `AimSettings` is aiming (holding the aim control): how much closer things look with each gun at
+/// full zoom, and how long zooming fully in or out takes. The mouse turns the view more slowly by
+/// the same factor.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct AimSettings {
+    pub sniper_zoom: f64,
+    pub rifle_zoom: f64,
+    pub zoom_s: f64,
+}
+
 /// `MapEdgeSettings` is the map's soft edge on a map with a crater: how far up the crater's wall
 /// (0 at its foot, 1 at the rim) players start to slow down, and how far up their speed would
 /// reach 0, which they never get to (each step outward is cut by the share of the way they have
@@ -170,13 +183,17 @@ pub struct MapEdgeSettings {
 }
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
-/// long motion smears, how strongly the view stretches near the map's edge, and the head bob.
+/// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
+/// blueshifts toward cyan just after going through a wormhole (0 to 1) and how long that takes to
+/// fade, and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
     pub look_rad_per_px: f64,
     pub motion_blur_s: f64,
     pub edge_stretch_frac: f64,
+    pub wormhole_tint_frac: f64,
+    pub wormhole_tint_s: f64,
     pub head_bob: HeadBobSettings,
 }
 
@@ -233,6 +250,7 @@ pub struct ServerSettings {
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
+    pub aim: AimSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -296,6 +314,14 @@ impl ServerSettings {
             &SERVER_ZERO_ALLOWED_KEYS,
             source,
         )?;
+        let aim: &AimSettings = &settings.aim;
+        if aim.sniper_zoom < 1.0 || aim.rifle_zoom < 1.0 {
+            return Err(format!(
+                "settings {source}: aim zooms must be at least 1 (1 for none), not {} and {}",
+                aim.sniper_zoom, aim.rifle_zoom
+            )
+            .into());
+        }
         let edge: &MapEdgeSettings = &settings.map_edge;
         if edge.start_wall_frac >= edge.stop_wall_frac || edge.stop_wall_frac > 1.0 {
             return Err(format!(
@@ -343,7 +369,8 @@ impl ServerSettings {
 
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
-    /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does.
+    /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
+    /// `view.wormhole_tint_frac` at most 1.
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
@@ -352,6 +379,13 @@ impl PerPlayerSettings {
             serde_yaml::from_str(text).map_err(|error| format!("settings {source}: {error}"))?;
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
+        if file.view.wormhole_tint_frac > 1.0 {
+            return Err(format!(
+                "settings {source}: view.wormhole_tint_frac must be at most 1, not {}",
+                file.view.wormhole_tint_frac
+            )
+            .into());
+        }
         Ok(PerPlayerSettings {
             keys: KeyBindings::FromNames(&file.keys, source)?,
             view: file.view,
@@ -400,6 +434,7 @@ mod tests {
     //! | Source | the built-in files, server settings sent as JSON, player settings the menu saved | `builtin_settings_read_and_survive_json`, `saved_player_settings_load_back` |
     //! | Keys | all present, one unknown, one missing | `builtin_settings_read_and_survive_json`, `unknown_and_missing_keys_fail` |
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
+    //! | Wormhole tint strength | 0 (with a fade of 0 s), between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -456,6 +491,12 @@ mod tests {
                     .to_string();
             assert!(error.contains(key), "{error}");
         }
+        let shrinking_aim: String =
+            BUILTIN_SERVER_YAML.replace("rifle_zoom: 1.5", "rifle_zoom: 0.5");
+        let error: String = ServerSettings::FromYaml(&shrinking_aim, "test")
+            .expect_err("a zoom below 1 fails")
+            .to_string();
+        assert!(error.contains("aim"), "{error}");
         let backward_edge: String =
             BUILTIN_SERVER_YAML.replace("start_wall_frac: 0.0", "start_wall_frac: 0.6");
         let error: String = ServerSettings::FromYaml(&backward_edge, "test")
@@ -469,5 +510,23 @@ mod tests {
             .expect("a bad number fails")
             .to_string();
         assert!(error.contains("view.look_rad_per_px"), "{error}");
+    }
+
+    #[test]
+    fn wormhole_tint_takes_0_to_1() {
+        let none: String = BUILTIN_PLAYER_YAML
+            .replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0")
+            .replace("wormhole_tint_s: 1.5", "wormhole_tint_s: 0");
+        assert!(PerPlayerSettings::FromYaml(&none, "test").is_ok());
+        let half: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0.5");
+        assert!(PerPlayerSettings::FromYaml(&half, "test").is_ok());
+        let too_strong: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 1.5");
+        let error: String = PerPlayerSettings::FromYaml(&too_strong, "test")
+            .err()
+            .expect("a tint above 1 fails")
+            .to_string();
+        assert!(error.contains("view.wormhole_tint_frac"), "{error}");
     }
 }

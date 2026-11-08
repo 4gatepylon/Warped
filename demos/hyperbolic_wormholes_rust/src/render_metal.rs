@@ -51,8 +51,9 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
 /// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
 /// frame's height the mask's text may take, a picture under the text, how far the scene
-/// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), and the
-/// minimap.
+/// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), the
+/// minimap, and how far into the blueshift after a wormhole the scene is (the shader's
+/// `blueshift_scene`: 1 at its peak, 0 for none).
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
@@ -64,6 +65,7 @@ pub struct Overlay<'a> {
     pub picture: Option<OverlayPicture<'a>>,
     pub stretch_frac: f32,
     pub minimap: Option<OverlayMinimap<'a>>,
+    pub blueshift_frac: f32,
 }
 
 /// `OverlayMinimap` is the minimap: the map's picture from above without labels (RGBA, rows top
@@ -172,6 +174,7 @@ struct OverlayParams {
     picture_min_mask_px: [i32; 2],
     picture_max_excl_mask_px: [i32; 2],
     stretch_frac: f32,
+    blueshift_frac: f32,
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -360,7 +363,7 @@ pub struct MetalRenderer {
     blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
-    viewmodel: Option<Option<Viewmodel>>,
+    viewmodel: Option<Viewmodel>,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -1258,16 +1261,17 @@ impl MetalRenderer {
                 if self.viewmodel.is_none() {
                     self.viewmodel = Some(Viewmodel::Load(&self.device)?);
                 }
-                match self.viewmodel.as_mut().and_then(Option::as_mut) {
-                    Some(revolver) => Some(revolver.encode(
-                        &self.device,
-                        command_buffer,
-                        &wand,
-                        output_px,
-                        tan_half_fov,
-                    )?),
-                    None => None,
-                }
+                let revolver: &mut Viewmodel = self
+                    .viewmodel
+                    .as_mut()
+                    .expect("the revolver was just loaded");
+                Some(revolver.encode(
+                    &self.device,
+                    command_buffer,
+                    &wand,
+                    output_px,
+                    tan_half_fov,
+                )?)
             }
             None => None,
         };
@@ -1301,6 +1305,7 @@ impl MetalRenderer {
             picture_min_mask_px: picture_corners_mask_px[0],
             picture_max_excl_mask_px: picture_corners_mask_px[1],
             stretch_frac: overlay.stretch_frac,
+            blueshift_frac: overlay.blueshift_frac,
         };
         let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
             center_m: [0.0; 4],
