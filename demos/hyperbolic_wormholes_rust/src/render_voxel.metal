@@ -1969,7 +1969,19 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
+/**
+ * @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a
+ * flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's
+ * code (team and gun) and speckle share. A chord that starts away from the eye (`travelled` above 0) and only moves away
+ * from a segment skips it: the chord before ends at that nearest point and counts it there.
+ * @par Example
+ * @code
+ * scan_beams(scene, x, v, s, t, core, halo, code, speckle);
+ * @endcode
+ * @par Must know
+ * - Gotchas:
+ *   - A far chord's start, where a pixel is metres wide, would light the whole sky with a near segment's glow.
+ */
 static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
                        thread float &speckle) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
@@ -1983,6 +1995,7 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float k1 = 0.5 * ((al * al - ga * ga) + (be * be - et * et)), k2 = al * be - ga * et;
         float s_c = k1 > abs(k2) ? 0.5 * clamp_atanh(-k2 / k1) : (k2 < 0.0 ? s_end : 0.0);
         s_c = clamp(s_c, 0.0, min(s_end, FAR_S));
+        if (s_c <= 0.0 && travelled > 0.0) continue;
         float4 xc = geodesic_point(x, v, s_c);
         float sigma = clamp(clamp_atanh(mdot(xc, b) / -mdot(xc, a)), 0.0, info.x);
         float d_m = measure_gap(xc, geodesic_point(a, b, sigma)) * r;
@@ -2267,7 +2280,8 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
  * surface, the sky or a horizon. After `LATE_STEP_COUNT` iterations (rays winding near a throat or the black hole,
  * which land in the lens's most compressed, aliased images) its bent steps are three times longer. With `HAS_BEND` the
- * ray travels the bent world in pieces (`trace_bent_piece`) between warp objects and within its bent steps, crosses
+ * ray travels the bent world in pieces (`trace_bent_piece`) between warp objects and within its bent steps, scans the
+ * laser beams once per straight chord between warp objects (as the flat tracer does), crosses
  * empty space (the void beyond the edge, the air high above the ground) in long untraced strides (`get_empty_s`), and
  * reaches the sky once it is past every surface and
  * moving away from the origin.
@@ -2314,12 +2328,14 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 if (s_in < s_end) { s_end = s_in; entering = w; }
             }
 #if HAS_BEND
+            float4 chord_x = x, chord_v = v;
+            float chord_travelled = travelled, chord_s = 0.0;
             while (s_end > 0.0 && bent_piece_count++ < MAX_BENT_PIECES) {
                 if (entering < 0 && x.w > sky_w && v.w > 0.0) { outcome = OUTCOME_SKY; break; }
                 float empty_s = get_empty_s(scene, x), s = min(empty_s, s_end), frac = 1.0;
                 float4 hx = x, hv = v;
                 if (empty_s <= nominal_s) s = trace_bent_piece(scene, x, v, min(nominal_s, s_end), travelled, hit, glass, hx, hv, frac, dust);
-                if (u.beam_count > 0) scan_beams(scene, x, v, s * frac, travelled, core, halo, code, speckle);
+                chord_s += s * frac;
                 if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
                 float4 xn = geodesic_point(x, v, s);
                 v = normalize_tangent(xn * rsqrt(-mdot(xn, xn)), geodesic_tangent(x, v, s));
@@ -2327,6 +2343,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 travelled += s;
                 s_end -= s;
             }
+            if (u.beam_count > 0) scan_beams(scene, chord_x, chord_v, chord_s, chord_travelled, core, halo, code, speckle);
             if (outcome == OUTCOME_SKY && last_warp >= 0) back_to_reach(scene, last_warp, x, v);
             if (s_end > 0.0 || outcome != OUTCOME_LOST) break;
             inside = entering;
