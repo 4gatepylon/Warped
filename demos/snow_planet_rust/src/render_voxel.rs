@@ -142,9 +142,9 @@ pub struct VoxelUniforms {
 }
 
 /// `MAX_COPY_DISTANCE_M` is how far a ray goes around a looping world before it stops being moved
-/// across the seams (DECISIONS S11, V1): past it, it sees only the empty snowfield, as before the
-/// world looped, so the copies of the level end there.
-const MAX_COPY_DISTANCE_M: f64 = 224.0;
+/// across the seams (DECISIONS S15, the user's "C1 + C2": one period, not S11's 224 m): past it, it
+/// sees only the empty snowfield, as before the world looped, so the copies of the level end there.
+const MAX_COPY_DISTANCE_M: f64 = 112.0;
 
 /// `MAX_BLIZZARD_COUNT` is how many blizzards the renderer draws (the rest only slow and freeze).
 pub const MAX_BLIZZARD_COUNT: usize = 8;

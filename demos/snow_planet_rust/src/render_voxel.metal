@@ -37,6 +37,7 @@ constant int MAX_FOLDS = 26;
 constant int OUTCOME_LOST = 0;
 constant int OUTCOME_SKY = 1;
 constant int OUTCOME_HIT = 2;
+constant int OUTCOME_DISK = 3;
 constant int MAT_GROUND = 255;
 constant int MAT_MESH = 254;
 constant int FIRST_AVATAR_ROOT_CODE = -2;
@@ -54,6 +55,8 @@ constant float FAR_S = 12.0;
 constant float SHADOW_M = 80.0;
 constant float SEAM_MIN_M = 0.001;
 constant int MAX_SHADOW_SEAM_COUNT = 3;
+constant float BLACK_DISK_PER_M = 20.0;
+constant float NEAR_COPY_LENS_M = 40.0;
 constant int MAX_BLIZZARD_COPIES = 6;
 constant float SURFACE_OFFSET_M = 0.02;
 constant float TERRAIN_SHADOW_START_M = 1.0;
@@ -2491,13 +2494,19 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float3 local = float3(0.0);
     bool has_gradient = false;
     float4x4 wraps = float4x4(1.0);
+    int seam_count = 0;
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         if (inside < 0) {
-            float s_end = FAR_S;
+            float s_end = FAR_S, disk_s = NO_HIT_S;
             int entering = -1;
             for (int w = 0; w < u.warp_count; w++) {
                 float a = -mdot(x, warps[w].centre), b = mdot(v, warps[w].centre), closest_sq = a * a - b * b, reach_cosh = cosh(warps[w].params.z);
                 if (b <= 0.0 || closest_sq >= reach_cosh * reach_cosh) continue;
+                if (seam_count > 0 && travelled > NEAR_COPY_LENS_M / r && warps[w].params.x < HALF_KIND) {
+                    float disk_cosh = cosh(warps[w].params.y * BLACK_DISK_PER_M);
+                    if (closest_sq < disk_cosh * disk_cosh) disk_s = min(disk_s, clamp_atanh(b / a));
+                    continue;
+                }
                 float s_in = max(clamp_atanh(b / a) - acosh(reach_cosh * rsqrt(max(closest_sq, 1.0))), 0.0);
                 if (s_in < s_end) { s_end = s_in; entering = w; }
             }
@@ -2506,6 +2515,8 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 float seam_s = find_seam_s(scene, x, v, seam_axis);
                 if (seam_s < s_end) { s_end = seam_s; entering = -1; } else seam_axis = -1;
             }
+            bool is_disk = disk_s < s_end;
+            if (is_disk) { s_end = disk_s; entering = -1; seam_axis = -1; }
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
@@ -2515,11 +2526,13 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+            if (is_disk) { outcome = OUTCOME_DISK; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (seam_axis >= 0) {
                 float4 xn = geodesic_point(x, v, s_end);
                 v = geodesic_tangent(x, v, s_end);
                 x = xn;
                 wraps = cross_seam(scene, x, v, seam_axis) * wraps;
+                seam_count++;
                 travelled += s_end;
                 last_warp = -1;
                 continue;
@@ -2590,6 +2603,10 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             end.surface.yz = int2(hit.k, hit.axis);
             end.glow.x = hit.sgn;
         }
+    } else if (outcome == OUTCOME_DISK) {
+        end.point = geodesic_point(hit_x, hit_v, hit.s);
+        end.view = geodesic_tangent(hit_x, hit_v, hit.s);
+        end.grid.w = hit_travelled + hit.s;
     } else if (outcome == OUTCOME_SKY) {
         float4x4 unwrap = invert_lorentz(wraps);
         end.point = float4(get_sky_direction(scene, unwrap * x, unwrap * v), 0.0);
@@ -2607,7 +2624,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
  */
 static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end) {
     float haze_frac, sun_cos;
-    if (end.surface.x == OUTCOME_HIT) {
+    if (end.surface.x == OUTCOME_HIT || end.surface.x == OUTCOME_DISK) {
         haze_frac = 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
         sun_cos = mdot(end.view, carry_from_centre(scene, scene.u.sun.xyz, end.point));
     } else if (end.surface.x == OUTCOME_SKY) {
@@ -2617,7 +2634,7 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
         return color;
     }
     if (scene.u.snow.x > 0.5) {
-        float far = end.surface.x == OUTCOME_HIT ? 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - SNOW_FOG_START_M, 0.0) / scene.u.snow.x) : haze_frac;
+        float far = end.surface.x == OUTCOME_HIT || end.surface.x == OUTCOME_DISK ? 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - SNOW_FOG_START_M, 0.0) / scene.u.snow.x) : haze_frac;
         float3 fog = to_linear(SNOW_HORIZON) + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
         return mix(color, fog, SNOW_FOG_MAX_FRAC * far);
     }
