@@ -10,6 +10,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
+  Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-team-join`, 2026-11-07.
 - [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
   windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
   (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
@@ -28,11 +30,6 @@ is in [`AGENTS.md`](AGENTS.md).
   `wizardly-hamilton-23a121`), branch `claude/hud-bars`, 2026-11-07.
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
-  2026-11-07.
-- [~] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
-  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
-  pulsing slows down smoothly instead of jumping back.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/console-pulse-ramp`,
   2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
@@ -99,6 +96,8 @@ is in [`AGENTS.md`](AGENTS.md).
   character, and the player controls it from there, seeing their own character.
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
+- [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills.
 
 ## Done
 
@@ -200,5 +199,8 @@ is in [`AGENTS.md`](AGENTS.md).
   start with the command that restores a missing one.
 - [x] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
   exit?", exits if the player presses OK, and otherwise doesn't. #175.
+- [x] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
+  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
+  pulsing slows down smoothly instead of jumping back. #176.
 - [x] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
   relativistic effect on colour if possible. #178.

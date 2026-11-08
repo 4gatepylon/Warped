@@ -66,10 +66,12 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 
 To win on Lunar Surface, turn off all five of the other team's consoles, the pulsing blocks around its pylon
 (the red pylon is past the wormhole on the ridge). Stand within 3 m, look straight at one and hold `E` for 10 s: a bar
-below the crosshair fills, the console pulses twice as fast for everyone, and you can't shoot meanwhile. Looking
-away or letting go starts it over. A console that is off goes dark. When a team's consoles are all off, everyone
-sees which team won, and a new game starts only when whoever started the server presses `Enter` in its terminal
-(the `make host-game` terminal, for that command): every console comes back on and everyone returns to their spawn.
+below the crosshair fills, the console pulses faster and faster for everyone (from once a second to a frenzy of 8
+times a second right before it turns off), and you can't shoot meanwhile. Looking away or letting go starts it over,
+and its pulse slows back down over about a second. A console that is off goes dark. When a team's consoles are all
+off, everyone sees which team won, and a new game starts only when whoever started the server presses `Enter` in its
+terminal (the `make host-game` terminal, for that command): every console comes back on and everyone returns to their
+spawn.
 
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
 each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
