@@ -1662,6 +1662,9 @@
     that turned frame, with the shot's noise, is what the window traces and sends, so every window draws and scores
     the same beam, from your head to the crosshair. A point more than 0.6 rad off your view (behind you) doesn't
     turn it. Holding `E` on a console uses the same turned eye.
+  - **Saved settings:** a `player_settings.yaml` saved before this, without `switch_view`, still loads and gets the
+    built-in `V`: `ADDED_PLAYER_KEYS` in `settings.rs` names the keys added since saves began, as
+    `REMOVED_PLAYER_KEYS` (#259) names those removed. Any other missing key still fails.
 - **Alternatives:**
   - one straight boom back and up from the eye (pulled in toward the eye, the head covers the crosshair once the
     camera is within about 2 m);
@@ -1669,11 +1672,9 @@
   - zooming in third person while aiming (the head grows over the view);
   - easing the camera back out after a wall (it comes in and out at once, as the wall allows);
   - tracing a shot through a wormhole several times until it lands on the crosshair (see the limitation).
-- **Limitations:**
-  - Through a wormhole's mouth, rays 0.6 m apart come out far apart, so a third-person shot through one lands only
-    roughly where the crosshair points (19 m off in a test); aim to look from the eye. Elsewhere, under the black
-    hole's reach too, it lands within 5 cm (the unturned eye's shot lands 2.7 m off at 20 m).
-  - A `player_settings.yaml` saved before this needs the new line `switch_view: [V]`: every key is required.
+- **Limitation:** through a wormhole's mouth, rays 0.6 m apart come out far apart, so a third-person shot through one
+  lands only roughly where the crosshair points (19 m off in a test); aim to look from the eye. Elsewhere, under the
+  black hole's reach too, it lands within 5 cm (the unturned eye's shot lands 2.7 m off at 20 m).
 - **Rationale:** you asked for a way to switch to a third-person view, the camera slightly behind the character,
   controlled from there, seeing your own character.
 

@@ -10,7 +10,9 @@
 //! Example: `let settings = ServerSettings::Load(Path::new("fast.yaml"))?;`
 //!
 //! Must know:
-//! - Every key is required and unknown keys fail, so a typo can't silently keep a default.
+//! - Every key is required and unknown keys fail, so a typo can't silently keep a default. The only
+//!   exceptions are named: player keys removed since saves began (`REMOVED_PLAYER_KEYS`) are
+//!   dropped, and those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing.
 //! - The built-in settings are the two files themselves, compiled in.
 
 use std::collections::BTreeMap;
@@ -56,6 +58,7 @@ const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
+const ADDED_PLAYER_KEYS: [&str; 1] = ["keys.switch_view"];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -373,6 +376,31 @@ fn drop_removed_keys(yaml: &mut serde_yaml::Value, removed: &[&str]) {
     }
 }
 
+/// `add_missing_keys` gives a settings file's YAML each dotted key of `added` (such as
+/// `keys.switch_view`, added after players began saving their settings) that it lacks, with its
+/// value in `defaults`, so a file an older version saved still loads; every other missing key
+/// still fails. A key of `added` that `defaults` lacks is a bug, and panics.
+///
+/// Example: `add_missing_keys(&mut yaml, &defaults, &ADDED_PLAYER_KEYS);`
+fn add_missing_keys(yaml: &mut serde_yaml::Value, defaults: &serde_yaml::Value, added: &[&str]) {
+    for key in added {
+        let mut parts: Vec<&str> = key.split('.').collect();
+        let default: &serde_yaml::Value = parts
+            .iter()
+            .try_fold(defaults, |node, part| node.get(*part))
+            .unwrap_or_else(|| panic!("add_missing_keys: the defaults have no {key}"));
+        let name: &str = parts.pop().expect("a key has at least one part");
+        let parent: Option<&mut serde_yaml::Value> = parts
+            .iter()
+            .try_fold(&mut *yaml, |node, part| node.get_mut(*part));
+        if let Some(serde_yaml::Value::Mapping(fields)) = parent
+            && !fields.contains_key(name)
+        {
+            fields.insert(name.into(), default.clone());
+        }
+    }
+}
+
 impl ServerSettings {
     /// `FromYaml` reads server settings from YAML text, naming `source` in errors, and checks every
     /// number (`check_numbers`).
@@ -474,7 +502,8 @@ impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
     /// `view.wormhole_tint_frac` at most 1. The keys in `REMOVED_PLAYER_KEYS`, which older
-    /// versions saved, are dropped (`drop_removed_keys`).
+    /// versions saved, are dropped (`drop_removed_keys`), and those in `ADDED_PLAYER_KEYS`, which
+    /// older versions didn't save, take their built-in values when missing (`add_missing_keys`).
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
@@ -482,6 +511,9 @@ impl PerPlayerSettings {
         let mut yaml: serde_yaml::Value =
             serde_yaml::from_str(text).map_err(|error| format!("settings {source}: {error}"))?;
         drop_removed_keys(&mut yaml, &REMOVED_PLAYER_KEYS);
+        let defaults: serde_yaml::Value = serde_yaml::from_str(BUILTIN_PLAYER_YAML)
+            .expect("the built-in player_settings.yaml is YAML (tested)");
+        add_missing_keys(&mut yaml, &defaults, &ADDED_PLAYER_KEYS);
         let file: PlayerFile =
             serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
@@ -544,6 +576,7 @@ mod tests {
     //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise or beam speckle that shrinks with heat, a speckle share above 1, speckle kinds that don't add up to 1) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
+    //! | Added key (`keys.switch_view`) | present (built in), missing in an old save (gets the built-in `V`), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -682,5 +715,32 @@ mod tests {
             .expect("a key that was never removed fails")
             .to_string();
         assert!(error.contains("wormhole_tint_seconds"), "{error}");
+    }
+
+    #[test]
+    fn added_keys_take_their_defaults_and_others_still_fail() {
+        let without_key = |name: &str| -> String {
+            let prefix: String = format!("{name}:");
+            let lines: Vec<&str> = BUILTIN_PLAYER_YAML
+                .lines()
+                .filter(|line| !line.trim_start().starts_with(&prefix))
+                .collect();
+            lines.join("\n")
+        };
+        let old_save: String = without_key("switch_view");
+        assert!(!old_save.contains("switch_view"));
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
+        assert!(
+            loaded
+                .keys
+                .matches(Action::SwitchView, Control::Key(Scancode::V))
+        );
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let error: String = PerPlayerSettings::FromYaml(&without_key("flashlight"), "test")
+            .err()
+            .expect("a key that wasn't added later still fails when missing")
+            .to_string();
+        assert!(error.contains("flashlight"), "{error}");
     }
 }
