@@ -1,6 +1,6 @@
 ---
 name: graphical-changes
-description: Show the user screenshots, videos and clearly named options for every change to how something looks, before finishing it. Use whenever you add or change anything visual - a model, colour, shape, light, sky, effect, animation, HUD or menu, shader or render setting - in a game, demo or app; whenever a visual choice is uncertain or the user asks (or implies) a range of looks or parameters to explore; whenever you make a collage or comparison sheet; and whenever the user's words about a look allow more than one reading, or a look has edge cases to raise with the user.
+description: Show the user screenshots, videos and clearly named options for every change to how something looks, before finishing it. Use whenever you add or change anything visual - a model, colour, shape, light, sky, effect, animation, HUD or menu, shader or render setting - in a game, demo or app; whenever a visual choice is uncertain or the user asks (or implies) a range of looks or parameters to explore; whenever you make a collage, comparison sheet or HTML comparison page; and whenever the user's words about a look allow more than one reading, or a look has edge cases to raise with the user.
 ---
 
 # Graphical changes
@@ -13,6 +13,10 @@ the look.
 Any change that alters what the user sees: models, colours, shapes, lighting, the sky, particles and effects,
 animation and motion (of the camera, the gun, other players), the HUD and menus, and render settings that change the
 picture.
+
+A look that only shows in play (camera sway, recoil, an effect set off by a hit or a jump) also needs something to
+play, and a gameplay change usually changes the look too: for those, follow the `sharing-gameplay` skill as well,
+which covers playtests and smaller three.js demos. Pictures don't replace a demo or a playtest, nor the reverse.
 
 ## Options before building
 
@@ -113,6 +117,20 @@ capture.
   `zone_walls_opacity_2_of_3.png`, ...
 - **Detail:** when a small detail decides the choice, crop every image to the region that differs rather than
   shrinking whole frames.
+
+## HTML pages for big comparisons
+
+- **When:** for a complex comparison between many options (more than a couple of collages, several parameters at
+  once, videos side by side), an agent may also give an HTML page.
+- **What it shows:** the same labelled images and videos, with the same option names, laid out for comparing: for
+  example a row per viewpoint and a column per option, buttons that flip between options at one viewpoint, or videos
+  that play in step. The page shows the question too.
+- **It's an artifact:** keep it in the same run folder as its pictures, refer to them by relative paths so it still
+  works when the folder is copied, and load nothing from the internet.
+- **One command to open it:** the page works from `file://`, so give the user one command that opens it,
+  `open <absolute path of the run folder>/index.html`, beside the files' paths. The question and the option names
+  still go in the chat message.
+- **Interactive demos** of how a look plays are in the `sharing-gameplay` skill.
 
 ## Label every comparison
 

@@ -1,6 +1,6 @@
 ---
 name: devin-worktrees
-description: Give every Devin session its own git worktree under `.devin/worktrees/`, the Devin counterpart of Claude Code's `.claude/worktrees/`, and know how the two map. Use whenever a Devin session gets a WORKTREE WARNING or WORKTREE ERROR at its start, you start a Devin session in a worktree (`devin-wt`), work in a worktree you weren't started in, rename a worktree's branch for a PR, clean up worktrees, or reason about Claude Code and Devin worktrees side by side.
+description: Give every Devin session its own git worktree under `.devin/worktrees/`, the Devin counterpart of Claude Code's `.claude/worktrees/`, and know how the two map. Use whenever a Devin session gets a WORKTREE WARNING or WORKTREE ERROR at its start, you start a Devin session in a worktree (`devin-wt`), work in a worktree you weren't started in, rename a worktree's branch for a PR, start a subagent, clean up worktrees, or reason about Claude Code and Devin worktrees side by side.
 ---
 
 # Devin worktrees
@@ -23,7 +23,7 @@ Every agent works in a git worktree of its own, so parallel agents never edit th
 | Branch for a PR | renamed to `claude/<topic>` | renamed to `devin/<topic>` |
 
 Treat a worktree in either folder as another agent's: never edit, commit in or remove it unless the
-user asks.
+user asks, or it belongs to a subagent you started (below).
 
 ## Why names never collide
 
@@ -88,6 +88,32 @@ devin-wt() {
 ```
 
 In Devin Desktop, open `.devin/worktrees/<name>/` as the workspace to get the same.
+
+## Subagents
+
+A Devin subagent gets no worktree of its own: it starts in the main checkout, the `SessionStart` hook doesn't run for
+it, and it doesn't inherit its parent's worktree (seen in Devin Desktop, 2026-11-08). So the parent gives it one,
+and runs its git. What every parent owes its subagents (depth, merge plan, outputs) is in the `managing-agents` skill.
+
+- **Every subagent gets a worktree**, including one that only reads, created before the subagent starts.
+- **Names:** `.devin/worktrees/sub-<parent-folder>-<n>/` on branch `worktree-sub-<parent-folder>-<n>`, where `<n>` is
+  the next number `git worktree add -b` accepts (e.g. `sub-agent-blue-general-1`). The name doesn't start with
+  `agent-`, so `SessionEnd` never removes it. Before the first push, rename the branch to `devin/<topic>`.
+- **Base:** create it from `origin/staging/user-<login>`:
+  `git worktree add -q --no-track -b worktree-sub-<parent-folder>-<n> <folder> origin/staging/user-<login>`.
+  When its work builds on the parent's, move it to the parent's branch with `git -C <folder> merge --ff-only
+  <parent-branch>`. The subagent's task says which base it got.
+- **Its task** gives the worktree's absolute path and branch, and tells the subagent to:
+  - pass that path as `workdir` to every command and use absolute paths under it for every file;
+  - stop and report if `git rev-parse --show-toplevel` doesn't print that path;
+  - change nothing outside it (not the main checkout, not the parent's worktree);
+  - edit files and run only read-only git commands.
+- **Git:** the parent reviews the subagent's changes, then commits and pushes them from the subagent's worktree after
+  each step.
+- **Cleanup:** when the subagent is done, the parent checks its worktree (branch, last commit, pushed or not,
+  uncommitted files) and tells the user what it left. Before removing it, the parent copies every run folder the user
+  reviewed into the same component's `.artifacts/` in its own worktree, because `git worktree remove` deletes
+  git-ignored files without asking. Then it removes the worktree and branch as below.
 
 ## Branches and cleanup
 

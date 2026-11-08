@@ -41,6 +41,25 @@ So every agent's work must be findable, pushed, and kept apart from every other 
 - **Shared code:** tell each agent which shared files and structures others are changing (Rust and Metal structs,
   the network snapshot's bits, the checklist, `DECISIONS.md`), so it expects the conflicts and keeps everyone's work.
 
+## Subagents you start
+
+- **One level deep.** A parent starts subagents, but subagents don't start their own (`sub-*`, never `sub-sub-*`).
+- **A worktree each.** The parent starts every subagent in a unique worktree of its own; for Devin, how is in the
+  `devin-worktrees` skill.
+- **A merge plan.** For a long task, the parent decides up front how the subagents' work merges, and tells the user.
+  A subagent's branch may merge into the parent's branch first, but all of it ends up in `staging/user-<username>`
+  (the `merging-to-staging` skill).
+- **Outputs go through the parent.** The user sees only the parent, and a subagent can't ask the user anything:
+  - the subagent writes pictures, videos, HTML pages and demos to `.artifacts/<script>/<run_id>/` in its own
+    worktree, reports each file's absolute path, caption and the decision it answers, and stops;
+  - the parent opens every file before passing it on (Reports aren't confirmations, below), then shows the user as
+    the `graphical-changes` and `sharing-gameplay` skills say, with a gallery page (an HTML page the user opens with
+    one `open` command) for videos or more than a few files;
+  - the parent resumes the subagent with the user's words (Relaying, below).
+- **Many subagents.** For large, unusual work with so many subagents that relaying everything through one parent
+  would hold the user back, the parent may agree another way of sharing outputs with the user first (such as each
+  subagent's own page). Only for such work, and only once the user agrees.
+
 ## Work that survives
 
 - **Claim with a location.** Each claim in the wishlist has a **Where the work is** line: the worktree's full path and
