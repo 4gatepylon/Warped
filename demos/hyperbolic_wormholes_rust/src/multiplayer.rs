@@ -31,7 +31,7 @@ use crate::scene_data::{Beam, SceneData};
 use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
-    LOOK_RAD_PER_PX, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
+    LOOK_RAD_PER_PX, MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
 };
 use crate::world::{Color, EYE_HEIGHT_M, World};
 
@@ -472,11 +472,6 @@ pub fn pack_shared_voxel_view(
 ///
 /// Example: `let text = describe_shot(&world, &shot);`
 pub fn describe_shot(world: &VoxelWorld, shot: &Shot) -> String {
-    let through: String = shot
-        .through
-        .iter()
-        .map(|name| format!("through {name}, "))
-        .collect();
     let what: String = match (shot.is_hit, shot.hit_structure) {
         (true, Some(k)) => world
             .structures
@@ -487,18 +482,32 @@ pub fn describe_shot(world: &VoxelWorld, shot: &Shot) -> String {
         (true, None) => "the ground".to_string(),
         (false, _) => "nothing".to_string(),
     };
+    format_shot(shot, &what)
+}
+
+/// `format_shot` gives the HUD's line for `shot`, which hit `what`: the warps it went through,
+/// what it hit and how far it went.
+///
+/// Example: `let text = format_shot(&shot, "the ground");`
+fn format_shot(shot: &Shot, what: &str) -> String {
+    let through: String = shot
+        .through
+        .iter()
+        .map(|name| format!("through {name}, "))
+        .collect();
     format!("{through}hits {what} after {:.1} m", shot.length_m)
 }
 
 /// `describe_voxel_laser` gives the HUD's line for this player's laser in a shared view: the
-/// player it hit, or what else it hit in `world` (the map without avatars), or `None` with the
-/// laser off. A shot that hit an avatar is always a hit on a player, so the map's structures are
-/// only looked up for shots that hit the map.
+/// player it hit, a thrown wormhole's marker, or what else it hit in `world` (the map without
+/// avatars or markers), or `None` with the laser off. A shot that hit an avatar or a marker never
+/// hit the map, so the map's structures are only looked up for shots that hit the map.
 ///
 /// Example: `let line = multiplayer::describe_voxel_laser(&world, &view);`
 pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Option<String> {
     match (view.hit_player_id, view.shot.as_ref()) {
         (Some(victim_id), _) => Some(format!("hits player {victim_id}")),
+        (None, Some(shot)) if view.hit_marker.is_some() => Some(format_shot(shot, MARKER_NAME)),
         (None, Some(shot)) => Some(describe_shot(world, shot)),
         (None, None) => None,
     }
@@ -737,6 +746,8 @@ mod tests {
             (64, 40),
         );
         assert_eq!((view.hit_player_id, view.hit_marker), (None, Some(0)));
+        let line: String = describe_voxel_laser(&world, &view).expect("the laser is on");
+        assert!(line.contains(MARKER_NAME), "{line}");
     }
 
     #[test]
