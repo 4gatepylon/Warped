@@ -1,10 +1,10 @@
 //! `title.rs` is the title screen a double-clicked app opens on (W-58): the choices of game
-//! (online games, or joining one on this Wi-Fi on either map), the one selected, and the flags that
-//! start each. It keeps no window state: the window feeds it keys and
+//! (online games, a server by its address, or a game on this Wi-Fi, on either map), the one
+//! selected, and the flags that start each. It keeps no window state: the window feeds it keys and
 //! draws its lines, as with `menu.rs`.
 //!
 //! Interface: `TitleScreen` (`New`, `get_lines`, `move_selection`, `get_selected`), `Choice`
-//! (`get_flags`, `is_online`).
+//! (`get_flags`, `is_online`, `needs_address`).
 //!
 //! Example: `let title = TitleScreen::New("34.1.2.3:47810 lunar-surface Lunar Surface 1")?;`
 //!
@@ -37,6 +37,7 @@ pub enum Choice {
         address: String,
         map: MapName,
     },
+    Address(MapName),
     Join(MapName),
     Quit,
 }
@@ -74,18 +75,23 @@ impl Choice {
     fn get_label(&self) -> String {
         match self {
             Choice::Online { name, .. } => format!("Play online: {name}"),
+            Choice::Address(map) => {
+                format!("Join a server by its address: {}", get_map_label(*map))
+            }
             Choice::Join(map) => format!("Join a game on this Wi-Fi: {}", get_map_label(*map)),
             Choice::Quit => "Quit".to_string(),
         }
     }
 
     /// `get_flags` gives the flags that start the chosen game (none for `Quit`); an online game
-    /// also needs `--game-password-file`.
+    /// also needs `--game-password-file`, and a server by its address needs `--join <address>`
+    /// before them (`needs_address`).
     ///
     /// Example: `let flags = Choice::Join(MapName::HouseDemo).get_flags();`
     pub fn get_flags(&self) -> Vec<String> {
         let (address, map): (&str, MapName) = match self {
             Choice::Online { address, map, .. } => (address, *map),
+            Choice::Address(map) => return vec!["--map".to_string(), get_map_flag(*map)],
             Choice::Join(map) => ("auto", *map),
             Choice::Quit => return Vec::new(),
         };
@@ -94,11 +100,19 @@ impl Choice {
             .to_vec()
     }
 
-    /// `is_online` says whether the choice is a game on a server on the internet.
+    /// `is_online` says whether the choice is a game on a server on the internet: one of the
+    /// app's online games or a server by its address, which may need the game's password.
     ///
     /// Example: `if choice.is_online() { ... }`
     pub fn is_online(&self) -> bool {
-        matches!(self, Choice::Online { .. })
+        matches!(self, Choice::Online { .. } | Choice::Address(_))
+    }
+
+    /// `needs_address` says whether the player types the server's address for this choice.
+    ///
+    /// Example: `if choice.needs_address() { ... }`
+    pub fn needs_address(&self) -> bool {
+        matches!(self, Choice::Address(_))
     }
 }
 
@@ -129,6 +143,7 @@ impl TitleScreen {
                 map,
             });
         }
+        choices.extend(MAPS.map(Choice::Address));
         choices.extend(MAPS.map(Choice::Join));
         choices.push(Choice::Quit);
         Ok(TitleScreen {
@@ -180,18 +195,21 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | `online_games.txt` | empty, games (blank lines skipped), a line missing its name, an unknown map | `without_online_games_only_local_choices_show`, `online_games_come_first`, `bad_online_games_fail_naming_the_line` |
-    //! | Choice | online, join on this Wi-Fi, quit | `choices_start_their_games` |
+    //! | Choice | online, a server by its address, join on this Wi-Fi, quit | `choices_start_their_games` |
     //! | Selection move | down, up past the first (wraps) | `selection_wraps_around` |
 
     use super::*;
 
-    const LOCAL_CHOICE_COUNT: usize = 3;
+    const LOCAL_CHOICE_COUNT: usize = 5;
 
     #[test]
     fn without_online_games_only_local_choices_show() {
         let title: TitleScreen = TitleScreen::New("").expect("a title screen");
         assert_eq!(title.choices.len(), LOCAL_CHOICE_COUNT);
-        assert_eq!(title.get_selected(), &Choice::Join(MapName::LunarSurface));
+        assert_eq!(
+            title.get_selected(),
+            &Choice::Address(MapName::LunarSurface)
+        );
     }
 
     #[test]
@@ -245,6 +263,10 @@ mod tests {
             Choice::Join(MapName::HouseDemo).get_flags(),
             ["--join", "auto", "--map", "house-demo"]
         );
+        let by_address: Choice = Choice::Address(MapName::LunarSurface);
+        assert_eq!(by_address.get_flags(), ["--map", "lunar-surface"]);
+        assert!(by_address.is_online() && by_address.needs_address());
+        assert!(!online.needs_address());
         assert!(Choice::Quit.get_flags().is_empty());
         assert!(!Choice::Quit.is_online());
     }
@@ -253,7 +275,7 @@ mod tests {
     fn selection_wraps_around() {
         let mut title: TitleScreen = TitleScreen::New("").expect("a title screen");
         title.move_selection(1);
-        assert_eq!(title.get_selected(), &Choice::Join(MapName::HouseDemo));
+        assert_eq!(title.get_selected(), &Choice::Address(MapName::HouseDemo));
         title.move_selection(-2);
         assert_eq!(title.get_selected(), &Choice::Quit);
     }
