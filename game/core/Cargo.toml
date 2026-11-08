@@ -13,12 +13,15 @@ edition.workspace = true
 
 [dependencies]
 clap.workspace = true
+getrandom.workspace = true
 glam.workspace = true
 gltf.workspace = true
+hmac.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+sha2.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 legacy-oracle = { path = "../legacy_oracle" }

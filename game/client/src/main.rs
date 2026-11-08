@@ -31,7 +31,6 @@ mod map_layout;
 mod menu;
 mod minimap;
 mod multiplayer;
-mod net;
 mod play;
 mod player_settings;
 mod render_mesh;
@@ -49,7 +48,7 @@ mod viewmodel;
 mod voxel_textures;
 
 use warped_core::{
-    app_bundle, avatar_model, black_hole_growth, fps_demo_assets, geometry, map, mesh, player,
+    app_bundle, avatar_model, black_hole_growth, fps_demo_assets, geometry, map, mesh, net, player,
     settings, shapes, shot_noise, terrain, thrown_wormholes, voxel_clearance, voxel_world,
     zone_walls,
 };

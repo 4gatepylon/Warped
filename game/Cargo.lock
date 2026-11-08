@@ -998,13 +998,16 @@ name = "warped-core"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "getrandom",
  "glam",
  "gltf",
+ "hmac",
  "image",
  "legacy-oracle",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
 ]
 
 [[package]]

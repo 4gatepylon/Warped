@@ -1,7 +1,8 @@
 //! `core_matches_the_demo.rs` checks that the modules step A4 moved into `warped-core` give exactly
 //! the demo's results (through `legacy-oracle`) on the same inputs: Lunar Surface's map, its
 //! terrain and models, the hyperbolic geometry under them, the built-in server settings, shot noise, landed thrown
-//! wormholes, the zone walls, and walking and lasers in the voxel world. Values without a shared type are compared through `Debug`, which
+//! wormholes, the zone walls, walking and lasers in the voxel world, and the network protocol (the
+//! game's server and window each admit or refuse the demo's). Values without a shared type are compared through `Debug`, which
 //! prints every digit of a float.
 //!
 //! Partitions and the tests that cover each part:
@@ -17,6 +18,9 @@
 //! | | `thrown_wormholes` | `landed_mouths_match_the_demo` |
 //! | | `zone_walls` | `zone_walls_match_the_demo` |
 //! | | `voxel_world` | `walks_and_lasers_match_the_demo` |
+//! | | `net` | `servers_admit_each_others_windows`, `servers_refuse_each_others_wrong_passwords` |
+//! | Server and window | game and demo, demo and game | both `net` tests |
+//! | Game password | right, wrong | `servers_admit_each_others_windows`, `servers_refuse_each_others_wrong_passwords` |
 //! | Team spawned on | blue, red | `walks_and_lasers_match_the_demo` |
 //! | Movement | walking, sprinting while turning | `walks_and_lasers_match_the_demo` |
 //! | Rifle heat | cold, half, hot | `shot_noise_matches_the_demo` |
@@ -25,6 +29,9 @@
 //! | Sample point | inside the map's bounds, on and above the ground | every test with points |
 
 #![cfg(target_os = "macos")]
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use glam::{DMat4, DVec3, DVec4};
 use legacy_oracle as demo;
@@ -44,6 +51,10 @@ const TEAM_COUNT: u32 = 2;
 const STEP_COUNT: usize = 180;
 const DT_S: f64 = 1.0 / 60.0;
 const SPRINT_FROM_STEP: usize = 90;
+const GAME_PASSWORD: &[u8] = b"warped2-oracle";
+const WRONG_PASSWORD: &[u8] = b"warped2-wrong";
+const JOIN_TIMEOUT_S: f64 = 5.0;
+const POLL_MS: u64 = 10;
 
 /// `load_maps` loads Lunar Surface in the game and in the demo, both curved by
 /// `curvature_per_map_curvature`.
@@ -286,4 +297,85 @@ fn walks_and_lasers_match_the_demo() {
             );
         }
     }
+}
+
+/// `start_server` runs `$net::serve` with `$settings::ServerSettings::Builtin()` on a free port of
+/// this machine, for `GAME_PASSWORD`, on a thread of `$scope` until `$should_stop` is set, and
+/// gives its address.
+///
+/// Example: `let server: SocketAddr = start_server!(core::net, core::settings, scope, &should_stop);`
+macro_rules! start_server {
+    ($net:ident :: $net_module:ident, $settings:ident :: $settings_module:ident, $scope:expr, $should_stop:expr) => {{
+        let socket: std::net::UdpSocket =
+            $net::$net_module::bind_server(0).expect("a free UDP port");
+        let port: u16 = socket.local_addr().expect("a bound socket").port();
+        let should_stop: &AtomicBool = $should_stop;
+        $scope.spawn(move || {
+            let should_start_new_game: AtomicBool = AtomicBool::new(false);
+            $net::$net_module::serve(
+                socket,
+                should_stop,
+                MAP_NAME.to_string(),
+                $settings::$settings_module::ServerSettings::Builtin(),
+                vec![0, 1],
+                &should_start_new_game,
+                None,
+                GAME_PASSWORD.to_vec(),
+            )
+            .expect("the server runs");
+        });
+        std::net::SocketAddr::from(([127, 0, 0, 1], port))
+    }};
+}
+
+/// `try_join` connects a `$net::Client` to `$server` with `$password`, joins any team and polls
+/// until the server welcomes it (`true`) or refuses its password (`false`); it fails after
+/// `JOIN_TIMEOUT_S`.
+///
+/// Example: `assert!(try_join!(demo::net, server, GAME_PASSWORD));`
+macro_rules! try_join {
+    ($net:ident :: $net_module:ident, $server:expr, $password:expr) => {{
+        use $net::$net_module as net;
+        let mut client: net::Client =
+            net::Client::Connect($server, MAP_NAME, $password).expect("a client socket");
+        client.join(None).expect("a join request");
+        let start: Instant = Instant::now();
+        loop {
+            assert!(
+                start.elapsed().as_secs_f64() < JOIN_TIMEOUT_S,
+                "no answer from {}",
+                $server
+            );
+            match client.poll() {
+                Ok(_) if !client.is_waiting_for_welcome() => break true,
+                Ok(_) => std::thread::sleep(Duration::from_millis(POLL_MS)),
+                Err(error) if error.is::<net::PasswordRefused>() => break false,
+                Err(error) => panic!("the client failed: {error}"),
+            }
+        }
+    }};
+}
+
+#[test]
+fn servers_admit_each_others_windows() {
+    let should_stop: AtomicBool = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let game_server = start_server!(core::net, core::settings, scope, &should_stop);
+        let demo_server = start_server!(demo::net, demo::settings, scope, &should_stop);
+        assert!(try_join!(demo::net, game_server, GAME_PASSWORD));
+        assert!(try_join!(core::net, demo_server, GAME_PASSWORD));
+        should_stop.store(true, Ordering::Relaxed);
+    });
+}
+
+#[test]
+fn servers_refuse_each_others_wrong_passwords() {
+    let should_stop: AtomicBool = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let game_server = start_server!(core::net, core::settings, scope, &should_stop);
+        let demo_server = start_server!(demo::net, demo::settings, scope, &should_stop);
+        assert!(!try_join!(demo::net, game_server, WRONG_PASSWORD));
+        assert!(!try_join!(core::net, demo_server, WRONG_PASSWORD));
+        should_stop.store(true, Ordering::Relaxed);
+    });
 }

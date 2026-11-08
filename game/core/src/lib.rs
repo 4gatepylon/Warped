@@ -4,10 +4,10 @@
 //! Apple dependency, so it and the server build on Linux.
 //!
 //! Interface: so far `app_bundle`, `avatar_model`, `black_hole_growth`, `fps_demo_assets`,
-//! `geometry`, `map`, `material_surfaces`, `mesh`, `player` (only `Input` yet), `settings`,
+//! `geometry`, `map`, `material_surfaces`, `mesh`, `net`, `player` (only `Input` yet), `settings`,
 //! `shapes`, `shot_noise`, `terrain`, `thrown_wormholes`, `voxel_clearance`, `voxel_world` and
-//! `zone_walls`. The rest of step A4 of `REFACTOR_PLAN.md` moves `net::protocol`,
-//! `net::connection` and `bot` here, and later phases add `rules` (phase D) and `space` (phase E).
+//! `zone_walls`. Step A5 of `REFACTOR_PLAN.md` moves the server half of `net` to `warped-server`,
+//! and later phases add `rules` (phase D) and `space` (phase E).
 //!
 //! Example: `use warped_core::map::{Map, get_map_folder};`
 
@@ -19,6 +19,7 @@ pub mod geometry;
 pub mod map;
 pub mod material_surfaces;
 pub mod mesh;
+pub mod net;
 pub mod player;
 pub mod settings;
 pub mod shapes;
