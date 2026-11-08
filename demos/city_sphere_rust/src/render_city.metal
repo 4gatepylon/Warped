@@ -50,6 +50,10 @@ constant float FRAME_GROOVE_DARK = 0.6;
 constant float FRAME_ROUGH = 0.2;
 constant float WALL_PANEL_M = 3.0;
 constant float GRIME_HEIGHT_M = 1.2;
+constant float BOLT_INSET_M = 0.08;
+constant float BOLT_RADIUS_M = 0.03;
+constant float BOLT_BRIGHT = 1.8;
+constant float BOLT_SHADOW_DARK = 0.55;
 constant float GRIME_FRAC = 0.45;
 constant float GRIME_MOTTLE_FRAC = 0.18;
 constant float HAZARD_GAP_M = 0.25;
@@ -167,6 +171,11 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
             float groove = 1.0 - smoothstep(FRAME_GROOVE_M - edge_aa_m, FRAME_GROOVE_M + edge_aa_m, edge_m);
             base = mix(base, base * FRAME_BRIGHT, frame) * (1.0 - FRAME_GROOVE_DARK * groove);
             rough = mix(rough, FRAME_ROUGH, frame);
+            float2 in_panel_m = fract(in.uv) * WALL_PANEL_M;
+            float bolt_m = length(min(in_panel_m, WALL_PANEL_M - in_panel_m) - BOLT_INSET_M);
+            float bolt = 1.0 - smoothstep(BOLT_RADIUS_M - edge_aa_m, BOLT_RADIUS_M + edge_aa_m, bolt_m);
+            float bolt_shadow = (1.0 - smoothstep(BOLT_RADIUS_M, BOLT_RADIUS_M * 1.8, bolt_m)) * (1.0 - bolt);
+            base = mix(base, base * BOLT_BRIGHT, bolt) * (1.0 - BOLT_SHADOW_DARK * bolt_shadow);
         }
         if (is_street) {
             base = apply_hazard(base, in.world, u);
