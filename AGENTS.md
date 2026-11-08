@@ -248,6 +248,12 @@ whether it breaks anything: `git fetch -q origin staging && git log --format='%h
 refs/worktree/last-seen-staging..origin/staging`, then `git update-ref refs/worktree/last-seen-staging origin/staging`.
 Details, and when to ask the user who an author is, are in the `compatible-changes` skill.
 
+## Game design
+
+Before merging any PR, tell the user whether it changes the game's design (rules, controls, screens, menus, weapons,
+levels), whether `game_design/DESIGN.md` describes the change, and anything else you know the design doc gets wrong
+(the `merging-to-staging` skill).
+
 ## Machine-specific workarounds
 
 This repo is used from several machines, so don't write a workaround for one machine (e.g. a
