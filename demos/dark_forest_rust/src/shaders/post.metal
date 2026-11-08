@@ -730,9 +730,6 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
     float2 centered = in.uv - 0.5;
     float vignette = 1.0 - VIGNETTE_STRENGTH * (1.0 - is_kept_plain) * smoothstep(0.2, 0.85, length(centered * float2(1.1, 1.0)));
     color *= vignette;
-    float damage = frame.post_params.x;
-    float edge = smoothstep(0.25, 0.75, length(centered));
-    color = mix(color, float3(0.45, 0.02, 0.01), damage * edge * 0.8);
     float3 encoded = linear_to_srgb(saturate(color));
     float grain = interleaved_gradient_noise(in.position.xy + fract(frame.camera_position_m.w) * 97.0) - 0.5;
     encoded = saturate(encoded + grain * GRAIN_STRENGTH * (1.0 - is_kept_plain));
@@ -758,8 +755,33 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
 }
 
 /**
- * @brief `fxaa_fragment` is FXAA 3.11 (quality), reading luma from alpha; it also scales the
- * internal resolution up to the window.
+ * @brief `HitEffect` matches `render::overlay::HitEffect`: how much of a recent hit's effect is left
+ * (1 just after it, 0 for none), how red the edges turn, how wide their blur is and how far the
+ * picture shifts this frame, in window pixels.
+ */
+struct HitEffect {
+    float strength_frac;
+    float red_frac;
+    float blur_px;
+    packed_float2 shake_px;
+};
+
+/**
+ * @brief `HIT_RED_COLOR`, `HIT_EDGE_REACH_FRAC` and `HIT_BLUR_TAP_COUNT` are the Lunar Surface demo's
+ * (`demos/hyperbolic_wormholes_rust/src/render_metal.metal`): the colour the edges turn, how far in
+ * a fresh hit reaches, and the blur's taps.
+ */
+constant float3 HIT_RED_COLOR = float3(0.85, 0.05, 0.03);
+constant float HIT_EDGE_REACH_FRAC = 0.7;
+constant int HIT_BLUR_TAP_COUNT = 8;
+
+static float3 get_fxaa_color(texture2d<float> ldr, float2 uv, float is_enabled);
+
+/**
+ * @brief `fxaa_fragment` shows the frame in the window as a player who was just hit sees it, as the
+ * Lunar Surface demo's `read_hit_scene` does: shifted by `hit.shake_px`, and toward the edges
+ * blurred over `hit.blur_px` and turned red by `hit.red_frac`, reaching further in the fresher the
+ * hit. Each pixel is FXAA 3.11 of the internal-resolution frame (`get_fxaa_color`).
  * @param is_enabled 0 copies the image without anti-aliasing.
  * @par Example
  * @code
@@ -768,13 +790,41 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
  */
 fragment float4 fxaa_fragment(FullscreenVertexOut in [[stage_in]],
                               constant float& is_enabled [[buffer(0)]],
+                              constant HitEffect& hit [[buffer(1)]],
+                              constant float2& window_px [[buffer(2)]],
                               texture2d<float> ldr [[texture(0)]]) {
+    if (hit.strength_frac <= 0.0) {
+        return float4(get_fxaa_color(ldr, in.uv, is_enabled), 1.0);
+    }
+    constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+    float2 at_px = clamp(in.position.xy + round(float2(hit.shake_px)), float2(0.5), window_px - 0.5);
+    float3 sharp = get_fxaa_color(ldr, at_px / window_px, is_enabled);
+    float corner = length(in.position.xy / window_px - 0.5) * M_SQRT2_F;
+    float edge = hit.strength_frac * smoothstep(1.0 - HIT_EDGE_REACH_FRAC * hit.strength_frac, 1.0, corner);
+    float3 sum = sharp;
+    for (int k = 0; k < HIT_BLUR_TAP_COUNT; k++) {
+        float angle = 2.0 * M_PI_F * float(k) / float(HIT_BLUR_TAP_COUNT);
+        float2 tap_px = at_px + round(hit.blur_px * edge * float2(cos(angle), sin(angle)));
+        sum += ldr.sample(linear_sampler, clamp(tap_px, float2(0.5), window_px - 0.5) / window_px).rgb;
+    }
+    float3 blurred = mix(sharp, sum / float(HIT_BLUR_TAP_COUNT + 1), edge);
+    return float4(mix(blurred, HIT_RED_COLOR, edge * hit.red_frac), 1.0);
+}
+
+/**
+ * @brief `get_fxaa_color` is FXAA 3.11 (quality) of `ldr` at `uv`, reading luma from alpha; it also
+ * scales the internal resolution up to the window. `is_enabled` 0 copies the pixel as it is.
+ * @par Example
+ * @code
+ * float3 color = get_fxaa_color(ldr, in.uv, is_enabled);
+ * @endcode
+ */
+static float3 get_fxaa_color(texture2d<float> ldr, float2 uv, float is_enabled) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float2 texel = 1.0 / float2(ldr.get_width(), ldr.get_height());
-    float2 uv = in.uv;
     float4 center = ldr.sample(linear_sampler, uv);
     if (is_enabled < 0.5) {
-        return float4(center.rgb, 1.0);
+        return center.rgb;
     }
     float luma_center = center.a;
     float luma_down = ldr.sample(linear_sampler, uv + float2(0, 1) * texel).a;
@@ -785,7 +835,7 @@ fragment float4 fxaa_fragment(FullscreenVertexOut in [[stage_in]],
     float luma_max = max(luma_center, max(max(luma_down, luma_up), max(luma_left, luma_right)));
     float luma_range = luma_max - luma_min;
     if (luma_range < max(FXAA_EDGE_THRESHOLD_MIN, luma_max * FXAA_EDGE_THRESHOLD)) {
-        return float4(center.rgb, 1.0);
+        return center.rgb;
     }
     float luma_down_left = ldr.sample(linear_sampler, uv + float2(-1, 1) * texel).a;
     float luma_up_right = ldr.sample(linear_sampler, uv + float2(1, -1) * texel).a;
@@ -867,7 +917,7 @@ fragment float4 fxaa_fragment(FullscreenVertexOut in [[stage_in]],
     } else {
         final_uv.x += final_offset * step_length;
     }
-    return float4(ldr.sample(linear_sampler, final_uv).rgb, 1.0);
+    return ldr.sample(linear_sampler, final_uv).rgb;
 }
 
 /** @brief `HudVertexOut` is one corner of a HUD rectangle. */

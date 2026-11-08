@@ -37,9 +37,15 @@ is in [`AGENTS.md`](AGENTS.md).
   - **Where the work is** (for any agent picking it up): a parity audit of every level against Lunar Surface on
     `claude/levels-checks`, then each level's fixes on its own agent's branch (`claude/city-sphere-fixes`,
     `claude/dark-forest-lens-robots`, `claude/snow-planet-torus`, `claude/dust-wormhole-speed`), in worktrees under
-    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. City Sphere: #429
+    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. Dust: #427
+    (`claude/dust-parity`, open). Snow Planet: #421
+    (branch `claude/snow-planet-parity`, open). City Sphere: #429
     (HUD bars, hit effect, movement, jump, exit prompt, zoom, head bob, speckle, walking console bot); still missing
-    there: thrown wormholes, flashlight, third person, ground dust.
+    there: thrown wormholes, flashlight, third person, ground dust. Lunar Surface, Dust and Snow Planet: #434 (servers
+    take a console hold only in reach and aimed at, console bots walk to every pylon, `claude/console-reach-walking-bots`,
+    open). Dark Forest: #431 (Lunar's HUD, hit effect and
+    "YOU DIED", `claude/dark-forest-parity-hud`, open); still missing there: both guns, settings and the Tab pages,
+    the minimap, small bot windows, flashlight, third person, thrown wormholes, exit prompt.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
@@ -82,6 +88,15 @@ is in [`AGENTS.md`](AGENTS.md).
   play but has a dashboard where they can change or reset those settings.
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
+- [ ] **W-127 Dark Forest canopy flicker.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): In about one fixed-step capture in three or four, a few thousand canopy pixels differ, also on the base build before any of the 2026-11-08 work; it looks like a GPU race in the FPS-demo renderer.
+- [ ] **W-128 Dark Forest double lens.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Standing within 4 m of a gate shows a faint second image of the wormhole's lens over the direct view.
+- [ ] **W-129 Dark Forest lasers off in the lens.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lasers seen through a wormhole lens are drawn in the lens atlas's direction: exact for shots through the throat, slightly off their true place otherwise (#426).
+- [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
+- [ ] **W-131 Lunar wormhole_exit slow at full size.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lunar Surface's `wormhole_exit` bench view takes about 109 ms of GPU time at full 2560x1440 (the reference and the match's copy alike); in play the window's render scale drops to keep frames fast, but the view itself is far over 16.7 ms.
+- [ ] **W-132 City Sphere stairs hole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): The stairs' hole in the glass (#429) is wider than a lift hole: shots pass through it, and players on the glass level can fall in onto the steps.
+- [ ] **W-133 Match winning round wording.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): The match's progression page calls the round that wins the match "attacker advances" (e.g. round 5, Dust); changing it changes visible text.
+- [ ] **W-134 Dust map page picture stale.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Dust's committed MAP page picture (`map_pictures/dust_r50m.png`) was drawn before the ground switched to 3 noise octaves; a fresh render differs in 6.5% of its pixels.
+- [ ] **W-135 e2e-match ports and logs.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): `make e2e-match` (the older match test) uses the game's own ports 47850/47852 and writes its logs into `.build/`, not `.artifacts/`.
 
 ## Pending user review
 
@@ -125,7 +140,8 @@ is in [`AGENTS.md`](AGENTS.md).
   wormholes, and obviously, players can place wormholes. And obviously, that one's also hyperbolic, unlike the other
   ones."
   Merged into `staging/user-4gatepylon` with #393, 2026-11-08. Speed: #420 bakes the terrain's height, so every
-  bench view is under 16.7 ms at 2560×1440 with the same pictures (open, 2026-11-08).
+  bench view is under 16.7 ms at 2560×1440 with the same pictures (merged, 2026-11-08). Lunar's jump time and
+  walkable level mouths for W-126 (same play in every level): #427 (open, 2026-11-08).
 - [?] **W-122 Dark Forest demo.** Part of W-124 (four map demos): "I want it to just be kind of just like a normal
   forest. This is just that one's going to be just kind of a normal first-person shooter. Maybe one difference there
   is just to have it have verticality, similar to the Star Wars Endor or whatever, maybe the Wookiee Planet, where

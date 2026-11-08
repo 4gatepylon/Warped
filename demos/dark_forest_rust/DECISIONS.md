@@ -56,6 +56,16 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   covers about 160 m around the view), not a cascade of their own. Pylons and their beams stay out of the live
   faces, as before (they aren't in the atlas either). **Weigh in:** whether pylons and their beams should also
   show through the wormholes.
+- **D16. Lunar Surface's play is ported into this engine, not this level into Lunar's** (the lead's call for W-126,
+  same play in every level; the user may overrule it). Lunar, Dust, Snow Planet and City Sphere share a voxel ray
+  tracer in hyperbolic space; rebuilding the forest there would lose its rasterized bamboo, canopy shadows, light
+  shafts and ladders. So Lunar's play code is copied here whole wherever it doesn't need the voxel world, starting
+  with the HUD: `hud_bars.rs`, the overlay rectangles and their shader (`render/overlay.rs`, `shaders/overlay.metal`),
+  the crosshair, the console bar, the hit effect and the "YOU DIED" banner, with Lunar's numbers (sprint energy
+  7.5 s to empty, 7.5 s crouched and 15 s upright to refill; the hit effect's 0.6 s, red 0.6, 6 px shake and blur;
+  the death dim 0.55). The forest's own health bar, ammo digits and pips, reload bar, kill counter and hit markers
+  went with it, since Lunar shows none of them. The console lights at the top of the screen stay. **Weigh in:**
+  whether those console lights should go too, for a HUD exactly like Lunar's.
 
 ## Follow-ups for the next agent
 

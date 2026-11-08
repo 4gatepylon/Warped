@@ -26,13 +26,14 @@ LAN discovery 47831.
 | --- | --- |
 | `--serve --port <p> [--map dust] --level-result-file <path>` | When a team has turned off all the other team's consoles, write `{"winner": "blue"}` or `{"winner": "red"}` to `<path>` once (`<path>.partial`, then renamed), and never start a new game. Also on `wormholes_server`. |
 | `--join <addr> --port <p> [--team blue\|red]` | Join that team at once instead of choosing in the lobby. |
-| `--join <addr> --port <p> --bot --exit-after-s <s> --team <t> --bot-objective consoles` | The bot holds `E` on the other team's consoles (the server takes its word for which one) until a team wins. |
+| `--join <addr> --port <p> --bot --exit-after-s <s> --team <t> --bot-objective consoles` | The bot walks to the other team's consoles and holds `E` on each once in reach (`console_bot.rs`; the server takes a hold only from within `consoles.reach_m`, aimed at it: `console_reach.rs`) until a team wins. |
 
 ## How it works
 
 - **Map**: `common/maps/dust/map.json`, written by `tools/make_dust_map.py` (rerun it after editing it): a crater
   basin with dunes, sandstone mesas, pillars, ruin walls and an arch, HESCO rows, bunkers, 3 pylons per team
-  (mirrored), spawns at u = ±104 m, a wormhole pair at (-50, -40) and (50, 40) m.
+  (mirrored), spawns at u = ±104 m, a wormhole pair near (-50, -40) and (50, 40) m, centred at eye height so
+  players walk through it.
 - **Wind**: the map's `atmosphere.wind` is a refractive-index field, ln n = k d, where d is the signed hyperbolic
   distance (m) to the plane through the origin perpendicular to `direction`, and k is
   `log_index_gradient_per_m` (0.00144 /m). Light follows the ray equation, so it curves toward higher n, i.e.

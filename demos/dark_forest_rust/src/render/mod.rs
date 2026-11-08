@@ -9,6 +9,7 @@
 
 pub mod culling;
 pub mod metal;
+pub mod overlay;
 
 use glam::{Mat4, Vec3, Vec4};
 
@@ -234,6 +235,8 @@ pub struct HudImage<'a> {
 /// `FrameDescription` is everything the backend draws in one frame. `lens_draws` and
 /// `lens_particles` are the robots and laser effects among `world_draws` and `world_particles`,
 /// which wormhole lenses also show live (the lens atlas holds only the static world).
+/// `overlay_rects` are the HUD's bars and crosshair, in the Lunar Surface demo's look, drawn over
+/// `hud_rects` and under `hud_images`.
 pub struct FrameDescription<'a> {
     pub camera: Camera,
     pub world_draws: &'a [DrawItem],
@@ -246,9 +249,10 @@ pub struct FrameDescription<'a> {
     pub hud_rects: &'a [HudRect],
     pub hud_images: &'a [HudImage<'a>],
     pub time_s: f32,
-    pub damage_flash_frac: f32,
+    pub hit_effect: overlay::HitEffect,
     pub lens_draws: &'a [DrawItem],
     pub lens_particles: &'a [Particle],
+    pub overlay_rects: &'a [overlay::OverlayRect],
 }
 
 /// `LensMouth` is one wormhole mouth as the lens pass sees it: its lens throat (where rays cross),
@@ -395,6 +399,12 @@ pub trait Renderer {
     /// `set_is_capturing` leaves the vignette and grain out of frames, for pictures that become
     /// textures.
     fn set_is_capturing(&mut self, is_capturing: bool);
+    /// `set_is_capturing_hud` draws frames, HUD included, into a picture instead of the window
+    /// (from the next frame on, at the window's current size), for `read_hud_frame_rgba`.
+    fn set_is_capturing_hud(&mut self, is_capturing_hud: bool);
+    /// `read_hud_frame_rgba` waits for the frames in flight and gives the last one with its HUD,
+    /// as the window would show it: (width_px, height_px, RGBA bytes).
+    fn read_hud_frame_rgba(&mut self) -> (u32, u32, Vec<u8>);
 }
 
 /// `tests` checks which mouths the lens shows live, the atlas's depth encoding, and that a robot
