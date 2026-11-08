@@ -40,7 +40,7 @@ The match demo (`demos/warped_match_rust/`) launches the level with:
 | --- | --- | --- |
 | `--level-result-file <path>` | `--serve`, or `snow_planet_server` | when a team wins, writes `{"winner":"blue"}` or `{"winner":"red"}` to `<path>` once (`<path>.partial`, then a rename), and doesn't start a new game; the server keeps running |
 | `--team blue\|red` | `--join` | joins that team at once instead of waiting for `1`/`2` |
-| `--bot-objective consoles` | `--bot` | the bot claims the other team's consoles one by one until its team wins |
+| `--bot-objective consoles` | `--bot` | the bot walks to the other team's consoles one by one, around the blizzard, and holds `E` on each once in reach until its team wins (the server takes a hold only from within `consoles.reach_m`, aimed at it) |
 | `--map snow-planet` | any | the default; `lunar-surface` and `house-demo` also load |
 
 ```bash

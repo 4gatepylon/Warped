@@ -9,13 +9,18 @@
 //!
 //! Must know:
 //! - It shares `net.rs` and the modules it needs (`map.rs`, `settings.rs`, `thrown_wormholes.rs`,
-//!   `shot_noise.rs`, `terrain.rs`, `geometry.rs`, `app_bundle.rs`) with the game, so both speak
-//!   the same protocol.
+//!   `shot_noise.rs`, `terrain.rs`, `geometry.rs`, `app_bundle.rs`, `shapes.rs`,
+//!   `console_reach.rs`) with the game, so both speak the same protocol and check consoles alike.
+//! - It loads the map as the game does (its curvature scaled by the server settings), so the
+//!   consoles' places match the players' map.
 //! - It exits on the first error, so a supervisor such as systemd can restart it.
 
 #[allow(dead_code)]
 #[path = "../app_bundle.rs"]
 mod app_bundle;
+#[allow(dead_code)]
+#[path = "../console_reach.rs"]
+mod console_reach;
 #[allow(dead_code)]
 #[path = "../geometry.rs"]
 mod geometry;
@@ -31,6 +36,9 @@ mod net;
 #[allow(dead_code)]
 #[path = "../settings.rs"]
 mod settings;
+#[allow(dead_code)]
+#[path = "../shapes.rs"]
+mod shapes;
 #[allow(dead_code)]
 #[path = "../shot_noise.rs"]
 mod shot_noise;
@@ -48,7 +56,7 @@ use std::time::Duration;
 
 use clap::Parser;
 
-use map::{Map, MapName, get_console_team};
+use map::{Map, MapName};
 use settings::ServerSettings;
 
 const NEW_GAME_AFTER_WIN_S: u64 = 10;
@@ -86,16 +94,16 @@ struct Arguments {
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments: Arguments = Arguments::parse();
     let map_name: &str = arguments.map.get_folder_name();
-    let console_teams: Vec<u32> = Map::Builtin(map_name)?
-        .materials
-        .iter()
-        .filter_map(get_console_team)
-        .collect();
     let game_password: Vec<u8> = net::read_game_password(arguments.game_password_file.as_deref())?;
     let settings: ServerSettings = match &arguments.server_settings {
         Some(path) => ServerSettings::Load(path)?,
         None => ServerSettings::Builtin(),
     };
+    let mut map: Map = Map::Builtin(map_name)?;
+    if !map.structures.is_empty() {
+        map.scale_curvature(settings.space.curvature_per_map_curvature)?;
+    }
+    let consoles: Vec<console_reach::ConsolePlace> = console_reach::find_console_places(&map)?;
     let socket: std::net::UdpSocket = net::bind_server(arguments.port)?;
     println!("Game server for {map_name} on UDP port {}.", arguments.port);
     net::serve(
@@ -103,7 +111,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &AtomicBool::new(false),
         map_name.to_string(),
         settings,
-        console_teams,
+        consoles,
         &AtomicBool::new(false),
         Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
         game_password,

@@ -514,10 +514,12 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 }
 
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
-/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
-/// view) and rejoins `BOT_REJOIN_S` after being hit. The black hole grows with the server's
-/// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. It returns how many players it hit and how often it was hit,
-/// and fails if the server curves space other than the built-in settings (`check_bot_space`).
+/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits
+/// (handing `save_view` its view, which it may save on another thread) and rejoins `BOT_REJOIN_S`
+/// after being hit. The black hole grows with the server's consoles, or to `black_hole_strength`
+/// when given, and the bot's own time slows near it. It returns how many players it hit and how
+/// often it was hit, and fails if the server curves space other than the built-in settings
+/// (`check_bot_space`).
 ///
 /// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, |frame, id| Ok(()))?;`
 pub fn run_voxel_bot(
@@ -525,7 +527,7 @@ pub fn run_voxel_bot(
     client: &mut Client,
     duration_s: f64,
     black_hole_strength: Option<f64>,
-    mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
+    mut save_view: impl FnMut(VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
     let (mut grown_world, mut black_hole_growth) =
         (world.clone(), BlackHoleGrowth::New(black_hole_strength));
@@ -619,7 +621,7 @@ pub fn run_voxel_bot(
                 if last_victim != Some(victim_id) {
                     hit_count += 1;
                     println!("bot hit player {victim_id}");
-                    save_view(&view.frame, victim_id)?;
+                    save_view(view.frame, victim_id)?;
                 }
             }
             last_victim = view.hit_player_id;

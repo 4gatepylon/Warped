@@ -26,6 +26,8 @@ mod app_bundle;
 mod avatar_animation;
 mod avatar_model;
 mod black_hole_growth;
+mod console_bot;
+mod console_reach;
 mod credits;
 mod dust;
 mod exit_prompt;
@@ -42,6 +44,7 @@ mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
+mod picture_saver;
 mod render_cpu;
 mod render_mesh;
 mod render_metal;
@@ -89,6 +92,7 @@ use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_ro
 use key_bindings::{Action, Control};
 use map::MapName;
 use physics::{Input, LaserReport, Player};
+use picture_saver::PictureSaver;
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
@@ -103,6 +107,7 @@ use world::{DEFAULT_CURVATURE_RADIUS_M, EYE_HEIGHT_M, World};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const BYTES_PER_PIXEL: usize = 4;
+const HIT_PICTURE_QUEUE_COUNT: usize = 2;
 const LONE_MOUTH_HITS_TO_DESTROY: u8 = 1;
 const CPU_RENDER_SCALE: f64 = 0.35;
 const METAL_RENDER_SCALE: f64 = 0.6;
@@ -655,10 +660,11 @@ fn run(arguments: Arguments) -> Result<()> {
             voxel_textures::check_surface_textures()?;
         }
     }
-    let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
     if arguments.bot {
-        run_bot(&arguments, renderer)
-    } else if arguments.make_map_picture {
+        return run_bot(&arguments);
+    }
+    let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
+    if arguments.make_map_picture {
         make_map_picture(&arguments, renderer)
     } else if arguments.bench_views {
         bench_views(&arguments, renderer)
@@ -895,16 +901,16 @@ fn get_server_address(arguments: &Arguments) -> Result<SocketAddr> {
     }
 }
 
-/// `start_server` binds the server's port and runs the server for a map with `console_teams` on a
+/// `start_server` binds the server's port and runs the server for a map with `consoles` on a
 /// thread until the returned flag is set, starting a new game after a win at each line read from
 /// standard input (`Enter` in the server's terminal).
 ///
-/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", ServerSettings::Builtin(), vec![0, 1])?;`
+/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", ServerSettings::Builtin(), places)?;`
 fn start_server(
     port: u16,
     map_name: &str,
     settings: ServerSettings,
-    console_teams: Vec<u32>,
+    consoles: Vec<console_reach::ConsolePlace>,
     game_password: Vec<u8>,
     level_result_path: Option<PathBuf>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
@@ -925,7 +931,7 @@ fn start_server(
             &flag,
             map_name,
             settings,
-            console_teams,
+            consoles,
             &should_start_new_game,
             None,
             game_password,
@@ -1011,7 +1017,7 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         arguments.port,
         arguments.map.get_folder_name(),
         settings,
-        consoles.iter().map(|c| c.team).collect(),
+        console_reach::find_console_places(&map_data)?,
         net::read_game_password(arguments.game_password_file.as_deref())?,
         arguments.level_result_file.clone(),
     )?;
@@ -1560,7 +1566,7 @@ fn bench_voxel_views(
 /// prints how many players it hit and how often it was hit.
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
-fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
+fn run_bot(arguments: &Arguments) -> Result<()> {
     let map: map::Map = load_map(arguments.map, &ServerSettings::Builtin())?;
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
@@ -1568,47 +1574,44 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         &net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
     client.join(arguments.team.map(|team| team as u32))?;
-    let objective_console_teams: Option<Vec<u32>> = arguments.bot_objective.map(|_| {
-        voxel_world::find_consoles(&map)
-            .iter()
-            .map(|console| console.team)
-            .collect()
-    });
+    let objective_consoles: Option<Vec<console_reach::ConsolePlace>> = arguments
+        .bot_objective
+        .map(|_| console_reach::find_console_places(&map))
+        .transpose()?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
-    let mut saved_count: usize = 0;
     let duration_s: f64 = arguments
         .exit_after_s
         .expect("validate_arguments checked --bot");
-    let mut save = |frame: FrameData, victim_id: u32| -> Result<()> {
-        let size: (u32, u32) = {
-            let (w, h) = frame.get_render_size();
-            (w as u32, h as u32)
-        };
-        let mut pixels: Vec<u8> = vec![0; size.0 as usize * size.1 as usize * BYTES_PER_PIXEL];
-        renderer.render(frame, size, &mut pixels)?;
-        saved_count += 1;
-        save_png(
-            &folder.join(format!("hit_{saved_count:03}_player_{victim_id}.png")),
-            &pixels,
-            size.0,
-            size.1,
-        )
-    };
     let (hit_count, eliminated_count) = if map.structures.is_empty() {
         let world: World = World::FromMap(&map)?;
+        let mut renderer: Box<dyn Renderer> =
+            make_renderer(arguments.renderer, arguments.sampling)?;
+        let mut saved_count: usize = 0;
         multiplayer::run_bot(&world, &mut client, duration_s, |data, id| {
-            save(FrameData::House(data), id)
+            saved_count += 1;
+            let path: PathBuf = folder.join(format!("hit_{saved_count:03}_player_{id}.png"));
+            save_frame(&mut *renderer, FrameData::House(data), &path)
         })?
     } else {
         let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
-        multiplayer::run_voxel_bot(
+        let mut saver: PictureSaver<(VoxelFrame, u32)> =
+            start_hit_picture_saver(arguments.renderer, arguments.sampling, folder.clone());
+        let counts: (u32, u32) = multiplayer::run_voxel_bot(
             &world,
             &mut client,
             duration_s,
             arguments.black_hole_strength,
-            objective_console_teams.as_deref(),
-            |frame, id| save(FrameData::Voxel(frame), id),
-        )?
+            objective_consoles.as_deref(),
+            |frame, id| {
+                saver.submit((frame, id));
+                Ok(())
+            },
+        )?;
+        let (_, dropped_count) = saver.finish()?;
+        if dropped_count > 0 {
+            println!("The renderer fell behind, so {dropped_count} hit pictures weren't saved.");
+        }
+        counts
     };
     if arguments.json {
         println!(
@@ -1620,6 +1623,47 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         println!("Run folder: {}", folder.display());
     }
     Ok(())
+}
+
+/// `start_hit_picture_saver` starts saving a voxel bot's hit pictures on their own thread
+/// (`PictureSaver`), with a renderer of `kind` and `sampling` made there, into `folder` as
+/// `hit_<n>_player_<id>.png`, so a slow render never holds up the bot's network loop.
+///
+/// Example: `let mut saver = start_hit_picture_saver(RendererKind::Metal, Sampling::Adaptive, folder);`
+fn start_hit_picture_saver(
+    kind: RendererKind,
+    sampling: Sampling,
+    folder: PathBuf,
+) -> PictureSaver<(VoxelFrame, u32)> {
+    PictureSaver::Start(
+        move || {
+            let mut renderer: Box<dyn Renderer> =
+                make_renderer(kind, sampling).map_err(|error| error.to_string())?;
+            let mut saved_count: usize = 0;
+            Ok(move |(frame, victim_id): (VoxelFrame, u32)| {
+                saved_count += 1;
+                let path: PathBuf =
+                    folder.join(format!("hit_{saved_count:03}_player_{victim_id}.png"));
+                save_frame(&mut *renderer, FrameData::Voxel(&frame), &path)
+                    .map_err(|error| error.to_string())
+            })
+        },
+        HIT_PICTURE_QUEUE_COUNT,
+    )
+}
+
+/// `save_frame` renders `frame` at its render size with `renderer` and saves it as a PNG at
+/// `path`.
+///
+/// Example: `save_frame(&mut *renderer, FrameData::Voxel(&frame), &path)?;`
+fn save_frame(renderer: &mut dyn Renderer, frame: FrameData, path: &Path) -> Result<()> {
+    let size: (u32, u32) = {
+        let (w, h) = frame.get_render_size();
+        (w as u32, h as u32)
+    };
+    let mut pixels: Vec<u8> = vec![0; size.0 as usize * size.1 as usize * BYTES_PER_PIXEL];
+    renderer.render(frame, size, &mut pixels)?;
+    save_png(path, &pixels, size.0, size.1)
 }
 
 /// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder, with
@@ -3126,10 +3170,14 @@ impl Session {
         self.update_gun(&input, own_dt_s);
         self.update_rifle(own_dt_s);
         let eye: DMat4 = self.get_eye_frame();
-        let laser_aim: Option<DMat4> = self.get_laser_aim(self.get_shot_eye());
+        let shot_eye: DMat4 = self.get_shot_eye();
+        let laser_aim: Option<DMat4> = self.get_laser_aim(shot_eye);
         if let Some(multiplayer) = &mut self.multiplayer
             && let Err(error) = multiplayer.client.send_state(
-                laser_aim.unwrap_or(eye),
+                laser_aim.unwrap_or(match multiplayer.disabling {
+                    Some(_) => shot_eye,
+                    None => eye,
+                }),
                 laser_aim.is_some(),
                 self.gun == Gun::Rifle,
                 multiplayer.disabling.map(|(console, _)| console),

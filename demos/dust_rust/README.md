@@ -26,7 +26,7 @@ LAN discovery 47831.
 | --- | --- |
 | `--serve --port <p> [--map dust] --level-result-file <path>` | When a team has turned off all the other team's consoles, write `{"winner": "blue"}` or `{"winner": "red"}` to `<path>` once (`<path>.partial`, then renamed), and never start a new game. Also on `wormholes_server`. |
 | `--join <addr> --port <p> [--team blue\|red]` | Join that team at once instead of choosing in the lobby. |
-| `--join <addr> --port <p> --bot --exit-after-s <s> --team <t> --bot-objective consoles` | The bot holds `E` on the other team's consoles (the server takes its word for which one) until a team wins. |
+| `--join <addr> --port <p> --bot --exit-after-s <s> --team <t> --bot-objective consoles` | The bot walks to the other team's consoles and holds `E` on each once in reach (`console_bot.rs`; the server takes a hold only from within `consoles.reach_m`, aimed at it: `console_reach.rs`) until a team wins. |
 
 ## How it works
 

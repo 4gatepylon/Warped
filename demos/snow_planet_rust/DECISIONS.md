@@ -75,8 +75,9 @@ were downloaded: the snow is procedural. Snow and ice textures from ambientCG (C
 
 `--level-result-file <path>` (with `--serve`) writes `{"winner":"blue"}` or `{"winner":"red"}` once, through
 `<path>.partial` and a rename, and then the server doesn't start a new game. `--team blue|red` (with `--join`)
-joins at once. `--bot-objective consoles` makes a bot claim the enemy consoles one after another (the server takes
-its word), so a match can be tested without walking.
+joins at once. `--bot-objective consoles` makes a bot claim the enemy consoles one after another. Since W-126 (same
+play in every level) the bot walks to each one, around the blizzard, and the server takes a hold only from within
+`consoles.reach_m` of the console, aimed at it, so a bot win shows every pylon can be reached on foot.
 
 ## S8. Benchmark views and binary names
 

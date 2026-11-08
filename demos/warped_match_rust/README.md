@@ -43,7 +43,10 @@ stops early, or a round, level result file or outcome off that plan, and writes
 `.artifacts/play_all_levels/<run>/`: `levels.log` (each level's start, winner and duration), the
 match server's and both bots' logs, `summary.json` and `pictures/` (blue's progression page at each
 round's start and at the end, `--progression-pictures` with `--match`). It uses UDP 48110 for the
-match and 48112 for the levels (`MATCH_PORT`, `LEVEL_PORT`), away from a running match's.
+match and 48112 for the levels (`MATCH_PORT`, `LEVEL_PORT`), away from a running match's. In Lunar
+Surface, Snow Planet and Dust the bot walks to each pylon and its server takes a hold only from
+within reach, so `levels.log` says when the bot reached each pylon on foot, and the test fails if it
+didn't reach them all (W-126, same play in every level).
 
 `make levels` puts each branch level in `.levels/<name>/` and builds it there; `match_levels.yaml`
 reads `.levels/<name>/demos/<name>_rust/.build/release/<binary>` and its `map_picture`. The default
@@ -95,9 +98,11 @@ Bot:    <program> --join <address> --port <port> [--map <map>] --team <team> --b
 ```
 
 `--team` joins that team at once, without the lobby. The match client kills the level when the
-round ends, so a level needs no exit logic. `--bot-objective consoles` holds `E` on the other
-team's consoles in turn until its team wins (the copy's bot doesn't walk there: the server, as in
-the hyperbolic demo, doesn't check a player's distance to a console).
+round ends, so a level needs no exit logic. `--bot-objective consoles` walks to the other team's
+consoles in turn and holds `E` on each once in reach, until its team wins: in this copy (Lunar
+Surface), Dust and Snow Planet the server takes a hold only from within the settings'
+`consoles.reach_m` of the console, aimed at it (`console_reach.rs`), so a bot win shows every
+pylon can be reached on foot (`console_bot.rs`).
 
 Ports: match server UDP 47850 (`--match-port`; 47851 reserved for its discovery, not used yet:
 join by address); each round's level server 47852 (`--port` with `--serve-match`), and this copy's
@@ -142,8 +147,16 @@ start to its win: City Sphere 1.2–1.4, Dark Forest 14.7–22.7 (its own consol
 Surface 3.3–4.0, Snow Planet 2.6–2.9, Dust 3.5–4.3 (consoles off in 1 s). With Dark Forest's client killed 6 s into
 its round, the match client started it again and the round ended at 37 s. Pylons a team, counted as the consoles the
 winner turned off (and the other team's with a lone bot): City Sphere 1, Dark Forest 2, Lunar Surface 3, Snow Planet
-2, Dust 3, as `game_design/DESIGN.md` says. No level's console bot walks to a pylon (each holds `E` from where it
-stands, and the servers take its word), so these runs don't show that every pylon can be reached on foot.
+2, Dust 3, as `game_design/DESIGN.md` says. No level's console bot walked to a pylon then (each held `E` from where
+it stood, and the servers took its word).
+
+With walking console bots and the servers' reach check (W-126, same play in every level), `make play-all-levels`
+passed five runs in a row (the last on `1aa771f`, with `staging/user-4gatepylon` merged in): Lunar Surface 35.9 s to
+42.4 s, Snow Planet 13.0 s to 14.0 s and Dust 30.8 s to 40.6 s from a round's start to its win, every pylon reached on foot (City Sphere's and Dark Forest's own bots don't report their walks).
+A lone walking bot of each team won each of those levels from its own spawn: Lunar Surface in 40 s (blue) and 42 s
+(red), Dust in 33 s and 34 s, Snow Planet in 15 s and 13 s (Dust and Snow Planet after their W-126 parity changes);
+the longest walk, to the farthest pylon (192 m to 204 m away), took 22 s to 25 s with up to 7 sidesteps along walls on
+the way (Lunar Surface's hesco rows among them), the others 2 s to 10 s.
 
 The match takes no pylon or console count: each level program has its own (the column above
 follows `game_design/DESIGN.md`, 3-2-1-2-3 from the outside in) and reports only the winner.
@@ -164,6 +177,7 @@ showed 61 fps and 3.3 GPU ms.
   (`hello <team>` datagrams answered with the state as JSON), level processes;
   `src/match_menu.rs`: the progression page; `match_levels.yaml`: the levels.
 - In the copied level code: `--level-result-file` (`net::write_level_result`), `--team`,
-  `--bot-objective consoles` (`multiplayer::get_console_to_disable`), `--serve-match`, `--match`.
+  `--bot-objective consoles` (`console_bot.rs`), the console reach check (`console_reach.rs`), hit
+  pictures saved on their own thread (`picture_saver.rs`), `--serve-match`, `--match`.
 - `e2e/`: settings and levels for the fast bot match.
 - Everything else is the hyperbolic demo; see its README for the level itself.

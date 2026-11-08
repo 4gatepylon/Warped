@@ -94,6 +94,7 @@ const FLY_CLIMB_PER_S: f64 = 0.8;
 const MIN_FLY_CLIMB_M_PER_S: f64 = 5.0;
 const FLY_SPRINT_PER_FLY: f64 = 40.0 / 14.0;
 const NEARBY_REACH_M: f64 = 6.0;
+const WAY_PROBE_STEP_M: f64 = 0.25;
 const INSIDE_MOUTH_PER_THROAT: f64 = 5.0;
 const INSIDE_MOUTH_SCALE: f64 = 1.8;
 const LASER_MAX_LENGTH_M: f64 = 480.0;
@@ -1272,6 +1273,24 @@ impl VoxelWorld {
         let hit: Hit = self.trace_scene(x, v, reach_m / self.r, None)?;
         let inside: DVec4 = geodesic_point(x, v, hit.s + CONSOLE_PROBE_M / self.r);
         Some(self.get_material_at(inside, &[hit.structure?]))
+    }
+
+    /// `is_way_clear` says whether a player's body `body`, its eye `h_m` up, could walk
+    /// `distance_m` straight ahead as `VoxelPlayer::step` moves it: at every `WAY_PROBE_STEP_M` of
+    /// the way, inside the boundary and free of blocks or only a walkable rise up. A walking bot
+    /// probes its way with it.
+    ///
+    /// Example: `if world.is_way_clear(player.body, player.h_m, 1.5) { ... }`
+    pub fn is_way_clear(&self, body: DMat4, h_m: f64, distance_m: f64) -> bool {
+        let step_count: usize = (distance_m / WAY_PROBE_STEP_M).ceil() as usize;
+        (1..=step_count).all(|i| {
+            let along_m: f64 = distance_m * i as f64 / step_count as f64;
+            let ahead: DMat4 = renormalize_frame(body * make_boost(AXIS_Z, -along_m / self.r));
+            let nearby: Vec<usize> = self.find_nearby_structures(ahead.col(AXIS_W), NEARBY_REACH_M);
+            !self.is_outside_boundary(ahead.col(AXIS_W))
+                && (!self.is_body_blocked(ahead, h_m, &nearby)
+                    || self.find_walk_rise_m(ahead, h_m, &nearby).is_some())
+        })
     }
 
     /// `is_eye_supported` says whether a player whose eye frame is `eye` (from the network) stands

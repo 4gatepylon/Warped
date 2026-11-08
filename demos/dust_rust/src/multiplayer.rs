@@ -18,6 +18,8 @@ use glam::{DMat4, DVec3, DVec4};
 
 use crate::avatar_model::AvatarClip;
 use crate::black_hole_growth::BlackHoleGrowth;
+use crate::console_bot::{ConsoleWalker, WalkStep, find_warp_dangers};
+use crate::console_reach::ConsolePlace;
 use crate::dust::DustCloud;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
@@ -517,8 +519,9 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 /// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
 /// view) and rejoins `BOT_REJOIN_S` after being hit. The black hole grows with the server's
 /// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. With
-/// `objective_console_teams` (each console's team), it holds `E` on the first of the other team's
-/// consoles still on until a team wins. It returns how many players it hit and how often it was hit,
+/// `objective_consoles` (each console's place), it walks to the other team's consoles instead and
+/// turns them off on foot (`console_bot.rs`) until a team wins. It returns how many players it hit
+/// and how often it was hit,
 /// and fails if the server curves space other than the built-in settings (`check_bot_space`).
 ///
 /// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, None, |frame, id| Ok(()))?;`
@@ -527,9 +530,11 @@ pub fn run_voxel_bot(
     client: &mut Client,
     duration_s: f64,
     black_hole_strength: Option<f64>,
-    objective_console_teams: Option<&[u32]>,
-    mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
+    objective_consoles: Option<&[ConsolePlace]>,
+    mut save_view: impl FnMut(VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
+    let mut walker: Option<ConsoleWalker> = objective_consoles
+        .map(|places| ConsoleWalker::New(places.to_vec(), find_warp_dangers(world)));
     let (mut grown_world, mut black_hole_growth) =
         (world.clone(), BlackHoleGrowth::New(black_hole_strength));
     let start: Instant = Instant::now();
@@ -571,6 +576,34 @@ pub fn run_voxel_bot(
                 rejoin_at = None;
                 client.rejoin()?;
             }
+        } else if client.id.is_some()
+            && let Some(walker) = walker.as_mut().filter(|_| client.game.winner.is_none())
+        {
+            let team: u32 = client.team.expect("a welcome brings the team");
+            let settings: &ServerSettings = client
+                .settings
+                .as_ref()
+                .expect("a welcome brings the settings");
+            let own_step_s: f64 =
+                BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
+            let walk: WalkStep = walker.step(
+                world,
+                &mut player,
+                client.game.off_mask,
+                team,
+                settings.consoles.reach_m,
+                now_s,
+                own_step_s,
+            );
+            player.step(world, &walk.input, own_step_s, team as usize);
+            client.send_state(
+                player.get_camera_frame(world),
+                false,
+                false,
+                walk.console,
+                0.0,
+                PlayerWormholes::default(),
+            )?;
         } else if client.id.is_some() {
             let camera: DMat4 = player.get_camera_frame(world);
             let eye: DVec4 = camera.col(AXIS_W);
@@ -622,23 +655,15 @@ pub fn run_voxel_bot(
                 if last_victim != Some(victim_id) {
                     hit_count += 1;
                     println!("bot hit player {victim_id}");
-                    save_view(&view.frame, victim_id)?;
+                    save_view(view.frame, victim_id)?;
                 }
             }
             last_victim = view.hit_player_id;
-            let disabling_console: Option<u8> = objective_console_teams
-                .filter(|_| client.game.winner.is_none())
-                .and_then(|teams| {
-                    (0..teams.len()).find(|&i| {
-                        Some(teams[i]) != client.team && client.game.off_mask >> i & 1 == 0
-                    })
-                })
-                .map(|i| i as u8);
             client.send_state(
                 camera,
                 is_laser_on,
                 false,
-                disabling_console,
+                None,
                 0.0,
                 PlayerWormholes::default(),
             )?;

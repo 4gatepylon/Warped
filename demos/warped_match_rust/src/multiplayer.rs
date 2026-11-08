@@ -19,6 +19,8 @@ use glam::{DMat4, DVec3, DVec4};
 use crate::BotObjective;
 use crate::avatar_model::AvatarClip;
 use crate::black_hole_growth::BlackHoleGrowth;
+use crate::console_bot::{ConsoleWalker, WalkStep, find_warp_dangers};
+use crate::console_reach::ConsolePlace;
 use crate::dust::DustCloud;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
@@ -515,20 +517,26 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 }
 
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
-/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
-/// view) and rejoins `BOT_REJOIN_S` after being hit. The black hole grows with the server's
-/// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. It returns how many players it hit and how often it was hit,
-/// and fails if the server curves space other than the built-in settings (`check_bot_space`).
+/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits
+/// (handing `save_view` its view, which it may save on another thread) and rejoins `BOT_REJOIN_S`
+/// after being hit. With `objective` `Consoles` it instead walks to the other team's consoles
+/// (`consoles`, each one's place) and turns them off on foot (`console_bot.rs`) until a team wins.
+/// The black hole grows with the server's consoles, or to `black_hole_strength` when given, and the
+/// bot's own time slows near it. It returns how many players it hit and how often it was hit, and
+/// fails if the server curves space other than the built-in settings (`check_bot_space`).
 ///
-/// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, |frame, id| Ok(()))?;`
+/// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, BotObjective::Fight, &[], |frame, id| Ok(()))?;`
 pub fn run_voxel_bot(
     world: &VoxelWorld,
     client: &mut Client,
     duration_s: f64,
     black_hole_strength: Option<f64>,
     objective: BotObjective,
-    mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
+    consoles: &[ConsolePlace],
+    mut save_view: impl FnMut(VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
+    let mut walker: Option<ConsoleWalker> = (objective == BotObjective::Consoles)
+        .then(|| ConsoleWalker::New(consoles.to_vec(), find_warp_dangers(world)));
     let (mut grown_world, mut black_hole_growth) =
         (world.clone(), BlackHoleGrowth::New(black_hole_strength));
     let start: Instant = Instant::now();
@@ -570,6 +578,34 @@ pub fn run_voxel_bot(
                 rejoin_at = None;
                 client.rejoin()?;
             }
+        } else if client.id.is_some()
+            && let Some(walker) = walker.as_mut().filter(|_| client.game.winner.is_none())
+        {
+            let team: u32 = client.team.expect("a welcome brings the team");
+            let settings: &ServerSettings = client
+                .settings
+                .as_ref()
+                .expect("a welcome brings the settings");
+            let own_step_s: f64 =
+                BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
+            let walk: WalkStep = walker.step(
+                world,
+                &mut player,
+                client.game.off_mask,
+                team,
+                settings.consoles.reach_m,
+                now_s,
+                own_step_s,
+            );
+            player.step(world, &walk.input, own_step_s, team as usize);
+            client.send_state(
+                player.get_camera_frame(world),
+                false,
+                false,
+                walk.console,
+                0.0,
+                PlayerWormholes::default(),
+            )?;
         } else if client.id.is_some() {
             let camera: DMat4 = player.get_camera_frame(world);
             let eye: DVec4 = camera.col(AXIS_W);
@@ -588,10 +624,7 @@ pub fn run_voxel_bot(
                     -local.y.clamp(-1.0, 1.0).asin() / LOOK_RAD_PER_PX,
                 );
                 input.forward = distance_m > VOXEL_SPAWN_RING_M * 2.0;
-                is_laser_on = distance_m < VOXEL_BOT_LASER_RANGE_M
-                    && (objective == BotObjective::Fight
-                        || get_console_to_disable(world, client, client.team.unwrap_or(0))
-                            .is_none());
+                is_laser_on = distance_m < VOXEL_BOT_LASER_RANGE_M;
             } else {
                 input.forward = true;
                 player.look(BOT_WANDER_PX_PER_S * BOT_STEP_S, 0.0);
@@ -624,19 +657,15 @@ pub fn run_voxel_bot(
                 if last_victim != Some(victim_id) {
                     hit_count += 1;
                     println!("bot hit player {victim_id}");
-                    save_view(&view.frame, victim_id)?;
+                    save_view(view.frame, victim_id)?;
                 }
             }
             last_victim = view.hit_player_id;
-            let console: Option<u8> = match objective {
-                BotObjective::Fight => None,
-                BotObjective::Consoles => get_console_to_disable(world, client, team),
-            };
             client.send_state(
                 camera,
                 is_laser_on,
                 false,
-                console,
+                None,
                 0.0,
                 PlayerWormholes::default(),
             )?;
@@ -647,19 +676,6 @@ pub fn run_voxel_bot(
     }
     client.leave()?;
     Ok((hit_count, eliminated_count))
-}
-
-/// `get_console_to_disable` gives the first console of the other team (than `team`) that is still
-/// on, for a `--bot-objective consoles` bot to hold `E` on, or `None` once the game is won.
-///
-/// Example: `let console = get_console_to_disable(&world, &client, 0);`
-fn get_console_to_disable(world: &VoxelWorld, client: &Client, team: u32) -> Option<u8> {
-    if client.game.winner.is_some() {
-        return None;
-    }
-    (0..world.consoles.len())
-        .find(|&i| world.consoles[i].team != team && client.game.off_mask >> i & 1 == 0)
-        .map(|i| i as u8)
 }
 
 #[cfg(test)]
