@@ -82,9 +82,22 @@ impl Shape {
 ///
 /// Example: `let (d_m, i) = get_distance_m(&shapes, q);`
 pub fn get_distance_m(shapes: &[Shape], q: DVec3) -> (f64, usize) {
+    get_solid_distance_m(shapes, q, None)
+}
+
+/// `get_solid_distance_m` is `get_distance_m` over the shapes not made of `see_through_material`
+/// (every shape for `None`); it gives `f64::MAX` when no shape is left.
+///
+/// Example: `let (d_m, i) = get_solid_distance_m(&shapes, q, Some(glass));`
+fn get_solid_distance_m(
+    shapes: &[Shape],
+    q: DVec3,
+    see_through_material: Option<u8>,
+) -> (f64, usize) {
     shapes
         .iter()
         .enumerate()
+        .filter(|(_, shape)| Some(shape.material) != see_through_material)
         .map(|(i, shape)| (shape.get_distance_m(q), i))
         .fold(
             (f64::MAX, 0),
@@ -93,15 +106,17 @@ pub fn get_distance_m(shapes: &[Shape], q: DVec3) -> (f64, usize) {
 }
 
 /// `find_hit_mu` sphere-traces the line q0 + dq mu over [mu_lo, mu_hi] and gives where it first
-/// meets a shape and which, or `None`.
+/// meets a shape and which, or `None`. The line passes through shapes made of
+/// `see_through_material` (glass, for a laser); with `None` every shape stops it.
 ///
-/// Example: `let hit = find_hit_mu(&shapes, q0, dq, 0.0, 1.0);`
+/// Example: `let hit = find_hit_mu(&shapes, q0, dq, 0.0, 1.0, None);`
 pub fn find_hit_mu(
     shapes: &[Shape],
     q0: DVec3,
     dq: DVec3,
     mu_lo: f64,
     mu_hi: f64,
+    see_through_material: Option<u8>,
 ) -> Option<(f64, usize)> {
     let speed: f64 = dq.length();
     if speed <= 0.0 || shapes.is_empty() {
@@ -109,7 +124,7 @@ pub fn find_hit_mu(
     }
     let mut mu: f64 = mu_lo;
     for _ in 0..MAX_STEPS {
-        let (d_m, i) = get_distance_m(shapes, q0 + dq * mu);
+        let (d_m, i) = get_solid_distance_m(shapes, q0 + dq * mu, see_through_material);
         if d_m < HIT_M {
             return Some((mu, i));
         }
@@ -123,6 +138,14 @@ pub fn find_hit_mu(
 
 #[cfg(test)]
 mod tests {
+    //! Tests of the shapes' distance bounds and of tracing a line to them.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Line and a solid shape | meets it, passes it by | `a_cylinder_is_hit_at_its_side` |
+    //! | See-through material | none (a pane stops the line), a pane's (passed, stops on the shape behind), a pane's with nothing behind (no hit) | `a_line_passes_through_a_see_through_pane` |
+    //! | Shape kind for the distance bound | box, cylinder, ellipsoid | `distances_never_overshoot` |
+
     use super::*;
 
     const PILLAR: Shape = Shape {
@@ -133,13 +156,57 @@ mod tests {
         axis: 1,
         material: 1,
     };
+    const PANE_MATERIAL: u8 = 2;
+    const PANE: Shape = Shape {
+        kind: ShapeKind::Box,
+        centre: DVec3::new(-1.5, 1.0, 0.0),
+        half: DVec3::new(0.1, 1.0, 1.0),
+        round_m: 0.05,
+        axis: 1,
+        material: PANE_MATERIAL,
+    };
+    const START: DVec3 = DVec3::new(-3.0, 1.0, 0.0);
+    const MAX_MU: f64 = 10.0;
+    const PANE_FACE_MU: f64 = 1.4;
+    const PILLAR_SIDE_MU: f64 = 2.5;
+    const MU_TOLERANCE: f64 = 0.01;
 
     #[test]
     fn a_cylinder_is_hit_at_its_side() {
-        let (mu, _) =
-            find_hit_mu(&[PILLAR], DVec3::new(-3.0, 1.0, 0.0), DVec3::X, 0.0, 10.0).expect("a hit");
-        assert!((mu - 2.5).abs() < 0.01, "hit at {mu}");
-        assert!(find_hit_mu(&[PILLAR], DVec3::new(-3.0, 2.5, 0.0), DVec3::X, 0.0, 10.0).is_none());
+        let (mu, _) = find_hit_mu(&[PILLAR], START, DVec3::X, 0.0, MAX_MU, None).expect("a hit");
+        assert!((mu - PILLAR_SIDE_MU).abs() < MU_TOLERANCE, "hit at {mu}");
+        assert!(
+            find_hit_mu(
+                &[PILLAR],
+                DVec3::new(-3.0, 2.5, 0.0),
+                DVec3::X,
+                0.0,
+                MAX_MU,
+                None
+            )
+            .is_none()
+        );
+    }
+
+    /// `a_line_passes_through_a_see_through_pane` traces a line through a pane in front of a pillar:
+    /// it stops on the pane, unless the pane's material is see-through, when it stops on the pillar
+    /// behind, or on nothing without the pillar.
+    #[test]
+    fn a_line_passes_through_a_see_through_pane() {
+        let trace = |shapes: &[Shape], see_through: Option<u8>| {
+            find_hit_mu(shapes, START, DVec3::X, 0.0, MAX_MU, see_through)
+        };
+        let (mu, i) = trace(&[PANE, PILLAR], None).expect("a hit on the pane");
+        assert!(
+            (mu - PANE_FACE_MU).abs() < MU_TOLERANCE && i == 0,
+            "hit {i} at {mu}"
+        );
+        let (mu, i) = trace(&[PANE, PILLAR], Some(PANE_MATERIAL)).expect("a hit on the pillar");
+        assert!(
+            (mu - PILLAR_SIDE_MU).abs() < MU_TOLERANCE && i == 1,
+            "hit {i} at {mu}"
+        );
+        assert!(trace(&[PANE], Some(PANE_MATERIAL)).is_none());
     }
 
     #[test]

@@ -364,7 +364,7 @@ struct PyramidLevels {
 
 const SHADER_SOURCE: &str = include_str!("render_metal.metal");
 const BYTES_PER_RAY_END: usize = 48;
-pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 96;
+pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 112;
 const BYTES_PER_CELL_MARK: usize = 1;
 const BYTES_PER_CELL_INDEX: usize = 4;
 const REFINE_COUNT_BYTES: usize = 16;
@@ -439,6 +439,7 @@ pub struct MetalRenderer {
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
     viewmodel: Option<Viewmodel>,
+    is_voxel_frame: bool,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -761,6 +762,7 @@ impl MetalRenderer {
             hole_buffers: None,
             voxel_gpu: None,
             viewmodel: None,
+            is_voxel_frame: false,
             throat_table,
             camera_table,
             has_throat_table: false,
@@ -864,6 +866,7 @@ impl MetalRenderer {
             )?);
         }
         self.prepare_upscaling(output_px)?;
+        self.is_voxel_frame = matches!(frame_data, FrameData::Voxel(_));
         if let FrameData::Voxel(voxel_frame) = frame_data {
             return self.encode_voxel_frame(voxel_frame, output_px);
         }
@@ -1340,12 +1343,17 @@ impl MetalRenderer {
                     .viewmodel
                     .as_mut()
                     .expect("the revolver was just loaded");
+                let hand_light: Option<&ProtocolObject<dyn MTLBuffer>> = match &self.voxel_gpu {
+                    Some(gpu) if self.is_voxel_frame => Some(gpu.get_hand_light()),
+                    _ => None,
+                };
                 Some(revolver.encode(
                     &self.device,
                     command_buffer,
                     &wand,
                     output_px,
                     tan_half_fov,
+                    hand_light,
                 )?)
             }
             None => None,

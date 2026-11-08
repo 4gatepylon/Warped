@@ -4,8 +4,8 @@
  * per pixel, as the Lunar Surface level's WebGL fragment shader does (`demos/levels/lunar_surface/index.html`):
  * straight geodesic chords between warp objects, kick–drift–kick steps inside their reach, a voxel walk through each
  * structure in its Klein coordinates, the ground's folded {4,5} tiling, lunar-Lambert light with soft sun shadows, lamps,
- * earthshine, a thin haze, laser beams, stars, a planet, spaceships flying over and bloom. Everything here belongs to
- * the `lunar` appearance style.
+ * earthshine, a thin haze, laser beams, the dust of shots into the ground, stars, a planet, spaceships flying over
+ * and bloom. Everything here belongs to the `lunar` appearance style.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread per pixel of the render size.
@@ -18,7 +18,8 @@ using namespace metal;
     device const Shape *shapes [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
     device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]], \
     device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], device const float *mound_heights [[buffer(26)]], \
-    constant float4 *means [[buffer(27)]], \
+    constant float4 *means [[buffer(27)]], device const DustBurst *dust_bursts [[buffer(29)]], \
+    device const DustParticle *dust_particles [[buffer(30)]], \
     texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]]
 
 constant int MAX_ITERATIONS = 240;
@@ -81,6 +82,8 @@ constant float BLOOM_KARIS_LUMA = 4.0;
 constant float BLOOM_GLOW = 1.0;
 constant float2 BLOOM_GLOW_LUMA_EDGES = float2(0.5, 2.0);
 constant float3 EARTHSHINE_COLOR = float3(0.55, 0.7, 1.0);
+constant int HAND_LIGHT_COUNT = 3;
+constant int HAND_LIGHT_BUFFER_INDEX = 28;
 constant float LIGHT_CUTOFF_FRAC = 3.0;
 constant float LIGHT_WRAP = 0.3;
 constant float BLOCK_NOISE = 0.18;
@@ -94,6 +97,13 @@ constant float3 GLASS_SHEEN = float3(0.05, 0.07, 0.09);
 constant float BEAM_RADIUS_M = 0.02;
 constant float BEAM_REACH = 4.8;
 constant float SPOT_RADIUS_M = 0.15;
+constant float DUST_MIN_WIDTH_PX = 1.5;
+constant float DUST_CUTOFF_WIDTHS = 3.0;
+constant float DUST_WRAP = 0.4;
+constant float DUST_FORWARD_GLOW = 0.8;
+constant float DUST_FORWARD_POWER = 6.0;
+constant float DUST_EARTHSHINE_FRAC = 0.5;
+constant float DUST_SMOOTH_DEPTH = 0.02;
 constant float3 HASH_DIRECTION = float3(12.9898, 78.233, 37.719);
 constant float HASH_SCALE = 43758.5453;
 constant int FBM_OCTAVES = 4;
@@ -313,8 +323,8 @@ struct Spaceship {
 };
 
 /**
- * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot and
- * regions, and the spaceships, as `render_voxel.rs` writes them.
+ * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
+ * regions, flashlight, the spaceships and the dust (how many bursts and particles), as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -356,6 +366,7 @@ struct VoxelUniforms {
     float4 flashlight_direction;
     float4 flashlight;
     Spaceship spaceships[SPACESHIP_COUNT];
+    int4 dust_counts;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -408,6 +419,28 @@ struct BeamSegment {
 };
 
 /**
+ * @brief `DustBurst` is the dust of one shot into the ground (`dust.rs`): the rows of the inverse of its frame (at the
+ * hit point, y up), the sun's direction in that frame with how much sunlight reaches it, where its particles start and
+ * how many there are, and how far its farthest particle centre is and its largest radius, in meters.
+ */
+struct DustBurst {
+    float4 rows[4];
+    float4 sun;
+    int4 range;
+    float4 bound;
+};
+
+/**
+ * @brief `DustParticle` is one grain or puff of mist: its centre in its burst's Klein coordinates (meters) and its
+ * radius, its linear albedo and its opacity at its centre, and how soft its edge is (0 a sharp disc, 1 a Gaussian).
+ */
+struct DustParticle {
+    float4 position_radius;
+    float4 color_opacity;
+    float4 shape;
+};
+
+/**
  * @brief `Hit` is the first surface along a chord: distance, material, structure (-1 for the ground), face, grid point,
  * and, for a shadow ray, how far it stayed from every surface it passed: the least ratio of that gap to the distance
  * travelled times `SHADOW_PENUMBRA_TAN` (1 or more is fully lit).
@@ -427,8 +460,8 @@ struct Hit {
  * @brief `VoxelRayEnd` is where a ray ended, with what shading needs: the hit point (or the sky direction at the
  * origin, with w = 0), the ray's unit tangent there, the hit's grid point in its structure with the distance
  * travelled, the hit cell with its material (`MAT_GROUND` for the ground), the outcome with the structure (-1 for the
- * ground), face axis and laser team (1 for red), and the face's side with the glass count and the laser's core and
- * halo.
+ * ground), face axis and laser team (1 for red), the face's side with the glass count and the laser's core and
+ * halo, and the dust in front of it (`scan_dust`).
  */
 struct VoxelRayEnd {
     float4 point;
@@ -437,6 +470,7 @@ struct VoxelRayEnd {
     int4 cell;
     int4 surface;
     float4 glow;
+    float4 dust;
 };
 static_assert(sizeof(VoxelRayEnd) == __BYTES_PER_RAY_END__, "render_voxel.rs sizes the sample buffers by VOXEL_BYTES_PER_RAY_END");
 
@@ -457,6 +491,8 @@ struct Scene {
     texture2d_array<float> albedo_maps;
     texture2d_array<float> normal_maps;
     texture2d_array<float> arm_maps;
+    device const DustBurst *dust_bursts;
+    device const DustParticle *dust_particles;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -913,19 +949,25 @@ static float2 get_env_brdf(float roughness, float n_dot_v) {
     return float2(-1.04, 1.04) * a004 + r.zw;
 }
 
+/** @brief `get_lamp_light` gives lamp i's light reaching x (black past its cutoff) and the unit direction toward it. @par Example @code float3 c = get_lamp_light(scene, i, x, toward); @endcode */
+static float3 get_lamp_light(thread const Scene &scene, int i, float4 x, thread float4 &toward) {
+    float4 lx = scene.lights[i].position;
+    float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
+    toward = normalize_tangent(x, lx);
+    if (d_m > LIGHT_CUTOFF_FRAC * radius_m) return float3(0.0);
+    return scene.lights[i].color_radius.rgb / (1.0 + (d_m / radius_m) * (d_m / radius_m))
+        * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
+}
+
 /** @brief `gather_lights` sums the lamps' light at a surface point. @par Example @code float3 lamps = gather_lights(scene, s, x, view, energy); @endcode */
 static float3 gather_lights(thread const Scene &scene, Surface s, float4 x, float4 view, float3 energy) {
     float3 sum = float3(0.0);
     for (int i = 0; i < scene.u.light_count; i++) {
-        float4 lx = scene.lights[i].position;
-        float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
-        if (d_m > LIGHT_CUTOFF_FRAC * radius_m) continue;
-        float4 toward = lx + mdot(lx, x) * x;
-        toward *= rsqrt(max(mdot(toward, toward), TINY));
-        float falloff = 1.0 / (1.0 + (d_m / radius_m) * (d_m / radius_m))
-                      * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
+        float4 toward;
+        float3 light = get_lamp_light(scene, i, x, toward);
+        if (all(light == 0.0)) continue;
         float3 wrap = LIGHT_WRAP * s.albedo * (1.0 - s.metallic);
-        sum += scene.lights[i].color_radius.rgb * falloff * (wrap + (1.0 - LIGHT_WRAP) * M_PI_F * light_from(s, toward, view, energy));
+        sum += light * (wrap + (1.0 - LIGHT_WRAP) * M_PI_F * light_from(s, toward, view, energy));
     }
     return sum;
 }
@@ -978,6 +1020,55 @@ static float3 light_surface(thread const Scene &scene, Surface s, float4 x, floa
         color += scene.u.spot_color.rgb * scene.u.spot_color.a * exp(-d_m * d_m / (SPOT_RADIUS_M * SPOT_RADIUS_M));
     }
     return color;
+}
+
+/**
+ * @brief `HandLight` is viewmodel.metal's `HandLight`: the light at the eye for the held gun, in camera space (+x right,
+ * +y up, -z ahead): the unit directions toward the sun, the lamps and the planet (zero when absent) and each one's
+ * radiance, the local up, and the radiance of the sky and of the ground.
+ */
+struct HandLight {
+    float4 directions[HAND_LIGHT_COUNT];
+    float4 colors[HAND_LIGHT_COUNT];
+    float4 up;
+    float4 sky;
+    float4 ground;
+};
+
+/** @brief `to_camera` gives a tangent vector at the eye in camera coordinates. @par Example @code float3 d = to_camera(u, l); @endcode */
+static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdot(t, u.camera[0]), mdot(t, u.camera[1]), mdot(t, u.camera[2])); }
+
+/**
+ * @brief `probe_hand_light` writes the light at the eye into `hand`, as `light_surface` lights a surface there: the sun
+ * (shadowed), the lamps summed into one light from their weighted mean direction (their wrapped part goes to the
+ * sky), earthshine, the ambient light and the haze's skylight as the sky, and the ground (regolith) lit by the sun and the ambient light.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs, one thread, before the frame's rays.
+ * @endcode
+ */
+kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
+    float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
+    float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
+    float4 toward_lamps = float4(0.0);
+    for (int i = 0; i < u.light_count; i++) {
+        float4 toward;
+        float3 light = get_lamp_light(scene, i, x, toward);
+        lamps += light;
+        toward_lamps += toward * dot(light, float3(1.0));
+    }
+    float4 directions[HAND_LIGHT_COUNT] = {l, toward_lamps, transport_from_centre(u.planet.xyz, x)};
+    float3 colors[HAND_LIGHT_COUNT] = {sun, (1.0 - LIGHT_WRAP) * lamps, EARTHSHINE * EARTHSHINE_COLOR};
+    for (int k = 0; k < HAND_LIGHT_COUNT; k++) {
+        float3 d = to_camera(u, directions[k]);
+        hand.directions[k] = float4(dot(d, d) > TINY ? normalize(d) : float3(0.0), 0.0);
+        hand.colors[k] = float4(colors[k], 0.0);
+    }
+    hand.up = float4(to_camera(u, up), 0.0);
+    hand.sky = float4(ambient + LIGHT_WRAP * lamps, 0.0);
+    hand.ground = float4(get_palette(scene, u.mat_regolith).rgb * (sun * max(mdot(up, l), 0.0) + ambient), 0.0);
 }
 
 /** @brief `grid_normal` is the unit normal, toward +axis, of the grid plane of structure st through local point p. @par Example @code float4 t = grid_normal(st, p, 0); @endcode */
@@ -1348,6 +1439,49 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
 }
 
 /**
+ * @brief `scan_dust` adds the dust of shots into the ground near a chord (x along v for s_end, `travelled` from the
+ * eye) to `dust`: the summed colour times optical depth and the summed depth. Each burst the chord comes near is
+ * scanned in its Klein coordinates (meters), where the chord is straight: a particle is a disc with a pixel-wide edge
+ * (a grain) or a Gaussian (a puff) of its radius, at least `DUST_MIN_WIDTH_PX` pixels wide (and fainter as it
+ * widens), and its colour is its albedo lit by the sun (more on the side facing it, glowing when seen toward it) and
+ * the ambient light.
+ * @par Example
+ * @code
+ * scan_dust(scene, x, v, s, t, dust);
+ * @endcode
+ */
+static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
+    float r = scene.u.curvature_radius_m, s_max = min(s_end, FAR_S);
+    float3 ambient = float3(AMBIENT) + EARTHSHINE * DUST_EARTHSHINE_FRAC * EARTHSHINE_COLOR;
+    for (int b = 0; b < scene.u.dust_counts.x; b++) {
+        device const DustBurst &burst = scene.dust_bursts[b];
+        float x_w = dot(burst.rows[3], x), v_w = dot(burst.rows[3], v);
+        float s_c = clamp(clamp_atanh(-v_w / x_w), 0.0, s_max);
+        float pixel_m = scene.u.pixel_angle_rad * r * sinh(min(travelled + s_c, FAR_S)), footprint_m = DUST_MIN_WIDTH_PX * pixel_m;
+        float reach = (burst.bound.x + DUST_CUTOFF_WIDTHS * max(burst.bound.y, footprint_m)) / r;
+        if (cosh(s_c) * x_w + sinh(s_c) * v_w > cosh(reach)) continue;
+        float4 p = float4(dot(burst.rows[0], x), dot(burst.rows[1], x), dot(burst.rows[2], x), x_w);
+        float4 e = p + tanh(s_max) * float4(dot(burst.rows[0], v), dot(burst.rows[1], v), dot(burst.rows[2], v), v_w);
+        float3 q0 = p.xyz / p.w * r, d = e.xyz / max(e.w, TINY) * r - q0;
+        float dd = max(dot(d, d), TINY);
+        float3 dir = d * rsqrt(dd), sun = burst.sun.xyz;
+        float forward = DUST_FORWARD_GLOW * pow(saturate(dot(dir, sun)), DUST_FORWARD_POWER);
+        for (int i = burst.range.x; i < burst.range.x + burst.range.y; i++) {
+            device const DustParticle &particle = scene.dust_particles[i];
+            float4 pr = particle.position_radius, co = particle.color_opacity;
+            float3 off = q0 + clamp(dot(pr.xyz - q0, d) / dd, 0.0, 1.0) * d - pr.xyz;
+            float width_m = max(pr.w, footprint_m), q = dot(off, off) / (width_m * width_m);
+            if (q > DUST_CUTOFF_WIDTHS * DUST_CUTOFF_WIDTHS) continue;
+            float disc = saturate((1.0 - sqrt(q)) * width_m / pixel_m + 0.5);
+            float depth = co.w * (pr.w / width_m) * (pr.w / width_m) * mix(disc, exp(-q), particle.shape.x);
+            float3 n = q < 1.0 ? off / width_m - sqrt(1.0 - q) * dir : off * rsqrt(max(dot(off, off), TINY));
+            float facing = saturate((dot(n, sun) + DUST_WRAP) / (1.0 + DUST_WRAP));
+            dust += float4(co.rgb * (SUN_INTENSITY * SUN_COLOR * burst.sun.w * (facing + forward) + ambient) * depth, depth);
+        }
+    }
+}
+
+/**
  * @brief `back_to_reach` moves a ray that has just left warp w's reach (by up to one step) back along its straight line
  * to the reach's sphere, so that an escaping ray's direction is carried to the eye from where its bending ended rather
  * than from wherever its last step happened to end, which jumps between neighbouring rays.
@@ -1388,6 +1522,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         if (-mdot(x, warps[w].centre) < cosh(warps[w].params.z)) inside = w;
     }
     float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, team = 0.0;
+    float4 dust = float4(0.0);
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0); hit.lit = 1.0;
     int outcome = OUTCOME_LOST, last_warp = -1;
@@ -1413,6 +1548,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
             if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
+            if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (entering < 0) {
                 if (last_warp >= 0) back_to_reach(scene, last_warp, x, v);
@@ -1435,6 +1571,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
+        if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
         float4 xn = geodesic_point(x, v, ds), vn = geodesic_tangent(x, v, ds);
         x = xn * rsqrt(-mdot(xn, xn));
@@ -1449,7 +1586,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         if (rho > prm.z) { last_warp = inside; inside = -1; has_gradient = false; }
     }
     VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0), int4(outcome, -1, -1, team > HALF_KIND ? 1 : 0),
-                       float4(0.0, glass, core, halo)};
+                       float4(0.0, glass, core, halo), dust};
     if (outcome == OUTCOME_HIT) {
         end.point = geodesic_point(hit_x, hit_v, hit.s);
         end.view = geodesic_tangent(hit_x, hit_v, hit.s);
@@ -1492,7 +1629,8 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
 
 /**
  * @brief `shade_ray_end` gives a ray's final colour from where it ended: the lit surface or the sky, hazed, tinted by
- * the glass it crossed, with the laser's glow and the highlight roll-off; a lost ray is black.
+ * the glass it crossed, behind the dust in front of it (as thick as its optical depth), with the laser's glow and
+ * the highlight roll-off; a lost ray is black.
  * @par Example
  * @code
  * float3 color = shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5));
@@ -1512,6 +1650,7 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
     float3 beam_color = to_linear(end.surface.w > 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
+    if (end.dust.w > 0.0) color = mix(color, end.dust.rgb / end.dust.w, 1.0 - exp(-end.dust.w));
     color = mix(color, beam_color, clamp(BEAM_HALO_OPACITY * halo, 0.0, 1.0)) + mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * core;
     return max(color, 0.0);
 }
@@ -1530,14 +1669,14 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
 /**
  * @brief `is_same_surface` says whether two samples ended the same way with no laser glow, so the pixels between them
  * can be interpolated: both on one face plane of one structure (same axis, side and layer of cells), both on the
- * ground, both in the sky or both lost, behind the same number of glass faces.
+ * ground, both in the sky or both lost, behind the same number of glass faces and nearly as much dust.
  * @par Example
  * @code
  * if (!is_same_surface(a, b)) return false;
@@ -1547,7 +1686,8 @@ static bool is_same_surface(VoxelRayEnd a, VoxelRayEnd b) {
     int axis = a.surface.z;
     bool is_inside_cell = a.surface.x == OUTCOME_HIT && a.surface.y >= 0 && axis < 0;
     return all(a.surface.xyz == b.surface.xyz) && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
-        && (axis < 0 || a.cell[axis] == b.cell[axis]) && b.glow.z < GLOW_FLOOR && b.glow.w < GLOW_FLOOR;
+        && (axis < 0 || a.cell[axis] == b.cell[axis]) && b.glow.z < GLOW_FLOOR && b.glow.w < GLOW_FLOOR
+        && abs(b.dust.w - a.dust.w) <= DUST_SMOOTH_DEPTH;
 }
 
 /**
@@ -1591,9 +1731,10 @@ static bool is_cell_smooth(device const VoxelRayEnd *grid, int columns, int grid
 
 /**
  * @brief `interpolate_ray_end` blends four samples around a point of a cell (`wx` and `wy` from 0 to 1 along it) into
- * `end`: the point (back on the hyperboloid, or the unit sphere for the sky), tangent, grid point and distance blend,
- * and the rest is the first sample's. On a block face the cell under the blended grid point gives the material, and
- * the result is false (trace the ray instead) unless that cell is solid and the one in front of the face is open.
+ * `end`: the point (back on the hyperboloid, or the unit sphere for the sky), tangent, grid point, distance and dust
+ * blend, and the rest is the first sample's. On a block face the cell under the blended grid point gives the
+ * material, and the result is false (trace the ray instead) unless that cell is solid and the one in front of the
+ * face is open.
  * @par Example
  * @code
  * if (!interpolate_ray_end(scene, a, b, c, d, 0.5, 0.0, end)) end = trace_ray(scene, pixel);
@@ -1602,6 +1743,7 @@ static bool is_cell_smooth(device const VoxelRayEnd *grid, int columns, int grid
 static bool interpolate_ray_end(thread const Scene &scene, VoxelRayEnd a, VoxelRayEnd b, VoxelRayEnd c, VoxelRayEnd d, float wx, float wy,
                                 thread VoxelRayEnd &end) {
     end = a;
+    end.dust = mix(mix(a.dust, b.dust, wx), mix(c.dust, d.dust, wx), wy);
     float4 point = mix(mix(a.point, b.point, wx), mix(c.point, d.point, wx), wy);
     end.grid = mix(mix(a.grid, b.grid, wx), mix(c.grid, d.grid, wx), wy);
     if (a.surface.x == OUTCOME_SKY) end.point = float4(normalize(point.xyz), 0.0);
@@ -1634,7 +1776,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -1658,7 +1800,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -1695,7 +1837,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -1750,7 +1892,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1769,7 +1911,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {

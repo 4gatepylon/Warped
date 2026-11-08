@@ -1036,6 +1036,46 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D81. Dust and mist from shots into the ground
+
+- **Choice:**
+  - **When:** a shot of either gun, by any player, that hits the ground (the flat ground or the crater's terrain)
+    throws up a burst where it lands, when its beam front gets there. Shots into blocks or players raise none. At
+    most 12 bursts show at once; a new one replaces the oldest.
+  - **Grains:** a sniper shot throws 44 grains of grey-brown dust (2 to 4.5 cm), a rifle shot 16 at 0.65 times the
+    speed. They fly up a cone (0.5 rad) around the ground's normal, tilted a little back toward the shooter, at 2 to
+    6 m/s, rising up to 3 m, then land on the ground's slope and lie there.
+  - **Mist:** 7 puffs for a sniper shot, 3 for a rifle shot (0.65 times as big), lighter than the grains. They drift
+    out at 1.5 to 3.5 m/s, slowing to a stop within about half a second, while they swell from 0.12 m to 0.6 to
+    1.2 m.
+  - **Fading:** each particle fades from a third of its life (0.9 to 2 s) to nothing, so a burst is gone within 2 s.
+  - **Gravity:** the map's own, 6 m/s² on Lunar Surface, not the 30 m/s² the server settings give players for their
+    quick jumps. At 30 m/s² the grains would be back on the ground within half a second, before anyone saw them in
+    the air.
+  - **Light:** the sun lights the dust like the ground: the side of a grain or puff that faces the sun is brighter,
+    and dust seen toward the sun glows. A burst in shadow (checked once, when it starts) gets the ambient light and
+    some earthshine only.
+  - **Drawing:** in the world, by the voxel ray tracer (`scan_dust`), so the dust is seen from any angle, through
+    wormholes and behind blocks. Each straight piece of a ray is tested against each burst's bounding sphere, then
+    against its particles in the burst's Klein coordinates, where the piece is a straight line. Grains are discs at
+    least 1.5 pixels wide, puffs are Gaussians, and their optical depths add up along the ray. Each ray end carries
+    its dust, so it grows from 96 to 112 bytes, and adaptive sampling blends dust between samples only where its
+    depth changes by less than 0.02.
+  - **Cost:** Apple M3 Pro, macOS 15.7.3, Rust 1.98.1, release build, 2560 × 1600 with adaptive sampling, medians of
+    10 frames, runs alternated. With no dust on screen, each bench view takes 0.4 to 1.8 ms more GPU time than
+    before (about 2%, from the larger ray ends). One sniper burst 12 m away adds 0.1 to 1 ms to a 33 ms frame; the
+    rifle held on one spot 5 m away (12 bursts, 193 particles) adds 2.7 ms to 34 ms. Twelve sniper bursts at once
+    (513 particles, out of reach in play with its 2 s reload) would add 11 to 20 ms.
+- **Alternatives:**
+  - sprites drawn over the picture at the hit's place on screen (cheaper, but they would not bend through
+    wormholes, hide behind blocks, or move in 3D as you walk around them);
+  - the players' 30 m/s² gravity (see above);
+  - sending the particles over the network (each window makes them from the shots it already draws, so everyone sees
+    a burst where a shot lands, though the grains differ from screen to screen);
+  - keeping ray ends at 96 bytes by storing the laser glow and the dust as half floats, which might win back the 2%
+    at some cost in the glow's precision.
+- **Rationale:** you asked that shooting the ground throw some mist and dust particles up into the air.
+
 ### D82. Spaceships flying over Lunar Surface
 
 - **Choice:**
@@ -1230,6 +1270,7 @@
   - window holes in the walls without glass, as doorways are (players could climb through).
 - **Rationale:** you reported that a laser shot out of a window close up doesn't leave the room; it stops on the
   glass by design, so whether lasers should pass through windows is your call.
+- **Superseded by:** D90 (W-70): lasers now pass through glass, and the windows are real openings.
 
 ### D89. Shot noise: each shot strays a little (W-69)
 
@@ -1271,6 +1312,42 @@
   shooting, exponential for the sniper, and all of it in the YAML settings. The defaults keep the crosshair
   meaningful: the sniper still hits what it is centred on nearly always within 30 m, while a long rifle burst
   spreads wide enough that short bursts pay off.
+
+### D90. Windows you see and shoot through (W-70)
+
+- **Choice:**
+  - **Walls:** the level's exporter (`demos/levels/lunar_surface/shape_builders.js`, `add_wall_around_windows`)
+    builds each habitat module's and walkway's side wall as a piece below the window row, a piece above it, and a
+    pillar between each pair of windows, so each glass pane fills a real 1 m hole. The pieces keep the wall's 1 m
+    thickness and 0.3 m rounding. Each pillar reaches one cell into the pieces above and below, so its rounded ends
+    are buried and no seam shows. The panes are unchanged: 1 m blocks, 6 cm proud of each face. The map goes from
+    340 to 398 shapes (a habitat module from 29 to 41); no other structure changes.
+  - **Format:** `glass` is now see-through for light and lasers, and stops players (`common/maps/README.md`). The
+    schema and validator never encoded it.
+  - **Lunar Surface:** the laser's tracer leaves glass shapes out (`find_hit_mu` takes a see-through material), so
+    the drawn beam and its spot go on to whatever lies behind. The console aim ray (`E`) passes through glass too.
+    The picture already did; `render_voxel.metal` needed no change.
+  - **Players:** glass still stops them: their collision probes count every shape.
+  - **House:** its laser passes through glass boxes too (`Scene::ForLaser`). But the house's windows are glass laid
+    on solid plank walls, and both house renderers draw glass as an opaque sheen, so a shot at a house window stops
+    on the wall 6 cm behind the glass, which looks the same as before.
+  - **WebGL level:** its laser passes through glass too (one line in `trace_structure_cpu`). Its voxel walls
+    already had holes behind the panes.
+  - **Tests:** `the_laser_stops_on_a_window_pane` (D88) became `a_laser_passes_through_a_window`: shots from inside
+    (touching the pane, close, across the room, slantwise) leave the module, a shot from outside comes in to the
+    floor, and the pane's middle is still solid for players. `the_laser_passes_through_a_house_window` and
+    `a_line_passes_through_a_see_through_pane` cover the house and the tracer.
+  - **Frame time:** no change measured. The machine's GPU was shared with other agents' renders, so the same view
+    varied by up to 40% between runs at 2560 × 1600.
+- **Alternatives:**
+  - a second glass kind that stops lasers (City Sphere's design in `game_design/DESIGN.md` wants a glass floor that
+    players see through but can't shoot through; the format can add one when that level is built);
+  - thinner panes in the middle of the wall (the level's 1 m panes were kept);
+  - holes without glass, as doorways are (nothing would show it is a window, and players could climb through);
+  - see-through glass in the house as well (its walls would need holes and its two renderers a glass pass);
+  - a stronger glass look, such as a reflection, so panes show from outside (the voxel renderer tints glass 20%
+    darker, so from outside a window reads mostly as an opening).
+- **Rationale:** asked whether windows should be see-through and let lasers through, you answered "Both".
 
 ### D91. A window says why it can't play on its server (W-72, W-78)
 
@@ -1315,6 +1392,18 @@
   - keeping `host-game` (you asked for only starting a server and connecting to one).
 - **Rationale:** you recommended disabling everything except starting a server and connecting to one, since nobody
   will use the local demo.
+
+### D93. Crouching refills the sprint energy faster
+
+- **Choice:** `sprint_energy.refill_s` becomes two settings. `refill_crouching_s` (7.5 s, as fast as sprinting
+  empties the bar) applies while crouched; `refill_walking_s` (15 s, half as fast, the old rate) applies while
+  walking or standing upright. Sprinting drains the bar as before (`drain_s`, 7.5 s).
+- **Alternatives:**
+  - a third rate for standing still upright (you named only crouching and walking, so standing keeps the walking
+    rate);
+  - keeping `refill_s` beside a crouch multiplier (two rates in seconds read more plainly).
+- **Rationale:** you asked that crouching recharge the energy for running at the same rate as running uses it, and
+  walking at half that, as YAML defaults that can be changed.
 
 ## Baselines
 

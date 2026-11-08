@@ -21,6 +21,7 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod dust;
 mod exit_prompt;
 mod fps_demo_assets;
 mod geometry;
@@ -850,12 +851,12 @@ fn bench_voxel_views(
         let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> =
             shot.iter().map(|s| (s.segments.clone(), 0)).collect();
         let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
-        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, render_px);
+        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, render_px);
+            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());
@@ -1755,6 +1756,7 @@ struct Session {
     is_overheated: bool,
     has_rifle_shot_hit: bool,
     tracers: Vec<Tracer>,
+    dust_bursts: Vec<dust::DustBurst>,
     was_firing: bool,
     remote_firing_ids: Vec<u32>,
     rifle_shot_count: u64,
@@ -1894,6 +1896,35 @@ impl Tracer {
         let head_m: f64 = self.speed_m_per_s * (now_s - self.fired_s);
         (head_m - self.speed_m_per_s * self.trail_s, head_m)
     }
+
+    /// `get_arrival_s` gives when the beam's front reaches the end of its path, in seconds into
+    /// the session.
+    ///
+    /// Example: `let start_s = tracer.get_arrival_s();`
+    fn get_arrival_s(&self) -> f64 {
+        self.fired_s + self.length_m / self.speed_m_per_s
+    }
+}
+
+/// `add_dust_burst` adds the dust burst of `shot`, fired as `tracer` by the rifle (`is_rifle`) or
+/// the sniper, to `bursts` when it hit the ground of `world` (`DustBurst::FromShot`), starting when
+/// its beam front arrives, and drops the oldest bursts beyond `MAX_DUST_BURST_COUNT`.
+///
+/// Example: `add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, false);`
+fn add_dust_burst(
+    bursts: &mut Vec<dust::DustBurst>,
+    world: &VoxelWorld,
+    shot: &voxel_world::Shot,
+    tracer: &Tracer,
+    is_rifle: bool,
+) {
+    let Some(burst) = dust::DustBurst::FromShot(world, shot, tracer.get_arrival_s(), is_rifle)
+    else {
+        return;
+    };
+    bursts.push(burst);
+    let excess_count: usize = bursts.len().saturating_sub(dust::MAX_DUST_BURST_COUNT);
+    bursts.drain(..excess_count);
 }
 
 /// `Gun` is the weapon a player holds: gun 1, the laser (a quarter-second shot per click; one
@@ -2052,6 +2083,7 @@ impl Session {
             is_overheated: false,
             has_rifle_shot_hit: false,
             tracers: Vec::new(),
+            dust_bursts: Vec::new(),
             was_firing: false,
             remote_firing_ids: Vec::new(),
             rifle_shot_count: 0,
@@ -2774,6 +2806,12 @@ impl Session {
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
+            self.dust_bursts.retain(|burst| !burst.is_over(now_s));
+            let clouds: Vec<dust::DustCloud> = self
+                .dust_bursts
+                .iter()
+                .filter_map(|burst| burst.get_cloud(now_s))
+                .collect();
             let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> = self.get_lit_beams(r);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
@@ -2790,6 +2828,7 @@ impl Session {
                 self.route.is_empty().then_some(multiplayer::Tracers {
                     beams: &beams,
                     spot,
+                    dust: &clouds,
                 }),
                 render_px,
             );
@@ -2799,6 +2838,7 @@ impl Session {
             {
                 let is_rifle: bool = self.gun == Gun::Rifle;
                 let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                 self.tracers.push(tracer);
             }
             self.was_firing = is_firing;
@@ -2807,6 +2847,7 @@ impl Session {
                     let shooter: Option<&net::RemotePlayer> = players.iter().find(|p| p.id == *id);
                     let (team, is_rifle) = shooter.map_or((0, false), |p| (p.team, p.is_rifle));
                     let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                    add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                     self.tracers.push(tracer);
                 }
             }

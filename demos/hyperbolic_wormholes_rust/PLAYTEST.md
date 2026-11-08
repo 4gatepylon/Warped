@@ -81,6 +81,10 @@ off, everyone sees which team won, and a new game starts only when whoever start
 terminal: every console comes back on and everyone returns to their
 spawn.
 
+The habitat modules (the red one stands near the red base, on the side away from the ridge) and the covered walkways
+have windows: glass in real 1 m openings at eye height. You see out of them, and a laser goes through them both ways,
+but you can't climb through.
+
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
 each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
 14 m high). Your view stretches out from the middle of the screen, more and more as you slow. Walking back in is at
@@ -109,7 +113,7 @@ glow, red and green running lights and a flashing strobe. They follow the UTC cl
 sees the same ships at the same moment. They are far away in the sky: lasers and players never touch them.
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
-`PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
+`PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting; once you let go of `Shift` it refills in 7.5 s crouched (`Ctrl`) or 15 s walking or standing),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
@@ -118,7 +122,8 @@ above the energy bar that empties when you fire; one hit eliminates), and gun 2,
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s). Each shot strays
 a little from the crosshair: the sniper's by a random few milliradians, the rifle's more and more as it heats up
-during a burst (`DECISIONS.md` D89). `E` (held)
+during a burst (`DECISIONS.md` D89). A shot into the ground, from either gun and anyone, throws up dust and a puff
+of mist that fade within 2 s. `E` (held)
 turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu (`Q`/`E`
 turn between your settings, a map of the whole level with you on it, and SCORES: how many players there are and each
 one's team, kills and deaths in this game). There is no key to respawn:
@@ -134,8 +139,9 @@ Multiplayer:
   map.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too. On the SCORES page, eliminating a teammate counts their death but no kill.
-- Lasers stop on glass, windows included, as in the WebGL level (`DECISIONS.md` D88). Since the smooth shapes
-  (#147), the habitat modules' and walkways' windows are panes on a solid wall, so they don't show the outside.
+- Lasers pass through glass; players don't (`DECISIONS.md` D90). The house's windows are glass laid on solid
+  plank walls and drawn opaque, so there a shot at a window still stops on the wall behind it.
+- Glass is drawn as a faint tint, so from outside a habitat module's windows look mostly like open holes.
 - Health, shown in the bottom left, resets when a player respawns.
 - The menu doesn't pause the game: a player in it stands still and can still be hit.
 - A file saved from the menu has no comments. If a later version adds a setting, that file stops loading and the

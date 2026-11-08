@@ -221,6 +221,8 @@ These values are configurable and may change after playtests.
 - Warp objects bend bullets and lasers as they bend light, and both pass through wormholes.
 - A player coming out of a wormhole sees the world blueshift toward cyan, as if moving at a good fraction of
   light speed, fading back within about 1.5 s. Only that player sees it.
+- A shot that hits the ground throws up dust and a puff of mist where it lands, which every player
+  sees.
 
 ## Weapons
 

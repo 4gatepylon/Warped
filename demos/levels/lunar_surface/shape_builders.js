@@ -12,6 +12,7 @@ const STAND_PROBE_TOP_M = 30;
 const STAND_PROBE_STEP_M = 0.02;
 const TERRAIN_OCTAVES = 5, TERRAIN_RIM_NOISE_M = 60, TERRAIN_RIM_NOISE_FRAC = 0.5, TERRAIN_OUTER_FLANK = 3;
 const TERRAIN_WALL_RELIEF_GAIN = 3, TERRAIN_RIM_SEED = 9;
+const WINDOW_Y = 2, WALL_ROUND_M = 0.3;
 
 /** `ShapeModel` collects one structure's shapes, lamps and consoles, like `VoxelModel`. */
 class ShapeModel {
@@ -217,13 +218,37 @@ function build_pylon(team) {
   return model;
 }
 
+/**
+ * `add_wall_around_windows` adds a hull wall one cell thick with a hole in row `WINDOW_Y` at each window, for a glass
+ * pane to fill: a piece below the row, a piece above it, and a pillar between each pair of holes that reaches one
+ * cell into both pieces, so no seam shows.
+ * @param {ShapeModel} model The model to add the wall to.
+ * @param {number} x The wall's cell column.
+ * @param {number} top_y The wall's top cell row.
+ * @param {number} z0 The wall's first cell along z.
+ * @param {number} z1 Its last cell along z (included).
+ * @param {function(number): boolean} is_window Whether cell z of row `WINDOW_Y` is a window.
+ * @example add_wall_around_windows(model, -3, 4, -6, 5, z => z % 3 === 0);
+ */
+function add_wall_around_windows(model, x, top_y, z0, z1, is_window) {
+  model.box(x, 0, z0, x, WINDOW_Y - 1, z1, MAT.HULL, WALL_ROUND_M);
+  model.box(x, WINDOW_Y + 1, z0, x, top_y, z1, MAT.HULL, WALL_ROUND_M);
+  for (let z = z0; z <= z1; z++) {
+    if (is_window(z) || (z > z0 && !is_window(z - 1))) continue;
+    let z_end_incl = z;
+    while (z_end_incl < z1 && !is_window(z_end_incl + 1)) z_end_incl++;
+    model.box(x, WINDOW_Y - 1, z, x, WINDOW_Y + 1, z_end_incl, MAT.HULL, WALL_ROUND_M);
+  }
+}
+
 function build_habitat(name, length_m, stripe, light) {
   const model = new ShapeModel(name), z0 = -Math.floor(length_m / 2), z1 = z0 + length_m - 1, window_period = 3;
+  const is_window = z => z > z0 && z < z1 && (z - z0) % window_period === 1;
   model.box(-3, 0, z0, 2, 0, z1, MAT.FLOOR, 0.1);
   for (const x of [-3, 2]) {
-    model.box(x, 0, z0, x, 4, z1, MAT.HULL, 0.3);
+    add_wall_around_windows(model, x, 4, z0, z1, is_window);
     model.box(x, 1, z0 + 1, x, 1, z1 - 1, stripe, 0.1); model.shapes.at(-1).half_m[0] = 0.55;
-    for (let z = z0 + 1; z < z1; z++) if ((z - z0) % window_period === 1) { model.box(x, 2, z, x, 2, z, MAT.GLASS, 0.15); model.shapes.at(-1).half_m[0] = 0.56; }
+    for (let z = z0 + 1; z < z1; z++) if (is_window(z)) { model.box(x, WINDOW_Y, z, x, WINDOW_Y, z, MAT.GLASS, 0.15); model.shapes.at(-1).half_m[0] = 0.56; }
   }
   model.box(-3, 4, z0, 2, 4, z1, MAT.HULL, 0.4);
   for (let z = z0 + 1; z < z1; z += 2) { model.box(-2, 5, z, 1, 5, z, MAT.SOLAR, 0.05); model.shapes.at(-1).half_m[1] = 0.08; model.shapes.at(-1).centre_m[1] = 5.05; }
@@ -259,10 +284,11 @@ function build_antenna(name, height_m, light) {
 
 function build_walkway(name, length_m) {
   const model = new ShapeModel(name), z0 = -Math.floor(length_m / 2), z1 = z0 + length_m - 1;
+  const is_window = z => (z - z0) % 2 === 1;
   model.box(-1, 0, z0, 1, 0, z1, MAT.METAL, 0.1);
-  for (const x of [-2, 2]) model.box(x, 0, z0, x, 3, z1, MAT.HULL, 0.3);
+  for (const x of [-2, 2]) add_wall_around_windows(model, x, 3, z0, z1, is_window);
   model.box(-2, 3, z0, 2, 3, z1, MAT.HULL, 0.4);
-  for (let z = z0 + 1; z <= z1; z += 2) for (const x of [-2, 2]) { model.box(x, 2, z, x, 2, z, MAT.GLASS, 0.15); model.shapes.at(-1).half_m[0] = 0.56; }
+  for (let z = z0; z <= z1; z++) for (const x of [-2, 2]) if (is_window(z)) { model.box(x, WINDOW_Y, z, x, WINDOW_Y, z, MAT.GLASS, 0.15); model.shapes.at(-1).half_m[0] = 0.56; }
   return model;
 }
 
