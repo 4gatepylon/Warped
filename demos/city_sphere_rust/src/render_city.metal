@@ -14,9 +14,10 @@ constant float3 ENV_FLOOR_COLOR = float3(0.05, 0.06, 0.09);
 constant float ENV_CORE_GAIN = 0.35;
 constant float ENV_HIGHLIGHT_POWER = 48.0;
 constant float ENV_HIGHLIGHT_GAIN = 1.5;
-constant float RIB_HALF_WIDTH_M = 0.07;
-constant float RIB_ALPHA = 0.85;
-constant float3 RIB_COLOR = float3(0.16, 0.17, 0.2);
+constant float RIB_HALF_WIDTH_M = 0.05;
+constant float RIB_ALPHA = 0.9;
+constant float3 RIB_COLOR = float3(1.0, 1.0, 1.0);
+constant float RIB_GLOW = 1.4;
 constant float GLASS_BASE_ALPHA = 0.035;
 constant float GLASS_FRESNEL_GAIN = 0.35;
 constant float GLASS_TINT_FRAC = 0.5;
@@ -34,7 +35,7 @@ constant float CORE_HALO_POWER = 2.0;
 constant float METAL_SATURATION = 0.3;
 constant float STREET_LAYER = 0.0;
 constant float PANEL_LINE_HALF_WIDTH_M = 0.03;
-constant float3 PANEL_LINE_COLOR = float3(0.05, 0.14, 0.18);
+constant float3 PANEL_LINE_COLOR = float3(0.02, 0.055, 0.07);
 constant uint BEACON_SLOT_COUNT = 8;
 constant float BEACON_GLOW_BRIGHTNESS = 2.0;
 constant float BEACON_BODY_GLOW = 0.72;
@@ -250,7 +251,7 @@ fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& 
     }
     float alpha = clamp(GLASS_BASE_ALPHA + fresnel * (1.0 - line) + RIB_ALPHA * line + 0.6 * rim, 0.0, 0.95);
     float3 l = normalize(-in.world);
-    float rib_light = 0.3 + 0.4 * pow(max(dot(reflect(-view, n), l), 0.0), 8.0);
+    float rib_light = RIB_GLOW + 0.3 * pow(max(dot(reflect(-view, n), l), 0.0), 8.0);
     float3 tint = mix(in.color.rgb * GLASS_TINT_FRAC, RIB_COLOR * rib_light, line) + float3(0.8, 0.6, 1.0) * rim;
     return float4(encode_srgb(tint) * alpha, alpha);
 }
