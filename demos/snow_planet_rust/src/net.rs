@@ -984,10 +984,7 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
-            println!(
-                "The {} team won. Press Enter here to start a new game.",
-                TEAM_NAMES[winner as usize]
-            );
+            println!("The {} team won.", TEAM_NAMES[winner as usize]);
         }
     }
 
@@ -1089,18 +1086,6 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
     Ok(socket)
 }
 
-/// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
-/// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
-/// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
-/// `PLAYER_TIMEOUT_S`, turns off
-/// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
-/// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
-/// `new_game_after_win`, that long after a team won, admits only players who prove they know
-/// `game_password` (empty for anyone), and broadcasts
-/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
-///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
-#[allow(clippy::too_many_arguments)]
 /// `write_level_result` writes a level's winner (an index into `TEAM_NAMES`) to `path` for a match
 /// server (`--level-result-file`), as JSON such as `{"winner": "blue"}`, atomically: into
 /// `<path>.partial`, then renamed onto `path`.
@@ -1116,6 +1101,17 @@ pub fn write_level_result(path: &Path, winner: u32) -> Result<()> {
     Ok(())
 }
 
+/// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
+/// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
+/// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
+/// `PLAYER_TIMEOUT_S`, turns off
+/// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
+/// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
+/// `new_game_after_win`, that long after a team won, admits only players who prove they know
+/// `game_password` (empty for anyone), and broadcasts
+/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
+///
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
 #[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
@@ -1177,6 +1173,9 @@ pub fn serve(
         server.update_consoles();
         server.freeze_players(last_freeze.elapsed().as_secs_f64());
         last_freeze = Instant::now();
+        if server.game.winner.is_some() && won_at.is_none() && level_result_file.is_none() {
+            println!("Press Enter here to start a new game.");
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(path), Some(winner)) = (level_result_file, server.game.winner)
             && !has_written_result

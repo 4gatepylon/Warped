@@ -705,7 +705,8 @@ const PHASE_NAMES: [&str; 5] = ["sim", "build", "slot wait", "drawable wait", "r
 const LATE_FRAME_MS: f32 = 17.5;
 
 impl FrameStats {
-    /// `summary` returns mean, median, 99th percentile frame time and mean GPU time.
+    /// `summary` returns mean, median, 99th percentile frame time and median, mean and 99th
+    /// percentile GPU time.
     fn summary(&self) -> String {
         if self.frame_ms.is_empty() {
             return "no frames".to_string();
@@ -732,7 +733,7 @@ impl FrameStats {
         let mut temp_gpu_ms: Vec<f32> = self.gpu_ms.clone();
         temp_gpu_ms.sort_by(f32::total_cmp);
         format!(
-            "{} frames: mean {:.2} ms ({:.0} fps), median {:.2} ms, p99 {:.2} ms, worst {:.2} ms, {} over {LATE_FRAME_MS} ms, GPU mean {:.2} ms, GPU median {:.2} ms, GPU p99 {:.2} ms; p99 ms of {}",
+            "{} frames: mean {:.2} ms ({:.0} fps), median {:.2} ms, p99 {:.2} ms, worst {:.2} ms, {} over {LATE_FRAME_MS} ms, GPU median {:.2} ms, GPU mean {:.2} ms, GPU p99 {:.2} ms; p99 ms of {}",
             sorted.len(),
             mean_ms,
             1000.0 / mean_ms,
@@ -740,8 +741,8 @@ impl FrameStats {
             percentile(0.99),
             sorted[sorted.len() - 1],
             late_count,
-            gpu_mean_ms,
             temp_gpu_ms[(temp_gpu_ms.len() - 1) / 2],
+            gpu_mean_ms,
             temp_gpu_ms[((temp_gpu_ms.len() - 1) as f32 * 0.99) as usize],
             phase_p99s.join(", ")
         )
