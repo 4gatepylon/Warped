@@ -2,8 +2,8 @@
 
 City Sphere (W-119), the purple, close-quarters level, playable in Rust with Metal: a satellite city inside a
 hollow sphere in Euclidean space. You walk on the inside of the sphere (gravity points outward, so up is toward the
-glowing core at the centre) through streets of buildings, under a glass shell that roofs them. Lifts carry you up
-onto the glass level, the glass shell's inner side, where nothing is overhead: from there you can shoot straight
+glowing core at the centre) through streets of buildings, under a glass shell that roofs them. Each team's stairs,
+right in front of its spawns, and the lifts carry you up onto the glass level, the glass shell's inner side, where nothing is overhead: from there you can shoot straight
 across the sphere, and shots reflect off the glass about its normal, up to 2 times by default. Below the glass it
 is a normal shooter, and shots stop at the glass. Each team has one pylon, standing exposed on the glass level with no
 cover right around it, with one console; a team wins when it has turned off the other team's console. Red's half is
@@ -43,13 +43,21 @@ make join-game SERVER=127.0.0.1 TEAM=blue   # terminal 2: window 1
 make join-game SERVER=127.0.0.1 TEAM=red    # terminal 3: window 2
 ```
 
-Controls are the hyperbolic demo's (`player_settings.yaml`): `WASD` walk, mouse look (click to capture the mouse),
-`Shift` sprint, `Space` jump (hold it on a lift pad to ride up; walk off at the top), left click shoots, right click
-zooms, `1` the laser, `2` the rifle (heats up; overheats), wheel switches gun, hold `E` near the other team's console
-to turn it off (10 s), `Esc` releases the mouse (close the window to quit), `Tab` opens the menu (`Q`/`E` change page:
-scores, settings, map, credits), `-` and `=` lower and raise the render resolution. The minimap (top right) shows the
-whole sphere centred on you: consoles in team colours (grey when off), robots, and you in white. The window's title
-shows your team, level, consoles still on, the gun's reload or heat and the frame rate.
+Controls and play are Lunar Surface's (W-126 (same play in every level); `player_settings.yaml` and
+`server_settings.yaml` are the hyperbolic demo's, except a faster sprint): `WASD` walk, mouse look (click to capture
+the mouse), `Shift` sprint (Lunar's sprint energy), `Space` jump (Lunar's 1.25 m in 0.58 s; hold it on a lift pad to
+ride up; walk off at the top), walk up the stairs in front of your spawn to the glass level, left click shoots, right
+click eases into the gun's zoom, `1` the laser, `2` the rifle (heats up; overheats; a window starts on it), wheel
+switches gun, hold `E` aiming at the other team's console within reach to turn it off (10 s, Lunar's bar below the
+middle), `Esc` releases the mouse and, with the mouse free, asks whether to exit, `Tab` opens the menu (`Q`/`E` change
+page: scores, settings, map, credits), `-` and `=` lower and raise the render resolution. The HUD has Lunar's health,
+ammo and energy bars with their pulses, and Lunar's hit effects (red, blur and shake from the edges) whenever health
+drops; an eliminated player sees "YOU DIED" and a countdown and comes back at a spawn after `respawn.delay_s` (3 s).
+The minimap (top right, placed by the player settings' `minimap`) shows the sphere seen from its centre around you, the
+way you face up, with straight Cartesian grid lines every 5 m: buildings, covers, each team's stairs in its colour,
+lifts and holes, consoles in team colours (grey when off), other players and shots in team colours, and you as the
+white arrow. The window's title shows your team, level, consoles still on, the gun's reload or heat and the frame
+rate.
 
 ### Flags for the match (W-123)
 
@@ -58,7 +66,10 @@ shows your team, level, consoles still on, the gun's reload or heat and the fram
   game) until stopped.
 - `--join <address> --port <port> --team blue|red`: join that team at once instead of waiting in the lobby.
 - `--join <address> --port <port> --bot --exit-after-s <s> --team <team> --bot-objective consoles`: a bot without a
-  window that holds `E` on the other team's consoles until its team wins (it doesn't walk; the server takes its word).
+  window that walks on foot (up its stairs, then a planned path on the glass level) to each of the other team's
+  consoles and holds `E` on it, aiming at it, until its team wins. The server counts a hold only within reach and while
+  aiming, so a bot win shows the pylons can be reached on foot. A level result that can't be written stops the server
+  with an error.
 - The binaries are `city-sphere` and `city_sphere_server`; `--map city-sphere` is the default.
 
 ## How it works
@@ -67,8 +78,10 @@ shows your team, level, consoles still on, the gun's reload or heat and the fram
   shells, the lift holes, spawns, consoles in the server's order). A player is feet, body axes (up toward the centre)
   and head pitch; each step turns the body the least way to keep up toward the centre, walks along the ground,
   applies gravity outward, and pushes out of the street, the glass (from whichever side the player is on, except in a
-  hole) and the boxes (three spheres up the body). Holding jump in a lift hole raises the player at 6 m/s to 1 m over
-  the glass level and holds them there until they walk off.
+  hole) and the boxes (three spheres up the body); a player on the ground steps up onto a box at most 0.2 m higher (a
+  stair). Holding jump in a lift hole (a hole over a lift pad, not the stairs') raises the player at 6 m/s to 1 m over
+  the glass level and holds them there until they walk off. Speeds, jump and gravity follow Lunar Surface's
+  `VoxelWorld::set_settings`: the map's numbers times `server_settings.yaml`'s `movement`.
 - **Shots** (`CityWorld::trace_shot`): a ray from the eye stops at the nearest of the street, a box, the core, another
   player (torso and head spheres) or the glass met from outside; the glass met from inside reflects it (`d - 2(d·n)n`)
   while bounces are left; the total length is capped at `glass.range_m`.
@@ -79,8 +92,11 @@ shows your team, level, consoles still on, the gun's reload or heat and the fram
   MetalFX upscaling when the render scale is below 1.
 - **Game** (`src/city.rs`): the window, the in-process server (when not joining), the network (the hyperbolic demo's
   `net.rs`: state, hits, consoles, the winner), the bot, `--bench-views` and `--play-route`.
-- **Settings**: `server_settings.yaml`'s new `glass` section (`max_bounce_count: 2`, `range_m: 90.0`); the rest are
-  the hyperbolic demo's (`sniper`, `consoles`, `respawn`, ...).
+- **Settings**: `server_settings.yaml`'s new `glass` section (`max_bounce_count: 2`, `range_m: 90.0`) and
+  `movement.sprint_speed_per_map_speed: 2.4`; the rest are the hyperbolic demo's, line for line (a test checks it).
+- **Stairs** (`tools/make_map.py`): 48 steps a team, each a box standing on the street, from 2 to 4 m in front of the
+  spawns up through a hole in the glass to the glass level, about 5 m short of the team's pylon, with the map's
+  seeded, mirrored jitter.
 
 ## Measure
 
@@ -172,4 +188,5 @@ noise; the crowd view's p99 frame is over 16.7 ms in both, from posing eight rob
   Results); not yet measured on a real Mac display.
 - Posing robots costs about 1 ms of CPU per clip each frame; a crowd of eight is the worst view's main cost.
 - No zone walls, thrown wormholes or shadows in City Sphere.
-- Lifts instead of the WebGL version's stairs (see `DECISIONS.md`).
+- Still missing against Lunar Surface (W-126 (same play in every level)): thrown wormholes (`Q`), the flashlight, third
+  person (`V`), ground dust where shots hit, and Lunar's separate sniper and rifle beam looks.

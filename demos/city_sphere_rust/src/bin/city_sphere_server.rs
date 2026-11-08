@@ -102,6 +102,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(path) => ServerSettings::Load(path)?,
         None => ServerSettings::Builtin(),
     };
+    let console_check: Option<net::console_check_t> = match arguments.map {
+        MapName::CitySphere => {
+            Some(city_world::CityWorld::Builtin()?.into_console_check(settings.consoles.reach_m))
+        }
+        _ => None,
+    };
     let socket: std::net::UdpSocket = net::bind_server(arguments.port)?;
     println!("Game server for {map_name} on UDP port {}.", arguments.port);
     net::serve(
@@ -115,5 +121,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         game_password,
         None,
         true,
+        console_check,
     )
 }

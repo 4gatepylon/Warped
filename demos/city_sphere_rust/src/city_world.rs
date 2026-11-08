@@ -6,10 +6,14 @@
 //! Interface: `CityWorld::Builtin`, `CityWorld::FromJson`, `CityPlayer`, `CityInput`, `Shot`,
 //! `ShotHit`, `CityWorld::trace_shot`, `CityWorld::move_player`, `Side`, `get_up`.
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::error::Error;
 
 use glam::{DMat3, DMat4, DQuat, DVec3};
 use serde::Deserialize;
+
+use crate::settings::ServerSettings;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -28,9 +32,21 @@ const AIR_CONTROL_FRAC: f64 = 0.35;
 const SHOT_START_M: f64 = 1e-4;
 const SURFACE_OFFSET_M: f64 = 1e-3;
 const MAX_STEP_M: f64 = 0.2;
+const MAX_STEP_UP_M: f64 = 0.2;
 const MIN_PITCH_RAD: f64 = -1.5;
 const MAX_PITCH_RAD: f64 = 1.5;
 const GROUND_NORMAL_COS: f64 = 0.6;
+const SPAWN_PITCH_RAD: f64 = 0.25;
+const LIFT_GROUP: &str = "lifts";
+const STAIRS_GROUP: &str = "stairs";
+const PYLON_GROUP: &str = "pylons";
+const PATH_CELL_RAD: f64 = 0.025;
+const PATH_CLEARANCE_M: f64 = 0.35;
+const PATH_HOLE_CLEARANCE_M: f64 = 1.5;
+const PATH_COST_PER_RAD: f64 = 1e6;
+/// `CONSOLE_REACH_SLACK_M` is how much further than `consoles.reach_m` the server lets a hold
+/// count, so a window that turns a console off at the edge of its reach isn't refused.
+pub const CONSOLE_REACH_SLACK_M: f64 = 0.6;
 
 #[derive(Deserialize)]
 struct JsonMaterial {
@@ -222,16 +238,27 @@ pub struct Console {
 pub struct CityWorld {
     pub street_radius_m: f64,
     pub street_material: u8,
-    pub gravity_m_per_s2: f64,
+    /// `map_gravity_m_per_s2` is the map's gravity, before `server_settings.yaml`'s `movement`
+    /// speeds up the jumps (`get_motion`).
+    pub map_gravity_m_per_s2: f64,
     pub eye_height_m: f64,
-    pub walk_m_per_s: f64,
-    pub sprint_m_per_s: f64,
-    pub jump_m_per_s: f64,
+    /// `map_walk_m_per_s` is the map's walking speed, which `server_settings.yaml`'s
+    /// `movement.walk_speed_per_map_speed` multiplies, as on Lunar Surface.
+    pub map_walk_m_per_s: f64,
+    /// `map_sprint_m_per_s` is the map's sprinting speed, which `movement.sprint_speed_per_map_speed`
+    /// multiplies.
+    pub map_sprint_m_per_s: f64,
+    /// `map_jump_m_per_s` is the map's jump speed, which with `map_gravity_m_per_s2` gives the
+    /// map's jump time.
+    pub map_jump_m_per_s: f64,
     pub materials: Vec<Material>,
     pub shells: Vec<Shell>,
     pub boxes: Vec<CityBox>,
     pub consoles: Vec<Console>,
     pub spawns: Vec<(u32, DMat4)>,
+    /// `lift_holes` are the glass's holes over a lift pad (a box in the group `lifts`), as (unit
+    /// direction, cosine of the angular radius); the stairs' holes have none.
+    pub lift_holes: Vec<(DVec3, f64)>,
     pub laser_colors: [[f32; 3]; 2],
     /// `variation_seed` seeds the map's small look variation (panel tint), 0 without one.
     pub variation_seed: u32,
@@ -393,6 +420,16 @@ impl CityWorld {
                     .collect(),
             })
             .collect();
+        let lift_holes: Vec<(DVec3, f64)> = shells
+            .iter()
+            .filter(|s| s.is_walkable_inside)
+            .flat_map(|s| s.holes.iter().copied())
+            .filter(|&(hole, cos)| {
+                boxes
+                    .iter()
+                    .any(|b| b.group == LIFT_GROUP && b.center.normalize().dot(hole) >= cos)
+            })
+            .collect();
         let spawns: Vec<(u32, DMat4)> = map
             .spawns
             .iter()
@@ -406,16 +443,17 @@ impl CityWorld {
         Ok(CityWorld {
             street_radius_m: map.ground.sphere.radius_m,
             street_material: map.ground.material,
-            gravity_m_per_s2: map.gravity_m_per_s2,
+            map_gravity_m_per_s2: map.gravity_m_per_s2,
             eye_height_m: map.player.eye_height_m,
-            walk_m_per_s: map.player.walk_m_per_s,
-            sprint_m_per_s: map.player.sprint_m_per_s,
-            jump_m_per_s: map.player.jump_m_per_s,
+            map_walk_m_per_s: map.player.walk_m_per_s,
+            map_sprint_m_per_s: map.player.sprint_m_per_s,
+            map_jump_m_per_s: map.player.jump_m_per_s,
             materials,
             shells,
             boxes,
             consoles,
             spawns,
+            lift_holes,
             variation_seed: map.variation.as_ref().map_or(0, |v| v.seed),
             laser_colors: match &map.lasers {
                 Some(JsonLasers {
@@ -451,11 +489,200 @@ impl CityWorld {
         self.boxes[console.box_index].center
     }
 
-    /// `is_in_lift` says whether `feet` are over a lift pad, under a hole in the glass.
+    /// `get_stairs_ends` gives where `team`'s stairs start on the street (the middle of the bottom
+    /// step's back edge) and end on the glass level (the middle of the top step's far edge), as
+    /// unit directions from the centre, or `None` on a map without them.
+    ///
+    /// Example: `let (bottom, top) = world.get_stairs_ends(0).expect("stairs");`
+    pub fn get_stairs_ends(&self, team: u32) -> Option<(DVec3, DVec3)> {
+        let steps: Vec<&CityBox> = self
+            .boxes
+            .iter()
+            .filter(|b| b.group == STAIRS_GROUP && b.name.starts_with(TEAM_NAMES[team as usize]))
+            .collect();
+        let (first, last) = (steps.first()?, steps.last()?);
+        let bottom: DVec3 = first.center + first.axes.z_axis * first.half_m.z;
+        let top: DVec3 = last.center - last.axes.z_axis * last.half_m.z;
+        Some((bottom.normalize(), top.normalize()))
+    }
+
+    /// `is_console_aimed` says whether a player whose eye frame is `eye` aims at console `index`
+    /// within `reach_m`, as on Lunar Surface (`find_aimed_material`): the first box the ray along
+    /// their crosshair meets is the console, or the pylon around it, at most `reach_m` away. An
+    /// index that isn't a console (from the network) isn't aimed at.
+    ///
+    /// Example: `if world.is_console_aimed(player.get_eye_frame(), 1, 3.0) { ... }`
+    pub fn is_console_aimed(&self, eye: DMat4, index: u8, reach_m: f64) -> bool {
+        let Some(console) = self.consoles.iter().find(|c| c.index == index) else {
+            return false;
+        };
+        let console_center: DVec3 = self.boxes[console.box_index].center;
+        let (origin, direction) = (eye.w_axis.truncate(), -eye.z_axis.truncate().normalize());
+        let nearest: Option<(f64, usize)> = self
+            .boxes
+            .iter()
+            .enumerate()
+            .filter_map(|(k, b)| b.find_hit_m(origin, direction).map(|(t, _)| (t, k)))
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        nearest.is_some_and(|(t, k)| {
+            let hit: &CityBox = &self.boxes[k];
+            let is_pylon_around: bool = hit.group == PYLON_GROUP
+                && hit.to_local(console_center).abs().cmple(hit.half_m).all();
+            t <= reach_m && (k == console.box_index || is_pylon_around)
+        })
+    }
+
+    /// `into_console_check` turns the world into the game server's console check: a hold counts
+    /// while the player aims at the console within `reach_m` plus `CONSOLE_REACH_SLACK_M`
+    /// (`is_console_aimed`).
+    ///
+    /// Example: `let check = CityWorld::Builtin()?.into_console_check(3.0);`
+    pub fn into_console_check(self, reach_m: f64) -> Box<dyn Fn(DMat4, u8) -> bool + Send> {
+        Box::new(move |eye, index| {
+            self.is_console_aimed(eye, index, reach_m + CONSOLE_REACH_SLACK_M)
+        })
+    }
+
+    /// `find_glass_path` plans a walk on the glass level from the unit direction `from` toward
+    /// the unit direction `goal`, avoiding the glass's holes and whatever stands on the glass level
+    /// (covers, pylons) by a body radius and `PATH_CLEARANCE_M` (`PATH_HOLE_CLEARANCE_M` from a
+    /// hole, since a walker that overshoots a turn there falls through): an A* search on a
+    /// longitude-latitude grid of `PATH_CELL_RAD` cells, from the free cell nearest `from` (the
+    /// first waypoint) to the free cell nearest `goal`, then pulled taut into the fewest straight
+    /// legs. It gives the legs' ends as unit directions, or `None` when no walk exists.
+    ///
+    /// Example: `let waypoints = world.find_glass_path(top, console_direction).expect("a path");`
+    pub fn find_glass_path(&self, from: DVec3, goal: DVec3) -> Option<Vec<DVec3>> {
+        let glass: &Shell = self.get_glass()?;
+        let level_m: f64 = glass.radius_m - glass.thickness_m / 2.0;
+        let lat_count: usize = (std::f64::consts::PI / PATH_CELL_RAD).round() as usize;
+        let lon_count: usize = (std::f64::consts::TAU / PATH_CELL_RAD).round() as usize;
+        let to_direction = |cell: usize| -> DVec3 {
+            let (i, j) = (cell / lon_count, cell % lon_count);
+            let lat: f64 = (i as f64 + 0.5) / lat_count as f64 * std::f64::consts::PI
+                - std::f64::consts::FRAC_PI_2;
+            let lon: f64 = j as f64 / lon_count as f64 * std::f64::consts::TAU;
+            DVec3::new(lat.cos() * lon.cos(), lat.sin(), lat.cos() * lon.sin())
+        };
+        let clearance_m: f64 = BODY_RADIUS_M + PATH_CLEARANCE_M;
+        let standing: Vec<&CityBox> = self
+            .boxes
+            .iter()
+            .filter(|b| {
+                let (near_m, far_m) = (
+                    b.center.length() - b.half_m.length(),
+                    b.center.length() + b.half_m.length(),
+                );
+                near_m < level_m && far_m > level_m - BODY_HEIGHT_M
+            })
+            .filter(|b| b.group != STAIRS_GROUP)
+            .collect();
+        let is_free = |d: DVec3| -> bool {
+            let is_near_hole: bool = glass.holes.iter().any(|&(hole, cos)| {
+                d.dot(hole).clamp(-1.0, 1.0).acos()
+                    < cos.acos() + (BODY_RADIUS_M + PATH_HOLE_CLEARANCE_M) / level_m
+            });
+            !is_near_hole
+                && standing.iter().all(|b| {
+                    [
+                        BODY_RADIUS_M,
+                        BODY_HEIGHT_M / 2.0,
+                        BODY_HEIGHT_M - BODY_RADIUS_M,
+                    ]
+                    .iter()
+                    .all(|&height_m| {
+                        let local: DVec3 = b.to_local(d * (level_m - height_m));
+                        (local - local.clamp(-b.half_m, b.half_m)).length() >= clearance_m
+                    })
+                })
+        };
+        let cell_count: usize = lat_count * lon_count;
+        let free: Vec<bool> = (0..cell_count)
+            .map(|cell| is_free(to_direction(cell)))
+            .collect();
+        let find_nearest_free = |d: DVec3| -> Option<usize> {
+            (0..cell_count)
+                .filter(|&cell| free[cell])
+                .min_by(|&a, &b| d.dot(to_direction(b)).total_cmp(&d.dot(to_direction(a))))
+        };
+        let start: usize = find_nearest_free(from)?;
+        let end: usize = find_nearest_free(goal)?;
+        let angle =
+            |a: usize, b: usize| to_direction(a).dot(to_direction(b)).clamp(-1.0, 1.0).acos();
+        let mut cost: Vec<f64> = vec![f64::INFINITY; cell_count];
+        let mut came_from: Vec<usize> = vec![usize::MAX; cell_count];
+        let mut open: BinaryHeap<Reverse<(u64, usize)>> = BinaryHeap::new();
+        cost[start] = 0.0;
+        open.push(Reverse((
+            (angle(start, end) * PATH_COST_PER_RAD) as u64,
+            start,
+        )));
+        while let Some(Reverse((_, cell))) = open.pop() {
+            if cell == end {
+                break;
+            }
+            let (i, j) = (cell / lon_count, cell % lon_count);
+            for (di, dj) in [
+                (-1, -1),
+                (-1, 0),
+                (-1, 1),
+                (0, -1),
+                (0, 1),
+                (1, -1),
+                (1, 0),
+                (1, 1),
+            ] {
+                let ni: i64 = i as i64 + di;
+                if ni < 0 || ni >= lat_count as i64 {
+                    continue;
+                }
+                let nj: usize = (j as i64 + dj).rem_euclid(lon_count as i64) as usize;
+                let next: usize = ni as usize * lon_count + nj;
+                let next_cost: f64 = cost[cell] + angle(cell, next);
+                if free[next] && next_cost < cost[next] {
+                    cost[next] = next_cost;
+                    came_from[next] = cell;
+                    let priority: f64 = (next_cost + angle(next, end)) * PATH_COST_PER_RAD;
+                    open.push(Reverse((priority as u64, next)));
+                }
+            }
+        }
+        if !cost[end].is_finite() {
+            return None;
+        }
+        let mut cells: Vec<usize> = vec![end];
+        while *cells.last().expect("the path has a cell") != start {
+            cells.push(came_from[*cells.last().expect("the path has a cell")]);
+        }
+        cells.reverse();
+        let is_leg_free = |a: DVec3, b: DVec3| -> bool {
+            let sample_count: usize =
+                (a.dot(b).clamp(-1.0, 1.0).acos() / (PATH_CELL_RAD / 2.0)).ceil() as usize;
+            (1..sample_count)
+                .all(|k| is_free(a.lerp(b, k as f64 / sample_count as f64).normalize()))
+        };
+        let mut waypoints: Vec<DVec3> = vec![to_direction(start)];
+        let mut at: usize = 0;
+        while at + 1 < cells.len() {
+            let reach: usize = (at + 1..cells.len())
+                .rev()
+                .find(|&k| is_leg_free(to_direction(cells[at]), to_direction(cells[k])))
+                .unwrap_or(at + 1);
+            waypoints.push(to_direction(cells[reach]));
+            at = reach;
+        }
+        Some(waypoints)
+    }
+
+    /// `is_in_lift` says whether `feet` are over a lift pad, under its hole in the glass (not in
+    /// the stairs' holes, where holding jump does nothing).
     ///
     /// Example: `let can_ride = world.is_in_lift(feet);`
     pub fn is_in_lift(&self, feet: DVec3) -> bool {
-        self.get_glass().is_some_and(|glass| glass.is_in_hole(feet))
+        let d: DVec3 = feet.normalize_or_zero();
+        self.lift_holes
+            .iter()
+            .any(|&(hole, cos)| d.dot(hole) >= cos)
     }
 
     /// `trace_shot` follows a shot from `origin` along `direction` for up to `range_m`: it stops
@@ -569,23 +796,82 @@ impl CityWorld {
         }
     }
 
-    /// `move_player` moves `player` by `input` for `dt_s`: walking along the ground, gravity
-    /// outward, jumping, riding a lift up through the glass while jump is held (hovering
-    /// `LIFT_TOP_UNDER_GLASS_M` over the glass level until they walk off), and collisions with
-    /// the street, the glass (from either side, except in its holes) and the boxes.
+    /// `get_speed_m_per_s` gives the walking or sprinting speed under `settings`: the map's times
+    /// `movement`'s multiplier, as on Lunar Surface.
     ///
-    /// Example: `world.move_player(&mut player, &input, 1.0 / 60.0);`
-    pub fn move_player(&self, player: &mut CityPlayer, input: &CityInput, dt_s: f64) {
+    /// Example: `let sprint_m_per_s = world.get_speed_m_per_s(&settings, true);`
+    pub fn get_speed_m_per_s(&self, settings: &ServerSettings, is_sprinting: bool) -> f64 {
+        if is_sprinting {
+            self.map_sprint_m_per_s * settings.movement.sprint_speed_per_map_speed
+        } else {
+            self.map_walk_m_per_s * settings.movement.walk_speed_per_map_speed
+        }
+    }
+
+    /// `get_jump` gives the jump speed and the gravity under `settings`, as Lunar Surface's
+    /// `VoxelWorld::set_settings` makes them: a jump rises `movement.jump_height_m` in
+    /// `movement.jump_time_per_map_jump_time` of the map's time to the top of a jump.
+    ///
+    /// Example: `let (jump_m_per_s, gravity_m_per_s2) = world.get_jump(&settings);`
+    pub fn get_jump(&self, settings: &ServerSettings) -> (f64, f64) {
+        let movement = &settings.movement;
+        let half_jump_s: f64 = self.map_jump_m_per_s / self.map_gravity_m_per_s2
+            * movement.jump_time_per_map_jump_time;
+        let jump_m_per_s: f64 = 2.0 * movement.jump_height_m / half_jump_s;
+        (jump_m_per_s, jump_m_per_s / half_jump_s)
+    }
+
+    /// `move_player` moves `player` by `input` for `dt_s` under `settings`: sprinting while there
+    /// is sprint energy (`sprint_energy`, as on Lunar Surface: it drains while sprinting and
+    /// refills otherwise), walking along the ground, gravity outward, jumping, riding a lift up
+    /// through the glass while jump is held (hovering `LIFT_TOP_UNDER_GLASS_M` over the glass level
+    /// until they walk off), and collisions with the street, the glass (from either side, except
+    /// in its holes) and the boxes.
+    ///
+    /// Example: `world.move_player(&mut player, &input, &settings, 1.0 / 60.0);`
+    pub fn move_player(
+        &self,
+        player: &mut CityPlayer,
+        input: &CityInput,
+        settings: &ServerSettings,
+        dt_s: f64,
+    ) {
+        let is_moving: bool = input.forward_frac != 0.0 || input.right_frac != 0.0;
+        let wants_to_sprint: bool = input.is_sprinting && is_moving;
+        let energy = &settings.sprint_energy;
+        let energy_change_per_s: f64 = if wants_to_sprint {
+            -1.0 / energy.drain_s
+        } else {
+            1.0 / energy.refill_walking_s
+        };
+        let is_sprinting: bool = wants_to_sprint && player.energy_frac > 0.0;
+        player.is_sprinting = is_sprinting;
+        player.energy_frac = (player.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
+        let speed_m_per_s: f64 = self.get_speed_m_per_s(settings, is_sprinting) * input.speed_frac;
+        let (jump_m_per_s, gravity_m_per_s2) = self.get_jump(settings);
+        let motion: StepMotion = StepMotion {
+            speed_m_per_s,
+            jump_m_per_s,
+            gravity_m_per_s2,
+        };
         let step_count: usize =
             ((player.velocity.length() * dt_s / MAX_STEP_M).ceil() as usize).clamp(1, 16);
         let step_s: f64 = dt_s / step_count as f64;
         for k in 0..step_count {
-            self.step_player(player, input, step_s, k == 0);
+            self.step_player(player, input, &motion, step_s, k == 0);
         }
     }
 
-    /// `step_player` is one sub-step of `move_player`.
-    fn step_player(&self, player: &mut CityPlayer, input: &CityInput, dt_s: f64, is_first: bool) {
+    /// `step_player` is one sub-step of `move_player`, walking at up to `motion`'s speed.
+    fn step_player(
+        &self,
+        player: &mut CityPlayer,
+        input: &CityInput,
+        motion: &StepMotion,
+        dt_s: f64,
+        is_first: bool,
+    ) {
+        let speed_m_per_s: f64 = motion.speed_m_per_s;
         player.align_to_ground();
         let up: DVec3 = player.get_up();
         let (right, back) = (player.body.x_axis, player.body.z_axis);
@@ -593,11 +879,6 @@ impl CityWorld {
         if wish.length_squared() > 1.0 {
             wish = wish.normalize();
         }
-        let speed_m_per_s: f64 = if input.is_sprinting {
-            self.sprint_m_per_s
-        } else {
-            self.walk_m_per_s
-        } * input.speed_frac;
         let v_up: f64 = player.velocity.dot(up);
         let tangent: DVec3 = player.velocity - up * v_up;
         let control: f64 = if player.is_on_ground {
@@ -607,9 +888,9 @@ impl CityWorld {
         };
         let target: DVec3 = wish * speed_m_per_s;
         let new_tangent: DVec3 = tangent + (target - tangent) * (control * 12.0 * dt_s).min(1.0);
-        let mut new_up: f64 = v_up - self.gravity_m_per_s2 * dt_s;
+        let mut new_up: f64 = v_up - motion.gravity_m_per_s2 * dt_s;
         if is_first && input.is_jumping && player.is_on_ground {
-            new_up = self.jump_m_per_s;
+            new_up = motion.jump_m_per_s - motion.gravity_m_per_s2 * dt_s;
         }
         let glass_m: f64 = self.get_glass().map_or(0.0, |glass| glass.radius_m);
         let top_m: f64 = glass_m - LIFT_TOP_UNDER_GLASS_M;
@@ -624,13 +905,16 @@ impl CityWorld {
         player.velocity = new_tangent + up * new_up;
         let before: DVec3 = player.feet;
         player.feet += player.velocity * dt_s;
+        let was_on_ground: bool = player.is_on_ground;
         player.is_on_ground = false;
-        self.collide(player, before);
+        self.collide(player, before, was_on_ground);
     }
 
     /// `collide` pushes `player` out of the street, glass and boxes, `before` being where its feet
-    /// were before this step (which side of the glass it is on).
-    fn collide(&self, player: &mut CityPlayer, before: DVec3) {
+    /// were before this step (which side of the glass it is on). A player who was on the ground
+    /// steps up onto a box whose top is at most `MAX_STEP_UP_M` above their feet (a stair's step)
+    /// instead of being pushed back by its edge.
+    fn collide(&self, player: &mut CityPlayer, before: DVec3, was_on_ground: bool) {
         let up: DVec3 = get_up(player.feet);
         let r: f64 = player.feet.length();
         if r > self.street_radius_m {
@@ -655,6 +939,9 @@ impl CityWorld {
             }
         }
         for city_box in &self.boxes {
+            if was_on_ground {
+                self.step_up(player, city_box, up);
+            }
             for height_m in [
                 BODY_RADIUS_M,
                 BODY_HEIGHT_M / 2.0,
@@ -698,6 +985,27 @@ impl CityWorld {
         }
     }
 
+    /// `step_up` lifts `player`'s feet onto `city_box`'s top when the box stands upright under
+    /// them (its +y along `up`), its top is above the feet by at most `MAX_STEP_UP_M`, and the feet
+    /// are within a body radius of its footprint.
+    fn step_up(&self, player: &mut CityPlayer, city_box: &CityBox, up: DVec3) {
+        if city_box.axes.y_axis.dot(up) < GROUND_NORMAL_COS {
+            return;
+        }
+        let local: DVec3 = city_box.to_local(player.feet);
+        let rise_m: f64 = city_box.half_m.y - local.y;
+        let outside_m: f64 = DVec3::new(
+            (local.x.abs() - city_box.half_m.x).max(0.0),
+            0.0,
+            (local.z.abs() - city_box.half_m.z).max(0.0),
+        )
+        .length();
+        if rise_m > 0.0 && rise_m <= MAX_STEP_UP_M && outside_m < BODY_RADIUS_M {
+            player.feet += city_box.axes.y_axis * rise_m;
+            self.land(player, up);
+        }
+    }
+
     /// `land` stops a player's fall and marks them on the ground.
     fn land(&self, player: &mut CityPlayer, up: DVec3) {
         let v_up: f64 = player.velocity.dot(up);
@@ -707,7 +1015,9 @@ impl CityWorld {
         player.is_on_ground = true;
     }
 
-    /// `make_player` puts a new player at a team's spawn (`index` picks among them).
+    /// `make_player` puts a new player at a team's spawn (`index` picks among them), looking a
+    /// little up (`SPAWN_PITCH_RAD`), since level ground inside the sphere rises ahead and would
+    /// fill the view.
     ///
     /// Example: `let player = world.make_player(0, 1);`
     pub fn make_player(&self, team: u32, index: usize) -> CityPlayer {
@@ -723,12 +1033,22 @@ impl CityWorld {
         CityPlayer {
             feet: frame.w_axis.truncate(),
             body: DMat3::from_mat4(frame),
-            pitch_rad: 0.0,
+            pitch_rad: SPAWN_PITCH_RAD,
             velocity: DVec3::ZERO,
             is_on_ground: true,
             eye_height_m: self.eye_height_m,
+            energy_frac: 1.0,
+            is_sprinting: false,
         }
     }
+}
+
+/// `StepMotion` is how a player moves under the server settings: their speed this frame, the jump
+/// speed and the gravity (`CityWorld::get_jump`).
+struct StepMotion {
+    speed_m_per_s: f64,
+    jump_m_per_s: f64,
+    gravity_m_per_s2: f64,
 }
 
 /// `CityInput` is what a player asks of their body this frame.
@@ -742,7 +1062,8 @@ pub struct CityInput {
 }
 
 /// `CityPlayer` is a player's body: feet, the body's axes (columns right, up, back; up toward the
-/// centre), the head's pitch, velocity and whether it stands on something.
+/// centre), the head's pitch, velocity, whether it stands on something, its sprint energy (1
+/// full, 0 empty) and whether it sprinted in its last move.
 #[derive(Clone, Copy, Debug)]
 pub struct CityPlayer {
     pub feet: DVec3,
@@ -751,6 +1072,8 @@ pub struct CityPlayer {
     pub velocity: DVec3,
     pub is_on_ground: bool,
     pub eye_height_m: f64,
+    pub energy_frac: f64,
+    pub is_sprinting: bool,
 }
 
 impl CityPlayer {
@@ -818,6 +1141,11 @@ mod tests {
         CityWorld::Builtin().expect("the shipped map loads")
     }
 
+    /// `settings` is the built-in `server_settings.yaml`.
+    fn settings() -> ServerSettings {
+        ServerSettings::Builtin()
+    }
+
     #[test]
     fn map_has_one_console_a_team_and_antipodal_spawns() {
         let world: CityWorld = world();
@@ -849,7 +1177,7 @@ mod tests {
         let mut player: CityPlayer = world.make_player(0, 0);
         player.feet *= 0.95;
         for _ in 0..120 {
-            world.move_player(&mut player, &CityInput::default(), 1.0 / 60.0);
+            world.move_player(&mut player, &CityInput::default(), &settings(), 1.0 / 60.0);
         }
         assert!((player.feet.length() - world.street_radius_m).abs() < 1e-3);
         assert!(player.is_on_ground);
@@ -869,7 +1197,7 @@ mod tests {
             ..CityInput::default()
         };
         for _ in 0..240 {
-            world.move_player(&mut player, &ride, 1.0 / 60.0);
+            world.move_player(&mut player, &ride, &settings(), 1.0 / 60.0);
             if player.feet.length() < glass.radius_m - 1.0 {
                 break;
             }
@@ -882,10 +1210,10 @@ mod tests {
         };
         player.body = DMat3::from_cols(player.body.x_axis, player.body.y_axis, player.body.z_axis);
         for _ in 0..90 {
-            world.move_player(&mut player, &step, 1.0 / 60.0);
+            world.move_player(&mut player, &step, &settings(), 1.0 / 60.0);
         }
         for _ in 0..120 {
-            world.move_player(&mut player, &CityInput::default(), 1.0 / 60.0);
+            world.move_player(&mut player, &CityInput::default(), &settings(), 1.0 / 60.0);
         }
         assert_eq!(world.get_side(player.feet), Side::Glass);
         assert!(player.is_on_ground);
