@@ -32,6 +32,7 @@ const MANIFEST_NAME: &str = "map.json";
 const FORMAT: &str = "warped-map";
 const VERSION: u32 = 1;
 const SPACE_HYPERBOLIC: &str = "hyperbolic";
+const DIRECTION_TOLERANCE: f64 = 1e-6;
 
 /// `Space` is the map's space; this demo reads hyperbolic maps only.
 #[derive(Deserialize)]
@@ -179,6 +180,15 @@ pub struct Planet {
     pub angular_radius_rad: f64,
 }
 
+/// `MilkyWay` is where the galaxy's band lies in the sky: the great circle 90° from
+/// `pole_direction`, brightest at `core_direction` (a unit direction perpendicular to it).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MilkyWay {
+    pub pole_direction: [f64; 3],
+    pub core_direction: [f64; 3],
+}
+
 /// `Sky` is how the sky looks and how a ray finds its place in it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,6 +196,7 @@ pub struct Sky {
     pub transport: String,
     pub sun: Sun,
     pub planet: Option<Planet>,
+    pub milky_way: Option<MilkyWay>,
     pub stars: bool,
     pub clouds: bool,
     pub zenith_color: [f32; 3],
@@ -219,12 +230,23 @@ pub struct Boundary {
     pub v_m: f64,
 }
 
-/// `Regions` is the map's zones and boundary.
+/// `ZoneWalls` is how the walls along the team zones' edges look: their height above the ground,
+/// their thickness and their opacity at the ground.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub struct ZoneWalls {
+    pub height_m: f64,
+    pub thickness_m: f64,
+    pub opacity_frac: f64,
+}
+
+/// `Regions` is the map's zones, boundary and zone walls.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Regions {
     pub zones: Option<Vec<Zone>>,
     pub boundary: Option<Boundary>,
+    pub zone_walls: Option<ZoneWalls>,
 }
 
 /// `Lighting` is the lighting model and its numbers (those of the model; the others are absent).
@@ -336,9 +358,31 @@ pub fn to_direction(values: &[f64; 3]) -> DVec3 {
     DVec3::from_array(*values)
 }
 
+/// `check_milky_way` says what is wrong with a Milky Way, if anything: its pole or core isn't a
+/// unit direction, or the core isn't perpendicular to the pole (within `DIRECTION_TOLERANCE`, as
+/// `common/maps/validate_map.py` checks).
+///
+/// Example: `check_milky_way(&milky_way)?;`
+fn check_milky_way(milky_way: &MilkyWay) -> std::result::Result<(), String> {
+    let pole: DVec3 = to_direction(&milky_way.pole_direction);
+    let core: DVec3 = to_direction(&milky_way.core_direction);
+    for (name, direction) in [("pole_direction", pole), ("core_direction", core)] {
+        if (direction.length() - 1.0).abs() > DIRECTION_TOLERANCE {
+            return Err(format!("{name} must be a unit direction, not {direction}"));
+        }
+    }
+    if pole.dot(core).abs() > DIRECTION_TOLERANCE {
+        return Err(format!(
+            "core_direction must be perpendicular to pole_direction, not at a dot product of {}",
+            pole.dot(core)
+        ));
+    }
+    Ok(())
+}
+
 impl Map {
-    /// `Load` reads the map in `folder`, checking the format's name and version and that the
-    /// space is hyperbolic.
+    /// `Load` reads the map in `folder`, checking the format's name and version, that the space is
+    /// hyperbolic and that a Milky Way's pole and core are perpendicular unit directions.
     ///
     /// Example: `let map = Map::Load(&get_map_folder("house_demo"))?;`
     #[allow(non_snake_case)]
@@ -367,6 +411,10 @@ impl Map {
                 map.name, map.space.kind
             )
             .into());
+        }
+        if let Some(milky_way) = &map.sky.milky_way {
+            check_milky_way(milky_way)
+                .map_err(|problem| format!("map: {}: sky.milky_way {problem}", map.name))?;
         }
         Ok(map)
     }
@@ -448,10 +496,13 @@ impl Map {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of curving a map's space more (`Map::scale_curvature`).
+    //! Tests of curving a map's space more (`Map::scale_curvature`) and of checking a map's Milky
+    //! Way (`check_milky_way`).
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
+    //! | Milky Way in the map | none (the house), valid (Lunar Surface) | `shipped_milky_ways_load` |
+    //! | Milky Way's directions | perpendicular unit directions, pole not unit, core not unit, not perpendicular | `milky_way_needs_perpendicular_unit_directions` |
     //! | Factor | 1 (nothing moves), between 1 and 2 (the house at 1.25), 2 (Lunar Surface: the radius halves) | `scaling_by_1_moves_nothing`, `scaling_keeps_fermi_coordinates_and_turns` |
     //! | What moves | structures and spawns (Lunar Surface), boxes and mouths (the house), black holes and lamps (Lunar Surface) | `scaling_keeps_fermi_coordinates_and_turns` |
     //! | Distance in meters | along the middle line v = 0 (stays), across it at the same u (stays), along u away from it (grows) | `distances_on_and_off_the_middle_line` |
@@ -503,6 +554,39 @@ mod tests {
         let r_m: f64 = map.get_curvature_radius_m();
         let a: DVec4 = make_fermi_point(a_m[0], a_m[1], 0.0, r_m);
         get_distance(a, make_fermi_point(b_m[0], b_m[1], 0.0, r_m)) * r_m
+    }
+
+    #[test]
+    fn shipped_milky_ways_load() {
+        assert!(load("house_demo").sky.milky_way.is_none());
+        let milky_way: MilkyWay = load("lunar_surface")
+            .sky
+            .milky_way
+            .expect("Lunar Surface has a Milky Way");
+        assert_eq!(check_milky_way(&milky_way), Ok(()));
+    }
+
+    #[test]
+    fn milky_way_needs_perpendicular_unit_directions() {
+        const UP: [f64; 3] = [0.0, 1.0, 0.0];
+        const ALONG_X: [f64; 3] = [1.0, 0.0, 0.0];
+        const LONG_X: [f64; 3] = [2.0, 0.0, 0.0];
+        const SLANTED: [f64; 3] = [0.6, 0.8, 0.0];
+        let check = |pole_direction: [f64; 3], core_direction: [f64; 3]| {
+            check_milky_way(&MilkyWay {
+                pole_direction,
+                core_direction,
+            })
+        };
+        assert_eq!(check(UP, ALONG_X), Ok(()));
+        for (pole, core, problem) in [
+            (LONG_X, UP, "pole_direction must be a unit direction"),
+            (UP, LONG_X, "core_direction must be a unit direction"),
+            (UP, SLANTED, "core_direction must be perpendicular"),
+        ] {
+            let error: String = check(pole, core).expect_err(problem);
+            assert!(error.contains(problem), "{error}");
+        }
     }
 
     #[test]

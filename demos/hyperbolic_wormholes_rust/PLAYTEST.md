@@ -68,9 +68,10 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
 - Up to 8 players. A laser that reaches another player removes them: their view darkens, says "YOU DIED" with a
   countdown, and they come back at their spawn 3 seconds later.
-- Joining opens a lobby that shows how many players each team has: press `1` to join blue or `2` to join red. You
-  keep your team when you come back after being hit. Lasers hit teammates too, but you can only turn off the other
-  team's consoles. Bots join whichever team has fewer players.
+- Joining opens a lobby that says CONNECTING until the server answers, then CONNECTED with how many players each
+  team has: press `1` to join blue or `2` to join red. You keep your team when you come back after being hit. Lasers
+  hit teammates too, but you can only turn off the other team's consoles. Bots join whichever team has fewer
+  players.
 
 To win on Lunar Surface, turn off all three of the other team's consoles, the pulsing block beside each of its three
 pylons (one near its spawn, one on each flank; a red pylon is past the wormhole on the ridge). Stand within 3 m, look
@@ -84,6 +85,13 @@ every console comes back on and everyone returns to their spawn.
 The habitat modules (the red one stands near the red base, on the side away from the ridge) and the covered walkways
 have windows: glass in real 1 m openings at eye height. You see out of them, and a laser goes through them both ways,
 but you can't climb through.
+
+The edges of the blue and red zones are walls you can see through: faint slabs in the team's colour, 0.6 m thick (a
+player's width), that rise 6 m straight up from the ground along each edge (45 m either side of the middle),
+brightest at their foot and fading out at the top. Seen face-on they are a faint tint; looking along one, or down on
+it, you see its thickness as a stronger band. They follow the ground over the mounds and up the crater's wall, and end
+at the playable area's edge. They stop neither you nor lasers: walk through one to cross into a zone. Their height,
+thickness and opacity are in the map (`regions.zone_walls` in `common/maps/lunar_surface/map.json`).
 
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
 each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
@@ -131,6 +139,11 @@ small lights, a red beacon flashing on top and lit windows on its dark side. It 
 wedge-shaped capital ship with a bridge tower, blue engines and rows of lit windows crosses the sky slowly: 30
 minutes from horizon to horizon, then 6 below it. From the blue spawn it rises on the left and passes highest a
 little right of ahead, 30° up. Both show through the wormholes and around the black hole, like the stars.
+
+Behind everything, the Milky Way arches across the sky from one base to the other, so both teams see it ahead of
+them: a pale band with a warm, brighter core, a dark rift along its middle, dust clouds and faint pink nebulae. To
+dim it or turn it off, lower `milky way 0-1` on the menu's settings page (or `view.milky_way_brightness_frac` in
+your `player_settings.yaml`).
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
 `PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting; once you let go of `Shift` it refills in 7.5 s crouched (`Ctrl`) or 15 s walking or standing),

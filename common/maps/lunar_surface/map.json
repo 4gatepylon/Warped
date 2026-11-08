@@ -8539,6 +8539,18 @@
    ],
    "angular_radius_rad": 0.14835298641951802
   },
+  "milky_way": {
+   "pole_direction": [
+    0.9731116834538869,
+    0.19866933079506122,
+    0.11655105545204082
+   ],
+   "core_direction": [
+    0.005188089220746303,
+    0.48697561629379543,
+    -0.8734001562087768
+   ]
+  },
   "stars": true,
   "clouds": false,
   "zenith_color": [
@@ -8618,6 +8630,11 @@
    "kind": "fermi_ellipse",
    "u_m": 128,
    "v_m": 72
+  },
+  "zone_walls": {
+   "height_m": 6,
+   "thickness_m": 0.6,
+   "opacity_frac": 0.25
   }
  },
  "appearance": {

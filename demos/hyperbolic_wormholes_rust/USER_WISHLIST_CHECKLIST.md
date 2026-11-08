@@ -11,6 +11,13 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
+  frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
+  `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
+  2026-11-08.
+- [~] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Claimed by Claude Code
+  (subagent of a session on `leah`'s Mac in `Warped-main`), branch `claude/screen-tearing`, worktree
+  `/Users/leah/Documents/dev/Warped-rb-tearing`, 2026-11-08.
 - [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
   wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
@@ -19,30 +26,6 @@ is in [`AGENTS.md`](AGENTS.md).
     different rifle model)), branch `claude/rifle-sway`, to be cut from `staging` once W-96 merges; pictures will be in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-102/`
     (temporary, under `/private/tmp`). State, 2026-11-08: not started; starts after W-96 (a different rifle model) merges.
-- [~] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
-  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
-  bar while disabling a pylon". Claimed by Claude Code (worktree `Warped-loading`), branch `claude/loading-screen`,
-  2026-11-08. Loading screen: #292, #293; the user confirmed it ("i love hte loading screen"),
-  2026-11-08. Saying when the server is connected is not done yet.
-- [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, branch `claude/milky-way`
-    (pushed to `origin`: one WIP commit, `1b8ac4e`, with temporary `TEMP_MW*` mock-up hooks; not for merging),
-    pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-98/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: mock-ups of three looks
-    (A subtle, B rich, C photo-like) and one alternative position for the band done, with GPU costs; the user asked
-    for images only for now; nothing built.
-- [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
-  of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac, branch `claude/zone-planes`
-    (on this Mac only so far; to be pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering two
-    levels of translucency; waits for the user's OK before merging.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -60,6 +43,16 @@ is in [`AGENTS.md`](AGENTS.md).
   The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
   commit the models with textures downscaled (about 20 MB).
   Claimed by Devin (session Devin Desktop 2026-11-07), branch `devin/models-prepare`, 2026-11-07.
+- [~] **W-106 Teal robot player model.** "Replace the player model with that [Teal V.2] and rig it with an animation":
+  the Sketchfab model "Teal V.2" by Lagst (`d6a54ff9468c451bbdbd879afa03f20a`, Sketchfab Standard) replaces the
+  1 × 4 voxel column drawn for every player's body (the others', and your own in the third-person view, W-61
+  (third-person view)). The user chose: idle, walk, run, jump and death clips, keyframed in Blender on the model's own
+  rig; lasers keep hitting the current box, not the triangles; the model is ray-traced with W-94 (Sketchfab models for
+  the voxel assets)'s triangle renderer. Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch
+  `claude/teal-player`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-teal` on
+    `leah`'s Mac, branch `claude/teal-player` (not pushed yet), to be stacked on W-94 (Sketchfab models for the voxel
+    assets)'s branch once that is pushed. State, 2026-11-08: started; the clips are made first.
 
 ## Open
 
@@ -117,6 +110,8 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
+  reality bending version). #316.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
   good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
@@ -153,11 +148,24 @@ are here too, since the user hadn't confirmed them.
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
+- [?] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
+  From three looks, the user picked C, photo-like ("get milky way photo like merged"): drawn in code, arching across
+  the sky from base to base (a placement chosen for the user), its brightness in `player_settings.yaml` (D102).
+  #317.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/milky-way` (pushed to `origin`),
+    worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, built by Claude
+    Code and finished by Devin; final pictures in
+    `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-98/final/`. State,
+    2026-11-08: on `staging`, waiting for the user to test it.
 
 ## Done
 
 Confirmed by the user after testing.
 
+- [x] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
+  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
+  bar while disabling a pylon". Loading screen: #292, #293; connected: the lobby says CONNECTING, then CONNECTED,
+  #307. Confirmed by the user, 2026-11-08: "i love hte loading screen", then "looks good".
 - [x] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
 - [x] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. #197–#204. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
@@ -370,3 +378,6 @@ Confirmed by the user after testing.
   character, and the player controls it from there, seeing their own character. `V` switches to a view from 3 m
   behind and 0.6 m above the head, pulled in when a wall or the ground is behind it; shots go from the head into the
   crosshair, and aiming looks from the eye again. #286. Confirmed by the user, 2026-11-08: "third person looks good its done mark at such".
+- [x] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
+  of the ground, just barely translucent, to mark out the real zones. Then, from the pictures: "Level A, faint", and
+  "the blates should also have a little bit of thickness (rougly 1 player worth of thickenss)". #291. Confirmed by the user, 2026-11-08: "please merge the fact that the walls are odne", "(zone planes are done)".

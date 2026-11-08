@@ -38,6 +38,7 @@ use crate::voxel_textures::SurfaceTextures;
 use crate::voxel_world::{
     BeamSegment, MAX_MATERIAL_COUNT, VoxelWarp, VoxelWorld, clip_beam_to_map,
 };
+use crate::zone_walls::{GpuZoneWalls, MAX_ZONE_WALL_COUNT};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -58,6 +59,9 @@ const HAND_LIGHT_BUFFER_INDEX: usize = 28;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
 const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
+const MILKY_WAY_TEXTURE_INDEX: usize = 3;
+const MILKY_WAY_TEXTURE_PX: (usize, usize) = (4096, 1024);
+const BAKE_TARGET_TEXTURE_INDEX: usize = 0;
 const BLOOM_LEVELS: usize = 5;
 const FIRST_BLOOM_TEXTURE_INDEX: usize = 7;
 const THREADGROUP_SIDE: usize = 8;
@@ -118,6 +122,9 @@ pub struct VoxelUniforms {
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
     pub beam_speckle: [f32; 4],
+    pub zone_walls: GpuZoneWalls,
+    pub milky_way_pole: [f32; 4],
+    pub milky_way_core: [f32; 4],
 }
 
 const _: () = assert!(
@@ -467,6 +474,15 @@ impl VoxelFrame {
             })
             .collect();
         let (dust_bursts, dust_particles) = pack_dust(dust);
+        let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
+            GpuZoneWalls {
+                walls: [[0.0; 4]; MAX_ZONE_WALL_COUNT],
+                look: [0.0; 4],
+                boundary: [0.0; 4],
+                counts: [0; 4],
+            },
+            |walls| walls.to_gpu(r),
+        );
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
         let (planet, e1, e2) = match world.planet {
             Some((d, radius_rad)) => {
@@ -560,6 +576,15 @@ impl VoxelFrame {
                 world.settings.beam_speckle.white_frac as f32,
                 0.0,
             ],
+            zone_walls,
+            milky_way_pole: world.milky_way.map_or([0.0; 4], |(pole, _)| {
+                pole.as_vec3()
+                    .extend(world.milky_way_brightness_frac as f32)
+                    .to_array()
+            }),
+            milky_way_core: world
+                .milky_way
+                .map_or([0.0; 4], |(_, core)| core.as_vec3().extend(0.0).to_array()),
         };
         assert_eq!(
             world.palette.len(),
@@ -740,6 +765,7 @@ fn compile_library(
         )
         .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
         .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+        .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
         .replace(
             "__BYTES_PER_VOXEL_UNIFORMS__",
             &std::mem::size_of::<VoxelUniforms>().to_string(),
@@ -772,7 +798,8 @@ fn make_trace_pipelines(
 }
 
 /// `VoxelGpu` is the voxel renderer's pipelines (the flat and the bent ray tracer's, the
-/// post-processing's and the held gun's light probe), buffers, surface textures and HDR textures.
+/// post-processing's, the held gun's light probe and the Milky Way's bake), buffers, surface
+/// textures, HDR textures, and the Milky Way's texture with whether it is baked yet.
 pub struct VoxelGpu {
     flat: TracePipelines,
     bent: TracePipelines,
@@ -780,9 +807,12 @@ pub struct VoxelGpu {
     hand_light: Retained<ProtocolObject<dyn MTLBuffer>>,
     bloom_down: Pipeline,
     tonemap: Pipeline,
+    bake_milky_way: Pipeline,
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
     post: Option<PostTextures>,
+    milky_way: Texture,
+    is_milky_way_baked: bool,
 }
 
 impl VoxelGpu {
@@ -809,11 +839,14 @@ impl VoxelGpu {
                 .ok_or("Metal: no memory for the hand light")?,
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
+            bake_milky_way: make_pipeline(device, &library, "bake_milky_way")?,
             buffers: (0..SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len())
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
             textures,
             post: None,
+            milky_way: make_hdr_texture(device, MILKY_WAY_TEXTURE_PX)?,
+            is_milky_way_baked: false,
         })
     }
 
@@ -827,7 +860,8 @@ impl VoxelGpu {
 
     /// `encode` uploads a frame, probes the light at the eye for the held gun, and traces it into
     /// the HDR texture (with `samples`, by adaptive sampling into those buffers, otherwise one ray
-    /// per pixel), then blooms, grades and tone maps it into `target`.
+    /// per pixel), then blooms, grades and tone maps it into `target`. The first call bakes the
+    /// Milky Way into its texture first; later frames only read it.
     ///
     /// Example: `gpu.encode(&device, &encoder, &frame, None, &render_texture)?;`
     pub(crate) fn encode(
@@ -853,6 +887,12 @@ impl VoxelGpu {
                 .as_ref()
                 .map_or(as_bytes(&NO_MOUNDS), |g| as_bytes(&g.heights)),
         ];
+        if !self.is_milky_way_baked {
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE BAKE WRITING THE WRONG TEXTURE WILL HAPPEN
+            unsafe { encoder.setTexture_atIndex(Some(&self.milky_way), BAKE_TARGET_TEXTURE_INDEX) };
+            dispatch(encoder, &self.bake_milky_way, MILKY_WAY_TEXTURE_PX);
+            self.is_milky_way_baked = true;
+        }
         let means: &[[f32; 4]] = &self.textures.means;
         let maps = [
             &self.textures.albedo,
@@ -869,6 +909,7 @@ impl VoxelGpu {
             for (k, map) in maps.iter().enumerate() {
                 encoder.setTexture_atIndex(Some(map), FIRST_SURFACE_TEXTURE_INDEX + k);
             }
+            encoder.setTexture_atIndex(Some(&self.milky_way), MILKY_WAY_TEXTURE_INDEX);
         }
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN

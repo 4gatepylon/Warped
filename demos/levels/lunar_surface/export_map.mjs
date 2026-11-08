@@ -25,7 +25,11 @@ const SUN_COLOR = [1.0, 0.96, 0.88];
 const LIGHTING = { model: 'lunar_lambert', lommel_seeliger_frac: 0.7, ambient: 0.11, earthshine: 0.08, sun_intensity: 1.45, shadows: true };
 const SPACE_COLOR = [0, 0, 0];
 const TEAM_NAMES = ['blue', 'red'];
+const ZONE_WALLS = { height_m: 6, thickness_m: 0.6, opacity_frac: 0.25 };
 const TERRAIN = { kind: 'crater', rim_u_m: 190, rim_v_m: 90, wall_m: 30, rim_height_m: 22, relief_m: 2.5, relief_wavelength_m: 18, seed: 1 };
+const MILKY_WAY_POLE_ELEVATION_RAD = 0.2;
+const MILKY_WAY_POLE_AZIMUTH_RAD = 1.69;
+const MILKY_WAY_CORE_ALONG_BAND_RAD = 0.52;
 
 /**
  * `cut_between` returns the text of `source` from the start of `start` to the start of `end`.
@@ -73,6 +77,24 @@ function make_sky_direction(elevation_rad, azimuth_rad) {
 }
 
 /**
+ * `make_milky_way` gives the sky's Milky Way: its pole, from an elevation and an azimuth as `make_sky_direction` takes
+ * them, and its core, on the band (the great circle 90° from the pole), an angle along it from where the band meets the
+ * horizon on the pole's left toward where it stands highest.
+ * @param {number} pole_elevation_rad The pole's angle above the ground.
+ * @param {number} pole_azimuth_rad The pole's angle from +u toward +v.
+ * @param {number} core_along_band_rad The core's angle along the band from the horizon.
+ * @return {Object} `{pole_direction, core_direction}`, two perpendicular unit directions.
+ * @example const milky_way = make_milky_way(0.2, 1.69, 0.52);
+ */
+function make_milky_way(pole_elevation_rad, pole_azimuth_rad, core_along_band_rad) {
+  const pole = make_sky_direction(pole_elevation_rad, pole_azimuth_rad), length = Math.hypot(pole[0], pole[2]);
+  const horizon = [pole[2] / length, 0, -pole[0] / length];
+  const top = [pole[1] * horizon[2], pole[2] * horizon[0] - pole[0] * horizon[2], -pole[1] * horizon[0]];
+  const core = horizon.map((h, i) => Math.cos(core_along_band_rad) * h + Math.sin(core_along_band_rad) * top[i]);
+  return { pole_direction: pole, core_direction: core };
+}
+
+/**
  * `make_map` turns the level into a map manifest.
  * @param {Object} level What `run_level` returned.
  * @return {Object} The map manifest.
@@ -117,6 +139,7 @@ function make_map(level) {
     sky: {
       transport: 'parallel', sun: { direction: make_sky_direction(level.SUN_ELEVATION_RAD, level.SUN_AZIMUTH_RAD), color: SUN_COLOR },
       planet: { direction: make_sky_direction(level.PLANET_ELEVATION_RAD, level.PLANET_AZIMUTH_RAD), angular_radius_rad: level.PLANET_RADIUS_RAD },
+      milky_way: make_milky_way(MILKY_WAY_POLE_ELEVATION_RAD, MILKY_WAY_POLE_AZIMUTH_RAD, MILKY_WAY_CORE_ALONG_BAND_RAD),
       stars: true, clouds: false, zenith_color: SPACE_COLOR, horizon_color: SPACE_COLOR
     },
     spawns,
@@ -126,7 +149,8 @@ function make_map(level) {
         { team: 'middle', u_min_m: -level.ZONE_EDGE_U_M, u_max_m: level.ZONE_EDGE_U_M },
         { team: 'red', u_min_m: level.ZONE_EDGE_U_M, u_max_m: null }
       ],
-      boundary: { kind: 'fermi_ellipse', u_m: level.BOUNDARY_U_M, v_m: level.BOUNDARY_V_M }
+      boundary: { kind: 'fermi_ellipse', u_m: level.BOUNDARY_U_M, v_m: level.BOUNDARY_V_M },
+      zone_walls: ZONE_WALLS
     },
     appearance: { style: 'lunar', lighting: LIGHTING }
   };
