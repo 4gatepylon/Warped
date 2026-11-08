@@ -811,6 +811,21 @@
   well on the dark sky and the lit blocks).
 - **Rationale:** you asked for a crosshair.
 
+### D70. A flashlight
+
+- **Choice:** right-click turns a flashlight on or off. On voxel maps it lights surfaces in a cone from the eye along
+  the view, measured along the curved space's geodesics:
+  - **Cone:** full inside 0.3 rad of the axis, softening to nothing 0.08 rad further out.
+  - **Range:** half as bright at 25 m.
+  - **Facing:** as bright as the surface faces it.
+  - **Brightness:** twice full sunlight, so its cone shows on the sunlit moon as well as in shadows.
+  - **Settings:** all four numbers are under `flashlight` in `game_settings.yaml`.
+  - **What it lights:** it casts no shadows (from the eye they would be hidden anyway), lights no dust in the air,
+    and only its owner sees it.
+- **Alternatives:** a light at the wand's tip (it would light the wand's side of everything and show shadows);
+  other players' flashlights (each would need a bit in the snapshot and a light in the shader).
+- **Rationale:** you asked for a right-click flashlight that shines in a neat cone.
+
 
 ## Baselines
 

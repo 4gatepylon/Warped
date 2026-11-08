@@ -19,7 +19,7 @@ use objc2_metal::{
     MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
 };
 
-use crate::geometry::get_distance;
+use crate::geometry::{AXIS_W, AXIS_Z, get_distance};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
@@ -75,6 +75,9 @@ pub struct VoxelUniforms {
     pub spot: [f32; 4],
     pub spot_color: [f32; 4],
     pub regions: [f32; 4],
+    pub flashlight_position: [f32; 4],
+    pub flashlight_direction: [f32; 4],
+    pub flashlight: [f32; 4],
 }
 
 /// `GpuStructure` is the shader's `VoxelStructure`.
@@ -300,6 +303,21 @@ impl VoxelFrame {
             }),
             regions: world.regions.map_or([0.0; 4], |[edge, u_m, v_m]| {
                 [edge as f32, u_m as f32, v_m as f32, 0.0]
+            }),
+            flashlight_position: world
+                .flashlight_eye
+                .map_or([0.0, 0.0, 0.0, 1.0], |eye| to_f32(eye.col(AXIS_W))),
+            flashlight_direction: world
+                .flashlight_eye
+                .map_or([0.0; 4], |eye| to_f32(-eye.col(AXIS_Z))),
+            flashlight: world.flashlight_eye.map_or([0.0; 4], |_| {
+                let light = &world.settings.flashlight;
+                [
+                    light.cone_half_angle_rad.cos() as f32,
+                    (light.cone_half_angle_rad + light.soft_edge_rad).cos() as f32,
+                    light.range_m as f32,
+                    light.brightness_frac as f32,
+                ]
             }),
         };
         assert_eq!(

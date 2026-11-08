@@ -127,6 +127,17 @@ pub struct WhenHitSettings {
     pub blur_px: f64,
 }
 
+/// `FlashlightSettings` is the flashlight's cone (half its opening angle and the width of its soft
+/// edge), the distance at which its light falls to half, and its brightness against the sun's.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct FlashlightSettings {
+    pub cone_half_angle_rad: f64,
+    pub soft_edge_rad: f64,
+    pub range_m: f64,
+    pub brightness_frac: f64,
+}
+
 /// `DisplaySettings` is how long motion smears in the window.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -146,6 +157,7 @@ pub struct GameSettings {
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
     pub when_hit: WhenHitSettings,
+    pub flashlight: FlashlightSettings,
     pub display: DisplaySettings,
 }
 
