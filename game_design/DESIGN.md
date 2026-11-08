@@ -359,7 +359,7 @@ Every weapon follows these rules:
 
 | Parameter | Sniper rifle (`1`) | Rifle (`2`) |
 | --- | --- | --- |
-| Looks | The energy revolver | A wooden bolt-action rifle with a scope, drawn small so its body shows |
+| Looks | A wooden bolt-action rifle with a scope, drawn small so its body shows | The energy revolver |
 | Fire rate, at most | 1 shot every 2 s (a 2 s reload) | 8 shots/s while the button is held |
 | Overheats after | Never: it reloads after each shot | 20 shots in a row; cools down fully in 2 s without firing |
 | Hits to kill, head (the top half-meter) | 1 | 2 |

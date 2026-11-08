@@ -11,6 +11,12 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
+  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
+  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere.
+  Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch `claude/time-dilation`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-time-dilation` on
+    `leah`'s Mac, branch `claude/time-dilation` (pushed to `origin` once it has commits). State, 2026-11-08: started.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
@@ -107,7 +113,8 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
   good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
-  (D106). #304.
+  (D106). #304. Then: "make a quick PR to switch which gun model is used where; we accientally got them flipped":
+  the sniper (gun 1) now holds the bolt-action rifle and the rifle (gun 2) the energy revolver. #318.
   - **Where the work is** (for any agent picking it up): merged from branch `claude/rifle-model` (pushed to
     `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac,
     pictures in
