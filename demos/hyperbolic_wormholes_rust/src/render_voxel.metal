@@ -205,8 +205,10 @@ constant float FINE_STAR_BRIGHTNESS = 0.5;
 constant float3 MILKY_WAY_COLOR = float3(0.75, 0.8, 1.0);
 constant float MILKY_WAY_BRIGHTNESS = 0.05;
 constant float MILKY_WAY_DETAIL = 6.0;
-constant float BEAM_HALO_OPACITY = 0.9;
-constant float BEAM_CORE_WHITENESS = 0.6;
+constant float BEAM_HAZE_BRIGHTNESS = 0.45;
+constant float BEAM_HAZE_WHITENESS = 0.45;
+constant float BEAM_CORE_BRIGHTNESS = 1.6;
+constant float BEAM_CORE_WHITENESS = 0.9;
 constant float3 BLUE_COLOR = float3(0.30, 0.62, 1.0);
 constant float3 RED_COLOR = float3(1.0, 0.16, 0.08);
 constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
@@ -1453,7 +1455,7 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form), with the brightest halo's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */
+/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a flat-topped blade (`core`) and a soft haze (`halo`), with the brightest haze's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */
 static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &team) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
     for (int i = 0; i < scene.u.beam_count; i++) {
@@ -1471,7 +1473,7 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float d_m = measure_gap(xc, geodesic_point(a, b, sigma)) * r;
         float width_m = max(BEAM_RADIUS_M, pix * r * sinh(min(travelled + s_c, FAR_S)));
         float q = d_m * d_m / (width_m * width_m);
-        core = max(core, info.z * exp(-q));
+        core = max(core, info.z * exp(-q * q * q));
         float hl = info.z * exp(-q / BEAM_REACH);
         if (hl > halo) { halo = hl; team = info.w; }
     }
@@ -1690,7 +1692,8 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
     float3 beam_color = to_linear(end.surface.w > 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
     if (end.dust.w > 0.0) color = mix(color, end.dust.rgb / end.dust.w, 1.0 - exp(-end.dust.w));
-    color = mix(color, beam_color, clamp(BEAM_HALO_OPACITY * halo, 0.0, 1.0)) + mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * core;
+    color += mix(beam_color, float3(1.0), BEAM_HAZE_WHITENESS) * BEAM_HAZE_BRIGHTNESS * halo;
+    color = mix(color, mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS, saturate(core));
     return max(color, 0.0);
 }
 

@@ -147,7 +147,10 @@ constant float3 GRASS_DARK_COLOR = float3(0.36, 0.60, 0.25);
 constant float3 GRASS_LIGHT_COLOR = float3(0.40, 0.65, 0.28);
 constant float3 GLASS_SHEEN_COLOR = float3(0.95);
 constant float3 LASER_HALO_COLOR = float3(1.0, 0.06, 0.03);
-constant float3 LASER_CORE_COLOR = float3(1.0, 0.62, 0.52);
+constant float3 LASER_CORE_COLOR = float3(1.0, 0.92, 0.9);
+constant float LASER_HAZE_BRIGHTNESS = 0.45;
+constant float LASER_HAZE_WHITENESS = 0.45;
+constant float LASER_CORE_BRIGHTNESS = 1.6;
 constant float DIRT_FRACTION = 0.04;
 constant float TEXTURE_CELLS_PER_BLOCK = 8.0;
 constant float TEXTURE_MIN = 0.86;
@@ -877,7 +880,8 @@ static void add_beam_glow(thread const Scene &scene, int row, float4 a, float4 b
             float t_m = t0_m + s * (t1_m - t0_m);
             float sigma = max(beam_radius, scene.u.pixel_angle_rad * tanh(t_m / r));
             float fade = exp(-q0.w / BEAM_FADE_M);
-            core = max(core, fade * exp(-d2 / (sigma * sigma)));
+            float q = d2 / (sigma * sigma);
+            core = max(core, fade * exp(-q * q * q));
             halo = max(halo, fade * exp(-d2 / (4.8 * sigma * sigma)));
             q0 = q1;
         }
@@ -1568,7 +1572,8 @@ static float3 shade_ray_end(thread const Scene &scene, RayEnd end) {
         halo = max(halo, spot);
         core = max(core, spot * spot);
     }
-    color = mix(color, LASER_HALO_COLOR, clamp(0.9 * halo, 0.0, 1.0)) + LASER_CORE_COLOR * core;
+    color += mix(LASER_HALO_COLOR, float3(1.0), LASER_HAZE_WHITENESS) * LASER_HAZE_BRIGHTNESS * halo;
+    color = mix(color, LASER_CORE_COLOR * LASER_CORE_BRIGHTNESS, saturate(core));
     color = color / (1.0 + max(color - 1.0, 0.0) * HIGHLIGHT_ROLLOFF);
     return clamp(color, 0.0, 1.0);
 }

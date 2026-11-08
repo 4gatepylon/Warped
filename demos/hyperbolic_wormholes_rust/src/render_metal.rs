@@ -146,6 +146,17 @@ pub struct OverlayWand {
     pub tip_color: [f32; 4],
 }
 
+impl OverlayWand {
+    /// `get_tip_m` gives the front of the wand's tip in camera space, where the gun's muzzle is.
+    ///
+    /// Example: `let muzzle_m = wand.get_tip_m();`
+    pub fn get_tip_m(&self) -> glam::Vec3 {
+        let reach_m: f32 = self.shaft_half_m[2] + 2.0 * self.tip_half_m[2];
+        glam::Vec4::from(self.center_m).truncate()
+            - glam::Vec4::from(self.axes[2]).truncate() * reach_m
+    }
+}
+
 /// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0),
 /// an RGBA colour (A the opacity), how it looks beyond its colour (`FLAT_RECT_STYLE` for a
 /// plain rectangle) and the pulses it carries for its bar (`NO_RECT_PULSE` for none).

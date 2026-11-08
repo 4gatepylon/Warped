@@ -166,9 +166,9 @@ const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
 const GUN_POSE_PER_S: f64 = 6.0;
 const WAND_JOG_CENTER_M: [f32; 3] = [0.22, -0.22, -0.34];
-const WAND_AIM_YAW_RAD: f32 = 0.06;
+const WAND_AIM_YAW_RAD: f32 = 0.117;
 const WAND_JOG_YAW_RAD: f32 = 0.35;
-const WAND_AIM_PITCH_RAD: f32 = 0.06;
+const WAND_AIM_PITCH_RAD: f32 = 0.098;
 const WAND_JOG_PITCH_RAD: f32 = -0.35;
 const WAND_JOG_ROLL_RAD: f32 = 0.5;
 const WAND_JOG_SWING_RAD: f32 = 0.18;
@@ -1834,7 +1834,8 @@ impl PackedFrame {
 /// `Tracer` is a fired laser drawn as a beam flying out along its path (`segments`, traced when it
 /// was fired, `length_m` long): its front leaves the muzzle at `fired_s` (seconds into the session)
 /// and moves at `speed_m_per_s`, each point stays lit for `trail_s` after the front passes it, and
-/// `spot` glows where it hit while the trail is there.
+/// `spot` glows where it hit while the trail is there. This player's own shots (`is_own`) stay
+/// joined to the gun in hand while their trail still reaches the muzzle.
 struct Tracer {
     segments: Vec<voxel_world::BeamSegment>,
     length_m: f64,
@@ -1843,6 +1844,7 @@ struct Tracer {
     fired_s: f64,
     speed_m_per_s: f64,
     trail_s: f64,
+    is_own: bool,
 }
 
 impl Tracer {
@@ -1885,6 +1887,7 @@ impl Tracer {
             fired_s,
             speed_m_per_s,
             trail_s,
+            is_own: false,
         }
     }
 
@@ -2075,7 +2078,7 @@ impl Session {
             is_running: false,
             is_jumping: false,
             is_walking_upright: false,
-            gun: Gun::Laser,
+            gun: Gun::Rifle,
             is_trigger_held: false,
             is_flashlight_on: false,
             rifle_next_shot_s: 0.0,
@@ -2837,7 +2840,10 @@ impl Session {
                 && let Some(shot) = &view.shot
             {
                 let is_rifle: bool = self.gun == Gun::Rifle;
-                let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                let tracer = Tracer {
+                    is_own: true,
+                    ..Tracer::New(shot, team, now_s, is_rifle, &self.settings, r)
+                };
                 add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                 self.tracers.push(tracer);
             }
@@ -3108,21 +3114,50 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team, on a map of curvature radius `r`.
+    /// shooter's team, on a map of curvature radius `r`. While the trail of one of this player's
+    /// own shots still reaches the muzzle, its beam starts at the gun's tip as drawn now
+    /// (`get_muzzle`), so it stays on the tip as the gun moves.
     ///
     /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
     fn get_lit_beams(&self, r: f64) -> Vec<(Vec<voxel_world::BeamSegment>, u32)> {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
+        let muzzle: Option<glam::DVec4> = self.get_muzzle(r);
         self.tracers
             .iter()
             .map(|tracer| {
                 let (tail_m, head_m) = tracer.get_lit_m(now_s);
-                (
-                    voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m),
-                    tracer.team,
-                )
+                let mut lit: Vec<voxel_world::BeamSegment> =
+                    voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m);
+                if tracer.is_own
+                    && tail_m <= 0.0
+                    && let (Some(muzzle), Some(first)) = (muzzle, lit.first_mut())
+                    && let Some(joined) = voxel_world::BeamSegment::Between(
+                        muzzle,
+                        voxel_world::geodesic_point(first.a, first.b, first.length),
+                    )
+                {
+                    *first = joined;
+                }
+                (lit, tracer.team)
             })
             .collect()
+    }
+
+    /// `get_muzzle` gives where the tip of the gun in hand shows in the world, on a map of
+    /// curvature radius `r`: the wand's tip in camera space, moved toward the view's centre by the
+    /// aim zoom (which magnifies the scene but not the gun), or `None` with no gun in view.
+    ///
+    /// Example: `let muzzle = self.get_muzzle(voxel.world.r);`
+    fn get_muzzle(&self, r: f64) -> Option<glam::DVec4> {
+        let tip_m: glam::DVec3 = self.get_wand()?.get_tip_m().as_dvec3();
+        let zoom: f64 = self.get_zoom();
+        Some(
+            self.get_eye_frame()
+                * voxel_world::map_exp(
+                    glam::DVec3::new(tip_m.x / zoom, tip_m.y / zoom, tip_m.z),
+                    r,
+                ),
+        )
     }
 
     /// `make_overlay_minimap` gives the minimap for a window of `window_px` (`minimap.rs`): around
