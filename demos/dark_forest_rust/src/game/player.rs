@@ -177,6 +177,14 @@ impl Player {
             .is_some_and(|time_s: f32| time_s > RESPAWN_DELAY_S)
     }
 
+    /// `get_respawn_in_s` is how long until a dead player respawns (`None` while alive).
+    ///
+    /// Example: `if let Some(left_s) = player.get_respawn_in_s() { ... }`
+    pub fn get_respawn_in_s(&self) -> Option<f32> {
+        self.dead_time_s
+            .map(|time_s: f32| (RESPAWN_DELAY_S - time_s).max(0.0))
+    }
+
     /// `update` applies one frame of input and physics.
     pub fn update(
         &mut self,
