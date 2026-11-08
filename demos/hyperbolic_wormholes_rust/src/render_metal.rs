@@ -52,8 +52,9 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
 /// frame's height the mask's text may take, a picture under the text, how far the scene
 /// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), the
-/// minimap, and how far into the blueshift after a wormhole the scene is (the shader's
-/// `blueshift_scene`: 1 at its peak, 0 for none).
+/// minimap, and how far the scene blueshifts inside a wormhole mouth (the shader's
+/// `blueshift_scene`: 1 for walking straight ahead at the throat, negative for a redshift, 0 for
+/// none).
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
