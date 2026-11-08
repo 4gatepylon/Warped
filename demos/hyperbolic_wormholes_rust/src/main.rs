@@ -98,6 +98,7 @@ use world::{DEFAULT_CURVATURE_RADIUS_M, EYE_HEIGHT_M, World};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const BYTES_PER_PIXEL: usize = 4;
+const LONE_MOUTH_HITS_TO_DESTROY: u8 = 1;
 const CPU_RENDER_SCALE: f64 = 0.35;
 const METAL_RENDER_SCALE: f64 = 1.0;
 const MIN_AUTO_RENDER_SCALE: f64 = 0.5;
@@ -2705,8 +2706,10 @@ impl Session {
     }
 
     /// `report_wormhole_hits` tells the server, once per shot, whose enemy wormholes this player's
-    /// shot went into (`entered_pairs`, indices into the world's thrown pairs) or hit
-    /// (`hit_marker`, an index into `markers`, if it is a mouth's).
+    /// shot went into (`entered_pairs`, indices into the world's thrown pairs), which counts toward
+    /// destroying them by the gun, or hit (`hit_marker`, an index into `markers`, if it is a lone
+    /// mouth's ball), which destroys it at once. A shot at this player's own or a teammate's
+    /// wormholes does nothing.
     ///
     /// Example: `self.report_wormhole_hits(&[0], None, &markers);`
     fn report_wormhole_hits(
@@ -2719,32 +2722,33 @@ impl Session {
             return;
         };
         let team: Option<u32> = multiplayer.client.team;
-        let is_enemy = |id: &u32| {
-            let player = multiplayer.client.players.iter().find(|p| p.id == *id);
+        let is_enemy = |&(id, _): &(u32, u8)| {
+            let player = multiplayer.client.players.iter().find(|p| p.id == id);
             player.is_some_and(|p| Some(p.team) != team)
         };
-        let mut enemy_ids: Vec<u32> = entered_pairs
-            .iter()
-            .map(|&i| self.thrown_pair_owners[i])
-            .chain(
-                hit_marker
-                    .filter(|&k| markers[k].1.is_mouth)
-                    .map(|k| markers[k].0),
-            )
-            .flatten()
-            .filter(is_enemy)
-            .collect();
-        enemy_ids.dedup();
-        if self.has_shot_hit_wormholes || enemy_ids.is_empty() {
-            return;
-        }
-        self.has_shot_hit_wormholes = true;
-        let hits_to_destroy: u8 = match self.gun {
+        let gun_hits_to_destroy: u8 = match self.gun {
             Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
             Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
         };
+        let mut enemy_hits: Vec<(u32, u8)> = entered_pairs
+            .iter()
+            .filter_map(|&i| self.thrown_pair_owners[i])
+            .map(|id| (id, gun_hits_to_destroy))
+            .chain(
+                hit_marker
+                    .filter(|&k| markers[k].1.is_mouth)
+                    .and_then(|k| markers[k].0)
+                    .map(|id| (id, LONE_MOUTH_HITS_TO_DESTROY)),
+            )
+            .filter(is_enemy)
+            .collect();
+        enemy_hits.dedup_by_key(|&mut (id, _)| id);
+        if self.has_shot_hit_wormholes || enemy_hits.is_empty() {
+            return;
+        }
+        self.has_shot_hit_wormholes = true;
         let multiplayer: &mut Multiplayer = self.multiplayer.as_mut().expect("checked above");
-        for id in enemy_ids {
+        for (id, hits_to_destroy) in enemy_hits {
             if let Err(error) = multiplayer.client.send_wormhole_hit(id, hits_to_destroy) {
                 self.show_message(format!("Couldn't reach the server: {error}"));
                 return;

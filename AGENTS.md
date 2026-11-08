@@ -230,7 +230,8 @@ When the user tests a game or other visual work you made, follow the `playtestin
 
 Coordinate agents working in parallel (subagents, other sessions, Codex, Devin) with the `managing-agents` skill
 (`.agents/skills/managing-agents/`), and merge with the `merging-to-staging` skill
-(`.agents/skills/merging-to-staging/`).
+(`.agents/skills/merging-to-staging/`). NEVER change the branch of the user's own checkout, for any reason: do git
+work in a worktree of your own.
 
 ## Assets
 
