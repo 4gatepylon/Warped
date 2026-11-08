@@ -121,9 +121,6 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. #210.
-- [?] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
-  the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
-  #210.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
   #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
@@ -315,3 +312,6 @@ Confirmed by the user after testing.
   and team. #164. Confirmed by the user, 2026-11-07: "kd stuff also looiks good so add that as complete as well".
 - [x] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
   menu opens on the SCORES page. #265. Confirmed by the user, 2026-11-07: "scores page change looks good, mark it as done in a pr".
+- [x] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
+  the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
+  #210. Confirmed by the user, 2026-11-07: "no spaceship on blue side looks good mark it as done".
