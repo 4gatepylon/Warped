@@ -1,6 +1,10 @@
-# Design slides
+# Preliminary design slides
 
-`index.html` is a slide deck, in HTML and SVG, of the design in [`../DESIGN.md`](../DESIGN.md):
+This is the preliminary design deck, from before the game was built, kept for history. Some of its rules
+and numbers have changed since. The official deck, which describes the game as it is, is
+[`../slides/`](../slides/README.md).
+
+`index.html` is a slide deck, in HTML and SVG, of the design in [`../DESIGN.md`](../DESIGN.md) at the time:
 
 1. The map: five levels and their spaces.
 2. The wavefront: which level is played after each round, with an example match.
