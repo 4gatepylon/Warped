@@ -3040,11 +3040,13 @@ impl Session {
                     min_frac: [x, y],
                     max_frac: [x + w, y + h],
                     color: DISABLE_BAR_BACK_COLOR,
+                    style: render_metal::FLAT_RECT_STYLE,
                 },
                 render_metal::OverlayRect {
                     min_frac: [x, y],
                     max_frac: [x + w * fill_frac, y + h],
                     color: DISABLE_BAR_FILL_COLOR,
+                    style: render_metal::FLAT_RECT_STYLE,
                 },
             ]);
         }
@@ -3194,6 +3196,7 @@ fn get_crosshair_rects(window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> 
             min_frac: [0.5 + x0, 0.5 + y0],
             max_frac: [0.5 + x1, 0.5 + y1],
             color: CROSSHAIR_COLOR,
+            style: render_metal::FLAT_RECT_STYLE,
         })
         .collect()
 }
@@ -3225,6 +3228,7 @@ fn make_segmented_bar(
                 } else {
                     ENERGY_BAR_BACK_COLOR
                 },
+                style: render_metal::FLAT_RECT_STYLE,
             }
         })
         .collect()
