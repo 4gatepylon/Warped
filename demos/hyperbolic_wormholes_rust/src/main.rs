@@ -571,12 +571,17 @@ fn get_server_address(arguments: &Arguments) -> Result<SocketAddr> {
 /// thread until the returned flag is set, starting a new game after a win at each line read from
 /// standard input (`Enter` in the server's terminal).
 ///
-/// Example: `let (should_stop, thread) = start_server(47800, vec![0, 1])?;`
-fn start_server(port: u16, console_teams: Vec<u32>) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
+/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", vec![0, 1])?;`
+fn start_server(
+    port: u16,
+    map_name: &str,
+    console_teams: Vec<u32>,
+) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let flag: Arc<AtomicBool> = Arc::clone(&should_stop);
     let should_start_new_game: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let map_name: String = map_name.to_string();
     let new_game_flag: Arc<AtomicBool> = Arc::clone(&should_start_new_game);
     std::thread::spawn(move || {
         for _ in std::io::stdin().lines().map_while(std::io::Result::ok) {
@@ -584,7 +589,13 @@ fn start_server(port: u16, console_teams: Vec<u32>) -> Result<(Arc<AtomicBool>, 
         }
     });
     let thread: JoinHandle<()> = std::thread::spawn(move || {
-        if let Err(error) = net::serve(socket, &flag, console_teams, &should_start_new_game) {
+        if let Err(error) = net::serve(
+            socket,
+            &flag,
+            map_name,
+            console_teams,
+            &should_start_new_game,
+        ) {
             eprintln!("The game server stopped: {error}");
         }
     });
@@ -643,8 +654,11 @@ fn find_lan_address() -> Option<IpAddr> {
 fn serve_only(arguments: &Arguments) -> Result<()> {
     let map_data: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
     let consoles: Vec<voxel_world::Console> = voxel_world::find_consoles(&map_data);
-    let (should_stop, thread) =
-        start_server(arguments.port, consoles.iter().map(|c| c.team).collect())?;
+    let (should_stop, thread) = start_server(
+        arguments.port,
+        arguments.map.get_folder_name(),
+        consoles.iter().map(|c| c.team).collect(),
+    )?;
     let (map, port) = (get_map_flag(arguments.map), arguments.port);
     let address: String = match find_lan_address() {
         Some(address) => address.to_string(),
@@ -795,7 +809,10 @@ fn bench_voxel_views(
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
-    let mut client: net::Client = net::Client::Connect(get_server_address(arguments)?)?;
+    let mut client: net::Client = net::Client::Connect(
+        get_server_address(arguments)?,
+        arguments.map.get_folder_name(),
+    )?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
     let duration_s: f64 = arguments
@@ -1749,7 +1766,10 @@ impl Session {
                 None
             };
             Some(Multiplayer {
-                client: net::Client::Connect(get_server_address(arguments)?)?,
+                client: net::Client::Connect(
+                    get_server_address(arguments)?,
+                    arguments.map.get_folder_name(),
+                )?,
                 server,
                 is_eliminated: false,
                 respawn_in_s: 0.0,
@@ -1888,10 +1908,11 @@ impl Session {
         true
     }
 
-    /// `update` moves the player by the held keys for the time since the last frame.
+    /// `update` moves the player by the held keys for the time since the last frame, and fails if
+    /// the game server can't be read (it plays another map, say).
     ///
-    /// Example: `session.update(&event_pump.keyboard_state());`
-    fn update(&mut self, keys: &sdl3::keyboard::KeyboardState) {
+    /// Example: `session.update(&event_pump.keyboard_state())?;`
+    fn update(&mut self, keys: &sdl3::keyboard::KeyboardState) -> Result<()> {
         let frame_s: f64 = self.last.elapsed().as_secs_f64();
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
         self.motion_blur_frac = (-dt_s / MOTION_BLUR_S).exp() as f32;
@@ -1902,7 +1923,7 @@ impl Session {
             (self.player.frame, self.is_laser_on) = (step.frame, step.is_laser_on);
             self.route_index += 1;
             self.hud_time_s += dt_s;
-            return;
+            return Ok(());
         }
         self.shot_time_s = (self.shot_time_s - dt_s).max(0.0);
         if let Some(multiplayer) = &mut self.multiplayer
@@ -1917,10 +1938,10 @@ impl Session {
                 }
             }
         }
-        if self.update_multiplayer() {
+        if self.update_multiplayer()? {
             self.message_time_s -= dt_s;
             self.hud_time_s += dt_s;
-            return;
+            return Ok(());
         }
         let input: Input = Input {
             forward: keys.is_scancode_pressed(Scancode::W),
@@ -1964,6 +1985,7 @@ impl Session {
         }
         self.message_time_s -= dt_s;
         self.hud_time_s += dt_s;
+        Ok(())
     }
 
     /// `is_firing` says whether this player's laser is on: on for a scripted route, or a shot fired
@@ -2134,20 +2156,15 @@ impl Session {
 
     /// `update_multiplayer` reads the server's news: a welcome puts this player at its spawn
     /// point, and a hit is announced (and, if this player was hit, starts the respawn countdown).
-    /// It returns whether this player is out of the game for now.
+    /// It returns whether this player is out of the game for now, and fails if the server can't be
+    /// read.
     ///
-    /// Example: `if session.update_multiplayer() { return; }`
-    fn update_multiplayer(&mut self) -> bool {
+    /// Example: `if session.update_multiplayer()? { return Ok(()); }`
+    fn update_multiplayer(&mut self) -> Result<bool> {
         let Some(multiplayer) = &mut self.multiplayer else {
-            return false;
+            return Ok(false);
         };
-        let events: Vec<net::NetEvent> = match multiplayer.client.poll() {
-            Ok(events) => events,
-            Err(error) => {
-                self.show_message(format!("Couldn't reach the server: {error}"));
-                return false;
-            }
-        };
+        let events: Vec<net::NetEvent> = multiplayer.client.poll()?;
         let mut messages: Vec<String> = Vec::new();
         for event in events {
             match event {
@@ -2198,7 +2215,7 @@ impl Session {
         if let Some(message) = messages.pop() {
             self.show_message(message);
         }
-        is_out
+        Ok(is_out)
     }
 
     /// `get_render_size` gives the size to ray-trace for a window of `window_px` pixels. With
@@ -2770,7 +2787,7 @@ fn play_on_canvas(
         if session.is_finished() {
             return Ok(());
         }
-        session.update(&event_pump.keyboard_state());
+        session.update(&event_pump.keyboard_state())?;
         let render_px: (u32, u32) = session.get_render_size(canvas.window().size_in_pixels());
         pixels.resize(
             render_px.0 as usize * render_px.1 as usize * BYTES_PER_PIXEL,
@@ -2859,7 +2876,7 @@ fn play_on_layer(
         if session.is_finished() {
             return Ok(());
         }
-        session.update(&event_pump.keyboard_state());
+        session.update(&event_pump.keyboard_state())?;
         let window_px: (u32, u32) = window.size_in_pixels();
         layer.setDrawableSize(CGSize {
             width: f64::from(window_px.0),
