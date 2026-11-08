@@ -22,6 +22,7 @@
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
 mod geometry;
+mod key_bindings;
 mod map;
 mod map_export;
 mod multiplayer;
@@ -52,13 +53,12 @@ use objc2_core_foundation::CGSize;
 use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
-use sdl3::keyboard::{Keycode, Scancode};
-use sdl3::mouse::MouseButton;
 use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
 
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
+use key_bindings::{Action, Control, KeyBindings};
 use physics::{Input, LaserReport, Player};
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
@@ -294,6 +294,10 @@ struct Arguments {
     /// --host) sends them to every player who joins; without a server, this game uses them.
     #[arg(long, conflicts_with = "join")]
     settings: Option<PathBuf>,
+    /// This player's keys, a YAML file with key_bindings.yaml's actions (the default): which keys,
+    /// mouse buttons and wheel do what in the window.
+    #[arg(long)]
+    key_bindings: Option<PathBuf>,
     /// Which map to play, from common/maps/.
     #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
     map: MapName,
@@ -1664,6 +1668,7 @@ struct Session {
     is_jumping: bool,
     is_walking_upright: bool,
     settings: GameSettings,
+    key_bindings: KeyBindings,
     gun: Gun,
     is_trigger_held: bool,
     is_flashlight_on: bool,
@@ -1834,6 +1839,10 @@ impl Session {
     fn New(arguments: &Arguments) -> Result<Session> {
         let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
         let settings: GameSettings = load_settings(arguments)?;
+        let key_bindings: KeyBindings = match &arguments.key_bindings {
+            Some(path) => KeyBindings::Load(path)?,
+            None => KeyBindings::Builtin(),
+        };
         let voxel: Option<VoxelState> = if map.structures.is_empty() {
             None
         } else {
@@ -1897,6 +1906,7 @@ impl Session {
             world,
             player,
             settings,
+            key_bindings,
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
@@ -1965,74 +1975,11 @@ impl Session {
     ) -> bool {
         match event {
             Event::Quit { .. } => return false,
-            Event::KeyDown {
-                keycode: Some(Keycode::Escape),
-                ..
-            } => {
-                if !self.is_captured {
-                    return false;
-                }
-                self.is_captured = false;
-                mouse.set_relative_mouse_mode(window, false);
-            }
-            Event::KeyDown {
-                keycode: Some(key),
-                repeat: false,
-                ..
-            } => match key {
-                Keycode::Minus => {
-                    self.is_auto_scale = false;
-                    self.render_scale =
-                        (self.render_scale / RENDER_SCALE_STEP).max(MIN_RENDER_SCALE);
-                }
-                Keycode::Equals => {
-                    self.is_auto_scale = false;
-                    self.render_scale = (self.render_scale * RENDER_SCALE_STEP).min(1.0);
-                }
-                Keycode::_1 | Keycode::_2 if self.is_in_lobby() => {
-                    let team: u32 = u32::from(key == Keycode::_2);
-                    let multiplayer: &mut Multiplayer =
-                        self.multiplayer.as_mut().expect("checked by the guard");
-                    if let Err(error) = multiplayer.client.join(Some(team)) {
-                        self.show_message(format!("Couldn't reach the server: {error}"));
-                    }
-                }
-                Keycode::_1 => self.switch_gun(Gun::Laser),
-                Keycode::_2 => self.switch_gun(Gun::Rifle),
-                _ => {}
-            },
             Event::MouseButtonDown { .. } if !self.is_captured => {
                 self.is_captured = true;
                 mouse.set_relative_mouse_mode(window, true);
+                return true;
             }
-            Event::MouseButtonDown {
-                mouse_btn: MouseButton::Left,
-                ..
-            } => {
-                self.is_trigger_held = true;
-                if self.gun == Gun::Laser
-                    && self.can_shoot()
-                    && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
-                {
-                    self.shot_time_s = self.settings.sniper.shot_s;
-                }
-            }
-            Event::MouseButtonUp {
-                mouse_btn: MouseButton::Left,
-                ..
-            } => self.is_trigger_held = false,
-            Event::MouseButtonDown {
-                mouse_btn: MouseButton::Right,
-                ..
-            } => self.is_flashlight_on = true,
-            Event::MouseButtonUp {
-                mouse_btn: MouseButton::Right,
-                ..
-            } => self.is_flashlight_on = false,
-            Event::MouseWheel { y, .. } if y != 0.0 => self.switch_gun(match self.gun {
-                Gun::Laser => Gun::Rifle,
-                Gun::Rifle => Gun::Laser,
-            }),
             Event::MouseMotion { xrel, yrel, .. } if self.is_captured => match &mut self.voxel {
                 Some(voxel) => voxel.player.look(f64::from(xrel), f64::from(yrel)),
                 None => {
@@ -2041,14 +1988,75 @@ impl Session {
             },
             _ => {}
         }
+        match key_bindings::get_pressed_control(&event) {
+            Some(control) => self.handle_control(control, window, mouse),
+            None => true,
+        }
+    }
+
+    /// `handle_control` does what a pressed control (key, mouse button or wheel) is bound to, and
+    /// returns false when the player quits: releasing the mouse (or quitting when it is free),
+    /// the render resolution, choosing a team in the lobby (before the guns, which may share its
+    /// keys), the guns, and firing the sniper.
+    ///
+    /// Example: `if !self.handle_control(control, window, mouse) { return false; }`
+    fn handle_control(
+        &mut self,
+        control: Control,
+        window: &sdl3::video::Window,
+        mouse: &sdl3::mouse::MouseUtil,
+    ) -> bool {
+        let actions: Vec<Action> = self.key_bindings.get_actions(control);
+        let is = |action: Action| actions.contains(&action);
+        if is(Action::ReleaseMouse) {
+            if !self.is_captured {
+                return false;
+            }
+            self.is_captured = false;
+            mouse.set_relative_mouse_mode(window, false);
+        } else if is(Action::LowerResolution) || is(Action::RaiseResolution) {
+            self.is_auto_scale = false;
+            self.render_scale = if is(Action::LowerResolution) {
+                (self.render_scale / RENDER_SCALE_STEP).max(MIN_RENDER_SCALE)
+            } else {
+                (self.render_scale * RENDER_SCALE_STEP).min(1.0)
+            };
+        } else if self.is_in_lobby() && (is(Action::JoinBlue) || is(Action::JoinRed)) {
+            let team: u32 = u32::from(is(Action::JoinRed));
+            let multiplayer: &mut Multiplayer = self.multiplayer.as_mut().expect("in the lobby");
+            if let Err(error) = multiplayer.client.join(Some(team)) {
+                self.show_message(format!("Couldn't reach the server: {error}"));
+            }
+        } else if is(Action::Gun1) {
+            self.switch_gun(Gun::Laser);
+        } else if is(Action::Gun2) {
+            self.switch_gun(Gun::Rifle);
+        } else if is(Action::SwitchGun) {
+            self.switch_gun(match self.gun {
+                Gun::Laser => Gun::Rifle,
+                Gun::Rifle => Gun::Laser,
+            });
+        }
+        if is(Action::Shoot)
+            && self.is_captured
+            && self.gun == Gun::Laser
+            && self.can_shoot()
+            && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
+        {
+            self.shot_time_s = self.settings.sniper.shot_s;
+        }
         true
     }
 
     /// `update` moves the player by the held keys for the time since the last frame, and fails if
     /// the game server can't be read (it plays another map, say).
     ///
-    /// Example: `session.update(&event_pump.keyboard_state())?;`
-    fn update(&mut self, keys: &sdl3::keyboard::KeyboardState) -> Result<()> {
+    /// Example: `session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;`
+    fn update(
+        &mut self,
+        keyboard: &sdl3::keyboard::KeyboardState,
+        mouse: &sdl3::mouse::MouseState,
+    ) -> Result<()> {
         let frame_s: f64 = self.last.elapsed().as_secs_f64();
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
         let blur_s: f64 = self.settings.display.motion_blur_s;
@@ -2086,18 +2094,20 @@ impl Session {
             self.hud_time_s += dt_s;
             return Ok(());
         }
+        let held = |action: Action| self.key_bindings.is_held(action, keyboard, mouse);
         let input: Input = Input {
-            forward: keys.is_scancode_pressed(Scancode::W),
-            back: keys.is_scancode_pressed(Scancode::S),
-            left: keys.is_scancode_pressed(Scancode::A),
-            right: keys.is_scancode_pressed(Scancode::D),
-            up: keys.is_scancode_pressed(Scancode::Space),
+            forward: held(Action::MoveForward),
+            back: held(Action::MoveBack),
+            left: held(Action::MoveLeft),
+            right: held(Action::MoveRight),
+            up: held(Action::Jump),
             down: false,
-            sprint: keys.is_scancode_pressed(Scancode::LShift)
-                || keys.is_scancode_pressed(Scancode::RShift),
-            crouch: keys.is_scancode_pressed(Scancode::LCtrl)
-                || keys.is_scancode_pressed(Scancode::RCtrl),
+            sprint: held(Action::Sprint),
+            crouch: held(Action::Crouch),
         };
+        self.is_trigger_held = self.is_captured && held(Action::Shoot);
+        self.is_flashlight_on = self.is_captured && held(Action::Flashlight);
+        let is_holding_e: bool = held(Action::TurnOffConsole);
         let team: usize = self.get_team() as usize;
         let messages: Vec<String> = match &mut self.voxel {
             Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, team),
@@ -2112,7 +2122,7 @@ impl Session {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
-        self.update_disabling(keys.is_scancode_pressed(Scancode::E), dt_s);
+        self.update_disabling(is_holding_e, dt_s);
         self.update_gun(&input, dt_s);
         self.update_rifle(dt_s);
         let eye: DMat4 = self.get_eye_frame();
@@ -2713,7 +2723,15 @@ impl Session {
                 Some([blue, red]) => format!("BLUE {blue}   RED {red}"),
                 None => "LOOKING FOR THE GAME".to_string(),
             };
-            return Some([counts, "1 joins blue, 2 joins red".to_string()]);
+            let keys = &self.key_bindings;
+            return Some([
+                counts,
+                format!(
+                    "{} joins blue, {} joins red",
+                    keys.get_label(Action::JoinBlue),
+                    keys.get_label(Action::JoinRed)
+                ),
+            ]);
         }
         if let Some(winner) = multiplayer.client.game.winner {
             return Some([
@@ -2875,7 +2893,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Shift run, Space jump, click shoot, 1/2 or wheel switch gun, hold right button flashlight, Ctrl crouch (shoot standing still or crouched), hold E on an enemy console to turn it off, -/= scale, Esc release".to_string()
+            self.key_bindings.describe()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
@@ -3169,7 +3187,7 @@ fn play_on_canvas(
         if session.is_finished() {
             return Ok(());
         }
-        session.update(&event_pump.keyboard_state())?;
+        session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;
         let render_px: (u32, u32) = session.get_render_size(canvas.window().size_in_pixels());
         pixels.resize(
             render_px.0 as usize * render_px.1 as usize * BYTES_PER_PIXEL,
@@ -3258,7 +3276,7 @@ fn play_on_layer(
         if session.is_finished() {
             return Ok(());
         }
-        session.update(&event_pump.keyboard_state())?;
+        session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;
         let window_px: (u32, u32) = window.size_in_pixels();
         layer.setDrawableSize(CGSize {
             width: f64::from(window_px.0),

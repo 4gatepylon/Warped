@@ -847,6 +847,27 @@
 - **Alternatives:** none considered; you asked for click and hold.
 - **Rationale:** you asked for the flashlight to stay on only while the button is held.
 
+### D73. Key bindings in YAML
+
+- **Choice:**
+  - **The file:** `key_bindings.yaml` lists every action the window takes from a key, mouse button or the wheel:
+    moving, jumping, running, crouching, shooting, the flashlight, consoles, the guns, the lobby's team keys, the
+    render resolution and releasing the mouse. Each action takes one or more controls: SDL's key names (`W`,
+    `Left Shift`, `"1"`), `Mouse Left` and the other buttons, or `Wheel` (only for actions done once per press).
+  - **Whose file:** it is each player's own, passed with `--key-bindings` (`KEY_BINDINGS=` with `run-demo`,
+    `host-game` and `join-game`). It is not the server's: players can want different keys, while game numbers must
+    match.
+  - **Checks:** every action is required, and an unknown action or control fails, naming it.
+  - **Keys follow the file:** keys are read by their place on the keyboard (scancodes), so they don't move with
+    the keyboard layout. The HUD's help line and the lobby's hint are built from the bindings, so they stay right
+    after a change.
+  - **The flag:** `--key-bindings` joins the CLI vocabulary in the `clis` skill.
+- **Alternatives:**
+  - the bindings in `game_settings.yaml` (the server would impose them on everyone);
+  - key names by character, SDL keycodes (they follow the layout, so `W` would move on an AZERTY keyboard, but
+    held keys are read by scancode).
+- **Rationale:** you asked for crouch, move, jump, switching weapons and the other keys to be settable in YAML.
+
 
 ## Baselines
 

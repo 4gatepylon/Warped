@@ -17,6 +17,8 @@ make run-demo RENDERER=cpu
 ```
 
 - Click to capture the mouse (`Esc` releases it; `Esc` again quits).
+- Every key below is the default; [`key_bindings.yaml`](key_bindings.yaml) lists them all, and a copy with other
+  keys is passed with `KEY_BINDINGS=my_keys.yaml` (`--key-bindings`) to `make run-demo`, `host-game` or `join-game`.
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
