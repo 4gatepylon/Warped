@@ -2441,6 +2441,7 @@ mod tests {
     //! | Thrown pair | walked into (the walker comes out of the other mouth), shot into (the laser goes through, naming the mouth's warp), flashing (both mouths) | `a_thrown_pair_carries_walkers_and_lasers` |
     //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
     //! | Marker | inside a thrown mouth's reach (in its list, hit by a laser) | `a_marker_is_listed_and_hit` |
+    //! | Thrown pair on Dust | shot into across terrain and wind (the laser goes through) | `a_dust_throw_carries_the_laser_through_the_wind` |
 
     use super::*;
     use crate::geometry::orthonormalize_frame;
@@ -3644,5 +3645,29 @@ mod tests {
         let windy_spot: DVec4 = windy.trace_laser(camera).spot.expect("a windy hit");
         let calm_spot: DVec4 = calm.trace_laser(camera).spot.expect("a calm hit");
         assert!(windy_spot.x > calm_spot.x, "{windy_spot} vs {calm_spot}");
+    }
+
+    /// `a_dust_throw_carries_the_laser_through_the_wind` checks that on Dust, with its terrain and
+    /// wind, a laser aimed at a thrown purple mouth goes through it.
+    #[test]
+    fn a_dust_throw_carries_the_laser_through_the_wind() {
+        const MOUTH_U_M: f64 = -20.0;
+        const GREEN_V_M: f64 = -20.0;
+        let map: Map = Map::Load(&get_map_folder("dust")).expect("the Dust map");
+        let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let eye_m: f64 = world.player.eye_height_m;
+        let terrain: &Terrain = world.terrain.as_ref().expect("Dust's terrain");
+        let place = |v_m: f64| MouthPlace {
+            u_m: MOUTH_U_M,
+            v_m,
+            h_m: terrain.get_height_m(MOUTH_U_M, v_m) + eye_m,
+            yaw_rad: 0.0,
+        };
+        let pair: [MouthPlace; 2] = [place(0.0), place(GREEN_V_M)];
+        world.set_thrown_wormholes(&[pair]);
+        let camera: DMat4 = VoxelPlayer::AtView(&world, [-30.0, 0.0], [MOUTH_U_M, 0.0], None, 0.0)
+            .get_camera_frame(&world);
+        let shot: Shot = world.trace_laser(camera);
+        assert_eq!(shot.through, vec!["the purple wormhole".to_string()]);
     }
 }

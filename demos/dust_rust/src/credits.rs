@@ -12,9 +12,8 @@
 //!   `main.rs`), which `overlay_text_fits_its_mask` checks; a long link goes over two lines.
 
 /// `CREDITS_LINES` is the CREDITS page's text, one menu line each.
-pub const CREDITS_LINES: [&str; 25] = [
+pub const CREDITS_LINES: [&str; 23] = [
     "Warped: Dust",
-    "",
     "SURFACES  Poly Haven textures, CC0 (polyhaven.com/a/<name>)",
     "  aerial_sand, large_sandstone_blocks (Rob Tuytel), gravelly_sand",
     "  (Dario Barresi), cliff_side (James Ray Cock, Dario Barresi),",
@@ -35,7 +34,6 @@ pub const CREDITS_LINES: [&str; 25] = [
     "CODE      Rust crates: sdl3, glam, gltf, image, png, rayon, clap",
     "  objc2, objc2-metal (Metal, MetalFX), serde (json, yaml), hmac,",
     "  sha2, getrandom: each under its own open-source license",
-    "",
     "Everything else (maps, terrain, sky, ships, bars) is made in",
     "code in this repository.",
 ];

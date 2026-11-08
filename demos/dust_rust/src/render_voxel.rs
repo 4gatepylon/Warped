@@ -81,6 +81,13 @@ const MS_PER_S: f64 = 1000.0;
 /// `FOG_DEPTHS` is how many of a fog's e-folding distances past its start a ray goes before it
 /// ends in the fog (5: the fog hides all but 0.7% of what lies beyond).
 const FOG_DEPTHS: f64 = 5.0;
+/// `SAND_PERIOD_S` is how often the blowing sand's clock wraps, short enough to keep the shader's
+/// float positions precise.
+const SAND_PERIOD_S: f64 = 600.0;
+/// `SAND_GUST_FRAC` is how much the gusts thicken or thin a fog (0.3: by up to 30%).
+const SAND_GUST_FRAC: f32 = 0.3;
+/// `SAND_STREAK_FRAC` is how opaque the nearest streak of blowing sand is.
+const SAND_STREAK_FRAC: f32 = 0.15;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -137,6 +144,7 @@ pub struct VoxelUniforms {
     pub wind: [f32; 4],
     pub atmosphere: [f32; 4],
     pub fog_color: [f32; 4],
+    pub sand: [f32; 4],
 }
 
 const _: () = assert!(
@@ -645,6 +653,14 @@ impl VoxelFrame {
             }),
             fog_color: world.fog.map_or([0.0; 4], |fog| {
                 [fog.color[0], fog.color[1], fog.color[2], fog.max_frac as f32]
+            }),
+            sand: world.fog.map_or([0.0; 4], |_| {
+                [
+                    (world.sky_time_s % SAND_PERIOD_S) as f32,
+                    SAND_GUST_FRAC,
+                    SAND_STREAK_FRAC,
+                    0.0,
+                ]
             }),
         };
         assert_eq!(

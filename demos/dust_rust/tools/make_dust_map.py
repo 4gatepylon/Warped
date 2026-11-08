@@ -190,7 +190,7 @@ def main() -> None:
                 "fog_m": 150},
         "atmosphere": {
             "fog": {"color": [0.7, 0.56, 0.4], "start_m": 4, "distance_m": 60, "max_frac": 0.94},
-            "wind": {"direction": [1, 0, 0], "log_index_gradient_per_m": 0.0012, "segment_m": 12},
+            "wind": {"direction": [1, 0, 0], "log_index_gradient_per_m": 0.0012, "segment_m": 48},
         },
         "spawns": [{"team": "blue", "frame": make_frame(-104, 0, ground(-104, 0), 0.0)},
                    {"team": "red", "frame": make_frame(104, 0, ground(104, 0), math.pi)}],

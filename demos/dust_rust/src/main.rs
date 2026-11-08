@@ -3681,10 +3681,21 @@ impl Session {
 
     /// `print_route_statistics` prints how the window kept up while playing the route, after its
     /// first `ROUTE_WARMUP_FRAME_COUNT` frames: the time between frames (median, 99th percentile,
-    /// worst, and how many took longer than a 60 Hz frame) and the render scale it used.
+    /// worst, and how many took longer than a 60 Hz frame) and the render scale it used; it writes
+    /// every frame's time and render scale to `.artifacts/play_route/<run_id>/frames.csv`.
     ///
     /// Example: `session.print_route_statistics();`
     fn print_route_statistics(&self) {
+        let mut csv: String = String::from("frame,frame_ms,render_scale\n");
+        for (n, (ms, scale)) in self.frame_times_ms.iter().zip(&self.render_scales).enumerate() {
+            csv += &format!("{n},{ms:.3},{scale:.3}\n");
+        }
+        match make_run_folder("play_route", None)
+            .and_then(|folder| Ok(std::fs::write(folder.join("frames.csv"), csv).map(|_| folder)?))
+        {
+            Ok(folder) => println!("Wrote the route's frame times to {}.", folder.join("frames.csv").display()),
+            Err(error) => eprintln!("Couldn't write the route's frame times: {error}"),
+        }
         let mut times_ms: Vec<f64> = self.frame_times_ms[ROUTE_WARMUP_FRAME_COUNT..].to_vec();
         times_ms.sort_by(f64::total_cmp);
         let scales: &[f64] = &self.render_scales[ROUTE_WARMUP_FRAME_COUNT..];

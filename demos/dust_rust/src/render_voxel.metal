@@ -93,6 +93,17 @@ constant float HAZE_HORIZON_HEIGHT_FRAC = 0.08;
 constant float HAZE_SUN_GLOW = 0.5;
 constant float HAZE_SUN_POWER = 8.0;
 constant float HAZE_SKYLIGHT = 0.2;
+constant float SAND_SPEED_M_PER_S = 9.0;
+constant float SAND_PROBE_S = 0.02;
+constant float SAND_GUST_REACH_M = 120.0;
+constant float3 SAND_GUST_SIZE_M = float3(40.0, 14.0, 6.0);
+constant int SAND_LAYER_COUNT = 2;
+constant float SAND_LAYER_FIRST_M = 2.5;
+constant float SAND_LAYER_RATIO = 2.6;
+constant float SAND_LAYER_OFFSET = 17.0;
+constant float3 SAND_STREAK_SIZE_M = float3(4.0, 0.08, 0.08);
+constant float2 SAND_STREAK_EDGES = float2(0.7, 0.95);
+constant float SAND_STREAK_BRIGHTNESS = 1.15;
 constant float BLOOM_KARIS_LUMA = 4.0;
 constant float BLOOM_GLOW = 1.0;
 constant float2 BLOOM_GLOW_LUMA_EDGES = float2(0.5, 2.0);
@@ -549,6 +560,7 @@ struct VoxelUniforms {
     float4 wind;
     float4 atmosphere;
     float4 fog_color;
+    float4 sand;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -979,11 +991,11 @@ static float3 get_fermi(float4 x, float r) {
  * `SHADOW_PENUMBRA_TAN`.
  * @par Example
  * @code
- * trace_terrain<false>(scene, x, v, 0.0, hit);
+ * trace_terrain<false>(scene, x, v, 0.0, 0.0, hit);
  * @endcode
  */
 template <bool should_track_lit>
-static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s_start, thread Hit &hit) {
+static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s_start, float travelled, thread Hit &hit) {
     float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = s_start, previous = s_start;
     for (int i = 0; i < TERRAIN_MAX_STEPS; i++) {
         float4 p = geodesic_point(x, v, s);
@@ -1002,7 +1014,7 @@ static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s
         if (should_track_lit) hit.lit = min(hit.lit, gap / max(s * r * SHADOW_PENUMBRA_TAN, TINY));
         if (f.z > top_m && geodesic_tangent(x, v, s).y > 0.0) return;
         previous = s;
-        s += max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * s * r) / r;
+        s += max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * (travelled + s) * r) / r;
         if (s > hit.s) return;
     }
 }
@@ -1054,11 +1066,11 @@ static bool is_clear_of_blocks(thread const Scene &scene, int w, float3 local, f
  * no static block within reach.
  * @par Example
  * @code
- * trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
+ * trace_scene(scene, x, v, -1, 0.0, float3(0.0), 0.0, hit, glass_s);
  * @endcode
  */
-static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, thread Hit &hit, thread float &glass_s) {
-    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, 0.0, hit); else trace_ground(x, v, hit);
+static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, float travelled, thread Hit &hit, thread float &glass_s) {
+    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, 0.0, travelled, hit); else trace_ground(x, v, hit);
     if (warp < 0) {
         for (int k = 0; k < scene.u.structure_count; k++) trace_structure(scene, k, x, v, 0.0, false, hit, glass_s);
     } else {
@@ -1088,7 +1100,7 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
     h.lit = 1.0;
     float glass_s = NO_HIT_S;
     if (scene.u.has_terrain != 0) {
-        trace_terrain<true>(scene, x, l, TERRAIN_SHADOW_START_M / scene.u.curvature_radius_m, h);
+        trace_terrain<true>(scene, x, l, TERRAIN_SHADOW_START_M / scene.u.curvature_radius_m, 0.0, h);
         if (h.mat != 0) return SHADOW_FLOOR;
     }
     for (int k = 0; k < scene.u.structure_count; k++) {
@@ -2393,7 +2405,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
-            trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
+            trace_scene(scene, x, v, -1, 0.0, float3(0.0), travelled, hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
             if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
@@ -2426,7 +2438,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         hit.s = ds;
         hit.mat = 0;
         float glass_s = NO_HIT_S;
-        trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
+        trace_scene(scene, x, v, inside, rho, local, travelled, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
@@ -2473,14 +2485,45 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
 }
 
 /**
+ * @brief `blow_sand` mixes fog of opacity `fog_frac` (thickened and thinned by gusts drifting downwind halfway along
+ * the ray) into `color`, then streaks of blowing sand at `SAND_LAYER_COUNT` distances in front of the camera, all
+ * moving with the wind at `SAND_SPEED_M_PER_S` on the clock `u.sand.x`.
+ * @par Example
+ * @code
+ * return blow_sand(scene, color, fog, u.fog_color.w * fog_frac, end, id);
+ * @endcode
+ */
+static float3 blow_sand(thread const Scene &scene, float3 color, float3 fog, float fog_frac, VoxelRayEnd end, uint2 id) {
+    constant VoxelUniforms &u = scene.u;
+    float r = u.curvature_radius_m;
+    float2 wind = normalize(float2(-u.wind.z, u.wind.x)), across = float2(-wind.y, wind.x);
+    float travelled_m = end.surface.x == OUTCOME_HIT ? end.grid.w * r : INFINITY;
+    float2 ndc = float2(2.0 * (float(id.x) + 0.5) / float(u.width_px) - 1.0, 1.0 - 2.0 * (float(id.y) + 0.5) / float(u.height_px));
+    float3 d_cam = normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0));
+    float4 x = u.camera[3], v = u.camera[0] * d_cam.x + u.camera[1] * d_cam.y + u.camera[2] * d_cam.z;
+    float3 eye = get_fermi(x, r), d = normalize(get_fermi(x * cosh(SAND_PROBE_S) + v * sinh(SAND_PROBE_S), r) - eye);
+    float drift_m = u.sand.x * SAND_SPEED_M_PER_S;
+    float3 g = eye + d * 0.5 * min(travelled_m, SAND_GUST_REACH_M);
+    float gust = sample_noise_3d(float3(dot(g.xy, wind) - drift_m, dot(g.xy, across), g.z) / SAND_GUST_SIZE_M);
+    color = mix(color, fog, saturate(fog_frac * (1.0 + u.sand.y * (2.0 * gust - 1.0))));
+    float streak = 0.0, layer_m = SAND_LAYER_FIRST_M;
+    for (int i = 0; i < SAND_LAYER_COUNT && layer_m < travelled_m; i++, layer_m *= SAND_LAYER_RATIO) {
+        float3 p = eye + d * layer_m;
+        float n = sample_noise_3d(float3(dot(p.xy, wind) - drift_m, dot(p.xy, across), p.z) / SAND_STREAK_SIZE_M + float(i) * SAND_LAYER_OFFSET);
+        streak += smoothstep(SAND_STREAK_EDGES.x, SAND_STREAK_EDGES.y, n) / float(i + 1);
+    }
+    return mix(color, u.fog_color.rgb * SAND_STREAK_BRIGHTNESS, saturate(u.sand.z * streak));
+}
+
+/**
  * @brief `add_haze` mixes a thin haze into the colour of a ray that hit a surface beyond `HAZE_START_M` (more the farther
  * it went) or reached the sky (more the nearer the horizon), brighter toward the sun; a lost ray stays as it is.
  * @par Example
  * @code
- * color = add_haze(scene, color, end);
+ * color = add_haze(scene, color, end, id);
  * @endcode
  */
-static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end) {
+static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end, uint2 id) {
     float haze_frac, sun_cos;
     if (end.surface.x == OUTCOME_HIT) {
         haze_frac = 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
@@ -2495,7 +2538,8 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
     if (u.fog_color.w > 0.0) {
         float fog_frac = end.surface.x == OUTCOME_HIT ? 1.0 - exp(-max(end.grid.w * u.curvature_radius_m - u.atmosphere.z, 0.0) / u.atmosphere.w) : 1.0;
         float3 fog = u.fog_color.rgb * (1.0 + HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER));
-        return mix(color, fog, u.fog_color.w * fog_frac);
+        if (u.sand.y <= 0.0) return mix(color, fog, u.fog_color.w * fog_frac);
+        return blow_sand(scene, color, fog, u.fog_color.w * fog_frac, end, id);
     }
     float3 haze = HAZE_COLOR + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
     return mix(color, haze, HAZE_MAX_FRAC * haze_frac);
@@ -2559,7 +2603,7 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id
     } else if (end.surface.x == OUTCOME_SKY) {
         color = to_linear(sample_sky(scene, end.point.xyz));
     }
-    color = add_haze(scene, color, end);
+    color = add_haze(scene, color, end, id);
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
     float3 beam_color = to_linear((end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
