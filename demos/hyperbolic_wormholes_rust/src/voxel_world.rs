@@ -72,6 +72,7 @@ const UNSTICK_STEP_M: f64 = 0.25;
 const UNSTICK_MAX_STEPS: usize = 160;
 const PUSH_OUT_STEP_M: f64 = 0.05;
 const MAX_WALK_RISE_M: f64 = 0.5;
+const RING_PROBE_COUNT: usize = 8;
 const WALK_RISE_STEP_M: f64 = 0.02;
 const SUN_SHADOW_M: f64 = 80.0;
 const PUSH_OUT_STEP_COUNT: usize = 6;
@@ -1284,23 +1285,24 @@ impl VoxelWorld {
     }
 
     /// `is_body_blocked` says whether a body standing on `body` with its eye `h_m` up touches a
-    /// block or the ground, by probe points at its feet, knees, waist and head.
+    /// block or the ground, by probe points at its feet and head and rings of `RING_PROBE_COUNT`
+    /// at its knees and waist, so turning in place doesn't swing a probe into a wall.
     ///
     /// Example: `if world.is_body_blocked(body, h_m, &nearby) { ... }`
     fn is_body_blocked(&self, body: DMat4, h_m: f64, nearby: &[usize]) -> bool {
         let eye_m: f64 = self.player.eye_height_m;
-        let probes: [[f64; 3]; 10] = [
+        let ring = (0..RING_PROBE_COUNT)
+            .map(|i| std::f64::consts::TAU * i as f64 / RING_PROBE_COUNT as f64);
+        let probes: Vec<[f64; 3]> = [
             [0.0, PROBE_LOW_M, 0.0],
-            [BODY_RADIUS_M, PROBE_KNEE_M, 0.0],
-            [-BODY_RADIUS_M, PROBE_KNEE_M, 0.0],
-            [0.0, PROBE_KNEE_M, BODY_RADIUS_M],
-            [0.0, PROBE_KNEE_M, -BODY_RADIUS_M],
-            [BODY_RADIUS_M, PROBE_WAIST_M, 0.0],
-            [-BODY_RADIUS_M, PROBE_WAIST_M, 0.0],
-            [0.0, PROBE_WAIST_M, BODY_RADIUS_M],
-            [0.0, PROBE_WAIST_M, -BODY_RADIUS_M],
             [0.0, eye_m + HEAD_CLEARANCE_M, 0.0],
-        ];
+        ]
+        .into_iter()
+        .chain([PROBE_KNEE_M, PROBE_WAIST_M].into_iter().flat_map(|y_m| {
+            ring.clone()
+                .map(move |a: f64| [BODY_RADIUS_M * a.cos(), y_m, BODY_RADIUS_M * a.sin()])
+        }))
+        .collect();
         probes.iter().any(|&[dx, dy, dz]| {
             let y_m: f64 = h_m - eye_m + dy;
             let probe: DVec4 =
@@ -2325,6 +2327,7 @@ mod tests {
     //! | Refilling energy | crouched (at the crouched rate), walking upright (at the walking rate) | `crouching_refills_energy_faster` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Low way walked out of | a habitat module's doors (each module, each way), a walkway's ends (each walkway, each way) | `players_walk_out_of_modules_and_walkways` |
+    //! | Turning while pressed on a bunker wall | the garage's corners (straight, diagonal), the field bunker's forecourt corner (diagonal); each walks away | `players_turning_at_bunker_walls_get_away` |
     //! | Bunker model walked out of | the kazemat's door, each of the garage's two doorways, the field bunker's room, forecourt and steps | `players_walk_out_of_bunkers` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
     //! | Bend strength | 0 after a bend (as never bent), between, 1 (black hole at the sphere's centre) | `a_flat_bend_traces_the_unbent_laser`, `a_bent_shot_along_the_ground_hits_what_is_ahead`, `a_shot_up_at_full_strength_lands_across_the_map` |
@@ -3157,6 +3160,91 @@ mod tests {
                 x_m > out_m[0] && z_m > out_m[1],
                 "{name} from {start_m:?}: stopped at ({x_m}, {z_m})"
             );
+        }
+    }
+
+    /// `players_turning_at_bunker_walls_get_away` checks that a player who sprints into a bunker
+    /// wall and turns while pressing on it can still walk away: each probe ring has
+    /// `RING_PROBE_COUNT` probes, so turning doesn't swing one into the wall.
+    #[test]
+    fn players_turning_at_bunker_walls_get_away() {
+        const TURN_RAD: f64 = 0.3;
+        const TURN_COUNT: usize = 12;
+        const TURN_FRAME_COUNT: usize = 10;
+        const MIN_ESCAPE_M: f64 = 0.5;
+        const FRAME_S: f64 = 1.0 / 30.0;
+        let world: VoxelWorld = load_lunar_surface();
+        let escapes: [Input; 4] = [
+            Input {
+                back: true,
+                ..Input::default()
+            },
+            Input {
+                left: true,
+                ..Input::default()
+            },
+            Input {
+                right: true,
+                ..Input::default()
+            },
+            Input {
+                forward: true,
+                ..Input::default()
+            },
+        ];
+        let eighth = |n: f64, radius_m: f64| -> [f64; 2] {
+            let angle_rad: f64 = n * std::f64::consts::FRAC_PI_4;
+            [radius_m * angle_rad.cos(), radius_m * angle_rad.sin()]
+        };
+        for (name, start_m, is_diagonal) in [
+            ("red spawn hangar", eighth(7.0, 16.0), false),
+            ("red spawn hangar", eighth(0.0, 16.0), true),
+            ("derelict field bunker", eighth(5.0, 11.0), true),
+        ] {
+            let sprint: Input = Input {
+                forward: true,
+                left: is_diagonal,
+                sprint: true,
+                ..Input::default()
+            };
+            let k: usize = world
+                .structures
+                .iter()
+                .position(|st| st.name == name)
+                .expect(name);
+            let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
+            let start: DVec4 = frame * map_klein(DVec3::new(start_m[0], 0.0, start_m[1]) / world.r);
+            let body: DMat4 = orthonormalize_frame(DMat4::from_cols(
+                frame.col(0),
+                frame.col(1),
+                frame.col(2),
+                start,
+            ));
+            let facing: DMat4 = make_rotation(AXIS_X, AXIS_Z, (-start_m[0]).atan2(start_m[1]));
+            let mut player: VoxelPlayer = VoxelPlayer::Standing(&world, body * facing);
+            for _ in 0..(4.0 / FRAME_S) as usize {
+                player.step(&world, &sprint, FRAME_S, 0);
+            }
+            for turn in 0..TURN_COUNT {
+                player.body *= make_rotation(AXIS_X, AXIS_Z, TURN_RAD);
+                for _ in 0..TURN_FRAME_COUNT {
+                    player.step(&world, &sprint, FRAME_S, 0);
+                }
+                let escape_m: f64 = escapes
+                    .iter()
+                    .map(|input| {
+                        let mut moved: VoxelPlayer = player;
+                        for _ in 0..(1.0 / FRAME_S) as usize {
+                            moved.step(&world, input, FRAME_S, 0);
+                        }
+                        get_distance(moved.body.col(AXIS_W), player.body.col(AXIS_W)) * world.r
+                    })
+                    .fold(0.0, f64::max);
+                assert!(
+                    escape_m > MIN_ESCAPE_M,
+                    "{name} from {start_m:?}, turn {turn}: got only {escape_m} m away"
+                );
+            }
         }
     }
 
