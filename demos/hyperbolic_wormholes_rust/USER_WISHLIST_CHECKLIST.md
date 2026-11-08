@@ -170,4 +170,4 @@ is in [`AGENTS.md`](AGENTS.md).
   map, so they can never leave it, and things stretch longer and longer: a relativistic barrier rather than a block.
   Since the map update (W-59), the hills at the edge may block players from leaving: the "Zeno's paradox" slowdown
   should start when a player climbs the hill, to stop them from leaving. As they slow down, their view of the world
-  should warp so it looks as if they are being stretched ever further. #PR.
+  should warp so it looks as if they are being stretched ever further. #159.
