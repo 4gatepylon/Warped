@@ -600,6 +600,7 @@ fn make_frame(
         camera_m: camera.as_vec3(),
         tan_half_fov: TAN_HALF_FOV,
         beacons,
+        time_s: now_s as f32,
         dynamic,
         beams: beam_vertices,
     }

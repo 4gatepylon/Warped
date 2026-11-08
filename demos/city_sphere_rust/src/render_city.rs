@@ -6,6 +6,7 @@
 //! Interface: `CityVertex`, `CityScene`, `build_scene`, `CityFrame`, `CityGpu`, `push_rounded_box`,
 //! `push_mesh`, `push_beam`, `MAX_HOLE_COUNT`.
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -55,9 +56,27 @@ const NEAR_M: f32 = 0.05;
 const FAR_M: f32 = 200.0;
 const STREET_TILE_M: f64 = 4.0;
 const WALL_TILE_M: f64 = 3.0;
-const GLASS_CELL_M: f64 = 2.5;
-const SPHERE_LON_COUNT: usize = 128;
-const SPHERE_LAT_COUNT: usize = 64;
+const GLASS_FREQUENCY: usize = 7;
+const GLASS_SUBDIVISION_COUNT: usize = 2;
+const STREET_FREQUENCY: usize = 7;
+const STREET_SUBDIVISION_COUNT: usize = 3;
+const GLASS_KEY_PER_M: f64 = 1e6;
+const SCREEN_LAYER: f32 = -2.0;
+const LED_LAYER: f32 = -3.0;
+const ELECTRONICS_SALT: u32 = 0x5eed_e1ec;
+const ELECTRONICS_PER_BOX_MAX: usize = 3;
+const ELECTRONICS_OFFSET_M: f64 = 0.02;
+const BEZEL_M: f64 = 0.05;
+const BEZEL_COLOR: [f32; 4] = [0.03, 0.035, 0.04, 0.0];
+const SCREEN_HALF_M: [f64; 2] = [0.3, 0.2];
+const LED_HALF_M: f64 = 0.035;
+const LED_SPACING_M: f64 = 0.12;
+const LED_COUNT_MAX: usize = 5;
+const DETAIL_HEIGHT_M: [f64; 2] = [0.7, 1.8];
+const DETAIL_TOP_MARGIN_M: f64 = 0.35;
+const GLOW_PHASE_SPAN: f32 = 0.45;
+const SCREEN_COLORS: [[f32; 3]; 3] = [[0.15, 0.8, 0.9], [0.3, 0.9, 0.4], [0.95, 0.6, 0.15]];
+const LED_COLORS: [[f32; 3]; 3] = [[1.0, 0.15, 0.1], [0.2, 1.0, 0.3], [1.0, 0.7, 0.1]];
 const CORE_LON_COUNT: usize = 32;
 const CORE_LAT_COUNT: usize = 16;
 const SKY_COLOR: [f32; 4] = [0.05, 0.03, 0.08, 1.0];
@@ -112,6 +131,7 @@ pub struct CityFrame {
     pub camera_m: Vec3,
     pub tan_half_fov: f32,
     pub beacons: [[f32; 4]; BEACON_SLOT_COUNT],
+    pub time_s: f32,
     pub dynamic: Vec<CityVertex>,
     pub beams: Vec<CityVertex>,
 }
@@ -278,7 +298,18 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     let mut opaque: Vec<CityVertex> = Vec::new();
     let street = &world.materials[world.street_material as usize];
     let street_color: [f32; 4] = [street.color[0] * 2.4, street.color[1] * 2.4, street.color[2] * 2.4, 0.0];
-    push_sphere(&mut opaque, world.street_radius_m, true, (SPHERE_LON_COUNT, SPHERE_LAT_COUNT), STREET_TILE_M, street_color, LAYER_STREET);
+    let street_radius_m: f64 = world.street_radius_m;
+    push_goldberg(&mut opaque, street_radius_m, STREET_FREQUENCY, STREET_SUBDIVISION_COUNT, |d, edge_m, center, e1, e2| {
+        let p: DVec3 = d * street_radius_m;
+        let [r, g, b, _] = street_color;
+        CityVertex {
+            position: to_f32(p),
+            normal: to_f32(-d),
+            uv: [(p.dot(e1) / STREET_TILE_M) as f32, (p.dot(e2) / STREET_TILE_M + center.x) as f32],
+            color: [r, g, b, -(edge_m as f32)],
+            layer: LAYER_STREET,
+        }
+    });
     for (k, city_box) in world.boxes.iter().filter(|b| b.group != "consoles" && b.group != "pylons").enumerate() {
         let material = &world.materials[city_box.material as usize];
         let layer: f32 = get_layer(&material.name);
@@ -296,7 +327,14 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
             let c = material.color;
             push_sphere(&mut opaque, shell.radius_m, false, (CORE_LON_COUNT, CORE_LAT_COUNT), 1.0, [c[0], c[1], c[2], 1.0], NO_LAYER);
         } else {
-            push_sphere(&mut glass, shell.radius_m, true, (SPHERE_LON_COUNT, SPHERE_LAT_COUNT), GLASS_CELL_M, GLASS_TINT, NO_LAYER);
+            let radius_m: f64 = shell.radius_m;
+            push_goldberg(&mut glass, radius_m, GLASS_FREQUENCY, GLASS_SUBDIVISION_COUNT, |d, edge_m, _, _, _| CityVertex {
+                position: to_f32(d * radius_m),
+                normal: to_f32(-d),
+                uv: [edge_m as f32, 0.0],
+                color: GLASS_TINT,
+                layer: NO_LAYER,
+            });
             glass_radius_m = shell.radius_m as f32;
             holes = shell
                 .holes
@@ -307,12 +345,157 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
         }
     }
     push_pylon_beacons(&mut opaque, world);
+    push_electronics(&mut opaque, world);
     CityScene {
         id: 1,
         opaque,
         glass,
         holes,
         glass_radius_m,
+    }
+}
+
+/// `push_goldberg` adds a sphere of `radius_m` as a Goldberg polyhedron: hexagonal cells and 12
+/// pentagons, the cells of an icosahedron subdivided `frequency` times. Each cell is a fan of
+/// triangles from its centre, each split `subdivision_count` times to follow the sphere, and
+/// `make_vertex` makes each corner from its direction, its distance in metres from its cell's edge,
+/// and its cell's centre direction and two tangents.
+///
+/// Example: `push_goldberg(&mut glass, 17.0, 7, 2, |d, edge_m, _, _, _| make(d, edge_m));`
+fn push_goldberg(
+    out: &mut Vec<CityVertex>,
+    radius_m: f64,
+    frequency: usize,
+    subdivision_count: usize,
+    make_vertex: impl Fn(DVec3, f64, DVec3, DVec3, DVec3) -> CityVertex,
+) {
+    let phi: f64 = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    let corners: [DVec3; 12] = [
+        [-1.0, phi, 0.0], [1.0, phi, 0.0], [-1.0, -phi, 0.0], [1.0, -phi, 0.0],
+        [0.0, -1.0, phi], [0.0, 1.0, phi], [0.0, -1.0, -phi], [0.0, 1.0, -phi],
+        [phi, 0.0, -1.0], [phi, 0.0, 1.0], [-phi, 0.0, -1.0], [-phi, 0.0, 1.0],
+    ]
+    .map(|c| DVec3::from_array(c).normalize());
+    let faces: [[usize; 3]; 20] = [
+        [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+        [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    ];
+    let n: usize = frequency;
+    let mut ids: HashMap<[i64; 3], usize> = HashMap::new();
+    let mut centers: Vec<DVec3> = Vec::new();
+    let mut cell_corners: Vec<Vec<DVec3>> = Vec::new();
+    for [a, b, c] in faces.map(|f| f.map(|k| corners[k])) {
+        let mut grid: Vec<Vec<usize>> = Vec::new();
+        for i in 0..=n {
+            let mut row: Vec<usize> = Vec::new();
+            for j in 0..=n - i {
+                let d: DVec3 = (a + (b - a) * (i as f64 / n as f64) + (c - a) * (j as f64 / n as f64)).normalize();
+                let key: [i64; 3] = (d * GLASS_KEY_PER_M).round().as_i64vec3().to_array();
+                let id: usize = *ids.entry(key).or_insert_with(|| {
+                    centers.push(d);
+                    cell_corners.push(Vec::new());
+                    centers.len() - 1
+                });
+                row.push(id);
+            }
+            grid.push(row);
+        }
+        for i in 0..n {
+            for j in 0..n - i {
+                let mut triangles: Vec<[usize; 3]> = vec![[grid[i][j], grid[i + 1][j], grid[i][j + 1]]];
+                if i + j + 1 < n {
+                    triangles.push([grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]]);
+                }
+                for triangle in triangles {
+                    let corner: DVec3 = triangle.iter().map(|&k| centers[k]).sum::<DVec3>().normalize();
+                    for k in triangle {
+                        cell_corners[k].push(corner);
+                    }
+                }
+            }
+        }
+    }
+    let s: usize = subdivision_count;
+    for (center, mut rim) in centers.into_iter().zip(cell_corners) {
+        let e1: DVec3 = center.any_orthonormal_vector();
+        let e2: DVec3 = center.cross(e1);
+        rim.sort_by(|x, y| x.dot(e2).atan2(x.dot(e1)).total_cmp(&y.dot(e2).atan2(y.dot(e1))));
+        for k in 0..rim.len() {
+            let (a, b) = (rim[k], rim[(k + 1) % rim.len()]);
+            let apothem_m: f64 = (center - (a + b) / 2.0).length() * radius_m;
+            let corner = |p: usize, q: usize| -> CityVertex {
+                let (wa, wb) = (p as f64 / s as f64, q as f64 / s as f64);
+                let wc: f64 = 1.0 - wa - wb;
+                make_vertex((center * wc + a * wa + b * wb).normalize(), wc * apothem_m, center, e1, e2)
+            };
+            for p in 0..s {
+                for q in 0..s - p {
+                    out.extend([corner(p, q), corner(p + 1, q), corner(p, q + 1)]);
+                    if p + q + 1 < s {
+                        out.extend([corner(p + 1, q), corner(p + 1, q + 1), corner(p, q + 1)]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// `push_electronics` adds small glowing station details on the side walls of the metal blocks
+/// and cover, placed from the map's variation seed: screens in a dark bezel and rows of status
+/// LEDs. Each carries a phase in its colour's alpha (1 to 1 + `GLOW_PHASE_SPAN`) and its kind in
+/// its layer, and the shader makes screens flicker and LEDs blink; they light nothing else.
+///
+/// Example: `push_electronics(&mut opaque, &world);`
+fn push_electronics(out: &mut Vec<CityVertex>, world: &CityWorld) {
+    let mut draw_count: usize = 0;
+    let mut next = || {
+        draw_count += 1;
+        f64::from(get_variation_frac(world.variation_seed ^ ELECTRONICS_SALT, draw_count))
+    };
+    for city_box in world.boxes.iter().filter(|b| b.group != "consoles" && b.group != "pylons") {
+        if get_layer(&world.materials[city_box.material as usize].name) < 0.0 {
+            continue;
+        }
+        let up: DVec3 = city_box.axes.y_axis;
+        let top_m: f64 = 2.0 * city_box.half_m.y - DETAIL_TOP_MARGIN_M;
+        let detail_count: usize = (next() * (ELECTRONICS_PER_BOX_MAX + 1) as f64) as usize;
+        for _ in 0..detail_count {
+            let side: usize = (next() * 4.0) as usize % 4;
+            let (normal, half_n, along, half_along) = match side {
+                0 => (city_box.axes.x_axis, city_box.half_m.x, city_box.axes.z_axis, city_box.half_m.z),
+                1 => (-city_box.axes.x_axis, city_box.half_m.x, city_box.axes.z_axis, city_box.half_m.z),
+                2 => (city_box.axes.z_axis, city_box.half_m.z, city_box.axes.x_axis, city_box.half_m.x),
+                _ => (-city_box.axes.z_axis, city_box.half_m.z, city_box.axes.x_axis, city_box.half_m.x),
+            };
+            let is_screen: bool = next() < 0.5;
+            let half_m: [f64; 2] = if is_screen { SCREEN_HALF_M } else { [LED_SPACING_M * LED_COUNT_MAX as f64 / 2.0, LED_HALF_M] };
+            let room_m: f64 = half_along - ROUND_RADIUS_M - half_m[0] - BEZEL_M;
+            let height_max_m: f64 = DETAIL_HEIGHT_M[1].min(top_m - half_m[1]);
+            if room_m <= 0.0 || height_max_m <= DETAIL_HEIGHT_M[0] {
+                continue;
+            }
+            let height_m: f64 = DETAIL_HEIGHT_M[0] + next() * (height_max_m - DETAIL_HEIGHT_M[0]);
+            let center: DVec3 = city_box.center + normal * (half_n + ELECTRONICS_OFFSET_M) + along * (room_m * (2.0 * next() - 1.0))
+                + up * (height_m - city_box.half_m.y);
+            let quad = |c: DVec3, half: [f64; 2], lift_m: f64| -> [DVec3; 4] {
+                let (x, y, z) = (along * half[0], up * half[1], normal * lift_m);
+                [c - x - y + z, c + x - y + z, c + x + y + z, c - x + y + z]
+            };
+            let pick = |colors: &[[f32; 3]; 3], frac: f64| colors[(frac * 3.0) as usize % 3];
+            push_quad(out, quad(center, [half_m[0] + BEZEL_M, half_m[1] + BEZEL_M], 0.0), [[0.0; 2]; 4], normal, BEZEL_COLOR, NO_LAYER);
+            if is_screen {
+                let [r, g, b] = pick(&SCREEN_COLORS, next());
+                let color: [f32; 4] = [r, g, b, 1.0 + GLOW_PHASE_SPAN * next() as f32];
+                push_quad(out, quad(center, half_m, ELECTRONICS_OFFSET_M), [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], normal, color, SCREEN_LAYER);
+            } else {
+                for k in 0..LED_COUNT_MAX {
+                    let [r, g, b] = pick(&LED_COLORS, next());
+                    let color: [f32; 4] = [r, g, b, 1.0 + GLOW_PHASE_SPAN * next() as f32];
+                    let c: DVec3 = center + along * (LED_SPACING_M * (k as f64 - (LED_COUNT_MAX - 1) as f64 / 2.0));
+                    push_quad(out, quad(c, [LED_HALF_M; 2], ELECTRONICS_OFFSET_M), [[0.0; 2]; 4], normal, color, LED_LAYER);
+                }
+            }
+        }
     }
 }
 
@@ -559,7 +742,7 @@ impl CityGpu {
             core_light: CORE_LIGHT,
             ambient: AMBIENT,
             holes,
-            glass: [frame.scene.glass_radius_m, frame.scene.holes.len() as f32, 0.0, FOG_M],
+            glass: [frame.scene.glass_radius_m, frame.scene.holes.len() as f32, frame.time_s, FOG_M],
             sky_color: SKY_COLOR,
             beacons: frame.beacons,
         };
@@ -629,7 +812,7 @@ mod tests {
     //! | Behaviour | Test |
     //! | --- | --- |
     //! | The vertex layout matches the shader's (13 floats) | `vertex_is_13_floats` |
-    //! | The scene has the street, boxes, core and glass, and the lift holes | `scene_has_every_part` |
+    //! | The scene has the street, boxes, core, hexagonal glass, glowing details and lift holes | `scene_has_every_part` |
 
     use super::*;
 
@@ -642,8 +825,12 @@ mod tests {
     fn scene_has_every_part() {
         let world: CityWorld = CityWorld::Builtin().unwrap();
         let scene: CityScene = build_scene(&world);
-        assert!(scene.opaque.len() > SPHERE_LON_COUNT * SPHERE_LAT_COUNT * 6);
-        assert_eq!(scene.glass.len(), SPHERE_LON_COUNT * SPHERE_LAT_COUNT * 6);
+        let street_edge_count: usize = 60 * STREET_FREQUENCY * STREET_FREQUENCY;
+        assert!(scene.opaque.len() > street_edge_count * 3 * STREET_SUBDIVISION_COUNT * STREET_SUBDIVISION_COUNT);
+        let window_edge_count: usize = 60 * GLASS_FREQUENCY * GLASS_FREQUENCY;
+        assert_eq!(scene.glass.len(), window_edge_count * 3 * GLASS_SUBDIVISION_COUNT * GLASS_SUBDIVISION_COUNT);
+        assert!(scene.opaque.iter().any(|v| v.layer == SCREEN_LAYER));
+        assert!(scene.opaque.iter().any(|v| v.layer == LED_LAYER));
         assert_eq!(scene.holes.len(), 6);
     }
 }
