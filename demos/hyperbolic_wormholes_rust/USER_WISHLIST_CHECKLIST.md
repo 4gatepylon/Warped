@@ -118,8 +118,6 @@ are here too, since the user hadn't confirmed them.
   white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
   then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
   that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249.
-- [?] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
-  menu opens on the SCORES page. #265.
 - [?] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. #210.
@@ -315,3 +313,5 @@ Confirmed by the user after testing.
   demo's `AGENTS.md` that any new asset gets added to that page. #262. Confirmed by the user, 2026-11-07: "the credits page looks good yes".
 - [x] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
   and team. #164. Confirmed by the user, 2026-11-07: "kd stuff also looiks good so add that as complete as well".
+- [x] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
+  menu opens on the SCORES page. #265. Confirmed by the user, 2026-11-07: "scores page change looks good, mark it as done in a pr".
