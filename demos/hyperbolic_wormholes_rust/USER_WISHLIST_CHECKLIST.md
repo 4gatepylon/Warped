@@ -11,12 +11,23 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
+  curvature by default (and at most twice). Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
+- [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
+  of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
+- [~] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
+  character, and the player controls it from there, seeing their own character. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
+- [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
+  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
+  wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
+- [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
+  (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
 - [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
-- [~] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
-  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user wants to see it
-  before it merges. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/dust-polyhedra`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
   itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
@@ -56,8 +67,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Open
 
-- [ ] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
-  curvature by default (and at most twice).
 - [ ] **W-40 Graphics caveats.** Fix the Lunar Surface graphics caveats listed in `PLAYTEST.md` ("Graphics on Lunar
   Surface, to fix in later pull requests"); slightly wrong graphics were accepted for playtesting "and we can fix
   them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
@@ -104,31 +113,20 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-- [ ] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
-  character, and the player controls it from there, seeing their own character.
-- [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
-  of the ground, just barely translucent, to mark out the real zones.
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
-- [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
-  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
-  wedge-shaped capital ship), not copies of the films' models, and without their names in the code.
 
 ## Pending user review
 
-- [?] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
-  shadows on the hills. #233.
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
-- [?] **W-91 One laser on the minimap.** A bug: when you shoot, the minimap shows two lasers instead of one ("like
-  a triangle of some kind"). #243.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
   it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
   don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
-  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226.
+  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226. Then: "can you add a little bit more haze". #238.
 - [?] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
   and on Lunar Surface. #73, #76, #81–#86, #90, #91.
 - [?] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
@@ -277,3 +275,11 @@ are here too, since the user hadn't confirmed them.
 ## Done
 
 Confirmed by the user after testing.
+
+- [x] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
+  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
+  screenshots before it merged ("dust polyhedra looks good plz merge"). #234. Confirmed by the user, 2026-11-07: "dust as small polydra is good so it should be masrked as done".
+- [x] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills. #233. Confirmed by the user, 2026-11-07: "shadows on hills is good enough so it shouledbe marked as done".
+- [x] **W-91 One laser on the minimap.** A bug: when you shoot, the minimap shows two lasers instead of one ("like
+  a triangle of some kind"). #243. Confirmed by the user, 2026-11-07: "one laser on minimap seems fixed so shoudl be marked as done".
