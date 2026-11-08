@@ -12,6 +12,8 @@
 //! - A point shows where it stands on the ground (its Fermi u, v), seen from the player's ground
 //!   point: (x, z) / (1 + w) of that ground point in the player's ground frame, divided by
 //!   tanh(range / 2R) so that the reach lands on the rim.
+//! - A laser's `BeamSegment` is a start point, a unit tangent and a length, not two points: its
+//!   line is sampled along the geodesic (`geodesic_point`).
 
 use glam::{DMat4, DVec4};
 
@@ -20,7 +22,7 @@ use crate::map_layout::MapLayout;
 use crate::render_metal::{MAX_MINIMAP_LINE_COUNT, MAX_MINIMAP_MARK_COUNT, Minimap};
 use crate::settings::{MinimapCorner, MinimapSettings};
 use crate::terrain::get_fermi_coordinates;
-use crate::voxel_world::BeamSegment;
+use crate::voxel_world::{BeamSegment, geodesic_point};
 
 const MARGIN_FRAC: f64 = 0.03;
 const PLAYER_MARK_RADIUS_PX: f32 = 4.0;
@@ -155,9 +157,8 @@ pub fn make_minimap(
         .flat_map(|(segment, team)| {
             let points: Vec<[f64; 2]> = (0..=SAMPLES_PER_SEGMENT)
                 .map(|k| {
-                    let t: f64 = k as f64 / SAMPLES_PER_SEGMENT as f64;
-                    let chord: DVec4 = segment.a * (1.0 - t) + segment.b * t;
-                    projection.project(crate::geometry::normalize_point(chord))
+                    let s: f64 = segment.length * k as f64 / SAMPLES_PER_SEGMENT as f64;
+                    projection.project(geodesic_point(segment.a, segment.b, s))
                 })
                 .collect();
             (1..points.len())
@@ -188,6 +189,7 @@ mod tests {
     //! | Point seen | ahead (up), to the right (right), at the reach (on the rim), behind a player turned to +v | `points_show_where_the_player_faces` |
     //! | Corner | top right, bottom left | `the_minimap_sits_in_its_corner` |
     //! | Players and shots | in reach (marked), out of reach (left out) | `the_minimap_sits_in_its_corner` |
+    //! | Laser drawn | one straight shot ahead, as one segment (one straight line up to its end) | `a_shot_is_one_line` |
 
     use super::*;
     use crate::geometry::make_rotation;
@@ -198,6 +200,7 @@ mod tests {
     const RANGE_M: f64 = 60.0;
     const NEAR_M: f64 = 10.0;
     const TOLERANCE: f64 = 1e-9;
+    const TOLERANCE_F32: f64 = 1e-5;
     const WINDOW_PX: (u32, u32) = (2560, 1600);
 
     #[test]
@@ -218,6 +221,52 @@ mod tests {
         assert!(
             x.abs() < TOLERANCE && y < 0.0,
             "+v is up when facing it: {x}, {y}"
+        );
+    }
+
+    /// `a_shot_is_one_line` checks that a shot fired straight ahead shows as one straight line,
+    /// from the player up to where the shot ends (W-91: it showed as two).
+    #[test]
+    fn a_shot_is_one_line() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("Lunar Surface loads");
+        let layout: MapLayout = MapLayout::FromMap(&map, (992, 556)).expect("a layout");
+        let mut settings: MinimapSettings = PerPlayerSettings::Builtin().minimap;
+        settings.range_m = RANGE_M;
+        let r_m: f64 = layout.get_curvature_radius_m();
+        let ahead: DVec4 = -DMat4::IDENTITY.col(AXIS_Z);
+        let shot: Vec<BeamSegment> = vec![BeamSegment {
+            a: DVec4::W,
+            b: ahead,
+            length: NEAR_M / r_m,
+        }];
+        let minimap: Minimap = make_minimap(
+            &layout,
+            &settings,
+            DMat4::IDENTITY,
+            &[],
+            &[(shot, 0)],
+            WINDOW_PX,
+        );
+        let line_count: usize = minimap.counts[1] as usize;
+        assert_eq!(line_count, SAMPLES_PER_SEGMENT, "one line, in its pieces");
+        let (projection, _) = Projection::New(DMat4::IDENTITY, RANGE_M, r_m);
+        let [_, end_y] = projection.project(make_fermi_point(NEAR_M, 0.0, 0.0, r_m));
+        let mut last_y: f64 = 0.0;
+        for (k, [ends, _]) in minimap.lines[..line_count].iter().enumerate() {
+            let [x0, y0, x1, y1] = ends.map(f64::from);
+            assert!(
+                x0.abs() < TOLERANCE_F32 && x1.abs() < TOLERANCE_F32,
+                "piece {k} leaves the line ahead: {ends:?}"
+            );
+            assert!(
+                (y0 - last_y).abs() < TOLERANCE_F32 && y1 < y0,
+                "piece {k} doesn't go on up from the last: {ends:?}"
+            );
+            last_y = y1;
+        }
+        assert!(
+            (last_y - end_y).abs() < TOLERANCE_F32,
+            "the line ends at {last_y}, not at the shot's end {end_y}"
         );
     }
 
