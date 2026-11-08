@@ -10,9 +10,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-78 Shooting from the team screen.** A bug: you may be able to shoot a laser before leaving the screen where
-  you press `1` or `2` to choose a team. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch
-  `claude/fix-team-join`, 2026-11-07, with W-72.
 - [~] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
   it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom").
   Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/scene-haze-soft-shadows`, 2026-11-07.
@@ -25,8 +22,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
   scene lighting. Claimed by Claude Code (session
   `5cf069f6-934c-466e-93ea-854879c2feaa`), branch `claude/gun-scene-lighting`, 2026-11-07.
-- [~] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
-  Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-team-join`, 2026-11-07.
 - [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
   windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
   (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
@@ -223,3 +218,8 @@ is in [`AGENTS.md`](AGENTS.md).
   taking damage the health bar pulses with a reddish orange pulse traveling downwards, when you run a blue pulse goes
   from right to left (down), ammo is normal though; another pulse (but much more subtle) occurs when you are
   regaining things such as energy" (D85). #207.
+- [x] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
+  It was a join sent to a port no server listened on; windows now say when a server doesn't answer, is full or runs
+  another version. #PR.
+- [x] **W-78 Shooting from the team screen.** A bug: you may be able to shoot a laser before leaving the screen where
+  you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #PR.

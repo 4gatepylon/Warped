@@ -1231,6 +1231,30 @@
 - **Rationale:** you reported that a laser shot out of a window close up doesn't leave the room; it stops on the
   glass by design, so whether lasers should pass through windows is your call.
 
+### D91. A window says why it can't play on its server (W-72, W-78)
+
+- **Choice:**
+  - **No answer:** a window shows "NO ANSWER FROM THE SERVER" and the server's address when nothing has answered its
+    messages for 2 s, and prints a fuller hint in the terminal once. It counts only time with a message waiting for an
+    answer, so a long first frame, when the window sends nothing, doesn't count.
+  - **Another version:** "SERVER RUNS ANOTHER VERSION" shows when the server's snapshots have had the wrong length
+    for this game, and none the right one, for a second. A welcome whose settings this game can't read stops the
+    game with an error saying the server runs another version.
+  - **Full:** a full server now answers a join with a new `Full` message (kind 12, which old clients ignore). The
+    window shows "THE GAME IS FULL".
+  - **Joining:** after `1` or `2`, "JOINING THE GAME" shows until the welcome, instead of no banner.
+  - **Finding a server:** `--join auto` listens for 1 s after the first announcement and joins the server on
+    `DEFAULT_PORT` if one announced itself, else the first heard, printing the others.
+  - **Server log:** a join now prints the window's address as "their window's address", so it isn't mistaken for
+    the server's port.
+  - **Shooting (W-78):** a player in a game on a server can shoot only once welcomed: not from the team screen,
+    while joining, or while out after a hit.
+- **Alternatives:**
+  - a version number in the join message (part of W-58, another agent's);
+  - a list of servers to pick from, when several announce themselves (more than this needed).
+- **Rationale:** you couldn't join with `1` or `2`, which turned out to be a join sent to a port no server listened
+  on, and nothing said so. You asked to cover the cases where a server doesn't answer, and that you can't shoot
+  before leaving the team screen.
 
 ## Baselines
 
