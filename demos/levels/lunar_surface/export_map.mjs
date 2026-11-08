@@ -83,7 +83,7 @@ function make_map(level) {
   const materials = level.MATERIALS.map(([name, color, glow], id) => ({
     id, name, color, kind: id === 0 ? 'empty' : id === level.MAT.GLASS ? 'glass' : glow > 0 ? 'light' : 'solid'
   }));
-  const structures = level.structures.map(structure => ({ name: structure.name, frame: Array.from(structure.frame), shapes: structure.shapes }));
+  const structures = level.structures.map(structure => ({ name: structure.name, frame: Array.from(structure.frame), ...(structure.mesh ? { mesh: structure.mesh } : {}), shapes: structure.shapes }));
   const warps = level.warps.map(warp => {
     const is_mouth = warp.kind === level.KIND_MOUTH;
     return {
