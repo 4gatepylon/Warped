@@ -25,6 +25,8 @@ use objc2_metal::{
 use crate::bend::Bend;
 use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_Z, get_distance, invert_lorentz};
+use crate::mesh::MeshModel;
+use crate::render_mesh::{MeshGpu, NO_MESH, get_mesh_roots};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
@@ -238,6 +240,7 @@ pub struct VoxelFrame {
     mound_grid: Option<Arc<MoundGrid>>,
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
+    meshes: Arc<Vec<MeshModel>>,
 }
 
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
@@ -382,6 +385,7 @@ impl VoxelFrame {
         bend: Bend,
     ) -> VoxelFrame {
         let r: f64 = world.r;
+        let mesh_roots: Vec<i32> = get_mesh_roots(&world.meshes);
         let structures: Vec<GpuStructure> = world
             .structures
             .iter()
@@ -395,7 +399,7 @@ impl VoxelFrame {
                         s.first_shape as i32,
                         s.shape_count as i32,
                         i32::from(s.is_dark),
-                        0,
+                        s.mesh.map_or(NO_MESH, |m| mesh_roots[m]),
                     ],
                     scale: [r as f32, 0.0, 0.0, 0.0],
                 }
@@ -623,6 +627,7 @@ impl VoxelFrame {
             mound_grid: get_mound_grid(&world.terrain).cloned(),
             dust_bursts,
             dust_particles,
+            meshes: Arc::clone(&world.meshes),
         }
     }
 
@@ -810,6 +815,7 @@ pub struct VoxelGpu {
     bake_milky_way: Pipeline,
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
+    meshes: Option<(*const Vec<MeshModel>, MeshGpu)>,
     post: Option<PostTextures>,
     milky_way: Texture,
     is_milky_way_baked: bool,
@@ -844,6 +850,7 @@ impl VoxelGpu {
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
             textures,
+            meshes: None,
             post: None,
             milky_way: make_hdr_texture(device, MILKY_WAY_TEXTURE_PX)?,
             is_milky_way_baked: false,
@@ -911,6 +918,15 @@ impl VoxelGpu {
             }
             encoder.setTexture_atIndex(Some(&self.milky_way), MILKY_WAY_TEXTURE_INDEX);
         }
+        let mesh_key: *const Vec<MeshModel> = Arc::as_ptr(&frame.meshes);
+        if self.meshes.as_ref().is_none_or(|(key, _)| *key != mesh_key) {
+            self.meshes = Some((mesh_key, MeshGpu::New(device, &frame.meshes)?));
+        }
+        self.meshes
+            .as_ref()
+            .expect("the meshes were just uploaded")
+            .1
+            .bind(encoder);
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
         unsafe {
