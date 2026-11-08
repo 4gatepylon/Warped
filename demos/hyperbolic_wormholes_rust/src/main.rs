@@ -117,6 +117,7 @@ const WINDOW_TITLE: &str = "Hyperbolic wormholes (Rust)";
 const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
+const MAX_BLUESHIFT_FRAC: f64 = 1.25;
 const WAND_RECOIL_M: f32 = 0.035;
 const WAND_RECOIL_TILT_RAD: f32 = 0.12;
 const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
@@ -1697,25 +1698,20 @@ fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Resu
     Ok(())
 }
 
-/// `fade_wormhole_tint` gives how much of the blueshift after a wormhole is left `dt_s` after
-/// `left_frac` was (1 just after going through, 0 none), fading linearly over `tint_s` (0 for none).
+/// `get_blueshift_frac` gives how far the scene blueshifts (the overlay's `blueshift_frac`: 1 for
+/// walking straight ahead at a mouth's throat, negative for a redshift, 0 for none): `strength_frac`
+/// times how deep the eye is in a mouth (`VoxelWorld::get_mouth_depth_frac`) times the speed
+/// along the view in walking speeds, held within ±`MAX_BLUESHIFT_FRAC`.
 ///
-/// Example: `let left_frac = fade_wormhole_tint(1.0, 1.0 / 60.0, 1.5);`
-fn fade_wormhole_tint(left_frac: f64, dt_s: f64, tint_s: f64) -> f64 {
-    if tint_s > 0.0 {
-        (left_frac - dt_s / tint_s).max(0.0)
-    } else {
-        0.0
-    }
-}
-
-/// `get_blueshift_frac` gives how far into its blueshift the scene is (the overlay's
-/// `blueshift_frac`) with `left_frac` of the fade left: `strength_frac` times the smoothstep
-/// 3x² − 2x³ of `left_frac`, so the tint lingers a moment at its peak and eases out at the end.
-///
-/// Example: `let blueshift_frac = get_blueshift_frac(0.5, 1.0);`
-fn get_blueshift_frac(left_frac: f64, strength_frac: f64) -> f32 {
-    (strength_frac * left_frac * left_frac * (3.0 - 2.0 * left_frac)) as f32
+/// Example: `let blueshift_frac = get_blueshift_frac(0.5, -10.0, 10.0, 1.0);`
+fn get_blueshift_frac(
+    depth_frac: f64,
+    view_m_per_s: f64,
+    walk_m_per_s: f64,
+    strength_frac: f64,
+) -> f32 {
+    (strength_frac * depth_frac * view_m_per_s / walk_m_per_s)
+        .clamp(-MAX_BLUESHIFT_FRAC, MAX_BLUESHIFT_FRAC) as f32
 }
 
 /// `Session` is the state of a played window: the world, the player, the toggles and the HUD's
@@ -1768,7 +1764,7 @@ struct Session {
     run_pose_frac: f64,
     motion_blur_frac: f32,
     hit_effect_frac: f64,
-    wormhole_tint_left_frac: f64,
+    blueshift_frac: f32,
     last_health_frac: f64,
     health_pulses: hud_bars::BarPulses,
     energy_pulses: hud_bars::BarPulses,
@@ -2104,7 +2100,7 @@ impl Session {
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
-            wormhole_tint_left_frac: 0.0,
+            blueshift_frac: 0.0,
             last_health_frac: 1.0,
             health_pulses: hud_bars::BarPulses::New(1.0),
             energy_pulses: hud_bars::BarPulses::New(1.0),
@@ -2292,11 +2288,7 @@ impl Session {
         self.hit_effect_frac =
             (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
         self.update_bar_pulses(dt_s);
-        self.wormhole_tint_left_frac = fade_wormhole_tint(
-            self.wormhole_tint_left_frac,
-            dt_s,
-            self.player_settings.view.wormhole_tint_s,
-        );
+        self.blueshift_frac = 0.0;
         self.motion_blur_frac = if blur_s > 0.0 {
             (-dt_s / blur_s).exp() as f32
         } else {
@@ -2356,22 +2348,30 @@ impl Session {
             (self.aim_frac + if is_aiming { aim_step } else { -aim_step }).clamp(0.0, 1.0);
         let is_holding_e: bool = held(Action::TurnOffConsole);
         let team: usize = self.get_team() as usize;
-        let report: voxel_world::StepReport = match &mut self.voxel {
-            Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, team),
+        let messages: Vec<String> = match &mut self.voxel {
+            Some(voxel) => {
+                let report: voxel_world::StepReport =
+                    voxel.player.step(&voxel.world, &input, dt_s, team);
+                let pitch_rad: f64 = voxel.player.pitch_rad;
+                let view_m_per_s: f64 = report.forward_m_per_s * pitch_rad.cos()
+                    + voxel.player.vertical_m_per_s * pitch_rad.sin();
+                let eye: DVec4 = voxel.player.get_camera_frame(&voxel.world).col(AXIS_W);
+                self.blueshift_frac = get_blueshift_frac(
+                    voxel.world.get_mouth_depth_frac(eye),
+                    view_m_per_s,
+                    voxel.world.player.walk_m_per_s,
+                    self.player_settings.view.wormhole_tint_frac,
+                );
+                report.messages
+            }
             None => {
                 let messages: Vec<String> =
                     physics::update_player(&self.world, &mut self.player, &input, dt_s);
                 physics::level_out(&mut self.player.frame, dt_s);
-                voxel_world::StepReport {
-                    has_crossed_mouth: !messages.is_empty(),
-                    messages,
-                }
+                messages
             }
         };
-        if report.has_crossed_mouth {
-            self.wormhole_tint_left_frac = 1.0;
-        }
-        for message in report.messages {
+        for message in messages {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
@@ -4016,15 +4016,12 @@ fn play_on_layer(
         let wand: Option<render_metal::OverlayWand> = session.get_wand();
         let stretch_frac: f32 = session.get_edge_stretch_frac();
         let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
-        let blueshift_frac: f32 = get_blueshift_frac(
-            session.wormhole_tint_left_frac,
-            session.player_settings.view.wormhole_tint_frac,
-        );
+        let blueshift_frac: f32 = session.blueshift_frac;
         let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
             || !rects.is_empty()
             || wand.is_some()
             || stretch_frac > 0.0
-            || blueshift_frac > 0.0
+            || blueshift_frac != 0.0
             || minimap.is_some())
         .then(|| render_metal::Overlay {
             dim_frac: match &overlay_text {
@@ -4083,9 +4080,9 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Wormhole tint left | all (just through), part, none (stays none) | `wormhole_tint_peaks_and_fades` |
-    //! | Wormhole tint fade time | above 0 (fades over it), 0 (no tint) | `wormhole_tint_peaks_and_fades` |
-    //! | Wormhole tint strength | 1, between 0 and 1, 0 | `wormhole_tint_peaks_and_fades` |
+    //! | Depth in a mouth | at the throat (1), part way, outside (0) | `wormhole_shift_follows_depth_and_speed` |
+    //! | Speed along the view | forward (blueshift), backward (redshift), still (none), past the cap (held at it) | `wormhole_shift_follows_depth_and_speed` |
+    //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
@@ -4094,26 +4091,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wormhole_tint_peaks_and_fades() {
-        const TINT_S: f64 = 1.5;
-        const DT_S: f64 = 1.0 / 60.0;
+    fn wormhole_shift_follows_depth_and_speed() {
+        const WALK_M_PER_S: f64 = 10.0;
+        const SPRINT_M_PER_S: f64 = 18.0;
         const HALF_FRAC: f64 = 0.5;
         const WEAK_STRENGTH_FRAC: f64 = 0.4;
-        assert_eq!(get_blueshift_frac(1.0, 1.0), 1.0);
-        assert_eq!(get_blueshift_frac(1.0, 0.0), 0.0);
-        assert_eq!(get_blueshift_frac(0.0, 1.0), 0.0);
-        let half_way: f32 = get_blueshift_frac(HALF_FRAC, WEAK_STRENGTH_FRAC);
-        assert!((f64::from(half_way) - HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
-        let mut left_frac: f64 = 1.0;
-        let mut fade_frames: Vec<f64> = Vec::new();
-        while left_frac > 0.0 {
-            left_frac = fade_wormhole_tint(left_frac, DT_S, TINT_S);
-            fade_frames.push(left_frac);
-        }
-        assert!((fade_frames.len() as f64 * DT_S - TINT_S).abs() <= DT_S);
-        assert!(fade_frames.windows(2).all(|pair| pair[1] < pair[0]));
-        assert_eq!(fade_wormhole_tint(0.0, DT_S, TINT_S), 0.0);
-        assert_eq!(fade_wormhole_tint(1.0, DT_S, 0.0), 0.0);
+        let shift = |depth_frac: f64, view_m_per_s: f64, strength_frac: f64| -> f64 {
+            f64::from(get_blueshift_frac(
+                depth_frac,
+                view_m_per_s,
+                WALK_M_PER_S,
+                strength_frac,
+            ))
+        };
+        assert_eq!(shift(1.0, WALK_M_PER_S, 1.0), 1.0);
+        assert_eq!(shift(1.0, -WALK_M_PER_S, 1.0), -1.0);
+        assert_eq!(shift(1.0, 0.0, 1.0), 0.0);
+        assert_eq!(shift(0.0, WALK_M_PER_S, 1.0), 0.0);
+        assert_eq!(shift(1.0, WALK_M_PER_S, 0.0), 0.0);
+        let part_way: f64 = shift(HALF_FRAC, -WALK_M_PER_S, WEAK_STRENGTH_FRAC);
+        assert!((part_way + HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
+        assert!((shift(1.0, SPRINT_M_PER_S, 1.0) - MAX_BLUESHIFT_FRAC).abs() < 1e-6);
+        assert!((shift(1.0, -SPRINT_M_PER_S, 1.0) + MAX_BLUESHIFT_FRAC).abs() < 1e-6);
     }
 
     #[test]

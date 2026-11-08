@@ -43,17 +43,17 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 16] = [
     "respawn.delay_s",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
     "view.wormhole_tint_frac",
-    "view.wormhole_tint_s",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
     "hit_effects.red_frac",
     "hit_effects.shake_px",
     "hit_effects.blur_px",
 ];
+const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -217,8 +217,7 @@ pub struct MapEdgeSettings {
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
-/// blueshifts toward cyan just after going through a wormhole (0 to 1) and how long that takes to
-/// fade, and the head bob.
+/// blue- or redshifts while moving inside a wormhole mouth (0 to 1), and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
@@ -226,7 +225,6 @@ pub struct ViewSettings {
     pub motion_blur_s: f64,
     pub edge_stretch_frac: f64,
     pub wormhole_tint_frac: f64,
-    pub wormhole_tint_s: f64,
     pub head_bob: HeadBobSettings,
 }
 
@@ -334,6 +332,24 @@ fn read_text(path: &Path) -> Result<String> {
         .map_err(|error| format!("settings {}: {error}", path.display()))?)
 }
 
+/// `drop_removed_keys` deletes from a settings file's YAML each dotted key of `removed` (such as
+/// `view.wormhole_tint_s`) that it has, so a file an older version saved still loads; every other
+/// unknown key still fails.
+///
+/// Example: `drop_removed_keys(&mut yaml, &REMOVED_PLAYER_KEYS);`
+fn drop_removed_keys(yaml: &mut serde_yaml::Value, removed: &[&str]) {
+    for key in removed {
+        let mut parts: Vec<&str> = key.split('.').collect();
+        let name: &str = parts.pop().expect("a key has at least one part");
+        let parent: Option<&mut serde_yaml::Value> = parts
+            .iter()
+            .try_fold(&mut *yaml, |node, part| node.get_mut(*part));
+        if let Some(serde_yaml::Value::Mapping(fields)) = parent {
+            fields.remove(name);
+        }
+    }
+}
+
 impl ServerSettings {
     /// `FromYaml` reads server settings from YAML text, naming `source` in errors, and checks every
     /// number (`check_numbers`).
@@ -433,13 +449,17 @@ impl ServerSettings {
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
-    /// `view.wormhole_tint_frac` at most 1.
+    /// `view.wormhole_tint_frac` at most 1. The keys in `REMOVED_PLAYER_KEYS`, which older
+    /// versions saved, are dropped (`drop_removed_keys`).
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
     fn FromYaml(text: &str, source: &str) -> Result<PerPlayerSettings> {
-        let file: PlayerFile =
+        let mut yaml: serde_yaml::Value =
             serde_yaml::from_str(text).map_err(|error| format!("settings {source}: {error}"))?;
+        drop_removed_keys(&mut yaml, &REMOVED_PLAYER_KEYS);
+        let file: PlayerFile =
+            serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         if file.view.wormhole_tint_frac > 1.0 {
@@ -498,7 +518,8 @@ mod tests {
     //! | Keys | all present, one unknown, one missing | `builtin_settings_read_and_survive_json`, `unknown_and_missing_keys_fail` |
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise or beam speckle that shrinks with heat, a speckle share above 1, speckle kinds that don't add up to 1) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
-    //! | Wormhole tint strength | 0 (with a fade of 0 s), between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -607,9 +628,8 @@ mod tests {
 
     #[test]
     fn wormhole_tint_takes_0_to_1() {
-        let none: String = BUILTIN_PLAYER_YAML
-            .replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0")
-            .replace("wormhole_tint_s: 1.5", "wormhole_tint_s: 0");
+        let none: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0");
         assert!(PerPlayerSettings::FromYaml(&none, "test").is_ok());
         let half: String =
             BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0.5");
@@ -621,5 +641,25 @@ mod tests {
             .expect("a tint above 1 fails")
             .to_string();
         assert!(error.contains("view.wormhole_tint_frac"), "{error}");
+    }
+
+    #[test]
+    fn removed_keys_are_dropped_and_others_still_fail() {
+        const OLD_TINT_LINE: &str = "\n  wormhole_tint_s: 1.5  # removed by W-82";
+        let with_tint_line = |line: &str| -> String {
+            let tint_frac_line: &str = "\n  wormhole_tint_frac: 1.0";
+            BUILTIN_PLAYER_YAML.replacen(tint_frac_line, &format!("{tint_frac_line}{line}"), 1)
+        };
+        let old_save: String = with_tint_line(OLD_TINT_LINE);
+        assert_ne!(old_save, BUILTIN_PLAYER_YAML);
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let typo: String = with_tint_line("\n  wormhole_tint_seconds: 1.5");
+        let error: String = PerPlayerSettings::FromYaml(&typo, "test")
+            .err()
+            .expect("a key that was never removed fails")
+            .to_string();
+        assert!(error.contains("wormhole_tint_seconds"), "{error}");
     }
 }

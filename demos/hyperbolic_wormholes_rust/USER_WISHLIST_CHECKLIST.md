@@ -27,14 +27,6 @@ is in [`AGENTS.md`](AGENTS.md).
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
-- [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
-  (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
-- [~] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
-  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
-  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
-  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
-  show a redshift instead. The user wants video or image demos to confirm. Claimed by Claude Code (subagent of
-  session `wizardly-hamilton-23a121`), branch `claude/wormhole-doppler`, 2026-11-07.
 - [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
@@ -135,6 +127,12 @@ are here too, since the user hadn't confirmed them.
   speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
   white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2".
   #249.
+- [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
+- [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
+  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
+  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
+  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
+  show a redshift instead. The user wants video or image demos to confirm. #259.
 - [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
   lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
   laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
