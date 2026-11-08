@@ -26,7 +26,7 @@ const SUN_COLOR = [1.0, 0.96, 0.88];
 const LIGHTING = { model: 'lunar_lambert', lommel_seeliger_frac: 0.7, ambient: 0.11, earthshine: 0.08, sun_intensity: 1.45, shadows: true };
 const SPACE_COLOR = [0, 0, 0];
 const TEAM_NAMES = ['blue', 'red'];
-const TERRAIN = { kind: 'crater', rim_u_m: 160, rim_v_m: 90, wall_m: 30, rim_height_m: 22, relief_m: 1, relief_wavelength_m: 24, seed: 1 };
+const TERRAIN = { kind: 'crater', rim_u_m: 160, rim_v_m: 90, wall_m: 30, rim_height_m: 22, relief_m: 2.5, relief_wavelength_m: 18, seed: 1 };
 
 /**
  * `cut_between` returns the text of `source` from the start of `start` to the start of `end`.

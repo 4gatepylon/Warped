@@ -330,8 +330,8 @@
    "rim_v_m": 90,
    "wall_m": 30,
    "rim_height_m": 22,
-   "relief_m": 1,
-   "relief_wavelength_m": 24,
+   "relief_m": 2.5,
+   "relief_wavelength_m": 18,
    "seed": 1
   }
  },
