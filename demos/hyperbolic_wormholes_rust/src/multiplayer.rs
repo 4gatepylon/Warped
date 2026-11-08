@@ -382,7 +382,8 @@ fn trace_other_voxel_lasers(
 /// which the other players' lasers stop at but this player's own passes, as it leaves from inside
 /// it. It draws every laser's whole path (this player's as the sniper's, without speckle; the
 /// others' in their gun's style, with their shots' speckle), or `tracers` instead when given. `own_body` takes the pose after the players' in `poses`, and
-/// the `corpses` still lying are drawn last, where lasers pass through them.
+/// the `corpses` still lying (a feet frame, team and pose each) are drawn last, where lasers pass
+/// through them.
 ///
 /// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &poses, &[], None, &[], None, (1280, 800));`
 #[allow(clippy::too_many_arguments)]
@@ -395,7 +396,7 @@ pub fn pack_shared_voxel_view(
     poses: &[(AvatarClip, f64)],
     markers: &[Marker],
     own_body: Option<(DMat4, usize)>,
-    corpses: &[(DMat4, (AvatarClip, f64))],
+    corpses: &[(DMat4, usize, (AvatarClip, f64))],
     tracers: Option<Tracers>,
     render_px: (u32, u32),
 ) -> SharedVoxelView {

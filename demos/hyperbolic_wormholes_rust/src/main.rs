@@ -3097,6 +3097,12 @@ impl Session {
         let Some(multiplayer) = &mut self.multiplayer else {
             return Ok(false);
         };
+        let teams_before_poll: Vec<(u32, u32)> = multiplayer
+            .client
+            .players
+            .iter()
+            .map(|p| (p.id, p.team))
+            .collect();
         let events: Vec<net::NetEvent> = multiplayer.client.poll()?;
         let mut messages: Vec<String> = Vec::new();
         for event in events {
@@ -3152,9 +3158,12 @@ impl Session {
                         self.shot_time_s = 0.0;
                         self.thrown.clear();
                     }
-                    if !is_self {
+                    if !is_self
+                        && let Some(&(_, team)) =
+                            teams_before_poll.iter().find(|(id, _)| *id == victim_id)
+                    {
                         let now_s: f64 = self.start.elapsed().as_secs_f64();
-                        self.avatars.add_corpse(victim_id, now_s);
+                        self.avatars.add_corpse(victim_id, team, now_s);
                     }
                     messages.push(if is_self {
                         format!("You died: hit by player {shooter_id}")
@@ -3268,11 +3277,11 @@ impl Session {
             let mut poses: Vec<(avatar_model::AvatarClip, f64)> =
                 self.avatars.update(&voxel.world, &eyes, now_s);
             poses.truncate(players.len() + usize::from(own_body.is_some()));
-            let corpses: Vec<(DMat4, (avatar_model::AvatarClip, f64))> = self
+            let corpses: Vec<(DMat4, usize, (avatar_model::AvatarClip, f64))> = self
                 .avatars
                 .get_corpses(now_s, self.settings.respawn.delay_s)
                 .into_iter()
-                .map(|(corpse, pose)| (corpse.feet, pose))
+                .map(|(corpse, pose)| (corpse.feet, corpse.team as usize, pose))
                 .collect();
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);

@@ -209,8 +209,9 @@ The level as the Rust game builds it, from the map
   watchtower, a landing pad, an antenna, a walkway, crates and a solar array. The bunkers are models players walk
   into. Each pylon is a 12 m sci-fi beacon whose console is the beacon itself; it beams its team colour 400 m up while
   its console is on.
-- Players look like a teal robot, animated by what they do: standing, walking, running, in the air, and, once
-  eliminated, falling onto their back where they were hit and lying there until they respawn. Shots hit an invisible
+- Players look like a robot in their team's colour (blue or red, its grey and black parts unchanged), animated by
+  what they do: standing, walking, running, in the air, and, once eliminated, falling onto their back where they
+  were hit and lying there until they respawn. Shots hit an invisible
   cylinder and head the robot's size, not the robot's own shape.
 - Structures have sharp edges. The habitat modules' and walkways' windows are glass: players see
   out of them and shoot through them, but can't climb through them.
