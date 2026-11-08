@@ -11,6 +11,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
+  and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
+  `claude/delta-fighters`, 2026-11-07.
 - [~] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-bunker-exit`,
   2026-11-07.
