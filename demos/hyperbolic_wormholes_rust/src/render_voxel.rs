@@ -16,7 +16,8 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
-    MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
+    MTLBuffer, MTLComputeCommandEncoder, MTLDevice, MTLLibrary, MTLPixelFormat, MTLResourceOptions,
+    MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
 use crate::geometry::get_distance;
@@ -37,6 +38,8 @@ const UNIFORMS_BUFFER_INDEX: usize = 16;
 const SCENE_BUFFER_COUNT: usize = 9;
 const MEANS_BUFFER_INDEX: usize = 26;
 const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
+const BLOOM_LEVELS: usize = 5;
+const FIRST_BLOOM_TEXTURE_INDEX: usize = 7;
 const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
@@ -382,13 +385,72 @@ fn as_bytes<T: Copy>(values: &[T]) -> &[u8] {
     }
 }
 
-/// `VoxelGpu` is the voxel renderer's pipelines (every pixel, and adaptive sampling's), buffers
-/// and surface textures.
+/// `Texture` is a Metal texture.
+type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
+
+/// `PostTextures` is the HDR image the rays are traced into, and its bloom chain (each level half
+/// the last).
+struct PostTextures {
+    hdr: Texture,
+    bloom: Vec<Texture>,
+}
+
+/// `make_hdr_texture` makes a private half-float texture that kernels read and write.
+///
+/// Example: `let hdr = make_hdr_texture(device, (1280, 800))?;`
+fn make_hdr_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    size: (usize, usize),
+) -> Result<Texture> {
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+    let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::RGBA16Float,
+            size.0.max(1),
+            size.1.max(1),
+            false,
+        )
+    };
+    descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite);
+    descriptor.setStorageMode(MTLStorageMode::Private);
+    Ok(device
+        .newTextureWithDescriptor(&descriptor)
+        .ok_or("Metal: no memory for the HDR texture")?)
+}
+
+/// `dispatch` runs a kernel over a size, one thread per pixel.
+///
+/// Example: `dispatch(encoder, &self.tonemap, (1280, 800));`
+fn dispatch(
+    encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
+    pipeline: &Pipeline,
+    size: (usize, usize),
+) {
+    encoder.setComputePipelineState(pipeline);
+    encoder.dispatchThreads_threadsPerThreadgroup(
+        MTLSize {
+            width: size.0,
+            height: size.1,
+            depth: 1,
+        },
+        MTLSize {
+            width: THREADGROUP_SIDE,
+            height: THREADGROUP_SIDE,
+            depth: 1,
+        },
+    );
+}
+
+/// `VoxelGpu` is the voxel renderer's pipelines (every pixel, adaptive sampling's and the
+/// post-processing's), buffers, surface textures and HDR textures.
 pub struct VoxelGpu {
     trace_pixels: Pipeline,
     adaptive: AdaptivePipelines,
+    bloom_down: Pipeline,
+    tonemap: Pipeline,
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
+    post: Option<PostTextures>,
 }
 
 impl VoxelGpu {
@@ -402,7 +464,8 @@ impl VoxelGpu {
             .replace(
                 "__BYTES_PER_RAY_END__",
                 &VOXEL_BYTES_PER_RAY_END.to_string(),
-            );
+            )
+            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string());
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|error| {
@@ -414,23 +477,28 @@ impl VoxelGpu {
         Ok(VoxelGpu {
             trace_pixels: make_pipeline(device, &library, KERNEL_NAME)?,
             adaptive: AdaptivePipelines::FromLibrary(device, &library)?,
+            bloom_down: make_pipeline(device, &library, "bloom_down")?,
+            tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
             buffers: (0..SCENE_BUFFER_COUNT)
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
             textures: SurfaceTextures::Load(device)?,
+            post: None,
         })
     }
 
-    /// `encode` uploads a frame and traces it into the encoder's texture 0: with `samples`, by
-    /// adaptive sampling into those buffers, otherwise one ray per pixel.
+    /// `encode` uploads a frame and traces it into the HDR texture (with `samples`, by adaptive
+    /// sampling into those buffers, otherwise one ray per pixel), then blooms, grades and tone maps
+    /// it into `target`.
     ///
-    /// Example: `gpu.encode(&device, &encoder, &frame, None)?;`
+    /// Example: `gpu.encode(&device, &encoder, &frame, None, &render_texture)?;`
     pub(crate) fn encode(
         &mut self,
         device: &ProtocolObject<dyn MTLDevice>,
         encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
         frame: &VoxelFrame,
         samples: Option<&SampleBuffers>,
+        target: &ProtocolObject<dyn MTLTexture>,
     ) -> Result<()> {
         let contents: [&[u8]; SCENE_BUFFER_COUNT] = [
             as_bytes(&frame.structures),
@@ -477,29 +545,51 @@ impl VoxelGpu {
             };
         }
         let (width, height) = frame.get_render_size();
-        if let Some(buffers) = samples {
-            encode_adaptive_sampling(
+        if self
+            .post
+            .as_ref()
+            .is_none_or(|p| (p.hdr.width(), p.hdr.height()) != (width, height))
+        {
+            self.post = Some(PostTextures {
+                hdr: make_hdr_texture(device, (width, height))?,
+                bloom: (1..=BLOOM_LEVELS)
+                    .map(|k| make_hdr_texture(device, (width >> k, height >> k)))
+                    .collect::<Result<_>>()?,
+            });
+        }
+        let post: &PostTextures = self.post.as_ref().expect("the HDR textures were just made");
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
+        unsafe { encoder.setTexture_atIndex(Some(&post.hdr), 0) };
+        match samples {
+            Some(buffers) => encode_adaptive_sampling(
                 encoder,
                 &self.adaptive,
                 buffers,
                 VOXEL_BYTES_PER_RAY_END,
                 (width, height),
-            );
-            return Ok(());
+            ),
+            None => dispatch(encoder, &self.trace_pixels, (width, height)),
         }
-        encoder.setComputePipelineState(&self.trace_pixels);
-        encoder.dispatchThreads_threadsPerThreadgroup(
-            MTLSize {
-                width,
-                height,
-                depth: 1,
-            },
-            MTLSize {
-                width: THREADGROUP_SIDE,
-                height: THREADGROUP_SIDE,
-                depth: 1,
-            },
-        );
+        for (k, level) in post.bloom.iter().enumerate() {
+            let source: &Texture = if k == 0 {
+                &post.hdr
+            } else {
+                &post.bloom[k - 1]
+            };
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN BLOOM FROM THE WRONG LEVEL WILL HAPPEN
+            unsafe {
+                encoder.setTexture_atIndex(Some(source), 1);
+                encoder.setTexture_atIndex(Some(level), 2);
+                encoder.setTexture_atIndex(Some(level), FIRST_BLOOM_TEXTURE_INDEX + k);
+            }
+            dispatch(encoder, &self.bloom_down, (level.width(), level.height()));
+        }
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN TONE MAPPING THE WRONG TEXTURE WILL HAPPEN
+        unsafe {
+            encoder.setTexture_atIndex(Some(&post.hdr), 1);
+            encoder.setTexture_atIndex(Some(target), 0);
+        }
+        dispatch(encoder, &self.tonemap, (width, height));
         Ok(())
     }
 }

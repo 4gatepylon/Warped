@@ -49,6 +49,17 @@ constant float MIN_ROUGHNESS = 0.045;
 constant float MIN_FACING = 0.05;
 constant float MIN_MEAN_ALBEDO = 0.02;
 constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);
+constant float DISPLAY_GAMMA = 2.2;
+constant float EXPOSURE = 1.6;
+constant float BLOOM_STRENGTH = 0.05;
+constant int BLOOM_LEVELS = __BLOOM_LEVELS__;
+constant float VIGNETTE_STRENGTH = 0.28;
+constant float GRADE_MIDDLE_GREY = 0.18;
+constant float GRADE_CONTRAST = 1.18;
+constant float GRADE_SATURATION = 1.12;
+constant float3 GRADE_WHITE_BALANCE = float3(1.04, 1.0, 0.94);
+constant float3 GRADE_SHADOW_TINT = float3(0.94, 1.0, 1.07);
+constant float3 GRADE_HIGHLIGHT_TINT = float3(1.04, 1.0, 0.95);
 constant float AMBIENT = 0.11;
 constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
@@ -168,7 +179,6 @@ constant float MILKY_WAY_BRIGHTNESS = 0.05;
 constant float MILKY_WAY_DETAIL = 6.0;
 constant float BEAM_HALO_OPACITY = 0.9;
 constant float BEAM_CORE_WHITENESS = 0.6;
-constant float TONEMAP_KNEE = 0.6;
 constant float3 BLUE_COLOR = float3(0.30, 0.62, 1.0);
 constant float3 RED_COLOR = float3(1.0, 0.16, 0.08);
 constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
@@ -344,8 +354,11 @@ static float sample_fbm_3d(float3 p) {
     return sum;
 }
 
-/** @brief `get_palette` gives a material's colour and glow, black for one outside the palette. @par Example @code float4 c = get_palette(scene, m); @endcode */
-static float4 get_palette(thread const Scene &scene, int m) { return m >= 0 ? scene.palette[m] : float4(0.0); }
+/** @brief `to_linear` turns a display colour into a linear one. @par Example @code float3 c = to_linear(RED_COLOR); @endcode */
+static float3 to_linear(float3 c) { return pow(c, DISPLAY_GAMMA); }
+
+/** @brief `get_palette` gives material m's linear colour and glow (black for one outside the palette). @par Example @code float4 c = get_palette(scene, m); @endcode */
+static float4 get_palette(thread const Scene &scene, int m) { return m >= 0 ? float4(to_linear(scene.palette[m].rgb), scene.palette[m].a) : float4(0.0); }
 
 /**
  * @brief `trace_structure` finds where a chord first enters a solid cell of structure k, by a voxel walk along the
@@ -715,7 +728,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
         float theta = atan2(centre.x, -centre.y);
         float ray = smoothstep(EJECTA_RAY_EDGES.x, EJECTA_RAY_EDGES.y, sample_noise_3d(float3(theta * EJECTA_RAY_COUNT, 0.0, 1.0)))
                   * (1.0 - smoothstep(EJECTA_INNER_M, EJECTA_OUTER_M, r_m));
-        albedo = mix(albedo, EJECTA_COLOR, EJECTA_STRENGTH * ray);
+        albedo = mix(albedo, to_linear(EJECTA_COLOR), EJECTA_STRENGTH * ray);
     }
     if (dist_s < GROUND_DETAIL_S && r_m > CRATER_RIM_RADIUS_M + CRATERLET_CLEARANCE_M) {
         float2 local = (cell + 0.5) * cell_s, best = float2(NO_HIT_S, 0.0);
@@ -743,7 +756,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
             albedo *= OUTSIDE_DARKEN;
         } else if (e > 1.0 - BOUNDARY_STRIP_FRAC) {
             float stripes = floor(u_m / HAZARD_STRIPE_M) + floor(v_m / HAZARD_STRIPE_M);
-            albedo = stripes - 2.0 * floor(stripes / 2.0) < 0.5 ? get_palette(scene, u.mat_hazard).rgb : HAZARD_DARK_COLOR;
+            albedo = stripes - 2.0 * floor(stripes / 2.0) < 0.5 ? get_palette(scene, u.mat_hazard).rgb : to_linear(HAZARD_DARK_COLOR);
         }
     }
     float texel = has_texture(scene, u.mat_regolith) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), h * CELL_SEED));
@@ -787,8 +800,8 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     float glow = entry.a, block = hash_3d(float3(h.cell) + float(h.k) * STRUCT_SEED), detail = detail_fraction(scene, dist_s);
     float stripe = step(0.5, fract((uv.x + uv.y) * STRIPES_PER_BLOCK));
     if (m >= u.mat_console_first && m < u.mat_console_first + u.mat_console_count) albedo *= 1.0 - CONSOLE_STRIPE_DARKEN * (1.0 - stripe);
-    if (m == u.mat_solar) albedo = mix(albedo, SOLAR_GRID_COLOR, step(SOLAR_GRID_EDGE, max(fract(uv.x * SOLAR_CELLS.x), fract(uv.y * SOLAR_CELLS.y))));
-    if (m == u.mat_hazard) albedo = mix(albedo, HAZARD_STRIPE_COLOR, stripe);
+    if (m == u.mat_solar) albedo = mix(albedo, to_linear(SOLAR_GRID_COLOR), step(SOLAR_GRID_EDGE, max(fract(uv.x * SOLAR_CELLS.x), fract(uv.y * SOLAR_CELLS.y))));
+    if (m == u.mat_hazard) albedo = mix(albedo, to_linear(HAZARD_STRIPE_COLOR), stripe);
     if (m == u.mat_gold_foil) albedo *= 1.0 - FOIL_VARIATION * (0.5 - hash_3d(float3(floor(uv * FOIL_CRINKLES), block)));
     if (m == u.mat_hull || m == u.mat_pad) albedo *= 1.0 - PANEL_SEAM_DARKEN * step(PANEL_SEAM_EDGE, max(fract(uv.x * PANEL_SEAMS), fract(uv.y * PANEL_SEAMS)));
     float texel = has_texture(scene, m) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
@@ -1010,14 +1023,13 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
         Hit hit = {0.0, end.cell.w, end.surface.y, end.surface.z, end.glow.x, end.grid.xyz, end.cell.xyz};
         color = shade_block(scene, hit, end.point, end.view, end.grid.w);
     } else if (end.surface.x == OUTCOME_SKY) {
-        color = sample_sky(scene, end.point.xyz);
+        color = to_linear(sample_sky(scene, end.point.xyz));
     }
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
-    float3 beam_color = end.surface.w > 0 ? RED_COLOR : BLUE_COLOR;
-    if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + GLASS_SHEEN;
+    float3 beam_color = to_linear(end.surface.w > 0 ? RED_COLOR : BLUE_COLOR);
+    if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
     color = mix(color, beam_color, clamp(BEAM_HALO_OPACITY * halo, 0.0, 1.0)) + mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * core;
-    color = color / (1.0 + max(color - 1.0, 0.0) * TONEMAP_KNEE);
-    return clamp(color, 0.0, 1.0);
+    return max(color, 0.0);
 }
 
 /** @brief `write_pixel` shades a ray end into pixel `id`. @par Example @code write_pixel(scene, end, id, image); @endcode */
@@ -1289,4 +1301,77 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
         end = trace_ray(scene, float2(id) + 0.5);
     }
     write_pixel(scene, end, id, image);
+}
+
+/** @brief `aces_fitted` is Stephen Hill's fit of the ACES reference rendering transform (from the fps_demo). @par Example @code float3 d = aces_fitted(c); @endcode */
+static float3 aces_fitted(float3 color) {
+    const float3x3 input_matrix = float3x3(float3(0.59719, 0.07600, 0.02840), float3(0.35458, 0.90834, 0.13383), float3(0.04823, 0.01566, 0.83777));
+    const float3x3 output_matrix = float3x3(float3(1.60475, -0.10208, -0.00327), float3(-0.53108, 1.10813, -0.07276), float3(-0.07367, -0.00605, 1.07602));
+    float3 v = input_matrix * color;
+    float3 a = v * (v + 0.0245786) - 0.000090537;
+    float3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return saturate(output_matrix * (a / b));
+}
+
+/** @brief `linear_to_srgb` applies the sRGB transfer function. @par Example @code float3 e = linear_to_srgb(c); @endcode */
+static float3 linear_to_srgb(float3 color) { return select(1.055 * pow(color, 1.0 / 2.4) - 0.055, color * 12.92, color <= 0.0031308); }
+
+/** @brief `grade_scene` is the fps_demo's scene-linear grade: white balance, log contrast around middle grey, saturation. @par Example @code float3 g = grade_scene(c); @endcode */
+static float3 grade_scene(float3 color) {
+    color *= GRADE_WHITE_BALANCE;
+    float luminance = max(dot(color, LUMA), 1e-6);
+    float graded_luminance = GRADE_MIDDLE_GREY * pow(luminance / GRADE_MIDDLE_GREY, GRADE_CONTRAST);
+    color *= graded_luminance / luminance;
+    return max(mix(float3(graded_luminance), color, GRADE_SATURATION), 0.0);
+}
+
+/** @brief `grade_display` is the fps_demo's display grade: cool shadows and warm highlights. @par Example @code float3 g = grade_display(c); @endcode */
+static float3 grade_display(float3 color) {
+    float3 tint = mix(GRADE_SHADOW_TINT, GRADE_HIGHLIGHT_TINT, smoothstep(0.05, 0.6, saturate(dot(color, LUMA))));
+    return saturate(color * tint);
+}
+
+/**
+ * @brief `bloom_down` halves texture 1 into texture 2 for the bloom chain: four bilinear taps over a 4x4 block, each
+ * damped by Karis' weight so single bright pixels don't bloom.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs once per bloom level, one thread per smaller pixel.
+ * @endcode
+ */
+kernel void bloom_down(texture2d<float> source [[texture(1)]], texture2d<float, access::write> target [[texture(2)]], uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= target.get_width() || id.y >= target.get_height()) return;
+    constexpr sampler edge(filter::linear, address::clamp_to_edge);
+    float2 texel = 1.0 / float2(source.get_width(), source.get_height());
+    float2 uv = (float2(id) + 0.5) / float2(target.get_width(), target.get_height());
+    float3 sum = float3(0.0);
+    float weight = 0.0;
+    for (int i = 0; i < 4; i++) {
+        float3 c = source.sample(edge, uv + texel * (float2(i & 1, i >> 1) * 2.0 - 1.0)).rgb;
+        float w = 1.0 / (1.0 + dot(c, LUMA));
+        sum += c * w;
+        weight += w;
+    }
+    target.write(float4(sum / weight, 1.0), id);
+}
+
+/**
+ * @brief `tonemap_voxel` finishes the HDR image (texture 1) like the fps_demo: mixes in the bloom levels, exposes,
+ * grades, tone maps with ACES, vignettes and encodes sRGB into texture 0.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs after tracing, one thread per pixel.
+ * @endcode
+ */
+kernel void tonemap_voxel(texture2d<float> hdr [[texture(1)]], array<texture2d<float>, BLOOM_LEVELS> bloom [[texture(7)]],
+                          texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= hdr.get_width() || id.y >= hdr.get_height()) return;
+    constexpr sampler edge(filter::linear, address::clamp_to_edge);
+    float2 uv = (float2(id) + 0.5) / float2(hdr.get_width(), hdr.get_height());
+    float3 bloom_color = float3(0.0);
+    for (int k = 0; k < BLOOM_LEVELS; k++) bloom_color += bloom[k].sample(edge, uv).rgb;
+    float3 color = mix(hdr.read(id).rgb, bloom_color / float(BLOOM_LEVELS), BLOOM_STRENGTH) * EXPOSURE;
+    color = grade_display(aces_fitted(grade_scene(color)));
+    color *= 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length((uv - 0.5) * float2(1.1, 1.0)));
+    image.write(float4(linear_to_srgb(saturate(color)), 1.0), id);
 }
