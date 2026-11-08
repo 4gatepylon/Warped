@@ -24,13 +24,6 @@ is in [`AGENTS.md`](AGENTS.md).
   chose a high arch that replaces the straight beams, so W-109 (taller pylon beams) is folded into this item. Shelved
   by the user, 2026-11-08: the arches (80 m, the user's pick in the game) are on branch `claude/taller-beacon-beams`
   (#361, not merged), but views of the black hole render about 1.5 to 2.5 times slower than without them.
-- [ ] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
-  get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
-  second touches the ground; shooting a ball before then crashes the game.
-- [ ] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
-  but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
-  nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
-  again and moves it.
 - [ ] **W-113 A black hole for every pylon.** "Instead of making the black hole bigger, BOTH make it bigger AND also
   add another black hole for every pylon solved." Builds on W-107 (time dilation), where each console turned off grows
   the black hole at the centre.
@@ -195,6 +188,22 @@ are here too, since the user hadn't confirmed them.
 
 Confirmed by the user after testing.
 
+- [x] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
+  get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
+  second touches the ground; shooting a ball before then crashes the game. The user, 2026-11-08: "you should be
+  able to shoot your own purple ball and have it do nothing", "if you shoot enemy purple ball its destroyed" (one
+  hit, for a ball that is down), "document that in game mechanics for lunar base map". The crash is fixed by
+  #362 (Leah, 2026-11-08); branch `devin/wormhole-throw-fixes`, 2026-11-08,
+  makes one hit destroy an enemy's lone mouth and documents both. Confirmed by the user, 2026-11-08: "great it
+  seems to work".
+- [x] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
+  but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
+  nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
+  again and moves it. The user, 2026-11-08: "first click throws purple wormhole, second one throws green (causing
+  them to connect and transform into real wormholes) and third doesnt do anything". Fixed on branch
+  `devin/wormhole-throw-fixes`, 2026-11-08: once both mouths
+  are down `Q` does nothing until death or destruction clears them; `DESIGN.md` updated to match. Confirmed by the user, 2026-11-08: "great it seems to
+  work".
 - [x] **W-110 Team-coloured robots.** "is it possible for you to recolor the teal robot? to be other colors than
   teal?", then "yep team colors!": the players' body of W-106 (Teal robot player model) in each team's colour, blue
   or red, instead of teal; corpses and your own body in third person too. #344. Confirmed by the user, 2026-11-08: "looks good merge it".

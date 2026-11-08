@@ -208,6 +208,9 @@ The level as the Rust game builds it, from the map
   slowed player move slowly. On the ground under the black hole, time runs at about 81% with no console off, 45%
   with three off and 25% with five. The HUD shows the black hole's strength and how fast the player's time runs.
 - One wormhole joins a ridge to the red landing pad. Its mouths are 15 m in reach.
+- Each player throws their own pair of wormhole mouths ([Thrown wormholes](#thrown-wormholes)): `Q` throws the
+  purple one, then the green one, and nothing more once both are down. A lone mouth glows as a ball until its
+  partner lands: shooting your own or a teammate's ball does nothing, and one shot at an enemy's ball destroys it.
 - Blue's side has a concrete bunker (a kazemat) at its spawn, rows of Hesco barriers, a relay mast, supply crates and
   a solar array. The middle has derelict field bunkers, a comms dome, a crater walkway, a relay mast, a solar array
   and crates. Red's side has Hesco barriers, a habitat module, a dome, a bunker garage as its spawn hangar, a
@@ -402,8 +405,9 @@ What a player sees while playing:
 Each player has a pair of wormhole mouths of their own, one purple and one green, which they throw
 anywhere in the level.
 
-- **Throwing:** `Q` throws the purple mouth, the next press the green one, then purple again, and
-  so on; throwing a mouth again moves it.
+- **Throwing:** `Q` throws the purple mouth and the next press the green one. Once both are down,
+  `Q` does nothing until the pair is gone (death or destruction); a throw that fizzles can be
+  thrown again.
 - **Flight:** a mouth is lobbed from the player's hand a little above the crosshair and curves down
   under its own gravity. It drops to the floor below whatever it hits, and hovers there at eye
   height, facing back the way it flew.
@@ -416,9 +420,10 @@ anywhere in the level.
   - a mouth in flight, or down while its partner isn't, glows as a small ball;
   - every player sees every player's mouths, and anyone can walk or shoot through them.
 - **Death:** a player's mouths disappear when they die.
-- **Shooting an enemy's mouths:** a shot that goes through an enemy's mouth, or hits a lone
-  mouth's ball, makes both of that enemy's mouths flash red; enough hits destroy the pair.
-  Teammates' shots don't count.
+- **Shooting an enemy's mouths:** a shot that goes through an enemy's linked mouth makes both of
+  that enemy's mouths flash red; enough hits destroy the pair. A shot that hits an enemy's lone
+  mouth's ball (down, its partner not yet thrown) destroys it at once. A shot at a player's own or
+  a teammate's mouths, or at a ball still in flight, does nothing.
 
 | Parameter | Value |
 | --- | --- |
@@ -429,6 +434,7 @@ anywhere in the level.
 | A mouth's size on Lunar Surface | 1.6 m Schwarzschild radius (`wormholes.schwarzschild_radius_m`); on the house, the house's mouths' size |
 | How far its bending reaches on Lunar Surface | 6 m (`wormholes.reach_m`) |
 | Hits that destroy an enemy's pair | 2 sniper shots or 5 rifle shots (`wormholes.sniper_hits_to_destroy`, `wormholes.rifle_hits_to_destroy`) |
+| Hits that destroy an enemy's lone mouth | 1 shot of either gun |
 | Red flash after each hit | 0.25 s (`wormholes.hit_flash_s`) |
 
 ## Weapons
