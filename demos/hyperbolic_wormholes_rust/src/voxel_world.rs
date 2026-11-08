@@ -39,6 +39,7 @@ const MAX_FLY_HEIGHT_M: f64 = 240.0;
 const UNSTICK_STEP_M: f64 = 0.25;
 const UNSTICK_MAX_STEPS: usize = 160;
 const PUSH_OUT_STEP_M: f64 = 0.05;
+const MAX_WALK_RISE_M: f64 = 0.3;
 const PUSH_OUT_STEP_COUNT: usize = 6;
 const PUSH_OUT_DIRECTION_COUNT: usize = 16;
 const LANDING_BISECTIONS: usize = 10;
@@ -548,6 +549,29 @@ impl VoxelWorld {
                 (!self.is_body_blocked(moved, h_m, nearby)).then_some(moved)
             })
         })
+    }
+
+    /// `find_walk_rise_m` gives the smallest lift, up to `MAX_WALK_RISE_M`, that clears a body
+    /// standing on `body` with eye height `h_m`, or `None` if that much doesn't. Walking on a
+    /// structure needs it: its cells' tops are geodesic planes, which rise a little against the
+    /// ground's height away from the structure's centre, but a lift this small never climbs a
+    /// block.
+    ///
+    /// Example: `if let Some(rise_m) = world.find_walk_rise_m(body, h_m, &nearby) { ... }`
+    fn find_walk_rise_m(&self, body: DMat4, h_m: f64, nearby: &[usize]) -> Option<f64> {
+        if self.is_body_blocked(body, h_m + MAX_WALK_RISE_M, nearby) {
+            return None;
+        }
+        let (mut lo_m, mut hi_m) = (0.0, MAX_WALK_RISE_M);
+        for _ in 0..LANDING_BISECTIONS {
+            let mid_m: f64 = (lo_m + hi_m) / 2.0;
+            if self.is_body_blocked(body, h_m + mid_m, nearby) {
+                lo_m = mid_m;
+            } else {
+                hi_m = mid_m;
+            }
+        }
+        Some(hi_m)
     }
 
     /// `find_standing_height` gives the eye height where a body standing on `body` is clear of blocks.
@@ -1103,7 +1127,8 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to spawn),
-    /// colliding with blocks and the boundary, jumping (the only way onto a block) and falling. A
+    /// colliding with blocks and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
+    /// cells rise a little), jumping (the only way onto a block) and falling. A
     /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
     /// level does) only if that fails. It returns messages for the HUD.
     ///
@@ -1188,6 +1213,10 @@ impl VoxelPlayer {
                 world.find_nearby_structures(body_new.col(AXIS_W), NEARBY_REACH_M);
             if !world.is_body_blocked(body_new, h_new, &nearby_new) {
                 (self.body, self.h_m) = (body_new, h_new);
+            } else if self.is_on_ground
+                && let Some(rise_m) = world.find_walk_rise_m(body_new, h_new, &nearby_new)
+            {
+                (self.body, self.h_m) = (body_new, h_new + rise_m);
             }
         }
         if input.up && self.is_on_ground {
@@ -1227,6 +1256,7 @@ mod tests {
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
+    //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -1244,6 +1274,8 @@ mod tests {
     const MAX_RISE_ALONG_WALL_M: f64 = 0.5;
     const MIN_RISE_ONTO_BLOCK_M: f64 = 0.9;
     const MAX_RISE_ONTO_BLOCK_M: f64 = 1.2;
+    const DECK_WALK_STEP_COUNT: usize = 30;
+    const MIN_DECK_WALK_FRAC: f64 = 0.5;
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
 
     /// `find_columns` finds, on structures standing upright on the ground, columns of cells (x, z)
@@ -1408,6 +1440,20 @@ mod tests {
             top_m - start_m < MAX_RISE_ALONG_WALL_M,
             "rose {} m along a wall",
             top_m - start_m
+        );
+    }
+
+    #[test]
+    fn walking_on_a_deck_moves() {
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
+        let start: DVec4 = player.body.col(AXIS_W);
+        walk_forward(&world, &mut player, DECK_WALK_STEP_COUNT);
+        let moved_m: f64 = get_distance(start, player.body.col(AXIS_W)) * world.r;
+        let expected_m: f64 = world.player.walk_m_per_s * STEP_S * DECK_WALK_STEP_COUNT as f64;
+        assert!(
+            moved_m > MIN_DECK_WALK_FRAC * expected_m,
+            "moved {moved_m} m of {expected_m} m"
         );
     }
 }
