@@ -16,10 +16,6 @@ is in [`AGENTS.md`](AGENTS.md).
   NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
   show a redshift instead. The user wants video or image demos to confirm. Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/wormhole-doppler`, 2026-11-07.
-- [~] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": if you crouch, the energy for
-  running is recharged at the same rate as when you run (drains it); if you walk, it is recharged at half that. This
-  is the default in the YAML, and in general it should be parameterized. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/crouch-recharge`, 2026-11-07.
 - [~] **W-80 Smoother bar pulses.** The pulsing should start where the bar's filled part ends: losing health, it starts
   at the last hit point, not the bar's end (empty slots don't count). The blue pulse going left should be less dark,
   and it too starts on the last filled slot. Pulses shouldn't light whole segments: they should look more Gaussian
@@ -239,3 +235,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [x] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
   noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
   All of it is in the YAML settings. #216.
+- [x] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": if you crouch, the energy for
+  running is recharged at the same rate as when you run (drains it); if you walk, it is recharged at half that. This
+  is the default in the YAML, and in general it should be parameterized. #219.
