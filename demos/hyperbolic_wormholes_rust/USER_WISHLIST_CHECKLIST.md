@@ -10,6 +10,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
+  Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-team-join`, 2026-11-07.
 - [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
   windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
   (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
