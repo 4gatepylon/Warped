@@ -166,6 +166,7 @@ const TEXT_LINE_PX: f32 = 12.0;
 const MENU_LEFT_PX: f32 = 4.0;
 const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const GAME_PASSWORD_HOME_PATH: &str = "Library/Application Support/Warped/game_password";
+const LAST_SERVER_HOME_PATH: &str = "Library/Application Support/Warped/last_server_address";
 const LOGS_HOME_FOLDER: &str = "Library/Logs/Warped";
 const ONLINE_GAMES_FILE: &str = "online_games.txt";
 const OWNER_ONLY_FILE_MODE: u32 = 0o600;
@@ -712,17 +713,27 @@ fn start_title_choice(choice: &title::Choice) -> Result<()> {
     let home: PathBuf = PathBuf::from(std::env::var_os("HOME").ok_or("HOME isn't set")?);
     let password_path: PathBuf = home.join(GAME_PASSWORD_HOME_PATH);
     let mut flags: Vec<String> = choice.get_flags();
+    if choice.needs_address() {
+        let Some(address) = ask_server_address(&home.join(LAST_SERVER_HOME_PATH))? else {
+            return Ok(());
+        };
+        flags.splice(0..0, ["--join".to_string(), address]);
+    }
     if choice.is_online() {
         if !password_path.exists() {
             let Some(password) = ask_game_password()? else {
                 return Ok(());
             };
-            save_game_password(&password_path, &password)?;
+            if !password.is_empty() {
+                save_game_password(&password_path, &password)?;
+            }
         }
-        flags.extend([
-            "--game-password-file".to_string(),
-            password_path.display().to_string(),
-        ]);
+        if password_path.exists() {
+            flags.extend([
+                "--game-password-file".to_string(),
+                password_path.display().to_string(),
+            ]);
+        }
     }
     let logs_folder: PathBuf = home.join(LOGS_HOME_FOLDER);
     fs::create_dir_all(&logs_folder)?;
@@ -733,7 +744,7 @@ fn start_title_choice(choice: &title::Choice) -> Result<()> {
         .stdout(log.try_clone()?)
         .stderr(log)
         .status()?;
-    if status.code() == Some(i32::from(WRONG_PASSWORD_EXIT_CODE)) {
+    if status.code() == Some(i32::from(WRONG_PASSWORD_EXIT_CODE)) && password_path.exists() {
         fs::remove_file(&password_path)?;
     }
     if status.success() {
@@ -751,22 +762,63 @@ fn start_title_choice(choice: &title::Choice) -> Result<()> {
     .into())
 }
 
-/// `ask_game_password` asks the player for the game's password in a dialog, or gives `None` if
-/// they cancel.
+/// `ask_game_password` asks the player for the game's password in a dialog (empty for a server
+/// without one), or gives `None` if they cancel.
 ///
 /// Example: `let password = ask_game_password()?;`
 fn ask_game_password() -> Result<Option<String>> {
     let output: std::process::Output = Command::new("osascript")
         .args([
             "-e",
-            "text returned of (display dialog \"The game's password (ask whoever runs the server):\" default answer \"\" with hidden answer with title \"Warped\")",
+            "text returned of (display dialog \"The game's password (ask whoever runs the server; leave it empty if it has none):\" default answer \"\" with hidden answer with title \"Warped\")",
         ])
         .output()?;
     if !output.status.success() {
         return Ok(None);
     }
-    let password: String = String::from_utf8(output.stdout)?.trim_end().to_string();
-    Ok((!password.is_empty()).then_some(password))
+    Ok(Some(
+        String::from_utf8(output.stdout)?.trim_end().to_string(),
+    ))
+}
+
+/// `ask_server_address` asks the player for a server's address (`IP:port`) in a dialog that
+/// starts with the last one, kept at `last_address_path`; it gives `None` if they cancel, or if
+/// the text isn't an address (after saying so in a pop-up).
+///
+/// Example: `let address = ask_server_address(&home.join(LAST_SERVER_HOME_PATH))?;`
+fn ask_server_address(last_address_path: &Path) -> Result<Option<String>> {
+    let last_address: String = match last_address_path.exists() {
+        true => fs::read_to_string(last_address_path)?.trim().to_string(),
+        false => String::new(),
+    };
+    let output: std::process::Output = Command::new("osascript")
+        .args([
+            "-e",
+            "on run argv",
+            "-e",
+            "text returned of (display dialog \"The server's address, its IP and port (ask whoever runs it), e.g. 34.1.2.3:47810:\" default answer (item 1 of argv) with title \"Warped\")",
+            "-e",
+            "end run",
+            &last_address,
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let address: String = String::from_utf8(output.stdout)?.trim().to_string();
+    if parse_server_address(&address, net::DEFAULT_PORT).is_none() {
+        show_alert(&format!(
+            "{address:?} isn't a server's address; type its IP and port, such as 34.1.2.3:47810."
+        ))?;
+        return Ok(None);
+    }
+    fs::create_dir_all(
+        last_address_path
+            .parent()
+            .ok_or("an address file has a folder")?,
+    )?;
+    fs::write(last_address_path, &address)?;
+    Ok(Some(address))
 }
 
 /// `save_game_password` writes `password` to `path`, readable only by this user.

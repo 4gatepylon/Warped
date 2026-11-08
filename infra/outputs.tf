@@ -1,14 +1,15 @@
 # `outputs.tf` gives what the deploy steps and players need from the Warped cloud deploy.
 #
 # Interface:
-#     server_ip: the game server's static IP; site_bucket, server_bucket: the buckets' names;
+#     server_ip: the game server's static IP; site_bucket, server_bucket: the buckets' names (the
+#     server's IP and bucket are null without game servers);
 #     download_page_url: the public download page.
 #
 # Example:
 #     terraform output -raw server_ip
 
 output "server_ip" {
-  value = google_compute_address.game_server.address
+  value = one(google_compute_address.game_server[*].address)
 }
 
 output "site_bucket" {
@@ -16,7 +17,7 @@ output "site_bucket" {
 }
 
 output "server_bucket" {
-  value = google_storage_bucket.server.name
+  value = one(google_storage_bucket.server[*].name)
 }
 
 output "download_page_url" {
