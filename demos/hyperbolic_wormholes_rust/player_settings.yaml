@@ -30,6 +30,7 @@ keys:
   aim: [Mouse Right]  # Aim while held: zoom in (more with the sniper) and turn more slowly.
   flashlight: [F]  # Shine the flashlight while held.
   turn_off_console: [E]  # Hold on one of the other team's consoles to turn it off.
+  throw_wormhole: [Q]  # Throw your purple wormhole mouth, then your green one, and so on.
   gun_1: ["1"]  # Take the sniper.
   gun_2: ["2"]  # Take the rifle.
   switch_gun: [Wheel]  # Swap between the two guns.

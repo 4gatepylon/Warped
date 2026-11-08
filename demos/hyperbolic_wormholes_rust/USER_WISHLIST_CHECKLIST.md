@@ -39,9 +39,6 @@ is in [`AGENTS.md`](AGENTS.md).
   `claude/square-shapes`, 2026-11-07.
 - [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
   (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
-- [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
-  throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
-  `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
 - [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
   center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
@@ -49,9 +46,6 @@ is in [`AGENTS.md`](AGENTS.md).
   console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
   down.
   Claimed by Claude Code (session `08e70e8b-f763-4c5c-828c-f939a12fad13`), branch `reality-bend`, 2026-11-07.
-- [~] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
-  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). Claimed by Claude Code
-  (session `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/shoot-wormholes`, 2026-11-07.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -155,6 +149,12 @@ are here too, since the user hadn't confirmed them.
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
 - [?] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
   and team. #164.
+- [?] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
+  throws the other. These are each player's linked wormholes. #197–#204.
+- [?] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
+  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). You chose: a shot through
+  an enemy's mouth (or at a lone mouth's ball) counts, 2 sniper shots, damage kept until destroyed, both mouths flash
+  (D98). #246–#248.
 
 ## Done
 

@@ -1,8 +1,9 @@
 # `server_settings.yaml` holds the numbers that shape play in the Rust demo: movement, sprint energy, both
-# guns, consoles, respawning, how a hit slows a player, and the flashlight. The game server reads it and
-# sends it to every player who joins, so everyone in a game plays by the same numbers; a game without a
-# server uses it too. What only changes a player's own experience (keys, mouse speed, head bob, motion
-# blur, how a hit looks) is in `player_settings.yaml` instead.
+# guns, consoles, respawning, how a hit slows a player, the flashlight, aiming, the map's edge and thrown
+# wormholes. The game server reads it and sends it to every player who joins, so everyone in a game
+# plays by the same numbers; a game without a server uses it too. What only changes a player's own
+# experience (keys, mouse speed, head bob, motion blur, how a hit looks) is in `player_settings.yaml`
+# instead.
 #
 # Interface:
 #     Copy this file, change the numbers, and pass the copy to the server: `SERVER_SETTINGS=` with
@@ -77,3 +78,14 @@ aim:  # Holding the aim control (the right button) zooms in; the mouse turns the
 map_edge:  # On a map with a crater, its wall is the edge: climbing it, players slow down without end ("Zeno's paradox").
   start_wall_frac: 0.0  # How far up the wall players start to slow (0 at its foot, 1 at the rim).
   stop_wall_frac: 0.5  # How far up their speed would reach 0; each step outward is cut by the share of the way there.
+
+wormholes:  # Q throws your purple wormhole mouth, then your green one, and so on; once both are down they link.
+  throw_speed_m_per_s: 16.0  # How fast a mouth leaves your hand.
+  throw_up_rad: 0.3  # How far above the crosshair it leaves (0 for along it).
+  gravity_m_per_s_per_s: 20.0  # How fast its flight curves down (on the house, a fast throw upward escapes the curved ground).
+  max_flight_s: 4.0  # Seconds it may fly before it fizzles without landing.
+  schwarzschild_radius_m: 1.6  # Lunar Surface: the mouth's size (the house's mouths are all the house's size).
+  reach_m: 6.0  # Lunar Surface: how far its bending reaches; reaches of warps may not overlap.
+  sniper_hits_to_destroy: 2  # Sniper shots through an enemy's mouths (either one) that destroy both.
+  rifle_hits_to_destroy: 5  # Rifle shots through an enemy's mouths (either one) that destroy both.
+  hit_flash_s: 0.25  # Seconds both mouths of a pair flash red after a hit.

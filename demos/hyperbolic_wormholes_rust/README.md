@@ -79,6 +79,14 @@ make join-game SERVER=127.0.0.1
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
+- `Q` throws your purple wormhole mouth, the next press your green one, then purple again, and so on, on both maps.
+  A throw is lobbed under its own gravity, drops to the floor below whatever it hits, and hovers there at eye
+  height facing back the way it flew; once both are down they link, and any player or laser that goes into one
+  comes out of the other (`wormholes` in `server_settings.yaml`). The view through a thrown mouth is tinted its
+  colour, and a mouth in the air, or down while its partner isn't, glows as a small ball. A throw fizzles if it
+  never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
+  A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
+  2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
@@ -131,7 +139,7 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
-  consoles, respawn, the hit slowdown, the flashlight); it sends them to every player who joins.
+  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes); it sends them to every player who joins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
@@ -183,6 +191,9 @@ make run-autopilot
 
 ## How it works
 
+- `thrown_wormholes.rs`: each player's purple and green mouths: the lobbed throw, where a mouth hovers once down,
+  and which colour is next. Each map adds the linked pairs as mouths of its own (after the map's), and
+  `net.rs` sends every player's mouths in each snapshot.
 - `geometry.rs`: Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
 - `world.rs`: the scene: hyperbolic boxes grouped in clusters, and the wormholes' mouths with their gluing maps.
 - `scene_data.rs`: each frame, packs the scene into rows of float 4-vectors, one row in the camera's coordinates and

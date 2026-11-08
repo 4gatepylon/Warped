@@ -72,11 +72,12 @@ pub struct Input {
     pub crouch: bool,
 }
 
-/// `LaserReport` describes the laser's path: how many wormholes it went through, what it hit and
-/// how long it is.
+/// `LaserReport` describes the laser's path: how many wormholes it went through (and the index of
+/// each mouth it went into), what it hit and how long it is.
 #[derive(Clone, Default)]
 pub struct LaserReport {
     pub wormhole_count: usize,
+    pub mouths_entered: Vec<usize>,
     pub hit: Option<String>,
     pub hit_box: Option<usize>,
     pub length_m: f64,
@@ -207,6 +208,9 @@ pub fn get_up_local(frame: DMat4) -> DVec3 {
 ///
 /// Example: `messages.push(format_crossing(&world, mouth));`
 fn format_crossing(world: &World, mouth: &Mouth) -> String {
+    if mouth.color.is_some() {
+        return format!("Through {}", mouth.name);
+    }
     format!(
         "Through wormhole {}: out of mouth {}",
         mouth.pair_index + 1,
@@ -671,6 +675,9 @@ pub fn trace_laser(world: &World, data: &SceneData) -> (Beam, LaserReport) {
             if row != current_row {
                 if current_row != usize::MAX {
                     report.wormhole_count += 1;
+                    report
+                        .mouths_entered
+                        .push(world.mouths[row - 1].partner_index);
                 }
                 beam.runs.push(vec![(a_world, f64::from(t0_m))]);
                 current_row = row;

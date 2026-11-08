@@ -26,7 +26,7 @@ const MOUSE_BUTTON_NAMES: [(&str, MouseButton); 5] = [
     ("Mouse X1", MouseButton::X1),
     ("Mouse X2", MouseButton::X2),
 ];
-const ACTION_NAMES: [(Action, &str); 20] = [
+const ACTION_NAMES: [(Action, &str); 21] = [
     (Action::MoveForward, "move_forward"),
     (Action::MoveBack, "move_back"),
     (Action::MoveLeft, "move_left"),
@@ -38,6 +38,7 @@ const ACTION_NAMES: [(Action, &str); 20] = [
     (Action::Aim, "aim"),
     (Action::Flashlight, "flashlight"),
     (Action::TurnOffConsole, "turn_off_console"),
+    (Action::ThrowWormhole, "throw_wormhole"),
     (Action::Gun1, "gun_1"),
     (Action::Gun2, "gun_2"),
     (Action::SwitchGun, "switch_gun"),
@@ -48,7 +49,8 @@ const ACTION_NAMES: [(Action, &str); 20] = [
     (Action::ReleaseMouse, "release_mouse"),
     (Action::OpenMenu, "open_menu"),
 ];
-const PRESS_ONLY_ACTIONS: [Action; 9] = [
+const PRESS_ONLY_ACTIONS: [Action; 10] = [
+    Action::ThrowWormhole,
     Action::Gun1,
     Action::Gun2,
     Action::SwitchGun,
@@ -59,7 +61,7 @@ const PRESS_ONLY_ACTIONS: [Action; 9] = [
     Action::ReleaseMouse,
     Action::OpenMenu,
 ];
-const HELP_GROUPS: [(&[Action], &str); 12] = [
+const HELP_GROUPS: [(&[Action], &str); 13] = [
     (
         &[
             Action::MoveForward,
@@ -83,6 +85,7 @@ const HELP_GROUPS: [(&[Action], &str); 12] = [
         &[Action::TurnOffConsole],
         "hold on an enemy console to turn it off",
     ),
+    (&[Action::ThrowWormhole], "throw a wormhole"),
     (&[Action::LowerResolution, Action::RaiseResolution], "scale"),
     (&[Action::ReleaseMouse], "release"),
     (&[Action::OpenMenu], "menu"),
@@ -105,6 +108,7 @@ pub enum Action {
     Aim,
     Flashlight,
     TurnOffConsole,
+    ThrowWormhole,
     Gun1,
     Gun2,
     SwitchGun,
