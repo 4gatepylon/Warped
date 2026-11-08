@@ -402,7 +402,7 @@ pub struct MetalRenderer {
     blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
-    viewmodel: Option<Option<Viewmodel>>,
+    viewmodel: Option<Viewmodel>,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -1300,16 +1300,17 @@ impl MetalRenderer {
                 if self.viewmodel.is_none() {
                     self.viewmodel = Some(Viewmodel::Load(&self.device)?);
                 }
-                match self.viewmodel.as_mut().and_then(Option::as_mut) {
-                    Some(revolver) => Some(revolver.encode(
-                        &self.device,
-                        command_buffer,
-                        &wand,
-                        output_px,
-                        tan_half_fov,
-                    )?),
-                    None => None,
-                }
+                let revolver: &mut Viewmodel = self
+                    .viewmodel
+                    .as_mut()
+                    .expect("the revolver was just loaded");
+                Some(revolver.encode(
+                    &self.device,
+                    command_buffer,
+                    &wand,
+                    output_px,
+                    tan_half_fov,
+                )?)
             }
             None => None,
         };
