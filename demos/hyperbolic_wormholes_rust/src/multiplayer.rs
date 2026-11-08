@@ -25,7 +25,7 @@ use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
 use crate::render_voxel::VoxelFrame;
 use crate::scene_data::{Beam, SceneData};
-use crate::thrown_wormholes::WormholeColor;
+use crate::thrown_wormholes::{PlayerWormholes, WormholeColor};
 use crate::voxel_world::{
     BeamSegment, LOOK_RAD_PER_PX, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
 };
@@ -243,7 +243,13 @@ pub fn run_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(player.frame, is_laser_on, false, None)?;
+            client.send_state(
+                player.frame,
+                is_laser_on,
+                false,
+                None,
+                PlayerWormholes::default(),
+            )?;
         } else {
             client.keep_joining()?;
         }
@@ -503,7 +509,7 @@ pub fn run_voxel_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(camera, is_laser_on, false, None)?;
+            client.send_state(camera, is_laser_on, false, None, PlayerWormholes::default())?;
         } else {
             client.keep_joining()?;
         }
@@ -572,6 +578,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let view: SharedView =
             pack_shared_view(&world, aimed, Some(aimed), &[other], &[], (64, 40), 0.0);
@@ -600,6 +607,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
         let view: SharedVoxelView = pack_shared_voxel_view(
@@ -639,6 +647,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let target_camera: DMat4 = target.get_camera_frame(&world);
         let shooters_view: SharedVoxelView = pack_shared_voxel_view(
@@ -689,6 +698,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let bodies: Vec<(DMat4, usize)> = vec![(
             VoxelPlayer::FromEye(&world, firing.frame).get_feet_frame(&world),

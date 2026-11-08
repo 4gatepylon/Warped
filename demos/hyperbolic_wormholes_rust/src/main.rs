@@ -78,7 +78,7 @@ use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
 use settings::{PerPlayerSettings, ServerSettings};
-use thrown_wormholes::{MouthPlace, ThrownWormholes, WormholeColor, fly_throw};
+use thrown_wormholes::{MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor, fly_throw};
 use voxel_world::{VoxelPlayer, VoxelWorld};
 use world::{DEFAULT_CURVATURE_RADIUS_M, EYE_HEIGHT_M, World};
 
@@ -2388,6 +2388,7 @@ impl Session {
                 laser_aim.is_some(),
                 self.gun == Gun::Rifle,
                 multiplayer.disabling.map(|(console, _)| console),
+                self.thrown.placed,
             )
         {
             self.message = format!("Couldn't reach the server: {error}");
@@ -2457,12 +2458,15 @@ impl Session {
     }
 
     /// `update_wormholes` lands this player's throw once it comes down (where the map allows, clear
-    /// of the other mouths down), and puts every linked pair into the world when they change.
+    /// of the other mouths down, other players' too), and puts every linked pair, this player's
+    /// first, into the world when they change.
     ///
     /// Example: `self.update_wormholes();`
     fn update_wormholes(&mut self) {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
-        let others: Vec<MouthPlace> = self.thrown.get_kept_places();
+        let remote: Vec<PlayerWormholes> = self.get_remote_wormholes();
+        let mut others: Vec<MouthPlace> = self.thrown.get_kept_places();
+        others.extend(remote.iter().flat_map(PlayerWormholes::get_places));
         let message: Option<String> = match &self.voxel {
             Some(voxel) => {
                 let (eye_m, r) = (voxel.world.player.eye_height_m, voxel.world.r);
@@ -2480,7 +2484,10 @@ impl Session {
         if let Some(message) = message {
             self.show_message(message);
         }
-        let pairs: Vec<[MouthPlace; 2]> = self.thrown.placed.get_pair().into_iter().collect();
+        let pairs: Vec<[MouthPlace; 2]> = std::iter::once(self.thrown.placed)
+            .chain(remote)
+            .filter_map(|wormholes| wormholes.get_pair())
+            .collect();
         if pairs != self.thrown_pairs {
             match &mut self.voxel {
                 Some(voxel) => voxel.world.set_thrown_wormholes(&pairs),
@@ -2490,8 +2497,17 @@ impl Session {
         }
     }
 
-    /// `get_wormhole_markers` lists the glowing balls to draw for thrown mouths: throws in the air,
-    /// and mouths down whose partner isn't.
+    /// `get_remote_wormholes` gives the other players' wormholes, by the last snapshot.
+    ///
+    /// Example: `let remote = self.get_remote_wormholes();`
+    fn get_remote_wormholes(&self) -> Vec<PlayerWormholes> {
+        self.multiplayer.as_ref().map_or(Vec::new(), |m| {
+            m.client.players.iter().map(|p| p.wormholes).collect()
+        })
+    }
+
+    /// `get_wormhole_markers` lists the glowing balls to draw for every player's thrown mouths:
+    /// throws in the air, and mouths down whose partner isn't.
     ///
     /// Example: `let markers = self.get_wormhole_markers();`
     fn get_wormhole_markers(&self) -> Vec<(DVec4, WormholeColor, f64)> {
@@ -2499,7 +2515,10 @@ impl Session {
             Some(voxel) => voxel.world.r,
             None => self.world.curvature_radius_m,
         };
-        self.thrown.placed.get_markers(r)
+        std::iter::once(self.thrown.placed)
+            .chain(self.get_remote_wormholes())
+            .flat_map(|wormholes| wormholes.get_markers(r))
+            .collect()
     }
 
     /// `is_firing` says whether this player's laser is on: on for a scripted route, or a shot fired

@@ -235,6 +235,13 @@ impl PlayerWormholes {
         flying.into_iter().chain(unlinked).collect()
     }
 
+    /// `get_places` lists the places of the mouths that are down.
+    ///
+    /// Example: `let others = wormholes.get_places();`
+    pub fn get_places(&self) -> Vec<MouthPlace> {
+        self.purple.into_iter().chain(self.green).collect()
+    }
+
     /// `get_unlinked` gives the place of a mouth that is down while the other isn't, with its colour.
     ///
     /// Example: `if let Some((color, place)) = wormholes.get_unlinked() { mark(color, place); }`

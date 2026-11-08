@@ -32,9 +32,10 @@ use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use glam::DMat4;
+use glam::{DMat4, DVec4};
 
 use crate::settings::ServerSettings;
+use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -64,8 +65,19 @@ const FLOATS_PER_FRAME: usize = 16;
 const BYTES_PER_FLOAT: usize = 8;
 const BYTES_PER_ID: usize = 4;
 const BYTES_PER_PORT: usize = 2;
-const BYTES_PER_PLAYER: usize = BYTES_PER_ID + FLOATS_PER_FRAME * BYTES_PER_FLOAT + 3;
+const BYTES_PER_F32: usize = 4;
+const F32S_PER_PLACE: usize = 4;
+const F32S_PER_POINT: usize = 4;
+const BYTES_PER_WORMHOLES: usize = 1 + (2 * F32S_PER_PLACE + F32S_PER_POINT) * BYTES_PER_F32;
+const PURPLE_DOWN_BIT: u8 = 0;
+const GREEN_DOWN_BIT: u8 = 1;
+const FLYING_BIT: u8 = 2;
+const FLYING_GREEN_BIT: u8 = 3;
+const BYTES_PER_PLAYER: usize =
+    BYTES_PER_ID + FLOATS_PER_FRAME * BYTES_PER_FLOAT + 3 + BYTES_PER_WORMHOLES;
 const BYTES_PER_GAME: usize = 2 * BYTES_PER_ID + 1;
+const _: () =
+    assert!(2 + MAX_PLAYER_COUNT * (BYTES_PER_PLAYER + 1) + BYTES_PER_GAME <= MAX_DATAGRAM_BYTES);
 
 /// `Kind` is a message's first byte.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -112,8 +124,9 @@ impl Kind {
 /// `RemotePlayer` is another player as the last snapshot gave them: their eye frame (while their
 /// laser is on, turned by their shot's noise, so it is the frame their laser fires from), whether
 /// their laser is on and from which gun, their team (an index into `TEAM_NAMES`), the console they
-/// hold `E` on, if any, and how far along turning it off they are, from 0 to 1, as the server times
-/// it (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it).
+/// hold `E` on, if any, how far along turning it off they are, from 0 to 1, as the server times it
+/// (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it), and their
+/// thrown wormholes.
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
@@ -123,6 +136,7 @@ pub struct RemotePlayer {
     pub team: u32,
     pub disabling_console: Option<u8>,
     pub disabling_frac: f64,
+    pub wormholes: PlayerWormholes,
 }
 
 /// `GameState` is the game as the server keeps it: which game this is (from 0, one more each new
@@ -175,8 +189,8 @@ impl Message {
         self
     }
 
-    /// `player` appends a player: id, eye frame, laser switch, the console they hold `E` on, and how
-    /// far along turning it off they are (a byte, 255 for done).
+    /// `player` appends a player: id, eye frame, laser switch, the console they hold `E` on, how far
+    /// along turning it off they are (a byte, 255 for done), and their wormholes.
     ///
     /// Example: `let message = Message::New(Kind::State).player(&player);`
     fn player(mut self, player: &RemotePlayer) -> Message {
@@ -192,6 +206,33 @@ impl Message {
         self.0.push(player.disabling_console.unwrap_or(NO_CONSOLE));
         self.0
             .push((player.disabling_frac.clamp(0.0, 1.0) * f64::from(u8::MAX)).round() as u8);
+        self.wormholes(&player.wormholes)
+    }
+
+    /// `wormholes` appends a player's wormholes: which are down or flying (and the flying one's
+    /// colour), each colour's place (u, v, h, yaw), and the flying one's point, as `f32`s (zeros
+    /// for what isn't there).
+    ///
+    /// Example: `let message = message.wormholes(&PlayerWormholes::default());`
+    fn wormholes(mut self, wormholes: &PlayerWormholes) -> Message {
+        let flying_color: Option<WormholeColor> = wormholes.flying.map(|(color, _)| color);
+        self.0.push(
+            u8::from(wormholes.purple.is_some()) << PURPLE_DOWN_BIT
+                | u8::from(wormholes.green.is_some()) << GREEN_DOWN_BIT
+                | u8::from(flying_color.is_some()) << FLYING_BIT
+                | u8::from(flying_color == Some(WormholeColor::Green)) << FLYING_GREEN_BIT,
+        );
+        let place_values = |place: Option<MouthPlace>| {
+            place.map_or([0.0; F32S_PER_PLACE], |p| [p.u_m, p.v_m, p.h_m, p.yaw_rad])
+        };
+        let point: DVec4 = wormholes.flying.map_or(DVec4::ZERO, |(_, x)| x);
+        for value in place_values(wormholes.purple)
+            .into_iter()
+            .chain(place_values(wormholes.green))
+            .chain(point.to_array())
+        {
+            self.0.extend_from_slice(&(value as f32).to_le_bytes());
+        }
         self
     }
 
@@ -267,6 +308,41 @@ impl Reader<'_> {
             team: u32::from(laser >> TEAM_BIT & 1),
             disabling_console: (console != NO_CONSOLE).then_some(console),
             disabling_frac: f64::from(disabling) / f64::from(u8::MAX),
+            wormholes: self.wormholes()?,
+        })
+    }
+
+    /// `wormholes` reads a player's wormholes written by `Message::wormholes`.
+    ///
+    /// Example: `let wormholes = reader.wormholes()?;`
+    fn wormholes(&mut self) -> Option<PlayerWormholes> {
+        let flags: u8 = self.take(1)?[0];
+        let mut values: [f64; 2 * F32S_PER_PLACE + F32S_PER_POINT] = [0.0; 12];
+        for value in &mut values {
+            *value = f64::from(f32::from_le_bytes(
+                self.take(BYTES_PER_F32)?.try_into().ok()?,
+            ));
+        }
+        let is_set = |bit: u8| flags >> bit & 1 == 1;
+        let place = |at: usize, bit: u8| {
+            let [u_m, v_m, h_m, yaw_rad] = [0, 1, 2, 3].map(|i| values[at + i]);
+            is_set(bit).then_some(MouthPlace {
+                u_m,
+                v_m,
+                h_m,
+                yaw_rad,
+            })
+        };
+        let color: WormholeColor = if is_set(FLYING_GREEN_BIT) {
+            WormholeColor::Green
+        } else {
+            WormholeColor::Purple
+        };
+        let point: DVec4 = DVec4::from_slice(&values[2 * F32S_PER_PLACE..]);
+        Some(PlayerWormholes {
+            purple: place(0, PURPLE_DOWN_BIT),
+            green: place(F32S_PER_PLACE, GREEN_DOWN_BIT),
+            flying: is_set(FLYING_BIT).then_some((color, point)),
         })
     }
 
@@ -376,6 +452,7 @@ impl Server {
                                 team,
                                 disabling_console: None,
                                 disabling_frac: 0.0,
+                                wormholes: PlayerWormholes::default(),
                             },
                             address,
                             last_heard: Instant::now(),
@@ -1017,17 +1094,18 @@ impl Client {
         Ok(events)
     }
 
-    /// `send_state` sends this player's eye frame, laser switch, whether the gun is the rifle, and
-    /// the console they hold `E` on, once joined. The server times the hold itself, so the
-    /// progress sent is 0.
+    /// `send_state` sends this player's eye frame, laser switch, whether the gun is the rifle, the
+    /// console they hold `E` on and their wormholes, once joined. The server times the hold itself,
+    /// so the progress sent is 0.
     ///
-    /// Example: `client.send_state(player.frame, is_laser_on, false, None)?;`
+    /// Example: `client.send_state(player.frame, is_laser_on, false, None, PlayerWormholes::default())?;`
     pub fn send_state(
         &mut self,
         frame: DMat4,
         is_laser_on: bool,
         is_rifle: bool,
         disabling_console: Option<u8>,
+        wormholes: PlayerWormholes,
     ) -> Result<()> {
         if let Some(id) = self.id {
             let player: RemotePlayer = RemotePlayer {
@@ -1038,6 +1116,7 @@ impl Client {
                 team: self.team.unwrap_or(0),
                 disabling_console,
                 disabling_frac: 0.0,
+                wormholes,
             };
             self.send(&Message::New(Kind::State).player(&player))?;
         }
@@ -1191,6 +1270,7 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Datagram length | complete (progress kept to a 255th), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
+    //! | Player's wormholes | none, one down with a green throw in the air, both down | `players_survive_encoding` |
     //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
     //! | Servers announcing themselves | one, several with one on the default port (chosen), several without (the first) | `the_default_port_wins_among_servers` |
     //! | A server that can't take this player | full (says so), of another version (snapshots that don't fit) | `full_games_and_other_versions_are_noticed` |
@@ -1281,6 +1361,7 @@ mod tests {
             team: 0,
             disabling_console: Some(console),
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         server
             .handle(&Message::New(Kind::State).player(&player).0, from)
@@ -1367,38 +1448,62 @@ mod tests {
     #[test]
     fn players_survive_encoding() {
         let frame: DMat4 = DMat4::from_cols_array(&std::array::from_fn(|i| i as f64 * 0.25 - 1.0));
-        let sent: RemotePlayer = RemotePlayer {
-            id: 7,
-            frame,
-            is_laser_on: true,
-            is_rifle: true,
-            team: 0,
-            disabling_console: Some(3),
-            disabling_frac: SENT_DISABLING_FRAC,
+        let place = |u_m: f64| MouthPlace {
+            u_m,
+            v_m: -2.5,
+            h_m: 1.75,
+            yaw_rad: 0.5,
         };
-        let game: GameState = GameState {
-            number: 2,
-            off_mask: 0b101,
-            winner: Some(1),
-        };
-        let message: Message = Message::New(Kind::State).player(&sent).game(&game);
-        let mut reader: Reader = Reader {
-            bytes: &message.0,
-            position: 1,
-        };
-        let player: RemotePlayer = reader.player().expect("a complete player");
-        assert_eq!(
-            (
-                player.id,
-                player.frame,
-                player.is_laser_on,
-                player.is_rifle,
-                player.disabling_console
-            ),
-            (7, frame, true, true, Some(3))
-        );
-        assert!((player.disabling_frac - SENT_DISABLING_FRAC).abs() <= DISABLING_FRAC_STEP);
-        assert_eq!(reader.game(), Some(game));
+        let flying: (WormholeColor, DVec4) =
+            (WormholeColor::Green, DVec4::new(0.5, 0.25, 0.0, 1.5));
+        for wormholes in [
+            PlayerWormholes::default(),
+            PlayerWormholes {
+                purple: Some(place(12.0)),
+                green: None,
+                flying: Some(flying),
+            },
+            PlayerWormholes {
+                purple: Some(place(12.0)),
+                green: Some(place(-30.0)),
+                flying: None,
+            },
+        ] {
+            let sent: RemotePlayer = RemotePlayer {
+                id: 7,
+                frame,
+                is_laser_on: true,
+                is_rifle: true,
+                team: 0,
+                disabling_console: Some(3),
+                disabling_frac: SENT_DISABLING_FRAC,
+                wormholes,
+            };
+            let game: GameState = GameState {
+                number: 2,
+                off_mask: 0b101,
+                winner: Some(1),
+            };
+            let message: Message = Message::New(Kind::State).player(&sent).game(&game);
+            let mut reader: Reader = Reader {
+                bytes: &message.0,
+                position: 1,
+            };
+            let player: RemotePlayer = reader.player().expect("a complete player");
+            assert_eq!(
+                (
+                    player.id,
+                    player.frame,
+                    player.is_laser_on,
+                    player.is_rifle,
+                    player.disabling_console,
+                    player.wormholes
+                ),
+                (7, frame, true, true, Some(3), wormholes)
+            );
+            assert!((player.disabling_frac - SENT_DISABLING_FRAC).abs() <= DISABLING_FRAC_STEP);
+            assert_eq!(reader.game(), Some(game));
+        }
     }
 
     #[test]
@@ -1411,6 +1516,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let message: Message = Message::New(Kind::State).player(&player);
         let cut: &[u8] = &message.0[..message.0.len() - 1];
@@ -1681,6 +1787,7 @@ mod tests {
             team: u32::from(RED),
             disabling_console: Some(0),
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         server
             .handle(&Message::New(Kind::State).player(&holding).0, holder)
