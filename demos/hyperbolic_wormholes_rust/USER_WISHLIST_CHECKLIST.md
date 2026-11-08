@@ -155,7 +155,7 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
   few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). You chose: a shot through
   an enemy's mouth (or at a lone mouth's ball) counts, 2 sniper shots, damage kept until destroyed, both mouths flash
-  (D97). #246–#248.
+  (D98). #246–#248.
 
 ## Done
 

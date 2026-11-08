@@ -1546,7 +1546,7 @@
   release build) took 3.3 to 13.6 ms per view at its fastest frame with 24 mouths allowed and 3.6 to 13.9 ms
   with 8.
 
-### D97. Shooting enemy wormholes (W-89)
+### D98. Shooting enemy wormholes (W-89)
 
 - **Choice:**
   - **A hit:** a shot that goes through the throat of a mouth of a player on the other team counts, and goes on
