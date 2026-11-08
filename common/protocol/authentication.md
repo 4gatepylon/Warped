@@ -1,82 +1,141 @@
-# Authentication: a game's password
+# Authentication and encryption
 
-How a game server lets in only the players who know its password. A server's owner makes up a password, gives it
-to their friends by any private channel (a WhatsApp message, say), and the server refuses everyone else. It is the
-scheme of the infra stack's
-[#181](https://github.com/4gatepylon/Warped/pull/181) ("protect the Rust demo's game server with a password
-challenge"), written up here so the demo, the game in `game/`, the Mac app and the cloud deployment all build the
-same thing. Change it only by changing this page in the same PR as the code, and raise `PROTOCOL_VERSION` when the
-bytes change.
+How a game server lets in only the players who know its password, and how every datagram between a window and the
+server is encrypted. Every implementation follows this page (the demo, the game in `game/`, the Mac app, the cloud
+deployment); change it only together with the code, and raise the protocol version when the bytes change.
 
-## What it protects against, and what not
+There are two versions:
 
-- **Protects against:** strangers who find the server's address and port (scanners, a leaked address) joining,
-  speaking for a player, or using the server to flood someone else with replies.
-- **Doesn't protect against:** someone who can watch the traffic between a player and the server (on the same
-  café Wi-Fi, say): messages are not encrypted, so they can read positions, and they could replay a captured join
-  from the same address or try to guess a weak password offline. Friends cheating is out of scope too: the server
-  still takes each window's word for its hits.
-- **Upgrade path, if ever needed:** derive a per-session key from the password and both sides' random numbers, and
-  seal every datagram with ChaCha20-Poly1305 (24 to 34 bytes per datagram). Not planned now.
-
-## The password
-
-- **Server:** `--game-password-file <path>` names a file holding the password (its final line break is dropped;
-  an empty file is an error). Without the flag the password is empty, which suits a local network.
-- **Player:** the same flag. In the Mac app, picking an online game on the title screen asks for the password in a
-  macOS dialog (hidden input) the first time and keeps it in `~/Library/Application Support/Warped/game_password`
-  (mode 0600), and asks again after a refusal. A password is never written to a log, a command line or a
-  screenshot.
-- **Choosing one:** long and random (e.g. `openssl rand -base64 18`), since a captured join lets someone test
-  guesses offline.
-
-## The bytes
-
-Every message is one UDP datagram, little-endian, starting with its `Kind` byte (`net.rs`). Authentication adds two
-kinds and three fields:
-
-| Message | Direction | Layout |
+| Version | Where | What |
 | --- | --- | --- |
-| `Join` (1) | window → server | kind, `PROTOCOL_VERSION` (u16), cookie (16 bytes, zeros until the server sends one), proof (32 bytes), team asked for (u8, optional) |
-| `Challenge` (14) | server → window | kind, cookie (16 bytes) |
-| `Refused` (15) | server → window | kind, reason (u8: 1 another version, 2 wrong password), the server's `PROTOCOL_VERSION` (u16) |
-| `Welcome` (2) | server → window | kind, player id (u32), token (u64), then as before (team, map name, settings) |
-| every later message | window → server | kind, token (u64), then as before |
+| **v2** (this page's design) | `game/`, from step C1 of [`game/REFACTOR_PLAN.md`](../../game/REFACTOR_PLAN.md) | Every server must have a password, generated (never chosen), and every datagram is encrypted and authenticated with a standard Noise handshake and ChaCha20-Poly1305. |
+| **v1** | the demo, from the infra stack's [#181](https://github.com/4gatepylon/Warped/pull/181), and `game/` until C1 | An HMAC challenge proves the password; nothing is encrypted; the password may be empty. Described at the end. |
 
-- **Cookie** = the first 16 bytes of HMAC-SHA256(server secret, the sender's address as text, `ip:port`). The server
-  secret is 32 random bytes made at start, so cookies change when the server restarts.
-- **Proof** = HMAC-SHA256(password, cookie), 32 bytes. The password itself never crosses the network.
-- **Token** = 64 random bits the server picks per player at their welcome.
+## v2
 
-## The exchange
+### Building blocks
 
-1. The window sends `Join` with a zero cookie (and a proof of it).
-2. The server checks the version first: another version gets `Refused` (reason 1), which the window reports as
-   "the server runs another version of the game". Then the cookie: one that isn't this address's gets a
-   `Challenge` carrying the right one. A `Challenge` (17 bytes) is smaller than a `Join` (52 bytes), so a forged
-   source address can't turn the server into an amplifier.
-3. The window resends `Join` with that cookie and its proof.
-4. The server compares the proof with its own in constant time. A wrong one gets `Refused` (reason 2), which the
-   window reports as a wrong password and stops retrying (the game exits with code 3, `WRONG_PASSWORD_EXIT_CODE`,
-   which the title screen takes as "ask for the password again").
-   A right one gets the `Welcome`, with the player's token.
-5. From then on the server accepts a message only if its token, its player id and its sender's address match a
-   joined player. Anything else is dropped without a reply.
+Only standard, widely deployed cryptography, through one maintained library; nothing home-made:
 
-## Cost
+| Block | What it does | Where else it protects real traffic |
+| --- | --- | --- |
+| [Noise Protocol Framework](https://noiseprotocol.org/noise.html), pattern `Noise_NNpsk0_25519_ChaChaPoly_SHA256` | the handshake: both sides prove they know the password and agree on fresh keys | WireGuard (VPNs), WhatsApp's client-server traffic, the Lightning Network, libp2p |
+| X25519 (Curve25519 Diffie-Hellman) | fresh keys for each session, so a password leaked later can't decrypt recorded games (forward secrecy) | TLS 1.3 (most HTTPS connections), SSH, Signal, WireGuard |
+| ChaCha20-Poly1305 (RFC 8439) | encrypts each datagram and detects any change to it (an AEAD cipher) | TLS 1.3, QUIC (HTTP/3), WireGuard, SSH |
+| SHA-256, HKDF (RFC 5869) | hashing inside Noise; turning the password into a 32-byte key | everywhere |
+| [`snow`](https://docs.rs/snow) 0.10 (Rust) | implements Noise, including a "stateless" transport mode made for UDP, where the sender numbers each datagram | the standard Rust implementation of Noise; pure Rust, builds on Linux |
 
-One HMAC per join attempt and 8 bytes on each message from a window. Nothing on the server's snapshots. That's
-negligible next to a 60 Hz snapshot of up to 1,200 bytes.
+### The game password
 
-## Tests every implementation keeps
+- **Generated, never chosen.** `warped-server create-game-password --output-file <path>` draws 20 bytes (160 bits)
+  from the operating system's random generator and writes them as text: `warped2-` followed by the base32 (RFC
+  4648, lowercase) of the 20 bytes and a 2-byte checksum (the first 2 bytes of SHA-256 of `warped password` and the
+  20 bytes), in groups of 4 letters joined by `-`. That's 36 letters, so the password is
+  `warped2-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx`. The command prints the file's path, not the password.
+  The owner copies it (`pbcopy < <path>`) into a message to their friends.
+- **Why generated:** someone who records a handshake can test password guesses offline as fast as their computer
+  allows. A chosen password can be guessed; 160 random bits can't be, ever. That makes a pre-shared key safe without
+  slow password hashing.
+- **Always required.** `warped-server` doesn't start without `--game-password-file`, or with a file that isn't a
+  valid `warped2-` password (exit code 2, with the command that creates one). This holds even on a local network.
+  The window checks the same way before sending anything, so a mistyped password is caught by its checksum on the
+  player's machine ("the password was mistyped"), not by the server.
+- **Reading it:** letters in either case; dashes, spaces and line breaks are ignored.
+- **Keeping it:** the file is mode 0600. The Mac app keeps one password per server address in
+  `~/Library/Application Support/Warped/game_passwords/` (a file per `<address>_<port>`, mode 0600), so players
+  can switch between friends' servers. A password is never logged, put on a command line or shown on screen.
+- **The key:** psk = HKDF-SHA256(input = the 20 bytes, salt = `warped psk`, info = `v2`), 32 bytes, the Noise
+  pre-shared key.
+- **Changing it:** create a new one and restart the server. Everyone needs the new one.
 
-Partitioned by the join's version × cookie × proof, plus the later messages' token:
+### Datagrams
 
-- right version, no cookie → `Challenge`, no slot made;
-- right version, another address's cookie → `Challenge`;
-- right version, right cookie, wrong proof → `Refused` reason 2, no slot made;
-- right version, right cookie, right proof → `Welcome` with a token;
-- another version, anything else → `Refused` reason 1;
-- a later message with a wrong token, a wrong id, or from another address → ignored, the game unchanged;
-- no reply to an unproven address is ever longer than the datagram that caused it;
-- an empty password on both sides works (local network).
+Every datagram starts with a 3-byte header in the clear: magic `0xF7`, `PROTOCOL_VERSION` (u8), type (u8).
+Multi-byte numbers are little-endian. Indexes are random u32 numbers each side picks for a session, as in
+WireGuard, so a datagram names its session without naming the player.
+
+| Type | Direction | After the header | Size |
+| --- | --- | --- | --- |
+| 1 `HandshakeInit` | window → server | sender index (u32), Noise message 1 (`psk, e`, with a 16-byte zero payload) | 71 bytes |
+| 2 `HandshakeResponse` | server → window | sender index (u32), receiver index (u32), Noise message 2 (`e, ee`, empty payload) | 59 bytes |
+| 3 `Transport` | both | receiver index (u32), counter (u64), the game message encrypted with ChaCha20-Poly1305 and its 16-byte tag | message + 31 bytes |
+| 4 `OtherVersion` | server → window | the server's `PROTOCOL_VERSION` (u8), in the clear | 4 bytes |
+
+- **Game messages** are the existing ones (`Join`, `State`, `Snapshot`, ...), each starting with its `Kind` byte,
+  now always inside a `Transport` datagram. v1's `Challenge`, `Refused` and token go away.
+- **Counter:** each direction of a session numbers its datagrams 0, 1, 2, ...; the counter is the Noise nonce
+  (`snow`'s `StatelessTransportState`), so it is never reused under one key. The receiver drops a datagram whose
+  counter it has already seen or that is more than 64 behind the highest it has seen (a sliding window, as in
+  WireGuard and IPsec). Reordered datagrams within the window are accepted. Changing the header in transit changes
+  the nonce or the session, so decryption fails.
+
+### The exchange
+
+1. The window, holding the password, sends `HandshakeInit`.
+2. The server reads Noise message 1. With the wrong password, its tag doesn't verify (cheap: no key exchange yet),
+   and the server drops it without a reply. With the right one, it answers `HandshakeResponse` and keeps the
+   half-open session for 5 s. `HandshakeInit` is padded to be longer than `HandshakeResponse`, so a forged sender
+   address never makes the server send more than it got. The server accepts at most 20 handshakes a second from
+   one IP address and holds at most 64 half-open ones.
+3. Both sides now have two keys, one per direction. The window sends its first `Transport` datagram, the `Join`
+   (the team it asks for). That datagram proves the window received the response at its address, so only then does
+   the server make the player and answer with the `Welcome`, which may be large. The session is now open.
+4. Every later datagram is a `Transport`. The server moves a session to the address of its newest authenticated
+   datagram, so a player whose home router changes their port keeps playing.
+5. A session ends on `Leave` or after 3 s without a valid datagram. A window that comes back does a new handshake,
+   with new keys.
+6. A datagram with the magic but another `PROTOCOL_VERSION` gets `OtherVersion`, which the window reports as "the
+   server runs another version of the game". Anything else invalid gets no reply.
+
+### What it protects against, and what not
+
+- **Protects against:** strangers joining or interfering. Anyone on the network path (the same café Wi-Fi, an
+  ISP) reading, changing, replaying or injecting game traffic. Guessing the password, offline or online. Using the
+  server to flood a third party. Recorded games being decrypted later if the password leaks (forward secrecy).
+- **Doesn't protect against:**
+  - anyone who has the password: friends can join, and could impersonate the server to each other;
+  - an observer seeing that a game is played, how big and how frequent its datagrams are;
+  - a forged `OtherVersion` showing a window a wrong message (it carries no secret and changes nothing);
+  - friends cheating: the server still takes each window's word for its hits.
+
+### Cost
+
+- **Handshake:** two X25519 operations per side, well under a millisecond, once per join.
+- **Each datagram:** ChaCha20-Poly1305 over at most 1,200 bytes, a few microseconds, plus 31 bytes. A 10-player
+  snapshot at 60 Hz costs the server well under 1% of a core. The snapshot budget of 1,200 bytes per datagram
+  (plan, step C3) includes those 31 bytes.
+- **Dependency:** `snow` with its default pure-Rust primitives, version pinned and at least 7 days old when added.
+
+### Tests every implementation keeps
+
+Each partition, and the tests that cover its parts, goes in the test file's docstring (`unit-tests` skill):
+
+- **Password text:**
+  - a generated password parses back to its bytes;
+  - wrong prefix, wrong length, wrong checksum, letters outside base32 → refused with a reason;
+  - case, dashes and spaces don't matter.
+- **Server start:** no password file, empty file, malformed password → exit code 2; valid → runs.
+- **Handshake:** right password → session open; wrong password → no reply, no state kept; an `HandshakeInit`
+  replayed from a recording → a response the replayer can't use, and no player made; another version →
+  `OtherVersion`.
+- **Transport:**
+  - one changed byte anywhere → dropped;
+  - a replayed counter → dropped;
+  - reordered within 64 → accepted once each;
+  - more than 64 behind → dropped;
+  - a valid datagram from a new address → the session moves there.
+- **Amplification:** no reply to an unproven address is longer than the datagram that caused it.
+- **Strangers during a game** (plan, 7.5 scenario 7): no slot, no change to the game, nothing noticed by players.
+
+## v1 (the demo, until replaced)
+
+The infra stack's #181, kept here so the demo and `game/` before step C1 stay documented:
+
+- `--game-password-file` holds any password; without it the password is empty.
+- `Join` carries `PROTOCOL_VERSION` (u16), a 16-byte cookie and a 32-byte proof. The cookie is the first 16 bytes of
+  HMAC-SHA256(server secret, the sender's `ip:port`); the proof is HMAC-SHA256(password, cookie).
+- A wrong or missing cookie gets `Challenge` (kind 14, the right cookie). A wrong version or proof gets `Refused`
+  (kind 15, reason 1 or 2, the server's version). A right proof gets `Welcome` with a 64-bit token.
+- Every later message from the window carries the token, and the server checks token, player id and address.
+- Nothing is encrypted, a weak password can be guessed offline from a recorded join, and an empty password lets
+  anyone in. That's why v2 replaces it.

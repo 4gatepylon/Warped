@@ -58,6 +58,8 @@ Made by the user (2026-11-08):
 - Games go over the internet, so they need a simple, efficient way to refuse strangers: a secret the server's owner
   gives their friends (e.g. by WhatsApp). The scheme is decided now, so no two agents build it differently:
   [`common/protocol/authentication.md`](../common/protocol/authentication.md).
+- Traffic is encrypted with a scheme in common use for real traffic. Every server must have a password; running
+  without one is not allowed. The earlier proposal may be changed to be more secure.
 - Another agent (the infra stack) makes the downloadable Mac app (double-click, pick a server, give an address)
   and the cloud deployment.
 
@@ -76,12 +78,14 @@ Made by the agent who wrote this plan, for the user to confirm or overturn:
   the commit before layer 2 of this stack).
 - **The demo's names stay during the port** (`VoxelWorld`, `VoxelPlayer`, ...), so that ported files diff cleanly
   against the demo's. Renames come after the regression tests are in place.
-- **Authentication is the infra stack's password challenge (#181), unchanged:** a password file on both sides
-  (`--game-password-file`), an HMAC-SHA256 proof of a server cookie (so the password never crosses the network),
-  a per-player token on every later message, and no reply larger than its request to an unproven address. It is
-  exactly what was asked (a shared secret, cheap: one HMAC per join, 8 bytes per message), it is already written
-  and tested, and building a second scheme would conflict with it. Encryption is left as a later upgrade (described
-  in the spec).
+- **Authentication and encryption: v2 of `authentication.md`, built in step C1.** A Noise handshake
+  (`Noise_NNpsk0_25519_ChaChaPoly_SHA256`, through the `snow` crate) proves the password on both sides and makes
+  fresh keys. Every datagram is then sealed with ChaCha20-Poly1305 and numbered against replays, as WireGuard does.
+  The password is generated (160 random bits, `warped2-...`, with a checksum for typos), never chosen: a chosen
+  password could be guessed offline from a recorded handshake. `warped-server` refuses to start without one.
+  - Until C1, the game keeps the infra stack's v1 (#181) as the demo has it, but from A5 on, `warped-server`
+    already refuses to start without a non-empty password.
+  - v2 replaces v1 in one layer, rather than the demo being changed while the infra stack works on it.
 - **The infra stack lands in the demo first, and the game copies it** (step A0), so the app, the Linux server, the
   password and the title screen arrive in `game/` with the rest of the demo instead of being redone.
 
@@ -138,6 +142,9 @@ Interfaces both sides rely on, which change only with both sides' agreement:
   no flags at all, the window opens the title screen.
 - `online_games.txt`: one game a line, `<address>:<port> <map> <name>`.
 - The exit code 3 for a refused password.
+- From step C1: the password format `warped2-...` (`authentication.md` v2). The cloud deployment then makes each
+  game's password with `warped-server create-game-password` instead of choosing one, and the app keeps one password
+  per server address.
 - Where the app keeps things: `~/Library/Application Support/Warped/game_password`, `~/Library/Logs/Warped/`,
   `~/.config/warped/player_settings.yaml`; assets in `Contents/Resources/assets/`; maps inside the program.
 
@@ -204,7 +211,8 @@ per game, each on its own UDP port, started at boot with the game's password.
 | `--map <name>` | One level per game, as today (phases A to C) |
 | `--maps <name,...>` | The levels of a match, blue's deepest first (phase D); replaces `--map` |
 | `--server-settings <path>` | The settings sent to every player (default: the built-in `server_settings.yaml`) |
-| `--game-password-file <path>` | Only players who prove they know this password join (`authentication.md`); none: no password |
+| `--game-password-file <path>` | Required: only players who prove they know this password join, and all traffic is encrypted with keys from it (`authentication.md`) |
+| `create-game-password --output-file <path>` | A subcommand: writes a new generated password (`warped2-...`, mode 0600) and prints the file's path (step C1) |
 | `--max-player-count <count>` | At most 10 (5v5) after phase C; 8 before |
 | `--next-game-after-s <seconds>` | Starts the next game this long after a win, since a server on a VM has no one to press `Enter` |
 | `--exit-after-s <seconds>` | Stops after that long (tests) |
@@ -290,8 +298,9 @@ section 7.
   (`Game::handle(datagram, from, now_s) -> Vec<(to, datagram)>`, `Game::tick(now_s)`), with a thin UDP loop, from
   the infra stack's `wormholes_server` `main`. The binary becomes `warped-server` with the same flags; the same PR
   changes `infra/startup.sh.tftpl` and `make build-server-bundle` to the new name, and the infra stack reviews it.
-  Remove `--serve` from the window. The password challenge (`authentication.md`) moves with the server and keeps its
-  tests. Done when: 7.5 (in-process games) and 7.3.3 (cross-version, still byte-identical) pass.
+  Remove `--serve` from the window. The password challenge (`authentication.md` v1) moves with the server and keeps
+  its tests, and `warped-server` now refuses to start without a non-empty `--game-password-file` (exit code 2). Done
+  when: 7.5 (in-process games) and 7.3.3 (cross-version, still byte-identical) pass.
 - **A6, assets.** Move the used assets to `common/assets/` and point the game, both demos and `make
   package-mac-app` (which copies them into `Contents/Resources/assets/`) at them. Done when: both demos and the game
   build and draw (7.4 where Metal runs, otherwise their `check_*` functions find every file), and a packaged app
@@ -309,22 +318,33 @@ section 7.
 
 ### Phase C: network for 5v5 between friends in different cities
 
-Each item is its own layer, with its tests (7.5, 7.6). The protocol version, the `Refused` message and the
-password challenge already exist (infra stack, `authentication.md`). Every layer that changes bytes raises
-`PROTOCOL_VERSION`, updates `authentication.md` or the protocol docs if it touches them, and says in its PR that
-older windows can't join. Cross-version tests with the demo stop at the first such layer (7.3.3 is retired; the
-oracle tests stay).
+Each item is its own layer, with its tests (7.5, 7.6). Every layer that changes bytes raises `PROTOCOL_VERSION`,
+updates `authentication.md` or the protocol docs if it touches them, and says in its PR that older windows can't
+join. Cross-version tests with the demo stop at C1 (7.3.3 is retired; the oracle tests stay).
 
-- **C1, write the protocol up.** `common/protocol/messages.md`: every message's layout, from the code, with the
+- **C1, encrypted sessions (`authentication.md` v2).** Several layers, in order:
+  1. `core/src/net/password.rs`: generating, writing and parsing `warped2-` passwords, and the HKDF key, with the
+     spec's password tests. `warped-server create-game-password`. The server and window refuse a missing or
+     malformed password.
+  2. `core/src/net/secure.rs`, sans-IO:
+     - the handshake (`snow`, `Noise_NNpsk0_25519_ChaChaPoly_SHA256`) for both sides;
+     - `Transport` sealing and opening with the counter as nonce and a 64-datagram replay window;
+     - the limits on half-open handshakes;
+     - the spec's handshake, transport and amplification tests.
+  3. Wire it in. Every game message travels in `Transport` datagrams. v1's `Challenge`, `Refused` and token go.
+     Sessions move to a player's new address (home routers sometimes change a player's port mid-game).
+     `OtherVersion` replaces `Refused` for versions.
+  4. With the infra stack: the title screen asks for a `warped2-` password per server, and `infra/` generates
+     passwords with `create-game-password` (the infra stack's layer, reviewed by the refactor).
+- **C2, write the protocol up.** `common/protocol/messages.md`: every game message's layout, from the code, with the
   tests that hold it to the page. No byte changes.
-- **C2, players keep their id when their address changes.** Today a later message must come from the address that
-  joined; home routers sometimes change a player's port mid-game. The server accepts a message whose token and id
-  match from a new address and moves the player there (the token, 64 random bits, is what proves who they are).
 - **C3, smaller pose, 10 players.** Each player's eye frame (16 `f64`, 128 bytes) becomes a position in the map's
   coordinates plus a unit quaternion (7 `f32`, 28 bytes): plain `f32` matrices would lose centimetres far out in
   hyperbolic space. `MAX_PLAYER_COUNT` becomes 10. A test asserts a 10-player snapshot fits in 1,200 bytes, under
   the 1,472 bytes of one ordinary internet packet, so it is never split into IP fragments.
-- **C4, snapshot sequence numbers.** Snapshots carry the server's tick; a window drops any older than its newest.
+- **C4, stale snapshots dropped.** A window drops a snapshot whose `Transport` counter is lower than the newest
+  snapshot's it has shown, so a late, reordered snapshot never moves players back. The counter of C1 is the
+  sequence number, so no bytes are added.
 - **C5, eliminations that can't be lost.** The snapshot lists eliminated players too, with a flag and the time left
   until they may respawn, so a lost `Eliminated` datagram no longer leaves a "ghost" player, and the server, not the
   window, decides when a player may respawn.
@@ -404,8 +424,8 @@ can't run on the machine (no Metal, for example) is reported as "Not run: <reaso
   module's docstring (`unit-tests` skill). Partitions worth stating for the new code:
   - `net::protocol`: each message kind × {smallest, typical, largest (10 players, every field at its maximum)};
     truncated, over-long and unknown-kind datagrams; round trips bit for bit.
-  - Authentication: the partitions listed at the end of `common/protocol/authentication.md` (version × cookie ×
-    proof, and later messages' token, id and address), kept from the infra stack's tests.
+  - Authentication and encryption: the partitions listed in `common/protocol/authentication.md` (v1's until C1, kept
+    from the infra stack's tests; then v2's password text, server start, handshake, transport and amplification).
   - `rules` (phase D): every row of the design doc's example match; a team winning at depth 0, 1, 2; a defender
     winning its own level.
   - `space` (phase E): k ∈ {-1, 0, +1} × {a point at the origin, near, far (10 R)}: geodesics stay on the manifold,
@@ -503,7 +523,7 @@ in one process, on a simulated clock, with no sockets:
   3. Combat: hits eliminate after the right number of hits per weapon and zone; kills and deaths add up; friendly
      fire eliminates but scores no kill; respawn happens after `respawn.delay_s`, not before.
   4. Thrown wormholes: placed, linked, destroyed by enemy shots.
-  5. Churn: bots leave, time out, rejoin (same token keeps the id after C2), change address (after C2).
+  5. Churn: bots leave, time out, rejoin, and change address mid-game (the session follows them after C1).
   6. A 10-minute match of game time (runs in seconds of real time).
   7. Strangers: an endpoint without the password, one with a wrong password, one replaying datagrams captured from
      a player (from its own address), and one sending random bytes, all while a 5v5 game runs. None gets a slot or
@@ -603,5 +623,6 @@ the Linux target is installed. Then, if anything is missing:
 - City Sphere's design may change to one floor (`DESIGN.md`); phase E's sphere ground waits for that decision.
 - Should a management server (to start games from a web page or the window) come back in phase G, or are the infra
   stack's Terraform-managed `warped-server` processes enough for tournaments?
-- Is unencrypted traffic acceptable (`authentication.md`, "what it doesn't protect against"), or should the
-  ChaCha20-Poly1305 upgrade be planned for phase C?
+- Passwords are generated (`warped2-` and 36 letters), not chosen, so they can't be guessed offline. Is copying a
+  generated password into WhatsApp acceptable, or do you want memorable passwords? Those would need slow hashing
+  (Argon2id) and a minimum length, and a weak one could still be guessed by someone who records a handshake.
