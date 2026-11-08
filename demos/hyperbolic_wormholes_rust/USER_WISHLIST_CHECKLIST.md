@@ -11,6 +11,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox"). Claimed by Claude Code (subagent of
+  session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." Pictures first. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
@@ -108,7 +110,6 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
-- [ ] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
 
 ## Pending user review
 
