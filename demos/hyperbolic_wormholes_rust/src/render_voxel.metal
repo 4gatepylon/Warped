@@ -279,7 +279,9 @@ constant float MAX_BEND_PIECE_M = 8.0;
 constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
 constant int HULL_FIGHTER = 0;
 constant int HULL_RING_SHIP = 1;
-constant int HULL_COUNT = 2;
+constant int FLAT_HULL_COUNT = 2;
+constant int HULL_BATTLE_STATION = 2;
+constant int HULL_CAPITAL_SHIP = 3;
 constant int LIGHT_NAV = 0;
 constant int LIGHT_STROBE = 1;
 constant float SHIP_BOUND_HALF_LENGTHS = 1.5;
@@ -308,6 +310,50 @@ constant float3 RING_COLOR = float3(0.75, 0.74, 0.7);
 constant float RING_LIGHT_COUNT = 6.0;
 constant float RING_LIGHT_HALF_LENGTHS = 0.02;
 constant float3 RING_LIGHT_COLOR = float3(0.8, 1.1, 1.3);
+constant float GIANT_NIGHT = 0.06;
+constant float STATION_GROUNDSHINE_FRAC = 0.25;
+constant float CAPITAL_GROUNDSHINE_FRAC = 1.2;
+constant float STATION_TILT_RAD = 0.3;
+constant float2 STATION_DISH_LAT_LON_RAD = float2(0.55, -0.4);
+constant float STATION_DISH_RAD = 0.3;
+constant float STATION_BOWL_RADIUS_RADII = 0.45;
+constant float STATION_LENS_RADIUS_RADII = 0.035;
+constant float2 STATION_DISH_RING_FRACS = float2(0.45, 0.76);
+constant float STATION_DISH_RING_HALF_WIDTH_RADII = 0.004;
+constant float STATION_TRENCH_HALF_RAD = 0.022;
+constant float STATION_BAND_RAD = 0.105;
+constant float STATION_SEAM_HALF_RAD = 0.0025;
+constant float STATION_SEAM_DARKEN_FRAC = 0.3;
+constant float STATION_PANEL_RAD = 0.14;
+constant float STATION_MIN_PANEL_COS = 0.2;
+constant float STATION_PANEL_VARIATION = 0.16;
+constant float3 STATION_COLOR = float3(0.6, 0.61, 0.63);
+constant float3 STATION_DISH_COLOR = float3(0.5, 0.51, 0.53);
+constant float3 STATION_TRENCH_COLOR = float3(0.12, 0.12, 0.13);
+constant float3 STATION_LENS_COLOR = float3(0.07, 0.08, 0.09);
+constant float STATION_WINDOW_FRAC = 0.1;
+constant float STATION_WINDOW_SEED = 0.5;
+constant float STATION_WINDOW_RADIUS_RADII = 0.005;
+constant float STATION_WINDOW_BRIGHTNESS = 0.5;
+constant float2 STATION_NIGHT_EDGES = float2(-0.05, 0.12);
+constant float STATION_TRENCH_LIGHT_COUNT = 14.0;
+constant float STATION_TRENCH_LIGHT_RADIUS_RADII = 0.007;
+constant float STATION_BEACON_RADIUS_RADII = 0.012;
+constant float CAPITAL_TILT_RAD = 0.9;
+constant float CAPITAL_WINDOWS_PER_HALF_LENGTH = 45.0;
+constant float CAPITAL_WINDOW_ROW_HALF_LENGTHS = 0.03;
+constant float2 CAPITAL_WINDOW_SIZE_FRACS = float2(0.55, 0.35);
+constant float CAPITAL_WINDOW_LIT_FRAC = 0.5;
+constant float CAPITAL_WINDOW_BRIGHTNESS = 0.9;
+constant float CAPITAL_WINDOW_SEED = 0.25;
+constant float CAPITAL_EYE_DISTANCE_HALF_LENGTHS = 2.0;
+constant float CAPITAL_PANELS_PER_HALF_LENGTH = 9.0;
+constant float CAPITAL_PANEL_VARIATION = 0.05;
+constant float CAPITAL_HALF_WIDTH_PER_HALF_LENGTH = 0.21;
+constant float2 CAPITAL_EDGE_WINDOW_BAND_HALF_LENGTHS = float2(0.03, 0.09);
+constant float CAPITAL_EDGE_WINDOW_END_HALF_LENGTHS = 0.5;
+constant float3 CAPITAL_ENGINE_COLOR = float3(0.55, 0.8, 1.0);
+constant float CAPITAL_ENGINE_BRIGHTNESS = 1.3;
 
 /** @brief `HULL_BOXES` are the spaceships' boxes (centre, half size; in half lengths, x to the nose, y to starboard), mirrored across the keel. */
 constant float4 HULL_BOXES[] = {float4(0.82, 0.0, 0.1, 0.09), float4(-0.85, 0.0, 0.08, 0.14)};
@@ -320,7 +366,7 @@ constant float2 HULL_CAPSULE_RADII[] = {float2(0.06, 0.05), float2(0.12, 0.12)};
 /** @brief `HULL_CAPSULE_COLORS` are the colours of `HULL_CAPSULES`. */
 constant float3 HULL_CAPSULE_COLORS[] = {float3(0.58, 0.58, 0.6), float3(0.66, 0.66, 0.68)};
 /** @brief `HULL_PART_RANGES` gives each hull's first box, box count, first capsule and capsule count. */
-constant int4 HULL_PART_RANGES[HULL_COUNT] = {int4(0, 0, 0, 0), int4(0, 2, 0, 2)};
+constant int4 HULL_PART_RANGES[FLAT_HULL_COUNT] = {int4(0, 0, 0, 0), int4(0, 2, 0, 2)};
 /** @brief `HULL_TRIANGLES` are the spaceships' flat triangles (three corners), each symmetric across the keel. */
 constant float2 HULL_TRIANGLES[][3] = {{float2(1.0, 0.0), float2(-0.75, 0.82), float2(-0.75, -0.82)}};
 /** @brief `HULL_TRIANGLE_COLORS` are the colours of `HULL_TRIANGLES`. */
@@ -332,20 +378,46 @@ constant float2 HULL_INSETS[][3] = {
 /** @brief `HULL_INSET_COLORS` are the colours of `HULL_INSETS`: a darker spine and a dark glass canopy. */
 constant float3 HULL_INSET_COLORS[] = {float3(0.44, 0.46, 0.52), float3(0.14, 0.2, 0.3)};
 /** @brief `HULL_TRIANGLE_RANGES` gives each hull's first triangle, triangle count, first inset and inset count. */
-constant int4 HULL_TRIANGLE_RANGES[HULL_COUNT] = {int4(0, 1, 0, 2), int4(0, 0, 0, 0)};
+constant int4 HULL_TRIANGLE_RANGES[FLAT_HULL_COUNT] = {int4(0, 1, 0, 2), int4(0, 0, 0, 0)};
 /** @brief `HULL_ENGINES` are the spaceships' engine nozzles (centre, radius, unused), mirrored across the keel. */
 constant float4 HULL_ENGINES[] = {float4(-0.77, 0.12, 0.055, 0.0), float4(-0.95, 0.0, 0.09, 0.0)};
 /** @brief `HULL_PANEL_VARIATIONS` are how much each hull's panels vary in brightness (plain on the fighters' deltas). */
-constant float HULL_PANEL_VARIATIONS[HULL_COUNT] = {0.06, 0.3};
+constant float HULL_PANEL_VARIATIONS[FLAT_HULL_COUNT] = {0.06, 0.3};
 /** @brief `HULL_ENGINE_COLORS` are each hull's engine colours. */
-constant float3 HULL_ENGINE_COLORS[HULL_COUNT] = {float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
+constant float3 HULL_ENGINE_COLORS[FLAT_HULL_COUNT] = {float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
 /** @brief `HULL_LIGHTS` are the spaceships' lights (centre, `LIGHT_*` kind or else a window, radius), mirrored across the keel. */
 constant float4 HULL_LIGHTS[] = {
     float4(-0.7, 0.76, 0.0, 0.035), float4(-0.74, 0.0, 1.0, 0.04),
     float4(0.85, 0.1, 0.0, 0.025), float4(-0.85, 0.15, 1.0, 0.03), float4(0.86, 0.0, 2.0, 0.015),
 };
 /** @brief `HULL_GLOW_RANGES` gives each hull's first engine, engine count, first light and light count. */
-constant int4 HULL_GLOW_RANGES[HULL_COUNT] = {int4(0, 1, 0, 2), int4(1, 1, 2, 3)};
+constant int4 HULL_GLOW_RANGES[FLAT_HULL_COUNT] = {int4(0, 1, 0, 2), int4(1, 1, 2, 3)};
+/**
+ * @brief `CAPITAL_HULL_PLANES` are the capital ship's wedge (unit-free normal, offset; inside where `dot(normal, x) <=
+ * offset`), in half lengths with x to the nose, y to port and z up: two sloped top faces meeting in a ridge, two
+ * flatter bottom faces and the stern.
+ */
+constant float4 CAPITAL_HULL_PLANES[] = {
+    float4(0.042, 0.2, 0.84, 0.042), float4(0.042, -0.2, 0.84, 0.042), float4(0.021, 0.1, -0.84, 0.021),
+    float4(0.021, -0.1, -0.84, 0.021), float4(-1.0, 0.0, 0.0, 1.0),
+};
+/** @brief `CAPITAL_BOXES` are the capital ship's superstructure: a deck block, the bridge tower's neck and the bridge (lowest and highest corners, in the hull's axes). */
+constant float3 CAPITAL_BOXES[][2] = {
+    {float3(-0.95, -0.14, 0.0), float3(-0.35, 0.14, 0.15)}, {float3(-0.88, -0.03, 0.0), float3(-0.8, 0.03, 0.27)},
+    {float3(-0.9, -0.13, 0.24), float3(-0.78, 0.13, 0.3)},
+};
+/** @brief `CAPITAL_BOX_COLORS` are the colours of `CAPITAL_BOXES`. */
+constant float3 CAPITAL_BOX_COLORS[] = {float3(0.64, 0.65, 0.67), float3(0.56, 0.57, 0.59), float3(0.66, 0.67, 0.69)};
+/** @brief `CAPITAL_HULL_COLOR` is the colour of the capital ship's wedge. */
+constant float3 CAPITAL_HULL_COLOR = float3(0.58, 0.59, 0.62);
+/** @brief `CAPITAL_ENGINES` are the capital ship's engine nozzles (centre in the hull's axes, radius), mirrored across the keel. */
+constant float4 CAPITAL_ENGINES[] = {float4(-1.0, 0.0, 0.04, 0.04), float4(-1.0, 0.14, 0.03, 0.03)};
+/** @brief `CAPITAL_LIGHTS` are the capital ship's lights (centre in the hull's axes, `LIGHT_*` kind), not mirrored. */
+constant float4 CAPITAL_LIGHTS[] = {float4(-0.98, 0.41, 0.0, 0.0), float4(-0.98, -0.41, 0.0, 0.0), float4(-0.84, 0.0, 0.3, 1.0)};
+constant int CAPITAL_BOX_COUNT = 3;
+constant int CAPITAL_ENGINE_COUNT = 2;
+constant int CAPITAL_LIGHT_COUNT = 3;
+constant float CAPITAL_LIGHT_RADIUS_HALF_LENGTHS = 0.01;
 
 /**
  * @brief `Spaceship` is one spaceship in the sky (`spaceships.rs`): its centre's direction at the origin with its half
@@ -1504,9 +1576,216 @@ static float3 get_spaceship_glow(Spaceship ship, int hull, float2 p, float px) {
 }
 
 /**
+ * @brief `get_light_glow` gives the glow of a light of colour `tint` and radius `radius` at e from its centre, at least
+ * `SHIP_LIGHT_MIN_PIXELS` pixels (`px` wide) across.
+ * @par Example
+ * @code
+ * glow += get_light_glow(p - centre, CAPITAL_LIGHT_RADIUS_HALF_LENGTHS, px, STROBE_COLOR);
+ * @endcode
+ */
+static float3 get_light_glow(float2 e, float radius, float px, float3 tint) {
+    float r = max(radius, SHIP_LIGHT_MIN_PIXELS * px);
+    return tint * exp(-dot(e, e) / (r * r));
+}
+
+/**
+ * @brief `light_giant` gives the light on a giant ship's surface with normal n: the sun, a little light from the sunlit
+ * ground below (`groundshine_frac` times what lights the small ships), and a faint glow so its night side shows against
+ * the stars.
+ * @par Example
+ * @code
+ * float3 light = light_giant(scene, n, STATION_GROUNDSHINE_FRAC);
+ * @endcode
+ */
+static float3 light_giant(thread const Scene &scene, float3 n, float groundshine_frac) {
+    return SUN_COLOR * SHIP_SUNLIT * max(dot(n, scene.u.sun.xyz), 0.0) + groundshine_frac * SHIP_GROUNDSHINE_COLOR * max(-n.y, 0.0)
+           + float3(GIANT_NIGHT);
+}
+
+/**
+ * @brief `draw_battle_station` draws the battle station over the sky colour `color`: a sphere `ship.centre.w` radians
+ * across in the sky (p is the direction in its radii, x along the heading), its pole tilted toward the eye, with panel
+ * bands, a dark trench round its equator and a concave dish with a dark lens in its upper half; small lights in the
+ * trench, lit windows on its night side and a red beacon flashing on its pole.
+ * @par Example
+ * @code
+ * color = draw_battle_station(scene, ship, p, px, color);
+ * @endcode
+ */
+static float3 draw_battle_station(thread const Scene &scene, Spaceship ship, float2 p, float px, float3 color) {
+    float r2 = dot(p, p), coverage = clamp(0.5 - (sqrt(r2) - 1.0) / px, 0.0, 1.0);
+    if (coverage <= 0.0) return color;
+    float3 c = ship.centre.xyz, h = ship.heading.xyz, side = cross(h, c), toward_eye = -c;
+    float3 pole = side * cos(STATION_TILT_RAD) + toward_eye * sin(STATION_TILT_RAD);
+    float3 front = toward_eye * cos(STATION_TILT_RAD) - side * sin(STATION_TILT_RAD);
+    float2 dish_rad = STATION_DISH_LAT_LON_RAD;
+    float3 dish = cos(dish_rad.x) * (cos(dish_rad.y) * front + sin(dish_rad.y) * h) + sin(dish_rad.x) * pole;
+    float3 x = p.x * h + p.y * side + sqrt(max(1.0 - r2, 0.0)) * toward_eye, n = x;
+    float rim = sin(STATION_DISH_RAD), bowl_offset = cos(STATION_DISH_RAD) + sqrt(STATION_BOWL_RADIUS_RADII * STATION_BOWL_RADIUS_RADII - rim * rim);
+    bool is_dish = dot(x, dish) > cos(STATION_DISH_RAD);
+    float3 albedo, glow = float3(0.0);
+    if (is_dish) {
+        float3 q = x - bowl_offset * dish;
+        float b = dot(q, c);
+        x += (-b + sqrt(max(b * b - dot(q, q) + STATION_BOWL_RADIUS_RADII * STATION_BOWL_RADIUS_RADII, 0.0))) * c;
+        if (dot(x, x) > 1.0) return color;
+        n = normalize(bowl_offset * dish - x);
+        float from_axis = length(x - dot(x, dish) * dish);
+        float ring = min(abs(from_axis - STATION_DISH_RING_FRACS.x * rim), abs(from_axis - STATION_DISH_RING_FRACS.y * rim));
+        albedo = mix(STATION_DISH_COLOR, STATION_TRENCH_COLOR, clamp(0.5 - (ring - STATION_DISH_RING_HALF_WIDTH_RADII) / px, 0.0, 1.0));
+        albedo = mix(albedo, STATION_LENS_COLOR, clamp(0.5 - (from_axis - STATION_LENS_RADIUS_RADII) / px, 0.0, 1.0));
+    } else {
+        float lat = asin(clamp(dot(x, pole), -1.0, 1.0)), lon = atan2(dot(x, h), dot(x, front));
+        float band = floor(lat / STATION_BAND_RAD), band_lat = (band + 0.5) * STATION_BAND_RAD;
+        float panel_rad = STATION_PANEL_RAD / max(cos(band_lat), STATION_MIN_PANEL_COS), column = floor(lon / panel_rad);
+        albedo = STATION_COLOR * (1.0 + STATION_PANEL_VARIATION * (hash_3d(float3(band, column, float(HULL_BATTLE_STATION))) - 0.5));
+        float seam = abs(lat - STATION_BAND_RAD * round(lat / STATION_BAND_RAD));
+        albedo *= 1.0 - STATION_SEAM_DARKEN_FRAC * clamp(0.5 - (seam - STATION_SEAM_HALF_RAD) / px, 0.0, 1.0);
+        float trench = clamp(0.5 - (abs(lat) - STATION_TRENCH_HALF_RAD) / px, 0.0, 1.0);
+        albedo = mix(albedo, STATION_TRENCH_COLOR, trench);
+        float window_lon = (column + 0.5) * panel_rad;
+        float3 window = cos(band_lat) * (cos(window_lon) * front + sin(window_lon) * h) + sin(band_lat) * pole;
+        float night = 1.0 - smoothstep(STATION_NIGHT_EDGES.x, STATION_NIGHT_EDGES.y, dot(n, scene.u.sun.xyz));
+        if (hash_3d(float3(band, column, float(HULL_BATTLE_STATION) + STATION_WINDOW_SEED)) < STATION_WINDOW_FRAC && trench < 1.0) {
+            glow += night * STATION_WINDOW_BRIGHTNESS * get_light_glow(float2(dot(x - window, h), dot(x - window, side)), STATION_WINDOW_RADIUS_RADII, px, WINDOW_COLOR);
+        }
+    }
+    color = mix(color, albedo * light_giant(scene, n, STATION_GROUNDSHINE_FRAC), coverage);
+    for (float i = 0.0; i < STATION_TRENCH_LIGHT_COUNT; i += 1.0) {
+        float lon = 2.0 * M_PI_F * i / STATION_TRENCH_LIGHT_COUNT;
+        float3 light = cos(lon) * front + sin(lon) * h;
+        if (dot(light, toward_eye) > 0.0) glow += get_light_glow(p - float2(dot(light, h), dot(light, side)), STATION_TRENCH_LIGHT_RADIUS_RADII, px, RING_LIGHT_COLOR);
+    }
+    glow += get_light_glow(p - float2(dot(pole, h), dot(pole, side)), STATION_BEACON_RADIUS_RADII, px, PORT_COLOR * ship.lights.x);
+    return color + coverage * glow;
+}
+
+/**
+ * @brief `trace_capital_box` traces the ray from o along unit u through the box with corners `lo` and `hi`: the
+ * distance it enters at into `entry` and the normal there into n, and returns its gap to the box (negative when it goes
+ * through), measured midway between where it enters the last slab and leaves the first.
+ * @par Example
+ * @code
+ * float gap = trace_capital_box(o, u, CAPITAL_BOXES[i][0], CAPITAL_BOXES[i][1], entry, n);
+ * @endcode
+ */
+static float trace_capital_box(float3 o, float3 u, float3 lo, float3 hi, thread float &entry, thread float3 &n) {
+    float exit = NO_HIT_S;
+    entry = -NO_HIT_S;
+    for (int k = 0; k < 3; k++) {
+        if (abs(u[k]) < TINY) continue;
+        float t_lo = (lo[k] - o[k]) / u[k], t_hi = (hi[k] - o[k]) / u[k];
+        float3 axis = float3(0.0);
+        axis[k] = 1.0;
+        if (min(t_lo, t_hi) > entry) { entry = min(t_lo, t_hi); n = t_lo < t_hi ? -axis : axis; }
+        exit = min(exit, max(t_lo, t_hi));
+    }
+    float3 e = abs(o + 0.5 * (entry + exit) * u - 0.5 * (lo + hi)) - 0.5 * (hi - lo);
+    return length(max(e, 0.0)) + min(max(e.x, max(e.y, e.z)), 0.0);
+}
+
+/**
+ * @brief `trace_capital_hull` traces the ray from o along unit u through the capital ship's wedge
+ * (`CAPITAL_HULL_PLANES`), as `trace_capital_box` does a box.
+ * @par Example
+ * @code
+ * float gap = trace_capital_hull(o, u, entry, n);
+ * @endcode
+ */
+static float trace_capital_hull(float3 o, float3 u, thread float &entry, thread float3 &n) {
+    float exit = NO_HIT_S, gap = -NO_HIT_S;
+    entry = -NO_HIT_S;
+    for (int i = 0; i < 5; i++) {
+        float4 plane = CAPITAL_HULL_PLANES[i];
+        float a = dot(plane.xyz, o) - plane.w, b = dot(plane.xyz, u);
+        if (b < 0.0 && -a / b > entry) { entry = -a / b; n = normalize(plane.xyz); }
+        if (b > 0.0) exit = min(exit, -a / b);
+    }
+    float3 middle = o + 0.5 * (entry + exit) * u;
+    for (int i = 0; i < 5; i++) gap = max(gap, (dot(CAPITAL_HULL_PLANES[i].xyz, middle) - CAPITAL_HULL_PLANES[i].w) / length(CAPITAL_HULL_PLANES[i].xyz));
+    return gap;
+}
+
+/**
+ * @brief `get_window_light` gives how much of a pixel `px` half lengths wide, at q (along and up a superstructure's side,
+ * or in from a hull edge, in half lengths), the capital ship's rows of lit windows cover: sharp windows close up, and their mean once a window
+ * is under a pixel, so they do not flicker as the ship drifts.
+ * @par Example
+ * @code
+ * color += WINDOW_COLOR * get_window_light(b.xz, px);
+ * @endcode
+ */
+static float get_window_light(float2 q, float px) {
+    float2 cells_per_half_length = float2(CAPITAL_WINDOWS_PER_HALF_LENGTH, 1.0 / CAPITAL_WINDOW_ROW_HALF_LENGTHS);
+    float2 cell = q * cells_per_half_length, cell_px = px * cells_per_half_length;
+    float2 inside = clamp((0.5 * CAPITAL_WINDOW_SIZE_FRACS - abs(fract(cell) - 0.5)) / cell_px + 0.5, 0.0, 1.0);
+    float2 window = mix(inside, CAPITAL_WINDOW_SIZE_FRACS, clamp(cell_px, 0.0, 1.0));
+    float lit = hash_3d(float3(floor(cell), float(HULL_CAPITAL_SHIP) + CAPITAL_WINDOW_SEED)) < CAPITAL_WINDOW_LIT_FRAC ? 1.0 : 0.0;
+    return window.x * window.y * mix(lit, CAPITAL_WINDOW_LIT_FRAC, clamp(max(cell_px.x, cell_px.y), 0.0, 1.0));
+}
+
+/**
+ * @brief `draw_capital_ship` draws the capital ship over the sky colour `color`: a long wedge `2 ship.centre.w` radians
+ * long (p is the direction in its half lengths, x to the nose), seen from above at a slant so its superstructure stands
+ * up toward the top of the sky, lit by the sun; with glowing engines and a plume behind, red and green lights at the
+ * stern's corners, a flashing strobe on the bridge, and rows of lit windows along the superstructure's sides and the
+ * hull's edges. Its superstructure is one deck block and a bridge tower.
+ * @par Example
+ * @code
+ * color = draw_capital_ship(scene, ship, p, px, color);
+ * @endcode
+ */
+static float3 draw_capital_ship(thread const Scene &scene, Spaceship ship, float2 p, float px, float3 color) {
+    float3 c = ship.centre.xyz, h = ship.heading.xyz, side = cross(h, c);
+    float3 up = -c * cos(CAPITAL_TILT_RAD) + side * sin(CAPITAL_TILT_RAD), port = side * cos(CAPITAL_TILT_RAD) + c * sin(CAPITAL_TILT_RAD);
+    float2 screen_per_z = float2(sin(CAPITAL_TILT_RAD), cos(CAPITAL_TILT_RAD));
+    float3 o = float3(p.x, p.y * screen_per_z.y - CAPITAL_EYE_DISTANCE_HALF_LENGTHS * screen_per_z.x, p.y * screen_per_z.x + CAPITAL_EYE_DISTANCE_HALF_LENGTHS * screen_per_z.y);
+    float3 u = float3(0.0, screen_per_z.x, -screen_per_z.y);
+    float entry, best_entry, coverage;
+    float3 n, best_n, albedo = CAPITAL_HULL_COLOR;
+    coverage = clamp(0.5 - trace_capital_hull(o, u, best_entry, best_n) / px, 0.0, 1.0);
+    bool is_hull = true;
+    for (int i = 0; i < CAPITAL_BOX_COUNT; i++) {
+        float box_coverage = clamp(0.5 - trace_capital_box(o, u, CAPITAL_BOXES[i][0], CAPITAL_BOXES[i][1], entry, n) / px, 0.0, 1.0);
+        if (box_coverage > coverage || (box_coverage > 0.0 && box_coverage >= coverage && entry < best_entry)) {
+            coverage = box_coverage; best_entry = entry; best_n = n; albedo = CAPITAL_BOX_COLORS[i]; is_hull = false;
+        }
+    }
+    float3 glow = float3(0.0);
+    if (coverage > 0.0) {
+        float3 b = o + best_entry * u;
+        float panel = 1.0 + CAPITAL_PANEL_VARIATION * (hash_3d(float3(floor(b.xy * CAPITAL_PANELS_PER_HALF_LENGTH), float(HULL_CAPITAL_SHIP) + sign(b.z))) - 0.5);
+        float3 normal = normalize(best_n.x * h + best_n.y * port + best_n.z * up);
+        color = mix(color, albedo * panel * light_giant(scene, normal, CAPITAL_GROUNDSHINE_FRAC), coverage);
+        float in_from_edge = CAPITAL_HALF_WIDTH_PER_HALF_LENGTH * (1.0 - b.x) - abs(b.y);
+        bool is_edge_window = is_hull && best_n.z > 0.0 && b.x < CAPITAL_EDGE_WINDOW_END_HALF_LENGTHS && in_from_edge > CAPITAL_EDGE_WINDOW_BAND_HALF_LENGTHS.x
+                              && in_from_edge < CAPITAL_EDGE_WINDOW_BAND_HALF_LENGTHS.y;
+        float2 q = is_hull ? float2(b.x, in_from_edge) : b.xz;
+        if (is_edge_window || (!is_hull && best_n.y < 0.0)) color += coverage * CAPITAL_WINDOW_BRIGHTNESS * WINDOW_COLOR * get_window_light(q, px);
+    }
+    for (int i = 0; i < CAPITAL_ENGINE_COUNT; i++) {
+        float4 engine = CAPITAL_ENGINES[i];
+        for (float mirror = -1.0; mirror <= 1.0; mirror += 2.0) {
+            if (mirror < 0.0 && engine.y == 0.0) continue;
+            float2 e = p - float2(engine.x, mirror * engine.y * screen_per_z.y + engine.z * screen_per_z.x);
+            float r = max(engine.w, SHIP_LIGHT_MIN_PIXELS * px), across = e.y / (r * SHIP_PLUME_WIDTH_PER_RADIUS), along = e.x / SHIP_PLUME_HALF_LENGTHS;
+            float plume = e.x < 0.0 ? exp(-across * across - along * along) : 0.0;
+            glow += CAPITAL_ENGINE_COLOR * ship.lights.y * (CAPITAL_ENGINE_BRIGHTNESS * exp(-dot(e, e) / (r * r)) + SHIP_PLUME_BRIGHTNESS * plume);
+        }
+    }
+    for (int i = 0; i < CAPITAL_LIGHT_COUNT; i++) {
+        float4 light = CAPITAL_LIGHTS[i];
+        int kind = int(light.w);
+        float3 tint = kind == LIGHT_NAV ? (light.y > 0.0 ? PORT_COLOR : STARBOARD_COLOR) : kind == LIGHT_STROBE ? STROBE_COLOR * ship.lights.x : WINDOW_COLOR;
+        glow += get_light_glow(p - float2(light.x, light.y * screen_per_z.y + light.z * screen_per_z.x), CAPITAL_LIGHT_RADIUS_HALF_LENGTHS, px, tint);
+    }
+    return color + glow;
+}
+
+/**
  * @brief `draw_spaceship` draws a spaceship over the sky colour `color` in direction d: its hull, lit by the sun on the
- * edges that face it and from below by the sunlit ground, with its engines and lights on top. Directions far from the
- * ship return `color` after a few dot products.
+ * edges that face it and from below by the sunlit ground, with its engines and lights on top; the giants are drawn by
+ * `draw_battle_station` and `draw_capital_ship`. Directions far from the ship return `color` after a few dot products.
  * @par Example
  * @code
  * color = draw_spaceship(scene, scene.u.spaceships[0], d, color);
@@ -1519,6 +1798,8 @@ static float3 draw_spaceship(thread const Scene &scene, Spaceship ship, float3 d
     float bound = SHIP_BOUND_HALF_LENGTHS + SHIP_BOUND_PIXELS * px;
     if (facing <= 0.0 || dot(p, p) > bound * bound) return color;
     int hull = int(ship.heading.w);
+    if (hull == HULL_BATTLE_STATION) return draw_battle_station(scene, ship, p, px, color);
+    if (hull == HULL_CAPITAL_SHIP) return draw_capital_ship(scene, ship, p, px, color);
     float3 albedo = float3(0.0), unused;
     float distance = get_hull_distance(hull, p, ship.lights.z, albedo), coverage = clamp(0.5 - distance / px, 0.0, 1.0);
     if (coverage > 0.0) {

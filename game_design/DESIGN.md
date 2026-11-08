@@ -202,7 +202,7 @@ The level as the Rust game builds it, from the map
 - Structures have sharp edges. The habitat modules' and walkways' windows are glass: players see
   out of them and shoot through them, but can't climb through them.
 - The sky has the sun, a planet, stars, and spaceships that fly over, purely for looks, on the same
-  clock for every player.
+  clock for every player; far behind them hang a moon-sized battle station and a long capital ship.
 - Lighting has soft sun shadows, lamps, light from the planet, a thin haze and bloom.
 
 ## Zones and routes
