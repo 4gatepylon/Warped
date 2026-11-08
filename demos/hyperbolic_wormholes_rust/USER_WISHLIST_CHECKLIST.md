@@ -48,9 +48,6 @@ is in [`AGENTS.md`](AGENTS.md).
   console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
   down.
   Claimed by Claude Code (session `08e70e8b-f763-4c5c-828c-f939a12fad13`), branch `reality-bend`, 2026-11-07.
-- [~] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
-  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). Claimed by Claude Code
-  (session `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/shoot-wormholes`, 2026-11-07.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -155,6 +152,10 @@ are here too, since the user hadn't confirmed them.
   and team. #164.
 - [?] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. #197–#204.
+- [?] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
+  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). You chose: a shot through
+  an enemy's mouth (or at a lone mouth's ball) counts, 2 sniper shots, damage kept until destroyed, both mouths flash
+  (D97). #246–#248.
 
 ## Done
 
