@@ -15,6 +15,11 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
+- [~] **W-118 Join any server.** "The client should be able to connect to any server": a player types a server's
+  IP in the app ("I'm not entirely sure if it's possible to put the IP in the IP for the client"), so the
+  downloaded app can join a local server now and the GCP server later. Claimed by Claude Code (session
+  `424fcf46-e362-48b1-8e23-4eed979a478f`), branch `claude/download-page-only`, 2026-11-08.
+
 ## Open
 
 - [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
