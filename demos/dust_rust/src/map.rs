@@ -350,6 +350,19 @@ pub struct Wind {
     pub direction: [f64; 3],
     pub log_index_gradient_per_m: f64,
     pub segment_m: f64,
+    pub gust: Option<Gust>,
+}
+
+/// `Gust` makes a wind's strength (never its direction) vary smoothly in space and time (W-121):
+/// three waves `size_m` across, seeded by `seed`, scale it by up to ±`strength_frac` and drift
+/// downwind at `speed_m_per_s`.
+#[derive(Deserialize, Clone, Copy, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct Gust {
+    pub seed: u64,
+    pub strength_frac: f64,
+    pub size_m: f64,
+    pub speed_m_per_s: f64,
 }
 
 /// `Sand` is how strong a fog's blowing sand is (W-121): `gust_frac` how much gusts thicken or

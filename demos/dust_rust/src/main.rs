@@ -3727,7 +3727,7 @@ impl Session {
             voxel
                 .world
                 .light_consoles(off_mask, &disabling_fracs, time_s);
-            voxel.world.sky_time_s = spaceships::get_utc_s();
+            voxel.world.set_sky_time_s(spaceships::get_utc_s());
             voxel
                 .black_hole_growth
                 .update(&mut voxel.world, off_mask, time_s);

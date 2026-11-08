@@ -132,7 +132,9 @@ constant float DUST_CUTOFF_WIDTHS = 3.0;
 constant float DUST_WRAP = 0.4;
 constant float DUST_FORWARD_GLOW = 0.8;
 constant float DUST_FORWARD_POWER = 6.0;
+constant int GUST_WAVE_COUNT = 3;
 constant float DUST_EARTHSHINE_FRAC = 0.5;
+constant float DUST_FOG_SKYLIGHT = 1.2;
 constant float DUST_SMOOTH_DEPTH = 0.02;
 constant int DUST_PUFF = 0;
 constant float GRAIN_WRAP = 0.2;
@@ -568,6 +570,8 @@ struct VoxelUniforms {
     float4 sand;
     float4 overhead;
     float4 laser_color;
+    float4 gust_waves[GUST_WAVE_COUNT];
+    float4 gust;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -2312,7 +2316,7 @@ static float cover_grain(int shape, float4 orientation, float3 p, float3 u, floa
 
 static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
     float r = scene.u.curvature_radius_m, s_max = min(s_end, FAR_S);
-    float3 ambient = float3(AMBIENT) + EARTHSHINE * DUST_EARTHSHINE_FRAC * EARTHSHINE_COLOR;
+    float3 ambient = float3(AMBIENT) + EARTHSHINE * DUST_EARTHSHINE_FRAC * EARTHSHINE_COLOR + DUST_FOG_SKYLIGHT * scene.u.fog_color.w * scene.u.fog_color.rgb;
     for (int b = 0; b < scene.u.dust_counts.x; b++) {
         device const DustBurst &burst = scene.dust_bursts[b];
         float x_w = dot(burst.rows[3], x), v_w = dot(burst.rows[3], v);
@@ -2373,13 +2377,27 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * @endcode
  */
 /**
+ * @brief `gust_strength` is how many times the wind's base strength blows at x: 1 plus `u.gust.x` times the mean of
+ * the gust waves (wavevector `u.gust_waves[i].xyz`, phase `.w`); `voxel_world.rs`'s `GustField::get_strength` matches.
+ * @par Example
+ * @code
+ * float strength = gust_strength(u, x);
+ * @endcode
+ */
+static float gust_strength(constant VoxelUniforms &u, float4 x) {
+    float wave_sum = 0.0;
+    for (int i = 0; i < GUST_WAVE_COUNT; i++) wave_sum += sin(dot(u.gust_waves[i].xyz, x.xyz) + u.gust_waves[i].w);
+    return 1.0 + u.gust.x * wave_sum / float(GUST_WAVE_COUNT);
+}
+
+/**
  * @brief `wind_gradient` is the map's wind (W-121) at x: grad ln n = k (N + <x, N> x) / sqrt(1 + <x, N>^2), with N
  * `u.wind.xyz` (w = 0) and k `u.wind.w` per curvature radius; zero without wind. `voxel_world.rs`'s `WindField` matches.
  */
 static float4 wind_gradient(constant VoxelUniforms &u, float4 x) {
     float4 n = float4(u.wind.xyz, 0.0);
     float f = mdot(x, n);
-    return u.wind.w * (n + f * x) * rsqrt(1.0 + f * f);
+    return gust_strength(u, x) * u.wind.w * (n + f * x) * rsqrt(1.0 + f * f);
 }
 
 /** @brief `wind_kick` turns direction v at x by the wind's gradient across it over ds, like `WindField::kick`. */
@@ -2538,18 +2556,20 @@ static float3 blow_sand(thread const Scene &scene, float3 color, float3 fog, flo
     float4 x = u.camera[3], v = u.camera[0] * d_cam.x + u.camera[1] * d_cam.y + u.camera[2] * d_cam.z;
     float3 eye = get_fermi(x, r), d = normalize(get_fermi(x * cosh(SAND_PROBE_S) + v * sinh(SAND_PROBE_S), r) - eye);
     float drift_m = u.sand.x * SAND_SPEED_M_PER_S;
+    float gust_s = 0.5 * min(travelled_m, SAND_GUST_REACH_M) / r;
+    float far_wind = gust_strength(u, x * cosh(gust_s) + v * sinh(gust_s)), near_wind = gust_strength(u, x);
     float3 g = eye + d * 0.5 * min(travelled_m, SAND_GUST_REACH_M);
     float gust = sample_noise_3d(float3(dot(g.xy, wind) - drift_m, dot(g.xy, across), g.z) / SAND_GUST_SIZE_M);
     float3 q = eye + d * 0.35 * min(travelled_m, SAND_SHEET_REACH_M);
     float sheet = smoothstep(SAND_SHEET_EDGES.x, SAND_SHEET_EDGES.y, sample_noise_3d(float3(dot(q.xy, wind) - drift_m, dot(q.xy, across), q.z) / SAND_SHEET_SIZE_M));
-    color = mix(color, fog, saturate(fog_frac * (1.0 + u.sand.y * (2.0 * gust - 1.0)) + u.sand.w * sheet * saturate(travelled_m / SAND_SHEET_REACH_M)));
+    color = mix(color, fog, saturate(fog_frac * (1.0 + u.sand.y * far_wind * (2.0 * gust - 1.0)) + u.sand.w * far_wind * sheet * saturate(travelled_m / SAND_SHEET_REACH_M)));
     float streak = 0.0, layer_m = SAND_LAYER_FIRST_M;
     for (int i = 0; i < SAND_LAYER_COUNT && layer_m < travelled_m; i++, layer_m *= SAND_LAYER_RATIO) {
         float3 p = eye + d * layer_m;
         float n = sample_noise_3d(float3(dot(p.xy, wind) - drift_m, dot(p.xy, across), p.z) / SAND_STREAK_SIZE_M + float(i) * SAND_LAYER_OFFSET);
         streak += smoothstep(SAND_STREAK_EDGES.x, SAND_STREAK_EDGES.y, n) / float(i + 1);
     }
-    return mix(color, u.fog_color.rgb * SAND_STREAK_BRIGHTNESS, saturate(u.sand.z * streak));
+    return mix(color, u.fog_color.rgb * SAND_STREAK_BRIGHTNESS, saturate(u.sand.z * near_wind * streak));
 }
 
 /**

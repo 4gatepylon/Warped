@@ -26,7 +26,7 @@ use crate::geometry::{
     minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
 use crate::map::{
-    Fog, Map, PlayerSettings, Wind, get_console_team, to_direction, to_frame, to_point,
+    Fog, Gust, Map, PlayerSettings, Wind, get_console_team, to_direction, to_frame, to_point,
 };
 use crate::mesh::MeshModel;
 use crate::net::MAX_CONSOLE_COUNT;
@@ -350,6 +350,88 @@ pub struct WindField {
     pub normal: DVec4,
     pub k: f64,
     pub segment_s: f64,
+    pub gust: Option<GustField>,
+    pub time_s: f64,
+}
+
+/// `GUST_WAVE_SIZES` gives each gust wave's wavelengths along and across the wind, in the map's
+/// `size_m`; `GUST_WAVE_PERIODS_S` how often each changes shape as it drifts.
+const GUST_WAVE_SIZES: [[f64; 2]; GUST_WAVE_COUNT] = [[1.0, 2.2], [1.6, -1.2], [0.6, 0.9]];
+const GUST_WAVE_PERIODS_S: [f64; GUST_WAVE_COUNT] = [7.0, 11.0, 5.0];
+pub const GUST_WAVE_COUNT: usize = 3;
+
+/// `GustField` is a map's `Gust` in curvature units: each wave's wavevector in the hyperboloid's
+/// x, y, z (per curvature radius), its seeded phase and how fast its phase turns.
+#[derive(Clone, Copy, Debug)]
+pub struct GustField {
+    pub strength_frac: f64,
+    pub waves: [DVec3; GUST_WAVE_COUNT],
+    phases_rad: [f64; GUST_WAVE_COUNT],
+    rad_per_s: [f64; GUST_WAVE_COUNT],
+}
+
+impl GustField {
+    /// `FromMap` builds the gust waves of `gust` for a wind blowing along `direction`, curvature
+    /// radius `r` meters.
+    ///
+    /// Example: `let gust = GustField::FromMap(&map_gust, DVec3::X, 50.0);`
+    #[allow(non_snake_case)]
+    pub fn FromMap(gust: &Gust, direction: DVec3, r: f64) -> GustField {
+        let across: DVec3 = direction.cross(DVec3::Y).normalize();
+        let mut seed: u64 = gust.seed;
+        let mut waves: [DVec3; GUST_WAVE_COUNT] = [DVec3::ZERO; GUST_WAVE_COUNT];
+        let mut phases_rad: [f64; GUST_WAVE_COUNT] = [0.0; GUST_WAVE_COUNT];
+        let mut rad_per_s: [f64; GUST_WAVE_COUNT] = [0.0; GUST_WAVE_COUNT];
+        for i in 0..GUST_WAVE_COUNT {
+            let [along, side] = GUST_WAVE_SIZES[i];
+            let k_per_m: DVec3 = std::f64::consts::TAU
+                * (direction / (along * gust.size_m) + across / (side * gust.size_m));
+            waves[i] = k_per_m * r;
+            phases_rad[i] = std::f64::consts::TAU * (next_splitmix64(&mut seed) >> 11) as f64
+                / (1u64 << 53) as f64;
+            rad_per_s[i] = std::f64::consts::TAU / GUST_WAVE_PERIODS_S[i]
+                - k_per_m.dot(direction) * gust.speed_m_per_s;
+        }
+        GustField {
+            strength_frac: gust.strength_frac,
+            waves,
+            phases_rad,
+            rad_per_s,
+        }
+    }
+
+    /// `get_phases_rad` is each wave's phase at `time_s` (seconds on the shared UTC clock), in
+    /// [0, 2π): the shader's `u.gust_waves[i].w`.
+    ///
+    /// Example: `let phases = gust.get_phases_rad(world.sky_time_s);`
+    pub fn get_phases_rad(&self, time_s: f64) -> [f64; GUST_WAVE_COUNT] {
+        std::array::from_fn(|i| {
+            (self.phases_rad[i] + self.rad_per_s[i] * time_s).rem_euclid(std::f64::consts::TAU)
+        })
+    }
+
+    /// `get_strength` is how many times the wind's base strength blows at x at `time_s`: 1 plus
+    /// `strength_frac` times the mean of the waves, as the shader's `gust_strength`.
+    ///
+    /// Example: `let strength = gust.get_strength(x, world.sky_time_s);`
+    pub fn get_strength(&self, x: DVec4, time_s: f64) -> f64 {
+        let phases_rad: [f64; GUST_WAVE_COUNT] = self.get_phases_rad(time_s);
+        let wave_sum: f64 = (0..GUST_WAVE_COUNT)
+            .map(|i| (self.waves[i].dot(x.truncate()) + phases_rad[i]).sin())
+            .sum();
+        1.0 + self.strength_frac * wave_sum / GUST_WAVE_COUNT as f64
+    }
+}
+
+/// `next_splitmix64` steps `state` and returns the next number of the SplitMix64 sequence.
+///
+/// Example: `let n = next_splitmix64(&mut seed);`
+fn next_splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z: u64 = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 impl WindField {
@@ -363,16 +445,23 @@ impl WindField {
             normal: DVec4::new(x, y, z, 0.0),
             k: wind.log_index_gradient_per_m * r,
             segment_s: wind.segment_m / r,
+            gust: wind
+                .gust
+                .map(|gust| GustField::FromMap(&gust, DVec3::new(x, y, z), r)),
+            time_s: 0.0,
         }
     }
 
-    /// `get_gradient` is ∇ ln n at x: k times the unit gradient of the signed distance to the
-    /// plane, (N + ⟨x, N⟩ x) / √(1 + ⟨x, N⟩²).
+    /// `get_gradient` is ∇ ln n at x: k, scaled by the gust strength at x at `time_s`, times the
+    /// unit gradient of the signed distance to the plane, (N + ⟨x, N⟩ x) / √(1 + ⟨x, N⟩²).
     ///
     /// Example: `let g = wind.get_gradient(x);`
     pub fn get_gradient(&self, x: DVec4) -> DVec4 {
         let f: f64 = minkowski_dot(x, self.normal);
-        self.k * (self.normal + f * x) / (1.0 + f * f).sqrt()
+        let strength: f64 = self
+            .gust
+            .map_or(1.0, |gust| gust.get_strength(x, self.time_s));
+        strength * self.k * (self.normal + f * x) / (1.0 + f * f).sqrt()
     }
 
     /// `kick` turns direction v at x by the gradient's part across it over `ds`, as the shader's
@@ -653,6 +742,17 @@ fn make_structure(
 }
 
 impl VoxelWorld {
+    /// `set_sky_time_s` sets the UTC clock the sky, the blowing sand and the wind's gusts follow,
+    /// so every window computes the same gusts at the same moment.
+    ///
+    /// Example: `world.set_sky_time_s(spaceships::get_utc_s());`
+    pub fn set_sky_time_s(&mut self, time_s: f64) {
+        self.sky_time_s = time_s;
+        if let Some(wind) = &mut self.wind {
+            wind.time_s = time_s;
+        }
+    }
+
     /// `get_shapes` gives structure k's shapes.
     ///
     /// Example: `let shapes = world.get_shapes(0);`
@@ -2448,6 +2548,7 @@ mod tests {
     //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
     //! | Marker | inside a thrown mouth's reach (in its list, hit by a laser) | `a_marker_is_listed_and_hit` |
     //! | Thrown pair on Dust | shot into across terrain and wind (the laser goes through) | `a_dust_throw_carries_the_laser_through_the_wind` |
+    //! | Dust's gusts | two places, two times (strength differs, direction stays downwind), worlds loaded apart at one UTC time, also years from 1970 (same gradient, same laser spot) | `gusts_change_strength_not_direction`, `two_worlds_agree_on_the_gusts` |
 
     use super::*;
     use crate::geometry::orthonormalize_frame;
@@ -3626,6 +3727,8 @@ mod tests {
             normal: DVec4::new(1.0, 0.0, 0.0, 0.0),
             k: K,
             segment_s: 0.24,
+            gust: None,
+            time_s: 0.0,
         };
         let origin: DVec4 = DVec4::new(0.0, 0.0, 0.0, 1.0);
         let gradient: DVec4 = wind.get_gradient(origin);
@@ -3681,5 +3784,65 @@ mod tests {
             .get_camera_frame(&world);
         let shot: Shot = world.trace_laser(camera);
         assert_eq!(shot.through, vec!["the purple wormhole".to_string()]);
+    }
+
+    /// `gusts_change_strength_not_direction` checks that Dust's gusts make the wind stronger and
+    /// weaker across places and times, while ∇ ln n keeps the calm wind's direction.
+    #[test]
+    fn gusts_change_strength_not_direction() {
+        const TIMES_S: [f64; 2] = [0.0, 3.0];
+        const PLACES_M: [[f64; 2]; 2] = [[0.0, 0.0], [30.0, -20.0]];
+        let map: Map = Map::Load(&get_map_folder("dust")).expect("the Dust map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let mut wind: WindField = world.wind.expect("Dust's wind");
+        let gust: GustField = wind.gust.expect("Dust's gusts");
+        let calm: WindField = WindField { gust: None, ..wind };
+        let mut strengths: Vec<f64> = Vec::new();
+        for time_s in TIMES_S {
+            wind.time_s = time_s;
+            for [u_m, v_m] in PLACES_M {
+                let x: DVec4 = VoxelPlayer::AtView(&world, [u_m, v_m], [u_m + 1.0, v_m], None, 0.0)
+                    .get_camera_frame(&world)
+                    .col(3);
+                let (g, g_calm) = (wind.get_gradient(x), calm.get_gradient(x));
+                let strength: f64 = gust.get_strength(x, time_s);
+                assert!((g - strength * g_calm).length() < 1e-12 * g_calm.length());
+                strengths.push(strength);
+            }
+        }
+        assert!(
+            strengths
+                .iter()
+                .all(|&s| (s - 1.0).abs() <= gust.strength_frac)
+        );
+        assert!(
+            strengths
+                .windows(2)
+                .all(|pair| (pair[0] - pair[1]).abs() > 1e-3)
+        );
+    }
+
+    /// `two_worlds_agree_on_the_gusts` checks that two windows (or a window and a server) loading
+    /// Dust apart compute the same wind and the same laser spot at one UTC time, today and far on.
+    #[test]
+    fn two_worlds_agree_on_the_gusts() {
+        const UTC_TIMES_S: [f64; 2] = [1.79e9, 4.1e9];
+        let map: Map = Map::Load(&get_map_folder("dust")).expect("the Dust map");
+        let mut worlds: Vec<VoxelWorld> = (0..2)
+            .map(|_| VoxelWorld::FromMap(&map).expect("a voxel world"))
+            .collect();
+        for time_s in UTC_TIMES_S {
+            for world in &mut worlds {
+                world.set_sky_time_s(time_s);
+            }
+            let camera: DMat4 =
+                VoxelPlayer::AtView(&worlds[0], [-60.0, 0.0], [60.0, 0.0], None, -0.05)
+                    .get_camera_frame(&worlds[0]);
+            let x: DVec4 = camera.col(3);
+            let [a, b] = [&worlds[0], &worlds[1]].map(|w| w.wind.expect("wind").get_gradient(x));
+            assert_eq!(a, b);
+            let [spot_a, spot_b] = [&worlds[0], &worlds[1]].map(|w| w.trace_laser(camera).spot);
+            assert_eq!(spot_a, spot_b);
+        }
     }
 }

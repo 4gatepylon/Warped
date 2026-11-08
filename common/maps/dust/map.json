@@ -3650,7 +3650,13 @@
     0
    ],
    "log_index_gradient_per_m": 0.00144,
-   "segment_m": 48
+   "segment_m": 48,
+   "gust": {
+    "seed": 121,
+    "strength_frac": 0.4,
+    "size_m": 45,
+    "speed_m_per_s": 14
+   }
   }
  },
  "spawns": [

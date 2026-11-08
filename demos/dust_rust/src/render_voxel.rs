@@ -149,6 +149,8 @@ pub struct VoxelUniforms {
     pub sand: [f32; 4],
     pub overhead: [f32; 4],
     pub laser_color: [f32; 4],
+    pub gust_waves: [[f32; 4]; crate::voxel_world::GUST_WAVE_COUNT],
+    pub gust: [f32; 4],
 }
 
 const _: () = assert!(
@@ -673,6 +675,28 @@ impl VoxelFrame {
                 ]
             }),
             overhead: [0.0; 4],
+            gust_waves: world
+                .wind
+                .and_then(|wind| wind.gust.map(|gust| (gust, wind.time_s)))
+                .map_or(
+                    [[0.0; 4]; crate::voxel_world::GUST_WAVE_COUNT],
+                    |(gust, time_s)| {
+                        let phases_rad = gust.get_phases_rad(time_s);
+                        std::array::from_fn(|i| {
+                            let k = gust.waves[i];
+                            [k.x as f32, k.y as f32, k.z as f32, phases_rad[i] as f32]
+                        })
+                    },
+                ),
+            gust: [
+                world
+                    .wind
+                    .and_then(|wind| wind.gust)
+                    .map_or(0.0, |gust| gust.strength_frac as f32),
+                0.0,
+                0.0,
+                0.0,
+            ],
             laser_color: world
                 .laser_color
                 .map_or([0.0; 4], |[r, g, b]| [r, g, b, 1.0]),

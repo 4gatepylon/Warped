@@ -342,7 +342,19 @@
           "properties": {
             "direction": {"$ref": "#/$defs/vector3"},
             "log_index_gradient_per_m": {"type": "number"},
-            "segment_m": {"type": "number", "exclusiveMinimum": 0}
+            "segment_m": {"type": "number", "exclusiveMinimum": 0},
+            "gust": {
+              "type": "object",
+              "description": "Gusts: the wind's strength (not its direction) times 1 plus up to strength_frac, from three waves size_m across seeded by seed, drifting downwind at speed_m_per_s, on the shared UTC clock.",
+              "required": ["seed", "strength_frac", "size_m", "speed_m_per_s"],
+              "additionalProperties": false,
+              "properties": {
+                "seed": {"type": "integer", "minimum": 0},
+                "strength_frac": {"type": "number", "minimum": 0, "maximum": 1},
+                "size_m": {"type": "number", "exclusiveMinimum": 0},
+                "speed_m_per_s": {"type": "number"}
+              }
+            }
           }
         }
       }
