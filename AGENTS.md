@@ -236,6 +236,11 @@ Coordinate agents working in parallel (subagents, other sessions, Codex, Devin) 
 Find, get approved, add and credit assets from outside the repository (models, textures, sounds, fonts) with the
 `adding-assets` skill (`.agents/skills/adding-assets/`).
 
+## Compatible changes
+
+Change what outlives one build (saved player settings, server settings, what the network sends, map files) with the
+`compatible-changes` skill (`.agents/skills/compatible-changes/`).
+
 ## Machine-specific workarounds
 
 This repo is used from several machines, so don't write a workaround for one machine (e.g. a
