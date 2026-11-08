@@ -10,6 +10,7 @@
 use crate::game::bots::BODY_CENTRE_HEIGHT_M;
 use crate::game::warps::{BeamPath, Warps};
 use std::collections::VecDeque;
+use std::ops::Range;
 
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
@@ -55,6 +56,19 @@ pub struct Controls {
     pub weapon: WeaponInput,
 }
 
+/// `RobotHold` holds robot 0 for pictures and benchmarks: it stands at `feet_m` facing `yaw_rad`,
+/// doesn't think or shoot, and walks straight ahead at `speed_m_s` (through any mouth it enters),
+/// starting again from `feet_m` every `ROBOT_HOLD_RESTART_S`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RobotHold {
+    pub feet_m: Vec3,
+    pub yaw_rad: f32,
+    pub speed_m_s: f32,
+}
+
+/// `ROBOT_HOLD_RESTART_S` is how long a held robot walks before it starts again from its pose.
+const ROBOT_HOLD_RESTART_S: f32 = 10.0;
+
 /// `SimParticle` is a simulated particle.
 #[derive(Clone, Copy, Debug)]
 struct SimParticle {
@@ -90,7 +104,8 @@ struct Flash {
     life_s: f32,
 }
 
-/// `FrameData` owns everything a frame description points at.
+/// `FrameData` owns everything a frame description points at; `lens_draws` are the robots among
+/// `world_draws`, and `lens_particles` the robots' eye glows, lasers and their sparks and smoke.
 pub struct FrameData {
     pub camera: Camera,
     pub world_draws: Vec<DrawItem>,
@@ -102,6 +117,8 @@ pub struct FrameData {
     pub viewmodel_particles: Vec<Particle>,
     pub hud_rects: Vec<HudRect>,
     pub damage_flash_frac: f32,
+    pub lens_draws: Range<usize>,
+    pub lens_particles: Vec<Particle>,
 }
 
 /// `OFF_PYLON_TINT` darkens a pylon whose console is off.
@@ -160,6 +177,8 @@ pub struct Session {
     pub winner: Option<u32>,
     pub laps_done: u32,
     pub is_trigger_down: bool,
+    robot_hold: Option<RobotHold>,
+    robot_hold_s: f32,
 }
 
 /// `RemoteBot` is another player of a network game, drawn as a robot in their team's colour.
@@ -244,6 +263,23 @@ impl Session {
             winner: None,
             laps_done: 0,
             is_trigger_down: false,
+            robot_hold: None,
+            robot_hold_s: 0.0,
+        }
+    }
+
+    /// `set_robot_hold` holds robot 0 from the next update on (`None` lets it think again); a new
+    /// hold starts at its pose.
+    ///
+    /// Example: `session.set_robot_hold(Some(hold));`
+    pub fn set_robot_hold(&mut self, hold: Option<RobotHold>) {
+        assert!(
+            hold.is_none() || !self.bots.is_empty(),
+            "a robot hold needs at least one robot"
+        );
+        if hold != self.robot_hold {
+            self.robot_hold = hold;
+            self.robot_hold_s = ROBOT_HOLD_RESTART_S;
         }
     }
 
@@ -662,11 +698,22 @@ impl Session {
             is_player_alive: self.player.is_alive(),
             is_player_crouched: self.player.height_m < 1.5,
         };
+        let held_count: usize = usize::from(self.robot_hold.is_some());
         let shots: Vec<BotShot> = self
             .bots
             .iter_mut()
+            .skip(held_count)
             .filter_map(|bot| bot.update(&context, dt_s))
             .collect();
+        if let Some(hold) = self.robot_hold {
+            self.robot_hold_s += dt_s;
+            if self.robot_hold_s > ROBOT_HOLD_RESTART_S {
+                self.robot_hold_s = 0.0;
+                self.bots[0] = Bot::new(hold.feet_m, 0);
+                self.bots[0].yaw_rad = hold.yaw_rad;
+            }
+            self.bots[0].walk_ahead(hold.speed_m_s, dt_s);
+        }
         for shot in shots {
             self.apply_bot_shot(shot, scene, audio);
         }
@@ -949,6 +996,8 @@ impl Session {
                 color_rgb: flash.color_rgb * frac * frac,
             });
         }
+        let lens_draws: Range<usize> = scene.static_draws.len()..world_draws.len();
+        let robot_particle_count: usize = world_particles.len();
         let beacon_height_m: f32 = scene.beacon.bounds_max_m.y - scene.beacon.bounds_min_m.y;
         for pylon in &self.arena.pylons {
             let is_off: bool = self
@@ -986,6 +1035,7 @@ impl Session {
                 });
             }
         }
+        let beacon_particle_end: usize = world_particles.len();
         for beam in &self.beams {
             let frac: f32 = 1.0 - beam.age_s / beam.life_s;
             world_particles.push(Particle {
@@ -1093,7 +1143,14 @@ impl Session {
             height_px,
         );
         hud_rects.extend(self.objective_hud(width_px, height_px));
+        let lens_particles: Vec<Particle> = world_particles[..robot_particle_count]
+            .iter()
+            .chain(&world_particles[beacon_particle_end..])
+            .copied()
+            .collect();
         FrameData {
+            lens_draws,
+            lens_particles,
             camera,
             world_draws,
             viewmodel_draws,

@@ -69,7 +69,10 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
   treehouse deck. Each mouth is the hyperbolic demo's foil lens in flat space (`src/game/warps.rs`): it bends light
   and lasers within its reach, and whatever enters its throat leaves the partner's through the partner's mirror in z.
   The tonemap pass traces each pixel's ray through the lens (`get_lens_color` in `src/shaders/post.metal`) and shows
-  the far side from a cube atlas of every mouth, drawn once at start-up (about 0.8 s).
+  the far side from a cube atlas of every mouth, drawn once at start-up (about 0.8 s). Robots, players and lasers
+  near the mouths in view are drawn live each frame from the mouths' centres (`encode_lens_live` in
+  `src/render/metal/mod.rs`), so they show through the wormholes too, hidden by the forest where it stands in front
+  (DECISIONS.md D15).
 - **Objective:** two pylons per team (the hyperbolic demo's `scifi_beacon`), one on the ground near the base, one on
   the treehouse deck, each sending up a beam in its team's colour while its console is on. Hold `E` at an enemy
   console for 3 s to turn it off; a team wins once every console of the other team is off.
@@ -94,8 +97,13 @@ binary. The wire protocol is the hyperbolic demo's, with its wormhole fields alw
 
 ## Tools
 
-- `--bench-views <s>`: holds five fixed views (`spawn`, `bridge`, `lookout`, `treehouse`, `firing`) for `<s>` seconds
-  each and prints their frame times; `make bench-views` writes them to `.artifacts/bench_views/<run_id>/`.
+- `--bench-views <s>`: holds seven fixed views (`spawn`, `bridge`, `lookout`, `treehouse`, `firing`, and the
+  wormhole views `gate` and `lift`) for `<s>` seconds each and prints their frame times; `make bench-views` writes
+  them to `.artifacts/bench_views/<run_id>/`. `gate` looks into the centre gate and `lift` into red's lift from the
+  ground, and each holds robot 0 just beyond the partner mouth, facing back through it.
+- `--robot-pose x,y,z,yaw [--robot-walk-m-per-s <speed>]`: holds robot 0 there (it doesn't think or shoot); with a
+  speed it walks straight ahead, through any mouth, and starts again every 10 s. `--hold-trigger` keeps firing. For
+  pictures and videos of robots and lasers through the wormholes.
 - `--play-route`: the autopilot walks the vertical route from red's spawn; `make bench-dark-forest` runs it full
   screen into `.artifacts/bench_dark_forest/<run_id>/`.
 - `--photo <png> [--photo-width-px <px>] [--camera-pose x,y,z,yaw,pitch] [--fov-deg <deg>] [--hide-canopy]`: saves
@@ -162,10 +170,10 @@ revolver Sketchfab Standard, which limit sharing the game.
 
 ## Limits
 
-- Robots and players on the far side of a wormhole don't show through it: the lens shows a static picture of each partner's surroundings drawn at start-up. A parked, unfinished overlay is on branch `devin/dark-forest-lens-robots` (see DECISIONS.md).
+- Through a wormhole, robots, players and lasers show live, but the scenery and lights around the partner are a
+  picture drawn at start-up, and pylons and their beams don't show (DECISIONS.md D15). At most 4 mouths' surroundings
+  are live at once, and a robot more than 50 m from a mouth doesn't show through it.
 - The online bot match (`--bot --bot-objective consoles`) was not rerun to a win after the server's console count was fixed; rerun it first.
-- Through a wormhole you see the scenery and lights around its partner, drawn at start-up, but not robots, players or
-  lasers there.
 - Lasers of other players online are traced locally; their hits come from the shooter's own trace.
 - Online, the server trusts the client about which console it holds and about its hits.
 - The protocol still carries the hyperbolic demo's wormhole fields, always empty.
