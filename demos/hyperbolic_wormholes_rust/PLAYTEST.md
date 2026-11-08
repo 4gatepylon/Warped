@@ -64,7 +64,7 @@ sees which team won, and a new game starts only when whoever started the server 
 (the `make host-game` terminal, for that command): every console comes back on and everyone returns to their spawn.
 
 Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
-`Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), `Ctrl` (held) crouches
+`Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), right-click turns your flashlight on or off (a cone of light that only you see for now), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click; one hit eliminates), and gun 2, the

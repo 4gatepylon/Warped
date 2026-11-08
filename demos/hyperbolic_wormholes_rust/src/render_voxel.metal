@@ -165,6 +165,7 @@ constant float TONEMAP_KNEE = 0.6;
 constant float3 BLUE_COLOR = float3(0.30, 0.62, 1.0);
 constant float3 RED_COLOR = float3(1.0, 0.16, 0.08);
 constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
+constant float3 FLASHLIGHT_COLOR = float3(1.0, 0.95, 0.85);
 constant int TILE_CELLS_PER_HALF = 18;
 constant float KIND_BLACK_HOLE = 0.0;
 constant float HALF_KIND = 0.5;
@@ -209,6 +210,9 @@ struct VoxelUniforms {
     float4 spot;
     float4 spot_color;
     float4 regions;
+    float4 flashlight_position;
+    float4 flashlight_direction;
+    float4 flashlight;
 };
 
 /**
@@ -531,6 +535,26 @@ static float3 gather_lights(thread const Scene &scene, float4 x, float4 n) {
 }
 
 /** @brief `light_surface` lights a surface point: the sun (lunar-Lambert, shadowed), earthshine, lamps and the laser spot. @par Example @code float3 c = light_surface(scene, albedo, x, n, v); @endcode */
+/**
+ * @brief `light_flashlight` gives the light of the player's flashlight (`flashlight_position`, aimed along
+ * `flashlight_direction`; `flashlight` holds the cosines of its cone's inner and outer edges, the distance at which it
+ * falls to half, and its brightness, 0 when off) on a surface at x with normal n: full inside the cone, softening to
+ * nothing at its outer edge, falling with distance, and as much as the surface faces it.
+ * @par Example
+ * @code
+ * float3 lit = light_flashlight(scene, x, n);
+ * @endcode
+ */
+static float3 light_flashlight(thread const Scene &scene, float4 x, float4 n) {
+    float4 p = scene.u.flashlight_position, f = scene.u.flashlight;
+    if (f.w <= 0.0) return float3(0.0);
+    float4 toward = x + mdot(x, p) * p, back = p + mdot(p, x) * x;
+    float cone = smoothstep(f.y, f.x, mdot(toward, scene.u.flashlight_direction) * rsqrt(max(mdot(toward, toward), TINY)));
+    float d_m = acosh(max(-mdot(x, p), 1.0)) * scene.u.curvature_radius_m / f.z;
+    float facing = max(mdot(n, back) * rsqrt(max(mdot(back, back), TINY)), 0.0);
+    return SUN_INTENSITY * FLASHLIGHT_COLOR * f.w * cone * facing / (1.0 + d_m * d_m);
+}
+
 static float3 light_surface(thread const Scene &scene, float3 albedo, float4 x, float4 n, float4 v) {
     float4 l = transport_from_centre(scene.u.sun.xyz, x);
     float mu0 = mdot(n, l), mu = max(-mdot(n, v), 0.0), sun = 0.0;
@@ -539,7 +563,8 @@ static float3 light_surface(thread const Scene &scene, float3 albedo, float4 x, 
             * trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / scene.u.curvature_radius_m), l);
     }
     float earth = max(mdot(n, transport_from_centre(scene.u.planet.xyz, x)), 0.0);
-    float3 light = float3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR + SUN_INTENSITY * sun * SUN_COLOR + gather_lights(scene, x, n);
+    float3 light = float3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR + SUN_INTENSITY * sun * SUN_COLOR + gather_lights(scene, x, n)
+        + light_flashlight(scene, x, n);
     float3 color = albedo * light;
     if (scene.u.spot_color.a > 0.0) {
         float d_m = measure_gap(scene.u.spot, x) * scene.u.curvature_radius_m;

@@ -1665,6 +1665,7 @@ struct Session {
     settings: GameSettings,
     gun: Gun,
     is_trigger_held: bool,
+    is_flashlight_on: bool,
     rifle_next_shot_s: f64,
     rifle_heat_frac: f64,
     is_overheated: bool,
@@ -1704,8 +1705,8 @@ struct VoxelState {
 
 /// `PackedFrame` is one frame packed for the renderer: the house's rows or a voxel map's frame.
 enum PackedFrame {
-    House(SceneData),
-    Voxel(VoxelFrame),
+    House(Box<SceneData>),
+    Voxel(Box<VoxelFrame>),
 }
 
 impl PackedFrame {
@@ -1916,6 +1917,7 @@ impl Session {
             is_walking_upright: false,
             gun: Gun::Laser,
             is_trigger_held: false,
+            is_flashlight_on: false,
             rifle_next_shot_s: 0.0,
             rifle_heat_frac: 0.0,
             is_overheated: false,
@@ -1949,8 +1951,9 @@ impl Session {
 
     /// `handle_event` reacts to one window event and returns false when the player quits: Esc
     /// releases the mouse (or quits if it is free), a click captures it (and once captured, a left
-    /// click fires a shot), the mouse looks, `1`, `2` and the wheel switch guns, and - and = change
-    /// the render scale. Players can't respawn by choice.
+    /// click fires a shot), a right click turns the flashlight on or off, the mouse looks, `1`, `2`
+    /// and the wheel switch guns, and - and = change the render scale. Players can't respawn by
+    /// choice.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
     fn handle_event(
@@ -2009,6 +2012,10 @@ impl Session {
                 mouse_btn: MouseButton::Left,
                 ..
             } => self.is_trigger_held = false,
+            Event::MouseButtonDown {
+                mouse_btn: MouseButton::Right,
+                ..
+            } => self.is_flashlight_on = !self.is_flashlight_on,
             Event::MouseWheel { y, .. } if y != 0.0 => self.switch_gun(match self.gun {
                 Gun::Laser => Gun::Rifle,
                 Gun::Rifle => Gun::Laser,
@@ -2447,6 +2454,8 @@ impl Session {
         let time_s: f64 = self.start.elapsed().as_secs_f64();
         if let Some(voxel) = &mut self.voxel {
             voxel.world.light_consoles(off_mask, disabling_mask, time_s);
+            let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
+            voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }
         if let Some(voxel) = &self.voxel {
             let camera: DMat4 = if self.route.is_empty() {
@@ -2522,7 +2531,7 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
-            return PackedFrame::Voxel(view.frame);
+            return PackedFrame::Voxel(Box::new(view.frame));
         }
         if let Some(multiplayer) = &mut self.multiplayer {
             let view: multiplayer::SharedView = multiplayer::pack_shared_view(
@@ -2545,7 +2554,7 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
-            return PackedFrame::House(view.data);
+            return PackedFrame::House(Box::new(view.data));
         }
         let (data, report) = pack_view(
             &self.world,
@@ -2555,7 +2564,7 @@ impl Session {
             self.start.elapsed().as_secs_f64(),
         );
         self.laser = report.as_ref().map(describe_laser);
-        PackedFrame::House(data)
+        PackedFrame::House(Box::new(data))
     }
 
     /// `record_frame` adds one frame's render time to the HUD's averages, which refresh every
@@ -2824,7 +2833,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Shift run, Space jump, click shoot, 1/2 or wheel switch gun, Ctrl crouch (shoot standing still or crouched), hold E on an enemy console to turn it off, -/= scale, Esc release".to_string()
+            "WASD move, Shift run, Space jump, click shoot, 1/2 or wheel switch gun, right-click flashlight, Ctrl crouch (shoot standing still or crouched), hold E on an enemy console to turn it off, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });

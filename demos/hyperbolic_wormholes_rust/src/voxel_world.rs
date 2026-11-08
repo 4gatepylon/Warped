@@ -184,6 +184,7 @@ pub struct VoxelWorld {
     pub spawns: Vec<DMat4>,
     pub static_structure_count: usize,
     pub consoles: Vec<Console>,
+    pub flashlight_eye: Option<DMat4>,
     pub clearance: Arc<ClearanceGrids>,
 }
 
@@ -498,6 +499,7 @@ impl VoxelWorld {
             r,
             static_structure_count: structures.len(),
             consoles: find_consoles(map),
+            flashlight_eye: None,
             structures,
             voxels: map.voxels.clone(),
             warps,
