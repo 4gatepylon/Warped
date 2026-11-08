@@ -202,14 +202,14 @@ def _watch_match(
     with (run_folder / "levels.log").open("w") as levels_log:
         _log(levels_log, _ON_FOOT_NOTE)
         while True:
-            if started is not None and match_folder is not None and len(rounds) < len(_PLAN):
+            if started is not None and match_folder is not None:
                 level_log_path: Path = match_folder / f"round_{len(rounds) + 1}_server.log"
                 offset_bytes = _note_pylons_off(level_log_path, offset_bytes, started[2], pylon_off_s)
             for team, bot in bots.items():
                 if bot.poll() is not None and (bot.returncode != 0 or len(rounds) < len(_PLAN)):
                     raise _MatchCheckFailed(f"{team}'s bot stopped ({bot.returncode}) mid-match; see {team}.log")
             if time.monotonic() > deadline_s:
-                level: str = started[0] if started else "before it started"
+                level: str = started[0] if started else "not started"
                 raise _MatchCheckFailed(f"stall in round {len(rounds) + 1} ({level}); see server.log")
             try:
                 line: str | None = lines.get(timeout=_POLL_S)
@@ -236,6 +236,7 @@ def _watch_match(
                     f"round {won_match[1]} won by {won_match[2]}: {started[0]} in {duration_s:.1f} s; "
                     f"the other team's pylons off: {len(pylon_off_s)}, at {times} s",
                 )
+                started = None
     if server.wait() != 0 or match_folder is None:
         raise _MatchCheckFailed(f"the match server stopped ({server.returncode}); see server.log")
     return match_folder, rounds
