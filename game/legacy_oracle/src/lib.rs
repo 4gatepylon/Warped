@@ -15,11 +15,16 @@
 //!   - The modules keep the demo's `crate::` paths, so each module a listed one uses must be
 //!     listed too; a new `crate::` use in the demo needs a line here.
 //!   - `CARGO_MANIFEST_DIR` is this crate's folder, two levels down like the demo's, so the
-//!     demo's `../../common/maps` still finds the maps; its fps_demo assets aren't found.
+//!     demo's `../../common/maps` still finds the maps and their models; its fps_demo assets
+//!     aren't found.
+//!   - `build.rs` gives `fps_demo_assets.rs` an empty table of built-in files, so the oracle
+//!     reads every model from disk.
 //!   - The demo's private items that only its `main.rs` used are dead code here, hence the allows.
 
 #![allow(dead_code, unused, clippy::all)]
 
+#[path = "../../../demos/hyperbolic_wormholes_rust/src/app_bundle.rs"]
+pub mod app_bundle;
 #[path = "../../../demos/hyperbolic_wormholes_rust/src/avatar_model.rs"]
 pub mod avatar_model;
 #[path = "../../../demos/hyperbolic_wormholes_rust/src/black_hole_growth.rs"]

@@ -19,8 +19,11 @@ test = false
 doctest = false
 
 [dependencies]
+clap.workspace = true
+getrandom.workspace = true
 glam.workspace = true
 gltf.workspace = true
+hmac.workspace = true
 image.workspace = true
 objc2.workspace = true
 objc2-foundation.workspace = true
@@ -30,3 +33,4 @@ sdl3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+sha2.workspace = true
