@@ -109,9 +109,9 @@ in their team's colours. The menu's MAP page rings the same 60 m around you and 
 or hide the minimap, change `minimap` in your `player_settings.yaml` (`corner: top_left`, `top_right`,
 `bottom_left` or `bottom_right`).
 
-Look up on Lunar Surface: spaceships fly slowly across the sky, purely for looks. A container freighter, a ring ship
-with a turning ring, and three fighters in a V each cross from horizon to horizon in 2 to 5 minutes, with engine
-glow, red and green running lights and a flashing strobe. They follow the UTC clock, so everyone whose clock is right
+Look up on Lunar Surface: spaceships fly slowly across the sky, purely for looks. A ring ship with a turning ring and
+three fighters in a V each cross from horizon to horizon in 2 to 5 minutes, with engine glow, red and green running
+lights and a flashing strobe. They follow the UTC clock, so everyone whose clock is right
 sees the same ships at the same moment. They are far away in the sky: lasers and players never touch them.
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add

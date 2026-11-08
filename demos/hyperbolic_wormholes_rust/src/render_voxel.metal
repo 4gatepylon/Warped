@@ -231,13 +231,11 @@ constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
 constant int REFINED_PIXELS_PER_CELL = 3;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
 constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
-constant int HULL_FREIGHTER = 0;
-constant int HULL_FIGHTER = 1;
-constant int HULL_RING_SHIP = 2;
-constant int HULL_COUNT = 3;
+constant int HULL_FIGHTER = 0;
+constant int HULL_RING_SHIP = 1;
+constant int HULL_COUNT = 2;
 constant int LIGHT_NAV = 0;
 constant int LIGHT_STROBE = 1;
-constant int LIGHT_BEACON = 2;
 constant float SHIP_BOUND_HALF_LENGTHS = 1.5;
 constant float SHIP_BOUND_PIXELS = 4.0;
 constant float SHIP_ROUNDING_HALF_LENGTHS = 0.02;
@@ -256,7 +254,6 @@ constant float SHIP_PLUME_HALF_LENGTHS = 0.3;
 constant float3 PORT_COLOR = float3(1.6, 0.18, 0.12);
 constant float3 STARBOARD_COLOR = float3(0.25, 1.6, 0.5);
 constant float3 STROBE_COLOR = float3(3.0);
-constant float3 BEACON_COLOR = float3(1.8, 0.3, 0.12);
 constant float3 WINDOW_COLOR = float3(1.0, 0.8, 0.5);
 constant float RING_RADIUS_HALF_LENGTHS = 0.52;
 constant float RING_HALF_WIDTH_HALF_LENGTHS = 0.055;
@@ -268,55 +265,42 @@ constant float RING_LIGHT_HALF_LENGTHS = 0.02;
 constant float3 RING_LIGHT_COLOR = float3(0.8, 1.1, 1.3);
 
 /** @brief `HULL_BOXES` are the spaceships' boxes (centre, half size; in half lengths, x to the nose, y to starboard), mirrored across the keel. */
-constant float4 HULL_BOXES[] = {
-    float4(-0.05, 0.0, 0.78, 0.075), float4(0.45, 0.19, 0.145, 0.105), float4(0.13, 0.19, 0.145, 0.105), float4(-0.19, 0.19, 0.145, 0.105),
-    float4(-0.51, 0.19, 0.145, 0.105), float4(0.8, 0.0, 0.11, 0.14), float4(-0.85, 0.0, 0.09, 0.25),
-    float4(0.82, 0.0, 0.1, 0.09), float4(-0.85, 0.0, 0.08, 0.14),
-};
+constant float4 HULL_BOXES[] = {float4(0.82, 0.0, 0.1, 0.09), float4(-0.85, 0.0, 0.08, 0.14)};
 /** @brief `HULL_BOX_COLORS` are the colours of `HULL_BOXES`. */
-constant float3 HULL_BOX_COLORS[] = {
-    float3(0.55, 0.56, 0.58), float3(0.78, 0.45, 0.2), float3(0.25, 0.52, 0.56), float3(0.82, 0.8, 0.72),
-    float3(0.62, 0.25, 0.18), float3(0.7, 0.7, 0.72), float3(0.36, 0.36, 0.38),
-    float3(0.7, 0.7, 0.72), float3(0.36, 0.36, 0.38),
-};
+constant float3 HULL_BOX_COLORS[] = {float3(0.7, 0.7, 0.72), float3(0.36, 0.36, 0.38)};
 /** @brief `HULL_CAPSULES` are the spaceships' tapered capsules (the two ends of the axis), mirrored across the keel. */
 constant float4 HULL_CAPSULES[] = {
-    float4(0.88, 0.0, 0.99, 0.0), float4(-0.62, 0.3, -0.42, 0.44),
     float4(-0.8, 0.0, 0.62, 0.0), float4(0.62, 0.0, 1.0, 0.0), float4(0.15, 0.08, -0.6, 0.8), float4(-0.95, 0.17, -0.38, 0.17),
     float4(-0.8, 0.0, 0.8, 0.0), float4(-0.06, 0.0, 0.06, 0.0),
 };
 /** @brief `HULL_CAPSULE_RADII` are the radii of `HULL_CAPSULES` at their two ends. */
 constant float2 HULL_CAPSULE_RADII[] = {
-    float2(0.08, 0.035), float2(0.035, 0.03),
     float2(0.12, 0.1), float2(0.1, 0.015), float2(0.2, 0.05), float2(0.065, 0.065),
     float2(0.06, 0.05), float2(0.12, 0.12),
 };
 /** @brief `HULL_CAPSULE_COLORS` are the colours of `HULL_CAPSULES`. */
 constant float3 HULL_CAPSULE_COLORS[] = {
-    float3(0.7, 0.7, 0.72), float3(0.75, 0.76, 0.78),
     float3(0.68, 0.7, 0.74), float3(0.68, 0.7, 0.74), float3(0.6, 0.62, 0.66), float3(0.4, 0.4, 0.44),
     float3(0.58, 0.58, 0.6), float3(0.66, 0.66, 0.68),
 };
 /** @brief `HULL_PART_RANGES` gives each hull's first box, box count, first capsule and capsule count. */
-constant int4 HULL_PART_RANGES[HULL_COUNT] = {int4(0, 7, 0, 2), int4(9, 0, 2, 4), int4(7, 2, 6, 2)};
+constant int4 HULL_PART_RANGES[HULL_COUNT] = {int4(0, 0, 0, 4), int4(0, 2, 4, 2)};
 /** @brief `HULL_ENGINES` are the spaceships' engine nozzles (centre, radius, unused), mirrored across the keel. */
-constant float4 HULL_ENGINES[] = {float4(-0.96, 0.0, 0.065, 0.0), float4(-0.96, 0.16, 0.055, 0.0), float4(-0.97, 0.17, 0.06, 0.0), float4(-0.95, 0.0, 0.09, 0.0)};
+constant float4 HULL_ENGINES[] = {float4(-0.97, 0.17, 0.06, 0.0), float4(-0.95, 0.0, 0.09, 0.0)};
 /** @brief `HULL_ENGINE_COLORS` are each hull's engine colours. */
-constant float3 HULL_ENGINE_COLORS[HULL_COUNT] = {float3(1.0, 0.62, 0.3), float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
+constant float3 HULL_ENGINE_COLORS[HULL_COUNT] = {float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
 /** @brief `HULL_LIGHTS` are the spaceships' lights (centre, `LIGHT_*` kind or else a window, radius), mirrored across the keel. */
 constant float4 HULL_LIGHTS[] = {
-    float4(0.6, 0.3, 0.0, 0.02), float4(-0.85, 0.26, 1.0, 0.022), float4(0.0, 0.0, 2.0, 0.02), float4(0.86, 0.05, 3.0, 0.012),
-    float4(0.86, 0.11, 3.0, 0.012), float4(0.76, 0.05, 3.0, 0.012), float4(0.76, 0.11, 3.0, 0.012),
     float4(-0.63, 0.83, 0.0, 0.035), float4(-0.82, 0.0, 1.0, 0.04),
-    float4(0.85, 0.1, 0.0, 0.025), float4(-0.85, 0.15, 1.0, 0.03), float4(0.86, 0.0, 3.0, 0.015),
+    float4(0.85, 0.1, 0.0, 0.025), float4(-0.85, 0.15, 1.0, 0.03), float4(0.86, 0.0, 2.0, 0.015),
 };
 /** @brief `HULL_GLOW_RANGES` gives each hull's first engine, engine count, first light and light count. */
-constant int4 HULL_GLOW_RANGES[HULL_COUNT] = {int4(0, 2, 0, 7), int4(2, 1, 7, 2), int4(3, 1, 9, 3)};
+constant int4 HULL_GLOW_RANGES[HULL_COUNT] = {int4(0, 1, 0, 2), int4(1, 1, 2, 3)};
 
 /**
  * @brief `Spaceship` is one spaceship in the sky (`spaceships.rs`): its centre's direction at the origin with its half
- * length in radians, its unit heading with its hull (`HULL_*`), and its strobe's and beacon's brightness, its engines'
- * brightness and its ring's turn in radians.
+ * length in radians, its unit heading with its hull (`HULL_*`), and its strobe's brightness, its engines' brightness
+ * and its ring's turn in radians (w unused).
  */
 struct Spaceship {
     float4 centre;
@@ -1351,7 +1335,7 @@ static float get_hull_distance(int hull, float2 p, float ring_rad, thread float3
 /**
  * @brief `get_spaceship_glow` gives the light a spaceship's engines and lights add at p (its own frame, in half lengths,
  * with pixels `px` half lengths wide): glowing nozzles with a plume behind, red to port, green to starboard, a flashing
- * strobe, a pulsing beacon, lit windows and a ring ship's ring lights.
+ * strobe, lit windows and a ring ship's ring lights.
  * @par Example
  * @code
  * color += get_spaceship_glow(ship, HULL_FIGHTER, p, px);
@@ -1365,7 +1349,7 @@ static float3 get_spaceship_glow(Spaceship ship, int hull, float2 p, float px) {
         float2 e = m - HULL_ENGINES[i].xy;
         float r = max(HULL_ENGINES[i].z, SHIP_LIGHT_MIN_PIXELS * px), across = e.y / (r * SHIP_PLUME_WIDTH_PER_RADIUS), along = e.x / SHIP_PLUME_HALF_LENGTHS;
         float plume = e.x < 0.0 ? exp(-across * across - along * along) : 0.0;
-        glow += HULL_ENGINE_COLORS[hull] * ship.lights.z * (SHIP_ENGINE_BRIGHTNESS * exp(-dot(e, e) / (r * r)) + SHIP_PLUME_BRIGHTNESS * plume);
+        glow += HULL_ENGINE_COLORS[hull] * ship.lights.y * (SHIP_ENGINE_BRIGHTNESS * exp(-dot(e, e) / (r * r)) + SHIP_PLUME_BRIGHTNESS * plume);
     }
     for (int i = range.z; i < range.z + range.w; i++) {
         float4 light = HULL_LIGHTS[i];
@@ -1373,11 +1357,11 @@ static float3 get_spaceship_glow(Spaceship ship, int hull, float2 p, float px) {
         float r = max(light.w, SHIP_LIGHT_MIN_PIXELS * px);
         int kind = int(light.z);
         float3 tint = kind == LIGHT_NAV ? (p.y < 0.0 ? PORT_COLOR : STARBOARD_COLOR)
-                      : kind == LIGHT_STROBE ? STROBE_COLOR * ship.lights.x : kind == LIGHT_BEACON ? BEACON_COLOR * ship.lights.y : WINDOW_COLOR;
+                      : kind == LIGHT_STROBE ? STROBE_COLOR * ship.lights.x : WINDOW_COLOR;
         glow += tint * exp(-dot(e, e) / (r * r));
     }
     if (hull == HULL_RING_SHIP) {
-        float2 e = turn_into_sector(p, ship.lights.w, RING_LIGHT_COUNT) - float2(RING_RADIUS_HALF_LENGTHS, 0.0);
+        float2 e = turn_into_sector(p, ship.lights.z, RING_LIGHT_COUNT) - float2(RING_RADIUS_HALF_LENGTHS, 0.0);
         float r = max(RING_LIGHT_HALF_LENGTHS, SHIP_LIGHT_MIN_PIXELS * px);
         glow += RING_LIGHT_COLOR * exp(-dot(e, e) / (r * r));
     }
@@ -1401,10 +1385,10 @@ static float3 draw_spaceship(thread const Scene &scene, Spaceship ship, float3 d
     if (facing <= 0.0 || dot(p, p) > bound * bound) return color;
     int hull = int(ship.heading.w);
     float3 albedo = float3(0.0), unused;
-    float distance = get_hull_distance(hull, p, ship.lights.w, albedo), coverage = clamp(0.5 - distance / px, 0.0, 1.0);
+    float distance = get_hull_distance(hull, p, ship.lights.z, albedo), coverage = clamp(0.5 - distance / px, 0.0, 1.0);
     if (coverage > 0.0) {
         float step = SHIP_GRADIENT_PIXELS * px;
-        float2 g = float2(get_hull_distance(hull, p + float2(step, 0.0), ship.lights.w, unused), get_hull_distance(hull, p + float2(0.0, step), ship.lights.w, unused)) - distance;
+        float2 g = float2(get_hull_distance(hull, p + float2(step, 0.0), ship.lights.z, unused), get_hull_distance(hull, p + float2(0.0, step), ship.lights.z, unused)) - distance;
         g /= max(length(g), TINY);
         float tilt_rad = SHIP_BEVEL_TILT_RAD * clamp(1.0 + distance / SHIP_BEVEL_HALF_LENGTHS, 0.0, 1.0);
         float3 n = -c * cos(tilt_rad) + (g.x * h + g.y * side) * sin(tilt_rad);

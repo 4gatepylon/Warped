@@ -1,7 +1,7 @@
-//! `spaceships.rs` flies a few spaceships across Lunar Surface's sky, purely for looks: a
-//! freighter, a ring ship and three fighters in a V. Each crosses the sky slowly on a great circle,
-//! from horizon to horizon, then comes back round below the horizon in a fifth of that time, so
-//! it is in the sky most of the time. `render_voxel.metal` draws them wherever a ray escapes to the
+//! `spaceships.rs` flies a few spaceships across Lunar Surface's sky, purely for looks: a ring
+//! ship and three fighters in a V. Each crosses the sky slowly on a great circle, from horizon to
+//! horizon, then comes back round below the horizon in a fifth of that time, so it is in the sky
+//! most of the time. `render_voxel.metal` draws them wherever a ray escapes to the
 //! sky, behind everything, so they never touch the game.
 //!
 //! Interface: `GpuSpaceship`, `SPACESHIP_COUNT`, `get_spaceships`, `get_utc_s`.
@@ -18,12 +18,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use glam::DVec3;
 
-pub const SPACESHIP_COUNT: usize = 5;
+pub const SPACESHIP_COUNT: usize = 4;
 const HIDDEN_PER_CROSSING: f64 = 0.2;
 const STROBE_PERIOD_S: f64 = 1.6;
 const STROBE_FLASH_FRAC: f64 = 0.08;
 const STROBE_OFFSET_PER_SHIP_FRAC: f64 = 0.37;
-const BEACON_PERIOD_S: f64 = 2.4;
 const ENGINE_FLICKER_HZ: [f64; 2] = [5.3, 2.9];
 const ENGINE_FLICKER_FRAC: f64 = 0.08;
 const RING_SPIN_RAD_PER_S: f64 = 0.35;
@@ -31,9 +30,8 @@ const RING_SPIN_RAD_PER_S: f64 = 0.35;
 /// `Hull` is a spaceship's shape, numbered as the shader's `HULL_*` constants.
 #[derive(Clone, Copy)]
 enum Hull {
-    Freighter = 0,
-    Fighter = 1,
-    RingShip = 2,
+    Fighter = 0,
+    RingShip = 1,
 }
 
 /// `Flight` is one spaceship's path and size: its hull; the highest point of its great circle
@@ -63,15 +61,6 @@ const FIGHTER_FLIGHT: Flight = Flight {
 
 const FLIGHTS: [Flight; SPACESHIP_COUNT] = [
     Flight {
-        hull: Hull::Freighter,
-        top_elevation_deg: 58.0,
-        top_azimuth_deg: 25.0,
-        crossing_s: 240.0,
-        offset_s: 100.0,
-        half_length_rad: 0.055,
-        formation_lengths: [0.0, 0.0],
-    },
-    Flight {
         hull: Hull::RingShip,
         top_elevation_deg: 74.0,
         top_azimuth_deg: 215.0,
@@ -93,8 +82,8 @@ const FLIGHTS: [Flight; SPACESHIP_COUNT] = [
 
 /// `GpuSpaceship` is the shader's `Spaceship`: its centre's direction in the sky (at the world
 /// origin, like the sun's) with its half length in radians, its unit heading (along the sky,
-/// square to the centre) with its hull number, and its lights: the strobe's and the beacon's
-/// brightness (0 to 1), the engines' brightness, and the ring's turn in radians.
+/// square to the centre) with its hull number, and its lights: the strobe's brightness (0 to 1),
+/// the engines' brightness and the ring's turn in radians (the fourth number is unused).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GpuSpaceship {
@@ -152,7 +141,6 @@ fn get_flight_point(flight: &Flight, angle_rad: f64) -> (DVec3, DVec3) {
 ///
 /// Example: `let ships = get_spaceships(get_utc_s());`
 pub fn get_spaceships(time_s: f64) -> [GpuSpaceship; SPACESHIP_COUNT] {
-    let beacon_frac: f64 = 0.5 + 0.5 * (TAU * time_s / BEACON_PERIOD_S).cos();
     let ring_rad: f64 = (RING_SPIN_RAD_PER_S * time_s).rem_euclid(TAU);
     std::array::from_fn(|i| {
         let flight: &Flight = &FLIGHTS[i];
@@ -170,9 +158,9 @@ pub fn get_spaceships(time_s: f64) -> [GpuSpaceship; SPACESHIP_COUNT] {
             * (TAU * ENGINE_FLICKER_HZ[1] * time_s).sin();
         let lights: [f64; 4] = [
             (1.0 - flash_frac).max(0.0),
-            beacon_frac,
             1.0 - ENGINE_FLICKER_FRAC * (0.5 + 0.5 * flicker),
             ring_rad,
+            0.0,
         ];
         GpuSpaceship {
             centre: centre
@@ -208,6 +196,7 @@ mod tests {
     const COME_BACK_TOLERANCE_RAD: f64 = 1e-4;
     const FORMATION_GAP_LENGTHS: std::ops::Range<f64> = 1.5..2.5;
     const PARALLEL_COS: f64 = 0.99;
+    const LEAD_FIGHTER: usize = 1;
 
     /// `to_dvec3` reads the xyz of a shader vector.
     ///
@@ -311,19 +300,21 @@ mod tests {
     #[test]
     fn fighters_fly_in_formation() {
         let ships = get_spaceships(TODAY_S);
-        let lead: DVec3 = to_dvec3(ships[2].centre);
-        for wing in &ships[3..] {
+        let lead: DVec3 = to_dvec3(ships[LEAD_FIGHTER].centre);
+        for wing in &ships[LEAD_FIGHTER + 1..] {
             let gap_lengths: f64 =
                 lead.angle_between(to_dvec3(wing.centre)) / (2.0 * FIGHTER_FLIGHT.half_length_rad);
             assert!(
                 FORMATION_GAP_LENGTHS.contains(&gap_lengths),
                 "{gap_lengths}"
             );
-            assert!(to_dvec3(wing.heading).dot(to_dvec3(ships[2].heading)) > PARALLEL_COS);
+            assert!(
+                to_dvec3(wing.heading).dot(to_dvec3(ships[LEAD_FIGHTER].heading)) > PARALLEL_COS
+            );
         }
-        let behind: DVec3 = to_dvec3(ships[3].centre) - lead;
+        let behind: DVec3 = to_dvec3(ships[LEAD_FIGHTER + 1].centre) - lead;
         assert!(
-            behind.dot(to_dvec3(ships[2].heading)) < 0.0,
+            behind.dot(to_dvec3(ships[LEAD_FIGHTER].heading)) < 0.0,
             "wingmen trail"
         );
     }
