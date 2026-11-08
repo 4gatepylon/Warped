@@ -12,6 +12,7 @@
 #     make bench-views BENCH_SECONDS=<s>: hold each fixed view for BENCH_SECONDS full screen and write frame times
 #         to .artifacts/bench_views/<run_id>/.
 #     make export-map: write the forest's map to ../../common/maps/dark_forest/map.json.
+#     make map-picture: render the forest from above into assets/map_picture.png for the menu's map page.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
 #     make clean: remove .build/.
@@ -35,7 +36,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (frame-time logs, screenshot
   Recreating them means rerunning the benchmarks. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help download-assets run-dark-forest serve-game join-game bench-dark-forest bench-views export-map \
+.PHONY: help download-assets run-dark-forest serve-game join-game bench-dark-forest bench-views export-map map-picture \
   test fmt clean reset-artifacts
 
 help:
@@ -47,6 +48,7 @@ help:
 	@echo "  make bench-dark-forest BENCH_SECONDS=<s>      Route benchmark into .artifacts/bench_dark_forest/"
 	@echo "  make bench-views BENCH_SECONDS=<s>            Fixed-view benchmark into .artifacts/bench_views/"
 	@echo "  make export-map                               Write common/maps/dark_forest/map.json"
+	@echo "  make map-picture                              Render the map page's picture into assets/"
 	@echo "  make test                                     Run the tests"
 	@echo "  make fmt                                      Format with rustfmt and lint with clippy"
 	@echo "  make clean                                    Remove .build/"
@@ -80,6 +82,10 @@ bench-views:
 
 export-map:
 	cargo run --release --bin dark-forest -- --export-map ../../common/maps/dark_forest/map.json
+
+map-picture:
+	cargo run --release --bin dark-forest -- --width-pt 1600 --height-pt 900 --render-scale 2.0 \
+	  --map-picture assets/map_picture.png
 
 test:
 	cargo test --release

@@ -1,3 +1,4 @@
 .build/
 .artifacts/
-assets/
+assets/*
+!assets/map_picture.png

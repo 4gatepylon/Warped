@@ -11,14 +11,20 @@
 //! - The ground picture is drawn once from the arena (decks, bridges, trunks, ladders, rocks;
 //!   canopies are left out so the walkways show); each frame only samples it, about 40,000
 //!   pixels, with no allocation.
+//! - `load_photo` swaps the map page's drawing for the photo-like picture `make map-picture`
+//!   saves, at `MAP_PICTURE_PX_PER_M`; without it the map page shows the drawing.
 //! - Map pixels run along +x to the right and +z down, so red's base (positive z) is at the
 //!   bottom of the map page.
+
+use std::path::Path;
 
 use glam::{Vec2, Vec3};
 
 use crate::game::world::{Arena, ShapeKind, Surface};
 use crate::render::HudImage;
 
+/// `MAP_PICTURE_PX_PER_M` is the resolution of the map page's photo-like picture.
+pub const MAP_PICTURE_PX_PER_M: f32 = 10.0;
 /// `GROUND_PX_PER_M` is the ground picture's resolution.
 const GROUND_PX_PER_M: f32 = 4.0;
 /// `MINIMAP_SIZE_PX` is the minimap's diameter in its own pixels.
@@ -56,6 +62,8 @@ pub struct Minimap {
     min_m: Vec2,
     minimap_rgba: Vec<u8>,
     map_rgba: Vec<u8>,
+    size_m: Vec2,
+    photo: Option<(Vec<u8>, (usize, usize))>,
 }
 
 /// `get_surface_rgba` gives the colour a surface has seen from above, or `None` for surfaces the
@@ -230,7 +238,27 @@ impl Minimap {
             ground_size_px,
             min_m,
             minimap_rgba: vec![0; MINIMAP_SIZE_PX * MINIMAP_SIZE_PX * BYTES_PER_PIXEL],
+            size_m,
+            photo: None,
         }
+    }
+
+    /// `load_photo` makes the map page show the picture at `path` (from `make map-picture`) under
+    /// its marks instead of the drawing, if the picture exists.
+    ///
+    /// Example: `minimap.load_photo(Path::new("assets/map_picture.png"));`
+    pub fn load_photo(&mut self, path: &Path) {
+        if !path.exists() {
+            return;
+        }
+        let picture: image::RgbaImage = image::open(path)
+            .unwrap_or_else(|error| {
+                panic!("can't read the map picture {}: {error}", path.display())
+            })
+            .to_rgba8();
+        let size_px: (usize, usize) = (picture.width() as usize, picture.height() as usize);
+        self.map_rgba = vec![0; size_px.0 * size_px.1 * BYTES_PER_PIXEL];
+        self.photo = Some((picture.into_raw(), size_px));
     }
 
     /// `draw_minimap` draws the round minimap around `feet_m`, turned so `yaw_rad` faces up, with
@@ -304,15 +332,19 @@ impl Minimap {
     ///
     /// Example: `minimap.draw_map(player.feet_m, player.yaw_rad, &marks);`
     pub fn draw_map(&mut self, feet_m: Vec3, yaw_rad: f32, marks: &[Mark]) {
-        self.map_rgba.copy_from_slice(&self.ground_rgba);
-        let width_px: usize = self.ground_size_px.0;
-        let to_px = |p: Vec3| (Vec2::new(p.x, p.z) - self.min_m) * GROUND_PX_PER_M;
+        let (base_rgba, width_px, px_per_m): (&[u8], usize, f32) = match &self.photo {
+            Some((rgba, size_px)) => (rgba, size_px.0, size_px.0 as f32 / self.size_m.x),
+            None => (&self.ground_rgba, self.ground_size_px.0, GROUND_PX_PER_M),
+        };
+        self.map_rgba.copy_from_slice(base_rgba);
+        let mark_scale: f32 = px_per_m / GROUND_PX_PER_M;
+        let to_px = |p: Vec3| (Vec2::new(p.x, p.z) - self.min_m) * px_per_m;
         for mark in marks {
             fill_disc(
                 &mut self.map_rgba,
                 width_px,
                 to_px(mark.position_m),
-                mark.radius_px,
+                mark.radius_px * mark_scale,
                 mark.rgba,
             );
         }
@@ -320,7 +352,7 @@ impl Minimap {
             &mut self.map_rgba,
             width_px,
             to_px(feet_m),
-            get_forward_xz(yaw_rad),
+            get_forward_xz(yaw_rad) * mark_scale,
         );
     }
 
@@ -346,7 +378,10 @@ impl Minimap {
     ///
     /// Example: `let image = minimap.get_map_image(1600.0, 1200.0);`
     pub fn get_map_image(&self, window_width_px: f32, window_height_px: f32) -> HudImage<'_> {
-        let (width_px, height_px) = self.ground_size_px;
+        let (width_px, height_px) = self
+            .photo
+            .as_ref()
+            .map_or(self.ground_size_px, |(_, size_px)| *size_px);
         let scale: f32 = window_height_px * MAP_HEIGHT_FRAC / height_px as f32;
         HudImage {
             pixels_rgba: &self.map_rgba,

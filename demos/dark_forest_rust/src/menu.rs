@@ -23,6 +23,8 @@ use crate::net::{Score, TEAM_NAMES};
 /// `MENU_PICTURE_PX` is the size of the menu's text picture: 64 characters by 25 lines.
 pub const MENU_PICTURE_PX: (u32, u32) = (528, 312);
 
+/// `PAGE_COUNT` is how many pages the menu has.
+pub const PAGE_COUNT: usize = PAGES.len();
 const PAGES: [(Page, &str); 4] = [
     (Page::Scores, "SCORES"),
     (Page::Settings, "SETTINGS"),

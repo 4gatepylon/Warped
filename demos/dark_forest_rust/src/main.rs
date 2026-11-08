@@ -228,10 +228,59 @@ struct Args {
     /// Leave out the tree canopies (for pictures from above).
     #[arg(long)]
     hide_canopy: bool,
+    /// Open the menu on its map page (for --photo).
+    #[arg(long)]
+    photo_map_page: bool,
+    /// Draw the whole forest from straight above (no canopies, robots, vignette or grain), crop it
+    /// to the arena and save it to this PNG for the menu's map page, then quit.
+    #[arg(long)]
+    map_picture: Option<PathBuf>,
 }
 
 /// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle.
 const PHOTO_SETTLE_S: f32 = 3.0;
+
+/// `MAP_PICTURE_PATH` is where `make map-picture` saves the map page's picture, from this demo's
+/// folder.
+const MAP_PICTURE_PATH: &str = "assets/map_picture.png";
+/// `MAP_PICTURE_HEIGHT_M` is how high above the forest the map picture is taken, so it looks
+/// almost flat; `MAP_PICTURE_SHADOW_DISTANCE_M` lets the sun's shadows reach that far.
+const MAP_PICTURE_HEIGHT_M: f32 = 600.0;
+const MAP_PICTURE_SHADOW_DISTANCE_M: f32 = 1000.0;
+
+/// `save_map_picture` reads the last frame back, crops it to the arena's bounds and writes it to
+/// `path` at `minimap::MAP_PICTURE_PX_PER_M`, opaque.
+fn save_map_picture(renderer: &mut dyn Renderer, path: &Path, arena: &Arena) {
+    let (frame_width_px, frame_height_px, rgba) = renderer.read_frame_rgba();
+    let picture: image::RgbaImage =
+        image::RgbaImage::from_raw(frame_width_px, frame_height_px, rgba).expect("RGBA frame");
+    let size_m: Vec2 = Vec2::new(
+        arena.bounds_max_m.x - arena.bounds_min_m.x,
+        arena.bounds_max_m.z - arena.bounds_min_m.z,
+    );
+    let crop_width_px: u32 =
+        ((frame_height_px as f32 * size_m.x / size_m.y).round() as u32).min(frame_width_px);
+    let cropped: image::RgbaImage = image::imageops::crop_imm(
+        &picture,
+        (frame_width_px - crop_width_px) / 2,
+        0,
+        crop_width_px,
+        frame_height_px,
+    )
+    .to_image();
+    let mut map_picture: image::RgbaImage = image::imageops::resize(
+        &cropped,
+        (size_m.x * minimap::MAP_PICTURE_PX_PER_M).round() as u32,
+        (size_m.y * minimap::MAP_PICTURE_PX_PER_M).round() as u32,
+        image::imageops::FilterType::Lanczos3,
+    );
+    for pixel in map_picture.pixels_mut() {
+        pixel.0[3] = u8::MAX;
+    }
+    map_picture
+        .save(path)
+        .expect("writing the map picture failed");
+}
 
 /// `LENS_FACE_PX` is the side of each face of the wormhole lens atlas.
 const LENS_FACE_PX: u32 = 384;
@@ -605,6 +654,13 @@ impl FrameStats {
 
 fn main() {
     let mut args: Args = Args::parse();
+    if let Some(path) = &args.map_picture {
+        args.photo = Some(path.clone());
+        args.hide_canopy = true;
+        args.no_title = true;
+        args.bot_count = 0;
+        args.shadow_distance_m = MAP_PICTURE_SHADOW_DISTANCE_M;
+    }
     let map_path: PathBuf = args.map.clone().unwrap_or_else(map::default_map_path);
     if let Some(path) = &args.export_map {
         let json: String = serde_json::to_string(&forest_layout::build()).expect("map JSON");
@@ -799,6 +855,7 @@ fn main() {
         std::process::exit(2);
     });
     let mut minimap: Minimap = Minimap::New(&session.arena);
+    minimap.load_photo(&Path::new(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
     let mut marks: Vec<Mark> = Vec::new();
     let mut menu: Option<Menu> = None;
     let mut menu_picture: TextPicture =
@@ -826,6 +883,16 @@ fn main() {
     let mut last_report_s: f32 = 0.0;
     let mut smoothed_frame_ms: f32 = 8.3;
     let mut timing: FrameTiming = FrameTiming::default();
+    if args.photo_map_page {
+        let mut opened: Menu = Menu::New();
+        for _ in 0..menu::PAGE_COUNT {
+            if opened.get_page() == menu::Page::Map {
+                break;
+            }
+            let _outcome: MenuOutcome = opened.handle(Scancode::E, &mut menu_settings);
+        }
+        menu = Some(opened);
+    }
     'running: loop {
         let mut look_delta_pt: Vec2 = Vec2::ZERO;
         let mut is_jump_pressed: bool = false;
@@ -1012,6 +1079,17 @@ fn main() {
             frame.camera.fov_y_rad = fov_deg.to_radians();
             frame.camera.far_m = f32::MAX;
         }
+        if args.map_picture.is_some() {
+            let (low_m, high_m) = (session.arena.bounds_min_m, session.arena.bounds_max_m);
+            let centre_m: Vec3 = (low_m + high_m) * 0.5;
+            let eye_m: Vec3 = Vec3::new(centre_m.x, MAP_PICTURE_HEIGHT_M, centre_m.z);
+            frame.camera.view = glam::Mat4::look_to_rh(eye_m, Vec3::NEG_Y, Vec3::NEG_Z);
+            frame.camera.position_m = eye_m;
+            frame.camera.fov_y_rad =
+                2.0 * ((high_m.z - low_m.z) * 0.5 / MAP_PICTURE_HEIGHT_M).atan();
+            frame.camera.far_m = f32::MAX;
+            renderer.set_is_capturing(true);
+        }
         if args.photo.is_some() {
             frame.viewmodel_draws.clear();
             frame.viewmodel_particles.clear();
@@ -1084,7 +1162,11 @@ fn main() {
         if let Some(path) = &args.photo
             && elapsed_s > PHOTO_SETTLE_S
         {
-            save_photo(&mut renderer, path, args.photo_width_px);
+            if args.map_picture.is_some() {
+                save_map_picture(&mut renderer, path, &session.arena);
+            } else {
+                save_photo(&mut renderer, path, args.photo_width_px);
+            }
             break 'running;
         }
         if stats.frame_ms.len() > 30 || elapsed_s > 2.0 {
