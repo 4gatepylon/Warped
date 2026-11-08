@@ -162,6 +162,24 @@ pub fn run(arguments: &Arguments) -> Result<()> {
     play(arguments, metal)
 }
 
+/// `step_respawn` counts an eliminated player's `respawn_in_s` down by `dt_s` and asks the server
+/// to rejoin once it runs out; with no countdown running it keeps asking to join until welcomed
+/// (`net::Client::keep_joining`). A player waiting to respawn never asks, so they come back only
+/// after the settings' `respawn.delay_s`, as on Lunar Surface.
+///
+/// Example: `step_respawn(&mut client, &mut respawn_in_s, dt_s)?;`
+fn step_respawn(client: &mut net::Client, respawn_in_s: &mut Option<f64>, dt_s: f64) -> Result<()> {
+    match respawn_in_s {
+        Some(left_s) if *left_s > dt_s => *left_s -= dt_s,
+        Some(_) => {
+            *respawn_in_s = None;
+            client.rejoin()?;
+        }
+        None => client.keep_joining()?,
+    }
+    Ok(())
+}
+
 /// `get_console_teams` lists each console's team in the server's console order.
 fn get_console_teams(world: &CityWorld) -> Vec<u32> {
     world.consoles.iter().map(|console| console.team).collect()
@@ -1064,19 +1082,12 @@ impl CitySession {
                 }
             }
         }
-        self.client.keep_joining()?;
         if let Some(settings) = &self.client.settings
             && *settings != self.settings
         {
             self.settings = settings.clone();
         }
-        if let Some(left_s) = &mut self.respawn_in_s {
-            *left_s -= dt_s;
-            if *left_s <= 0.0 {
-                self.respawn_in_s = None;
-                self.client.rejoin()?;
-            }
-        }
+        step_respawn(&mut self.client, &mut self.respawn_in_s, dt_s)?;
         self.reload_left_s = (self.reload_left_s - dt_s).max(0.0);
         self.laser_left_s = (self.laser_left_s - dt_s).max(0.0);
         self.recoil_left_s = (self.recoil_left_s - dt_s).max(0.0);
@@ -1329,7 +1340,10 @@ impl CitySession {
             ]);
         }
         if let Some(left_s) = self.respawn_in_s {
-            return Some(["YOU WERE HIT".to_string(), format!("back in {left_s:.1} s")]);
+            return Some([
+                "YOU DIED".to_string(),
+                format!("Respawning in {:.0}", left_s.ceil().max(1.0)),
+            ]);
         }
         if !self.is_spawned {
             return Some([
@@ -2529,17 +2543,10 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 net::NetEvent::Eliminated { .. } => {}
             }
         }
-        client.keep_joining()?;
         if let Some(s) = &client.settings {
             settings = s.clone();
         }
-        if let Some(left_s) = &mut respawn_in_s {
-            *left_s -= dt_s;
-            if *left_s <= 0.0 {
-                respawn_in_s = None;
-                client.rejoin()?;
-            }
-        }
+        step_respawn(&mut client, &mut respawn_in_s, dt_s)?;
         let team: u32 = client.team.unwrap_or(0);
         if arguments.bot_objective == Some(BotObjective::Consoles) && client.game.winner.is_some() {
             break;
@@ -2662,7 +2669,111 @@ mod tests {
     //! | --- | --- | --- |
     //! | Part of the rifle target aimed at from blue's spawn | head, body | `the_rifle_target_is_in_sight_of_blues_spawn` |
     //! | Map picture pixel and direction | round trip at the equator and near a pole | `map_pixels_and_directions_agree` |
+    //! | When an eliminated player comes back | before the respawn delay (never), within a join retry after it, at their team's spawn | `an_eliminated_player_respawns_only_after_the_delay` |
     use super::*;
+
+    const TEST_RESPAWN_DELAY_S: f64 = 1.5;
+    const TEST_STEP_MS: u64 = 10;
+    const TEST_TIMING_SLACK_S: f64 = 0.05;
+    const TEST_JOIN_RETRY_SLACK_S: f64 = 0.6;
+    const TEST_TIMEOUT_S: f64 = 5.0;
+
+    /// `poll_until` polls `client` every `TEST_STEP_MS`, stepping its respawn countdown
+    /// (`step_respawn`) by the real time passed, until `is_done` says yes for an event, and gives
+    /// the seconds that took; it panics after `TEST_TIMEOUT_S`.
+    ///
+    /// Example: `let joined_s = poll_until(&mut client, &mut respawn_in_s, |e| matches!(e, net::NetEvent::Joined(_)));`
+    fn poll_until(
+        client: &mut net::Client,
+        respawn_in_s: &mut Option<f64>,
+        is_done: impl Fn(&net::NetEvent) -> bool,
+    ) -> f64 {
+        let start: Instant = Instant::now();
+        let mut last: Instant = start;
+        while start.elapsed().as_secs_f64() < TEST_TIMEOUT_S {
+            std::thread::sleep(Duration::from_millis(TEST_STEP_MS));
+            let events: Vec<net::NetEvent> = client.poll().expect("the client polls");
+            if events.iter().any(&is_done) {
+                return start.elapsed().as_secs_f64();
+            }
+            step_respawn(client, respawn_in_s, last.elapsed().as_secs_f64())
+                .expect("the client steps");
+            last = Instant::now();
+        }
+        panic!("poll_until: nothing happened within {TEST_TIMEOUT_S} s");
+    }
+
+    /// `an_eliminated_player_respawns_only_after_the_delay` plays an elimination on a real server:
+    /// the victim's window keeps polling and stepping its countdown, and must be welcomed back
+    /// only once `respawn.delay_s` has passed (W-119 (City Sphere demo): they came back at once,
+    /// after one 0.5 s join retry), and then at a spawn of their team.
+    #[test]
+    fn an_eliminated_player_respawns_only_after_the_delay() {
+        let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
+        let mut settings: ServerSettings = ServerSettings::Builtin();
+        settings.respawn.delay_s = TEST_RESPAWN_DELAY_S;
+        let socket: std::net::UdpSocket =
+            std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port");
+        socket
+            .set_read_timeout(Some(Duration::from_millis(TEST_STEP_MS)))
+            .expect("a timeout");
+        let address: SocketAddr = socket.local_addr().expect("an address");
+        let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+        let stop_flag: Arc<AtomicBool> = Arc::clone(&should_stop);
+        let console_teams: Vec<u32> = get_console_teams(&world);
+        let server: JoinHandle<()> = std::thread::spawn(move || {
+            net::serve(
+                socket,
+                &stop_flag,
+                MAP_NAME.to_string(),
+                settings,
+                console_teams,
+                &AtomicBool::new(false),
+                None,
+                Vec::new(),
+                None,
+                false,
+            )
+            .expect("the server runs");
+        });
+        let is_joined = |event: &net::NetEvent| matches!(event, net::NetEvent::Joined(_));
+        let mut shooter: net::Client =
+            net::Client::Connect(address, MAP_NAME, b"").expect("a shooter");
+        let mut victim: net::Client =
+            net::Client::Connect(address, MAP_NAME, b"").expect("a victim");
+        let mut no_countdown: Option<f64> = None;
+        shooter.join(Some(0)).expect("the shooter joins blue");
+        poll_until(&mut shooter, &mut no_countdown, is_joined);
+        victim.join(Some(1)).expect("the victim joins red");
+        poll_until(&mut victim, &mut no_countdown, is_joined);
+        let victim_id: u32 = victim.id.expect("the victim was welcomed");
+        shooter.send_hit(victim_id, 1).expect("the shooter's hit");
+        poll_until(&mut victim, &mut no_countdown, |event| {
+            matches!(event, net::NetEvent::Eliminated { is_self: true, .. })
+        });
+        let mut respawn_in_s: Option<f64> = Some(TEST_RESPAWN_DELAY_S);
+        let back_after_s: f64 = poll_until(&mut victim, &mut respawn_in_s, is_joined);
+        should_stop.store(true, Ordering::Relaxed);
+        server.join().expect("the server stops");
+        assert!(
+            back_after_s >= TEST_RESPAWN_DELAY_S - TEST_TIMING_SLACK_S,
+            "back after {back_after_s:.2} s, before the {TEST_RESPAWN_DELAY_S} s delay"
+        );
+        assert!(
+            back_after_s < TEST_RESPAWN_DELAY_S + TEST_JOIN_RETRY_SLACK_S,
+            "back after {back_after_s:.2} s, long after the {TEST_RESPAWN_DELAY_S} s delay"
+        );
+        let team: u32 = victim.team.expect("the victim has a team");
+        let respawned: CityPlayer = world.make_player(team, 1);
+        assert!(
+            world
+                .spawns
+                .iter()
+                .any(|&(t, frame)| t == team && frame.w_axis.truncate() == respawned.feet),
+            "the victim came back at {:?}, not at a red spawn",
+            respawned.feet
+        );
+    }
 
     #[test]
     fn the_rifle_target_is_in_sight_of_blues_spawn() {
