@@ -318,3 +318,71 @@ fn get_crosshair_rects(window_px: (u32, u32)) -> Vec<OverlayRect> {
         })
         .collect()
 }
+
+/// `tests` checks which overlay rectangles the HUD draws.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | view | clear, covered (menu or "YOU DIED") | `test_crosshair_only_over_a_clear_view` |
+/// | console | not held, held | `test_console_bar_only_while_held` |
+/// | bars | health, ammo and energy, each in its Lunar Surface colour | `test_console_bar_only_while_held` |
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `state` is a player at full health, ammo and energy, with the view clear.
+    fn state() -> OverlayHudState {
+        OverlayHudState {
+            health_frac: 1.0,
+            health_segment_count: 3,
+            ammo_frac: 1.0,
+            ammo_segment_count: 14,
+            is_reloading: false,
+            energy_frac: 1.0,
+            console_hold_frac: None,
+            is_view_covered: false,
+        }
+    }
+
+    /// `count_colored` counts the rectangles whose colour starts with `rgb`.
+    fn count_colored(rects: &[OverlayRect], rgb: [f32; 3]) -> usize {
+        rects
+            .iter()
+            .filter(|rect| rect.color[..3] == rgb[..])
+            .count()
+    }
+
+    /// `test_crosshair_only_over_a_clear_view` checks the four crosshair arms show over a clear
+    /// view and not while text covers it.
+    #[test]
+    fn test_crosshair_only_over_a_clear_view() {
+        let pulses: BarPulsePair = BarPulsePair::New();
+        let crosshair_rgb: [f32; 3] = [CROSSHAIR_COLOR[0], CROSSHAIR_COLOR[1], CROSSHAIR_COLOR[2]];
+        let clear: Vec<OverlayRect> = build_overlay_rects(&state(), &pulses, (2560, 1440));
+        assert_eq!(count_colored(&clear, crosshair_rgb), 4);
+        let covered: OverlayHudState = OverlayHudState {
+            is_view_covered: true,
+            ..state()
+        };
+        let hidden: Vec<OverlayRect> = build_overlay_rects(&covered, &pulses, (2560, 1440));
+        assert_eq!(count_colored(&hidden, crosshair_rgb), 0);
+    }
+
+    /// `test_console_bar_only_while_held` checks the health, ammo and energy bars always show in
+    /// their colours, and the console bar only while `E` is held on a console.
+    #[test]
+    fn test_console_bar_only_while_held() {
+        let pulses: BarPulsePair = BarPulsePair::New();
+        let idle: Vec<OverlayRect> = build_overlay_rects(&state(), &pulses, (2560, 1440));
+        for rgb in [HEALTH_BAR_RGB, HEAT_BAR_RGB, ENERGY_BAR_RGB] {
+            assert!(count_colored(&idle, rgb) > 0, "{rgb:?}");
+        }
+        assert_eq!(count_colored(&idle, DISABLE_BAR_RGB), 0);
+        let holding: OverlayHudState = OverlayHudState {
+            console_hold_frac: Some(0.5),
+            ..state()
+        };
+        let held: Vec<OverlayRect> = build_overlay_rects(&holding, &pulses, (2560, 1440));
+        assert!(count_colored(&held, DISABLE_BAR_RGB) > 0);
+    }
+}

@@ -339,11 +339,13 @@ impl Vec3Ext for Vec3 {
     }
 }
 
-/// `tests` checks climbing a rope ladder onto a deck.
+/// `tests` checks climbing a rope ladder onto a deck, and sprint energy.
 ///
 /// | Partitioning | Part | Covered by |
 /// | --- | --- | --- |
 /// | input at a ladder's foot | walk into it (climbs to the deck), walk past it sideways (stays on the ground) | `test_walking_into_a_ladder_climbs_onto_the_deck`, `test_walking_beside_a_ladder_stays_down` |
+/// | sprint energy while sprinting | some left, empty | `test_sprinting_drains_energy_then_stops` |
+/// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
 #[cfg(test)]
 mod tests {
     use glam::Mat4;
@@ -400,5 +402,50 @@ mod tests {
     fn test_walking_beside_a_ladder_stays_down() {
         let feet_m: Vec3 = walk_s(Vec3::new(14.0, 0.0, 48.5), Vec2::Y, 2.0);
         assert!(feet_m.y < 0.05, "ended at {feet_m}");
+    }
+
+    /// `run_s` runs a standing player on open ground with `input` for `seconds`, starting with
+    /// `energy_frac` of sprint energy, and returns the player.
+    fn run_s(input: &PlayerInput, energy_frac: f32, seconds: f32) -> Player {
+        let solids: [Aabb; 1] = [Aabb {
+            min_m: Vec3::new(-500.0, -1.0, -500.0),
+            max_m: Vec3::new(500.0, 0.0, 500.0),
+        }];
+        let mut player: Player = Player::new(Vec3::ZERO, 0.0);
+        player.energy_frac = energy_frac;
+        let dt_s: f32 = 1.0 / 120.0;
+        for _ in 0..(seconds / dt_s).round() as usize {
+            player.update(input, &solids, &[], dt_s);
+        }
+        player
+    }
+
+    /// `test_sprinting_drains_energy_then_stops` checks sprint energy empties in `SPRINT_DRAIN_S`
+    /// of sprinting, as on Lunar Surface, and that an empty bar stops the sprint.
+    #[test]
+    fn test_sprinting_drains_energy_then_stops() {
+        let sprint: PlayerInput = PlayerInput {
+            move_axes: Vec2::Y,
+            is_sprint_held: true,
+            ..PlayerInput::default()
+        };
+        let half: Player = run_s(&sprint, 1.0, SPRINT_DRAIN_S * 0.5);
+        assert!(half.is_sprinting && (half.energy_frac - 0.5).abs() < 0.01);
+        let empty: Player = run_s(&sprint, 1.0, SPRINT_DRAIN_S + 0.5);
+        assert!(!empty.is_sprinting && empty.energy_frac == 0.0);
+    }
+
+    /// `test_energy_refills_faster_crouched` checks an empty bar refills in
+    /// `SPRINT_REFILL_WALKING_S` standing and in `SPRINT_REFILL_CROUCHING_S` crouched.
+    #[test]
+    fn test_energy_refills_faster_crouched() {
+        let standing: Player = run_s(&PlayerInput::default(), 0.0, SPRINT_REFILL_WALKING_S * 0.5);
+        assert!((standing.energy_frac - 0.5).abs() < 0.01);
+        let crouch: PlayerInput = PlayerInput {
+            is_crouch_held: true,
+            ..PlayerInput::default()
+        };
+        let crouched: Player = run_s(&crouch, 0.0, SPRINT_REFILL_CROUCHING_S * 0.5);
+        assert!(crouched.energy_frac > 0.45, "{}", crouched.energy_frac);
     }
 }

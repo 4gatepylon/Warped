@@ -49,6 +49,12 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | `Esc` | release the mouse; a second `Esc` quits |
 | `F1`-`F8`, `[` / `]` | effects and render scale, as in `../fps_demo/` |
 
+The HUD is the Lunar Surface demo's (W-126, same play in every level; DECISIONS.md D16): in the bottom left the
+health bar (a segment per body hit), the gun's ammo bar and the sprint energy bar (sprinting empties it in 7.5 s),
+with glows that run along a bar while it changes; Lunar's crosshair; the console bar below the middle while `E` is
+held on an enemy console; red, blurred edges and a shake when you take any damage; and "YOU DIED" with the respawn
+countdown.
+
 ## The level
 
 - **Map:** [`../../common/maps/dark_forest/map.json`](../../common/maps/dark_forest/map.json), written by
@@ -104,6 +110,9 @@ binary. The wire protocol is the hyperbolic demo's, with its wormhole fields alw
 - `--robot-pose x,y,z,yaw [--robot-walk-m-per-s <speed>]`: holds robot 0 there (it doesn't think or shoot); with a
   speed it walks straight ahead, through any mouth, and starts again every 10 s. `--hold-trigger` keeps firing. For
   pictures and videos of robots and lasers through the wormholes.
+- `--photo-hud` keeps the HUD in `--photo` and `--video-frames` pictures; `--photo-at-s <s>` takes the photo at that
+  simulated time; `--hurt-player-every-s <s>` hurts the player by a robot's shot that often; `--hold-console` holds
+  `E`. For pictures of the HUD, hits and "YOU DIED".
 - `--play-route`: the autopilot walks the vertical route from red's spawn; `make bench-dark-forest` runs it full
   screen into `.artifacts/bench_dark_forest/<run_id>/`.
 - `--photo <png> [--photo-width-px <px>] [--camera-pose x,y,z,yaw,pitch] [--fov-deg <deg>] [--hide-canopy]`: saves

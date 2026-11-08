@@ -946,7 +946,7 @@ impl Renderer for MetalRenderer {
     fn read_hud_frame_rgba(&mut self) -> (u32, u32, Vec<u8>) {
         let capture: Texture = self.hud_capture.clone().expect("the HUD is being captured");
         let (width_px, height_px, mut bgra) = self.read_texture_bytes(&capture);
-        for pixel in bgra.chunks_exact_mut(4) {
+        for pixel in bgra.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
         (width_px, height_px, bgra)

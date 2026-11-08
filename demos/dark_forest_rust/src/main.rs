@@ -252,6 +252,9 @@ struct Args {
     /// and of "YOU DIED".
     #[arg(long)]
     hurt_player_every_s: Option<f32>,
+    /// Hold `E` (turning off a console within reach), for pictures of the console bar.
+    #[arg(long)]
+    hold_console: bool,
     /// How many simulated seconds --video-frames records.
     #[arg(long, default_value_t = 8.0)]
     video_seconds: f32,
@@ -1219,7 +1222,8 @@ fn main() {
                 start.elapsed().as_secs_f32()
             );
         }
-        let is_e_held: bool = menu.is_none() && keys.is_scancode_pressed(Scancode::E);
+        let is_e_held: bool =
+            menu.is_none() && (args.hold_console || keys.is_scancode_pressed(Scancode::E));
         if let Err(error) = play.update(&mut session, &scene, is_e_held, dt_s) {
             eprintln!("network error: {error}");
         }
