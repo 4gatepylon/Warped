@@ -110,9 +110,6 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
-- [?] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
-  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
-  cylinder, just make it a cylinder. #210.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
   #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
@@ -315,3 +312,6 @@ Confirmed by the user after testing.
   white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
   then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
   that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249. Confirmed by the user, 2026-11-07: "shot noise is good".
+- [x] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
+  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
+  cylinder, just make it a cylinder. #210. Confirmed by the user, 2026-11-07: "sharp edged shpes is done".
