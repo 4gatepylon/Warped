@@ -52,6 +52,8 @@ make run-demo RENDERER=cpu
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
+  On Lunar Surface, a shot into the ground (yours or anyone's) throws up grey-brown dust and a puff of mist where
+  it lands: the grains fly up to a few meters and fall back, and all of it fades within 2 s (D81).
 - Holding the right button shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it
   yet).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
@@ -179,6 +181,8 @@ make run-autopilot
   the laser's light path, and walking on the map. `render_voxel.metal` and `render_voxel.rs` draw it on the GPU.
 - `voxel_clearance.rs`: each warp's clearance grid, a lower bound on the distance to the nearest block, so the GPU
   skips blocks a bent step can't reach.
+- `dust.rs`: the dust and mist a shot throws up where it hits the ground, which `render_voxel.metal` draws in the
+  world (D81).
 - `main.rs`: the command line, the SDL3 window and HUD, and the benchmark and autopilot runs.
 
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the

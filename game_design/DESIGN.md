@@ -217,6 +217,8 @@ These values are configurable and may change after playtests.
 - A shot fires a bullet (an energy pulse) with minimal drop, and shows a laser along its path with
   no drop.
 - Warp objects bend bullets and lasers as they bend light, and both pass through wormholes.
+- A shot that hits the ground throws up dust and a puff of mist where it lands, which every player
+  sees.
 
 ## Weapons
 
