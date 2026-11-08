@@ -2549,7 +2549,7 @@ impl Session {
     }
 
     /// `can_throw` says whether this player may throw a wormhole mouth now: playing, with the
-    /// mouse captured, and without a throw in the air.
+    /// mouse captured, without a throw in the air, and without both mouths down.
     ///
     /// Example: `if self.can_throw() { self.throw_wormhole(); }`
     fn can_throw(&self) -> bool {
@@ -2557,7 +2557,7 @@ impl Session {
             && self.route.is_empty()
             && !self.is_in_lobby()
             && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
-            && !self.thrown.is_flying()
+            && self.thrown.can_throw()
     }
 
     /// `throw_wormhole` throws this player's next wormhole mouth from their eye.

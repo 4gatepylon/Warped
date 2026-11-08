@@ -89,7 +89,8 @@ make join-game SERVER=127.0.0.1
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
-- `Q` throws your purple wormhole mouth, the next press your green one, then purple again, and so on, on both maps.
+- `Q` throws your purple wormhole mouth and the next press your green one, on both maps; once both are down, `Q`
+  does nothing until the pair is gone.
   A throw is lobbed under its own gravity, drops to the floor below whatever it hits, and hovers there at eye
   height facing back the way it flew; once both are down they link, and any player or laser that goes into one
   comes out of the other (`wormholes` in `server_settings.yaml`). The view through a thrown mouth is tinted its
