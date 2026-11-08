@@ -1620,9 +1620,10 @@ static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end
  * @brief `scan_zone_walls` adds the zone walls that the chord from x along v crosses before `s_end` (`travelled` from
  * the eye) to `dust`, as faint glowing sheets in their team's colour. A wall is the plane straight above its zone's
  * edge (`zone_walls.rs`), (n_z, -n_w) in `zone_walls[i].xy`, which the chord crosses where tanh s = -⟨x, n⟩ / ⟨v, n⟩.
- * Its opacity there is the map's at the ground, falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`
- * and smoothly on to nothing at the wall's height above the ground, and fading out over the last `ZONE_WALL_END_M` before the
- * boundary; its optical depth grows as the chord grazes it (up to `ZONE_WALL_MAX_SLANT` times) and thins in the haze.
+ * Its opacity there is the map's at the ground, falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`,
+ * then by `ZONE_WALL_TOP_FADE_FRAC` of that up to the wall's height above the ground, over whose top
+ * `ZONE_WALL_SOFT_TOP_FRAC` it fades out; it also fades out over the last `ZONE_WALL_END_M` before the boundary. Its
+ * optical depth grows as the chord grazes it (up to `ZONE_WALL_MAX_SLANT` times) and thins in the haze.
  * @par Example
  * @code
  * scan_zone_walls(scene, x, v, s, t, dust);

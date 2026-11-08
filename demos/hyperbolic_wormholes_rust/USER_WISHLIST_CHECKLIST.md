@@ -52,10 +52,10 @@ is in [`AGENTS.md`](AGENTS.md).
   `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
   - **Where the work is** (for any agent picking it up): worktree
     `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac, branch `claude/zone-planes`
-    (on this Mac only so far; to be pushed to `origin`), pictures in
+    (pushed to `origin`), pictures in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering two
-    levels of translucency; waits for the user's OK before merging.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: built, tested and pictured
+    (levels A and B of translucency, a walk-through GIF); PR next, then it waits for the user's OK before merging.
 - [~] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
   character, and the player controls it from there, seeing their own character. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
