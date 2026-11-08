@@ -37,7 +37,8 @@ is in [`AGENTS.md`](AGENTS.md).
   - **Where the work is** (for any agent picking it up): a parity audit of every level against Lunar Surface on
     `claude/levels-checks`, then each level's fixes on its own agent's branch (`claude/city-sphere-fixes`,
     `claude/dark-forest-lens-robots`, `claude/snow-planet-torus`, `claude/dust-wormhole-speed`), in worktrees under
-    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. Snow Planet: #421
+    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. Dust: #427
+    (`claude/dust-parity`, open). Snow Planet: #421
     (branch `claude/snow-planet-parity`, open). City Sphere: #429
     (HUD bars, hit effect, movement, jump, exit prompt, zoom, head bob, speckle, walking console bot); still missing
     there: thrown wormholes, flashlight, third person, ground dust.
@@ -126,7 +127,8 @@ is in [`AGENTS.md`](AGENTS.md).
   wormholes, and obviously, players can place wormholes. And obviously, that one's also hyperbolic, unlike the other
   ones."
   Merged into `staging/user-4gatepylon` with #393, 2026-11-08. Speed: #420 bakes the terrain's height, so every
-  bench view is under 16.7 ms at 2560×1440 with the same pictures (open, 2026-11-08).
+  bench view is under 16.7 ms at 2560×1440 with the same pictures (merged, 2026-11-08). Lunar's jump time and
+  walkable level mouths for W-126 (same play in every level): #427 (open, 2026-11-08).
 - [?] **W-122 Dark Forest demo.** Part of W-124 (four map demos): "I want it to just be kind of just like a normal
   forest. This is just that one's going to be just kind of a normal first-person shooter. Maybe one difference there
   is just to have it have verticality, similar to the Star Wars Endor or whatever, maybe the Wookiee Planet, where
