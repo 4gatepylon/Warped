@@ -1522,6 +1522,7 @@ fn bench_voxel_views(
             "fastest_ms": times_ms[0],
             "p99_ms": times_ms[(times_ms.len() * 99 / 100).min(times_ms.len() - 1)],
             "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
+            "p99_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() * 99 / 100),
             "laser": shot.as_ref().map(|s| multiplayer::describe_shot(world, s)),
         }));
         if let Some(frame_count) = arguments.clip_frame_count.filter(|_| view.is_laser_on) {
