@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use glam::DVec3;
 
-pub const SPACESHIP_COUNT: usize = 4;
+pub const SPACESHIP_COUNT: usize = 6;
 const HIDDEN_PER_CROSSING: f64 = 0.2;
 const STROBE_PERIOD_S: f64 = 1.6;
 const STROBE_FLASH_FRAC: f64 = 0.08;
@@ -32,6 +32,8 @@ const RING_SPIN_RAD_PER_S: f64 = 0.35;
 enum Hull {
     Fighter = 0,
     RingShip = 1,
+    BattleStation = 2,
+    CapitalShip = 3,
 }
 
 /// `Flight` is one spaceship's path and size: its hull; the highest point of its great circle
@@ -60,6 +62,24 @@ const FIGHTER_FLIGHT: Flight = Flight {
 };
 
 const FLIGHTS: [Flight; SPACESHIP_COUNT] = [
+    Flight {
+        hull: Hull::BattleStation,
+        top_elevation_deg: 14.0,
+        top_azimuth_deg: 240.0,
+        crossing_s: 1.0e9,
+        offset_s: 5.0e8,
+        half_length_rad: 0.075,
+        formation_lengths: [0.0, 0.0],
+    },
+    Flight {
+        hull: Hull::CapitalShip,
+        top_elevation_deg: 30.0,
+        top_azimuth_deg: 290.0,
+        crossing_s: 1800.0,
+        offset_s: 900.0,
+        half_length_rad: 0.06,
+        formation_lengths: [0.0, 0.0],
+    },
     Flight {
         hull: Hull::RingShip,
         top_elevation_deg: 74.0,
@@ -90,6 +110,16 @@ pub struct GpuSpaceship {
     centre: [f32; 4],
     heading: [f32; 4],
     lights: [f32; 4],
+}
+
+impl GpuSpaceship {
+    pub fn temp_set_option(&mut self, option: f32) {
+        self.lights[3] = option;
+    }
+    pub fn temp_place(&mut self, centre: DVec3, heading: DVec3, size_rad: f64) {
+        self.centre = centre.as_vec3().extend(size_rad as f32).to_array();
+        self.heading = heading.as_vec3().extend(self.heading[3]).to_array();
+    }
 }
 
 /// `get_utc_s` gives the UTC clock's seconds since 1970, the time every window's sky shows.
@@ -196,7 +226,7 @@ mod tests {
     const COME_BACK_TOLERANCE_RAD: f64 = 1e-4;
     const FORMATION_GAP_LENGTHS: std::ops::Range<f64> = 1.5..2.5;
     const PARALLEL_COS: f64 = 0.99;
-    const LEAD_FIGHTER: usize = 1;
+    const LEAD_FIGHTER: usize = 3;
 
     /// `to_dvec3` reads the xyz of a shader vector.
     ///

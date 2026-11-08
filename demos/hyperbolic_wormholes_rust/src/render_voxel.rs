@@ -295,6 +295,7 @@ impl VoxelFrame {
         dust: &[DustCloud],
         size_px: (u32, u32),
     ) -> VoxelFrame {
+        let camera: DMat4 = temp_look(camera);
         let r: f64 = world.r;
         let structures: Vec<GpuStructure> = world
             .structures
@@ -452,9 +453,15 @@ impl VoxelFrame {
                     light.brightness_frac as f32,
                 ]
             }),
-            spaceships: get_spaceships(world.sky_time_s),
+            spaceships: temp_giant_hook(world, camera),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
         };
+        let mut uniforms = uniforms;
+        if let Ok(spec) = std::env::var("TEMP_GIANT_LOOK") {
+            let zoom: f32 = spec.split(',').nth(2).unwrap().parse().unwrap();
+            uniforms.tan_half_fov /= zoom;
+            uniforms.pixel_angle_rad /= zoom;
+        }
         assert_eq!(
             world.palette.len(),
             MAX_MATERIAL_COUNT,
@@ -803,4 +810,61 @@ impl VoxelGpu {
         dispatch(encoder, &self.tonemap, (width, height));
         Ok(())
     }
+}
+
+fn temp_giant_hook(world: &VoxelWorld, camera: DMat4) -> [GpuSpaceship; SPACESHIP_COUNT] {
+    let time_s: f64 = std::env::var("TEMP_GIANT_TIME_S").map_or(world.sky_time_s, |s| s.parse().unwrap());
+    let mut ships = get_spaceships(time_s);
+    let cam = camera.col(3);
+    let to_sky = |v: glam::DVec4| -> glam::DVec3 {
+        (v.truncate() - v.w / (1.0 + cam.w) * cam.truncate()).normalize()
+    };
+    let (right, up, forward) = (to_sky(camera.col(0)), to_sky(camera.col(1)), to_sky(-camera.col(2)));
+    if std::env::var("TEMP_GIANT_PRINT").is_ok() {
+        eprintln!("TEMP forward {forward:?} up {up:?} right {right:?}");
+        for (i, s) in ships.iter().enumerate() {
+            eprintln!("TEMP ship {i} {s:?}");
+        }
+    }
+    let options: Vec<f32> = std::env::var("TEMP_GIANT_OPTIONS").map_or(vec![], |s| s.split(',').map(|x| x.parse().unwrap()).collect());
+    for (i, w) in options.iter().enumerate() {
+        ships[i].temp_set_option(*w);
+    }
+    if let Ok(spec) = std::env::var("TEMP_GIANT_PLACE") {
+        for item in spec.split(';') {
+            let v: Vec<f64> = item.split(':').map(|x| x.parse().unwrap()).collect();
+            let (i, size_rad, a, b) = (v[0] as usize, v[1], v[2], v[3]);
+            let centre = (forward + a * right + b * up).normalize();
+            let heading = right.reject_from_normalized(centre).normalize();
+            ships[i].temp_place(centre, heading, size_rad);
+        }
+    }
+    if let Ok(spec) = std::env::var("TEMP_GIANT_HIDE") {
+        for item in spec.split(',') {
+            let i: usize = item.parse().unwrap();
+            ships[i].temp_place(-forward, right, 0.001);
+        }
+    }
+    ships
+}
+
+fn temp_look(camera: DMat4) -> DMat4 {
+    let Ok(spec) = std::env::var("TEMP_GIANT_LOOK") else {
+        return camera;
+    };
+    let v: Vec<f64> = spec.split(',').map(|x| x.parse().unwrap()).collect();
+    let (az, el) = (v[0].to_radians(), v[1].to_radians());
+    let d = glam::DVec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin());
+    let cam = camera.col(3);
+    let to_sky = |v: glam::DVec4| -> glam::DVec3 {
+        (v.truncate() - v.w / (1.0 + cam.w) * cam.truncate()).normalize()
+    };
+    let (right, up, back) = (to_sky(camera.col(0)), to_sky(camera.col(1)), to_sky(camera.col(2)));
+    let local = |w: glam::DVec3| glam::DVec3::new(w.dot(right), w.dot(up), w.dot(back));
+    let f = local(d).normalize();
+    let world_up = local(glam::DVec3::Y);
+    let r = f.cross(world_up).normalize();
+    let u = r.cross(f);
+    let m = DMat4::from_cols(r.extend(0.0), u.extend(0.0), (-f).extend(0.0), glam::DVec4::W);
+    camera * m
 }
