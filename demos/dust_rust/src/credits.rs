@@ -12,12 +12,13 @@
 //!   `main.rs`), which `overlay_text_fits_its_mask` checks; a long link goes over two lines.
 
 /// `CREDITS_LINES` is the CREDITS page's text, one menu line each.
-pub const CREDITS_LINES: [&str; 24] = [
-    "Warped: hyperbolic wormholes",
+pub const CREDITS_LINES: [&str; 25] = [
+    "Warped: Dust",
     "",
     "SURFACES  Poly Haven textures, CC0 (polyhaven.com/a/<name>)",
-    "  moon_01, moon_meteor_02, concrete_wall_008, metal_plate,",
-    "  corrugated_iron_02, rusty_metal_02, concrete_pavement_02,",
+    "  aerial_sand, large_sandstone_blocks (Rob Tuytel), gravelly_sand",
+    "  (Dario Barresi), cliff_side (James Ray Cock, Dario Barresi),",
+    "  metal_plate, corrugated_iron_02, rusty_metal_02,",
     "  concrete_floor_worn_001",
     "SNIPER    \"Bolt Action Rifle 7.62\" by Mateusz Sadek, CC0",
     "  Poly Haven, polyhaven.com/a/bolt_action_rifle_7_62",

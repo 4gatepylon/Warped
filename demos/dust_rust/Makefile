@@ -50,10 +50,11 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help download-assets serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
+	@echo "  make download-assets                            Download Dust's Poly Haven textures into assets/ (once)"
 	@echo "  make serve-game PORT=47830 MAP=lunar-surface     Run a game server, without a window; prints how to join"
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
 	@echo "  make join-game SERVER=auto PORT=47830            Open the window and join the game server (SERVER=auto finds one)"
@@ -106,6 +107,9 @@ package-mac-app:
 	mv $(APP_ZIP).partial $(APP_ZIP)
 	@echo "App: $(APP)"
 	@echo "Zip: $(APP_ZIP)"
+
+download-assets:
+	sh tools/download_textures.sh
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)

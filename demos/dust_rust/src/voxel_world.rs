@@ -3608,4 +3608,41 @@ mod tests {
             );
         }
     }
+
+    /// `the_wind_bends_light_toward_its_direction` checks Dust's wind field (W-121): its gradient
+    /// at the origin is k along the wind, it turns a ray across the wind toward it, and leaves a
+    /// ray along the wind alone.
+    #[test]
+    fn the_wind_bends_light_toward_its_direction() {
+        const K: f64 = 0.06;
+        let wind: WindField = WindField {
+            normal: DVec4::new(1.0, 0.0, 0.0, 0.0),
+            k: K,
+            segment_s: 0.24,
+        };
+        let origin: DVec4 = DVec4::new(0.0, 0.0, 0.0, 1.0);
+        let gradient: DVec4 = wind.get_gradient(origin);
+        assert!((gradient - DVec4::new(K, 0.0, 0.0, 0.0)).length() < 1e-12, "{gradient}");
+        let across: DVec4 = wind.kick(origin, DVec4::new(0.0, 0.0, -1.0, 0.0), 0.5);
+        assert!(across.x > 0.0 && across.z < 0.0, "{across}");
+        let along: DVec4 = wind.kick(origin, DVec4::new(1.0, 0.0, 0.0, 0.0), 0.5);
+        assert!((along - DVec4::new(1.0, 0.0, 0.0, 0.0)).length() < 1e-12, "{along}");
+    }
+
+    /// `the_dust_laser_bends_downwind` checks that on Dust a laser fired across the wind lands
+    /// downwind of where it lands without the wind.
+    #[test]
+    fn the_dust_laser_bends_downwind() {
+        let map: Map = Map::Load(&crate::map::get_map_folder("dust")).expect("the Dust map");
+        let windy: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let calm: VoxelWorld = VoxelWorld {
+            wind: None,
+            ..windy.clone()
+        };
+        let camera: DMat4 =
+            VoxelPlayer::AtView(&windy, [0.0, -40.0], [0.0, 40.0], None, 0.0).get_camera_frame(&windy);
+        let windy_spot: DVec4 = windy.trace_laser(camera).spot.expect("a windy hit");
+        let calm_spot: DVec4 = calm.trace_laser(camera).spot.expect("a calm hit");
+        assert!(windy_spot.x > calm_spot.x, "{windy_spot} vs {calm_spot}");
+    }
 }

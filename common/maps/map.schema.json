@@ -307,6 +307,33 @@
           ]
         }
       }
+    },
+    "atmosphere": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fog": {
+          "type": "object",
+          "required": ["color", "start_m", "distance_m", "max_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "color": {"$ref": "#/$defs/color"},
+            "start_m": {"type": "number", "minimum": 0},
+            "distance_m": {"type": "number", "exclusiveMinimum": 0},
+            "max_frac": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "wind": {
+          "type": "object",
+          "required": ["direction", "log_index_gradient_per_m", "segment_m"],
+          "additionalProperties": false,
+          "properties": {
+            "direction": {"$ref": "#/$defs/vector3"},
+            "log_index_gradient_per_m": {"type": "number"},
+            "segment_m": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
+      }
     }
   },
   "$defs": {

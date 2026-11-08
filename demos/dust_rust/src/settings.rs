@@ -833,12 +833,12 @@ mod tests {
 
     #[test]
     fn curvature_takes_1_to_2() {
-        const BUILTIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.5;
+        const BUILTIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
         let builtin: f64 = ServerSettings::Builtin().space.curvature_per_map_curvature;
         assert_eq!(builtin, BUILTIN_CURVATURE_PER_MAP_CURVATURE);
         for (factor, is_valid) in [("1.0", true), ("2.0", true), ("0.5", false), ("2.5", false)] {
             let yaml: String = BUILTIN_SERVER_YAML.replace(
-                "curvature_per_map_curvature: 1.5",
+                "curvature_per_map_curvature: 1.0",
                 &format!("curvature_per_map_curvature: {factor}"),
             );
             let result: Result<ServerSettings> = ServerSettings::FromYaml(&yaml, "test");
