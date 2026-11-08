@@ -431,7 +431,7 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
             current = partner;
             continue;
         }
-        float h = clamp(0.1 * (rho - 0.5 * pt), 0.01, reach_now / 24.0);
+        float h = clamp(0.2 * (rho - 0.5 * pt), 0.02, reach_now / 10.0);
         float3 g = get_lens_bend(lens, current, x);
         v = normalize(v + (g - dot(g, v) * v) * h);
         x += v * h;
