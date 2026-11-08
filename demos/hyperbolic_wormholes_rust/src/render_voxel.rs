@@ -23,6 +23,8 @@ use objc2_metal::{
 
 use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_Z, get_distance, invert_lorentz};
+use crate::mesh::MeshModel;
+use crate::render_mesh::{MeshGpu, NO_MESH, get_mesh_roots};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
@@ -204,6 +206,7 @@ pub struct VoxelFrame {
     mound_grid: Option<Arc<MoundGrid>>,
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
+    meshes: Arc<Vec<MeshModel>>,
 }
 
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
@@ -296,6 +299,7 @@ impl VoxelFrame {
         size_px: (u32, u32),
     ) -> VoxelFrame {
         let r: f64 = world.r;
+        let mesh_roots: Vec<i32> = get_mesh_roots(&world.meshes);
         let structures: Vec<GpuStructure> = world
             .structures
             .iter()
@@ -305,7 +309,12 @@ impl VoxelFrame {
                     rows,
                     centre: to_f32(s.centre),
                     bound: [s.radius.cosh() as f32, 0.0, 0.0, 0.0],
-                    size: [s.first_shape as i32, s.shape_count as i32, 0, 0],
+                    size: [
+                        s.first_shape as i32,
+                        s.shape_count as i32,
+                        s.mesh.map_or(NO_MESH, |m| mesh_roots[m]),
+                        0,
+                    ],
                     scale: [r as f32, 0.0, 0.0, 0.0],
                 }
             })
@@ -492,6 +501,7 @@ impl VoxelFrame {
             mound_grid: get_mound_grid(&world.terrain).cloned(),
             dust_bursts,
             dust_particles,
+            meshes: Arc::clone(&world.meshes),
         }
     }
 
@@ -622,6 +632,7 @@ pub struct VoxelGpu {
     tonemap: Pipeline,
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
+    meshes: Option<(*const Vec<MeshModel>, MeshGpu)>,
     post: Option<PostTextures>,
 }
 
@@ -667,6 +678,7 @@ impl VoxelGpu {
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
             textures: SurfaceTextures::Load(device)?,
+            meshes: None,
             post: None,
         })
     }
@@ -724,6 +736,15 @@ impl VoxelGpu {
                 encoder.setTexture_atIndex(Some(map), FIRST_SURFACE_TEXTURE_INDEX + k);
             }
         }
+        let mesh_key: *const Vec<MeshModel> = Arc::as_ptr(&frame.meshes);
+        if self.meshes.as_ref().is_none_or(|(key, _)| *key != mesh_key) {
+            self.meshes = Some((mesh_key, MeshGpu::New(device, &frame.meshes)?));
+        }
+        self.meshes
+            .as_ref()
+            .expect("the meshes were just uploaded")
+            .1
+            .bind(encoder);
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
         unsafe {

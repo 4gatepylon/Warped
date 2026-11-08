@@ -37,6 +37,7 @@ mod multiplayer;
 mod net;
 mod physics;
 mod render_cpu;
+mod render_mesh;
 mod render_metal;
 mod render_voxel;
 mod scene_data;
