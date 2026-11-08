@@ -98,6 +98,8 @@ reference Lunar Surface level takes 21-71 ms per frame at the same size on this 
   "Now" has 48 m wind chords and terrain steps that grow with the whole distance a ray has gone (they used to
   restart at each chord and each wormhole step), which helped both levels; Dust's wormhole views are still
   slower than Lunar's (the fog chords after the mouth). Not under 16.7 ms on this machine.
+- Since then the renderer starts at render scale 0.6 with 3 terrain octaves (DECISIONS.md, item 17): at 2560x1440
+  every view but `wormhole`, `wormhole_exit` and `laser_into_wormhole` (17.6–19.3 ms) has a median under 16.7 ms.
 - `--play-route --route warp-tour` at 1280x800 (frame times include 60 Hz vsync; the first 5 frames are skipped):
 
   | | median ms | 99th percentile ms | worst ms | render scale mean |

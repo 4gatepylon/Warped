@@ -105,7 +105,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const BYTES_PER_PIXEL: usize = 4;
 const LONE_MOUTH_HITS_TO_DESTROY: u8 = 1;
 const CPU_RENDER_SCALE: f64 = 0.35;
-const METAL_RENDER_SCALE: f64 = 1.0;
+const METAL_RENDER_SCALE: f64 = 0.6;
 const MIN_AUTO_RENDER_SCALE: f64 = 0.5;
 const AUTO_SCALE_TARGET_GPU_MS: f64 = 14.0;
 const AUTO_SCALE_MAX_STEP: f64 = 1.02;
@@ -1426,7 +1426,12 @@ fn bench_voxel_views(
     BlackHoleGrowth::New(arguments.black_hole_strength).update(&mut grown_world, 0, 0.0);
     let world: &VoxelWorld = &grown_world;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
-    let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
+    let render_px: (u32, u32) = scale_size(
+        size_px,
+        arguments
+            .render_scale
+            .unwrap_or(get_default_render_scale(arguments.renderer)),
+    );
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
     let mut pixels: Vec<u8> = vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL];
     let views: Vec<VoxelView> = if arguments.photo_views {
