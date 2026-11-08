@@ -15,6 +15,63 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
+- [~] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
+  (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
+  The user asked on 2026-11-07: running servers so that people can play; it "does not need to be highly
+  available or performant", it "just has to work in happy path with <= 20 concurrent players, i.e. across <= 3
+  games". On GCP, "completely reproducible using either their Terraform format or some scripts (whichever is
+  simplest and easiest to use)"; no git clone on the server ("locally build for the right target and then just
+  scp or run a script to upload and do the Terraform"); ideally a "one click setup". On 2026-11-08: "share just
+  the hyperbolic Rust demo on Mac", set up to be "slightly more generalizable" for a bigger game later, "but
+  please do not overcomplicate this".
+  Claimed by Claude Code (session `424fcf46-e362-48b1-8e23-4eed979a478f`), branch `claude/share-mac-demo`,
+  2026-11-08.
+- [~] **W-58 Installable bundle.** Define the map in some kind of declarative form so that it can be put into an app
+  bundle that other people can install or port without needing the GitHub repository; more generally, refactor
+  things so there is an easy "bundle, then give the bundle to another person, and they can run it easily". Before
+  starting, talk with the user about how to do it, rather than doing it in some random way.
+
+  The user asked to fold in this plan, which another agent wrote, as part of this item: a **downloadable Mac app**.
+  The game is played among friends: a friend downloads a zip, unzips it and runs the game on an Apple silicon Mac
+  (macOS 13+), then hosts or joins a game on the same Wi-Fi, without a terminal, Rust or a checkout of the repo. Not
+  for the App Store, and no paid Apple developer account.
+  1. **Built-in maps:** build the maps (`common/maps/house_demo` and `lunar_surface`, about 136 KB) into the
+     program. Today `get_map_folder` finds them through the path to the checkout, which is fixed at build time, so
+     they aren't found on other Macs.
+  2. **Title screen:** a double-clicked app gets no flags, so it opens on a screen with Host, Join (finds the game on
+     the local network) and a map choice. Build it on the W-46 settings menu.
+  3. **Logs and errors:** log to `~/Library/Logs/` instead of the terminal, and show fatal errors in a pop-up.
+  4. **Version check:** put a version number in the join messages, and refuse a player whose version doesn't match
+     the server's, with a clear message, since friends will download at different times.
+  5. **App and zip:** a `make app` target that builds the .app (`Info.plist` with name, icon, minimum macOS 13, and a
+     line explaining the local network use), signs it ad hoc (free), and zips it with `ditto -c -k --keepParent` so
+     the app survives unzipping.
+  6. **Local network permission:** as its own app, macOS asks the player whether the game may find devices on the
+     local network. If the player refuses, the game says so clearly instead of failing silently.
+  7. **First-open instructions:** without notarization, macOS blocks a downloaded app the first time. `PLAYTEST.md`
+     and a short note in the zip tell players to open the app once, then click System Settings → Privacy & Security
+     → Open Anyway.
+  8. **Hosting the zip:** the repo is private, so friends can't download from its GitHub Releases unless added to
+     the repo. Ask the user where the zip goes (for example a shared Drive or Dropbox link).
+
+  Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
+  renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
+
+  On 2026-11-07 the user asked for all of W-58 to be done together with W-42 and W-116, and the zip is hosted on
+  the W-116 download page; after W-79 the title screen offers only online games and joining on this Wi-Fi.
+  Claimed by Claude Code (session `424fcf46-e362-48b1-8e23-4eed979a478f`), branch `claude/share-mac-demo`,
+  2026-11-08.
+- [~] **W-116 Download page.** "A webpage people can go to download the app and an easy installation (and other
+  stuff like it has a nice icon etc)"; "think as simple as possible".
+  Claimed by Claude Code (session `424fcf46-e362-48b1-8e23-4eed979a478f`), branch `claude/share-mac-demo`,
+  2026-11-08.
+- [~] **W-117 Server DoS protection.** "Bare minimum security/auth in the form of 'people can't DoS my server' or
+  something like that." The user chose a game password with a challenge: the server sends a random challenge
+  and the client answers with a keyed hash of the password, so the password never crosses the network, and every
+  later message carries a per-player token.
+  Claimed by Claude Code (session `424fcf46-e362-48b1-8e23-4eed979a478f`), branch `claude/share-mac-demo`,
+  2026-11-08.
+
 ## Open
 
 - [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
@@ -52,39 +109,6 @@ is in [`AGENTS.md`](AGENTS.md).
   play but has a dashboard where they can change or reset those settings.
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
-- [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
-  (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
-- [ ] **W-58 Installable bundle.** Define the map in some kind of declarative form so that it can be put into an app
-  bundle that other people can install or port without needing the GitHub repository; more generally, refactor
-  things so there is an easy "bundle, then give the bundle to another person, and they can run it easily". Before
-  starting, talk with the user about how to do it, rather than doing it in some random way.
-
-  The user asked to fold in this plan, which another agent wrote, as part of this item: a **downloadable Mac app**.
-  The game is played among friends: a friend downloads a zip, unzips it and runs the game on an Apple silicon Mac
-  (macOS 13+), then hosts or joins a game on the same Wi-Fi, without a terminal, Rust or a checkout of the repo. Not
-  for the App Store, and no paid Apple developer account.
-  1. **Built-in maps:** build the maps (`common/maps/house_demo` and `lunar_surface`, about 136 KB) into the
-     program. Today `get_map_folder` finds them through the path to the checkout, which is fixed at build time, so
-     they aren't found on other Macs.
-  2. **Title screen:** a double-clicked app gets no flags, so it opens on a screen with Host, Join (finds the game on
-     the local network) and a map choice. Build it on the W-46 settings menu.
-  3. **Logs and errors:** log to `~/Library/Logs/` instead of the terminal, and show fatal errors in a pop-up.
-  4. **Version check:** put a version number in the join messages, and refuse a player whose version doesn't match
-     the server's, with a clear message, since friends will download at different times.
-  5. **App and zip:** a `make app` target that builds the .app (`Info.plist` with name, icon, minimum macOS 13, and a
-     line explaining the local network use), signs it ad hoc (free), and zips it with `ditto -c -k --keepParent` so
-     the app survives unzipping.
-  6. **Local network permission:** as its own app, macOS asks the player whether the game may find devices on the
-     local network. If the player refuses, the game says so clearly instead of failing silently.
-  7. **First-open instructions:** without notarization, macOS blocks a downloaded app the first time. `PLAYTEST.md`
-     and a short note in the zip tell players to open the app once, then click System Settings → Privacy & Security
-     → Open Anyway.
-  8. **Hosting the zip:** the repo is private, so friends can't download from its GitHub Releases unless added to
-     the repo. Ask the user where the zip goes (for example a shared Drive or Dropbox link).
-
-  Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
-  renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-
 ## Pending user review
 
 - [?] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
