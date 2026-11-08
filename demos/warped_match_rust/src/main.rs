@@ -178,6 +178,7 @@ const TITLE_FRAME_MS: u64 = 16;
 const LEVEL_RESTART_S: f64 = 1.0;
 const MATCH_WINDOW_PX: (u32, u32) = (1280, 800);
 const MATCH_MASK_PX: (u32, u32) = (728, 420);
+const MATCH_HEIGHT_FRAC: f32 = 0.95;
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
@@ -780,6 +781,7 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
     };
     let mut canvas: Option<sdl3::render::WindowCanvas> = window.map(|(_, canvas)| canvas);
     let mut printed_phase: Option<match_flow::Phase> = None;
+    let mut is_over_announced: bool = false;
     let result: Result<()> = (|| loop {
         client.poll()?;
         for event in event_pump
@@ -852,7 +854,8 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                 level = Some((round, command.spawn()?));
             }
         }
-        if view.phase == match_flow::Phase::Over {
+        if view.phase == match_flow::Phase::Over && !is_over_announced {
+            is_over_announced = true;
             let outcome = view.state.outcome().expect("an over match has an outcome");
             println!(
                 "The match is over: {}",
@@ -873,7 +876,7 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                     &OverlayText {
                         lines,
                         mask_px: MATCH_MASK_PX,
-                        height_frac: MENU_HEIGHT_FRAC,
+                        height_frac: MATCH_HEIGHT_FRAC,
                         is_centered: false,
                         dim_frac: 0.0,
                         picture: None,

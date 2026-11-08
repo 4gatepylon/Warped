@@ -143,7 +143,7 @@ else
 endif
 
 # The plugged-in levels (match_levels.yaml): each level's branch as a git worktree in .levels/, built there.
-LEVEL_BRANCHES := snow_planet:devin/snow-planet-demo
+LEVEL_BRANCHES := snow_planet:devin/snow-planet-demo dust:devin/dust-demo
 
 levels:
 	git fetch origin $(foreach level,$(LEVEL_BRANCHES),$(word 2,$(subst :, ,$(level))))
@@ -151,7 +151,7 @@ levels:
 	  $(eval name := $(word 1,$(subst :, ,$(level))))$(eval branch := $(word 2,$(subst :, ,$(level))))\
 	  (test -d .levels/$(name) || git worktree add --detach .levels/$(name) origin/$(branch)) && \
 	  git -C .levels/$(name) checkout --detach origin/$(branch) && \
-	  (cd .levels/$(name)/demos/$(name)_rust && cargo build --release) &&) true
+	  (cd .levels/$(name)/demos/$(name)_rust && (! grep -q '^download-assets:' Makefile || make download-assets) && cargo build --release) &&) true
 
 # The match (README, "Match"): a match server, a window or bot per player.
 serve-match: levels

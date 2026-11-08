@@ -85,7 +85,7 @@ address); each round's level server 47852, and this copy's level discovery 47853
 
 | # | Level | Side, depth | Pylons a team | Folder | Branch | In the match |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Dust | blue 2 | 3 | `demos/dust_rust/` | `devin/dust-demo` | Lunar Surface stands in |
+| 1 | Dust | blue 2 | 3 | `demos/dust_rust/` | `devin/dust-demo` | plugged in (`make levels`) |
 | 2 | Snow Planet | blue 1 | 2 | `demos/snow_planet_rust/` | `devin/snow-planet-demo` | plugged in (`make levels`) |
 | 3 | City Sphere | purple 0 | 2 | `demos/city_sphere_rust/` | `devin/city-sphere-demo` | Lunar Surface stands in |
 | 4 | Dark Forest | red 1 | 2 | `demos/dark_forest_rust/` | `devin/dark-forest-demo` | Lunar Surface stands in |

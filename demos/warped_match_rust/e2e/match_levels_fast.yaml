@@ -8,11 +8,10 @@ levels:
   - name: Dust
     folder: demos/dust_rust
     branch: devin/dust-demo
-    status: stand-in (Lunar Surface) until devin/dust-demo is plugged in
-    program: self
-    map: lunar-surface
-    server_args: [--server-settings, e2e/fast_server_settings.yaml]
-    stand_in_for: Dust
+    status: plugged in (make levels links and builds devin/dust-demo in .levels/)
+    program: .levels/dust/demos/dust_rust/.build/release/hyperbolic-wormholes
+    map: dust
+    server_args: [--server-settings, e2e/fast_dust_server_settings.yaml]
   - name: Snow Planet
     folder: demos/snow_planet_rust
     branch: devin/snow-planet-demo
