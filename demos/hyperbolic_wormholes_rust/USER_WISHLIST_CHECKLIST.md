@@ -10,6 +10,11 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
+  windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
+  (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/see-through-windows`,
+  2026-11-07.
 - [~] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
   noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
   All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
