@@ -44,10 +44,10 @@ const CLUMP_SPREAD_FRAC: f32 = 2.2;
 const THIN_CULM_RADIUS_M: f32 = 0.13;
 const MAX_CULM_LEAN_RAD: f32 = 0.08;
 /// `LEAF_SPRAY_COUNT` thin leaf sprays point out from each culm over its top `LEAF_SPRAY_DEPTH_M`.
-const LEAF_SPRAY_COUNT: usize = 6;
-const LEAF_SPRAY_DEPTH_M: f32 = 3.0;
-const LEAF_HALF_LENGTH_M: f32 = 0.9;
-const LEAF_HALF_WIDTH_M: f32 = 0.14;
+const LEAF_SPRAY_COUNT: usize = 10;
+const LEAF_SPRAY_DEPTH_M: f32 = 4.5;
+const LEAF_HALF_LENGTH_M: f32 = 1.3;
+const LEAF_HALF_WIDTH_M: f32 = 0.22;
 const LEAF_HALF_THICKNESS_M: f32 = 0.03;
 
 const AIR: u8 = 0;

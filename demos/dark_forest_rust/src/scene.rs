@@ -196,11 +196,11 @@ fn environment_from_sky(sky: Sky) -> (EnvironmentData, f32) {
         exposure: MIDDLE_EXPOSURE / daylight_radiance.max(1e-4),
         ibl_intensity_frac,
         fog_color_rgb,
-        fog_density_per_m: 0.0035,
+        fog_density_per_m: 0.007,
         fog_height_falloff_per_m: 0.12,
         fog_base_height_m: 0.0,
         fog_sun_inscatter_frac: 0.6,
-        fog_max_opacity_frac: 0.7,
+        fog_max_opacity_frac: 0.8,
         bounce_color_rgb: up_irradiance_rgb * Vec3::new(0.36, 0.32, 0.28),
         bloom_mix_frac: 0.06,
     };

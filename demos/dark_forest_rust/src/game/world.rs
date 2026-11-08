@@ -141,10 +141,10 @@ pub struct Arena {
 
 /// `CYLINDER_SEGMENT_COUNT` is how many sides a trunk or log mesh has.
 const CYLINDER_SEGMENT_COUNT: usize = 14;
-/// `ELLIPSOID_RING_COUNT` and `ELLIPSOID_SEGMENT_COUNT` are a canopy's latitude and longitude
+/// `ELLIPSOID_RING_COUNT` and `ELLIPSOID_SEGMENT_COUNT` are a leaf spray's latitude and longitude
 /// divisions.
-const ELLIPSOID_RING_COUNT: usize = 8;
-const ELLIPSOID_SEGMENT_COUNT: usize = 14;
+const ELLIPSOID_RING_COUNT: usize = 6;
+const ELLIPSOID_SEGMENT_COUNT: usize = 8;
 /// `BAMBOO_TILE_FRAC_AROUND_CULM` is how much of the bamboo texture's width (a row of about 30
 /// culms) wraps once around a culm, so each culm shows about two of the texture's.
 const BAMBOO_TILE_FRAC_AROUND_CULM: f32 = 0.06;
