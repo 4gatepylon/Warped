@@ -131,6 +131,25 @@ With `--no-vsync` only 12 of 16,856 frames take over 17.5 ms, so the vsync p99 i
 game; robot posing, network polling and allocations don't show up in the slow frames. Only a real Mac display can
 say whether the vsync p99 meets 16.7 ms.
 
+## Station look, pylons, map page, photos
+
+- **Look**: a space station: steel deck plates (`metal_plate`) with lit cyan panel seams, buildings in Poly Haven CC0
+  `metal_plate_02` and `blue_metal_plate` (`make download-assets` puts them in `assets/textures/`), metal highlights,
+  and the glass as a window with metal ribs.
+- **Pylons**: the hyperbolic demo's `scifi_beacon` (as on Lunar Surface) with its base colour and emissive textures,
+  recoloured per team; it pulses while its console is being turned off and goes dark when off. Each console sits
+  inside its pylon. The beacons are drawn once with the still scene; each console's state goes in the uniforms.
+- **Laser colours** come from the map's optional `lasers` (`common/maps/README.md`); City Sphere's are blue and red.
+- **Map page** (`Tab`, then `E`): the whole sphere seen from its centre, unrolled (longitude across, latitude down),
+  rendered by `make map-picture` into `assets/map_picture.png` and cached; consoles, players and you are drawn over
+  it. Without the file it falls back to a flat drawing.
+- **Photos**: `make photos WIDTH_PX=2560 HEIGHT_PX=1440` renders photogenic views into `.artifacts/photos/`.
+- **Rifle check**: `make play-route ROUTE=rifle` with `make run-bot SERVER=127.0.0.1 TEAM=red BOT_OBJECTIVE=target`:
+  20 shots to overheat, 2.0 s to cool, the target eliminated by 2 head hits and then by 12 body hits.
+
+`make bench-views WIDTH_PX=2560 HEIGHT_PX=1440 FRAME_COUNT=60` with the station look and beacons: GPU median 1.35 to
+1.74 ms in the five plain views; eight robots and eight reflected shots 7.2 ms GPU, 14.8 ms frame (p99 15.8 ms).
+
 ## Known limitations
 
 - On this VM the frame interval's p99 with vsync (21 to 28 ms) is over 16.7 ms because of the display's pacing (see

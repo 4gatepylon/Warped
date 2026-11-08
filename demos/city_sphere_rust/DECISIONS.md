@@ -66,4 +66,16 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
     should weigh in on its look.
 19. **Gun 2 is the hyperbolic demo's rifle**: heat, overheat, head and body hits from `server_settings.yaml`. Its
     pulses reflect off the glass like the laser's shots.
+20. **Pylons are Lunar Surface's beacon** (the user asked every level to share the hyperbolic demo's pylons): the
+    `scifi_beacon` model scaled to each pylon box's height (5.2 m on the street, 4 m on the glass level, since the
+    levels are only 7 m apart), and each console moved inside its pylon, as on Lunar Surface.
+21. **Beacons are still geometry with per-console state in the uniforms**: rebuilding 4 x 15k triangles each frame
+    doubled the GPU time and pushed the worst view to 22 ms.
+22. **Map page picture from the centre, unrolled**: a sphere has no "from above"; from the centre every street and
+    the glass level show at once, in the same projection as the live marks. It has no shadows (the renderer has none).
+23. **Station look on the existing renderer**: metal textures are desaturated to read as steel; panel seams are
+    drawn in the shader, not textures. Hazard stripes, grime, metal frames for blocks and per-panel roughness are
+    not done yet.
+24. **`lasers` in the map format** is optional and either one colour or two team colours, so Dust and Dark Forest
+    can be golden, Snow Planet green, and Lunar Surface and City Sphere red and blue.
 
