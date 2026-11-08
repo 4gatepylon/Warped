@@ -55,3 +55,15 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
 14. **Robots share one pose per animation clip each frame** (posing the skinned model is the CPU's biggest cost).
 15. **`--bot-objective consoles` doesn't walk**: the server takes a client's word for which console it holds, as the
     W-123 (match progression demo) interface allows.
+16. **Two frames in flight**: the window no longer waits for the GPU to finish a frame before drawing the next, so
+    the CPU and GPU overlap. Lunar Surface's vsync p99 fell from 33 to 23 ms on this VM; City Sphere's (21 to 28 ms,
+    varying between runs) didn't clearly change, because its frames wait for the display, not the GPU. `--no-vsync`
+    is a measuring flag only; play keeps vsync on.
+17. **The scripted route's server doesn't announce itself** on the network, so recording it needs no Local Network
+    permission; every other server still announces itself for `--join auto`.
+18. **The minimap is a view of the whole sphere from outside, centred on the player** (consoles in team colours,
+    grey when off, robots, the player in white), because the hyperbolic minimap draws the hyperbolic plane. The user
+    should weigh in on its look.
+19. **Gun 2 is the hyperbolic demo's rifle**: heat, overheat, head and body hits from `server_settings.yaml`. Its
+    pulses reflect off the glass like the laser's shots.
+

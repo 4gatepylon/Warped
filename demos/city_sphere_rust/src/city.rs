@@ -130,15 +130,16 @@ fn get_console_teams(world: &CityWorld) -> Vec<u32> {
 
 /// `start_server` starts a game server for City Sphere on `port` in a thread; a new game starts
 /// when Enter is pressed in the terminal unless `result_path` is set (then the won game stays won
-/// and the winner is written there).
+/// and the winner is written there); it announces itself on the network if `should_announce`.
 ///
-/// Example: `let (stop, thread) = start_server(47810, settings, &world, Vec::new(), None)?;`
+/// Example: `let (stop, thread) = start_server(47810, settings, &world, Vec::new(), None, true)?;`
 fn start_server(
     port: u16,
     settings: ServerSettings,
     world: &CityWorld,
     game_password: Vec<u8>,
     result_path: Option<PathBuf>,
+    should_announce: bool,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -164,6 +165,7 @@ fn start_server(
             None,
             game_password,
             result_path,
+            should_announce,
         ) {
             eprintln!("The game server stopped: {error}");
         }
@@ -180,6 +182,7 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         &world,
         net::read_game_password(arguments.game_password_file.as_deref())?,
         arguments.level_result_file.clone(),
+        true,
     )?;
     let port: u16 = arguments.port;
     let address: String = find_lan_address().map_or("<this computer's address>".to_string(), |a| a.to_string());
@@ -558,7 +561,7 @@ impl CitySession {
         let (server, address) = match &arguments.join {
             Some(_) => (None, get_server_address(arguments)?),
             None => (
-                Some(start_server(arguments.port, settings.clone(), &world, password.clone(), None)?),
+                Some(start_server(arguments.port, settings.clone(), &world, password.clone(), None, !arguments.play_route)?),
                 SocketAddr::from((Ipv4Addr::LOCALHOST, arguments.port)),
             ),
         };

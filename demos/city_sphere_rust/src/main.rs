@@ -910,6 +910,7 @@ fn start_server(
             None,
             game_password,
             None,
+            true,
         ) {
             eprintln!("The game server stopped: {error}");
         }

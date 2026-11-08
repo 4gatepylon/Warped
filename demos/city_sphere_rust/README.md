@@ -45,9 +45,11 @@ make join-game SERVER=127.0.0.1 TEAM=red    # terminal 3: window 2
 
 Controls are the hyperbolic demo's (`player_settings.yaml`): `WASD` walk, mouse look (click to capture the mouse),
 `Shift` sprint, `Space` jump (hold it on a lift pad to ride up; walk off at the top), left click shoots, right click
-zooms, hold `E` near the other team's console to turn it off (10 s), `Esc` or `Tab` releases the mouse (close the window to quit), `-` and `=` lower and
-raise the render resolution. The window's title shows your team, level, consoles still on, the reload and the frame
-rate.
+zooms, `1` the laser, `2` the rifle (heats up; overheats), wheel switches gun, hold `E` near the other team's console
+to turn it off (10 s), `Esc` releases the mouse (close the window to quit), `Tab` opens the menu (`Q`/`E` change page:
+scores, settings, map, credits), `-` and `=` lower and raise the render resolution. The minimap (top right) shows the
+whole sphere centred on you: consoles in team colours (grey when off), robots, and you in white. The window's title
+shows your team, level, consoles still on, the gun's reload or heat and the frame rate.
 
 ### Flags for the match (W-123)
 
@@ -90,7 +92,9 @@ make play-route                                                # the scripted ro
 
 `--play-route` plays blue alone: ride a lift, fire four shots that reflect or cross, walk across the glass level to
 red's glass console and turn it off, drop through a hole to red's street console and turn it off (blue wins), then
-print the frame times, GPU times and winner as JSON.
+print the frame times, GPU times, each part of the frame (`phases`) and winner as JSON. Its server doesn't announce
+itself on the network, so macOS doesn't ask for Local Network access during a recording. Add `--no-vsync` to the
+binary (`.build/release/city-sphere --play-route --no-vsync`) to time frames without waiting for the display.
 
 ## Results
 
@@ -107,13 +111,30 @@ Apple M4 Pro (virtual machine, 12 cores, 16 GB), macOS 26.6.2, rustc 1.99.0, 202
 | lift_up | 1.49 | 3.75 | 2.69 | 5.02 |
 | glass_crowd_and_shots (8 robots, 8 reflected shots) | 6.17 | 6.83 | 12.43 | 14.24 |
 
-`--play-route` in a 1280x800 window (this VM's display has no Retina scaling), 2835 frames, blue won:
-frame interval median 16.69 ms (vsync), p99 21.23 ms; GPU median 2.04 ms, p99 3.69 ms.
+`--play-route` in a 1280x800 window (this VM's display has no Retina scaling), blue won. Frame interval in ms;
+Lunar Surface is the hyperbolic demo's `--map lunar-surface --play-route warp-tour` (adaptive render scale) on the same
+VM. "Before" is before frame pipelining (commit `6d4cd3b`):
+
+| Route | Median | p99 | Worst |
+| --- | --- | --- | --- |
+| Lunar Surface, before, vsync | 16.7 | 33.0 | 322 |
+| Lunar Surface, after, vsync | 16.7 | 23.0 | 173 |
+| Lunar Surface, after, `--no-vsync` | 12.2 | 18.5 | 161 |
+| City Sphere, before, vsync | 16.7 | 21 to 24 | |
+| City Sphere, after, vsync | 16.7 | 21 to 28 | |
+| City Sphere, after, `--no-vsync` | 2.5 | 7.1 | |
+
+City Sphere's GPU time is 2.1 ms median and 4 to 6 ms p99. The route's JSON also gives each part of the frame: the
+game's own work (input, update, building the frame, overlay) stays under 1 ms at p99 in total apart from input
+(2.2 ms), and nearly all the rest is `render_and_present`, waiting in `CAMetalLayer::nextDrawable` for the display.
+With `--no-vsync` only 12 of 16,856 frames take over 17.5 ms, so the vsync p99 is this VM's display pacing, not the
+game; robot posing, network polling and allocations don't show up in the slow frames. Only a real Mac display can
+say whether the vsync p99 meets 16.7 ms.
 
 ## Known limitations
 
-- The frame interval's p99 in the window (21 ms) is over 16.7 ms although the GPU takes 2 to 4 ms: some frames wait
-  on the CPU (not yet profiled).
+- On this VM the frame interval's p99 with vsync (21 to 28 ms) is over 16.7 ms because of the display's pacing (see
+  Results); not yet measured on a real Mac display.
 - Posing robots costs about 1 ms of CPU per clip each frame; a crowd of eight is the worst view's main cost.
-- Only the laser (gun 1); no rifle, minimap, menu or zone walls in City Sphere yet. No shadows.
+- No zone walls, thrown wormholes or shadows in City Sphere. The menu's MAP page has no picture of City Sphere.
 - Lifts instead of the WebGL version's stairs (see `DECISIONS.md`).
