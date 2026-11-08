@@ -1036,6 +1036,27 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D88. Lasers still stop on window glass (W-57)
+
+- **Choice:**
+  - **Finding:** the room is the red habitat module (and its twins, the derelict modules), with four windows one
+    meter wide in each long wall. A shot at a window stops on the window's glass pane. It always did: the voxel walk
+    stopped at any filled cell, glass included, while the picture looked through glass, so the window looked open
+    but held the laser. That is the "hitbox". It isn't a fault of the tracer: the shot stops exactly on the pane's
+    near face whether the shooter stands 5 cm, 30 cm or 3.5 m from it, aims square on or slantwise, or shoots in
+    from outside. The shot is traced from the eye, so the gun's muzzle (`MUZZLE_M`, 0.555 m ahead) reaching past
+    the pane changes only where the drawn beam starts.
+  - **No change:** the map format makes `glass` see-through for light but a stop for lasers and players, as the
+    WebGL level does (`demos/levels/lunar_surface/DECISIONS.md` D16). A new test,
+    `the_laser_stops_on_a_window_pane`, keeps it so.
+  - **Since #147 (W-59):** the smooth-shape export lays each pane over a solid hull wall, so the habitat modules'
+    and walkways' windows no longer show the outside. A laser through glass would now stop on the hull 6 cm behind.
+- **Alternatives:**
+  - lasers through glass (the format and the level would change, and the walls would need holes behind the panes);
+  - window holes in the walls without glass, as doorways are (players could climb through).
+- **Rationale:** you reported that a laser shot out of a window close up doesn't leave the room; it stops on the
+  glass by design, so whether lasers should pass through windows is your call.
+
 
 ## Baselines
 
