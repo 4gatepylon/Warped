@@ -25,6 +25,7 @@
 //! - An elimination counts a death for the player hit and a kill for the shooter, unless they are on
 //!   the same team. Scores go back to 0 when a new game starts.
 
+use std::cell::Cell;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
@@ -54,6 +55,8 @@ const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
 const JOIN_RETRY_S: f64 = 0.5;
 const PLAYER_TIMEOUT_S: f64 = 3.0;
+const BEACON_GATHER_S: f64 = 1.0;
+const OTHER_VERSION_WINDOW_S: f64 = 1.0;
 const SERVER_POLL_MS: u64 = 2;
 const MAX_DATAGRAM_BYTES: usize = 2048;
 const BEACON_MAGIC: &[u8; 8] = b"WORMHOLE";
@@ -78,6 +81,7 @@ enum Kind {
     LobbyQuery = 9,
     Lobby = 10,
     Scores = 11,
+    Full = 12,
 }
 
 impl Kind {
@@ -98,16 +102,18 @@ impl Kind {
             Kind::LobbyQuery,
             Kind::Lobby,
             Kind::Scores,
+            Kind::Full,
         ]
         .into_iter()
         .find(|kind| *kind as u8 == byte)
     }
 }
 
-/// `RemotePlayer` is another player as the last snapshot gave them: their eye frame, whether their
-/// laser is on and from which gun, their team (an index into `TEAM_NAMES`), the console they hold
-/// `E` on, if any, and how far along turning it off they are, from 0 to 1, as the server times it
-/// (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it).
+/// `RemotePlayer` is another player as the last snapshot gave them: their eye frame (while their
+/// laser is on, turned by their shot's noise, so it is the frame their laser fires from), whether
+/// their laser is on and from which gun, their team (an index into `TEAM_NAMES`), the console they
+/// hold `E` on, if any, and how far along turning it off they are, from 0 to 1, as the server times
+/// it (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it).
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
@@ -378,12 +384,15 @@ impl Server {
                         });
                         self.start_tally(id, team, address);
                         println!(
-                            "player {id} joined the {} team from {address}",
+                            "player {id} joined the {} team (their window's address: {address}; players join this server's port)",
                             TEAM_NAMES[team as usize]
                         );
                         (id, team)
                     }
-                    None => return Ok(()),
+                    None => {
+                        self.socket.send_to(&Message::New(Kind::Full).0, address)?;
+                        return Ok(());
+                    }
                 };
                 let mut welcome: Message = Message::New(Kind::Welcome).id(id);
                 welcome.0.push(team as u8);
@@ -789,10 +798,15 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
     let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)).map_err(|error| {
         format!("net: can't listen for servers on UDP port {DISCOVERY_PORT} ({error}); join with --join <address>")
     })?;
-    socket.set_read_timeout(Some(timeout))?;
-    let start: Instant = Instant::now();
+    let mut deadline: Instant = Instant::now() + timeout;
+    let mut found: Vec<SocketAddr> = Vec::new();
     let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
-    while start.elapsed() < timeout {
+    loop {
+        let left: Duration = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        socket.set_read_timeout(Some(left))?;
         let Ok((length, address)) = socket.recv_from(&mut buffer) else {
             break;
         };
@@ -803,14 +817,43 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
             && &bytes[1..magic_end] == BEACON_MAGIC
         {
             let port: u16 = u16::from_le_bytes([bytes[magic_end], bytes[magic_end + 1]]);
-            return Ok(SocketAddr::new(address.ip(), port));
+            let server: SocketAddr = SocketAddr::new(address.ip(), port);
+            if found.is_empty() {
+                deadline = deadline.min(Instant::now() + Duration::from_secs_f64(BEACON_GATHER_S));
+            }
+            if !found.contains(&server) {
+                found.push(server);
+            }
         }
     }
-    Err(format!(
-        "net: no server announced itself within {} s; start one with --host, or join with --join <address>",
-        timeout.as_secs()
-    )
-    .into())
+    if found.is_empty() {
+        return Err(format!(
+            "net: no server announced itself within {} s; start one with --host, or join with --join <address>",
+            timeout.as_secs()
+        )
+        .into());
+    }
+    let chosen: SocketAddr = choose_server(&found);
+    if found.len() > 1 {
+        let all: Vec<String> = found.iter().map(SocketAddr::to_string).collect();
+        eprintln!(
+            "Found {} servers ({}); joining {chosen}. To join another, use --join <address>.",
+            found.len(),
+            all.join(", ")
+        );
+    }
+    Ok(chosen)
+}
+
+/// `choose_server` picks which of the servers that announced themselves to join: the first on
+/// `DEFAULT_PORT` (a game started the usual way), else the first heard.
+///
+/// Example: `let server = choose_server(&found);`
+fn choose_server(found: &[SocketAddr]) -> SocketAddr {
+    match found.iter().find(|server| server.port() == DEFAULT_PORT) {
+        Some(&server) => server,
+        None => found[0],
+    }
 }
 
 /// `Client` is this player's connection: its map's name, its id and the server's game settings
@@ -833,6 +876,10 @@ pub struct Client {
     join_request: Option<u8>,
     last_join: Instant,
     pub last_heard: Instant,
+    is_full: bool,
+    first_unanswered: Cell<Option<Instant>>,
+    last_bad_snapshot: Option<Instant>,
+    last_good_snapshot: Option<Instant>,
 }
 
 impl Client {
@@ -861,6 +908,10 @@ impl Client {
             join_request: None,
             last_join: Instant::now(),
             last_heard: Instant::now(),
+            is_full: false,
+            first_unanswered: Cell::new(Some(Instant::now())),
+            last_bad_snapshot: None,
+            last_good_snapshot: None,
         })
     }
 
@@ -882,6 +933,7 @@ impl Client {
                 continue;
             }
             self.last_heard = Instant::now();
+            self.first_unanswered.set(None);
             let bytes: &[u8] = &buffer[..length];
             let mut reader: Reader = Reader { bytes, position: 1 };
             match bytes.first().copied().and_then(Kind::FromByte) {
@@ -898,7 +950,15 @@ impl Client {
                                 self.server, self.map_name, server_map.replace('_', "-")
                             ).into());
                         }
-                        self.settings = Some(ServerSettings::FromJson(&bytes[reader.position..])?);
+                        let settings: ServerSettings =
+                            ServerSettings::FromJson(&bytes[reader.position..]).map_err(|error| {
+                                format!(
+                                    "net: the server at {} sent settings this game can't read, so it runs another version of the game; rebuild the server and this game from the same commit ({error})",
+                                    self.server
+                                )
+                            })?;
+                        self.settings = Some(settings);
+                        self.is_full = false;
                         self.id = Some(id);
                         self.welcomed_id = Some(id);
                         self.team = Some(u32::from(team));
@@ -906,6 +966,7 @@ impl Client {
                         events.push(NetEvent::Joined(id));
                     }
                 }
+                Some(Kind::Full) if self.id.is_none() => self.is_full = true,
                 Some(Kind::Lobby) => {
                     if let Some(counts) = reader.take(TEAM_NAMES.len()) {
                         self.lobby_counts = Some(std::array::from_fn(|i| u32::from(counts[i])));
@@ -919,8 +980,10 @@ impl Client {
                 Some(Kind::Snapshot) => {
                     let count: usize = reader.take(1).map_or(0, |count| usize::from(count[0]));
                     if length != 2 + count * (BYTES_PER_PLAYER + 1) + BYTES_PER_GAME {
+                        self.last_bad_snapshot = Some(Instant::now());
                         continue;
                     }
+                    self.last_good_snapshot = Some(Instant::now());
                     let players: Vec<RemotePlayer> =
                         (0..count).filter_map(|_| reader.player()).collect();
                     self.game = reader.game().expect("the length was checked");
@@ -994,6 +1057,54 @@ impl Client {
         Ok(())
     }
 
+    /// `get_server` gives the address of the server this client plays on.
+    ///
+    /// Example: `let server = client.get_server();`
+    pub fn get_server(&self) -> SocketAddr {
+        self.server
+    }
+
+    /// `get_silent_s` gives how long the server has left this client unanswered: the seconds
+    /// since the first message sent after anything last came from it, or 0 when nothing is
+    /// waiting for an answer. Time when this window sent nothing (a long first frame, say) doesn't
+    /// count.
+    ///
+    /// Example: `if client.get_silent_s() > 2.0 { ... }`
+    pub fn get_silent_s(&self) -> f64 {
+        match self.first_unanswered.get() {
+            Some(sent) => sent.elapsed().as_secs_f64(),
+            None => 0.0,
+        }
+    }
+
+    /// `is_full` says whether the server answered this player's join that the game is full
+    /// (`MAX_PLAYER_COUNT` players), since their last welcome.
+    ///
+    /// Example: `if client.is_full() { ... }`
+    pub fn is_full(&self) -> bool {
+        self.is_full
+    }
+
+    /// `is_other_version` says whether the server's snapshots have the wrong length for this
+    /// game, and none had the right one, within the last `OTHER_VERSION_WINDOW_S`: the server runs
+    /// another version of the game.
+    ///
+    /// Example: `if client.is_other_version() { ... }`
+    pub fn is_other_version(&self) -> bool {
+        let is_recent = |at: Option<Instant>| {
+            at.is_some_and(|at| at.elapsed().as_secs_f64() < OTHER_VERSION_WINDOW_S)
+        };
+        is_recent(self.last_bad_snapshot) && !is_recent(self.last_good_snapshot)
+    }
+
+    /// `is_waiting_for_welcome` says whether this player asked to join and the server hasn't
+    /// welcomed them yet.
+    ///
+    /// Example: `if client.is_waiting_for_welcome() { ... }`
+    pub fn is_waiting_for_welcome(&self) -> bool {
+        self.join_request.is_some() && self.id.is_none()
+    }
+
     /// `is_in_lobby` says whether this player hasn't chosen a team yet.
     ///
     /// Example: `if client.is_in_lobby() { ... }`
@@ -1057,10 +1168,14 @@ impl Client {
         Ok(())
     }
 
-    /// `send` sends a message to the server, dropping it if the socket is momentarily full.
+    /// `send` sends a message to the server, dropping it if the socket is momentarily full, and
+    /// starts the unanswered clock (`get_silent_s`) if it isn't running.
     ///
     /// Example: `self.send(&Message::New(Kind::Join))?;`
     fn send(&self, message: &Message) -> Result<()> {
+        if self.first_unanswered.get().is_none() {
+            self.first_unanswered.set(Some(Instant::now()));
+        }
         match self.socket.send_to(&message.0, self.server) {
             Ok(_) => Ok(()),
             Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(()),
@@ -1077,6 +1192,8 @@ mod tests {
     //! | --- | --- | --- |
     //! | Datagram length | complete (progress kept to a 255th), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
     //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
+    //! | Servers announcing themselves | one, several with one on the default port (chosen), several without (the first) | `the_default_port_wins_among_servers` |
+    //! | A server that can't take this player | full (says so), of another version (snapshots that don't fit) | `full_games_and_other_versions_are_noticed` |
     //! | Team asked for | blue or red (given), any or none (the smaller team), a different one on a repeated join (kept) | `players_join_the_team_they_choose_or_the_smaller` |
     //! | Hit | by a joined player, by a stranger, on a player who is gone | `only_joined_players_can_hit` |
     //! | Welcome size | the built-in settings with the longest map name | `the_welcome_fits_a_datagram` |
@@ -1200,6 +1317,51 @@ mod tests {
     /// Example: `let a = address(50000);`
     fn address(port: u16) -> SocketAddr {
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+    }
+
+    /// `poll_until` polls `client` until `is_done` holds, for at most a second.
+    ///
+    /// Example: `poll_until(&mut client, |c| c.is_full());`
+    fn poll_until(client: &mut Client, is_done: impl Fn(&Client) -> bool) {
+        let start: Instant = Instant::now();
+        while !is_done(client) && start.elapsed() < Duration::from_secs(1) {
+            client.poll().expect("datagrams");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn full_games_and_other_versions_are_noticed() {
+        let mut server: Server = make_server();
+        let join: Vec<u8> = Message::New(Kind::Join).0;
+        for port in 0..MAX_PLAYER_COUNT as u16 {
+            server
+                .handle(&join, address(50_100 + port))
+                .expect("a join");
+        }
+        let mut client: Client = connect_client(&mut server, RED);
+        poll_until(&mut client, Client::is_full);
+        assert!(client.is_full() && client.is_waiting_for_welcome());
+        assert!(!client.is_other_version());
+        let client_address: SocketAddr =
+            address(client.socket.local_addr().expect("an address").port());
+        let short_snapshot: [u8; 3] = [Kind::Snapshot as u8, 1, 0];
+        server
+            .socket
+            .send_to(&short_snapshot, client_address)
+            .expect("a snapshot");
+        poll_until(&mut client, Client::is_other_version);
+        assert!(client.is_other_version());
+    }
+
+    #[test]
+    fn the_default_port_wins_among_servers() {
+        let other: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT + 170);
+        let usual: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT);
+        let third: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT + 171);
+        assert_eq!(choose_server(&[other]), other);
+        assert_eq!(choose_server(&[other, usual, third]), usual);
+        assert_eq!(choose_server(&[third, other]), third);
     }
 
     #[test]

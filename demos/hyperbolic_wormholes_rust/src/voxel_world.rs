@@ -1576,13 +1576,12 @@ impl VoxelPlayer {
         self.crouch_frac += (crouch_target - self.crouch_frac).clamp(-crouch_step, crouch_step);
         let wants_to_sprint: bool = input.sprint && !input.crouch && len > 0.0;
         self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
-        self.energy_frac = (self.energy_frac
-            + if wants_to_sprint {
-                -dt_s / energy.drain_s
-            } else {
-                dt_s / energy.refill_s
-            })
-        .clamp(0.0, 1.0);
+        let energy_change_per_s: f64 = match (wants_to_sprint, input.crouch) {
+            (true, _) => -1.0 / energy.drain_s,
+            (false, true) => 1.0 / energy.refill_crouching_s,
+            (false, false) => 1.0 / energy.refill_walking_s,
+        };
+        self.energy_frac = (self.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
         let is_walking: bool = len > 0.0 && !self.is_flying && self.is_on_ground;
         let bob_target: f64 = f64::from(u8::from(is_walking));
         self.bob_frac += (bob_target - self.bob_frac).clamp(-dt_s / bob.fade_s, dt_s / bob.fade_s);
@@ -1743,6 +1742,7 @@ mod tests {
     //! | Walking | upright, crouched (half as far, eye fully lowered) | `crouching_lowers_the_eye_and_slows_walking` |
     //! | Step through a mouth | not yet (no crossing, no message), the step that goes through (one crossing and its message) | `walking_into_a_mouth_reports_the_crossing` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
+    //! | Refilling energy | crouched (at the crouched rate), walking upright (at the walking rate) | `crouching_refills_energy_faster` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
     //! | Progress of turning off a console | none (the normal rate), part way (rising, faster each step), done (the frenzy), past done (fails) | `the_pulse_ramps_up_with_progress`, `progress_past_done_fails` |
@@ -2224,6 +2224,38 @@ mod tests {
             );
         }
         assert!(player.energy_frac < STEP_S / drain_s);
+    }
+
+    #[test]
+    fn crouching_refills_energy_faster() {
+        const REFILL_STEP_COUNT: usize = 60;
+        let world: VoxelWorld = load_lunar_surface();
+        let energy = &world.settings.sprint_energy;
+        let refill_s: f64 = STEP_S * REFILL_STEP_COUNT as f64;
+        for (crouch, full_refill_s) in [
+            (true, energy.refill_crouching_s),
+            (false, energy.refill_walking_s),
+        ] {
+            let mut player: VoxelPlayer =
+                VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+            player.energy_frac = 0.0;
+            let input: Input = Input {
+                forward: true,
+                crouch,
+                ..Input::default()
+            };
+            for _ in 0..REFILL_STEP_COUNT {
+                player.step(&world, &input, STEP_S, 0);
+            }
+            let expected_frac: f64 = refill_s / full_refill_s;
+            assert!(
+                (player.energy_frac - expected_frac).abs() < 1e-9,
+                "crouch {crouch}: {} of {expected_frac}",
+                player.energy_frac
+            );
+        }
+        assert_eq!(energy.refill_crouching_s, energy.drain_s);
+        assert_eq!(energy.refill_walking_s, 2.0 * energy.drain_s);
     }
 
     #[test]
