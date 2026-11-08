@@ -109,21 +109,21 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
 <section class="slide">
   <p class="kicker">Gameplay</p>
   <h1>The game in play</h1>
-  <p class="sub">Recordings of the game by the user. The players need a network connection; if one won't play from the file, the link opens it on YouTube.</p>
+  <p class="sub">Recordings of the game by the user. The players need a network connection, and YouTube plays them only when the deck is served: <code>python3 -m http.server 8137 --directory game_design/slides</code>, then open <code>http://localhost:8137/#2</code>. Opened as a file, use the links.</p>
   <div class="video-pair">
     <div class="video">
       <div class="frame">
-        <iframe src="https://www.youtube.com/embed/AwuKH4_CE_k" title="Warped gameplay video 1" allow="fullscreen; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
-        <img class="thumbnail" alt="Warped gameplay video 1" src="https://img.youtube.com/vi/AwuKH4_CE_k/hqdefault.jpg">
+        <iframe src="https://www.youtube.com/embed/AwuKH4_CE_k" title="Warped demo v0.2" allow="fullscreen; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <img class="thumbnail" alt="Warped demo v0.2" src="https://img.youtube.com/vi/AwuKH4_CE_k/hqdefault.jpg">
       </div>
-      <p>Video 1 · <a href="https://www.youtube.com/watch?v=AwuKH4_CE_k" target="_blank" rel="noopener">Watch on YouTube</a></p>
+      <p>Warped demo v0.2 · <a href="https://www.youtube.com/watch?v=AwuKH4_CE_k" target="_blank" rel="noopener">Watch on YouTube</a></p>
     </div>
     <div class="video">
       <div class="frame">
-        <iframe src="https://www.youtube.com/embed/B9_w3Jzb7zQ" title="Warped gameplay video 2" allow="fullscreen; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
-        <img class="thumbnail" alt="Warped gameplay video 2" src="https://img.youtube.com/vi/B9_w3Jzb7zQ/hqdefault.jpg">
+        <iframe src="https://www.youtube.com/embed/B9_w3Jzb7zQ" title="Warped v0.3 demo" allow="fullscreen; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <img class="thumbnail" alt="Warped v0.3 demo" src="https://img.youtube.com/vi/B9_w3Jzb7zQ/hqdefault.jpg">
       </div>
-      <p>Video 2 · <a href="https://www.youtube.com/watch?v=B9_w3Jzb7zQ" target="_blank" rel="noopener">Watch on YouTube</a></p>
+      <p>Warped v0.3 demo · <a href="https://www.youtube.com/watch?v=B9_w3Jzb7zQ" target="_blank" rel="noopener">Watch on YouTube</a></p>
     </div>
   </div>
 </section>
@@ -177,8 +177,8 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
       </ul>
     </div>
     <div class="col" style="flex: 1; gap: 12px">
-      <figure class="shot"><img alt="A red beacon on Lunar Surface" src="images/lunar_beacon.jpg"><figcaption><b>A red pylon</b> on Lunar Surface, beaming up while its console is on.</figcaption></figure>
-      <figure class="shot"><img alt="The console bar while E is held" src="images/forest_console_bar.jpg" style="aspect-ratio: 16 / 7"><figcaption><b>The console bar</b> fills below the crosshair while <kbd>E</kbd> is held (Lunar's bar, seen in Dark Forest).</figcaption></figure>
+      <figure class="shot"><img alt="A red beacon on Lunar Surface" src="images/lunar_beacon.jpg" style="height: 270px"><figcaption><b>A red pylon</b> on Lunar Surface, beaming up while its console is on.</figcaption></figure>
+      <figure class="shot"><img alt="The console bar while E is held" src="images/forest_console_bar.jpg" style="height: 170px; object-position: 50% 60%"><figcaption><b>The console bar</b> fills below the crosshair while <kbd>E</kbd> is held (Lunar's bar, seen in Dark Forest).</figcaption></figure>
     </div>
   </div>
   <p class="differs"><b>Differs:</b> Dark Forest still has its own hold, 3 s within 2.5 m, and doesn't check reach on its server yet.</p>
@@ -334,11 +334,12 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
   <p class="kicker">Screens</p>
   <h1>What a player sees</h1>
   <div class="row">
-    <div class="col" style="width: 560px; flex: none">
+    <div class="col" style="width: 520px; flex: none">
       <figure class="shot"><img alt="Lunar Surface's HUD" src="images/hud_lunar.jpg"><figcaption><b>In play on Lunar Surface:</b> crosshair, bars, minimap, the gun in hand.</figcaption></figure>
-      <div class="grid two" style="grid-template-columns: 1fr 1fr">
-        <figure class="shot"><img alt="Lunar's Poincaré disk minimap" src="images/hud_lunar_minimap.jpg" style="aspect-ratio: 1"><figcaption><b>Hyperbolic minimap:</b> a Poincaré disk.</figcaption></figure>
-        <figure class="shot"><img alt="City Sphere's minimap" src="images/minimap_city.jpg" style="aspect-ratio: 1"><figcaption><b>City Sphere:</b> straight grid lines.</figcaption></figure>
+      <div class="grid three">
+        <figure class="shot"><img alt="Lunar's Poincaré disk minimap" src="images/hud_lunar_minimap.jpg" style="aspect-ratio: 1"><figcaption><b>Lunar:</b> a Poincaré disk.</figcaption></figure>
+        <figure class="shot"><img alt="City Sphere's minimap" src="images/minimap_city.jpg" style="aspect-ratio: 1"><figcaption><b>City Sphere:</b> grid lines.</figcaption></figure>
+        <figure class="shot"><img alt="The HUD bars" src="images/hud_lunar_bars.jpg" style="aspect-ratio: 1"><figcaption><b>The bars</b>, glowing.</figcaption></figure>
       </div>
     </div>
     <div class="col" style="flex: 1">
@@ -360,7 +361,7 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
   <p class="kicker blue">Level · blue · depth 2</p>
   <h1>Dust</h1>
   <div class="row">
-    <div class="col" style="width: 680px; flex: none">
+    <div class="col" style="width: 570px; flex: none">
       <figure class="shot main-shot"><img alt="Dust from blue's spawn" src="images/dust_blue_spawn.jpg"><figcaption><b>Blue's spawn:</b> a bunker, blue pylons beaming up, dunes in the sandstorm.</figcaption></figure>
       <div class="small-shots">
         <figure class="shot"><img alt="A laser bent by the wind" src="images/dust_laser_across_wind.jpg"><figcaption><b>Fired across the wind:</b> the laser curves downwind.</figcaption></figure>
@@ -384,7 +385,7 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
   <p class="kicker blue">Level · blue · depth 1</p>
   <h1>Snow Planet</h1>
   <div class="row">
-    <div class="col" style="width: 680px; flex: none">
+    <div class="col" style="width: 570px; flex: none">
       <figure class="shot main-shot"><img alt="Snow Planet's black holes" src="images/snow_photo_black_hole.jpg"><figcaption><b>Black holes</b> over the snowfield, lensing the sky and the blizzard behind them.</figcaption></figure>
       <div class="small-shots">
         <figure class="shot"><img alt="The blizzard cylinder" src="images/snow_whiteout_outside.jpg"><figcaption><b>The blizzard:</b> one tall white cylinder in the middle.</figcaption></figure>
@@ -407,7 +408,7 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
   <p class="kicker purple">Level · purple · depth 0</p>
   <h1>City Sphere</h1>
   <div class="row">
-    <div class="col" style="width: 680px; flex: none">
+    <div class="col" style="width: 570px; flex: none">
       <figure class="shot main-shot"><img alt="City Sphere's street under the glass" src="images/city_street_up_at_glass.jpg"><figcaption><b>The street</b> on the inside of the sphere, under the glass shell, the core glowing at the centre.</figcaption></figure>
       <div class="small-shots">
         <figure class="shot"><img alt="Stairs in front of the spawn" src="images/city_street_spawn_stairs.jpg"><figcaption><b>Stairs</b> from each team's spawn up to the glass level.</figcaption></figure>
@@ -431,7 +432,7 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
   <p class="kicker red">Level · red · depth 1</p>
   <h1>Dark Forest</h1>
   <div class="row">
-    <div class="col" style="width: 680px; flex: none">
+    <div class="col" style="width: 570px; flex: none">
       <figure class="shot main-shot"><img alt="Through the lift's wormhole" src="images/forest_lift_robot.jpg"><figcaption><b>A lift wormhole</b> from the ground: the treehouse deck, its candle and a robot seen through the lens.</figcaption></figure>
       <div class="small-shots">
         <figure class="shot"><img alt="The bamboo forest" src="images/forest_hud.jpg"><figcaption><b>Dark bamboo</b> with shafts of light and a gate in view.</figcaption></figure>
@@ -455,7 +456,7 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
   <p class="kicker red">Level · red · depth 2</p>
   <h1>Lunar Surface</h1>
   <div class="row">
-    <div class="col" style="width: 680px; flex: none">
+    <div class="col" style="width: 570px; flex: none">
       <figure class="shot main-shot"><img alt="Lunar Surface's middle" src="images/lunar_middle.jpg"><figcaption><b>The middle:</b> the black hole lensing the Milky Way, the planet, the battle station and a fighter.</figcaption></figure>
       <div class="small-shots">
         <figure class="shot"><img alt="Lunar from above" src="images/lunar_overlook.jpg"><figcaption><b>From 28 m up:</b> the hyperbolic ground falls away.</figcaption></figure>
@@ -547,7 +548,7 @@ kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
  * Interface:
  * - Keys: Right, Down, Space and Page Down go forward; Left, Up and Page Up go back; Home and End
  *   jump to the first and last slide.
- * - URL hash: `#3` opens the third slide, and the hash follows the current slide.
+ * - URL hash: `#3` opens the third slide (also when the hash changes), and the hash follows the current slide.
  *
  * Example: open `game_design/slides/index.html` in a browser, or print it to get one PDF page per slide.
  *
@@ -602,6 +603,7 @@ let current_slide_index = 0;
 fit_stage();
 window.addEventListener('resize', fit_stage);
 window.addEventListener('keydown', handle_key);
+window.addEventListener('hashchange', () => show_slide(Number.parseInt(location.hash.slice(1), 10) - 1 || 0));
 document.getElementById('previous-button').addEventListener('click', () => show_slide(current_slide_index - 1));
 document.getElementById('next-button').addEventListener('click', () => show_slide(current_slide_index + 1));
 show_slide(Number.parseInt(location.hash.slice(1), 10) - 1 || 0);
