@@ -13,10 +13,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 - [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
-- [~] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
-  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user wants to see it
-  before it merges. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/dust-polyhedra`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
   itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
@@ -121,6 +117,9 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
+  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
+  screenshots before it merged ("dust polyhedra looks good plz merge"). #234.
 - [?] **W-91 One laser on the minimap.** A bug: when you shoot, the minimap shows two lasers instead of one ("like
   a triangle of some kind"). #243.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
