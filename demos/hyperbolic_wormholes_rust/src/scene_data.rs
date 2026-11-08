@@ -12,7 +12,8 @@ use glam::{DMat4, DVec3, DVec4, Vec4};
 use crate::geometry::{
     AXIS_W, AXIS_Y, UP_VECTOR, get_distance, get_local_direction, invert_lorentz, normalize_tangent,
 };
-use crate::world::{MAX_BOX_COUNT, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT, World};
+use crate::thrown_wormholes::HIT_FLASH_COLOR;
+use crate::world::{MAX_BOX_COUNT, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT, Mouth, World};
 
 pub const ROW_COUNT: usize = 1 + MAX_MOUTH_COUNT;
 pub const TEXEL_TO_WORLD: usize = 0;
@@ -55,6 +56,7 @@ pub struct Uniforms {
     pub sky_basis: [[f32; 4]; 3],
     pub sun_ideal_world: [f32; 4],
     pub next_rows: [i32; MAX_MOUTH_COUNT],
+    pub row_tints: [[f32; 4]; MAX_MOUTH_COUNT],
     pub curvature_radius_m: f32,
     pub tan_half_fov: f32,
     pub aspect: f32,
@@ -317,8 +319,18 @@ fn make_uniforms(
     let back: DVec3 = right.cross(up);
     let height_m: f64 = r * x[AXIS_Y].max(0.0).asinh();
     let mut next_rows: [i32; MAX_MOUTH_COUNT] = [0; MAX_MOUTH_COUNT];
+    let mut row_tints: [[f32; 4]; MAX_MOUTH_COUNT] = [[0.0; 4]; MAX_MOUTH_COUNT];
     for (k, mouth) in world.mouths.iter().enumerate() {
         next_rows[k] = (1 + mouth.partner_index) as i32;
+        let entered: &Mouth = &world.mouths[mouth.partner_index];
+        if let Some(color) = entered.color {
+            let [r, g, b] = if entered.is_flashing {
+                HIT_FLASH_COLOR
+            } else {
+                color.get_rgb()
+            };
+            row_tints[k] = [r, g, b, 1.0];
+        }
     }
     let tan_half_fov: f64 = HALF_FOV_RAD.tan();
     let (mut camera_mouth, mut camera_distance_m): (i32, f64) = (-1, 0.0);
@@ -335,6 +347,7 @@ fn make_uniforms(
         sky_basis: [right, up, back].map(|v| v.as_vec3().extend(0.0).to_array()),
         sun_ideal_world: SUN_DIRECTION.normalize().extend(1.0).as_vec4().to_array(),
         next_rows,
+        row_tints,
         curvature_radius_m: r as f32,
         tan_half_fov: tan_half_fov as f32,
         aspect: size_px.0 as f32 / size_px.1 as f32,

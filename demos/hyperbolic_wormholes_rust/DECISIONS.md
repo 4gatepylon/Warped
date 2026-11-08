@@ -1553,6 +1553,68 @@
   dot apart from your own white-ringed disk, the console markers and the spawns, and shows on both the bright and
   the dimmed ground.
 
+### D96. Thrown wormholes
+
+- **Choice:**
+  - **Keys and colours:** `throw_wormhole` (`Q` by default) throws the player's purple mouth, the next press the
+    green one, then purple again, and so on; a press while a throw is in the air does nothing. Each new throw moves
+    that colour's mouth once it comes down.
+  - **Flight:** the mouth leaves the eye 0.3 rad above the crosshair at 16 m/s and falls at 20 m/s² (`wormholes` in
+    `server_settings.yaml`), straight through other warps' bending. From whatever it hits (the ground, or on Lunar
+    Surface any structure) it drops to the floor below and hovers at the map's eye height there, its back axis
+    facing back along its flight, so a player walking the way it flew goes through.
+  - **Fizzling:** a throw that hasn't landed in 4 s, or lands where its mouth doesn't fit, fizzles with a message;
+    the old mouth of that colour stays and the next throw is the same colour. On Lunar Surface a thrown mouth is
+    1.6 m (Schwarzschild radius) with a 6 m reach, which may not overlap any warp's reach (the tapered bending
+    adds up wrongly where they do). On the house mouths share the house's size, and a thrown mouth's 1.6 m jump
+    sphere must hold no box or ground and stay clear of every other mouth's (D23).
+  - **Linking:** once both are down, the pair is added to the world after the map's own warps, so the renderer,
+    walking and lasers all use it; anyone and any laser goes through, teammates or not.
+  - **Looks:** a ray that came through a thrown mouth is tinted its colour (45%, by brightness), which colours the
+    mouth's disk. A mouth in the air, or down while its partner isn't, is a glowing ball (a cube on the house).
+  - **Network:** every player's state carries their mouths (each colour's place as u, v, h and heading) and the
+    throw in the air (its point), 49 bytes, so a snapshot of 8 players stays under the 2048-byte datagram. A
+    player who dies is out of the snapshot until they rejoin, so their mouths vanish for everyone, and their own
+    window clears them.
+  - **House limit:** the house shader holds 24 mouths instead of 8 (6 the map's, 2 for each of 8 players).
+- **Alternatives:**
+  - a throw that flies straight to the first surface, or one placed a set distance ahead (you chose a lob);
+  - keeping mouths after death, or allowing only two throws (you chose alternating, cleared on death);
+  - mouths only the thrower's team can use (you chose everyone; the renderer would need a world per team);
+  - gravity of 9.8 m/s²: on the house (R = 8 m) a 16 m/s throw then curves away from the ground for good;
+  - bending throws near warps like light (they would cross wormholes, at the cost of the flight's simple path);
+  - checking another player's mouths for overlap again on arrival (two throws landing at once may overlap).
+- **Rationale:** you asked for each player to throw a linked purple and green pair with `Q`, on both maps, lobbed,
+  alternating, cleared on death, and usable by everyone. With no thrown mouths, the house's 24-mouth limit costs
+  nothing measurable: `make bench-views` at 1280×800 (30 frames, Metal, Apple M3 Pro, macOS 26.5.2, Rust 1.98.0,
+  release build) took 3.3 to 13.6 ms per view at its fastest frame with 24 mouths allowed and 3.6 to 13.9 ms
+  with 8.
+
+### D98. Shooting enemy wormholes (W-89)
+
+- **Choice:**
+  - **A hit:** a shot that goes through the throat of a mouth of a player on the other team counts, and goes on
+    out of the other mouth as before; so does a shot that hits the glowing ball of a mouth down alone. Each
+    shot counts once (the sniper's 0.25 s beam and each rifle pulse), whichever mouths it goes through.
+  - **Destroying:** 2 sniper shots or 5 rifle shots destroy both mouths (`wormholes.sniper_hits_to_destroy` and
+    `rifle_hits_to_destroy`), adding up across the pair's two mouths. The damage stays until they are destroyed:
+    moving a mouth by throwing it again keeps it, and dying clears the mouths as before (D96).
+  - **Flash:** each hit makes both mouths of the pair flash red for `wormholes.hit_flash_s` (0.25 s), for everyone,
+    the owner included: the view through them is tinted red instead of their colour, and a lone mouth's ball turns
+    red.
+  - **Who counts:** the server, like hits on players: a shooter's window reports a shot through an enemy's mouths
+    (`WormholeHit`), the server adds it up (ignoring teammates' shots and players with no mouth down) and sends each
+    player's damage in the snapshot (one byte); the owner's window destroys the pair at 1, and the server resets the
+    damage once the owner has no mouth down.
+- **Alternatives:**
+  - mouths that block enemy shots, or any shot through their bending (you chose shots through the throat);
+  - 1 or 5 sniper shots (you chose 2), damage that heals or resets on a new throw (you chose only when destroyed);
+  - flashing only the mouth hit (you chose both).
+- **Rationale:** you asked that shooting enemy wormholes make them flash red, and that a few shots (5 rifle shots)
+  destroy both.
+
+## Baselines
+
 ### D15. WebGL at the same drawing-buffer sizes
 
 - **Choice:** the browser demo from PR 58, unchanged, in the Claude desktop app's built-in browser (Chromium 152,

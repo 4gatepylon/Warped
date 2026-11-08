@@ -144,6 +144,9 @@ constant float3 SKY_ZENITH_COLOR = float3(0.30, 0.52, 0.88);
 constant float3 CLOUD_COLOR = float3(1.0);
 constant float3 SUN_COLOR = float3(1.0, 0.92, 0.75);
 constant float3 LOST_COLOR = float3(0.02, 0.02, 0.03);
+constant float3 TINT_LUMA = float3(0.2126, 0.7152, 0.0722);
+constant float THROWN_TINT_FRAC = 0.45;
+constant float THROWN_TINT_FLOOR = 0.08;
 constant float3 ROAD_COLOR = float3(0.58, 0.58, 0.60);
 constant float3 DIRT_COLOR = float3(0.55, 0.42, 0.27);
 constant float3 GRASS_DARK_COLOR = float3(0.36, 0.60, 0.25);
@@ -195,12 +198,16 @@ constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
 constant float TILE_SIDE_COUNT = 4.0;
 constant float TILES_PER_VERTEX = 5.0;
 
-/** @brief `Uniforms` matches the Rust `Uniforms` struct field by field (240 bytes). */
+/**
+ * @brief `Uniforms` matches the Rust `Uniforms` struct field by field (688 bytes). `row_tints[k]` is the colour of
+ * the thrown mouth a ray went through to come out in row k + 1, with w = 1 (w = 0 for a map's mouth).
+ */
 struct Uniforms {
     float4x4 world_to_camera;
     float4 sky_basis[3];
     float4 sun_ideal_world;
     int next_rows[MAX_MOUTH_COUNT];
+    float4 row_tints[MAX_MOUTH_COUNT];
     float curvature_radius_m;
     float tan_half_fov;
     float aspect;
@@ -1575,6 +1582,8 @@ static float3 shade_ray_end(thread const Scene &scene, RayEnd end) {
         halo = max(halo, spot);
         core = max(core, spot * spot);
     }
+    float4 tint = end.row > 0 ? scene.u.row_tints[end.row - 1] : float4(0.0);
+    if (tint.w > 0.0) color = mix(color, tint.rgb * (dot(color, TINT_LUMA) + THROWN_TINT_FLOOR), THROWN_TINT_FRAC);
     color += mix(LASER_HALO_COLOR, float3(1.0), LASER_HAZE_WHITENESS) * LASER_HAZE_BRIGHTNESS * halo;
     color = mix(color, LASER_CORE_COLOR * LASER_CORE_BRIGHTNESS, saturate(core));
     color = color / (1.0 + max(color - 1.0, 0.0) * HIGHLIGHT_ROLLOFF);

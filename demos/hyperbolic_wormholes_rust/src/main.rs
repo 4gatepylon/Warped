@@ -44,6 +44,7 @@ mod shapes;
 mod shot_noise;
 mod spaceships;
 mod terrain;
+mod thrown_wormholes;
 mod viewmodel;
 mod voxel_clearance;
 mod voxel_textures;
@@ -77,8 +78,11 @@ use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
 use settings::{PerPlayerSettings, ServerSettings};
+use thrown_wormholes::{
+    HIT_FLASH_COLOR, Marker, MouthPlace, PlayerWormholes, ThrownWormholes, fly_throw,
+};
 use voxel_world::{VoxelPlayer, VoxelWorld};
-use world::{DEFAULT_CURVATURE_RADIUS_M, World};
+use world::{DEFAULT_CURVATURE_RADIUS_M, EYE_HEIGHT_M, World};
 
 /// `Result` is this program's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -1782,6 +1786,12 @@ struct Session {
     hud_render_ms: f64,
     multiplayer: Option<Multiplayer>,
     voxel: Option<VoxelState>,
+    thrown: ThrownWormholes,
+    thrown_pairs: Vec<[MouthPlace; 2]>,
+    thrown_pair_owners: Vec<Option<u32>>,
+    wormhole_damages: Vec<(Option<u32>, f64)>,
+    wormhole_flashes: Vec<(Option<u32>, f64)>,
+    has_shot_hit_wormholes: bool,
 }
 
 /// `VoxelState` is a window's game on a voxel map: the map, the player and their spawn point.
@@ -2118,6 +2128,12 @@ impl Session {
             hud_render_ms: 0.0,
             multiplayer,
             voxel,
+            thrown: ThrownWormholes::New(),
+            thrown_pairs: Vec::new(),
+            thrown_pair_owners: Vec::new(),
+            wormhole_damages: Vec::new(),
+            wormhole_flashes: Vec::new(),
+            has_shot_hit_wormholes: false,
         })
     }
 
@@ -2259,6 +2275,9 @@ impl Session {
                 Gun::Rifle => Gun::Laser,
             });
         }
+        if is(Action::ThrowWormhole) && self.can_throw() {
+            self.throw_wormhole();
+        }
         if is(Action::Shoot)
             && self.is_captured
             && self.gun == Gun::Laser
@@ -2267,6 +2286,7 @@ impl Session {
             && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
         {
             self.shot_time_s = self.settings.sniper.shot_s;
+            self.has_shot_hit_wormholes = false;
             self.sniper_reload_s = self.settings.sniper.reload_s;
             self.shot_offset = self.shot_noise.sample_sniper(&self.settings.sniper);
             self.beam_speckle_frac = self.shot_noise.sample_sniper_speckle(&self.settings.sniper);
@@ -2375,6 +2395,7 @@ impl Session {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
+        self.update_wormholes();
         self.update_disabling(is_holding_e, dt_s);
         self.update_gun(&input, dt_s);
         self.update_rifle(dt_s);
@@ -2387,6 +2408,7 @@ impl Session {
                 self.gun == Gun::Rifle,
                 multiplayer.disabling.map(|(console, _)| console),
                 self.beam_speckle_frac,
+                self.thrown.placed,
             )
         {
             self.message = format!("Couldn't reach the server: {error}");
@@ -2418,6 +2440,210 @@ impl Session {
                 ENERGY_SEGMENT_COUNT,
                 &hud_bars::PULSE_TUNING,
             );
+        }
+    }
+
+    /// `can_throw` says whether this player may throw a wormhole mouth now: playing, with the
+    /// mouse captured, and without a throw in the air.
+    ///
+    /// Example: `if self.can_throw() { self.throw_wormhole(); }`
+    fn can_throw(&self) -> bool {
+        self.is_captured
+            && self.route.is_empty()
+            && !self.is_in_lobby()
+            && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
+            && !self.thrown.is_flying()
+    }
+
+    /// `throw_wormhole` throws this player's next wormhole mouth from their eye.
+    ///
+    /// Example: `self.throw_wormhole();`
+    fn throw_wormhole(&mut self) {
+        let (camera, color) = (self.get_eye_frame(), self.thrown.get_next_color());
+        let settings = &self.settings.wormholes;
+        let flight = match &self.voxel {
+            Some(voxel) => fly_throw(camera, color, settings, voxel.world.r, |x, v, s| {
+                voxel.world.find_hit_s(x, v, s)
+            }),
+            None => fly_throw(
+                camera,
+                color,
+                settings,
+                self.world.curvature_radius_m,
+                |x, v, s| self.world.find_hit_s(x, v, s),
+            ),
+        };
+        self.thrown
+            .throw(flight, self.start.elapsed().as_secs_f64());
+    }
+
+    /// `update_wormholes` lands this player's throw once it comes down (where the map allows, clear
+    /// of the other mouths down, other players' too), flashes and destroys wormholes by the
+    /// server's damage (`update_wormhole_damage`), and puts every linked pair, this player's first,
+    /// into the world when they change, flashing red where they were just hit.
+    ///
+    /// Example: `self.update_wormholes();`
+    fn update_wormholes(&mut self) {
+        let now_s: f64 = self.start.elapsed().as_secs_f64();
+        let mut others: Vec<MouthPlace> = self.thrown.get_kept_places();
+        for (_, wormholes) in &self.get_all_wormholes()[1..] {
+            others.extend(wormholes.get_places());
+        }
+        let message: Option<String> = match &self.voxel {
+            Some(voxel) => {
+                let (eye_m, r) = (voxel.world.player.eye_height_m, voxel.world.r);
+                let world: &VoxelWorld = &voxel.world;
+                self.thrown
+                    .update(now_s, eye_m, r, |p| world.can_place_mouth(p, &others))
+            }
+            None => {
+                let (world, r) = (&self.world, self.world.curvature_radius_m);
+                self.thrown.update(now_s, EYE_HEIGHT_M, r, |p| {
+                    world.can_place_mouth(p, &others)
+                })
+            }
+        };
+        if let Some(message) = message {
+            self.show_message(message);
+        }
+        self.update_wormhole_damage(now_s);
+        let (owners, pairs): (Vec<Option<u32>>, Vec<[MouthPlace; 2]>) = self
+            .get_all_wormholes()
+            .into_iter()
+            .filter_map(|(owner, wormholes)| Some((owner, wormholes.get_pair()?)))
+            .unzip();
+        let flashing: Vec<bool> = owners.iter().map(|&o| self.is_flashing(o, now_s)).collect();
+        if pairs != self.thrown_pairs {
+            match &mut self.voxel {
+                Some(voxel) => voxel.world.set_thrown_wormholes(&pairs),
+                None => self.world.set_thrown_wormholes(&pairs),
+            }
+            (self.thrown_pairs, self.thrown_pair_owners) = (pairs, owners);
+        }
+        match &mut self.voxel {
+            Some(voxel) => voxel.world.set_flashing_pairs(&flashing),
+            None => self.world.set_flashing_pairs(&flashing),
+        }
+    }
+
+    /// `update_wormhole_damage` makes the wormholes of every player whose damage (from the server)
+    /// rose flash red for the settings' `wormholes.hit_flash_s` from `now_s`, and destroys this
+    /// player's once theirs reaches 1.
+    ///
+    /// Example: `self.update_wormhole_damage(now_s);`
+    fn update_wormhole_damage(&mut self, now_s: f64) {
+        let all: Vec<(Option<u32>, PlayerWormholes)> = self.get_all_wormholes();
+        for &(owner, wormholes) in &all {
+            let last_frac: f64 = match self.wormhole_damages.iter().find(|(o, _)| *o == owner) {
+                Some(&(_, frac)) => frac,
+                None => 0.0,
+            };
+            if wormholes.damage_frac > last_frac {
+                self.wormhole_flashes.retain(|(o, _)| *o != owner);
+                let until_s: f64 = now_s + self.settings.wormholes.hit_flash_s;
+                self.wormhole_flashes.push((owner, until_s));
+            }
+        }
+        self.wormhole_damages = all.iter().map(|&(o, w)| (o, w.damage_frac)).collect();
+        if all[0].1.damage_frac >= 1.0 && !self.thrown.placed.get_places().is_empty() {
+            self.thrown.clear();
+            self.show_message("Your wormholes were destroyed".to_string());
+        }
+    }
+
+    /// `is_flashing` says whether `owner`'s wormholes (`None` for this player's) flash red at `now_s`.
+    ///
+    /// Example: `let is_red = self.is_flashing(Some(3), now_s);`
+    fn is_flashing(&self, owner: Option<u32>, now_s: f64) -> bool {
+        self.wormhole_flashes
+            .iter()
+            .any(|&(o, until_s)| o == owner && until_s > now_s)
+    }
+
+    /// `get_all_wormholes` gives every player's wormholes with their owner: this player's first
+    /// (`None`, with the damage the server counts for them), then the others' by the last snapshot.
+    ///
+    /// Example: `let all = self.get_all_wormholes();`
+    fn get_all_wormholes(&self) -> Vec<(Option<u32>, PlayerWormholes)> {
+        let (own_damage_frac, remote) = self.multiplayer.as_ref().map_or((0.0, Vec::new()), |m| {
+            let remote = m.client.players.iter().map(|p| (Some(p.id), p.wormholes));
+            (m.client.wormhole_damage_frac, remote.collect())
+        });
+        let own: PlayerWormholes = PlayerWormholes {
+            damage_frac: own_damage_frac,
+            ..self.thrown.placed
+        };
+        std::iter::once((None, own)).chain(remote).collect()
+    }
+
+    /// `get_wormhole_markers` lists the glowing balls to draw for every player's thrown mouths, with
+    /// their owner (as `get_all_wormholes`): throws in the air, and mouths down whose partner isn't
+    /// (red while they flash).
+    ///
+    /// Example: `let markers = self.get_wormhole_markers();`
+    fn get_wormhole_markers(&self) -> Vec<(Option<u32>, Marker)> {
+        let r: f64 = match &self.voxel {
+            Some(voxel) => voxel.world.r,
+            None => self.world.curvature_radius_m,
+        };
+        let now_s: f64 = self.start.elapsed().as_secs_f64();
+        let mut markers: Vec<(Option<u32>, Marker)> = Vec::new();
+        for (owner, wormholes) in self.get_all_wormholes() {
+            for mut marker in wormholes.get_markers(r) {
+                if marker.is_mouth && self.is_flashing(owner, now_s) {
+                    marker.rgb = HIT_FLASH_COLOR;
+                }
+                markers.push((owner, marker));
+            }
+        }
+        markers
+    }
+
+    /// `report_wormhole_hits` tells the server, once per shot, whose enemy wormholes this player's
+    /// shot went into (`entered_pairs`, indices into the world's thrown pairs) or hit
+    /// (`hit_marker`, an index into `markers`, if it is a mouth's).
+    ///
+    /// Example: `self.report_wormhole_hits(&[0], None, &markers);`
+    fn report_wormhole_hits(
+        &mut self,
+        entered_pairs: &[usize],
+        hit_marker: Option<usize>,
+        markers: &[(Option<u32>, Marker)],
+    ) {
+        let Some(multiplayer) = &self.multiplayer else {
+            return;
+        };
+        let team: Option<u32> = multiplayer.client.team;
+        let is_enemy = |id: &u32| {
+            let player = multiplayer.client.players.iter().find(|p| p.id == *id);
+            player.is_some_and(|p| Some(p.team) != team)
+        };
+        let mut enemy_ids: Vec<u32> = entered_pairs
+            .iter()
+            .map(|&i| self.thrown_pair_owners[i])
+            .chain(
+                hit_marker
+                    .filter(|&k| markers[k].1.is_mouth)
+                    .map(|k| markers[k].0),
+            )
+            .flatten()
+            .filter(is_enemy)
+            .collect();
+        enemy_ids.dedup();
+        if self.has_shot_hit_wormholes || enemy_ids.is_empty() {
+            return;
+        }
+        self.has_shot_hit_wormholes = true;
+        let hits_to_destroy: u8 = match self.gun {
+            Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
+            Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
+        };
+        let multiplayer: &mut Multiplayer = self.multiplayer.as_mut().expect("checked above");
+        for id in enemy_ids {
+            if let Err(error) = multiplayer.client.send_wormhole_hit(id, hits_to_destroy) {
+                self.show_message(format!("Couldn't reach the server: {error}"));
+                return;
+            }
         }
     }
 
@@ -2490,6 +2716,7 @@ impl Session {
             self.shot_time_s = rifle.pulse_s;
             self.rifle_next_shot_s = 1.0 / rifle.shots_per_s;
             self.has_rifle_shot_hit = false;
+            self.has_shot_hit_wormholes = false;
             self.shot_offset = self.shot_noise.sample_rifle(&rifle, self.rifle_heat_frac);
             self.beam_speckle_frac =
                 shot_noise::get_rifle_speckle_frac(&rifle, self.rifle_heat_frac);
@@ -2724,6 +2951,7 @@ impl Session {
                         multiplayer.disabling = None;
                         self.is_laser_on = false;
                         self.shot_time_s = 0.0;
+                        self.thrown.clear();
                     }
                     messages.push(if is_self {
                         format!("You died: hit by player {shooter_id}")
@@ -2796,6 +3024,8 @@ impl Session {
     /// Example: `let data = session.pack((1280, 800));`
     fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
         let is_firing: bool = self.is_firing();
+        let owned_markers: Vec<(Option<u32>, Marker)> = self.get_wormhole_markers();
+        let markers: Vec<Marker> = owned_markers.iter().map(|&(_, marker)| marker).collect();
         let (off_mask, disabling_fracs) = self.get_console_states();
         let time_s: f64 = self.start.elapsed().as_secs_f64();
         if let Some(voxel) = &mut self.voxel {
@@ -2839,6 +3069,7 @@ impl Session {
                 self.get_laser_aim(camera),
                 team,
                 &players,
+                &markers,
                 self.route.is_empty().then_some(multiplayer::Tracers {
                     beams: &beams,
                     spot,
@@ -2874,6 +3105,7 @@ impl Session {
             }
             self.remote_firing_ids = view.other_shots.iter().map(|(id, _)| *id).collect();
             self.laser = multiplayer::describe_voxel_laser(&voxel.world, &view);
+            let first: usize = voxel.world.static_warp_count;
             if let Some(victim_id) = view.hit_player_id
                 && let Some(hits_to_kill) = take_hit_weight(
                     &self.settings,
@@ -2886,6 +3118,13 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
+            let entered: Vec<usize> = view.shot.as_ref().map_or(Vec::new(), |shot| {
+                shot.through_warps
+                    .iter()
+                    .filter_map(|w| w.checked_sub(first).map(|k| k / 2))
+                    .collect()
+            });
+            self.report_wormhole_hits(&entered, view.hit_marker, &owned_markers);
             return PackedFrame::Voxel(Box::new(view.frame));
         }
         let laser_aim: Option<DMat4> = self.get_laser_aim(self.player.frame);
@@ -2895,6 +3134,7 @@ impl Session {
                 self.player.frame,
                 laser_aim,
                 &multiplayer.client.players,
+                &markers,
                 render_px,
                 self.start.elapsed().as_secs_f64(),
             );
@@ -2910,10 +3150,21 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
+            let first: usize = self.world.static_mouth_count;
+            let entered: Vec<usize> = view.report.as_ref().map_or(Vec::new(), |report| {
+                report
+                    .mouths_entered
+                    .iter()
+                    .filter_map(|m| m.checked_sub(first).map(|k| k / 2))
+                    .collect()
+            });
+            self.report_wormhole_hits(&entered, view.hit_marker, &owned_markers);
             return PackedFrame::House(Box::new(view.data));
         }
+        let mut marked: World = self.world.clone();
+        marked.add_markers(&markers);
         let (data, report) = pack_view(
-            &self.world,
+            &marked,
             self.player.frame,
             laser_aim,
             render_px,

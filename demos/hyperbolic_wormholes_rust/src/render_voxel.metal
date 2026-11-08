@@ -212,6 +212,9 @@ constant float BEAM_HAZE_WHITENESS = 0.45;
 constant float BEAM_CORE_BRIGHTNESS = 1.6;
 constant float BEAM_CORE_WHITENESS = 0.9;
 constant float BEAM_SPECKLE_STEPS = 1023.0;
+constant int THROWN_TINT_FIRST_BIT = 1;
+constant int THROWN_TINT_MASK = 3;
+constant int BEAM_SPECKLE_FIRST_BIT = 3;
 constant float MIN_SPECKLE_GLOW = 0.02;
 constant uint SPECKLE_KIND_SALT = 0x9e3779b9u;
 constant uint3 PIXEL_HASH_PRIMES = uint3(73856093u, 19349663u, 2654435761u);
@@ -238,6 +241,10 @@ constant int TERRAIN_BISECTIONS = 8;
 constant float TERRAIN_NORMAL_STEP_M = 0.1;
 constant float KIND_BLACK_HOLE = 0.0;
 constant float HALF_KIND = 0.5;
+constant float FIRST_THROWN_KIND = 1.5;
+constant float3 THROWN_TINTS[3] = {float3(__PURPLE_COLOR__), float3(__GREEN_COLOR__), float3(__HIT_FLASH_COLOR__)};
+constant float THROWN_TINT_FRAC = 0.45;
+constant float THROWN_TINT_FLOOR = 0.08;
 constant float GLOW_FLOOR = 1.0 / 1024.0;
 constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
 constant int REFINED_PIXELS_PER_CELL = 3;
@@ -484,9 +491,10 @@ struct Hit {
  * @brief `VoxelRayEnd` is where a ray ended, with what shading needs: the hit point (or the sky direction at the
  * origin, with w = 0), the ray's unit tangent there, the hit's grid point in its structure with the distance
  * travelled, the hit cell with its material (`MAT_GROUND` for the ground), the outcome with the structure (-1 for the
- * ground), face axis and laser (bit 0 its team, 1 for red; the bits above its speckle share in steps of
- * 1 / `BEAM_SPECKLE_STEPS`), the face's side with the glass count and the laser's core and halo, and the dust in front
- * of it (`scan_dust`).
+ * ground), face axis and laser and tint (bit 0 the laser's team, 1 for red; from `THROWN_TINT_FIRST_BIT`, two bits
+ * for the thrown wormhole it went through, 0 for none; from `BEAM_SPECKLE_FIRST_BIT`, the laser's speckle share in
+ * steps of 1 / `BEAM_SPECKLE_STEPS`), the face's side with the glass count and the laser's core and halo, and the dust
+ * in front of it (`scan_dust`).
  */
 struct VoxelRayEnd {
     float4 point;
@@ -1634,7 +1642,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float4 dust = float4(0.0);
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
-    int outcome = OUTCOME_LOST, last_warp = -1;
+    int outcome = OUTCOME_LOST, last_warp = -1, tint = 0;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
     float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
@@ -1691,10 +1699,17 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         has_gradient = true;
         float4 prm = warps[inside].params;
         if (prm.x < HALF_KIND && rho < prm.y * HORIZON_CAPTURE_FRAC) { outcome = OUTCOME_LOST; break; }
-        if (prm.x > HALF_KIND && rho < prm.y) { cross_throat(scene, inside, x, v); inside = int(prm.w + 0.5); has_gradient = false; continue; }
+        if (prm.x > HALF_KIND && rho < prm.y) {
+            if (prm.x > FIRST_THROWN_KIND) tint = int(prm.x + 0.5) - 1;
+            cross_throat(scene, inside, x, v);
+            inside = int(prm.w + 0.5);
+            has_gradient = false;
+            continue;
+        }
         if (rho > prm.z) { last_warp = inside; inside = -1; has_gradient = false; }
     }
-    VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0), int4(outcome, -1, -1, (team > HALF_KIND ? 1 : 0) + 2 * int(round(speckle * BEAM_SPECKLE_STEPS))),
+    VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0),
+                       int4(outcome, -1, -1, (team > HALF_KIND ? 1 : 0) | tint << THROWN_TINT_FIRST_BIT | int(round(speckle * BEAM_SPECKLE_STEPS)) << BEAM_SPECKLE_FIRST_BIT),
                        float4(0.0, glass, core, halo), dust};
     if (outcome == OUTCOME_HIT) {
         end.point = geodesic_point(hit_x, hit_v, hit.s);
@@ -1797,11 +1812,13 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
     float3 beam_color = to_linear((end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
+    int tint = end.surface.w >> THROWN_TINT_FIRST_BIT & THROWN_TINT_MASK;
+    if (tint > 0) color = mix(color, THROWN_TINTS[tint - 1] * (dot(color, LUMA) + THROWN_TINT_FLOOR), THROWN_TINT_FRAC);
     if (end.dust.w > 0.0) color = mix(color, end.dust.rgb / end.dust.w, 1.0 - exp(-end.dust.w));
     float3 lit = color + mix(beam_color, float3(1.0), BEAM_HAZE_WHITENESS) * BEAM_HAZE_BRIGHTNESS * halo;
     lit = mix(lit, mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS, saturate(core));
     float glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
-    color = speckle_beam(scene, color, lit, glow, float(end.surface.w >> 1) / BEAM_SPECKLE_STEPS, id);
+    color = speckle_beam(scene, color, lit, glow, float(end.surface.w >> BEAM_SPECKLE_FIRST_BIT) / BEAM_SPECKLE_STEPS, id);
     return max(color, 0.0);
 }
 
@@ -1835,7 +1852,7 @@ kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> im
 static bool is_same_surface(VoxelRayEnd a, VoxelRayEnd b) {
     int axis = a.surface.z;
     bool is_inside_cell = a.surface.x == OUTCOME_HIT && a.surface.y >= 0 && axis < 0;
-    return all(a.surface.xyz == b.surface.xyz) && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
+    return all(a.surface == b.surface) && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
         && (axis < 0 || a.cell[axis] == b.cell[axis]) && b.glow.z < GLOW_FLOOR && b.glow.w < GLOW_FLOOR
         && abs(b.dust.w - a.dust.w) <= DUST_SMOOTH_DEPTH;
 }
