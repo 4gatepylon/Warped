@@ -26,9 +26,9 @@ WebGL prototype has more. The map follows the design: blue pylons at (u, v) = (�
 
 ## S3. Blizzards (User: the numbers)
 
-Three blizzard zones, upright cylinders in the map's `regions.blizzards` (format extended compatibly, see
-`common/maps/map.schema.json`): the white-out in the middle (radius 10 m) and two squalls (radius 7 m) at
-(−14, 24) and (14, −24), all 16 m high. Each has its own numbers, so the user can tune them in the map
+One blizzard (the user asked for a single one in the middle; there were three), an upright cylinder in the map's
+`regions.blizzards` (format extended compatibly, see `common/maps/map.schema.json`): the white-out at the centre,
+radius 10 m, 16 m high. Each blizzard has its own numbers, so the user can tune them in the map
 (`tools/make_map.py`, `BLIZZARD_NUMBERS`):
 
 | Field | Value | What it does |
@@ -40,8 +40,8 @@ Three blizzard zones, upright cylinders in the map's `regions.blizzards` (format
 | `snow_per_m3` | 0.6 | chance of a flake per cubic meter cell |
 
 - Shots: each blizzard uses up the fraction (length inside / its `shot_reach_m`) of the shot's blizzard budget;
-  the shot stops where the fractions add up to 1, and doesn't hit what is behind. So a shot can cross the 7 m
-  squall's edge but not its middle, and goes 8 m into the white-out.
+  the shot stops where the fractions add up to 1, and doesn't hit what is behind. So a shot goes 8 m into the
+  white-out.
 - Freezing is decided by the server (`net::Server::freeze_players`, each tick): it reads the blizzards from the map
   (`net::Freezing`), adds `freeze_health_per_s × dt` to the damage of every player whose last reported position is
   inside one, and eliminates a player at full damage as killed by themselves (a death, no one's kill). Players who
@@ -62,7 +62,7 @@ packed snow use the map's palette; no external textures were downloaded yet (S6)
 
 ## S5. Black holes and wormholes
 
-Two black holes at (0, ±17), one wormhole pair from (−22, −27) to (22, 27), from the copied H³ lensing: they bend
+Five black holes and one wormhole pair (placed in S9), from the copied H³ lensing: they bend
 light and lasers as on Lunar Surface. Their reach (11 m and 9 m) makes them large on screen; the user may want
 them smaller.
 
@@ -82,3 +82,16 @@ its word), so a match can be tested without walking.
 
 `--bench-views` renders Snow Planet viewpoints (the copied Lunar Surface ones are gone; other maps still load).
 The binaries are `snow-planet` and `snow_planet_server`, so several levels can be built side by side.
+
+## S9. Five black holes, scattered (User)
+
+The user asked for five black holes: three north of the white-out and two south, placed a little at random and the
+two south ones offset rather than mirrored. They are at (u, v) (−22, 20), (0, 27), (21, 19) and (−6, −21),
+(19, −27) (`BLACK_HOLES` in `tools/make_map.py`), each at least 22 m from the next so their 11 m reaches don't
+overlap, and at least 12 m from every pylon. The wormhole pair moved to the corners, A at (−46, −26) by blue's
+south pylon and B at (46, 26) by red's north pylon, so it is a flank route of the same length for each team.
+
+Fairness: the teams spawn west (blue) and east (red), so each sees the same three holes north and two south. The
+holes are not mirrored between the halves: blue's half has the north-west hole and the south one nearest the
+centre, red's has the north-east one and the south one 19 m out; the north hole is on the middle line. Pylons,
+spawns, mounds and the wormhole stay point-symmetric.

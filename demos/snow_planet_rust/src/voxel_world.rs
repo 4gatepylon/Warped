@@ -3693,7 +3693,7 @@ mod blizzard_tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Point | in the white-out, in a squall, between them, above the white-out | `points_find_their_blizzard` |
+    //! | Point | in the white-out, outside it, above it | `points_find_their_blizzard` |
     //! | Walking | in the white-out (its `speed_frac` of the speed), outside (full speed) | `blizzards_slow_walking` |
     //! | Laser | into the white-out (stops `shot_reach_m` in, hits nothing), away from every blizzard (hits what it's aimed at) | `lasers_stop_in_a_blizzard` |
 
@@ -3721,14 +3721,13 @@ mod blizzard_tests {
     #[test]
     fn points_find_their_blizzard() {
         let world: VoxelWorld = load_snow_planet();
-        assert_eq!(world.blizzards.len(), 3);
+        assert_eq!(world.blizzards.len(), 1);
         let name = |at_m: [f64; 2], h_m: Option<f64>| -> Option<String> {
             world
                 .find_blizzard(get_eye(&world, at_m, h_m))
                 .map(|b| b.name.clone())
         };
         assert_eq!(name([0.0, 0.0], None).as_deref(), Some("white-out"));
-        assert_eq!(name([-14.0, 24.0], None).as_deref(), Some("north squall"));
         assert_eq!(name([-30.0, 0.0], None), None);
         assert_eq!(name([0.0, 0.0], Some(30.0)), None);
     }

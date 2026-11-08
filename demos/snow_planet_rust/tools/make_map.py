@@ -63,10 +63,16 @@ BLUE_MOUNDS: list[tuple] = [
     (-42.0, 27.0, [1.6, 0.8, 1.6], 0.9),
 ]
 MOUND_ROUND_M: float = 0.7
+# Five black holes scattered by hand, not in rows: three north of the white-out, two south of it, offset (u, v).
+BLACK_HOLES: list[tuple] = [
+    ("black hole north-west", -22.0, 20.0),
+    ("black hole north", 0.0, 27.0),
+    ("black hole north-east", 21.0, 19.0),
+    ("black hole south-west", -6.0, -21.0),
+    ("black hole south-east", 19.0, -27.0),
+]
 BLIZZARDS: list[dict] = [
     {"name": "white-out", "u_m": 0.0, "v_m": 0.0, "radius_m": 10.0},
-    {"name": "north squall", "u_m": -14.0, "v_m": 24.0, "radius_m": 7.0},
-    {"name": "south squall", "u_m": 14.0, "v_m": -24.0, "radius_m": 7.0},
 ]
 BLIZZARD_NUMBERS: dict = {
     "height_m": 16.0,
@@ -124,12 +130,13 @@ def make_map() -> dict:
             structures.append(make_pylon(team, index, u_m, sign * v_m))
             lights.append({"position": [sign * v_m, 8.0, -u_m, 1.0], "color": TEAM_LIGHT[team], "radius_m": 8.0})
     warps: list[dict] = []
-    for name, u_m, v_m in (("black hole north", 0.0, 17.0), ("black hole south", 0.0, -17.0)):
+    for name, u_m, v_m in BLACK_HOLES:
         warps.append({"kind": "black_hole", "name": name, "frame": make_frame(u_m, v_m, 6.0),
                       "law": "isotropic_schwarzschild", "schwarzschild_radius_m": 1.1, "radial_coordinate": "distance",
                       "reach_m": 11.0, "falloff": "taper"})
-    for name, u_m, v_m, yaw_rad, partner in (("wormhole mouth A", -22.0, -27.0, 0.0, 3),
-                                              ("wormhole mouth B", 22.0, 27.0, math.pi, 2)):
+    mouth_a_index: int = len(warps)
+    for name, u_m, v_m, yaw_rad, partner in (("wormhole mouth A", -46.0, -26.0, 0.0, mouth_a_index + 1),
+                                              ("wormhole mouth B", 46.0, 26.0, math.pi, mouth_a_index)):
         warps.append({"kind": "wormhole_mouth", "name": name, "frame": make_frame(u_m, v_m, 2.4, yaw_rad),
                       "law": "foil", "schwarzschild_radius_m": 1.6, "lambda_squared": 0.25,
                       "radial_coordinate": "distance", "reach_m": 9.0, "falloff": "taper", "partner": partner})
@@ -156,7 +163,7 @@ def make_map() -> dict:
         "format": "warped-map",
         "version": 1,
         "name": "snow_planet",
-        "description": "A snow field on a torus (T² × ℝ): two pylons a team, two black holes, a wormhole pair, "
+        "description": "A snow field on a torus (T² × ℝ): two pylons a team, five black holes, a wormhole pair, "
         "open snow with six rounded mounds, light snowfall and fog, and three blizzards.",
         "source": "demos/snow_planet_rust/tools/make_map.py (after demos/levels/snow_planet/index.html)",
         "space": {"kind": "euclidean", "torus_periods_m": [PERIOD_U_M, PERIOD_V_M]},

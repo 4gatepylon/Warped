@@ -1,7 +1,7 @@
 # Snow Planet in Rust
 
 A playable demo of the Snow Planet level (blue, depth 1, mid range): two teams of robots on a small snowfield with
-two black holes, a wormhole and three blizzards, in the Rust + SDL3 + Metal game of
+four black holes, a wormhole and three blizzards, in the Rust + SDL3 + Metal game of
 [`../hyperbolic_wormholes_rust/`](../hyperbolic_wormholes_rust/README.md). It started as a verbatim copy of that
 demo (commit `9f249fc`); everything it doesn't describe here (controls, menus, HUD, settings files, the app, the
 server bundle, the renderer and its optimizations) works as described there. The map is

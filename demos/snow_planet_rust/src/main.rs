@@ -1070,7 +1070,7 @@ struct VoxelView {
 }
 
 /// `make_voxel_bench_views` gives the voxel benchmark's viewpoints on Snow Planet (u, v in meters,
-/// blue at negative u): the spawns, the white-out and a squall from inside and outside, the black
+/// blue at negative u): the spawns, the white-out from inside and outside, the black
 /// holes, the wormhole, the pylons, the torus seam, the laser fired into the white-out, and photo views
 /// (`photo_*`) for pictures of the map.
 ///
@@ -1097,10 +1097,23 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
             Some(22.0),
             -0.6,
         ),
-        view("north_squall", [-28.0, 24.0], [-14.0, 24.0], None, 0.0),
-        view("black_hole", [-9.0, 17.0], [0.0, 17.0], Some(6.0), 0.0),
-        view("black_hole_far", [-30.0, 10.0], [0.0, 17.0], None, 0.05),
-        view("wormhole", [-30.0, -20.0], [-22.0, -27.0], None, 0.0),
+        view("black_hole", [-9.0, 27.0], [0.0, 27.0], Some(6.0), 0.0),
+        view("black_hole_far", [-30.0, 10.0], [0.0, 27.0], None, 0.05),
+        view(
+            "black_holes_north",
+            [-36.0, 4.0],
+            [0.0, 24.0],
+            Some(3.0),
+            0.0,
+        ),
+        view(
+            "black_holes_south",
+            [-34.0, -6.0],
+            [8.0, -24.0],
+            Some(3.0),
+            0.0,
+        ),
+        view("wormhole", [-38.0, -19.0], [-46.0, -26.0], None, 0.0),
         view("blue_pylon", [-24.0, 11.0], [-34.0, 11.0], None, 0.1),
         view("red_pylon", [24.0, -11.0], [34.0, -11.0], None, 0.1),
         view("seam", [-50.0, 20.0], [-56.0, 0.0], None, 0.0),
@@ -1129,15 +1142,15 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         ),
         view(
             "photo_black_hole",
-            [-20.0, 25.0],
-            [0.0, 17.0],
+            [-24.0, 6.0],
+            [0.0, 27.0],
             Some(4.0),
             -0.05,
         ),
         view(
-            "photo_wormhole_squall",
-            [-36.0, -14.0],
-            [-22.0, -27.0],
+            "photo_wormhole_pylon",
+            [-32.0, -14.0],
+            [-46.0, -26.0],
             Some(3.0),
             0.0,
         ),

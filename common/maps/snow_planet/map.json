@@ -2,7 +2,7 @@
  "format": "warped-map",
  "version": 1,
  "name": "snow_planet",
- "description": "A snow field on a torus (T\u00b2 \u00d7 \u211d): two pylons a team, two black holes, a wormhole pair, open snow with six rounded mounds, light snowfall and fog, and three blizzards.",
+ "description": "A snow field on a torus (T\u00b2 \u00d7 \u211d): two pylons a team, five black holes, a wormhole pair, open snow with six rounded mounds, light snowfall and fog, and three blizzards.",
  "source": "demos/snow_planet_rust/tools/make_map.py (after demos/levels/snow_planet/index.html)",
  "space": {
   "kind": "euclidean",
@@ -579,6 +579,33 @@
  "warps": [
   {
    "kind": "black_hole",
+   "name": "black hole north-west",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    20.0,
+    6.0,
+    22.0,
+    1.0
+   ],
+   "law": "isotropic_schwarzschild",
+   "schwarzschild_radius_m": 1.1,
+   "radial_coordinate": "distance",
+   "reach_m": 11.0,
+   "falloff": "taper"
+  },
+  {
+   "kind": "black_hole",
    "name": "black hole north",
    "frame": [
     1.0,
@@ -593,7 +620,7 @@
     0.0,
     1.0,
     0.0,
-    17.0,
+    27.0,
     6.0,
     -0.0,
     1.0
@@ -606,7 +633,7 @@
   },
   {
    "kind": "black_hole",
-   "name": "black hole south",
+   "name": "black hole north-east",
    "frame": [
     1.0,
     0.0,
@@ -620,9 +647,63 @@
     0.0,
     1.0,
     0.0,
-    -17.0,
+    19.0,
     6.0,
+    -21.0,
+    1.0
+   ],
+   "law": "isotropic_schwarzschild",
+   "schwarzschild_radius_m": 1.1,
+   "radial_coordinate": "distance",
+   "reach_m": 11.0,
+   "falloff": "taper"
+  },
+  {
+   "kind": "black_hole",
+   "name": "black hole south-west",
+   "frame": [
+    1.0,
+    0.0,
     -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -21.0,
+    6.0,
+    6.0,
+    1.0
+   ],
+   "law": "isotropic_schwarzschild",
+   "schwarzschild_radius_m": 1.1,
+   "radial_coordinate": "distance",
+   "reach_m": 11.0,
+   "falloff": "taper"
+  },
+  {
+   "kind": "black_hole",
+   "name": "black hole south-east",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -27.0,
+    6.0,
+    -19.0,
     1.0
    ],
    "law": "isotropic_schwarzschild",
@@ -647,9 +728,9 @@
     0.0,
     1.0,
     0.0,
-    -27.0,
+    -26.0,
     2.4,
-    22.0,
+    46.0,
     1.0
    ],
    "law": "foil",
@@ -658,7 +739,7 @@
    "radial_coordinate": "distance",
    "reach_m": 9.0,
    "falloff": "taper",
-   "partner": 3
+   "partner": 6
   },
   {
    "kind": "wormhole_mouth",
@@ -676,9 +757,9 @@
     0.0,
     -1.0,
     0.0,
-    27.0,
+    26.0,
     2.4,
-    -22.0,
+    -46.0,
     1.0
    ],
    "law": "foil",
@@ -687,7 +768,7 @@
    "radial_coordinate": "distance",
    "reach_m": 9.0,
    "falloff": "taper",
-   "partner": 2
+   "partner": 5
   }
  ],
  "lights": [
@@ -855,30 +936,6 @@
     "u_m": 0.0,
     "v_m": 0.0,
     "radius_m": 10.0,
-    "height_m": 16.0,
-    "speed_frac": 0.5,
-    "freeze_health_per_s": 0.08,
-    "shot_reach_m": 8.0,
-    "fog_per_m": 0.3,
-    "snow_per_m3": 1.0
-   },
-   {
-    "name": "north squall",
-    "u_m": -14.0,
-    "v_m": 24.0,
-    "radius_m": 7.0,
-    "height_m": 16.0,
-    "speed_frac": 0.5,
-    "freeze_health_per_s": 0.08,
-    "shot_reach_m": 8.0,
-    "fog_per_m": 0.3,
-    "snow_per_m3": 1.0
-   },
-   {
-    "name": "south squall",
-    "u_m": 14.0,
-    "v_m": -24.0,
-    "radius_m": 7.0,
     "height_m": 16.0,
     "speed_frac": 0.5,
     "freeze_health_per_s": 0.08,
