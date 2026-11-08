@@ -117,6 +117,8 @@ const WARMUP_FRAME_COUNT: usize = 30;
 const SLOW_FRAME_MS: f64 = 17.5;
 const STAIRS_ARRIVE_M: f64 = 0.5;
 const STAIRS_LEAD_IN_M: f64 = 2.0;
+const STEER_WALK_ERROR_RAD: f64 = 0.35;
+const CONSOLE_REPLAN_S: f64 = 3.0;
 const SERVE_POLL_MS: u64 = 50;
 const STAIRS_ROUTE_END_WAIT_S: f64 = 2.0;
 
@@ -701,7 +703,9 @@ fn make_rifle_route() -> Vec<Step> {
     ]
 }
 
-/// `steer` turns `player` toward the tangent direction `to` and walks when facing roughly along it.
+/// `steer` turns `player` toward the tangent direction `to` and walks only when facing within
+/// `STEER_WALK_ERROR_RAD` of it, so a sharp turn at a waypoint happens in place rather than in a
+/// wide arc (which could swing a walker on the glass level into a hole).
 fn steer(player: &mut CityPlayer, to: DVec3, dt_s: f64, input: &mut CityInput) {
     if to.length() < STEER_MIN_M {
         return;
@@ -712,7 +716,11 @@ fn steer(player: &mut CityPlayer, to: DVec3, dt_s: f64, input: &mut CityInput) {
     let error: f64 = forward.cross(want).dot(up).atan2(forward.dot(want));
     let turn: f64 = error.clamp(-TURN_RAD_PER_S * dt_s, TURN_RAD_PER_S * dt_s);
     player.look_around(turn, 0.0);
-    input.forward_frac = if error.abs() < 0.8 { 1.0 } else { 0.2 };
+    input.forward_frac = if error.abs() < STEER_WALK_ERROR_RAD {
+        1.0
+    } else {
+        0.0
+    };
 }
 
 /// `make_route` is the scripted route for blue: ride a lift to the glass level, shoot four shots
@@ -2893,7 +2901,8 @@ impl Rng {
 /// `run_bot` plays without a window on `--join`'s server for `--exit-after-s`: it wanders between
 /// the levels shooting enemies it can hit, or with `--bot-objective consoles` walks up its stairs
 /// to each of the other team's consoles and holds `E` on it, aiming at it, until its team wins
-/// (`make_console_route`).
+/// (`make_console_route`); if it can't aim at the console for `CONSOLE_REPLAN_S` (it fell off the
+/// glass level, say), it starts the walk again from its stairs.
 fn run_bot(arguments: &Arguments) -> Result<()> {
     let world: CityWorld = CityWorld::Builtin()?;
     let mut client: net::Client = net::Client::Connect(
@@ -2913,6 +2922,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         ^ u64::from(start.elapsed().subsec_nanos())
         ^ u64::from(std::process::id()));
     let mut brain: Brain = Brain::New(Vec::new());
+    let mut unaimed_s: f64 = 0.0;
     let mut last_s: f64 = 0.0;
     while start.elapsed().as_secs_f64() < duration_s {
         std::thread::sleep(Duration::from_secs_f64(BOT_STEP_S));
@@ -2972,6 +2982,15 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 )
                 .filter(|&aimed| aimed == index)
             });
+            unaimed_s = if out.console.is_some() && disabling.is_none() {
+                unaimed_s + dt_s
+            } else {
+                0.0
+            };
+            if unaimed_s > CONSOLE_REPLAN_S {
+                brain.restart();
+                unaimed_s = 0.0;
+            }
         } else if arguments.bot_objective == Some(BotObjective::Target) {
             player = make_target_player(&world);
         } else if client.game.winner.is_none() {

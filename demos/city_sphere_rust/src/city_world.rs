@@ -42,6 +42,7 @@ const STAIRS_GROUP: &str = "stairs";
 const PYLON_GROUP: &str = "pylons";
 const PATH_CELL_RAD: f64 = 0.025;
 const PATH_CLEARANCE_M: f64 = 0.35;
+const PATH_HOLE_CLEARANCE_M: f64 = 1.5;
 const PATH_COST_PER_RAD: f64 = 1e6;
 /// `CONSOLE_REACH_SLACK_M` is how much further than `consoles.reach_m` the server lets a hold
 /// count, so a window that turns a console off at the edge of its reach isn't refused.
@@ -544,7 +545,8 @@ impl CityWorld {
 
     /// `find_glass_path` plans a walk on the glass level from the unit direction `from` toward
     /// the unit direction `goal`, avoiding the glass's holes and whatever stands on the glass level
-    /// (covers, pylons) by a body radius and `PATH_CLEARANCE_M`: an A* search on a
+    /// (covers, pylons) by a body radius and `PATH_CLEARANCE_M` (`PATH_HOLE_CLEARANCE_M` from a
+    /// hole, since a walker that overshoots a turn there falls through): an A* search on a
     /// longitude-latitude grid of `PATH_CELL_RAD` cells, from the free cell nearest `from` (the
     /// first waypoint) to the free cell nearest `goal`, then pulled taut into the fewest straight
     /// legs. It gives the legs' ends as unit directions, or `None` when no walk exists.
@@ -577,7 +579,8 @@ impl CityWorld {
             .collect();
         let is_free = |d: DVec3| -> bool {
             let is_near_hole: bool = glass.holes.iter().any(|&(hole, cos)| {
-                d.dot(hole).clamp(-1.0, 1.0).acos() < cos.acos() + clearance_m / level_m
+                d.dot(hole).clamp(-1.0, 1.0).acos()
+                    < cos.acos() + (BODY_RADIUS_M + PATH_HOLE_CLEARANCE_M) / level_m
             });
             !is_near_hole
                 && standing.iter().all(|b| {
