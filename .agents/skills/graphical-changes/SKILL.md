@@ -64,7 +64,7 @@ capture.
   player's view, near, far, and the edge cases of the change (edge-on, from inside, at its limits).
 - **Videos, ideally:** anything that moves or changes over time (motion, sway, an animation, a flicker, walking
   through something) also gets a short video, a GIF or MP4 of a few seconds.
-- **Before and after:** show today's look (`staging`) beside the change.
+- **Before and after:** show today's look (the PR's base branch) beside the change.
 - **Real renders first; label anything else.** Prefer pictures the game itself rendered. A picture that isn't one (a
   plot of the data the shader draws, text rendered offscreen, a Python copy of a shader) says so on the image and in
   its caption: "Not a game screenshot: the minimap's line data, plotted".
@@ -75,7 +75,7 @@ capture.
   with its zoom ("enlarged 7×").
 - **Whose view:** when players see the change differently (your own view against another player's, one team's against
   the other's), show each view.
-- **Cost:** give each option's frame time from alternating runs against `staging`, and say when the machine was busy
+- **Cost:** give each option's frame time from alternating runs against the PR's base branch, and say when the machine was busy
   (other agents' runs, the user's playtest), since the numbers are then only rough.
 - **Shared before finishing:** send them to the user before you call the work done, open the PR for review, mark a
   wishlist item pending or merge, and again whenever the look changes after the user's feedback.

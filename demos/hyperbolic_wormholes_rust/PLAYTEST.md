@@ -17,14 +17,17 @@ git clone https://github.com/4gatepylon/Warped.git
 - `xcode-select --install` gives the C compiler, and CMake builds SDL3 (the window library) from source. Skip
   whichever you already have.
 - The repository is private: each player needs read access on GitHub to clone it.
-- `main` is the official version; `staging` is the latest, with fixes that reach `main` when a person merges
-  them. Everyone in a game should be on the same one.
-- For the official version: `git -C Warped switch main && git -C Warped pull`. For the latest:
-  `git -C Warped switch staging && git -C Warped pull`.
-- From a fork, GitHub's "Sync fork" updates the fork's `main`. For the latest, take `staging` from this
+- `main` is the stable version; `staging/global` is the latest, with fixes that reach `main` when a person
+  merges them. Each developer's newest work is on `staging/user-<username>` before it reaches `staging/global`.
+  Everyone in a game should be on the same one.
+- For the stable version: `git -C Warped switch main && git -C Warped pull`. For the latest:
+  `git -C Warped switch staging/global && git -C Warped pull`.
+- If the switch fails because a clone still has the old `staging` branch: `git -C Warped fetch --prune` and
+  `git -C Warped branch -m staging staging/global`.
+- From a fork, GitHub's "Sync fork" updates the fork's `main`. For the latest, take `staging/global` from this
   repository: `git -C Warped remote add upstream https://github.com/4gatepylon/Warped.git`, then
-  `git -C Warped fetch upstream staging && git -C Warped switch -c staging upstream/staging`, and
-  `git -C Warped pull upstream staging` to update later.
+  `git -C Warped fetch upstream staging/global && git -C Warped switch -c staging/global upstream/staging/global`,
+  and `git -C Warped pull upstream staging/global` to update later.
 - The first build takes a few minutes (SDL3 compiles from source); later ones take seconds.
 
 ## Play

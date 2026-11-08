@@ -6,7 +6,7 @@ is in [`AGENTS.md`](AGENTS.md).
 
 - `[ ]` open: nobody has started it.
 - `[~]` claimed: someone is working on it; the line says who, on which branch, since when.
-- `[?]` pending user review: merged into `staging`; the line names the PR; the user hasn't confirmed it works yet.
+- `[?]` pending user review: merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`); the line names the PR; the user hasn't confirmed it works yet.
 - `[x]` done: the user tested it and confirmed it works.
 
 ## Claimed
@@ -106,7 +106,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
-Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
+Merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`), waiting for the user to test and
+confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
 - [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the

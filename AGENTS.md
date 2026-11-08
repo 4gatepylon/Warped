@@ -20,8 +20,9 @@ that applies only to some kinds of work goes in a skill, and this file points to
 - State the reviewable line count in the PR description.
 - Write every PR description with the `pr-description` skill (`.agents/skills/pr-description/`).
   Every PR uses its template unchanged.
-- Open every PR against `staging`. Agents may merge into `staging`; only humans merge into `main`,
-  or an agent when a human explicitly asks (details in the `pr-description` skill).
+- Open every PR against your user's `staging/user-<username>`, which goes into `staging/global` (the
+  latest game), then `main` (stable). Agents merge into `staging/global` or `main` only with the
+  user's explicit permission for that merge (the `merging-to-staging` skill).
 
 ## Issues
 
@@ -228,7 +229,7 @@ When the user tests a game or other visual work you made, follow the `playtestin
 ## Agents working together
 
 Coordinate agents working in parallel (subagents, other sessions, Codex, Devin) with the `managing-agents` skill
-(`.agents/skills/managing-agents/`), and merge into `staging` with the `merging-to-staging` skill
+(`.agents/skills/managing-agents/`), and merge with the `merging-to-staging` skill
 (`.agents/skills/merging-to-staging/`).
 
 ## Assets
@@ -243,9 +244,10 @@ Change what outlives one build (saved player settings, server settings, what the
 
 ## Changes from others
 
-At the start of every response, check whether anyone else changed `staging` and tell the user at once who did what and
-whether it breaks anything: `git fetch -q origin staging && git log --format='%h %an: %s'
-refs/worktree/last-seen-staging..origin/staging`, then `git update-ref refs/worktree/last-seen-staging origin/staging`.
+At the start of every response, check whether anyone else changed `staging/global` and tell the user at once who did
+what and whether it breaks anything: `git fetch -q origin staging/global && git log --format='%h %an: %s'
+refs/worktree/last-seen-staging..origin/staging/global`, then
+`git update-ref refs/worktree/last-seen-staging origin/staging/global`.
 Details, and when to ask the user who an author is, are in the `compatible-changes` skill.
 
 ## Game design

@@ -37,7 +37,7 @@ So every agent's work must be findable, pushed, and kept apart from every other 
   by default; ask the user which they use). An agent kills every server it started before it finishes.
 - **Decision numbers:** don't reserve numbers ahead; they clash as soon as agents merge in another order (D96, D98,
   D99 and D100 each clashed once). An agent takes the next free number when it merges, rechecks it after merging
-  `staging`, and renumbers its decision and every reference to it if another agent took it first.
+  the PR's base in, and renumbers its decision and every reference to it if another agent took it first.
 - **Shared code:** tell each agent which shared files and structures others are changing (Rust and Metal structs,
   the network snapshot's bits, the checklist, `DECISIONS.md`), so it expects the conflicts and keeps everyone's work.
 
