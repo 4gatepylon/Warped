@@ -98,7 +98,7 @@ binary (e.g. `.levels/snow_planet/demos/snow_planet_rust/.build/release/snow-pla
 drop `stand_in_for`, and update this table. Set `takes_bot_label: false` if its bots don't take
 `--label`. `make levels` follows each branch's tip, so run it again to pick up their changes.
 Until a level is plugged in, `program: self` with `map: lunar-surface` and `stand_in_for: <level>`
-plays it on Lunar Surface. `make progression-pictures WIDTH_PX=2560 HEIGHT_PX=1440` renders the progression page without a window for four match states (before round 1, mid-match, a sweep, a tie) into `.artifacts/progression_pictures/`. `map_picture: <png from this folder>` puts a picture of the level in its box on the progression page (Dust, Snow Planet and City Sphere commit theirs; Dark Forest has none yet); this demo's own maps draw theirs from the map, and a level without one shows an empty box.
+plays it on Lunar Surface. `make progression-pictures WIDTH_PX=2560 HEIGHT_PX=1440` renders the progression page without a window for four match states (before round 1, mid-match, a sweep, a tie) into `.artifacts/progression_pictures/`. `map_picture: <png from this folder>` puts a picture of the level in its box on the progression page (the four branch levels commit theirs); this demo's own maps draw theirs from the map, and a level without one shows an empty box.
 
 ## Results
 
@@ -112,6 +112,8 @@ finished with no stall: 3 rounds (blue), 6 rounds (blue: City Sphere blue, Dark 
 Planet red, then Dust, Dark Forest and Lunar Surface blue) and 3 rounds (blue).
 With the branch tips of 2026-11-08 14:06 UTC (Dust `3c23593`, Snow Planet `9095d1a`, City Sphere
 `191b9d4`, Dark Forest `8f9b0ab`), a 9-round bot match ended with red winning, no stall.
+With the tips of 14:50 UTC (Dust `91924f4`, Snow Planet `0d0e450`, City Sphere `ce2bdc2`, Dark
+Forest `a6b3482`), a bot match ended in 3 rounds (red swept City Sphere, Snow Planet and Dust), no stall.
 
 The match takes no pylon or console count: each level program has its own (the column above
 follows `game_design/DESIGN.md`, 3-2-1-2-3 from the outside in) and reports only the winner.

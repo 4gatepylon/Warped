@@ -31,6 +31,7 @@ levels:
     branch: devin/dark-forest-demo
     status: plugged in (make levels links and builds devin/dark-forest-demo in .levels/)
     program: .levels/dark_forest/demos/dark_forest_rust/.build/release/dark-forest
+    map_picture: .levels/dark_forest/demos/dark_forest_rust/assets/map_picture.png
     takes_bot_label: false
   - name: Lunar Surface
     folder: demos/hyperbolic_wormholes_rust
