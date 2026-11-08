@@ -32,6 +32,7 @@ const MANIFEST_NAME: &str = "map.json";
 const FORMAT: &str = "warped-map";
 const VERSION: u32 = 1;
 const SPACE_HYPERBOLIC: &str = "hyperbolic";
+const DIRECTION_TOLERANCE: f64 = 1e-6;
 
 /// `Space` is the map's space; this demo reads hyperbolic maps only.
 #[derive(Deserialize)]
@@ -179,6 +180,15 @@ pub struct Planet {
     pub angular_radius_rad: f64,
 }
 
+/// `MilkyWay` is where the galaxy's band lies in the sky: the great circle 90° from
+/// `pole_direction`, brightest at `core_direction` (a unit direction perpendicular to it).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MilkyWay {
+    pub pole_direction: [f64; 3],
+    pub core_direction: [f64; 3],
+}
+
 /// `Sky` is how the sky looks and how a ray finds its place in it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,6 +196,7 @@ pub struct Sky {
     pub transport: String,
     pub sun: Sun,
     pub planet: Option<Planet>,
+    pub milky_way: Option<MilkyWay>,
     pub stars: bool,
     pub clouds: bool,
     pub zenith_color: [f32; 3],
@@ -336,9 +347,31 @@ pub fn to_direction(values: &[f64; 3]) -> DVec3 {
     DVec3::from_array(*values)
 }
 
+/// `check_milky_way` says what is wrong with a Milky Way, if anything: its pole or core isn't a
+/// unit direction, or the core isn't perpendicular to the pole (within `DIRECTION_TOLERANCE`, as
+/// `common/maps/validate_map.py` checks).
+///
+/// Example: `check_milky_way(&milky_way)?;`
+fn check_milky_way(milky_way: &MilkyWay) -> std::result::Result<(), String> {
+    let pole: DVec3 = to_direction(&milky_way.pole_direction);
+    let core: DVec3 = to_direction(&milky_way.core_direction);
+    for (name, direction) in [("pole_direction", pole), ("core_direction", core)] {
+        if (direction.length() - 1.0).abs() > DIRECTION_TOLERANCE {
+            return Err(format!("{name} must be a unit direction, not {direction}"));
+        }
+    }
+    if pole.dot(core).abs() > DIRECTION_TOLERANCE {
+        return Err(format!(
+            "core_direction must be perpendicular to pole_direction, not at a dot product of {}",
+            pole.dot(core)
+        ));
+    }
+    Ok(())
+}
+
 impl Map {
-    /// `Load` reads the map in `folder`, checking the format's name and version and that the
-    /// space is hyperbolic.
+    /// `Load` reads the map in `folder`, checking the format's name and version, that the space is
+    /// hyperbolic and that a Milky Way's pole and core are perpendicular unit directions.
     ///
     /// Example: `let map = Map::Load(&get_map_folder("house_demo"))?;`
     #[allow(non_snake_case)]
@@ -367,6 +400,10 @@ impl Map {
                 map.name, map.space.kind
             )
             .into());
+        }
+        if let Some(milky_way) = &map.sky.milky_way {
+            check_milky_way(milky_way)
+                .map_err(|problem| format!("map: {}: sky.milky_way {problem}", map.name))?;
         }
         Ok(map)
     }

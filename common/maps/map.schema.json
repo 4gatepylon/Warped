@@ -203,6 +203,15 @@
             "angular_radius_rad": {"type": "number", "exclusiveMinimum": 0}
           }
         },
+        "milky_way": {
+          "type": "object",
+          "required": ["pole_direction", "core_direction"],
+          "additionalProperties": false,
+          "properties": {
+            "pole_direction": {"$ref": "#/$defs/vector3"},
+            "core_direction": {"$ref": "#/$defs/vector3"}
+          }
+        },
         "stars": {"type": "boolean"},
         "clouds": {"type": "boolean"},
         "zenith_color": {"$ref": "#/$defs/color"},
