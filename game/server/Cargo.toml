@@ -1,0 +1,16 @@
+# `Cargo.toml` builds warped-server, the game server, binary `warped-server` (REFACTOR_PLAN.md,
+# section 5).
+#
+# Example:
+#     cargo run --release -p warped-server -- --port 47800 --map lunar-surface
+#
+# Must know:
+#     - Limitations: warped-server must build on Linux, so it depends only on warped-core and
+#       portable crates.
+[package]
+name = "warped-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+warped-core.workspace = true

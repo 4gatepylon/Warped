@@ -1,0 +1,41 @@
+# `Cargo.toml` is the Warped game's Cargo workspace: the shared library, the game window and the
+# game server, with one lockfile and one `.build/` (REFACTOR_PLAN.md, section 3).
+#
+# Interface:
+#     core/: warped-core, the library both binaries use; no window, GPU or Apple dependency.
+#     client/: warped-client, the game window, binary `warped` (macOS, Metal).
+#     server/: warped-server, the game server, binary `warped-server` (macOS and Linux).
+#     [workspace.dependencies]: the versions every crate uses, copied from the Rust demo and the
+#     infra stack's #181, so a crate names a dependency with `workspace = true`.
+#
+# Example:
+#     cargo build --release --workspace
+[workspace]
+resolver = "3"
+members = ["core", "client", "server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+warped-core = { path = "core" }
+clap = { version = "4.6.7", features = ["derive"] }
+getrandom = "0.4.3"
+glam = "0.34"
+gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_materials_transmission"] }
+hmac = "0.13.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+objc2 = "0.6"
+objc2-core-foundation = "0.3"
+objc2-foundation = "0.3"
+objc2-metal = "0.3"
+objc2-metal-fx = "0.3"
+objc2-quartz-core = "0.3"
+png = "0.18"
+rayon = "1.12"
+sdl3 = { version = "0.22", features = ["build-from-source-static"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+serde_yaml = "0.9"
+sha2 = "0.11.1"

@@ -1,0 +1,14 @@
+# `Cargo.toml` builds warped-core, the library the game window and the game server share
+# (REFACTOR_PLAN.md, section 5).
+#
+# Example:
+#     cargo test -p warped-core
+#
+# Must know:
+#     - Limitations: warped-core must build on Linux, so it never depends on sdl3, objc2 or Metal.
+[package]
+name = "warped-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

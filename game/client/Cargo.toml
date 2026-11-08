@@ -1,0 +1,18 @@
+# `Cargo.toml` builds warped-client, the game window, binary `warped` (REFACTOR_PLAN.md, section 5).
+#
+# Example:
+#     cargo run --release -p warped-client -- --join 127.0.0.1
+#
+# Must know:
+#     - Limitations: macOS only (Metal, MetalFX, SDL3) once step A1 copies the demo here.
+[package]
+name = "warped-client"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "warped"
+path = "src/main.rs"
+
+[dependencies]
+warped-core.workspace = true
