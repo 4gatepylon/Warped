@@ -24,7 +24,8 @@ use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 4] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 5] = [
+    "sniper.reload_s",
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
@@ -78,12 +79,14 @@ pub struct HeadBobSettings {
     pub fade_s: f64,
 }
 
-/// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how many hits
-/// eliminate a player, and how its beam flies (speed, and how long each point stays lit).
+/// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
+/// to reload, how many hits eliminate a player, and how its beam flies (speed, and how long each
+/// point stays lit).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SniperSettings {
     pub shot_s: f64,
+    pub reload_s: f64,
     pub hits_to_eliminate: u8,
     pub beam_speed_m_per_s: f64,
     pub beam_trail_s: f64,
@@ -393,6 +396,8 @@ mod tests {
         let zero_blur: String =
             BUILTIN_PLAYER_YAML.replace("motion_blur_s: 0.01", "motion_blur_s: 0");
         assert!(PerPlayerSettings::FromYaml(&zero_blur, "test").is_ok());
+        let no_reload: String = BUILTIN_SERVER_YAML.replace("reload_s: 2.0", "reload_s: 0");
+        assert!(ServerSettings::FromYaml(&no_reload, "test").is_ok());
         for (old, new, key) in [
             ("drain_s: 7.5", "drain_s: 0", "sprint_energy.drain_s"),
             ("shots_per_s: 8.0", "shots_per_s: -1", "rifle.shots_per_s"),

@@ -940,6 +940,21 @@
 - **Rationale:** you asked for a general menu with pages: one for the hotkeys, another showing a layout of the
   entire map.
 
+### D77. The sniper reloads, and its ammo bar is one block
+
+- **Choice:**
+  - **Reload:** after a shot, the sniper (gun 1) can't fire again for `sniper.reload_s`, 2 s by default, a new
+    server setting (0 turns it off). Before this, a click could fire again as soon as the quarter-second shot
+    ended.
+  - **Bar:** with the sniper in hand, the ammo bar (where the rifle's heat bar is) is one block, as wide as the
+    other bars. It is full when the sniper can fire, and empty from a shot until the reload ends.
+- **Alternatives:**
+  - a block that fills up gradually while reloading (you asked for it to come back when the timer resets);
+  - no reload, with the block only flashing empty during the shot (a quarter second is too short to see, and
+    `game_design/DESIGN.md` calls for about one sniper shot every 2 s).
+- **Rationale:** you asked for an ammo bar for the sniper of only one block, which comes back when the timer
+  resets, letting you shoot again.
+
 
 ## Baselines
 
