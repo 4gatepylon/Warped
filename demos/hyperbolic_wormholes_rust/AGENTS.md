@@ -9,8 +9,9 @@ Each item has an id (`W-NN`) and a status: `[ ]` open, `[~]` claimed, `[x]` done
 
 - **Read it first.** Before starting work on this demo, read the checklist on the latest `staging`
   (`git fetch origin staging`). Work only on items that are open, or that you have claimed.
-- **Add requests.** When the user asks for something new, add it under "Open" with the next id, in the user's words
-  (fixing only spelling), in your next PR. Ask the user before splitting or merging items.
+- **Add requests at once.** As soon as the user asks for something new, add it under "Open" with the next id, in
+  the user's words (fixing only spelling), in its own `wishlist: add W-NN` PR into `staging` that you merge at once,
+  even while doing other work; then do it when its turn comes. Ask the user before splitting or merging items.
 - **Claim before starting.** Change the item's `[ ]` to `[~]`, move it under "Claimed", and add who and where:
   `Claimed by <agent> (session <session or task id>), branch <branch>, <YYYY-MM-DD>.` Put only that change in a PR
   into `staging` titled `wishlist: claim W-NN` and merge it at once (agents may merge into `staging`), so other agents

@@ -28,6 +28,12 @@ Nothing yet.
   Mac over loopback.
 - [ ] **W-44 Smooth wormhole interior.** Inside a wormhole, looking sideways shows a grainy texture; it should look
   pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
+- [ ] **W-45 Player and server settings.** Split the YAML settings into a part each player can change for
+  themselves and a part that belongs to the server.
+- [ ] **W-46 Settings menu.** A screen to exit to a menu where a player changes their own choices (hotkeys and the
+  rest of the per-player settings).
+- [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
+  play but has a dashboard where they can change or reset those settings.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
 
