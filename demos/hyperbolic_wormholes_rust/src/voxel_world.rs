@@ -89,6 +89,7 @@ const MAX_PITCH_RAD: f64 = 1.55;
 const TINY: f64 = 1e-12;
 const AVATAR_HEAD_FROM_M: f64 = 1.5;
 const AVATAR_HEIGHT_M: f64 = 2.0;
+const GROUND_PROBE_M: f64 = 0.1;
 const AVATAR_SHAPES: [Shape; 2] = [
     Shape {
         kind: ShapeKind::Cylinder,
@@ -818,13 +819,15 @@ impl VoxelWorld {
     }
 
     /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
-    /// in `poses` (a clip and a time in it, one per body); lasers still hit the shapes.
+    /// in `poses` (a clip and a time in it, one per body); lasers still hit the shapes. After the
+    /// bodies come `corpses` (a feet frame and a pose each), only drawn: lasers pass through them.
     ///
-    /// Example: `let shared = world.with_posed_avatars(&[(feet, 2)], &[(AvatarClip::Idle, 0.0)], &colors);`
+    /// Example: `let shared = world.with_posed_avatars(&[(feet, 2)], &[(AvatarClip::Idle, 0.0)], &[], &colors);`
     pub fn with_posed_avatars(
         &self,
         bodies: &[(DMat4, usize)],
         poses: &[(AvatarClip, f64)],
+        corpses: &[(DMat4, (AvatarClip, f64))],
         colors: &[[f32; 3]],
     ) -> VoxelWorld {
         assert_eq!(
@@ -838,6 +841,15 @@ impl VoxelWorld {
         for (&(feet, color_index), &(clip, time_s)) in bodies.iter().zip(poses) {
             let posed: MeshModel = self.body.make_posed(clip, time_s);
             shared.add_avatar(feet, color_index, colors, Some(posed));
+        }
+        for &(feet, (clip, time_s)) in corpses {
+            let posed: MeshModel = self.body.make_posed(clip, time_s);
+            let drawn: Option<(usize, &MeshModel)> = Some((shared.avatar_meshes.len(), &posed));
+            let mut corpse: VoxelStructure =
+                make_structure("corpse", feet, shared.shapes.len(), &[], drawn, self.r);
+            corpse.avatar_mesh = corpse.mesh.take();
+            shared.avatar_meshes.push(Arc::new(posed));
+            shared.push_structure(corpse);
         }
         shared
     }
@@ -871,13 +883,21 @@ impl VoxelWorld {
         if let Some(model) = posed {
             self.avatar_meshes.push(Arc::new(model));
         }
+        self.push_structure(avatar);
+    }
+
+    /// `push_structure` adds `structure` after the others, in the list of every warp it comes
+    /// within reach of.
+    ///
+    /// Example: `shared.push_structure(avatar);`
+    fn push_structure(&mut self, structure: VoxelStructure) {
         let k: usize = self.structures.len();
         for warp in &mut self.warps {
-            if get_distance(avatar.centre, warp.centre) < avatar.radius + warp.reach {
+            if get_distance(structure.centre, warp.centre) < structure.radius + warp.reach {
                 warp.list.push(k);
             }
         }
-        self.structures.push(avatar);
+        self.structures.push(structure);
     }
 
     /// `light_consoles` sets each console's light at `time_s` (seconds, never going back): dark
@@ -919,6 +939,16 @@ impl VoxelWorld {
         let hit: Hit = self.trace_scene(x, v, reach_m / self.r, None)?;
         let inside: DVec4 = geodesic_point(x, v, hit.s + CONSOLE_PROBE_M / self.r);
         Some(self.get_material_at(inside, &[hit.structure?]))
+    }
+
+    /// `is_eye_supported` says whether a player whose eye frame is `eye` (from the network) stands
+    /// on something: their body, `GROUND_PROBE_M` lower, would meet the ground or a block.
+    ///
+    /// Example: `let is_on_ground = world.is_eye_supported(player.frame);`
+    pub fn is_eye_supported(&self, eye: DMat4) -> bool {
+        let player: VoxelPlayer = VoxelPlayer::FromEye(self, eye);
+        let nearby: Vec<usize> = self.find_nearby_structures(eye.col(AXIS_W), NEARBY_REACH_M);
+        self.is_body_blocked(player.body, player.h_m - GROUND_PROBE_M, &nearby)
     }
 
     /// `is_head_hit` says whether point x, on an avatar (structure `k`, from `with_avatars`), is in

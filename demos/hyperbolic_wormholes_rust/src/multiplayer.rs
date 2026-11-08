@@ -37,6 +37,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const AVATAR_HALF_M: [f64; 3] = [0.3, 0.95, 0.3];
 const AVATAR_DROP_M: f64 = 0.75;
 const SPAWN_RING_M: f64 = 3.0;
+const IDLE_POSE: (AvatarClip, f64) = (AvatarClip::Idle, 0.0);
 const AVATAR_COLORS: [Color; 8] = [
     [0.95, 0.25, 0.2],
     [0.2, 0.55, 0.95],
@@ -300,18 +301,21 @@ fn trace_other_voxel_lasers(
 }
 
 /// `pack_shared_voxel_view` packs a voxel map seen from `camera` with a body for each of
-/// `players`, this player's laser (if on, fired from `laser_aim`, `camera` turned by the shot's
+/// `players` in its pose in `poses` (and the `corpses` still lying, after them), this player's laser (if on, fired from `laser_aim`, `camera` turned by the shot's
 /// noise, for team `team`) and the lasers of the players who have theirs on, all traced through
 /// the same map, so beams stop at players and bend like light. It draws every laser's whole path,
 /// or `tracers` instead when given.
 ///
-/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, None, (1280, 800));`
+/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &poses, &[], None, (1280, 800));`
+#[allow(clippy::too_many_arguments)]
 pub fn pack_shared_voxel_view(
     world: &VoxelWorld,
     camera: DMat4,
     laser_aim: Option<DMat4>,
     team: u32,
     players: &[RemotePlayer],
+    poses: &[(AvatarClip, f64)],
+    corpses: &[(DMat4, (AvatarClip, f64))],
     tracers: Option<Tracers>,
     render_px: (u32, u32),
 ) -> SharedVoxelView {
@@ -325,8 +329,7 @@ pub fn pack_shared_voxel_view(
             )
         })
         .collect();
-    let poses: Vec<(AvatarClip, f64)> = vec![(AvatarClip::Idle, 0.0); bodies.len()];
-    let shared: VoxelWorld = world.with_posed_avatars(&bodies, &poses, &colors);
+    let shared: VoxelWorld = world.with_posed_avatars(&bodies, poses, corpses, &colors);
     let mut beams: Vec<(Vec<BeamSegment>, u32)> = Vec::new();
     let (mut shot, mut hit_player_id, mut spot, mut is_head_hit) = (None, None, None, false);
     if let Some(aim) = laser_aim {
@@ -483,6 +486,8 @@ pub fn run_voxel_bot(
                 is_laser_on.then_some(camera),
                 team,
                 &client.players,
+                &vec![IDLE_POSE; client.players.len()],
+                &[],
                 None,
                 BOT_VIEW_PX,
             );
@@ -593,8 +598,17 @@ mod tests {
             disabling_frac: 0.0,
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
-        let view: SharedVoxelView =
-            pack_shared_voxel_view(&world, camera, Some(camera), 0, &[other], None, (64, 40));
+        let view: SharedVoxelView = pack_shared_voxel_view(
+            &world,
+            camera,
+            Some(camera),
+            0,
+            &[other],
+            &[IDLE_POSE],
+            &[],
+            None,
+            (64, 40),
+        );
         assert_eq!(view.hit_player_id, Some(2));
         assert_eq!(
             describe_voxel_laser(&world, &view),
@@ -630,6 +644,8 @@ mod tests {
             Some(aim),
             0,
             &[remote(2, target_camera, false)],
+            &[IDLE_POSE],
+            &[],
             None,
             (64, 40),
         );
@@ -644,6 +660,8 @@ mod tests {
             None,
             0,
             &[remote(1, aim, true)],
+            &[IDLE_POSE],
+            &[],
             None,
             (64, 40),
         );

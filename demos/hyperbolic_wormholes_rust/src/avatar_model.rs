@@ -312,16 +312,30 @@ impl AvatarModel {
         &self.placed.materials
     }
 
+    /// `get_duration_s` gives the length of clip `clip` in seconds.
+    ///
+    /// Example: `let loop_s = body.get_duration_s(AvatarClip::Walk);`
+    pub fn get_duration_s(&self, clip: AvatarClip) -> f64 {
+        f64::from(self.get_clip(clip).duration_s)
+    }
+
+    /// `get_clip` gives clip `clip`'s keys.
+    ///
+    /// Example: `let keys = body.get_clip(AvatarClip::Walk);`
+    fn get_clip(&self, clip: AvatarClip) -> &Clip {
+        &self.clips[ALL_CLIPS
+            .iter()
+            .position(|&c| c == clip)
+            .expect("every clip is listed")]
+    }
+
     /// `get_joint_matrices` gives each skin joint's matrix (its node's transform times its inverse
     /// bind matrix) in clip `clip` at `time_s`, wrapped for a looping clip and held at the ends
     /// otherwise.
     ///
     /// Example: `let matrices = body.get_joint_matrices(AvatarClip::Run, 0.25);`
     fn get_joint_matrices(&self, clip: AvatarClip, time_s: f64) -> Vec<Mat4> {
-        let clip_data: &Clip = &self.clips[ALL_CLIPS
-            .iter()
-            .position(|&c| c == clip)
-            .expect("every clip is listed")];
+        let clip_data: &Clip = self.get_clip(clip);
         let t_s: f32 = if clip.is_looping() {
             (time_s as f32).rem_euclid(clip_data.duration_s)
         } else {
@@ -446,9 +460,7 @@ mod tests {
     fn looping_clips_repeat() {
         let body: AvatarModel = AvatarModel::Load(BODY_MODEL, HEIGHT_M).expect("the body");
         for clip in [AvatarClip::Idle, AvatarClip::Walk, AvatarClip::Run] {
-            let duration_s: f64 = f64::from(
-                body.clips[ALL_CLIPS.iter().position(|&c| c == clip).unwrap()].duration_s,
-            );
+            let duration_s: f64 = body.get_duration_s(clip);
             let (a, b) = (
                 body.make_posed(clip, 0.2),
                 body.make_posed(clip, 0.2 + duration_s),

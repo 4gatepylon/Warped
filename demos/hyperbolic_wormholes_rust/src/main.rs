@@ -21,6 +21,7 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod avatar_animation;
 mod avatar_model;
 mod dust;
 mod exit_prompt;
@@ -1781,6 +1782,7 @@ struct Session {
     dust_bursts: Vec<dust::DustBurst>,
     was_firing: bool,
     remote_firing_ids: Vec<u32>,
+    avatars: avatar_animation::AvatarAnimator,
     rifle_shot_count: u64,
     recoil_frac: f64,
     shot_noise: shot_noise::ShotNoise,
@@ -2111,6 +2113,7 @@ impl Session {
             dust_bursts: Vec::new(),
             was_firing: false,
             remote_firing_ids: Vec::new(),
+            avatars: avatar_animation::AvatarAnimator::New(),
             rifle_shot_count: 0,
             recoil_frac: 0.0,
             shot_noise: shot_noise::ShotNoise::FromClock(),
@@ -2736,6 +2739,10 @@ impl Session {
                         self.is_laser_on = false;
                         self.shot_time_s = 0.0;
                     }
+                    if !is_self {
+                        let now_s: f64 = self.start.elapsed().as_secs_f64();
+                        self.avatars.add_corpse(victim_id, now_s);
+                    }
                     messages.push(if is_self {
                         format!("You died: hit by player {shooter_id}")
                     } else {
@@ -2829,6 +2836,14 @@ impl Session {
                 .map_or(Vec::new(), |m| m.client.players.clone());
             let team: u32 = self.get_team();
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
+            let poses: Vec<(avatar_model::AvatarClip, f64)> =
+                self.avatars.update(&voxel.world, &players, now_s);
+            let corpses: Vec<(DMat4, (avatar_model::AvatarClip, f64))> = self
+                .avatars
+                .get_corpses(now_s, self.settings.respawn.delay_s)
+                .into_iter()
+                .map(|(corpse, pose)| (corpse.feet, pose))
+                .collect();
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
             self.dust_bursts.retain(|burst| !burst.is_over(now_s));
@@ -2850,6 +2865,8 @@ impl Session {
                 self.get_laser_aim(camera),
                 team,
                 &players,
+                &poses,
+                &corpses,
                 self.route.is_empty().then_some(multiplayer::Tracers {
                     beams: &beams,
                     spot,
