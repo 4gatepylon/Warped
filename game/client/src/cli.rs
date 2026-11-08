@@ -16,7 +16,7 @@ use crate::server_process::parse_server_address;
 use crate::{JOIN_AUTO, MIN_IMAGE_SIDE_PX, Result, net};
 
 const METAL_RENDER_SCALE: f64 = 1.0;
-const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views and --play-route.";
+const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (warped-server) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views and --play-route.";
 const HOUSE_IN_DEMO: &str = "The house demo plays only in demos/hyperbolic_wormholes_rust/ now (make -C demos/hyperbolic_wormholes_rust join-game MAP=house-demo); the game plays lunar-surface.";
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 
@@ -90,33 +90,23 @@ pub(crate) struct Arguments {
     /// back, while the view swings around.
     #[arg(long, value_enum, default_value_t = RouteKind::WarpTour)]
     pub(crate) route: RouteKind,
-    /// Host a game on the local network: start a game server as its own process (as --serve,
-    /// without a window), play in it, and stop it when this window closes.
-    #[arg(long, conflicts_with_all = ["join", "serve", "bench_views", "play_route"])]
-    pub(crate) host: bool,
     /// Join a game on the local network: `auto` to find one, or a server's IP address (with an
     /// optional :port).
-    #[arg(long, conflicts_with_all = ["serve", "bench_views", "play_route"])]
-    pub(crate) join: Option<String>,
-    /// Run only a game server, without a window, until --exit-after-s (or until stopped); it
-    /// prints this computer's address and the command that joins it.
     #[arg(long, conflicts_with_all = ["bench_views", "play_route"])]
-    pub(crate) serve: bool,
+    pub(crate) join: Option<String>,
     /// With --join and --exit-after-s: play by itself without a window (walk, aim at the nearest
     /// player and fire), to test a game; saves its view under .artifacts/bot/ at each hit.
     #[arg(long)]
     pub(crate) bot: bool,
-    /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
+    /// --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     pub(crate) port: u16,
-    /// The numbers that shape play, a YAML file with server_settings.yaml's keys (the default): a
-    /// server (--serve, --host) sends them to every player who joins; without a server, this game
-    /// uses them.
+    /// The numbers that shape play, a YAML file with server_settings.yaml's keys (the default), for
+    /// the tools that run without a server; a server sends its own to every player who joins.
     #[arg(long, conflicts_with = "join")]
     pub(crate) server_settings: Option<PathBuf>,
-    /// A file holding the game's password: a server (--serve, --host) admits only players who prove
-    /// they know it, and a player (--join, --host) proves it. Without it the password is empty, as
-    /// suits a local network.
+    /// A file holding the game's password, which a player (--join) proves to the server. Without it
+    /// the password is empty, as suits a local network.
     #[arg(long)]
     pub(crate) game_password_file: Option<PathBuf>,
     /// This player's own choices (keys, mouse speed, head bob, motion blur, how a hit looks), a YAML
@@ -184,13 +174,8 @@ pub(crate) fn validate_arguments(arguments: &Arguments) -> Result<()> {
     if arguments.map == MapName::HouseDemo {
         return Err(HOUSE_IN_DEMO.into());
     }
-    if arguments.host {
-        return Err(LOCAL_PLAY_OFF.into());
-    }
-    let is_window_without_server: bool = arguments.join.is_none()
-        && !arguments.serve
-        && !arguments.bench_views
-        && !arguments.play_route;
+    let is_window_without_server: bool =
+        arguments.join.is_none() && !arguments.bench_views && !arguments.play_route;
     if is_window_without_server {
         return Err(LOCAL_PLAY_OFF.into());
     }

@@ -72,7 +72,7 @@ help:
 	@echo "Example: make test"
 
 serve-game:
-	$(RUN_WINDOW) --serve --port $(PORT) --map $(MAP) $(SERVER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
+	cargo run --release -p $(SERVER_PROGRAM) -- --port $(PORT) --map $(MAP) $(SERVER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
 
 join-game:
 	$(RUN_WINDOW) --join $(SERVER) --port $(PORT) --map $(MAP) $(PLAYER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)

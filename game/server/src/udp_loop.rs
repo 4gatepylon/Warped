@@ -4,7 +4,7 @@
 //!
 //! Interface: `bind_server`, `serve`.
 //!
-//! Example: `udp_loop::serve(udp_loop::bind_server(47800)?, &mut game, &AtomicBool::new(false))?;`
+//! Example: `udp_loop::serve(udp_loop::bind_server(47800)?, &mut game, &should_stop, &should_start_next_game)?;`
 //!
 //! Must know:
 //! - A failed send is logged, not fatal, so one unreachable player can't end the game for everyone.
@@ -36,14 +36,16 @@ pub fn bind_server(port: u16) -> Result<UdpSocket, Box<dyn Error>> {
 
 /// `serve` runs `game` on `socket` (from `bind_server`) until `should_stop` is set: it gives the
 /// game every datagram (`Game::handle`) and, after each wait for one, the time (`Game::tick`), in
-/// seconds since `serve` started; sends what the game gives back; and broadcasts a beacon every
+/// seconds since `serve` started; sends what the game gives back; starts the next game after a win
+/// when `should_start_next_game` is set (clearing it); and broadcasts a beacon every
 /// `BEACON_PERIOD_S` so `net::find_server` can find it.
 ///
-/// Example: `udp_loop::serve(socket, &mut game, &should_stop)?;`
+/// Example: `udp_loop::serve(socket, &mut game, &should_stop, &should_start_next_game)?;`
 pub fn serve(
     socket: UdpSocket,
     game: &mut Game,
     should_stop: &AtomicBool,
+    should_start_next_game: &AtomicBool,
 ) -> Result<(), Box<dyn Error>> {
     let start: Instant = Instant::now();
     let beacon_socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
@@ -62,6 +64,9 @@ pub fn serve(
             }
             Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
             Err(error) => return Err(error.into()),
+        }
+        if should_start_next_game.swap(false, Ordering::Relaxed) {
+            game.startNextGame();
         }
         let now_s: f64 = start.elapsed().as_secs_f64();
         send_all(&socket, game.tick(now_s));

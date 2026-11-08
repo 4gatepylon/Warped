@@ -38,9 +38,12 @@ fn with_server(test: impl FnOnce(SocketAddr)) {
         PASSWORD.to_vec(),
         None,
     );
-    let should_stop: AtomicBool = AtomicBool::new(false);
+    let (should_stop, should_start_next_game) = (AtomicBool::new(false), AtomicBool::new(false));
     std::thread::scope(|scope| {
-        scope.spawn(|| udp_loop::serve(socket, &mut game, &should_stop).expect("a server"));
+        scope.spawn(|| {
+            udp_loop::serve(socket, &mut game, &should_stop, &should_start_next_game)
+                .expect("a server")
+        });
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
             test(SocketAddr::from(([127, 0, 0, 1], port)))
         }));

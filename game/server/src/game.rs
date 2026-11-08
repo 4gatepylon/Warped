@@ -2,7 +2,7 @@
 //! moves the game on, each given the time and giving back the datagrams to send, so a UDP loop or a
 //! test drives it without sockets.
 //!
-//! Interface: `Game`, `Game::New`, `Game::handle`, `Game::tick`.
+//! Interface: `Game`, `Game::New`, `Game::handle`, `Game::tick`, `Game::startNextGame`.
 //!
 //! Example: `for (to, datagram) in game.tick(now_s) { socket.send_to(&datagram, to)?; }`
 //!
@@ -158,6 +158,18 @@ impl Game {
             self.last_scores_s = now_s;
         }
         std::mem::take(&mut self.outbox)
+    }
+
+    /// `startNextGame` starts a new game if a team has won, as `Enter` in the server's terminal
+    /// asks, or says that the game goes on.
+    ///
+    /// Example: `game.startNextGame();`
+    #[allow(non_snake_case)]
+    pub fn startNextGame(&mut self) {
+        match self.game.winner {
+            Some(_) => self.start_new_game(),
+            None => println!("No team has won yet, so the game goes on."),
+        }
     }
 
     /// `advance_clock` sets the time to `now_s`, which may not be earlier than the time already set.
@@ -637,7 +649,7 @@ mod tests {
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Time since a player was last heard | less than `PLAYER_TIMEOUT_S` (kept), `PLAYER_TIMEOUT_S` (removed) | `silent_players_time_out` |
     //! | Time since the last snapshot and scores | less than their period (nothing sent), a snapshot's period, both periods (both sent to every player) | `snapshots_and_scores_follow_their_periods` |
-    //! | Next game after a win | by itself, before `new_game_after_win_s` (not yet) and at it (started); never by itself (`None`) | `the_next_game_starts_after_a_win` |
+    //! | Next game after a win | by itself, before `new_game_after_win_s` (not yet) and at it (started); never by itself (`None`); asked for (`startNextGame`) with a winner (started) and without (the game goes on) | `the_next_game_starts_after_a_win` |
     //! | Time given | later or the same (taken), earlier (fails) | every test, `time_cannot_go_back` |
 
     use super::*;
@@ -1128,6 +1140,10 @@ mod tests {
         }
         assert_eq!((by_itself.game.number, by_itself.game.winner), (1, None));
         assert_eq!((never.game.number, never.game.winner), (0, Some(1)));
+        never.startNextGame();
+        assert_eq!((never.game.number, never.game.winner), (1, None));
+        never.startNextGame();
+        assert_eq!(never.game.number, 1);
     }
 
     #[test]

@@ -11,7 +11,6 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Child;
 use std::time::Instant;
 
 use glam::{DMat4, DVec4};
@@ -46,7 +45,6 @@ use crate::cli::get_default_render_scale;
 use crate::server_process::get_server_address;
 use crate::server_process::load_map;
 use crate::server_process::load_settings;
-use crate::server_process::start_server_process;
 pub(crate) use hud::{OverlayText, get_text_positions, make_text_mask};
 use hud::{get_blueshift_frac, get_map_picture_max_px};
 use online::ConnectionProblem;
@@ -362,12 +360,11 @@ impl Gun {
     }
 }
 
-/// `Multiplayer` is a window's game on the local network: its connection, the server process it
-/// started with `--host`, whether this player was hit and waits to rejoin, the number of the game
-/// it plays, and the console this player holds `E` on, with the seconds held.
+/// `Multiplayer` is a window's game on a game server: its connection, whether this player was hit
+/// and waits to rejoin, the number of the game it plays, and the console this player holds `E` on,
+/// with the seconds held.
 struct Multiplayer {
     client: net::Client,
-    server: Option<Child>,
     is_eliminated: bool,
     respawn_in_s: f64,
     game_number: u32,
@@ -375,17 +372,12 @@ struct Multiplayer {
 }
 
 impl Drop for Multiplayer {
-    /// `drop` tells the server this player is leaving and stops the hosted server, if any.
+    /// `drop` tells the server this player is leaving.
     ///
     /// Example: `drop(multiplayer);`
     fn drop(&mut self) {
         if let Err(error) = self.client.leave() {
             eprintln!("Couldn't tell the server this player left: {error}");
-        }
-        if let Some(mut server) = self.server.take()
-            && let Err(error) = server.kill().and_then(|()| server.wait().map(drop))
-        {
-            eprintln!("Couldn't stop the game server: {error}");
         }
     }
 }
@@ -436,19 +428,13 @@ impl Session {
             (false, _) => Vec::new(),
             (true, RouteKind::WarpTour) => make_warp_tour(&voxel.world),
         };
-        let multiplayer: Option<Multiplayer> = if arguments.host || arguments.join.is_some() {
-            let server: Option<Child> = if arguments.host {
-                Some(start_server_process(arguments)?)
-            } else {
-                None
-            };
+        let multiplayer: Option<Multiplayer> = if arguments.join.is_some() {
             Some(Multiplayer {
                 client: net::Client::Connect(
                     get_server_address(arguments)?,
                     arguments.map.get_folder_name(),
                     &net::read_game_password(arguments.game_password_file.as_deref())?,
                 )?,
-                server,
                 is_eliminated: false,
                 respawn_in_s: 0.0,
                 game_number: 0,

@@ -9,8 +9,8 @@
 //!   `.artifacts/bench_views/<run_id>/`. `--frame-count`, `--width-px`, `--height-px` set it up.
 //! - `--json`: print results as one JSON object. `--label`: suffix for the run folder.
 //! - `--exit-after-s <seconds>`: close the window after that long and print its frame rate.
-//! - `--host`, `--join auto|<address>`, `--serve`, `--bot`, `--port`: play with others on the local
-//!   network (see `net.rs` and `multiplayer.rs`).
+//! - `--join auto|<address>`, `--bot`, `--port`: play on a game server (`warped-server`, see
+//!   `net.rs` and `multiplayer.rs`).
 //! - `--black-hole-strength <0..1>`: on lunar-surface, force the black hole's strength (W-68).
 //!
 //! Example: `cargo run --release -- --bench-views --width-px 2560 --height-px 1600`
@@ -64,7 +64,6 @@ use crate::cli::RendererKind;
 use crate::cli::validate_arguments;
 use crate::renderer::Renderer;
 use crate::renderer::make_renderer;
-use crate::server_process::serve_only;
 use crate::title_choice::run_title_screen;
 use crate::title_choice::show_alert;
 use bench::bench_views;
@@ -112,15 +111,12 @@ fn main() -> ExitCode {
     }
 }
 
-/// `run` validates the command line and runs what it asks for: the window, a server, the bot or
-/// the benchmark.
+/// `run` validates the command line and runs what it asks for: the window, the bot or the
+/// benchmark.
 ///
 /// Example: `run(Arguments::parse())?;`
 fn run(arguments: Arguments) -> Result<()> {
     validate_arguments(&arguments)?;
-    if arguments.serve {
-        return serve_only(&arguments);
-    }
     if arguments.renderer == RendererKind::Metal {
         viewmodel::check_gun_models()?;
         if arguments.map == MapName::LunarSurface {
