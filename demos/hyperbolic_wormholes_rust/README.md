@@ -25,7 +25,7 @@ make run-demo RENDERER=cpu
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
-- `R` respawns. `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
+- `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
 - The HUD shows the frame rate, the render time and, with Metal, the GPU's own time and the render scale; with Metal

@@ -794,6 +794,14 @@
 - **Rationale:** you asked for crouching that slows walking, for shooting while crouched, and for no shooting while
   walking.
 
+### D68. No respawning by choice
+
+- **Choice:** the `R` key is gone. A player comes back at their spawn only after being eliminated (or a new game),
+  so nobody can escape a fight or skip the walk back.
+- **Alternatives:** keeping `R` without a server only (it helped testing alone; `--view` still starts a solo game at
+  any viewpoint).
+- **Rationale:** you asked to get rid of respawning by choice.
+
 
 ## Baselines
 
