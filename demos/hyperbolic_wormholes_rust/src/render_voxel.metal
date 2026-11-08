@@ -57,8 +57,8 @@ constant float MIN_FACING = 0.05;
 constant float MIN_MEAN_ALBEDO = 0.02;
 constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);
 constant float DISPLAY_GAMMA = 2.2;
-constant float EXPOSURE = 1.6;
-constant float BLOOM_STRENGTH = 0.12;
+constant float EXPOSURE = 1.3;
+constant float BLOOM_STRENGTH = 0.08;
 constant int BLOOM_LEVELS = __BLOOM_LEVELS__;
 constant float VIGNETTE_STRENGTH = 0.28;
 constant float GRADE_MIDDLE_GREY = 0.18;
@@ -72,12 +72,13 @@ constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
 constant float SHADOW_PENUMBRA_TAN = 0.015;
 constant float3 HAZE_COLOR = float3(0.15, 0.17, 0.21);
-constant float HAZE_DISTANCE_M = 200.0;
-constant float HAZE_MAX_FRAC = 0.35;
-constant float HAZE_HORIZON_HEIGHT_FRAC = 0.12;
+constant float HAZE_START_M = 60.0;
+constant float HAZE_DISTANCE_M = 150.0;
+constant float HAZE_MAX_FRAC = 0.2;
+constant float HAZE_HORIZON_HEIGHT_FRAC = 0.06;
 constant float HAZE_SUN_GLOW = 0.5;
 constant float HAZE_SUN_POWER = 8.0;
-constant float HAZE_SKYLIGHT = 0.4;
+constant float HAZE_SKYLIGHT = 0.2;
 constant float BLOOM_KARIS_LUMA = 4.0;
 constant float BLOOM_GLOW = 1.0;
 constant float2 BLOOM_GLOW_LUMA_EDGES = float2(0.5, 2.0);
@@ -570,20 +571,21 @@ static float structure_distance(thread const Scene &scene, device const VoxelStr
 
 /**
  * @brief `march_shapes` sphere-traces the chart line q0 + dq mu from mu to mu_hi and gives where it meets a shape (or
- * INFINITY), lowering `lit` to the least gap to a shape over the chart distance from `mu_from` times
- * `SHADOW_PENUMBRA_TAN`.
+ * INFINITY); with `should_track_lit` (shadow rays only, since it slows the camera's rays), it lowers `lit` to the
+ * least gap to a shape over the chart distance from `mu_from` times `SHADOW_PENUMBRA_TAN`.
  * @par Example
  * @code
- * float mu = march_shapes(scene, st, q0, dq, 0.0, 1.0, false, index, 0.0, lit);
+ * float mu = march_shapes<false>(scene, st, q0, dq, 0.0, 1.0, false, index, 0.0, lit);
  * @endcode
  */
+template <bool should_track_lit>
 static float march_shapes(thread const Scene &scene, device const VoxelStructure &st, float3 q0, float3 dq, float mu, float mu_hi, bool is_glass, thread int &index,
                           float mu_from, thread float &lit) {
     float speed = max(length(dq), TINY);
     for (int i = 0; i < MAX_SHAPE_STEPS; i++) {
         float d = structure_distance(scene, st, q0 + dq * mu, is_glass, index);
         if (d < SHAPE_HIT_M) return mu;
-        lit = min(lit, d / max((mu - mu_from) * speed * SHADOW_PENUMBRA_TAN, TINY));
+        if (should_track_lit) lit = min(lit, d / max((mu - mu_from) * speed * SHADOW_PENUMBRA_TAN, TINY));
         mu += d / speed;
         if (mu > mu_hi) break;
     }
@@ -615,12 +617,14 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     float scale = st.scale.x;
     float3 q0 = p.xyz / p.w * scale, dq = (t.xyz * p.w - p.xyz * t.w) * scale;
     int index = st.size.x;
-    float lam_from = -tanh(s_star), mu_from = lam_from / (p.w * (p.w + lam_from * t.w));
-    float mu = march_shapes(scene, st, q0, dq, mu_lo, mu_hi, false, index, mu_from, hit.lit);
-    if (!is_shadow) {
+    float mu;
+    if (is_shadow) {
+        float lam_from = -tanh(s_star), mu_from = lam_from / (p.w * (p.w + lam_from * t.w));
+        mu = march_shapes<true>(scene, st, q0, dq, mu_lo, mu_hi, false, index, mu_from, hit.lit);
+    } else {
         int glass_index;
-        float temp_lit = 1.0;
-        float mu_glass = march_shapes(scene, st, q0, dq, mu_lo, min(mu, mu_hi), true, glass_index, mu_from, temp_lit);
+        mu = march_shapes<false>(scene, st, q0, dq, mu_lo, mu_hi, false, index, 0.0, hit.lit);
+        float mu_glass = march_shapes<false>(scene, st, q0, dq, mu_lo, min(mu, mu_hi), true, glass_index, 0.0, hit.lit);
         if (mu_glass < INFINITY) glass_s = min(glass_s, s_star + clamp_atanh(mu_glass * p.w * p.w / (1.0 - mu_glass * p.w * t.w)));
     }
     if (mu == INFINITY) return;
@@ -693,13 +697,15 @@ static float3 get_fermi(float4 x, float r) {
 
 /**
  * @brief `trace_terrain` is terrain.rs's `find_hit_s` on the chord from x along v within `hit.s`: steps of a fraction
- * of the gap to the ground, at least a little more each meter out, then bisection of the step that went under; lowers
- * `hit.lit` to the least gap over the distance travelled times `SHADOW_PENUMBRA_TAN`.
+ * of the gap to the ground, at least a little more each meter out, then bisection of the step that went under; with
+ * `should_track_lit` (shadow rays only), it lowers `hit.lit` to the least gap over the distance travelled times
+ * `SHADOW_PENUMBRA_TAN`.
  * @par Example
  * @code
- * trace_terrain(scene, x, v, hit);
+ * trace_terrain<false>(scene, x, v, hit);
  * @endcode
  */
+template <bool should_track_lit>
 static void trace_terrain(thread const Scene &scene, float4 x, float4 v, thread Hit &hit) {
     float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = 0.0, previous = 0.0;
     for (int i = 0; i < TERRAIN_MAX_STEPS; i++) {
@@ -716,7 +722,7 @@ static void trace_terrain(thread const Scene &scene, float4 x, float4 v, thread 
             if (hi < hit.s) { hit.s = hi; hit.mat = MAT_GROUND; hit.k = -1; }
             return;
         }
-        hit.lit = min(hit.lit, gap / max(s * r * SHADOW_PENUMBRA_TAN, TINY));
+        if (should_track_lit) hit.lit = min(hit.lit, gap / max(s * r * SHADOW_PENUMBRA_TAN, TINY));
         if (f.z > top_m && geodesic_tangent(x, v, s).y > 0.0) return;
         previous = s;
         s += max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * s * r) / r;
@@ -775,7 +781,7 @@ static bool is_clear_of_blocks(thread const Scene &scene, int w, float3 local, f
  * @endcode
  */
 static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, thread Hit &hit, thread float &glass_s) {
-    if (scene.u.has_terrain != 0) trace_terrain(scene, x, v, hit); else trace_ground(x, v, hit);
+    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, hit); else trace_ground(x, v, hit);
     if (warp < 0) {
         for (int k = 0; k < scene.u.structure_count; k++) trace_structure(scene, k, x, v, 0.0, false, hit, glass_s);
     } else {
@@ -804,7 +810,7 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
     h.lit = 1.0;
     float glass_s = NO_HIT_S;
     if (scene.u.has_terrain != 0) {
-        trace_terrain(scene, x, l, h);
+        trace_terrain<true>(scene, x, l, h);
         if (h.mat != 0) return SHADOW_FLOOR;
     }
     for (int k = 0; k < scene.u.structure_count; k++) {
@@ -1524,7 +1530,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, team = 0.0;
     float4 dust = float4(0.0);
     Hit hit;
-    hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0); hit.lit = 1.0;
+    hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
     int outcome = OUTCOME_LOST, last_warp = -1;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
@@ -1605,8 +1611,8 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
 }
 
 /**
- * @brief `add_haze` mixes a thin haze into the colour of a ray that hit a surface (more the farther it went) or reached
- * the sky (more the nearer the horizon), brighter toward the sun; a lost ray stays as it is.
+ * @brief `add_haze` mixes a thin haze into the colour of a ray that hit a surface beyond `HAZE_START_M` (more the farther
+ * it went) or reached the sky (more the nearer the horizon), brighter toward the sun; a lost ray stays as it is.
  * @par Example
  * @code
  * color = add_haze(scene, color, end);
@@ -1615,7 +1621,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
 static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end) {
     float haze_frac, sun_cos;
     if (end.surface.x == OUTCOME_HIT) {
-        haze_frac = 1.0 - exp(-end.grid.w * scene.u.curvature_radius_m / HAZE_DISTANCE_M);
+        haze_frac = 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
         sun_cos = mdot(end.view, transport_from_centre(scene.u.sun.xyz, end.point));
     } else if (end.surface.x == OUTCOME_SKY) {
         haze_frac = exp(-max(end.point.y, 0.0) / HAZE_HORIZON_HEIGHT_FRAC);
