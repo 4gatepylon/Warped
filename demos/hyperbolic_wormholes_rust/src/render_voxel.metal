@@ -2111,7 +2111,7 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
+/** @brief `scan_beams` adds the glow of laser segments near a chord (the chord's closest approach to the segment's line in closed form, then the chord's point nearest the segment's point nearest that, so a short piece of an arc isn't judged by its line's far reaches): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
 static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
                        thread float &speckle) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
@@ -2128,7 +2128,10 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         s_c = clamp(s_c, 0.0, min(s_end, FAR_S));
         float4 xc = geodesic_point(x, v, s_c);
         float sigma = clamp(clamp_atanh(mdot(xc, b) / -mdot(xc, a)), 0.0, info.x);
-        float d_m = measure_gap(xc, geodesic_point(a, b, sigma)) * r;
+        float4 p = geodesic_point(a, b, sigma);
+        s_c = clamp(clamp_atanh(mdot(v, p) / -mdot(x, p)), 0.0, min(s_end, FAR_S));
+        xc = geodesic_point(x, v, s_c);
+        float d_m = measure_gap(xc, p) * r;
         float width_m = max(radius_m, pix * r * sinh(min(travelled + s_c, FAR_S)));
         float q = d_m * d_m / (width_m * width_m);
         bool is_rifle = (beam_code & RIFLE_BEAM_CODE) != 0;

@@ -22,7 +22,7 @@ use objc2_metal::{
 };
 
 use crate::dust::DustCloud;
-use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
+use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_fermi_point};
 use crate::mesh::MeshModel;
 use crate::render_mesh::{
     FIRST_AVATAR_ROOT_CODE, GpuNode, GpuTriangle, MeshGpu, NO_MESH, get_first_materials,
@@ -33,7 +33,7 @@ use crate::render_metal::{
     encode_adaptive_sampling, make_pipeline,
 };
 use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
-use crate::terrain::MoundGrid;
+use crate::terrain::{MoundGrid, get_fermi_coordinates};
 use crate::thrown_wormholes::{GREEN_COLOR, HIT_FLASH_COLOR, PURPLE_COLOR, WormholeColor};
 use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
@@ -72,7 +72,10 @@ const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
-const BEACON_BEAM_M: f64 = 400.0;
+const BEACON_ARC_APEX_M: f64 = 80.0;
+const BEACON_ARC_SEGMENT_COUNT: usize = 32;
+const CUBIC_MIDPOINT_WEIGHT_COUNT: f64 = 8.0;
+const CUBIC_INNER_WEIGHT: f64 = 3.0;
 const RIFLE_BEAM_CODE: u32 = 2;
 const BEACON_BEAM_CODE: u32 = 4;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
@@ -249,10 +252,10 @@ pub struct VoxelFrame {
     avatar_nodes: Vec<GpuNode>,
 }
 
-/// `get_beacon_beams` gives each beacon's beam: from the top of the model of each structure drawn
-/// as a mesh whose first shape is a console, straight up for `BEACON_BEAM_M` (as far as
-/// `clip_beam_to_map` allows), in its console's team colour and `BEACON_BEAM_CODE` (so the shader
-/// draws it wider), bright while its console is on and gone once it is off.
+/// `get_beacon_beams` gives each beacon's beam: an arc from the top of the model of each structure
+/// drawn as a mesh whose first shape is a console to the centre of the map's black hole, in its
+/// console's team colour and `BEACON_BEAM_CODE` (so the shader draws it wider), bright while its
+/// console is on and gone once it is off. A map with beacons has one black hole.
 ///
 /// Example: `let beams = get_beacon_beams(&world);`
 fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
@@ -266,6 +269,14 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
         else {
             continue;
         };
+        let black_holes: Vec<&VoxelWarp> = world.warps.iter().filter(|w| !w.is_mouth).collect();
+        let [hole] = black_holes[..] else {
+            panic!(
+                "get_beacon_beams: map {} has beacons, so it needs one black hole, not {}",
+                world.name,
+                black_holes.len()
+            )
+        };
         let on_frac: f32 = if world.palette[usize::from(console.material)][3] > 0.0 {
             1.0
         } else {
@@ -273,15 +284,10 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
         };
         let frame: DMat4 = invert_lorentz(st.inverse);
         let top: f64 = f64::from(world.meshes[m].nodes[0].hi.y) / world.r;
-        let (x, v) = (frame.col(AXIS_W), frame.col(AXIS_Y));
-        let segment: BeamSegment = BeamSegment {
-            a: top.cosh() * x + top.sinh() * v,
-            b: top.sinh() * x + top.cosh() * v,
-            length: BEACON_BEAM_M / world.r,
-        };
+        let top_x: DVec4 = top.cosh() * frame.col(AXIS_W) + top.sinh() * frame.col(AXIS_Y);
         let code: u32 = console.team + BEACON_BEAM_CODE;
         beams.extend(
-            clip_beam_to_map(&[segment], world.r)
+            make_arc_segments(top_x, hole.centre, world.r)
                 .into_iter()
                 .map(|s| GpuBeam {
                     a: to_f32(s.a),
@@ -291,6 +297,45 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
         );
     }
     beams
+}
+
+/// `make_arc_segments` gives the geodesic pieces of an arch from point `start` to point `end`
+/// on a map of curvature radius `r`: a cubic Bézier curve in Fermi coordinates that leaves `start`
+/// straight up, comes down into `end` straight from above, and is `BEACON_ARC_APEX_M` above the
+/// ground halfway, cut into `BEACON_ARC_SEGMENT_COUNT` pieces.
+///
+/// Example: `let segments = make_arc_segments(beacon_top, hole.centre, world.r);`
+fn make_arc_segments(start: DVec4, end: DVec4, r: f64) -> Vec<BeamSegment> {
+    let [u0_m, v0_m, h0_m] = get_fermi_coordinates(start, r);
+    let [u3_m, v3_m, h3_m] = get_fermi_coordinates(end, r);
+    let control_h_m: f64 = (CUBIC_MIDPOINT_WEIGHT_COUNT * BEACON_ARC_APEX_M - h0_m - h3_m)
+        / (2.0 * CUBIC_INNER_WEIGHT);
+    let get_point = |t: f64| -> DVec4 {
+        let (w0, w1, w2, w3) = (
+            (1.0 - t).powi(3),
+            CUBIC_INNER_WEIGHT * (1.0 - t).powi(2) * t,
+            CUBIC_INNER_WEIGHT * (1.0 - t) * t * t,
+            t.powi(3),
+        );
+        make_fermi_point(
+            (w0 + w1) * u0_m + (w2 + w3) * u3_m,
+            (w0 + w1) * v0_m + (w2 + w3) * v3_m,
+            w0 * h0_m + (w1 + w2) * control_h_m + w3 * h3_m,
+            r,
+        )
+    };
+    (0..BEACON_ARC_SEGMENT_COUNT)
+        .map(|i| {
+            let a: DVec4 = get_point(i as f64 / BEACON_ARC_SEGMENT_COUNT as f64);
+            let next: DVec4 = get_point((i + 1) as f64 / BEACON_ARC_SEGMENT_COUNT as f64);
+            let length: f64 = get_distance(a, next);
+            BeamSegment {
+                a,
+                b: (next - length.cosh() * a) / length.sinh(),
+                length,
+            }
+        })
+        .collect()
 }
 
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
@@ -1033,6 +1078,7 @@ mod tests {
     //! | Team | blue, red | `beams_carry_their_gun_team_and_speckle` |
     //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
     //! | A beacon's console | on (its beam is bright), off (its beam goes, the others stay) | `beacon_beams_go_with_their_consoles` |
+    //! | Point along a beacon's arc | its start, a join between pieces, halfway, its end | `beacon_arcs_join_the_beacon_to_the_black_hole` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -1085,17 +1131,47 @@ mod tests {
         };
         assert_eq!(
             get_brightness(&mut world, 0),
-            vec![BEAM_BRIGHTNESS; beacon_count]
+            vec![BEAM_BRIGHTNESS; beacon_count * BEACON_ARC_SEGMENT_COUNT]
         );
         let brightness: Vec<f32> = get_brightness(&mut world, 1);
         assert_eq!(
             brightness.iter().filter(|&&b| b == 0.0).count(),
-            1,
+            BEACON_ARC_SEGMENT_COUNT,
             "{brightness:?}"
         );
         assert_eq!(
             brightness.iter().filter(|&&b| b == BEAM_BRIGHTNESS).count(),
-            beacon_count - 1
+            (beacon_count - 1) * BEACON_ARC_SEGMENT_COUNT
         );
+    }
+
+    #[test]
+    fn beacon_arcs_join_the_beacon_to_the_black_hole() {
+        const R_M: f64 = 40.0;
+        const TOLERANCE_M: f64 = 1e-6;
+        const MAX_FIRST_PIECE_SIDEWAYS_PER_UP: f64 = 0.1;
+        let start: DVec4 = make_fermi_point(-100.0, 10.0, 12.0, R_M);
+        let end: DVec4 = make_fermi_point(0.0, 0.0, 17.0, R_M);
+        let segments: Vec<BeamSegment> = make_arc_segments(start, end, R_M);
+        let get_end = |s: &BeamSegment| s.length.cosh() * s.a + s.length.sinh() * s.b;
+        let is_near = |p: DVec4, q: DVec4| get_distance(p, q) * R_M < TOLERANCE_M;
+        assert_eq!(segments.len(), BEACON_ARC_SEGMENT_COUNT);
+        assert!(is_near(segments[0].a, start));
+        assert!(
+            segments
+                .windows(2)
+                .all(|pair| is_near(get_end(&pair[0]), pair[1].a))
+        );
+        assert!(is_near(
+            get_end(&segments[BEACON_ARC_SEGMENT_COUNT - 1]),
+            end
+        ));
+        let [_, _, halfway_h_m] =
+            get_fermi_coordinates(segments[BEACON_ARC_SEGMENT_COUNT / 2].a, R_M);
+        assert!((halfway_h_m - BEACON_ARC_APEX_M).abs() < TOLERANCE_M);
+        let [u0_m, v0_m, h0_m] = get_fermi_coordinates(segments[0].a, R_M);
+        let [u1_m, v1_m, h1_m] = get_fermi_coordinates(get_end(&segments[0]), R_M);
+        let sideways_m: f64 = (u1_m - u0_m).hypot(v1_m - v0_m);
+        assert!(sideways_m < MAX_FIRST_PIECE_SIDEWAYS_PER_UP * (h1_m - h0_m));
     }
 }
