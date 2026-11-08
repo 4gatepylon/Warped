@@ -281,6 +281,174 @@ inline float3 grade_display(float3 color) {
 }
 
 /**
+ * @brief `LensUniforms` matches `GpuLensUniforms`: each mouth's (centre, lens throat) and (reach, λ²,
+ * partner, floor height), and (mouth count, 1 while capturing, atlas rows, unused).
+ */
+struct LensUniforms {
+    float4 centres[16];
+    float4 shapes[16];
+    float4 params;
+};
+
+/** @brief `LENS_VISIBLE_FRAC` of a mouth's reach shows the lens; it fades in from `LENS_FADE_FRAC`. */
+constant float LENS_VISIBLE_FRAC = 0.8;
+constant float LENS_FADE_FRAC = 0.6;
+/** @brief `LENS_PROXY_M` is the distance of the world around a mouth that its atlas lookups assume. */
+constant float LENS_PROXY_M = 12.0;
+constant int LENS_MAX_STEP_COUNT = 200;
+
+/**
+ * @brief `get_lens_bend` is ∇ln n of mouth w's foil lens at x, tapered by (1 − (ρ/reach)²)² to
+ * nothing at its reach: the hyperbolic demo's `compute_gradient` in flat space.
+ * @par Example
+ * @code
+ * float3 g = get_lens_bend(lens, w, x);
+ * @endcode
+ */
+static float3 get_lens_bend(constant LensUniforms& lens, int w, float3 x) {
+    float3 offset = x - lens.centres[w].xyz;
+    float rho = max(length(offset), 1e-4);
+    float reach = lens.shapes[w].x;
+    float f = rho / reach;
+    if (f >= 1.0) {
+        return float3(0.0);
+    }
+    float pt = lens.centres[w].w, lambda_sq = lens.shapes[w].y;
+    float ir = 1.0 / rho, psi = 1.0 + pt * ir, ir2 = ir / (psi * psi), rs = 4.0 * pt;
+    float slope = -2.0 * pt * ir * ir / psi - rs * psi * (1.0 - pt * ir) * ir2 * ir2 / (2.0 * (1.0 + lambda_sq - rs * ir2));
+    float ln_n = 2.0 * log(psi) - 0.5 * log((1.0 - rs * ir2 + lambda_sq) / (1.0 + lambda_sq));
+    float window = (1.0 - f * f) * (1.0 - f * f), window_slope = -4.0 * f * (1.0 - f * f) / reach;
+    return offset * ir * (slope * window + ln_n * window_slope);
+}
+
+/**
+ * @brief `sample_lens_atlas` is the world seen from mouth w's centre in direction d (its atlas row's
+ * six faces, oriented as `LENS_FACES`).
+ * @par Example
+ * @code
+ * float3 color = sample_lens_atlas(lens, atlas, w, d);
+ * @endcode
+ */
+static float3 sample_lens_atlas(constant LensUniforms& lens, texture2d<float> atlas, int w, float3 d) {
+    constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+    float3 a = abs(d);
+    int face;
+    float3 forward, up;
+    if (a.x >= a.y && a.x >= a.z) {
+        face = d.x > 0.0 ? 0 : 1;
+        forward = float3(sign(d.x), 0.0, 0.0);
+        up = float3(0.0, 1.0, 0.0);
+    } else if (a.y >= a.z) {
+        face = d.y > 0.0 ? 2 : 3;
+        forward = float3(0.0, sign(d.y), 0.0);
+        up = float3(0.0, 0.0, sign(d.y));
+    } else {
+        face = d.z > 0.0 ? 4 : 5;
+        forward = float3(0.0, 0.0, sign(d.z));
+        up = float3(0.0, 1.0, 0.0);
+    }
+    float3 right = cross(forward, up);
+    float2 st = float2(dot(d, right), dot(d, up)) / dot(d, forward);
+    float face_px = float(atlas.get_width()) / 6.0;
+    float2 uv_face = clamp(float2(0.5 + 0.5 * st.x, 0.5 - 0.5 * st.y), 0.5 / face_px, 1.0 - 0.5 / face_px);
+    float2 uv = float2((float(face) + uv_face.x) / 6.0, (float(w) + uv_face.y) / lens.params.z);
+    return atlas.sample(linear_sampler, uv, level(0.0)).rgb;
+}
+
+/**
+ * @brief `get_lens_color` traces the eye ray through a pixel into the nearest wormhole mouth in
+ * front of the scene: bent by its lens, through its throat to the partner (inversion, then the
+ * mirror diag(1, 1, -1)), until it leaves a reach or meets the floor; it returns the atlas color
+ * there (lined up on the floor or a `LENS_PROXY_M` sphere) and how much it covers the scene.
+ * @par Example
+ * @code
+ * float4 lensed = get_lens_color(frame, lens, atlas, depth, in.uv);
+ * @endcode
+ */
+static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniforms& lens,
+                             texture2d<float> atlas, depth2d<float> depth, float2 uv) {
+    int count = int(lens.params.x + 0.5);
+    if (count == 0) {
+        return float4(0.0);
+    }
+    constexpr sampler point_sampler(coord::normalized, filter::nearest, address::clamp_to_edge);
+    float3 eye = frame.camera_position_m.xyz;
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float4 near_point = frame.inv_view_proj * float4(ndc, 1.0, 1.0);
+    float3 dir = normalize(near_point.xyz / near_point.w - eye);
+    float scene_depth = depth.sample(point_sampler, uv);
+    float scene_m = 1e30;
+    if (scene_depth > 0.0) {
+        float4 p = frame.inv_view_proj * float4(ndc, scene_depth, 1.0);
+        scene_m = length(p.xyz / p.w - eye);
+    }
+    int w = -1;
+    float entry_m = 1e30, closest_m = 0.0;
+    for (int i = 0; i < count; i++) {
+        float3 oc = eye - lens.centres[i].xyz;
+        float b = dot(oc, dir);
+        float closest_sq = dot(oc, oc) - b * b;
+        float visible = lens.shapes[i].x * LENS_VISIBLE_FRAC;
+        if (closest_sq >= visible * visible) {
+            continue;
+        }
+        float half_chord = sqrt(visible * visible - closest_sq);
+        if (-b + half_chord < 0.0) {
+            continue;
+        }
+        float visible_entry = max(-b - half_chord, 0.0);
+        if (visible_entry < entry_m) {
+            entry_m = visible_entry;
+            w = i;
+            closest_m = sqrt(closest_sq);
+        }
+    }
+    if (w < 0 || entry_m >= scene_m) {
+        return float4(0.0);
+    }
+    float reach = lens.shapes[w].x;
+    float3 oc = eye - lens.centres[w].xyz;
+    float b = dot(oc, dir);
+    float start_m = max(-b - sqrt(max(reach * reach - (dot(oc, oc) - b * b), 0.0)), 0.0);
+    float3 x = eye + dir * start_m, v = dir;
+    int current = w;
+    for (int k = 0; k < LENS_MAX_STEP_COUNT; k++) {
+        float3 offset = x - lens.centres[current].xyz;
+        float rho = length(offset);
+        float pt = lens.centres[current].w, reach_now = lens.shapes[current].x;
+        if (rho >= reach_now && dot(offset, v) > 0.0) {
+            break;
+        }
+        if (x.y < lens.shapes[current].w) {
+            break;
+        }
+        if (rho < pt) {
+            int partner = int(lens.shapes[current].z + 0.5);
+            float3 n = offset / max(rho, 1e-4);
+            float3 mirror = float3(1.0, 1.0, -1.0);
+            v = normalize((v - 2.0 * dot(v, n) * n) * mirror);
+            x = lens.centres[partner].xyz + n * mirror * (lens.centres[partner].w * pt / max(rho, 1e-4));
+            current = partner;
+            continue;
+        }
+        float h = clamp(0.1 * (rho - 0.5 * pt), 0.01, reach_now / 24.0);
+        float3 g = get_lens_bend(lens, current, x);
+        v = normalize(v + (g - dot(g, v) * v) * h);
+        x += v * h;
+    }
+    float3 c = lens.centres[current].xyz;
+    float3 oc_proxy = x - c;
+    float b_proxy = dot(oc_proxy, v);
+    float t = -b_proxy + sqrt(max(b_proxy * b_proxy - (dot(oc_proxy, oc_proxy) - LENS_PROXY_M * LENS_PROXY_M), 0.0));
+    if (v.y < -1e-4) {
+        t = min(t, (lens.shapes[current].w - x.y) / v.y);
+    }
+    float3 color = sample_lens_atlas(lens, atlas, current, normalize(x + v * max(t, 0.0) - c));
+    float weight = 1.0 - smoothstep(LENS_FADE_FRAC * reach, LENS_VISIBLE_FRAC * reach, closest_m);
+    return float4(color, weight);
+}
+
+/**
  * @brief `tonemap_fragment` adds bloom, exposes, tone maps with ACES, grades, and stores luma
  * in alpha for FXAA.
  * @par Interface
@@ -294,9 +462,13 @@ inline float3 grade_display(float3 color) {
 fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
                                  constant FrameUniforms& frame [[buffer(1)]],
                                  texture2d<float> hdr [[texture(0)]],
-                                 texture2d<float> bloom [[texture(1)]]) {
+                                 texture2d<float> bloom [[texture(1)]],
+                                 constant LensUniforms& lens [[buffer(2)]],
+                                 depth2d<float> depth [[texture(2)]],
+                                 texture2d<float> atlas [[texture(3)]]) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float3 color = hdr.sample(linear_sampler, in.uv).rgb;
+    float is_kept_plain = lens.params.y;
     float3 bloom_color = bloom.sample(linear_sampler, in.uv).rgb / frame.effect_params.w;
     color = mix(color, bloom_color, frame.render_params.y);
     color *= frame.render_params.x;
@@ -308,14 +480,16 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
         color = aces_fitted(max(mix(float3(luminance), color, 1.08), 0.0));
     }
     float2 centered = in.uv - 0.5;
-    float vignette = 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length(centered * float2(1.1, 1.0)));
+    float vignette = 1.0 - VIGNETTE_STRENGTH * (1.0 - is_kept_plain) * smoothstep(0.2, 0.85, length(centered * float2(1.1, 1.0)));
     color *= vignette;
     float damage = frame.post_params.x;
     float edge = smoothstep(0.25, 0.75, length(centered));
     color = mix(color, float3(0.45, 0.02, 0.01), damage * edge * 0.8);
     float3 encoded = linear_to_srgb(saturate(color));
     float grain = interleaved_gradient_noise(in.position.xy + fract(frame.camera_position_m.w) * 97.0) - 0.5;
-    encoded = saturate(encoded + grain * GRAIN_STRENGTH);
+    encoded = saturate(encoded + grain * GRAIN_STRENGTH * (1.0 - is_kept_plain));
+    float4 lensed = get_lens_color(frame, lens, atlas, depth, in.uv);
+    encoded = mix(encoded, lensed.rgb, lensed.a);
     float luma = dot(encoded, float3(0.299, 0.587, 0.114));
     return float4(encoded, luma);
 }

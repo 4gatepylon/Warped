@@ -350,13 +350,6 @@ impl Arena {
                 Surface::Accretion,
             ));
         }
-        for mouth in &warps.mouths {
-            shapes.push(warp_shape(
-                mouth.centre_m,
-                Vec3::splat(mouth.throat_radius_m),
-                Surface::Throat,
-            ));
-        }
         let mut team_spawns: [Vec<(Vec3, f32)>; 2] = [Vec::new(), Vec::new()];
         let mut player_spawns: Vec<(Vec3, f32)> = Vec::new();
         for spawn in &map.spawns {

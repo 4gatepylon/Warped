@@ -127,8 +127,11 @@ impl Bot {
     pub fn apply_warps(&mut self, warps: &Warps, dt_s: f32) {
         let centre_m: Vec3 = self.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
         self.velocity_m_s += warps.get_pull_m_per_s2(centre_m) * dt_s;
-        if let Some(exit_m) = warps.get_mouth_exit_feet_m(self.feet_m, centre_m) {
+        if let Some((exit_m, turn)) = warps.get_mouth_exit_feet_m(self.feet_m, centre_m) {
             self.feet_m = exit_m;
+            self.velocity_m_s = turn * self.velocity_m_s;
+            let facing: Vec3 = turn * Vec3::new(self.yaw_rad.sin(), 0.0, self.yaw_rad.cos());
+            self.yaw_rad = facing.x.atan2(facing.z);
         }
         if warps.is_inside_horizon(centre_m) {
             self.take_damage(f32::MAX);

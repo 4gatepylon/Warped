@@ -244,6 +244,8 @@ pub struct MetalRenderer {
     in_flight: VecDeque<CommandBuffer>,
     last_gpu_ms: f64,
     drawable_size_px: (u32, u32),
+    lens: Option<(Texture, gpu_types::GpuLensUniforms)>,
+    is_capturing: bool,
 }
 
 /// `as_bytes` views a plain value as its bytes.
@@ -402,6 +404,8 @@ impl MetalRenderer {
             meshes: Vec::new(),
             materials: Vec::new(),
             white_texture,
+            lens: None,
+            is_capturing: false,
             flat_normal_texture,
             shadow_map,
             environment: None,
@@ -609,6 +613,36 @@ impl MetalRenderer {
 }
 
 impl Renderer for MetalRenderer {
+    fn set_wormhole_lens(&mut self, lens: Option<&crate::render::WormholeLens>) {
+        self.lens = lens.map(|lens| {
+            let mouth_count: usize = lens.mouths.len();
+            assert!(
+                mouth_count <= crate::render::MAX_LENS_MOUTH_COUNT,
+                "the lens takes at most {} mouths, not {mouth_count}",
+                crate::render::MAX_LENS_MOUTH_COUNT
+            );
+            let mut uniforms: gpu_types::GpuLensUniforms = gpu_types::GpuLensUniforms::default();
+            for (index, mouth) in lens.mouths.iter().enumerate() {
+                uniforms.centres[index] = mouth.centre_m.extend(mouth.lens_throat_m);
+                uniforms.shapes[index] = Vec4::new(
+                    mouth.reach_m,
+                    mouth.lambda_squared,
+                    mouth.partner as f32,
+                    mouth.floor_m,
+                );
+            }
+            uniforms.params = Vec4::new(mouth_count as f32, 0.0, mouth_count as f32, 0.0);
+            (
+                upload_texture_2d(&self.device, &self.queue, &lens.atlas),
+                uniforms,
+            )
+        });
+    }
+
+    fn set_is_capturing(&mut self, is_capturing: bool) {
+        self.is_capturing = is_capturing;
+    }
+
     fn read_frame_rgba(&mut self) -> (u32, u32, Vec<u8>) {
         for command_buffer in self.in_flight.drain(..) {
             command_buffer.waitUntilCompleted();
@@ -1181,9 +1215,23 @@ impl MetalRenderer {
             MTLLoadAction::DontCare,
             |encoder: &Encoder| {
                 set_fragment_bytes(encoder, as_bytes(&frame_uniforms), 1);
+                let mut lens_uniforms: gpu_types::GpuLensUniforms = self
+                    .lens
+                    .as_ref()
+                    .map_or_else(gpu_types::GpuLensUniforms::default, |(_, uniforms)| {
+                        *uniforms
+                    });
+                lens_uniforms.params.y = if self.is_capturing { 1.0 } else { 0.0 };
+                set_fragment_bytes(encoder, as_bytes(&lens_uniforms), 2);
+                let lens_atlas: &Texture = self
+                    .lens
+                    .as_ref()
+                    .map_or(&self.white_texture, |(atlas, _)| atlas);
                 unsafe {
                     encoder.setFragmentTexture_atIndex(Some(&targets.hdr), 0);
                     encoder.setFragmentTexture_atIndex(Some(bloom_source), 1);
+                    encoder.setFragmentTexture_atIndex(Some(&targets.depth), 2);
+                    encoder.setFragmentTexture_atIndex(Some(lens_atlas), 3);
                 }
             },
         );

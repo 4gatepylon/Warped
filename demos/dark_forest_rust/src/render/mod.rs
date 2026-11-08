@@ -247,6 +247,39 @@ pub struct FrameDescription<'a> {
     pub damage_flash_frac: f32,
 }
 
+/// `LensMouth` is one wormhole mouth as the lens pass sees it: its lens throat (where rays cross),
+/// reach, foil λ², the floor height under it, and its partner's index in `WormholeLens::mouths`.
+#[derive(Clone, Copy, Debug)]
+pub struct LensMouth {
+    pub centre_m: Vec3,
+    pub lens_throat_m: f32,
+    pub reach_m: f32,
+    pub lambda_squared: f32,
+    pub floor_m: f32,
+    pub partner: usize,
+}
+
+/// `WormholeLens` is what the lens pass needs: every mouth, and `atlas`, the world seen from each
+/// mouth's centre: one row per mouth of six square 90° faces, oriented as `LENS_FACES`.
+pub struct WormholeLens {
+    pub mouths: Vec<LensMouth>,
+    pub atlas: TextureData,
+}
+
+/// `LENS_FACES` are the lens atlas's cube faces' (forward, up) directions, in atlas order; the
+/// shader's `sample_lens_atlas` matches them.
+pub const LENS_FACES: [(Vec3, Vec3); 6] = [
+    (Vec3::X, Vec3::Y),
+    (Vec3::NEG_X, Vec3::Y),
+    (Vec3::Y, Vec3::Z),
+    (Vec3::NEG_Y, Vec3::NEG_Z),
+    (Vec3::Z, Vec3::Y),
+    (Vec3::NEG_Z, Vec3::Y),
+];
+
+/// `MAX_LENS_MOUTH_COUNT` is how many mouths the lens pass takes.
+pub const MAX_LENS_MOUTH_COUNT: usize = 16;
+
 /// `RenderSettings` are the quality switches that can change while the demo runs.
 #[derive(Clone, Copy, Debug)]
 pub struct RenderSettings {
@@ -289,4 +322,9 @@ pub trait Renderer {
     /// `read_frame_rgba` waits for the frames in flight and gives the last one's picture before
     /// the HUD, at the internal resolution: (width_px, height_px, RGBA bytes).
     fn read_frame_rgba(&mut self) -> (u32, u32, Vec<u8>);
+    /// `set_wormhole_lens` bends the view through these wormhole mouths from now on (None stops).
+    fn set_wormhole_lens(&mut self, lens: Option<&WormholeLens>);
+    /// `set_is_capturing` leaves the vignette and grain out of frames, for pictures that become
+    /// textures.
+    fn set_is_capturing(&mut self, is_capturing: bool);
 }

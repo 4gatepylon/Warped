@@ -233,6 +233,110 @@ struct Args {
 /// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle.
 const PHOTO_SETTLE_S: f32 = 3.0;
 
+/// `LENS_FACE_PX` is the side of each face of the wormhole lens atlas.
+const LENS_FACE_PX: u32 = 384;
+/// `LENS_CAPTURE_RENDER_SCALE_FRAC` is the render scale the lens atlas is drawn at.
+const LENS_CAPTURE_RENDER_SCALE_FRAC: f32 = 0.5;
+
+/// `capture_wormhole_lens` draws the static world and the map's lights seen from every wormhole
+/// mouth's centre (six 90° faces each, without vignette or grain) into the lens atlas.
+fn capture_wormhole_lens(
+    renderer: &mut dyn Renderer,
+    session: &Session,
+    scene: &Scene,
+    settings: &RenderSettings,
+    width_px: u32,
+    height_px: u32,
+) -> render::WormholeLens {
+    let mouths: &[game::warps::WormholeMouth] = &session.arena.warps.mouths;
+    let frame: FrameData = session.frame_data(scene, width_px as f32, height_px as f32);
+    let capture_settings: RenderSettings = RenderSettings {
+        render_scale_frac: LENS_CAPTURE_RENDER_SCALE_FRAC,
+        ..*settings
+    };
+    let mut atlas: image::RgbaImage =
+        image::RgbaImage::new(LENS_FACE_PX * 6, LENS_FACE_PX * mouths.len() as u32);
+    renderer.set_is_capturing(true);
+    for (row, mouth) in mouths.iter().enumerate() {
+        for (face, (forward, up)) in render::LENS_FACES.iter().enumerate() {
+            let camera: render::Camera = render::Camera {
+                view: glam::Mat4::look_to_rh(mouth.centre_m, *forward, *up),
+                position_m: mouth.centre_m,
+                fov_y_rad: std::f32::consts::FRAC_PI_2,
+                ..frame.camera
+            };
+            renderer.render_frame(
+                &FrameDescription {
+                    camera,
+                    world_draws: &scene.static_draws,
+                    viewmodel_draws: &[],
+                    joint_matrices: &[],
+                    point_lights: &frame.point_lights,
+                    decals: &[],
+                    world_particles: &[],
+                    viewmodel_particles: &[],
+                    hud_rects: &[],
+                    hud_images: &[],
+                    time_s: 0.0,
+                    damage_flash_frac: 0.0,
+                },
+                &capture_settings,
+            );
+            let (frame_width_px, frame_height_px, rgba) = renderer.read_frame_rgba();
+            let picture: image::RgbaImage =
+                image::RgbaImage::from_raw(frame_width_px, frame_height_px, rgba)
+                    .expect("RGBA frame");
+            let side_px: u32 = frame_width_px.min(frame_height_px);
+            let square: image::RgbaImage = image::imageops::crop_imm(
+                &picture,
+                (frame_width_px - side_px) / 2,
+                (frame_height_px - side_px) / 2,
+                side_px,
+                side_px,
+            )
+            .to_image();
+            let face_picture: image::RgbaImage = image::imageops::resize(
+                &square,
+                LENS_FACE_PX,
+                LENS_FACE_PX,
+                image::imageops::FilterType::Triangle,
+            );
+            image::imageops::replace(
+                &mut atlas,
+                &face_picture,
+                i64::from(face as u32 * LENS_FACE_PX),
+                i64::from(row as u32 * LENS_FACE_PX),
+            );
+        }
+    }
+    renderer.set_is_capturing(false);
+    render::WormholeLens {
+        mouths: mouths
+            .iter()
+            .map(|mouth| render::LensMouth {
+                centre_m: mouth.centre_m,
+                lens_throat_m: mouth.get_lens_throat_m(),
+                reach_m: mouth.reach_m,
+                lambda_squared: mouth.lambda_squared,
+                floor_m: game::collision::cast_ray(
+                    &scene.solids,
+                    mouth.centre_m,
+                    Vec3::NEG_Y,
+                    20.0,
+                )
+                .map_or(0.0, |(_, hit)| mouth.centre_m.y - hit.distance_m),
+                partner: mouth.partner,
+            })
+            .collect(),
+        atlas: render::TextureData {
+            width: atlas.width(),
+            height: atlas.height(),
+            format: render::TextureFormat::Rgba8Linear,
+            pixels: atlas.into_raw(),
+        },
+    }
+}
+
 /// `save_photo` reads the last frame back and writes it to `path` as a PNG, downscaled to
 /// `width_px` if given.
 fn save_photo(renderer: &mut dyn Renderer, path: &std::path::Path, width_px: Option<u32>) {
@@ -665,6 +769,23 @@ fn main() {
     );
     if args.play_route {
         session.route = VERTICAL_ROUTE.to_vec();
+    }
+    if !session.arena.warps.mouths.is_empty() {
+        let capture_start: Instant = Instant::now();
+        let lens: render::WormholeLens = capture_wormhole_lens(
+            &mut renderer,
+            &session,
+            &scene,
+            &settings,
+            width_px,
+            height_px,
+        );
+        renderer.set_wormhole_lens(Some(&lens));
+        println!(
+            "lens: drew {} wormhole mouths in {:.1} s",
+            lens.mouths.len(),
+            capture_start.elapsed().as_secs_f32()
+        );
     }
     let mut play: MatchPlay = MatchPlay::New(
         client,

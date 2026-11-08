@@ -8,7 +8,7 @@
 //!     let frame: FrameData = session.frame_data(&scene, width_px, height_px);
 
 use crate::game::bots::BODY_CENTRE_HEIGHT_M;
-use crate::game::warps::Warps;
+use crate::game::warps::{BeamPath, Warps};
 use std::collections::VecDeque;
 
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
@@ -340,56 +340,67 @@ impl Session {
 
     /// `fire_player_shot` resolves one player shot against the world and the bots.
     fn fire_player_shot(&mut self, scene: &Scene, audio: &Audio) {
+        /// `ShotHit` is what a laser hit first.
+        #[derive(Clone, Copy)]
+        enum ShotHit {
+            World(Vec3),
+            Bot(usize, bool, Vec3),
+            Remote(u32, Vec3),
+        }
         let origin_m: Vec3 = self.player.eye_position_m();
         let direction: Vec3 = self.weapon.shot_direction(&self.player);
-        let world_hit = cast_ray(&scene.solids, origin_m, direction, SHOT_RANGE_M);
-        let mut nearest_m: f32 = world_hit.map_or(SHOT_RANGE_M, |(_, hit)| hit.distance_m);
-        let mut bot_hit: Option<(usize, bool, Vec3)> = None;
-        for (index, bot) in self
-            .bots
-            .iter()
-            .enumerate()
-            .filter(|(_, bot)| bot.is_alive())
-        {
-            for (aabb, is_head) in [(bot.head(), true), (bot.body(), false)] {
-                if let Some(hit) = aabb.cast_ray(origin_m, direction, nearest_m) {
+        let mut shot_hit: Option<ShotHit> = None;
+        let path: BeamPath = self.arena.warps.trace_beam(
+            origin_m,
+            direction,
+            SHOT_RANGE_M,
+            |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
+                let mut nearest_m: f32 = length_m;
+                let mut found: Option<ShotHit> = None;
+                if let Some((_, hit)) = cast_ray(&scene.solids, start_m, piece_direction, nearest_m)
+                {
                     nearest_m = hit.distance_m;
-                    bot_hit = Some((index, is_head, hit.normal));
+                    found = Some(ShotHit::World(hit.normal));
                 }
-            }
-        }
-        let mut remote_hit: Option<(u32, Vec3)> = None;
-        for remote in self.remote_bots.iter().filter(|r| r.bot.is_alive()) {
-            for aabb in [remote.bot.head(), remote.bot.body()] {
-                if let Some(hit) = aabb.cast_ray(origin_m, direction, nearest_m) {
-                    nearest_m = hit.distance_m;
-                    remote_hit = Some((remote.id, hit.normal));
-                    bot_hit = None;
+                for (index, bot) in self
+                    .bots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, bot)| bot.is_alive())
+                {
+                    for (aabb, is_head) in [(bot.head(), true), (bot.body(), false)] {
+                        if let Some(hit) = aabb.cast_ray(start_m, piece_direction, nearest_m) {
+                            nearest_m = hit.distance_m;
+                            found = Some(ShotHit::Bot(index, is_head, hit.normal));
+                        }
+                    }
                 }
-            }
-        }
-        let end_m: Vec3 = origin_m + direction * nearest_m;
+                for remote in self.remote_bots.iter().filter(|r| r.bot.is_alive()) {
+                    for aabb in [remote.bot.head(), remote.bot.body()] {
+                        if let Some(hit) = aabb.cast_ray(start_m, piece_direction, nearest_m) {
+                            nearest_m = hit.distance_m;
+                            found = Some(ShotHit::Remote(remote.id, hit.normal));
+                        }
+                    }
+                }
+                found.map(|hit| {
+                    shot_hit = Some(hit);
+                    nearest_m
+                })
+            },
+        );
+        let end_m: Vec3 = path.end_m;
         let muzzle_m: Vec3 = self.muzzle_world_m(scene);
-        if let Some((id, normal)) = remote_hit {
-            self.pending_hits.push(id);
-            self.add_impact(
-                end_m,
-                normal,
-                self.player_beam_color,
-                scene.light_scale,
-                false,
-            );
-            self.hit_marker_s = 0.25;
-            audio.play(Sound::HitMarker, 0.5, 0.0);
+        for (index, (start_m, piece_end_m)) in path.pieces.iter().enumerate() {
+            self.beams.push(Beam {
+                start_m: if index == 0 { muzzle_m } else { *start_m },
+                end_m: *piece_end_m,
+                age_s: 0.0,
+                life_s: 0.16,
+                color_rgb: self.player_beam_color * scene.light_scale,
+                width_m: 0.022,
+            });
         }
-        self.beams.push(Beam {
-            start_m: muzzle_m,
-            end_m,
-            age_s: 0.0,
-            life_s: 0.16,
-            color_rgb: self.player_beam_color * scene.light_scale,
-            width_m: 0.022,
-        });
         self.flashes.push(Flash {
             position_m: muzzle_m,
             color_rgb: self.player_beam_color * scene.light_scale * 0.5,
@@ -398,34 +409,50 @@ impl Session {
             life_s: 0.07,
         });
         audio.play(Sound::Shot, 0.9, 0.0);
-        if let Some((index, is_head, normal)) = bot_hit {
-            let damage: f32 = if is_head { HEAD_DAMAGE } else { BODY_DAMAGE };
-            let did_kill: bool = self.bots[index].take_damage(damage);
-            self.add_impact(
-                end_m,
-                normal,
-                self.player_beam_color,
-                scene.light_scale,
-                false,
-            );
-            self.hit_marker_s = 0.25;
-            audio.play(Sound::HitMarker, 0.5, 0.0);
-            if did_kill {
-                self.kill_count += 1;
-                self.kill_marker_s = 0.4;
-                let (gain, pan) = self.sound_placement(end_m);
-                audio.play(Sound::BotDeath, gain * 1.4, pan);
+        match shot_hit {
+            Some(ShotHit::Remote(id, normal)) => {
+                self.pending_hits.push(id);
+                self.add_impact(
+                    end_m,
+                    normal,
+                    self.player_beam_color,
+                    scene.light_scale,
+                    false,
+                );
+                self.hit_marker_s = 0.25;
+                audio.play(Sound::HitMarker, 0.5, 0.0);
             }
-        } else if let Some((_, hit)) = world_hit {
-            self.add_impact(
-                end_m,
-                hit.normal,
-                self.player_beam_color,
-                scene.light_scale,
-                true,
-            );
-            let (gain, pan) = self.sound_placement(end_m);
-            audio.play(Sound::Impact, gain, pan);
+            Some(ShotHit::Bot(index, is_head, normal)) => {
+                let damage: f32 = if is_head { HEAD_DAMAGE } else { BODY_DAMAGE };
+                let did_kill: bool = self.bots[index].take_damage(damage);
+                self.add_impact(
+                    end_m,
+                    normal,
+                    self.player_beam_color,
+                    scene.light_scale,
+                    false,
+                );
+                self.hit_marker_s = 0.25;
+                audio.play(Sound::HitMarker, 0.5, 0.0);
+                if did_kill {
+                    self.kill_count += 1;
+                    self.kill_marker_s = 0.4;
+                    let (gain, pan) = self.sound_placement(end_m);
+                    audio.play(Sound::BotDeath, gain * 1.4, pan);
+                }
+            }
+            Some(ShotHit::World(normal)) => {
+                self.add_impact(
+                    end_m,
+                    normal,
+                    self.player_beam_color,
+                    scene.light_scale,
+                    true,
+                );
+                let (gain, pan) = self.sound_placement(end_m);
+                audio.play(Sound::Impact, gain, pan);
+            }
+            None => {}
         }
     }
 
@@ -567,8 +594,13 @@ impl Session {
             let warps: &Warps = &self.arena.warps;
             let centre_m: Vec3 = self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
             self.player.velocity_m_s += warps.get_pull_m_per_s2(centre_m) * dt_s;
-            if let Some(exit_m) = warps.get_mouth_exit_feet_m(self.player.feet_m, centre_m) {
+            if let Some((exit_m, turn)) = warps.get_mouth_exit_feet_m(self.player.feet_m, centre_m)
+            {
+                let yaw_rad: f32 = self.player.yaw_rad;
+                let facing: Vec3 = turn * Vec3::new(-yaw_rad.sin(), 0.0, -yaw_rad.cos());
                 self.player.feet_m = exit_m;
+                self.player.velocity_m_s = turn * self.player.velocity_m_s;
+                self.player.yaw_rad = (-facing.x).atan2(-facing.z);
             }
             if warps.is_inside_horizon(self.player.eye_position_m()) {
                 self.player.take_damage(f32::MAX);
@@ -648,16 +680,25 @@ impl Session {
                 remote.fire_cooldown_s = REMOTE_FIRE_PERIOD_S;
                 let origin_m: Vec3 = remote.bot.eye_m();
                 let direction: Vec3 = remote.bot.facing();
-                let distance_m: f32 = cast_ray(&scene.solids, origin_m, direction, SHOT_RANGE_M)
-                    .map_or(SHOT_RANGE_M, |(_, hit)| hit.distance_m);
-                remote_beams.push(Beam {
-                    start_m: origin_m,
-                    end_m: origin_m + direction * distance_m,
-                    age_s: 0.0,
-                    life_s: 0.12,
-                    color_rgb: self.bot_beam_color * scene.light_scale,
-                    width_m: 0.022,
-                });
+                let path: BeamPath = self.arena.warps.trace_beam(
+                    origin_m,
+                    direction,
+                    SHOT_RANGE_M,
+                    |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
+                        cast_ray(&scene.solids, start_m, piece_direction, length_m)
+                            .map(|(_, hit)| hit.distance_m)
+                    },
+                );
+                for (start_m, end_m) in path.pieces {
+                    remote_beams.push(Beam {
+                        start_m,
+                        end_m,
+                        age_s: 0.0,
+                        life_s: 0.12,
+                        color_rgb: self.bot_beam_color * scene.light_scale,
+                        width_m: 0.022,
+                    });
+                }
             }
         }
         self.beams.extend(remote_beams);

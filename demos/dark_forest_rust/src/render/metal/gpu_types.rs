@@ -39,6 +39,16 @@ pub struct GpuFrameUniforms {
     pub effect_params: Vec4,
 }
 
+/// `GpuLensUniforms` is the wormhole lens pass's mouths: (centre, lens throat) and (reach, λ²,
+/// partner, floor height) each, and (mouth count, 1 while capturing, atlas rows, unused).
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct GpuLensUniforms {
+    pub centres: [Vec4; 16],
+    pub shapes: [Vec4; 16],
+    pub params: Vec4,
+}
+
 /// `GpuPassUniforms` is the projection that one pass draws with.
 ///
 /// Example:
