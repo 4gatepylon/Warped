@@ -47,12 +47,14 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
 /// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
-/// (the HUD's bars) and the player's wand.
+/// (the HUD's bars), the player's wand, and how much of the previous frame's scene to blend into
+/// this one's (motion blur; 0 for none).
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
     pub rects: &'a [OverlayRect],
     pub wand: Option<OverlayWand>,
+    pub blur_frac: f32,
 }
 
 /// `OverlayWand` is the shader's `OverlayWand`: the wand's shaft centre in camera space (x right,
@@ -76,8 +78,8 @@ pub struct OverlayRect {
     pub color: [f32; 4],
 }
 
-/// `OverlayParams` is the shader's `OverlayParams`.
-#[repr(C)]
+/// `OverlayParams` is the shader's `OverlayParams` (8-byte aligned, as its `int2` makes it).
+#[repr(C, align(8))]
 struct OverlayParams {
     dim_frac: f32,
     scale: i32,
@@ -86,6 +88,7 @@ struct OverlayParams {
     has_mask: i32,
     has_wand: i32,
     tan_half_fov: f32,
+    blur_frac: f32,
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -265,6 +268,7 @@ pub struct MetalRenderer {
     apply_overlay: Pipeline,
     overlay_target: Option<Texture>,
     overlay_mask: Option<Texture>,
+    blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -525,6 +529,7 @@ impl MetalRenderer {
             fill_holes,
             apply_overlay,
             overlay_target: None,
+            blur_histories: None,
             overlay_mask: None,
             hole_buffers: None,
             voxel_gpu: None,
@@ -997,7 +1002,8 @@ impl MetalRenderer {
     }
 
     /// `encode_overlay` encodes drawing `overlay` over a finished frame into a texture of its own,
-    /// which it returns: the frame darkened, the mask (if any) scaled by a whole number to about a
+    /// which it returns: the frame blended with the previous frame's scene (kept in one of two
+    /// history textures, swapped each frame; none after a resize) and darkened, the mask (if any) scaled by a whole number to about a
     /// fifth of the frame's height (and at most `OVERLAY_MAX_WIDTH_FRAC` of its width), centred,
     /// and the rectangles.
     ///
@@ -1030,6 +1036,17 @@ impl MetalRenderer {
                 output_px,
                 MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
             )?);
+        }
+        let is_blur_history_valid: bool = self
+            .blur_histories
+            .as_ref()
+            .is_some_and(|((_, size), _)| *size == output_px);
+        if !is_blur_history_valid {
+            let usage: MTLTextureUsage = MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead;
+            self.blur_histories = Some((
+                self.make_texture(output_px, usage)?,
+                self.make_texture(output_px, usage)?,
+            ));
         }
         if self
             .overlay_mask
@@ -1085,6 +1102,11 @@ impl MetalRenderer {
             has_mask: i32::from(overlay.mask.is_some()),
             has_wand: i32::from(overlay.wand.is_some()),
             tan_half_fov: HALF_FOV_RAD.tan() as f32,
+            blur_frac: if is_blur_history_valid {
+                overlay.blur_frac
+            } else {
+                0.0
+            },
         };
         let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
             center_m: [0.0; 4],
@@ -1101,6 +1123,10 @@ impl MetalRenderer {
             .overlay_target
             .as_ref()
             .expect("the target was just made");
+        let ((history_in, _), (history_out, _)) = self
+            .blur_histories
+            .as_ref()
+            .expect("the histories were just made");
         let encoder = command_buffer
             .computeCommandEncoder()
             .ok_or("Metal: no compute encoder")?;
@@ -1110,6 +1136,8 @@ impl MetalRenderer {
             encoder.setTexture_atIndex(Some(frame), 0);
             encoder.setTexture_atIndex(Some(mask), 1);
             encoder.setTexture_atIndex(Some(target), 2);
+            encoder.setTexture_atIndex(Some(history_in), 3);
+            encoder.setTexture_atIndex(Some(history_out), 4);
             encoder.setBytes_length_atIndex(
                 NonNull::from(&params).cast(),
                 std::mem::size_of::<OverlayParams>(),
@@ -1128,7 +1156,9 @@ impl MetalRenderer {
         }
         dispatch_grid(&encoder, output_px);
         encoder.endEncoding();
-        Ok(target.clone())
+        let target: Retained<ProtocolObject<dyn MTLTexture>> = target.clone();
+        self.blur_histories = self.blur_histories.take().map(|(a, b)| (b, a));
+        Ok(target)
     }
 
     /// `render_to_layer` draws one frame straight into the next drawable of a window's

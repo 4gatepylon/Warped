@@ -88,6 +88,7 @@ Graphics on Lunar Surface, to fix in later pull requests:
   ends, not where their last step ended (D39).
 - Neighbouring pixels on one surface are interpolated rather than traced (D37); textures smaller than a pixel
   shimmer, as they do when every pixel is traced.
+- The window blends each frame with the last one a little (motion blur, D55), so fast turns smear for about 10 ms.
 - Frames that take more than about 15.5 ms of GPU time are drawn at a lower resolution and upscaled (D19, D41), so
   very close approaches to a mouth look softer.
 - Rays that never come out (trapped near a throat or out of iterations) are black on Lunar Surface; the house paints
