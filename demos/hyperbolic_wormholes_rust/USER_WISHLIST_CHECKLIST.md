@@ -14,9 +14,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." Pictures first. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
-- [~] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
-  menu opens on the SCORES page. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch
-  `claude/scores-first`, 2026-11-07.
 - [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
@@ -117,6 +114,8 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
+  menu opens on the SCORES page. #265.
 - [?] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. #210.
