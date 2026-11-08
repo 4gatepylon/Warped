@@ -18,11 +18,9 @@ use glam::{DMat4, DVec3, DVec4};
 
 use crate::avatar_model::AvatarClip;
 use crate::black_hole_growth::BlackHoleGrowth;
+use crate::console_bot::{FightStep, Fighter, find_warp_dangers};
 use crate::dust::DustCloud;
-use crate::geometry::{
-    AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
-    normalize_tangent,
-};
+use crate::geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use crate::minimap::TEAM_COLORS;
 use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
@@ -31,7 +29,7 @@ use crate::scene_data::{Beam, SceneData};
 use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
-    LOOK_RAD_PER_PX, MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
+    MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
 };
 use crate::world::{Color, EYE_HEIGHT_M, World};
 
@@ -47,11 +45,8 @@ const BOT_HITS_TO_KILL: u8 = 1;
 const BOT_RANGE_M: f64 = 12.0;
 const BOT_WANDER_PX_PER_S: f64 = 120.0;
 const BOT_REJOIN_S: f64 = 2.0;
-const BOT_STUCK_FRAC: f64 = 0.5;
 const BOT_VIEW_PX: (u32, u32) = (1280, 800);
-const VOXEL_SPAWN_RING_M: f64 = 3.0;
 const SPAWN_SLOT_COUNT: u32 = 16;
-const VOXEL_BOT_LASER_RANGE_M: f64 = 120.0;
 
 /// `get_spawn_player` makes player `id`'s starting player on the house: on a ring around spawn,
 /// facing the middle, at the first bearing (starting from the id's own) at least
@@ -515,8 +510,8 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
 /// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits
-/// (handing `save_view` its view, which it may save on another thread) and rejoins `BOT_REJOIN_S`
-/// after being hit. The black hole grows with the server's consoles, or to `black_hole_strength`
+/// (handing `save_view` its view, which it may save on another thread) and rejoins the server
+/// settings' `respawn.delay_s` after being hit. The black hole grows with the server's consoles, or to `black_hole_strength`
 /// when given, and the bot's own time slows near it. It returns how many players it hit and how
 /// often it was hit, and fails if the server curves space other than the built-in settings
 /// (`check_bot_space`).
@@ -536,7 +531,7 @@ pub fn run_voxel_bot(
     let (mut hit_count, mut eliminated_count) = (0, 0);
     let mut rejoin_at: Option<Instant> = None;
     let mut last_victim: Option<u32> = None;
-    let mut is_stuck: bool = false;
+    let mut fighter: Fighter = Fighter::New(find_warp_dangers(world));
     while start.elapsed().as_secs_f64() < duration_s {
         let tick: Instant = Instant::now();
         let now_s: f64 = start.elapsed().as_secs_f64();
@@ -551,6 +546,7 @@ pub fn run_voxel_bot(
                     check_bot_space(client)?;
                     player = VoxelPlayer::NearSpawn(world, team, id, &others);
                     println!("bot joined as player {id}");
+                    fighter.restart();
                 }
                 NetEvent::Eliminated {
                     victim_id,
@@ -560,7 +556,12 @@ pub fn run_voxel_bot(
                     println!("player {victim_id} was hit by player {shooter_id}");
                     if is_self {
                         eliminated_count += 1;
-                        rejoin_at = Some(Instant::now() + Duration::from_secs_f64(BOT_REJOIN_S));
+                        let settings: &ServerSettings = client
+                            .settings
+                            .as_ref()
+                            .expect("a welcome brings the settings");
+                        let delay_s: f64 = settings.respawn.delay_s;
+                        rejoin_at = Some(Instant::now() + Duration::from_secs_f64(delay_s));
                     }
                 }
             }
@@ -571,37 +572,18 @@ pub fn run_voxel_bot(
                 client.rejoin()?;
             }
         } else if client.id.is_some() {
-            let camera: DMat4 = player.get_camera_frame(world);
-            let eye: DVec4 = camera.col(AXIS_W);
-            let target: Option<(&RemotePlayer, f64)> = client
+            let team: u32 = client.team.expect("a welcome brings the team");
+            let enemies: Vec<(u32, DVec4)> = client
                 .players
                 .iter()
-                .map(|other| (other, get_distance(eye, other.frame.col(AXIS_W)) * world.r))
-                .min_by(|a, b| a.1.total_cmp(&b.1));
-            let mut input: Input = Input::default();
-            let mut is_laser_on: bool = false;
-            if let Some((other, distance_m)) = target {
-                let local: DVec3 =
-                    get_local_direction(camera, normalize_tangent(eye, other.frame.col(AXIS_W)));
-                player.look(
-                    local.x.atan2(-local.z) / LOOK_RAD_PER_PX,
-                    -local.y.clamp(-1.0, 1.0).asin() / LOOK_RAD_PER_PX,
-                );
-                input.forward = distance_m > VOXEL_SPAWN_RING_M * 2.0;
-                is_laser_on = distance_m < VOXEL_BOT_LASER_RANGE_M;
-            } else {
-                input.forward = true;
-                player.look(BOT_WANDER_PX_PER_S * BOT_STEP_S, 0.0);
-            }
-            input.up = input.forward && is_stuck;
-            let before: DVec4 = player.body.col(AXIS_W);
-            let team: u32 = client.team.unwrap_or(0);
+                .filter(|other| other.team != team)
+                .map(|other| (other.id, other.frame.col(AXIS_W)))
+                .collect();
             let own_step_s: f64 =
                 BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
-            player.step(world, &input, own_step_s, team as usize);
-            is_stuck = input.forward
-                && get_distance(before, player.body.col(AXIS_W)) * world.r
-                    < BOT_STUCK_FRAC * world.player.walk_m_per_s * own_step_s;
+            let fight: FightStep = fighter.step(world, &mut player, &enemies, now_s, own_step_s);
+            let is_laser_on: bool = fight.is_laser_on;
+            player.step(world, &fight.input, own_step_s, team as usize);
             let camera: DMat4 = player.get_camera_frame(world);
             let view: SharedVoxelView = pack_shared_voxel_view(
                 world,
@@ -625,6 +607,7 @@ pub fn run_voxel_bot(
                 }
             }
             last_victim = view.hit_player_id;
+            fighter.note_shot(view.hit_player_id.is_some(), own_step_s);
             client.send_state(
                 camera,
                 is_laser_on,
