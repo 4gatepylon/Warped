@@ -34,6 +34,13 @@ is in [`AGENTS.md`](AGENTS.md).
   rest of the per-player settings).
 - [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
   play but has a dashboard where they can change or reset those settings.
+- [ ] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
+  least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
+  doesn't show the entire map.
+- [ ] **W-49 Menu with pages.** The menu where players change their hotkeys and the rest is a general menu with
+  pages: one page for the hotkeys, another showing a layout of the entire map.
+- [ ] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
+  and team.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
 
