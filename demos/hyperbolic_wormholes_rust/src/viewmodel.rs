@@ -30,7 +30,7 @@ type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 type Pipeline = Retained<ProtocolObject<dyn MTLRenderPipelineState>>;
 
 const SHADER_SOURCE: &str = include_str!("viewmodel.metal");
-const REVOLVER_GLTF: &str = "../fps_demo/.assets/sketchfab/sci_fi_revolver/scene.gltf";
+const REVOLVER_GLTF: &str = "../fps_demo/assets/sketchfab/sci_fi_revolver/scene.gltf";
 /// `RAILGUN_NODE_PARTS` are name parts of the revolver's railgun variant; the file also holds a
 /// ballistic one beside it.
 const RAILGUN_NODE_PARTS: [&str; 8] = [
@@ -261,7 +261,7 @@ fn get_map_images(material: &gltf::Material) -> [Option<usize>; 4] {
 }
 
 impl Viewmodel {
-    /// `Load` reads the revolver from the fps_demo's `.assets/` onto `device`, or gives `None` (and
+    /// `Load` reads the revolver from the fps_demo's `assets/` onto `device`, or gives `None` (and
     /// says how to download it) when it is missing.
     ///
     /// Example: `let revolver = Viewmodel::Load(&device)?;`

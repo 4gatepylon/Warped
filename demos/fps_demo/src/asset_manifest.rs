@@ -1,5 +1,5 @@
 //! `asset_manifest` lists every downloaded asset of the demo, where it comes from, and where it is
-//! saved under `.assets/`, so that `download-assets` and the game agree on paths.
+//! saved under `assets/`, so that `download-assets` and the game agree on paths.
 //!
 //! Interface: `ASSETS_DIR_NAME`, `HDRI`, `SURFACE_TEXTURES`, `LUNAR_SURFACE_TEXTURES`,
 //! `PROP_MODELS`, `RIFLE_MODEL`,
@@ -12,8 +12,8 @@
 
 use std::path::{Path, PathBuf};
 
-/// `ASSETS_DIR_NAME` is the git-ignored folder, inside `demos/fps_demo/`, that holds the assets.
-pub const ASSETS_DIR_NAME: &str = ".assets";
+/// `ASSETS_DIR_NAME` is the committed folder, inside `demos/fps_demo/`, that holds the assets.
+pub const ASSETS_DIR_NAME: &str = "assets";
 
 /// `POLY_HAVEN_FILES_API_URL` is the Poly Haven endpoint that lists the files of one asset.
 pub const POLY_HAVEN_FILES_API_URL: &str = "https://api.polyhaven.com/files";
@@ -179,7 +179,7 @@ pub const ROBOT_MODEL: DirectDownload = DirectDownload {
 
 /// `hdri_path` returns where the HDRI is saved.
 ///
-/// Example: `hdri_path(Path::new(".assets"))` is `.assets/hdri/<id>_4k.hdr`.
+/// Example: `hdri_path(Path::new("assets"))` is `assets/hdri/<id>_4k.hdr`.
 pub fn hdri_path(assets_dir: &Path) -> PathBuf {
     assets_dir
         .join("hdri")
