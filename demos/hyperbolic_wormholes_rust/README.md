@@ -12,15 +12,18 @@ done.
 ## Play
 
 ```bash
-make run-demo
-make run-demo RENDERER=cpu
+make serve-game
+make join-game SERVER=127.0.0.1
 ```
 
+- Playing is only on a game server: `make serve-game` runs one (Lunar Surface by default), and every player joins
+  it with `make join-game` (`SERVER=127.0.0.1` on the same computer, or the address the server prints). There is no
+  local demo or host-and-play command; without a server, only the tools below run.
 - Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
   `Esc` or `N` goes back to the game). The window's close button quits at once.
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
-  (`--player-settings`) to `make run-demo`, `host-game` or `join-game`.
+  (`--player-settings`) to `make join-game`.
 - `Tab` opens a menu of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
   (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
@@ -81,8 +84,9 @@ about 50 blocks down the rails), and far left (to high above the rails, where yo
 ## Maps
 
 ```bash
-make run-demo MAP=lunar-surface
-cargo run --release -- --map lunar-surface --view black_hole
+make serve-game MAP=house-demo
+make join-game MAP=house-demo SERVER=127.0.0.1
+cargo run --release -- --map lunar-surface --bench-views --view black_hole
 ```
 
 - The demo reads its maps from [`common/maps/`](../../common/maps/README.md) (the portable map format):
@@ -107,14 +111,12 @@ for a fresh Mac, the commands for each player and the known caveats.
 
 ```bash
 make serve-game MAP=lunar-surface
-make host-game MAP=lunar-surface
 make join-game MAP=lunar-surface
 make join-game MAP=lunar-surface SERVER=192.168.1.20
 ```
 
 - `make serve-game` (`--serve`) runs only the server and prints this computer's address with the commands that join
-  it, so it can run on a computer nobody plays on. `make host-game` (`--host`) starts the same server as its own
-  process, joins it from a window, and stops it when the window closes.
+  it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
   consoles, respawn, the hit slowdown, the flashlight); it sends them to every player who joins.

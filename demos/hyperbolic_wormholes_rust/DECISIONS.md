@@ -1256,6 +1256,25 @@
   on, and nothing said so. You asked to cover the cases where a server doesn't answer, and that you can't shoot
   before leaving the team screen.
 
+### D92. Playing is only on a game server
+
+- **Choice:**
+  - **Make targets:** only `make serve-game` and `make join-game` play. `make run-demo` (the local demo) and
+    `make host-game` (a server and a window in one) are gone.
+  - **Default map:** Lunar Surface for both targets, so a server and a window started with the defaults play the
+    same map.
+  - **The program:** it refuses `--host`, and a window started without `--join`, with a message saying to start a
+    server and join it.
+  - **Tools kept:** `--serve`, `--join` (with bots), and the tools that need no server (`--bench-views`,
+    `--autopilot`, `--play-route` and `--export-map`) still run, because the tests, benchmarks and screenshots use
+    them.
+  - **Code kept:** the `--host` code path stays, so turning it back on is a one-line change.
+- **Alternatives:**
+  - deleting the local play and `--host` code (a bigger change, and harder to undo);
+  - keeping `host-game` (you asked for only starting a server and connecting to one).
+- **Rationale:** you recommended disabling everything except starting a server and connecting to one, since nobody
+  will use the local demo.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

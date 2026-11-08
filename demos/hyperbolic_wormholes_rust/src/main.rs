@@ -146,6 +146,7 @@ const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
+const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route and --export-map.";
 const MENU_DIM_FRAC: f32 = 0.8;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
@@ -501,6 +502,18 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         && arguments.route == RouteKind::WarpTour
     {
         return Err("--route warp-tour is for voxel maps; use --map lunar-surface".into());
+    }
+    if arguments.host {
+        return Err(LOCAL_PLAY_OFF.into());
+    }
+    let is_window_without_server: bool = arguments.join.is_none()
+        && !arguments.serve
+        && !arguments.bench_views
+        && !arguments.autopilot
+        && !arguments.play_route
+        && arguments.export_map.is_none();
+    if is_window_without_server {
+        return Err(LOCAL_PLAY_OFF.into());
     }
     if arguments.bot && (arguments.join.is_none() || arguments.exit_after_s.is_none()) {
         return Err(
