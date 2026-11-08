@@ -496,10 +496,13 @@ impl Map {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of curving a map's space more (`Map::scale_curvature`).
+    //! Tests of curving a map's space more (`Map::scale_curvature`) and of checking a map's Milky
+    //! Way (`check_milky_way`).
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
+    //! | Milky Way in the map | none (the house), valid (Lunar Surface) | `shipped_milky_ways_load` |
+    //! | Milky Way's directions | perpendicular unit directions, pole not unit, core not unit, not perpendicular | `milky_way_needs_perpendicular_unit_directions` |
     //! | Factor | 1 (nothing moves), between 1 and 2 (the house at 1.25), 2 (Lunar Surface: the radius halves) | `scaling_by_1_moves_nothing`, `scaling_keeps_fermi_coordinates_and_turns` |
     //! | What moves | structures and spawns (Lunar Surface), boxes and mouths (the house), black holes and lamps (Lunar Surface) | `scaling_keeps_fermi_coordinates_and_turns` |
     //! | Distance in meters | along the middle line v = 0 (stays), across it at the same u (stays), along u away from it (grows) | `distances_on_and_off_the_middle_line` |
@@ -551,6 +554,39 @@ mod tests {
         let r_m: f64 = map.get_curvature_radius_m();
         let a: DVec4 = make_fermi_point(a_m[0], a_m[1], 0.0, r_m);
         get_distance(a, make_fermi_point(b_m[0], b_m[1], 0.0, r_m)) * r_m
+    }
+
+    #[test]
+    fn shipped_milky_ways_load() {
+        assert!(load("house_demo").sky.milky_way.is_none());
+        let milky_way: MilkyWay = load("lunar_surface")
+            .sky
+            .milky_way
+            .expect("Lunar Surface has a Milky Way");
+        assert_eq!(check_milky_way(&milky_way), Ok(()));
+    }
+
+    #[test]
+    fn milky_way_needs_perpendicular_unit_directions() {
+        const UP: [f64; 3] = [0.0, 1.0, 0.0];
+        const ALONG_X: [f64; 3] = [1.0, 0.0, 0.0];
+        const LONG_X: [f64; 3] = [2.0, 0.0, 0.0];
+        const SLANTED: [f64; 3] = [0.6, 0.8, 0.0];
+        let check = |pole_direction: [f64; 3], core_direction: [f64; 3]| {
+            check_milky_way(&MilkyWay {
+                pole_direction,
+                core_direction,
+            })
+        };
+        assert_eq!(check(UP, ALONG_X), Ok(()));
+        for (pole, core, problem) in [
+            (LONG_X, UP, "pole_direction must be a unit direction"),
+            (UP, LONG_X, "core_direction must be a unit direction"),
+            (UP, SLANTED, "core_direction must be perpendicular"),
+        ] {
+            let error: String = check(pole, core).expect_err(problem);
+            assert!(error.contains(problem), "{error}");
+        }
     }
 
     #[test]

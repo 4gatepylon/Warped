@@ -140,6 +140,11 @@ wedge-shaped capital ship with a bridge tower, blue engines and rows of lit wind
 minutes from horizon to horizon, then 6 below it. From the blue spawn it rises on the left and passes highest a
 little right of ahead, 30° up. Both show through the wormholes and around the black hole, like the stars.
 
+Behind everything, the Milky Way arches across the sky from one base to the other, so both teams see it ahead of
+them: a pale band with a warm, brighter core, a dark rift along its middle, dust clouds and faint pink nebulae. To
+dim it or turn it off, lower `milky way 0-1` on the menu's settings page (or `view.milky_way_brightness_frac` in
+your `player_settings.yaml`).
+
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
 `PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting; once you let go of `Shift` it refills in 7.5 s crouched (`Ctrl`) or 15 s walking or standing),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `V` switches to a third-person view from 3 m behind and a little above your character and back (it pulls in when a wall or the ground is behind you; shots still leave your head toward the crosshair, and aiming looks from your eye again), `Ctrl` (held) crouches

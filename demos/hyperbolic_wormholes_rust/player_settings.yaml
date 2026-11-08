@@ -1,7 +1,7 @@
 # `player_settings.yaml` holds each player's own choices in the Rust demo: which keys do what, how fast the
 # mouse turns the view, the head bob, motion blur, the colour shift inside a wormhole, how bright the Milky
-# Way is, and how strongly a hit reddens, shakes and blurs the screen. They change only that player's experience; the numbers that
-# shape play for everyone are the server's, in `server_settings.yaml`.
+# Way is, and how strongly a hit reddens, shakes and blurs the screen. They change only that player's
+# experience; the numbers that shape play for everyone are the server's, in `server_settings.yaml`.
 #
 # Interface:
 #     Copy this file, change it, and start the game with the copy: `PLAYER_SETTINGS=` with

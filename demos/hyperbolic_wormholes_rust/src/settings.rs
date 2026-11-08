@@ -537,8 +537,8 @@ impl ServerSettings {
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
-    /// `view.wormhole_tint_frac` and `view.milky_way_brightness_frac` at most 1. The keys in `REMOVED_PLAYER_KEYS`, which older
-    /// versions saved, are dropped (`drop_removed_keys`), and those in `ADDED_PLAYER_KEYS`, which
+    /// `view.wormhole_tint_frac` and `view.milky_way_brightness_frac` at most 1. The keys in
+    /// `REMOVED_PLAYER_KEYS`, which older versions saved, are dropped (`drop_removed_keys`), and those in `ADDED_PLAYER_KEYS`, which
     /// older versions didn't save, take their built-in values when missing (`add_missing_keys`).
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
