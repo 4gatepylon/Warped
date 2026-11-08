@@ -186,4 +186,4 @@ is in [`AGENTS.md`](AGENTS.md).
 - [x] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
   radius (the rest is slightly darker and blurred), and shows where they are on the map. #166.
 - [x] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
-  different key. The right button zooms in; the flashlight is on `F`. #PR.
+  different key. The right button zooms in; the flashlight is on `F`. #170.
