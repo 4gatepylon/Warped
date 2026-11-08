@@ -34,6 +34,17 @@ joined to your team; a team wins it by turning off all of the other team's conso
 stays open 5 s to show the win, closes, and the match window shows the progression until the next
 round. `make e2e-match` plays a whole match of two bots with consoles off in 1 s.
 
+`make play-all-levels` plays a bot match steered through all five levels and checks it
+(`e2e/play_all_levels.py`): each bot gets `--bot-round-winners blue,blue,red,red,red` and joins no
+level in the rounds its team should lose, so the rounds are City Sphere (blue), Dark Forest (blue
+attacks and wins), Lunar Surface (red defends and wins), Snow Planet (red attacks and wins) and
+Dust (red wins the match). It fails on a stall (a round over `--round-timeout-s`), a process that
+stops early, or a round, level result file or outcome off that plan, and writes
+`.artifacts/play_all_levels/<run>/`: `levels.log` (each level's start, winner and duration), the
+match server's and both bots' logs, `summary.json` and `pictures/` (blue's progression page at each
+round's start and at the end, `--progression-pictures` with `--match`). It uses UDP 48110 for the
+match and 48112 for the levels (`MATCH_PORT`, `LEVEL_PORT`), away from a running match's.
+
 `make levels` puts each branch level in `.levels/<name>/` and builds it there; `match_levels.yaml`
 reads `.levels/<name>/demos/<name>_rust/.build/release/<binary>` and its `map_picture`. The default
 `LEVEL_SOURCE=checkout` makes `.levels/<name>` a symlink to this checkout, so the match builds and runs
@@ -88,8 +99,9 @@ round ends, so a level needs no exit logic. `--bot-objective consoles` holds `E`
 team's consoles in turn until its team wins (the copy's bot doesn't walk there: the server, as in
 the hyperbolic demo, doesn't check a player's distance to a console).
 
-Ports: match server UDP 47850 (47851 reserved for its discovery, not used yet: join by
-address); each round's level server 47852, and this copy's level discovery 47853.
+Ports: match server UDP 47850 (`--match-port`; 47851 reserved for its discovery, not used yet:
+join by address); each round's level server 47852 (`--port` with `--serve-match`), and this copy's
+level discovery 47853.
 
 ## The five levels (source of truth)
 

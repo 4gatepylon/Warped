@@ -4,7 +4,7 @@
 //! (`MatchClient`) what is on, so each client can start and stop its level window.
 //!
 //! Interface: `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `serve_match`, `MatchClient`
-//! (`Connect`, `poll`), `make_level_client_command`, `MATCH_PORT`.
+//! (`Connect`, `poll`), `make_level_client_command`, `is_sitting_out`, `MATCH_PORT`.
 //!
 //! Example: `serve_match(&levels, &MatchTimes::default(), &run_folder, MATCH_PORT, 47852)?;`
 //!
@@ -242,6 +242,24 @@ pub fn stop_child(child: &mut Option<Child>) {
         let _ = process.kill();
         let _ = process.wait();
     }
+}
+
+/// `is_sitting_out` says whether `team`'s bot joins no level in round `round` (from 1) of a
+/// steered match: `round_winners`, each round's winner in turn, names the other team there. An
+/// unsteered bot (no `round_winners`) never sits out; a round past the list is an error.
+///
+/// Example: `assert!(is_sitting_out(&[Team::Blue], 1, Team::Red)?);`
+pub fn is_sitting_out(round_winners: &[Team], round: usize, team: Team) -> Result<bool> {
+    if round_winners.is_empty() {
+        return Ok(false);
+    }
+    let winner: Team = *round_winners.get(round - 1).ok_or_else(|| {
+        format!(
+            "round {round} started, but --bot-round-winners names only {} rounds",
+            round_winners.len()
+        )
+    })?;
+    Ok(winner != team)
 }
 
 /// `parse_hello` gives the team a client's `hello <team>` datagram names (`None` for `any`), or
@@ -497,8 +515,19 @@ mod tests {
     //! | Levels file | the shipped one, an even count | `the_shipped_levels_file_loads`, `an_even_level_count_is_refused` |
     //! | Level result | none yet, blue, red, garbage | `level_results_are_read` |
     //! | Hello | each team, any, garbage | `hellos_name_a_team` |
+    //! | Steered bot | unsteered, its team's round, the other's, past the list | `steered_bots_sit_out_the_other_teams_rounds` |
 
     use super::*;
+
+    #[test]
+    fn steered_bots_sit_out_the_other_teams_rounds() {
+        let winners: [Team; 2] = [Team::Blue, Team::Red];
+        assert!(!is_sitting_out(&[], 7, Team::Red).unwrap());
+        assert!(!is_sitting_out(&winners, 1, Team::Blue).unwrap());
+        assert!(is_sitting_out(&winners, 1, Team::Red).unwrap());
+        assert!(is_sitting_out(&winners, 2, Team::Blue).unwrap());
+        assert!(is_sitting_out(&winners, 3, Team::Red).is_err());
+    }
 
     #[test]
     fn the_shipped_levels_file_loads() {

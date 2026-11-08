@@ -58,4 +58,26 @@ the user should check.
   once the levels are merged. Unsteered bot matches may sweep (3 rounds) and skip Dark Forest and
   Lunar Surface. A `--bot-round-winners` steering flag (only the named winner's bot turns off
   consoles, the other fights) was tried and left out: in Dark Forest the fighting bot kept the
-  console bot from finishing for 20 minutes. Making the other bot idle (no `--bot`) is the next try.
+  console bot from finishing for 20 minutes. `make play-all-levels` now steers with the other bot
+  sitting the round out (below).
+- **Steering a test match: the losing team's bot sits the round out** (`--bot-round-winners`, a
+  bot-only flag of the match client; the match's rules are unchanged). In a round its team should
+  lose, a bot joins no level, so the other team's console bot, alone there, wins it. A fighting
+  bot kept the console bot from finishing (above), and an idle bot would need a new
+  `--bot-objective` in each of the five level programs. Cost: each steered round runs one team's
+  level client, not both; the unsteered `make e2e-match` still runs both. **Weigh in** if the test
+  should run both (an `idle` objective in every level).
+- **The steered plan is five rounds**: City Sphere blue, Dark Forest blue, Lunar Surface red,
+  Snow Planet red, Dust red (red wins). It is the shortest match that plays every level, and it
+  has each rule once: the purple round, an attacker that advances, a defender that holds (roles
+  swap), and a win on the deepest level. Each level is played once, so a level that stalls shows
+  as that round. The plan is fixed in `e2e/play_all_levels.py` with its expected attackers, rather
+  than computed, so the test checks the match's rules instead of repeating them.
+- **Progression pictures of a test match are drawn from the live page** the blue bot receives
+  (`--progression-pictures` with `--match`), with the window's own drawing code but without a
+  window, rather than screenshots of a window: a bot match has no window, and a screenshot would
+  catch whatever else is on the screen.
+- **`make play-all-levels` uses UDP 48110 and 48112** (match and levels, `MATCH_PORT` and
+  `LEVEL_PORT`), so a test doesn't meet a match or level that someone is playing on 47850 and
+  47852. Level servers still announce themselves on their fixed discovery ports (e.g. Dust 47831),
+  so a `--join auto` on that level during a test may find the test's server.

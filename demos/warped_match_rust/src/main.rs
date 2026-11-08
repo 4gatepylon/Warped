@@ -326,7 +326,8 @@ struct Arguments {
     /// player and fire), to test a game; saves its view under .artifacts/bot/ at each hit.
     #[arg(long)]
     bot: bool,
-    /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
+    /// UDP port the server listens on (--host, --serve, and each round's level server with
+    /// --serve-match), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
     /// The numbers that shape play, a YAML file with server_settings.yaml's keys (the default): a
@@ -385,9 +386,15 @@ struct Arguments {
     #[arg(long, default_value = "match_levels.yaml")]
     match_levels: PathBuf,
     /// Render the progression page without a window at --width-px x --height-px for a few match
-    /// states and save them under .artifacts/progression_pictures/.
+    /// states and save them under .artifacts/progression_pictures/. With --match: save the page
+    /// this player sees at the start of each round and at the end there instead.
     #[arg(long)]
     progression_pictures: bool,
+    /// With --match --bot: each round's winner in turn, e.g. blue,blue,red: the bot turns off
+    /// consoles in the rounds its team should win and joins no level in the others, so a test can
+    /// steer a match through every level. The bot fails if the match outlasts the list.
+    #[arg(long, value_enum, value_delimiter = ',', requires = "bot", requires = "match_server")]
+    bot_round_winners: Vec<TeamFlag>,
     /// With --serve-match: seconds between rounds, showing the progression.
     #[arg(long, default_value_t = 10.0)]
     intermission_s: f64,
@@ -419,6 +426,16 @@ pub enum BotObjective {
 /// Example: `client.join(get_team_index(arguments))?;`
 fn get_team_index(arguments: &Arguments) -> Option<u32> {
     arguments.team.map(|team| u32::from(team == TeamFlag::Red))
+}
+
+/// `get_match_team` gives a `--team` or `--bot-round-winners` team as the match's `Team`.
+///
+/// Example: `assert_eq!(get_match_team(TeamFlag::Red), match_state::Team::Red);`
+fn get_match_team(team: TeamFlag) -> match_state::Team {
+    match team {
+        TeamFlag::Blue => match_state::Team::Blue,
+        TeamFlag::Red => match_state::Team::Red,
+    }
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -690,11 +707,11 @@ fn run(arguments: Arguments) -> Result<()> {
     if arguments.serve_match {
         return run_match_server(&arguments);
     }
-    if arguments.progression_pictures {
-        return save_progression_pictures(&arguments);
-    }
     if let Some(address) = &arguments.match_server {
         return run_match_client(&arguments, address);
+    }
+    if arguments.progression_pictures {
+        return save_progression_pictures(&arguments);
     }
     if arguments.renderer == RendererKind::Metal {
         viewmodel::check_gun_models()?;
@@ -727,12 +744,13 @@ fn run_match_server(arguments: &Arguments) -> Result<()> {
         match_s: arguments.match_s,
     };
     println!("Join with: make join-match SERVER=<this computer's address> (127.0.0.1 here)");
+    println!("Run folder: {}", folder.display());
     let state: match_state::MatchState = match_flow::serve_match(
         &levels,
         &times,
         &folder,
         arguments.match_port,
-        net::DEFAULT_PORT,
+        arguments.port,
     )?;
     let outcome: match_state::Outcome = state.outcome().expect("serve_match ends with an outcome");
     let rounds: Vec<Value> = state
@@ -761,15 +779,27 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
         parse_server_address(address, arguments.match_port).ok_or_else(|| {
             format!("--match must be an IP address with an optional :port, got {address:?}")
         })?;
-    let team: Option<match_state::Team> = arguments.team.map(|team| match team {
-        TeamFlag::Blue => match_state::Team::Blue,
-        TeamFlag::Red => match_state::Team::Red,
-    });
+    let team: Option<match_state::Team> = arguments.team.map(get_match_team);
     if arguments.bot && team.is_none() {
         return Err("--match with --bot needs --team blue or --team red".into());
     }
+    let round_winners: Vec<match_state::Team> = arguments
+        .bot_round_winners
+        .iter()
+        .map(|&winner| get_match_team(winner))
+        .collect();
+    let picture_folder: Option<PathBuf> = match arguments.progression_pictures {
+        true => Some(make_run_folder(
+            "progression_pictures",
+            arguments.label.as_deref(),
+        )?),
+        false => None,
+    };
+    if let Some(folder) = &picture_folder {
+        println!("Run folder: {}", folder.display());
+    }
     let mut client: match_flow::MatchClient = match_flow::MatchClient::Connect(server, team)?;
-    let mut level: Option<(usize, Child)> = None;
+    let mut level: Option<(usize, Option<Child>)> = None;
     let window: Option<(sdl3::Sdl, sdl3::render::WindowCanvas)> = match arguments.bot {
         true => None,
         false => {
@@ -826,7 +856,7 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
             match_flow::Phase::Playing { round, level, port } => Some((round, level, port)),
             _ => None,
         };
-        if let Some((round, child)) = &mut level
+        if let Some((round, Some(child))) = &mut level
             && let Some(status) = child.try_wait()?
         {
             println!("round {round}'s level stopped ({status}); starting it again");
@@ -834,10 +864,21 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
             std::thread::sleep(Duration::from_secs_f64(LEVEL_RESTART_S));
         }
         if level.as_ref().map(|(round, _)| *round) != playing.map(|(round, _, _)| round) {
-            if let Some((_, child)) = level.take() {
-                match_flow::stop_child(&mut Some(child));
+            if let Some((_, mut child)) = level.take() {
+                match_flow::stop_child(&mut child);
             }
             if let (Some((round, index, port)), Some(team)) = (playing, client.team) {
+                if let Some(folder) = &picture_folder {
+                    let name: String = view.levels[index].name.to_lowercase().replace(' ', "_");
+                    let path: PathBuf = folder.join(format!("round_{round}_{name}.png"));
+                    let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
+                    save_progression_picture(&view, team, size_px, &path)?;
+                }
+                if match_flow::is_sitting_out(&round_winners, round, team)? {
+                    println!("round {round}: sitting it out (--bot-round-winners)");
+                    level = Some((round, None));
+                    continue;
+                }
                 let extra: Vec<String> = match arguments.bot {
                     true => {
                         let label: String = format!("match-{}-round-{round}", team.get_name());
@@ -865,7 +906,7 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                     &extra,
                 )?;
                 println!("round {round}: {command:?}");
-                level = Some((round, command.spawn()?));
+                level = Some((round, Some(command.spawn()?)));
             }
         }
         if view.phase == match_flow::Phase::Over && !is_over_announced {
@@ -875,6 +916,10 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                 "The match is over: {}",
                 match_flow::describe_outcome(outcome)
             );
+            if let (Some(folder), Some(team)) = (&picture_folder, client.team) {
+                let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
+                save_progression_picture(&view, team, size_px, &folder.join("match_over.png"))?;
+            }
             if canvas.is_none() {
                 return Ok(());
             }
@@ -911,8 +956,8 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(TITLE_FRAME_MS));
     })();
-    if let Some((_, child)) = level.take() {
-        match_flow::stop_child(&mut Some(child));
+    if let Some((_, mut child)) = level.take() {
+        match_flow::stop_child(&mut child);
     }
     result
 }
@@ -5063,30 +5108,45 @@ fn save_progression_pictures(arguments: &Arguments) -> Result<()> {
             team_counts: [1, 1],
             match_left_s,
         };
-        let surface = sdl3::surface::Surface::new(width_px, height_px, PixelFormat::RGBA32)?;
-        let mut canvas: sdl3::render::Canvas<sdl3::surface::Surface> = surface.into_canvas()?;
-        let creator = canvas.texture_creator();
-        let thumbnails: Vec<Option<Thumbnail>> = make_thumbnails(&creator, &levels)?;
-        draw_shapes(
-            &mut canvas,
-            (width_px, height_px),
-            &match_menu::get_progression_shapes(&view, Some(Team::Blue)),
-            &thumbnails,
-        )?;
-        canvas.present();
-        drop(thumbnails);
-        let surface = canvas.into_surface();
-        let pitch: usize = surface.pitch() as usize;
-        let row_bytes: usize = width_px as usize * BYTES_PER_PIXEL;
-        let pixels: Vec<u8> = surface.with_lock(|pixels: &[u8]| {
-            (0..height_px as usize)
-                .flat_map(|y| pixels[y * pitch..y * pitch + row_bytes].iter().copied())
-                .collect()
-        });
         let path: PathBuf = folder.join(format!("{name}.png"));
-        save_png(&path, &pixels, width_px, height_px)?;
-        println!("{}", path.display());
+        save_progression_picture(&view, Team::Blue, (width_px, height_px), &path)?;
     }
+    Ok(())
+}
+
+/// `save_progression_picture` renders the progression page of `view`, as `team`'s player sees
+/// it, without a window at `size_px`, and saves it as a PNG at `path`.
+///
+/// Example: `save_progression_picture(&view, Team::Blue, (1280, 800), &path)?;`
+fn save_progression_picture(
+    view: &match_flow::MatchView,
+    team: match_state::Team,
+    size_px: (u32, u32),
+    path: &Path,
+) -> Result<()> {
+    let (width_px, height_px): (u32, u32) = size_px;
+    let surface = sdl3::surface::Surface::new(width_px, height_px, PixelFormat::RGBA32)?;
+    let mut canvas: sdl3::render::Canvas<sdl3::surface::Surface> = surface.into_canvas()?;
+    let creator = canvas.texture_creator();
+    let thumbnails: Vec<Option<Thumbnail>> = make_thumbnails(&creator, &view.levels)?;
+    draw_shapes(
+        &mut canvas,
+        size_px,
+        &match_menu::get_progression_shapes(view, Some(team)),
+        &thumbnails,
+    )?;
+    canvas.present();
+    drop(thumbnails);
+    let surface = canvas.into_surface();
+    let pitch: usize = surface.pitch() as usize;
+    let row_bytes: usize = width_px as usize * BYTES_PER_PIXEL;
+    let pixels: Vec<u8> = surface.with_lock(|pixels: &[u8]| {
+        (0..height_px as usize)
+            .flat_map(|y| pixels[y * pitch..y * pitch + row_bytes].iter().copied())
+            .collect()
+    });
+    save_png(path, &pixels, width_px, height_px)?;
+    println!("{}", path.display());
     Ok(())
 }
 
