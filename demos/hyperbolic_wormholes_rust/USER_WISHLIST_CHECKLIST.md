@@ -41,7 +41,9 @@ is in [`AGENTS.md`](AGENTS.md).
     (`claude/dust-parity`, open). Snow Planet: #421
     (branch `claude/snow-planet-parity`, open). City Sphere: #429
     (HUD bars, hit effect, movement, jump, exit prompt, zoom, head bob, speckle, walking console bot); still missing
-    there: thrown wormholes, flashlight, third person, ground dust.
+    there: thrown wormholes, flashlight, third person, ground dust. Dark Forest: #431 (Lunar's HUD, hit effect and
+    "YOU DIED", `claude/dark-forest-parity-hud`, open); still missing there: both guns, settings and the Tab pages,
+    the minimap, small bot windows, flashlight, third person, thrown wormholes, exit prompt.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,

@@ -23,6 +23,7 @@ const SHADER_SOURCE: &str = concat!(
     include_str!("../../shaders/ibl.metal"),
     include_str!("../../shaders/scene.metal"),
     include_str!("../../shaders/post.metal"),
+    include_str!("../../shaders/overlay.metal"),
 );
 
 /// `HDR_FORMAT` is the format of the lit scene and the bloom chain.
@@ -104,6 +105,7 @@ pub struct Pipelines {
     pub fxaa: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub hud: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub hud_image: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    pub overlay_rects: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub convert_equirect_to_cube: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
     pub prefilter_specular: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
     pub integrate_brdf: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
@@ -368,6 +370,11 @@ impl Pipelines {
             tonemap: fullscreen_pipeline("tonemap_fragment", LDR_FORMAT, Blend::None),
             lens: fullscreen_pipeline("lens_fragment", LDR_FORMAT, Blend::None),
             fxaa: fullscreen_pipeline("fxaa_fragment", DRAWABLE_FORMAT, Blend::None),
+            overlay_rects: fullscreen_pipeline(
+                "overlay_rects_fragment",
+                DRAWABLE_FORMAT,
+                Blend::Premultiplied,
+            ),
             hud: render_pipeline(
                 device,
                 RenderPipelineSpec {

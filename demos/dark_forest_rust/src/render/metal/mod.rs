@@ -26,8 +26,8 @@ use objc2_metal::{
     MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
     MTLCreateSystemDefaultDevice, MTLCullMode, MTLDevice, MTLDrawable, MTLIndexType, MTLLoadAction,
     MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLResourceOptions, MTLStoreAction, MTLTexture, MTLTextureType, MTLTextureUsage, MTLViewport,
-    MTLWinding,
+    MTLResourceOptions, MTLScissorRect, MTLStoreAction, MTLTexture, MTLTextureType,
+    MTLTextureUsage, MTLViewport, MTLWinding,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
@@ -51,7 +51,7 @@ use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
     LensMouth, MAX_LIVE_LENS_SLOT_COUNT, MaterialData, MaterialHandle, MeshData, MeshHandle,
     OccluderBox, Particle, RenderSettings, Renderer, TextureData, TextureHandle,
-    pick_live_lens_mouths,
+    overlay::get_overlay_regions_px, pick_live_lens_mouths,
 };
 
 /// `FRAMES_IN_FLIGHT` is how many frames the CPU may encode ahead of the GPU.
@@ -272,6 +272,7 @@ pub struct MetalRenderer {
     drawable_size_px: (u32, u32),
     lens: Option<(Texture, gpu_types::GpuLensUniforms)>,
     lens_live: Option<LensLive>,
+    hud_capture: Option<Texture>,
     is_capturing: bool,
 }
 
@@ -433,6 +434,7 @@ impl MetalRenderer {
             white_texture,
             lens: None,
             lens_live: None,
+            hud_capture: None,
             is_capturing: false,
             flat_normal_texture,
             shadow_map,
@@ -844,7 +846,7 @@ impl MetalRenderer {
                 PREFILTERED_MIP_COUNT as f32,
             ),
             post_params: Vec4::new(
-                frame.damage_flash_frac,
+                0.0,
                 1.0 / SHADOW_MAP_SIZE_PX as f32,
                 atmosphere.ibl_intensity_frac,
                 frame.point_lights.len().min(MAX_POINT_LIGHT_COUNT) as f32,
@@ -928,6 +930,26 @@ impl Renderer for MetalRenderer {
                 mouths: lens.mouths.clone(),
             }
         });
+    }
+
+    fn set_is_capturing_hud(&mut self, is_capturing_hud: bool) {
+        let (width_px, height_px) = self.drawable_size_px;
+        self.hud_capture = is_capturing_hud.then(|| {
+            create_texture(
+                &self.device,
+                &TextureSpec::render_target(DRAWABLE_FORMAT, width_px as usize, height_px as usize),
+                "hud capture",
+            )
+        });
+    }
+
+    fn read_hud_frame_rgba(&mut self) -> (u32, u32, Vec<u8>) {
+        let capture: Texture = self.hud_capture.clone().expect("the HUD is being captured");
+        let (width_px, height_px, mut bgra) = self.read_texture_bytes(&capture);
+        for pixel in bgra.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+        (width_px, height_px, bgra)
     }
 
     fn set_is_capturing(&mut self, is_capturing: bool) {
@@ -1152,6 +1174,7 @@ impl MetalRenderer {
             })
             .collect();
         let hud_offset_bytes: usize = dynamic.push(&hud_rects);
+        let overlay_offset_bytes: usize = dynamic.push(frame.overlay_rects);
         let hud_images: Vec<(GpuHudImage, usize)> = frame
             .hud_images
             .iter()
@@ -1536,10 +1559,18 @@ impl MetalRenderer {
         );
 
         let drawable_start: std::time::Instant = std::time::Instant::now();
-        let drawable = self.layer.nextDrawable();
+        let drawable = match &self.hud_capture {
+            Some(_) => None,
+            None => self.layer.nextDrawable(),
+        };
         let drawable_wait_ms: f64 = drawable_start.elapsed().as_secs_f64() * SECONDS_TO_MS;
-        if let Some(drawable) = drawable {
-            let drawable_texture: Retained<ProtocolObject<dyn MTLTexture>> = drawable.texture();
+        let output_texture: Option<Retained<ProtocolObject<dyn MTLTexture>>> =
+            match (&self.hud_capture, &drawable) {
+                (Some(capture), _) => Some(capture.clone()),
+                (None, Some(drawable)) => Some(drawable.texture()),
+                (None, None) => None,
+            };
+        if let Some(drawable_texture) = output_texture {
             let descriptor: Retained<MTLRenderPassDescriptor> =
                 color_pass(&drawable_texture, MTLLoadAction::DontCare, None);
             let encoder = command_buffer
@@ -1548,6 +1579,12 @@ impl MetalRenderer {
             encoder.setRenderPipelineState(&self.pipelines.fxaa);
             let is_fxaa_enabled: f32 = if settings.is_fxaa_enabled { 1.0 } else { 0.0 };
             set_fragment_bytes(&encoder, as_bytes(&is_fxaa_enabled), 0);
+            set_fragment_bytes(&encoder, as_bytes(&frame.hit_effect), 1);
+            let output_size_px: Vec2 = Vec2::new(
+                drawable_texture.width() as f32,
+                drawable_texture.height() as f32,
+            );
+            set_fragment_bytes(&encoder, as_bytes(&output_size_px), 2);
             unsafe {
                 encoder.setFragmentTexture_atIndex(Some(&targets.ldr), 0);
                 encoder.drawPrimitives_vertexStart_vertexCount(
@@ -1577,6 +1614,50 @@ impl MetalRenderer {
                     );
                 }
             }
+            if !frame.overlay_rects.is_empty() {
+                let window_size_px: Vec2 = Vec2::new(
+                    drawable_texture.width() as f32,
+                    drawable_texture.height() as f32,
+                );
+                let rect_count: u32 = frame.overlay_rects.len() as u32;
+                encoder.setRenderPipelineState(&self.pipelines.overlay_rects);
+                set_fragment_bytes(&encoder, as_bytes(&rect_count), 1);
+                set_fragment_bytes(&encoder, as_bytes(&window_size_px), 2);
+                unsafe {
+                    encoder.setFragmentBuffer_offset_atIndex(
+                        Some(&dynamic_buffer),
+                        overlay_offset_bytes,
+                        0,
+                    );
+                }
+                let size_px: (u32, u32) = (
+                    drawable_texture.width() as u32,
+                    drawable_texture.height() as u32,
+                );
+                for [left, top, right, bottom] in
+                    get_overlay_regions_px(frame.overlay_rects, size_px)
+                {
+                    encoder.setScissorRect(MTLScissorRect {
+                        x: left as usize,
+                        y: top as usize,
+                        width: (right - left) as usize,
+                        height: (bottom - top) as usize,
+                    });
+                    unsafe {
+                        encoder.drawPrimitives_vertexStart_vertexCount(
+                            MTLPrimitiveType::Triangle,
+                            0,
+                            FULLSCREEN_VERTEX_COUNT,
+                        );
+                    }
+                }
+                encoder.setScissorRect(MTLScissorRect {
+                    x: 0,
+                    y: 0,
+                    width: size_px.0 as usize,
+                    height: size_px.1 as usize,
+                });
+            }
             if !hud_images.is_empty() {
                 let window_size_px: Vec2 = Vec2::new(
                     drawable_texture.width() as f32,
@@ -1602,9 +1683,11 @@ impl MetalRenderer {
                 }
             }
             encoder.endEncoding();
-            let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
-                ProtocolObject::from_ref(&*drawable);
-            command_buffer.presentDrawable(metal_drawable);
+            if let Some(drawable) = &drawable {
+                let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
+                    ProtocolObject::from_ref(&**drawable);
+                command_buffer.presentDrawable(metal_drawable);
+            }
         }
         command_buffer.commit();
         self.in_flight.push_back(command_buffer);

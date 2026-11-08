@@ -14,6 +14,7 @@ mod assets;
 mod credits;
 mod forest_layout;
 mod game;
+mod hud_bars;
 mod map;
 mod match_play;
 mod menu;
@@ -52,6 +53,7 @@ use menu::{Menu, MenuOutcome, MenuSettings, Scoreboard};
 use minimap::{Mark, Minimap};
 use platform::Platform;
 use render::metal::MetalRenderer;
+use render::overlay::HitEffect;
 use render::{FrameDescription, FrameTiming, HudImage, HudRect, RenderSettings, Renderer};
 use scene::{Scene, SceneOptions};
 use text_overlay::TextPicture;
@@ -240,6 +242,19 @@ struct Args {
     /// 30 simulated frames a second, for --video-seconds, then quit.
     #[arg(long)]
     video_frames: Option<PathBuf>,
+    /// Keep the HUD in --photo and --video-frames pictures, as the window shows it.
+    #[arg(long)]
+    photo_hud: bool,
+    /// Take --photo at this many simulated seconds instead of after 3 s.
+    #[arg(long, default_value_t = PHOTO_SETTLE_S)]
+    photo_at_s: f32,
+    /// Hurt the player by one robot shot every this many simulated seconds, for pictures of hits
+    /// and of "YOU DIED".
+    #[arg(long)]
+    hurt_player_every_s: Option<f32>,
+    /// Hold `E` (turning off a console within reach), for pictures of the console bar.
+    #[arg(long)]
+    hold_console: bool,
     /// How many simulated seconds --video-frames records.
     #[arg(long, default_value_t = 8.0)]
     video_seconds: f32,
@@ -278,6 +293,8 @@ struct Args {
 /// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle, in simulated
 /// seconds.
 const PHOTO_SETTLE_S: f32 = 3.0;
+/// `HURT_PLAYER_DAMAGE` is how much --hurt-player-every-s takes each time: a robot's shot.
+const HURT_PLAYER_DAMAGE: f32 = game::bots::SHOT_DAMAGE;
 /// `RECORDING_DT_S` is the fixed step of --photo and --video-frames, so the same command gives the
 /// same picture.
 const RECORDING_DT_S: f32 = 1.0 / 30.0;
@@ -369,9 +386,10 @@ fn capture_wormhole_lens(
                     hud_rects: &[],
                     hud_images: &[],
                     time_s: 0.0,
-                    damage_flash_frac: 0.0,
+                    hit_effect: HitEffect::default(),
                     lens_draws: &[],
                     lens_particles: &[],
+                    overlay_rects: &[],
                 },
                 &capture_settings,
             );
@@ -454,10 +472,30 @@ fn capture_wormhole_lens(
     }
 }
 
-/// `save_photo` reads the last frame back and writes it to `path` as a PNG, downscaled to
-/// `width_px` if given.
-fn save_photo(renderer: &mut dyn Renderer, path: &std::path::Path, width_px: Option<u32>) {
-    let (frame_width_px, frame_height_px, rgba) = renderer.read_frame_rgba();
+/// `hold_player` puts the player at `feet_m` facing `yaw_rad`, standing and still, as a fixed view
+/// does each frame, but keeps their health and whether they are dead, so hits and deaths still show.
+///
+/// Example: `hold_player(&mut session, Vec3::new(0.0, 0.0, 50.0), 0.0);`
+fn hold_player(session: &mut Session, feet_m: Vec3, yaw_rad: f32) {
+    let (health, dead_time_s) = (session.player.health, session.player.dead_time_s);
+    session.player = Player::new(feet_m, yaw_rad);
+    session.player.health = health;
+    session.player.dead_time_s = dead_time_s;
+}
+
+/// `save_photo` reads the last frame back (with its HUD if `is_with_hud`, which needs
+/// `set_is_capturing_hud`) and writes it to `path` as a PNG, downscaled to `width_px` if given.
+fn save_photo(
+    renderer: &mut dyn Renderer,
+    path: &std::path::Path,
+    width_px: Option<u32>,
+    is_with_hud: bool,
+) {
+    let (frame_width_px, frame_height_px, rgba) = if is_with_hud {
+        renderer.read_hud_frame_rgba()
+    } else {
+        renderer.read_frame_rgba()
+    };
     let mut picture: image::RgbaImage =
         image::RgbaImage::from_raw(frame_width_px, frame_height_px, rgba).expect("RGBA frame");
     for pixel in picture.pixels_mut() {
@@ -551,6 +589,10 @@ const TITLE_PICTURE_PX: (u32, u32) = (416, 168);
 const TITLE_HEIGHT_FRAC: f32 = 0.5;
 /// `TITLE_DIM_FRAC` is how much the title screen darkens the forest behind it.
 const TITLE_DIM_FRAC: f32 = 0.45;
+/// `DEATH_PICTURE_PX` and `BANNER_HEIGHT_FRAC` are the Lunar Surface demo's "YOU DIED" banner: its
+/// text picture's size and the most of the window's height it takes.
+const DEATH_PICTURE_PX: (u32, u32) = (240, 24);
+const BANNER_HEIGHT_FRAC: f32 = 0.2;
 /// `TITLE_TURN_RAD_PER_S` is how fast the view behind the title screen turns.
 const TITLE_TURN_RAD_PER_S: f32 = 0.05;
 const TEAM_MARK_RGBA: [[u8; 4]; 2] = [[80, 140, 255, 255], [240, 80, 60, 255]];
@@ -666,9 +708,10 @@ fn run_title_screen(
                 hud_rects: &frame.hud_rects,
                 hud_images: &[picture.get_image(width_px, height_px, TITLE_HEIGHT_FRAC)],
                 time_s: start.elapsed().as_secs_f32(),
-                damage_flash_frac: 0.0,
+                hit_effect: HitEffect::default(),
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
+                overlay_rects: &[],
             },
             settings,
         );
@@ -940,6 +983,11 @@ fn main() {
     minimap.load_photo(&Path::new(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
     let mut marks: Vec<Mark> = Vec::new();
     let mut menu: Option<Menu> = None;
+    if args.photo_hud {
+        renderer.set_is_capturing_hud(true);
+    }
+    let mut death_picture: TextPicture =
+        TextPicture::Banner(DEATH_PICTURE_PX.0, DEATH_PICTURE_PX.1);
     let mut menu_picture: TextPicture =
         TextPicture::New(menu::MENU_PICTURE_PX.0, menu::MENU_PICTURE_PX.1);
     let mut menu_settings: MenuSettings = MenuSettings {
@@ -1112,7 +1160,7 @@ fn main() {
             .or(args.camera_view);
         if let Some(pose) = &args.camera_pose {
             assert_eq!(pose.len(), 5, "--camera-pose takes x,y,z,yaw,pitch");
-            session.player = Player::new(Vec3::new(pose[0], pose[1], pose[2]), pose[3]);
+            hold_player(&mut session, Vec3::new(pose[0], pose[1], pose[2]), pose[3]);
             session.player.pitch_rad = pose[4];
             session.player.is_on_ground = true;
             session.is_autopilot = false;
@@ -1131,7 +1179,7 @@ fn main() {
         let controls: Controls = match camera_view {
             Some(view) => {
                 let (feet_m, yaw_rad, pitch_rad) = view.pose();
-                session.player = Player::new(feet_m, yaw_rad);
+                hold_player(&mut session, feet_m, yaw_rad);
                 session.player.pitch_rad = pitch_rad;
                 session.player.is_on_ground = true;
                 session.is_autopilot = false;
@@ -1161,6 +1209,11 @@ fn main() {
         };
         let sim_start: Instant = Instant::now();
         let waypoint_before: usize = session.autopilot_waypoint;
+        if let Some(period_s) = args.hurt_player_every_s
+            && (session.time_s / period_s).floor() != ((session.time_s + dt_s) / period_s).floor()
+        {
+            session.player.take_damage(HURT_PLAYER_DAMAGE);
+        }
         session.update(&controls, &scene, &audio, dt_s);
         if args.play_route && session.autopilot_waypoint != waypoint_before {
             println!(
@@ -1169,7 +1222,8 @@ fn main() {
                 start.elapsed().as_secs_f32()
             );
         }
-        let is_e_held: bool = menu.is_none() && keys.is_scancode_pressed(Scancode::E);
+        let is_e_held: bool =
+            menu.is_none() && (args.hold_console || keys.is_scancode_pressed(Scancode::E));
         if let Err(error) = play.update(&mut session, &scene, is_e_held, dt_s) {
             eprintln!("network error: {error}");
         }
@@ -1184,6 +1238,7 @@ fn main() {
             .then_some(smoothed_frame_ms);
         let sim_ms: f32 = sim_start.elapsed().as_secs_f32() * 1000.0;
         let build_start: Instant = Instant::now();
+        session.is_view_covered = menu.is_some() || !session.player.is_alive();
         let mut frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);
         if let Some(fov_deg) = args.fov_deg {
             frame.camera.fov_y_rad = fov_deg.to_radians();
@@ -1200,7 +1255,7 @@ fn main() {
             frame.camera.far_m = f32::MAX;
             renderer.set_is_capturing(true);
         }
-        if is_recording {
+        if is_recording && !args.photo_hud {
             frame.viewmodel_draws.clear();
             frame.viewmodel_particles.clear();
         }
@@ -1242,6 +1297,25 @@ fn main() {
             minimap.draw_minimap(session.player.feet_m, session.player.yaw_rad, &marks);
             hud_images.push(minimap.get_minimap_image(window_width_px, window_height_px));
         }
+        if menu.is_none()
+            && let Some(respawn_in_s) = session.player.get_respawn_in_s()
+        {
+            death_picture.draw(
+                &[
+                    ("YOU DIED".to_string(), true),
+                    (
+                        format!("Respawning in {:.0}", respawn_in_s.ceil().max(1.0)),
+                        false,
+                    ),
+                ],
+                true,
+            );
+            hud_images.push(death_picture.get_image(
+                window_width_px,
+                window_height_px,
+                BANNER_HEIGHT_FRAC,
+            ));
+        }
         let build_ms: f32 = build_start.elapsed().as_secs_f32() * 1000.0;
         timing = renderer.render_frame(
             &FrameDescription {
@@ -1256,9 +1330,10 @@ fn main() {
                 hud_rects: &frame.hud_rects,
                 hud_images: &hud_images,
                 time_s: session.time_s,
-                damage_flash_frac: frame.damage_flash_frac,
+                hit_effect: frame.hit_effect,
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
+                overlay_rects: &frame.overlay_rects,
             },
             &settings,
         );
@@ -1279,15 +1354,20 @@ fn main() {
                 "frame_{:04}.png",
                 (session.time_s / RECORDING_DT_S).round() as u32
             ));
-            save_photo(&mut renderer, &frame_path, args.photo_width_px);
+            save_photo(
+                &mut renderer,
+                &frame_path,
+                args.photo_width_px,
+                args.photo_hud,
+            );
         }
         if let Some(path) = &args.photo
-            && session.time_s > PHOTO_SETTLE_S
+            && session.time_s > args.photo_at_s
         {
             if args.map_picture.is_some() {
                 save_map_picture(&mut renderer, path, &session.arena);
             } else {
-                save_photo(&mut renderer, path, args.photo_width_px);
+                save_photo(&mut renderer, path, args.photo_width_px, args.photo_hud);
             }
             break 'running;
         }
