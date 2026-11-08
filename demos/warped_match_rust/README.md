@@ -32,6 +32,15 @@ joined to your team; a team wins it by turning off all of the other team's conso
 stays open 5 s to show the win, closes, and the match window shows the progression until the next
 round. `make e2e-match` plays a whole match of two bots with consoles off in 1 s.
 
+`make levels` puts each branch level in `.levels/<name>/` and builds it there; `match_levels.yaml`
+reads `.levels/<name>/demos/<name>_rust/.build/release/<binary>` and its `map_picture`. With the
+default `LEVEL_SOURCE=branches`, `.levels/<name>` is a git worktree of the level's branch tip
+(`LEVEL_BRANCHES` in the Makefile). Once the levels are merged into `staging/user-4gatepylon`, use
+`make levels LEVEL_SOURCE=checkout` (and `make serve-match LEVEL_SOURCE=checkout`): `.levels/<name>`
+becomes a symlink to this checkout, so the match builds and runs `demos/<name>_rust/` from the same
+checkout, and the yaml needs no change. Make `checkout` the default then, and drop `branches`
+when no level is developed on its own branch any more.
+
 ## The progression page
 
 ![The match window after a round](docs/progression.png)

@@ -64,6 +64,7 @@ help:
 	@echo "  make join-match SERVER=127.0.0.1 TEAM=blue       Open the match window (progression page); each round opens its level"
 	@echo "  make bot-match TEAM=red                          Join the match with a bot that turns off the other team's consoles"
 	@echo "  make e2e-match                                   A whole match of two bots, consoles off in 1 s (e2e/)"
+	@echo "  make levels LEVEL_SOURCE=checkout                Build the levels from this checkout's demos/<level>_rust/ instead of their branches"
 	@echo "  make serve-game PORT=47852 MAP=lunar-surface     Run a game server, without a window; prints how to join"
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
 	@echo "  make join-game SERVER=auto PORT=47852            Open the window and join the game server (SERVER=auto finds one)"
@@ -146,16 +147,31 @@ else
 	@printf '%s\nTo be asked instead, pass INTERACTIVE=1.\n' "$(RESET_ARTIFACTS_WARNING)" >&2; exit 2
 endif
 
-# The plugged-in levels (match_levels.yaml): each level's branch as a git worktree in .levels/, built there.
+# The plugged-in levels (match_levels.yaml reads .levels/<name>/demos/<name>_rust/). LEVEL_SOURCE=branches
+# makes .levels/<name> a git worktree of the level's branch tip; LEVEL_SOURCE=checkout makes it a symlink to
+# this checkout, so the levels come from demos/<name>_rust/ here (e.g. once merged into staging/user-4gatepylon).
 LEVEL_BRANCHES := snow_planet:devin/snow-planet-demo dust:devin/dust-demo city_sphere:devin/city-sphere-demo dark_forest:devin/dark-forest-demo
+LEVEL_SOURCE ?= branches
 
 levels:
+ifeq ($(LEVEL_SOURCE),checkout)
+	mkdir -p .levels
+	$(foreach level,$(LEVEL_BRANCHES),\
+	  $(eval name := $(word 1,$(subst :, ,$(level))))\
+	  (test -L .levels/$(name) || ! test -e .levels/$(name) || (echo ".levels/$(name) is a branch worktree; remove it with git worktree remove .levels/$(name)" >&2; false)) && \
+	  ln -sfn ../../.. .levels/$(name) && \
+	  (cd .levels/$(name)/demos/$(name)_rust && (! grep -q '^download-assets:' Makefile || make download-assets) && cargo build --release) &&) true
+else ifeq ($(LEVEL_SOURCE),branches)
 	git fetch origin $(foreach level,$(LEVEL_BRANCHES),$(word 2,$(subst :, ,$(level))))
 	$(foreach level,$(LEVEL_BRANCHES),\
 	  $(eval name := $(word 1,$(subst :, ,$(level))))$(eval branch := $(word 2,$(subst :, ,$(level))))\
+	  (! test -L .levels/$(name) || rm .levels/$(name)) && \
 	  (test -d .levels/$(name) || git worktree add --detach .levels/$(name) origin/$(branch)) && \
 	  git -C .levels/$(name) checkout --detach origin/$(branch) && \
 	  (cd .levels/$(name)/demos/$(name)_rust && (! grep -q '^download-assets:' Makefile || make download-assets) && cargo build --release) &&) true
+else
+	@echo "LEVEL_SOURCE must be branches or checkout, got $(LEVEL_SOURCE)" >&2; exit 2
+endif
 
 # The match (README, "Match"): a match server, a window or bot per player.
 serve-match: levels

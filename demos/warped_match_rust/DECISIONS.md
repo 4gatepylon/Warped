@@ -53,3 +53,9 @@ the user should check.
   reads as a home-ground edge (shorter way to one's own consoles). With people it may differ. If it
   holds, options are a time limit per round that the attacker wins, fewer consoles on the
   defender's side, or a respawn delay for defenders; none is implemented.
+- **For future agents:** level code is found through `.levels/<name>/` (README, "Match"):
+  branch worktrees by default, or `LEVEL_SOURCE=checkout` for this checkout's `demos/<name>_rust/`
+  once the levels are merged. Unsteered bot matches may sweep (3 rounds) and skip Dark Forest and
+  Lunar Surface. A `--bot-round-winners` steering flag (only the named winner's bot turns off
+  consoles, the other fights) was tried and left out: in Dark Forest the fighting bot kept the
+  console bot from finishing for 20 minutes. Making the other bot idle (no `--bot`) is the next try.
