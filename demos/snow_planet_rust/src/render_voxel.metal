@@ -1489,7 +1489,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     float4 n = float4(0.0, 1.0, 0.0, 0.0);
     if (has_terrain) {
         n = terrain_normal(scene, fermi);
-    } else {
+    } else if (!is_snow) {
         albedo *= 1.0 + detail * (BLOCK_NOISE * (h - 0.5) + TEXEL_NOISE * (texel - 0.5));
         float2 edge = min(uv, 1.0 - uv);
         albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * GROUND_EDGE_FRAC);

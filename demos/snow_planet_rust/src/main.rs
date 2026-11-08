@@ -1060,8 +1060,9 @@ struct VoxelView {
     is_laser_on: bool,
 }
 
-/// `make_voxel_bench_views` gives the voxel benchmark's viewpoints: the Lunar Surface level's
-/// views, and the laser fired into the wormhole from its viewpoint.
+/// `make_voxel_bench_views` gives the voxel benchmark's viewpoints on Snow Planet (u, v in meters,
+/// blue at negative u): the spawns, the white-out and a squall from inside and outside, the black
+/// holes, the wormhole, the pylons, the torus seam, and the laser fired into the white-out.
 ///
 /// Example: `let views = make_voxel_bench_views();`
 fn make_voxel_bench_views() -> Vec<VoxelView> {
@@ -1074,47 +1075,28 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         is_laser_on: false,
     };
     vec![
-        view("blue_spawn", [-107.0, 0.0], [0.0, 0.0], None, 0.0),
-        view("red_spawn", [112.0, 0.0], [0.0, 0.0], None, 0.0),
-        view("overview", [0.0, 0.0], [0.0, -10.0], Some(46.0), -1.55),
-        view("middle", [-27.0, 0.0], [40.0, 0.0], None, 0.1),
-        view("black_hole", [-12.0, 4.0], [0.0, 0.0], Some(19.0), -0.42),
-        view("wormhole", [-22.0, 40.0], [-14.0, 40.0], None, 0.0),
-        view("wormhole_exit", [81.0, 26.0], [78.0, 30.0], None, 0.0),
-        view("red_pylon", [82.0, -1.0], [94.0, 6.0], None, 0.05),
-        view("ridge", [10.0, 58.5], [45.0, -5.0], None, -0.12),
-        view("einstein_ring", [-10.0, -3.0], [0.0, 0.0], Some(11.0), 0.15),
-        view("overlook", [-85.0, 0.0], [0.0, 0.0], Some(28.0), -0.7),
-        view("habitat_row", [-46.0, -36.0], [0.0, -42.0], None, 0.0),
-        view("crater_wall", [-30.0, -30.0], [-60.0, -90.0], None, 0.1),
-        view("red_hangar", [100.0, 9.0], [121.0, 0.0], None, 0.1),
-        view("blue_kazemat", [-100.0, 9.0], [-114.0, 0.0], None, 0.0),
+        view("blue_spawn", [-46.0, 0.0], [0.0, 0.0], None, 0.0),
+        view("red_spawn", [46.0, 0.0], [0.0, 0.0], None, 0.0),
+        view("overview", [0.0, 0.0], [0.0, -10.0], Some(60.0), -1.55),
+        view("whiteout_outside", [-22.0, 0.0], [0.0, 0.0], None, 0.0),
+        view("whiteout_inside", [-4.0, 0.0], [10.0, 0.0], None, 0.0),
         view(
-            "blue_hesco_rows",
-            [-40.0, 4.0],
-            [-80.0, 0.0],
-            Some(9.0),
-            -0.25,
+            "whiteout_above",
+            [-18.0, -6.0],
+            [0.0, 0.0],
+            Some(22.0),
+            -0.6,
         ),
-        view("field_bunker", [-18.0, -30.0], [-30.0, -40.0], None, 0.0),
-        view(
-            "field_bunker_above",
-            [-22.0, -46.0],
-            [-30.0, -40.0],
-            Some(14.0),
-            -0.7,
-        ),
-        view("hesco_barrier", [46.0, -8.0], [56.0, -15.0], None, 0.0),
-        view("beacon", [87.0, 2.0], [94.0, 6.0], None, 0.2),
+        view("north_squall", [-28.0, 24.0], [-14.0, 24.0], None, 0.0),
+        view("black_hole", [-9.0, 17.0], [0.0, 17.0], Some(6.0), 0.0),
+        view("black_hole_far", [-30.0, 10.0], [0.0, 17.0], None, 0.05),
+        view("wormhole", [-30.0, -20.0], [-22.0, -27.0], None, 0.0),
+        view("blue_pylon", [-24.0, 11.0], [-34.0, 11.0], None, 0.1),
+        view("red_pylon", [24.0, -11.0], [34.0, -11.0], None, 0.1),
+        view("seam", [-50.0, 20.0], [-56.0, 0.0], None, 0.0),
         VoxelView {
             is_laser_on: true,
-            ..view(
-                "laser_into_wormhole",
-                [-22.0, 40.5],
-                [-14.0, 40.0],
-                None,
-                0.0,
-            )
+            ..view("laser_into_whiteout", [-20.0, 0.0], [0.0, 0.0], None, 0.0)
         },
     ]
 }

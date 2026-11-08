@@ -1025,6 +1025,7 @@ pub fn write_level_result(path: &Path, winner: u32) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
     should_stop: &AtomicBool,
@@ -1662,11 +1663,15 @@ mod tests {
 
     #[test]
     fn level_result_is_written_whole() {
-        let folder: PathBuf = std::env::temp_dir().join(format!("level_result_{}", std::process::id()));
+        let folder: PathBuf =
+            std::env::temp_dir().join(format!("level_result_{}", std::process::id()));
         std::fs::create_dir_all(&folder).expect("a folder");
         let path: PathBuf = folder.join("result.json");
         write_level_result(&path, 1).expect("a result");
-        assert_eq!(std::fs::read_to_string(&path).expect("the result"), "{\"winner\":\"red\"}\n");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("the result"),
+            "{\"winner\":\"red\"}\n"
+        );
         assert!(!folder.join("result.json.partial").exists());
         std::fs::remove_dir_all(&folder).expect("cleaned up");
     }

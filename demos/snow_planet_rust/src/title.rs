@@ -22,7 +22,11 @@ use crate::map::MapName;
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const MAPS: [MapName; 3] = [MapName::SnowPlanet, MapName::LunarSurface, MapName::HouseDemo];
+const MAPS: [MapName; 3] = [
+    MapName::SnowPlanet,
+    MapName::LunarSurface,
+    MapName::HouseDemo,
+];
 const HEADER_LINES: [&str; 3] = [
     "WARPED",
     "Up and Down choose, Return starts, Escape quits.",
@@ -186,13 +190,13 @@ mod tests {
 
     use super::*;
 
-    const LOCAL_CHOICE_COUNT: usize = 3;
+    const LOCAL_CHOICE_COUNT: usize = 4;
 
     #[test]
     fn without_online_games_only_local_choices_show() {
         let title: TitleScreen = TitleScreen::New("").expect("a title screen");
         assert_eq!(title.choices.len(), LOCAL_CHOICE_COUNT);
-        assert_eq!(title.get_selected(), &Choice::Join(MapName::LunarSurface));
+        assert_eq!(title.get_selected(), &Choice::Join(MapName::SnowPlanet));
     }
 
     #[test]
@@ -254,7 +258,7 @@ mod tests {
     fn selection_wraps_around() {
         let mut title: TitleScreen = TitleScreen::New("").expect("a title screen");
         title.move_selection(1);
-        assert_eq!(title.get_selected(), &Choice::Join(MapName::HouseDemo));
+        assert_eq!(title.get_selected(), &Choice::Join(MapName::LunarSurface));
         title.move_selection(-2);
         assert_eq!(title.get_selected(), &Choice::Quit);
     }

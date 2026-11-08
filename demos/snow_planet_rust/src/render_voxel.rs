@@ -21,9 +21,9 @@ use objc2_metal::{
     MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
-use crate::map::Blizzard;
 use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
+use crate::map::Blizzard;
 use crate::mesh::MeshModel;
 use crate::render_mesh::{
     FIRST_AVATAR_ROOT_CODE, GpuNode, GpuTriangle, MeshGpu, NO_MESH, get_first_materials,
@@ -654,10 +654,10 @@ impl VoxelFrame {
                 (world.sky_time_s % SNOW_CLOCK_PERIOD_S) as f32,
                 0.0,
             ],
-            blizzards: pack_blizzards(&world.blizzards, |b| {
-                [b.u_m, b.v_m, b.radius_m, b.height_m]
+            blizzards: pack_blizzards(&world.blizzards, |b| [b.u_m, b.v_m, b.radius_m, b.height_m]),
+            blizzard_air: pack_blizzards(&world.blizzards, |b| {
+                [b.fog_per_m, b.snow_per_m3, 0.0, 0.0]
             }),
-            blizzard_air: pack_blizzards(&world.blizzards, |b| [b.fog_per_m, b.snow_per_m3, 0.0, 0.0]),
         };
         assert_eq!(
             world.palette.len(),

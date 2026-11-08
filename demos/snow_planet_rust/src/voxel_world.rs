@@ -342,7 +342,6 @@ pub struct VoxelWorld {
     growing_hole: Option<(usize, VoxelWarp)>,
     pub blizzards: Vec<Blizzard>,
     pub is_snow: bool,
-    pub torus_periods_m: Option<[f64; 2]>,
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -864,7 +863,6 @@ impl VoxelWorld {
             clearance: Arc::new(ClearanceGrids::default()),
             blizzards: map.get_blizzards(),
             is_snow: map.appearance.style == SNOW_STYLE,
-            torus_periods_m: map.space.torus_periods_m,
         };
         world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
@@ -1806,7 +1804,11 @@ impl VoxelWorld {
                 }
                 if d.z.abs() > f64::EPSILON {
                     let t_top: f64 = (blizzard.height_m - pa.z) / d.z;
-                    (t0, t1) = if d.z > 0.0 { (t0, t1.min(t_top)) } else { (t0.max(t_top), t1) };
+                    (t0, t1) = if d.z > 0.0 {
+                        (t0, t1.min(t_top))
+                    } else {
+                        (t0.max(t_top), t1)
+                    };
                 } else if pa.z >= blizzard.height_m {
                     return 0.0;
                 }
@@ -3676,5 +3678,100 @@ mod tests {
                 ]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod blizzard_tests {
+    //! Tests of Snow Planet's blizzards against its map's numbers.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Point | in the white-out, in a squall, between them, above the white-out | `points_find_their_blizzard` |
+    //! | Walking | in the white-out (its `speed_frac` of the speed), outside (full speed) | `blizzards_slow_walking` |
+    //! | Laser | into the white-out (stops `shot_reach_m` in, hits nothing), away from every blizzard (hits what it's aimed at) | `lasers_stop_in_a_blizzard` |
+
+    use super::*;
+    use crate::map::{FLAT_CURVATURE_RADIUS_M, Map, get_map_folder};
+
+    const STEP_S: f64 = 1.0 / 60.0;
+    const WHITE_OUT_EDGE_U_M: f64 = -10.0;
+    const LASER_FROM_U_M: f64 = -20.0;
+    const LENGTH_TOLERANCE_M: f64 = 0.3;
+    const SPEED_TOLERANCE: f64 = 1e-9;
+
+    fn load_snow_planet() -> VoxelWorld {
+        let mut map: Map = Map::Load(&get_map_folder("snow_planet")).expect("the Snow Planet map");
+        map.curve_flat(FLAT_CURVATURE_RADIUS_M);
+        VoxelWorld::FromMap(&map).expect("a voxel world")
+    }
+
+    fn get_eye(world: &VoxelWorld, at_m: [f64; 2], h_m: Option<f64>) -> DVec4 {
+        VoxelPlayer::AtView(world, at_m, [at_m[0] + 1.0, at_m[1]], h_m, 0.0)
+            .get_camera_frame(world)
+            .col(AXIS_W)
+    }
+
+    #[test]
+    fn points_find_their_blizzard() {
+        let world: VoxelWorld = load_snow_planet();
+        assert_eq!(world.blizzards.len(), 3);
+        let name = |at_m: [f64; 2], h_m: Option<f64>| -> Option<String> {
+            world
+                .find_blizzard(get_eye(&world, at_m, h_m))
+                .map(|b| b.name.clone())
+        };
+        assert_eq!(name([0.0, 0.0], None).as_deref(), Some("white-out"));
+        assert_eq!(name([-14.0, 24.0], None).as_deref(), Some("north squall"));
+        assert_eq!(name([-30.0, 0.0], None), None);
+        assert_eq!(name([0.0, 0.0], Some(30.0)), None);
+    }
+
+    #[test]
+    fn blizzards_slow_walking() {
+        let world: VoxelWorld = load_snow_planet();
+        let forward: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        let walk_m_per_s: f64 = world.player.walk_m_per_s;
+        let speed_frac: f64 = world.blizzards[0].speed_frac;
+        for (at_m, expected_m_per_s) in [
+            ([-2.0, 0.0], walk_m_per_s * speed_frac),
+            ([-30.0, 0.0], walk_m_per_s),
+        ] {
+            let mut player: VoxelPlayer =
+                VoxelPlayer::AtView(&world, at_m, [at_m[0] + 1.0, at_m[1]], None, 0.0);
+            let report: StepReport = player.step(&world, &forward, STEP_S, 0);
+            assert!(
+                (report.forward_m_per_s - expected_m_per_s).abs() < SPEED_TOLERANCE,
+                "{at_m:?}: {}",
+                report.forward_m_per_s
+            );
+        }
+    }
+
+    #[test]
+    fn lasers_stop_in_a_blizzard() {
+        let world: VoxelWorld = load_snow_planet();
+        let reach_m: f64 = world.blizzards[0].shot_reach_m;
+        let into: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [LASER_FROM_U_M, 0.0], [0.0, 0.0], None, 0.0);
+        let shot: Shot = world.trace_laser(into.get_camera_frame(&world));
+        let expected_m: f64 = WHITE_OUT_EDGE_U_M - LASER_FROM_U_M + reach_m;
+        assert!(!shot.is_hit);
+        assert!(
+            (shot.length_m - expected_m).abs() < LENGTH_TOLERANCE_M,
+            "{} m",
+            shot.length_m
+        );
+        let away: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [LASER_FROM_U_M, 0.0], [-40.0, 0.0], None, 0.0);
+        let shot: Shot = world.trace_laser(away.get_camera_frame(&world));
+        assert!(
+            shot.is_hit || shot.length_m > expected_m + 1.0,
+            "{} m",
+            shot.length_m
+        );
     }
 }

@@ -202,6 +202,7 @@ mod tests {
         Regions {
             zones: Some(zones),
             boundary: None,
+            blizzards: Vec::new(),
             zone_walls: Some(MapZoneWalls {
                 height_m,
                 thickness_m: THICKNESS_M,
@@ -263,6 +264,7 @@ mod tests {
         let regions: Regions = Regions {
             zones: Some(vec![make_zone("blue", None, Some(-EDGE_U_M))]),
             boundary: None,
+            blizzards: Vec::new(),
             zone_walls: None,
         };
         assert_eq!(ZoneWalls::FromRegions(&regions).unwrap(), None);
