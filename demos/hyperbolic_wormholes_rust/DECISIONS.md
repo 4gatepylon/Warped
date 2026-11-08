@@ -515,6 +515,38 @@
 - **Rationale:** you asked for the bar to run out 4 times faster by shrinking it 4 times, and for more head bob;
   twice the depth is a first guess, easy to change (`BOB_WALK_M`, `BOB_SPRINT_M` in `src/voxel_world.rs`).
 
+### D49. No running on an empty energy bar
+
+- **Choice:** energy refills only while the player isn't holding `Shift` to move. Before, an empty bar refilled a
+  little in the very next frame, so holding `Shift` switched between running and walking every frame and the player
+  kept running at about two thirds of the sprint speed.
+- **Alternatives:** letting the bar refill while `Shift` is held but requiring some energy (say a tenth of the bar)
+  before running again.
+- **Rationale:** you asked that a player can run only while there is energy.
+
+### D50. No shooting in the air
+
+- **Choice:** on voxel maps a player can't shoot while jumping or falling (in the air and not flying), as while
+  running (D46): clicks don't shoot, and a shot in flight stops when the player leaves the ground. On the house,
+  `Space` is a jetpack rather than a jump, and shooting while on it is unchanged.
+- **Alternatives:** allowing a shot started on the ground to finish in the air; also blocking shots on the house's
+  jetpack.
+- **Rationale:** you asked that players can't shoot while jumping.
+
+### D51. A low, quick jump
+
+- **Choice:** on voxel maps a jump rises 1.25 m (enough to get onto a 1 m block, D43) and lands in a third of the
+  map's jump time: 0.58 s on Lunar Surface, against the level's 1.73 s and D45's 1.0 s. Gravity follows from those
+  two numbers, about 30 m/s² (five times the level's 6 m/s², up from D45's 18), with a jump speed of 8.7 m/s, so
+  falls are faster too. At 60 frames a second a jump peaks at about 1.18 m, as each step applies gravity before it
+  moves the player.
+- **Alternatives:** three times the level's gravity with the level's jump speed (the same 0.58 s, but a jump
+  would rise only 0.75 m, too low for a block); three times D45's gravity, 54 m/s², with a 1.25 m jump (0.43 s,
+  a hop).
+- **Rationale:** you found D45's jump too long (it still rose 2.25 m and lasted 1 s) and asked for gravity three
+  times as strong in the sense that a jump is snappy and falls are quick; a jump three times shorter than the
+  level's is that, and 1.25 m keeps jumping onto blocks (the same jump height as Minecraft's, for 1 m blocks).
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

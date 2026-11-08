@@ -1509,6 +1509,7 @@ struct Session {
     is_laser_on: bool,
     shot_time_s: f64,
     is_running: bool,
+    is_jumping: bool,
     gun_phase_rad: f64,
     run_pose_frac: f64,
     is_captured: bool,
@@ -1658,6 +1659,7 @@ impl Session {
             is_laser_on: false,
             shot_time_s: 0.0,
             is_running: false,
+            is_jumping: false,
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
             is_captured: false,
@@ -1729,7 +1731,7 @@ impl Session {
             Event::MouseButtonDown {
                 mouse_btn: MouseButton::Left,
                 ..
-            } if !self.is_running
+            } if self.can_shoot()
                 && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated) =>
             {
                 self.shot_time_s = SHOT_DURATION_S;
@@ -1816,17 +1818,26 @@ impl Session {
         self.hud_time_s += dt_s;
     }
 
-    /// `is_firing` says whether this player's laser is on: toggled on with L, or a shot fired by a
-    /// click in the last `SHOT_DURATION_S`, and not running (no one shoots while running).
+    /// `is_firing` says whether this player's laser is on: on for a scripted route, or a shot fired
+    /// by a click in the last `SHOT_DURATION_S`, and only while this player can shoot.
     ///
     /// Example: `let is_firing = self.is_firing();`
     fn is_firing(&self) -> bool {
-        (self.is_laser_on || self.shot_time_s > 0.0) && !self.is_running
+        (self.is_laser_on || self.shot_time_s > 0.0) && self.can_shoot()
     }
 
-    /// `update_gun` notes whether this player runs (sprints while moving), dropping a shot in flight
-    /// if so, and moves the gun: its step phase while walking or running on the ground, and its
-    /// pose toward jogging while running and back to aiming otherwise.
+    /// `can_shoot` says whether this player may shoot: not while running, and not while jumping or
+    /// falling on a voxel map.
+    ///
+    /// Example: `if self.can_shoot() { ... }`
+    fn can_shoot(&self) -> bool {
+        !self.is_running && !self.is_jumping
+    }
+
+    /// `update_gun` notes whether this player runs (sprints while moving) or jumps (is in the air
+    /// on a voxel map, not flying), dropping a shot in flight if either, and moves the gun: its
+    /// step phase while walking or running on the ground, and its pose toward jogging while
+    /// running and back to aiming otherwise.
     ///
     /// Example: `self.update_gun(&input, dt_s);`
     fn update_gun(&mut self, input: &Input, dt_s: f64) {
@@ -1839,7 +1850,11 @@ impl Session {
             None => (input.sprint && is_moving, self.player.is_on_ground),
         };
         self.is_running = is_running;
-        if is_running {
+        self.is_jumping = self
+            .voxel
+            .as_ref()
+            .is_some_and(|voxel| !voxel.player.is_on_ground && !voxel.player.is_flying);
+        if !self.can_shoot() {
             self.shot_time_s = 0.0;
         }
         if is_moving && is_on_ground {

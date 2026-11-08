@@ -17,7 +17,7 @@ make run-demo RENDERER=cpu
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
   you through.
-- Click (once the mouse is captured) to fire a laser shot for a quarter of a second.
+- Click (once the mouse is captured) to fire a laser shot for a quarter of a second; not while running, nor in the air on Lunar Surface.
   You can't shoot while running (sprinting while moving): the gun in the bottom right drops into a jogging pose, and
   points ahead again when you walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
@@ -45,7 +45,7 @@ cargo run --release -- --map lunar-surface --view black_hole
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
   steps, lighting with sun shadows, lamps, ground, stars and planet, so it looks like the level, with the house's
   adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
-  flying, the laser and multiplayer follow the level's rules there (18 m/s² gravity (three times the level's), walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 15 s, a head bob, jumping onto blocks with `Space`, moving
+  flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 15 s, a head bob, jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
