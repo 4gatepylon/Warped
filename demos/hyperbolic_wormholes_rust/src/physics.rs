@@ -3,7 +3,7 @@
 //! It also aims through a mouth and traces the laser, whose path is a light ray.
 //!
 //! Interface: `Player`, `Input`, `update_player`, `look_around`, `level_out`, `aim_through_mouth`,
-//! `find_aimed_mouth`, `trace_laser`, `LaserReport`.
+//! `trace_laser`, `LaserReport`.
 //!
 //! Example: `let messages = update_player(&world, &mut player, &input, 1.0 / 60.0);`
 //!
@@ -44,7 +44,6 @@ const AIM_MAX_TURN: f64 = 0.2;
 const AIM_MAX_STEP_COUNT: usize = 4000;
 const AIM_MAX_TRAVEL_M: f64 = 120.0;
 const AIM_GIVE_UP_PAST_CLOSEST_M: f64 = 1.0;
-const SHADOW_PER_HORIZON: f64 = 2.598_076_211_353_316;
 const HAND_OFFSET_M: DVec3 = DVec3::new(0.25, -0.22, -0.35);
 const LASER_FOCUS_M: f64 = 10.0;
 const LASER_MAX_M: f64 = 150.0;
@@ -619,32 +618,6 @@ pub fn aim_through_mouth(world: &World, frame: &mut DMat4, target: &Mouth) {
     *frame = orthonormalize_frame(
         *frame * make_rotation_between(DVec3::NEG_Z, direction_of(alpha, beta).normalize()),
     );
-}
-
-/// `find_aimed_mouth` finds the mouth whose dark disk is closest to the crosshair: the angle to
-/// its centre less the disk's apparent radius is smallest.
-///
-/// Example: `if let Some(k) = find_aimed_mouth(&world, player.frame) { aim(k); }`
-pub fn find_aimed_mouth(world: &World, frame: DMat4) -> Option<usize> {
-    let x: DVec4 = frame.col(AXIS_W);
-    let mut best: Option<(usize, f64)> = None;
-    for (k, mouth) in world.mouths.iter().enumerate() {
-        let distance: f64 = get_distance(x, mouth.center);
-        if distance < 1e-9 {
-            continue;
-        }
-        let local: DVec3 =
-            get_local_direction(frame, normalize_tangent(x, mouth.center)).normalize();
-        let angle_rad: f64 = (-local.z).clamp(-1.0, 1.0).acos();
-        let disk_rad: f64 = (SHADOW_PER_HORIZON * world.get_throat_m()
-            / crate::world::THROAT_PER_HORIZON
-            / (world.curvature_radius_m * distance.sinh()))
-        .atan();
-        if best.is_none_or(|(_, score)| angle_rad - disk_rad < score) {
-            best = Some((k, angle_rad - disk_rad));
-        }
-    }
-    best.map(|(k, _)| k)
 }
 
 /// `trace_laser` traces the laser from the hand toward the point `LASER_FOCUS_M` straight ahead of

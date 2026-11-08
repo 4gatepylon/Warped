@@ -1508,7 +1508,6 @@ struct Session {
     last_output_px: (u32, u32),
     is_laser_on: bool,
     shot_time_s: f64,
-    is_auto_forward: bool,
     is_running: bool,
     gun_phase_rad: f64,
     run_pose_frac: f64,
@@ -1658,7 +1657,6 @@ impl Session {
             last_output_px: (0, 0),
             is_laser_on: false,
             shot_time_s: 0.0,
-            is_auto_forward: false,
             is_running: false,
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
@@ -1681,8 +1679,8 @@ impl Session {
 
     /// `handle_event` reacts to one window event and returns false when the player quits: Esc
     /// releases the mouse (or quits if it is free), a click captures it (and once captured, a left
-    /// click fires a laser shot for `SHOT_DURATION_S`), the mouse looks, and H, L, F, R, G, - and =
-    /// toggle flying, the laser, moving forward, respawn, aim and render scale.
+    /// click fires a laser shot for `SHOT_DURATION_S`), the mouse looks, R respawns, and - and =
+    /// change the render scale.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
     fn handle_event(
@@ -1708,31 +1706,11 @@ impl Session {
                 repeat: false,
                 ..
             } => match key {
-                Keycode::H if self.voxel.is_some() => {
-                    let voxel: &mut VoxelState = self.voxel.as_mut().expect("checked by the guard");
-                    voxel.player.is_flying = !voxel.player.is_flying;
-                    voxel.player.vertical_m_per_s = 0.0;
-                }
                 Keycode::R if self.voxel.is_some() => {
                     let voxel: &mut VoxelState = self.voxel.as_mut().expect("checked by the guard");
                     voxel.player = VoxelPlayer::AtSpawn(&voxel.world, voxel.spawn_index);
                 }
-                Keycode::H => {
-                    self.player.is_flying = !self.player.is_flying;
-                    self.player.velocity = glam::DVec4::ZERO;
-                }
-                Keycode::L => self.is_laser_on = !self.is_laser_on,
-                Keycode::F => self.is_auto_forward = !self.is_auto_forward,
                 Keycode::R => self.player = Player::AtSpawn(&self.world),
-                Keycode::G => {
-                    if let Some(k) = physics::find_aimed_mouth(&self.world, self.player.frame) {
-                        physics::aim_through_mouth(
-                            &self.world,
-                            &mut self.player.frame,
-                            &self.world.mouths[k],
-                        );
-                    }
-                }
                 Keycode::Minus => {
                     self.is_auto_scale = false;
                     self.render_scale =
@@ -1801,12 +1779,12 @@ impl Session {
             return;
         }
         let input: Input = Input {
-            forward: keys.is_scancode_pressed(Scancode::W) || self.is_auto_forward,
+            forward: keys.is_scancode_pressed(Scancode::W),
             back: keys.is_scancode_pressed(Scancode::S),
             left: keys.is_scancode_pressed(Scancode::A),
             right: keys.is_scancode_pressed(Scancode::D),
-            up: keys.is_scancode_pressed(Scancode::Space) || keys.is_scancode_pressed(Scancode::E),
-            down: keys.is_scancode_pressed(Scancode::Q),
+            up: keys.is_scancode_pressed(Scancode::Space),
+            down: false,
             sprint: keys.is_scancode_pressed(Scancode::LShift)
                 || keys.is_scancode_pressed(Scancode::RShift),
         };
@@ -2287,7 +2265,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Space jump/jetpack, H fly, click shoot (not while running), L laser, G aim, R respawn, -/= scale, Esc release".to_string()
+            "WASD move, Shift run, Space jump, click shoot (not while running), R respawn, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
