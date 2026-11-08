@@ -21,6 +21,7 @@
 mod app_bundle;
 mod avatar_animation;
 mod avatar_model;
+mod bench;
 mod black_hole_growth;
 mod credits;
 mod dust;
@@ -37,9 +38,11 @@ mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
+mod play;
 mod render_mesh;
 mod render_metal;
 mod render_voxel;
+mod run_folder;
 mod settings;
 mod shapes;
 mod shot_noise;
@@ -62,26 +65,25 @@ use std::process::{Child, Command, ExitCode};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
 use glam::{DMat4, DVec4, EulerRot, Mat3, Vec3};
-use objc2_core_foundation::CGSize;
-use objc2_metal::MTLPixelFormat;
-use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
 use sdl3::pixels::{Color, PixelFormat};
-use sdl3::render::Texture;
-use serde_json::{Value, json};
+use serde_json::json;
 
+use bench::{VoxelView, bench_views, make_voxel_bench_views};
 use black_hole_growth::BlackHoleGrowth;
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, make_boost, make_rotation};
 use key_bindings::{Action, Control};
 use map::MapName;
 use physics::Input;
+use play::{draw_text_overlay, play};
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
+use run_folder::{format_utc_now, make_run_folder, save_png};
 use settings::{PerPlayerSettings, ServerSettings};
 use thrown_wormholes::{
     HIT_FLASH_COLOR, Marker, MouthPlace, PlayerWormholes, ThrownWormholes, fly_throw,
@@ -114,12 +116,8 @@ const WARP_TOUR_FRAMES_PER_WARP: usize = 600;
 const WARP_TOUR_NEAR_PER_REACH: f64 = 0.1;
 const WARP_TOUR_FAR_PER_REACH: f64 = 0.8;
 const FRAME_BUDGET_MS: f64 = 1000.0 / 60.0;
-const HUD_TEXT_SCALE: f32 = 2.0;
-const HUD_LINE_PX: f32 = 10.0;
-const HUD_MARGIN_PX: f32 = 4.0;
 const WINDOW_TITLE: &str = "Hyperbolic wormholes (Rust)";
 const MS_PER_S: f64 = 1000.0;
-const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
 const MAX_BLUESHIFT_FRAC: f64 = 1.25;
 const WAND_RECOIL_M: f32 = 0.035;
@@ -174,9 +172,6 @@ const ENERGY_PULSE_RGB: [f32; 3] = [0.8, 0.94, 1.0];
 const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
 const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
 const DISABLE_BAR_RGB: [f32; 3] = [1.0, 0.85, 0.3];
-const LOADING_DIM_FRAC: f32 = 1.0;
-const LOADING_TITLE: &str = "LOADING";
-const LOADING_DONE_LABEL: &str = "ready";
 const PERCENT_PER_FRAC: f64 = 100.0;
 const GUN_POSE_PER_S: f64 = 6.0;
 const WAND_JOG_CENTER_M: [f32; 3] = [0.22, -0.22, -0.34];
@@ -192,7 +187,6 @@ const WAND_BLUE_TIP_COLOR: [f32; 4] = [0.35, 0.68, 1.0, 1.0];
 const WAND_RED_TIP_COLOR: [f32; 4] = [1.0, 0.28, 0.14, 1.0];
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
-const SECONDS_PER_DAY: u64 = 86_400;
 const DISCOVERY_TIMEOUT_S: u64 = 5;
 const JOIN_AUTO: &str = "auto";
 const SERVER_START_S: f64 = 0.3;
@@ -904,145 +898,6 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
     Ok(())
 }
 
-/// `VoxelView` is a named viewpoint on a voxel map, from the Lunar Surface level's own list: where
-/// the eye stands (Fermi coordinates), what it faces, its height when flying and its pitch.
-struct VoxelView {
-    name: &'static str,
-    at_m: [f64; 2],
-    target_m: [f64; 2],
-    h_m: Option<f64>,
-    pitch_rad: f64,
-    is_laser_on: bool,
-}
-
-/// `make_voxel_bench_views` gives the voxel benchmark's viewpoints: the Lunar Surface level's
-/// views, and the laser fired into the wormhole from its viewpoint.
-///
-/// Example: `let views = make_voxel_bench_views();`
-fn make_voxel_bench_views() -> Vec<VoxelView> {
-    let view = |name, at_m, target_m, h_m, pitch_rad| VoxelView {
-        name,
-        at_m,
-        target_m,
-        h_m,
-        pitch_rad,
-        is_laser_on: false,
-    };
-    vec![
-        view("blue_spawn", [-107.0, 0.0], [0.0, 0.0], None, 0.0),
-        view("red_spawn", [112.0, 0.0], [0.0, 0.0], None, 0.0),
-        view("overview", [0.0, 0.0], [0.0, -10.0], Some(46.0), -1.55),
-        view("middle", [-27.0, 0.0], [40.0, 0.0], None, 0.1),
-        view("black_hole", [-12.0, 4.0], [0.0, 0.0], Some(19.0), -0.42),
-        view("wormhole", [-22.0, 40.0], [-14.0, 40.0], None, 0.0),
-        view("wormhole_exit", [81.0, 26.0], [78.0, 30.0], None, 0.0),
-        view("red_pylon", [82.0, -1.0], [94.0, 6.0], None, 0.05),
-        view("ridge", [10.0, 58.5], [45.0, -5.0], None, -0.12),
-        view("einstein_ring", [-10.0, -3.0], [0.0, 0.0], Some(11.0), 0.15),
-        view("overlook", [-85.0, 0.0], [0.0, 0.0], Some(28.0), -0.7),
-        view("habitat_row", [-46.0, -36.0], [0.0, -42.0], None, 0.0),
-        view("crater_wall", [-30.0, -30.0], [-60.0, -90.0], None, 0.1),
-        view("red_hangar", [100.0, 9.0], [121.0, 0.0], None, 0.1),
-        view("blue_kazemat", [-100.0, 9.0], [-114.0, 0.0], None, 0.0),
-        view(
-            "blue_hesco_rows",
-            [-40.0, 4.0],
-            [-80.0, 0.0],
-            Some(9.0),
-            -0.25,
-        ),
-        view("field_bunker", [-18.0, -30.0], [-30.0, -40.0], None, 0.0),
-        view(
-            "field_bunker_above",
-            [-22.0, -46.0],
-            [-30.0, -40.0],
-            Some(14.0),
-            -0.7,
-        ),
-        view("hesco_barrier", [46.0, -8.0], [56.0, -15.0], None, 0.0),
-        view("beacon", [87.0, 2.0], [94.0, 6.0], None, 0.2),
-        VoxelView {
-            is_laser_on: true,
-            ..view(
-                "laser_into_wormhole",
-                [-22.0, 40.5],
-                [-14.0, 40.0],
-                None,
-                0.0,
-            )
-        },
-    ]
-}
-
-/// `bench_voxel_views` renders a voxel map's viewpoints without a window, timing each.
-///
-/// Example: `bench_voxel_views(&arguments, renderer, &world)?;`
-fn bench_voxel_views(
-    arguments: &Arguments,
-    mut renderer: Box<dyn Renderer>,
-    world: &VoxelWorld,
-) -> Result<()> {
-    let mut grown_world: VoxelWorld = world.clone();
-    BlackHoleGrowth::New(arguments.black_hole_strength).update(&mut grown_world, 0, 0.0);
-    let world: &VoxelWorld = &grown_world;
-    let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
-    let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
-    let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
-    let mut pixels: Vec<u8> = vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL];
-    let views: Vec<VoxelView> = make_voxel_bench_views();
-    eprintln!(
-        "Benchmarking {} views of {} at {}x{} with the {} renderer...",
-        views.len(),
-        world.name,
-        size_px.0,
-        size_px.1,
-        renderer.name()
-    );
-    let mut results: Vec<Value> = Vec::new();
-    for view in views {
-        let player: VoxelPlayer =
-            VoxelPlayer::AtView(world, view.at_m, view.target_m, view.h_m, view.pitch_rad);
-        let camera: DMat4 = player.get_camera_frame(world);
-        let shot: Option<voxel_world::Shot> = view.is_laser_on.then(|| world.trace_laser(camera));
-        let beams: Vec<render_voxel::LaserBeam> = shot
-            .iter()
-            .map(|s| render_voxel::LaserBeam {
-                segments: s.segments.clone(),
-                team: 0,
-                is_rifle: false,
-                speckle_frac: 0.0,
-            })
-            .collect();
-        let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
-        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
-        renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
-        let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
-        for _ in 0..arguments.frame_count {
-            let start: Instant = Instant::now();
-            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
-            renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
-            times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
-            gpu_times_ms.extend(renderer.gpu_ms());
-        }
-        times_ms.sort_by(f64::total_cmp);
-        gpu_times_ms.sort_by(f64::total_cmp);
-        save_png(
-            &folder.join(format!("{}.png", view.name)),
-            &pixels,
-            size_px.0,
-            size_px.1,
-        )?;
-        results.push(json!({
-            "view": view.name,
-            "median_ms": times_ms[times_ms.len() / 2],
-            "fastest_ms": times_ms[0],
-            "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
-            "laser": shot.as_ref().map(|s| multiplayer::describe_shot(world, s)),
-        }));
-    }
-    report_bench(arguments, &folder, renderer.name(), render_px, results)
-}
-
 /// `run_bot` plays as a bot without a window for `--exit-after-s` seconds (see
 /// `multiplayer::run_bot`), saving its view at each hit under `.artifacts/bot/<run_id>/`, and
 /// prints how many players it hit and how often it was hit.
@@ -1090,146 +945,6 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         );
     } else {
         println!("The bot hit {hit_count} players and was hit {eliminated_count} times.");
-        println!("Run folder: {}", folder.display());
-    }
-    Ok(())
-}
-
-/// `make_run_folder` creates `.artifacts/<script>/<run_id>/` in the crate folder, with
-/// `command.txt` holding the command line and the git commit, and returns its path.
-///
-/// Example: `let folder = make_run_folder("bench_views", None)?;`
-fn make_run_folder(script: &str, label: Option<&str>) -> Result<PathBuf> {
-    let crate_folder: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut run_id: String = format_utc_now();
-    if let Some(label) = label {
-        run_id = format!("{run_id}-{label}");
-    }
-    let folder: PathBuf = crate_folder.join(".artifacts").join(script).join(&run_id);
-    if folder.exists() {
-        return Err(format!(
-            "run folder {} already exists; wait a second or pass another --label",
-            folder.display()
-        )
-        .into());
-    }
-    fs::create_dir_all(&folder)?;
-    let commit: String = std::process::Command::new("git")
-        .args(["describe", "--always", "--dirty"])
-        .current_dir(crate_folder)
-        .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())?;
-    let command: String = std::env::args().collect::<Vec<String>>().join(" ");
-    fs::write(
-        folder.join("command.txt"),
-        format!("{command}\ncommit: {commit}\n"),
-    )?;
-    Ok(folder)
-}
-
-/// `format_utc_now` formats the current UTC time as `YYYYMMDD-HHMMSS` (civil-from-days, Howard
-/// Hinnant's algorithm).
-///
-/// Example: `let run_id = format_utc_now();`
-fn format_utc_now() -> String {
-    let seconds: u64 = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("the clock is after 1970")
-        .as_secs();
-    let (days, time_of_day) = (
-        (seconds / SECONDS_PER_DAY) as i64,
-        seconds % SECONDS_PER_DAY,
-    );
-    let z: i64 = days + 719_468;
-    let era: i64 = z.div_euclid(146_097);
-    let day_of_era: i64 = z - era * 146_097;
-    let year_of_era: i64 =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year: i64 = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index: i64 = (5 * day_of_year + 2) / 153;
-    let day: i64 = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month: i64 = if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    };
-    let year: i64 = year_of_era + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}{month:02}{day:02}-{:02}{:02}{:02}",
-        time_of_day / 3600,
-        time_of_day / 60 % 60,
-        time_of_day % 60
-    )
-}
-
-/// `save_png` writes an RGBA image as a PNG file.
-///
-/// Example: `save_png(&folder.join("spawn.png"), &pixels, 1280, 800)?;`
-fn save_png(path: &Path, pixels: &[u8], width_px: u32, height_px: u32) -> Result<()> {
-    let file: fs::File = fs::File::create(path)?;
-    let mut encoder: png::Encoder<std::io::BufWriter<fs::File>> =
-        png::Encoder::new(std::io::BufWriter::new(file), width_px, height_px);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    encoder.write_header()?.write_image_data(pixels)?;
-    Ok(())
-}
-
-/// `bench_views` renders each benchmark view `--frame-count` times without a window, reports the
-/// median and fastest frame times, and saves each view as a PNG in the run folder.
-///
-/// Example: `bench_views(&arguments, renderer)?;`
-fn bench_views(arguments: &Arguments, renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = load_map(arguments.map, &load_settings(arguments)?)?;
-    bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?)
-}
-
-/// `report_bench` writes a benchmark's results to `results.json` in its run folder and prints them
-/// (or `--json`).
-///
-/// Example: `report_bench(&arguments, &folder, "metal", (1280, 800), results)?;`
-fn report_bench(
-    arguments: &Arguments,
-    folder: &Path,
-    renderer_name: &str,
-    render_px: (u32, u32),
-    results: Vec<Value>,
-) -> Result<()> {
-    let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
-    let summary: Value = json!({
-        "run_folder": folder.display().to_string(),
-        "renderer": renderer_name,
-        "sampling": get_sampling_name(arguments),
-        "width_px": size_px.0,
-        "height_px": size_px.1,
-        "render_width_px": render_px.0,
-        "render_height_px": render_px.1,
-        "frame_count": arguments.frame_count,
-        "views": results,
-    });
-    fs::write(
-        folder.join("results.json"),
-        serde_json::to_string_pretty(&summary)?,
-    )?;
-    if arguments.json {
-        println!("{summary}");
-    } else {
-        println!(
-            "{:<18} {:>10} {:>10} {:>10}  laser",
-            "view", "median ms", "fastest ms", "GPU ms"
-        );
-        for view in &results {
-            println!(
-                "{:<18} {:>10.1} {:>10.1} {:>10}  {}",
-                view["view"].as_str().unwrap_or_default(),
-                view["median_ms"].as_f64().unwrap_or_default(),
-                view["fastest_ms"].as_f64().unwrap_or_default(),
-                view["median_gpu_ms"]
-                    .as_f64()
-                    .map_or("-".to_string(), |ms| format!("{ms:.1}")),
-                view["laser"].as_str().unwrap_or("-"),
-            );
-        }
         println!("Run folder: {}", folder.display());
     }
     Ok(())
@@ -3357,21 +3072,6 @@ fn scale_size(size_px: (u32, u32), scale: f64) -> (u32, u32) {
     )
 }
 
-/// `play` opens the window and runs the demo until it is closed, presenting with Metal straight
-/// to the window's layer or, for the CPU, through SDL's renderer.
-///
-/// Example: `play(&arguments, renderer)?;`
-fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let sdl: sdl3::Sdl = sdl3::init()?;
-    let video: sdl3::VideoSubsystem = sdl.video()?;
-    let mut session: Session = Session::New(arguments)?;
-    let window_size: (u32, u32) = (arguments.width_px, arguments.height_px);
-    match renderer.as_metal() {
-        Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
-        None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
-    }
-}
-
 /// `get_crosshair_rects` gives the crosshair in the middle of a window of `window_px` pixels: four
 /// arms `CROSSHAIR_ARM_FRAC` long, `CROSSHAIR_GAP_FRAC` from the middle, in fractions of the window's
 /// height so they look the same at any size.
@@ -3716,340 +3416,6 @@ fn make_text_mask(text: &OverlayText) -> Result<Vec<u8>> {
             })
             .collect()
     }))
-}
-
-/// `draw_overlay_rects` draws the HUD's rectangles (`Session::get_overlay_rects`) on the canvas,
-/// for the SDL-renderer window: flat boxes in their colours, without the Metal overlay's style
-/// (slant, outline, gloss, glow) or pulses.
-///
-/// Example: `draw_overlay_rects(&mut canvas, &session.get_overlay_rects())?;`
-fn draw_overlay_rects(
-    canvas: &mut sdl3::render::WindowCanvas,
-    rects: &[render_metal::OverlayRect],
-) -> Result<()> {
-    let (width, height) = canvas.window().size_in_pixels();
-    canvas.set_scale(1.0, 1.0)?;
-    canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
-    for rect in rects {
-        let [r, g, b, a] = rect.color.map(|c| (c * 255.0) as u8);
-        canvas.set_draw_color(Color::RGBA(r, g, b, a));
-        canvas.fill_rect(sdl3::render::FRect::new(
-            rect.min_frac[0] * width as f32,
-            rect.min_frac[1] * height as f32,
-            (rect.max_frac[0] - rect.min_frac[0]) * width as f32,
-            (rect.max_frac[1] - rect.min_frac[1]) * height as f32,
-        ))?;
-    }
-    Ok(())
-}
-
-/// `draw_text_overlay` dims the canvas and draws `text` in its middle, scaled like the Metal
-/// overlay's mask (`text.height_frac` of the height, at most `OVERLAY_MAX_WIDTH_FRAC` of the
-/// width), for the SDL-renderer window.
-///
-/// Example: `draw_text_overlay(&mut canvas, &text)?;`
-fn draw_text_overlay(canvas: &mut sdl3::render::WindowCanvas, text: &OverlayText) -> Result<()> {
-    let (width, height) = canvas.window().size_in_pixels();
-    let (mask_width, mask_height) = text.mask_px;
-    let scale: f32 = ((height as f32 * text.height_frac) as u32 / mask_height)
-        .min((f64::from(width) * render_metal::OVERLAY_MAX_WIDTH_FRAC) as u32 / mask_width)
-        .max(1) as f32;
-    canvas.set_scale(1.0, 1.0)?;
-    canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
-    canvas.set_draw_color(Color::RGBA(0, 0, 0, (text.dim_frac * 255.0) as u8));
-    canvas.fill_rect(None)?;
-    canvas.set_scale(scale, scale)?;
-    let left: f32 = (width as f32 / scale - mask_width as f32) / 2.0;
-    let top: f32 = (height as f32 / scale - mask_height as f32) / 2.0;
-    if let Some(picture) = &text.picture {
-        let creator = canvas.texture_creator();
-        let mut texture = creator.create_texture_static(
-            PixelFormat::RGBA32,
-            picture.size_px.0,
-            picture.size_px.1,
-        )?;
-        texture.update(
-            None,
-            &picture.pixels,
-            picture.size_px.0 as usize * BYTES_PER_PIXEL,
-        )?;
-        let [min_x, min_y] = picture.min_mask_px.map(|n| n as f32);
-        let [max_x, max_y] = picture.max_excl_mask_px.map(|n| n as f32);
-        canvas.copy(
-            &texture,
-            None,
-            sdl3::render::FRect::new(left + min_x, top + min_y, max_x - min_x, max_y - min_y),
-        )?;
-    }
-    for (line, (x, y), is_highlighted) in get_text_positions(text) {
-        canvas.set_draw_color(if is_highlighted {
-            Color::RGB(255, 90, 80)
-        } else {
-            HUD_COLOR
-        });
-        canvas.draw_debug_text(line.as_str(), (left + x, top + y))?;
-    }
-    Ok(())
-}
-
-/// `play_on_canvas` runs the window through SDL's renderer: each frame is drawn into pixels, put
-/// in a texture scaled to the window, and the HUD is drawn over it with SDL's built-in text.
-///
-/// Example: `play_on_canvas(&sdl, &video, (1280, 800), &mut session, renderer.as_mut())?;`
-fn play_on_canvas(
-    sdl: &sdl3::Sdl,
-    video: &sdl3::VideoSubsystem,
-    window_size: (u32, u32),
-    session: &mut Session,
-    renderer: &mut dyn Renderer,
-) -> Result<()> {
-    let window: sdl3::video::Window = video
-        .window(WINDOW_TITLE, window_size.0, window_size.1)
-        .high_pixel_density()
-        .resizable()
-        .position_centered()
-        .build()?;
-    let mouse: sdl3::mouse::MouseUtil = sdl.mouse();
-    let mut canvas: sdl3::render::WindowCanvas = window.into_canvas();
-    let texture_creator: sdl3::render::TextureCreator<sdl3::video::WindowContext> =
-        canvas.texture_creator();
-    let mut texture: Option<(Texture, (u32, u32))> = None;
-    let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
-    let mut pixels: Vec<u8> = Vec::new();
-    loop {
-        for event in event_pump.poll_iter() {
-            if !session.handle_event(event, canvas.window(), &mouse) {
-                return Ok(());
-            }
-        }
-        if session.is_finished() {
-            return Ok(());
-        }
-        session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;
-        let render_px: (u32, u32) = session.get_render_size(canvas.window().size_in_pixels());
-        pixels.resize(
-            render_px.0 as usize * render_px.1 as usize * BYTES_PER_PIXEL,
-            0,
-        );
-        let render_start: Instant = Instant::now();
-        let mut packed: PackedFrame = session.pack(render_px);
-        packed.zoom_in(session.get_zoom());
-        renderer.render(packed.as_frame_data(), render_px, &mut pixels)?;
-        session.record_frame(
-            render_start.elapsed().as_secs_f64() * MS_PER_S,
-            renderer.gpu_ms(),
-        );
-        if texture.as_ref().is_none_or(|(_, size)| *size != render_px) {
-            texture = Some((
-                texture_creator.create_texture_streaming(
-                    PixelFormat::RGBA32,
-                    render_px.0,
-                    render_px.1,
-                )?,
-                render_px,
-            ));
-        }
-        let (current_texture, _) = texture.as_mut().expect("the texture was just made");
-        current_texture.update(None, &pixels, render_px.0 as usize * BYTES_PER_PIXEL)?;
-        canvas.set_scale(1.0, 1.0)?;
-        canvas.copy(current_texture, None, None)?;
-        let density: f32 = canvas.window().pixel_density();
-        canvas.set_scale(density * HUD_TEXT_SCALE, density * HUD_TEXT_SCALE)?;
-        canvas.set_draw_color(HUD_COLOR);
-        let window_px: (u32, u32) = canvas.window().size_in_pixels();
-        for (i, line) in session
-            .get_hud_lines(renderer.name(), render_px, window_px)
-            .iter()
-            .enumerate()
-        {
-            canvas.draw_debug_text(
-                line.as_str(),
-                (HUD_MARGIN_PX, HUD_MARGIN_PX + HUD_LINE_PX * i as f32),
-            )?;
-        }
-        draw_overlay_rects(&mut canvas, &session.get_overlay_rects())?;
-        if let Some(text) = session.get_overlay_text() {
-            draw_text_overlay(&mut canvas, &text)?;
-        }
-        canvas.present();
-    }
-}
-
-/// `draw_loading_screen` draws the loading screen on a window's layer: black, the banner
-/// `LOADING_TITLE` over `label` (what is loading), and a bar in the pylon-disabling bar's place and
-/// look, filled to `done_frac`.
-///
-/// Example: `draw_loading_screen(metal, layer, 0.5, "revolver")?;`
-fn draw_loading_screen(
-    metal: &mut render_metal::MetalRenderer,
-    layer: &CAMetalLayer,
-    done_frac: f32,
-    label: &str,
-) -> Result<()> {
-    let text: OverlayText = OverlayText {
-        lines: vec![
-            (LOADING_TITLE.to_string(), true),
-            (label.to_string(), false),
-        ],
-        mask_px: DEATH_MASK_PX,
-        height_frac: BANNER_HEIGHT_FRAC,
-        is_centered: true,
-        dim_frac: LOADING_DIM_FRAC,
-        picture: None,
-    };
-    let mask: Vec<u8> = make_text_mask(&text)?;
-    let rects: Vec<render_metal::OverlayRect> = hud_bars::make_progress_bar(
-        DISABLE_BAR_MIN_FRAC,
-        DISABLE_BAR_SIZE_FRAC,
-        done_frac,
-        DISABLE_BAR_RGB,
-    );
-    metal.render_overlay_to_layer(
-        layer,
-        &render_metal::Overlay {
-            dim_frac: text.dim_frac,
-            mask: Some((&mask, (text.mask_px.0 as usize, text.mask_px.1 as usize))),
-            rects: &rects,
-            wand: None,
-            blur_frac: 0.0,
-            hit: render_metal::HitEffect::default(),
-            mask_height_frac: text.height_frac,
-            picture: None,
-            stretch_frac: 0.0,
-            minimap: None,
-            blueshift_frac: 0.0,
-        },
-    )?;
-    Ok(())
-}
-
-/// `play_on_layer` runs the window with Metal presenting straight to the window's `CAMetalLayer`:
-/// no pixels go through the CPU, MetalFX upscales the ray-traced image to the window's size, and
-/// the HUD is shown in the window's title, since SDL's renderer can't draw on the same layer.
-///
-/// Example: `play_on_layer(&sdl, &video, (1280, 800), &mut session, metal)?;`
-fn play_on_layer(
-    sdl: &sdl3::Sdl,
-    video: &sdl3::VideoSubsystem,
-    window_size: (u32, u32),
-    session: &mut Session,
-    metal: &mut render_metal::MetalRenderer,
-) -> Result<()> {
-    let mut builder: sdl3::video::WindowBuilder =
-        video.window(WINDOW_TITLE, window_size.0, window_size.1);
-    builder.high_pixel_density().resizable().position_centered();
-    let flags: u32 = builder.window_flags() | sdl3::sys::video::SDL_WINDOW_METAL.0 as u32;
-    let mut window: sdl3::video::Window = builder.set_window_flags(flags).build()?;
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
-    let view: sdl3::sys::metal::SDL_MetalView =
-        unsafe { sdl3::sys::metal::SDL_Metal_CreateView(window.raw()) };
-    if view.is_null() {
-        return Err(format!("SDL: couldn't make a Metal view: {}", sdl3::get_error()).into());
-    }
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A LAYER POINTER THAT ISN'T A CAMetalLayer WILL HAPPEN
-    let layer: &CAMetalLayer =
-        unsafe { &*sdl3::sys::metal::SDL_Metal_GetLayer(view).cast::<CAMetalLayer>() };
-    layer.setDevice(Some(metal.get_device()));
-    layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
-    layer.setFramebufferOnly(false);
-    let mouse: sdl3::mouse::MouseUtil = sdl.mouse();
-    let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
-    let loading_steps: &[render_metal::LoadingStep] = render_metal::get_loading_steps();
-    let mut loading_step_index: usize = 0;
-    let result: Result<()> = (|| loop {
-        for event in event_pump.poll_iter() {
-            if !session.handle_event(event, &window, &mouse) {
-                return Ok(());
-            }
-        }
-        if session.is_finished() {
-            return Ok(());
-        }
-        session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;
-        let window_px: (u32, u32) = window.size_in_pixels();
-        layer.setDrawableSize(CGSize {
-            width: f64::from(window_px.0),
-            height: f64::from(window_px.1),
-        });
-        if loading_step_index <= loading_steps.len() {
-            let step: Option<render_metal::LoadingStep> =
-                loading_steps.get(loading_step_index).copied();
-            let done_frac: f32 = loading_step_index as f32 / loading_steps.len() as f32;
-            let label: &str = step.map_or(LOADING_DONE_LABEL, render_metal::LoadingStep::get_label);
-            draw_loading_screen(metal, layer, done_frac, label)?;
-            if let Some(step) = step {
-                metal.load(step)?;
-            }
-            loading_step_index += 1;
-            continue;
-        }
-        let render_px: (u32, u32) = session.get_render_size(window_px);
-        let render_start: Instant = Instant::now();
-        let mut packed: PackedFrame = session.pack(render_px);
-        packed.zoom_in(session.get_zoom());
-        let overlay_text: Option<OverlayText> = session.get_overlay_text();
-        let text_mask: Option<Vec<u8>> = overlay_text.as_ref().map(make_text_mask).transpose()?;
-        let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
-        let wand: Option<(render_metal::OverlayWand, viewmodel::GunModel)> = session
-            .get_wand()
-            .map(|wand| (wand, session.gun.get_model()));
-        let stretch_frac: f32 = session.get_edge_stretch_frac();
-        let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
-        let blueshift_frac: f32 = session.blueshift_frac;
-        let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
-            || !rects.is_empty()
-            || wand.is_some()
-            || stretch_frac > 0.0
-            || blueshift_frac != 0.0
-            || minimap.is_some())
-        .then(|| render_metal::Overlay {
-            dim_frac: match &overlay_text {
-                Some(text) => text.dim_frac,
-                None => 0.0,
-            },
-            mask: text_mask
-                .as_deref()
-                .zip(overlay_text.as_ref())
-                .map(|(pixels, text)| (pixels, (text.mask_px.0 as usize, text.mask_px.1 as usize))),
-            mask_height_frac: match &overlay_text {
-                Some(text) => text.height_frac,
-                None => 0.0,
-            },
-            picture: overlay_text
-                .as_ref()
-                .and_then(|text| text.picture.as_ref())
-                .map(|picture| render_metal::OverlayPicture {
-                    pixels: &picture.pixels,
-                    size_px: (picture.size_px.0 as usize, picture.size_px.1 as usize),
-                    min_mask_px: picture.min_mask_px,
-                    max_excl_mask_px: picture.max_excl_mask_px,
-                }),
-            stretch_frac,
-            minimap,
-            rects: &rects,
-            wand,
-            blur_frac: session.motion_blur_frac,
-            hit: session.get_hit_effect(),
-            blueshift_frac,
-        });
-        if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
-            session.record_frame(
-                render_start.elapsed().as_secs_f64() * MS_PER_S,
-                Some(metal.last_gpu_ms),
-            );
-        }
-        if session.hud_frame_count == 0 {
-            window.set_title(&format!(
-                "{WINDOW_TITLE}: {}",
-                session
-                    .get_hud_lines("metal", render_px, window_px)
-                    .join("  |  ")
-            ))?;
-        }
-    })();
-    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
-    unsafe { sdl3::sys::metal::SDL_Metal_DestroyView(view) };
-    result
 }
 
 #[cfg(test)]
