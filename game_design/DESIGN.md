@@ -38,7 +38,7 @@ and in progress.
 | Defender | The team that owns the level being played. |
 | Lobby | The screen a player joins on: it shows each team's head count, and the player picks a team. |
 | Spawn | Where a team's players enter a level. |
-| Pylon | One of a team's 2 or 3 objectives in a level, near its spawn. |
+| Pylon | One of a team's 1 to 3 objectives in a level, near its spawn. |
 | Console | One part of a pylon. The opposing team deactivates consoles to win the level. |
 | Zone | One of a level's three regions: the blue zone, the middle zone and the red zone. |
 | Route | One way across the middle zone, from one side to the other. |
@@ -70,8 +70,8 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 
 ### Winning a level
 
-- Each team has a spawn and, near it, its pylons: 3 on Dust and Lunar Surface, 2 on every other
-  level. The two spawns are on opposite sides of the level.
+- Each team has a spawn and, near it, its pylons: 3 on Dust and Lunar Surface, 2 on Snow Planet and
+  Dark Forest, and 1 on City Sphere, so the count rises from the middle level outward. The two spawns are on opposite sides of the level.
 - A team wins a level by deactivating every console on the opposing team's pylons, as in capture
   the flag. The [wavefront](#wavefront) then decides which level is played next.
 - A pylon with more consoles takes longer to deactivate.
@@ -85,7 +85,7 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 
 | Parameter | Value |
 | --- | --- |
-| Pylons per team per level | Set per level: 3 on Dust and Lunar Surface, 2 on the others (see [Levels](#levels)) |
+| Pylons per team per level | Set per level: 3 on Dust and Lunar Surface, 2 on Snow Planet and Dark Forest, 1 on City Sphere (see [Levels](#levels)) |
 | Consoles per pylon | 1 on every level |
 | Control to deactivate a console | Hold `E` while aiming at it from within 3 m |
 | Time to deactivate one console | 10 s |
@@ -151,7 +151,7 @@ full health and energy. A player can't choose to respawn early.
 | Gravity | Down, onto the ground | Down | Outward, onto the sphere | Down | Down, onto the ground, ≈30 m/s² |
 | Warp objects | Yes | Yes | No | Yes | 1 black hole, 1 wormhole |
 | Size | Very large | Large | Smallest | Large | Very large: 256 m × 144 m playable |
-| Pylons per team | 3 | 2 | 2 | 2 | 3 |
+| Pylons per team | 3 | 2 | 1 | 2 | 3 |
 | Consoles per pylon | 1 | 1 | 1 | 1 | 1 |
 | Combat focus | Long range | Mid range | Close quarters | Mid range | Long range |
 | Zone layout | Open | Paired bands | Bands | Paired bands | Open |
@@ -178,8 +178,9 @@ full health and energy. A player can't choose to respawn early.
 
 ### City Sphere
 
-- The blue spawn and its two pylons sit close together. The red spawn and pylons are blue's
-  reflected through the sphere's center, so the two sides sit at antipodes.
+- Each team has one pylon, on top of the glass floor in an exposed spot with no cover around it.
+  The red spawn and pylon are blue's reflected through the sphere's center, so the two sides sit
+  at antipodes.
 - Walls divide the space into close quarters.
 - City Sphere has two floors: the sphere's surface, and the surface of a smaller sphere with the
   same center, which players walk up to. Gravity pulls outward on both floors.
