@@ -545,6 +545,9 @@ fn main() -> Result<()> {
     if arguments.serve {
         return serve_only(&arguments);
     }
+    if arguments.map == MapName::LunarSurface && arguments.renderer == RendererKind::Metal {
+        voxel_textures::check_surface_textures()?;
+    }
     let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
     if arguments.bot {
         run_bot(&arguments, renderer)

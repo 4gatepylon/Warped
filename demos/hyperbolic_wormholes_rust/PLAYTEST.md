@@ -12,11 +12,14 @@ xcode-select --install
 brew install cmake
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone https://github.com/4gatepylon/Warped.git
+make -C Warped/demos/fps_demo download-assets
 ```
 
 - `xcode-select --install` gives the C compiler, and CMake builds SDL3 (the window library) from source. Skip
   whichever you already have.
 - The repository is private: each player needs read access on GitHub to clone it.
+- `make download-assets` downloads Lunar Surface's textures into `demos/fps_demo/.assets/`; they aren't in git, and
+  without them the game stops at start and prints this command.
 - `main` is the official version; `staging` is the latest, with fixes that reach `main` when a person merges
   them. Everyone in a game should be on the same one.
 - For the official version: `git -C Warped switch main && git -C Warped pull`. For the latest:

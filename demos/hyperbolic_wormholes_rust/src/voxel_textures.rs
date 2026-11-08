@@ -1,10 +1,10 @@
 //! `voxel_textures.rs` gives the voxel renderer high-resolution surfaces: it loads the fps_demo's
 //! Poly Haven 2K PBR sets (`make download-assets`) into mipmapped Metal texture arrays (albedo,
 //! normal, and ambient occlusion with roughness and metalness), and says which set, tiling and
-//! metalness each map material uses. Without the downloaded sets it gives 1x1 arrays and the
-//! shader keeps its procedural look.
+//! metalness each map material uses. The sets aren't in git, so without them `check_surface_textures`
+//! and `SurfaceTextures::Load` fail with the command that downloads them.
 //!
-//! Interface: `get_material_surface`, `SurfaceTextures::Load`.
+//! Interface: `get_material_surface`, `check_surface_textures`, `SurfaceTextures::Load`.
 //!
 //! Example: `let textures = SurfaceTextures::Load(&device)?;`
 
@@ -170,49 +170,69 @@ pub(crate) fn make_array(
     Ok(texture)
 }
 
+/// `get_fps_demo_folder` gives `demos/fps_demo/`, whose `make download-assets` downloads the sets.
+///
+/// Example: `let folder: PathBuf = get_fps_demo_folder();`
+fn get_fps_demo_folder() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the demo's folder sits in demos/")
+        .join("fps_demo")
+}
+
+/// `get_surface_texture_paths` gives every map file of the sets, in the arrays' order: all the
+/// albedos, then the normals, then the ambient occlusion, roughness and metalness maps.
+///
+/// Example: `let paths: Vec<PathBuf> = get_surface_texture_paths();`
+fn get_surface_texture_paths() -> Vec<PathBuf> {
+    let dir: PathBuf = get_fps_demo_folder().join(".assets/textures");
+    ["diff", "nor_gl", "arm"]
+        .iter()
+        .flat_map(|map| {
+            SURFACE_SETS
+                .iter()
+                .map(|id| dir.join(id).join(format!("{id}_{map}_2k.jpg")))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// `check_surface_textures` fails, naming a missing file and the command that downloads the sets,
+/// when any map file of the sets is missing.
+///
+/// Example: `check_surface_textures()?;`
+pub fn check_surface_textures() -> Result<()> {
+    match get_surface_texture_paths().into_iter().find(|path| !path.exists()) {
+        Some(path) => Err(format!(
+            "Lunar Surface needs its textures, which aren't in git, and {} is missing. Download them once with: cd {} && make download-assets",
+            path.display(),
+            get_fps_demo_folder().display()
+        )
+        .into()),
+        None => Ok(()),
+    }
+}
+
 impl SurfaceTextures {
-    /// `Load` reads the sets from the fps_demo's `.assets/textures/` onto `device`, or makes
-    /// empty arrays (and says how to download them) when any map is missing.
+    /// `Load` reads the sets from the fps_demo's `.assets/textures/` onto `device`, and fails like
+    /// `check_surface_textures` when any map is missing.
     ///
     /// Example: `let textures = SurfaceTextures::Load(&device)?;`
     #[allow(non_snake_case)]
     pub fn Load(device: &ProtocolObject<dyn MTLDevice>) -> Result<SurfaceTextures> {
-        let dir: PathBuf =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fps_demo/.assets/textures");
-        let paths: Vec<PathBuf> = ["diff", "nor_gl", "arm"]
-            .iter()
-            .flat_map(|map| {
-                SURFACE_SETS
-                    .iter()
-                    .map(|id| dir.join(id).join(format!("{id}_{map}_2k.jpg")))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        let mut maps: Vec<Vec<RgbaImage>> = Vec::new();
-        if paths.iter().all(|p| p.exists()) {
-            maps = paths
-                .par_iter()
-                .map(|p| make_mips(p, SIZE_PX))
-                .collect::<std::result::Result<_, _>>()?;
-        } else {
-            eprintln!(
-                "No surface textures in {}; run make download-assets for the high-resolution look.",
-                dir.display()
-            );
-            maps.resize(3 * SURFACE_SETS.len(), vec![RgbaImage::new(1, 1)]);
-        }
+        check_surface_textures()?;
+        let maps: Vec<Vec<RgbaImage>> = get_surface_texture_paths()
+            .par_iter()
+            .map(|p| make_mips(p, SIZE_PX))
+            .collect::<std::result::Result<_, _>>()?;
         let n: usize = SURFACE_SETS.len();
-        let is_loaded: bool = maps[0][0].width() > 1;
         Ok(SurfaceTextures {
             albedo: make_array(device, MTLPixelFormat::RGBA8Unorm_sRGB, 4, &maps[..n])?,
             normal: make_array(device, MTLPixelFormat::RG8Unorm, 2, &maps[n..2 * n])?,
             arm: make_array(device, MTLPixelFormat::RGBA8Unorm, 4, &maps[2 * n..])?,
             means: maps[..n]
                 .iter()
-                .map(|mips| match is_loaded {
-                    true => get_mean_albedo(&mips[MEAN_LEVEL]),
-                    false => [0.0; 4],
-                })
+                .map(|mips| get_mean_albedo(&mips[MEAN_LEVEL]))
                 .collect(),
         })
     }
