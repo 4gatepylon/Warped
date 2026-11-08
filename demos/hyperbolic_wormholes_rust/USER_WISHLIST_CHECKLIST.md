@@ -117,11 +117,11 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
-- [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
-  reality bending version). #316.
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
+  reality bending version). #316.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
   good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
