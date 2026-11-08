@@ -216,8 +216,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
 - On Lunar Surface each team has three pylons, each a beacon that is its own console, and a team wins by turning off all
-  three of the other team's beacons (hold `E` on one for 10 s within 3 m). A beacon glows and beams its team colour up
-  while it is on.
+  three of the other team's beacons (hold `E` on one for 10 s within 3 m). The server checks that too: it takes a hold
+  only from a player whose view meets the beacon within 3 m, with half a meter of slack (`console_reach.rs`), so no
+  window turns a beacon off from afar. A beacon glows and beams its team colour up while it is on.
   Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
   just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
   go dark when off. After a win, `Enter` in the server's terminal starts a new game.
