@@ -764,6 +764,20 @@
 - **Rationale:** you asked that a player who is hit is slowed (set in the YAML), sees red and a blur come in from
   the edges, and feels the screen shake.
 
+### D66. Shots into the sky draw only their first 80 m
+
+- **Choice:** a tracer for a shot that hit nothing (D61) flies only its first 80 m, two curvature radii, and is
+  then gone. Shots that hit something are drawn whole, up to D64's limit. Hits don't change.
+  - **Why:** you still saw a little noise after D64. Counting pixels changed by a 12 m stretch of a sky shot
+    against no beam at all, over six views: 0–50 pixels at 40 m, 0–30 at 80 m and none beyond (some of them the
+    beam itself). From the map's edge shooting outward, none.
+  - **The cut:** 80 m keeps a sky shot's drawn points near the shooter, where single precision is ample. Past it a
+    beam is under a pixel wide anyway.
+- **Alternatives:** working out beam glow relative to the camera in the shader (the real cure, but the renderer
+  works in map coordinates throughout); fading the tracer out instead of cutting it.
+- **Rationale:** you suggested special-casing far-off tracers, keeping gameplay the same when players shoot each
+  other.
+
 
 ## Baselines
 
