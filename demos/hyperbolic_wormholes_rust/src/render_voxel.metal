@@ -71,7 +71,6 @@ constant float SHADOW_FLOOR = 0.0;
 constant float3 EARTHSHINE_COLOR = float3(0.55, 0.7, 1.0);
 constant int HAND_LIGHT_COUNT = 3;
 constant int HAND_LIGHT_BUFFER_INDEX = 28;
-constant float GROUND_ALBEDO = 0.12;
 constant float LIGHT_CUTOFF_FRAC = 3.0;
 constant float LIGHT_WRAP = 0.3;
 constant float BLOCK_NOISE = 0.18;
@@ -968,7 +967,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
 /**
  * @brief `probe_hand_light` writes the light at the eye into `hand`, as `light_surface` lights a surface there: the sun
  * (shadowed), the lamps summed into one light from their weighted mean direction (their wrapped part goes to the
- * sky), earthshine, the ambient light as the sky, and the ground lit by the sun and the ambient light.
+ * sky), earthshine, the ambient light as the sky, and the ground (regolith) lit by the sun and the ambient light.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread, before the frame's rays.
@@ -994,7 +993,7 @@ kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND
     }
     hand.up = float4(to_camera(u, up), 0.0);
     hand.sky = float4(float3(AMBIENT) + LIGHT_WRAP * lamps, 0.0);
-    hand.ground = float4(GROUND_ALBEDO * (sun * max(mdot(up, l), 0.0) + AMBIENT), 0.0);
+    hand.ground = float4(get_palette(scene, u.mat_regolith).rgb * (sun * max(mdot(up, l), 0.0) + AMBIENT), 0.0);
 }
 
 /** @brief `grid_normal` is the unit normal, toward +axis, of the grid plane of structure st through local point p. @par Example @code float4 t = grid_normal(st, p, 0); @endcode */
