@@ -287,8 +287,9 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
 }
 
 /// `VoxelWorld` is a whole voxel map, ready to trace and to walk on, with the eye of the flashlight
-/// shining this frame and the time the sky shows (`sky_time_s`: the UTC clock in the window, 0 for
-/// fixed views; `spaceships.rs`).
+/// shining this frame, the time the sky shows (`sky_time_s`: the UTC clock in the window, 0 for
+/// fixed views; `spaceships.rs`), and how bright this player sees the Milky Way (`milky_way`: its
+/// pole and core directions, if the map has one), from their `view.milky_way_brightness_frac`.
 #[derive(Clone)]
 pub struct VoxelWorld {
     pub name: String,
@@ -305,6 +306,8 @@ pub struct VoxelWorld {
     pub terrain: Option<Terrain>,
     pub sun: DVec3,
     pub planet: Option<(DVec3, f64)>,
+    pub milky_way: Option<(DVec3, DVec3)>,
+    pub milky_way_brightness_frac: f64,
     pub player: PlayerSettings,
     pub gravity_m_per_s2: f64,
     map_player: PlayerSettings,
@@ -737,6 +740,13 @@ impl VoxelWorld {
                 .planet
                 .as_ref()
                 .map(|p| (to_direction(&p.direction), p.angular_radius_rad)),
+            milky_way: map.sky.milky_way.as_ref().map(|m| {
+                (
+                    to_direction(&m.pole_direction),
+                    to_direction(&m.core_direction),
+                )
+            }),
+            milky_way_brightness_frac: PerPlayerSettings::Builtin().view.milky_way_brightness_frac,
             player: map.player,
             gravity_m_per_s2: map.gravity_m_per_s2,
             map_player: map.player,

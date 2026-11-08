@@ -2080,6 +2080,7 @@ impl Session {
             let mut world: VoxelWorld = VoxelWorld::FromMap(&map)?;
             world.set_settings(settings.clone());
             world.head_bob = player_settings.view.head_bob.clone();
+            world.milky_way_brightness_frac = player_settings.view.milky_way_brightness_frac;
             let player: VoxelPlayer = match &arguments.view {
                 Some(name) => {
                     let view: VoxelView = make_voxel_bench_views()
@@ -2270,7 +2271,7 @@ impl Session {
     }
 
     /// `handle_menu_control` passes a pressed control to the open menu, closes it or saves when
-    /// the menu says so, and puts the changed head bob into the world.
+    /// the menu says so, and puts the changed head bob and Milky Way brightness into the world.
     ///
     /// Example: `self.handle_menu_control(Control::Key(Scancode::Down));`
     fn handle_menu_control(&mut self, control: Control) {
@@ -2291,6 +2292,8 @@ impl Session {
         }
         if let Some(voxel) = &mut self.voxel {
             voxel.world.head_bob = self.player_settings.view.head_bob.clone();
+            voxel.world.milky_way_brightness_frac =
+                self.player_settings.view.milky_way_brightness_frac;
         }
     }
 
@@ -3065,6 +3068,8 @@ impl Session {
                         let head_bob: settings::HeadBobSettings = voxel.world.head_bob.clone();
                         voxel.world = VoxelWorld::FromMap(&map)?;
                         voxel.world.head_bob = head_bob;
+                        voxel.world.milky_way_brightness_frac =
+                            self.player_settings.view.milky_way_brightness_frac;
                         self.world = World::Empty(map.get_curvature_radius_m());
                         messages.push(format!(
                             "The server curves space {} times as much as the map",

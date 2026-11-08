@@ -1,6 +1,7 @@
 //! `menu.rs` is the in-game menu, in pages under a tab bar: the settings page, where a player
 //! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
-//! head bob, motion blur and how a hit looks, and a row that saves them), the map page, whose
+//! head bob, motion blur, how a hit looks, the wormhole tint and the Milky Way's brightness, and a
+//! row that saves them), the map page, whose
 //! picture the window draws (`map_layout.rs`), the scores page, with each player's team, kills
 //! and deaths from the server, and the credits page, with where the game's assets come from
 //! (`credits.rs`). It keeps no window state: the window feeds it pressed controls and the scores,
@@ -40,7 +41,7 @@ const PLAYER_WIDTH: usize = 16;
 const KILLS_WIDTH: usize = 6;
 const DEATHS_WIDTH: usize = 8;
 const LABEL_WIDTH: usize = 24;
-const NUMBERS: [(Number, &str, f64, f64, f64); 8] = [
+const NUMBERS: [(Number, &str, f64, f64, f64); 9] = [
     (
         Number::LookSpeed,
         "mouse look rad/px",
@@ -55,6 +56,7 @@ const NUMBERS: [(Number, &str, f64, f64, f64); 8] = [
     (Number::HitShake, "hit shake px", 1.0, 0.0, 20.0),
     (Number::HitBlur, "hit blur px", 1.0, 0.0, 20.0),
     (Number::WormholeTint, "wormhole tint 0-1", 0.1, 0.0, 1.0),
+    (Number::MilkyWay, "milky way 0-1", 0.1, 0.0, 1.0),
 ];
 
 /// `Page` is one page of the menu.
@@ -90,6 +92,7 @@ enum Number {
     HitShake,
     HitBlur,
     WormholeTint,
+    MilkyWay,
 }
 
 /// `Row` is one line of the menu that can be chosen: an action's controls, a number, or saving.
@@ -138,6 +141,7 @@ fn get_number(settings: &PerPlayerSettings, number: Number) -> f64 {
         Number::HitShake => settings.hit_effects.shake_px,
         Number::HitBlur => settings.hit_effects.blur_px,
         Number::WormholeTint => settings.view.wormhole_tint_frac,
+        Number::MilkyWay => settings.view.milky_way_brightness_frac,
     }
 }
 
@@ -154,6 +158,7 @@ fn get_number_slot(settings: &mut PerPlayerSettings, number: Number) -> &mut f64
         Number::HitShake => &mut settings.hit_effects.shake_px,
         Number::HitBlur => &mut settings.hit_effects.blur_px,
         Number::WormholeTint => &mut settings.view.wormhole_tint_frac,
+        Number::MilkyWay => &mut settings.view.milky_way_brightness_frac,
     }
 }
 

@@ -2,8 +2,8 @@
 //! `server_settings.yaml`, the numbers that shape play for everyone (movement, sprint energy, both
 //! guns, consoles, respawning, how a hit slows, the flashlight, thrown wormholes, how curved space
 //! is, the reality bend), which the game server sends to every player who joins; and
-//! `player_settings.yaml`, each player's own choices (keys, mouse speed, head bob, motion blur, how
-//! a hit looks).
+//! `player_settings.yaml`, each player's own choices (keys, mouse speed, head bob, motion blur, the
+//! Milky Way's brightness, how a hit looks).
 //!
 //! Interface: `ServerSettings` (`Builtin`, `Load`, `FromJson`, `to_json`), `PerPlayerSettings`
 //! (`Builtin`, `Load`) and their sections.
@@ -50,10 +50,11 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 18] = [
     "wormholes.throw_up_rad",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
     "view.wormhole_tint_frac",
+    "view.milky_way_brightness_frac",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
     "hit_effects.red_frac",
@@ -61,7 +62,7 @@ const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 1] = ["keys.switch_view"];
+const ADDED_PLAYER_KEYS: [&str; 2] = ["keys.switch_view", "view.milky_way_brightness_frac"];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -266,7 +267,7 @@ pub struct RealityBendSettings {
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
 /// shifts colour (light cyan forward, dark red backward) while moving through a wormhole's throat
-/// (0 to 1), and the head bob.
+/// (0 to 1), how bright the Milky Way is (0 to 1), and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
@@ -274,6 +275,7 @@ pub struct ViewSettings {
     pub motion_blur_s: f64,
     pub edge_stretch_frac: f64,
     pub wormhole_tint_frac: f64,
+    pub milky_way_brightness_frac: f64,
     pub head_bob: HeadBobSettings,
 }
 
@@ -535,8 +537,8 @@ impl ServerSettings {
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
-    /// `view.wormhole_tint_frac` at most 1. The keys in `REMOVED_PLAYER_KEYS`, which older
-    /// versions saved, are dropped (`drop_removed_keys`), and those in `ADDED_PLAYER_KEYS`, which
+    /// `view.wormhole_tint_frac` and `view.milky_way_brightness_frac` at most 1. The keys in
+    /// `REMOVED_PLAYER_KEYS`, which older versions saved, are dropped (`drop_removed_keys`), and those in `ADDED_PLAYER_KEYS`, which
     /// older versions didn't save, take their built-in values when missing (`add_missing_keys`).
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
@@ -552,12 +554,19 @@ impl PerPlayerSettings {
             serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
-        if file.view.wormhole_tint_frac > 1.0 {
-            return Err(format!(
-                "settings {source}: view.wormhole_tint_frac must be at most 1, not {}",
-                file.view.wormhole_tint_frac
-            )
-            .into());
+        for (key, value_frac) in [
+            ("view.wormhole_tint_frac", file.view.wormhole_tint_frac),
+            (
+                "view.milky_way_brightness_frac",
+                file.view.milky_way_brightness_frac,
+            ),
+        ] {
+            if value_frac > 1.0 {
+                return Err(format!(
+                    "settings {source}: {key} must be at most 1, not {value_frac}"
+                )
+                .into());
+            }
         }
         Ok(PerPlayerSettings {
             keys: KeyBindings::FromNames(&file.keys, source)?,
@@ -611,7 +620,8 @@ mod tests {
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
-    //! | Added key (`keys.switch_view`) | present (built in), missing in an old save (gets the built-in `V`), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
+    //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`) | present (built in), missing in an old save (gets the built-in `V` and 1), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
+    //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -733,6 +743,29 @@ mod tests {
     }
 
     #[test]
+    fn milky_way_brightness_takes_0_to_1() {
+        const BUILTIN_LINE: &str = "milky_way_brightness_frac: 1.0";
+        let with_brightness = |value: &str| -> String {
+            BUILTIN_PLAYER_YAML
+                .replace(BUILTIN_LINE, &format!("milky_way_brightness_frac: {value}"))
+        };
+        assert!(BUILTIN_PLAYER_YAML.contains(BUILTIN_LINE));
+        for value in ["0", "0.5"] {
+            let loaded: PerPlayerSettings =
+                PerPlayerSettings::FromYaml(&with_brightness(value), "test").expect("0 to 1 loads");
+            assert_eq!(
+                loaded.view.milky_way_brightness_frac.to_string(),
+                value.to_string()
+            );
+        }
+        let error: String = PerPlayerSettings::FromYaml(&with_brightness("1.5"), "test")
+            .err()
+            .expect("a brightness above 1 fails")
+            .to_string();
+        assert!(error.contains("view.milky_way_brightness_frac"), "{error}");
+    }
+
+    #[test]
     fn removed_keys_are_dropped_and_others_still_fail() {
         const OLD_TINT_LINE: &str = "\n  wormhole_tint_s: 1.5  # removed by W-82";
         let with_tint_line = |line: &str| -> String {
@@ -785,16 +818,19 @@ mod tests {
                 .collect();
             lines.join("\n")
         };
-        let old_save: String = without_key("switch_view");
-        assert!(!old_save.contains("switch_view"));
-        let loaded: PerPlayerSettings =
-            PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
-        assert!(
-            loaded
-                .keys
-                .matches(Action::SwitchView, Control::Key(Scancode::V))
-        );
-        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        for name in ["switch_view", "milky_way_brightness_frac"] {
+            let old_save: String = without_key(name);
+            assert!(!old_save.contains(name));
+            let loaded: PerPlayerSettings =
+                PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
+            assert!(
+                loaded
+                    .keys
+                    .matches(Action::SwitchView, Control::Key(Scancode::V))
+            );
+            assert_eq!(loaded.view.milky_way_brightness_frac, 1.0);
+            assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        }
         let error: String = PerPlayerSettings::FromYaml(&without_key("flashlight"), "test")
             .err()
             .expect("a key that wasn't added later still fails when missing")

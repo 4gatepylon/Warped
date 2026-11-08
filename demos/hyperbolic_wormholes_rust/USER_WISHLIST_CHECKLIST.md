@@ -26,16 +26,6 @@ is in [`AGENTS.md`](AGENTS.md).
     different rifle model)), branch `claude/rifle-sway`, to be cut from `staging` once W-96 merges; pictures will be in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-102/`
     (temporary, under `/private/tmp`). State, 2026-11-08: not started; starts after W-96 (a different rifle model) merges.
-- [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, branch `claude/milky-way`
-    (pushed to `origin`: one WIP commit, `1b8ac4e`, with temporary `TEMP_MW*` mock-up hooks; not for merging),
-    pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-98/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: mock-ups of three looks
-    (A subtle, B rich, C photo-like) and one alternative position for the band done, with GPU costs; the user asked
-    for images only for now; nothing built.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -158,6 +148,15 @@ are here too, since the user hadn't confirmed them.
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
+- [?] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
+  From three looks, the user picked C, photo-like ("get milky way photo like merged"): drawn in code, arching across
+  the sky from base to base (a placement chosen for the user), its brightness in `player_settings.yaml` (D102).
+  #317.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/milky-way` (pushed to `origin`),
+    worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, built by Claude
+    Code and finished by Devin; final pictures in
+    `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-98/final/`. State,
+    2026-11-08: on `staging`, waiting for the user to test it.
 
 ## Done
 

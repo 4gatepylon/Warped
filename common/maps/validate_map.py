@@ -3,8 +3,8 @@
 It checks `map.json` against `map.schema.json`, then what the schema can't say: the name matches the folder,
 material ids are unique with 0 (and only 0) empty, every material used exists, frames are isometries of the map's
 space, points lie in the space, shapes' rounding fits inside them, wormhole mouths pair up, tapered warps'
-reach spheres don't overlap, and directions are unit vectors. It prints one line per map (or `--json`) and exits 1
-if any map is invalid.
+reach spheres don't overlap, directions are unit vectors, and the Milky Way's core is perpendicular to its pole. It
+prints one line per map (or `--json`) and exits 1 if any map is invalid.
 
 Interface:
     uv run python validate_map.py <map folder>... [--json]
@@ -215,9 +215,17 @@ def _get_geometry_errors(manifest: dict) -> list[str]:
             errors += _get_frame_errors(f"{key[:-1]} {label!r}", item["frame"], kind)
     for k, light in enumerate(manifest["lights"] if "lights" in manifest else []):
         errors += _get_point_errors(f"light {k}", light["position"], kind)
-    bodies: list[tuple[str, list[float]]] = [("sun", manifest["sky"]["sun"]["direction"])]
-    if "planet" in manifest["sky"]:
-        bodies.append(("planet", manifest["sky"]["planet"]["direction"]))
+    sky: dict = manifest["sky"]
+    bodies: list[tuple[str, list[float]]] = [("sun", sky["sun"]["direction"])]
+    if "planet" in sky:
+        bodies.append(("planet", sky["planet"]["direction"]))
+    if "milky_way" in sky:
+        bodies += [
+            (f"Milky Way's {key[: -len('_direction')]}", sky["milky_way"][key])
+            for key in ("pole_direction", "core_direction")
+        ]
+        if abs(np.dot(sky["milky_way"]["pole_direction"], sky["milky_way"]["core_direction"])) > TOLERANCE:
+            errors.append("sky: the Milky Way's core is not perpendicular to its pole")
     for name, direction in bodies:
         if abs(np.linalg.norm(direction) - 1.0) > TOLERANCE:
             errors.append(f"sky: the {name}'s direction is not a unit vector")

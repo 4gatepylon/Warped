@@ -1875,6 +1875,30 @@
   one ideally; see if you can find something for that"), and chose the bolt-action from the pictures ("bolt action
   is good"). The wooden rifle stands out from the sci-fi look, which also makes the two guns easy to tell apart.
 
+### D102. A photo-like Milky Way across the sky, W-98 (Milky Way)
+
+- **Choice:**
+  - **Look:** option C, photo-like, from the mock-ups, drawn in code with no downloaded photo: a band brighter and
+    wider toward its core with a warm bulge there, mottled by star clouds and grain, split by a dark rift along its
+    middle and dimmed by dust clouds, with faint pink nebulae and the stars thicker inside it.
+  - **Placement:** the band arches across the sky from base to base, so both teams see it ahead of them, with its
+    core about 30° along it from the horizon. Its pole and core are map data, `sky.milky_way` (`pole_direction`,
+    `core_direction`) in `common/maps/`, so moving it is one change to `export_map.mjs`; the house has none.
+  - **Brightness:** each player's `view.milky_way_brightness_frac` in `player_settings.yaml` (0 to 1, 1 by default, 0
+    for none), also a row of the settings menu. An older settings file without the key gets 1.
+  - **Cost:** `render_voxel.metal`'s `bake_milky_way` draws the band once into a 4096 × 1024 HDR texture (longitude
+    by latitude in the band's own frame, up to 45° from its middle) before the first frame; each frame only reads it
+    where a ray reaches the sky. Alternating runs against `staging` (4 rounds, 15 frames, four views at 2560 × 1600)
+    showed no cost: the least GPU time per view was 1.5% to 4.6% lower with the band, within the noise.
+- **Alternatives:**
+  - the looks A, subtle, and B, rich, from the same mock-ups;
+  - a real photo (ESO's Milky Way panorama, CC BY 4.0), which needs a download and a credit;
+  - the band low across the horizon (the mock-ups' first position) rather than arching over from base to base;
+  - drawing the band anew every frame (the mock-ups did; it cost GPU time at every pixel of sky).
+- **Rationale:** you asked for a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox") and
+  picked option C from the pictures ("get milky way photo like merged"). You didn't pick a placement, so the arch
+  from base to base was chosen for you, since it gives both teams the same view; tell us if you want it elsewhere.
+
 ## Workload
 
 ### D7. Eight fixed views

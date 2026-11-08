@@ -147,6 +147,9 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
 - Two giant ships hang far behind them (D101): a moon-sized battle station with a dish, hovering low over the horizon
   ahead of the blue spawn, and a long wedge-shaped capital ship with rows of lit windows, crossing the sky in 30
   minutes.
+- A photo-like Milky Way arches across Lunar Surface's sky from base to base (D102): where it lies is the map's
+  `sky.milky_way`, and how bright you see it is `view.milky_way_brightness_frac` in `player_settings.yaml` (0 for
+  none). It is drawn once into a texture when the map loads.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
 - `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and
