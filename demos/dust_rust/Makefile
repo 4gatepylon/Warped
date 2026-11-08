@@ -55,7 +55,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
 help:
 	@echo "Targets:"
 	@echo "  make download-assets                            Download Dust's Poly Haven textures into assets/ (once)"
-	@echo "  make serve-game PORT=47830 MAP=lunar-surface     Run a game server, without a window; prints how to join"
+	@echo "  make serve-game PORT=47830 MAP=dust              Run a game server, without a window; prints how to join"
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
 	@echo "  make join-game SERVER=auto PORT=47830            Open the window and join the game server (SERVER=auto finds one)"
 	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of player_settings.yaml)"
