@@ -89,14 +89,16 @@ make join-game SERVER=127.0.0.1
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
-- `Q` throws your purple wormhole mouth, the next press your green one, then purple again, and so on, on both maps.
+- `Q` throws your purple wormhole mouth and the next press your green one, on both maps; once both are down, `Q`
+  does nothing until the pair is gone.
   A throw is lobbed under its own gravity, drops to the floor below whatever it hits, and hovers there at eye
   height facing back the way it flew; once both are down they link, and any player or laser that goes into one
   comes out of the other (`wormholes` in `server_settings.yaml`). The view through a thrown mouth is tinted its
   colour, and a mouth in the air, or down while its partner isn't, glows as a small ball. A throw fizzles if it
   never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
-  A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
-  2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
+  A shot that goes through an enemy's mouth makes both their mouths flash red; 2 sniper shots or 5 rifle shots
+  destroy the pair (`wormholes` in `server_settings.yaml`). One shot at an enemy's lone mouth's ball destroys it;
+  a shot at your own or a teammate's ball does nothing.
 - On Lunar Surface the blue and red zones' edges are walls you see through (D103): faint slabs in the team's colour
   straight above each edge, 6 m high above the ground and 0.6 m thick (a player's width), brightest at their foot
   and fading out at the top. They stop neither you nor lasers. The map sets their height, thickness and opacity
