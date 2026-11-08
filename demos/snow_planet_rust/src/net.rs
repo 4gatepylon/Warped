@@ -984,10 +984,7 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
-            println!(
-                "The {} team won. Press Enter here to start a new game.",
-                TEAM_NAMES[winner as usize]
-            );
+            println!("The {} team won.", TEAM_NAMES[winner as usize]);
         }
     }
 
@@ -1177,6 +1174,9 @@ pub fn serve(
         server.update_consoles();
         server.freeze_players(last_freeze.elapsed().as_secs_f64());
         last_freeze = Instant::now();
+        if server.game.winner.is_some() && won_at.is_none() && level_result_file.is_none() {
+            println!("Press Enter here to start a new game.");
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(path), Some(winner)) = (level_result_file, server.game.winner)
             && !has_written_result
