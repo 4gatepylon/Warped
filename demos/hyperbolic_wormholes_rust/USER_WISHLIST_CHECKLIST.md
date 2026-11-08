@@ -10,9 +10,7 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-45 Player and server settings.** Split the YAML settings into a part each player can change for
-  themselves and a part that belongs to the server. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/split-settings`, 2026-11-07.
+Nothing yet.
 
 ## Open
 
@@ -111,4 +109,6 @@ is in [`AGENTS.md`](AGENTS.md).
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
 - [x] **W-43 Hold for the flashlight.** The flashlight stays on only while the right button is held. #133.
 - [x] **W-39 Key bindings.** Which key crouches, moves, jumps, switches weapons and so on can be set in YAML
-  (`key_bindings.yaml`, each player's own). #135.
+  (now the `keys` of `player_settings.yaml`, each player's own). #135.
+- [x] **W-45 Player and server settings.** The YAML settings are split into `player_settings.yaml`, each
+  player's own, and `server_settings.yaml`, the server's. #140.

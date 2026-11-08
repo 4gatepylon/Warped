@@ -17,8 +17,9 @@ make run-demo RENDERER=cpu
 ```
 
 - Click to capture the mouse (`Esc` releases it; `Esc` again quits).
-- Every key below is the default; [`key_bindings.yaml`](key_bindings.yaml) lists them all, and a copy with other
-  keys is passed with `KEY_BINDINGS=my_keys.yaml` (`--key-bindings`) to `make run-demo`, `host-game` or `join-game`.
+- Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
+  choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
+  (`--player-settings`) to `make run-demo`, `host-game` or `join-game`.
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
@@ -79,9 +80,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `make serve-game` (`--serve`) runs only the server and prints this computer's address with the commands that join
   it, so it can run on a computer nobody plays on. `make host-game` (`--host`) starts the same server as its own
   process, joins it from a window, and stops it when the window closes.
-- `SETTINGS=my_settings.yaml` (`--settings`) gives the server a copy of [`game_settings.yaml`](game_settings.yaml)
-  with other numbers (speeds, jump, head bob, both guns, consoles, respawn, motion blur); it sends them to every
-  player who joins.
+- `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
+  [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
+  consoles, respawn, the hit slowdown, the flashlight); it sends them to every player who joins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from

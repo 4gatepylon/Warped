@@ -20,7 +20,7 @@ use crate::geometry::{
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
-use crate::settings::GameSettings;
+use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
 use crate::voxel_clearance::ClearanceGrids;
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -180,7 +180,8 @@ pub struct VoxelWorld {
     pub gravity_m_per_s2: f64,
     map_player: PlayerSettings,
     map_gravity_m_per_s2: f64,
-    pub settings: GameSettings,
+    pub settings: ServerSettings,
+    pub head_bob: HeadBobSettings,
     pub spawns: Vec<DMat4>,
     pub static_structure_count: usize,
     pub consoles: Vec<Console>,
@@ -521,11 +522,12 @@ impl VoxelWorld {
             gravity_m_per_s2: map.gravity_m_per_s2,
             map_player: map.player,
             map_gravity_m_per_s2: map.gravity_m_per_s2,
-            settings: GameSettings::Builtin(),
+            settings: ServerSettings::Builtin(),
+            head_bob: PerPlayerSettings::Builtin().view.head_bob,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
             clearance: Arc::new(ClearanceGrids::default()),
         };
-        world.set_settings(GameSettings::Builtin());
+        world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
         Ok(world)
     }
@@ -534,8 +536,8 @@ impl VoxelWorld {
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
     /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
     ///
-    /// Example: `world.set_settings(GameSettings::Load(Path::new("fast.yaml"))?);`
-    pub fn set_settings(&mut self, settings: GameSettings) {
+    /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
+    pub fn set_settings(&mut self, settings: ServerSettings) {
         let movement = &settings.movement;
         let half_jump_s: f64 = self.map_player.jump_m_per_s / self.map_gravity_m_per_s2
             * movement.jump_time_per_map_jump_time;
@@ -1345,7 +1347,7 @@ impl VoxelPlayer {
     ///
     /// Example: `let bob_m = player.get_bob_m(&world);`
     pub fn get_bob_m(&self, world: &VoxelWorld) -> f64 {
-        let bob = &world.settings.head_bob;
+        let bob = &world.head_bob;
         let depth_m: f64 = if self.is_sprinting {
             bob.sprint_depth_m
         } else {
@@ -1439,7 +1441,7 @@ impl VoxelPlayer {
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
         let len: f64 = forward.hypot(side);
         let settings: PlayerSettings = world.player;
-        let (energy, bob) = (&world.settings.sprint_energy, &world.settings.head_bob);
+        let (energy, bob) = (&world.settings.sprint_energy, &world.head_bob);
         let crouch_step: f64 = dt_s / world.settings.movement.crouch_s;
         let crouch_target: f64 = f64::from(u8::from(input.crouch));
         self.crouch_frac += (crouch_target - self.crouch_frac).clamp(-crouch_step, crouch_step);

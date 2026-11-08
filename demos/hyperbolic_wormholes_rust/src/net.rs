@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use glam::DMat4;
 
-use crate::settings::GameSettings;
+use crate::settings::ServerSettings;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -253,7 +253,7 @@ struct Slot {
 struct Server {
     socket: UdpSocket,
     map_name: String,
-    settings: GameSettings,
+    settings: ServerSettings,
     slots: Vec<Slot>,
     next_id: u32,
     known_ids: Vec<(SocketAddr, u32)>,
@@ -516,12 +516,12 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 /// starts a new game after that when `should_start_new_game` is set (clearing it), and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), GameSettings::Builtin(), vec![0, 1], &should_start_new_game)?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game)?;`
 pub fn serve(
     socket: UdpSocket,
     should_stop: &AtomicBool,
     map_name: String,
-    settings: GameSettings,
+    settings: ServerSettings,
     console_teams: Vec<u32>,
     should_start_new_game: &AtomicBool,
 ) -> Result<()> {
@@ -629,7 +629,7 @@ pub struct Client {
     map_name: String,
     pub id: Option<u32>,
     pub team: Option<u32>,
-    pub settings: Option<GameSettings>,
+    pub settings: Option<ServerSettings>,
     pub players: Vec<RemotePlayer>,
     pub game: GameState,
     pub health_frac: f64,
@@ -700,7 +700,7 @@ impl Client {
                                 self.server, self.map_name, server_map.replace('_', "-")
                             ).into());
                         }
-                        self.settings = Some(GameSettings::FromJson(&bytes[reader.position..])?);
+                        self.settings = Some(ServerSettings::FromJson(&bytes[reader.position..])?);
                         self.id = Some(id);
                         self.team = Some(u32::from(team));
                         self.health_frac = 1.0;
@@ -901,7 +901,7 @@ mod tests {
         Server {
             socket: UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port"),
             map_name: TEST_MAP_NAME.to_string(),
-            settings: GameSettings::Builtin(),
+            settings: ServerSettings::Builtin(),
             slots: Vec::new(),
             next_id: 0,
             known_ids: Vec::new(),
@@ -1076,7 +1076,7 @@ mod tests {
     #[test]
     fn the_welcome_fits_a_datagram() {
         let header_bytes: usize = 1 + BYTES_PER_ID + 1 + usize::from(u8::MAX);
-        assert!(header_bytes + GameSettings::Builtin().to_json().len() <= MAX_DATAGRAM_BYTES);
+        assert!(header_bytes + ServerSettings::Builtin().to_json().len() <= MAX_DATAGRAM_BYTES);
     }
 
     #[test]
