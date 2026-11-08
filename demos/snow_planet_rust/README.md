@@ -58,8 +58,9 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
   hyperbolic space of curvature radius 160 m, nearly flat, so the copied H³ ray marcher, physics, lasers and
   black-hole and wormhole lensing work unchanged. The level loops (`src/torus.rs`, DECISIONS S11, S14): walking
   past u = ±56 m or v = ±36 m carries on from the other side, and copies ("ghosts") of what stands near a seam
-  stand past the opposite one, so it blocks and bends light from both sides. Seeing and shooting across the seams
-  come next.
+  stand past the opposite one, so it blocks and bends light from both sides. Light rays cross the seams too, out to
+  224 m (`MAX_COPY_DISTANCE_M`), so the level is seen repeating; past that, only the empty snowfield. Shooting across
+  the seams comes next.
 - Blizzards: `VoxelWorld::find_blizzard` (a point's blizzard), `get_blizzard_frac` (how much of a shot's reach a
   chord uses) and `stop_in_blizzards` (cuts the laser) in `src/voxel_world.rs`; `VoxelPlayer::step` slows the
   player; the server freezes players standing in one (`net::Server::freeze_players`, `net::Freezing`); the shader's

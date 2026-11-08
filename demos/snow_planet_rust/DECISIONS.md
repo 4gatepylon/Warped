@@ -280,3 +280,25 @@ Built on `claude/snow-planet-torus-walk`, 2026-11-08 (Claude Code), on layer 1 (
   3 for the two near a corner) and 2 of the north and south-east black holes, whose reach crosses the v seam.
 - **Not yet:** rays (the view still ends at the seam, past which the ghosts show), lasers, other players and thrown
   mouths across the seams; the minimap and map page.
+
+## S15. Seeing around the loop, layer 3 (User: the cost)
+
+Built on `claude/snow-planet-torus-rays`, 2026-11-08 (Claude Code), on layer 2 (S14).
+
+- **Rays:** `render_voxel.metal` cuts each straight stretch of a ray at the nearest seam (`find_seam_s`: a linear
+  equation for u, a quadratic for v, in the chord's Klein parameter) and carries it across by the glue (`cross_seam`),
+  until it has gone `MAX_COPY_DISTANCE_M` (224 m, S11's V1). A ray that leaves a warp past a seam comes back into the
+  cell (`wrap_into_cell`). Inside a warp's reach rays aren't cut. Shadow rays (80 m) cross up to 3 seams.
+- **Sky and sun:** on a looping world they are looked up in Fermi frames (`carry_from_centre`): the sun at a point has
+  the same parts along the Fermi axes everywhere, so light matches across the seams, and the sky is the escaping
+  ray, as if it had gone straight on at the seams, carried to the eye and read in the eye's Fermi frame, so it
+  doesn't jump when a player crosses a seam. Reading it where the ray escaped instead broke the sky into shards
+  (an H³ line turns about 8° against the Fermi axes over a cell).
+- **Blizzard:** the fog and flakes cover every copy of the white-out the first stretch of a ray passes, and the fog
+  length is how far the ray went.
+- **The camera** is moved into the cell (a third-person camera can stand past a seam).
+- **Cost (User):** every view more than doubles at 2560×1440 (for example `blue_spawn` 15.7 → 39.1 ms, `black_hole`
+  19.5 → 73.6 ms, best of 2 rounds on a busy Mac); copies out to 112 m instead of 224 m save only about a fifth.
+  The cost is the repeated level itself: rays that used to reach empty snow or sky now cross seams and meet
+  copies' pylons, beams and black-hole lenses. Ways down, for the user: no lensing for copies past one period
+  (draw only their black disk), a lower render scale (the window already lowers it to hold 60 fps), or fewer copies.
