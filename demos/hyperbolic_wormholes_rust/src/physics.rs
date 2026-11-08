@@ -207,6 +207,9 @@ pub fn get_up_local(frame: DMat4) -> DVec3 {
 ///
 /// Example: `messages.push(format_crossing(&world, mouth));`
 fn format_crossing(world: &World, mouth: &Mouth) -> String {
+    if mouth.color.is_some() {
+        return format!("Through {}", mouth.name);
+    }
     format!(
         "Through wormhole {}: out of mouth {}",
         mouth.pair_index + 1,

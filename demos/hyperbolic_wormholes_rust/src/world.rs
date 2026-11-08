@@ -13,10 +13,11 @@
 use glam::{DMat4, DVec4};
 
 use crate::map::{Map, Spawn, Warp, to_frame};
+use crate::thrown_wormholes::{MouthPlace, WormholeColor};
 
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
-    minkowski_dot,
+    minkowski_dot, orthonormalize_frame,
 };
 
 pub const DEFAULT_CURVATURE_RADIUS_M: f64 = 8.0;
@@ -26,7 +27,7 @@ pub const BEND_CUTOFF_PER_R: f64 = 2.0;
 pub const FOIL_LAMBDA_SQUARED: f64 = 0.25;
 pub const JUMP_RADIUS_PER_THROAT: f64 = 4.5;
 pub const EYE_HEIGHT_M: f64 = 1.7;
-pub const MAX_MOUTH_COUNT: usize = 8;
+pub const MAX_MOUTH_COUNT: usize = 24;
 pub const MAX_BOX_COUNT: usize = 96;
 pub const MAX_CLUSTER_COUNT: usize = 32;
 pub const MATERIAL_SOLID: u32 = 0;
@@ -137,7 +138,8 @@ pub struct Cluster {
 
 /// `Mouth` is one end of a wormhole. Its frame's columns are right, up, back and centre; you pass
 /// through cleanly moving along -back. `gluing` maps the space around it to the space around its
-/// partner, with the back axis flipped (or every axis, for a mouth without a partner).
+/// partner, with the back axis flipped (or every axis, for a mouth without a partner). A mouth a
+/// player threw has its colour.
 #[derive(Clone)]
 pub struct Mouth {
     pub frame: DMat4,
@@ -148,9 +150,11 @@ pub struct Mouth {
     pub partner_index: usize,
     pub pair_index: usize,
     pub name: String,
+    pub color: Option<WormholeColor>,
 }
 
-/// `World` is the whole scene at one curvature radius.
+/// `World` is the whole scene at one curvature radius; its first `static_mouth_count` mouths are
+/// the map's, and players' thrown ones follow.
 #[derive(Clone)]
 pub struct World {
     pub curvature_radius_m: f64,
@@ -160,6 +164,7 @@ pub struct World {
     pub spawn_frame: DMat4,
     pub throat_m: f64,
     pub bend_cutoff_m: f64,
+    pub static_mouth_count: usize,
 }
 
 impl World {
@@ -176,6 +181,7 @@ impl World {
             spawn_frame: DMat4::IDENTITY,
             throat_m: THROAT_PER_HORIZON * HORIZON_RADIUS_M,
             bend_cutoff_m: BEND_CUTOFF_PER_R * curvature_radius_m,
+            static_mouth_count: 0,
         };
         world.spawn_frame = world.make_ground_frame(SPAWN_X_M, SPAWN_Z_M, SPAWN_HEADING_RAD);
         world.build_rails();
@@ -192,6 +198,7 @@ impl World {
         });
         let pairs: Vec<(DMat4, DMat4)> = world.make_default_wormholes();
         world.set_wormholes(&pairs);
+        world.static_mouth_count = world.mouths.len();
         world.place_trees();
         world
     }
@@ -209,6 +216,7 @@ impl World {
             spawn_frame: DMat4::IDENTITY,
             throat_m: THROAT_PER_HORIZON * HORIZON_RADIUS_M,
             bend_cutoff_m: BEND_CUTOFF_PER_R * curvature_radius_m,
+            static_mouth_count: 0,
         }
     }
 
@@ -261,6 +269,7 @@ impl World {
             spawn_frame: to_frame(&spawn.frame),
             throat_m: mouth.schwarzschild_radius_m * THROAT_PER_HORIZON,
             bend_cutoff_m: mouth.reach_m,
+            static_mouth_count: 0,
         };
         let mut groups: Vec<&str> = Vec::new();
         for map_box in &map.boxes {
@@ -319,6 +328,7 @@ impl World {
                     partner_index,
                     pair_index: k.min(partner_index) / 2,
                     name: warp.name.clone(),
+                    color: None,
                 }
             })
             .collect();
@@ -327,6 +337,7 @@ impl World {
             world.mouths[k].gluing =
                 partner_frame * world.mouths[k].flip * world.mouths[k].to_local;
         }
+        world.static_mouth_count = world.mouths.len();
         Ok(world)
     }
 
@@ -393,6 +404,93 @@ impl World {
     pub fn add_avatar(&mut self, frame: DMat4, name: &str, half_m: [f64; 3], color: Color) {
         self.group_boxes(frame, name, |world| {
             world.add_box(frame, half_m, color, MATERIAL_SOLID)
+        });
+    }
+
+    /// `set_thrown_wormholes` replaces the thrown mouths with `pairs`, each a purple and a green
+    /// place linked to each other, after the map's own mouths.
+    ///
+    /// Example: `world.set_thrown_wormholes(&[[purple, green]]);`
+    pub fn set_thrown_wormholes(&mut self, pairs: &[[MouthPlace; 2]]) {
+        self.mouths.truncate(self.static_mouth_count);
+        assert!(
+            self.mouths.len() + 2 * pairs.len() <= MAX_MOUTH_COUNT,
+            "set_thrown_wormholes: more than {MAX_MOUTH_COUNT} mouths"
+        );
+        let mut flip: DMat4 = DMat4::IDENTITY;
+        flip.col_mut(AXIS_Z)[AXIS_Z] = -1.0;
+        for pair in pairs {
+            let first: usize = self.mouths.len();
+            for (side, color) in [WormholeColor::Purple, WormholeColor::Green]
+                .into_iter()
+                .enumerate()
+            {
+                let frame: DMat4 = pair[side].get_frame(self.curvature_radius_m);
+                self.mouths.push(Mouth {
+                    frame,
+                    to_local: invert_lorentz(frame),
+                    flip,
+                    gluing: DMat4::IDENTITY,
+                    center: frame.col(AXIS_W),
+                    partner_index: first + 1 - side,
+                    pair_index: first / 2,
+                    name: format!("the {} wormhole", color.get_name().to_lowercase()),
+                    color: Some(color),
+                });
+            }
+            for k in [first, first + 1] {
+                let partner_frame: DMat4 = self.mouths[self.mouths[k].partner_index].frame;
+                self.mouths[k].gluing = partner_frame * flip * self.mouths[k].to_local;
+            }
+        }
+    }
+
+    /// `can_place_mouth` says whether a thrown mouth may hover at `place`: its jump sphere (which
+    /// the Metal shader crosses in one go) clear of the ground, every box, the map's mouths' jump
+    /// spheres and those of the thrown mouths at `others`.
+    ///
+    /// Example: `if world.can_place_mouth(&place, &others) { ... }`
+    pub fn can_place_mouth(&self, place: &MouthPlace, others: &[MouthPlace]) -> bool {
+        let (r, jump_m) = (self.curvature_radius_m, self.get_jump_radius_m());
+        let centre: DVec4 = place.get_centre(r);
+        let is_clear_of = |x: DVec4| get_distance(centre, x) * r >= 2.0 * jump_m;
+        r * centre[AXIS_Y].asinh() > jump_m
+            && self
+                .boxes
+                .iter()
+                .all(|b| self.get_box_lower_bound_m(b, centre) > jump_m)
+            && self.mouths[..self.static_mouth_count]
+                .iter()
+                .all(|m| is_clear_of(m.center))
+            && others.iter().all(|other| is_clear_of(other.get_centre(r)))
+    }
+
+    /// `find_hit_s` gives how far along a straight chord from x along unit v (at most `s_max`, in
+    /// curvature radii) the ground is, for a thrown mouth's flight: on the house, players and
+    /// thrown mouths collide with the ground only.
+    ///
+    /// Example: `let s = world.find_hit_s(x, v, 0.01);`
+    pub fn find_hit_s(&self, x: DVec4, v: DVec4, s_max: f64) -> Option<f64> {
+        let is_falling_in: bool = x.y > 0.0 && v.y < 0.0 && x.y / -v.y < 1.0;
+        is_falling_in
+            .then(|| (x.y / -v.y).atanh())
+            .filter(|&s| s <= s_max)
+    }
+
+    /// `add_markers` adds a glowing cube for each of `markers` (a centre, a colour and a half size
+    /// in meters), all in one cluster: a thrown mouth in the air, or one down whose partner isn't.
+    /// Add them after every avatar, so the avatars' boxes keep their places.
+    ///
+    /// Example: `shared.add_markers(&[(x, WormholeColor::Purple, 0.15)]);`
+    pub fn add_markers(&mut self, markers: &[(DVec4, WormholeColor, f64)]) {
+        let Some(&(first, _, _)) = markers.first() else {
+            return;
+        };
+        let at = |x: DVec4| orthonormalize_frame(DMat4::from_cols(DVec4::X, DVec4::Y, DVec4::Z, x));
+        self.group_boxes(at(first), "a thrown wormhole", |world| {
+            for &(x, color, half_m) in markers {
+                world.add_box(at(x), [half_m; 3], color.get_rgb(), MATERIAL_GLOW);
+            }
         });
     }
 
@@ -792,6 +890,7 @@ impl World {
                     partner_index: 2 * pair_index + 1 - side,
                     pair_index,
                     name: format!("{}{}", pair_index + 1, if side == 0 { 'A' } else { 'B' }),
+                    color: None,
                 });
             }
         }
@@ -873,12 +972,22 @@ mod tests {
     //! | Cluster | house, pylon, tree | `every_box_is_inside_its_cluster_bound` |
     //! | Mouth | each of the demo's mouths | `jump_spheres_hold_no_boxes_or_ground` |
     //! | World's source | built in code, loaded from `common/maps/house_demo` | `the_house_map_loads_the_built_world` |
+    //! | Thrown pair | walked into (the walker comes out of the other mouth) | `a_thrown_pair_carries_a_walker` |
+    //! | Thrown mouth's place | in the open, at a map mouth, in a box, near another thrown mouth | `thrown_mouths_keep_clear_of_boxes_and_mouths` |
+    //! | Players' thrown mouths and markers | every player's at once | `every_players_wormholes_fit_the_shader` |
 
     use super::*;
     use crate::geometry::{make_rotation_about, minkowski_dot};
+    use crate::net::MAX_PLAYER_COUNT;
+    use crate::physics::{Input, Player, update_player};
+    use crate::terrain::get_fermi_coordinates;
     use glam::DVec3;
 
     const SAMPLE_COUNT_PER_SIDE: usize = 9;
+    const AHEAD_M: f64 = 5.0;
+    const ASIDE_M: f64 = 20.0;
+    const WALK_STEP_COUNT: usize = 90;
+    const STEP_S: f64 = 1.0 / 60.0;
     const TOLERANCE: f64 = 1e-9;
     const TIGHTNESS: f64 = 0.02;
 
@@ -990,6 +1099,63 @@ mod tests {
                 assert!(bound >= sampled - TOLERANCE);
                 assert!(bound <= sampled + TIGHTNESS);
             }
+        }
+    }
+
+    #[test]
+    fn a_thrown_pair_carries_a_walker() {
+        let mut world: World = World::Empty(DEFAULT_CURVATURE_RADIUS_M);
+        world.set_thrown_wormholes(&[[open_place(AHEAD_M, 0.0), open_place(AHEAD_M, ASIDE_M)]]);
+        let mut player: Player = Player::AtSpawn(&world);
+        let input: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        let messages: Vec<String> = (0..WALK_STEP_COUNT)
+            .flat_map(|_| update_player(&world, &mut player, &input, STEP_S))
+            .collect();
+        assert!(
+            messages.contains(&"Through the purple wormhole".to_string()),
+            "{messages:?}"
+        );
+        let [_, v_m, _] = get_fermi_coordinates(player.get_position(), world.curvature_radius_m);
+        assert!((v_m - ASIDE_M).abs() < AHEAD_M, "{v_m}");
+    }
+
+    #[test]
+    fn thrown_mouths_keep_clear_of_boxes_and_mouths() {
+        let empty: World = World::Empty(DEFAULT_CURVATURE_RADIUS_M);
+        let (open, other) = (open_place(AHEAD_M, 0.0), open_place(AHEAD_M, ASIDE_M));
+        assert!(empty.can_place_mouth(&open, &[other]));
+        assert!(!empty.can_place_mouth(&open, &[open_place(AHEAD_M, 1.0)]));
+        let built: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
+        let r: f64 = built.curvature_radius_m;
+        for x in [built.mouths[0].center, built.boxes[0].center] {
+            let [u_m, v_m, _] = get_fermi_coordinates(x, r);
+            assert!(!built.can_place_mouth(&open_place(u_m, v_m), &[]));
+        }
+    }
+
+    #[test]
+    fn every_players_wormholes_fit_the_shader() {
+        let map: Map = Map::Load(&crate::map::get_map_folder("house_demo")).expect("the house map");
+        let world: World = World::FromMap(&map).expect("a world of boxes and mouths");
+        let (others, markers) = (MAX_PLAYER_COUNT - 1, 2 * MAX_PLAYER_COUNT);
+        assert!(world.mouths.len() + 2 * MAX_PLAYER_COUNT <= MAX_MOUTH_COUNT);
+        assert!(world.boxes.len() + others + markers <= MAX_BOX_COUNT);
+        assert!(world.clusters.len() + others + 1 <= MAX_CLUSTER_COUNT);
+    }
+
+    /// `open_place` gives a mouth place at eye height over (u, v), facing back toward the origin
+    /// along u.
+    ///
+    /// Example: `let place = open_place(5.0, 0.0);`
+    fn open_place(u_m: f64, v_m: f64) -> MouthPlace {
+        MouthPlace {
+            u_m,
+            v_m,
+            h_m: EYE_HEIGHT_M,
+            yaw_rad: 0.0,
         }
     }
 
