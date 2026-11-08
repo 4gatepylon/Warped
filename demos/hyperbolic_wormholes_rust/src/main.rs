@@ -145,6 +145,7 @@ const MENU_LEFT_PX: f32 = 4.0;
 const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
+const SERVER_SILENT_S: f64 = 2.0;
 const MENU_DIM_FRAC: f32 = 0.8;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
@@ -1718,6 +1719,7 @@ struct Session {
     player_settings: PerPlayerSettings,
     player_settings_path: Option<PathBuf>,
     menu: Option<menu::Menu>,
+    last_connection_problem: Option<ConnectionProblem>,
     exit_prompt: exit_prompt::ExitPrompt,
     map_layout: map_layout::MapLayout,
     gun: Gun,
@@ -1992,6 +1994,7 @@ impl Session {
             player_settings,
             player_settings_path,
             menu: None,
+            last_connection_problem: None,
             exit_prompt: exit_prompt::ExitPrompt::New(),
             map_layout: map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?,
             render_scale: arguments
@@ -2251,7 +2254,9 @@ impl Session {
                 }
             }
         }
-        if self.update_multiplayer()? {
+        let is_out: bool = self.update_multiplayer()?;
+        self.report_connection_problem();
+        if is_out {
             self.message_time_s -= dt_s;
             self.hud_time_s += dt_s;
             return Ok(());
@@ -2353,17 +2358,18 @@ impl Session {
 
     /// `can_shoot` says whether this player may shoot: standing still or crouched (walking while
     /// crouched is fine), so not while walking upright or running, not while jumping or falling on
-    /// a voxel map, not while holding `E` on a console, and not once a team has won.
+    /// a voxel map, and, in a game on a server, only once in the game (welcomed, so not in the
+    /// lobby, while joining or while out after a hit), not while holding `E` on a console, and not
+    /// once a team has won.
     ///
     /// Example: `if self.can_shoot() { ... }`
     fn can_shoot(&self) -> bool {
         !self.is_running
             && !self.is_jumping
             && !self.is_walking_upright
-            && self
-                .multiplayer
-                .as_ref()
-                .is_none_or(|m| m.disabling.is_none() && m.client.game.winner.is_none())
+            && self.multiplayer.as_ref().is_none_or(|m| {
+                m.client.id.is_some() && m.disabling.is_none() && m.client.game.winner.is_none()
+            })
     }
 
     /// `switch_gun` makes `gun` the one in hand, stopping a shot in flight.
@@ -2918,10 +2924,47 @@ impl Session {
         true
     }
 
+    /// `get_connection_problem` gives why this window can't play on its server right now, if it
+    /// can't: nothing from the server for `SERVER_SILENT_S` while not out after a hit (no server
+    /// at that address and port), its snapshots of another version, or a full game while asking
+    /// to join.
+    ///
+    /// Example: `if let Some(problem) = self.get_connection_problem() { ... }`
+    fn get_connection_problem(&self) -> Option<ConnectionProblem> {
+        let multiplayer: &Multiplayer = self.multiplayer.as_ref()?;
+        let client: &net::Client = &multiplayer.client;
+        if !multiplayer.is_eliminated && client.get_silent_s() > SERVER_SILENT_S {
+            Some(ConnectionProblem::Silent)
+        } else if client.is_other_version() {
+            Some(ConnectionProblem::OtherVersion)
+        } else if client.is_full() && client.is_waiting_for_welcome() {
+            Some(ConnectionProblem::Full)
+        } else {
+            None
+        }
+    }
+
+    /// `report_connection_problem` prints a connection problem's longer hint to the terminal
+    /// once, when it starts.
+    ///
+    /// Example: `self.report_connection_problem();`
+    fn report_connection_problem(&mut self) {
+        let problem: Option<ConnectionProblem> = self.get_connection_problem();
+        if problem != self.last_connection_problem
+            && let (Some(problem), Some(multiplayer)) = (problem, &self.multiplayer)
+        {
+            eprintln!("{}", problem.get_hint(multiplayer.client.get_server()));
+        }
+        self.last_connection_problem = problem;
+    }
+
     /// `get_banner_lines` gives the two lines shown over the view: while the exit prompt shows,
-    /// its question and keys; in the lobby, each team's head count and the keys that join a team;
-    /// once a team has won, the winner and how to start a new game; while this player is out after
-    /// a hit, "YOU DIED" and the countdown to respawning; or `None`.
+    /// its question and keys; when this window can't play on its server
+    /// (`get_connection_problem`), what is wrong; in the lobby, each
+    /// team's head count and the keys that join a team; after asking to join, until welcomed, that
+    /// it is joining and the server's address; once a team has won, the winner and how to start a
+    /// new game; while this player is out after a hit, "YOU DIED" and the countdown to respawning;
+    /// or `None`.
     ///
     /// Example: `if let Some(lines) = session.get_banner_lines() { ... }`
     fn get_banner_lines(&self) -> Option<[String; 2]> {
@@ -2929,6 +2972,10 @@ impl Session {
             return Some(exit_prompt::get_lines());
         }
         let multiplayer: &Multiplayer = self.multiplayer.as_ref()?;
+        let client: &net::Client = &multiplayer.client;
+        if let Some(problem) = self.get_connection_problem() {
+            return Some(problem.get_lines(client.get_server()));
+        }
         if multiplayer.client.is_in_lobby() {
             let counts: String = match multiplayer.client.lobby_counts {
                 Some([blue, red]) => format!("BLUE {blue}   RED {red}"),
@@ -2942,6 +2989,12 @@ impl Session {
                     keys.get_label(Action::JoinBlue),
                     keys.get_label(Action::JoinRed)
                 ),
+            ]);
+        }
+        if client.is_waiting_for_welcome() && !multiplayer.is_eliminated {
+            return Some([
+                "JOINING THE GAME".to_string(),
+                format!("server {}", client.get_server()),
             ]);
         }
         if let Some(winner) = multiplayer.client.game.winner {
@@ -3443,6 +3496,58 @@ fn make_wand(
         } else {
             WAND_BLUE_TIP_COLOR
         },
+    }
+}
+
+/// `ConnectionProblem` is why a window can't play on its server: nothing comes from it (no server
+/// at that address and port, or it stopped), it runs another version of the game, or its game is
+/// full.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ConnectionProblem {
+    Silent,
+    OtherVersion,
+    Full,
+}
+
+impl ConnectionProblem {
+    /// `get_lines` gives the banner's two lines for this problem with the server at `server`
+    /// (short enough for the banner).
+    ///
+    /// Example: `let lines = ConnectionProblem::Silent.get_lines(server);`
+    fn get_lines(self, server: std::net::SocketAddr) -> [String; 2] {
+        match self {
+            ConnectionProblem::Silent => [
+                "NO ANSWER FROM THE SERVER".to_string(),
+                format!("at {server}"),
+            ],
+            ConnectionProblem::OtherVersion => [
+                "SERVER RUNS ANOTHER VERSION".to_string(),
+                "Rebuild both from one commit".to_string(),
+            ],
+            ConnectionProblem::Full => [
+                "THE GAME IS FULL".to_string(),
+                format!("{} players already", net::MAX_PLAYER_COUNT),
+            ],
+        }
+    }
+
+    /// `get_hint` gives the longer advice for this problem with the server at `server`, for the
+    /// terminal.
+    ///
+    /// Example: `eprintln!("{}", ConnectionProblem::Silent.get_hint(server));`
+    fn get_hint(self, server: std::net::SocketAddr) -> String {
+        match self {
+            ConnectionProblem::Silent => format!(
+                "No answer from a game server at {server} for {SERVER_SILENT_S} s. Is it running, on that address and port? The server prints the address and port to join (its own port, not the port of a window that joined it). Start one with `make serve-game`, then `make join-game SERVER=<address> PORT=<port>`."
+            ),
+            ConnectionProblem::OtherVersion => format!(
+                "The game server at {server} runs another version of the game: its snapshots don't fit this one. Rebuild the server and this game from the same commit (pull, then restart `make serve-game`)."
+            ),
+            ConnectionProblem::Full => format!(
+                "The game server at {server} already has {} players, so it can't take more until one leaves.",
+                net::MAX_PLAYER_COUNT
+            ),
+        }
     }
 }
 
