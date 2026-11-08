@@ -75,7 +75,7 @@ const NEARBY_REACH_M: f64 = 6.0;
 const LASER_MAX_LENGTH_M: f64 = 480.0;
 const LASER_MAX_ITERATIONS: usize = 4000;
 const LASER_MUZZLE_M: f64 = 3.0;
-pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
+pub const MUZZLE_M: DVec3 = DVec3::new(0.262, -0.22, -0.777);
 const BEAM_TOLERANCE_M: f64 = 0.02;
 const MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS: f64 = 4.0;
 const BEAM_CLIP_BISECTION_COUNT: usize = 40;
@@ -306,6 +306,21 @@ pub struct BeamSegment {
     pub length: f64,
 }
 
+impl BeamSegment {
+    /// `Between` gives the geodesic segment from `p` to `q`, or `None` if they are the same point.
+    ///
+    /// Example: `let segment = BeamSegment::Between(muzzle, end);`
+    #[allow(non_snake_case)]
+    pub fn Between(p: DVec4, q: DVec4) -> Option<BeamSegment> {
+        let length: f64 = get_distance(p, q);
+        (length > 1e-9).then(|| BeamSegment {
+            a: p,
+            b: (q - length.cosh() * p) / length.sinh(),
+            length,
+        })
+    }
+}
+
 /// `Shot` is a laser's path: its drawn segments, where it hit (and what), and the mouths it went through.
 pub struct Shot {
     pub segments: Vec<BeamSegment>,
@@ -407,7 +422,7 @@ pub(crate) fn map_klein(k: DVec3) -> DVec4 {
 /// `map_exp` maps a local offset in meters to the hyperboloid by the exponential map at the origin.
 ///
 /// Example: `let probe = map_exp(DVec3::new(0.25, 0.0, 0.0), 40.0);`
-fn map_exp(q_m: DVec3, r: f64) -> DVec4 {
+pub fn map_exp(q_m: DVec3, r: f64) -> DVec4 {
     let n: f64 = q_m.length() / r;
     if n < TINY {
         return DVec4::W;
@@ -1257,14 +1272,7 @@ impl VoxelWorld {
     ///
     /// Example: `let segments = world.simplify_path(&points);`
     fn simplify_path(&self, points: &[DVec4]) -> Vec<BeamSegment> {
-        let make_segment = |p: DVec4, q: DVec4| -> Option<BeamSegment> {
-            let length: f64 = get_distance(p, q);
-            (length > 1e-9).then(|| BeamSegment {
-                a: p,
-                b: (q - length.cosh() * p) / length.sinh(),
-                length,
-            })
-        };
+        let make_segment = BeamSegment::Between;
         let offset = |p: DVec4, segment: &BeamSegment| -> f64 {
             let perp: DVec4 = p + minkowski_dot(p, segment.a) * segment.a
                 - minkowski_dot(p, segment.b) * segment.b;
