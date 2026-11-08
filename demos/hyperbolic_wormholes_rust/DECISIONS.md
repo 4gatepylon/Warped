@@ -486,6 +486,16 @@
 - **Rationale:** you asked for twice the speeds, three times the gravity, a sprint energy bar as described in the
   levels, and head bobbing.
 
+### D46. A gun on screen, and no shooting while running
+
+- **Choice:** a gun drawn in the bottom right with four rectangles (grip, body, barrel, and a muzzle in the team's
+  colour). Walking or standing, it points ahead and sways a little with each step; running (sprinting while moving),
+  it eases over a sixth of a second into a lowered, leaning pose that bounces with each stride. While running, clicks
+  don't shoot, a shot in flight stops, and a laser toggled on with `L` is off.
+- **Alternatives:** a sprite or 3D model of a gun (more code and assets); letting players shoot while running.
+- **Rationale:** you asked for a simple moving gun of rectangles that jogs when running and points forward when
+  walking, and for no shooting while running.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
