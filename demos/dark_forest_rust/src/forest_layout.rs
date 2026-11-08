@@ -86,6 +86,20 @@ const RED_PAINT: u8 = 7;
 const BLUE_PAINT: u8 = 8;
 const RED_CONSOLE: u8 = 9;
 const BLUE_CONSOLE: u8 = 10;
+const CANDLE_WAX: u8 = 11;
+const CANDLE_FLAME: u8 = 12;
+/// `CANDLE_RADIUS_M` and `CANDLE_HALF_HEIGHT_M` size a candle's wax.
+const CANDLE_RADIUS_M: f32 = 0.05;
+const CANDLE_HALF_HEIGHT_M: f32 = 0.1;
+/// `FLAME_RADIUS_M` and `FLAME_HALF_HEIGHT_M` size a candle's flame.
+const FLAME_RADIUS_M: f32 = 0.025;
+const FLAME_HALF_HEIGHT_M: f32 = 0.06;
+/// `CANDLE_LIGHT_RGB`, `CANDLE_LIGHT_RADIUS_M` and `CANDLE_FLICKER_FRAC` are a candle's light.
+const CANDLE_LIGHT_RGB: [f32; 3] = [1.0, 0.5, 0.18];
+const CANDLE_LIGHT_RADIUS_M: f32 = 3.5;
+const CANDLE_FLICKER_FRAC: f32 = 0.35;
+/// `CANDLE_OFFSET_PER_SUPPORT_RADIUS_FRAC` is how far from a support bundle's middle its candle stands.
+const CANDLE_OFFSET_PER_SUPPORT_RADIUS_FRAC: f32 = 1.6;
 
 /// `Side` is one team's half of the forest: red's is as written, blue's is its half turn.
 #[derive(Clone, Copy)]
@@ -172,6 +186,10 @@ impl Layout {
         };
         let mut culms: Vec<(Vec2, f32, f32, f32)> = Vec::new();
         if radius_m >= SUPPORT_RADIUS_M {
+            self.add_candle(
+                &format!("{name} candle"),
+                foot_m + Vec3::X * (radius_m * CANDLE_OFFSET_PER_SUPPORT_RADIUS_FRAC * turn),
+            );
             let culm_radius_m: f32 = radius_m * SUPPORT_CULM_RADIUS_FRAC;
             let ring_radius_m: f32 = radius_m - culm_radius_m;
             let ring_count: usize =
@@ -340,6 +358,41 @@ impl Layout {
         });
     }
 
+    /// `add_candle` adds a candle standing at `foot_m`, with a flickering warm light above it.
+    fn add_candle(&mut self, name: &str, foot_m: Vec3) {
+        let flame_y_m: f32 = 2.0 * CANDLE_HALF_HEIGHT_M + FLAME_HALF_HEIGHT_M;
+        self.map.structures.push(Structure {
+            name: name.to_string(),
+            frame: translation_frame(foot_m),
+            shapes: vec![
+                Shape {
+                    kind: "cylinder".to_string(),
+                    centre_m: [0.0, CANDLE_HALF_HEIGHT_M, 0.0],
+                    half_m: [CANDLE_RADIUS_M, CANDLE_HALF_HEIGHT_M, CANDLE_RADIUS_M],
+                    round_m: 0.0,
+                    axis: 1,
+                    material: CANDLE_WAX,
+                },
+                Shape {
+                    kind: "ellipsoid".to_string(),
+                    centre_m: [0.0, flame_y_m, 0.0],
+                    half_m: [FLAME_RADIUS_M, FLAME_HALF_HEIGHT_M, FLAME_RADIUS_M],
+                    round_m: 0.0,
+                    axis: 1,
+                    material: CANDLE_FLAME,
+                },
+            ],
+        });
+        self.map.lights.push(Light {
+            position: (foot_m + Vec3::Y * (flame_y_m + 2.0 * FLAME_HALF_HEIGHT_M))
+                .extend(1.0)
+                .to_array(),
+            color: CANDLE_LIGHT_RGB,
+            radius_m: CANDLE_LIGHT_RADIUS_M,
+            flicker_frac: Some(CANDLE_FLICKER_FRAC),
+        });
+    }
+
     /// `add_deck` adds a square deck whose top is at `top_m`.
     fn add_deck(&mut self, group: &str, centre: Vec2, half: Vec2, top_m: f32) {
         self.add_box(
@@ -349,10 +402,21 @@ impl Layout {
             PLANKS,
         );
         self.keep_clear(centre, half);
+        for (index, corner) in [Vec2::new(0.8, 0.8), Vec2::new(-0.8, -0.8)]
+            .into_iter()
+            .enumerate()
+        {
+            let point: Vec2 = centre + half * corner * get_half_turn(centre);
+            self.add_candle(
+                &format!("{group} candle {index}"),
+                Vec3::new(point.x, top_m, point.y),
+            );
+        }
         self.map.lights.push(Light {
             position: [centre.x, top_m + 2.4, centre.y, 1.0],
             color: [1.0, 0.62, 0.3],
             radius_m: 5.0,
+            flicker_frac: None,
         });
     }
 
@@ -396,6 +460,13 @@ impl Layout {
                 );
             }
         }
+        let middle_on_path: Vec2 = low.lerp(high, 0.5);
+        let middle: Vec2 =
+            middle_on_path + across * (half_width_m + 0.04) * get_half_turn(middle_on_path);
+        self.add_candle(
+            &format!("{group} candle"),
+            Vec3::new(middle.x, DECK_TOP_M + RAIL_HEIGHT_M, middle.y),
+        );
     }
 
     /// `add_ladder` adds a rope ladder from `bottom_m` to `top_m`, hanging at `centre` with its
@@ -443,6 +514,7 @@ impl Layout {
             position: [foot_m.x, foot_m.y + 1.9, foot_m.z, 1.0],
             color,
             radius_m: 3.5,
+            flicker_frac: None,
         });
     }
 
@@ -698,6 +770,7 @@ fn add_team_side(layout: &mut Layout, side: Side) {
         position: side.at(-14.0, 3.2, 41.0).extend(1.0).to_array(),
         color: [1.0, 0.62, 0.3],
         radius_m: 5.0,
+        flicker_frac: None,
     });
 
     for (index, (x, z, is_along_x)) in [
@@ -798,6 +871,8 @@ fn materials() -> Vec<Material> {
         entry(BLUE_PAINT, "blue paint", [0.1, 0.22, 0.62], "solid"),
         entry(RED_CONSOLE, "red console", [1.0, 0.22, 0.12], "light"),
         entry(BLUE_CONSOLE, "blue console", [0.2, 0.45, 1.0], "light"),
+        entry(CANDLE_WAX, "candle wax", [0.85, 0.8, 0.65], "solid"),
+        entry(CANDLE_FLAME, "candle flame", [1.0, 0.6, 0.25], "light"),
     ]
 }
 
@@ -823,6 +898,16 @@ fn get_prop_jitter_m(salt: u32, index: usize) -> Vec2 {
         state as f32 / u32::MAX as f32
     };
     Vec2::new(next_frac() - 0.5, next_frac() - 0.5) * 2.0 * PROP_JITTER_M
+}
+
+/// `get_half_turn` is 1 for a point on red's half and -1 on blue's, so a detail placed with it
+/// turns half a turn with its half.
+fn get_half_turn(point: Vec2) -> f32 {
+    if point.y < 0.0 || (point.y == 0.0 && point.x < 0.0) {
+        -1.0
+    } else {
+        1.0
+    }
 }
 
 /// `unit_direction` scales a direction to length 1, in f64 so the map's validator agrees.

@@ -166,6 +166,8 @@ pub struct Light {
     pub position: [f32; 4],
     pub color: [f32; 3],
     pub radius_m: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flicker_frac: Option<f32>,
 }
 
 /// `Sky` is the sky and the sun.

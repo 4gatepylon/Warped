@@ -103,6 +103,21 @@ pub struct FrameData {
     pub damage_flash_frac: f32,
 }
 
+/// `FLICKER_SLOW_RAD_PER_S` and `FLICKER_FAST_RAD_PER_S` are the two waves a flame flickers by.
+const FLICKER_SLOW_RAD_PER_S: f32 = 11.0;
+const FLICKER_FAST_RAD_PER_S: f32 = 27.0;
+
+/// `get_flicker_scale` is how bright light `index` is at `time_s`: dimmed by up to
+/// `flicker_frac`, out of step with the other lights.
+///
+/// Example: `color_rgb * get_flicker_scale(time_s, 3, 0.35)`
+fn get_flicker_scale(time_s: f32, index: usize, flicker_frac: f32) -> f32 {
+    let phase_rad: f32 = index as f32 * 1.7;
+    let wave: f32 = 0.6 * (time_s * FLICKER_SLOW_RAD_PER_S + phase_rad).sin()
+        + 0.4 * (time_s * FLICKER_FAST_RAD_PER_S + phase_rad * 2.3).sin();
+    1.0 - flicker_frac * (0.5 + 0.5 * wave)
+}
+
 /// `Session` is one match.
 pub struct Session {
     pub arena: Arena,
@@ -793,10 +808,13 @@ impl Session {
             .arena
             .lights
             .iter()
-            .map(|light| PointLight {
+            .enumerate()
+            .map(|(index, light)| PointLight {
                 position_m: light.position_m,
                 radius_m: light.radius_m,
-                color_rgb: light.color_rgb * scene.light_scale,
+                color_rgb: light.color_rgb
+                    * scene.light_scale
+                    * get_flicker_scale(self.time_s, index, light.flicker_frac),
             })
             .collect();
         let mut world_particles: Vec<Particle> = Vec::new();

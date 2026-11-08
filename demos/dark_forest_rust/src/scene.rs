@@ -141,6 +141,12 @@ fn create_surface_materials(
                 Surface::Horizon => glowing(Vec3::ZERO),
                 Surface::Accretion => glowing(Vec3::new(0.6, 0.22, 0.06)),
                 Surface::Throat => glowing(Vec3::new(0.16, 0.08, 0.45)),
+                Surface::Wax => MaterialData {
+                    base_color_factor: Vec4::new(0.85, 0.8, 0.65, 1.0),
+                    roughness_factor: 0.6,
+                    ..MaterialData::default()
+                },
+                Surface::Flame => glowing(Vec3::new(1.6, 0.8, 0.3)),
                 Surface::Ground => textured(index, Vec4::new(0.6, 0.66, 0.5, 1.0)),
                 Surface::Bark => textured(index, Vec4::new(0.78, 0.84, 0.62, 1.0)),
                 Surface::Leaves => textured(index, Vec4::new(0.55, 0.78, 0.42, 1.0)),

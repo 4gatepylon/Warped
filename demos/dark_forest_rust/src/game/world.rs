@@ -29,12 +29,14 @@ pub enum Surface {
     Horizon,
     Accretion,
     Throat,
+    Wax,
+    Flame,
 }
 
 impl Surface {
     /// `ALL` lists every surface; the first `TEXTURED_COUNT` have their own texture sets, in
     /// the order of `asset_manifest::SURFACE_TEXTURES`.
-    pub const ALL: [Surface; 13] = [
+    pub const ALL: [Surface; 15] = [
         Surface::Ground,
         Surface::Bark,
         Surface::Planks,
@@ -48,6 +50,8 @@ impl Surface {
         Surface::Horizon,
         Surface::Accretion,
         Surface::Throat,
+        Surface::Wax,
+        Surface::Flame,
     ];
     /// `TEXTURED_COUNT` is how many surfaces have their own texture sets.
     pub const TEXTURED_COUNT: usize = 5;
@@ -63,6 +67,7 @@ impl Surface {
             Surface::Rope => 0.5,
             Surface::RedConsole | Surface::BlueConsole => 1.0,
             Surface::Horizon | Surface::Accretion | Surface::Throat => 1.0,
+            Surface::Wax | Surface::Flame => 1.0,
         }
     }
 
@@ -78,6 +83,8 @@ impl Surface {
             "blue paint" => Surface::BluePaint,
             "red console" => Surface::RedConsole,
             "blue console" => Surface::BlueConsole,
+            "candle wax" => Surface::Wax,
+            "candle flame" => Surface::Flame,
             _ => Surface::Planks,
         }
     }
@@ -97,6 +104,7 @@ pub struct LightPlacement {
     pub position_m: Vec3,
     pub radius_m: f32,
     pub color_rgb: Vec3,
+    pub flicker_frac: f32,
 }
 
 /// `ShapeKind` is the kind of a smooth shape that is drawn as a mesh.
@@ -242,7 +250,7 @@ impl Arena {
                     rotation: Mat3::from_mat4(frame),
                     surface,
                 });
-                if surface != Surface::Leaves {
+                if !matches!(surface, Surface::Leaves | Surface::Wax | Surface::Flame) {
                     boxes.push(WorldBox {
                         aabb: Aabb::from_center(centre_m, collision_half_m),
                         surface,
@@ -273,6 +281,7 @@ impl Arena {
                 position_m: Vec3::new(light.position[0], light.position[1], light.position[2]),
                 radius_m: light.radius_m,
                 color_rgb: Vec3::from(light.color),
+                flicker_frac: light.flicker_frac.unwrap_or(0.0),
             })
             .collect();
         let warps: Warps = Warps::from_map(&map.warps);

@@ -137,6 +137,7 @@ distance d to its centre, the origin of its `frame`:
 `{"position": [x, y, z, w], "color": [r, g, b], "radius_m"}`: a lamp. At distance d from it, a surface facing it at
 angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/radius_m)²), times
 0.3 + 0.7 max(cos θ, 0), faded smoothly to nothing between 1.8 and 3 times `radius_m`.
+An optional `"flicker_frac"` (0 to 1) makes it a flame: its brightness wavers, dimming by up to that fraction.
 
 ### Sky
 
