@@ -31,6 +31,7 @@ mod render_cpu;
 mod render_metal;
 mod render_voxel;
 mod scene_data;
+mod settings;
 mod voxel_clearance;
 mod voxel_world;
 mod world;
@@ -62,6 +63,7 @@ use physics::{Input, LaserReport, Player};
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
+use settings::GameSettings;
 use voxel_world::{VoxelPlayer, VoxelWorld};
 use world::{DEFAULT_CURVATURE_RADIUS_M, World};
 
@@ -81,7 +83,6 @@ const RENDER_SCALE_ROUNDING: f64 = 1e-6;
 const RENDER_SCALE_STEP: f64 = 1.25;
 const MIN_RENDER_SCALE: f64 = 0.05;
 const MAX_FRAME_DT_S: f64 = 0.05;
-const MOTION_BLUR_S: f64 = 0.01;
 const AUTOPILOT_DT_S: f64 = 1.0 / 60.0;
 const HUD_PERIOD_S: f64 = 0.25;
 const ROUTE_WARMUP_FRAME_COUNT: usize = 5;
@@ -103,17 +104,6 @@ const WINDOW_TITLE: &str = "Hyperbolic wormholes (Rust)";
 const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
-const SHOT_DURATION_S: f64 = 0.25;
-const LASER_HITS_TO_KILL: u8 = 1;
-const RIFLE_SHOT_PERIOD_S: f64 = 0.125;
-const RIFLE_PULSE_S: f64 = 0.06;
-const RIFLE_OVERHEAT_SHOT_COUNT: f64 = 20.0;
-const RIFLE_COOL_S: f64 = 2.0;
-const RIFLE_BODY_HITS_TO_KILL: u8 = 12;
-const RIFLE_HEAD_HITS_TO_KILL: u8 = 2;
-const RIFLE_RECOIL_PITCH_RAD: f64 = 0.0075;
-const RIFLE_RECOIL_YAW_RAD: f64 = 0.0025;
-const RIFLE_RECOIL_RECOVER_S: f64 = 0.08;
 const WAND_RECOIL_M: f32 = 0.035;
 const WAND_RECOIL_TILT_RAD: f32 = 0.12;
 const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
@@ -125,7 +115,6 @@ const WAND_LASER_TIP_HALF_M: [f32; 4] = [0.016, 0.016, 0.028, 0.0];
 const WAND_RIFLE_SHAFT_HALF_M: [f32; 4] = [0.024, 0.032, 0.17, 0.0];
 const WAND_RIFLE_SHAFT_COLOR: [f32; 4] = [0.42, 0.45, 0.5, 1.0];
 const WAND_RIFLE_TIP_HALF_M: [f32; 4] = [0.007, 0.007, 0.07, 0.0];
-const RESPAWN_DELAY_S: f64 = 3.0;
 const DEATH_MASK_PX: (u32, u32) = (240, 24);
 const DEATH_TITLE_Y_PX: f32 = 2.0;
 const DEATH_COUNTDOWN_Y_PX: f32 = 14.0;
@@ -137,7 +126,6 @@ const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
 const ENERGY_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.018];
 const ENERGY_BAR_BACK_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
 const ENERGY_BAR_FILL_COLOR: [f32; 4] = [0.5, 0.82, 1.0, 0.9];
-const CONSOLE_REACH_M: f64 = 3.0;
 const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
 const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
 const DISABLE_BAR_BACK_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.5];
@@ -291,6 +279,10 @@ struct Arguments {
     /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
+    /// Game settings, a YAML file with game_settings.yaml's keys (the default): a server (--serve,
+    /// --host) sends them to every player who joins; without a server, this game uses them.
+    #[arg(long, conflicts_with = "join")]
+    settings: Option<PathBuf>,
     /// Which map to play, from common/maps/.
     #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
     map: MapName,
@@ -576,10 +568,11 @@ fn get_server_address(arguments: &Arguments) -> Result<SocketAddr> {
 /// thread until the returned flag is set, starting a new game after a win at each line read from
 /// standard input (`Enter` in the server's terminal).
 ///
-/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", vec![0, 1])?;`
+/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", GameSettings::Builtin(), vec![0, 1])?;`
 fn start_server(
     port: u16,
     map_name: &str,
+    settings: GameSettings,
     console_teams: Vec<u32>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
@@ -598,6 +591,7 @@ fn start_server(
             socket,
             &flag,
             map_name,
+            settings,
             console_teams,
             &should_start_new_game,
         ) {
@@ -608,20 +602,24 @@ fn start_server(
 }
 
 /// `start_server_process` starts this program as a game server (`--serve`, without a window) on
-/// `arguments`' port and map, and fails if it stops within `SERVER_START_S` (its port in use, say).
+/// `arguments`' port, map and settings, and fails if it stops within `SERVER_START_S` (its port in
+/// use, say).
 ///
 /// Example: `let server = start_server_process(&arguments)?;`
 fn start_server_process(arguments: &Arguments) -> Result<Child> {
     let map_name: String = get_map_flag(arguments.map);
-    let mut server: Child = Command::new(std::env::current_exe()?)
-        .args([
-            "--serve",
-            "--port",
-            &arguments.port.to_string(),
-            "--map",
-            &map_name,
-        ])
-        .spawn()?;
+    let mut command: Command = Command::new(std::env::current_exe()?);
+    command.args([
+        "--serve",
+        "--port",
+        &arguments.port.to_string(),
+        "--map",
+        &map_name,
+    ]);
+    if let Some(path) = &arguments.settings {
+        command.arg("--settings").arg(path);
+    }
+    let mut server: Child = command.spawn()?;
     std::thread::sleep(Duration::from_secs_f64(SERVER_START_S));
     if let Some(status) = server.try_wait()? {
         return Err(
@@ -629,6 +627,16 @@ fn start_server_process(arguments: &Arguments) -> Result<Child> {
         );
     }
     Ok(server)
+}
+
+/// `load_settings` gives the game settings `--settings` names, or the built-in ones.
+///
+/// Example: `let settings = load_settings(&arguments)?;`
+fn load_settings(arguments: &Arguments) -> Result<GameSettings> {
+    match &arguments.settings {
+        Some(path) => GameSettings::Load(path),
+        None => Ok(GameSettings::Builtin()),
+    }
 }
 
 /// `get_map_flag` gives a map's name as `--map` and `MAP=` take it, e.g. `lunar-surface`.
@@ -662,8 +670,18 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
     let (should_stop, thread) = start_server(
         arguments.port,
         arguments.map.get_folder_name(),
+        load_settings(arguments)?,
         consoles.iter().map(|c| c.team).collect(),
     )?;
+    println!(
+        "Game settings: {} (players who join get them).",
+        arguments
+            .settings
+            .as_ref()
+            .map_or("the built-in game_settings.yaml".to_string(), |path| path
+                .display()
+                .to_string())
+    );
     let (map, port) = (get_map_flag(arguments.map), arguments.port);
     let address: String = match find_lan_address() {
         Some(address) => address.to_string(),
@@ -1632,6 +1650,7 @@ struct Session {
     shot_time_s: f64,
     is_running: bool,
     is_jumping: bool,
+    settings: GameSettings,
     gun: Gun,
     is_trigger_held: bool,
     rifle_next_shot_s: f64,
@@ -1728,10 +1747,12 @@ impl Session {
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
         let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+        let settings: GameSettings = load_settings(arguments)?;
         let voxel: Option<VoxelState> = if map.structures.is_empty() {
             None
         } else {
-            let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
+            let mut world: VoxelWorld = VoxelWorld::FromMap(&map)?;
+            world.set_settings(settings.clone());
             let player: VoxelPlayer = match &arguments.view {
                 Some(name) => {
                     let view: VoxelView = make_voxel_bench_views()
@@ -1789,6 +1810,7 @@ impl Session {
         Ok(Session {
             world,
             player,
+            settings,
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
@@ -1837,7 +1859,7 @@ impl Session {
 
     /// `handle_event` reacts to one window event and returns false when the player quits: Esc
     /// releases the mouse (or quits if it is free), a click captures it (and once captured, a left
-    /// click fires a laser shot for `SHOT_DURATION_S`), the mouse looks, R respawns, and - and =
+    /// click fires a laser shot for the settings' `sniper.shot_s`), the mouse looks, R respawns, and - and =
     /// change the render scale.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
@@ -1895,7 +1917,7 @@ impl Session {
                     && self.can_shoot()
                     && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
                 {
-                    self.shot_time_s = SHOT_DURATION_S;
+                    self.shot_time_s = self.settings.sniper.shot_s;
                 }
             }
             Event::MouseButtonUp {
@@ -1924,7 +1946,12 @@ impl Session {
     fn update(&mut self, keys: &sdl3::keyboard::KeyboardState) -> Result<()> {
         let frame_s: f64 = self.last.elapsed().as_secs_f64();
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
-        self.motion_blur_frac = (-dt_s / MOTION_BLUR_S).exp() as f32;
+        let blur_s: f64 = self.settings.display.motion_blur_s;
+        self.motion_blur_frac = if blur_s > 0.0 {
+            (-dt_s / blur_s).exp() as f32
+        } else {
+            0.0
+        };
         self.last = Instant::now();
         if self.route_index < self.route.len() {
             self.frame_times_ms.push(frame_s * MS_PER_S);
@@ -1998,7 +2025,7 @@ impl Session {
     }
 
     /// `is_firing` says whether this player's laser is on: on for a scripted route, or a shot fired
-    /// by a click in the last `SHOT_DURATION_S`, and only while this player can shoot.
+    /// by a click in the last `sniper.shot_s` (the settings), and only while this player can shoot.
     ///
     /// Example: `let is_firing = self.is_firing();`
     fn is_firing(&self) -> bool {
@@ -2029,37 +2056,42 @@ impl Session {
     /// `update_rifle` fires the rifle while its trigger is held and this player can shoot: a
     /// `RIFLE_PULSE_S` pulse of the beam every `RIFLE_SHOT_PERIOD_S`, each adding
     /// 1 / `RIFLE_OVERHEAT_SHOT_COUNT` of heat. At full heat it overheats; it cools fully in
-    /// `RIFLE_COOL_S` while not firing, and fires again once cool. Each shot recoils: the view kicks
-    /// up by `RIFLE_RECOIL_PITCH_RAD` and sideways by `RIFLE_RECOIL_YAW_RAD`, alternately left and
-    /// right, and the rifle jolts back (`recoil_frac`, settling over `RIFLE_RECOIL_RECOVER_S`).
+    /// `cool_down_s` while not firing, and fires again once cool. Each shot recoils: the view kicks
+    /// up by `recoil_up_rad` and sideways by `recoil_sideways_rad`, alternately left and right, and
+    /// the rifle jolts back (`recoil_frac`, settling over `recoil_settle_s`); all from the settings.
     ///
     /// Example: `self.update_rifle(1.0 / 60.0);`
     fn update_rifle(&mut self, dt_s: f64) {
+        let rifle: settings::RifleSettings = self.settings.rifle.clone();
         self.rifle_next_shot_s = (self.rifle_next_shot_s - dt_s).max(0.0);
-        self.recoil_frac = (self.recoil_frac - dt_s / RIFLE_RECOIL_RECOVER_S).max(0.0);
+        self.recoil_frac = if rifle.recoil_settle_s > 0.0 {
+            (self.recoil_frac - dt_s / rifle.recoil_settle_s).max(0.0)
+        } else {
+            0.0
+        };
         let is_firing_rifle: bool = self.gun == Gun::Rifle
             && self.is_trigger_held
             && self.can_shoot()
             && !self.is_overheated;
         if !is_firing_rifle {
-            self.rifle_heat_frac = (self.rifle_heat_frac - dt_s / RIFLE_COOL_S).max(0.0);
+            self.rifle_heat_frac = (self.rifle_heat_frac - dt_s / rifle.cool_down_s).max(0.0);
             self.is_overheated &= self.rifle_heat_frac > 0.0;
         } else if self.rifle_next_shot_s <= 0.0 {
-            self.shot_time_s = RIFLE_PULSE_S;
-            self.rifle_next_shot_s = RIFLE_SHOT_PERIOD_S;
+            self.shot_time_s = rifle.pulse_s;
+            self.rifle_next_shot_s = 1.0 / rifle.shots_per_s;
             self.has_rifle_shot_hit = false;
-            self.rifle_heat_frac += 1.0 / RIFLE_OVERHEAT_SHOT_COUNT;
+            self.rifle_heat_frac += 1.0 / f64::from(rifle.shots_until_overheat);
             self.is_overheated = self.rifle_heat_frac >= 1.0;
             self.rifle_shot_count += 1;
-            self.recoil_frac = 1.0;
+            self.recoil_frac = f64::from(u8::from(rifle.recoil_settle_s > 0.0));
             let side: f64 = if self.rifle_shot_count.is_multiple_of(2) {
                 1.0
             } else {
                 -1.0
             };
             let (dx_px, dy_px) = (
-                side * RIFLE_RECOIL_YAW_RAD / voxel_world::LOOK_RAD_PER_PX,
-                -RIFLE_RECOIL_PITCH_RAD / voxel_world::LOOK_RAD_PER_PX,
+                side * rifle.recoil_sideways_rad / voxel_world::LOOK_RAD_PER_PX,
+                -rifle.recoil_up_rad / voxel_world::LOOK_RAD_PER_PX,
             );
             match &mut self.voxel {
                 Some(voxel) => voxel.player.look(dx_px, dy_px),
@@ -2081,7 +2113,10 @@ impl Session {
         let aimed: Option<u8> = match multiplayer.client.id {
             Some(id) if is_holding_e && game.winner.is_none() => voxel
                 .world
-                .find_aimed_material(voxel.player.get_camera_frame(&voxel.world), CONSOLE_REACH_M)
+                .find_aimed_material(
+                    voxel.player.get_camera_frame(&voxel.world),
+                    self.settings.consoles.reach_m,
+                )
                 .and_then(|m| voxel.world.consoles.iter().position(|c| c.material == m))
                 .filter(|&i| {
                     voxel.world.consoles[i].team != net::get_team(id) && game.off_mask >> i & 1 == 0
@@ -2202,8 +2237,14 @@ impl Session {
         for event in events {
             match event {
                 net::NetEvent::Joined(id) => {
+                    self.settings = multiplayer
+                        .client
+                        .settings
+                        .clone()
+                        .expect("a welcome brings the server's settings");
                     match &mut self.voxel {
                         Some(voxel) => {
+                            voxel.world.set_settings(self.settings.clone());
                             voxel.spawn_index = id as usize;
                             voxel.player = multiplayer::get_voxel_spawn(&voxel.world, id);
                         }
@@ -2218,7 +2259,7 @@ impl Session {
                 } => {
                     if is_self {
                         multiplayer.is_eliminated = true;
-                        multiplayer.respawn_in_s = RESPAWN_DELAY_S;
+                        multiplayer.respawn_in_s = self.settings.respawn.delay_s;
                         multiplayer.disabling = None;
                         self.is_laser_on = false;
                         self.shot_time_s = 0.0;
@@ -2306,8 +2347,12 @@ impl Session {
             );
             self.laser = multiplayer::describe_voxel_laser(&voxel.world, &view);
             if let Some(victim_id) = view.hit_player_id
-                && let Some(hits_to_kill) =
-                    take_hit_weight(self.gun, &mut self.has_rifle_shot_hit, view.is_head_hit)
+                && let Some(hits_to_kill) = take_hit_weight(
+                    &self.settings,
+                    self.gun,
+                    &mut self.has_rifle_shot_hit,
+                    view.is_head_hit,
+                )
                 && let Some(multiplayer) = &mut self.multiplayer
                 && let Err(error) = multiplayer.client.send_hit(victim_id, hits_to_kill)
             {
@@ -2326,8 +2371,12 @@ impl Session {
             );
             self.laser = view.report.as_ref().map(describe_laser);
             if let Some(victim_id) = view.hit_player_id
-                && let Some(hits_to_kill) =
-                    take_hit_weight(self.gun, &mut self.has_rifle_shot_hit, false)
+                && let Some(hits_to_kill) = take_hit_weight(
+                    &self.settings,
+                    self.gun,
+                    &mut self.has_rifle_shot_hit,
+                    false,
+                )
                 && let Err(error) = multiplayer.client.send_hit(victim_id, hits_to_kill)
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
@@ -2500,7 +2549,8 @@ impl Session {
         }
         if let Some((_, held_s)) = self.multiplayer.as_ref().and_then(|m| m.disabling) {
             let ([x, y], [w, h]) = (DISABLE_BAR_MIN_FRAC, DISABLE_BAR_SIZE_FRAC);
-            let fill_frac: f32 = (held_s / net::CONSOLE_DISABLE_S).min(1.0) as f32;
+            let fill_frac: f32 =
+                (held_s / self.settings.consoles.hold_to_disable_s).min(1.0) as f32;
             rects.extend([
                 render_metal::OverlayRect {
                     min_frac: [x, y],
@@ -2644,21 +2694,27 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     }
 }
 
-/// `take_hit_weight` gives how many hits like this one `gun` needs to eliminate someone (a rifle
-/// hit to the head counts more), or `None` when this rifle shot already hit (`has_rifle_shot_hit`,
-/// which it then sets): the laser reports every frame it hits, the rifle once per shot.
+/// `take_hit_weight` gives how many hits like this one `gun` needs to eliminate someone by
+/// `settings` (a rifle hit to the head counts more), or `None` when this rifle shot already hit
+/// (`has_rifle_shot_hit`, which it then sets): the laser reports every frame it hits, the rifle
+/// once per shot.
 ///
-/// Example: `if let Some(hits_to_kill) = take_hit_weight(Gun::Rifle, &mut has_hit, false) { ... }`
-fn take_hit_weight(gun: Gun, has_rifle_shot_hit: &mut bool, is_head_hit: bool) -> Option<u8> {
+/// Example: `if let Some(hits_to_kill) = take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false) { ... }`
+fn take_hit_weight(
+    settings: &GameSettings,
+    gun: Gun,
+    has_rifle_shot_hit: &mut bool,
+    is_head_hit: bool,
+) -> Option<u8> {
     match (gun, is_head_hit) {
-        (Gun::Laser, _) => Some(LASER_HITS_TO_KILL),
+        (Gun::Laser, _) => Some(settings.sniper.hits_to_eliminate),
         (Gun::Rifle, _) if *has_rifle_shot_hit => None,
         (Gun::Rifle, is_head) => {
             *has_rifle_shot_hit = true;
             Some(if is_head {
-                RIFLE_HEAD_HITS_TO_KILL
+                settings.rifle.head_hits_to_eliminate
             } else {
-                RIFLE_BODY_HITS_TO_KILL
+                settings.rifle.body_hits_to_eliminate
             })
         }
     }
@@ -2982,22 +3038,26 @@ mod tests {
 
     #[test]
     fn hits_weigh_by_gun_and_place() {
+        let settings: GameSettings = GameSettings::Builtin();
         let mut has_hit: bool = false;
         for _ in 0..2 {
             assert_eq!(
-                take_hit_weight(Gun::Laser, &mut has_hit, false),
-                Some(LASER_HITS_TO_KILL)
+                take_hit_weight(&settings, Gun::Laser, &mut has_hit, false),
+                Some(settings.sniper.hits_to_eliminate)
             );
         }
         assert_eq!(
-            take_hit_weight(Gun::Rifle, &mut has_hit, true),
-            Some(RIFLE_HEAD_HITS_TO_KILL)
+            take_hit_weight(&settings, Gun::Rifle, &mut has_hit, true),
+            Some(settings.rifle.head_hits_to_eliminate)
         );
-        assert_eq!(take_hit_weight(Gun::Rifle, &mut has_hit, false), None);
+        assert_eq!(
+            take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false),
+            None
+        );
         has_hit = false;
         assert_eq!(
-            take_hit_weight(Gun::Rifle, &mut has_hit, false),
-            Some(RIFLE_BODY_HITS_TO_KILL)
+            take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false),
+            Some(settings.rifle.body_hits_to_eliminate)
         );
     }
 }
