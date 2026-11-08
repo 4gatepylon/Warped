@@ -1683,6 +1683,7 @@ struct Session {
     last_output_px: (u32, u32),
     is_laser_on: bool,
     shot_time_s: f64,
+    aim_frac: f64,
     sniper_reload_s: f64,
     is_running: bool,
     is_jumping: bool,
@@ -1740,6 +1741,25 @@ enum PackedFrame {
 }
 
 impl PackedFrame {
+    /// `zoom_in` narrows the camera's field of view so the world looks `zoom` times closer (1 for
+    /// none), for aiming: the renderers read the view's width from `tan_half_fov` and the size of
+    /// a pixel's view from `pixel_angle_rad`.
+    ///
+    /// Example: `packed.zoom_in(2.5);`
+    fn zoom_in(&mut self, zoom: f64) {
+        let zoom: f32 = zoom as f32;
+        match self {
+            PackedFrame::House(data) => {
+                data.uniforms.tan_half_fov /= zoom;
+                data.uniforms.pixel_angle_rad /= zoom;
+            }
+            PackedFrame::Voxel(frame) => {
+                frame.uniforms.tan_half_fov /= zoom;
+                frame.uniforms.pixel_angle_rad /= zoom;
+            }
+        }
+    }
+
     /// `as_frame_data` lends the frame to a renderer.
     ///
     /// Example: `renderer.render(packed.as_frame_data(), size, &mut pixels)?;`
@@ -1960,6 +1980,7 @@ impl Session {
             last_output_px: (0, 0),
             is_laser_on: false,
             shot_time_s: 0.0,
+            aim_frac: 0.0,
             sniper_reload_s: 0.0,
             is_running: false,
             is_jumping: false,
@@ -2001,9 +2022,9 @@ impl Session {
     /// `handle_event` reacts to one window event and returns false when the player quits: the
     /// window's close button quits, Esc releases the mouse (or asks whether to exit if it is free,
     /// and while it asks every pressed control answers it), a click captures it (and once captured,
-    /// a left click fires a shot), the flashlight shines while the right button is held, the mouse looks, `1`, `2`
-    /// and the wheel switch guns, and - and = change the render scale. Players can't respawn by
-    /// choice.
+    /// a left click fires a shot), the mouse looks (more slowly while aiming zooms in, by the same
+    /// factor), `1`, `2` and the wheel switch guns, and - and = change the render scale. Players
+    /// can't respawn by choice.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
     fn handle_event(
@@ -2020,8 +2041,9 @@ impl Session {
                 return true;
             }
             Event::MouseMotion { xrel, yrel, .. } if self.is_captured && self.menu.is_none() => {
-                let speed: f64 =
-                    self.player_settings.view.look_rad_per_px / voxel_world::LOOK_RAD_PER_PX;
+                let speed: f64 = self.player_settings.view.look_rad_per_px
+                    / voxel_world::LOOK_RAD_PER_PX
+                    / self.get_zoom();
                 let (dx_px, dy_px) = (f64::from(xrel) * speed, f64::from(yrel) * speed);
                 match &mut self.voxel {
                     Some(voxel) => voxel.player.look(dx_px, dy_px),
@@ -2092,8 +2114,9 @@ impl Session {
     }
 
     /// `handle_control` does what a pressed control (key, mouse button or wheel) is bound to:
-    /// releasing the mouse (or asking whether to exit when it is free), the render resolution, choosing a team in the lobby (before the guns, which may share its
-    /// keys), the guns, and firing the sniper.
+    /// releasing the mouse (or asking whether to exit when it is free), the render resolution,
+    /// choosing a team in the lobby (before the guns, which may share its keys), the guns, and
+    /// firing the sniper.
     ///
     /// Example: `self.handle_control(control, window, mouse);`
     fn handle_control(
@@ -2209,6 +2232,12 @@ impl Session {
         };
         self.is_trigger_held = self.is_captured && held(Action::Shoot);
         self.is_flashlight_on = self.is_captured && held(Action::Flashlight);
+        let is_aiming: bool = self.is_captured
+            && held(Action::Aim)
+            && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated);
+        let aim_step: f64 = dt_s / self.settings.aim.zoom_s;
+        self.aim_frac =
+            (self.aim_frac + if is_aiming { aim_step } else { -aim_step }).clamp(0.0, 1.0);
         let is_holding_e: bool = held(Action::TurnOffConsole);
         let team: usize = self.get_team() as usize;
         let messages: Vec<String> = match &mut self.voxel {
@@ -2803,9 +2832,9 @@ impl Session {
     }
 
     /// `get_banner_lines` gives the two lines shown over the view: while the exit prompt shows,
-    /// its question and keys; in the lobby, each team's head count and the keys that join a team; once a team has won, the winner and how to start a new
-    /// game; while this player is out after a hit, "YOU DIED" and the countdown to respawning; or
-    /// `None`.
+    /// its question and keys; in the lobby, each team's head count and the keys that join a team;
+    /// once a team has won, the winner and how to start a new game; while this player is out after
+    /// a hit, "YOU DIED" and the countdown to respawning; or `None`.
     ///
     /// Example: `if let Some(lines) = session.get_banner_lines() { ... }`
     fn get_banner_lines(&self) -> Option<[String; 2]> {
@@ -2847,6 +2876,18 @@ impl Session {
                 multiplayer.respawn_in_s.ceil().max(1.0)
             ),
         ])
+    }
+
+    /// `get_zoom` gives how much closer the world looks now: the gun in hand's full zoom
+    /// (`aim` in the server settings), eased in by how far this player has aimed (`get_aim_zoom`).
+    ///
+    /// Example: `let zoom = self.get_zoom();`
+    fn get_zoom(&self) -> f64 {
+        let full_zoom: f64 = match self.gun {
+            Gun::Laser => self.settings.aim.sniper_zoom,
+            Gun::Rifle => self.settings.aim.rifle_zoom,
+        };
+        get_aim_zoom(self.aim_frac, full_zoom)
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
@@ -3242,6 +3283,15 @@ fn make_segmented_bar(
         .collect()
 }
 
+/// `get_aim_zoom` gives how much closer the world looks at aim fraction `aim_frac` (0 not aiming,
+/// 1 fully aimed), eased in and out, toward `full_zoom`.
+///
+/// Example: `let zoom = get_aim_zoom(0.5, 2.5);`
+fn get_aim_zoom(aim_frac: f64, full_zoom: f64) -> f64 {
+    let t: f64 = aim_frac.clamp(0.0, 1.0);
+    1.0 + (full_zoom - 1.0) * t * t * (3.0 - 2.0 * t)
+}
+
 /// `get_eyes` gives where other players' eyes are, so spawning players can keep clear of them.
 ///
 /// Example: `let others = get_eyes(&client.players);`
@@ -3542,7 +3592,8 @@ fn play_on_canvas(
             0,
         );
         let render_start: Instant = Instant::now();
-        let packed: PackedFrame = session.pack(render_px);
+        let mut packed: PackedFrame = session.pack(render_px);
+        packed.zoom_in(session.get_zoom());
         renderer.render(packed.as_frame_data(), render_px, &mut pixels)?;
         session.record_frame(
             render_start.elapsed().as_secs_f64() * MS_PER_S,
@@ -3632,7 +3683,8 @@ fn play_on_layer(
         });
         let render_px: (u32, u32) = session.get_render_size(window_px);
         let render_start: Instant = Instant::now();
-        let packed: PackedFrame = session.pack(render_px);
+        let mut packed: PackedFrame = session.pack(render_px);
+        packed.zoom_in(session.get_zoom());
         let overlay_text: Option<OverlayText> = session.get_overlay_text();
         let text_mask: Option<Vec<u8>> = overlay_text.as_ref().map(make_text_mask).transpose()?;
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
@@ -3703,6 +3755,7 @@ mod tests {
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Bar fill | empty, a sliver (one segment), 11 of 12 after the network's byte rounding, full | `segmented_bars_count_whole_segments` |
     //! | Segment count | 12, 1 (the sniper's block, empty or full and as wide as the whole bar) | `segmented_bars_count_whole_segments` |
+    //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
@@ -3787,6 +3840,20 @@ mod tests {
         for line in exit_prompt::get_lines() {
             assert!(line.chars().count() <= banner_char_count, "{line}");
         }
+    }
+
+    #[test]
+    fn aiming_zooms_in_eased() {
+        const FULL_ZOOM: f64 = 2.5;
+        assert_eq!(get_aim_zoom(0.0, FULL_ZOOM), 1.0);
+        assert_eq!(get_aim_zoom(0.5, FULL_ZOOM), 1.0 + (FULL_ZOOM - 1.0) / 2.0);
+        assert_eq!(get_aim_zoom(1.0, FULL_ZOOM), FULL_ZOOM);
+        assert_eq!(get_aim_zoom(-1.0, FULL_ZOOM), 1.0);
+        assert_eq!(get_aim_zoom(2.0, FULL_ZOOM), FULL_ZOOM);
+        assert!(
+            get_aim_zoom(0.1, FULL_ZOOM) - 1.0 < 0.1 * (FULL_ZOOM - 1.0),
+            "eased in"
+        );
     }
 
     #[test]

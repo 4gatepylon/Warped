@@ -53,8 +53,9 @@ make run-demo RENDERER=cpu
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
-- Holding the right button shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it
-  yet).
+- Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
+  (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
+- Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.

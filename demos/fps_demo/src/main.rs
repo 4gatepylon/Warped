@@ -1,5 +1,5 @@
 //! `warped-fps-demo` is a single-player FPS demo: Rust, SDL3 for the window, input and audio,
-//! and Metal for rendering. It loads the assets that `download-assets` saved in `.assets/`.
+//! and Metal for rendering. It loads the assets that `download-assets` saved in `assets/`.
 //!
 //! Example:
 //!     cargo run --release --bin warped-fps-demo -- --render-scale 0.8

@@ -171,14 +171,14 @@ pub(crate) fn make_array(
 }
 
 impl SurfaceTextures {
-    /// `Load` reads the sets from the fps_demo's `.assets/textures/` onto `device`, or makes
+    /// `Load` reads the sets from the fps_demo's `assets/textures/` onto `device`, or makes
     /// empty arrays (and says how to download them) when any map is missing.
     ///
     /// Example: `let textures = SurfaceTextures::Load(&device)?;`
     #[allow(non_snake_case)]
     pub fn Load(device: &ProtocolObject<dyn MTLDevice>) -> Result<SurfaceTextures> {
         let dir: PathBuf =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fps_demo/.assets/textures");
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../fps_demo/assets/textures");
         let paths: Vec<PathBuf> = ["diff", "nor_gl", "arm"]
             .iter()
             .flat_map(|map| {
