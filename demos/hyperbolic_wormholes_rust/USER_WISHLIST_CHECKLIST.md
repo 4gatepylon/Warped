@@ -10,6 +10,33 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
+  relativistic effect on colour if possible. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/wormhole-cyan`, 2026-11-07.
+- [~] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
+  look cool and pretty. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/spaceships`, 2026-11-07.
+- [~] **W-54 Professional HUD bars.** Make the health, ammo and other bars look more professional: at the very least
+  slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
+  implementing. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/hud-bars`, 2026-11-07.
+- [~] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
+  different key. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/aiming`, 2026-11-07.
+- [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
+  2026-11-07.
+- [~] **W-57 Laser stuck in a room.** In one of the rooms on the red side, the one with windows one block wide,
+  shooting out from close to a window hits some sort of hitbox (or looks like it) and the laser doesn't leave the
+  room.
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/laser-room-fix`, 2026-11-07.
+- [~] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
+  exit?", exits if the player presses OK, and otherwise doesn't.
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/exit-confirm`, 2026-11-07.
+- [~] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
+  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
+  pulsing slows down smoothly instead of jumping back.
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/console-pulse-ramp`,
+  2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
@@ -32,19 +59,6 @@ is in [`AGENTS.md`](AGENTS.md).
   play but has a dashboard where they can change or reset those settings.
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
-- [ ] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
-  relativistic effect on colour if possible.
-- [ ] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
-  look cool and pretty.
-- [ ] **W-54 Professional HUD bars.** Make the health, ammo and other bars look more professional: at the very least
-  slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
-  implementing.
-- [ ] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
-  different key.
-- [ ] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
-- [ ] **W-57 Laser stuck in a room.** In one of the rooms on the red side, the one with windows one block wide,
-  shooting out from close to a window hits some sort of hitbox (or looks like it) and the laser doesn't leave the
-  room.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
 - [ ] **W-58 Installable bundle.** Define the map in some kind of declarative form so that it can be put into an app
@@ -84,11 +98,6 @@ is in [`AGENTS.md`](AGENTS.md).
   missing".
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
-- [ ] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
-  exit?", exits if the player presses OK, and otherwise doesn't.
-- [ ] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
-  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
-  pulsing slows down smoothly instead of jumping back.
 
 ## Done
 
