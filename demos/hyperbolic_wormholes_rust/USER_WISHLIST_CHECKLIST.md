@@ -93,6 +93,9 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
   character, and the player controls it from there, seeing their own character.
+- [ ] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
+  fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
+  missing".
 
 ## Done
 
