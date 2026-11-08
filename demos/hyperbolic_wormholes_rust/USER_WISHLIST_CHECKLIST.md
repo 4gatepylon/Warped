@@ -220,6 +220,6 @@ is in [`AGENTS.md`](AGENTS.md).
   regaining things such as energy" (D85). #207.
 - [x] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
   It was a join sent to a port no server listened on; windows now say when a server doesn't answer, is full or runs
-  another version. #PR.
+  another version. #209.
 - [x] **W-78 Shooting from the team screen.** A bug: you may be able to shoot a laser before leaving the screen where
-  you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #PR.
+  you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #209.
