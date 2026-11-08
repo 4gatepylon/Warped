@@ -1,59 +1,85 @@
-# `Makefile` downloads the assets for, builds, runs, benchmarks, tests, and formats and lints the
-# FPS demo.
+# `Makefile` downloads the textures for, builds, runs, serves, benchmarks, tests, and formats and lints the
+# Dark Forest demo.
 #
 # Interface:
 #     make help: list the targets.
-#     make download-assets: download the committed CC0 assets again (and the Sketchfab models if
-#         SKETCHFAB_API_TOKEN is set) into assets/.
-#     make run-fps-demo RENDER_SCALE=<0.25..1> BOT_COUNT=<0..6>: build and play.
-#     make bench-fps-demo BENCH_SECONDS=<s>: let the autopilot play and write frame times to
-#         .artifacts/bench_fps_demo/<run_id>/.
+#     make download-assets: download the Poly Haven forest textures into assets/textures/.
+#     make run-dark-forest BOT_COUNT=<0..6>: build and play alone against AI robots.
+#     make serve-game PORT=<port>: run a game server without a window until killed.
+#     make join-game SERVER=<address> PORT=<port> TEAM=<blue|red>: join a game server.
+#     make bench-dark-forest BENCH_SECONDS=<s>: walk the vertical route full screen and write frame times to
+#         .artifacts/bench_dark_forest/<run_id>/.
+#     make bench-views BENCH_SECONDS=<s>: hold each fixed view for BENCH_SECONDS full screen and write frame times
+#         to .artifacts/bench_views/<run_id>/.
+#     make export-map: write the forest's map to ../../common/maps/dark_forest/map.json.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
 #     make clean: remove .build/.
 #     make reset-artifacts YES_TO_RESET_ARTIFACTS=1: delete .artifacts/.
 #
 # Example:
-#     make run-fps-demo RENDER_SCALE=0.8
+#     make join-game SERVER=127.0.0.1 TEAM=red
 SHELL := /bin/bash
-RENDER_SCALE ?= 1.0
-BOT_COUNT ?= 4
-BENCH_SECONDS ?= 30
-BENCH_RUN_DIR = .artifacts/bench_fps_demo/$(shell date -u +%Y%m%d-%H%M%S)
-BENCH_COMMAND = ./.build/release/warped-fps-demo --autopilot --show-frame-time \
-  --benchmark-seconds $(BENCH_SECONDS) --render-scale $(RENDER_SCALE) --bot-count $(BOT_COUNT)
+BOT_COUNT ?= 3
+BENCH_SECONDS ?= 60
+PORT ?= 47840
+SERVER ?= 127.0.0.1
+TEAM ?=
+TEAM_FLAG = $(if $(TEAM),--team $(TEAM),)
+RUN_ID = $(shell date -u +%Y%m%d-%H%M%S)
+BENCH_COMMAND = ./.build/release/dark-forest --play-route --fullscreen --show-frame-time \
+  --benchmark-seconds $(BENCH_SECONDS) --bot-count $(BOT_COUNT)
+BENCH_VIEWS_COMMAND = ./.build/release/dark-forest --fullscreen --bench-views $(BENCH_SECONDS)
 
-RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (frame-time logs and screenshots). \
-  Recreating them means rerunning make bench-fps-demo. \
+RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (frame-time logs, screenshots and videos). \
+  Recreating them means rerunning the benchmarks. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help download-assets run-fps-demo bench-fps-demo test fmt clean reset-artifacts
+.PHONY: help download-assets run-dark-forest serve-game join-game bench-dark-forest bench-views export-map \
+  test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
-	@echo "  make download-assets                         Download the assets into assets/ again"
-	@echo "  make run-fps-demo RENDER_SCALE=<0.25..1> BOT_COUNT=<0..6>"
-	@echo "                                               Build and play (defaults $(RENDER_SCALE), $(BOT_COUNT))"
-	@echo "  make bench-fps-demo BENCH_SECONDS=<s>        Autopilot benchmark into .artifacts/bench_fps_demo/"
-	@echo "  make test                                    Run the tests"
-	@echo "  make fmt                                     Format with rustfmt and lint with clippy"
-	@echo "  make clean                                   Remove .build/"
-	@echo "  make reset-artifacts YES_TO_RESET_ARTIFACTS=1  Delete .artifacts/"
+	@echo "  make download-assets                          Download the forest textures into assets/textures/"
+	@echo "  make run-dark-forest BOT_COUNT=<0..6>         Build and play alone (default $(BOT_COUNT) robots)"
+	@echo "  make serve-game PORT=<port>                   Run a game server (default port $(PORT))"
+	@echo "  make join-game SERVER=<address> TEAM=<team>   Join a game server (default $(SERVER))"
+	@echo "  make bench-dark-forest BENCH_SECONDS=<s>      Route benchmark into .artifacts/bench_dark_forest/"
+	@echo "  make bench-views BENCH_SECONDS=<s>            Fixed-view benchmark into .artifacts/bench_views/"
+	@echo "  make export-map                               Write common/maps/dark_forest/map.json"
+	@echo "  make test                                     Run the tests"
+	@echo "  make fmt                                      Format with rustfmt and lint with clippy"
+	@echo "  make clean                                    Remove .build/"
+	@echo "  make reset-artifacts YES_TO_RESET_ARTIFACTS=1 Delete .artifacts/"
 	@echo ""
-	@echo "Example: make run-fps-demo RENDER_SCALE=0.8"
+	@echo "Example: make join-game SERVER=127.0.0.1 TEAM=red"
 
 download-assets:
 	cargo run --release --bin download-assets
 
-run-fps-demo:
-	cargo run --release --bin warped-fps-demo -- --render-scale $(RENDER_SCALE) --bot-count $(BOT_COUNT)
+run-dark-forest:
+	cargo run --release --bin dark-forest -- --bot-count $(BOT_COUNT)
 
-bench-fps-demo:
-	cargo build --release --bin warped-fps-demo
-	@set -o pipefail; run_dir="$(BENCH_RUN_DIR)"; mkdir -p "$$run_dir"; \
+serve-game:
+	cargo run --release --bin dark-forest -- --serve --port $(PORT)
+
+join-game:
+	cargo run --release --bin dark-forest -- --join $(SERVER) --port $(PORT) $(TEAM_FLAG)
+
+bench-dark-forest:
+	cargo build --release --bin dark-forest
+	@set -o pipefail; run_dir=".artifacts/bench_dark_forest/$(RUN_ID)"; mkdir -p "$$run_dir"; \
 	  printf '%s\n%s\n' "$(BENCH_COMMAND)" "$$(git describe --always --dirty)" > "$$run_dir/command.txt"; \
-	  $(BENCH_COMMAND) 2>&1 | tee "$$run_dir/output.txt" && \
-	  echo "wrote $$run_dir"
+	  $(BENCH_COMMAND) 2>&1 | tee "$$run_dir/output.txt" && echo "wrote $$run_dir"
+
+bench-views:
+	cargo build --release --bin dark-forest
+	@set -o pipefail; run_dir=".artifacts/bench_views/$(RUN_ID)"; mkdir -p "$$run_dir"; \
+	  printf '%s\n%s\n' "$(BENCH_VIEWS_COMMAND)" "$$(git describe --always --dirty)" > "$$run_dir/command.txt"; \
+	  $(BENCH_VIEWS_COMMAND) 2>&1 | tee "$$run_dir/output.txt" && echo "wrote $$run_dir"
+
+export-map:
+	cargo run --release --bin dark-forest -- --export-map ../../common/maps/dark_forest/map.json
 
 test:
 	cargo test --release

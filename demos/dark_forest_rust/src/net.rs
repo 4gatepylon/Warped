@@ -894,7 +894,7 @@ impl Server {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
             println!(
-                "The {} team won. Press Enter here to start a new game.",
+                "The {} team won.",
                 TEAM_NAMES[winner as usize]
             );
         }
