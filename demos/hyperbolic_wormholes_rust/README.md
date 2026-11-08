@@ -44,7 +44,7 @@ cargo run --release -- --map lunar-surface --view black_hole
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
   steps, lighting with sun shadows, lamps, ground, stars and planet, so it looks like the level, with the house's
   adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
-  flying, the laser and multiplayer follow the level's rules there (6 m/s² gravity, jumping onto blocks with `Space`, moving
+  flying, the laser and multiplayer follow the level's rules there (18 m/s² gravity (three times the level's), walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 30 s and refills in 60 s, a head bob, jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,

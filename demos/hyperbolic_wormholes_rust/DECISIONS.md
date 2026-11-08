@@ -473,6 +473,19 @@
   only in the window's title); a longer delay.
 - **Rationale:** you asked for a "you died" message and a visible respawn timer.
 
+### D45. Faster, heavier movement with sprint energy and a head bob
+
+- **Choice:** on voxel maps the game scales the map's player settings: walking and sprinting twice as fast (10 and
+  18 m/s on Lunar Surface), gravity three times as strong (18 m/s²), and the jump speed by √3 so a jump still rises
+  2.25 m (high enough to get onto a block, D43) in less time. Sprinting uses energy as in the WebGL levels: a full bar
+  empties in 30 s of sprinting and refills in 60 s, and an empty bar means walking; the bar is drawn in the bottom
+  left. The eye dips at each footstep (4 cm walking, 7 cm sprinting, 2 and 2.8 bobs a second), fading in and out over
+  about a sixth of a second.
+- **Alternatives:** changing the map's own values (they would no longer match the level the map was exported from);
+  keeping the jump speed (a jump would rise only 0.75 m, too little for a block).
+- **Rationale:** you asked for twice the speeds, three times the gravity, a sprint energy bar as described in the
+  levels, and head bobbing.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
