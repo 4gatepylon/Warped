@@ -1086,6 +1086,30 @@
 - **Rationale:** you asked that going through a wormhole turn your whole screen kind of cyan, simulating the
   relativistic effect on colour if possible.
 
+### D86. Ask before exiting on Escape
+
+- **Choice:**
+  - **When:** the release-mouse control (`Escape`) still frees a captured mouse first. Pressed again with the mouse
+    free, it no longer quits: it shows "Do you want to exit?" with its keys, `Return/Y: exit   Esc/N: stay`, as a
+    banner in the middle of the darkened view (the "YOU DIED" banner's mask, colours and 55% dimming). The prompt
+    comes before any other banner. Inside the menu, `Escape` still just closes the menu.
+  - **Keys:** `Return` or `Y` exits; `Escape` or `N` goes back, with the mouse still free. These keys work whatever
+    the key bindings say, like the menu's arrows. While the prompt shows, every other key, click and the wheel does
+    nothing, so the prompt and the menu never both take a key, and a click doesn't capture the mouse behind it.
+  - **Play:** while the prompt shows, held keys are ignored, as under the menu, so this player stands still. The
+    world goes on (a server's game doesn't pause).
+  - **Close button:** the window's close button still quits at once, without asking.
+  - **Code:** a small state machine, `exit_prompt.rs` (`ExitPrompt`), with its own unit tests; the window shows its
+    lines through `get_banner_lines`.
+- **Alternatives:**
+  - an OK button to click on screen (the keyboard is enough, and the overlay has no buttons yet);
+  - asking on the first `Escape` with the mouse captured (freeing the mouse is a common thing to do, so it would
+    ask too often);
+  - `Escape` exiting from the prompt, as a "press it again to confirm" (a player pressing `Escape` repeatedly
+    would quit by accident, which is what the prompt guards against).
+- **Rationale:** you asked that `Escape` ask "do you want to exit?" instead of exiting, exiting only if you press
+  OK.
+
 ### D88. Lasers still stop on window glass (W-57)
 
 - **Choice:**

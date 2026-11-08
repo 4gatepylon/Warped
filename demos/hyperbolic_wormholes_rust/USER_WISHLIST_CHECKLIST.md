@@ -10,6 +10,11 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
+  windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
+  (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/see-through-windows`,
+  2026-11-07.
 - [~] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
   noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
   All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
@@ -24,9 +29,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
   2026-11-07.
-- [~] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
-  exit?", exits if the player presses OK, and otherwise doesn't.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/exit-confirm`, 2026-11-07.
 - [~] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
   continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
   pulsing slows down smoothly instead of jumping back.
@@ -196,5 +198,7 @@ is in [`AGENTS.md`](AGENTS.md).
   missing". The game fails when they are not there ("it's fine if they are not committed"), and "the error (client
   side) should say what to do to fix it". #168 committed them in `demos/fps_demo/assets/`; #173 stops the client at
   start with the command that restores a missing one.
+- [x] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
+  exit?", exits if the player presses OK, and otherwise doesn't. #175.
 - [x] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
   relativistic effect on colour if possible. #178.
