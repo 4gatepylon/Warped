@@ -210,6 +210,7 @@ These values are configurable and may change after playtests.
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |
 | `Tab` | Open or close the menu: a page of the player's own settings (key bindings, mouse speed and view effects), a page with the whole map from above, and a scoreboard (the player count, and each player's team, kills and deaths) |
 | `Q`, `E` (in the menu) | Turn to the menu's previous or next page |
+| `Esc` | Free the mouse; with the mouse free, ask "Do you want to exit?" (`Return` or `Y` exits, `Esc` or `N` goes back to the game) |
 
 ## Bullets, lasers and light
 

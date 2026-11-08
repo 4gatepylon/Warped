@@ -29,9 +29,6 @@ is in [`AGENTS.md`](AGENTS.md).
   shooting out from close to a window hits some sort of hitbox (or looks like it) and the laser doesn't leave the
   room.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/laser-room-fix`, 2026-11-07.
-- [~] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
-  exit?", exits if the player presses OK, and otherwise doesn't.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/exit-confirm`, 2026-11-07.
 - [~] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
   continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
   pulsing slows down smoothly instead of jumping back.
@@ -187,3 +184,5 @@ is in [`AGENTS.md`](AGENTS.md).
   menu's map page, W-49, shows the whole map). #166.
 - [x] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
   radius (the rest is slightly darker and blurred), and shows where they are on the map. #166.
+- [x] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
+  exit?", exits if the player presses OK, and otherwise doesn't. #NNN.
