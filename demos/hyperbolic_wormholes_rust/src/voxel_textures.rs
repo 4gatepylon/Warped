@@ -78,7 +78,10 @@ pub fn get_material_surface(name: &str) -> [f32; 4] {
 pub fn get_albedo_path(name: &str) -> Option<(PathBuf, f32)> {
     MATERIAL_SURFACES.iter().find(|s| s.0 == name).map(|s| {
         let id: &str = SURFACE_SETS[s.1];
-        (get_asset_path(&format!("textures/{id}/{id}_diff_2k.jpg")), s.2)
+        (
+            get_asset_path(&format!("textures/{id}/{id}_diff_2k.jpg")),
+            s.2,
+        )
     })
 }
 

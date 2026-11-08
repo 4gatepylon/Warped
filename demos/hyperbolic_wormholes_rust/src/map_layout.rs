@@ -481,7 +481,10 @@ impl MapLayout {
         };
         let looks: Vec<Option<MaterialLook>> = make_material_looks(map, m_per_sub_px)?;
         let ground_id: u8 = map.ground.material;
-        if looks.get(usize::from(ground_id)).is_none_or(Option::is_none) {
+        if looks
+            .get(usize::from(ground_id))
+            .is_none_or(Option::is_none)
+        {
             return Err(format!("map {}: no ground material {ground_id}", map.name).into());
         }
         let terrain: Option<Terrain> = map.ground.terrain.as_ref().map(Terrain::FromMap);
@@ -503,8 +506,7 @@ impl MapLayout {
                 } else if look.is_light {
                     (1.0, TOP_DETAIL_FRAC)
                 } else {
-                    let height_frac: f32 =
-                        ((h_m - ground_m) / FULL_SHADE_HEIGHT_M).min(1.0) as f32;
+                    let height_frac: f32 = ((h_m - ground_m) / FULL_SHADE_HEIGHT_M).min(1.0) as f32;
                     (
                         LOW_SHADE_FRAC + (1.0 - LOW_SHADE_FRAC) * height_frac,
                         TOP_DETAIL_FRAC,
@@ -521,9 +523,8 @@ impl MapLayout {
         let sun_elevation_rad: f64 = sun[1]
             .atan2(sun[0].hypot(sun[2]))
             .max(MIN_SUN_ELEVATION_RAD);
-        let toward_sun: DVec3 = (sun_flat * sun_elevation_rad.cos()
-            + DVec3::Z * sun_elevation_rad.sin())
-        .normalize();
+        let toward_sun: DVec3 =
+            (sun_flat * sun_elevation_rad.cos() + DVec3::Z * sun_elevation_rad.sin()).normalize();
         let sun_elevation_tan: f64 =
             toward_sun.z.max(MIN_SUN_Z) / toward_sun.truncate().length().max(f64::EPSILON);
         let sun_step_px: [f64; 2] = toward_sun.truncate().normalize_or_zero().to_array();
@@ -566,8 +567,7 @@ impl MapLayout {
                         .map(|blocker_m| ((blocker_m - ray_m) / PENUMBRA_M).clamp(0.0, 1.0))
                     })
                     .fold(0.0, f64::max);
-                let mean_m: f64 =
-                    get_box_mean(&sums_m, sub_width, sub_height, x, y, ao_radius_px);
+                let mean_m: f64 = get_box_mean(&sums_m, sub_width, sub_height, x, y, ao_radius_px);
                 let ao_frac: f64 =
                     1.0 - AO_MAX_FRAC * ((mean_m - h_m) / AO_DEPTH_M).clamp(0.0, 1.0);
                 let light_frac: f64 = (AMBIENT_FRAC * ao_frac
@@ -818,17 +818,27 @@ impl MaterialLook {
 ///
 /// Example: `let looks = make_material_looks(&map, 0.1)?;`
 fn make_material_looks(map: &Map, m_per_sample: f64) -> Result<Vec<Option<MaterialLook>>> {
-    let max_id: usize = map.materials.iter().map(|m| usize::from(m.id)).max().unwrap_or(0);
+    let max_id: usize = map
+        .materials
+        .iter()
+        .map(|m| usize::from(m.id))
+        .max()
+        .unwrap_or(0);
     let mut looks: Vec<Option<MaterialLook>> = (0..=max_id).map(|_| None).collect();
     let mut details: Vec<(PathBuf, Detail)> = Vec::new();
-    for material in map.materials.iter().filter(|m| m.kind != MATERIAL_KIND_EMPTY) {
+    for material in map
+        .materials
+        .iter()
+        .filter(|m| m.kind != MATERIAL_KIND_EMPTY)
+    {
         let detail: Option<Detail> = match get_albedo_path(&material.name) {
             None => None,
             Some((path, blocks_per_repeat)) => {
                 if let Some((_, detail)) = details.iter().find(|(p, _)| *p == path) {
                     Some(detail.clone())
                 } else {
-                    let detail: Detail = load_detail(&path, f64::from(blocks_per_repeat), m_per_sample)?;
+                    let detail: Detail =
+                        load_detail(&path, f64::from(blocks_per_repeat), m_per_sample)?;
                     details.push((path, detail.clone()));
                     Some(detail)
                 }
@@ -907,7 +917,10 @@ fn get_box_mean(
     radius_px: usize,
 ) -> f64 {
     let (x0, y0) = (x.saturating_sub(radius_px), y.saturating_sub(radius_px));
-    let (x1, y1) = ((x + radius_px + 1).min(width), (y + radius_px + 1).min(height));
+    let (x1, y1) = (
+        (x + radius_px + 1).min(width),
+        (y + radius_px + 1).min(height),
+    );
     let get = |x: usize, y: usize| sums[x + (width + 1) * y];
     (get(x1, y1) - get(x0, y1) - get(x1, y0) + get(x0, y0)) / ((x1 - x0) * (y1 - y0)) as f64
 }
