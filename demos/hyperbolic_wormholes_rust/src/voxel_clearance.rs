@@ -106,7 +106,6 @@ fn build_grid(world: &VoxelWorld, w: usize) -> (usize, f64, Vec<u8>) {
                         let hi: DVec3 = ((centre_p + window + half_size) / side)
                             .floor()
                             .min(DVec3::splat(n as f64 - 1.0));
-                        let shapes = world.get_shapes(k);
                         for kz in lo.z as usize..=hi.z as usize {
                             for j in lo.y as usize..=hi.y as usize {
                                 for i in lo.x as usize..=hi.x as usize {
@@ -116,7 +115,7 @@ fn build_grid(world: &VoxelWorld, w: usize) -> (usize, f64, Vec<u8>) {
                                     let local: DVec4 =
                                         to_structure * p.extend((1.0 + p.length_squared()).sqrt());
                                     let q: DVec3 = local.truncate() / local.w * world.r;
-                                    let (d_m, _) = crate::shapes::get_distance_m(shapes, q);
+                                    let d_m: f64 = world.get_distance_m(k, q);
                                     let unit: u8 = (d_m.max(0.0) / STORED_M_PER_UNIT)
                                         .floor()
                                         .min(f64::from(cap_unit))
@@ -188,7 +187,7 @@ mod tests {
         world.warps[w].list.iter().any(|&k| {
             let local: DVec4 = world.structures[k].inverse * x;
             let q: DVec3 = local.truncate() / local.w * world.r;
-            crate::shapes::get_distance_m(world.get_shapes(k), q).0 < 0.0
+            world.get_distance_m(k, q) < 0.0
         })
     }
 
@@ -212,14 +211,17 @@ mod tests {
                 let (z, phi) = (2.0 * u[0] - 1.0, std::f64::consts::TAU * u[1]);
                 let ring: f64 = (1.0 - z * z).sqrt();
                 let direction: DVec3 = DVec3::new(ring * phi.cos(), z, ring * phi.sin());
-                let hit = crate::shapes::find_hit_mu(
-                    world.get_shapes(k),
-                    q0,
-                    direction,
-                    0.0,
-                    2.0 * reach_m,
-                    None,
-                );
+                let hit = match st.mesh {
+                    Some(m) => world.meshes[m].find_hit_mu(q0, direction, 0.0, 2.0 * reach_m),
+                    None => crate::shapes::find_hit_mu(
+                        world.get_shapes(k),
+                        q0,
+                        direction,
+                        0.0,
+                        2.0 * reach_m,
+                        None,
+                    ),
+                };
                 if let Some((mu, _)) = hit {
                     let point: DVec4 = frame * map_klein((q0 + direction * mu) / world.r);
                     best = best.min(get_distance(point, x) * world.r);
