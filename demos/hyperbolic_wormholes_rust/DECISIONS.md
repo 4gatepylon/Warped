@@ -462,6 +462,17 @@
   moment; stepping up smoothly over a fraction of a second.
 - **Rationale:** you chose jumping: walking into a block popped the player onto it at once.
 
+### D44. Respawn after a countdown
+
+- **Choice:** a player who is hit sees their view darkened to 45% with "YOU DIED" in red and "Respawning in N" in
+  white, and rejoins at their spawn 3 seconds later; `Enter` no longer rejoins. The window's title and the HUD say the
+  same. The text is SDL's built-in font drawn into a 160×24 mask on the CPU, which a compute pass scales up by a whole
+  number (to about a fifth of the window's height) and draws over the frame, as Metal presents straight to the
+  window's layer, where SDL can't draw.
+- **Alternatives:** pressing `Enter` to rejoin (the earlier rule; players often didn't see the message, which was
+  only in the window's title); a longer delay.
+- **Rationale:** you asked for a "you died" message and a visible respawn timer.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
