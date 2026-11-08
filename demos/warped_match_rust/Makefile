@@ -26,7 +26,11 @@ HEIGHT_PX ?= 800
 FRAME_COUNT ?= 10
 AUTOPILOT_WIDTH_PX ?= 640
 AUTOPILOT_HEIGHT_PX ?= 400
-PORT ?= 47800
+PORT ?= 47852
+MATCH_LEVELS ?= match_levels.yaml
+TEAM ?=
+TEAM_FLAG := $(if $(TEAM),--team $(TEAM))
+SERVER_MATCH ?= 127.0.0.1
 MAP ?= lunar-surface
 SERVER ?= auto
 SERVER_SETTINGS ?=
@@ -50,13 +54,17 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help serve-match join-match bot-match serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
-	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run a game server, without a window; prints how to join"
+	@echo "  make serve-match                                 Run a match server (UDP 47850) over the levels of match_levels.yaml"
+	@echo "  make join-match SERVER=127.0.0.1 TEAM=blue       Open the match window (progression page); each round opens its level"
+	@echo "  make bot-match TEAM=red                          Join the match with a bot that turns off the other team's consoles"
+	@echo "  make e2e-match                                   A whole match of two bots, consoles off in 1 s (e2e/)"
+	@echo "  make serve-game PORT=47852 MAP=lunar-surface     Run a game server, without a window; prints how to join"
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
-	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
+	@echo "  make join-game SERVER=auto PORT=47852            Open the window and join the game server (SERVER=auto finds one)"
 	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of player_settings.yaml)"
 	@echo "  (serve-game and join-game take GAME_PASSWORD_FILE=password.txt: only players who know it join)"
 	@echo "  make build-server-bundle                         Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"
@@ -132,3 +140,19 @@ else ifeq ($(INTERACTIVE),1)
 else
 	@printf '%s\nTo be asked instead, pass INTERACTIVE=1.\n' "$(RESET_ARTIFACTS_WARNING)" >&2; exit 2
 endif
+
+# The match (README, "Match"): a match server, a window or bot per player.
+serve-match:
+	cargo run --release -- --serve-match --match-levels $(MATCH_LEVELS)
+
+join-match:
+	cargo run --release -- --match $(SERVER_MATCH) $(TEAM_FLAG)
+
+bot-match:
+	cargo run --release -- --match $(SERVER_MATCH) --bot --team $(or $(TEAM),red)
+
+e2e-match:
+	cargo build --release
+	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --bot --team blue > .build/e2e_blue.log 2>&1 &
+	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --bot --team red > .build/e2e_red.log 2>&1 &
+	./.build/release/hyperbolic-wormholes --serve-match --match-levels e2e/match_levels_fast.yaml --intermission-s 2 --round-over-s 2 --label e2e

@@ -36,6 +36,9 @@ mod key_bindings;
 mod map;
 mod map_export;
 mod map_layout;
+mod match_flow;
+mod match_menu;
+mod match_state;
 mod menu;
 mod mesh;
 mod minimap;
@@ -172,6 +175,9 @@ const OWNER_ONLY_FILE_MODE: u32 = 0o600;
 const WRONG_PASSWORD_EXIT_CODE: u8 = 3;
 const TITLE_WINDOW_PX: (u32, u32) = (960, 600);
 const TITLE_FRAME_MS: u64 = 16;
+const LEVEL_RESTART_S: f64 = 1.0;
+const MATCH_WINDOW_PX: (u32, u32) = (1280, 800);
+const MATCH_MASK_PX: (u32, u32) = (728, 420);
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
@@ -350,6 +356,63 @@ struct Arguments {
     /// replacing the folder's map.json, and exit.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
     export_map: Option<PathBuf>,
+    /// With --serve: write the level's result, {"winner": "blue"} or {"winner": "red"}, to this
+    /// file once a team has turned off all of the other team's consoles (see README, "Level
+    /// interface").
+    #[arg(long, requires = "serve")]
+    level_result_file: Option<PathBuf>,
+    /// With --join or --bot: join this team at once instead of waiting in the lobby.
+    #[arg(long, value_enum)]
+    team: Option<TeamFlag>,
+    /// With --bot: what the bot does. `consoles` holds E on the other team's consoles until its
+    /// team wins (without walking there; the server, as in the hyperbolic demo, trusts players).
+    #[arg(long, value_enum, default_value_t = BotObjective::Fight, requires = "bot")]
+    bot_objective: BotObjective,
+    /// Run a match server (match_flow.rs) on UDP --match-port, without a window: it plays the
+    /// levels of --match-levels round by round and exits once the match is over.
+    #[arg(long, conflicts_with_all = ["serve", "join", "match_server", "bench_views", "autopilot", "play_route"])]
+    serve_match: bool,
+    /// Join the match server at this address (e.g. 127.0.0.1): show the match's progression and
+    /// open each round's level in its own window (or, with --bot, run a bot in each round).
+    #[arg(long = "match", conflicts_with_all = ["serve", "join", "bench_views", "autopilot", "play_route"])]
+    match_server: Option<String>,
+    /// The match server's UDP port.
+    #[arg(long, default_value_t = match_flow::MATCH_PORT)]
+    match_port: u16,
+    /// With --serve-match: the levels file (see match_levels.yaml).
+    #[arg(long, default_value = "match_levels.yaml")]
+    match_levels: PathBuf,
+    /// With --serve-match: seconds between rounds, showing the progression.
+    #[arg(long, default_value_t = 10.0)]
+    intermission_s: f64,
+    /// With --serve-match: seconds a won level stays open, showing its win.
+    #[arg(long, default_value_t = 5.0)]
+    round_over_s: f64,
+    /// With --serve-match: the match's length in seconds; a match no team has won by then is a tie.
+    #[arg(long, default_value_t = 1800.0)]
+    match_s: f64,
+}
+
+/// `TeamFlag` is a team as `--team` takes it.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum TeamFlag {
+    Blue,
+    Red,
+}
+
+/// `BotObjective` is what a `--bot` does: fight other players, or turn off the other team's
+/// consoles.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BotObjective {
+    Fight,
+    Consoles,
+}
+
+/// `get_team_index` gives `--team` as an index into `net::TEAM_NAMES`, or `None` without it.
+///
+/// Example: `client.join(get_team_index(arguments))?;`
+fn get_team_index(arguments: &Arguments) -> Option<u32> {
+    arguments.team.map(|team| u32::from(team == TeamFlag::Red))
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -536,16 +599,21 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
     if arguments.host {
         return Err(LOCAL_PLAY_OFF.into());
     }
+    let is_match: bool = arguments.serve_match || arguments.match_server.is_some();
     let is_window_without_server: bool = arguments.join.is_none()
         && !arguments.serve
         && !arguments.bench_views
         && !arguments.autopilot
         && !arguments.play_route
-        && arguments.export_map.is_none();
+        && arguments.export_map.is_none()
+        && !is_match;
     if is_window_without_server {
         return Err(LOCAL_PLAY_OFF.into());
     }
-    if arguments.bot && (arguments.join.is_none() || arguments.exit_after_s.is_none()) {
+    if arguments.bot
+        && arguments.match_server.is_none()
+        && (arguments.join.is_none() || arguments.exit_after_s.is_none())
+    {
         return Err(
             "--bot needs --join and --exit-after-s; e.g. --join auto --bot --exit-after-s 30"
                 .into(),
@@ -612,6 +680,12 @@ fn run(arguments: Arguments) -> Result<()> {
     if arguments.serve {
         return serve_only(&arguments);
     }
+    if arguments.serve_match {
+        return run_match_server(&arguments);
+    }
+    if let Some(address) = &arguments.match_server {
+        return run_match_client(&arguments, address);
+    }
     if arguments.renderer == RendererKind::Metal {
         viewmodel::check_gun_models()?;
         if arguments.map == MapName::LunarSurface {
@@ -628,6 +702,205 @@ fn run(arguments: Arguments) -> Result<()> {
     } else {
         play(&arguments, renderer)
     }
+}
+
+/// `run_match_server` runs one match (`match_flow::serve_match`) on `--match-levels`, its level
+/// results and logs under `.artifacts/match/<run_id>/`, and prints how it ended.
+///
+/// Example: `run_match_server(&arguments)?;`
+fn run_match_server(arguments: &Arguments) -> Result<()> {
+    let levels: Vec<match_flow::LevelEntry> = match_flow::LoadLevels(&arguments.match_levels)?;
+    let folder: PathBuf = make_run_folder("match", arguments.label.as_deref())?;
+    let times: match_flow::MatchTimes = match_flow::MatchTimes {
+        intermission_s: arguments.intermission_s,
+        round_over_s: arguments.round_over_s,
+        match_s: arguments.match_s,
+    };
+    println!("Join with: make join-match SERVER=<this computer's address> (127.0.0.1 here)");
+    let state: match_state::MatchState = match_flow::serve_match(
+        &levels,
+        &times,
+        &folder,
+        arguments.match_port,
+        net::DEFAULT_PORT,
+    )?;
+    let outcome: match_state::Outcome = state.outcome().expect("serve_match ends with an outcome");
+    let rounds: Vec<Value> = state
+        .rounds()
+        .iter()
+        .map(|round| json!({"round": round.number, "level": levels[round.level].name, "attacker": round.attacker, "winner": round.winner}))
+        .collect();
+    let report: Value = json!({"outcome": outcome, "rounds": rounds, "run_folder": folder});
+    fs::write(
+        folder.join("match.json"),
+        serde_json::to_string_pretty(&report)?,
+    )?;
+    println!("{}", match_flow::describe_outcome(outcome));
+    println!("{report}");
+    Ok(())
+}
+
+/// `run_match_client` joins the match server at `address`: it shows the progression page
+/// (`match_menu.rs`) in a window, or prints it with `--bot`, and for each round it starts the
+/// round's level joined to `--team` (a window, or a `--bot-objective consoles` bot) and stops it
+/// when the round ends. It returns once the match is over.
+///
+/// Example: `run_match_client(&arguments, "127.0.0.1")?;`
+fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
+    let server: SocketAddr =
+        parse_server_address(address, arguments.match_port).ok_or_else(|| {
+            format!("--match must be an IP address with an optional :port, got {address:?}")
+        })?;
+    let team: Option<match_state::Team> = arguments.team.map(|team| match team {
+        TeamFlag::Blue => match_state::Team::Blue,
+        TeamFlag::Red => match_state::Team::Red,
+    });
+    if arguments.bot && team.is_none() {
+        return Err("--match with --bot needs --team blue or --team red".into());
+    }
+    let mut client: match_flow::MatchClient = match_flow::MatchClient::Connect(server, team)?;
+    let mut level: Option<(usize, Child)> = None;
+    let window: Option<(sdl3::Sdl, sdl3::render::WindowCanvas)> = match arguments.bot {
+        true => None,
+        false => {
+            let sdl: sdl3::Sdl = sdl3::init()?;
+            let window: sdl3::video::Window = sdl
+                .video()?
+                .window("Warped match", MATCH_WINDOW_PX.0, MATCH_WINDOW_PX.1)
+                .high_pixel_density()
+                .resizable()
+                .position_centered()
+                .build()?;
+            Some((sdl, window.into_canvas()))
+        }
+    };
+    let mut event_pump: Option<sdl3::EventPump> = match &window {
+        Some((sdl, _)) => Some(sdl.event_pump()?),
+        None => None,
+    };
+    let mut canvas: Option<sdl3::render::WindowCanvas> = window.map(|(_, canvas)| canvas);
+    let mut printed_phase: Option<match_flow::Phase> = None;
+    let result: Result<()> = (|| loop {
+        client.poll()?;
+        for event in event_pump
+            .iter_mut()
+            .flat_map(|pump| pump.poll_iter().collect::<Vec<Event>>())
+        {
+            match event {
+                Event::Quit { .. } => return Ok(()),
+                Event::KeyDown {
+                    scancode: Some(scancode),
+                    ..
+                } => match scancode {
+                    Scancode::Escape => return Ok(()),
+                    Scancode::_1 if client.team.is_none() => {
+                        client.team = Some(match_state::Team::Blue)
+                    }
+                    Scancode::_2 if client.team.is_none() => {
+                        client.team = Some(match_state::Team::Red)
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        let Some(view) = client.view.clone() else {
+            std::thread::sleep(Duration::from_millis(TITLE_FRAME_MS));
+            continue;
+        };
+        let playing: Option<(usize, usize, u16)> = match view.phase {
+            match_flow::Phase::Playing { round, level, port } => Some((round, level, port)),
+            _ => None,
+        };
+        if let Some((round, child)) = &mut level
+            && let Some(status) = child.try_wait()?
+        {
+            println!("round {round}'s level stopped ({status}); starting it again");
+            level = None;
+            std::thread::sleep(Duration::from_secs_f64(LEVEL_RESTART_S));
+        }
+        if level.as_ref().map(|(round, _)| *round) != playing.map(|(round, _, _)| round) {
+            if let Some((_, child)) = level.take() {
+                match_flow::stop_child(&mut Some(child));
+            }
+            if let (Some((round, index, port)), Some(team)) = (playing, client.team) {
+                let extra: Vec<String> = match arguments.bot {
+                    true => {
+                        let label: String = format!("match-{}-round-{round}", team.get_name());
+                        [
+                            "--bot",
+                            "--bot-objective",
+                            "consoles",
+                            "--exit-after-s",
+                            "3600",
+                            "--label",
+                            &label,
+                        ]
+                        .map(String::from)
+                        .to_vec()
+                    }
+                    false => Vec::new(),
+                };
+                let mut command: Command = match_flow::make_level_client_command(
+                    &view.levels[index],
+                    server.ip(),
+                    port,
+                    team,
+                    &extra,
+                )?;
+                println!("round {round}: {command:?}");
+                level = Some((round, command.spawn()?));
+            }
+        }
+        if view.phase == match_flow::Phase::Over {
+            let outcome = view.state.outcome().expect("an over match has an outcome");
+            println!(
+                "The match is over: {}",
+                match_flow::describe_outcome(outcome)
+            );
+            if canvas.is_none() {
+                return Ok(());
+            }
+        }
+        let mut lines: Vec<(String, bool)> = match_menu::get_progression_lines(&view, client.team);
+        lines.truncate(match_menu::MAX_LINE_COUNT);
+        match &mut canvas {
+            Some(canvas) => {
+                canvas.set_draw_color(Color::RGB(0, 0, 0));
+                canvas.clear();
+                draw_text_overlay(
+                    canvas,
+                    &OverlayText {
+                        lines,
+                        mask_px: MATCH_MASK_PX,
+                        height_frac: MENU_HEIGHT_FRAC,
+                        is_centered: false,
+                        dim_frac: 0.0,
+                        picture: None,
+                    },
+                )?;
+                canvas.present();
+            }
+            None if printed_phase.as_ref() != Some(&view.phase)
+                && !matches!(
+                    view.phase,
+                    match_flow::Phase::Intermission { .. } | match_flow::Phase::RoundOver { .. }
+                )
+                || printed_phase.is_none() =>
+            {
+                for (line, _) in lines {
+                    println!("{line}");
+                }
+                printed_phase = Some(view.phase.clone());
+            }
+            None => {}
+        }
+        std::thread::sleep(Duration::from_millis(TITLE_FRAME_MS));
+    })();
+    if let Some((_, child)) = level.take() {
+        match_flow::stop_child(&mut Some(child));
+    }
+    result
 }
 
 /// `run_title_screen` shows the title screen (`title.rs`) until the player quits, starting each
@@ -867,6 +1140,7 @@ fn start_server(
     settings: ServerSettings,
     console_teams: Vec<u32>,
     game_password: Vec<u8>,
+    level_result_file: Option<PathBuf>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -889,6 +1163,7 @@ fn start_server(
             &should_start_new_game,
             None,
             game_password,
+            level_result_file.as_deref(),
         ) {
             eprintln!("The game server stopped: {error}");
         }
@@ -972,6 +1247,7 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         settings,
         consoles.iter().map(|c| c.team).collect(),
         net::read_game_password(arguments.game_password_file.as_deref())?,
+        arguments.level_result_file.clone(),
     )?;
     println!(
         "Server settings: {} (players who join get them).",
@@ -1167,7 +1443,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         arguments.map.get_folder_name(),
         &net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
-    client.join(None)?;
+    client.join(get_team_index(arguments))?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
     let duration_s: f64 = arguments
@@ -1200,6 +1476,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
             &mut client,
             duration_s,
             arguments.black_hole_strength,
+            arguments.bot_objective,
             |frame, id| save(FrameData::Voxel(frame), id),
         )?
     };
@@ -2342,12 +2619,16 @@ impl Session {
             } else {
                 None
             };
+            let mut client: net::Client = net::Client::Connect(
+                get_server_address(arguments)?,
+                arguments.map.get_folder_name(),
+                &net::read_game_password(arguments.game_password_file.as_deref())?,
+            )?;
+            if let Some(team) = get_team_index(arguments) {
+                client.join(Some(team))?;
+            }
             Some(Multiplayer {
-                client: net::Client::Connect(
-                    get_server_address(arguments)?,
-                    arguments.map.get_folder_name(),
-                    &net::read_game_password(arguments.game_password_file.as_deref())?,
-                )?,
+                client,
                 server,
                 is_eliminated: false,
                 respawn_in_s: 0.0,

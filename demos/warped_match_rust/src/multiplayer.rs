@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::BotObjective;
 use crate::avatar_model::AvatarClip;
 use crate::black_hole_growth::BlackHoleGrowth;
 use crate::dust::DustCloud;
@@ -525,6 +526,7 @@ pub fn run_voxel_bot(
     client: &mut Client,
     duration_s: f64,
     black_hole_strength: Option<f64>,
+    objective: BotObjective,
     mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
     let (mut grown_world, mut black_hole_growth) =
@@ -623,11 +625,15 @@ pub fn run_voxel_bot(
                 }
             }
             last_victim = view.hit_player_id;
+            let console: Option<u8> = match objective {
+                BotObjective::Fight => None,
+                BotObjective::Consoles => get_console_to_disable(world, client, team),
+            };
             client.send_state(
                 camera,
-                is_laser_on,
+                is_laser_on && console.is_none(),
                 false,
-                None,
+                console,
                 0.0,
                 PlayerWormholes::default(),
             )?;
@@ -638,6 +644,19 @@ pub fn run_voxel_bot(
     }
     client.leave()?;
     Ok((hit_count, eliminated_count))
+}
+
+/// `get_console_to_disable` gives the first console of the other team (than `team`) that is still
+/// on, for a `--bot-objective consoles` bot to hold `E` on, or `None` once the game is won.
+///
+/// Example: `let console = get_console_to_disable(&world, &client, 0);`
+fn get_console_to_disable(world: &VoxelWorld, client: &Client, team: u32) -> Option<u8> {
+    if client.game.winner.is_some() {
+        return None;
+    }
+    (0..world.consoles.len())
+        .find(|&i| world.consoles[i].team != team && client.game.off_mask >> i & 1 == 0)
+        .map(|i| i as u8)
 }
 
 #[cfg(test)]

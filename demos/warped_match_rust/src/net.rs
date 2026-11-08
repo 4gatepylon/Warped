@@ -50,7 +50,7 @@ use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-pub const DEFAULT_PORT: u16 = 47_800;
+pub const DEFAULT_PORT: u16 = 47_852;
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_PLAYER_COUNT: usize = 8;
 pub const MAX_CONSOLE_COUNT: usize = 32;
@@ -62,7 +62,7 @@ const SPECKLE_FIRST_BIT: u8 = 3;
 const ANY_TEAM: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
-const DISCOVERY_PORT: u16 = 47_801;
+const DISCOVERY_PORT: u16 = 47_853;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
 const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
@@ -870,16 +870,29 @@ impl Server {
     ///
     /// Example: `server.update_consoles();`
     fn update_consoles(&mut self) {
-        for slot in &mut self.slots {
+        for index in 0..self.slots.len() {
+            let slot: &mut Slot = &mut self.slots[index];
             if let (Some(console), Some(since)) =
                 (slot.player.disabling_console, slot.disabling_since)
                 && since.elapsed().as_secs_f64() >= self.settings.consoles.hold_to_disable_s
             {
-                self.game.off_mask |= 1 << console;
                 (slot.player.disabling_console, slot.disabling_since) = (None, None);
-                println!("player {} turned off console {console}", slot.player.id);
+                let id: u32 = slot.player.id;
+                if self.game.winner.is_none() {
+                    self.game.off_mask |= 1 << console;
+                    println!("player {id} turned off console {console}");
+                    self.update_winner();
+                }
             }
         }
+    }
+
+    /// `update_winner` declares the other team the winner once all of a team's consoles are off;
+    /// `update_consoles` calls it after each console, so the first team to finish wins even when
+    /// both teams' last consoles go off in the same update.
+    ///
+    /// Example: `self.update_winner();`
+    fn update_winner(&mut self) {
         let losers: Vec<u32> = (0..TEAM_NAMES.len() as u32)
             .filter(|&team| {
                 let mut consoles = (0..self.console_teams.len())
@@ -998,6 +1011,19 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
     Ok(socket)
 }
 
+/// `write_level_result` writes `{"winner": "<team>"}` to `path` at once, through `<path>.partial`
+/// and a rename, so a match server polling `path` never reads half a file.
+///
+/// Example: `write_level_result(Path::new("round_1.json"), 0)?;`
+fn write_level_result(path: &std::path::Path, winner: u32) -> Result<()> {
+    let partial: std::path::PathBuf = path.with_extension("partial");
+    let team: &str = TEAM_NAMES[winner as usize];
+    std::fs::write(&partial, format!("{{\"winner\": \"{team}\"}}\n"))?;
+    std::fs::rename(&partial, path)?;
+    println!("{team} won the level; wrote {}", path.display());
+    Ok(())
+}
+
 /// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
 /// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
 /// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
@@ -1005,10 +1031,11 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 /// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
 /// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
 /// `new_game_after_win`, that long after a team won, admits only players who prove they know
-/// `game_password` (empty for anyone), and broadcasts
+/// `game_password` (empty for anyone), writes the winner to `level_result_file` once (when
+/// given; `write_level_result`), and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new(), None)?;`
 #[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
@@ -1019,6 +1046,7 @@ pub fn serve(
     should_start_new_game: &AtomicBool,
     new_game_after_win: Option<Duration>,
     game_password: Vec<u8>,
+    level_result_file: Option<&std::path::Path>,
 ) -> Result<()> {
     assert!(
         console_teams.len() <= MAX_CONSOLE_COUNT,
@@ -1063,6 +1091,9 @@ pub fn serve(
             is_alive
         });
         server.update_consoles();
+        if let (Some(winner), None, Some(path)) = (server.game.winner, won_at, level_result_file) {
+            write_level_result(path, winner)?;
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
             && time.elapsed() >= delay
@@ -1770,6 +1801,15 @@ mod tests {
     ///
     /// Example: `hold_console(&mut server, 1, address(50_001), 2);`
     fn hold_console(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
+        start_holding(server, id, from, console);
+        server.update_consoles();
+    }
+
+    /// `start_holding` is `hold_console` without the update, so several players' holds can end in
+    /// the same update.
+    ///
+    /// Example: `start_holding(&mut server, 1, address(50_001), 2);`
+    fn start_holding(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
         let player: RemotePlayer = RemotePlayer {
             id,
             frame: DMat4::IDENTITY,
@@ -1791,7 +1831,6 @@ mod tests {
                 .disabling_since
                 .map(|since| since - Duration::from_secs_f64(disable_s));
         }
-        server.update_consoles();
     }
 
     /// `connect_client` connects a client to `server` and joins it on `team`, letting the server
@@ -2137,6 +2176,19 @@ mod tests {
         assert_eq!(shoot(&mut server, 1, 50_001), 1.0);
         send_wormholes(&mut server, PlayerWormholes::default());
         assert_eq!(server.slots[1].wormhole_damage_frac, 0.0);
+    }
+
+    #[test]
+    fn the_first_team_to_finish_in_an_update_wins() {
+        let mut server: Server = make_server();
+        let (blue, red) = (address(50_002), address(50_001));
+        join(&mut server, red, RED);
+        join(&mut server, blue, BLUE);
+        hold_console(&mut server, 1, red, 0);
+        start_holding(&mut server, 1, red, 1);
+        start_holding(&mut server, 2, blue, 2);
+        server.update_consoles();
+        assert_eq!((server.game.off_mask, server.game.winner), (0b011, Some(1)));
     }
 
     #[test]

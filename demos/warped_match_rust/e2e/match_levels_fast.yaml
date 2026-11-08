@@ -1,0 +1,46 @@
+# The end-to-end bot match: match_levels.yaml with consoles turned off in 1 s (fast_server_settings.yaml).
+# The match's levels, blue's deepest first (game_design/DESIGN.md): Dust, Snow Planet, City Sphere,
+# Dark Forest, Lunar Surface. This file is the source of truth for which program plays each level;
+# see README.md, "Level interface". `program: self` is this demo's own binary; any other program
+# is a path from this folder. `stand_in_for` marks a level played on another map until its own
+# demo is plugged in.
+levels:
+  - name: Dust
+    folder: demos/dust_rust
+    branch: devin/dust-demo
+    status: stand-in (Lunar Surface) until devin/dust-demo is plugged in
+    program: self
+    map: lunar-surface
+    server_args: [--server-settings, e2e/fast_server_settings.yaml]
+    stand_in_for: Dust
+  - name: Snow Planet
+    folder: demos/snow_planet_rust
+    branch: devin/snow-planet-demo
+    status: stand-in (Lunar Surface) until devin/snow-planet-demo is plugged in
+    program: self
+    map: lunar-surface
+    server_args: [--server-settings, e2e/fast_server_settings.yaml]
+    stand_in_for: Snow Planet
+  - name: City Sphere
+    folder: demos/city_sphere_rust
+    branch: devin/city-sphere-demo
+    status: stand-in (Lunar Surface) until devin/city-sphere-demo is plugged in
+    program: self
+    map: lunar-surface
+    server_args: [--server-settings, e2e/fast_server_settings.yaml]
+    stand_in_for: City Sphere
+  - name: Dark Forest
+    folder: demos/dark_forest_rust
+    branch: devin/dark-forest-demo
+    status: stand-in (Lunar Surface) until devin/dark-forest-demo is plugged in
+    program: self
+    map: lunar-surface
+    server_args: [--server-settings, e2e/fast_server_settings.yaml]
+    stand_in_for: Dark Forest
+  - name: Lunar Surface
+    folder: demos/hyperbolic_wormholes_rust
+    branch: staging/user-4gatepylon
+    status: playable (copied into this demo)
+    program: self
+    map: lunar-surface
+    server_args: [--server-settings, e2e/fast_server_settings.yaml]
