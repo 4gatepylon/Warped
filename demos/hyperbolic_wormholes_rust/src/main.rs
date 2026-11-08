@@ -114,6 +114,7 @@ const ENERGY_SEGMENT_COUNT: u32 = 10;
 const MAX_BAR_SEGMENT_COUNT: u32 = 20;
 const BAR_GAP_FRAC: f32 = 0.002;
 const BAR_FILL_TOLERANCE: f64 = 0.05;
+const SKY_TRACER_M: f64 = 80.0;
 const HEAT_BAR_OVERHEATED_COLOR: [f32; 4] = [1.0, 0.15, 0.1, 0.9];
 const WAND_LASER_SHAFT_HALF_M: [f32; 4] = [0.011, 0.011, 0.16, 0.0];
 const WAND_LASER_SHAFT_COLOR: [f32; 4] = [0.2, 0.17, 0.22, 1.0];
@@ -1730,7 +1731,9 @@ struct Tracer {
 
 impl Tracer {
     /// `New` makes a tracer for `shot`, fired at `fired_s` by a player of `team` with the rifle
-    /// (`is_rifle`) or the sniper, whose beam speed and trail come from `settings`.
+    /// (`is_rifle`) or the sniper, whose beam speed and trail come from `settings`. A shot that hit
+    /// nothing flies only its first `SKY_TRACER_M`: farther out over the sky it is under a pixel
+    /// wide, and the shader's single precision makes its glow noisy (D64, D66).
     ///
     /// Example: `let tracer = Tracer::New(&shot, 1, 12.5, false, &settings, world.r);`
     #[allow(non_snake_case)]
@@ -1753,9 +1756,14 @@ impl Tracer {
                 settings.sniper.beam_trail_s,
             )
         };
+        let segments: Vec<voxel_world::BeamSegment> = if shot.is_hit {
+            shot.segments.clone()
+        } else {
+            voxel_world::clip_beam(&shot.segments, r, 0.0, SKY_TRACER_M)
+        };
         Tracer {
-            segments: shot.segments.clone(),
-            length_m: shot.segments.iter().map(|s| s.length).sum::<f64>() * r,
+            length_m: segments.iter().map(|s| s.length).sum::<f64>() * r,
+            segments,
             spot: shot.spot,
             team,
             fired_s,
