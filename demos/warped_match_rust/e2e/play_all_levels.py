@@ -47,6 +47,7 @@ from typing import Any, TextIO
 import click
 
 _CRATE_FOLDER: Path = Path(__file__).resolve().parent.parent
+_REPO_FOLDER: Path = _CRATE_FOLDER.parent.parent
 _PROGRAM: Path = _CRATE_FOLDER / ".build" / "release" / "hyperbolic-wormholes"
 _LEVELS_FILE: Path = _CRATE_FOLDER / "e2e" / "match_levels_fast.yaml"
 _PLAN: list[tuple[str, str, str, int]] = [
@@ -67,6 +68,10 @@ _WON_LINE: re.Pattern[str] = re.compile(r"^Round (\d+): (blue|red) won (.+)$")
 _MATCH_FOLDER_LINE: re.Pattern[str] = re.compile(r"^Run folder: (.+)$")
 _PICTURE_FOLDER_LINE: re.Pattern[str] = re.compile(r"^Run folder: (.+/progression_pictures/.+)$", re.MULTILINE)
 _PROGRAM_LINE: re.Pattern[str] = re.compile(r"^\s*program: (\S+)$", re.MULTILINE)
+_LEVEL_BLOCK: re.Pattern[str] = re.compile(r"^  - name: .*?(?=^  - name: |\Z)", re.MULTILINE | re.DOTALL)
+_FOLDER_LINE: re.Pattern[str] = re.compile(r"^\s*folder: (\S+)$", re.MULTILINE)
+_SETTINGS_ARGUMENT: re.Pattern[str] = re.compile(r"--server-settings, (\S+?)\]")
+_HOLD_KEY: str = "hold_to_disable_s"
 _PYLON_OFF_LINE: re.Pattern[str] = re.compile(r"turned off console \d+")
 _JOIN_LINE: re.Pattern[str] = re.compile(r"joined the (?:blue|red) team")
 _FAILURE_LINE: re.Pattern[str] = re.compile(r"panicked at|^Error: ", re.MULTILINE)
@@ -306,8 +311,38 @@ def _check_match(match_folder: Path, rounds: list[_round_t]) -> None:
         raise _MatchCheckFailed(f"the match ended {report['outcome']}, not {_OUTCOME}")
 
 
+def _get_setting_lines(settings_path: Path) -> list[str]:
+    """`_get_setting_lines` gives a server settings file's lines without comments, but the console hold time.
+
+    Example:
+        >>> lines = _get_setting_lines(_CRATE_FOLDER / "server_settings.yaml")
+    """
+    lines: list[str] = [line.split("#")[0].rstrip() for line in settings_path.read_text().splitlines()]
+    return [line for line in lines if line.strip() and _HOLD_KEY not in line]
+
+
+def _find_drifted_settings() -> list[str]:
+    """`_find_drifted_settings` gives each fast settings file of the levels file that differs from its level's
+    `server_settings.yaml` in more than the console hold time, so the test plays each level as it is.
+
+    Example:
+        >>> drifted = _find_drifted_settings()
+    """
+    drifted: list[str] = []
+    for block in _LEVEL_BLOCK.findall(_LEVELS_FILE.read_text()):
+        if (argument := _SETTINGS_ARGUMENT.search(block)) is None:
+            continue
+        is_self: bool = _PROGRAM_LINE.search(block)[1] == "self"
+        level_folder: Path = _CRATE_FOLDER if is_self else _REPO_FOLDER / _FOLDER_LINE.search(block)[1]
+        level_lines: list[str] = _get_setting_lines(level_folder / "server_settings.yaml")
+        if level_lines != _get_setting_lines(_CRATE_FOLDER / argument[1]):
+            drifted.append(argument[1])
+    return drifted
+
+
 def _validate_args(match_port: int, level_port: int, label: str | None) -> None:
-    """`_validate_args` checks that the ports differ, the label, and that every program of the match is built.
+    """`_validate_args` checks that the ports differ, the label, that every program of the match is built and that
+    its fast settings files match their levels' settings but for the console hold time.
 
     Args:
         match_port: `--match-port`.
@@ -328,6 +363,10 @@ def _validate_args(match_port: int, level_port: int, label: str | None) -> None:
     programs: list[Path] = [_PROGRAM] + [_CRATE_FOLDER / program for program in level_programs if program != "self"]
     if missing := [str(program) for program in programs if not program.exists()]:
         raise click.UsageError(f"{missing} aren't built; run `make levels && cargo build --release` first")
+    if drifted := _find_drifted_settings():
+        raise click.UsageError(
+            f"{drifted} differ from their levels' server_settings.yaml in more than {_HOLD_KEY}; copy the changes in"
+        )
 
 
 @click.command()
