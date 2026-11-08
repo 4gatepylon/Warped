@@ -103,6 +103,9 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
   on W-68 (reality bend), which adds the pylons and the black hole.
+- [ ] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
+  are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
+  Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched).
 
 ## Pending user review
 
