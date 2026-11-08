@@ -1007,7 +1007,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
 /**
  * @brief `probe_hand_light` writes the light at the eye into `hand`, as `light_surface` lights a surface there: the sun
  * (shadowed), the lamps summed into one light from their weighted mean direction (their wrapped part goes to the
- * sky), earthshine, the ambient light as the sky, and the ground (regolith) lit by the sun and the ambient light.
+ * sky), earthshine, the ambient light and the haze's skylight as the sky, and the ground (regolith) lit by the sun and the ambient light.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread, before the frame's rays.
@@ -1017,6 +1017,7 @@ kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND
     Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
     float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
+    float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
     float4 toward_lamps = float4(0.0);
     for (int i = 0; i < u.light_count; i++) {
         float4 toward;
@@ -1032,8 +1033,8 @@ kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND
         hand.colors[k] = float4(colors[k], 0.0);
     }
     hand.up = float4(to_camera(u, up), 0.0);
-    hand.sky = float4(float3(AMBIENT) + LIGHT_WRAP * lamps, 0.0);
-    hand.ground = float4(get_palette(scene, u.mat_regolith).rgb * (sun * max(mdot(up, l), 0.0) + AMBIENT), 0.0);
+    hand.sky = float4(ambient + LIGHT_WRAP * lamps, 0.0);
+    hand.ground = float4(get_palette(scene, u.mat_regolith).rgb * (sun * max(mdot(up, l), 0.0) + ambient), 0.0);
 }
 
 /** @brief `grid_normal` is the unit normal, toward +axis, of the grid plane of structure st through local point p. @par Example @code float4 t = grid_normal(st, p, 0); @endcode */
