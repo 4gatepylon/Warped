@@ -1522,7 +1522,8 @@ fn bench_voxel_views(
             "fastest_ms": times_ms[0],
             "p99_ms": times_ms[(times_ms.len() * 99 / 100).min(times_ms.len() - 1)],
             "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
-            "p99_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() * 99 / 100),
+            "p99_gpu_ms": gpu_times_ms
+                .get((gpu_times_ms.len() * 99 / 100).min(gpu_times_ms.len().saturating_sub(1))),
             "laser": shot.as_ref().map(|s| multiplayer::describe_shot(world, s)),
         }));
         if let Some(frame_count) = arguments.clip_frame_count.filter(|_| view.is_laser_on) {
@@ -1906,6 +1907,8 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
             "fastest_ms": times_ms[0],
             "p99_ms": times_ms[(times_ms.len() * 99 / 100).min(times_ms.len() - 1)],
             "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
+            "p99_gpu_ms": gpu_times_ms
+                .get((gpu_times_ms.len() * 99 / 100).min(gpu_times_ms.len().saturating_sub(1))),
             "laser": report.as_ref().map(describe_laser),
         }));
     }
@@ -1943,17 +1946,20 @@ fn report_bench(
         println!("{summary}");
     } else {
         println!(
-            "{:<18} {:>10} {:>10} {:>10} {:>10}  laser",
-            "view", "median ms", "p99 ms", "fastest ms", "GPU ms"
+            "{:<18} {:>10} {:>10} {:>10} {:>10} {:>10}  laser",
+            "view", "median ms", "p99 ms", "fastest ms", "GPU ms", "GPU p99 ms"
         );
         for view in &results {
             println!(
-                "{:<18} {:>10.1} {:>10.1} {:>10.1} {:>10}  {}",
+                "{:<18} {:>10.1} {:>10.1} {:>10.1} {:>10} {:>10}  {}",
                 view["view"].as_str().unwrap_or_default(),
                 view["median_ms"].as_f64().unwrap_or_default(),
                 view["p99_ms"].as_f64().unwrap_or_default(),
                 view["fastest_ms"].as_f64().unwrap_or_default(),
                 view["median_gpu_ms"]
+                    .as_f64()
+                    .map_or("-".to_string(), |ms| format!("{ms:.1}")),
+                view["p99_gpu_ms"]
                     .as_f64()
                     .map_or("-".to_string(), |ms| format!("{ms:.1}")),
                 view["laser"].as_str().unwrap_or("-"),

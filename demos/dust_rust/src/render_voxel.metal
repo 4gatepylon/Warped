@@ -18,6 +18,7 @@ using namespace metal;
     device const Shape *shapes [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
     device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]], \
     device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], device const float *mound_heights [[buffer(26)]], \
+    texture2d<float> terrain_heights [[texture(16)]], \
     constant float4 *means [[buffer(27)]], device const DustBurst *dust_bursts [[buffer(29)]], \
     device const DustParticle *dust_particles [[buffer(30)]], \
     texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]], \
@@ -571,6 +572,7 @@ struct VoxelUniforms {
     float4 terrain;
     float4 relief;
     float4 mound_grid;
+    float4 height_grid;
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
@@ -757,6 +759,7 @@ struct Scene {
     device const uchar *clearances;
     device const float4 *surfaces;
     device const float *mound_heights;
+    texture2d<float> terrain_heights;
     constant float4 *means;
     texture2d_array<float> albedo_maps;
     texture2d_array<float> normal_maps;
@@ -992,8 +995,8 @@ static float mound_height_m(thread const Scene &scene, float u_m, float v_m) {
     return mix(bottom, top, f.y);
 }
 
-/** @brief `terrain_height_m` is terrain.rs's `get_height_m`: the ground's height at Fermi (u, v), mounds included. @par Example @code float h = terrain_height_m(scene, u_m, v_m); @endcode */
-static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
+/** @brief `terrain_shape_height_m` is terrain.rs's `get_shape_height_m`: the ground's height at Fermi (u, v) from its shape, mounds included. @par Example @code float h = terrain_shape_height_m(scene, u_m, v_m); @endcode */
+static float terrain_shape_height_m(thread const Scene &scene, float u_m, float v_m) {
     float4 t = scene.u.terrain, rl = scene.u.relief;
     uint seed = scene.u.terrain_seed;
     float inside_m = (1.0 - length(float2(u_m / t.x, v_m / t.y))) * t.y;
@@ -1004,6 +1007,26 @@ static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
     for (uint o = 0; o < uint(TERRAIN_OCTAVES); o++) { sum += amplitude * terrain_noise(p, seed + o); amplitude *= 0.5; p *= 2.0; }
     float mounds_m = mound_height_m(scene, u_m, v_m);
     return rim_m * wall + mounds_m + rl.x * sum / (1.0 - exp2(-float(TERRAIN_OCTAVES))) * (1.0 + TERRAIN_WALL_RELIEF_GAIN * wall);
+}
+
+/**
+ * @brief `terrain_height_m` is terrain.rs's `get_height_m`: the baked grid (origin u, v and cells per meter in `height_grid`,
+ * whose w is 1 when there is one) read bilinearly at Fermi (u, v), and `terrain_shape_height_m` outside it. One gather at
+ * the corner shared by texels i and i + 1 fetches the cell's four points, w at (i, j), z at (i + 1, j), x at (i, j + 1) and
+ * y at (i + 1, j + 1), unfiltered.
+ * @par Example
+ * @code
+ * float h = terrain_height_m(scene, u_m, v_m);
+ * @endcode
+ */
+static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
+    constexpr sampler corners(filter::nearest, address::clamp_to_edge);
+    float4 g = scene.u.height_grid;
+    float2 x = (float2(u_m, v_m) - g.xy) * g.z, i = floor(x), f = x - i;
+    float2 size = float2(scene.terrain_heights.get_width(), scene.terrain_heights.get_height());
+    if (g.w == 0.0 || any(i < 0.0) || any(i >= size - 1.0)) return terrain_shape_height_m(scene, u_m, v_m);
+    float4 q = scene.terrain_heights.gather(corners, (i + 1.0) / size);
+    return mix(mix(q.w, q.z, f.x), mix(q.x, q.y, f.x), f.y);
 }
 
 /** @brief `get_fermi` gives a point's Fermi (u, v, h) in meters. @par Example @code float3 f = get_fermi(x, r); @endcode */
@@ -1056,8 +1079,8 @@ static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s
  */
 static float4 terrain_normal(thread const Scene &scene, float3 f) {
     float r = scene.u.curvature_radius_m, d = TERRAIN_NORMAL_STEP_M;
-    float g_u = (terrain_height_m(scene, f.x + d, f.y) - terrain_height_m(scene, f.x - d, f.y)) / (2.0 * d);
-    float g_v = (terrain_height_m(scene, f.x, f.y + d) - terrain_height_m(scene, f.x, f.y - d)) / (2.0 * d);
+    float g_u = (terrain_shape_height_m(scene, f.x + d, f.y) - terrain_shape_height_m(scene, f.x - d, f.y)) / (2.0 * d);
+    float g_v = (terrain_shape_height_m(scene, f.x, f.y + d) - terrain_shape_height_m(scene, f.x, f.y - d)) / (2.0 * d);
     float3 c = cosh(f / r), sh = sinh(f / r);
     float4 du = float4(0.0, 0.0, -c.z * c.y * c.x, c.z * c.y * sh.x);
     float4 dv = float4(c.z * c.y, 0.0, -c.z * sh.y * sh.x, c.z * sh.y * c.x);
@@ -1404,7 +1427,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
  * @endcode
  */
 kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
     float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
     float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
@@ -2726,6 +2749,20 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
 }
 
 /**
+ * @brief `measure_terrain_heights` writes the ground's height `terrain_height_m` at each Fermi (u, v) of `points`, so
+ * render_voxel.rs's tests can check that the CPU walks and hits on the ground this shader draws.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs's tests, one thread per point.
+ * @endcode
+ */
+kernel void measure_terrain_heights(SCENE_BUFFERS, device const float2 *points [[buffer(2)]], device float *heights [[buffer(3)]],
+                                    uint t [[thread_position_in_grid]]) {
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    heights[t] = terrain_height_m(scene, points[t].x, points[t].y);
+}
+
+/**
  * @brief `trace_voxel_pixels` traces every pixel's ray and writes its colour (`--sampling every-pixel`).
  * @par Example
  * @code
@@ -2734,7 +2771,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2841,7 +2878,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -2865,7 +2902,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -2902,7 +2939,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -2957,7 +2994,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2976,7 +3013,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {

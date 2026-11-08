@@ -1,16 +1,19 @@
 //! `terrain.rs` is a map's `ground.terrain` (`common/maps/README.md`): the ground's height over
 //! the world's Fermi (u, v), a crater bowl whose walls rise to an elliptical rim, roughened by
 //! value noise and raised by round mounds (hills, a ridge, boulders) baked into a height grid,
-//! and where a chord first meets it. `render_voxel.metal` computes the same height.
+//! and where a chord first meets it. The whole height can be baked into a second grid where
+//! players see the ground, which this file and `render_voxel.metal` read the same way.
 //!
-//! Interface: `Terrain::FromMap`, `Terrain::get_height_m`, `Terrain::get_wall_frac`,
-//! `Terrain::find_hit_s`, `get_fermi_coordinates`.
+//! Interface: `Terrain::FromMap`, `Terrain::bake_heights`, `Terrain::get_height_m`,
+//! `Terrain::get_shape_height_m`, `Terrain::get_wall_frac`, `Terrain::find_hit_s`,
+//! `HeightGrid::find_height_m`, `get_fermi_coordinates`.
 //!
 //! Example: `let h_m = terrain.get_height_m(12.0, -3.5);`
 
 use std::sync::Arc;
 
 use glam::DVec4;
+use rayon::prelude::*;
 
 use crate::map::{MapMound, MapTerrain};
 
@@ -25,28 +28,28 @@ const MIN_STEP_M: f64 = 0.03;
 const STEP_PER_M: f64 = 0.01;
 const MAX_STEPS: usize = 400;
 const BISECTIONS: usize = 8;
-const MOUND_CELL_M: f64 = 0.25;
+const GRID_CELL_M: f64 = 0.25;
 
-/// `MoundGrid` is the mounds' summed height sampled every `cell_m` from `origin_m` (Fermi u, v)
-/// over `size` points (u fastest), read bilinearly; zero outside.
-pub struct MoundGrid {
+/// `HeightGrid` is a height sampled every `cell_m` from `origin_m` (Fermi u, v) over `size`
+/// points (u fastest), read bilinearly: the mounds' summed height, or the whole terrain's.
+pub struct HeightGrid {
     pub origin_m: [f64; 2],
     pub cell_m: f64,
     pub size: [usize; 2],
     pub heights: Vec<f32>,
 }
 
-impl MoundGrid {
+impl HeightGrid {
     /// `FromMounds` bakes mounds, each h (1 - d²)² within its radius (d the distance over the
     /// radius), into a grid a cell wider than all of them, or `None` if there are none.
     ///
-    /// Example: `let grid = MoundGrid::FromMounds(&map_terrain.mounds);`
+    /// Example: `let grid = HeightGrid::FromMounds(&map_terrain.mounds);`
     #[allow(non_snake_case)]
-    pub fn FromMounds(mounds: &[MapMound]) -> Option<MoundGrid> {
+    pub fn FromMounds(mounds: &[MapMound]) -> Option<HeightGrid> {
         let edge = |a: usize, sign: f64| -> f64 {
             mounds
                 .iter()
-                .map(|m| sign * ([m.u_m, m.v_m][a] + sign * (m.radius_m + MOUND_CELL_M)))
+                .map(|m| sign * ([m.u_m, m.v_m][a] + sign * (m.radius_m + GRID_CELL_M)))
                 .fold(f64::NEG_INFINITY, f64::max)
                 * sign
         };
@@ -55,12 +58,12 @@ impl MoundGrid {
         }
         let origin_m: [f64; 2] = [edge(0, -1.0), edge(1, -1.0)];
         let size: [usize; 2] =
-            [0, 1].map(|a| ((edge(a, 1.0) - origin_m[a]) / MOUND_CELL_M).ceil() as usize + 1);
+            [0, 1].map(|a| ((edge(a, 1.0) - origin_m[a]) / GRID_CELL_M).ceil() as usize + 1);
         let mut heights: Vec<f32> = Vec::with_capacity(size[0] * size[1]);
         for j in 0..size[1] {
             for i in 0..size[0] {
-                let u_m: f64 = origin_m[0] + i as f64 * MOUND_CELL_M;
-                let v_m: f64 = origin_m[1] + j as f64 * MOUND_CELL_M;
+                let u_m: f64 = origin_m[0] + i as f64 * GRID_CELL_M;
+                let v_m: f64 = origin_m[1] + j as f64 * GRID_CELL_M;
                 let sum: f64 = mounds
                     .iter()
                     .map(|m| {
@@ -76,30 +79,59 @@ impl MoundGrid {
                 heights.push(sum as f32);
             }
         }
-        Some(MoundGrid {
+        Some(HeightGrid {
             origin_m,
-            cell_m: MOUND_CELL_M,
+            cell_m: GRID_CELL_M,
             size,
             heights,
         })
     }
 
-    /// `get_height_m` reads the grid bilinearly at Fermi (u, v), as `render_voxel.metal` does.
+    /// `Bake` samples `get_height_m` at `size` points every `GRID_CELL_M` from `origin_m`, rows
+    /// in parallel.
     ///
-    /// Example: `let h_m = grid.get_height_m(0.0, 0.0);`
-    pub fn get_height_m(&self, u_m: f64, v_m: f64) -> f64 {
+    /// Example: `let grid = HeightGrid::Bake([-10.0, -10.0], [81, 81], |u_m, v_m| u_m + v_m);`
+    #[allow(non_snake_case)]
+    pub fn Bake(
+        origin_m: [f64; 2],
+        size: [usize; 2],
+        get_height_m: impl Fn(f64, f64) -> f64 + Sync,
+    ) -> HeightGrid {
+        let mut heights: Vec<f32> = vec![0.0; size[0] * size[1]];
+        heights
+            .par_chunks_mut(size[0])
+            .enumerate()
+            .for_each(|(j, row)| {
+                let v_m: f64 = origin_m[1] + j as f64 * GRID_CELL_M;
+                for (i, h) in row.iter_mut().enumerate() {
+                    *h = get_height_m(origin_m[0] + i as f64 * GRID_CELL_M, v_m) as f32;
+                }
+            });
+        HeightGrid {
+            origin_m,
+            cell_m: GRID_CELL_M,
+            size,
+            heights,
+        }
+    }
+
+    /// `find_height_m` reads the grid bilinearly at Fermi (u, v), as `render_voxel.metal` does,
+    /// or gives `None` outside it.
+    ///
+    /// Example: `let h_m = grid.find_height_m(0.0, 0.0);`
+    pub fn find_height_m(&self, u_m: f64, v_m: f64) -> Option<f64> {
         let x: f64 = (u_m - self.origin_m[0]) / self.cell_m;
         let y: f64 = (v_m - self.origin_m[1]) / self.cell_m;
         let (i, j) = (x.floor(), y.floor());
         if i < 0.0 || j < 0.0 || i >= (self.size[0] - 1) as f64 || j >= (self.size[1] - 1) as f64 {
-            return 0.0;
+            return None;
         }
         let k: usize = i as usize + self.size[0] * j as usize;
         let at = |d: usize| f64::from(self.heights[k + d]);
         let (fx, fy) = (x - i, y - j);
         let bottom: f64 = at(0) + (at(1) - at(0)) * fx;
         let top: f64 = at(self.size[0]) + (at(self.size[0] + 1) - at(self.size[0])) * fx;
-        bottom + (top - bottom) * fy
+        Some(bottom + (top - bottom) * fy)
     }
 
     /// `get_max_height_m` is the grid's highest sample, which bilinear reads never exceed.
@@ -111,7 +143,8 @@ impl MoundGrid {
 }
 
 /// `Terrain` is a crater's shape in meters: rim semi-axes along u and v, the wall's width inward
-/// from the rim along v, the rim's mean height, and noise of `relief_m` at `wavelength_m`.
+/// from the rim along v, the rim's mean height, noise of `relief_m` at `wavelength_m`, the
+/// mounds' grid, and the whole height's grid once baked.
 #[derive(Clone)]
 pub struct Terrain {
     pub rim_m: [f64; 2],
@@ -120,7 +153,8 @@ pub struct Terrain {
     pub relief_m: f64,
     pub wavelength_m: f64,
     pub seed: u32,
-    pub mound_grid: Option<Arc<MoundGrid>>,
+    pub mound_grid: Option<Arc<HeightGrid>>,
+    pub height_grid: Option<Arc<HeightGrid>>,
 }
 
 /// `get_fermi_coordinates` gives (u, v, h) of a point in meters, for curvature radius `r`.
@@ -187,7 +221,28 @@ impl Terrain {
             relief_m: terrain.relief_m,
             wavelength_m: terrain.relief_wavelength_m,
             seed: terrain.seed,
-            mound_grid: MoundGrid::FromMounds(&terrain.mounds).map(Arc::new),
+            mound_grid: HeightGrid::FromMounds(&terrain.mounds).map(Arc::new),
+            height_grid: None,
+        }
+    }
+
+    /// `bake_heights` gives this terrain with its whole height (`get_shape_height_m`) baked into a
+    /// grid over Fermi |u| <= `half_size_m[0]` and |v| <= `half_size_m[1]`, on the mound grid's
+    /// points, so that `get_height_m` and the shader read the grid there.
+    ///
+    /// Example: `let terrain = Terrain::FromMap(&map_terrain).bake_heights([382.0, 318.0]);`
+    pub fn bake_heights(self, half_size_m: [f64; 2]) -> Terrain {
+        let anchor_m: [f64; 2] = self.mound_grid.as_ref().map_or([0.0; 2], |g| g.origin_m);
+        let origin_m: [f64; 2] = [0, 1].map(|a| {
+            anchor_m[a] - ((anchor_m[a] + half_size_m[a]) / GRID_CELL_M).ceil() * GRID_CELL_M
+        });
+        let size: [usize; 2] =
+            [0, 1].map(|a| ((half_size_m[a] - origin_m[a]) / GRID_CELL_M).ceil() as usize + 1);
+        let grid: HeightGrid =
+            HeightGrid::Bake(origin_m, size, |u_m, v_m| self.get_shape_height_m(u_m, v_m));
+        Terrain {
+            height_grid: Some(Arc::new(grid)),
+            ..self
         }
     }
 
@@ -203,21 +258,38 @@ impl Terrain {
             + self.relief_m * (1.0 + WALL_RELIEF_GAIN)
     }
 
-    /// `get_mounds_height_m` is the mounds' height at (u, v), 0 without mounds.
+    /// `get_mounds_height_m` is the mounds' height at (u, v): 0 without mounds and outside their
+    /// grid, which reaches a cell past every mound.
     ///
     /// Example: `let h_m = terrain.get_mounds_height_m(0.0, 0.0);`
     fn get_mounds_height_m(&self, u_m: f64, v_m: f64) -> f64 {
         self.mound_grid
             .as_ref()
-            .map_or(0.0, |g| g.get_height_m(u_m, v_m))
+            .and_then(|g| g.find_height_m(u_m, v_m))
+            .unwrap_or(0.0)
     }
 
-    /// `get_height_m` gives the ground's height at Fermi (u, v): the wall rising from the floor
-    /// `wall_m` inside the rim to the rim, falling away outside over `OUTER_FLANK_PER_WALL` walls,
-    /// and the relief, rougher up the wall.
+    /// `get_height_m` gives the ground's height at Fermi (u, v) that walking, hits and the
+    /// pictures use: the baked grid's where it has one, else `get_shape_height_m`.
     ///
     /// Example: `let h_m = terrain.get_height_m(0.0, 0.0);`
     pub fn get_height_m(&self, u_m: f64, v_m: f64) -> f64 {
+        match self
+            .height_grid
+            .as_ref()
+            .and_then(|g| g.find_height_m(u_m, v_m))
+        {
+            Some(h_m) => h_m,
+            None => self.get_shape_height_m(u_m, v_m),
+        }
+    }
+
+    /// `get_shape_height_m` gives the ground's height at Fermi (u, v) from its shape: the wall
+    /// rising from the floor `wall_m` inside the rim to the rim, falling away outside over
+    /// `OUTER_FLANK_PER_WALL` walls, the relief, rougher up the wall, and the mounds.
+    ///
+    /// Example: `let h_m = terrain.get_shape_height_m(0.0, 0.0);`
+    pub fn get_shape_height_m(&self, u_m: f64, v_m: f64) -> f64 {
         let inside_m: f64 = self.get_inside_m(u_m, v_m);
         let wall: f64 = if inside_m >= 0.0 {
             smooth(1.0 - inside_m / self.wall_m)
@@ -292,12 +364,15 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Where on the crater | floor, wall, rim | `the_floor_is_low_and_the_rim_high` |
+    //! | Where on the crater | floor, wall, rim | `the_floor_is_low_and_the_rim_high`, `the_baked_ground_follows_the_shape` |
     //! | Chord | down onto the floor, up into the sky | `a_chord_down_hits_and_one_up_misses` |
+    //! | Baked grid | at a grid point, inside a cell, outside the grid | `the_baked_ground_follows_the_shape` |
 
     use super::*;
 
     const R_M: f64 = 40.0;
+    const BAKED_HALF_SIZE_M: [f64; 2] = [100.0, 90.0];
+    const BAKED_MATCH_M: f64 = 0.005;
     const CRATER: Terrain = Terrain {
         rim_m: [140.0, 84.0],
         wall_m: 26.0,
@@ -306,6 +381,7 @@ mod tests {
         wavelength_m: 24.0,
         seed: 1,
         mound_grid: None,
+        height_grid: None,
     };
 
     #[test]
@@ -329,5 +405,28 @@ mod tests {
         assert!((h_m - CRATER.get_height_m(u_m, v_m)).abs() < 0.05);
         let up: DVec4 = 0.6 * up_at_eye - 0.8 * DVec4::Z;
         assert!(CRATER.find_hit_s(eye, up, 12.0, R_M).is_none());
+    }
+
+    #[test]
+    fn the_baked_ground_follows_the_shape() {
+        let baked: Terrain = CRATER.bake_heights(BAKED_HALF_SIZE_M);
+        let grid: &HeightGrid = baked.height_grid.as_ref().expect("a baked grid");
+        let cell_m: f64 = grid.cell_m;
+        for [u_m, v_m] in [[0.0, 0.0], [0.0, 70.0], [-10.0 * cell_m, 84.0]] {
+            let grid_m: f64 = grid.find_height_m(u_m, v_m).expect("inside the grid");
+            assert!((grid_m - CRATER.get_shape_height_m(u_m, v_m)).abs() < BAKED_MATCH_M);
+            assert_eq!(baked.get_height_m(u_m, v_m), grid_m);
+        }
+        for [u_m, v_m] in [[1.3, 2.7], [10.1, 70.6], [-33.33, 80.2]] {
+            let baked_m: f64 = baked.get_height_m(u_m, v_m);
+            assert!((baked_m - CRATER.get_shape_height_m(u_m, v_m)).abs() < BAKED_MATCH_M);
+        }
+        for [u_m, v_m] in [[101.0, 0.0], [0.0, -91.0]] {
+            assert!(grid.find_height_m(u_m, v_m).is_none());
+            assert_eq!(
+                baked.get_height_m(u_m, v_m),
+                CRATER.get_shape_height_m(u_m, v_m)
+            );
+        }
     }
 }
