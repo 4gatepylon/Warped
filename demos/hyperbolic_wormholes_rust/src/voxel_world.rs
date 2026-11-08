@@ -979,7 +979,8 @@ impl VoxelWorld {
     ) {
         let material: u8 = self.set_avatar_color(color_index, colors);
         let first_shape: usize = self.shapes.len();
-        self.shapes.extend(AVATAR_SHAPES.map(|shape| Shape { material, ..shape }));
+        self.shapes
+            .extend(AVATAR_SHAPES.map(|shape| Shape { material, ..shape }));
         let body: &[Shape] = &self.shapes[first_shape..];
         let drawn: Option<(usize, &MeshModel)> = posed
             .as_ref()
