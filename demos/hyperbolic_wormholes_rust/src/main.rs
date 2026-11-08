@@ -115,6 +115,10 @@ const MAX_BAR_SEGMENT_COUNT: u32 = 20;
 const BAR_GAP_FRAC: f32 = 0.002;
 const BAR_FILL_TOLERANCE: f64 = 0.05;
 const SKY_TRACER_M: f64 = 80.0;
+const CROSSHAIR_GAP_FRAC: f32 = 0.006;
+const CROSSHAIR_ARM_FRAC: f32 = 0.012;
+const CROSSHAIR_THICKNESS_FRAC: f32 = 0.0025;
+const CROSSHAIR_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.85];
 const HEAT_BAR_OVERHEATED_COLOR: [f32; 4] = [1.0, 0.15, 0.1, 0.9];
 const WAND_LASER_SHAFT_HALF_M: [f32; 4] = [0.011, 0.011, 0.16, 0.0];
 const WAND_LASER_SHAFT_COLOR: [f32; 4] = [0.2, 0.17, 0.22, 1.0];
@@ -2681,7 +2685,8 @@ impl Session {
         ])
     }
 
-    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view. In the bottom left, as
+    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the crosshair (unless a
+    /// banner shows) and, in the bottom left, as
     /// segmented bars (`make_segmented_bar`): this player's health in a game on a server (one segment
     /// per rifle body hit), the rifle's shots left before it overheats (with the rifle in hand), and
     /// on a voxel map the sprint energy. Below the middle, the progress of turning off a console
@@ -2690,6 +2695,9 @@ impl Session {
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
         let mut rects: Vec<render_metal::OverlayRect> = Vec::new();
+        if self.get_banner_lines().is_none() {
+            rects.extend(get_crosshair_rects(self.last_output_px));
+        }
         if let Some(multiplayer) = &self.multiplayer {
             rects.extend(make_segmented_bar(
                 HEALTH_BAR_MIN_FRAC,
@@ -2847,6 +2855,34 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
         Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
         None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
     }
+}
+
+/// `get_crosshair_rects` gives the crosshair in the middle of a window of `window_px` pixels: four
+/// arms `CROSSHAIR_ARM_FRAC` long, `CROSSHAIR_GAP_FRAC` from the middle, in fractions of the window's
+/// height so they look the same at any size.
+///
+/// Example: `let rects = get_crosshair_rects((2560, 1600));`
+fn get_crosshair_rects(window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> {
+    let x_per_y: f32 = window_px.1 as f32 / window_px.0.max(1) as f32;
+    let (near, far, half) = (
+        CROSSHAIR_GAP_FRAC,
+        CROSSHAIR_GAP_FRAC + CROSSHAIR_ARM_FRAC,
+        CROSSHAIR_THICKNESS_FRAC / 2.0,
+    );
+    [(near, far), (-far, -near)]
+        .into_iter()
+        .flat_map(|(lo, hi)| {
+            [
+                ([lo * x_per_y, -half], [hi * x_per_y, half]),
+                ([-half * x_per_y, lo], [half * x_per_y, hi]),
+            ]
+        })
+        .map(|([x0, y0], [x1, y1])| render_metal::OverlayRect {
+            min_frac: [0.5 + x0, 0.5 + y0],
+            max_frac: [0.5 + x1, 0.5 + y1],
+            color: CROSSHAIR_COLOR,
+        })
+        .collect()
 }
 
 /// `make_segmented_bar` gives a HUD bar of `segment_count` separate segments (at most
