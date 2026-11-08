@@ -46,7 +46,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, ValueEnum};
-use glam::{DMat4, DVec3};
+use glam::{DMat4, DVec3, EulerRot, Mat3, Vec3};
 use objc2_core_foundation::CGSize;
 use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
@@ -124,21 +124,18 @@ const PERCENT_PER_FRAC: f64 = 100.0;
 const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
 const GUN_POSE_PER_S: f64 = 6.0;
-const GUN_AIM_ANCHOR_FRAC: [f32; 2] = [0.66, 0.84];
-const GUN_JOG_ANCHOR_FRAC: [f32; 2] = [0.74, 0.97];
-const GUN_JOG_TILT: f32 = -0.6;
-const GUN_WALK_BOB_FRAC: f32 = 0.008;
-const GUN_JOG_BOB_FRAC: f32 = 0.03;
-const GUN_JOG_SWAY_FRAC: f32 = 0.01;
-const GUN_GRIP: [f32; 4] = [0.0, 0.05, 0.045, 0.25];
-const GUN_BODY: [f32; 4] = [-0.05, -0.03, 0.05, 0.06];
-const GUN_BARREL: [f32; 4] = [-0.018, -0.12, 0.018, -0.02];
-const GUN_MUZZLE: [f32; 4] = [-0.015, -0.135, 0.015, -0.115];
-const GUN_GRIP_COLOR: [f32; 4] = [0.15, 0.15, 0.17, 1.0];
-const GUN_BODY_COLOR: [f32; 4] = [0.32, 0.34, 0.38, 1.0];
-const GUN_BARREL_COLOR: [f32; 4] = [0.18, 0.19, 0.21, 1.0];
-const GUN_BLUE_COLOR: [f32; 4] = [0.30, 0.62, 1.0, 1.0];
-const GUN_RED_COLOR: [f32; 4] = [1.0, 0.16, 0.08, 1.0];
+const WAND_AIM_CENTER_M: [f32; 3] = [0.2, -0.17, -0.34];
+const WAND_JOG_CENTER_M: [f32; 3] = [0.22, -0.22, -0.34];
+const WAND_AIM_YAW_RAD: f32 = 0.06;
+const WAND_JOG_YAW_RAD: f32 = 0.35;
+const WAND_AIM_PITCH_RAD: f32 = 0.06;
+const WAND_JOG_PITCH_RAD: f32 = -0.35;
+const WAND_JOG_ROLL_RAD: f32 = 0.5;
+const WAND_JOG_SWING_RAD: f32 = 0.18;
+const WAND_WALK_BOB_M: f32 = 0.006;
+const WAND_JOG_BOB_M: f32 = 0.03;
+const WAND_BLUE_TIP_COLOR: [f32; 4] = [0.35, 0.68, 1.0, 1.0];
+const WAND_RED_TIP_COLOR: [f32; 4] = [1.0, 0.28, 0.14, 1.0];
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
@@ -2016,42 +2013,18 @@ impl Session {
             (target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
     }
 
-    /// `get_gun_rects` gives the gun drawn in the bottom right: grip, body, barrel and a muzzle in
-    /// this player's team colour. Aiming, it points ahead and sways a little with each step;
-    /// running, it drops, leans (higher parts further right) and bounces with each stride.
+    /// `get_wand` gives this player's wand (`make_wand`, with its tip in the team's colour), or
+    /// `None` while a banner shows.
     ///
-    /// Example: `let rects = self.get_gun_rects();`
-    fn get_gun_rects(&self) -> Vec<render_metal::OverlayRect> {
-        let jog: f32 =
-            (self.run_pose_frac * self.run_pose_frac * (3.0 - 2.0 * self.run_pose_frac)) as f32;
-        let step: f32 = self.gun_phase_rad.sin().abs() as f32;
-        let bob: f32 = GUN_WALK_BOB_FRAC + (GUN_JOG_BOB_FRAC - GUN_WALK_BOB_FRAC) * jog;
-        let sway: f32 = GUN_JOG_SWAY_FRAC * jog * self.gun_phase_rad.sin() as f32;
-        let anchor: [f32; 2] = [0, 1].map(|a| {
-            GUN_AIM_ANCHOR_FRAC[a] + (GUN_JOG_ANCHOR_FRAC[a] - GUN_AIM_ANCHOR_FRAC[a]) * jog
-        });
-        let muzzle_color: [f32; 4] = match &self.voxel {
-            Some(voxel) if voxel.spawn_index % 2 == 1 => GUN_RED_COLOR,
-            _ => GUN_BLUE_COLOR,
-        };
-        [
-            (GUN_GRIP, GUN_GRIP_COLOR),
-            (GUN_BODY, GUN_BODY_COLOR),
-            (GUN_BARREL, GUN_BARREL_COLOR),
-            (GUN_MUZZLE, muzzle_color),
-        ]
-        .into_iter()
-        .map(|([x0, y0, x1, y1], color)| {
-            let lean: f32 = GUN_JOG_TILT * jog * (y0 + y1) / 2.0;
-            let dx: f32 = anchor[0] + lean + sway;
-            let dy: f32 = anchor[1] + bob * step;
-            render_metal::OverlayRect {
-                min_frac: [x0 + dx, y0 + dy],
-                max_frac: [x1 + dx, y1 + dy],
-                color,
-            }
-        })
-        .collect()
+    /// Example: `let wand = self.get_wand();`
+    fn get_wand(&self) -> Option<render_metal::OverlayWand> {
+        let team: u32 = self
+            .voxel
+            .as_ref()
+            .map_or(0, |voxel| net::get_team(voxel.spawn_index as u32));
+        self.get_banner_lines()
+            .is_none()
+            .then(|| make_wand(self.run_pose_frac, self.gun_phase_rad, team))
     }
 
     /// `get_eye_frame` gives the eye's frame: the house player's frame, or the voxel player's camera.
@@ -2358,17 +2331,13 @@ impl Session {
         ])
     }
 
-    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the gun (unless a banner
-    /// shows), the progress of turning off a console (while holding `E` on one) below the middle
+    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the progress of turning
+    /// off a console (while holding `E` on one) below the middle
     /// and, on a voxel map, the sprint energy bar (its frame and its fill) in the bottom left corner.
     ///
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
-        let mut rects: Vec<render_metal::OverlayRect> = if self.get_banner_lines().is_none() {
-            self.get_gun_rects()
-        } else {
-            Vec::new()
-        };
+        let mut rects: Vec<render_metal::OverlayRect> = Vec::new();
         if let Some((_, held_s)) = self.multiplayer.as_ref().and_then(|m| m.disabling) {
             let ([x, y], [w, h]) = (DISABLE_BAR_MIN_FRAC, DISABLE_BAR_SIZE_FRAC);
             let fill_frac: f32 = (held_s / net::CONSOLE_DISABLE_S).min(1.0) as f32;
@@ -2504,6 +2473,38 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     match renderer.as_metal() {
         Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
         None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
+    }
+}
+
+/// `make_wand` places the wand in camera space: held on the right with its tip toward the
+/// crosshair, dipping a little at each step (`phase_rad`), and, as `run_pose_frac` goes to 1
+/// (eased), lowered, tipped down and rolled, bouncing and swinging with each stride; its tip has
+/// `team`'s colour.
+///
+/// Example: `let wand = make_wand(0.0, 1.2, 1);`
+fn make_wand(run_pose_frac: f64, phase_rad: f64, team: u32) -> render_metal::OverlayWand {
+    let jog: f32 = (run_pose_frac * run_pose_frac * (3.0 - 2.0 * run_pose_frac)) as f32;
+    let (step, swing) = (phase_rad.sin().abs() as f32, phase_rad.sin() as f32);
+    let lerp = |aim: f32, run: f32| aim + (run - aim) * jog;
+    let bob_m: f32 = lerp(WAND_WALK_BOB_M, WAND_JOG_BOB_M) * step;
+    let center: Vec3 =
+        Vec3::from([0, 1, 2].map(|a| lerp(WAND_AIM_CENTER_M[a], WAND_JOG_CENTER_M[a])))
+            - Vec3::Y * bob_m;
+    let rotation: Mat3 = Mat3::from_euler(
+        EulerRot::YXZ,
+        lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD),
+        lerp(WAND_AIM_PITCH_RAD, WAND_JOG_PITCH_RAD),
+        (WAND_JOG_ROLL_RAD + WAND_JOG_SWING_RAD * swing) * jog,
+    );
+    render_metal::OverlayWand {
+        center_m: center.extend(0.0).to_array(),
+        axes: [rotation.x_axis, rotation.y_axis, rotation.z_axis]
+            .map(|axis| axis.extend(0.0).to_array()),
+        tip_color: if team == 1 {
+            WAND_RED_TIP_COLOR
+        } else {
+            WAND_BLUE_TIP_COLOR
+        },
     }
 }
 
@@ -2721,18 +2722,22 @@ fn play_on_layer(
             .map(|lines| make_death_mask(&lines))
             .transpose()?;
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
-        let overlay: Option<render_metal::Overlay> = (death_mask.is_some() || !rects.is_empty())
-            .then(|| render_metal::Overlay {
-                dim_frac: if death_mask.is_some() {
-                    DEATH_DIM_FRAC
-                } else {
-                    0.0
-                },
-                mask: death_mask
-                    .as_deref()
-                    .map(|pixels| (pixels, (DEATH_MASK_PX.0 as usize, DEATH_MASK_PX.1 as usize))),
-                rects: &rects,
-            });
+        let wand: Option<render_metal::OverlayWand> = session.get_wand();
+        let overlay: Option<render_metal::Overlay> = (death_mask.is_some()
+            || !rects.is_empty()
+            || wand.is_some())
+        .then(|| render_metal::Overlay {
+            dim_frac: if death_mask.is_some() {
+                DEATH_DIM_FRAC
+            } else {
+                0.0
+            },
+            mask: death_mask
+                .as_deref()
+                .map(|pixels| (pixels, (DEATH_MASK_PX.0 as usize, DEATH_MASK_PX.1 as usize))),
+            rects: &rects,
+            wand,
+        });
         if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(
                 render_start.elapsed().as_secs_f64() * MS_PER_S,

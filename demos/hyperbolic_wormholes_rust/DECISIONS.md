@@ -581,6 +581,20 @@
 - **Rationale:** you asked for consoles that pulse until disabled and darken after, a faster pulse while being
   disabled, the game to end with the winner shown, and the server's launcher to start the next game.
 
+### D54. A 3D wand instead of the flat gun
+
+- **Choice:** D46's four rectangles become a wand.
+  - **Shape and light:** a rectangular prism 2.2 cm thick and 32 cm long, with a 3.2 cm tip in the team's
+    colour. The overlay pass ray-traces it in camera space with 2 × 2 rays a pixel for smooth edges. The shaft is
+    dark and lit from above, with a highlight and darker edges; the tip glows with a faint halo.
+  - **Aiming:** the wand is held on the right with its tip toward the crosshair, dipping a little at each step.
+  - **Running:** it eases into a lowered pose, tipped down 0.35 rad and rolled 0.5 rad, that bounces and swings
+    with each stride. The CPU sets its position and rotation each frame.
+  - **CPU renderer:** it draws no wand; it is for the house only.
+- **Alternatives:** a mesh drawn with a vertex pipeline (a second render pass and a depth buffer for one object);
+  drawing it into the scene's rays (it would be lensed by warps, though it is in the player's hand).
+- **Rationale:** you asked for a prettier gun, "a rectangular prism with a colored tip" that turns like a real object.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
