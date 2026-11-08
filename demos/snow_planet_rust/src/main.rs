@@ -135,6 +135,7 @@ const HUD_LINE_PX: f32 = 10.0;
 const HUD_MARGIN_PX: f32 = 4.0;
 const WINDOW_TITLE: &str = "Snow Planet (Rust)";
 const MS_PER_S: f64 = 1000.0;
+const BENCH_DUST_AGE_S: f64 = 0.25;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
 const MAX_BLUESHIFT_FRAC: f64 = 1.25;
@@ -1097,8 +1098,8 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
             Some(22.0),
             -0.6,
         ),
-        view("black_hole", [-9.0, 27.0], [0.0, 27.0], Some(6.0), 0.0),
-        view("black_hole_far", [-30.0, 10.0], [0.0, 27.0], None, 0.05),
+        view("black_hole", [-10.0, 28.5], [-1.0, 28.5], Some(6.0), 0.0),
+        view("black_hole_far", [-30.0, 10.0], [-1.0, 28.5], None, 0.05),
         view(
             "black_holes_north",
             [-36.0, 4.0],
@@ -1125,6 +1126,10 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
             is_laser_on: true,
             ..view("laser_open", [-45.0, -12.0], [-30.0, -12.0], None, 0.0)
         },
+        VoxelView {
+            is_laser_on: true,
+            ..view("laser_ground", [-46.0, 4.0], [-36.0, 4.0], None, -0.3)
+        },
         view(
             "photo_oblique",
             [-52.0, -30.0],
@@ -1143,7 +1148,7 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         view(
             "photo_black_hole",
             [-24.0, 6.0],
-            [0.0, 27.0],
+            [-1.0, 28.5],
             Some(4.0),
             -0.05,
         ),
@@ -1198,12 +1203,19 @@ fn bench_voxel_views(
             })
             .collect();
         let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
-        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+        let dust_clouds: Vec<dust::DustCloud> = shot
+            .iter()
+            .filter_map(|s| dust::DustBurst::FromShot(world, s, 0.0, false))
+            .filter_map(|b| b.get_cloud(BENCH_DUST_AGE_S))
+            .collect();
+        let warm_up: VoxelFrame =
+            VoxelFrame::Build(world, camera, &beams, spot, &dust_clouds, render_px);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+            let frame: VoxelFrame =
+                VoxelFrame::Build(world, camera, &beams, spot, &dust_clouds, render_px);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());

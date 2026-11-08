@@ -64,8 +64,14 @@ const PUFF_MIN_LIFE_S: f64 = 0.9;
 const PUFF_MAX_LIFE_S: f64 = 1.5;
 const PUFF_OPACITY_FRAC: f64 = 0.45;
 const FADE_START_FRAC: f64 = 0.35;
-const DUST_SRGB: [f64; 3] = [0.62, 0.57, 0.50];
-const MIST_SRGB: [f64; 3] = [0.74, 0.70, 0.64];
+const LUNAR_DUST_COLORS: DustColors = DustColors {
+    grain_srgb: [0.62, 0.57, 0.50],
+    mist_srgb: [0.74, 0.70, 0.64],
+};
+const SNOW_POWDER_COLORS: DustColors = DustColors {
+    grain_srgb: [0.78, 0.88, 1.0],
+    mist_srgb: [0.68, 0.79, 0.95],
+};
 const SHADE_VARIATION_FRAC: f64 = 0.15;
 const DISPLAY_GAMMA: f64 = 2.2;
 const SLOPE_PROBE_M: f64 = 0.25;
@@ -76,6 +82,14 @@ const SPLITMIX_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 const SPLITMIX_MULTIPLIERS: [u64; 2] = [0xBF58_476D_1CE4_E5B9, 0x94D0_49BB_1331_11EB];
 const SPLITMIX_SHIFTS: [u32; 3] = [30, 27, 31];
 const F64_MANTISSA_BITS: u32 = 53;
+
+/// `DustColors` is the sRGB colour of a burst's grains and of its mist: grey lunar dust, or
+/// white-blue snow powder on a `snow` map.
+#[derive(Debug, PartialEq)]
+struct DustColors {
+    grain_srgb: [f64; 3],
+    mist_srgb: [f64; 3],
+}
 
 /// `BurstSize` is how big a gun's bursts are: how many grains and puffs, and a scale on their
 /// speeds and the puffs' size.
@@ -240,7 +254,7 @@ impl Random {
     /// `next_albedo` gives the linear albedo of an sRGB colour, lighter or darker by up to
     /// `SHADE_VARIATION_FRAC`.
     ///
-    /// Example: `let albedo = random.next_albedo(DUST_SRGB);`
+    /// Example: `let albedo = random.next_albedo(LUNAR_DUST_COLORS.grain_srgb);`
     fn next_albedo(&mut self, srgb: [f64; 3]) -> [f32; 3] {
         let shade: f64 = 1.0 + SHADE_VARIATION_FRAC * (2.0 * self.next_frac() - 1.0);
         srgb.map(|c| (c.powf(DISPLAY_GAMMA) * shade) as f32)
@@ -339,7 +353,7 @@ impl Particle {
             radius_m: random.next_between(GRAIN_MIN_RADIUS_M, GRAIN_MAX_RADIUS_M),
             life_s: random.next_between(GRAIN_MIN_LIFE_S, GRAIN_MAX_LIFE_S),
             opacity_frac: GRAIN_OPACITY_FRAC,
-            albedo: random.next_albedo(DUST_SRGB),
+            albedo: [0.0; 3],
             shape: GRAIN_SHAPES[(random.next_frac() * GRAIN_SHAPES.len() as f64) as usize],
         }
     }
@@ -364,7 +378,7 @@ impl Particle {
             radius_m: PUFF_START_RADIUS_M,
             life_s: random.next_between(PUFF_MIN_LIFE_S, PUFF_MAX_LIFE_S),
             opacity_frac: PUFF_OPACITY_FRAC,
-            albedo: random.next_albedo(MIST_SRGB),
+            albedo: [0.0; 3],
             shape: DustShape::Puff,
         }
     }
@@ -440,26 +454,33 @@ impl DustBurst {
         } else {
             &SNIPER_BURST
         };
+        let colors: &DustColors = if world.is_snow {
+            &SNOW_POWDER_COLORS
+        } else {
+            &LUNAR_DUST_COLORS
+        };
         Some(DustBurst::New(
             impact,
             world.get_map_gravity_m_per_s2(),
             start_s,
             size,
+            colors,
             make_seed(spot, start_s),
         ))
     }
 
-    /// `New` makes a burst of `size` at `impact`, starting at `start_s` and falling at
+    /// `New` makes a burst of `size` and `colors` at `impact`, starting at `start_s` and falling at
     /// `gravity_m_per_s2`, its particles drawn from `seed`: grains then puffs, thrown around the
     /// ground's normal tilted `BACKSPRAY_FRAC` toward the shooter (+z).
     ///
-    /// Example: `let burst = DustBurst::New(impact, 6.0, 0.0, &SNIPER_BURST, 7);`
+    /// Example: `let burst = DustBurst::New(impact, 6.0, 0.0, &SNIPER_BURST, &LUNAR_DUST_COLORS, 7);`
     #[allow(non_snake_case)]
     fn New(
         impact: Impact,
         gravity_m_per_s2: f64,
         start_s: f64,
         size: &BurstSize,
+        colors: &DustColors,
         seed: u64,
     ) -> DustBurst {
         let normal: DVec3 = impact.normal;
@@ -467,11 +488,18 @@ impl DustBurst {
         let axis: DVec3 = (normal + back * BACKSPRAY_FRAC).normalize();
         let mut random: Random = Random { state: seed };
         let mut particles: Vec<Particle> = (0..size.grain_count)
-            .map(|_| Particle::MakeGrain(&mut random, normal, axis, gravity_m_per_s2, size))
+            .map(|_| {
+                let mut grain: Particle =
+                    Particle::MakeGrain(&mut random, normal, axis, gravity_m_per_s2, size);
+                grain.albedo = random.next_albedo(colors.grain_srgb);
+                grain
+            })
             .collect();
-        particles.extend(
-            (0..size.puff_count).map(|_| Particle::MakePuff(&mut random, normal, axis, size)),
-        );
+        particles.extend((0..size.puff_count).map(|_| {
+            let mut puff: Particle = Particle::MakePuff(&mut random, normal, axis, size);
+            puff.albedo = random.next_albedo(colors.mist_srgb);
+            puff
+        }));
         let life_s: f64 = particles.iter().map(|p| p.life_s).fold(0.0, f64::max);
         DustBurst {
             impact,
@@ -525,6 +553,7 @@ mod tests {
     //! | Gun | sniper, rifle | `rifle_bursts_are_smaller` |
     //! | Seed | the same, another | `bursts_depend_only_on_their_seed` |
     //! | What the shot hit | nothing, a block, the flat ground, the crater's wall | `only_shots_into_the_ground_raise_dust` |
+    //! | Map style | lunar (grey dust), snow (white-blue powder) | `only_shots_into_the_ground_raise_dust`, `snow_raises_white_blue_powder` |
 
     use super::*;
     use crate::geometry::AXIS_W;
@@ -562,7 +591,14 @@ mod tests {
             sun: DVec3::Y,
             sun_frac: 1.0,
         };
-        DustBurst::New(impact, GRAVITY_M_PER_S2, START_S, size, seed)
+        DustBurst::New(
+            impact,
+            GRAVITY_M_PER_S2,
+            START_S,
+            size,
+            &LUNAR_DUST_COLORS,
+            seed,
+        )
     }
 
     /// `get_ages_s` gives ages from 0 to past the burst's end, `STEP_S` apart.
@@ -762,6 +798,26 @@ mod tests {
             } else {
                 assert!(burst.impact.normal.y > FLAT_NORMAL_MIN_Y);
             }
+        }
+    }
+
+    /// `snow_raises_white_blue_powder` checks that a shot into Snow Planet's snow throws up powder
+    /// in the snow colours, bluer than it is red, not the grey lunar dust.
+    #[test]
+    fn snow_raises_white_blue_powder() {
+        let mut map: Map = Map::Load(&get_map_folder("snow_planet")).expect("Snow Planet loads");
+        map.curve_flat(crate::map::FLAT_CURVATURE_RADIUS_M);
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("Snow Planet builds");
+        let player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [-46.0, 0.0], [-30.0, 0.0], None, FLOOR_PITCH_RAD);
+        let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
+        let burst: DustBurst =
+            DustBurst::FromShot(&world, &shot, START_S, false).expect("the snow raises powder");
+        let lunar_albedo: [f32; 3] =
+            Random { state: SEED }.next_albedo(LUNAR_DUST_COLORS.grain_srgb);
+        for particle in &burst.particles {
+            assert!(particle.albedo[2] > particle.albedo[0]);
+            assert!(particle.albedo[1] > lunar_albedo[1]);
         }
     }
 }

@@ -9,6 +9,7 @@ Example: `python3 tools/make_map.py` (or `make map`) from the demo's folder.
 
 import json
 import math
+import random
 from pathlib import Path
 
 MAP_PATH: Path = Path(__file__).resolve().parents[3] / "common" / "maps" / "snow_planet" / "map.json"
@@ -63,7 +64,7 @@ BLUE_MOUNDS: list[tuple] = [
     (-42.0, 27.0, [1.6, 0.8, 1.6], 0.9),
 ]
 MOUND_ROUND_M: float = 0.7
-# Five black holes scattered by hand, not in rows: three north of the white-out, two south of it, offset (u, v).
+# Five black holes placed by hand, then scattered by SCATTER_SEED so they look natural (not in rows): three north of the white-out, two south of it, offset (u, v).
 BLACK_HOLES: list[tuple] = [
     ("black hole north-west", -22.0, 20.0),
     ("black hole north", 0.0, 27.0),
@@ -82,6 +83,56 @@ BLIZZARD_NUMBERS: dict = {
     "fog_per_m": 0.3,
     "snow_per_m3": 1.0,
 }
+
+
+# The seed of the natural scatter of the black holes and mounds; the map's `source` names it.
+SCATTER_SEED: int = 7
+HOLE_JITTER_M: float = 2.5
+MOUND_JITTER_M: float = 2.0
+MOUND_JITTER_RAD: float = 0.3
+MIN_HOLE_GAP_M: float = 22.0
+MIN_HOLE_CLEARANCE_M: float = 12.0
+MIN_HOLE_TO_MOUTH_M: float = 20.0
+MIN_HOLE_TO_CENTRE_M: float = 21.0
+PYLON_SPOTS: list[tuple[float, float]] = [(-34.0, 16.0), (-34.0, -16.0), (34.0, 16.0), (34.0, -16.0)]
+MOUTH_SPOTS: list[tuple[float, float]] = [(-46.0, -26.0), (46.0, 26.0)]
+MAX_SCATTER_TRY_COUNT: int = 1000
+
+
+def scatter_mounds(rng: random.Random) -> list[tuple]:
+    """`scatter_mounds` gives blue's mounds moved up to MOUND_JITTER_M and turned up to MOUND_JITTER_RAD at random.
+
+    Example:
+        >>> len(scatter_mounds(random.Random(SCATTER_SEED)))
+        3
+    """
+    return [(u_m + rng.uniform(-MOUND_JITTER_M, MOUND_JITTER_M), v_m + rng.uniform(-MOUND_JITTER_M, MOUND_JITTER_M),
+             half_m, yaw_rad + rng.uniform(-MOUND_JITTER_RAD, MOUND_JITTER_RAD))
+            for u_m, v_m, half_m, yaw_rad in BLUE_MOUNDS]
+
+
+def scatter_black_holes(rng: random.Random, mound_spots: list[tuple[float, float]]) -> list[tuple]:
+    """`scatter_black_holes` gives BLACK_HOLES each moved up to HOLE_JITTER_M at random, drawn again until no two
+    reaches overlap and every hole keeps clear of the pylons, mounds, wormhole mouths and the white-out.
+
+    Example:
+        >>> len(scatter_black_holes(random.Random(SCATTER_SEED), []))
+        5
+    """
+    for _ in range(MAX_SCATTER_TRY_COUNT):
+        holes: list[tuple] = [(name, u_m + rng.uniform(-HOLE_JITTER_M, HOLE_JITTER_M),
+                               v_m + rng.uniform(-HOLE_JITTER_M, HOLE_JITTER_M)) for name, u_m, v_m in BLACK_HOLES]
+        spots: list[tuple[float, float]] = [(u_m, v_m) for _, u_m, v_m in holes]
+        is_clear: bool = all(
+            math.dist(a, b) >= MIN_HOLE_GAP_M for i, a in enumerate(spots) for b in spots[i + 1:]
+        ) and all(
+            math.dist(a, b) >= MIN_HOLE_CLEARANCE_M for a in spots for b in PYLON_SPOTS + mound_spots
+        ) and all(
+            math.dist(a, b) >= MIN_HOLE_TO_MOUTH_M for a in spots for b in MOUTH_SPOTS
+        ) and all(math.hypot(*a) >= MIN_HOLE_TO_CENTRE_M for a in spots)
+        if is_clear:
+            return holes
+    raise ValueError(f"no clear scatter of BLACK_HOLES in {MAX_SCATTER_TRY_COUNT} tries with seed {SCATTER_SEED}")
 
 
 def mirror(u_m: float, v_m: float, yaw_rad: float) -> tuple[float, float, float]:
@@ -119,9 +170,13 @@ def make_map() -> dict:
         'euclidean'
     """
     structures: list[dict] = []
-    for u_m, v_m, half_m, yaw_rad in BLUE_MOUNDS:
+    rng: random.Random = random.Random(SCATTER_SEED)
+    blue_mounds: list[tuple] = scatter_mounds(rng)
+    mound_spots: list[tuple[float, float]] = []
+    for u_m, v_m, half_m, yaw_rad in blue_mounds:
         structures.append(make_box("blue snow mound", u_m, v_m, half_m, PACKED, yaw_rad, "box", MOUND_ROUND_M))
         ru, rv, ryaw = mirror(u_m, v_m, yaw_rad)
+        mound_spots += [(u_m, v_m), (ru, rv)]
         structures.append(make_box("red snow mound", ru, rv, half_m, PACKED, ryaw, "box", MOUND_ROUND_M))
     lights: list[dict] = []
     for team, sign in (("blue", -1.0), ("red", 1.0)):
@@ -130,7 +185,7 @@ def make_map() -> dict:
             structures.append(make_pylon(team, index, u_m, sign * v_m))
             lights.append({"position": [sign * v_m, 8.0, -u_m, 1.0], "color": TEAM_LIGHT[team], "radius_m": 8.0})
     warps: list[dict] = []
-    for name, u_m, v_m in BLACK_HOLES:
+    for name, u_m, v_m in scatter_black_holes(rng, mound_spots):
         warps.append({"kind": "black_hole", "name": name, "frame": make_frame(u_m, v_m, 6.0),
                       "law": "isotropic_schwarzschild", "schwarzschild_radius_m": 1.1, "radial_coordinate": "distance",
                       "reach_m": 11.0, "falloff": "taper"})
@@ -165,7 +220,8 @@ def make_map() -> dict:
         "name": "snow_planet",
         "description": "A snow field on a torus (T² × ℝ): two pylons a team, five black holes, a wormhole pair, "
         "open snow with six rounded mounds, light snowfall and fog, and three blizzards.",
-        "source": "demos/snow_planet_rust/tools/make_map.py (after demos/levels/snow_planet/index.html)",
+        "source": f"demos/snow_planet_rust/tools/make_map.py, scatter seed {SCATTER_SEED} "
+                  "(after demos/levels/snow_planet/index.html)",
         "space": {"kind": "euclidean", "torus_periods_m": [PERIOD_U_M, PERIOD_V_M]},
         "gravity_m_per_s2": 9.81,
         "player": {"eye_height_m": 1.6, "walk_m_per_s": 5.0, "sprint_m_per_s": 9.0, "jump_m_per_s": 5.2,

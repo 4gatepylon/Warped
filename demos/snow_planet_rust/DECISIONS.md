@@ -86,9 +86,12 @@ The binaries are `snow-planet` and `snow_planet_server`, so several levels can b
 ## S9. Five black holes, scattered (User)
 
 The user asked for five black holes: three north of the white-out and two south, placed a little at random and the
-two south ones offset rather than mirrored. They are at (u, v) (−22, 20), (0, 27), (21, 19) and (−6, −21),
-(19, −27) (`BLACK_HOLES` in `tools/make_map.py`), each at least 22 m from the next so their 11 m reaches don't
-overlap, and at least 12 m from every pylon. The wormhole pair moved to the corners, A at (−46, −26) by blue's
+two south ones offset rather than mirrored. They start from hand-placed spots (u, v) (−22, 20), (0, 27), (21, 19)
+and (−6, −21), (19, −27) (`BLACK_HOLES` in `tools/make_map.py`), and the generator moves each up to 2.5 m at random
+with the seed `SCATTER_SEED` (7, named in the map's `source`), drawing again until each is at least 22 m from the
+next so their 11 m reaches don't overlap, at least 12 m from every pylon and mound, 20 m from the wormhole mouths
+and 21 m from the white-out's centre. The user asked for this slight randomness on most maps. Blue's mounds move up
+to 2 m and turn up to 0.3 rad with the same seed, and red's are blue's turned half a turn, so cover stays fair. The wormhole pair moved to the corners, A at (−46, −26) by blue's
 south pylon and B at (46, 26) by red's north pylon, so it is a flank route of the same length for each team.
 
 Fairness: the teams spawn west (blue) and east (red), so each sees the same three holes north and two south. The
