@@ -20,7 +20,7 @@ use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
     normalize_tangent,
 };
-use crate::net::{Client, NetEvent, RemotePlayer, get_team};
+use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
 use crate::render_voxel::VoxelFrame;
 use crate::scene_data::{Beam, SceneData};
@@ -340,7 +340,8 @@ pub fn pack_shared_voxel_view(
     }
     let other_shots: Vec<(u32, Shot)> = trace_other_voxel_lasers(world, players, &bodies, &colors);
     for (id, other) in &other_shots {
-        beams.push((other.segments.clone(), get_team(*id)));
+        let team: u32 = players.iter().find(|p| p.id == *id).map_or(0, |p| p.team);
+        beams.push((other.segments.clone(), team));
     }
     let (beams, spot) = match tracers {
         Some(tracers) => (tracers.beams, tracers.spot),
@@ -406,7 +407,7 @@ pub fn run_voxel_bot(
 ) -> Result<(u32, u32)> {
     let start: Instant = Instant::now();
     let mut player: VoxelPlayer = VoxelPlayer::AtSpawn(world, 0);
-    let (mut hit_count, mut eliminated_count, mut my_id) = (0, 0, 0);
+    let (mut hit_count, mut eliminated_count) = (0, 0);
     let mut rejoin_at: Option<Instant> = None;
     let mut last_victim: Option<u32> = None;
     let mut is_stuck: bool = false;
@@ -417,7 +418,8 @@ pub fn run_voxel_bot(
                 NetEvent::Joined(id) => {
                     let others: Vec<DVec4> =
                         client.players.iter().map(|p| p.frame.col(AXIS_W)).collect();
-                    (player, my_id) = (VoxelPlayer::NearSpawn(world, id, &others), id);
+                    let team: u32 = client.team.expect("a welcome brings the team");
+                    player = VoxelPlayer::NearSpawn(world, team, id, &others);
                     println!("bot joined as player {id}");
                 }
                 NetEvent::Eliminated {
@@ -463,7 +465,8 @@ pub fn run_voxel_bot(
             }
             input.up = input.forward && is_stuck;
             let before: DVec4 = player.body.col(AXIS_W);
-            player.step(world, &input, BOT_STEP_S, my_id as usize);
+            let team: u32 = client.team.unwrap_or(0);
+            player.step(world, &input, BOT_STEP_S, team as usize);
             is_stuck = input.forward
                 && get_distance(before, player.body.col(AXIS_W)) * world.r
                     < BOT_STUCK_FRAC * world.player.walk_m_per_s * BOT_STEP_S;
@@ -472,7 +475,7 @@ pub fn run_voxel_bot(
                 world,
                 camera,
                 is_laser_on,
-                get_team(my_id),
+                team,
                 &client.players,
                 None,
                 BOT_VIEW_PX,
@@ -546,6 +549,7 @@ mod tests {
             frame: target.frame,
             is_laser_on: false,
             is_rifle: false,
+            team: 0,
             disabling_console: None,
         };
         let view: SharedView = pack_shared_view(&world, aimed, true, &[other], (64, 40), 0.0);
@@ -570,6 +574,7 @@ mod tests {
             frame: target.get_camera_frame(&world),
             is_laser_on: false,
             is_rifle: false,
+            team: 0,
             disabling_console: None,
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
@@ -595,6 +600,7 @@ mod tests {
             frame: target.get_camera_frame(&world),
             is_laser_on: true,
             is_rifle: false,
+            team: 0,
             disabling_console: None,
         };
         let bodies: Vec<(DMat4, usize)> = vec![(

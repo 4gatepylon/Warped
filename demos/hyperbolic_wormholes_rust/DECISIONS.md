@@ -733,6 +733,183 @@
 - **Rationale:** you asked for a health bar so players know they were hit, and for the health, ammo and energy
   bars to be discrete.
 
+### D64. Beams stop being drawn past the map
+
+- **Choice:** a beam is drawn only up to where it first gets 4 curvature radii (160 m on Lunar Surface) from the
+  map's origin; the map lies within about 3.2.
+  - **Cause:** a shot into the sky flies on to 480 m, where its points' world coordinates reach 10⁵ (they grow as
+    cosh of the distance). The shader works out each pixel's nearness to a beam in single precision, and at that
+    size the maths turns to noise. Every sky pixel within reach of the far part of the beam got a noisy glow in the
+    team's colour, the pink blob you saw.
+  - **Before and after tracers:** before them, the far part came with the whole beam for a 0.06–0.25 s shot, the
+    flashing. Tracers (D61) drew the far stretch alone for about 2 s while it flew outward, which made it bloom.
+  - **Reproduction:** a sky shot's 300–312 m stretch drew a large noisy pink disk; with this change it draws
+    nothing, and the 100 m stretch and the whole beam look as before.
+- **Alternatives:** double precision in the shader (much slower on Apple GPUs); working out each beam relative to
+  the camera instead of the map's origin (a larger change to the shader).
+- **Rationale:** you found that shooting into the sky, and at the black hole's edge, flooded the sky with
+  flickering pink noise.
+
+### D65. What a hit feels like
+
+- **Choice:**
+  - **Trigger:** when a snapshot shows this player's health lower than before (D63), the window plays the hit.
+  - **Slowdown:** the player moves at half speed for 1 s (on voxel maps; the house's walking has no slowdown).
+  - **Screen:** the edges turn red (60% at the corners), blur over 6 px (an 8-tap ring), and the whole picture
+    shakes up to 6 px in a new direction each frame. All of it fades over 0.6 s, and the red and blur draw back
+    toward the corners as it fades. The HUD and the wand stay sharp.
+  - **Settings:** all six numbers are under `when_hit` in `game_settings.yaml`.
+- **Alternatives:** a hit message from the server (it could be lost, and health already arrives every snapshot);
+  blurring with a separate pass (more GPU time for an effect that lasts half a second).
+- **Rationale:** you asked that a player who is hit is slowed (set in the YAML), sees red and a blur come in from
+  the edges, and feels the screen shake.
+
+### D66. Shots into the sky draw only their first 80 m
+
+- **Choice:** a tracer for a shot that hit nothing (D61) flies only its first 80 m, two curvature radii, and is
+  then gone. Shots that hit something are drawn whole, up to D64's limit. Hits don't change.
+  - **Why:** you still saw a little noise after D64. Counting pixels changed by a 12 m stretch of a sky shot
+    against no beam at all, over six views: 0–50 pixels at 40 m, 0–30 at 80 m and none beyond (some of them the
+    beam itself). From the map's edge shooting outward, none.
+  - **The cut:** 80 m keeps a sky shot's drawn points near the shooter, where single precision is ample. Past it a
+    beam is under a pixel wide anyway.
+- **Alternatives:** working out beam glow relative to the camera in the shader (the real cure, but the renderer
+  works in map coordinates throughout); fading the tracer out instead of cutting it.
+- **Rationale:** you suggested special-casing far-off tracers, keeping gameplay the same when players shoot each
+  other.
+
+### D67. Crouching, and shooting only standing still or crouched
+
+- **Choice:**
+  - **Crouching:** holding `Ctrl` (either one) lowers the eye to 60% of its standing height over 0.15 s and moves the player at
+    half walking speed, with no sprinting. The numbers are in `game_settings.yaml`'s `movement`.
+  - **Shooting:** a player can shoot only standing still or crouched (walking crouched included). Walking
+    upright, running and jumping stop a shot, as running already did.
+  - **Seen by others:** avatars hang the standing eye height below the eye, so a crouched player's box sinks
+    into the floor by the drop. They look shorter and their head moves down with them.
+  - **The house:** it has no crouch, so walking there stops shooting.
+- **Alternatives:** `C` to crouch (my first pick, as on a Mac `Ctrl`+click can mean a right-click; but SDL hands
+  the game `Ctrl`+click as a left click unless its `SDL_HINT_MAC_CTRL_CLICK_EMULATE_RIGHT_CLICK` hint is set, and
+  you asked for `Ctrl`); a lower collision body when crouched (to fit under things; nothing on the map needs it yet).
+- **Rationale:** you asked for crouching that slows walking, for shooting while crouched, and for no shooting while
+  walking.
+
+### D68. No respawning by choice
+
+- **Choice:** the `R` key is gone. A player comes back at their spawn only after being eliminated (or a new game),
+  so nobody can escape a fight or skip the walk back.
+- **Alternatives:** keeping `R` without a server only (it helped testing alone; `--view` still starts a solo game at
+  any viewpoint).
+- **Rationale:** you asked to get rid of respawning by choice.
+
+### D69. A crosshair
+
+- **Choice:** four short white arms around the middle of the window, where shots and console holds aim. Each arm
+  is 1.2% of the window's height long, 0.6% from the middle and 0.25% thick, sized by the height so it looks the
+  same at any window size. It hides while a banner ("YOU DIED", a win) shows.
+- **Alternatives:** a dot (harder to see on bright blocks); arms with a dark outline (more rectangles; white reads
+  well on the dark sky and the lit blocks).
+- **Rationale:** you asked for a crosshair.
+
+### D70. A flashlight
+
+- **Choice:** right-click turns a flashlight on or off. On voxel maps it lights surfaces in a cone from the eye along
+  the view, measured along the curved space's geodesics:
+  - **Cone:** full inside 0.3 rad of the axis, softening to nothing 0.08 rad further out.
+  - **Range:** half as bright at 25 m.
+  - **Facing:** as bright as the surface faces it.
+  - **Brightness:** twice full sunlight, so its cone shows on the sunlit moon as well as in shadows.
+  - **Settings:** all four numbers are under `flashlight` in `game_settings.yaml`.
+  - **What it lights:** it casts no shadows (from the eye they would be hidden anyway), lights no dust in the air,
+    and only its owner sees it.
+- **Alternatives:** a light at the wand's tip (it would light the wand's side of everything and show shadows);
+  other players' flashlights (each would need a bit in the snapshot and a light in the shader).
+- **Rationale:** you asked for a right-click flashlight that shines in a neat cone.
+
+### D71. A lobby where players choose their team
+
+- **Choice:**
+  - **The lobby:** a window that connects to a server first sees a lobby over a dimmed view, with each team's head
+    count (asked of the server every 0.5 s) and "1 joins blue, 2 joins red". `1` or `2` asks to join that team.
+  - **Teams:** the server keeps each player's team, keeps it when they rejoin after a hit, and ignores any other
+    team in later messages. A join without a team (bots) gets the team with fewer players, blue on a tie.
+  - **What a team decides:** snapshots carry each player's team (a bit in the laser byte). It decides their spawn
+    point, their beam's and tip's colour, and which consoles they can turn off. Before, teams came from odd and even
+    ids. Lasers still hit teammates.
+- **Alternatives:** a separate lobby window or web page (more code than a banner); letting players switch team
+  later (it would need a way back to the lobby).
+- **Rationale:** you asked for a lobby page showing how many players are on each team, where players choose a team
+  and then play as it, with friendly fire on and only the enemy's consoles open to them.
+
+### D72. Hold the right button for the flashlight
+
+- **Choice:** the flashlight shines only while the right button is held, instead of toggling on each click (D70).
+- **Alternatives:** none considered; you asked for click and hold.
+- **Rationale:** you asked for the flashlight to stay on only while the button is held.
+
+### D73. Key bindings in YAML
+
+- **Choice:**
+  - **The file:** `key_bindings.yaml` lists every action the window takes from a key, mouse button or the wheel:
+    moving, jumping, running, crouching, shooting, the flashlight, consoles, the guns, the lobby's team keys, the
+    render resolution and releasing the mouse. Each action takes one or more controls: SDL's key names (`W`,
+    `Left Shift`, `"1"`), `Mouse Left` and the other buttons, or `Wheel` (only for actions done once per press).
+  - **Whose file:** it is each player's own, passed with `--key-bindings` (`KEY_BINDINGS=` with `run-demo`,
+    `host-game` and `join-game`). It is not the server's: players can want different keys, while game numbers must
+    match.
+  - **Checks:** every action is required, and an unknown action or control fails, naming it.
+  - **Keys follow the file:** keys are read by their place on the keyboard (scancodes), so they don't move with
+    the keyboard layout. The HUD's help line and the lobby's hint are built from the bindings, so they stay right
+    after a change.
+  - **The flag:** `--key-bindings` joins the CLI vocabulary in the `clis` skill.
+- **Alternatives:**
+  - the bindings in `game_settings.yaml` (the server would impose them on everyone);
+  - key names by character, SDL keycodes (they follow the layout, so `W` would move on an AZERTY keyboard, but
+    held keys are read by scancode).
+- **Rationale:** you asked for crouch, move, jump, switching weapons and the other keys to be settable in YAML.
+
+### D74. Player settings and server settings
+
+- **Choice:** the settings are two files.
+  - **`server_settings.yaml`** (`--server-settings`, `SERVER_SETTINGS=`): what shapes play for everyone, which the
+    server sends to every player. Movement, sprint energy, both guns (with their beams and recoil), consoles,
+    respawn, how a hit slows a player, and the flashlight.
+  - **`player_settings.yaml`** (`--player-settings`, `PLAYER_SETTINGS=`): each player's own choices, which change
+    only their own experience.
+    - `keys`: D73's key bindings, moved in from `key_bindings.yaml`;
+    - `view`: a new mouse look speed (`look_rad_per_px`), the head bob and motion blur;
+    - `hit_effects`: how strongly a hit reddens, shakes and blurs the screen.
+  - **Replaced:** `game_settings.yaml` (D60) and `key_bindings.yaml` (D73), and their flags.
+- **Alternatives:**
+  - the flashlight's cone and brightness as a player's choice (it lights only its owner's view, but a brighter one
+    shows more in shadows, so it is fairer on the server);
+  - recoil as a player's choice (it changes aim, so it is the server's).
+- **Rationale:** you asked to split the YAML into a part each player can change and a part that belongs to the
+  server.
+
+### D75. A menu of each player's settings
+
+- **Choice:**
+  - **Opening:** `Tab` (the new `open_menu` binding) opens a menu over the darkened view; `Esc` or `Tab` closes it.
+    While it is open, the player stands still, can't look or shoot, and the game goes on (it doesn't pause, since
+    others are playing).
+  - **Rows:** every action's controls (`Return`, then the next key, button or wheel turn rebinds it; `Esc`
+    cancels), then the numbers a player is likeliest to tune (mouse look speed, motion blur, the head bob's depth
+    walking and sprinting, and a hit's red, shake and blur), changed with `Left`/`Right` in fixed steps between
+    fixed limits, then a row that saves. Inside the menu, the arrows, `Return` and `Esc` work whatever the
+    bindings say, so a bad binding can always be fixed.
+  - **Saving:** to the `--player-settings` file if one was given, else to `~/.config/warped/player_settings.yaml`,
+    which every later game loads when it exists. The file is written from the settings, so it has no comments.
+  - **Drawing:** the menu is text in the same mask as the "YOU DIED" banner, now any size: 512×312 mask pixels,
+    scaled by a whole number to at most 85% of the window's height, left-aligned, the chosen row in the banner's
+    title colour, the view darkened by 80% (the banner's 55% left the text hard to read).
+- **Alternatives:**
+  - pausing the game while the menu is open (only possible offline);
+  - saving into the repository's `player_settings.yaml` (every `git pull` would then conflict with it);
+  - a menu drawn with a UI library such as egui (a new dependency and a second way to draw text).
+- **Rationale:** you asked for a screen to change each player's own choices, such as hotkeys. It is one page now;
+  W-49 adds pages to it.
+
 
 ## Baselines
 

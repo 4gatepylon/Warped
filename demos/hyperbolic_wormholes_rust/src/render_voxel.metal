@@ -186,6 +186,7 @@ constant float BEAM_CORE_WHITENESS = 0.6;
 constant float3 BLUE_COLOR = float3(0.30, 0.62, 1.0);
 constant float3 RED_COLOR = float3(1.0, 0.16, 0.08);
 constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
+constant float3 FLASHLIGHT_COLOR = float3(1.0, 0.95, 0.85);
 constant int TILE_CELLS_PER_HALF = 18;
 constant int TERRAIN_OCTAVES = 5;
 constant float TERRAIN_RIM_NOISE_M = 60.0;
@@ -246,6 +247,9 @@ struct VoxelUniforms {
     float4 terrain;
     float4 relief;
     float4 mound_grid;
+    float4 flashlight_position;
+    float4 flashlight_direction;
+    float4 flashlight;
 };
 
 /** @brief `Shape` is one smooth solid in its structure's chart (meters): centre and kind, half sizes and rounding, material and axis. */
@@ -793,6 +797,26 @@ static float3 gather_lights(thread const Scene &scene, Surface s, float4 x, floa
 }
 
 /**
+ * @brief `light_flashlight` gives the light of the player's flashlight (`flashlight_position`, aimed along
+ * `flashlight_direction`; `flashlight` holds the cosines of its cone's inner and outer edges, the distance at which it
+ * falls to half, and its brightness, 0 when off) on a surface at x with normal n: full inside the cone, softening to
+ * nothing at its outer edge, falling with distance, and as much as the surface faces it.
+ * @par Example
+ * @code
+ * float3 lit = light_flashlight(scene, x, n);
+ * @endcode
+ */
+static float3 light_flashlight(thread const Scene &scene, float4 x, float4 n) {
+    float4 p = scene.u.flashlight_position, f = scene.u.flashlight;
+    if (f.w <= 0.0) return float3(0.0);
+    float4 toward = x + mdot(x, p) * p, back = p + mdot(p, x) * x;
+    float cone = smoothstep(f.y, f.x, mdot(toward, scene.u.flashlight_direction) * rsqrt(max(mdot(toward, toward), TINY)));
+    float d_m = acosh(max(-mdot(x, p), 1.0)) * scene.u.curvature_radius_m / f.z;
+    float facing = max(mdot(n, back) * rsqrt(max(mdot(back, back), TINY)), 0.0);
+    return SUN_INTENSITY * FLASHLIGHT_COLOR * f.w * cone * facing / (1.0 + d_m * d_m);
+}
+
+/**
  * @brief `light_surface` lights a surface point with face normal n: the sun (GGX with lunar-Lambert diffuse, shadowed),
  * earthshine and the ambient light (split-sum specular with multiple-scattering compensation), lamps and the laser spot.
  * @par Example
@@ -812,7 +836,8 @@ static float3 light_surface(thread const Scene &scene, Surface s, float4 x, floa
     }
     float earth = max(mdot(s.n, transport_from_centre(scene.u.planet.xyz, x)), 0.0);
     float3 ambient = (float3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR) * s.ao;
-    color += ambient * (s.albedo * (1.0 - s.metallic) + (f0 * env.x + env.y) * energy) + gather_lights(scene, s, x, view, energy);
+    color += ambient * (s.albedo * (1.0 - s.metallic) + (f0 * env.x + env.y) * energy) + gather_lights(scene, s, x, view, energy)
+        + light_flashlight(scene, x, s.n) * s.albedo * (1.0 - s.metallic);
     if (scene.u.spot_color.a > 0.0) {
         float d_m = measure_gap(scene.u.spot, x) * scene.u.curvature_radius_m;
         color += scene.u.spot_color.rgb * scene.u.spot_color.a * exp(-d_m * d_m / (SPOT_RADIUS_M * SPOT_RADIUS_M));

@@ -22,8 +22,10 @@
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
 mod geometry;
+mod key_bindings;
 mod map;
 mod map_export;
+mod menu;
 mod multiplayer;
 mod net;
 mod physics;
@@ -55,18 +57,17 @@ use objc2_core_foundation::CGSize;
 use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
-use sdl3::keyboard::{Keycode, Scancode};
-use sdl3::mouse::MouseButton;
 use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
 
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
+use key_bindings::{Action, Control};
 use physics::{Input, LaserReport, Player};
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
-use settings::GameSettings;
+use settings::{PerPlayerSettings, ServerSettings};
 use voxel_world::{VoxelPlayer, VoxelWorld};
 use world::{DEFAULT_CURVATURE_RADIUS_M, World};
 
@@ -117,6 +118,11 @@ const ENERGY_SEGMENT_COUNT: u32 = 10;
 const MAX_BAR_SEGMENT_COUNT: u32 = 20;
 const BAR_GAP_FRAC: f32 = 0.002;
 const BAR_FILL_TOLERANCE: f64 = 0.05;
+const SKY_TRACER_M: f64 = 80.0;
+const CROSSHAIR_GAP_FRAC: f32 = 0.006;
+const CROSSHAIR_ARM_FRAC: f32 = 0.012;
+const CROSSHAIR_THICKNESS_FRAC: f32 = 0.0025;
+const CROSSHAIR_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.85];
 const HEAT_BAR_OVERHEATED_COLOR: [f32; 4] = [1.0, 0.15, 0.1, 0.9];
 const WAND_LASER_SHAFT_HALF_M: [f32; 4] = [0.011, 0.011, 0.16, 0.0];
 const WAND_LASER_SHAFT_COLOR: [f32; 4] = [0.2, 0.17, 0.22, 1.0];
@@ -125,10 +131,16 @@ const WAND_RIFLE_SHAFT_HALF_M: [f32; 4] = [0.024, 0.032, 0.17, 0.0];
 const WAND_RIFLE_SHAFT_COLOR: [f32; 4] = [0.42, 0.45, 0.5, 1.0];
 const WAND_RIFLE_TIP_HALF_M: [f32; 4] = [0.007, 0.007, 0.07, 0.0];
 const DEATH_MASK_PX: (u32, u32) = (240, 24);
-const DEATH_TITLE_Y_PX: f32 = 2.0;
-const DEATH_COUNTDOWN_Y_PX: f32 = 14.0;
+const MENU_MASK_PX: (u32, u32) = (512, 312);
+const BANNER_HEIGHT_FRAC: f32 = 0.2;
+const MENU_HEIGHT_FRAC: f32 = 0.85;
+const TEXT_TOP_PX: f32 = 2.0;
+const TEXT_LINE_PX: f32 = 12.0;
+const MENU_LEFT_PX: f32 = 4.0;
+const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
+const MENU_DIM_FRAC: f32 = 0.8;
 const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
 const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
@@ -288,10 +300,15 @@ struct Arguments {
     /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
-    /// Game settings, a YAML file with game_settings.yaml's keys (the default): a server (--serve,
-    /// --host) sends them to every player who joins; without a server, this game uses them.
+    /// The numbers that shape play, a YAML file with server_settings.yaml's keys (the default): a
+    /// server (--serve, --host) sends them to every player who joins; without a server, this game
+    /// uses them.
     #[arg(long, conflicts_with = "join")]
-    settings: Option<PathBuf>,
+    server_settings: Option<PathBuf>,
+    /// This player's own choices (keys, mouse speed, head bob, motion blur, how a hit looks), a YAML
+    /// file with player_settings.yaml's keys (the default).
+    #[arg(long)]
+    player_settings: Option<PathBuf>,
     /// Which map to play, from common/maps/.
     #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
     map: MapName,
@@ -577,11 +594,11 @@ fn get_server_address(arguments: &Arguments) -> Result<SocketAddr> {
 /// thread until the returned flag is set, starting a new game after a win at each line read from
 /// standard input (`Enter` in the server's terminal).
 ///
-/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", GameSettings::Builtin(), vec![0, 1])?;`
+/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", ServerSettings::Builtin(), vec![0, 1])?;`
 fn start_server(
     port: u16,
     map_name: &str,
-    settings: GameSettings,
+    settings: ServerSettings,
     console_teams: Vec<u32>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
@@ -625,8 +642,8 @@ fn start_server_process(arguments: &Arguments) -> Result<Child> {
         "--map",
         &map_name,
     ]);
-    if let Some(path) = &arguments.settings {
-        command.arg("--settings").arg(path);
+    if let Some(path) = &arguments.server_settings {
+        command.arg("--server-settings").arg(path);
     }
     let mut server: Child = command.spawn()?;
     std::thread::sleep(Duration::from_secs_f64(SERVER_START_S));
@@ -638,13 +655,13 @@ fn start_server_process(arguments: &Arguments) -> Result<Child> {
     Ok(server)
 }
 
-/// `load_settings` gives the game settings `--settings` names, or the built-in ones.
+/// `load_settings` gives the server settings `--server-settings` names, or the built-in ones.
 ///
 /// Example: `let settings = load_settings(&arguments)?;`
-fn load_settings(arguments: &Arguments) -> Result<GameSettings> {
-    match &arguments.settings {
-        Some(path) => GameSettings::Load(path),
-        None => Ok(GameSettings::Builtin()),
+fn load_settings(arguments: &Arguments) -> Result<ServerSettings> {
+    match &arguments.server_settings {
+        Some(path) => ServerSettings::Load(path),
+        None => Ok(ServerSettings::Builtin()),
     }
 }
 
@@ -683,11 +700,11 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         consoles.iter().map(|c| c.team).collect(),
     )?;
     println!(
-        "Game settings: {} (players who join get them).",
+        "Server settings: {} (players who join get them).",
         arguments
-            .settings
+            .server_settings
             .as_ref()
-            .map_or("the built-in game_settings.yaml".to_string(), |path| path
+            .map_or("the built-in server_settings.yaml".to_string(), |path| path
                 .display()
                 .to_string())
     );
@@ -846,6 +863,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         get_server_address(arguments)?,
         arguments.map.get_folder_name(),
     )?;
+    client.join(None)?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
     let duration_s: f64 = arguments
@@ -1660,9 +1678,14 @@ struct Session {
     shot_time_s: f64,
     is_running: bool,
     is_jumping: bool,
-    settings: GameSettings,
+    is_walking_upright: bool,
+    settings: ServerSettings,
+    player_settings: PerPlayerSettings,
+    player_settings_path: Option<PathBuf>,
+    menu: Option<menu::Menu>,
     gun: Gun,
     is_trigger_held: bool,
+    is_flashlight_on: bool,
     rifle_next_shot_s: f64,
     rifle_heat_frac: f64,
     is_overheated: bool,
@@ -1675,6 +1698,8 @@ struct Session {
     gun_phase_rad: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
+    hit_effect_frac: f64,
+    last_health_frac: f64,
     is_captured: bool,
     message: String,
     message_time_s: f64,
@@ -1700,8 +1725,8 @@ struct VoxelState {
 
 /// `PackedFrame` is one frame packed for the renderer: the house's rows or a voxel map's frame.
 enum PackedFrame {
-    House(SceneData),
-    Voxel(VoxelFrame),
+    House(Box<SceneData>),
+    Voxel(Box<VoxelFrame>),
 }
 
 impl PackedFrame {
@@ -1732,7 +1757,9 @@ struct Tracer {
 
 impl Tracer {
     /// `New` makes a tracer for `shot`, fired at `fired_s` by a player of `team` with the rifle
-    /// (`is_rifle`) or the sniper, whose beam speed and trail come from `settings`.
+    /// (`is_rifle`) or the sniper, whose beam speed and trail come from `settings`. A shot that hit
+    /// nothing flies only its first `SKY_TRACER_M`: farther out over the sky it is under a pixel
+    /// wide, and the shader's single precision makes its glow noisy (D64, D66).
     ///
     /// Example: `let tracer = Tracer::New(&shot, 1, 12.5, false, &settings, world.r);`
     #[allow(non_snake_case)]
@@ -1741,7 +1768,7 @@ impl Tracer {
         team: u32,
         fired_s: f64,
         is_rifle: bool,
-        settings: &GameSettings,
+        settings: &ServerSettings,
         r: f64,
     ) -> Tracer {
         let (speed_m_per_s, trail_s) = if is_rifle {
@@ -1755,9 +1782,14 @@ impl Tracer {
                 settings.sniper.beam_trail_s,
             )
         };
+        let segments: Vec<voxel_world::BeamSegment> = if shot.is_hit {
+            shot.segments.clone()
+        } else {
+            voxel_world::clip_beam(&shot.segments, r, 0.0, SKY_TRACER_M)
+        };
         Tracer {
-            segments: shot.segments.clone(),
-            length_m: shot.segments.iter().map(|s| s.length).sum::<f64>() * r,
+            length_m: segments.iter().map(|s| s.length).sum::<f64>() * r,
+            segments,
             spot: shot.spot,
             team,
             fired_s,
@@ -1820,12 +1852,25 @@ impl Session {
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
         let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
-        let settings: GameSettings = load_settings(arguments)?;
+        let settings: ServerSettings = load_settings(arguments)?;
+        let player_settings_path: Option<PathBuf> =
+            arguments.player_settings.clone().or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join(PLAYER_SETTINGS_HOME_PATH))
+            });
+        let player_settings: PerPlayerSettings = match &player_settings_path {
+            Some(path) if arguments.player_settings.is_some() || path.exists() => {
+                eprintln!("Player settings: {}", path.display());
+                PerPlayerSettings::Load(path)?
+            }
+            _ => PerPlayerSettings::Builtin(),
+        };
         let voxel: Option<VoxelState> = if map.structures.is_empty() {
             None
         } else {
             let mut world: VoxelWorld = VoxelWorld::FromMap(&map)?;
             world.set_settings(settings.clone());
+            world.head_bob = player_settings.view.head_bob.clone();
             let player: VoxelPlayer = match &arguments.view {
                 Some(name) => {
                     let view: VoxelView = make_voxel_bench_views()
@@ -1884,6 +1929,9 @@ impl Session {
             world,
             player,
             settings,
+            player_settings,
+            player_settings_path,
+            menu: None,
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
@@ -1902,8 +1950,10 @@ impl Session {
             shot_time_s: 0.0,
             is_running: false,
             is_jumping: false,
+            is_walking_upright: false,
             gun: Gun::Laser,
             is_trigger_held: false,
+            is_flashlight_on: false,
             rifle_next_shot_s: 0.0,
             rifle_heat_frac: 0.0,
             is_overheated: false,
@@ -1916,6 +1966,8 @@ impl Session {
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
+            hit_effect_frac: 0.0,
+            last_health_frac: 1.0,
             is_captured: false,
             message: String::new(),
             message_time_s: 0.0,
@@ -1935,8 +1987,9 @@ impl Session {
 
     /// `handle_event` reacts to one window event and returns false when the player quits: Esc
     /// releases the mouse (or quits if it is free), a click captures it (and once captured, a left
-    /// click fires a laser shot for the settings' `sniper.shot_s`), the mouse looks, R respawns, and - and =
-    /// change the render scale.
+    /// click fires a shot), the flashlight shines while the right button is held, the mouse looks, `1`, `2`
+    /// and the wheel switch guns, and - and = change the render scale. Players can't respawn by
+    /// choice.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
     fn handle_event(
@@ -1947,85 +2000,127 @@ impl Session {
     ) -> bool {
         match event {
             Event::Quit { .. } => return false,
-            Event::KeyDown {
-                keycode: Some(Keycode::Escape),
-                ..
-            } => {
-                if !self.is_captured {
-                    return false;
-                }
-                self.is_captured = false;
-                mouse.set_relative_mouse_mode(window, false);
-            }
-            Event::KeyDown {
-                keycode: Some(key),
-                repeat: false,
-                ..
-            } => match key {
-                Keycode::R => {
-                    let others: Vec<DVec4> = self
-                        .multiplayer
-                        .as_ref()
-                        .map_or(Vec::new(), |m| get_eyes(&m.client.players));
-                    match &mut self.voxel {
-                        Some(voxel) => {
-                            let id: u32 = voxel.spawn_index as u32;
-                            voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
-                        }
-                        None => {
-                            let id: u32 = self
-                                .multiplayer
-                                .as_ref()
-                                .and_then(|m| m.client.id)
-                                .unwrap_or(0);
-                            self.player = multiplayer::get_spawn_player(&self.world, id, &others);
-                        }
-                    }
-                }
-                Keycode::Minus => {
-                    self.is_auto_scale = false;
-                    self.render_scale =
-                        (self.render_scale / RENDER_SCALE_STEP).max(MIN_RENDER_SCALE);
-                }
-                Keycode::Equals => {
-                    self.is_auto_scale = false;
-                    self.render_scale = (self.render_scale * RENDER_SCALE_STEP).min(1.0);
-                }
-                Keycode::_1 => self.switch_gun(Gun::Laser),
-                Keycode::_2 => self.switch_gun(Gun::Rifle),
-                _ => {}
-            },
             Event::MouseButtonDown { .. } if !self.is_captured => {
                 self.is_captured = true;
                 mouse.set_relative_mouse_mode(window, true);
+                return true;
             }
-            Event::MouseButtonDown {
-                mouse_btn: MouseButton::Left,
-                ..
-            } => {
-                self.is_trigger_held = true;
-                if self.gun == Gun::Laser
-                    && self.can_shoot()
-                    && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
-                {
-                    self.shot_time_s = self.settings.sniper.shot_s;
+            Event::MouseMotion { xrel, yrel, .. } if self.is_captured && self.menu.is_none() => {
+                let speed: f64 =
+                    self.player_settings.view.look_rad_per_px / voxel_world::LOOK_RAD_PER_PX;
+                let (dx_px, dy_px) = (f64::from(xrel) * speed, f64::from(yrel) * speed);
+                match &mut self.voxel {
+                    Some(voxel) => voxel.player.look(dx_px, dy_px),
+                    None => physics::look_around(&mut self.player.frame, dx_px, dy_px),
                 }
             }
-            Event::MouseButtonUp {
-                mouse_btn: MouseButton::Left,
-                ..
-            } => self.is_trigger_held = false,
-            Event::MouseWheel { y, .. } if y != 0.0 => self.switch_gun(match self.gun {
+            _ => {}
+        }
+        match key_bindings::get_pressed_control(&event) {
+            Some(control) if self.menu.is_some() => {
+                self.handle_menu_control(control);
+                true
+            }
+            Some(control) if self.player_settings.keys.matches(Action::OpenMenu, control) => {
+                self.menu = Some(menu::Menu::New());
+                true
+            }
+            Some(control) => self.handle_control(control, window, mouse),
+            None => true,
+        }
+    }
+
+    /// `handle_menu_control` passes a pressed control to the open menu, closes it or saves when
+    /// the menu says so, and puts the changed head bob into the world.
+    ///
+    /// Example: `self.handle_menu_control(Control::Key(Scancode::Down));`
+    fn handle_menu_control(&mut self, control: Control) {
+        let menu: &mut menu::Menu = self.menu.as_mut().expect("the menu is open");
+        match menu.handle(control, &mut self.player_settings) {
+            menu::MenuOutcome::Stay => {}
+            menu::MenuOutcome::Close => self.menu = None,
+            menu::MenuOutcome::Save => {
+                let message: String = match self.save_player_settings() {
+                    Ok(path) => format!("Saved to {path}"),
+                    Err(error) => format!("Couldn't save: {error}"),
+                };
+                self.menu
+                    .as_mut()
+                    .expect("the menu is open")
+                    .show_message(message);
+            }
+        }
+        if let Some(voxel) = &mut self.voxel {
+            voxel.world.head_bob = self.player_settings.view.head_bob.clone();
+        }
+    }
+
+    /// `save_player_settings` writes this player's settings to their file (`--player-settings`, or
+    /// `~/.config/warped/player_settings.yaml`, which later games load), giving its path.
+    ///
+    /// Example: `let path = self.save_player_settings()?;`
+    fn save_player_settings(&self) -> Result<String> {
+        let path: &PathBuf = self
+            .player_settings_path
+            .as_ref()
+            .ok_or("no file to save to: pass --player-settings (HOME isn't set)")?;
+        if let Some(folder) = path.parent() {
+            fs::create_dir_all(folder)?;
+        }
+        fs::write(path, self.player_settings.to_yaml())?;
+        Ok(path.display().to_string())
+    }
+
+    /// `handle_control` does what a pressed control (key, mouse button or wheel) is bound to, and
+    /// returns false when the player quits: releasing the mouse (or quitting when it is free),
+    /// the render resolution, choosing a team in the lobby (before the guns, which may share its
+    /// keys), the guns, and firing the sniper.
+    ///
+    /// Example: `if !self.handle_control(control, window, mouse) { return false; }`
+    fn handle_control(
+        &mut self,
+        control: Control,
+        window: &sdl3::video::Window,
+        mouse: &sdl3::mouse::MouseUtil,
+    ) -> bool {
+        let actions: Vec<Action> = self.player_settings.keys.get_actions(control);
+        let is = |action: Action| actions.contains(&action);
+        if is(Action::ReleaseMouse) {
+            if !self.is_captured {
+                return false;
+            }
+            self.is_captured = false;
+            mouse.set_relative_mouse_mode(window, false);
+        } else if is(Action::LowerResolution) || is(Action::RaiseResolution) {
+            self.is_auto_scale = false;
+            self.render_scale = if is(Action::LowerResolution) {
+                (self.render_scale / RENDER_SCALE_STEP).max(MIN_RENDER_SCALE)
+            } else {
+                (self.render_scale * RENDER_SCALE_STEP).min(1.0)
+            };
+        } else if self.is_in_lobby() && (is(Action::JoinBlue) || is(Action::JoinRed)) {
+            let team: u32 = u32::from(is(Action::JoinRed));
+            let multiplayer: &mut Multiplayer = self.multiplayer.as_mut().expect("in the lobby");
+            if let Err(error) = multiplayer.client.join(Some(team)) {
+                self.show_message(format!("Couldn't reach the server: {error}"));
+            }
+        } else if is(Action::Gun1) {
+            self.switch_gun(Gun::Laser);
+        } else if is(Action::Gun2) {
+            self.switch_gun(Gun::Rifle);
+        } else if is(Action::SwitchGun) {
+            self.switch_gun(match self.gun {
                 Gun::Laser => Gun::Rifle,
                 Gun::Rifle => Gun::Laser,
-            }),
-            Event::MouseMotion { xrel, yrel, .. } if self.is_captured => match &mut self.voxel {
-                Some(voxel) => voxel.player.look(f64::from(xrel), f64::from(yrel)),
-                None => {
-                    physics::look_around(&mut self.player.frame, f64::from(xrel), f64::from(yrel))
-                }
-            },
-            _ => {}
+            });
+        }
+        if is(Action::Shoot)
+            && self.is_captured
+            && self.gun == Gun::Laser
+            && self.can_shoot()
+            && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
+        {
+            self.shot_time_s = self.settings.sniper.shot_s;
         }
         true
     }
@@ -2033,11 +2128,17 @@ impl Session {
     /// `update` moves the player by the held keys for the time since the last frame, and fails if
     /// the game server can't be read (it plays another map, say).
     ///
-    /// Example: `session.update(&event_pump.keyboard_state())?;`
-    fn update(&mut self, keys: &sdl3::keyboard::KeyboardState) -> Result<()> {
+    /// Example: `session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;`
+    fn update(
+        &mut self,
+        keyboard: &sdl3::keyboard::KeyboardState,
+        mouse: &sdl3::mouse::MouseState,
+    ) -> Result<()> {
         let frame_s: f64 = self.last.elapsed().as_secs_f64();
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
-        let blur_s: f64 = self.settings.display.motion_blur_s;
+        let blur_s: f64 = self.player_settings.view.motion_blur_s;
+        self.hit_effect_frac =
+            (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
         self.motion_blur_frac = if blur_s > 0.0 {
             (-dt_s / blur_s).exp() as f32
         } else {
@@ -2070,20 +2171,26 @@ impl Session {
             self.hud_time_s += dt_s;
             return Ok(());
         }
-        let input: Input = Input {
-            forward: keys.is_scancode_pressed(Scancode::W),
-            back: keys.is_scancode_pressed(Scancode::S),
-            left: keys.is_scancode_pressed(Scancode::A),
-            right: keys.is_scancode_pressed(Scancode::D),
-            up: keys.is_scancode_pressed(Scancode::Space),
-            down: false,
-            sprint: keys.is_scancode_pressed(Scancode::LShift)
-                || keys.is_scancode_pressed(Scancode::RShift),
+        let is_playing: bool = self.menu.is_none();
+        let held = |action: Action| {
+            is_playing && self.player_settings.keys.is_held(action, keyboard, mouse)
         };
+        let input: Input = Input {
+            forward: held(Action::MoveForward),
+            back: held(Action::MoveBack),
+            left: held(Action::MoveLeft),
+            right: held(Action::MoveRight),
+            up: held(Action::Jump),
+            down: false,
+            sprint: held(Action::Sprint),
+            crouch: held(Action::Crouch),
+        };
+        self.is_trigger_held = self.is_captured && held(Action::Shoot);
+        self.is_flashlight_on = self.is_captured && held(Action::Flashlight);
+        let is_holding_e: bool = held(Action::TurnOffConsole);
+        let team: usize = self.get_team() as usize;
         let messages: Vec<String> = match &mut self.voxel {
-            Some(voxel) => voxel
-                .player
-                .step(&voxel.world, &input, dt_s, voxel.spawn_index),
+            Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, team),
             None => {
                 let messages: Vec<String> =
                     physics::update_player(&self.world, &mut self.player, &input, dt_s);
@@ -2095,7 +2202,7 @@ impl Session {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
-        self.update_disabling(keys.is_scancode_pressed(Scancode::E), dt_s);
+        self.update_disabling(is_holding_e, dt_s);
         self.update_gun(&input, dt_s);
         self.update_rifle(dt_s);
         let eye: DMat4 = self.get_eye_frame();
@@ -2124,13 +2231,15 @@ impl Session {
         (self.is_laser_on || self.shot_time_s > 0.0) && self.can_shoot()
     }
 
-    /// `can_shoot` says whether this player may shoot: not while running, not while jumping or
-    /// falling on a voxel map, not while holding `E` on a console, and not once a team has won.
+    /// `can_shoot` says whether this player may shoot: standing still or crouched (walking while
+    /// crouched is fine), so not while walking upright or running, not while jumping or falling on
+    /// a voxel map, not while holding `E` on a console, and not once a team has won.
     ///
     /// Example: `if self.can_shoot() { ... }`
     fn can_shoot(&self) -> bool {
         !self.is_running
             && !self.is_jumping
+            && !self.is_walking_upright
             && self
                 .multiplayer
                 .as_ref()
@@ -2202,17 +2311,15 @@ impl Session {
             return;
         };
         let game: net::GameState = multiplayer.client.game;
-        let aimed: Option<u8> = match multiplayer.client.id {
-            Some(id) if is_holding_e && game.winner.is_none() => voxel
+        let aimed: Option<u8> = match multiplayer.client.team {
+            Some(team) if is_holding_e && game.winner.is_none() => voxel
                 .world
                 .find_aimed_material(
                     voxel.player.get_camera_frame(&voxel.world),
                     self.settings.consoles.reach_m,
                 )
                 .and_then(|m| voxel.world.consoles.iter().position(|c| c.material == m))
-                .filter(|&i| {
-                    voxel.world.consoles[i].team != net::get_team(id) && game.off_mask >> i & 1 == 0
-                })
+                .filter(|&i| voxel.world.consoles[i].team != team && game.off_mask >> i & 1 == 0)
                 .map(|i| i as u8),
             _ => None,
         };
@@ -2243,8 +2350,9 @@ impl Session {
         (multiplayer.client.game.off_mask, disabling_mask)
     }
 
-    /// `update_gun` notes whether this player runs (sprints while moving) or jumps (is in the air
-    /// on a voxel map, not flying), dropping a shot in flight if either, and moves the gun: its
+    /// `update_gun` notes whether this player runs (sprints while moving), walks upright (moves
+    /// without crouching on a voxel map) or jumps (is in the air on a voxel map, not flying),
+    /// dropping a shot in flight if any, and moves the gun: its
     /// step phase while walking or running on the ground, and its pose toward jogging while
     /// running and back to aiming otherwise.
     ///
@@ -2259,6 +2367,7 @@ impl Session {
             None => (input.sprint && is_moving, self.player.is_on_ground),
         };
         self.is_running = is_running;
+        self.is_walking_upright = is_moving && !(input.crouch && self.voxel.is_some());
         self.is_jumping = self
             .voxel
             .as_ref()
@@ -2276,16 +2385,50 @@ impl Session {
             (target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
     }
 
+    /// `get_hit_effect` gives what the last hit on this player still does to the scene, fading over
+    /// the player settings' `hit_effects.effect_s`: red edges, a blur from the edges inward, and a
+    /// shake in a new direction each frame (the golden angle apart).
+    ///
+    /// Example: `let hit = self.get_hit_effect();`
+    fn get_hit_effect(&self) -> render_metal::HitEffect {
+        let when_hit = &self.player_settings.hit_effects;
+        let shake_rad: f64 = self.total_frame_count as f64 * voxel_world::SPAWN_TURN_RAD;
+        let shake_px: f64 = when_hit.shake_px * self.hit_effect_frac;
+        render_metal::HitEffect {
+            strength_frac: self.hit_effect_frac as f32,
+            red_frac: when_hit.red_frac as f32,
+            blur_px: when_hit.blur_px as f32,
+            shake_px: [shake_rad.cos(), shake_rad.sin()].map(|c| (c * shake_px) as f32),
+        }
+    }
+
+    /// `get_team` gives this player's team (an index into `net::TEAM_NAMES`): the one the server
+    /// put them on, or the first without a server or before joining.
+    ///
+    /// Example: `let team = self.get_team();`
+    fn get_team(&self) -> u32 {
+        self.multiplayer
+            .as_ref()
+            .and_then(|m| m.client.team)
+            .unwrap_or(0)
+    }
+
+    /// `is_in_lobby` says whether this player is on a server and hasn't chosen a team yet.
+    ///
+    /// Example: `if self.is_in_lobby() { ... }`
+    fn is_in_lobby(&self) -> bool {
+        self.multiplayer
+            .as_ref()
+            .is_some_and(|m| m.client.is_in_lobby())
+    }
+
     /// `get_wand` gives this player's wand (`make_wand`, with its tip in the team's colour), or
-    /// `None` while a banner shows.
+    /// `None` while text covers the view (`is_view_covered`).
     ///
     /// Example: `let wand = self.get_wand();`
     fn get_wand(&self) -> Option<render_metal::OverlayWand> {
-        let team: u32 = self
-            .voxel
-            .as_ref()
-            .map_or(0, |voxel| net::get_team(voxel.spawn_index as u32));
-        self.get_banner_lines().is_none().then(|| {
+        let team: u32 = self.get_team();
+        (!self.is_view_covered()).then(|| {
             make_wand(
                 self.run_pose_frac,
                 self.gun_phase_rad,
@@ -2330,6 +2473,7 @@ impl Session {
             match event {
                 net::NetEvent::Joined(id) => {
                     let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
+                    let team: u32 = multiplayer.client.team.expect("a welcome brings the team");
                     self.settings = multiplayer
                         .client
                         .settings
@@ -2339,7 +2483,7 @@ impl Session {
                         Some(voxel) => {
                             voxel.world.set_settings(self.settings.clone());
                             voxel.spawn_index = id as usize;
-                            voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
+                            voxel.player = VoxelPlayer::NearSpawn(&voxel.world, team, id, &others);
                         }
                         None => {
                             self.player = multiplayer::get_spawn_player(&self.world, id, &others)
@@ -2367,19 +2511,32 @@ impl Session {
                 }
             }
         }
+        if multiplayer.client.health_frac < self.last_health_frac {
+            self.hit_effect_frac = 1.0;
+            if let Some(voxel) = &mut self.voxel {
+                voxel.player.slowed_s = self.settings.when_hit.slow_s;
+            }
+        }
+        self.last_health_frac = multiplayer.client.health_frac;
         if multiplayer.client.game.number != multiplayer.game_number {
             multiplayer.game_number = multiplayer.client.game.number;
-            if let (Some(voxel), Some(id)) = (&mut self.voxel, multiplayer.client.id) {
+            if let (Some(voxel), Some(id), Some(team)) = (
+                &mut self.voxel,
+                multiplayer.client.id,
+                multiplayer.client.team,
+            ) {
                 let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
-                voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
+                voxel.player = VoxelPlayer::NearSpawn(&voxel.world, team, id, &others);
             }
             messages.push(format!(
                 "Game {} started: every console is back on",
                 multiplayer.game_number
             ));
         }
-        let is_out: bool = multiplayer.is_eliminated;
-        if !is_out && let Err(error) = multiplayer.client.keep_joining() {
+        let is_out: bool = multiplayer.is_eliminated || multiplayer.client.id.is_none();
+        if !multiplayer.is_eliminated
+            && let Err(error) = multiplayer.client.keep_joining()
+        {
             messages.push(format!("Couldn't reach the server: {error}"));
         }
         if let Some(message) = messages.pop() {
@@ -2421,6 +2578,8 @@ impl Session {
         let time_s: f64 = self.start.elapsed().as_secs_f64();
         if let Some(voxel) = &mut self.voxel {
             voxel.world.light_consoles(off_mask, disabling_mask, time_s);
+            let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
+            voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }
         if let Some(voxel) = &self.voxel {
             let camera: DMat4 = if self.route.is_empty() {
@@ -2432,7 +2591,7 @@ impl Session {
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
-            let team: u32 = voxel.spawn_index as u32 % 2;
+            let team: u32 = self.get_team();
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
@@ -2476,9 +2635,9 @@ impl Session {
             self.was_firing = is_firing;
             for (id, shot) in &view.other_shots {
                 if !self.remote_firing_ids.contains(id) {
-                    let is_rifle: bool = players.iter().any(|p| p.id == *id && p.is_rifle);
-                    let tracer =
-                        Tracer::New(shot, net::get_team(*id), now_s, is_rifle, &self.settings, r);
+                    let shooter: Option<&net::RemotePlayer> = players.iter().find(|p| p.id == *id);
+                    let (team, is_rifle) = shooter.map_or((0, false), |p| (p.team, p.is_rifle));
+                    let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
                     self.tracers.push(tracer);
                 }
             }
@@ -2496,7 +2655,7 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
-            return PackedFrame::Voxel(view.frame);
+            return PackedFrame::Voxel(Box::new(view.frame));
         }
         if let Some(multiplayer) = &mut self.multiplayer {
             let view: multiplayer::SharedView = multiplayer::pack_shared_view(
@@ -2519,7 +2678,7 @@ impl Session {
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
-            return PackedFrame::House(view.data);
+            return PackedFrame::House(Box::new(view.data));
         }
         let (data, report) = pack_view(
             &self.world,
@@ -2529,7 +2688,7 @@ impl Session {
             self.start.elapsed().as_secs_f64(),
         );
         self.laser = report.as_ref().map(describe_laser);
-        PackedFrame::House(data)
+        PackedFrame::House(Box::new(data))
     }
 
     /// `record_frame` adds one frame's render time to the HUD's averages, which refresh every
@@ -2631,13 +2790,29 @@ impl Session {
         true
     }
 
-    /// `get_banner_lines` gives the two lines shown over the view once a team has won (the winner,
-    /// and how to start a new game), or else while this player is out after a hit ("YOU DIED" and
-    /// the countdown to respawning), or `None`.
+    /// `get_banner_lines` gives the two lines shown over the view: in the lobby, each team's head
+    /// count and the keys that join a team; once a team has won, the winner and how to start a new
+    /// game; while this player is out after a hit, "YOU DIED" and the countdown to respawning; or
+    /// `None`.
     ///
     /// Example: `if let Some(lines) = session.get_banner_lines() { ... }`
     fn get_banner_lines(&self) -> Option<[String; 2]> {
         let multiplayer: &Multiplayer = self.multiplayer.as_ref()?;
+        if multiplayer.client.is_in_lobby() {
+            let counts: String = match multiplayer.client.lobby_counts {
+                Some([blue, red]) => format!("BLUE {blue}   RED {red}"),
+                None => "LOOKING FOR THE GAME".to_string(),
+            };
+            let keys = &self.player_settings.keys;
+            return Some([
+                counts,
+                format!(
+                    "{} joins blue, {} joins red",
+                    keys.get_label(Action::JoinBlue),
+                    keys.get_label(Action::JoinRed)
+                ),
+            ]);
+        }
         if let Some(winner) = multiplayer.client.game.winner {
             return Some([
                 format!(
@@ -2659,7 +2834,43 @@ impl Session {
         ])
     }
 
-    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view. In the bottom left, as
+    /// `is_view_covered` says whether text covers the view: the menu or a banner.
+    ///
+    /// Example: `if !self.is_view_covered() { ... }`
+    fn is_view_covered(&self) -> bool {
+        self.menu.is_some() || self.get_banner_lines().is_some()
+    }
+
+    /// `get_overlay_text` gives the text shown over the dimmed view: the menu while it is open,
+    /// else the banner lines (`get_banner_lines`), or `None`.
+    ///
+    /// Example: `if let Some(text) = session.get_overlay_text() { ... }`
+    fn get_overlay_text(&self) -> Option<OverlayText> {
+        if let Some(menu) = &self.menu {
+            let save_path: String = match &self.player_settings_path {
+                Some(path) => path.display().to_string(),
+                None => "nowhere: HOME isn't set, pass --player-settings".to_string(),
+            };
+            return Some(OverlayText {
+                lines: menu.get_lines(&self.player_settings, &save_path),
+                mask_px: MENU_MASK_PX,
+                height_frac: MENU_HEIGHT_FRAC,
+                is_centered: false,
+                dim_frac: MENU_DIM_FRAC,
+            });
+        }
+        let [title, detail] = self.get_banner_lines()?;
+        Some(OverlayText {
+            lines: vec![(title, true), (detail, false)],
+            mask_px: DEATH_MASK_PX,
+            height_frac: BANNER_HEIGHT_FRAC,
+            is_centered: true,
+            dim_frac: DEATH_DIM_FRAC,
+        })
+    }
+
+    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the crosshair (unless
+    /// text covers the view) and, in the bottom left, as
     /// segmented bars (`make_segmented_bar`): this player's health in a game on a server (one segment
     /// per rifle body hit), the rifle's shots left before it overheats (with the rifle in hand), and
     /// on a voxel map the sprint energy. Below the middle, the progress of turning off a console
@@ -2668,6 +2879,9 @@ impl Session {
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
         let mut rects: Vec<render_metal::OverlayRect> = Vec::new();
+        if !self.is_view_covered() {
+            rects.extend(get_crosshair_rects(self.last_output_px));
+        }
         if let Some(multiplayer) = &self.multiplayer {
             rects.extend(make_segmented_bar(
                 HEALTH_BAR_MIN_FRAC,
@@ -2794,7 +3008,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Shift run, Space jump, click shoot (not while running), 1/2 or wheel switch gun, hold E on an enemy console to turn it off, R respawn, -/= scale, Esc release".to_string()
+            self.player_settings.keys.describe()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
@@ -2825,6 +3039,34 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
         Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
         None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
     }
+}
+
+/// `get_crosshair_rects` gives the crosshair in the middle of a window of `window_px` pixels: four
+/// arms `CROSSHAIR_ARM_FRAC` long, `CROSSHAIR_GAP_FRAC` from the middle, in fractions of the window's
+/// height so they look the same at any size.
+///
+/// Example: `let rects = get_crosshair_rects((2560, 1600));`
+fn get_crosshair_rects(window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> {
+    let x_per_y: f32 = window_px.1 as f32 / window_px.0.max(1) as f32;
+    let (near, far, half) = (
+        CROSSHAIR_GAP_FRAC,
+        CROSSHAIR_GAP_FRAC + CROSSHAIR_ARM_FRAC,
+        CROSSHAIR_THICKNESS_FRAC / 2.0,
+    );
+    [(near, far), (-far, -near)]
+        .into_iter()
+        .flat_map(|(lo, hi)| {
+            [
+                ([lo * x_per_y, -half], [hi * x_per_y, half]),
+                ([-half * x_per_y, lo], [half * x_per_y, hi]),
+            ]
+        })
+        .map(|([x0, y0], [x1, y1])| render_metal::OverlayRect {
+            min_frac: [0.5 + x0, 0.5 + y0],
+            max_frac: [0.5 + x1, 0.5 + y1],
+            color: CROSSHAIR_COLOR,
+        })
+        .collect()
 }
 
 /// `make_segmented_bar` gives a HUD bar of `segment_count` separate segments (at most
@@ -2876,7 +3118,7 @@ fn get_eyes(players: &[net::RemotePlayer]) -> Vec<DVec4> {
 ///
 /// Example: `if let Some(hits_to_kill) = take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false) { ... }`
 fn take_hit_weight(
-    settings: &GameSettings,
+    settings: &ServerSettings,
     gun: Gun,
     has_rifle_shot_hit: &mut bool,
     is_head_hit: bool,
@@ -2949,30 +3191,78 @@ fn make_wand(
     }
 }
 
-/// `make_death_mask` draws the banner lines (`Session::get_banner_lines`) with SDL's built-in text into a `DEATH_MASK_PX` mask,
-/// one byte a pixel: `DEATH_TITLE_MASK` on the first line's text, `DEATH_COUNTDOWN_MASK` on the
-/// second's, 0 elsewhere, for the Metal overlay.
+/// `OverlayText` is text shown over the dimmed view: its lines, each with whether it is
+/// highlighted, the size of the mask it is drawn into (`make_text_mask`), how much of the window's
+/// height that mask may take, whether its lines are centred (a banner) or start at the left (the
+/// menu), and how much the view behind it is darkened.
+struct OverlayText {
+    lines: Vec<(String, bool)>,
+    mask_px: (u32, u32),
+    height_frac: f32,
+    is_centered: bool,
+    dim_frac: f32,
+}
+
+/// `get_text_positions` places each of `text`'s lines in its mask: the line cut to the mask's
+/// width, and where its top left goes.
 ///
-/// Example: `let mask = make_death_mask(&lines)?;`
-fn make_death_mask(lines: &[String; 2]) -> Result<Vec<u8>> {
-    let (width, height) = DEATH_MASK_PX;
+/// Example: `for (line, (x, y), is_highlighted) in get_text_positions(&text) { ... }`
+fn get_text_positions(text: &OverlayText) -> Vec<(String, (f32, f32), bool)> {
+    let (width, height) = text.mask_px;
+    let bottom_px: f32 =
+        TEXT_TOP_PX + TEXT_LINE_PX * text.lines.len().saturating_sub(1) as f32 + DEBUG_GLYPH_PX;
+    assert!(
+        bottom_px <= height as f32,
+        "get_text_positions: {} lines don't fit a mask {height} px high",
+        text.lines.len()
+    );
+    let max_char_count: usize = (width as f32 / DEBUG_GLYPH_PX) as usize;
+    text.lines
+        .iter()
+        .enumerate()
+        .map(|(i, (line, is_highlighted))| {
+            let shown: String = line.chars().take(max_char_count).collect();
+            let x: f32 = if text.is_centered {
+                (width as f32 - DEBUG_GLYPH_PX * shown.chars().count() as f32) / 2.0
+            } else {
+                MENU_LEFT_PX
+            };
+            (
+                shown,
+                (x, TEXT_TOP_PX + TEXT_LINE_PX * i as f32),
+                *is_highlighted,
+            )
+        })
+        .collect()
+}
+
+/// `make_text_mask` draws `text` with SDL's built-in text into a mask of `text.mask_px`, one byte
+/// a pixel: `DEATH_TITLE_MASK` on highlighted lines' text, `DEATH_COUNTDOWN_MASK` on the others',
+/// 0 elsewhere, for the Metal overlay.
+///
+/// Example: `let mask = make_text_mask(&text)?;`
+fn make_text_mask(text: &OverlayText) -> Result<Vec<u8>> {
+    let (width, height) = text.mask_px;
     let surface = sdl3::surface::Surface::new(width, height, PixelFormat::RGBA32)?;
     let mut canvas = surface.into_canvas()?;
-    canvas.set_draw_color(Color::RGB(255, 255, 255));
-    for (line, y) in lines.iter().zip([DEATH_TITLE_Y_PX, DEATH_COUNTDOWN_Y_PX]) {
-        let x: f32 = (width as f32 - DEBUG_GLYPH_PX * line.len() as f32) / 2.0;
-        canvas.draw_debug_text(line.as_str(), (x, y))?;
+    for (line, position, is_highlighted) in get_text_positions(text) {
+        canvas.set_draw_color(if is_highlighted {
+            Color::RGB(255, 0, 0)
+        } else {
+            Color::RGB(0, 255, 0)
+        });
+        canvas.draw_debug_text(line.as_str(), position)?;
     }
     canvas.present();
     let surface = canvas.into_surface();
     let pitch: usize = surface.pitch() as usize;
     Ok(surface.with_lock(|pixels: &[u8]| {
         (0..height as usize)
-            .flat_map(|y| (0..width as usize).map(move |x| (x, y)))
-            .map(|(x, y)| match pixels[y * pitch + x * BYTES_PER_PIXEL] {
-                0 => 0,
-                _ if (y as f32) < DEATH_COUNTDOWN_Y_PX => DEATH_TITLE_MASK,
-                _ => DEATH_COUNTDOWN_MASK,
+            .flat_map(|y| (0..width as usize).map(move |x| y * pitch + x * BYTES_PER_PIXEL))
+            .map(|offset| match (pixels[offset], pixels[offset + 1]) {
+                (0, 0) => 0,
+                (0, _) => DEATH_COUNTDOWN_MASK,
+                _ => DEATH_TITLE_MASK,
             })
             .collect()
     }))
@@ -3002,27 +3292,31 @@ fn draw_overlay_rects(
     Ok(())
 }
 
-/// `draw_death_overlay` dims the canvas and draws the banner lines large in its middle, for the
-/// SDL-renderer window.
+/// `draw_text_overlay` dims the canvas and draws `text` in its middle, scaled like the Metal
+/// overlay's mask (`text.height_frac` of the height, at most `OVERLAY_MAX_WIDTH_FRAC` of the
+/// width), for the SDL-renderer window.
 ///
-/// Example: `draw_death_overlay(&mut canvas, &lines)?;`
-fn draw_death_overlay(canvas: &mut sdl3::render::WindowCanvas, lines: &[String; 2]) -> Result<()> {
+/// Example: `draw_text_overlay(&mut canvas, &text)?;`
+fn draw_text_overlay(canvas: &mut sdl3::render::WindowCanvas, text: &OverlayText) -> Result<()> {
     let (width, height) = canvas.window().size_in_pixels();
-    let scale: f32 = (height / DEATH_MASK_PX.1 / 2).max(1) as f32 / 2.0;
+    let (mask_width, mask_height) = text.mask_px;
+    let scale: f32 = ((height as f32 * text.height_frac) as u32 / mask_height)
+        .min((f64::from(width) * render_metal::OVERLAY_MAX_WIDTH_FRAC) as u32 / mask_width)
+        .max(1) as f32;
     canvas.set_scale(1.0, 1.0)?;
     canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
-    canvas.set_draw_color(Color::RGBA(0, 0, 0, (DEATH_DIM_FRAC * 255.0) as u8));
+    canvas.set_draw_color(Color::RGBA(0, 0, 0, (text.dim_frac * 255.0) as u8));
     canvas.fill_rect(None)?;
     canvas.set_scale(scale, scale)?;
-    for (line, y) in lines.iter().zip([DEATH_TITLE_Y_PX, DEATH_COUNTDOWN_Y_PX]) {
-        canvas.set_draw_color(if y == DEATH_TITLE_Y_PX {
+    let left: f32 = (width as f32 / scale - mask_width as f32) / 2.0;
+    let top: f32 = (height as f32 / scale - mask_height as f32) / 2.0;
+    for (line, (x, y), is_highlighted) in get_text_positions(text) {
+        canvas.set_draw_color(if is_highlighted {
             Color::RGB(255, 90, 80)
         } else {
             HUD_COLOR
         });
-        let x: f32 = (width as f32 / scale - DEBUG_GLYPH_PX * line.len() as f32) / 2.0;
-        let top: f32 = (height as f32 / scale - DEATH_MASK_PX.1 as f32) / 2.0;
-        canvas.draw_debug_text(line.as_str(), (x, top + y))?;
+        canvas.draw_debug_text(line.as_str(), (left + x, top + y))?;
     }
     Ok(())
 }
@@ -3060,7 +3354,7 @@ fn play_on_canvas(
         if session.is_finished() {
             return Ok(());
         }
-        session.update(&event_pump.keyboard_state())?;
+        session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;
         let render_px: (u32, u32) = session.get_render_size(canvas.window().size_in_pixels());
         pixels.resize(
             render_px.0 as usize * render_px.1 as usize * BYTES_PER_PIXEL,
@@ -3102,8 +3396,8 @@ fn play_on_canvas(
             )?;
         }
         draw_overlay_rects(&mut canvas, &session.get_overlay_rects())?;
-        if let Some(lines) = session.get_banner_lines() {
-            draw_death_overlay(&mut canvas, &lines)?;
+        if let Some(text) = session.get_overlay_text() {
+            draw_text_overlay(&mut canvas, &text)?;
         }
         canvas.present();
     }
@@ -3149,7 +3443,7 @@ fn play_on_layer(
         if session.is_finished() {
             return Ok(());
         }
-        session.update(&event_pump.keyboard_state())?;
+        session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;
         let window_px: (u32, u32) = window.size_in_pixels();
         layer.setDrawableSize(CGSize {
             width: f64::from(window_px.0),
@@ -3158,27 +3452,30 @@ fn play_on_layer(
         let render_px: (u32, u32) = session.get_render_size(window_px);
         let render_start: Instant = Instant::now();
         let packed: PackedFrame = session.pack(render_px);
-        let death_mask: Option<Vec<u8>> = session
-            .get_banner_lines()
-            .map(|lines| make_death_mask(&lines))
-            .transpose()?;
+        let overlay_text: Option<OverlayText> = session.get_overlay_text();
+        let text_mask: Option<Vec<u8>> = overlay_text.as_ref().map(make_text_mask).transpose()?;
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
         let wand: Option<render_metal::OverlayWand> = session.get_wand();
-        let overlay: Option<render_metal::Overlay> = (death_mask.is_some()
+        let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
             || !rects.is_empty()
             || wand.is_some())
         .then(|| render_metal::Overlay {
-            dim_frac: if death_mask.is_some() {
-                DEATH_DIM_FRAC
-            } else {
-                0.0
+            dim_frac: match &overlay_text {
+                Some(text) => text.dim_frac,
+                None => 0.0,
             },
-            mask: death_mask
+            mask: text_mask
                 .as_deref()
-                .map(|pixels| (pixels, (DEATH_MASK_PX.0 as usize, DEATH_MASK_PX.1 as usize))),
+                .zip(overlay_text.as_ref())
+                .map(|(pixels, text)| (pixels, (text.mask_px.0 as usize, text.mask_px.1 as usize))),
+            mask_height_frac: match &overlay_text {
+                Some(text) => text.height_frac,
+                None => 0.0,
+            },
             rects: &rects,
             wand,
             blur_frac: session.motion_blur_frac,
+            hit: session.get_hit_effect(),
         });
         if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(
@@ -3202,19 +3499,20 @@ fn play_on_layer(
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the guns' hit rules.
+    //! Tests of the guns' hit rules, the HUD's bars and where overlay text goes.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Bar fill | empty, a sliver (one segment), 11 of 12 after the network's byte rounding, full | `segmented_bars_count_whole_segments` |
+    //! | Overlay text | a centred two-line banner, the left-aligned menu with a line too long for its mask | `overlay_text_fits_its_mask` |
 
     use super::*;
 
     #[test]
     fn hits_weigh_by_gun_and_place() {
-        let settings: GameSettings = GameSettings::Builtin();
+        let settings: ServerSettings = ServerSettings::Builtin();
         let mut has_hit: bool = false;
         for _ in 0..2 {
             assert_eq!(
@@ -3235,6 +3533,37 @@ mod tests {
             take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false),
             Some(settings.rifle.body_hits_to_eliminate)
         );
+    }
+
+    #[test]
+    fn overlay_text_fits_its_mask() {
+        let banner: OverlayText = OverlayText {
+            lines: vec![
+                ("YOU DIED".to_string(), true),
+                ("Respawning in 3".to_string(), false),
+            ],
+            mask_px: DEATH_MASK_PX,
+            height_frac: BANNER_HEIGHT_FRAC,
+            is_centered: true,
+            dim_frac: DEATH_DIM_FRAC,
+        };
+        let placed = get_text_positions(&banner);
+        let title_px: f32 = DEBUG_GLYPH_PX * "YOU DIED".len() as f32;
+        assert_eq!(placed[0].1.0 * 2.0 + title_px, DEATH_MASK_PX.0 as f32);
+        assert!(placed[0].2 && !placed[1].2);
+        let long_path: String = "/very/long".repeat(20);
+        let menu_text: OverlayText = OverlayText {
+            lines: menu::Menu::New().get_lines(&PerPlayerSettings::Builtin(), &long_path),
+            mask_px: MENU_MASK_PX,
+            height_frac: MENU_HEIGHT_FRAC,
+            is_centered: false,
+            dim_frac: MENU_DIM_FRAC,
+        };
+        let max_char_count: usize = (MENU_MASK_PX.0 as f32 / DEBUG_GLYPH_PX) as usize;
+        for (line, (x, _), _) in get_text_positions(&menu_text) {
+            assert_eq!(x, MENU_LEFT_PX);
+            assert!(line.chars().count() <= max_char_count, "{line}");
+        }
     }
 
     #[test]

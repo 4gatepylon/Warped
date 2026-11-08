@@ -20,7 +20,7 @@ use objc2_metal::{
     MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
-use crate::geometry::get_distance;
+use crate::geometry::{AXIS_W, AXIS_Z, get_distance};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
@@ -28,7 +28,7 @@ use crate::render_metal::{
 use crate::terrain::MoundGrid;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
-use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld};
+use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld, clip_beam_to_map};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -87,6 +87,9 @@ pub struct VoxelUniforms {
     pub terrain: [f32; 4],
     pub relief: [f32; 4],
     pub mound_grid: [f32; 4],
+    pub flashlight_position: [f32; 4],
+    pub flashlight_direction: [f32; 4],
+    pub flashlight: [f32; 4],
 }
 
 const _: () = assert!(
@@ -195,7 +198,8 @@ fn to_columns(m: DMat4) -> [[f32; 4]; 4] {
 
 impl VoxelFrame {
     /// `Build` packs `world` seen from `camera` at a render size, with laser segments of each team
-    /// (`beams`: segments and team, 0 blue or 1 red) and an optional laser spot.
+    /// (`beams`: segments and team, 0 blue or 1 red; drawn as far as `clip_beam_to_map` allows)
+    /// and an optional laser spot.
     ///
     /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, (1280, 800));`
     #[allow(non_snake_case)]
@@ -269,11 +273,13 @@ impl VoxelFrame {
         let gpu_beams: Vec<GpuBeam> = beams
             .iter()
             .flat_map(|(segments, team)| {
-                segments.iter().map(move |s| GpuBeam {
-                    a: to_f32(s.a),
-                    b: to_f32(s.b),
-                    info: [s.length as f32, 0.0, BEAM_BRIGHTNESS, *team as f32],
-                })
+                clip_beam_to_map(segments)
+                    .into_iter()
+                    .map(move |s| GpuBeam {
+                        a: to_f32(s.a),
+                        b: to_f32(s.b),
+                        info: [s.length as f32, 0.0, BEAM_BRIGHTNESS, *team as f32],
+                    })
             })
             .collect();
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
@@ -344,6 +350,21 @@ impl VoxelFrame {
                     g.size[0] as f64,
                 ]
                 .map(|x| x as f32)
+            }),
+            flashlight_position: world
+                .flashlight_eye
+                .map_or([0.0, 0.0, 0.0, 1.0], |eye| to_f32(eye.col(AXIS_W))),
+            flashlight_direction: world
+                .flashlight_eye
+                .map_or([0.0; 4], |eye| to_f32(-eye.col(AXIS_Z))),
+            flashlight: world.flashlight_eye.map_or([0.0; 4], |_| {
+                let light = &world.settings.flashlight;
+                [
+                    light.cone_half_angle_rad.cos() as f32,
+                    (light.cone_half_angle_rad + light.soft_edge_rad).cos() as f32,
+                    light.range_m as f32,
+                    light.brightness_frac as f32,
+                ]
             }),
         };
         assert_eq!(

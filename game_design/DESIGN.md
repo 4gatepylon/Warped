@@ -203,9 +203,12 @@ These values are configurable and may change after playtests.
 | `W`, `A`, `S`, `D` | Walk forward, left, back, right |
 | `Shift` (held) | Sprint, while there is energy (see [Sprinting](#sprinting)) |
 | `Space` | Jump |
-| Left click | Shoot (hold it for a weapon that fires while held, such as the rifle) |
+| `Ctrl` (held) | Crouch: a lower view and half the walking speed |
+| Right button (held) | Flashlight: a cone of light from the eye while held |
+| Left click | Shoot, standing still or crouched, not while walking upright, sprinting or in the air (hold it for a weapon that fires while held, such as the rifle) |
 | Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |
+| `Tab` | Open or close the menu of the player's own settings: key bindings, mouse speed and view effects |
 
 ## Bullets, lasers and light
 
