@@ -26,8 +26,6 @@ is in [`AGENTS.md`](AGENTS.md).
   `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
 - [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
   (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
-- [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
-  session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
   itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
@@ -121,6 +119,8 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
+  player in the game as a dot in their team's colour; the minimap already showed those in reach. #250.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
