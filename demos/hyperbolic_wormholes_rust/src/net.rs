@@ -431,7 +431,8 @@ impl Server {
         println!("Game {} started.", self.game.number);
     }
 
-    /// `send_snapshot` sends every player the list of all players and the game's state.
+    /// `send_snapshot` sends every player the list of all players, the game's state and each
+    /// player's health (a byte each, 255 full).
     ///
     /// Example: `server.send_snapshot()?;`
     fn send_snapshot(&self) -> Result<()> {
@@ -441,6 +442,12 @@ impl Server {
             message = message.player(&slot.player);
         }
         message = message.game(&self.game);
+        for slot in &self.slots {
+            let health_frac: f64 = (1.0 - slot.damage_frac).clamp(0.0, 1.0);
+            message
+                .0
+                .push((health_frac * f64::from(u8::MAX)).round() as u8);
+        }
         for slot in &self.slots {
             self.socket.send_to(&message.0, slot.address)?;
         }
@@ -572,7 +579,7 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
 }
 
 /// `Client` is this player's connection: its map's name, its id and the server's game settings
-/// once welcomed, the other players and the game.
+/// once welcomed, the other players, the game, and this player's health (1 full, from the server).
 pub struct Client {
     socket: UdpSocket,
     server: SocketAddr,
@@ -581,6 +588,7 @@ pub struct Client {
     pub settings: Option<GameSettings>,
     pub players: Vec<RemotePlayer>,
     pub game: GameState,
+    pub health_frac: f64,
     last_join: Instant,
     pub last_heard: Instant,
 }
@@ -602,6 +610,7 @@ impl Client {
             settings: None,
             players: Vec::new(),
             game: GameState::default(),
+            health_frac: 1.0,
             last_join: Instant::now(),
             last_heard: Instant::now(),
         })
@@ -642,19 +651,26 @@ impl Client {
                         }
                         self.settings = Some(GameSettings::FromJson(&bytes[reader.position..])?);
                         self.id = Some(id);
+                        self.health_frac = 1.0;
                         events.push(NetEvent::Joined(id));
                     }
                 }
                 Some(Kind::Snapshot) => {
                     let count: usize = reader.take(1).map_or(0, |count| usize::from(count[0]));
-                    if length != 2 + count * BYTES_PER_PLAYER + BYTES_PER_GAME {
+                    if length != 2 + count * (BYTES_PER_PLAYER + 1) + BYTES_PER_GAME {
                         continue;
                     }
-                    self.players = (0..count)
-                        .filter_map(|_| reader.player())
+                    let players: Vec<RemotePlayer> =
+                        (0..count).filter_map(|_| reader.player()).collect();
+                    self.game = reader.game().expect("the length was checked");
+                    let healths: &[u8] = reader.take(count).expect("the length was checked");
+                    if let Some(i) = players.iter().position(|p| Some(p.id) == self.id) {
+                        self.health_frac = f64::from(healths[i]) / f64::from(u8::MAX);
+                    }
+                    self.players = players
+                        .into_iter()
                         .filter(|player| Some(player.id) != self.id)
                         .collect();
-                    self.game = reader.game().expect("the length was checked");
                 }
                 Some(Kind::Eliminated) => {
                     if let (Some(victim_id), Some(shooter_id)) = (reader.id(), reader.id()) {

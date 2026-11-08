@@ -81,7 +81,7 @@ Multiplayer:
   map.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too.
-- A player hit by the rifle doesn't see how much damage they have taken; damage resets when they rejoin.
+- Health, shown in the bottom left, resets when a player respawns.
 - Consoles are found by name: a map's materials named "blue console …" and "red console …". The house has none,
   so nobody can win there.
 - Local network only: no play over the internet. Networks that keep devices apart (many guest and office Wi-Fi
