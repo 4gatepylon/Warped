@@ -525,6 +525,9 @@ struct CitySession {
     hud: (f64, u32, f64),
     is_aiming: bool,
     phase_ms: Vec<[f64; PHASE_COUNT]>,
+    gun: Gun,
+    rifle_heat_frac: f64,
+    is_overheated: bool,
 }
 
 impl CitySession {
@@ -586,6 +589,9 @@ impl CitySession {
             hud: (0.0, 0, 0.0),
             is_aiming: false,
             phase_ms: Vec::new(),
+            gun: Gun::Laser,
+            rifle_heat_frac: 0.0,
+            is_overheated: false,
         })
     }
 
@@ -647,8 +653,13 @@ impl CitySession {
             &targets,
             self.client.id,
         );
-        if let ShotHit::Player { id, .. } = shot.hit {
-            self.client.send_hit(id, self.settings.sniper.hits_to_eliminate)?;
+        if let ShotHit::Player { id, is_head } = shot.hit {
+            let hits_to_kill: u8 = match (self.gun, is_head) {
+                (Gun::Laser, _) => self.settings.sniper.hits_to_eliminate,
+                (Gun::Rifle, true) => self.settings.rifle.head_hits_to_eliminate,
+                (Gun::Rifle, false) => self.settings.rifle.body_hits_to_eliminate,
+            };
+            self.client.send_hit(id, hits_to_kill)?;
             self.hit_count += 1;
             self.show_message(format!("You hit player {id} ({} bounces)", shot.bounce_count));
         }
@@ -658,8 +669,19 @@ impl CitySession {
             team,
             is_own: true,
         });
-        self.reload_left_s = self.settings.sniper.reload_s;
-        self.laser_left_s = self.settings.sniper.shot_s;
+        match self.gun {
+            Gun::Laser => {
+                self.reload_left_s = self.settings.sniper.reload_s;
+                self.laser_left_s = self.settings.sniper.shot_s;
+            }
+            Gun::Rifle => {
+                let rifle = &self.settings.rifle;
+                self.reload_left_s = 1.0 / rifle.shots_per_s;
+                self.laser_left_s = rifle.pulse_s;
+                self.rifle_heat_frac += 1.0 / f64::from(rifle.shots_until_overheat);
+                self.is_overheated = self.rifle_heat_frac >= 1.0;
+            }
+        }
         self.recoil_left_s = RECOIL_S;
         Ok(())
     }
@@ -708,6 +730,10 @@ impl CitySession {
         self.reload_left_s = (self.reload_left_s - dt_s).max(0.0);
         self.laser_left_s = (self.laser_left_s - dt_s).max(0.0);
         self.recoil_left_s = (self.recoil_left_s - dt_s).max(0.0);
+        if self.gun == Gun::Laser || !held.contains(&Action::Shoot) || self.is_overheated {
+            self.rifle_heat_frac = (self.rifle_heat_frac - dt_s / self.settings.rifle.cool_down_s).max(0.0);
+            self.is_overheated &= self.rifle_heat_frac > 0.0;
+        }
         let is_playing: bool = self.is_spawned && self.client.game.winner.is_none();
         let mut input = CityInput {
             speed_frac: 1.0,
@@ -740,7 +766,7 @@ impl CitySession {
             self.step_phase_rad += speed_m_per_s * dt_s * STEPS_RAD_PER_M;
             self.run_frac = (speed_m_per_s / self.world.sprint_m_per_s).min(1.0);
         }
-        if wants_shot && is_playing && self.reload_left_s <= 0.0 {
+        if wants_shot && is_playing && self.reload_left_s <= 0.0 && !(self.gun == Gun::Rifle && self.is_overheated) {
             self.fire()?;
         }
         match console.filter(|_| is_playing) {
@@ -753,7 +779,7 @@ impl CitySession {
             self.client.send_state(
                 self.player.get_eye_frame(),
                 self.laser_left_s > 0.0,
-                false,
+                self.gun == Gun::Rifle,
                 self.disabling,
                 0.0,
                 PlayerWormholes::default(),
@@ -899,7 +925,12 @@ impl CitySession {
             "{WINDOW_TITLE}: {team} | {level} | consoles on: blue {} red {} | {} | {fps:.0} fps, GPU {gpu_ms:.2} ms at {}x{}",
             on(0),
             on(1),
-            if self.reload_left_s > 0.0 { format!("reloading {:.1} s", self.reload_left_s) } else { "ready".to_string() },
+            match self.gun {
+                Gun::Laser if self.reload_left_s > 0.0 => format!("laser reloading {:.1} s", self.reload_left_s),
+                Gun::Laser => "laser ready".to_string(),
+                Gun::Rifle if self.is_overheated => format!("rifle overheated {:.0}%", self.rifle_heat_frac * 100.0),
+                Gun::Rifle => format!("rifle heat {:.0}%", self.rifle_heat_frac * 100.0),
+            },
             render_px.0,
             render_px.1
         )
@@ -1009,7 +1040,7 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         let rects: Vec<render_metal::OverlayRect> = if session.is_spawned { get_crosshair_rects(window_px) } else { Vec::new() };
         let wand = session.is_spawned.then(|| {
             let recoil_frac: f64 = session.recoil_left_s / RECOIL_S;
-            (make_wand(session.run_frac, session.step_phase_rad, recoil_frac, session.get_team(), Gun::Laser, (0.0, 0.0)), Gun::Laser.get_model())
+            (make_wand(session.run_frac, session.step_phase_rad, recoil_frac, session.get_team(), session.gun, (0.0, 0.0)), session.gun.get_model())
         });
         let overlay = render_metal::Overlay {
             dim_frac: text.as_ref().map_or(0.0, |t| t.dim_frac),
@@ -1073,6 +1104,15 @@ fn handle_event(session: &mut CitySession, event: Event, window: &sdl3::video::W
     } else if session.client.is_in_lobby() && (is(Action::JoinBlue) || is(Action::JoinRed)) {
         let team: u32 = u32::from(is(Action::JoinRed));
         session.client.join(Some(team))?;
+    } else if is(Action::Gun1) || is(Action::Gun2) || is(Action::SwitchGun) {
+        session.gun = if is(Action::Gun1) {
+            Gun::Laser
+        } else if is(Action::Gun2) || session.gun == Gun::Laser {
+            Gun::Rifle
+        } else {
+            Gun::Laser
+        };
+        session.reload_left_s = session.reload_left_s.min(1.0 / session.settings.rifle.shots_per_s);
     } else if is(Action::LowerResolution) {
         session.render_scale = (session.render_scale - RENDER_SCALE_STEP).max(MIN_RENDER_SCALE);
     } else if is(Action::RaiseResolution) {
