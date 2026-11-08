@@ -1,25 +1,22 @@
-//! `key_bindings.rs` reads `key_bindings.yaml`, which keys, mouse buttons and wheel do what in the
-//! game window, so each player can choose their own controls.
+//! `key_bindings.rs` reads which keys, mouse buttons and wheel do what in the game window (the `keys`
+//! of `player_settings.yaml`), so each player can choose their own controls.
 //!
-//! Interface: `Action`, `Control`, `KeyBindings` (`Builtin`, `Load`, `is_held`, `matches`,
-//! `get_actions`, `get_label`, `describe`), `get_pressed_control`.
+//! Interface: `Action`, `Control`, `KeyBindings` (`FromNames`, `is_held`, `matches`, `get_actions`,
+//! `get_label`, `describe`), `get_pressed_control`.
 //!
-//! Example: `let keys = KeyBindings::Load(Path::new("my_keys.yaml"))?;`
+//! Example: `let keys = KeyBindings::FromNames(&names, "mine.yaml")?;`
 //!
 //! Must know:
 //! - Every action is required and unknown actions or controls fail, naming them, so a typo can't
 //!   silently leave an action without a key.
-//! - The built-in bindings are `key_bindings.yaml` itself, compiled in.
 
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::path::Path;
 
 use sdl3::event::Event;
 use sdl3::keyboard::{KeyboardState, Scancode};
 use sdl3::mouse::{MouseButton, MouseState};
 
-const BUILTIN_YAML: &str = include_str!("../key_bindings.yaml");
 const WHEEL_NAME: &str = "Wheel";
 const MOUSE_BUTTON_NAMES: [(&str, MouseButton); 5] = [
     ("Mouse Left", MouseButton::Left),
@@ -121,7 +118,7 @@ pub enum Control {
 }
 
 impl Control {
-    /// `FromName` reads a control's name as `key_bindings.yaml` writes it, or `None` for an
+    /// `FromName` reads a control's name as `player_settings.yaml` writes it, or `None` for an
     /// unknown name.
     ///
     /// Example: `let shift = Control::FromName("Left Shift");`
@@ -137,7 +134,7 @@ impl Control {
             .or_else(|| Scancode::from_name(name).map(Control::Key))
     }
 
-    /// `get_name` gives the control's name as `key_bindings.yaml` writes it.
+    /// `get_name` gives the control's name as `player_settings.yaml` writes it.
     ///
     /// Example: `let name = Control::Wheel.get_name();`
     fn get_name(self) -> String {
@@ -176,14 +173,13 @@ pub struct KeyBindings {
 }
 
 impl KeyBindings {
-    /// `FromYaml` reads key bindings from YAML text, naming `source` in errors: every action needs
-    /// one or more known controls, and the wheel only for actions done once per press.
+    /// `FromNames` reads key bindings from each action's control names (`player_settings.yaml`'s
+    /// `keys`), naming `source` in errors: every action needs one or more known controls, and the
+    /// wheel only for actions done once per press.
     ///
-    /// Example: `let keys = KeyBindings::FromYaml(&text, "my_keys.yaml")?;`
+    /// Example: `let keys = KeyBindings::FromNames(&names, "mine.yaml")?;`
     #[allow(non_snake_case)]
-    fn FromYaml(text: &str, source: &str) -> Result<KeyBindings> {
-        let names: BTreeMap<String, Vec<String>> = serde_yaml::from_str(text)
-            .map_err(|error| format!("key bindings {source}: {error}"))?;
+    pub fn FromNames(names: &BTreeMap<String, Vec<String>>, source: &str) -> Result<KeyBindings> {
         let action_list: String = ACTION_NAMES.map(|(_, name)| name).join(", ");
         if let Some(unknown) = names
             .keys()
@@ -217,25 +213,6 @@ impl KeyBindings {
             controls.insert(action, action_controls);
         }
         Ok(KeyBindings { controls })
-    }
-
-    /// `Builtin` gives the key bindings in `key_bindings.yaml` as this program was built with it.
-    ///
-    /// Example: `let keys = KeyBindings::Builtin();`
-    #[allow(non_snake_case)]
-    pub fn Builtin() -> KeyBindings {
-        KeyBindings::FromYaml(BUILTIN_YAML, "key_bindings.yaml (built in)")
-            .expect("the built-in key_bindings.yaml is valid (tested)")
-    }
-
-    /// `Load` reads key bindings from a YAML file like `key_bindings.yaml`.
-    ///
-    /// Example: `let keys = KeyBindings::Load(Path::new("my_keys.yaml"))?;`
-    #[allow(non_snake_case)]
-    pub fn Load(path: &Path) -> Result<KeyBindings> {
-        let text: String = std::fs::read_to_string(path)
-            .map_err(|error| format!("key bindings {}: {error}", path.display()))?;
-        KeyBindings::FromYaml(&text, &path.display().to_string())
     }
 
     /// `is_held` says whether any control of `action` is held now, by the keyboard's and the
@@ -302,9 +279,20 @@ mod tests {
 
     use super::*;
 
+    const PLAYER_YAML: &str = include_str!("../player_settings.yaml");
+
+    /// `read_keys` reads the key bindings in the `keys` section of a player settings file.
+    ///
+    /// Example: `let keys = read_keys(PLAYER_YAML)?;`
+    fn read_keys(text: &str) -> Result<KeyBindings> {
+        let file: BTreeMap<String, serde_yaml::Value> = serde_yaml::from_str(text)?;
+        let names: BTreeMap<String, Vec<String>> = serde_yaml::from_value(file["keys"].clone())?;
+        KeyBindings::FromNames(&names, "test")
+    }
+
     #[test]
     fn builtin_bindings_read_every_kind_of_control() {
-        let keys: KeyBindings = KeyBindings::Builtin();
+        let keys: KeyBindings = read_keys(PLAYER_YAML).expect("the built-in keys");
         assert!(keys.matches(Action::Sprint, Control::Key(Scancode::LShift)));
         assert!(keys.matches(Action::Gun1, Control::Key(Scancode::_1)));
         assert!(keys.matches(Action::Shoot, Control::Mouse(MouseButton::Left)));
@@ -320,7 +308,7 @@ mod tests {
             ("jump: [Space]", "jump: [Spacebar]", "Spacebar"),
             ("jump: [Space]", "jump: [Wheel]", "jump is held"),
         ] {
-            let error: String = KeyBindings::FromYaml(&BUILTIN_YAML.replace(old, new), "test")
+            let error: String = read_keys(&PLAYER_YAML.replace(old, new))
                 .err()
                 .expect("a mistake fails")
                 .to_string();

@@ -43,10 +43,12 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   terminal; `Ctrl-C` ends the game.
 - `make host-game MAP=lunar-surface` does both in one terminal: it starts the same server as its own process, opens
   your window in it, and stops the server when your window closes.
-- To tune the game (speeds, jump, head bob, both guns, consoles, respawn delay, motion blur), copy
-  `game_settings.yaml`, change its numbers, and start the server with it:
-  `make host-game MAP=lunar-surface SETTINGS=my_settings.yaml` (or `make serve-game ... SETTINGS=...`). Everyone who
-  joins plays by the server's settings.
+- To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight), copy
+  `server_settings.yaml`, change its numbers, and start the server with it:
+  `make host-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml` (or `make serve-game ... SERVER_SETTINGS=...`).
+  Everyone who joins plays by the server's settings.
+- Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`: copy it,
+  change it, and add `PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`.
 - `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
   within a few seconds, use the address the server printed.
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
@@ -65,8 +67,8 @@ away or letting go starts it over. A console that is off goes dark. When a team'
 sees which team won, and a new game starts only when whoever started the server presses `Enter` in its terminal
 (the `make host-game` terminal, for that command): every console comes back on and everyone returns to their spawn.
 
-Controls (the defaults; to change them, copy `key_bindings.yaml`, edit the copy and add `KEY_BINDINGS=my_keys.yaml`
-to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
+Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
+`PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or

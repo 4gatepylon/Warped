@@ -868,6 +868,25 @@
     held keys are read by scancode).
 - **Rationale:** you asked for crouch, move, jump, switching weapons and the other keys to be settable in YAML.
 
+### D74. Player settings and server settings
+
+- **Choice:** the settings are two files.
+  - **`server_settings.yaml`** (`--server-settings`, `SERVER_SETTINGS=`): what shapes play for everyone, which the
+    server sends to every player. Movement, sprint energy, both guns (with their beams and recoil), consoles,
+    respawn, how a hit slows a player, and the flashlight.
+  - **`player_settings.yaml`** (`--player-settings`, `PLAYER_SETTINGS=`): each player's own choices, which change
+    only their own experience.
+    - `keys`: D73's key bindings, moved in from `key_bindings.yaml`;
+    - `view`: a new mouse look speed (`look_rad_per_px`), the head bob and motion blur;
+    - `hit_effects`: how strongly a hit reddens, shakes and blurs the screen.
+  - **Replaced:** `game_settings.yaml` (D60) and `key_bindings.yaml` (D73), and their flags.
+- **Alternatives:**
+  - the flashlight's cone and brightness as a player's choice (it lights only its owner's view, but a brighter one
+    shows more in shadows, so it is fairer on the server);
+  - recoil as a player's choice (it changes aim, so it is the server's).
+- **Rationale:** you asked to split the YAML into a part each player can change and a part that belongs to the
+  server.
+
 
 ## Baselines
 

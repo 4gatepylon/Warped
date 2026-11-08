@@ -58,12 +58,12 @@ use sdl3::render::Texture;
 use serde_json::{Value, json};
 
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
-use key_bindings::{Action, Control, KeyBindings};
+use key_bindings::{Action, Control};
 use physics::{Input, LaserReport, Player};
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
-use settings::GameSettings;
+use settings::{PerPlayerSettings, ServerSettings};
 use voxel_world::{VoxelPlayer, VoxelWorld};
 use world::{DEFAULT_CURVATURE_RADIUS_M, World};
 
@@ -290,14 +290,15 @@ struct Arguments {
     /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
-    /// Game settings, a YAML file with game_settings.yaml's keys (the default): a server (--serve,
-    /// --host) sends them to every player who joins; without a server, this game uses them.
+    /// The numbers that shape play, a YAML file with server_settings.yaml's keys (the default): a
+    /// server (--serve, --host) sends them to every player who joins; without a server, this game
+    /// uses them.
     #[arg(long, conflicts_with = "join")]
-    settings: Option<PathBuf>,
-    /// This player's keys, a YAML file with key_bindings.yaml's actions (the default): which keys,
-    /// mouse buttons and wheel do what in the window.
+    server_settings: Option<PathBuf>,
+    /// This player's own choices (keys, mouse speed, head bob, motion blur, how a hit looks), a YAML
+    /// file with player_settings.yaml's keys (the default).
     #[arg(long)]
-    key_bindings: Option<PathBuf>,
+    player_settings: Option<PathBuf>,
     /// Which map to play, from common/maps/.
     #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
     map: MapName,
@@ -583,11 +584,11 @@ fn get_server_address(arguments: &Arguments) -> Result<SocketAddr> {
 /// thread until the returned flag is set, starting a new game after a win at each line read from
 /// standard input (`Enter` in the server's terminal).
 ///
-/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", GameSettings::Builtin(), vec![0, 1])?;`
+/// Example: `let (should_stop, thread) = start_server(47800, "lunar_surface", ServerSettings::Builtin(), vec![0, 1])?;`
 fn start_server(
     port: u16,
     map_name: &str,
-    settings: GameSettings,
+    settings: ServerSettings,
     console_teams: Vec<u32>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
@@ -631,8 +632,8 @@ fn start_server_process(arguments: &Arguments) -> Result<Child> {
         "--map",
         &map_name,
     ]);
-    if let Some(path) = &arguments.settings {
-        command.arg("--settings").arg(path);
+    if let Some(path) = &arguments.server_settings {
+        command.arg("--server-settings").arg(path);
     }
     let mut server: Child = command.spawn()?;
     std::thread::sleep(Duration::from_secs_f64(SERVER_START_S));
@@ -644,13 +645,13 @@ fn start_server_process(arguments: &Arguments) -> Result<Child> {
     Ok(server)
 }
 
-/// `load_settings` gives the game settings `--settings` names, or the built-in ones.
+/// `load_settings` gives the server settings `--server-settings` names, or the built-in ones.
 ///
 /// Example: `let settings = load_settings(&arguments)?;`
-fn load_settings(arguments: &Arguments) -> Result<GameSettings> {
-    match &arguments.settings {
-        Some(path) => GameSettings::Load(path),
-        None => Ok(GameSettings::Builtin()),
+fn load_settings(arguments: &Arguments) -> Result<ServerSettings> {
+    match &arguments.server_settings {
+        Some(path) => ServerSettings::Load(path),
+        None => Ok(ServerSettings::Builtin()),
     }
 }
 
@@ -689,11 +690,11 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         consoles.iter().map(|c| c.team).collect(),
     )?;
     println!(
-        "Game settings: {} (players who join get them).",
+        "Server settings: {} (players who join get them).",
         arguments
-            .settings
+            .server_settings
             .as_ref()
-            .map_or("the built-in game_settings.yaml".to_string(), |path| path
+            .map_or("the built-in server_settings.yaml".to_string(), |path| path
                 .display()
                 .to_string())
     );
@@ -1667,8 +1668,8 @@ struct Session {
     is_running: bool,
     is_jumping: bool,
     is_walking_upright: bool,
-    settings: GameSettings,
-    key_bindings: KeyBindings,
+    settings: ServerSettings,
+    player_settings: PerPlayerSettings,
     gun: Gun,
     is_trigger_held: bool,
     is_flashlight_on: bool,
@@ -1754,7 +1755,7 @@ impl Tracer {
         team: u32,
         fired_s: f64,
         is_rifle: bool,
-        settings: &GameSettings,
+        settings: &ServerSettings,
         r: f64,
     ) -> Tracer {
         let (speed_m_per_s, trail_s) = if is_rifle {
@@ -1838,16 +1839,17 @@ impl Session {
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
         let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
-        let settings: GameSettings = load_settings(arguments)?;
-        let key_bindings: KeyBindings = match &arguments.key_bindings {
-            Some(path) => KeyBindings::Load(path)?,
-            None => KeyBindings::Builtin(),
+        let settings: ServerSettings = load_settings(arguments)?;
+        let player_settings: PerPlayerSettings = match &arguments.player_settings {
+            Some(path) => PerPlayerSettings::Load(path)?,
+            None => PerPlayerSettings::Builtin(),
         };
         let voxel: Option<VoxelState> = if map.structures.is_empty() {
             None
         } else {
             let mut world: VoxelWorld = VoxelWorld::FromMap(&map)?;
             world.set_settings(settings.clone());
+            world.head_bob = player_settings.view.head_bob.clone();
             let player: VoxelPlayer = match &arguments.view {
                 Some(name) => {
                     let view: VoxelView = make_voxel_bench_views()
@@ -1906,7 +1908,7 @@ impl Session {
             world,
             player,
             settings,
-            key_bindings,
+            player_settings,
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
@@ -1980,12 +1982,15 @@ impl Session {
                 mouse.set_relative_mouse_mode(window, true);
                 return true;
             }
-            Event::MouseMotion { xrel, yrel, .. } if self.is_captured => match &mut self.voxel {
-                Some(voxel) => voxel.player.look(f64::from(xrel), f64::from(yrel)),
-                None => {
-                    physics::look_around(&mut self.player.frame, f64::from(xrel), f64::from(yrel))
+            Event::MouseMotion { xrel, yrel, .. } if self.is_captured => {
+                let speed: f64 =
+                    self.player_settings.view.look_rad_per_px / voxel_world::LOOK_RAD_PER_PX;
+                let (dx_px, dy_px) = (f64::from(xrel) * speed, f64::from(yrel) * speed);
+                match &mut self.voxel {
+                    Some(voxel) => voxel.player.look(dx_px, dy_px),
+                    None => physics::look_around(&mut self.player.frame, dx_px, dy_px),
                 }
-            },
+            }
             _ => {}
         }
         match key_bindings::get_pressed_control(&event) {
@@ -2006,7 +2011,7 @@ impl Session {
         window: &sdl3::video::Window,
         mouse: &sdl3::mouse::MouseUtil,
     ) -> bool {
-        let actions: Vec<Action> = self.key_bindings.get_actions(control);
+        let actions: Vec<Action> = self.player_settings.keys.get_actions(control);
         let is = |action: Action| actions.contains(&action);
         if is(Action::ReleaseMouse) {
             if !self.is_captured {
@@ -2059,9 +2064,9 @@ impl Session {
     ) -> Result<()> {
         let frame_s: f64 = self.last.elapsed().as_secs_f64();
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
-        let blur_s: f64 = self.settings.display.motion_blur_s;
+        let blur_s: f64 = self.player_settings.view.motion_blur_s;
         self.hit_effect_frac =
-            (self.hit_effect_frac - dt_s / self.settings.when_hit.effect_s).max(0.0);
+            (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
         self.motion_blur_frac = if blur_s > 0.0 {
             (-dt_s / blur_s).exp() as f32
         } else {
@@ -2094,7 +2099,7 @@ impl Session {
             self.hud_time_s += dt_s;
             return Ok(());
         }
-        let held = |action: Action| self.key_bindings.is_held(action, keyboard, mouse);
+        let held = |action: Action| self.player_settings.keys.is_held(action, keyboard, mouse);
         let input: Input = Input {
             forward: held(Action::MoveForward),
             back: held(Action::MoveBack),
@@ -2306,12 +2311,12 @@ impl Session {
     }
 
     /// `get_hit_effect` gives what the last hit on this player still does to the scene, fading over
-    /// the settings' `when_hit.effect_s`: red edges, a blur from the edges inward, and a shake
-    /// in a new direction each frame (the golden angle apart).
+    /// the player settings' `hit_effects.effect_s`: red edges, a blur from the edges inward, and a
+    /// shake in a new direction each frame (the golden angle apart).
     ///
     /// Example: `let hit = self.get_hit_effect();`
     fn get_hit_effect(&self) -> render_metal::HitEffect {
-        let when_hit = &self.settings.when_hit;
+        let when_hit = &self.player_settings.hit_effects;
         let shake_rad: f64 = self.total_frame_count as f64 * voxel_world::SPAWN_TURN_RAD;
         let shake_px: f64 = when_hit.shake_px * self.hit_effect_frac;
         render_metal::HitEffect {
@@ -2723,7 +2728,7 @@ impl Session {
                 Some([blue, red]) => format!("BLUE {blue}   RED {red}"),
                 None => "LOOKING FOR THE GAME".to_string(),
             };
-            let keys = &self.key_bindings;
+            let keys = &self.player_settings.keys;
             return Some([
                 counts,
                 format!(
@@ -2893,7 +2898,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            self.key_bindings.describe()
+            self.player_settings.keys.describe()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
@@ -3003,7 +3008,7 @@ fn get_eyes(players: &[net::RemotePlayer]) -> Vec<DVec4> {
 ///
 /// Example: `if let Some(hits_to_kill) = take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false) { ... }`
 fn take_hit_weight(
-    settings: &GameSettings,
+    settings: &ServerSettings,
     gun: Gun,
     has_rifle_shot_hit: &mut bool,
     is_head_hit: bool,
@@ -3342,7 +3347,7 @@ mod tests {
 
     #[test]
     fn hits_weigh_by_gun_and_place() {
-        let settings: GameSettings = GameSettings::Builtin();
+        let settings: ServerSettings = ServerSettings::Builtin();
         let mut has_hit: bool = false;
         for _ in 0..2 {
             assert_eq!(

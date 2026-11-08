@@ -140,7 +140,8 @@ The same concept has the same name in every CLI:
 | Host a game and play in it | `--host` | `--server`, `--listen` |
 | Join a game | `--join <address>` (`auto` to find one) | `--connect`, `--client` |
 | Run only a game server | `--serve` | `--dedicated`, `--headless` |
-| A player's own key bindings | `--key-bindings <path>` | `--keys`, `--bindings`, `--controls` |
+| The settings a server sends to every player | `--server-settings <path>` | `--settings`, `--config`, `--game-settings` |
+| A player's own settings (keys, view) | `--player-settings <path>` | `--key-bindings`, `--keys`, `--prefs` |
 | A network port | `--port <port>` | `-p`, `--listen-port` |
 
 - Flags are kebab-case long options. The only short options are `-h` and the math letters of

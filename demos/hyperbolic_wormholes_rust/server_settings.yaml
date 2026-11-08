@@ -1,16 +1,18 @@
-# `game_settings.yaml` holds the numbers that tune how the Rust demo plays. The game server reads it
-# and sends it to every player who joins, so everyone in a game plays by the same numbers; a game
-# without a server uses it too.
+# `server_settings.yaml` holds the numbers that shape play in the Rust demo: movement, sprint energy, both
+# guns, consoles, respawning, how a hit slows a player, and the flashlight. The game server reads it and
+# sends it to every player who joins, so everyone in a game plays by the same numbers; a game without a
+# server uses it too. What only changes a player's own experience (keys, mouse speed, head bob, motion
+# blur, how a hit looks) is in `player_settings.yaml` instead.
 #
 # Interface:
-#     Copy this file, change the numbers, and pass the copy to the server: `SETTINGS=` with
-#     `make serve-game` or `make host-game` (`--settings`). Every key is required, unknown keys
+#     Copy this file, change the numbers, and pass the copy to the server: `SERVER_SETTINGS=` with
+#     `make serve-game` or `make host-game` (`--server-settings`). Every key is required, unknown keys
 #     fail, and numbers must be above 0 unless their note says 0 is allowed. Each name ends in its
 #     unit: `_m` meters, `_s` seconds, `_rad` radians, `_per_s` per second.
 #
 # Example:
-#     cp game_settings.yaml fast.yaml  # edit fast.yaml, then:
-#     make host-game MAP=lunar-surface SETTINGS=fast.yaml
+#     cp server_settings.yaml fast.yaml  # edit fast.yaml, then:
+#     make host-game MAP=lunar-surface SERVER_SETTINGS=fast.yaml
 
 movement:
   walk_speed_per_map_speed: 2.0  # Walking speed, times the map's (Lunar Surface: 5 m/s).
@@ -24,13 +26,6 @@ movement:
 sprint_energy:
   drain_s: 7.5  # Seconds of sprinting that empty a full bar.
   refill_s: 15.0  # Seconds to refill an empty bar while Shift is up.
-
-head_bob:
-  walk_depth_m: 0.08  # How far the eye dips at each step while walking (0 for none).
-  sprint_depth_m: 0.14  # How far the eye dips at each step while sprinting (0 for none).
-  walk_steps_per_s: 2.0  # Steps a second while walking.
-  sprint_steps_per_s: 2.8  # Steps a second while sprinting.
-  fade_s: 0.1667  # Seconds the bob takes to start or stop.
 
 sniper:  # Gun 1 (key 1): the thin laser wand, one shot per click.
   shot_s: 0.25  # How long each shot hits whatever the crosshair crosses.
@@ -58,19 +53,12 @@ consoles:
 respawn:
   delay_s: 3.0  # Seconds a player who was hit waits before coming back (0 for at once).
 
-when_hit:  # What a player feels each time a hit takes some of their health.
+when_hit:  # How a hit slows the player who takes it (how it looks is each player's own choice).
   slow_speed_frac: 0.5  # Their walking and sprinting speed while slowed, as a fraction (1 for not slowed).
   slow_s: 1.0  # Seconds they stay slowed.
-  effect_s: 0.6  # Seconds the red, shake and blur take to fade.
-  red_frac: 0.6  # How red the screen's edges turn, 0 to 1 (0 for none).
-  shake_px: 6.0  # How far the screen shakes, in pixels (0 for none).
-  blur_px: 6.0  # How wide the blur from the edges is, in pixels (0 for none).
 
 flashlight:  # It shines while the right button is held, lighting the scene in a cone from your eye.
   cone_half_angle_rad: 0.3  # Half the cone's opening angle, out to where its edge starts to soften.
   soft_edge_rad: 0.08  # How wide the cone's soft edge is.
   range_m: 25.0  # Distance at which its light has fallen to half.
   brightness_frac: 2.0  # How bright it is, as a fraction of full sunlight.
-
-display:
-  motion_blur_s: 0.01  # How long motion smears in the window (0 for none).
