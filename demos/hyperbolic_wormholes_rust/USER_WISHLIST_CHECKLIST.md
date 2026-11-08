@@ -10,7 +10,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-Nothing yet.
+- [~] **W-43 Hold for the flashlight.** The flashlight shouldn't toggle: it stays on only while the right button is
+  held. Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/flashlight-hold`, 2026-11-07.
 
 ## Open
 
@@ -27,8 +29,6 @@ Nothing yet.
 - [ ] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
   together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
   Mac over loopback.
-- [ ] **W-43 Hold for the flashlight.** The flashlight shouldn't toggle: it stays on only while the right button is
-  held.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
 
