@@ -639,6 +639,17 @@
 - **Alternatives:** moving the beam's start with the wand's small dip at each step (a few millimeters).
 - **Rationale:** you found that the laser didn't come out of the wand's tip.
 
+### D58. A client of another map stops with an error
+
+- **Choice:** the server's welcome names its map, and a client loaded with another map stops with an error that
+  names both and the `MAP=` to use. Before, a server started without `MAP=lunar-surface` (`make serve-game` plays
+  the house by default) let Lunar Surface players join. It had no consoles, so it ignored every hold of `E` while
+  the window's bar still filled: you saw a console stay on after 10 s. Errors reading the server now end the
+  window's game too, instead of a line in the title bar.
+- **Alternatives:** the server refusing the join; a warning instead of an error (the game would still be wrong).
+- **Rationale:** you found that turning off a console did nothing. A scripted client holding a console against a
+  Lunar Surface server saw it turn off after 10.02 s, so a server on another map is the likeliest cause.
+
 
 ## Baselines
 

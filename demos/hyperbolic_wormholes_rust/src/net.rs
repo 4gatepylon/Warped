@@ -18,6 +18,7 @@
 //! - Each client decides when its own laser hits someone (it traces the laser anyway) and which
 //!   console it aims at, and the server takes its word.
 //! - A player keeps their id, and so their team, when they rejoin from the same address.
+//! - The server's welcome names its map; a client of another map fails rather than playing on.
 
 use std::error::Error;
 use std::io::ErrorKind;
@@ -236,10 +237,11 @@ struct Slot {
     damage_frac: f64,
 }
 
-/// `Server` is the server's state: its socket, the joined players, the next id to give, the id
-/// each address had, each console's team and the game.
+/// `Server` is the server's state: its socket, its map's name, the joined players, the next id to
+/// give, the id each address had, each console's team and the game.
 struct Server {
     socket: UdpSocket,
+    map_name: String,
     slots: Vec<Slot>,
     next_id: u32,
     known_ids: Vec<(SocketAddr, u32)>,
@@ -288,8 +290,9 @@ impl Server {
                     }
                     None => return Ok(()),
                 };
-                self.socket
-                    .send_to(&Message::New(Kind::Welcome).id(id).0, address)?;
+                let mut welcome: Message = Message::New(Kind::Welcome).id(id);
+                welcome.0.extend_from_slice(self.map_name.as_bytes());
+                self.socket.send_to(&welcome.0, address)?;
             }
             Some(Kind::State) => {
                 if let Some(mut player) = reader.player()
@@ -446,16 +449,17 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
     Ok(socket)
 }
 
-/// `serve` runs a server on `socket` (from `bind_server`) until `should_stop` is set: it answers
-/// joins, relays players, removes players who are hit or silent for `PLAYER_TIMEOUT_S`, turns off
+/// `serve` runs a server for the map `map_name` on `socket` (from `bind_server`) until
+/// `should_stop` is set: it answers joins (naming the map), relays players, removes players who are hit or silent for `PLAYER_TIMEOUT_S`, turns off
 /// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
 /// starts a new game after that when `should_start_new_game` is set (clearing it), and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, vec![0, 1], &should_start_new_game)?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), vec![0, 1], &should_start_new_game)?;`
 pub fn serve(
     socket: UdpSocket,
     should_stop: &AtomicBool,
+    map_name: String,
     console_teams: Vec<u32>,
     should_start_new_game: &AtomicBool,
 ) -> Result<()> {
@@ -472,6 +476,7 @@ pub fn serve(
     beacon.extend_from_slice(&port.to_le_bytes());
     let mut server: Server = Server {
         socket,
+        map_name,
         slots: Vec::new(),
         next_id: 0,
         known_ids: Vec::new(),
@@ -553,10 +558,12 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
     .into())
 }
 
-/// `Client` is this player's connection: its id once welcomed, the other players and the game.
+/// `Client` is this player's connection: its map's name, its id once welcomed, the other players
+/// and the game.
 pub struct Client {
     socket: UdpSocket,
     server: SocketAddr,
+    map_name: String,
     pub id: Option<u32>,
     pub players: Vec<RemotePlayer>,
     pub game: GameState,
@@ -565,17 +572,18 @@ pub struct Client {
 }
 
 impl Client {
-    /// `Connect` opens a socket and asks `server` to join.
+    /// `Connect` opens a socket and asks `server` to join a game on the map `map_name`.
     ///
-    /// Example: `let mut client = Client::Connect("192.168.1.20:47800".parse()?)?;`
+    /// Example: `let mut client = Client::Connect("192.168.1.20:47800".parse()?, "lunar_surface")?;`
     #[allow(non_snake_case)]
-    pub fn Connect(server: SocketAddr) -> Result<Client> {
+    pub fn Connect(server: SocketAddr, map_name: &str) -> Result<Client> {
         let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
         socket.set_nonblocking(true)?;
         socket.send_to(&Message::New(Kind::Join).0, server)?;
         Ok(Client {
             socket,
             server,
+            map_name: map_name.to_string(),
             id: None,
             players: Vec::new(),
             game: GameState::default(),
@@ -585,7 +593,8 @@ impl Client {
     }
 
     /// `poll` reads every datagram that arrived, keeps the latest players (all but this one), and
-    /// returns what happened; while not yet welcomed it asks to join again every `JOIN_RETRY_S`.
+    /// returns what happened; while not yet welcomed it asks to join again every `JOIN_RETRY_S`. It
+    /// fails if the server plays another map.
     ///
     /// Example: `for event in client.poll()? { ... }`
     pub fn poll(&mut self) -> Result<Vec<NetEvent>> {
@@ -606,6 +615,14 @@ impl Client {
             match bytes.first().copied().and_then(Kind::FromByte) {
                 Some(Kind::Welcome) if self.id.is_none() => {
                     if let Some(id) = reader.id() {
+                        let server_map: String =
+                            String::from_utf8_lossy(&bytes[reader.position..]).into();
+                        if server_map != self.map_name {
+                            return Err(format!(
+                                "net: the server at {} plays the map {server_map}, but this game loaded {}; join with the server's map (MAP={})",
+                                self.server, self.map_name, server_map.replace('_', "-")
+                            ).into());
+                        }
                         self.id = Some(id);
                         events.push(NetEvent::Joined(id));
                     }
@@ -727,7 +744,7 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Datagram length | complete, cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
-    //! | Join | new player, repeated join, server full, rejoin after a hit (same id) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit` |
+    //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
     //! | Hit | by a joined player, by a stranger, on a player who is gone | `only_joined_players_can_hit` |
     //! | Hits to kill | 1 (eliminated at once), several (eliminated at the last) | `only_joined_players_can_hit`, `rifle_hits_add_up` |
     //! | Console held | the other team's (turned off after `CONSOLE_DISABLE_S`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
@@ -735,12 +752,15 @@ mod tests {
 
     use super::*;
 
+    const TEST_MAP_NAME: &str = "lunar_surface";
+
     /// `make_server` makes a server on a free local port, with no players.
     ///
     /// Example: `let mut server = make_server();`
     fn make_server() -> Server {
         Server {
             socket: UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port"),
+            map_name: TEST_MAP_NAME.to_string(),
             slots: Vec::new(),
             next_id: 0,
             known_ids: Vec::new(),
@@ -876,6 +896,27 @@ mod tests {
         assert_eq!(server.slots.len(), 1);
         server.handle(&join, address(50_002)).expect("a rejoin");
         assert_eq!(server.slots[1].player.id, 2);
+    }
+
+    #[test]
+    fn clients_of_another_map_fail() {
+        let mut server: Server = make_server();
+        let server_address: SocketAddr = server.socket.local_addr().expect("an address");
+        let mut client: Client = Client::Connect(server_address, "house_demo").expect("a socket");
+        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
+        let (length, from) = server.socket.recv_from(&mut buffer).expect("the join");
+        server.handle(&buffer[..length], from).expect("a join");
+        let deadline: Instant = Instant::now() + Duration::from_secs(1);
+        let error: String = loop {
+            assert!(Instant::now() < deadline, "the welcome never arrived");
+            if let Err(error) = client.poll() {
+                break error.to_string();
+            }
+        };
+        assert!(
+            error.contains(TEST_MAP_NAME) && error.contains("house_demo"),
+            "{error}"
+        );
     }
 
     #[test]

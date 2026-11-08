@@ -73,8 +73,8 @@ Multiplayer:
 
 - Tested on one Mac only: a host, two bots and a window joined over loopback, on both maps (lasers hit, players
   rejoin). Not yet tried across two computers on Wi-Fi.
-- The game doesn't check that everyone uses the same map; a player on another map sees the others in the wrong
-  places.
+- A player whose `MAP` differs from the server's can't join: their game stops with an error naming the server's
+  map.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too.
 - A player hit by the rifle doesn't see how much damage they have taken; damage resets when they rejoin.
