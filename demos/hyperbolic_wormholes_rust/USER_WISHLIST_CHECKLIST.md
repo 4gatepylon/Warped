@@ -116,7 +116,7 @@ are here too, since the user hadn't confirmed them.
   can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
   good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
   (D106). #304. Then: "make a quick PR to switch which gun model is used where; we accientally got them flipped":
-  the sniper (gun 1) now holds the bolt-action rifle and the rifle (gun 2) the energy revolver. #PRNUM.
+  the sniper (gun 1) now holds the bolt-action rifle and the rifle (gun 2) the energy revolver. #318.
   - **Where the work is** (for any agent picking it up): merged from branch `claude/rifle-model` (pushed to
     `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac,
     pictures in
