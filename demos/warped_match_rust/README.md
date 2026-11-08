@@ -136,10 +136,11 @@ With the branch tips of 2026-11-08 14:06 UTC (Dust `3c23593`, Snow Planet `9095d
 `191b9d4`, Dark Forest `8f9b0ab`), a 9-round bot match ended with red winning, no stall.
 With the tips of 14:50 UTC (Dust `91924f4`, Snow Planet `0d0e450`, City Sphere `ce2bdc2`, Dark
 Forest `a6b3482`), a bot match ended in 3 rounds (red swept City Sphere, Snow Planet and Dust), no stall.
-On `staging/user-4gatepylon` at `f1c57cd` (levels from this checkout), `make play-all-levels` passed three runs in a
-row, every level played, no stall, red winning in 5 rounds (Apple M3 Pro, macOS 15.7.3). Seconds from a round's
-start to its win: City Sphere 1.2–1.4, Dark Forest 15.5–21.8 (its own console time; its bot opens a window), Lunar
-Surface 3.7–4.0, Snow Planet 2.6–2.9, Dust 3.5–4.3 (consoles off in 1 s). Pylons a team, counted as the consoles the
+On `staging/user-4gatepylon` at `f1c57cd` (levels from this checkout), `make play-all-levels` passed all seven runs,
+every level played, no stall, red winning in 5 rounds (Apple M3 Pro, macOS 15.7.3). Seconds from a round's
+start to its win: City Sphere 1.2–1.4, Dark Forest 14.7–22.7 (its own console time; its bot opens a window), Lunar
+Surface 3.3–4.0, Snow Planet 2.6–2.9, Dust 3.5–4.3 (consoles off in 1 s). With Dark Forest's client killed 6 s into
+its round, the match client started it again and the round ended at 37 s. Pylons a team, counted as the consoles the
 winner turned off (and the other team's with a lone bot): City Sphere 1, Dark Forest 2, Lunar Surface 3, Snow Planet
 2, Dust 3, as `game_design/DESIGN.md` says. No level's console bot walks to a pylon (each holds `E` from where it
 stands, and the servers take its word), so these runs don't show that every pylon can be reached on foot.
