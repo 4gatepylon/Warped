@@ -7,11 +7,16 @@ the internet, and spaces other than hyperbolic ones. It is written for the agent
 on a cloud macOS VM that can't run the game at full fidelity, so the testing plan (section 7) is as detailed as the
 refactor itself.
 
+Another agent works on the same game at the same time: the **infra stack** (#179 to #185, branches
+`claude/infra-*`) packages the demo as a Mac app with a title screen, builds its game server alone for Linux,
+protects games with a password, and deploys game servers and a download page on Google Cloud. Section 3.1 says who
+owns what, so the two never do the same work twice or in two ways.
+
 Contents:
 
 1. Ground rules
 2. Decisions
-3. Target layout
+3. Target layout (3.1: who owns what)
 4. Where every demo file goes
 5. How the game is used afterwards
 6. The steps (the PR stack)
@@ -50,6 +55,11 @@ Made by the user (2026-11-08):
 - Delete the prototype square game with its HTTP management server (done in this stack, layer 2).
 - Players are friends, possibly in different cities: 5v5, on a game server on a VM in a nearby cloud region (e.g.
   Oregon for the US West Coast), 3 to 4 games at once, perhaps tournaments; no large scale yet.
+- Games go over the internet, so they need a simple, efficient way to refuse strangers: a secret the server's owner
+  gives their friends (e.g. by WhatsApp). The scheme is decided now, so no two agents build it differently:
+  [`common/protocol/authentication.md`](../common/protocol/authentication.md).
+- Another agent (the infra stack) makes the downloadable Mac app (double-click, pick a server, give an address)
+  and the cloud deployment.
 
 Made by the agent who wrote this plan, for the user to confirm or overturn:
 
@@ -66,6 +76,14 @@ Made by the agent who wrote this plan, for the user to confirm or overturn:
   the commit before layer 2 of this stack).
 - **The demo's names stay during the port** (`VoxelWorld`, `VoxelPlayer`, ...), so that ported files diff cleanly
   against the demo's. Renames come after the regression tests are in place.
+- **Authentication is the infra stack's password challenge (#181), unchanged:** a password file on both sides
+  (`--game-password-file`), an HMAC-SHA256 proof of a server cookie (so the password never crosses the network),
+  a per-player token on every later message, and no reply larger than its request to an unproven address. It is
+  exactly what was asked (a shared secret, cheap: one HMAC per join, 8 bytes per message), it is already written
+  and tested, and building a second scheme would conflict with it. Encryption is left as a later upgrade (described
+  in the spec).
+- **The infra stack lands in the demo first, and the game copies it** (step A0), so the app, the Linux server, the
+  password and the title screen arrive in `game/` with the rest of the demo instead of being redone.
 
 ## 3. Target layout
 
@@ -93,6 +111,36 @@ common/maps/                         maps, unchanged until phase E extends the f
 Dependencies only point downwards: `client` and `server` depend on `core`; nothing depends on `client` or `server`;
 `legacy-oracle` is only a dev-dependency of tests.
 
+### 3.1 Who owns what
+
+Two groups of agents work on the game at once: the **refactor** (this plan) and the **infra stack** (the Mac app,
+the Linux server bundle, the cloud). Each file has one owner at a time; the other may change it only in a PR the
+owner reviews. Before step A1 lands, the demo is where the infra stack works; once A1 lands, the infra stack's work
+on the game moves to `game/` and the demo is frozen (section 1).
+
+| What | Before A1 (in the demo) | After A1 (in `game/`) | Owner |
+| --- | --- | --- | --- |
+| Game code: world, rendering, HUD, network messages | `demos/hyperbolic_wormholes_rust/src/` | `game/core/`, `game/client/`, `game/server/` | refactor |
+| Authentication (`authentication.md`) | `net.rs` (#181) | `game/core/src/net/` | refactor keeps it working; changes go through the spec |
+| Title screen, password dialog (`title.rs`, `run_title_screen`) | the demo (#182) | `game/client/src/title.rs` | infra stack |
+| Mac app: `app/Info.plist`, icon, `how_to_open.txt`, `make package-mac-app`, `online_games.txt` | the demo (#183) | `game/client/app/`, `game/Makefile` | infra stack |
+| Assets inside the app (`Contents/Resources/assets/`, the built-in revolver) | the demo (#183) | `game/client/src/assets.rs` | infra stack, with A6's move to `common/assets/` done by the refactor |
+| Linux server build: `make build-server-bundle`, the musl target in `.cargo/config.toml` | the demo (#180) | `game/Makefile`, `game/.cargo/config.toml` | infra stack |
+| Maps built into the programs (#179) | `map.rs` | `game/core/src/map.rs` | refactor |
+| Cloud: `infra/` (Terraform, startup script, download page) | `infra/` | `infra/` | infra stack |
+| The server's command line, which `infra/startup.sh.tftpl` runs | `wormholes_server --port --map --game-password-file` | `warped-server` with the same flags (A5 renames it and updates the startup script in the same PR, reviewed by the infra stack) | refactor |
+
+Interfaces both sides rely on, which change only with both sides' agreement:
+
+- The server's flags: `--port`, `--map` (later `--maps`), `--game-password-file`, `--server-settings`; exit on
+  SIGTERM; one process per game.
+- The window's flags the title screen passes: `--join <address>`, `--port`, `--map`, `--game-password-file`; with
+  no flags at all, the window opens the title screen.
+- `online_games.txt`: one game a line, `<address>:<port> <map> <name>`.
+- The exit code 3 for a refused password.
+- Where the app keeps things: `~/Library/Application Support/Warped/game_password`, `~/Library/Logs/Warped/`,
+  `~/.config/warped/player_settings.yaml`; assets in `Contents/Resources/assets/`; maps inside the program.
+
 ## 4. Where every demo file goes
 
 Paths are relative to `demos/hyperbolic_wormholes_rust/src/` (from) and `game/` (to). "Split" means part of the
@@ -114,6 +162,9 @@ file goes to each place; the parts are listed.
 | `fps_demo_assets.rs` | 46 | `client/src/assets.rs` | Points at `common/assets/` after step A6. |
 | `hud_bars.rs`, `menu.rs`, `minimap.rs`, `map_layout.rs`, `exit_prompt.rs`, `credits.rs`, `third_person.rs`, `key_bindings.rs`, `avatar_animation.rs`, `dust.rs`, `spaceships.rs` | 4,600 | `client/src/` | As they are. |
 | `world.rs`, `scene_data.rs`, `render_cpu.rs`, `render_metal.metal`, `physics.rs`, `map_export.rs` | 6,500 | dropped | The house demo's engine. `physics::Input` moves to `core/src/player.rs` first, since `voxel_world.rs` uses it. `--renderer cpu` goes with `render_cpu.rs`. |
+| From the infra stack: `bin/wormholes_server.rs` (#180) | 100 | `server/src/main.rs` | The Linux game server's `main`; A5 builds `warped-server` from it and the server half of `net.rs`. |
+| From the infra stack: `title.rs` (#182), the title screen and password dialog in `main.rs` | 260 + 200 | `client/src/title.rs`, `client/src/main.rs` | As they are (infra stack's). |
+| From the infra stack: `../app/` (#183: `Info.plist`, `app_icon.png`, `how_to_open.txt`) | | `client/app/` | Copied verbatim (infra stack's). |
 | `../player_settings.yaml`, `../server_settings.yaml`, `../rustfmt.toml` | | `game/` | Copied verbatim. |
 | `../USER_WISHLIST_CHECKLIST.md`, `../DECISIONS.md`, `../OPTIMIZATIONS.md`, `../PLAYTEST.md`, `../AGENTS.md` | | `game/` | Copied in step A1; the demo's copies get one line at the top saying the game's copies are the live ones. Past decisions keep their `D` numbers; new ones are `G1`, `G2`, ... |
 
@@ -132,14 +183,18 @@ Outside the demo:
 
 ```bash
 cd game
-make serve-game MAP=lunar-surface PORT=47800      # warped-server --map lunar-surface --port 47800
-make join-game SERVER=203.0.113.7 PORT=47800      # warped --join 203.0.113.7 --port 47800
-make join-game SERVER=auto                         # finds a server on the local network, as today
+make serve-game MAP=lunar-surface PORT=47800 GAME_PASSWORD_FILE=password.txt
+#   warped-server --map lunar-surface --port 47800 --game-password-file password.txt
+make join-game SERVER=203.0.113.7 PORT=47800 GAME_PASSWORD_FILE=password.txt
+#   warped --join 203.0.113.7 --port 47800 --game-password-file password.txt
+make join-game SERVER=auto                         # a server on the local network, without a password
+make package-mac-app ONLINE_GAMES=online_games.txt # Warped.app, zipped (infra stack)
+make build-server-bundle                           # warped-server for x86-64 Linux, to upload (infra stack)
 ```
 
-On a cloud VM (phase G): one `warped-server` per game, each on its own port (47800 to 47803), started at boot, the
-VM's firewall open for those UDP ports. Each friend runs `make join-game SERVER=<the VM's address> PORT=<the game's
-port>`.
+Most players never type these: they download Warped.app, double-click it, pick a game on the title screen (or type
+an address), and type the password once (infra stack). On the cloud (`infra/`, infra stack): one `warped-server`
+per game, each on its own UDP port, started at boot with the game's password.
 
 ### `warped-server`
 
@@ -149,6 +204,7 @@ port>`.
 | `--map <name>` | One level per game, as today (phases A to C) |
 | `--maps <name,...>` | The levels of a match, blue's deepest first (phase D); replaces `--map` |
 | `--server-settings <path>` | The settings sent to every player (default: the built-in `server_settings.yaml`) |
+| `--game-password-file <path>` | Only players who prove they know this password join (`authentication.md`); none: no password |
 | `--max-player-count <count>` | At most 10 (5v5) after phase C; 8 before |
 | `--next-game-after-s <seconds>` | Starts the next game this long after a win, since a server on a VM has no one to press `Enter` |
 | `--exit-after-s <seconds>` | Stops after that long (tests) |
@@ -158,13 +214,14 @@ port>`.
 
 | Flag | Meaning |
 | --- | --- |
-| `--join <auto\|address>`, `--port <port>`, `--player-settings <path>` | As in the demo |
+| (no flags) | The title screen (infra stack): pick an online game from the app's `online_games.txt`, or one on this Wi-Fi |
+| `--join <auto\|address>`, `--port <port>`, `--player-settings <path>`, `--game-password-file <path>` | As in the demo (after the infra stack) |
 | `--bench-views`, `--view <name>`, `--play-route --route warp-tour`, `--width-px`, `--height-px`, `--frame-count`, `--render-scale`, `--sampling`, `--label`, `--json`, `--exit-after-s` | As in the demo, for the voxel maps |
 | `--map <name>` | Only for the offline tools above; when joining, the window loads the map the server names (phase D) |
 | `--bot` | A windowless player that joins and plays (tests); needs no GPU |
 
-Gone from the window: `--serve` (now `warped-server`), `--renderer` (only Metal remains), `--autopilot` and the
-house routes, `--export-map`.
+Gone from the window: `--serve` (now `warped-server`, which also replaces the infra stack's `wormholes_server`),
+`--renderer` (only Metal remains), `--autopilot` and the house routes, `--export-map`.
 
 ### `warped-core`
 
@@ -211,6 +268,11 @@ section 7.
 
 ### Phase A: port without changing behaviour
 
+- **A0, the infra stack lands in the demo.** #179 to #185 are based on an older `infra` branch; the infra stack
+  brings them up to date with `staging/user-4gatepylon` and merges them into the demo (its owner's job, not this
+  plan's). A1 starts only after that, so the game copies the app, the Linux server, the password and the title
+  screen with everything else. If A1 can't wait, A1 copies the demo as it is, and each infra PR is then ported into
+  `game/` as its own layer, in the infra stack's order, by agreement with the infra stack's agent.
 - **A1, copy.** Copy the demo's `src/`, settings files, wishlist and docs into `game/client/` and `game/` verbatim,
   then fix only what the new place breaks: the package and binary names (`warped-client`, `warped`), the fps_demo
   assets path (`fps_demo_assets.rs` takes `demos/` as the crate folder's parent, which is now `game/`), and any
@@ -225,10 +287,15 @@ section 7.
   and objc2 as listed there. Done when: `cargo check -p warped-core --target x86_64-unknown-linux-gnu` passes
   (7.1), and every oracle test passes against `warped_core` instead of the client.
 - **A5, `warped-server`.** Move the server half of `net.rs` and `serve_only` into `server/`, written sans-IO
-  (`Game::handle(datagram, from, now_s) -> Vec<(to, datagram)>`, `Game::tick(now_s)`), with a thin UDP loop. Remove
-  `--serve` from the window. Done when: 7.5 (in-process games) and 7.3.3 (cross-version, still byte-identical) pass.
-- **A6, assets.** Move the used assets to `common/assets/` and point the game and both demos at them. Done when:
-  both demos and the game build and draw (7.4 where Metal runs, otherwise their `check_*` functions find every file).
+  (`Game::handle(datagram, from, now_s) -> Vec<(to, datagram)>`, `Game::tick(now_s)`), with a thin UDP loop, from
+  the infra stack's `wormholes_server` `main`. The binary becomes `warped-server` with the same flags; the same PR
+  changes `infra/startup.sh.tftpl` and `make build-server-bundle` to the new name, and the infra stack reviews it.
+  Remove `--serve` from the window. The password challenge (`authentication.md`) moves with the server and keeps its
+  tests. Done when: 7.5 (in-process games) and 7.3.3 (cross-version, still byte-identical) pass.
+- **A6, assets.** Move the used assets to `common/assets/` and point the game, both demos and `make
+  package-mac-app` (which copies them into `Contents/Resources/assets/`) at them. Done when: both demos and the game
+  build and draw (7.4 where Metal runs, otherwise their `check_*` functions find every file), and a packaged app
+  starts (7.8).
 - **A7, docs.** README, design doc, skills and `common/` docs name `game/` as the game; the demo's README says it is
   kept as the reference the game came from.
 
@@ -242,12 +309,17 @@ section 7.
 
 ### Phase C: network for 5v5 between friends in different cities
 
-Each item is its own layer, with its tests (7.5, 7.6). After C1 older windows can't join; say so in the PR.
+Each item is its own layer, with its tests (7.5, 7.6). The protocol version, the `Refused` message and the
+password challenge already exist (infra stack, `authentication.md`). Every layer that changes bytes raises
+`PROTOCOL_VERSION`, updates `authentication.md` or the protocol docs if it touches them, and says in its PR that
+older windows can't join. Cross-version tests with the demo stop at the first such layer (7.3.3 is retired; the
+oracle tests stay).
 
-- **C1, protocol version.** Join and Welcome carry a magic number and a protocol version; a mismatch is reported in
-  words on both sides. Cross-version tests with the demo stop here (7.3.3 is retired, the oracle tests stay).
-- **C2, session token.** A window picks a random 64-bit token at start and sends it in Join; the server keys players
-  by it, not by address, so a player keeps their id when their address changes (home routers do that).
+- **C1, write the protocol up.** `common/protocol/messages.md`: every message's layout, from the code, with the
+  tests that hold it to the page. No byte changes.
+- **C2, players keep their id when their address changes.** Today a later message must come from the address that
+  joined; home routers sometimes change a player's port mid-game. The server accepts a message whose token and id
+  match from a new address and moves the player there (the token, 64 random bits, is what proves who they are).
 - **C3, smaller pose, 10 players.** Each player's eye frame (16 `f64`, 128 bytes) becomes a position in the map's
   coordinates plus a unit quaternion (7 `f32`, 28 bytes): plain `f32` matrices would lose centimetres far out in
   hyperbolic space. `MAX_PLAYER_COUNT` becomes 10. A test asserts a 10-player snapshot fits in 1,200 bytes, under
@@ -292,9 +364,10 @@ Each level of the design (Dust, Snow Planet, City Sphere, Dark Forest) gets an e
 
 ### Phase G: running games on a VM
 
-A README section and, if useful, a script: build `warped-server` for Linux, run one per port as a service, open the
-UDP ports, and watch `--json` output. A cloud VM costs about $0.35 per game-hour in outbound traffic with today's
-snapshot sizes (≈4 GB per game-hour), less after C3.
+The infra stack owns this (`infra/`: Terraform on Google Cloud, one systemd service per game port, the password
+from the VM's metadata, a download page). This plan only keeps the server's interface stable (section 3.1) and
+adds `--json` statistics the infra stack can watch. For budgeting: outbound traffic is ≈4 GB per game-hour with
+today's snapshot sizes, about $0.35 per game-hour at typical cloud rates, roughly half after C3.
 
 ## 7. Testing plan
 
@@ -331,6 +404,8 @@ can't run on the machine (no Metal, for example) is reported as "Not run: <reaso
   module's docstring (`unit-tests` skill). Partitions worth stating for the new code:
   - `net::protocol`: each message kind × {smallest, typical, largest (10 players, every field at its maximum)};
     truncated, over-long and unknown-kind datagrams; round trips bit for bit.
+  - Authentication: the partitions listed at the end of `common/protocol/authentication.md` (version × cookie ×
+    proof, and later messages' token, id and address), kept from the infra stack's tests.
   - `rules` (phase D): every row of the design doc's example match; a team winning at depth 0, 1, 2; a defender
     winning its own level.
   - `space` (phase E): k ∈ {-1, 0, +1} × {a point at the origin, near, far (10 R)}: geodesics stay on the manifold,
@@ -381,6 +456,7 @@ Until C1 changes the messages, the game and the demo must play together, which t
 
 - the demo's server (`cargo run --release -- --serve` in the demo) with the game's bots joining it;
 - the game's server with the demo's bots (`--bot`; check it runs without Metal, else use the game's bots only);
+- both sides with the same `--game-password-file`, and once with different ones (refused both ways);
 - both ways, a scripted game: 4 bots join, choose teams, hold a console until it turns off, shoot each other until
   one is eliminated and respawns, throw wormholes, leave. Every event both sides log must agree.
 
@@ -429,6 +505,9 @@ in one process, on a simulated clock, with no sockets:
   4. Thrown wormholes: placed, linked, destroyed by enemy shots.
   5. Churn: bots leave, time out, rejoin (same token keeps the id after C2), change address (after C2).
   6. A 10-minute match of game time (runs in seconds of real time).
+  7. Strangers: an endpoint without the password, one with a wrong password, one replaying datagrams captured from
+     a player (from its own address), and one sending random bytes, all while a 5v5 game runs. None gets a slot or
+     changes the game; no reply to them is longer than what they sent; the players notice nothing.
 - Invariants checked every simulated millisecond, on every profile:
   - every player sees every elimination of themselves within 1 s (no "ghosts"; after C5);
   - every hit a window sends is applied exactly once (after C6);
@@ -445,8 +524,9 @@ The same scenarios, end to end with the real binaries, to catch what a simulatio
 - `tools/udp_impair/`: a UDP proxy between the windows (or bots) and the server that applies a profile of 7.5 to
   real datagrams in both directions. It needs no administrator rights, unlike macOS's `dnctl` and `pfctl`, so it
   runs on a cloud VM.
-- `make test-network PROFILE=west_coast BOT_COUNT=10`: starts `warped-server --json` on loopback, `udp-impair` in
-  front of it, and 10 `warped --bot` processes through it for 2 minutes; then checks the server's and bots' JSON
+- `make test-network PROFILE=west_coast BOT_COUNT=10`: starts `warped-server --json --game-password-file <a
+  generated password>` on loopback, `udp-impair` in front of it, and 10 `warped --bot` processes through it with the
+  same password for 2 minutes, plus one with a wrong password that must be refused; then checks the server's and bots' JSON
   logs for the invariants of 7.5, and saves logs, per-second bytes and the summary under
   `game/.artifacts/test_network/<run_id>/` with a `command.txt`.
 - One window (`warped --join`) instead of one bot, when Metal is available, to check the game draws other players
@@ -511,11 +591,17 @@ the Linux target is installed. Then, if anything is missing:
 - Change a lower layer with `gh stack checkout <branch>`, commit there, then `gh stack rebase --upstack` and
   `gh stack push`.
 - When a step's done, tick it in this file (in that step's own layer) by adding "(done, #<PR>)" after its title.
+- **With the infra stack:** follow section 3.1's owners. Before changing anything the other side owns or relies on
+  (the server's flags, `online_games.txt`, the password files, the app's folders, `infra/`), comment on the other
+  side's open PR and wait for agreement. Run `git log origin/staging/global` and `gh pr list --search
+  "head:claude/infra"` at the start of each session to see what the infra stack has merged or opened since.
 
 ## 10. Open questions for the user
 
 - The budgets of 7.7 and the network profiles of 7.5 are first guesses: are they right for your friends?
 - Phase C's order: is smoothing (C7) more urgent than the hit and elimination fixes (C5, C6)?
 - City Sphere's design may change to one floor (`DESIGN.md`); phase E's sphere ground waits for that decision.
-- Should a management server (to start games from a web page or the window) come back in phase G, or is starting
-  `warped-server` processes on the VM by hand enough for tournaments?
+- Should a management server (to start games from a web page or the window) come back in phase G, or are the infra
+  stack's Terraform-managed `warped-server` processes enough for tournaments?
+- Is unencrypted traffic acceptable (`authentication.md`, "what it doesn't protect against"), or should the
+  ChaCha20-Poly1305 upgrade be planned for phase C?
