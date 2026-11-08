@@ -57,8 +57,8 @@ constant float MIN_FACING = 0.05;
 constant float MIN_MEAN_ALBEDO = 0.02;
 constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);
 constant float DISPLAY_GAMMA = 2.2;
-constant float EXPOSURE = 1.6;
-constant float BLOOM_STRENGTH = 0.12;
+constant float EXPOSURE = 1.3;
+constant float BLOOM_STRENGTH = 0.08;
 constant int BLOOM_LEVELS = __BLOOM_LEVELS__;
 constant float VIGNETTE_STRENGTH = 0.28;
 constant float GRADE_MIDDLE_GREY = 0.18;
@@ -72,12 +72,13 @@ constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
 constant float SHADOW_PENUMBRA_TAN = 0.015;
 constant float3 HAZE_COLOR = float3(0.15, 0.17, 0.21);
-constant float HAZE_DISTANCE_M = 200.0;
-constant float HAZE_MAX_FRAC = 0.35;
-constant float HAZE_HORIZON_HEIGHT_FRAC = 0.12;
+constant float HAZE_START_M = 60.0;
+constant float HAZE_DISTANCE_M = 150.0;
+constant float HAZE_MAX_FRAC = 0.2;
+constant float HAZE_HORIZON_HEIGHT_FRAC = 0.06;
 constant float HAZE_SUN_GLOW = 0.5;
 constant float HAZE_SUN_POWER = 8.0;
-constant float HAZE_SKYLIGHT = 0.4;
+constant float HAZE_SKYLIGHT = 0.2;
 constant float BLOOM_KARIS_LUMA = 4.0;
 constant float BLOOM_GLOW = 1.0;
 constant float2 BLOOM_GLOW_LUMA_EDGES = float2(0.5, 2.0);
@@ -1605,8 +1606,8 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
 }
 
 /**
- * @brief `add_haze` mixes a thin haze into the colour of a ray that hit a surface (more the farther it went) or reached
- * the sky (more the nearer the horizon), brighter toward the sun; a lost ray stays as it is.
+ * @brief `add_haze` mixes a thin haze into the colour of a ray that hit a surface beyond `HAZE_START_M` (more the farther
+ * it went) or reached the sky (more the nearer the horizon), brighter toward the sun; a lost ray stays as it is.
  * @par Example
  * @code
  * color = add_haze(scene, color, end);
@@ -1615,7 +1616,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
 static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end) {
     float haze_frac, sun_cos;
     if (end.surface.x == OUTCOME_HIT) {
-        haze_frac = 1.0 - exp(-end.grid.w * scene.u.curvature_radius_m / HAZE_DISTANCE_M);
+        haze_frac = 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
         sun_cos = mdot(end.view, transport_from_centre(scene.u.sun.xyz, end.point));
     } else if (end.surface.x == OUTCOME_SKY) {
         haze_frac = exp(-max(end.point.y, 0.0) / HAZE_HORIZON_HEIGHT_FRAC);
