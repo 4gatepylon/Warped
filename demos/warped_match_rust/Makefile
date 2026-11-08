@@ -12,6 +12,7 @@
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
+#     make bench-levels LABEL=<label>: time every bench view of the five levels at 2560x1440 into .artifacts/bench_levels/ (tools/bench_levels.sh).
 #     make progression-pictures WIDTH_PX=<n> HEIGHT_PX=<n>: render the progression page for a few match states into .artifacts/progression_pictures/.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
@@ -55,7 +56,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help progression-pictures levels serve-match join-match bot-match serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help progression-pictures levels serve-match join-match bot-match serve-game join-game build-server-bundle package-mac-app bench-views bench-levels run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -74,6 +75,7 @@ help:
 	@echo "  make package-mac-app ONLINE_GAMES=games.txt      Build Warped.app and zip it ($(APP_ZIP)); ONLINE_GAMES is optional"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
+	@echo "  make bench-levels LABEL=quiet                     Time all five levels' bench views at 2560x1440 (.artifacts/bench_levels/)"
 	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
 	@echo "                                                   Play a scripted route without a window (.artifacts/autopilot/)"
 	@echo "  make test                                        Run the tests"
@@ -123,6 +125,9 @@ progression-pictures:
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)
+
+bench-levels:
+	./tools/bench_levels.sh $(if $(LABEL),--label $(LABEL))
 
 run-autopilot:
 	cargo run --release -- --renderer $(RENDERER) --autopilot --width-px $(AUTOPILOT_WIDTH_PX) --height-px $(AUTOPILOT_HEIGHT_PX)
