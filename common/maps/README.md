@@ -192,6 +192,12 @@ All are licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) 
 | `scifi_beacon/` | ["Sci-Fi Beacon/Way Point Marker Free Model"](https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f) | [AMMediaGames](https://sketchfab.com/AMMediaGames) |
 | `hesco_barrier/` | ["Hesco Barrier PBR"](https://sketchfab.com/3d-models/hesco-barrier-pbr-ab21217481094e9a84f989e71fd56a59) | [polbrainstorm](https://sketchfab.com/polbrainstorm) |
 
+`teal_robot/` is the players' body, not part of any map: ["Teal V.2"](https://sketchfab.com/3d-models/teal-v2-d6a54ff9468c451bbdbd879afa03f20a)
+by [Lagst](https://sketchfab.com/Lagst), under the [Sketchfab Standard](https://sketchfab.com/licenses) license (use
+in any project, no redistribution of the model on its own; the repository is private). `prepare_models.py` runs
+`animate_teal_blender.py` in Blender on it first (`--blender-path`), which gives it a clean rig and the clips `Idle`,
+`Walk`, `Run`, `Jump` and `Death`.
+
 ## Checking a map
 
 ```bash

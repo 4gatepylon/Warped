@@ -4,10 +4,13 @@ Each model is downloaded with a Sketchfab API token into `.build/sketchfab/<name
 then copied to `models/<name>/` with its geometry unchanged but for parts left out (the garage's closed doors, so
 players can go in), its textures shrunk to at most `--max-texture-px` on a
 side (JPEG unless the texture's alpha is used), spec-gloss materials turned into metallic-roughness ones, and its
-`license.txt`. `models/` is committed, so players don't need a token; rerun this to change the models.
+`license.txt`. A model in `_ANIMATION_SCRIPTS` first goes through its Blender script (`teal_robot`, the players' body,
+gets a clean rig and its clips from `animate_teal_blender.py`), which writes into `.build/animated/<name>/`.
+`models/` is committed, so players don't need a token; rerun this to change the models.
 
 Interface:
     --max-texture-px: The longest texture side to keep (default 1024).
+    --blender-path: The Blender executable that runs the animation scripts.
     --dry-run: Print what would be downloaded and written, and change nothing.
     SKETCHFAB_API_TOKEN: The Sketchfab API token, needed only for models not yet in `.build/sketchfab/`.
 
@@ -23,6 +26,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -33,6 +37,8 @@ from PIL import Image
 _MAPS_FOLDER: Path = Path(__file__).resolve().parent
 _DOWNLOAD_FOLDER: Path = _MAPS_FOLDER / ".build" / "sketchfab"
 _MODELS_FOLDER: Path = _MAPS_FOLDER / "models"
+_ANIMATED_FOLDER: Path = _MAPS_FOLDER / ".build" / "animated"
+_DEFAULT_BLENDER_PATH: str = "/Applications/Blender.app/Contents/MacOS/Blender"
 _DOWNLOAD_API_URL: str = "https://api.sketchfab.com/v3/models/{uid}/download"
 _TOKEN_ENV: str = "SKETCHFAB_API_TOKEN"
 _JPEG_QUALITY: int = 90
@@ -46,7 +52,9 @@ MODELS: dict[str, str] = {
     "ww2_field_bunker": "6ea5cebdaa82455aa3aad26baa6e0375",
     "scifi_beacon": "a1d91ebb3e2d41bba31c02b11423d97f",
     "hesco_barrier": "ab21217481094e9a84f989e71fd56a59",
+    "teal_robot": "d6a54ff9468c451bbdbd879afa03f20a",
 }
+_ANIMATION_SCRIPTS: dict[str, str] = {"teal_robot": "animate_teal_blender.py"}
 
 
 def _download_model(name: str, uid: str, token: str) -> None:
@@ -144,6 +152,24 @@ def _shrink_images(gltf: dict, source: Path, target: Path, max_texture_px: int) 
         image_entry["mimeType"] = "image/png" if has_alpha else "image/jpeg"
 
 
+def _animate_model(name: str, blender_path: Path) -> None:
+    """`_animate_model` runs model `name`'s Blender script on its download, writing `.build/animated/<name>/`.
+
+    Args:
+        name: The model's folder name, a key of `_ANIMATION_SCRIPTS`.
+        blender_path: The Blender executable.
+
+    Example:
+        >>> _animate_model("teal_robot", Path(_DEFAULT_BLENDER_PATH))
+    """
+    target: Path = _ANIMATED_FOLDER / name
+    shutil.rmtree(target, ignore_errors=True)
+    script: Path = _MAPS_FOLDER / _ANIMATION_SCRIPTS[name]
+    command: list[str] = [str(blender_path), "-b", "--factory-startup", "-P", str(script), "--"]
+    subprocess.run([*command, str(_DOWNLOAD_FOLDER / name / "scene.gltf"), str(target)], check=True)
+    shutil.copy(_DOWNLOAD_FOLDER / name / "license.txt", target / "license.txt")
+
+
 def _write_model(name: str, max_texture_px: int) -> None:
     """`_write_model` writes `models/<name>/` from the downloaded model, without its nodes in `_REMOVED_NODE_NAMES`.
 
@@ -154,7 +180,7 @@ def _write_model(name: str, max_texture_px: int) -> None:
     Example:
         >>> _write_model("hesco_barrier", 1024)
     """
-    source: Path = _DOWNLOAD_FOLDER / name
+    source: Path = (_ANIMATED_FOLDER if name in _ANIMATION_SCRIPTS else _DOWNLOAD_FOLDER) / name
     target: Path = _MODELS_FOLDER / name
     shutil.rmtree(target, ignore_errors=True)
     (target / "textures").mkdir(parents=True)
@@ -177,12 +203,20 @@ def _write_model(name: str, max_texture_px: int) -> None:
     show_default=True,
     help="The longest texture side to keep.",
 )
+@click.option(
+    "--blender-path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=_DEFAULT_BLENDER_PATH,
+    show_default=True,
+    help="The Blender executable that runs the animation scripts.",
+)
 @click.option("--dry-run", is_flag=True, help="Print what would be downloaded and written, and change nothing.")
-def main(max_texture_px: int, dry_run: bool) -> None:
+def main(max_texture_px: int, blender_path: Path, dry_run: bool) -> None:
     """`main` downloads the missing models, then writes every model's small copy into `models/`.
 
     Args:
         max_texture_px: The longest texture side to keep.
+        blender_path: The Blender executable that runs the animation scripts.
         dry_run: Whether to only print the plan.
 
     Example:
@@ -196,6 +230,8 @@ def main(max_texture_px: int, dry_run: bool) -> None:
         )
     for name in missing_names:
         click.echo(f"download {name} into {_DOWNLOAD_FOLDER / name}", err=True)
+    for name in _ANIMATION_SCRIPTS:
+        click.echo(f"animate {name} into {_ANIMATED_FOLDER / name} with {blender_path}", err=True)
     for name in MODELS:
         click.echo(f"write {_MODELS_FOLDER / name}", err=True)
     if dry_run:
@@ -203,6 +239,8 @@ def main(max_texture_px: int, dry_run: bool) -> None:
     _DOWNLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     for name in missing_names:
         _download_model(name, MODELS[name], os.environ[_TOKEN_ENV])
+    for name in _ANIMATION_SCRIPTS:
+        _animate_model(name, blender_path)
     for name in MODELS:
         _write_model(name, max_texture_px)
     click.echo(_MODELS_FOLDER)
