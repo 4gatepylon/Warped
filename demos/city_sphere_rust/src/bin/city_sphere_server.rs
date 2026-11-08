@@ -1,11 +1,11 @@
-//! `wormholes_server.rs` runs one game server of the Rust demo without a window, for a machine that
+//! `city_sphere_server.rs` runs one game server of the Rust demo without a window, for a machine that
 //! only hosts games, such as a Linux server in the cloud: it builds without Metal or SDL, plays a
 //! map built into the program, and starts a new game a few seconds after a team wins.
 //!
 //! Interface: `--port <port>`, `--map <house-demo|lunar-surface>`, `--server-settings <path>`,
 //! `--game-password-file <path>`.
 //!
-//! Example: `.build/x86_64-unknown-linux-musl/release/wormholes_server --port 47810 --map lunar-surface`
+//! Example: `.build/x86_64-unknown-linux-musl/release/city_sphere_server --port 47810 --map city-sphere`
 //!
 //! Must know:
 //! - It shares `net.rs` and the modules it needs (`map.rs`, `settings.rs`, `thrown_wormholes.rs`,
@@ -16,6 +16,9 @@
 #[allow(dead_code)]
 #[path = "../app_bundle.rs"]
 mod app_bundle;
+#[allow(dead_code)]
+#[path = "../city_world.rs"]
+mod city_world;
 #[allow(dead_code)]
 #[path = "../geometry.rs"]
 mod geometry;
@@ -57,7 +60,7 @@ const NEW_GAME_AFTER_WIN_S: u64 = 10;
 #[derive(Parser)]
 #[command(
     about = "Run one game server of the Rust wormholes demo, without a window, until stopped.",
-    after_help = "Example: wormholes_server --port 47810 --map lunar-surface"
+    after_help = "Example: city_sphere_server --port 47810 --map city-sphere"
 )]
 struct Arguments {
     /// UDP port the server listens on.
@@ -82,11 +85,18 @@ struct Arguments {
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments: Arguments = Arguments::parse();
     let map_name: &str = arguments.map.get_folder_name();
-    let console_teams: Vec<u32> = Map::Builtin(map_name)?
-        .materials
-        .iter()
-        .filter_map(get_console_team)
-        .collect();
+    let console_teams: Vec<u32> = match arguments.map {
+        MapName::CitySphere => city_world::CityWorld::Builtin()?
+            .consoles
+            .iter()
+            .map(|console| console.team)
+            .collect(),
+        _ => Map::Builtin(map_name)?
+            .materials
+            .iter()
+            .filter_map(get_console_team)
+            .collect(),
+    };
     let game_password: Vec<u8> = net::read_game_password(arguments.game_password_file.as_deref())?;
     let settings: ServerSettings = match &arguments.server_settings {
         Some(path) => ServerSettings::Load(path)?,

@@ -898,8 +898,9 @@ impl Server {
                 write_level_result(path, TEAM_NAMES[winner as usize]);
             }
             println!(
-                "The {} team won. Press Enter here to start a new game.",
-                TEAM_NAMES[winner as usize]
+                "The {} team won.{}",
+                TEAM_NAMES[winner as usize],
+                if self.result_path.is_some() { "" } else { " Press Enter here to start a new game." }
             );
         }
     }

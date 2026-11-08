@@ -1,13 +1,14 @@
-# `Makefile` builds, runs, benchmarks, tests, and formats and lints the Rust hyperbolic wormholes
-# demo.
+# `Makefile` builds, runs, benchmarks, tests, and formats and lints the Rust City Sphere demo.
 #
 # Interface:
 #     make help: list the targets.
-#     make serve-game PORT=<n> MAP=<lunar-surface|house-demo> SERVER_SETTINGS=<file>: run a game server, without a window, and print how to join it.
+#     make play-game PORT=<n> TEAM=<blue|red>: open the window and play, hosting a game server on PORT that others (or make run-bot) can join.
+#     make serve-game PORT=<n> MAP=<city-sphere|lunar-surface|house-demo> SERVER_SETTINGS=<file>: run a game server, without a window, and print how to join it.
 #     make join-game SERVER=<auto|address> PORT=<n> MAP=<map> PLAYER_SETTINGS=<file>: open the window and join that game server.
 #     (SERVER_SETTINGS: a copy of server_settings.yaml with the numbers that shape play; the server sends them to every player.)
 #     (PLAYER_SETTINGS: a copy of player_settings.yaml with this player's own keys, mouse speed and view.)
-#     (Playing is only on a game server: there is no local demo and no host-and-play target.)
+#     make run-bot SERVER=<address> PORT=<n> TEAM=<blue|red> BOT_S=<s> BOT_OBJECTIVE=<consoles>: a bot without a window joins the game.
+#     make play-route WIDTH_PX=<n> HEIGHT_PX=<n>: play the scripted route in the window (lift, reflected shots, both red consoles, blue wins) and print its frame times.
 #     (GAME_PASSWORD_FILE, with serve-game and join-game: a file holding the game's password; only players who know it may join.)
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
@@ -26,8 +27,13 @@ HEIGHT_PX ?= 800
 FRAME_COUNT ?= 10
 AUTOPILOT_WIDTH_PX ?= 640
 AUTOPILOT_HEIGHT_PX ?= 400
-PORT ?= 47800
-MAP ?= lunar-surface
+PORT ?= 47810
+MAP ?= city-sphere
+TEAM ?=
+TEAM_FLAG := $(if $(TEAM),--team $(TEAM))
+BOT_S ?= 60
+BOT_OBJECTIVE ?=
+BOT_OBJECTIVE_FLAG := $(if $(BOT_OBJECTIVE),--bot-objective $(BOT_OBJECTIVE))
 SERVER ?= auto
 SERVER_SETTINGS ?=
 SERVER_TARGET := x86_64-unknown-linux-musl
@@ -50,13 +56,16 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help play-game run-bot play-route serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
-	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run a game server, without a window; prints how to join"
+	@echo "  make play-game PORT=47810 TEAM=blue              Open the window and play, hosting a game server others can join"
+	@echo "  make run-bot SERVER=127.0.0.1 TEAM=red BOT_S=60  A bot without a window joins (BOT_OBJECTIVE=consoles: it turns consoles off)"
+	@echo "  make play-route WIDTH_PX=1280 HEIGHT_PX=800      Play the scripted route in the window and print its frame times"
+	@echo "  make serve-game PORT=47810 MAP=city-sphere       Run a game server, without a window; prints how to join"
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
-	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
+	@echo "  make join-game SERVER=auto PORT=47810            Open the window and join the game server (SERVER=auto finds one)"
 	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of player_settings.yaml)"
 	@echo "  (serve-game and join-game take GAME_PASSWORD_FILE=password.txt: only players who know it join)"
 	@echo "  make build-server-bundle                         Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"
@@ -72,23 +81,32 @@ help:
 	@echo ""
 	@echo "Example: make bench-views RENDERER=cpu WIDTH_PX=2560 HEIGHT_PX=1600"
 
+play-game:
+	cargo run --release -- --port $(PORT) --map $(MAP) --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) $(TEAM_FLAG) $(SERVER_SETTINGS_FLAG) $(PLAYER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
+
+run-bot:
+	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) --bot --exit-after-s $(BOT_S) $(TEAM_FLAG) $(BOT_OBJECTIVE_FLAG) $(GAME_PASSWORD_FLAG)
+
+play-route:
+	cargo run --release -- --map $(MAP) --play-route --port $(PORT) --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX)
+
 serve-game:
 	cargo run --release -- --serve --port $(PORT) --map $(MAP) $(SERVER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
 
 join-game:
-	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) $(PLAYER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
+	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) $(TEAM_FLAG) $(PLAYER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
 
 build-server-bundle:
 	rustup target add $(SERVER_TARGET)
-	cargo build --release --target $(SERVER_TARGET) --bin wormholes_server
-	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(SERVER_TARGET)/release wormholes_server
+	cargo build --release --target $(SERVER_TARGET) --bin city_sphere_server
+	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(SERVER_TARGET)/release city_sphere_server
 	@echo "Server bundle: $(SERVER_BUNDLE)"
 
 package-mac-app:
 	cargo build --release
 	rm -rf .build/Warped .build/AppIcon.iconset
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(APP_ICONSET)
-	cp .build/release/hyperbolic-wormholes $(APP)/Contents/MacOS/Warped
+	cp .build/release/city-sphere $(APP)/Contents/MacOS/Warped
 	sed 's/@VERSION@/$(APP_VERSION)/' app/Info.plist > $(APP)/Contents/Info.plist
 	for size in 16 32 128 256 512; do \
 		sips -z $$size $$size app/app_icon.png --out $(APP_ICONSET)/icon_$${size}x$${size}.png > /dev/null; \

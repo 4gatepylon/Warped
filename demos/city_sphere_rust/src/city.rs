@@ -232,6 +232,12 @@ impl Brain {
         }
     }
 
+    /// `restart` goes back to the first step (after a respawn); steps already done, such as a
+    /// console that is off, finish at once.
+    fn restart(&mut self) {
+        (self.index, self.step_s, self.unstick_s) = (0, 0.0, 0.0);
+    }
+
     /// `is_done` says whether every step is done.
     fn is_done(&self) -> bool {
         self.index >= self.steps.len()
@@ -372,6 +378,9 @@ fn make_route(world: &CityWorld) -> Vec<Step> {
     steps
 }
 
+/// `Beam` is a shot's corners, its team and its brightness (0 to 1) for one frame.
+type Beam = (Vec<DVec3>, u32, f64);
+
 /// `LiveShot` is a shot being drawn: its path, when it was fired, by which team, and whether it
 /// is this window's own (drawn from the gun's muzzle).
 struct LiveShot {
@@ -404,7 +413,7 @@ fn make_frame(
     body: &AvatarModel,
     eye: DMat4,
     robots: &[Robot],
-    beams: &[(Vec<DVec3>, u32, f64)],
+    beams: &[Beam],
     masks: (u32, u32),
     now_s: f64,
     render_px: (usize, usize),
@@ -661,6 +670,9 @@ impl CitySession {
                     self.player = self.world.make_player(self.get_team(), self.spawn_count);
                     self.spawn_count += 1;
                     self.is_spawned = true;
+                    if let Some(brain) = &mut self.brain {
+                        brain.restart();
+                    }
                     let team: &str = net::TEAM_NAMES[self.get_team() as usize % 2];
                     self.show_message(format!("You are player {id}, on the {team} team"));
                 }
@@ -811,7 +823,7 @@ impl CitySession {
             .collect();
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
         let muzzle: DVec3 = (eye * MUZZLE_M.extend(1.0)).truncate();
-        let beams: Vec<(Vec<DVec3>, u32, f64)> = self
+        let beams: Vec<Beam> = self
             .shots
             .iter()
             .map(|s| {
@@ -1114,10 +1126,10 @@ fn make_bench_views(world: &CityWorld) -> Vec<BenchView> {
 
 /// `make_crowd` gives `BENCH_ROBOT_COUNT` robots across the glass level and street, and shots that
 /// reflect, for the worst bench view.
-fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<(Vec<DVec3>, u32, f64)>) {
+fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
     let glass_m: f64 = world.get_glass().map_or(10.0, |g| g.radius_m);
     let mut robots: Vec<Robot> = Vec::new();
-    let mut beams: Vec<(Vec<DVec3>, u32, f64)> = Vec::new();
+    let mut beams: Vec<Beam> = Vec::new();
     for k in 0..BENCH_ROBOT_COUNT {
         let angle: f64 = k as f64 / BENCH_ROBOT_COUNT as f64 * std::f64::consts::TAU;
         let d: DVec3 = DVec3::new(-0.6, angle.cos() * 0.8, angle.sin() * 0.8).normalize();
@@ -1146,7 +1158,7 @@ fn bench_views(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()>
     let (crowd, crowd_beams) = make_crowd(&world);
     let mut rows = Vec::new();
     for view in make_bench_views(&world) {
-        let (robots, beams): (&[Robot], &[(Vec<DVec3>, u32, f64)]) = if view.has_crowd { (&crowd, &crowd_beams) } else { (&[], &[]) };
+        let (robots, beams): (&[Robot], &[Beam]) = if view.has_crowd { (&crowd, &crowd_beams) } else { (&[], &[]) };
         let mut frame_ms: Vec<f64> = Vec::new();
         let mut gpu_ms: Vec<f64> = Vec::new();
         for k in 0..=arguments.frame_count {

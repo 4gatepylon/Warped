@@ -252,7 +252,7 @@ enum RouteKind {
 #[derive(Parser)]
 #[command(
     about = "Walk, fly and fire a laser through wormholes in hyperbolic space.",
-    after_help = "Example: hyperbolic-wormholes --renderer cpu --bench-views --width-px 2560 --height-px 1600"
+    after_help = "Example: city-sphere --bench-views --width-px 2560 --height-px 1600"
 )]
 struct Arguments {
     /// Which renderer draws the frames: the GPU with Metal, or every CPU core.

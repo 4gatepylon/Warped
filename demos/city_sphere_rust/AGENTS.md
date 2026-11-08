@@ -1,9 +1,9 @@
-These rules apply to `demos/hyperbolic_wormholes_rust/`, on top of the repository's root `AGENTS.md`. Codex and
+These rules apply to `demos/city_sphere_rust/` (copied from `demos/hyperbolic_wormholes_rust/`), on top of the repository's root `AGENTS.md`. Codex and
 Devin read them here; Claude Code reads them through `CLAUDE.md` beside this file.
 
 ## The user's wishlist
 
-[`USER_WISHLIST_CHECKLIST.md`](USER_WISHLIST_CHECKLIST.md) lists every feature and fix the user has asked for in
+[`USER_WISHLIST_CHECKLIST.md`](../hyperbolic_wormholes_rust/USER_WISHLIST_CHECKLIST.md) (in the hyperbolic demo's folder; City Sphere is W-119 there) lists every feature and fix the user has asked for in
 this demo, so agents on different platforms can share the work without doing it twice or forgetting a request.
 Each item has an id (`W-NN`) and a status: `[ ]` open, `[~]` claimed, `[?]` pending user review, `[x]` done (the
 user confirmed it).

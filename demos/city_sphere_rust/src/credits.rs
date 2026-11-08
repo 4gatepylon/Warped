@@ -18,7 +18,7 @@ pub const CREDITS_LINES: [&str; 24] = [
     "SURFACES  Poly Haven textures, CC0 (polyhaven.com/a/<name>)",
     "  moon_01, moon_meteor_02, concrete_wall_008, metal_plate,",
     "  corrugated_iron_02, rusty_metal_02, concrete_pavement_02,",
-    "  concrete_floor_worn_001",
+    "  concrete_floor_worn_001, asphalt_02, brick_wall_02",
     "SNIPER    \"Bolt Action Rifle 7.62\" by Mateusz Sadek, CC0",
     "  Poly Haven, polyhaven.com/a/bolt_action_rifle_7_62",
     "RIFLE     \"Sci-fi revolver\" by Ramhat, Sketchfab Standard",

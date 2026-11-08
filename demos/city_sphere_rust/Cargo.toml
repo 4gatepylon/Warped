@@ -1,16 +1,17 @@
-# `Cargo.toml` builds the Rust port of the hyperbolic wormholes demo (`../hyperbolic_wormholes/`).
+# `Cargo.toml` builds the Rust City Sphere demo (copied from `../hyperbolic_wormholes_rust/`, which
+# it still contains and can still play with `--map lunar-surface` or `--map house-demo`).
 #
 # Interface:
-#     hyperbolic-wormholes: the game (macOS only: Metal and SDL), what `cargo run` runs.
-#     wormholes_server: a game server alone (src/bin/wormholes_server.rs), which also builds for Linux.
+#     city-sphere: the game (macOS only: Metal and SDL), what `cargo run` runs.
+#     city_sphere_server: a game server alone (src/bin/city_sphere_server.rs), which also builds for Linux.
 #
 # Example:
 #     cargo run --release
 [package]
-name = "hyperbolic-wormholes"
+name = "city-sphere"
 version = "0.1.0"
 edition = "2024"
-default-run = "hyperbolic-wormholes"
+default-run = "city-sphere"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
@@ -36,5 +37,5 @@ objc2-quartz-core = "0.3"
 sdl3 = { version = "0.22", features = ["build-from-source-static"] }
 
 [[bin]]
-name = "wormholes_server"
+name = "city_sphere_server"
 test = false

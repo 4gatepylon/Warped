@@ -59,7 +59,6 @@ struct JsonHole {
 
 #[derive(Deserialize)]
 struct JsonShell {
-    name: String,
     radius_m: f64,
     thickness_m: f64,
     material: u8,
@@ -121,7 +120,6 @@ pub struct Material {
 /// from that side) or the core (a solid ball). Holes are (unit direction, cosine of their angular
 /// radius).
 pub struct Shell {
-    pub name: String,
     pub radius_m: f64,
     pub thickness_m: f64,
     pub material: u8,
@@ -203,7 +201,6 @@ pub struct Console {
 
 /// `CityWorld` is the whole level.
 pub struct CityWorld {
-    pub name: String,
     pub street_radius_m: f64,
     pub street_material: u8,
     pub gravity_m_per_s2: f64,
@@ -352,7 +349,6 @@ impl CityWorld {
             .shells
             .iter()
             .map(|s| Shell {
-                name: s.name.clone(),
                 radius_m: s.radius_m,
                 thickness_m: s.thickness_m,
                 material: s.material,
@@ -376,7 +372,6 @@ impl CityWorld {
             })
             .collect();
         Ok(CityWorld {
-            name: map.name,
             street_radius_m: map.ground.sphere.radius_m,
             street_material: map.ground.material,
             gravity_m_per_s2: map.gravity_m_per_s2,
@@ -805,7 +800,7 @@ mod tests {
         let (a, b, c) = (shot.points[0], shot.points[1], shot.points[2]);
         let normal: DVec3 = b.normalize();
         let (incoming, outgoing) = ((b - a).normalize(), (c - b).normalize());
-        assert!((incoming.dot(normal) - outgoing.dot(normal) * -1.0).abs() < 1e-6);
+        assert!((incoming.dot(normal) + outgoing.dot(normal)).abs() < 1e-6);
     }
 
     #[test]
