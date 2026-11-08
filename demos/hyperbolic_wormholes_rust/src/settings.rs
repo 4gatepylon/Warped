@@ -50,18 +50,24 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 18] = [
     "wormholes.throw_up_rad",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 10] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
     "view.wormhole_tint_frac",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
+    "view.head_bob.rifle_walk_sway_m",
+    "view.head_bob.rifle_sprint_sway_m",
     "hit_effects.red_frac",
     "hit_effects.shake_px",
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 1] = ["keys.switch_view"];
+const ADDED_PLAYER_KEYS: [&str; 3] = [
+    "keys.switch_view",
+    "view.head_bob.rifle_walk_sway_m",
+    "view.head_bob.rifle_sprint_sway_m",
+];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -91,8 +97,9 @@ pub struct SprintEnergySettings {
     pub refill_walking_s: f64,
 }
 
-/// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, and how long
-/// the bob takes to start or stop.
+/// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, how long the
+/// bob takes to start or stop, and how far the rifle in hand sways left and right with the steps
+/// while walking and while sprinting.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct HeadBobSettings {
@@ -101,6 +108,8 @@ pub struct HeadBobSettings {
     pub walk_steps_per_s: f64,
     pub sprint_steps_per_s: f64,
     pub fade_s: f64,
+    pub rifle_walk_sway_m: f64,
+    pub rifle_sprint_sway_m: f64,
 }
 
 /// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes

@@ -53,6 +53,8 @@ view:
     walk_steps_per_s: 2.0  # Steps a second while walking.
     sprint_steps_per_s: 2.8  # Steps a second while sprinting.
     fade_s: 0.1667  # Seconds the bob takes to start or stop.
+    rifle_walk_sway_m: 0.02  # How far the rifle in hand sways left and right with the steps while walking (0 for none).
+    rifle_sprint_sway_m: 0.04  # How far the rifle in hand sways left and right with the steps while sprinting (0 for none).
 
 hit_effects:  # How a hit looks to you (how much it slows you is the server's).
   effect_s: 0.6  # Seconds the red, shake and blur take to fade.

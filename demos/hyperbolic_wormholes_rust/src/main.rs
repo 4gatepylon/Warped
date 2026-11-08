@@ -1822,6 +1822,7 @@ struct Session {
     shot_offset: shot_noise::ShotOffset,
     beam_speckle_frac: f64,
     gun_phase_rad: f64,
+    step_frac: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
     hit_effect_frac: f64,
@@ -2185,6 +2186,7 @@ impl Session {
             shot_offset: shot_noise::ShotOffset::NONE,
             beam_speckle_frac: 0.0,
             gun_phase_rad: 0.0,
+            step_frac: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
@@ -2926,9 +2928,10 @@ impl Session {
 
     /// `update_gun` notes whether this player runs (sprints while moving), walks upright (moves
     /// without crouching on a voxel map) or jumps (is in the air on a voxel map, not flying),
-    /// dropping a shot in flight if any, and moves the gun: its
-    /// step phase while walking or running on the ground, and its pose toward jogging while
-    /// running and back to aiming otherwise.
+    /// dropping a shot in flight if any, and moves the gun: its step phase while walking or
+    /// running on the ground (on a voxel map the head bob's, so the gun steps with the eye), how
+    /// far into stepping it is (`step_frac`: easing in and out over the head bob's `fade_s`), and
+    /// its pose toward jogging while running and back to aiming otherwise.
     ///
     /// Example: `self.update_gun(&input, dt_s);`
     fn update_gun(&mut self, input: &Input, dt_s: f64) {
@@ -2949,10 +2952,22 @@ impl Session {
         if !self.can_shoot() {
             self.shot_time_s = 0.0;
         }
-        if is_moving && is_on_ground {
-            let hz: f64 = if is_running { GUN_JOG_HZ } else { GUN_WALK_HZ };
-            self.gun_phase_rad =
-                (self.gun_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
+        match &self.voxel {
+            Some(voxel) => {
+                (self.gun_phase_rad, self.step_frac) =
+                    (voxel.player.bob_phase_rad, voxel.player.bob_frac);
+            }
+            None => {
+                let is_stepping: bool = is_moving && is_on_ground;
+                if is_stepping {
+                    let hz: f64 = if is_running { GUN_JOG_HZ } else { GUN_WALK_HZ };
+                    self.gun_phase_rad = (self.gun_phase_rad + std::f64::consts::TAU * hz * dt_s)
+                        % std::f64::consts::TAU;
+                }
+                let fade_frac: f64 = dt_s / self.player_settings.view.head_bob.fade_s;
+                self.step_frac += (f64::from(u8::from(is_stepping)) - self.step_frac)
+                    .clamp(-fade_frac, fade_frac);
+            }
         }
         let target: f64 = f64::from(u8::from(is_running));
         self.run_pose_frac +=
@@ -3010,6 +3025,13 @@ impl Session {
                 self.recoil_frac,
                 team,
                 self.gun,
+                get_sway_m(
+                    self.gun,
+                    self.step_frac,
+                    self.run_pose_frac,
+                    self.gun_phase_rad,
+                    &self.player_settings.view.head_bob,
+                ),
             )
         })
     }
@@ -4027,17 +4049,19 @@ fn take_hit_weight(
 /// (eased), lowered, tipped down and rolled, bouncing and swinging with each stride; its tip has
 /// `team`'s colour. The laser (`gun`) is a thin dark wand with a short glowing tip; the rifle is a
 /// thick grey block with a long, thin glowing barrel. Recoil (`recoil_frac`, 1 just after a shot)
-/// pushes it back toward the eye and tips it up.
+/// pushes it back toward the eye and tips it up, and `sway_m` (`get_sway_m`) moves it sideways,
+/// right for more than 0.
 ///
-/// Example: `let wand = make_wand(0.0, 1.2, 0.0, 1, Gun::Laser);`
+/// Example: `let wand = make_wand(0.0, 1.2, 0.0, 1, Gun::Laser, 0.0);`
 fn make_wand(
     run_pose_frac: f64,
     phase_rad: f64,
     recoil_frac: f64,
     team: u32,
     gun: Gun,
+    sway_m: f32,
 ) -> render_metal::OverlayWand {
-    let jog: f32 = (run_pose_frac * run_pose_frac * (3.0 - 2.0 * run_pose_frac)) as f32;
+    let jog: f32 = ease_frac(run_pose_frac) as f32;
     let (step, swing) = (phase_rad.sin().abs() as f32, phase_rad.sin() as f32);
     let lerp = |aim: f32, run: f32| aim + (run - aim) * jog;
     let bob_m: f32 = lerp(WAND_WALK_BOB_M, WAND_JOG_BOB_M) * step;
@@ -4051,7 +4075,8 @@ fn make_wand(
         + aim_rotation * (Vec3::Z * (shaft_half_m[2] + 2.0 * tip_half_m[2]));
     let kick: f32 = recoil_frac as f32;
     let center: Vec3 = aim_center.lerp(Vec3::from(WAND_JOG_CENTER_M), jog) - Vec3::Y * bob_m
-        + Vec3::Z * WAND_RECOIL_M * kick;
+        + Vec3::Z * WAND_RECOIL_M * kick
+        + Vec3::X * sway_m;
     let rotation: Mat3 = Mat3::from_euler(
         EulerRot::YXZ,
         lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD),
@@ -4074,6 +4099,36 @@ fn make_wand(
             WAND_BLUE_TIP_COLOR
         },
     }
+}
+
+/// `ease_frac` eases a fraction from 0 to 1 (smoothstep): slow at both ends.
+///
+/// Example: `let jog: f64 = ease_frac(0.5);`
+fn ease_frac(frac: f64) -> f64 {
+    frac * frac * (3.0 - 2.0 * frac)
+}
+
+/// `get_sway_m` gives how far the gun in hand sways sideways now (right for more than 0): the
+/// rifle (`gun`) sways left on one step and right on the next (`phase_rad`, the step phase: a
+/// step each half turn), by `head_bob`'s walking sway, growing to its sprinting sway as the run
+/// pose (`run_pose_frac`, eased as `make_wand` eases it) goes to 1, and faded in and out by
+/// `step_frac` (0 standing still, 1 stepping). The sniper doesn't sway.
+///
+/// Example: `let sway_m = get_sway_m(Gun::Rifle, 1.0, 0.0, 0.5, &settings.view.head_bob);`
+fn get_sway_m(
+    gun: Gun,
+    step_frac: f64,
+    run_pose_frac: f64,
+    phase_rad: f64,
+    head_bob: &settings::HeadBobSettings,
+) -> f32 {
+    if gun != Gun::Rifle {
+        return 0.0;
+    }
+    let jog: f64 = ease_frac(run_pose_frac);
+    let size_m: f64 = head_bob.rifle_walk_sway_m
+        + (head_bob.rifle_sprint_sway_m - head_bob.rifle_walk_sway_m) * jog;
+    (step_frac * size_m * phase_rad.sin()) as f32
 }
 
 /// `ConnectionProblem` is why a window can't play on its server: nothing comes from it (no server
