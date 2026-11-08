@@ -11,6 +11,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
+  demo's `AGENTS.md` that any new asset gets added to that page. Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/credits-page`, 2026-11-07.
 - [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
