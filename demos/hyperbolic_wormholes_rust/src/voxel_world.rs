@@ -2300,7 +2300,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Where a player starts | on a structure (the blue landing pad), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
+    //! | Where a player starts | on the ground at the blue spawn, beside the blue kazemat, and at a viewpoint | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Laser at a window (the red habitat module's) | shot from inside touching the pane, close (the muzzle past the pane), across the room, slantwise (each leaves); from outside (comes in to the floor) | `a_laser_passes_through_a_window` |
     //! | What a window's pane stops | lasers (no), players (yes: its middle is solid) | `a_laser_passes_through_a_window` |
@@ -2334,10 +2334,10 @@ mod tests {
     use crate::settings::MAX_CURVATURE_PER_MAP_CURVATURE;
     use crate::thrown_wormholes::GREEN_COLOR;
 
-    const LANDER_DECK_M: f64 = 1.0;
     const STAND_TOLERANCE_M: f64 = 0.06;
-    const MAX_PLINTH_M: f64 = 1.5;
-    const PYLON_DISTANCE_M: f64 = 34.0;
+    const PYLON_DISTANCE_M: f64 = 43.7;
+    const PYLON_AIM_M: [f64; 2] = [-14.0, 40.1];
+    const PYLON_AIM_PITCH_RAD: f64 = -0.007;
     const DISTANCE_TOLERANCE_M: f64 = 0.5;
     const BLOCK_U_M: f64 = -80.0;
     const BLOCK_DEPTH_M: f64 = 6.0;
@@ -2594,11 +2594,11 @@ mod tests {
     fn players_stand_where_the_level_puts_them() {
         let world: VoxelWorld = load_lunar_surface();
         let eye_m: f64 = world.player.eye_height_m;
-        let on_lander: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
-        let deck_m: f64 = get_eye_above_ground_m(&world, &on_lander) - eye_m;
+        let at_spawn: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
+        let feet_m: f64 = get_eye_above_ground_m(&world, &at_spawn) - eye_m;
         assert!(
-            deck_m > LANDER_DECK_M - STAND_TOLERANCE_M && deck_m < LANDER_DECK_M + MAX_PLINTH_M,
-            "the spawn stands {deck_m} m above the ground"
+            feet_m.abs() < STAND_TOLERANCE_M,
+            "the spawn stands {feet_m} m above the ground"
         );
         let on_ground: VoxelPlayer =
             VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
@@ -2608,12 +2608,17 @@ mod tests {
     #[test]
     fn the_laser_into_the_wormhole_hits_the_red_pylon() {
         let world: VoxelWorld = load_lunar_surface();
-        let player: VoxelPlayer =
-            VoxelPlayer::AtView(&world, [-22.0, 40.5], [-14.0, 40.0], None, 0.0);
+        let player: VoxelPlayer = VoxelPlayer::AtView(
+            &world,
+            [-22.0, 40.5],
+            PYLON_AIM_M,
+            None,
+            PYLON_AIM_PITCH_RAD,
+        );
         let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
         assert_eq!(shot.through, vec!["wormhole mouth A".to_string()]);
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
-        assert_eq!(world.structures[hit].name, "red pylon");
+        assert_eq!(world.structures[hit].name, "red pylon consoles");
         assert!((shot.length_m - PYLON_DISTANCE_M).abs() < DISTANCE_TOLERANCE_M);
     }
 
@@ -3037,12 +3042,12 @@ mod tests {
             .iter()
             .enumerate()
             .filter_map(|(k, st)| match st.name.as_str() {
-                "red habitat module" | "derelict habitat module" => Some((k, MODULE_OUT_M)),
+                "red habitat module" => Some((k, MODULE_OUT_M)),
                 "red walkway" | "crater walkway" => Some((k, WALKWAY_OUT_M)),
                 _ => None,
             })
             .collect();
-        assert_eq!(ways.len(), 5, "three habitat modules and two walkways");
+        assert_eq!(ways.len(), 3, "one habitat module and two walkways");
         for (k, out_m) in ways {
             let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
             for turn_rad in [0.0, std::f64::consts::PI] {

@@ -839,7 +839,7 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
     };
     vec![
         view("blue_spawn", [-107.0, 0.0], [0.0, 0.0], None, 0.0),
-        view("red_spawn", [120.0, 0.0], [0.0, 0.0], None, 0.0),
+        view("red_spawn", [112.0, 0.0], [0.0, 0.0], None, 0.0),
         view("overview", [0.0, 0.0], [0.0, -10.0], Some(46.0), -1.55),
         view("middle", [-27.0, 0.0], [40.0, 0.0], None, 0.1),
         view("black_hole", [-12.0, 4.0], [0.0, 0.0], Some(19.0), -0.42),
@@ -851,6 +851,11 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         view("overlook", [-85.0, 0.0], [0.0, 0.0], Some(28.0), -0.7),
         view("habitat_row", [-46.0, -36.0], [0.0, -42.0], None, 0.0),
         view("crater_wall", [-30.0, -30.0], [-60.0, -90.0], None, 0.1),
+        view("red_hangar", [104.0, 7.0], [121.0, 0.0], None, 0.05),
+        view("blue_kazemat", [-104.0, 7.0], [-114.0, 0.0], None, 0.0),
+        view("field_bunker", [-18.0, -30.0], [-30.0, -40.0], None, 0.0),
+        view("hesco_barrier", [46.0, -8.0], [56.0, -15.0], None, 0.0),
+        view("beacon", [87.0, 2.0], [94.0, 6.0], None, 0.2),
         VoxelView {
             is_laser_on: true,
             ..view(
