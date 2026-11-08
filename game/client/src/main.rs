@@ -19,9 +19,7 @@
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
 mod avatar_animation;
-mod avatar_model;
 mod bench;
-mod black_hole_growth;
 mod bot;
 mod cli;
 mod credits;
@@ -48,13 +46,12 @@ mod third_person;
 mod title;
 mod title_choice;
 mod viewmodel;
-mod voxel_clearance;
 mod voxel_textures;
-mod voxel_world;
 
 use warped_core::{
-    app_bundle, fps_demo_assets, geometry, map, mesh, player, settings, shapes, shot_noise,
-    terrain, thrown_wormholes, zone_walls,
+    app_bundle, avatar_model, black_hole_growth, fps_demo_assets, geometry, map, mesh, player,
+    settings, shapes, shot_noise, terrain, thrown_wormholes, voxel_clearance, voxel_world,
+    zone_walls,
 };
 
 use std::error::Error;

@@ -25,17 +25,17 @@ use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
-use crate::map::{Map, PlayerSettings, get_console_team, to_direction, to_frame, to_point};
+use crate::map::{
+    MAX_CONSOLE_COUNT, Map, PlayerSettings, get_console_team, to_direction, to_frame, to_point,
+};
+use crate::material_surfaces::get_material_surface;
 use crate::mesh::MeshModel;
-use crate::net::MAX_CONSOLE_COUNT;
 use crate::player::Input;
-use crate::player_settings::PerPlayerSettings;
-use crate::settings::{HeadBobSettings, ServerSettings};
+use crate::settings::{HeadBobSettings, ServerSettings, ViewSettings};
 use crate::shapes::{Shape, ShapeKind, find_hit_mu};
 use crate::terrain::{Terrain, get_fermi_coordinates};
 use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
-use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
@@ -450,21 +450,21 @@ fn normalize_minkowski(a: DVec4) -> DVec4 {
 /// `geodesic_point` gives cosh(s) x + sinh(s) v.
 ///
 /// Example: `let y = geodesic_point(x, v, 0.1);`
-pub(crate) fn geodesic_point(x: DVec4, v: DVec4, s: f64) -> DVec4 {
+pub fn geodesic_point(x: DVec4, v: DVec4, s: f64) -> DVec4 {
     s.cosh() * x + s.sinh() * v
 }
 
 /// `geodesic_tangent` gives sinh(s) x + cosh(s) v.
 ///
 /// Example: `let w = geodesic_tangent(x, v, 0.1);`
-pub(crate) fn geodesic_tangent(x: DVec4, v: DVec4, s: f64) -> DVec4 {
+pub fn geodesic_tangent(x: DVec4, v: DVec4, s: f64) -> DVec4 {
     s.sinh() * x + s.cosh() * v
 }
 
 /// `map_klein` maps Klein coordinates (|k| < 1) to the hyperboloid.
 ///
 /// Example: `let p = map_klein(DVec3::new(0.1, 0.0, 0.0));`
-pub(crate) fn map_klein(k: DVec3) -> DVec4 {
+pub fn map_klein(k: DVec3) -> DVec4 {
     let f: f64 = 1.0 / (1.0 - k.length_squared()).sqrt();
     (k * f).extend(f)
 }
@@ -515,7 +515,7 @@ fn cross_ground(a: DVec4, b: DVec4) -> DVec4 {
 /// to ground point `g` and local +z toward `toward`.
 ///
 /// Example: `let frame = make_ground_frame(g, -heading);`
-pub(crate) fn make_ground_frame(g: DVec4, toward: DVec4) -> DMat4 {
+pub fn make_ground_frame(g: DVec4, toward: DVec4) -> DMat4 {
     let g: DVec4 = normalize_minkowski(g);
     let t: DVec4 = normalize_minkowski(toward + minkowski_dot(toward, g) * g);
     let r: DVec4 = normalize_minkowski(cross_ground(t, g));
@@ -835,13 +835,13 @@ impl VoxelWorld {
                     to_direction(&m.core_direction),
                 )
             }),
-            milky_way_brightness_frac: PerPlayerSettings::Builtin().view.milky_way_brightness_frac,
+            milky_way_brightness_frac: ViewSettings::Builtin().milky_way_brightness_frac,
             player: map.player,
             gravity_m_per_s2: map.gravity_m_per_s2,
             map_player: map.player,
             map_gravity_m_per_s2: map.gravity_m_per_s2,
             settings: ServerSettings::Builtin(),
-            head_bob: PerPlayerSettings::Builtin().view.head_bob,
+            head_bob: ViewSettings::Builtin().head_bob,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
             clearance: Arc::new(ClearanceGrids::default()),
         };
@@ -2840,7 +2840,7 @@ mod tests {
     fn players_spawn_apart() {
         let world: VoxelWorld = load_lunar_surface();
         let mut eyes: Vec<DVec4> = Vec::new();
-        for id in (1..=crate::net::MAX_PLAYER_COUNT as u32).chain([FAR_ID_NEAR_ONE]) {
+        for id in (1..=crate::map::MAX_PLAYER_COUNT as u32).chain([FAR_ID_NEAR_ONE]) {
             let team: u32 = id % SPAWN_TEAM_COUNT;
             let player: VoxelPlayer = VoxelPlayer::NearSpawn(&world, team, id, &eyes);
             let nearby: Vec<usize> =

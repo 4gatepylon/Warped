@@ -23,10 +23,10 @@ use serde_json::Value;
 
 #[cfg(target_os = "macos")]
 use crate::key_bindings::KeyBindings;
-use crate::settings::{HitEffectSettings, MinimapSettings, ViewSettings, check_numbers, read_text};
+use crate::settings::{
+    BUILTIN_PLAYER_YAML, HitEffectSettings, MinimapSettings, ViewSettings, check_numbers, read_text,
+};
 
-#[cfg(target_os = "macos")]
-const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 #[cfg(target_os = "macos")]
 const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "view.motion_blur_s",

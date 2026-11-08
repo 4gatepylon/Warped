@@ -2,16 +2,17 @@
 //! sprint energy, both guns, consoles, respawning, how a hit slows, the flashlight, thrown wormholes,
 //! how curved space is, the black hole), which the game server sends to every player who joins, so
 //! they can be tuned without rebuilding. It also holds the sections of each player's own
-//! `player_settings.yaml`, which the client's `player_settings.rs` reads.
+//! `player_settings.yaml`, which the client's `player_settings.rs` reads, and both files as built in.
 //!
 //! Interface: `ServerSettings` (`Builtin`, `Load`, `FromYaml`, `FromJson`, `to_json`), the
-//! sections of both files, `BUILTIN_SERVER_YAML`, `check_numbers`, `read_text`.
+//! sections of both files, `ViewSettings::Builtin`, `BUILTIN_SERVER_YAML`, `BUILTIN_PLAYER_YAML`,
+//! `check_numbers`, `read_text`.
 //!
 //! Example: `let settings = ServerSettings::Load(Path::new("fast.yaml"))?;`
 //!
 //! Must know:
 //! - Every key is required and unknown keys fail, so a typo can't silently keep a default.
-//! - The built-in settings are the file itself, compiled in.
+//! - The built-in settings are the two files themselves, compiled in.
 
 use std::error::Error;
 use std::path::Path;
@@ -20,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
+pub const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
 const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
@@ -273,6 +275,19 @@ pub struct ViewSettings {
     pub wormhole_tint_frac: f64,
     pub milky_way_brightness_frac: f64,
     pub head_bob: HeadBobSettings,
+}
+
+impl ViewSettings {
+    /// `Builtin` gives the `view` section of the built-in `player_settings.yaml`, for a world
+    /// that no player's own settings have reached yet (a server's, a benchmark's).
+    ///
+    /// Example: `let head_bob = ViewSettings::Builtin().head_bob;`
+    #[allow(non_snake_case)]
+    pub fn Builtin() -> ViewSettings {
+        let file: serde_yaml::Value = serde_yaml::from_str(BUILTIN_PLAYER_YAML)
+            .expect("the built-in player settings are YAML");
+        serde_yaml::from_value(file["view"].clone()).expect("the built-in view settings are valid")
+    }
 }
 
 /// `MinimapCorner` is the corner of the window the minimap sits in.

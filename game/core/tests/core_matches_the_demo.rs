@@ -1,7 +1,7 @@
 //! `core_matches_the_demo.rs` checks that the modules step A4 moved into `warped-core` give exactly
 //! the demo's results (through `legacy-oracle`) on the same inputs: Lunar Surface's map, its
 //! terrain and models, the hyperbolic geometry under them, the built-in server settings, shot noise, landed thrown
-//! wormholes and the zone walls. Values without a shared type are compared through `Debug`, which
+//! wormholes, the zone walls, and walking and lasers in the voxel world. Values without a shared type are compared through `Debug`, which
 //! prints every digit of a float.
 //!
 //! Partitions and the tests that cover each part:
@@ -16,6 +16,9 @@
 //! | | `shot_noise` | `shot_noise_matches_the_demo` |
 //! | | `thrown_wormholes` | `landed_mouths_match_the_demo` |
 //! | | `zone_walls` | `zone_walls_match_the_demo` |
+//! | | `voxel_world` | `walks_and_lasers_match_the_demo` |
+//! | Team spawned on | blue, red | `walks_and_lasers_match_the_demo` |
+//! | Movement | walking, sprinting while turning | `walks_and_lasers_match_the_demo` |
 //! | Rifle heat | cold, half, hot | `shot_noise_matches_the_demo` |
 //! | Curvature | the map's own | `lunar_surface_loads_as_in_the_demo` |
 //! | | halved | every test that loads a map |
@@ -37,6 +40,10 @@ const SHOT_NOISE_SEED: u64 = 7;
 const SHOT_COUNT: usize = 16;
 const HEAT_FRACS: [f64; 3] = [0.0, 0.5, 1.0];
 const MOUTH_HOVER_M: f64 = 0.8;
+const TEAM_COUNT: u32 = 2;
+const STEP_COUNT: usize = 180;
+const DT_S: f64 = 1.0 / 60.0;
+const SPRINT_FROM_STEP: usize = 90;
 
 /// `load_maps` loads Lunar Surface in the game and in the demo, both curved by
 /// `curvature_per_map_curvature`.
@@ -239,4 +246,44 @@ fn zone_walls_match_the_demo() {
         format!("{:?}", game_walls.to_gpu(r_m)),
         format!("{:?}", demo_walls.to_gpu(r_m))
     );
+}
+
+#[test]
+fn walks_and_lasers_match_the_demo() {
+    let (game_map, demo_map) = load_maps(CURVATURE_PER_MAP_CURVATURE);
+    let game_world = core::voxel_world::VoxelWorld::FromMap(&game_map).expect("a voxel world");
+    let demo_world = demo::voxel_world::VoxelWorld::FromMap(&demo_map).expect("a voxel world");
+    for team in 0..TEAM_COUNT {
+        let mut game_player =
+            core::voxel_world::VoxelPlayer::NearSpawn(&game_world, team, team, &[]);
+        let mut demo_player =
+            demo::voxel_world::VoxelPlayer::NearSpawn(&demo_world, team, team, &[]);
+        for i in 0..STEP_COUNT {
+            let is_sprinting: bool = i >= SPRINT_FROM_STEP;
+            let game_input = core::player::Input {
+                forward: true,
+                left: is_sprinting,
+                sprint: is_sprinting,
+                ..Default::default()
+            };
+            let demo_input = demo::physics::Input {
+                forward: true,
+                left: is_sprinting,
+                sprint: is_sprinting,
+                ..Default::default()
+            };
+            let game_report = game_player.step(&game_world, &game_input, DT_S, 0);
+            let demo_report = demo_player.step(&demo_world, &demo_input, DT_S, 0);
+            assert_eq!(game_report.messages, demo_report.messages);
+            assert_eq!(game_report.forward_m_per_s, demo_report.forward_m_per_s);
+            assert_eq!(game_player.body, demo_player.body);
+            assert_eq!(game_player.h_m, demo_player.h_m);
+            let game_shot = game_world.trace_laser(game_player.body);
+            let demo_shot = demo_world.trace_laser(demo_player.body);
+            assert_eq!(
+                (game_shot.spot, game_shot.is_hit, game_shot.length_m),
+                (demo_shot.spot, demo_shot.is_hit, demo_shot.length_m)
+            );
+        }
+    }
 }

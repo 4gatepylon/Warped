@@ -56,7 +56,7 @@ help:
 	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run a game server, without a window; prints how to join"
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of core/server_settings.yaml)"
 	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
-	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of client/player_settings.yaml)"
+	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of core/player_settings.yaml)"
 	@echo "  (serve-game and join-game take GAME_PASSWORD_FILE=password.txt: only players who know it join)"
 	@echo "  make build-server-bundle                         Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"
 	@echo "  make package-mac-app ONLINE_GAMES=games.txt      Build Warped.app and zip it ($(APP_ZIP)); ONLINE_GAMES is optional"

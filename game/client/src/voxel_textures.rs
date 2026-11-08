@@ -4,7 +4,7 @@
 //! tiling and metalness each map material uses. A missing set fails with the command that restores
 //! it.
 //!
-//! Interface: `get_material_surface`, `check_surface_textures`, `SurfaceTextures::Load`.
+//! Interface: `check_surface_textures`, `SurfaceTextures::Load`.
 //!
 //! Example: `let textures = SurfaceTextures::Load(&device)?;`
 
@@ -41,34 +41,6 @@ const SURFACE_SETS: [&str; 8] = [
 const SIZE_PX: u32 = 2048;
 const BYTES_PER_RGBA_PIXEL: usize = 4;
 const MEAN_LEVEL: usize = 7;
-
-/// `MATERIAL_SURFACES` is each textured material's name, layer, blocks per repeat and metalness.
-const MATERIAL_SURFACES: [(&str, usize, f32, f32); 13] = [
-    ("regolith", 0, 2.6, 0.0),
-    ("dark regolith", 7, 2.6, 0.0),
-    ("basalt", 1, 2.0, 0.0),
-    ("boulder", 1, 2.0, 0.0),
-    ("hull", 2, 2.0, 0.25),
-    ("metal", 3, 2.0, 1.0),
-    ("solar panel", 2, 1.0, 0.5),
-    ("gold foil", 2, 1.0, 1.0),
-    ("red paint", 4, 2.0, 0.3),
-    ("blue paint", 4, 2.0, 0.3),
-    ("hazard paint", 4, 2.0, 0.3),
-    ("landing pad", 5, 4.0, 0.0),
-    ("floor", 6, 4.0, 0.0),
-];
-
-/// `get_material_surface` gives the shader's surface of a material: its layer (-1 for none),
-/// blocks per repeat and metalness.
-///
-/// Example: `let surface = get_material_surface("hull");`
-pub fn get_material_surface(name: &str) -> [f32; 4] {
-    MATERIAL_SURFACES
-        .iter()
-        .find(|s| s.0 == name)
-        .map_or([-1.0, 1.0, 0.0, 0.0], |s| [s.1 as f32, s.2, s.3, 0.0])
-}
 
 /// `SurfaceTextures` is the albedo (sRGB), normal (RG) and AO-roughness-metalness arrays, and each
 /// layer's mean linear albedo with w = 1 (all zero without the downloaded sets).

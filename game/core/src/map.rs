@@ -30,6 +30,8 @@ use crate::terrain::get_fermi_coordinates;
 
 /// `TEAM_NAMES` is the teams' names, by team index: the network sends the index.
 pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
+pub const MAX_PLAYER_COUNT: usize = 8;
+pub const MAX_CONSOLE_COUNT: usize = 32;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;

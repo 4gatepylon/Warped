@@ -52,9 +52,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub const DEFAULT_PORT: u16 = 47_800;
 pub const PROTOCOL_VERSION: u16 = 1;
-pub const MAX_PLAYER_COUNT: usize = 8;
-pub const MAX_CONSOLE_COUNT: usize = 32;
-pub use crate::map::TEAM_NAMES;
+pub use crate::map::{MAX_CONSOLE_COUNT, MAX_PLAYER_COUNT, TEAM_NAMES};
 const NO_CONSOLE: u8 = u8::MAX;
 const RIFLE_BIT: u8 = 1;
 const TEAM_BIT: u8 = 2;
