@@ -553,6 +553,7 @@ mod tests {
             is_rifle: false,
             team: 0,
             disabling_console: None,
+            disabling_frac: 0.0,
         };
         let view: SharedView = pack_shared_view(&world, aimed, true, &[other], (64, 40), 0.0);
         assert_eq!(view.hit_player_id, Some(2));
@@ -578,6 +579,7 @@ mod tests {
             is_rifle: false,
             team: 0,
             disabling_console: None,
+            disabling_frac: 0.0,
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
         let view: SharedVoxelView =
@@ -604,6 +606,7 @@ mod tests {
             is_rifle: false,
             team: 0,
             disabling_console: None,
+            disabling_frac: 0.0,
         };
         let bodies: Vec<(DMat4, usize)> = vec![(
             VoxelPlayer::FromEye(&world, firing.frame).get_feet_frame(&world),

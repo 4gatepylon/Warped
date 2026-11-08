@@ -44,6 +44,12 @@ constant int STRETCH_TAP_COUNT = 12;
 constant float STRETCH_ZOOM_GAIN = 1.5;
 constant float STRETCH_SMEAR_FRAC = 0.35;
 constant float STRETCH_FRINGE_FRAC = 0.03;
+constant float3 BLUESHIFT_CHANNEL_NM = float3(610.0, 550.0, 465.0);
+constant float BLUESHIFT_INFRARED_NM = 700.0;
+constant float BLUESHIFT_INFRARED_PER_RED = 0.25;
+constant float BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED = 0.15;
+constant float BLUESHIFT_BEAMING_POWER = 1.5;
+constant float3 BLUESHIFT_GLOW_COLOR = float3(0.0, 0.3, 0.36);
 constant int MAX_MINIMAP_MARK_COUNT = 16;
 constant int MAX_MINIMAP_LINE_COUNT = 96;
 constant float MINIMAP_OPACITY = 0.88;
@@ -59,6 +65,16 @@ constant float MINIMAP_YOU_BASE_FRAC = 0.6;
 constant float MINIMAP_YOU_SPREAD = 0.5;
 constant float3 MINIMAP_YOU_COLOR = float3(1.0, 1.0, 1.0);
 constant float MINIMAP_TINY = 1e-6;
+constant float RECT_SHADOW_OPACITY = 0.55;
+constant float RECT_SHADOW_DROP_PER_BLUR = 0.45;
+constant float RECT_GLOW_OPACITY = 0.7;
+constant float RECT_GLOW_REACH_PER_RADIUS = 4.0;
+constant float RECT_GLOSS_END_FRAC = 0.5;
+constant float RECT_GLOSS_SOFT_FRAC = 0.08;
+constant float RECT_GLOSS_TOP_OPACITY = 0.6;
+constant float RECT_GLOSS_MIDDLE_OPACITY = 0.15;
+constant float RECT_GLOSS_INSET_PER_HEIGHT = 0.12;
+constant float RECT_EDGE_SOFT_PX = 0.5;
 
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
@@ -1998,8 +2014,9 @@ kernel void build_mouth_fields(device float4 *rows [[buffer(0)]], constant Unifo
 
 /**
  * @brief `OverlayParams` is how `apply_overlay` draws: how much to darken, mask pixels to screen pixels, the mask's top
- * left, how many rectangles there are, whether there is a mask and a wand, the camera's tan(half vertical fov), and how
- * much of the previous frame's scene to blend in (motion blur).
+ * left, how many rectangles there are, whether there is a mask and a wand, the camera's tan(half vertical fov), how
+ * much of the previous frame's scene to blend in (motion blur), and how far into the blueshift after a wormhole the
+ * scene is (`blueshift_scene`; 0 for none).
  */
 struct OverlayParams {
     float dim_frac;
@@ -2017,7 +2034,53 @@ struct OverlayParams {
     int2 picture_min_mask_px;
     int2 picture_max_excl_mask_px;
     float stretch_frac;
+    float blueshift_frac;
 };
+
+/**
+ * @brief `sample_spectrum` gives a colour's light at wavelength `nm`, reading its red, green and blue as samples of a
+ * spectrum at `BLUESHIFT_CHANNEL_NM` joined by straight lines: blue's below blue, and past red falling to
+ * `BLUESHIFT_INFRARED_PER_RED` of red's at `BLUESHIFT_INFRARED_NM` and beyond (the infrared a blueshift brings in).
+ * @par Example
+ * @code
+ * float red_seen = sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.r * D);
+ * @endcode
+ */
+static float sample_spectrum(float3 rgb, float nm) {
+    float3 at_nm = BLUESHIFT_CHANNEL_NM;
+    if (nm <= at_nm.b) return rgb.b;
+    if (nm <= at_nm.g) return mix(rgb.b, rgb.g, (nm - at_nm.b) / (at_nm.g - at_nm.b));
+    if (nm <= at_nm.r) return mix(rgb.g, rgb.r, (nm - at_nm.g) / (at_nm.r - at_nm.g));
+    return rgb.r * mix(1.0, BLUESHIFT_INFRARED_PER_RED, saturate((nm - at_nm.r) / (BLUESHIFT_INFRARED_NM - at_nm.r)));
+}
+
+/**
+ * @brief `blueshift_scene` gives a pixel's colour as seen moving straight ahead at `blueshift_frac` of
+ * `BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED` (0 for none): the relativistic Doppler factor D = sqrt(1 - β²) / (1 - β cos θ),
+ * with θ the angle between the pixel's ray and straight ahead, makes each channel show the light the scene sends at
+ * D times its wavelength (`sample_spectrum`: red fades, green takes red's light and blue green's, so greys turn cyan),
+ * D^`BLUESHIFT_BEAMING_POWER` times as bright (relativistic beaming), plus `BLUESHIFT_GLOW_COLOR` times that gain
+ * above 1, so black sky turns faintly teal; D is largest at the middle of the screen.
+ * @par Example
+ * @code
+ * float3 seen = blueshift_scene(scene, id, float2(out.get_width(), out.get_height()), p);
+ * @endcode
+ * @par Must know
+ * - Limitations:
+ *   - `blueshift_scene` takes the motion to be straight ahead, wherever the player really goes through the mouth.
+ *   - Real beaming brightens by D³ or more; `BLUESHIFT_BEAMING_POWER` keeps it gentler so bright scenes don't wash out.
+ */
+static float3 blueshift_scene(float3 rgb, uint2 id, float2 size, constant OverlayParams &p) {
+    if (p.blueshift_frac <= 0.0) return rgb;
+    float2 ndc = 2.0 * (float2(id) + 0.5) / size - 1.0;
+    float3 ray = normalize(float3(ndc.x * p.tan_half_fov * size.x / size.y, ndc.y * p.tan_half_fov, -1.0));
+    float beta = BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED * p.blueshift_frac;
+    float D = sqrt(1.0 - beta * beta) / (1.0 + beta * ray.z);
+    float3 shifted = float3(sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.r * D), sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.g * D),
+                            sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.b * D));
+    float beaming = pow(D, BLUESHIFT_BEAMING_POWER);
+    return shifted * beaming + BLUESHIFT_GLOW_COLOR * (beaming - 1.0);
+}
 
 /**
  * @brief `read_hit_scene` reads a frame's pixel as a player who was just hit sees it (`hit_frac` of the effect left, 1
@@ -2215,21 +2278,175 @@ static float3 draw_minimap(float3 color, uint2 id, constant Minimap &m, texture2
     return mix(color, ground, MINIMAP_OPACITY);
 }
 
-/** @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), and its colour and opacity. */
-struct OverlayRect {
-    float2 min_frac;
-    float2 max_frac;
+/**
+ * @brief `RectStyle` is render_metal.rs's `RectStyle`, how an `OverlayRect` looks beyond its colour (lengths as fractions
+ * of the output's height; all zero for a flat rectangle): its corners' radius, an inner outline's width, a gloss
+ * highlight's strength over its top half, a soft drop shadow's blur, a slant (how far its sides lean right per unit of
+ * height), a glow's radius in its own colour, how much lighter its top and darker its bottom are, a zero, and the
+ * outline's colour.
+ */
+struct RectStyle {
+    float corner_frac;
+    float outline_frac;
+    float gloss_frac;
+    float shadow_frac;
+    float slant_x_per_y;
+    float glow_frac;
+    float shade_frac;
+    float padding;
+    float4 outline_color;
+};
+
+/**
+ * @brief `RectPulse` is render_metal.rs's `RectPulse`, a band of light across an `OverlayRect` (a pulse running along a HUD
+ * bar): its middle's x and its half width as fractions of the screen's width (measured along the rect's slant, at its
+ * middle row), two zeros, and its colour with, in `.a`, its opacity at its middle (0 for none).
+ */
+struct RectPulse {
+    float center_x_frac;
+    float half_width_frac;
+    float2 padding;
     float4 color;
 };
 
 /**
+ * @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), its
+ * colour and opacity, its style and the pulse across it.
+ */
+struct OverlayRect {
+    float2 min_frac;
+    float2 max_frac;
+    float4 color;
+    RectStyle style;
+    RectPulse pulse;
+};
+
+/**
+ * @brief `get_rounded_box_distance` gives the signed distance from `p` to a box of half sizes `half_size` around the origin
+ * with corners rounded by `radius` (negative inside), the usual rounded-box distance.
+ * @par Example
+ * @code
+ * float d = get_rounded_box_distance(p - center, half_size, 4.0);
+ * @endcode
+ */
+static float get_rounded_box_distance(float2 p, float2 half_size, float radius) {
+    float2 q = abs(p) - half_size + radius;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+/**
+ * @brief `get_rect_distance_px` gives the signed distance in pixels from pixel centre `at_px` to `rect`'s shape on an
+ * output `size_px`: its box, slanted and with rounded corners, moved down by `drop_px` (for a shadow).
+ * @par Example
+ * @code
+ * float d_px = get_rect_distance_px(rect, at_px, size_px, 0.0);
+ * @endcode
+ */
+static float get_rect_distance_px(constant OverlayRect &rect, float2 at_px, float2 size_px, float drop_px) {
+    float2 min_px = rect.min_frac * size_px;
+    float2 max_px = rect.max_frac * size_px;
+    float2 half_size = (max_px - min_px) * 0.5;
+    float2 p = at_px - (min_px + half_size) - float2(0.0, drop_px);
+    p.x += rect.style.slant_x_per_y * p.y;
+    float radius = min(rect.style.corner_frac * size_px.y, min(half_size.x, half_size.y));
+    return get_rounded_box_distance(p, half_size, radius);
+}
+
+/**
+ * @brief `is_near_rect` tells whether pixel centre `at_px` lies within `reach_px` of `rect`'s box (widened by its slant),
+ * so the rect loops can skip far rectangles cheaply.
+ * @par Example
+ * @code
+ * if (!is_near_rect(rect, at_px, size_px, 1.0)) continue;
+ * @endcode
+ */
+static bool is_near_rect(constant OverlayRect &rect, float2 at_px, float2 size_px, float reach_px) {
+    float2 min_px = rect.min_frac * size_px;
+    float2 max_px = rect.max_frac * size_px;
+    float reach_x_px = reach_px + abs(rect.style.slant_x_per_y) * (max_px.y - min_px.y) * 0.5;
+    return at_px.x >= min_px.x - reach_x_px && at_px.x <= max_px.x + reach_x_px && at_px.y >= min_px.y - reach_px &&
+           at_px.y <= max_px.y + reach_px;
+}
+
+/**
+ * @brief `get_rect_halo` gives what `rect` casts around itself at pixel centre `at_px`, outside its shape: its drop
+ * shadow's opacity (`RECT_SHADOW_OPACITY` at most, `RECT_SHADOW_DROP_PER_BLUR` of the blur below it) in `.a` and its
+ * glow's light (its colour fading over `glow_frac` of the height) in `.rgb`.
+ * @par Example
+ * @code
+ * float4 halo = get_rect_halo(rects[i], at_px, size_px);
+ * @endcode
+ */
+static float4 get_rect_halo(constant OverlayRect &rect, float2 at_px, float2 size_px) {
+    float shadow_px = rect.style.shadow_frac * size_px.y;
+    float glow_px = rect.style.glow_frac * size_px.y;
+    float reach_px = max(shadow_px * (1.0 + RECT_SHADOW_DROP_PER_BLUR), glow_px * RECT_GLOW_REACH_PER_RADIUS);
+    if (reach_px <= 0.0 || !is_near_rect(rect, at_px, size_px, reach_px)) return float4(0.0);
+    float d_px = get_rect_distance_px(rect, at_px, size_px, 0.0);
+    float outside = smoothstep(-RECT_EDGE_SOFT_PX, RECT_EDGE_SOFT_PX, d_px);
+    float4 halo = float4(0.0);
+    if (shadow_px > 0.0) {
+        float shadow_d_px = get_rect_distance_px(rect, at_px, size_px, shadow_px * RECT_SHADOW_DROP_PER_BLUR);
+        halo.a = RECT_SHADOW_OPACITY * rect.color.a * (1.0 - smoothstep(-shadow_px, shadow_px, shadow_d_px)) * outside;
+    }
+    if (glow_px > 0.0) {
+        halo.rgb = rect.color.rgb * RECT_GLOW_OPACITY * rect.color.a * exp(-max(d_px, 0.0) / glow_px) * outside;
+    }
+    return halo;
+}
+
+/**
+ * @brief `get_rect_layer` gives `rect` at pixel centre `at_px` as premultiplied colour and opacity (zero outside it, soft
+ * over half a pixel at its edge): its colour shaded from top to bottom by `shade_frac`, a gloss highlight over its top
+ * half (inset from its edge by `RECT_GLOSS_INSET_PER_HEIGHT` of its height), its pulse (a Gaussian band of its colour
+ * across the rect, leaning with its slant), then its inner outline.
+ * @par Example
+ * @code
+ * float4 layer = get_rect_layer(rects[i], at_px, size_px);
+ * color.rgb = color.rgb * (1.0 - layer.a) + layer.rgb;
+ * @endcode
+ */
+static float4 get_rect_layer(constant OverlayRect &rect, float2 at_px, float2 size_px) {
+    if (!is_near_rect(rect, at_px, size_px, 1.0)) return float4(0.0);
+    float d_px = get_rect_distance_px(rect, at_px, size_px, 0.0);
+    float coverage = 1.0 - smoothstep(-RECT_EDGE_SOFT_PX, RECT_EDGE_SOFT_PX, d_px);
+    if (coverage <= 0.0) return float4(0.0);
+    RectStyle s = rect.style;
+    float height_px = (rect.max_frac.y - rect.min_frac.y) * size_px.y;
+    float t = clamp((at_px.y - rect.min_frac.y * size_px.y) / max(height_px, 1.0), 0.0, 1.0);
+    float3 rgb = rect.color.rgb * (1.0 + s.shade_frac * (1.0 - 2.0 * t));
+    float4 layer = float4(rgb * rect.color.a, rect.color.a);
+    if (s.gloss_frac > 0.0) {
+        float inset = smoothstep(0.0, RECT_GLOSS_INSET_PER_HEIGHT * height_px, -d_px - s.outline_frac * size_px.y);
+        float top = 1.0 - smoothstep(RECT_GLOSS_END_FRAC - RECT_GLOSS_SOFT_FRAC, RECT_GLOSS_END_FRAC, t);
+        float gloss_a = s.gloss_frac * inset * top * mix(RECT_GLOSS_TOP_OPACITY, RECT_GLOSS_MIDDLE_OPACITY, t / RECT_GLOSS_END_FRAC);
+        layer = float4(gloss_a, gloss_a, gloss_a, gloss_a) + layer * (1.0 - gloss_a);
+    }
+    if (rect.pulse.color.a > 0.0) {
+        float middle_y_px = (rect.min_frac.y + rect.max_frac.y) * 0.5 * size_px.y;
+        float along_px = at_px.x + s.slant_x_per_y * (at_px.y - middle_y_px) - rect.pulse.center_x_frac * size_px.x;
+        float u = along_px / max(rect.pulse.half_width_frac * size_px.x, 1.0);
+        float pulse_a = rect.pulse.color.a * exp(-u * u);
+        layer = float4(rect.pulse.color.rgb * pulse_a, pulse_a) + layer * (1.0 - pulse_a);
+    }
+    if (s.outline_frac > 0.0) {
+        float half_width_px = s.outline_frac * size_px.y * 0.5;
+        float stroke = clamp(half_width_px - abs(d_px + half_width_px) + RECT_EDGE_SOFT_PX, 0.0, 1.0);
+        float outline_a = stroke * s.outline_color.a;
+        layer = float4(s.outline_color.rgb * outline_a, outline_a) + layer * (1.0 - outline_a);
+    }
+    return layer * coverage;
+}
+
+/**
  * @brief `apply_overlay` copies a finished frame into `out`, blended with the previous frame's scene (`history_in`, by
- * `blur_frac`; the blend is kept in `history_out` for the next frame) and darkened by `dim_frac`, with a mask's text drawn over it at
+ * `blur_frac`; the blend is kept in `history_out` for the next frame), blueshifted (`blueshift_scene`) and darkened by `dim_frac`, with a mask's text drawn over it at
  * `scale` screen pixels per mask pixel from `origin` (the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
  * the text's above `OVERLAY_TEXT_LEVEL`) over a picture (blended by its alpha) stretched from `picture_min_mask_px` to
  * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel)
  * when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), the minimap
- * (`draw_minimap`, from `minimap` and the map's picture `minimap_map`), and `rects` blended over that in order
+ * (`draw_minimap`, from `minimap` and the map's picture `minimap_map`), and `rects` over that: first all their shadows
+ * and glows (`get_rect_halo`, the strongest of each), then the rectangles themselves blended in order (`get_rect_layer`)
  * (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
  * @par Example
  * @code
@@ -2246,7 +2463,7 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
     float3 scene = mix(read_stretched_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
     history_out.write(float4(scene, 1.0), id);
-    float4 color = float4(scene * (1.0 - p.dim_frac), 1.0);
+    float4 color = float4(blueshift_scene(scene, id, float2(out.get_width(), out.get_height()), p) * (1.0 - p.dim_frac), 1.0);
     int2 offset = int2(id) - p.origin;
     int2 picture_size_mask_px = p.picture_max_excl_mask_px - p.picture_min_mask_px;
     if (all(picture_size_mask_px > int2(0)) && all(offset >= int2(0))) {
@@ -2282,9 +2499,18 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
         color.rgb = mix(color.rgb + glow / samples, sum.a > 0.0 ? sum.rgb / sum.a : color.rgb, sum.a / samples);
     }
     color.rgb = draw_minimap(color.rgb, id, minimap, minimap_map);
-    float2 uv = (float2(id) + 0.5) / size;
+    float2 at_px = float2(id) + 0.5;
+    float shadow_a = 0.0;
+    float3 glow = float3(0.0);
     for (int i = 0; i < p.rect_count; i++) {
-        if (all(uv >= rects[i].min_frac) && all(uv < rects[i].max_frac)) color.rgb = mix(color.rgb, rects[i].color.rgb, rects[i].color.a);
+        float4 halo = get_rect_halo(rects[i], at_px, size);
+        shadow_a = max(shadow_a, halo.a);
+        glow = max(glow, halo.rgb);
+    }
+    color.rgb = color.rgb * (1.0 - shadow_a) + glow;
+    for (int i = 0; i < p.rect_count; i++) {
+        float4 layer = get_rect_layer(rects[i], at_px, size);
+        color.rgb = color.rgb * (1.0 - layer.a) + layer.rgb;
     }
     out.write(color, id);
 }

@@ -26,7 +26,7 @@ const MOUSE_BUTTON_NAMES: [(&str, MouseButton); 5] = [
     ("Mouse X1", MouseButton::X1),
     ("Mouse X2", MouseButton::X2),
 ];
-const ACTION_NAMES: [(Action, &str); 19] = [
+const ACTION_NAMES: [(Action, &str); 20] = [
     (Action::MoveForward, "move_forward"),
     (Action::MoveBack, "move_back"),
     (Action::MoveLeft, "move_left"),
@@ -35,6 +35,7 @@ const ACTION_NAMES: [(Action, &str); 19] = [
     (Action::Sprint, "sprint"),
     (Action::Crouch, "crouch"),
     (Action::Shoot, "shoot"),
+    (Action::Aim, "aim"),
     (Action::Flashlight, "flashlight"),
     (Action::TurnOffConsole, "turn_off_console"),
     (Action::Gun1, "gun_1"),
@@ -58,7 +59,7 @@ const PRESS_ONLY_ACTIONS: [Action; 9] = [
     Action::ReleaseMouse,
     Action::OpenMenu,
 ];
-const HELP_GROUPS: [(&[Action], &str); 11] = [
+const HELP_GROUPS: [(&[Action], &str); 12] = [
     (
         &[
             Action::MoveForward,
@@ -75,6 +76,7 @@ const HELP_GROUPS: [(&[Action], &str); 11] = [
         "crouch (shoot standing still or crouched)",
     ),
     (&[Action::Shoot], "shoot"),
+    (&[Action::Aim], "aim"),
     (&[Action::Flashlight], "flashlight"),
     (&[Action::Gun1, Action::Gun2, Action::SwitchGun], "guns"),
     (
@@ -100,6 +102,7 @@ pub enum Action {
     Sprint,
     Crouch,
     Shoot,
+    Aim,
     Flashlight,
     TurnOffConsole,
     Gun1,
@@ -326,7 +329,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Controls | keys, mouse buttons, the wheel | `builtin_bindings_read_every_kind_of_control` |
+    //! | Controls | keys, mouse buttons (shooting, aiming), the wheel | `builtin_bindings_read_every_kind_of_control` |
     //! | Mistakes | an unknown action, a missing action, an unknown key, the wheel on a held action | `mistakes_name_what_is_wrong` |
 
     use super::*;
@@ -348,6 +351,8 @@ mod tests {
         assert!(keys.matches(Action::Sprint, Control::Key(Scancode::LShift)));
         assert!(keys.matches(Action::Gun1, Control::Key(Scancode::_1)));
         assert!(keys.matches(Action::Shoot, Control::Mouse(MouseButton::Left)));
+        assert!(keys.matches(Action::Aim, Control::Mouse(MouseButton::Right)));
+        assert!(keys.matches(Action::Flashlight, Control::Key(Scancode::F)));
         assert!(keys.matches(Action::SwitchGun, Control::Wheel));
         assert!(keys.describe().starts_with("W/A/S/D move, Left Shift run"));
     }

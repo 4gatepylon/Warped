@@ -1,6 +1,6 @@
 # `player_settings.yaml` holds each player's own choices in the Rust demo: which keys do what, how fast the
-# mouse turns the view, the head bob, motion blur, and how strongly a hit reddens, shakes and blurs the
-# screen. They change only that player's experience; the numbers that shape play for everyone are the
+# mouse turns the view, the head bob, motion blur, the cyan tint after a wormhole, and how strongly a hit
+# reddens, shakes and blurs the screen. They change only that player's experience; the numbers that shape play for everyone are the
 # server's, in `server_settings.yaml`.
 #
 # Interface:
@@ -27,7 +27,8 @@ keys:
   sprint: [Left Shift, Right Shift]  # Run while held, using sprint energy.
   crouch: [Left Ctrl, Right Ctrl]  # Crouch while held.
   shoot: [Mouse Left]  # Fire (the rifle fires while held).
-  flashlight: [Mouse Right]  # Shine the flashlight while held.
+  aim: [Mouse Right]  # Aim while held: zoom in (more with the sniper) and turn more slowly.
+  flashlight: [F]  # Shine the flashlight while held.
   turn_off_console: [E]  # Hold on one of the other team's consoles to turn it off.
   gun_1: ["1"]  # Take the sniper.
   gun_2: ["2"]  # Take the rifle.
@@ -36,13 +37,15 @@ keys:
   join_red: ["2"]  # In the lobby, join the red team.
   lower_resolution: ["-"]  # Render at a lower resolution.
   raise_resolution: ["="]  # Render at a higher resolution.
-  release_mouse: [Escape]  # Free the mouse; again to quit.
+  release_mouse: [Escape]  # Free the mouse; again to ask whether to quit.
   open_menu: [Tab]  # Open or close the menu (settings).
 
 view:
   look_rad_per_px: 0.0025  # How far the view turns for each pixel the mouse moves (mouse sensitivity).
   motion_blur_s: 0.01  # How long motion smears (0 for none).
   edge_stretch_frac: 1.0  # How strongly the view stretches as you slow down at the map's edge (0 for none).
+  wormhole_tint_frac: 1.0  # How strongly the view blueshifts toward cyan as you come out of a wormhole, 0 to 1 (0 for none).
+  wormhole_tint_s: 1.5  # Seconds that blueshift takes to fade (0 for none).
   head_bob:
     walk_depth_m: 0.08  # How far the eye dips at each step while walking (0 for none).
     sprint_depth_m: 0.14  # How far the eye dips at each step while sprinting (0 for none).

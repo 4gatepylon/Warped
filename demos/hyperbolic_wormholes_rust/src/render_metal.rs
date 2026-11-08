@@ -51,8 +51,9 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
 /// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
 /// frame's height the mask's text may take, a picture under the text, how far the scene
-/// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), and the
-/// minimap.
+/// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), the
+/// minimap, and how far into the blueshift after a wormhole the scene is (the shader's
+/// `blueshift_scene`: 1 at its peak, 0 for none).
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
@@ -64,6 +65,7 @@ pub struct Overlay<'a> {
     pub picture: Option<OverlayPicture<'a>>,
     pub stretch_frac: f32,
     pub minimap: Option<OverlayMinimap<'a>>,
+    pub blueshift_frac: f32,
 }
 
 /// `OverlayMinimap` is the minimap: the map's picture from above without labels (RGBA, rows top
@@ -144,15 +146,79 @@ pub struct OverlayWand {
     pub tip_color: [f32; 4],
 }
 
-/// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0)
-/// and an RGBA colour, A the opacity.
+/// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0),
+/// an RGBA colour (A the opacity), how it looks beyond its colour (`FLAT_RECT_STYLE` for a
+/// plain rectangle) and the pulse across it (`NO_RECT_PULSE` for none).
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OverlayRect {
     pub min_frac: [f32; 2],
     pub max_frac: [f32; 2],
     pub color: [f32; 4],
+    pub style: RectStyle,
+    pub pulse: RectPulse,
 }
+
+/// `RectPulse` is the shader's `RectPulse`, a band of light across an `OverlayRect` (a pulse
+/// running along a HUD bar): its middle's x and its half width as fractions of the screen's width
+/// (measured along the rect's slant, at its middle row), two zeros, and its RGBA colour, A its
+/// opacity at its middle (0 for none).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RectPulse {
+    pub center_x_frac: f32,
+    pub half_width_frac: f32,
+    pub padding: [f32; 2],
+    pub color: [f32; 4],
+}
+
+/// `NO_RECT_PULSE` is no pulse: an opacity of 0, which the shader skips.
+pub const NO_RECT_PULSE: RectPulse = RectPulse {
+    center_x_frac: 0.0,
+    half_width_frac: 0.0,
+    padding: [0.0; 2],
+    color: [0.0; 4],
+};
+
+/// `RectStyle` is the shader's `RectStyle`, how an `OverlayRect` looks beyond its colour, with
+/// lengths as fractions of the output's height so it looks the same at any size: its corners'
+/// radius (at most half its shorter side), an inner outline's width, a gloss highlight's strength
+/// over its top half (0 to 1), a soft drop shadow's blur, a slant (how far its sides lean right
+/// per unit of height, like `/` when positive), a glow's radius in its own colour, how much
+/// lighter its top and darker its bottom are (0 for even), a zero, and the outline's RGBA colour.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RectStyle {
+    pub corner_frac: f32,
+    pub outline_frac: f32,
+    pub gloss_frac: f32,
+    pub shadow_frac: f32,
+    pub slant_x_per_y: f32,
+    pub glow_frac: f32,
+    pub shade_frac: f32,
+    pub padding: f32,
+    pub outline_color: [f32; 4],
+}
+
+/// `FLAT_RECT_STYLE` is a plain rectangle: square corners, no outline, gloss, shadow, slant, glow
+/// or shading.
+pub const FLAT_RECT_STYLE: RectStyle = RectStyle {
+    corner_frac: 0.0,
+    outline_frac: 0.0,
+    gloss_frac: 0.0,
+    shadow_frac: 0.0,
+    slant_x_per_y: 0.0,
+    glow_frac: 0.0,
+    shade_frac: 0.0,
+    padding: 0.0,
+    outline_color: [0.0; 4],
+};
+
+const BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT: usize = 112;
+const _: () = assert!(
+    std::mem::size_of::<OverlayRect>() == BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT,
+    "OverlayRect must match the shader's 112-byte OverlayRect"
+);
 
 /// `OverlayParams` is the shader's `OverlayParams` (8-byte aligned, as its `int2` makes it).
 #[repr(C, align(8))]
@@ -172,6 +238,7 @@ struct OverlayParams {
     picture_min_mask_px: [i32; 2],
     picture_max_excl_mask_px: [i32; 2],
     stretch_frac: f32,
+    blueshift_frac: f32,
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -360,7 +427,7 @@ pub struct MetalRenderer {
     blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
-    viewmodel: Option<Option<Viewmodel>>,
+    viewmodel: Option<Viewmodel>,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -1258,16 +1325,17 @@ impl MetalRenderer {
                 if self.viewmodel.is_none() {
                     self.viewmodel = Some(Viewmodel::Load(&self.device)?);
                 }
-                match self.viewmodel.as_mut().and_then(Option::as_mut) {
-                    Some(revolver) => Some(revolver.encode(
-                        &self.device,
-                        command_buffer,
-                        &wand,
-                        output_px,
-                        tan_half_fov,
-                    )?),
-                    None => None,
-                }
+                let revolver: &mut Viewmodel = self
+                    .viewmodel
+                    .as_mut()
+                    .expect("the revolver was just loaded");
+                Some(revolver.encode(
+                    &self.device,
+                    command_buffer,
+                    &wand,
+                    output_px,
+                    tan_half_fov,
+                )?)
             }
             None => None,
         };
@@ -1301,6 +1369,7 @@ impl MetalRenderer {
             picture_min_mask_px: picture_corners_mask_px[0],
             picture_max_excl_mask_px: picture_corners_mask_px[1],
             stretch_frac: overlay.stretch_frac,
+            blueshift_frac: overlay.blueshift_frac,
         };
         let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
             center_m: [0.0; 4],
@@ -1314,6 +1383,8 @@ impl MetalRenderer {
             min_frac: [0.0; 2],
             max_frac: [0.0; 2],
             color: [0.0; 4],
+            style: FLAT_RECT_STYLE,
+            pulse: NO_RECT_PULSE,
         }; MAX_OVERLAY_RECT_COUNT];
         rects[..overlay.rects.len()].copy_from_slice(overlay.rects);
         let (target, _) = self

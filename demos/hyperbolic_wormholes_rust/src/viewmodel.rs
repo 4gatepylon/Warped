@@ -22,6 +22,7 @@ use objc2_metal::{
 };
 use rayon::prelude::*;
 
+use crate::fps_demo_assets::{check_asset, get_asset_path};
 use crate::render_metal::OverlayWand;
 use crate::voxel_textures::{make_array, make_mips};
 
@@ -30,7 +31,7 @@ type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 type Pipeline = Retained<ProtocolObject<dyn MTLRenderPipelineState>>;
 
 const SHADER_SOURCE: &str = include_str!("viewmodel.metal");
-const REVOLVER_GLTF: &str = "../fps_demo/.assets/sketchfab/sci_fi_revolver/scene.gltf";
+const REVOLVER_GLTF: &str = "sketchfab/sci_fi_revolver/scene.gltf";
 /// `RAILGUN_NODE_PARTS` are name parts of the revolver's railgun variant; the file also holds a
 /// ballistic one beside it.
 const RAILGUN_NODE_PARTS: [&str; 8] = [
@@ -260,21 +261,22 @@ fn get_map_images(material: &gltf::Material) -> [Option<usize>; 4] {
     ]
 }
 
+/// `check_revolver` fails like `check_asset` when the revolver's glTF is missing.
+///
+/// Example: `check_revolver()?;`
+pub fn check_revolver() -> Result<()> {
+    check_asset(&get_asset_path(REVOLVER_GLTF))
+}
+
 impl Viewmodel {
-    /// `Load` reads the revolver from the fps_demo's `.assets/` onto `device`, or gives `None` (and
-    /// says how to download it) when it is missing.
+    /// `Load` reads the revolver from the fps_demo's `assets/` onto `device`, and fails like
+    /// `check_asset` when it is missing.
     ///
     /// Example: `let revolver = Viewmodel::Load(&device)?;`
     #[allow(non_snake_case)]
-    pub fn Load(device: &ProtocolObject<dyn MTLDevice>) -> Result<Option<Viewmodel>> {
-        let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join(REVOLVER_GLTF);
-        if !path.exists() {
-            println!(
-                "No revolver in {}; run make download-assets in demos/fps_demo to hold it.",
-                path.display()
-            );
-            return Ok(None);
-        }
+    pub fn Load(device: &ProtocolObject<dyn MTLDevice>) -> Result<Viewmodel> {
+        check_revolver()?;
+        let path: PathBuf = get_asset_path(REVOLVER_GLTF);
         let gltf::Gltf { document, blob } = gltf::Gltf::open(&path)?;
         let base_dir: &Path = path.parent().expect("a file has a folder");
         let buffers: Vec<gltf::buffer::Data> =
@@ -447,7 +449,7 @@ impl Viewmodel {
             indices.len() / 3,
             maps.len()
         );
-        Ok(Some(Viewmodel {
+        Ok(Viewmodel {
             vertices: make_buffer(device, &vertices)?,
             indices: make_buffer(device, &indices)?,
             parts,
@@ -459,7 +461,7 @@ impl Viewmodel {
             depth_write: make_depth_state(device, true)?,
             depth_test: make_depth_state(device, false)?,
             targets: None,
-        }))
+        })
     }
 
     /// `encode` draws the revolver posed like `wand` into a `size` image (premultiplied sRGB, clear
