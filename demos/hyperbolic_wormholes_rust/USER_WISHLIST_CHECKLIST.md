@@ -10,6 +10,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
+  radius (the rest is slightly darker and blurred), and shows where they are on the map. Claimed by Claude Code
+  (session `wizardly-hamilton-23a121`), branch `claude/minimap`, 2026-11-07, with W-48.
 - [~] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
   least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
   doesn't show the entire map. It is a circle that shows just where the player is and what is around them (the
