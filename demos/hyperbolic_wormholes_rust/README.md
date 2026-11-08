@@ -16,7 +16,8 @@ make run-demo
 make run-demo RENDERER=cpu
 ```
 
-- Click to capture the mouse (`Esc` releases it; `Esc` again quits).
+- Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
+  `Esc` or `N` goes back to the game). The window's close button quits at once.
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
   (`--player-settings`) to `make run-demo`, `host-game` or `join-game`.
