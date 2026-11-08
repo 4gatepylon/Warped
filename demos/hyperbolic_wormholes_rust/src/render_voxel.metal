@@ -272,7 +272,7 @@ constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
 constant int MAX_BENT_PIECES = 512;
 constant int MAX_BEND_HALVINGS = 8;
 constant float BEND_SAG_M = 0.02;
-constant float BEND_SAG_PIXELS = 0.5;
+constant float BEND_SAG_PIXELS = 0.1;
 constant float CHORD_SQ_PER_SAG_RADIUS = 8.0;
 constant float MIN_BEND_PIECE_M = 0.5;
 constant float MAX_BEND_PIECE_M = 8.0;
@@ -1991,7 +1991,7 @@ static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float
  * through the map, as voxel_world.rs's laser does: it halves the piece (up to `MAX_BEND_HALVINGS` times) while the map
  * point of its midpoint strays from the midpoint of the map chord between its ends' map points by more than a tolerance
  * times the stretch of unbending there, the tolerance being `BEND_SAG_M` or, once the ray has travelled `travelled`
- * far enough, half a pixel's footprint there, whichever is larger. Then it traces that chord (`trace_bent_chord`, counting glass in `glass`, and adding the zone walls along it to
+ * far enough, `BEND_SAG_PIXELS` (a tenth) of a pixel's footprint there, whichever is larger. Then it traces that chord (`trace_bent_chord`, counting glass in `glass`, and adding the zone walls along it to
  * `dust`) unless both ends unbend beyond the edge radius. It returns the piece's length, and in `frac` the fraction of it before a hit.
  * @par Example
  * @code
