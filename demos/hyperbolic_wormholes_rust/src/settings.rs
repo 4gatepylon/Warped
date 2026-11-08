@@ -17,7 +17,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const BUILTIN_YAML: &str = include_str!("../game_settings.yaml");
-const ZERO_ALLOWED_KEYS: [&str; 7] = [
+const ZERO_ALLOWED_KEYS: [&str; 10] = [
+    "when_hit.red_frac",
+    "when_hit.shake_px",
+    "when_hit.blur_px",
     "head_bob.walk_depth_m",
     "head_bob.sprint_depth_m",
     "rifle.recoil_up_rad",
@@ -106,6 +109,20 @@ pub struct RespawnSettings {
     pub delay_s: f64,
 }
 
+/// `WhenHitSettings` is what a player feels each time a hit takes some of their health: slowed
+/// to a fraction of their speed for a while, and the screen's edges turning red, shaking and
+/// blurring inward, all fading over `effect_s`.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct WhenHitSettings {
+    pub slow_speed_frac: f64,
+    pub slow_s: f64,
+    pub effect_s: f64,
+    pub red_frac: f64,
+    pub shake_px: f64,
+    pub blur_px: f64,
+}
+
 /// `DisplaySettings` is how long motion smears in the window.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -124,6 +141,7 @@ pub struct GameSettings {
     pub rifle: RifleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
+    pub when_hit: WhenHitSettings,
     pub display: DisplaySettings,
 }
 

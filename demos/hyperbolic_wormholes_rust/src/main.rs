@@ -1671,6 +1671,8 @@ struct Session {
     gun_phase_rad: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
+    hit_effect_frac: f64,
+    last_health_frac: f64,
     is_captured: bool,
     message: String,
     message_time_s: f64,
@@ -1912,6 +1914,8 @@ impl Session {
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
+            hit_effect_frac: 0.0,
+            last_health_frac: 1.0,
             is_captured: false,
             message: String::new(),
             message_time_s: 0.0,
@@ -2034,6 +2038,8 @@ impl Session {
         let frame_s: f64 = self.last.elapsed().as_secs_f64();
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
         let blur_s: f64 = self.settings.display.motion_blur_s;
+        self.hit_effect_frac =
+            (self.hit_effect_frac - dt_s / self.settings.when_hit.effect_s).max(0.0);
         self.motion_blur_frac = if blur_s > 0.0 {
             (-dt_s / blur_s).exp() as f32
         } else {
@@ -2272,6 +2278,23 @@ impl Session {
             (target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
     }
 
+    /// `get_hit_effect` gives what the last hit on this player still does to the scene, fading over
+    /// the settings' `when_hit.effect_s`: red edges, a blur from the edges inward, and a shake
+    /// in a new direction each frame (the golden angle apart).
+    ///
+    /// Example: `let hit = self.get_hit_effect();`
+    fn get_hit_effect(&self) -> render_metal::HitEffect {
+        let when_hit = &self.settings.when_hit;
+        let shake_rad: f64 = self.total_frame_count as f64 * voxel_world::SPAWN_TURN_RAD;
+        let shake_px: f64 = when_hit.shake_px * self.hit_effect_frac;
+        render_metal::HitEffect {
+            strength_frac: self.hit_effect_frac as f32,
+            red_frac: when_hit.red_frac as f32,
+            blur_px: when_hit.blur_px as f32,
+            shake_px: [shake_rad.cos(), shake_rad.sin()].map(|c| (c * shake_px) as f32),
+        }
+    }
+
     /// `get_wand` gives this player's wand (`make_wand`, with its tip in the team's colour), or
     /// `None` while a banner shows.
     ///
@@ -2363,6 +2386,13 @@ impl Session {
                 }
             }
         }
+        if multiplayer.client.health_frac < self.last_health_frac {
+            self.hit_effect_frac = 1.0;
+            if let Some(voxel) = &mut self.voxel {
+                voxel.player.slowed_s = self.settings.when_hit.slow_s;
+            }
+        }
+        self.last_health_frac = multiplayer.client.health_frac;
         if multiplayer.client.game.number != multiplayer.game_number {
             multiplayer.game_number = multiplayer.client.game.number;
             if let (Some(voxel), Some(id)) = (&mut self.voxel, multiplayer.client.id) {
@@ -3175,6 +3205,7 @@ fn play_on_layer(
             rects: &rects,
             wand,
             blur_frac: session.motion_blur_frac,
+            hit: session.get_hit_effect(),
         });
         if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(

@@ -26,6 +26,9 @@ constant float OVERLAY_TITLE_LEVEL = 0.75;
 constant float OVERLAY_TEXT_LEVEL = 0.25;
 constant float4 OVERLAY_TITLE_COLOR = float4(1.0, 0.35, 0.3, 1.0);
 constant float4 OVERLAY_TEXT_COLOR = float4(0.92, 0.94, 0.98, 1.0);
+constant float3 HIT_RED_COLOR = float3(0.85, 0.05, 0.03);
+constant float HIT_EDGE_REACH_FRAC = 0.7;
+constant int HIT_BLUR_TAP_COUNT = 8;
 constant float3 WAND_LIGHT_DIRECTION = float3(-0.42, 0.78, 0.46);
 constant float WAND_AMBIENT = 0.3;
 constant float WAND_SPECULAR = 0.45;
@@ -1987,7 +1990,37 @@ struct OverlayParams {
     int has_wand;
     float tan_half_fov;
     float blur_frac;
+    float hit_frac;
+    float hit_red_frac;
+    float hit_blur_px;
+    float2 shake_px;
 };
+
+/**
+ * @brief `read_hit_scene` reads a frame's pixel as a player who was just hit sees it (`hit_frac` of the effect left, 1
+ * just after the hit): shifted by `shake_px`, and toward the edges blurred over `hit_blur_px` and turned red by
+ * `hit_red_frac`, reaching further in the fresher the hit; with no hit left, the pixel as it is.
+ * @par Example
+ * @code
+ * float3 scene = read_hit_scene(frame, id, p);
+ * @endcode
+ */
+static float3 read_hit_scene(texture2d<float, access::read> frame, uint2 id, constant OverlayParams &p) {
+    int2 size = int2(frame.get_width(), frame.get_height());
+    int2 at = clamp(int2(id) + int2(round(p.shake_px)), int2(0), size - 1);
+    float3 sharp = frame.read(uint2(at)).rgb;
+    if (p.hit_frac <= 0.0) return sharp;
+    float corner = length((float2(id) + 0.5) / float2(size) - 0.5) * M_SQRT2_F;
+    float edge = p.hit_frac * smoothstep(1.0 - HIT_EDGE_REACH_FRAC * p.hit_frac, 1.0, corner);
+    float3 sum = sharp;
+    for (int k = 0; k < HIT_BLUR_TAP_COUNT; k++) {
+        float angle = 2.0 * M_PI_F * float(k) / float(HIT_BLUR_TAP_COUNT);
+        int2 tap = at + int2(round(p.hit_blur_px * edge * float2(cos(angle), sin(angle))));
+        sum += frame.read(uint2(clamp(tap, int2(0), size - 1))).rgb;
+    }
+    float3 blurred = mix(sharp, sum / float(HIT_BLUR_TAP_COUNT + 1), edge);
+    return mix(blurred, HIT_RED_COLOR, edge * p.hit_red_frac);
+}
 
 /**
  * @brief `OverlayWand` is the wand in camera space (x right, y up, -z ahead, meters): its shaft's centre, its axes (its
@@ -2078,7 +2111,7 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
                           texture2d<float, access::read> history_in [[texture(3)]],
                           texture2d<float, access::write> history_out [[texture(4)]], uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
-    float3 scene = mix(frame.read(id).rgb, history_in.read(id).rgb, p.blur_frac);
+    float3 scene = mix(read_hit_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
     history_out.write(float4(scene, 1.0), id);
     float4 color = float4(scene * (1.0 - p.dim_frac), 1.0);
     int2 offset = int2(id) - p.origin;
