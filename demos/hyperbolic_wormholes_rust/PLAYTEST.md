@@ -107,6 +107,8 @@ Multiplayer:
   map.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too. On the SCORES page, eliminating a teammate counts their death but no kill.
+- Lasers stop on glass, windows included, as in the WebGL level (`DECISIONS.md` D88). Since the smooth shapes
+  (#147), the habitat modules' and walkways' windows are panes on a solid wall, so they don't show the outside.
 - Health, shown in the bottom left, resets when a player respawns.
 - The menu doesn't pause the game: a player in it stands still and can still be hit.
 - A file saved from the menu has no comments. If a later version adds a setting, that file stops loading and the
