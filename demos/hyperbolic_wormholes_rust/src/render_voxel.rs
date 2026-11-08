@@ -62,6 +62,9 @@ const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
+const RIFLE_BEAM_CODE: u32 = 2;
+const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
+const MS_PER_S: f64 = 1000.0;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -111,6 +114,7 @@ pub struct VoxelUniforms {
     pub flashlight: [f32; 4],
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
+    pub beam_speckle: [f32; 4],
 }
 
 const _: () = assert!(
@@ -197,6 +201,17 @@ const _: () = assert!(
         && std::mem::size_of::<GpuDustParticle>() == FLOAT4S_PER_DUST_PARTICLE * BYTES_PER_FLOAT4,
     "GpuDustBurst and GpuDustParticle match the shader's DustBurst and DustParticle"
 );
+
+/// `LaserBeam` is a laser shot's beam to draw: its geodesic segments, the shooter's team (0 blue,
+/// 1 red), whether the rifle fired it (drawn as a laser; the sniper's is a lightsaber blade), and
+/// the share of its pixels that speckle each frame.
+#[derive(Clone)]
+pub struct LaserBeam {
+    pub segments: Vec<BeamSegment>,
+    pub team: u32,
+    pub is_rifle: bool,
+    pub speckle_frac: f64,
+}
 
 /// `VoxelFrame` is one frame's packed voxel scene: the uniforms and every buffer's contents.
 pub struct VoxelFrame {
@@ -312,15 +327,17 @@ fn to_columns(m: DMat4) -> [[f32; 4]; 4] {
 
 impl VoxelFrame {
     /// `Build` packs `world` seen from `camera` at a render size, with laser segments of each team
-    /// (`beams`: segments and team, 0 blue or 1 red; drawn as far as `clip_beam_to_map` allows),
-    /// an optional laser spot and the dust of shots into the ground.
+    /// (`beams`, each drawn in its gun's style as far as `clip_beam_to_map` allows), an optional
+    /// laser spot and the dust
+    /// of shots into the ground. The speckle picks its pixels anew each millisecond of
+    /// `world.sky_time_s`, and their kinds in the shares of `world.settings.beam_speckle`.
     ///
     /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &clouds, (1280, 800));`
     #[allow(non_snake_case)]
     pub fn Build(
         world: &VoxelWorld,
         camera: DMat4,
-        beams: &[(Vec<BeamSegment>, u32)],
+        beams: &[LaserBeam],
         spot: Option<(DVec4, u32)>,
         dust: &[DustCloud],
         size_px: (u32, u32),
@@ -391,13 +408,19 @@ impl VoxelFrame {
             .collect();
         let gpu_beams: Vec<GpuBeam> = beams
             .iter()
-            .flat_map(|(segments, team)| {
-                clip_beam_to_map(segments)
+            .flat_map(|beam| {
+                let code: u32 = beam.team + RIFLE_BEAM_CODE * u32::from(beam.is_rifle);
+                clip_beam_to_map(&beam.segments, world.r)
                     .into_iter()
                     .map(move |s| GpuBeam {
                         a: to_f32(s.a),
                         b: to_f32(s.b),
-                        info: [s.length as f32, 0.0, BEAM_BRIGHTNESS, *team as f32],
+                        info: [
+                            s.length as f32,
+                            beam.speckle_frac as f32,
+                            BEAM_BRIGHTNESS,
+                            code as f32,
+                        ],
                     })
             })
             .collect();
@@ -488,6 +511,12 @@ impl VoxelFrame {
             }),
             spaceships: get_spaceships(world.sky_time_s),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
+            beam_speckle: [
+                ((world.sky_time_s * MS_PER_S) as u64 % BEAM_SEED_PERIOD_MS) as f32,
+                world.settings.beam_speckle.black_frac as f32,
+                world.settings.beam_speckle.white_frac as f32,
+                0.0,
+            ],
         };
         assert_eq!(
             world.palette.len(),
@@ -660,11 +689,14 @@ pub struct VoxelGpu {
 }
 
 impl VoxelGpu {
-    /// `New` compiles `render_voxel.metal` and loads the surface textures on `device`.
+    /// `New` compiles `render_voxel.metal` on `device` and keeps the surface `textures`.
     ///
-    /// Example: `let gpu = VoxelGpu::New(&device)?;`
+    /// Example: `let gpu = VoxelGpu::New(&device, SurfaceTextures::Load(&device)?)?;`
     #[allow(non_snake_case)]
-    pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<VoxelGpu> {
+    pub fn New(
+        device: &ProtocolObject<dyn MTLDevice>,
+        textures: SurfaceTextures,
+    ) -> Result<VoxelGpu> {
         let source: String = SHADER_SOURCE
             .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
             .replace(
@@ -703,7 +735,7 @@ impl VoxelGpu {
             buffers: (0..SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len())
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
-            textures: SurfaceTextures::Load(device)?,
+            textures,
             post: None,
         })
     }
@@ -839,5 +871,50 @@ impl VoxelGpu {
         }
         dispatch(encoder, &self.tonemap, (width, height));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests of packing a frame's laser beams for the shader.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Gun | the sniper's (code = team), the rifle's (code = team + `RIFLE_BEAM_CODE`) | `beams_carry_their_gun_team_and_speckle` |
+    //! | Team | blue, red | `beams_carry_their_gun_team_and_speckle` |
+    //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
+
+    use super::*;
+    use crate::voxel_world::{Shot, VoxelPlayer, VoxelWorld};
+
+    const SPECKLE_FRAC: f64 = 0.4;
+    const RENDER_PX: (u32, u32) = (64, 40);
+
+    #[test]
+    fn beams_carry_their_gun_team_and_speckle() {
+        let map: crate::map::Map =
+            crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
+                .expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let camera: DMat4 = VoxelPlayer::AtSpawn(&world, 0).get_camera_frame(&world);
+        let shot: Shot = world.trace_laser(camera);
+        let beam = |team: u32, is_rifle: bool, speckle_frac: f64| LaserBeam {
+            segments: shot.segments.clone(),
+            team,
+            is_rifle,
+            speckle_frac,
+        };
+        let beams: [LaserBeam; 2] = [beam(0, false, 0.0), beam(1, true, SPECKLE_FRAC)];
+        let frame: VoxelFrame = VoxelFrame::Build(&world, camera, &beams, None, &[], RENDER_PX);
+        let sniper: [f32; 2] = [0.0, 0.0];
+        let rifle: [f32; 2] = [SPECKLE_FRAC as f32, (1 + RIFLE_BEAM_CODE) as f32];
+        let packed: Vec<[f32; 2]> = frame.beams.iter().map(|b| [b.info[1], b.info[3]]).collect();
+        assert!(packed.contains(&sniper) && packed.contains(&rifle));
+        assert!(packed.iter().all(|p| *p == sniper || *p == rifle));
+        let kinds: &crate::settings::BeamSpeckleSettings = &world.settings.beam_speckle;
+        assert_eq!(
+            frame.uniforms.beam_speckle[1..3],
+            [kinds.black_frac as f32, kinds.white_frac as f32]
+        );
     }
 }

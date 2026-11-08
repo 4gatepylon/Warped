@@ -141,7 +141,7 @@ full health and energy. A player can't choose to respawn early.
 | Team | Blue | Blue | Purple | Red | Red |
 | Depth | 2 | 1 | 0 | 1 | 2 |
 | Theme | Dust (desert) planet | Snow planet | City, or space station | Dark forest planet | Lunar base in a crater |
-| Space | Hyperbolic | T² × ℝ | Inside a sphere | T² × ℝ | Hyperbolic, curvature radius 40 m |
+| Space | Hyperbolic | T² × ℝ | Inside a sphere | T² × ℝ | Hyperbolic, curvature radius 26.7 m (the map's 40 m, curved 1.5 times as much by `space.curvature_per_map_curvature`) |
 | Gravity | Down, onto the ground | Down | Outward, onto the sphere | Down | Down, onto the ground, ≈30 m/s² |
 | Warp objects | Yes | Yes | No | Yes | 1 black hole, 1 wormhole |
 | Size | Very large | Large | Smallest | Large | Very large: 256 m × 144 m playable |
@@ -285,6 +285,7 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | `Ctrl` (held) | Crouch: a lower view and half the walking speed |
 | Right button (held) | Aim: zoom in (more with the sniper rifle) and turn more slowly while held |
 | `F` (held) | Flashlight: a cone of light from the eye while held (other players don't see it yet) |
+| `V` | Switch between first person and a third-person view from slightly behind and above the character, which pulls in when a wall is behind it; shots still leave the eye toward the crosshair, and aiming looks from the eye |
 | Left click | Shoot, standing still or crouched (walking crouched too), not while walking upright, sprinting, in the air or deactivating a console (hold it for a weapon that fires while held, such as the rifle) |
 | Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |
@@ -329,9 +330,9 @@ Every key here is the default. Each player can rebind any action, in the menu or
   250 m/s, and each point of it fades soon after the front passes.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
-- A player moving inside a wormhole mouth sees the world Doppler-shift, as if moving at a good fraction of light
-  speed: bluish cyan walking forward, red walking backward, stronger deeper in and faster, none standing still or
-  outside the mouth. Only that player sees it.
+- A player moving through a wormhole's throat sees the world's colours shift for a moment, as if moving near light
+  speed: a crisp light cyan, almost white, walking forward, a dark red walking backward, stronger nearer the throat
+  and faster, none standing still or outside the throat's region. Only that player sees it.
 - A shot that hits the ground throws up dust and a puff of mist where it lands, which every player
   sees. The grains fly up a few meters and fall back, and all of it fades within 2 s.
 
@@ -345,6 +346,8 @@ Every weapon follows these rules:
   the shooter is.
 - A player who is hit is slowed (see [Movement](#movement)).
 - Each shot strays from the crosshair by a small random angle, sampled for that shot.
+- Each shot's beam flickers with noise: every frame, random pixels of it turn black, white or drop out to show
+  what is behind.
 - Aiming (right button) zooms in over 0.15 s and turns the view more slowly by the same factor.
 - The rules are a simplified version of those of tactical shooters such as CS:GO.
 - A player who carries two weapons switches between them with the mouse wheel (either way swaps
@@ -363,6 +366,8 @@ Every weapon follows these rules:
 | Shot lasts (hits what the crosshair crosses) | 0.25 s | 0.06 s per shot |
 | Laser | Shows once per shot; each point fades 0.25 s after the front passes | Pulses with each shot; each point fades after 0.05 s |
 | Shot noise (each shot strays at random) | Small: 3 mrad on average, sampled exponentially, at most 15 mrad | Up to 2 mrad cold, growing with the rifle's heat to 20 mrad and shrinking as it cools |
+| Beam look | A white lightsaber blade in a pale haze | A laser in the team's colour |
+| Beam noise (each frame, a share of the beam's pixels turns black, white or drops out, 1 : 1 : 8) | Random per shot: 0.2 on average, sampled exponentially, at most 0.5 | None cold, growing with the rifle's heat to 0.5 |
 | Recoil | None | Each shot kicks the view up 7.5 mrad and 2.5 mrad left or right, alternately, settling in 0.08 s |
 | Aim zoom | 2.5× | 1.5× |
 
