@@ -9,7 +9,7 @@
 #     (PLAYER_SETTINGS: a copy of player_settings.yaml with this player's own keys, mouse speed and view.)
 #     (Playing is only on a game server: there is no local demo and no host-and-play target.)
 #     (GAME_PASSWORD_FILE, with serve-game and join-game: a file holding the game's password; only players who know it may join.)
-#     make build-server-bundle: build the online match's server for x86-64 Linux into $(SERVER_BUNDLE): the match server, every level's server and app/match_levels.yaml, with services.txt saying what the cloud VM runs (W-126).
+#     make build-server-bundle: build the online match's server for x86-64 Linux into $(SERVER_BUNDLE): the match server, every level's server and app/match_levels.yaml, with services.txt saying what the cloud VM runs (W-127).
 #     make package-mac-app SERVER_ADDRESS=<ip>: build Warped.app with every level of app/match_levels.yaml in it (each level's own make package-mac-app) and zip it with its note into $(APP_ZIP); SERVER_ADDRESS puts the online match at <ip> on its title screen.
 #     make check-server SERVER_ADDRESS=<ip> GAME_PASSWORD_FILE=<file>: join the match server at <ip> with a bot for $(CHECK_S) s, to check that it answers.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.

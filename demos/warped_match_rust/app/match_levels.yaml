@@ -1,4 +1,4 @@
-# The online match's levels (W-126), as shipped: `make package-mac-app` puts this file in the app's
+# The online match's levels (W-127), as shipped: `make package-mac-app` puts this file in the app's
 # Contents/Resources/ and `make build-server-bundle` at the root of the server bundle, and each side
 # reads its own paths from it, relative to the folder it sits in. `program` is the level's window in
 # the app (Contents/MacOS/<level folder>, or `self` for this demo), `server_program` its server in

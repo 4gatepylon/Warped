@@ -1,5 +1,5 @@
 # `main.tf` is the Warped cloud deploy on Google Cloud: one small VM that runs the services of the
-# server bundle's `services.txt` (the online match, W-126), a public bucket for the download page, a
+# server bundle's `services.txt` (the online match, W-127), a public bucket for the download page, a
 # private bucket for the server bundle, and a monthly budget.
 #
 # Interface:

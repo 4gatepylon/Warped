@@ -215,7 +215,7 @@ pub struct Appearance {
 }
 
 /// `BUILTIN_MAP_JSON` is `common/maps/dark_forest/map.json`, built into the program so that it
-/// runs from an app or a server bundle without this repository (W-126).
+/// runs from an app or a server bundle without this repository (W-127).
 const BUILTIN_MAP_JSON: &str = include_str!("../../../common/maps/dark_forest/map.json");
 
 /// `load` reads a Euclidean map file; `default_map_path()` gives the map built into the program.

@@ -1,4 +1,4 @@
-//! `title.rs` is the title screen a double-clicked app opens on (W-58, W-126): the matches to join
+//! `title.rs` is the title screen a double-clicked app opens on (W-58, W-127): the matches to join
 //! (the online matches, or one at an address the player types), the one selected, and the flags
 //! that start each. It keeps no window state: the window feeds it keys and draws its lines, as with
 //! `menu.rs`.

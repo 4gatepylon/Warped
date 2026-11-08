@@ -331,7 +331,7 @@ Every key here is the default. Each player can rebind any action, in the menu or
 
 The screens a player meets, in order:
 
-- **Title** (the Mac app, opened without flags): the downloadable app is the match (W-126): "Play online: Warped
+- **Title** (the Mac app, opened without flags): the downloadable app is the match (W-127): "Play online: Warped
   match" for the match server the app was built for, "Join a match by its address" (its IP and port, remembered for
   next time), and Quit. Either asks once for the game's password (empty for a server without one) and keeps it; a
   server that refuses it, or runs another version, stops the window with a pop-up saying why, and the title screen

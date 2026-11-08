@@ -31,7 +31,7 @@ pub const MODELS: ResourceFolder = ResourceFolder {
 };
 
 /// `OWN` is this level's own files that no other level reads, such as its map pictures: this crate's
-/// folder, and `Contents/Resources/dust_rust/` in the app, which holds several levels (W-126).
+/// folder, and `Contents/Resources/dust_rust/` in the app, which holds several levels (W-127).
 pub const OWN: ResourceFolder = ResourceFolder {
     name: "dust_rust",
     checkout_folder: ".",

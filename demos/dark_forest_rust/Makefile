@@ -8,7 +8,7 @@
 #     make serve-game PORT=<port>: run a game server without a window until killed.
 #     make join-game SERVER=<address> PORT=<port> TEAM=<blue|red>: join a game server.
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), for the
-#         online match's server bundle (W-126).
+#         online match's server bundle (W-127).
 #     make package-mac-app: build Warped.app (the window and every file it reads) for the online match's app;
 #         run make download-assets first.
 #     make bench-dark-forest BENCH_SECONDS=<s>: walk the vertical route full screen and write frame times to

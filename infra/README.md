@@ -1,7 +1,7 @@
 # Infra
 
 The cloud deploy on Google Cloud, in Terraform, so players can play over the internet (W-42 (server in the cloud)):
-one small VM runs the online match (W-126 (online match)), every level protected by the game's password, and a public
+one small VM runs the online match (W-127 (online match)), every level protected by the game's password, and a public
 bucket serves the download page with the app that plays all five levels (W-116 (download page)).
 
 ## Set up once

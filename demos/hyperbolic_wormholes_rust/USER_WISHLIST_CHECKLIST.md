@@ -11,7 +11,7 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-126 Online match.** "What updates need to be done to support all these different levels?": the user chose
+- [~] **W-127 Online match.** "What updates need to be done to support all these different levels?": the user chose
   "the online match" on 2026-11-08: the cloud server runs the match (W-123 (match progression menu)) and the
   downloaded app plays all five levels, Dark Forest included ("Include Dark Forest now"). Work on its own branch,
   not on `staging/user-4gatepylon` ("staging is going to be unstable"). Claimed by Claude Code (session

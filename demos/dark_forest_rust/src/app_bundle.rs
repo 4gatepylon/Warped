@@ -1,6 +1,6 @@
 //! `app_bundle.rs` finds the folders of files the game reads while it runs, the fps_demo's assets,
 //! the maps' models and Dark Forest's own textures and map picture: inside `Warped.app` when the
-//! game runs from it, else in the checkout (W-126).
+//! game runs from it, else in the checkout (W-127).
 //!
 //! Interface: `ResourceFolder` (`get_path`), `ASSETS`, `MODELS`, `OWN`, `get_app_resources_folder`.
 //!
@@ -31,7 +31,7 @@ pub const MODELS: ResourceFolder = ResourceFolder {
 };
 
 /// `OWN` is this level's own files that no other level reads, such as its map pictures: this crate's
-/// folder, and `Contents/Resources/dark_forest_rust/` in the app, which holds several levels (W-126).
+/// folder, and `Contents/Resources/dark_forest_rust/` in the app, which holds several levels (W-127).
 pub const OWN: ResourceFolder = ResourceFolder {
     name: "dark_forest_rust",
     checkout_folder: ".",

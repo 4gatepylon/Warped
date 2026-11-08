@@ -98,7 +98,7 @@ the client asks with a padded `hello`, the server answers with a cookie (a keyed
 client's address), and the client proves the password with a keyed hash of the cookie
 (`match_flow.rs`). A wrong password ends the client with exit code 3, as in the levels.
 
-## The online match (W-126)
+## The online match (W-127)
 
 The cloud VM runs the match, and the downloadable app plays every level. `app/match_levels.yaml`
 is the levels file both ship with: its paths are relative to its own folder, which is the app's

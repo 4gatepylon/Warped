@@ -95,7 +95,7 @@ binary. The wire protocol is the hyperbolic demo's, with its wormhole fields alw
 Every command also takes `--game-password-file <file>`: a server admits only players who prove they know the password
 in it, and a player proves it.
 
-### In the online match (W-126)
+### In the online match (W-127)
 
 The online match ships this level in its app and its cloud server bundle (`demos/warped_match_rust/README.md`, "The
 online match"):

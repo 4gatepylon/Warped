@@ -1,4 +1,4 @@
-//! `match_server.rs` runs one match of the online match (W-126) without a window, for a machine that
+//! `match_server.rs` runs one match of the online match (W-127) without a window, for a machine that
 //! has no screen, such as the cloud VM: the same match server as `--serve-match`, starting each
 //! round's level from the levels file's `server_program`s.
 //!

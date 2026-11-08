@@ -23,7 +23,7 @@
 # Must know:
 #     - HAS_GAME_SERVERS=false in .env deploys only the download page: no VM, and no online games in
 #       the app (players join a server by its address).
-#     - GAME_DIR is the game to deploy (the online match by default, W-126): any game folder whose
+#     - GAME_DIR is the game to deploy (the online match by default, W-127): any game folder whose
 #       Makefile has build-server-bundle (a bundle with a services.txt, see startup.sh.tftpl),
 #       package-mac-app SERVER_ADDRESS=<ip> and check-server SERVER_ADDRESS=<ip>
 #       GAME_PASSWORD_FILE=<file>.
