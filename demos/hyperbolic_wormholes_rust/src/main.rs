@@ -3456,8 +3456,8 @@ impl Session {
 
     /// `get_banner_lines` gives the two lines shown over the view: while the exit prompt shows,
     /// its question and keys; when this window can't play on its server
-    /// (`get_connection_problem`), what is wrong; in the lobby, each
-    /// team's head count and the keys that join a team; after asking to join, until welcomed, that
+    /// (`get_connection_problem`), what is wrong; in the lobby, whether it is connected to the
+    /// server yet (`get_lobby_lines`); after asking to join, until welcomed, that
     /// it is joining and the server's address; once a team has won, the winner and how to start a
     /// new game; while this player is out after a hit, "YOU DIED" and the countdown to respawning;
     /// or `None`.
@@ -3473,19 +3473,16 @@ impl Session {
             return Some(problem.get_lines(client.get_server()));
         }
         if multiplayer.client.is_in_lobby() {
-            let counts: String = match multiplayer.client.lobby_counts {
-                Some([blue, red]) => format!("BLUE {blue}   RED {red}"),
-                None => "LOOKING FOR THE GAME".to_string(),
-            };
             let keys = &self.player_settings.keys;
-            return Some([
-                counts,
+            return Some(get_lobby_lines(
+                client.lobby_counts,
+                client.get_server(),
                 format!(
                     "{} joins blue, {} joins red",
                     keys.get_label(Action::JoinBlue),
                     keys.get_label(Action::JoinRed)
                 ),
-            ]);
+            ));
         }
         if client.is_waiting_for_welcome() && !multiplayer.is_eliminated {
             return Some([
@@ -4147,6 +4144,22 @@ fn get_map_picture_max_px() -> (u32, u32) {
     (width, height)
 }
 
+/// `get_lobby_lines` gives the lobby banner's two lines: until the server at `server` first
+/// answers, that this window is connecting to it; once it has (`lobby_counts`, each team's head
+/// count), that it is connected, the counts and `join_keys_line`.
+///
+/// Example: `let lines = get_lobby_lines(Some([1, 2]), server, "1 joins blue, 2 joins red".to_string());`
+fn get_lobby_lines(
+    lobby_counts: Option<[u32; net::TEAM_NAMES.len()]>,
+    server: SocketAddr,
+    join_keys_line: String,
+) -> [String; 2] {
+    match lobby_counts {
+        Some([blue, red]) => [format!("CONNECTED  BLUE {blue}  RED {red}"), join_keys_line],
+        None => ["CONNECTING".to_string(), format!("server {server}")],
+    }
+}
+
 /// `get_text_positions` places each of `text`'s lines in its mask: the line cut to the mask's
 /// width, and where its top left goes.
 ///
@@ -4558,7 +4571,7 @@ mod tests {
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
-    //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
+    //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
 
@@ -4668,6 +4681,15 @@ mod tests {
         }
         let banner_char_count: usize = (DEATH_MASK_PX.0 as f32 / DEBUG_GLYPH_PX) as usize;
         for line in exit_prompt::get_lines() {
+            assert!(line.chars().count() <= banner_char_count, "{line}");
+        }
+        let longest_server: SocketAddr = "255.255.255.255:65535".parse().expect("an address");
+        let full_counts: [u32; 2] = [net::MAX_PLAYER_COUNT as u32; 2];
+        let keys_line: String = "1 joins blue, 2 joins red".to_string();
+        let connecting = get_lobby_lines(None, longest_server, keys_line.clone());
+        let connected = get_lobby_lines(Some(full_counts), longest_server, keys_line);
+        assert!(connecting[0].starts_with("CONNECTING") && connected[0].starts_with("CONNECTED "));
+        for line in connecting.iter().chain(&connected) {
             assert!(line.chars().count() <= banner_char_count, "{line}");
         }
     }
