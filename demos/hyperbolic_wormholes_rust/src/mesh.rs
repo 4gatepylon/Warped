@@ -211,6 +211,33 @@ impl MeshModel {
         best
     }
 
+    /// `is_within_m` says whether some triangle comes within `radius_m` of q (exactly, not by
+    /// boxes), as walls stop players.
+    ///
+    /// Example: `if model.is_within_m(q, 0.1) { ... }`
+    pub fn is_within_m(&self, q: DVec3, radius_m: f64) -> bool {
+        let mut stack: Vec<usize> = vec![0];
+        while let Some(k) = stack.pop() {
+            let node: BvhNode = self.nodes[k];
+            let gap: f64 = (node.lo.as_dvec3() - q)
+                .max(q - node.hi.as_dvec3())
+                .max(DVec3::ZERO)
+                .length();
+            if gap >= radius_m {
+                continue;
+            }
+            if node.count == 0 {
+                stack.extend([node.first, node.first + 1]);
+            } else if self.triangles[node.first..node.first + node.count]
+                .iter()
+                .any(|t| get_triangle_distance_m(t, q) < radius_m)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// `get_distance_m` bounds the distance from q to the model's triangles from below, by the
     /// distance to the nearest BVH leaf box.
     ///
@@ -234,6 +261,40 @@ impl MeshModel {
         }
         best
     }
+}
+
+/// `get_triangle_distance_m` gives the distance from q to triangle t (Ericson's closest point).
+///
+/// Example: `let d_m = get_triangle_distance_m(&triangle, q);`
+fn get_triangle_distance_m(t: &MeshTriangle, q: DVec3) -> f64 {
+    let [a, b, c] = t.p.map(|p| p.as_dvec3());
+    let (ab, ac, ap) = (b - a, c - a, q - a);
+    let (d1, d2) = (ab.dot(ap), ac.dot(ap));
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return ap.length();
+    }
+    let bp: DVec3 = q - b;
+    let (d3, d4) = (ab.dot(bp), ac.dot(bp));
+    if d3 >= 0.0 && d4 <= d3 {
+        return bp.length();
+    }
+    let cp: DVec3 = q - c;
+    let (d5, d6) = (ab.dot(cp), ac.dot(cp));
+    if d6 >= 0.0 && d5 <= d6 {
+        return cp.length();
+    }
+    let (vc, vb, va) = (d1 * d4 - d3 * d2, d5 * d2 - d1 * d6, d3 * d6 - d5 * d4);
+    let closest: DVec3 = if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        a + ab * (d1 / (d1 - d3))
+    } else if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        a + ac * (d2 / (d2 - d6))
+    } else if va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0 {
+        b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)))
+    } else {
+        let denominator: f64 = 1.0 / (va + vb + vc);
+        a + ab * (vb * denominator) + ac * (vc * denominator)
+    };
+    (q - closest).length()
 }
 
 /// `get_bounds` gives the box around `triangles`.
@@ -310,6 +371,7 @@ mod tests {
     //! | Placement | height, bottom on y = 0, centred | `the_block_is_placed` |
     //! | Ray | hits the block, passes beside it, stops short of it | `rays_hit_or_miss` |
     //! | Distance bound | far from the block, next to it | `distances_are_bounds` |
+    //! | Within a radius | inside the radius of a wall, just outside it | `walls_are_near_within_their_radius` |
 
     use super::*;
 
@@ -354,5 +416,15 @@ mod tests {
                 "bound over the hit at {q}"
             );
         }
+    }
+
+    #[test]
+    fn walls_are_near_within_their_radius() {
+        let model: MeshModel = MeshModel::Load("hesco_barrier", HEIGHT_M).expect("the Hesco block");
+        let (q0, dq) = (DVec3::new(-5.0, 0.7, 0.0), DVec3::X);
+        let (mu, _) = model.find_hit_mu(q0, dq, 0.0, 10.0).expect("a hit");
+        let wall: DVec3 = q0 + dq * mu;
+        assert!(model.is_within_m(wall - DVec3::X * 0.09, 0.1));
+        assert!(!model.is_within_m(wall - DVec3::X * 0.11, 0.1));
     }
 }

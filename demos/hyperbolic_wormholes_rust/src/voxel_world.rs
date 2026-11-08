@@ -61,6 +61,7 @@ const HORIZON_CAPTURE_FRAC: f64 = 1.02;
 const FALL_IN_PER_HORIZON: f64 = 2.0;
 const SUPPORTED_LAMBDA_SQUARED: f64 = 0.25;
 const BODY_RADIUS_M: f64 = 0.25;
+const MESH_WALL_M: f64 = 0.1;
 const HEAD_CLEARANCE_M: f64 = 0.15;
 const PROBE_LOW_M: f64 = 0.02;
 const PROBE_KNEE_M: f64 = 0.3;
@@ -70,7 +71,7 @@ const MAX_FLY_HEIGHT_M: f64 = 240.0;
 const UNSTICK_STEP_M: f64 = 0.25;
 const UNSTICK_MAX_STEPS: usize = 160;
 const PUSH_OUT_STEP_M: f64 = 0.05;
-const MAX_WALK_RISE_M: f64 = 0.3;
+const MAX_WALK_RISE_M: f64 = 0.5;
 const WALK_RISE_STEP_M: f64 = 0.02;
 const SUN_SHADOW_M: f64 = 80.0;
 const PUSH_OUT_STEP_COUNT: usize = 6;
@@ -1192,12 +1193,20 @@ impl VoxelWorld {
     }
 
     /// `get_material_at` gives the material of the cell holding point x among `candidates`, or 0.
+    /// A structure drawn as a mesh holds the points within `MESH_WALL_M` of its triangles, in the
+    /// material of its first shape.
     ///
     /// Example: `let m = world.get_material_at(x, &nearby);`
     fn get_material_at(&self, x: DVec4, candidates: &[usize]) -> u8 {
         for &k in candidates {
             let p: DVec4 = self.structures[k].inverse * x;
             let q: DVec3 = p.truncate() / p.w * self.r;
+            if let Some(m) = self.structures[k].mesh {
+                if self.meshes[m].is_within_m(q, MESH_WALL_M) {
+                    return self.get_shapes(k)[0].material;
+                }
+                continue;
+            }
             if let Some(shape) = self
                 .get_shapes(k)
                 .iter()
