@@ -76,15 +76,15 @@ pub struct SurfaceTextures {
     pub means: Vec<[f32; 4]>,
 }
 
-/// `make_mips` decodes one map and halves it down to 1x1.
+/// `make_mips` decodes one map, resizes it to `side_px` square and halves it down to 1x1.
 ///
-/// Example: `let mips = make_mips(&path)?;`
-fn make_mips(path: &Path) -> std::result::Result<Vec<RgbaImage>, String> {
+/// Example: `let mips = make_mips(&path, 2048)?;`
+pub(crate) fn make_mips(path: &Path, side_px: u32) -> std::result::Result<Vec<RgbaImage>, String> {
     let mut image: RgbaImage = image::open(path)
         .map_err(|e| format!("{}: {e}", path.display()))?
         .to_rgba8();
-    if image.dimensions() != (SIZE_PX, SIZE_PX) {
-        image = image::imageops::resize(&image, SIZE_PX, SIZE_PX, FilterType::Triangle);
+    if image.dimensions() != (side_px, side_px) {
+        image = image::imageops::resize(&image, side_px, side_px, FilterType::Triangle);
     }
     let mut mips: Vec<RgbaImage> = vec![image];
     while mips[mips.len() - 1].width() > 1 {
@@ -117,7 +117,7 @@ fn get_mean_albedo(image: &RgbaImage) -> [f32; 4] {
 /// first `channels` bytes of each pixel.
 ///
 /// Example: `let albedo = make_array(device, MTLPixelFormat::RGBA8Unorm_sRGB, 4, &layers)?;`
-fn make_array(
+pub(crate) fn make_array(
     device: &ProtocolObject<dyn MTLDevice>,
     format: MTLPixelFormat,
     channels: usize,
@@ -192,7 +192,7 @@ impl SurfaceTextures {
         if paths.iter().all(|p| p.exists()) {
             maps = paths
                 .par_iter()
-                .map(|p| make_mips(p))
+                .map(|p| make_mips(p, SIZE_PX))
                 .collect::<std::result::Result<_, _>>()?;
         } else {
             eprintln!(
