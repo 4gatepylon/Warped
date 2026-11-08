@@ -1742,7 +1742,7 @@
     toward its grey (luminance 0.2126 R + 0.7152 G + 0.0722 B); moved 60% toward light cyan #E0FFFF at the same
     luminance, so dark stays dark; × 1.5 through a shoulder that rolls the brightest channel off above 0.8 toward
     1, so nothing clips to flat white; then green moved into blue and held to 0.95 of blue, so nothing turns green.
-    On the `middle` view the ground turns from #A7A294 to #B2E2EE.
+    On the `middle` view the ground turns from #A8A295 to #B3E3EF.
   - **Backward, R2 "darker":** D as bright plus the red glow (0.4, 0.04, 0) × |D − 1|, then × 0.7. On the `middle`
     view the ground turns #540F00.
   - **Below walking strength:** the picked colour fades in, the gain and the green cap with it.
