@@ -515,6 +515,15 @@
 - **Rationale:** you asked for the bar to run out 4 times faster by shrinking it 4 times, and for more head bob;
   twice the depth is a first guess, easy to change (`BOB_WALK_M`, `BOB_SPRINT_M` in `src/voxel_world.rs`).
 
+### D49. No running on an empty energy bar
+
+- **Choice:** energy refills only while the player isn't holding `Shift` to move. Before, an empty bar refilled a
+  little in the very next frame, so holding `Shift` switched between running and walking every frame and the player
+  kept running at about two thirds of the sprint speed.
+- **Alternatives:** letting the bar refill while `Shift` is held but requiring some energy (say a tenth of the bar)
+  before running again.
+- **Rationale:** you asked that a player can run only while there is energy.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

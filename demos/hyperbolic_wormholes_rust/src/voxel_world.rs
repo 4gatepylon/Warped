@@ -1174,7 +1174,8 @@ impl VoxelPlayer {
         (body, world.r * sinh_h.asinh(), crossed)
     }
 
-    /// `step` moves the player one time step as the level does: walking or sprinting (or flying),
+    /// `step` moves the player one time step as the level does: walking or sprinting (or flying;
+    /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to spawn),
     /// colliding with blocks and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
     /// cells rise a little), jumping (the only way onto a block) and falling. A
@@ -1194,9 +1195,10 @@ impl VoxelPlayer {
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
         let len: f64 = forward.hypot(side);
         let settings: PlayerSettings = world.player;
-        self.is_sprinting = input.sprint && len > 0.0 && self.energy_frac > 0.0;
+        let wants_to_sprint: bool = input.sprint && len > 0.0;
+        self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
         self.energy_frac = (self.energy_frac
-            + if self.is_sprinting {
+            + if wants_to_sprint {
                 -dt_s / ENERGY_DRAIN_S
             } else {
                 dt_s / ENERGY_REFILL_S
@@ -1326,7 +1328,7 @@ mod tests {
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
-    //! | Sprint energy | full (sprints at sprint speed, drains), empty (walks), not sprinting (refills) | `sprinting_uses_energy` |
+    //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
 
     use super::*;
@@ -1348,6 +1350,7 @@ mod tests {
     const DECK_WALK_STEP_COUNT: usize = 30;
     const MIN_DECK_WALK_FRAC: f64 = 0.5;
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
+    const EMPTY_SPRINT_STEP_COUNT: usize = 10;
 
     /// `find_columns` finds, on structures standing upright on the ground, columns of cells (x, z)
     /// solid from the ground up to `solid_cells` (and, with `is_top_open`, empty for
@@ -1541,7 +1544,15 @@ mod tests {
         player.step(&world, &sprint, STEP_S, 0);
         assert!(player.is_sprinting && player.energy_frac < 1.0);
         player.energy_frac = 0.0;
-        player.step(&world, &sprint, STEP_S, 0);
+        for _ in 0..EMPTY_SPRINT_STEP_COUNT {
+            player.step(&world, &sprint, STEP_S, 0);
+            assert!(!player.is_sprinting && player.energy_frac == 0.0);
+        }
+        let walk: Input = Input {
+            sprint: false,
+            ..sprint
+        };
+        player.step(&world, &walk, STEP_S, 0);
         assert!(!player.is_sprinting && player.energy_frac > 0.0);
         let full_drain_steps: usize = (ENERGY_DRAIN_S / STEP_S).ceil() as usize;
         player.energy_frac = 1.0;
