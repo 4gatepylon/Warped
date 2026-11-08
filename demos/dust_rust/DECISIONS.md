@@ -88,7 +88,9 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
       at eye height (1.6 m above the sand), and each moved up to 1 m by `MOUTH_SEED` (122, mouth B mirroring A), as
       the user asks of anything moved on a map. **User?** they look a metre lower. The `laser_into_wormhole` bench
       view stands on a dune 3 m above the mouth's sand, so it now aims 0.2 rad down at the mouth's centre
-      (`LASER_INTO_WORMHOLE_PITCH_RAD`); level, its laser passed over the lowered throat.
+      (`LASER_INTO_WORMHOLE_PITCH_RAD`); level, its laser passed over the lowered throat. Frame times (2560x1440,
+      best of 6 alternating rounds of 15 frames, Apple M3 Pro): `wormhole` 10.2 → 9.6 ms, `wormhole_exit` 10.2 → 9.9,
+      `laser_into_wormhole` 15.9 → 13.1; the other views within 0.2 ms of before.
     - **Checked and found working** (tests in `parity_tests` and `play_tests`): every spawn on open sand with 20 m
       clear ahead, for 8 players a team; 15 s of walking, sprinting, jumping and crouching in 12 headings from each
       spawn, never blocked, sunk or past the edge; both ridges crossed on foot along six lines; every console turned
