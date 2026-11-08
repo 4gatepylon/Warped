@@ -309,8 +309,16 @@ Built on `claude/snow-planet-torus-rays`, 2026-11-08 (Claude Code), on layer 2 (
   - **Tried and dropped:** copies' pylons as their plain collision cylinders (under 1 ms, and they showed as flat
     coloured slabs); flakes only in near copies of the blizzard; sun and shadow rays without the loop (each under
     3%).
-  - **Still over (User):** every view is 1.5 to 2.3 times today's `staging/user-4gatepylon` (`blue_spawn` 13.0 →
-    22.5 ms, `black_hole` 15.4 → 35.5 ms). Where the time goes, for `blue_spawn`: 12.7 ms today; 16.3 with the
+  - **The user's second cut, quoting "Fog at 80 m + home lens":** from a player's height (`is_fog_wall_on`: a
+    looping snow world, eye below 20 m), far surfaces fade fully into the snow fog between 40 m and `FOG_END_M`
+    (80 m, a smoothstep on top of today's fog, so no wall shows), and a ray heading down stops there in fog.
+    Rising rays still reach the sky; views from high up keep today's fog. Each black hole is lensed only at its
+    copy nearest the eye (`get_lens_copy`, any ghost included, so a lens across a seam stays whole); every other
+    copy is a fogged dark disk of the visible core, 2.2 m (`BLACK_DISK_PER_M` 8). Gives up: far surfaces fade
+    sooner than today (40 to 80 m), and a hole half a period away swaps lens and disk as the eye passes halfway.
+  - **Still over (User):** with "C1 + C2", every view was 1.5 to 2.3 times today's `staging/user-4gatepylon`
+    (`blue_spawn` 13.0 → 22.5 ms, `black_hole` 15.4 → 35.5 ms); with "Fog at 80 m + home lens" as well, 1.2 to
+    2 times (`blue_spawn` 12.6 → 16.2 ms, `black_hole` 15.3 → 31.1 ms), 20 of 26 views still over 16.7 ms. Where the time goes, for `blue_spawn`: 12.7 ms today; 16.3 with the
     ghosts (layer 2: the ghost black holes' lenses past the seam); 18.1 with the loop's sky, sun and blizzard
     copies but no rays across seams; 25.8 with rays across seams (before the heuristics), 22.5 after them. The rest
     is the copies themselves within 112 m: their pylons, mounds and nearby black-hole lenses.

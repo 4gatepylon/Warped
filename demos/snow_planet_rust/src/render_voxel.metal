@@ -55,8 +55,9 @@ constant float FAR_S = 12.0;
 constant float SHADOW_M = 80.0;
 constant float SEAM_MIN_M = 0.001;
 constant int MAX_SHADOW_SEAM_COUNT = 3;
-constant float BLACK_DISK_PER_M = 20.0;
-constant float NEAR_COPY_LENS_M = 40.0;
+constant float BLACK_DISK_PER_M = 8.0;
+constant float FOG_END_M = 80.0;
+constant float FOG_RAMP_START_M = 40.0;
 constant float SCENE_TOP_M = 20.0;
 constant int MAX_BLIZZARD_COPIES = 6;
 constant float SURFACE_OFFSET_M = 0.02;
@@ -1016,6 +1017,11 @@ static float4x4 invert_lorentz(float4x4 m) {
     return t;
 }
 
+/** @brief `is_fog_wall_on` says whether far surfaces fade fully into the snow fog by `FOG_END_M` and rays heading down stop there (the user's "Fog at 80 m + home lens"): on a looping snow world, seen from a player's height (below `SCENE_TOP_M`), so views from high above keep today's fog. @par Example @code if (is_fog_wall_on(scene)) { ... } @endcode */
+static bool is_fog_wall_on(thread const Scene &scene) {
+    return scene.u.torus.w > 0.5 && scene.u.snow.x > 0.5 && scene.u.camera[3].y < sinh(SCENE_TOP_M / scene.u.curvature_radius_m);
+}
+
 /** @brief `carry_from_centre` carries a direction at the world origin (the sun, the planet) to x: on a looping world, with the same parts along the Fermi axes there (the glue keeps them, so the sun and sky match across the seams); otherwise by parallel transport. @par Example @code float4 l = carry_from_centre(scene, scene.u.sun.xyz, x); @endcode */
 static float4 carry_from_centre(thread const Scene &scene, float3 d, float4 x) {
     if (scene.u.torus.w < 0.5) return transport_from_centre(d, x);
@@ -1058,9 +1064,10 @@ static float find_seam_s(thread const Scene &scene, float4 x, float4 v, thread i
 }
 
 /** @brief `cross_seam` moves a ray at a seam of the looping world (point x, tangent v) across to the opposite seam by the glue (torus.rs): to its Fermi (u, v, h) less a period along `axis`, turned the same way against the Fermi axes. It returns the move, an isometry, whose inverse takes the moved ray to the straight continuation of the old one. @par Example @code cross_seam(scene, x, v, axis); @endcode */
-static float4x4 cross_seam(thread const Scene &scene, thread float4 &x, thread float4 &v, int axis) {
+static float4x4 cross_seam(thread const Scene &scene, thread float4 &x, thread float4 &v, int axis, thread int2 &cell) {
     float r = scene.u.curvature_radius_m;
     float3 f = get_fermi(x, r), g = f;
+    cell += axis == 0 ? int2(int(sign(f.x)), 0) : int2(0, int(sign(f.y)));
     if (axis == 0) g.x -= sign(f.x) * scene.u.torus.x * r; else g.y -= sign(f.y) * scene.u.torus.y * r;
     float4x4 m = make_fermi_frame(g, r) * invert_lorentz(make_fermi_frame(f, r));
     x = m * x;
@@ -1070,10 +1077,11 @@ static float4x4 cross_seam(thread const Scene &scene, thread float4 &x, thread f
 }
 
 /** @brief `wrap_into_cell` moves a ray past a seam of the looping world (one that left a warp's reach there) back into the cell by the glue, as torus.rs's `Torus::wrap_frame`, and returns the move (the identity if it was in the cell). @par Example @code wrap_into_cell(scene, x, v); @endcode */
-static float4x4 wrap_into_cell(thread const Scene &scene, thread float4 &x, thread float4 &v) {
+static float4x4 wrap_into_cell(thread const Scene &scene, thread float4 &x, thread float4 &v, thread int2 &cell) {
     float r = scene.u.curvature_radius_m;
     float3 f = get_fermi(x, r);
     float2 periods_m = scene.u.torus.xy * r, offset_m = -floor(f.xy / periods_m + 0.5) * periods_m;
+    cell += int2(floor(f.xy / periods_m + 0.5));
     if (all(offset_m == 0.0)) return float4x4(1.0);
     float4x4 m = make_fermi_frame(f + float3(offset_m, 0.0), r) * invert_lorentz(make_fermi_frame(f, r));
     x = m * x;
@@ -1214,7 +1222,8 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
         float4 xn = geodesic_point(x, l, seam_s);
         l = geodesic_tangent(x, l, seam_s);
         x = xn;
-        cross_seam(scene, x, l, axis);
+        int2 shadow_cell = int2(0);
+        cross_seam(scene, x, l, axis, shadow_cell);
         left -= seam_s;
     }
     return smoothstep(0.0, 1.0, h.lit);
@@ -2496,6 +2505,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     bool has_gradient = false;
     float4x4 wraps = float4x4(1.0);
     int seam_count = 0;
+    int2 cell = int2(0);
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         if (inside < 0) {
             float s_end = FAR_S, disk_s = NO_HIT_S;
@@ -2503,7 +2513,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             for (int w = 0; w < u.warp_count; w++) {
                 float a = -mdot(x, warps[w].centre), b = mdot(v, warps[w].centre), closest_sq = a * a - b * b, reach_cosh = cosh(warps[w].params.z);
                 if (b <= 0.0 || closest_sq >= reach_cosh * reach_cosh) continue;
-                if (seam_count > 0 && travelled > NEAR_COPY_LENS_M / r && warps[w].params.x < HALF_KIND) {
+                if (warps[w].params.x < HALF_KIND && any(cell != int2(round(warps[w].lens.zw)))) {
                     float disk_cosh = cosh(warps[w].params.y * BLACK_DISK_PER_M);
                     if (closest_sq < disk_cosh * disk_cosh) disk_s = min(disk_s, clamp_atanh(b / a));
                     continue;
@@ -2519,6 +2529,9 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             }
             bool is_disk = disk_s < s_end;
             if (is_disk) { s_end = disk_s; entering = -1; seam_axis = -1; }
+            float fog_s = is_fog_wall_on(scene) && v.y <= 0.0 ? max(FOG_END_M / r - travelled, 0.0) : NO_HIT_S;
+            bool is_fog = fog_s < s_end;
+            if (is_fog) { s_end = fog_s; entering = -1; seam_axis = -1; is_disk = false; }
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
@@ -2528,12 +2541,12 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
-            if (is_disk) { outcome = OUTCOME_DISK; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+            if (is_disk || is_fog) { outcome = OUTCOME_DISK; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (seam_axis >= 0) {
                 float4 xn = geodesic_point(x, v, s_end);
                 v = geodesic_tangent(x, v, s_end);
                 x = xn;
-                wraps = cross_seam(scene, x, v, seam_axis) * wraps;
+                wraps = cross_seam(scene, x, v, seam_axis, cell) * wraps;
                 seam_count++;
                 travelled += s_end;
                 last_warp = -1;
@@ -2584,7 +2597,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             last_warp = inside; inside = -1; has_gradient = false;
             if (u.torus.w > 0.5 && travelled < u.torus.z) {
                 float4 x_before = x;
-                wraps = wrap_into_cell(scene, x, v) * wraps;
+                wraps = wrap_into_cell(scene, x, v, cell) * wraps;
                 if (any(x != x_before)) last_warp = -1;
             }
         }
@@ -2636,9 +2649,13 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
         return color;
     }
     if (scene.u.snow.x > 0.5) {
-        float far = end.surface.x == OUTCOME_HIT || end.surface.x == OUTCOME_DISK ? 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - SNOW_FOG_START_M, 0.0) / scene.u.snow.x) : haze_frac;
+        bool is_surface = end.surface.x == OUTCOME_HIT || end.surface.x == OUTCOME_DISK;
+        float distance_m = end.grid.w * scene.u.curvature_radius_m;
+        float far = is_surface ? 1.0 - exp(-max(distance_m - SNOW_FOG_START_M, 0.0) / scene.u.snow.x) : haze_frac;
         float3 fog = to_linear(SNOW_HORIZON) + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
-        return mix(color, fog, SNOW_FOG_MAX_FRAC * far);
+        float fog_frac = SNOW_FOG_MAX_FRAC * far;
+        if (is_surface && is_fog_wall_on(scene)) fog_frac = max(fog_frac, smoothstep(FOG_RAMP_START_M, FOG_END_M, distance_m));
+        return mix(color, fog, fog_frac);
     }
     float3 haze = HAZE_COLOR + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
     return mix(color, haze, HAZE_MAX_FRAC * haze_frac);
@@ -2663,7 +2680,7 @@ static float3 add_blizzards(thread const Scene &scene, float3 color, VoxelRayEnd
     float3 a = get_fermi(x, r);
     float3 dir = normalize(get_fermi(geodesic_point(x, v, 1.0 / r), r) - a);
     bool is_looping = u.torus.w > 0.5;
-    float length_m = end.surface.x != OUTCOME_HIT ? BLIZZARD_SKY_M : is_looping ? end.grid.w * r : length(get_fermi(end.point, r) - a);
+    float length_m = end.surface.x == OUTCOME_DISK ? end.grid.w * r : end.surface.x != OUTCOME_HIT ? BLIZZARD_SKY_M : is_looping ? end.grid.w * r : length(get_fermi(end.point, r) - a);
     float3 snow_light = to_linear(BLIZZARD_FOG);
     float transmit = 1.0;
     float3 added = float3(0.0);
