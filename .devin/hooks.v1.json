@@ -1,0 +1,6 @@
+{
+  "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "timeout": 60,
+    "command": "python3 -I \"$DEVIN_PROJECT_DIR/.devin/hooks/session_worktree.py\""}]}],
+  "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "timeout": 60,
+    "command": "python3 -I \"$DEVIN_PROJECT_DIR/.devin/hooks/session_worktree.py\""}]}]
+}
