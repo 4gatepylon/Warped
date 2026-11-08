@@ -10,9 +10,7 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-43 Hold for the flashlight.** The flashlight shouldn't toggle: it stays on only while the right button is
-  held. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/flashlight-hold`, 2026-11-07.
+Nothing yet.
 
 ## Open
 
@@ -91,3 +89,4 @@ is in [`AGENTS.md`](AGENTS.md).
 - [x] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129.
 - [x] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
+- [x] **W-43 Hold for the flashlight.** The flashlight stays on only while the right button is held. #133.
