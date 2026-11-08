@@ -11,9 +11,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
-  demo's `AGENTS.md` that any new asset gets added to that page. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/credits-page`, 2026-11-07.
 - [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
@@ -121,6 +118,8 @@ are here too, since the user hadn't confirmed them.
   speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
   white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2".
   #249.
+- [?] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
+  demo's `AGENTS.md` that any new asset gets added to that page. #262.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
   bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
@@ -130,7 +129,9 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
   lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
   laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
-  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256.
+  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256. After playtesting
+  #256: "move the gun back so the handle of the gun is offscreen. it was fine how it was before, just make the gun
+  larger." #263.
 - [?] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
   player in the game as a dot in their team's colour; the minimap already showed those in reach. #250.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
