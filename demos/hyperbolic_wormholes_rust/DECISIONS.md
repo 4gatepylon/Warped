@@ -1192,7 +1192,8 @@
   It happens when you are INSIDE it", and "the transformation is still DARK BLUE but it has to be very close to white
   as I had asked".
 - **Superseded in part by:** D100, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
-  backward, which you picked, in place of the 85% white; where and when the shift shows stays as here.
+  backward, which you picked, in place of the 85% white; the inside reaches 9 throat radii (3.6 m), not 5, so the
+  shift lasts twice as long, about 0.6 s at walking speed.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1636,9 +1637,13 @@
 
 ### D100. The wormhole Doppler shift in the colours you picked, for W-82 (wormhole colour from motion)
 
-- **Choice:** D84 keeps where and when the shift shows (only within about 2 m of the throat, × the speed along the
-  view, no timer); its colours are now the ones you picked from sheets made by an exact Python copy of the shader.
-  The real shader matches that copy to within 1 level in 255 on the `middle` and `red_pylon` views.
+- **Choice:** D84 keeps how the shift shows (depth inside the mouth × the speed along the view, no timer); its
+  colours are now the ones you picked from sheets made by an exact Python copy of the shader, and it lasts twice as
+  long. The real shader matches that copy to within 1 level in 255 on the `middle` and `red_pylon` views.
+  - **Twice as long:** the inside now reaches 9 throat radii (3.6 m on Lunar Surface), not 5 (2 m). The smoothstep
+    from the throat out spans 8 throat radii instead of 4, so the shift's shape is the same, stretched to twice the
+    time: walking through mouth A at 10 m/s it lasts 38 frames (0.63 s) instead of 19 (0.32 s). Doubling the radius
+    itself, to 10 throat radii, would have made it 2.25 times as long, since the ramp starts at the throat.
   - **The Doppler step:** each channel shows the light at D times its wavelength (the spectrum at 610, 550 and 465
     nm, 0 at 400 and 700 nm), with D = √(1 − β²) / (1 − β cos θ′), cos θ′ = 1 − (1 − cos θ) / 2, θ the angle off
     the middle of the screen. β is 0.09 forward and −0.3 backward at walking speed, growing with it beyond.
@@ -1660,7 +1665,9 @@
   - #272's flash, 85% of the way to a pale blue-white (0.86, 0.93, 1.0) forward or a warm white (1.0, 0.92, 0.84)
     backward, chosen before your picks reached it;
   - #259's deep blue (β 0.2, D¹, no paling or whitening).
-- **Rationale:** from the sheets you said "i like option 8 for the wormhole" and "for red i like r2".
+- **Rationale:** from the sheets you said "i like option 8 for the wormhole" and "for red i like r2"; then "make a
+  PR that makes it take slightly longer; ideally just double its radius or wahtever (ioe walking at same speed
+  should take exactly trwice as long of time showing me cyan or red)".
 
 ## Workload
 
