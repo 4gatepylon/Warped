@@ -37,6 +37,7 @@ mod render_voxel;
 mod scene_data;
 mod settings;
 mod shapes;
+mod spaceships;
 mod terrain;
 mod viewmodel;
 mod voxel_clearance;
@@ -2591,6 +2592,7 @@ impl Session {
         let time_s: f64 = self.start.elapsed().as_secs_f64();
         if let Some(voxel) = &mut self.voxel {
             voxel.world.light_consoles(off_mask, disabling_mask, time_s);
+            voxel.world.sky_time_s = spaceships::get_utc_s();
             let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
             voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }
