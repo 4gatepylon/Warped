@@ -22,7 +22,17 @@ is in [`AGENTS.md`](AGENTS.md).
   pylon. They all have the same ability for the player to place two wormholes if the player wants. It should be
   possible for all of them to press E when you're next to the pylon to disable it. The patterns for the pylons are
   three for lunar and three for dust. Dark forest and two for snow, and then only one pylon for the space station."
-  And: "Respawn timers and all that stuff should be the same throughout." Claimed by Claude Code (session
+  And: "Respawn timers and all that stuff should be the same throughout." And, about each level's own features:
+  "dust is special in that it has basically this wind. It's like a sandstorm, and the wind bends the laser in the
+  direction of the wind. [...] Dust is also hyperbolic. [...] Dark Forest is like the toroidal setup [...] meant to be
+  kind of dark. There's meant to be a little bit of light coming in between the foliage. It's meant to be covered with
+  wormholes [...] a planet or level where you can access these ladders that let you go into the trees. So it's kind of
+  like a Wookiee planet style, but with bamboo. Snow Planet has [...] exactly one instance of basically a tall
+  cylinder in the map that's like a blizzard zone. And if you enter there, you're slowed and you take damage. And the
+  damage should, like in all the other variants or locations of the game, sort of jitter your screen and give you like
+  the red and blur coming in from the outside. This is something that Lunar has, and that everything has to have.
+  Whenever you take damage, in the past, the only ways to take damage were basically by getting shot, but here there's
+  like a natural world as well." Claimed by Claude Code (session
   `wizardly-hamilton-23a121` and its subagents), one branch per level, 2026-11-08.
   - **Where the work is** (for any agent picking it up): a parity audit of every level against Lunar Surface on
     `claude/levels-checks`, then each level's fixes on its own agent's branch (`claude/city-sphere-fixes`,
