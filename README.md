@@ -6,30 +6,26 @@ players can place objects such as black holes that bend the space around them.
 ## Layout
 
 ```
-clients/mac/        # the game client, one folder per platform (macOS first)
-management_server/  # starts and stops game servers, and tracks who may join each
-game_server/        # runs one room in real time; the authority on its state
-common/protocol/    # every message and API between components
+game/               # the Warped game: the window (`warped`), the game server (`warped-server`), shared code
+game_design/        # the game's design: levels, rules, weapons
+common/maps/        # the levels' layouts in one portable format, with a validator
+common/protocol/    # the messages between the game window and the game server
 common/physics/     # the physics spec and the test cases every implementation passes
 demos/              # experiments that de-risk mechanics, weapons and physics before we build them
 infra/              # the Rust demo's cloud deploy on Google Cloud (Terraform) and its download page
 notes/              # notes to keep for future reference: knowledge, thoughts, background reading
 ```
 
-Components may use different languages, so `common/` holds specifications, not shared code.
+`common/` holds specifications and data, not shared code.
 
-## Play the starter game on your Wi-Fi
+## Play
 
-On one Mac, start the servers; the first line it prints is the management server's URL:
-
-```bash
-make -C management_server run-management-server
-```
-
-On each player's Mac, with Rust installed (or with a copy of the built client):
+The game is moving from [`demos/hyperbolic_wormholes_rust/`](demos/hyperbolic_wormholes_rust/README.md) into
+[`game/`](game/REFACTOR_PLAN.md). Until the move is done, play the demo, as its README says:
 
 ```bash
-make -C clients/starter run-client MANAGEMENT_SERVER_URL=http://<that URL's IP>:8000
+make -C demos/hyperbolic_wormholes_rust serve-game
+make -C demos/hyperbolic_wormholes_rust join-game SERVER=127.0.0.1
 ```
 
 ## Rough checklist to full game

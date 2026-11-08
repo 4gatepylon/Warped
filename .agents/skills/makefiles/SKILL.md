@@ -5,7 +5,7 @@ description: Write or change a component's Makefile in this repo - which targets
 
 # Makefiles
 
-Each component folder (`management_server/`, `game_server/`, each `clients/<platform>/`) has a
+Each component folder (`game/`, `common/maps/`, each demo in `demos/`) has a
 Makefile that is its entry point, whatever language the component is in: `make help` says how to
 use it, and every other target says what it does and what it does it to, so `make <target>` reads
 without opening the Makefile.

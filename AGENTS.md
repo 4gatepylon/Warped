@@ -48,7 +48,7 @@ when to ask, the template, and where the list goes (PR description or a per-expe
 
 Everything that must not be committed (compiler output, generated code, logs and other run
 outputs) goes in one of these git-ignored folders at the root of its component folder (e.g.
-`game_server/.build/`), never at the repository root or next to the sources. Any other git-ignored
+`game/.build/`), never at the repository root or next to the sources. Any other git-ignored
 folder a component needs is dot-prefixed too. Each component's `.gitignore` lists its folders, and
 its README says which scripts write to them.
 

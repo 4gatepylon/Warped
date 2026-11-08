@@ -1,6 +1,0 @@
-.venv/
-.build/
-.artifacts/
-.pytest_cache/
-.ruff_cache/
-__pycache__/

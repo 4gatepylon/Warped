@@ -1,6 +1,0 @@
-# `config.toml` makes Cargo write its output to `.build/`, as the root `AGENTS.md` asks.
-#
-# Example:
-#     cargo build --release
-[build]
-target-dir = ".build"
