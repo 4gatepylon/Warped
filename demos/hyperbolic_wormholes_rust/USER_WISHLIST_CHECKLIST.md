@@ -10,7 +10,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-Nothing yet.
+- [~] **W-39 Key bindings.** Which key crouches, moves, jumps, switches weapons and so on can be set in YAML. Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/key-bindings`, 2026-11-07.
 
 ## Open
 
@@ -18,7 +19,6 @@ Nothing yet.
   curvature by default (and at most twice).
 - [ ] **W-38 Soft map edge.** Instead of a wall at the map's edge, players get slower and slower as they move off the
   map, so they can never leave it, and things stretch longer and longer: a relativistic barrier rather than a block.
-- [ ] **W-39 Key bindings.** Which key crouches, moves, jumps, switches weapons and so on can be set in YAML.
 - [ ] **W-40 Graphics caveats.** Fix the Lunar Surface graphics caveats listed in `PLAYTEST.md` ("Graphics on Lunar
   Surface, to fix in later pull requests"); slightly wrong graphics were accepted for playtesting "and we can fix
   them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
