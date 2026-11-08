@@ -245,6 +245,9 @@ Speeds are set per level as a multiple of the level map's own speeds (`movement`
 - A player climbs onto a block only by jumping; walking into a wall doesn't push them up it.
 - The view bobs with each step: by 8 cm at 2 steps a second walking, and by 14 cm at 2.8 steps a
   second sprinting (each player's own setting).
+- The gun in hand sways with those steps: the hands slide it 2 cm left and right walking and 4 cm
+  sprinting, and a longer gun's muzzle lags the other way, so the 1.23 m sniper rifle swings 1.7° to
+  3.4° and the 0.30 m revolver a quarter of that (each player's own setting).
 - A player's path bends near a warp object like light does, and the view turns with it, so walking
   into a wormhole mouth takes the player through it.
 
