@@ -122,12 +122,12 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
   the blue spawn stands on it; W-94 replaces the pad with a model later. #210.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
-- [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
-  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
-  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
-  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
-  show a redshift instead. The user wants video or image demos to confirm. #259. The user's picks from the colour
-  sheets: "i like option 8 for the wormhole", and "for red i like r2". #NNN.
+- [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
+  #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
+  velocity: as long as you are in the wormhole and moving, it shows up blue (based on your velocity and your place in
+  the wormhole); it should NOT go down with a timer. Once you're out of the wormhole it should go away immediately.
+  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. The user's
+  picks from the colour sheets: "i like option 8 for the wormhole", and "for red i like r2". #NNN.
 - [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
   lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
   laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
