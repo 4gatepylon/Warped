@@ -717,6 +717,22 @@
   but it needs another message).
 - **Rationale:** you asked that players never spawn one on top of another.
 
+### D63. A health bar, and bars in segments
+
+- **Choice:**
+  - **Health:** the server adds a byte of health per player to every snapshot (it already counted each player's
+    damage), and each window reads its own. In a game on a server the health bar sits in the bottom left, above
+    the others. It has one segment per rifle body hit (12): a rifle body hit takes one, a head hit six, the sniper
+    all of them. It is full again after respawning.
+  - **Segments:** the rifle's bar now shows its shots left before overheating, one segment per shot, red while
+    overheated. The sprint energy bar has 10 segments.
+  - **Rounding:** a segment counts as full once more than 5% of it is filled, so the byte's rounding never shows
+    a lost segment as full.
+- **Alternatives:** health in each player's record (other players' health could then be shown over their heads,
+  but every record would change); a separate message to the player who was hit (it could be lost).
+- **Rationale:** you asked for a health bar so players know they were hit, and for the health, ammo and energy
+  bars to be discrete.
+
 
 ## Baselines
 

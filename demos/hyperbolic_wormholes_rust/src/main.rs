@@ -108,6 +108,12 @@ const WAND_RECOIL_M: f32 = 0.035;
 const WAND_RECOIL_TILT_RAD: f32 = 0.12;
 const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
 const HEAT_BAR_FILL_COLOR: [f32; 4] = [1.0, 0.6, 0.2, 0.9];
+const HEALTH_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.87];
+const HEALTH_BAR_FILL_COLOR: [f32; 4] = [0.35, 0.95, 0.45, 0.9];
+const ENERGY_SEGMENT_COUNT: u32 = 10;
+const MAX_BAR_SEGMENT_COUNT: u32 = 20;
+const BAR_GAP_FRAC: f32 = 0.002;
+const BAR_FILL_TOLERANCE: f64 = 0.05;
 const HEAT_BAR_OVERHEATED_COLOR: [f32; 4] = [1.0, 0.15, 0.1, 0.9];
 const WAND_LASER_SHAFT_HALF_M: [f32; 4] = [0.011, 0.011, 0.16, 0.0];
 const WAND_LASER_SHAFT_COLOR: [f32; 4] = [0.2, 0.17, 0.22, 1.0];
@@ -2649,31 +2655,34 @@ impl Session {
         ])
     }
 
-    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the progress of turning
-    /// off a console (while holding `E` on one) below the middle
-    /// and, on a voxel map, the sprint energy bar (its frame and its fill) in the bottom left corner.
+    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view. In the bottom left, as
+    /// segmented bars (`make_segmented_bar`): this player's health in a game on a server (one segment
+    /// per rifle body hit), the rifle's shots left before it overheats (with the rifle in hand), and
+    /// on a voxel map the sprint energy. Below the middle, the progress of turning off a console
+    /// (while holding `E` on one).
     ///
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
         let mut rects: Vec<render_metal::OverlayRect> = Vec::new();
+        if let Some(multiplayer) = &self.multiplayer {
+            rects.extend(make_segmented_bar(
+                HEALTH_BAR_MIN_FRAC,
+                u32::from(self.settings.rifle.body_hits_to_eliminate),
+                multiplayer.client.health_frac,
+                HEALTH_BAR_FILL_COLOR,
+            ));
+        }
         if self.gun == Gun::Rifle {
-            let ([x, y], [w, h]) = (HEAT_BAR_MIN_FRAC, ENERGY_BAR_SIZE_FRAC);
-            rects.extend([
-                render_metal::OverlayRect {
-                    min_frac: [x, y],
-                    max_frac: [x + w, y + h],
-                    color: ENERGY_BAR_BACK_COLOR,
+            rects.extend(make_segmented_bar(
+                HEAT_BAR_MIN_FRAC,
+                self.settings.rifle.shots_until_overheat,
+                1.0 - self.rifle_heat_frac.min(1.0),
+                if self.is_overheated {
+                    HEAT_BAR_OVERHEATED_COLOR
+                } else {
+                    HEAT_BAR_FILL_COLOR
                 },
-                render_metal::OverlayRect {
-                    min_frac: [x, y],
-                    max_frac: [x + w * self.rifle_heat_frac.min(1.0) as f32, y + h],
-                    color: if self.is_overheated {
-                        HEAT_BAR_OVERHEATED_COLOR
-                    } else {
-                        HEAT_BAR_FILL_COLOR
-                    },
-                },
-            ]);
+            ));
         }
         if let Some((_, held_s)) = self.multiplayer.as_ref().and_then(|m| m.disabling) {
             let ([x, y], [w, h]) = (DISABLE_BAR_MIN_FRAC, DISABLE_BAR_SIZE_FRAC);
@@ -2695,20 +2704,12 @@ impl Session {
         let Some(voxel) = &self.voxel else {
             return rects;
         };
-        let [x, y] = ENERGY_BAR_MIN_FRAC;
-        let [w, h] = ENERGY_BAR_SIZE_FRAC;
-        rects.extend([
-            render_metal::OverlayRect {
-                min_frac: [x, y],
-                max_frac: [x + w, y + h],
-                color: ENERGY_BAR_BACK_COLOR,
-            },
-            render_metal::OverlayRect {
-                min_frac: [x, y],
-                max_frac: [x + w * voxel.player.energy_frac as f32, y + h],
-                color: ENERGY_BAR_FILL_COLOR,
-            },
-        ]);
+        rects.extend(make_segmented_bar(
+            ENERGY_BAR_MIN_FRAC,
+            ENERGY_SEGMENT_COUNT,
+            voxel.player.energy_frac,
+            ENERGY_BAR_FILL_COLOR,
+        ));
         rects
     }
 
@@ -2820,6 +2821,38 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
         Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
         None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
     }
+}
+
+/// `make_segmented_bar` gives a HUD bar of `segment_count` separate segments (at most
+/// `MAX_BAR_SEGMENT_COUNT`) from `min_frac`, `ENERGY_BAR_SIZE_FRAC` in all: enough of them in
+/// `fill_color` to cover `filled_frac` of the bar (a segment counts once it is more than
+/// `BAR_FILL_TOLERANCE` full), the rest in the bar's back colour.
+///
+/// Example: `let rects = make_segmented_bar([0.03, 0.87], 12, 0.5, [0.3, 1.0, 0.4, 0.9]);`
+fn make_segmented_bar(
+    min_frac: [f32; 2],
+    segment_count: u32,
+    filled_frac: f64,
+    fill_color: [f32; 4],
+) -> Vec<render_metal::OverlayRect> {
+    let n: u32 = segment_count.clamp(1, MAX_BAR_SEGMENT_COUNT);
+    let filled_count: f64 = (filled_frac * f64::from(n) - BAR_FILL_TOLERANCE).ceil();
+    let [w, h] = ENERGY_BAR_SIZE_FRAC;
+    let segment_w: f32 = (w - BAR_GAP_FRAC * (n - 1) as f32) / n as f32;
+    (0..n)
+        .map(|i| {
+            let x: f32 = min_frac[0] + i as f32 * (segment_w + BAR_GAP_FRAC);
+            render_metal::OverlayRect {
+                min_frac: [x, min_frac[1]],
+                max_frac: [x + segment_w, min_frac[1] + h],
+                color: if f64::from(i) < filled_count {
+                    fill_color
+                } else {
+                    ENERGY_BAR_BACK_COLOR
+                },
+            }
+        })
+        .collect()
 }
 
 /// `get_eyes` gives where other players' eyes are, so spawning players can keep clear of them.
@@ -3171,6 +3204,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
+    //! | Bar fill | empty, a sliver (one segment), 11 of 12 after the network's byte rounding, full | `segmented_bars_count_whole_segments` |
 
     use super::*;
 
@@ -3196,6 +3230,23 @@ mod tests {
         assert_eq!(
             take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false),
             Some(settings.rifle.body_hits_to_eliminate)
+        );
+    }
+
+    #[test]
+    fn segmented_bars_count_whole_segments() {
+        const SEGMENT_COUNT: u32 = 12;
+        let filled = |frac: f64| -> usize {
+            make_segmented_bar([0.0, 0.0], SEGMENT_COUNT, frac, HEALTH_BAR_FILL_COLOR)
+                .iter()
+                .filter(|rect| rect.color == HEALTH_BAR_FILL_COLOR)
+                .count()
+        };
+        let eleven_twelfths_frac: f64 =
+            (11.0 / 12.0 * f64::from(u8::MAX)).round() / f64::from(u8::MAX);
+        assert_eq!(
+            [0.0, 0.01, eleven_twelfths_frac, 1.0].map(filled),
+            [0, 1, 11, 12]
         );
     }
 }
