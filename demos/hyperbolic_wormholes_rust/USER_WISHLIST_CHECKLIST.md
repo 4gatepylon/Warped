@@ -11,6 +11,14 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
+  wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac (the same agent as W-96 (a
+    different rifle model)), branch `claude/rifle-sway`, to be cut from `staging` once W-96 merges; pictures will be in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-102/`
+    (temporary, under `/private/tmp`). State, 2026-11-08: not started; starts after W-96 (a different rifle model) merges.
 - [~] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly. The user asked for the loading screen "in the same style as the progress
   bar while disabling a pylon". Claimed by Claude Code (worktree `Warped-loading`), branch `claude/loading-screen`,
@@ -129,8 +137,6 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
   on W-68 (reality bend), which adds the pylons and the black hole.
-- [ ] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
-  wishlist having rifle going side to side when jogging like a normal rifle").
 
 ## Pending user review
 
