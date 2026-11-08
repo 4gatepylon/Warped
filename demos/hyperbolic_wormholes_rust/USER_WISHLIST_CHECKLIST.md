@@ -61,10 +61,10 @@ is in [`AGENTS.md`](AGENTS.md).
   `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
   - **Where the work is** (for any agent picking it up): worktree
     `/Users/4gate/git/Warped/.claude/worktrees/agent-adb5321f113e35420` on the user's Mac, branch
-    `claude/third-person` (on this Mac only so far; to be pushed to `origin`), pictures in
+    `claude/third-person` (pushed to `origin`), pictures in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-61/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering; waits
-    for the user's OK before merging.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: done and tested, PR #286 open
+    into `staging` (`V` toggles; 150 tests pass); waits for the user's OK before merging.
 - [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
