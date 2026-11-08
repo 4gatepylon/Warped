@@ -59,7 +59,8 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
   black-hole and wormhole lensing work unchanged. The level loops (`src/torus.rs`, DECISIONS S11, S14): walking
   past u = ±56 m or v = ±36 m carries on from the other side, and copies ("ghosts") of what stands near a seam
   stand past the opposite one, so it blocks and bends light from both sides. Light rays cross the seams too, out to
-  224 m (`MAX_COPY_DISTANCE_M`), so the level is seen repeating; past that, only the empty snowfield. Shooting across
+  112 m (`MAX_COPY_DISTANCE_M`), so the level is seen repeating (far black holes as plain dark disks, copies without
+  beams); past that, only the empty snowfield. Shooting across
   the seams comes next.
 - Blizzards: `VoxelWorld::find_blizzard` (a point's blizzard), `get_blizzard_frac` (how much of a shot's reach a
   chord uses) and `stop_in_blizzards` (cuts the laser) in `src/voxel_world.rs`; `VoxelPlayer::step` slows the

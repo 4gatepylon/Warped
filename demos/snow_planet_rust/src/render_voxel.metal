@@ -57,6 +57,7 @@ constant float SEAM_MIN_M = 0.001;
 constant int MAX_SHADOW_SEAM_COUNT = 3;
 constant float BLACK_DISK_PER_M = 20.0;
 constant float NEAR_COPY_LENS_M = 40.0;
+constant float SCENE_TOP_M = 20.0;
 constant int MAX_BLIZZARD_COPIES = 6;
 constant float SURFACE_OFFSET_M = 0.02;
 constant float TERRAIN_SHADOW_START_M = 1.0;
@@ -2511,7 +2512,8 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 if (s_in < s_end) { s_end = s_in; entering = w; }
             }
             int seam_axis = -1;
-            if (u.torus.w > 0.5 && travelled < u.torus.z) {
+            bool is_above_scene = x.y > sinh(SCENE_TOP_M / r) && v.y > 0.0;
+            if (u.torus.w > 0.5 && travelled < u.torus.z && !is_above_scene) {
                 float seam_s = find_seam_s(scene, x, v, seam_axis);
                 if (seam_s < s_end) { s_end = seam_s; entering = -1; } else seam_axis = -1;
             }
@@ -2522,7 +2524,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             float glass_s = NO_HIT_S;
             trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
-            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+            if (u.beam_count > 0 && seam_count == 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }

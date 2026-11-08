@@ -297,8 +297,20 @@ Built on `claude/snow-planet-torus-rays`, 2026-11-08 (Claude Code), on layer 2 (
 - **Blizzard:** the fog and flakes cover every copy of the white-out the first stretch of a ray passes, and the fog
   length is how far the ray went.
 - **The camera** is moved into the cell (a third-person camera can stand past a seam).
-- **Cost (User):** every view more than doubles at 2560×1440 (for example `blue_spawn` 15.7 → 39.1 ms, `black_hole`
-  19.5 → 73.6 ms, best of 2 rounds on a busy Mac); copies out to 112 m instead of 224 m save only about a fifth.
-  The cost is the repeated level itself: rays that used to reach empty snow or sky now cross seams and meet
-  copies' pylons, beams and black-hole lenses. Ways down, for the user: no lensing for copies past one period
-  (draw only their black disk), a lower render scale (the window already lowers it to hold 60 fps), or fewer copies.
+- **Cost (User):** the first version more than doubled every view at 2560×1440 (`blue_spawn` 15.7 → 39.1 ms,
+  `black_hole` 19.5 → 73.6 ms). The user chose "C1 + C2" and allowed heuristics that look right ("you can use
+  heuristics to achieve this even if it might be sometimes physically incorrect slightly"). Built:
+  - **C1:** a black hole met after a seam and more than `NEAR_COPY_LENS_M` (40 m) along the ray is a black disk of
+    its capture radius (`BLACK_DISK_PER_M`, 20 × its mass, about 5.5 m, measured with the laser), fogged like a far
+    surface, with no lens. Gives up the far copies' lensing rings; near copies keep theirs, so no seam shows.
+  - **C2:** copies out to 112 m (`MAX_COPY_DISTANCE_M`), one period, not 224 m.
+  - **Heuristics kept:** past a seam, no beams (the copies' 400 m beacon beams and lasers aren't drawn, 2 to 3 ms,
+    and the sky is less busy); a ray rising above `SCENE_TOP_M` (20 m) isn't carried across seams (nothing to meet).
+  - **Tried and dropped:** copies' pylons as their plain collision cylinders (under 1 ms, and they showed as flat
+    coloured slabs); flakes only in near copies of the blizzard; sun and shadow rays without the loop (each under
+    3%).
+  - **Still over (User):** every view is 1.5 to 2.3 times today's `staging/user-4gatepylon` (`blue_spawn` 13.0 →
+    22.5 ms, `black_hole` 15.4 → 35.5 ms). Where the time goes, for `blue_spawn`: 12.7 ms today; 16.3 with the
+    ghosts (layer 2: the ghost black holes' lenses past the seam); 18.1 with the loop's sky, sun and blizzard
+    copies but no rays across seams; 25.8 with rays across seams (before the heuristics), 22.5 after them. The rest
+    is the copies themselves within 112 m: their pylons, mounds and nearby black-hole lenses.
