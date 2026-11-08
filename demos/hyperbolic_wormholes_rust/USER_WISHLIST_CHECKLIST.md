@@ -10,6 +10,10 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": if you crouch, the energy for
+  running is recharged at the same rate as when you run (drains it); if you walk, it is recharged at half that. This
+  is the default in the YAML, and in general it should be parameterized. Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/crouch-recharge`, 2026-11-07.
 - [~] **W-80 Smoother bar pulses.** The pulsing should start where the bar's filled part ends: losing health, it starts
   at the last hit point, not the bar's end (empty slots don't count). The blue pulse going left should be less dark,
   and it too starts on the last filled slot. Pulses shouldn't light whole segments: they should look more Gaussian
@@ -105,8 +109,6 @@ is in [`AGENTS.md`](AGENTS.md).
   shadows on the hills.
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
-- [ ] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": crouching recharges (presumably
-  the sprint energy) faster than walking does.
 
 ## Done
 
