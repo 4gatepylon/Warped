@@ -1036,6 +1036,46 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D81. Dust and mist from shots into the ground
+
+- **Choice:**
+  - **When:** a shot of either gun, by any player, that hits the ground (the flat ground or the crater's terrain)
+    throws up a burst where it lands, when its beam front gets there. Shots into blocks or players raise none. At
+    most 12 bursts show at once; a new one replaces the oldest.
+  - **Grains:** a sniper shot throws 44 grains of grey-brown dust (2 to 4.5 cm), a rifle shot 16 at 0.65 times the
+    speed. They fly up a cone (0.5 rad) around the ground's normal, tilted a little back toward the shooter, at 2 to
+    6 m/s, rising up to 3 m, then land on the ground's slope and lie there.
+  - **Mist:** 7 puffs for a sniper shot, 3 for a rifle shot (0.65 times as big), lighter than the grains. They drift
+    out at 1.5 to 3.5 m/s, slowing to a stop within about half a second, while they swell from 0.12 m to 0.6 to
+    1.2 m.
+  - **Fading:** each particle fades from a third of its life (0.9 to 2 s) to nothing, so a burst is gone within 2 s.
+  - **Gravity:** the map's own, 6 m/s² on Lunar Surface, not the 30 m/s² the server settings give players for their
+    quick jumps. At 30 m/s² the grains would be back on the ground within half a second, before anyone saw them in
+    the air.
+  - **Light:** the sun lights the dust like the ground: the side of a grain or puff that faces the sun is brighter,
+    and dust seen toward the sun glows. A burst in shadow (checked once, when it starts) gets the ambient light and
+    some earthshine only.
+  - **Drawing:** in the world, by the voxel ray tracer (`scan_dust`), so the dust is seen from any angle, through
+    wormholes and behind blocks. Each straight piece of a ray is tested against each burst's bounding sphere, then
+    against its particles in the burst's Klein coordinates, where the piece is a straight line. Grains are discs at
+    least 1.5 pixels wide, puffs are Gaussians, and their optical depths add up along the ray. Each ray end carries
+    its dust, so it grows from 96 to 112 bytes, and adaptive sampling blends dust between samples only where its
+    depth changes by less than 0.02.
+  - **Cost:** Apple M3 Pro, macOS 15.7.3, Rust 1.98.1, release build, 2560 × 1600 with adaptive sampling, medians of
+    10 frames, runs alternated. With no dust on screen, each bench view takes 0.4 to 1.8 ms more GPU time than
+    before (about 2%, from the larger ray ends). One sniper burst 12 m away adds 0.1 to 1 ms to a 33 ms frame; the
+    rifle held on one spot 5 m away (12 bursts, 193 particles) adds 2.7 ms to 34 ms. Twelve sniper bursts at once
+    (513 particles, out of reach in play with its 2 s reload) would add 11 to 20 ms.
+- **Alternatives:**
+  - sprites drawn over the picture at the hit's place on screen (cheaper, but they would not bend through
+    wormholes, hide behind blocks, or move in 3D as you walk around them);
+  - the players' 30 m/s² gravity (see above);
+  - sending the particles over the network (each window makes them from the shots it already draws, so everyone sees
+    a burst where a shot lands, though the grains differ from screen to screen);
+  - keeping ray ends at 96 bytes by storing the laser glow and the dust as half floats, which might win back the 2%
+    at some cost in the glow's precision.
+- **Rationale:** you asked that shooting the ground throw some mist and dust particles up into the air.
+
 ### D82. Spaceships flying over Lunar Surface
 
 - **Choice:**

@@ -5,7 +5,8 @@
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
-//! `VoxelWorld::find_aimed_material`, `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
+//! `VoxelWorld::find_aimed_material`, `VoxelWorld::is_sunlit`, `Console`, `VoxelPlayer`, `StepReport`,
+//! `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
@@ -15,7 +16,7 @@ use glam::{DMat4, DVec3, DVec4};
 
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
-    minkowski_dot, normalize_tangent,
+    minkowski_dot, normalize_tangent, transport_from_centre,
 };
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
@@ -59,6 +60,7 @@ const UNSTICK_STEP_M: f64 = 0.25;
 const UNSTICK_MAX_STEPS: usize = 160;
 const PUSH_OUT_STEP_M: f64 = 0.05;
 const MAX_WALK_RISE_M: f64 = 0.3;
+const SUN_SHADOW_M: f64 = 80.0;
 const PUSH_OUT_STEP_COUNT: usize = 6;
 const PUSH_OUT_DIRECTION_COUNT: usize = 16;
 const LANDING_BISECTIONS: usize = 10;
@@ -389,7 +391,7 @@ fn geodesic_point(x: DVec4, v: DVec4, s: f64) -> DVec4 {
 /// `geodesic_tangent` gives sinh(s) x + cosh(s) v.
 ///
 /// Example: `let w = geodesic_tangent(x, v, 0.1);`
-fn geodesic_tangent(x: DVec4, v: DVec4, s: f64) -> DVec4 {
+pub(crate) fn geodesic_tangent(x: DVec4, v: DVec4, s: f64) -> DVec4 {
     s.sinh() * x + s.cosh() * v
 }
 
@@ -428,7 +430,7 @@ fn cross_ground(a: DVec4, b: DVec4) -> DVec4 {
 /// to ground point `g` and local +z toward `toward`.
 ///
 /// Example: `let frame = make_ground_frame(g, -heading);`
-fn make_ground_frame(g: DVec4, toward: DVec4) -> DMat4 {
+pub(crate) fn make_ground_frame(g: DVec4, toward: DVec4) -> DMat4 {
     let g: DVec4 = normalize_minkowski(g);
     let t: DVec4 = normalize_minkowski(toward + minkowski_dot(toward, g) * g);
     let r: DVec4 = normalize_minkowski(cross_ground(t, g));
@@ -680,6 +682,24 @@ impl VoxelWorld {
         };
         self.gravity_m_per_s2 = jump_m_per_s / half_jump_s;
         self.settings = settings;
+    }
+
+    /// `get_map_gravity_m_per_s2` gives the map's own gravity, before the game settings speed up
+    /// the players' jumps (`set_settings`).
+    ///
+    /// Example: `let g_m_per_s2 = world.get_map_gravity_m_per_s2();`
+    pub fn get_map_gravity_m_per_s2(&self) -> f64 {
+        self.map_gravity_m_per_s2
+    }
+
+    /// `is_sunlit` says whether sunlight reaches point x: nothing (the ground or a block) lies
+    /// within `SUN_SHADOW_M` of it toward the sun, as `render_voxel.metal`'s `trace_shadow` checks.
+    ///
+    /// Example: `let is_lit = world.is_sunlit(x);`
+    pub fn is_sunlit(&self, x: DVec4) -> bool {
+        let toward_sun: DVec4 = transport_from_centre(self.sun, x);
+        self.trace_scene(x, toward_sun, SUN_SHADOW_M / self.r, None)
+            .is_none()
     }
 
     /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame

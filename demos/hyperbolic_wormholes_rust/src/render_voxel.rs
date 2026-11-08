@@ -1,11 +1,12 @@
 //! `render_voxel.rs` draws voxel maps on the GPU with `render_voxel.metal`: it packs a
-//! `VoxelWorld` (with any avatars) and the laser beams into buffers each frame and traces them
-//! into the render texture that `render_metal.rs` upscales and presents, every pixel or with the
-//! house's adaptive sampling (`render_metal.rs`'s `encode_adaptive_sampling`).
+//! `VoxelWorld` (with any avatars), the laser beams and the dust of shots into the ground
+//! (`dust.rs`) into buffers each frame and traces them into the render texture that
+//! `render_metal.rs` upscales and presents, every pixel or with the house's adaptive sampling
+//! (`render_metal.rs`'s `encode_adaptive_sampling`).
 //!
 //! Interface: `VoxelUniforms`, `VoxelFrame::Build`, `VoxelGpu`.
 //!
-//! Example: `let frame = VoxelFrame::Build(&world, camera, &shots, (1280, 800));`
+//! Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &[], (1280, 800));`
 
 use std::error::Error;
 use std::ptr::NonNull;
@@ -20,7 +21,8 @@ use objc2_metal::{
     MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
-use crate::geometry::{AXIS_W, AXIS_Z, get_distance};
+use crate::dust::DustCloud;
+use crate::geometry::{AXIS_W, AXIS_Z, get_distance, invert_lorentz};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
@@ -40,6 +42,7 @@ const KERNEL_NAME: &str = "trace_voxel_pixels";
 const UNIFORMS_BUFFER_INDEX: usize = 16;
 const SCENE_BUFFER_COUNT: usize = 10;
 const MEANS_BUFFER_INDEX: usize = 27;
+const DUST_BUFFER_INDICES: [usize; 2] = [29, 30];
 const HAND_LIGHT_BUFFER_INDEX: usize = 28;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
@@ -51,6 +54,9 @@ const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
 const MIN_BUFFER_BYTES: usize = 256;
+const BYTES_PER_FLOAT4: usize = 16;
+const FLOAT4S_PER_DUST_BURST: usize = 7;
+const FLOAT4S_PER_DUST_PARTICLE: usize = 3;
 
 /// `VoxelUniforms` is the shader's `VoxelUniforms`.
 #[repr(C)]
@@ -95,11 +101,17 @@ pub struct VoxelUniforms {
     pub flashlight_direction: [f32; 4],
     pub flashlight: [f32; 4],
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
+    pub dust_counts: [i32; 4],
 }
 
 const _: () = assert!(
     std::mem::size_of::<VoxelUniforms>() <= 4096,
     "VoxelUniforms fits setBytes"
+);
+
+const _: () = assert!(
+    std::mem::size_of::<VoxelUniforms>().is_multiple_of(BYTES_PER_FLOAT4),
+    "VoxelUniforms ends on a float4 boundary, as Metal pads it"
 );
 
 /// `GpuStructure` is the shader's `VoxelStructure`.
@@ -151,6 +163,31 @@ struct GpuBeam {
     info: [f32; 4],
 }
 
+/// `GpuDustBurst` is the shader's `DustBurst`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GpuDustBurst {
+    rows: [[f32; 4]; 4],
+    sun: [f32; 4],
+    range: [i32; 4],
+    bound: [f32; 4],
+}
+
+/// `GpuDustParticle` is the shader's `DustParticle`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GpuDustParticle {
+    position_radius: [f32; 4],
+    color_opacity: [f32; 4],
+    shape: [f32; 4],
+}
+
+const _: () = assert!(
+    std::mem::size_of::<GpuDustBurst>() == FLOAT4S_PER_DUST_BURST * BYTES_PER_FLOAT4
+        && std::mem::size_of::<GpuDustParticle>() == FLOAT4S_PER_DUST_PARTICLE * BYTES_PER_FLOAT4,
+    "GpuDustBurst and GpuDustParticle match the shader's DustBurst and DustParticle"
+);
+
 /// `VoxelFrame` is one frame's packed voxel scene: the uniforms and every buffer's contents.
 pub struct VoxelFrame {
     pub uniforms: VoxelUniforms,
@@ -164,6 +201,8 @@ pub struct VoxelFrame {
     clearance: Arc<ClearanceGrids>,
     surfaces: Vec<[f32; 4]>,
     mound_grid: Option<Arc<MoundGrid>>,
+    dust_bursts: Vec<GpuDustBurst>,
+    dust_particles: Vec<GpuDustParticle>,
 }
 
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
@@ -194,6 +233,44 @@ fn pack_grid(grid: &ClearanceGrid, r: f64) -> [f32; 4] {
     ]
 }
 
+/// `pack_dust` gives the shader's dust bursts and their particles for `clouds`: each burst's
+/// inverse frame rows, its sun, where its particles start and how many there are, and how far its
+/// farthest particle centre is (and its largest radius), in meters.
+///
+/// Example: `let (bursts, particles) = pack_dust(&clouds);`
+fn pack_dust(clouds: &[DustCloud]) -> (Vec<GpuDustBurst>, Vec<GpuDustParticle>) {
+    let mut particles: Vec<GpuDustParticle> = Vec::new();
+    let bursts: Vec<GpuDustBurst> = clouds
+        .iter()
+        .map(|cloud| {
+            let first: usize = particles.len();
+            particles.extend(cloud.particles.iter().map(|p| GpuDustParticle {
+                position_radius: p.position_m.extend(p.radius_m).as_vec4().to_array(),
+                color_opacity: [p.albedo[0], p.albedo[1], p.albedo[2], p.opacity_frac as f32],
+                shape: [p.softness_frac as f32, 0.0, 0.0, 0.0],
+            }));
+            let inverse: DMat4 = invert_lorentz(cloud.frame);
+            let farthest_m: f64 = cloud
+                .particles
+                .iter()
+                .map(|p| p.position_m.length())
+                .fold(0.0, f64::max);
+            let largest_m: f64 = cloud
+                .particles
+                .iter()
+                .map(|p| p.radius_m)
+                .fold(0.0, f64::max);
+            GpuDustBurst {
+                rows: [0, 1, 2, 3].map(|i| to_f32(inverse.row(i))),
+                sun: cloud.sun.extend(cloud.sun_frac).as_vec4().to_array(),
+                range: [first as i32, cloud.particles.len() as i32, 0, 0],
+                bound: [farthest_m as f32, largest_m as f32, 0.0, 0.0],
+            }
+        })
+        .collect();
+    (bursts, particles)
+}
+
 /// `to_columns` converts a double matrix to float columns.
 ///
 /// Example: `let m = to_columns(frame);`
@@ -203,16 +280,17 @@ fn to_columns(m: DMat4) -> [[f32; 4]; 4] {
 
 impl VoxelFrame {
     /// `Build` packs `world` seen from `camera` at a render size, with laser segments of each team
-    /// (`beams`: segments and team, 0 blue or 1 red; drawn as far as `clip_beam_to_map` allows)
-    /// and an optional laser spot.
+    /// (`beams`: segments and team, 0 blue or 1 red; drawn as far as `clip_beam_to_map` allows),
+    /// an optional laser spot and the dust of shots into the ground.
     ///
-    /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, (1280, 800));`
+    /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &clouds, (1280, 800));`
     #[allow(non_snake_case)]
     pub fn Build(
         world: &VoxelWorld,
         camera: DMat4,
         beams: &[(Vec<BeamSegment>, u32)],
         spot: Option<(DVec4, u32)>,
+        dust: &[DustCloud],
         size_px: (u32, u32),
     ) -> VoxelFrame {
         let r: f64 = world.r;
@@ -287,6 +365,7 @@ impl VoxelFrame {
                     })
             })
             .collect();
+        let (dust_bursts, dust_particles) = pack_dust(dust);
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
         let (planet, e1, e2) = match world.planet {
             Some((d, radius_rad)) => {
@@ -372,6 +451,7 @@ impl VoxelFrame {
                 ]
             }),
             spaceships: get_spaceships(world.sky_time_s),
+            dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
         };
         assert_eq!(
             world.palette.len(),
@@ -408,6 +488,8 @@ impl VoxelFrame {
             clearance: Arc::clone(&world.clearance),
             surfaces: world.surfaces.clone(),
             mound_grid: get_mound_grid(&world.terrain).cloned(),
+            dust_bursts,
+            dust_particles,
         }
     }
 
@@ -579,7 +661,7 @@ impl VoxelGpu {
             adaptive: AdaptivePipelines::FromLibrary(device, &library)?,
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
-            buffers: (0..SCENE_BUFFER_COUNT)
+            buffers: (0..SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len())
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
             textures: SurfaceTextures::Load(device)?,
@@ -655,6 +737,16 @@ impl VoxelGpu {
             unsafe {
                 encoder.setBuffer_offset_atIndex(Some(buffer), 0, UNIFORMS_BUFFER_INDEX + k + 1)
             };
+        }
+        let dust: [&[u8]; DUST_BUFFER_INDICES.len()] = [
+            as_bytes(&frame.dust_bursts),
+            as_bytes(&frame.dust_particles),
+        ];
+        for (k, bytes) in dust.iter().enumerate() {
+            let buffer: &ProtocolObject<dyn MTLBuffer> =
+                self.buffers[SCENE_BUFFER_COUNT + k].write(device, bytes)?;
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
+            unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, DUST_BUFFER_INDICES[k]) };
         }
         let (width, height) = frame.get_render_size();
         if self

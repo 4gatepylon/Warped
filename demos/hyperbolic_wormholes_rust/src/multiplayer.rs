@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::dust::DustCloud;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
     normalize_tangent,
@@ -258,10 +259,11 @@ pub struct SharedVoxelView {
 }
 
 /// `Tracers` is what to draw for lasers instead of every laser's whole path: beam pieces with
-/// their teams, and an impact glow.
+/// their teams, an impact glow, and the dust of shots into the ground.
 pub struct Tracers<'a> {
     pub beams: &'a [(Vec<BeamSegment>, u32)],
     pub spot: Option<(DVec4, u32)>,
+    pub dust: &'a [DustCloud],
 }
 
 /// `trace_other_voxel_lasers` traces the laser of each of `players` who has theirs on (their
@@ -345,12 +347,12 @@ pub fn pack_shared_voxel_view(
         let team: u32 = players.iter().find(|p| p.id == *id).map_or(0, |p| p.team);
         beams.push((other.segments.clone(), team));
     }
-    let (beams, spot) = match tracers {
-        Some(tracers) => (tracers.beams, tracers.spot),
-        None => (beams.as_slice(), spot),
+    let (beams, spot, dust): (&[(Vec<BeamSegment>, u32)], _, &[DustCloud]) = match tracers {
+        Some(tracers) => (tracers.beams, tracers.spot, tracers.dust),
+        None => (beams.as_slice(), spot, &[]),
     };
     SharedVoxelView {
-        frame: VoxelFrame::Build(&shared, camera, beams, spot, render_px),
+        frame: VoxelFrame::Build(&shared, camera, beams, spot, dust, render_px),
         shot,
         hit_player_id,
         is_head_hit,

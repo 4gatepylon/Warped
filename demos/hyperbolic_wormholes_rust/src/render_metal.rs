@@ -353,7 +353,7 @@ struct PyramidLevels {
 
 const SHADER_SOURCE: &str = include_str!("render_metal.metal");
 const BYTES_PER_RAY_END: usize = 48;
-pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 96;
+pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 112;
 const BYTES_PER_CELL_MARK: usize = 1;
 const BYTES_PER_CELL_INDEX: usize = 4;
 const REFINE_COUNT_BYTES: usize = 16;

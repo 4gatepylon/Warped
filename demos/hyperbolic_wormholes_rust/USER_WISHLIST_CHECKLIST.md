@@ -34,9 +34,6 @@ is in [`AGENTS.md`](AGENTS.md).
   `claude/square-shapes`, 2026-11-07.
 - [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
   (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
-- [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
-  2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
@@ -226,6 +223,8 @@ is in [`AGENTS.md`](AGENTS.md).
   taking damage the health bar pulses with a reddish orange pulse traveling downwards, when you run a blue pulse goes
   from right to left (down), ammo is normal though; another pulse (but much more subtle) occurs when you are
   regaining things such as energy" (D85). #207.
+- [x] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air
+  (D81). #208.
 - [x] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
   It was a join sent to a port no server listened on; windows now say when a server doesn't answer, is full or runs
   another version. #209.
