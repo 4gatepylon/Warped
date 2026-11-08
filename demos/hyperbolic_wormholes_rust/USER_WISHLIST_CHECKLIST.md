@@ -10,15 +10,18 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
+  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
+  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
+  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
+  show a redshift instead. The user wants video or image demos to confirm. Claimed by Claude Code (subagent of
+  session `wizardly-hamilton-23a121`), branch `claude/wormhole-doppler`, 2026-11-07.
 - [~] **W-80 Smoother bar pulses.** The pulsing should start where the bar's filled part ends: losing health, it starts
   at the last hit point, not the bar's end (empty slots don't count). The blue pulse going left should be less dark,
   and it too starts on the last filled slot. Pulses shouldn't light whole segments: they should look more Gaussian
   and more subtle, at a faster pace in general, and in proportion to how fast the value is changing (smoothed). The
   user wants samples first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/hud-pulse-refine`, 2026-11-07.
-- [~] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
-  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom").
-  Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/scene-haze-soft-shadows`, 2026-11-07.
 - [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
@@ -33,10 +36,6 @@ is in [`AGENTS.md`](AGENTS.md).
   (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/see-through-windows`,
   2026-11-07.
-- [~] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
-  noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
-  All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/shot-noise`, 2026-11-07.
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
   2026-11-07.
@@ -112,6 +111,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Done
 
+- [x] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214.
 - [x] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
   and on Lunar Surface. #73, #76, #81–#86, #90, #91.
 - [x] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
@@ -231,6 +232,9 @@ is in [`AGENTS.md`](AGENTS.md).
   you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #209.
 - [x] **W-79 Only serve and join.** "Make a commit to disable everything except starting a server and connecting to
   a server; we will not be using the local demo etc." `make serve-game` and `make join-game` remain. #212.
+- [x] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
+  noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
+  All of it is in the YAML settings. #216.
 - [x] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": if you crouch, the energy for
   running is recharged at the same rate as when you run (drains it); if you walk, it is recharged at half that. This
   is the default in the YAML, and in general it should be parameterized. #219.
