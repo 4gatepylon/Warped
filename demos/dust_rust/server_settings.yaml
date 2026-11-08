@@ -101,7 +101,7 @@ wormholes:  # Q throws your purple wormhole mouth, then your green one, and so o
   hit_flash_s: 0.25  # Seconds both mouths of a pair flash red after a hit.
 
 space:  # How curved Lunar Surface is (the house demo keeps its own); a window that joins builds the map by the server's.
-  curvature_per_map_curvature: 1.5  # Times the map's own curvature (1 / its 40 m radius), from 1 to 2: 1.5 makes the radius 26.7 m.
+  curvature_per_map_curvature: 1.0  # Times the map's own curvature, from 1 to 2: 1 keeps Dust's 50 m radius (Lunar Surface's demo uses 1.5).
 
 black_hole:  # On Lunar Surface, each console turned off grows the black hole, and time runs slower near it (W-68, W-107).
   transition_s: 4.0  # Seconds the black hole takes to grow to a new size after a console turns off (or a new game starts).

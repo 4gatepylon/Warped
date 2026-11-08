@@ -38,7 +38,8 @@ const FORMAT: &str = "warped-map";
 const VERSION: u32 = 1;
 const SPACE_HYPERBOLIC: &str = "hyperbolic";
 const DIRECTION_TOLERANCE: f64 = 1e-6;
-const BUILTIN_MAPS: [(&str, &str); 2] = [
+const BUILTIN_MAPS: [(&str, &str); 3] = [
+    ("dust", include_str!("../../../common/maps/dust/map.json")),
     (
         "house_demo",
         include_str!("../../../common/maps/house_demo/map.json"),
@@ -321,11 +322,45 @@ pub struct Map {
     pub spawns: Vec<Spawn>,
     pub regions: Option<Regions>,
     pub appearance: Appearance,
+    #[serde(default)]
+    pub atmosphere: Option<Atmosphere>,
+}
+
+/// `Fog` is a map's thick haze (W-121, Dust's sandstorm): its colour, where it starts and how fast
+/// it thickens (e-folding distance), and the most of a colour it replaces.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub struct Fog {
+    pub color: [f32; 3],
+    pub start_m: f64,
+    pub distance_m: f64,
+    pub max_frac: f64,
+}
+
+/// `Wind` is a map-wide refractive-index field (W-121): ln n = k d, with d the signed distance in
+/// meters to the plane through the map's origin perpendicular to `direction` (a horizontal unit
+/// vector of the origin's frame) and k `log_index_gradient_per_m`, so light bends toward
+/// `direction` with curvature k per meter. Rays follow it in chords of `segment_m`.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub struct Wind {
+    pub direction: [f64; 3],
+    pub log_index_gradient_per_m: f64,
+    pub segment_m: f64,
+}
+
+/// `Atmosphere` is a map's optional air: a fog and a wind.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub struct Atmosphere {
+    pub fog: Option<Fog>,
+    pub wind: Option<Wind>,
 }
 
 /// `MapName` is which map to play, from `common/maps/`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum MapName {
+    Dust,
     HouseDemo,
     LunarSurface,
 }
@@ -336,6 +371,7 @@ impl MapName {
     /// Example: `let name = MapName::HouseDemo.get_folder_name();`
     pub fn get_folder_name(self) -> &'static str {
         match self {
+            MapName::Dust => "dust",
             MapName::HouseDemo => "house_demo",
             MapName::LunarSurface => "lunar_surface",
         }
@@ -498,6 +534,19 @@ impl Map {
         if let Some(milky_way) = &map.sky.milky_way {
             check_milky_way(milky_way)
                 .map_err(|problem| format!("map: {}: sky.milky_way {problem}", map.name))?;
+        }
+        if let Some(wind) = map.atmosphere.and_then(|a| a.wind) {
+            let d: DVec3 = DVec3::from_array(wind.direction);
+            if (d.length() - 1.0).abs() > DIRECTION_TOLERANCE || d.y.abs() > DIRECTION_TOLERANCE {
+                return Err(format!(
+                    "map: {}: atmosphere.wind.direction must be a horizontal unit vector",
+                    map.name
+                )
+                .into());
+            }
+            if wind.segment_m <= 0.0 {
+                return Err(format!("map: {}: atmosphere.wind.segment_m must be > 0", map.name).into());
+            }
         }
         Ok(map)
     }

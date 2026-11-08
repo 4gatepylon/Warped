@@ -336,7 +336,7 @@ struct Arguments {
     #[arg(long)]
     player_settings: Option<PathBuf>,
     /// Which map to play, from common/maps/.
-    #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
+    #[arg(long, value_enum, default_value_t = MapName::Dust)]
     map: MapName,
     /// With --map lunar-surface: start the window at one of the level's viewpoints (as
     /// --bench-views names them), e.g. black_hole.
@@ -522,7 +522,7 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         )
         .into());
     }
-    if arguments.map == MapName::LunarSurface
+    if arguments.map != MapName::HouseDemo
         && (arguments.autopilot || (arguments.play_route && arguments.route != RouteKind::WarpTour))
     {
         return Err("--autopilot and the house's routes need --map house-demo; on lunar-surface use --play-route --route warp-tour".into());
@@ -614,7 +614,7 @@ fn run(arguments: Arguments) -> Result<()> {
     }
     if arguments.renderer == RendererKind::Metal {
         viewmodel::check_gun_models()?;
-        if arguments.map == MapName::LunarSurface {
+        if arguments.map != MapName::HouseDemo {
             voxel_textures::check_surface_textures()?;
         }
     }

@@ -50,7 +50,7 @@ use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-pub const DEFAULT_PORT: u16 = 47_800;
+pub const DEFAULT_PORT: u16 = 47_830;
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_PLAYER_COUNT: usize = 8;
 pub const MAX_CONSOLE_COUNT: usize = 32;
@@ -62,7 +62,7 @@ const SPECKLE_FIRST_BIT: u8 = 3;
 const ANY_TEAM: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
-const DISCOVERY_PORT: u16 = 47_801;
+const DISCOVERY_PORT: u16 = 47_831;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
 const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;

@@ -25,7 +25,7 @@ use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
-use crate::map::{Map, PlayerSettings, get_console_team, to_direction, to_frame, to_point};
+use crate::map::{Fog, Map, PlayerSettings, Wind, get_console_team, to_direction, to_frame, to_point};
 use crate::mesh::MeshModel;
 use crate::net::MAX_CONSOLE_COUNT;
 use crate::physics::Input;
@@ -317,6 +317,8 @@ pub struct VoxelWorld {
     pub regions: Option<[f64; 3]>,
     pub zone_walls: Option<ZoneWalls>,
     pub terrain: Option<Terrain>,
+    pub wind: Option<WindField>,
+    pub fog: Option<Fog>,
     pub sun: DVec3,
     pub planet: Option<(DVec3, f64)>,
     pub milky_way: Option<(DVec3, DVec3)>,
@@ -335,6 +337,48 @@ pub struct VoxelWorld {
     pub sky_time_s: f64,
     pub clearance: Arc<ClearanceGrids>,
     growing_hole: Option<(usize, VoxelWarp)>,
+}
+
+/// `WindField` is a map's wind (`map::Wind`) in curvature units: the plane's unit normal at the
+/// origin (w = 0), ln n's gradient per curvature radius and the chord length.
+#[derive(Clone, Copy, Debug)]
+pub struct WindField {
+    pub normal: DVec4,
+    pub k: f64,
+    pub segment_s: f64,
+}
+
+impl WindField {
+    /// `FromMap` converts a map's wind for curvature radius `r` meters.
+    ///
+    /// Example: `let wind = WindField::FromMap(&map_wind, 50.0);`
+    #[allow(non_snake_case)]
+    pub fn FromMap(wind: &Wind, r: f64) -> WindField {
+        let [x, y, z] = wind.direction;
+        WindField {
+            normal: DVec4::new(x, y, z, 0.0),
+            k: wind.log_index_gradient_per_m * r,
+            segment_s: wind.segment_m / r,
+        }
+    }
+
+    /// `get_gradient` is ∇ ln n at x: k times the unit gradient of the signed distance to the
+    /// plane, (N + ⟨x, N⟩ x) / √(1 + ⟨x, N⟩²).
+    ///
+    /// Example: `let g = wind.get_gradient(x);`
+    pub fn get_gradient(&self, x: DVec4) -> DVec4 {
+        let f: f64 = minkowski_dot(x, self.normal);
+        self.k * (self.normal + f * x) / (1.0 + f * f).sqrt()
+    }
+
+    /// `kick` turns direction v at x by the gradient's part across it over `ds`, as the shader's
+    /// `wind_kick` does.
+    ///
+    /// Example: `let v = wind.kick(x, v, 0.5 * ds);`
+    pub fn kick(&self, x: DVec4, v: DVec4, ds: f64) -> DVec4 {
+        let g: DVec4 = self.get_gradient(x);
+        normalize_tangent(x, v + (g - minkowski_dot(g, v) * v) * ds)
+    }
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -759,8 +803,8 @@ impl VoxelWorld {
                 .find(|m| m.kind == "glass")
                 .map_or(-1, |m| i32::from(m.id)),
             regolith: i32::from(map.ground.material),
-            dark_regolith: find_material(map, "dark regolith"),
-            basalt: find_material(map, "basalt"),
+            dark_regolith: find_material(map, "dark regolith").max(find_material(map, "dark sand")),
+            basalt: find_material(map, "basalt").max(find_material(map, "sandstone")),
             solar: find_material(map, "solar panel"),
             hazard: find_material(map, "hazard paint"),
             pad: find_material(map, "landing pad"),
@@ -796,6 +840,11 @@ impl VoxelWorld {
             name: map.name.clone(),
             r,
             terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
+            wind: map
+                .atmosphere
+                .and_then(|a| a.wind)
+                .map(|wind| WindField::FromMap(&wind, r)),
+            fog: map.atmosphere.and_then(|a| a.fog),
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),
             consoles: team_consoles,
@@ -1510,7 +1559,10 @@ impl VoxelWorld {
         } else {
             slope_n * window + log_n * window_slope
         };
-        let g: DVec4 = slope * (ch * x - warp.centre) / sh;
+        let mut g: DVec4 = slope * (ch * x - warp.centre) / sh;
+        if let Some(wind) = &self.wind {
+            g += wind.get_gradient(x);
+        }
         (g - minkowski_dot(g, v) * v, rho)
     }
 
@@ -1758,7 +1810,12 @@ impl VoxelWorld {
                 break;
             }
             let Some(w) = inside else {
-                let (s_end, entering) = self.find_warp_entry(x, v, max_s - travelled);
+                let segment_s: f64 = self.wind.map_or(f64::INFINITY, |wind| wind.segment_s);
+                let s_max: f64 = (max_s - travelled).min(segment_s);
+                if let Some(wind) = &self.wind {
+                    v = wind.kick(x, v, 0.5 * s_max);
+                }
+                let (s_end, entering) = self.find_warp_entry(x, v, s_max);
                 if let Some(found) = self.trace_scene(x, v, s_end, None) {
                     pieces
                         .last_mut()
@@ -1773,6 +1830,12 @@ impl VoxelWorld {
                 x = xn;
                 travelled += s_end;
                 pieces.last_mut().expect("a piece").push(x);
+                if let Some(wind) = &self.wind {
+                    v = wind.kick(x, v, 0.5 * s_end);
+                    if entering.is_none() {
+                        continue;
+                    }
+                }
                 if entering.is_none() {
                     break;
                 }

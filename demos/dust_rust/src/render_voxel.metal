@@ -546,6 +546,9 @@ struct VoxelUniforms {
     ZoneWalls zone_walls;
     float4 milky_way_pole;
     float4 milky_way_core;
+    float4 wind;
+    float4 atmosphere;
+    float4 fog_color;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -2333,6 +2336,22 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
  * @endcode
  */
+/**
+ * @brief `wind_gradient` is the map's wind (W-121) at x: grad ln n = k (N + <x, N> x) / sqrt(1 + <x, N>^2), with N
+ * `u.wind.xyz` (w = 0) and k `u.wind.w` per curvature radius; zero without wind. `voxel_world.rs`'s `WindField` matches.
+ */
+static float4 wind_gradient(constant VoxelUniforms &u, float4 x) {
+    float4 n = float4(u.wind.xyz, 0.0);
+    float f = mdot(x, n);
+    return u.wind.w * (n + f * x) * rsqrt(1.0 + f * f);
+}
+
+/** @brief `wind_kick` turns direction v at x by the wind's gradient across it over ds, like `WindField::kick`. */
+static float4 wind_kick(constant VoxelUniforms &u, float4 x, float4 v, float ds) {
+    float4 g = wind_gradient(u, x);
+    return normalize_tangent(x, v + (g - mdot(g, v) * v) * ds);
+}
+
 static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     constant VoxelUniforms &u = scene.u;
     device const VoxelWarp *warps = scene.warps;
@@ -2356,8 +2375,14 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float3 local = float3(0.0);
     bool has_gradient = false;
     for (int it = 0; it < MAX_ITERATIONS; it++) {
+        bool has_wind = u.wind.w != 0.0;
         if (inside < 0) {
             float s_end = FAR_S;
+            if (has_wind) {
+                s_end = min(u.atmosphere.x, u.atmosphere.y - travelled);
+                if (s_end <= 0.0) { outcome = OUTCOME_SKY; break; }
+                v = wind_kick(u, x, v, 0.5 * s_end);
+            }
             int entering = -1;
             for (int w = 0; w < u.warp_count; w++) {
                 float a = -mdot(x, warps[w].centre), b = mdot(v, warps[w].centre), closest_sq = a * a - b * b, reach_cosh = cosh(warps[w].params.z);
@@ -2374,6 +2399,15 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+            if (entering < 0 && has_wind) {
+                float4 xn = geodesic_point(x, v, s_end);
+                v = geodesic_tangent(x, v, s_end);
+                x = xn * rsqrt(-mdot(xn, xn));
+                v = wind_kick(u, x, v, 0.5 * s_end);
+                travelled += s_end;
+                last_warp = -1;
+                continue;
+            }
             if (entering < 0) {
                 if (last_warp >= 0) back_to_reach(scene, last_warp, x, v);
                 outcome = OUTCOME_SKY;
@@ -2386,7 +2420,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             inside = entering;
             continue;
         }
-        if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho, local);
+        if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho, local) + wind_gradient(u, x);
         float ds = clamp((it < LATE_STEP_COUNT ? BEND_STEP_FRAC : LATE_BEND_STEP_FRAC) * rho, min_step, max_step);
         v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
         hit.s = ds;
@@ -2402,7 +2436,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         x = xn * rsqrt(-mdot(xn, xn));
         v = normalize_tangent(x, vn);
         travelled += ds;
-        gradient = compute_gradient(scene, inside, x, rho, local);
+        gradient = compute_gradient(scene, inside, x, rho, local) + wind_gradient(u, x);
         v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
         has_gradient = true;
         float4 prm = warps[inside].params;
@@ -2456,6 +2490,12 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
         sun_cos = dot(end.point.xyz, scene.u.sun.xyz);
     } else {
         return color;
+    }
+    constant VoxelUniforms &u = scene.u;
+    if (u.fog_color.w > 0.0) {
+        float fog_frac = end.surface.x == OUTCOME_HIT ? 1.0 - exp(-max(end.grid.w * u.curvature_radius_m - u.atmosphere.z, 0.0) / u.atmosphere.w) : 1.0;
+        float3 fog = u.fog_color.rgb * (1.0 + HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER));
+        return mix(color, fog, u.fog_color.w * fog_frac);
     }
     float3 haze = HAZE_COLOR + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
     return mix(color, haze, HAZE_MAX_FRAC * haze_frac);

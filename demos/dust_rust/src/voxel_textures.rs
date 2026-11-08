@@ -29,21 +29,34 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// `SURFACE_SETS` is the Poly Haven sets, in the order of the arrays' layers.
 const SURFACE_SETS: [&str; 8] = [
-    "moon_01",
-    "concrete_wall_008",
+    "aerial_sand",
+    "cliff_side",
     "metal_plate",
     "corrugated_iron_02",
     "rusty_metal_02",
-    "concrete_pavement_02",
+    "large_sandstone_blocks",
     "concrete_floor_worn_001",
-    "moon_meteor_02",
+    "gravelly_sand",
+];
+
+/// `DUST_SETS` are the sets `tools/download_textures.sh` puts in this demo's `assets/textures/`
+/// (W-121); the others come from the fps_demo's.
+const DUST_SETS: [&str; 4] = [
+    "aerial_sand",
+    "gravelly_sand",
+    "cliff_side",
+    "large_sandstone_blocks",
 ];
 const SIZE_PX: u32 = 2048;
 const BYTES_PER_RGBA_PIXEL: usize = 4;
 const MEAN_LEVEL: usize = 7;
 
 /// `MATERIAL_SURFACES` is each textured material's name, layer, blocks per repeat and metalness.
-const MATERIAL_SURFACES: [(&str, usize, f32, f32); 13] = [
+const MATERIAL_SURFACES: [(&str, usize, f32, f32); 17] = [
+    ("sand", 0, 3.0, 0.0),
+    ("dark sand", 7, 2.6, 0.0),
+    ("sandstone", 1, 2.5, 0.0),
+    ("sandstone blocks", 5, 2.0, 0.0),
     ("regolith", 0, 2.6, 0.0),
     ("dark regolith", 7, 2.6, 0.0),
     ("basalt", 1, 2.0, 0.0),
@@ -194,7 +207,16 @@ fn get_surface_texture_paths() -> Vec<PathBuf> {
         .flat_map(|map| {
             SURFACE_SETS
                 .iter()
-                .map(|id| get_asset_path(&format!("textures/{id}/{id}_{map}_2k.jpg")))
+                .map(|id| {
+                    let relative: String = format!("textures/{id}/{id}_{map}_2k.jpg");
+                    if DUST_SETS.contains(id) {
+                        Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("assets")
+                            .join(relative)
+                    } else {
+                        get_asset_path(&relative)
+                    }
+                })
                 .collect::<Vec<_>>()
         })
         .collect()

@@ -26,8 +26,8 @@ HEIGHT_PX ?= 800
 FRAME_COUNT ?= 10
 AUTOPILOT_WIDTH_PX ?= 640
 AUTOPILOT_HEIGHT_PX ?= 400
-PORT ?= 47800
-MAP ?= lunar-surface
+PORT ?= 47830
+MAP ?= dust
 SERVER ?= auto
 SERVER_SETTINGS ?=
 SERVER_TARGET := x86_64-unknown-linux-musl
@@ -54,9 +54,9 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
 
 help:
 	@echo "Targets:"
-	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run a game server, without a window; prints how to join"
+	@echo "  make serve-game PORT=47830 MAP=lunar-surface     Run a game server, without a window; prints how to join"
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
-	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
+	@echo "  make join-game SERVER=auto PORT=47830            Open the window and join the game server (SERVER=auto finds one)"
 	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of player_settings.yaml)"
 	@echo "  (serve-game and join-game take GAME_PASSWORD_FILE=password.txt: only players who know it join)"
 	@echo "  make build-server-bundle                         Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"

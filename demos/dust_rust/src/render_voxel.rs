@@ -78,6 +78,9 @@ const RIFLE_BEAM_CODE: u32 = 2;
 const BEACON_BEAM_CODE: u32 = 4;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const MS_PER_S: f64 = 1000.0;
+/// `FOG_DEPTHS` is how many of a fog's e-folding distances past its start a ray goes before it
+/// ends in the fog (5: the fog hides all but 0.7% of what lies beyond).
+const FOG_DEPTHS: f64 = 5.0;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -131,6 +134,9 @@ pub struct VoxelUniforms {
     pub zone_walls: GpuZoneWalls,
     pub milky_way_pole: [f32; 4],
     pub milky_way_core: [f32; 4],
+    pub wind: [f32; 4],
+    pub atmosphere: [f32; 4],
+    pub fog_color: [f32; 4],
 }
 
 const _: () = assert!(
@@ -625,6 +631,21 @@ impl VoxelFrame {
             milky_way_core: world
                 .milky_way
                 .map_or([0.0; 4], |(_, core)| core.as_vec3().extend(0.0).to_array()),
+            wind: world.wind.map_or([0.0; 4], |wind| {
+                let n = wind.normal;
+                [n.x as f32, n.y as f32, n.z as f32, wind.k as f32]
+            }),
+            atmosphere: world.fog.map_or([0.0; 4], |fog| {
+                [
+                    world.wind.map_or(0.0, |wind| wind.segment_s) as f32,
+                    ((fog.start_m + FOG_DEPTHS * fog.distance_m) / r) as f32,
+                    fog.start_m as f32,
+                    fog.distance_m as f32,
+                ]
+            }),
+            fog_color: world.fog.map_or([0.0; 4], |fog| {
+                [fog.color[0], fog.color[1], fog.color[2], fog.max_frac as f32]
+            }),
         };
         assert_eq!(
             world.palette.len(),
