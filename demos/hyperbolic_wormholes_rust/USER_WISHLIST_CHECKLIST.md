@@ -104,6 +104,9 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
   on W-68 (reality bend), which adds the pylons and the black hole.
+- [ ] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
+  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
+  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere.
 
 ## Pending user review
 
