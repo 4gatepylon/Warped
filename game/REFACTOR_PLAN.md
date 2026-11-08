@@ -274,7 +274,11 @@ section 7.
    `common/protocol/`'s square-game docs, and the docs that pointed at them.
 3. `game: workspace scaffold`: the folders of section 3 with their READMEs, crates that build, and the Makefile.
 4. `game: legacy oracle`: the crate that compiles the demo's code in place for regression tests (section 7.3).
-5. `game: udp-impair` (if it made it in): the impairment proxy of section 7.6.
+5. `common/protocol: security case`: `security_case.md`, the argument for `authentication.md` v2, for a human or
+   expert review.
+
+Not yet written: `tools/udp_impair/` (section 7.6). The first agent that needs it (step A5 or phase C) adds it as
+its own layer.
 
 ### Phase A: port without changing behaviour
 
