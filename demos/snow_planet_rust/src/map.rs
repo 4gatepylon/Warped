@@ -295,6 +295,16 @@ pub struct Blizzard {
     pub snow_per_m3: f64,
 }
 
+impl Blizzard {
+    /// `contains` says whether the point at Fermi coordinates `[u_m, v_m, h_m]` is inside this
+    /// blizzard.
+    ///
+    /// Example: `if blizzard.contains([0.0, 0.0, 1.6]) { ... }`
+    pub fn contains(&self, [u_m, v_m, h_m]: [f64; 3]) -> bool {
+        (u_m - self.u_m).hypot(v_m - self.v_m) < self.radius_m && h_m < self.height_m
+    }
+}
+
 /// `Regions` is the map's zones, boundary, zone walls and blizzards.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

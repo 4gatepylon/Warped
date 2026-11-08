@@ -1766,10 +1766,8 @@ impl VoxelWorld {
         if self.blizzards.is_empty() {
             return None;
         }
-        let [u_m, v_m, h_m] = get_fermi_coordinates(x, self.r);
-        self.blizzards
-            .iter()
-            .find(|b| (u_m - b.u_m).hypot(v_m - b.v_m) < b.radius_m && h_m < b.height_m)
+        let fermi: [f64; 3] = get_fermi_coordinates(x, self.r);
+        self.blizzards.iter().find(|b| b.contains(fermi))
     }
 
     /// `get_blizzard_frac` gives how much of a shot's reach in blizzards the chord from `a` to `b`

@@ -43,8 +43,10 @@ use glam::{DMat4, DVec4};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
+use crate::map::{Blizzard, FLAT_CURVATURE_RADIUS_M, Map};
 use crate::settings::ServerSettings;
 use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
+use crate::terrain::get_fermi_coordinates;
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
 
 /// `Result` is this module's result type.
@@ -482,7 +484,8 @@ fn make_random_bytes<const N: usize>() -> [u8; N] {
 
 /// `Slot` is a joined player on the server, the token their welcome gave them, since when they have held `E` on their console, the
 /// damage they took since joining (1 eliminates them), and the damage enemy shots did to their
-/// wormholes since they last had none down (1 destroys them).
+/// wormholes since they last had none down (1 destroys them), and whether they have said where they
+/// are since joining.
 struct Slot {
     player: RemotePlayer,
     address: SocketAddr,
@@ -491,6 +494,47 @@ struct Slot {
     disabling_since: Option<Instant>,
     damage_frac: f64,
     wormhole_damage_frac: f64,
+    is_placed: bool,
+}
+
+/// `Freezing` is what the server needs to freeze players standing in a map's blizzards: the
+/// blizzards and the curvature radius it reads players' positions with.
+pub struct Freezing {
+    pub blizzards: Vec<Blizzard>,
+    pub curvature_radius_m: f64,
+}
+
+impl Freezing {
+    /// `FromMapName` reads the blizzards of the built-in map `map_name`, in the nearly flat space
+    /// the game puts a Euclidean map in (`Map::curve_flat`).
+    ///
+    /// Example: `let freezing = Freezing::FromMapName("snow_planet")?;`
+    #[allow(non_snake_case)]
+    pub fn FromMapName(map_name: &str) -> Result<Freezing> {
+        let mut map: Map = Map::Builtin(map_name)?;
+        if map.is_euclidean() {
+            map.curve_flat(FLAT_CURVATURE_RADIUS_M);
+        }
+        Ok(Freezing {
+            blizzards: map.get_blizzards(),
+            curvature_radius_m: map.get_curvature_radius_m(),
+        })
+    }
+
+    /// `get_freeze_per_s` gives the health a second the blizzard at the point `x` freezes away, 0
+    /// outside every blizzard.
+    ///
+    /// Example: `let freeze_per_s = freezing.get_freeze_per_s(slot.player.frame.w_axis);`
+    fn get_freeze_per_s(&self, x: DVec4) -> f64 {
+        if self.blizzards.is_empty() {
+            return 0.0;
+        }
+        let fermi: [f64; 3] = get_fermi_coordinates(x, self.curvature_radius_m);
+        self.blizzards
+            .iter()
+            .find(|blizzard| blizzard.contains(fermi))
+            .map_or(0.0, |blizzard| blizzard.freeze_health_per_s)
+    }
 }
 
 /// `Tally` is a player's score in this game on the server, their address, and since when they wait
@@ -516,6 +560,7 @@ struct Server {
     console_teams: Vec<u32>,
     game: GameState,
     tallies: Vec<Tally>,
+    freezing: Freezing,
 }
 
 impl Server {
@@ -585,6 +630,7 @@ impl Server {
                             disabling_since: None,
                             damage_frac: 0.0,
                             wormhole_damage_frac: 0.0,
+                            is_placed: false,
                         });
                         self.start_tally(id, team, address);
                         println!(
@@ -627,6 +673,7 @@ impl Server {
                         slot.wormhole_damage_frac = 0.0;
                     }
                     slot.player = player;
+                    slot.is_placed = true;
                     slot.last_heard = Instant::now();
                 }
             }
@@ -653,20 +700,9 @@ impl Server {
                 if self.slots[victim].damage_frac < 1.0 - DAMAGE_TOLERANCE_FRAC {
                     return Ok(());
                 }
-                let victim_slot: Slot = self.slots.remove(victim);
-                let victim_address: SocketAddr = victim_slot.address;
-                let is_enemy: bool = shooter_team != Some(victim_slot.player.team);
-                self.count_elimination(victim_id, shooter_id, is_enemy);
+                let is_enemy: bool = shooter_team != Some(self.slots[victim].player.team);
                 println!("player {victim_id} was hit by player {shooter_id}");
-                let message: Message = Message::New(Kind::Eliminated).id(victim_id).id(shooter_id);
-                for target in self
-                    .slots
-                    .iter()
-                    .map(|slot| slot.address)
-                    .chain([victim_address])
-                {
-                    self.send(&message.0, target);
-                }
+                self.eliminate(victim, shooter_id, is_enemy);
             }
             Some(Kind::WormholeHit) => {
                 let (Some(token), Some(shooter_id), Some(owner_id), Some(&[hits_to_destroy])) =
@@ -781,6 +817,49 @@ impl Server {
         victim.eliminated_at = Some(Instant::now());
         if is_enemy {
             self.get_tally_mut(shooter_id).score.kills += 1;
+        }
+    }
+
+    /// `eliminate` takes the player in slot `victim` out of the game, counts it for player
+    /// `shooter_id` (a kill if `is_enemy`) and tells every player, the victim too.
+    ///
+    /// Example: `server.eliminate(0, 2, true);`
+    fn eliminate(&mut self, victim: usize, shooter_id: u32, is_enemy: bool) {
+        let victim_slot: Slot = self.slots.remove(victim);
+        let victim_id: u32 = victim_slot.player.id;
+        self.count_elimination(victim_id, shooter_id, is_enemy);
+        let message: Message = Message::New(Kind::Eliminated).id(victim_id).id(shooter_id);
+        for target in self
+            .slots
+            .iter()
+            .map(|slot| slot.address)
+            .chain([victim_slot.address])
+        {
+            self.send(&message.0, target);
+        }
+    }
+
+    /// `freeze_players` freezes away the health of every placed player standing in a blizzard over
+    /// `dt_s` seconds, and eliminates those it freezes to death (by themselves, so no one scores a
+    /// kill). Nothing freezes once a team has won.
+    ///
+    /// Example: `server.freeze_players(0.016);`
+    fn freeze_players(&mut self, dt_s: f64) {
+        if self.game.winner.is_some() {
+            return;
+        }
+        let freezing: &Freezing = &self.freezing;
+        for slot in self.slots.iter_mut().filter(|slot| slot.is_placed) {
+            slot.damage_frac += freezing.get_freeze_per_s(slot.player.frame.w_axis) * dt_s;
+        }
+        while let Some(victim) = self
+            .slots
+            .iter()
+            .position(|slot| slot.damage_frac >= 1.0 - DAMAGE_TOLERANCE_FRAC)
+        {
+            let victim_id: u32 = self.slots[victim].player.id;
+            println!("player {victim_id} froze in a blizzard");
+            self.eliminate(victim, victim_id, false);
         }
     }
 
@@ -1036,6 +1115,7 @@ pub fn serve(
     new_game_after_win: Option<Duration>,
     level_result_file: Option<&Path>,
     game_password: Vec<u8>,
+    freezing: Freezing,
 ) -> Result<()> {
     assert!(
         console_teams.len() <= MAX_CONSOLE_COUNT,
@@ -1060,7 +1140,9 @@ pub fn serve(
         console_teams,
         game: GameState::default(),
         tallies: Vec::new(),
+        freezing,
     };
+    let mut last_freeze: Instant = Instant::now();
     let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
     let (mut last_snapshot, mut last_beacon) = (Instant::now(), None::<Instant>);
     let mut last_scores: Instant = Instant::now();
@@ -1081,6 +1163,8 @@ pub fn serve(
             is_alive
         });
         server.update_consoles();
+        server.freeze_players(last_freeze.elapsed().as_secs_f64());
+        last_freeze = Instant::now();
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(path), Some(winner)) = (level_result_file, server.game.winner)
             && !has_written_result
@@ -1483,17 +1567,6 @@ impl Client {
         Ok(())
     }
 
-    /// `send_freeze` tells the server this player froze by one `1 / freezes_to_kill` of their health
-    /// in a blizzard: a hit on themselves.
-    ///
-    /// Example: `client.send_freeze(50)?;`
-    pub fn send_freeze(&mut self, freezes_to_kill: u8) -> Result<()> {
-        match self.id {
-            Some(id) => self.send_hit(id, freezes_to_kill),
-            None => Ok(()),
-        }
-    }
-
     /// `get_server` gives the address of the server this client plays on.
     ///
     /// Example: `let server = client.get_server();`
@@ -1688,6 +1761,11 @@ mod tests {
     const DISABLING_FRAC_STEP: f64 = 1.0 / u8::MAX as f64;
     const HALF: f64 = 0.5;
     const TWICE: f64 = 2.0;
+    const TEST_BLIZZARD_RADIUS_M: f64 = 10.0;
+    const TEST_BLIZZARD_HEIGHT_M: f64 = 16.0;
+    const TEST_BLIZZARD_SPEED_FRAC: f64 = 0.5;
+    const TEST_BLIZZARD_FOG_PER_M: f64 = 0.1;
+    const TEST_FREEZE_PER_S: f64 = 0.25;
 
     /// `make_join` makes `from`'s join request for `team` (or `ANY_TEAM`) with `version`,
     /// answering `server`'s challenge with a proof of `password`.
@@ -1790,6 +1868,21 @@ mod tests {
             console_teams: vec![0, 0, 1],
             game: GameState::default(),
             tallies: Vec::new(),
+            freezing: Freezing {
+                blizzards: vec![Blizzard {
+                    name: "test".to_string(),
+                    u_m: 0.0,
+                    v_m: 0.0,
+                    radius_m: TEST_BLIZZARD_RADIUS_M,
+                    height_m: TEST_BLIZZARD_HEIGHT_M,
+                    speed_frac: TEST_BLIZZARD_SPEED_FRAC,
+                    freeze_health_per_s: TEST_FREEZE_PER_S,
+                    shot_reach_m: TEST_BLIZZARD_RADIUS_M,
+                    fog_per_m: TEST_BLIZZARD_FOG_PER_M,
+                    snow_per_m3: TEST_BLIZZARD_FOG_PER_M,
+                }],
+                curvature_radius_m: FLAT_CURVATURE_RADIUS_M,
+            },
         }
     }
 
@@ -2101,6 +2194,25 @@ mod tests {
         assert_eq!(server.count_teams(), [2, 2]);
         join(&mut server, address(50_001), BLUE);
         assert_eq!(server.slots[0].player.team, 1);
+    }
+
+    #[test]
+    fn blizzards_freeze_placed_players_only() {
+        let mut server: Server = make_server();
+        for port in [50_001, 50_002, 50_003] {
+            join(&mut server, address(port), ANY_TEAM);
+        }
+        let outside_s: f64 = 2.0 * TEST_BLIZZARD_RADIUS_M / FLAT_CURVATURE_RADIUS_M;
+        server.slots[0].is_placed = true;
+        server.slots[1].is_placed = true;
+        server.slots[1].player.frame.w_axis =
+            DVec4::new(outside_s.sinh(), 0.0, 0.0, outside_s.cosh());
+        let half_life_s: f64 = 0.5 / TEST_FREEZE_PER_S;
+        server.freeze_players(half_life_s);
+        assert_eq!(server.slots.len(), 3);
+        server.freeze_players(half_life_s);
+        let ids: Vec<u32> = server.slots.iter().map(|slot| slot.player.id).collect();
+        assert_eq!(ids, vec![2, 3]);
     }
 
     #[test]

@@ -218,9 +218,6 @@ const SECONDS_PER_DAY: u64 = 86_400;
 const DISCOVERY_TIMEOUT_S: u64 = 5;
 const JOIN_AUTO: &str = "auto";
 const SERVER_START_S: f64 = 0.3;
-/// `FREEZES_TO_KILL` is how many steps a player's health freezes away in, in a blizzard: each step
-/// is a hit on themselves (`net::Client::send_freeze`).
-const FREEZES_TO_KILL: u8 = 50;
 const ROUTE_PROBE_ADDRESS: &str = "192.0.2.1:9";
 
 /// `RendererKind` is which renderer draws the frames.
@@ -899,6 +896,7 @@ fn start_server(
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let flag: Arc<AtomicBool> = Arc::clone(&should_stop);
     let should_start_new_game: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let freezing: net::Freezing = net::Freezing::FromMapName(map_name)?;
     let map_name: String = map_name.to_string();
     let new_game_flag: Arc<AtomicBool> = Arc::clone(&should_start_new_game);
     std::thread::spawn(move || {
@@ -917,6 +915,7 @@ fn start_server(
             None,
             level_result_file.as_deref(),
             game_password,
+            freezing,
         ) {
             eprintln!("The game server stopped: {error}");
         }
@@ -2065,7 +2064,6 @@ struct Session {
     hit_effect_frac: f64,
     blueshift_frac: f32,
     last_health_frac: f64,
-    freeze_frac: f64,
     health_pulses: hud_bars::BarPulses,
     energy_pulses: hud_bars::BarPulses,
     is_captured: bool,
@@ -2435,7 +2433,6 @@ impl Session {
             hit_effect_frac: 0.0,
             blueshift_frac: 0.0,
             last_health_frac: 1.0,
-            freeze_frac: 0.0,
             health_pulses: hud_bars::BarPulses::New(1.0),
             energy_pulses: hud_bars::BarPulses::New(1.0),
             is_captured: false,
@@ -2708,10 +2705,6 @@ impl Session {
                 let view_m_per_s: f64 = report.forward_m_per_s * pitch_rad.cos()
                     + voxel.player.vertical_m_per_s * pitch_rad.sin();
                 let eye: DVec4 = voxel.player.get_camera_frame(&voxel.world).col(AXIS_W);
-                self.freeze_frac += voxel
-                    .world
-                    .find_blizzard(eye)
-                    .map_or(0.0, |b| b.freeze_health_per_s * own_dt_s);
                 self.blueshift_frac = get_blueshift_frac(
                     voxel.world.get_mouth_depth_frac(eye),
                     view_m_per_s,
@@ -2727,17 +2720,6 @@ impl Session {
                 messages
             }
         };
-        let freeze_step_frac: f64 = 1.0 / f64::from(FREEZES_TO_KILL);
-        match self.multiplayer.as_mut() {
-            Some(multiplayer) if self.freeze_frac >= freeze_step_frac => {
-                self.freeze_frac -= freeze_step_frac;
-                if let Err(error) = multiplayer.client.send_freeze(FREEZES_TO_KILL) {
-                    eprintln!("Couldn't tell the server this player froze: {error}");
-                }
-            }
-            Some(_) => {}
-            None => self.freeze_frac = 0.0,
-        }
         for message in messages {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;

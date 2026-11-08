@@ -104,5 +104,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
         None,
         game_password,
+        net::Freezing::FromMapName(map_name)?,
     )
 }
