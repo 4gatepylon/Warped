@@ -10,6 +10,7 @@
 use crate::game::bots::BODY_CENTRE_HEIGHT_M;
 use crate::game::warps::{BeamPath, Warps};
 use std::collections::VecDeque;
+use std::ops::Range;
 
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
@@ -103,7 +104,8 @@ struct Flash {
     life_s: f32,
 }
 
-/// `FrameData` owns everything a frame description points at.
+/// `FrameData` owns everything a frame description points at; `lens_draws` are the robots among
+/// `world_draws`, and `lens_particles` the robots' eye glows, lasers and their sparks and smoke.
 pub struct FrameData {
     pub camera: Camera,
     pub world_draws: Vec<DrawItem>,
@@ -115,6 +117,8 @@ pub struct FrameData {
     pub viewmodel_particles: Vec<Particle>,
     pub hud_rects: Vec<HudRect>,
     pub damage_flash_frac: f32,
+    pub lens_draws: Range<usize>,
+    pub lens_particles: Vec<Particle>,
 }
 
 /// `OFF_PYLON_TINT` darkens a pylon whose console is off.
@@ -992,6 +996,8 @@ impl Session {
                 color_rgb: flash.color_rgb * frac * frac,
             });
         }
+        let lens_draws: Range<usize> = scene.static_draws.len()..world_draws.len();
+        let robot_particle_count: usize = world_particles.len();
         let beacon_height_m: f32 = scene.beacon.bounds_max_m.y - scene.beacon.bounds_min_m.y;
         for pylon in &self.arena.pylons {
             let is_off: bool = self
@@ -1029,6 +1035,7 @@ impl Session {
                 });
             }
         }
+        let beacon_particle_end: usize = world_particles.len();
         for beam in &self.beams {
             let frac: f32 = 1.0 - beam.age_s / beam.life_s;
             world_particles.push(Particle {
@@ -1136,7 +1143,14 @@ impl Session {
             height_px,
         );
         hud_rects.extend(self.objective_hud(width_px, height_px));
+        let lens_particles: Vec<Particle> = world_particles[..robot_particle_count]
+            .iter()
+            .chain(&world_particles[beacon_particle_end..])
+            .copied()
+            .collect();
         FrameData {
+            lens_draws,
+            lens_particles,
             camera,
             world_draws,
             viewmodel_draws,

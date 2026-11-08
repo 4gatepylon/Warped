@@ -370,10 +370,20 @@ fn capture_wormhole_lens(
                     hud_images: &[],
                     time_s: 0.0,
                     damage_flash_frac: 0.0,
+                    lens_draws: &[],
+                    lens_particles: &[],
                 },
                 &capture_settings,
             );
             let (frame_width_px, frame_height_px, rgba) = renderer.read_frame_rgba();
+            let (_, _, depths) = renderer.read_frame_depth();
+            let encoded_depths: Vec<u8> = depths
+                .iter()
+                .map(|&depth| render::encode_lens_depth(camera.near_m, depth))
+                .collect();
+            let depth_picture: image::GrayImage =
+                image::GrayImage::from_raw(frame_width_px, frame_height_px, encoded_depths)
+                    .expect("depth frame");
             let picture: image::RgbaImage =
                 image::RgbaImage::from_raw(frame_width_px, frame_height_px, rgba)
                     .expect("RGBA frame");
@@ -386,12 +396,28 @@ fn capture_wormhole_lens(
                 side_px,
             )
             .to_image();
-            let face_picture: image::RgbaImage = image::imageops::resize(
+            let mut face_picture: image::RgbaImage = image::imageops::resize(
                 &square,
                 LENS_FACE_PX,
                 LENS_FACE_PX,
                 image::imageops::FilterType::Triangle,
             );
+            let face_depths: image::GrayImage = image::imageops::resize(
+                &image::imageops::crop_imm(
+                    &depth_picture,
+                    (frame_width_px - side_px) / 2,
+                    (frame_height_px - side_px) / 2,
+                    side_px,
+                    side_px,
+                )
+                .to_image(),
+                LENS_FACE_PX,
+                LENS_FACE_PX,
+                image::imageops::FilterType::Nearest,
+            );
+            for (pixel, depth) in face_picture.pixels_mut().zip(face_depths.pixels()) {
+                pixel.0[3] = depth.0[0];
+            }
             image::imageops::replace(
                 &mut atlas,
                 &face_picture,
@@ -641,6 +667,8 @@ fn run_title_screen(
                 hud_images: &[picture.get_image(width_px, height_px, TITLE_HEIGHT_FRAC)],
                 time_s: start.elapsed().as_secs_f32(),
                 damage_flash_frac: 0.0,
+                lens_draws: &frame.world_draws[frame.lens_draws.clone()],
+                lens_particles: &frame.lens_particles,
             },
             settings,
         );
@@ -1228,6 +1256,8 @@ fn main() {
                 hud_images: &hud_images,
                 time_s: session.time_s,
                 damage_flash_frac: frame.damage_flash_frac,
+                lens_draws: &frame.world_draws[frame.lens_draws.clone()],
+                lens_particles: &frame.lens_particles,
             },
             &settings,
         );

@@ -231,7 +231,9 @@ pub struct HudImage<'a> {
     pub scale: f32,
 }
 
-/// `FrameDescription` is everything the backend draws in one frame.
+/// `FrameDescription` is everything the backend draws in one frame. `lens_draws` and
+/// `lens_particles` are the robots and laser effects among `world_draws` and `world_particles`,
+/// which wormhole lenses also show live (the lens atlas holds only the static world).
 pub struct FrameDescription<'a> {
     pub camera: Camera,
     pub world_draws: &'a [DrawItem],
@@ -245,6 +247,8 @@ pub struct FrameDescription<'a> {
     pub hud_images: &'a [HudImage<'a>],
     pub time_s: f32,
     pub damage_flash_frac: f32,
+    pub lens_draws: &'a [DrawItem],
+    pub lens_particles: &'a [Particle],
 }
 
 /// `LensMouth` is one wormhole mouth as the lens pass sees it: its lens throat (where rays cross),
@@ -279,6 +283,67 @@ pub const LENS_FACES: [(Vec3, Vec3); 6] = [
 
 /// `MAX_LENS_MOUTH_COUNT` is how many mouths the lens pass takes.
 pub const MAX_LENS_MOUTH_COUNT: usize = 16;
+/// `LENS_DEPTH_NEAR_M` and `LENS_DEPTH_FAR_M` bound the lens atlas's alpha: the static world's
+/// distance along each face's axis, log-encoded from 0 at the near bound to 1 at the far bound (and
+/// the sky); `post.metal` decodes it with the same bounds.
+pub const LENS_DEPTH_NEAR_M: f32 = 0.25;
+pub const LENS_DEPTH_FAR_M: f32 = 128.0;
+/// `MAX_LIVE_LENS_SLOT_COUNT` is how many mouths' surroundings the lens shows live at once.
+pub const MAX_LIVE_LENS_SLOT_COUNT: usize = 4;
+/// `LIVE_LENS_RANGE_M` is how near a mouth a robot or laser must come to show through the lens.
+pub const LIVE_LENS_RANGE_M: f32 = 50.0;
+
+/// `encode_lens_depth` is the lens atlas's alpha byte for a pixel of reverse-Z `depth` (0 for the
+/// sky) drawn with near plane `near_m`.
+///
+/// Example: `let alpha: u8 = encode_lens_depth(0.05, depth);`
+pub fn encode_lens_depth(near_m: f32, depth: f32) -> u8 {
+    let along_m: f32 = if depth > 0.0 {
+        near_m / depth
+    } else {
+        LENS_DEPTH_FAR_M
+    };
+    let frac: f32 =
+        (along_m / LENS_DEPTH_NEAR_M).ln() / (LENS_DEPTH_FAR_M / LENS_DEPTH_NEAR_M).ln();
+    (frac.clamp(0.0, 1.0) * f32::from(u8::MAX)).round() as u8
+}
+
+/// `get_segment_distance_m` is how near the segment from `a_m` to `b_m` comes to `point_m`.
+fn get_segment_distance_m(point_m: Vec3, a_m: Vec3, b_m: Vec3) -> f32 {
+    let ab: Vec3 = b_m - a_m;
+    let along_frac: f32 = (point_m - a_m).dot(ab) / ab.length_squared().max(1e-12);
+    point_m.distance(a_m + ab * along_frac.clamp(0.0, 1.0))
+}
+
+/// `pick_live_lens_mouths` chooses whose surroundings the lens shows live this frame, in slot
+/// order: for each mouth in `is_visible`, nearest the camera first, its partner (seen through it)
+/// and then itself (seen bent around it), each only if a mover (a segment) comes within
+/// `LIVE_LENS_RANGE_M` of it, at most `MAX_LIVE_LENS_SLOT_COUNT` mouths.
+///
+/// Example: `let slots: Vec<usize> = pick_live_lens_mouths(&mouths, camera_m, &is_visible, &movers);`
+pub fn pick_live_lens_mouths(
+    mouths: &[LensMouth],
+    camera_m: Vec3,
+    is_visible: &[bool],
+    movers: &[(Vec3, Vec3)],
+) -> Vec<usize> {
+    let mut visible: Vec<usize> = (0..mouths.len()).filter(|&i| is_visible[i]).collect();
+    visible.sort_by(|&a, &b| {
+        let a_m: f32 = mouths[a].centre_m.distance_squared(camera_m);
+        a_m.total_cmp(&mouths[b].centre_m.distance_squared(camera_m))
+    });
+    let mut slots: Vec<usize> = Vec::new();
+    for index in visible.into_iter().flat_map(|i| [mouths[i].partner, i]) {
+        let centre_m: Vec3 = mouths[index].centre_m;
+        let is_near: bool = movers
+            .iter()
+            .any(|&(a_m, b_m)| get_segment_distance_m(centre_m, a_m, b_m) < LIVE_LENS_RANGE_M);
+        if is_near && !slots.contains(&index) && slots.len() < MAX_LIVE_LENS_SLOT_COUNT {
+            slots.push(index);
+        }
+    }
+    slots
+}
 
 /// `RenderSettings` are the quality switches that can change while the demo runs.
 #[derive(Clone, Copy, Debug)]
@@ -322,6 +387,9 @@ pub trait Renderer {
     /// `read_frame_rgba` waits for the frames in flight and gives the last one's picture before
     /// the HUD, at the internal resolution: (width_px, height_px, RGBA bytes).
     fn read_frame_rgba(&mut self) -> (u32, u32, Vec<u8>);
+    /// `read_frame_depth` is `read_frame_rgba`'s depth: reverse Z, near plane over distance
+    /// along the view axis, 0 for the sky (opaque surfaces only).
+    fn read_frame_depth(&mut self) -> (u32, u32, Vec<f32>);
     /// `set_wormhole_lens` bends the view through these wormhole mouths from now on (None stops).
     fn set_wormhole_lens(&mut self, lens: Option<&WormholeLens>);
     /// `set_is_capturing` leaves the vignette and grain out of frames, for pictures that become
