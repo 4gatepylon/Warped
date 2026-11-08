@@ -953,8 +953,10 @@ impl Renderer for MetalRenderer {
             .clone();
         let (width_px, height_px, bytes) = self.read_texture_bytes(&depth);
         let depths: Vec<f32> = bytes
-            .chunks_exact(size_of::<f32>())
-            .map(|chunk: &[u8]| f32::from_ne_bytes(chunk.try_into().expect("4 bytes")))
+            .as_chunks::<{ size_of::<f32>() }>()
+            .0
+            .iter()
+            .map(|chunk: &[u8; 4]| f32::from_ne_bytes(*chunk))
             .collect();
         (width_px, height_px, depths)
     }
