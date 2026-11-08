@@ -46,6 +46,9 @@ is in [`AGENTS.md`](AGENTS.md).
   console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
   down.
   Claimed by Claude Code (session `08e70e8b-f763-4c5c-828c-f939a12fad13`), branch `reality-bend`, 2026-11-07.
+- [~] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
+  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). Claimed by Claude Code
+  (session `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/shoot-wormholes`, 2026-11-07.
 
 ## Open
 
@@ -106,8 +109,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code.
-- [ ] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
-  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204).
 
 ## Pending user review
 
