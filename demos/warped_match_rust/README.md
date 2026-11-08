@@ -98,7 +98,7 @@ binary (e.g. `.levels/snow_planet/demos/snow_planet_rust/.build/release/snow-pla
 drop `stand_in_for`, and update this table. Set `takes_bot_label: false` if its bots don't take
 `--label`. `make levels` follows each branch's tip, so run it again to pick up their changes.
 Until a level is plugged in, `program: self` with `map: lunar-surface` and `stand_in_for: <level>`
-plays it on Lunar Surface. `map_picture: <png from this folder>` puts a picture of the level in its box on the progression page (City Sphere's `assets/map_picture.png` today); this demo's own maps draw theirs from the map, and a level without one shows an empty box.
+plays it on Lunar Surface. `make progression-pictures WIDTH_PX=2560 HEIGHT_PX=1440` renders the progression page without a window for four match states (before round 1, mid-match, a sweep, a tie) into `.artifacts/progression_pictures/`. `map_picture: <png from this folder>` puts a picture of the level in its box on the progression page (City Sphere's `assets/map_picture.png` today); this demo's own maps draw theirs from the map, and a level without one shows an empty box.
 
 ## Results
 

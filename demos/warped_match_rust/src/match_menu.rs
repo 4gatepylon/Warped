@@ -275,7 +275,7 @@ const LEVEL_HEIGHT: f32 = 92.0 + THUMBNAIL_PAD + THUMBNAIL_HEIGHT;
 const LEVEL_GAP: f32 = 12.0;
 const CAPTURE_BAR: f32 = 6.0;
 const HISTORY_TOP: f32 = 232.0 + THUMBNAIL_PAD + THUMBNAIL_HEIGHT;
-const CHIP_WIDTH: f32 = 64.0;
+const CHIP_WIDTH: f32 = 72.0;
 
 /// `Shape` is one thing on the window's page: a filled panel with an optional border, a line of
 /// text in the menu's font, or the box a level's map picture fits in (the window draws the
@@ -326,7 +326,7 @@ fn format_short_status(ownership: &Ownership, state: &MatchState, level: usize) 
         .find(|round| round.level == level)
         .map(|round| round.number);
     match (ownership.captured_by, won_round) {
-        (Some(team), Some(round)) => format!("{} took it #{round}", team.get_name()),
+        (Some(team), Some(round)) => format!("{} took #{round}", team.get_name()),
         _ if level == state.get_purple_level() => "played first".to_string(),
         _ => "not taken".to_string(),
     }
@@ -808,7 +808,7 @@ mod tests {
             .collect();
         assert!(texts.contains(&("^ red wave *", TEAM_RGB[1])));
         assert!(texts.contains(&("^ blue wave", TEAM_RGB[0])));
-        assert!(texts.contains(&("red took it #2", TEAM_RGB[1])));
+        assert!(texts.contains(&("red took #2", TEAM_RGB[1])));
         assert_eq!(
             texts.iter().filter(|(text, _)| *text == "red won").count(),
             2

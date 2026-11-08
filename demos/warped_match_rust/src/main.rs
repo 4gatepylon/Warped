@@ -177,6 +177,7 @@ const TITLE_WINDOW_PX: (u32, u32) = (960, 600);
 const TITLE_FRAME_MS: u64 = 16;
 const THUMBNAIL_EMPTY_ALPHA: u8 = 90;
 const THUMBNAIL_MAX_PX: (u32, u32) = (400, 200);
+const PICTURE_MATCH_LEFT_S: f64 = 1_500.0;
 const LEVEL_RESTART_S: f64 = 1.0;
 const MATCH_WINDOW_PX: (u32, u32) = (1280, 800);
 const DEBUG_GLYPH_PX: f32 = 8.0;
@@ -383,6 +384,10 @@ struct Arguments {
     /// With --serve-match: the levels file (see match_levels.yaml).
     #[arg(long, default_value = "match_levels.yaml")]
     match_levels: PathBuf,
+    /// Render the progression page without a window at --width-px x --height-px for a few match
+    /// states and save them under .artifacts/progression_pictures/.
+    #[arg(long)]
+    progression_pictures: bool,
     /// With --serve-match: seconds between rounds, showing the progression.
     #[arg(long, default_value_t = 10.0)]
     intermission_s: f64,
@@ -607,6 +612,7 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         && !arguments.autopilot
         && !arguments.play_route
         && arguments.export_map.is_none()
+        && !arguments.progression_pictures
         && !is_match;
     if is_window_without_server {
         return Err(LOCAL_PLAY_OFF.into());
@@ -683,6 +689,9 @@ fn run(arguments: Arguments) -> Result<()> {
     }
     if arguments.serve_match {
         return run_match_server(&arguments);
+    }
+    if arguments.progression_pictures {
+        return save_progression_pictures(&arguments);
     }
     if let Some(address) = &arguments.match_server {
         return run_match_client(&arguments, address);
@@ -877,8 +886,10 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                 if let (None, Some(creator)) = (&thumbnails, &texture_creator) {
                     thumbnails = Some(make_thumbnails(creator, &view.levels)?);
                 }
+                let size_px: (u32, u32) = canvas.window().size_in_pixels();
                 draw_shapes(
                     canvas,
+                    size_px,
                     &match_menu::get_progression_shapes(&view, client.team),
                     thumbnails.as_deref().unwrap_or_default(),
                 )?;
@@ -4932,12 +4943,12 @@ fn draw_text_overlay(canvas: &mut sdl3::render::WindowCanvas, text: &OverlayText
 /// (`match_menu::PAGE_SIZE`) to fit the window and centring it.
 ///
 /// Example: `draw_shapes(&mut canvas, &match_menu::get_progression_shapes(&view, None))?;`
-fn draw_shapes(
-    canvas: &mut sdl3::render::WindowCanvas,
+fn draw_shapes<T: sdl3::render::RenderTarget>(
+    canvas: &mut sdl3::render::Canvas<T>,
+    (width, height): (u32, u32),
     shapes: &[match_menu::Shape],
     thumbnails: &[Option<Thumbnail>],
 ) -> Result<()> {
-    let (width, height) = canvas.window().size_in_pixels();
     let [page_width, page_height] = match_menu::PAGE_SIZE;
     let scale: f32 = (width as f32 / page_width).min(height as f32 / page_height);
     let left: f32 = (width as f32 / scale - page_width) / 2.0;
@@ -5000,6 +5011,85 @@ fn draw_shapes(
     Ok(())
 }
 
+/// `save_progression_pictures` renders the progression page (`match_menu`) without a window, at
+/// `--width-px` x `--height-px` for blue's player, for a few match states on `--match-levels`:
+/// before round 1, mid-match after role swaps while a round is played, red's sweep, and a tie. It
+/// saves them as PNGs under `.artifacts/progression_pictures/<run_id>/`.
+///
+/// Example: `save_progression_pictures(&arguments)?;`
+fn save_progression_pictures(arguments: &Arguments) -> Result<()> {
+    use match_flow::{MatchView, Phase};
+    use match_state::{MatchState, Team};
+    let levels: Vec<match_flow::LevelEntry> = match_flow::LoadLevels(&arguments.match_levels)?;
+    let folder: PathBuf = make_run_folder("progression_pictures", arguments.label.as_deref())?;
+    let (width_px, height_px): (u32, u32) = (arguments.width_px, arguments.height_px);
+    let samples: [(&str, Vec<Team>, bool, Phase); 4] = [
+        (
+            "before_round_1",
+            vec![],
+            false,
+            Phase::Intermission { left_s: 47.0 },
+        ),
+        (
+            "mid_match_round_5",
+            vec![Team::Blue, Team::Red, Team::Red, Team::Blue],
+            false,
+            Phase::Playing {
+                round: 5,
+                level: 3,
+                port: match_flow::MATCH_PORT + 2,
+            },
+        ),
+        ("red_sweep_over", vec![Team::Red; 3], false, Phase::Over),
+        ("tie_over", vec![Team::Blue, Team::Red], true, Phase::Over),
+    ];
+    for (name, winners, is_tie, phase) in samples {
+        let mut state: MatchState = MatchState::New(levels.len());
+        for winner in winners {
+            state.record_round(winner);
+        }
+        if is_tie {
+            state.end_in_tie();
+        }
+        let match_left_s: Option<f64> = if is_tie {
+            Some(0.0)
+        } else {
+            (!state.rounds().is_empty()).then_some(PICTURE_MATCH_LEFT_S)
+        };
+        let view: MatchView = MatchView {
+            state,
+            phase,
+            levels: levels.clone(),
+            team_counts: [1, 1],
+            match_left_s,
+        };
+        let surface = sdl3::surface::Surface::new(width_px, height_px, PixelFormat::RGBA32)?;
+        let mut canvas: sdl3::render::Canvas<sdl3::surface::Surface> = surface.into_canvas()?;
+        let creator = canvas.texture_creator();
+        let thumbnails: Vec<Option<Thumbnail>> = make_thumbnails(&creator, &levels)?;
+        draw_shapes(
+            &mut canvas,
+            (width_px, height_px),
+            &match_menu::get_progression_shapes(&view, Some(Team::Blue)),
+            &thumbnails,
+        )?;
+        canvas.present();
+        drop(thumbnails);
+        let surface = canvas.into_surface();
+        let pitch: usize = surface.pitch() as usize;
+        let row_bytes: usize = width_px as usize * BYTES_PER_PIXEL;
+        let pixels: Vec<u8> = surface.with_lock(|pixels: &[u8]| {
+            (0..height_px as usize)
+                .flat_map(|y| pixels[y * pitch..y * pitch + row_bytes].iter().copied())
+                .collect()
+        });
+        let path: PathBuf = folder.join(format!("{name}.png"));
+        save_png(&path, &pixels, width_px, height_px)?;
+        println!("{}", path.display());
+    }
+    Ok(())
+}
+
 /// `Thumbnail` is a level's map picture on the progression page: its texture and its size in
 /// pixels.
 struct Thumbnail<'creator> {
@@ -5013,8 +5103,8 @@ struct Thumbnail<'creator> {
 /// PNG isn't there yet (its branch not built by `make levels`), gets `None`.
 ///
 /// Example: `let thumbnails = make_thumbnails(&canvas.texture_creator(), &view.levels)?;`
-fn make_thumbnails<'creator>(
-    creator: &'creator sdl3::render::TextureCreator<sdl3::video::WindowContext>,
+fn make_thumbnails<'creator, T>(
+    creator: &'creator sdl3::render::TextureCreator<T>,
     levels: &[match_flow::LevelEntry],
 ) -> Result<Vec<Option<Thumbnail<'creator>>>> {
     let mut thumbnails: Vec<Option<Thumbnail>> = Vec::new();
