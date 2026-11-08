@@ -87,6 +87,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
+- [ ] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
+  character, and the player controls it from there, seeing their own character.
 
 ## Done
 
