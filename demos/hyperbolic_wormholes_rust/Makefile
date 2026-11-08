@@ -8,6 +8,9 @@
 #     (SERVER_SETTINGS: a copy of server_settings.yaml with the numbers that shape play; the server sends them to every player.)
 #     (PLAYER_SETTINGS: a copy of player_settings.yaml with this player's own keys, mouse speed and view.)
 #     (Playing is only on a game server: there is no local demo and no host-and-play target.)
+#     (GAME_PASSWORD_FILE, with serve-game and join-game: a file holding the game's password; only players who know it may join.)
+#     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
+#     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
@@ -27,15 +30,27 @@ PORT ?= 47800
 MAP ?= lunar-surface
 SERVER ?= auto
 SERVER_SETTINGS ?=
+SERVER_TARGET := x86_64-unknown-linux-musl
+SERVER_BUNDLE := .build/server_bundle.tar.gz
+APP_FOLDER := .build/Warped
+APP := $(APP_FOLDER)/Warped.app
+APP_ZIP := .build/Warped.zip
+APP_ICONSET := .build/AppIcon.iconset
+APP_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)
+ONLINE_GAMES ?=
+FPS_DEMO_ASSETS := ../fps_demo/assets
+MAP_MODELS := ../../common/maps/models
 SERVER_SETTINGS_FLAG := $(if $(SERVER_SETTINGS),--server-settings $(SERVER_SETTINGS))
 PLAYER_SETTINGS ?=
 PLAYER_SETTINGS_FLAG := $(if $(PLAYER_SETTINGS),--player-settings $(PLAYER_SETTINGS))
+GAME_PASSWORD_FILE ?=
+GAME_PASSWORD_FLAG := $(if $(GAME_PASSWORD_FILE),--game-password-file $(GAME_PASSWORD_FILE))
 
 RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilot frames and timings). \
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help serve-game join-game bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -43,6 +58,9 @@ help:
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
 	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
 	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of player_settings.yaml)"
+	@echo "  (serve-game and join-game take GAME_PASSWORD_FILE=password.txt: only players who know it join)"
+	@echo "  make build-server-bundle                         Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"
+	@echo "  make package-mac-app ONLINE_GAMES=games.txt      Build Warped.app and zip it ($(APP_ZIP)); ONLINE_GAMES is optional"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
 	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
@@ -55,10 +73,39 @@ help:
 	@echo "Example: make bench-views RENDERER=cpu WIDTH_PX=2560 HEIGHT_PX=1600"
 
 serve-game:
-	cargo run --release -- --serve --port $(PORT) --map $(MAP) $(SERVER_SETTINGS_FLAG)
+	cargo run --release -- --serve --port $(PORT) --map $(MAP) $(SERVER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
 
 join-game:
-	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) $(PLAYER_SETTINGS_FLAG)
+	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) $(PLAYER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
+
+build-server-bundle:
+	rustup target add $(SERVER_TARGET)
+	cargo build --release --target $(SERVER_TARGET) --bin wormholes_server
+	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(SERVER_TARGET)/release wormholes_server
+	@echo "Server bundle: $(SERVER_BUNDLE)"
+
+package-mac-app:
+	cargo build --release
+	rm -rf .build/Warped .build/AppIcon.iconset
+	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(APP_ICONSET)
+	cp .build/release/hyperbolic-wormholes $(APP)/Contents/MacOS/Warped
+	sed 's/@VERSION@/$(APP_VERSION)/' app/Info.plist > $(APP)/Contents/Info.plist
+	for size in 16 32 128 256 512; do \
+		sips -z $$size $$size app/app_icon.png --out $(APP_ICONSET)/icon_$${size}x$${size}.png > /dev/null; \
+		sips -z $$((size * 2)) $$((size * 2)) app/app_icon.png --out $(APP_ICONSET)/icon_$${size}x$${size}@2x.png > /dev/null; \
+	done
+	iconutil -c icns $(APP_ICONSET) -o $(APP)/Contents/Resources/AppIcon.icns
+	$(if $(ONLINE_GAMES),cp $(ONLINE_GAMES) $(APP)/Contents/Resources/online_games.txt)
+	mkdir -p $(APP)/Contents/Resources/assets/models $(APP)/Contents/Resources/models
+	cp -R $(FPS_DEMO_ASSETS)/textures $(APP)/Contents/Resources/assets/textures
+	cp -R $(FPS_DEMO_ASSETS)/models/bolt_action_rifle_7_62 $(APP)/Contents/Resources/assets/models/
+	rsync -a --exclude teal_robot $(MAP_MODELS)/ $(APP)/Contents/Resources/models/
+	cp app/how_to_open.txt "$(APP_FOLDER)/How to open Warped.txt"
+	codesign --force --deep --sign - $(APP)
+	ditto -c -k --keepParent $(APP_FOLDER) $(APP_ZIP).partial
+	mv $(APP_ZIP).partial $(APP_ZIP)
+	@echo "App: $(APP)"
+	@echo "Zip: $(APP_ZIP)"
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)

@@ -27,7 +27,7 @@ use objc2_metal::{
 };
 use rayon::prelude::*;
 
-use crate::fps_demo_assets::{check_asset, get_asset_path};
+use crate::fps_demo_assets::{check_asset, get_asset_path, import_gltf};
 use crate::render_metal::OverlayWand;
 use crate::voxel_textures::{make_array, make_mips};
 
@@ -403,9 +403,8 @@ struct GltfFile {
 fn open_gltf(spec: &ModelSpec) -> Result<GltfFile> {
     let path: PathBuf = get_asset_path(spec.gltf_path);
     check_asset(&path)?;
-    let gltf::Gltf { document, blob } = gltf::Gltf::open(&path)?;
+    let (document, buffers) = import_gltf(&path)?;
     let folder: PathBuf = path.parent().expect("a file has a folder").to_path_buf();
-    let buffers: Vec<gltf::buffer::Data> = gltf::import_buffers(&document, Some(&folder), blob)?;
     Ok(GltfFile {
         document,
         buffers,

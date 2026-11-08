@@ -15,7 +15,10 @@
 //!   exceptions are named: player keys removed since saves began (`REMOVED_PLAYER_KEYS`) are
 //!   dropped, and those added since (`ADDED_PLAYER_KEYS`) take their built-in values when missing.
 //! - The built-in settings are the two files themselves, compiled in.
+//! - `PerPlayerSettings` exists only on macOS, where the game's window runs (its keys are SDL's);
+//!   the game server also builds for Linux.
 
+#[cfg(target_os = "macos")]
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::Path;
@@ -23,9 +26,11 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[cfg(target_os = "macos")]
 use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
+#[cfg(target_os = "macos")]
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
@@ -53,6 +58,7 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
     "black_hole.max_lens_rad",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
+#[cfg(target_os = "macos")]
 const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
@@ -330,6 +336,7 @@ pub struct MinimapSettings {
 }
 
 /// `PlayerFile` is `player_settings.yaml` as written: the keys by name, the view and how a hit looks.
+#[cfg(target_os = "macos")]
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlayerFile {
@@ -340,6 +347,7 @@ struct PlayerFile {
 }
 
 /// `PerPlayerSettings` is everything in `player_settings.yaml`, with the keys read into controls.
+#[cfg(target_os = "macos")]
 pub struct PerPlayerSettings {
     pub keys: KeyBindings,
     pub view: ViewSettings,
@@ -569,6 +577,7 @@ impl ServerSettings {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with

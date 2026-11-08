@@ -22,6 +22,7 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod app_bundle;
 mod avatar_animation;
 mod avatar_model;
 mod black_hole_growth;
@@ -53,6 +54,7 @@ mod spaceships;
 mod terrain;
 mod third_person;
 mod thrown_wormholes;
+mod title;
 mod viewmodel;
 mod voxel_clearance;
 mod voxel_textures;
@@ -64,7 +66,7 @@ use std::error::Error;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, ExitCode};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
@@ -76,6 +78,7 @@ use objc2_core_foundation::CGSize;
 use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
 use sdl3::event::Event;
+use sdl3::keyboard::Scancode;
 use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
@@ -83,6 +86,7 @@ use serde_json::{Value, json};
 use black_hole_growth::BlackHoleGrowth;
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use key_bindings::{Action, Control};
+use map::MapName;
 use physics::{Input, LaserReport, Player};
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
@@ -161,6 +165,13 @@ const TEXT_TOP_PX: f32 = 2.0;
 const TEXT_LINE_PX: f32 = 12.0;
 const MENU_LEFT_PX: f32 = 4.0;
 const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
+const GAME_PASSWORD_HOME_PATH: &str = "Library/Application Support/Warped/game_password";
+const LOGS_HOME_FOLDER: &str = "Library/Logs/Warped";
+const ONLINE_GAMES_FILE: &str = "online_games.txt";
+const OWNER_ONLY_FILE_MODE: u32 = 0o600;
+const WRONG_PASSWORD_EXIT_CODE: u8 = 3;
+const TITLE_WINDOW_PX: (u32, u32) = (960, 600);
+const TITLE_FRAME_MS: u64 = 16;
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
@@ -222,25 +233,6 @@ enum RendererKind {
 enum Sampling {
     Adaptive,
     EveryPixel,
-}
-
-/// `MapName` is which map to play, from `common/maps/`.
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum MapName {
-    HouseDemo,
-    LunarSurface,
-}
-
-impl MapName {
-    /// `get_folder_name` gives the map's folder name in `common/maps/`.
-    ///
-    /// Example: `let name = MapName::HouseDemo.get_folder_name();`
-    fn get_folder_name(self) -> &'static str {
-        match self {
-            MapName::HouseDemo => "house_demo",
-            MapName::LunarSurface => "lunar_surface",
-        }
-    }
 }
 
 /// `RouteKind` is which route `--play-route` plays: the house's scripted legs, a tour around each
@@ -334,6 +326,11 @@ struct Arguments {
     /// uses them.
     #[arg(long, conflicts_with = "join")]
     server_settings: Option<PathBuf>,
+    /// A file holding the game's password: a server (--serve, --host) admits only players who prove
+    /// they know it, and a player (--join, --host) proves it. Without it the password is empty, as
+    /// suits a local network.
+    #[arg(long)]
+    game_password_file: Option<PathBuf>,
     /// This player's own choices (keys, mouse speed, head bob, motion blur, how a hit looks), a YAML
     /// file with player_settings.yaml's keys (the default).
     #[arg(long)]
@@ -580,8 +577,31 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
 /// `main` validates the command line and runs the window, the benchmark or the autopilot.
 ///
 /// Example: `cargo run --release -- --autopilot`
-fn main() -> Result<()> {
-    let arguments: Arguments = Arguments::parse();
+fn main() -> ExitCode {
+    let is_title_screen: bool = std::env::args_os().len() == 1;
+    let result: Result<()> = if is_title_screen {
+        run_title_screen()
+    } else {
+        run(Arguments::parse())
+    };
+    let Err(error) = result else {
+        return ExitCode::SUCCESS;
+    };
+    eprintln!("Error: {error}");
+    if is_title_screen {
+        let _ = show_alert(&error.to_string());
+    }
+    match error.downcast_ref::<net::PasswordRefused>() {
+        Some(_) => ExitCode::from(WRONG_PASSWORD_EXIT_CODE),
+        None => ExitCode::FAILURE,
+    }
+}
+
+/// `run` validates the command line and runs what it asks for: the window, a server, the bot, the
+/// benchmark or the autopilot.
+///
+/// Example: `run(Arguments::parse())?;`
+fn run(arguments: Arguments) -> Result<()> {
     validate_arguments(&arguments)?;
     if let Some(folder) = &arguments.export_map {
         let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
@@ -610,14 +630,188 @@ fn main() -> Result<()> {
     }
 }
 
-/// `load_map` loads a map from `common/maps/` and, on a voxel map (one with structures, such as
-/// Lunar Surface), curves its space as `settings` say (`Map::scale_curvature`). The house demo
-/// keeps its own curvature: at twice it, its far pylon sits 13 curvature radii out, too far for
-/// the renderer's single precision, and its scripted route breaks.
+/// `run_title_screen` shows the title screen (`title.rs`) until the player quits, starting each
+/// chosen game as this program with that game's flags and showing why in a pop-up when one fails.
+///
+/// Example: `run_title_screen()?;`
+fn run_title_screen() -> Result<()> {
+    let online_games_path: Option<PathBuf> = app_bundle::get_app_resources_folder()
+        .map(|folder| folder.join(ONLINE_GAMES_FILE))
+        .filter(|path| path.exists());
+    let online_games: String = match &online_games_path {
+        Some(path) => fs::read_to_string(path)?,
+        None => String::new(),
+    };
+    let mut title_screen: title::TitleScreen = title::TitleScreen::New(&online_games)?;
+    while let Some(choice) = pick_title_choice(&mut title_screen)? {
+        if let Err(error) = start_title_choice(&choice) {
+            show_alert(&error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// `pick_title_choice` opens the title screen's window until the player picks a game (`Some`) or
+/// quits (`None`).
+///
+/// Example: `let choice = pick_title_choice(&mut title_screen)?;`
+fn pick_title_choice(title_screen: &mut title::TitleScreen) -> Result<Option<title::Choice>> {
+    let sdl: sdl3::Sdl = sdl3::init()?;
+    let window: sdl3::video::Window = sdl
+        .video()?
+        .window(WINDOW_TITLE, TITLE_WINDOW_PX.0, TITLE_WINDOW_PX.1)
+        .high_pixel_density()
+        .position_centered()
+        .build()?;
+    let mut canvas: sdl3::render::WindowCanvas = window.into_canvas();
+    let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
+    loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. } => return Ok(None),
+                Event::KeyDown {
+                    scancode: Some(scancode),
+                    ..
+                } => match scancode {
+                    Scancode::Up | Scancode::W => title_screen.move_selection(-1),
+                    Scancode::Down | Scancode::S => title_screen.move_selection(1),
+                    Scancode::Escape => return Ok(None),
+                    Scancode::Return | Scancode::KpEnter => {
+                        let choice: title::Choice = title_screen.get_selected().clone();
+                        return Ok((choice != title::Choice::Quit).then_some(choice));
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        canvas.set_draw_color(Color::RGB(0, 0, 0));
+        canvas.clear();
+        draw_text_overlay(
+            &mut canvas,
+            &OverlayText {
+                lines: title_screen.get_lines(),
+                mask_px: MENU_MASK_PX,
+                height_frac: MENU_HEIGHT_FRAC,
+                is_centered: false,
+                dim_frac: 0.0,
+                picture: None,
+            },
+        )?;
+        canvas.present();
+        std::thread::sleep(Duration::from_millis(TITLE_FRAME_MS));
+    }
+}
+
+/// `start_title_choice` runs the chosen game as this program with its flags until it ends, its
+/// output in a log under `~/Library/Logs/Warped/`; an online game first asks for the game's
+/// password once and keeps it, and forgets it if the server refuses it.
+///
+/// Example: `start_title_choice(&title::Choice::Join(MapName::HouseDemo))?;`
+fn start_title_choice(choice: &title::Choice) -> Result<()> {
+    let home: PathBuf = PathBuf::from(std::env::var_os("HOME").ok_or("HOME isn't set")?);
+    let password_path: PathBuf = home.join(GAME_PASSWORD_HOME_PATH);
+    let mut flags: Vec<String> = choice.get_flags();
+    if choice.is_online() {
+        if !password_path.exists() {
+            let Some(password) = ask_game_password()? else {
+                return Ok(());
+            };
+            save_game_password(&password_path, &password)?;
+        }
+        flags.extend([
+            "--game-password-file".to_string(),
+            password_path.display().to_string(),
+        ]);
+    }
+    let logs_folder: PathBuf = home.join(LOGS_HOME_FOLDER);
+    fs::create_dir_all(&logs_folder)?;
+    let log_path: PathBuf = logs_folder.join(format!("{}.log", format_utc_now()));
+    let log: fs::File = fs::File::create(&log_path)?;
+    let status: std::process::ExitStatus = Command::new(std::env::current_exe()?)
+        .args(&flags)
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .status()?;
+    if status.code() == Some(i32::from(WRONG_PASSWORD_EXIT_CODE)) {
+        fs::remove_file(&password_path)?;
+    }
+    if status.success() {
+        return Ok(());
+    }
+    let text: String = fs::read_to_string(&log_path)?;
+    let reason: &str = match text.lines().rev().find(|line| line.starts_with("Error: ")) {
+        Some(line) => line,
+        None => "It stopped without saying why.",
+    };
+    Err(format!(
+        "The game stopped. {reason}\n\nIts log: {}",
+        log_path.display()
+    )
+    .into())
+}
+
+/// `ask_game_password` asks the player for the game's password in a dialog, or gives `None` if
+/// they cancel.
+///
+/// Example: `let password = ask_game_password()?;`
+fn ask_game_password() -> Result<Option<String>> {
+    let output: std::process::Output = Command::new("osascript")
+        .args([
+            "-e",
+            "text returned of (display dialog \"The game's password (ask whoever runs the server):\" default answer \"\" with hidden answer with title \"Warped\")",
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let password: String = String::from_utf8(output.stdout)?.trim_end().to_string();
+    Ok((!password.is_empty()).then_some(password))
+}
+
+/// `save_game_password` writes `password` to `path`, readable only by this user.
+///
+/// Example: `save_game_password(&path, "correct horse")?;`
+fn save_game_password(path: &Path, password: &str) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::create_dir_all(path.parent().ok_or("a password file has a folder")?)?;
+    let mut file: fs::File = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(OWNER_ONLY_FILE_MODE)
+        .open(path)?;
+    writeln!(file, "{password}")?;
+    Ok(())
+}
+
+/// `show_alert` shows `message` in a pop-up and waits for the player to close it.
+///
+/// Example: `show_alert("The game stopped.")?;`
+fn show_alert(message: &str) -> Result<()> {
+    Command::new("osascript")
+        .args([
+            "-e",
+            "on run argv",
+            "-e",
+            "display alert \"Warped\" message (item 1 of argv)",
+            "-e",
+            "end run",
+            message,
+        ])
+        .status()?;
+    Ok(())
+}
+
+/// `load_map` loads a map built into the program (`Map::Builtin`) and, on a voxel map (one with
+/// structures, such as Lunar Surface), curves its space as `settings` say (`Map::scale_curvature`).
+/// The house demo keeps its own curvature: at twice it, its far pylon sits 13 curvature radii out,
+/// too far for the renderer's single precision, and its scripted route breaks.
 ///
 /// Example: `let map = load_map(MapName::LunarSurface, &ServerSettings::Builtin())?;`
 fn load_map(name: MapName, settings: &ServerSettings) -> Result<map::Map> {
-    let mut map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
+    let mut map: map::Map = map::Map::Builtin(name.get_folder_name())?;
     if !map.structures.is_empty() {
         map.scale_curvature(settings.space.curvature_per_map_curvature)?;
     }
@@ -672,6 +866,7 @@ fn start_server(
     map_name: &str,
     settings: ServerSettings,
     console_teams: Vec<u32>,
+    game_password: Vec<u8>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -692,6 +887,8 @@ fn start_server(
             settings,
             console_teams,
             &should_start_new_game,
+            None,
+            game_password,
         ) {
             eprintln!("The game server stopped: {error}");
         }
@@ -716,6 +913,9 @@ fn start_server_process(arguments: &Arguments) -> Result<Child> {
     ]);
     if let Some(path) = &arguments.server_settings {
         command.arg("--server-settings").arg(path);
+    }
+    if let Some(path) = &arguments.game_password_file {
+        command.arg("--game-password-file").arg(path);
     }
     let mut server: Child = command.spawn()?;
     std::thread::sleep(Duration::from_secs_f64(SERVER_START_S));
@@ -771,6 +971,7 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         arguments.map.get_folder_name(),
         settings,
         consoles.iter().map(|c| c.team).collect(),
+        net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
     println!(
         "Server settings: {} (players who join get them).",
@@ -964,6 +1165,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         arguments.map.get_folder_name(),
+        &net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
     client.join(None)?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
@@ -2144,6 +2346,7 @@ impl Session {
                 client: net::Client::Connect(
                     get_server_address(arguments)?,
                     arguments.map.get_folder_name(),
+                    &net::read_game_password(arguments.game_password_file.as_deref())?,
                 )?,
                 server,
                 is_eliminated: false,

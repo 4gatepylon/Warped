@@ -22,7 +22,7 @@ use objc2_metal::{
 };
 use rayon::prelude::*;
 
-use crate::fps_demo_assets::{check_asset, get_asset_path};
+use crate::fps_demo_assets::{check_asset, get_asset_path, read_asset_file};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -79,11 +79,12 @@ pub struct SurfaceTextures {
     pub means: Vec<[f32; 4]>,
 }
 
-/// `make_mips` decodes one map, resizes it to `side_px` square and halves it down to 1x1.
+/// `make_mips` decodes one map (read with `read_asset_file`), resizes it to `side_px` square and
+/// halves it down to 1x1.
 ///
 /// Example: `let mips = make_mips(&path, 2048)?;`
 pub(crate) fn make_mips(path: &Path, side_px: u32) -> std::result::Result<Vec<RgbaImage>, String> {
-    let mut image: RgbaImage = image::open(path)
+    let mut image: RgbaImage = image::load_from_memory(&read_asset_file(path)?)
         .map_err(|e| format!("{}: {e}", path.display()))?
         .to_rgba8();
     if image.dimensions() != (side_px, side_px) {
