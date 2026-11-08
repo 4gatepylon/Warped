@@ -141,7 +141,7 @@ full health and energy. A player can't choose to respawn early.
 | Team | Blue | Blue | Purple | Red | Red |
 | Depth | 2 | 1 | 0 | 1 | 2 |
 | Theme | Dust (desert) planet | Snow planet | City, or space station | Dark forest planet | Lunar base in a crater |
-| Space | Hyperbolic | T² × ℝ | Inside a sphere | T² × ℝ | Hyperbolic, curvature radius 40 m |
+| Space | Hyperbolic | T² × ℝ | Inside a sphere | T² × ℝ | Hyperbolic, curvature radius 26.7 m (the map's 40 m, curved 1.5 times as much by `space.curvature_per_map_curvature`) |
 | Gravity | Down, onto the ground | Down | Outward, onto the sphere | Down | Down, onto the ground, ≈30 m/s² |
 | Warp objects | Yes | Yes | No | Yes | 1 black hole, 1 wormhole |
 | Size | Very large | Large | Smallest | Large | Very large: 256 m × 144 m playable |

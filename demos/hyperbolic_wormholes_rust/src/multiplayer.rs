@@ -26,6 +26,7 @@ use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
 use crate::render_voxel::{LaserBeam, VoxelFrame};
 use crate::scene_data::{Beam, SceneData};
+use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
     LOOK_RAD_PER_PX, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
@@ -175,6 +176,27 @@ pub fn pack_shared_view(
         hit_player_id,
         hit_marker,
     }
+}
+
+/// `check_bot_space` fails if the server that welcomed `client` curves space other than the
+/// built-in settings do, which a bot builds its world with.
+///
+/// Example: `check_bot_space(&client)?;`
+fn check_bot_space(client: &Client) -> Result<()> {
+    let space: &SpaceSettings = &client
+        .settings
+        .as_ref()
+        .expect("a welcome brings the server's settings")
+        .space;
+    let builtin: SpaceSettings = ServerSettings::Builtin().space;
+    if *space != builtin {
+        return Err(format!(
+            "the bot builds the map at the built-in space.curvature_per_map_curvature ({}), but the server uses {}; give the server the built-in value",
+            builtin.curvature_per_map_curvature, space.curvature_per_map_curvature
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// `run_bot` plays for `duration_s` seconds without a window, to test a game: it walks and turns
@@ -471,7 +493,8 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
 /// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
 /// view) and rejoins `BOT_REJOIN_S` after being hit. It returns how many players it hit and how
-/// often it was hit.
+/// often it was hit, and fails if the server curves space other than the built-in settings
+/// (`check_bot_space`).
 ///
 /// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, |frame, id| Ok(()))?;`
 pub fn run_voxel_bot(
@@ -494,6 +517,7 @@ pub fn run_voxel_bot(
                     let others: Vec<DVec4> =
                         client.players.iter().map(|p| p.frame.col(AXIS_W)).collect();
                     let team: u32 = client.team.expect("a welcome brings the team");
+                    check_bot_space(client)?;
                     player = VoxelPlayer::NearSpawn(world, team, id, &others);
                     println!("bot joined as player {id}");
                 }

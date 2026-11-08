@@ -32,16 +32,6 @@ is in [`AGENTS.md`](AGENTS.md).
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`.
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: options and pictures done, no
     code; waiting for the user to pick a model (and approve any download).
-- [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
-  curvature by default (and at most twice). Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-ada9a91a495af6bb8` on the user's Mac, branch
-    `claude/stronger-curvature` (pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-37/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: PR #285 open, not merged;
-    waiting for the user's OK (keep the default at 2 despite speckle on surfaces beyond about 90 m from the map's
-    middle, or use 1.5).
 - [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
@@ -147,6 +137,9 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
+  curvature by default (and at most twice). After seeing 2x speckle far from the map's middle, the user chose 1.5x
+  as the default: "1.5x curvature is fine". #285.
 - [?] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
   player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
   page use team colours. The user said to add and fix it ("Yes, add and fix"). #290.

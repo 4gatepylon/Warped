@@ -410,7 +410,7 @@ impl VoxelFrame {
             .iter()
             .flat_map(|beam| {
                 let code: u32 = beam.team + RIFLE_BEAM_CODE * u32::from(beam.is_rifle);
-                clip_beam_to_map(&beam.segments)
+                clip_beam_to_map(&beam.segments, world.r)
                     .into_iter()
                     .map(move |s| GpuBeam {
                         a: to_f32(s.a),
