@@ -10,6 +10,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-78 Shooting from the team screen.** A bug: you may be able to shoot a laser before leaving the screen where
+  you press `1` or `2` to choose a team. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch
+  `claude/fix-team-join`, 2026-11-07, with W-72.
 - [~] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
   it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom").
   Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/scene-haze-soft-shadows`, 2026-11-07.
@@ -107,6 +110,8 @@ is in [`AGENTS.md`](AGENTS.md).
   of the ground, just barely translucent, to mark out the real zones.
 - [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
   shadows on the hills.
+- [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
+  when the server is connected properly.
 
 ## Done
 
