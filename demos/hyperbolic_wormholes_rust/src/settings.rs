@@ -52,19 +52,30 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 20] = [
     "black_hole.max_lens_rad",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
     "view.wormhole_tint_frac",
     "view.milky_way_brightness_frac",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
+    "view.head_bob.gun_walk_sway_m",
+    "view.head_bob.gun_sprint_sway_m",
+    "view.head_bob.rifle_walk_swing_rad",
+    "view.head_bob.rifle_sprint_swing_rad",
     "hit_effects.red_frac",
     "hit_effects.shake_px",
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 2] = ["keys.switch_view", "view.milky_way_brightness_frac"];
+const ADDED_PLAYER_KEYS: [&str; 6] = [
+    "keys.switch_view",
+    "view.milky_way_brightness_frac",
+    "view.head_bob.gun_walk_sway_m",
+    "view.head_bob.gun_sprint_sway_m",
+    "view.head_bob.rifle_walk_swing_rad",
+    "view.head_bob.rifle_sprint_swing_rad",
+];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -94,8 +105,10 @@ pub struct SprintEnergySettings {
     pub refill_walking_s: f64,
 }
 
-/// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, and how long
-/// the bob takes to start or stop.
+/// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, how long the
+/// bob takes to start or stop, and how the gun in hand sways with the steps while walking and
+/// while sprinting: how far it slides left and right, and how far a gun as long as the bolt-action
+/// rifle swings (its muzzle lagging the slide; shorter guns swing in proportion).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct HeadBobSettings {
@@ -104,6 +117,10 @@ pub struct HeadBobSettings {
     pub walk_steps_per_s: f64,
     pub sprint_steps_per_s: f64,
     pub fade_s: f64,
+    pub gun_walk_sway_m: f64,
+    pub gun_sprint_sway_m: f64,
+    pub rifle_walk_swing_rad: f64,
+    pub rifle_sprint_swing_rad: f64,
 }
 
 /// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
@@ -635,7 +652,7 @@ mod tests {
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
-    //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`) | present (built in), missing in an old save (gets the built-in `V` and 1), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
+    //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`, the four `view.head_bob` sway and swing keys) | present (built in), missing in an old save (gets its built-in value), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
@@ -862,7 +879,14 @@ mod tests {
                 .collect();
             lines.join("\n")
         };
-        for name in ["switch_view", "milky_way_brightness_frac"] {
+        for name in [
+            "switch_view",
+            "milky_way_brightness_frac",
+            "gun_walk_sway_m",
+            "gun_sprint_sway_m",
+            "rifle_walk_swing_rad",
+            "rifle_sprint_swing_rad",
+        ] {
             let old_save: String = without_key(name);
             assert!(!old_save.contains(name));
             let loaded: PerPlayerSettings =
