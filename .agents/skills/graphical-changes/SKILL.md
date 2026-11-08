@@ -15,8 +15,8 @@ animation and motion (of the camera, the gun, other players), the HUD and menus,
 picture.
 
 A look that only shows in play (camera sway, recoil, an effect set off by a hit or a jump) also needs something to
-play, and a gameplay change usually changes the look too: for those, follow the `sharing-gameplay` skill as well,
-which covers playtests and smaller three.js demos. Pictures don't replace a demo or a playtest, nor the reverse.
+play, and a gameplay change usually changes the look too: for those, follow the `interactive-review` skill as well,
+which covers playtests, smaller three.js demos and review lanes. Pictures don't replace a demo or a playtest, nor the reverse.
 
 ## Options before building
 
@@ -130,7 +130,7 @@ capture.
 - **One command to open it:** the page works from `file://`, so give the user one command that opens it,
   `open <absolute path of the run folder>/index.html`, beside the files' paths. The question and the option names
   still go in the chat message.
-- **Interactive demos** of how a look plays are in the `sharing-gameplay` skill.
+- **Interactive demos** of how a look plays are in the `interactive-review` skill.
 
 ## Label every comparison
 
