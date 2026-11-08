@@ -609,7 +609,7 @@ fn run(arguments: Arguments) -> Result<()> {
 ///
 /// Example: `run_title_screen()?;`
 fn run_title_screen() -> Result<()> {
-    let online_games_path: Option<PathBuf> = get_app_resources_folder()
+    let online_games_path: Option<PathBuf> = fps_demo_assets::get_app_resources_folder()
         .map(|folder| folder.join(ONLINE_GAMES_FILE))
         .filter(|path| path.exists());
     let online_games: String = match &online_games_path {
@@ -623,16 +623,6 @@ fn run_title_screen() -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// `get_app_resources_folder` gives the app's `Contents/Resources/` when this program runs from an
-/// app bundle (`Contents/MacOS/`), or `None`.
-///
-/// Example: `let resources = get_app_resources_folder();`
-fn get_app_resources_folder() -> Option<PathBuf> {
-    let program: PathBuf = std::env::current_exe().ok()?;
-    let folder: &Path = program.parent()?;
-    (folder.file_name()? == "MacOS").then(|| folder.with_file_name("Resources"))
 }
 
 /// `pick_title_choice` opens the title screen's window until the player picks a game (`Some`) or

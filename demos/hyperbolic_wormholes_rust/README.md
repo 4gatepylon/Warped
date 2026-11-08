@@ -130,6 +130,21 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
 
+## Mac app
+
+```bash
+make package-mac-app
+make package-mac-app ONLINE_GAMES=online_games.txt
+```
+
+- `make package-mac-app` builds `.build/Warped/Warped.app` (the game with its maps built in, the icon from
+  [`app/app_icon.png`](app/app_icon.png), [`app/Info.plist`](app/Info.plist) with macOS 13 and the Local Network
+  note), signs it ad hoc and zips it with [`app/how_to_open.txt`](app/how_to_open.txt) into `.build/Warped.zip`.
+- The app carries the fps_demo's surface textures and revolver in `Contents/Resources/assets/`, and
+  `fps_demo_assets.rs` reads them from there when the game runs from the app.
+- `ONLINE_GAMES=` copies an `online_games.txt` into the app for its title screen (`title.rs` says the format); the
+  cloud deploy writes it.
+
 ## Play together
 
 Everyone on the same network can play in one game. A game server, without a window, keeps the players in step;
