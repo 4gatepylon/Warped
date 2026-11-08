@@ -87,7 +87,7 @@ address); each round's level server 47852, and this copy's level discovery 47853
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Dust | blue 2 | 3 | `demos/dust_rust/` | `devin/dust-demo` | plugged in (`make levels`) |
 | 2 | Snow Planet | blue 1 | 2 | `demos/snow_planet_rust/` | `devin/snow-planet-demo` | plugged in (`make levels`) |
-| 3 | City Sphere | purple 0 | 2 | `demos/city_sphere_rust/` | `devin/city-sphere-demo` | plugged in (`make levels`) |
+| 3 | City Sphere | purple 0 | 1 (on the glass, exposed) | `demos/city_sphere_rust/` | `devin/city-sphere-demo` | plugged in (`make levels`) |
 | 4 | Dark Forest | red 1 | 2 | `demos/dark_forest_rust/` | `devin/dark-forest-demo` | plugged in (`make levels`) |
 | 5 | Lunar Surface | red 2 | 3 | `demos/hyperbolic_wormholes_rust/` | `staging/user-4gatepylon` | playable (copied here) |
 
@@ -110,6 +110,11 @@ Surface blue. `make e2e-match` writes `.artifacts/match/<run>/match.json`
 After all four level branches took the first-to-finish console fix, three more bot matches all
 finished with no stall: 3 rounds (blue), 6 rounds (blue: City Sphere blue, Dark Forest and Snow
 Planet red, then Dust, Dark Forest and Lunar Surface blue) and 3 rounds (blue).
+With the branch tips of 2026-11-08 14:06 UTC (Dust `3c23593`, Snow Planet `9095d1a`, City Sphere
+`191b9d4`, Dark Forest `8f9b0ab`), a 9-round bot match ended with red winning, no stall.
+
+The match takes no pylon or console count: each level program has its own (the column above
+follows `game_design/DESIGN.md`, 3-2-1-2-3 from the outside in) and reports only the winner.
 
 ## Performance
 
