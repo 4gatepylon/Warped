@@ -14,7 +14,7 @@ password, and a public bucket serves the download page (W-116 (download page)).
 
 ## Deploy in one click
 
-Any game can use this: `GAME_DIR` names its folder (the Rust demo by default), whose Makefile must have
+Any game can use this: `GAME_DIR` names its folder (`game/` by default; the Rust demo also works, with `GAME_PROGRAM`), whose Makefile must have
 `build-server-bundle` and `package-mac-app`, and `GAMES_FILE` lists its games (`games.txt` by default).
 
 ```bash

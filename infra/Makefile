@@ -19,8 +19,9 @@
 #     cp .env.example .env && make deploy-everything
 #
 # Must know:
-#     - GAME_DIR is the game to deploy (the Rust demo by default): any game folder whose Makefile has
+#     - GAME_DIR is the game to deploy (`game/` by default): any game folder whose Makefile has
 #       build-server-bundle and package-mac-app, and GAMES_FILE lists its games (port, map, name).
+#       GAME_PROGRAM is its window's program (the Rust demo's: GAME_PROGRAM=<GAME_DIR>/.build/release/hyperbolic-wormholes).
 SHELL := /bin/bash
 .SHELLFLAGS := -eo pipefail -c
 -include .env
@@ -30,8 +31,8 @@ STATE_BUCKET := $(GCP_PROJECT_ID)-tfstate
 APIS := compute.googleapis.com storage.googleapis.com iap.googleapis.com billingbudgets.googleapis.com \
   cloudbilling.googleapis.com cloudresourcemanager.googleapis.com
 TEST_DATA_DIR := .build/terraform-test
-GAME_DIR ?= ../demos/hyperbolic_wormholes_rust
-GAME_PROGRAM := $(GAME_DIR)/.build/release/hyperbolic-wormholes
+GAME_DIR ?= ../game
+GAME_PROGRAM ?= $(GAME_DIR)/.build/release/warped
 GAMES_FILE ?= games.txt
 SITE_BUILD := .build/site
 CHECK_S := 5

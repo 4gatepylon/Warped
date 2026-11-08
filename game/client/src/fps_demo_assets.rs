@@ -30,8 +30,10 @@ const BUFFER_ALIGNMENT_BYTES: usize = 4;
 /// Example: `let folder: PathBuf = get_fps_demo_folder();`
 fn get_fps_demo_folder() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("the demo's folder sits in demos/")
+        .ancestors()
+        .nth(2)
+        .expect("the client's folder sits in game/ of the checkout")
+        .join("demos")
         .join("fps_demo")
 }
 

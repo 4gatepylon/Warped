@@ -1,5 +1,7 @@
 # Playtest: play together on one Wi-Fi
 
+> Frozen: the game now lives in [`game/`](../../game/README.md), and [`game/PLAYTEST.md`](../../game/PLAYTEST.md) is the live copy of this file.
+
 How to get a few people into one game of the Rust wormholes demo, and what is known to be rough. Report anything
 else you notice.
 

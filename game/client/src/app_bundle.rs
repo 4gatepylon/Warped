@@ -21,7 +21,7 @@ pub struct ResourceFolder {
 /// `ASSETS` is the fps_demo's assets: surface textures and gun models.
 pub const ASSETS: ResourceFolder = ResourceFolder {
     name: "assets",
-    checkout_folder: "../fps_demo/assets",
+    checkout_folder: "../../demos/fps_demo/assets",
 };
 
 /// `MODELS` is the maps' models: the structures and the players' body.

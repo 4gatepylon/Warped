@@ -1,5 +1,7 @@
 # Decisions: Rust port of the hyperbolic wormholes demo
 
+> Frozen: the game now lives in [`game/`](../../game/README.md), and [`game/DECISIONS.md`](../../game/DECISIONS.md) is the live copy of this file.
+
 - **Question:** How fast does the WebGL hyperbolic wormholes demo's ray tracer run natively, in Rust on the CPU and
   then with a Metal (MSL) shader, especially at full resolution, where the browser version is too slow? And how
   fast can Rust + MSL be made?

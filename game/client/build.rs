@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 const EMBEDDED_FOLDERS: [(&str, &str); 2] = [
     (
         "assets/sketchfab/sci_fi_revolver",
-        "../fps_demo/assets/sketchfab/sci_fi_revolver",
+        "../../demos/fps_demo/assets/sketchfab/sci_fi_revolver",
     ),
     ("models/teal_robot", "../../common/maps/models/teal_robot"),
 ];

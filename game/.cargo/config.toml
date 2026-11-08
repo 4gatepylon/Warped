@@ -1,6 +1,10 @@
-# `config.toml` makes Cargo write its output to `.build/`, as the root `AGENTS.md` asks.
+# `config.toml` makes Cargo write its output to `.build/`, as the root `AGENTS.md` asks, and link
+# the Linux server with Rust's own linker (macOS's can't link Linux programs).
 #
 # Example:
 #     cargo build --release
 [build]
 target-dir = ".build"
+
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"

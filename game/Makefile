@@ -3,6 +3,13 @@
 #
 # Interface:
 #     make help: list the targets.
+#     make serve-game PORT=<n> MAP=<lunar-surface|house-demo> SERVER_SETTINGS=<file>: run a game server, without a window, and print how to join it.
+#     make join-game SERVER=<auto|address> PORT=<n> MAP=<map> PLAYER_SETTINGS=<file>: open the window and join that game server.
+#     (GAME_PASSWORD_FILE, with serve-game and join-game: a file holding the game's password; only players who know it may join.)
+#     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
+#     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
+#     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
+#     make run-autopilot RENDERER=<metal|cpu> AUTOPILOT_WIDTH_PX=<n> AUTOPILOT_HEIGHT_PX=<n>: play a scripted route.
 #     make test: check formatting, lint with clippy, and run every crate's tests.
 #     make fmt: format with rustfmt and lint with clippy.
 #     make check-linux: check that warped-core and warped-server build for x86-64 Linux.
@@ -13,15 +20,53 @@
 # Example:
 #     make test
 LINUX_TARGET := x86_64-unknown-linux-musl
+RENDERER ?= metal
+WIDTH_PX ?= 1280
+HEIGHT_PX ?= 800
+FRAME_COUNT ?= 10
+AUTOPILOT_WIDTH_PX ?= 640
+AUTOPILOT_HEIGHT_PX ?= 400
+PORT ?= 47800
+MAP ?= lunar-surface
+SERVER ?= auto
+SERVER_SETTINGS ?=
+SERVER_SETTINGS_FLAG := $(if $(SERVER_SETTINGS),--server-settings $(SERVER_SETTINGS))
+PLAYER_SETTINGS ?=
+PLAYER_SETTINGS_FLAG := $(if $(PLAYER_SETTINGS),--player-settings $(PLAYER_SETTINGS))
+GAME_PASSWORD_FILE ?=
+GAME_PASSWORD_FLAG := $(if $(GAME_PASSWORD_FILE),--game-password-file $(GAME_PASSWORD_FILE))
+RUN_WINDOW := cargo run --release -p warped-client --bin warped --
+SERVER_PROGRAM := wormholes_server
+SERVER_BUNDLE := .build/server_bundle.tar.gz
+APP_FOLDER := .build/Warped
+APP := $(APP_FOLDER)/Warped.app
+APP_ZIP := .build/Warped.zip
+APP_ICONSET := .build/AppIcon.iconset
+APP_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)
+APP_FILES := app
+ONLINE_GAMES ?=
+FPS_DEMO_ASSETS := ../demos/fps_demo/assets
+MAP_MODELS := ../common/maps/models
 
 RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (test logs, benchmark results, compared views). \
   Recreating them means rerunning the targets that wrote them. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help test fmt check-linux check-environment clean reset-artifacts
+.PHONY: help serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt check-linux check-environment clean reset-artifacts
 
 help:
 	@echo "Targets:"
+	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run a game server, without a window; prints how to join"
+	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of client/server_settings.yaml)"
+	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
+	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of client/player_settings.yaml)"
+	@echo "  (serve-game and join-game take GAME_PASSWORD_FILE=password.txt: only players who know it join)"
+	@echo "  make build-server-bundle                         Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"
+	@echo "  make package-mac-app ONLINE_GAMES=games.txt      Build Warped.app and zip it ($(APP_ZIP)); ONLINE_GAMES is optional"
+	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
+	@echo "                                                   Time fixed views without a window (client/.artifacts/bench_views/)"
+	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
+	@echo "                                                   Play a scripted route without a window (client/.artifacts/autopilot/)"
 	@echo "  make test                                        Check formatting, lint, and run every crate's tests"
 	@echo "  make fmt                                         Format with rustfmt and lint with clippy"
 	@echo "  make check-linux                                 Check that warped-core and warped-server build for Linux"
@@ -30,6 +75,47 @@ help:
 	@echo "  make reset-artifacts YES_TO_RESET_ARTIFACTS=1    Delete .artifacts/ (or INTERACTIVE=1 to be asked)"
 	@echo ""
 	@echo "Example: make test"
+
+serve-game:
+	$(RUN_WINDOW) --serve --port $(PORT) --map $(MAP) $(SERVER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
+
+join-game:
+	$(RUN_WINDOW) --join $(SERVER) --port $(PORT) --map $(MAP) $(PLAYER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
+
+build-server-bundle:
+	rustup target add $(LINUX_TARGET)
+	cargo build --release --target $(LINUX_TARGET) -p warped-client --bin $(SERVER_PROGRAM)
+	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(LINUX_TARGET)/release $(SERVER_PROGRAM)
+	@echo "Server bundle: $(SERVER_BUNDLE)"
+
+package-mac-app:
+	cargo build --release -p warped-client --bin warped
+	rm -rf $(APP_FOLDER) $(APP_ICONSET)
+	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources $(APP_ICONSET)
+	cp .build/release/warped $(APP)/Contents/MacOS/Warped
+	sed 's/@VERSION@/$(APP_VERSION)/' $(APP_FILES)/Info.plist > $(APP)/Contents/Info.plist
+	for size in 16 32 128 256 512; do \
+		sips -z $$size $$size $(APP_FILES)/app_icon.png --out $(APP_ICONSET)/icon_$${size}x$${size}.png > /dev/null; \
+		sips -z $$((size * 2)) $$((size * 2)) $(APP_FILES)/app_icon.png --out $(APP_ICONSET)/icon_$${size}x$${size}@2x.png > /dev/null; \
+	done
+	iconutil -c icns $(APP_ICONSET) -o $(APP)/Contents/Resources/AppIcon.icns
+	$(if $(ONLINE_GAMES),cp $(ONLINE_GAMES) $(APP)/Contents/Resources/online_games.txt)
+	mkdir -p $(APP)/Contents/Resources/assets/models $(APP)/Contents/Resources/models
+	cp -R $(FPS_DEMO_ASSETS)/textures $(APP)/Contents/Resources/assets/textures
+	cp -R $(FPS_DEMO_ASSETS)/models/bolt_action_rifle_7_62 $(APP)/Contents/Resources/assets/models/
+	rsync -a --exclude teal_robot $(MAP_MODELS)/ $(APP)/Contents/Resources/models/
+	cp $(APP_FILES)/how_to_open.txt "$(APP_FOLDER)/How to open Warped.txt"
+	codesign --force --deep --sign - $(APP)
+	ditto -c -k --keepParent $(APP_FOLDER) $(APP_ZIP).partial
+	mv $(APP_ZIP).partial $(APP_ZIP)
+	@echo "App: $(APP)"
+	@echo "Zip: $(APP_ZIP)"
+
+bench-views:
+	$(RUN_WINDOW) --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)
+
+run-autopilot:
+	$(RUN_WINDOW) --renderer $(RENDERER) --autopilot --width-px $(AUTOPILOT_WIDTH_PX) --height-px $(AUTOPILOT_HEIGHT_PX)
 
 test:
 	cargo fmt --all --check

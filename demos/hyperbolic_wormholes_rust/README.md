@@ -1,5 +1,7 @@
 # Hyperbolic wormholes in Rust
 
+> Frozen: the game now lives in [`game/`](../../game/README.md) (`make -C game join-game`); this demo stays as the reference the game's tests compare with.
+
 A Rust port of the WebGL demo in [`../hyperbolic_wormholes/`](../hyperbolic_wormholes/README.md), to see how
 fast its ray tracer runs natively. It is the same scene and the same light paths (hyperbolic space H³, R = 8, three
 wormholes), with gravity and a laser added, drawn either on the GPU with Metal (the default) or on every CPU core.

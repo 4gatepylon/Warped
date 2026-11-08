@@ -1,18 +1,50 @@
-# `Cargo.toml` builds warped-client, the game window, binary `warped` (REFACTOR_PLAN.md, section 5).
+# `Cargo.toml` builds warped-client, the game window, binary `warped` (REFACTOR_PLAN.md, section 5),
+# copied from the Rust demo in step A1.
+#
+# Interface:
+#     warped: the game (macOS only: Metal and SDL), what `cargo run -p warped-client` runs.
+#     wormholes_server: a game server alone (src/bin/wormholes_server.rs), which also builds for
+#     Linux; step A5 moves it to warped-server.
 #
 # Example:
 #     cargo run --release -p warped-client -- --join 127.0.0.1
 #
 # Must know:
-#     - Limitations: macOS only (Metal, MetalFX, SDL3) once step A1 copies the demo here.
+#     - Limitations: the window is macOS only (Metal, MetalFX, SDL3); `wormholes_server` isn't.
 [package]
 name = "warped-client"
 version.workspace = true
 edition.workspace = true
+default-run = "warped"
 
 [[bin]]
 name = "warped"
 path = "src/main.rs"
 
+[[bin]]
+name = "wormholes_server"
+test = false
+
 [dependencies]
 warped-core.workspace = true
+clap.workspace = true
+getrandom.workspace = true
+glam.workspace = true
+gltf.workspace = true
+hmac.workspace = true
+image.workspace = true
+png.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-core-foundation.workspace = true
+objc2-foundation.workspace = true
+objc2-metal.workspace = true
+objc2-metal-fx.workspace = true
+objc2-quartz-core.workspace = true
+sdl3.workspace = true

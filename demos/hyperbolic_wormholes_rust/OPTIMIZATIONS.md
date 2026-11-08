@@ -1,5 +1,7 @@
 # Making the Metal ray tracer fast
 
+> Frozen: the game now lives in [`game/`](../../game/README.md), and [`game/OPTIMIZATIONS.md`](../../game/OPTIMIZATIONS.md) is the live copy of this file.
+
 This file explains, in order and with the maths, every optimization tried on the Rust + Metal hyperbolic wormholes
 renderer, kept or not, and what each one measured. The code is in PR 72, which builds on the Rust port (PR 69) and
 the Metal port (PR 70). [`DECISIONS.md`](DECISIONS.md) records the same choices in the repo's decision template; this

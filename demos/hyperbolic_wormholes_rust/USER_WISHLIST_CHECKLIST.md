@@ -1,5 +1,7 @@
 # User wishlist checklist
 
+> Frozen: the game now lives in [`game/`](../../game/README.md), and [`game/USER_WISHLIST_CHECKLIST.md`](../../game/USER_WISHLIST_CHECKLIST.md) is the live copy of this file.
+
 Every feature and fix the user has asked for in the Rust wormholes demo, so that agents on any platform (Claude Code,
 Codex, Devin) can see what is wanted, who is working on what, and what is done. How to add, claim and finish items
 is in [`AGENTS.md`](AGENTS.md).
