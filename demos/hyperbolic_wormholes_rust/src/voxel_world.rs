@@ -1198,15 +1198,15 @@ impl VoxelPlayer {
         }
     }
 
-    /// `NearSpawn` makes player `id` standing near their team's spawn point (ids alternate between
-    /// the map's spawns), clear of blocks, at the first slot at least `MIN_SPAWN_GAP_M` from every
-    /// eye in `others`: slots go around rings `SPAWN_RING_STEP_M` apart from `SPAWN_RING_M`,
+    /// `NearSpawn` makes player `id` standing near the spawn point of `team` (the map's spawn of
+    /// that index), clear of blocks, at the first slot at least `MIN_SPAWN_GAP_M` from every eye in
+    /// `others`: slots go around rings `SPAWN_RING_STEP_M` apart from `SPAWN_RING_M`,
     /// `SPAWN_TURN_RAD` apart, starting from the id's own. If all are taken it uses the last.
     ///
-    /// Example: `let player = VoxelPlayer::NearSpawn(&world, 3, &other_eyes);`
+    /// Example: `let player = VoxelPlayer::NearSpawn(&world, 1, 3, &other_eyes);`
     #[allow(non_snake_case)]
-    pub fn NearSpawn(world: &VoxelWorld, id: u32, others: &[DVec4]) -> VoxelPlayer {
-        let spawn: DMat4 = VoxelPlayer::AtSpawn(world, id as usize).body;
+    pub fn NearSpawn(world: &VoxelWorld, team: u32, id: u32, others: &[DVec4]) -> VoxelPlayer {
+        let spawn: DMat4 = VoxelPlayer::AtSpawn(world, team as usize).body;
         let slot_count: u32 = SPAWN_SLOTS_PER_RING * SPAWN_RING_COUNT;
         let mut player: Option<VoxelPlayer> = None;
         for k in 0..slot_count {
@@ -1419,7 +1419,8 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying;
     /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
-    /// moving along light paths inside a mouth's reach, falling into a black hole (back to spawn),
+    /// moving along light paths inside a mouth's reach, falling into a black hole (back to the spawn
+    /// of index `spawn_index`, the player's team),
     /// colliding with blocks and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
     /// cells rise a little), jumping (the only way onto a block) and falling. A
     /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
@@ -1487,7 +1488,7 @@ impl VoxelPlayer {
             && world.compute_bend(w, eye, self.body.col(AXIS_X)).1
                 < FALL_IN_PER_HORIZON * world.warps[w].m
         {
-            *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, &[]);
+            *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, 0, &[]);
             return vec!["You fell into the black hole".to_string()];
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
@@ -1614,6 +1615,7 @@ mod tests {
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
     const EMPTY_SPRINT_STEP_COUNT: usize = 10;
     const FAR_ID_NEAR_ONE: u32 = 35;
+    const SPAWN_TEAM_COUNT: u32 = 2;
     const SKY_PITCH_RAD: f64 = 0.5;
     const CROUCH_STEP_COUNT: usize = 30;
     const CROUCH_TOLERANCE_FRAC: f64 = 0.02;
@@ -1745,7 +1747,8 @@ mod tests {
         let world: VoxelWorld = load_lunar_surface();
         let mut eyes: Vec<DVec4> = Vec::new();
         for id in (1..=crate::net::MAX_PLAYER_COUNT as u32).chain([FAR_ID_NEAR_ONE]) {
-            let player: VoxelPlayer = VoxelPlayer::NearSpawn(&world, id, &eyes);
+            let team: u32 = id % SPAWN_TEAM_COUNT;
+            let player: VoxelPlayer = VoxelPlayer::NearSpawn(&world, team, id, &eyes);
             let nearby: Vec<usize> =
                 world.find_nearby_structures(player.body.col(AXIS_W), NEARBY_REACH_M);
             assert!(

@@ -847,6 +847,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         get_server_address(arguments)?,
         arguments.map.get_folder_name(),
     )?;
+    client.join(None)?;
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
     let duration_s: f64 = arguments
@@ -1988,6 +1989,14 @@ impl Session {
                     self.is_auto_scale = false;
                     self.render_scale = (self.render_scale * RENDER_SCALE_STEP).min(1.0);
                 }
+                Keycode::_1 | Keycode::_2 if self.is_in_lobby() => {
+                    let team: u32 = u32::from(key == Keycode::_2);
+                    let multiplayer: &mut Multiplayer =
+                        self.multiplayer.as_mut().expect("checked by the guard");
+                    if let Err(error) = multiplayer.client.join(Some(team)) {
+                        self.show_message(format!("Couldn't reach the server: {error}"));
+                    }
+                }
                 Keycode::_1 => self.switch_gun(Gun::Laser),
                 Keycode::_2 => self.switch_gun(Gun::Rifle),
                 _ => {}
@@ -2085,10 +2094,9 @@ impl Session {
             crouch: keys.is_scancode_pressed(Scancode::LCtrl)
                 || keys.is_scancode_pressed(Scancode::RCtrl),
         };
+        let team: usize = self.get_team() as usize;
         let messages: Vec<String> = match &mut self.voxel {
-            Some(voxel) => voxel
-                .player
-                .step(&voxel.world, &input, dt_s, voxel.spawn_index),
+            Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, team),
             None => {
                 let messages: Vec<String> =
                     physics::update_player(&self.world, &mut self.player, &input, dt_s);
@@ -2209,17 +2217,15 @@ impl Session {
             return;
         };
         let game: net::GameState = multiplayer.client.game;
-        let aimed: Option<u8> = match multiplayer.client.id {
-            Some(id) if is_holding_e && game.winner.is_none() => voxel
+        let aimed: Option<u8> = match multiplayer.client.team {
+            Some(team) if is_holding_e && game.winner.is_none() => voxel
                 .world
                 .find_aimed_material(
                     voxel.player.get_camera_frame(&voxel.world),
                     self.settings.consoles.reach_m,
                 )
                 .and_then(|m| voxel.world.consoles.iter().position(|c| c.material == m))
-                .filter(|&i| {
-                    voxel.world.consoles[i].team != net::get_team(id) && game.off_mask >> i & 1 == 0
-                })
+                .filter(|&i| voxel.world.consoles[i].team != team && game.off_mask >> i & 1 == 0)
                 .map(|i| i as u8),
             _ => None,
         };
@@ -2302,15 +2308,32 @@ impl Session {
         }
     }
 
+    /// `get_team` gives this player's team (an index into `net::TEAM_NAMES`): the one the server
+    /// put them on, or the first without a server or before joining.
+    ///
+    /// Example: `let team = self.get_team();`
+    fn get_team(&self) -> u32 {
+        self.multiplayer
+            .as_ref()
+            .and_then(|m| m.client.team)
+            .unwrap_or(0)
+    }
+
+    /// `is_in_lobby` says whether this player is on a server and hasn't chosen a team yet.
+    ///
+    /// Example: `if self.is_in_lobby() { ... }`
+    fn is_in_lobby(&self) -> bool {
+        self.multiplayer
+            .as_ref()
+            .is_some_and(|m| m.client.is_in_lobby())
+    }
+
     /// `get_wand` gives this player's wand (`make_wand`, with its tip in the team's colour), or
     /// `None` while a banner shows.
     ///
     /// Example: `let wand = self.get_wand();`
     fn get_wand(&self) -> Option<render_metal::OverlayWand> {
-        let team: u32 = self
-            .voxel
-            .as_ref()
-            .map_or(0, |voxel| net::get_team(voxel.spawn_index as u32));
+        let team: u32 = self.get_team();
         self.get_banner_lines().is_none().then(|| {
             make_wand(
                 self.run_pose_frac,
@@ -2356,6 +2379,7 @@ impl Session {
             match event {
                 net::NetEvent::Joined(id) => {
                     let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
+                    let team: u32 = multiplayer.client.team.expect("a welcome brings the team");
                     self.settings = multiplayer
                         .client
                         .settings
@@ -2365,7 +2389,7 @@ impl Session {
                         Some(voxel) => {
                             voxel.world.set_settings(self.settings.clone());
                             voxel.spawn_index = id as usize;
-                            voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
+                            voxel.player = VoxelPlayer::NearSpawn(&voxel.world, team, id, &others);
                         }
                         None => {
                             self.player = multiplayer::get_spawn_player(&self.world, id, &others)
@@ -2402,17 +2426,23 @@ impl Session {
         self.last_health_frac = multiplayer.client.health_frac;
         if multiplayer.client.game.number != multiplayer.game_number {
             multiplayer.game_number = multiplayer.client.game.number;
-            if let (Some(voxel), Some(id)) = (&mut self.voxel, multiplayer.client.id) {
+            if let (Some(voxel), Some(id), Some(team)) = (
+                &mut self.voxel,
+                multiplayer.client.id,
+                multiplayer.client.team,
+            ) {
                 let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
-                voxel.player = VoxelPlayer::NearSpawn(&voxel.world, id, &others);
+                voxel.player = VoxelPlayer::NearSpawn(&voxel.world, team, id, &others);
             }
             messages.push(format!(
                 "Game {} started: every console is back on",
                 multiplayer.game_number
             ));
         }
-        let is_out: bool = multiplayer.is_eliminated;
-        if !is_out && let Err(error) = multiplayer.client.keep_joining() {
+        let is_out: bool = multiplayer.is_eliminated || multiplayer.client.id.is_none();
+        if !multiplayer.is_eliminated
+            && let Err(error) = multiplayer.client.keep_joining()
+        {
             messages.push(format!("Couldn't reach the server: {error}"));
         }
         if let Some(message) = messages.pop() {
@@ -2467,7 +2497,7 @@ impl Session {
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
-            let team: u32 = voxel.spawn_index as u32 % 2;
+            let team: u32 = self.get_team();
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
@@ -2511,9 +2541,9 @@ impl Session {
             self.was_firing = is_firing;
             for (id, shot) in &view.other_shots {
                 if !self.remote_firing_ids.contains(id) {
-                    let is_rifle: bool = players.iter().any(|p| p.id == *id && p.is_rifle);
-                    let tracer =
-                        Tracer::New(shot, net::get_team(*id), now_s, is_rifle, &self.settings, r);
+                    let shooter: Option<&net::RemotePlayer> = players.iter().find(|p| p.id == *id);
+                    let (team, is_rifle) = shooter.map_or((0, false), |p| (p.team, p.is_rifle));
+                    let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
                     self.tracers.push(tracer);
                 }
             }
@@ -2666,13 +2696,21 @@ impl Session {
         true
     }
 
-    /// `get_banner_lines` gives the two lines shown over the view once a team has won (the winner,
-    /// and how to start a new game), or else while this player is out after a hit ("YOU DIED" and
-    /// the countdown to respawning), or `None`.
+    /// `get_banner_lines` gives the two lines shown over the view: in the lobby, each team's head
+    /// count and the keys that join a team; once a team has won, the winner and how to start a new
+    /// game; while this player is out after a hit, "YOU DIED" and the countdown to respawning; or
+    /// `None`.
     ///
     /// Example: `if let Some(lines) = session.get_banner_lines() { ... }`
     fn get_banner_lines(&self) -> Option<[String; 2]> {
         let multiplayer: &Multiplayer = self.multiplayer.as_ref()?;
+        if multiplayer.client.is_in_lobby() {
+            let counts: String = match multiplayer.client.lobby_counts {
+                Some([blue, red]) => format!("BLUE {blue}   RED {red}"),
+                None => "LOOKING FOR THE GAME".to_string(),
+            };
+            return Some([counts, "1 joins blue, 2 joins red".to_string()]);
+        }
         if let Some(winner) = multiplayer.client.game.winner {
             return Some([
                 format!(
