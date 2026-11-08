@@ -11,6 +11,16 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
+  frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
+  `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
+  2026-11-08.
+- [~] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
+  reality bending version). Claimed by Claude Code (subagent of a session on `leah`'s Mac in `Warped-main`), branch
+  `claude/shot-sky-flash`, worktree `/Users/leah/Documents/dev/Warped-rb-sky-flash`, 2026-11-08.
+- [~] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Claimed by Claude Code
+  (subagent of a session on `leah`'s Mac in `Warped-main`), branch `claude/screen-tearing`, worktree
+  `/Users/leah/Documents/dev/Warped-rb-tearing`, 2026-11-08.
 - [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
   wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
