@@ -258,7 +258,13 @@ fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
 struct FrameStats {
     frame_ms: Vec<f32>,
     gpu_ms: Vec<f32>,
+    phase_ms: Vec<[f32; PHASE_NAMES.len()]>,
 }
+
+/// `PHASE_NAMES` names the parts of a frame's CPU time that `FrameStats` reports.
+const PHASE_NAMES: [&str; 5] = ["sim", "build", "slot wait", "drawable wait", "render"];
+/// `LATE_FRAME_MS` is the frame time above which a frame missed a 60 Hz display refresh.
+const LATE_FRAME_MS: f32 = 17.5;
 
 impl FrameStats {
     /// `summary` returns mean, median, 99th percentile frame time and mean GPU time.
@@ -271,14 +277,34 @@ impl FrameStats {
         let percentile = |frac: f32| sorted[((sorted.len() - 1) as f32 * frac) as usize];
         let mean_ms: f32 = sorted.iter().sum::<f32>() / sorted.len() as f32;
         let gpu_mean_ms: f32 = self.gpu_ms.iter().sum::<f32>() / self.gpu_ms.len().max(1) as f32;
+        let late_count: usize = sorted.iter().filter(|&&ms| ms > LATE_FRAME_MS).count();
+        let phase_p99s: Vec<String> = PHASE_NAMES
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let mut temp_phase_ms: Vec<f32> = self.phase_ms.iter().map(|p| p[i]).collect();
+                temp_phase_ms.sort_by(f32::total_cmp);
+                let p99_ms: f32 = temp_phase_ms
+                    .get(((temp_phase_ms.len().max(1) - 1) as f32 * 0.99) as usize)
+                    .copied()
+                    .unwrap_or(0.0);
+                format!("{name} {p99_ms:.2}")
+            })
+            .collect();
+        let mut temp_gpu_ms: Vec<f32> = self.gpu_ms.clone();
+        temp_gpu_ms.sort_by(f32::total_cmp);
         format!(
-            "{} frames: mean {:.2} ms ({:.0} fps), median {:.2} ms, p99 {:.2} ms, GPU mean {:.2} ms",
+            "{} frames: mean {:.2} ms ({:.0} fps), median {:.2} ms, p99 {:.2} ms, worst {:.2} ms, {} over {LATE_FRAME_MS} ms, GPU mean {:.2} ms, GPU p99 {:.2} ms; p99 ms of {}",
             sorted.len(),
             mean_ms,
             1000.0 / mean_ms,
             percentile(0.5),
             percentile(0.99),
-            gpu_mean_ms
+            sorted[sorted.len() - 1],
+            late_count,
+            gpu_mean_ms,
+            temp_gpu_ms[((temp_gpu_ms.len() - 1) as f32 * 0.99) as usize],
+            phase_p99s.join(", ")
         )
     }
 }
@@ -564,6 +590,7 @@ fn main() {
             }
             None => controls,
         };
+        let sim_start: Instant = Instant::now();
         let waypoint_before: usize = session.autopilot_waypoint;
         session.update(&controls, &scene, &audio, dt_s);
         if args.play_route && session.autopilot_waypoint != waypoint_before {
@@ -584,7 +611,10 @@ fn main() {
 
         smoothed_frame_ms += (frame_s * 1000.0 - smoothed_frame_ms) * 0.05;
         session.show_frame_ms = is_showing_frame_time.then_some(smoothed_frame_ms);
+        let sim_ms: f32 = sim_start.elapsed().as_secs_f32() * 1000.0;
+        let build_start: Instant = Instant::now();
         let frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);
+        let build_ms: f32 = build_start.elapsed().as_secs_f32() * 1000.0;
         timing = renderer.render_frame(
             &FrameDescription {
                 camera: frame.camera,
@@ -602,17 +632,27 @@ fn main() {
             &settings,
         );
 
+        let phase_ms: [f32; PHASE_NAMES.len()] = [
+            sim_ms,
+            build_ms,
+            timing.slot_wait_ms as f32,
+            timing.drawable_wait_ms as f32,
+            timing.cpu_render_ms as f32,
+        ];
         let elapsed_s: f32 = start.elapsed().as_secs_f32();
         if stats.frame_ms.len() > 30 || elapsed_s > 2.0 {
             stats.frame_ms.push(frame_s * 1000.0);
             stats.gpu_ms.push(timing.gpu_ms as f32);
+            stats.phase_ms.push(phase_ms);
             report_stats.frame_ms.push(frame_s * 1000.0);
             report_stats.gpu_ms.push(timing.gpu_ms as f32);
+            report_stats.phase_ms.push(phase_ms);
             if let Some(index) = bench_view {
                 let seconds: f32 = args.bench_views.unwrap_or(1.0);
                 if start.elapsed().as_secs_f32() - index as f32 * seconds > 1.0 {
                     view_stats[index].frame_ms.push(frame_s * 1000.0);
                     view_stats[index].gpu_ms.push(timing.gpu_ms as f32);
+                    view_stats[index].phase_ms.push(phase_ms);
                 }
             }
         }

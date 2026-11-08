@@ -893,10 +893,7 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
-            println!(
-                "The {} team won.",
-                TEAM_NAMES[winner as usize]
-            );
+            println!("The {} team won.", TEAM_NAMES[winner as usize]);
         }
     }
 

@@ -251,6 +251,9 @@ pub struct RenderSettings {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameTiming {
     pub gpu_ms: f64,
+    pub slot_wait_ms: f64,
+    pub drawable_wait_ms: f64,
+    pub cpu_render_ms: f64,
 }
 
 /// `Renderer` is the whole backend interface.

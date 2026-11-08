@@ -711,13 +711,19 @@ impl Renderer for MetalRenderer {
     }
 
     fn render_frame(&mut self, frame: &FrameDescription, settings: &RenderSettings) -> FrameTiming {
+        let start: std::time::Instant = std::time::Instant::now();
         self.wait_for_frame_slot();
+        let slot_wait_ms: f64 = start.elapsed().as_secs_f64() * SECONDS_TO_MS;
         self.layer.setDisplaySyncEnabled(settings.is_vsync_enabled);
         self.ensure_targets(settings.render_scale_frac.clamp(0.25, 2.0));
         let targets: Targets = self.targets.take().expect("targets were just created");
         let timing: FrameTiming = self.encode_frame(frame, settings, &targets);
         self.targets = Some(targets);
-        timing
+        FrameTiming {
+            slot_wait_ms,
+            cpu_render_ms: start.elapsed().as_secs_f64() * SECONDS_TO_MS,
+            ..timing
+        }
     }
 }
 
@@ -1120,7 +1126,10 @@ impl MetalRenderer {
             },
         );
 
-        if let Some(drawable) = self.layer.nextDrawable() {
+        let drawable_start: std::time::Instant = std::time::Instant::now();
+        let drawable = self.layer.nextDrawable();
+        let drawable_wait_ms: f64 = drawable_start.elapsed().as_secs_f64() * SECONDS_TO_MS;
+        if let Some(drawable) = drawable {
             let drawable_texture: Retained<ProtocolObject<dyn MTLTexture>> = drawable.texture();
             let descriptor: Retained<MTLRenderPassDescriptor> =
                 color_pass(&drawable_texture, MTLLoadAction::DontCare, None);
@@ -1168,6 +1177,8 @@ impl MetalRenderer {
         self.in_flight.push_back(command_buffer);
         FrameTiming {
             gpu_ms: self.last_gpu_ms,
+            drawable_wait_ms,
+            ..FrameTiming::default()
         }
     }
 
