@@ -126,7 +126,7 @@ at 2560x1440 has not been measured yet.
 | Asset | Source | Author | License | Size |
 | --- | --- | --- | --- | --- |
 | Texture `forest_ground_04` (1K) | https://polyhaven.com/a/forest_ground_04 | Rob Tuytel, Rico Cilliers | CC0 | 3.2 MB |
-| Texture `bark_brown_02` (1K) | https://polyhaven.com/a/bark_brown_02 | Rob Tuytel | CC0 | 1.8 MB |
+| Texture `bamboo_wall` (1K) | https://polyhaven.com/a/bamboo_wall | Amal Kumar | CC0 | 2.0 MB |
 | Texture `old_planks_02` (1K) | https://polyhaven.com/a/old_planks_02 | Rob Tuytel | CC0 | 1.0 MB |
 | Texture `forest_leaves_02` (1K) | https://polyhaven.com/a/forest_leaves_02 | Rob Tuytel | CC0 | 1.3 MB |
 | Texture `mossy_rock` (1K) | https://polyhaven.com/a/mossy_rock | Rob Tuytel | CC0 | 2.9 MB |

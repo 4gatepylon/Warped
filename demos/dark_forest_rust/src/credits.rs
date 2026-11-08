@@ -11,12 +11,13 @@
 //!   `menu`'s tests check.
 
 /// `CREDITS_LINES` is the CREDITS page's text, one menu line each.
-pub const CREDITS_LINES: [&str; 21] = [
+pub const CREDITS_LINES: [&str; 22] = [
     "Warped: Dark Forest",
     "",
     "SURFACES  Poly Haven textures, CC0 (polyhaven.com/a/<name>)",
-    "  forest_ground_04 (Rob Tuytel, Rico Cilliers), bark_brown_02,",
-    "  old_planks_02, forest_leaves_02, mossy_rock (Rob Tuytel)",
+    "  forest_ground_04 (Rob Tuytel, Rico Cilliers), bamboo_wall",
+    "  (Amal Kumar), old_planks_02, forest_leaves_02, mossy_rock",
+    "  (Rob Tuytel)",
     "SKY       kloofendal_48d_partly_cloudy_puresky, Poly Haven, CC0",
     "ROBOTS    RobotExpressive by Tomas Laulhe, modified by",
     "  Don McCurdy, CC0 (three.js examples)",

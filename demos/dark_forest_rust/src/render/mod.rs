@@ -258,6 +258,7 @@ pub struct RenderSettings {
     pub is_volumetric_haze_enabled: bool,
     pub is_material_response_enabled: bool,
     pub is_vsync_enabled: bool,
+    pub shadow_distance_m: f32,
 }
 
 /// `FrameTiming` is how long the GPU took for a frame finished earlier.
@@ -285,4 +286,7 @@ pub trait Renderer {
     /// `resize` sets the size, in pixels, of the window's drawable.
     fn resize(&mut self, width_px: u32, height_px: u32);
     fn render_frame(&mut self, frame: &FrameDescription, settings: &RenderSettings) -> FrameTiming;
+    /// `read_frame_rgba` waits for the frames in flight and gives the last one's picture before
+    /// the HUD, at the internal resolution: (width_px, height_px, RGBA bytes).
+    fn read_frame_rgba(&mut self) -> (u32, u32, Vec<u8>);
 }

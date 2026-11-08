@@ -6,7 +6,7 @@
 //!     let arena: Arena = Arena::from_map(&map::load(&path)?);
 //!     let meshes: Vec<(Surface, MeshData)> = arena.surface_meshes();
 
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3};
 
 use super::collision::Aabb;
 use crate::map::{self, MapFile};
@@ -62,7 +62,7 @@ impl Surface {
     pub fn from_material_name(name: &str) -> Surface {
         match name {
             "forest floor" => Surface::Ground,
-            "bark" => Surface::Bark,
+            "bamboo" | "bark" => Surface::Bark,
             "leaves" => Surface::Leaves,
             "rock" => Surface::Rock,
             "rope" => Surface::Rope,
@@ -104,6 +104,8 @@ pub struct WorldShape {
     pub kind: ShapeKind,
     pub centre_m: Vec3,
     pub half_m: Vec3,
+    pub local_half_m: Vec3,
+    pub rotation: Mat3,
     pub surface: Surface,
 }
 
@@ -128,6 +130,7 @@ pub struct Arena {
     pub shapes: Vec<WorldShape>,
     pub ladders: Vec<LadderVolume>,
     pub consoles: Vec<Console>,
+    pub laser_rgb: Option<Vec3>,
     pub lights: Vec<LightPlacement>,
     pub player_spawns: Vec<(Vec3, f32)>,
     pub team_spawns: [Vec<(Vec3, f32)>; 2],
@@ -142,6 +145,9 @@ const CYLINDER_SEGMENT_COUNT: usize = 14;
 /// divisions.
 const ELLIPSOID_RING_COUNT: usize = 8;
 const ELLIPSOID_SEGMENT_COUNT: usize = 14;
+/// `BAMBOO_TILE_FRAC_AROUND_CULM` is how much of the bamboo texture's width (a row of about 30
+/// culms) wraps once around a culm, so each culm shows about two of the texture's.
+const BAMBOO_TILE_FRAC_AROUND_CULM: f32 = 0.06;
 /// `TRUNK_COLLISION_FRAC` is the share of a round shape's radius its collision box covers.
 const TRUNK_COLLISION_FRAC: f32 = 0.82;
 /// `CANOPY_COLLISION_FRAC` is the share of a canopy's half size its collision box covers.
@@ -218,13 +224,17 @@ impl Arena {
                     kind,
                     centre_m,
                     half_m,
+                    local_half_m: Vec3::from(shape.half_m),
+                    rotation: Mat3::from_mat4(frame),
                     surface,
                 });
-                boxes.push(WorldBox {
-                    aabb: Aabb::from_center(centre_m, collision_half_m),
-                    surface,
-                    is_drawn: false,
-                });
+                if surface != Surface::Leaves {
+                    boxes.push(WorldBox {
+                        aabb: Aabb::from_center(centre_m, collision_half_m),
+                        surface,
+                        is_drawn: false,
+                    });
+                }
             }
         }
         let ladders: Vec<LadderVolume> = map
@@ -278,6 +288,7 @@ impl Arena {
             shapes,
             ladders,
             consoles,
+            laser_rgb: map.laser.as_ref().map(|laser| Vec3::from(laser.rgb)),
             lights,
             player_spawns,
             team_spawns,
@@ -372,26 +383,31 @@ fn ladder_parts(ladder: &LadderVolume) -> Vec<Aabb> {
     parts
 }
 
-/// `append_cylinder` adds a capped cylinder along a world axis, its UVs around and along it.
+/// `append_cylinder` adds a capped cylinder along an axis of its structure's frame, its UVs around
+/// and along it.
 fn append_cylinder(mesh: &mut MeshData, shape: &WorldShape, axis: usize, tile_size_m: f32) {
+    let rotation: Mat3 = shape.rotation;
     let along: Vec3 = Vec3::AXES[axis];
     let (a, b) = (Vec3::AXES[(axis + 1) % 3], Vec3::AXES[(axis + 2) % 3]);
-    let radius_a_m: f32 = shape.half_m.dot(a);
-    let radius_b_m: f32 = shape.half_m.dot(b);
-    let half_length_m: f32 = shape.half_m.dot(along);
+    let radius_a_m: f32 = shape.local_half_m.dot(a);
+    let radius_b_m: f32 = shape.local_half_m.dot(b);
+    let half_length_m: f32 = shape.local_half_m.dot(along);
     let circumference_m: f32 = std::f32::consts::TAU * (radius_a_m + radius_b_m) * 0.5;
+    let around_tile_count: f32 = match shape.surface {
+        Surface::Bark => BAMBOO_TILE_FRAC_AROUND_CULM,
+        _ => circumference_m / tile_size_m,
+    };
     let base: u32 = mesh.vertices.len() as u32;
     for segment in 0..=CYLINDER_SEGMENT_COUNT {
         let angle: f32 = segment as f32 / CYLINDER_SEGMENT_COUNT as f32 * std::f32::consts::TAU;
         let (sin, cos) = angle.sin_cos();
         let radial: Vec3 = a * cos * radius_a_m + b * sin * radius_b_m;
-        let normal: Vec3 = (a * cos / radius_a_m + b * sin / radius_b_m).normalize();
-        let tangent: Vec3 = (b * cos - a * sin).normalize();
+        let normal: Vec3 = rotation * (a * cos / radius_a_m + b * sin / radius_b_m).normalize();
+        let tangent: Vec3 = rotation * (b * cos - a * sin).normalize();
         for end in [-1.0_f32, 1.0] {
-            let position: Vec3 = shape.centre_m + radial + along * half_length_m * end;
-            let u: f32 =
-                segment as f32 / CYLINDER_SEGMENT_COUNT as f32 * circumference_m / tile_size_m;
-            let v: f32 = -(position.dot(along)) / tile_size_m;
+            let position: Vec3 = shape.centre_m + rotation * (radial + along * half_length_m * end);
+            let u: f32 = segment as f32 / CYLINDER_SEGMENT_COUNT as f32 * around_tile_count;
+            let v: f32 = -(position.dot(rotation * along)) / tile_size_m;
             mesh.vertices.push(Vertex {
                 position: position.to_array(),
                 normal: normal.to_array(),
@@ -411,22 +427,22 @@ fn append_cylinder(mesh: &mut MeshData, shape: &WorldShape, axis: usize, tile_si
         push_outward(mesh, [i1, i2, i3], shape.centre_m);
     }
     for end in [-1.0_f32, 1.0] {
-        let normal: Vec3 = along * end;
+        let normal: Vec3 = rotation * along * end;
         let centre_index: u32 = mesh.vertices.len() as u32;
-        let centre: Vec3 = shape.centre_m + along * half_length_m * end;
+        let centre: Vec3 = shape.centre_m + rotation * along * half_length_m * end;
         mesh.vertices.push(Vertex {
             position: centre.to_array(),
             normal: normal.to_array(),
-            tangent: a.extend(1.0).to_array(),
+            tangent: (rotation * a).extend(1.0).to_array(),
             uv: [0.0, 0.0],
         });
         for segment in 0..=CYLINDER_SEGMENT_COUNT {
             let angle: f32 = segment as f32 / CYLINDER_SEGMENT_COUNT as f32 * std::f32::consts::TAU;
             let offset: Vec3 = a * angle.cos() * radius_a_m + b * angle.sin() * radius_b_m;
             mesh.vertices.push(Vertex {
-                position: (centre + offset).to_array(),
+                position: (centre + rotation * offset).to_array(),
                 normal: normal.to_array(),
-                tangent: a.extend(1.0).to_array(),
+                tangent: (rotation * a).extend(1.0).to_array(),
                 uv: [offset.dot(a) / tile_size_m, offset.dot(b) / tile_size_m],
             });
         }
@@ -441,11 +457,12 @@ fn append_cylinder(mesh: &mut MeshData, shape: &WorldShape, axis: usize, tile_si
     }
 }
 
-/// `append_ellipsoid` adds a latitude-longitude ellipsoid.
+/// `append_ellipsoid` adds a latitude-longitude ellipsoid, turned with its structure's frame.
 fn append_ellipsoid(mesh: &mut MeshData, shape: &WorldShape, tile_size_m: f32) {
+    let (rotation, half_m) = (shape.rotation, shape.local_half_m);
     let base: u32 = mesh.vertices.len() as u32;
     let row_length: u32 = ELLIPSOID_SEGMENT_COUNT as u32 + 1;
-    let around_m: f32 = std::f32::consts::TAU * (shape.half_m.x + shape.half_m.z) * 0.5;
+    let around_m: f32 = std::f32::consts::TAU * (half_m.x + half_m.z) * 0.5;
     for ring in 0..=ELLIPSOID_RING_COUNT {
         let polar: f32 = ring as f32 / ELLIPSOID_RING_COUNT as f32 * std::f32::consts::PI;
         for segment in 0..=ELLIPSOID_SEGMENT_COUNT {
@@ -456,16 +473,16 @@ fn append_ellipsoid(mesh: &mut MeshData, shape: &WorldShape, tile_size_m: f32) {
                 polar.cos(),
                 polar.sin() * azimuth.sin(),
             );
-            let position: Vec3 = shape.centre_m + unit * shape.half_m;
-            let normal: Vec3 = (unit / shape.half_m).normalize();
-            let tangent: Vec3 = Vec3::new(-azimuth.sin(), 0.0, azimuth.cos());
+            let position: Vec3 = shape.centre_m + rotation * (unit * half_m);
+            let normal: Vec3 = rotation * (unit / half_m).normalize();
+            let tangent: Vec3 = rotation * Vec3::new(-azimuth.sin(), 0.0, azimuth.cos());
             mesh.vertices.push(Vertex {
                 position: position.to_array(),
                 normal: normal.to_array(),
                 tangent: tangent.extend(1.0).to_array(),
                 uv: [
                     segment as f32 / ELLIPSOID_SEGMENT_COUNT as f32 * around_m / tile_size_m,
-                    polar * shape.half_m.y / tile_size_m,
+                    polar * half_m.y / tile_size_m,
                 ],
             });
         }

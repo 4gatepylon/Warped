@@ -57,6 +57,7 @@ pub struct Viewmodel {
 /// `Scene` is everything loaded into the renderer.
 pub struct Scene {
     pub static_draws: Vec<DrawItem>,
+    pub static_surfaces: Vec<Surface>,
     pub solids: Vec<Aabb>,
     pub robot: Model,
     pub robot_scale: f32,
@@ -378,7 +379,9 @@ impl Scene {
         let surface_materials: HashMap<Surface, MaterialHandle> =
             create_surface_materials(renderer, textures_dir, emissive_scale);
         let mut static_draws: Vec<DrawItem> = Vec::new();
+        let mut static_surfaces: Vec<Surface> = Vec::new();
         for (surface, mesh_data) in arena.surface_meshes() {
+            static_surfaces.push(surface);
             let mesh: MeshHandle = renderer.create_mesh(&mesh_data);
             static_draws.push(DrawItem {
                 mesh,
@@ -435,6 +438,7 @@ impl Scene {
         let _ = AlphaMode::Opaque;
         Scene {
             static_draws,
+            static_surfaces,
             solids,
             robot,
             robot_scale,

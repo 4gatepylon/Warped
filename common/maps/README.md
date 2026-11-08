@@ -63,6 +63,7 @@ Both are exported from the programs that first built them; the map files are wha
 | `spawns` | where players start (below) |
 | `regions` | zones and the boundary (below), optional |
 | `appearance` | `{"style": name, ...}`: how the renderer details surfaces (below) |
+| `laser` (optional) | `{"rgb": [r, g, b]}`: the linear colour every team's lasers share on this map; without it, lasers take team colours |
 
 ### Materials
 

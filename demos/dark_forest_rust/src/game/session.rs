@@ -30,10 +30,12 @@ const BODY_DAMAGE: f32 = 34.0;
 const HEAD_DAMAGE: f32 = 75.0;
 /// `SHOT_RANGE_M` is the weapon's range.
 const SHOT_RANGE_M: f32 = 250.0;
-/// `PLAYER_BEAM_COLOR` is the HDR color of the player's beam (times the light scale).
-const PLAYER_BEAM_COLOR: Vec3 = Vec3::new(0.35, 0.8, 1.6);
-/// `BOT_BEAM_COLOR` is the HDR color of the bots' bolts (times the light scale).
-const BOT_BEAM_COLOR: Vec3 = Vec3::new(1.8, 0.25, 0.12);
+/// `TEAM_PLAYER_BEAM_COLOR` is the HDR color of the player's beam (times the light scale).
+const TEAM_PLAYER_BEAM_COLOR: Vec3 = Vec3::new(0.35, 0.8, 1.6);
+/// `MAP_BEAM_HDR_SCALE` brightens a map's laser colour (`Arena::laser_rgb`) to a beam's HDR level.
+const MAP_BEAM_HDR_SCALE: f32 = 1.8;
+/// `TEAM_BOT_BEAM_COLOR` is the HDR color of the bots' bolts (times the light scale).
+const TEAM_BOT_BEAM_COLOR: Vec3 = Vec3::new(1.8, 0.25, 0.12);
 /// `AUTOPILOT_HIP_FIRE_RANGE_M` is the range inside which the autopilot fires from the hip.
 const AUTOPILOT_HIP_FIRE_RANGE_M: f32 = 14.0;
 /// `NEAR_M` is the camera's near plane.
@@ -126,6 +128,8 @@ pub struct Session {
     pub pending_hits: Vec<u32>,
     pub team: u32,
     pub console_off: Vec<bool>,
+    pub player_beam_color: Vec3,
+    pub bot_beam_color: Vec3,
     pub console_hold_frac: Option<f32>,
     pub winner: Option<u32>,
     pub laps_done: u32,
@@ -159,6 +163,7 @@ const GROUND_PATROL: [Vec3; 6] = [
 impl Session {
     /// `new` starts a match with a number of bots.
     pub fn new(arena: Arena, bot_count: usize, is_autopilot: bool) -> Session {
+        let laser_rgb: Option<Vec3> = arena.laser_rgb;
         let (spawn_m, yaw_rad) = arena.team_spawns[1]
             .first()
             .copied()
@@ -197,6 +202,9 @@ impl Session {
             pending_hits: Vec::new(),
             team: 1,
             console_off: Vec::new(),
+            player_beam_color: laser_rgb
+                .map_or(TEAM_PLAYER_BEAM_COLOR, |rgb| rgb * MAP_BEAM_HDR_SCALE),
+            bot_beam_color: laser_rgb.map_or(TEAM_BOT_BEAM_COLOR, |rgb| rgb * MAP_BEAM_HDR_SCALE),
             console_hold_frac: None,
             winner: None,
             laps_done: 0,
@@ -340,7 +348,13 @@ impl Session {
         let muzzle_m: Vec3 = self.muzzle_world_m(scene);
         if let Some((id, normal)) = remote_hit {
             self.pending_hits.push(id);
-            self.add_impact(end_m, normal, PLAYER_BEAM_COLOR, scene.light_scale, false);
+            self.add_impact(
+                end_m,
+                normal,
+                self.player_beam_color,
+                scene.light_scale,
+                false,
+            );
             self.hit_marker_s = 0.25;
             audio.play(Sound::HitMarker, 0.5, 0.0);
         }
@@ -349,12 +363,12 @@ impl Session {
             end_m,
             age_s: 0.0,
             life_s: 0.16,
-            color_rgb: PLAYER_BEAM_COLOR * scene.light_scale,
+            color_rgb: self.player_beam_color * scene.light_scale,
             width_m: 0.022,
         });
         self.flashes.push(Flash {
             position_m: muzzle_m,
-            color_rgb: PLAYER_BEAM_COLOR * scene.light_scale * 0.5,
+            color_rgb: self.player_beam_color * scene.light_scale * 0.5,
             radius_m: 7.0,
             age_s: 0.0,
             life_s: 0.07,
@@ -363,7 +377,13 @@ impl Session {
         if let Some((index, is_head, normal)) = bot_hit {
             let damage: f32 = if is_head { HEAD_DAMAGE } else { BODY_DAMAGE };
             let did_kill: bool = self.bots[index].take_damage(damage);
-            self.add_impact(end_m, normal, PLAYER_BEAM_COLOR, scene.light_scale, false);
+            self.add_impact(
+                end_m,
+                normal,
+                self.player_beam_color,
+                scene.light_scale,
+                false,
+            );
             self.hit_marker_s = 0.25;
             audio.play(Sound::HitMarker, 0.5, 0.0);
             if did_kill {
@@ -376,7 +396,7 @@ impl Session {
             self.add_impact(
                 end_m,
                 hit.normal,
-                PLAYER_BEAM_COLOR,
+                self.player_beam_color,
                 scene.light_scale,
                 true,
             );
@@ -392,12 +412,12 @@ impl Session {
             end_m: shot.end_m,
             age_s: 0.0,
             life_s: 0.22,
-            color_rgb: BOT_BEAM_COLOR * scene.light_scale,
+            color_rgb: self.bot_beam_color * scene.light_scale,
             width_m: 0.03,
         });
         self.flashes.push(Flash {
             position_m: shot.origin_m,
-            color_rgb: BOT_BEAM_COLOR * scene.light_scale * 0.4,
+            color_rgb: self.bot_beam_color * scene.light_scale * 0.4,
             radius_m: 6.0,
             age_s: 0.0,
             life_s: 0.1,
@@ -412,7 +432,7 @@ impl Session {
             self.add_impact(
                 shot.end_m,
                 shot.end_normal,
-                BOT_BEAM_COLOR,
+                self.bot_beam_color,
                 scene.light_scale,
                 true,
             );
@@ -597,7 +617,7 @@ impl Session {
                     end_m: origin_m + direction * distance_m,
                     age_s: 0.0,
                     life_s: 0.12,
-                    color_rgb: BOT_BEAM_COLOR * scene.light_scale,
+                    color_rgb: self.bot_beam_color * scene.light_scale,
                     width_m: 0.022,
                 });
             }
@@ -810,7 +830,7 @@ impl Session {
                     position_m: eye_m,
                     stretch_m: Vec3::ZERO,
                     size_m: 0.07 + bot.muzzle_flash_frac * 0.2,
-                    color_rgba: (BOT_BEAM_COLOR
+                    color_rgba: (self.bot_beam_color
                         * scene.light_scale
                         * (0.25 + bot.muzzle_flash_frac))
                         .extend(0.0),
@@ -820,7 +840,7 @@ impl Session {
                 point_lights.push(PointLight {
                     position_m: eye_m,
                     radius_m: 3.0 + bot.muzzle_flash_frac * 4.0,
-                    color_rgb: BOT_BEAM_COLOR
+                    color_rgb: self.bot_beam_color
                         * scene.light_scale
                         * (0.02 + bot.muzzle_flash_frac * 0.3),
                 });
@@ -897,7 +917,7 @@ impl Session {
                     position_m: muzzle_m,
                     stretch_m: Vec3::ZERO,
                     size_m: 0.06 + flash_frac * 0.05,
-                    color_rgba: (PLAYER_BEAM_COLOR * scene.light_scale * flash_frac * 1.5)
+                    color_rgba: (self.player_beam_color * scene.light_scale * flash_frac * 1.5)
                         .extend(0.0),
                     kind: ParticleKind::MuzzleFlash,
                     seed: self.weapon.since_shot_s,
@@ -910,7 +930,7 @@ impl Session {
                     position_m: muzzle_m,
                     stretch_m: Vec3::ZERO,
                     size_m: 0.012,
-                    color_rgba: (PLAYER_BEAM_COLOR
+                    color_rgba: (self.player_beam_color
                         * scene.light_scale
                         * 0.12
                         * pulse

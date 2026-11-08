@@ -209,6 +209,50 @@ struct Args {
     /// Start playing at once instead of on the title screen (flags such as --join already do).
     #[arg(long)]
     no_title: bool,
+    /// Save one frame, without the HUD, to this PNG after the scene settles, then quit.
+    #[arg(long)]
+    photo: Option<PathBuf>,
+    /// Downscale the --photo to this width (keeping its aspect), e.g. to supersample.
+    #[arg(long)]
+    photo_width_px: Option<u32>,
+    /// Hold the camera here: feet x,y,z in meters, yaw and pitch in radians.
+    #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
+    camera_pose: Option<Vec<f32>>,
+    /// Vertical field of view in degrees, instead of the weapon's (narrow from far away looks
+    /// almost flat, for map pictures).
+    #[arg(long)]
+    fov_deg: Option<f32>,
+    /// How far from the camera the sun casts shadows, in meters.
+    #[arg(long, default_value_t = 110.0)]
+    shadow_distance_m: f32,
+    /// Leave out the tree canopies (for pictures from above).
+    #[arg(long)]
+    hide_canopy: bool,
+}
+
+/// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle.
+const PHOTO_SETTLE_S: f32 = 3.0;
+
+/// `save_photo` reads the last frame back and writes it to `path` as a PNG, downscaled to
+/// `width_px` if given.
+fn save_photo(renderer: &mut dyn Renderer, path: &std::path::Path, width_px: Option<u32>) {
+    let (frame_width_px, frame_height_px, rgba) = renderer.read_frame_rgba();
+    let mut picture: image::RgbaImage =
+        image::RgbaImage::from_raw(frame_width_px, frame_height_px, rgba).expect("RGBA frame");
+    for pixel in picture.pixels_mut() {
+        pixel[3] = 255;
+    }
+    if let Some(width_px) = width_px {
+        let height_px: u32 = width_px * frame_height_px / frame_width_px;
+        picture = image::imageops::resize(
+            &picture,
+            width_px,
+            height_px,
+            image::imageops::FilterType::Lanczos3,
+        );
+    }
+    picture.save(path).expect("writing the photo failed");
+    println!("wrote {}", path.display());
 }
 
 /// `VERTICAL_ROUTE` is `--play-route`'s loop from red's spawn: up a ladder to the treehouse, over
@@ -236,9 +280,9 @@ const VERTICAL_ROUTE: [Vec3; 17] = [
 /// `validate_args` checks every flag before anything starts.
 fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
     let example: &str = "example: dark-forest --render-scale 0.8 --bot-count 4";
-    if !(0.25..=1.0).contains(&args.render_scale) {
+    if !(0.25..=2.0).contains(&args.render_scale) {
         return Err(format!(
-            "--render-scale must be in 0.25..=1.0, got {}; {example}",
+            "--render-scale must be in 0.25..=2.0 (above 1 supersamples), got {}; {example}",
             args.render_scale
         ));
     }
@@ -511,7 +555,7 @@ fn main() {
     renderer.resize(width_px, height_px);
     let audio: Audio = Audio::new(&platform.sdl);
     let arena: Arena = Arena::from_map(&map_file);
-    let scene: Scene = Scene::load(
+    let mut scene: Scene = Scene::load(
         &mut renderer,
         &assets_dir,
         &textures_dir,
@@ -520,6 +564,15 @@ fn main() {
             should_use_rifle: args.rifle,
         },
     );
+    if args.hide_canopy {
+        let surfaces: Vec<game::world::Surface> = std::mem::take(&mut scene.static_surfaces);
+        let draws: Vec<render::DrawItem> = std::mem::take(&mut scene.static_draws);
+        (scene.static_draws, scene.static_surfaces) = draws
+            .into_iter()
+            .zip(surfaces)
+            .filter(|(_, surface)| *surface != game::world::Surface::Leaves)
+            .unzip();
+    }
     let mut event_pump = platform.sdl.event_pump().expect("SDL event pump failed");
     let mut settings: RenderSettings = RenderSettings {
         render_scale_frac: args.render_scale,
@@ -529,6 +582,7 @@ fn main() {
         is_color_grade_enabled: !args.disable_effect.contains(&Effect::ColorGrade),
         is_volumetric_haze_enabled: !args.disable_effect.contains(&Effect::VolumetricHaze),
         is_material_response_enabled: !args.disable_effect.contains(&Effect::MaterialResponse),
+        shadow_distance_m: args.shadow_distance_m,
         is_vsync_enabled: !args.no_vsync,
     };
     let is_title_shown: bool = !(args.no_title
@@ -538,7 +592,8 @@ fn main() {
         || args.autopilot
         || args.play_route
         || args.bench_views.is_some()
-        || args.camera_view.is_some());
+        || args.camera_view.is_some()
+        || args.photo.is_some());
     if is_title_shown {
         match run_title_screen(
             &mut platform,
@@ -780,6 +835,13 @@ fn main() {
         let camera_view: Option<CameraView> = bench_view
             .map(|index| CameraView::ALL[index])
             .or(args.camera_view);
+        if let Some(pose) = &args.camera_pose {
+            assert_eq!(pose.len(), 5, "--camera-pose takes x,y,z,yaw,pitch");
+            session.player = Player::new(Vec3::new(pose[0], pose[1], pose[2]), pose[3]);
+            session.player.pitch_rad = pose[4];
+            session.player.is_on_ground = true;
+            session.is_autopilot = false;
+        }
         let controls: Controls = match camera_view {
             Some(view) => {
                 let (feet_m, yaw_rad, pitch_rad) = view.pose();
@@ -825,6 +887,14 @@ fn main() {
         let sim_ms: f32 = sim_start.elapsed().as_secs_f32() * 1000.0;
         let build_start: Instant = Instant::now();
         let mut frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);
+        if let Some(fov_deg) = args.fov_deg {
+            frame.camera.fov_y_rad = fov_deg.to_radians();
+            frame.camera.far_m = f32::MAX;
+        }
+        if args.photo.is_some() {
+            frame.viewmodel_draws.clear();
+            frame.viewmodel_particles.clear();
+        }
         let (window_width_px, window_height_px) = (width_px as f32, height_px as f32);
         fill_marks(&session, &mut marks);
         let mut hud_images: Vec<HudImage> = Vec::new();
@@ -890,6 +960,12 @@ fn main() {
             timing.cpu_render_ms as f32,
         ];
         let elapsed_s: f32 = start.elapsed().as_secs_f32();
+        if let Some(path) = &args.photo
+            && elapsed_s > PHOTO_SETTLE_S
+        {
+            save_photo(&mut renderer, path, args.photo_width_px);
+            break 'running;
+        }
         if stats.frame_ms.len() > 30 || elapsed_s > 2.0 {
             stats.frame_ms.push(frame_s * 1000.0);
             stats.gpu_ms.push(timing.gpu_ms as f32);

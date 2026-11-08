@@ -51,14 +51,14 @@ pub const HDRI: PolyHavenHdri = PolyHavenHdri {
 };
 
 /// `SURFACE_TEXTURES` are the forest's tiling materials, in the order of `Surface::ALL`:
-/// ground, bark, planks, leaves, rock (all CC0, Poly Haven, 1k so the whole set is about 10 MB).
+/// ground, bamboo, planks, leaves, rock (all CC0, Poly Haven, 1k so the whole set is about 10 MB).
 pub const SURFACE_TEXTURES: [PolyHavenTexture; 5] = [
     PolyHavenTexture {
         id: "forest_ground_04",
         resolution: "1k",
     },
     PolyHavenTexture {
-        id: "bark_brown_02",
+        id: "bamboo_wall",
         resolution: "1k",
     },
     PolyHavenTexture {

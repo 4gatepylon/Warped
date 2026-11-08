@@ -32,6 +32,10 @@ pub struct MapFile {
     pub boxes: Vec<MapBox>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ladders: Vec<Ladder>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warps: Vec<Warp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub laser: Option<LaserLook>,
     #[serde(default)]
     pub lights: Vec<Light>,
     pub sky: Sky,
@@ -119,6 +123,30 @@ pub struct Ladder {
     pub name: String,
     pub frame: [f32; 16],
     pub half_size_m: [f32; 3],
+}
+
+/// `Warp` is a black hole or a wormhole mouth (the format README's "Warps"): its centre is its
+/// frame's origin, and a mouth's `partner` is the index of the other mouth of its pair.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Warp {
+    pub kind: String,
+    pub name: String,
+    pub frame: [f32; 16],
+    pub law: String,
+    pub schwarzschild_radius_m: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lambda_squared: Option<f32>,
+    pub radial_coordinate: String,
+    pub reach_m: f32,
+    pub falloff: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partner: Option<usize>,
+}
+
+/// `LaserLook` is the colour every team's lasers share on this map (absent: team colours).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LaserLook {
+    pub rgb: [f32; 3],
 }
 
 /// `Light` is one lamp.

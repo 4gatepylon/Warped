@@ -60,8 +60,6 @@ const DYNAMIC_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 const DYNAMIC_ALIGNMENT_BYTES: usize = 256;
 /// `SHADOW_MAP_SIZE_PX` is the size of each shadow cascade.
 const SHADOW_MAP_SIZE_PX: u32 = 2048;
-/// `SHADOW_DISTANCE_M` is how far from the camera the sun casts shadows.
-const SHADOW_DISTANCE_M: f32 = 110.0;
 /// `SHADOW_DEPTH_BIAS` is the constant depth bias of the shadow pass.
 const SHADOW_DEPTH_BIAS: f32 = 0.0004;
 /// `SHADOW_SLOPE_BIAS` is the slope-scaled depth bias of the shadow pass.
@@ -611,6 +609,53 @@ impl MetalRenderer {
 }
 
 impl Renderer for MetalRenderer {
+    fn read_frame_rgba(&mut self) -> (u32, u32, Vec<u8>) {
+        for command_buffer in self.in_flight.drain(..) {
+            command_buffer.waitUntilCompleted();
+        }
+        let ldr: &Texture = &self.targets.as_ref().expect("a frame was rendered").ldr;
+        let (width_px, height_px) = (ldr.width(), ldr.height());
+        let bytes_per_row: usize = width_px * 4;
+        let readback = self
+            .device
+            .newBufferWithLength_options(
+                bytes_per_row * height_px,
+                MTLResourceOptions::StorageModeShared,
+            )
+            .expect("readback buffer creation failed");
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .expect("command buffer creation failed");
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .expect("blit encoder creation failed");
+        unsafe {
+            objc2_metal::MTLBlitCommandEncoder::copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(&*blit,
+                ldr,
+                0,
+                0,
+                objc2_metal::MTLOrigin { x: 0, y: 0, z: 0 },
+                objc2_metal::MTLSize { width: width_px, height: height_px, depth: 1 },
+                &readback,
+                0,
+                bytes_per_row,
+                bytes_per_row * height_px,
+            );
+        }
+        blit.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let rgba: Vec<u8> = unsafe {
+            std::slice::from_raw_parts(
+                readback.contents().as_ptr().cast::<u8>(),
+                bytes_per_row * height_px,
+            )
+        }
+        .to_vec();
+        (width_px as u32, height_px as u32, rgba)
+    }
+
     fn create_texture(&mut self, texture: &TextureData) -> TextureHandle {
         self.textures
             .push(upload_texture_2d(&self.device, &self.queue, texture));
@@ -754,7 +799,7 @@ impl MetalRenderer {
                 aspect,
             },
             environment.sun_direction.truncate(),
-            SHADOW_DISTANCE_M.min(frame.camera.far_m),
+            settings.shadow_distance_m.min(frame.camera.far_m),
             SHADOW_MAP_SIZE_PX,
         );
         let frame_uniforms: GpuFrameUniforms =
