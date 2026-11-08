@@ -96,6 +96,8 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
   fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
   missing".
+- [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
+  of the ground, just barely translucent, to mark out the real zones.
 
 ## Done
 
