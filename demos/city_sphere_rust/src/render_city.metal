@@ -48,6 +48,14 @@ constant float FRAME_BRIGHT = 1.6;
 constant float FRAME_GROOVE_DARK = 0.6;
 constant float FRAME_ROUGH = 0.2;
 constant float WALL_PANEL_M = 3.0;
+constant float GRIME_HEIGHT_M = 1.2;
+constant float GRIME_FRAC = 0.45;
+constant float GRIME_MOTTLE_FRAC = 0.18;
+constant float HAZARD_GAP_M = 0.25;
+constant float HAZARD_WIDTH_M = 0.7;
+constant float HAZARD_STRIPE_M = 0.45;
+constant float3 HAZARD_YELLOW = float3(0.95, 0.62, 0.06);
+constant float3 HAZARD_DARK = float3(0.05, 0.05, 0.06);
 
 struct CityVertex {
     packed_float3 position;
@@ -106,6 +114,32 @@ static float3 apply_fog(float3 c, float3 world, constant CityUniforms& u) {
     return mix(u.sky_color.rgb, c, exp(-d / u.glass.w));
 }
 
+// `apply_hazard` paints diagonal yellow and black stripes on the street in a ring around the foot
+// of every lift (under each hole in the glass), a little outside the lift.
+static float3 apply_hazard(float3 base, float3 world, constant CityUniforms& u) {
+    float3 d = normalize(world);
+    float street_r = u.ambient.w;
+    for (uint i = 0; i < uint(u.glass.y) && i < MAX_HOLE_COUNT; i++) {
+        float3 axis = u.holes[i].xyz;
+        float c = dot(d, axis);
+        float lift_m = u.glass.x * sqrt(max(1.0 - u.holes[i].w * u.holes[i].w, 0.0));
+        float rho_m = street_r * sqrt(max(1.0 - c * c, 0.0));
+        float ring_m = rho_m - lift_m - HAZARD_GAP_M;
+        if (c <= 0.0 || ring_m < -0.1 || ring_m > HAZARD_WIDTH_M + 0.1) {
+            continue;
+        }
+        float3 t1 = normalize(cross(axis, abs(axis.y) < 0.9 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0)));
+        float3 t2 = cross(axis, t1);
+        float angle = atan2(dot(d, t2), dot(d, t1));
+        float stripe_count = round(6.2832 * (lift_m + HAZARD_GAP_M) / (2.0 * HAZARD_STRIPE_M));
+        float stripe = step(0.5, fract(angle / 6.2832 * stripe_count + rho_m / (2.0 * HAZARD_STRIPE_M)));
+        float aa_m = fwidth(ring_m);
+        float inside = smoothstep(-aa_m, aa_m, ring_m) * (1.0 - smoothstep(HAZARD_WIDTH_M - aa_m, HAZARD_WIDTH_M + aa_m, ring_m));
+        return mix(base, mix(HAZARD_DARK, HAZARD_YELLOW, stripe), inside);
+    }
+    return base;
+}
+
 fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u [[buffer(1)]],
                               texture2d_array<float> albedo [[texture(0)]]) {
     constexpr sampler s(address::repeat, filter::linear, mip_filter::linear, max_anisotropy(8));
@@ -133,6 +167,16 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
             base = mix(base, base * FRAME_BRIGHT, frame) * (1.0 - FRAME_GROOVE_DARK * groove);
             rough = mix(rough, FRAME_ROUGH, frame);
         }
+        if (is_street) {
+            base = apply_hazard(base, in.world, u);
+        }
+        float above_m = u.ambient.w - length(in.world);
+        float mottle = 0.5 + 0.25 * sin(dot(in.world, float3(0.83, 1.31, 0.57))) * sin(dot(in.world, float3(-1.13, 0.37, 1.49)))
+            + 0.25 * sin(dot(in.world, float3(2.9, -2.3, 1.7)) + 1.3);
+        float grime = GRIME_MOTTLE_FRAC * mottle
+            + (is_street ? 0.0 : GRIME_FRAC * (1.0 - smoothstep(0.0, GRIME_HEIGHT_M, above_m)) * (0.6 + 0.4 * mottle));
+        base *= 1.0 - grime;
+        rough = mix(rough, ROUGH_MAX, grime);
     }
     float4 beacon = is_beacon ? u.beacons[min(uint(in.color.a - BEACON_FLAG + 0.5), BEACON_SLOT_COUNT - 1)] : float4(0.0);
     base *= is_beacon ? beacon.y : 1.0;

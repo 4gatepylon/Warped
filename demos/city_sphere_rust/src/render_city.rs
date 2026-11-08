@@ -123,6 +123,7 @@ pub struct CityScene {
     pub glass: Vec<CityVertex>,
     pub holes: Vec<[f32; 4]>,
     pub glass_radius_m: f32,
+    pub street_radius_m: f32,
 }
 
 /// `CityFrame` is one frame to draw: the scene, the camera (world to camera, the vertical
@@ -374,6 +375,7 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
         glass,
         holes,
         glass_radius_m,
+        street_radius_m: street_radius_m as f32,
     }
 }
 
@@ -774,7 +776,7 @@ impl CityGpu {
             clip_from_world: frame.get_clip_from_world().to_cols_array_2d(),
             camera_m: frame.camera_m.extend(1.0).to_array(),
             core_light: CORE_LIGHT,
-            ambient: AMBIENT,
+            ambient: [AMBIENT[0], AMBIENT[1], AMBIENT[2], frame.scene.street_radius_m],
             holes,
             glass: [frame.scene.glass_radius_m, frame.scene.holes.len() as f32, frame.time_s, FOG_M],
             sky_color: SKY_COLOR,
