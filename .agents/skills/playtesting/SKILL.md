@@ -12,5 +12,5 @@ When the user tests a game or other visual work you made:
 - **No screen sharing:** the user doesn't share their screen or microphone, so ask them to playtest
   desktop apps and anything else you can't see yourself. Where you can, work with them to set up an
   environment you can test in yourself, such as a browser page or a simulator.
-- **Gameplay changes:** what to give the user to play, including smaller three.js demos, is in the
-  `sharing-gameplay` skill.
+- **Gameplay changes:** what to give the user to play, including smaller three.js demos and a review
+  lane per feature when several are in development, is in the `interactive-review` skill.

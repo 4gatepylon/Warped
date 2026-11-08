@@ -53,14 +53,15 @@ So every agent's work must be findable, pushed, and kept apart from every other 
   - the subagent writes pictures, videos, HTML pages and demos to `.artifacts/<script>/<run_id>/` in its own
     worktree, reports each file's absolute path, caption and the decision it answers, and stops;
   - the parent opens every file before passing it on (Reports aren't confirmations, below), then shows the user as
-    the `graphical-changes` and `sharing-gameplay` skills say, with a gallery page (an HTML page the user opens with
+    the `graphical-changes` and `interactive-review` skills say, with a gallery page (an HTML page the user opens with
     one `open` command) for videos or more than a few files;
   - the parent resumes the subagent with the user's words (Relaying, below).
 - **Many subagents.** For large, unusual work with so many subagents that relaying everything through one parent
   would hold the user back, the parent may agree another way of sharing outputs with the user first (such as each
   subagent's own page). Only for such work, and only once the user agrees.
-- **Features to test side by side.** When several subagents build features the user tests by playing, run each as a
-  review lane (the `review-lanes` skill).
+- **Features to test side by side.** When several features the user tests by playing are in development at once,
+  each runs in a review lane with one subagent, unless the user asks for something else. The parent runs every
+  lane's server and window and swaps in new builds (the `interactive-review` skill).
 
 ## Work that survives
 

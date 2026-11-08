@@ -224,7 +224,7 @@ that cover each part in the test file's docstring. Follow the `unit-tests` skill
 ## Playtesting
 
 When the user tests a game or other visual work you made, follow the `playtesting` skill
-(`.agents/skills/playtesting/`). Let the user play gameplay changes with the `sharing-gameplay` skill.
+(`.agents/skills/playtesting/`). Let the user play gameplay changes with the `interactive-review` skill.
 
 ## Agents working together
 
