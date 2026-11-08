@@ -1,6 +1,6 @@
 //! `mesh.rs` is a glTF model of `common/maps/models/` placed in its structure's chart q (meters,
 //! where straight lines are geodesics, so its triangles are exact geodesic faces): its triangles,
-//! a bounding volume hierarchy over them (so far only its root) and its materials.
+//! a bounding volume hierarchy over them for ray hits and distance bounds, and its materials.
 //!
 //! Interface: `MeshModel::Load`, `MeshModel`, `MeshTriangle`, `BvhNode`, `MeshMaterial`.
 //!
@@ -8,9 +8,12 @@
 
 use std::path::{Path, PathBuf};
 
-use glam::{Mat3, Mat4, Vec2, Vec3};
+use glam::{DVec3, Mat3, Mat4, Vec2, Vec3};
 
 use crate::map::get_model_path;
+
+const LEAF_TRIANGLE_COUNT: usize = 4;
+const PARALLEL_DET: f64 = 1e-12;
 
 /// `MeshTriangle` is one triangle: its corners, their normals and texture coordinates (u, v), and
 /// its material.
@@ -159,17 +162,77 @@ impl MeshModel {
             .map(|m| read_material(&m, &image_paths))
             .collect();
         let (lo, hi) = get_bounds(&triangles);
-        let nodes: Vec<BvhNode> = vec![BvhNode {
+        let mut nodes: Vec<BvhNode> = vec![BvhNode {
             lo,
             hi,
             first: 0,
             count: triangles.len(),
         }];
+        split_node(&mut nodes, 0, &mut triangles);
         Ok(MeshModel {
             triangles,
             nodes,
             materials,
         })
+    }
+
+    /// `find_hit_mu` gives where the line q0 + dq mu first meets a triangle within [mu_lo, mu_hi],
+    /// and which triangle, or `None`.
+    ///
+    /// Example: `let hit = model.find_hit_mu(q0, dq, 0.0, 1.0);`
+    pub fn find_hit_mu(
+        &self,
+        q0: DVec3,
+        dq: DVec3,
+        mu_lo: f64,
+        mu_hi: f64,
+    ) -> Option<(f64, usize)> {
+        let (mut best, mut stack) = (None, vec![0usize]);
+        let mut hi: f64 = mu_hi;
+        while let Some(k) = stack.pop() {
+            let node: BvhNode = self.nodes[k];
+            let a: DVec3 = (node.lo.as_dvec3() - q0) / dq;
+            let b: DVec3 = (node.hi.as_dvec3() - q0) / dq;
+            if a.min(b).max_element().max(mu_lo) > a.max(b).min_element().min(hi) {
+                continue;
+            }
+            if node.count == 0 {
+                stack.extend([node.first, node.first + 1]);
+                continue;
+            }
+            for i in node.first..node.first + node.count {
+                if let Some(mu) =
+                    hit_triangle(&self.triangles[i], q0, dq).filter(|&mu| mu >= mu_lo && mu < hi)
+                {
+                    (hi, best) = (mu, Some((mu, i)));
+                }
+            }
+        }
+        best
+    }
+
+    /// `get_distance_m` bounds the distance from q to the model's triangles from below, by the
+    /// distance to the nearest BVH leaf box.
+    ///
+    /// Example: `let d_m = model.get_distance_m(DVec3::new(0.0, 5.0, 0.0));`
+    pub fn get_distance_m(&self, q: DVec3) -> f64 {
+        let (mut best, mut stack) = (f64::MAX, vec![0usize]);
+        while let Some(k) = stack.pop() {
+            let node: BvhNode = self.nodes[k];
+            let gap: f64 = (node.lo.as_dvec3() - q)
+                .max(q - node.hi.as_dvec3())
+                .max(DVec3::ZERO)
+                .length();
+            if gap >= best {
+                continue;
+            }
+            if node.count == 0 {
+                stack.extend([node.first, node.first + 1]);
+            } else {
+                best = gap;
+            }
+        }
+        best
     }
 }
 
@@ -183,6 +246,61 @@ fn get_bounds(triangles: &[MeshTriangle]) -> (Vec3, Vec3) {
         .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)))
 }
 
+/// `split_node` splits node k's triangles at the median along the longest axis of their centres,
+/// until leaves hold at most `LEAF_TRIANGLE_COUNT`.
+///
+/// Example: `split_node(&mut nodes, 0, &mut triangles);`
+fn split_node(nodes: &mut Vec<BvhNode>, k: usize, triangles: &mut [MeshTriangle]) {
+    let BvhNode { first, count, .. } = nodes[k];
+    if count <= LEAF_TRIANGLE_COUNT {
+        return;
+    }
+    let part: &mut [MeshTriangle] = &mut triangles[first..first + count];
+    let centre = |t: &MeshTriangle| t.p[0] + t.p[1] + t.p[2];
+    let (lo, hi) = part
+        .iter()
+        .map(centre)
+        .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), c| (lo.min(c), hi.max(c)));
+    let axis: usize = (hi - lo).max_position();
+    let half: usize = count / 2;
+    part.select_nth_unstable_by(half, |a, b| centre(a)[axis].total_cmp(&centre(b)[axis]));
+    let children: usize = nodes.len();
+    for (start, length) in [(first, half), (first + half, count - half)] {
+        let (lo, hi) = get_bounds(&triangles[start..start + length]);
+        nodes.push(BvhNode {
+            lo,
+            hi,
+            first: start,
+            count: length,
+        });
+    }
+    nodes[k] = BvhNode {
+        first: children,
+        count: 0,
+        ..nodes[k]
+    };
+    split_node(nodes, children, triangles);
+    split_node(nodes, children + 1, triangles);
+}
+
+/// `hit_triangle` gives where the line q0 + dq mu crosses triangle t (Möller-Trumbore), or `None`.
+///
+/// Example: `let mu = hit_triangle(&triangle, q0, dq);`
+fn hit_triangle(t: &MeshTriangle, q0: DVec3, dq: DVec3) -> Option<f64> {
+    let [a, b, c] = t.p.map(|p| p.as_dvec3());
+    let (e1, e2) = (b - a, c - a);
+    let h: DVec3 = dq.cross(e2);
+    let det: f64 = e1.dot(h);
+    if det.abs() < PARALLEL_DET * dq.length() {
+        return None;
+    }
+    let s: DVec3 = q0 - a;
+    let u: f64 = s.dot(h) / det;
+    let g: DVec3 = s.cross(e1);
+    let v: f64 = dq.dot(g) / det;
+    (u >= 0.0 && v >= 0.0 && u + v <= 1.0).then(|| e2.dot(g) / det)
+}
+
 #[cfg(test)]
 mod tests {
     //! Tests for `mesh.rs` on the Hesco block (a 1.4 m cube-like block standing on the origin).
@@ -190,6 +308,8 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Placement | height, bottom on y = 0, centred | `the_block_is_placed` |
+    //! | Ray | hits the block, passes beside it, stops short of it | `rays_hit_or_miss` |
+    //! | Distance bound | far from the block, next to it | `distances_are_bounds` |
 
     use super::*;
 
@@ -201,5 +321,38 @@ mod tests {
         let (lo, hi) = get_bounds(&model.triangles);
         assert!((f64::from(hi.y - lo.y) - HEIGHT_M).abs() < 1e-4 && lo.y.abs() < 1e-4);
         assert!((lo.x + hi.x).abs() < 1e-4 && (lo.z + hi.z).abs() < 1e-4);
+    }
+
+    #[test]
+    fn rays_hit_or_miss() {
+        let model: MeshModel = MeshModel::Load("hesco_barrier", HEIGHT_M).expect("the Hesco block");
+        let (q0, dq) = (DVec3::new(-5.0, 0.7, 0.0), DVec3::X);
+        let (mu, _) = model.find_hit_mu(q0, dq, 0.0, 10.0).expect("a hit");
+        assert!((4.0..5.0).contains(&mu), "hit at {mu}");
+        assert!(model.find_hit_mu(q0, dq, 0.0, 3.0).is_none());
+        assert!(
+            model
+                .find_hit_mu(DVec3::new(-5.0, 3.0, 0.0), dq, 0.0, 10.0)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn distances_are_bounds() {
+        let model: MeshModel = MeshModel::Load("hesco_barrier", HEIGHT_M).expect("the Hesco block");
+        for q in [
+            DVec3::new(-5.0, 0.7, 0.0),
+            DVec3::new(-0.9, 0.7, 0.0),
+            DVec3::new(0.0, 4.0, 0.0),
+        ] {
+            let dq: DVec3 = (DVec3::new(0.0, 0.7, 0.0) - q).normalize();
+            let (mu, _) = model
+                .find_hit_mu(q, dq, 0.0, 10.0)
+                .expect("a hit toward the centre");
+            assert!(
+                model.get_distance_m(q) <= mu + 1e-6,
+                "bound over the hit at {q}"
+            );
+        }
     }
 }
