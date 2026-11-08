@@ -415,7 +415,7 @@ pub fn pack_shared_voxel_view(
                 .hit_structure
                 .zip(own.spot)
                 .is_some_and(|(k, x)| shared.is_head_hit(k, x));
-        spot = own.spot.map(|x| (x, team));
+        spot = own.drawn_spot.map(|x| (x, team));
         beams.push(LaserBeam {
             segments: own.segments.clone(),
             team,

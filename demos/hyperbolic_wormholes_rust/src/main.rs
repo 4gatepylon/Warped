@@ -900,7 +900,8 @@ fn bench_voxel_views(
                 speckle_frac: 0.0,
             })
             .collect();
-        let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
+        let spot: Option<(glam::DVec4, u32)> =
+            shot.as_ref().and_then(|s| s.drawn_spot).map(|x| (x, 0));
         let (camera, bend) = (world.bend.bend_frame(camera), world.bend);
         let warm_up: VoxelFrame =
             VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
@@ -1951,7 +1952,7 @@ impl Tracer {
         Tracer {
             length_m: segments.iter().map(|s| s.length).sum::<f64>() * r,
             segments,
-            spot: shot.spot,
+            spot: shot.drawn_spot,
             team,
             is_rifle,
             speckle_frac,
