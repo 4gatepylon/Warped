@@ -41,8 +41,9 @@ pub struct GpuFrameUniforms {
 
 /// `GpuLensUniforms` is the wormhole lens pass's mouths: (centre, lens throat) and (reach, λ²,
 /// partner, floor height) each, and (mouth count, 1 while capturing, atlas rows, unused); then
-/// what it shows live: each mouth's live slot plus 1 (0 for none, four mouths a vector), the
-/// robots' bounding spheres (centre, radius), and (unused, sphere count, near plane, unused).
+/// what it shows live: each mouth's live slot plus 1 (0 for none, negative when a robot is within
+/// the mouth's reach; four mouths a vector), the robots' bounding spheres (centre, radius), and
+/// (unused, sphere count, near plane, unused).
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct GpuLensUniforms {

@@ -42,16 +42,22 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   (inversion, then diag(1, 1, -1)), so you come out facing what you saw.
 - **D14. Compact map JSON.** Every culm and leaf stays listed (the format has no generator), so the map is written
   without indentation: 8.6 MB instead of about 20 MB, under the 10 MB limit.
+- **D15. Robots and lasers show through the wormholes from live cube faces, found by depth.** Each frame, up to 4
+  live slots redraw only the robots and laser effects (beams, the robots' eye glows, sparks, smoke) within 50 m of
+  a mouth into six 384 px faces from its centre, with depth: for each visible mouth, nearest first, its partner and
+  then itself. The lens pass then looks for a robot along the traced ray, at each bent step and across each robot's
+  bounding sphere on the straight part, by comparing the ray's distance from the mouth with the faces' depth, and
+  hides a robot behind the static forest with the atlas's alpha, now the static world's distance (log-encoded).
+  Lasers are added in the atlas's own direction. Redrawing the whole forest per visible mouth (D12's live view)
+  would cost about a full frame each; this costs only the robots. The parked branch `devin/dark-forest-lens-robots`
+  drew robots over the atlas in the atlas's direction, so they slid with parallax and showed through bamboo walls;
+  it was redone rather than finished. Robots in the live faces are lit with the player's last shadow cascade (which
+  covers about 160 m around the view), not a cascade of their own. Pylons and their beams stay out of the live
+  faces, as before (they aren't in the atlas either). **Weigh in:** whether pylons and their beams should also
+  show through the wormholes.
 
 ## Follow-ups for the next agent
 
-- **Robots and players through wormholes (deferred by the user):** the lens samples a static
-  atlas made at start-up, so movers on the far side don't show. Branch
-  `devin/dark-forest-lens-robots` holds an unfinished, untested overlay: it redraws the skinned
-  draws within 30 m of the nearest two visible mouths' partners into six faces and composites
-  them over a copy of the partner's atlas row (`encode_lens_live`). It builds; it was measured
-  once at about +0.5 ms GPU at the lift close-up (2560x1440), but nothing checked that robots
-  actually appear.
 - **Ground mist:** dropped by the user; don't add it.
 - **Server console count:** `map::console_teams` once read boxes only, so the server saw 0
   consoles (the pylons are `scifi_beacon` mesh structures) and no online match could be won. It

@@ -89,8 +89,9 @@ const LENS_LIVE_UNUSED_SPLIT_M: f32 = 0.0;
 const LENS_LIVE_LAST_SPLIT_M: f32 = 1.0e6;
 
 /// `LensLive` is where the robots and lasers near some wormhole mouths are drawn each frame, seen
-/// from those mouths' centres: one row of six faces (oriented as `LENS_FACES`) per live slot, in
-/// HDR color (alpha is coverage) and depth.
+/// from those mouths' centres: one array slice per live slot, a row of six faces (oriented as
+/// `LENS_FACES`), in HDR color (alpha is coverage) and depth. Each live slot is its own render
+/// pass, so a frame stores only the slots it uses.
 struct LensLive {
     color: Texture,
     depth: Texture,
@@ -610,16 +611,22 @@ impl MetalRenderer {
         if slots.is_empty() {
             return uniforms;
         }
-        let lanes_per_vec4: usize = 4;
-        for (slot, &mouth) in slots.iter().enumerate() {
-            uniforms.live_slots[mouth / lanes_per_vec4][mouth % lanes_per_vec4] = (slot + 1) as f32;
-        }
         let mut spheres: Vec<Vec4> = Vec::new();
         for draw in frame.lens_draws {
             let sphere: Vec4 = draw.bounds_center_m.extend(draw.bounds_radius_m);
             if !spheres.contains(&sphere) {
                 spheres.push(sphere);
             }
+        }
+        let lanes_per_vec4: usize = 4;
+        for (slot, &mouth) in slots.iter().enumerate() {
+            let mouth_data: &LensMouth = &live.mouths[mouth];
+            let is_mover_within_reach: bool = spheres.iter().any(|sphere| {
+                sphere.truncate().distance(mouth_data.centre_m) < mouth_data.reach_m + sphere.w
+            });
+            let sign: f32 = if is_mover_within_reach { -1.0 } else { 1.0 };
+            uniforms.live_slots[mouth / lanes_per_vec4][mouth % lanes_per_vec4] =
+                sign * (slot + 1) as f32;
         }
         let get_slot_distance_m = |sphere: &Vec4| -> f32 {
             slots
@@ -632,26 +639,28 @@ impl MetalRenderer {
         uniforms.movers[..spheres.len()].copy_from_slice(&spheres);
         uniforms.live_params = Vec4::new(0.0, spheres.len() as f32, frame.camera.near_m, 0.0);
 
-        let descriptor: Retained<MTLRenderPassDescriptor> = color_pass(
-            &live.color,
-            MTLLoadAction::Clear,
-            Some((&live.depth, MTLLoadAction::Clear, MTLStoreAction::Store)),
-        );
-        unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) }.setClearColor(
-            MTLClearColor {
+        let face_px: f32 = live.face_px as f32;
+        let alpha_mode_of = |draw: &DrawItem| self.materials[draw.material.0 as usize].alpha_mode;
+        for (slot, &mouth) in slots.iter().enumerate() {
+            let descriptor: Retained<MTLRenderPassDescriptor> = color_pass(
+                &live.color,
+                MTLLoadAction::Clear,
+                Some((&live.depth, MTLLoadAction::Clear, MTLStoreAction::Store)),
+            );
+            let color_attachment =
+                unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
+            color_attachment.setSlice(slot);
+            color_attachment.setClearColor(MTLClearColor {
                 red: 0.0,
                 green: 0.0,
                 blue: 0.0,
                 alpha: 0.0,
-            },
-        );
-        let encoder = command_buffer
-            .renderCommandEncoderWithDescriptor(&descriptor)
-            .expect("render encoder creation failed");
-        encoder.setFrontFacingWinding(MTLWinding::CounterClockwise);
-        let face_px: f32 = live.face_px as f32;
-        let alpha_mode_of = |draw: &DrawItem| self.materials[draw.material.0 as usize].alpha_mode;
-        for (slot, &mouth) in slots.iter().enumerate() {
+            });
+            descriptor.depthAttachment().setSlice(slot);
+            let encoder = command_buffer
+                .renderCommandEncoderWithDescriptor(&descriptor)
+                .expect("render encoder creation failed");
+            encoder.setFrontFacingWinding(MTLWinding::CounterClockwise);
             let centre_m: Vec3 = live.mouths[mouth].centre_m;
             for (face, (forward, up)) in LENS_FACES.iter().enumerate() {
                 let camera: crate::render::Camera = crate::render::Camera {
@@ -690,7 +699,7 @@ impl MetalRenderer {
                 }
                 encoder.setViewport(MTLViewport {
                     originX: f64::from(face_px) * face as f64,
-                    originY: f64::from(face_px) * slot as f64,
+                    originY: 0.0,
                     width: f64::from(face_px),
                     height: f64::from(face_px),
                     znear: 0.0,
@@ -759,8 +768,8 @@ impl MetalRenderer {
                     }
                 }
             }
+            encoder.endEncoding();
         }
-        encoder.endEncoding();
         uniforms
     }
 
@@ -905,21 +914,16 @@ impl Renderer for MetalRenderer {
         });
         self.lens_live = lens.map(|lens| {
             let face_px: usize = lens.atlas.width as usize / LENS_FACES.len();
-            let (width_px, height_px) = (
-                face_px * LENS_FACES.len(),
-                face_px * MAX_LIVE_LENS_SLOT_COUNT,
-            );
+            let slot_spec = |format: MTLPixelFormat| -> TextureSpec {
+                TextureSpec {
+                    texture_type: MTLTextureType::Type2DArray,
+                    array_length: MAX_LIVE_LENS_SLOT_COUNT,
+                    ..TextureSpec::render_target(format, face_px * LENS_FACES.len(), face_px)
+                }
+            };
             LensLive {
-                color: create_texture(
-                    &self.device,
-                    &TextureSpec::render_target(HDR_FORMAT, width_px, height_px),
-                    "live lens color",
-                ),
-                depth: create_texture(
-                    &self.device,
-                    &TextureSpec::render_target(DEPTH_FORMAT, width_px, height_px),
-                    "live lens depth",
-                ),
+                color: create_texture(&self.device, &slot_spec(HDR_FORMAT), "live lens color"),
+                depth: create_texture(&self.device, &slot_spec(DEPTH_FORMAT), "live lens depth"),
                 face_px,
                 mouths: lens.mouths.clone(),
             }

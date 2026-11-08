@@ -283,8 +283,8 @@ inline float3 grade_display(float3 color) {
 /**
  * @brief `LensUniforms` matches `GpuLensUniforms`: each mouth's (centre, lens throat) and (reach, λ²,
  * partner, floor height), and (mouth count, 1 while capturing, atlas rows, unused); then each
- * mouth's live slot plus 1 (0 for none), the robots' bounding spheres, and (unused, sphere count,
- * near plane, unused).
+ * mouth's live slot plus 1 (0 for none, negative when a robot is within its reach), the robots'
+ * bounding spheres, and (unused, sphere count, near plane, unused).
  */
 struct LensUniforms {
     float4 centres[16];
@@ -418,7 +418,20 @@ static float get_static_distance_m(texture2d<float> atlas, int w, float3 d) {
  * @endcode
  */
 static int get_live_slot(constant LensUniforms& lens, int w) {
-    return int(lens.live_slots[w / 4][w % 4] + 0.5) - 1;
+    return int(abs(lens.live_slots[w / 4][w % 4]) + 0.5) - 1;
+}
+
+/**
+ * @brief `get_inner_live_slot` is mouth w's live slot if a robot stands within its reach, where
+ * rays bend (−1 otherwise), so the bent steps only look for robots where one can be.
+ * @par Example
+ * @code
+ * int slot = get_inner_live_slot(lens, current);
+ * @endcode
+ */
+static int get_inner_live_slot(constant LensUniforms& lens, int w) {
+    float encoded = lens.live_slots[w / 4][w % 4];
+    return encoded < 0.0 ? int(-encoded + 0.5) - 1 : -1;
 }
 
 /**
@@ -429,28 +442,28 @@ static int get_live_slot(constant LensUniforms& lens, int w) {
  * float robot_m = get_live_distance_m(lens, live_depth, slot, d);
  * @endcode
  */
-static float get_live_distance_m(constant LensUniforms& lens, depth2d<float> live_depth, int slot,
+static float get_live_distance_m(constant LensUniforms& lens, depth2d_array<float> live_depth, int slot,
                                  float3 d) {
     float face_px = float(live_depth.get_width()) / 6.0;
     float axis_cos;
     float2 uv = get_lens_face_uv(d, face_px, axis_cos);
-    float depth = live_depth.read(uint2(uv.x * float(live_depth.get_width()), (float(slot) + uv.y) * face_px));
+    float depth = live_depth.read(uint2(uv.x * float(live_depth.get_width()), uv.y * face_px), uint(slot));
     return depth > 0.0 ? lens.live_params.z / depth / axis_cos : 1e30;
 }
 
 /**
  * @brief `is_on_live_mover` says whether the point at `offset` from the centre of live slot `slot`'s
- * mouth is inside a robot drawn there (just behind its surface seen from that centre).
+ * mouth is inside a robot drawn there: at most `depth_m` behind its surface seen from that centre.
  * @par Example
  * @code
- * bool is_hit = is_on_live_mover(lens, live_depth, slot, x - c);
+ * bool is_hit = is_on_live_mover(lens, live_depth, slot, x - c, LENS_MOVER_THICKNESS_M);
  * @endcode
  */
-static bool is_on_live_mover(constant LensUniforms& lens, depth2d<float> live_depth, int slot,
-                             float3 offset) {
+static bool is_on_live_mover(constant LensUniforms& lens, depth2d_array<float> live_depth, int slot,
+                             float3 offset, float depth_m) {
     float r = length(offset);
     float robot_m = get_live_distance_m(lens, live_depth, slot, offset);
-    return r >= robot_m && r - robot_m < LENS_MOVER_THICKNESS_M;
+    return r >= robot_m && r - robot_m < depth_m;
 }
 
 /**
@@ -462,7 +475,7 @@ static bool is_on_live_mover(constant LensUniforms& lens, depth2d<float> live_de
  * float t = find_live_mover_m(lens, live_depth, w, slot, x, v, far_m);
  * @endcode
  */
-static float find_live_mover_m(constant LensUniforms& lens, depth2d<float> live_depth, int w,
+static float find_live_mover_m(constant LensUniforms& lens, depth2d_array<float> live_depth, int w,
                                int slot, float3 x, float3 v, float far_m) {
     float3 c = lens.centres[w].xyz;
     float best_m = far_m;
@@ -480,7 +493,7 @@ static float find_live_mover_m(constant LensUniforms& lens, depth2d<float> live_
         float t_end = min(-b + sqrt(disc), best_m);
         for (int i = 0; i <= LENS_MOVER_STEP_COUNT && t_start <= t_end; i++) {
             float t = mix(t_start, t_end, float(i) / float(LENS_MOVER_STEP_COUNT));
-            if (is_on_live_mover(lens, live_depth, slot, x + v * t - c)) {
+            if (is_on_live_mover(lens, live_depth, slot, x + v * t - c, LENS_MOVER_THICKNESS_M)) {
                 best_m = t;
                 is_found = true;
                 break;
@@ -528,12 +541,11 @@ static float3 get_display_color(constant FrameUniforms& frame, float3 color) {
  * @endcode
  */
 static float3 add_live_color(constant FrameUniforms& frame, texture2d<float> atlas,
-                             texture2d<float> live_color, depth2d<float> live_depth,
+                             texture2d_array<float> live_color, depth2d_array<float> live_depth,
                              constant LensUniforms& lens, int w, int slot, bool is_hit,
                              float3 hit_offset, float3 d, float3 color) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float face_px = float(live_color.get_width()) / 6.0;
-    float row_count = float(live_color.get_height()) / face_px;
     float axis_cos;
     if (is_hit) {
         float robot_m = get_live_distance_m(lens, live_depth, slot, hit_offset);
@@ -541,12 +553,12 @@ static float3 add_live_color(constant FrameUniforms& frame, texture2d<float> atl
             return color;
         }
         float2 uv = get_lens_face_uv(hit_offset, face_px, axis_cos);
-        float4 robot = live_color.sample(linear_sampler, float2(uv.x, (float(slot) + uv.y) / row_count), level(0.0));
+        float4 robot = live_color.sample(linear_sampler, uv, uint(slot), level(0.0));
         float coverage = saturate(robot.a);
         return mix(color, get_display_color(frame, robot.rgb / max(coverage, 1e-4)), coverage);
     }
     float2 uv = get_lens_face_uv(d, face_px, axis_cos);
-    float4 glow = live_color.sample(linear_sampler, float2(uv.x, (float(slot) + uv.y) / row_count), level(0.0));
+    float4 glow = live_color.sample(linear_sampler, uv, uint(slot), level(0.0));
     float3 light = glow.rgb * (1.0 - saturate(glow.a));
     if (all(light <= 0.0)) {
         return color;
@@ -607,8 +619,8 @@ static int find_lens_mouth(constant FrameUniforms& frame, constant LensUniforms&
  * @endcode
  */
 static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniforms& lens,
-                             texture2d<float> atlas, texture2d<float> live_color,
-                             depth2d<float> live_depth, float2 uv) {
+                             texture2d<float> atlas, texture2d_array<float> live_color,
+                             depth2d_array<float> live_depth, float2 uv) {
     float entry_m, closest_m;
     float3 dir;
     int w = find_lens_mouth(frame, lens, uv, entry_m, closest_m, dir);
@@ -646,8 +658,9 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
         float3 g = get_lens_bend(lens, current, x);
         v = normalize(v + (g - dot(g, v) * v) * h);
         x += v * h;
-        int slot_now = get_live_slot(lens, current);
-        is_hit = slot_now >= 0 && is_on_live_mover(lens, live_depth, slot_now, x - lens.centres[current].xyz);
+        int slot_now = get_inner_live_slot(lens, current);
+        is_hit = slot_now >= 0 && is_on_live_mover(lens, live_depth, slot_now, x - lens.centres[current].xyz,
+                                                   max(LENS_MOVER_THICKNESS_M, h));
     }
     float3 c = lens.centres[current].xyz;
     float3 oc_proxy = x - c;
@@ -686,8 +699,8 @@ fragment float4 lens_fragment(FullscreenVertexOut in [[stage_in]],
                               constant FrameUniforms& frame [[buffer(1)]],
                               constant LensUniforms& lens [[buffer(2)]],
                               texture2d<float> atlas [[texture(0)]],
-                              texture2d<float> live_color [[texture(1)]],
-                              depth2d<float> live_depth [[texture(2)]]) {
+                              texture2d_array<float> live_color [[texture(1)]],
+                              depth2d_array<float> live_depth [[texture(2)]]) {
     return get_lens_color(frame, lens, atlas, live_color, live_depth, in.uv);
 }
 

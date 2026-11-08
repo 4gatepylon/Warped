@@ -509,7 +509,9 @@ mod tests {
         let near_robot: (Vec3, Vec3) = (Vec3::new(203.0, 1.0, 0.0), Vec3::new(203.0, 1.0, 0.0));
         let laser: (Vec3, Vec3) = (Vec3::new(200.0, 1.7, 100.0), Vec3::new(200.0, 1.7, -100.0));
         assert!(pick_live_lens_mouths(&mouths, camera_m, &[true, false], &[far_robot]).is_empty());
-        assert!(pick_live_lens_mouths(&mouths, camera_m, &[false, false], &[near_robot]).is_empty());
+        assert!(
+            pick_live_lens_mouths(&mouths, camera_m, &[false, false], &[near_robot]).is_empty()
+        );
         assert_eq!(
             pick_live_lens_mouths(&mouths, camera_m, &[true, false], &[laser]),
             vec![1]
@@ -538,7 +540,10 @@ mod tests {
     fn test_lens_depth_encoding() {
         let near_m: f32 = 0.05;
         assert_eq!(encode_lens_depth(near_m, 0.0), u8::MAX);
-        assert_eq!(encode_lens_depth(near_m, near_m / LENS_DEPTH_FAR_M), u8::MAX);
+        assert_eq!(
+            encode_lens_depth(near_m, near_m / LENS_DEPTH_FAR_M),
+            u8::MAX
+        );
         assert_eq!(encode_lens_depth(near_m, near_m / 0.1), 0);
         let along_m: f32 = 9.0;
         let frac: f32 = f32::from(encode_lens_depth(near_m, near_m / along_m)) / 255.0;

@@ -1133,6 +1133,7 @@ pub fn build() -> MapFile {
 /// | ladders | to a deck, to a lookout | `test_ladders_reach_decks` |
 /// | symmetry | red's half against blue's | `test_halves_mirror` |
 /// | warps | 2 black holes and 3 paired wormholes, each reach clear of boxes, shapes, ladders and spawns | `test_warps_are_paired_and_clear` |
+/// | walking into a mouth | each of the 10 mouths, from 16 directions | `test_every_mouth_lets_out_onto_solid_ground` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1186,6 +1187,63 @@ mod tests {
             (Vec3::INFINITY, Vec3::NEG_INFINITY),
             |(low, high), corner| (low.min(corner), high.max(corner)),
         )
+    }
+
+    /// `test_every_mouth_lets_out_onto_solid_ground` walks a body into every mouth from 16
+    /// directions and checks it steps out of the partner with ground or a deck under its feet
+    /// (within 0.6 m), without overlapping a solid.
+    #[test]
+    fn test_every_mouth_lets_out_onto_solid_ground() {
+        use crate::game::collision::Aabb;
+        let arena: crate::game::world::Arena = crate::game::world::Arena::from_map(&build());
+        let solids: Vec<Aabb> = arena.boxes.iter().map(|world_box| world_box.aabb).collect();
+        let body_centre_above_feet_m: f32 = 0.9;
+        let body_half_width_m: f32 = 0.4;
+        let ground_reach_m: f32 = 0.6;
+        let step_m: f32 = 0.02;
+        let direction_count: usize = 16;
+        let mut problems: Vec<String> = Vec::new();
+        for (index, mouth) in arena.warps.mouths.iter().enumerate() {
+            let floor_y_m: f32 = mouth.centre_m.y - MOUTH_HEIGHT_M;
+            let walk_m: f32 = mouth.throat_radius_m + 1.0;
+            for direction in 0..direction_count {
+                let angle_rad: f32 = TAU * direction as f32 / direction_count as f32;
+                let toward: Vec3 = Vec3::new(angle_rad.cos(), 0.0, angle_rad.sin());
+                let start_m: Vec3 = (mouth.centre_m - toward * walk_m).with_y(floor_y_m);
+                let exit_feet_m: Option<Vec3> =
+                    (0..(2.0 * walk_m / step_m) as usize).find_map(|step| {
+                        let feet_m: Vec3 = start_m + toward * (step as f32 * step_m);
+                        let centre_m: Vec3 = feet_m + Vec3::Y * body_centre_above_feet_m;
+                        arena
+                            .warps
+                            .get_mouth_exit_feet_m(feet_m, centre_m)
+                            .map(|(exit_m, _)| exit_m)
+                    });
+                let Some(exit_feet_m) = exit_feet_m else {
+                    problems.push(format!(
+                        "mouth {index} from {angle_rad:.2} rad: never entered"
+                    ));
+                    continue;
+                };
+                let half_width: Vec3 = Vec3::new(body_half_width_m, 0.0, body_half_width_m);
+                let under_feet: Aabb = Aabb {
+                    min_m: exit_feet_m - half_width - Vec3::Y * ground_reach_m,
+                    max_m: exit_feet_m + half_width,
+                };
+                let has_ground: bool = exit_feet_m.y < ground_reach_m
+                    || solids.iter().any(|solid| solid.overlaps(&under_feet));
+                let body: Aabb = Aabb {
+                    min_m: exit_feet_m - half_width + Vec3::Y * 0.3,
+                    max_m: exit_feet_m + half_width + Vec3::Y * 1.8,
+                };
+                if !has_ground || solids.iter().any(|solid| solid.overlaps(&body)) {
+                    problems.push(format!(
+                        "mouth {index} from {angle_rad:.2} rad: out at {exit_feet_m:.2?}, ground under it: {has_ground}"
+                    ));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{problems:#?}");
     }
 
     /// `test_warps_are_paired_and_clear` checks the map has 2 black holes and 3 wormholes whose
