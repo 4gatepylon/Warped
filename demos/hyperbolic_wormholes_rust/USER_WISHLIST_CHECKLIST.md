@@ -11,46 +11,29 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
-  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
-  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere.
-  Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch `claude/time-dilation`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-time-dilation` on
-    `leah`'s Mac, branch `claude/time-dilation` (pushed to `origin` once it has commits). State, 2026-11-08: started.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
-  and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
-  1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
-     lander and its pad at the blue spawn, 3.5 m tall.
-  2. "Desert Planet Bunker Garage Thing" by eKross (`ebe3177a1c7947b98328d8cab6aa8600`) replaces the red spawn
-     hangar, 6 m tall.
-  3. "WW2 Field Bunker" by goldenblack4 (`6ea5cebdaa82455aa3aad26baa6e0375`) replaces the two derelict habitat
-     modules in the middle, 3.5 m tall.
-  4. "Sci-Fi Beacon/Way Point Marker Free Model" by AMMediaGames (`a1d91ebb3e2d41bba31c02b11423d97f`) replaces the
-     core and pad of both team pylons: 4 m tall on bare ground, the 5 consoles stay in a ring around it, and each
-     beacon shoots a team-coloured beam 400 m straight up that dims as consoles are switched off.
-  5. "Hesco Barrier PBR" by polbrainstorm (`ab21217481094e9a84f989e71fd56a59`) replaces the two red barriers in the
-     middle: each is a 16 m row of 1.4 m Hesco blocks, keeping the 3 m gap in the middle.
-
-  The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
-  commit the models with textures downscaled (about 20 MB).
-  Claimed by Devin (session Devin Desktop 2026-11-07), branch `devin/models-prepare`, 2026-11-07.
-- [~] **W-106 Teal robot player model.** "Replace the player model with that [Teal V.2] and rig it with an animation":
-  the Sketchfab model "Teal V.2" by Lagst (`d6a54ff9468c451bbdbd879afa03f20a`, Sketchfab Standard) replaces the
-  1 × 4 voxel column drawn for every player's body (the others', and your own in the third-person view, W-61
-  (third-person view)). The user chose: idle, walk, run, jump and death clips, keyframed in Blender on the model's own
-  rig; lasers keep hitting the current box, not the triangles; the model is ray-traced with W-94 (Sketchfab models for
-  the voxel assets)'s triangle renderer. Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch
-  `claude/teal-player`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-teal` on
-    `leah`'s Mac, branch `claude/teal-player` (not pushed yet), to be stacked on W-94 (Sketchfab models for the voxel
-    assets)'s branch once that is pushed. State, 2026-11-08: started; the clips are made first.
-
 ## Open
 
+- [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
+  on W-68 (reality bend), which adds the pylons and the black hole. The user's later requests, 2026-11-08: "Make the
+  lasers coming out of the pylons go higher into the sky", filed as W-109 (taller pylon beams), then "is it possible
+  for you to make the beams from the pylons go up and arc through the sky to the black hole in the center"; the user
+  chose a high arch that replaces the straight beams, so W-109 (taller pylon beams) is folded into this item. Shelved
+  by the user, 2026-11-08: the arches (80 m, the user's pick in the game) are on branch `claude/taller-beacon-beams`
+  (#361, not merged), but views of the black hole render about 1.5 to 2.5 times slower than without them.
+- [ ] **W-113 A black hole for every pylon.** "Instead of making the black hole bigger, BOTH make it bigger AND also
+  add another black hole for every pylon solved." Builds on W-107 (time dilation), where each console turned off grows
+  the black hole at the centre.
+- [ ] **W-114 Fly around black holes.** "You can fly around black holes after the first pylon console deactivation
+  (only the first)". Builds on W-107 (time dilation)'s black hole and on the pylons' consoles.
+- [ ] **W-115 Pylons per map.** "Update gameplay to say that there are 3 pylons etc., but say that per-map the effect
+  of deactivating a pylon varies. For all other maps also have 2 pylons (so not 4 consoles and one pylon, 2 pylons;
+  and for the last map 3 pylons instead of 1 pylon with 5 consoles)." The user chose, 2026-11-08: one console per
+  pylon on every level; per team, 3 pylons on Dust and Lunar Surface and 2 on Snow Planet, City Sphere and Dark
+  Forest. The design doc says so in its own PR; this item is building it in the game.
 - [ ] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Found in #319: not vsync
   tearing (the window presents at vsync, one frame in flight) but bands and strips on far ground under the reality
   bend, from `BEND_SAG_PIXELS` = 0.5 in `render_voxel.metal`; 0.1 px removes them at 13% more GPU time (34% on the
@@ -101,15 +84,46 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-- [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
-  on W-68 (reality bend), which adds the pylons and the black hole.
 
 ## Pending user review
 
+- [?] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
+  are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
+  Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched). #331.
 Merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`), waiting for the user to test and
 confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
+  and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
+  1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
+     lander and its pad at the blue spawn, 3.5 m tall.
+  2. "Desert Planet Bunker Garage Thing" by eKross (`ebe3177a1c7947b98328d8cab6aa8600`) replaces the red spawn
+     hangar, 6 m tall.
+  3. "WW2 Field Bunker" by goldenblack4 (`6ea5cebdaa82455aa3aad26baa6e0375`) replaces the two derelict habitat
+     modules in the middle, 3.5 m tall.
+  4. "Sci-Fi Beacon/Way Point Marker Free Model" by AMMediaGames (`a1d91ebb3e2d41bba31c02b11423d97f`) replaces the
+     core and pad of both team pylons: 4 m tall on bare ground, the 5 consoles stay in a ring around it, and each
+     beacon shoots a team-coloured beam 400 m straight up that dims as consoles are switched off.
+  5. "Hesco Barrier PBR" by polbrainstorm (`ab21217481094e9a84f989e71fd56a59`) replaces the two red barriers in the
+     middle: each is a 16 m row of 1.4 m Hesco blocks, keeping the 3 m gap in the middle.
+
+  The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
+  commit the models with textures downscaled (about 20 MB).
+  #333 (Devin's commits, merged by Claude Code together with W-106 (Teal robot player model) at the user's request
+  after Devin stopped, 2026-11-08; each team's three beacons are 12 m tall, one console each, beaming while it is on).
+- [?] **W-106 Teal robot player model.** "Replace the player model with that [Teal V.2] and rig it with an animation":
+  the Sketchfab model "Teal V.2" by Lagst (`d6a54ff9468c451bbdbd879afa03f20a`, Sketchfab Standard) replaces the
+  cylinder and head drawn for every player's body (the others', and your own in the third-person view, W-61
+  (third-person view)). The user chose: idle, walk, run, jump and death clips, keyframed in Blender on the model's own
+  rig; lasers keep hitting the current box, not the triangles; the model is ray-traced with W-94 (Sketchfab models for
+  the voxel assets)'s triangle renderer. #333.
+- [?] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
+  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
+  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere. After
+  playing: "make the time dilation more intense all around, and then make the effect also be that when the black hole
+  gets bigger it's the black part grows a little but mostly the distortion area grows"; the user said "this looks
+  good" (D108). #329.
 - [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
   reality bending version). #316.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
@@ -128,7 +142,7 @@ are here too, since the user hadn't confirmed them.
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
   pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
   console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
-  down. #298, #299, #300, #301.
+  down. #298, #299, #300, #301. The warping into a sphere was removed by W-107 (time dilation), #329.
 - [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). After seeing 2x speckle far from the map's middle, the user chose 1.5x
   as the default: "1.5x curvature is fine". #285.
@@ -174,6 +188,25 @@ are here too, since the user hadn't confirmed them.
 
 Confirmed by the user after testing.
 
+- [x] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
+  get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
+  second touches the ground; shooting a ball before then crashes the game. The user, 2026-11-08: "you should be
+  able to shoot your own purple ball and have it do nothing", "if you shoot enemy purple ball its destroyed" (one
+  hit, for a ball that is down), "document that in game mechanics for lunar base map". The crash is fixed by
+  #362 (Leah, 2026-11-08); branch `devin/wormhole-throw-fixes`, 2026-11-08,
+  makes one hit destroy an enemy's lone mouth and documents both. Confirmed by the user, 2026-11-08: "great it
+  seems to work".
+- [x] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
+  but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
+  nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
+  again and moves it. The user, 2026-11-08: "first click throws purple wormhole, second one throws green (causing
+  them to connect and transform into real wormholes) and third doesnt do anything". Fixed on branch
+  `devin/wormhole-throw-fixes`, 2026-11-08: once both mouths
+  are down `Q` does nothing until death or destruction clears them; `DESIGN.md` updated to match. Confirmed by the user, 2026-11-08: "great it seems to
+  work".
+- [x] **W-110 Team-coloured robots.** "is it possible for you to recolor the teal robot? to be other colors than
+  teal?", then "yep team colors!": the players' body of W-106 (Teal robot player model) in each team's colour, blue
+  or red, instead of teal; corpses and your own body in third person too. #344. Confirmed by the user, 2026-11-08: "looks good merge it".
 - [x] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly. The user asked for the loading screen "in the same style as the progress
   bar while disabling a pylon". Loading screen: #292, #293; connected: the lobby says CONNECTING, then CONNECTED,

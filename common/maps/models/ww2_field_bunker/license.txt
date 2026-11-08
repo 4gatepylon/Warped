@@ -1,0 +1,11 @@
+Model Information:
+* title:	WW2 Field Bunker
+* source:	https://sketchfab.com/3d-models/ww2-field-bunker-6ea5cebdaa82455aa3aad26baa6e0375
+* author:	Golden (https://sketchfab.com/goldenblack4)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "WW2 Field Bunker" (https://sketchfab.com/3d-models/ww2-field-bunker-6ea5cebdaa82455aa3aad26baa6e0375) by Golden (https://sketchfab.com/goldenblack4) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

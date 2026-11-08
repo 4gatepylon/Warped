@@ -316,18 +316,22 @@ impl ThrownWormholes {
         .collect()
     }
 
-    /// `is_flying` says whether a throw is in the air (a new one must wait for it).
+    /// `can_throw` says whether this player may throw a mouth: no throw is in the air and not both
+    /// mouths are down (a linked pair stays until death or destruction clears it).
     ///
-    /// Example: `if !thrown.is_flying() { thrown.throw(flight, now_s); }`
-    pub fn is_flying(&self) -> bool {
-        self.flight.is_some()
+    /// Example: `if thrown.can_throw() { thrown.throw(flight, now_s); }`
+    pub fn can_throw(&self) -> bool {
+        self.flight.is_none() && self.placed.get_pair().is_none()
     }
 
     /// `throw` puts `flight` in the air from `now_s`.
     ///
     /// Example: `thrown.throw(fly_throw(camera, thrown.get_next_color(), &settings, r, find_hit), now_s);`
     pub fn throw(&mut self, flight: Flight, now_s: f64) {
-        assert!(!self.is_flying(), "throw: a throw is already in the air");
+        assert!(
+            self.can_throw(),
+            "throw: a throw is in the air or both mouths are down"
+        );
         self.flight = Some((flight, now_s));
     }
 
@@ -389,7 +393,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Mouth place | round trip through its frame; facing back the way it flew | `a_place_survives_its_frame`, `a_landed_mouth_faces_back_along_its_flight` |
     //! | Throw | lands on the ground ahead; hits a wall and drops to the floor below it; flies off with nothing to hit (never lands) | `a_throw_lands_ahead_on_the_ground`, `a_throw_at_a_wall_drops_below_it`, `a_throw_that_never_lands_fizzles` |
-    //! | Colours | purple then green then purple; a refused place keeps the colour; death clears both | `throws_alternate_purple_and_green`, `a_refused_place_fizzles`, `clearing_starts_over_with_purple` |
+    //! | Colours | purple then green, then no third throw; a refused place keeps the colour; death clears both | `throws_go_purple_then_green_then_stop`, `a_refused_place_fizzles`, `clearing_starts_over_with_purple` |
     //! | What others see | none down (nothing kept), a throw in the air with one mouth down (two markers, that mouth kept), both down (no markers) | `markers_show_throws_and_unlinked_mouths` |
 
     use super::*;
@@ -504,10 +508,10 @@ mod tests {
     }
 
     #[test]
-    fn throws_alternate_purple_and_green() {
+    fn throws_go_purple_then_green_then_stop() {
         let mut thrown: ThrownWormholes = ThrownWormholes::New();
         let mut colors: Vec<WormholeColor> = Vec::new();
-        for _ in 0..3 {
+        while thrown.can_throw() {
             let color: WormholeColor = thrown.get_next_color();
             colors.push(color);
             let settings: WormholeSettings = ServerSettings::Builtin().wormholes;
@@ -515,6 +519,7 @@ mod tests {
                 fly_throw(get_eye(0.0), color, &settings, R_M, find_ground_hit),
                 0.0,
             );
+            assert!(!thrown.can_throw());
             assert!(thrown.update(0.0, EYE_M, R_M, |_| true).is_none());
             assert!(thrown.placed.flying.is_some());
             thrown
@@ -522,7 +527,7 @@ mod tests {
                 .expect("it lands");
         }
         use WormholeColor::{Green, Purple};
-        assert_eq!(colors, [Purple, Green, Purple]);
+        assert_eq!(colors, [Purple, Green]);
         assert!(thrown.placed.get_pair().is_some() && thrown.placed.flying.is_none());
     }
 
@@ -577,6 +582,7 @@ mod tests {
             .expect("it lands");
         assert!(thrown.placed.get_unlinked().is_some());
         thrown.clear();
+        assert!(thrown.can_throw());
         assert_eq!(thrown.get_next_color(), WormholeColor::Purple);
         assert_eq!(thrown.placed, PlayerWormholes::default());
     }

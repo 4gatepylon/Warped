@@ -1,0 +1,11 @@
+Model Information:
+* title:	'Stekelvarken S3' Kazemat (Dutch WWII bunker)
+* source:	https://sketchfab.com/3d-models/stekelvarken-s3-kazemat-dutch-wwii-bunker-f409a77deaaf4e3888d47f76ec48dbdd
+* author:	Sjoerd van Riel (https://sketchfab.com/sjoerdnijkerk)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "'Stekelvarken S3' Kazemat (Dutch WWII bunker)" (https://sketchfab.com/3d-models/stekelvarken-s3-kazemat-dutch-wwii-bunker-f409a77deaaf4e3888d47f76ec48dbdd) by Sjoerd van Riel (https://sketchfab.com/sjoerdnijkerk) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

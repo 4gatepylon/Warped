@@ -75,10 +75,7 @@ const HELP_GROUPS: [(&[Action], &str); 14] = [
     ),
     (&[Action::Sprint], "run"),
     (&[Action::Jump], "jump"),
-    (
-        &[Action::Crouch],
-        "crouch (shoot standing still or crouched)",
-    ),
+    (&[Action::Crouch], "crouch (shoot while walking crouched)"),
     (&[Action::Shoot], "shoot"),
     (&[Action::Aim], "aim"),
     (&[Action::Flashlight], "flashlight"),
