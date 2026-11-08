@@ -43,18 +43,19 @@ use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
 use crate::render_city::{
-    BEACON_SLOT_COUNT, CityFrame, CityScene, build_scene, push_beam, push_core_halo, push_mesh,
+    BEACON_SLOT_COUNT, BEAM_WIDTH_M, CityFrame, CityScene, build_scene, push_beam, push_core_halo,
+    push_mesh,
 };
 use crate::render_metal::{self, FrameData};
 use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
 use crate::shot_noise;
+use crate::third_person;
 use crate::thrown_wormholes::PlayerWormholes;
 use crate::viewmodel;
 use crate::voxel_world::{MUZZLE_M, SPAWN_TURN_RAD};
 
 const MAP_NAME: &str = "city_sphere";
 const TAN_HALF_FOV: f32 = 0.62;
-const BEAM_WIDTH_M: f64 = 0.06;
 const AVATAR_HEIGHT_M: f64 = 1.8;
 const TEAM_COLORS: [[f32; 4]; 2] = [[0.3, 0.55, 1.0, 1.0], [1.0, 0.3, 0.25, 1.0]];
 const OVERHEAT_PITCH_RAD: f64 = 1.2;
@@ -782,9 +783,9 @@ fn make_route(world: &CityWorld) -> Vec<Step> {
     steps
 }
 
-/// `Beam` is a shot's corners, its team, its brightness (0 to 1) for one frame and the share of its
-/// pixels that speckle (0 for none).
-type Beam = (Vec<DVec3>, u32, f64, f64);
+/// `Beam` is a shot's corners, its team, its brightness (0 to 1) for one frame, the share of its
+/// pixels that speckle (0 for none), and whether the rifle fired it (else the sniper).
+type Beam = (Vec<DVec3>, u32, f64, f64, bool);
 
 /// `RifleLog` records the rifle check on the route: shots from cold until the rifle overheated,
 /// the seconds it took to cool down, and for each player this player eliminated, the rifle's head
@@ -801,14 +802,15 @@ struct RifleLog {
 }
 
 /// `LiveShot` is a shot being drawn: its path, when it was fired, by which team, whether it is
-/// this window's own (drawn from the gun's muzzle), and the share of its beam's pixels that
-/// speckle.
+/// this window's own (drawn from the gun's muzzle), the share of its beam's pixels that speckle,
+/// and whether the rifle fired it.
 struct LiveShot {
     shot: Shot,
     start_s: f64,
     team: u32,
     is_own: bool,
     speckle_frac: f64,
+    is_rifle: bool,
 }
 
 /// `Motion` is what a remote player's robot is doing: where its feet were and how fast it goes.
@@ -889,7 +891,7 @@ fn make_frame(
     }
     let camera: DVec3 = eye.w_axis.truncate();
     let mut beam_vertices = Vec::new();
-    for (points, team, alpha, speckle_frac) in beams {
+    for (points, team, alpha, speckle_frac, is_rifle) in beams {
         let c: [f32; 3] = world.laser_colors[*team as usize % 2];
         for pair in points.windows(2) {
             push_beam(
@@ -898,8 +900,9 @@ fn make_frame(
                 pair[1],
                 camera,
                 BEAM_WIDTH_M,
-                [c[0], c[1], c[2], (*alpha * 1.4) as f32],
+                [c[0], c[1], c[2], *alpha as f32],
                 *speckle_frac as f32,
+                *is_rifle,
             );
         }
     }
@@ -921,6 +924,19 @@ fn make_frame(
         dynamic,
         beams: beam_vertices,
         beam_speckle: [0.0; 4],
+        flashlight: [[0.0; 4]; 3],
+    }
+}
+
+/// `get_clip` gives the robot animation for a body moving at `speed_m_per_s`: running, walking or
+/// standing.
+fn get_clip(speed_m_per_s: f64) -> AvatarClip {
+    if speed_m_per_s > RUN_M_PER_S {
+        AvatarClip::Run
+    } else if speed_m_per_s > WALK_M_PER_S {
+        AvatarClip::Walk
+    } else {
+        AvatarClip::Idle
     }
 }
 
@@ -989,6 +1005,8 @@ struct CitySession {
     energy_pulses: hud_bars::BarPulses,
     shot_noise: shot_noise::ShotNoise,
     beam_speckle_frac: f64,
+    is_flashlight_on: bool,
+    view_switch: third_person::ViewSwitch,
     hit_effect_frac: f64,
     last_health_frac: f64,
     slowed_s: f64,
@@ -1097,6 +1115,8 @@ impl CitySession {
             energy_pulses: hud_bars::BarPulses::New(1.0),
             shot_noise: shot_noise::ShotNoise::FromClock(),
             beam_speckle_frac: 0.0,
+            is_flashlight_on: false,
+            view_switch: third_person::ViewSwitch::FirstPerson(),
             hit_effect_frac: 0.0,
             last_health_frac: 1.0,
             slowed_s: 0.0,
@@ -1140,7 +1160,7 @@ impl CitySession {
     fn find_console(&self, index: Option<u8>) -> Option<u8> {
         find_aimed_console(
             &self.world,
-            self.player.get_eye_frame(),
+            self.get_shot_eye(),
             self.get_team(),
             &self.client.game,
             self.settings.consoles.reach_m,
@@ -1171,7 +1191,7 @@ impl CitySession {
 
     /// `fire` shoots from the eye along the crosshair, telling the server about a hit.
     fn fire(&mut self) -> Result<()> {
-        let eye: DMat4 = self.player.get_eye_frame();
+        let eye: DMat4 = self.get_shot_eye();
         let team: u32 = self.get_team();
         let targets: Vec<Target> = self.get_targets(Some(team));
         let shot: Shot = self.world.trace_shot(
@@ -1214,6 +1234,7 @@ impl CitySession {
             team,
             is_own: true,
             speckle_frac: self.beam_speckle_frac,
+            is_rifle: self.gun == Gun::Rifle,
         });
         match self.gun {
             Gun::Laser => {
@@ -1415,6 +1436,70 @@ impl CitySession {
             (pose_target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
     }
 
+    /// `place_camera` puts the camera for the eye frame `eye`, as Lunar Surface's
+    /// `third_person::place_camera` does: out along its boom by the view switch (`V`, eased, and
+    /// back to the eye while aiming), up `PIVOT_UP_M` toward the centre to a pivot over the head,
+    /// then back `BOOM_BACK_M` along the pivot's own back axis, each leg stopping `WALL_GAP_M` short
+    /// of the street, the glass or a box. It gives the camera's frame and whether this player's own
+    /// body shows from there (the pivot cleared `MIN_PIVOT_UP_M`) rather than the gun.
+    fn place_camera(&self, eye: DMat4) -> (DMat4, bool) {
+        let boom_frac: f64 = self.view_switch.get_boom_frac(self.aim_frac);
+        let along_m: f64 = boom_frac * (third_person::PIVOT_UP_M + third_person::BOOM_BACK_M);
+        if along_m <= 0.0 {
+            return (eye, false);
+        }
+        let clear_m = |from: DVec3, direction: DVec3, wanted_m: f64| -> f64 {
+            let shot: Shot = self.world.trace_shot(
+                from,
+                direction,
+                wanted_m + third_person::WALL_GAP_M,
+                0,
+                &[],
+                None,
+            );
+            let reach_m: f64 = (shot.points[1] - from).length();
+            (reach_m - third_person::WALL_GAP_M).clamp(0.0, wanted_m)
+        };
+        let at: DVec3 = eye.w_axis.truncate();
+        let up: DVec3 = self.player.get_up();
+        let up_m: f64 = clear_m(at, up, along_m.min(third_person::PIVOT_UP_M));
+        let pivot: DVec3 = at + up * up_m;
+        let back: DVec3 = eye.z_axis.truncate();
+        let back_m: f64 = clear_m(pivot, back, (along_m - third_person::PIVOT_UP_M).max(0.0));
+        let mut camera: DMat4 = eye;
+        camera.w_axis = (pivot + back * back_m).extend(1.0);
+        (camera, up_m >= third_person::MIN_PIVOT_UP_M)
+    }
+
+    /// `get_shot_eye` gives the frame shots and `E` leave from, as Lunar Surface's
+    /// `third_person::aim_at_crosshair` does: the eye, turned in third person toward the point the
+    /// camera's crosshair meets, so a shot goes where the crosshair shows.
+    fn get_shot_eye(&self) -> DMat4 {
+        let eye: DMat4 = self.player.get_eye_frame();
+        let (camera, _) = self.place_camera(eye);
+        if camera == eye {
+            return eye;
+        }
+        let from: DVec3 = camera.w_axis.truncate();
+        let crosshair: Shot = self.world.trace_shot(
+            from,
+            -camera.z_axis.truncate(),
+            self.settings.glass.range_m,
+            0,
+            &[],
+            None,
+        );
+        let at: DVec3 = eye.w_axis.truncate();
+        let target: DVec3 = *crosshair.points.last().expect("a shot has an end");
+        make_eye(at, target - at, self.player.get_up())
+    }
+
+    /// `is_own_body_shown` says whether the camera is out far enough in third person to show this
+    /// player's own robot instead of the gun in hand.
+    fn is_own_body_shown(&self) -> bool {
+        self.is_spawned && self.place_camera(self.player.get_eye_frame()).1
+    }
+
     /// `get_bob_m` gives the head bob, as on Lunar Surface: the eye dips at each footstep, deeper
     /// when sprinting, by the player settings' `view.head_bob`.
     fn get_bob_m(&self) -> f64 {
@@ -1566,6 +1651,7 @@ impl CitySession {
                     team: p.team,
                     is_own: false,
                     speckle_frac: p.beam_speckle_frac,
+                    is_rifle: p.is_rifle,
                 });
             }
             let motion: &mut Motion = self.remote_motion.entry(p.id).or_insert(Motion {
@@ -1585,7 +1671,7 @@ impl CitySession {
         if self.is_spawned {
             let mut eye: DMat4 = self.player.get_eye_frame();
             eye.w_axis -= (self.player.get_up() * self.get_bob_m()).extend(0.0);
-            return eye;
+            return self.place_camera(eye).0;
         }
         let angle: f64 = self.now_s() * LOBBY_ORBIT_RAD_PER_S;
         let radius_m: f64 =
@@ -1600,6 +1686,15 @@ impl CitySession {
     fn pack(&self, render_px: (usize, usize)) -> CityFrame {
         let eye: DMat4 = self.get_eye();
         let now_s: f64 = self.now_s();
+        let own_speed_m_per_s: f64 = (self.player.velocity
+            - self.player.get_up() * self.player.velocity.dot(self.player.get_up()))
+        .length();
+        let own: Option<Robot> = self.is_own_body_shown().then(|| Robot {
+            feet: self.player.feet,
+            forward: -self.player.body.z_axis,
+            team: self.get_team(),
+            clip: get_clip(own_speed_m_per_s),
+        });
         let robots: Vec<Robot> = self
             .client
             .players
@@ -1610,23 +1705,22 @@ impl CitySession {
                     feet: p.frame.w_axis.truncate(),
                     speed_m_per_s: 0.0,
                 });
-                let clip: AvatarClip = if motion.speed_m_per_s > RUN_M_PER_S {
-                    AvatarClip::Run
-                } else if motion.speed_m_per_s > WALK_M_PER_S {
-                    AvatarClip::Walk
-                } else {
-                    AvatarClip::Idle
-                };
                 Robot {
                     feet: motion.feet,
                     forward: -p.frame.z_axis.truncate(),
                     team: p.team,
-                    clip,
+                    clip: get_clip(motion.speed_m_per_s),
                 }
             })
+            .chain(own)
             .collect();
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
-        let muzzle: DVec3 = (eye * MUZZLE_M.extend(1.0)).truncate();
+        let gun_eye: DMat4 = if self.is_own_body_shown() {
+            self.player.get_eye_frame()
+        } else {
+            eye
+        };
+        let muzzle: DVec3 = (gun_eye * MUZZLE_M.extend(1.0)).truncate();
         let beams: Vec<Beam> = self
             .shots
             .iter()
@@ -1640,6 +1734,7 @@ impl CitySession {
                     s.team,
                     (1.0 - (now_s - s.start_s) / life_s).clamp(0.0, 1.0),
                     s.speckle_frac,
+                    s.is_rifle,
                 )
             })
             .collect();
@@ -1664,6 +1759,25 @@ impl CitySession {
         if self.is_spawned && self.brain.is_none() {
             frame.zoom_in(self.get_zoom());
         }
+        let flashlight = &self.settings.flashlight;
+        let shot_eye: DMat4 = self.player.get_eye_frame();
+        frame.flashlight = [
+            shot_eye.w_axis.truncate().as_vec3().extend(1.0).to_array(),
+            (-shot_eye.z_axis.truncate())
+                .as_vec3()
+                .extend(0.0)
+                .to_array(),
+            [
+                flashlight.cone_half_angle_rad.cos() as f32,
+                (flashlight.cone_half_angle_rad + flashlight.soft_edge_rad).cos() as f32,
+                flashlight.range_m as f32,
+                if self.is_flashlight_on && self.is_spawned {
+                    flashlight.brightness_frac as f32
+                } else {
+                    0.0
+                },
+            ],
+        ];
         let kinds = &self.settings.beam_speckle;
         frame.beam_speckle = [
             ((now_s * MS_PER_S) as u64 % BEAM_SEED_PERIOD_MS) as f32,
@@ -1845,6 +1959,13 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 })
                 .collect()
         };
+        session.is_flashlight_on = session.is_captured
+            && session.is_spawned
+            && session.menu.is_none()
+            && held.contains(&Action::Flashlight);
+        session
+            .view_switch
+            .update((session.now_s() - session.last_s).clamp(0.0, MAX_DT_S));
         session.is_aiming = session.is_captured
             && session.is_spawned
             && !session.exit_prompt.is_shown()
@@ -1915,7 +2036,7 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 map_size_px: MINIMAP_MAP_PX,
                 minimap: make_minimap(&session, window_px),
             });
-        let wand = session.is_spawned.then(|| {
+        let wand = (session.is_spawned && !session.is_own_body_shown()).then(|| {
             let recoil_frac: f64 = session.recoil_left_s / RECOIL_S;
             (
                 make_wand(
@@ -2045,6 +2166,8 @@ fn handle_event(
         session.reload_left_s = session
             .reload_left_s
             .min(1.0 / session.settings.rifle.shots_per_s);
+    } else if is(Action::SwitchView) {
+        session.view_switch.toggle();
     } else if is(Action::LowerResolution) {
         session.render_scale = (session.render_scale - RENDER_SCALE_STEP).max(MIN_RENDER_SCALE);
     } else if is(Action::RaiseResolution) {
@@ -2695,7 +2818,7 @@ fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
             &[],
             None,
         );
-        beams.push((shot.points, (k % 2) as u32, 1.0, 0.0));
+        beams.push((shot.points, (k % 2) as u32, 1.0, 0.0, false));
     }
     (robots, beams)
 }
@@ -2836,6 +2959,7 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
             team,
             1.0,
             0.0,
+            false,
         )
     };
     let blue_street: DVec3 = world

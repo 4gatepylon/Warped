@@ -37,6 +37,9 @@ type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
 
 const SHADER_SOURCE: &str = include_str!("render_city.metal");
 pub const MAX_HOLE_COUNT: usize = 8;
+/// `BEAM_WIDTH_M` is a beam quad's width, wide enough for Lunar Surface's haze around the beam.
+pub const BEAM_WIDTH_M: f64 = 0.16;
+const RIFLE_BEAM_MARK: f64 = 0.25;
 const TEXTURE_SIDE_PX: u32 = 1024;
 pub const BEACON_SLOT_COUNT: usize = 8;
 const ROUND_RADIUS_M: f64 = 0.35;
@@ -121,6 +124,9 @@ struct CityUniforms {
     beacons: [[f32; 4]; BEACON_SLOT_COUNT],
     hazard: [f32; 4],
     beam_speckle: [f32; 4],
+    flashlight_position: [f32; 4],
+    flashlight_direction: [f32; 4],
+    flashlight: [f32; 4],
 }
 
 /// `CityScene` is the geometry that never changes: opaque triangles and the glass's, with an id
@@ -151,6 +157,10 @@ pub struct CityFrame {
     /// `beam_speckle` is the beams' speckle this frame, as on Lunar Surface: a seed that changes
     /// every frame, then the shares of speckled pixels painted black and turned white.
     pub beam_speckle: [f32; 4],
+    /// `flashlight` is the player's flashlight, as on Lunar Surface: its position, its direction,
+    /// then the cosines of its cone's inner and outer edges, the distance at which it falls to half
+    /// and its brightness (0 when off).
+    pub flashlight: [[f32; 4]; 3],
 }
 
 impl CityFrame {
@@ -892,9 +902,12 @@ pub fn get_beacon() -> &'static MeshModel {
 }
 
 /// `push_beam` adds a laser beam from `a` to `b`, `width_m` wide, facing `camera_m`, with colour
-/// and brightness (alpha).
+/// and brightness (alpha), the share of its pixels that speckle, and the rifle's look if
+/// `is_rifle` (else the sniper's); the beam shader reads the share from the vertices' layer and the
+/// look from their normal (`RIFLE_BEAM_MARK`).
 ///
-/// Example: `push_beam(&mut beams, muzzle, hit, eye, 0.05, [1.0, 0.3, 0.2, 1.0]);`
+/// Example: `push_beam(&mut beams, muzzle, hit, eye, BEAM_WIDTH_M, [1.0, 0.3, 0.2, 1.0], 0.2, false);`
+#[allow(clippy::too_many_arguments)]
 pub fn push_beam(
     out: &mut Vec<CityVertex>,
     a: DVec3,
@@ -903,6 +916,7 @@ pub fn push_beam(
     width_m: f64,
     color: [f32; 4],
     speckle_frac: f32,
+    is_rifle: bool,
 ) {
     let along: DVec3 = b - a;
     let side: DVec3 = along.cross(camera_m - a).normalize_or_zero() * (width_m / 2.0);
@@ -913,7 +927,11 @@ pub fn push_beam(
         out,
         [a - side, a + side, b + side, b - side],
         [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-        DVec3::ZERO,
+        if is_rifle {
+            DVec3::Y * RIFLE_BEAM_MARK
+        } else {
+            DVec3::ZERO
+        },
         color,
         speckle_frac,
     );
@@ -1136,6 +1154,9 @@ impl CityGpu {
             beacons: frame.beacons,
             hazard: [frame.scene.lift_hole_count as f32, 0.0, 0.0, 0.0],
             beam_speckle: frame.beam_speckle,
+            flashlight_position: frame.flashlight[0],
+            flashlight_direction: frame.flashlight[1],
+            flashlight: frame.flashlight[2],
         };
         let dynamic: Buffer = make_buffer(device, &frame.dynamic)?;
         let beams: Buffer = make_buffer(device, &frame.beams)?;
