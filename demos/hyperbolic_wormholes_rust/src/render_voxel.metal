@@ -1279,6 +1279,71 @@ static float3 get_sky_direction(thread const Scene &scene, float4 x, float4 v) {
     return normalize(w.xyz - w.w / (1.0 + cam.w) * cam.xyz);
 }
 
+constant int TEMP_MW_OPTION = __TEMP_MW_OPTION__;
+constant float TEMP_MW_CORE_RAD = 0.785;
+
+static float temp_fbm(float3 p, int octaves) {
+    float sum = 0.0, amplitude = 0.5, total = 0.0;
+    for (int i = 0; i < octaves; i++) { sum += amplitude * sample_noise_3d(p); total += amplitude; p *= FBM_LACUNARITY; amplitude *= 0.5; }
+    return sum / total;
+}
+
+static float3 temp_sample_milky_way(thread const Scene &scene, float3 d, int option) {
+    float disk_peak, bulge_peak, width, bulge_lat, bulge_lon, cloud_amount, grain_amount, rift_depth, dark_depth, star_boost, micro, nebula, edge_warp, anticentre;
+    float3 disk_color, bulge_color;
+    int octaves;
+    if (option == 1) {
+        disk_peak = 0.08; bulge_peak = 0.12; width = 0.16; bulge_lat = 0.18; bulge_lon = 0.45; cloud_amount = 0.5; grain_amount = 0.2; rift_depth = 0.8; dark_depth = 0.4;
+        star_boost = 0.0; micro = 0.0; nebula = 0.0; edge_warp = 0.03; octaves = 4; anticentre = 0.7;
+        disk_color = float3(0.9, 0.95, 1.0); bulge_color = float3(1.0, 0.93, 0.82);
+    } else if (option == 2 || option == 4) {
+        disk_peak = 0.13; bulge_peak = 0.42; width = 0.17; bulge_lat = 0.2; bulge_lon = 0.48; cloud_amount = 0.75; grain_amount = 0.35; rift_depth = 1.8; dark_depth = 0.8;
+        star_boost = 2.0; micro = 0.6; nebula = 0.0; edge_warp = 0.045; octaves = 5; anticentre = 0.55;
+        disk_color = float3(0.84, 0.9, 1.0); bulge_color = float3(1.0, 0.82, 0.6);
+    } else {
+        disk_peak = 0.21; bulge_peak = 0.75; width = 0.18; bulge_lat = 0.21; bulge_lon = 0.5; cloud_amount = 0.9; grain_amount = 0.5; rift_depth = 2.6; dark_depth = 1.3;
+        star_boost = 4.0; micro = 1.0; nebula = 0.5; edge_warp = 0.055; octaves = 6; anticentre = 0.5;
+        disk_color = float3(0.8, 0.88, 1.0); bulge_color = float3(1.0, 0.8, 0.56);
+    }
+    float3 n = option == 4 ? normalize(float3(0.97, 0.2, 0.12)) : normalize(MILKY_WAY_NORMAL);
+    float3 h0 = normalize(cross(float3(0.0, 1.0, 0.0), n));
+    float core_rad = option == 4 ? 0.52 : TEMP_MW_CORE_RAD;
+    float3 c = cos(core_rad) * h0 + sin(core_rad) * cross(n, h0);
+    float3 e = cross(n, c);
+    float3 g = float3(dot(d, c), dot(d, e), dot(d, n));
+    float lon = atan2(g.y, g.x);
+    float3 warp = float3(sample_noise_3d(g * 2.3), sample_noise_3d(g * 2.3 + 5.2), sample_noise_3d(g * 2.3 + 9.7)) - 0.5;
+    float lat = g.z + edge_warp * warp.x * 2.0;
+    float toward_core = 0.5 + 0.5 * cos(lon);
+    float bulge_shape = exp(-(lon * lon) / (bulge_lon * bulge_lon));
+    float w = width * (1.0 + 0.3 * bulge_shape);
+    float band = exp(-(lat * lat) / (w * w));
+    float bulge = bulge_shape * exp(-(lat * lat) / (bulge_lat * bulge_lat));
+    float3 gs = g * float3(1.0, 1.0, 1.7) + warp * 0.35;
+    float clouds = saturate((temp_fbm(gs * 3.0, 3) - 0.5) * 2.5 + 0.5);
+    float grain = saturate((temp_fbm(gs * 16.0 + 4.4, octaves - 2) - 0.5) * 2.5 + 0.5);
+    float gain = mix(1.0, 0.55 + 0.9 * clouds, cloud_amount) * mix(1.0, 0.6 + 0.8 * grain, grain_amount);
+    float lane_lat = lat - 0.03 * (sample_noise_3d(g * 3.1 + 2.0) - 0.5) * 2.0;
+    float lane_band = exp(-(lane_lat * lane_lat) / (0.2 * w * w));
+    float rift_noise = saturate((temp_fbm(gs * 2.6 + 3.1, 3) - 0.5) * 3.0 + 0.5);
+    float rift = lane_band * smoothstep(0.35, 0.8, rift_noise) * (1.0 - 0.45 * bulge_shape);
+    float dark_noise = saturate((temp_fbm(gs * 9.0 + warp * 1.5 + 7.7, octaves) - 0.5) * 3.0 + 0.5);
+    float dark = band * smoothstep(0.5, 0.92, dark_noise) * (0.55 + 0.45 * grain);
+    float3 transmit = exp(-(rift_depth * rift + dark_depth * dark) * float3(0.9, 1.0, 1.12));
+    float3 intensity = (disk_color * disk_peak * band * mix(anticentre, 1.0, toward_core * toward_core) * gain + bulge_color * bulge_peak * bulge * mix(1.0, 0.75 + 0.5 * clouds, cloud_amount) * mix(1.0, 0.8 + 0.4 * grain, grain_amount)) * transmit;
+    if (nebula > 0.0) {
+        float spots = smoothstep(0.72, 0.9, saturate((temp_fbm(g * 20.0 + 21.0, 3) - 0.5) * 2.5 + 0.5));
+        intensity += float3(1.0, 0.32, 0.45) * nebula * disk_peak * band * spots * transmit;
+    }
+    float3 glow = 0.69 * pow(intensity, 0.46);
+    float star_mask = saturate(band + bulge) * dot(transmit, LUMA);
+    float coarse = sample_star_layer(scene, d, STAR_GRID_COARSE, STAR_DENSITY_COARSE * (1.0 + star_boost * star_mask));
+    float fine = sample_star_layer(scene, d, STAR_GRID_FINE, STAR_DENSITY_FINE * (1.0 + star_boost * star_mask));
+    float stars = coarse + FINE_STAR_BRIGHTNESS * fine;
+    if (micro > 0.0) stars += micro * 0.35 * sample_star_layer(scene, d, 420.0, 0.3 * star_mask);
+    return float3(stars) + glow;
+}
+
 /** @brief `sample_sky_bodies` gives the sky in direction d at the origin: stars, Milky Way, sun, planet. @par Example @code float3 c = sample_sky_bodies(scene, d); @endcode */
 static float3 sample_sky_bodies(thread const Scene &scene, float3 d) {
     constant VoxelUniforms &u = scene.u;
@@ -1297,9 +1362,14 @@ static float3 sample_sky_bodies(thread const Scene &scene, float3 d) {
         float3 color = surface * (max(lit, 0.0) * PLANET_SUNLIT + PLANET_NIGHT) + ATMOSPHERE_COLOR * pow(r2, LIMB_POWER) * max(lit + LIMB_WRAP, 0.0) * LIMB_GLOW;
         return color + sun;
     }
-    float3 color = float3(sample_star_layer(scene, d, STAR_GRID_COARSE, STAR_DENSITY_COARSE) + FINE_STAR_BRIGHTNESS * sample_star_layer(scene, d, STAR_GRID_FINE, STAR_DENSITY_FINE));
+    float3 color;
+    if (TEMP_MW_OPTION == 0) {
+    color = float3(sample_star_layer(scene, d, STAR_GRID_COARSE, STAR_DENSITY_COARSE) + FINE_STAR_BRIGHTNESS * sample_star_layer(scene, d, STAR_GRID_FINE, STAR_DENSITY_FINE));
     float band = exp(-pow(dot(d, normalize(MILKY_WAY_NORMAL)) / MILKY_WAY_WIDTH, 2.0));
     color += MILKY_WAY_COLOR * band * MILKY_WAY_BRIGHTNESS * sample_fbm_3d(d * MILKY_WAY_DETAIL);
+    } else {
+    color = temp_sample_milky_way(scene, d, TEMP_MW_OPTION);
+    }
     if (dot(d, planet) > 0.0 && r2 < HALO_RADIUS_SQ) {
         color += ATMOSPHERE_COLOR * HALO_GLOW * (1.0 - smoothstep(1.0, HALO_RADIUS_SQ, r2)) * max(dot(normalize(q.x * e1 + q.y * e2), sun_dir) + HALO_WRAP, 0.0);
     }
