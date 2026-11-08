@@ -101,6 +101,10 @@ is in [`AGENTS.md`](AGENTS.md).
   of the ground, just barely translucent, to mark out the real zones.
 - [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
   shadows on the hills.
+- [ ] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
+  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
+  cylinder, just make it a cylinder.
+- [ ] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side.
 
 ## Done
 
