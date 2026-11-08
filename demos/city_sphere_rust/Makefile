@@ -7,12 +7,13 @@
 #     make join-game SERVER=<auto|address> PORT=<n> MAP=<map> PLAYER_SETTINGS=<file>: open the window and join that game server.
 #     (SERVER_SETTINGS: a copy of server_settings.yaml with the numbers that shape play; the server sends them to every player.)
 #     (PLAYER_SETTINGS: a copy of player_settings.yaml with this player's own keys, mouse speed and view.)
-#     make run-bot SERVER=<address> PORT=<n> TEAM=<blue|red> BOT_S=<s> BOT_OBJECTIVE=<consoles>: a bot without a window joins the game.
-#     make play-route WIDTH_PX=<n> HEIGHT_PX=<n>: play the scripted route in the window (lift, reflected shots, both red consoles, blue wins) and print its frame times.
+#     make run-bot SERVER=<address> PORT=<n> TEAM=<blue|red> BOT_S=<s> BOT_OBJECTIVE=<consoles|target>: a bot without a window joins the game (target: stands still in front of blue's spawn for ROUTE=rifle).
+#     make play-route WIDTH_PX=<n> HEIGHT_PX=<n> ROUTE=<legs|rifle>: play the scripted route in the window (legs: lift, reflected shots, both red consoles, blue wins; rifle: overheat, cool, eliminate a BOT_OBJECTIVE=target bot by head and by body hits) and print its numbers.
 #     (GAME_PASSWORD_FILE, with serve-game and join-game: a file holding the game's password; only players who know it may join.)
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
+#     make photos WIDTH_PX=<n> HEIGHT_PX=<n>: render City Sphere's photogenic views once each into .artifacts/photos/.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
@@ -28,6 +29,7 @@ FRAME_COUNT ?= 10
 AUTOPILOT_WIDTH_PX ?= 640
 AUTOPILOT_HEIGHT_PX ?= 400
 PORT ?= 47810
+ROUTE ?= legs
 MAP ?= city-sphere
 TEAM ?=
 TEAM_FLAG := $(if $(TEAM),--team $(TEAM))
@@ -56,7 +58,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help play-game run-bot play-route serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help photos play-game run-bot play-route serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -88,7 +90,7 @@ run-bot:
 	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) --bot --exit-after-s $(BOT_S) $(TEAM_FLAG) $(BOT_OBJECTIVE_FLAG) $(GAME_PASSWORD_FLAG)
 
 play-route:
-	cargo run --release -- --map $(MAP) --play-route --port $(PORT) --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX)
+	cargo run --release -- --map $(MAP) --play-route --route $(ROUTE) --port $(PORT) --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX)
 
 serve-game:
 	cargo run --release -- --serve --port $(PORT) --map $(MAP) $(SERVER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
@@ -124,6 +126,9 @@ package-mac-app:
 	mv $(APP_ZIP).partial $(APP_ZIP)
 	@echo "App: $(APP)"
 	@echo "Zip: $(APP_ZIP)"
+
+photos:
+	cargo run --release -- --map $(MAP) --photos --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX)
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)

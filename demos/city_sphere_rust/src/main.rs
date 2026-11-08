@@ -239,13 +239,14 @@ enum Sampling {
 }
 
 /// `RouteKind` is which route `--play-route` plays: the house's scripted legs, a tour around each
-/// of its mouths from 5 blocks to just outside its throat and back, or (on a voxel map) a tour
-/// around each warp object.
+/// of its mouths from 5 blocks to just outside its throat and back, (on a voxel map) a tour
+/// around each warp object, or (on City Sphere) the rifle check.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum RouteKind {
     Legs,
     MouthTour,
     WarpTour,
+    Rifle,
 }
 
 /// `Arguments` is the command line.
@@ -271,6 +272,11 @@ struct Arguments {
     /// Render fixed views without a window, time them and save them under .artifacts/bench_views/.
     #[arg(long, conflicts_with = "autopilot")]
     bench_views: bool,
+    /// City Sphere: render photogenic views (the far side from near the core, the sphere from its
+    /// centre, hero shots with robots, pylons and shots) once each and save them under
+    /// .artifacts/photos/.
+    #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route"])]
+    photos: bool,
     /// Play a scripted route without a window and save frames and timings under .artifacts/autopilot/.
     #[arg(long)]
     autopilot: bool,
@@ -302,7 +308,9 @@ struct Arguments {
     play_route: bool,
     /// Which route --play-route plays: the scripted legs, or a tour circling every mouth from 5
     /// blocks to just outside its throat and back while the view swings around (both on the
-    /// house), or on a voxel map a tour circling each warp object the same way (`warp-tour`).
+    /// house), or on a voxel map a tour circling each warp object the same way (`warp-tour`), or
+    /// on City Sphere `rifle`: overheat the rifle, let it cool, then eliminate a `--bot-objective
+    /// target` bot with head hits and again with body hits.
     #[arg(long, value_enum, default_value_t = RouteKind::Legs)]
     route: RouteKind,
     /// Host a game on the local network: start a game server as its own process (as --serve,
@@ -556,6 +564,7 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
     let is_window_without_server: bool = arguments.join.is_none()
         && !arguments.serve
         && !arguments.bench_views
+        && !arguments.photos
         && !arguments.autopilot
         && !arguments.play_route
         && arguments.export_map.is_none();
@@ -2357,6 +2366,7 @@ impl Session {
                     .ok_or("--route warp-tour needs a voxel map")?
                     .world,
             ),
+            (true, RouteKind::Rifle) => return Err("--route rifle is only for --map city-sphere".into()),
         };
         let multiplayer: Option<Multiplayer> = if arguments.host || arguments.join.is_some() {
             let server: Option<Child> = if arguments.host {

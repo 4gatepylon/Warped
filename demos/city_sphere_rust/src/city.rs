@@ -14,7 +14,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use clap::ValueEnum;
-use glam::{DMat4, DVec3, Mat4};
+use glam::{DMat3, DMat4, DQuat, DVec3, Mat4};
 use objc2_core_foundation::CGSize;
 use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
@@ -22,12 +22,12 @@ use sdl3::event::Event;
 use serde_json::json;
 
 use super::{
-    Arguments, BANNER_HEIGHT_FRAC, MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX, PLAYER_SETTINGS_HOME_PATH, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, Gun, MS_PER_S, OverlayText, Renderer,
+    Arguments, RouteKind, Picture, MAP_AREA_MIN_MASK_PX, MAP_AREA_MAX_EXCL_MASK_PX, PICTURE_PX_PER_MASK_PX, BANNER_HEIGHT_FRAC, MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX, PLAYER_SETTINGS_HOME_PATH, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, Gun, MS_PER_S, OverlayText, Renderer,
     RendererKind, Result, WINDOW_TITLE, find_lan_address, get_crosshair_rects, get_lobby_lines, get_server_address,
     load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
 };
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
-use crate::city_world::{CityInput, CityPlayer, CityWorld, Shot, ShotHit, Side, Target, get_up};
+use crate::city_world::{CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target, get_up};
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
@@ -43,6 +43,22 @@ const TAN_HALF_FOV: f32 = 0.62;
 const BEAM_WIDTH_M: f64 = 0.06;
 const AVATAR_HEIGHT_M: f64 = 1.8;
 const TEAM_COLORS: [[f32; 4]; 2] = [[0.3, 0.55, 1.0, 1.0], [1.0, 0.3, 0.25, 1.0]];
+const OVERHEAT_PITCH_RAD: f64 = 1.2;
+const PHOTO_TIME_S: f64 = 0.4;
+const PHOTO_CENTRE_EYE_M: f64 = 3.5;
+const RIFLE_ROUTE_SETTLE_S: f64 = 1.0;
+const RIFLE_ROUTE_TIMEOUT_S: f64 = 20.0;
+const RIFLE_ROUTE_RESPAWN_WAIT_S: f64 = 4.0;
+const TARGET_DISTANCE_M: f64 = 7.0;
+const CITY_MAP_LEGEND: &str = "The whole sphere, unrolled: you white, cyan holes to the street";
+const MAP_STREET_COLOR: [u8; 4] = [70, 70, 78, 255];
+const MAP_BUILDING_COLOR: [u8; 4] = [140, 105, 85, 255];
+const MAP_COVER_COLOR: [u8; 4] = [150, 165, 190, 255];
+const MAP_HOLE_COLOR: [u8; 4] = [90, 230, 255, 255];
+const MAP_CONSOLE_HALF_PX: i32 = 6;
+const MAP_PLAYER_HALF_PX: i32 = 4;
+const MAP_SELF_HALF_PX: i32 = 6;
+const MAP_COVER_ABOVE_GLASS_M: f64 = 1.0;
 const TEAM_TINTS: [[f32; 3]; 2] = [[0.55, 0.8, 1.5], [1.5, 0.6, 0.5]];
 const MINIMAP_RADIUS_FRAC: f64 = 0.12;
 const MINIMAP_MARGIN_FRAC: f64 = 0.03;
@@ -99,6 +115,9 @@ impl TeamName {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum BotObjective {
     Consoles,
+    /// `Target` stands still in the open in front of blue's spawn (back there after each
+    /// respawn) without shooting, as the target of `--play-route --route rifle`.
+    Target,
 }
 
 /// `run` runs City Sphere as the command line asks: a server, the bot, the benchmark or the window.
@@ -118,6 +137,9 @@ pub fn run(arguments: &Arguments) -> Result<()> {
     let mut renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
     if arguments.bench_views {
         return bench_views(arguments, renderer.as_mut());
+    }
+    if arguments.photos {
+        return render_photos(arguments, renderer.as_mut());
     }
     let metal: &mut render_metal::MetalRenderer = renderer.as_metal().ok_or("City Sphere needs Metal")?;
     play(arguments, metal)
@@ -206,7 +228,9 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
 
 /// `Step` is one step of a scripted route (`--play-route`) or the bot: walk to a place on a level
 /// (taking lifts up and holes down as needed), turn and tilt the head, shoot, hold `E` on a
-/// console until it is off, or wait.
+/// console until it is off, or wait; and for the rifle check, take the rifle, fire it into the
+/// glass until it overheats, wait until it has cooled, or fire at the nearest enemy's head or body
+/// until a player is eliminated.
 #[derive(Clone, Copy, Debug)]
 enum Step {
     GoTo { direction: DVec3, side: Side, arrive_m: f64 },
@@ -214,6 +238,10 @@ enum Step {
     Shoot,
     HoldConsole { index: u8 },
     Wait { s: f64 },
+    SelectRifle,
+    Overheat,
+    CoolDown,
+    FireAt { is_head: bool, timeout_s: f64 },
 }
 
 /// `BrainOutput` is what a brain does this frame.
@@ -221,6 +249,17 @@ struct BrainOutput {
     input: CityInput,
     is_shooting: bool,
     console: Option<u8>,
+    wants_rifle: bool,
+}
+
+/// `BrainSight` is what a brain knows besides the world and its player: the rifle's heat, the
+/// nearest enemy's head and body centres, and how many players this player has eliminated.
+#[derive(Default)]
+struct BrainSight {
+    is_overheated: bool,
+    heat_frac: f64,
+    enemy: Option<(DVec3, DVec3)>,
+    kill_count: u32,
 }
 
 /// `Brain` follows steps for the route and the bot, with a little unsticking when a box is in the way.
@@ -231,6 +270,7 @@ struct Brain {
     stuck_from: DVec3,
     stuck_s: f64,
     unstick_s: f64,
+    kills_at_step_start: u32,
 }
 
 impl Brain {
@@ -244,6 +284,7 @@ impl Brain {
             stuck_from: DVec3::ZERO,
             stuck_s: 0.0,
             unstick_s: 0.0,
+            kills_at_step_start: 0,
         }
     }
 
@@ -259,7 +300,7 @@ impl Brain {
     }
 
     /// `drive` works on the current step for `dt_s`, moving to the next when it is done.
-    fn drive(&mut self, world: &CityWorld, player: &mut CityPlayer, dt_s: f64, game: &net::GameState, can_shoot: bool) -> BrainOutput {
+    fn drive(&mut self, world: &CityWorld, player: &mut CityPlayer, dt_s: f64, game: &net::GameState, can_shoot: bool, sight: &BrainSight) -> BrainOutput {
         let mut out = BrainOutput {
             input: CityInput {
                 speed_frac: 1.0,
@@ -267,10 +308,14 @@ impl Brain {
             },
             is_shooting: false,
             console: None,
+            wants_rifle: false,
         };
         let Some(&step) = self.steps.get(self.index) else {
             return out;
         };
+        if self.step_s == 0.0 {
+            self.kills_at_step_start = sight.kill_count;
+        }
         self.step_s += dt_s;
         let is_finished: bool = match step {
             Step::GoTo { direction, side, arrive_m } => self.go_to(world, player, (direction, side, arrive_m), dt_s, &mut out.input),
@@ -288,6 +333,23 @@ impl Brain {
                 game.off_mask >> index & 1 == 1 || game.winner.is_some()
             }
             Step::Wait { s } => self.step_s >= s,
+            Step::SelectRifle => {
+                out.wants_rifle = true;
+                true
+            }
+            Step::Overheat => {
+                player.pitch_rad = OVERHEAT_PITCH_RAD;
+                out.is_shooting = true;
+                sight.is_overheated
+            }
+            Step::CoolDown => !sight.is_overheated && sight.heat_frac <= 0.0,
+            Step::FireAt { is_head, timeout_s } => {
+                if let Some((head, body)) = sight.enemy {
+                    aim_at(player, if is_head { head } else { body });
+                    out.is_shooting = true;
+                }
+                sight.kill_count > self.kills_at_step_start || self.step_s >= timeout_s
+            }
         };
         if is_finished {
             self.index += 1;
@@ -352,6 +414,47 @@ impl Brain {
     }
 }
 
+/// `aim_at` turns `player`'s body and tilts the head so the crosshair points at `point`.
+fn aim_at(player: &mut CityPlayer, point: DVec3) {
+    let aim: DVec3 = (point - player.get_eye_frame().w_axis.truncate()).normalize();
+    let up: DVec3 = player.get_up();
+    let flat: DVec3 = (aim - up * aim.dot(up)).normalize();
+    let forward: DVec3 = -player.body.z_axis;
+    player.look_around(forward.cross(flat).dot(up).atan2(forward.dot(flat)), 0.0);
+    player.pitch_rad = aim.dot(up).asin();
+}
+
+/// `make_target_player` stands a player in the open on the street, `TARGET_DISTANCE_M` in front of
+/// blue's first spawn, for the rifle check to shoot at.
+///
+/// Example: `let target = make_target_player(&world);`
+fn make_target_player(world: &CityWorld) -> CityPlayer {
+    let mut player: CityPlayer = world.make_player(0, 0);
+    let old_up: DVec3 = player.get_up();
+    let ahead: DVec3 = player.feet - player.body.z_axis * TARGET_DISTANCE_M;
+    player.feet = ahead.normalize() * player.feet.length();
+    let rotation: DQuat = DQuat::from_rotation_arc(old_up, player.get_up());
+    player.body = DMat3::from_quat(rotation) * player.body;
+    player
+}
+
+/// `make_rifle_route` is the rifle check for blue at its spawn: take the rifle, fire it into the
+/// glass until it overheats, wait until it has cooled, then eliminate the nearest red player (a
+/// `--bot-objective target` bot) with head hits, wait for it to come back, and eliminate it with
+/// body hits.
+fn make_rifle_route() -> Vec<Step> {
+    vec![
+        Step::SelectRifle,
+        Step::Wait { s: RIFLE_ROUTE_SETTLE_S },
+        Step::Overheat,
+        Step::CoolDown,
+        Step::FireAt { is_head: true, timeout_s: RIFLE_ROUTE_TIMEOUT_S },
+        Step::Wait { s: RIFLE_ROUTE_RESPAWN_WAIT_S },
+        Step::FireAt { is_head: false, timeout_s: RIFLE_ROUTE_TIMEOUT_S },
+        Step::Wait { s: RIFLE_ROUTE_SETTLE_S },
+    ]
+}
+
 /// `steer` turns `player` toward the tangent direction `to` and walks when facing roughly along it.
 fn steer(player: &mut CityPlayer, to: DVec3, dt_s: f64, input: &mut CityInput) {
     if to.length() < STEER_MIN_M {
@@ -395,6 +498,20 @@ fn make_route(world: &CityWorld) -> Vec<Step> {
 
 /// `Beam` is a shot's corners, its team and its brightness (0 to 1) for one frame.
 type Beam = (Vec<DVec3>, u32, f64);
+
+/// `RifleLog` records the rifle check on the route: shots from cold until the rifle overheated,
+/// the seconds it took to cool down, and for each player this player eliminated, the rifle's head
+/// and body hits since the elimination before.
+#[derive(Default)]
+struct RifleLog {
+    cold_shot_count: u32,
+    shots_until_overheat: Option<u32>,
+    overheated_at_s: Option<f64>,
+    cool_down_s: Option<f64>,
+    head_hit_count: u32,
+    body_hit_count: u32,
+    kills: Vec<[u32; 2]>,
+}
 
 /// `LiveShot` is a shot being drawn: its path, when it was fired, by which team, and whether it
 /// is this window's own (drawn from the gun's muzzle).
@@ -535,6 +652,9 @@ struct CitySession {
     gpu_ms: Vec<f64>,
     last_frame: Option<Instant>,
     hit_count: u32,
+    rifle_log: RifleLog,
+    was_trigger_held: bool,
+    map_base: std::cell::OnceCell<Vec<u8>>,
     hud: (f64, u32, f64),
     is_aiming: bool,
     phase_ms: Vec<[f64; PHASE_COUNT]>,
@@ -574,7 +694,9 @@ impl CitySession {
         Ok(CitySession {
             scene: Arc::new(build_scene(&world)),
             body: AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?,
-            brain: arguments.play_route.then(|| Brain::New(make_route(&world))),
+            brain: arguments
+                .play_route
+                .then(|| Brain::New(if arguments.route == RouteKind::Rifle { make_rifle_route() } else { make_route(&world) })),
             world,
             settings,
             player_settings,
@@ -603,6 +725,9 @@ impl CitySession {
             gpu_ms: Vec::new(),
             last_frame: None,
             hit_count: 0,
+            rifle_log: RifleLog::default(),
+            was_trigger_held: false,
+            map_base: std::cell::OnceCell::new(),
             hud: (0.0, 0, 0.0),
             is_aiming: false,
             phase_ms: Vec::new(),
@@ -659,6 +784,27 @@ impl CitySession {
             .map(|(i, _)| i)
     }
 
+    /// `get_brain_sight` gives the route's brain the rifle's heat, the nearest enemy's head and
+    /// body centres, and this player's eliminations.
+    fn get_brain_sight(&self) -> BrainSight {
+        let eye: DVec3 = self.player.get_eye_frame().w_axis.truncate();
+        let team: u32 = self.get_team();
+        let enemy: Option<(DVec3, DVec3)> = self
+            .client
+            .players
+            .iter()
+            .filter(|p| Some(p.id) != self.client.id && p.team != team)
+            .map(|p| CityPlayer::get_feet_up(p.frame, self.world.eye_height_m))
+            .min_by(|a, b| (a.0 - eye).length().total_cmp(&(b.0 - eye).length()))
+            .map(|(feet, up)| (feet + up * HEAD_HEIGHT_M, feet + up * TORSO_HEIGHT_M));
+        BrainSight {
+            is_overheated: self.is_overheated,
+            heat_frac: self.rifle_heat_frac,
+            enemy,
+            kill_count: self.rifle_log.kills.len() as u32,
+        }
+    }
+
     /// `fire` shoots from the eye along the crosshair, telling the server about a hit.
     fn fire(&mut self) -> Result<()> {
         let eye: DMat4 = self.player.get_eye_frame();
@@ -680,6 +826,13 @@ impl CitySession {
             };
             self.client.send_hit(id, hits_to_kill)?;
             self.hit_count += 1;
+            if self.gun == Gun::Rifle {
+                if is_head {
+                    self.rifle_log.head_hit_count += 1;
+                } else {
+                    self.rifle_log.body_hit_count += 1;
+                }
+            }
             self.show_message(format!("You hit player {id} ({} bounces)", shot.bounce_count));
         }
         self.shots.push(LiveShot {
@@ -699,6 +852,11 @@ impl CitySession {
                 self.laser_left_s = rifle.pulse_s;
                 self.rifle_heat_frac += 1.0 / f64::from(rifle.shots_until_overheat);
                 self.is_overheated = self.rifle_heat_frac >= 1.0;
+                self.rifle_log.cold_shot_count += 1;
+                if self.is_overheated && self.rifle_log.shots_until_overheat.is_none() {
+                    self.rifle_log.shots_until_overheat = Some(self.rifle_log.cold_shot_count);
+                    self.rifle_log.overheated_at_s = Some(self.now_s());
+                }
             }
         }
         self.recoil_left_s = RECOIL_S;
@@ -724,6 +882,10 @@ impl CitySession {
                     self.show_message(format!("You are player {id}, on the {team} team"));
                 }
                 net::NetEvent::Eliminated { victim_id, shooter_id, is_self } => {
+                    if !is_self && Some(shooter_id) == self.client.id {
+                        self.rifle_log.kills.push([self.rifle_log.head_hit_count, self.rifle_log.body_hit_count]);
+                        (self.rifle_log.head_hit_count, self.rifle_log.body_hit_count) = (0, 0);
+                    }
                     if is_self {
                         self.is_spawned = false;
                         self.respawn_in_s = Some(self.settings.respawn.delay_s);
@@ -749,9 +911,15 @@ impl CitySession {
         self.reload_left_s = (self.reload_left_s - dt_s).max(0.0);
         self.laser_left_s = (self.laser_left_s - dt_s).max(0.0);
         self.recoil_left_s = (self.recoil_left_s - dt_s).max(0.0);
-        if self.gun == Gun::Laser || !held.contains(&Action::Shoot) || self.is_overheated {
+        if self.gun == Gun::Laser || !self.was_trigger_held || self.is_overheated {
             self.rifle_heat_frac = (self.rifle_heat_frac - dt_s / self.settings.rifle.cool_down_s).max(0.0);
             self.is_overheated &= self.rifle_heat_frac > 0.0;
+            if let Some(at_s) = self.rifle_log.overheated_at_s
+                && !self.is_overheated
+                && self.rifle_log.cool_down_s.is_none()
+            {
+                self.rifle_log.cool_down_s = Some(now_s - at_s);
+            }
         }
         let is_playing: bool = self.is_spawned && self.client.game.winner.is_none();
         let mut input = CityInput {
@@ -759,10 +927,14 @@ impl CitySession {
             ..CityInput::default()
         };
         let (mut wants_shot, mut console) = (false, None);
+        let sight: BrainSight = self.get_brain_sight();
         if let Some(brain) = &mut self.brain {
             if self.is_spawned {
-                let out: BrainOutput = brain.drive(&self.world, &mut self.player, dt_s, &self.client.game, is_playing && self.reload_left_s <= 0.0);
+                let out: BrainOutput = brain.drive(&self.world, &mut self.player, dt_s, &self.client.game, is_playing && self.reload_left_s <= 0.0, &sight);
                 input = out.input;
+                if out.wants_rifle {
+                    self.gun = Gun::Rifle;
+                }
                 wants_shot = out.is_shooting;
                 console = out.console.and_then(|index| self.find_console(Some(index)));
             }
@@ -785,6 +957,7 @@ impl CitySession {
             self.step_phase_rad += speed_m_per_s * dt_s * STEPS_RAD_PER_M;
             self.run_frac = (speed_m_per_s / self.world.sprint_m_per_s).min(1.0);
         }
+        self.was_trigger_held = wants_shot;
         if wants_shot && is_playing && self.reload_left_s <= 0.0 && !(self.gun == Gun::Rifle && self.is_overheated) {
             self.fire()?;
         }
@@ -1068,7 +1241,12 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
             dim_frac: text.as_ref().map_or(0.0, |t| t.dim_frac),
             mask: mask.as_deref().zip(text.as_ref()).map(|(pixels, t)| (pixels, (t.mask_px.0 as usize, t.mask_px.1 as usize))),
             mask_height_frac: text.as_ref().map_or(0.0, |t| t.height_frac),
-            picture: None,
+            picture: text.as_ref().and_then(|t| t.picture.as_ref()).map(|p| render_metal::OverlayPicture {
+                pixels: &p.pixels,
+                size_px: (p.size_px.0 as usize, p.size_px.1 as usize),
+                min_mask_px: p.min_mask_px,
+                max_excl_mask_px: p.max_excl_mask_px,
+            }),
             stretch_frac: 0.0,
             minimap: None,
             rects: &rects,
@@ -1199,14 +1377,110 @@ fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
         None => menu::Scoreboard::Waiting,
         Some(scores) => menu::Scoreboard::Scores { scores, own_id: session.client.welcomed_id },
     };
+    let mut lines: Vec<(String, bool)> = menu.get_lines(&session.player_settings, &save_path, scoreboard);
+    let picture: Option<Picture> = if menu.get_page() == menu::Page::Map {
+        lines.truncate(1);
+        lines.push((CITY_MAP_LEGEND.to_string(), false));
+        Some(make_map_picture(session))
+    } else {
+        None
+    };
     Some(OverlayText {
-        lines: menu.get_lines(&session.player_settings, &save_path, scoreboard),
+        lines,
         mask_px: MENU_MASK_PX,
         height_frac: MENU_HEIGHT_FRAC,
         is_centered: false,
         dim_frac: MENU_DIM_FRAC,
-        picture: None,
+        picture,
     })
+}
+
+/// `get_map_picture_px` gives the map page's picture size: the sphere unrolled (longitude across,
+/// latitude down) at 2:1, as large as the page's map area holds.
+fn get_map_picture_px() -> (usize, usize) {
+    let [width_px, height_px] = [0, 1].map(|a| (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a]) * PICTURE_PX_PER_MASK_PX);
+    let fitted_width_px: i32 = width_px.min(height_px * 2);
+    (fitted_width_px as usize, (fitted_width_px / 2) as usize)
+}
+
+/// `get_map_direction` gives the direction from the centre that the map picture's pixel `(x, y)`
+/// shows.
+fn get_map_direction(x: usize, y: usize, size_px: (usize, usize)) -> DVec3 {
+    let longitude_rad: f64 = ((x as f64 + 0.5) / size_px.0 as f64 - 0.5) * std::f64::consts::TAU;
+    let latitude_rad: f64 = (0.5 - (y as f64 + 0.5) / size_px.1 as f64) * std::f64::consts::PI;
+    DVec3::new(latitude_rad.cos() * longitude_rad.cos(), latitude_rad.sin(), latitude_rad.cos() * longitude_rad.sin())
+}
+
+/// `get_map_pixel` gives the map picture's pixel that shows the unit direction `d` from the centre.
+fn get_map_pixel(d: DVec3, size_px: (usize, usize)) -> (usize, usize) {
+    let longitude_rad: f64 = d.z.atan2(d.x);
+    let latitude_rad: f64 = d.y.clamp(-1.0, 1.0).asin();
+    let x: f64 = (longitude_rad / std::f64::consts::TAU + 0.5) * size_px.0 as f64;
+    let y: f64 = (0.5 - latitude_rad / std::f64::consts::PI) * size_px.1 as f64;
+    ((x as usize).min(size_px.0 - 1), (y as usize).min(size_px.1 - 1))
+}
+
+/// `make_map_base` draws the map picture's still part as seen from the centre: the street,
+/// buildings, the glass level's covers and the glass's holes to the street.
+fn make_map_base(world: &CityWorld, size_px: (usize, usize)) -> Vec<u8> {
+    let glass_radius_m: f64 = world.get_glass().map_or(0.0, |glass| glass.radius_m);
+    let mut pixels: Vec<u8> = Vec::with_capacity(size_px.0 * size_px.1 * BYTES_PER_PIXEL);
+    for y in 0..size_px.1 {
+        for x in 0..size_px.0 {
+            let d: DVec3 = get_map_direction(x, y, size_px);
+            let nearest_m: Option<f64> = world
+                .boxes
+                .iter()
+                .filter_map(|city_box| city_box.find_hit_m(DVec3::ZERO, d).map(|(t, _)| t))
+                .min_by(f64::total_cmp);
+            let color: [u8; 4] = match nearest_m {
+                Some(t) if t < glass_radius_m + MAP_COVER_ABOVE_GLASS_M => MAP_COVER_COLOR,
+                Some(_) => MAP_BUILDING_COLOR,
+                None if world.get_glass().is_some_and(|glass| glass.is_in_hole(d)) => MAP_HOLE_COLOR,
+                None => MAP_STREET_COLOR,
+            };
+            pixels.extend_from_slice(&color);
+        }
+    }
+    pixels
+}
+
+/// `make_map_picture` gives the menu's map page picture: the whole sphere unrolled
+/// (`make_map_base`), with consoles as squares in their team's colour (dark once off), the other
+/// players as dots in their team's colour and this player in white, centred in the page's map area.
+fn make_map_picture(session: &CitySession) -> Picture {
+    let size_px: (usize, usize) = get_map_picture_px();
+    let mut pixels: Vec<u8> = session.map_base.get_or_init(|| make_map_base(&session.world, size_px)).clone();
+    let mut draw_square = |point: DVec3, half_px: i32, color: [f32; 4]| {
+        let (center_x, center_y) = get_map_pixel(point.normalize_or(DVec3::X), size_px);
+        let rgba: [u8; 4] = color.map(|c| (c * 255.0) as u8);
+        for y in (center_y as i32 - half_px)..=(center_y as i32 + half_px) {
+            for x in (center_x as i32 - half_px)..=(center_x as i32 + half_px) {
+                if x >= 0 && y >= 0 && (x as usize) < size_px.0 && (y as usize) < size_px.1 {
+                    let i: usize = (y as usize * size_px.0 + x as usize) * BYTES_PER_PIXEL;
+                    pixels[i..i + BYTES_PER_PIXEL].copy_from_slice(&rgba);
+                }
+            }
+        }
+    };
+    for console in &session.world.consoles {
+        let is_off: bool = session.client.game.off_mask >> console.index & 1 == 1;
+        let color: [f32; 4] = if is_off { MINIMAP_OFF_COLOR } else { TEAM_COLORS[console.team as usize] };
+        draw_square(session.world.get_console_center(console), MAP_CONSOLE_HALF_PX, color);
+    }
+    for player in session.client.players.iter().filter(|p| Some(p.id) != session.client.id) {
+        draw_square(player.frame.w_axis.truncate(), MAP_PLAYER_HALF_PX, TEAM_COLORS[player.team as usize % 2]);
+    }
+    draw_square(session.player.feet, MAP_SELF_HALF_PX, MINIMAP_SELF_COLOR);
+    let size_mask_px: [i32; 2] = [size_px.0 as i32, size_px.1 as i32].map(|n| n / PICTURE_PX_PER_MASK_PX);
+    let min_mask_px: [i32; 2] =
+        [0, 1].map(|a| MAP_AREA_MIN_MASK_PX[a] + (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a] - size_mask_px[a]) / 2);
+    Picture {
+        pixels,
+        size_px: (size_px.0 as u32, size_px.1 as u32),
+        min_mask_px,
+        max_excl_mask_px: [0, 1].map(|a| min_mask_px[a] + size_mask_px[a]),
+    }
 }
 
 /// `get_minimap_rects` draws the minimap in the window's top-right corner: the whole sphere
@@ -1278,6 +1552,11 @@ fn print_route_report(session: &CitySession, arguments: &Arguments, window_px: (
         "off_mask": session.client.game.off_mask,
         "route_done": session.brain.as_ref().is_some_and(Brain::is_done),
         "seconds": session.now_s(),
+        "rifle": json!({
+            "shots_until_overheat": session.rifle_log.shots_until_overheat,
+            "cool_down_s": session.rifle_log.cool_down_s,
+            "kills_head_and_body_hits": session.rifle_log.kills,
+        }),
     });
     if arguments.json {
         println!("{report}");
@@ -1399,6 +1678,126 @@ fn bench_views(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()>
     Ok(())
 }
 
+/// `PhotoView` is a named camera for `--photos`, with its field of view, robots and shots.
+struct PhotoView {
+    name: &'static str,
+    eye: DMat4,
+    tan_half_fov: f32,
+    robots: Vec<Robot>,
+    beams: Vec<Beam>,
+}
+
+/// `get_pylon_center` gives the centre of `team`'s pylon on the glass level or on the street.
+fn get_pylon_center(world: &CityWorld, team: u32, is_glass: bool) -> DVec3 {
+    let glass_m: f64 = world.get_glass().map_or(0.0, |g| g.radius_m);
+    world
+        .boxes
+        .iter()
+        .filter(|b| b.group == "pylons" && b.name.starts_with(net::TEAM_NAMES[team as usize]))
+        .find(|b| (b.center.length() < glass_m + 1.0) == is_glass)
+        .map_or(DVec3::X, |b| b.center)
+}
+
+/// `get_level_point` gives the point `along_m` from `point` on its level (radius `radius_m`), in
+/// the tangent direction `toward`.
+fn get_level_point(point: DVec3, toward: DVec3, along_m: f64, radius_m: f64) -> DVec3 {
+    let d: DVec3 = point.normalize();
+    let t: DVec3 = (toward - d * toward.dot(d)).normalize_or(d.any_orthonormal_vector());
+    (d + t * (along_m / radius_m)).normalize() * radius_m
+}
+
+/// `make_photo_views` gives `--photos`' views: the far side from near the core, the whole sphere
+/// from its centre, a street fight at blue's street pylon, the glass level across to red's glass
+/// pylon, and the glass level's crowd with reflected shots.
+fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
+    let glass_m: f64 = world.get_glass().map_or(10.0, |g| g.radius_m);
+    let street_m: f64 = world.street_radius_m;
+    let eye_m: f64 = world.eye_height_m;
+    let robot = |feet: DVec3, toward: DVec3, team: u32, clip: AvatarClip| Robot { feet, forward: toward - feet, team, clip };
+    let shot = |from: DVec3, to: DVec3, team: u32| -> Beam {
+        let up: DVec3 = get_up(from);
+        let origin: DVec3 = from + up * eye_m;
+        (world.trace_shot(origin, (to - origin).normalize(), 90.0, 2, &[], None).points, team, 1.0)
+    };
+    let blue_street: DVec3 = get_pylon_center(world, 0, false);
+    let red_glass: DVec3 = get_pylon_center(world, 1, true);
+    let side: DVec3 = blue_street.normalize().any_orthonormal_vector();
+    let near_core: DVec3 = side * (world.street_radius_m * 0.3);
+    let far_robots: Vec<Robot> = (0..4)
+        .map(|k| {
+            let radius_m: f64 = if k % 2 == 0 { street_m } else { glass_m };
+            let feet: DVec3 = get_level_point(blue_street, side, 3.0 + 2.0 * k as f64, radius_m);
+            robot(feet, blue_street, (k % 2) as u32, AvatarClip::Run)
+        })
+        .collect();
+    let camera_street: DVec3 = get_level_point(blue_street, side, 9.0, street_m);
+    let fighter_blue: DVec3 = get_level_point(blue_street, side, 2.5, street_m);
+    let fighter_red: DVec3 = get_level_point(blue_street, -side, 4.0, street_m);
+    let glass_side: DVec3 = red_glass.normalize().any_orthonormal_vector();
+    let camera_glass: DVec3 = get_level_point(red_glass, glass_side, 7.0, glass_m);
+    let glass_red: DVec3 = get_level_point(red_glass, glass_side, 2.0, glass_m);
+    let glass_blue: DVec3 = get_level_point(red_glass, -glass_side, 5.0, glass_m);
+    let across: DVec3 = -red_glass.normalize() * glass_m;
+    let (crowd, crowd_beams) = make_crowd(world);
+    vec![
+        PhotoView {
+            name: "far_side_from_core",
+            eye: make_eye(near_core, blue_street - near_core, side),
+            tan_half_fov: 0.9,
+            beams: vec![shot(far_robots[1].feet, far_robots[0].feet, 1), shot(far_robots[3].feet, near_core, 1)],
+            robots: far_robots,
+        },
+        PhotoView {
+            name: "sphere_from_centre",
+            eye: make_eye(blue_street.normalize() * PHOTO_CENTRE_EYE_M, blue_street, side),
+            tan_half_fov: 1.6,
+            robots: Vec::new(),
+            beams: Vec::new(),
+        },
+        PhotoView {
+            name: "street_fight_at_blue_pylon",
+            eye: make_eye(camera_street + get_up(camera_street) * eye_m, blue_street + get_up(blue_street) * 1.5 - camera_street - get_up(camera_street) * eye_m, get_up(camera_street)),
+            tan_half_fov: 0.55,
+            robots: vec![robot(fighter_blue, fighter_red, 0, AvatarClip::Run), robot(fighter_red, fighter_blue, 1, AvatarClip::Run)],
+            beams: vec![shot(fighter_red, fighter_blue + get_up(fighter_blue) * 1.2, 1)],
+        },
+        PhotoView {
+            name: "glass_level_across_to_red_pylon",
+            eye: make_eye(camera_glass + get_up(camera_glass) * eye_m, red_glass + get_up(red_glass) * 1.0 - camera_glass - get_up(camera_glass) * eye_m, get_up(camera_glass)),
+            tan_half_fov: 0.65,
+            robots: vec![robot(glass_red, glass_blue, 1, AvatarClip::Run), robot(glass_blue, glass_red, 0, AvatarClip::Run)],
+            beams: vec![shot(glass_blue, across, 0), shot(glass_red, glass_blue + get_up(glass_blue) * 1.5, 1)],
+        },
+        PhotoView {
+            name: "glass_level_crowd_and_reflections",
+            eye: make_bench_views(world).last().map_or(DMat4::IDENTITY, |view| view.eye),
+            tan_half_fov: TAN_HALF_FOV,
+            robots: crowd,
+            beams: crowd_beams,
+        },
+    ]
+}
+
+/// `render_photos` renders each of `make_photo_views` once at `--width-px` x `--height-px` and
+/// saves it as a PNG under .artifacts/photos/.
+fn render_photos(arguments: &Arguments, renderer: &mut dyn Renderer) -> Result<()> {
+    let world: CityWorld = CityWorld::Builtin()?;
+    let scene: Arc<CityScene> = Arc::new(build_scene(&world));
+    let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
+    let folder: PathBuf = make_run_folder("photos", arguments.label.as_deref())?;
+    let size: (u32, u32) = (arguments.width_px, arguments.height_px);
+    let render_px: (usize, usize) = (size.0 as usize, size.1 as usize);
+    let mut pixels: Vec<u8> = vec![0; size.0 as usize * size.1 as usize * BYTES_PER_PIXEL];
+    for view in make_photo_views(&world) {
+        let mut frame: CityFrame = make_frame(&world, &scene, &body, view.eye, &view.robots, &view.beams, (0, 0), PHOTO_TIME_S, render_px);
+        frame.tan_half_fov = view.tan_half_fov;
+        renderer.render(FrameData::City(&frame), size, &mut pixels)?;
+        save_png(&folder.join(format!("{}.png", view.name)), &pixels, size.0, size.1)?;
+    }
+    println!("Photos in {}", folder.display());
+    Ok(())
+}
+
 /// `Rng` is a small xorshift generator for the bot's wandering.
 struct Rng(u64);
 
@@ -1475,13 +1874,15 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         let mut disabling: Option<u8> = None;
         if arguments.bot_objective == Some(BotObjective::Consoles) {
             disabling = world.consoles.iter().find(|c| c.team != team && client.game.off_mask >> c.index & 1 == 0).map(|c| c.index);
+        } else if arguments.bot_objective == Some(BotObjective::Target) {
+            player = make_target_player(&world);
         } else if client.game.winner.is_none() {
             if brain.is_done() {
                 let side: Side = if rng.next_frac() < 0.5 { Side::Street } else { Side::Glass };
                 let direction: DVec3 = DVec3::new(rng.next_frac() - 0.5, rng.next_frac() - 0.5, rng.next_frac() - 0.5);
                 brain = Brain::New(vec![Step::GoTo { direction: direction.normalize_or(DVec3::X), side, arrive_m: 2.0 }]);
             }
-            let out: BrainOutput = brain.drive(&world, &mut player, dt_s, &client.game, false);
+            let out: BrainOutput = brain.drive(&world, &mut player, dt_s, &client.game, false, &BrainSight::default());
             world.move_player(&mut player, &out.input, dt_s);
             let eye: DMat4 = player.get_eye_frame();
             let targets: Vec<Target> = client
@@ -1524,4 +1925,38 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
     }
     let _ = client.leave();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for the City Sphere session's scripted helpers.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Part of the rifle target aimed at from blue's spawn | head, body | `the_rifle_target_is_in_sight_of_blues_spawn` |
+    //! | Map picture pixel and direction | round trip at the equator and near a pole | `map_pixels_and_directions_agree` |
+    use super::*;
+
+    #[test]
+    fn the_rifle_target_is_in_sight_of_blues_spawn() {
+        let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
+        let target: CityPlayer = make_target_player(&world);
+        let (feet, up) = (target.feet, target.get_up());
+        let targets: [Target; 1] = [Target { id: 1, feet, up }];
+        for (height_m, is_head) in [(HEAD_HEIGHT_M, true), (TORSO_HEIGHT_M, false)] {
+            let mut shooter: CityPlayer = world.make_player(0, 0);
+            aim_at(&mut shooter, feet + up * height_m);
+            let eye: DMat4 = shooter.get_eye_frame();
+            let shot: Shot = world.trace_shot(eye.w_axis.truncate(), -eye.z_axis.truncate(), 90.0, 2, &targets, Some(0));
+            assert_eq!(shot.hit, ShotHit::Player { id: 1, is_head }, "{shot:?}");
+        }
+    }
+
+    #[test]
+    fn map_pixels_and_directions_agree() {
+        let size_px: (usize, usize) = get_map_picture_px();
+        for (x, y) in [(size_px.0 / 3, size_px.1 / 2), (size_px.0 / 5, 2)] {
+            assert_eq!(get_map_pixel(get_map_direction(x, y, size_px), size_px), (x, y));
+        }
+    }
 }
