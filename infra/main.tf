@@ -36,7 +36,7 @@ provider "google" {
 }
 
 locals {
-  games = [for line in compact(split("\n", file("${path.module}/games.txt"))) : {
+  games = [for line in compact(split("\n", file(var.games_file))) : {
     port = tonumber(split(" ", line)[0])
     map  = split(" ", line)[1]
   }]

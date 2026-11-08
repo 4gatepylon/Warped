@@ -2,7 +2,8 @@
 # `.env` as `TF_VAR_*`.
 #
 # Interface:
-#     project_id, region, zone, monthly_budget_usd, game_password (see `.env.example`).
+#     project_id, region, zone, monthly_budget_usd, game_password (see `.env.example`);
+#     games_file, the list of games (`games.txt` unless the Makefile's GAMES_FILE says otherwise).
 #
 # Example:
 #     TF_VAR_project_id=warped-zq607d terraform plan
@@ -21,6 +22,10 @@ variable "zone" {
 
 variable "monthly_budget_usd" {
   type = number
+}
+
+variable "games_file" {
+  type = string
 }
 
 variable "game_password" {

@@ -17,6 +17,10 @@
 #
 # Example:
 #     cp .env.example .env && make deploy-everything
+#
+# Must know:
+#     - GAME_DIR is the game to deploy (the Rust demo by default): any game folder whose Makefile has
+#       build-server-bundle and package-mac-app, and GAMES_FILE lists its games (port, map, name).
 SHELL := /bin/bash
 .SHELLFLAGS := -eo pipefail -c
 -include .env
@@ -26,7 +30,9 @@ STATE_BUCKET := $(GCP_PROJECT_ID)-tfstate
 APIS := compute.googleapis.com storage.googleapis.com iap.googleapis.com billingbudgets.googleapis.com \
   cloudbilling.googleapis.com cloudresourcemanager.googleapis.com
 TEST_DATA_DIR := .build/terraform-test
-DEMO_DIR := ../demos/hyperbolic_wormholes_rust
+GAME_DIR ?= ../demos/hyperbolic_wormholes_rust
+GAME_PROGRAM := $(GAME_DIR)/.build/release/hyperbolic-wormholes
+GAMES_FILE ?= games.txt
 SITE_BUILD := .build/site
 CHECK_S := 5
 SITE_HOST ?= https://storage.googleapis.com
@@ -36,6 +42,7 @@ export TF_VAR_region := $(GCP_REGION)
 export TF_VAR_zone := $(GCP_ZONE)
 export TF_VAR_monthly_budget_usd := $(MONTHLY_BUDGET_USD)
 export TF_VAR_game_password := $(GAME_PASSWORD)
+export TF_VAR_games_file := $(abspath $(GAMES_FILE))
 
 DESTROY_INFRA_WARNING := This deletes the game server VM, its IP, both buckets (the download page and the \
   server bundle), the firewall rules and the budget: players are cut off, and the IP changes when it is made \
@@ -105,19 +112,19 @@ create-game-password: check-env
 	fi
 
 deploy-game-servers: init-terraform
-	$(MAKE) -C $(DEMO_DIR) build-server-bundle
-	$(GCLOUD) storage cp $(DEMO_DIR)/.build/server_bundle.tar.gz \
+	$(MAKE) -C $(GAME_DIR) build-server-bundle
+	$(GCLOUD) storage cp $(GAME_DIR)/.build/server_bundle.tar.gz \
 		gs://$$($(TERRAFORM) output -raw server_bucket)/server_bundle.tar.gz
 	$(GCLOUD) compute instances reset warped-game-server --zone $(GCP_ZONE) --project $(GCP_PROJECT_ID)
 
 deploy-download-page: init-terraform
 	mkdir -p $(SITE_BUILD)
-	awk -v ip="$$($(TERRAFORM) output -raw server_ip)" '{ $$1 = ip ":" $$1; print }' games.txt > .build/online_games.txt
-	$(MAKE) -C $(DEMO_DIR) package-mac-app ONLINE_GAMES=$(CURDIR)/.build/online_games.txt
+	awk -v ip="$$($(TERRAFORM) output -raw server_ip)" '{ $$1 = ip ":" $$1; print }' $(GAMES_FILE) > .build/online_games.txt
+	$(MAKE) -C $(GAME_DIR) package-mac-app ONLINE_GAMES=$(CURDIR)/.build/online_games.txt
 	site_url="$(SITE_HOST)/$$($(TERRAFORM) output -raw site_bucket)"; \
 		sed "s|@SITE_URL@|$$site_url|g" site/index.html > $(SITE_BUILD)/index.html; \
 		sed "s|@SITE_URL@|$$site_url|g" site/install.sh > $(SITE_BUILD)/install.sh
-	cp $(DEMO_DIR)/.build/Warped.zip $(DEMO_DIR)/app/app_icon.png $(SITE_BUILD)/
+	cp $(GAME_DIR)/.build/Warped.zip $(GAME_DIR)/app/app_icon.png $(SITE_BUILD)/
 	$(GCLOUD) storage cp --cache-control=no-store $(SITE_BUILD)/* gs://$$($(TERRAFORM) output -raw site_bucket)/
 	@echo "Download page: $$($(TERRAFORM) output -raw download_page_url)"
 
@@ -131,15 +138,15 @@ deploy-everything: check-env
 	@echo "Give the VM a minute to start the games, then check them with: make check-game-servers"
 
 check-game-servers: init-terraform
-	cd $(DEMO_DIR) && cargo build --release
+	cd $(GAME_DIR) && cargo build --release
 	install -m 600 /dev/null .build/game_password
 	printf '%s\n' "$(GAME_PASSWORD)" > .build/game_password
 	server_ip="$$($(TERRAFORM) output -raw server_ip)"; \
 		while read -r port map name; do \
 			echo "Checking $$name ($$server_ip:$$port, $$map)"; \
-			$(DEMO_DIR)/.build/release/hyperbolic-wormholes --join "$$server_ip:$$port" --map "$$map" \
+			$(GAME_PROGRAM) --join "$$server_ip:$$port" --map "$$map" \
 				--game-password-file $(CURDIR)/.build/game_password --bot --exit-after-s $(CHECK_S) --label "check-$$port"; \
-		done < games.txt
+		done < $(GAMES_FILE)
 
 test:
 	$(TERRAFORM) fmt -check

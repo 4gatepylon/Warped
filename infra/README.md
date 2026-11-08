@@ -1,8 +1,8 @@
 # Infra
 
-The Rust demo's cloud deploy on Google Cloud, in Terraform, so players can play over the internet (W-42): one small
-VM runs a game server for each line of [`games.txt`](games.txt), protected by the game's password, and a public bucket
-serves the download page (W-99).
+The Rust demo's cloud deploy on Google Cloud, in Terraform, so players can play over the internet (W-42 (server
+in the cloud)): one small VM runs a game server for each line of [`games.txt`](games.txt), protected by the game's
+password, and a public bucket serves the download page (W-116 (download page)).
 
 ## Set up once
 
@@ -13,6 +13,9 @@ serves the download page (W-99).
   git-ignored, and so is `.build/`, where Terraform keeps its working files (`TF_DATA_DIR`).
 
 ## Deploy in one click
+
+Any game can use this: `GAME_DIR` names its folder (the Rust demo by default), whose Makefile must have
+`build-server-bundle` and `package-mac-app`, and `GAMES_FILE` lists its games (`games.txt` by default).
 
 ```bash
 make deploy-everything
