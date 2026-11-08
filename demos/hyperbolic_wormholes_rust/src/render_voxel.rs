@@ -24,8 +24,9 @@ use objc2_metal::{
 
 use crate::bend::Bend;
 use crate::dust::DustCloud;
-use crate::geometry::{AXIS_W, AXIS_Z, get_distance, invert_lorentz};
+use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
 use crate::mesh::MeshModel;
+use crate::net::TEAM_NAMES;
 use crate::render_mesh::{MeshGpu, NO_MESH, get_mesh_roots};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
@@ -73,6 +74,7 @@ const BEAM_BRIGHTNESS: f32 = 1.0;
 const RIFLE_BEAM_CODE: u32 = 2;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const MS_PER_S: f64 = 1000.0;
+const BEACON_BEAM_M: f64 = 400.0;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -241,6 +243,47 @@ pub struct VoxelFrame {
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
     meshes: Arc<Vec<MeshModel>>,
+}
+
+/// `get_beacon_beams` gives each beacon's beam: from the top of the model of each structure
+/// "<team> pylon" straight up for `BEACON_BEAM_M` (as far as `clip_beam_to_map` allows), in the
+/// team's colour, as bright as the fraction of the team's consoles still on.
+///
+/// Example: `let beams = get_beacon_beams(&world);`
+fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
+    let mut beams: Vec<GpuBeam> = Vec::new();
+    for (team, name) in TEAM_NAMES.iter().enumerate() {
+        let pylon_name: String = format!("{name} pylon");
+        let consoles: Vec<bool> = world
+            .consoles
+            .iter()
+            .filter(|c| c.team as usize == team)
+            .map(|c| world.palette[usize::from(c.material)][3] > 0.0)
+            .collect();
+        let on_frac: f32 =
+            consoles.iter().filter(|&&is_on| is_on).count() as f32 / consoles.len().max(1) as f32;
+        for st in world.structures.iter().filter(|st| st.name == pylon_name) {
+            let Some(m) = st.mesh else { continue };
+            let frame: DMat4 = invert_lorentz(st.inverse);
+            let top: f64 = f64::from(world.meshes[m].nodes[0].hi.y) / world.r;
+            let (x, v) = (frame.col(AXIS_W), frame.col(AXIS_Y));
+            let segment: BeamSegment = BeamSegment {
+                a: top.cosh() * x + top.sinh() * v,
+                b: top.sinh() * x + top.cosh() * v,
+                length: BEACON_BEAM_M / world.r,
+            };
+            beams.extend(
+                clip_beam_to_map(&[segment], world.r)
+                    .into_iter()
+                    .map(|s| GpuBeam {
+                        a: to_f32(s.a),
+                        b: to_f32(s.b),
+                        info: [s.length as f32, 0.0, BEAM_BRIGHTNESS * on_frac, team as f32],
+                    }),
+            );
+        }
+    }
+    beams
 }
 
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
@@ -459,7 +502,7 @@ impl VoxelFrame {
                 color_radius: [color[0], color[1], color[2], radius_m as f32],
             })
             .collect();
-        let gpu_beams: Vec<GpuBeam> = beams
+        let mut gpu_beams: Vec<GpuBeam> = beams
             .iter()
             .flat_map(|beam| {
                 let code: u32 = beam.team + RIFLE_BEAM_CODE * u32::from(beam.is_rifle);
@@ -477,6 +520,7 @@ impl VoxelFrame {
                     })
             })
             .collect();
+        gpu_beams.extend(get_beacon_beams(world));
         let (dust_bursts, dust_particles) = pack_dust(dust);
         let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
             GpuZoneWalls {
@@ -1015,7 +1059,7 @@ impl VoxelGpu {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of packing a frame's laser beams for the shader.
+    //! Tests of packing a frame's laser beams and the beacons' beams for the shader.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -1023,7 +1067,11 @@ mod tests {
     //! | Team | blue, red | `beams_carry_their_gun_team_and_speckle` |
     //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
 
+    //! | A team's consoles switched off | none, some, all | `beacon_beams_dim_as_consoles_go_off` |
+
     use super::*;
+    use crate::map::{Map, get_map_folder};
+    use crate::net::MAX_CONSOLE_COUNT;
     use crate::voxel_world::{Shot, VoxelPlayer, VoxelWorld};
 
     const SPECKLE_FRAC: f64 = 0.4;
@@ -1048,7 +1096,11 @@ mod tests {
             VoxelFrame::Build(&world, camera, &beams, None, &[], RENDER_PX, world.bend);
         let sniper: [f32; 2] = [0.0, 0.0];
         let rifle: [f32; 2] = [SPECKLE_FRAC as f32, (1 + RIFLE_BEAM_CODE) as f32];
-        let packed: Vec<[f32; 2]> = frame.beams.iter().map(|b| [b.info[1], b.info[3]]).collect();
+        let laser_beam_count: usize = frame.beams.len() - get_beacon_beams(&world).len();
+        let packed: Vec<[f32; 2]> = frame.beams[..laser_beam_count]
+            .iter()
+            .map(|b| [b.info[1], b.info[3]])
+            .collect();
         assert!(packed.contains(&sniper) && packed.contains(&rifle));
         assert!(packed.iter().all(|p| *p == sniper || *p == rifle));
         let kinds: &crate::settings::BeamSpeckleSettings = &world.settings.beam_speckle;
@@ -1056,5 +1108,43 @@ mod tests {
             frame.uniforms.beam_speckle[1..3],
             [kinds.black_frac as f32, kinds.white_frac as f32]
         );
+    }
+
+    /// `get_brightness` gives each team's beacon beam brightness once the consoles in `off_mask`
+    /// are off.
+    ///
+    /// Example: `let [blue, red] = get_brightness(&mut world, 0);`
+    fn get_brightness(world: &mut VoxelWorld, off_mask: u32) -> [f32; 2] {
+        world.light_consoles(off_mask, &[0.0; MAX_CONSOLE_COUNT], 0.0);
+        let beams: Vec<GpuBeam> = get_beacon_beams(world);
+        [0, 1].map(|team| {
+            beams
+                .iter()
+                .find(|b| b.info[3] == team as f32)
+                .expect("a beam")
+                .info[2]
+        })
+    }
+
+    #[test]
+    fn beacon_beams_dim_as_consoles_go_off() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
+        let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let red_mask = |count: usize| -> u32 {
+            let red: Vec<usize> = (0..world.consoles.len())
+                .filter(|&i| world.consoles[i].team == 1)
+                .collect();
+            red[..count].iter().fold(0, |mask, &i| mask | 1 << i)
+        };
+        let red_count: usize = world.consoles.iter().filter(|c| c.team == 1).count();
+        let (none, some, all) = (red_mask(0), red_mask(1), red_mask(red_count));
+        assert_eq!(get_brightness(&mut world, none), [BEAM_BRIGHTNESS; 2]);
+        let [blue, red] = get_brightness(&mut world, some);
+        let expected: f32 = BEAM_BRIGHTNESS * (red_count - 1) as f32 / red_count as f32;
+        assert!(
+            blue == BEAM_BRIGHTNESS && (red - expected).abs() < 1e-6,
+            "{red}"
+        );
+        assert_eq!(get_brightness(&mut world, all), [BEAM_BRIGHTNESS, 0.0]);
     }
 }
