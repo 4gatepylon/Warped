@@ -846,7 +846,7 @@ impl MetalRenderer {
                 PREFILTERED_MIP_COUNT as f32,
             ),
             post_params: Vec4::new(
-                frame.damage_flash_frac,
+                0.0,
                 1.0 / SHADOW_MAP_SIZE_PX as f32,
                 atmosphere.ibl_intensity_frac,
                 frame.point_lights.len().min(MAX_POINT_LIGHT_COUNT) as f32,
@@ -1579,6 +1579,12 @@ impl MetalRenderer {
             encoder.setRenderPipelineState(&self.pipelines.fxaa);
             let is_fxaa_enabled: f32 = if settings.is_fxaa_enabled { 1.0 } else { 0.0 };
             set_fragment_bytes(&encoder, as_bytes(&is_fxaa_enabled), 0);
+            set_fragment_bytes(&encoder, as_bytes(&frame.hit_effect), 1);
+            let output_size_px: Vec2 = Vec2::new(
+                drawable_texture.width() as f32,
+                drawable_texture.height() as f32,
+            );
+            set_fragment_bytes(&encoder, as_bytes(&output_size_px), 2);
             unsafe {
                 encoder.setFragmentTexture_atIndex(Some(&targets.ldr), 0);
                 encoder.drawPrimitives_vertexStart_vertexCount(

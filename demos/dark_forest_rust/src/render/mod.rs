@@ -249,7 +249,7 @@ pub struct FrameDescription<'a> {
     pub hud_rects: &'a [HudRect],
     pub hud_images: &'a [HudImage<'a>],
     pub time_s: f32,
-    pub damage_flash_frac: f32,
+    pub hit_effect: overlay::HitEffect,
     pub lens_draws: &'a [DrawItem],
     pub lens_particles: &'a [Particle],
     pub overlay_rects: &'a [overlay::OverlayRect],

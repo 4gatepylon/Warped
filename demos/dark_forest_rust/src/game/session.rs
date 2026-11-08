@@ -23,7 +23,7 @@ use super::player::{MAX_HEALTH, Player, PlayerInput};
 use super::weapon::{MAGAZINE_SIZE, Weapon, WeaponEvent, WeaponInput};
 use super::world::Arena;
 use crate::assets::gltf_model::Trs;
-use crate::render::overlay::OverlayRect;
+use crate::render::overlay::{HitEffect, OverlayRect};
 use crate::render::{Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
 use crate::scene::{Scene, draw_items_for};
 
@@ -118,7 +118,7 @@ pub struct FrameData {
     pub viewmodel_particles: Vec<Particle>,
     pub hud_rects: Vec<HudRect>,
     pub overlay_rects: Vec<OverlayRect>,
-    pub damage_flash_frac: f32,
+    pub hit_effect: HitEffect,
     pub lens_draws: Range<usize>,
     pub lens_particles: Vec<Particle>,
 }
@@ -130,6 +130,16 @@ const OFF_PYLON_TINT: Vec3 = Vec3::new(0.3, 0.3, 0.3);
 const BEACON_BEAM_M: f32 = 25.0;
 const BEACON_BEAM_WIDTH_M: f32 = 0.12;
 const BEACON_BEAM_RGB: [Vec3; 2] = [Vec3::new(0.3, 0.6, 2.0), Vec3::new(2.0, 0.35, 0.2)];
+/// `HIT_EFFECT_S`, `HIT_RED_FRAC`, `HIT_SHAKE_PX` and `HIT_BLUR_PX` are the Lunar Surface demo's
+/// `hit_effects` player settings: seconds the red, shake and blur of a hit take to fade, how red the
+/// screen's edges turn, and how far the screen shakes and the edges blur, in window pixels.
+const HIT_EFFECT_S: f32 = 0.6;
+const HIT_RED_FRAC: f32 = 0.6;
+const HIT_SHAKE_PX: f32 = 6.0;
+const HIT_BLUR_PX: f32 = 6.0;
+/// `HIT_SHAKE_TURN_RAD` is the golden angle, how far the shake's direction turns each frame (the
+/// Lunar Surface demo's `SPAWN_TURN_RAD`).
+const HIT_SHAKE_TURN_RAD: f64 = 2.399_963_229_728_653;
 /// `FLICKER_SLOW_RAD_PER_S` and `FLICKER_FAST_RAD_PER_S` are the two waves a flame flickers by.
 const FLICKER_SLOW_RAD_PER_S: f32 = 11.0;
 const FLICKER_FAST_RAD_PER_S: f32 = 27.0;
@@ -163,7 +173,9 @@ pub struct Session {
     flashes: Vec<Flash>,
     hit_marker_s: f32,
     kill_marker_s: f32,
-    damage_flash_frac: f32,
+    hit_effect_frac: f32,
+    last_health: f32,
+    frame_count: u64,
     spawn_counter: usize,
     noise_state: u32,
     pub autopilot_waypoint: usize,
@@ -250,7 +262,9 @@ impl Session {
             flashes: Vec::new(),
             hit_marker_s: 0.0,
             kill_marker_s: 0.0,
-            damage_flash_frac: 0.0,
+            hit_effect_frac: 0.0,
+            last_health: MAX_HEALTH,
+            frame_count: 0,
             spawn_counter: 1,
             noise_state: 0xdead_beef,
             autopilot_waypoint: 0,
@@ -530,7 +544,6 @@ impl Session {
         audio.play(Sound::BotShot, gain * 1.3, pan);
         if shot.did_hit_player {
             self.player.take_damage(SHOT_DAMAGE);
-            self.damage_flash_frac = 1.0;
             audio.play(Sound::Hurt, 0.8, pan);
         } else {
             self.add_impact(
@@ -638,6 +651,11 @@ impl Session {
         } else {
             *controls
         };
+        self.frame_count += 1;
+        if self.player.health < self.last_health {
+            self.hit_effect_frac = 1.0;
+        }
+        self.last_health = self.player.health;
         self.is_trigger_down = controls.weapon.is_trigger_held && self.weapon.ammo > 0;
         let bar_state: OverlayHudState = self.overlay_hud_state();
         self.bar_pulses.update(dt_s, &bar_state);
@@ -792,7 +810,7 @@ impl Session {
         self.flashes.retain(|flash| flash.age_s < flash.life_s);
         self.hit_marker_s = (self.hit_marker_s - dt_s).max(0.0);
         self.kill_marker_s = (self.kill_marker_s - dt_s).max(0.0);
-        self.damage_flash_frac = (self.damage_flash_frac - dt_s * 2.5).max(0.0);
+        self.hit_effect_frac = (self.hit_effect_frac - dt_s / HIT_EFFECT_S).max(0.0);
     }
 
     /// `bot_pose` samples a bot's blended animation pose.
@@ -838,6 +856,20 @@ impl Session {
     /// `overlay_hud_state` is what the HUD's bars show now: health in segments of one body hit,
     /// the magazine in segments of one shot (overheated while reloading), the sprint energy, the
     /// console hold and whether the menu covers the view.
+    /// `get_hit_effect` is what the last hit on the player still does to the view, as the Lunar
+    /// Surface demo's `get_hit_effect` gives it: red edges, a blur from the edges inward, and a
+    /// shake in a new direction each frame (the golden angle apart), fading over `HIT_EFFECT_S`.
+    fn get_hit_effect(&self) -> HitEffect {
+        let shake_rad: f64 = self.frame_count as f64 * HIT_SHAKE_TURN_RAD;
+        let shake_px: f32 = HIT_SHAKE_PX * self.hit_effect_frac;
+        HitEffect {
+            strength_frac: self.hit_effect_frac,
+            red_frac: HIT_RED_FRAC,
+            blur_px: HIT_BLUR_PX,
+            shake_px: [shake_rad.cos() as f32 * shake_px, shake_rad.sin() as f32 * shake_px],
+        }
+    }
+
     fn overlay_hud_state(&self) -> OverlayHudState {
         OverlayHudState {
             health_frac: self.player.health / MAX_HEALTH,
@@ -1161,7 +1193,7 @@ impl Session {
             viewmodel_particles,
             hud_rects,
             overlay_rects,
-            damage_flash_frac: self.damage_flash_frac,
+            hit_effect: self.get_hit_effect(),
         }
     }
 }

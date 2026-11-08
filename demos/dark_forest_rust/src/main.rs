@@ -53,6 +53,7 @@ use menu::{Menu, MenuOutcome, MenuSettings, Scoreboard};
 use minimap::{Mark, Minimap};
 use platform::Platform;
 use render::metal::MetalRenderer;
+use render::overlay::HitEffect;
 use render::{FrameDescription, FrameTiming, HudImage, HudRect, RenderSettings, Renderer};
 use scene::{Scene, SceneOptions};
 use text_overlay::TextPicture;
@@ -373,7 +374,7 @@ fn capture_wormhole_lens(
                     hud_rects: &[],
                     hud_images: &[],
                     time_s: 0.0,
-                    damage_flash_frac: 0.0,
+                    hit_effect: HitEffect::default(),
                     lens_draws: &[],
                     lens_particles: &[],
                     overlay_rects: &[],
@@ -680,7 +681,7 @@ fn run_title_screen(
                 hud_rects: &frame.hud_rects,
                 hud_images: &[picture.get_image(width_px, height_px, TITLE_HEIGHT_FRAC)],
                 time_s: start.elapsed().as_secs_f32(),
-                damage_flash_frac: 0.0,
+                hit_effect: HitEffect::default(),
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
                 overlay_rects: &[],
@@ -1274,7 +1275,7 @@ fn main() {
                 hud_rects: &frame.hud_rects,
                 hud_images: &hud_images,
                 time_s: session.time_s,
-                damage_flash_frac: frame.damage_flash_frac,
+                hit_effect: frame.hit_effect,
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
                 overlay_rects: &frame.overlay_rects,

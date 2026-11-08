@@ -89,3 +89,15 @@ const _: () = assert!(
     std::mem::size_of::<OverlayRect>() == BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT,
     "OverlayRect must match the shader's 144-byte OverlayRect"
 );
+
+/// `HitEffect` is what a recent hit does to the scene (the shader's `read_hit_scene`): how much of
+/// the effect is left (1 just after the hit, 0 for none), how red the edges turn, how wide their
+/// blur is and how far the picture is shifted this frame. It matches `post.metal`'s `HitEffect`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HitEffect {
+    pub strength_frac: f32,
+    pub red_frac: f32,
+    pub blur_px: f32,
+    pub shake_px: [f32; 2],
+}
