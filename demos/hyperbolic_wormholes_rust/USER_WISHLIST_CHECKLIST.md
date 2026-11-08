@@ -128,7 +128,8 @@ is in [`AGENTS.md`](AGENTS.md).
   is just to have it have verticality, similar to the Star Wars Endor or whatever, maybe the Wookiee Planet, where
   there's like tree houses and stuff. Maybe have some like rope ladders and ways of going up trees. And crossing
   across them."
-  Merged into `staging/user-4gatepylon` with #399, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #399, 2026-11-08. #426: robots, players and lasers show through the
+  wormholes (open, 2026-11-08).
 - [?] **W-123 Match progression menu.** "Make sure that the menus, when you see, like, there's a menu that shows the
   game progression, kind of the game history. Like, some state, I suppose, in the game server has to keep track of the
   game history and which team won what and what the wavefronts are, who has ownership, defensive ownership, offensive
