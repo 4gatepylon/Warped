@@ -1036,6 +1036,25 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D83. Aiming zooms in, and the flashlight moves to F
+
+- **Choice:**
+  - **Keys:** a new `aim` control, the right button by default. The flashlight moves from the right button to `F`.
+    It still shines only while held.
+  - **Zoom:** holding `aim` zooms in, 2.5 times with the sniper and 1.5 times with the rifle (`aim.sniper_zoom` and
+    `aim.rifle_zoom` in `server_settings.yaml`, at least 1). It eases in and out over `aim.zoom_s` (0.15 s, a
+    smoothstep). The zoom divides the camera's `tan_half_fov` and `pixel_angle_rad` in the frame after it is packed
+    (`PackedFrame::zoom_in`), for both renderers and both maps.
+  - **Turning:** the mouse turns the view more slowly by the same factor, so aiming is steadier.
+  - **The gun stays put** and keeps its normal field of view: the laser leaves its tip as before, and other
+    players' windows, which don't know who is aiming, draw the same beams.
+- **Alternatives:**
+  - moving the gun to the middle of the view (the laser would then start somewhere else than other windows draw
+    it);
+  - zoom as a player's own setting (it changes what a player can see, so it is the server's, like recoil);
+  - slowing walking while aiming (not asked for).
+- **Rationale:** you asked for a way to aim on the right button, with the flashlight moved to another key.
+
 ### D88. Lasers still stop on window glass (W-57)
 
 - **Choice:**

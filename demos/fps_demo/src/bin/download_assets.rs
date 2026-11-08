@@ -1,4 +1,4 @@
-//! `download-assets` downloads every asset in `asset_manifest` into `demos/fps_demo/.assets/`.
+//! `download-assets` downloads every asset in `asset_manifest` into `demos/fps_demo/assets/`.
 //!
 //! Interface: `--dry-run` prints the files it would download and downloads nothing. Files that
 //! already exist with the expected size are skipped, so a second run downloads nothing. The two
@@ -8,7 +8,7 @@
 //! Example: `cargo run --release --bin download-assets -- --dry-run`
 //!
 //! Must know:
-//! - Side effects: `download-assets` writes only inside `.assets/`, which `make clean` keeps.
+//! - Side effects: `download-assets` writes only inside `assets/`, which `make clean` keeps.
 
 #[path = "../asset_manifest.rs"]
 #[allow(dead_code)]
@@ -36,7 +36,7 @@ const TEXTURE_MAP_API_NAMES: [(&str, &str); 3] =
 /// `Arguments` is the command line.
 #[derive(Parser)]
 #[command(
-    about = "Download the demo's CC0 assets into .assets/.",
+    about = "Download the demo's CC0 assets into assets/.",
     after_help = "Example: download-assets --dry-run"
 )]
 struct Arguments {
@@ -107,7 +107,7 @@ fn plan_model(assets_dir: &Path, model: &PolyHavenModel) -> Vec<PlannedFile> {
 
 /// `plan_downloads` lists every file of the manifest.
 ///
-/// Example: `let planned_files = plan_downloads(Path::new(".assets"));`
+/// Example: `let planned_files = plan_downloads(Path::new("assets"));`
 fn plan_downloads(assets_dir: &Path) -> Vec<PlannedFile> {
     let mut planned_files: Vec<PlannedFile> = Vec::new();
     let hdri_files: Value = fetch_json(&format!("{POLY_HAVEN_FILES_API_URL}/{}", HDRI.id));
