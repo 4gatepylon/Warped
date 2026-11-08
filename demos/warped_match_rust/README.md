@@ -8,8 +8,8 @@ the progression in each player's match window. W-123.
 
 It is a copy of `demos/hyperbolic_wormholes_rust/` (first commit on the branch, verbatim) plus
 the match (`src/match_state.rs`, `src/match_flow.rs`, `src/match_menu.rs`, `match_levels.yaml`)
-and the level interface below added to the copied level code. Lunar Surface stands in for the
-levels not plugged in yet (the house map has no consoles, so it can't be won).
+and the level interface below added to the copied level code. All five levels are real: Lunar
+Surface is this copy; the other four are built from their branches by `make levels`.
 
 ## Play
 
@@ -87,20 +87,36 @@ address); each round's level server 47852, and this copy's level discovery 47853
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Dust | blue 2 | 3 | `demos/dust_rust/` | `devin/dust-demo` | plugged in (`make levels`) |
 | 2 | Snow Planet | blue 1 | 2 | `demos/snow_planet_rust/` | `devin/snow-planet-demo` | plugged in (`make levels`) |
-| 3 | City Sphere | purple 0 | 2 | `demos/city_sphere_rust/` | `devin/city-sphere-demo` | Lunar Surface stands in |
-| 4 | Dark Forest | red 1 | 2 | `demos/dark_forest_rust/` | `devin/dark-forest-demo` | Lunar Surface stands in |
+| 3 | City Sphere | purple 0 | 2 | `demos/city_sphere_rust/` | `devin/city-sphere-demo` | plugged in (`make levels`) |
+| 4 | Dark Forest | red 1 | 2 | `demos/dark_forest_rust/` | `devin/dark-forest-demo` | plugged in (`make levels`) |
 | 5 | Lunar Surface | red 2 | 3 | `demos/hyperbolic_wormholes_rust/` | `staging/user-4gatepylon` | playable (copied here) |
 
 To plug a level in: add `<folder name>:<branch>` to `LEVEL_BRANCHES` in the `Makefile` (`make
 levels` checks the branch out as a git worktree in `.levels/<folder name>/` and builds it there;
 `make serve-match` runs it first), then in `match_levels.yaml` set the level's `program` to the
 binary (e.g. `.levels/snow_planet/demos/snow_planet_rust/.build/release/snow-planet`) and `map`,
-drop `stand_in_for`, and update this table.
+drop `stand_in_for`, and update this table. Set `takes_bot_label: false` if its bots don't take
+`--label`. `make levels` follows each branch's tip, so run it again to pick up their changes.
+Until a level is plugged in, `program: self` with `map: lunar-surface` and `stand_in_for: <level>`
+plays it on Lunar Surface.
 
 ## Results
 
-See the PR for the latest runs; `make e2e-match` writes `.artifacts/match/<run>/match.json`
+A bot match across all five real levels (`make e2e-match`, consoles off in 1 s) ended in 14
+rounds, blue winning: City Sphere blue; Dark Forest and Snow Planet held by their defenders
+for six rounds; Snow Planet red, then Dust held by blue three times; Dark Forest blue, Lunar
+Surface blue. `make e2e-match` writes `.artifacts/match/<run>/match.json`
 (rounds, winners, outcome) and each round's level server log.
+
+## Performance
+
+The match adds no rendering of its own: the match window is a text page, and each round's level
+is its own program at its own frame rate (see each level's README for its numbers). Lunar Surface
+is the hyperbolic demo's renderer unchanged, so its numbers there hold. On this session's Mac, a
+virtual M4, `--bench-views --map lunar-surface --width-px 2560 --height-px 1440` took 19 to 164 GPU
+ms a view, about five times the hyperbolic README's on a real Mac (blue spawn 45.5 against 8.4),
+so its GPU can't judge the 16.7 ms target. City Sphere, opened by the match in a 1280x800 window,
+showed 61 fps and 3.3 GPU ms.
 
 ## Files
 

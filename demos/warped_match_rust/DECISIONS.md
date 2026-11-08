@@ -26,9 +26,15 @@ the user should check.
 - **Ownership on the page**: defensive ownership of a level is its side's team (purple has none);
   offensive ownership is the team whose wavefront it is, or that captured it (won it attacking).
   **Weigh in** if "ownership" was meant differently (e.g. a captured level changing hands).
-- **Stand-ins**: Lunar Surface (from the copied hyperbolic demo) plays each level not plugged in
-  yet; the page marks it `(stand-in)`. The house map has no consoles, so it can't be won and isn't
+- **Stand-ins**: Lunar Surface (from the copied hyperbolic demo) can play a level not plugged in
+  (`stand_in_for` in `match_levels.yaml`); the page marks it `(stand-in)`. All four levels are
+  plugged in now, so none is used. The house map has no consoles, so it can't be won and isn't
   used.
+- **Levels' flags differ a little**: Dark Forest's bots take no `--label`, so a level says so in
+  `match_levels.yaml` (`takes_bot_label: false`) rather than every level having to accept every
+  flag. Dark Forest takes no `--map` name either (its `--map` is a map file), so its entry has no
+  `map`. The fast bot match shortens consoles to 1 s through each level's `--server-settings`
+  where it has one (Dark Forest has none, so it keeps its own time).
 - **Plugging in a level links its branch** (`make levels`: a git worktree of the level's branch
   in `.levels/`, built there) rather than copying its folder, so the match always plays the
   level's latest pushed version and this branch stays small. `match_levels.yaml` names each
