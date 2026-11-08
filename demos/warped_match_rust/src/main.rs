@@ -393,7 +393,13 @@ struct Arguments {
     /// With --match --bot: each round's winner in turn, e.g. blue,blue,red: the bot turns off
     /// consoles in the rounds its team should win and joins no level in the others, so a test can
     /// steer a match through every level. The bot fails if the match outlasts the list.
-    #[arg(long, value_enum, value_delimiter = ',', requires = "bot", requires = "match_server")]
+    #[arg(
+        long,
+        value_enum,
+        value_delimiter = ',',
+        requires = "bot",
+        requires = "match_server"
+    )]
     bot_round_winners: Vec<TeamFlag>,
     /// With --serve-match: seconds between rounds, showing the progression.
     #[arg(long, default_value_t = 10.0)]
