@@ -134,6 +134,10 @@ pub fn place_camera(world: &VoxelWorld, eye: DMat4, boom_frac: f64) -> ThirdPers
 /// the eye looks (behind the player, say).
 ///
 /// Example: `let shot_eye = aim_at_crosshair(&world, eye, placed.frame);`
+///
+/// Must know:
+/// - Limitations: a wormhole's throat sends two rays 0.6 m apart far apart, so a shot through a
+///   mouth lands only roughly where the crosshair points; aiming looks from the eye, exactly.
 pub fn aim_at_crosshair(world: &VoxelWorld, eye: DMat4, camera: DMat4) -> DMat4 {
     let x: DVec4 = eye.col(AXIS_W);
     let target: DVec4 = world.find_crosshair_point(camera);
@@ -160,7 +164,7 @@ mod tests {
     //! | Chosen view | first person, third person, switched back | `switching_eases_out_and_back_and_aiming_brings_it_in` |
     //! | Time since switching | none, part of `SWITCH_S`, all of it and more | `switching_eases_out_and_back_and_aiming_brings_it_in` |
     //! | Aim fraction | not aiming, half way, fully aimed | `switching_eases_out_and_back_and_aiming_brings_it_in` |
-    //! | Crosshair's point | ahead (the eye turns to it), behind the player (the eye doesn't turn) | `a_shot_lands_where_the_crosshair_points` |
+    //! | Crosshair's ray | ahead and straight, ahead through the black hole's reach (bent alike), behind the player (the eye doesn't turn) | `a_shot_lands_where_the_crosshair_points` |
 
     use super::*;
     use crate::geometry::{AXIS_X, invert_lorentz, make_rotation};
@@ -172,11 +176,14 @@ mod tests {
     const LOOK_DOWN_RAD: f64 = -0.5;
     const LOOK_UP_RAD: f64 = 1.2;
     const AIM_DOWN_RAD: f64 = -0.3;
+    const HILL_AT_M: [f64; 2] = [-27.0, 3.0];
+    const HILL_TOWARD_M: [f64; 2] = [-10.0, 2.0];
+    const AIM_HILL_RAD: f64 = -0.08;
     const PART_WAY_FRAC: f64 = 0.1;
     const HALF_FRAC: f64 = 0.5;
     const OFFSET_TOLERANCE_M: f64 = 0.02;
     const GAP_TOLERANCE_M: f64 = 0.01;
-    const SPOT_TOLERANCE_M: f64 = 0.02;
+    const SPOT_TOLERANCE_M: f64 = 0.05;
     const MIN_PARALLAX_M: f64 = 0.5;
     const TINY_M: f64 = 1e-6;
     const FRAC_TOLERANCE: f64 = 1e-9;
@@ -329,18 +336,32 @@ mod tests {
     #[test]
     fn a_shot_lands_where_the_crosshair_points() {
         let world: VoxelWorld = load_lunar_surface();
-        let eye: DMat4 = VoxelPlayer::AtView(&world, OPEN_AT_M, OPEN_TOWARD_M, None, AIM_DOWN_RAD)
+        let spot = |shot: Shot| -> DVec4 { shot.spot.expect("the shot lands on the ground") };
+        for (what, at_m, toward_m, pitch_rad) in [
+            ("close ahead", OPEN_AT_M, OPEN_TOWARD_M, AIM_DOWN_RAD),
+            (
+                "in the black hole's reach",
+                HILL_AT_M,
+                HILL_TOWARD_M,
+                AIM_HILL_RAD,
+            ),
+        ] {
+            let eye: DMat4 = VoxelPlayer::AtView(&world, at_m, toward_m, None, pitch_rad)
+                .get_camera_frame(&world);
+            let camera: DMat4 = place_camera(&world, eye, 1.0).frame;
+            let seen: DVec4 = spot(world.trace_laser(camera));
+            let aimed: DVec4 = spot(world.trace_laser(aim_at_crosshair(&world, eye, camera)));
+            let aimed_m: f64 = get_distance(aimed, seen) * world.r;
+            assert!(aimed_m < SPOT_TOLERANCE_M, "{what}: {aimed_m} m off");
+            let straight_m: f64 = get_distance(spot(world.trace_laser(eye)), seen) * world.r;
+            assert!(
+                straight_m > MIN_PARALLAX_M,
+                "{what}: {straight_m} m off unturned"
+            );
+        }
+        let eye: DMat4 = VoxelPlayer::AtView(&world, OPEN_AT_M, OPEN_TOWARD_M, None, 0.0)
             .get_camera_frame(&world);
         let camera: DMat4 = place_camera(&world, eye, 1.0).frame;
-        let target: DVec4 = world.find_crosshair_point(camera);
-        let spot = |shot: Shot| -> DVec4 { shot.spot.expect("the shot lands on the ground") };
-        let aimed_m: f64 = get_distance(
-            spot(world.trace_laser(aim_at_crosshair(&world, eye, camera))),
-            target,
-        ) * world.r;
-        assert!(aimed_m < SPOT_TOLERANCE_M, "{aimed_m} m from the crosshair");
-        let straight_m: f64 = get_distance(spot(world.trace_laser(eye)), target) * world.r;
-        assert!(straight_m > MIN_PARALLAX_M, "{straight_m} m");
         let looking_back: DMat4 = camera * make_rotation(AXIS_Z, AXIS_X, std::f64::consts::PI);
         assert_eq!(aim_at_crosshair(&world, eye, looking_back), eye);
     }

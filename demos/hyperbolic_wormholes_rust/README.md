@@ -78,6 +78,11 @@ make join-game SERVER=127.0.0.1
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
+- `V` switches between first and third person (on voxel maps). The camera eases out over 0.3 s to 3 m behind and
+  0.6 m above your head, looking where you look, and you see your own body as the others see it, without the gun in
+  hand. It pulls in toward your head when the ground or a wall is in the way (in a 2 m walkway it stays at your
+  head). Shots still leave your eye, turned toward the point under the crosshair, so the beam runs from your head to
+  the crosshair; holding the right button to aim brings the camera back to your eye (D100).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.

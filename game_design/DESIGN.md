@@ -285,6 +285,7 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | `Ctrl` (held) | Crouch: a lower view and half the walking speed |
 | Right button (held) | Aim: zoom in (more with the sniper rifle) and turn more slowly while held |
 | `F` (held) | Flashlight: a cone of light from the eye while held (other players don't see it yet) |
+| `V` | Switch between first person and a third-person view from slightly behind and above the character, which pulls in when a wall is behind it; shots still leave the eye toward the crosshair, and aiming looks from the eye |
 | Left click | Shoot, standing still or crouched (walking crouched too), not while walking upright, sprinting, in the air or deactivating a console (hold it for a weapon that fires while held, such as the rifle) |
 | Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |

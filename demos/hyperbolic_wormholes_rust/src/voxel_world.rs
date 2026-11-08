@@ -786,21 +786,17 @@ impl VoxelWorld {
     }
 
     /// `find_crosshair_point` gives the point the straight ray from `camera`'s eye along its
-    /// crosshair first meets: the ground or a block (through glass, as the laser goes), else where
-    /// it enters a warp's reach, else the end of the laser's range. From inside a warp's reach the
-    /// ray goes on straight, past every reach.
+    /// crosshair first meets, ignoring the warps' bending: the ground or a block (through glass, as
+    /// the laser goes), else the end of the laser's range. Two nearby rays aimed at it, as from the
+    /// eye and from a camera behind it, bend nearly alike on the way.
     ///
     /// Example: `let target = world.find_crosshair_point(camera);`
     pub fn find_crosshair_point(&self, camera: DMat4) -> DVec4 {
         let (x, v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
-        let end_s: f64 = match self.find_warp_inside(x) {
-            Some(_) => max_s,
-            None => self.find_warp_entry(x, v, max_s).0,
-        };
         let s: f64 = self
-            .trace_scene(x, v, end_s, None)
-            .map_or(end_s, |hit| hit.s);
+            .trace_scene(x, v, max_s, None)
+            .map_or(max_s, |hit| hit.s);
         geodesic_point(x, v, s)
     }
 
