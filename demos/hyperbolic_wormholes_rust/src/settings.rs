@@ -1,8 +1,8 @@
 //! `settings.rs` reads the game's two settings files, so players can tune it without rebuilding:
 //! `server_settings.yaml`, the numbers that shape play for everyone (movement, sprint energy, both
-//! guns, consoles, respawning, how a hit slows, the flashlight), which the game server sends to every
-//! player who joins; and `player_settings.yaml`, each player's own choices (keys, mouse speed, head
-//! bob, motion blur, how a hit looks).
+//! guns, consoles, respawning, how a hit slows, the flashlight, thrown wormholes), which the game
+//! server sends to every player who joins; and `player_settings.yaml`, each player's own choices
+//! (keys, mouse speed, head bob, motion blur, how a hit looks).
 //!
 //! Interface: `ServerSettings` (`Builtin`, `Load`, `FromJson`, `to_json`), `PerPlayerSettings`
 //! (`Builtin`, `Load`) and their sections.
@@ -24,29 +24,38 @@ use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 10] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 18] = [
     "map_edge.start_wall_frac",
     "sniper.reload_s",
     "sniper.noise_mean_rad",
     "sniper.noise_max_rad",
+    "sniper.beam_speckle_mean_frac",
+    "sniper.beam_speckle_max_frac",
     "rifle.noise_start_rad",
     "rifle.noise_max_rad",
+    "rifle.beam_speckle_start_frac",
+    "rifle.beam_speckle_max_frac",
+    "beam_speckle.black_frac",
+    "beam_speckle.white_frac",
+    "beam_speckle.dropout_frac",
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
     "respawn.delay_s",
+    "wormholes.throw_up_rad",
 ];
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
+const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
     "view.wormhole_tint_frac",
-    "view.wormhole_tint_s",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
     "hit_effects.red_frac",
     "hit_effects.shake_px",
     "hit_effects.blur_px",
 ];
+const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -90,8 +99,9 @@ pub struct HeadBobSettings {
 
 /// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
 /// to reload, how many hits eliminate a player, how its beam flies (speed, and how long each
-/// point stays lit), and how far a shot strays from the crosshair (the mean of an exponential
-/// distribution, and a cap; `shot_noise.rs`).
+/// point stays lit), how far a shot strays from the crosshair (the mean of an exponential
+/// distribution, and a cap; `shot_noise.rs`), and the share of its beam's pixels that speckle each
+/// frame (the same: a mean and a cap).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SniperSettings {
@@ -102,11 +112,14 @@ pub struct SniperSettings {
     pub beam_trail_s: f64,
     pub noise_mean_rad: f64,
     pub noise_max_rad: f64,
+    pub beam_speckle_mean_frac: f64,
+    pub beam_speckle_max_frac: f64,
 }
 
 /// `RifleSettings` is gun 2: its fire rate, how long a shot hits, how its beam flies, overheating
-/// and cooling, the hits that eliminate a player, each shot's recoil, and the most a shot strays
-/// from the crosshair, cold and at full heat (`shot_noise.rs`).
+/// and cooling, the hits that eliminate a player, each shot's recoil, the most a shot strays
+/// from the crosshair, cold and at full heat, and the share of its beam's pixels that speckle each
+/// frame, cold and at full heat (`shot_noise.rs`).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RifleSettings {
@@ -123,6 +136,18 @@ pub struct RifleSettings {
     pub recoil_settle_s: f64,
     pub noise_start_rad: f64,
     pub noise_max_rad: f64,
+    pub beam_speckle_start_frac: f64,
+    pub beam_speckle_max_frac: f64,
+}
+
+/// `BeamSpeckleSettings` is how a laser beam's speckled pixels look, with both guns: the shares of
+/// them painted black, turned white and dropping out (showing what is behind), which add up to 1.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct BeamSpeckleSettings {
+    pub black_frac: f64,
+    pub white_frac: f64,
+    pub dropout_frac: f64,
 }
 
 /// `ConsoleSettings` is how long holding `E` takes to turn off a console, and from how far.
@@ -182,6 +207,24 @@ pub struct AimSettings {
     pub zoom_s: f64,
 }
 
+/// `WormholeSettings` is how a thrown wormhole mouth flies (its speed, how far above the aim it
+/// leaves, its gravity and how long it may fly before it fizzles), on voxel maps its size
+/// (Schwarzschild radius and reach; the house's mouths all share the house's size), how many shots
+/// of each gun destroy an enemy's pair, and how long a hit pair flashes red.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct WormholeSettings {
+    pub throw_speed_m_per_s: f64,
+    pub throw_up_rad: f64,
+    pub gravity_m_per_s_per_s: f64,
+    pub max_flight_s: f64,
+    pub schwarzschild_radius_m: f64,
+    pub reach_m: f64,
+    pub sniper_hits_to_destroy: u8,
+    pub rifle_hits_to_destroy: u8,
+    pub hit_flash_s: f64,
+}
+
 /// `MapEdgeSettings` is the map's soft edge on a map with a crater: how far up the crater's wall
 /// (0 at its foot, 1 at the rim) players start to slow down, and how far up their speed would
 /// reach 0, which they never get to (each step outward is cut by the share of the way they have
@@ -195,8 +238,7 @@ pub struct MapEdgeSettings {
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
-/// blueshifts toward cyan just after going through a wormhole (0 to 1) and how long that takes to
-/// fade, and the head bob.
+/// flashes near white while moving through a wormhole's throat (0 to 1), and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
@@ -204,7 +246,6 @@ pub struct ViewSettings {
     pub motion_blur_s: f64,
     pub edge_stretch_frac: f64,
     pub wormhole_tint_frac: f64,
-    pub wormhole_tint_s: f64,
     pub head_bob: HeadBobSettings,
 }
 
@@ -256,12 +297,14 @@ pub struct ServerSettings {
     pub sprint_energy: SprintEnergySettings,
     pub sniper: SniperSettings,
     pub rifle: RifleSettings,
+    pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
     pub aim: AimSettings,
+    pub wormholes: WormholeSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -311,6 +354,24 @@ fn read_text(path: &Path) -> Result<String> {
         .map_err(|error| format!("settings {}: {error}", path.display()))?)
 }
 
+/// `drop_removed_keys` deletes from a settings file's YAML each dotted key of `removed` (such as
+/// `view.wormhole_tint_s`) that it has, so a file an older version saved still loads; every other
+/// unknown key still fails.
+///
+/// Example: `drop_removed_keys(&mut yaml, &REMOVED_PLAYER_KEYS);`
+fn drop_removed_keys(yaml: &mut serde_yaml::Value, removed: &[&str]) {
+    for key in removed {
+        let mut parts: Vec<&str> = key.split('.').collect();
+        let name: &str = parts.pop().expect("a key has at least one part");
+        let parent: Option<&mut serde_yaml::Value> = parts
+            .iter()
+            .try_fold(&mut *yaml, |node, part| node.get_mut(*part));
+        if let Some(serde_yaml::Value::Mapping(fields)) = parent {
+            fields.remove(name);
+        }
+    }
+}
+
 impl ServerSettings {
     /// `FromYaml` reads server settings from YAML text, naming `source` in errors, and checks every
     /// number (`check_numbers`).
@@ -338,6 +399,28 @@ impl ServerSettings {
             return Err(format!(
                 "settings {source}: rifle needs noise_start_rad <= noise_max_rad, not {} and {}",
                 rifle.noise_start_rad, rifle.noise_max_rad
+            )
+            .into());
+        }
+        let speckle: &BeamSpeckleSettings = &settings.beam_speckle;
+        let speckles_frac: [f64; 7] = [
+            settings.sniper.beam_speckle_mean_frac,
+            settings.sniper.beam_speckle_max_frac,
+            rifle.beam_speckle_start_frac,
+            rifle.beam_speckle_max_frac,
+            speckle.black_frac,
+            speckle.white_frac,
+            speckle.dropout_frac,
+        ];
+        let kinds_sum_frac: f64 = speckle.black_frac + speckle.white_frac + speckle.dropout_frac;
+        if speckles_frac.iter().any(|&x| x > 1.0)
+            || rifle.beam_speckle_start_frac > rifle.beam_speckle_max_frac
+            || (kinds_sum_frac - 1.0).abs() > SPECKLE_KINDS_SUM_TOLERANCE_FRAC
+        {
+            return Err(format!(
+                "settings {source}: beam speckles are shares from 0 to 1, with the rifle's \
+                 beam_speckle_start_frac <= beam_speckle_max_frac and beam_speckle's three \
+                 shares adding up to 1, not {speckles_frac:?}"
             )
             .into());
         }
@@ -389,13 +472,17 @@ impl ServerSettings {
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
-    /// `view.wormhole_tint_frac` at most 1.
+    /// `view.wormhole_tint_frac` at most 1. The keys in `REMOVED_PLAYER_KEYS`, which older
+    /// versions saved, are dropped (`drop_removed_keys`).
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
     fn FromYaml(text: &str, source: &str) -> Result<PerPlayerSettings> {
-        let file: PlayerFile =
+        let mut yaml: serde_yaml::Value =
             serde_yaml::from_str(text).map_err(|error| format!("settings {source}: {error}"))?;
+        drop_removed_keys(&mut yaml, &REMOVED_PLAYER_KEYS);
+        let file: PlayerFile =
+            serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         if file.view.wormhole_tint_frac > 1.0 {
@@ -453,8 +540,9 @@ mod tests {
     //! | Source | the built-in files, server settings sent as JSON, player settings the menu saved | `builtin_settings_read_and_survive_json`, `saved_player_settings_load_back` |
     //! | Keys | all present, one unknown, one missing | `builtin_settings_read_and_survive_json`, `unknown_and_missing_keys_fail` |
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
-    //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise that shrinks with heat) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
-    //! | Wormhole tint strength | 0 (with a fade of 0 s), between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise or beam speckle that shrinks with heat, a speckle share above 1, speckle kinds that don't add up to 1) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
+    //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -523,6 +611,26 @@ mod tests {
             .expect_err("a rifle's noise that shrinks with heat fails")
             .to_string();
         assert!(error.contains("noise_start_rad"), "{error}");
+        for bad in [
+            BUILTIN_SERVER_YAML.replace(
+                "beam_speckle_start_frac: 0.0",
+                "beam_speckle_start_frac: 0.7",
+            ),
+            BUILTIN_SERVER_YAML.replace("beam_speckle_max_frac: 0.5", "beam_speckle_max_frac: 1.5"),
+            BUILTIN_SERVER_YAML
+                .replace("beam_speckle_mean_frac: 0.2", "beam_speckle_mean_frac: 1.5"),
+            BUILTIN_SERVER_YAML.replace("dropout_frac: 0.8", "dropout_frac: 0.7"),
+        ] {
+            let error: String = ServerSettings::FromYaml(&bad, "test")
+                .expect_err("a bad beam speckle fails")
+                .to_string();
+            assert!(error.contains("beam speckles"), "{error}");
+        }
+        let all_dropout: String = BUILTIN_SERVER_YAML
+            .replace("black_frac: 0.1", "black_frac: 0")
+            .replace("white_frac: 0.1", "white_frac: 0")
+            .replace("dropout_frac: 0.8", "dropout_frac: 1.0");
+        assert!(ServerSettings::FromYaml(&all_dropout, "test").is_ok());
         let backward_edge: String =
             BUILTIN_SERVER_YAML.replace("start_wall_frac: 0.0", "start_wall_frac: 0.6");
         let error: String = ServerSettings::FromYaml(&backward_edge, "test")
@@ -540,9 +648,8 @@ mod tests {
 
     #[test]
     fn wormhole_tint_takes_0_to_1() {
-        let none: String = BUILTIN_PLAYER_YAML
-            .replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0")
-            .replace("wormhole_tint_s: 1.5", "wormhole_tint_s: 0");
+        let none: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0");
         assert!(PerPlayerSettings::FromYaml(&none, "test").is_ok());
         let half: String =
             BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0.5");
@@ -554,5 +661,25 @@ mod tests {
             .expect("a tint above 1 fails")
             .to_string();
         assert!(error.contains("view.wormhole_tint_frac"), "{error}");
+    }
+
+    #[test]
+    fn removed_keys_are_dropped_and_others_still_fail() {
+        const OLD_TINT_LINE: &str = "\n  wormhole_tint_s: 1.5  # removed by W-82";
+        let with_tint_line = |line: &str| -> String {
+            let tint_frac_line: &str = "\n  wormhole_tint_frac: 1.0";
+            BUILTIN_PLAYER_YAML.replacen(tint_frac_line, &format!("{tint_frac_line}{line}"), 1)
+        };
+        let old_save: String = with_tint_line(OLD_TINT_LINE);
+        assert_ne!(old_save, BUILTIN_PLAYER_YAML);
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let typo: String = with_tint_line("\n  wormhole_tint_seconds: 1.5");
+        let error: String = PerPlayerSettings::FromYaml(&typo, "test")
+            .err()
+            .expect("a key that was never removed fails")
+            .to_string();
+        assert!(error.contains("wormhole_tint_seconds"), "{error}");
     }
 }
