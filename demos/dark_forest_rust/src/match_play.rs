@@ -210,6 +210,7 @@ impl MatchPlay {
         client.keep_joining()?;
         if let Some(settings) = &client.settings {
             self.settings = settings.clone();
+            session.settings = settings.clone();
         }
         if let Some(team) = client.team {
             session.team = team;
@@ -228,8 +229,7 @@ impl MatchPlay {
         }
         session.winner = client.game.winner;
         self.sync_remotes(client, session, scene);
-        let hits_to_kill: u8 = self.settings.rifle_hits_to_kill;
-        for victim_id in std::mem::take(&mut session.pending_hits) {
+        for (victim_id, hits_to_kill) in std::mem::take(&mut session.pending_hits) {
             client.send_hit(victim_id, hits_to_kill)?;
         }
         if self.last_state.elapsed().as_secs_f64() >= STATE_PERIOD_S && client.id.is_some() {

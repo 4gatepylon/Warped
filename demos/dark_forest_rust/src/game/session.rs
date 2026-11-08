@@ -15,7 +15,9 @@ use std::ops::Range;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::audio::{Audio, Sound};
-use super::bots::{BOT_HEIGHT_M, Bot, BotClip, BotContext, BotShot, RESPAWN_DELAY_S, SHOT_DAMAGE};
+use super::bots::{
+    BOT_HEIGHT_M, BOT_MAX_HEALTH, Bot, BotClip, BotContext, BotShot, RESPAWN_DELAY_S,
+};
 use super::collision::{Aabb, cast_ray};
 use super::hud::{BarPulsePair, HudState, OverlayHudState, build_hud, build_overlay_rects};
 use super::nav::NavGraph;
@@ -26,13 +28,10 @@ use crate::assets::gltf_model::Trs;
 use crate::render::overlay::{HitEffect, OverlayRect};
 use crate::render::{Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
 use crate::scene::{Scene, draw_items_for};
+use crate::settings::ServerSettings;
 
 /// `MAX_DECAL_COUNT` is how many impact marks stay in the world.
 const MAX_DECAL_COUNT: usize = 160;
-/// `BODY_DAMAGE` is the damage of a body hit.
-const BODY_DAMAGE: f32 = 34.0;
-/// `HEAD_DAMAGE` is the damage of a headshot.
-const HEAD_DAMAGE: f32 = 75.0;
 /// `SHOT_RANGE_M` is the weapon's range.
 const SHOT_RANGE_M: f32 = 250.0;
 /// `TEAM_PLAYER_BEAM_COLOR` is the HDR color of the player's beam (times the light scale).
@@ -161,6 +160,7 @@ pub struct Session {
     pub nav: NavGraph,
     pub player: Player,
     pub weapon: Weapon,
+    pub settings: ServerSettings,
     pub bots: Vec<Bot>,
     pub kill_count: u32,
     pub death_count: u32,
@@ -182,7 +182,7 @@ pub struct Session {
     autopilot_trigger_s: f32,
     pub route: Vec<Vec3>,
     pub remote_bots: Vec<RemoteBot>,
-    pub pending_hits: Vec<u32>,
+    pub pending_hits: Vec<(u32, u8)>,
     pub team: u32,
     pub console_off: Vec<bool>,
     pub player_beam_color: Vec3,
@@ -250,6 +250,7 @@ impl Session {
             arena,
             nav,
             weapon: Weapon::new(),
+            settings: ServerSettings::Builtin(),
             bots,
             kill_count: 0,
             death_count: 0,
@@ -412,7 +413,7 @@ impl Session {
         enum ShotHit {
             World(Vec3),
             Bot(usize, bool, Vec3),
-            Remote(u32, Vec3),
+            Remote(u32, bool, Vec3),
         }
         let origin_m: Vec3 = self.player.eye_position_m();
         let direction: Vec3 = self.weapon.shot_direction(&self.player);
@@ -443,10 +444,10 @@ impl Session {
                     }
                 }
                 for remote in self.remote_bots.iter().filter(|r| r.bot.is_alive()) {
-                    for aabb in [remote.bot.head(), remote.bot.body()] {
+                    for (aabb, is_head) in [(remote.bot.head(), true), (remote.bot.body(), false)] {
                         if let Some(hit) = aabb.cast_ray(start_m, piece_direction, nearest_m) {
                             nearest_m = hit.distance_m;
-                            found = Some(ShotHit::Remote(remote.id, hit.normal));
+                            found = Some(ShotHit::Remote(remote.id, is_head, hit.normal));
                         }
                     }
                 }
@@ -477,8 +478,9 @@ impl Session {
         });
         audio.play(Sound::Shot, 0.9, 0.0);
         match shot_hit {
-            Some(ShotHit::Remote(id, normal)) => {
-                self.pending_hits.push(id);
+            Some(ShotHit::Remote(id, is_head, normal)) => {
+                self.pending_hits
+                    .push((id, self.get_hits_to_eliminate(is_head)));
                 self.add_impact(
                     end_m,
                     normal,
@@ -490,7 +492,7 @@ impl Session {
                 audio.play(Sound::HitMarker, 0.5, 0.0);
             }
             Some(ShotHit::Bot(index, is_head, normal)) => {
-                let damage: f32 = if is_head { HEAD_DAMAGE } else { BODY_DAMAGE };
+                let damage: f32 = BOT_MAX_HEALTH / f32::from(self.get_hits_to_eliminate(is_head));
                 let did_kill: bool = self.bots[index].take_damage(damage);
                 self.add_impact(
                     end_m,
@@ -523,6 +525,18 @@ impl Session {
         }
     }
 
+    /// `get_hits_to_eliminate` gives how many hits like this one (to the head when `is_head`)
+    /// eliminate a player or a bot: the server settings' rifle hits, as on Lunar Surface.
+    ///
+    /// Example: `let hits_to_kill: u8 = self.get_hits_to_eliminate(false);`
+    fn get_hits_to_eliminate(&self, is_head: bool) -> u8 {
+        if is_head {
+            self.settings.rifle.head_hits_to_eliminate
+        } else {
+            self.settings.rifle.body_hits_to_eliminate
+        }
+    }
+
     /// `apply_bot_shot` shows a bot's bolt and applies its damage.
     fn apply_bot_shot(&mut self, shot: BotShot, scene: &Scene, audio: &Audio) {
         self.beams.push(Beam {
@@ -543,7 +557,8 @@ impl Session {
         let (gain, pan) = self.sound_placement(shot.origin_m);
         audio.play(Sound::BotShot, gain * 1.3, pan);
         if shot.did_hit_player {
-            self.player.take_damage(SHOT_DAMAGE);
+            let body_hits: f32 = f32::from(self.get_hits_to_eliminate(false));
+            self.player.take_damage(MAX_HEALTH / body_hits);
             audio.play(Sound::Hurt, 0.8, pan);
         } else {
             self.add_impact(
@@ -853,7 +868,8 @@ impl Session {
             .collect()
     }
 
-    /// `overlay_hud_state` is what the HUD's bars show now: health in segments of one body hit,
+    /// `overlay_hud_state` is what the HUD's bars show now: health in segments of one rifle hit to
+    /// the body,
     /// the magazine in segments of one shot (overheated while reloading), the sprint energy, the
     /// console hold and whether the menu covers the view.
     /// `get_hit_effect` is what the last hit on the player still does to the view, as the Lunar
@@ -876,7 +892,7 @@ impl Session {
     fn overlay_hud_state(&self) -> OverlayHudState {
         OverlayHudState {
             health_frac: self.player.health / MAX_HEALTH,
-            health_segment_count: (MAX_HEALTH / BODY_DAMAGE).ceil() as u32,
+            health_segment_count: u32::from(self.settings.rifle.body_hits_to_eliminate),
             ammo_frac: self.weapon.ammo as f32 / MAGAZINE_SIZE as f32,
             ammo_segment_count: MAGAZINE_SIZE,
             is_reloading: self.weapon.reload_time_s.is_some(),

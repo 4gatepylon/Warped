@@ -22,10 +22,15 @@ const ADS_SPEED_FRAC: f32 = 0.6;
 const GROUND_ACCELERATION_PER_S: f32 = 12.0;
 /// `AIR_ACCELERATION_PER_S` is how fast velocity approaches the target in the air.
 const AIR_ACCELERATION_PER_S: f32 = 2.0;
-/// `JUMP_SPEED_M_S` is the upward speed of a jump.
-const JUMP_SPEED_M_S: f32 = 5.4;
-/// `GRAVITY_M_S2` is the downward acceleration.
-const GRAVITY_M_S2: f32 = 16.0;
+/// `JUMP_HEIGHT_M` and `JUMP_AIR_S` are Lunar Surface's jump (W-126): how high it rises
+/// (`movement.jump_height_m` in its server settings) and how long it stays in the air
+/// (`jump_time_per_map_jump_time`, a third, of its map's 2 × 5.2 m/s ÷ 6 m/s², 0.58 s).
+const JUMP_HEIGHT_M: f32 = 1.25;
+const JUMP_AIR_S: f32 = 2.0 * 5.2 / 6.0 / 3.0;
+/// `JUMP_SPEED_M_S` is the upward speed of a jump, and `GRAVITY_M_S2` the downward acceleration,
+/// that give that jump.
+const JUMP_SPEED_M_S: f32 = 4.0 * JUMP_HEIGHT_M / JUMP_AIR_S;
+const GRAVITY_M_S2: f32 = 8.0 * JUMP_HEIGHT_M / (JUMP_AIR_S * JUMP_AIR_S);
 /// `STAND_HEIGHT_M` is the standing body height.
 const STAND_HEIGHT_M: f32 = 1.8;
 /// `CROUCH_HEIGHT_M` is the crouched body height.
@@ -339,10 +344,11 @@ impl Vec3Ext for Vec3 {
     }
 }
 
-/// `tests` checks climbing a rope ladder onto a deck, and sprint energy.
+/// `tests` checks climbing a rope ladder onto a deck, sprint energy, and the jump.
 ///
 /// | Partitioning | Part | Covered by |
 /// | --- | --- | --- |
+/// | jump | a standing jump on flat ground, against Lunar Surface's own settings and map | `test_a_jump_matches_lunar_surface` |
 /// | input at a ladder's foot | walk into it (climbs to the deck), walk past it sideways (stays on the ground) | `test_walking_into_a_ladder_climbs_onto_the_deck`, `test_walking_beside_a_ladder_stays_down` |
 /// | sprint energy while sprinting | some left, empty | `test_sprinting_drains_energy_then_stops` |
 /// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
@@ -433,6 +439,53 @@ mod tests {
         assert!(half.is_sprinting && (half.energy_frac - 0.5).abs() < 0.01);
         let empty: Player = run_s(&sprint, 1.0, SPRINT_DRAIN_S + 0.5);
         assert!(!empty.is_sprinting && empty.energy_frac == 0.0);
+    }
+
+    /// `test_a_jump_matches_lunar_surface` checks a standing jump rises as high and stays in the
+    /// air as long as on Lunar Surface, computed from Lunar Surface's own server settings and map
+    /// as its `set_settings` computes them, within a step of the simulation.
+    #[test]
+    fn test_a_jump_matches_lunar_surface() {
+        let lunar_map_path: std::path::PathBuf = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../common/maps/lunar_surface/map.json");
+        let lunar_map: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(lunar_map_path).unwrap()).unwrap();
+        let map_jump_s: f64 = 2.0 * lunar_map["player"]["jump_m_per_s"].as_f64().unwrap()
+            / lunar_map["gravity_m_per_s2"].as_f64().unwrap();
+        let movement = |key: &str| -> f64 {
+            crate::settings::read_lunar_setting("server_settings.yaml", &["movement"], key)
+        };
+        let air_s: f64 = map_jump_s * movement("jump_time_per_map_jump_time");
+        let height_m: f64 = movement("jump_height_m");
+        let solids: [Aabb; 1] = [Aabb {
+            min_m: Vec3::new(-50.0, -1.0, -50.0),
+            max_m: Vec3::new(50.0, 0.0, 50.0),
+        }];
+        let dt_s: f32 = 1.0 / 240.0;
+        let mut player: Player = Player::new(Vec3::ZERO, 0.0);
+        player.update(&PlayerInput::default(), &solids, &[], dt_s);
+        assert!(player.is_on_ground);
+        let jump: PlayerInput = PlayerInput {
+            is_jump_pressed: true,
+            ..PlayerInput::default()
+        };
+        player.update(&jump, &solids, &[], dt_s);
+        let (mut apex_m, mut step_count) = (player.feet_m.y, 1_usize);
+        while !player.is_on_ground {
+            player.update(&PlayerInput::default(), &solids, &[], dt_s);
+            apex_m = apex_m.max(player.feet_m.y);
+            step_count += 1;
+            assert!(step_count < 10_000, "the jump never landed");
+        }
+        let measured_air_s: f64 = step_count as f64 * f64::from(dt_s);
+        assert!(
+            (measured_air_s - air_s).abs() < 2.0 * f64::from(dt_s),
+            "{measured_air_s} s, not {air_s} s"
+        );
+        assert!(
+            (f64::from(apex_m) - height_m).abs() < 0.02,
+            "{apex_m} m, not {height_m} m"
+        );
     }
 
     /// `test_energy_refills_faster_crouched` checks an empty bar refills in

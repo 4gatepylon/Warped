@@ -11,6 +11,7 @@
 #[allow(dead_code)]
 mod asset_manifest;
 mod assets;
+mod console_reach;
 mod credits;
 mod forest_layout;
 mod game;
@@ -293,8 +294,9 @@ struct Args {
 /// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle, in simulated
 /// seconds.
 const PHOTO_SETTLE_S: f32 = 3.0;
-/// `HURT_PLAYER_DAMAGE` is how much --hurt-player-every-s takes each time: a robot's shot.
-const HURT_PLAYER_DAMAGE: f32 = game::bots::SHOT_DAMAGE;
+/// `HURT_PLAYER_DAMAGE` is how much --hurt-player-every-s takes each time: one rifle hit to the
+/// body (of the server settings' 12).
+const HURT_PLAYER_DAMAGE: f32 = game::player::MAX_HEALTH / 12.0;
 /// `RECORDING_DT_S` is the fixed step of --photo and --video-frames, so the same command gives the
 /// same picture.
 const RECORDING_DT_S: f32 = 1.0 / 30.0;
