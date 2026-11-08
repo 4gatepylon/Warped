@@ -89,6 +89,8 @@ cargo run --release -- --map lunar-surface --view black_hole
   flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 15 s, a head bob, jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
+- Spaceships fly over Lunar Surface, purely for looks (D82): a freighter, a ring ship and three fighters in a V, each
+  crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
 

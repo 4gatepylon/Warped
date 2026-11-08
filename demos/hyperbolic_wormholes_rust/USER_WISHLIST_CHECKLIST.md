@@ -33,9 +33,6 @@ is in [`AGENTS.md`](AGENTS.md).
   noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
   All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/shot-noise`, 2026-11-07.
-- [~] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
-  look cool and pretty. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/spaceships`, 2026-11-07.
 - [~] **W-54 Professional HUD bars.** Make the health, ammo and other bars look more professional: at the very least
   slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
   implementing. Claimed by Claude Code (subagent of session
@@ -216,3 +213,5 @@ is in [`AGENTS.md`](AGENTS.md).
   pulsing slows down smoothly instead of jumping back. #176.
 - [x] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
   relativistic effect on colour if possible. #178.
+- [x] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
+  look cool and pretty. #193.
