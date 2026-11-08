@@ -20,6 +20,10 @@ make run-demo RENDERER=cpu
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
   (`--player-settings`) to `make run-demo`, `host-game` or `join-game`.
+- `Tab` opens a menu of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
+  an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
+  (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
+  stands still while it is open, but the game goes on.
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes

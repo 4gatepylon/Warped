@@ -164,7 +164,7 @@ pub struct ViewSettings {
 }
 
 /// `PlayerFile` is `player_settings.yaml` as written: the keys by name, the view and how a hit looks.
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlayerFile {
     keys: BTreeMap<String, Vec<String>>,
@@ -319,6 +319,18 @@ impl PerPlayerSettings {
             .expect("the built-in player_settings.yaml is valid (tested)")
     }
 
+    /// `to_yaml` gives the settings as YAML text that `Load` reads back (without the notes).
+    ///
+    /// Example: `std::fs::write(path, mine.to_yaml())?;`
+    pub fn to_yaml(&self) -> String {
+        let file: PlayerFile = PlayerFile {
+            keys: self.keys.to_names(),
+            view: self.view.clone(),
+            hit_effects: self.hit_effects.clone(),
+        };
+        serde_yaml::to_string(&file).expect("player settings serialize to YAML")
+    }
+
     /// `Load` reads a player's settings from a YAML file like `player_settings.yaml`.
     ///
     /// Example: `let mine = PerPlayerSettings::Load(Path::new("mine.yaml"))?;`
@@ -334,11 +346,13 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Source | the built-in files, server settings sent as JSON | `builtin_settings_read_and_survive_json` |
+    //! | Source | the built-in files, server settings sent as JSON, player settings the menu saved | `builtin_settings_read_and_survive_json`, `saved_player_settings_load_back` |
     //! | Keys | all present, one unknown, one missing | `builtin_settings_read_and_survive_json`, `unknown_and_missing_keys_fail` |
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
 
     use super::*;
+    use crate::key_bindings::{Action, Control};
+    use sdl3::keyboard::Scancode;
 
     #[test]
     fn builtin_settings_read_and_survive_json() {
@@ -348,6 +362,20 @@ mod tests {
             settings
         );
         assert!(PerPlayerSettings::Builtin().view.look_rad_per_px > 0.0);
+    }
+
+    #[test]
+    fn saved_player_settings_load_back() {
+        let mut mine: PerPlayerSettings = PerPlayerSettings::Builtin();
+        mine.view.motion_blur_s = 0.0;
+        mine.keys
+            .set_controls(Action::Jump, vec![Control::Key(Scancode::J)])
+            .expect("J can jump");
+        let saved: String = mine.to_yaml();
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&saved, "test").expect("saved settings load");
+        assert_eq!(loaded.to_yaml(), saved);
+        assert_eq!(loaded.keys.get_names(Action::Jump), "J");
     }
 
     #[test]

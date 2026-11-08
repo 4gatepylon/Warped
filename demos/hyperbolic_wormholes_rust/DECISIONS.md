@@ -887,6 +887,29 @@
 - **Rationale:** you asked to split the YAML into a part each player can change and a part that belongs to the
   server.
 
+### D75. A menu of each player's settings
+
+- **Choice:**
+  - **Opening:** `Tab` (the new `open_menu` binding) opens a menu over the darkened view; `Esc` or `Tab` closes it.
+    While it is open, the player stands still, can't look or shoot, and the game goes on (it doesn't pause, since
+    others are playing).
+  - **Rows:** every action's controls (`Return`, then the next key, button or wheel turn rebinds it; `Esc`
+    cancels), then the numbers a player is likeliest to tune (mouse look speed, motion blur, the head bob's depth
+    walking and sprinting, and a hit's red, shake and blur), changed with `Left`/`Right` in fixed steps between
+    fixed limits, then a row that saves. Inside the menu, the arrows, `Return` and `Esc` work whatever the
+    bindings say, so a bad binding can always be fixed.
+  - **Saving:** to the `--player-settings` file if one was given, else to `~/.config/warped/player_settings.yaml`,
+    which every later game loads when it exists. The file is written from the settings, so it has no comments.
+  - **Drawing:** the menu is text in the same mask as the "YOU DIED" banner, now any size: 512×312 mask pixels,
+    scaled by a whole number to at most 85% of the window's height, left-aligned, the chosen row in the banner's
+    title colour, the view darkened by 80% (the banner's 55% left the text hard to read).
+- **Alternatives:**
+  - pausing the game while the menu is open (only possible offline);
+  - saving into the repository's `player_settings.yaml` (every `git pull` would then conflict with it);
+  - a menu drawn with a UI library such as egui (a new dependency and a second way to draw text).
+- **Rationale:** you asked for a screen to change each player's own choices, such as hotkeys. It is one page now;
+  W-49 adds pages to it.
+
 
 ## Baselines
 

@@ -47,8 +47,12 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   `server_settings.yaml`, change its numbers, and start the server with it:
   `make host-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml` (or `make serve-game ... SERVER_SETTINGS=...`).
   Everyone who joins plays by the server's settings.
-- Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`: copy it,
-  change it, and add `PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`.
+- Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`. The
+  easiest way to change them is in the game: press `Tab` for the menu, `Up`/`Down` to pick a row, `Return` and then
+  a key, button or the wheel to rebind an action, `Left`/`Right` to change a number, and `Return` on its last row
+  to save. Saved choices go to `~/.config/warped/player_settings.yaml`, which every later game on that computer
+  loads. `Esc` or `Tab` closes the menu. You can also copy the file, change it, and add `PLAYER_SETTINGS=mine.yaml`
+  to `make host-game` or `make join-game`.
 - `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
   within a few seconds, use the address the server printed.
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
@@ -75,7 +79,8 @@ the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wh
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click; one hit eliminates), and gun 2, the
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s), `E` (held)
-turns off one of the other team's consoles, `-` and `=` change the render resolution. There is no key to respawn:
+turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu of your
+own settings. There is no key to respawn:
 players come back only after being eliminated.
 
 ## Known caveats
@@ -89,6 +94,9 @@ Multiplayer:
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too.
 - Health, shown in the bottom left, resets when a player respawns.
+- The menu doesn't pause the game: a player in it stands still and can still be hit.
+- A file saved from the menu has no comments. If a later version adds a setting, that file stops loading and the
+  error names it: delete it (`~/.config/warped/player_settings.yaml`) or add the new setting.
 - Consoles are found by name: a map's materials named "blue console …" and "red console …". The house has none,
   so nobody can win there.
 - Local network only: no play over the internet. Networks that keep devices apart (many guest and office Wi-Fi

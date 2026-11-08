@@ -48,7 +48,8 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
 /// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
-/// this one's (motion blur; 0 for none), and what a recent hit does to the scene.
+/// this one's (motion blur; 0 for none), what a recent hit does to the scene, and how much of the
+/// frame's height the mask's text may take.
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
@@ -56,6 +57,7 @@ pub struct Overlay<'a> {
     pub wand: Option<OverlayWand>,
     pub blur_frac: f32,
     pub hit: HitEffect,
+    pub mask_height_frac: f32,
 }
 
 /// `HitEffect` is what a recent hit does to the scene (the shader's `read_hit_scene`): how much of
@@ -237,8 +239,7 @@ const BYTES_PER_TEXEL: usize = 16;
 const BYTES_PER_LOST_FLAG: usize = 1;
 const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
-const OVERLAY_HEIGHT_PER_MASK: usize = 5;
-const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
+pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
 const EMPTY_MASK_PX: (usize, usize) = (1, 1);
 const MS_PER_S: f64 = 1000.0;
@@ -1022,9 +1023,9 @@ impl MetalRenderer {
 
     /// `encode_overlay` encodes drawing `overlay` over a finished frame into a texture of its own,
     /// which it returns: the frame blended with the previous frame's scene (kept in one of two
-    /// history textures, swapped each frame; none after a resize) and darkened, the mask (if any) scaled by a whole number to about a
-    /// fifth of the frame's height (and at most `OVERLAY_MAX_WIDTH_FRAC` of its width), centred,
-    /// and the rectangles.
+    /// history textures, swapped each frame; none after a resize) and darkened, the mask (if any)
+    /// scaled by a whole number to at most `mask_height_frac` of the frame's height (and at most
+    /// `OVERLAY_MAX_WIDTH_FRAC` of its width), centred, and the rectangles.
     ///
     /// Example: `let shown = self.encode_overlay(&command_buffer, &frame, &overlay, (2560, 1600))?;`
     fn encode_overlay(
@@ -1107,7 +1108,7 @@ impl MetalRenderer {
                 mask_w,
             )
         };
-        let scale: usize = (output_px.1 / (mask_h * OVERLAY_HEIGHT_PER_MASK))
+        let scale: usize = ((output_px.1 as f32 * overlay.mask_height_frac) as usize / mask_h)
             .min((output_px.0 as f64 * OVERLAY_MAX_WIDTH_FRAC) as usize / mask_w)
             .max(1);
         let params: OverlayParams = OverlayParams {

@@ -25,6 +25,7 @@ mod geometry;
 mod key_bindings;
 mod map;
 mod map_export;
+mod menu;
 mod multiplayer;
 mod net;
 mod physics;
@@ -127,10 +128,16 @@ const WAND_RIFLE_SHAFT_HALF_M: [f32; 4] = [0.024, 0.032, 0.17, 0.0];
 const WAND_RIFLE_SHAFT_COLOR: [f32; 4] = [0.42, 0.45, 0.5, 1.0];
 const WAND_RIFLE_TIP_HALF_M: [f32; 4] = [0.007, 0.007, 0.07, 0.0];
 const DEATH_MASK_PX: (u32, u32) = (240, 24);
-const DEATH_TITLE_Y_PX: f32 = 2.0;
-const DEATH_COUNTDOWN_Y_PX: f32 = 14.0;
+const MENU_MASK_PX: (u32, u32) = (512, 312);
+const BANNER_HEIGHT_FRAC: f32 = 0.2;
+const MENU_HEIGHT_FRAC: f32 = 0.85;
+const TEXT_TOP_PX: f32 = 2.0;
+const TEXT_LINE_PX: f32 = 12.0;
+const MENU_LEFT_PX: f32 = 4.0;
+const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
+const MENU_DIM_FRAC: f32 = 0.8;
 const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
 const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
@@ -1670,6 +1677,8 @@ struct Session {
     is_walking_upright: bool,
     settings: ServerSettings,
     player_settings: PerPlayerSettings,
+    player_settings_path: Option<PathBuf>,
+    menu: Option<menu::Menu>,
     gun: Gun,
     is_trigger_held: bool,
     is_flashlight_on: bool,
@@ -1840,9 +1849,17 @@ impl Session {
     fn New(arguments: &Arguments) -> Result<Session> {
         let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
         let settings: ServerSettings = load_settings(arguments)?;
-        let player_settings: PerPlayerSettings = match &arguments.player_settings {
-            Some(path) => PerPlayerSettings::Load(path)?,
-            None => PerPlayerSettings::Builtin(),
+        let player_settings_path: Option<PathBuf> =
+            arguments.player_settings.clone().or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join(PLAYER_SETTINGS_HOME_PATH))
+            });
+        let player_settings: PerPlayerSettings = match &player_settings_path {
+            Some(path) if arguments.player_settings.is_some() || path.exists() => {
+                eprintln!("Player settings: {}", path.display());
+                PerPlayerSettings::Load(path)?
+            }
+            _ => PerPlayerSettings::Builtin(),
         };
         let voxel: Option<VoxelState> = if map.structures.is_empty() {
             None
@@ -1909,6 +1926,8 @@ impl Session {
             player,
             settings,
             player_settings,
+            player_settings_path,
+            menu: None,
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
@@ -1982,7 +2001,7 @@ impl Session {
                 mouse.set_relative_mouse_mode(window, true);
                 return true;
             }
-            Event::MouseMotion { xrel, yrel, .. } if self.is_captured => {
+            Event::MouseMotion { xrel, yrel, .. } if self.is_captured && self.menu.is_none() => {
                 let speed: f64 =
                     self.player_settings.view.look_rad_per_px / voxel_world::LOOK_RAD_PER_PX;
                 let (dx_px, dy_px) = (f64::from(xrel) * speed, f64::from(yrel) * speed);
@@ -1994,9 +2013,58 @@ impl Session {
             _ => {}
         }
         match key_bindings::get_pressed_control(&event) {
+            Some(control) if self.menu.is_some() => {
+                self.handle_menu_control(control);
+                true
+            }
+            Some(control) if self.player_settings.keys.matches(Action::OpenMenu, control) => {
+                self.menu = Some(menu::Menu::New());
+                true
+            }
             Some(control) => self.handle_control(control, window, mouse),
             None => true,
         }
+    }
+
+    /// `handle_menu_control` passes a pressed control to the open menu, closes it or saves when
+    /// the menu says so, and puts the changed head bob into the world.
+    ///
+    /// Example: `self.handle_menu_control(Control::Key(Scancode::Down));`
+    fn handle_menu_control(&mut self, control: Control) {
+        let menu: &mut menu::Menu = self.menu.as_mut().expect("the menu is open");
+        match menu.handle(control, &mut self.player_settings) {
+            menu::MenuOutcome::Stay => {}
+            menu::MenuOutcome::Close => self.menu = None,
+            menu::MenuOutcome::Save => {
+                let message: String = match self.save_player_settings() {
+                    Ok(path) => format!("Saved to {path}"),
+                    Err(error) => format!("Couldn't save: {error}"),
+                };
+                self.menu
+                    .as_mut()
+                    .expect("the menu is open")
+                    .show_message(message);
+            }
+        }
+        if let Some(voxel) = &mut self.voxel {
+            voxel.world.head_bob = self.player_settings.view.head_bob.clone();
+        }
+    }
+
+    /// `save_player_settings` writes this player's settings to their file (`--player-settings`, or
+    /// `~/.config/warped/player_settings.yaml`, which later games load), giving its path.
+    ///
+    /// Example: `let path = self.save_player_settings()?;`
+    fn save_player_settings(&self) -> Result<String> {
+        let path: &PathBuf = self
+            .player_settings_path
+            .as_ref()
+            .ok_or("no file to save to: pass --player-settings (HOME isn't set)")?;
+        if let Some(folder) = path.parent() {
+            fs::create_dir_all(folder)?;
+        }
+        fs::write(path, self.player_settings.to_yaml())?;
+        Ok(path.display().to_string())
     }
 
     /// `handle_control` does what a pressed control (key, mouse button or wheel) is bound to, and
@@ -2099,7 +2167,10 @@ impl Session {
             self.hud_time_s += dt_s;
             return Ok(());
         }
-        let held = |action: Action| self.player_settings.keys.is_held(action, keyboard, mouse);
+        let is_playing: bool = self.menu.is_none();
+        let held = |action: Action| {
+            is_playing && self.player_settings.keys.is_held(action, keyboard, mouse)
+        };
         let input: Input = Input {
             forward: held(Action::MoveForward),
             back: held(Action::MoveBack),
@@ -2348,12 +2419,12 @@ impl Session {
     }
 
     /// `get_wand` gives this player's wand (`make_wand`, with its tip in the team's colour), or
-    /// `None` while a banner shows.
+    /// `None` while text covers the view (`is_view_covered`).
     ///
     /// Example: `let wand = self.get_wand();`
     fn get_wand(&self) -> Option<render_metal::OverlayWand> {
         let team: u32 = self.get_team();
-        self.get_banner_lines().is_none().then(|| {
+        (!self.is_view_covered()).then(|| {
             make_wand(
                 self.run_pose_frac,
                 self.gun_phase_rad,
@@ -2759,8 +2830,43 @@ impl Session {
         ])
     }
 
-    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the crosshair (unless a
-    /// banner shows) and, in the bottom left, as
+    /// `is_view_covered` says whether text covers the view: the menu or a banner.
+    ///
+    /// Example: `if !self.is_view_covered() { ... }`
+    fn is_view_covered(&self) -> bool {
+        self.menu.is_some() || self.get_banner_lines().is_some()
+    }
+
+    /// `get_overlay_text` gives the text shown over the dimmed view: the menu while it is open,
+    /// else the banner lines (`get_banner_lines`), or `None`.
+    ///
+    /// Example: `if let Some(text) = session.get_overlay_text() { ... }`
+    fn get_overlay_text(&self) -> Option<OverlayText> {
+        if let Some(menu) = &self.menu {
+            let save_path: String = match &self.player_settings_path {
+                Some(path) => path.display().to_string(),
+                None => "nowhere: HOME isn't set, pass --player-settings".to_string(),
+            };
+            return Some(OverlayText {
+                lines: menu.get_lines(&self.player_settings, &save_path),
+                mask_px: MENU_MASK_PX,
+                height_frac: MENU_HEIGHT_FRAC,
+                is_centered: false,
+                dim_frac: MENU_DIM_FRAC,
+            });
+        }
+        let [title, detail] = self.get_banner_lines()?;
+        Some(OverlayText {
+            lines: vec![(title, true), (detail, false)],
+            mask_px: DEATH_MASK_PX,
+            height_frac: BANNER_HEIGHT_FRAC,
+            is_centered: true,
+            dim_frac: DEATH_DIM_FRAC,
+        })
+    }
+
+    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the crosshair (unless
+    /// text covers the view) and, in the bottom left, as
     /// segmented bars (`make_segmented_bar`): this player's health in a game on a server (one segment
     /// per rifle body hit), the rifle's shots left before it overheats (with the rifle in hand), and
     /// on a voxel map the sprint energy. Below the middle, the progress of turning off a console
@@ -2769,7 +2875,7 @@ impl Session {
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
         let mut rects: Vec<render_metal::OverlayRect> = Vec::new();
-        if self.get_banner_lines().is_none() {
+        if !self.is_view_covered() {
             rects.extend(get_crosshair_rects(self.last_output_px));
         }
         if let Some(multiplayer) = &self.multiplayer {
@@ -3081,30 +3187,78 @@ fn make_wand(
     }
 }
 
-/// `make_death_mask` draws the banner lines (`Session::get_banner_lines`) with SDL's built-in text into a `DEATH_MASK_PX` mask,
-/// one byte a pixel: `DEATH_TITLE_MASK` on the first line's text, `DEATH_COUNTDOWN_MASK` on the
-/// second's, 0 elsewhere, for the Metal overlay.
+/// `OverlayText` is text shown over the dimmed view: its lines, each with whether it is
+/// highlighted, the size of the mask it is drawn into (`make_text_mask`), how much of the window's
+/// height that mask may take, whether its lines are centred (a banner) or start at the left (the
+/// menu), and how much the view behind it is darkened.
+struct OverlayText {
+    lines: Vec<(String, bool)>,
+    mask_px: (u32, u32),
+    height_frac: f32,
+    is_centered: bool,
+    dim_frac: f32,
+}
+
+/// `get_text_positions` places each of `text`'s lines in its mask: the line cut to the mask's
+/// width, and where its top left goes.
 ///
-/// Example: `let mask = make_death_mask(&lines)?;`
-fn make_death_mask(lines: &[String; 2]) -> Result<Vec<u8>> {
-    let (width, height) = DEATH_MASK_PX;
+/// Example: `for (line, (x, y), is_highlighted) in get_text_positions(&text) { ... }`
+fn get_text_positions(text: &OverlayText) -> Vec<(String, (f32, f32), bool)> {
+    let (width, height) = text.mask_px;
+    let bottom_px: f32 =
+        TEXT_TOP_PX + TEXT_LINE_PX * text.lines.len().saturating_sub(1) as f32 + DEBUG_GLYPH_PX;
+    assert!(
+        bottom_px <= height as f32,
+        "get_text_positions: {} lines don't fit a mask {height} px high",
+        text.lines.len()
+    );
+    let max_char_count: usize = (width as f32 / DEBUG_GLYPH_PX) as usize;
+    text.lines
+        .iter()
+        .enumerate()
+        .map(|(i, (line, is_highlighted))| {
+            let shown: String = line.chars().take(max_char_count).collect();
+            let x: f32 = if text.is_centered {
+                (width as f32 - DEBUG_GLYPH_PX * shown.chars().count() as f32) / 2.0
+            } else {
+                MENU_LEFT_PX
+            };
+            (
+                shown,
+                (x, TEXT_TOP_PX + TEXT_LINE_PX * i as f32),
+                *is_highlighted,
+            )
+        })
+        .collect()
+}
+
+/// `make_text_mask` draws `text` with SDL's built-in text into a mask of `text.mask_px`, one byte
+/// a pixel: `DEATH_TITLE_MASK` on highlighted lines' text, `DEATH_COUNTDOWN_MASK` on the others',
+/// 0 elsewhere, for the Metal overlay.
+///
+/// Example: `let mask = make_text_mask(&text)?;`
+fn make_text_mask(text: &OverlayText) -> Result<Vec<u8>> {
+    let (width, height) = text.mask_px;
     let surface = sdl3::surface::Surface::new(width, height, PixelFormat::RGBA32)?;
     let mut canvas = surface.into_canvas()?;
-    canvas.set_draw_color(Color::RGB(255, 255, 255));
-    for (line, y) in lines.iter().zip([DEATH_TITLE_Y_PX, DEATH_COUNTDOWN_Y_PX]) {
-        let x: f32 = (width as f32 - DEBUG_GLYPH_PX * line.len() as f32) / 2.0;
-        canvas.draw_debug_text(line.as_str(), (x, y))?;
+    for (line, position, is_highlighted) in get_text_positions(text) {
+        canvas.set_draw_color(if is_highlighted {
+            Color::RGB(255, 0, 0)
+        } else {
+            Color::RGB(0, 255, 0)
+        });
+        canvas.draw_debug_text(line.as_str(), position)?;
     }
     canvas.present();
     let surface = canvas.into_surface();
     let pitch: usize = surface.pitch() as usize;
     Ok(surface.with_lock(|pixels: &[u8]| {
         (0..height as usize)
-            .flat_map(|y| (0..width as usize).map(move |x| (x, y)))
-            .map(|(x, y)| match pixels[y * pitch + x * BYTES_PER_PIXEL] {
-                0 => 0,
-                _ if (y as f32) < DEATH_COUNTDOWN_Y_PX => DEATH_TITLE_MASK,
-                _ => DEATH_COUNTDOWN_MASK,
+            .flat_map(|y| (0..width as usize).map(move |x| y * pitch + x * BYTES_PER_PIXEL))
+            .map(|offset| match (pixels[offset], pixels[offset + 1]) {
+                (0, 0) => 0,
+                (0, _) => DEATH_COUNTDOWN_MASK,
+                _ => DEATH_TITLE_MASK,
             })
             .collect()
     }))
@@ -3134,27 +3288,31 @@ fn draw_overlay_rects(
     Ok(())
 }
 
-/// `draw_death_overlay` dims the canvas and draws the banner lines large in its middle, for the
-/// SDL-renderer window.
+/// `draw_text_overlay` dims the canvas and draws `text` in its middle, scaled like the Metal
+/// overlay's mask (`text.height_frac` of the height, at most `OVERLAY_MAX_WIDTH_FRAC` of the
+/// width), for the SDL-renderer window.
 ///
-/// Example: `draw_death_overlay(&mut canvas, &lines)?;`
-fn draw_death_overlay(canvas: &mut sdl3::render::WindowCanvas, lines: &[String; 2]) -> Result<()> {
+/// Example: `draw_text_overlay(&mut canvas, &text)?;`
+fn draw_text_overlay(canvas: &mut sdl3::render::WindowCanvas, text: &OverlayText) -> Result<()> {
     let (width, height) = canvas.window().size_in_pixels();
-    let scale: f32 = (height / DEATH_MASK_PX.1 / 2).max(1) as f32 / 2.0;
+    let (mask_width, mask_height) = text.mask_px;
+    let scale: f32 = ((height as f32 * text.height_frac) as u32 / mask_height)
+        .min((f64::from(width) * render_metal::OVERLAY_MAX_WIDTH_FRAC) as u32 / mask_width)
+        .max(1) as f32;
     canvas.set_scale(1.0, 1.0)?;
     canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
-    canvas.set_draw_color(Color::RGBA(0, 0, 0, (DEATH_DIM_FRAC * 255.0) as u8));
+    canvas.set_draw_color(Color::RGBA(0, 0, 0, (text.dim_frac * 255.0) as u8));
     canvas.fill_rect(None)?;
     canvas.set_scale(scale, scale)?;
-    for (line, y) in lines.iter().zip([DEATH_TITLE_Y_PX, DEATH_COUNTDOWN_Y_PX]) {
-        canvas.set_draw_color(if y == DEATH_TITLE_Y_PX {
+    let left: f32 = (width as f32 / scale - mask_width as f32) / 2.0;
+    let top: f32 = (height as f32 / scale - mask_height as f32) / 2.0;
+    for (line, (x, y), is_highlighted) in get_text_positions(text) {
+        canvas.set_draw_color(if is_highlighted {
             Color::RGB(255, 90, 80)
         } else {
             HUD_COLOR
         });
-        let x: f32 = (width as f32 / scale - DEBUG_GLYPH_PX * line.len() as f32) / 2.0;
-        let top: f32 = (height as f32 / scale - DEATH_MASK_PX.1 as f32) / 2.0;
-        canvas.draw_debug_text(line.as_str(), (x, top + y))?;
+        canvas.draw_debug_text(line.as_str(), (left + x, top + y))?;
     }
     Ok(())
 }
@@ -3234,8 +3392,8 @@ fn play_on_canvas(
             )?;
         }
         draw_overlay_rects(&mut canvas, &session.get_overlay_rects())?;
-        if let Some(lines) = session.get_banner_lines() {
-            draw_death_overlay(&mut canvas, &lines)?;
+        if let Some(text) = session.get_overlay_text() {
+            draw_text_overlay(&mut canvas, &text)?;
         }
         canvas.present();
     }
@@ -3290,24 +3448,26 @@ fn play_on_layer(
         let render_px: (u32, u32) = session.get_render_size(window_px);
         let render_start: Instant = Instant::now();
         let packed: PackedFrame = session.pack(render_px);
-        let death_mask: Option<Vec<u8>> = session
-            .get_banner_lines()
-            .map(|lines| make_death_mask(&lines))
-            .transpose()?;
+        let overlay_text: Option<OverlayText> = session.get_overlay_text();
+        let text_mask: Option<Vec<u8>> = overlay_text.as_ref().map(make_text_mask).transpose()?;
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
         let wand: Option<render_metal::OverlayWand> = session.get_wand();
-        let overlay: Option<render_metal::Overlay> = (death_mask.is_some()
+        let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
             || !rects.is_empty()
             || wand.is_some())
         .then(|| render_metal::Overlay {
-            dim_frac: if death_mask.is_some() {
-                DEATH_DIM_FRAC
-            } else {
-                0.0
+            dim_frac: match &overlay_text {
+                Some(text) => text.dim_frac,
+                None => 0.0,
             },
-            mask: death_mask
+            mask: text_mask
                 .as_deref()
-                .map(|pixels| (pixels, (DEATH_MASK_PX.0 as usize, DEATH_MASK_PX.1 as usize))),
+                .zip(overlay_text.as_ref())
+                .map(|(pixels, text)| (pixels, (text.mask_px.0 as usize, text.mask_px.1 as usize))),
+            mask_height_frac: match &overlay_text {
+                Some(text) => text.height_frac,
+                None => 0.0,
+            },
             rects: &rects,
             wand,
             blur_frac: session.motion_blur_frac,
@@ -3335,13 +3495,14 @@ fn play_on_layer(
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the guns' hit rules.
+    //! Tests of the guns' hit rules, the HUD's bars and where overlay text goes.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Bar fill | empty, a sliver (one segment), 11 of 12 after the network's byte rounding, full | `segmented_bars_count_whole_segments` |
+    //! | Overlay text | a centred two-line banner, the left-aligned menu with a line too long for its mask | `overlay_text_fits_its_mask` |
 
     use super::*;
 
@@ -3368,6 +3529,37 @@ mod tests {
             take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false),
             Some(settings.rifle.body_hits_to_eliminate)
         );
+    }
+
+    #[test]
+    fn overlay_text_fits_its_mask() {
+        let banner: OverlayText = OverlayText {
+            lines: vec![
+                ("YOU DIED".to_string(), true),
+                ("Respawning in 3".to_string(), false),
+            ],
+            mask_px: DEATH_MASK_PX,
+            height_frac: BANNER_HEIGHT_FRAC,
+            is_centered: true,
+            dim_frac: DEATH_DIM_FRAC,
+        };
+        let placed = get_text_positions(&banner);
+        let title_px: f32 = DEBUG_GLYPH_PX * "YOU DIED".len() as f32;
+        assert_eq!(placed[0].1.0 * 2.0 + title_px, DEATH_MASK_PX.0 as f32);
+        assert!(placed[0].2 && !placed[1].2);
+        let long_path: String = "/very/long".repeat(20);
+        let menu_text: OverlayText = OverlayText {
+            lines: menu::Menu::New().get_lines(&PerPlayerSettings::Builtin(), &long_path),
+            mask_px: MENU_MASK_PX,
+            height_frac: MENU_HEIGHT_FRAC,
+            is_centered: false,
+            dim_frac: MENU_DIM_FRAC,
+        };
+        let max_char_count: usize = (MENU_MASK_PX.0 as f32 / DEBUG_GLYPH_PX) as usize;
+        for (line, (x, _), _) in get_text_positions(&menu_text) {
+            assert_eq!(x, MENU_LEFT_PX);
+            assert!(line.chars().count() <= max_char_count, "{line}");
+        }
     }
 
     #[test]
