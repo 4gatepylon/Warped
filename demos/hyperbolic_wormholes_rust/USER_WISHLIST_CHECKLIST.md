@@ -34,6 +34,13 @@ is in [`AGENTS.md`](AGENTS.md).
     (runs `*-team-robot-*`). State 2026-11-08: built and tested, screenshots sent to the user.
 ## Open
 
+- [ ] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
+  get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
+  second touches the ground; shooting a ball before then crashes the game.
+- [ ] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
+  but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
+  nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
+  again and moves it.
 - [ ] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Found in #319: not vsync
   tearing (the window presents at vsync, one frame in flight) but bands and strips on far ground under the reality
   bend, from `BEND_SAG_PIXELS` = 0.5 in `render_voxel.metal`; 0.1 px removes them at 13% more GPU time (34% on the
