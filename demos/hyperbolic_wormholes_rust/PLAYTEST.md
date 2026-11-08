@@ -79,8 +79,8 @@ the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wh
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click; one hit eliminates), and gun 2, the
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s), `E` (held)
-turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu of your
-own settings. There is no key to respawn:
+turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu (`Q`/`E`
+turn between your settings and a map of the whole level with you on it). There is no key to respawn:
 players come back only after being eliminated.
 
 ## Known caveats

@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::geometry;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent,
@@ -683,12 +684,7 @@ impl VoxelWorld {
     ///
     /// Example: `let [u_m, v_m, h_m] = world.get_fermi_coordinates(x);`
     fn get_fermi_coordinates(&self, x: DVec4) -> [f64; 3] {
-        let cosh_h: f64 = (1.0 + x.y * x.y).sqrt();
-        [
-            -self.r * (x.z / x.w).atanh(),
-            self.r * (x.x / cosh_h).asinh(),
-            self.r * x.y.asinh(),
-        ]
+        geometry::get_fermi_coordinates(x, self.r)
     }
 
     /// `is_outside_boundary` says whether a point is outside the playable ellipse (never, without one).
