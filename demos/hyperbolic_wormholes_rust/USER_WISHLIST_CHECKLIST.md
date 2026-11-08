@@ -134,7 +134,6 @@ are here too, since the user hadn't confirmed them.
   staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
-- [?] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
 - [?] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
@@ -315,3 +314,4 @@ Confirmed by the user after testing.
   and on Lunar Surface. #73, #76, #81–#86, #90, #91. Confirmed by the user, 2026-11-07: "mark fast runst render er as done".
 - [x] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
   `lunar_surface`, with lasers that eliminate players. #77, #79, #80. Confirmed by the user, 2026-11-07: "mark multiplayer on one network as done".
+- [x] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129. Confirmed by the user, 2026-11-07: "mark flashlight as done".
