@@ -31,6 +31,7 @@ SHELL := /bin/bash
 GCLOUD ?= gcloud
 TERRAFORM ?= terraform
 STATE_BUCKET := $(GCP_PROJECT_ID)-tfstate
+BILLING_LINK_URL := https://console.cloud.google.com/billing/linkedaccount?project=$(GCP_PROJECT_ID)
 APIS := compute.googleapis.com storage.googleapis.com iap.googleapis.com billingbudgets.googleapis.com \
   cloudbilling.googleapis.com cloudresourcemanager.googleapis.com
 TEST_DATA_DIR := .build/terraform-test
@@ -80,12 +81,15 @@ check-env:
 	@test -f .env || { echo "No .env here: run cp .env.example .env and fill it in." >&2; exit 2; }
 	@test -n "$(GCP_PROJECT_ID)" -a -n "$(GCP_REGION)" -a -n "$(GCP_ZONE)" -a -n "$(MONTHLY_BUDGET_USD)" || \
 		{ echo ".env needs GCP_PROJECT_ID, GCP_REGION, GCP_ZONE and MONTHLY_BUDGET_USD." >&2; exit 2; }
+	@! grep -qE "^[A-Z_]+=[\"']" .env || \
+		{ echo "Write the values in .env without quotes: make keeps quotes as part of the value." >&2; exit 2; }
 	@test "$(HAS_GAME_SERVERS)" = true -o "$(HAS_GAME_SERVERS)" = false || \
 		{ echo "HAS_GAME_SERVERS in .env must be true or false, not '$(HAS_GAME_SERVERS)'." >&2; exit 2; }
 
 prepare-gcp-project: check-env
-	@test "$$($(GCLOUD) billing projects describe $(GCP_PROJECT_ID) --format='value(billingEnabled)')" = True || \
-		{ echo "Billing isn't enabled for $(GCP_PROJECT_ID); link a billing account in the console first." >&2; exit 1; }
+	@billing_enabled="$$($(GCLOUD) billing projects describe $(GCP_PROJECT_ID) --format='value(billingEnabled)')" || exit 1; \
+		test "$$billing_enabled" = True || { echo "Billing isn't enabled for $(GCP_PROJECT_ID) (billingEnabled: '$$billing_enabled')." >&2; \
+		echo "Link an open billing account to it: $(BILLING_LINK_URL)" >&2; exit 1; }
 	$(GCLOUD) services enable $(APIS) --project $(GCP_PROJECT_ID)
 	$(GCLOUD) storage buckets describe gs://$(STATE_BUCKET) --project $(GCP_PROJECT_ID) > /dev/null 2>&1 || \
 		$(GCLOUD) storage buckets create gs://$(STATE_BUCKET) --project $(GCP_PROJECT_ID) \
@@ -141,7 +145,7 @@ deploy-download-page: init-terraform
 	@echo "Download page: $$($(TERRAFORM) output -raw download_page_url)"
 
 deploy-everything: check-env
-	$(MAKE) create-game-password
+	$(if $(WITH_GAME_SERVERS),$(MAKE) create-game-password)
 	$(MAKE) prepare-gcp-project
 	$(MAKE) apply-infra
 	$(if $(WITH_GAME_SERVERS),$(MAKE) deploy-game-servers)
