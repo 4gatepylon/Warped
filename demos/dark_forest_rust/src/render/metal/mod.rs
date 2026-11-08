@@ -26,7 +26,8 @@ use objc2_metal::{
     MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
     MTLCreateSystemDefaultDevice, MTLCullMode, MTLDevice, MTLDrawable, MTLIndexType, MTLLoadAction,
     MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLResourceOptions, MTLStoreAction, MTLTexture, MTLTextureType, MTLTextureUsage, MTLWinding,
+    MTLResourceOptions, MTLStoreAction, MTLTexture, MTLTextureType, MTLTextureUsage, MTLViewport,
+    MTLWinding,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
@@ -47,9 +48,10 @@ use self::resources::{
 };
 use crate::render::culling::{CASCADE_COUNT, CascadeCamera, Cascades, Frustum, fit_cascades};
 use crate::render::{
-    AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, MaterialData,
-    MaterialHandle, MeshData, MeshHandle, OccluderBox, Particle, RenderSettings, Renderer,
-    TextureData, TextureHandle,
+    AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
+    LensMouth, MAX_LIVE_LENS_SLOT_COUNT, MaterialData, MaterialHandle, MeshData, MeshHandle,
+    OccluderBox, Particle, RenderSettings, Renderer, TextureData, TextureHandle,
+    pick_live_lens_mouths,
 };
 
 /// `FRAMES_IN_FLIGHT` is how many frames the CPU may encode ahead of the GPU.
@@ -78,6 +80,24 @@ const FULLSCREEN_VERTEX_COUNT: usize = 3;
 const SECONDS_TO_MS: f64 = 1000.0;
 /// `MATRIX_BYTES` is the size of one joint matrix.
 const MATRIX_BYTES: usize = 64;
+/// `MAX_LENS_MOVER_COUNT` is how many robots' bounding spheres the lens pass looks for robots in;
+/// `post.metal`'s `LensUniforms` agrees.
+const MAX_LENS_MOVER_COUNT: usize = 16;
+/// `LENS_LIVE_UNUSED_SPLIT_M` puts every point in the last shadow cascade when the lens's live
+/// faces are drawn, since the cascades were fitted to the player's view, not theirs.
+const LENS_LIVE_UNUSED_SPLIT_M: f32 = 0.0;
+const LENS_LIVE_LAST_SPLIT_M: f32 = 1.0e6;
+
+/// `LensLive` is where the robots and lasers near some wormhole mouths are drawn each frame, seen
+/// from those mouths' centres: one array slice per live slot, a row of six faces (oriented as
+/// `LENS_FACES`), in HDR color (alpha is coverage) and depth. Each live slot is its own render
+/// pass, so a frame stores only the slots it uses.
+struct LensLive {
+    color: Texture,
+    depth: Texture,
+    face_px: usize,
+    mouths: Vec<LensMouth>,
+}
 
 /// `CommandBuffer` is a retained Metal command buffer.
 type CommandBuffer = Retained<ProtocolObject<dyn MTLCommandBuffer>>;
@@ -251,6 +271,7 @@ pub struct MetalRenderer {
     last_gpu_ms: f64,
     drawable_size_px: (u32, u32),
     lens: Option<(Texture, gpu_types::GpuLensUniforms)>,
+    lens_live: Option<LensLive>,
     is_capturing: bool,
 }
 
@@ -411,6 +432,7 @@ impl MetalRenderer {
             materials: Vec::new(),
             white_texture,
             lens: None,
+            lens_live: None,
             is_capturing: false,
             flat_normal_texture,
             shadow_map,
@@ -445,6 +467,54 @@ impl MetalRenderer {
                 self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
             }
         }
+    }
+
+    /// `read_texture_bytes` waits for the frames in flight and copies a 4-byte-per-pixel texture
+    /// back: (width_px, height_px, bytes, rows top first).
+    fn read_texture_bytes(&mut self, texture: &Texture) -> (u32, u32, Vec<u8>) {
+        for command_buffer in self.in_flight.drain(..) {
+            command_buffer.waitUntilCompleted();
+        }
+        let (width_px, height_px) = (texture.width(), texture.height());
+        let bytes_per_row: usize = width_px * 4;
+        let readback = self
+            .device
+            .newBufferWithLength_options(
+                bytes_per_row * height_px,
+                MTLResourceOptions::StorageModeShared,
+            )
+            .expect("readback buffer creation failed");
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .expect("command buffer creation failed");
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .expect("blit encoder creation failed");
+        unsafe {
+            objc2_metal::MTLBlitCommandEncoder::copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(&*blit,
+                texture,
+                0,
+                0,
+                objc2_metal::MTLOrigin { x: 0, y: 0, z: 0 },
+                objc2_metal::MTLSize { width: width_px, height: height_px, depth: 1 },
+                &readback,
+                0,
+                bytes_per_row,
+                bytes_per_row * height_px,
+            );
+        }
+        blit.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let rgba: Vec<u8> = unsafe {
+            std::slice::from_raw_parts(
+                readback.contents().as_ptr().cast::<u8>(),
+                bytes_per_row * height_px,
+            )
+        }
+        .to_vec();
+        (width_px as u32, height_px as u32, rgba)
     }
 
     /// `draw_meshes` encodes a list of mesh draws for one pass.
@@ -502,6 +572,205 @@ impl MetalRenderer {
                 );
             }
         }
+    }
+
+    /// `encode_lens_live` draws the lens's live slots: the robots and lasers near the mouths that
+    /// `pick_live_lens_mouths` picks, seen from each mouth's centre, into `live`. It returns
+    /// `static_uniforms` with those slots and the robots' bounding spheres filled in.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_lens_live(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        frame: &FrameDescription,
+        settings: &RenderSettings,
+        targets: &Targets,
+        cascades: &Cascades,
+        buffers: &FrameBuffers,
+        camera_frustum: &Frustum,
+        (particles_offset_bytes, particle_count): (usize, usize),
+        live: &LensLive,
+        static_uniforms: &gpu_types::GpuLensUniforms,
+    ) -> gpu_types::GpuLensUniforms {
+        let mut uniforms: gpu_types::GpuLensUniforms = *static_uniforms;
+        let is_visible: Vec<bool> = live
+            .mouths
+            .iter()
+            .map(|mouth| camera_frustum.contains_sphere(mouth.centre_m, mouth.reach_m))
+            .collect();
+        let movers: Vec<(Vec3, Vec3)> = frame
+            .lens_draws
+            .iter()
+            .map(|draw| (draw.bounds_center_m, draw.bounds_center_m))
+            .chain(frame.lens_particles.iter().map(|particle| {
+                let half_m: Vec3 = particle.stretch_m * 0.5;
+                (particle.position_m - half_m, particle.position_m + half_m)
+            }))
+            .collect();
+        let slots: Vec<usize> =
+            pick_live_lens_mouths(&live.mouths, frame.camera.position_m, &is_visible, &movers);
+        if slots.is_empty() {
+            return uniforms;
+        }
+        let mut spheres: Vec<Vec4> = Vec::new();
+        for draw in frame.lens_draws {
+            let sphere: Vec4 = draw.bounds_center_m.extend(draw.bounds_radius_m);
+            if !spheres.contains(&sphere) {
+                spheres.push(sphere);
+            }
+        }
+        let lanes_per_vec4: usize = 4;
+        for (slot, &mouth) in slots.iter().enumerate() {
+            let mouth_data: &LensMouth = &live.mouths[mouth];
+            let is_mover_within_reach: bool = spheres.iter().any(|sphere| {
+                sphere.truncate().distance(mouth_data.centre_m) < mouth_data.reach_m + sphere.w
+            });
+            let sign: f32 = if is_mover_within_reach { -1.0 } else { 1.0 };
+            uniforms.live_slots[mouth / lanes_per_vec4][mouth % lanes_per_vec4] =
+                sign * (slot + 1) as f32;
+        }
+        let get_slot_distance_m = |sphere: &Vec4| -> f32 {
+            slots
+                .iter()
+                .map(|&mouth| live.mouths[mouth].centre_m.distance(sphere.truncate()))
+                .fold(f32::MAX, f32::min)
+        };
+        spheres.sort_by(|a, b| get_slot_distance_m(a).total_cmp(&get_slot_distance_m(b)));
+        spheres.truncate(MAX_LENS_MOVER_COUNT);
+        uniforms.movers[..spheres.len()].copy_from_slice(&spheres);
+        uniforms.live_params = Vec4::new(0.0, spheres.len() as f32, frame.camera.near_m, 0.0);
+
+        let face_px: f32 = live.face_px as f32;
+        let alpha_mode_of = |draw: &DrawItem| self.materials[draw.material.0 as usize].alpha_mode;
+        for (slot, &mouth) in slots.iter().enumerate() {
+            let descriptor: Retained<MTLRenderPassDescriptor> = color_pass(
+                &live.color,
+                MTLLoadAction::Clear,
+                Some((&live.depth, MTLLoadAction::Clear, MTLStoreAction::Store)),
+            );
+            let color_attachment =
+                unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
+            color_attachment.setSlice(slot);
+            color_attachment.setClearColor(MTLClearColor {
+                red: 0.0,
+                green: 0.0,
+                blue: 0.0,
+                alpha: 0.0,
+            });
+            descriptor.depthAttachment().setSlice(slot);
+            let encoder = command_buffer
+                .renderCommandEncoderWithDescriptor(&descriptor)
+                .expect("render encoder creation failed");
+            encoder.setFrontFacingWinding(MTLWinding::CounterClockwise);
+            let centre_m: Vec3 = live.mouths[mouth].centre_m;
+            for (face, (forward, up)) in LENS_FACES.iter().enumerate() {
+                let camera: crate::render::Camera = crate::render::Camera {
+                    view: Mat4::look_to_rh(centre_m, *forward, *up),
+                    position_m: centre_m,
+                    fov_y_rad: std::f32::consts::FRAC_PI_2,
+                    ..frame.camera
+                };
+                let proj: Mat4 = Mat4::perspective_infinite_reverse_rh(
+                    std::f32::consts::FRAC_PI_2,
+                    1.0,
+                    camera.near_m,
+                );
+                let face_frame: FrameDescription = FrameDescription { camera, ..*frame };
+                let mut face_uniforms: GpuFrameUniforms =
+                    self.frame_uniforms(&face_frame, settings, targets, cascades, proj, proj);
+                face_uniforms.screen_size =
+                    Vec4::new(face_px, face_px, face_px.recip(), face_px.recip());
+                face_uniforms.render_params.z = 0.0;
+                face_uniforms.cascade_split_far_m = Vec4::new(
+                    LENS_LIVE_UNUSED_SPLIT_M,
+                    LENS_LIVE_UNUSED_SPLIT_M,
+                    LENS_LIVE_UNUSED_SPLIT_M,
+                    LENS_LIVE_LAST_SPLIT_M,
+                );
+                let face_frustum: Frustum = Frustum::from_view_proj(face_uniforms.view_proj);
+                let draws: Vec<&DrawItem> = frame
+                    .lens_draws
+                    .iter()
+                    .filter(|draw| {
+                        face_frustum.contains_sphere(draw.bounds_center_m, draw.bounds_radius_m)
+                    })
+                    .collect();
+                if draws.is_empty() && particle_count == 0 {
+                    continue;
+                }
+                encoder.setViewport(MTLViewport {
+                    originX: f64::from(face_px) * face as f64,
+                    originY: 0.0,
+                    width: f64::from(face_px),
+                    height: f64::from(face_px),
+                    znear: 0.0,
+                    zfar: 1.0,
+                });
+                let face_buffers: FrameBuffers = FrameBuffers {
+                    frame: &face_uniforms,
+                    ..*buffers
+                };
+                self.bind_scene_inputs(&encoder, &face_buffers, targets);
+                let face_pass: GpuPassUniforms = GpuPassUniforms {
+                    view_proj: face_uniforms.view_proj,
+                    flags: Vec4::ZERO,
+                };
+                set_vertex_bytes(&encoder, as_bytes(&face_pass), 2);
+                encoder.setCullMode(MTLCullMode::Back);
+                encoder
+                    .setDepthStencilState(Some(&self.pipelines.depth_states.greater_equal_write));
+                for (pipeline_pair, alpha_mode) in [
+                    (&self.pipelines.forward_opaque, AlphaMode::Opaque),
+                    (&self.pipelines.forward_masked, AlphaMode::Mask),
+                ] {
+                    let mode_draws: Vec<&DrawItem> = draws
+                        .iter()
+                        .copied()
+                        .filter(|draw| alpha_mode_of(draw) == alpha_mode)
+                        .collect();
+                    self.draw_meshes(
+                        &encoder,
+                        pipeline_pair,
+                        &mode_draws,
+                        ScenePass::Forward,
+                        &face_buffers,
+                        false,
+                    );
+                }
+                encoder.setCullMode(MTLCullMode::None);
+                encoder.setDepthStencilState(Some(&self.pipelines.depth_states.greater_equal_read));
+                let blended: Vec<&DrawItem> = draws
+                    .iter()
+                    .copied()
+                    .filter(|draw| alpha_mode_of(draw) == AlphaMode::Blend)
+                    .collect();
+                self.draw_meshes(
+                    &encoder,
+                    &self.pipelines.forward_blend,
+                    &blended,
+                    ScenePass::Forward,
+                    &face_buffers,
+                    false,
+                );
+                if particle_count > 0 {
+                    encoder.setRenderPipelineState(&self.pipelines.particle);
+                    unsafe {
+                        encoder.setVertexBuffer_offset_atIndex(
+                            Some(buffers.dynamic),
+                            particles_offset_bytes,
+                            0,
+                        );
+                        encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                            MTLPrimitiveType::TriangleStrip,
+                            0,
+                            QUAD_VERTEX_COUNT,
+                            particle_count,
+                        );
+                    }
+                }
+            }
+            encoder.endEncoding();
+        }
+        uniforms
     }
 
     /// `bind_scene_inputs` binds the frame, the lights, and the lighting textures that every
@@ -643,6 +912,22 @@ impl Renderer for MetalRenderer {
                 uniforms,
             )
         });
+        self.lens_live = lens.map(|lens| {
+            let face_px: usize = lens.atlas.width as usize / LENS_FACES.len();
+            let slot_spec = |format: MTLPixelFormat| -> TextureSpec {
+                TextureSpec {
+                    texture_type: MTLTextureType::Type2DArray,
+                    array_length: MAX_LIVE_LENS_SLOT_COUNT,
+                    ..TextureSpec::render_target(format, face_px * LENS_FACES.len(), face_px)
+                }
+            };
+            LensLive {
+                color: create_texture(&self.device, &slot_spec(HDR_FORMAT), "live lens color"),
+                depth: create_texture(&self.device, &slot_spec(DEPTH_FORMAT), "live lens depth"),
+                face_px,
+                mouths: lens.mouths.clone(),
+            }
+        });
     }
 
     fn set_is_capturing(&mut self, is_capturing: bool) {
@@ -650,50 +935,30 @@ impl Renderer for MetalRenderer {
     }
 
     fn read_frame_rgba(&mut self) -> (u32, u32, Vec<u8>) {
-        for command_buffer in self.in_flight.drain(..) {
-            command_buffer.waitUntilCompleted();
-        }
-        let ldr: &Texture = &self.targets.as_ref().expect("a frame was rendered").ldr;
-        let (width_px, height_px) = (ldr.width(), ldr.height());
-        let bytes_per_row: usize = width_px * 4;
-        let readback = self
-            .device
-            .newBufferWithLength_options(
-                bytes_per_row * height_px,
-                MTLResourceOptions::StorageModeShared,
-            )
-            .expect("readback buffer creation failed");
-        let command_buffer = self
-            .queue
-            .commandBuffer()
-            .expect("command buffer creation failed");
-        let blit = command_buffer
-            .blitCommandEncoder()
-            .expect("blit encoder creation failed");
-        unsafe {
-            objc2_metal::MTLBlitCommandEncoder::copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(&*blit,
-                ldr,
-                0,
-                0,
-                objc2_metal::MTLOrigin { x: 0, y: 0, z: 0 },
-                objc2_metal::MTLSize { width: width_px, height: height_px, depth: 1 },
-                &readback,
-                0,
-                bytes_per_row,
-                bytes_per_row * height_px,
-            );
-        }
-        blit.endEncoding();
-        command_buffer.commit();
-        command_buffer.waitUntilCompleted();
-        let rgba: Vec<u8> = unsafe {
-            std::slice::from_raw_parts(
-                readback.contents().as_ptr().cast::<u8>(),
-                bytes_per_row * height_px,
-            )
-        }
-        .to_vec();
-        (width_px as u32, height_px as u32, rgba)
+        let ldr: Texture = self
+            .targets
+            .as_ref()
+            .expect("a frame was rendered")
+            .ldr
+            .clone();
+        self.read_texture_bytes(&ldr)
+    }
+
+    fn read_frame_depth(&mut self) -> (u32, u32, Vec<f32>) {
+        let depth: Texture = self
+            .targets
+            .as_ref()
+            .expect("a frame was rendered")
+            .depth
+            .clone();
+        let (width_px, height_px, bytes) = self.read_texture_bytes(&depth);
+        let depths: Vec<f32> = bytes
+            .as_chunks::<{ size_of::<f32>() }>()
+            .0
+            .iter()
+            .map(|chunk: &[u8; 4]| f32::from_ne_bytes(*chunk))
+            .collect();
+        (width_px, height_px, depths)
     }
 
     fn create_texture(&mut self, texture: &TextureData) -> TextureHandle {
@@ -876,6 +1141,8 @@ impl MetalRenderer {
         let world_particles_offset_bytes: usize = dynamic.push(&world_particles);
         let viewmodel_particles: Vec<GpuParticle> = gpu_particles(frame.viewmodel_particles);
         let viewmodel_particles_offset_bytes: usize = dynamic.push(&viewmodel_particles);
+        let lens_particles: Vec<GpuParticle> = gpu_particles(frame.lens_particles);
+        let lens_particles_offset_bytes: usize = dynamic.push(&lens_particles);
         let hud_rects: Vec<GpuHudRect> = frame
             .hud_rects
             .iter()
@@ -1215,6 +1482,19 @@ impl MetalRenderer {
             &targets.hdr
         };
         if let Some((lens_atlas, lens_uniforms)) = &self.lens {
+            let live: &LensLive = self.lens_live.as_ref().expect("a lens has live slots");
+            let frame_lens_uniforms: gpu_types::GpuLensUniforms = self.encode_lens_live(
+                &command_buffer,
+                frame,
+                settings,
+                targets,
+                &cascades,
+                &buffers,
+                &camera_frustum,
+                (lens_particles_offset_bytes, lens_particles.len()),
+                live,
+                lens_uniforms,
+            );
             draw_fullscreen(
                 &command_buffer,
                 &targets.lens,
@@ -1222,8 +1502,12 @@ impl MetalRenderer {
                 MTLLoadAction::DontCare,
                 |encoder: &Encoder| {
                     set_fragment_bytes(encoder, as_bytes(&frame_uniforms), 1);
-                    set_fragment_bytes(encoder, as_bytes(lens_uniforms), 2);
-                    unsafe { encoder.setFragmentTexture_atIndex(Some(lens_atlas), 0) };
+                    set_fragment_bytes(encoder, as_bytes(&frame_lens_uniforms), 2);
+                    unsafe {
+                        encoder.setFragmentTexture_atIndex(Some(lens_atlas), 0);
+                        encoder.setFragmentTexture_atIndex(Some(&live.color), 1);
+                        encoder.setFragmentTexture_atIndex(Some(&live.depth), 2);
+                    }
                 },
             );
         }

@@ -44,7 +44,7 @@ use sdl3::keyboard::Scancode;
 
 use game::audio::Audio;
 use game::player::{Player, PlayerInput};
-use game::session::{Controls, FrameData, Session};
+use game::session::{Controls, FrameData, RobotHold, Session};
 use game::weapon::WeaponInput;
 use game::world::Arena;
 use match_play::{MatchOptions, MatchPlay};
@@ -74,17 +74,36 @@ enum CameraView {
     Lookout,
     Treehouse,
     Firing,
+    Gate,
+    Lift,
 }
 
 impl CameraView {
     /// `ALL` is every view, in `--bench-views` order.
-    const ALL: [CameraView; 5] = [
+    const ALL: [CameraView; 7] = [
         CameraView::Spawn,
         CameraView::Bridge,
         CameraView::Lookout,
         CameraView::Treehouse,
         CameraView::Firing,
+        CameraView::Gate,
+        CameraView::Lift,
     ];
+
+    /// `robot_hold` is where the view holds robot 0, if it has robots: just beyond the partner of
+    /// the mouth that `Gate` and `Lift` look into, facing back through it.
+    fn robot_hold(self) -> Option<RobotHold> {
+        let feet_m: Vec3 = match self {
+            CameraView::Gate => Vec3::new(2.0, 0.0, -30.0),
+            CameraView::Lift => Vec3::new(10.3, forest_layout::DECK_TOP_M, 35.5),
+            _ => return None,
+        };
+        Some(RobotHold {
+            feet_m,
+            yaw_rad: 0.0,
+            speed_m_s: 0.0,
+        })
+    }
 
     /// `pose` returns the view's feet position, yaw and pitch (yaw 0 looks along -z, towards
     /// blue's base from red's).
@@ -99,6 +118,8 @@ impl CameraView {
                 -0.05,
             ),
             CameraView::Firing => (Vec3::new(-4.0, 0.0, 20.0), 0.1, 0.02),
+            CameraView::Gate => (Vec3::new(-2.0, 0.0, 30.5), 0.0, 0.0),
+            CameraView::Lift => (Vec3::new(-4.0, 0.0, 40.0), 0.0, 0.05),
         }
     }
 }
@@ -215,6 +236,13 @@ struct Args {
     /// Downscale the --photo to this width (keeping its aspect), e.g. to supersample.
     #[arg(long)]
     photo_width_px: Option<u32>,
+    /// Save every frame, without the HUD, as frame_NNNN.png in this folder (which must exist), at
+    /// 30 simulated frames a second, for --video-seconds, then quit.
+    #[arg(long)]
+    video_frames: Option<PathBuf>,
+    /// How many simulated seconds --video-frames records.
+    #[arg(long, default_value_t = 8.0)]
+    video_seconds: f32,
     /// Hold the camera here: feet x,y,z in meters, yaw and pitch in radians.
     #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
     camera_pose: Option<Vec<f32>>,
@@ -225,6 +253,16 @@ struct Args {
     /// How far from the camera the sun casts shadows, in meters.
     #[arg(long, default_value_t = 110.0)]
     shadow_distance_m: f32,
+    /// Hold robot 0 here (it doesn't think or shoot): feet x,y,z in meters and yaw in radians.
+    #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
+    robot_pose: Option<Vec<f32>>,
+    /// With --robot-pose, the held robot walks straight ahead at this speed (through mouths) and
+    /// starts again from its pose every 10 s.
+    #[arg(long, default_value_t = 0.0)]
+    robot_walk_m_per_s: f32,
+    /// Hold the trigger (and reload when the magazine is empty), for pictures of lasers.
+    #[arg(long)]
+    hold_trigger: bool,
     /// Leave out the tree canopies (for pictures from above).
     #[arg(long)]
     hide_canopy: bool,
@@ -237,8 +275,12 @@ struct Args {
     map_picture: Option<PathBuf>,
 }
 
-/// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle.
+/// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle, in simulated
+/// seconds.
 const PHOTO_SETTLE_S: f32 = 3.0;
+/// `RECORDING_DT_S` is the fixed step of --photo and --video-frames, so the same command gives the
+/// same picture.
+const RECORDING_DT_S: f32 = 1.0 / 30.0;
 
 /// `MAP_PICTURE_PATH` is where `make map-picture` saves the map page's picture, from this demo's
 /// folder.
@@ -328,10 +370,20 @@ fn capture_wormhole_lens(
                     hud_images: &[],
                     time_s: 0.0,
                     damage_flash_frac: 0.0,
+                    lens_draws: &[],
+                    lens_particles: &[],
                 },
                 &capture_settings,
             );
             let (frame_width_px, frame_height_px, rgba) = renderer.read_frame_rgba();
+            let (_, _, depths) = renderer.read_frame_depth();
+            let encoded_depths: Vec<u8> = depths
+                .iter()
+                .map(|&depth| render::encode_lens_depth(camera.near_m, depth))
+                .collect();
+            let depth_picture: image::GrayImage =
+                image::GrayImage::from_raw(frame_width_px, frame_height_px, encoded_depths)
+                    .expect("depth frame");
             let picture: image::RgbaImage =
                 image::RgbaImage::from_raw(frame_width_px, frame_height_px, rgba)
                     .expect("RGBA frame");
@@ -344,12 +396,28 @@ fn capture_wormhole_lens(
                 side_px,
             )
             .to_image();
-            let face_picture: image::RgbaImage = image::imageops::resize(
+            let mut face_picture: image::RgbaImage = image::imageops::resize(
                 &square,
                 LENS_FACE_PX,
                 LENS_FACE_PX,
                 image::imageops::FilterType::Triangle,
             );
+            let face_depths: image::GrayImage = image::imageops::resize(
+                &image::imageops::crop_imm(
+                    &depth_picture,
+                    (frame_width_px - side_px) / 2,
+                    (frame_height_px - side_px) / 2,
+                    side_px,
+                    side_px,
+                )
+                .to_image(),
+                LENS_FACE_PX,
+                LENS_FACE_PX,
+                image::imageops::FilterType::Nearest,
+            );
+            for (pixel, depth) in face_picture.pixels_mut().zip(face_depths.pixels()) {
+                pixel.0[3] = depth.0[0];
+            }
             image::imageops::replace(
                 &mut atlas,
                 &face_picture,
@@ -453,6 +521,15 @@ fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
     if !(0.0..=3600.0).contains(&args.benchmark_seconds) {
         return Err(format!(
             "--benchmark-seconds must be in 0..=3600; {example}"
+        ));
+    }
+    if args
+        .robot_pose
+        .as_ref()
+        .is_some_and(|pose| pose.len() != 4 || args.bot_count == 0)
+    {
+        return Err(format!(
+            "--robot-pose takes x,y,z,yaw and needs --bot-count 1 or more; {example} --robot-pose 2,0,-30,0"
         ));
     }
     if !asset_manifest::hdri_path(assets_dir).exists() {
@@ -590,6 +667,8 @@ fn run_title_screen(
                 hud_images: &[picture.get_image(width_px, height_px, TITLE_HEIGHT_FRAC)],
                 time_s: start.elapsed().as_secs_f32(),
                 damage_flash_frac: 0.0,
+                lens_draws: &frame.world_draws[frame.lens_draws.clone()],
+                lens_particles: &frame.lens_particles,
             },
             settings,
         );
@@ -610,7 +689,8 @@ const PHASE_NAMES: [&str; 5] = ["sim", "build", "slot wait", "drawable wait", "r
 const LATE_FRAME_MS: f32 = 17.5;
 
 impl FrameStats {
-    /// `summary` returns mean, median, 99th percentile frame time and mean GPU time.
+    /// `summary` returns mean, median, 99th percentile frame time and median, mean and 99th
+    /// percentile GPU time.
     fn summary(&self) -> String {
         if self.frame_ms.is_empty() {
             return "no frames".to_string();
@@ -637,7 +717,7 @@ impl FrameStats {
         let mut temp_gpu_ms: Vec<f32> = self.gpu_ms.clone();
         temp_gpu_ms.sort_by(f32::total_cmp);
         format!(
-            "{} frames: mean {:.2} ms ({:.0} fps), median {:.2} ms, p99 {:.2} ms, worst {:.2} ms, {} over {LATE_FRAME_MS} ms, GPU mean {:.2} ms, GPU p99 {:.2} ms; p99 ms of {}",
+            "{} frames: mean {:.2} ms ({:.0} fps), median {:.2} ms, p99 {:.2} ms, worst {:.2} ms, {} over {LATE_FRAME_MS} ms, GPU median {:.2} ms, GPU mean {:.2} ms, GPU p99 {:.2} ms; p99 ms of {}",
             sorted.len(),
             mean_ms,
             1000.0 / mean_ms,
@@ -645,6 +725,7 @@ impl FrameStats {
             percentile(0.99),
             sorted[sorted.len() - 1],
             late_count,
+            temp_gpu_ms[(temp_gpu_ms.len() - 1) / 2],
             gpu_mean_ms,
             temp_gpu_ms[((temp_gpu_ms.len() - 1) as f32 * 0.99) as usize],
             phase_p99s.join(", ")
@@ -753,7 +834,8 @@ fn main() {
         || args.play_route
         || args.bench_views.is_some()
         || args.camera_view.is_some()
-        || args.photo.is_some());
+        || args.photo.is_some()
+        || args.video_frames.is_some());
     if is_title_shown {
         match run_title_screen(
             &mut platform,
@@ -983,7 +1065,12 @@ fn main() {
         let now: Instant = Instant::now();
         let frame_s: f32 = (now - last_frame).as_secs_f32();
         last_frame = now;
-        let dt_s: f32 = frame_s.min(MAX_FRAME_S);
+        let is_recording: bool = args.photo.is_some() || args.video_frames.is_some();
+        let dt_s: f32 = if is_recording {
+            RECORDING_DT_S
+        } else {
+            frame_s.min(MAX_FRAME_S)
+        };
         let keys = event_pump.keyboard_state();
         let mouse_state = event_pump.mouse_state();
         let axis = |positive: Scancode, negative: Scancode| -> f32 {
@@ -1030,6 +1117,17 @@ fn main() {
             session.player.is_on_ground = true;
             session.is_autopilot = false;
         }
+        let robot_hold: Option<RobotHold> = match &args.robot_pose {
+            Some(pose) => Some(RobotHold {
+                feet_m: Vec3::new(pose[0], pose[1], pose[2]),
+                yaw_rad: pose[3],
+                speed_m_s: args.robot_walk_m_per_s,
+            }),
+            None => camera_view.and_then(CameraView::robot_hold),
+        };
+        if !session.bots.is_empty() {
+            session.set_robot_hold(robot_hold);
+        }
         let controls: Controls = match camera_view {
             Some(view) => {
                 let (feet_m, yaw_rad, pitch_rad) = view.pose();
@@ -1048,6 +1146,18 @@ fn main() {
                 }
             }
             None => controls,
+        };
+        let controls: Controls = if args.hold_trigger {
+            Controls {
+                weapon: WeaponInput {
+                    is_trigger_held: true,
+                    is_reload_pressed: session.weapon.ammo == 0,
+                    ..controls.weapon
+                },
+                ..controls
+            }
+        } else {
+            controls
         };
         let sim_start: Instant = Instant::now();
         let waypoint_before: usize = session.autopilot_waypoint;
@@ -1090,7 +1200,7 @@ fn main() {
             frame.camera.far_m = f32::MAX;
             renderer.set_is_capturing(true);
         }
-        if args.photo.is_some() {
+        if is_recording {
             frame.viewmodel_draws.clear();
             frame.viewmodel_particles.clear();
         }
@@ -1147,6 +1257,8 @@ fn main() {
                 hud_images: &hud_images,
                 time_s: session.time_s,
                 damage_flash_frac: frame.damage_flash_frac,
+                lens_draws: &frame.world_draws[frame.lens_draws.clone()],
+                lens_particles: &frame.lens_particles,
             },
             &settings,
         );
@@ -1159,8 +1271,18 @@ fn main() {
             timing.cpu_render_ms as f32,
         ];
         let elapsed_s: f32 = start.elapsed().as_secs_f32();
+        if let Some(directory) = &args.video_frames {
+            if session.time_s > args.video_seconds {
+                break 'running;
+            }
+            let frame_path: PathBuf = directory.join(format!(
+                "frame_{:04}.png",
+                (session.time_s / RECORDING_DT_S).round() as u32
+            ));
+            save_photo(&mut renderer, &frame_path, args.photo_width_px);
+        }
         if let Some(path) = &args.photo
-            && elapsed_s > PHOTO_SETTLE_S
+            && session.time_s > PHOTO_SETTLE_S
         {
             if args.map_picture.is_some() {
                 save_map_picture(&mut renderer, path, &session.arena);

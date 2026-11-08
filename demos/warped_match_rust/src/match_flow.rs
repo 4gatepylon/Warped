@@ -4,7 +4,8 @@
 //! (`MatchClient`) what is on, so each client can start and stop its level window.
 //!
 //! Interface: `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `serve_match`, `MatchClient`
-//! (`Connect`, `poll`), `make_level_client_command`, `MATCH_PORT`.
+//! (`Connect`, `poll`), `make_level_client_command`, `is_sitting_out`, `is_level_restart_due`,
+//! `MATCH_PORT`.
 //!
 //! Example: `serve_match(&levels, &MatchTimes::default(), &run_folder, MATCH_PORT, 47852)?;`
 //!
@@ -244,6 +245,43 @@ pub fn stop_child(child: &mut Option<Child>) {
     }
 }
 
+/// `is_sitting_out` says whether `team`'s bot joins no level in round `round` (from 1) of a
+/// steered match: `round_winners`, each round's winner in turn, names the other team there. An
+/// unsteered bot (no `round_winners`) never sits out; a round past the list is an error.
+///
+/// Example: `assert!(is_sitting_out(&[Team::Blue], 1, Team::Red)?);`
+pub fn is_sitting_out(round_winners: &[Team], round: usize, team: Team) -> Result<bool> {
+    if round_winners.is_empty() {
+        return Ok(false);
+    }
+    let winner: Team = *round_winners.get(round - 1).ok_or_else(|| {
+        format!(
+            "round {round} started, but --bot-round-winners names only {} rounds",
+            round_winners.len()
+        )
+    })?;
+    Ok(winner != team)
+}
+
+/// `is_level_restart_due` says whether a match client may start a level again that stopped by
+/// itself at `stopped_at`: only once a view came (`view_at`) `restart_s` after the stop, so it
+/// shows whether the round goes on. An older view may still say a round is on that the stopped
+/// level has just won (City Sphere's bot quits when its team wins).
+///
+/// Example: `if is_level_restart_due(stopped_at, client.view_at, 1.0) { ... }`
+pub fn is_level_restart_due(
+    stopped_at: Option<Instant>,
+    view_at: Option<Instant>,
+    restart_s: f64,
+) -> bool {
+    match (stopped_at, view_at) {
+        (Some(stopped_at), Some(view_at)) => {
+            view_at >= stopped_at + Duration::from_secs_f64(restart_s)
+        }
+        _ => false,
+    }
+}
+
 /// `parse_hello` gives the team a client's `hello <team>` datagram names (`None` for `any`), or
 /// an error for any other datagram.
 ///
@@ -421,13 +459,14 @@ pub fn serve_match(
     }
 }
 
-/// `MatchClient` is a connection to a match server: the team it says it plays for and the last
-/// `MatchView` the server sent.
+/// `MatchClient` is a connection to a match server: the team it says it plays for, and the last
+/// `MatchView` the server sent and when it came (`view_at`).
 pub struct MatchClient {
     socket: UdpSocket,
     pub server: SocketAddr,
     pub team: Option<Team>,
     pub view: Option<MatchView>,
+    pub view_at: Option<Instant>,
     last_hello: Option<Instant>,
     buffer: Vec<u8>,
 }
@@ -446,6 +485,7 @@ impl MatchClient {
             server,
             team,
             view: None,
+            view_at: None,
             last_hello: None,
             buffer: vec![0; MAX_DATAGRAM_BYTES],
         })
@@ -468,6 +508,7 @@ impl MatchClient {
             match self.socket.recv_from(&mut self.buffer) {
                 Ok((length, address)) if address == self.server => {
                     self.view = Some(serde_json::from_slice(&self.buffer[..length])?);
+                    self.view_at = Some(Instant::now());
                 }
                 Ok(_) => {}
                 Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
@@ -497,8 +538,44 @@ mod tests {
     //! | Levels file | the shipped one, an even count | `the_shipped_levels_file_loads`, `an_even_level_count_is_refused` |
     //! | Level result | none yet, blue, red, garbage | `level_results_are_read` |
     //! | Hello | each team, any, garbage | `hellos_name_a_team` |
+    //! | Steered bot | unsteered, its team's round, the other's, past the list | `steered_bots_sit_out_the_other_teams_rounds` |
+    //! | Level restart | none stopped, no view, a view from before the stop, too soon after, late enough | `a_stopped_level_restarts_only_on_a_fresh_view` |
 
     use super::*;
+
+    #[test]
+    fn a_stopped_level_restarts_only_on_a_fresh_view() {
+        let stopped_at: Instant = Instant::now();
+        let restart_s: f64 = 1.0;
+        let after = |seconds: f64| Some(stopped_at + Duration::from_secs_f64(seconds));
+        assert!(!is_level_restart_due(None, after(5.0), restart_s));
+        assert!(!is_level_restart_due(Some(stopped_at), None, restart_s));
+        assert!(!is_level_restart_due(
+            after(1.0),
+            Some(stopped_at),
+            restart_s
+        ));
+        assert!(!is_level_restart_due(
+            Some(stopped_at),
+            after(0.5),
+            restart_s
+        ));
+        assert!(is_level_restart_due(
+            Some(stopped_at),
+            after(1.0),
+            restart_s
+        ));
+    }
+
+    #[test]
+    fn steered_bots_sit_out_the_other_teams_rounds() {
+        let winners: [Team; 2] = [Team::Blue, Team::Red];
+        assert!(!is_sitting_out(&[], 7, Team::Red).unwrap());
+        assert!(!is_sitting_out(&winners, 1, Team::Blue).unwrap());
+        assert!(is_sitting_out(&winners, 1, Team::Red).unwrap());
+        assert!(is_sitting_out(&winners, 2, Team::Blue).unwrap());
+        assert!(is_sitting_out(&winners, 3, Team::Red).is_err());
+    }
 
     #[test]
     fn the_shipped_levels_file_loads() {

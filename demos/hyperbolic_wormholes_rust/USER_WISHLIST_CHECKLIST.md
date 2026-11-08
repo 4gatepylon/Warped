@@ -11,6 +11,33 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-126 Same play in every level.** "it looks like in Space Station you don't have the same health bars and
+  stuff. All the different levels should have the health bars and the weapons and sort of the same stuff that we made
+  happen in Lunar, including even the speckled noise for the lasers and the head bobbing and stuff like that when
+  you're running, the way the gun moves. All that has to be the same throughout the entire game. The only things that
+  kind of change are, like I mentioned, of course, the laser colors. It's green for the snow planet, golden white for
+  dust, red and blue for both Lunar and for Space Station, and also golden white for the Dark Forest. For Dark Forest,
+  it can just be like golden, golden. They should all have their own mini maps that are nicely represented. All should
+  have their own maps. [...] They all need to be possible to win, which means it needs to be possible to get to the
+  pylon. They all have the same ability for the player to place two wormholes if the player wants. It should be
+  possible for all of them to press E when you're next to the pylon to disable it. The patterns for the pylons are
+  three for lunar and three for dust. Dark forest and two for snow, and then only one pylon for the space station."
+  And: "Respawn timers and all that stuff should be the same throughout." And, about each level's own features:
+  "dust is special in that it has basically this wind. It's like a sandstorm, and the wind bends the laser in the
+  direction of the wind. [...] Dust is also hyperbolic. [...] Dark Forest is like the toroidal setup [...] meant to be
+  kind of dark. There's meant to be a little bit of light coming in between the foliage. It's meant to be covered with
+  wormholes [...] a planet or level where you can access these ladders that let you go into the trees. So it's kind of
+  like a Wookiee planet style, but with bamboo. Snow Planet has [...] exactly one instance of basically a tall
+  cylinder in the map that's like a blizzard zone. And if you enter there, you're slowed and you take damage. And the
+  damage should, like in all the other variants or locations of the game, sort of jitter your screen and give you like
+  the red and blur coming in from the outside. This is something that Lunar has, and that everything has to have.
+  Whenever you take damage, in the past, the only ways to take damage were basically by getting shot, but here there's
+  like a natural world as well." Claimed by Claude Code (session
+  `wizardly-hamilton-23a121` and its subagents), one branch per level, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): a parity audit of every level against Lunar Surface on
+    `claude/levels-checks`, then each level's fixes on its own agent's branch (`claude/city-sphere-fixes`,
+    `claude/dark-forest-lens-robots`, `claude/snow-planet-torus`, `claude/dust-wormhole-speed`), in worktrees under
+    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
@@ -65,7 +92,8 @@ is in [`AGENTS.md`](AGENTS.md).
   ideas I've described and just do the simplest possible version of it. You can start with a very small map for each
   one, and then we're going to want to go on based on feedback." The four maps are W-119 (City Sphere demo), W-120
   (Snow Planet demo), W-121 (Dust demo) and W-122 (Dark Forest demo).
-  Merged into `staging/user-4gatepylon` with #393, #396, #397, #399, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #393, #396, #397, #399, 2026-11-08. Correctness checks of every level
+  and their fixes: #419, #418; frame times of every level on a real Mac: #422.
 - [?] **W-119 City Sphere demo.** Part of W-124 (four map demos), the satellite city: "Ideally it can be like a sphere,
   where you walk and the roof is like glass or something, and then you can also go up onto the glass level, and
   there's also going to be like obstacles and stuff, but there's going to be no roof on the glass level. On the glass
@@ -93,18 +121,21 @@ is in [`AGENTS.md`](AGENTS.md).
   should kind of bend in the direction of the wind. There will be no black hole there, but there will still be
   wormholes, and obviously, players can place wormholes. And obviously, that one's also hyperbolic, unlike the other
   ones."
-  Merged into `staging/user-4gatepylon` with #393, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #393, 2026-11-08. Speed: #420 bakes the terrain's height, so every
+  bench view is under 16.7 ms at 2560×1440 with the same pictures (open, 2026-11-08).
 - [?] **W-122 Dark Forest demo.** Part of W-124 (four map demos): "I want it to just be kind of just like a normal
   forest. This is just that one's going to be just kind of a normal first-person shooter. Maybe one difference there
   is just to have it have verticality, similar to the Star Wars Endor or whatever, maybe the Wookiee Planet, where
   there's like tree houses and stuff. Maybe have some like rope ladders and ways of going up trees. And crossing
   across them."
-  Merged into `staging/user-4gatepylon` with #399, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #399, 2026-11-08. #426: robots, players and lasers show through the
+  wormholes (open, 2026-11-08).
 - [?] **W-123 Match progression menu.** "Make sure that the menus, when you see, like, there's a menu that shows the
   game progression, kind of the game history. Like, some state, I suppose, in the game server has to keep track of the
   game history and which team won what and what the wavefronts are, who has ownership, defensive ownership, offensive
   ownership, etc."
-  Merged into `staging/user-4gatepylon` with #403, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #403, 2026-11-08. #417: `make play-all-levels`, a bot match steered
+  through all five levels and checked (no stall, each level's result, the progression).
 - [?] **W-125 Photo map page.** "I also really liked the 3 dimensional-looking visualization for the snow map, if
   you can for all maps (including lunar base) make the map as shown when you click tab and then e to get to map look
   not like some random 1950s drawing but instead a real like photo from the top that would be very nice (it could
