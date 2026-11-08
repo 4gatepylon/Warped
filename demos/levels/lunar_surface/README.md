@@ -139,4 +139,4 @@ the layout, then `make -C common/maps validate-maps`.
 - Light bends only inside the reach spheres; between 10 m and 24 m from the black hole the bending is weaker than a
   real black hole's, and beyond 24 m there is none.
 - The sky is a parallel-transported skybox rather than the sphere at infinity, so it barely moves as you walk.
-- Glass is see-through and stops the laser but doesn't refract. The laser has no gravity drop. No damage model.
+- Glass lets light and the laser through but doesn't refract; it stops players. The laser has no gravity drop. No damage model.

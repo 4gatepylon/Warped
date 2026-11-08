@@ -46,6 +46,7 @@ const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "hit_effects.shake_px",
     "hit_effects.blur_px",
 ];
+const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -65,13 +66,14 @@ pub struct MovementSettings {
     pub crouch_s: f64,
 }
 
-/// `SprintEnergySettings` is how long a full sprint bar lasts and how long an empty one takes to
-/// refill.
+/// `SprintEnergySettings` is how long a full sprint bar lasts, and how long an empty one takes to
+/// refill while crouched and while walking or standing upright.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SprintEnergySettings {
     pub drain_s: f64,
-    pub refill_s: f64,
+    pub refill_crouching_s: f64,
+    pub refill_walking_s: f64,
 }
 
 /// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, and how long
@@ -307,6 +309,24 @@ fn read_text(path: &Path) -> Result<String> {
         .map_err(|error| format!("settings {}: {error}", path.display()))?)
 }
 
+/// `drop_removed_keys` deletes from a settings file's YAML each dotted key of `removed` (such as
+/// `view.wormhole_tint_s`) that it has, so a file an older version saved still loads; every other
+/// unknown key still fails.
+///
+/// Example: `drop_removed_keys(&mut yaml, &REMOVED_PLAYER_KEYS);`
+fn drop_removed_keys(yaml: &mut serde_yaml::Value, removed: &[&str]) {
+    for key in removed {
+        let mut parts: Vec<&str> = key.split('.').collect();
+        let name: &str = parts.pop().expect("a key has at least one part");
+        let parent: Option<&mut serde_yaml::Value> = parts
+            .iter()
+            .try_fold(&mut *yaml, |node, part| node.get_mut(*part));
+        if let Some(serde_yaml::Value::Mapping(fields)) = parent {
+            fields.remove(name);
+        }
+    }
+}
+
 impl ServerSettings {
     /// `FromYaml` reads server settings from YAML text, naming `source` in errors, and checks every
     /// number (`check_numbers`).
@@ -385,13 +405,17 @@ impl ServerSettings {
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
-    /// `view.wormhole_tint_frac` at most 1.
+    /// `view.wormhole_tint_frac` at most 1. The keys in `REMOVED_PLAYER_KEYS`, which older
+    /// versions saved, are dropped (`drop_removed_keys`).
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
     fn FromYaml(text: &str, source: &str) -> Result<PerPlayerSettings> {
-        let file: PlayerFile =
+        let mut yaml: serde_yaml::Value =
             serde_yaml::from_str(text).map_err(|error| format!("settings {source}: {error}"))?;
+        drop_removed_keys(&mut yaml, &REMOVED_PLAYER_KEYS);
+        let file: PlayerFile =
+            serde_yaml::from_value(yaml).map_err(|error| format!("settings {source}: {error}"))?;
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         if file.view.wormhole_tint_frac > 1.0 {
@@ -451,6 +475,7 @@ mod tests {
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise that shrinks with heat) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -484,7 +509,7 @@ mod tests {
     fn unknown_and_missing_keys_fail() {
         let unknown: String = BUILTIN_SERVER_YAML.replace("drain_s:", "drain_seconds:");
         assert!(ServerSettings::FromYaml(&unknown, "test").is_err());
-        let missing: String = BUILTIN_SERVER_YAML.replace("  refill_s: 15.0", "");
+        let missing: String = BUILTIN_SERVER_YAML.replace("  refill_walking_s: 15.0", "");
         assert!(ServerSettings::FromYaml(&missing, "test").is_err());
         let unknown_view: String = BUILTIN_PLAYER_YAML.replace("motion_blur_s:", "blur_s:");
         assert!(PerPlayerSettings::FromYaml(&unknown_view, "test").is_err());
@@ -549,5 +574,25 @@ mod tests {
             .expect("a tint above 1 fails")
             .to_string();
         assert!(error.contains("view.wormhole_tint_frac"), "{error}");
+    }
+
+    #[test]
+    fn removed_keys_are_dropped_and_others_still_fail() {
+        const OLD_TINT_LINE: &str = "\n  wormhole_tint_s: 1.5  # removed by W-82";
+        let with_tint_line = |line: &str| -> String {
+            let tint_frac_line: &str = "\n  wormhole_tint_frac: 1.0";
+            BUILTIN_PLAYER_YAML.replacen(tint_frac_line, &format!("{tint_frac_line}{line}"), 1)
+        };
+        let old_save: String = with_tint_line(OLD_TINT_LINE);
+        assert_ne!(old_save, BUILTIN_PLAYER_YAML);
+        let loaded: PerPlayerSettings =
+            PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
+        assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());
+        let typo: String = with_tint_line("\n  wormhole_tint_seconds: 1.5");
+        let error: String = PerPlayerSettings::FromYaml(&typo, "test")
+            .err()
+            .expect("a key that was never removed fails")
+            .to_string();
+        assert!(error.contains("wormhole_tint_seconds"), "{error}");
     }
 }

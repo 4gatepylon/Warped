@@ -1251,7 +1251,7 @@ function find_warp_entry(x, v, s_max) {
 }
 
 /**
- * `trace_structure_cpu` finds where a geodesic segment first enters a solid block of one structure (glass counts as solid), by a voxel DDA in the structure's Klein coordinates.
+ * `trace_structure_cpu` finds where a geodesic segment first enters a solid block of one structure (it passes through glass, as light does), by a voxel DDA in the structure's Klein coordinates.
  * @param {number} k The structure index.
  * @param {Array<number>} x The segment's start.
  * @param {Array<number>} v Its unit tangent.
@@ -1278,7 +1278,7 @@ function trace_structure_cpu(k, x, v, s_min, s_max) {
   let mu = mu_in;
   for (let n = 0; n < st.dims[0] + st.dims[1] + st.dims[2] + 3; n++) {
     const material = st.cells[cell[0] + st.dims[0] * (cell[1] + st.dims[1] * cell[2])];
-    if (material) { const lam = mu * p[W] * p[W] / (1 - mu * p[W] * t[W]); return { s: s_star + Math.atanh(lam), k, material }; }
+    if (material && material !== MAT.GLASS) { const lam = mu * p[W] * p[W] / (1 - mu * p[W] * t[W]); return { s: s_star + Math.atanh(lam), k, material }; }
     const i = mu_next[0] < mu_next[1] ? (mu_next[0] < mu_next[2] ? 0 : 2) : (mu_next[1] < mu_next[2] ? 1 : 2);
     mu = mu_next[i]; cell[i] += step[i]; mu_next[i] += mu_delta[i];
     if (mu > mu_out || cell[i] < 0 || cell[i] >= st.dims[i]) return null;

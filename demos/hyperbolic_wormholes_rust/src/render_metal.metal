@@ -78,6 +78,10 @@ constant float RECT_GLOSS_TOP_OPACITY = 0.6;
 constant float RECT_GLOSS_MIDDLE_OPACITY = 0.15;
 constant float RECT_GLOSS_INSET_PER_HEIGHT = 0.12;
 constant float RECT_EDGE_SOFT_PX = 0.5;
+constant int MAX_RECT_PULSE_COUNT = 4;
+constant float RECT_PULSE_REACH_PER_HALF_SIZE = 3.0;
+constant float RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH = 0.5;
+constant float RECT_PULSE_LIGHT_GAIN = 0.6;
 
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
@@ -2312,20 +2316,25 @@ struct RectStyle {
 };
 
 /**
- * @brief `RectPulse` is render_metal.rs's `RectPulse`, a band of light across an `OverlayRect` (a pulse running along a HUD
- * bar): its middle's x and its half width as fractions of the screen's width (measured along the rect's slant, at its
- * middle row), two zeros, and its colour with, in `.a`, its opacity at its middle (0 for none).
+ * @brief `RectPulse` is render_metal.rs's `RectPulse`, up to `MAX_RECT_PULSE_COUNT` soft glows running along a HUD bar,
+ * carried by the bar's first `OverlayRect`: their middles' x as fractions of the screen's width (measured along the rect's
+ * slant, at its middle row), their opacities (0 for none), the x span they show in (the bar's filled part, fading out
+ * over `RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH` of a half width, at most half the span, inside each end), their half width
+ * (of the screen's width) and half height (of its height), and their colour (`.a` unused).
  */
 struct RectPulse {
-    float center_x_frac;
+    float4 centers_x_frac;
+    float4 opacities;
+    float min_x_frac;
+    float max_x_frac;
     float half_width_frac;
-    float2 padding;
+    float half_height_frac;
     float4 color;
 };
 
 /**
  * @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), its
- * colour and opacity, its style and the pulse across it.
+ * colour and opacity, its style and the pulses it carries for its bar.
  */
 struct OverlayRect {
     float2 min_frac;
@@ -2410,10 +2419,40 @@ static float4 get_rect_halo(constant OverlayRect &rect, float2 at_px, float2 siz
 }
 
 /**
+ * @brief `get_pulse_glow` gives how much of `rect`'s pulse colour covers pixel centre `at_px` (0 to 1): the sum of its
+ * pulses' Gaussians along the bar (leaning with its slant) times a Gaussian across it, faded out smoothly inside both
+ * ends of its span, so it never reaches the empty slots. The glow covers the segments and the gaps between them alike.
+ * @par Example
+ * @code
+ * color.rgb = mix(color.rgb, rect.pulse.color.rgb, get_pulse_glow(rect, at_px, size_px));
+ * @endcode
+ */
+static float get_pulse_glow(constant OverlayRect &rect, float2 at_px, float2 size_px) {
+    RectPulse pulse = rect.pulse;
+    if (all(pulse.opacities <= 0.0)) return 0.0;
+    float half_width_px = max(pulse.half_width_frac * size_px.x, 1.0);
+    float half_height_px = max(pulse.half_height_frac * size_px.y, 1.0);
+    float across_px = at_px.y - (rect.min_frac.y + rect.max_frac.y) * 0.5 * size_px.y;
+    if (abs(across_px) > RECT_PULSE_REACH_PER_HALF_SIZE * half_height_px) return 0.0;
+    float along_px = at_px.x + rect.style.slant_x_per_y * across_px;
+    float min_px = pulse.min_x_frac * size_px.x;
+    float max_px = pulse.max_x_frac * size_px.x;
+    float soft_px = max(min(RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH * half_width_px, (max_px - min_px) * 0.5), 1.0);
+    float span = smoothstep(min_px, min_px + soft_px, along_px) * (1.0 - smoothstep(max_px - soft_px, max_px, along_px));
+    if (span <= 0.0) return 0.0;
+    float sum = 0.0;
+    for (int k = 0; k < MAX_RECT_PULSE_COUNT; k++) {
+        float u = (along_px - pulse.centers_x_frac[k] * size_px.x) / half_width_px;
+        sum += pulse.opacities[k] * exp(-u * u);
+    }
+    float v = across_px / half_height_px;
+    return min(sum, 1.0) * exp(-v * v) * span;
+}
+
+/**
  * @brief `get_rect_layer` gives `rect` at pixel centre `at_px` as premultiplied colour and opacity (zero outside it, soft
  * over half a pixel at its edge): its colour shaded from top to bottom by `shade_frac`, a gloss highlight over its top
- * half (inset from its edge by `RECT_GLOSS_INSET_PER_HEIGHT` of its height), its pulse (a Gaussian band of its colour
- * across the rect, leaning with its slant), then its inner outline.
+ * half (inset from its edge by `RECT_GLOSS_INSET_PER_HEIGHT` of its height), then its inner outline.
  * @par Example
  * @code
  * float4 layer = get_rect_layer(rects[i], at_px, size_px);
@@ -2436,13 +2475,6 @@ static float4 get_rect_layer(constant OverlayRect &rect, float2 at_px, float2 si
         float gloss_a = s.gloss_frac * inset * top * mix(RECT_GLOSS_TOP_OPACITY, RECT_GLOSS_MIDDLE_OPACITY, t / RECT_GLOSS_END_FRAC);
         layer = float4(gloss_a, gloss_a, gloss_a, gloss_a) + layer * (1.0 - gloss_a);
     }
-    if (rect.pulse.color.a > 0.0) {
-        float middle_y_px = (rect.min_frac.y + rect.max_frac.y) * 0.5 * size_px.y;
-        float along_px = at_px.x + s.slant_x_per_y * (at_px.y - middle_y_px) - rect.pulse.center_x_frac * size_px.x;
-        float u = along_px / max(rect.pulse.half_width_frac * size_px.x, 1.0);
-        float pulse_a = rect.pulse.color.a * exp(-u * u);
-        layer = float4(rect.pulse.color.rgb * pulse_a, pulse_a) + layer * (1.0 - pulse_a);
-    }
     if (s.outline_frac > 0.0) {
         float half_width_px = s.outline_frac * size_px.y * 0.5;
         float stroke = clamp(half_width_px - abs(d_px + half_width_px) + RECT_EDGE_SOFT_PX, 0.0, 1.0);
@@ -2460,8 +2492,10 @@ static float4 get_rect_layer(constant OverlayRect &rect, float2 at_px, float2 si
  * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel)
  * when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), the minimap
  * (`draw_minimap`, from `minimap` and the map's picture `minimap_map`), and `rects` over that: first all their shadows
- * and glows (`get_rect_halo`, the strongest of each), then the rectangles themselves blended in order (`get_rect_layer`)
- * (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
+ * and glows (`get_rect_halo`, the strongest of each), then the rectangles themselves blended in order (`get_rect_layer`),
+ * then the bars' pulses (`get_pulse_glow`: tinting toward their colour and adding `RECT_PULSE_LIGHT_GAIN` of it as
+ * light) (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the
+ * energy bar).
  * @par Example
  * @code
  * dispatched by render_metal.rs, one thread per output pixel.
@@ -2525,6 +2559,11 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
     for (int i = 0; i < p.rect_count; i++) {
         float4 layer = get_rect_layer(rects[i], at_px, size);
         color.rgb = color.rgb * (1.0 - layer.a) + layer.rgb;
+    }
+    for (int i = 0; i < p.rect_count; i++) {
+        float pulse_glow = get_pulse_glow(rects[i], at_px, size);
+        float3 pulse_rgb = rects[i].pulse.color.rgb;
+        color.rgb = mix(color.rgb, pulse_rgb, pulse_glow) + pulse_rgb * pulse_glow * RECT_PULSE_LIGHT_GAIN;
     }
     out.write(color, id);
 }

@@ -5,8 +5,8 @@
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
-//! `VoxelWorld::find_aimed_material`, `VoxelWorld::get_mouth_depth_frac`, `Console`, `VoxelPlayer`,
-//! `StepReport`, `Shot`, `BeamSegment`.
+//! `VoxelWorld::find_aimed_material`, `VoxelWorld::is_sunlit`, `VoxelWorld::get_mouth_depth_frac`,
+//! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
@@ -16,7 +16,7 @@ use glam::{DMat4, DVec3, DVec4};
 
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
-    minkowski_dot, normalize_tangent,
+    minkowski_dot, normalize_tangent, transport_from_centre,
 };
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
@@ -60,6 +60,8 @@ const UNSTICK_STEP_M: f64 = 0.25;
 const UNSTICK_MAX_STEPS: usize = 160;
 const PUSH_OUT_STEP_M: f64 = 0.05;
 const MAX_WALK_RISE_M: f64 = 0.3;
+const WALK_RISE_STEP_M: f64 = 0.02;
+const SUN_SHADOW_M: f64 = 80.0;
 const PUSH_OUT_STEP_COUNT: usize = 6;
 const PUSH_OUT_DIRECTION_COUNT: usize = 16;
 const LANDING_BISECTIONS: usize = 10;
@@ -383,14 +385,14 @@ fn normalize_minkowski(a: DVec4) -> DVec4 {
 /// `geodesic_point` gives cosh(s) x + sinh(s) v.
 ///
 /// Example: `let y = geodesic_point(x, v, 0.1);`
-fn geodesic_point(x: DVec4, v: DVec4, s: f64) -> DVec4 {
+pub(crate) fn geodesic_point(x: DVec4, v: DVec4, s: f64) -> DVec4 {
     s.cosh() * x + s.sinh() * v
 }
 
 /// `geodesic_tangent` gives sinh(s) x + cosh(s) v.
 ///
 /// Example: `let w = geodesic_tangent(x, v, 0.1);`
-fn geodesic_tangent(x: DVec4, v: DVec4, s: f64) -> DVec4 {
+pub(crate) fn geodesic_tangent(x: DVec4, v: DVec4, s: f64) -> DVec4 {
     s.sinh() * x + s.cosh() * v
 }
 
@@ -429,7 +431,7 @@ fn cross_ground(a: DVec4, b: DVec4) -> DVec4 {
 /// to ground point `g` and local +z toward `toward`.
 ///
 /// Example: `let frame = make_ground_frame(g, -heading);`
-fn make_ground_frame(g: DVec4, toward: DVec4) -> DMat4 {
+pub(crate) fn make_ground_frame(g: DVec4, toward: DVec4) -> DMat4 {
     let g: DVec4 = normalize_minkowski(g);
     let t: DVec4 = normalize_minkowski(toward + minkowski_dot(toward, g) * g);
     let r: DVec4 = normalize_minkowski(cross_ground(t, g));
@@ -683,6 +685,24 @@ impl VoxelWorld {
         self.settings = settings;
     }
 
+    /// `get_map_gravity_m_per_s2` gives the map's own gravity, before the game settings speed up
+    /// the players' jumps (`set_settings`).
+    ///
+    /// Example: `let g_m_per_s2 = world.get_map_gravity_m_per_s2();`
+    pub fn get_map_gravity_m_per_s2(&self) -> f64 {
+        self.map_gravity_m_per_s2
+    }
+
+    /// `is_sunlit` says whether sunlight reaches point x: nothing (the ground or a block) lies
+    /// within `SUN_SHADOW_M` of it toward the sun, as `render_voxel.metal`'s `trace_shadow` checks.
+    ///
+    /// Example: `let is_lit = world.is_sunlit(x);`
+    pub fn is_sunlit(&self, x: DVec4) -> bool {
+        let toward_sun: DVec4 = transport_from_centre(self.sun, x);
+        self.trace_scene(x, toward_sun, SUN_SHADOW_M / self.r, None)
+            .is_none()
+    }
+
     /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame
     /// and an avatar colour index): a 1 × 4 grid of half-meter cells in its own material, so it is
     /// drawn, lensed and hit by lasers like any structure.
@@ -744,8 +764,8 @@ impl VoxelWorld {
     }
 
     /// `find_aimed_material` gives the material of the block straight ahead of `camera`'s eye
-    /// within `reach_m`, or `None` when the ground or nothing is there. The ray isn't bent: over a
-    /// few meters only a mouth's throat would bend it much.
+    /// within `reach_m`, or `None` when the ground or nothing is there. The ray passes through glass
+    /// and isn't bent: over a few meters only a mouth's throat would bend it much.
     ///
     /// Example: `let material = world.find_aimed_material(camera, 3.0);`
     pub fn find_aimed_material(&self, camera: DMat4, reach_m: f64) -> Option<u8> {
@@ -895,17 +915,20 @@ impl VoxelWorld {
     }
 
     /// `find_walk_rise_m` gives the smallest lift, up to `MAX_WALK_RISE_M`, that clears a body
-    /// standing on `body` with eye height `h_m`, or `None` if that much doesn't. Walking on a
-    /// structure needs it: its cells' tops are geodesic planes, which rise a little against the
-    /// ground's height away from the structure's centre, but a lift this small never climbs a
-    /// block.
+    /// standing on `body` with eye height `h_m`, or `None` if none does. Walking on a structure
+    /// needs it: its floors are geodesic planes, which rise a little against the ground's height
+    /// away from the structure's centre, but a lift this small never climbs a block. It tries lifts
+    /// upward in `WALK_RISE_STEP_M` steps and bisects below the first that clears, rather than
+    /// trying the largest first: under a low ceiling (a doorway's lintel, a walkway's roof) the
+    /// largest lift puts the head into it while a small one clears the floor.
     ///
     /// Example: `if let Some(rise_m) = world.find_walk_rise_m(body, h_m, &nearby) { ... }`
     fn find_walk_rise_m(&self, body: DMat4, h_m: f64, nearby: &[usize]) -> Option<f64> {
-        if self.is_body_blocked(body, h_m + MAX_WALK_RISE_M, nearby) {
-            return None;
-        }
-        let (mut lo_m, mut hi_m) = (0.0, MAX_WALK_RISE_M);
+        let step_count: usize = (MAX_WALK_RISE_M / WALK_RISE_STEP_M).ceil() as usize;
+        let first_clear_m: f64 = (1..=step_count)
+            .map(|i| (i as f64 * WALK_RISE_STEP_M).min(MAX_WALK_RISE_M))
+            .find(|&rise_m| !self.is_body_blocked(body, h_m + rise_m, nearby))?;
+        let (mut lo_m, mut hi_m) = ((first_clear_m - WALK_RISE_STEP_M).max(0.0), first_clear_m);
         for _ in 0..LANDING_BISECTIONS {
             let mid_m: f64 = (lo_m + hi_m) / 2.0;
             if self.is_body_blocked(body, h_m + mid_m, nearby) {
@@ -1065,7 +1088,8 @@ impl VoxelWorld {
         )
     }
 
-    /// `trace_structure` finds where a chord first enters a solid cell of structure k, by a voxel walk.
+    /// `trace_structure` finds where a chord first enters a shape of structure k, by sphere tracing.
+    /// The chord passes through glass, as light and lasers do.
     ///
     /// Example: `let s = world.trace_structure(3, x, v, 0.0, 1.0);`
     fn trace_structure(&self, k: usize, x: DVec4, v: DVec4, s_min: f64, s_max: f64) -> Option<f64> {
@@ -1092,7 +1116,8 @@ impl VoxelWorld {
         };
         let q0: DVec3 = p.truncate() / p.w * self.r;
         let dq: DVec3 = (t.truncate() * p.w - p.truncate() * t.w) * self.r;
-        let (mu, _) = find_hit_mu(self.get_shapes(k), q0, dq, mu_of(s_lo), mu_of(s_hi))?;
+        let glass: Option<u8> = u8::try_from(self.special.glass).ok();
+        let (mu, _) = find_hit_mu(self.get_shapes(k), q0, dq, mu_of(s_lo), mu_of(s_hi), glass)?;
         let lam: f64 = mu * p.w * p.w / (1.0 - mu * p.w * t.w);
         Some(s_star + lam.atanh())
     }
@@ -1131,7 +1156,8 @@ impl VoxelWorld {
     }
 
     /// `trace_laser` follows a shot from `camera`'s eye along its crosshair: straight between warps,
-    /// bent inside them, through throats, to a block, the ground, a horizon or `LASER_MAX_LENGTH_M`.
+    /// bent inside them, through throats and glass, to a block, the ground, a horizon or
+    /// `LASER_MAX_LENGTH_M`.
     /// The drawn beam starts at the muzzle (`MUZZLE_M` in camera space, where the window draws the
     /// tip of the gun in hand) and joins the path `LASER_MUZZLE_M` ahead,
     /// simplified into geodesic segments within `BEAM_TOLERANCE_M`.
@@ -1574,13 +1600,12 @@ impl VoxelPlayer {
         self.crouch_frac += (crouch_target - self.crouch_frac).clamp(-crouch_step, crouch_step);
         let wants_to_sprint: bool = input.sprint && !input.crouch && len > 0.0;
         self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
-        self.energy_frac = (self.energy_frac
-            + if wants_to_sprint {
-                -dt_s / energy.drain_s
-            } else {
-                dt_s / energy.refill_s
-            })
-        .clamp(0.0, 1.0);
+        let energy_change_per_s: f64 = match (wants_to_sprint, input.crouch) {
+            (true, _) => -1.0 / energy.drain_s,
+            (false, true) => 1.0 / energy.refill_crouching_s,
+            (false, false) => 1.0 / energy.refill_walking_s,
+        };
+        self.energy_frac = (self.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
         let is_walking: bool = len > 0.0 && !self.is_flying && self.is_on_ground;
         let bob_target: f64 = f64::from(u8::from(is_walking));
         self.bob_frac += (bob_target - self.bob_frac).clamp(-dt_s / bob.fade_s, dt_s / bob.fade_s);
@@ -1744,7 +1769,8 @@ mod tests {
     //! | --- | --- | --- |
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
-    //! | Laser at a window (the red habitat module's) | shot from inside touching the pane, close (the muzzle past the pane), across the room, slantwise; from outside | `the_laser_stops_on_a_window_pane` |
+    //! | Laser at a window (the red habitat module's) | shot from inside touching the pane, close (the muzzle past the pane), across the room, slantwise (each leaves); from outside (comes in to the floor) | `a_laser_passes_through_a_window` |
+    //! | What a window's pane stops | lasers (no), players (yes: its middle is solid) | `a_laser_passes_through_a_window` |
     //! | Players spawning | up to the player limit, and a late id whose own slot is next to player 1's (it moves on) | `players_spawn_apart` |
     //! | Beam drawn | inside the map (whole), out into the sky (stops 4 curvature radii from the origin) | `beams_into_the_sky_stop_near_the_map` |
     //! | Beam clipped to | its middle (through the wormhole), before its start, past its end | `a_clipped_beam_keeps_its_middle` |
@@ -1754,7 +1780,9 @@ mod tests {
     //! | Speed a step reports | standing still (0), forward (walking speed), backward (minus it), sideways (0), forward and sideways (its forward part), into a block (0) | `steps_report_speed_along_the_facing` |
     //! | Mouth depth at | a mouth's centre (1), halfway out its reach (3/4), just past its reach (0), inside the black hole's reach (0) | `mouth_depth_falls_from_the_throat_to_the_reach` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
+    //! | Refilling energy | crouched (at the crouched rate), walking upright (at the walking rate) | `crouching_refills_energy_faster` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
+    //! | Low way walked out of | a habitat module's doors (each module, each way), a walkway's ends (each walkway, each way) | `players_walk_out_of_modules_and_walkways` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
     //! | Progress of turning off a console | none (the normal rate), part way (rising, faster each step), done (the frenzy), past done (fails) | `the_pulse_ramps_up_with_progress`, `progress_past_done_fails` |
     //! | Target rate against the pulse's own | higher (reached at once), the same (kept), lower (eases down: barely after a frame, nearly there after a second, never below) | `the_pulse_eases_back_down` |
@@ -1952,19 +1980,21 @@ mod tests {
         DMat4::from_cols(basis.col(2), basis.col(1), basis.col(0), basis.col(3))
     }
 
-    /// `the_laser_stops_on_a_window_pane` checks that a shot at a window of the red habitat module
-    /// stops on its glass pane's near face, however close to it the shooter stands (W-57).
+    /// `a_laser_passes_through_a_window` checks that a shot at a window of the red habitat module
+    /// passes through its glass pane however close to it the shooter stands: from inside it leaves
+    /// the module, and from outside it comes in to the floor. The pane still stops players (W-70).
     #[test]
-    fn the_laser_stops_on_a_window_pane() {
+    fn a_laser_passes_through_a_window() {
         const TOUCHING_M: f64 = 0.05;
         const CLOSE_M: f64 = 0.3;
         const ACROSS_ROOM_M: f64 = 3.5;
-        const OUTSIDE_M: f64 = 2.0;
+        const OUTSIDE_M: f64 = 2.5;
         const AIM_PAST_M: f64 = 4.0;
         const SLANT_FROM_M: f64 = 0.4;
         const SLANT_TO_M: f64 = -1.5;
-        const FACE_TOLERANCE_M: f64 = 0.01;
-        const PROBE_PAST_M: f64 = 0.01;
+        const FLOOR_IN_M: f64 = 3.0;
+        const FLOOR_DOWN_M: f64 = 1.5;
+        const MIN_INSIDE_M: f64 = 1.0;
         let world: VoxelWorld = load_lunar_surface();
         let k: usize = world
             .structures
@@ -1981,41 +2011,41 @@ mod tests {
         let at = |x_m: f64, along_m: f64| -> DVec3 {
             DVec3::new(x_m, pane.centre.y, pane.centre.z + along_m)
         };
-        let (out_m, in_m) = (
-            at(pane.centre.x - AIM_PAST_M, 0.0),
-            at(pane.centre.x + AIM_PAST_M, 0.0),
-        );
-        for (from_m, to_m, face_x_m) in [
-            (at(inner_x_m + TOUCHING_M, 0.0), out_m, inner_x_m),
-            (at(inner_x_m + CLOSE_M, 0.0), out_m, inner_x_m),
-            (at(inner_x_m + ACROSS_ROOM_M, 0.0), out_m, inner_x_m),
+        let out_m: DVec3 = at(pane.centre.x - AIM_PAST_M, 0.0);
+        for (from_m, to_m) in [
+            (at(inner_x_m + TOUCHING_M, 0.0), out_m),
+            (at(inner_x_m + CLOSE_M, 0.0), out_m),
+            (at(inner_x_m + ACROSS_ROOM_M, 0.0), out_m),
             (
                 at(inner_x_m + CLOSE_M, SLANT_FROM_M),
                 at(pane.centre.x - AIM_PAST_M, SLANT_TO_M),
-                inner_x_m,
             ),
-            (at(outer_x_m - OUTSIDE_M, 0.0), in_m, outer_x_m),
         ] {
             let shot: Shot = world.trace_laser(aim_camera(&world, k, from_m, to_m));
-            assert_eq!(shot.hit_structure, Some(k), "shot from {from_m}");
-            let p: DVec4 = world.structures[k].inverse * shot.spot.expect("a hit's spot");
-            let hit_m: DVec3 = p.truncate() / p.w * world.r;
+            assert_ne!(shot.hit_structure, Some(k), "shot from {from_m} stays in");
             assert!(
-                (hit_m.x - face_x_m).abs() < FACE_TOLERANCE_M,
-                "shot from {from_m} stops at {hit_m}, not on the pane's face x = {face_x_m}"
-            );
-            let past_m: DVec3 = hit_m + (to_m - from_m).normalize() * PROBE_PAST_M;
-            let material: Option<u8> = world
-                .get_shapes(k)
-                .iter()
-                .find(|sh| sh.get_distance_m(past_m) <= 0.0)
-                .map(|sh| sh.material);
-            assert_eq!(
-                material.map(i32::from),
-                Some(world.special.glass),
-                "shot from {from_m}"
+                shot.length_m > from_m.x - outer_x_m,
+                "shot from {from_m} stops after {} m, before the pane's outer face",
+                shot.length_m
             );
         }
+        let floor_m: DVec3 = pane.centre + DVec3::new(FLOOR_IN_M, -FLOOR_DOWN_M, 0.0);
+        let outside_m: DVec3 = pane.centre - (floor_m - pane.centre).normalize() * OUTSIDE_M;
+        let shot: Shot = world.trace_laser(aim_camera(&world, k, outside_m, floor_m));
+        assert_eq!(shot.hit_structure, Some(k), "the shot from outside");
+        let p: DVec4 = world.structures[k].inverse * shot.spot.expect("a hit's spot");
+        let hit_m: DVec3 = p.truncate() / p.w * world.r;
+        assert!(
+            hit_m.x > inner_x_m + MIN_INSIDE_M,
+            "the shot from outside stops at {hit_m}, not inside the room"
+        );
+        let pane_x: DVec4 =
+            invert_lorentz(world.structures[k].inverse) * map_klein(pane.centre / world.r);
+        assert_eq!(
+            i32::from(world.get_material_at(pane_x, &[k])),
+            world.special.glass,
+            "the pane's middle is solid for players"
+        );
     }
 
     #[test]
@@ -2256,6 +2286,45 @@ mod tests {
         );
     }
 
+    /// `players_walk_out_of_modules_and_walkways` checks that a player standing in the middle of
+    /// a habitat module's floor walks out through either of its doors, and one standing in a
+    /// walkway walks out of either end, though both are only 2 m high (W-85).
+    #[test]
+    fn players_walk_out_of_modules_and_walkways() {
+        const MODULE_OUT_M: f64 = 6.5;
+        const WALKWAY_OUT_M: f64 = 5.5;
+        const EXIT_WALK_M: f64 = 9.0;
+        let world: VoxelWorld = load_lunar_surface();
+        let step_count: usize =
+            (EXIT_WALK_M / (world.player.walk_m_per_s * STEP_S)).ceil() as usize;
+        let ways: Vec<(usize, f64)> = world
+            .structures
+            .iter()
+            .enumerate()
+            .filter_map(|(k, st)| match st.name.as_str() {
+                "red habitat module" | "derelict habitat module" => Some((k, MODULE_OUT_M)),
+                "red walkway" | "crater walkway" => Some((k, WALKWAY_OUT_M)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ways.len(), 5, "three habitat modules and two walkways");
+        for (k, out_m) in ways {
+            let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
+            for turn_rad in [0.0, std::f64::consts::PI] {
+                let mut player: VoxelPlayer =
+                    VoxelPlayer::Standing(&world, frame * make_rotation(AXIS_X, AXIS_Z, turn_rad));
+                walk_forward(&world, &mut player, step_count);
+                let p: DVec4 = world.structures[k].inverse * player.body.col(AXIS_W);
+                let z_m: f64 = p.z / p.w * world.r;
+                assert!(
+                    z_m.abs() > out_m,
+                    "{} #{k}, turned {turn_rad} rad: stopped at z = {z_m} m",
+                    world.structures[k].name
+                );
+            }
+        }
+    }
+
     #[test]
     fn sprinting_uses_energy() {
         let world: VoxelWorld = load_lunar_surface();
@@ -2294,6 +2363,38 @@ mod tests {
             );
         }
         assert!(player.energy_frac < STEP_S / drain_s);
+    }
+
+    #[test]
+    fn crouching_refills_energy_faster() {
+        const REFILL_STEP_COUNT: usize = 60;
+        let world: VoxelWorld = load_lunar_surface();
+        let energy = &world.settings.sprint_energy;
+        let refill_s: f64 = STEP_S * REFILL_STEP_COUNT as f64;
+        for (crouch, full_refill_s) in [
+            (true, energy.refill_crouching_s),
+            (false, energy.refill_walking_s),
+        ] {
+            let mut player: VoxelPlayer =
+                VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+            player.energy_frac = 0.0;
+            let input: Input = Input {
+                forward: true,
+                crouch,
+                ..Input::default()
+            };
+            for _ in 0..REFILL_STEP_COUNT {
+                player.step(&world, &input, STEP_S, 0);
+            }
+            let expected_frac: f64 = refill_s / full_refill_s;
+            assert!(
+                (player.energy_frac - expected_frac).abs() < 1e-9,
+                "crouch {crouch}: {} of {expected_frac}",
+                player.energy_frac
+            );
+        }
+        assert_eq!(energy.refill_crouching_s, energy.drain_s);
+        assert_eq!(energy.refill_walking_s, 2.0 * energy.drain_s);
     }
 
     #[test]

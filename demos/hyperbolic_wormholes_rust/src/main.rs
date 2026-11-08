@@ -21,6 +21,7 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod dust;
 mod exit_prompt;
 mod fps_demo_assets;
 mod geometry;
@@ -123,7 +124,7 @@ const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
 const HEAT_BAR_RGB: [f32; 3] = [1.0, 0.6, 0.2];
 const HEALTH_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.87];
 const HEALTH_BAR_RGB: [f32; 3] = [0.35, 0.95, 0.45];
-const HEALTH_PULSE_RGB: [f32; 3] = [1.0, 0.38, 0.12];
+const HEALTH_PULSE_RGB: [f32; 3] = [1.0, 0.45, 0.2];
 const ENERGY_SEGMENT_COUNT: u32 = 10;
 const SKY_TRACER_M: f64 = 80.0;
 const CROSSHAIR_GAP_FRAC: f32 = 0.006;
@@ -157,7 +158,7 @@ const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
 const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
 const ENERGY_BAR_RGB: [f32; 3] = [0.5, 0.82, 1.0];
-const ENERGY_PULSE_RGB: [f32; 3] = [0.15, 0.4, 1.0];
+const ENERGY_PULSE_RGB: [f32; 3] = [0.8, 0.94, 1.0];
 const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
 const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
 const DISABLE_BAR_RGB: [f32; 3] = [1.0, 0.85, 0.3];
@@ -851,12 +852,12 @@ fn bench_voxel_views(
         let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> =
             shot.iter().map(|s| (s.segments.clone(), 0)).collect();
         let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
-        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, render_px);
+        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, render_px);
+            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());
@@ -1751,6 +1752,7 @@ struct Session {
     is_overheated: bool,
     has_rifle_shot_hit: bool,
     tracers: Vec<Tracer>,
+    dust_bursts: Vec<dust::DustBurst>,
     was_firing: bool,
     remote_firing_ids: Vec<u32>,
     rifle_shot_count: u64,
@@ -1763,9 +1765,8 @@ struct Session {
     hit_effect_frac: f64,
     blueshift_frac: f32,
     last_health_frac: f64,
-    health_pulse: hud_bars::BarPulse,
-    last_energy_frac: f64,
-    energy_pulse: hud_bars::BarPulse,
+    health_pulses: hud_bars::BarPulses,
+    energy_pulses: hud_bars::BarPulses,
     is_captured: bool,
     message: String,
     message_time_s: f64,
@@ -1891,6 +1892,35 @@ impl Tracer {
         let head_m: f64 = self.speed_m_per_s * (now_s - self.fired_s);
         (head_m - self.speed_m_per_s * self.trail_s, head_m)
     }
+
+    /// `get_arrival_s` gives when the beam's front reaches the end of its path, in seconds into
+    /// the session.
+    ///
+    /// Example: `let start_s = tracer.get_arrival_s();`
+    fn get_arrival_s(&self) -> f64 {
+        self.fired_s + self.length_m / self.speed_m_per_s
+    }
+}
+
+/// `add_dust_burst` adds the dust burst of `shot`, fired as `tracer` by the rifle (`is_rifle`) or
+/// the sniper, to `bursts` when it hit the ground of `world` (`DustBurst::FromShot`), starting when
+/// its beam front arrives, and drops the oldest bursts beyond `MAX_DUST_BURST_COUNT`.
+///
+/// Example: `add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, false);`
+fn add_dust_burst(
+    bursts: &mut Vec<dust::DustBurst>,
+    world: &VoxelWorld,
+    shot: &voxel_world::Shot,
+    tracer: &Tracer,
+    is_rifle: bool,
+) {
+    let Some(burst) = dust::DustBurst::FromShot(world, shot, tracer.get_arrival_s(), is_rifle)
+    else {
+        return;
+    };
+    bursts.push(burst);
+    let excess_count: usize = bursts.len().saturating_sub(dust::MAX_DUST_BURST_COUNT);
+    bursts.drain(..excess_count);
 }
 
 /// `Gun` is the weapon a player holds: gun 1, the laser (a quarter-second shot per click; one
@@ -2049,6 +2079,7 @@ impl Session {
             is_overheated: false,
             has_rifle_shot_hit: false,
             tracers: Vec::new(),
+            dust_bursts: Vec::new(),
             was_firing: false,
             remote_firing_ids: Vec::new(),
             rifle_shot_count: 0,
@@ -2061,9 +2092,8 @@ impl Session {
             hit_effect_frac: 0.0,
             blueshift_frac: 0.0,
             last_health_frac: 1.0,
-            health_pulse: hud_bars::BarPulse::Idle(),
-            last_energy_frac: 1.0,
-            energy_pulse: hud_bars::BarPulse::Idle(),
+            health_pulses: hud_bars::BarPulses::New(1.0),
+            energy_pulses: hud_bars::BarPulses::New(1.0),
             is_captured: false,
             message: String::new(),
             message_time_s: 0.0,
@@ -2355,27 +2385,28 @@ impl Session {
         Ok(())
     }
 
-    /// `update_bar_pulses` ages the pulses running along the HUD's bars by `dt_s` (`hud_bars.rs`):
-    /// the health bar's (started by `update_multiplayer` when health falls or rises), and the
-    /// energy bar's, repeating while this player sprints (unless eliminated) or the energy refills.
+    /// `update_bar_pulses` moves the pulses running along the HUD's bars on by `dt_s`
+    /// (`hud_bars.rs`), driven by how fast each bar's value changes: this player's health in a
+    /// game on a server, and the sprint energy on a voxel map.
     ///
     /// Example: `self.update_bar_pulses(dt_s);`
     fn update_bar_pulses(&mut self, dt_s: f64) {
-        self.health_pulse.update(dt_s, None);
-        let Some(voxel) = &self.voxel else {
-            return;
-        };
-        let is_eliminated: bool = self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated);
-        let energy_frac: f64 = voxel.player.energy_frac;
-        self.energy_pulse.update(
-            dt_s,
-            hud_bars::get_energy_pulse_kind(
-                voxel.player.is_sprinting && !is_eliminated,
-                energy_frac,
-                self.last_energy_frac,
-            ),
-        );
-        self.last_energy_frac = energy_frac;
+        if let Some(multiplayer) = &self.multiplayer {
+            self.health_pulses.update(
+                dt_s,
+                multiplayer.client.health_frac,
+                u32::from(self.settings.rifle.body_hits_to_eliminate),
+                &hud_bars::PULSE_TUNING,
+            );
+        }
+        if let Some(voxel) = &self.voxel {
+            self.energy_pulses.update(
+                dt_s,
+                voxel.player.energy_frac,
+                ENERGY_SEGMENT_COUNT,
+                &hud_bars::PULSE_TUNING,
+            );
+        }
     }
 
     /// `is_firing` says whether this player's laser is on: on for a scripted route, or a shot fired
@@ -2688,11 +2719,6 @@ impl Session {
                 }
             }
         }
-        if let Some(kind) =
-            hud_bars::get_health_pulse_kind(multiplayer.client.health_frac, self.last_health_frac)
-        {
-            self.health_pulse.start(kind);
-        }
         if multiplayer.client.health_frac < self.last_health_frac {
             self.hit_effect_frac = 1.0;
             if let Some(voxel) = &mut self.voxel {
@@ -2780,6 +2806,12 @@ impl Session {
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
+            self.dust_bursts.retain(|burst| !burst.is_over(now_s));
+            let clouds: Vec<dust::DustCloud> = self
+                .dust_bursts
+                .iter()
+                .filter_map(|burst| burst.get_cloud(now_s))
+                .collect();
             let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> = self.get_lit_beams(r);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
@@ -2796,6 +2828,7 @@ impl Session {
                 self.route.is_empty().then_some(multiplayer::Tracers {
                     beams: &beams,
                     spot,
+                    dust: &clouds,
                 }),
                 render_px,
             );
@@ -2805,6 +2838,7 @@ impl Session {
             {
                 let is_rifle: bool = self.gun == Gun::Rifle;
                 let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                 self.tracers.push(tracer);
             }
             self.was_firing = is_firing;
@@ -2813,6 +2847,7 @@ impl Session {
                     let shooter: Option<&net::RemotePlayer> = players.iter().find(|p| p.id == *id);
                     let (team, is_rifle) = shooter.map_or((0, false), |p| (p.team, p.is_rifle));
                     let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                    add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                     self.tracers.push(tracer);
                 }
             }
@@ -3227,10 +3262,10 @@ impl Session {
     /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the crosshair (unless
     /// text covers the view) and, in the bottom left, as segmented bars in the HUD's look
     /// (`hud_bars.rs`): this player's health in a game on a server (one segment per rifle body
-    /// hit, with a pulse running down it at each hit), the gun in hand's ammo (the rifle's shots
-    /// left before it overheats, or the sniper's one block, empty while it reloads; no pulse), and
-    /// on a voxel map the sprint energy (a pulse running down it while sprinting, a fainter one up
-    /// it while it refills). Below the middle, the progress of turning off a console (while
+    /// hit), the gun in hand's ammo (the rifle's shots left before it overheats, or the sniper's
+    /// one block, empty while it reloads; no pulses), and on a voxel map the sprint energy. Health
+    /// and energy carry pulses that run over their filled part while they change
+    /// (`update_bar_pulses`). Below the middle, the progress of turning off a console (while
     /// holding `E` on one).
     ///
     /// Example: `let rects = session.get_overlay_rects();`
@@ -3240,15 +3275,20 @@ impl Session {
             rects.extend(get_crosshair_rects(self.last_output_px));
         }
         if let Some(multiplayer) = &self.multiplayer {
+            let segment_count: u32 = u32::from(self.settings.rifle.body_hits_to_eliminate);
+            let health_frac: f64 = multiplayer.client.health_frac;
             rects.extend(hud_bars::make_segmented_bar(
                 HEALTH_BAR_MIN_FRAC,
-                u32::from(self.settings.rifle.body_hits_to_eliminate),
-                multiplayer.client.health_frac,
+                segment_count,
+                health_frac,
                 HEALTH_BAR_RGB,
-                self.health_pulse.make_rect_pulse(
-                    HEALTH_BAR_MIN_FRAC[0],
+                self.health_pulses.make_rect_pulse(
+                    HEALTH_BAR_MIN_FRAC,
+                    segment_count,
+                    health_frac,
                     HEALTH_PULSE_RGB,
                     HEALTH_BAR_RGB,
+                    &hud_bars::PULSE_TUNING,
                 ),
             ));
         }
@@ -3293,10 +3333,13 @@ impl Session {
             ENERGY_SEGMENT_COUNT,
             voxel.player.energy_frac,
             ENERGY_BAR_RGB,
-            self.energy_pulse.make_rect_pulse(
-                ENERGY_BAR_MIN_FRAC[0],
+            self.energy_pulses.make_rect_pulse(
+                ENERGY_BAR_MIN_FRAC,
+                ENERGY_SEGMENT_COUNT,
+                voxel.player.energy_frac,
                 ENERGY_PULSE_RGB,
                 ENERGY_BAR_RGB,
+                &hud_bars::PULSE_TUNING,
             ),
         ));
         rects

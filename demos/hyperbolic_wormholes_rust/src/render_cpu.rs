@@ -79,7 +79,8 @@ const TILE_SIDE_COUNT: f32 = 4.0;
 const TILES_PER_VERTEX: f32 = 5.0;
 const BYTES_PER_PIXEL: usize = 4;
 
-/// `Scene` is one frame's packed scene, with the uniforms unpacked into vector types.
+/// `Scene` is one frame's packed scene, with the uniforms unpacked into vector types, and whether
+/// its rays pass through glass boxes (a laser's do; the picture's stop on them).
 pub struct Scene<'a> {
     rows: &'a [Vec4],
     u: &'a Uniforms,
@@ -90,6 +91,7 @@ pub struct Scene<'a> {
     tile_klein_half_width: f32,
     q_cutoff: f32,
     q_throat: f32,
+    can_pass_glass: bool,
 }
 
 /// `Reach` is cosh and sinh of how far a straight piece of a ray reaches, in curvature radii, so a
@@ -357,6 +359,18 @@ impl<'a> Scene<'a> {
             tile_klein_half_width: inradius.tanh(),
             q_cutoff: get_q_of_distance(u.bend_cutoff_m / u.curvature_radius_m),
             q_throat: get_q_of_distance(0.5 * (2.0 * u.throat_m / u.curvature_radius_m).ln_1p()),
+            can_pass_glass: false,
+        }
+    }
+
+    /// `ForLaser` unpacks one frame's scene data for tracing a laser, which passes through glass.
+    ///
+    /// Example: `let scene = Scene::ForLaser(&data);`
+    #[allow(non_snake_case)]
+    pub fn ForLaser(data: &'a SceneData) -> Scene<'a> {
+        Scene {
+            can_pass_glass: true,
+            ..Scene::New(data)
         }
     }
 
@@ -534,12 +548,19 @@ impl<'a> Scene<'a> {
     }
 
     /// `test_box` finds where a geodesic first enters a box within `reach`, lowering `hit` if
-    /// nearer.
+    /// nearer; a glass box never does when the scene's rays pass through glass.
     ///
     /// Example: `let lower_m = scene.test_box(row, b, x, v, reach, &mut hit);`
     fn test_box(&self, row: usize, b: usize, x: Vec4, v: Vec4, reach: Reach, hit: &mut Hit) -> f32 {
-        let (lower_m, entry) = self.test_slabs(row, TEXEL_BOXES + TEXELS_PER_BOX * b, x, v, reach);
-        if entry.tau_in <= entry.tau_out && entry.tau_in >= 0.0 && entry.tau_in < hit.tau {
+        let first: usize = TEXEL_BOXES + TEXELS_PER_BOX * b;
+        let (lower_m, entry) = self.test_slabs(row, first, x, v, reach);
+        let is_passed: bool =
+            self.can_pass_glass && self.fetch(row, first + 3).w.round() as u32 == MATERIAL_GLASS;
+        if !is_passed
+            && entry.tau_in <= entry.tau_out
+            && entry.tau_in >= 0.0
+            && entry.tau_in < hit.tau
+        {
             *hit = Hit {
                 tau: entry.tau_in,
                 index: b as i32,

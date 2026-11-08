@@ -5,7 +5,7 @@
 //! Interface: `minkowski_dot`, `make_rotation`, `make_boost`, `make_boost_along`,
 //! `make_rotation_about`, `make_rotation_between`, `invert_lorentz`, `normalize_point`,
 //! `normalize_tangent`, `get_distance`, `orthonormalize_frame`, `get_local_direction`,
-//! `make_fermi_point`.
+//! `make_fermi_point`, `transport_from_centre`.
 //!
 //! Example: `let ahead = make_boost(AXIS_Z, -6.0 / curvature_radius_m);`
 
@@ -158,6 +158,14 @@ pub fn get_local_direction(frame: DMat4, w: DVec4) -> DVec3 {
     (invert_lorentz(frame) * w).truncate()
 }
 
+/// `transport_from_centre` carries the unit direction `d` at the origin to point `x` along the
+/// geodesic between them (parallel transport), as `render_voxel.metal` aims the sun at each point.
+///
+/// Example: `let toward_sun = transport_from_centre(world.sun, x);`
+pub fn transport_from_centre(d: DVec3, x: DVec4) -> DVec4 {
+    d.extend(0.0) + x.truncate().dot(d) / (1.0 + x.w) * (DVec4::W + x)
+}
+
 #[cfg(test)]
 mod tests {
     //! Tests of the Lorentz maths.
@@ -167,6 +175,7 @@ mod tests {
     //! | Matrix kind | rotation, boost along an axis, boost along any direction | `isometries_keep_the_hyperboloid`, `boost_along_matches_axis_boost` |
     //! | Inverse of | identity-like, general composition | `inverse_undoes_a_frame` |
     //! | Distance | zero, small, large | `distance_matches_boost_length` |
+    //! | Transported to | the origin, a point along the direction, a point across it | `transport_matches_the_boost` |
 
     use super::*;
 
@@ -214,6 +223,18 @@ mod tests {
         for s in [0.0, 0.001, 5.0] {
             let distance: f64 = get_distance(ORIGIN_POINT, make_boost(AXIS_X, s) * ORIGIN_POINT);
             assert!((distance - s).abs() < 1e-7 * (1.0 + s));
+        }
+    }
+
+    /// `transport_matches_the_boost` checks that carrying a direction from the origin to a point
+    /// gives what the boost from the origin to that point does to it.
+    #[test]
+    fn transport_matches_the_boost() {
+        let d: DVec3 = DVec3::new(0.6, 0.0, 0.8);
+        for (along, s) in [(DVec3::X, 0.0), (d, 1.3), (DVec3::Y, 0.7)] {
+            let m: DMat4 = make_boost_along(along, s);
+            let difference: DVec4 = transport_from_centre(d, m * ORIGIN_POINT) - m * d.extend(0.0);
+            assert!(difference.length() < TOLERANCE);
         }
     }
 }
