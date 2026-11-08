@@ -27,6 +27,7 @@ mod map;
 mod map_export;
 mod map_layout;
 mod menu;
+mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
@@ -2607,17 +2608,7 @@ impl Session {
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
-            let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> = self
-                .tracers
-                .iter()
-                .map(|tracer| {
-                    let (tail_m, head_m) = tracer.get_lit_m(now_s);
-                    (
-                        voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m),
-                        tracer.team,
-                    )
-                })
-                .collect();
+            let beams: Vec<(Vec<voxel_world::BeamSegment>, u32)> = self.get_lit_beams(r);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
                 .iter()
@@ -2846,6 +2837,67 @@ impl Session {
         ])
     }
 
+    /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
+    /// shooter's team, on a map of curvature radius `r`.
+    ///
+    /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
+    fn get_lit_beams(&self, r: f64) -> Vec<(Vec<voxel_world::BeamSegment>, u32)> {
+        let now_s: f64 = self.start.elapsed().as_secs_f64();
+        self.tracers
+            .iter()
+            .map(|tracer| {
+                let (tail_m, head_m) = tracer.get_lit_m(now_s);
+                (
+                    voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m),
+                    tracer.team,
+                )
+            })
+            .collect()
+    }
+
+    /// `make_overlay_minimap` gives the minimap for a window of `window_px` (`minimap.rs`): around
+    /// this player, with the other players and the shots, or `None` when the player settings hide
+    /// it or text covers the view.
+    ///
+    /// Example: `let minimap = session.make_overlay_minimap((2560, 1600));`
+    fn make_overlay_minimap(
+        &self,
+        window_px: (u32, u32),
+    ) -> Option<render_metal::OverlayMinimap<'_>> {
+        if !self.player_settings.minimap.is_shown || self.is_view_covered() {
+            return None;
+        }
+        let (feet, beams): (DMat4, Vec<(Vec<voxel_world::BeamSegment>, u32)>) = match &self.voxel {
+            Some(voxel) => (
+                voxel.player.get_feet_frame(&voxel.world),
+                self.get_lit_beams(voxel.world.r),
+            ),
+            None => (self.player.frame, Vec::new()),
+        };
+        let players: Vec<(DVec4, u32)> = match &self.multiplayer {
+            Some(multiplayer) => multiplayer
+                .client
+                .players
+                .iter()
+                .map(|player| (player.frame.col(AXIS_W), player.team))
+                .collect(),
+            None => Vec::new(),
+        };
+        let size_px: (u32, u32) = self.map_layout.get_size_px();
+        Some(render_metal::OverlayMinimap {
+            map_pixels: self.map_layout.get_plain_pixels(),
+            map_size_px: (size_px.0 as usize, size_px.1 as usize),
+            minimap: minimap::make_minimap(
+                &self.map_layout,
+                &self.player_settings.minimap,
+                feet,
+                &players,
+                &beams,
+                window_px,
+            ),
+        })
+    }
+
     /// `get_edge_stretch_frac` gives how far this player's view stretches at the map's soft edge:
     /// the square of how far into it they stand (`VoxelWorld::get_edge_frac`), so it starts gently
     /// and builds near the stop, times their `view.edge_stretch_frac`; 0 off a voxel map.
@@ -2926,7 +2978,11 @@ impl Session {
                 + (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a] - size_mask_px[a]) / 2
         });
         Picture {
-            pixels: self.map_layout.draw_player(feet, self.get_team()),
+            pixels: self.map_layout.draw_player(
+                feet,
+                self.get_team(),
+                self.player_settings.minimap.range_m,
+            ),
             size_px,
             min_mask_px,
             max_excl_mask_px: [0, 1].map(|a| min_mask_px[a] + size_mask_px[a]),
@@ -3570,38 +3626,41 @@ fn play_on_layer(
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
         let wand: Option<render_metal::OverlayWand> = session.get_wand();
         let stretch_frac: f32 = session.get_edge_stretch_frac();
-        let overlay: Option<render_metal::Overlay> =
-            (text_mask.is_some() || !rects.is_empty() || wand.is_some() || stretch_frac > 0.0)
-                .then(|| render_metal::Overlay {
-                    dim_frac: match &overlay_text {
-                        Some(text) => text.dim_frac,
-                        None => 0.0,
-                    },
-                    mask: text_mask
-                        .as_deref()
-                        .zip(overlay_text.as_ref())
-                        .map(|(pixels, text)| {
-                            (pixels, (text.mask_px.0 as usize, text.mask_px.1 as usize))
-                        }),
-                    mask_height_frac: match &overlay_text {
-                        Some(text) => text.height_frac,
-                        None => 0.0,
-                    },
-                    picture: overlay_text
-                        .as_ref()
-                        .and_then(|text| text.picture.as_ref())
-                        .map(|picture| render_metal::OverlayPicture {
-                            pixels: &picture.pixels,
-                            size_px: (picture.size_px.0 as usize, picture.size_px.1 as usize),
-                            min_mask_px: picture.min_mask_px,
-                            max_excl_mask_px: picture.max_excl_mask_px,
-                        }),
-                    stretch_frac,
-                    rects: &rects,
-                    wand,
-                    blur_frac: session.motion_blur_frac,
-                    hit: session.get_hit_effect(),
-                });
+        let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
+        let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
+            || !rects.is_empty()
+            || wand.is_some()
+            || stretch_frac > 0.0
+            || minimap.is_some())
+        .then(|| render_metal::Overlay {
+            dim_frac: match &overlay_text {
+                Some(text) => text.dim_frac,
+                None => 0.0,
+            },
+            mask: text_mask
+                .as_deref()
+                .zip(overlay_text.as_ref())
+                .map(|(pixels, text)| (pixels, (text.mask_px.0 as usize, text.mask_px.1 as usize))),
+            mask_height_frac: match &overlay_text {
+                Some(text) => text.height_frac,
+                None => 0.0,
+            },
+            picture: overlay_text
+                .as_ref()
+                .and_then(|text| text.picture.as_ref())
+                .map(|picture| render_metal::OverlayPicture {
+                    pixels: &picture.pixels,
+                    size_px: (picture.size_px.0 as usize, picture.size_px.1 as usize),
+                    min_mask_px: picture.min_mask_px,
+                    max_excl_mask_px: picture.max_excl_mask_px,
+                }),
+            stretch_frac,
+            minimap,
+            rects: &rects,
+            wand,
+            blur_frac: session.motion_blur_frac,
+            hit: session.get_hit_effect(),
+        });
         if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(
                 render_start.elapsed().as_secs_f64() * MS_PER_S,

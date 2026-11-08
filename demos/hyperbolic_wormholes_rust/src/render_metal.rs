@@ -50,8 +50,9 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
 /// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
 /// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
-/// frame's height the mask's text may take, a picture under the text, and how far the scene
-/// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none).
+/// frame's height the mask's text may take, a picture under the text, how far the scene
+/// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), and the
+/// minimap.
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
@@ -62,6 +63,51 @@ pub struct Overlay<'a> {
     pub mask_height_frac: f32,
     pub picture: Option<OverlayPicture<'a>>,
     pub stretch_frac: f32,
+    pub minimap: Option<OverlayMinimap<'a>>,
+}
+
+/// `OverlayMinimap` is the minimap: the map's picture from above without labels (RGBA, rows top
+/// first, `map_layout.rs`) with its size, and the shader's `Minimap`.
+pub struct OverlayMinimap<'a> {
+    pub map_pixels: &'a [u8],
+    pub map_size_px: (usize, usize),
+    pub minimap: Minimap,
+}
+
+/// `Minimap` is the shader's `Minimap` (each member a multiple of 16 bytes, as Metal lays it
+/// out): the frame that takes the minimap's plane (its y = 0, with −z up the minimap) into the
+/// world; where it sits (the centre's x and y and the radius in pixels, then the Poincaré disk's
+/// radius at its rim, tanh of half its range in curvature radii); where the map's picture lies
+/// (the Fermi u and v of its top left corner, meters per pixel, then the curvature radius); how
+/// many marks and lines it has (then two zeros); the marks (other players: a point in the
+/// minimap's unit disk, x right and y down, then a radius in pixels and a zero; and a colour);
+/// and the lines (shots: two ends in the unit disk, then a colour).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Minimap {
+    pub ground_frame: [[f32; 4]; 4],
+    pub placement: [f32; 4],
+    pub map: [f32; 4],
+    pub counts: [i32; 4],
+    pub marks: [[[f32; 4]; 2]; MAX_MINIMAP_MARK_COUNT],
+    pub lines: [[[f32; 4]; 2]; MAX_MINIMAP_LINE_COUNT],
+}
+
+impl Minimap {
+    /// `Hidden` is no minimap: a radius of 0, which the shader skips.
+    ///
+    /// Example: `let minimap = Minimap::Hidden();`
+    #[allow(non_snake_case)]
+    pub fn Hidden() -> Minimap {
+        Minimap {
+            ground_frame: [[0.0; 4]; 4],
+            placement: [0.0; 4],
+            map: [0.0; 4],
+            counts: [0; 4],
+            marks: [[[0.0; 4]; 2]; MAX_MINIMAP_MARK_COUNT],
+            lines: [[[0.0; 4]; 2]; MAX_MINIMAP_LINE_COUNT],
+        }
+    }
 }
 
 /// `OverlayPicture` is an RGBA picture (rows top first) of `size_px`, drawn under the overlay's
@@ -257,6 +303,8 @@ const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
 pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
+pub(crate) const MAX_MINIMAP_MARK_COUNT: usize = 16;
+pub(crate) const MAX_MINIMAP_LINE_COUNT: usize = 96;
 /// `REVOLVER_WAND` is `has_wand` when the revolver (viewmodel.rs) is drawn in the wand's place.
 const REVOLVER_WAND: i32 = 2;
 const EMPTY_MASK_PX: (usize, usize) = (1, 1);
@@ -308,6 +356,7 @@ pub struct MetalRenderer {
     overlay_target: Option<Texture>,
     overlay_mask: Option<Texture>,
     overlay_picture: Option<Texture>,
+    overlay_map: Option<Texture>,
     blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
@@ -630,6 +679,7 @@ impl MetalRenderer {
             blur_histories: None,
             overlay_mask: None,
             overlay_picture: None,
+            overlay_map: None,
             hole_buffers: None,
             voxel_gpu: None,
             viewmodel: None,
@@ -1174,10 +1224,34 @@ impl MetalRenderer {
             BYTES_PER_PICTURE_PIXEL,
         )?;
         let (mask, _) = self.overlay_mask.as_ref().expect("the mask was just made");
+        let minimap: Minimap = match &overlay.minimap {
+            Some(minimap) => {
+                let is_uploaded: bool = self
+                    .overlay_map
+                    .as_ref()
+                    .is_some_and(|(_, size)| *size == minimap.map_size_px);
+                if !is_uploaded {
+                    upload_texture(
+                        &self.device,
+                        &mut self.overlay_map,
+                        minimap.map_pixels,
+                        minimap.map_size_px,
+                        MTLPixelFormat::RGBA8Unorm,
+                        BYTES_PER_PICTURE_PIXEL,
+                    )?;
+                }
+                minimap.minimap
+            }
+            None => Minimap::Hidden(),
+        };
         let (picture, _) = self
             .overlay_picture
             .as_ref()
             .expect("the picture was just made");
+        let map: &ProtocolObject<dyn MTLTexture> = match &self.overlay_map {
+            Some((map, _)) => map,
+            None => picture,
+        };
         let tan_half_fov: f32 = HALF_FOV_RAD.tan() as f32;
         let revolver_image: Option<Retained<ProtocolObject<dyn MTLTexture>>> = match overlay.wand {
             Some(wand) => {
@@ -1278,6 +1352,12 @@ impl MetalRenderer {
                 std::mem::size_of::<OverlayWand>(),
                 2,
             );
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&minimap).cast(),
+                std::mem::size_of::<Minimap>(),
+                3,
+            );
+            encoder.setTexture_atIndex(Some(map), 7);
         }
         dispatch_grid(&encoder, output_px);
         encoder.endEncoding();

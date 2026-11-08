@@ -2,9 +2,12 @@
 //! map's Fermi coordinates (`common/maps/README.md`), u to the right and v down, with the top of
 //! every structure and box in its material's colour (brighter the higher it stands), the ground's
 //! relief, everything shaded as if lit from the top left, the consoles, the black hole and wormhole
-//! mouths, the spawns, the team zones' edges, the playable boundary, and, on each frame, the player.
+//! mouths, the spawns, the team zones' edges, the playable boundary, and, on each frame, the player
+//! with a circle of what is within reach of them (the rest darker and blurred). It also lends the
+//! picture without labels, and where it lies, to the minimap.
 //!
-//! Interface: `MapLayout` (`FromMap`, `draw_player`, `get_size_px`).
+//! Interface: `MapLayout` (`FromMap`, `draw_player`, `get_size_px`, `get_plain_pixels`,
+//! `get_placement`, `get_curvature_radius_m`).
 //!
 //! Example: `let pixels = MapLayout::FromMap(&map, (992, 536))?.draw_player(feet_frame, 0);`
 //!
@@ -67,6 +70,9 @@ const WARP_KIND_BLACK_HOLE: &str = "black_hole";
 const MOUTH_NAME_PREFIX: &str = "wormhole mouth ";
 const MATERIAL_KIND_LIGHT: &str = "light";
 const SPAWN_TEAM_ANY: &str = "any";
+const OUT_OF_RANGE_BLUR_PX: usize = 3;
+const OUT_OF_RANGE_SHADE_FRAC: f32 = 0.55;
+const RANGE_RIM_COLOR: [u8; 3] = [255, 255, 255];
 
 /// `Top` is what a column of a structure or box shows from above: its top's Fermi height h in
 /// meters, and its material.
@@ -142,11 +148,14 @@ impl Footprint {
     }
 }
 
-/// `MapLayout` is a map's picture seen from above (RGBA, top row first), with what `draw_player`
-/// needs to place a player on it: the curvature radius, the Fermi coordinates of the picture's
-/// top left corner and the meters per pixel.
+/// `MapLayout` is a map's picture seen from above (RGBA, top row first), the same picture without
+/// labels (for the minimap) and darkened and blurred (out of the player's range), and what
+/// `draw_player` needs to place a player on it: the curvature radius, the Fermi coordinates of the
+/// picture's top left corner and the meters per pixel.
 pub struct MapLayout {
     pixels: Vec<u8>,
+    plain_pixels: Vec<u8>,
+    dim_pixels: Vec<u8>,
     size_px: (u32, u32),
     r_m: f64,
     corner_m: [f64; 2],
@@ -180,6 +189,8 @@ impl MapLayout {
         );
         let mut layout: MapLayout = MapLayout {
             pixels: vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL],
+            plain_pixels: Vec::new(),
+            dim_pixels: Vec::new(),
             size_px,
             r_m,
             corner_m: min_m,
@@ -241,7 +252,9 @@ impl MapLayout {
                 ],
             ));
         }
+        layout.plain_pixels = layout.pixels.clone();
         layout.draw_labels(&labels)?;
+        layout.dim_pixels = make_dim_pixels(&layout.pixels, size_px);
         Ok(layout)
     }
 
@@ -252,12 +265,36 @@ impl MapLayout {
         self.size_px
     }
 
+    /// `get_plain_pixels` gives the picture without its labels (RGBA, top row first), for the
+    /// minimap, which turns it.
+    ///
+    /// Example: `let pixels = layout.get_plain_pixels();`
+    pub fn get_plain_pixels(&self) -> &[u8] {
+        &self.plain_pixels
+    }
+
+    /// `get_placement` gives where the picture lies: the Fermi (u, v) of its top left corner and
+    /// its meters per pixel.
+    ///
+    /// Example: `let (corner_m, m_per_px) = layout.get_placement();`
+    pub fn get_placement(&self) -> ([f64; 2], f64) {
+        (self.corner_m, self.m_per_px)
+    }
+
+    /// `get_curvature_radius_m` gives the map's curvature radius.
+    ///
+    /// Example: `let r_m = layout.get_curvature_radius_m();`
+    pub fn get_curvature_radius_m(&self) -> f64 {
+        self.r_m
+    }
+
     /// `draw_player` gives the picture with a player standing at `feet` (a frame: its position,
     /// and its −z the way they face) as a disk in their team's colour (an index into
-    /// `TEAM_NAMES`), ringed in white, with a white line the way they face.
+    /// `TEAM_NAMES`), ringed in white, with a white line the way they face, and everything farther
+    /// than `range_m` from them (along the ground) darker and blurred, behind a white rim.
     ///
-    /// Example: `let pixels = layout.draw_player(voxel.player.get_feet_frame(&world), 0);`
-    pub fn draw_player(&self, feet: DMat4, team: u32) -> Vec<u8> {
+    /// Example: `let pixels = layout.draw_player(voxel.player.get_feet_frame(&world), 0, 60.0);`
+    pub fn draw_player(&self, feet: DMat4, team: u32, range_m: f64) -> Vec<u8> {
         let x: DVec4 = feet.col(AXIS_W);
         let forward: DVec4 = -feet.col(AXIS_Z);
         let probe: f64 = HEADING_PROBE_M / self.r_m;
@@ -267,8 +304,13 @@ impl MapLayout {
         let heading: DVec3 = DVec3::new(ahead_u_m - u_m, ahead_v_m - v_m, 0.0).normalize();
         let center_px: [f64; 2] = self.get_px([u_m, v_m]);
         let mut picture: MapLayout = MapLayout {
-            pixels: self.pixels.clone(),
-            ..*self
+            pixels: self.get_range_pixels([u_m, v_m], range_m),
+            plain_pixels: Vec::new(),
+            dim_pixels: Vec::new(),
+            size_px: self.size_px,
+            r_m: self.r_m,
+            corner_m: self.corner_m,
+            m_per_px: self.m_per_px,
         };
         for step in 0..=PLAYER_HEADING_PX as usize {
             let along_px: f64 = step as f64;
@@ -285,6 +327,62 @@ impl MapLayout {
         );
         picture.paint_disk(center_px, PLAYER_RADIUS_PX, TEAM_COLORS[team as usize]);
         picture.pixels
+    }
+
+    /// `get_range_pixels` gives the picture with the pixels whose ground point is farther than
+    /// `range_m` from ground point `center_m` (u, v) taken from the darker, blurred copy, and a
+    /// white rim on the near side of that edge. The distance d is hyperbolic: for ground point X at
+    /// (u, v) and the centre P, cosh d = −⟨X, P⟩ = cosh v (sinh u P_z + cosh u P_w) − sinh v P_x
+    /// (in curvature radii), so with a term per column and per row each pixel costs a few
+    /// products.
+    ///
+    /// Example: `let pixels = layout.get_range_pixels([-60.0, 0.0], 60.0);`
+    fn get_range_pixels(&self, center_m: [f64; 2], range_m: f64) -> Vec<u8> {
+        let (width, height) = (self.size_px.0 as usize, self.size_px.1 as usize);
+        let p: DVec4 = make_fermi_point(center_m[0], center_m[1], 0.0, self.r_m);
+        let max_cosh: f64 = (range_m / self.r_m).cosh();
+        let column_terms: Vec<f64> = (0..width)
+            .map(|x| {
+                let u: f64 = (self.corner_m[0] + (x as f64 + 0.5) * self.m_per_px) / self.r_m;
+                u.sinh() * p.z + u.cosh() * p.w
+            })
+            .collect();
+        let rows: Vec<(f64, f64)> = (0..height)
+            .map(|y| {
+                let v: f64 = (self.corner_m[1] + (y as f64 + 0.5) * self.m_per_px) / self.r_m;
+                (v.sinh() * p.x, v.cosh())
+            })
+            .collect();
+        let is_near = |x: usize, y: usize| -> bool {
+            let (sinh_term, cosh_v) = rows[y];
+            cosh_v * column_terms[x] - sinh_term <= max_cosh
+        };
+        let mut pixels: Vec<u8> = self.pixels.clone();
+        for y in 0..height {
+            for x in 0..width {
+                let i: usize = (x + width * y) * BYTES_PER_PIXEL;
+                if !is_near(x, y) {
+                    pixels[i..i + BYTES_PER_PIXEL]
+                        .copy_from_slice(&self.dim_pixels[i..i + BYTES_PER_PIXEL]);
+                } else if [
+                    (x.wrapping_sub(1), y),
+                    (x + 1, y),
+                    (x, y.wrapping_sub(1)),
+                    (x, y + 1),
+                ]
+                .into_iter()
+                .any(|(nx, ny)| nx < width && ny < height && !is_near(nx, ny))
+                {
+                    pixels[i..i + BYTES_PER_PIXEL].copy_from_slice(&[
+                        RANGE_RIM_COLOR[0],
+                        RANGE_RIM_COLOR[1],
+                        RANGE_RIM_COLOR[2],
+                        OPAQUE,
+                    ]);
+                }
+            }
+        }
+        pixels
     }
 
     /// `get_px` gives where ground point (u, v), in meters, falls on the picture, in pixels from
@@ -510,6 +608,48 @@ impl MapLayout {
     }
 }
 
+/// `make_dim_pixels` gives a picture blurred by a box `2 OUT_OF_RANGE_BLUR_PX + 1` pixels wide,
+/// first across and then down, and darkened to `OUT_OF_RANGE_SHADE_FRAC`.
+///
+/// Example: `let dim = make_dim_pixels(&pixels, (966, 556));`
+fn make_dim_pixels(pixels: &[u8], size_px: (u32, u32)) -> Vec<u8> {
+    let (width, height) = (size_px.0 as usize, size_px.1 as usize);
+    let blur = |source: &[u8], step: [usize; 2]| -> Vec<u8> {
+        let mut blurred: Vec<u8> = source.to_vec();
+        for y in 0..height {
+            for x in 0..width {
+                let mut sum: [u32; BYTES_PER_PIXEL] = [0; BYTES_PER_PIXEL];
+                let mut count: u32 = 0;
+                for k in 0..=2 * OUT_OF_RANGE_BLUR_PX {
+                    let (nx, ny) = (
+                        (x + k * step[0]).wrapping_sub(OUT_OF_RANGE_BLUR_PX * step[0]),
+                        (y + k * step[1]).wrapping_sub(OUT_OF_RANGE_BLUR_PX * step[1]),
+                    );
+                    if nx < width && ny < height {
+                        let j: usize = (nx + width * ny) * BYTES_PER_PIXEL;
+                        for c in 0..BYTES_PER_PIXEL {
+                            sum[c] += u32::from(source[j + c]);
+                        }
+                        count += 1;
+                    }
+                }
+                let i: usize = (x + width * y) * BYTES_PER_PIXEL;
+                for c in 0..BYTES_PER_PIXEL {
+                    blurred[i + c] = (sum[c] / count) as u8;
+                }
+            }
+        }
+        blurred
+    };
+    let mut dim: Vec<u8> = blur(&blur(pixels, [1, 0]), [0, 1]);
+    for pixel in dim.as_chunks_mut::<BYTES_PER_PIXEL>().0 {
+        for channel in &mut pixel[..BYTES_PER_PIXEL - 1] {
+            *channel = (f32::from(*channel) * OUT_OF_RANGE_SHADE_FRAC) as u8;
+        }
+    }
+    dim
+}
+
 /// `make_label_right` places a label just right of a ring of `radius_px` around `center_px`,
 /// centred on it from top to bottom.
 ///
@@ -666,12 +806,14 @@ mod tests {
     //! | Map | with a boundary, terrain, structures and consoles (Lunar Surface); without one, with boxes (the house) | `lunar_surface_fits_its_boundary`, `house_shows_its_boxes` |
     //! | Pixel | ground, a structure's top (blue and red), a box's top, a console | `lunar_surface_fits_its_boundary`, `house_shows_its_boxes` |
     //! | Player | at the world origin facing −z, which is +u | `player_points_along_u` |
+    //! | Pixel and the player's range | within it (as drawn), beyond it (darker), across its edge (a white rim) | `the_range_circle_dims_what_is_beyond` |
     //! | Fermi coordinates | the ground, above it | `fermi_coordinates_round_trip` |
 
     use super::*;
     use crate::map::get_map_folder;
 
     const MAX_SIZE_PX: (u32, u32) = (992, 536);
+    const RANGE_M: f64 = 30.0;
 
     /// `get_rgb` gives a picture's pixel at (x, y).
     ///
@@ -750,10 +892,36 @@ mod tests {
     }
 
     #[test]
+    fn the_range_circle_dims_what_is_beyond() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("Lunar Surface loads");
+        let layout: MapLayout = MapLayout::FromMap(&map, MAX_SIZE_PX).expect("a layout");
+        let pixels: Vec<u8> = layout.get_range_pixels([0.0, 0.0], RANGE_M);
+        let brightness = |pixels: &[u8], point_m: [f64; 2]| -> u32 {
+            let [x, y] = layout.get_px(point_m).map(|p| p as usize);
+            get_rgb(pixels, layout.size_px, x, y)
+                .iter()
+                .map(|&c| u32::from(c))
+                .sum()
+        };
+        let near_m: [f64; 2] = [RANGE_M / 2.0, -RANGE_M / 2.0];
+        assert_eq!(
+            brightness(&pixels, near_m),
+            brightness(&layout.pixels, near_m)
+        );
+        let far_m: [f64; 2] = [-2.0 * RANGE_M, RANGE_M];
+        assert!(brightness(&pixels, far_m) < brightness(&layout.pixels, far_m));
+        let [x, y] = layout.get_px([0.0, 0.0]).map(|p| p as usize);
+        let rim_count: usize = (x..layout.size_px.0 as usize)
+            .filter(|&x| get_rgb(&pixels, layout.size_px, x, y) == RANGE_RIM_COLOR)
+            .count();
+        assert!(rim_count >= 1, "a rim crosses the line right of the middle");
+    }
+
+    #[test]
     fn player_points_along_u() {
         let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("Lunar Surface loads");
         let layout: MapLayout = MapLayout::FromMap(&map, MAX_SIZE_PX).expect("a layout");
-        let pixels: Vec<u8> = layout.draw_player(DMat4::IDENTITY, 1);
+        let pixels: Vec<u8> = layout.draw_player(DMat4::IDENTITY, 1, RANGE_M);
         let [x, y] = layout.get_px([0.0, 0.0]).map(|p| p as usize);
         assert_eq!(get_rgb(&pixels, layout.size_px, x, y), TEAM_COLORS[1]);
         let ahead_x: usize = x + (PLAYER_HEADING_PX - 1.0) as usize;

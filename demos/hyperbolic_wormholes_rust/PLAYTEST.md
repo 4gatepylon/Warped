@@ -77,6 +77,12 @@ each step outward is cut by how far you have already come, so you never get past
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
 
+The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
+the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,
+in their team's colours. The menu's MAP page rings the same 60 m around you and darkens the rest. To move, resize
+or hide the minimap, change `minimap` in your `player_settings.yaml` (`corner: top_left`, `top_right`,
+`bottom_left` or `bottom_right`).
+
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
 `PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches

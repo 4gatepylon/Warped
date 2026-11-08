@@ -1010,6 +1010,32 @@
 - **Rationale:** you asked for a menu page that shows how many players there are, and each player's kills, deaths
   and team.
 
+### D80. A Poincaré-disk minimap, and your range on the map page
+
+- **Choice:**
+  - **Model:** the minimap is the Poincaré disk of the ground around the player, centred on the ground point under
+    them and turned so they face up. It reaches `minimap.range_m` (60 m, 1.5 curvature radii on Lunar Surface),
+    which lands on the rim at disk radius tanh(range / 2R). Geodesics away from the player bend into arcs, which
+    shows the hyperbolic plane, while near the player it looks like an ordinary map.
+  - **Drawing:** the overlay shader draws it (`draw_minimap`). Each pixel of the disk goes onto the hyperboloid,
+    through the player's ground frame into the world, to its Fermi (u, v), and so to the map page's picture without
+    labels (`map_layout.rs`), uploaded once. On it go faint grid lines every 10 m of u and v (a pixel wide, from the
+    disk's metric), other players as dots, the lit parts of laser shots as lines (each segment sampled 6 times so
+    it bends), and a white arrow for the player.
+  - **Settings:** each player's `minimap` in `player_settings.yaml`: whether it shows, its corner (top right by
+    default, away from the bars in the bottom left), its radius (14% of the window's height) and its reach. It
+    hides under the menu and the banners.
+  - **Map page (W-66):** everything farther than the minimap's reach from the player is darker and blurred (a
+    3-pixel box blur, 55% brightness, made once), behind a white rim. The distance is hyperbolic, computed per pixel
+    from a term per row and per column, so the ring comes out lopsided in the map's Fermi coordinates.
+- **Alternatives:**
+  - a flat, Euclidean minimap of the Fermi coordinates around the player (it would hide what is hyperbolic);
+  - the whole Poincaré disk, out to infinity (you asked that it not show the whole map);
+  - drawing the minimap on the CPU each frame (about 2 ms a frame, against nothing measurable on the GPU).
+- **Rationale:** you asked for a round minimap that shows off the map's hyperbolic nature, just around the player,
+  with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
+  rest.
+
 
 ## Baselines
 
