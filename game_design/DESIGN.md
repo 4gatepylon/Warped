@@ -329,9 +329,9 @@ Every key here is the default. Each player can rebind any action, in the menu or
   250 m/s, and each point of it fades soon after the front passes.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
-- A player moving inside a wormhole mouth sees the world Doppler-shift, as if moving at a good fraction of light
-  speed: toward a pale light cyan walking forward, a darker red walking backward, stronger deeper in and faster,
-  none standing still or outside the mouth. Only that player sees it.
+- A player moving through a wormhole's throat sees the world Doppler-shift for a split second, as if moving near
+  light speed: toward a pale light cyan walking forward, a darker red walking backward, stronger nearer the throat
+  and faster, none standing still or outside the throat's region. Only that player sees it.
 - A shot that hits the ground throws up dust and a puff of mist where it lands, which every player
   sees. The grains fly up a few meters and fall back, and all of it fades within 2 s.
 
@@ -345,6 +345,8 @@ Every weapon follows these rules:
   the shooter is.
 - A player who is hit is slowed (see [Movement](#movement)).
 - Each shot strays from the crosshair by a small random angle, sampled for that shot.
+- Each shot's beam flickers with noise: every frame, random pixels of it turn black, white or drop out to show
+  what is behind.
 - Aiming (right button) zooms in over 0.15 s and turns the view more slowly by the same factor.
 - The rules are a simplified version of those of tactical shooters such as CS:GO.
 - A player who carries two weapons switches between them with the mouse wheel (either way swaps
@@ -363,6 +365,8 @@ Every weapon follows these rules:
 | Shot lasts (hits what the crosshair crosses) | 0.25 s | 0.06 s per shot |
 | Laser | Shows once per shot; each point fades 0.25 s after the front passes | Pulses with each shot; each point fades after 0.05 s |
 | Shot noise (each shot strays at random) | Small: 3 mrad on average, sampled exponentially, at most 15 mrad | Up to 2 mrad cold, growing with the rifle's heat to 20 mrad and shrinking as it cools |
+| Beam look | A white lightsaber blade in a pale haze | A laser in the team's colour |
+| Beam noise (each frame, a share of the beam's pixels turns black, white or drops out, 1 : 1 : 8) | Random per shot: 0.2 on average, sampled exponentially, at most 0.5 | None cold, growing with the rifle's heat to 0.5 |
 | Recoil | None | Each shot kicks the view up 7.5 mrad and 2.5 mrad left or right, alternately, settling in 0.08 s |
 | Aim zoom | 2.5× | 1.5× |
 

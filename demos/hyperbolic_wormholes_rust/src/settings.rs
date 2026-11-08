@@ -24,19 +24,27 @@ use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 11] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 18] = [
     "map_edge.start_wall_frac",
     "sniper.reload_s",
     "sniper.noise_mean_rad",
     "sniper.noise_max_rad",
+    "sniper.beam_speckle_mean_frac",
+    "sniper.beam_speckle_max_frac",
     "rifle.noise_start_rad",
     "rifle.noise_max_rad",
+    "rifle.beam_speckle_start_frac",
+    "rifle.beam_speckle_max_frac",
+    "beam_speckle.black_frac",
+    "beam_speckle.white_frac",
+    "beam_speckle.dropout_frac",
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
     "respawn.delay_s",
     "wormholes.throw_up_rad",
 ];
+const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
 const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
@@ -91,8 +99,9 @@ pub struct HeadBobSettings {
 
 /// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
 /// to reload, how many hits eliminate a player, how its beam flies (speed, and how long each
-/// point stays lit), and how far a shot strays from the crosshair (the mean of an exponential
-/// distribution, and a cap; `shot_noise.rs`).
+/// point stays lit), how far a shot strays from the crosshair (the mean of an exponential
+/// distribution, and a cap; `shot_noise.rs`), and the share of its beam's pixels that speckle each
+/// frame (the same: a mean and a cap).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SniperSettings {
@@ -103,11 +112,14 @@ pub struct SniperSettings {
     pub beam_trail_s: f64,
     pub noise_mean_rad: f64,
     pub noise_max_rad: f64,
+    pub beam_speckle_mean_frac: f64,
+    pub beam_speckle_max_frac: f64,
 }
 
 /// `RifleSettings` is gun 2: its fire rate, how long a shot hits, how its beam flies, overheating
-/// and cooling, the hits that eliminate a player, each shot's recoil, and the most a shot strays
-/// from the crosshair, cold and at full heat (`shot_noise.rs`).
+/// and cooling, the hits that eliminate a player, each shot's recoil, the most a shot strays
+/// from the crosshair, cold and at full heat, and the share of its beam's pixels that speckle each
+/// frame, cold and at full heat (`shot_noise.rs`).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RifleSettings {
@@ -124,6 +136,18 @@ pub struct RifleSettings {
     pub recoil_settle_s: f64,
     pub noise_start_rad: f64,
     pub noise_max_rad: f64,
+    pub beam_speckle_start_frac: f64,
+    pub beam_speckle_max_frac: f64,
+}
+
+/// `BeamSpeckleSettings` is how a laser beam's speckled pixels look, with both guns: the shares of
+/// them painted black, turned white and dropping out (showing what is behind), which add up to 1.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct BeamSpeckleSettings {
+    pub black_frac: f64,
+    pub white_frac: f64,
+    pub dropout_frac: f64,
 }
 
 /// `ConsoleSettings` is how long holding `E` takes to turn off a console, and from how far.
@@ -214,7 +238,8 @@ pub struct MapEdgeSettings {
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
-/// blue- or redshifts while moving inside a wormhole mouth (0 to 1), and the head bob.
+/// shifts toward light cyan (forward) or dark red (backward) while moving through a wormhole's
+/// throat (0 to 1), and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
@@ -273,6 +298,7 @@ pub struct ServerSettings {
     pub sprint_energy: SprintEnergySettings,
     pub sniper: SniperSettings,
     pub rifle: RifleSettings,
+    pub beam_speckle: BeamSpeckleSettings,
     pub consoles: ConsoleSettings,
     pub respawn: RespawnSettings,
     pub when_hit: WhenHitSettings,
@@ -374,6 +400,28 @@ impl ServerSettings {
             return Err(format!(
                 "settings {source}: rifle needs noise_start_rad <= noise_max_rad, not {} and {}",
                 rifle.noise_start_rad, rifle.noise_max_rad
+            )
+            .into());
+        }
+        let speckle: &BeamSpeckleSettings = &settings.beam_speckle;
+        let speckles_frac: [f64; 7] = [
+            settings.sniper.beam_speckle_mean_frac,
+            settings.sniper.beam_speckle_max_frac,
+            rifle.beam_speckle_start_frac,
+            rifle.beam_speckle_max_frac,
+            speckle.black_frac,
+            speckle.white_frac,
+            speckle.dropout_frac,
+        ];
+        let kinds_sum_frac: f64 = speckle.black_frac + speckle.white_frac + speckle.dropout_frac;
+        if speckles_frac.iter().any(|&x| x > 1.0)
+            || rifle.beam_speckle_start_frac > rifle.beam_speckle_max_frac
+            || (kinds_sum_frac - 1.0).abs() > SPECKLE_KINDS_SUM_TOLERANCE_FRAC
+        {
+            return Err(format!(
+                "settings {source}: beam speckles are shares from 0 to 1, with the rifle's \
+                 beam_speckle_start_frac <= beam_speckle_max_frac and beam_speckle's three \
+                 shares adding up to 1, not {speckles_frac:?}"
             )
             .into());
         }
@@ -493,7 +541,7 @@ mod tests {
     //! | Source | the built-in files, server settings sent as JSON, player settings the menu saved | `builtin_settings_read_and_survive_json`, `saved_player_settings_load_back` |
     //! | Keys | all present, one unknown, one missing | `builtin_settings_read_and_survive_json`, `unknown_and_missing_keys_fail` |
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
-    //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise that shrinks with heat) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
+    //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise or beam speckle that shrinks with heat, a speckle share above 1, speckle kinds that don't add up to 1) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
 
@@ -564,6 +612,26 @@ mod tests {
             .expect_err("a rifle's noise that shrinks with heat fails")
             .to_string();
         assert!(error.contains("noise_start_rad"), "{error}");
+        for bad in [
+            BUILTIN_SERVER_YAML.replace(
+                "beam_speckle_start_frac: 0.0",
+                "beam_speckle_start_frac: 0.7",
+            ),
+            BUILTIN_SERVER_YAML.replace("beam_speckle_max_frac: 0.5", "beam_speckle_max_frac: 1.5"),
+            BUILTIN_SERVER_YAML
+                .replace("beam_speckle_mean_frac: 0.2", "beam_speckle_mean_frac: 1.5"),
+            BUILTIN_SERVER_YAML.replace("dropout_frac: 0.8", "dropout_frac: 0.7"),
+        ] {
+            let error: String = ServerSettings::FromYaml(&bad, "test")
+                .expect_err("a bad beam speckle fails")
+                .to_string();
+            assert!(error.contains("beam speckles"), "{error}");
+        }
+        let all_dropout: String = BUILTIN_SERVER_YAML
+            .replace("black_frac: 0.1", "black_frac: 0")
+            .replace("white_frac: 0.1", "white_frac: 0")
+            .replace("dropout_frac: 0.8", "dropout_frac: 1.0");
+        assert!(ServerSettings::FromYaml(&all_dropout, "test").is_ok());
         let backward_edge: String =
             BUILTIN_SERVER_YAML.replace("start_wall_frac: 0.0", "start_wall_frac: 0.6");
         let error: String = ServerSettings::FromYaml(&backward_edge, "test")

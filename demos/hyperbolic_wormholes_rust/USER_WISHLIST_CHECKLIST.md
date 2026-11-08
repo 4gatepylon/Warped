@@ -29,12 +29,6 @@ is in [`AGENTS.md`](AGENTS.md).
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
-- [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
-  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
-  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
-  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead; that stray is to be turned off
-  by default. Demos first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/beam-shot-noise`, 2026-11-07.
 - [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
   center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
@@ -116,6 +110,14 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
+  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
+  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
+  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
+  speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
+  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
+  then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
+  that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249.
 - [?] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
   menu opens on the SCORES page. #265.
 - [?] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
@@ -129,14 +131,19 @@ are here too, since the user hadn't confirmed them.
   #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
   velocity: as long as you are in the wormhole and moving, it shows up blue (based on your velocity and your place in
   the wormhole); it should NOT go down with a timer. Once you're out of the wormhole it should go away immediately.
-  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. The user's
-  picks from the colour sheets: "i like option 8 for the wormhole", and "for red i like r2". #271.
+  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. After
+  testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
+  for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
+  BLUE but it has to be very close to white as I had asked". #272. The user's picks from the colour sheets: "i like
+  option 8 for the wormhole", and "for red i like r2". #271.
 - [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
   lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
   laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
   see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256. After playtesting
   #256: "move the gun back so the handle of the gun is offscreen. it was fine how it was before, just make the gun
-  larger." #263.
+  larger." #263. Then: "I see Leah made the lightsaber thing. That's OK. Let's do lightsaber for the sniper and do
+  the old laser view for the rifle." The rifle's beam is the laser again in #249, with W-84 (shot noise in the beam
+  itself).
 - [?] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
   player in the game as a dot in their team's colour; the minimap already showed those in reach. #250.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on

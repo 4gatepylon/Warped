@@ -1151,50 +1151,48 @@
   - slowing walking while aiming (not asked for).
 - **Rationale:** you asked for a way to aim on the right button, with the flashlight moved to another key.
 
-### D84. A Doppler shift while moving inside a wormhole mouth
+### D84. A near-white flash while moving through a wormhole's throat
 
-- **Choice** (W-82 replaced W-52's 1.5 s cyan tint after each crossing, which turned greys greenish):
-  - **When:** the shift depends only on where the player is and how they move, with no timer. Its strength is the
-    tint setting × how deep the eye is in a mouth × the speed along the view (forward speed × cos pitch + vertical
-    speed × sin pitch) in walking speeds, held within ±1.25. Forward gives a blueshift, backward a redshift, standing
-    still or stepping sideways none.
-  - **How deep:** 1 − (ρ / reach)², with ρ the eye's distance to the centre of the mouth whose reach holds it, the
-    same taper as the mouth's bending: 1 at the throat, 3/4 halfway out, 0 at the reach's edge (15 m on Lunar
-    Surface), where the bending ends, and 0 beyond it. Through the throat the eye is at the other mouth's throat, so
-    the shift carries on there and falls as the player walks out.
-  - **The shift:** the overlay shader's `blueshift_scene` reads each pixel's red, green and blue as samples of a
-    spectrum at 610, 550 and 465 nm, joined by straight lines and falling to 0 at the eye's limits, 400 and 700 nm.
-    Each channel shows the light at D times its wavelength, with the relativistic Doppler factor
-    D = √(1 − β²) / (1 − β cos θ). At strength 1 (walking at the throat), β is 0.2 forward and −0.3 backward;
-    beyond 1 (sprinting), β grows with it; below 1, the colour at strength 1 fades in instead. Forward, red fades and
-    green takes red's light, so greys turn a bluish cyan, deep blue in the middle; backward, blue fades and greys
-    turn red. The pixel is D times as bright, plus a faint blue (or red) glow, (0, 0.12, 0.4) (or (0.4, 0.04, 0))
-    times |D − 1|, so the black sky turns too.
+- **Choice** (W-82 (wormhole colour from motion) replaced the 1.5 s cyan tint after each crossing of W-52 (cyan
+  through a wormhole); a fix after testing #259 moved it to the throat and made it near white):
+  - **When:** the flash depends only on where the player is and how they move, with no timer. Its strength is the
+    tint setting × how deep the eye is inside a mouth × the speed along the view (forward speed × cos pitch +
+    vertical speed × sin pitch) in walking speeds, held within ±1.25. Forward gives a blue-white flash, backward a
+    warm-white one, standing still or stepping sideways none.
+  - **Where:** only inside the mouth, where it bends space strongly: 1 within the throat (ρ ≤ m, ρ the eye's
+    distance to the mouth's centre, m the throat's radius, 0.4 m on Lunar Surface), falling along a smoothstep to 0
+    at 5 throat radii (2 m), and 0 beyond. Through the throat the eye is at the other mouth's throat, so the flash
+    carries on there for the same 1.6 m. At walking speed it lasts about 0.3 s (19 frames at 60 fps).
+  - **The colour:** the overlay shader's `blueshift_scene` first shifts each pixel by a small relativistic Doppler
+    factor, D = √(1 − β²) / (1 − β cos θ) with β = 0.05 at walking speed (0.05 backward too), reading the pixel's
+    red, green and blue as samples of a spectrum at 610, 550 and 465 nm that falls to 0 at 400 and 700 nm, D times
+    as bright. It then takes the result 85% of the way to a pale blue-white, (0.86, 0.93, 1.0), moving forward, or a
+    warm white, (1.0, 0.92, 0.84), moving backward, as the forward view whitens near light speed. Below strength 1
+    the result fades in.
   - **What it touches:** the scene only, after motion blur; the HUD, text, minimap and the gun in your hand stay as
     they are, since they move with you. Each window steps only its own player, so in a game on a server only that
-    player sees it. The house map has no mouth reach, so it shows no shift.
+    player sees it. The house map moves players by other rules, so it shows none.
   - **Settings:** each player's `view.wormhole_tint_frac` (1 by default; 0 to 1, 0 for none; also in the menu as
     `wormhole tint 0-1`). `view.wormhole_tint_s` is gone. A saved settings file that still has it loads, because
     `REMOVED_PLAYER_KEYS` in `settings.rs` names it to be dropped; any other unknown key still fails.
-  - **Defaults you can change** (chosen while the questions were open): the shift carries on past the throat while
-    walking out of the other mouth; the middle goes deep blue (not a lighter β of 0.18); red objects turn green under
-    a blueshift, the real effect; the shift snaps on and off with movement, with no smoothing.
+  - **Defaults you can change:** the flash carries on past the throat in the other mouth; red objects keep a hint of
+    the shift under the white; it snaps on and off with movement, with no smoothing.
 - **Alternatives:**
-  - a smaller shift below strength 1 instead of fading in (a small shift first turns greys greenish cyan, or
-    yellowish backward, since removing only red or only blue leaves the other two);
-  - the real dependence on θ (the corners stayed greenish while the middle went deep blue); it keeps half (cos θ is
-    taken half way from 1), which is not physical;
-  - the same β backward as forward (greys turned yellow, not red: green sits 85 nm from blue but 60 nm from red);
-  - a depth that is 1 across most of the reach (it would not say where in the mouth you are), or one that follows
-    the bending's strength (it is concentrated within about 2 m of the throat, a fifth of a second at walking speed);
-  - the player's real velocity direction per pixel (stepping sideways would blueshift one side of the screen and
-    redshift the other), instead of the speed along the view;
-  - real beaming, D³ to D⁴ (washes out the ground when blueshifted).
-- **Rationale:** you asked for a more bluish cyan, not greenish; for the colour to depend on where you are in the
-  wormhole and how fast you move, not on a timer; for it to go away once you are out; and for a redshift when
-  walking backwards.
-- **Superseded in part by:** D99, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
-  backward, which you picked.
+  - the whole 15 m reach, 1 − (ρ / reach)² (#259; you said it started far too early: "it should happen only for a
+    split second as you are in it");
+  - the full spectral shift with β = 0.2 forward and 0.3 backward (#259; you said it was dark blue and must be very
+    close to white);
+  - a plain blend to white without the small shift (a little less like a Doppler shift, for no visible gain at 85%
+    white);
+  - the player's real velocity direction per pixel (stepping sideways would tint one side of the screen one way and
+    the other side the other), instead of the speed along the view.
+- **Rationale:** you asked that the colour depend on where you are in the wormhole and how fast you move, not on a
+  timer, go away once you are out, and redshift walking backwards; then, testing #259: "You cannot start the
+  transformation so early when going into the wormhole, it should happen only for a split second as you are in it.
+  It happens when you are INSIDE it", and "the transformation is still DARK BLUE but it has to be very close to white
+  as I had asked".
+- **Superseded in part by:** D100, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
+  backward, which you picked, in place of the 85% white; where and when the shift shows stays as here.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1573,6 +1571,61 @@
 
 ## Baselines
 
+### D99. Shot noise in the beam, for W-84 (shot noise in the beam itself): pixels turn black, white or drop out
+
+- **Choice:**
+  - **Each gun's beam:** the sniper's is the lightsaber blade of W-92 (lightsaber lasers, rifle first, guns further
+    out; #256): a flat-topped white core in a soft, pale haze. The rifle's is the laser from before #256: a Gaussian
+    core whitened at its middle over a halo in the team's colour. Each beam carries its gun (`LaserBeam.is_rifle`,
+    packed into `GpuBeam.info.w` as the team plus 2 for the rifle), so `scan_beams` shapes its core and
+    `shade_ray_end` shades it by gun. Other windows know the gun from the rifle bit already in the player record.
+  - **The speckle:** each frame, a share of the beam's screen pixels is speckled, and the rest is the gun's normal
+    beam. A speckled pixel is one of three kinds, picked by its own roll in the shares of `beam_speckle` in
+    `server_settings.yaml`, 1 : 1 : 8 by default:
+    - black (`black_frac`, 0.1): the colour darkened by the beam's glow there, black where the glow is full;
+    - white (`white_frac`, 0.1): the colour moved toward white by the glow, never brighter than white;
+    - dropout (`dropout_frac`, 0.8): the beam is left out, so what is behind shows through: the sky over the sky,
+      ground specks over the ground.
+    Only pixels where the glow is above 2% count as the beam's, so no specks show beyond its visible edge. The
+    pixels are picked anew each frame and independently for each pixel (`hash_pixel` on the pixel and a seed from
+    the frame's clock, in milliseconds), so they flicker as single pixels.
+  - **The share, per shot (`shot_noise.rs`), from 0 to 0.5:** the sniper's is exponential with mean
+    `sniper.beam_speckle_mean_frac` (0.2), cut at `sniper.beam_speckle_max_frac` (0.5, for 8% of shots), so most
+    shots are lightly speckled and some heavily. The rifle's grows in step with the heat, from
+    `rifle.beam_speckle_start_frac` (0) on a cold rifle to `rifle.beam_speckle_max_frac` (0.5) at full heat, like a
+    weapon malfunctioning as it overheats: the heat is the one before the shot adds its own, so a burst's first shot
+    is clean and its 20th is 47% speckled, and it falls back as the rifle cools. The shares are 0 for none; a share
+    above 1, a rifle start above its maximum, or kinds that don't add up to 1 fail.
+  - **Every window draws a shot alike:** the share is rounded to steps of 1/30 (so 0.5 and 0.2 are steps) and sent
+    in the five unused high bits of the laser byte of the player record (bits 3 to 7; bits 0 to 2 are the laser, the
+    rifle and the team), so the snapshot keeps its length. Older windows read only the low bits and draw plain
+    beams; an older server drops the bits, so others' beams show plain. Other windows start a tracer with the share
+    they receive with the shot; the kinds' shares come with the server's settings.
+  - **On the GPU:** each beam segment carries its share in `GpuBeam.info.y`; the ray keeps the share and code of the
+    beam whose halo is brightest, packed in `VoxelRayEnd.surface.w` beside the team bit and the tint bits of W-60
+    (throw wormholes): bit 0 the team, bits 1 and 2 the tint, bit 3 the rifle, the share from bit 4. The tint
+    used to read every bit above bit 0 and now reads its two. `shade_ray_end` hands the pixel's colour with and
+    without the beam to `speckle_beam`.
+  - **Kept:** #216's aim stray (D89), unchanged: you called it neutral.
+- **Alternatives:**
+  - the lightsaber for both guns (#256) or the laser for both (before it);
+  - shares from 0 to 1 (the version just before: you then asked for 0 to 0.5);
+  - dropout alone, with the surviving pixels brighter and whiter (the version this PR first had; you asked for the
+    beam otherwise to stay the normal beam);
+  - other ratios of black : white : dropout (1:1:4, 1:1:2, 2:1:7, 1:2:7, 1:1:18, in the samples);
+  - grain inside the glow, bright motes around the beam, or a glitchy beam with gaps and jumps (the first samples);
+  - deriving the share in each window from the shooter's id and shot count (the rifle's depends on its heat, which
+    other windows don't know);
+  - picking pixels after MetalFX upscaling (the overlay pass doesn't know where beams are): at a render scale under 1
+    the specks are render pixels, up to 2 window pixels across.
+- **Rationale:** you asked that the laser beam itself have shot noise, "a combination of black AND dropout AND
+  white": "i recommend the ratio is always 1 black to 1 white to 8 dropout and the total amount at this fixed ratio
+  is scaled as I had described" (random per sniper shot, rising with the rifle's shots). Then: "stick with 118 and
+  goes from amount 0 to 1 as you fire more, exponential average should be at 0.2". Then: "I see Leah made the
+  lightsaber thing. That's OK. Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add
+  the SPECKLE on top of that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for
+  sniper."
+
 ### D15. WebGL at the same drawing-buffer sizes
 
 - **Choice:** the browser demo from PR 58, unchanged, in the Claude desktop app's built-in browser (Chromium 152,
@@ -1581,20 +1634,21 @@
 - **Alternatives:** moving the WebGL demo's mouths to match first.
 - **Rationale:** it is the version you found too slow.
 
-### D99. The wormhole Doppler shift in the colours you picked, for W-82 (wormhole colour from motion)
+### D100. The wormhole Doppler shift in the colours you picked, for W-82 (wormhole colour from motion)
 
-- **Choice:** D84's shift keeps when and how strongly it shows (depth in a mouth × speed along the view, no timer),
-  and its colours are now the ones you picked from sheets made by an exact Python copy of the shader. The real
-  shader matches that copy to within 1 level in 255 on the `middle` and `red_pylon` views.
-  - **The Doppler step:** as in D84, but D = √(1 − β²) / (1 − β cos θ′), cos θ′ = 1 − (1 − cos θ) / 2, with β 0.09
-    forward at walking speed (was 0.2) and −0.3 backward, growing with it beyond.
-  - **Forward, option 8 "toward light cyan":** D² as bright (was D) plus the blue glow (0, 0.12, 0.4) × (D² − 1);
-    paled 30% toward its grey (luminance 0.2126 R + 0.7152 G + 0.0722 B); moved 60% toward light cyan #E0FFFF at
-    the same luminance; × 1.5 through a shoulder that rolls the brightest channel off above 0.8 toward 1, so
-    nothing clips to flat white; then green moved into blue and held to 0.95 of blue, so nothing turns green. On
-    the `middle` view the ground turns from #A7A294 to #B2E2EE.
-  - **Backward, R2 "darker":** the redshift as before (D as bright plus the red glow (0.4, 0.04, 0) × |D − 1|),
-    then × 0.7. On the `middle` view the ground turns #540F00.
+- **Choice:** D84 keeps where and when the shift shows (only within about 2 m of the throat, × the speed along the
+  view, no timer); its colours are now the ones you picked from sheets made by an exact Python copy of the shader.
+  The real shader matches that copy to within 1 level in 255 on the `middle` and `red_pylon` views.
+  - **The Doppler step:** each channel shows the light at D times its wavelength (the spectrum at 610, 550 and 465
+    nm, 0 at 400 and 700 nm), with D = √(1 − β²) / (1 − β cos θ′), cos θ′ = 1 − (1 − cos θ) / 2, θ the angle off
+    the middle of the screen. β is 0.09 forward and −0.3 backward at walking speed, growing with it beyond.
+  - **Forward, option 8 "toward light cyan":** D² as bright plus a blue glow (0, 0.12, 0.4) × (D² − 1); paled 30%
+    toward its grey (luminance 0.2126 R + 0.7152 G + 0.0722 B); moved 60% toward light cyan #E0FFFF at the same
+    luminance; × 1.5 through a shoulder that rolls the brightest channel off above 0.8 toward 1, so nothing clips
+    to flat white; then green moved into blue and held to 0.95 of blue, so nothing turns green. On the `middle`
+    view the ground turns from #A7A294 to #B2E2EE.
+  - **Backward, R2 "darker":** D as bright plus a red glow (0.4, 0.04, 0) × |D − 1|, then × 0.7. On the `middle`
+    view the ground turns #540F00.
   - **Below walking strength:** the picked colour fades in, the gain and the green cap with it.
   - **Knobs:** named constants at the top of `render_metal.metal` (`BLUESHIFT_PALE_FRAC`, `BLUESHIFT_WHITE_FRAC`,
     `BLUESHIFT_TINT`, `BLUESHIFT_GAIN`, `BLUESHIFT_SHOULDER_KNEE`, `BLUESHIFT_LIFT_FRAC` at 0,
@@ -1603,7 +1657,9 @@
   - the other forward options on the sheet: 1 to 7 (bluer or greener, less white), 9 to 12 (nearly white, #E0FFFF
     to #F0FFFF, keeping less of the scene's texture), and lifting the blacks toward the tint (options 7 and 12);
   - the redshift as it was, or another darkness (R1, R3, R4);
-  - D84's deep blue (β 0.2, D¹, no paling or whitening).
+  - #272's flash, 85% of the way to a pale blue-white (0.86, 0.93, 1.0) forward or a warm white (1.0, 0.92, 0.84)
+    backward, chosen before your picks reached it;
+  - #259's deep blue (β 0.2, D¹, no paling or whitening).
 - **Rationale:** from the sheets you said "i like option 8 for the wormhole" and "for red i like r2".
 
 ## Workload

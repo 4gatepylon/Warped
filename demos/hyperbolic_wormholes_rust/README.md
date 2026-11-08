@@ -48,11 +48,11 @@ make join-game SERVER=127.0.0.1
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
-  you through. While you move inside a mouth's reach, your view Doppler-shifts as if you moved near light speed
-  (D84, D99): walking forward turns it toward a pale light cyan; walking backward turns it a darker red. It is
-  strongest at the throat and with speed, none standing still, and gone once you are out of the reach.
-  `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for none).
-  Only you see your own shift (Metal renderer, voxel maps).
+  you through. For the split second you are inside the mouth (within about 2 m of its throat), moving, your view
+  Doppler-shifts as if you moved near light speed (D84, D100): toward a pale light cyan walking forward, a darker
+  red walking backward. It is strongest at the throat and with speed, none standing still, and gone once you are 2 m
+  out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for
+  none). Only you see your own shift (Metal renderer, voxel maps).
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
   `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
@@ -62,6 +62,11 @@ make join-game SERVER=127.0.0.1
   Each shot strays a little from the crosshair, by a random angle sampled for that shot (D89): with the sniper
   usually by a hair (3 mrad on average, at most 15), with the rifle by up to 2 mrad cold, growing with its heat to 20
   mrad and shrinking as it cools (`noise_*_rad` under `sniper` and `rifle` in `server_settings.yaml`).
+  The sniper's beam is a white lightsaber blade and the rifle's a laser in the team's colour (D99). Each shot's beam
+  also flickers with shot noise: every frame a random share of its pixels is speckled, 1 in 10 of them black, 1 in 10
+  white and 8 in 10 dropping out to show what is behind, while the rest is the normal beam. The share is random per
+  sniper shot (0.2 on average, at most half the beam) and rises with the rifle's heat, from none cold to half the beam
+  at full heat (`beam_speckle_*_frac` and `beam_speckle` in `server_settings.yaml`).
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.

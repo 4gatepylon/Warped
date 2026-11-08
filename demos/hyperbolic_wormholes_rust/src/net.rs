@@ -35,6 +35,7 @@ use std::time::{Duration, Instant};
 use glam::{DMat4, DVec4};
 
 use crate::settings::ServerSettings;
+use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
 
 /// `Result` is this module's result type.
@@ -47,6 +48,7 @@ pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
 const NO_CONSOLE: u8 = u8::MAX;
 const RIFLE_BIT: u8 = 1;
 const TEAM_BIT: u8 = 2;
+const SPECKLE_FIRST_BIT: u8 = 3;
 const ANY_TEAM: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
@@ -126,9 +128,10 @@ impl Kind {
 /// `RemotePlayer` is another player as the last snapshot gave them: their eye frame (while their
 /// laser is on, turned by their shot's noise, so it is the frame their laser fires from), whether
 /// their laser is on and from which gun, their team (an index into `TEAM_NAMES`), the console they
-/// hold `E` on, if any, how far along turning it off they are, from 0 to 1, as the server times it
-/// (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it), and their
-/// thrown wormholes.
+/// hold `E` on, if any, how far along turning it off they are, from 0 to 1, as the server times
+/// it (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it), the share of
+/// their shot's beam pixels that speckle (`beam_speckle_frac`, in steps of
+/// 1 / `shot_noise::BEAM_SPECKLE_LEVEL_COUNT`), and their thrown wormholes.
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
@@ -138,6 +141,7 @@ pub struct RemotePlayer {
     pub team: u32,
     pub disabling_console: Option<u8>,
     pub disabling_frac: f64,
+    pub beam_speckle_frac: f64,
     pub wormholes: PlayerWormholes,
 }
 
@@ -191,8 +195,9 @@ impl Message {
         self
     }
 
-    /// `player` appends a player: id, eye frame, laser switch, the console they hold `E` on, how far
-    /// along turning it off they are (a byte, 255 for done), and their wormholes.
+    /// `player` appends a player: id, eye frame, laser switch (with the gun, the team and the beam
+    /// speckle's level in its higher bits), the console they hold `E` on, how far along turning it
+    /// off they are (a byte, 255 for done), and their wormholes.
     ///
     /// Example: `let message = Message::New(Kind::State).player(&player);`
     fn player(mut self, player: &RemotePlayer) -> Message {
@@ -203,7 +208,8 @@ impl Message {
         self.0.push(
             u8::from(player.is_laser_on)
                 | u8::from(player.is_rifle) << RIFLE_BIT
-                | (player.team as u8) << TEAM_BIT,
+                | (player.team as u8) << TEAM_BIT
+                | encode_speckle_level(player.beam_speckle_frac) << SPECKLE_FIRST_BIT,
         );
         self.0.push(player.disabling_console.unwrap_or(NO_CONSOLE));
         self.0
@@ -267,6 +273,16 @@ impl Message {
     }
 }
 
+/// `encode_speckle_level` gives a beam speckle share's level, 0 to `BEAM_SPECKLE_LEVEL_COUNT`,
+/// which fits the laser byte's bits from `SPECKLE_FIRST_BIT` up; older windows read only the bits
+/// below, so they ignore it.
+///
+/// Example: `let level = encode_speckle_level(0.12);`
+fn encode_speckle_level(beam_speckle_frac: f64) -> u8 {
+    (shot_noise::round_speckle_frac(beam_speckle_frac) * f64::from(BEAM_SPECKLE_LEVEL_COUNT))
+        .round() as u8
+}
+
 /// `Reader` reads a datagram's fields in order.
 struct Reader<'a> {
     bytes: &'a [u8],
@@ -312,6 +328,8 @@ impl Reader<'_> {
             team: u32::from(laser >> TEAM_BIT & 1),
             disabling_console: (console != NO_CONSOLE).then_some(console),
             disabling_frac: f64::from(disabling) / f64::from(u8::MAX),
+            beam_speckle_frac: f64::from(laser >> SPECKLE_FIRST_BIT)
+                / f64::from(BEAM_SPECKLE_LEVEL_COUNT),
             wormholes: self.wormholes()?,
         })
     }
@@ -459,6 +477,7 @@ impl Server {
                                 team,
                                 disabling_console: None,
                                 disabling_frac: 0.0,
+                                beam_speckle_frac: 0.0,
                                 wormholes: PlayerWormholes::default(),
                             },
                             address,
@@ -1135,16 +1154,17 @@ impl Client {
     }
 
     /// `send_state` sends this player's eye frame, laser switch, whether the gun is the rifle, the
-    /// console they hold `E` on and their wormholes, once joined. The server times the hold itself,
-    /// so the progress sent is 0.
+    /// console they hold `E` on, their shot's beam speckle and their wormholes, once joined. The
+    /// server times the hold itself, so the progress sent is 0.
     ///
-    /// Example: `client.send_state(player.frame, is_laser_on, false, None, PlayerWormholes::default())?;`
+    /// Example: `client.send_state(player.frame, is_laser_on, false, None, 0.0, PlayerWormholes::default())?;`
     pub fn send_state(
         &mut self,
         frame: DMat4,
         is_laser_on: bool,
         is_rifle: bool,
         disabling_console: Option<u8>,
+        beam_speckle_frac: f64,
         wormholes: PlayerWormholes,
     ) -> Result<()> {
         if let Some(id) = self.id {
@@ -1156,6 +1176,7 @@ impl Client {
                 team: self.team.unwrap_or(0),
                 disabling_console,
                 disabling_frac: 0.0,
+                beam_speckle_frac,
                 wormholes,
             };
             self.send(&Message::New(Kind::State).player(&player))?;
@@ -1322,7 +1343,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Datagram length | complete (progress kept to a 255th), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
+    //! | Datagram length | complete (progress kept to a 255th; the beam speckle's top level beside the laser, rifle and red-team bits), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
     //! | Player's wormholes | none, one down with a green throw in the air, both down and damaged | `players_survive_encoding` |
     //! | Shot at a player's wormholes | by an enemy (adds up to destroyed, then no further), by a teammate (ignored), with none down (ignored); the owner then has none down (reset) | `enemy_shots_destroy_wormholes` |
     //! | Wormhole damage sent | to its owner's client, in the snapshot | `owners_learn_their_wormholes_are_destroyed` |
@@ -1350,6 +1371,7 @@ mod tests {
     const SENT_DAMAGE_BYTE: u8 = 51;
     const RED: u8 = 1;
     const SENT_DISABLING_FRAC: f64 = 0.37;
+    const SENT_SPECKLE_FRAC: f64 = 1.0;
     const DISABLING_FRAC_STEP: f64 = 1.0 / u8::MAX as f64;
     const HALF: f64 = 0.5;
     const TWICE: f64 = 2.0;
@@ -1417,6 +1439,7 @@ mod tests {
             team: 0,
             disabling_console: Some(console),
             disabling_frac: 0.0,
+            beam_speckle_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         server
@@ -1532,9 +1555,10 @@ mod tests {
                 frame,
                 is_laser_on: true,
                 is_rifle: true,
-                team: 0,
+                team: 1,
                 disabling_console: Some(3),
                 disabling_frac: SENT_DISABLING_FRAC,
+                beam_speckle_frac: SENT_SPECKLE_FRAC,
                 wormholes,
             };
             let game: GameState = GameState {
@@ -1560,6 +1584,8 @@ mod tests {
                 (7, frame, true, true, Some(3), wormholes)
             );
             assert!((player.disabling_frac - SENT_DISABLING_FRAC).abs() <= DISABLING_FRAC_STEP);
+            assert_eq!(player.beam_speckle_frac, SENT_SPECKLE_FRAC);
+            assert_eq!(player.team, 1);
             assert_eq!(reader.game(), Some(game));
         }
     }
@@ -1574,6 +1600,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            beam_speckle_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let message: Message = Message::New(Kind::State).player(&player);
@@ -1916,6 +1943,7 @@ mod tests {
             team: u32::from(RED),
             disabling_console: Some(0),
             disabling_frac: 0.0,
+            beam_speckle_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         server

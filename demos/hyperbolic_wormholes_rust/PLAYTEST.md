@@ -97,12 +97,12 @@ changes: after a hit, reddish-orange ones run down the health bar from your last
 blue ones run down the energy bar from its last filled slot; while it refills, fainter ones run up toward it. The
 ammo bar doesn't pulse.
 
-Walk into a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, within about 15 m of
-its centre, your view Doppler-shifts as if you moved near light speed. Walking forward it turns toward a pale light
-cyan (option 8, which you picked); walking backward it turns a darker red (R2). It grows toward the throat and
-with your speed (sprinting deepens it), goes away the moment you stand still, and is gone once you are out of the
-mouth's reach on the other side. Only you see your own shift. In the menu, `wormhole tint 0-1` sets how strong it
-is (0 turns it off). A saved `player_settings.yaml` that still has the old `wormhole_tint_s` line loads as before;
+Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, for the split second
+you are inside it, within about 2 m of its throat on either side (about 0.3 s at walking speed), your view
+Doppler-shifts as if you moved near light speed: toward a pale light cyan walking forward (option 8, which you
+picked), a darker red walking backward (R2). It is strongest at the throat and with your speed, goes away the moment
+you stand still, and is gone 2 m out. Only you see your own shift. In the menu, `wormhole tint 0-1` sets how strong
+it is (0 turns it off). A saved `player_settings.yaml` that still has the old `wormhole_tint_s` line loads as before;
 that line is ignored.
 
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
@@ -127,7 +127,10 @@ above the energy bar that empties when you fire; one hit eliminates), and gun 2,
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s). Each shot strays
 a little from the crosshair: the sniper's by a random few milliradians, the rifle's more and more as it heats up
-during a burst (`DECISIONS.md` D89). A shot into the ground, from either gun and anyone, throws up dust and a puff
+during a burst (`DECISIONS.md` D89). The sniper's beam is a white lightsaber blade, the rifle's a laser. Each shot's
+beam also flickers: each frame random pixels of it turn black, white or drop out to show what is behind (1 : 1 : 8),
+a random share for each sniper shot (0.2 on average, at most half) and more and more as the rifle heats up, from none
+to half the beam (D99). A shot into the ground, from either gun and anyone, throws up dust and a puff
 of mist that fade within 2 s. `E` (held)
 turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu on SCORES: how
 many players there are and each one's team, kills and deaths in this game (`Q`/`E` turn to your settings, a map of the
