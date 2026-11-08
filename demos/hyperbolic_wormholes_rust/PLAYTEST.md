@@ -91,13 +91,13 @@ each step outward is cut by how far you have already come, so you never get past
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
 
-Space on Lunar Surface is twice as curved as before: its curvature radius is 20 m instead of 40 m. Buildings and
-players keep their size, but far things shrink much faster with distance, the crater's wall sinks toward the
+Space on Lunar Surface is 1.5 times as curved as before: its curvature radius is 26.7 m instead of 40 m. Buildings
+and players keep their size, but far things shrink faster with distance, the crater's wall sinks toward the
 horizon, and the structures away from the middle line are further apart. The server's
-`space.curvature_per_map_curvature` sets it, from 1 (the old curvature) to 2 (the default); a window that joins
-builds the map at the server's value. Known rough: at 2, surfaces more than about 90 m from the middle of the map
-(both spawns, the red pylon) speckle, because the renderer's single precision runs out that many curvature radii
-out; at 1.5 there is almost none.
+`space.curvature_per_map_curvature` sets it, from 1 (the old curvature) to 2, with 1.5 the default; a window that
+joins builds the map at the server's value. Known rough: at 2, surfaces more than about 90 m from the middle of the
+map (both spawns, the red pylon) speckle, because the renderer's single precision runs out that many curvature
+radii out; at 1.5 there is almost none.
 
 The bars in the bottom left (health, then the gun's ammo, then sprint energy) lean like `/` and glow in their
 colours. While one changes, soft swells of light run over its filled part, stronger and faster the faster it
@@ -105,11 +105,11 @@ changes: after a hit, reddish-orange ones run down the health bar from your last
 blue ones run down the energy bar from its last filled slot; while it refills, fainter ones run up toward it. The
 ammo bar doesn't pulse.
 
-Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, for the split second
-you are inside it, within about 2 m of its throat on either side (about 0.3 s at walking speed), your view flashes
-almost white, as if you moved near light speed: a pale blue-white walking forward, a warm white walking backward.
-It is strongest at the throat and with your speed, goes away the moment you stand still, and is gone 2 m out. Only
-you see your own flash. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off). A saved
+Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, for the moment you
+are inside it, within about 3.6 m of its centre on either side (about 0.6 s at walking speed), your view's colours
+shift as if you moved near light speed: a light cyan, almost white, walking forward, a dark red walking backward,
+crisp, with dark staying dark. It is strongest at the throat and with your speed, goes away the moment you stand
+still, and is gone 3.6 m out. Only you see your own shift. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off). A saved
 `player_settings.yaml` that still has the old `wormhole_tint_s` line loads as before; that line is ignored.
 
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so

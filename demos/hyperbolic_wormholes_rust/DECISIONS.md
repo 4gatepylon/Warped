@@ -1151,46 +1151,59 @@
   - slowing walking while aiming (not asked for).
 - **Rationale:** you asked for a way to aim on the right button, with the flashlight moved to another key.
 
-### D84. A near-white flash while moving through a wormhole's throat
+### D84. A crisp colour shift while moving through a wormhole's throat
 
 - **Choice** (W-82 (wormhole colour from motion) replaced the 1.5 s cyan tint after each crossing of W-52 (cyan
-  through a wormhole); a fix after testing #259 moved it to the throat and made it near white):
-  - **When:** the flash depends only on where the player is and how they move, with no timer. Its strength is the
+  through a wormhole); after testing, #272 moved it to the throat, and #289 made the colours crisp and the time twice
+  as long):
+  - **When:** the shift depends only on where the player is and how they move, with no timer. Its strength is the
     tint setting × how deep the eye is inside a mouth × the speed along the view (forward speed × cos pitch +
-    vertical speed × sin pitch) in walking speeds, held within ±1.25. Forward gives a blue-white flash, backward a
-    warm-white one, standing still or stepping sideways none.
-  - **Where:** only inside the mouth, where it bends space strongly: 1 within the throat (ρ ≤ m, ρ the eye's
-    distance to the mouth's centre, m the throat's radius, 0.4 m on Lunar Surface), falling along a smoothstep to 0
-    at 5 throat radii (2 m), and 0 beyond. Through the throat the eye is at the other mouth's throat, so the flash
-    carries on there for the same 1.6 m. At walking speed it lasts about 0.3 s (19 frames at 60 fps).
-  - **The colour:** the overlay shader's `blueshift_scene` first shifts each pixel by a small relativistic Doppler
-    factor, D = √(1 − β²) / (1 − β cos θ) with β = 0.05 at walking speed (0.05 backward too), reading the pixel's
-    red, green and blue as samples of a spectrum at 610, 550 and 465 nm that falls to 0 at 400 and 700 nm, D times
-    as bright. It then takes the result 85% of the way to a pale blue-white, (0.86, 0.93, 1.0), moving forward, or a
-    warm white, (1.0, 0.92, 0.84), moving backward, as the forward view whitens near light speed. Below strength 1
-    the result fades in.
+    vertical speed × sin pitch) in walking speeds, held within ±1.25. Forward gives a light cyan, backward a dark
+    red, standing still or stepping sideways none.
+  - **Where:** only inside the mouth, where it bends space strongly. With ρ the eye's distance to the mouth's centre
+    and m the throat's radius (0.4 m on Lunar Surface), the depth is 1 within 1.8 throat radii (0.72 m), falling
+    along a smoothstep to 0 at 9 throat radii (3.6 m), and 0 beyond. Through the throat the eye is at the other
+    mouth's throat, so the shift carries on there over the same distance. `INSIDE_MOUTH_SCALE` (1.8) scales both
+    radii.
+  - **How long:** walking through mouth A, it shows for 38 frames (0.63 s at 60 fps), twice #272's 19 (0.32 s). The
+    eye passes 1.2 throat radii (0.48 m) from the centre, not through it, so doubling both radii would have made it
+    2.3 times as long (43 frames); 1.8 makes it exactly twice.
+  - **The colour:** the overlay shader's `blueshift_scene` reads each pixel's red, green and blue as samples of a
+    spectrum at 610, 550 and 465 nm that falls to 0 at 400 and 700 nm, and shows each channel's light at D times its
+    wavelength, with D = √(1 − β²) / (1 − β cos θ) (cos θ taken half way from 1). Nothing is added over the image,
+    so dark stays dark and edges stay sharp.
+    - Forward: β = 0.16 at walking speed, D³ times as bright, shown at 45% over the scene: greys turn a light
+      cyan, almost white.
+    - Backward: as #259, β = −0.3, D times as bright, shown in full, with a faint red glow, (0.4, 0.04, 0) × (1 − D),
+      on the black sky: greys turn a dark red.
+    - Below strength 1 the result fades in.
   - **What it touches:** the scene only, after motion blur; the HUD, text, minimap and the gun in your hand stay as
     they are, since they move with you. Each window steps only its own player, so in a game on a server only that
     player sees it. The house map moves players by other rules, so it shows none.
   - **Settings:** each player's `view.wormhole_tint_frac` (1 by default; 0 to 1, 0 for none; also in the menu as
     `wormhole tint 0-1`). `view.wormhole_tint_s` is gone. A saved settings file that still has it loads, because
     `REMOVED_PLAYER_KEYS` in `settings.rs` names it to be dropped; any other unknown key still fails.
-  - **Defaults you can change:** the flash carries on past the throat in the other mouth; red objects keep a hint of
-    the shift under the white; it snaps on and off with movement, with no smoothing.
+  - **Defaults you can change:** the shift carries on past the throat in the other mouth; red objects turn green
+    under the forward shift, the real effect; it snaps on and off with movement, with no smoothing.
 - **Alternatives:**
   - the whole 15 m reach, 1 − (ρ / reach)² (#259; you said it started far too early: "it should happen only for a
     split second as you are in it");
-  - the full spectral shift with β = 0.2 forward and 0.3 backward (#259; you said it was dark blue and must be very
-    close to white);
-  - a plain blend to white without the small shift (a little less like a Doppler shift, for no visible gain at 85%
-    white);
+  - the full forward shift with β = 0.2 (#259; deep blue, which you called dark blue);
+  - a blend 85% toward a pale blue-white or a warm white (#272; you said it was not crisp, "like diffused by this
+    white screen");
+  - a smaller forward shift without the D³ brightening (mint green rather than cyan on the warm ground);
+  - both radii doubled (2.3 times as long on mouth A, since the eye misses the centre);
   - the player's real velocity direction per pixel (stepping sideways would tint one side of the screen one way and
     the other side the other), instead of the speed along the view.
 - **Rationale:** you asked that the colour depend on where you are in the wormhole and how fast you move, not on a
-  timer, go away once you are out, and redshift walking backwards; then, testing #259: "You cannot start the
+  timer, go away once you are out, and redshift walking backwards. Testing #259: "You cannot start the
   transformation so early when going into the wormhole, it should happen only for a split second as you are in it.
-  It happens when you are INSIDE it", and "the transformation is still DARK BLUE but it has to be very close to white
-  as I had asked".
+  It happens when you are INSIDE it". Seeing #272: "for the "at the throat" thing you still need to have the dark
+  red and the light cyan almost white instead of doing this "warm" stuff. It has to be CRISP (not like diffused by
+  this white screen), like the previous pictures I was shown", "so overall your throat timing looks good", and "its
+  just the specific colors should be a bit more crisp". Then: "make a PR that makes it take slightly longer; ideally
+  just double its radius or whatever (i.e. walking at same speed should take exactly twice as long of time showing
+  me cyan or red)".
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1624,19 +1637,21 @@
   the SPECKLE on top of that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for
   sniper."
 
-### D100. Twice the curvature, set in the server's settings, for W-37 (stronger curvature)
+### D100. A stronger curvature, set in the server's settings, for W-37 (stronger curvature)
 
 - **Choice:**
-  - **Setting:** `space.curvature_per_map_curvature` in `server_settings.yaml`, from 1 to 2, default 2: the
+  - **Setting:** `space.curvature_per_map_curvature` in `server_settings.yaml`, from 1 to 2, default 1.5: the
     curvature (1 over the curvature radius) as a multiple of the map's own. Lunar Surface's 40 m radius becomes
-    20 m. A value outside 1 to 2 fails with the key's name. Twice the curvature in this sense makes the Gaussian
-    curvature, −1/R², four times as strong.
+    26.7 m (20 m at 2). A value outside 1 to 2 fails with the key's name. A curvature k times as strong in this sense
+    makes the Gaussian curvature, −1/R², k² times as strong.
+  - **Default 1.5, not 2:** the item asked for twice the curvature by default. After seeing pictures at 1, 1.5 and
+    2, with the speckle at 2 described below, you chose 1.5: "1.5x curvature is fine". 2 stays allowed.
   - **What stays in meters:** every frame (structures, warps, spawns) and lamp keeps its Fermi coordinates (u, v, h)
     and its turn against the Fermi axes there (`Map::scale_curvature`). Shapes in their charts, the terrain, the
     zones, the warps' reach and the players' speeds and jump keep their meters. So distances along the middle line
     (v = 0) and straight across it stay; along u away from it, a stretch Δu is cosh(v/R) Δu long, which at
-    v = 40 m grows from 1.5 Δu to 3.8 Δu. A structure's chart must reach less than R from its origin; Lunar Surface's furthest shape corner is
-    15.8 m, so it could go up to 2.5.
+    v = 40 m grows from 1.5 Δu (at 1) to 2.4 Δu (at 1.5) and 3.8 Δu (at 2). A structure's chart must reach less
+    than R from its origin; Lunar Surface's furthest shape corner is 15.8 m, so it could go up to 2.5.
   - **Where:** voxel maps only (Lunar Surface). The house demo keeps R = 8 m: at 2 its far pylon would sit 13
     curvature radii out (coordinates near 2 × 10⁵), and its scripted route (`--autopilot`) flies back and forth
     through wormhole 1 without end.
@@ -1644,24 +1659,24 @@
     the built-in value; if the welcome's differs, it rebuilds the map, the minimap and the map page at the server's
     and says so in the HUD. The renderer uploads the minimap's picture again when its placement changes. A bot
     (`--bot`) fails with a clear error on a server with another value.
-  - **Beams:** they are drawn up to 160 m from the map's origin at any curvature, instead of 4 curvature radii (D64):
-    at 2 that would have hidden every beam fired from either spawn.
-- **Known break at 2:** the renderer works in the map's coordinates in single precision, and a point's error there
-  grows as cosh² of its distance from the origin in curvature radii. Beyond about 90 m at 2 (both spawns, the red
-  pylon and the buildings around it) surfaces and shadows speckle; at 1.5 the limit is about 120 m (a faint grain
-  at the red spawn's roof), and at 1 about 170 m, outside the map. The cure is to trace relative to the camera, a
-  larger change to the shaders (D64 and D66 put it off too).
+  - **Beams:** they are drawn up to 160 m from the map's origin at any curvature, instead of 4 curvature radii (D64),
+    which at 1.5 would have hidden beams fired from either spawn (both lie beyond 4 radii, 107 m).
+- **Speckle at 2:** the renderer works in the map's coordinates in single precision, and a point's error there grows
+  as cosh² of its distance from the origin in curvature radii. Beyond about 90 m at 2 (both spawns, the red pylon
+  and the buildings around it) surfaces and shadows speckle; at 1.5 the limit is about 120 m (a faint grain at the
+  red spawn's roof), and at 1 about 170 m, outside the map. The cure is to trace relative to the camera, a larger
+  change to the shaders (D64 and D66 put it off too); until then, 2 speckles at the spawns.
 - **Tests at the map's own curvature:** the tests that aim or walk by the map's numbers load it at 1 (`Map::Load`
   doesn't scale): at 2, the laser into the wormhole misses the red pylon, the walk into the mouth misses it, and
   the dust test's shots land elsewhere.
 - **Alternatives:**
+  - a default of 2, as the item first asked (speckle at both spawns until the renderer traces relative to the
+    camera);
   - keeping geodesic distance and direction from the map's origin instead of Fermi coordinates (spacing around the
-    origin would grow by sinh: 10 times at the spawns, and structures would leave the terrain they stand on);
-  - scaling the curvature radius by 1/√2 for twice the Gaussian curvature (you asked for twice the curvature with
-    radius ÷ factor);
-  - a default of 1.5 (no visible speckle) until the renderer traces relative to the camera.
-- **Rationale:** you asked that the curvature be set in the YAML settings, higher than now: twice the current
-  curvature by default, and at most twice.
+    origin would grow by sinh: 10 times at the spawns at 2, and structures would leave the terrain they stand on);
+  - scaling the curvature radius by 1/√k for k times the Gaussian curvature (you asked for the radius ÷ factor).
+- **Rationale:** you asked that the curvature be set in the YAML settings, higher than now, at most twice the
+  current curvature, and then chose 1.5 as the default after seeing the speckle at 2.
 
 ### D15. WebGL at the same drawing-buffer sizes
 

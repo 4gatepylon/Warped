@@ -100,4 +100,4 @@ wormholes:  # Q throws your purple wormhole mouth, then your green one, and so o
   hit_flash_s: 0.25  # Seconds both mouths of a pair flash red after a hit.
 
 space:  # How curved Lunar Surface is (the house demo keeps its own); a window that joins builds the map by the server's.
-  curvature_per_map_curvature: 2.0  # Times the map's own curvature (1 / its 40 m radius), from 1 to 2: 2 makes the radius 20 m.
+  curvature_per_map_curvature: 1.5  # Times the map's own curvature (1 / its 40 m radius), from 1 to 2: 1.5 makes the radius 26.7 m.

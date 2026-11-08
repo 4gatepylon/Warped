@@ -48,11 +48,11 @@ make join-game SERVER=127.0.0.1
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
-  you through. For the split second you are inside the mouth (within about 2 m of its throat), moving, your view
-  flashes almost white, as if you moved near light speed (D84): a pale blue-white walking forward, a warm white
-  walking backward. It is strongest at the throat and with speed, none standing still, and gone once you are 2 m
-  out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for
-  none). Only you see your own flash (Metal renderer, voxel maps).
+  you through. For the moment you are inside the mouth (within about 3.6 m of its centre), moving, your view's
+  colours shift as if you moved near light speed (D84): a light cyan, almost white, walking forward, a dark red
+  walking backward, crisp, with dark staying dark. It is strongest at the throat and with speed, none standing
+  still, and gone once you are 3.6 m out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the
+  menu) sets its strength (0 for none). Only you see your own shift (Metal renderer, voxel maps).
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
   `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
@@ -97,10 +97,11 @@ make join-game SERVER=127.0.0.1
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
-- Lunar Surface's space is twice as curved as its map file says: its curvature radius is 20 m, not 40 m
-  (`space.curvature_per_map_curvature` in `server_settings.yaml`, from 1 to 2, default 2). Buildings, players and
+- Lunar Surface's space is 1.5 times as curved as its map file says: its curvature radius is 26.7 m, not 40 m
+  (`space.curvature_per_map_curvature` in `server_settings.yaml`, from 1 to 2, default 1.5). Buildings, players and
   distances along the middle line keep their size in meters; far things shrink faster with distance, and the
-  structures away from the middle line spread apart along it. The house demo keeps its own curvature (D100).
+  structures away from the middle line spread apart along it. At 2, surfaces more than about 90 m from the middle
+  speckle. The house demo keeps its own curvature (D100).
 - `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
@@ -122,7 +123,7 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
 
 - The demo reads its maps from [`common/maps/`](../../common/maps/README.md) (the portable map format):
   `house-demo` (the default: the house, rails and three wormholes, R = 8) or `lunar-surface` (the Lunar Surface level of
-  [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m in its map file, played at 20 m: see
+  [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m in its map file, played at 26.7 m: see
   below, with its black hole and wormhole).
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
   steps, lighting with soft sun shadows, lamps, ground, stars and planet, so it looks like the level (plus a thin haze

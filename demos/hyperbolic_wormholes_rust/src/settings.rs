@@ -249,7 +249,8 @@ pub struct SpaceSettings {
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
-/// flashes near white while moving through a wormhole's throat (0 to 1), and the head bob.
+/// shifts colour (light cyan forward, dark red backward) while moving through a wormhole's throat
+/// (0 to 1), and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
@@ -563,7 +564,7 @@ mod tests {
     //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise or beam speckle that shrinks with heat, a speckle share above 1, speckle kinds that don't add up to 1) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
-    //! | Curvature per map curvature | below 1, 1, between 1 and 2, 2 (built in), above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
+    //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -706,13 +707,12 @@ mod tests {
 
     #[test]
     fn curvature_takes_1_to_2() {
-        assert_eq!(
-            ServerSettings::Builtin().space.curvature_per_map_curvature,
-            MAX_CURVATURE_PER_MAP_CURVATURE
-        );
-        for (factor, is_valid) in [("1.0", true), ("1.5", true), ("0.5", false), ("2.5", false)] {
+        const BUILTIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.5;
+        let builtin: f64 = ServerSettings::Builtin().space.curvature_per_map_curvature;
+        assert_eq!(builtin, BUILTIN_CURVATURE_PER_MAP_CURVATURE);
+        for (factor, is_valid) in [("1.0", true), ("2.0", true), ("0.5", false), ("2.5", false)] {
             let yaml: String = BUILTIN_SERVER_YAML.replace(
-                "curvature_per_map_curvature: 2.0",
+                "curvature_per_map_curvature: 1.5",
                 &format!("curvature_per_map_curvature: {factor}"),
             );
             let result: Result<ServerSettings> = ServerSettings::FromYaml(&yaml, "test");
