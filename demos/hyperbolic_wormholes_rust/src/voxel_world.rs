@@ -6,8 +6,9 @@
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
 //! `VoxelWorld::set_thrown_wormholes`, `VoxelWorld::can_place_mouth`, `VoxelWorld::find_hit_s`,
-//! `VoxelWorld::add_markers`, `VoxelWorld::find_aimed_material`, `VoxelWorld::is_sunlit`,
-//! `VoxelWorld::get_mouth_depth_frac`, `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
+//! `VoxelWorld::add_markers`, `VoxelWorld::find_aimed_material`, `VoxelWorld::find_clear_m`,
+//! `VoxelWorld::find_crosshair_point`, `VoxelWorld::is_sunlit`, `VoxelWorld::get_mouth_depth_frac`,
+//! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
@@ -947,6 +948,30 @@ impl VoxelWorld {
         Some(self.get_material_at(inside, &[hit.structure?]))
     }
 
+    /// `find_clear_m` gives how far the straight chord from point x along unit tangent v goes, up to
+    /// `max_m`, before it meets the ground or a block, glass included: a camera can't pass a pane.
+    ///
+    /// Example: `let clear_m = world.find_clear_m(eye.col(AXIS_W), eye.col(AXIS_Z), 3.0);`
+    pub fn find_clear_m(&self, x: DVec4, v: DVec4, max_m: f64) -> f64 {
+        self.trace_scene_through(x, v, max_m / self.r, None, None)
+            .map_or(max_m, |hit| hit.s * self.r)
+    }
+
+    /// `find_crosshair_point` gives the point the straight ray from `camera`'s eye along its
+    /// crosshair first meets, ignoring the warps' bending: the ground or a block (through glass, as
+    /// the laser goes), else the end of the laser's range. Two nearby rays aimed at it, as from the
+    /// eye and from a camera behind it, bend nearly alike on the way.
+    ///
+    /// Example: `let target = world.find_crosshair_point(camera);`
+    pub fn find_crosshair_point(&self, camera: DMat4) -> DVec4 {
+        let (x, v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
+        let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
+        let s: f64 = self
+            .trace_scene(x, v, max_s, None)
+            .map_or(max_s, |hit| hit.s);
+        geodesic_point(x, v, s)
+    }
+
     /// `is_head_hit` says whether point x, on an avatar (structure `k`, from `with_avatars`), is in
     /// its top cell, its head.
     ///
@@ -1271,10 +1296,19 @@ impl VoxelWorld {
     }
 
     /// `trace_structure` finds where a chord first enters a shape of structure k, by sphere tracing.
-    /// The chord passes through glass, as light and lasers do.
+    /// The chord passes through shapes of material `see_through`, if any (glass, as light and
+    /// lasers do).
     ///
-    /// Example: `let s = world.trace_structure(3, x, v, 0.0, 1.0);`
-    fn trace_structure(&self, k: usize, x: DVec4, v: DVec4, s_min: f64, s_max: f64) -> Option<f64> {
+    /// Example: `let s = world.trace_structure(3, x, v, 0.0, 1.0, None);`
+    fn trace_structure(
+        &self,
+        k: usize,
+        x: DVec4,
+        v: DVec4,
+        s_min: f64,
+        s_max: f64,
+        see_through: Option<u8>,
+    ) -> Option<f64> {
         let st: &VoxelStructure = &self.structures[k];
         let (a, b) = (-minkowski_dot(x, st.centre), minkowski_dot(v, st.centre));
         let (closest_sq, bound_cosh) = (a * a - b * b, st.radius.cosh());
@@ -1298,17 +1332,39 @@ impl VoxelWorld {
         };
         let q0: DVec3 = p.truncate() / p.w * self.r;
         let dq: DVec3 = (t.truncate() * p.w - p.truncate() * t.w) * self.r;
-        let glass: Option<u8> = u8::try_from(self.special.glass).ok();
-        let (mu, _) = find_hit_mu(self.get_shapes(k), q0, dq, mu_of(s_lo), mu_of(s_hi), glass)?;
+        let (mu, _) = find_hit_mu(
+            self.get_shapes(k),
+            q0,
+            dq,
+            mu_of(s_lo),
+            mu_of(s_hi),
+            see_through,
+        )?;
         let lam: f64 = mu * p.w * p.w / (1.0 - mu * p.w * t.w);
         Some(s_star + lam.atanh())
     }
 
     /// `trace_scene` finds the first thing a chord hits: the ground or a block (among all
-    /// structures, or warp w's list).
+    /// structures, or warp w's list), passing through glass as light and lasers do.
     ///
     /// Example: `let hit = world.trace_scene(x, v, 1.0, None);`
     fn trace_scene(&self, x: DVec4, v: DVec4, s_max: f64, warp: Option<usize>) -> Option<Hit> {
+        let glass: Option<u8> = u8::try_from(self.special.glass).ok();
+        self.trace_scene_through(x, v, s_max, warp, glass)
+    }
+
+    /// `trace_scene_through` is `trace_scene` passing through shapes of material `see_through`
+    /// only, if any.
+    ///
+    /// Example: `let hit = world.trace_scene_through(x, v, 1.0, None, None);`
+    fn trace_scene_through(
+        &self,
+        x: DVec4,
+        v: DVec4,
+        s_max: f64,
+        warp: Option<usize>,
+        see_through: Option<u8>,
+    ) -> Option<Hit> {
         let ground_s: Option<f64> = match &self.terrain {
             Some(terrain) => terrain.find_hit_s(x, v, s_max, self.r),
             None if x.y >= 0.0 && v.y < 0.0 && x.y / -v.y < 1.0 => Some((x.y / -v.y).atanh()),
@@ -1327,7 +1383,7 @@ impl VoxelWorld {
         };
         for &k in candidates {
             let limit: f64 = best.map_or(s_max, |hit| hit.s);
-            if let Some(s) = self.trace_structure(k, x, v, 0.0, limit) {
+            if let Some(s) = self.trace_structure(k, x, v, 0.0, limit, see_through) {
                 best = Some(Hit {
                     structure: Some(k),
                     s,
