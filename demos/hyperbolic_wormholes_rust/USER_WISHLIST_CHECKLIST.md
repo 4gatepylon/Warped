@@ -10,6 +10,12 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-80 Smoother bar pulses.** The pulsing should start where the bar's filled part ends: losing health, it starts
+  at the last hit point, not the bar's end (empty slots don't count). The blue pulse going left should be less dark,
+  and it too starts on the last filled slot. Pulses shouldn't light whole segments: they should look more Gaussian
+  and more subtle, at a faster pace in general, and in proportion to how fast the value is changing (smoothed). The
+  user wants samples first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
+  `claude/hud-pulse-refine`, 2026-11-07.
 - [~] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
   it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom").
   Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/scene-haze-soft-shadows`, 2026-11-07.
@@ -103,6 +109,8 @@ is in [`AGENTS.md`](AGENTS.md).
   shadows on the hills.
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
+- [ ] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": crouching recharges (presumably
+  the sprint energy) faster than walking does.
 
 ## Done
 
@@ -223,3 +231,5 @@ is in [`AGENTS.md`](AGENTS.md).
   another version. #209.
 - [x] **W-78 Shooting from the team screen.** A bug: you may be able to shoot a laser before leaving the screen where
   you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #209.
+- [x] **W-79 Only serve and join.** "Make a commit to disable everything except starting a server and connecting to
+  a server; we will not be using the local demo etc." `make serve-game` and `make join-game` remain. #212.
