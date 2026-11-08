@@ -56,15 +56,6 @@ is in [`AGENTS.md`](AGENTS.md).
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering two
     levels of translucency; waits for the user's OK before merging.
-- [~] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
-  character, and the player controls it from there, seeing their own character. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-adb5321f113e35420` on the user's Mac, branch
-    `claude/third-person` (on this Mac only so far; to be pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-61/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering; waits
-    for the user's OK before merging.
 - [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
@@ -159,6 +150,10 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
+  character, and the player controls it from there, seeing their own character. `V` switches to a view from 3 m
+  behind and 0.6 m above the head, pulled in when a wall or the ground is behind it; shots go from the head into the
+  crosshair, and aiming looks from the eye again. #286.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
