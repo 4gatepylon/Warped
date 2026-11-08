@@ -87,9 +87,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
-- [?] **W-110 Team-coloured robots.** "is it possible for you to recolor the teal robot? to be other colors than
-  teal?", then "yep team colors!": the players' body of W-106 (Teal robot player model) in each team's colour, blue
-  or red, instead of teal; corpses and your own body in third person too. #344.
 - [?] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
   are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
   Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched). #331.
@@ -191,6 +188,9 @@ are here too, since the user hadn't confirmed them.
 
 Confirmed by the user after testing.
 
+- [x] **W-110 Team-coloured robots.** "is it possible for you to recolor the teal robot? to be other colors than
+  teal?", then "yep team colors!": the players' body of W-106 (Teal robot player model) in each team's colour, blue
+  or red, instead of teal; corpses and your own body in third person too. #344. Confirmed by the user, 2026-11-08: "looks good merge it".
 - [x] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly. The user asked for the loading screen "in the same style as the progress
   bar while disabling a pylon". Loading screen: #292, #293; connected: the lobby says CONNECTING, then CONNECTED,
