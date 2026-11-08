@@ -59,6 +59,8 @@ So every agent's work must be findable, pushed, and kept apart from every other 
 - **Many subagents.** For large, unusual work with so many subagents that relaying everything through one parent
   would hold the user back, the parent may agree another way of sharing outputs with the user first (such as each
   subagent's own page). Only for such work, and only once the user agrees.
+- **Features to test side by side.** When several subagents build features the user tests by playing, run each as a
+  review lane (the `review-lanes` skill).
 
 ## Work that survives
 

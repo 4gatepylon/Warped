@@ -12,7 +12,7 @@ agent gives the user something to play. This skill is a start and will grow.
 ## Something to play
 
 - **The game first.** When the change runs in the game, hand it to the user to playtest there (the `playtesting`
-  skill), with what to try.
+  skill), with what to try. Several features under way at once each run in a review lane (the `review-lanes` skill).
 - **A smaller demo when that helps.** An agent may also demo a mechanic interactively with three.js in a smaller or
   simpler setting: a flat floor or one room, simple shapes, one player against a dummy. Use one when the game can't
   show the mechanic yet, when building it in the game first would cost a lot, or to compare options quickly.
