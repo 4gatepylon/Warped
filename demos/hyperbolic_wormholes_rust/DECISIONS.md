@@ -1441,7 +1441,21 @@
   pulses look Gaussian, more subtle and faster, in proportion to the smoothed rate of change; then for "soft swell"
   but rate based, "really wide gaussian like; think like smoother convolution vibes".
 
-## Baselines
+### D95. A step up is searched from the bottom (W-85)
+
+- **Choice:** when a step forward is blocked, the walk tries lifts of 2, 4, 6 cm and so on up to 30 cm
+  (`MAX_WALK_RISE_M`), takes the first that clears, and bisects between it and the lift before it. It used to try 30
+  cm first and give up if that didn't clear.
+- **Why it got stuck:** a structure's floor is a geodesic plane, so a step toward a habitat module's door or along a
+  walkway lifts it 1 to 2 cm into the feet, and the walk needs a small lift. The doorways and walkways are only 2 m
+  high, so a 30 cm lift put the head (15 cm above the 1.6 m eye) into the lintel or the roof, and the walk gave up.
+  The player stopped about 1 m before a module's door and moved only 0.3 to 0.5 m in a walkway.
+- **Alternatives:**
+  - a smaller `MAX_WALK_RISE_M` (it would stop climbing the low curbs and plinths it climbs now);
+  - a lower head probe (the head would show inside low ceilings);
+  - a taller doorway in the map (only those doorways, and any low ceiling added later would trap players again).
+- **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
+  room for it, and costs at most 15 more checks, only on a blocked step.
 
 ### D15. WebGL at the same drawing-buffer sizes
 

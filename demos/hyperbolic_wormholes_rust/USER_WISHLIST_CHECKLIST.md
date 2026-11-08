@@ -17,9 +17,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
   and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/delta-fighters`, 2026-11-07.
-- [~] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
-  staging at #225. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-bunker-exit`,
-  2026-11-07.
 - [~] **W-87 No colourful spaceship.** Remove the colourful spaceship from the sky (W-53, #193): "the circular space
   station one is fine and great, but the colourful ones look ugly". That is the container freighter; the ring station
   stays, and so do the grey fighters unless the user says otherwise. Claimed by Claude Code (subagent of session
@@ -122,6 +119,8 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
+  staging at #225 ("i click w and cannot get out"). #PRNUM.
 - [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
   it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214.
 - [?] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
