@@ -99,6 +99,12 @@ is in [`AGENTS.md`](AGENTS.md).
   character, and the player controls it from there, seeing their own character.
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
+- [ ] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
+  center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
+  it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
+  pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
+  console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
+  down.
 
 ## Done
 
