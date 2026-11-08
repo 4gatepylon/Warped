@@ -11,6 +11,10 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
+  player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
+  page use team colours. The user said to add and fix it ("Yes, add and fix"). Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/team-colour-figures`, 2026-11-07.
 - [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox"). Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
