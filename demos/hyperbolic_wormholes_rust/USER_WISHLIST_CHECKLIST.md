@@ -158,12 +158,14 @@ are here too, since the user hadn't confirmed them.
     2026-11-08: on `staging`, waiting for the user to test it.
 - [?] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
   wishlist having rifle going side to side when jogging like a normal rifle"). From before and after pictures (the
-  sprint pose already tilted it), the user chose the sway as built: 2 cm walking, 4 cm sprinting, in step with the
-  head bob ("ok menrge to staging", "i like your animation") (D107). #PR_NUMBER.
+  sprint pose already tilted it), the user chose the sway as built ("ok menrge to staging", "i like your animation");
+  after #318 swapped the gun models, "I want them both swaying ... get both working realistically based on their
+  size": both guns slide 2 cm walking and 4 cm sprinting in step with the head bob, and swing by their length, the
+  1.23 m rifle 1.7° to 3.4° and the 0.30 m revolver a quarter of that ("merge this") (D107). #PR_NUMBER.
   - **Where the work is** (for any agent picking it up): merged from branch `claude/rifle-sway` (pushed to `origin`),
     worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac, started by
     Claude Code and finished by Devin; pictures in
-    `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-102/`. State,
+    `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-102/both_guns/`. State,
     2026-11-08: on `staging`, waiting for the user to test it.
 
 ## Done

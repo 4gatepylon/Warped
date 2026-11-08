@@ -54,8 +54,10 @@ view:
     walk_steps_per_s: 2.0  # Steps a second while walking.
     sprint_steps_per_s: 2.8  # Steps a second while sprinting.
     fade_s: 0.1667  # Seconds the bob takes to start or stop.
-    rifle_walk_sway_m: 0.02  # How far the rifle in hand sways left and right with the steps while walking (0 for none).
-    rifle_sprint_sway_m: 0.04  # How far the rifle in hand sways left and right with the steps while sprinting (0 for none).
+    gun_walk_sway_m: 0.02  # How far the gun in hand slides left and right with the steps while walking (0 for none).
+    gun_sprint_sway_m: 0.04  # How far the gun in hand slides left and right with the steps while sprinting (0 for none).
+    rifle_walk_swing_rad: 0.03  # How far a gun as long as the bolt-action rifle (1.23 m) swings left and right while walking, its muzzle lagging the slide; shorter guns swing in proportion (0 for none).
+    rifle_sprint_swing_rad: 0.06  # The same swing while sprinting (0 for none).
 
 hit_effects:  # How a hit looks to you (how much it slows you is the server's).
   effect_s: 0.6  # Seconds the red, shake and blur take to fade.

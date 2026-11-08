@@ -3029,8 +3029,8 @@ impl Session {
                 self.recoil_frac,
                 team,
                 self.gun,
-                get_sway_m(
-                    self.gun,
+                get_sway(
+                    self.gun.get_model(),
                     self.step_frac,
                     self.run_pose_frac,
                     self.gun_phase_rad,
@@ -4052,18 +4052,19 @@ fn take_hit_weight(
 /// (eased), lowered, tipped down and rolled, bouncing and swinging with each stride; its tip has
 /// `team`'s colour. The laser (`gun`) is a thin dark wand with a short glowing tip; the rifle is a
 /// thick grey block with a long, thin glowing barrel. Recoil (`recoil_frac`, 1 just after a shot)
-/// pushes it back toward the eye and tips it up, and `sway_m` (`get_sway_m`) moves it sideways,
-/// right for more than 0.
+/// pushes it back toward the eye and tips it up, and `sway` (`get_sway`: metres right, radians of
+/// muzzle turned left) slides and swings it with the steps.
 ///
-/// Example: `let wand = make_wand(0.0, 1.2, 0.0, 1, Gun::Laser, 0.0);`
+/// Example: `let wand = make_wand(0.0, 1.2, 0.0, 1, Gun::Laser, (0.0, 0.0));`
 fn make_wand(
     run_pose_frac: f64,
     phase_rad: f64,
     recoil_frac: f64,
     team: u32,
     gun: Gun,
-    sway_m: f32,
+    sway: (f32, f32),
 ) -> render_metal::OverlayWand {
+    let (sway_m, swing_rad) = sway;
     let jog: f32 = ease_frac(run_pose_frac) as f32;
     let (step, swing) = (phase_rad.sin().abs() as f32, phase_rad.sin() as f32);
     let lerp = |aim: f32, run: f32| aim + (run - aim) * jog;
@@ -4082,7 +4083,7 @@ fn make_wand(
         + Vec3::X * sway_m;
     let rotation: Mat3 = Mat3::from_euler(
         EulerRot::YXZ,
-        lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD),
+        lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD) + swing_rad,
         lerp(WAND_AIM_PITCH_RAD, WAND_JOG_PITCH_RAD) + WAND_RECOIL_TILT_RAD * kick,
         (WAND_JOG_ROLL_RAD + WAND_JOG_SWING_RAD * swing) * jog,
     );
@@ -4111,27 +4112,34 @@ fn ease_frac(frac: f64) -> f64 {
     frac * frac * (3.0 - 2.0 * frac)
 }
 
-/// `get_sway_m` gives how far the gun in hand sways sideways now (right for more than 0): the
-/// rifle (`gun`) sways left on one step and right on the next (`phase_rad`, the step phase: a
-/// step each half turn), by `head_bob`'s walking sway, growing to its sprinting sway as the run
-/// pose (`run_pose_frac`, eased as `make_wand` eases it) goes to 1, and faded in and out by
-/// `step_frac` (0 standing still, 1 stepping). The sniper doesn't sway.
+/// `get_sway` gives how the gun in hand sways now with the steps (`phase_rad`, the step phase: a
+/// step each half turn), as (metres slid right, radians its muzzle turns left): the hands slide it
+/// left on one step and right on the next by `head_bob`'s walking slide, and a longer, heavier gun
+/// lags behind them, its muzzle swinging the other way by `head_bob`'s swing for a gun as long as
+/// the bolt-action rifle, times `model`'s length over the rifle's. Both grow to their sprinting
+/// sizes as the run pose (`run_pose_frac`, eased as `make_wand` eases it) goes to 1, and fade in
+/// and out with `step_frac` (0 standing still, 1 stepping).
 ///
-/// Example: `let sway_m = get_sway_m(Gun::Rifle, 1.0, 0.0, 0.5, &settings.view.head_bob);`
-fn get_sway_m(
-    gun: Gun,
+/// Example: `let sway = get_sway(GunModel::Revolver, 1.0, 0.0, 0.5, &settings.view.head_bob);`
+fn get_sway(
+    model: viewmodel::GunModel,
     step_frac: f64,
     run_pose_frac: f64,
     phase_rad: f64,
     head_bob: &settings::HeadBobSettings,
-) -> f32 {
-    if gun != Gun::Rifle {
-        return 0.0;
-    }
+) -> (f32, f32) {
     let jog: f64 = ease_frac(run_pose_frac);
-    let size_m: f64 = head_bob.rifle_walk_sway_m
-        + (head_bob.rifle_sprint_sway_m - head_bob.rifle_walk_sway_m) * jog;
-    (step_frac * size_m * phase_rad.sin()) as f32
+    let lerp = |walk: f64, sprint: f64| walk + (sprint - walk) * jog;
+    let length_frac: f64 =
+        f64::from(model.get_modelled_length_m() / viewmodel::BOLT_ACTION_RIFLE_MODELLED_LENGTH_M);
+    let side: f64 = step_frac * phase_rad.sin();
+    let sway_m: f64 = lerp(head_bob.gun_walk_sway_m, head_bob.gun_sprint_sway_m) * side;
+    let swing_rad: f64 = lerp(
+        head_bob.rifle_walk_swing_rad,
+        head_bob.rifle_sprint_swing_rad,
+    ) * length_frac
+        * side;
+    (sway_m as f32, swing_rad as f32)
 }
 
 /// `ConnectionProblem` is why a window can't play on its server: nothing comes from it (no server
@@ -4649,10 +4657,10 @@ mod tests {
     //! | Gun in hand | laser (the bolt-action rifle), rifle (the revolver) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
-    //! | Gun swaying | rifle (sways), laser (never sways) | `rifle_sways_with_the_steps` |
-    //! | Stepping fraction | standing (0: no sway), easing in (0.5: half), stepping (1) | `rifle_sways_with_the_steps` |
-    //! | Run pose | walking (0: the walking sway), sprinting (1: the sprinting sway), half way (eased between) | `rifle_sways_with_the_steps` |
-    //! | Step phase | between steps (0: centred), one step (a quarter turn: right), the next (three quarters: left) | `rifle_sways_with_the_steps` |
+    //! | Gun model swaying | the bolt-action rifle (full swing), the revolver (its swing scaled by its length) | `guns_sway_with_the_steps_by_their_length` |
+    //! | Stepping fraction | standing (0: no sway), easing in (0.5: half), stepping (1) | `guns_sway_with_the_steps_by_their_length` |
+    //! | Run pose | walking (0: the walking sway), sprinting (1: the sprinting sway), half way (eased between) | `guns_sway_with_the_steps_by_their_length` |
+    //! | Step phase | between steps (0: centred), one step (a quarter turn: right), the next (three quarters: left) | `guns_sway_with_the_steps_by_their_length` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
@@ -4683,34 +4691,62 @@ mod tests {
     }
 
     #[test]
-    fn rifle_sways_with_the_steps() {
-        const TOLERANCE_M: f64 = 1e-6;
+    fn guns_sway_with_the_steps_by_their_length() {
+        const TOLERANCE: f64 = 1e-6;
         const HALF_FRAC: f64 = 0.5;
         let head_bob: settings::HeadBobSettings = PerPlayerSettings::Builtin().view.head_bob;
-        let (walk_m, sprint_m) = (head_bob.rifle_walk_sway_m, head_bob.rifle_sprint_sway_m);
         let right_rad: f64 = std::f64::consts::FRAC_PI_2;
         let left_rad: f64 = 3.0 * std::f64::consts::FRAC_PI_2;
-        let sway = |gun: Gun, step_frac: f64, run_pose_frac: f64, phase_rad: f64| -> f64 {
-            f64::from(get_sway_m(
-                gun,
-                step_frac,
-                run_pose_frac,
-                phase_rad,
-                &head_bob,
-            ))
+        let sway =
+            |model: viewmodel::GunModel, step_frac: f64, run_pose_frac: f64, phase_rad: f64| {
+                let (sway_m, swing_rad) =
+                    get_sway(model, step_frac, run_pose_frac, phase_rad, &head_bob);
+                (f64::from(sway_m), f64::from(swing_rad))
+            };
+        let is_near = |a: (f64, f64), b: (f64, f64)| {
+            (a.0 - b.0).abs() < TOLERANCE && (a.1 - b.1).abs() < TOLERANCE
         };
-        assert!(walk_m > 0.0 && sprint_m > walk_m);
-        assert_eq!(sway(Gun::Laser, 1.0, 1.0, right_rad), 0.0);
-        assert_eq!(sway(Gun::Rifle, 0.0, 1.0, right_rad), 0.0);
-        assert!(sway(Gun::Rifle, 1.0, 0.0, 0.0).abs() < TOLERANCE_M);
-        assert!((sway(Gun::Rifle, 1.0, 0.0, right_rad) - walk_m).abs() < TOLERANCE_M);
-        assert!((sway(Gun::Rifle, 1.0, 0.0, left_rad) + walk_m).abs() < TOLERANCE_M);
-        assert!((sway(Gun::Rifle, 1.0, 1.0, right_rad) - sprint_m).abs() < TOLERANCE_M);
-        assert!(
-            (sway(Gun::Rifle, HALF_FRAC, 0.0, right_rad) - HALF_FRAC * walk_m).abs() < TOLERANCE_M
+        let rifle = viewmodel::GunModel::BoltActionRifle;
+        let revolver = viewmodel::GunModel::Revolver;
+        let (walk_m, sprint_m) = (head_bob.gun_walk_sway_m, head_bob.gun_sprint_sway_m);
+        let (walk_rad, sprint_rad) = (
+            head_bob.rifle_walk_swing_rad,
+            head_bob.rifle_sprint_swing_rad,
         );
-        let half_way_m: f64 = sway(Gun::Rifle, 1.0, HALF_FRAC, right_rad);
-        assert!((half_way_m - (walk_m + sprint_m) * HALF_FRAC).abs() < TOLERANCE_M);
+        assert!(walk_m > 0.0 && sprint_m > walk_m && walk_rad > 0.0 && sprint_rad > walk_rad);
+        assert!(is_near(sway(rifle, 0.0, 1.0, right_rad), (0.0, 0.0)));
+        assert!(is_near(sway(rifle, 1.0, 0.0, 0.0), (0.0, 0.0)));
+        assert!(is_near(
+            sway(rifle, 1.0, 0.0, right_rad),
+            (walk_m, walk_rad)
+        ));
+        assert!(is_near(
+            sway(rifle, 1.0, 0.0, left_rad),
+            (-walk_m, -walk_rad)
+        ));
+        assert!(is_near(
+            sway(rifle, 1.0, 1.0, right_rad),
+            (sprint_m, sprint_rad)
+        ));
+        assert!(is_near(
+            sway(rifle, HALF_FRAC, 0.0, right_rad),
+            (HALF_FRAC * walk_m, HALF_FRAC * walk_rad)
+        ));
+        let half_way: (f64, f64) = sway(rifle, 1.0, HALF_FRAC, right_rad);
+        assert!(is_near(
+            half_way,
+            (
+                (walk_m + sprint_m) * HALF_FRAC,
+                (walk_rad + sprint_rad) * HALF_FRAC
+            )
+        ));
+        let length_frac: f64 =
+            f64::from(revolver.get_modelled_length_m() / rifle.get_modelled_length_m());
+        assert!(length_frac < 1.0);
+        assert!(is_near(
+            sway(revolver, 1.0, 1.0, right_rad),
+            (sprint_m, sprint_rad * length_frac)
+        ));
     }
 
     #[test]
