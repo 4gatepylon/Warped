@@ -34,11 +34,6 @@ is in [`AGENTS.md`](AGENTS.md).
   `claude/square-shapes`, 2026-11-07.
 - [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
   (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
-- [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
-  windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
-  (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/see-through-windows`,
-  2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
@@ -246,3 +241,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [x] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
   scene lighting. On voxel maps the gun takes the light at the eye: the sun (dark in shadow), lamps, earthshine and
   the ground. #211.
+- [x] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
+  windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
+  (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both". #222.

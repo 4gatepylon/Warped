@@ -61,7 +61,9 @@ make join-game SERVER=127.0.0.1
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
-  The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
+  The laser is a light ray from your hand that bends near mouths and goes through them, and through glass; the HUD
+  says what it hits. On Lunar Surface the habitat modules' and walkways' windows are glass in real openings: you
+  see out of them and shoot through them, but can't climb through them.
   On Lunar Surface, a shot into the ground (yours or anyone's) throws up grey-brown dust and a puff of mist where
   it lands: the grains fly up to a few meters and fall back, and all of it fades within 2 s (D81).
 - The bars in the bottom left (health in a game on a server, the gun's ammo, and on Lunar Surface the sprint energy)

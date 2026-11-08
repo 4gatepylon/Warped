@@ -218,6 +218,7 @@ mod tests {
                     direction,
                     0.0,
                     2.0 * reach_m,
+                    None,
                 );
                 if let Some((mu, _)) = hit {
                     let point: DVec4 = frame * map_klein((q0 + direction * mu) / world.r);
