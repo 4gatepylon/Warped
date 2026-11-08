@@ -2,7 +2,7 @@
 
 It checks `map.json` against `map.schema.json`, then what the schema can't say: the name matches the folder,
 material ids are unique with 0 (and only 0) empty, every material used exists, frames are isometries of the map's
-space, points lie in the space, `voxels.bin` is exactly the structures' cells, wormhole mouths pair up, tapered warps'
+space, points lie in the space, shapes' rounding fits inside them, wormhole mouths pair up, tapered warps'
 reach spheres don't overlap, and directions are unit vectors. It prints one line per map (or `--json`) and exits 1
 if any map is invalid.
 
@@ -22,7 +22,6 @@ import numpy as np
 
 SCHEMA_PATH: Path = Path(__file__).parent / "map.schema.json"
 MANIFEST_NAME: str = "map.json"
-VOXELS_NAME: str = "voxels.bin"
 TOLERANCE: float = 1e-6
 EMPTY_ID: int = 0
 MINKOWSKI: np.ndarray = np.diag([1.0, 1.0, 1.0, -1.0])
@@ -130,52 +129,31 @@ def _get_material_errors(manifest: dict) -> list[str]:
     used: list[tuple[str, int]] = [("ground", manifest["ground"]["material"])]
     if "boxes" in manifest:
         used += [(f"box {box['name']!r}", box["material"]) for box in manifest["boxes"]]
+    for structure in manifest["structures"] if "structures" in manifest else []:
+        used += [(f"structure {structure['name']!r}", shape["material"]) for shape in structure["shapes"]]
     errors += [f"{owner}: material {id_} isn't in the palette" for owner, id_ in used if id_ not in set(ids)]
     return errors
 
 
-def _get_voxel_errors(manifest: dict, folder: Path) -> list[str]:
-    """`_get_voxel_errors` checks that `voxels.bin` is exactly the structures' cells and holds only known materials.
+def _get_shape_errors(manifest: dict) -> list[str]:
+    """`_get_shape_errors` checks that each structure shape's rounding fits inside its half sizes.
 
     Args:
         manifest: The map's manifest (already valid against the schema).
-        folder: The map's folder.
 
     Returns:
         One message per problem.
 
     Example:
-        >>> _get_voxel_errors({"structures": []}, Path("house_demo"))
+        >>> _get_shape_errors({"structures": []})
         []
     """
-    structures: list[dict] = manifest["structures"] if "structures" in manifest else []
-    path: Path = folder / VOXELS_NAME
-    if not structures:
-        return [f"{VOXELS_NAME}: there are no structures, so there should be no {VOXELS_NAME}"] if path.exists() else []
-    if not path.exists():
-        return [f"{VOXELS_NAME}: missing, but the map has {len(structures)} structures"]
-    data: bytes = path.read_bytes()
-    covered: np.ndarray = np.zeros(len(data), dtype=np.int32)
-    errors: list[str] = []
-    for structure in structures:
-        voxels: dict = structure["voxels"]
-        start: int = voxels["offset_bytes"]
-        end_excl: int = start + int(np.prod(voxels["size"]))
-        if end_excl > len(data):
-            errors.append(
-                f"structure {structure['name']!r}: its cells end at byte {end_excl}, past the file's {len(data)}"
-            )
-            continue
-        covered[start:end_excl] += 1
-    if errors:
-        return errors
-    if not np.all(covered == 1):
-        errors.append(f"{VOXELS_NAME}: the structures' cells must fill the file exactly once each")
-    known: set[int] = {material["id"] for material in manifest["materials"]}
-    unknown: set[int] = set(np.unique(np.frombuffer(data, dtype=np.uint8)).tolist()) - known
-    if unknown:
-        errors.append(f"{VOXELS_NAME}: cells use materials {sorted(unknown)} that aren't in the palette")
-    return errors
+    return [
+        f"structure {structure['name']!r}: shape {k}'s round_m {shape['round_m']} exceeds its smallest half size"
+        for structure in (manifest["structures"] if "structures" in manifest else [])
+        for k, shape in enumerate(structure["shapes"])
+        if "round_m" in shape and shape["round_m"] > min(shape["half_m"])
+    ]
 
 
 def _get_warp_errors(manifest: dict) -> list[str]:
@@ -276,7 +254,7 @@ def _validate_map(folder: Path, schema: dict) -> list[str]:
     return (
         errors
         + _get_material_errors(manifest)
-        + _get_voxel_errors(manifest, folder)
+        + _get_shape_errors(manifest)
         + _get_warp_errors(manifest)
         + _get_geometry_errors(manifest)
     )

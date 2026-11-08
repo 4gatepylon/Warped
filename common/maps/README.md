@@ -6,13 +6,12 @@ once and drawn and simulated the same way everywhere. Gameplay that changes duri
 state) is not part of a map.
 
 A map is a folder `common/maps/<name>/` holding `map.json`, a JSON manifest that [`map.schema.json`](map.schema.json)
-describes, and, if the map has voxel structures, `voxels.bin`, their cells. `validate_map.py` checks a map against
-this page (`make validate-maps`).
+describes. `validate_map.py` checks a map against this page (`make validate-maps`).
 
 | Map | Made by | What it is |
 | --- | --- | --- |
 | [`house_demo/`](house_demo/) | `demos/hyperbolic_wormholes_rust` (`--export-map`) | the Rust wormholes demo's house, rails and pylons in H³ (R = 8 m), three wormholes |
-| [`lunar_surface/`](lunar_surface/) | `demos/levels/lunar_surface/export_map.mjs` | the Lunar Surface level in H³ (R = 40 m), 53 voxel structures, a black hole and a wormhole |
+| [`lunar_surface/`](lunar_surface/) | `demos/levels/lunar_surface/export_map.mjs` | the Lunar Surface level in H³ (R = 40 m), a crater, 25 smooth-shape structures, a black hole and a wormhole |
 
 Both are exported from the programs that first built them; the map files are what other programs read.
 
@@ -30,8 +29,8 @@ Both are exported from the programs that first built them; the map files are wha
   every local frame +y is up, −z is forward and +x is right.
 - **Local coordinates** of a local point p are its projective coordinates, scaled to meters at the origin:
   q = R · (p_x, p_y, p_z) / p_w (Klein coordinates in H³, gnomonic in S³), or q = (p_x, p_y, p_z) in E³. In all three
-  spaces geodesics are straight lines in q and geodesic planes are planes, so a voxel's faces are geodesic planes and a
-  ray crosses a structure as a straight line (a plain voxel walk). The map from q back to p is
+  spaces geodesics are straight lines in q and geodesic planes are planes, so a ray crosses a structure as a straight
+  line in q. The map from q back to p is
   p = (q/R, 1)/√(1 − |q/R|²) in H³ and (q/R, 1)/√(1 + |q/R|²) in S³.
 - **The ground** is the geodesic plane y = 0 of the world frame; the world origin (0, 0, 0, 1) is on it, and "up" at
   any point is the unit normal away from that plane.
@@ -54,8 +53,8 @@ Both are exported from the programs that first built them; the map files are wha
 | `gravity_m_per_s2` | the acceleration toward the ground |
 | `player` | `{"eye_height_m", "walk_m_per_s", "sprint_m_per_s", "jump_m_per_s", "fly_m_per_s"}` |
 | `materials` | the palette (below); material 0 is always empty space |
-| `ground` | `{"material": id, "tiling": {...}}` (optional `tiling`, below) |
-| `structures` | voxel structures (below), optional |
+| `ground` | `{"material": id, "tiling": {...}, "terrain": {...}}` (optional `tiling` and `terrain`, below) |
+| `structures` | structures of smooth shapes (below), optional |
 | `boxes` | boxes (below), optional |
 | `warps` | black holes and wormhole mouths (below), optional |
 | `lights` | lamps (below), optional |
@@ -69,16 +68,19 @@ Both are exported from the programs that first built them; the map files are wha
 `{"id", "name", "color": [r, g, b], "kind"}`, ids from 0 to 255, each once. `kind` is `empty` (id 0 only), `solid`,
 `glass` (see-through for light, stops lasers and players) or `light` (solid and glowing in its own colour, unlit).
 
-### Voxel structures
+### Structures
 
-`{"name", "frame", "voxels": {"size": [n_x, n_y, n_z], "cell_m", "origin": [o_x, o_y, o_z], "offset_bytes"}}`.
+`{"name", "frame", "shapes": [...]}`: a solid made of smooth shapes, each
+`{"kind", "centre_m": [c_x, c_y, c_z], "half_m": [h_x, h_y, h_z], "round_m", "axis", "material"}` in the frame's local
+coordinates q (meters):
 
-- Cell (i, j, k) is the region of local coordinates (i − o_x, j − o_y, k − o_z) · c ≤ q < (i − o_x + 1, …) · c, with
-  c = `cell_m` (so a cell is `cell_m` wide at the frame's origin, and grows slowly away from it in H³).
-- Its material is byte i + n_x (j + n_y k) of `voxels.bin`, counted from `offset_bytes`; the structure's
-  n_x · n_y · n_z bytes are contiguous, structures may come in any order, and together they fill the file exactly
-  once.
-- A ray or a player meets the structure where it enters a cell whose material isn't empty.
+- `box`: the box |q − c| ≤ h per axis, its edges and corners rounded by `round_m` (default 0, at most the smallest
+  half size).
+- `cylinder`: a cylinder along local axis `axis` (0 = x, 1 = y, 2 = z; default 1), half length h along it and radius
+  the next axis's h, its rims rounded by `round_m`.
+- `ellipsoid`: the ellipsoid with semi-axes h centred at c.
+- A ray or a player meets the structure where it enters any shape. `demos/hyperbolic_wormholes_rust/src/shapes.rs`
+  defines the shapes' distance bounds exactly.
 
 ### Boxes
 
@@ -150,6 +152,13 @@ Fermi coordinates: a team's zone is a band of u, and the playable area is (u/u_m
 - `ground.tiling` (optional): `{"kind": "square_order_5", "cells_per_side": N}` in H³: the ground is tiled by squares
   with 72° corners (five at each vertex), the world origin at a tile's centre and its edges along x and z, each tile
   split into N × N cells for texture.
+- `ground.terrain` (optional; without it the ground is flat): `{"kind": "crater", "rim_u_m", "rim_v_m", "wall_m",
+  "rim_height_m", "relief_m", "relief_wavelength_m", "seed", "mounds"}` raises the ground at Fermi (u, v) to height H(u, v) above
+  h = 0: a crater wall rising over `wall_m` inward of the rim ellipse (semi-axes `rim_u_m`, `rim_v_m`; inward measured as
+  (1 − e) · `rim_v_m`, e the ellipse's radius) to about `rim_height_m`, falling away outside, plus value-noise relief of
+  up to `relief_m` at `relief_wavelength_m`, plus `mounds` (optional, at most 64): hills
+  `{"u_m", "v_m", "radius_m", "height_m"}`, each adding `height_m` · (1 − d²)² where d < 1 is the distance from
+  (`u_m`, `v_m`) over `radius_m`. `demos/hyperbolic_wormholes_rust/src/terrain.rs` defines H exactly.
 - `appearance.style` names how a renderer details surfaces and the sky beyond what the map fixes: noise on blocks,
   craterlets, star fields, clouds. Renderers implement each style they support and draw any other plainly with the
   materials' colours. Defined styles: `meadow` (the house demo's grass, roads and block textures) and `lunar` (Lunar

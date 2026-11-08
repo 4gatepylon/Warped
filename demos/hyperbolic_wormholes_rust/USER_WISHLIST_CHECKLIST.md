@@ -10,10 +10,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-49 Menu with pages.** The menu where players change their hotkeys and the rest is a general menu with
-  pages: one page for the hotkeys, another showing a layout of the entire map. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/menu-pages`, 2026-11-07.
-
 ## Open
 
 - [ ] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
@@ -54,6 +50,38 @@ is in [`AGENTS.md`](AGENTS.md).
   room.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
+- [ ] **W-58 Installable bundle.** Define the map in some kind of declarative form so that it can be put into an app
+  bundle that other people can install or port without needing the GitHub repository; more generally, refactor
+  things so there is an easy "bundle, then give the bundle to another person, and they can run it easily". Before
+  starting, talk with the user about how to do it, rather than doing it in some random way.
+
+  The user asked to fold in this plan, which another agent wrote, as part of this item: a **downloadable Mac app**.
+  The game is played among friends: a friend downloads a zip, unzips it and runs the game on an Apple silicon Mac
+  (macOS 13+), then hosts or joins a game on the same Wi-Fi, without a terminal, Rust or a checkout of the repo. Not
+  for the App Store, and no paid Apple developer account.
+  1. **Built-in maps:** build the maps (`common/maps/house_demo` and `lunar_surface`, about 136 KB) into the
+     program. Today `get_map_folder` finds them through the path to the checkout, which is fixed at build time, so
+     they aren't found on other Macs.
+  2. **Title screen:** a double-clicked app gets no flags, so it opens on a screen with Host, Join (finds the game on
+     the local network) and a map choice. Build it on the W-46 settings menu.
+  3. **Logs and errors:** log to `~/Library/Logs/` instead of the terminal, and show fatal errors in a pop-up.
+  4. **Version check:** put a version number in the join messages, and refuse a player whose version doesn't match
+     the server's, with a clear message, since friends will download at different times.
+  5. **App and zip:** a `make app` target that builds the .app (`Info.plist` with name, icon, minimum macOS 13, and a
+     line explaining the local network use), signs it ad hoc (free), and zips it with `ditto -c -k --keepParent` so
+     the app survives unzipping.
+  6. **Local network permission:** as its own app, macOS asks the player whether the game may find devices on the
+     local network. If the player refuses, the game says so clearly instead of failing silently.
+  7. **First-open instructions:** without notarization, macOS blocks a downloaded app the first time. `PLAYTEST.md`
+     and a short note in the zip tell players to open the app once, then click System Settings → Privacy & Security
+     → Open Anyway.
+  8. **Hosting the zip:** the repo is private, so friends can't download from its GitHub Releases unless added to
+     the repo. Ask the user where the zip goes (for example a shared Drive or Dropbox link).
+
+  Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
+  renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
+- [ ] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
+  throws the other. These are each player's linked wormholes.
 
 ## Done
 
@@ -121,3 +149,9 @@ is in [`AGENTS.md`](AGENTS.md).
   player's own, and `server_settings.yaml`, the server's. #140.
 - [x] **W-46 Settings menu.** A screen to exit to a menu where a player changes their own choices (hotkeys and the
   rest of the per-player settings): `Tab` opens it. #143.
+- [x] **W-49 Menu with pages.** The menu where players change their hotkeys and the rest is a general menu with
+  pages: one page for the hotkeys, another showing a layout of the entire map (`Q`/`E` turn pages). #149.
+- [x] **W-59 Smooth crater instead of voxels.** Get rid of voxels and replace them with a proper 3D world: an uneven
+  lunar surface texture from an online source, the Lunar Surface level inside a crater whose walls are the level's
+  walls, a smooth noise-based environment with no voxels at all, smooth shapes for the objects, and the ridge, peak
+  and boulders as hills and mounds in the terrain. #147.

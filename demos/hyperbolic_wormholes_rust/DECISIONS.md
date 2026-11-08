@@ -917,9 +917,12 @@
     work whatever the bindings say, like the arrows. The menu opens on SETTINGS each time.
   - **The map page** shows the whole map from above, drawn once at start-up (`map_layout.rs`, under 0.1 s for
     either map) in the map's Fermi coordinates (u to the right, v down), the coordinates its zones and boundary are
-    given in. Each column shows the top of the highest structure or box there in its material's colour, brighter
-    the higher it is (full brightness at 12 m), with lit and shadowed edges where it rises or drops by more than
-    0.5 m; lights stay at full brightness. On top: console cells as small squares in their team's colour,
+    given in. Each column shows the top of the highest structure shape or box there in its material's colour,
+    brighter the higher it stands above the ground (full brightness at 12 m; lights always full), or else the
+    ground. Structures are read with the game's own sphere tracer (`shapes.rs`), straight down through each
+    column, and the ground's height comes from its terrain (`terrain.rs`). Everything is then lit from the top
+    left by the slope of those heights, which shows the crater's walls, the mounds and the structures' edges.
+    On top: console shapes as small squares in their team's colour,
     wormhole mouths as cyan rings at their Schwarzschild radius, the black hole as a black disk ringed in orange,
     the spawns, the zones' edges dashed, the boundary outlined with the outside darkened, and labels. On each frame
     the window adds the player: a disk in their team's colour, ringed in white, with a white line the way they

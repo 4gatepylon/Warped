@@ -39,6 +39,7 @@ constant float WAND_TIP_GLOW = 1.25;
 constant float WAND_HALO_M = 0.012;
 constant float WAND_HALO_STRENGTH = 0.6;
 constant int WAND_SAMPLES_PER_SIDE = 2;
+constant int REVOLVER_WAND = 2;
 
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
@@ -2101,19 +2102,20 @@ struct OverlayRect {
  * `blur_frac`; the blend is kept in `history_out` for the next frame) and darkened by `dim_frac`, with a mask's text drawn over it at
  * `scale` screen pixels per mask pixel from `origin` (the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
  * the text's above `OVERLAY_TEXT_LEVEL`) over a picture (blended by its alpha) stretched from `picture_min_mask_px` to
- * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel) when `has_wand` is set, and `rects`
+ * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel)
+ * when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), and `rects`
  * blended over that in order (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
  * @par Example
  * @code
  * dispatched by render_metal.rs, one thread per output pixel.
  * @endcode
  */
-kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], texture2d<float, access::read> mask [[texture(1)]],
+kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], texture2d<float, access::read> revolver [[texture(5)]], texture2d<float, access::read> mask [[texture(1)]],
                           texture2d<float, access::write> out [[texture(2)]], constant OverlayParams &p [[buffer(0)]],
                           constant OverlayRect *rects [[buffer(1)]], constant OverlayWand &wand [[buffer(2)]],
                           texture2d<float, access::read> history_in [[texture(3)]],
                           texture2d<float, access::write> history_out [[texture(4)]],
-                          texture2d<float, access::read> picture [[texture(5)]], uint2 id [[thread_position_in_grid]]) {
+                          texture2d<float, access::read> picture [[texture(6)]], uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
     float3 scene = mix(read_hit_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
     history_out.write(float4(scene, 1.0), id);
@@ -2136,7 +2138,10 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
         }
     }
     float2 size = float2(out.get_width(), out.get_height());
-    if (p.has_wand != 0) {
+    if (p.has_wand == REVOLVER_WAND) {
+        float4 held = revolver.read(id);
+        color.rgb = color.rgb * (1.0 - held.a) + held.rgb;
+    } else if (p.has_wand != 0) {
         float3 glow = float3(0.0);
         float4 sum = float4(0.0);
         for (int k = 0; k < WAND_SAMPLES_PER_SIDE * WAND_SAMPLES_PER_SIDE; k++) {

@@ -14,12 +14,18 @@
 using namespace metal;
 
 #define SCENE_BUFFERS constant VoxelUniforms &u [[buffer(16)]], device const VoxelStructure *structures [[buffer(17)]], \
-    device const uchar *voxels [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
+    device const Shape *shapes [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
     device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]], \
-    device const uchar *clearances [[buffer(24)]]
+    device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], device const float *mound_heights [[buffer(26)]], \
+    constant float4 *means [[buffer(27)]], \
+    texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]]
 
 constant int MAX_ITERATIONS = 240;
-constant int MAX_DDA_STEPS = 80;
+constant int MAX_SHAPE_STEPS = 96;
+constant float SHAPE_HIT_M = 0.003;
+constant float SHAPE_NORMAL_M = 0.002;
+constant int SHAPE_BOX = 0;
+constant int SHAPE_CYLINDER = 1;
 constant int MAX_FOLDS = 26;
 constant int OUTCOME_LOST = 0;
 constant int OUTCOME_SKY = 1;
@@ -42,6 +48,23 @@ constant float MAX_BEND_STEP_M = 3.0;
 constant float GROUND_DETAIL_S = 7.0;
 constant float SUN_INTENSITY = 1.45;
 constant float LUNAR_LAMBERT_FRAC = 0.7;
+constant float TEXTURE_SIDE_PX = 2048.0;
+constant float UNTEXTURED_ROUGHNESS = 0.85;
+constant float MIN_ROUGHNESS = 0.045;
+constant float MIN_FACING = 0.05;
+constant float MIN_MEAN_ALBEDO = 0.02;
+constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);
+constant float DISPLAY_GAMMA = 2.2;
+constant float EXPOSURE = 1.6;
+constant float BLOOM_STRENGTH = 0.05;
+constant int BLOOM_LEVELS = __BLOOM_LEVELS__;
+constant float VIGNETTE_STRENGTH = 0.28;
+constant float GRADE_MIDDLE_GREY = 0.18;
+constant float GRADE_CONTRAST = 1.18;
+constant float GRADE_SATURATION = 1.12;
+constant float3 GRADE_WHITE_BALANCE = float3(1.04, 1.0, 0.94);
+constant float3 GRADE_SHADOW_TINT = float3(0.94, 1.0, 1.07);
+constant float3 GRADE_HIGHLIGHT_TINT = float3(1.04, 1.0, 0.95);
 constant float AMBIENT = 0.11;
 constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
@@ -131,7 +154,6 @@ constant float GLOW_BRIGHTNESS = 1.2;
 constant float GLOW_RIM = 0.3;
 constant float DETAIL_FADE_START_FRAC = 0.3;
 constant float LIGHT_FADE_START_FRAC = 0.6;
-constant float DDA_NUDGE = 1.0e-5;
 constant float HORIZON_GUARD = 1.0e-4;
 constant float SUN_GLARE = 0.6;
 constant float SUN_HALO_POWER = 40.0;
@@ -161,12 +183,23 @@ constant float MILKY_WAY_BRIGHTNESS = 0.05;
 constant float MILKY_WAY_DETAIL = 6.0;
 constant float BEAM_HALO_OPACITY = 0.9;
 constant float BEAM_CORE_WHITENESS = 0.6;
-constant float TONEMAP_KNEE = 0.6;
 constant float3 BLUE_COLOR = float3(0.30, 0.62, 1.0);
 constant float3 RED_COLOR = float3(1.0, 0.16, 0.08);
 constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
 constant float3 FLASHLIGHT_COLOR = float3(1.0, 0.95, 0.85);
 constant int TILE_CELLS_PER_HALF = 18;
+constant int TERRAIN_OCTAVES = 5;
+constant float TERRAIN_RIM_NOISE_M = 60.0;
+constant float TERRAIN_RIM_NOISE_FRAC = 0.5;
+constant float TERRAIN_OUTER_FLANK_PER_WALL = 3.0;
+constant float TERRAIN_WALL_RELIEF_GAIN = 3.0;
+constant uint TERRAIN_RIM_SEED = 9u;
+constant float TERRAIN_STEP_FRAC = 0.45;
+constant float TERRAIN_MIN_STEP_M = 0.03;
+constant float TERRAIN_STEP_PER_M = 0.01;
+constant int TERRAIN_MAX_STEPS = 200;
+constant int TERRAIN_BISECTIONS = 8;
+constant float TERRAIN_NORMAL_STEP_M = 0.1;
 constant float KIND_BLACK_HOLE = 0.0;
 constant float HALF_KIND = 0.5;
 constant float GLOW_FLOOR = 1.0 / 1024.0;
@@ -202,7 +235,8 @@ struct VoxelUniforms {
     int mat_console_first;
     int mat_console_count;
     int has_regions;
-    int padding[2];
+    int has_terrain;
+    uint terrain_seed;
     float4 sun;
     float4 planet;
     float4 planet_e1;
@@ -210,14 +244,24 @@ struct VoxelUniforms {
     float4 spot;
     float4 spot_color;
     float4 regions;
+    float4 terrain;
+    float4 relief;
+    float4 mound_grid;
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
 };
 
+/** @brief `Shape` is one smooth solid in its structure's chart (meters): centre and kind, half sizes and rounding, material and axis. */
+struct Shape {
+    float4 centre_kind;
+    float4 half_round;
+    int4 info;
+};
+
 /**
  * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
- * radius with the grid's origin, its size with the offset of its cells, and R over its cell size.
+ * radius, its first shape and shape count, and R.
  */
 struct VoxelStructure {
     float4 rows[4];
@@ -288,13 +332,19 @@ static_assert(sizeof(VoxelRayEnd) == __BYTES_PER_RAY_END__, "render_voxel.rs siz
 struct Scene {
     constant VoxelUniforms &u;
     device const VoxelStructure *structures;
-    device const uchar *voxels;
+    device const Shape *shapes;
     device const VoxelWarp *warps;
     device const float4 *warp_lists;
     device const VoxelLight *lights;
     device const float4 *palette;
     device const BeamSegment *beams;
     device const uchar *clearances;
+    device const float4 *surfaces;
+    device const float *mound_heights;
+    constant float4 *means;
+    texture2d_array<float> albedo_maps;
+    texture2d_array<float> normal_maps;
+    texture2d_array<float> arm_maps;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -336,8 +386,51 @@ static float sample_fbm_3d(float3 p) {
     return sum;
 }
 
-/** @brief `get_palette` gives a material's colour and glow, black for one outside the palette. @par Example @code float4 c = get_palette(scene, m); @endcode */
-static float4 get_palette(thread const Scene &scene, int m) { return m >= 0 ? scene.palette[m] : float4(0.0); }
+/** @brief `to_linear` turns a display colour into a linear one. @par Example @code float3 c = to_linear(RED_COLOR); @endcode */
+static float3 to_linear(float3 c) { return pow(c, DISPLAY_GAMMA); }
+
+/** @brief `get_palette` gives material m's linear colour and glow (black for one outside the palette). @par Example @code float4 c = get_palette(scene, m); @endcode */
+static float4 get_palette(thread const Scene &scene, int m) { return m >= 0 ? float4(to_linear(scene.palette[m].rgb), scene.palette[m].a) : float4(0.0); }
+
+/** @brief `shape_distance` bounds the distance from chart point q to a shape from below (negative inside). @par Example @code float d = shape_distance(scene.shapes[0], q); @endcode */
+static float shape_distance(device const Shape &sh, float3 q) {
+    float3 p = q - sh.centre_kind.xyz, h = sh.half_round.xyz;
+    float rounding = sh.half_round.w;
+    int kind = int(sh.centre_kind.w);
+    if (kind == SHAPE_BOX) {
+        float3 d = abs(p) - (h - rounding);
+        return length(max(d, 0.0)) + min(max(max(d.x, d.y), d.z), 0.0) - rounding;
+    }
+    if (kind == SHAPE_CYLINDER) {
+        int a = sh.info.y, b = (a + 1) % 3, c = (a + 2) % 3;
+        float2 d = float2(length(float2(p[b], p[c])) - (h[b] - rounding), abs(p[a]) - (h[a] - rounding));
+        return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - rounding;
+    }
+    return (length(p / h) - 1.0) * min(min(h.x, h.y), h.z);
+}
+
+/** @brief `structure_distance` is the smallest distance bound at q over a structure's glass (or other) shapes, and which shape. @par Example @code float d = structure_distance(scene, st, q, false, index); @endcode */
+static float structure_distance(thread const Scene &scene, device const VoxelStructure &st, float3 q, bool is_glass, thread int &index) {
+    float best = INFINITY;
+    for (int i = st.size.x; i < st.size.x + st.size.y; i++) {
+        if ((scene.shapes[i].info.x == scene.u.mat_glass) != is_glass) continue;
+        float d = shape_distance(scene.shapes[i], q);
+        if (d < best) { best = d; index = i; }
+    }
+    return best;
+}
+
+/** @brief `march_shapes` sphere-traces the chart line q0 + dq mu from mu to mu_hi and gives where it meets a shape (or INFINITY). @par Example @code float mu = march_shapes(scene, st, q0, dq, 0.0, 1.0, false, index); @endcode */
+static float march_shapes(thread const Scene &scene, device const VoxelStructure &st, float3 q0, float3 dq, float mu, float mu_hi, bool is_glass, thread int &index) {
+    float speed = max(length(dq), TINY);
+    for (int i = 0; i < MAX_SHAPE_STEPS; i++) {
+        float d = structure_distance(scene, st, q0 + dq * mu, is_glass, index);
+        if (d < SHAPE_HIT_M) return mu;
+        mu += d / speed;
+        if (mu > mu_hi) break;
+    }
+    return INFINITY;
+}
 
 /**
  * @brief `trace_structure` finds where a chord first enters a solid cell of structure k, by a voxel walk along the
@@ -362,42 +455,19 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     float lam_lo = tanh(s_lo - s_star), lam_hi = tanh(s_hi - s_star);
     float mu_lo = lam_lo / (p.w * (p.w + lam_lo * t.w)), mu_hi = lam_hi / (p.w * (p.w + lam_hi * t.w));
     float scale = st.scale.x;
-    float3 g0 = p.xyz / p.w * scale + info.yzw, d = (t.xyz * p.w - p.xyz * t.w) * scale;
-    d = select(d, float3(TINY), abs(d) < TINY);
-    float3 inv_d = 1.0 / d, size = float3(st.size.xyz);
-    float3 m0 = -g0 * inv_d, m1 = (size - g0) * inv_d, m_near = min(m0, m1), m_far = max(m0, m1);
-    float mu_in = max(max(m_near.x, m_near.y), m_near.z);
-    int axis = mu_in == m_near.x ? 0 : (mu_in == m_near.y ? 1 : 2);
-    if (mu_lo > mu_in) { mu_in = mu_lo; axis = -1; }
-    float mu_out = min(min(min(m_far.x, m_far.y), m_far.z), mu_hi);
-    if (mu_in >= mu_out) return;
-    int3 dims = st.size.xyz, step_dir = int3(sign(d));
-    int3 cell = clamp(int3(floor(g0 + d * mu_in + sign(d) * DDA_NUDGE)), int3(0), dims - 1);
-    float3 mu_next = (float3(cell) + step(float3(0.0), d) - g0) * inv_d, mu_delta = abs(inv_d);
-    float mu = mu_in;
-    bool in_glass = false;
-    device const uchar *cells = scene.voxels + st.size.w;
-    for (int i = 0; i < MAX_DDA_STEPS; i++) {
-        int m = int(cells[cell.x + dims.x * (cell.y + dims.y * cell.z)]);
-        if (m != 0) {
-            float lam = mu * p.w * p.w / (1.0 - mu * p.w * t.w), s_hit = s_star + clamp_atanh(lam);
-            if (m == scene.u.mat_glass && !is_shadow) {
-                if (!in_glass) glass_s = min(glass_s, s_hit);
-                in_glass = true;
-            } else if (m != scene.u.mat_glass) {
-                if (s_hit < hit.s) {
-                    hit.s = s_hit; hit.mat = m; hit.k = k; hit.axis = axis;
-                    hit.sgn = axis >= 0 ? -float(step_dir[axis]) : 0.0; hit.g = g0 + d * mu; hit.cell = cell;
-                }
-                return;
-            }
-        } else {
-            in_glass = false;
-        }
-        if (mu_next.x < mu_next.y && mu_next.x < mu_next.z) { axis = 0; mu = mu_next.x; cell.x += step_dir.x; mu_next.x += mu_delta.x; }
-        else if (mu_next.y < mu_next.z) { axis = 1; mu = mu_next.y; cell.y += step_dir.y; mu_next.y += mu_delta.y; }
-        else { axis = 2; mu = mu_next.z; cell.z += step_dir.z; mu_next.z += mu_delta.z; }
-        if (mu > mu_out || any(cell < int3(0)) || any(cell >= dims)) return;
+    float3 q0 = p.xyz / p.w * scale, dq = (t.xyz * p.w - p.xyz * t.w) * scale;
+    int index = st.size.x;
+    float mu = march_shapes(scene, st, q0, dq, mu_lo, mu_hi, false, index);
+    if (!is_shadow) {
+        int glass_index;
+        float mu_glass = march_shapes(scene, st, q0, dq, mu_lo, min(mu, mu_hi), true, glass_index);
+        if (mu_glass < INFINITY) glass_s = min(glass_s, s_star + clamp_atanh(mu_glass * p.w * p.w / (1.0 - mu_glass * p.w * t.w)));
+    }
+    if (mu == INFINITY) return;
+    float s_hit = s_star + clamp_atanh(mu * p.w * p.w / (1.0 - mu * p.w * t.w));
+    if (s_hit < hit.s) {
+        hit.s = s_hit; hit.mat = scene.shapes[index].info.x; hit.k = k; hit.axis = 0;
+        hit.sgn = 1.0; hit.g = q0 + dq * mu; hit.cell = int3(index, 0, 0);
     }
 }
 
@@ -408,6 +478,108 @@ static void trace_ground(float4 x, float4 v, thread Hit &hit) {
     if (lam >= LAMBDA_LIMIT) return;
     float s = atanh(lam);
     if (s < hit.s) { hit.s = s; hit.mat = MAT_GROUND; hit.k = -1; }
+}
+
+/** @brief `terrain_hash` is lattice point (i, j)'s value in [0, 1], as terrain.rs's `hash`. @par Example @code float h = terrain_hash(3, -2, 1u); @endcode */
+static float terrain_hash(int i, int j, uint seed) {
+    uint h = uint(i) * 0x8da6b343u ^ uint(j) * 0xd8163841u ^ seed * 0xcb1ab31fu;
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    h ^= h >> 15;
+    return float(h) * (1.0 / 4294967295.0);
+}
+
+/** @brief `smooth01` is the cubic smoothstep of t clamped to [0, 1]. @par Example @code float w = smooth01(t); @endcode */
+static float smooth01(float t) { t = clamp(t, 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
+
+/** @brief `terrain_noise` is terrain.rs's smooth value noise in [0, 1]. @par Example @code float n = terrain_noise(p, 1u); @endcode */
+static float terrain_noise(float2 p, uint seed) {
+    float2 c = floor(p), f = float2(smooth01(p.x - c.x), smooth01(p.y - c.y));
+    int i = int(c.x), j = int(c.y);
+    float bottom = mix(terrain_hash(i, j, seed), terrain_hash(i + 1, j, seed), f.x);
+    float top = mix(terrain_hash(i, j + 1, seed), terrain_hash(i + 1, j + 1, seed), f.x);
+    return mix(bottom, top, f.y);
+}
+
+/** @brief `mound_height_m` is terrain.rs's `MoundGrid::get_height_m`: the baked mound grid (origin u, v, cells per meter, points along u in `mound_grid`, points along v in `relief.w`) read bilinearly at Fermi (u, v), 0 outside. @par Example @code float h = mound_height_m(scene, u_m, v_m); @endcode */
+static float mound_height_m(thread const Scene &scene, float u_m, float v_m) {
+    float4 g = scene.u.mound_grid;
+    float2 x = (float2(u_m, v_m) - g.xy) * g.z, i = floor(x), f = x - i;
+    if (any(i < 0.0) || i.x >= g.w - 1.0 || i.y >= scene.u.relief.w - 1.0) return 0.0;
+    int k = int(i.x) + int(g.w) * int(i.y), n = int(g.w);
+    float bottom = mix(scene.mound_heights[k], scene.mound_heights[k + 1], f.x);
+    float top = mix(scene.mound_heights[k + n], scene.mound_heights[k + n + 1], f.x);
+    return mix(bottom, top, f.y);
+}
+
+/** @brief `terrain_height_m` is terrain.rs's `get_height_m`: the ground's height at Fermi (u, v), mounds included. @par Example @code float h = terrain_height_m(scene, u_m, v_m); @endcode */
+static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
+    float4 t = scene.u.terrain, rl = scene.u.relief;
+    uint seed = scene.u.terrain_seed;
+    float inside_m = (1.0 - length(float2(u_m / t.x, v_m / t.y))) * t.y;
+    float wall = inside_m >= 0.0 ? smooth01(1.0 - inside_m / t.z) : 1.0 - smooth01(-inside_m / (TERRAIN_OUTER_FLANK_PER_WALL * t.z));
+    float rim_m = t.w * (1.0 + TERRAIN_RIM_NOISE_FRAC * (terrain_noise(float2(u_m, v_m) / TERRAIN_RIM_NOISE_M, seed ^ TERRAIN_RIM_SEED) - 0.5));
+    float2 p = float2(u_m, v_m) / rl.y;
+    float sum = 0.0, amplitude = 0.5;
+    for (uint o = 0; o < uint(TERRAIN_OCTAVES); o++) { sum += amplitude * terrain_noise(p, seed + o); amplitude *= 0.5; p *= 2.0; }
+    float mounds_m = mound_height_m(scene, u_m, v_m);
+    return rim_m * wall + mounds_m + rl.x * sum / (1.0 - exp2(-float(TERRAIN_OCTAVES))) * (1.0 + TERRAIN_WALL_RELIEF_GAIN * wall);
+}
+
+/** @brief `get_fermi` gives a point's Fermi (u, v, h) in meters. @par Example @code float3 f = get_fermi(x, r); @endcode */
+static float3 get_fermi(float4 x, float r) {
+    return float3(-r * clamp_atanh(x.z / x.w), r * asinh(x.x * rsqrt(1.0 + x.y * x.y)), r * asinh(x.y));
+}
+
+/**
+ * @brief `trace_terrain` is terrain.rs's `find_hit_s` on the chord from x along v within `hit.s`: steps of a fraction
+ * of the gap to the ground, at least a little more each meter out, then bisection of the step that went under.
+ * @par Example
+ * @code
+ * trace_terrain(scene, x, v, hit);
+ * @endcode
+ */
+static void trace_terrain(thread const Scene &scene, float4 x, float4 v, thread Hit &hit) {
+    float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = 0.0, previous = 0.0;
+    for (int i = 0; i < TERRAIN_MAX_STEPS; i++) {
+        float4 p = geodesic_point(x, v, s);
+        float3 f = get_fermi(p, r);
+        float gap = f.z - terrain_height_m(scene, f.x, f.y);
+        if (gap < 0.0) {
+            float lo = previous, hi = s;
+            for (int b = 0; b < TERRAIN_BISECTIONS; b++) {
+                float mid = 0.5 * (lo + hi);
+                float3 g = get_fermi(geodesic_point(x, v, mid), r);
+                if (g.z < terrain_height_m(scene, g.x, g.y)) hi = mid; else lo = mid;
+            }
+            if (hi < hit.s) { hit.s = hi; hit.mat = MAT_GROUND; hit.k = -1; }
+            return;
+        }
+        if (f.z > top_m && geodesic_tangent(x, v, s).y > 0.0) return;
+        previous = s;
+        s += max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * s * r) / r;
+        if (s > hit.s) return;
+    }
+}
+
+/**
+ * @brief `terrain_normal` is the unit normal of the terrain at Fermi (u, v, h): ∂h less the height's gradient along
+ * ∂u and ∂v, which are orthogonal with lengths cosh h cosh v and cosh h.
+ * @par Example
+ * @code
+ * float4 n = terrain_normal(scene, f);
+ * @endcode
+ */
+static float4 terrain_normal(thread const Scene &scene, float3 f) {
+    float r = scene.u.curvature_radius_m, d = TERRAIN_NORMAL_STEP_M;
+    float g_u = (terrain_height_m(scene, f.x + d, f.y) - terrain_height_m(scene, f.x - d, f.y)) / (2.0 * d);
+    float g_v = (terrain_height_m(scene, f.x, f.y + d) - terrain_height_m(scene, f.x, f.y - d)) / (2.0 * d);
+    float3 c = cosh(f / r), sh = sinh(f / r);
+    float4 du = float4(0.0, 0.0, -c.z * c.y * c.x, c.z * c.y * sh.x);
+    float4 dv = float4(c.z * c.y, 0.0, -c.z * sh.y * sh.x, c.z * sh.y * c.x);
+    float4 dh = float4(sh.z * sh.y, c.z, -sh.z * c.y * sh.x, sh.z * c.y * c.x);
+    float4 n = dh - g_u / (c.z * c.z * c.y * c.y) * du - g_v / (c.z * c.z) * dv;
+    return n * rsqrt(max(mdot(n, n), TINY));
 }
 
 /**
@@ -441,7 +613,7 @@ static bool is_clear_of_blocks(thread const Scene &scene, int w, float3 local, f
  * @endcode
  */
 static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, thread Hit &hit, thread float &glass_s) {
-    trace_ground(x, v, hit);
+    if (scene.u.has_terrain != 0) trace_terrain(scene, x, v, hit); else trace_ground(x, v, hit);
     if (warp < 0) {
         for (int k = 0; k < scene.u.structure_count; k++) trace_structure(scene, k, x, v, 0.0, false, hit, glass_s);
     } else {
@@ -461,6 +633,10 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
     h.s = SHADOW_M / scene.u.curvature_radius_m;
     h.mat = 0;
     float glass_s = NO_HIT_S;
+    if (scene.u.has_terrain != 0) {
+        trace_terrain(scene, x, l, h);
+        if (h.mat != 0) return SHADOW_FLOOR;
+    }
     for (int k = 0; k < scene.u.structure_count; k++) {
         trace_structure(scene, k, x, l, 0.0, true, h, glass_s);
         if (h.mat != 0) return SHADOW_FLOOR;
@@ -518,23 +694,108 @@ static void cross_throat(thread const Scene &scene, int w, thread float4 &x, thr
     v = normalize_tangent(x, scene.warps[partner].forward * float4(tt + g * q.xyz, g * (1.0 + q.w)));
 }
 
-/** @brief `gather_lights` sums the lamps' light at a surface point. @par Example @code float3 lamps = gather_lights(scene, x, n); @endcode */
-static float3 gather_lights(thread const Scene &scene, float4 x, float4 n) {
+/** @brief `Surface` is a shading point's material: albedo, perceptual roughness, metalness, ambient occlusion and normal. */
+struct Surface {
+    float3 albedo;
+    float roughness;
+    float metallic;
+    float ao;
+    float4 n;
+};
+
+/** @brief `orthonormal` makes tangent t at a point unit and perpendicular to n. @par Example @code float4 t = orthonormal(t, n); @endcode */
+static float4 orthonormal(float4 t, float4 n) { t -= mdot(t, n) * n; return t * rsqrt(max(mdot(t, t), TINY)); }
+
+/** @brief `has_texture` says whether material m has a loaded texture set. @par Example @code if (has_texture(scene, m)) ...; @endcode */
+static bool has_texture(thread const Scene &scene, int m) {
+    int layer = int(scene.surfaces[m].x);
+    return layer >= 0 && scene.means[layer].w > 0.0;
+}
+
+/**
+ * @brief `sample_surface` reads material m's texture set at uv (in blocks of block_m meters), at the level of detail of
+ * the pixel's footprint: the albedo is `tint` scaled by the texture's brightness over its mean, and the normal map bends n along tangents t, b.
+ * Untextured materials get `tint` with a rough, dielectric finish.
+ * @par Example
+ * @code
+ * Surface s = sample_surface(scene, m, albedo, uv, 1.0, dist_s, x, n, t, b, v);
+ * @endcode
+ */
+static Surface sample_surface(thread const Scene &scene, int m, float3 tint, float2 uv, float block_m, float dist_s,
+                              float4 x, float4 n, float4 t, float4 b, float4 v) {
+    Surface s = {tint, UNTEXTURED_ROUGHNESS, 0.0, 1.0, n};
+    if (!has_texture(scene, m)) return s;
+    constexpr sampler wrap(address::repeat, filter::linear, mip_filter::linear);
+    float4 info = scene.surfaces[m];
+    int layer = int(info.x);
+    float pixel_m = scene.u.pixel_angle_rad * scene.u.curvature_radius_m * sinh(min(dist_s, FAR_S)) * rsqrt(max(abs(mdot(n, v)), MIN_FACING));
+    float lod = log2(max(pixel_m * TEXTURE_SIDE_PX / (info.y * block_m), 1.0));
+    float2 tex = uv / info.y;
+    float3 albedo = scene.albedo_maps.sample(wrap, tex, layer, level(lod)).rgb;
+    float2 bend = scene.normal_maps.sample(wrap, tex, layer, level(lod)).rg * 2.0 - 1.0;
+    float3 arm = scene.arm_maps.sample(wrap, tex, layer, level(lod)).rgb;
+    s.albedo = tint * dot(albedo, LUMA) / max(dot(scene.means[layer].rgb, LUMA), MIN_MEAN_ALBEDO);
+    s.ao = arm.r;
+    s.roughness = max(arm.g, MIN_ROUGHNESS);
+    s.metallic = arm.b * info.z;
+    s.n = normalize_tangent(x, t * bend.x + b * bend.y + n * sqrt(saturate(1.0 - dot(bend, bend))));
+    return s;
+}
+
+/**
+ * @brief `evaluate_direct_light` is the fps_demo's GGX specular plus (lunar-Lambert) diffuse for one light, from the
+ * Minkowski products of the normal, view, light and half vectors at the surface point.
+ * @par Example
+ * @code
+ * float3 c = evaluate_direct_light(s, n_dot_l, n_dot_v, n_dot_h, v_dot_h, energy);
+ * @endcode
+ */
+static float3 evaluate_direct_light(Surface s, float n_dot_l, float n_dot_v, float n_dot_h, float v_dot_h, float3 energy) {
+    if (n_dot_l <= 0.0) return float3(0.0);
+    n_dot_h = saturate(n_dot_h);
+    v_dot_h = saturate(v_dot_h);
+    float alpha = s.roughness * s.roughness, alpha_squared = alpha * alpha;
+    float d_denominator = n_dot_h * n_dot_h * (alpha_squared - 1.0) + 1.0;
+    float d = alpha_squared / (M_PI_F * d_denominator * d_denominator);
+    float visibility = 0.5 / max(n_dot_l * sqrt(n_dot_v * n_dot_v * (1.0 - alpha_squared) + alpha_squared)
+                               + n_dot_v * sqrt(n_dot_l * n_dot_l * (1.0 - alpha_squared) + alpha_squared), 1e-5);
+    float3 f0 = mix(float3(0.04), s.albedo, s.metallic);
+    float3 f = f0 + (1.0 - f0) * pow(1.0 - v_dot_h, 5.0);
+    float lunar = mix(1.0, 2.0 / (n_dot_l + n_dot_v), LUNAR_LAMBERT_FRAC);
+    return ((1.0 - f) * (1.0 - s.metallic) * s.albedo / M_PI_F * lunar + d * visibility * f * energy) * n_dot_l;
+}
+
+/** @brief `light_from` is a surface's light from unit direction l, per unit of irradiance. @par Example @code float3 c = light_from(s, l, view, energy); @endcode */
+static float3 light_from(Surface s, float4 l, float4 view, float3 energy) {
+    float4 h = l + view;
+    h *= rsqrt(max(mdot(h, h), TINY));
+    return evaluate_direct_light(s, mdot(s.n, l), max(mdot(s.n, view), 1e-4), mdot(s.n, h), mdot(view, h), energy);
+}
+
+/** @brief `get_env_brdf` is Karis' fit of the split-sum specular scale and bias. @par Example @code float2 ab = get_env_brdf(0.5, n_dot_v); @endcode */
+static float2 get_env_brdf(float roughness, float n_dot_v) {
+    float4 r = roughness * float4(-1.0, -0.0275, -0.572, 0.022) + float4(1.0, 0.0425, 1.04, -0.04);
+    float a004 = min(r.x * r.x, exp2(-9.28 * n_dot_v)) * r.x + r.y;
+    return float2(-1.04, 1.04) * a004 + r.zw;
+}
+
+/** @brief `gather_lights` sums the lamps' light at a surface point. @par Example @code float3 lamps = gather_lights(scene, s, x, view, energy); @endcode */
+static float3 gather_lights(thread const Scene &scene, Surface s, float4 x, float4 view, float3 energy) {
     float3 sum = float3(0.0);
     for (int i = 0; i < scene.u.light_count; i++) {
         float4 lx = scene.lights[i].position;
         float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
         if (d_m > LIGHT_CUTOFF_FRAC * radius_m) continue;
         float4 toward = lx + mdot(lx, x) * x;
-        float facing = mdot(n, toward) * rsqrt(max(mdot(toward, toward), TINY));
+        toward *= rsqrt(max(mdot(toward, toward), TINY));
         float falloff = 1.0 / (1.0 + (d_m / radius_m) * (d_m / radius_m))
                       * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
-        sum += scene.lights[i].color_radius.rgb * falloff * (LIGHT_WRAP + (1.0 - LIGHT_WRAP) * max(facing, 0.0));
+        float3 wrap = LIGHT_WRAP * s.albedo * (1.0 - s.metallic);
+        sum += scene.lights[i].color_radius.rgb * falloff * (wrap + (1.0 - LIGHT_WRAP) * M_PI_F * light_from(s, toward, view, energy));
     }
     return sum;
 }
 
-/** @brief `light_surface` lights a surface point: the sun (lunar-Lambert, shadowed), earthshine, lamps and the laser spot. @par Example @code float3 c = light_surface(scene, albedo, x, n, v); @endcode */
 /**
  * @brief `light_flashlight` gives the light of the player's flashlight (`flashlight_position`, aimed along
  * `flashlight_direction`; `flashlight` holds the cosines of its cone's inner and outer edges, the distance at which it
@@ -555,22 +816,45 @@ static float3 light_flashlight(thread const Scene &scene, float4 x, float4 n) {
     return SUN_INTENSITY * FLASHLIGHT_COLOR * f.w * cone * facing / (1.0 + d_m * d_m);
 }
 
-static float3 light_surface(thread const Scene &scene, float3 albedo, float4 x, float4 n, float4 v) {
-    float4 l = transport_from_centre(scene.u.sun.xyz, x);
-    float mu0 = mdot(n, l), mu = max(-mdot(n, v), 0.0), sun = 0.0;
-    if (mu0 > 0.0) {
-        sun = mix(mu0, 2.0 * mu0 / (mu0 + mu), LUNAR_LAMBERT_FRAC)
-            * trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / scene.u.curvature_radius_m), l);
+/**
+ * @brief `light_surface` lights a surface point with face normal n: the sun (GGX with lunar-Lambert diffuse, shadowed),
+ * earthshine and the ambient light (split-sum specular with multiple-scattering compensation), lamps and the laser spot.
+ * @par Example
+ * @code
+ * float3 c = light_surface(scene, s, x, n, v);
+ * @endcode
+ */
+static float3 light_surface(thread const Scene &scene, Surface s, float4 x, float4 n, float4 v) {
+    float4 l = transport_from_centre(scene.u.sun.xyz, x), view = -v;
+    float2 env = get_env_brdf(s.roughness, max(mdot(s.n, view), 1e-4));
+    float3 f0 = mix(float3(0.04), s.albedo, s.metallic);
+    float3 energy = 1.0 + f0 * (1.0 / max(env.x + env.y, 1e-3) - 1.0);
+    float3 color = float3(0.0);
+    if (mdot(n, l) > 0.0) {
+        float sun = trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / scene.u.curvature_radius_m), l);
+        if (sun > 0.0) color += M_PI_F * SUN_INTENSITY * sun * SUN_COLOR * light_from(s, l, view, energy);
     }
-    float earth = max(mdot(n, transport_from_centre(scene.u.planet.xyz, x)), 0.0);
-    float3 light = float3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR + SUN_INTENSITY * sun * SUN_COLOR + gather_lights(scene, x, n)
-        + light_flashlight(scene, x, n);
-    float3 color = albedo * light;
+    float earth = max(mdot(s.n, transport_from_centre(scene.u.planet.xyz, x)), 0.0);
+    float3 ambient = (float3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR) * s.ao;
+    color += ambient * (s.albedo * (1.0 - s.metallic) + (f0 * env.x + env.y) * energy) + gather_lights(scene, s, x, view, energy)
+        + light_flashlight(scene, x, s.n) * s.albedo * (1.0 - s.metallic);
     if (scene.u.spot_color.a > 0.0) {
         float d_m = measure_gap(scene.u.spot, x) * scene.u.curvature_radius_m;
         color += scene.u.spot_color.rgb * scene.u.spot_color.a * exp(-d_m * d_m / (SPOT_RADIUS_M * SPOT_RADIUS_M));
     }
     return color;
+}
+
+/** @brief `grid_normal` is the unit normal, toward +axis, of the grid plane of structure st through local point p. @par Example @code float4 t = grid_normal(st, p, 0); @endcode */
+static float4 grid_normal(device const VoxelStructure &st, float4 p, int axis) {
+    float c = p[axis] / p.w;
+    float4 n_local = float4(0.0);
+    n_local[axis] = 1.0;
+    n_local.w = c;
+    n_local *= rsqrt(max(1.0 - c * c, TINY));
+    float4 n = st.rows[0] * n_local.x + st.rows[1] * n_local.y + st.rows[2] * n_local.z - st.rows[3] * n_local.w;
+    n.w = -n.w;
+    return n;
 }
 
 /** @brief `detail_fraction` gives how much per-block detail to keep at a distance. @par Example @code float d = detail_fraction(scene, s); @endcode */
@@ -594,7 +878,11 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     float tile_normal_scale = rsqrt(1.0 - tile_klein_half * tile_klein_half);
     float tile_inradius_s = atanh(tile_klein_half), cell_s = tile_inradius_s / float(TILE_CELLS_PER_HALF);
     float detail = detail_fraction(scene, dist_s);
-    float3 y = float3(x.x, x.z, x.w);
+    bool has_terrain = u.has_terrain != 0;
+    float3 fermi = get_fermi(x, r);
+    float cosh_v = cosh(fermi.y / r);
+    float4 foot = has_terrain ? float4(sinh(fermi.y / r), 0.0, -cosh_v * sinh(fermi.x / r), cosh_v * cosh(fermi.x / r)) : x;
+    float3 y = float3(foot.x, foot.z, foot.w);
     float3x3 N = float3x3(1.0);
     if (dist_s < GROUND_DETAIL_S) {
         for (int i = 0; i < MAX_FOLDS; i++) {
@@ -611,6 +899,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     float2 cell = floor(a), uv = a - cell, kc = tanh((cell + 0.5) * cell_s);
     float3 centre = N * (float3(kc, 1.0) * rsqrt(max(1.0 - dot(kc, kc), TINY)));
     if (dist_s >= GROUND_DETAIL_S) centre = y;
+    if (has_terrain) centre = float3(foot.x, foot.z, foot.w);
     float u_m = -r * clamp_atanh(centre.y / centre.z), v_m = r * asinh(centre.x), r_m = acosh(max(centre.z, 1.0)) * r;
     float h = hash_3d(floor(centre * CELL_HASH_SCALE) * HASH_SHRINK);
     float3 albedo = get_palette(scene, u.mat_regolith).rgb * (MARIA_BASE + MARIA_CONTRAST * sample_fbm_3d(float3(u_m, v_m, 0.0) * MARIA_PER_M));
@@ -620,9 +909,9 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
         float theta = atan2(centre.x, -centre.y);
         float ray = smoothstep(EJECTA_RAY_EDGES.x, EJECTA_RAY_EDGES.y, sample_noise_3d(float3(theta * EJECTA_RAY_COUNT, 0.0, 1.0)))
                   * (1.0 - smoothstep(EJECTA_INNER_M, EJECTA_OUTER_M, r_m));
-        albedo = mix(albedo, EJECTA_COLOR, EJECTA_STRENGTH * ray);
+        albedo = mix(albedo, to_linear(EJECTA_COLOR), EJECTA_STRENGTH * ray);
     }
-    if (dist_s < GROUND_DETAIL_S && r_m > CRATER_RIM_RADIUS_M + CRATERLET_CLEARANCE_M) {
+    if (!has_terrain && dist_s < GROUND_DETAIL_S && r_m > CRATER_RIM_RADIUS_M + CRATERLET_CLEARANCE_M) {
         float2 local = (cell + 0.5) * cell_s, best = float2(NO_HIT_S, 0.0);
         for (int i = 0; i < 9; i++) {
             float2 cand = (float2(float(i % 3), float(i / 3)) - 1.0) * tile_inradius_s * CRATERLET_SPACING_FRAC;
@@ -644,18 +933,30 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
         if (abs(u_m) > zone_edge_u_m) albedo *= mix(float3(1.0), (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_TINT_GAIN, ZONE_TINT_FRAC);
         if (abs(abs(u_m) - zone_edge_u_m) < ZONE_STRIP_M && abs(v_m) < boundary_v_m) glow = (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
         float e = (u_m / boundary_u_m) * (u_m / boundary_u_m) + (v_m / boundary_v_m) * (v_m / boundary_v_m);
-        if (e > 1.0) {
+        if (has_terrain) {
+        } else if (e > 1.0) {
             albedo *= OUTSIDE_DARKEN;
         } else if (e > 1.0 - BOUNDARY_STRIP_FRAC) {
             float stripes = floor(u_m / HAZARD_STRIPE_M) + floor(v_m / HAZARD_STRIPE_M);
-            albedo = stripes - 2.0 * floor(stripes / 2.0) < 0.5 ? get_palette(scene, u.mat_hazard).rgb : HAZARD_DARK_COLOR;
+            albedo = stripes - 2.0 * floor(stripes / 2.0) < 0.5 ? get_palette(scene, u.mat_hazard).rgb : to_linear(HAZARD_DARK_COLOR);
         }
     }
-    float texel = hash_3d(float3(floor(uv * SUBTEXELS), h * CELL_SEED));
-    albedo *= 1.0 + detail * (BLOCK_NOISE * (h - 0.5) + TEXEL_NOISE * (texel - 0.5));
-    float2 edge = min(uv, 1.0 - uv);
-    albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * GROUND_EDGE_FRAC);
-    return light_surface(scene, albedo, x, float4(0.0, 1.0, 0.0, 0.0), v) + glow;
+    float texel = has_texture(scene, u.mat_regolith) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), h * CELL_SEED));
+    float4 n = float4(0.0, 1.0, 0.0, 0.0);
+    if (has_terrain) {
+        n = terrain_normal(scene, fermi);
+    } else {
+        albedo *= 1.0 + detail * (BLOCK_NOISE * (h - 0.5) + TEXEL_NOISE * (texel - 0.5));
+        float2 edge = min(uv, 1.0 - uv);
+        albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * GROUND_EDGE_FRAC);
+    }
+    float3 tx = N * (float3(1.0, 0.0, 0.0) + y.x * y), tz = N * (float3(0.0, 1.0, 0.0) + y.y * y);
+    float4 t4 = float4(tx.x, 0.0, tx.y, tx.z), b4 = float4(tz.x, 0.0, tz.y, tz.z);
+    t4 += mdot(t4, x) * x;
+    b4 += mdot(b4, x) * x;
+    float4 t = orthonormal(t4, n), b = -orthonormal(b4, n);
+    Surface s = sample_surface(scene, u.mat_regolith, albedo, a, cell_s * r, dist_s, x, n, t, b, v);
+    return light_surface(scene, s, x, n, v) + glow;
 }
 
 /**
@@ -672,31 +973,37 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     device const VoxelStructure &st = scene.structures[h.k];
     float4 r0 = st.rows[0], r1 = st.rows[1], r2 = st.rows[2], r3 = st.rows[3];
     float4 p = float4(dot(r0, x), dot(r1, x), dot(r2, x), dot(r3, x));
-    int axis = h.axis < 0 ? 1 : h.axis;
-    float c = p[axis] / p.w;
-    float4 n_local = float4(0.0);
-    n_local[axis] = 1.0;
-    n_local.w = c;
-    n_local *= (h.axis < 0 ? 1.0 : h.sgn) * rsqrt(max(1.0 - c * c, TINY));
+    device const Shape &sh = scene.shapes[h.cell.x];
+    float3 q = h.g, grad = float3(0.0);
+    for (int i = 0; i < 3; i++) {
+        float3 e = float3(0.0);
+        e[i] = SHAPE_NORMAL_M;
+        grad[i] = shape_distance(sh, q + e) - shape_distance(sh, q - e);
+    }
+    grad = normalize(grad);
+    float4 n_local = float4(grad, dot(grad, p.xyz / p.w));
+    n_local *= rsqrt(max(1.0 - n_local.w * n_local.w, TINY));
     float4 n = r0 * n_local.x + r1 * n_local.y + r2 * n_local.z - r3 * n_local.w;
     n.w = -n.w;
-    float2 uv = fract(float2(h.g[(axis + 1) % 3], h.g[(axis + 2) % 3]));
+    float3 a_grad = abs(grad);
+    int axis = a_grad.x > a_grad.y && a_grad.x > a_grad.z ? 0 : (a_grad.y > a_grad.z ? 1 : 2);
+    float4 t = orthonormal(grid_normal(st, p, (axis + 1) % 3), n), b = -orthonormal(grid_normal(st, p, (axis + 2) % 3), n);
+    float2 g = float2(q[(axis + 1) % 3], q[(axis + 2) % 3]), uv = fract(g);
     int m = h.mat;
     float4 entry = get_palette(scene, m);
     float3 albedo = entry.rgb;
     float glow = entry.a, block = hash_3d(float3(h.cell) + float(h.k) * STRUCT_SEED), detail = detail_fraction(scene, dist_s);
     float stripe = step(0.5, fract((uv.x + uv.y) * STRIPES_PER_BLOCK));
     if (m >= u.mat_console_first && m < u.mat_console_first + u.mat_console_count) albedo *= 1.0 - CONSOLE_STRIPE_DARKEN * (1.0 - stripe);
-    if (m == u.mat_solar) albedo = mix(albedo, SOLAR_GRID_COLOR, step(SOLAR_GRID_EDGE, max(fract(uv.x * SOLAR_CELLS.x), fract(uv.y * SOLAR_CELLS.y))));
-    if (m == u.mat_hazard) albedo = mix(albedo, HAZARD_STRIPE_COLOR, stripe);
+    if (m == u.mat_solar) albedo = mix(albedo, to_linear(SOLAR_GRID_COLOR), step(SOLAR_GRID_EDGE, max(fract(uv.x * SOLAR_CELLS.x), fract(uv.y * SOLAR_CELLS.y))));
+    if (m == u.mat_hazard) albedo = mix(albedo, to_linear(HAZARD_STRIPE_COLOR), stripe);
     if (m == u.mat_gold_foil) albedo *= 1.0 - FOIL_VARIATION * (0.5 - hash_3d(float3(floor(uv * FOIL_CRINKLES), block)));
     if (m == u.mat_hull || m == u.mat_pad) albedo *= 1.0 - PANEL_SEAM_DARKEN * step(PANEL_SEAM_EDGE, max(fract(uv.x * PANEL_SEAMS), fract(uv.y * PANEL_SEAMS)));
-    float texel = hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
+    float texel = has_texture(scene, m) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
     albedo *= 1.0 + detail * (BLOCK_NOISE * (block - 0.5) + TEXEL_NOISE * (texel - 0.5));
-    float2 edge = min(uv, 1.0 - uv);
-    albedo *= mix(1.0, mix(EDGE_DARKEN, 1.0, smoothstep(0.0, EDGE_WIDTH, min(edge.x, edge.y))), detail * (1.0 - glow));
-    if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM * smoothstep(0.0, GLOW_RIM, min(edge.x, edge.y)));
-    return light_surface(scene, albedo, x, n, v);
+    if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM);
+    Surface s = sample_surface(scene, m, albedo, g, u.curvature_radius_m / st.scale.x, dist_s, x, n, t, b, v);
+    return light_surface(scene, s, x, n, v);
 }
 
 /** @brief `sample_star_layer` draws one layer of stars from a grid on the cube around the sky. @par Example @code float s = sample_star_layer(scene, d, 60.0, 0.03); @endcode */
@@ -909,14 +1216,13 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
         Hit hit = {0.0, end.cell.w, end.surface.y, end.surface.z, end.glow.x, end.grid.xyz, end.cell.xyz};
         color = shade_block(scene, hit, end.point, end.view, end.grid.w);
     } else if (end.surface.x == OUTCOME_SKY) {
-        color = sample_sky(scene, end.point.xyz);
+        color = to_linear(sample_sky(scene, end.point.xyz));
     }
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
-    float3 beam_color = end.surface.w > 0 ? RED_COLOR : BLUE_COLOR;
-    if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + GLASS_SHEEN;
+    float3 beam_color = to_linear(end.surface.w > 0 ? RED_COLOR : BLUE_COLOR);
+    if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
     color = mix(color, beam_color, clamp(BEAM_HALO_OPACITY * halo, 0.0, 1.0)) + mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * core;
-    color = color / (1.0 + max(color - 1.0, 0.0) * TONEMAP_KNEE);
-    return clamp(color, 0.0, 1.0);
+    return max(color, 0.0);
 }
 
 /** @brief `write_pixel` shades a ray end into pixel `id`. @par Example @code write_pixel(scene, end, id, image); @endcode */
@@ -933,7 +1239,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1012,16 +1318,7 @@ static bool interpolate_ray_end(thread const Scene &scene, VoxelRayEnd a, VoxelR
     end.point = point * rsqrt(-mdot(point, point));
     end.view = normalize_tangent(end.point, mix(mix(a.view, b.view, wx), mix(c.view, d.view, wx), wy));
     if (a.surface.y < 0) return true;
-    device const VoxelStructure &st = scene.structures[a.surface.y];
-    int axis = a.surface.z;
-    int3 dims = st.size.xyz, cell = clamp(int3(floor(end.grid.xyz)), int3(0), dims - 1), front = cell;
-    cell[axis] = a.cell[axis];
-    front[axis] = cell[axis] + int(a.glow.x);
-    device const uchar *cells = scene.voxels + st.size.w;
-    int m = int(cells[cell.x + dims.x * (cell.y + dims.y * cell.z)]);
-    bool is_front_open = any(front < int3(0)) || any(front >= dims) || cells[front.x + dims.x * (front.y + dims.y * front.z)] == 0;
-    end.cell = int4(cell, m);
-    return m != 0 && m != scene.u.mat_glass && is_front_open;
+    return all(int3(b.surface.y, c.surface.y, d.surface.y) == a.surface.y) && all(int3(b.cell.x, c.cell.x, d.cell.x) == a.cell.x);
 }
 
 /** @brief `get_sample_columns` gives how many samples a row of the fine grid has (one per even pixel column, one past the edge). @par Example @code int columns = get_sample_columns(u); @endcode */
@@ -1046,7 +1343,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -1070,7 +1367,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -1107,7 +1404,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -1162,7 +1459,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1181,11 +1478,84 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, voxels, warps, warp_lists, lights, palette, beams, clearances};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {
         end = trace_ray(scene, float2(id) + 0.5);
     }
     write_pixel(scene, end, id, image);
+}
+
+/** @brief `aces_fitted` is Stephen Hill's fit of the ACES reference rendering transform (from the fps_demo). @par Example @code float3 d = aces_fitted(c); @endcode */
+static float3 aces_fitted(float3 color) {
+    const float3x3 input_matrix = float3x3(float3(0.59719, 0.07600, 0.02840), float3(0.35458, 0.90834, 0.13383), float3(0.04823, 0.01566, 0.83777));
+    const float3x3 output_matrix = float3x3(float3(1.60475, -0.10208, -0.00327), float3(-0.53108, 1.10813, -0.07276), float3(-0.07367, -0.00605, 1.07602));
+    float3 v = input_matrix * color;
+    float3 a = v * (v + 0.0245786) - 0.000090537;
+    float3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return saturate(output_matrix * (a / b));
+}
+
+/** @brief `linear_to_srgb` applies the sRGB transfer function. @par Example @code float3 e = linear_to_srgb(c); @endcode */
+static float3 linear_to_srgb(float3 color) { return select(1.055 * pow(color, 1.0 / 2.4) - 0.055, color * 12.92, color <= 0.0031308); }
+
+/** @brief `grade_scene` is the fps_demo's scene-linear grade: white balance, log contrast around middle grey, saturation. @par Example @code float3 g = grade_scene(c); @endcode */
+static float3 grade_scene(float3 color) {
+    color *= GRADE_WHITE_BALANCE;
+    float luminance = max(dot(color, LUMA), 1e-6);
+    float graded_luminance = GRADE_MIDDLE_GREY * pow(luminance / GRADE_MIDDLE_GREY, GRADE_CONTRAST);
+    color *= graded_luminance / luminance;
+    return max(mix(float3(graded_luminance), color, GRADE_SATURATION), 0.0);
+}
+
+/** @brief `grade_display` is the fps_demo's display grade: cool shadows and warm highlights. @par Example @code float3 g = grade_display(c); @endcode */
+static float3 grade_display(float3 color) {
+    float3 tint = mix(GRADE_SHADOW_TINT, GRADE_HIGHLIGHT_TINT, smoothstep(0.05, 0.6, saturate(dot(color, LUMA))));
+    return saturate(color * tint);
+}
+
+/**
+ * @brief `bloom_down` halves texture 1 into texture 2 for the bloom chain: four bilinear taps over a 4x4 block, each
+ * damped by Karis' weight so single bright pixels don't bloom.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs once per bloom level, one thread per smaller pixel.
+ * @endcode
+ */
+kernel void bloom_down(texture2d<float> source [[texture(1)]], texture2d<float, access::write> target [[texture(2)]], uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= target.get_width() || id.y >= target.get_height()) return;
+    constexpr sampler edge(filter::linear, address::clamp_to_edge);
+    float2 texel = 1.0 / float2(source.get_width(), source.get_height());
+    float2 uv = (float2(id) + 0.5) / float2(target.get_width(), target.get_height());
+    float3 sum = float3(0.0);
+    float weight = 0.0;
+    for (int i = 0; i < 4; i++) {
+        float3 c = source.sample(edge, uv + texel * (float2(i & 1, i >> 1) * 2.0 - 1.0)).rgb;
+        float w = 1.0 / (1.0 + dot(c, LUMA));
+        sum += c * w;
+        weight += w;
+    }
+    target.write(float4(sum / weight, 1.0), id);
+}
+
+/**
+ * @brief `tonemap_voxel` finishes the HDR image (texture 1) like the fps_demo: mixes in the bloom levels, exposes,
+ * grades, tone maps with ACES, vignettes and encodes sRGB into texture 0.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs after tracing, one thread per pixel.
+ * @endcode
+ */
+kernel void tonemap_voxel(texture2d<float> hdr [[texture(1)]], array<texture2d<float>, BLOOM_LEVELS> bloom [[texture(7)]],
+                          texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= hdr.get_width() || id.y >= hdr.get_height()) return;
+    constexpr sampler edge(filter::linear, address::clamp_to_edge);
+    float2 uv = (float2(id) + 0.5) / float2(hdr.get_width(), hdr.get_height());
+    float3 bloom_color = float3(0.0);
+    for (int k = 0; k < BLOOM_LEVELS; k++) bloom_color += bloom[k].sample(edge, uv).rgb;
+    float3 color = mix(hdr.read(id).rgb, bloom_color / float(BLOOM_LEVELS), BLOOM_STRENGTH) * EXPOSURE;
+    color = grade_display(aces_fitted(grade_scene(color)));
+    color *= 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length((uv - 0.5) * float2(1.1, 1.0)));
+    image.write(float4(linear_to_srgb(saturate(color)), 1.0), id);
 }

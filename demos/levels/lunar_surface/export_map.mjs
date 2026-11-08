@@ -1,7 +1,7 @@
 /**
  * `export_map.mjs` exports the Lunar Surface level to the portable map format of `common/maps/` (see its README): it
  * runs the level's own layout code from `index.html` (everything before the WebGL set-up, plus the functions that
- * find where a player stands) in a Node VM, then writes `map.json` and `voxels.bin` into
+ * find where a player stands) in a Node VM, then writes `map.json` into
  * `common/maps/lunar_surface/`, replacing what is there. The map files are generated: rerun this after changing the
  * level's layout.
  *
@@ -21,11 +21,11 @@ const LAYOUT_START = 'const CURVATURE_RADIUS_M';
 const LAYOUT_END = "const canvas = document.getElementById('canvas');";
 const STANDING_START = 'function find_nearby_structures';
 const STANDING_END = 'function move_optically';
-const CELL_M = 1;
 const SUN_COLOR = [1.0, 0.96, 0.88];
 const LIGHTING = { model: 'lunar_lambert', lommel_seeliger_frac: 0.7, ambient: 0.11, earthshine: 0.08, sun_intensity: 1.45, shadows: true };
 const SPACE_COLOR = [0, 0, 0];
 const TEAM_NAMES = ['blue', 'red'];
+const TERRAIN = { kind: 'crater', rim_u_m: 190, rim_v_m: 90, wall_m: 30, rim_height_m: 22, relief_m: 2.5, relief_wavelength_m: 18, seed: 1 };
 
 /**
  * `cut_between` returns the text of `source` from the start of `start` to the start of `end`.
@@ -48,13 +48,16 @@ function cut_between(source, start, end) {
  * @example const level = run_level(readFileSync('index.html', 'utf8'));
  */
 function run_level(html) {
-  const code = cut_between(html, LAYOUT_START, LAYOUT_END) + cut_between(html, STANDING_START, STANDING_END);
+  const level_code = cut_between(html, LAYOUT_START, LAYOUT_END), build_call = '\nconst level = build_level();';
+  if (!level_code.includes(build_call)) throw new Error(`run_level: index.html no longer has ${JSON.stringify(build_call)}`);
+  const code = level_code.replace(build_call, '') + cut_between(html, STANDING_START, STANDING_END) +
+    readFileSync(path.join(LEVEL_FOLDER, 'shape_builders.js'), 'utf8') + build_call;
   const exported = `;({ structures, warps, lamps, MATERIALS, MAT, SPAWNS, CURVATURE_RADIUS_M, GRAVITY_M_PER_S_PER_S, EYE_HEIGHT_M,
     WALK_SPEED_M_PER_S, SPRINT_SPEED_M_PER_S, JUMP_SPEED_M_PER_S, FLY_SPEED_M_PER_S, BLACK_HOLE_RS_M, BLACK_HOLE_REACH_M,
     WORMHOLE_RS_M, WORMHOLE_REACH_M, FOIL_LAMBDA_SQ, TILE_CELLS_PER_HALF, SUN_ELEVATION_RAD, SUN_AZIMUTH_RAD,
     PLANET_ELEVATION_RAD, PLANET_AZIMUTH_RAD, PLANET_RADIUS_RAD, ZONE_EDGE_U_M, BOUNDARY_U_M, BOUNDARY_V_M, KIND_MOUTH,
     make_frame, make_boost, multiply_matrices, get_facing_yaw, find_standing_height, Y })`;
-  return vm.runInNewContext(code + exported, {}, { filename: 'lunar_surface/index.html' });
+  return vm.runInNewContext(code + exported, { TERRAIN }, { filename: 'lunar_surface/index.html' });
 }
 
 /**
@@ -70,24 +73,17 @@ function make_sky_direction(elevation_rad, azimuth_rad) {
 }
 
 /**
- * `make_map` turns the level into a map manifest and its voxel bytes.
+ * `make_map` turns the level into a map manifest.
  * @param {Object} level What `run_level` returned.
- * @return {{manifest: Object, voxels: Uint8Array}} The map.
- * @example const { manifest, voxels } = make_map(level);
+ * @return {Object} The map manifest.
+ * @example const manifest = make_map(level);
  */
 function make_map(level) {
   const R = level.CURVATURE_RADIUS_M;
   const materials = level.MATERIALS.map(([name, color, glow], id) => ({
     id, name, color, kind: id === 0 ? 'empty' : id === level.MAT.GLASS ? 'glass' : glow > 0 ? 'light' : 'solid'
   }));
-  let offset_bytes = 0;
-  const structures = level.structures.map(structure => {
-    const voxels = { size: structure.dims, cell_m: CELL_M, origin: structure.off, offset_bytes };
-    offset_bytes += structure.cells.length;
-    return { name: structure.name, frame: Array.from(structure.frame), voxels };
-  });
-  const voxels = new Uint8Array(offset_bytes);
-  level.structures.reduce((at, structure) => { voxels.set(structure.cells, at); return at + structure.cells.length; }, 0);
+  const structures = level.structures.map(structure => ({ name: structure.name, frame: Array.from(structure.frame), shapes: structure.shapes }));
   const warps = level.warps.map(warp => {
     const is_mouth = warp.kind === level.KIND_MOUTH;
     return {
@@ -115,7 +111,7 @@ function make_map(level) {
       jump_m_per_s: level.JUMP_SPEED_M_PER_S, fly_m_per_s: level.FLY_SPEED_M_PER_S
     },
     materials,
-    ground: { material: level.MAT.REGOLITH, tiling: { kind: 'square_order_5', cells_per_side: 2 * level.TILE_CELLS_PER_HALF } },
+    ground: { material: level.MAT.REGOLITH, tiling: { kind: 'square_order_5', cells_per_side: 2 * level.TILE_CELLS_PER_HALF }, terrain: TERRAIN },
     structures, warps,
     lights: level.lamps.map(lamp => ({ position: Array.from(lamp.x), color: lamp.color, radius_m: lamp.radius_m })),
     sky: {
@@ -134,7 +130,7 @@ function make_map(level) {
     },
     appearance: { style: 'lunar', lighting: LIGHTING }
   };
-  return { manifest, voxels };
+  return manifest;
 }
 
 /**
@@ -149,11 +145,11 @@ function main() {
     process.exit(2);
   }
   const output_folder = is_flag ? path.resolve(args[1]) : DEFAULT_OUTPUT_FOLDER;
-  const { manifest, voxels } = make_map(run_level(readFileSync(path.join(LEVEL_FOLDER, 'index.html'), 'utf8')));
+  const manifest = make_map(run_level(readFileSync(path.join(LEVEL_FOLDER, 'index.html'), 'utf8')));
   mkdirSync(output_folder, { recursive: true });
   writeFileSync(path.join(output_folder, 'map.json'), JSON.stringify(manifest, null, 1) + '\n');
-  writeFileSync(path.join(output_folder, 'voxels.bin'), voxels);
-  console.log(`Wrote ${manifest.structures.length} structures (${voxels.length} voxel bytes), ${manifest.warps.length} warps and ${manifest.lights.length} lights to ${output_folder}`);
+  const shape_count = manifest.structures.reduce((n, structure) => n + structure.shapes.length, 0);
+  console.log(`Wrote ${manifest.structures.length} structures (${shape_count} shapes), ${manifest.warps.length} warps and ${manifest.lights.length} lights to ${output_folder}`);
 }
 
 main();

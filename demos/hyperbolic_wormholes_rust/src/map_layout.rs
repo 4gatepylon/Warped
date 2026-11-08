@@ -1,8 +1,8 @@
 //! `map_layout.rs` draws a whole map seen from above, for the menu's map page: a picture in the
 //! map's Fermi coordinates (`common/maps/README.md`), u to the right and v down, with the top of
-//! every structure and box in its material's colour (brighter the higher it is), the consoles, the
-//! black hole and wormhole mouths, the spawns, the team zones' edges, the playable boundary, and,
-//! on each frame, the player.
+//! every structure and box in its material's colour (brighter the higher it stands), the ground's
+//! relief, everything shaded as if lit from the top left, the consoles, the black hole and wormhole
+//! mouths, the spawns, the team zones' edges, the playable boundary, and, on each frame, the player.
 //!
 //! Interface: `MapLayout` (`FromMap`, `draw_player`, `get_size_px`).
 //!
@@ -12,8 +12,9 @@
 //! - Fermi coordinates aren't distances: along u, a meter at v from the middle line takes only
 //!   1 / cosh(v / R) of a meter on the picture, so things far above and below the middle line look
 //!   squeezed from side to side. That is the hyperbolic plane showing.
-//! - Each structure's and box's frame must keep the ground (y = 0) as its own y = 0, as every
-//!   shipped map's frames do: the picture reads each column straight down from there.
+//! - The picture reads a structure's shapes, and a box, straight down through the height of its
+//!   frame's origin, so a frame must keep "up" pointing away from the ground, as every shipped
+//!   map's frames do.
 
 use std::error::Error;
 
@@ -21,11 +22,11 @@ use glam::{DMat4, DVec3, DVec4};
 use sdl3::pixels::{Color, PixelFormat};
 use sdl3::surface::Surface;
 
-use crate::geometry::{
-    AXIS_W, AXIS_X, AXIS_Z, get_fermi_coordinates, invert_lorentz, make_fermi_point,
-};
+use crate::geometry::{AXIS_W, AXIS_Z, invert_lorentz, make_fermi_point};
 use crate::map::{Map, to_frame};
 use crate::net::TEAM_NAMES;
+use crate::shapes::{Shape, find_hit_mu};
+use crate::terrain::{Terrain, get_fermi_coordinates};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -36,9 +37,10 @@ const GROUND_SHADE_FRAC: f32 = 0.45;
 const OUTSIDE_SHADE_FRAC: f32 = 0.4;
 const LOW_SHADE_FRAC: f32 = 0.6;
 const FULL_SHADE_HEIGHT_M: f64 = 12.0;
-const EDGE_RISE_M: f64 = 0.5;
-const LIT_EDGE_FRAC: f32 = 1.25;
-const SHADOW_EDGE_FRAC: f32 = 0.6;
+const LIGHT_TOWARD: [f64; 3] = [-1.0, -1.0, 1.0];
+const MIN_RELIEF_SHADE_FRAC: f64 = 0.35;
+const MAX_RELIEF_SHADE_FRAC: f64 = 1.6;
+const COLUMN_TOP_MARGIN_M: f64 = 0.5;
 const GAMMA: f32 = 2.2;
 const ZONE_DASH_PX: usize = 6;
 const ZONE_COLOR: [u8; 3] = [230, 230, 230];
@@ -66,33 +68,26 @@ const MOUTH_NAME_PREFIX: &str = "wormhole mouth ";
 const MATERIAL_KIND_LIGHT: &str = "light";
 const SPAWN_TEAM_ANY: &str = "any";
 
-/// `Top` is what a column of a structure or box shows from above: how high its top is, in meters
-/// above the ground, and its material.
+/// `Top` is what a column of a structure or box shows from above: its top's Fermi height h in
+/// meters, and its material.
 type Top = (f64, u8);
 
 /// `Footprint` is one structure or box seen from above: the map from the world to its frame, the
-/// circle on the picture's plane (u, v) that holds it, and its shape.
+/// height of its frame's origin, the circle on the picture's plane (u, v) that holds it, and its
+/// form.
 struct Footprint {
     to_local: DMat4,
+    center_h_m: f64,
     center_m: [f64; 2],
     radius_m: f64,
-    shape: Shape,
+    form: Form,
 }
 
-/// `Shape` is a footprint's shape: a voxel grid with each column's top (`None` for an empty
-/// column), or a box at a height with its half sizes and material.
-enum Shape {
-    Voxels {
-        cell_m: f64,
-        size: [usize; 3],
-        origin: [i32; 3],
-        tops: Vec<Option<Top>>,
-    },
-    Box {
-        center_h_m: f64,
-        half_size_m: [f64; 3],
-        material: u8,
-    },
+/// `Form` is a footprint's form: a structure's smooth shapes (in its local chart, meters), or a box
+/// with its half sizes and material.
+enum Form {
+    Shapes(Vec<Shape>),
+    Box { half_size_m: [f64; 3], material: u8 },
 }
 
 impl Footprint {
@@ -101,32 +96,47 @@ impl Footprint {
     ///
     /// Example: `let top = footprint.get_top(12.0, -3.0, 40.0);`
     fn get_top(&self, u_m: f64, v_m: f64, r_m: f64) -> Option<Top> {
-        match &self.shape {
-            Shape::Voxels {
-                cell_m,
-                size,
-                origin,
-                tops,
-            } => {
-                let p: DVec4 = self.to_local * make_fermi_point(u_m, v_m, 0.0, r_m);
-                let i: i64 = (r_m * p.x / p.w / cell_m).floor() as i64 + i64::from(origin[0]);
-                let k: i64 = (r_m * p.z / p.w / cell_m).floor() as i64 + i64::from(origin[2]);
-                let is_inside: bool =
-                    (0..size[0] as i64).contains(&i) && (0..size[2] as i64).contains(&k);
-                if !is_inside {
-                    return None;
-                }
-                tops[i as usize + size[0] * k as usize]
+        let p: DVec4 = self.to_local * make_fermi_point(u_m, v_m, self.center_h_m, r_m);
+        match &self.form {
+            Form::Shapes(shapes) => {
+                let (q_x_m, q_z_m) = (r_m * p.x / p.w, r_m * p.z / p.w);
+                let candidates: Vec<Shape> = shapes
+                    .iter()
+                    .filter(|shape| {
+                        let reach_m: f64 = shape.half.max_element();
+                        (q_x_m - shape.centre.x).abs() <= reach_m
+                            && (q_z_m - shape.centre.z).abs() <= reach_m
+                    })
+                    .copied()
+                    .collect();
+                let start_m: f64 = candidates
+                    .iter()
+                    .map(|shape| shape.centre.y + shape.half.max_element())
+                    .fold(f64::MIN, f64::max)
+                    + COLUMN_TOP_MARGIN_M;
+                let end_m: f64 = candidates
+                    .iter()
+                    .map(|shape| shape.centre.y - shape.half.max_element())
+                    .fold(f64::MAX, f64::min);
+                let (mu, i) = find_hit_mu(
+                    &candidates,
+                    DVec3::new(q_x_m, start_m, q_z_m),
+                    DVec3::new(0.0, end_m - start_m, 0.0),
+                    0.0,
+                    1.0,
+                )?;
+                Some((
+                    self.center_h_m + start_m + mu * (end_m - start_m),
+                    candidates[i].material,
+                ))
             }
-            Shape::Box {
-                center_h_m,
+            Form::Box {
                 half_size_m,
                 material,
             } => {
-                let p: DVec4 = self.to_local * make_fermi_point(u_m, v_m, *center_h_m, r_m);
                 let is_inside: bool = p.x.abs() <= (half_size_m[0] / r_m).sinh()
                     && p.z.abs() <= (half_size_m[2] / r_m).sinh();
-                is_inside.then_some((center_h_m + half_size_m[1], *material))
+                is_inside.then_some((self.center_h_m + half_size_m[1], *material))
             }
         }
     }
@@ -184,8 +194,8 @@ impl MapLayout {
             }
         }
         let mut labels: Vec<(String, [f64; 2])> = Vec::new();
-        for (cell_m, team) in find_console_cells(map, r_m) {
-            let center_px: [f64; 2] = layout.get_px(cell_m);
+        for (point_m, team) in find_console_points(map, r_m) {
+            let center_px: [f64; 2] = layout.get_px(point_m);
             layout.paint_disk(
                 center_px,
                 CONSOLE_MARKER_RADIUS_PX,
@@ -288,10 +298,10 @@ impl MapLayout {
         ]
     }
 
-    /// `paint_tops` paints every pixel: the highest top of the footprints there in its material's
-    /// colour (lights at full brightness, the rest brighter the higher), lit or shadowed where it
-    /// rises above or drops below its upper and left neighbours, else the ground, darker outside
-    /// the boundary, which gets a white outline.
+    /// `paint_tops` paints every pixel: the highest top of the footprints there above the ground in
+    /// its material's colour (lights at full brightness, the rest brighter the higher above the
+    /// ground), else the ground; then lit from the top left by the slope of those heights, darker
+    /// outside the boundary, which gets a white outline.
     ///
     /// Example: `layout.paint_tops(&map, &footprints, Some([128.0, 72.0]))?;`
     fn paint_tops(
@@ -318,16 +328,23 @@ impl MapLayout {
             }
         };
         let ground: [f32; 3] = map.get_material(map.ground.material)?.color;
+        let terrain: Option<Terrain> = map.ground.terrain.as_ref().map(Terrain::FromMap);
         let mut heights_m: Vec<f64> = vec![0.0; width * height];
         let mut colors: Vec<[f32; 3]> = vec![[0.0; 3]; width * height];
         for y in 0..height {
             for x in 0..width {
                 let [u_m, v_m] = get_point_m(x, y);
+                let ground_m: f64 = match &terrain {
+                    Some(terrain) => terrain.get_height_m(u_m, v_m),
+                    None => 0.0,
+                };
                 let top: Option<Top> = footprints
                     .iter()
                     .filter(|f| (u_m - f.center_m[0]).hypot(v_m - f.center_m[1]) <= f.radius_m)
                     .filter_map(|f| f.get_top(u_m, v_m, r_m))
+                    .filter(|(top_m, _)| *top_m > ground_m)
                     .max_by(|a, b| a.0.total_cmp(&b.0));
+                heights_m[x + width * y] = ground_m;
                 colors[x + width * y] = match top {
                     None => ground.map(|c| c * GROUND_SHADE_FRAC),
                     Some((top_m, id)) => {
@@ -338,7 +355,7 @@ impl MapLayout {
                         } else {
                             LOW_SHADE_FRAC
                                 + (1.0 - LOW_SHADE_FRAC)
-                                    * (top_m / FULL_SHADE_HEIGHT_M).min(1.0) as f32
+                                    * ((top_m - ground_m) / FULL_SHADE_HEIGHT_M).min(1.0) as f32
                         };
                         material.color.map(|c| c * shade_frac)
                     }
@@ -348,14 +365,22 @@ impl MapLayout {
         for y in 0..height {
             for x in 0..width {
                 let i: usize = x + width * y;
-                let neighbour_m: f64 = heights_m[x.saturating_sub(1) + width * y]
-                    .max(heights_m[x + width * y.saturating_sub(1)]);
-                let rise_m: f64 = heights_m[i] - neighbour_m;
-                let mut frac: f32 = match rise_m {
-                    _ if rise_m > EDGE_RISE_M => LIT_EDGE_FRAC,
-                    _ if rise_m < -EDGE_RISE_M => SHADOW_EDGE_FRAC,
-                    _ => 1.0,
+                let get_slope = |before: usize, after: usize| -> f64 {
+                    (heights_m[after] - heights_m[before]) / (2.0 * m_per_px)
                 };
+                let slope_x: f64 = get_slope(
+                    x.saturating_sub(1) + width * y,
+                    (x + 1).min(width - 1) + width * y,
+                );
+                let slope_y: f64 = get_slope(
+                    x + width * y.saturating_sub(1),
+                    x + width * (y + 1).min(height - 1),
+                );
+                let normal: DVec3 = DVec3::new(-slope_x, -slope_y, 1.0).normalize();
+                let toward_light: DVec3 = DVec3::from_array(LIGHT_TOWARD).normalize();
+                let mut frac: f32 = (normal.dot(toward_light) / toward_light.z)
+                    .clamp(MIN_RELIEF_SHADE_FRAC, MAX_RELIEF_SHADE_FRAC)
+                    as f32;
                 if !is_inside(x, y) {
                     frac *= OUTSIDE_SHADE_FRAC;
                 }
@@ -513,27 +538,19 @@ fn encode_srgb(linear: f32) -> u8 {
 fn make_footprints(map: &Map, r_m: f64) -> Result<Vec<Footprint>> {
     let mut footprints: Vec<Footprint> = Vec::new();
     for structure in &map.structures {
-        let grid = structure.voxels;
-        let size: [usize; 3] = grid.size.map(|n| n as usize);
-        let mut tops: Vec<Option<Top>> = vec![None; size[0] * size[2]];
-        for k in 0..size[2] {
-            for i in 0..size[0] {
-                tops[i + size[0] * k] = (0..size[1]).rev().find_map(|j| {
-                    let id: u8 = map.voxels[grid.offset_bytes + i + size[0] * (j + size[1] * k)];
-                    let top_m: f64 = (j as f64 + 1.0 - f64::from(grid.origin[1])) * grid.cell_m;
-                    (id != 0).then_some((top_m, id))
-                });
-            }
-        }
-        let far_corner_m: f64 = [AXIS_X, AXIS_Z]
-            .map(|a| {
-                grid.cell_m * f64::from(grid.origin[a].max(grid.size[a] as i32 - grid.origin[a]))
+        let shapes: Vec<Shape> = structure
+            .shapes
+            .iter()
+            .map(Shape::FromMap)
+            .collect::<std::result::Result<_, _>>()?;
+        let reach_m: f64 = shapes
+            .iter()
+            .map(|shape| {
+                let half_m: f64 = shape.half.max_element();
+                (shape.centre.x.abs() + half_m).hypot(shape.centre.z.abs() + half_m)
             })
-            .into_iter()
-            .map(|q_m| q_m * q_m)
-            .sum::<f64>()
-            .sqrt();
-        if far_corner_m >= r_m {
+            .fold(0.0, f64::max);
+        if reach_m >= r_m {
             return Err(format!(
                 "map {}: structure {:?} reaches past the horizon",
                 map.name, structure.name
@@ -542,25 +559,18 @@ fn make_footprints(map: &Map, r_m: f64) -> Result<Vec<Footprint>> {
         }
         footprints.push(make_footprint(
             to_frame(&structure.frame),
-            r_m * (far_corner_m / r_m).atanh(),
+            r_m * (reach_m / r_m).atanh(),
             r_m,
-            Shape::Voxels {
-                cell_m: grid.cell_m,
-                size,
-                origin: grid.origin,
-                tops,
-            },
+            Form::Shapes(shapes),
         ));
     }
     for map_box in &map.boxes {
-        let frame: DMat4 = to_frame(&map_box.frame);
         let [hx, _, hz] = map_box.half_size_m.map(|h| (h / r_m).sinh());
         footprints.push(make_footprint(
-            frame,
+            to_frame(&map_box.frame),
             r_m * (1.0 + hx * hx + hz * hz).sqrt().acosh(),
             r_m,
-            Shape::Box {
-                center_h_m: get_fermi_coordinates(frame.col(AXIS_W), r_m)[2],
+            Form::Box {
                 half_size_m: map_box.half_size_m,
                 material: map_box.material,
             },
@@ -569,57 +579,42 @@ fn make_footprints(map: &Map, r_m: f64) -> Result<Vec<Footprint>> {
     Ok(footprints)
 }
 
-/// `make_footprint` makes the footprint of a shape with frame `frame` that stays within
-/// `radius_m` of its origin.
+/// `make_footprint` makes the footprint of a form with frame `frame` that stays within `radius_m`
+/// of its origin.
 ///
-/// Example: `let footprint = make_footprint(frame, 9.0, 40.0, shape);`
-fn make_footprint(frame: DMat4, radius_m: f64, r_m: f64, shape: Shape) -> Footprint {
-    let [u_m, v_m, _] = get_fermi_coordinates(frame.col(AXIS_W), r_m);
+/// Example: `let footprint = make_footprint(frame, 9.0, 40.0, form);`
+fn make_footprint(frame: DMat4, radius_m: f64, r_m: f64, form: Form) -> Footprint {
+    let [u_m, v_m, h_m] = get_fermi_coordinates(frame.col(AXIS_W), r_m);
     Footprint {
         to_local: invert_lorentz(frame),
+        center_h_m: h_m,
         center_m: [u_m, v_m],
         radius_m,
-        shape,
+        form,
     }
 }
 
-/// `find_console_cells` gives every console cell of a map's structures: where its column meets
-/// the ground (u, v) and its team (an index into `TEAM_NAMES`), from the materials named
+/// `find_console_points` gives every console shape of a map's structures: the ground point (u, v)
+/// under its centre and its team (an index into `TEAM_NAMES`), from the materials named
 /// "<team> console <n>".
 ///
-/// Example: `for (point_m, team) in find_console_cells(&map, 40.0) { ... }`
-fn find_console_cells(map: &Map, r_m: f64) -> Vec<([f64; 2], u32)> {
-    let console_teams: Vec<(u8, u32)> = crate::voxel_world::find_consoles(map)
-        .iter()
-        .map(|console| (console.material, console.team))
-        .collect();
-    let mut cells: Vec<([f64; 2], u32)> = Vec::new();
+/// Example: `for (point_m, team) in find_console_points(&map, 40.0) { ... }`
+fn find_console_points(map: &Map, r_m: f64) -> Vec<([f64; 2], u32)> {
+    let consoles = crate::voxel_world::find_consoles(map);
+    let mut points: Vec<([f64; 2], u32)> = Vec::new();
     for structure in &map.structures {
-        let grid = structure.voxels;
         let frame: DMat4 = to_frame(&structure.frame);
-        let [n_x, n_y, n_z] = grid.size.map(|n| n as usize);
-        for k in 0..n_z {
-            for j in 0..n_y {
-                for i in 0..n_x {
-                    let id: u8 = map.voxels[grid.offset_bytes + i + n_x * (j + n_y * k)];
-                    let Some(&(_, team)) =
-                        console_teams.iter().find(|(material, _)| *material == id)
-                    else {
-                        continue;
-                    };
-                    let q: DVec3 = DVec3::new(
-                        (i as f64 + 0.5 - f64::from(grid.origin[0])) * grid.cell_m,
-                        0.0,
-                        (k as f64 + 0.5 - f64::from(grid.origin[2])) * grid.cell_m,
-                    ) / r_m;
-                    let local: DVec4 = q.extend(1.0) / (1.0 - q.length_squared()).sqrt();
-                    let [u_m, v_m, _] = get_fermi_coordinates(frame * local, r_m);
-                    cells.push(([u_m, v_m], team));
-                }
-            }
+        for shape in &structure.shapes {
+            let Some(console) = consoles.iter().find(|c| c.material == shape.material) else {
+                continue;
+            };
+            let q: DVec3 = DVec3::from_array(shape.centre_m) / r_m;
+            let local: DVec4 = q.extend(1.0) / (1.0 - q.length_squared()).sqrt();
+            let [u_m, v_m, _] = get_fermi_coordinates(frame * local, r_m);
+            points.push(([u_m, v_m], console.team));
         }
     }
-    cells
+    points
 }
 
 /// `get_bounds_m` gives the corners (u, v) of what the picture shows: the boundary, else every
@@ -668,8 +663,8 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Map | with a boundary, structures and consoles (Lunar Surface); without one, with boxes (the house) | `lunar_surface_fits_its_boundary`, `house_shows_its_boxes` |
-    //! | Pixel | ground, a structure's top, a console, a warp | `lunar_surface_fits_its_boundary`, `house_shows_its_boxes` |
+    //! | Map | with a boundary, terrain, structures and consoles (Lunar Surface); without one, with boxes (the house) | `lunar_surface_fits_its_boundary`, `house_shows_its_boxes` |
+    //! | Pixel | ground, a structure's top (blue and red), a box's top, a console | `lunar_surface_fits_its_boundary`, `house_shows_its_boxes` |
     //! | Player | at the world origin facing −z, which is +u | `player_points_along_u` |
     //! | Fermi coordinates | the ground, above it | `fermi_coordinates_round_trip` |
 
@@ -704,16 +699,23 @@ mod tests {
         let (width, height) = layout.get_size_px();
         assert!(width <= MAX_SIZE_PX.0 && height <= MAX_SIZE_PX.1);
         assert!(width == MAX_SIZE_PX.0 || height == MAX_SIZE_PX.1);
-        let ground: [u8; 3] = get_rgb(&layout.pixels, layout.size_px, width as usize / 2, 2);
-        let peak_px: [f64; 2] = layout.get_px([0.0, 0.0]);
-        let peak: [u8; 3] = get_rgb(
-            &layout.pixels,
-            layout.size_px,
-            peak_px[0] as usize + 10,
-            peak_px[1] as usize,
-        );
-        assert_ne!(ground, peak, "the central peak shows over the ground");
-        let (point_m, team) = find_console_cells(&map, layout.r_m)[0];
+        for (name, team) in [("blue pylon", 0), ("red pylon", 1)] {
+            let structure = map
+                .structures
+                .iter()
+                .find(|s| s.name == name)
+                .expect("a pylon");
+            let [u_m, v_m, _] =
+                get_fermi_coordinates(to_frame(&structure.frame).col(AXIS_W), layout.r_m);
+            let [x, y] = layout.get_px([u_m, v_m]).map(|p| p as usize);
+            let [r, _, b] = get_rgb(&layout.pixels, layout.size_px, x, y);
+            assert_eq!(
+                b > r,
+                team == 0,
+                "{name} shows in its team's colour, not {r}, {b}"
+            );
+        }
+        let (point_m, team) = find_console_points(&map, layout.r_m)[0];
         let console_px: [f64; 2] = layout.get_px(point_m);
         assert_eq!(
             get_rgb(

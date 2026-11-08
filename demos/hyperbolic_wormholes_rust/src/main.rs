@@ -35,7 +35,11 @@ mod render_metal;
 mod render_voxel;
 mod scene_data;
 mod settings;
+mod shapes;
+mod terrain;
+mod viewmodel;
 mod voxel_clearance;
+mod voxel_textures;
 mod voxel_world;
 mod world;
 
@@ -779,11 +783,12 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         view("einstein_ring", [-10.0, -3.0], [0.0, 0.0], Some(11.0), 0.15),
         view("overlook", [-85.0, 0.0], [0.0, 0.0], Some(28.0), -0.7),
         view("habitat_row", [-46.0, -36.0], [0.0, -42.0], None, 0.0),
+        view("crater_wall", [-30.0, -30.0], [-60.0, -90.0], None, 0.1),
         VoxelView {
             is_laser_on: true,
             ..view(
                 "laser_into_wormhole",
-                [-22.0, 40.0],
+                [-22.0, 40.5],
                 [-14.0, 40.0],
                 None,
                 0.0,

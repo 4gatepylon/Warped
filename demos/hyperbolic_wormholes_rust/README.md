@@ -25,10 +25,11 @@ make run-demo RENDERER=cpu
   (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
   stands still while it is open, but the game goes on.
 - `Q` and `E` turn the menu's pages: SETTINGS (above) and MAP, the whole map from above with you on it as a disk in
-  your team's colour pointing the way you face: structures brighter the higher they are, consoles as small squares,
-  wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team zones' edges (dashed) and the
-  playable boundary. The map is drawn in its Fermi coordinates (`common/maps/README.md`), so things far above and
-  below its middle line look squeezed from side to side: that is the hyperbolic plane.
+  your team's colour pointing the way you face: the ground's relief, structures brighter the higher they are,
+  consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
+  zones' edges (dashed) and the playable boundary. The map is drawn in its Fermi coordinates
+  (`common/maps/README.md`), so things far above and below its middle line look squeezed from side to side: that is
+  the hyperbolic plane.
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes

@@ -36,6 +36,7 @@ use crate::scene_data::{
     TEXELS_PER_BEAM_CHUNK, TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING,
     TEXELS_PER_MOUTH_FIELD, Uniforms,
 };
+use crate::viewmodel::Viewmodel;
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
 /// `Result` is this module's result type.
@@ -253,6 +254,8 @@ const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
 pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
+/// `REVOLVER_WAND` is `has_wand` when the revolver (viewmodel.rs) is drawn in the wand's place.
+const REVOLVER_WAND: i32 = 2;
 const EMPTY_MASK_PX: (usize, usize) = (1, 1);
 const BYTES_PER_PICTURE_PIXEL: usize = 4;
 const MS_PER_S: f64 = 1000.0;
@@ -305,6 +308,7 @@ pub struct MetalRenderer {
     blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
+    viewmodel: Option<Option<Viewmodel>>,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -625,6 +629,7 @@ impl MetalRenderer {
             overlay_picture: None,
             hole_buffers: None,
             voxel_gpu: None,
+            viewmodel: None,
             throat_table,
             camera_table,
             has_throat_table: false,
@@ -839,12 +844,16 @@ impl MetalRenderer {
             .render_texture
             .as_ref()
             .expect("encode_frame made the render texture");
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
-        unsafe { encoder.setTexture_atIndex(Some(render_texture), 0) };
         self.voxel_gpu
             .as_mut()
             .expect("the voxel pipeline was just made")
-            .encode(&self.device, &encoder, frame, self.sample_buffers.as_ref())?;
+            .encode(
+                &self.device,
+                &encoder,
+                frame,
+                self.sample_buffers.as_ref(),
+                render_texture,
+            )?;
         encoder.endEncoding();
         let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
         self.finish_encoding(command_buffer, texture, render_px, output_px != render_px)
@@ -1166,6 +1175,25 @@ impl MetalRenderer {
             .overlay_picture
             .as_ref()
             .expect("the picture was just made");
+        let tan_half_fov: f32 = HALF_FOV_RAD.tan() as f32;
+        let revolver_image: Option<Retained<ProtocolObject<dyn MTLTexture>>> = match overlay.wand {
+            Some(wand) => {
+                if self.viewmodel.is_none() {
+                    self.viewmodel = Some(Viewmodel::Load(&self.device)?);
+                }
+                match self.viewmodel.as_mut().and_then(Option::as_mut) {
+                    Some(revolver) => Some(revolver.encode(
+                        &self.device,
+                        command_buffer,
+                        &wand,
+                        output_px,
+                        tan_half_fov,
+                    )?),
+                    None => None,
+                }
+            }
+            None => None,
+        };
         let scale: usize = ((output_px.1 as f32 * overlay.mask_height_frac) as usize / mask_h)
             .min((output_px.0 as f64 * OVERLAY_MAX_WIDTH_FRAC) as usize / mask_w)
             .max(1);
@@ -1178,8 +1206,12 @@ impl MetalRenderer {
             ],
             rect_count: overlay.rects.len() as i32,
             has_mask: i32::from(overlay.mask.is_some()),
-            has_wand: i32::from(overlay.wand.is_some()),
-            tan_half_fov: HALF_FOV_RAD.tan() as f32,
+            has_wand: if revolver_image.is_some() {
+                REVOLVER_WAND
+            } else {
+                i32::from(overlay.wand.is_some())
+            },
+            tan_half_fov,
             blur_frac: if is_blur_history_valid {
                 overlay.blur_frac
             } else {
@@ -1225,7 +1257,8 @@ impl MetalRenderer {
             encoder.setTexture_atIndex(Some(target), 2);
             encoder.setTexture_atIndex(Some(history_in), 3);
             encoder.setTexture_atIndex(Some(history_out), 4);
-            encoder.setTexture_atIndex(Some(picture), 5);
+            encoder.setTexture_atIndex(Some(revolver_image.as_deref().unwrap_or(frame)), 5);
+            encoder.setTexture_atIndex(Some(picture), 6);
             encoder.setBytes_length_atIndex(
                 NonNull::from(&params).cast(),
                 std::mem::size_of::<OverlayParams>(),
