@@ -212,6 +212,15 @@
             "angular_radius_rad": {"type": "number", "exclusiveMinimum": 0}
           }
         },
+        "milky_way": {
+          "type": "object",
+          "required": ["pole_direction", "core_direction"],
+          "additionalProperties": false,
+          "properties": {
+            "pole_direction": {"$ref": "#/$defs/vector3"},
+            "core_direction": {"$ref": "#/$defs/vector3"}
+          }
+        },
         "stars": {"type": "boolean"},
         "clouds": {"type": "boolean"},
         "zenith_color": {"$ref": "#/$defs/color"},
@@ -254,6 +263,16 @@
             "kind": {"const": "fermi_ellipse"},
             "u_m": {"type": "number", "exclusiveMinimum": 0},
             "v_m": {"type": "number", "exclusiveMinimum": 0}
+          }
+        },
+        "zone_walls": {
+          "type": "object",
+          "required": ["height_m", "thickness_m", "opacity_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "height_m": {"type": "number", "exclusiveMinimum": 0},
+            "thickness_m": {"type": "number", "exclusiveMinimum": 0},
+            "opacity_frac": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
           }
         }
       }

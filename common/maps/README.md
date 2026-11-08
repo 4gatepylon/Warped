@@ -130,8 +130,8 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
 
 ### Sky
 
-`{"transport", "sun": {"direction": [x, y, z], "color": [r, g, b]}, "planet": {...}, "stars": bool, "clouds": bool,
-"zenith_color", "horizon_color", "fog_m"}`:
+`{"transport", "sun": {"direction": [x, y, z], "color": [r, g, b]}, "planet": {...}, "milky_way": {...}, "stars": bool,
+"clouds": bool, "zenith_color", "horizon_color", "fog_m"}`:
 
 - `transport` is how a ray that escapes finds its direction in the sky: `parallel` (the sky is fixed at the world
   origin like a skybox: the ray's last direction is carried by parallel transport along the geodesic to the eye, then
@@ -139,6 +139,10 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
   (the ray's direction at infinity, where its geodesic meets the sphere at infinity, read in the world frame).
 - `sun.direction` is a unit direction in the world origin's local frame.
 - `planet` (optional): `{"direction": [x, y, z], "angular_radius_rad"}`, another body in the sky.
+- `milky_way` (optional): `{"pole_direction": [x, y, z], "core_direction": [x, y, z]}`, where the galaxy's band lies:
+  along the great circle 90° from `pole_direction`, brightest and widest at `core_direction`, a direction on that
+  circle. Both are unit directions in the world origin's local frame, perpendicular to each other. How the band looks
+  (brightness, colour, dust) is the appearance style's.
 - `fog_m` (optional): a surface d meters away keeps e^(−d/`fog_m`) of its colour, and the rest is `horizon_color`.
 
 ### Spawns
@@ -148,8 +152,17 @@ ground or on a structure) and their eye `player.eye_height_m` above it, facing t
 
 ### Regions
 
-`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"}}`, in the world's
-Fermi coordinates: a team's zone is a band of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+`{"zones": [{"team", "u_min_m", "u_max_m"}], "boundary": {"kind": "fermi_ellipse", "u_m", "v_m"},
+"zone_walls": {"height_m", "thickness_m", "opacity_frac"}}`, in the world's Fermi coordinates: a team's zone is a band
+of u, and the playable area is (u/u_m)² + (v/v_m)² ≤ 1.
+
+`zone_walls` (optional) marks each finite edge (`u_min_m` or `u_max_m`) of each blue or red zone with a wall in the
+team's colour that stops neither players nor lasers. Its middle is the points straight above the edge (Fermi u equal to
+the edge's, any v and h), from the ground (the terrain's height H(u, v), or h = 0 without terrain) up to `height_m`
+above it, within the boundary when there is one. The edge is a geodesic of the ground, so in H³ (and S³) that middle is
+part of a geodesic plane, and the wall is the slab of points within `thickness_m` / 2 of it. Seen straight through
+its thickness, it is `opacity_frac` opaque at the ground (0 < `opacity_frac` < 1) and fades out toward its top;
+renderers choose the fade and the glow.
 
 ### Ground tiling and appearance
 

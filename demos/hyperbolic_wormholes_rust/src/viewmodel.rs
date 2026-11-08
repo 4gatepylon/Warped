@@ -1,6 +1,11 @@
-//! `viewmodel.rs` draws the fps_demo's energy revolver (the Sketchfab "Sci-fi revolver" glTF's railgun
-//! variant, with its PBR textures) in the player's hand where the wand is, rasterised with 4x MSAA
-//! into a texture of its own that `apply_overlay` lays over the frame.
+//! `viewmodel.rs` draws a gun model from the fps_demo's assets in the player's hand where the wand
+//! is, rasterised with 4x MSAA into a texture of its own that `apply_overlay` lays over the frame:
+//! the energy revolver (the Sketchfab "Sci-fi revolver" glTF's railgun variant) or Poly Haven's
+//! bolt-action rifle, with their PBR textures.
+//!
+//! Interface: `GunModel`, `check_gun_models`, `Viewmodel::Load`, `Viewmodel::encode`.
+//!
+//! Example: `let rifle = Viewmodel::Load(&device, GunModel::BoltActionRifle)?;`
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -32,6 +37,7 @@ type Pipeline = Retained<ProtocolObject<dyn MTLRenderPipelineState>>;
 
 const SHADER_SOURCE: &str = include_str!("viewmodel.metal");
 const REVOLVER_GLTF: &str = "sketchfab/sci_fi_revolver/scene.gltf";
+const BOLT_ACTION_RIFLE_GLTF: &str = "models/bolt_action_rifle_7_62/bolt_action_rifle_7_62_2k.gltf";
 /// `RAILGUN_NODE_PARTS` are name parts of the revolver's railgun variant; the file also holds a
 /// ballistic one beside it.
 const RAILGUN_NODE_PARTS: [&str; 8] = [
@@ -48,8 +54,17 @@ const TEXTURE_SIDE_PX: u32 = 1024;
 const SAMPLE_COUNT: usize = 4;
 const NEAR_M: f32 = 0.01;
 const FAR_M: f32 = 4.0;
-/// `MUZZLE_SLICE_M` is how far behind the revolver's front its vertices count as the muzzle's face.
+/// `MUZZLE_SLICE_M` is how far behind a gun model's front its vertices count as the muzzle's face.
 const MUZZLE_SLICE_M: f32 = 0.01;
+/// `REVOLVER_SCALE` is how many times its modelled size the revolver is drawn.
+const REVOLVER_SCALE: f32 = 1.6;
+/// `BOLT_ACTION_RIFLE_SCALE` is how many times its modelled size (1.23 m long) the rifle is drawn:
+/// small enough that its scope, bolt and stock come into the corner of the view with its muzzle at
+/// the wand's tip, where a full-size rifle shows only its barrel.
+const BOLT_ACTION_RIFLE_SCALE: f32 = 0.28;
+/// `BOLT_ACTION_RIFLE_TURN_RAD` turns the rifle about its up axis so that its barrel, which lies
+/// along +x in its glTF, points along +z like the revolver's.
+const BOLT_ACTION_RIFLE_TURN_RAD: f32 = -std::f32::consts::FRAC_PI_2;
 /// `TRANSMISSION_OPACITY` is how opaque the transmissive glass is drawn.
 const TRANSMISSION_OPACITY: f32 = 0.18;
 /// `SLOT_FORMATS` are the formats of a material's base colour, metallic-roughness, normal and
@@ -63,6 +78,59 @@ const SLOT_FORMATS: [MTLPixelFormat; 4] = [
 const HAND_LIGHT_COUNT: usize = 3;
 const HAND_LIGHT_BUFFER_INDEX: usize = 1;
 const SLOT_FALLBACKS: [[u8; 4]; 4] = [[255; 4], [255; 4], [128, 128, 255, 255], [255; 4]];
+
+/// `GunModel` is a model drawn in the player's hand: the bolt-action rifle (the sniper, gun 1) or
+/// the energy revolver (the rifle, gun 2).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum GunModel {
+    Revolver,
+    BoltActionRifle,
+}
+
+/// `ModelSpec` is where a gun model's glTF is in the fps_demo's `assets/`, which of its nodes are
+/// drawn (name parts, or `None` for all), how far it turns about its up axis so its barrel points
+/// along +z, and how many times its modelled size it is drawn.
+struct ModelSpec {
+    gltf_path: &'static str,
+    node_parts: Option<&'static [&'static str]>,
+    turn_rad: f32,
+    scale: f32,
+}
+
+impl GunModel {
+    /// `ALL` is every gun model, for loading them all before the first frame.
+    pub const ALL: [GunModel; 2] = [GunModel::Revolver, GunModel::BoltActionRifle];
+
+    /// `get_label` names the model, for the loading screen and the console.
+    ///
+    /// Example: `let label: &str = GunModel::BoltActionRifle.get_label();`
+    pub fn get_label(self) -> &'static str {
+        match self {
+            GunModel::Revolver => "revolver",
+            GunModel::BoltActionRifle => "rifle",
+        }
+    }
+
+    /// `get_spec` gives where the model's glTF is and how it is drawn.
+    ///
+    /// Example: `let spec: ModelSpec = GunModel::Revolver.get_spec();`
+    fn get_spec(self) -> ModelSpec {
+        match self {
+            GunModel::Revolver => ModelSpec {
+                gltf_path: REVOLVER_GLTF,
+                node_parts: Some(&RAILGUN_NODE_PARTS),
+                turn_rad: 0.0,
+                scale: REVOLVER_SCALE,
+            },
+            GunModel::BoltActionRifle => ModelSpec {
+                gltf_path: BOLT_ACTION_RIFLE_GLTF,
+                node_parts: None,
+                turn_rad: BOLT_ACTION_RIFLE_TURN_RAD,
+                scale: BOLT_ACTION_RIFLE_SCALE,
+            },
+        }
+    }
+}
 
 /// `Vertex` is the shader's `Vertex`: a glTF vertex with its node's transform applied.
 #[repr(C)]
@@ -92,7 +160,7 @@ struct MaterialUniforms {
     params: [f32; 4],
 }
 
-/// `HandLight` is the shader's `HandLight` (and render_voxel.metal's): the light on the revolver
+/// `HandLight` is the shader's `HandLight` (and render_voxel.metal's): the light on the gun model
 /// in camera space, as directions toward three lights with their radiance, the local up, and the
 /// radiance of the sky and of the ground.
 #[repr(C)]
@@ -108,7 +176,7 @@ struct HandLight {
 /// `HAND_LIGHT_BYTES` is the size of a `HandLight`, for the buffer `probe_hand_light` writes.
 pub(crate) const HAND_LIGHT_BYTES: usize = std::mem::size_of::<HandLight>();
 
-/// `FIXED_HAND_LIGHT` lights the revolver on maps whose renderer doesn't probe their light (the
+/// `FIXED_HAND_LIGHT` lights the gun model on maps whose renderer doesn't probe their light (the
 /// house): a key light from the upper left, lit regolith below and black space above.
 const FIXED_HAND_LIGHT: HandLight = HandLight {
     directions: [[-0.4208, 0.7814, 0.4608, 0.0], [0.0; 4], [0.0; 4]],
@@ -140,7 +208,7 @@ struct Targets {
     resolved: Texture,
 }
 
-/// `Viewmodel` is the revolver's mesh and materials on the GPU, the transform that puts its muzzle
+/// `Viewmodel` is a gun model's mesh and materials on the GPU, the transform that puts its muzzle
 /// at the origin pointing along -z, its pipelines and targets.
 pub struct Viewmodel {
     vertices: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -177,7 +245,7 @@ fn make_buffer<T>(
             MTLResourceOptions::StorageModeShared,
         )
     };
-    Ok(buffer.ok_or("Metal: no memory for the revolver")?)
+    Ok(buffer.ok_or("Metal: no memory for the gun model")?)
 }
 
 /// `make_target` makes a private render target, multisampled when `sample_count` is above 1.
@@ -208,10 +276,10 @@ fn make_target(
     descriptor.setStorageMode(MTLStorageMode::Private);
     Ok(device
         .newTextureWithDescriptor(&descriptor)
-        .ok_or("Metal: no memory for the revolver's targets")?)
+        .ok_or("Metal: no memory for the gun model's targets")?)
 }
 
-/// `make_pipeline` builds the revolver's pipeline, blending premultiplied colour if `is_blended`.
+/// `make_pipeline` builds the gun models' pipeline, blending premultiplied colour if `is_blended`.
 fn make_pipeline(
     device: &ProtocolObject<dyn MTLDevice>,
     library: &ProtocolObject<dyn MTLLibrary>,
@@ -240,7 +308,7 @@ fn make_pipeline(
         .newRenderPipelineStateWithDescriptor_error(&descriptor)
         .map_err(|e| {
             format!(
-                "Metal: the revolver pipeline failed: {}",
+                "Metal: the gun model pipeline failed: {}",
                 e.localizedDescription()
             )
         })?)
@@ -288,94 +356,172 @@ fn get_map_images(material: &gltf::Material) -> [Option<usize>; 4] {
     ]
 }
 
-/// `check_revolver` fails like `check_asset` when the revolver's glTF is missing.
+/// `check_gun_models` fails like `check_asset` when a gun model's glTF is missing.
 ///
-/// Example: `check_revolver()?;`
-pub fn check_revolver() -> Result<()> {
-    check_asset(&get_asset_path(REVOLVER_GLTF))
+/// Example: `check_gun_models()?;`
+pub fn check_gun_models() -> Result<()> {
+    GunModel::ALL
+        .iter()
+        .try_for_each(|model| check_asset(&get_asset_path(model.get_spec().gltf_path)))
+}
+
+/// `Mesh` is a gun model's drawn triangles, with its nodes' transforms and its turn applied, and
+/// the material of each run of indices.
+struct Mesh {
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+    parts: Vec<Part>,
+}
+
+/// `GltfFile` is a glTF document read from the fps_demo's `assets/`, its buffers and its folder.
+struct GltfFile {
+    document: gltf::Document,
+    buffers: Vec<gltf::buffer::Data>,
+    folder: PathBuf,
+}
+
+/// `open_gltf` reads `spec`'s glTF and its buffers, and fails like `check_asset` when it is missing.
+///
+/// Example: `let file: GltfFile = open_gltf(&GunModel::Revolver.get_spec())?;`
+fn open_gltf(spec: &ModelSpec) -> Result<GltfFile> {
+    let path: PathBuf = get_asset_path(spec.gltf_path);
+    check_asset(&path)?;
+    let gltf::Gltf { document, blob } = gltf::Gltf::open(&path)?;
+    let folder: PathBuf = path.parent().expect("a file has a folder").to_path_buf();
+    let buffers: Vec<gltf::buffer::Data> = gltf::import_buffers(&document, Some(&folder), blob)?;
+    Ok(GltfFile {
+        document,
+        buffers,
+        folder,
+    })
+}
+
+/// `read_mesh` gathers the triangles of `file`'s nodes that `spec` draws, in model space turned by
+/// `spec.turn_rad` about the up axis.
+///
+/// Example: `let mesh: Mesh = read_mesh(&file, &spec);`
+fn read_mesh(file: &GltfFile, spec: &ModelSpec) -> Mesh {
+    let document: &gltf::Document = &file.document;
+    let mut globals: Vec<Mat4> = vec![Mat4::IDENTITY; document.nodes().len()];
+    for scene in document.scenes() {
+        for node in scene.nodes() {
+            set_globals(node, Mat4::from_rotation_y(spec.turn_rad), &mut globals);
+        }
+    }
+    let (mut vertices, mut indices, mut parts) =
+        (Vec::<Vertex>::new(), Vec::<u32>::new(), Vec::<Part>::new());
+    for node in document.nodes() {
+        let Some(mesh) = node.mesh() else { continue };
+        let name: &str = node.name().unwrap_or_default();
+        if let Some(node_parts) = spec.node_parts
+            && !node_parts.iter().any(|part| name.contains(part))
+        {
+            continue;
+        }
+        let global: Mat4 = globals[node.index()];
+        let (turn, normal_turn) = (
+            Mat3::from_mat4(global),
+            Mat3::from_mat4(global).inverse().transpose(),
+        );
+        for primitive in mesh.primitives() {
+            let reader = primitive.reader(|buffer| Some(&file.buffers[buffer.index()]));
+            let Some(positions) = reader.read_positions() else {
+                continue;
+            };
+            let normals: Vec<[f32; 3]> = reader
+                .read_normals()
+                .map(|n| n.collect())
+                .unwrap_or_default();
+            let tangents: Vec<[f32; 4]> = reader
+                .read_tangents()
+                .map(|t| t.collect())
+                .unwrap_or_default();
+            let uvs: Vec<[f32; 2]> = reader
+                .read_tex_coords(0)
+                .map(|t| t.into_f32().collect())
+                .unwrap_or_default();
+            let first_vertex: u32 = vertices.len() as u32;
+            for (i, position) in positions.enumerate() {
+                let position: Vec3 = global.transform_point3(Vec3::from(position));
+                let normal: Vec3 =
+                    normal_turn * Vec3::from(normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]));
+                let tangent: [f32; 4] = tangents.get(i).copied().unwrap_or([0.0; 4]);
+                let uv: [f32; 2] = uvs.get(i).copied().unwrap_or([0.0; 2]);
+                vertices.push(Vertex {
+                    position: position.extend(1.0).to_array(),
+                    normal: normal.normalize_or_zero().extend(0.0).to_array(),
+                    tangent: (turn * Vec3::new(tangent[0], tangent[1], tangent[2]))
+                        .normalize_or_zero()
+                        .extend(tangent[3])
+                        .to_array(),
+                    uv: [uv[0], uv[1], 0.0, 0.0],
+                });
+            }
+            let first_index: usize = indices.len();
+            match reader.read_indices() {
+                Some(read) => indices.extend(read.into_u32().map(|i| i + first_vertex)),
+                None => indices.extend(first_vertex..vertices.len() as u32),
+            }
+            let material: usize = primitive.material().index().unwrap_or(0);
+            parts.push(Part {
+                first_index,
+                index_count: indices.len() - first_index,
+                material,
+            });
+        }
+    }
+    Mesh {
+        vertices,
+        indices,
+        parts,
+    }
+}
+
+/// `get_muzzle_m` gives a gun model's muzzle in model space: the middle of its front face (the
+/// vertices within `MUZZLE_SLICE_M` of its frontmost, the largest z), on that front.
+///
+/// Example: `let muzzle_m: Vec3 = get_muzzle_m(&mesh.vertices);`
+fn get_muzzle_m(vertices: &[Vertex]) -> Vec3 {
+    let positions = || {
+        vertices
+            .iter()
+            .map(|v| Vec3::new(v.position[0], v.position[1], v.position[2]))
+    };
+    let front_z_m: f32 = positions().map(|p| p.z).fold(f32::MIN, f32::max);
+    let (face_min_m, face_max_m) = positions()
+        .filter(|p| p.z > front_z_m - MUZZLE_SLICE_M)
+        .fold(
+            (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(lo, hi), p| (lo.min(p), hi.max(p)),
+        );
+    ((face_min_m + face_max_m) * 0.5).with_z(front_z_m)
+}
+
+/// `get_muzzle_from_model` takes a gun model's space to its muzzle's: `muzzle_m` to the origin,
+/// the barrel along -z (the camera's ahead), drawn `scale` times its modelled size.
+///
+/// Example: `let muzzle_from_model: Mat4 = get_muzzle_from_model(muzzle_m, 1.6);`
+fn get_muzzle_from_model(muzzle_m: Vec3, scale: f32) -> Mat4 {
+    Mat4::from_rotation_y(std::f32::consts::PI)
+        * Mat4::from_scale(Vec3::splat(scale))
+        * Mat4::from_translation(-muzzle_m)
 }
 
 impl Viewmodel {
-    /// `Load` reads the revolver from the fps_demo's `assets/` onto `device`, and fails like
+    /// `Load` reads `model` from the fps_demo's `assets/` onto `device`, and fails like
     /// `check_asset` when it is missing.
     ///
-    /// Example: `let revolver = Viewmodel::Load(&device)?;`
+    /// Example: `let rifle = Viewmodel::Load(&device, GunModel::BoltActionRifle)?;`
     #[allow(non_snake_case)]
-    pub fn Load(device: &ProtocolObject<dyn MTLDevice>) -> Result<Viewmodel> {
-        check_revolver()?;
-        let path: PathBuf = get_asset_path(REVOLVER_GLTF);
-        let gltf::Gltf { document, blob } = gltf::Gltf::open(&path)?;
-        let base_dir: &Path = path.parent().expect("a file has a folder");
-        let buffers: Vec<gltf::buffer::Data> =
-            gltf::import_buffers(&document, Some(base_dir), blob)?;
-        let mut globals: Vec<Mat4> = vec![Mat4::IDENTITY; document.nodes().len()];
-        for scene in document.scenes() {
-            for node in scene.nodes() {
-                set_globals(node, Mat4::IDENTITY, &mut globals);
-            }
-        }
-        let (mut vertices, mut indices, mut parts) =
-            (Vec::<Vertex>::new(), Vec::<u32>::new(), Vec::<Part>::new());
-        let (mut min_m, mut max_m) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-        for node in document.nodes() {
-            let Some(mesh) = node.mesh() else { continue };
-            let name: &str = node.name().unwrap_or_default();
-            if !RAILGUN_NODE_PARTS.iter().any(|part| name.contains(part)) {
-                continue;
-            }
-            let global: Mat4 = globals[node.index()];
-            let (turn, normal_turn) = (
-                Mat3::from_mat4(global),
-                Mat3::from_mat4(global).inverse().transpose(),
-            );
-            for primitive in mesh.primitives() {
-                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-                let Some(positions) = reader.read_positions() else {
-                    continue;
-                };
-                let normals: Vec<[f32; 3]> = reader
-                    .read_normals()
-                    .map(|n| n.collect())
-                    .unwrap_or_default();
-                let tangents: Vec<[f32; 4]> = reader
-                    .read_tangents()
-                    .map(|t| t.collect())
-                    .unwrap_or_default();
-                let uvs: Vec<[f32; 2]> = reader
-                    .read_tex_coords(0)
-                    .map(|t| t.into_f32().collect())
-                    .unwrap_or_default();
-                let first_vertex: u32 = vertices.len() as u32;
-                for (i, position) in positions.enumerate() {
-                    let position: Vec3 = global.transform_point3(Vec3::from(position));
-                    (min_m, max_m) = (min_m.min(position), max_m.max(position));
-                    let normal: Vec3 = normal_turn
-                        * Vec3::from(normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]));
-                    let tangent: [f32; 4] = tangents.get(i).copied().unwrap_or([0.0; 4]);
-                    let uv: [f32; 2] = uvs.get(i).copied().unwrap_or([0.0; 2]);
-                    vertices.push(Vertex {
-                        position: position.extend(1.0).to_array(),
-                        normal: normal.normalize_or_zero().extend(0.0).to_array(),
-                        tangent: (turn * Vec3::new(tangent[0], tangent[1], tangent[2]))
-                            .normalize_or_zero()
-                            .extend(tangent[3])
-                            .to_array(),
-                        uv: [uv[0], uv[1], 0.0, 0.0],
-                    });
-                }
-                let first_index: usize = indices.len();
-                match reader.read_indices() {
-                    Some(read) => indices.extend(read.into_u32().map(|i| i + first_vertex)),
-                    None => indices.extend(first_vertex..vertices.len() as u32),
-                }
-                let material: usize = primitive.material().index().unwrap_or(0);
-                parts.push(Part {
-                    first_index,
-                    index_count: indices.len() - first_index,
-                    material,
-                });
-            }
-        }
+    pub fn Load(device: &ProtocolObject<dyn MTLDevice>, model: GunModel) -> Result<Viewmodel> {
+        let spec: ModelSpec = model.get_spec();
+        let file: GltfFile = open_gltf(&spec)?;
+        let Mesh {
+            vertices,
+            indices,
+            parts,
+        } = read_mesh(&file, &spec);
+        let (document, base_dir): (&gltf::Document, &Path) = (&file.document, &file.folder);
         let image_paths: Vec<Option<PathBuf>> = document
             .images()
             .map(|image| match image.source() {
@@ -401,7 +547,7 @@ impl Viewmodel {
             .map(|&(image, slot)| {
                 let path: &PathBuf = image_paths[image]
                     .as_ref()
-                    .ok_or("an embedded revolver image")?;
+                    .ok_or_else(|| format!("an embedded {} image", model.get_label()))?;
                 Ok(((image, slot), make_mips(path, TEXTURE_SIDE_PX)?))
             })
             .collect::<std::result::Result<_, String>>()?;
@@ -458,25 +604,17 @@ impl Viewmodel {
                 }
             })
             .collect();
-        let (face_min_m, face_max_m) = vertices
-            .iter()
-            .map(|v| Vec3::new(v.position[0], v.position[1], v.position[2]))
-            .filter(|p| p.z > max_m.z - MUZZLE_SLICE_M)
-            .fold(
-                (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
-                |(lo, hi), p| (lo.min(p), hi.max(p)),
-            );
-        let muzzle_m: Vec3 = ((face_min_m + face_max_m) * 0.5).with_z(max_m.z);
         let library = device
             .newLibraryWithSource_options_error(&NSString::from_str(SHADER_SOURCE), None)
             .map_err(|e| {
                 format!(
-                    "Metal: the revolver shader didn't compile: {}",
+                    "Metal: the gun model shader didn't compile: {}",
                     e.localizedDescription()
                 )
             })?;
         println!(
-            "Holding the energy revolver: {} triangles, {} maps.",
+            "Loaded the {}: {} triangles, {} maps.",
+            model.get_label(),
             indices.len() / 3,
             maps.len()
         );
@@ -485,8 +623,7 @@ impl Viewmodel {
             indices: make_buffer(device, &indices)?,
             parts,
             materials,
-            muzzle_from_gltf: Mat4::from_rotation_y(std::f32::consts::PI)
-                * Mat4::from_translation(-muzzle_m),
+            muzzle_from_gltf: get_muzzle_from_model(get_muzzle_m(&vertices), spec.scale),
             opaque: make_pipeline(device, &library, false)?,
             blended: make_pipeline(device, &library, true)?,
             depth_write: make_depth_state(device, true)?,
@@ -495,12 +632,12 @@ impl Viewmodel {
         })
     }
 
-    /// `encode` draws the revolver posed like `wand`, its muzzle at the wand's tip, into a `size`
+    /// `encode` draws the gun model posed like `wand`, its muzzle at the wand's tip, into a `size`
     /// image (premultiplied sRGB, clear where it isn't) for a camera of vertical half-angle tangent `tan_half_fov`, lit by
     /// `hand_light` (a GPU `HandLight` written earlier in `command_buffer`) or, if it is None, by
     /// `FIXED_HAND_LIGHT`, and returns it.
     ///
-    /// Example: `let image = revolver.encode(&device, &command_buffer, &wand, (2560, 1600), 0.6, None)?;`
+    /// Example: `let image = viewmodel.encode(&device, &command_buffer, &wand, (2560, 1600), 0.6, None)?;`
     pub fn encode(
         &mut self,
         device: &ProtocolObject<dyn MTLDevice>,
@@ -610,5 +747,130 @@ impl Viewmodel {
         }
         encoder.endEncoding();
         Ok(targets.resolved.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests of the gun models held in hand: their files, which way they point, their size and
+    //! where their muzzle sits.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Gun model | the revolver, the bolt-action rifle | `every_gun_model_is_found`, `the_muzzle_is_the_front_of_the_barrel`, `every_gun_model_points_ahead` |
+    //! | Model file | present, missing (fails naming the restore command) | `every_gun_model_is_found`, `a_missing_model_fails_with_the_fix` |
+    //! | Where a vertex is along the barrel | on the muzzle's face (z = 0), behind it (z > 0); none ahead of it | `the_muzzle_is_the_front_of_the_barrel` |
+    //! | Turn about the up axis | none (the revolver), a quarter turn (the rifle, modelled along +x) | `every_gun_model_points_ahead`, `the_rifle_is_drawn_at_its_scale` |
+
+    use super::*;
+
+    /// `RIFLE_MODELLED_LENGTH_M` is the bolt-action rifle's length in its glTF, from its stock's
+    /// end to its muzzle.
+    const RIFLE_MODELLED_LENGTH_M: f32 = 1.231;
+    const LENGTH_TOLERANCE_M: f32 = 0.01;
+    const POSITION_TOLERANCE_M: f32 = 1e-5;
+    /// `MIN_LENGTH_PER_WIDTH` is how many times longer than wide a gun model is at least.
+    const MIN_LENGTH_PER_WIDTH: f32 = 3.0;
+    const RESTORE_COMMAND: &str = "checkout -- assets";
+
+    /// `get_positions_from_muzzle_m` gives `model`'s drawn vertices in its muzzle's space (the
+    /// muzzle at the origin, the barrel along -z), at its drawn size.
+    fn get_positions_from_muzzle_m(model: GunModel) -> Vec<Vec3> {
+        let spec: ModelSpec = model.get_spec();
+        let mesh: Mesh = read_mesh(&open_gltf(&spec).expect("the model is committed"), &spec);
+        let muzzle_from_model: Mat4 =
+            get_muzzle_from_model(get_muzzle_m(&mesh.vertices), spec.scale);
+        mesh.vertices
+            .iter()
+            .map(|v| {
+                muzzle_from_model.transform_point3(Vec3::new(
+                    v.position[0],
+                    v.position[1],
+                    v.position[2],
+                ))
+            })
+            .collect()
+    }
+
+    /// `get_extent_m` gives the smallest and largest corners around `positions_m`.
+    fn get_extent_m(positions_m: &[Vec3]) -> (Vec3, Vec3) {
+        positions_m.iter().fold(
+            (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+        )
+    }
+
+    #[test]
+    fn every_gun_model_is_found() {
+        check_gun_models().expect("every gun model is committed in the fps_demo's assets");
+        for model in GunModel::ALL {
+            assert!(
+                !get_positions_from_muzzle_m(model).is_empty(),
+                "{model:?} draws nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_model_fails_with_the_fix() {
+        let spec = ModelSpec {
+            gltf_path: "models/no_such_gun/no_such_gun.gltf",
+            node_parts: None,
+            turn_rad: 0.0,
+            scale: 1.0,
+        };
+        let error: String = open_gltf(&spec)
+            .err()
+            .expect("a missing model fails")
+            .to_string();
+        assert!(error.contains("no_such_gun.gltf"), "{error}");
+        assert!(error.contains(RESTORE_COMMAND), "{error}");
+    }
+
+    #[test]
+    fn the_muzzle_is_the_front_of_the_barrel() {
+        for model in GunModel::ALL {
+            let positions_m: Vec<Vec3> = get_positions_from_muzzle_m(model);
+            assert!(
+                positions_m.iter().all(|p| p.z >= -POSITION_TOLERANCE_M),
+                "{model:?} has vertices ahead of its muzzle"
+            );
+            let face_m: Vec<Vec3> = positions_m
+                .iter()
+                .copied()
+                .filter(|p| p.z < MUZZLE_SLICE_M * model.get_spec().scale)
+                .collect();
+            let (face_min_m, face_max_m) = get_extent_m(&face_m);
+            assert!(
+                face_min_m.x < 0.0
+                    && face_max_m.x > 0.0
+                    && face_min_m.y < 0.0
+                    && face_max_m.y > 0.0,
+                "{model:?}'s muzzle {face_min_m}..{face_max_m} doesn't surround the origin"
+            );
+        }
+    }
+
+    #[test]
+    fn every_gun_model_points_ahead() {
+        for model in GunModel::ALL {
+            let (min_m, max_m) = get_extent_m(&get_positions_from_muzzle_m(model));
+            let size_m: Vec3 = max_m - min_m;
+            assert!(
+                size_m.z > MIN_LENGTH_PER_WIDTH * size_m.x,
+                "{model:?} is {size_m} across: its barrel isn't along z"
+            );
+        }
+    }
+
+    #[test]
+    fn the_rifle_is_drawn_at_its_scale() {
+        let (_, max_m) = get_extent_m(&get_positions_from_muzzle_m(GunModel::BoltActionRifle));
+        let drawn_length_m: f32 = RIFLE_MODELLED_LENGTH_M * BOLT_ACTION_RIFLE_SCALE;
+        assert!(
+            (max_m.z - drawn_length_m).abs() < LENGTH_TOLERANCE_M,
+            "the rifle reaches {} m behind its muzzle, not {drawn_length_m} m",
+            max_m.z
+        );
     }
 }

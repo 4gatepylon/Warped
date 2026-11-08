@@ -1,9 +1,11 @@
 //! `menu.rs` is the in-game menu, in pages under a tab bar: the settings page, where a player
 //! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
-//! head bob, motion blur and how a hit looks, and a row that saves them), the map page, whose
-//! picture the window draws (`map_layout.rs`), and the scores page, with each player's team, kills
-//! and deaths from the server. It keeps no window state: the window feeds it pressed controls and
-//! the scores, and draws its lines.
+//! head bob, motion blur, how a hit looks, the wormhole tint and the Milky Way's brightness, and a
+//! row that saves them), the map page, whose
+//! picture the window draws (`map_layout.rs`), the scores page, with each player's team, kills
+//! and deaths from the server, and the credits page, with where the game's assets come from
+//! (`credits.rs`). It keeps no window state: the window feeds it pressed controls and the scores,
+//! and draws its lines.
 //!
 //! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`, `show_message`), `MenuOutcome`,
 //! `Page`, `Scoreboard`.
@@ -18,15 +20,17 @@ use std::cmp::Reverse;
 
 use sdl3::keyboard::Scancode;
 
+use crate::credits::CREDITS_LINES;
 use crate::key_bindings::{Action, Control, KeyBindings};
 use crate::net::{Score, TEAM_NAMES};
 use crate::settings::PerPlayerSettings;
 
 const VISIBLE_ROW_COUNT: usize = 20;
-const PAGES: [(Page, &str); 3] = [
+const PAGES: [(Page, &str); 4] = [
+    (Page::Scores, "SCORES"),
     (Page::Settings, "SETTINGS"),
     (Page::Map, "MAP"),
-    (Page::Scores, "SCORES"),
+    (Page::Credits, "CREDITS"),
 ];
 const MAP_LEGEND: &str = "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
 const NO_SERVER_LINE: &str = "No game on a server: host or join one to keep scores.";
@@ -37,7 +41,7 @@ const PLAYER_WIDTH: usize = 16;
 const KILLS_WIDTH: usize = 6;
 const DEATHS_WIDTH: usize = 8;
 const LABEL_WIDTH: usize = 24;
-const NUMBERS: [(Number, &str, f64, f64, f64); 8] = [
+const NUMBERS: [(Number, &str, f64, f64, f64); 9] = [
     (
         Number::LookSpeed,
         "mouse look rad/px",
@@ -52,6 +56,7 @@ const NUMBERS: [(Number, &str, f64, f64, f64); 8] = [
     (Number::HitShake, "hit shake px", 1.0, 0.0, 20.0),
     (Number::HitBlur, "hit blur px", 1.0, 0.0, 20.0),
     (Number::WormholeTint, "wormhole tint 0-1", 0.1, 0.0, 1.0),
+    (Number::MilkyWay, "milky way 0-1", 0.1, 0.0, 1.0),
 ];
 
 /// `Page` is one page of the menu.
@@ -60,6 +65,7 @@ pub enum Page {
     Settings,
     Map,
     Scores,
+    Credits,
 }
 
 /// `Scoreboard` is what the scores page shows: that there is no game on a server, that the server
@@ -86,6 +92,7 @@ enum Number {
     HitShake,
     HitBlur,
     WormholeTint,
+    MilkyWay,
 }
 
 /// `Row` is one line of the menu that can be chosen: an action's controls, a number, or saving.
@@ -134,6 +141,7 @@ fn get_number(settings: &PerPlayerSettings, number: Number) -> f64 {
         Number::HitShake => settings.hit_effects.shake_px,
         Number::HitBlur => settings.hit_effects.blur_px,
         Number::WormholeTint => settings.view.wormhole_tint_frac,
+        Number::MilkyWay => settings.view.milky_way_brightness_frac,
     }
 }
 
@@ -150,6 +158,7 @@ fn get_number_slot(settings: &mut PerPlayerSettings, number: Number) -> &mut f64
         Number::HitShake => &mut settings.hit_effects.shake_px,
         Number::HitBlur => &mut settings.hit_effects.blur_px,
         Number::WormholeTint => &mut settings.view.wormhole_tint_frac,
+        Number::MilkyWay => &mut settings.view.milky_way_brightness_frac,
     }
 }
 
@@ -226,7 +235,7 @@ pub struct Menu {
 }
 
 impl Menu {
-    /// `New` opens the menu on its first row.
+    /// `New` opens the menu on its first page, SCORES, with the settings page's first row chosen.
     ///
     /// Example: `let menu = Menu::New();`
     #[allow(non_snake_case)]
@@ -313,8 +322,9 @@ impl Menu {
 
     /// `get_lines` gives the menu's text, each line with whether it is highlighted: the tab bar,
     /// then on the settings page a hint, the rows around the chosen one (`VISIBLE_ROW_COUNT` of
-    /// them) and the line of news, on the map page the map's legend, or on the scores page
-    /// `scoreboard`'s lines (`get_score_lines`). `save_path` is where saving writes.
+    /// them) and the line of news, on the map page the map's legend, on the scores page
+    /// `scoreboard`'s lines (`get_score_lines`), or on the credits page `CREDITS_LINES`.
+    /// `save_path` is where saving writes.
     ///
     /// Example: `let lines = menu.get_lines(&mine, "~/.config/warped/player_settings.yaml", Scoreboard::NoServer);`
     pub fn get_lines(
@@ -342,6 +352,11 @@ impl Menu {
             Page::Scores => {
                 let mut lines: Vec<(String, bool)> = vec![(tab_bar, true), (String::new(), false)];
                 lines.extend(get_score_lines(scoreboard));
+                return lines;
+            }
+            Page::Credits => {
+                let mut lines: Vec<(String, bool)> = vec![(tab_bar, true), (String::new(), false)];
+                lines.extend(CREDITS_LINES.iter().map(|line| (line.to_string(), false)));
                 return lines;
             }
             Page::Settings => {}
@@ -383,7 +398,8 @@ mod tests {
     //! | --- | --- | --- |
     //! | Row kind | an action (rebound, or cancelled with Escape), a number (stepped, clamped), saving | `rows_rebind_step_and_save` |
     //! | Closing | Escape, the open-menu control | `escape_and_the_menu_key_close_it` |
-    //! | Page | turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
+    //! | Page | the first (SCORES, where the menu opens), turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
+    //! | Credits page | its lines, ignoring the settings keys | `the_credits_page_lists_the_assets` |
     //! | Scoreboard | no server, waiting for scores, scores (two teams, ties in kills, this player known or not yet) | `the_scores_page_sorts_and_totals` |
 
     use super::*;
@@ -400,6 +416,7 @@ mod tests {
     #[test]
     fn rows_rebind_step_and_save() {
         let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::E), &mut mine);
         let jump: Row = Row::Key(Action::Jump, "jump");
         move_to(&mut menu, &mut mine, jump);
         menu.handle(Control::Key(Scancode::Return), &mut mine);
@@ -427,13 +444,15 @@ mod tests {
     #[test]
     fn q_and_e_turn_pages() {
         let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
-        for expected in [Page::Map, Page::Scores, Page::Settings] {
+        assert_eq!(menu.get_page(), Page::Scores);
+        for expected in [Page::Settings, Page::Map, Page::Credits, Page::Scores] {
             menu.handle(Control::Key(Scancode::E), &mut mine);
             assert_eq!(menu.get_page(), expected);
         }
-        menu.handle(Control::Key(Scancode::Q), &mut mine);
-        menu.handle(Control::Key(Scancode::Q), &mut mine);
-        assert_eq!(menu.get_page(), Page::Map);
+        for expected in [Page::Credits, Page::Map] {
+            menu.handle(Control::Key(Scancode::Q), &mut mine);
+            assert_eq!(menu.get_page(), expected);
+        }
         menu.handle(Control::Key(Scancode::Down), &mut mine);
         menu.handle(Control::Key(Scancode::Return), &mut mine);
         assert!(!menu.is_waiting_for_control && menu.row == 0);
@@ -445,6 +464,21 @@ mod tests {
             menu.handle(Control::Key(Scancode::Escape), &mut mine),
             MenuOutcome::Close
         );
+    }
+
+    #[test]
+    fn the_credits_page_lists_the_assets() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::Q), &mut mine);
+        assert_eq!(menu.get_page(), Page::Credits);
+        menu.handle(Control::Key(Scancode::Down), &mut mine);
+        menu.handle(Control::Key(Scancode::Return), &mut mine);
+        assert!(!menu.is_waiting_for_control && menu.row == 0);
+        let lines: Vec<(String, bool)> = menu.get_lines(&mine, "", Scoreboard::NoServer);
+        assert!(lines[0].0.contains("[CREDITS]"));
+        let texts: Vec<&str> = lines[2..].iter().map(|(text, _)| text.as_str()).collect();
+        assert_eq!(texts, CREDITS_LINES);
+        assert!(lines[2..].iter().all(|(_, is_highlighted)| !is_highlighted));
     }
 
     #[test]
@@ -462,8 +496,7 @@ mod tests {
 
     #[test]
     fn the_scores_page_sorts_and_totals() {
-        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
-        menu.handle(Control::Key(Scancode::Q), &mut mine);
+        let (menu, mine) = (Menu::New(), PerPlayerSettings::Builtin());
         assert_eq!(menu.get_page(), Page::Scores);
         let get_texts = |scoreboard: Scoreboard| -> Vec<(String, bool)> {
             menu.get_lines(&mine, "", scoreboard)[2..].to_vec()

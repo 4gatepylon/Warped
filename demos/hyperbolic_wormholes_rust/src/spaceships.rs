@@ -1,8 +1,10 @@
 //! `spaceships.rs` flies a few spaceships across Lunar Surface's sky, purely for looks: a ring
-//! ship and three fighters in a V. Each crosses the sky slowly on a great circle, from horizon to
-//! horizon, then comes back round below the horizon in a fifth of that time, so it is in the sky
-//! most of the time. `render_voxel.metal` draws them wherever a ray escapes to the
-//! sky, behind everything, so they never touch the game.
+//! ship, three fighters in a V, and far behind them two giants, a moon-sized battle station and a
+//! long wedge-shaped capital ship. Each but the station crosses the sky slowly on a great circle,
+//! from horizon to horizon, then comes back round below the horizon in a fifth of that time, so it
+//! is in the sky most of the time; the station hovers low over the horizon, nearly still.
+//! `render_voxel.metal` draws them wherever a ray escapes to the sky, behind everything, so they
+//! never touch the game.
 //!
 //! Interface: `GpuSpaceship`, `SPACESHIP_COUNT`, `get_spaceships`, `get_utc_s`.
 //!
@@ -12,13 +14,15 @@
 //! - Gotchas:
 //!   - Where the ships are depends only on the time given, so windows whose clocks agree (the UTC
 //!     clock, set by the network) show every player the same ships.
+//!   - The shader draws the ships in the order of `FLIGHTS`, each over the ones before, so the
+//!     giants, which are farthest away, come first.
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use glam::DVec3;
 
-pub const SPACESHIP_COUNT: usize = 4;
+pub const SPACESHIP_COUNT: usize = 6;
 const HIDDEN_PER_CROSSING: f64 = 0.2;
 const STROBE_PERIOD_S: f64 = 1.6;
 const STROBE_FLASH_FRAC: f64 = 0.08;
@@ -32,19 +36,31 @@ const RING_SPIN_RAD_PER_S: f64 = 0.35;
 enum Hull {
     Fighter = 0,
     RingShip = 1,
+    BattleStation = 2,
+    CapitalShip = 3,
+}
+
+/// `Path` is how a flight moves along its great circle:
+/// - `Crossing`: across the sky from horizon to horizon in `crossing_s`, then back round below the
+///   horizon in `HIDDEN_PER_CROSSING` of that time, `offset_s` into its first crossing at time 0;
+/// - `Hovering`: nearly still at the highest point, swaying `sway_deg` either way along the great
+///   circle and back every `sway_period_s`, so it never sets.
+#[derive(Clone, Copy)]
+enum Path {
+    Crossing { crossing_s: f64, offset_s: f64 },
+    Hovering { sway_deg: f64, sway_period_s: f64 },
 }
 
 /// `Flight` is one spaceship's path and size: its hull; the highest point of its great circle
 /// (elevation above the horizon, and azimuth from +x toward +z; the ship flies a quarter turn
-/// further round, toward azimuth + 90°); how long it takes from horizon to horizon; how far into
-/// its first crossing it is at time 0; its half length; and its place in a formation (ahead and to
-/// starboard, in ship lengths, from the point the flight gives).
+/// further round, toward azimuth + 90°); how it moves along it; its half length (a sphere's
+/// radius); and its place in a formation (ahead and to starboard, in ship lengths, from the point
+/// the flight gives).
 struct Flight {
     hull: Hull,
     top_elevation_deg: f64,
     top_azimuth_deg: f64,
-    crossing_s: f64,
-    offset_s: f64,
+    path: Path,
     half_length_rad: f64,
     formation_lengths: [f64; 2],
 }
@@ -53,19 +69,45 @@ const FIGHTER_FLIGHT: Flight = Flight {
     hull: Hull::Fighter,
     top_elevation_deg: 84.0,
     top_azimuth_deg: 110.0,
-    crossing_s: 110.0,
-    offset_s: 40.0,
+    path: Path::Crossing {
+        crossing_s: 110.0,
+        offset_s: 40.0,
+    },
     half_length_rad: 0.02,
     formation_lengths: [0.0, 0.0],
 };
 
 const FLIGHTS: [Flight; SPACESHIP_COUNT] = [
     Flight {
+        hull: Hull::BattleStation,
+        top_elevation_deg: 14.0,
+        top_azimuth_deg: 240.0,
+        path: Path::Hovering {
+            sway_deg: 0.5,
+            sway_period_s: 900.0,
+        },
+        half_length_rad: 0.075,
+        formation_lengths: [0.0, 0.0],
+    },
+    Flight {
+        hull: Hull::CapitalShip,
+        top_elevation_deg: 30.0,
+        top_azimuth_deg: 290.0,
+        path: Path::Crossing {
+            crossing_s: 1800.0,
+            offset_s: 900.0,
+        },
+        half_length_rad: 0.06,
+        formation_lengths: [0.0, 0.0],
+    },
+    Flight {
         hull: Hull::RingShip,
         top_elevation_deg: 74.0,
         top_azimuth_deg: 215.0,
-        crossing_s: 300.0,
-        offset_s: 190.0,
+        path: Path::Crossing {
+            crossing_s: 300.0,
+            offset_s: 190.0,
+        },
         half_length_rad: 0.042,
         formation_lengths: [0.0, 0.0],
     },
@@ -104,16 +146,27 @@ pub fn get_utc_s() -> f64 {
 
 /// `get_flight_angle_rad` gives how far round its great circle `flight` is at `time_s`, from its
 /// highest point: from -90° (rising) through 0 to 90° (setting) during a crossing, then on to 270°
-/// below the horizon.
+/// below the horizon; or within the sway either side of 0 when hovering.
 ///
 /// Example: `let angle_rad = get_flight_angle_rad(&FLIGHTS[0], 12.0);`
 fn get_flight_angle_rad(flight: &Flight, time_s: f64) -> f64 {
-    let hidden_s: f64 = HIDDEN_PER_CROSSING * flight.crossing_s;
-    let into_s: f64 = (time_s + flight.offset_s).rem_euclid(flight.crossing_s + hidden_s);
-    if into_s < flight.crossing_s {
-        -FRAC_PI_2 + PI * into_s / flight.crossing_s
-    } else {
-        FRAC_PI_2 + PI * (into_s - flight.crossing_s) / hidden_s
+    match flight.path {
+        Path::Crossing {
+            crossing_s,
+            offset_s,
+        } => {
+            let hidden_s: f64 = HIDDEN_PER_CROSSING * crossing_s;
+            let into_s: f64 = (time_s + offset_s).rem_euclid(crossing_s + hidden_s);
+            if into_s < crossing_s {
+                -FRAC_PI_2 + PI * into_s / crossing_s
+            } else {
+                FRAC_PI_2 + PI * (into_s - crossing_s) / hidden_s
+            }
+        }
+        Path::Hovering {
+            sway_deg,
+            sway_period_s,
+        } => sway_deg.to_radians() * (TAU * time_s / sway_period_s).sin(),
     }
 }
 
@@ -184,19 +237,25 @@ mod tests {
     //! | --- | --- | --- |
     //! | Time | 0, today's UTC clock | `ships_are_unit_and_square`, `the_same_time_gives_the_same_sky` |
     //! | Time between two calls | none, a tenth of a second, a whole round | `the_same_time_gives_the_same_sky`, `ships_fly_slowly_forward`, `a_flight_comes_back` |
-    //! | Place on the flight | rising, highest, setting, below the horizon | `flights_rise_and_set`, `ships_fly_slowly_forward` |
+    //! | Path | crossing, hovering | `flights_rise_and_set`, `ships_fly_slowly_forward`, `the_station_hovers_nearly_still` |
+    //! | Place on a crossing | rising, highest, setting, below the horizon | `flights_rise_and_set`, `ships_fly_slowly_forward` |
+    //! | Place on a hover | highest, swayed furthest, in between | `the_station_hovers_nearly_still` |
     //! | Ship | alone, in formation | `ships_are_unit_and_square`, `fighters_fly_in_formation` |
+    //! | Hull | small (fighter, ring ship), giant (battle station, capital ship) | `giants_are_drawn_behind_the_small_ships` |
 
     use super::*;
 
     const TODAY_S: f64 = 1.794e9;
+    const DAY_S: f64 = 86_400.0;
+    const DAY_SAMPLE_S: f64 = 37.0;
     const TOLERANCE: f64 = 1e-5;
     const SMALL_DT_S: f64 = 0.1;
     const SPEED_TOLERANCE_FRAC: f64 = 0.01;
     const COME_BACK_TOLERANCE_RAD: f64 = 1e-4;
     const FORMATION_GAP_LENGTHS: std::ops::Range<f64> = 1.5..2.5;
     const PARALLEL_COS: f64 = 0.99;
-    const LEAD_FIGHTER: usize = 1;
+    const LEAD_FIGHTER: usize = 3;
+    const MAX_HOVER_DEG_PER_S: f64 = 0.01;
 
     /// `to_dvec3` reads the xyz of a shader vector.
     ///
@@ -205,14 +264,42 @@ mod tests {
         DVec3::new(f64::from(v[0]), f64::from(v[1]), f64::from(v[2]))
     }
 
+    /// `get_point` gives where `flight` is in the sky at `time_s`.
+    ///
+    /// Example: `let point = get_point(&FLIGHTS[0], 0.0);`
+    fn get_point(flight: &Flight, time_s: f64) -> DVec3 {
+        get_flight_point(flight, get_flight_angle_rad(flight, time_s)).0
+    }
+
     /// `get_elevation_rad` gives how high above the horizon `flight` is at `time_s`.
     ///
     /// Example: `let elevation_rad = get_elevation_rad(&FLIGHTS[0], 0.0);`
     fn get_elevation_rad(flight: &Flight, time_s: f64) -> f64 {
-        get_flight_point(flight, get_flight_angle_rad(flight, time_s))
-            .0
-            .y
-            .asin()
+        get_point(flight, time_s).y.asin()
+    }
+
+    /// `get_crossings` gives each crossing flight with its time from horizon to horizon and its
+    /// offset.
+    ///
+    /// Example: `for (flight, crossing_s, offset_s) in get_crossings() { ... }`
+    fn get_crossings() -> Vec<(&'static Flight, f64, f64)> {
+        FLIGHTS
+            .iter()
+            .filter_map(|flight| match flight.path {
+                Path::Crossing {
+                    crossing_s,
+                    offset_s,
+                } => Some((flight, crossing_s, offset_s)),
+                Path::Hovering { .. } => None,
+            })
+            .collect()
+    }
+
+    /// `is_giant` says whether `flight` flies one of the giants far behind the small ships.
+    ///
+    /// Example: `assert!(is_giant(&FLIGHTS[0]));`
+    fn is_giant(flight: &Flight) -> bool {
+        matches!(flight.hull, Hull::BattleStation | Hull::CapitalShip)
     }
 
     #[test]
@@ -235,19 +322,13 @@ mod tests {
 
     #[test]
     fn ships_fly_slowly_forward() {
-        for flight in &FLIGHTS {
-            let hidden_s: f64 = HIDDEN_PER_CROSSING * flight.crossing_s;
+        for (flight, crossing_s, offset_s) in get_crossings() {
+            let hidden_s: f64 = HIDDEN_PER_CROSSING * crossing_s;
             let crossing_start_s: f64 =
-                TODAY_S - (TODAY_S + flight.offset_s).rem_euclid(flight.crossing_s + hidden_s);
+                TODAY_S - (TODAY_S + offset_s).rem_euclid(crossing_s + hidden_s);
             for (time_s, leg_s) in [
-                (
-                    crossing_start_s + 0.5 * flight.crossing_s,
-                    flight.crossing_s,
-                ),
-                (
-                    crossing_start_s + flight.crossing_s + 0.5 * hidden_s,
-                    hidden_s,
-                ),
+                (crossing_start_s + 0.5 * crossing_s, crossing_s),
+                (crossing_start_s + crossing_s + 0.5 * hidden_s, hidden_s),
             ] {
                 let moved_rad: f64 = get_flight_angle_rad(flight, time_s + SMALL_DT_S)
                     - get_flight_angle_rad(flight, time_s);
@@ -258,8 +339,7 @@ mod tests {
                 );
                 let (before, heading) =
                     get_flight_point(flight, get_flight_angle_rad(flight, time_s));
-                let after: DVec3 =
-                    get_flight_point(flight, get_flight_angle_rad(flight, time_s + SMALL_DT_S)).0;
+                let after: DVec3 = get_point(flight, time_s + SMALL_DT_S);
                 assert!(
                     (after - before).dot(heading) > 0.0,
                     "the ship flies forward"
@@ -271,7 +351,10 @@ mod tests {
     #[test]
     fn a_flight_comes_back() {
         for (i, flight) in FLIGHTS.iter().enumerate() {
-            let round_s: f64 = (1.0 + HIDDEN_PER_CROSSING) * flight.crossing_s;
+            let round_s: f64 = match flight.path {
+                Path::Crossing { crossing_s, .. } => (1.0 + HIDDEN_PER_CROSSING) * crossing_s,
+                Path::Hovering { sway_period_s, .. } => sway_period_s,
+            };
             let later = get_spaceships(TODAY_S + round_s);
             let moved_rad: f64 = to_dvec3(get_spaceships(TODAY_S)[i].centre)
                 .angle_between(to_dvec3(later[i].centre));
@@ -284,16 +367,64 @@ mod tests {
 
     #[test]
     fn flights_rise_and_set() {
-        for flight in &FLIGHTS {
-            let rise_s: f64 = -flight.offset_s;
+        for (flight, crossing_s, offset_s) in get_crossings() {
+            let rise_s: f64 = -offset_s;
             let top_rad: f64 = flight.top_elevation_deg.to_radians();
             assert!(get_elevation_rad(flight, rise_s).abs() < TOLERANCE);
-            let top_s: f64 = rise_s + 0.5 * flight.crossing_s;
+            let top_s: f64 = rise_s + 0.5 * crossing_s;
             assert!((get_elevation_rad(flight, top_s) - top_rad).abs() < TOLERANCE);
-            let set_s: f64 = rise_s + flight.crossing_s;
+            let set_s: f64 = rise_s + crossing_s;
             assert!(get_elevation_rad(flight, set_s - SMALL_DT_S) > 0.0);
-            let hidden_s: f64 = HIDDEN_PER_CROSSING * flight.crossing_s;
+            let hidden_s: f64 = HIDDEN_PER_CROSSING * crossing_s;
             assert!(get_elevation_rad(flight, set_s + 0.5 * hidden_s) < 0.0);
+        }
+    }
+
+    #[test]
+    fn the_station_hovers_nearly_still() {
+        let station: &Flight = FLIGHTS
+            .iter()
+            .find(|flight| matches!(flight.hull, Hull::BattleStation))
+            .expect("a battle station flies");
+        let (sway_rad, sway_period_s): (f64, f64) = match station.path {
+            Path::Hovering {
+                sway_deg,
+                sway_period_s,
+            } => (sway_deg.to_radians(), sway_period_s),
+            Path::Crossing { .. } => panic!("the battle station hovers"),
+        };
+        let top: DVec3 = get_flight_point(station, 0.0).0;
+        assert!(top.angle_between(get_point(station, 0.0)) < TOLERANCE);
+        let furthest_rad: f64 = top.angle_between(get_point(station, 0.25 * sway_period_s));
+        assert!(
+            (furthest_rad - sway_rad).abs() < TOLERANCE,
+            "{furthest_rad}"
+        );
+        let mut time_s: f64 = TODAY_S;
+        while time_s < TODAY_S + DAY_S {
+            let (here, next) = (get_point(station, time_s), get_point(station, time_s + 1.0));
+            assert!(top.angle_between(here) <= sway_rad + TOLERANCE);
+            assert!(get_elevation_rad(station, time_s) > 0.0, "it never sets");
+            assert!(here.angle_between(next).to_degrees() < MAX_HOVER_DEG_PER_S);
+            time_s += DAY_SAMPLE_S;
+        }
+    }
+
+    #[test]
+    fn giants_are_drawn_behind_the_small_ships() {
+        let last_giant: usize = FLIGHTS.iter().rposition(is_giant).expect("giants fly");
+        let first_small: usize = FLIGHTS
+            .iter()
+            .position(|flight| !is_giant(flight))
+            .expect("small ships fly");
+        assert!(last_giant < first_small, "giants come first in FLIGHTS");
+        let largest_small_rad: f64 = FLIGHTS
+            .iter()
+            .filter(|flight| !is_giant(flight))
+            .map(|flight| flight.half_length_rad)
+            .fold(0.0, f64::max);
+        for giant in FLIGHTS.iter().filter(|flight| is_giant(flight)) {
+            assert!(giant.half_length_rad > largest_small_rad);
         }
     }
 

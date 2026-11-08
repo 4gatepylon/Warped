@@ -1,9 +1,8 @@
 // Smooth-shape versions of index.html's voxel builders, for export_map.mjs. It runs this after index.html's level
-// code, so these declarations replace the voxel ones: every model becomes rounded boxes, cylinders and ellipsoids
+// code, so these declarations replace the voxel ones: every model becomes sharp-edged boxes, cylinders and ellipsoids
 // in its local chart (meters, y up from the ground), placed on the crater terrain. Shapes resting on the ground
 // reach down below the terrain so nothing floats on uneven ground.
 
-const ROUND_M = 0.12;
 const PLACED_MODELS = [];
 const MOUND_HEIGHT_SCALE = 0.45, MOUND_WIDTH_SCALE = 1.4, MOUND_RADIUS_PER_PEAK_RADIUS = 1.6, RIDGE_MOUND_SPACING_M = 6, RIDGE_MOUND_RADIUS_M = 10, MOUND_SEED = 17;
 const BOULDER_MIN_RADIUS_M = 2.5, BOULDER_EXTRA_RADIUS_M = 2.5, BOULDER_MIN_RISE = 0.25, BOULDER_EXTRA_RISE = 0.25;
@@ -12,7 +11,7 @@ const STAND_PROBE_TOP_M = 30;
 const STAND_PROBE_STEP_M = 0.02;
 const TERRAIN_OCTAVES = 5, TERRAIN_RIM_NOISE_M = 60, TERRAIN_RIM_NOISE_FRAC = 0.5, TERRAIN_OUTER_FLANK = 3;
 const TERRAIN_WALL_RELIEF_GAIN = 3, TERRAIN_RIM_SEED = 9;
-const WINDOW_Y = 2, WALL_ROUND_M = 0.3;
+const WINDOW_Y = 2;
 const KAZEMAT_HEIGHT_M = 6, GARAGE_HEIGHT_M = 9, FIELD_BUNKER_HEIGHT_M = 5.5, BEACON_HEIGHT_M = 4, HESCO_HEIGHT_M = 1.4;
 const HESCO_WIDTH_M = 1.55, HESCO_GAP_M = 3, HESCO_ROW_M = 16, BEACON_RADIUS_M = 0.45, RED_SPAWN_U_M = 119;
 const MAX_EXPORTED_STRUCTURE_COUNT = 128, BUNKER_LAMP_COLOR = [1.0, 0.92, 0.8];
@@ -22,20 +21,19 @@ SPAWNS[RED].u_m = RED_SPAWN_U_M;
 /** `ShapeModel` collects one structure's shapes, lamps and consoles, like `VoxelModel`. */
 class ShapeModel {
   constructor(name) { this.name = name; this.shapes = []; this.lamps = []; this.consoles = []; this.mesh = null; this.parts = []; this.turn_rad = 0; }
-  /** `box` adds a rounded box over the voxel-style inclusive cell range [x0, x1] x [y0, y1] x [z0, z1]. */
-  box(x0, y0, z0, x1, y1, z1, material, round_m = ROUND_M) {
+  /** `box` adds a box over the voxel-style inclusive cell range [x0, x1] x [y0, y1] x [z0, z1]. */
+  box(x0, y0, z0, x1, y1, z1, material) {
     const lo = [x0, y0, z0], hi = [x1 + 1, y1 + 1, z1 + 1];
-    this.add('box', lo.map((l, a) => (l + hi[a]) / 2), lo.map((l, a) => (hi[a] - l) / 2), material, round_m);
+    this.add('box', lo.map((l, a) => (l + hi[a]) / 2), lo.map((l, a) => (hi[a] - l) / 2), material);
   }
-  /** `cylinder` adds a rounded cylinder along `axis` (0 x, 1 y, 2 z) from its centre, radius and half length. */
-  cylinder(centre_m, radius_m, half_length_m, material, axis = 1, round_m = ROUND_M) {
+  /** `cylinder` adds a cylinder along `axis` (0 x, 1 y, 2 z) from its centre, radius and half length. */
+  cylinder(centre_m, radius_m, half_length_m, material, axis = 1) {
     const half_m = [radius_m, radius_m, radius_m]; half_m[axis] = half_length_m;
-    this.add('cylinder', centre_m, half_m, material, round_m, axis);
+    this.add('cylinder', centre_m, half_m, material, axis);
   }
-  ellipsoid(centre_m, half_m, material) { this.add('ellipsoid', centre_m, half_m, material, 0); }
-  add(kind, centre_m, half_m, material, round_m, axis = 1) {
-    round_m = Math.min(round_m, ...half_m.map(h => h * 0.99));
-    this.shapes.push({ kind, centre_m, half_m, round_m, axis, material });
+  ellipsoid(centre_m, half_m, material) { this.add('ellipsoid', centre_m, half_m, material); }
+  add(kind, centre_m, half_m, material, axis = 1) {
+    this.shapes.push({ kind, centre_m, half_m, round_m: 0, axis, material });
   }
   addLamp(q_m, color, radius_m) { this.lamps.push({ q_m, color, radius_m }); }
 }
@@ -201,7 +199,7 @@ function find_standing_height(B) {
 function make_mesh_model(name, mesh_model, height_m, boxes, material, boxes_height_m = height_m) {
   const model = new ShapeModel(name), scale = height_m / boxes_height_m;
   model.mesh = { model: mesh_model, height_m };
-  for (const [centre_m, half_m] of boxes) model.add('box', centre_m.map(c => c * scale), half_m.map(h => h * scale), material, 0);
+  for (const [centre_m, half_m] of boxes) model.add('box', centre_m.map(c => c * scale), half_m.map(h => h * scale), material);
   return model;
 }
 
@@ -212,11 +210,11 @@ function build_lander() {
   return model;
 }
 
-function build_pylon(team) {
+function build_pylon(team, pylon_index) {
   const t = TEAMS[team], model = make_mesh_model(`${t.name} pylon`, 'scifi_beacon', BEACON_HEIGHT_M, [], MAT.METAL);
-  model.cylinder([0, BEACON_HEIGHT_M / 2, 0], BEACON_RADIUS_M, BEACON_HEIGHT_M / 2, t.console);
+  model.cylinder([0, BEACON_HEIGHT_M / 2, 0], BEACON_RADIUS_M, BEACON_HEIGHT_M / 2, t.console + pylon_index * CONSOLES_PER_PYLON);
   model.consoles.push([0, PYLON_CORE_HEIGHT_M / 2, 0]);
-  model.addLamp([0, PYLON_CORE_HEIGHT_M, 0], t.color, 10);
+  model.addLamp([0, BEACON_HEIGHT_M, 0], t.color, 10);
   return model;
 }
 
@@ -233,29 +231,29 @@ function build_pylon(team) {
  * @example add_wall_around_windows(model, -3, 4, -6, 5, z => z % 3 === 0);
  */
 function add_wall_around_windows(model, x, top_y, z0, z1, is_window) {
-  model.box(x, 0, z0, x, WINDOW_Y - 1, z1, MAT.HULL, WALL_ROUND_M);
-  model.box(x, WINDOW_Y + 1, z0, x, top_y, z1, MAT.HULL, WALL_ROUND_M);
+  model.box(x, 0, z0, x, WINDOW_Y - 1, z1, MAT.HULL);
+  model.box(x, WINDOW_Y + 1, z0, x, top_y, z1, MAT.HULL);
   for (let z = z0; z <= z1; z++) {
     if (is_window(z) || (z > z0 && !is_window(z - 1))) continue;
     let z_end_incl = z;
     while (z_end_incl < z1 && !is_window(z_end_incl + 1)) z_end_incl++;
-    model.box(x, WINDOW_Y - 1, z, x, WINDOW_Y + 1, z_end_incl, MAT.HULL, WALL_ROUND_M);
+    model.box(x, WINDOW_Y - 1, z, x, WINDOW_Y + 1, z_end_incl, MAT.HULL);
   }
 }
 
 function build_habitat_shapes(name, length_m, stripe, light) {
   const model = new ShapeModel(name), z0 = -Math.floor(length_m / 2), z1 = z0 + length_m - 1, window_period = 3;
   const is_window = z => z > z0 && z < z1 && (z - z0) % window_period === 1;
-  model.box(-3, 0, z0, 2, 0, z1, MAT.FLOOR, 0.1);
+  model.box(-3, 0, z0, 2, 0, z1, MAT.FLOOR);
   for (const x of [-3, 2]) {
     add_wall_around_windows(model, x, 4, z0, z1, is_window);
-    model.box(x, 1, z0 + 1, x, 1, z1 - 1, stripe, 0.1); model.shapes.at(-1).half_m[0] = 0.55;
-    for (let z = z0 + 1; z < z1; z++) if (is_window(z)) { model.box(x, WINDOW_Y, z, x, WINDOW_Y, z, MAT.GLASS, 0.15); model.shapes.at(-1).half_m[0] = 0.56; }
+    model.box(x, 1, z0 + 1, x, 1, z1 - 1, stripe); model.shapes.at(-1).half_m[0] = 0.55;
+    for (let z = z0 + 1; z < z1; z++) if (is_window(z)) { model.box(x, WINDOW_Y, z, x, WINDOW_Y, z, MAT.GLASS); model.shapes.at(-1).half_m[0] = 0.56; }
   }
-  model.box(-3, 4, z0, 2, 4, z1, MAT.HULL, 0.4);
-  for (let z = z0 + 1; z < z1; z += 2) { model.box(-2, 5, z, 1, 5, z, MAT.SOLAR, 0.05); model.shapes.at(-1).half_m[1] = 0.08; model.shapes.at(-1).centre_m[1] = 5.05; }
+  model.box(-3, 4, z0, 2, 4, z1, MAT.HULL);
+  for (let z = z0 + 1; z < z1; z += 2) { model.box(-2, 5, z, 1, 5, z, MAT.SOLAR); model.shapes.at(-1).half_m[1] = 0.08; model.shapes.at(-1).centre_m[1] = 5.05; }
   for (const z of [z0, z1]) {
-    model.box(-3, 0, z, -2, 4, z, MAT.HULL, 0.2); model.box(1, 0, z, 2, 4, z, MAT.HULL, 0.2); model.box(-1, 3, z, 0, 4, z, MAT.HULL, 0.2);
+    model.box(-3, 0, z, -2, 4, z, MAT.HULL); model.box(1, 0, z, 2, 4, z, MAT.HULL); model.box(-1, 3, z, 0, 4, z, MAT.HULL);
     for (const x of [-3, 2]) model.ellipsoid([x + 0.5, 3.5, z + (z === z0 ? 0 : 1)], [0.3, 0.3, 0.15], light);
   }
   return model;
@@ -270,23 +268,23 @@ function build_habitat(name, length_m, stripe, light) {
 
 function build_dome(name, radius_m, light) {
   const model = new ShapeModel(name), r = radius_m, glass_frac = 0.62, light_count = 6;
-  model.cylinder([0, glass_frac * r / 2, 0], r, glass_frac * r / 2, MAT.HULL, 1, 0.5);
+  model.cylinder([0, glass_frac * r / 2, 0], r, glass_frac * r / 2, MAT.HULL);
   model.ellipsoid([0, 0, 0], [r - 0.15, r, r - 0.15], MAT.GLASS);
   model.cylinder([0, glass_frac * r + 0.3, 0], 1, 0.3, light);
   for (let i = 0; i < light_count; i++) {
     const a = i * 2 * Math.PI / light_count;
     model.ellipsoid([r * Math.cos(a), 1, r * Math.sin(a)], [0.3, 0.3, 0.3], light);
   }
-  for (const s of [-1, 1]) model.box(-1, 0, s > 0 ? r - 1 : -r - 1, 0, 2, s > 0 ? r : -r, MAT.HULL, 0.3);
+  for (const s of [-1, 1]) model.box(-1, 0, s > 0 ? r - 1 : -r - 1, 0, 2, s > 0 ? r : -r, MAT.HULL);
   return model;
 }
 
 function build_antenna(name, height_m, light) {
   const model = new ShapeModel(name), dish_r = 2.5;
-  model.box(-1, 0, -1, 1, 0, 1, MAT.METAL, 0.2);
+  model.box(-1, 0, -1, 1, 0, 1, MAT.METAL);
   model.cylinder([0.5, (height_m + 2) / 2, 0.5], 0.22, height_m / 2, MAT.METAL);
   model.cylinder([0.5, height_m - 1.5, 0.5], 0.12, dish_r, MAT.METAL, 0);
-  model.cylinder([0.5, height_m + 1.6, 0.5], dish_r, 0.25, MAT.HULL, 1, 0.2);
+  model.cylinder([0.5, height_m + 1.6, 0.5], dish_r, 0.25, MAT.HULL);
   model.ellipsoid([0.5, height_m + 3.4, 0.5], [0.35, 0.35, 0.35], light);
   return model;
 }
@@ -294,25 +292,25 @@ function build_antenna(name, height_m, light) {
 function build_walkway(name, length_m) {
   const model = new ShapeModel(name), z0 = -Math.floor(length_m / 2), z1 = z0 + length_m - 1;
   const is_window = z => (z - z0) % 2 === 1;
-  model.box(-1, 0, z0, 1, 0, z1, MAT.METAL, 0.1);
+  model.box(-1, 0, z0, 1, 0, z1, MAT.METAL);
   for (const x of [-2, 2]) add_wall_around_windows(model, x, 3, z0, z1, is_window);
-  model.box(-2, 3, z0, 2, 3, z1, MAT.HULL, 0.4);
-  for (let z = z0; z <= z1; z++) for (const x of [-2, 2]) if (is_window(z)) { model.box(x, WINDOW_Y, z, x, WINDOW_Y, z, MAT.GLASS, 0.15); model.shapes.at(-1).half_m[0] = 0.56; }
+  model.box(-2, 3, z0, 2, 3, z1, MAT.HULL);
+  for (let z = z0; z <= z1; z++) for (const x of [-2, 2]) if (is_window(z)) { model.box(x, WINDOW_Y, z, x, WINDOW_Y, z, MAT.GLASS); model.shapes.at(-1).half_m[0] = 0.56; }
   return model;
 }
 
 function build_landing_pad(name, team) {
   const t = TEAMS[team], model = new ShapeModel(name), half = 7;
-  model.box(-half, 0, -half, half - 1, 0, half - 1, MAT.HAZARD, 0.1);
-  model.box(-half + 1, 0, -half + 1, half - 2, 0, half - 2, MAT.PAD, 0.1); model.shapes.at(-1).half_m[1] += 0.02;
-  model.cylinder([0, 0.53, 0], 4.5, 0.5, t.paint, 1, 0.05);
-  model.cylinder([0, 0.55, 0], 3.5, 0.5, MAT.PAD, 1, 0.05);
+  model.box(-half, 0, -half, half - 1, 0, half - 1, MAT.HAZARD);
+  model.box(-half + 1, 0, -half + 1, half - 2, 0, half - 2, MAT.PAD); model.shapes.at(-1).half_m[1] += 0.02;
+  model.cylinder([0, 0.53, 0], 4.5, 0.5, t.paint);
+  model.cylinder([0, 0.55, 0], 3.5, 0.5, MAT.PAD);
   for (const [x, z] of [[-half, -half], [half - 1, -half], [-half, half - 1], [half - 1, half - 1]]) {
     model.cylinder([x + 0.5, 2, z + 0.5], 0.25, 1, MAT.METAL);
     model.ellipsoid([x + 0.5, 3.4, z + 0.5], [0.35, 0.35, 0.35], t.light);
   }
-  model.box(3, 1, 4, 4, 2, 5, MAT.METAL, 0.3);
-  model.box(-5, 1, 4, -5, 1, 4, MAT.HAZARD, 0.3);
+  model.box(3, 1, 4, 4, 2, 5, MAT.METAL);
+  model.box(-5, 1, 4, -5, 1, 4, MAT.HAZARD);
   model.addLamp([0, 3, 0], t.color, 9);
   return model;
 }
@@ -320,11 +318,11 @@ function build_landing_pad(name, team) {
 function build_watchtower(name, team) {
   const t = TEAMS[team], model = new ShapeModel(name), top = 6;
   for (const [x, z] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) model.cylinder([x + 0.5, (top + 1) / 2, z + 0.5], 0.3, (top + 1) / 2, MAT.METAL);
-  model.box(-2, top, -2, 2, top, 2, MAT.METAL, 0.2);
-  model.box(-2, top + 1, -2, 2, top + 1, -2, MAT.HULL, 0.15); model.box(-2, top + 1, 2, 2, top + 1, 2, MAT.HULL, 0.15);
-  model.box(-2, top + 1, -2, -2, top + 1, 2, MAT.HULL, 0.15); model.box(2, top + 1, -2, 2, top + 1, 0, MAT.HULL, 0.15);
+  model.box(-2, top, -2, 2, top, 2, MAT.METAL);
+  model.box(-2, top + 1, -2, 2, top + 1, -2, MAT.HULL); model.box(-2, top + 1, 2, 2, top + 1, 2, MAT.HULL);
+  model.box(-2, top + 1, -2, -2, top + 1, 2, MAT.HULL); model.box(2, top + 1, -2, 2, top + 1, 0, MAT.HULL);
   for (const [x, z] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) model.ellipsoid([x + 0.5, top + 2.3, z + 0.5], [0.3, 0.3, 0.3], t.light);
-  for (let k = 0; k <= top; k++) model.box(3, k, k - 4, 3, k, k - 4, MAT.METAL, 0.1);
+  for (let k = 0; k <= top; k++) model.box(3, k, k - 4, 3, k, k - 4, MAT.METAL);
   model.addLamp([0, top + 2, 0], t.color, 9);
   return model;
 }
@@ -352,7 +350,7 @@ function build_crates(name, rng, count) {
     let y = 0;
     for (let a = x; a < x + size; a++) for (let b = z; b < z + size; b++) y = Math.max(y, heights.get(`${a},${b}`) || 0);
     for (let a = x; a < x + size; a++) for (let b = z; b < z + size; b++) heights.set(`${a},${b}`, y + size);
-    model.box(x, y, z, x + size - 1, y + size - 1, z + size - 1, kinds[Math.floor(rng() * kinds.length)], 0.1);
+    model.box(x, y, z, x + size - 1, y + size - 1, z + size - 1, kinds[Math.floor(rng() * kinds.length)]);
   }
   return model;
 }
@@ -361,7 +359,7 @@ function build_solar_array(name, rows, length_m) {
   const model = new ShapeModel(name), row_pitch = 4, post_period = 4, x0 = -Math.floor(length_m / 2), x1 = length_m - Math.floor(length_m / 2) - 1;
   for (let r = 0; r < rows; r++) {
     const z = r * row_pitch - Math.floor(rows * row_pitch / 2);
-    model.box(x0, 1, z, x1, 1, z + 1, MAT.SOLAR, 0.05); model.shapes.at(-1).half_m[1] = 0.1; model.shapes.at(-1).centre_m[1] = 1.4;
+    model.box(x0, 1, z, x1, 1, z + 1, MAT.SOLAR); model.shapes.at(-1).half_m[1] = 0.1; model.shapes.at(-1).centre_m[1] = 1.4;
     for (let x = x0; x <= x1; x++) if (((x % post_period) + post_period) % post_period === 0) model.cylinder([x + 0.5, 0.65, z + 1], 0.12, 0.65, MAT.METAL);
   }
   return model;

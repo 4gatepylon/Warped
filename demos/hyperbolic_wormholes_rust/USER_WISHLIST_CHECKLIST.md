@@ -11,55 +11,58 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
-  curvature by default (and at most twice). Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
-- [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
-  of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
-- [~] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
-  character, and the player controls it from there, seeing their own character. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
-- [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
-  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
-  wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
-- [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
-  (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
-- [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
-  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
-  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
-  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead; that stray is to be turned off
-  by default. Demos first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/beam-shot-noise`, 2026-11-07.
-- [~] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
-  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
-  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
-  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
-  show a redshift instead. The user wants video or image demos to confirm. Claimed by Claude Code (subagent of
-  session `wizardly-hamilton-23a121`), branch `claude/wormhole-doppler`, 2026-11-07.
-- [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
-  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
-  cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
-  `claude/square-shapes`, 2026-11-07.
-- [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
-  (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
-- [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
-  throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
-  `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
-- [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
-  center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
-  it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
-  pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
-  console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
-  down.
-  Claimed by Claude Code (session `08e70e8b-f763-4c5c-828c-f939a12fad13`), branch `reality-bend`, 2026-11-07.
-- [~] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
-  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). Claimed by Claude Code
-  (session `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/shoot-wormholes`, 2026-11-07.
+- [~] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
+  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
+  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere.
+  Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch `claude/time-dilation`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-time-dilation` on
+    `leah`'s Mac, branch `claude/time-dilation` (pushed to `origin` once it has commits). State, 2026-11-08: started.
+- [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
+  frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
+  `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
+  2026-11-08.
+- [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
+  wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac (the same agent as W-96 (a
+    different rifle model)), branch `claude/rifle-sway`, to be cut from `staging` once W-96 merges; pictures will be in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-102/`
+    (temporary, under `/private/tmp`). State, 2026-11-08: not started; starts after W-96 (a different rifle model) merges.
+- [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
+  and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
+  1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
+     lander and its pad at the blue spawn, 3.5 m tall.
+  2. "Desert Planet Bunker Garage Thing" by eKross (`ebe3177a1c7947b98328d8cab6aa8600`) replaces the red spawn
+     hangar, 6 m tall.
+  3. "WW2 Field Bunker" by goldenblack4 (`6ea5cebdaa82455aa3aad26baa6e0375`) replaces the two derelict habitat
+     modules in the middle, 3.5 m tall.
+  4. "Sci-Fi Beacon/Way Point Marker Free Model" by AMMediaGames (`a1d91ebb3e2d41bba31c02b11423d97f`) replaces the
+     core and pad of both team pylons: 4 m tall on bare ground, the 5 consoles stay in a ring around it, and each
+     beacon shoots a team-coloured beam 400 m straight up that dims as consoles are switched off.
+  5. "Hesco Barrier PBR" by polbrainstorm (`ab21217481094e9a84f989e71fd56a59`) replaces the two red barriers in the
+     middle: each is a 16 m row of 1.4 m Hesco blocks, keeping the 3 m gap in the middle.
+
+  The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
+  commit the models with textures downscaled (about 20 MB).
+  Claimed by Devin (session Devin Desktop 2026-11-07), branch `devin/models-prepare`, 2026-11-07.
+- [~] **W-106 Teal robot player model.** "Replace the player model with that [Teal V.2] and rig it with an animation":
+  the Sketchfab model "Teal V.2" by Lagst (`d6a54ff9468c451bbdbd879afa03f20a`, Sketchfab Standard) replaces the
+  1 × 4 voxel column drawn for every player's body (the others', and your own in the third-person view, W-61
+  (third-person view)). The user chose: idle, walk, run, jump and death clips, keyframed in Blender on the model's own
+  rig; lasers keep hitting the current box, not the triangles; the model is ray-traced with W-94 (Sketchfab models for
+  the voxel assets)'s triangle renderer. Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch
+  `claude/teal-player`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-teal` on
+    `leah`'s Mac, branch `claude/teal-player` (not pushed yet), to be stacked on W-94 (Sketchfab models for the voxel
+    assets)'s branch once that is pushed. State, 2026-11-08: started; the clips are made first.
 
 ## Open
 
+- [ ] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Found in #319: not vsync
+  tearing (the window presents at vsync, one frame in flight) but bands and strips on far ground under the reality
+  bend, from `BEND_SAG_PIXELS` = 0.5 in `render_voxel.metal`; 0.1 px removes them at 13% more GPU time (34% on the
+  overview view). The user chose to keep 0.5 px for now, 2026-11-08, with W-107 (time dilation) replacing the bend.
 - [ ] **W-40 Graphics caveats.** Fix the Lunar Surface graphics caveats listed in `PLAYTEST.md` ("Graphics on Lunar
   Surface, to fix in later pull requests"); slightly wrong graphics were accepted for playtesting "and we can fix
   them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
@@ -106,58 +109,78 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-- [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
-  when the server is connected properly.
-- [ ] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
-  and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
-  1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
-     lander and its pad at the blue spawn, 3.5 m tall.
-  2. "Desert Planet Bunker Garage Thing" by eKross (`ebe3177a1c7947b98328d8cab6aa8600`) replaces the red spawn
-     hangar, 6 m tall.
-  3. "WW2 Field Bunker" by goldenblack4 (`6ea5cebdaa82455aa3aad26baa6e0375`) replaces the two derelict habitat
-     modules in the middle, 3.5 m tall.
-  4. "Sci-Fi Beacon/Way Point Marker Free Model" by AMMediaGames (`a1d91ebb3e2d41bba31c02b11423d97f`) replaces the
-     core and pad of both team pylons: 4 m tall on bare ground, the 5 consoles stay in a ring around it, and each
-     beacon shoots a team-coloured beam 400 m straight up that dims as consoles are switched off.
-  5. "Hesco Barrier PBR" by polbrainstorm (`ab21217481094e9a84f989e71fd56a59`) replaces the two red barriers in the
-     middle: each is a 16 m row of 1.4 m Hesco blocks, keeping the 3 m gap in the middle.
-
-  The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
-  commit the models with textures downscaled (about 20 MB).
+- [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
+  on W-68 (reality bend), which adds the pylons and the black hole.
 
 ## Pending user review
 
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
-- [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
-  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
-  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
-  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256.
-- [?] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
-  player in the game as a dot in their team's colour; the minimap already showed those in reach. #250.
-- [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
-  staging at #225 ("i click w and cannot get out"). #237.
-- [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
-  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
-  don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
-  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226. Then: "can you add a little bit more haze". #238.
-- [?] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
-  and on Lunar Surface. #73, #76, #81–#86, #90, #91.
-- [?] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
-  `lunar_surface`, with lasers that eliminate players. #77, #79, #80.
+- [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
+  reality bending version). #316.
+- [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
+  can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
+  good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
+  (D106). #304. Then: "make a quick PR to switch which gun model is used where; we accientally got them flipped":
+  the sniper (gun 1) now holds the bolt-action rifle and the rifle (gun 2) the energy revolver. #318.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/rifle-model` (pushed to
+    `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac,
+    pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`
+    (temporary, under `/private/tmp`; the `W-96_final_*` files show the result). State, 2026-11-08: on `staging`,
+    waiting for the user to test it.
+- [?] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
+  center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
+  it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
+  pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
+  console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
+  down. #298, #299, #300, #301.
+- [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
+  curvature by default (and at most twice). After seeing 2x speckle far from the map's middle, the user chose 1.5x
+  as the default: "1.5x curvature is fine". #285.
+- [?] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
+  player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
+  page use team colours. The user said to add and fix it ("Yes, add and fix"). #290.
+- [?] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
+  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
+  wedge-shaped capital ship), not copies of the films' models, and without their names in the code. From two options
+  of each, the user picked "Death Star option B" (the dish in the upper half) and "ship option A but you can add a
+  bunch of lights on it like B" (D101). #303.
+  - **Where the work is** (for any agent picking it up): merged into `staging` in #303 from branch
+    `claude/giant-ships` (pushed to `origin`; worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a58a7f92ff135229f`
+    on the user's Mac), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-83/`
+    (temporary, under `/private/tmp`). State, 2026-11-08: done and on `staging`; waiting for the user to test.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
-- [?] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
-- [?] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
-  and team. #164.
+- [?] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
+  From three looks, the user picked C, photo-like ("get milky way photo like merged"): drawn in code, arching across
+  the sky from base to base (a placement chosen for the user), its brightness in `player_settings.yaml` (D102).
+  #317.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/milky-way` (pushed to `origin`),
+    worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, built by Claude
+    Code and finished by Devin; final pictures in
+    `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-98/final/`. State,
+    2026-11-08: on `staging`, waiting for the user to test it.
 
 ## Done
 
 Confirmed by the user after testing.
 
+- [x] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
+  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
+  bar while disabling a pylon". Loading screen: #292, #293; connected: the lobby says CONNECTING, then CONNECTED,
+  #307. Confirmed by the user, 2026-11-08: "i love hte loading screen", then "looks good".
+- [x] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
+- [x] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
+  throws the other. These are each player's linked wormholes. #197–#204. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
+- [x] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
+  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). You chose: a shot through
+  an enemy's mouth (or at a lone mouth's ball) counts, 2 sniper shots, damage kept until destroyed, both mouths flash
+  (D98). #246–#248. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
 - [x] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
   be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
   screenshots before it merged ("dust polyhedra looks good plz merge"). #234. Confirmed by the user, 2026-11-07: "dust as small polydra is good so it should be masrked as done".
@@ -298,3 +321,71 @@ Confirmed by the user after testing.
   stays, and so do the grey fighters unless the user says otherwise. #232. Confirmed by the user, 2026-11-07.
 - [x] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go
   simple and geometric." Pictures first; the user picked "A wide delta". #242. Confirmed by the user, 2026-11-07.
+- [x] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
+  demo's `AGENTS.md` that any new asset gets added to that page. #262. Confirmed by the user, 2026-11-07: "the credits page looks good yes".
+- [x] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
+  and team. #164. Confirmed by the user, 2026-11-07: "kd stuff also looiks good so add that as complete as well".
+- [x] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
+  menu opens on the SCORES page. #265. Confirmed by the user, 2026-11-07: "scores page change looks good, mark it as done in a pr".
+- [x] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
+  the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
+  #210. Confirmed by the user, 2026-11-07: "no spaceship on blue side looks good mark it as done".
+- [x] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
+  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
+  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
+  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256. After playtesting
+  #256: "move the gun back so the handle of the gun is offscreen. it was fine how it was before, just make the gun
+  larger." #263. Then: "I see Leah made the lightsaber thing. That's OK. Let's do lightsaber for the sniper and do
+  the old laser view for the rifle." The rifle's beam is the laser again in #249, with W-84 (shot noise in the beam
+  itself). Confirmed by the user, 2026-11-07: "lightsaber lasers is done, mark it as done".
+- [x] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
+  player in the game as a dot in their team's colour; the minimap already showed those in reach. #250. Confirmed by the user, 2026-11-07: "other players on map is done mark it as done".
+- [x] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
+  don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
+  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226. Then: "can you add a little bit more haze". #238. Confirmed by the user, 2026-11-07: "better scene lighting is done, mark it as done".
+- [x] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
+  and on Lunar Surface. #73, #76, #81–#86, #90, #91. Confirmed by the user, 2026-11-07: "mark fast runst render er as done".
+- [x] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
+  `lunar_surface`, with lasers that eliminate players. #77, #79, #80. Confirmed by the user, 2026-11-07: "mark multiplayer on one network as done".
+- [x] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129. Confirmed by the user, 2026-11-07: "mark flashlight as done".
+- [x] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
+  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
+  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
+  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
+  speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
+  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
+  then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
+  that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249. Confirmed by the user, 2026-11-07: "shot noise is good".
+- [x] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
+  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
+  cylinder, just make it a cylinder. #210. Confirmed by the user, 2026-11-07: "sharp edged shpes is done".
+- [x] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
+  #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
+  velocity: as long as you are in the wormhole and moving, it shows up blue (based on your velocity and your place in
+  the wormhole); it should NOT go down with a timer. Once you're out of the wormhole it should go away immediately.
+  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. After
+  testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
+  for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
+  BLUE but it has to be very close to white as I had asked". #272. Confirmed by the user, 2026-11-07: "wormhole color from motion is almost done: just mark it as done and make a PR that makes it take slightly longer; ideally just double its radius or wahtever (ioe walking at same speed should take exactly trwice as long of time showing me cyan or red)".
+  After seeing #272's pictures: "for the "at the throat" thing you still need to have the dark red and the light
+  cyan almost white instead of doing this "warm" stuff. It has to be CRISP (not like diffused by this white screen),
+  like the previous pictures I was shown. Still fix the throat timing for the color though", "so overall your throat
+  timing looks good", and "its just the specific colors should be a bit more crisp". #289. The user's picks from the
+  colour sheets: "i like option 8 for the wormhole", and "for red i like r2" (branch `claude/wormhole-doppler-picks`).
+  #271.
+  - **Where the work is** (for any agent picking it up): branch `claude/wormhole-tint-crisp`, pushed to `origin`,
+    PR #289 into `staging` (crisp colours, and the tint showing twice as long: 0.63 s against 0.32 s at walking
+    speed). Worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-acc2c2d6bf5b447c3` on the user's Mac; pictures
+    in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-82/`
+    (`fix3_*`), which is temporary (it is under `/private/tmp`). State, 2026-11-08: merged into `staging`.
+- [x] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
+  staging at #225 ("i click w and cannot get out"). #237. Confirmed by the user, 2026-11-07: "also stuck in bunker is fixed so mark that as done".
+- [x] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
+  character, and the player controls it from there, seeing their own character. `V` switches to a view from 3 m
+  behind and 0.6 m above the head, pulled in when a wall or the ground is behind it; shots go from the head into the
+  crosshair, and aiming looks from the eye again. #286. Confirmed by the user, 2026-11-08: "third person looks good its done mark at such".
+- [x] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
+  of the ground, just barely translucent, to mark out the real zones. Then, from the pictures: "Level A, faint", and
+  "the blates should also have a little bit of thickness (rougly 1 player worth of thickenss)". #291. Confirmed by the user, 2026-11-08: "please merge the fact that the walls are odne", "(zone planes are done)".

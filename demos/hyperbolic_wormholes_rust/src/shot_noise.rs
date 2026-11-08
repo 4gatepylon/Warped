@@ -6,8 +6,16 @@
 //! step with the rifle's heat, from `rifle.noise_start_rad` cold to `rifle.noise_max_rad` at full
 //! heat, and shrinks back as it cools.
 //!
-//! Interface: `ShotNoise` (`FromSeed`, `FromClock`, `sample_sniper`, `sample_rifle`),
-//! `ShotOffset` (`NONE`, `aim`), `get_rifle_spread_rad`.
+//! Each shot also gets its beam's speckle (W-84): the share of the beam's pixels that speckle each
+//! frame, painted black, turned white or dropping out (`render_voxel.metal`). The sniper's is
+//! exponential with mean `sniper.beam_speckle_mean_frac`, cut at `sniper.beam_speckle_max_frac`;
+//! the rifle's grows in step with the heat, from `rifle.beam_speckle_start_frac` cold to
+//! `rifle.beam_speckle_max_frac`. Both are rounded to steps of 1 / `BEAM_SPECKLE_LEVEL_COUNT`, which
+//! the network carries.
+//!
+//! Interface: `ShotNoise` (`FromSeed`, `FromClock`, `sample_sniper`, `sample_rifle`,
+//! `sample_sniper_speckle`), `ShotOffset` (`NONE`, `aim`), `get_rifle_spread_rad`,
+//! `get_rifle_speckle_frac`, `BEAM_SPECKLE_LEVEL_COUNT`, `round_speckle_frac`.
 //!
 //! Example: `let laser_frame = noise.sample_sniper(&settings.sniper).aim(camera);`
 //!
@@ -30,6 +38,7 @@ const SPLITMIX_MULTIPLIERS: [u64; 2] = [0xbf58_476d_1ce4_e5b9, 0x94d0_49bb_1331_
 const SPLITMIX_SHIFTS: [u32; 3] = [30, 27, 31];
 const MANTISSA_BITS: u32 = 53;
 const BITS_PER_U64: u32 = 64;
+pub const BEAM_SPECKLE_LEVEL_COUNT: u8 = 30;
 
 /// `ShotOffset` is how far one shot strays from the crosshair: the angle between the shot and the
 /// crosshair's direction, and the direction around the crosshair it strays toward (0 to the
@@ -127,6 +136,17 @@ impl ShotNoise {
             direction_rad: TAU * self.sample_frac(),
         }
     }
+
+    /// `sample_sniper_speckle` gives one sniper shot's beam speckle: a share from an exponential
+    /// distribution with mean `sniper.beam_speckle_mean_frac`, cut at `sniper.beam_speckle_max_frac`,
+    /// and rounded (`round_speckle_frac`).
+    ///
+    /// Example: `self.beam_speckle_frac = self.shot_noise.sample_sniper_speckle(&self.settings.sniper);`
+    pub fn sample_sniper_speckle(&mut self, sniper: &SniperSettings) -> f64 {
+        let exponential_frac: f64 =
+            -sniper.beam_speckle_mean_frac * (1.0 - self.sample_frac()).ln();
+        round_speckle_frac(exponential_frac.min(sniper.beam_speckle_max_frac))
+    }
 }
 
 /// `get_rifle_spread_rad` gives the most a rifle shot fired at `heat_frac` strays: from
@@ -142,6 +162,35 @@ pub fn get_rifle_spread_rad(rifle: &RifleSettings, heat_frac: f64) -> f64 {
     rifle.noise_start_rad * (1.0 - heat_frac) + rifle.noise_max_rad * heat_frac
 }
 
+/// `get_rifle_speckle_frac` gives the beam speckle of a rifle shot fired at `heat_frac`: from
+/// `rifle.beam_speckle_start_frac` cold (0) to `rifle.beam_speckle_max_frac` at full heat (1), in
+/// step with the heat, rounded (`round_speckle_frac`). It panics on a heat outside [0, 1].
+///
+/// Example: `self.beam_speckle_frac = get_rifle_speckle_frac(&rifle, self.rifle_heat_frac);`
+pub fn get_rifle_speckle_frac(rifle: &RifleSettings, heat_frac: f64) -> f64 {
+    assert!(
+        (0.0..=1.0).contains(&heat_frac),
+        "get_rifle_speckle_frac: heat_frac must be in [0, 1], not {heat_frac}"
+    );
+    round_speckle_frac(
+        rifle.beam_speckle_start_frac * (1.0 - heat_frac) + rifle.beam_speckle_max_frac * heat_frac,
+    )
+}
+
+/// `round_speckle_frac` rounds a beam speckle share in [0, 1] to the nearest step of
+/// 1 / `BEAM_SPECKLE_LEVEL_COUNT`, the steps the network carries, so every window draws a shot's
+/// beam with the same share. It panics on a share outside [0, 1].
+///
+/// Example: `let speckle_frac = round_speckle_frac(0.12);`
+pub fn round_speckle_frac(speckle_frac: f64) -> f64 {
+    assert!(
+        (0.0..=1.0).contains(&speckle_frac),
+        "round_speckle_frac: speckle_frac must be in [0, 1], not {speckle_frac}"
+    );
+    let level_count: f64 = f64::from(BEAM_SPECKLE_LEVEL_COUNT);
+    (speckle_frac * level_count).round() / level_count
+}
+
 #[cfg(test)]
 mod tests {
     //! Tests of sampling shots' offsets and turning the camera by them.
@@ -153,6 +202,8 @@ mod tests {
     //! | Rifle heat | cold (0), half, full (1), outside [0, 1] (panics) | `rifle_spread_grows_with_heat`, `heat_outside_its_range_fails` |
     //! | Seed | the same twice, two different | `seeds_repeat_their_offsets` |
     //! | Offset | none (the camera itself), a stray (its angle and direction, the position kept) | `no_noise_keeps_the_crosshair`, `aim_turns_the_crosshair_by_the_offset` |
+    //! | Beam speckle | the sniper's (exponential, cut at its cap, a step of the network's, rounded), the rifle's (cold, half, full heat), off (0) | `sniper_speckle_is_exponential_up_to_its_cap`, `rifle_speckle_grows_with_heat` |
+    //! | Share to round | 0, 1, between steps, outside [0, 1] (panics) | `speckles_round_to_network_steps`, `speckle_outside_its_range_fails` |
 
     use super::*;
     use crate::geometry::{
@@ -170,6 +221,8 @@ mod tests {
     const MEAN_PER_SPREAD_OF_A_DISC: f64 = 2.0 / 3.0;
     const HEATS_FRAC: [f64; 3] = [0.0, 0.5, 1.0];
     const BEYOND_FULL_HEAT_FRAC: f64 = 1.5;
+    const ROUNDS_DOWN_STEPS: f64 = 2.4;
+    const ROUNDS_UP_STEPS: f64 = 2.6;
     const REPEAT_COUNT: usize = 100;
     const CAMERA_BOOST: f64 = 0.4;
     const CAMERA_YAW_RAD: f64 = 0.7;
@@ -253,6 +306,65 @@ mod tests {
         }
         assert_eq!(get_rifle_spread_rad(&rifle, 0.0), rifle.noise_start_rad);
         assert_eq!(get_rifle_spread_rad(&rifle, 1.0), rifle.noise_max_rad);
+    }
+
+    #[test]
+    fn sniper_speckle_is_exponential_up_to_its_cap() {
+        let sniper: SniperSettings = ServerSettings::Builtin().sniper;
+        let mut noise: ShotNoise = ShotNoise::FromSeed(SEED);
+        let speckles_frac: Vec<f64> = (0..SAMPLE_COUNT)
+            .map(|_| noise.sample_sniper_speckle(&sniper))
+            .collect();
+        let (mean_frac, cap_frac) = (sniper.beam_speckle_mean_frac, sniper.beam_speckle_max_frac);
+        let capped_mean_frac: f64 = mean_frac * (1.0 - (-cap_frac / mean_frac).exp());
+        assert!(
+            (get_mean(&speckles_frac) - capped_mean_frac).abs() < MEAN_TOLERANCE_FRAC * mean_frac
+        );
+        assert!(speckles_frac.iter().all(|&x| (0.0..=cap_frac).contains(&x)));
+        assert!(speckles_frac.contains(&cap_frac));
+        assert!(speckles_frac.iter().all(|&x| x == round_speckle_frac(x)));
+        let mut off: SniperSettings = sniper.clone();
+        off.beam_speckle_mean_frac = 0.0;
+        assert!((0..REPEAT_COUNT).all(|_| noise.sample_sniper_speckle(&off) == 0.0));
+    }
+
+    #[test]
+    fn rifle_speckle_grows_with_heat() {
+        let rifle: RifleSettings = ServerSettings::Builtin().rifle;
+        let speckles_frac: Vec<f64> = HEATS_FRAC
+            .iter()
+            .map(|&heat_frac| get_rifle_speckle_frac(&rifle, heat_frac))
+            .collect();
+        assert!(speckles_frac.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(
+            speckles_frac[0],
+            round_speckle_frac(rifle.beam_speckle_start_frac)
+        );
+        assert_eq!(
+            speckles_frac[HEATS_FRAC.len() - 1],
+            round_speckle_frac(rifle.beam_speckle_max_frac)
+        );
+    }
+
+    #[test]
+    fn speckles_round_to_network_steps() {
+        let step_frac: f64 = 1.0 / f64::from(BEAM_SPECKLE_LEVEL_COUNT);
+        assert_eq!(round_speckle_frac(0.0), 0.0);
+        assert_eq!(round_speckle_frac(1.0), 1.0);
+        assert_eq!(
+            round_speckle_frac(step_frac * ROUNDS_DOWN_STEPS),
+            step_frac * 2.0
+        );
+        assert_eq!(
+            round_speckle_frac(step_frac * ROUNDS_UP_STEPS),
+            step_frac * 3.0
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "speckle_frac must be in [0, 1]")]
+    fn speckle_outside_its_range_fails() {
+        round_speckle_frac(BEYOND_FULL_HEAT_FRAC);
     }
 
     #[test]

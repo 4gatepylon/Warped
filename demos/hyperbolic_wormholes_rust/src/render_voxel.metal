@@ -4,8 +4,11 @@
  * per pixel, as the Lunar Surface level's WebGL fragment shader does (`demos/levels/lunar_surface/index.html`):
  * straight geodesic chords between warp objects, kick–drift–kick steps inside their reach, a voxel walk through each
  * structure in its Klein coordinates, the ground's folded {4,5} tiling, lunar-Lambert light with soft sun shadows, lamps,
- * earthshine, a thin haze, laser beams, the dust of shots into the ground, stars, a planet, spaceships flying over
- * and bloom. Everything here belongs to the `lunar` appearance style.
+ * earthshine, a thin haze, laser beams, the dust of shots into the ground, the zone walls, stars, a planet, spaceships
+ * flying over and bloom. Everything here belongs to the `lunar` appearance style. Under a reality bend (`bend.rs`)
+ * the rays and warp objects are in the bent world and every other thing stays in the map: each short chord of a ray
+ * is traced through the map between its ends' map points. render_voxel.rs compiles this file twice, with `HAS_BEND` 0
+ * for flat frames (the flat ray tracer, untouched) and 1 for bent ones.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread per pixel of the render size.
@@ -24,7 +27,9 @@ using namespace metal;
     device const MeshTriangle *mesh_triangles [[buffer(0)]], device const BvhNode *mesh_nodes [[buffer(1)]], \
     device const MeshMaterial *mesh_materials [[buffer(7)]], texture2d_array<float> mesh_albedo [[texture(12)]], \
     texture2d_array<float> mesh_mr [[texture(13)]], texture2d_array<float> mesh_normal [[texture(14)]], texture2d_array<float> mesh_emissive [[texture(15)]], \
-    device const MeshTriangle *avatar_triangles [[buffer(8)]], device const BvhNode *avatar_nodes [[buffer(10)]]
+    device const MeshTriangle *avatar_triangles [[buffer(8)]], device const BvhNode *avatar_nodes [[buffer(10)]], \
+    texture2d<float> milky_way [[texture(3)]]
+#define HAS_BEND __HAS_BEND__
 
 constant int MAX_ITERATIONS = 240;
 constant int MAX_SHAPE_STEPS = 96;
@@ -129,8 +134,60 @@ constant float STAR_DENSITY_FINE = 0.012;
 constant float STAR_PIXELS = 0.8;
 constant float STAR_GRID_COARSE = 60.0;
 constant float STAR_GRID_FINE = 170.0;
-constant float3 MILKY_WAY_NORMAL = float3(0.35, 0.55, 0.76);
-constant float MILKY_WAY_WIDTH = 0.2;
+constant float MILKY_WAY_MAX_LATITUDE_RAD = 0.7853982;
+constant float MILKY_WAY_DISK = 0.21;
+constant float MILKY_WAY_BULGE = 0.75;
+constant float MILKY_WAY_DISK_WIDTH = 0.18;
+constant float MILKY_WAY_CORE_WIDENING = 0.3;
+constant float2 MILKY_WAY_BULGE_SIZE = float2(0.5, 0.21);
+constant float MILKY_WAY_ANTICENTRE_FRAC = 0.5;
+constant float MILKY_WAY_EDGE_WARP = 0.11;
+constant float MILKY_WAY_WARP_SCALE = 2.3;
+constant float3 MILKY_WAY_WARP_SEEDS = float3(0.0, 5.2, 9.7);
+constant float3 MILKY_WAY_STRETCH = float3(1.0, 1.0, 1.7);
+constant float MILKY_WAY_STRETCH_WARP = 0.35;
+constant float MILKY_WAY_NOISE_CONTRAST = 2.5;
+constant float MILKY_WAY_DUST_CONTRAST = 3.0;
+constant int MILKY_WAY_COARSE_OCTAVES = 3;
+constant int MILKY_WAY_GRAIN_OCTAVES = 4;
+constant int MILKY_WAY_DARK_OCTAVES = 6;
+constant float MILKY_WAY_CLOUD_SCALE = 3.0;
+constant float MILKY_WAY_CLOUD_AMOUNT = 0.9;
+constant float2 MILKY_WAY_CLOUD_GAIN = float2(0.55, 0.9);
+constant float2 MILKY_WAY_BULGE_CLOUD_GAIN = float2(0.75, 0.5);
+constant float MILKY_WAY_GRAIN_SCALE = 16.0;
+constant float MILKY_WAY_GRAIN_SEED = 4.4;
+constant float MILKY_WAY_GRAIN_AMOUNT = 0.5;
+constant float2 MILKY_WAY_GRAIN_GAIN = float2(0.6, 0.8);
+constant float2 MILKY_WAY_BULGE_GRAIN_GAIN = float2(0.8, 0.4);
+constant float MILKY_WAY_LANE_WANDER = 0.06;
+constant float MILKY_WAY_LANE_WANDER_SCALE = 3.1;
+constant float MILKY_WAY_LANE_WANDER_SEED = 2.0;
+constant float MILKY_WAY_LANE_WIDTH_FRAC = 0.447;
+constant float MILKY_WAY_RIFT_SCALE = 2.6;
+constant float MILKY_WAY_RIFT_SEED = 3.1;
+constant float2 MILKY_WAY_RIFT_EDGES = float2(0.35, 0.8);
+constant float MILKY_WAY_RIFT_CORE_GAP = 0.45;
+constant float MILKY_WAY_RIFT_DEPTH = 2.6;
+constant float MILKY_WAY_DARK_SCALE = 9.0;
+constant float MILKY_WAY_DARK_WARP = 1.5;
+constant float MILKY_WAY_DARK_SEED = 7.7;
+constant float2 MILKY_WAY_DARK_EDGES = float2(0.5, 0.92);
+constant float2 MILKY_WAY_DARK_GRAIN_GAIN = float2(0.55, 0.45);
+constant float MILKY_WAY_DARK_DEPTH = 1.3;
+constant float3 MILKY_WAY_REDDENING = float3(0.9, 1.0, 1.12);
+constant float3 MILKY_WAY_DISK_COLOR = float3(0.8, 0.88, 1.0);
+constant float3 MILKY_WAY_BULGE_COLOR = float3(1.0, 0.8, 0.56);
+constant float3 MILKY_WAY_NEBULA_COLOR = float3(1.0, 0.32, 0.45);
+constant float MILKY_WAY_NEBULA = 0.5;
+constant float MILKY_WAY_NEBULA_SCALE = 20.0;
+constant float MILKY_WAY_NEBULA_SEED = 21.0;
+constant float2 MILKY_WAY_NEBULA_EDGES = float2(0.72, 0.9);
+constant float MILKY_WAY_STAR_BOOST = 4.0;
+constant float MILKY_WAY_MICRO_STAR_GRID = 420.0;
+constant float MILKY_WAY_MICRO_STAR_DENSITY = 0.3;
+constant float MILKY_WAY_MICRO_STAR_BRIGHTNESS = 0.35;
+constant float2 MILKY_WAY_TONE = float2(0.69, 0.46);
 constant float SUN_COS_INNER = 0.99996;
 constant float SUN_COS_OUTER = 0.99990;
 constant float SUN_GLARE_POWER = 900.0;
@@ -148,6 +205,17 @@ constant float EJECTA_OUTER_M = 80.0;
 constant float ZONE_STRIP_M = 0.8;
 constant float ZONE_TINT_GAIN = 1.5;
 constant float ZONE_TINT_FRAC = 0.07;
+constant int MAX_ZONE_WALL_COUNT = __MAX_ZONE_WALL_COUNT__;
+constant float ZONE_WALL_BRIGHTNESS = 0.8;
+constant float ZONE_WALL_FOOT_M = 0.4;
+constant float ZONE_WALL_BODY_FRAC = 0.6;
+constant float ZONE_WALL_TOP_FADE_FRAC = 0.4;
+constant float ZONE_WALL_SOFT_TOP_FRAC = 0.25;
+constant float ZONE_WALL_END_M = 4.0;
+constant float ZONE_WALL_MAX_SLANT = 4.0;
+constant float ZONE_WALL_FACE_FRAC = 0.7;
+constant float ZONE_WALL_SAMPLE_M = 1.0;
+constant int ZONE_WALL_MAX_SAMPLES = 12;
 constant float BOUNDARY_STRIP_FRAC = 0.04;
 constant float CELL_HASH_SCALE = 4096.0;
 constant float HASH_SHRINK = 0.001;
@@ -216,13 +284,30 @@ constant float STAR_BRIGHTNESS_POWER = 4.0;
 constant float STAR_JITTER = 0.6;
 constant float2 STAR_SEEDS = float2(7.1, 3.7);
 constant float FINE_STAR_BRIGHTNESS = 0.5;
-constant float3 MILKY_WAY_COLOR = float3(0.75, 0.8, 1.0);
-constant float MILKY_WAY_BRIGHTNESS = 0.05;
-constant float MILKY_WAY_DETAIL = 6.0;
 constant float BEAM_HAZE_BRIGHTNESS = 0.45;
 constant float BEAM_HAZE_WHITENESS = 0.45;
 constant float BEAM_CORE_BRIGHTNESS = 1.6;
 constant float BEAM_CORE_WHITENESS = 0.9;
+constant float DARK_PYLON_GLOW_FRAC = 0.12;
+constant float BEAM_SPECKLE_STEPS = 1023.0;
+constant int THROWN_TINT_FIRST_BIT = 1;
+constant int THROWN_TINT_MASK = 3;
+constant int BEAM_RIFLE_BIT = 3;
+constant int BEAM_SPECKLE_FIRST_BIT = 4;
+constant int RIFLE_BEAM_CODE = 2;
+constant int BEACON_BEAM_CODE = 4;
+constant float BEACON_BEAM_RADIUS_M = 0.12;
+constant int DARK_FLAG = 1;
+constant int BEACON_FLAG = 2;
+constant float LASER_HALO_OPACITY = 0.9;
+constant float LASER_CORE_WHITENESS = 0.6;
+constant float MIN_SPECKLE_GLOW = 0.02;
+constant uint SPECKLE_KIND_SALT = 0x9e3779b9u;
+constant uint3 PIXEL_HASH_PRIMES = uint3(73856093u, 19349663u, 2654435761u);
+constant uint2 PIXEL_HASH_MULTIPLIERS = uint2(0x7feb352du, 0x846ca68bu);
+constant uint3 PIXEL_HASH_SHIFTS = uint3(16u, 15u, 16u);
+constant uint PIXEL_HASH_DROPPED_BITS = 8u;
+constant float PIXEL_HASH_SCALE = 1.0 / 16777216.0;
 constant float3 BLUE_COLOR = float3(0.30, 0.62, 1.0);
 constant float3 RED_COLOR = float3(1.0, 0.16, 0.08);
 constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
@@ -242,14 +327,27 @@ constant int TERRAIN_BISECTIONS = 8;
 constant float TERRAIN_NORMAL_STEP_M = 0.1;
 constant float KIND_BLACK_HOLE = 0.0;
 constant float HALF_KIND = 0.5;
+constant float FIRST_THROWN_KIND = 1.5;
+constant float3 THROWN_TINTS[3] = {float3(__PURPLE_COLOR__), float3(__GREEN_COLOR__), float3(__HIT_FLASH_COLOR__)};
+constant float THROWN_TINT_FRAC = 0.45;
+constant float THROWN_TINT_FLOOR = 0.08;
 constant float GLOW_FLOOR = 1.0 / 1024.0;
 constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
 constant int REFINED_PIXELS_PER_CELL = 3;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
+constant int MAX_BENT_PIECES = 512;
+constant int MAX_BEND_HALVINGS = 8;
+constant float BEND_SAG_M = 0.02;
+constant float BEND_SAG_PIXELS = 0.5;
+constant float CHORD_SQ_PER_SAG_RADIUS = 8.0;
+constant float MIN_BEND_PIECE_M = 0.5;
+constant float MAX_BEND_PIECE_M = 8.0;
 constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
 constant int HULL_FIGHTER = 0;
 constant int HULL_RING_SHIP = 1;
-constant int HULL_COUNT = 2;
+constant int FLAT_HULL_COUNT = 2;
+constant int HULL_BATTLE_STATION = 2;
+constant int HULL_CAPITAL_SHIP = 3;
 constant int LIGHT_NAV = 0;
 constant int LIGHT_STROBE = 1;
 constant float SHIP_BOUND_HALF_LENGTHS = 1.5;
@@ -278,6 +376,50 @@ constant float3 RING_COLOR = float3(0.75, 0.74, 0.7);
 constant float RING_LIGHT_COUNT = 6.0;
 constant float RING_LIGHT_HALF_LENGTHS = 0.02;
 constant float3 RING_LIGHT_COLOR = float3(0.8, 1.1, 1.3);
+constant float GIANT_NIGHT = 0.06;
+constant float STATION_GROUNDSHINE_FRAC = 0.25;
+constant float CAPITAL_GROUNDSHINE_FRAC = 1.2;
+constant float STATION_TILT_RAD = 0.3;
+constant float2 STATION_DISH_LAT_LON_RAD = float2(0.55, -0.4);
+constant float STATION_DISH_RAD = 0.3;
+constant float STATION_BOWL_RADIUS_RADII = 0.45;
+constant float STATION_LENS_RADIUS_RADII = 0.035;
+constant float2 STATION_DISH_RING_FRACS = float2(0.45, 0.76);
+constant float STATION_DISH_RING_HALF_WIDTH_RADII = 0.004;
+constant float STATION_TRENCH_HALF_RAD = 0.022;
+constant float STATION_BAND_RAD = 0.105;
+constant float STATION_SEAM_HALF_RAD = 0.0025;
+constant float STATION_SEAM_DARKEN_FRAC = 0.3;
+constant float STATION_PANEL_RAD = 0.14;
+constant float STATION_MIN_PANEL_COS = 0.2;
+constant float STATION_PANEL_VARIATION = 0.16;
+constant float3 STATION_COLOR = float3(0.6, 0.61, 0.63);
+constant float3 STATION_DISH_COLOR = float3(0.5, 0.51, 0.53);
+constant float3 STATION_TRENCH_COLOR = float3(0.12, 0.12, 0.13);
+constant float3 STATION_LENS_COLOR = float3(0.07, 0.08, 0.09);
+constant float STATION_WINDOW_FRAC = 0.1;
+constant float STATION_WINDOW_SEED = 0.5;
+constant float STATION_WINDOW_RADIUS_RADII = 0.005;
+constant float STATION_WINDOW_BRIGHTNESS = 0.5;
+constant float2 STATION_NIGHT_EDGES = float2(-0.05, 0.12);
+constant float STATION_TRENCH_LIGHT_COUNT = 14.0;
+constant float STATION_TRENCH_LIGHT_RADIUS_RADII = 0.007;
+constant float STATION_BEACON_RADIUS_RADII = 0.012;
+constant float CAPITAL_TILT_RAD = 0.9;
+constant float CAPITAL_WINDOWS_PER_HALF_LENGTH = 45.0;
+constant float CAPITAL_WINDOW_ROW_HALF_LENGTHS = 0.03;
+constant float2 CAPITAL_WINDOW_SIZE_FRACS = float2(0.55, 0.35);
+constant float CAPITAL_WINDOW_LIT_FRAC = 0.5;
+constant float CAPITAL_WINDOW_BRIGHTNESS = 0.9;
+constant float CAPITAL_WINDOW_SEED = 0.25;
+constant float CAPITAL_EYE_DISTANCE_HALF_LENGTHS = 2.0;
+constant float CAPITAL_PANELS_PER_HALF_LENGTH = 9.0;
+constant float CAPITAL_PANEL_VARIATION = 0.05;
+constant float CAPITAL_HALF_WIDTH_PER_HALF_LENGTH = 0.21;
+constant float2 CAPITAL_EDGE_WINDOW_BAND_HALF_LENGTHS = float2(0.03, 0.09);
+constant float CAPITAL_EDGE_WINDOW_END_HALF_LENGTHS = 0.5;
+constant float3 CAPITAL_ENGINE_COLOR = float3(0.55, 0.8, 1.0);
+constant float CAPITAL_ENGINE_BRIGHTNESS = 1.3;
 
 /** @brief `HULL_BOXES` are the spaceships' boxes (centre, half size; in half lengths, x to the nose, y to starboard), mirrored across the keel. */
 constant float4 HULL_BOXES[] = {float4(0.82, 0.0, 0.1, 0.09), float4(-0.85, 0.0, 0.08, 0.14)};
@@ -290,7 +432,7 @@ constant float2 HULL_CAPSULE_RADII[] = {float2(0.06, 0.05), float2(0.12, 0.12)};
 /** @brief `HULL_CAPSULE_COLORS` are the colours of `HULL_CAPSULES`. */
 constant float3 HULL_CAPSULE_COLORS[] = {float3(0.58, 0.58, 0.6), float3(0.66, 0.66, 0.68)};
 /** @brief `HULL_PART_RANGES` gives each hull's first box, box count, first capsule and capsule count. */
-constant int4 HULL_PART_RANGES[HULL_COUNT] = {int4(0, 0, 0, 0), int4(0, 2, 0, 2)};
+constant int4 HULL_PART_RANGES[FLAT_HULL_COUNT] = {int4(0, 0, 0, 0), int4(0, 2, 0, 2)};
 /** @brief `HULL_TRIANGLES` are the spaceships' flat triangles (three corners), each symmetric across the keel. */
 constant float2 HULL_TRIANGLES[][3] = {{float2(1.0, 0.0), float2(-0.75, 0.82), float2(-0.75, -0.82)}};
 /** @brief `HULL_TRIANGLE_COLORS` are the colours of `HULL_TRIANGLES`. */
@@ -302,20 +444,46 @@ constant float2 HULL_INSETS[][3] = {
 /** @brief `HULL_INSET_COLORS` are the colours of `HULL_INSETS`: a darker spine and a dark glass canopy. */
 constant float3 HULL_INSET_COLORS[] = {float3(0.44, 0.46, 0.52), float3(0.14, 0.2, 0.3)};
 /** @brief `HULL_TRIANGLE_RANGES` gives each hull's first triangle, triangle count, first inset and inset count. */
-constant int4 HULL_TRIANGLE_RANGES[HULL_COUNT] = {int4(0, 1, 0, 2), int4(0, 0, 0, 0)};
+constant int4 HULL_TRIANGLE_RANGES[FLAT_HULL_COUNT] = {int4(0, 1, 0, 2), int4(0, 0, 0, 0)};
 /** @brief `HULL_ENGINES` are the spaceships' engine nozzles (centre, radius, unused), mirrored across the keel. */
 constant float4 HULL_ENGINES[] = {float4(-0.77, 0.12, 0.055, 0.0), float4(-0.95, 0.0, 0.09, 0.0)};
 /** @brief `HULL_PANEL_VARIATIONS` are how much each hull's panels vary in brightness (plain on the fighters' deltas). */
-constant float HULL_PANEL_VARIATIONS[HULL_COUNT] = {0.06, 0.3};
+constant float HULL_PANEL_VARIATIONS[FLAT_HULL_COUNT] = {0.06, 0.3};
 /** @brief `HULL_ENGINE_COLORS` are each hull's engine colours. */
-constant float3 HULL_ENGINE_COLORS[HULL_COUNT] = {float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
+constant float3 HULL_ENGINE_COLORS[FLAT_HULL_COUNT] = {float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
 /** @brief `HULL_LIGHTS` are the spaceships' lights (centre, `LIGHT_*` kind or else a window, radius), mirrored across the keel. */
 constant float4 HULL_LIGHTS[] = {
     float4(-0.7, 0.76, 0.0, 0.035), float4(-0.74, 0.0, 1.0, 0.04),
     float4(0.85, 0.1, 0.0, 0.025), float4(-0.85, 0.15, 1.0, 0.03), float4(0.86, 0.0, 2.0, 0.015),
 };
 /** @brief `HULL_GLOW_RANGES` gives each hull's first engine, engine count, first light and light count. */
-constant int4 HULL_GLOW_RANGES[HULL_COUNT] = {int4(0, 1, 0, 2), int4(1, 1, 2, 3)};
+constant int4 HULL_GLOW_RANGES[FLAT_HULL_COUNT] = {int4(0, 1, 0, 2), int4(1, 1, 2, 3)};
+/**
+ * @brief `CAPITAL_HULL_PLANES` are the capital ship's wedge (unit-free normal, offset; inside where `dot(normal, x) <=
+ * offset`), in half lengths with x to the nose, y to port and z up: two sloped top faces meeting in a ridge, two
+ * flatter bottom faces and the stern.
+ */
+constant float4 CAPITAL_HULL_PLANES[] = {
+    float4(0.042, 0.2, 0.84, 0.042), float4(0.042, -0.2, 0.84, 0.042), float4(0.021, 0.1, -0.84, 0.021),
+    float4(0.021, -0.1, -0.84, 0.021), float4(-1.0, 0.0, 0.0, 1.0),
+};
+/** @brief `CAPITAL_BOXES` are the capital ship's superstructure: a deck block, the bridge tower's neck and the bridge (lowest and highest corners, in the hull's axes). */
+constant float3 CAPITAL_BOXES[][2] = {
+    {float3(-0.95, -0.14, 0.0), float3(-0.35, 0.14, 0.15)}, {float3(-0.88, -0.03, 0.0), float3(-0.8, 0.03, 0.27)},
+    {float3(-0.9, -0.13, 0.24), float3(-0.78, 0.13, 0.3)},
+};
+/** @brief `CAPITAL_BOX_COLORS` are the colours of `CAPITAL_BOXES`. */
+constant float3 CAPITAL_BOX_COLORS[] = {float3(0.64, 0.65, 0.67), float3(0.56, 0.57, 0.59), float3(0.66, 0.67, 0.69)};
+/** @brief `CAPITAL_HULL_COLOR` is the colour of the capital ship's wedge. */
+constant float3 CAPITAL_HULL_COLOR = float3(0.58, 0.59, 0.62);
+/** @brief `CAPITAL_ENGINES` are the capital ship's engine nozzles (centre in the hull's axes, radius), mirrored across the keel. */
+constant float4 CAPITAL_ENGINES[] = {float4(-1.0, 0.0, 0.04, 0.04), float4(-1.0, 0.14, 0.03, 0.03)};
+/** @brief `CAPITAL_LIGHTS` are the capital ship's lights (centre in the hull's axes, `LIGHT_*` kind), not mirrored. */
+constant float4 CAPITAL_LIGHTS[] = {float4(-0.98, 0.41, 0.0, 0.0), float4(-0.98, -0.41, 0.0, 0.0), float4(-0.84, 0.0, 0.3, 1.0)};
+constant int CAPITAL_BOX_COUNT = 3;
+constant int CAPITAL_ENGINE_COUNT = 2;
+constant int CAPITAL_LIGHT_COUNT = 3;
+constant float CAPITAL_LIGHT_RADIUS_HALF_LENGTHS = 0.01;
 
 /**
  * @brief `Spaceship` is one spaceship in the sky (`spaceships.rs`): its centre's direction at the origin with its half
@@ -329,8 +497,23 @@ struct Spaceship {
 };
 
 /**
+ * @brief `ZoneWalls` is `zone_walls.rs`'s `GpuZoneWalls`: per wall its plane's (n_z, -n_w, edge u in meters, team),
+ * then (height, opacity, thickness in meters, unused), the boundary's (u, v) semi-axes in meters (0 without one), and
+ * (wall count, unused).
+ */
+struct ZoneWalls {
+    float4 walls[MAX_ZONE_WALL_COUNT];
+    float4 look;
+    float4 boundary;
+    int4 counts;
+};
+
+/**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
- * regions, flashlight, the spaceships and the dust (how many bursts and particles), as `render_voxel.rs` writes them.
+ * regions, flashlight, the reality bend's curvature per meter (0 when flat), edge radius and greatest height of any
+ * surface above or below the ground (meters), the spaceships, the dust (how many bursts and particles), the beams'
+ * speckle (the frame's seed and the shares of speckled pixels painted black and turned white) and the zone walls
+ * (`zone_walls.rs`'s `to_gpu`), as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -371,8 +554,13 @@ struct VoxelUniforms {
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
+    float4 bend;
     Spaceship spaceships[SPACESHIP_COUNT];
     int4 dust_counts;
+    float4 beam_speckle;
+    ZoneWalls zone_walls;
+    float4 milky_way_pole;
+    float4 milky_way_core;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -386,7 +574,8 @@ struct Shape {
 /**
  * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
  * radius, its first shape, shape count, mesh root node (-1 for none; `FIRST_AVATAR_ROOT_CODE - root` for a posed body
- * in the avatar buffers) and whether its first shape is a console, and R.
+ * in the avatar buffers), flags (`DARK_FLAG`: its glowing shapes are dark, a pylon whose console is off; `BEACON_FLAG`:
+ * its first shape is a console, so its model glows with it), and R.
  */
 struct VoxelStructure {
     float4 rows[4];
@@ -418,7 +607,7 @@ struct VoxelLight {
     float4 color_radius;
 };
 
-/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, unused, brightness, team). */
+/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, speckle share, brightness, code: the team, 1 for red, plus `RIFLE_BEAM_CODE` for the rifle's or `BEACON_BEAM_CODE` for a beacon's beam). */
 struct BeamSegment {
     float4 a;
     float4 b;
@@ -487,8 +676,11 @@ struct Hit {
  * @brief `VoxelRayEnd` is where a ray ended, with what shading needs: the hit point (or the sky direction at the
  * origin, with w = 0), the ray's unit tangent there, the hit's grid point in its structure with the distance
  * travelled, the hit cell with its material (`MAT_GROUND` for the ground), the outcome with the structure (-1 for the
- * ground), face axis and laser team (1 for red), the face's side with the glass count and the laser's core and
- * halo, and the dust in front of it (`scan_dust`).
+ * ground), face axis and laser and tint (bit 0 the laser's team, 1 for red; from `THROWN_TINT_FIRST_BIT`, two bits
+ * for the thrown wormhole it went through, 0 for none; `BEAM_RIFLE_BIT` set for the rifle's laser, clear for the
+ * sniper's blade; from `BEAM_SPECKLE_FIRST_BIT`, the laser's speckle share in steps of 1 / `BEAM_SPECKLE_STEPS`), the
+ * face's side with the glass count and the laser's core and halo, and the dust and zone walls in front of it
+ * (`scan_dust`, `scan_zone_walls`).
  */
 struct VoxelRayEnd {
     float4 point;
@@ -550,6 +742,7 @@ struct Scene {
     texture2d_array<float> mesh_emissive;
     device const MeshTriangle *avatar_triangles;
     device const BvhNode *avatar_nodes;
+    texture2d<float> milky_way;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -1148,7 +1341,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
  * @endcode
  */
 kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
     float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
     float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
     float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
@@ -1257,7 +1450,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     if (u.has_regions != 0) {
         float zone_edge_u_m = u.regions.x, boundary_u_m = u.regions.y, boundary_v_m = u.regions.z;
         if (abs(u_m) > zone_edge_u_m) albedo *= mix(float3(1.0), (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_TINT_GAIN, ZONE_TINT_FRAC);
-        if (abs(abs(u_m) - zone_edge_u_m) < ZONE_STRIP_M && abs(v_m) < boundary_v_m) glow = (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
+        if (u.zone_walls.counts.x == 0 && abs(abs(u_m) - zone_edge_u_m) < ZONE_STRIP_M && abs(v_m) < boundary_v_m) glow = (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
         float e = (u_m / boundary_u_m) * (u_m / boundary_u_m) + (v_m / boundary_v_m) * (v_m / boundary_v_m);
         if (has_terrain) {
         } else if (e > 1.0) {
@@ -1327,6 +1520,7 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     if (m == u.mat_hull || m == u.mat_pad) albedo *= 1.0 - PANEL_SEAM_DARKEN * step(PANEL_SEAM_EDGE, max(fract(uv.x * PANEL_SEAMS), fract(uv.y * PANEL_SEAMS)));
     float texel = has_texture(scene, m) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
     albedo *= 1.0 + detail * (BLOCK_NOISE * (block - 0.5) + TEXEL_NOISE * (texel - 0.5));
+    if (glow > 0.5 && (st.size.w & DARK_FLAG) != 0) { albedo *= DARK_PYLON_GLOW_FRAC; glow = 0.0; }
     if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM);
     Surface s = sample_surface(scene, m, albedo, g, u.curvature_radius_m / st.scale.x, dist_s, x, n, t, b, v);
     return light_surface(scene, s, x, n, v);
@@ -1380,7 +1574,7 @@ static float3 shade_mesh(thread const Scene &scene, Hit h, float4 x, float4 v, f
         float2 bend = scene.mesh_normal.sample(wrap, uv, layers.z, level(lod)).rg * 2.0 - 1.0;
         s.n = normalize_tangent(x, t * bend.x + b * bend.y + n * sqrt(saturate(1.0 - dot(bend, bend))));
     }
-    if (st.size.w != 0) {
+    if ((st.size.w & BEACON_FLAG) != 0) {
         float4 entry = get_palette(scene, scene.shapes[st.size.x].info.x);
         emissive += entry.rgb * entry.a * BEACON_GLOW;
     }
@@ -1401,6 +1595,94 @@ static float sample_star_layer(thread const Scene &scene, float3 d, float grid, 
     float2 star = (cell + 0.5 * (1.0 - STAR_JITTER) + STAR_JITTER * float2(hash_3d(float3(cell, face + STAR_SEEDS.x)), hash_3d(float3(cell, face + STAR_SEEDS.y)))) / grid;
     float angle = length(uv - star) / (1.0 + dot(uv, uv)), radius = scene.u.pixel_angle_rad * STAR_PIXELS;
     return (STAR_FAINT + STAR_BRIGHT * pow(h / density, STAR_BRIGHTNESS_POWER)) * exp(-angle * angle / (radius * radius));
+}
+
+/** @brief `sample_fbm_normalized` sums `octaves` octaves of value noise, scaled back to [0, 1]. @par Example @code float n = sample_fbm_normalized(p, 3); @endcode */
+static float sample_fbm_normalized(float3 p, int octaves) {
+    float sum = 0.0, amplitude = 0.5, total = 0.0;
+    for (int i = 0; i < octaves; i++) { sum += amplitude * sample_noise_3d(p); total += amplitude; p *= FBM_LACUNARITY; amplitude *= 0.5; }
+    return sum / total;
+}
+
+/** @brief `stretch_noise` spreads noise in [0, 1] away from its middle by `contrast`, clamped to [0, 1]. @par Example @code float n = stretch_noise(sample_noise_3d(p), 2.5); @endcode */
+static float stretch_noise(float n, float contrast) { return saturate((n - 0.5) * contrast + 0.5); }
+
+/** @brief `get_gain` gives the factor `gain.x + gain.y * x`, applied by `amount` (0 leaves 1). @par Example @code float g = get_gain(MILKY_WAY_CLOUD_GAIN, clouds, MILKY_WAY_CLOUD_AMOUNT); @endcode */
+static float get_gain(float2 gain, float x, float amount) { return mix(1.0, gain.x + gain.y * x, amount); }
+
+/**
+ * @brief `get_milky_way_glow` gives the Milky Way in direction g of its own frame (x toward the core, z toward the
+ * pole): a band brighter and wider toward the core with a warm bulge there, mottled by star clouds and grain, dimmed
+ * and reddened by a dark rift along its middle and by dust clouds, with pink nebulae (rgb, an intensity
+ * `sample_sky_bodies` turns into colour), and how much it thickens the stars (a, 0 to 1).
+ * @par Example
+ * @code
+ * float4 glow = get_milky_way_glow(float3(1.0, 0.0, 0.0));
+ * @endcode
+ */
+static float4 get_milky_way_glow(float3 g) {
+    float lon = atan2(g.y, g.x);
+    float3 warp = float3(sample_noise_3d(g * MILKY_WAY_WARP_SCALE + MILKY_WAY_WARP_SEEDS.x), sample_noise_3d(g * MILKY_WAY_WARP_SCALE + MILKY_WAY_WARP_SEEDS.y),
+                         sample_noise_3d(g * MILKY_WAY_WARP_SCALE + MILKY_WAY_WARP_SEEDS.z)) - 0.5;
+    float lat = g.z + MILKY_WAY_EDGE_WARP * warp.x;
+    float toward_core = 0.5 + 0.5 * cos(lon);
+    float bulge_shape = exp(-lon * lon / (MILKY_WAY_BULGE_SIZE.x * MILKY_WAY_BULGE_SIZE.x));
+    float width = MILKY_WAY_DISK_WIDTH * (1.0 + MILKY_WAY_CORE_WIDENING * bulge_shape);
+    float band = exp(-lat * lat / (width * width));
+    float bulge = bulge_shape * exp(-lat * lat / (MILKY_WAY_BULGE_SIZE.y * MILKY_WAY_BULGE_SIZE.y));
+    float3 stretched = g * MILKY_WAY_STRETCH + warp * MILKY_WAY_STRETCH_WARP;
+    float clouds = stretch_noise(sample_fbm_normalized(stretched * MILKY_WAY_CLOUD_SCALE, MILKY_WAY_COARSE_OCTAVES), MILKY_WAY_NOISE_CONTRAST);
+    float grain = stretch_noise(sample_fbm_normalized(stretched * MILKY_WAY_GRAIN_SCALE + MILKY_WAY_GRAIN_SEED, MILKY_WAY_GRAIN_OCTAVES), MILKY_WAY_NOISE_CONTRAST);
+    float lane_lat = (lat - MILKY_WAY_LANE_WANDER * (sample_noise_3d(g * MILKY_WAY_LANE_WANDER_SCALE + MILKY_WAY_LANE_WANDER_SEED) - 0.5)) / (MILKY_WAY_LANE_WIDTH_FRAC * width);
+    float rift_noise = stretch_noise(sample_fbm_normalized(stretched * MILKY_WAY_RIFT_SCALE + MILKY_WAY_RIFT_SEED, MILKY_WAY_COARSE_OCTAVES), MILKY_WAY_DUST_CONTRAST);
+    float rift = exp(-lane_lat * lane_lat) * smoothstep(MILKY_WAY_RIFT_EDGES.x, MILKY_WAY_RIFT_EDGES.y, rift_noise) * (1.0 - MILKY_WAY_RIFT_CORE_GAP * bulge_shape);
+    float3 dust_at = stretched * MILKY_WAY_DARK_SCALE + warp * MILKY_WAY_DARK_WARP + MILKY_WAY_DARK_SEED;
+    float dark = band * smoothstep(MILKY_WAY_DARK_EDGES.x, MILKY_WAY_DARK_EDGES.y, stretch_noise(sample_fbm_normalized(dust_at, MILKY_WAY_DARK_OCTAVES), MILKY_WAY_DUST_CONTRAST))
+        * (MILKY_WAY_DARK_GRAIN_GAIN.x + MILKY_WAY_DARK_GRAIN_GAIN.y * grain);
+    float3 transmit = exp(-(MILKY_WAY_RIFT_DEPTH * rift + MILKY_WAY_DARK_DEPTH * dark) * MILKY_WAY_REDDENING);
+    float disk_gain = get_gain(MILKY_WAY_CLOUD_GAIN, clouds, MILKY_WAY_CLOUD_AMOUNT) * get_gain(MILKY_WAY_GRAIN_GAIN, grain, MILKY_WAY_GRAIN_AMOUNT);
+    float bulge_gain = get_gain(MILKY_WAY_BULGE_CLOUD_GAIN, clouds, MILKY_WAY_CLOUD_AMOUNT) * get_gain(MILKY_WAY_BULGE_GRAIN_GAIN, grain, MILKY_WAY_GRAIN_AMOUNT);
+    float3 intensity = MILKY_WAY_DISK_COLOR * MILKY_WAY_DISK * band * mix(MILKY_WAY_ANTICENTRE_FRAC, 1.0, toward_core * toward_core) * disk_gain
+                       + MILKY_WAY_BULGE_COLOR * MILKY_WAY_BULGE * bulge * bulge_gain;
+    float nebula_noise = stretch_noise(sample_fbm_normalized(g * MILKY_WAY_NEBULA_SCALE + MILKY_WAY_NEBULA_SEED, MILKY_WAY_COARSE_OCTAVES), MILKY_WAY_NOISE_CONTRAST);
+    intensity += MILKY_WAY_NEBULA_COLOR * MILKY_WAY_NEBULA * MILKY_WAY_DISK * band * smoothstep(MILKY_WAY_NEBULA_EDGES.x, MILKY_WAY_NEBULA_EDGES.y, nebula_noise);
+    return float4(intensity * transmit, saturate(band + bulge) * dot(transmit, LUMA));
+}
+
+/**
+ * @brief `bake_milky_way` draws the Milky Way (`get_milky_way_glow`) into texture 0 once, in its own frame: longitude
+ * across (from −π at the left edge), latitude up to ±`MILKY_WAY_MAX_LATITUDE_RAD` (bottom to top), beyond which it is
+ * too faint to matter.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs before the first frame, one thread per texel.
+ * @endcode
+ */
+kernel void bake_milky_way(texture2d<float, access::write> glow [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= glow.get_width() || id.y >= glow.get_height()) return;
+    float2 uv = (float2(id) + 0.5) / float2(glow.get_width(), glow.get_height());
+    float lon = (2.0 * uv.x - 1.0) * M_PI_F, lat = (2.0 * uv.y - 1.0) * MILKY_WAY_MAX_LATITUDE_RAD;
+    glow.write(get_milky_way_glow(float3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))), id);
+}
+
+/**
+ * @brief `sample_milky_way` reads the baked Milky Way in sky direction d (in the world origin's frame), turned by the
+ * map's pole and core and scaled by the player's brightness: 0 for a map without one or outside the baked latitudes.
+ * @par Example
+ * @code
+ * float4 galaxy = sample_milky_way(scene, d);
+ * @endcode
+ */
+static float4 sample_milky_way(thread const Scene &scene, float3 d) {
+    float4 pole = scene.u.milky_way_pole;
+    float3 core = scene.u.milky_way_core.xyz;
+    if (pole.w <= 0.0) return float4(0.0);
+    float3 g = float3(dot(d, core), dot(d, cross(pole.xyz, core)), dot(d, pole.xyz));
+    float lat = asin(clamp(g.z, -1.0, 1.0));
+    if (abs(lat) >= MILKY_WAY_MAX_LATITUDE_RAD) return float4(0.0);
+    constexpr sampler around(filter::linear, s_address::repeat, t_address::clamp_to_edge);
+    float2 uv = float2(0.5 + 0.5 * atan2(g.y, g.x) / M_PI_F, 0.5 + 0.5 * lat / MILKY_WAY_MAX_LATITUDE_RAD);
+    return scene.milky_way.sample(around, uv) * pole.w;
 }
 
 /** @brief `get_sky_direction` gives an escaping ray's direction, carried to the eye, then to the origin. @par Example @code float3 d = get_sky_direction(scene, x, v); @endcode */
@@ -1428,9 +1710,14 @@ static float3 sample_sky_bodies(thread const Scene &scene, float3 d) {
         float3 color = surface * (max(lit, 0.0) * PLANET_SUNLIT + PLANET_NIGHT) + ATMOSPHERE_COLOR * pow(r2, LIMB_POWER) * max(lit + LIMB_WRAP, 0.0) * LIMB_GLOW;
         return color + sun;
     }
-    float3 color = float3(sample_star_layer(scene, d, STAR_GRID_COARSE, STAR_DENSITY_COARSE) + FINE_STAR_BRIGHTNESS * sample_star_layer(scene, d, STAR_GRID_FINE, STAR_DENSITY_FINE));
-    float band = exp(-pow(dot(d, normalize(MILKY_WAY_NORMAL)) / MILKY_WAY_WIDTH, 2.0));
-    color += MILKY_WAY_COLOR * band * MILKY_WAY_BRIGHTNESS * sample_fbm_3d(d * MILKY_WAY_DETAIL);
+    float4 galaxy = sample_milky_way(scene, d);
+    float star_boost = 1.0 + MILKY_WAY_STAR_BOOST * galaxy.a;
+    float3 color = float3(sample_star_layer(scene, d, STAR_GRID_COARSE, STAR_DENSITY_COARSE * star_boost)
+                          + FINE_STAR_BRIGHTNESS * sample_star_layer(scene, d, STAR_GRID_FINE, STAR_DENSITY_FINE * star_boost));
+    if (galaxy.a > 0.0) {
+        color += MILKY_WAY_MICRO_STAR_BRIGHTNESS * sample_star_layer(scene, d, MILKY_WAY_MICRO_STAR_GRID, MILKY_WAY_MICRO_STAR_DENSITY * galaxy.a);
+        color += MILKY_WAY_TONE.x * pow(galaxy.rgb, MILKY_WAY_TONE.y);
+    }
     if (dot(d, planet) > 0.0 && r2 < HALO_RADIUS_SQ) {
         color += ATMOSPHERE_COLOR * HALO_GLOW * (1.0 - smoothstep(1.0, HALO_RADIUS_SQ, r2)) * max(dot(normalize(q.x * e1 + q.y * e2), sun_dir) + HALO_WRAP, 0.0);
     }
@@ -1574,9 +1861,216 @@ static float3 get_spaceship_glow(Spaceship ship, int hull, float2 p, float px) {
 }
 
 /**
+ * @brief `get_light_glow` gives the glow of a light of colour `tint` and radius `radius` at e from its centre, at least
+ * `SHIP_LIGHT_MIN_PIXELS` pixels (`px` wide) across.
+ * @par Example
+ * @code
+ * glow += get_light_glow(p - centre, CAPITAL_LIGHT_RADIUS_HALF_LENGTHS, px, STROBE_COLOR);
+ * @endcode
+ */
+static float3 get_light_glow(float2 e, float radius, float px, float3 tint) {
+    float r = max(radius, SHIP_LIGHT_MIN_PIXELS * px);
+    return tint * exp(-dot(e, e) / (r * r));
+}
+
+/**
+ * @brief `light_giant` gives the light on a giant ship's surface with normal n: the sun, a little light from the sunlit
+ * ground below (`groundshine_frac` times what lights the small ships), and a faint glow so its night side shows against
+ * the stars.
+ * @par Example
+ * @code
+ * float3 light = light_giant(scene, n, STATION_GROUNDSHINE_FRAC);
+ * @endcode
+ */
+static float3 light_giant(thread const Scene &scene, float3 n, float groundshine_frac) {
+    return SUN_COLOR * SHIP_SUNLIT * max(dot(n, scene.u.sun.xyz), 0.0) + groundshine_frac * SHIP_GROUNDSHINE_COLOR * max(-n.y, 0.0)
+           + float3(GIANT_NIGHT);
+}
+
+/**
+ * @brief `draw_battle_station` draws the battle station over the sky colour `color`: a sphere `ship.centre.w` radians
+ * across in the sky (p is the direction in its radii, x along the heading), its pole tilted toward the eye, with panel
+ * bands, a dark trench round its equator and a concave dish with a dark lens in its upper half; small lights in the
+ * trench, lit windows on its night side and a red beacon flashing on its pole.
+ * @par Example
+ * @code
+ * color = draw_battle_station(scene, ship, p, px, color);
+ * @endcode
+ */
+static float3 draw_battle_station(thread const Scene &scene, Spaceship ship, float2 p, float px, float3 color) {
+    float r2 = dot(p, p), coverage = clamp(0.5 - (sqrt(r2) - 1.0) / px, 0.0, 1.0);
+    if (coverage <= 0.0) return color;
+    float3 c = ship.centre.xyz, h = ship.heading.xyz, side = cross(h, c), toward_eye = -c;
+    float3 pole = side * cos(STATION_TILT_RAD) + toward_eye * sin(STATION_TILT_RAD);
+    float3 front = toward_eye * cos(STATION_TILT_RAD) - side * sin(STATION_TILT_RAD);
+    float2 dish_rad = STATION_DISH_LAT_LON_RAD;
+    float3 dish = cos(dish_rad.x) * (cos(dish_rad.y) * front + sin(dish_rad.y) * h) + sin(dish_rad.x) * pole;
+    float3 x = p.x * h + p.y * side + sqrt(max(1.0 - r2, 0.0)) * toward_eye, n = x;
+    float rim = sin(STATION_DISH_RAD), bowl_offset = cos(STATION_DISH_RAD) + sqrt(STATION_BOWL_RADIUS_RADII * STATION_BOWL_RADIUS_RADII - rim * rim);
+    bool is_dish = dot(x, dish) > cos(STATION_DISH_RAD);
+    float3 albedo, glow = float3(0.0);
+    if (is_dish) {
+        float3 q = x - bowl_offset * dish;
+        float b = dot(q, c);
+        x += (-b + sqrt(max(b * b - dot(q, q) + STATION_BOWL_RADIUS_RADII * STATION_BOWL_RADIUS_RADII, 0.0))) * c;
+        if (dot(x, x) > 1.0) return color;
+        n = normalize(bowl_offset * dish - x);
+        float from_axis = length(x - dot(x, dish) * dish);
+        float ring = min(abs(from_axis - STATION_DISH_RING_FRACS.x * rim), abs(from_axis - STATION_DISH_RING_FRACS.y * rim));
+        albedo = mix(STATION_DISH_COLOR, STATION_TRENCH_COLOR, clamp(0.5 - (ring - STATION_DISH_RING_HALF_WIDTH_RADII) / px, 0.0, 1.0));
+        albedo = mix(albedo, STATION_LENS_COLOR, clamp(0.5 - (from_axis - STATION_LENS_RADIUS_RADII) / px, 0.0, 1.0));
+    } else {
+        float lat = asin(clamp(dot(x, pole), -1.0, 1.0)), lon = atan2(dot(x, h), dot(x, front));
+        float band = floor(lat / STATION_BAND_RAD), band_lat = (band + 0.5) * STATION_BAND_RAD;
+        float panel_rad = STATION_PANEL_RAD / max(cos(band_lat), STATION_MIN_PANEL_COS), column = floor(lon / panel_rad);
+        albedo = STATION_COLOR * (1.0 + STATION_PANEL_VARIATION * (hash_3d(float3(band, column, float(HULL_BATTLE_STATION))) - 0.5));
+        float seam = abs(lat - STATION_BAND_RAD * round(lat / STATION_BAND_RAD));
+        albedo *= 1.0 - STATION_SEAM_DARKEN_FRAC * clamp(0.5 - (seam - STATION_SEAM_HALF_RAD) / px, 0.0, 1.0);
+        float trench = clamp(0.5 - (abs(lat) - STATION_TRENCH_HALF_RAD) / px, 0.0, 1.0);
+        albedo = mix(albedo, STATION_TRENCH_COLOR, trench);
+        float window_lon = (column + 0.5) * panel_rad;
+        float3 window = cos(band_lat) * (cos(window_lon) * front + sin(window_lon) * h) + sin(band_lat) * pole;
+        float night = 1.0 - smoothstep(STATION_NIGHT_EDGES.x, STATION_NIGHT_EDGES.y, dot(n, scene.u.sun.xyz));
+        if (hash_3d(float3(band, column, float(HULL_BATTLE_STATION) + STATION_WINDOW_SEED)) < STATION_WINDOW_FRAC && trench < 1.0) {
+            glow += night * STATION_WINDOW_BRIGHTNESS * get_light_glow(float2(dot(x - window, h), dot(x - window, side)), STATION_WINDOW_RADIUS_RADII, px, WINDOW_COLOR);
+        }
+    }
+    color = mix(color, albedo * light_giant(scene, n, STATION_GROUNDSHINE_FRAC), coverage);
+    for (float i = 0.0; i < STATION_TRENCH_LIGHT_COUNT; i += 1.0) {
+        float lon = 2.0 * M_PI_F * i / STATION_TRENCH_LIGHT_COUNT;
+        float3 light = cos(lon) * front + sin(lon) * h;
+        if (dot(light, toward_eye) > 0.0) glow += get_light_glow(p - float2(dot(light, h), dot(light, side)), STATION_TRENCH_LIGHT_RADIUS_RADII, px, RING_LIGHT_COLOR);
+    }
+    glow += get_light_glow(p - float2(dot(pole, h), dot(pole, side)), STATION_BEACON_RADIUS_RADII, px, PORT_COLOR * ship.lights.x);
+    return color + coverage * glow;
+}
+
+/**
+ * @brief `trace_capital_box` traces the ray from o along unit u through the box with corners `lo` and `hi`: the
+ * distance it enters at into `entry` and the normal there into n, and returns its gap to the box (negative when it goes
+ * through), measured midway between where it enters the last slab and leaves the first.
+ * @par Example
+ * @code
+ * float gap = trace_capital_box(o, u, CAPITAL_BOXES[i][0], CAPITAL_BOXES[i][1], entry, n);
+ * @endcode
+ */
+static float trace_capital_box(float3 o, float3 u, float3 lo, float3 hi, thread float &entry, thread float3 &n) {
+    float exit = NO_HIT_S;
+    entry = -NO_HIT_S;
+    for (int k = 0; k < 3; k++) {
+        if (abs(u[k]) < TINY) continue;
+        float t_lo = (lo[k] - o[k]) / u[k], t_hi = (hi[k] - o[k]) / u[k];
+        float3 axis = float3(0.0);
+        axis[k] = 1.0;
+        if (min(t_lo, t_hi) > entry) { entry = min(t_lo, t_hi); n = t_lo < t_hi ? -axis : axis; }
+        exit = min(exit, max(t_lo, t_hi));
+    }
+    float3 e = abs(o + 0.5 * (entry + exit) * u - 0.5 * (lo + hi)) - 0.5 * (hi - lo);
+    return length(max(e, 0.0)) + min(max(e.x, max(e.y, e.z)), 0.0);
+}
+
+/**
+ * @brief `trace_capital_hull` traces the ray from o along unit u through the capital ship's wedge
+ * (`CAPITAL_HULL_PLANES`), as `trace_capital_box` does a box.
+ * @par Example
+ * @code
+ * float gap = trace_capital_hull(o, u, entry, n);
+ * @endcode
+ */
+static float trace_capital_hull(float3 o, float3 u, thread float &entry, thread float3 &n) {
+    float exit = NO_HIT_S, gap = -NO_HIT_S;
+    entry = -NO_HIT_S;
+    for (int i = 0; i < 5; i++) {
+        float4 plane = CAPITAL_HULL_PLANES[i];
+        float a = dot(plane.xyz, o) - plane.w, b = dot(plane.xyz, u);
+        if (b < 0.0 && -a / b > entry) { entry = -a / b; n = normalize(plane.xyz); }
+        if (b > 0.0) exit = min(exit, -a / b);
+    }
+    float3 middle = o + 0.5 * (entry + exit) * u;
+    for (int i = 0; i < 5; i++) gap = max(gap, (dot(CAPITAL_HULL_PLANES[i].xyz, middle) - CAPITAL_HULL_PLANES[i].w) / length(CAPITAL_HULL_PLANES[i].xyz));
+    return gap;
+}
+
+/**
+ * @brief `get_window_light` gives how much of a pixel `px` half lengths wide, at q (along and up a superstructure's side,
+ * or in from a hull edge, in half lengths), the capital ship's rows of lit windows cover: sharp windows close up, and their mean once a window
+ * is under a pixel, so they do not flicker as the ship drifts.
+ * @par Example
+ * @code
+ * color += WINDOW_COLOR * get_window_light(b.xz, px);
+ * @endcode
+ */
+static float get_window_light(float2 q, float px) {
+    float2 cells_per_half_length = float2(CAPITAL_WINDOWS_PER_HALF_LENGTH, 1.0 / CAPITAL_WINDOW_ROW_HALF_LENGTHS);
+    float2 cell = q * cells_per_half_length, cell_px = px * cells_per_half_length;
+    float2 inside = clamp((0.5 * CAPITAL_WINDOW_SIZE_FRACS - abs(fract(cell) - 0.5)) / cell_px + 0.5, 0.0, 1.0);
+    float2 window = mix(inside, CAPITAL_WINDOW_SIZE_FRACS, clamp(cell_px, 0.0, 1.0));
+    float lit = hash_3d(float3(floor(cell), float(HULL_CAPITAL_SHIP) + CAPITAL_WINDOW_SEED)) < CAPITAL_WINDOW_LIT_FRAC ? 1.0 : 0.0;
+    return window.x * window.y * mix(lit, CAPITAL_WINDOW_LIT_FRAC, clamp(max(cell_px.x, cell_px.y), 0.0, 1.0));
+}
+
+/**
+ * @brief `draw_capital_ship` draws the capital ship over the sky colour `color`: a long wedge `2 ship.centre.w` radians
+ * long (p is the direction in its half lengths, x to the nose), seen from above at a slant so its superstructure stands
+ * up toward the top of the sky, lit by the sun; with glowing engines and a plume behind, red and green lights at the
+ * stern's corners, a flashing strobe on the bridge, and rows of lit windows along the superstructure's sides and the
+ * hull's edges. Its superstructure is one deck block and a bridge tower.
+ * @par Example
+ * @code
+ * color = draw_capital_ship(scene, ship, p, px, color);
+ * @endcode
+ */
+static float3 draw_capital_ship(thread const Scene &scene, Spaceship ship, float2 p, float px, float3 color) {
+    float3 c = ship.centre.xyz, h = ship.heading.xyz, side = cross(h, c);
+    float3 up = -c * cos(CAPITAL_TILT_RAD) + side * sin(CAPITAL_TILT_RAD), port = side * cos(CAPITAL_TILT_RAD) + c * sin(CAPITAL_TILT_RAD);
+    float2 screen_per_z = float2(sin(CAPITAL_TILT_RAD), cos(CAPITAL_TILT_RAD));
+    float3 o = float3(p.x, p.y * screen_per_z.y - CAPITAL_EYE_DISTANCE_HALF_LENGTHS * screen_per_z.x, p.y * screen_per_z.x + CAPITAL_EYE_DISTANCE_HALF_LENGTHS * screen_per_z.y);
+    float3 u = float3(0.0, screen_per_z.x, -screen_per_z.y);
+    float entry, best_entry, coverage;
+    float3 n, best_n, albedo = CAPITAL_HULL_COLOR;
+    coverage = clamp(0.5 - trace_capital_hull(o, u, best_entry, best_n) / px, 0.0, 1.0);
+    bool is_hull = true;
+    for (int i = 0; i < CAPITAL_BOX_COUNT; i++) {
+        float box_coverage = clamp(0.5 - trace_capital_box(o, u, CAPITAL_BOXES[i][0], CAPITAL_BOXES[i][1], entry, n) / px, 0.0, 1.0);
+        if (box_coverage > coverage || (box_coverage > 0.0 && box_coverage >= coverage && entry < best_entry)) {
+            coverage = box_coverage; best_entry = entry; best_n = n; albedo = CAPITAL_BOX_COLORS[i]; is_hull = false;
+        }
+    }
+    float3 glow = float3(0.0);
+    if (coverage > 0.0) {
+        float3 b = o + best_entry * u;
+        float panel = 1.0 + CAPITAL_PANEL_VARIATION * (hash_3d(float3(floor(b.xy * CAPITAL_PANELS_PER_HALF_LENGTH), float(HULL_CAPITAL_SHIP) + sign(b.z))) - 0.5);
+        float3 normal = normalize(best_n.x * h + best_n.y * port + best_n.z * up);
+        color = mix(color, albedo * panel * light_giant(scene, normal, CAPITAL_GROUNDSHINE_FRAC), coverage);
+        float in_from_edge = CAPITAL_HALF_WIDTH_PER_HALF_LENGTH * (1.0 - b.x) - abs(b.y);
+        bool is_edge_window = is_hull && best_n.z > 0.0 && b.x < CAPITAL_EDGE_WINDOW_END_HALF_LENGTHS && in_from_edge > CAPITAL_EDGE_WINDOW_BAND_HALF_LENGTHS.x
+                              && in_from_edge < CAPITAL_EDGE_WINDOW_BAND_HALF_LENGTHS.y;
+        float2 q = is_hull ? float2(b.x, in_from_edge) : b.xz;
+        if (is_edge_window || (!is_hull && best_n.y < 0.0)) color += coverage * CAPITAL_WINDOW_BRIGHTNESS * WINDOW_COLOR * get_window_light(q, px);
+    }
+    for (int i = 0; i < CAPITAL_ENGINE_COUNT; i++) {
+        float4 engine = CAPITAL_ENGINES[i];
+        for (float mirror = -1.0; mirror <= 1.0; mirror += 2.0) {
+            if (mirror < 0.0 && engine.y == 0.0) continue;
+            float2 e = p - float2(engine.x, mirror * engine.y * screen_per_z.y + engine.z * screen_per_z.x);
+            float r = max(engine.w, SHIP_LIGHT_MIN_PIXELS * px), across = e.y / (r * SHIP_PLUME_WIDTH_PER_RADIUS), along = e.x / SHIP_PLUME_HALF_LENGTHS;
+            float plume = e.x < 0.0 ? exp(-across * across - along * along) : 0.0;
+            glow += CAPITAL_ENGINE_COLOR * ship.lights.y * (CAPITAL_ENGINE_BRIGHTNESS * exp(-dot(e, e) / (r * r)) + SHIP_PLUME_BRIGHTNESS * plume);
+        }
+    }
+    for (int i = 0; i < CAPITAL_LIGHT_COUNT; i++) {
+        float4 light = CAPITAL_LIGHTS[i];
+        int kind = int(light.w);
+        float3 tint = kind == LIGHT_NAV ? (light.y > 0.0 ? PORT_COLOR : STARBOARD_COLOR) : kind == LIGHT_STROBE ? STROBE_COLOR * ship.lights.x : WINDOW_COLOR;
+        glow += get_light_glow(p - float2(light.x, light.y * screen_per_z.y + light.z * screen_per_z.x), CAPITAL_LIGHT_RADIUS_HALF_LENGTHS, px, tint);
+    }
+    return color + glow;
+}
+
+/**
  * @brief `draw_spaceship` draws a spaceship over the sky colour `color` in direction d: its hull, lit by the sun on the
- * edges that face it and from below by the sunlit ground, with its engines and lights on top. Directions far from the
- * ship return `color` after a few dot products.
+ * edges that face it and from below by the sunlit ground, with its engines and lights on top; the giants are drawn by
+ * `draw_battle_station` and `draw_capital_ship`. Directions far from the ship return `color` after a few dot products.
  * @par Example
  * @code
  * color = draw_spaceship(scene, scene.u.spaceships[0], d, color);
@@ -1589,6 +2083,8 @@ static float3 draw_spaceship(thread const Scene &scene, Spaceship ship, float3 d
     float bound = SHIP_BOUND_HALF_LENGTHS + SHIP_BOUND_PIXELS * px;
     if (facing <= 0.0 || dot(p, p) > bound * bound) return color;
     int hull = int(ship.heading.w);
+    if (hull == HULL_BATTLE_STATION) return draw_battle_station(scene, ship, p, px, color);
+    if (hull == HULL_CAPITAL_SHIP) return draw_capital_ship(scene, ship, p, px, color);
     float3 albedo = float3(0.0), unused;
     float distance = get_hull_distance(hull, p, ship.lights.z, albedo), coverage = clamp(0.5 - distance / px, 0.0, 1.0);
     if (coverage > 0.0) {
@@ -1612,12 +2108,28 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments (each `info.y` meters wide, at least `BEAM_RADIUS_M`) near a chord (closest approach in closed form): a flat-topped blade (`core`) and a soft haze (`halo`), with the brightest haze's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */
-static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &team) {
+/**
+ * @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a
+ * flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's
+ * code (team and gun, or a beacon's) and speckle share. A beacon's beam (code `BEACON_BEAM_CODE` and up) is
+ * `BEACON_BEAM_RADIUS_M` wide, drawn like the sniper's, without speckle. A chord that starts away from the eye (`travelled` above 0) and only moves away
+ * from a segment skips it: the chord before ends at that nearest point and counts it there.
+ * @par Example
+ * @code
+ * scan_beams(scene, x, v, s, t, core, halo, code, speckle);
+ * @endcode
+ * @par Must know
+ * - Gotchas:
+ *   - A far chord's start, where a pixel is metres wide, would light the whole sky with a near segment's glow.
+ */
+static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
+                       thread float &speckle) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
     for (int i = 0; i < scene.u.beam_count; i++) {
         float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
-        float half_len = 0.5 * info.x, radius_m = max(BEAM_RADIUS_M, info.y);
+        int kind = int(info.w + HALF_KIND);
+        bool is_beacon = kind >= BEACON_BEAM_CODE;
+        float half_len = 0.5 * info.x, radius_m = is_beacon ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
         float4 mid = geodesic_point(a, b, half_len);
         float am = -mdot(x, mid), bm = mdot(v, mid), reach = half_len + BEAM_REACH * max(radius_m, pix * r * sinh(min(travelled + s_end, FAR_S))) / r;
         if (am * am - bm * bm > cosh(reach) * cosh(reach)) continue;
@@ -1625,15 +2137,188 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float k1 = 0.5 * ((al * al - ga * ga) + (be * be - et * et)), k2 = al * be - ga * et;
         float s_c = k1 > abs(k2) ? 0.5 * clamp_atanh(-k2 / k1) : (k2 < 0.0 ? s_end : 0.0);
         s_c = clamp(s_c, 0.0, min(s_end, FAR_S));
+        if (s_c <= 0.0 && travelled > 0.0) continue;
         float4 xc = geodesic_point(x, v, s_c);
         float sigma = clamp(clamp_atanh(mdot(xc, b) / -mdot(xc, a)), 0.0, info.x);
         float d_m = measure_gap(xc, geodesic_point(a, b, sigma)) * r;
         float width_m = max(radius_m, pix * r * sinh(min(travelled + s_c, FAR_S)));
         float q = d_m * d_m / (width_m * width_m);
-        core = max(core, info.z * exp(-q * q * q));
+        bool is_rifle = !is_beacon && kind >= RIFLE_BEAM_CODE;
+        core = max(core, info.z * exp(is_rifle ? -q : -q * q * q));
         float hl = info.z * exp(-q / BEAM_REACH);
-        if (hl > halo) { halo = hl; team = info.w; }
+        if (hl > halo) { halo = hl; code = info.w; speckle = is_beacon ? 0.0 : info.y; }
     }
+}
+
+/** @brief `get_axis_distance_m` gives a point's distance in meters from the origin's vertical axis, in the origin's normal coordinates. @par Example @code float out_m = get_axis_distance_m(p, r); @endcode */
+static float get_axis_distance_m(float4 p, float r) { float n = length(p.xyz); return n > 0.0 ? length(p.xz) * r * asinh(n) / n : 0.0; }
+
+/**
+ * @brief `unbend_point` is bend.rs's `Bend::unbend_point` for curvature k per meter: the map point that the bent world
+ * shows at x, with x's polar angle `theta` about the bend sphere's centre (0 straight below it) and k times its
+ * distance from that centre, `k_rho`. It works in the origin's normal coordinates ξ (meters), in forms that stay exact as
+ * k goes to 0.
+ * @par Example
+ * @code
+ * float4 m = unbend_point(x, r, k, theta, k_rho);
+ * @endcode
+ */
+static float4 unbend_point(float4 x, float r, float k, thread float &theta, thread float &k_rho) {
+    float n = length(x.xyz);
+    float3 xi = n > 0.0 ? x.xyz * (r * asinh(n) / n) : float3(0.0);
+    float out_m = length(xi.xz), below = 1.0 - k * xi.y;
+    theta = atan2(k * out_m, below);
+    k_rho = length(float2(k * out_m, below));
+    float h_m = (2.0 * xi.y - k * dot(xi, xi)) / (1.0 + k_rho), scale = out_m > 0.0 ? theta / (k * out_m) : 0.0;
+    float3 q = float3(xi.x * scale, h_m, xi.z * scale);
+    float d = length(q) / r;
+    return d > 0.0 ? float4(q * (sinh(d) / (d * r)), cosh(d)) : float4(0.0, 0.0, 0.0, 1.0);
+}
+
+/**
+ * @brief `get_empty_s` gives how far (curvature units) a point of the bent world is from every point that unbends within
+ * the edge radius and below the greatest surface height, so from every surface (0 when it may be near one): the larger
+ * of its distances, in the origin's normal coordinates, from the cone of polar angles up to the edge's about the bend
+ * sphere's centre and from the outside of the sphere about that centre whose points unbend to that height; distances in
+ * those coordinates bound distances in H³ from below.
+ * @par Example
+ * @code
+ * float empty_s = get_empty_s(scene, x);
+ * @endcode
+ */
+static float get_empty_s(thread const Scene &scene, float4 x) {
+    float r = scene.u.curvature_radius_m, k = scene.u.bend.x, theta, k_rho;
+    unbend_point(x, r, k, theta, k_rho);
+    return max(k_rho * sin(clamp(theta - k * scene.u.bend.y, 0.0, M_PI_2_F)), 1.0 - k * scene.u.bend.z - k_rho) / (k * r);
+}
+
+/**
+ * @brief `trace_bent_chord` finds the first surface along the map's chord from m0 to m1, the map points at the ends of
+ * one short chord of a bent ray, testing every structure, and puts the map chord's start and unit tangent in `chord_x`
+ * and `chord_v`; a hit beyond the edge radius, which the bend cuts away, doesn't count. It returns the fraction of the
+ * chord before the hit (1 without one).
+ * @par Example
+ * @code
+ * float frac = trace_bent_chord(scene, m, mn, hit, glass_s, chord_x, chord_v);
+ * @endcode
+ */
+static float trace_bent_chord(thread const Scene &scene, float4 m0, float4 m1, thread Hit &hit, thread float &glass_s, thread float4 &chord_x,
+                              thread float4 &chord_v) {
+    float length_s = measure_gap(m0, m1);
+    chord_x = m0;
+    chord_v = normalize_tangent(m0, m1);
+    hit.s = length_s;
+    hit.mat = 0;
+    trace_scene(scene, m0, chord_v, -1, 0.0, float3(0.0), hit, glass_s);
+    if (hit.mat != 0 && get_axis_distance_m(geodesic_point(m0, chord_v, hit.s), scene.u.curvature_radius_m) > scene.u.bend.y) hit.mat = 0;
+    return hit.mat != 0 ? hit.s / max(length_s, TINY) : 1.0;
+}
+
+/**
+ * @brief `get_zone_wall_depth` gives the optical depth of a zone wall seen face-on (straight through its thickness) at
+ * point p, `distance_s` from the eye, for the wall on the edge at Fermi u `wall_u_m`: the map's opacity at the ground,
+ * falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`, then by `ZONE_WALL_TOP_FADE_FRAC` of that up
+ * to the wall's height above the ground, over whose top `ZONE_WALL_SOFT_TOP_FRAC` it fades out; it also fades out over
+ * the last `ZONE_WALL_END_M` before the boundary, and thins in the haze.
+ * @par Example
+ * @code
+ * float depth = get_zone_wall_depth(scene, p, -45.0, s);
+ * @endcode
+ */
+static float get_zone_wall_depth(thread const Scene &scene, float4 p, float wall_u_m, float distance_s) {
+    constant ZoneWalls &walls = scene.u.zone_walls;
+    float r = scene.u.curvature_radius_m;
+    float4 look = walls.look, boundary = walls.boundary;
+    float3 f = get_fermi(p, r);
+    float v_end_m = boundary.y > 0.0 ? boundary.y * sqrt(max(1.0 - (wall_u_m / boundary.x) * (wall_u_m / boundary.x), 0.0)) : NO_HIT_S;
+    float above_m = max(f.z - (scene.u.has_terrain != 0 ? terrain_height_m(scene, f.x, f.y) : 0.0), 0.0);
+    float height_frac = above_m / look.x;
+    float profile = mix(ZONE_WALL_BODY_FRAC * (1.0 - ZONE_WALL_TOP_FADE_FRAC * height_frac), 1.0, exp(-above_m / ZONE_WALL_FOOT_M))
+                  * (1.0 - smoothstep(1.0 - ZONE_WALL_SOFT_TOP_FRAC, 1.0, height_frac));
+    float haze_frac = 1.0 - exp(-max(distance_s * r - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
+    float opacity = look.y * profile * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y)) * (1.0 - HAZE_MAX_FRAC * haze_frac);
+    return -log(1.0 - opacity);
+}
+
+/**
+ * @brief `scan_zone_walls` adds the zone walls that the chord from x along v passes through before `s_end` (`travelled`
+ * from the eye) to `dust`, as glowing slabs in their team's colour. A wall is the slab within half its thickness of
+ * the plane straight above its zone's edge (`zone_walls.rs`, the plane's (n_z, -n_w) in `walls[i].xy`): |⟨x, n⟩| ≤ k
+ * with k the sinh of half the thickness over R. Along the chord ⟨x, n⟩ = cosh s (a + b tanh s), so the chord is
+ * inside where (b² + k²) τ² + 2ab τ + a² − k² ≤ 0 for τ = tanh s, an interval found in closed form. Of the face-on
+ * depth (`get_zone_wall_depth`), `ZONE_WALL_FACE_FRAC` is in the two faces, each crossed face adding its half,
+ * thicker as the chord grazes it (up to `ZONE_WALL_MAX_SLANT` times), and the rest is spread through the slab,
+ * summed along the chord at most `ZONE_WALL_SAMPLE_M` apart (and at most `ZONE_WALL_MAX_SAMPLES` samples): face-on
+ * the wall looks as thin as the map says, and seen at a slant its tint builds up with the way through it.
+ * @par Example
+ * @code
+ * scan_zone_walls(scene, x, v, s, t, dust);
+ * @endcode
+ */
+static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
+    constant ZoneWalls &walls = scene.u.zone_walls;
+    float r = scene.u.curvature_radius_m, thickness_m = walls.look.z;
+    float k = sinh(0.5 * thickness_m / r), t_end = tanh(min(s_end, FAR_S));
+    for (int i = 0; i < walls.counts.x; i++) {
+        float4 wall = walls.walls[i];
+        float a = x.z * wall.x + x.w * wall.y, b = v.z * wall.x + v.w * wall.y, discriminant = b * b - a * a + k * k;
+        if (discriminant < 0.0) continue;
+        float half_width = k * sqrt(discriminant) / (b * b + k * k), middle = -a * b / (b * b + k * k);
+        float t_in = middle - half_width, t_out = middle + half_width;
+        if (t_out <= 0.0 || t_in >= t_end) continue;
+        float s_in = clamp_atanh(max(t_in, 0.0)), s_out = clamp_atanh(min(t_out, t_end));
+        int sample_count = clamp(int(ceil((s_out - s_in) * r / ZONE_WALL_SAMPLE_M)), 1, ZONE_WALL_MAX_SAMPLES);
+        float ds = (s_out - s_in) / float(sample_count), depth = 0.0;
+        for (int j = 0; j < sample_count; j++) {
+            float s = s_in + (float(j) + 0.5) * ds;
+            depth += get_zone_wall_depth(scene, geodesic_point(x, v, s), wall.z, travelled + s) * ds * r / thickness_m;
+        }
+        depth *= 1.0 - ZONE_WALL_FACE_FRAC;
+        float face_cos_scale = rsqrt(1.0 + k * k);
+        if (t_in > 0.0) {
+            float slant = min(1.0 / max(abs(a * sinh(s_in) + b * cosh(s_in)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
+            depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_in), wall.z, travelled + s_in);
+        }
+        if (t_out < t_end) {
+            float slant = min(1.0 / max(abs(a * sinh(s_out) + b * cosh(s_out)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
+            depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_out), wall.z, travelled + s_out);
+        }
+        dust += float4(to_linear(wall.w > HALF_KIND ? RED_COLOR : BLUE_COLOR) * ZONE_WALL_BRIGHTNESS * depth, depth);
+    }
+}
+
+/**
+ * @brief `trace_bent_piece` traces the first piece of a bent ray from x along v, at most `s_max` long (curvature units),
+ * through the map, as voxel_world.rs's laser does: it halves the piece (up to `MAX_BEND_HALVINGS` times) while the map
+ * point of its midpoint strays from the midpoint of the map chord between its ends' map points by more than a tolerance
+ * times the stretch of unbending there, the tolerance being `BEND_SAG_M` or, once the ray has travelled `travelled`
+ * far enough, half a pixel's footprint there, whichever is larger. Then it traces that chord (`trace_bent_chord`, counting glass in `glass`, and adding the zone walls along it to
+ * `dust`) unless both ends unbend beyond the edge radius. It returns the piece's length, and in `frac` the fraction of it before a hit.
+ * @par Example
+ * @code
+ * float s = trace_bent_piece(scene, x, v, nominal_s, travelled, hit, glass, hx, hv, frac, dust);
+ * @endcode
+ */
+static float trace_bent_piece(thread const Scene &scene, float4 x, float4 v, float s_max, float travelled, thread Hit &hit, thread float &glass, thread float4 &chord_x,
+                              thread float4 &chord_v, thread float &frac, thread float4 &dust) {
+    float r = scene.u.curvature_radius_m, k = scene.u.bend.x, edge_rad = k * scene.u.bend.y, s = s_max, theta, theta_mid, theta_end, k_rho;
+    float4 m = unbend_point(x, r, k, theta, k_rho), mn;
+    float sag_m = max(BEND_SAG_M, BEND_SAG_PIXELS * scene.u.pixel_angle_rad * r * sinh(min(travelled, FAR_S)));
+    for (int i = 0;; i++) {
+        float4 xn = geodesic_point(x, v, s), xm = geodesic_point(x, v, 0.5 * s);
+        mn = unbend_point(xn * rsqrt(-mdot(xn, xn)), r, k, theta_end, k_rho);
+        float4 mm = unbend_point(xm * rsqrt(-mdot(xm, xm)), r, k, theta_mid, k_rho), mid = m + mn;
+        if (i == MAX_BEND_HALVINGS || measure_gap(mm, mid * rsqrt(-mdot(mid, mid))) * r * s <= sag_m * measure_gap(m, mn)) break;
+        s *= 0.5;
+    }
+    hit.mat = 0;
+    frac = 1.0;
+    if (theta > edge_rad && theta_end > edge_rad) return s;
+    float glass_s = NO_HIT_S;
+    frac = trace_bent_chord(scene, m, mn, hit, glass_s, chord_x, chord_v);
+    if (glass_s < hit.s) glass += 1.0;
+    if (scene.u.zone_walls.counts.x > 0) scan_zone_walls(scene, chord_x, chord_v, hit.s, travelled, dust);
+    return s;
 }
 
 /**
@@ -1736,7 +2421,12 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * @brief `trace_ray` traces a ray backwards from the eye through a point of the image (in pixels from its top left
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
  * surface, the sky or a horizon. After `LATE_STEP_COUNT` iterations (rays winding near a throat or the black hole,
- * which land in the lens's most compressed, aliased images) its bent steps are three times longer.
+ * which land in the lens's most compressed, aliased images) its bent steps are three times longer. With `HAS_BEND` the
+ * ray travels the bent world in pieces (`trace_bent_piece`) between warp objects and within its bent steps, scans the
+ * laser beams once per straight chord between warp objects (as the flat tracer does), crosses
+ * empty space (the void beyond the edge, the air high above the ground) in long untraced strides (`get_empty_s`), and
+ * reaches the sky once it is past every surface and
+ * moving away from the origin.
  * @par Example
  * @code
  * VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
@@ -1753,17 +2443,22 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     for (int w = 0; w < u.warp_count; w++) {
         if (-mdot(x, warps[w].centre) < cosh(warps[w].params.z)) inside = w;
     }
-    float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, team = 0.0;
+    float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, code = 0.0, speckle = 0.0;
     float4 dust = float4(0.0);
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
-    int outcome = OUTCOME_LOST, last_warp = -1;
+    int outcome = OUTCOME_LOST, last_warp = -1, tint = 0;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
     float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
     float4 gradient = float4(0.0);
     float3 local = float3(0.0);
     bool has_gradient = false;
+#if HAS_BEND
+    float k = u.bend.x, sky_w = cosh((u.bend.y + u.bend.z) / r);
+    float nominal_s = clamp(sqrt(CHORD_SQ_PER_SAG_RADIUS * BEND_SAG_M / k), MIN_BEND_PIECE_M, MAX_BEND_PIECE_M) / r;
+    int bent_piece_count = 0;
+#endif
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         if (inside < 0) {
             float s_end = FAR_S;
@@ -1774,13 +2469,36 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 float s_in = max(clamp_atanh(b / a) - acosh(reach_cosh * rsqrt(max(closest_sq, 1.0))), 0.0);
                 if (s_in < s_end) { s_end = s_in; entering = w; }
             }
+#if HAS_BEND
+            float4 chord_x = x, chord_v = v;
+            float chord_travelled = travelled, chord_s = 0.0;
+            while (s_end > 0.0 && bent_piece_count++ < MAX_BENT_PIECES) {
+                if (entering < 0 && x.w > sky_w && v.w > 0.0) { outcome = OUTCOME_SKY; break; }
+                float empty_s = get_empty_s(scene, x), s = min(empty_s, s_end), frac = 1.0;
+                float4 hx = x, hv = v;
+                if (empty_s <= nominal_s) s = trace_bent_piece(scene, x, v, min(nominal_s, s_end), travelled, hit, glass, hx, hv, frac, dust);
+                chord_s += s * frac;
+                if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
+                float4 xn = geodesic_point(x, v, s);
+                v = normalize_tangent(xn * rsqrt(-mdot(xn, xn)), geodesic_tangent(x, v, s));
+                x = xn * rsqrt(-mdot(xn, xn));
+                travelled += s;
+                s_end -= s;
+            }
+            if (u.beam_count > 0) scan_beams(scene, chord_x, chord_v, chord_s, chord_travelled, core, halo, code, speckle);
+            if (outcome == OUTCOME_SKY && last_warp >= 0) back_to_reach(scene, last_warp, x, v);
+            if (s_end > 0.0 || outcome != OUTCOME_LOST) break;
+            inside = entering;
+            continue;
+#endif
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
             trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
-            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
+            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
+            if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (entering < 0) {
                 if (last_warp >= 0) back_to_reach(scene, last_warp, x, v);
@@ -1800,11 +2518,24 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         hit.s = ds;
         hit.mat = 0;
         float glass_s = NO_HIT_S;
+#if HAS_BEND
+        float done = 0.0, frac = 1.0;
+        float4 hx = x, hv = v;
+        while (done < ds && hit.mat == 0 && bent_piece_count++ < MAX_BENT_PIECES) {
+            float4 xa = geodesic_point(x, v, done);
+            float piece = trace_bent_piece(scene, xa * rsqrt(-mdot(xa, xa)), geodesic_tangent(x, v, done), ds - done, travelled + done, hit, glass, hx, hv, frac, dust);
+            done += piece * frac;
+        }
+        if (u.beam_count > 0) scan_beams(scene, x, v, min(done, ds), travelled, core, halo, code, speckle);
+        if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
+#else
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
-        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
+        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
+        if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+#endif
         float4 xn = geodesic_point(x, v, ds), vn = geodesic_tangent(x, v, ds);
         x = xn * rsqrt(-mdot(xn, xn));
         v = normalize_tangent(x, vn);
@@ -1814,10 +2545,19 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         has_gradient = true;
         float4 prm = warps[inside].params;
         if (prm.x < HALF_KIND && rho < prm.y * HORIZON_CAPTURE_FRAC) { outcome = OUTCOME_LOST; break; }
-        if (prm.x > HALF_KIND && rho < prm.y) { cross_throat(scene, inside, x, v); inside = int(prm.w + 0.5); has_gradient = false; continue; }
+        if (prm.x > HALF_KIND && rho < prm.y) {
+            if (prm.x > FIRST_THROWN_KIND) tint = int(prm.x + 0.5) - 1;
+            cross_throat(scene, inside, x, v);
+            inside = int(prm.w + 0.5);
+            has_gradient = false;
+            continue;
+        }
         if (rho > prm.z) { last_warp = inside; inside = -1; has_gradient = false; }
     }
-    VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0), int4(outcome, -1, -1, team > HALF_KIND ? 1 : 0),
+    int beam_code = int(code + HALF_KIND);
+    VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0),
+                       int4(outcome, -1, -1, (beam_code & 1) | tint << THROWN_TINT_FIRST_BIT | (beam_code >= RIFLE_BEAM_CODE && beam_code < BEACON_BEAM_CODE ? 1 : 0) << BEAM_RIFLE_BIT
+                                                 | int(round(speckle * BEAM_SPECKLE_STEPS)) << BEAM_SPECKLE_FIRST_BIT),
                        float4(0.0, glass, core, halo), dust};
     if (outcome == OUTCOME_HIT) {
         end.point = geodesic_point(hit_x, hit_v, hit.s);
@@ -1860,15 +2600,54 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
 }
 
 /**
- * @brief `shade_ray_end` gives a ray's final colour from where it ended: the lit surface or the sky, hazed, tinted by
- * the glass it crossed, behind the dust in front of it (as thick as its optical depth), with the laser's glow and
- * the highlight roll-off; a lost ray is black.
+ * @brief `hash_pixel` gives a pseudo-random number in [0, 1) for pixel `id` and `seed`, independent from pixel to
+ * pixel (a lowbias32 integer hash).
  * @par Example
  * @code
- * float3 color = shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5));
+ * float roll = hash_pixel(id, uint(scene.u.beam_speckle.x));
  * @endcode
  */
-static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
+static float hash_pixel(uint2 id, uint seed) {
+    uint h = id.x * PIXEL_HASH_PRIMES.x ^ id.y * PIXEL_HASH_PRIMES.y ^ seed * PIXEL_HASH_PRIMES.z;
+    h ^= h >> PIXEL_HASH_SHIFTS.x;
+    h *= PIXEL_HASH_MULTIPLIERS.x;
+    h ^= h >> PIXEL_HASH_SHIFTS.y;
+    h *= PIXEL_HASH_MULTIPLIERS.y;
+    h ^= h >> PIXEL_HASH_SHIFTS.z;
+    return float(h >> PIXEL_HASH_DROPPED_BITS) * PIXEL_HASH_SCALE;
+}
+
+/**
+ * @brief `speckle_beam` gives pixel `id`'s colour with its laser's speckle (W-84). On the share `speckle` of the pixels
+ * the laser's `glow` reaches (above `MIN_SPECKLE_GLOW`), picked anew each frame with the uniforms' `beam_speckle.x`
+ * seed, a second roll picks the pixel's kind in the uniforms' shares `beam_speckle.y` and `.z`: black (`lit` darkened
+ * by the glow, black where it is full), white (`lit` moved toward white by the glow) or, for the rest, a dropout
+ * (`bare`, the scene without the laser). Every other pixel keeps `lit`, the normal laser.
+ * @par Example
+ * @code
+ * color = speckle_beam(scene, bare, lit, glow, 0.3, id);
+ * @endcode
+ */
+static float3 speckle_beam(thread const Scene &scene, float3 bare, float3 lit, float glow, float speckle, uint2 id) {
+    uint seed = uint(scene.u.beam_speckle.x);
+    if (speckle <= 0.0 || glow <= MIN_SPECKLE_GLOW || hash_pixel(id, seed) >= speckle) return lit;
+    float kind = hash_pixel(id, seed ^ SPECKLE_KIND_SALT);
+    if (kind < scene.u.beam_speckle.y) return lit * (1.0 - glow);
+    if (kind < scene.u.beam_speckle.y + scene.u.beam_speckle.z) return mix(lit, float3(1.0), glow);
+    return bare;
+}
+
+/**
+ * @brief `shade_ray_end` gives pixel `id`'s final colour from where its ray ended: the lit surface or the sky, hazed,
+ * tinted by the glass it crossed, behind the dust and zone walls in front of it (as thick as their optical depth), with the laser's
+ * glow (the sniper's a white blade in a soft haze, the rifle's a laser over its halo) speckled by `speckle_beam`; a
+ * lost ray is black.
+ * @par Example
+ * @code
+ * float3 color = shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5), id);
+ * @endcode
+ */
+static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id) {
     float3 color = float3(0.0);
     if (end.surface.x == OUTCOME_HIT && end.cell.w == MAT_GROUND) {
         color = shade_ground(scene, end.point, end.view, end.grid.w);
@@ -1880,17 +2659,28 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
     }
     color = add_haze(scene, color, end);
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
-    float3 beam_color = to_linear(end.surface.w > 0 ? RED_COLOR : BLUE_COLOR);
+    float3 beam_color = to_linear((end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
+    int tint = end.surface.w >> THROWN_TINT_FIRST_BIT & THROWN_TINT_MASK;
+    if (tint > 0) color = mix(color, THROWN_TINTS[tint - 1] * (dot(color, LUMA) + THROWN_TINT_FLOOR), THROWN_TINT_FRAC);
     if (end.dust.w > 0.0) color = mix(color, end.dust.rgb / end.dust.w, 1.0 - exp(-end.dust.w));
-    color += mix(beam_color, float3(1.0), BEAM_HAZE_WHITENESS) * BEAM_HAZE_BRIGHTNESS * halo;
-    color = mix(color, mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS, saturate(core));
+    float3 lit;
+    float glow;
+    if ((end.surface.w >> BEAM_RIFLE_BIT & 1) != 0) {
+        lit = mix(color, beam_color, saturate(LASER_HALO_OPACITY * halo)) + mix(beam_color, float3(1.0), LASER_CORE_WHITENESS) * core;
+        glow = saturate(LASER_HALO_OPACITY * halo + core);
+    } else {
+        lit = color + mix(beam_color, float3(1.0), BEAM_HAZE_WHITENESS) * BEAM_HAZE_BRIGHTNESS * halo;
+        lit = mix(lit, mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS, saturate(core));
+        glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
+    }
+    color = speckle_beam(scene, color, lit, glow, float(end.surface.w >> BEAM_SPECKLE_FIRST_BIT) / BEAM_SPECKLE_STEPS, id);
     return max(color, 0.0);
 }
 
 /** @brief `write_pixel` shades a ray end into pixel `id`. @par Example @code write_pixel(scene, end, id, image); @endcode */
 static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, texture2d<float, access::write> image) {
-    image.write(float4(shade_ray_end(scene, end), 1.0), id);
+    image.write(float4(shade_ray_end(scene, end, id), 1.0), id);
 }
 
 /**
@@ -1902,7 +2692,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1918,7 +2708,7 @@ kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> im
 static bool is_same_surface(VoxelRayEnd a, VoxelRayEnd b) {
     int axis = a.surface.z;
     bool is_inside_cell = a.surface.x == OUTCOME_HIT && a.surface.y >= 0 && axis < 0;
-    return all(a.surface.xyz == b.surface.xyz) && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
+    return all(a.surface == b.surface) && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
         && (axis < 0 || a.cell[axis] == b.cell[axis]) && b.glow.z < GLOW_FLOOR && b.glow.w < GLOW_FLOOR
         && abs(b.dust.w - a.dust.w) <= DUST_SMOOTH_DEPTH;
 }
@@ -2009,7 +2799,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -2033,7 +2823,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -2070,7 +2860,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -2125,7 +2915,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2144,7 +2934,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes, milky_way};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {

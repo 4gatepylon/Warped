@@ -10,6 +10,8 @@
 | Mouth partners | paired, unpaired | `test_shipped_maps_are_valid`, `test_unpaired_mouths_are_caught` |
 | Tapered reaches | apart, overlapping | `test_shipped_maps_are_valid`, `test_overlapping_tapered_reaches_are_caught` |
 | Name | matches the folder, doesn't | `test_shipped_maps_are_valid`, `test_a_wrong_name_is_caught` |
+| Zone walls | absent (house_demo), valid (lunar_surface), height or thickness not positive, opacity 0, opacity 1, a field missing (height, thickness) | `test_shipped_maps_are_valid`, `test_bad_zone_walls_are_caught` |
+| Milky Way | none (house_demo), valid (lunar_surface), a pole that isn't a unit vector, a core not perpendicular to the pole | `test_shipped_maps_are_valid`, `test_a_bad_milky_way_is_caught` |
 
 Example:
     uv run pytest
@@ -105,9 +107,50 @@ def test_overlapping_tapered_reaches_are_caught(tmp_path: Path) -> None:
     assert any("overlap" in error for error in errors)
 
 
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda walls: walls.update(height_m=0.0),
+        lambda walls: walls.update(thickness_m=-0.1),
+        lambda walls: walls.update(opacity_frac=0.0),
+        lambda walls: walls.update(opacity_frac=1.0),
+        lambda walls: walls.pop("height_m"),
+        lambda walls: walls.pop("thickness_m"),
+    ],
+    ids=[
+        "height not positive",
+        "thickness not positive",
+        "opacity 0",
+        "opacity 1",
+        "height missing",
+        "thickness missing",
+    ],
+)
+def test_bad_zone_walls_are_caught(damage: Callable[[dict], None], tmp_path: Path) -> None:
+    errors: list[str] = _validate_map(
+        _copy_map("lunar_surface", tmp_path, lambda manifest: damage(manifest["regions"]["zone_walls"])), SCHEMA
+    )
+    assert errors != []
+
+
 def test_a_wrong_name_is_caught(tmp_path: Path) -> None:
     errors: list[str] = _validate_map(_copy_map("house_demo", tmp_path, lambda m: m.update(name="other")), SCHEMA)
     assert any("doesn't match" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("damage", "expected"),
+    [
+        (lambda milky_way: milky_way.update(pole_direction=[0.0, 2.0, 0.0]), "pole's direction is not a unit vector"),
+        (lambda milky_way: milky_way.update(core_direction=milky_way["pole_direction"]), "not perpendicular"),
+    ],
+    ids=["pole not a unit vector", "core not perpendicular"],
+)
+def test_a_bad_milky_way_is_caught(damage: Callable[[dict], None], expected: str, tmp_path: Path) -> None:
+    errors: list[str] = _validate_map(
+        _copy_map("lunar_surface", tmp_path, lambda manifest: damage(manifest["sky"]["milky_way"])), SCHEMA
+    )
+    assert any(expected in error for error in errors)
 
 
 @pytest.mark.parametrize(("model", "expected"), [("hesco_barrier", None), ("no_such_model", "isn't in")])

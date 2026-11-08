@@ -4,17 +4,18 @@
 //! from takeoff), and, once eliminated, a body lying where they fell (`Death`) until they could
 //! respawn.
 //!
-//! Interface: `AvatarAnimator::New`, `AvatarAnimator`, `Corpse`.
+//! Interface: `AvatarAnimator::New`, `AvatarAnimator`, `Corpse`, `OWN_TRACK_ID`.
 //!
-//! Example: `let poses = animator.update(&world, &players, now_s);`
+//! Example: `let poses = animator.update(&world, &[(2, eye)], now_s);`
 
 use glam::{DMat4, DVec4};
 
 use crate::avatar_model::{AvatarClip, AvatarModel};
 use crate::geometry::{AXIS_W, get_distance};
-use crate::net::RemotePlayer;
 use crate::voxel_world::{VoxelPlayer, VoxelWorld};
 
+/// `OWN_TRACK_ID` is the id this window gives its own player's eye, beside the others' ids.
+pub const OWN_TRACK_ID: u32 = u32::MAX;
 const SPEED_SMOOTHING_S: f64 = 0.12;
 const STALE_SNAPSHOT_S: f64 = 0.25;
 const MIN_WALK_M_PER_S: f64 = 0.8;
@@ -65,34 +66,34 @@ impl AvatarAnimator {
         }
     }
 
-    /// `update` follows `players` to `now_s` (seconds, never going back) and gives each one's
-    /// clip and time in it, in their order. A player not seen before stands idle at first.
+    /// `update` follows the players whose ids and eye frames are `eyes` to `now_s` (seconds, never
+    /// going back) and gives each one's clip and time in it, in their order. A player not seen
+    /// before stands idle at first.
     ///
-    /// Example: `let poses = animator.update(&world, &players, 12.5);`
+    /// Example: `let poses = animator.update(&world, &[(2, eye)], 12.5);`
     pub fn update(
         &mut self,
         world: &VoxelWorld,
-        players: &[RemotePlayer],
+        eyes: &[(u32, DMat4)],
         now_s: f64,
     ) -> Vec<(AvatarClip, f64)> {
         let dt_s: f64 = (now_s - self.last_s).max(0.0);
         self.last_s = now_s;
         self.tracks
-            .retain(|track| players.iter().any(|p| p.id == track.id));
+            .retain(|track| eyes.iter().any(|&(id, _)| id == track.id));
         let run_from_m_per_s: f64 = (world.player.walk_m_per_s + world.player.sprint_m_per_s) / 2.0;
-        players
-            .iter()
-            .map(|player| {
-                let seen: VoxelPlayer = VoxelPlayer::FromEye(world, player.frame);
+        eyes.iter()
+            .map(|&(id, eye)| {
+                let seen: VoxelPlayer = VoxelPlayer::FromEye(world, eye);
                 let feet: DMat4 = seen.get_feet_frame(world);
                 let under: DVec4 = seen.body.col(AXIS_W);
-                let is_on_ground: bool = world.is_eye_supported(player.frame);
-                let track: &mut Track = match self.tracks.iter().position(|t| t.id == player.id) {
+                let is_on_ground: bool = world.is_eye_supported(eye);
+                let track: &mut Track = match self.tracks.iter().position(|t| t.id == id) {
                     Some(k) => &mut self.tracks[k],
                     None => {
                         self.tracks.push(Track {
-                            id: player.id,
-                            eye: player.frame,
+                            id,
+                            eye,
                             feet,
                             under,
                             moved_s: now_s,
@@ -109,7 +110,7 @@ impl AvatarAnimator {
                     is_on_ground,
                     r: world.r,
                 };
-                track.follow(player.frame, ground, run_from_m_per_s, now_s, dt_s);
+                track.follow(eye, ground, run_from_m_per_s, now_s, dt_s);
                 track.get_pose(&world.body, run_from_m_per_s, now_s)
             })
             .collect()
@@ -248,23 +249,15 @@ mod tests {
             .expect("the world")
     }
 
-    /// `make_player` gives player 2 standing `u_m` along the ground from `START_M`, looking
-    /// along it, with the eye `rise_m` above standing height.
+    /// `make_player` gives player 2's id and eye, standing `u_m` along the ground from
+    /// `START_M`, looking along it, with the eye `rise_m` above standing height.
     ///
     /// Example: `let player = make_player(&world, 1.5, 0.0);`
-    fn make_player(world: &VoxelWorld, u_m: f64, rise_m: f64) -> RemotePlayer {
+    fn make_player(world: &VoxelWorld, u_m: f64, rise_m: f64) -> (u32, DMat4) {
         let at_m: [f64; 2] = [START_M[0] + u_m, START_M[1]];
         let mut body: VoxelPlayer = VoxelPlayer::AtView(world, at_m, [40.0, 0.0], None, 0.0);
         body.h_m += rise_m;
-        RemotePlayer {
-            id: 2,
-            frame: body.get_camera_frame(world),
-            is_laser_on: false,
-            is_rifle: false,
-            team: 0,
-            disabling_console: None,
-            disabling_frac: 0.0,
-        }
+        (2, body.get_camera_frame(world))
     }
 
     /// `walk` moves the player at `speed_m_per_s` for `duration_s` from `u_m`, updating
@@ -284,7 +277,7 @@ mod tests {
         let mut pose: (AvatarClip, f64) = (AvatarClip::Idle, 0.0);
         for i in 1..=frame_count {
             let t_s: f64 = i as f64 * FRAME_S;
-            let player: RemotePlayer = make_player(world, u_m + speed_m_per_s * t_s, 0.0);
+            let player: (u32, DMat4) = make_player(world, u_m + speed_m_per_s * t_s, 0.0);
             pose = animator.update(world, &[player], start_s + t_s)[0];
         }
         (pose, u_m + speed_m_per_s * duration_s, start_s + duration_s)
@@ -321,12 +314,12 @@ mod tests {
     fn jumping_starts_in_the_air() {
         let world: VoxelWorld = load_world();
         let mut animator: AvatarAnimator = AvatarAnimator::New();
-        let standing: RemotePlayer = make_player(&world, 0.0, 0.0);
+        let standing: (u32, DMat4) = make_player(&world, 0.0, 0.0);
         assert_eq!(
             animator.update(&world, &[standing], 0.0)[0].0,
             AvatarClip::Idle
         );
-        let airborne: RemotePlayer = make_player(&world, 0.0, 1.0);
+        let airborne: (u32, DMat4) = make_player(&world, 0.0, 1.0);
         let just_left: (AvatarClip, f64) =
             animator.update(&world, std::slice::from_ref(&airborne), FRAME_S)[0];
         assert_eq!(just_left.0, AvatarClip::Idle);
@@ -342,7 +335,7 @@ mod tests {
         let mut animator: AvatarAnimator = AvatarAnimator::New();
         let walk_m_per_s: f64 = world.player.walk_m_per_s;
         let (_, u_m, now_s) = walk(&world, &mut animator, walk_m_per_s, 1.0, 0.0, 0.0);
-        let last: RemotePlayer = make_player(&world, u_m, 0.0);
+        let last: (u32, DMat4) = make_player(&world, u_m, 0.0);
         let repeat: (AvatarClip, f64) =
             animator.update(&world, std::slice::from_ref(&last), now_s + FRAME_S)[0];
         assert_eq!(repeat.0, AvatarClip::Walk);
