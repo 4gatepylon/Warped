@@ -29,7 +29,9 @@ make run-demo RENDERER=cpu
   consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
   zones' edges (dashed) and the playable boundary. The map is drawn in its Fermi coordinates
   (`common/maps/README.md`), so things far above and below its middle line look squeezed from side to side: that is
-  the hyperbolic plane.
+  the hyperbolic plane. The third page, SCORES, shows in a game on a server how many players there are and each
+  one's team, kills and deaths in this game, sorted by team and then kills, with your line highlighted and each
+  team's totals.
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
@@ -159,8 +161,8 @@ make run-autopilot
   layer, without waiting for the GPU.
 - `physics.rs`: walking, gravity, the jetpack and flying, crossing throats, aiming, and tracing the laser (with the
   renderer's own ray tracer, so the laser hits exactly what you see).
-- `net.rs`: the game server and client, over UDP: joins, a snapshot of every player 60 times a second, hits, and
-  an announcement on the network for `--join auto`.
+- `net.rs`: the game server and client, over UDP: joins, a snapshot of every player 60 times a second, hits, each
+  player's kills and deaths 4 times a second, and an announcement on the network for `--join auto`.
 - `multiplayer.rs`: the other players as boxes in a per-frame copy of the world, everyone's laser, hits, spawn
   points, and the test bot.
 - `map.rs`: reads a map of the portable format; `map_export.rs` writes the house as one (`--export-map`).

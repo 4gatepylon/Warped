@@ -81,7 +81,8 @@ above the energy bar that empties when you fire; one hit eliminates), and gun 2,
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s), `E` (held)
 turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu (`Q`/`E`
-turn between your settings and a map of the whole level with you on it). There is no key to respawn:
+turn between your settings, a map of the whole level with you on it, and SCORES: how many players there are and each
+one's team, kills and deaths in this game). There is no key to respawn:
 players come back only after being eliminated.
 
 ## Known caveats
@@ -93,7 +94,7 @@ Multiplayer:
 - A player whose `MAP` differs from the server's can't join: their game stops with an error naming the server's
   map.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
-- Lasers hit teammates too.
+- Lasers hit teammates too. On the SCORES page, eliminating a teammate counts their death but no kill.
 - Health, shown in the bottom left, resets when a player respawns.
 - The menu doesn't pause the game: a player in it stands still and can still be hit.
 - A file saved from the menu has no comments. If a later version adds a setting, that file stops loading and the

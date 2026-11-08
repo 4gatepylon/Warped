@@ -208,7 +208,7 @@ These values are configurable and may change after playtests.
 | Left click | Shoot, standing still or crouched, not while walking upright, sprinting or in the air (hold it for a weapon that fires while held, such as the rifle) |
 | Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |
-| `Tab` | Open or close the menu: a page of the player's own settings (key bindings, mouse speed and view effects) and a page with the whole map from above |
+| `Tab` | Open or close the menu: a page of the player's own settings (key bindings, mouse speed and view effects), a page with the whole map from above, and a scoreboard (the player count, and each player's team, kills and deaths) |
 | `Q`, `E` (in the menu) | Turn to the menu's previous or next page |
 
 ## Bullets, lasers and light
