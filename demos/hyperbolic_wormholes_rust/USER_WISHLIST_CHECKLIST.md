@@ -11,16 +11,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
-  shadows on the hills.
-  Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/hill-self-shadow`, 2026-11-07.
 - [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
   and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/delta-fighters`, 2026-11-07.
-- [~] **W-87 No colourful spaceship.** Remove the colourful spaceship from the sky (W-53, #193): "the circular space
-  station one is fine and great, but the colourful ones look ugly". That is the container freighter; the ring station
-  stays, and so do the grey fighters unless the user says otherwise. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/no-freighter`, 2026-11-07.
 - [~] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
   be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user wants to see it
   before it merges. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
@@ -113,16 +106,22 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code.
+- [ ] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
+  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204).
 
 ## Pending user review
 
+- [?] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills. #233.
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
-  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214.
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
+  don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
+  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226.
 - [?] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
   and on Lunar Surface. #73, #76, #81–#86, #90, #91.
 - [?] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
@@ -262,6 +261,9 @@ are here too, since the user hadn't confirmed them.
   and more subtle, at a faster pace in general, and in proportion to how fast the value is changing (smoothed). The
   user wants samples first. From the samples the user picked "soft swells except that it is also rate based (and
   make the swell really soft, i.e. really wide gaussian like; think like smoother convolution vibes)" (D94). #231.
+- [?] **W-87 No colourful spaceship.** Remove the colourful spaceship from the sky (W-53, #193): "the circular space
+  station one is fine and great, but the colourful ones look ugly". That is the container freighter; the ring station
+  stays, and so do the grey fighters unless the user says otherwise. #232.
 
 ## Done
 

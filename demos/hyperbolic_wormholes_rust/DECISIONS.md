@@ -1079,14 +1079,16 @@
 ### D82. Spaceships flying over Lunar Surface
 
 - **Choice:**
-  - **Ships:** five, purely for looks: a container freighter, a ring ship whose ring turns, and three fighters
-    flying in a V. Each is a flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s
-    `draw_spaceship`) from boxes and tapered capsules (tables `HULL_*`), lit by the sun on the edges that face it
-    and from below by the sunlit ground, with glowing engines and a short plume, red lights to port and green to
-    starboard, a flashing white strobe, a pulsing red beacon and lit windows.
-  - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) to 300 s
-    (the ring ship), highest at 58° to 84° above the horizon, then comes back round below the horizon in a fifth of
-    that time. So a view straight up nearly always has a ship in it.
+  - **Ships:** four, purely for looks: a ring ship whose ring turns, and three fighters flying in a V. Each is a
+    flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s `draw_spaceship`) from boxes
+    and tapered capsules (tables `HULL_*`), lit by the sun on the edges that face it and from below by the sunlit
+    ground, with glowing engines and a short plume, red lights to port and green to starboard, a flashing white
+    strobe and lit windows.
+  - **No freighter (W-87):** a fifth ship, a container freighter with coloured containers, a lit bridge and orange
+    engines, flew from #193 until W-87 removed it, with its hull tables and its pulsing red beacon.
+  - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) or 300 s
+    (the ring ship), highest at 84° and 74° above the horizon, then comes back round below the horizon in a fifth of
+    that time. So a view straight up often has a ship in it.
   - **Shared time:** where the ships are depends only on the UTC clock (`spaceships.rs`), so every window whose
     clock is set by the network shows the same ships in the same place, to within its clock's error (tens of
     milliseconds, under a pixel). The game has no clock all clients share (the server sends no time). Fixed views
@@ -1099,7 +1101,8 @@
   - **Cost:** each sky pixel rules a ship out with a few dot products; only pixels within 1.5 half lengths of a ship
     shade its hull. On D10's shared machine, the window at 1280×800 ran 85.5 fps (11.1 ms on the GPU) with the
     ships and 85.7 fps (11.1 ms) without; `--bench-views` at 2560×1600 moved by −4 to +4 ms per view (mean +1 ms),
-    within the noise, and views straight up with all five ships in sight took about 0.4 ms more on the GPU.
+    within the noise, and views straight up with all five ships of then (the freighter too) in sight took about
+    0.4 ms more on the GPU.
 - **Alternatives:**
   - ships as structures traced like the blocks (properly shadowed, but every ray would pay for them, and they would
     be in the game's world);
@@ -1108,7 +1111,8 @@
   - whole orbits at a steady speed (half of each below the horizon, so looking up often showed an empty sky);
   - ships described in the map format (`common/maps/`), which only this renderer would read.
 - **Rationale:** you asked for a few spaceships flying overhead in the sky, purely background world-building, to
-  look cool and pretty.
+  look cool and pretty; then, seeing them, that the colourful freighter go ("the freighter is indeed meant to be
+  deleted and is ugly") and the ring station stay.
 
 ### D83. Aiming zooms in, and the flashlight moves to F
 

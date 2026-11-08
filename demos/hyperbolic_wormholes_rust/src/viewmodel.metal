@@ -8,7 +8,7 @@
 using namespace metal;
 
 constant int HAND_LIGHT_COUNT = 3;
-constant float EXPOSURE = 1.6;
+constant float EXPOSURE = 1.3;
 constant float MIN_ROUGHNESS = 0.045;
 constant float MIN_TANGENT_SQUARED = 1e-8;
 
