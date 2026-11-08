@@ -11,6 +11,17 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-125 Photo map page.** "I also really liked the 3 dimensional-looking visualization for the snow map, if
+  you can for all maps (including lunar base) make the map as shown when you click tab and then e to get to map look
+  not like some random 1950s drawing but instead a real like photo from the top that would be very nice (it could
+  have some shadows, etc...) of course, because it doesn't change (it's just the map) it should be cheap to make it
+  extremely beautiful". Here: the hyperbolic demo's maps (Lunar Surface and the others); the other levels do theirs
+  in W-119 (City Sphere demo) to W-122 (Dark Forest demo). Claimed by Devin (session
+  9f480d75ff384998bc6f7e2f5d3bdbcb), branch `devin/lunar-map-picture`, 2026-11-08.
+  - **Where the work is:** worktree `/Users/devin/repos/Warped/.devin/worktrees/lunar-map-picture` on Devin's VM,
+    branch `devin/lunar-map-picture` (not pushed yet). Lunar Surface renders in that worktree's
+    `demos/hyperbolic_wormholes_rust/.artifacts/bench_views/20261108-140707-photos/`. State, 2026-11-08: renders
+    made, map page code not started.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
