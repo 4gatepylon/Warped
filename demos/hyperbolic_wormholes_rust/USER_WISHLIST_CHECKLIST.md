@@ -165,4 +165,4 @@ is in [`AGENTS.md`](AGENTS.md).
   and boulders as hills and mounds in the terrain. #147.
 - [x] **W-62 Sniper ammo bar.** The sniper gets an ammo bar too, but of only one block instead of many: it empties
   when the sniper fires and comes back when the timer resets, letting the player shoot again (a 2 s reload,
-  `sniper.reload_s`). #PR.
+  `sniper.reload_s`). #156.
