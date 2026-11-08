@@ -1,8 +1,9 @@
 //! `key_bindings.rs` reads which keys, mouse buttons and wheel do what in the game window (the `keys`
 //! of `player_settings.yaml`), so each player can choose their own controls.
 //!
-//! Interface: `Action`, `Control`, `KeyBindings` (`FromNames`, `is_held`, `matches`, `get_actions`,
-//! `get_label`, `describe`), `get_pressed_control`.
+//! Interface: `Action`, `Control`, `KeyBindings` (`FromNames`, `get_all`, `set_controls`,
+//! `get_names`, `to_names`, `is_held`, `matches`, `get_actions`, `get_label`, `describe`),
+//! `get_pressed_control`.
 //!
 //! Example: `let keys = KeyBindings::FromNames(&names, "mine.yaml")?;`
 //!
@@ -25,7 +26,7 @@ const MOUSE_BUTTON_NAMES: [(&str, MouseButton); 5] = [
     ("Mouse X1", MouseButton::X1),
     ("Mouse X2", MouseButton::X2),
 ];
-const ACTION_NAMES: [(Action, &str); 18] = [
+const ACTION_NAMES: [(Action, &str); 19] = [
     (Action::MoveForward, "move_forward"),
     (Action::MoveBack, "move_back"),
     (Action::MoveLeft, "move_left"),
@@ -44,8 +45,9 @@ const ACTION_NAMES: [(Action, &str); 18] = [
     (Action::LowerResolution, "lower_resolution"),
     (Action::RaiseResolution, "raise_resolution"),
     (Action::ReleaseMouse, "release_mouse"),
+    (Action::OpenMenu, "open_menu"),
 ];
-const PRESS_ONLY_ACTIONS: [Action; 8] = [
+const PRESS_ONLY_ACTIONS: [Action; 9] = [
     Action::Gun1,
     Action::Gun2,
     Action::SwitchGun,
@@ -54,8 +56,9 @@ const PRESS_ONLY_ACTIONS: [Action; 8] = [
     Action::LowerResolution,
     Action::RaiseResolution,
     Action::ReleaseMouse,
+    Action::OpenMenu,
 ];
-const HELP_GROUPS: [(&[Action], &str); 10] = [
+const HELP_GROUPS: [(&[Action], &str); 11] = [
     (
         &[
             Action::MoveForward,
@@ -80,6 +83,7 @@ const HELP_GROUPS: [(&[Action], &str); 10] = [
     ),
     (&[Action::LowerResolution, Action::RaiseResolution], "scale"),
     (&[Action::ReleaseMouse], "release"),
+    (&[Action::OpenMenu], "menu"),
 ];
 
 /// `Result` is this module's result type.
@@ -106,6 +110,7 @@ pub enum Action {
     LowerResolution,
     RaiseResolution,
     ReleaseMouse,
+    OpenMenu,
 }
 
 /// `Control` is a key (by its place on the keyboard), a mouse button, or the mouse wheel turned
@@ -213,6 +218,53 @@ impl KeyBindings {
             controls.insert(action, action_controls);
         }
         Ok(KeyBindings { controls })
+    }
+
+    /// `get_all` gives every action with its name in `player_settings.yaml`, in the file's order.
+    ///
+    /// Example: `for (action, name) in KeyBindings::get_all() { ... }`
+    pub fn get_all() -> &'static [(Action, &'static str)] {
+        &ACTION_NAMES
+    }
+
+    /// `set_controls` makes `controls` the only ones of `action`, failing (with the reason) on the
+    /// wheel for an action that is held.
+    ///
+    /// Example: `keys.set_controls(Action::Jump, vec![Control::Key(Scancode::Return)])?;`
+    pub fn set_controls(&mut self, action: Action, controls: Vec<Control>) -> Result<()> {
+        if controls.contains(&Control::Wheel) && !PRESS_ONLY_ACTIONS.contains(&action) {
+            return Err("that action is held, so it can't use the Wheel".into());
+        }
+        self.controls.insert(action, controls);
+        Ok(())
+    }
+
+    /// `get_names` gives `action`'s controls by name, joined with commas.
+    ///
+    /// Example: `let shown = keys.get_names(Action::Sprint);`
+    pub fn get_names(&self, action: Action) -> String {
+        let names: Vec<String> = self.controls[&action]
+            .iter()
+            .map(|c| c.get_name())
+            .collect();
+        names.join(", ")
+    }
+
+    /// `to_names` gives every action's controls by name, as `player_settings.yaml`'s `keys` holds
+    /// them.
+    ///
+    /// Example: `let names = keys.to_names();`
+    pub fn to_names(&self) -> BTreeMap<String, Vec<String>> {
+        ACTION_NAMES
+            .iter()
+            .map(|&(action, name)| {
+                let names: Vec<String> = self.controls[&action]
+                    .iter()
+                    .map(|c| c.get_name())
+                    .collect();
+                (name.to_string(), names)
+            })
+            .collect()
     }
 
     /// `is_held` says whether any control of `action` is held now, by the keyboard's and the

@@ -37,6 +37,7 @@ keys:
   lower_resolution: ["-"]  # Render at a lower resolution.
   raise_resolution: ["="]  # Render at a higher resolution.
   release_mouse: [Escape]  # Free the mouse; again to quit.
+  open_menu: [Tab]  # Open or close the menu (settings).
 
 view:
   look_rad_per_px: 0.0025  # How far the view turns for each pixel the mouse moves (mouse sensitivity).
