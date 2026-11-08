@@ -10,9 +10,29 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
-  relativistic effect on colour if possible. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/wormhole-cyan`, 2026-11-07.
+- [~] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom").
+  Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/scene-haze-soft-shadows`, 2026-11-07.
+- [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
+  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
+  cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
+  `claude/square-shapes`, 2026-11-07.
+- [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
+  (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
+- [~] **W-73 Gun lit by the scene.** There's an issue with the gun where the gun is uniformly lit and not reactive to
+  scene lighting. Claimed by Claude Code (session
+  `5cf069f6-934c-466e-93ea-854879c2feaa`), branch `claude/gun-scene-lighting`, 2026-11-07.
+- [~] **W-72 Can't join a team.** A bug, somewhat intermittent it seems: pressing `1` or `2` doesn't join a team.
+  Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-team-join`, 2026-11-07.
+- [~] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
+  windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
+  (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both".
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/see-through-windows`,
+  2026-11-07.
+- [~] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
+  noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
+  All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
+  `claude/shot-noise`, 2026-11-07.
 - [~] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
   look cool and pretty. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/spaceships`, 2026-11-07.
@@ -22,14 +42,6 @@ is in [`AGENTS.md`](AGENTS.md).
   `wizardly-hamilton-23a121`), branch `claude/hud-bars`, 2026-11-07.
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
-  2026-11-07.
-- [~] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
-  exit?", exits if the player presses OK, and otherwise doesn't.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/exit-confirm`, 2026-11-07.
-- [~] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
-  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
-  pulsing slows down smoothly instead of jumping back.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/console-pulse-ramp`,
   2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
@@ -96,6 +108,8 @@ is in [`AGENTS.md`](AGENTS.md).
   character, and the player controls it from there, seeing their own character.
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
+- [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills.
 
 ## Done
 
@@ -195,3 +209,10 @@ is in [`AGENTS.md`](AGENTS.md).
   missing". The game fails when they are not there ("it's fine if they are not committed"), and "the error (client
   side) should say what to do to fix it". #168 committed them in `demos/fps_demo/assets/`; #173 stops the client at
   start with the command that restores a missing one.
+- [x] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
+  exit?", exits if the player presses OK, and otherwise doesn't. #175.
+- [x] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
+  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
+  pulsing slows down smoothly instead of jumping back. #176.
+- [x] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
+  relativistic effect on colour if possible. #178.

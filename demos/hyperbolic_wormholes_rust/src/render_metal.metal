@@ -44,6 +44,12 @@ constant int STRETCH_TAP_COUNT = 12;
 constant float STRETCH_ZOOM_GAIN = 1.5;
 constant float STRETCH_SMEAR_FRAC = 0.35;
 constant float STRETCH_FRINGE_FRAC = 0.03;
+constant float3 BLUESHIFT_CHANNEL_NM = float3(610.0, 550.0, 465.0);
+constant float BLUESHIFT_INFRARED_NM = 700.0;
+constant float BLUESHIFT_INFRARED_PER_RED = 0.25;
+constant float BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED = 0.15;
+constant float BLUESHIFT_BEAMING_POWER = 1.5;
+constant float3 BLUESHIFT_GLOW_COLOR = float3(0.0, 0.3, 0.36);
 constant int MAX_MINIMAP_MARK_COUNT = 16;
 constant int MAX_MINIMAP_LINE_COUNT = 96;
 constant float MINIMAP_OPACITY = 0.88;
@@ -2008,8 +2014,9 @@ kernel void build_mouth_fields(device float4 *rows [[buffer(0)]], constant Unifo
 
 /**
  * @brief `OverlayParams` is how `apply_overlay` draws: how much to darken, mask pixels to screen pixels, the mask's top
- * left, how many rectangles there are, whether there is a mask and a wand, the camera's tan(half vertical fov), and how
- * much of the previous frame's scene to blend in (motion blur).
+ * left, how many rectangles there are, whether there is a mask and a wand, the camera's tan(half vertical fov), how
+ * much of the previous frame's scene to blend in (motion blur), and how far into the blueshift after a wormhole the
+ * scene is (`blueshift_scene`; 0 for none).
  */
 struct OverlayParams {
     float dim_frac;
@@ -2027,7 +2034,53 @@ struct OverlayParams {
     int2 picture_min_mask_px;
     int2 picture_max_excl_mask_px;
     float stretch_frac;
+    float blueshift_frac;
 };
+
+/**
+ * @brief `sample_spectrum` gives a colour's light at wavelength `nm`, reading its red, green and blue as samples of a
+ * spectrum at `BLUESHIFT_CHANNEL_NM` joined by straight lines: blue's below blue, and past red falling to
+ * `BLUESHIFT_INFRARED_PER_RED` of red's at `BLUESHIFT_INFRARED_NM` and beyond (the infrared a blueshift brings in).
+ * @par Example
+ * @code
+ * float red_seen = sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.r * D);
+ * @endcode
+ */
+static float sample_spectrum(float3 rgb, float nm) {
+    float3 at_nm = BLUESHIFT_CHANNEL_NM;
+    if (nm <= at_nm.b) return rgb.b;
+    if (nm <= at_nm.g) return mix(rgb.b, rgb.g, (nm - at_nm.b) / (at_nm.g - at_nm.b));
+    if (nm <= at_nm.r) return mix(rgb.g, rgb.r, (nm - at_nm.g) / (at_nm.r - at_nm.g));
+    return rgb.r * mix(1.0, BLUESHIFT_INFRARED_PER_RED, saturate((nm - at_nm.r) / (BLUESHIFT_INFRARED_NM - at_nm.r)));
+}
+
+/**
+ * @brief `blueshift_scene` gives a pixel's colour as seen moving straight ahead at `blueshift_frac` of
+ * `BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED` (0 for none): the relativistic Doppler factor D = sqrt(1 - β²) / (1 - β cos θ),
+ * with θ the angle between the pixel's ray and straight ahead, makes each channel show the light the scene sends at
+ * D times its wavelength (`sample_spectrum`: red fades, green takes red's light and blue green's, so greys turn cyan),
+ * D^`BLUESHIFT_BEAMING_POWER` times as bright (relativistic beaming), plus `BLUESHIFT_GLOW_COLOR` times that gain
+ * above 1, so black sky turns faintly teal; D is largest at the middle of the screen.
+ * @par Example
+ * @code
+ * float3 seen = blueshift_scene(scene, id, float2(out.get_width(), out.get_height()), p);
+ * @endcode
+ * @par Must know
+ * - Limitations:
+ *   - `blueshift_scene` takes the motion to be straight ahead, wherever the player really goes through the mouth.
+ *   - Real beaming brightens by D³ or more; `BLUESHIFT_BEAMING_POWER` keeps it gentler so bright scenes don't wash out.
+ */
+static float3 blueshift_scene(float3 rgb, uint2 id, float2 size, constant OverlayParams &p) {
+    if (p.blueshift_frac <= 0.0) return rgb;
+    float2 ndc = 2.0 * (float2(id) + 0.5) / size - 1.0;
+    float3 ray = normalize(float3(ndc.x * p.tan_half_fov * size.x / size.y, ndc.y * p.tan_half_fov, -1.0));
+    float beta = BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED * p.blueshift_frac;
+    float D = sqrt(1.0 - beta * beta) / (1.0 + beta * ray.z);
+    float3 shifted = float3(sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.r * D), sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.g * D),
+                            sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.b * D));
+    float beaming = pow(D, BLUESHIFT_BEAMING_POWER);
+    return shifted * beaming + BLUESHIFT_GLOW_COLOR * (beaming - 1.0);
+}
 
 /**
  * @brief `read_hit_scene` reads a frame's pixel as a player who was just hit sees it (`hit_frac` of the effect left, 1
@@ -2387,7 +2440,7 @@ static float4 get_rect_layer(constant OverlayRect &rect, float2 at_px, float2 si
 
 /**
  * @brief `apply_overlay` copies a finished frame into `out`, blended with the previous frame's scene (`history_in`, by
- * `blur_frac`; the blend is kept in `history_out` for the next frame) and darkened by `dim_frac`, with a mask's text drawn over it at
+ * `blur_frac`; the blend is kept in `history_out` for the next frame), blueshifted (`blueshift_scene`) and darkened by `dim_frac`, with a mask's text drawn over it at
  * `scale` screen pixels per mask pixel from `origin` (the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
  * the text's above `OVERLAY_TEXT_LEVEL`) over a picture (blended by its alpha) stretched from `picture_min_mask_px` to
  * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel)
@@ -2410,7 +2463,7 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
     float3 scene = mix(read_stretched_scene(frame, id, p), history_in.read(id).rgb, p.blur_frac);
     history_out.write(float4(scene, 1.0), id);
-    float4 color = float4(scene * (1.0 - p.dim_frac), 1.0);
+    float4 color = float4(blueshift_scene(scene, id, float2(out.get_width(), out.get_height()), p) * (1.0 - p.dim_frac), 1.0);
     int2 offset = int2(id) - p.origin;
     int2 picture_size_mask_px = p.picture_max_excl_mask_px - p.picture_min_mask_px;
     if (all(picture_size_mask_px > int2(0)) && all(offset >= int2(0))) {

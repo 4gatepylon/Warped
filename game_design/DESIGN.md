@@ -211,6 +211,7 @@ These values are configurable and may change after playtests.
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |
 | `Tab` | Open or close the menu: a page of the player's own settings (key bindings, mouse speed and view effects), a page with the whole map from above, and a scoreboard (the player count, and each player's team, kills and deaths) |
 | `Q`, `E` (in the menu) | Turn to the menu's previous or next page |
+| `Esc` | Free the mouse; with the mouse free, ask "Do you want to exit?" (`Return` or `Y` exits, `Esc` or `N` goes back to the game) |
 
 ## Bullets, lasers and light
 
@@ -218,6 +219,8 @@ These values are configurable and may change after playtests.
 - A shot fires a bullet (an energy pulse) with minimal drop, and shows a laser along its path with
   no drop.
 - Warp objects bend bullets and lasers as they bend light, and both pass through wormholes.
+- A player coming out of a wormhole sees the world blueshift toward cyan, as if moving at a good fraction of
+  light speed, fading back within about 1.5 s. Only that player sees it.
 
 ## Weapons
 

@@ -37,7 +37,7 @@ const PLAYER_WIDTH: usize = 16;
 const KILLS_WIDTH: usize = 6;
 const DEATHS_WIDTH: usize = 8;
 const LABEL_WIDTH: usize = 24;
-const NUMBERS: [(Number, &str, f64, f64, f64); 7] = [
+const NUMBERS: [(Number, &str, f64, f64, f64); 8] = [
     (
         Number::LookSpeed,
         "mouse look rad/px",
@@ -51,6 +51,7 @@ const NUMBERS: [(Number, &str, f64, f64, f64); 7] = [
     (Number::HitRed, "hit red 0-1", 0.1, 0.0, 1.0),
     (Number::HitShake, "hit shake px", 1.0, 0.0, 20.0),
     (Number::HitBlur, "hit blur px", 1.0, 0.0, 20.0),
+    (Number::WormholeTint, "wormhole tint 0-1", 0.1, 0.0, 1.0),
 ];
 
 /// `Page` is one page of the menu.
@@ -84,6 +85,7 @@ enum Number {
     HitRed,
     HitShake,
     HitBlur,
+    WormholeTint,
 }
 
 /// `Row` is one line of the menu that can be chosen: an action's controls, a number, or saving.
@@ -131,6 +133,7 @@ fn get_number(settings: &PerPlayerSettings, number: Number) -> f64 {
         Number::HitRed => settings.hit_effects.red_frac,
         Number::HitShake => settings.hit_effects.shake_px,
         Number::HitBlur => settings.hit_effects.blur_px,
+        Number::WormholeTint => settings.view.wormhole_tint_frac,
     }
 }
 
@@ -146,6 +149,7 @@ fn get_number_slot(settings: &mut PerPlayerSettings, number: Number) -> &mut f64
         Number::HitRed => &mut settings.hit_effects.red_frac,
         Number::HitShake => &mut settings.hit_effects.shake_px,
         Number::HitBlur => &mut settings.hit_effects.blur_px,
+        Number::WormholeTint => &mut settings.view.wormhole_tint_frac,
     }
 }
 

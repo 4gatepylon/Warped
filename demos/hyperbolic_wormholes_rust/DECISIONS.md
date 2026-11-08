@@ -1055,6 +1055,37 @@
   - slowing walking while aiming (not asked for).
 - **Rationale:** you asked for a way to aim on the right button, with the flashlight moved to another key.
 
+### D84. A blueshift toward cyan after going through a wormhole
+
+- **Choice:**
+  - **When:** the step that takes a player through a mouth (`StepReport::has_crossed_mouth` on a voxel map, any
+    crossing message on the house) starts the tint at its peak. It fades over `view.wormhole_tint_s`, 1.5 s, along
+    a smoothstep, so it lingers a moment at the peak and eases out. Each window steps only its own player, so in a
+    game on a server only the player who went through sees it.
+  - **The shift:** the overlay shader's `blueshift_scene` reads each pixel's red, green and blue as samples of a
+    spectrum at 610, 550 and 465 nm, joined by straight lines, and falling past red to a quarter of red's at 700 nm
+    (the infrared a blueshift brings into view). Moving straight ahead at β = 0.15 of light speed at the peak, the
+    relativistic Doppler factor D = √(1 − β²) / (1 − β cos θ), with θ the angle off the middle of the screen, is
+    1.16 in the middle and 1.08 in the corners of a 16:10 window. Each channel shows the light at D times its
+    wavelength: red fades, green takes red's light and blue takes green's, so greys turn cyan and reds turn green.
+    The pixel is also D^1.5 times as bright (beaming), plus a faint teal glow, (D^1.5 − 1) × (0, 0.3, 0.36), so the
+    black sky, often half the screen, turns too.
+  - **What it touches:** the scene only, after motion blur; the HUD, text, minimap and the gun in your hand stay as
+    they are, since they move with you.
+  - **Settings:** each player's `view.wormhole_tint_frac` (1 by default; 0 to 1, 0 for none; also in the menu as
+    `wormhole tint 0-1`) scales β, and `view.wormhole_tint_s` (1.5 s; 0 for none) sets the fade.
+- **Alternatives:**
+  - a flat cyan overlay, or a hue rotation (you asked for something like the relativistic effect on colour; with
+    them a red object would stay reddish);
+  - β = 0.10 or 0.12 (warm ground turned mint green rather than cyan);
+  - real beaming, D³ to D⁴ (1.6 times as bright in the middle, washing out the ground);
+  - aberration too: the scene squeezed toward the middle of the screen, as it would really be at that speed (left
+    out because you asked about colour, and the map's edge already warps the view);
+  - the player's real direction through the mouth instead of straight ahead (players nearly always walk in facing
+    it).
+- **Rationale:** you asked that going through a wormhole turn your whole screen kind of cyan, simulating the
+  relativistic effect on colour if possible.
+
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
 - **Choice:**
@@ -1091,6 +1122,59 @@
   rounded, chose "slanted tactical but with the neo background", slightly more translucent than the neon example,
   and asked for a reddish-orange pulse down the health bar when taking damage, a blue one down the energy bar while
   running, none on ammo, and a much more subtle one while regaining things such as energy.
+
+### D86. Ask before exiting on Escape
+
+- **Choice:**
+  - **When:** the release-mouse control (`Escape`) still frees a captured mouse first. Pressed again with the mouse
+    free, it no longer quits: it shows "Do you want to exit?" with its keys, `Return/Y: exit   Esc/N: stay`, as a
+    banner in the middle of the darkened view (the "YOU DIED" banner's mask, colours and 55% dimming). The prompt
+    comes before any other banner. Inside the menu, `Escape` still just closes the menu.
+  - **Keys:** `Return` or `Y` exits; `Escape` or `N` goes back, with the mouse still free. These keys work whatever
+    the key bindings say, like the menu's arrows. While the prompt shows, every other key, click and the wheel does
+    nothing, so the prompt and the menu never both take a key, and a click doesn't capture the mouse behind it.
+  - **Play:** while the prompt shows, held keys are ignored, as under the menu, so this player stands still. The
+    world goes on (a server's game doesn't pause).
+  - **Close button:** the window's close button still quits at once, without asking.
+  - **Code:** a small state machine, `exit_prompt.rs` (`ExitPrompt`), with its own unit tests; the window shows its
+    lines through `get_banner_lines`.
+- **Alternatives:**
+  - an OK button to click on screen (the keyboard is enough, and the overlay has no buttons yet);
+  - asking on the first `Escape` with the mouse captured (freeing the mouse is a common thing to do, so it would
+    ask too often);
+  - `Escape` exiting from the prompt, as a "press it again to confirm" (a player pressing `Escape` repeatedly
+    would quit by accident, which is what the prompt guards against).
+- **Rationale:** you asked that `Escape` ask "do you want to exit?" instead of exiting, exiting only if you press
+  OK.
+
+### D87. Consoles pulse faster and faster while being turned off
+
+- **Choice:**
+  - **Ramp:** a console that someone holds `E` on pulses 8^p times a second at progress p (the seconds held over
+    `consoles.hold_to_disable_s`, from 0 to 1): from the normal 1 Hz up to a frenzy of 8 Hz right before it turns
+    off. Each equal step of progress multiplies the rate by the same factor (2.8 Hz halfway, 6.5 Hz at 90%), so the
+    rate climbs fastest at the end. This replaces D53's fixed double rate.
+  - **Easing back:** when the hold stops (letting go, looking away, the holder hit or gone from the server), the
+    rate falls exponentially toward the normal rate with a 0.3 s time constant: about half the way in 0.2 s, and
+    within 4% after 1 s. A rate that has to rise (a new hold) follows the progress at once.
+  - **No jumps:** each console keeps its own phase, which adds up its rate frame by frame instead of using
+    sin(2π f t), so its light never jumps when the rate changes. The other consoles keep their 1 Hz pulse.
+  - **Same in every window:** each player in the server's snapshot carries one more byte, how far along their hold
+    is by the server's own timer (in 255ths). A window lights each console by the furthest of its holders, using
+    its own seconds held for itself. The snapshot's length check drops snapshots between a server and a client of
+    different versions, so both must be rebuilt.
+- **Alternatives:**
+  - a linear ramp, 1 to 8 Hz evenly (most of the change comes early and the end feels flat);
+  - 10 Hz at the top (at 60 fps only 6 frames a pulse, and more flicker);
+  - each window timing other players' holds from when it sees them start (no protocol change, but a player who
+    joins mid-hold or a lost snapshot would put windows out of step);
+  - the progress of each console in the game's state (32 bytes a snapshot instead of 1 per player);
+  - easing down linearly over exactly 1 s (each console would need the rate and time its easing started).
+- **Rationale:** you asked that a console's pulse speed up continuously, reaching a fervor right before it turns
+  off, and slow down smoothly instead of jumping when the turning off stops.
+- **Revisit if:** the flashing bothers anyone. 8 Hz is above the 3 flashes a second that accessibility guidelines
+  (WCAG 2.3.1) allow for large, bright or red flashes. A console fills little of the screen, but
+  `CONSOLE_FRENZY_PULSE_HZ` in `voxel_world.rs` lowers the top rate.
 
 ### D88. Lasers still stop on window glass (W-57)
 

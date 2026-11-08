@@ -32,9 +32,11 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 6] = [
     "rifle.recoil_settle_s",
     "respawn.delay_s",
 ];
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 7] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
+    "view.wormhole_tint_frac",
+    "view.wormhole_tint_s",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
     "hit_effects.red_frac",
@@ -181,13 +183,17 @@ pub struct MapEdgeSettings {
 }
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
-/// long motion smears, how strongly the view stretches near the map's edge, and the head bob.
+/// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
+/// blueshifts toward cyan just after going through a wormhole (0 to 1) and how long that takes to
+/// fade, and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
     pub look_rad_per_px: f64,
     pub motion_blur_s: f64,
     pub edge_stretch_frac: f64,
+    pub wormhole_tint_frac: f64,
+    pub wormhole_tint_s: f64,
     pub head_bob: HeadBobSettings,
 }
 
@@ -363,7 +369,8 @@ impl ServerSettings {
 
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
-    /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does.
+    /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
+    /// `view.wormhole_tint_frac` at most 1.
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
@@ -372,6 +379,13 @@ impl PerPlayerSettings {
             serde_yaml::from_str(text).map_err(|error| format!("settings {source}: {error}"))?;
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
+        if file.view.wormhole_tint_frac > 1.0 {
+            return Err(format!(
+                "settings {source}: view.wormhole_tint_frac must be at most 1, not {}",
+                file.view.wormhole_tint_frac
+            )
+            .into());
+        }
         Ok(PerPlayerSettings {
             keys: KeyBindings::FromNames(&file.keys, source)?,
             view: file.view,
@@ -420,6 +434,7 @@ mod tests {
     //! | Source | the built-in files, server settings sent as JSON, player settings the menu saved | `builtin_settings_read_and_survive_json`, `saved_player_settings_load_back` |
     //! | Keys | all present, one unknown, one missing | `builtin_settings_read_and_survive_json`, `unknown_and_missing_keys_fail` |
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
+    //! | Wormhole tint strength | 0 (with a fade of 0 s), between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -495,5 +510,23 @@ mod tests {
             .expect("a bad number fails")
             .to_string();
         assert!(error.contains("view.look_rad_per_px"), "{error}");
+    }
+
+    #[test]
+    fn wormhole_tint_takes_0_to_1() {
+        let none: String = BUILTIN_PLAYER_YAML
+            .replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0")
+            .replace("wormhole_tint_s: 1.5", "wormhole_tint_s: 0");
+        assert!(PerPlayerSettings::FromYaml(&none, "test").is_ok());
+        let half: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0.5");
+        assert!(PerPlayerSettings::FromYaml(&half, "test").is_ok());
+        let too_strong: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 1.5");
+        let error: String = PerPlayerSettings::FromYaml(&too_strong, "test")
+            .err()
+            .expect("a tint above 1 fails")
+            .to_string();
+        assert!(error.contains("view.wormhole_tint_frac"), "{error}");
     }
 }
