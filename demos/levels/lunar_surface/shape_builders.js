@@ -184,7 +184,7 @@ function build_lander() {
   return model;
 }
 
-function build_pylon(team) {
+function build_pylon(team, pylon_index) {
   const t = TEAMS[team], model = new ShapeModel(`${t.name} pylon`), half = 6;
   model.box(-half, 0, -half, half - 1, 0, half - 1, t.paint);
   model.box(-half + 1, 0, -half + 1, half - 2, 0, half - 2, MAT.PAD); model.shapes.at(-1).half_m[1] += 0.03;
@@ -197,7 +197,7 @@ function build_pylon(team) {
     const angle_rad = Math.PI / 2 + i * 2 * Math.PI / CONSOLES_PER_PYLON;
     const x = Math.floor(PYLON_CONSOLE_RADIUS_M * Math.cos(angle_rad)), z = Math.floor(PYLON_CONSOLE_RADIUS_M * Math.sin(angle_rad));
     model.cylinder([x + 0.5, 1.5, z + 0.5], 0.35, 0.5, MAT.METAL);
-    model.box(x, 2, z, x, 2, z, t.console + i);
+    model.box(x, 2, z, x, 2, z, t.console + pylon_index * CONSOLES_PER_PYLON + i);
     model.consoles.push([x + 0.5, 2.5, z + 0.5]);
   }
   for (const [x, z] of [[-half, -half], [half - 1, half - 1]]) {

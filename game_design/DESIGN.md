@@ -141,7 +141,7 @@ full health and energy. A player can't choose to respawn early.
 | Team | Blue | Blue | Purple | Red | Red |
 | Depth | 2 | 1 | 0 | 1 | 2 |
 | Theme | Dust (desert) planet | Snow planet | City, or space station | Dark forest planet | Lunar base in a crater |
-| Space | Hyperbolic | T² × ℝ | Inside a sphere | T² × ℝ | Hyperbolic, curvature radius 40 m |
+| Space | Hyperbolic | T² × ℝ | Inside a sphere | T² × ℝ | Hyperbolic, curvature radius 26.7 m (the map's 40 m, curved 1.5 times as much by `space.curvature_per_map_curvature`) |
 | Gravity | Down, onto the ground | Down | Outward, onto the sphere | Down | Down, onto the ground, ≈30 m/s² |
 | Warp objects | Yes | Yes | No | Yes | 1 black hole, 1 wormhole |
 | Size | Very large | Large | Smallest | Large | Very large: 256 m × 144 m playable |
@@ -287,6 +287,7 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | `Ctrl` (held) | Crouch: a lower view and half the walking speed |
 | Right button (held) | Aim: zoom in (more with the sniper rifle) and turn more slowly while held |
 | `F` (held) | Flashlight: a cone of light from the eye while held (other players don't see it yet) |
+| `V` | Switch between first person and a third-person view from slightly behind and above the character, which pulls in when a wall is behind it; shots still leave the eye toward the crosshair, and aiming looks from the eye |
 | Left click | Shoot, standing still or crouched (walking crouched too), not while walking upright, sprinting, in the air or deactivating a console (hold it for a weapon that fires while held, such as the rifle) |
 | Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |

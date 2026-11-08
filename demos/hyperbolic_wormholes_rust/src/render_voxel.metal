@@ -5,7 +5,10 @@
  * straight geodesic chords between warp objects, kick–drift–kick steps inside their reach, a voxel walk through each
  * structure in its Klein coordinates, the ground's folded {4,5} tiling, lunar-Lambert light with soft sun shadows, lamps,
  * earthshine, a thin haze, laser beams, the dust of shots into the ground, the zone walls, stars, a planet, spaceships
- * flying over and bloom. Everything here belongs to the `lunar` appearance style.
+ * flying over and bloom. Everything here belongs to the `lunar` appearance style. Under a reality bend (`bend.rs`)
+ * the rays and warp objects are in the bent world and every other thing stays in the map: each short chord of a ray
+ * is traced through the map between its ends' map points. render_voxel.rs compiles this file twice, with `HAS_BEND` 0
+ * for flat frames (the flat ray tracer, untouched) and 1 for bent ones.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread per pixel of the render size.
@@ -21,6 +24,7 @@ using namespace metal;
     constant float4 *means [[buffer(27)]], device const DustBurst *dust_bursts [[buffer(29)]], \
     device const DustParticle *dust_particles [[buffer(30)]], \
     texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]]
+#define HAS_BEND __HAS_BEND__
 
 constant int MAX_ITERATIONS = 240;
 constant int MAX_SHAPE_STEPS = 96;
@@ -222,6 +226,7 @@ constant float BEAM_HAZE_BRIGHTNESS = 0.45;
 constant float BEAM_HAZE_WHITENESS = 0.45;
 constant float BEAM_CORE_BRIGHTNESS = 1.6;
 constant float BEAM_CORE_WHITENESS = 0.9;
+constant float DARK_PYLON_GLOW_FRAC = 0.12;
 constant float BEAM_SPECKLE_STEPS = 1023.0;
 constant int THROWN_TINT_FIRST_BIT = 1;
 constant int THROWN_TINT_MASK = 3;
@@ -264,6 +269,13 @@ constant float GLOW_FLOOR = 1.0 / 1024.0;
 constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
 constant int REFINED_PIXELS_PER_CELL = 3;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
+constant int MAX_BENT_PIECES = 512;
+constant int MAX_BEND_HALVINGS = 8;
+constant float BEND_SAG_M = 0.02;
+constant float BEND_SAG_PIXELS = 0.5;
+constant float CHORD_SQ_PER_SAG_RADIUS = 8.0;
+constant float MIN_BEND_PIECE_M = 0.5;
+constant float MAX_BEND_PIECE_M = 8.0;
 constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
 constant int HULL_FIGHTER = 0;
 constant int HULL_RING_SHIP = 1;
@@ -360,9 +372,10 @@ struct ZoneWalls {
 
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
- * regions, flashlight, the spaceships, the dust (how many bursts and particles), the beams' speckle (the frame's
- * seed and the shares of speckled pixels painted black and turned white) and the zone walls (`zone_walls.rs`'s
- * `to_gpu`), as `render_voxel.rs` writes them.
+ * regions, flashlight, the reality bend's curvature per meter (0 when flat), edge radius and greatest height of any
+ * surface above or below the ground (meters), the spaceships, the dust (how many bursts and particles), the beams'
+ * speckle (the frame's seed and the shares of speckled pixels painted black and turned white) and the zone walls
+ * (`zone_walls.rs`'s `to_gpu`), as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -403,6 +416,7 @@ struct VoxelUniforms {
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
+    float4 bend;
     Spaceship spaceships[SPACESHIP_COUNT];
     int4 dust_counts;
     float4 beam_speckle;
@@ -419,7 +433,8 @@ struct Shape {
 
 /**
  * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
- * radius, its first shape and shape count, and R.
+ * radius, its first shape and shape count and whether its glowing shapes are dark (1: a pylon whose console is off),
+ * and R.
  */
 struct VoxelStructure {
     float4 rows[4];
@@ -1296,6 +1311,7 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     if (m == u.mat_hull || m == u.mat_pad) albedo *= 1.0 - PANEL_SEAM_DARKEN * step(PANEL_SEAM_EDGE, max(fract(uv.x * PANEL_SEAMS), fract(uv.y * PANEL_SEAMS)));
     float texel = has_texture(scene, m) ? 0.5 : hash_3d(float3(floor(uv * SUBTEXELS), block * TEXEL_SEED));
     albedo *= 1.0 + detail * (BLOCK_NOISE * (block - 0.5) + TEXEL_NOISE * (texel - 0.5));
+    if (glow > 0.5 && st.size.z != 0) { albedo *= DARK_PYLON_GLOW_FRAC; glow = 0.0; }
     if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM);
     Surface s = sample_surface(scene, m, albedo, g, u.curvature_radius_m / st.scale.x, dist_s, x, n, t, b, v);
     return light_surface(scene, s, x, n, v);
@@ -1552,6 +1568,177 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
     }
 }
 
+/** @brief `get_axis_distance_m` gives a point's distance in meters from the origin's vertical axis, in the origin's normal coordinates. @par Example @code float out_m = get_axis_distance_m(p, r); @endcode */
+static float get_axis_distance_m(float4 p, float r) { float n = length(p.xyz); return n > 0.0 ? length(p.xz) * r * asinh(n) / n : 0.0; }
+
+/**
+ * @brief `unbend_point` is bend.rs's `Bend::unbend_point` for curvature k per meter: the map point that the bent world
+ * shows at x, with x's polar angle `theta` about the bend sphere's centre (0 straight below it) and k times its
+ * distance from that centre, `k_rho`. It works in the origin's normal coordinates ξ (meters), in forms that stay exact as
+ * k goes to 0.
+ * @par Example
+ * @code
+ * float4 m = unbend_point(x, r, k, theta, k_rho);
+ * @endcode
+ */
+static float4 unbend_point(float4 x, float r, float k, thread float &theta, thread float &k_rho) {
+    float n = length(x.xyz);
+    float3 xi = n > 0.0 ? x.xyz * (r * asinh(n) / n) : float3(0.0);
+    float out_m = length(xi.xz), below = 1.0 - k * xi.y;
+    theta = atan2(k * out_m, below);
+    k_rho = length(float2(k * out_m, below));
+    float h_m = (2.0 * xi.y - k * dot(xi, xi)) / (1.0 + k_rho), scale = out_m > 0.0 ? theta / (k * out_m) : 0.0;
+    float3 q = float3(xi.x * scale, h_m, xi.z * scale);
+    float d = length(q) / r;
+    return d > 0.0 ? float4(q * (sinh(d) / (d * r)), cosh(d)) : float4(0.0, 0.0, 0.0, 1.0);
+}
+
+/**
+ * @brief `get_empty_s` gives how far (curvature units) a point of the bent world is from every point that unbends within
+ * the edge radius and below the greatest surface height, so from every surface (0 when it may be near one): the larger
+ * of its distances, in the origin's normal coordinates, from the cone of polar angles up to the edge's about the bend
+ * sphere's centre and from the outside of the sphere about that centre whose points unbend to that height; distances in
+ * those coordinates bound distances in H³ from below.
+ * @par Example
+ * @code
+ * float empty_s = get_empty_s(scene, x);
+ * @endcode
+ */
+static float get_empty_s(thread const Scene &scene, float4 x) {
+    float r = scene.u.curvature_radius_m, k = scene.u.bend.x, theta, k_rho;
+    unbend_point(x, r, k, theta, k_rho);
+    return max(k_rho * sin(clamp(theta - k * scene.u.bend.y, 0.0, M_PI_2_F)), 1.0 - k * scene.u.bend.z - k_rho) / (k * r);
+}
+
+/**
+ * @brief `trace_bent_chord` finds the first surface along the map's chord from m0 to m1, the map points at the ends of
+ * one short chord of a bent ray, testing every structure, and puts the map chord's start and unit tangent in `chord_x`
+ * and `chord_v`; a hit beyond the edge radius, which the bend cuts away, doesn't count. It returns the fraction of the
+ * chord before the hit (1 without one).
+ * @par Example
+ * @code
+ * float frac = trace_bent_chord(scene, m, mn, hit, glass_s, chord_x, chord_v);
+ * @endcode
+ */
+static float trace_bent_chord(thread const Scene &scene, float4 m0, float4 m1, thread Hit &hit, thread float &glass_s, thread float4 &chord_x,
+                              thread float4 &chord_v) {
+    float length_s = measure_gap(m0, m1);
+    chord_x = m0;
+    chord_v = normalize_tangent(m0, m1);
+    hit.s = length_s;
+    hit.mat = 0;
+    trace_scene(scene, m0, chord_v, -1, 0.0, float3(0.0), hit, glass_s);
+    if (hit.mat != 0 && get_axis_distance_m(geodesic_point(m0, chord_v, hit.s), scene.u.curvature_radius_m) > scene.u.bend.y) hit.mat = 0;
+    return hit.mat != 0 ? hit.s / max(length_s, TINY) : 1.0;
+}
+
+/**
+ * @brief `get_zone_wall_depth` gives the optical depth of a zone wall seen face-on (straight through its thickness) at
+ * point p, `distance_s` from the eye, for the wall on the edge at Fermi u `wall_u_m`: the map's opacity at the ground,
+ * falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`, then by `ZONE_WALL_TOP_FADE_FRAC` of that up
+ * to the wall's height above the ground, over whose top `ZONE_WALL_SOFT_TOP_FRAC` it fades out; it also fades out over
+ * the last `ZONE_WALL_END_M` before the boundary, and thins in the haze.
+ * @par Example
+ * @code
+ * float depth = get_zone_wall_depth(scene, p, -45.0, s);
+ * @endcode
+ */
+static float get_zone_wall_depth(thread const Scene &scene, float4 p, float wall_u_m, float distance_s) {
+    constant ZoneWalls &walls = scene.u.zone_walls;
+    float r = scene.u.curvature_radius_m;
+    float4 look = walls.look, boundary = walls.boundary;
+    float3 f = get_fermi(p, r);
+    float v_end_m = boundary.y > 0.0 ? boundary.y * sqrt(max(1.0 - (wall_u_m / boundary.x) * (wall_u_m / boundary.x), 0.0)) : NO_HIT_S;
+    float above_m = max(f.z - (scene.u.has_terrain != 0 ? terrain_height_m(scene, f.x, f.y) : 0.0), 0.0);
+    float height_frac = above_m / look.x;
+    float profile = mix(ZONE_WALL_BODY_FRAC * (1.0 - ZONE_WALL_TOP_FADE_FRAC * height_frac), 1.0, exp(-above_m / ZONE_WALL_FOOT_M))
+                  * (1.0 - smoothstep(1.0 - ZONE_WALL_SOFT_TOP_FRAC, 1.0, height_frac));
+    float haze_frac = 1.0 - exp(-max(distance_s * r - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
+    float opacity = look.y * profile * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y)) * (1.0 - HAZE_MAX_FRAC * haze_frac);
+    return -log(1.0 - opacity);
+}
+
+/**
+ * @brief `scan_zone_walls` adds the zone walls that the chord from x along v passes through before `s_end` (`travelled`
+ * from the eye) to `dust`, as glowing slabs in their team's colour. A wall is the slab within half its thickness of
+ * the plane straight above its zone's edge (`zone_walls.rs`, the plane's (n_z, -n_w) in `walls[i].xy`): |⟨x, n⟩| ≤ k
+ * with k the sinh of half the thickness over R. Along the chord ⟨x, n⟩ = cosh s (a + b tanh s), so the chord is
+ * inside where (b² + k²) τ² + 2ab τ + a² − k² ≤ 0 for τ = tanh s, an interval found in closed form. Of the face-on
+ * depth (`get_zone_wall_depth`), `ZONE_WALL_FACE_FRAC` is in the two faces, each crossed face adding its half,
+ * thicker as the chord grazes it (up to `ZONE_WALL_MAX_SLANT` times), and the rest is spread through the slab,
+ * summed along the chord at most `ZONE_WALL_SAMPLE_M` apart (and at most `ZONE_WALL_MAX_SAMPLES` samples): face-on
+ * the wall looks as thin as the map says, and seen at a slant its tint builds up with the way through it.
+ * @par Example
+ * @code
+ * scan_zone_walls(scene, x, v, s, t, dust);
+ * @endcode
+ */
+static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
+    constant ZoneWalls &walls = scene.u.zone_walls;
+    float r = scene.u.curvature_radius_m, thickness_m = walls.look.z;
+    float k = sinh(0.5 * thickness_m / r), t_end = tanh(min(s_end, FAR_S));
+    for (int i = 0; i < walls.counts.x; i++) {
+        float4 wall = walls.walls[i];
+        float a = x.z * wall.x + x.w * wall.y, b = v.z * wall.x + v.w * wall.y, discriminant = b * b - a * a + k * k;
+        if (discriminant < 0.0) continue;
+        float half_width = k * sqrt(discriminant) / (b * b + k * k), middle = -a * b / (b * b + k * k);
+        float t_in = middle - half_width, t_out = middle + half_width;
+        if (t_out <= 0.0 || t_in >= t_end) continue;
+        float s_in = clamp_atanh(max(t_in, 0.0)), s_out = clamp_atanh(min(t_out, t_end));
+        int sample_count = clamp(int(ceil((s_out - s_in) * r / ZONE_WALL_SAMPLE_M)), 1, ZONE_WALL_MAX_SAMPLES);
+        float ds = (s_out - s_in) / float(sample_count), depth = 0.0;
+        for (int j = 0; j < sample_count; j++) {
+            float s = s_in + (float(j) + 0.5) * ds;
+            depth += get_zone_wall_depth(scene, geodesic_point(x, v, s), wall.z, travelled + s) * ds * r / thickness_m;
+        }
+        depth *= 1.0 - ZONE_WALL_FACE_FRAC;
+        float face_cos_scale = rsqrt(1.0 + k * k);
+        if (t_in > 0.0) {
+            float slant = min(1.0 / max(abs(a * sinh(s_in) + b * cosh(s_in)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
+            depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_in), wall.z, travelled + s_in);
+        }
+        if (t_out < t_end) {
+            float slant = min(1.0 / max(abs(a * sinh(s_out) + b * cosh(s_out)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
+            depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_out), wall.z, travelled + s_out);
+        }
+        dust += float4(to_linear(wall.w > HALF_KIND ? RED_COLOR : BLUE_COLOR) * ZONE_WALL_BRIGHTNESS * depth, depth);
+    }
+}
+
+/**
+ * @brief `trace_bent_piece` traces the first piece of a bent ray from x along v, at most `s_max` long (curvature units),
+ * through the map, as voxel_world.rs's laser does: it halves the piece (up to `MAX_BEND_HALVINGS` times) while the map
+ * point of its midpoint strays from the midpoint of the map chord between its ends' map points by more than a tolerance
+ * times the stretch of unbending there, the tolerance being `BEND_SAG_M` or, once the ray has travelled `travelled`
+ * far enough, half a pixel's footprint there, whichever is larger. Then it traces that chord (`trace_bent_chord`, counting glass in `glass`, and adding the zone walls along it to
+ * `dust`) unless both ends unbend beyond the edge radius. It returns the piece's length, and in `frac` the fraction of it before a hit.
+ * @par Example
+ * @code
+ * float s = trace_bent_piece(scene, x, v, nominal_s, travelled, hit, glass, hx, hv, frac, dust);
+ * @endcode
+ */
+static float trace_bent_piece(thread const Scene &scene, float4 x, float4 v, float s_max, float travelled, thread Hit &hit, thread float &glass, thread float4 &chord_x,
+                              thread float4 &chord_v, thread float &frac, thread float4 &dust) {
+    float r = scene.u.curvature_radius_m, k = scene.u.bend.x, edge_rad = k * scene.u.bend.y, s = s_max, theta, theta_mid, theta_end, k_rho;
+    float4 m = unbend_point(x, r, k, theta, k_rho), mn;
+    float sag_m = max(BEND_SAG_M, BEND_SAG_PIXELS * scene.u.pixel_angle_rad * r * sinh(min(travelled, FAR_S)));
+    for (int i = 0;; i++) {
+        float4 xn = geodesic_point(x, v, s), xm = geodesic_point(x, v, 0.5 * s);
+        mn = unbend_point(xn * rsqrt(-mdot(xn, xn)), r, k, theta_end, k_rho);
+        float4 mm = unbend_point(xm * rsqrt(-mdot(xm, xm)), r, k, theta_mid, k_rho), mid = m + mn;
+        if (i == MAX_BEND_HALVINGS || measure_gap(mm, mid * rsqrt(-mdot(mid, mid))) * r * s <= sag_m * measure_gap(m, mn)) break;
+        s *= 0.5;
+    }
+    hit.mat = 0;
+    frac = 1.0;
+    if (theta > edge_rad && theta_end > edge_rad) return s;
+    float glass_s = NO_HIT_S;
+    frac = trace_bent_chord(scene, m, mn, hit, glass_s, chord_x, chord_v);
+    if (glass_s < hit.s) glass += 1.0;
+    if (scene.u.zone_walls.counts.x > 0) scan_zone_walls(scene, chord_x, chord_v, hit.s, travelled, dust);
+    return s;
+}
+
 /**
  * @brief `scan_dust` adds the dust of shots into the ground near a chord (x along v for s_end, `travelled` from the
  * eye) to `dust`: the summed colour times optical depth and the summed depth. Each burst the chord comes near is
@@ -1630,79 +1817,6 @@ static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end
 }
 
 /**
- * @brief `get_zone_wall_depth` gives the optical depth of a zone wall seen face-on (straight through its thickness) at
- * point p, `distance_s` from the eye, for the wall on the edge at Fermi u `wall_u_m`: the map's opacity at the ground,
- * falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`, then by `ZONE_WALL_TOP_FADE_FRAC` of that up
- * to the wall's height above the ground, over whose top `ZONE_WALL_SOFT_TOP_FRAC` it fades out; it also fades out over
- * the last `ZONE_WALL_END_M` before the boundary, and thins in the haze.
- * @par Example
- * @code
- * float depth = get_zone_wall_depth(scene, p, -45.0, s);
- * @endcode
- */
-static float get_zone_wall_depth(thread const Scene &scene, float4 p, float wall_u_m, float distance_s) {
-    constant ZoneWalls &walls = scene.u.zone_walls;
-    float r = scene.u.curvature_radius_m;
-    float4 look = walls.look, boundary = walls.boundary;
-    float3 f = get_fermi(p, r);
-    float v_end_m = boundary.y > 0.0 ? boundary.y * sqrt(max(1.0 - (wall_u_m / boundary.x) * (wall_u_m / boundary.x), 0.0)) : NO_HIT_S;
-    float above_m = max(f.z - (scene.u.has_terrain != 0 ? terrain_height_m(scene, f.x, f.y) : 0.0), 0.0);
-    float height_frac = above_m / look.x;
-    float profile = mix(ZONE_WALL_BODY_FRAC * (1.0 - ZONE_WALL_TOP_FADE_FRAC * height_frac), 1.0, exp(-above_m / ZONE_WALL_FOOT_M))
-                  * (1.0 - smoothstep(1.0 - ZONE_WALL_SOFT_TOP_FRAC, 1.0, height_frac));
-    float haze_frac = 1.0 - exp(-max(distance_s * r - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
-    float opacity = look.y * profile * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y)) * (1.0 - HAZE_MAX_FRAC * haze_frac);
-    return -log(1.0 - opacity);
-}
-
-/**
- * @brief `scan_zone_walls` adds the zone walls that the chord from x along v passes through before `s_end` (`travelled`
- * from the eye) to `dust`, as glowing slabs in their team's colour. A wall is the slab within half its thickness of
- * the plane straight above its zone's edge (`zone_walls.rs`, the plane's (n_z, -n_w) in `walls[i].xy`): |⟨x, n⟩| ≤ k
- * with k the sinh of half the thickness over R. Along the chord ⟨x, n⟩ = cosh s (a + b tanh s), so the chord is
- * inside where (b² + k²) τ² + 2ab τ + a² − k² ≤ 0 for τ = tanh s, an interval found in closed form. Of the face-on
- * depth (`get_zone_wall_depth`), `ZONE_WALL_FACE_FRAC` is in the two faces, each crossed face adding its half,
- * thicker as the chord grazes it (up to `ZONE_WALL_MAX_SLANT` times), and the rest is spread through the slab,
- * summed along the chord at most `ZONE_WALL_SAMPLE_M` apart (and at most `ZONE_WALL_MAX_SAMPLES` samples): face-on
- * the wall looks as thin as the map says, and seen at a slant its tint builds up with the way through it.
- * @par Example
- * @code
- * scan_zone_walls(scene, x, v, s, t, dust);
- * @endcode
- */
-static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
-    constant ZoneWalls &walls = scene.u.zone_walls;
-    float r = scene.u.curvature_radius_m, thickness_m = walls.look.z;
-    float k = sinh(0.5 * thickness_m / r), t_end = tanh(min(s_end, FAR_S));
-    for (int i = 0; i < walls.counts.x; i++) {
-        float4 wall = walls.walls[i];
-        float a = x.z * wall.x + x.w * wall.y, b = v.z * wall.x + v.w * wall.y, discriminant = b * b - a * a + k * k;
-        if (discriminant < 0.0) continue;
-        float half_width = k * sqrt(discriminant) / (b * b + k * k), middle = -a * b / (b * b + k * k);
-        float t_in = middle - half_width, t_out = middle + half_width;
-        if (t_out <= 0.0 || t_in >= t_end) continue;
-        float s_in = clamp_atanh(max(t_in, 0.0)), s_out = clamp_atanh(min(t_out, t_end));
-        int sample_count = clamp(int(ceil((s_out - s_in) * r / ZONE_WALL_SAMPLE_M)), 1, ZONE_WALL_MAX_SAMPLES);
-        float ds = (s_out - s_in) / float(sample_count), depth = 0.0;
-        for (int j = 0; j < sample_count; j++) {
-            float s = s_in + (float(j) + 0.5) * ds;
-            depth += get_zone_wall_depth(scene, geodesic_point(x, v, s), wall.z, travelled + s) * ds * r / thickness_m;
-        }
-        depth *= 1.0 - ZONE_WALL_FACE_FRAC;
-        float face_cos_scale = rsqrt(1.0 + k * k);
-        if (t_in > 0.0) {
-            float slant = min(1.0 / max(abs(a * sinh(s_in) + b * cosh(s_in)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
-            depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_in), wall.z, travelled + s_in);
-        }
-        if (t_out < t_end) {
-            float slant = min(1.0 / max(abs(a * sinh(s_out) + b * cosh(s_out)) * face_cos_scale, TINY), ZONE_WALL_MAX_SLANT);
-            depth += 0.5 * ZONE_WALL_FACE_FRAC * slant * get_zone_wall_depth(scene, geodesic_point(x, v, s_out), wall.z, travelled + s_out);
-        }
-        dust += float4(to_linear(wall.w > HALF_KIND ? RED_COLOR : BLUE_COLOR) * ZONE_WALL_BRIGHTNESS * depth, depth);
-    }
-}
-
-/**
  * @brief `back_to_reach` moves a ray that has just left warp w's reach (by up to one step) back along its straight line
  * to the reach's sphere, so that an escaping ray's direction is carried to the eye from where its bending ended rather
  * than from wherever its last step happened to end, which jumps between neighbouring rays.
@@ -1725,7 +1839,11 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * @brief `trace_ray` traces a ray backwards from the eye through a point of the image (in pixels from its top left
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
  * surface, the sky or a horizon. After `LATE_STEP_COUNT` iterations (rays winding near a throat or the black hole,
- * which land in the lens's most compressed, aliased images) its bent steps are three times longer.
+ * which land in the lens's most compressed, aliased images) its bent steps are three times longer. With `HAS_BEND` the
+ * ray travels the bent world in pieces (`trace_bent_piece`) between warp objects and within its bent steps, crosses
+ * empty space (the void beyond the edge, the air high above the ground) in long untraced strides (`get_empty_s`), and
+ * reaches the sky once it is past every surface and
+ * moving away from the origin.
  * @par Example
  * @code
  * VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
@@ -1753,6 +1871,11 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float4 gradient = float4(0.0);
     float3 local = float3(0.0);
     bool has_gradient = false;
+#if HAS_BEND
+    float k = u.bend.x, sky_w = cosh((u.bend.y + u.bend.z) / r);
+    float nominal_s = clamp(sqrt(CHORD_SQ_PER_SAG_RADIUS * BEND_SAG_M / k), MIN_BEND_PIECE_M, MAX_BEND_PIECE_M) / r;
+    int bent_piece_count = 0;
+#endif
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         if (inside < 0) {
             float s_end = FAR_S;
@@ -1763,6 +1886,25 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
                 float s_in = max(clamp_atanh(b / a) - acosh(reach_cosh * rsqrt(max(closest_sq, 1.0))), 0.0);
                 if (s_in < s_end) { s_end = s_in; entering = w; }
             }
+#if HAS_BEND
+            while (s_end > 0.0 && bent_piece_count++ < MAX_BENT_PIECES) {
+                if (entering < 0 && x.w > sky_w && v.w > 0.0) { outcome = OUTCOME_SKY; break; }
+                float empty_s = get_empty_s(scene, x), s = min(empty_s, s_end), frac = 1.0;
+                float4 hx = x, hv = v;
+                if (empty_s <= nominal_s) s = trace_bent_piece(scene, x, v, min(nominal_s, s_end), travelled, hit, glass, hx, hv, frac, dust);
+                if (u.beam_count > 0) scan_beams(scene, x, v, s * frac, travelled, core, halo, code, speckle);
+                if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
+                float4 xn = geodesic_point(x, v, s);
+                v = normalize_tangent(xn * rsqrt(-mdot(xn, xn)), geodesic_tangent(x, v, s));
+                x = xn * rsqrt(-mdot(xn, xn));
+                travelled += s;
+                s_end -= s;
+            }
+            if (outcome == OUTCOME_SKY && last_warp >= 0) back_to_reach(scene, last_warp, x, v);
+            if (s_end > 0.0 || outcome != OUTCOME_LOST) break;
+            inside = entering;
+            continue;
+#endif
             hit.s = s_end;
             hit.mat = 0;
             float glass_s = NO_HIT_S;
@@ -1790,12 +1932,24 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         hit.s = ds;
         hit.mat = 0;
         float glass_s = NO_HIT_S;
+#if HAS_BEND
+        float done = 0.0, frac = 1.0;
+        float4 hx = x, hv = v;
+        while (done < ds && hit.mat == 0 && bent_piece_count++ < MAX_BENT_PIECES) {
+            float4 xa = geodesic_point(x, v, done);
+            float piece = trace_bent_piece(scene, xa * rsqrt(-mdot(xa, xa)), geodesic_tangent(x, v, done), ds - done, travelled + done, hit, glass, hx, hv, frac, dust);
+            done += piece * frac;
+        }
+        if (u.beam_count > 0) scan_beams(scene, x, v, min(done, ds), travelled, core, halo, code, speckle);
+        if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = hx; hit_v = hv; hit_travelled = travelled; break; }
+#else
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
         if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+#endif
         float4 xn = geodesic_point(x, v, ds), vn = geodesic_tangent(x, v, ds);
         x = xn * rsqrt(-mdot(xn, xn));
         v = normalize_tangent(x, vn);
