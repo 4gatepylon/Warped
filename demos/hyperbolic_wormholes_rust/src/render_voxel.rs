@@ -25,7 +25,10 @@ use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
 use crate::mesh::MeshModel;
 use crate::net::TEAM_NAMES;
-use crate::render_mesh::{MeshGpu, NO_MESH, get_mesh_roots};
+use crate::render_mesh::{
+    FIRST_AVATAR_ROOT_CODE, GpuNode, GpuTriangle, MeshGpu, NO_MESH, get_first_materials,
+    get_mesh_roots, pack_avatar_meshes,
+};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
@@ -46,6 +49,7 @@ const UNIFORMS_BUFFER_INDEX: usize = 16;
 const SCENE_BUFFER_COUNT: usize = 10;
 const MEANS_BUFFER_INDEX: usize = 27;
 const DUST_BUFFER_INDICES: [usize; 2] = [29, 30];
+const AVATAR_BUFFER_INDICES: [usize; 2] = [8, 10];
 const HAND_LIGHT_BUFFER_INDEX: usize = 28;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
@@ -210,6 +214,8 @@ pub struct VoxelFrame {
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
     meshes: Arc<Vec<MeshModel>>,
+    avatar_triangles: Vec<GpuTriangle>,
+    avatar_nodes: Vec<GpuNode>,
 }
 
 /// `get_beacon_beams` gives each team's beacon beam: from the top of the model of the structure
@@ -346,6 +352,9 @@ impl VoxelFrame {
     ) -> VoxelFrame {
         let r: f64 = world.r;
         let mesh_roots: Vec<i32> = get_mesh_roots(&world.meshes);
+        let body_first_material: i32 = get_first_materials(&world.meshes)[world.body_mesh];
+        let (avatar_triangles, avatar_nodes, avatar_roots) =
+            pack_avatar_meshes(&world.avatar_meshes, body_first_material);
         let structures: Vec<GpuStructure> = world
             .structures
             .iter()
@@ -358,7 +367,11 @@ impl VoxelFrame {
                     size: [
                         s.first_shape as i32,
                         s.shape_count as i32,
-                        s.mesh.map_or(NO_MESH, |m| mesh_roots[m]),
+                        match (s.mesh, s.avatar_mesh) {
+                            (Some(m), _) => mesh_roots[m],
+                            (None, Some(a)) => FIRST_AVATAR_ROOT_CODE - avatar_roots[a],
+                            (None, None) => NO_MESH,
+                        },
                         i32::from(
                             s.shape_count > 0
                                 && world
@@ -555,6 +568,8 @@ impl VoxelFrame {
             dust_bursts,
             dust_particles,
             meshes: Arc::clone(&world.meshes),
+            avatar_triangles,
+            avatar_nodes,
         }
     }
 
@@ -727,7 +742,9 @@ impl VoxelGpu {
             adaptive: AdaptivePipelines::FromLibrary(device, &library)?,
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
-            buffers: (0..SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len())
+            buffers: (0..SCENE_BUFFER_COUNT
+                + DUST_BUFFER_INDICES.len()
+                + AVATAR_BUFFER_INDICES.len())
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
             textures: SurfaceTextures::Load(device)?,
@@ -823,6 +840,16 @@ impl VoxelGpu {
                 self.buffers[SCENE_BUFFER_COUNT + k].write(device, bytes)?;
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
             unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, DUST_BUFFER_INDICES[k]) };
+        }
+        let avatars: [&[u8]; AVATAR_BUFFER_INDICES.len()] = [
+            as_bytes(&frame.avatar_triangles),
+            as_bytes(&frame.avatar_nodes),
+        ];
+        for (k, bytes) in avatars.iter().enumerate() {
+            let slot: usize = SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len() + k;
+            let buffer: &ProtocolObject<dyn MTLBuffer> = self.buffers[slot].write(device, bytes)?;
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
+            unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, AVATAR_BUFFER_INDICES[k]) };
         }
         let (width, height) = frame.get_render_size();
         if self

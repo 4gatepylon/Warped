@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::avatar_model::AvatarClip;
 use crate::dust::DustCloud;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
@@ -324,7 +325,8 @@ pub fn pack_shared_voxel_view(
             )
         })
         .collect();
-    let shared: VoxelWorld = world.with_avatars(&bodies, &colors);
+    let poses: Vec<(AvatarClip, f64)> = vec![(AvatarClip::Idle, 0.0); bodies.len()];
+    let shared: VoxelWorld = world.with_posed_avatars(&bodies, &poses, &colors);
     let mut beams: Vec<(Vec<BeamSegment>, u32)> = Vec::new();
     let (mut shot, mut hit_player_id, mut spot, mut is_head_hit) = (None, None, None, false);
     if let Some(aim) = laser_aim {

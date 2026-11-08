@@ -4,7 +4,8 @@
 //! the map (collisions, stepping up blocks, gravity, jumping, flying, and moving along light paths
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
-//! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
+//! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::with_posed_avatars`,
+//! `VoxelWorld::light_consoles`,
 //! `VoxelWorld::find_aimed_material`, `VoxelWorld::is_sunlit`, `Console`, `VoxelPlayer`, `StepReport`,
 //! `Shot`, `BeamSegment`.
 //!
@@ -14,6 +15,7 @@ use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent, transport_from_centre,
@@ -86,6 +88,7 @@ pub const LOOK_RAD_PER_PX: f64 = 0.0025;
 const MAX_PITCH_RAD: f64 = 1.55;
 const TINY: f64 = 1e-12;
 const AVATAR_HEAD_FROM_M: f64 = 1.5;
+const AVATAR_HEIGHT_M: f64 = 2.0;
 const AVATAR_SHAPES: [Shape; 2] = [
     Shape {
         kind: ShapeKind::Cylinder,
@@ -106,7 +109,9 @@ const AVATAR_SHAPES: [Shape; 2] = [
 ];
 
 /// `VoxelStructure` is one structure: its frame (and inverse), its grid, where its cells start in
-/// the voxel bytes, and its bounding sphere (radius in curvature units).
+/// the voxel bytes, its map model (`mesh`, which lasers hit) or posed body (`avatar_mesh`, an index
+/// into the world's `avatar_meshes`, only drawn: lasers hit its shapes), and its bounding sphere
+/// (radius in curvature units).
 #[derive(Clone)]
 pub struct VoxelStructure {
     pub name: String,
@@ -114,6 +119,7 @@ pub struct VoxelStructure {
     pub first_shape: usize,
     pub shape_count: usize,
     pub mesh: Option<usize>,
+    pub avatar_mesh: Option<usize>,
     pub centre: DVec4,
     pub radius: f64,
 }
@@ -265,7 +271,8 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
 
 /// `VoxelWorld` is a whole voxel map, ready to trace and to walk on, with the eye of the flashlight
 /// shining this frame and the time the sky shows (`sky_time_s`: the UTC clock in the window, 0 for
-/// fixed views; `spaceships.rs`).
+/// fixed views; `spaceships.rs`). `body` is the players' body model, whose materials are map model
+/// `body_mesh` (with no triangles), and `avatar_meshes` are this frame's posed bodies.
 #[derive(Clone)]
 pub struct VoxelWorld {
     pub name: String,
@@ -273,6 +280,9 @@ pub struct VoxelWorld {
     pub structures: Vec<VoxelStructure>,
     pub shapes: Vec<Shape>,
     pub meshes: Arc<Vec<MeshModel>>,
+    pub body: Arc<AvatarModel>,
+    pub body_mesh: usize,
+    pub avatar_meshes: Vec<Arc<MeshModel>>,
     pub warps: Vec<VoxelWarp>,
     pub lights: Vec<(DVec4, [f32; 3], f64)>,
     pub palette: Vec<[f32; 4]>,
@@ -533,6 +543,7 @@ fn make_structure(
         first_shape,
         shape_count: shapes.len(),
         mesh: mesh.map(|(index, _)| index),
+        avatar_mesh: None,
         centre: frame * centre_local,
         radius: radius + BOUND_MARGIN_M / r,
     }
@@ -704,6 +715,13 @@ impl VoxelWorld {
             let boundary = regions.boundary.as_ref()?;
             Some([edge_m, boundary.u_m, boundary.v_m])
         });
+        let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
+        let body_mesh: usize = meshes.len();
+        meshes.push(MeshModel {
+            triangles: Vec::new(),
+            nodes: Vec::new(),
+            materials: body.get_materials().to_vec(),
+        });
         let mut world: VoxelWorld = VoxelWorld {
             name: map.name.clone(),
             r,
@@ -715,6 +733,9 @@ impl VoxelWorld {
             structures,
             shapes,
             meshes: Arc::new(meshes),
+            body: Arc::new(body),
+            body_mesh,
+            avatar_meshes: Vec::new(),
             warps,
             lights: map
                 .lights
@@ -784,35 +805,79 @@ impl VoxelWorld {
     }
 
     /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame
-    /// and an avatar colour index): a 1 × 4 grid of half-meter cells in its own material, so it is
-    /// drawn, lensed and hit by lasers like any structure.
+    /// and an avatar colour index): a cylinder and a head in its own material, so it is lensed and
+    /// hit by lasers like any structure, and drawn as such.
     ///
-    /// Example: `let shared = world.with_avatars(&[(feet, 2)]);`
+    /// Example: `let shared = world.with_avatars(&[(feet, 2)], &colors);`
     pub fn with_avatars(&self, bodies: &[(DMat4, usize)], colors: &[[f32; 3]]) -> VoxelWorld {
         let mut shared: VoxelWorld = self.clone();
         for &(feet, color_index) in bodies {
-            let material: usize = AVATAR_FIRST_MATERIAL + color_index % colors.len();
-            let color: [f32; 3] = colors[color_index % colors.len()];
-            shared.palette[material] = [color[0], color[1], color[2], 0.0];
-            let first_shape: usize = shared.shapes.len();
-            shared.shapes.extend(AVATAR_SHAPES.map(|shape| Shape {
-                material: material as u8,
-                ..shape
-            }));
-            let body: &[Shape] = &shared.shapes[first_shape..];
-            let avatar: VoxelStructure =
-                make_structure("player", feet, first_shape, body, None, self.r);
-            shared.structures.push(avatar);
-            for warp in &mut shared.warps {
-                let k: usize = shared.structures.len() - 1;
-                if get_distance(shared.structures[k].centre, warp.centre)
-                    < shared.structures[k].radius + warp.reach
-                {
-                    warp.list.push(k);
-                }
-            }
+            shared.add_avatar(feet, color_index, colors, None);
         }
         shared
+    }
+
+    /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
+    /// in `poses` (a clip and a time in it, one per body); lasers still hit the shapes.
+    ///
+    /// Example: `let shared = world.with_posed_avatars(&[(feet, 2)], &[(AvatarClip::Idle, 0.0)], &colors);`
+    pub fn with_posed_avatars(
+        &self,
+        bodies: &[(DMat4, usize)],
+        poses: &[(AvatarClip, f64)],
+        colors: &[[f32; 3]],
+    ) -> VoxelWorld {
+        assert_eq!(
+            bodies.len(),
+            poses.len(),
+            "with_posed_avatars: {} bodies but {} poses",
+            bodies.len(),
+            poses.len()
+        );
+        let mut shared: VoxelWorld = self.clone();
+        for (&(feet, color_index), &(clip, time_s)) in bodies.iter().zip(poses) {
+            let posed: MeshModel = self.body.make_posed(clip, time_s);
+            shared.add_avatar(feet, color_index, colors, Some(posed));
+        }
+        shared
+    }
+
+    /// `add_avatar` adds a body standing on `feet` in avatar colour `color_index`, drawn as
+    /// `posed` if given, and puts it in the list of every warp it comes within reach of.
+    ///
+    /// Example: `shared.add_avatar(feet, 2, &colors, None);`
+    fn add_avatar(
+        &mut self,
+        feet: DMat4,
+        color_index: usize,
+        colors: &[[f32; 3]],
+        posed: Option<MeshModel>,
+    ) {
+        let material: usize = AVATAR_FIRST_MATERIAL + color_index % colors.len();
+        let color: [f32; 3] = colors[color_index % colors.len()];
+        self.palette[material] = [color[0], color[1], color[2], 0.0];
+        let first_shape: usize = self.shapes.len();
+        self.shapes.extend(AVATAR_SHAPES.map(|shape| Shape {
+            material: material as u8,
+            ..shape
+        }));
+        let body: &[Shape] = &self.shapes[first_shape..];
+        let drawn: Option<(usize, &MeshModel)> = posed
+            .as_ref()
+            .map(|model| (self.avatar_meshes.len(), model));
+        let mut avatar: VoxelStructure =
+            make_structure("player", feet, first_shape, body, drawn, self.r);
+        avatar.avatar_mesh = avatar.mesh.take();
+        if let Some(model) = posed {
+            self.avatar_meshes.push(Arc::new(model));
+        }
+        let k: usize = self.structures.len();
+        for warp in &mut self.warps {
+            if get_distance(avatar.centre, warp.centre) < avatar.radius + warp.reach {
+                warp.list.push(k);
+            }
+        }
+        self.structures.push(avatar);
     }
 
     /// `light_consoles` sets each console's light at `time_s` (seconds, never going back): dark

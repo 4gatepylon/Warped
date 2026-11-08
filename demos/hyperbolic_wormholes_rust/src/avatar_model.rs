@@ -10,6 +10,8 @@
 //! Must know:
 //! - A posed model is in its structure's chart, in meters: feet at the origin, up +y, facing -z
 //!   (the way a player looks), and its triangles' materials index `get_materials`.
+//! - The ray tracer draws every triangle opaque, so `Load` leaves out see-through (`BLEND`)
+//!   primitives: the robot's face glass, which would hide its glowing eyes.
 
 use std::path::{Path, PathBuf};
 
@@ -220,7 +222,10 @@ impl AvatarModel {
             let mesh = node
                 .mesh()
                 .ok_or("avatar_model: a skinned node has no mesh".to_string())?;
-            for primitive in mesh.primitives() {
+            for primitive in mesh
+                .primitives()
+                .filter(|p| p.material().alpha_mode() != gltf::material::AlphaMode::Blend)
+            {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
                 let first: usize = vertices.len();
                 let missing =
@@ -492,24 +497,20 @@ mod tests {
         let standing: MeshModel = body.make_posed(AvatarClip::Idle, 0.0);
         let (lo, hi) = get_bounds(&standing);
         assert!((hi.y - lo.y - HEIGHT_M as f32).abs() < TOLERANCE_M && lo.y.abs() < TOLERANCE_M);
-        let screen: usize = body
+        let glow: usize = body
             .get_materials()
             .iter()
-            .position(|m| {
-                m.images[0]
-                    .as_ref()
-                    .is_some_and(|path| path.to_string_lossy().contains("Screen"))
-            })
-            .expect("the face's screen");
-        let screen_z_m: Vec<f32> = standing
+            .position(|m| m.emissive.iter().sum::<f32>() > 0.0)
+            .expect("the glowing eyes");
+        let eyes_z_m: Vec<f32> = standing
             .triangles
             .iter()
-            .filter(|t| t.material == screen)
+            .filter(|t| t.material == glow && t.p[0].y > 0.8 * HEIGHT_M as f32)
             .map(|t| t.p[0].z)
             .collect();
         assert!(
-            screen_z_m.iter().sum::<f32>() < 0.0,
-            "the face looks toward +z"
+            !eyes_z_m.is_empty() && eyes_z_m.iter().sum::<f32>() < 0.0,
+            "the eyes look toward +z"
         );
         let lying: MeshModel = body.make_posed(AvatarClip::Death, 10.0);
         let (lo, hi) = get_bounds(&lying);

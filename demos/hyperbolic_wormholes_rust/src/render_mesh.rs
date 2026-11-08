@@ -2,13 +2,19 @@
 //! `render_voxel.metal`: every model's triangles, BVH nodes and materials in shared buffers, and
 //! their base colour, metallic-roughness, normal and emissive images in one texture array each.
 //!
-//! Interface: `MeshGpu::New`, `MeshGpu`, `get_mesh_roots`, `NO_MESH`.
+//! Each frame's posed player bodies (`voxel_world.rs`'s `avatar_meshes`) are packed apart
+//! (`pack_avatar_meshes`) into buffers of their own, whose roots a structure gives as
+//! `FIRST_AVATAR_ROOT_CODE - root`.
+//!
+//! Interface: `MeshGpu::New`, `MeshGpu`, `get_mesh_roots`, `get_first_materials`,
+//! `pack_avatar_meshes`, `GpuTriangle`, `GpuNode`, `NO_MESH`, `FIRST_AVATAR_ROOT_CODE`.
 //!
 //! Example: `let gpu = MeshGpu::New(&device, &world.meshes)?;`
 
 use std::error::Error;
 use std::path::PathBuf;
 use std::ptr::NonNull;
+use std::sync::Arc;
 
 use image::RgbaImage;
 use objc2::rc::Retained;
@@ -23,6 +29,7 @@ use crate::voxel_textures::{make_array, make_mips};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub const NO_MESH: i32 = -1;
+pub const FIRST_AVATAR_ROOT_CODE: i32 = -2;
 const TEXTURE_SIDE_PX: u32 = 1024;
 const BUFFER_INDICES: [usize; 3] = [0, 1, 7];
 const FIRST_TEXTURE_INDEX: usize = 12;
@@ -37,7 +44,7 @@ const SLOT_FORMATS: [objc2_metal::MTLPixelFormat; 4] = [
 /// unused...).
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct GpuTriangle {
+pub struct GpuTriangle {
     p: [[f32; 4]; 3],
     n: [[f32; 4]; 3],
     info: [i32; 4],
@@ -47,7 +54,7 @@ struct GpuTriangle {
 /// its triangle count (0 for an inner node) in `hi.w`.
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct GpuNode {
+pub struct GpuNode {
     lo: [f32; 4],
     hi: [f32; 4],
 }
@@ -84,6 +91,65 @@ pub fn get_mesh_roots(meshes: &[MeshModel]) -> Vec<i32> {
         .collect()
 }
 
+/// `get_first_materials` gives where each model's materials start in the uploaded material buffer.
+///
+/// Example: `let firsts = get_first_materials(&world.meshes);`
+pub fn get_first_materials(meshes: &[MeshModel]) -> Vec<i32> {
+    meshes
+        .iter()
+        .scan(0, |first, model| {
+            let start: i32 = *first;
+            *first += model.materials.len() as i32;
+            Some(start)
+        })
+        .collect()
+}
+
+/// `pack_model` appends `model`'s triangles and nodes to `triangles` and `nodes`, its root at
+/// `nodes.len()` and its materials from `first_material`.
+///
+/// Example: `pack_model(&model, 0, &mut triangles, &mut nodes);`
+fn pack_model(
+    model: &MeshModel,
+    first_material: i32,
+    triangles: &mut Vec<GpuTriangle>,
+    nodes: &mut Vec<GpuNode>,
+) {
+    let (first_triangle, root) = (triangles.len() as f32, nodes.len() as f32);
+    triangles.extend(model.triangles.iter().map(|t| GpuTriangle {
+        p: [0, 1, 2].map(|i| t.p[i].extend(t.uv[i].x).to_array()),
+        n: [0, 1, 2].map(|i| t.n[i].extend(t.uv[i].y).to_array()),
+        info: [first_material + t.material as i32, 0, 0, 0],
+    }));
+    nodes.extend(model.nodes.iter().map(|node| {
+        let first: f32 = if node.count == 0 {
+            root
+        } else {
+            first_triangle
+        };
+        GpuNode {
+            lo: node.lo.extend(first + node.first as f32).to_array(),
+            hi: node.hi.extend(node.count as f32).to_array(),
+        }
+    }));
+}
+
+/// `pack_avatar_meshes` packs this frame's posed bodies, whose materials start at
+/// `first_material`, giving their triangles, nodes and each body's root node.
+///
+/// Example: `let (triangles, nodes, roots) = pack_avatar_meshes(&world.avatar_meshes, 12);`
+pub fn pack_avatar_meshes(
+    meshes: &[Arc<MeshModel>],
+    first_material: i32,
+) -> (Vec<GpuTriangle>, Vec<GpuNode>, Vec<i32>) {
+    let (mut triangles, mut nodes, mut roots) = (Vec::new(), Vec::new(), Vec::new());
+    for model in meshes {
+        roots.push(nodes.len() as i32);
+        pack_model(model, first_material, &mut triangles, &mut nodes);
+    }
+    (triangles, nodes, roots)
+}
+
 /// `make_buffer` copies `items` into a new shared buffer.
 ///
 /// Example: `let buffer = make_buffer(device, &nodes)?;`
@@ -115,24 +181,8 @@ impl MeshGpu {
     pub fn New(device: &ProtocolObject<dyn MTLDevice>, meshes: &[MeshModel]) -> Result<MeshGpu> {
         let (mut triangles, mut nodes, mut materials) = (Vec::new(), Vec::new(), Vec::new());
         let mut slot_images: [Vec<PathBuf>; 4] = Default::default();
-        for (model, root) in meshes.iter().zip(get_mesh_roots(meshes)) {
-            let (first_triangle, first_material) = (triangles.len() as f32, materials.len() as i32);
-            triangles.extend(model.triangles.iter().map(|t| GpuTriangle {
-                p: [0, 1, 2].map(|i| t.p[i].extend(t.uv[i].x).to_array()),
-                n: [0, 1, 2].map(|i| t.n[i].extend(t.uv[i].y).to_array()),
-                info: [first_material + t.material as i32, 0, 0, 0],
-            }));
-            nodes.extend(model.nodes.iter().map(|node| {
-                let first: f32 = if node.count == 0 {
-                    root as f32
-                } else {
-                    first_triangle
-                };
-                GpuNode {
-                    lo: node.lo.extend(first + node.first as f32).to_array(),
-                    hi: node.hi.extend(node.count as f32).to_array(),
-                }
-            }));
+        for model in meshes {
+            pack_model(model, materials.len() as i32, &mut triangles, &mut nodes);
             for m in &model.materials {
                 let layers: [i32; 4] = std::array::from_fn(|slot| {
                     m.images[slot].as_ref().map_or(NO_MESH, |path| {
