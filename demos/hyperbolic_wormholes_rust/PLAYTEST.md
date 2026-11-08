@@ -41,8 +41,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `make serve-game` runs only the server, without a window, and prints this computer's address and the exact
   `make join-game` commands to give the others (`SERVER=127.0.0.1` on the same computer). Leave it running in its
   terminal; `Ctrl-C` ends the game.
-- To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight), copy
-  `server_settings.yaml`, change its numbers, and start the server with it:
+- To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight, thrown
+  wormholes), copy `server_settings.yaml`, change its numbers, and start the server with it:
   `make serve-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml`.
   Everyone who joins plays by the server's settings.
 - Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`. The
@@ -130,8 +130,8 @@ a little from the crosshair: the sniper's by a random few milliradians, the rifl
 during a burst (`DECISIONS.md` D89). A shot into the ground, from either gun and anyone, throws up dust and a puff
 of mist that fade within 2 s. `E` (held)
 turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu (`Q`/`E`
-turn between your settings, a map of the whole level with you on it, and SCORES: how many players there are and each
-one's team, kills and deaths in this game). There is no key to respawn:
+turn between your settings, a map of the whole level with you on it, SCORES: how many players there are and each
+one's team, kills and deaths in this game, and CREDITS: where the game's assets come from). There is no key to respawn:
 players come back only after being eliminated.
 
 ## Known caveats

@@ -9,7 +9,7 @@
 //! Interface: `get_spawn_player`, `SharedView`, `pack_shared_view`, `run_bot`,
 //! `SharedVoxelView`, `pack_shared_voxel_view`, `run_voxel_bot`.
 //!
-//! Example: `let view = multiplayer::pack_shared_view(&world, frame, Some(frame), &client.players, (1280, 800), 0.0);`
+//! Example: `let view = multiplayer::pack_shared_view(&world, frame, Some(frame), &client.players, &[], (1280, 800), 0.0);`
 
 use std::error::Error;
 use std::time::{Duration, Instant};
@@ -25,6 +25,7 @@ use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
 use crate::render_voxel::VoxelFrame;
 use crate::scene_data::{Beam, SceneData};
+use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
     BeamSegment, LOOK_RAD_PER_PX, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
 };
@@ -97,24 +98,27 @@ fn get_avatar_frame(world: &World, eye: DMat4) -> DMat4 {
 }
 
 /// `SharedView` is one frame's packed scene with the other players and every laser, this
-/// player's laser report, and the player its laser hit, if any.
+/// player's laser report, the player its laser hit, if any, and the marker it hit (an index into
+/// the markers given), if any.
 pub struct SharedView {
     pub data: SceneData,
     pub report: Option<LaserReport>,
     pub hit_player_id: Option<u32>,
+    pub hit_marker: Option<usize>,
 }
 
-/// `pack_shared_view` packs the scene seen from `frame` with a box for each of `players`, this
-/// player's laser (if on, fired from `laser_aim`: `frame` turned by the shot's noise) and the lasers
-/// of the players who have theirs on, each traced through the same scene, so beams stop at players
-/// and bend through wormholes.
+/// `pack_shared_view` packs the scene seen from `frame` with a box for each of `players` and a
+/// glowing cube for each of `markers`, this player's laser (if on, fired from `laser_aim`: `frame`
+/// turned by the shot's noise) and the lasers of the players who have theirs on, each traced
+/// through the same scene, so beams stop at players and bend through wormholes.
 ///
-/// Example: `let view = multiplayer::pack_shared_view(&world, frame, Some(frame), &players, (1280, 800), 0.0);`
+/// Example: `let view = multiplayer::pack_shared_view(&world, frame, Some(frame), &players, &[], (1280, 800), 0.0);`
 pub fn pack_shared_view(
     world: &World,
     frame: DMat4,
     laser_aim: Option<DMat4>,
     players: &[RemotePlayer],
+    markers: &[Marker],
     render_px: (u32, u32),
     time_s: f64,
 ) -> SharedView {
@@ -130,18 +134,23 @@ pub fn pack_shared_view(
             color,
         );
     }
+    shared.add_markers(markers);
     let trace_from = |eye: DMat4| {
         let data: SceneData =
             SceneData::Build(&shared, eye, &Beam::default(), render_px, time_s, true);
         physics::trace_laser(&shared, &data)
     };
-    let (mut beam, mut report, mut hit_player_id) = (Beam::default(), None, None);
+    let (mut beam, mut report, mut hit_player_id, mut hit_marker) =
+        (Beam::default(), None, None, None);
     if let Some(aim) = laser_aim {
         let (own_beam, mut own_report) = trace_from(aim);
-        hit_player_id = own_report
+        let past_avatars: Option<usize> = own_report
             .hit_box
-            .and_then(|b| b.checked_sub(first_avatar_box))
-            .map(|k| players[k].id);
+            .and_then(|b| b.checked_sub(first_avatar_box));
+        hit_player_id = past_avatars
+            .and_then(|k| players.get(k))
+            .map(|player| player.id);
+        hit_marker = past_avatars.and_then(|k| k.checked_sub(players.len()));
         if let Some(id) = hit_player_id {
             own_report.hit = Some(format!("player {id}"));
         }
@@ -154,6 +163,7 @@ pub fn pack_shared_view(
         data: SceneData::Build(&shared, frame, &beam, render_px, time_s, true),
         report,
         hit_player_id,
+        hit_marker,
     }
 }
 
@@ -226,6 +236,7 @@ pub fn run_bot(
                 player.frame,
                 is_laser_on.then_some(player.frame),
                 &client.players,
+                &[],
                 BOT_VIEW_PX,
                 start.elapsed().as_secs_f64(),
             );
@@ -238,7 +249,13 @@ pub fn run_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(player.frame, is_laser_on, false, None)?;
+            client.send_state(
+                player.frame,
+                is_laser_on,
+                false,
+                None,
+                PlayerWormholes::default(),
+            )?;
         } else {
             client.keep_joining()?;
         }
@@ -254,6 +271,7 @@ pub struct SharedVoxelView {
     pub frame: VoxelFrame,
     pub shot: Option<Shot>,
     pub hit_player_id: Option<u32>,
+    pub hit_marker: Option<usize>,
     pub is_head_hit: bool,
     pub other_shots: Vec<(u32, Shot)>,
 }
@@ -299,18 +317,20 @@ fn trace_other_voxel_lasers(
 }
 
 /// `pack_shared_voxel_view` packs a voxel map seen from `camera` with a body for each of
-/// `players`, this player's laser (if on, fired from `laser_aim`, `camera` turned by the shot's
-/// noise, for team `team`) and the lasers of the players who have theirs on, all traced through
-/// the same map, so beams stop at players and bend like light. It draws every laser's whole path,
-/// or `tracers` instead when given.
+/// `players` and a glowing ball for each of `markers`, this player's laser (if on, fired from
+/// `laser_aim`, `camera` turned by the shot's noise, for team `team`) and the lasers of the players
+/// who have theirs on, all traced through the same map, so beams stop at players and bend like
+/// light. It draws every laser's whole path, or `tracers` instead when given.
 ///
-/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, None, (1280, 800));`
+/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &[], None, (1280, 800));`
+#[allow(clippy::too_many_arguments)]
 pub fn pack_shared_voxel_view(
     world: &VoxelWorld,
     camera: DMat4,
     laser_aim: Option<DMat4>,
     team: u32,
     players: &[RemotePlayer],
+    markers: &[Marker],
     tracers: Option<Tracers>,
     render_px: (u32, u32),
 ) -> SharedVoxelView {
@@ -324,15 +344,20 @@ pub fn pack_shared_voxel_view(
             )
         })
         .collect();
-    let shared: VoxelWorld = world.with_avatars(&bodies, &colors);
+    let mut shared: VoxelWorld = world.with_avatars(&bodies, &colors);
+    shared.add_markers(markers);
     let mut beams: Vec<(Vec<BeamSegment>, u32)> = Vec::new();
     let (mut shot, mut hit_player_id, mut spot, mut is_head_hit) = (None, None, None, false);
+    let mut hit_marker: Option<usize> = None;
     if let Some(aim) = laser_aim {
         let own: Shot = shared.trace_laser(aim);
-        hit_player_id = own
+        let past_static: Option<usize> = own
             .hit_structure
-            .and_then(|k| k.checked_sub(shared.static_structure_count))
-            .map(|k| players[k].id);
+            .and_then(|k| k.checked_sub(shared.static_structure_count));
+        hit_player_id = past_static
+            .and_then(|k| players.get(k))
+            .map(|player| player.id);
+        hit_marker = past_static.and_then(|k| k.checked_sub(players.len()));
         is_head_hit = hit_player_id.is_some()
             && own
                 .hit_structure
@@ -355,6 +380,7 @@ pub fn pack_shared_voxel_view(
         frame: VoxelFrame::Build(&shared, camera, beams, spot, dust, render_px),
         shot,
         hit_player_id,
+        hit_marker,
         is_head_hit,
         other_shots,
     }
@@ -481,6 +507,7 @@ pub fn run_voxel_bot(
                 is_laser_on.then_some(camera),
                 team,
                 &client.players,
+                &[],
                 None,
                 BOT_VIEW_PX,
             );
@@ -493,7 +520,7 @@ pub fn run_voxel_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(camera, is_laser_on, false, None)?;
+            client.send_state(camera, is_laser_on, false, None, PlayerWormholes::default())?;
         } else {
             client.keep_joining()?;
         }
@@ -511,6 +538,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Player id | each id up to `MAX_PLAYER_COUNT` | `spawn_points_are_apart_and_clear_of_mouths` |
     //! | Laser aim | at another player, past them, strayed past them by shot noise | `a_laser_hits_the_player_it_points_at`, `a_strayed_shot_misses_alike_in_both_windows` |
+    //! | What a shot hits past the players | a thrown wormhole's marker (named by its index) | `a_shot_at_a_marker_names_it` |
     //! | Map | the house, Lunar Surface (a hit on another player's body, described for the HUD) | `a_laser_hits_the_player_it_points_at`, `a_lunar_laser_hit_on_a_player_is_described` |
     //! | Whose laser | this player's, another player's on Lunar Surface (drawn from their gun, out of their own body; strayed as in its shooter's window) | the tests above, `other_players_lasers_leave_their_bodies`, `a_strayed_shot_misses_alike_in_both_windows` |
 
@@ -521,6 +549,8 @@ mod tests {
 
     const LUNAR_SHOOTER_M: [f64; 2] = [-27.0, 0.0];
     const LUNAR_TARGET_M: [f64; 2] = [-20.0, 0.0];
+    const MARKER_AHEAD_M: f64 = 3.0;
+    const MARKER_RADIUS_M: f64 = 0.5;
     const MIN_OTHER_BEAM_M: f64 = 1.0;
     const STRAY_PAST_TARGET: ShotOffset = ShotOffset {
         angle_rad: 0.15,
@@ -562,13 +592,44 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let view: SharedView =
-            pack_shared_view(&world, aimed, Some(aimed), &[other], (64, 40), 0.0);
+            pack_shared_view(&world, aimed, Some(aimed), &[other], &[], (64, 40), 0.0);
         assert_eq!(view.hit_player_id, Some(2));
         let away: DMat4 = aimed * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
-        let view: SharedView = pack_shared_view(&world, away, Some(away), &[other], (64, 40), 0.0);
+        let view: SharedView =
+            pack_shared_view(&world, away, Some(away), &[other], &[], (64, 40), 0.0);
         assert_eq!(view.hit_player_id, None);
+    }
+
+    #[test]
+    fn a_shot_at_a_marker_names_it() {
+        let map: crate::map::Map =
+            crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
+                .expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let shooter: VoxelPlayer =
+            VoxelPlayer::AtView(&world, LUNAR_SHOOTER_M, LUNAR_TARGET_M, None, 0.0);
+        let camera: DMat4 = shooter.get_camera_frame(&world);
+        let ahead: DVec4 = (camera * make_boost(AXIS_Z, -MARKER_AHEAD_M / world.r)).col(AXIS_W);
+        let marker: Marker = Marker {
+            x: ahead,
+            rgb: [1.0; 3],
+            radius_m: MARKER_RADIUS_M,
+            is_mouth: true,
+        };
+        let view: SharedVoxelView = pack_shared_voxel_view(
+            &world,
+            camera,
+            Some(camera),
+            0,
+            &[],
+            &[marker],
+            None,
+            (64, 40),
+        );
+        assert_eq!((view.hit_player_id, view.hit_marker), (None, Some(0)));
     }
 
     #[test]
@@ -589,10 +650,19 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
-        let view: SharedVoxelView =
-            pack_shared_voxel_view(&world, camera, Some(camera), 0, &[other], None, (64, 40));
+        let view: SharedVoxelView = pack_shared_voxel_view(
+            &world,
+            camera,
+            Some(camera),
+            0,
+            &[other],
+            &[],
+            None,
+            (64, 40),
+        );
         assert_eq!(view.hit_player_id, Some(2));
         assert_eq!(
             describe_voxel_laser(&world, &view),
@@ -620,6 +690,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let target_camera: DMat4 = target.get_camera_frame(&world);
         let shooters_view: SharedVoxelView = pack_shared_voxel_view(
@@ -628,6 +699,7 @@ mod tests {
             Some(aim),
             0,
             &[remote(2, target_camera, false)],
+            &[],
             None,
             (64, 40),
         );
@@ -642,6 +714,7 @@ mod tests {
             None,
             0,
             &[remote(1, aim, true)],
+            &[],
             None,
             (64, 40),
         );
@@ -668,6 +741,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            wormholes: PlayerWormholes::default(),
         };
         let bodies: Vec<(DMat4, usize)> = vec![(
             VoxelPlayer::FromEye(&world, firing.frame).get_feet_frame(&world),

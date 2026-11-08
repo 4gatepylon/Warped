@@ -29,3 +29,13 @@ user confirmed it).
 - **Stale claims.** A claim with no open PR for two days may be taken over. Change the claim to yours and say whose
   it was in the PR description.
 - **Unclaim.** If you stop working on an item, change it back to `[ ]` under "Open" in a `wishlist: unclaim W-NN` PR.
+
+## Credits for assets
+
+The game's CREDITS page (the `Tab` menu, text in [`src/credits.rs`](src/credits.rs)) says where every asset comes from.
+
+- **Add credits with the asset.** Any change that adds an asset to the game (a texture, model, sound, font, picture or
+  data from outside this repository) adds it to `CREDITS_LINES` in the same PR: what it is, its author, where it came
+  from (a link) and its license. Follow any attribution the license requires (CC BY needs the author's name).
+- **Remove credits with the asset.** A change that removes an asset removes its credit.
+- **Fit the menu.** Each line fits 64 characters; `cargo test` checks it.
