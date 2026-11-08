@@ -7,13 +7,13 @@
 #
 # Interface:
 #     Copy this file, change the numbers, and pass the copy to the server: `SERVER_SETTINGS=` with
-#     `make serve-game` or `make host-game` (`--server-settings`). Every key is required, unknown keys
+#     `make serve-game` (`warped-server --server-settings`). Every key is required, unknown keys
 #     fail, and numbers must be above 0 unless their note says 0 is allowed. Each name ends in its
 #     unit: `_m` meters, `_s` seconds, `_rad` radians, `_per_s` per second.
 #
 # Example:
 #     cp server_settings.yaml fast.yaml  # edit fast.yaml, then:
-#     make host-game MAP=lunar-surface SERVER_SETTINGS=fast.yaml
+#     make serve-game MAP=lunar-surface SERVER_SETTINGS=fast.yaml
 
 movement:
   walk_speed_per_map_speed: 2.0  # Walking speed, times the map's (Lunar Surface: 5 m/s).

@@ -1624,6 +1624,24 @@
   7 views facing the walls gave each view's least median GPU time 1% to 5% higher (about 1 ms in 26 ms) in 6 of
   them; both are within the run-to-run noise (single views ±12%).
 
+## The game
+
+Decisions made while turning the demo into the game in `game/` (`REFACTOR_PLAN.md`), numbered G1, G2, ...
+
+### G1. Games are served only by `warped-server`
+
+- **Choice:** the window's `--serve` and `--host` are gone, and `make serve-game` runs `warped-server`. The server
+  took over what `--serve` did for a person at its terminal: it prints this computer's address and the
+  `make join-game` commands, and `Enter` starts the next game after a win. As on the cloud, it also starts the next
+  game by itself 10 s after a win, which `--serve` never did.
+- **Alternatives:** keep `--serve`, starting `warped-server` as a child process (the window would need to find that
+  binary, which `cargo run -p warped-client` doesn't build); or keep it in the window's process, with the window
+  depending on `warped-server` as a library.
+- **Rationale:** the plan (sections 3 and 5) wants one server program, so a game on the local network and one in the
+  cloud run the same code, and only `warped-core` shared by the window and the server. `--host` only started
+  `--serve` beside the window, and the window already refused it ("Playing is only on a game server now").
+- **Revisit if:** the title screen gets a button to host a game; it would start `warped-server` beside the window.
+
 ## Baselines
 
 ### D99. Shot noise in the beam, for W-84 (shot noise in the beam itself): pixels turn black, white or drop out

@@ -49,12 +49,12 @@ Everyone joins the same Wi-Fi and uses the same `MAP`. One person starts a game 
 included, joins it with a window:
 
 ```bash
-cd Warped/demos/hyperbolic_wormholes_rust
+cd Warped/game
 make serve-game MAP=lunar-surface
 make join-game MAP=lunar-surface SERVER=192.168.1.20
 ```
 
-- `make serve-game` runs only the server, without a window, and prints this computer's address and the exact
+- `make serve-game` runs only the server (`warped-server`), without a window, and prints this computer's address and the exact
   `make join-game` commands to give the others (`SERVER=127.0.0.1` on the same computer). Leave it running in its
   terminal; `Ctrl-C` ends the game.
 - To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight, thrown
@@ -95,8 +95,8 @@ pylons (one near its spawn, one on each flank; a red pylon is past the wormhole 
 straight at one and hold `E` for 10 s: a bar below the crosshair fills, the console pulses faster and faster for
 everyone (from once a second to a frenzy of 8 times a second right before it turns off), and you can't shoot
 meanwhile. Looking away or letting go starts it over, and its pulse slows back down over about a second. A console
-that is off goes dark. When a team's consoles are all off, everyone sees which team won, and a new game starts only
-when whoever started the server presses `Enter` in its terminal (the `make host-game` terminal, for that command):
+that is off goes dark. When a team's consoles are all off, everyone sees which team won, and a new game starts 10 s
+later, or at once when whoever started the server presses `Enter` in its terminal (the `make serve-game` terminal):
 every console comes back on and everyone returns to their spawn.
 
 The habitat modules (the red one stands near the red base, on the side away from the ridge) and the covered walkways

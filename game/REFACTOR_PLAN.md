@@ -111,15 +111,15 @@ game/                                the Warped game (a component folder, one Ca
   server_settings.yaml               the numbers that shape play, as in the demo
   core/                              crate warped-core (library): everything both binaries need
   client/                            crate warped-client: the game window, binary `warped` (macOS, Metal)
-  server/                            crate warped-server: the game server, binary `warped-server` (macOS, Linux)
+  server/                            crate warped-server: the game server, library and binary `warped-server` (macOS, Linux)
   legacy_oracle/                     crate legacy-oracle (tests only): the demo's own code, compiled in place
   tools/udp_impair/                  crate udp-impair: a UDP proxy that adds latency, jitter, loss and reordering
 common/assets/                       textures and gun models the game draws (moved from demos/fps_demo/assets/)
 common/maps/                         maps, unchanged until phase E extends the format
 ```
 
-Dependencies only point downwards: `client` and `server` depend on `core`; nothing depends on `client` or `server`;
-`legacy-oracle` is only a dev-dependency of tests.
+Dependencies only point downwards: `client` and `server` depend on `core`; nothing depends on `client` or `server`
+(`server`'s library is only for its own binary and tests); `legacy-oracle` is only a dev-dependency of tests.
 
 ### 3.1 Who owns what
 
@@ -172,8 +172,8 @@ file goes to each place; the parts are listed.
 
 | Demo file | Lines | Goes to | Notes |
 | --- | --- | --- | --- |
-| `main.rs` | 5,136 | `client/src/main.rs` + `client/src/{cli,renderer,title_choice,server_process,bot,bench,play,run_folder}.rs`, `client/src/session/{mod,weapons,online,hud}.rs`, then `server/src/main.rs` | Split (step A3, done): command line, the `Session` (≈1,900 lines: input, weapons, HUD, net glue, and the warp tour), offscreen benchmark views, the window loop; `serve_only` waits in `server_process.rs` and goes to the server in A5. House routes, house views and `--autopilot` are dropped. |
-| `net.rs` | 2,428 | `core/src/net/protocol.rs`, `core/src/net/connection.rs`, `server/src/game.rs` | Split (steps A4, A5): message layouts (`Message`, `Reader`, `Kind`, sizes) and the window's `Client` go to core; `Server`, `serve`, the beacon go to the server. Step A4e moved it whole to `core/src/net.rs` (it needs no SDL, Metal or objc2), so the server binary and the window use one copy; A5 moves `Server`, `serve` and the beacon out to `warped-server`. |
+| `main.rs` | 5,136 | `client/src/main.rs` + `client/src/{cli,renderer,title_choice,server_process,bot,bench,play,run_folder}.rs`, `client/src/session/{mod,weapons,online,hud}.rs`, then `server/src/main.rs` | Split (step A3, done): command line, the `Session` (≈1,900 lines: input, weapons, HUD, net glue, and the warp tour), offscreen benchmark views, the window loop; `serve_only` went to the server in A5b (its join commands and `Enter`, in `server/src/main.rs`). House routes, house views and `--autopilot` are dropped. |
+| `net.rs` | 2,428 | `core/src/net/protocol.rs`, `core/src/net/connection.rs`, `server/src/game.rs` | Split (steps A4, A5): message layouts (`Message`, `Reader`, `Kind`, sizes) and the window's `Client` go to core; `Server`, `serve`, the beacon go to the server. Step A4e moved it whole to `core/src/net.rs` (it needs no SDL, Metal or objc2), so the server binary and the window use one copy; A5b moved `Server` (as the sans-IO `Game`, `server/src/game.rs`), `serve` and the beacon (`server/src/udp_loop.rs`) out to `warped-server`; splitting the rest into `protocol.rs` and `connection.rs` is still to do. |
 | `voxel_world.rs` | 3,550 | `core/src/voxel_world.rs` (+ `core/src/player.rs`, `core/src/laser.rs` later) and `client/src/scene.rs` | Split (step A4): walking, collisions, lasers, consoles, black hole, time rate stay in core; avatars posed for drawing (`with_avatars`, `with_posed_avatars`), clearance grids, markers and material surfaces go to the client. Step A4d moved it whole, with `avatar_model.rs`, `voxel_clearance.rs` and the material table (`core/src/material_surfaces.rs`), since none of them needs SDL, Metal or objc2; the split to the client is left for when the server needs a lighter world. |
 | `settings.rs` | 911 | `core/src/settings.rs` and `client/src/player_settings.rs` | Split (step A4b, done): `ServerSettings`, the sections of both files and `server_settings.yaml` to core; `PerPlayerSettings` (keys, through `key_bindings.rs`, which needs SDL), `player_settings.yaml` and the tests of both files to `client/src/player_settings.rs`. |
 | `multiplayer.rs` | 963 | `client/src/others.rs` and `core/src/bot.rs` | Split: drawing other players to the client; the windowless bot (`run_voxel_bot`) to core, so tests can run bots without a window. The house half (`pack_shared_view`, `run_bot`) is dropped. The bot still saves a rendered frame through the client's `Renderer`, so it stays in `client/src/bot.rs` until the rendering is taken out of it. |
@@ -189,7 +189,7 @@ file goes to each place; the parts are listed.
 | From the infra stack: `app_bundle.rs` (#183) | 54 | `client/src/app_bundle.rs` | Finds assets and models inside `Warped.app` or in the checkout; its checkout folders are relative to the crate folder, so A1 fixes them for `game/client/`. |
 | From the infra stack: `../build.rs` (#183) | 80 | `client/build.rs` | Builds the Sketchfab-licensed models into the program; its folders are relative to the crate folder, fixed in A1 like `app_bundle.rs`'s. |
 | `../Makefile` | 130 | `game/Makefile` | Its targets join the game's in A1, pointing at `client/`; A5 points the server ones at `warped-server`. |
-| From the infra stack: `bin/wormholes_server.rs` (#180) | 107 | `server/src/main.rs` | The Linux game server's `main`; A5 builds `warped-server` from it and the server half of `net.rs`. Step A5 moved it, as the binary `warped-server`; `net::serve` stays in core until A5b, because the window's `--serve` still runs it. |
+| From the infra stack: `bin/wormholes_server.rs` (#180) | 107 | `server/src/main.rs` | The Linux game server's `main`; A5 builds `warped-server` from it and the server half of `net.rs`. Step A5 moved it, as the binary `warped-server`; A5b replaced its `net::serve` with `warped-server`'s own `udp_loop::serve`. |
 | From the infra stack: `title.rs` (#182), the title screen and password dialog in `main.rs` | 260 + 200 | `client/src/title.rs`, `client/src/main.rs` | As they are (infra stack's). |
 | From the infra stack: `../app/` (#183: `Info.plist`, `app_icon.png`, `how_to_open.txt`) | | `client/app/` | Copied verbatim (infra stack's). |
 | `../player_settings.yaml`, `../server_settings.yaml`, `../rustfmt.toml` | | `game/` | Copied verbatim. |
@@ -323,17 +323,23 @@ its own layer.
 - **A4, extract `warped-core`.** Move the modules of section 4 into `core/`, cutting every dependency on SDL, Metal
   and objc2 as listed there. Done when: `cargo check -p warped-core --target x86_64-unknown-linux-gnu` passes
   (7.1), and every oracle test passes against `warped_core` instead of the client.
-- **A5, `warped-server`, moved as it is.** Build `warped-server` in `server/` from `bin/wormholes_server.rs` and
+- **A5, `warped-server`, moved as it is (done, #402).** Build `warped-server` in `server/` from `bin/wormholes_server.rs` and
   the server half of `net.rs`, unchanged (it still runs its own UDP loop), with the same flags and exit codes.
   `make build-server-bundle` packs it, and `infra/startup.sh.tftpl` and `infra/Makefile` point at the game. Done
   when: the demo's server tests pass in `server/`, and 7.3.3 (cross-version) passes.
-- **A5b, sans-IO server.** Rewrite the server half of `net.rs` and `serve_only` into `server/`, written sans-IO
-  (`Game::handle(datagram, from, now_s) -> Vec<(to, datagram)>`, `Game::tick(now_s)`), with a thin UDP loop, from
-  the infra stack's `wormholes_server` `main`. The binary becomes `warped-server` with the same flags; the same PR
-  changes `infra/startup.sh.tftpl` and `make build-server-bundle` to the new name, and the infra stack reviews it.
-  Remove `--serve` from the window. The password challenge (`authentication.md` v1) moves with the server and keeps
-  its tests, and `warped-server` now refuses to start without a non-empty `--game-password-file` (exit code 2). Done
-  when: 7.5 (in-process games) and 7.3.3 (cross-version, still byte-identical) pass.
+- **A5b, sans-IO server (done, layers A5b-1 to A5b-7).** The server half of `net.rs` is `server/src/game.rs`,
+  written sans-IO (`Game::handle(datagram, from, now_s) -> Vec<(to, datagram)>`, `Game::tick(now_s)`, which gives
+  back the snapshots and scores to send), played by a thin UDP loop (`server/src/udp_loop.rs`, with the discovery
+  beacon) from the `main` A5 moved. `warped-server` is a library and a binary, so its tests use `Game` directly;
+  `warped-core`'s `net` keeps the window's side and the wire format both sides share. The window loses `--serve`
+  (and `--host`, which only started `--serve` beside it); `make serve-game` runs `warped-server`, which prints how
+  to join and starts the next game at `Enter` or 10 s after a win (`DECISIONS.md`, G1). The password challenge
+  (`authentication.md` v1) moved with the server and kept its tests. The password stays optional until C1, as v1
+  allows and section 5's `make join-game SERVER=auto` expects; v2 makes it required. Done when: `game.rs`'s tests
+  play the rules without sockets, `server/tests/udp_loop_serves_windows.rs` joins the loop with the window's
+  `Client` over loopback, and the demo still plays with the game both ways (`server_admits_players.rs`,
+  `core_matches_the_demo.rs`). Not yet written: 7.5's `SimNetwork` and 7.3.3's scripted 4-bot game; the first phase
+  C layer that needs them adds them.
 - **A6, assets.** Move the used assets to `common/assets/` and point the game, both demos and `make
   package-mac-app` (which copies them into `Contents/Resources/assets/`) at them. Done when: both demos and the game
   build and draw (7.4 where Metal runs, otherwise their `check_*` functions find every file), and a packaged app
