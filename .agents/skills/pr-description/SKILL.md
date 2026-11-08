@@ -82,10 +82,10 @@ Reviewable lines: <N> (<what they are, e.g. "Markdown only" or "src/ + tests/">)
   Write `None: <why>.` only when nothing anyone sees changes.
 - **Attaching pictures**: upload them with `gh pr create` or `gh pr edit` and `--attach <file>`
   (gh 2.99.0 or later), never by committing them. Reference each file in the body as
-  `![<caption>](./<file>)`, relative to the body file's folder, and `gh` replaces it with the
-  uploaded file's URL; keep `body.md` in the pictures' `.artifacts/` run folder. Attaching needs
-  push access and a token type `gh` accepts (not a GitHub App token, `ghu_`). Keep each file under
-  10 MB. If `gh` is older than 2.99.0 (seen with gh 2.96.0 on the user's Mac, 2026-11-08), ask the
+  `![<caption>](./<file>)`, videos too, relative to the body file's folder; `gh` replaces it with
+  the uploaded file's URL, which GitHub shows as an image or a video player. Keep `body.md` in the
+  pictures' `.artifacts/` run folder. Attaching needs push access and a token type `gh` accepts
+  (not a GitHub App token, `ghu_`). Keep each file under 10 MB. If `gh` is older than 2.99.0 (seen with gh 2.96.0 on the user's Mac, 2026-11-08), ask the
   user to upgrade it (`brew upgrade gh`) or to drag the files into the PR in the browser.
 - **Stack**: link the PR below (and above, once it exists) by number. Layer 1's base is
   `staging/user-<username>`.
