@@ -16,7 +16,8 @@ using namespace metal;
 #define SCENE_BUFFERS constant VoxelUniforms &u [[buffer(16)]], device const VoxelStructure *structures [[buffer(17)]], \
     device const Shape *shapes [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
     device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]], \
-    device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], constant float4 *means [[buffer(26)]], \
+    device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], device const float *mound_heights [[buffer(26)]], \
+    constant float4 *means [[buffer(27)]], \
     texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]]
 
 constant int MAX_ITERATIONS = 240;
@@ -244,8 +245,7 @@ struct VoxelUniforms {
     float4 regions;
     float4 terrain;
     float4 relief;
-    float4 mounds[64];
-    float4 mound_groups[16];
+    float4 mound_grid;
 };
 
 /** @brief `Shape` is one smooth solid in its structure's chart (meters): centre and kind, half sizes and rounding, material and axis. */
@@ -336,6 +336,7 @@ struct Scene {
     device const BeamSegment *beams;
     device const uchar *clearances;
     device const float4 *surfaces;
+    device const float *mound_heights;
     constant float4 *means;
     texture2d_array<float> albedo_maps;
     texture2d_array<float> normal_maps;
@@ -496,7 +497,18 @@ static float terrain_noise(float2 p, uint seed) {
     return mix(bottom, top, f.y);
 }
 
-/** @brief `terrain_height_m` is terrain.rs's `get_height_m`: the ground's height at Fermi (u, v), mounds (`TERRAIN_MAX_MOUNDS` = 64) included. @par Example @code float h = terrain_height_m(scene, u_m, v_m); @endcode */
+/** @brief `mound_height_m` is terrain.rs's `MoundGrid::get_height_m`: the baked mound grid (origin u, v, cells per meter, points along u in `mound_grid`, points along v in `relief.w`) read bilinearly at Fermi (u, v), 0 outside. @par Example @code float h = mound_height_m(scene, u_m, v_m); @endcode */
+static float mound_height_m(thread const Scene &scene, float u_m, float v_m) {
+    float4 g = scene.u.mound_grid;
+    float2 x = (float2(u_m, v_m) - g.xy) * g.z, i = floor(x), f = x - i;
+    if (any(i < 0.0) || i.x >= g.w - 1.0 || i.y >= scene.u.relief.w - 1.0) return 0.0;
+    int k = int(i.x) + int(g.w) * int(i.y), n = int(g.w);
+    float bottom = mix(scene.mound_heights[k], scene.mound_heights[k + 1], f.x);
+    float top = mix(scene.mound_heights[k + n], scene.mound_heights[k + n + 1], f.x);
+    return mix(bottom, top, f.y);
+}
+
+/** @brief `terrain_height_m` is terrain.rs's `get_height_m`: the ground's height at Fermi (u, v), mounds included. @par Example @code float h = terrain_height_m(scene, u_m, v_m); @endcode */
 static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
     float4 t = scene.u.terrain, rl = scene.u.relief;
     uint seed = scene.u.terrain_seed;
@@ -506,17 +518,7 @@ static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
     float2 p = float2(u_m, v_m) / rl.y;
     float sum = 0.0, amplitude = 0.5;
     for (uint o = 0; o < uint(TERRAIN_OCTAVES); o++) { sum += amplitude * terrain_noise(p, seed + o); amplitude *= 0.5; p *= 2.0; }
-    float mounds_m = 0.0;
-    for (int g = 0; g < int(rl.w); g++) {
-        float4 group = scene.u.mound_groups[g];
-        if (length_squared(float2(u_m, v_m) - group.xy) >= group.z * group.z) continue;
-        int first = int(group.w) / 256, end = first + int(group.w) % 256;
-        for (int k = first; k < end; k++) {
-            float4 m = scene.u.mounds[k];
-            float d2 = length_squared(float2(u_m, v_m) - m.xy) / (m.z * m.z);
-            if (d2 < 1.0) mounds_m += m.w * (1.0 - d2) * (1.0 - d2);
-        }
-    }
+    float mounds_m = mound_height_m(scene, u_m, v_m);
     return rim_m * wall + mounds_m + rl.x * sum / (1.0 - exp2(-float(TERRAIN_OCTAVES))) * (1.0 + TERRAIN_WALL_RELIEF_GAIN * wall);
 }
 
@@ -1212,7 +1214,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1316,7 +1318,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -1340,7 +1342,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -1377,7 +1379,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -1432,7 +1434,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1451,7 +1453,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {

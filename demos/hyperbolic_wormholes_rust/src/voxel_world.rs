@@ -681,7 +681,10 @@ impl VoxelWorld {
     /// Example: `if world.is_under_ground(x) { ... }`
     fn is_under_ground(&self, x: DVec4) -> bool {
         let [u_m, v_m, h_m] = self.get_fermi_coordinates(x);
-        h_m < self.terrain.map_or(0.0, |t| t.get_height_m(u_m, v_m))
+        h_m < self
+            .terrain
+            .as_ref()
+            .map_or(0.0, |t| t.get_height_m(u_m, v_m))
     }
 
     /// `is_outside_boundary` says whether a point is outside the playable ellipse (never, without one).
@@ -936,7 +939,7 @@ impl VoxelWorld {
     ///
     /// Example: `let hit = world.trace_scene(x, v, 1.0, None);`
     fn trace_scene(&self, x: DVec4, v: DVec4, s_max: f64, warp: Option<usize>) -> Option<Hit> {
-        let ground_s: Option<f64> = match self.terrain {
+        let ground_s: Option<f64> = match &self.terrain {
             Some(terrain) => terrain.find_hit_s(x, v, s_max, self.r),
             None if x.y >= 0.0 && v.y < 0.0 && x.y / -v.y < 1.0 => Some((x.y / -v.y).atanh()),
             None => None,
@@ -1433,7 +1436,10 @@ impl VoxelPlayer {
                 self.h_m -= climb_m_per_s * dt_s;
             }
             let [u_m, v_m, _] = world.get_fermi_coordinates(self.body.col(AXIS_W));
-            let floor_m: f64 = world.terrain.map_or(0.0, |t| t.get_height_m(u_m, v_m));
+            let floor_m: f64 = world
+                .terrain
+                .as_ref()
+                .map_or(0.0, |t| t.get_height_m(u_m, v_m));
             self.h_m = self.h_m.clamp(floor_m + MIN_FLY_HEIGHT_M, MAX_FLY_HEIGHT_M);
             return messages;
         }
@@ -1574,7 +1580,11 @@ mod tests {
     /// Example: `let eye_m = get_eye_above_ground_m(&world, &player);`
     fn get_eye_above_ground_m(world: &VoxelWorld, player: &VoxelPlayer) -> f64 {
         let [u_m, v_m, _] = world.get_fermi_coordinates(player.body.col(AXIS_W));
-        player.h_m - world.terrain.map_or(0.0, |t| t.get_height_m(u_m, v_m))
+        player.h_m
+            - world
+                .terrain
+                .as_ref()
+                .map_or(0.0, |t| t.get_height_m(u_m, v_m))
     }
 
     /// `walk_forward` steps a player walking forward `count` times and gives the highest eye height

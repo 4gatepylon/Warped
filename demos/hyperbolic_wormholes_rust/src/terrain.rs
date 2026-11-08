@@ -1,15 +1,18 @@
 //! `terrain.rs` is a map's `ground.terrain` (`common/maps/README.md`): the ground's height over
 //! the world's Fermi (u, v), a crater bowl whose walls rise to an elliptical rim, roughened by
-//! value noise and raised by round mounds (hills, a ridge, boulders), and where a chord first meets it. `render_voxel.metal` computes the same height.
+//! value noise and raised by round mounds (hills, a ridge, boulders) baked into a height grid,
+//! and where a chord first meets it. `render_voxel.metal` computes the same height.
 //!
 //! Interface: `Terrain::FromMap`, `Terrain::get_height_m`, `Terrain::find_hit_s`,
 //! `get_fermi_coordinates`.
 //!
 //! Example: `let h_m = terrain.get_height_m(12.0, -3.5);`
 
+use std::sync::Arc;
+
 use glam::DVec4;
 
-use crate::map::MapTerrain;
+use crate::map::{MapMound, MapTerrain};
 
 const OCTAVE_COUNT: u32 = 5;
 const RIM_NOISE_M: f64 = 60.0;
@@ -22,14 +25,94 @@ const MIN_STEP_M: f64 = 0.03;
 const STEP_PER_M: f64 = 0.01;
 const MAX_STEPS: usize = 400;
 const BISECTIONS: usize = 8;
-/// `MAX_MOUNDS` is how many mounds a terrain holds (`render_voxel.metal`'s `TERRAIN_MAX_MOUNDS`).
-pub const MAX_MOUNDS: usize = 64;
-const MOUND_SAMPLE_M: f64 = 0.5;
-const MOUND_BOUND_MARGIN_M: f64 = 0.3;
+const MOUND_CELL_M: f64 = 0.25;
+
+/// `MoundGrid` is the mounds' summed height sampled every `cell_m` from `origin_m` (Fermi u, v)
+/// over `size` points (u fastest), read bilinearly; zero outside.
+pub struct MoundGrid {
+    pub origin_m: [f64; 2],
+    pub cell_m: f64,
+    pub size: [usize; 2],
+    pub heights: Vec<f32>,
+}
+
+impl MoundGrid {
+    /// `FromMounds` bakes mounds, each h (1 - d²)² within its radius (d the distance over the
+    /// radius), into a grid a cell wider than all of them, or `None` if there are none.
+    ///
+    /// Example: `let grid = MoundGrid::FromMounds(&map_terrain.mounds);`
+    #[allow(non_snake_case)]
+    pub fn FromMounds(mounds: &[MapMound]) -> Option<MoundGrid> {
+        let edge = |a: usize, sign: f64| -> f64 {
+            mounds
+                .iter()
+                .map(|m| sign * ([m.u_m, m.v_m][a] + sign * (m.radius_m + MOUND_CELL_M)))
+                .fold(f64::NEG_INFINITY, f64::max)
+                * sign
+        };
+        if mounds.is_empty() {
+            return None;
+        }
+        let origin_m: [f64; 2] = [edge(0, -1.0), edge(1, -1.0)];
+        let size: [usize; 2] =
+            [0, 1].map(|a| ((edge(a, 1.0) - origin_m[a]) / MOUND_CELL_M).ceil() as usize + 1);
+        let mut heights: Vec<f32> = Vec::with_capacity(size[0] * size[1]);
+        for j in 0..size[1] {
+            for i in 0..size[0] {
+                let u_m: f64 = origin_m[0] + i as f64 * MOUND_CELL_M;
+                let v_m: f64 = origin_m[1] + j as f64 * MOUND_CELL_M;
+                let sum: f64 = mounds
+                    .iter()
+                    .map(|m| {
+                        let d2: f64 =
+                            ((u_m - m.u_m).powi(2) + (v_m - m.v_m).powi(2)) / m.radius_m.powi(2);
+                        if d2 < 1.0 {
+                            m.height_m * (1.0 - d2).powi(2)
+                        } else {
+                            0.0
+                        }
+                    })
+                    .sum();
+                heights.push(sum as f32);
+            }
+        }
+        Some(MoundGrid {
+            origin_m,
+            cell_m: MOUND_CELL_M,
+            size,
+            heights,
+        })
+    }
+
+    /// `get_height_m` reads the grid bilinearly at Fermi (u, v), as `render_voxel.metal` does.
+    ///
+    /// Example: `let h_m = grid.get_height_m(0.0, 0.0);`
+    pub fn get_height_m(&self, u_m: f64, v_m: f64) -> f64 {
+        let x: f64 = (u_m - self.origin_m[0]) / self.cell_m;
+        let y: f64 = (v_m - self.origin_m[1]) / self.cell_m;
+        let (i, j) = (x.floor(), y.floor());
+        if i < 0.0 || j < 0.0 || i >= (self.size[0] - 1) as f64 || j >= (self.size[1] - 1) as f64 {
+            return 0.0;
+        }
+        let k: usize = i as usize + self.size[0] * j as usize;
+        let at = |d: usize| f64::from(self.heights[k + d]);
+        let (fx, fy) = (x - i, y - j);
+        let bottom: f64 = at(0) + (at(1) - at(0)) * fx;
+        let top: f64 = at(self.size[0]) + (at(self.size[0] + 1) - at(self.size[0])) * fx;
+        bottom + (top - bottom) * fy
+    }
+
+    /// `get_max_height_m` is the grid's highest sample, which bilinear reads never exceed.
+    ///
+    /// Example: `let top_m = grid.get_max_height_m();`
+    pub fn get_max_height_m(&self) -> f64 {
+        f64::from(self.heights.iter().copied().fold(0.0, f32::max))
+    }
+}
 
 /// `Terrain` is a crater's shape in meters: rim semi-axes along u and v, the wall's width inward
 /// from the rim along v, the rim's mean height, and noise of `relief_m` at `wavelength_m`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Terrain {
     pub rim_m: [f64; 2],
     pub wall_m: f64,
@@ -37,8 +120,7 @@ pub struct Terrain {
     pub relief_m: f64,
     pub wavelength_m: f64,
     pub seed: u32,
-    pub mounds: [[f64; 4]; MAX_MOUNDS],
-    pub mound_count: usize,
+    pub mound_grid: Option<Arc<MoundGrid>>,
 }
 
 /// `get_fermi_coordinates` gives (u, v, h) of a point in meters, for curvature radius `r`.
@@ -98,14 +180,6 @@ impl Terrain {
     /// Example: `let terrain = map.ground.terrain.as_ref().map(Terrain::FromMap);`
     #[allow(non_snake_case)]
     pub fn FromMap(terrain: &MapTerrain) -> Terrain {
-        assert!(
-            terrain.mounds.len() <= MAX_MOUNDS,
-            "Terrain::FromMap: more than {MAX_MOUNDS} mounds"
-        );
-        let mut mounds: [[f64; 4]; MAX_MOUNDS] = [[0.0; 4]; MAX_MOUNDS];
-        for (slot, m) in mounds.iter_mut().zip(&terrain.mounds) {
-            *slot = [m.u_m, m.v_m, m.radius_m, m.height_m];
-        }
         Terrain {
             rim_m: [terrain.rim_u_m, terrain.rim_v_m],
             wall_m: terrain.wall_m,
@@ -113,8 +187,7 @@ impl Terrain {
             relief_m: terrain.relief_m,
             wavelength_m: terrain.relief_wavelength_m,
             seed: terrain.seed,
-            mounds,
-            mound_count: terrain.mounds.len(),
+            mound_grid: MoundGrid::FromMounds(&terrain.mounds).map(Arc::new),
         }
     }
 
@@ -123,52 +196,20 @@ impl Terrain {
     /// Example: `let top_m = terrain.get_max_height_m();`
     pub fn get_max_height_m(&self) -> f64 {
         self.rim_height_m * (1.0 + RIM_NOISE_FRAC / 2.0)
-            + self.get_max_mounds_height_m()
+            + self
+                .mound_grid
+                .as_ref()
+                .map_or(0.0, |g| g.get_max_height_m())
             + self.relief_m * (1.0 + WALL_RELIEF_GAIN)
     }
 
-    /// `get_max_mounds_height_m` bounds `get_mounds_height_m`: its most over a
-    /// `MOUND_SAMPLE_M` grid across each mound, plus `MOUND_BOUND_MARGIN_M` (the sum is smooth,
-    /// flat at its peaks, so a sample near a peak is within centimetres of it).
-    ///
-    /// Example: `let top_m = terrain.get_max_mounds_height_m();`
-    fn get_max_mounds_height_m(&self) -> f64 {
-        let mut top_m: f64 = 0.0;
-        for m in &self.mounds[..self.mound_count] {
-            let n: i32 = (m[2] / MOUND_SAMPLE_M).ceil() as i32;
-            for i in -n..=n {
-                for j in -n..=n {
-                    let (u_m, v_m) = (
-                        m[0] + f64::from(i) * MOUND_SAMPLE_M,
-                        m[1] + f64::from(j) * MOUND_SAMPLE_M,
-                    );
-                    top_m = top_m.max(self.get_mounds_height_m(u_m, v_m));
-                }
-            }
-        }
-        if self.mound_count == 0 {
-            0.0
-        } else {
-            top_m + MOUND_BOUND_MARGIN_M
-        }
-    }
-
-    /// `get_mounds_height_m` sums the mounds at (u, v), each h (1 - d²)² within its radius,
-    /// d the distance over the radius.
+    /// `get_mounds_height_m` is the mounds' height at (u, v), 0 without mounds.
     ///
     /// Example: `let h_m = terrain.get_mounds_height_m(0.0, 0.0);`
     fn get_mounds_height_m(&self, u_m: f64, v_m: f64) -> f64 {
-        self.mounds[..self.mound_count]
-            .iter()
-            .map(|m| {
-                let d2: f64 = ((u_m - m[0]).powi(2) + (v_m - m[1]).powi(2)) / (m[2] * m[2]);
-                if d2 < 1.0 {
-                    m[3] * (1.0 - d2).powi(2)
-                } else {
-                    0.0
-                }
-            })
-            .sum()
+        self.mound_grid
+            .as_ref()
+            .map_or(0.0, |g| g.get_height_m(u_m, v_m))
     }
 
     /// `get_height_m` gives the ground's height at Fermi (u, v): the wall rising from the floor
@@ -249,8 +290,7 @@ mod tests {
         relief_m: 1.0,
         wavelength_m: 24.0,
         seed: 1,
-        mounds: [[0.0; 4]; MAX_MOUNDS],
-        mound_count: 0,
+        mound_grid: None,
     };
 
     #[test]
