@@ -6,6 +6,7 @@
 | Manifest against the schema | valid, a required field missing, a wrong type | `test_shipped_maps_are_valid`, `test_schema_errors_are_reported` |
 | Frame | an isometry, not one | `test_shipped_maps_are_valid`, `test_a_bent_frame_is_caught` |
 | Shapes | valid, an unknown material, rounding too big, an unknown kind | `test_shipped_maps_are_valid`, `test_bad_shapes_are_caught` |
+| Mesh | none, a model in `models/`, a missing model | `test_shipped_maps_are_valid`, `test_meshes_are_checked` |
 | Mouth partners | paired, unpaired | `test_shipped_maps_are_valid`, `test_unpaired_mouths_are_caught` |
 | Tapered reaches | apart, overlapping | `test_shipped_maps_are_valid`, `test_overlapping_tapered_reaches_are_caught` |
 | Name | matches the folder, doesn't | `test_shipped_maps_are_valid`, `test_a_wrong_name_is_caught` |
@@ -107,3 +108,12 @@ def test_overlapping_tapered_reaches_are_caught(tmp_path: Path) -> None:
 def test_a_wrong_name_is_caught(tmp_path: Path) -> None:
     errors: list[str] = _validate_map(_copy_map("house_demo", tmp_path, lambda m: m.update(name="other")), SCHEMA)
     assert any("doesn't match" in error for error in errors)
+
+
+@pytest.mark.parametrize(("model", "expected"), [("hesco_barrier", None), ("no_such_model", "isn't in")])
+def test_meshes_are_checked(model: str, expected: str | None, tmp_path: Path) -> None:
+    folder: Path = _copy_map(
+        "lunar_surface", tmp_path, lambda m: m["structures"][0].update(mesh={"model": model, "height_m": 2})
+    )
+    errors: list[str] = _validate_map(folder, SCHEMA)
+    assert errors == [] if expected is None else len(errors) == 1 and expected in errors[0]

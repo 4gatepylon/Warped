@@ -109,6 +109,15 @@
         "properties": {
           "name": {"type": "string"},
           "frame": {"$ref": "#/$defs/frame"},
+          "mesh": {
+            "type": "object",
+            "required": ["model", "height_m"],
+            "additionalProperties": false,
+            "properties": {
+              "model": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+              "height_m": {"type": "number", "exclusiveMinimum": 0}
+            }
+          },
           "shapes": {
             "type": "array",
             "minItems": 1,
