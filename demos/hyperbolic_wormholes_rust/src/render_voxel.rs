@@ -25,7 +25,9 @@ use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
 };
+use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
 use crate::terrain::MoundGrid;
+use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
 use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld, clip_beam_to_map};
@@ -38,6 +40,8 @@ const KERNEL_NAME: &str = "trace_voxel_pixels";
 const UNIFORMS_BUFFER_INDEX: usize = 16;
 const SCENE_BUFFER_COUNT: usize = 10;
 const MEANS_BUFFER_INDEX: usize = 27;
+const HAND_LIGHT_BUFFER_INDEX: usize = 28;
+const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
 const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
 const BLOOM_LEVELS: usize = 5;
@@ -90,6 +94,7 @@ pub struct VoxelUniforms {
     pub flashlight_position: [f32; 4],
     pub flashlight_direction: [f32; 4],
     pub flashlight: [f32; 4],
+    pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
 }
 
 const _: () = assert!(
@@ -366,6 +371,7 @@ impl VoxelFrame {
                     light.brightness_frac as f32,
                 ]
             }),
+            spaceships: get_spaceships(world.sky_time_s),
         };
         assert_eq!(
             world.palette.len(),
@@ -521,10 +527,12 @@ fn dispatch(
     );
 }
 
-/// `VoxelGpu` is the voxel renderer's pipelines (every pixel, adaptive sampling's and the
-/// post-processing's), buffers, surface textures and HDR textures.
+/// `VoxelGpu` is the voxel renderer's pipelines (every pixel, adaptive sampling's, the
+/// post-processing's and the held gun's light probe), buffers, surface textures and HDR textures.
 pub struct VoxelGpu {
     trace_pixels: Pipeline,
+    probe_hand_light: Pipeline,
+    hand_light: Retained<ProtocolObject<dyn MTLBuffer>>,
     adaptive: AdaptivePipelines,
     bloom_down: Pipeline,
     tonemap: Pipeline,
@@ -545,7 +553,12 @@ impl VoxelGpu {
                 "__BYTES_PER_RAY_END__",
                 &VOXEL_BYTES_PER_RAY_END.to_string(),
             )
-            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string());
+            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
+            .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+            .replace(
+                "__BYTES_PER_VOXEL_UNIFORMS__",
+                &std::mem::size_of::<VoxelUniforms>().to_string(),
+            );
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|error| {
@@ -556,6 +569,13 @@ impl VoxelGpu {
             })?;
         Ok(VoxelGpu {
             trace_pixels: make_pipeline(device, &library, KERNEL_NAME)?,
+            probe_hand_light: make_pipeline(device, &library, "probe_hand_light")?,
+            hand_light: device
+                .newBufferWithLength_options(
+                    HAND_LIGHT_BYTES,
+                    MTLResourceOptions::StorageModePrivate,
+                )
+                .ok_or("Metal: no memory for the hand light")?,
             adaptive: AdaptivePipelines::FromLibrary(device, &library)?,
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
@@ -567,9 +587,17 @@ impl VoxelGpu {
         })
     }
 
-    /// `encode` uploads a frame and traces it into the HDR texture (with `samples`, by adaptive
-    /// sampling into those buffers, otherwise one ray per pixel), then blooms, grades and tone maps
-    /// it into `target`.
+    /// `get_hand_light` gives the buffer where `encode` has the light at the eye written, for the
+    /// held gun (viewmodel.rs).
+    ///
+    /// Example: `revolver.encode(&device, &command_buffer, &wand, size, 0.6, Some(gpu.get_hand_light()))?;`
+    pub(crate) fn get_hand_light(&self) -> &ProtocolObject<dyn MTLBuffer> {
+        &self.hand_light
+    }
+
+    /// `encode` uploads a frame, probes the light at the eye for the held gun, and traces it into
+    /// the HDR texture (with `samples`, by adaptive sampling into those buffers, otherwise one ray
+    /// per pixel), then blooms, grades and tone maps it into `target`.
     ///
     /// Example: `gpu.encode(&device, &encoder, &frame, None, &render_texture)?;`
     pub(crate) fn encode(
@@ -642,6 +670,11 @@ impl VoxelGpu {
             });
         }
         let post: &PostTextures = self.post.as_ref().expect("the HDR textures were just made");
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG BUFFER WILL HAPPEN
+        unsafe {
+            encoder.setBuffer_offset_atIndex(Some(&self.hand_light), 0, HAND_LIGHT_BUFFER_INDEX)
+        };
+        dispatch(encoder, &self.probe_hand_light, HAND_LIGHT_GRID);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
         unsafe { encoder.setTexture_atIndex(Some(&post.hdr), 0) };
         match samples {

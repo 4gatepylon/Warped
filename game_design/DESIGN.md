@@ -219,6 +219,8 @@ These values are configurable and may change after playtests.
 - A shot fires a bullet (an energy pulse) with minimal drop, and shows a laser along its path with
   no drop.
 - Warp objects bend bullets and lasers as they bend light, and both pass through wormholes.
+- A player coming out of a wormhole sees the world blueshift toward cyan, as if moving at a good fraction of
+  light speed, fading back within about 1.5 s. Only that player sees it.
 
 ## Weapons
 
@@ -240,6 +242,7 @@ Every weapon follows these rules:
 | Hits to kill, body | 1 | 10–20 |
 | Time to kill, sustained fire | One shot | At most ≈1–2 s |
 | Laser | Shows once per shot, then fades slowly | Pulses on and off while firing |
+| Shot noise (each shot strays at random) | Small: most shots near the crosshair, a few further | Grows as a burst heats the rifle, recovers as it cools |
 
 The rifle's fire rate and body hits to kill are tuned together, so that body shots kill within the
 time to kill.

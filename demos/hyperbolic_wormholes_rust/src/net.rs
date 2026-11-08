@@ -1,5 +1,6 @@
 //! `net.rs` lets players on one local network share a game. A server (its own process, without a
-//! window) keeps every player's eye frame, laser switch and the console they hold `E` on, sends
+//! window) keeps every player's eye frame, laser switch and the console they hold `E` on (with how
+//! far along turning it off they are, so every window speeds up its pulse alike), sends
 //! everyone a snapshot 60 times a second, removes a player another player's laser hit, turns off a
 //! console held for the settings' `consoles.hold_to_disable_s`, ends the game when a team's consoles are all off, and
 //! announces itself on the network so others can find it. It counts each player's kills and deaths
@@ -24,6 +25,7 @@
 //! - An elimination counts a death for the player hit and a kill for the shooter, unless they are on
 //!   the same team. Scores go back to 0 when a new game starts.
 
+use std::cell::Cell;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
@@ -53,6 +55,8 @@ const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
 const JOIN_RETRY_S: f64 = 0.5;
 const PLAYER_TIMEOUT_S: f64 = 3.0;
+const BEACON_GATHER_S: f64 = 1.0;
+const OTHER_VERSION_WINDOW_S: f64 = 1.0;
 const SERVER_POLL_MS: u64 = 2;
 const MAX_DATAGRAM_BYTES: usize = 2048;
 const BEACON_MAGIC: &[u8; 8] = b"WORMHOLE";
@@ -60,7 +64,7 @@ const FLOATS_PER_FRAME: usize = 16;
 const BYTES_PER_FLOAT: usize = 8;
 const BYTES_PER_ID: usize = 4;
 const BYTES_PER_PORT: usize = 2;
-const BYTES_PER_PLAYER: usize = BYTES_PER_ID + FLOATS_PER_FRAME * BYTES_PER_FLOAT + 2;
+const BYTES_PER_PLAYER: usize = BYTES_PER_ID + FLOATS_PER_FRAME * BYTES_PER_FLOAT + 3;
 const BYTES_PER_GAME: usize = 2 * BYTES_PER_ID + 1;
 
 /// `Kind` is a message's first byte.
@@ -77,6 +81,7 @@ enum Kind {
     LobbyQuery = 9,
     Lobby = 10,
     Scores = 11,
+    Full = 12,
 }
 
 impl Kind {
@@ -97,15 +102,18 @@ impl Kind {
             Kind::LobbyQuery,
             Kind::Lobby,
             Kind::Scores,
+            Kind::Full,
         ]
         .into_iter()
         .find(|kind| *kind as u8 == byte)
     }
 }
 
-/// `RemotePlayer` is another player as the last snapshot gave them: their eye frame, whether their
-/// laser is on and from which gun, their team (an index into `TEAM_NAMES`), and the console they
-/// hold `E` on, if any.
+/// `RemotePlayer` is another player as the last snapshot gave them: their eye frame (while their
+/// laser is on, turned by their shot's noise, so it is the frame their laser fires from), whether
+/// their laser is on and from which gun, their team (an index into `TEAM_NAMES`), the console they
+/// hold `E` on, if any, and how far along turning it off they are, from 0 to 1, as the server times
+/// it (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it).
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
@@ -114,6 +122,7 @@ pub struct RemotePlayer {
     pub is_rifle: bool,
     pub team: u32,
     pub disabling_console: Option<u8>,
+    pub disabling_frac: f64,
 }
 
 /// `GameState` is the game as the server keeps it: which game this is (from 0, one more each new
@@ -166,7 +175,8 @@ impl Message {
         self
     }
 
-    /// `player` appends a player: id, eye frame, laser switch and the console they hold `E` on.
+    /// `player` appends a player: id, eye frame, laser switch, the console they hold `E` on, and how
+    /// far along turning it off they are (a byte, 255 for done).
     ///
     /// Example: `let message = Message::New(Kind::State).player(&player);`
     fn player(mut self, player: &RemotePlayer) -> Message {
@@ -180,6 +190,8 @@ impl Message {
                 | (player.team as u8) << TEAM_BIT,
         );
         self.0.push(player.disabling_console.unwrap_or(NO_CONSOLE));
+        self.0
+            .push((player.disabling_frac.clamp(0.0, 1.0) * f64::from(u8::MAX)).round() as u8);
         self
     }
 
@@ -246,6 +258,7 @@ impl Reader<'_> {
         }
         let laser: u8 = self.take(1)?[0];
         let console: u8 = self.take(1)?[0];
+        let disabling: u8 = self.take(1)?[0];
         Some(RemotePlayer {
             id,
             frame: DMat4::from_cols_array(&values),
@@ -253,6 +266,7 @@ impl Reader<'_> {
             is_rifle: laser >> RIFLE_BIT & 1 == 1,
             team: u32::from(laser >> TEAM_BIT & 1),
             disabling_console: (console != NO_CONSOLE).then_some(console),
+            disabling_frac: f64::from(disabling) / f64::from(u8::MAX),
         })
     }
 
@@ -361,6 +375,7 @@ impl Server {
                                 is_rifle: false,
                                 team,
                                 disabling_console: None,
+                                disabling_frac: 0.0,
                             },
                             address,
                             last_heard: Instant::now(),
@@ -369,12 +384,15 @@ impl Server {
                         });
                         self.start_tally(id, team, address);
                         println!(
-                            "player {id} joined the {} team from {address}",
+                            "player {id} joined the {} team (their window's address: {address}; players join this server's port)",
                             TEAM_NAMES[team as usize]
                         );
                         (id, team)
                     }
-                    None => return Ok(()),
+                    None => {
+                        self.socket.send_to(&Message::New(Kind::Full).0, address)?;
+                        return Ok(());
+                    }
                 };
                 let mut welcome: Message = Message::New(Kind::Welcome).id(id);
                 welcome.0.push(team as u8);
@@ -635,15 +653,30 @@ impl Server {
         println!("Game {} started.", self.game.number);
     }
 
-    /// `send_snapshot` sends every player the list of all players, the game's state and each
-    /// player's health (a byte each, 255 full).
+    /// `get_disabling_frac` gives how far along `slot`'s player is in turning off the console they
+    /// hold `E` on: the seconds held over the settings' `consoles.hold_to_disable_s`, at most 1, or
+    /// 0 when they hold `E` on none.
+    ///
+    /// Example: `let frac = server.get_disabling_frac(&server.slots[0]);`
+    fn get_disabling_frac(&self, slot: &Slot) -> f64 {
+        slot.disabling_since.map_or(0.0, |since| {
+            (since.elapsed().as_secs_f64() / self.settings.consoles.hold_to_disable_s).min(1.0)
+        })
+    }
+
+    /// `send_snapshot` sends every player the list of all players (each with how far along turning
+    /// off a console they are, from `get_disabling_frac`), the game's state and each player's
+    /// health (a byte each, 255 full).
     ///
     /// Example: `server.send_snapshot()?;`
     fn send_snapshot(&self) -> Result<()> {
         let mut message: Message = Message::New(Kind::Snapshot);
         message.0.push(self.slots.len() as u8);
         for slot in &self.slots {
-            message = message.player(&slot.player);
+            message = message.player(&RemotePlayer {
+                disabling_frac: self.get_disabling_frac(slot),
+                ..slot.player
+            });
         }
         message = message.game(&self.game);
         for slot in &self.slots {
@@ -765,10 +798,15 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
     let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)).map_err(|error| {
         format!("net: can't listen for servers on UDP port {DISCOVERY_PORT} ({error}); join with --join <address>")
     })?;
-    socket.set_read_timeout(Some(timeout))?;
-    let start: Instant = Instant::now();
+    let mut deadline: Instant = Instant::now() + timeout;
+    let mut found: Vec<SocketAddr> = Vec::new();
     let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
-    while start.elapsed() < timeout {
+    loop {
+        let left: Duration = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        socket.set_read_timeout(Some(left))?;
         let Ok((length, address)) = socket.recv_from(&mut buffer) else {
             break;
         };
@@ -779,14 +817,43 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
             && &bytes[1..magic_end] == BEACON_MAGIC
         {
             let port: u16 = u16::from_le_bytes([bytes[magic_end], bytes[magic_end + 1]]);
-            return Ok(SocketAddr::new(address.ip(), port));
+            let server: SocketAddr = SocketAddr::new(address.ip(), port);
+            if found.is_empty() {
+                deadline = deadline.min(Instant::now() + Duration::from_secs_f64(BEACON_GATHER_S));
+            }
+            if !found.contains(&server) {
+                found.push(server);
+            }
         }
     }
-    Err(format!(
-        "net: no server announced itself within {} s; start one with --host, or join with --join <address>",
-        timeout.as_secs()
-    )
-    .into())
+    if found.is_empty() {
+        return Err(format!(
+            "net: no server announced itself within {} s; start one with --host, or join with --join <address>",
+            timeout.as_secs()
+        )
+        .into());
+    }
+    let chosen: SocketAddr = choose_server(&found);
+    if found.len() > 1 {
+        let all: Vec<String> = found.iter().map(SocketAddr::to_string).collect();
+        eprintln!(
+            "Found {} servers ({}); joining {chosen}. To join another, use --join <address>.",
+            found.len(),
+            all.join(", ")
+        );
+    }
+    Ok(chosen)
+}
+
+/// `choose_server` picks which of the servers that announced themselves to join: the first on
+/// `DEFAULT_PORT` (a game started the usual way), else the first heard.
+///
+/// Example: `let server = choose_server(&found);`
+fn choose_server(found: &[SocketAddr]) -> SocketAddr {
+    match found.iter().find(|server| server.port() == DEFAULT_PORT) {
+        Some(&server) => server,
+        None => found[0],
+    }
 }
 
 /// `Client` is this player's connection: its map's name, its id and the server's game settings
@@ -809,6 +876,10 @@ pub struct Client {
     join_request: Option<u8>,
     last_join: Instant,
     pub last_heard: Instant,
+    is_full: bool,
+    first_unanswered: Cell<Option<Instant>>,
+    last_bad_snapshot: Option<Instant>,
+    last_good_snapshot: Option<Instant>,
 }
 
 impl Client {
@@ -837,6 +908,10 @@ impl Client {
             join_request: None,
             last_join: Instant::now(),
             last_heard: Instant::now(),
+            is_full: false,
+            first_unanswered: Cell::new(Some(Instant::now())),
+            last_bad_snapshot: None,
+            last_good_snapshot: None,
         })
     }
 
@@ -858,6 +933,7 @@ impl Client {
                 continue;
             }
             self.last_heard = Instant::now();
+            self.first_unanswered.set(None);
             let bytes: &[u8] = &buffer[..length];
             let mut reader: Reader = Reader { bytes, position: 1 };
             match bytes.first().copied().and_then(Kind::FromByte) {
@@ -874,7 +950,15 @@ impl Client {
                                 self.server, self.map_name, server_map.replace('_', "-")
                             ).into());
                         }
-                        self.settings = Some(ServerSettings::FromJson(&bytes[reader.position..])?);
+                        let settings: ServerSettings =
+                            ServerSettings::FromJson(&bytes[reader.position..]).map_err(|error| {
+                                format!(
+                                    "net: the server at {} sent settings this game can't read, so it runs another version of the game; rebuild the server and this game from the same commit ({error})",
+                                    self.server
+                                )
+                            })?;
+                        self.settings = Some(settings);
+                        self.is_full = false;
                         self.id = Some(id);
                         self.welcomed_id = Some(id);
                         self.team = Some(u32::from(team));
@@ -882,6 +966,7 @@ impl Client {
                         events.push(NetEvent::Joined(id));
                     }
                 }
+                Some(Kind::Full) if self.id.is_none() => self.is_full = true,
                 Some(Kind::Lobby) => {
                     if let Some(counts) = reader.take(TEAM_NAMES.len()) {
                         self.lobby_counts = Some(std::array::from_fn(|i| u32::from(counts[i])));
@@ -895,8 +980,10 @@ impl Client {
                 Some(Kind::Snapshot) => {
                     let count: usize = reader.take(1).map_or(0, |count| usize::from(count[0]));
                     if length != 2 + count * (BYTES_PER_PLAYER + 1) + BYTES_PER_GAME {
+                        self.last_bad_snapshot = Some(Instant::now());
                         continue;
                     }
+                    self.last_good_snapshot = Some(Instant::now());
                     let players: Vec<RemotePlayer> =
                         (0..count).filter_map(|_| reader.player()).collect();
                     self.game = reader.game().expect("the length was checked");
@@ -931,7 +1018,8 @@ impl Client {
     }
 
     /// `send_state` sends this player's eye frame, laser switch, whether the gun is the rifle, and
-    /// the console they hold `E` on, once joined.
+    /// the console they hold `E` on, once joined. The server times the hold itself, so the
+    /// progress sent is 0.
     ///
     /// Example: `client.send_state(player.frame, is_laser_on, false, None)?;`
     pub fn send_state(
@@ -949,6 +1037,7 @@ impl Client {
                 is_rifle,
                 team: self.team.unwrap_or(0),
                 disabling_console,
+                disabling_frac: 0.0,
             };
             self.send(&Message::New(Kind::State).player(&player))?;
         }
@@ -966,6 +1055,54 @@ impl Client {
             self.send(&message)?;
         }
         Ok(())
+    }
+
+    /// `get_server` gives the address of the server this client plays on.
+    ///
+    /// Example: `let server = client.get_server();`
+    pub fn get_server(&self) -> SocketAddr {
+        self.server
+    }
+
+    /// `get_silent_s` gives how long the server has left this client unanswered: the seconds
+    /// since the first message sent after anything last came from it, or 0 when nothing is
+    /// waiting for an answer. Time when this window sent nothing (a long first frame, say) doesn't
+    /// count.
+    ///
+    /// Example: `if client.get_silent_s() > 2.0 { ... }`
+    pub fn get_silent_s(&self) -> f64 {
+        match self.first_unanswered.get() {
+            Some(sent) => sent.elapsed().as_secs_f64(),
+            None => 0.0,
+        }
+    }
+
+    /// `is_full` says whether the server answered this player's join that the game is full
+    /// (`MAX_PLAYER_COUNT` players), since their last welcome.
+    ///
+    /// Example: `if client.is_full() { ... }`
+    pub fn is_full(&self) -> bool {
+        self.is_full
+    }
+
+    /// `is_other_version` says whether the server's snapshots have the wrong length for this
+    /// game, and none had the right one, within the last `OTHER_VERSION_WINDOW_S`: the server runs
+    /// another version of the game.
+    ///
+    /// Example: `if client.is_other_version() { ... }`
+    pub fn is_other_version(&self) -> bool {
+        let is_recent = |at: Option<Instant>| {
+            at.is_some_and(|at| at.elapsed().as_secs_f64() < OTHER_VERSION_WINDOW_S)
+        };
+        is_recent(self.last_bad_snapshot) && !is_recent(self.last_good_snapshot)
+    }
+
+    /// `is_waiting_for_welcome` says whether this player asked to join and the server hasn't
+    /// welcomed them yet.
+    ///
+    /// Example: `if client.is_waiting_for_welcome() { ... }`
+    pub fn is_waiting_for_welcome(&self) -> bool {
+        self.join_request.is_some() && self.id.is_none()
     }
 
     /// `is_in_lobby` says whether this player hasn't chosen a team yet.
@@ -1031,10 +1168,14 @@ impl Client {
         Ok(())
     }
 
-    /// `send` sends a message to the server, dropping it if the socket is momentarily full.
+    /// `send` sends a message to the server, dropping it if the socket is momentarily full, and
+    /// starts the unanswered clock (`get_silent_s`) if it isn't running.
     ///
     /// Example: `self.send(&Message::New(Kind::Join))?;`
     fn send(&self, message: &Message) -> Result<()> {
+        if self.first_unanswered.get().is_none() {
+            self.first_unanswered.set(Some(Instant::now()));
+        }
         match self.socket.send_to(&message.0, self.server) {
             Ok(_) => Ok(()),
             Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(()),
@@ -1049,13 +1190,16 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Datagram length | complete, cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
+    //! | Datagram length | complete (progress kept to a 255th), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
     //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
+    //! | Servers announcing themselves | one, several with one on the default port (chosen), several without (the first) | `the_default_port_wins_among_servers` |
+    //! | A server that can't take this player | full (says so), of another version (snapshots that don't fit) | `full_games_and_other_versions_are_noticed` |
     //! | Team asked for | blue or red (given), any or none (the smaller team), a different one on a repeated join (kept) | `players_join_the_team_they_choose_or_the_smaller` |
     //! | Hit | by a joined player, by a stranger, on a player who is gone | `only_joined_players_can_hit` |
     //! | Welcome size | the built-in settings with the longest map name | `the_welcome_fits_a_datagram` |
     //! | Hits to kill | 1 (eliminated at once), several (eliminated at the last) | `only_joined_players_can_hit`, `rifle_hits_add_up` |
     //! | Console held | the other team's (turned off after the settings' `hold_to_disable_s`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
+    //! | Progress of turning off a console, in a snapshot | none held (0), part way (the seconds held over `hold_to_disable_s`), past the hold time (1) | `snapshots_carry_how_far_consoles_are_turned_off` |
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
     //! | Scores datagram | complete (several players, none), cut short, too long, an unknown team | `scores_survive_encoding` |
     //! | Who a hit eliminates | nobody (a hit short of the limit), the other team's player (a kill and a death), a teammate (a death only) | `eliminations_count_kills_and_deaths` |
@@ -1069,6 +1213,10 @@ mod tests {
     const LOBBY_QUERY_AND_JOIN_COUNT: usize = 2;
     const BLUE: u8 = 0;
     const RED: u8 = 1;
+    const SENT_DISABLING_FRAC: f64 = 0.37;
+    const DISABLING_FRAC_STEP: f64 = 1.0 / u8::MAX as f64;
+    const HALF: f64 = 0.5;
+    const TWICE: f64 = 2.0;
 
     /// `join_team` makes a join request for `team` (or `ANY_TEAM`).
     ///
@@ -1132,6 +1280,7 @@ mod tests {
             is_rifle: false,
             team: 0,
             disabling_console: Some(console),
+            disabling_frac: 0.0,
         };
         server
             .handle(&Message::New(Kind::State).player(&player).0, from)
@@ -1145,11 +1294,74 @@ mod tests {
         server.update_consoles();
     }
 
+    /// `connect_client` connects a client to `server` and joins it on `team`, letting the server
+    /// handle its lobby query and join.
+    ///
+    /// Example: `let client = connect_client(&mut server, RED);`
+    fn connect_client(server: &mut Server, team: u8) -> Client {
+        let server_address: SocketAddr = server.socket.local_addr().expect("an address");
+        let mut client: Client = Client::Connect(server_address, TEST_MAP_NAME).expect("a socket");
+        client.join(Some(u32::from(team))).expect("a join request");
+        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
+        for _ in 0..LOBBY_QUERY_AND_JOIN_COUNT {
+            let (length, from) = server.socket.recv_from(&mut buffer).expect("a datagram");
+            server
+                .handle(&buffer[..length], from)
+                .expect("a lobby query or join");
+        }
+        client
+    }
+
     /// `address` gives a local address with a made-up port, standing for a client.
     ///
     /// Example: `let a = address(50000);`
     fn address(port: u16) -> SocketAddr {
         SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+    }
+
+    /// `poll_until` polls `client` until `is_done` holds, for at most a second.
+    ///
+    /// Example: `poll_until(&mut client, |c| c.is_full());`
+    fn poll_until(client: &mut Client, is_done: impl Fn(&Client) -> bool) {
+        let start: Instant = Instant::now();
+        while !is_done(client) && start.elapsed() < Duration::from_secs(1) {
+            client.poll().expect("datagrams");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn full_games_and_other_versions_are_noticed() {
+        let mut server: Server = make_server();
+        let join: Vec<u8> = Message::New(Kind::Join).0;
+        for port in 0..MAX_PLAYER_COUNT as u16 {
+            server
+                .handle(&join, address(50_100 + port))
+                .expect("a join");
+        }
+        let mut client: Client = connect_client(&mut server, RED);
+        poll_until(&mut client, Client::is_full);
+        assert!(client.is_full() && client.is_waiting_for_welcome());
+        assert!(!client.is_other_version());
+        let client_address: SocketAddr =
+            address(client.socket.local_addr().expect("an address").port());
+        let short_snapshot: [u8; 3] = [Kind::Snapshot as u8, 1, 0];
+        server
+            .socket
+            .send_to(&short_snapshot, client_address)
+            .expect("a snapshot");
+        poll_until(&mut client, Client::is_other_version);
+        assert!(client.is_other_version());
+    }
+
+    #[test]
+    fn the_default_port_wins_among_servers() {
+        let other: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT + 170);
+        let usual: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT);
+        let third: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT + 171);
+        assert_eq!(choose_server(&[other]), other);
+        assert_eq!(choose_server(&[other, usual, third]), usual);
+        assert_eq!(choose_server(&[third, other]), third);
     }
 
     #[test]
@@ -1162,6 +1374,7 @@ mod tests {
             is_rifle: true,
             team: 0,
             disabling_console: Some(3),
+            disabling_frac: SENT_DISABLING_FRAC,
         };
         let game: GameState = GameState {
             number: 2,
@@ -1184,6 +1397,7 @@ mod tests {
             ),
             (7, frame, true, true, Some(3))
         );
+        assert!((player.disabling_frac - SENT_DISABLING_FRAC).abs() <= DISABLING_FRAC_STEP);
         assert_eq!(reader.game(), Some(game));
     }
 
@@ -1196,6 +1410,7 @@ mod tests {
             is_rifle: false,
             team: 0,
             disabling_console: None,
+            disabling_frac: 0.0,
         };
         let message: Message = Message::New(Kind::State).player(&player);
         let cut: &[u8] = &message.0[..message.0.len() - 1];
@@ -1432,16 +1647,7 @@ mod tests {
     #[test]
     fn clients_receive_scores() {
         let mut server: Server = make_server();
-        let server_address: SocketAddr = server.socket.local_addr().expect("an address");
-        let mut client: Client = Client::Connect(server_address, TEST_MAP_NAME).expect("a socket");
-        client.join(Some(u32::from(RED))).expect("a join request");
-        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
-        for _ in 0..LOBBY_QUERY_AND_JOIN_COUNT {
-            let (length, from) = server.socket.recv_from(&mut buffer).expect("a datagram");
-            server
-                .handle(&buffer[..length], from)
-                .expect("a lobby query or join");
-        }
+        let mut client: Client = connect_client(&mut server, RED);
         server.send_scores().expect("the scores");
         let deadline: Instant = Instant::now() + Duration::from_secs(1);
         while client.scores.is_none() {
@@ -1458,5 +1664,49 @@ mod tests {
                 deaths: 0
             }])
         );
+    }
+
+    #[test]
+    fn snapshots_carry_how_far_consoles_are_turned_off() {
+        let mut server: Server = make_server();
+        let mut watcher: Client = connect_client(&mut server, BLUE);
+        let (holder, idle) = (address(50_001), address(50_002));
+        server.handle(&join_team(RED), holder).expect("a join");
+        server.handle(&join_team(RED), idle).expect("a join");
+        let holding: RemotePlayer = RemotePlayer {
+            id: 2,
+            frame: DMat4::IDENTITY,
+            is_laser_on: false,
+            is_rifle: false,
+            team: u32::from(RED),
+            disabling_console: Some(0),
+            disabling_frac: 0.0,
+        };
+        server
+            .handle(&Message::New(Kind::State).player(&holding).0, holder)
+            .expect("a state");
+        let hold_s: f64 = server.settings.consoles.hold_to_disable_s;
+        server.slots[1].disabling_since =
+            Some(Instant::now() - Duration::from_secs_f64(HALF * hold_s));
+        server.send_snapshot().expect("a snapshot");
+        let deadline: Instant = Instant::now() + Duration::from_secs(1);
+        while watcher.players.len() < 2 {
+            assert!(Instant::now() < deadline, "the snapshot never arrived");
+            watcher.poll().expect("the welcome and a snapshot");
+        }
+        let fracs: Vec<(u32, Option<u8>, f64)> = watcher
+            .players
+            .iter()
+            .map(|p| (p.id, p.disabling_console, p.disabling_frac))
+            .collect();
+        assert_eq!((fracs[0].0, fracs[0].1), (2, Some(0)));
+        assert!(
+            (fracs[0].2 - HALF).abs() <= DISABLING_FRAC_STEP,
+            "{fracs:?}"
+        );
+        assert_eq!(fracs[1], (3, None, 0.0));
+        server.slots[1].disabling_since =
+            Some(Instant::now() - Duration::from_secs_f64(TWICE * hold_s));
+        assert_eq!(server.get_disabling_frac(&server.slots[1]), 1.0);
     }
 }

@@ -62,6 +62,8 @@ const SLOT_FORMATS: [MTLPixelFormat; 4] = [
     MTLPixelFormat::RGBA8Unorm,
     MTLPixelFormat::RGBA8Unorm_sRGB,
 ];
+const HAND_LIGHT_COUNT: usize = 3;
+const HAND_LIGHT_BUFFER_INDEX: usize = 1;
 const SLOT_FALLBACKS: [[u8; 4]; 4] = [[255; 4], [255; 4], [128, 128, 255, 255], [255; 4]];
 
 /// `Vertex` is the shader's `Vertex`: a glTF vertex with its node's transform applied.
@@ -91,6 +93,32 @@ struct MaterialUniforms {
     emissive: [f32; 4],
     params: [f32; 4],
 }
+
+/// `HandLight` is the shader's `HandLight` (and render_voxel.metal's): the light on the revolver
+/// in camera space, as directions toward three lights with their radiance, the local up, and the
+/// radiance of the sky and of the ground.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct HandLight {
+    directions: [[f32; 4]; HAND_LIGHT_COUNT],
+    colors: [[f32; 4]; HAND_LIGHT_COUNT],
+    up: [f32; 4],
+    sky: [f32; 4],
+    ground: [f32; 4],
+}
+
+/// `HAND_LIGHT_BYTES` is the size of a `HandLight`, for the buffer `probe_hand_light` writes.
+pub(crate) const HAND_LIGHT_BYTES: usize = std::mem::size_of::<HandLight>();
+
+/// `FIXED_HAND_LIGHT` lights the revolver on maps whose renderer doesn't probe their light (the
+/// house): a key light from the upper left, lit regolith below and black space above.
+const FIXED_HAND_LIGHT: HandLight = HandLight {
+    directions: [[-0.4208, 0.7814, 0.4608, 0.0], [0.0; 4], [0.0; 4]],
+    colors: [[2.4, 2.35, 2.25, 0.0], [0.0; 4], [0.0; 4]],
+    up: [0.0, 1.0, 0.0, 0.0],
+    sky: [0.03, 0.035, 0.05, 0.0],
+    ground: [0.32, 0.31, 0.3, 0.0],
+};
 
 /// `Material` is a glTF material's uniforms and its four maps.
 struct Material {
@@ -465,9 +493,11 @@ impl Viewmodel {
     }
 
     /// `encode` draws the revolver posed like `wand` into a `size` image (premultiplied sRGB, clear
-    /// where it isn't) for a camera of vertical half-angle tangent `tan_half_fov`, and returns it.
+    /// where it isn't) for a camera of vertical half-angle tangent `tan_half_fov`, lit by
+    /// `hand_light` (a GPU `HandLight` written earlier in `command_buffer`) or, if it is None, by
+    /// `FIXED_HAND_LIGHT`, and returns it.
     ///
-    /// Example: `let image = revolver.encode(&device, &command_buffer, &wand, (2560, 1600), 0.6)?;`
+    /// Example: `let image = revolver.encode(&device, &command_buffer, &wand, (2560, 1600), 0.6, None)?;`
     pub fn encode(
         &mut self,
         device: &ProtocolObject<dyn MTLDevice>,
@@ -475,6 +505,7 @@ impl Viewmodel {
         wand: &OverlayWand,
         size: (usize, usize),
         tan_half_fov: f32,
+        hand_light: Option<&ProtocolObject<dyn MTLBuffer>>,
     ) -> Result<Texture> {
         if self.targets.as_ref().is_none_or(|t| t.size != size) {
             self.targets = Some(Targets {
@@ -525,6 +556,18 @@ impl Viewmodel {
                 std::mem::size_of::<DrawUniforms>(),
                 1,
             );
+            match hand_light {
+                Some(buffer) => encoder.setFragmentBuffer_offset_atIndex(
+                    Some(buffer),
+                    0,
+                    HAND_LIGHT_BUFFER_INDEX,
+                ),
+                None => encoder.setFragmentBytes_length_atIndex(
+                    NonNull::from(&FIXED_HAND_LIGHT).cast(),
+                    std::mem::size_of::<HandLight>(),
+                    HAND_LIGHT_BUFFER_INDEX,
+                ),
+            }
         }
         for is_blended in [false, true] {
             encoder.setRenderPipelineState(if is_blended {

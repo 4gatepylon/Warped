@@ -3,8 +3,9 @@
  * @brief `render_voxel.metal` ray-traces voxel maps of the portable map format (`common/maps/`) in H³, one thread
  * per pixel, as the Lunar Surface level's WebGL fragment shader does (`demos/levels/lunar_surface/index.html`):
  * straight geodesic chords between warp objects, kick–drift–kick steps inside their reach, a voxel walk through each
- * structure in its Klein coordinates, the ground's folded {4,5} tiling, lunar-Lambert light with sun shadows, lamps,
- * earthshine, laser beams, stars and a planet. Everything here belongs to the `lunar` appearance style.
+ * structure in its Klein coordinates, the ground's folded {4,5} tiling, lunar-Lambert light with soft sun shadows, lamps,
+ * earthshine, a thin haze, laser beams, stars, a planet, spaceships flying over and bloom. Everything here belongs to
+ * the `lunar` appearance style.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread per pixel of the render size.
@@ -56,7 +57,7 @@ constant float MIN_MEAN_ALBEDO = 0.02;
 constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);
 constant float DISPLAY_GAMMA = 2.2;
 constant float EXPOSURE = 1.6;
-constant float BLOOM_STRENGTH = 0.05;
+constant float BLOOM_STRENGTH = 0.12;
 constant int BLOOM_LEVELS = __BLOOM_LEVELS__;
 constant float VIGNETTE_STRENGTH = 0.28;
 constant float GRADE_MIDDLE_GREY = 0.18;
@@ -68,7 +69,20 @@ constant float3 GRADE_HIGHLIGHT_TINT = float3(1.04, 1.0, 0.95);
 constant float AMBIENT = 0.11;
 constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
+constant float SHADOW_PENUMBRA_TAN = 0.015;
+constant float3 HAZE_COLOR = float3(0.15, 0.17, 0.21);
+constant float HAZE_DISTANCE_M = 200.0;
+constant float HAZE_MAX_FRAC = 0.35;
+constant float HAZE_HORIZON_HEIGHT_FRAC = 0.12;
+constant float HAZE_SUN_GLOW = 0.5;
+constant float HAZE_SUN_POWER = 8.0;
+constant float HAZE_SKYLIGHT = 0.4;
+constant float BLOOM_KARIS_LUMA = 4.0;
+constant float BLOOM_GLOW = 1.0;
+constant float2 BLOOM_GLOW_LUMA_EDGES = float2(0.5, 2.0);
 constant float3 EARTHSHINE_COLOR = float3(0.55, 0.7, 1.0);
+constant int HAND_LIGHT_COUNT = 3;
+constant int HAND_LIGHT_BUFFER_INDEX = 28;
 constant float LIGHT_CUTOFF_FRAC = 3.0;
 constant float LIGHT_WRAP = 0.3;
 constant float BLOCK_NOISE = 0.18;
@@ -206,10 +220,103 @@ constant float GLOW_FLOOR = 1.0 / 1024.0;
 constant float SMOOTH_SECOND_DIFFERENCE_PER_FIRST = 1.6;
 constant int REFINED_PIXELS_PER_CELL = 3;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
+constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
+constant int HULL_FREIGHTER = 0;
+constant int HULL_FIGHTER = 1;
+constant int HULL_RING_SHIP = 2;
+constant int HULL_COUNT = 3;
+constant int LIGHT_NAV = 0;
+constant int LIGHT_STROBE = 1;
+constant int LIGHT_BEACON = 2;
+constant float SHIP_BOUND_HALF_LENGTHS = 1.5;
+constant float SHIP_BOUND_PIXELS = 4.0;
+constant float SHIP_ROUNDING_HALF_LENGTHS = 0.02;
+constant float SHIP_GRADIENT_PIXELS = 0.5;
+constant float SHIP_BEVEL_HALF_LENGTHS = 0.03;
+constant float SHIP_BEVEL_TILT_RAD = 1.2;
+constant float SHIP_SUNLIT = 1.1;
+constant float3 SHIP_GROUNDSHINE_COLOR = float3(0.5, 0.48, 0.46);
+constant float SHIP_PANELS_PER_HALF_LENGTH = 4.0;
+constant float SHIP_PANEL_VARIATION = 0.3;
+constant float SHIP_LIGHT_MIN_PIXELS = 1.0;
+constant float SHIP_ENGINE_BRIGHTNESS = 2.6;
+constant float SHIP_PLUME_BRIGHTNESS = 0.7;
+constant float SHIP_PLUME_WIDTH_PER_RADIUS = 0.8;
+constant float SHIP_PLUME_HALF_LENGTHS = 0.3;
+constant float3 PORT_COLOR = float3(1.6, 0.18, 0.12);
+constant float3 STARBOARD_COLOR = float3(0.25, 1.6, 0.5);
+constant float3 STROBE_COLOR = float3(3.0);
+constant float3 BEACON_COLOR = float3(1.8, 0.3, 0.12);
+constant float3 WINDOW_COLOR = float3(1.0, 0.8, 0.5);
+constant float RING_RADIUS_HALF_LENGTHS = 0.52;
+constant float RING_HALF_WIDTH_HALF_LENGTHS = 0.055;
+constant float RING_SPOKE_COUNT = 3.0;
+constant float RING_SPOKE_RADIUS_HALF_LENGTHS = 0.03;
+constant float3 RING_COLOR = float3(0.75, 0.74, 0.7);
+constant float RING_LIGHT_COUNT = 6.0;
+constant float RING_LIGHT_HALF_LENGTHS = 0.02;
+constant float3 RING_LIGHT_COLOR = float3(0.8, 1.1, 1.3);
+
+/** @brief `HULL_BOXES` are the spaceships' boxes (centre, half size; in half lengths, x to the nose, y to starboard), mirrored across the keel. */
+constant float4 HULL_BOXES[] = {
+    float4(-0.05, 0.0, 0.78, 0.075), float4(0.45, 0.19, 0.145, 0.105), float4(0.13, 0.19, 0.145, 0.105), float4(-0.19, 0.19, 0.145, 0.105),
+    float4(-0.51, 0.19, 0.145, 0.105), float4(0.8, 0.0, 0.11, 0.14), float4(-0.85, 0.0, 0.09, 0.25),
+    float4(0.82, 0.0, 0.1, 0.09), float4(-0.85, 0.0, 0.08, 0.14),
+};
+/** @brief `HULL_BOX_COLORS` are the colours of `HULL_BOXES`. */
+constant float3 HULL_BOX_COLORS[] = {
+    float3(0.55, 0.56, 0.58), float3(0.78, 0.45, 0.2), float3(0.25, 0.52, 0.56), float3(0.82, 0.8, 0.72),
+    float3(0.62, 0.25, 0.18), float3(0.7, 0.7, 0.72), float3(0.36, 0.36, 0.38),
+    float3(0.7, 0.7, 0.72), float3(0.36, 0.36, 0.38),
+};
+/** @brief `HULL_CAPSULES` are the spaceships' tapered capsules (the two ends of the axis), mirrored across the keel. */
+constant float4 HULL_CAPSULES[] = {
+    float4(0.88, 0.0, 0.99, 0.0), float4(-0.62, 0.3, -0.42, 0.44),
+    float4(-0.8, 0.0, 0.62, 0.0), float4(0.62, 0.0, 1.0, 0.0), float4(0.15, 0.08, -0.6, 0.8), float4(-0.95, 0.17, -0.38, 0.17),
+    float4(-0.8, 0.0, 0.8, 0.0), float4(-0.06, 0.0, 0.06, 0.0),
+};
+/** @brief `HULL_CAPSULE_RADII` are the radii of `HULL_CAPSULES` at their two ends. */
+constant float2 HULL_CAPSULE_RADII[] = {
+    float2(0.08, 0.035), float2(0.035, 0.03),
+    float2(0.12, 0.1), float2(0.1, 0.015), float2(0.2, 0.05), float2(0.065, 0.065),
+    float2(0.06, 0.05), float2(0.12, 0.12),
+};
+/** @brief `HULL_CAPSULE_COLORS` are the colours of `HULL_CAPSULES`. */
+constant float3 HULL_CAPSULE_COLORS[] = {
+    float3(0.7, 0.7, 0.72), float3(0.75, 0.76, 0.78),
+    float3(0.68, 0.7, 0.74), float3(0.68, 0.7, 0.74), float3(0.6, 0.62, 0.66), float3(0.4, 0.4, 0.44),
+    float3(0.58, 0.58, 0.6), float3(0.66, 0.66, 0.68),
+};
+/** @brief `HULL_PART_RANGES` gives each hull's first box, box count, first capsule and capsule count. */
+constant int4 HULL_PART_RANGES[HULL_COUNT] = {int4(0, 7, 0, 2), int4(9, 0, 2, 4), int4(7, 2, 6, 2)};
+/** @brief `HULL_ENGINES` are the spaceships' engine nozzles (centre, radius, unused), mirrored across the keel. */
+constant float4 HULL_ENGINES[] = {float4(-0.96, 0.0, 0.065, 0.0), float4(-0.96, 0.16, 0.055, 0.0), float4(-0.97, 0.17, 0.06, 0.0), float4(-0.95, 0.0, 0.09, 0.0)};
+/** @brief `HULL_ENGINE_COLORS` are each hull's engine colours. */
+constant float3 HULL_ENGINE_COLORS[HULL_COUNT] = {float3(1.0, 0.62, 0.3), float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
+/** @brief `HULL_LIGHTS` are the spaceships' lights (centre, `LIGHT_*` kind or else a window, radius), mirrored across the keel. */
+constant float4 HULL_LIGHTS[] = {
+    float4(0.6, 0.3, 0.0, 0.02), float4(-0.85, 0.26, 1.0, 0.022), float4(0.0, 0.0, 2.0, 0.02), float4(0.86, 0.05, 3.0, 0.012),
+    float4(0.86, 0.11, 3.0, 0.012), float4(0.76, 0.05, 3.0, 0.012), float4(0.76, 0.11, 3.0, 0.012),
+    float4(-0.63, 0.83, 0.0, 0.035), float4(-0.82, 0.0, 1.0, 0.04),
+    float4(0.85, 0.1, 0.0, 0.025), float4(-0.85, 0.15, 1.0, 0.03), float4(0.86, 0.0, 3.0, 0.015),
+};
+/** @brief `HULL_GLOW_RANGES` gives each hull's first engine, engine count, first light and light count. */
+constant int4 HULL_GLOW_RANGES[HULL_COUNT] = {int4(0, 2, 0, 7), int4(2, 1, 7, 2), int4(3, 1, 9, 3)};
+
+/**
+ * @brief `Spaceship` is one spaceship in the sky (`spaceships.rs`): its centre's direction at the origin with its half
+ * length in radians, its unit heading with its hull (`HULL_*`), and its strobe's and beacon's brightness, its engines'
+ * brightness and its ring's turn in radians.
+ */
+struct Spaceship {
+    float4 centre;
+    float4 heading;
+    float4 lights;
+};
 
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot and
- * regions, as `render_voxel.rs` writes them.
+ * regions, and the spaceships, as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -250,7 +357,9 @@ struct VoxelUniforms {
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
+    Spaceship spaceships[SPACESHIP_COUNT];
 };
+static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
 /** @brief `Shape` is one smooth solid in its structure's chart (meters): centre and kind, half sizes and rounding, material and axis. */
 struct Shape {
@@ -300,7 +409,11 @@ struct BeamSegment {
     float4 info;
 };
 
-/** @brief `Hit` is the first surface along a chord: distance, material, structure (-1 for the ground), face, grid point. */
+/**
+ * @brief `Hit` is the first surface along a chord: distance, material, structure (-1 for the ground), face, grid point,
+ * and, for a shadow ray, how far it stayed from every surface it passed: the least ratio of that gap to the distance
+ * travelled times `SHADOW_PENUMBRA_TAN` (1 or more is fully lit).
+ */
 struct Hit {
     float s;
     int mat;
@@ -309,6 +422,7 @@ struct Hit {
     float sgn;
     float3 g;
     int3 cell;
+    float lit;
 };
 
 /**
@@ -420,12 +534,22 @@ static float structure_distance(thread const Scene &scene, device const VoxelStr
     return best;
 }
 
-/** @brief `march_shapes` sphere-traces the chart line q0 + dq mu from mu to mu_hi and gives where it meets a shape (or INFINITY). @par Example @code float mu = march_shapes(scene, st, q0, dq, 0.0, 1.0, false, index); @endcode */
-static float march_shapes(thread const Scene &scene, device const VoxelStructure &st, float3 q0, float3 dq, float mu, float mu_hi, bool is_glass, thread int &index) {
+/**
+ * @brief `march_shapes` sphere-traces the chart line q0 + dq mu from mu to mu_hi and gives where it meets a shape (or
+ * INFINITY), lowering `lit` to the least gap to a shape over the chart distance from `mu_from` times
+ * `SHADOW_PENUMBRA_TAN`.
+ * @par Example
+ * @code
+ * float mu = march_shapes(scene, st, q0, dq, 0.0, 1.0, false, index, 0.0, lit);
+ * @endcode
+ */
+static float march_shapes(thread const Scene &scene, device const VoxelStructure &st, float3 q0, float3 dq, float mu, float mu_hi, bool is_glass, thread int &index,
+                          float mu_from, thread float &lit) {
     float speed = max(length(dq), TINY);
     for (int i = 0; i < MAX_SHAPE_STEPS; i++) {
         float d = structure_distance(scene, st, q0 + dq * mu, is_glass, index);
         if (d < SHAPE_HIT_M) return mu;
+        lit = min(lit, d / max((mu - mu_from) * speed * SHADOW_PENUMBRA_TAN, TINY));
         mu += d / speed;
         if (mu > mu_hi) break;
     }
@@ -457,10 +581,12 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     float scale = st.scale.x;
     float3 q0 = p.xyz / p.w * scale, dq = (t.xyz * p.w - p.xyz * t.w) * scale;
     int index = st.size.x;
-    float mu = march_shapes(scene, st, q0, dq, mu_lo, mu_hi, false, index);
+    float lam_from = -tanh(s_star), mu_from = lam_from / (p.w * (p.w + lam_from * t.w));
+    float mu = march_shapes(scene, st, q0, dq, mu_lo, mu_hi, false, index, mu_from, hit.lit);
     if (!is_shadow) {
         int glass_index;
-        float mu_glass = march_shapes(scene, st, q0, dq, mu_lo, min(mu, mu_hi), true, glass_index);
+        float temp_lit = 1.0;
+        float mu_glass = march_shapes(scene, st, q0, dq, mu_lo, min(mu, mu_hi), true, glass_index, mu_from, temp_lit);
         if (mu_glass < INFINITY) glass_s = min(glass_s, s_star + clamp_atanh(mu_glass * p.w * p.w / (1.0 - mu_glass * p.w * t.w)));
     }
     if (mu == INFINITY) return;
@@ -533,7 +659,8 @@ static float3 get_fermi(float4 x, float r) {
 
 /**
  * @brief `trace_terrain` is terrain.rs's `find_hit_s` on the chord from x along v within `hit.s`: steps of a fraction
- * of the gap to the ground, at least a little more each meter out, then bisection of the step that went under.
+ * of the gap to the ground, at least a little more each meter out, then bisection of the step that went under; lowers
+ * `hit.lit` to the least gap over the distance travelled times `SHADOW_PENUMBRA_TAN`.
  * @par Example
  * @code
  * trace_terrain(scene, x, v, hit);
@@ -555,6 +682,7 @@ static void trace_terrain(thread const Scene &scene, float4 x, float4 v, thread 
             if (hi < hit.s) { hit.s = hi; hit.mat = MAT_GROUND; hit.k = -1; }
             return;
         }
+        hit.lit = min(hit.lit, gap / max(s * r * SHADOW_PENUMBRA_TAN, TINY));
         if (f.z > top_m && geodesic_tangent(x, v, s).y > 0.0) return;
         previous = s;
         s += max(TERRAIN_STEP_FRAC * gap, TERRAIN_MIN_STEP_M + TERRAIN_STEP_PER_M * s * r) / r;
@@ -627,11 +755,19 @@ static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp,
     }
 }
 
-/** @brief `trace_shadow` gives 1 if nothing blocks the straight path toward the sun within `SHADOW_M`, else 0. @par Example @code float lit = trace_shadow(scene, x, l); @endcode */
+/**
+ * @brief `trace_shadow` gives 0 if something blocks the straight path toward the sun within `SHADOW_M`, else how lit
+ * x is, from 0 to 1: a path that passes close to a surface, compared with how far it has gone, is in the penumbra.
+ * @par Example
+ * @code
+ * float lit = trace_shadow(scene, x, l);
+ * @endcode
+ */
 static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
     Hit h;
     h.s = SHADOW_M / scene.u.curvature_radius_m;
     h.mat = 0;
+    h.lit = 1.0;
     float glass_s = NO_HIT_S;
     if (scene.u.has_terrain != 0) {
         trace_terrain(scene, x, l, h);
@@ -641,7 +777,7 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
         trace_structure(scene, k, x, l, 0.0, true, h, glass_s);
         if (h.mat != 0) return SHADOW_FLOOR;
     }
-    return 1.0;
+    return smoothstep(0.0, 1.0, h.lit);
 }
 
 /** @brief `get_index_slope` gives d ln n / dρ of a warp's index (isotropic Schwarzschild or foil). @par Example @code float s = get_index_slope(scene, w, rho); @endcode */
@@ -779,19 +915,25 @@ static float2 get_env_brdf(float roughness, float n_dot_v) {
     return float2(-1.04, 1.04) * a004 + r.zw;
 }
 
+/** @brief `get_lamp_light` gives lamp i's light reaching x (black past its cutoff) and the unit direction toward it. @par Example @code float3 c = get_lamp_light(scene, i, x, toward); @endcode */
+static float3 get_lamp_light(thread const Scene &scene, int i, float4 x, thread float4 &toward) {
+    float4 lx = scene.lights[i].position;
+    float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
+    toward = normalize_tangent(x, lx);
+    if (d_m > LIGHT_CUTOFF_FRAC * radius_m) return float3(0.0);
+    return scene.lights[i].color_radius.rgb / (1.0 + (d_m / radius_m) * (d_m / radius_m))
+        * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
+}
+
 /** @brief `gather_lights` sums the lamps' light at a surface point. @par Example @code float3 lamps = gather_lights(scene, s, x, view, energy); @endcode */
 static float3 gather_lights(thread const Scene &scene, Surface s, float4 x, float4 view, float3 energy) {
     float3 sum = float3(0.0);
     for (int i = 0; i < scene.u.light_count; i++) {
-        float4 lx = scene.lights[i].position;
-        float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
-        if (d_m > LIGHT_CUTOFF_FRAC * radius_m) continue;
-        float4 toward = lx + mdot(lx, x) * x;
-        toward *= rsqrt(max(mdot(toward, toward), TINY));
-        float falloff = 1.0 / (1.0 + (d_m / radius_m) * (d_m / radius_m))
-                      * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
+        float4 toward;
+        float3 light = get_lamp_light(scene, i, x, toward);
+        if (all(light == 0.0)) continue;
         float3 wrap = LIGHT_WRAP * s.albedo * (1.0 - s.metallic);
-        sum += scene.lights[i].color_radius.rgb * falloff * (wrap + (1.0 - LIGHT_WRAP) * M_PI_F * light_from(s, toward, view, energy));
+        sum += light * (wrap + (1.0 - LIGHT_WRAP) * M_PI_F * light_from(s, toward, view, energy));
     }
     return sum;
 }
@@ -818,7 +960,8 @@ static float3 light_flashlight(thread const Scene &scene, float4 x, float4 n) {
 
 /**
  * @brief `light_surface` lights a surface point with face normal n: the sun (GGX with lunar-Lambert diffuse, shadowed),
- * earthshine and the ambient light (split-sum specular with multiple-scattering compensation), lamps and the laser spot.
+ * earthshine, the haze's skylight and the ambient light (split-sum specular with multiple-scattering compensation), lamps
+ * and the laser spot.
  * @par Example
  * @code
  * float3 c = light_surface(scene, s, x, n, v);
@@ -835,7 +978,7 @@ static float3 light_surface(thread const Scene &scene, Surface s, float4 x, floa
         if (sun > 0.0) color += M_PI_F * SUN_INTENSITY * sun * SUN_COLOR * light_from(s, l, view, energy);
     }
     float earth = max(mdot(s.n, transport_from_centre(scene.u.planet.xyz, x)), 0.0);
-    float3 ambient = (float3(AMBIENT) + EARTHSHINE * earth * EARTHSHINE_COLOR) * s.ao;
+    float3 ambient = (float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR + EARTHSHINE * earth * EARTHSHINE_COLOR) * s.ao;
     color += ambient * (s.albedo * (1.0 - s.metallic) + (f0 * env.x + env.y) * energy) + gather_lights(scene, s, x, view, energy)
         + light_flashlight(scene, x, s.n) * s.albedo * (1.0 - s.metallic);
     if (scene.u.spot_color.a > 0.0) {
@@ -843,6 +986,55 @@ static float3 light_surface(thread const Scene &scene, Surface s, float4 x, floa
         color += scene.u.spot_color.rgb * scene.u.spot_color.a * exp(-d_m * d_m / (SPOT_RADIUS_M * SPOT_RADIUS_M));
     }
     return color;
+}
+
+/**
+ * @brief `HandLight` is viewmodel.metal's `HandLight`: the light at the eye for the held gun, in camera space (+x right,
+ * +y up, -z ahead): the unit directions toward the sun, the lamps and the planet (zero when absent) and each one's
+ * radiance, the local up, and the radiance of the sky and of the ground.
+ */
+struct HandLight {
+    float4 directions[HAND_LIGHT_COUNT];
+    float4 colors[HAND_LIGHT_COUNT];
+    float4 up;
+    float4 sky;
+    float4 ground;
+};
+
+/** @brief `to_camera` gives a tangent vector at the eye in camera coordinates. @par Example @code float3 d = to_camera(u, l); @endcode */
+static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdot(t, u.camera[0]), mdot(t, u.camera[1]), mdot(t, u.camera[2])); }
+
+/**
+ * @brief `probe_hand_light` writes the light at the eye into `hand`, as `light_surface` lights a surface there: the sun
+ * (shadowed), the lamps summed into one light from their weighted mean direction (their wrapped part goes to the
+ * sky), earthshine, the ambient light and the haze's skylight as the sky, and the ground (regolith) lit by the sun and the ambient light.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs, one thread, before the frame's rays.
+ * @endcode
+ */
+kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
+    float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
+    float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
+    float4 toward_lamps = float4(0.0);
+    for (int i = 0; i < u.light_count; i++) {
+        float4 toward;
+        float3 light = get_lamp_light(scene, i, x, toward);
+        lamps += light;
+        toward_lamps += toward * dot(light, float3(1.0));
+    }
+    float4 directions[HAND_LIGHT_COUNT] = {l, toward_lamps, transport_from_centre(u.planet.xyz, x)};
+    float3 colors[HAND_LIGHT_COUNT] = {sun, (1.0 - LIGHT_WRAP) * lamps, EARTHSHINE * EARTHSHINE_COLOR};
+    for (int k = 0; k < HAND_LIGHT_COUNT; k++) {
+        float3 d = to_camera(u, directions[k]);
+        hand.directions[k] = float4(dot(d, d) > TINY ? normalize(d) : float3(0.0), 0.0);
+        hand.colors[k] = float4(colors[k], 0.0);
+    }
+    hand.up = float4(to_camera(u, up), 0.0);
+    hand.sky = float4(ambient + LIGHT_WRAP * lamps, 0.0);
+    hand.ground = float4(get_palette(scene, u.mat_regolith).rgb * (sun * max(mdot(up, l), 0.0) + ambient), 0.0);
 }
 
 /** @brief `grid_normal` is the unit normal, toward +axis, of the grid plane of structure st through local point p. @par Example @code float4 t = grid_normal(st, p, 0); @endcode */
@@ -1029,8 +1221,8 @@ static float3 get_sky_direction(thread const Scene &scene, float4 x, float4 v) {
     return normalize(w.xyz - w.w / (1.0 + cam.w) * cam.xyz);
 }
 
-/** @brief `sample_sky` gives the sky in direction d at the origin: stars, Milky Way, sun, planet. @par Example @code float3 c = sample_sky(scene, d); @endcode */
-static float3 sample_sky(thread const Scene &scene, float3 d) {
+/** @brief `sample_sky_bodies` gives the sky in direction d at the origin: stars, Milky Way, sun, planet. @par Example @code float3 c = sample_sky_bodies(scene, d); @endcode */
+static float3 sample_sky_bodies(thread const Scene &scene, float3 d) {
     constant VoxelUniforms &u = scene.u;
     float3 sun_dir = u.sun.xyz, planet = u.planet.xyz, e1 = u.planet_e1.xyz, e2 = u.planet_e2.xyz;
     float sd = dot(d, sun_dir);
@@ -1054,6 +1246,138 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
         color += ATMOSPHERE_COLOR * HALO_GLOW * (1.0 - smoothstep(1.0, HALO_RADIUS_SQ, r2)) * max(dot(normalize(q.x * e1 + q.y * e2), sun_dir) + HALO_WRAP, 0.0);
     }
     return color + sun;
+}
+
+/** @brief `get_box_distance_2d` gives the signed distance from p to the box centred at `box.xy` with half size `box.zw`. @par Example @code float d = get_box_distance_2d(p, HULL_BOXES[0]); @endcode */
+static float get_box_distance_2d(float2 p, float4 box) {
+    float2 e = abs(p - box.xy) - box.zw;
+    return length(max(e, 0.0)) + min(max(e.x, e.y), 0.0);
+}
+
+/**
+ * @brief `get_capsule_distance_2d` nearly gives the signed distance from p to the segment from `ends.xy` to `ends.zw`,
+ * thickened by a radius running from `radii.x` to `radii.y`.
+ * @par Example
+ * @code
+ * float d = get_capsule_distance_2d(p, HULL_CAPSULES[0], HULL_CAPSULE_RADII[0]);
+ * @endcode
+ */
+static float get_capsule_distance_2d(float2 p, float4 ends, float2 radii) {
+    float2 pa = p - ends.xy, ba = ends.zw - ends.xy;
+    float t = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * t) - mix(radii.x, radii.y, t);
+}
+
+/** @brief `turn_into_sector` turns p by `-turn_rad`, then into the sector of `count` around the origin that holds the +x axis. @par Example @code float2 q = turn_into_sector(p, 0.3, 6.0); @endcode */
+static float2 turn_into_sector(float2 p, float turn_rad, float count) {
+    float sector_rad = 2.0 * M_PI_F / count, angle_rad = atan2(p.y, p.x) - turn_rad;
+    angle_rad -= sector_rad * round(angle_rad / sector_rad);
+    return length(p) * float2(cos(angle_rad), sin(angle_rad));
+}
+
+/**
+ * @brief `get_hull_distance` gives the signed distance from p to a spaceship's hull, in its half lengths, with the colour
+ * of the nearest part. p is in the ship's own frame (x to the nose, y to starboard), and a ring ship's ring and spokes
+ * are turned by `ring_rad`.
+ * @par Example
+ * @code
+ * float d = get_hull_distance(HULL_FIGHTER, p, 0.0, albedo);
+ * @endcode
+ */
+static float get_hull_distance(int hull, float2 p, float ring_rad, thread float3 &albedo) {
+    float2 m = float2(p.x, abs(p.y));
+    int4 range = HULL_PART_RANGES[hull];
+    float distance = INFINITY;
+    for (int i = range.x; i < range.x + range.y; i++) {
+        float d = get_box_distance_2d(m, HULL_BOXES[i]) - SHIP_ROUNDING_HALF_LENGTHS;
+        if (d < distance) { distance = d; albedo = HULL_BOX_COLORS[i]; }
+    }
+    for (int i = range.z; i < range.z + range.w; i++) {
+        float d = get_capsule_distance_2d(m, HULL_CAPSULES[i], HULL_CAPSULE_RADII[i]);
+        if (d < distance) { distance = d; albedo = HULL_CAPSULE_COLORS[i]; }
+    }
+    if (hull == HULL_RING_SHIP) {
+        float ring = abs(length(p) - RING_RADIUS_HALF_LENGTHS) - RING_HALF_WIDTH_HALF_LENGTHS;
+        float spoke = get_capsule_distance_2d(turn_into_sector(p, ring_rad, RING_SPOKE_COUNT), float4(0.0, 0.0, RING_RADIUS_HALF_LENGTHS, 0.0),
+                                              float2(RING_SPOKE_RADIUS_HALF_LENGTHS));
+        float d = min(ring, spoke);
+        if (d < distance) { distance = d; albedo = RING_COLOR; }
+    }
+    return distance;
+}
+
+/**
+ * @brief `get_spaceship_glow` gives the light a spaceship's engines and lights add at p (its own frame, in half lengths,
+ * with pixels `px` half lengths wide): glowing nozzles with a plume behind, red to port, green to starboard, a flashing
+ * strobe, a pulsing beacon, lit windows and a ring ship's ring lights.
+ * @par Example
+ * @code
+ * color += get_spaceship_glow(ship, HULL_FIGHTER, p, px);
+ * @endcode
+ */
+static float3 get_spaceship_glow(Spaceship ship, int hull, float2 p, float px) {
+    float2 m = float2(p.x, abs(p.y));
+    int4 range = HULL_GLOW_RANGES[hull];
+    float3 glow = float3(0.0);
+    for (int i = range.x; i < range.x + range.y; i++) {
+        float2 e = m - HULL_ENGINES[i].xy;
+        float r = max(HULL_ENGINES[i].z, SHIP_LIGHT_MIN_PIXELS * px), across = e.y / (r * SHIP_PLUME_WIDTH_PER_RADIUS), along = e.x / SHIP_PLUME_HALF_LENGTHS;
+        float plume = e.x < 0.0 ? exp(-across * across - along * along) : 0.0;
+        glow += HULL_ENGINE_COLORS[hull] * ship.lights.z * (SHIP_ENGINE_BRIGHTNESS * exp(-dot(e, e) / (r * r)) + SHIP_PLUME_BRIGHTNESS * plume);
+    }
+    for (int i = range.z; i < range.z + range.w; i++) {
+        float4 light = HULL_LIGHTS[i];
+        float2 e = m - light.xy;
+        float r = max(light.w, SHIP_LIGHT_MIN_PIXELS * px);
+        int kind = int(light.z);
+        float3 tint = kind == LIGHT_NAV ? (p.y < 0.0 ? PORT_COLOR : STARBOARD_COLOR)
+                      : kind == LIGHT_STROBE ? STROBE_COLOR * ship.lights.x : kind == LIGHT_BEACON ? BEACON_COLOR * ship.lights.y : WINDOW_COLOR;
+        glow += tint * exp(-dot(e, e) / (r * r));
+    }
+    if (hull == HULL_RING_SHIP) {
+        float2 e = turn_into_sector(p, ship.lights.w, RING_LIGHT_COUNT) - float2(RING_RADIUS_HALF_LENGTHS, 0.0);
+        float r = max(RING_LIGHT_HALF_LENGTHS, SHIP_LIGHT_MIN_PIXELS * px);
+        glow += RING_LIGHT_COLOR * exp(-dot(e, e) / (r * r));
+    }
+    return glow;
+}
+
+/**
+ * @brief `draw_spaceship` draws a spaceship over the sky colour `color` in direction d: its hull, lit by the sun on the
+ * edges that face it and from below by the sunlit ground, with its engines and lights on top. Directions far from the
+ * ship return `color` after a few dot products.
+ * @par Example
+ * @code
+ * color = draw_spaceship(scene, scene.u.spaceships[0], d, color);
+ * @endcode
+ */
+static float3 draw_spaceship(thread const Scene &scene, Spaceship ship, float3 d, float3 color) {
+    float3 c = ship.centre.xyz, h = ship.heading.xyz, side = cross(h, c);
+    float facing = dot(d, c), half_length = ship.centre.w, px = scene.u.pixel_angle_rad / half_length;
+    float2 p = float2(dot(d, h), dot(d, side)) / (max(facing, TINY) * half_length);
+    float bound = SHIP_BOUND_HALF_LENGTHS + SHIP_BOUND_PIXELS * px;
+    if (facing <= 0.0 || dot(p, p) > bound * bound) return color;
+    int hull = int(ship.heading.w);
+    float3 albedo = float3(0.0), unused;
+    float distance = get_hull_distance(hull, p, ship.lights.w, albedo), coverage = clamp(0.5 - distance / px, 0.0, 1.0);
+    if (coverage > 0.0) {
+        float step = SHIP_GRADIENT_PIXELS * px;
+        float2 g = float2(get_hull_distance(hull, p + float2(step, 0.0), ship.lights.w, unused), get_hull_distance(hull, p + float2(0.0, step), ship.lights.w, unused)) - distance;
+        g /= max(length(g), TINY);
+        float tilt_rad = SHIP_BEVEL_TILT_RAD * clamp(1.0 + distance / SHIP_BEVEL_HALF_LENGTHS, 0.0, 1.0);
+        float3 n = -c * cos(tilt_rad) + (g.x * h + g.y * side) * sin(tilt_rad);
+        float panel = 1.0 + SHIP_PANEL_VARIATION * (hash_3d(float3(floor(p * SHIP_PANELS_PER_HALF_LENGTH), float(hull) + sign(p.y))) - 0.5);
+        float3 light = SUN_COLOR * SHIP_SUNLIT * max(dot(n, scene.u.sun.xyz), 0.0) + SHIP_GROUNDSHINE_COLOR * max(-n.y, 0.0);
+        color = mix(color, albedo * panel * light, coverage);
+    }
+    return color + get_spaceship_glow(ship, hull, p, px);
+}
+
+/** @brief `sample_sky` gives the sky in direction d at the origin: stars, Milky Way, sun and planet, with the spaceships in front. @par Example @code float3 c = sample_sky(scene, d); @endcode */
+static float3 sample_sky(thread const Scene &scene, float3 d) {
+    float3 color = sample_sky_bodies(scene, d);
+    for (int i = 0; i < SPACESHIP_COUNT; i++) color = draw_spaceship(scene, scene.u.spaceships[i], d, color);
+    return color;
 }
 
 /** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form), with the brightest halo's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */
@@ -1122,7 +1446,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     }
     float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, team = 0.0;
     Hit hit;
-    hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
+    hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0); hit.lit = 1.0;
     int outcome = OUTCOME_LOST, last_warp = -1;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
@@ -1201,8 +1525,31 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
 }
 
 /**
- * @brief `shade_ray_end` gives a ray's final colour from where it ended: the lit surface or the sky, tinted by the
- * glass it crossed, with the laser's glow and the highlight roll-off; a lost ray is black.
+ * @brief `add_haze` mixes a thin haze into the colour of a ray that hit a surface (more the farther it went) or reached
+ * the sky (more the nearer the horizon), brighter toward the sun; a lost ray stays as it is.
+ * @par Example
+ * @code
+ * color = add_haze(scene, color, end);
+ * @endcode
+ */
+static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end) {
+    float haze_frac, sun_cos;
+    if (end.surface.x == OUTCOME_HIT) {
+        haze_frac = 1.0 - exp(-end.grid.w * scene.u.curvature_radius_m / HAZE_DISTANCE_M);
+        sun_cos = mdot(end.view, transport_from_centre(scene.u.sun.xyz, end.point));
+    } else if (end.surface.x == OUTCOME_SKY) {
+        haze_frac = exp(-max(end.point.y, 0.0) / HAZE_HORIZON_HEIGHT_FRAC);
+        sun_cos = dot(end.point.xyz, scene.u.sun.xyz);
+    } else {
+        return color;
+    }
+    float3 haze = HAZE_COLOR + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
+    return mix(color, haze, HAZE_MAX_FRAC * haze_frac);
+}
+
+/**
+ * @brief `shade_ray_end` gives a ray's final colour from where it ended: the lit surface or the sky, hazed, tinted by
+ * the glass it crossed, with the laser's glow and the highlight roll-off; a lost ray is black.
  * @par Example
  * @code
  * float3 color = shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5));
@@ -1218,6 +1565,7 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
     } else if (end.surface.x == OUTCOME_SKY) {
         color = to_linear(sample_sky(scene, end.point.xyz));
     }
+    color = add_haze(scene, color, end);
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
     float3 beam_color = to_linear(end.surface.w > 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
@@ -1517,7 +1865,7 @@ static float3 grade_display(float3 color) {
 
 /**
  * @brief `bloom_down` halves texture 1 into texture 2 for the bloom chain: four bilinear taps over a 4x4 block, each
- * damped by Karis' weight so single bright pixels don't bloom.
+ * damped by a weight like Karis' that keeps single, very bright pixels from blooming but lets glows and the sun bloom.
  * @par Example
  * @code
  * dispatched by render_voxel.rs once per bloom level, one thread per smaller pixel.
@@ -1532,7 +1880,7 @@ kernel void bloom_down(texture2d<float> source [[texture(1)]], texture2d<float, 
     float weight = 0.0;
     for (int i = 0; i < 4; i++) {
         float3 c = source.sample(edge, uv + texel * (float2(i & 1, i >> 1) * 2.0 - 1.0)).rgb;
-        float w = 1.0 / (1.0 + dot(c, LUMA));
+        float w = 1.0 / (1.0 + dot(c, LUMA) / BLOOM_KARIS_LUMA);
         sum += c * w;
         weight += w;
     }
@@ -1540,8 +1888,8 @@ kernel void bloom_down(texture2d<float> source [[texture(1)]], texture2d<float, 
 }
 
 /**
- * @brief `tonemap_voxel` finishes the HDR image (texture 1) like the fps_demo: mixes in the bloom levels, exposes,
- * grades, tone maps with ACES, vignettes and encodes sRGB into texture 0.
+ * @brief `tonemap_voxel` finishes the HDR image (texture 1) like the fps_demo: mixes in the bloom levels, adds the
+ * bloom's bright parts as a glow, exposes, grades, tone maps with ACES, vignettes and encodes sRGB into texture 0.
  * @par Example
  * @code
  * dispatched by render_voxel.rs after tracing, one thread per pixel.
@@ -1554,7 +1902,9 @@ kernel void tonemap_voxel(texture2d<float> hdr [[texture(1)]], array<texture2d<f
     float2 uv = (float2(id) + 0.5) / float2(hdr.get_width(), hdr.get_height());
     float3 bloom_color = float3(0.0);
     for (int k = 0; k < BLOOM_LEVELS; k++) bloom_color += bloom[k].sample(edge, uv).rgb;
-    float3 color = mix(hdr.read(id).rgb, bloom_color / float(BLOOM_LEVELS), BLOOM_STRENGTH) * EXPOSURE;
+    float3 bloom_mean = bloom_color / float(BLOOM_LEVELS);
+    float3 glow = bloom_mean * smoothstep(BLOOM_GLOW_LUMA_EDGES.x, BLOOM_GLOW_LUMA_EDGES.y, dot(bloom_mean, LUMA));
+    float3 color = (mix(hdr.read(id).rgb, bloom_mean, BLOOM_STRENGTH) + BLOOM_GLOW * glow) * EXPOSURE;
     color = grade_display(aces_fitted(grade_scene(color)));
     color *= 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length((uv - 0.5) * float2(1.1, 1.0)));
     image.write(float4(linear_to_srgb(saturate(color)), 1.0), id);

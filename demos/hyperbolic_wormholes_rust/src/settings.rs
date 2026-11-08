@@ -24,17 +24,23 @@ use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 6] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 10] = [
     "map_edge.start_wall_frac",
     "sniper.reload_s",
+    "sniper.noise_mean_rad",
+    "sniper.noise_max_rad",
+    "rifle.noise_start_rad",
+    "rifle.noise_max_rad",
     "rifle.recoil_up_rad",
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
     "respawn.delay_s",
 ];
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 7] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
+    "view.wormhole_tint_frac",
+    "view.wormhole_tint_s",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
     "hit_effects.red_frac",
@@ -60,13 +66,14 @@ pub struct MovementSettings {
     pub crouch_s: f64,
 }
 
-/// `SprintEnergySettings` is how long a full sprint bar lasts and how long an empty one takes to
-/// refill.
+/// `SprintEnergySettings` is how long a full sprint bar lasts, and how long an empty one takes to
+/// refill while crouched and while walking or standing upright.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SprintEnergySettings {
     pub drain_s: f64,
-    pub refill_s: f64,
+    pub refill_crouching_s: f64,
+    pub refill_walking_s: f64,
 }
 
 /// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, and how long
@@ -82,8 +89,9 @@ pub struct HeadBobSettings {
 }
 
 /// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
-/// to reload, how many hits eliminate a player, and how its beam flies (speed, and how long each
-/// point stays lit).
+/// to reload, how many hits eliminate a player, how its beam flies (speed, and how long each
+/// point stays lit), and how far a shot strays from the crosshair (the mean of an exponential
+/// distribution, and a cap; `shot_noise.rs`).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SniperSettings {
@@ -92,10 +100,13 @@ pub struct SniperSettings {
     pub hits_to_eliminate: u8,
     pub beam_speed_m_per_s: f64,
     pub beam_trail_s: f64,
+    pub noise_mean_rad: f64,
+    pub noise_max_rad: f64,
 }
 
 /// `RifleSettings` is gun 2: its fire rate, how long a shot hits, how its beam flies, overheating
-/// and cooling, the hits that eliminate a player, and each shot's recoil.
+/// and cooling, the hits that eliminate a player, each shot's recoil, and the most a shot strays
+/// from the crosshair, cold and at full heat (`shot_noise.rs`).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RifleSettings {
@@ -110,6 +121,8 @@ pub struct RifleSettings {
     pub recoil_up_rad: f64,
     pub recoil_sideways_rad: f64,
     pub recoil_settle_s: f64,
+    pub noise_start_rad: f64,
+    pub noise_max_rad: f64,
 }
 
 /// `ConsoleSettings` is how long holding `E` takes to turn off a console, and from how far.
@@ -181,13 +194,17 @@ pub struct MapEdgeSettings {
 }
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
-/// long motion smears, how strongly the view stretches near the map's edge, and the head bob.
+/// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
+/// blueshifts toward cyan just after going through a wormhole (0 to 1) and how long that takes to
+/// fade, and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {
     pub look_rad_per_px: f64,
     pub motion_blur_s: f64,
     pub edge_stretch_frac: f64,
+    pub wormhole_tint_frac: f64,
+    pub wormhole_tint_s: f64,
     pub head_bob: HeadBobSettings,
 }
 
@@ -316,6 +333,14 @@ impl ServerSettings {
             )
             .into());
         }
+        let rifle: &RifleSettings = &settings.rifle;
+        if rifle.noise_start_rad > rifle.noise_max_rad {
+            return Err(format!(
+                "settings {source}: rifle needs noise_start_rad <= noise_max_rad, not {} and {}",
+                rifle.noise_start_rad, rifle.noise_max_rad
+            )
+            .into());
+        }
         let edge: &MapEdgeSettings = &settings.map_edge;
         if edge.start_wall_frac >= edge.stop_wall_frac || edge.stop_wall_frac > 1.0 {
             return Err(format!(
@@ -363,7 +388,8 @@ impl ServerSettings {
 
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
-    /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does.
+    /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with
+    /// `view.wormhole_tint_frac` at most 1.
     ///
     /// Example: `let mine = PerPlayerSettings::FromYaml(&text, "mine.yaml")?;`
     #[allow(non_snake_case)]
@@ -372,6 +398,13 @@ impl PerPlayerSettings {
             serde_yaml::from_str(text).map_err(|error| format!("settings {source}: {error}"))?;
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
+        if file.view.wormhole_tint_frac > 1.0 {
+            return Err(format!(
+                "settings {source}: view.wormhole_tint_frac must be at most 1, not {}",
+                file.view.wormhole_tint_frac
+            )
+            .into());
+        }
         Ok(PerPlayerSettings {
             keys: KeyBindings::FromNames(&file.keys, source)?,
             view: file.view,
@@ -420,6 +453,8 @@ mod tests {
     //! | Source | the built-in files, server settings sent as JSON, player settings the menu saved | `builtin_settings_read_and_survive_json`, `saved_player_settings_load_back` |
     //! | Keys | all present, one unknown, one missing | `builtin_settings_read_and_survive_json`, `unknown_and_missing_keys_fail` |
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, negative; in either file | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
+    //! | Numbers that bound each other | in order (built in), out of order (a zoom below 1, a map edge that stops before it starts, a rifle's noise that shrinks with heat) | `builtin_settings_read_and_survive_json`, `bad_numbers_name_their_key` |
+    //! | Wormhole tint strength | 0 (with a fade of 0 s), between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -453,7 +488,7 @@ mod tests {
     fn unknown_and_missing_keys_fail() {
         let unknown: String = BUILTIN_SERVER_YAML.replace("drain_s:", "drain_seconds:");
         assert!(ServerSettings::FromYaml(&unknown, "test").is_err());
-        let missing: String = BUILTIN_SERVER_YAML.replace("  refill_s: 15.0", "");
+        let missing: String = BUILTIN_SERVER_YAML.replace("  refill_walking_s: 15.0", "");
         assert!(ServerSettings::FromYaml(&missing, "test").is_err());
         let unknown_view: String = BUILTIN_PLAYER_YAML.replace("motion_blur_s:", "blur_s:");
         assert!(PerPlayerSettings::FromYaml(&unknown_view, "test").is_err());
@@ -482,6 +517,12 @@ mod tests {
             .expect_err("a zoom below 1 fails")
             .to_string();
         assert!(error.contains("aim"), "{error}");
+        let shrinking_noise: String =
+            BUILTIN_SERVER_YAML.replace("noise_start_rad: 0.002", "noise_start_rad: 0.5");
+        let error: String = ServerSettings::FromYaml(&shrinking_noise, "test")
+            .expect_err("a rifle's noise that shrinks with heat fails")
+            .to_string();
+        assert!(error.contains("noise_start_rad"), "{error}");
         let backward_edge: String =
             BUILTIN_SERVER_YAML.replace("start_wall_frac: 0.0", "start_wall_frac: 0.6");
         let error: String = ServerSettings::FromYaml(&backward_edge, "test")
@@ -495,5 +536,23 @@ mod tests {
             .expect("a bad number fails")
             .to_string();
         assert!(error.contains("view.look_rad_per_px"), "{error}");
+    }
+
+    #[test]
+    fn wormhole_tint_takes_0_to_1() {
+        let none: String = BUILTIN_PLAYER_YAML
+            .replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0")
+            .replace("wormhole_tint_s: 1.5", "wormhole_tint_s: 0");
+        assert!(PerPlayerSettings::FromYaml(&none, "test").is_ok());
+        let half: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 0.5");
+        assert!(PerPlayerSettings::FromYaml(&half, "test").is_ok());
+        let too_strong: String =
+            BUILTIN_PLAYER_YAML.replace("wormhole_tint_frac: 1.0", "wormhole_tint_frac: 1.5");
+        let error: String = PerPlayerSettings::FromYaml(&too_strong, "test")
+            .err()
+            .expect("a tint above 1 fails")
+            .to_string();
+        assert!(error.contains("view.wormhole_tint_frac"), "{error}");
     }
 }

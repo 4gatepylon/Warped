@@ -12,15 +12,18 @@ done.
 ## Play
 
 ```bash
-make run-demo
-make run-demo RENDERER=cpu
+make serve-game
+make join-game SERVER=127.0.0.1
 ```
 
+- Playing is only on a game server: `make serve-game` runs one (Lunar Surface by default), and every player joins
+  it with `make join-game` (`SERVER=127.0.0.1` on the same computer, or the address the server prints). There is no
+  local demo or host-and-play command; without a server, only the tools below run.
 - Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
   `Esc` or `N` goes back to the game). The window's close button quits at once.
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
-  (`--player-settings`) to `make run-demo`, `host-game` or `join-game`.
+  (`--player-settings`) to `make join-game`.
 - `Tab` opens a menu of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
   (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
@@ -42,19 +45,30 @@ make run-demo RENDERER=cpu
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
-  you through.
+  you through. Coming out, your view blueshifts toward cyan, as if you moved at 15% of light speed (D84): red fades,
+  green takes red's light and blue green's, most of all straight ahead, then it fades back over 1.5 s.
+  `view.wormhole_tint_frac` (0 to 1, also in the menu) and `view.wormhole_tint_s` in `player_settings.yaml` set its
+  strength and length (0 for none). Only the player who goes through sees it (Metal renderer).
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
   `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
   bar, is empty until it can fire again.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
   eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots.
+  Each shot strays a little from the crosshair, by a random angle sampled for that shot (D89): with the sniper
+  usually by a hair (3 mrad on average, at most 15), with the rifle by up to 2 mrad cold, growing with its heat to 20
+  mrad and shrinking as it cools (`noise_*_rad` under `sniper` and `rifle` in `server_settings.yaml`).
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
   The laser is a light ray from your hand that bends near mouths and goes through them, and through glass; the HUD
   says what it hits. On Lunar Surface the habitat modules' and walkways' windows are glass in real openings: you
   see out of them and shoot through them, but can't climb through them.
+- The bars in the bottom left (health in a game on a server, the gun's ammo, and on Lunar Surface the sprint energy)
+  are segments that lean like `/`: empty ones dark glass outlined in the bar's colour, filled ones translucent,
+  glossy and glowing (D85). A reddish-orange pulse runs down the health bar (right to left) at each hit, a blue one
+  down the energy bar while you sprint, and a fainter one up the energy bar while it refills; the ammo bar has none.
+  The CPU renderer's window draws them as flat boxes.
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
@@ -75,19 +89,22 @@ about 50 blocks down the rails), and far left (to high above the rails, where yo
 ## Maps
 
 ```bash
-make run-demo MAP=lunar-surface
-cargo run --release -- --map lunar-surface --view black_hole
+make serve-game MAP=house-demo
+make join-game MAP=house-demo SERVER=127.0.0.1
+cargo run --release -- --map lunar-surface --bench-views --view black_hole
 ```
 
 - The demo reads its maps from [`common/maps/`](../../common/maps/README.md) (the portable map format):
   `house-demo` (the default: the house, rails and three wormholes, R = 8) or `lunar-surface` (the Lunar Surface level of
   [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m, with its black hole and wormhole).
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
-  steps, lighting with sun shadows, lamps, ground, stars and planet, so it looks like the level, with the house's
-  adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
-  flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 15 s, a head bob, jumping onto blocks with `Space`, moving
+  steps, lighting with soft sun shadows, lamps, ground, stars and planet, so it looks like the level (plus a thin haze
+  and stronger bloom, W-76), with the house's adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
+  flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 7.5 s crouched or 15 s walking or standing, a head bob, jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
+- Spaceships fly over Lunar Surface, purely for looks (D82): a freighter, a ring ship and three fighters in a V, each
+  crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
 
@@ -99,14 +116,12 @@ for a fresh Mac, the commands for each player and the known caveats.
 
 ```bash
 make serve-game MAP=lunar-surface
-make host-game MAP=lunar-surface
 make join-game MAP=lunar-surface
 make join-game MAP=lunar-surface SERVER=192.168.1.20
 ```
 
 - `make serve-game` (`--serve`) runs only the server and prints this computer's address with the commands that join
-  it, so it can run on a computer nobody plays on. `make host-game` (`--host`) starts the same server as its own
-  process, joins it from a window, and stops it when the window closes.
+  it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
   consoles, respawn, the hit slowdown, the flashlight); it sends them to every player who joins.
@@ -119,8 +134,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
 - On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).
-  Consoles pulse while on, twice as fast while someone holds `E` on them, and go dark when off. After a win, `Enter`
-  in the server's terminal starts a new game.
+  Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
+  just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
+  go dark when off. After a win, `Enter` in the server's terminal starts a new game.
 - Up to 8 players. The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
 - `--join <address> --bot --exit-after-s <seconds>` plays by itself without a window (it walks until another player
   is within 12 blocks, then turns toward them and fires), to test a game; it saves its view at each hit under
