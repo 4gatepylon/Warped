@@ -120,6 +120,7 @@ struct CityUniforms {
     sky_color: [f32; 4],
     beacons: [[f32; 4]; BEACON_SLOT_COUNT],
     hazard: [f32; 4],
+    beam_speckle: [f32; 4],
 }
 
 /// `CityScene` is the geometry that never changes: opaque triangles and the glass's, with an id
@@ -147,6 +148,9 @@ pub struct CityFrame {
     pub time_s: f32,
     pub dynamic: Vec<CityVertex>,
     pub beams: Vec<CityVertex>,
+    /// `beam_speckle` is the beams' speckle this frame, as on Lunar Surface: a seed that changes
+    /// every frame, then the shares of speckled pixels painted black and turned white.
+    pub beam_speckle: [f32; 4],
 }
 
 impl CityFrame {
@@ -898,6 +902,7 @@ pub fn push_beam(
     camera_m: DVec3,
     width_m: f64,
     color: [f32; 4],
+    speckle_frac: f32,
 ) {
     let along: DVec3 = b - a;
     let side: DVec3 = along.cross(camera_m - a).normalize_or_zero() * (width_m / 2.0);
@@ -910,7 +915,7 @@ pub fn push_beam(
         [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
         DVec3::ZERO,
         color,
-        NO_LAYER,
+        speckle_frac,
     );
 }
 
@@ -1055,7 +1060,7 @@ impl CityGpu {
         Ok(CityGpu {
             opaque: make_pipeline(device, &library, "city_fragment", None)?,
             glass: make_pipeline(device, &library, "glass_fragment", Some(false))?,
-            beam: make_pipeline(device, &library, "beam_fragment", Some(true))?,
+            beam: make_pipeline(device, &library, "beam_fragment", Some(false))?,
             depth_write: make_depth_state(device, true)?,
             depth_test: make_depth_state(device, false)?,
             albedo: make_array(device, MTLPixelFormat::RGBA8Unorm_sRGB, 4, &layers)?,
@@ -1130,6 +1135,7 @@ impl CityGpu {
             sky_color: SKY_COLOR,
             beacons: frame.beacons,
             hazard: [frame.scene.lift_hole_count as f32, 0.0, 0.0, 0.0],
+            beam_speckle: frame.beam_speckle,
         };
         let dynamic: Buffer = make_buffer(device, &frame.dynamic)?;
         let beams: Buffer = make_buffer(device, &frame.beams)?;

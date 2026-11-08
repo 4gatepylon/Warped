@@ -47,6 +47,7 @@ use crate::render_city::{
 };
 use crate::render_metal::{self, FrameData};
 use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
+use crate::shot_noise;
 use crate::thrown_wormholes::PlayerWormholes;
 use crate::viewmodel;
 use crate::voxel_world::{MUZZLE_M, SPAWN_TURN_RAD};
@@ -118,6 +119,7 @@ const SLOW_FRAME_MS: f64 = 17.5;
 const STAIRS_ARRIVE_M: f64 = 0.5;
 const STAIRS_LEAD_IN_M: f64 = 2.0;
 const STEER_WALK_ERROR_RAD: f64 = 0.35;
+const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const CONSOLE_REPLAN_S: f64 = 3.0;
 const SERVE_POLL_MS: u64 = 50;
 const STAIRS_ROUTE_END_WAIT_S: f64 = 2.0;
@@ -780,8 +782,9 @@ fn make_route(world: &CityWorld) -> Vec<Step> {
     steps
 }
 
-/// `Beam` is a shot's corners, its team and its brightness (0 to 1) for one frame.
-type Beam = (Vec<DVec3>, u32, f64);
+/// `Beam` is a shot's corners, its team, its brightness (0 to 1) for one frame and the share of its
+/// pixels that speckle (0 for none).
+type Beam = (Vec<DVec3>, u32, f64, f64);
 
 /// `RifleLog` records the rifle check on the route: shots from cold until the rifle overheated,
 /// the seconds it took to cool down, and for each player this player eliminated, the rifle's head
@@ -797,13 +800,15 @@ struct RifleLog {
     kills: Vec<[u32; 2]>,
 }
 
-/// `LiveShot` is a shot being drawn: its path, when it was fired, by which team, and whether it
-/// is this window's own (drawn from the gun's muzzle).
+/// `LiveShot` is a shot being drawn: its path, when it was fired, by which team, whether it is
+/// this window's own (drawn from the gun's muzzle), and the share of its beam's pixels that
+/// speckle.
 struct LiveShot {
     shot: Shot,
     start_s: f64,
     team: u32,
     is_own: bool,
+    speckle_frac: f64,
 }
 
 /// `Motion` is what a remote player's robot is doing: where its feet were and how fast it goes.
@@ -884,7 +889,7 @@ fn make_frame(
     }
     let camera: DVec3 = eye.w_axis.truncate();
     let mut beam_vertices = Vec::new();
-    for (points, team, alpha) in beams {
+    for (points, team, alpha, speckle_frac) in beams {
         let c: [f32; 3] = world.laser_colors[*team as usize % 2];
         for pair in points.windows(2) {
             push_beam(
@@ -894,6 +899,7 @@ fn make_frame(
                 camera,
                 BEAM_WIDTH_M,
                 [c[0], c[1], c[2], (*alpha * 1.4) as f32],
+                *speckle_frac as f32,
             );
         }
     }
@@ -914,6 +920,7 @@ fn make_frame(
         time_s: now_s as f32,
         dynamic,
         beams: beam_vertices,
+        beam_speckle: [0.0; 4],
     }
 }
 
@@ -980,6 +987,8 @@ struct CitySession {
     is_overheated: bool,
     health_pulses: hud_bars::BarPulses,
     energy_pulses: hud_bars::BarPulses,
+    shot_noise: shot_noise::ShotNoise,
+    beam_speckle_frac: f64,
     hit_effect_frac: f64,
     last_health_frac: f64,
     slowed_s: f64,
@@ -1086,6 +1095,8 @@ impl CitySession {
             is_overheated: false,
             health_pulses: hud_bars::BarPulses::New(1.0),
             energy_pulses: hud_bars::BarPulses::New(1.0),
+            shot_noise: shot_noise::ShotNoise::FromClock(),
+            beam_speckle_frac: 0.0,
             hit_effect_frac: 0.0,
             last_health_frac: 1.0,
             slowed_s: 0.0,
@@ -1191,11 +1202,18 @@ impl CitySession {
                 shot.bounce_count
             ));
         }
+        self.beam_speckle_frac = shot_noise::round_speckle_frac(match self.gun {
+            Gun::Laser => self.shot_noise.sample_sniper_speckle(&self.settings.sniper),
+            Gun::Rifle => {
+                shot_noise::get_rifle_speckle_frac(&self.settings.rifle, self.rifle_heat_frac)
+            }
+        });
         self.shots.push(LiveShot {
             shot,
             start_s: self.now_s(),
             team,
             is_own: true,
+            speckle_frac: self.beam_speckle_frac,
         });
         match self.gun {
             Gun::Laser => {
@@ -1356,7 +1374,7 @@ impl CitySession {
                 self.laser_left_s > 0.0,
                 self.gun == Gun::Rifle,
                 self.disabling,
-                0.0,
+                self.beam_speckle_frac,
                 PlayerWormholes::default(),
             )?;
         }
@@ -1547,6 +1565,7 @@ impl CitySession {
                     start_s: now_s,
                     team: p.team,
                     is_own: false,
+                    speckle_frac: p.beam_speckle_frac,
                 });
             }
             let motion: &mut Motion = self.remote_motion.entry(p.id).or_insert(Motion {
@@ -1620,6 +1639,7 @@ impl CitySession {
                     points,
                     s.team,
                     (1.0 - (now_s - s.start_s) / life_s).clamp(0.0, 1.0),
+                    s.speckle_frac,
                 )
             })
             .collect();
@@ -1644,6 +1664,13 @@ impl CitySession {
         if self.is_spawned && self.brain.is_none() {
             frame.zoom_in(self.get_zoom());
         }
+        let kinds = &self.settings.beam_speckle;
+        frame.beam_speckle = [
+            ((now_s * MS_PER_S) as u64 % BEAM_SEED_PERIOD_MS) as f32,
+            kinds.black_frac as f32,
+            kinds.white_frac as f32,
+            0.0,
+        ];
         frame
     }
 
@@ -2668,7 +2695,7 @@ fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
             &[],
             None,
         );
-        beams.push((shot.points, (k % 2) as u32, 1.0));
+        beams.push((shot.points, (k % 2) as u32, 1.0, 0.0));
     }
     (robots, beams)
 }
@@ -2808,6 +2835,7 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
                 .points,
             team,
             1.0,
+            0.0,
         )
     };
     let blue_street: DVec3 = world
