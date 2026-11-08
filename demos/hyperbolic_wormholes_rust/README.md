@@ -59,7 +59,7 @@ make join-game SERVER=127.0.0.1
   bar, is empty until it can fire again.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
   eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots. In hand, the sniper is the
-  energy revolver and the rifle a wooden bolt-action rifle with a scope (Poly Haven, CC0; D105, for W-96 (a
+  energy revolver and the rifle a wooden bolt-action rifle with a scope (Poly Haven, CC0; D106, for W-96 (a
   different rifle model)), drawn small so its scope, bolt and stock show in the corner.
   Each shot strays a little from the crosshair, by a random angle sampled for that shot (D89): with the sniper
   usually by a hair (3 mrad on average, at most 15), with the rifle by up to 2 mrad cold, growing with its heat to 20
