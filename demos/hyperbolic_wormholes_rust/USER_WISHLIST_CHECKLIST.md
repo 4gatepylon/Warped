@@ -52,19 +52,6 @@ is in [`AGENTS.md`](AGENTS.md).
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering two
     levels of translucency; waits for the user's OK before merging.
-- [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
-  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
-  wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-a58a7f92ff135229f` on the user's Mac, branch `claude/giant-ships`
-    (pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-83/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: both ships drawn in the sky
-    shader with two options each (station: dish on the equator or in the upper half; capital ship: plain or detailed
-    hull), committed as WIP (`14d8ccb`) with temporary screenshot hooks; waiting for the user to pick, then remove the
-    hooks and the unpicked options, make the station hover, add tests, a decision, README and PLAYTEST, and open the
-    PR.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -151,6 +138,16 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
   player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
   page use team colours. The user said to add and fix it ("Yes, add and fix"). #290.
+- [?] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
+  the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
+  wedge-shaped capital ship), not copies of the films' models, and without their names in the code. From two options
+  of each, the user picked "Death Star option B" (the dish in the upper half) and "ship option A but you can add a
+  bunch of lights on it like B" (D101). #303.
+  - **Where the work is** (for any agent picking it up): merged into `staging` in #303 from branch
+    `claude/giant-ships` (pushed to `origin`; worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a58a7f92ff135229f`
+    on the user's Mac), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-83/`
+    (temporary, under `/private/tmp`). State, 2026-11-08: done and on `staging`; waiting for the user to test.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
