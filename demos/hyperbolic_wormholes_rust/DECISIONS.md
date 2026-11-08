@@ -1680,6 +1680,54 @@
 - **Rationale:** you asked that the curvature be set in the YAML settings, higher than now, at most twice the
   current curvature, and then chose 1.5 as the default after seeing the speckle at 2.
 
+### D101. Giant ships far in the sky, for W-83 (giant ships in the distance)
+
+- **Choice:**
+  - **Ships:** two giants far behind D82's ships, purely for looks, as original designs in the spirit of the films'
+    (no copies, and no film names in the code, which calls them `battle_station` and `capital_ship`): a moon-sized
+    battle station and a long wedge-shaped capital ship. `spaceships.rs` flies them like the others, first in
+    `FLIGHTS`, so the shader draws them behind the small ships.
+  - **Battle station (`draw_battle_station`):** a sphere 8.6° across, about half the planet, 14° above the horizon at
+    azimuth 240°, ahead and a little left from the blue spawn. It has panel bands with thin seams, a dark trench round
+    its equator with 14 small pale lights, a concave dish in its upper half (a bowl cut out of the sphere, with two
+    rings and a dark lens), a few lit windows on its night side and a red beacon flashing on its pole. Its pole leans
+    17° toward the eye so the upper half shows. The sun is 90° away from it there, so it shows half lit. You picked the
+    dish in the upper half (option B) over one on the equator.
+  - **Hovering:** the station holds its place (`Path::Hovering`), swaying 0.5° along its great circle and back every
+    15 minutes, so it never sets and moves about a pixel every 15 s at 2560×1600.
+  - **Capital ship (`draw_capital_ship`):** a long flat wedge 7° long, with one deck block and a bridge tower at the
+    stern, three blue engines with plumes, red and green lights at the stern's corners and a white strobe on the
+    bridge. Rows of lit windows run along the superstructure's sides and the hull's two edges; once a window is
+    smaller than a pixel they show their mean light, so they don't flicker as the ship drifts. It crosses the sky like
+    D82's ships, highest at 30° (azimuth 290°, ahead and a little right from the blue spawn), in 30 minutes, then
+    comes back below the horizon in 6. You picked the plain hull (option A) over one with stepped tiers and panel
+    stripes, with lights like that one's.
+  - **Solids, not silhouettes:** D82's ships are flat silhouettes; the giants are shaded as solids, along parallel
+    rays since they are far: the station as a sphere, the capital ship as a convex wedge (five planes) and three boxes.
+    The capital ship is drawn tilted 52° from facing the eye, so its top and superstructure show, standing up toward
+    the top of the sky. Both are lit by the sun and, more faintly, by the sunlit ground, with a faint glow so their
+    night sides show against the stars.
+  - **Background only:** as in D82, they are part of the sky: behind everything, bent through the lenses like the
+    stars, on the UTC clock, and in the `lunar` appearance style rather than the map.
+  - **Cost:** as in D82, each sky pixel rules a giant out with a few dot products, and only pixels within 1.5 half
+    lengths of one shade it (about 19,000 for the station and 3,000 for the capital ship at 2560×1600, 0.5% of the
+    frame). On D10's shared machine, with other agents' work running, three alternating `--bench-views` runs at
+    2560×1600 against `staging`: by the best of the three, the fastest frames moved by −0.5 to +0.8 ms per view
+    (mean +0.2 ms), and the median GPU times by −0.2 to +0.5 ms, apart from two noisy views (+1.5 ms at the red spawn
+    and −14 ms at the wormhole's exit). The blue spawn, with both giants in sight, took 28.0 ms on the GPU against
+    27.5 ms. The window at 1280×800 ran 85.8 fps (10.0 ms on the GPU).
+- **Alternatives:**
+  - flat silhouettes like D82's ships (a sphere and a superstructure read as flat discs and blocks);
+  - the station crossing the sky like the others (it would set for a sixth of the time; a moon-sized station reads
+    better holding still);
+  - the station further from the sun, more fully lit (around azimuth 300° it would crowd the planet in the spawns'
+    view);
+  - the options not picked: the dish on the equator, and a detailed hull with three stepped tiers, panel stripes and
+    seven engines.
+- **Rationale:** you asked for a moon-sized battle station with a dish and a long wedge-shaped capital ship off in the
+  distance, as original designs in that spirit; seeing two options of each, you said "I like Death Star option B and
+  I like ship option A but you can add a bunch of lights on it like B".
+
 ### D104. A third-person view on `V`, W-61 (third-person view)
 
 - **Choice:**
