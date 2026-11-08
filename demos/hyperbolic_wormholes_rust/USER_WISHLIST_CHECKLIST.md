@@ -27,10 +27,12 @@ is in [`AGENTS.md`](AGENTS.md).
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
   - **Where the work is** (for any agent picking it up): worktree
     `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, branch `claude/milky-way`
-    (on this Mac only so far; to be pushed to `origin`), pictures in
+    (pushed to `origin`: one WIP commit, `1b8ac4e`, with temporary `TEMP_MW*` mock-up hooks; not for merging),
+    pictures in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-98/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: making mock-up pictures of 3
-    styles; nothing to build until the user picks.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: mock-ups of three looks
+    (A subtle, B rich, C photo-like) and one alternative position for the band done, with GPU costs; the user asked
+    for images only for now; nothing built.
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." Pictures first. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
