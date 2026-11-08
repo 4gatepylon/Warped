@@ -9,7 +9,7 @@
 //! Must know:
 //! - It is the server half of the demo's `net.rs` with its socket and clock taken out (step A5b),
 //!   so it answers as the demo's server does, and logs the same lines on standard output.
-//! - `now_s` is seconds since the game was made, on one clock that never goes back.
+//! - `now_s` is seconds from 0 on one clock that never goes back (`udp_loop::serve`'s, from its start).
 
 use std::net::SocketAddr;
 

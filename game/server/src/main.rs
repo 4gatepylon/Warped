@@ -8,23 +8,24 @@
 //! Example: `.build/x86_64-unknown-linux-musl/release/warped-server --port 47810 --map lunar-surface`
 //!
 //! Must know:
-//! - It shares `warped_core::net` with the game, so both speak the same protocol. Until step A5b the
-//!   window's `--serve` runs the same `net::serve`.
+//! - It plays `warped_server::game` through `warped_server::udp_loop`, and the window joins with
+//!   `warped_core::net`, so both speak the same protocol.
 //! - It exits on the first error, so a supervisor such as systemd can restart it.
 
 use warped_core::{map, net, settings};
+use warped_server::game::Game;
+use warped_server::udp_loop;
 
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
 
 use clap::Parser;
 
 use map::{Map, MapName, get_console_team};
 use settings::ServerSettings;
 
-const NEW_GAME_AFTER_WIN_S: u64 = 10;
+const NEW_GAME_AFTER_WIN_S: f64 = 10.0;
 
 /// `Arguments` is the command line.
 #[derive(Parser)]
@@ -65,16 +66,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(path) => ServerSettings::Load(path)?,
         None => ServerSettings::Builtin(),
     };
-    let socket: std::net::UdpSocket = net::bind_server(arguments.port)?;
+    let socket: std::net::UdpSocket = udp_loop::bind_server(arguments.port)?;
     println!("Game server for {map_name} on UDP port {}.", arguments.port);
-    net::serve(
-        socket,
-        &AtomicBool::new(false),
+    let mut game: Game = Game::New(
         map_name.to_string(),
         settings,
         console_teams,
-        &AtomicBool::new(false),
-        Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
         game_password,
-    )
+        Some(NEW_GAME_AFTER_WIN_S),
+    );
+    udp_loop::serve(socket, &mut game, &AtomicBool::new(false))
 }
