@@ -28,6 +28,7 @@ mod avatar_model;
 mod black_hole_growth;
 mod city;
 mod city_world;
+mod city_wormholes;
 mod credits;
 mod dust;
 mod exit_prompt;

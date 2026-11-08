@@ -11,7 +11,7 @@ use std::error::Error;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use glam::{DMat3, DVec3, Mat4, Vec3};
+use glam::{DMat3, DMat4, DVec3, Mat4, Vec3};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
@@ -37,6 +37,10 @@ type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
 
 const SHADER_SOURCE: &str = include_str!("render_city.metal");
 pub const MAX_HOLE_COUNT: usize = 8;
+const MOUTH_RING_SEGMENT_COUNT: usize = 32;
+const MOUTH_RING_WIDTH_FRAC: f64 = 0.12;
+const MOUTH_DISC_TINT: f32 = 0.25;
+const MOUTH_DISC_OPACITY: f32 = 0.85;
 /// `BEAM_WIDTH_M` is a beam quad's width, wide enough for Lunar Surface's haze around the beam.
 pub const BEAM_WIDTH_M: f64 = 0.16;
 const RIFLE_BEAM_MARK: f64 = 0.25;
@@ -968,6 +972,98 @@ pub fn push_dust_particle(
         DVec3::X,
         [albedo[0], albedo[1], albedo[2], opacity_frac],
         f32::from(u8::from(is_grain)),
+    );
+}
+
+/// `push_glow_ball` adds a glowing ball of `radius_m` at `centre_m` in `rgb` (a thrown wormhole
+/// mouth in the air, or one waiting for its partner), as a quad facing `camera_m` drawn by the beam
+/// shader's halo.
+///
+/// Example: `push_glow_ball(&mut beams, centre, 0.3, eye, [0.62, 0.22, 1.0]);`
+pub fn push_glow_ball(
+    out: &mut Vec<CityVertex>,
+    centre_m: DVec3,
+    radius_m: f64,
+    camera_m: DVec3,
+    rgb: [f32; 3],
+) {
+    let forward: DVec3 = (camera_m - centre_m).normalize_or(DVec3::Z);
+    let right: DVec3 = forward.any_orthonormal_vector() * radius_m;
+    let up: DVec3 = forward.cross(right);
+    push_quad(
+        out,
+        [
+            centre_m - right - up,
+            centre_m + right - up,
+            centre_m + right + up,
+            centre_m + up - right,
+        ],
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        DVec3::Z,
+        [rgb[0], rgb[1], rgb[2], 1.0],
+        NO_LAYER,
+    );
+}
+
+/// `push_mouth` adds a linked wormhole mouth with frame `frame` (columns right, up, back, centre)
+/// of `radius_m`: a glowing ring in `rgb` among the opaque triangles (`opaque`), and over it in
+/// the beam pass (`beams`) a dark disc that dims what is behind, a cheap stand-in for Lunar
+/// Surface's lensed view through the mouth.
+///
+/// Example: `push_mouth(&mut frame.dynamic, &mut frame.beams, mouth, 1.0, [0.2, 1.0, 0.4]);`
+pub fn push_mouth(
+    out_opaque: &mut Vec<CityVertex>,
+    out_beams: &mut Vec<CityVertex>,
+    frame: DMat4,
+    radius_m: f64,
+    rgb: [f32; 3],
+) {
+    let (right, up, back, centre) = (
+        frame.x_axis.truncate(),
+        frame.y_axis.truncate(),
+        frame.z_axis.truncate(),
+        frame.w_axis.truncate(),
+    );
+    let at = |angle: f64, r: f64| centre + (right * angle.cos() + up * angle.sin()) * r;
+    for k in 0..MOUTH_RING_SEGMENT_COUNT {
+        let (a0, a1) = (
+            k as f64 / MOUTH_RING_SEGMENT_COUNT as f64 * std::f64::consts::TAU,
+            (k + 1) as f64 / MOUTH_RING_SEGMENT_COUNT as f64 * std::f64::consts::TAU,
+        );
+        let inner_m: f64 = radius_m * (1.0 - MOUTH_RING_WIDTH_FRAC);
+        for normal in [back, -back] {
+            push_quad(
+                out_opaque,
+                [
+                    at(a0, inner_m),
+                    at(a1, inner_m),
+                    at(a1, radius_m),
+                    at(a0, radius_m),
+                ],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                normal,
+                [rgb[0], rgb[1], rgb[2], 1.0],
+                NO_LAYER,
+            );
+        }
+    }
+    push_quad(
+        out_beams,
+        [
+            centre - right * radius_m - up * radius_m,
+            centre + right * radius_m - up * radius_m,
+            centre + right * radius_m + up * radius_m,
+            centre - right * radius_m + up * radius_m,
+        ],
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        DVec3::X,
+        [
+            rgb[0] * MOUTH_DISC_TINT,
+            rgb[1] * MOUTH_DISC_TINT,
+            rgb[2] * MOUTH_DISC_TINT,
+            MOUTH_DISC_OPACITY,
+        ],
+        0.0,
     );
 }
 

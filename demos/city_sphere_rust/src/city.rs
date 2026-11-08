@@ -37,6 +37,10 @@ use crate::city_world::{
     CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,
     get_up,
 };
+use crate::city_wormholes::{
+    MOUTH_RADIUS_M, can_place_mouth, carry_through, find_crossing, fly_city_throw, get_mouth_frame,
+    land_city_mouth,
+};
 use crate::dust::{DustBurst, MAX_DUST_BURST_COUNT};
 use crate::exit_prompt;
 use crate::hud_bars;
@@ -45,13 +49,13 @@ use crate::menu;
 use crate::net;
 use crate::render_city::{
     BEACON_SLOT_COUNT, BEAM_WIDTH_M, CityFrame, CityScene, build_scene, push_beam, push_core_halo,
-    push_dust_particle, push_mesh,
+    push_dust_particle, push_glow_ball, push_mesh, push_mouth,
 };
 use crate::render_metal::{self, FrameData};
 use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
 use crate::shot_noise;
 use crate::third_person;
-use crate::thrown_wormholes::PlayerWormholes;
+use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor};
 use crate::viewmodel;
 use crate::voxel_world::{MUZZLE_M, SPAWN_TURN_RAD};
 
@@ -123,6 +127,11 @@ const STAIRS_LEAD_IN_M: f64 = 2.0;
 const STEER_WALK_ERROR_RAD: f64 = 0.35;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const DUST_LIFT_M: f64 = 0.02;
+const BODY_MIDDLE_M: f64 = 0.9;
+const MAX_WORMHOLE_LEGS: usize = 2;
+const WORMHOLE_EXIT_M: f64 = 0.01;
+const UNLINKED_MOUTH_BALL_M: f64 = 0.3;
+const FLYING_MOUTH_BALL_M: f64 = 0.15;
 const CONSOLE_REPLAN_S: f64 = 3.0;
 const SERVE_POLL_MS: u64 = 50;
 const STAIRS_ROUTE_END_WAIT_S: f64 = 2.0;
@@ -1010,6 +1019,7 @@ struct CitySession {
     is_flashlight_on: bool,
     view_switch: third_person::ViewSwitch,
     dust: Vec<DustBurst>,
+    thrown: ThrownWormholes,
     hit_effect_frac: f64,
     last_health_frac: f64,
     slowed_s: f64,
@@ -1121,6 +1131,7 @@ impl CitySession {
             is_flashlight_on: false,
             view_switch: third_person::ViewSwitch::FirstPerson(),
             dust: Vec::new(),
+            thrown: ThrownWormholes::New(),
             hit_effect_frac: 0.0,
             last_health_frac: 1.0,
             slowed_s: 0.0,
@@ -1198,14 +1209,27 @@ impl CitySession {
         let eye: DMat4 = self.get_shot_eye();
         let team: u32 = self.get_team();
         let targets: Vec<Target> = self.get_targets(Some(team));
-        let shot: Shot = self.world.trace_shot(
+        let (mut legs, owners) = self.trace_through_wormholes(
             eye.w_axis.truncate(),
             -eye.z_axis.truncate(),
-            self.settings.glass.range_m,
-            self.settings.glass.max_bounce_count,
             &targets,
             self.client.id,
         );
+        let shot: Shot = legs.pop().expect("a shot has a leg");
+        for owner in owners {
+            if self
+                .client
+                .players
+                .iter()
+                .any(|p| p.id == owner && p.team != team)
+            {
+                let hits_to_destroy: u8 = match self.gun {
+                    Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
+                    Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
+                };
+                self.client.send_wormhole_hit(owner, hits_to_destroy)?;
+            }
+        }
         if let ShotHit::Player { id, is_head } = shot.hit {
             let hits_to_kill: u8 = match (self.gun, is_head) {
                 (Gun::Laser, _) => self.settings.sniper.hits_to_eliminate,
@@ -1233,14 +1257,17 @@ impl CitySession {
             }
         });
         self.add_dust(&shot, eye.w_axis.truncate(), self.gun == Gun::Rifle);
-        self.shots.push(LiveShot {
-            shot,
-            start_s: self.now_s(),
-            team,
-            is_own: true,
-            speckle_frac: self.beam_speckle_frac,
-            is_rifle: self.gun == Gun::Rifle,
-        });
+        let now_s: f64 = self.now_s();
+        for (k, leg) in legs.into_iter().chain([shot]).enumerate() {
+            self.shots.push(LiveShot {
+                shot: leg,
+                start_s: now_s,
+                team,
+                is_own: k == 0,
+                speckle_frac: self.beam_speckle_frac,
+                is_rifle: self.gun == Gun::Rifle,
+            });
+        }
         match self.gun {
             Gun::Laser => {
                 self.reload_left_s = self.settings.sniper.reload_s;
@@ -1296,6 +1323,7 @@ impl CitySession {
                         self.is_spawned = false;
                         self.respawn_in_s = Some(self.settings.respawn.delay_s);
                         self.disabling = None;
+                        self.thrown.clear();
                     }
                     self.show_message(format!("player {shooter_id} hit player {victim_id}"));
                 }
@@ -1363,9 +1391,12 @@ impl CitySession {
                 console = self.find_console(None);
             }
         }
+        self.update_wormholes(now_s);
         if self.is_spawned {
+            let before: DVec3 = self.player.feet;
             self.world
                 .move_player(&mut self.player, &input, &self.settings, dt_s);
+            self.pass_through_wormholes(before);
             self.update_gun_motion(&input, dt_s);
         }
         self.health_pulses.update(
@@ -1401,7 +1432,7 @@ impl CitySession {
                 self.gun == Gun::Rifle,
                 self.disabling,
                 self.beam_speckle_frac,
-                PlayerWormholes::default(),
+                self.thrown.placed,
             )?;
         }
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
@@ -1623,6 +1654,135 @@ impl CitySession {
         rects
     }
 
+    /// `get_mouth_pairs` gives every linked pair of wormhole mouths in the game, this player's and
+    /// the others', as (owner's id, purple mouth's frame, green mouth's frame).
+    fn get_mouth_pairs(&self) -> Vec<(u32, DMat4, DMat4)> {
+        let own = self.client.id.zip(self.thrown.placed.get_pair());
+        own.into_iter()
+            .chain(
+                self.client
+                    .players
+                    .iter()
+                    .filter(|p| Some(p.id) != self.client.id)
+                    .filter_map(|p| p.wormholes.get_pair().map(|pair| (p.id, pair))),
+            )
+            .map(|(id, [purple, green])| (id, get_mouth_frame(&purple), get_mouth_frame(&green)))
+            .collect()
+    }
+
+    /// `update_wormholes` lands this player's throw in the air, as Lunar Surface does: its mouth
+    /// stands at eye height over the floor below where it came down, unless it would be within a
+    /// few meters of another mouth or against a wall; and clears both mouths once enemy shots
+    /// have destroyed them (the server's tally).
+    fn update_wormholes(&mut self, now_s: f64) {
+        let mut others: Vec<MouthPlace> = self.thrown.get_kept_places();
+        others.extend(
+            self.client
+                .players
+                .iter()
+                .filter(|p| Some(p.id) != self.client.id)
+                .flat_map(|p| p.wormholes.get_places()),
+        );
+        let hover_m: f64 = self.world.eye_height_m;
+        let world: &CityWorld = &self.world;
+        if let Some(message) = self.thrown.update_placing(
+            now_s,
+            |floor, velocity| land_city_mouth(floor, velocity, hover_m),
+            |place| can_place_mouth(world, place, &others),
+        ) {
+            self.show_message(message);
+        }
+        if self.client.wormhole_damage_frac >= 1.0 && !self.thrown.placed.get_places().is_empty() {
+            self.thrown.clear();
+            self.show_message("Your wormholes were destroyed".to_string());
+        }
+    }
+
+    /// `pass_through_wormholes` carries this player through a linked mouth when the middle of their
+    /// body crossed its disc in the last move (from feet at `before`): out of the other mouth of
+    /// its pair, mirrored through it, with their facing and velocity carried along.
+    fn pass_through_wormholes(&mut self, before: DVec3) {
+        let middle = |feet: DVec3| feet + get_up(feet) * (BODY_MIDDLE_M);
+        let (a, b) = (middle(before), middle(self.player.feet));
+        let crossing = self
+            .get_mouth_pairs()
+            .into_iter()
+            .flat_map(|(_, purple, green)| [(purple, green), (green, purple)])
+            .find(|&(from, _)| find_crossing(from, a, b).is_some());
+        if let Some((from, to)) = crossing {
+            let carry: DMat4 = carry_through(from, to);
+            let rotation: DMat3 = DMat3::from_mat4(carry);
+            self.player.feet = carry.transform_point3(self.player.feet);
+            self.player.body = rotation * self.player.body;
+            self.player.velocity = rotation * self.player.velocity;
+            self.player.align_to_ground();
+        }
+    }
+
+    /// `trace_through_wormholes` traces a shot from `origin` along `direction` as
+    /// `CityWorld::trace_shot` does, but where a leg passes through a linked mouth's disc before it
+    /// ends, it stops there and goes on out of the other mouth of the pair, mirrored through it,
+    /// for the range left (at most `MAX_WORMHOLE_LEGS` mouths). It gives the shot's legs in order,
+    /// the last one ending where the shot ends, and the owners of the pairs it went through.
+    fn trace_through_wormholes(
+        &self,
+        origin: DVec3,
+        direction: DVec3,
+        targets: &[Target],
+        shooter_id: Option<u32>,
+    ) -> (Vec<Shot>, Vec<u32>) {
+        let pairs: Vec<(u32, DMat4, DMat4)> = self.get_mouth_pairs();
+        let (mut legs, mut owners) = (Vec::new(), Vec::new());
+        let (mut from, mut along, mut range_m) =
+            (origin, direction.normalize(), self.settings.glass.range_m);
+        loop {
+            let mut shot: Shot = self.world.trace_shot(
+                from,
+                along,
+                range_m,
+                self.settings.glass.max_bounce_count,
+                targets,
+                shooter_id,
+            );
+            let crossing = (legs.len() < MAX_WORMHOLE_LEGS)
+                .then(|| {
+                    shot.points.windows(2).enumerate().find_map(|(k, pair)| {
+                        pairs
+                            .iter()
+                            .flat_map(|&(owner, purple, green)| {
+                                [(owner, purple, green), (owner, green, purple)]
+                            })
+                            .filter_map(|(owner, near, far)| {
+                                find_crossing(near, pair[0], pair[1]).map(|t| (t, owner, near, far))
+                            })
+                            .min_by(|x, y| x.0.total_cmp(&y.0))
+                            .map(|(t, owner, near, far)| (k, t, owner, near, far))
+                    })
+                })
+                .flatten();
+            let Some((k, t, owner, near, far)) = crossing else {
+                legs.push(shot);
+                return (legs, owners);
+            };
+            let (a, b) = (shot.points[k], shot.points[k + 1]);
+            let at: DVec3 = a.lerp(b, t);
+            let used_m: f64 = shot.points[..=k]
+                .windows(2)
+                .map(|pair| (pair[1] - pair[0]).length())
+                .sum::<f64>()
+                + (at - a).length();
+            shot.points.truncate(k + 1);
+            shot.points.push(at);
+            shot.hit = ShotHit::Range;
+            legs.push(shot);
+            owners.push(owner);
+            let carry: DMat4 = carry_through(near, far);
+            along = carry.transform_vector3((b - a).normalize());
+            from = carry.transform_point3(at) + along * WORMHOLE_EXIT_M;
+            range_m = (range_m - used_m).max(0.0);
+        }
+    }
+
     /// `add_dust` throws up Lunar Surface's dust (`dust.rs`) where `shot`, fired from `shooter` by
     /// the rifle or the sniper, ended on a floor (the street or the glass), sprayed back toward
     /// the shooter; at most `MAX_DUST_BURST_COUNT` bursts are kept, the oldest dropped first.
@@ -1680,22 +1840,20 @@ impl CitySession {
                     .into_iter()
                     .filter(|t| t.id != p.id)
                     .collect();
-                let shot: Shot = self.world.trace_shot(
+                let (legs, _) = self.trace_through_wormholes(
                     p.frame.w_axis.truncate(),
                     -p.frame.z_axis.truncate(),
-                    self.settings.glass.range_m,
-                    self.settings.glass.max_bounce_count,
                     &targets,
                     Some(p.id),
                 );
-                new_shots.push(LiveShot {
+                new_shots.extend(legs.into_iter().map(|shot| LiveShot {
                     shot,
                     start_s: now_s,
                     team: p.team,
                     is_own: false,
                     speckle_frac: p.beam_speckle_frac,
                     is_rifle: p.is_rifle,
-                });
+                }));
             }
             let motion: &mut Motion = self.remote_motion.entry(p.id).or_insert(Motion {
                 feet,
@@ -1706,7 +1864,8 @@ impl CitySession {
             motion.feet = feet;
         }
         for new_shot in &new_shots {
-            self.add_dust(&new_shot.shot, new_shot.shot.points[0], new_shot.is_rifle);
+            let shooter: DVec3 = new_shot.shot.points[0];
+            self.add_dust(&new_shot.shot, shooter, new_shot.is_rifle);
         }
         self.shots.extend(new_shots);
     }
@@ -1824,6 +1983,47 @@ impl CitySession {
                 },
             ],
         ];
+        let all_wormholes = [self.thrown.placed].into_iter().chain(
+            self.client
+                .players
+                .iter()
+                .filter(|p| Some(p.id) != self.client.id)
+                .map(|p| p.wormholes),
+        );
+        for wormholes in all_wormholes {
+            if let Some([purple, green]) = wormholes.get_pair() {
+                for (place, color) in [
+                    (purple, WormholeColor::Purple),
+                    (green, WormholeColor::Green),
+                ] {
+                    push_mouth(
+                        &mut frame.dynamic,
+                        &mut frame.beams,
+                        get_mouth_frame(&place),
+                        MOUTH_RADIUS_M,
+                        color.get_rgb(),
+                    );
+                }
+            }
+            if let Some((color, place)) = wormholes.get_unlinked() {
+                push_glow_ball(
+                    &mut frame.beams,
+                    get_mouth_frame(&place).w_axis.truncate(),
+                    UNLINKED_MOUTH_BALL_M,
+                    eye.w_axis.truncate(),
+                    color.get_rgb(),
+                );
+            }
+            if let Some((color, x)) = wormholes.flying {
+                push_glow_ball(
+                    &mut frame.beams,
+                    x.truncate(),
+                    FLYING_MOUTH_BALL_M,
+                    eye.w_axis.truncate(),
+                    color.get_rgb(),
+                );
+            }
+        }
         for cloud in self.dust.iter().filter_map(|burst| burst.get_cloud(now_s)) {
             for particle in &cloud.particles {
                 push_dust_particle(
@@ -2227,6 +2427,15 @@ fn handle_event(
             .min(1.0 / session.settings.rifle.shots_per_s);
     } else if is(Action::SwitchView) {
         session.view_switch.toggle();
+    } else if is(Action::ThrowWormhole) && session.is_spawned && session.thrown.can_throw() {
+        let flight = fly_city_throw(
+            &session.world,
+            session.get_shot_eye(),
+            session.thrown.get_next_color(),
+            &session.settings.wormholes,
+        );
+        let now_s: f64 = session.now_s();
+        session.thrown.throw(flight, now_s);
     } else if is(Action::LowerResolution) {
         session.render_scale = (session.render_scale - RENDER_SCALE_STEP).max(MIN_RENDER_SCALE);
     } else if is(Action::RaiseResolution) {
