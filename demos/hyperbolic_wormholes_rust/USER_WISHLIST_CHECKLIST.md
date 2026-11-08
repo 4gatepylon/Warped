@@ -21,34 +21,6 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
-  and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
-  1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
-     lander and its pad at the blue spawn, 3.5 m tall.
-  2. "Desert Planet Bunker Garage Thing" by eKross (`ebe3177a1c7947b98328d8cab6aa8600`) replaces the red spawn
-     hangar, 6 m tall.
-  3. "WW2 Field Bunker" by goldenblack4 (`6ea5cebdaa82455aa3aad26baa6e0375`) replaces the two derelict habitat
-     modules in the middle, 3.5 m tall.
-  4. "Sci-Fi Beacon/Way Point Marker Free Model" by AMMediaGames (`a1d91ebb3e2d41bba31c02b11423d97f`) replaces the
-     core and pad of both team pylons: 4 m tall on bare ground, the 5 consoles stay in a ring around it, and each
-     beacon shoots a team-coloured beam 400 m straight up that dims as consoles are switched off.
-  5. "Hesco Barrier PBR" by polbrainstorm (`ab21217481094e9a84f989e71fd56a59`) replaces the two red barriers in the
-     middle: each is a 16 m row of 1.4 m Hesco blocks, keeping the 3 m gap in the middle.
-
-  The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
-  commit the models with textures downscaled (about 20 MB).
-  Claimed by Devin (session Devin Desktop 2026-11-07), branch `devin/models-prepare`, 2026-11-07.
-- [~] **W-106 Teal robot player model.** "Replace the player model with that [Teal V.2] and rig it with an animation":
-  the Sketchfab model "Teal V.2" by Lagst (`d6a54ff9468c451bbdbd879afa03f20a`, Sketchfab Standard) replaces the
-  1 × 4 voxel column drawn for every player's body (the others', and your own in the third-person view, W-61
-  (third-person view)). The user chose: idle, walk, run, jump and death clips, keyframed in Blender on the model's own
-  rig; lasers keep hitting the current box, not the triangles; the model is ray-traced with W-94 (Sketchfab models for
-  the voxel assets)'s triangle renderer. Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch
-  `claude/teal-player`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-teal` on
-    `leah`'s Mac, branch `claude/teal-player` (not pushed yet), to be stacked on W-94 (Sketchfab models for the voxel
-    assets)'s branch once that is pushed. State, 2026-11-08: started; the clips are made first.
-
 ## Open
 
 - [ ] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Found in #319: not vsync
@@ -110,6 +82,30 @@ Merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`), w
 confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
+  and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
+  1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
+     lander and its pad at the blue spawn, 3.5 m tall.
+  2. "Desert Planet Bunker Garage Thing" by eKross (`ebe3177a1c7947b98328d8cab6aa8600`) replaces the red spawn
+     hangar, 6 m tall.
+  3. "WW2 Field Bunker" by goldenblack4 (`6ea5cebdaa82455aa3aad26baa6e0375`) replaces the two derelict habitat
+     modules in the middle, 3.5 m tall.
+  4. "Sci-Fi Beacon/Way Point Marker Free Model" by AMMediaGames (`a1d91ebb3e2d41bba31c02b11423d97f`) replaces the
+     core and pad of both team pylons: 4 m tall on bare ground, the 5 consoles stay in a ring around it, and each
+     beacon shoots a team-coloured beam 400 m straight up that dims as consoles are switched off.
+  5. "Hesco Barrier PBR" by polbrainstorm (`ab21217481094e9a84f989e71fd56a59`) replaces the two red barriers in the
+     middle: each is a 16 m row of 1.4 m Hesco blocks, keeping the 3 m gap in the middle.
+
+  The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
+  commit the models with textures downscaled (about 20 MB).
+  #333 (Devin's commits, merged by Claude Code together with W-106 (Teal robot player model) at the user's request
+  after Devin stopped, 2026-11-08; each team's three beacons are 12 m tall, one console each, beaming while it is on).
+- [?] **W-106 Teal robot player model.** "Replace the player model with that [Teal V.2] and rig it with an animation":
+  the Sketchfab model "Teal V.2" by Lagst (`d6a54ff9468c451bbdbd879afa03f20a`, Sketchfab Standard) replaces the
+  cylinder and head drawn for every player's body (the others', and your own in the third-person view, W-61
+  (third-person view)). The user chose: idle, walk, run, jump and death clips, keyframed in Blender on the model's own
+  rig; lasers keep hitting the current box, not the triangles; the model is ray-traced with W-94 (Sketchfab models for
+  the voxel assets)'s triangle renderer. #333.
 - [?] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
   more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
   time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere. After
