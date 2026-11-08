@@ -112,18 +112,11 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
-- [?] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
-  shadows on the hills. #233.
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
 - [?] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
   player in the game as a dot in their team's colour; the minimap already showed those in reach. #250.
-- [?] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
-  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
-  screenshots before it merged ("dust polyhedra looks good plz merge"). #234.
-- [?] **W-91 One laser on the minimap.** A bug: when you shoot, the minimap shows two lasers instead of one ("like
-  a triangle of some kind"). #243.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
@@ -278,3 +271,11 @@ are here too, since the user hadn't confirmed them.
 ## Done
 
 Confirmed by the user after testing.
+
+- [x] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
+  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
+  screenshots before it merged ("dust polyhedra looks good plz merge"). #234. Confirmed by the user, 2026-11-07: "dust as small polydra is good so it should be masrked as done".
+- [x] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills. #233. Confirmed by the user, 2026-11-07: "shadows on hills is good enough so it shouledbe marked as done".
+- [x] **W-91 One laser on the minimap.** A bug: when you shoot, the minimap shows two lasers instead of one ("like
+  a triangle of some kind"). #243. Confirmed by the user, 2026-11-07: "one laser on minimap seems fixed so shoudl be marked as done".
