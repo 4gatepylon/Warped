@@ -590,7 +590,7 @@ fn main() -> Result<()> {
 ///
 /// Example: `let world = load_world(MapName::HouseDemo)?;`
 fn load_world(name: MapName) -> Result<World> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
+    let map: map::Map = map::Map::Builtin(name.get_folder_name())?;
     Ok(World::FromMap(&map)?)
 }
 
@@ -725,7 +725,7 @@ fn find_lan_address() -> Option<IpAddr> {
 ///
 /// Example: `serve_only(&arguments)?;`
 fn serve_only(arguments: &Arguments) -> Result<()> {
-    let map_data: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map_data: map::Map = map::Map::Builtin(arguments.map.get_folder_name())?;
     let consoles: Vec<voxel_world::Console> = voxel_world::find_consoles(&map_data);
     let (should_stop, thread) = start_server(
         arguments.port,
@@ -892,7 +892,7 @@ fn bench_voxel_views(
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map: map::Map = map::Map::Builtin(arguments.map.get_folder_name())?;
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         arguments.map.get_folder_name(),
@@ -1172,7 +1172,7 @@ fn make_bench_views(world: &World) -> Vec<View> {
 ///
 /// Example: `bench_views(&arguments, renderer)?;`
 fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map: map::Map = map::Map::Builtin(arguments.map.get_folder_name())?;
     if !map.structures.is_empty() {
         return bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?);
     }
@@ -1980,7 +1980,7 @@ impl Session {
     /// Example: `let mut session = Session::New(&arguments);`
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
-        let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+        let map: map::Map = map::Map::Builtin(arguments.map.get_folder_name())?;
         let settings: ServerSettings = load_settings(arguments)?;
         let player_settings_path: Option<PathBuf> =
             arguments.player_settings.clone().or_else(|| {

@@ -1,13 +1,15 @@
 //! `map.rs` reads a map in the portable format of `common/maps/` (see its README), `map.json`, into
 //! typed values, failing at once with the field's name when a map breaks the format.
 //!
-//! Interface: `Map::Load`, `get_map_folder`, and the types of the manifest's parts.
+//! Interface: `Map::Builtin`, `Map::Load`, `get_map_folder`, and the types of the manifest's parts.
 //!
-//! Example: `let map = Map::Load(&get_map_folder("lunar_surface"))?;`
+//! Example: `let map = Map::Builtin("lunar_surface")?;`
 //!
 //! Must know:
 //! - Every field of the format is read, so any valid map parses (`deny_unknown_fields`), even the
 //!   ones this demo doesn't use; hence `dead_code` is allowed here.
+//! - The game plays the maps built into the program (`Map::Builtin`), so it runs without the
+//!   repository; `Map::Load` reads a map from a folder, for tests and tools.
 
 #![allow(dead_code)]
 
@@ -26,6 +28,16 @@ const MANIFEST_NAME: &str = "map.json";
 const FORMAT: &str = "warped-map";
 const VERSION: u32 = 1;
 const SPACE_HYPERBOLIC: &str = "hyperbolic";
+const BUILTIN_MAPS: [(&str, &str); 2] = [
+    (
+        "house_demo",
+        include_str!("../../../common/maps/house_demo/map.json"),
+    ),
+    (
+        "lunar_surface",
+        include_str!("../../../common/maps/lunar_surface/map.json"),
+    ),
+];
 
 /// `Space` is the map's space; this demo reads hyperbolic maps only.
 #[derive(Deserialize)]
@@ -301,8 +313,24 @@ pub fn to_direction(values: &[f64; 3]) -> DVec3 {
 }
 
 impl Map {
-    /// `Load` reads the map in `folder`, checking the format's name and version and that the
-    /// space is hyperbolic.
+    /// `Builtin` gives the map called `name` (its folder's name in `common/maps/`) from the copy
+    /// built into the program, checked as `Load` checks a map.
+    ///
+    /// Example: `let map = Map::Builtin("house_demo")?;`
+    #[allow(non_snake_case)]
+    pub fn Builtin(name: &str) -> Result<Map> {
+        let Some(&(_, text)) = BUILTIN_MAPS.iter().find(|(builtin, _)| *builtin == name) else {
+            let names: Vec<&str> = BUILTIN_MAPS.iter().map(|(builtin, _)| *builtin).collect();
+            return Err(format!(
+                "map: no built-in map {name:?}; built-in maps: {}",
+                names.join(", ")
+            )
+            .into());
+        };
+        Map::Parse(text, &format!("the built-in {name}"))
+    }
+
+    /// `Load` reads the map in `folder`, checked as `Parse` checks it.
     ///
     /// Example: `let map = Map::Load(&get_map_folder("house_demo"))?;`
     #[allow(non_snake_case)]
@@ -310,18 +338,21 @@ impl Map {
         let manifest_path: PathBuf = folder.join(MANIFEST_NAME);
         let text: String = fs::read_to_string(&manifest_path)
             .map_err(|error| format!("map: can't read {}: {error}", manifest_path.display()))?;
-        let map: Map = serde_json::from_str(&text).map_err(|error| {
-            format!(
-                "map: {} breaks the format: {error}",
-                manifest_path.display()
-            )
-        })?;
+        Map::Parse(&text, &manifest_path.display().to_string())
+    }
+
+    /// `Parse` reads a map from its `map.json` text, checking the format's name and version and
+    /// that the space is hyperbolic; `source` names the text in errors.
+    ///
+    /// Example: `let map = Map::Parse(&text, "house_demo/map.json")?;`
+    #[allow(non_snake_case)]
+    fn Parse(text: &str, source: &str) -> Result<Map> {
+        let map: Map = serde_json::from_str(text)
+            .map_err(|error| format!("map: {source} breaks the format: {error}"))?;
         if map.format != FORMAT || map.version != VERSION {
             return Err(format!(
-                "map: {} is {:?} version {}, not {FORMAT:?} version {VERSION}",
-                manifest_path.display(),
-                map.format,
-                map.version
+                "map: {source} is {:?} version {}, not {FORMAT:?} version {VERSION}",
+                map.format, map.version
             )
             .into());
         }
@@ -358,5 +389,34 @@ impl Map {
                 )
                 .into()
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests of the built-in maps.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Name asked for | a built-in map (`house_demo`, `lunar_surface`), not a built-in map | `builtin_maps_match_their_files`, `unknown_names_fail_listing_the_builtins` |
+
+    use super::*;
+
+    #[test]
+    fn builtin_maps_match_their_files() {
+        for (name, _) in BUILTIN_MAPS {
+            let builtin: Map = Map::Builtin(name).expect("the built-in map parses");
+            let loaded: Map = Map::Load(&get_map_folder(name)).expect("the map's file parses");
+            assert_eq!(builtin.name, loaded.name);
+            assert_eq!(builtin.materials.len(), loaded.materials.len());
+            assert_eq!(builtin.spawns.len(), loaded.spawns.len());
+        }
+    }
+
+    #[test]
+    fn unknown_names_fail_listing_the_builtins() {
+        let error: String = Map::Builtin("moon_base").err().expect("no such map").to_string();
+        assert!(error.contains("moon_base"), "{error}");
+        assert!(error.contains("house_demo, lunar_surface"), "{error}");
     }
 }
