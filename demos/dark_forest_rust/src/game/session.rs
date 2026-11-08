@@ -15,8 +15,9 @@ use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::audio::{Audio, Sound};
 use super::bots::{BOT_HEIGHT_M, Bot, BotClip, BotContext, BotShot, RESPAWN_DELAY_S, SHOT_DAMAGE};
-use super::collision::cast_ray;
+use super::collision::{Aabb, cast_ray};
 use super::hud::{HudState, build_hud};
+use super::nav::NavGraph;
 use super::player::{MAX_HEALTH, Player, PlayerInput};
 use super::weapon::{MAGAZINE_SIZE, Weapon, WeaponEvent, WeaponInput};
 use super::world::Arena;
@@ -128,6 +129,7 @@ fn get_flicker_scale(time_s: f32, index: usize, flicker_frac: f32) -> f32 {
 /// `Session` is one match.
 pub struct Session {
     pub arena: Arena,
+    pub nav: NavGraph,
     pub player: Player,
     pub weapon: Weapon,
     pub bots: Vec<Bot>,
@@ -188,6 +190,14 @@ impl Session {
     /// `new` starts a match with a number of bots.
     pub fn new(arena: Arena, bot_count: usize, is_autopilot: bool) -> Session {
         let laser_rgb: Option<Vec3> = arena.laser_rgb;
+        let solids: Vec<Aabb> = arena.boxes.iter().map(|world_box| world_box.aabb).collect();
+        let nav: NavGraph = NavGraph::build(
+            &solids,
+            &arena.ladders,
+            &arena.warps,
+            arena.bounds_min_m,
+            arena.bounds_max_m,
+        );
         let (spawn_m, yaw_rad) = arena.team_spawns[1]
             .first()
             .copied()
@@ -203,6 +213,7 @@ impl Session {
         Session {
             player: Player::new(spawn_m, yaw_rad),
             arena,
+            nav,
             weapon: Weapon::new(),
             bots,
             kill_count: 0,
@@ -644,6 +655,8 @@ impl Session {
 
         let context: BotContext = BotContext {
             solids: &scene.solids,
+            nav: &self.nav,
+            ladders: &self.arena.ladders,
             player_eye_m: self.player.eye_position_m(),
             player_velocity_m_s: self.player.velocity_m_s,
             is_player_alive: self.player.is_alive(),

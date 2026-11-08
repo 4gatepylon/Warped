@@ -4,7 +4,9 @@
 //! Example:
 //!     if let Some(shot) = bot.update(&context, dt_s) { ... }
 
+use crate::game::nav::{NavGraph, NavStep};
 use crate::game::warps::Warps;
+use crate::game::world::LadderVolume;
 use glam::{Quat, Vec3};
 
 use super::collision::{Aabb, MoveResult, cast_ray, move_body};
@@ -37,6 +39,24 @@ pub const RESPAWN_DELAY_S: f32 = 6.0;
 const ANIMATION_BLEND_S: f32 = 0.25;
 /// `GRAVITY_M_S2` is the downward acceleration.
 const GRAVITY_M_S2: f32 = 16.0;
+/// `CLIMB_SPEED_M_S` is how fast a robot climbs a ladder (a player's speed).
+const CLIMB_SPEED_M_S: f32 = 3.2;
+/// `REPLAN_S` is how often a robot that can't fight the player where it stands finds a new path.
+const REPLAN_S: f32 = 0.8;
+/// `WAYPOINT_REACH_M` is how close a robot comes to a path's spot before heading for the next.
+const WAYPOINT_REACH_M: f32 = 0.35;
+/// `WAYPOINT_HEIGHT_M` is how far above or below a spot a robot may be and still have reached it.
+const WAYPOINT_HEIGHT_M: f32 = 0.6;
+/// `LEVEL_HEIGHT_M` is how far below or above the robot the player may stand to be fought
+/// directly rather than reached by a path.
+const LEVEL_HEIGHT_M: f32 = 2.0;
+/// `PLAYER_EYE_ABOVE_FEET_M` turns the player's eye into their feet.
+const PLAYER_EYE_ABOVE_FEET_M: f32 = 1.6;
+/// `LADDER_HOLD_BACK_M` keeps a climbing robot this far behind a ladder's middle, clear of the
+/// deck's edge; `LADDER_HOLD_GAIN_PER_S` and `LADDER_HOLD_MAX_M_S` pull it there.
+const LADDER_HOLD_BACK_M: f32 = 0.25;
+const LADDER_HOLD_GAIN_PER_S: f32 = 4.0;
+const LADDER_HOLD_MAX_M_S: f32 = 1.5;
 
 /// `BotClip` is which animation a bot plays.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -90,6 +110,8 @@ pub struct BotShot {
 /// `BotContext` is what a bot knows about the world this frame.
 pub struct BotContext<'a> {
     pub solids: &'a [Aabb],
+    pub nav: &'a NavGraph,
+    pub ladders: &'a [LadderVolume],
     pub player_eye_m: Vec3,
     pub player_velocity_m_s: Vec3,
     pub is_player_alive: bool,
@@ -117,6 +139,10 @@ pub struct Bot {
     avoid_direction: Vec3,
     last_seen_m: Option<Vec3>,
     noise_state: u32,
+    path: Vec<NavStep>,
+    path_index: usize,
+    replan_s: f32,
+    is_climbing: bool,
 }
 
 impl Bot {
@@ -136,6 +162,57 @@ impl Bot {
         if warps.is_inside_horizon(centre_m) {
             self.take_damage(f32::MAX);
         }
+    }
+
+    /// `follow_path` steers along the bot's path: the direction and speed to walk, and the climbing
+    /// speed while it climbs a ladder (holding just behind its middle, then stepping off at the
+    /// spot it leads to).
+    fn follow_path(&mut self, ladders: &[LadderVolume]) -> (Vec3, f32, Option<f32>) {
+        while let Some(step) = self.path.get(self.path_index) {
+            let is_reached: bool = (step.position_m - self.feet_m).with_y(0.0).length()
+                < WAYPOINT_REACH_M
+                && (step.position_m.y - self.feet_m.y).abs() < WAYPOINT_HEIGHT_M;
+            if !is_reached {
+                break;
+            }
+            self.path_index += 1;
+        }
+        let Some(step) = self.path.get(self.path_index).copied() else {
+            self.is_climbing = false;
+            return (Vec3::ZERO, 0.0, None);
+        };
+        let to_step: Vec3 = (step.position_m - self.feet_m).with_y(0.0);
+        let Some(ladder_index) = step.ladder else {
+            self.is_climbing = false;
+            return (to_step, RUN_SPEED_M_S, None);
+        };
+        let ladder: &LadderVolume = &ladders[ladder_index];
+        let facing: Vec3 = (-ladder.frame.z_axis.truncate())
+            .with_y(0.0)
+            .normalize_or_zero();
+        let centre_m: Vec3 = ((ladder.aabb.min_m + ladder.aabb.max_m) * 0.5).with_y(self.feet_m.y);
+        let is_going_up: bool = step.position_m.y > self.feet_m.y;
+        let is_done: bool = if is_going_up {
+            self.feet_m.y > step.position_m.y + 0.05
+        } else {
+            self.feet_m.y < step.position_m.y + 0.05
+        };
+        if self.is_climbing && is_done {
+            self.is_climbing = false;
+            return (to_step, WALK_SPEED_M_S, None);
+        }
+        if !self.is_climbing && !ladder.aabb.overlaps(&self.body()) {
+            return (centre_m - self.feet_m, WALK_SPEED_M_S, None);
+        }
+        self.is_climbing = true;
+        let to_hold: Vec3 = centre_m - facing * LADDER_HOLD_BACK_M - self.feet_m;
+        let hold_m_s: f32 = (to_hold.length() * LADDER_HOLD_GAIN_PER_S).min(LADDER_HOLD_MAX_M_S);
+        let climb_m_s: f32 = if is_going_up {
+            CLIMB_SPEED_M_S
+        } else {
+            -CLIMB_SPEED_M_S
+        };
+        (to_hold, hold_m_s, Some(climb_m_s))
     }
 
     /// `new` spawns a bot.
@@ -162,6 +239,10 @@ impl Bot {
             avoid_time_s: 0.0,
             avoid_direction: Vec3::ZERO,
             last_seen_m: None,
+            path: Vec::new(),
+            path_index: 0,
+            replan_s: 0.0,
+            is_climbing: false,
             noise_state: seed.wrapping_mul(0x9e37_79b9) | 1,
         }
     }
@@ -264,7 +345,29 @@ impl Bot {
             self.strafe_sign = if self.random_frac() < 0.5 { -1.0 } else { 1.0 };
             self.strafe_time_s = 1.0 + self.random_frac() * 1.8;
         }
-        let (mut desired, speed_m_s): (Vec3, f32) = if !context.is_player_alive {
+        let player_feet_m: Vec3 = context.player_eye_m - Vec3::Y * PLAYER_EYE_ABOVE_FEET_M;
+        let is_level_with_player: bool = (player_feet_m.y - self.feet_m.y).abs() < LEVEL_HEIGHT_M;
+        let should_follow_path: bool =
+            context.is_player_alive && (self.is_climbing || !(sees_player && is_level_with_player));
+        let mut climb_m_s: Option<f32> = None;
+        let (mut desired, speed_m_s): (Vec3, f32) = if should_follow_path {
+            self.replan_s -= dt_s;
+            if self.replan_s <= 0.0 && !self.is_climbing {
+                self.replan_s = REPLAN_S;
+                self.path = context
+                    .nav
+                    .find_path(self.feet_m, player_feet_m)
+                    .unwrap_or_default();
+                self.path_index = 0;
+            }
+            let (direction, path_speed_m_s, climb) = self.follow_path(context.ladders);
+            climb_m_s = climb;
+            if self.path.is_empty() {
+                (toward, RUN_SPEED_M_S)
+            } else {
+                (direction, path_speed_m_s)
+            }
+        } else if !context.is_player_alive {
             (Vec3::ZERO, 0.0)
         } else if sees_player {
             if distance_m > ENGAGE_DISTANCE_M {
@@ -280,7 +383,7 @@ impl Bot {
             self.last_seen_m = None;
             (Vec3::ZERO, 0.0)
         };
-        if self.avoid_time_s > 0.0 {
+        if self.avoid_time_s > 0.0 && !should_follow_path {
             self.avoid_time_s -= dt_s;
             desired = self.avoid_direction;
         }
@@ -291,7 +394,10 @@ impl Bot {
             .velocity_m_s
             .with_y(0.0)
             .lerp(target_velocity, blend_frac);
-        self.velocity_m_s = horizontal.with_y(self.velocity_m_s.y - GRAVITY_M_S2 * dt_s);
+        self.velocity_m_s = match climb_m_s {
+            Some(climb_m_s) => horizontal.with_y(climb_m_s),
+            None => horizontal.with_y(self.velocity_m_s.y - GRAVITY_M_S2 * dt_s),
+        };
         let result: MoveResult = move_body(
             context.solids,
             self.feet_m,
@@ -302,7 +408,11 @@ impl Bot {
         if result.is_on_ground {
             self.velocity_m_s.y = 0.0;
         }
-        if result.did_hit_wall && self.avoid_time_s <= 0.0 && desired != Vec3::ZERO {
+        if result.did_hit_wall
+            && !should_follow_path
+            && self.avoid_time_s <= 0.0
+            && desired != Vec3::ZERO
+        {
             let turn: f32 = if self.random_frac() < 0.5 { -1.0 } else { 1.0 };
             self.avoid_direction = Vec3::new(-desired.z * turn, 0.0, desired.x * turn);
             self.avoid_time_s = 0.6 + self.random_frac() * 0.6;

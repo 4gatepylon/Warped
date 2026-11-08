@@ -7,6 +7,7 @@ pub mod audio;
 pub mod bots;
 pub mod collision;
 pub mod hud;
+pub mod nav;
 pub mod player;
 pub mod session;
 pub mod warps;
