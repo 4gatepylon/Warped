@@ -945,20 +945,32 @@ impl Server {
     }
 
     /// `update_consoles` turns off each console a player has held `E` on for `consoles.hold_to_disable_s`,
-    /// and declares the other team the winner once all of a team's consoles are off.
+    /// checking for a winner after each one, so the first team to finish wins even when both teams'
+    /// last consoles go off in the same update; once there is a winner it turns no more off.
     ///
     /// Example: `server.update_consoles();`
     fn update_consoles(&mut self) {
-        for slot in &mut self.slots {
+        for index in 0..self.slots.len() {
+            let slot: &mut Slot = &mut self.slots[index];
             if let (Some(console), Some(since)) =
                 (slot.player.disabling_console, slot.disabling_since)
                 && since.elapsed().as_secs_f64() >= self.settings.consoles.hold_to_disable_s
             {
-                self.game.off_mask |= 1 << console;
                 (slot.player.disabling_console, slot.disabling_since) = (None, None);
-                println!("player {} turned off console {console}", slot.player.id);
+                let id: u32 = slot.player.id;
+                if self.game.winner.is_none() {
+                    self.game.off_mask |= 1 << console;
+                    println!("player {id} turned off console {console}");
+                    self.update_winner();
+                }
             }
         }
+    }
+
+    /// `update_winner` declares the other team the winner once all of a team's consoles are off.
+    ///
+    /// Example: `self.update_winner();`
+    fn update_winner(&mut self) {
         let losers: Vec<u32> = (0..TEAM_NAMES.len() as u32)
             .filter(|&team| {
                 let mut consoles = (0..self.console_teams.len())
@@ -1726,6 +1738,7 @@ mod tests {
     //! | Console held | the other team's (turned off after the settings' `hold_to_disable_s`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
     //! | Progress of turning off a console, in a snapshot | none held (0), part way (the seconds held over `hold_to_disable_s`), past the hold time (1) | `snapshots_carry_how_far_consoles_are_turned_off` |
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
+    //! | Last consoles off in one update | both teams' (the first team to finish wins) | `the_first_team_to_finish_in_an_update_wins` |
     //! | Scores datagram | complete (several players, none), cut short, too long, an unknown team | `scores_survive_encoding` |
     //! | Who a hit eliminates | nobody (a hit short of the limit), the other team's player (a kill and a death), a teammate (a death only) | `eliminations_count_kills_and_deaths` |
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
@@ -1918,6 +1931,15 @@ mod tests {
     ///
     /// Example: `hold_console(&mut server, 1, address(50_001), 2);`
     fn hold_console(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
+        start_holding(server, id, from, console);
+        server.update_consoles();
+    }
+
+    /// `start_holding` is `hold_console` without the update, so several players' holds can end in
+    /// the same update.
+    ///
+    /// Example: `start_holding(&mut server, 1, address(50_001), 2);`
+    fn start_holding(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
         let player: RemotePlayer = RemotePlayer {
             id,
             frame: DMat4::IDENTITY,
@@ -1939,7 +1961,6 @@ mod tests {
                 .disabling_since
                 .map(|since| since - Duration::from_secs_f64(disable_s));
         }
-        server.update_consoles();
     }
 
     /// `connect_client` connects a client to `server` and joins it on `team`, letting the server
@@ -2304,6 +2325,19 @@ mod tests {
         assert_eq!(shoot(&mut server, 1, 50_001), 1.0);
         send_wormholes(&mut server, PlayerWormholes::default());
         assert_eq!(server.slots[1].wormhole_damage_frac, 0.0);
+    }
+
+    #[test]
+    fn the_first_team_to_finish_in_an_update_wins() {
+        let mut server: Server = make_server();
+        let (blue, red) = (address(50_002), address(50_001));
+        join(&mut server, red, RED);
+        join(&mut server, blue, BLUE);
+        hold_console(&mut server, 1, red, 0);
+        start_holding(&mut server, 1, red, 1);
+        start_holding(&mut server, 2, blue, 2);
+        server.update_consoles();
+        assert_eq!((server.game.off_mask, server.game.winner), (0b011, Some(1)));
     }
 
     #[test]
