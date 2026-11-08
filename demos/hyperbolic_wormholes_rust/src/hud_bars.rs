@@ -1,7 +1,7 @@
 //! `hud_bars.rs` builds the HUD's bars as overlay rectangles in their look (D85): segments that
 //! lean like `/`, empty ones dark glass outlined in the bar's colour, filled ones translucent,
 //! glossy, outlined and glowing in it; and soft glows that run along a bar's filled part while
-//! its value changes (D89): down from the filled part's end while it falls (a hit, sprinting),
+//! its value changes (D94): down from the filled part's end while it falls (a hit, sprinting),
 //! up toward it while it rises (refilling), as strong as the value's smoothed rate of change.
 //! The shader's `get_rect_layer`, `get_rect_halo` and `get_pulse_glow` draw them.
 //!
@@ -37,18 +37,19 @@ const MIN_PULSE_STRENGTH_FRAC: f64 = 0.05;
 const PULSE_END_MARGIN_PER_HALF_WIDTH: f64 = 3.0;
 const WHITE_RGB: [f32; 3] = [1.0, 1.0, 1.0];
 
-/// `PULSE_TUNING` is how the HUD's bars pulse: the `PulseTuning` the user picked.
+/// `PULSE_TUNING` is how the HUD's bars pulse, the `PulseTuning` the user picked (D94's variant D):
+/// wide, soft swells whose speed, frequency and strength grow with the value's smoothed rate.
 pub(crate) const PULSE_TUNING: PulseTuning = PulseTuning {
-    smoothing_s: 0.2,
-    full_rate_frac_per_s: 0.12,
-    use_opacity: 0.7,
+    smoothing_s: 0.3,
+    full_rate_frac_per_s: 0.15,
+    use_opacity: 0.5,
     refill_opacity: 0.45,
-    slow_speed_frac_per_s: 2.5,
-    fast_speed_frac_per_s: 2.5,
-    slow_period_s: 0.3,
-    fast_period_s: 0.3,
-    half_width_frac: 0.01,
-    half_height_per_bar_height: 0.8,
+    slow_speed_frac_per_s: 0.8,
+    fast_speed_frac_per_s: 2.2,
+    slow_period_s: 0.9,
+    fast_period_s: 0.45,
+    half_width_frac: 0.045,
+    half_height_per_bar_height: 1.1,
 };
 
 /// `PulseTuning` is how a bar's pulses behave: the time constant of the moving average whose rate
@@ -503,7 +504,7 @@ mod tests {
         run(&mut pulses, 0.1, |_| after_hit_frac);
         let x_frac: f64 = pulses.positions_frac[0].expect("still running");
         assert!(x_frac < end_frac, "runs down: {x_frac}");
-        run(&mut pulses, 3.0, |_| after_hit_frac);
+        run(&mut pulses, 5.0, |_| after_hit_frac);
         assert!(
             pulses.get_strength_frac(&PULSE_TUNING) < MIN_PULSE_STRENGTH_FRAC,
             "a hit is a burst"
