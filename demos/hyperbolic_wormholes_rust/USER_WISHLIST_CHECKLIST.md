@@ -76,6 +76,13 @@ is in [`AGENTS.md`](AGENTS.md).
   it also can also be shot directly across. And there should be a well defined parameter for how long it goes. I think
   usually it should be no more than two bounces at most."
   Merged into `staging/user-4gatepylon` with #397, 2026-11-08.
+  - **Bugs found playing it, 2026-11-08:** "if you kill the enemy, they immediately respawn. That's not how it should
+    work. They should not immediately respawn. I also think you should be able to run a little faster in space
+    station. I separately cannot find how to get on top of the inner sphere, like I'm stuck in the outer sphere.
+    There should be like stairs going up. That is extremely important because you need to make it to the pylons.
+    Also, the mini map is just like a blank, it's just like doesn't have any mini map stuff. It should have like
+    actual Cartesian lines and it should, um, like show things properly, I guess." Being fixed on branch
+    `claude/city-sphere-fixes`.
 - [?] **W-120 Snow Planet demo.** Part of W-124 (four map demos): "There should be like a really snowy zone where
   you're like slowed and you start to lose health because you're like freezing. And it should be the case that
   there's like multiple of these. And if you shoot through them, like the shot has like a smaller distance it can
