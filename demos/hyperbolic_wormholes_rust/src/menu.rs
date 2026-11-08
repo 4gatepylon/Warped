@@ -1,11 +1,12 @@
 //! `menu.rs` is the in-game menu, in pages under a tab bar: the settings page, where a player
 //! changes their own settings (`player_settings.yaml`: every key binding, the mouse look speed, the
-//! head bob, motion blur and how a hit looks, and a row that saves them), and the map page, whose
-//! picture the window draws (`map_layout.rs`). It keeps no window state: the window feeds it pressed
-//! controls and draws its lines.
+//! head bob, motion blur and how a hit looks, and a row that saves them), the map page, whose
+//! picture the window draws (`map_layout.rs`), and the scores page, with each player's team, kills
+//! and deaths from the server. It keeps no window state: the window feeds it pressed controls and
+//! the scores, and draws its lines.
 //!
 //! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`, `show_message`), `MenuOutcome`,
-//! `Page`.
+//! `Page`, `Scoreboard`.
 //!
 //! Example: `if menu.handle(control, &mut mine) == MenuOutcome::Close { ... }`
 //!
@@ -13,14 +14,28 @@
 //! - Inside the menu the arrows, `Return`, `Escape`, `Q` and `E` work whatever the key bindings
 //!   say, so a bad binding can always be fixed.
 
+use std::cmp::Reverse;
+
 use sdl3::keyboard::Scancode;
 
 use crate::key_bindings::{Action, Control, KeyBindings};
+use crate::net::{Score, TEAM_NAMES};
 use crate::settings::PerPlayerSettings;
 
 const VISIBLE_ROW_COUNT: usize = 20;
-const PAGES: [(Page, &str); 2] = [(Page::Settings, "SETTINGS"), (Page::Map, "MAP")];
+const PAGES: [(Page, &str); 3] = [
+    (Page::Settings, "SETTINGS"),
+    (Page::Map, "MAP"),
+    (Page::Scores, "SCORES"),
+];
 const MAP_LEGEND: &str = "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
+const NO_SERVER_LINE: &str = "No game on a server: host or join one to keep scores.";
+const WAITING_LINE: &str = "No scores from the server yet: join a team first.";
+const MAX_SCORE_ROW_COUNT: usize = 16;
+const TEAM_WIDTH: usize = 6;
+const PLAYER_WIDTH: usize = 16;
+const KILLS_WIDTH: usize = 6;
+const DEATHS_WIDTH: usize = 8;
 const LABEL_WIDTH: usize = 24;
 const NUMBERS: [(Number, &str, f64, f64, f64); 7] = [
     (
@@ -43,6 +58,20 @@ const NUMBERS: [(Number, &str, f64, f64, f64); 7] = [
 pub enum Page {
     Settings,
     Map,
+    Scores,
+}
+
+/// `Scoreboard` is what the scores page shows: that there is no game on a server, that the server
+/// hasn't sent scores yet, or the latest scores of every player in the game with this player's id
+/// (`None` before the server's first welcome).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Scoreboard<'a> {
+    NoServer,
+    Waiting,
+    Scores {
+        scores: &'a [Score],
+        own_id: Option<u32>,
+    },
 }
 
 /// `Number` is one of the player's numeric settings that the menu changes.
@@ -118,6 +147,68 @@ fn get_number_slot(settings: &mut PerPlayerSettings, number: Number) -> &mut f64
         Number::HitShake => &mut settings.hit_effects.shake_px,
         Number::HitBlur => &mut settings.hit_effects.blur_px,
     }
+}
+
+/// `format_score_row` lays out one row of the scores page in its columns: team, player, kills and
+/// deaths.
+///
+/// Example: `let header = format_score_row("TEAM", "PLAYER", "KILLS", "DEATHS");`
+fn format_score_row(team: &str, player: &str, kills: &str, deaths: &str) -> String {
+    format!(
+        "{team:<TEAM_WIDTH$}{player:<PLAYER_WIDTH$}{kills:>KILLS_WIDTH$}{deaths:>DEATHS_WIDTH$}"
+    )
+}
+
+/// `get_score_lines` gives the scores page's lines below the tab bar: without scores, why there
+/// are none; with them, how many players are in the game and on each team, a row per player
+/// (team, id, kills and deaths, at most `MAX_SCORE_ROW_COUNT`) sorted by team and then by most
+/// kills, with this player's row marked "(you)" and highlighted, and each team's totals.
+///
+/// Example: `let lines = get_score_lines(Scoreboard::NoServer);`
+fn get_score_lines(scoreboard: Scoreboard) -> Vec<(String, bool)> {
+    let (scores, own_id) = match scoreboard {
+        Scoreboard::NoServer => return vec![(NO_SERVER_LINE.to_string(), false)],
+        Scoreboard::Waiting => return vec![(WAITING_LINE.to_string(), false)],
+        Scoreboard::Scores { scores, own_id } => (scores, own_id),
+    };
+    let mut sorted: Vec<Score> = scores.to_vec();
+    sorted.sort_by_key(|score| (score.team, Reverse(score.kills), score.id));
+    let team_scores = |team: usize| sorted.iter().filter(move |s| s.team as usize == team);
+    let team_counts: Vec<String> = TEAM_NAMES
+        .iter()
+        .enumerate()
+        .map(|(team, name)| format!("{name} {}", team_scores(team).count()))
+        .collect();
+    let mut lines: Vec<(String, bool)> = vec![
+        (
+            format!("Players: {} ({})", sorted.len(), team_counts.join(", ")),
+            false,
+        ),
+        (String::new(), false),
+        (format_score_row("TEAM", "PLAYER", "KILLS", "DEATHS"), false),
+    ];
+    for score in sorted.iter().take(MAX_SCORE_ROW_COUNT) {
+        let is_own: bool = Some(score.id) == own_id;
+        let player: String = match is_own {
+            true => format!("player {} (you)", score.id),
+            false => format!("player {}", score.id),
+        };
+        let row: String = format_score_row(
+            TEAM_NAMES[score.team as usize],
+            &player,
+            &score.kills.to_string(),
+            &score.deaths.to_string(),
+        );
+        lines.push((row, is_own));
+    }
+    lines.push((String::new(), false));
+    for (team, name) in TEAM_NAMES.iter().enumerate() {
+        let kills: u32 = team_scores(team).map(|score| score.kills).sum();
+        let deaths: u32 = team_scores(team).map(|score| score.deaths).sum();
+        let row: String = format_score_row(name, "total", &kills.to_string(), &deaths.to_string());
+        lines.push((row, false));
+    }
+    lines
 }
 
 /// `Menu` is the menu's state: the page shown (an index into `PAGES`), the settings page's chosen
@@ -218,11 +309,16 @@ impl Menu {
 
     /// `get_lines` gives the menu's text, each line with whether it is highlighted: the tab bar,
     /// then on the settings page a hint, the rows around the chosen one (`VISIBLE_ROW_COUNT` of
-    /// them) and the line of news, or on the map page the map's legend. `save_path` is where saving
-    /// writes.
+    /// them) and the line of news, on the map page the map's legend, or on the scores page
+    /// `scoreboard`'s lines (`get_score_lines`). `save_path` is where saving writes.
     ///
-    /// Example: `let lines = menu.get_lines(&mine, "~/.config/warped/player_settings.yaml");`
-    pub fn get_lines(&self, settings: &PerPlayerSettings, save_path: &str) -> Vec<(String, bool)> {
+    /// Example: `let lines = menu.get_lines(&mine, "~/.config/warped/player_settings.yaml", Scoreboard::NoServer);`
+    pub fn get_lines(
+        &self,
+        settings: &PerPlayerSettings,
+        save_path: &str,
+        scoreboard: Scoreboard,
+    ) -> Vec<(String, bool)> {
         let rows: Vec<Row> = get_rows();
         let first: usize = self
             .row
@@ -237,8 +333,14 @@ impl Menu {
             })
             .collect();
         let tab_bar: String = format!("MENU  {}     Q/E: page", tabs.join(" "));
-        if self.get_page() == Page::Map {
-            return vec![(tab_bar, true), (MAP_LEGEND.to_string(), false)];
+        match self.get_page() {
+            Page::Map => return vec![(tab_bar, true), (MAP_LEGEND.to_string(), false)],
+            Page::Scores => {
+                let mut lines: Vec<(String, bool)> = vec![(tab_bar, true), (String::new(), false)];
+                lines.extend(get_score_lines(scoreboard));
+                return lines;
+            }
+            Page::Settings => {}
         }
         let mut lines: Vec<(String, bool)> = vec![
             (tab_bar, true),
@@ -278,6 +380,7 @@ mod tests {
     //! | Row kind | an action (rebound, or cancelled with Escape), a number (stepped, clamped), saving | `rows_rebind_step_and_save` |
     //! | Closing | Escape, the open-menu control | `escape_and_the_menu_key_close_it` |
     //! | Page | turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
+    //! | Scoreboard | no server, waiting for scores, scores (two teams, ties in kills, this player known or not yet) | `the_scores_page_sorts_and_totals` |
 
     use super::*;
 
@@ -320,16 +423,20 @@ mod tests {
     #[test]
     fn q_and_e_turn_pages() {
         let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
-        for expected in [Page::Map, Page::Settings] {
+        for expected in [Page::Map, Page::Scores, Page::Settings] {
             menu.handle(Control::Key(Scancode::E), &mut mine);
             assert_eq!(menu.get_page(), expected);
         }
+        menu.handle(Control::Key(Scancode::Q), &mut mine);
         menu.handle(Control::Key(Scancode::Q), &mut mine);
         assert_eq!(menu.get_page(), Page::Map);
         menu.handle(Control::Key(Scancode::Down), &mut mine);
         menu.handle(Control::Key(Scancode::Return), &mut mine);
         assert!(!menu.is_waiting_for_control && menu.row == 0);
-        assert_eq!(menu.get_lines(&mine, "")[1].0, MAP_LEGEND);
+        assert_eq!(
+            menu.get_lines(&mine, "", Scoreboard::NoServer)[1].0,
+            MAP_LEGEND
+        );
         assert_eq!(
             menu.handle(Control::Key(Scancode::Escape), &mut mine),
             MenuOutcome::Close
@@ -346,6 +453,61 @@ mod tests {
         assert_eq!(
             menu.handle(Control::Key(Scancode::Tab), &mut mine),
             MenuOutcome::Close
+        );
+    }
+
+    #[test]
+    fn the_scores_page_sorts_and_totals() {
+        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::Q), &mut mine);
+        assert_eq!(menu.get_page(), Page::Scores);
+        let get_texts = |scoreboard: Scoreboard| -> Vec<(String, bool)> {
+            menu.get_lines(&mine, "", scoreboard)[2..].to_vec()
+        };
+        assert_eq!(get_texts(Scoreboard::NoServer)[0].0, NO_SERVER_LINE);
+        assert_eq!(get_texts(Scoreboard::Waiting)[0].0, WAITING_LINE);
+        let score = |id: u32, team: u32, kills: u32, deaths: u32| Score {
+            id,
+            team,
+            kills,
+            deaths,
+        };
+        let scores: Vec<Score> = vec![
+            score(1, 1, 0, 2),
+            score(2, 0, 1, 0),
+            score(3, 1, 4, 1),
+            score(4, 0, 3, 1),
+            score(5, 0, 3, 0),
+        ];
+        let lines: Vec<(String, bool)> = get_texts(Scoreboard::Scores {
+            scores: &scores,
+            own_id: Some(5),
+        });
+        let row = |team: &str, player: &str, kills: u32, deaths: u32| {
+            format_score_row(team, player, &kills.to_string(), &deaths.to_string())
+        };
+        let expected: Vec<(String, bool)> = vec![
+            ("Players: 5 (blue 3, red 2)".to_string(), false),
+            (String::new(), false),
+            (format_score_row("TEAM", "PLAYER", "KILLS", "DEATHS"), false),
+            (row("blue", "player 4", 3, 1), false),
+            (row("blue", "player 5 (you)", 3, 0), true),
+            (row("blue", "player 2", 1, 0), false),
+            (row("red", "player 3", 4, 1), false),
+            (row("red", "player 1", 0, 2), false),
+            (String::new(), false),
+            (row("blue", "total", 7, 1), false),
+            (row("red", "total", 4, 3), false),
+        ];
+        assert_eq!(lines, expected);
+        let not_welcomed: Vec<(String, bool)> = get_texts(Scoreboard::Scores {
+            scores: &scores,
+            own_id: None,
+        });
+        assert!(
+            not_welcomed
+                .iter()
+                .all(|(_, is_highlighted)| !is_highlighted)
         );
     }
 }

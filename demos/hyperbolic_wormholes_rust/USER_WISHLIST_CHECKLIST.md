@@ -10,6 +10,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
+  radius (the rest is slightly darker and blurred), and shows where they are on the map. Claimed by Claude Code
+  (session `wizardly-hamilton-23a121`), branch `claude/minimap`, 2026-11-07, with W-48.
 - [~] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
   least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
   doesn't show the entire map. It is a circle that shows just where the player is and what is around them (the
@@ -18,9 +21,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
-- [~] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
-  and team. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/scoreboard-page`, 2026-11-07.
 
 ## Open
 
@@ -92,6 +92,11 @@ is in [`AGENTS.md`](AGENTS.md).
   missing".
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
+- [ ] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
+  exit?", exits if the player presses OK, and otherwise doesn't.
+- [ ] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
+  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
+  pulsing slows down smoothly instead of jumping back.
 
 ## Done
 
@@ -173,3 +178,5 @@ is in [`AGENTS.md`](AGENTS.md).
   Since the map update (W-59), the hills at the edge may block players from leaving: the "Zeno's paradox" slowdown
   should start when a player climbs the hill, to stop them from leaving. As they slow down, their view of the world
   should warp so it looks as if they are being stretched ever further. #159.
+- [x] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
+  and team. #164.
