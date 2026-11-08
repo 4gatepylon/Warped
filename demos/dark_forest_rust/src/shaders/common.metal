@@ -122,6 +122,7 @@ struct GpuParticle {
     float4 stretch_kind;
     float4 color;
     float4 seed;
+    float4 params;
 };
 
 /** @brief `GpuHudRect` matches the Rust struct of the same name. */

@@ -362,6 +362,7 @@ fn gpu_particles(particles: &[Particle]) -> Vec<GpuParticle> {
             stretch_kind: particle.stretch_m.extend(particle.kind as u32 as f32),
             color: particle.color_rgba,
             seed: Vec4::splat(particle.seed),
+            params: particle.params,
         })
         .collect()
 }

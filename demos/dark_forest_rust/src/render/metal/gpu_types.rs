@@ -114,7 +114,8 @@ pub struct GpuDecal {
     pub tangent: Vec4,
 }
 
-/// `GpuParticle` is one particle: position and size, stretch and kind, color, seed.
+/// `GpuParticle` is one particle: position and size, stretch and kind, color, seed, and a beam's
+/// speckle (`Particle::params`).
 ///
 /// Example:
 ///     let particle: GpuParticle = GpuParticle::default();
@@ -125,6 +126,7 @@ pub struct GpuParticle {
     pub stretch_kind: Vec4,
     pub color: Vec4,
     pub seed: Vec4,
+    pub params: Vec4,
 }
 
 /// `GpuHudRect` is one HUD rectangle in window pixels (x, y, width, height) and its color.
@@ -188,7 +190,7 @@ mod tests {
     fn test_layouts_match_shaders() {
         assert_eq!(std::mem::size_of::<GpuFrameUniforms>(), 64 * 10 + 16 * 23);
         assert_eq!(std::mem::size_of::<GpuDrawUniforms>(), 96);
-        assert_eq!(std::mem::size_of::<GpuParticle>(), 64);
+        assert_eq!(std::mem::size_of::<GpuParticle>(), 80);
         assert_eq!(std::mem::size_of::<crate::render::Vertex>(), 48);
         assert_eq!(std::mem::size_of::<crate::render::SkinVertex>(), 24);
     }

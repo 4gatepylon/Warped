@@ -20,6 +20,28 @@ constant float DECAL_SCORCH_RADIUS_FRAC = 0.48;
 constant float DECAL_NORMAL_OFFSET_M = 0.004;
 constant float SUN_DISK_RADIANCE_SCALE = 1.0;
 constant float SUN_GLOW_STRENGTH = 0.04;
+constant uint SMOKE_KIND = 1;
+constant uint MUZZLE_FLASH_KIND = 2;
+constant uint TRACER_KIND = 3;
+constant uint SNIPER_BEAM_KIND = 4;
+constant uint RIFLE_BEAM_KIND = 5;
+constant uint GRAIN_KIND = 6;
+constant float BEAM_REACH = 4.8;
+constant float BEAM_HAZE_BRIGHTNESS = 0.45;
+constant float BEAM_HAZE_WHITENESS = 0.45;
+constant float BEAM_CORE_BRIGHTNESS = 1.6;
+constant float BEAM_CORE_WHITENESS = 0.9;
+constant float LASER_HALO_OPACITY = 0.9;
+constant float LASER_CORE_WHITENESS = 0.6;
+constant float MIN_SPECKLE_GLOW = 0.02;
+constant uint SPECKLE_KIND_SALT = 0x9e3779b9u;
+constant uint3 PIXEL_HASH_PRIMES = uint3(73856093u, 19349663u, 2654435761u);
+constant uint2 PIXEL_HASH_MULTIPLIERS = uint2(0x7feb352du, 0x846ca68bu);
+constant uint3 PIXEL_HASH_SHIFTS = uint3(16u, 15u, 16u);
+constant uint PIXEL_HASH_DROPPED_BITS = 8u;
+constant float PIXEL_HASH_SCALE = 1.0 / 16777216.0;
+constant float GRAIN_EDGE_FRAC = 0.8;
+constant float MIN_BEAM_ACROSS_LENGTH = 1e-6;
 
 /** @brief `SceneFragmentTextures` are the material textures, bound at slots 0 to 3. */
 struct MaterialTextures {
@@ -351,6 +373,7 @@ struct ParticleVertexOut {
     float4 color;
     uint kind [[flat]];
     float seed;
+    float4 params [[flat]];
 };
 
 /**
@@ -374,6 +397,23 @@ vertex ParticleVertexOut particle_vertex(uint vertex_id [[vertex_id]],
     float size_m = particle.position_size.w;
     float3 axis_u;
     float3 axis_v;
+    uint kind = uint(particle.stretch_kind.w);
+    if (kind == SNIPER_BEAM_KIND || kind == RIFLE_BEAM_KIND) {
+        float3 end_m = center + stretch * (corner.x * 0.5);
+        float3 to_eye = frame.camera_position_m.xyz - end_m;
+        float pixel_angle_rad = 2.0 / (frame.proj[1][1] * frame.screen_size.y);
+        float width_m = max(size_m, pixel_angle_rad * length(to_eye));
+        float3 across = cross(stretch, to_eye);
+        across = length(across) > MIN_BEAM_ACROSS_LENGTH ? normalize(across) : float3(0.0, 1.0, 0.0);
+        ParticleVertexOut beam_out;
+        beam_out.position = pass.view_proj * float4(end_m + across * (corner.y * BEAM_REACH * width_m), 1.0);
+        beam_out.local = corner;
+        beam_out.color = particle.color;
+        beam_out.kind = kind;
+        beam_out.seed = particle.seed.x;
+        beam_out.params = particle.params;
+        return beam_out;
+    }
     if (stretch_length_m > 1e-4) {
         axis_u = stretch / stretch_length_m;
         axis_v = normalize(cross(axis_u, to_camera));
@@ -392,13 +432,80 @@ vertex ParticleVertexOut particle_vertex(uint vertex_id [[vertex_id]],
     out.position = pass.view_proj * float4(world_position, 1.0);
     out.local = corner;
     out.color = particle.color;
-    out.kind = uint(particle.stretch_kind.w);
+    out.kind = kind;
     out.seed = particle.seed.x;
+    out.params = particle.params;
     return out;
 }
 
 /**
- * @brief `particle_fragment` shades sparks, smoke, muzzle flashes and tracers procedurally.
+ * @brief `hash_pixel` gives a pseudo-random number in [0, 1) for pixel `id` and `seed`, independent
+ * from pixel to pixel (a lowbias32 integer hash): Lunar Surface's.
+ * @par Example
+ * @code
+ * float roll = hash_pixel(id, seed);
+ * @endcode
+ */
+static float hash_pixel(uint2 id, uint seed) {
+    uint h = id.x * PIXEL_HASH_PRIMES.x ^ id.y * PIXEL_HASH_PRIMES.y ^ seed * PIXEL_HASH_PRIMES.z;
+    h ^= h >> PIXEL_HASH_SHIFTS.x;
+    h *= PIXEL_HASH_MULTIPLIERS.x;
+    h ^= h >> PIXEL_HASH_SHIFTS.y;
+    h *= PIXEL_HASH_MULTIPLIERS.y;
+    h ^= h >> PIXEL_HASH_SHIFTS.z;
+    return float(h >> PIXEL_HASH_DROPPED_BITS) * PIXEL_HASH_SCALE;
+}
+
+/**
+ * @brief `shade_beam` gives a laser piece's premultiplied colour at a point `local.y` of its half
+ * width across, as Lunar Surface's `shade_ray_end` lights a pixel near a beam: the sniper's a white
+ * blade in a soft haze, the rifle's a laser over its halo, in `color.rgb` (display white is
+ * 1 / `exposure` in the scene's units). Its speckle (`speckle_beam` there) paints a share
+ * `color.a` of the pixels it reaches, picked anew each frame by `params.z`: black (`params.x` of
+ * them), white (`params.y`) or, for the rest, dropped out.
+ * @par Example
+ * @code
+ * return shade_beam(in.local, in.color, in.params, in.kind == RIFLE_BEAM_KIND, exposure, id);
+ * @endcode
+ */
+static float4 shade_beam(float2 local, float4 color, float4 params, bool is_rifle, float exposure, uint2 id) {
+    float q = (local.y * BEAM_REACH) * (local.y * BEAM_REACH);
+    float halo = exp(-q / BEAM_REACH);
+    float3 white = float3(1.0 / exposure);
+    float3 beam = color.rgb * white;
+    float3 lit;
+    float alpha;
+    float glow;
+    if (is_rifle) {
+        float core = exp(-q);
+        alpha = saturate(LASER_HALO_OPACITY * halo);
+        lit = beam * alpha + mix(beam, white, LASER_CORE_WHITENESS) * core;
+        glow = saturate(LASER_HALO_OPACITY * halo + core);
+    } else {
+        float core = saturate(exp(-q * q * q));
+        float3 haze = mix(beam, white, BEAM_HAZE_WHITENESS) * BEAM_HAZE_BRIGHTNESS * halo;
+        lit = mix(haze, mix(beam, white, BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS, core);
+        alpha = core;
+        glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
+    }
+    uint seed = uint(params.z);
+    if (color.a <= 0.0 || glow <= MIN_SPECKLE_GLOW || hash_pixel(id, seed) >= color.a) {
+        return float4(lit, alpha);
+    }
+    float speckle_kind = hash_pixel(id, seed ^ SPECKLE_KIND_SALT);
+    float kept_alpha = 1.0 - (1.0 - alpha) * (1.0 - glow);
+    if (speckle_kind < params.x) {
+        return float4(lit * (1.0 - glow), kept_alpha);
+    }
+    if (speckle_kind < params.x + params.y) {
+        return float4(lit * (1.0 - glow) + white * glow, kept_alpha);
+    }
+    return float4(0.0);
+}
+
+/**
+ * @brief `particle_fragment` shades sparks, smoke, muzzle flashes, tracers, laser beams
+ * (`shade_beam`) and dust grains procedurally.
  * Additive kinds return alpha 0 so that one premultiplied blend state serves every kind.
  * @par Example
  * @code
@@ -409,7 +516,20 @@ fragment float4 particle_fragment(ParticleVertexOut in [[stage_in]],
                                   constant FrameUniforms& frame [[buffer(1)]]) {
     float radius = length(in.local);
     float4 color = in.color;
-    if (in.kind == 1) {
+    if (in.kind == SNIPER_BEAM_KIND || in.kind == RIFLE_BEAM_KIND) {
+        return shade_beam(in.local, color, in.params, in.kind == RIFLE_BEAM_KIND, frame.render_params.x,
+                          uint2(in.position.xy));
+    }
+    if (in.kind == GRAIN_KIND) {
+        float sector_rad = 2.0 * PI / in.params.x;
+        float angle_rad = atan2(in.local.y, in.local.x) + PI;
+        float edge = cos(0.5 * sector_rad) / cos(fmod(angle_rad, sector_rad) - 0.5 * sector_rad);
+        float3 lit = color.rgb * (evaluate_sh9(frame.sh9, float3(0.0, 1.0, 0.0)) * frame.post_params.z +
+                                  frame.sun_illuminance.rgb * 0.15);
+        float alpha = color.a * (1.0 - smoothstep(edge * GRAIN_EDGE_FRAC, edge, radius));
+        return float4(lit * alpha, alpha);
+    }
+    if (in.kind == SMOKE_KIND) {
         float puff = (1.0 - smoothstep(0.2, 1.0, radius)) *
                      (0.75 + 0.25 * sin(in.local.x * 5.0 + in.seed * 30.0) *
                                  sin(in.local.y * 4.0 + in.seed * 11.0));
@@ -419,7 +539,7 @@ fragment float4 particle_fragment(ParticleVertexOut in [[stage_in]],
         float alpha = color.a * puff;
         return float4(lit * alpha, alpha);
     }
-    if (in.kind == 2) {
+    if (in.kind == MUZZLE_FLASH_KIND) {
         float angle = atan2(in.local.y, in.local.x);
         float star = pow(abs(cos(angle * 2.0 + in.seed * 6.0)), 18.0) * (1.0 - radius) +
                      pow(abs(cos(angle * 3.0 + in.seed * 3.0)), 30.0) * (1.0 - radius) * 0.6;
@@ -427,8 +547,8 @@ fragment float4 particle_fragment(ParticleVertexOut in [[stage_in]],
         float intensity = saturate(core + star) * (1.0 - smoothstep(0.85, 1.0, radius));
         return float4(color.rgb * intensity, 0.0);
     }
-    float glow = exp(-dot(in.local, in.local) * (in.kind == 3 ? 6.0 : 4.0));
-    if (in.kind == 3) {
+    float glow = exp(-dot(in.local, in.local) * (in.kind == TRACER_KIND ? 6.0 : 4.0));
+    if (in.kind == TRACER_KIND) {
         glow *= exp(-in.local.y * in.local.y * 8.0);
     }
     return float4(color.rgb * glow, 0.0);

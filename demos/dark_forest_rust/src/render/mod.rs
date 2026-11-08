@@ -189,7 +189,9 @@ pub struct Decal {
     pub seed: f32,
 }
 
-/// `ParticleKind` is how a particle is shaded.
+/// `ParticleKind` is how a particle is shaded: `SniperBeam` and `RifleBeam` are a piece of a
+/// laser in Lunar Surface's two looks (the sniper's blade, the rifle's laser), and `Grain` a grain
+/// of dust.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u32)]
 pub enum ParticleKind {
@@ -197,9 +199,18 @@ pub enum ParticleKind {
     Smoke = 1,
     MuzzleFlash = 2,
     Tracer = 3,
+    SniperBeam = 4,
+    RifleBeam = 5,
+    Grain = 6,
 }
 
 /// `Particle` is a camera-facing sprite, stretched along `stretch_m` (for sparks and tracers).
+/// A beam's piece runs from `position_m - stretch_m / 2` to `position_m + stretch_m / 2`, at least
+/// `size_m` wide (wider far away, a pixel's width), its `color_rgba` its colour (linear, in display
+/// white) and the share of its pixels that speckle, and its `params` (the shares of speckled
+/// pixels painted black and turned white, the frame's speckle seed, unused). A grain's `params.x`
+/// is its outline's number of sides and its `seed` how far it is turned, in turns; `params` is
+/// zero for the other kinds.
 #[derive(Clone, Copy, Debug)]
 pub struct Particle {
     pub position_m: Vec3,
@@ -208,6 +219,7 @@ pub struct Particle {
     pub color_rgba: Vec4,
     pub kind: ParticleKind,
     pub seed: f32,
+    pub params: Vec4,
 }
 
 /// `HudRect` is a filled rectangle on the screen, in pixels from the top left of the window.
