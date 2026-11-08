@@ -24,21 +24,21 @@ make join-game SERVER=127.0.0.1
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
   (`--player-settings`) to `make join-game`.
-- `Tab` opens a menu of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
+- `Tab` opens the menu on its SCORES page (below); `E` turns to the settings page, of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
   (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
   stands still while it is open, but the game goes on.
-- `Q` and `E` turn the menu's pages: SETTINGS (above) and MAP, the whole map from above with you on it as a disk in
+- `Q` and `E` turn the menu's pages: SCORES, SETTINGS (above), MAP and CREDITS. MAP is the whole map from above with you on it as a disk in
   your team's colour pointing the way you face: the ground's relief, structures brighter the higher they are,
   consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
   zones' edges (dashed) and the playable boundary. The map is drawn in its Fermi coordinates
   (`common/maps/README.md`), so things far above and below its middle line look squeezed from side to side: that is
-  the hyperbolic plane. The third page, SCORES, shows in a game on a server how many players there are and each
+  the hyperbolic plane. The SCORES page, where the menu opens, shows in a game on a server how many players there are and each
   one's team, kills and deaths in this game, sorted by team and then kills, with your line highlighted and each
   team's totals. The MAP page also rings everything within the minimap's reach of you (60 m by default); the rest is
   darker and blurred. The ring is a hyperbolic circle, so on the map it comes out lopsided. In a game on a server,
   every other player in the game shows as a smaller dot in their team's colour, ringed in dark grey, near or far.
-  The fourth page, CREDITS, says where the game's assets come from: their authors, sources and licenses
+  The last page, CREDITS, says where the game's assets come from: their authors, sources and licenses
   (`src/credits.rs`).
 - The minimap, in the top right, is a Poincaré disk of the ground within 60 m of you, turned so you face up (the
   white arrow in the middle): faint lines every 10 m and paths away from you bend into arcs, as straight lines do
@@ -48,11 +48,11 @@ make join-game SERVER=127.0.0.1
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
-  you through. While you move inside a mouth's reach, your view Doppler-shifts as if you moved near light speed
-  (D84): walking forward turns it a bluish cyan, deep blue in the middle; walking backward turns it red. It is
-  strongest at the throat and with speed, none standing still, and gone once you are out of the reach.
-  `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for none).
-  Only you see your own shift (Metal renderer, voxel maps).
+  you through. For the split second you are inside the mouth (within about 2 m of its throat), moving, your view
+  flashes almost white, as if you moved near light speed (D84): a pale blue-white walking forward, a warm white
+  walking backward. It is strongest at the throat and with speed, none standing still, and gone once you are 2 m
+  out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for
+  none). Only you see your own flash (Metal renderer, voxel maps).
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
   `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy

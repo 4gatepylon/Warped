@@ -47,12 +47,10 @@ constant float STRETCH_FRINGE_FRAC = 0.03;
 constant float3 BLUESHIFT_CHANNEL_NM = float3(610.0, 550.0, 465.0);
 constant float BLUESHIFT_INFRARED_NM = 700.0;
 constant float BLUESHIFT_ULTRAVIOLET_NM = 400.0;
-constant float BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED = 0.2;
-constant float REDSHIFT_WALK_SPEED_PER_LIGHT_SPEED = 0.3;
-constant float BLUESHIFT_ANGLE_FRAC = 0.5;
-constant float BLUESHIFT_BEAMING_POWER = 1.0;
-constant float3 BLUESHIFT_GLOW_COLOR = float3(0.0, 0.12, 0.4);
-constant float3 REDSHIFT_GLOW_COLOR = float3(0.4, 0.04, 0.0);
+constant float BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED = 0.05;
+constant float BLUESHIFT_WHITE_FRAC = 0.85;
+constant float3 BLUESHIFT_WHITE_COLOR = float3(0.86, 0.93, 1.0);
+constant float3 REDSHIFT_WHITE_COLOR = float3(1.0, 0.92, 0.84);
 constant int MAX_MINIMAP_MARK_COUNT = 16;
 constant int MAX_MINIMAP_LINE_COUNT = 96;
 constant float MINIMAP_OPACITY = 0.88;
@@ -2077,19 +2075,16 @@ static float sample_spectrum(float3 rgb, float nm) {
 
 /**
  * @brief `blueshift_scene` gives a pixel's colour as seen moving along the view, `blueshift_frac` giving how fast
- * (1 for walking at a mouth's throat; negative backward; 0 for none). The relativistic Doppler factor
- * D = sqrt(1 - β²) / (1 - β cos θ), with θ the angle between the pixel's ray and straight ahead, makes each channel
- * show the light the scene sends at D times its wavelength (`sample_spectrum`). Moving forward (D > 1), red fades,
- * green takes red's light and blue green's, so greys turn a bluish cyan and reds green; moving backward (D < 1), blue
- * fades and greys turn red. The pixel is D^`BLUESHIFT_BEAMING_POWER` times as bright (relativistic beaming), plus
- * `BLUESHIFT_GLOW_COLOR` (or `REDSHIFT_GLOW_COLOR`) times how far that gain is from 1, so the black sky turns faintly
- * blue (or red).
- * - Speed: β is `BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED` (backward, `REDSHIFT_WALK_SPEED_PER_LIGHT_SPEED`) at
- *   |`blueshift_frac`| = 1 and grows with it beyond; below 1, the shifted colour fades in by |`blueshift_frac`|
- *   instead, since a smaller shift would first turn greys greenish (or yellowish).
- * - Backward: green sits further from blue than from red, so a redshift needs more speed to look as red.
- * - Angle: θ keeps only `BLUESHIFT_ANGLE_FRAC` of its effect (cos θ is taken that much of the way from 1), so the
- *   corners stay bluish instead of turning greenish while the middle turns deep blue.
+ * (1 for walking at a mouth's throat; negative backward; 0 for none), as a flash close to white: a small relativistic
+ * Doppler shift, then most of the way to a pale tinted white.
+ * - Shift: the Doppler factor D = sqrt(1 - β²) / (1 - β cos θ), with θ the angle between the pixel's ray and
+ *   straight ahead and β = `BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED` × max(|`blueshift_frac`|, 1) (negative backward),
+ *   makes each channel show the light the scene sends at D times its wavelength (`sample_spectrum`), D times as
+ *   bright (relativistic beaming).
+ * - White: that colour goes `BLUESHIFT_WHITE_FRAC` of the way to `BLUESHIFT_WHITE_COLOR` (a pale blue-white) moving
+ *   forward, or to `REDSHIFT_WHITE_COLOR` (a warm white) moving backward, as the forward view whitens at speeds near
+ *   light's.
+ * - Strength: below |`blueshift_frac`| = 1, the result fades in by |`blueshift_frac`|.
  * @par Example
  * @code
  * float3 seen = blueshift_scene(scene, id, float2(out.get_width(), out.get_height()), p);
@@ -2097,21 +2092,18 @@ static float sample_spectrum(float3 rgb, float nm) {
  * @par Must know
  * - Limitations:
  *   - `blueshift_scene` takes the motion to be along the view, wherever the player really goes.
- *   - Real beaming changes brightness by D³ or more; `BLUESHIFT_BEAMING_POWER` keeps it gentler so scenes don't wash out.
  */
 static float3 blueshift_scene(float3 rgb, uint2 id, float2 size, constant OverlayParams &p) {
     if (p.blueshift_frac == 0.0) return rgb;
     float2 ndc = 2.0 * (float2(id) + 0.5) / size - 1.0;
     float3 ray = normalize(float3(ndc.x * p.tan_half_fov * size.x / size.y, ndc.y * p.tan_half_fov, -1.0));
     float speed_frac = abs(p.blueshift_frac);
-    float walk_beta = p.blueshift_frac > 0.0 ? BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED : -REDSHIFT_WALK_SPEED_PER_LIGHT_SPEED;
-    float beta = walk_beta * max(speed_frac, 1.0);
-    float D = sqrt(1.0 - beta * beta) / (1.0 - beta * mix(1.0, -ray.z, BLUESHIFT_ANGLE_FRAC));
-    float3 shifted = float3(sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.r * D), sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.g * D),
-                            sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.b * D));
-    float beaming = pow(D, BLUESHIFT_BEAMING_POWER);
-    float3 glow = beaming > 1.0 ? BLUESHIFT_GLOW_COLOR : REDSHIFT_GLOW_COLOR;
-    return mix(rgb, shifted * beaming + glow * abs(beaming - 1.0), min(speed_frac, 1.0));
+    float beta = sign(p.blueshift_frac) * BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED * max(speed_frac, 1.0);
+    float D = sqrt(1.0 - beta * beta) / (1.0 + beta * ray.z);
+    float3 shifted = D * float3(sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.r * D), sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.g * D),
+                                sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.b * D));
+    float3 white = p.blueshift_frac > 0.0 ? BLUESHIFT_WHITE_COLOR : REDSHIFT_WHITE_COLOR;
+    return mix(rgb, mix(shifted, white, BLUESHIFT_WHITE_FRAC), min(speed_frac, 1.0));
 }
 
 /**

@@ -308,14 +308,14 @@ Every key here is the default. Each player can rebind any action, in the menu or
   turned so the player faces up, with other players as dots and shots as lines in their team's
   colours. Straight paths away from the player bend into arcs, as they do in that picture of the
   hyperbolic plane.
-- **Menu** (`Tab`), with three pages:
+- **Menu** (`Tab`), with four pages; it opens on SCORES:
+  - SCORES: the player count, and each player's team, kills and deaths, sorted by team and kills,
+    with each team's totals.
   - SETTINGS: the player's own settings (key bindings, mouse speed and view effects).
   - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole
     mouths, the black hole, the spawns, the zones' edges and the map edge, the player as a disk
     pointing the way they face, a circle of the minimap's reach around them (the rest darker and
     blurred), and every other player in the game, near or far, as a dot in their team's colour.
-  - SCORES: the player count, and each player's team, kills and deaths, sorted by team and kills,
-    with each team's totals.
   - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
     and the libraries the game is built on.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the
@@ -329,9 +329,9 @@ Every key here is the default. Each player can rebind any action, in the menu or
   250 m/s, and each point of it fades soon after the front passes.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
-- A player moving inside a wormhole mouth sees the world Doppler-shift, as if moving at a good fraction of light
-  speed: bluish cyan walking forward, red walking backward, stronger deeper in and faster, none standing still or
-  outside the mouth. Only that player sees it.
+- A player moving through a wormhole's throat sees the world flash almost white for a split second, as if moving
+  near light speed: pale blue-white walking forward, warm white walking backward, stronger nearer the throat and
+  faster, none standing still or outside the throat's region. Only that player sees it.
 - A shot that hits the ground throws up dust and a puff of mist where it lands, which every player
   sees. The grains fly up a few meters and fall back, and all of it fades within 2 s.
 
