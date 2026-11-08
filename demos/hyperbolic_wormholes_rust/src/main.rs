@@ -111,6 +111,11 @@ const RIFLE_OVERHEAT_SHOT_COUNT: f64 = 20.0;
 const RIFLE_COOL_S: f64 = 2.0;
 const RIFLE_BODY_HITS_TO_KILL: u8 = 12;
 const RIFLE_HEAD_HITS_TO_KILL: u8 = 2;
+const RIFLE_RECOIL_PITCH_RAD: f64 = 0.0075;
+const RIFLE_RECOIL_YAW_RAD: f64 = 0.0025;
+const RIFLE_RECOIL_RECOVER_S: f64 = 0.08;
+const WAND_RECOIL_M: f32 = 0.035;
+const WAND_RECOIL_TILT_RAD: f32 = 0.12;
 const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
 const HEAT_BAR_FILL_COLOR: [f32; 4] = [1.0, 0.6, 0.2, 0.9];
 const HEAT_BAR_OVERHEATED_COLOR: [f32; 4] = [1.0, 0.15, 0.1, 0.9];
@@ -1633,6 +1638,8 @@ struct Session {
     rifle_heat_frac: f64,
     is_overheated: bool,
     has_rifle_shot_hit: bool,
+    rifle_shot_count: u64,
+    recoil_frac: f64,
     gun_phase_rad: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
@@ -1806,6 +1813,8 @@ impl Session {
             rifle_heat_frac: 0.0,
             is_overheated: false,
             has_rifle_shot_hit: false,
+            rifle_shot_count: 0,
+            recoil_frac: 0.0,
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
@@ -2020,11 +2029,14 @@ impl Session {
     /// `update_rifle` fires the rifle while its trigger is held and this player can shoot: a
     /// `RIFLE_PULSE_S` pulse of the beam every `RIFLE_SHOT_PERIOD_S`, each adding
     /// 1 / `RIFLE_OVERHEAT_SHOT_COUNT` of heat. At full heat it overheats; it cools fully in
-    /// `RIFLE_COOL_S` while not firing, and fires again once cool.
+    /// `RIFLE_COOL_S` while not firing, and fires again once cool. Each shot recoils: the view kicks
+    /// up by `RIFLE_RECOIL_PITCH_RAD` and sideways by `RIFLE_RECOIL_YAW_RAD`, alternately left and
+    /// right, and the rifle jolts back (`recoil_frac`, settling over `RIFLE_RECOIL_RECOVER_S`).
     ///
     /// Example: `self.update_rifle(1.0 / 60.0);`
     fn update_rifle(&mut self, dt_s: f64) {
         self.rifle_next_shot_s = (self.rifle_next_shot_s - dt_s).max(0.0);
+        self.recoil_frac = (self.recoil_frac - dt_s / RIFLE_RECOIL_RECOVER_S).max(0.0);
         let is_firing_rifle: bool = self.gun == Gun::Rifle
             && self.is_trigger_held
             && self.can_shoot()
@@ -2038,6 +2050,21 @@ impl Session {
             self.has_rifle_shot_hit = false;
             self.rifle_heat_frac += 1.0 / RIFLE_OVERHEAT_SHOT_COUNT;
             self.is_overheated = self.rifle_heat_frac >= 1.0;
+            self.rifle_shot_count += 1;
+            self.recoil_frac = 1.0;
+            let side: f64 = if self.rifle_shot_count.is_multiple_of(2) {
+                1.0
+            } else {
+                -1.0
+            };
+            let (dx_px, dy_px) = (
+                side * RIFLE_RECOIL_YAW_RAD / voxel_world::LOOK_RAD_PER_PX,
+                -RIFLE_RECOIL_PITCH_RAD / voxel_world::LOOK_RAD_PER_PX,
+            );
+            match &mut self.voxel {
+                Some(voxel) => voxel.player.look(dx_px, dy_px),
+                None => physics::look_around(&mut self.player.frame, dx_px, dy_px),
+            }
         }
     }
 
@@ -2131,9 +2158,15 @@ impl Session {
             .voxel
             .as_ref()
             .map_or(0, |voxel| net::get_team(voxel.spawn_index as u32));
-        self.get_banner_lines()
-            .is_none()
-            .then(|| make_wand(self.run_pose_frac, self.gun_phase_rad, team, self.gun))
+        self.get_banner_lines().is_none().then(|| {
+            make_wand(
+                self.run_pose_frac,
+                self.gun_phase_rad,
+                self.recoil_frac,
+                team,
+                self.gun,
+            )
+        })
     }
 
     /// `get_eye_frame` gives the eye's frame: the house player's frame, or the voxel player's camera.
@@ -2635,10 +2668,17 @@ fn take_hit_weight(gun: Gun, has_rifle_shot_hit: &mut bool, is_head_hit: bool) -
 /// the front of its tip at the muzzle (`voxel_world::MUZZLE_M`, where the laser starts), dipping a little at each step (`phase_rad`), and, as `run_pose_frac` goes to 1
 /// (eased), lowered, tipped down and rolled, bouncing and swinging with each stride; its tip has
 /// `team`'s colour. The laser (`gun`) is a thin dark wand with a short glowing tip; the rifle is a
-/// thick grey block with a long, thin glowing barrel.
+/// thick grey block with a long, thin glowing barrel. Recoil (`recoil_frac`, 1 just after a shot)
+/// pushes it back toward the eye and tips it up.
 ///
-/// Example: `let wand = make_wand(0.0, 1.2, 1, Gun::Laser);`
-fn make_wand(run_pose_frac: f64, phase_rad: f64, team: u32, gun: Gun) -> render_metal::OverlayWand {
+/// Example: `let wand = make_wand(0.0, 1.2, 0.0, 1, Gun::Laser);`
+fn make_wand(
+    run_pose_frac: f64,
+    phase_rad: f64,
+    recoil_frac: f64,
+    team: u32,
+    gun: Gun,
+) -> render_metal::OverlayWand {
     let jog: f32 = (run_pose_frac * run_pose_frac * (3.0 - 2.0 * run_pose_frac)) as f32;
     let (step, swing) = (phase_rad.sin().abs() as f32, phase_rad.sin() as f32);
     let lerp = |aim: f32, run: f32| aim + (run - aim) * jog;
@@ -2651,11 +2691,13 @@ fn make_wand(run_pose_frac: f64, phase_rad: f64, team: u32, gun: Gun) -> render_
         Mat3::from_euler(EulerRot::YXZ, WAND_AIM_YAW_RAD, WAND_AIM_PITCH_RAD, 0.0);
     let aim_center: Vec3 = voxel_world::MUZZLE_M.as_vec3()
         + aim_rotation * (Vec3::Z * (shaft_half_m[2] + 2.0 * tip_half_m[2]));
-    let center: Vec3 = aim_center.lerp(Vec3::from(WAND_JOG_CENTER_M), jog) - Vec3::Y * bob_m;
+    let kick: f32 = recoil_frac as f32;
+    let center: Vec3 = aim_center.lerp(Vec3::from(WAND_JOG_CENTER_M), jog) - Vec3::Y * bob_m
+        + Vec3::Z * WAND_RECOIL_M * kick;
     let rotation: Mat3 = Mat3::from_euler(
         EulerRot::YXZ,
         lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD),
-        lerp(WAND_AIM_PITCH_RAD, WAND_JOG_PITCH_RAD),
+        lerp(WAND_AIM_PITCH_RAD, WAND_JOG_PITCH_RAD) + WAND_RECOIL_TILT_RAD * kick,
         (WAND_JOG_ROLL_RAD + WAND_JOG_SWING_RAD * swing) * jog,
     );
     render_metal::OverlayWand {
