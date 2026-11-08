@@ -29,14 +29,23 @@ use crate::render_metal::{
 };
 use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
 use crate::terrain::MoundGrid;
+use crate::thrown_wormholes::{GREEN_COLOR, PURPLE_COLOR, WormholeColor};
 use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
-use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld, clip_beam_to_map};
+use crate::voxel_world::{
+    BeamSegment, MAX_MATERIAL_COUNT, VoxelWarp, VoxelWorld, clip_beam_to_map,
+};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+const NO_CLEARANCE_GRID: ClearanceGrid = ClearanceGrid {
+    offset: 0,
+    cell_count: 0,
+    half_size: 1.0,
+    static_entry_count: 0,
+};
 const SHADER_SOURCE: &str = include_str!("render_voxel.metal");
 const KERNEL_NAME: &str = "trace_voxel_pixels";
 const UNIFORMS_BUFFER_INDEX: usize = 16;
@@ -273,6 +282,26 @@ fn pack_dust(clouds: &[DustCloud]) -> (Vec<GpuDustBurst>, Vec<GpuDustParticle>) 
     (bursts, particles)
 }
 
+/// `format_rgb` writes a colour as the arguments of a Metal `float3`.
+///
+/// Example: `let text = format_rgb(PURPLE_COLOR);`
+fn format_rgb([r, g, b]: [f32; 3]) -> String {
+    format!("{r:?}, {g:?}, {b:?}")
+}
+
+/// `get_warp_kind` gives the shader's kind of a warp: 0 for a black hole, 1 for a map's wormhole
+/// mouth, and 2 and 3 for a thrown purple and green mouth.
+///
+/// Example: `let kind = get_warp_kind(&world.warps[0]);`
+fn get_warp_kind(warp: &VoxelWarp) -> f32 {
+    match (warp.is_mouth, warp.color) {
+        (false, _) => 0.0,
+        (true, None) => 1.0,
+        (true, Some(WormholeColor::Purple)) => 2.0,
+        (true, Some(WormholeColor::Green)) => 3.0,
+    }
+}
+
 /// `to_columns` converts a double matrix to float columns.
 ///
 /// Example: `let m = to_columns(frame);`
@@ -314,8 +343,12 @@ impl VoxelFrame {
         let warps: Vec<GpuWarp> = world
             .warps
             .iter()
-            .zip(&world.clearance.grids)
-            .map(|(w, grid)| {
+            .enumerate()
+            .map(|(k, w)| {
+                let grid: &ClearanceGrid = match w.color {
+                    Some(_) => &NO_CLEARANCE_GRID,
+                    None => &world.clearance.grids[k],
+                };
                 let first: usize = lists.len();
                 lists.extend(w.list.iter().map(|&k| {
                     let structure = &world.structures[k];
@@ -332,7 +365,7 @@ impl VoxelFrame {
                     forward: to_columns(w.frame),
                     centre: to_f32(w.centre),
                     params: [
-                        f32::from(u8::from(w.is_mouth)),
+                        get_warp_kind(w),
                         w.m as f32,
                         w.reach as f32,
                         if w.is_mouth { w.partner as f32 } else { -1.0 },
@@ -642,7 +675,9 @@ impl VoxelGpu {
             .replace(
                 "__BYTES_PER_VOXEL_UNIFORMS__",
                 &std::mem::size_of::<VoxelUniforms>().to_string(),
-            );
+            )
+            .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
+            .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR));
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|error| {
