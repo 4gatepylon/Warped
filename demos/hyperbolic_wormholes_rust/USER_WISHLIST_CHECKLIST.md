@@ -20,8 +20,6 @@ is in [`AGENTS.md`](AGENTS.md).
   slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
   implementing. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/hud-bars`, 2026-11-07.
-- [~] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
-  different key. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/aiming`, 2026-11-07.
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
   2026-11-07.
@@ -187,3 +185,5 @@ is in [`AGENTS.md`](AGENTS.md).
   menu's map page, W-49, shows the whole map). #166.
 - [x] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
   radius (the rest is slightly darker and blurred), and shows where they are on the map. #166.
+- [x] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
+  different key. The right button zooms in; the flashlight is on `F`. #PR.
