@@ -25,6 +25,7 @@ use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
 };
+use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
 use crate::terrain::MoundGrid;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
@@ -90,6 +91,7 @@ pub struct VoxelUniforms {
     pub flashlight_position: [f32; 4],
     pub flashlight_direction: [f32; 4],
     pub flashlight: [f32; 4],
+    pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
 }
 
 const _: () = assert!(
@@ -366,6 +368,7 @@ impl VoxelFrame {
                     light.brightness_frac as f32,
                 ]
             }),
+            spaceships: get_spaceships(world.sky_time_s),
         };
         assert_eq!(
             world.palette.len(),
@@ -545,7 +548,12 @@ impl VoxelGpu {
                 "__BYTES_PER_RAY_END__",
                 &VOXEL_BYTES_PER_RAY_END.to_string(),
             )
-            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string());
+            .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
+            .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+            .replace(
+                "__BYTES_PER_VOXEL_UNIFORMS__",
+                &std::mem::size_of::<VoxelUniforms>().to_string(),
+            );
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|error| {
