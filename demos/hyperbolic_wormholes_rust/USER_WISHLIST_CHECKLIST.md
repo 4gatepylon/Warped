@@ -34,15 +34,6 @@ is in [`AGENTS.md`](AGENTS.md).
     The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: mock-ups of three looks
     (A subtle, B rich, C photo-like) and one alternative position for the band done, with GPU costs; the user asked
     for images only for now; nothing built.
-- [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
-  can find something for that." Pictures first. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac, branch `claude/rifle-model`
-    (on this Mac only so far; to be pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: options and pictures done, no
-    code; waiting for the user to pick a model (and approve any download).
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -120,6 +111,22 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones. Then, from the pictures: "Level A, faint", and
   "the blates should also have a little bit of thickness (rougly 1 player worth of thickenss)". #291.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/zone-planes` (pushed to
+    `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac,
+    pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`
+    (temporary, under `/private/tmp`; the `*_slab*` and `6*_recheck_*` files show the result). State, 2026-11-08: on
+    `staging`, waiting for the user to test it.
+- [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
+  can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
+  good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
+  (D106). #304.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/rifle-model` (pushed to
+    `origin`), worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac,
+    pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`
+    (temporary, under `/private/tmp`; the `W-96_final_*` files show the result). State, 2026-11-08: on `staging`,
+    waiting for the user to test it.
 - [?] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
   center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
