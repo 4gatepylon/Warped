@@ -11,6 +11,11 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
+  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
+  bar while disabling a pylon". Claimed by Claude Code (worktree `Warped-loading`), branch `claude/loading-screen`,
+  2026-11-08.
+
 - [~] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
   player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
   page use team colours. The user said to add and fix it ("Yes, add and fix"). Claimed by Claude Code (session
@@ -61,10 +66,10 @@ is in [`AGENTS.md`](AGENTS.md).
   `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
   - **Where the work is** (for any agent picking it up): worktree
     `/Users/4gate/git/Warped/.claude/worktrees/agent-adb5321f113e35420` on the user's Mac, branch
-    `claude/third-person` (on this Mac only so far; to be pushed to `origin`), pictures in
+    `claude/third-person` (pushed to `origin`), pictures in
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-61/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering; waits
-    for the user's OK before merging.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: done and tested, PR #286 open
+    into `staging` (`V` toggles; 150 tests pass); waits for the user's OK before merging.
 - [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
@@ -149,8 +154,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-- [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
-  when the server is connected properly.
 - [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
   on W-68 (reality bend), which adds the pylons and the black hole.
 
