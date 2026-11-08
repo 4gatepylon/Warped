@@ -829,17 +829,19 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                 let extra: Vec<String> = match arguments.bot {
                     true => {
                         let label: String = format!("match-{}-round-{round}", team.get_name());
-                        [
+                        let mut extra: Vec<String> = [
                             "--bot",
                             "--bot-objective",
                             "consoles",
                             "--exit-after-s",
                             "3600",
-                            "--label",
-                            &label,
                         ]
                         .map(String::from)
-                        .to_vec()
+                        .to_vec();
+                        if view.levels[index].takes_bot_label {
+                            extra.extend(["--label".to_string(), label]);
+                        }
+                        extra
                     }
                     false => Vec::new(),
                 };

@@ -143,7 +143,7 @@ else
 endif
 
 # The plugged-in levels (match_levels.yaml): each level's branch as a git worktree in .levels/, built there.
-LEVEL_BRANCHES := snow_planet:devin/snow-planet-demo dust:devin/dust-demo
+LEVEL_BRANCHES := snow_planet:devin/snow-planet-demo dust:devin/dust-demo city_sphere:devin/city-sphere-demo dark_forest:devin/dark-forest-demo
 
 levels:
 	git fetch origin $(foreach level,$(LEVEL_BRANCHES),$(word 2,$(subst :, ,$(level))))

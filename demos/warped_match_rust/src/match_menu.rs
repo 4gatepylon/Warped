@@ -294,6 +294,7 @@ mod tests {
                     server_args: Vec::new(),
                     client_args: Vec::new(),
                     stand_in_for: None,
+                    takes_bot_label: true,
                 })
                 .collect(),
             team_counts: [1, 1],

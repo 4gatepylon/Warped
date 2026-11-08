@@ -56,6 +56,14 @@ pub struct LevelEntry {
     pub client_args: Vec<String>,
     #[serde(default)]
     pub stand_in_for: Option<String>,
+    /// Whether the level's bots take `--label` (the name of their artifact folder).
+    #[serde(default = "get_true")]
+    pub takes_bot_label: bool,
+}
+
+/// `get_true` is serde's default for flags that are on unless a level turns them off.
+fn get_true() -> bool {
+    true
 }
 
 /// `LevelFile` is `match_levels.yaml`: the map's levels, blue's deepest first.

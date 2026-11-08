@@ -22,19 +22,16 @@ levels:
   - name: City Sphere
     folder: demos/city_sphere_rust
     branch: devin/city-sphere-demo
-    status: stand-in (Lunar Surface) until devin/city-sphere-demo is plugged in
-    program: self
-    map: lunar-surface
-    server_args: [--server-settings, e2e/fast_server_settings.yaml]
-    stand_in_for: City Sphere
+    status: plugged in (make levels links and builds devin/city-sphere-demo in .levels/)
+    program: .levels/city_sphere/demos/city_sphere_rust/.build/release/city-sphere
+    map: city-sphere
+    server_args: [--server-settings, e2e/fast_city_sphere_server_settings.yaml]
   - name: Dark Forest
     folder: demos/dark_forest_rust
     branch: devin/dark-forest-demo
-    status: stand-in (Lunar Surface) until devin/dark-forest-demo is plugged in
-    program: self
-    map: lunar-surface
-    server_args: [--server-settings, e2e/fast_server_settings.yaml]
-    stand_in_for: Dark Forest
+    status: plugged in (make levels links and builds devin/dark-forest-demo in .levels/)
+    program: .levels/dark_forest/demos/dark_forest_rust/.build/release/dark-forest
+    takes_bot_label: false
   - name: Lunar Surface
     folder: demos/hyperbolic_wormholes_rust
     branch: staging/user-4gatepylon
