@@ -20,6 +20,7 @@ use crate::geometry::{
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
+use crate::settings::GameSettings;
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 
@@ -27,22 +28,18 @@ pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
 const BOUND_MARGIN_M: f64 = 0.2;
 pub(crate) const BEND_STEP_FRAC: f64 = 0.08;
-const GAME_SPEED_PER_MAP_SPEED: f64 = 2.0;
-const JUMP_TIME_PER_MAP_JUMP_TIME: f64 = 1.0 / 3.0;
-const JUMP_HEIGHT_M: f64 = 1.25;
-const ENERGY_DRAIN_S: f64 = 7.5;
-const ENERGY_REFILL_S: f64 = 15.0;
-const BOB_WALK_HZ: f64 = 2.0;
-const BOB_SPRINT_HZ: f64 = 2.8;
-const BOB_WALK_M: f64 = 0.08;
-const BOB_SPRINT_M: f64 = 0.14;
-const BOB_FADE_PER_S: f64 = 6.0;
 const CONSOLE_PULSE_HZ: f64 = 1.0;
 const CONSOLE_DISABLING_PULSE_PER_PULSE: f64 = 2.0;
 const CONSOLE_PULSE_MIN_FRAC: f32 = 0.6;
 const CONSOLE_PULSE_MAX_FRAC: f32 = 2.0;
 const CONSOLE_OFF_FRAC: f32 = 0.12;
 const CONSOLE_PROBE_M: f64 = 0.05;
+pub const SPAWN_TURN_RAD: f64 = 2.399_963_229_728_653;
+pub const MIN_SPAWN_GAP_M: f64 = 1.5;
+const SPAWN_RING_M: f64 = 3.0;
+const SPAWN_RING_STEP_M: f64 = 2.0;
+const SPAWN_SLOTS_PER_RING: u32 = 8;
+const SPAWN_RING_COUNT: u32 = 3;
 const MIN_BEND_STEP_M: f64 = 0.004;
 const MAX_BEND_STEP_M: f64 = 3.0;
 const HORIZON_CAPTURE_FRAC: f64 = 1.02;
@@ -181,6 +178,9 @@ pub struct VoxelWorld {
     pub planet: Option<(DVec3, f64)>,
     pub player: PlayerSettings,
     pub gravity_m_per_s2: f64,
+    map_player: PlayerSettings,
+    map_gravity_m_per_s2: f64,
+    pub settings: GameSettings,
     pub spawns: Vec<DMat4>,
     pub static_structure_count: usize,
     pub consoles: Vec<Console>,
@@ -210,6 +210,29 @@ pub struct Shot {
     pub is_hit: bool,
     pub length_m: f64,
     pub through: Vec<String>,
+}
+
+/// `clip_beam` gives the part of a beam (`segments`, in a world of curvature radius `r`) from
+/// `from_m` to `to_m` along it, meters from its start.
+///
+/// Example: `let flying = clip_beam(&shot.segments, world.r, 20.0, 35.0);`
+pub fn clip_beam(segments: &[BeamSegment], r: f64, from_m: f64, to_m: f64) -> Vec<BeamSegment> {
+    let mut start_m: f64 = 0.0;
+    let mut clipped: Vec<BeamSegment> = Vec::new();
+    for segment in segments {
+        let length_m: f64 = segment.length * r;
+        let (lo_m, hi_m) = (from_m.max(start_m), to_m.min(start_m + length_m));
+        if lo_m < hi_m {
+            let s: f64 = (lo_m - start_m) / r;
+            clipped.push(BeamSegment {
+                a: geodesic_point(segment.a, segment.b, s),
+                b: geodesic_tangent(segment.a, segment.b, s),
+                length: (hi_m - lo_m) / r,
+            });
+        }
+        start_m += length_m;
+    }
+    clipped
 }
 
 /// `normalize_minkowski` scales a vector to unit Minkowski length (either sign).
@@ -315,10 +338,9 @@ impl VoxelWorld {
     /// `FromMap` builds the world from a voxel map: each structure's bounding sphere (around its
     /// grid's corners, plus `BOUND_MARGIN_M`), each warp's list of structures within reach, the
     /// palette (with a glow for `light` materials) and the `lunar` style's special materials.
-    /// Warps must use the `distance` radius and the `taper` falloff, and foils λ² = 0.25. The game
-    /// walks and sprints `GAME_SPEED_PER_MAP_SPEED` times as fast as the map, and its jump rises
-    /// `JUMP_HEIGHT_M` in `JUMP_TIME_PER_MAP_JUMP_TIME` of the map's jump time (gravity follows),
-    /// so the map's gravity and jump speed must be above 0.
+    /// Warps must use the `distance` radius and the `taper` falloff, and foils λ² = 0.25. The
+    /// player moves by the built-in game settings (`set_settings`), so the map's gravity and jump
+    /// speed must be above 0.
     ///
     /// Example: `let world = VoxelWorld::FromMap(&map)?;`
     #[allow(non_snake_case)]
@@ -330,9 +352,6 @@ impl VoxelWorld {
                 map.name, map.gravity_m_per_s2, map.player.jump_m_per_s
             ));
         }
-        let half_jump_s: f64 =
-            map.player.jump_m_per_s / map.gravity_m_per_s2 * JUMP_TIME_PER_MAP_JUMP_TIME;
-        let jump_m_per_s: f64 = 2.0 * JUMP_HEIGHT_M / half_jump_s;
         let structures: Vec<VoxelStructure> = map
             .structures
             .iter()
@@ -463,18 +482,37 @@ impl VoxelWorld {
                 .planet
                 .as_ref()
                 .map(|p| (to_direction(&p.direction), p.angular_radius_rad)),
-            player: PlayerSettings {
-                walk_m_per_s: map.player.walk_m_per_s * GAME_SPEED_PER_MAP_SPEED,
-                sprint_m_per_s: map.player.sprint_m_per_s * GAME_SPEED_PER_MAP_SPEED,
-                jump_m_per_s,
-                ..map.player
-            },
-            gravity_m_per_s2: jump_m_per_s / half_jump_s,
+            player: map.player,
+            gravity_m_per_s2: map.gravity_m_per_s2,
+            map_player: map.player,
+            map_gravity_m_per_s2: map.gravity_m_per_s2,
+            settings: GameSettings::Builtin(),
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
             clearance: Arc::new(ClearanceGrids::default()),
         };
+        world.set_settings(GameSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
         Ok(world)
+    }
+
+    /// `set_settings` makes `settings` the world's game settings and moves the player by them:
+    /// walking and sprinting at multiples of the map's speeds, and a jump that rises
+    /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
+    ///
+    /// Example: `world.set_settings(GameSettings::Load(Path::new("fast.yaml"))?);`
+    pub fn set_settings(&mut self, settings: GameSettings) {
+        let movement = &settings.movement;
+        let half_jump_s: f64 = self.map_player.jump_m_per_s / self.map_gravity_m_per_s2
+            * movement.jump_time_per_map_jump_time;
+        let jump_m_per_s: f64 = 2.0 * movement.jump_height_m / half_jump_s;
+        self.player = PlayerSettings {
+            walk_m_per_s: self.map_player.walk_m_per_s * movement.walk_speed_per_map_speed,
+            sprint_m_per_s: self.map_player.sprint_m_per_s * movement.sprint_speed_per_map_speed,
+            jump_m_per_s,
+            ..self.map_player
+        };
+        self.gravity_m_per_s2 = jump_m_per_s / half_jump_s;
+        self.settings = settings;
     }
 
     /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame
@@ -1119,6 +1157,35 @@ impl VoxelPlayer {
         }
     }
 
+    /// `NearSpawn` makes player `id` standing near their team's spawn point (ids alternate between
+    /// the map's spawns), clear of blocks, at the first slot at least `MIN_SPAWN_GAP_M` from every
+    /// eye in `others`: slots go around rings `SPAWN_RING_STEP_M` apart from `SPAWN_RING_M`,
+    /// `SPAWN_TURN_RAD` apart, starting from the id's own. If all are taken it uses the last.
+    ///
+    /// Example: `let player = VoxelPlayer::NearSpawn(&world, 3, &other_eyes);`
+    #[allow(non_snake_case)]
+    pub fn NearSpawn(world: &VoxelWorld, id: u32, others: &[DVec4]) -> VoxelPlayer {
+        let spawn: DMat4 = VoxelPlayer::AtSpawn(world, id as usize).body;
+        let slot_count: u32 = SPAWN_SLOTS_PER_RING * SPAWN_RING_COUNT;
+        let mut player: Option<VoxelPlayer> = None;
+        for k in 0..slot_count {
+            let turn: DMat4 = make_rotation(AXIS_X, AXIS_Z, f64::from(id + k) * SPAWN_TURN_RAD);
+            let ring_m: f64 =
+                SPAWN_RING_M + SPAWN_RING_STEP_M * f64::from(k / SPAWN_SLOTS_PER_RING);
+            let body: DMat4 = spawn * turn * make_boost(AXIS_Z, -ring_m / world.r) * turn.inverse();
+            let candidate: VoxelPlayer = VoxelPlayer::Standing(world, body);
+            let eye: DVec4 = candidate.get_camera_frame(world).col(AXIS_W);
+            if others
+                .iter()
+                .all(|&x| get_distance(eye, x) * world.r >= MIN_SPAWN_GAP_M)
+            {
+                return candidate;
+            }
+            player = Some(candidate);
+        }
+        player.expect("there is at least one spawn slot")
+    }
+
     /// `Standing` makes a player standing on `body` (a ground frame), clear of blocks.
     ///
     /// Example: `let player = VoxelPlayer::Standing(&world, body);`
@@ -1210,18 +1277,20 @@ impl VoxelPlayer {
     /// Example: `let camera = player.get_camera_frame(&world);`
     pub fn get_camera_frame(&self, world: &VoxelWorld) -> DMat4 {
         self.body
-            * make_boost(AXIS_Y, (self.h_m + self.get_bob_m()) / world.r)
+            * make_boost(AXIS_Y, (self.h_m + self.get_bob_m(world)) / world.r)
             * make_rotation(AXIS_Z, AXIS_Y, -self.pitch_rad)
     }
 
-    /// `get_bob_m` gives the head bob: the eye dips at each footstep, deeper when sprinting.
+    /// `get_bob_m` gives the head bob: the eye dips at each footstep, deeper when sprinting, by
+    /// `world`'s settings.
     ///
-    /// Example: `let bob_m = player.get_bob_m();`
-    pub fn get_bob_m(&self) -> f64 {
+    /// Example: `let bob_m = player.get_bob_m(&world);`
+    pub fn get_bob_m(&self, world: &VoxelWorld) -> f64 {
+        let bob = &world.settings.head_bob;
         let depth_m: f64 = if self.is_sprinting {
-            BOB_SPRINT_M
+            bob.sprint_depth_m
         } else {
-            BOB_WALK_M
+            bob.walk_depth_m
         };
         -self.bob_frac * depth_m * self.bob_phase_rad.sin().abs()
     }
@@ -1310,24 +1379,24 @@ impl VoxelPlayer {
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
         let len: f64 = forward.hypot(side);
         let settings: PlayerSettings = world.player;
+        let (energy, bob) = (&world.settings.sprint_energy, &world.settings.head_bob);
         let wants_to_sprint: bool = input.sprint && len > 0.0;
         self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
         self.energy_frac = (self.energy_frac
             + if wants_to_sprint {
-                -dt_s / ENERGY_DRAIN_S
+                -dt_s / energy.drain_s
             } else {
-                dt_s / ENERGY_REFILL_S
+                dt_s / energy.refill_s
             })
         .clamp(0.0, 1.0);
         let is_walking: bool = len > 0.0 && !self.is_flying && self.is_on_ground;
         let bob_target: f64 = f64::from(u8::from(is_walking));
-        self.bob_frac +=
-            (bob_target - self.bob_frac).clamp(-BOB_FADE_PER_S * dt_s, BOB_FADE_PER_S * dt_s);
+        self.bob_frac += (bob_target - self.bob_frac).clamp(-dt_s / bob.fade_s, dt_s / bob.fade_s);
         if is_walking {
             let hz: f64 = if self.is_sprinting {
-                BOB_SPRINT_HZ
+                bob.sprint_steps_per_s
             } else {
-                BOB_WALK_HZ
+                bob.walk_steps_per_s
             };
             self.bob_phase_rad =
                 (self.bob_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
@@ -1345,7 +1414,7 @@ impl VoxelPlayer {
             && world.compute_bend(w, eye, self.body.col(AXIS_X)).1
                 < FALL_IN_PER_HORIZON * world.warps[w].m
         {
-            *self = VoxelPlayer::AtSpawn(world, spawn_index);
+            *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, &[]);
             return vec!["You fell into the black hole".to_string()];
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
@@ -1442,8 +1511,10 @@ mod tests {
     //! | --- | --- | --- |
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
+    //! | Players spawning | up to the player limit, and a late id whose own slot is next to player 1's (it moves on) | `players_spawn_apart` |
+    //! | Beam clipped to | its middle (through the wormhole), before its start, past its end | `a_clipped_beam_keeps_its_middle` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
-    //! | Jump on open ground | rises `JUMP_HEIGHT_M` and lands in a third of the map's jump time | `a_jump_is_low_and_quick` |
+    //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
 
@@ -1467,6 +1538,7 @@ mod tests {
     const MIN_DECK_WALK_FRAC: f64 = 0.5;
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
     const EMPTY_SPRINT_STEP_COUNT: usize = 10;
+    const FAR_ID_NEAR_ONE: u32 = 35;
     const MAX_JUMP_STEP_COUNT: usize = 120;
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
     const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
@@ -1591,6 +1663,46 @@ mod tests {
     }
 
     #[test]
+    fn players_spawn_apart() {
+        let world: VoxelWorld = load_lunar_surface();
+        let mut eyes: Vec<DVec4> = Vec::new();
+        for id in (1..=crate::net::MAX_PLAYER_COUNT as u32).chain([FAR_ID_NEAR_ONE]) {
+            let player: VoxelPlayer = VoxelPlayer::NearSpawn(&world, id, &eyes);
+            let nearby: Vec<usize> =
+                world.find_nearby_structures(player.body.col(AXIS_W), NEARBY_REACH_M);
+            assert!(
+                !world.is_body_blocked(player.body, player.h_m, &nearby),
+                "player {id}"
+            );
+            let eye: DVec4 = player.get_camera_frame(&world).col(AXIS_W);
+            for other in &eyes {
+                assert!(
+                    get_distance(eye, *other) * world.r >= MIN_SPAWN_GAP_M,
+                    "player {id}"
+                );
+            }
+            eyes.push(eye);
+        }
+    }
+
+    #[test]
+    fn a_clipped_beam_keeps_its_middle() {
+        let world: VoxelWorld = load_lunar_surface();
+        let player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0);
+        let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
+        let length_m = |segments: &[BeamSegment]| -> f64 {
+            segments.iter().map(|s| s.length).sum::<f64>() * world.r
+        };
+        let full_m: f64 = length_m(&shot.segments);
+        let (from_m, to_m) = (full_m / 4.0, full_m / 2.0);
+        let middle: Vec<BeamSegment> = clip_beam(&shot.segments, world.r, from_m, to_m);
+        assert!((length_m(&middle) - (to_m - from_m)).abs() < DISTANCE_TOLERANCE_M);
+        assert!(clip_beam(&shot.segments, world.r, -2.0, -1.0).is_empty());
+        assert!(clip_beam(&shot.segments, world.r, full_m + 1.0, full_m + 2.0).is_empty());
+    }
+
+    #[test]
     fn walking_into_a_block_does_not_climb_it() {
         let world: VoxelWorld = load_lunar_surface();
         let mut player: VoxelPlayer = place_on_ground(&world, &find_columns(&world, 1, true, 0.0));
@@ -1673,7 +1785,8 @@ mod tests {
         };
         player.step(&world, &walk, STEP_S, 0);
         assert!(!player.is_sprinting && player.energy_frac > 0.0);
-        let full_drain_steps: usize = (ENERGY_DRAIN_S / STEP_S).ceil() as usize;
+        let drain_s: f64 = world.settings.sprint_energy.drain_s;
+        let full_drain_steps: usize = (drain_s / STEP_S).ceil() as usize;
         player.energy_frac = 1.0;
         for _ in 0..full_drain_steps {
             player.step(
@@ -1686,7 +1799,7 @@ mod tests {
                 0,
             );
         }
-        assert!(player.energy_frac < STEP_S / ENERGY_DRAIN_S);
+        assert!(player.energy_frac < STEP_S / drain_s);
     }
 
     #[test]
@@ -1715,11 +1828,12 @@ mod tests {
         let map_jump_s: f64 = 2.0 * map.player.jump_m_per_s / map.gravity_m_per_s2;
         let jump_s: f64 = air_step_count as f64 * STEP_S;
         assert!(
-            (apex_m - JUMP_HEIGHT_M).abs() < JUMP_HEIGHT_TOLERANCE_M,
+            (apex_m - world.settings.movement.jump_height_m).abs() < JUMP_HEIGHT_TOLERANCE_M,
             "apex {apex_m} m"
         );
         assert!(
-            (jump_s - map_jump_s * JUMP_TIME_PER_MAP_JUMP_TIME).abs() < JUMP_TIME_TOLERANCE_S,
+            (jump_s - map_jump_s * world.settings.movement.jump_time_per_map_jump_time).abs()
+                < JUMP_TIME_TOLERANCE_S,
             "jump took {jump_s} s"
         );
     }

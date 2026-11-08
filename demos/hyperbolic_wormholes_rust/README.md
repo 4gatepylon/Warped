@@ -70,6 +70,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `make serve-game` (`--serve`) runs only the server and prints this computer's address with the commands that join
   it, so it can run on a computer nobody plays on. `make host-game` (`--host`) starts the same server as its own
   process, joins it from a window, and stops it when the window closes.
+- `SETTINGS=my_settings.yaml` (`--settings`) gives the server a copy of [`game_settings.yaml`](game_settings.yaml)
+  with other numbers (speeds, jump, head bob, both guns, consoles, respawn, motion blur); it sends them to every
+  player who joins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from

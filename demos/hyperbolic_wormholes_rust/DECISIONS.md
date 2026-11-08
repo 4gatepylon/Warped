@@ -660,6 +660,79 @@
   drifting back down by itself.
 - **Rationale:** you asked for recoil on the rifle.
 
+### D60. Game settings in a YAML file
+
+- **Choice:**
+  - **The file:** `game_settings.yaml` holds the numbers that tune play, in sections: movement, sprint energy,
+    head bob, the sniper (gun 1), the rifle (gun 2), consoles, respawn and display. Each key has a one-line note
+    beside it, because you asked for a file that is easy to understand; the repository's no-comments rule is for
+    code.
+  - **Distribution:** `--settings <file>` (`SETTINGS=` with `make serve-game`, `make host-game` and
+    `make run-demo`) gives a server its settings, and the server sends them in its welcome to every player who
+    joins. The window adopts them on joining, so everyone plays by the server's numbers. Without `--settings`, the
+    file as built in is used.
+  - **Checks:** every key is required, unknown keys fail, and every number must be above 0. Zero is allowed for
+    the bob depths, the recoil, the respawn delay and the motion blur. An error names the key.
+  - **Left out:** mouse sensitivity (each player's own preference, not the server's), the player limit and
+    timeouts (part of the protocol), and the wand's looks.
+  - **Bots:** they keep the built-in movement settings.
+- **Alternatives:**
+  - a file of overrides on top of the defaults (shorter files, but a typo in a key name would be silently
+    ignored unless checked separately);
+  - TOML (the Rust crates' usual format; you asked for YAML);
+  - each player reading their own file (players could play by different numbers).
+- **Rationale:** you asked for speed, head bob, shots per second and the other game parameters in a YAML file that
+  the server takes with a flag, so players can tune the game. The YAML parser is `serde_yaml` 0.9, which its author
+  has marked deprecated but which is stable and widely used.
+
+### D61. Beams fly out like tracers
+
+- **Choice:**
+  - **Flight:** on voxel maps each shot's path is traced once, when it is fired, and stays where it was fired. A
+    lit stretch flies along it: its front leaves the gun's tip at `beam_speed_m_per_s` (250 m/s for both guns), and
+    each point stays lit for `beam_trail_s` after the front passes it (0.25 s for the sniper, a 62 m streak; 0.05 s
+    for the rifle, 12 m). The impact glows while the trail reaches it. Both numbers are in `game_settings.yaml`, per
+    gun.
+  - **Other players' shots:** each window traces another player's shot when their laser comes on. The snapshot now
+    says which gun fired (a bit in the laser byte), so each gun keeps its own look.
+  - **Hits:** unchanged. A hit counts at once along the crosshair's path, so the beam is only a picture, as you
+    said.
+  - **Unchanged:** the house, scripted routes and bots still draw whole beams.
+- **Alternatives:** moving the hit to when the beam's front arrives (closer to a bullet, but a hit would lag the
+  shot); re-tracing the path every frame from the current aim (the beam would swing with the view).
+- **Rationale:** you asked for the laser to disappear from the tip onward and fly forward like a bullet, lasting
+  longer for the sniper than the rifle, with both settings in the YAML file.
+
+### D62. Players never spawn on top of each other
+
+- **Choice:**
+  - **Slots:** every spawn tries slots around the team's spawn point, starting from the player's own (the golden
+    angle times their id on a 3 m ring). It takes the first slot at least 1.5 m from every other player it can
+    see, going on to rings 5 m and 7 m out (24 slots in all, 16 on the house).
+  - **Where it applies:** joining, a new game, `R`, and falling into a black hole. Before, `R` and the black hole
+    put players exactly on the spawn point.
+  - **Why ids alone weren't enough:** a player's slot came from their id alone, and ids keep growing over a
+    session (each new address gets the next one), so two players could share a slot: ids 1 and 35 are 5° apart.
+- **Alternatives:** the server handing out spawn slots (it would know every player even before snapshots arrive,
+  but it needs another message).
+- **Rationale:** you asked that players never spawn one on top of another.
+
+### D63. A health bar, and bars in segments
+
+- **Choice:**
+  - **Health:** the server adds a byte of health per player to every snapshot (it already counted each player's
+    damage), and each window reads its own. In a game on a server the health bar sits in the bottom left, above
+    the others. It has one segment per rifle body hit (12): a rifle body hit takes one, a head hit six, the sniper
+    all of them. It is full again after respawning.
+  - **Segments:** the rifle's bar now shows its shots left before overheating, one segment per shot, red while
+    overheated. The sprint energy bar has 10 segments.
+  - **Rounding:** a segment counts as full once more than 5% of it is filled, so the byte's rounding never shows
+    a lost segment as full.
+- **Alternatives:** health in each player's record (other players' health could then be shown over their heads,
+  but every record would change); a separate message to the player who was hit (it could be lost).
+- **Rationale:** you asked for a health bar so players know they were hit, and for the health, ammo and energy
+  bars to be discrete.
+
 
 ## Baselines
 

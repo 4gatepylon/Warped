@@ -43,6 +43,10 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   terminal; `Ctrl-C` ends the game.
 - `make host-game MAP=lunar-surface` does both in one terminal: it starts the same server as its own process, opens
   your window in it, and stops the server when your window closes.
+- To tune the game (speeds, jump, head bob, both guns, consoles, respawn delay, motion blur), copy
+  `game_settings.yaml`, change its numbers, and start the server with it:
+  `make host-game MAP=lunar-surface SETTINGS=my_settings.yaml` (or `make serve-game ... SETTINGS=...`). Everyone who
+  joins plays by the server's settings.
 - `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
   within a few seconds, use the address the server printed.
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
@@ -77,7 +81,7 @@ Multiplayer:
   map.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too.
-- A player hit by the rifle doesn't see how much damage they have taken; damage resets when they rejoin.
+- Health, shown in the bottom left, resets when a player respawns.
 - Consoles are found by name: a map's materials named "blue console …" and "red console …". The house has none,
   so nobody can win there.
 - Local network only: no play over the internet. Networks that keep devices apart (many guest and office Wi-Fi
@@ -92,6 +96,8 @@ Graphics on Lunar Surface, to fix in later pull requests:
   ends, not where their last step ended (D39).
 - Neighbouring pixels on one surface are interpolated rather than traced (D37); textures smaller than a pixel
   shimmer, as they do when every pixel is traced.
+- On Lunar Surface a shot's beam flies out from the gun's tip as a streak (D61), but a hit counts the moment you
+  fire, so a target can drop before the streak reaches them.
 - The window blends each frame with the last one a little (motion blur, D55), so fast turns smear for about 10 ms.
 - Frames that take more than about 15.5 ms of GPU time are drawn at a lower resolution and upscaled (D19, D41), so
   very close approaches to a mouth look softer.
