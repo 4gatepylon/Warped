@@ -1,17 +1,18 @@
 //! `dust.rs` throws up lunar dust and a puff of mist where a laser shot hits the ground. A
-//! `DustBurst` starts when the shot's beam front reaches the ground: its grains fly up and fall
-//! back under the map's gravity onto the ground's slope, its mist puffs swell and drift, and all of
-//! them fade out within two seconds. Each frame, `DustBurst::get_cloud` gives the grains and puffs
-//! for `render_voxel.rs` to draw in the world, lit by the sun.
+//! `DustBurst` starts when the shot's beam front reaches the ground: its grains (small tumbling
+//! tetrahedra, cubes and octahedra) fly up and fall back under the map's gravity onto the ground's
+//! slope, its mist puffs swell and drift, and all of them fade out within two seconds. Each frame,
+//! `DustBurst::get_cloud` gives the grains and puffs for `render_voxel.rs` to draw in the world,
+//! lit by the sun.
 //!
 //! Interface: `DustBurst::FromShot`, `DustBurst::get_cloud`, `DustBurst::is_over`, `DustCloud`,
-//! `DustParticle`, `MAX_DUST_BURST_COUNT`.
+//! `DustParticle`, `DustShape`, `MAX_DUST_BURST_COUNT`.
 //!
 //! Example: `let clouds: Vec<DustCloud> = bursts.iter().filter_map(|b| b.get_cloud(now_s)).collect();`
 
 use std::f64::consts::TAU;
 
-use glam::{DMat4, DVec3, DVec4};
+use glam::{DMat4, DQuat, DVec3, DVec4};
 
 use crate::geometry::{
     AXIS_Y, get_local_direction, make_boost, minkowski_dot, transport_from_centre,
@@ -21,12 +22,12 @@ use crate::voxel_world::{Shot, VoxelWorld, geodesic_tangent, make_ground_frame, 
 
 pub const MAX_DUST_BURST_COUNT: usize = 12;
 const SNIPER_BURST: BurstSize = BurstSize {
-    grain_count: 44,
+    grain_count: 33,
     puff_count: 7,
     size_frac: 1.0,
 };
 const RIFLE_BURST: BurstSize = BurstSize {
-    grain_count: 16,
+    grain_count: 12,
     puff_count: 3,
     size_frac: 0.65,
 };
@@ -38,7 +39,14 @@ const GRAIN_SPREAD_M: f64 = 0.08;
 const GRAIN_MIN_SPEED_M_PER_S: f64 = 2.0;
 const GRAIN_MAX_SPEED_M_PER_S: f64 = 6.0;
 const GRAIN_MIN_RADIUS_M: f64 = 0.02;
-const GRAIN_MAX_RADIUS_M: f64 = 0.045;
+const GRAIN_MAX_RADIUS_M: f64 = 0.032;
+const GRAIN_MIN_SPIN_RAD_PER_S: f64 = 4.0;
+const GRAIN_MAX_SPIN_RAD_PER_S: f64 = 14.0;
+const GRAIN_SHAPES: [DustShape; 3] = [
+    DustShape::Tetrahedron,
+    DustShape::Cube,
+    DustShape::Octahedron,
+];
 const GRAIN_MIN_LIFE_S: f64 = 1.2;
 const GRAIN_MAX_LIFE_S: f64 = 2.0;
 const GRAIN_OPACITY_FRAC: f64 = 0.95;
@@ -77,17 +85,29 @@ struct BurstSize {
     size_frac: f64,
 }
 
+/// `DustShape` is what a particle looks like: a puff of mist (a soft Gaussian ball) or a grain, a
+/// small polyhedron about as big as a ball of its radius (`GRAIN_PLANES` in `render_voxel.metal`).
+/// Its value is the shader's index for it (`GRAIN_PLANE_RANGES`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DustShape {
+    Puff = 0,
+    Tetrahedron = 1,
+    Cube = 2,
+    Octahedron = 3,
+}
+
 /// `DustParticle` is one grain or puff as drawn now: its centre in its burst's frame (Klein
 /// coordinates in meters, so within (size / R)² of true distances near the burst), its radius, its
-/// linear albedo, its opacity at its centre and how soft its edge is (0 a grain's sharp disc, 1 a
-/// puff's Gaussian).
+/// linear albedo, its opacity at its centre, its shape, and how it is turned (from its own axes to
+/// the burst's frame).
 #[derive(Clone, Copy, Debug)]
 pub struct DustParticle {
     pub position_m: DVec3,
     pub radius_m: f64,
     pub albedo: [f32; 3],
     pub opacity_frac: f64,
-    pub softness_frac: f64,
+    pub shape: DustShape,
+    pub orientation: DQuat,
 }
 
 /// `DustCloud` is a burst as drawn now: the frame of the hit point (y up), the sun's direction in
@@ -107,18 +127,21 @@ enum Motion {
     Drifting { final_radius_m: f64 },
 }
 
-/// `Particle` is how one grain or puff starts (position and velocity in the burst's frame, its
-/// radius or a puff's first radius) and looks (albedo, opacity), how it moves and how long it
-/// lasts.
+/// `Particle` is how one grain or puff starts (position, velocity and turn in the burst's frame,
+/// its spin as an axis times radians per second, and its radius or a puff's first radius) and looks
+/// (albedo, opacity, shape), how it moves and how long it lasts.
 #[derive(Clone, Copy, Debug)]
 struct Particle {
     motion: Motion,
     start_m: DVec3,
     velocity_m_per_s: DVec3,
+    start_orientation: DQuat,
+    spin_rad_per_s: DVec3,
     radius_m: f64,
     life_s: f64,
     opacity_frac: f64,
     albedo: [f32; 3],
+    shape: DustShape,
 }
 
 /// `Impact` is where a shot hit the ground, seen from the frame of the hit point (y up, z along the
@@ -187,6 +210,31 @@ impl Random {
         let distance_m: f64 = radius_m * self.next_frac().sqrt();
         let phi_rad: f64 = TAU * self.next_frac();
         (e1 * phi_rad.cos() + e2 * phi_rad.sin()) * distance_m
+    }
+
+    /// `next_direction` gives a unit vector spread evenly over all directions.
+    ///
+    /// Example: `let axis = random.next_direction();`
+    fn next_direction(&mut self) -> DVec3 {
+        let z: f64 = 2.0 * self.next_frac() - 1.0;
+        let phi_rad: f64 = TAU * self.next_frac();
+        let across: f64 = (1.0 - z * z).sqrt();
+        DVec3::new(across * phi_rad.cos(), across * phi_rad.sin(), z)
+    }
+
+    /// `next_rotation` gives a rotation spread evenly over all rotations (Shoemake's method).
+    ///
+    /// Example: `let orientation = random.next_rotation();`
+    fn next_rotation(&mut self) -> DQuat {
+        let u: f64 = self.next_frac();
+        let (a_rad, b_rad) = (TAU * self.next_frac(), TAU * self.next_frac());
+        let (first, second) = ((1.0 - u).sqrt(), u.sqrt());
+        DQuat::from_xyzw(
+            first * a_rad.sin(),
+            first * a_rad.cos(),
+            second * b_rad.sin(),
+            second * b_rad.cos(),
+        )
     }
 
     /// `next_albedo` gives the linear albedo of an sRGB colour, lighter or darker by up to
@@ -258,8 +306,9 @@ fn make_seed(spot: DVec4, start_s: f64) -> u64 {
 }
 
 impl Particle {
-    /// `MakeGrain` makes a dust grain thrown from near the hit point (`impact`'s ground normal),
-    /// up a cone around `axis`, which lands on the ground plane under `gravity_m_per_s2`.
+    /// `MakeGrain` makes a dust grain, a polyhedron of `GRAIN_SHAPES` turned and spinning at
+    /// random, thrown from near the hit point (`impact`'s ground normal) up a cone around `axis`,
+    /// which lands on the ground plane under `gravity_m_per_s2`.
     ///
     /// Example: `let grain = Particle::MakeGrain(&mut random, &impact, axis, 6.0, &SNIPER_BURST);`
     #[allow(non_snake_case)]
@@ -284,10 +333,14 @@ impl Particle {
             motion: Motion::Ballistic { landing_s },
             start_m,
             velocity_m_per_s,
+            start_orientation: random.next_rotation(),
+            spin_rad_per_s: random.next_direction()
+                * random.next_between(GRAIN_MIN_SPIN_RAD_PER_S, GRAIN_MAX_SPIN_RAD_PER_S),
             radius_m: random.next_between(GRAIN_MIN_RADIUS_M, GRAIN_MAX_RADIUS_M),
             life_s: random.next_between(GRAIN_MIN_LIFE_S, GRAIN_MAX_LIFE_S),
             opacity_frac: GRAIN_OPACITY_FRAC,
             albedo: random.next_albedo(DUST_SRGB),
+            shape: GRAIN_SHAPES[(random.next_frac() * GRAIN_SHAPES.len() as f64) as usize],
         }
     }
 
@@ -306,34 +359,37 @@ impl Particle {
             motion: Motion::Drifting { final_radius_m },
             start_m: normal * PUFF_LIFT_M + random.next_on_disk(normal, PUFF_SPREAD_M),
             velocity_m_per_s: direction * speed_m_per_s,
+            start_orientation: DQuat::IDENTITY,
+            spin_rad_per_s: DVec3::ZERO,
             radius_m: PUFF_START_RADIUS_M,
             life_s: random.next_between(PUFF_MIN_LIFE_S, PUFF_MAX_LIFE_S),
             opacity_frac: PUFF_OPACITY_FRAC,
             albedo: random.next_albedo(MIST_SRGB),
+            shape: DustShape::Puff,
         }
     }
 
     /// `get_state` gives the particle `age_s` after its burst started, falling at
-    /// `gravity_m_per_s2` along -y: a grain (sharp-edged) on its arc, or where it landed; a puff
-    /// (soft) where it has drifted, at its size now; with what is left of its opacity.
+    /// `gravity_m_per_s2` along -y: a grain on its arc, tumbling, or where it landed, still; a
+    /// puff where it has drifted, at its size now; with what is left of its opacity.
     ///
     /// Example: `let drawn = particle.get_state(0.4, 6.0);`
     fn get_state(&self, age_s: f64, gravity_m_per_s2: f64) -> DustParticle {
-        let (position_m, radius_m, softness_frac) = match self.motion {
+        let (position_m, radius_m, flight_s) = match self.motion {
             Motion::Ballistic { landing_s } => {
                 let t_s: f64 = age_s.min(landing_s);
                 (
                     self.start_m + self.velocity_m_per_s * t_s
                         - DVec3::Y * (0.5 * gravity_m_per_s2 * t_s * t_s),
                     self.radius_m,
-                    0.0,
+                    t_s,
                 )
             }
             Motion::Drifting { final_radius_m } => (
                 self.start_m
                     + self.velocity_m_per_s * (PUFF_DRAG_S * (1.0 - (-age_s / PUFF_DRAG_S).exp())),
                 final_radius_m + (self.radius_m - final_radius_m) * (-age_s / PUFF_GROW_S).exp(),
-                1.0,
+                0.0,
             ),
         };
         DustParticle {
@@ -341,7 +397,9 @@ impl Particle {
             radius_m,
             albedo: self.albedo,
             opacity_frac: self.opacity_frac * fade(age_s / self.life_s),
-            softness_frac,
+            shape: self.shape,
+            orientation: DQuat::from_scaled_axis(self.spin_rad_per_s * flight_s)
+                * self.start_orientation,
         }
     }
 }
@@ -463,6 +521,7 @@ mod tests {
     //! | Time since the beam arrived | before it, grains in the air, grains landed, every particle faded | `nothing_shows_before_the_beam_arrives`, `grains_rise_then_land_and_stay`, `the_burst_fades_and_ends` |
     //! | Ground at the hit | flat, sloped | `grains_never_sink_below_the_ground` |
     //! | Particle kind | grain, puff | `grains_rise_then_land_and_stay`, `puffs_swell_and_slow` |
+    //! | Grain's turn | in flight (tumbling), landed (still) | `grains_are_tumbling_polyhedra` |
     //! | Gun | sniper, rifle | `rifle_bursts_are_smaller` |
     //! | Seed | the same, another | `bursts_depend_only_on_their_seed` |
     //! | What the shot hit | nothing, a block, the flat ground, the crater's wall | `only_shots_into_the_ground_raise_dust` |
@@ -585,6 +644,29 @@ mod tests {
                     let position_m: DVec3 = grain.get_state(age_s, GRAVITY_M_PER_S2).position_m;
                     assert!(normal.dot(position_m) > -TOLERANCE_M);
                 }
+            }
+        }
+    }
+
+    /// `grains_are_tumbling_polyhedra` checks that a sniper burst's grains include each polyhedron,
+    /// turn while they fly and stop turning once they land, and that puffs stay puffs.
+    #[test]
+    fn grains_are_tumbling_polyhedra() {
+        let burst: DustBurst = make_burst(DVec3::Y, &SNIPER_BURST, SEED);
+        for shape in GRAIN_SHAPES {
+            assert!(burst.particles.iter().any(|p| p.shape == shape));
+        }
+        for particle in &burst.particles {
+            let get_turn = |t_s: f64| particle.get_state(t_s, GRAVITY_M_PER_S2).orientation;
+            match particle.motion {
+                Motion::Ballistic { landing_s } => {
+                    assert!(GRAIN_SHAPES.contains(&particle.shape));
+                    let flying_rad: f64 = get_turn(0.0).angle_between(get_turn(STEP_S));
+                    assert!(flying_rad > 0.0);
+                    assert_eq!(get_turn(landing_s), get_turn(landing_s + SETTLED_S));
+                    assert!(get_turn(STEP_S).is_normalized());
+                }
+                Motion::Drifting { .. } => assert_eq!(particle.shape, DustShape::Puff),
             }
         }
     }

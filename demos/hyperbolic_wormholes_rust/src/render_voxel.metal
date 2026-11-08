@@ -104,6 +104,8 @@ constant float DUST_FORWARD_GLOW = 0.8;
 constant float DUST_FORWARD_POWER = 6.0;
 constant float DUST_EARTHSHINE_FRAC = 0.5;
 constant float DUST_SMOOTH_DEPTH = 0.02;
+constant int DUST_PUFF = 0;
+constant float GRAIN_WRAP = 0.2;
 constant float3 HASH_DIRECTION = float3(12.9898, 78.233, 37.719);
 constant float HASH_SCALE = 43758.5453;
 constant int FBM_OCTAVES = 4;
@@ -419,6 +421,24 @@ struct BeamSegment {
 };
 
 /**
+ * @brief `GRAIN_PLANES` are the faces of the dust grains' polyhedra (unit outward normal, distance from the centre in
+ * radii): a tetrahedron, a cube and an octahedron, their vertices 1.56, 1.2 and 1.26 radii out, so they look about
+ * as big as a ball of that radius.
+ */
+constant float4 GRAIN_PLANES[] = {
+    float4(-0.57735027, -0.57735027, -0.57735027, 0.52), float4(-0.57735027, 0.57735027, 0.57735027, 0.52),
+    float4(0.57735027, -0.57735027, 0.57735027, 0.52), float4(0.57735027, 0.57735027, -0.57735027, 0.52),
+    float4(1.0, 0.0, 0.0, 0.69282032), float4(-1.0, 0.0, 0.0, 0.69282032), float4(0.0, 1.0, 0.0, 0.69282032),
+    float4(0.0, -1.0, 0.0, 0.69282032), float4(0.0, 0.0, 1.0, 0.69282032), float4(0.0, 0.0, -1.0, 0.69282032),
+    float4(0.57735027, 0.57735027, 0.57735027, 0.72746134), float4(0.57735027, 0.57735027, -0.57735027, 0.72746134),
+    float4(0.57735027, -0.57735027, 0.57735027, 0.72746134), float4(0.57735027, -0.57735027, -0.57735027, 0.72746134),
+    float4(-0.57735027, 0.57735027, 0.57735027, 0.72746134), float4(-0.57735027, 0.57735027, -0.57735027, 0.72746134),
+    float4(-0.57735027, -0.57735027, 0.57735027, 0.72746134), float4(-0.57735027, -0.57735027, -0.57735027, 0.72746134),
+};
+/** @brief `GRAIN_PLANE_RANGES` gives each `DustShape` (`dust.rs`) its first face in `GRAIN_PLANES` and face count; a puff has none. */
+constant int2 GRAIN_PLANE_RANGES[] = {int2(0, 0), int2(0, 4), int2(4, 6), int2(10, 8)};
+
+/**
  * @brief `DustBurst` is the dust of one shot into the ground (`dust.rs`): the rows of the inverse of its frame (at the
  * hit point, y up), the sun's direction in that frame with how much sunlight reaches it, where its particles start and
  * how many there are, and how far its farthest particle centre is and its largest radius, in meters.
@@ -432,12 +452,14 @@ struct DustBurst {
 
 /**
  * @brief `DustParticle` is one grain or puff of mist: its centre in its burst's Klein coordinates (meters) and its
- * radius, its linear albedo and its opacity at its centre, and how soft its edge is (0 a sharp disc, 1 a Gaussian).
+ * radius, its linear albedo and its opacity at its centre, its `DustShape` (`dust.rs`), and the unit quaternion that
+ * turns it from its own axes into the burst's.
  */
 struct DustParticle {
     float4 position_radius;
     float4 color_opacity;
     float4 shape;
+    float4 orientation;
 };
 
 /**
@@ -1441,15 +1463,47 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
 /**
  * @brief `scan_dust` adds the dust of shots into the ground near a chord (x along v for s_end, `travelled` from the
  * eye) to `dust`: the summed colour times optical depth and the summed depth. Each burst the chord comes near is
- * scanned in its Klein coordinates (meters), where the chord is straight: a particle is a disc with a pixel-wide edge
- * (a grain) or a Gaussian (a puff) of its radius, at least `DUST_MIN_WIDTH_PX` pixels wide (and fainter as it
- * widens), and its colour is its albedo lit by the sun (more on the side facing it, glowing when seen toward it) and
- * the ambient light.
+ * scanned in its Klein coordinates (meters), where the chord is straight: a grain is a flat-faced polyhedron
+ * (`cover_grain`) and a puff a Gaussian ball, at least `DUST_MIN_WIDTH_PX` pixels wide (and fainter as it widens),
+ * and its colour is its albedo lit by the sun (more on the side facing it, glowing when seen toward it) and the
+ * ambient light.
  * @par Example
  * @code
  * scan_dust(scene, x, v, s, t, dust);
  * @endcode
  */
+/** @brief `rotate_by` turns v by unit quaternion q. @par Example @code float3 w = rotate_by(q, v); @endcode */
+static float3 rotate_by(float4 q, float3 v) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }
+
+/**
+ * @brief `cover_grain` gives how much of a pixel a grain covers, for the ray through `p` (from the grain's centre, in
+ * units of the grain's size) along unit vector u, both in the burst's axes: the polyhedron of `shape` turned by
+ * `orientation`, with a pixel-wide edge (`pixels_per_size` pixels per unit), and the normal of the face the ray enters
+ * (in the burst's axes) into n. The ray's gap to the polyhedron is measured midway between where it crosses into the
+ * last face's inside and out of the first: inside the polyhedron when the ray goes through it, near the closest point
+ * when it misses.
+ * @par Example
+ * @code
+ * float coverage = cover_grain(2, particle.orientation, off / width_m, dir, width_m / pixel_m, n);
+ * @endcode
+ */
+static float cover_grain(int shape, float4 orientation, float3 p, float3 u, float pixels_per_size, thread float3 &n) {
+    float4 inverse = float4(-orientation.xyz, orientation.w);
+    float3 p_local = rotate_by(inverse, p), u_local = rotate_by(inverse, u), n_local = float3(0.0, 1.0, 0.0);
+    float entry = -NO_HIT_S, exit = NO_HIT_S, gap = -NO_HIT_S;
+    int2 range = GRAIN_PLANE_RANGES[shape];
+    for (int i = range.x; i < range.x + range.y; i++) {
+        float4 plane = GRAIN_PLANES[i];
+        float a = dot(plane.xyz, p_local) - plane.w, b = dot(plane.xyz, u_local);
+        if (b < 0.0 && -a / b > entry) { entry = -a / b; n_local = plane.xyz; }
+        if (b > 0.0) exit = min(exit, -a / b);
+    }
+    float3 middle = p_local + 0.5 * (entry + exit) * u_local;
+    for (int i = range.x; i < range.x + range.y; i++) gap = max(gap, dot(GRAIN_PLANES[i].xyz, middle) - GRAIN_PLANES[i].w);
+    n = rotate_by(orientation, n_local);
+    return saturate(0.5 - gap * pixels_per_size);
+}
+
 static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
     float r = scene.u.curvature_radius_m, s_max = min(s_end, FAR_S);
     float3 ambient = float3(AMBIENT) + EARTHSHINE * DUST_EARTHSHINE_FRAC * EARTHSHINE_COLOR;
@@ -1472,10 +1526,12 @@ static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end
             float3 off = q0 + clamp(dot(pr.xyz - q0, d) / dd, 0.0, 1.0) * d - pr.xyz;
             float width_m = max(pr.w, footprint_m), q = dot(off, off) / (width_m * width_m);
             if (q > DUST_CUTOFF_WIDTHS * DUST_CUTOFF_WIDTHS) continue;
-            float disc = saturate((1.0 - sqrt(q)) * width_m / pixel_m + 0.5);
-            float depth = co.w * (pr.w / width_m) * (pr.w / width_m) * mix(disc, exp(-q), particle.shape.x);
+            int shape = int(particle.shape.x + HALF_KIND);
             float3 n = q < 1.0 ? off / width_m - sqrt(1.0 - q) * dir : off * rsqrt(max(dot(off, off), TINY));
-            float facing = saturate((dot(n, sun) + DUST_WRAP) / (1.0 + DUST_WRAP));
+            float coverage = shape == DUST_PUFF ? exp(-q) : cover_grain(shape, particle.orientation, off / width_m, dir, width_m / pixel_m, n);
+            float depth = co.w * (pr.w / width_m) * (pr.w / width_m) * coverage;
+            float wrap = shape == DUST_PUFF ? DUST_WRAP : GRAIN_WRAP;
+            float facing = saturate((dot(n, sun) + wrap) / (1.0 + wrap));
             dust += float4(co.rgb * (SUN_INTENSITY * SUN_COLOR * burst.sun.w * (facing + forward) + ambient) * depth, depth);
         }
     }
