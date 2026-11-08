@@ -30,12 +30,16 @@ head_bob:
   fade_s: 0.1667  # Seconds the bob takes to start or stop.
 
 sniper:  # Gun 1 (key 1): the thin laser wand, one shot per click.
-  shot_s: 0.25  # How long each shot's beam lasts.
+  shot_s: 0.25  # How long each shot hits whatever the crosshair crosses.
   hits_to_eliminate: 1  # Hits that eliminate a player.
+  beam_speed_m_per_s: 250.0  # How fast the beam flies out from the tip.
+  beam_trail_s: 0.25  # How long each point of the beam stays lit after the beam's front passes it.
 
 rifle:  # Gun 2 (key 2): the grey block, fires while the button is held.
   shots_per_s: 8.0  # Shots a second while the button is held.
-  pulse_s: 0.06  # How long each shot's beam lasts.
+  pulse_s: 0.06  # How long each shot hits whatever the crosshair crosses.
+  beam_speed_m_per_s: 250.0  # How fast each shot's beam flies out from the tip.
+  beam_trail_s: 0.05  # How long each point of the beam stays lit after the beam's front passes it.
   shots_until_overheat: 20  # Shots in a row before it overheats.
   cool_down_s: 2.0  # Seconds without firing to cool down fully.
   head_hits_to_eliminate: 2  # Hits to the head (the top half-meter) that eliminate a player.

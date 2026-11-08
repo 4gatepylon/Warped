@@ -221,7 +221,7 @@ pub fn run_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(player.frame, is_laser_on, None)?;
+            client.send_state(player.frame, is_laser_on, false, None)?;
         } else {
             client.keep_joining()?;
         }
@@ -251,11 +251,19 @@ pub struct SharedVoxelView {
     pub shot: Option<Shot>,
     pub hit_player_id: Option<u32>,
     pub is_head_hit: bool,
+    pub other_shots: Vec<(u32, Shot)>,
+}
+
+/// `Tracers` is what to draw for lasers instead of every laser's whole path: beam pieces with
+/// their teams, and an impact glow.
+pub struct Tracers<'a> {
+    pub beams: &'a [(Vec<BeamSegment>, u32)],
+    pub spot: Option<(DVec4, u32)>,
 }
 
 /// `trace_other_voxel_lasers` traces the laser of each of `players` who has theirs on (their
 /// `bodies` given), through `world` with every other player's body but not their own (their gun
-/// is inside it, so their beam would stop where it starts), giving each shot and team.
+/// is inside it, so their beam would stop where it starts), giving each player's id and shot.
 ///
 /// Example: `let shots = trace_other_voxel_lasers(&world, &players, &bodies, &colors);`
 fn trace_other_voxel_lasers(
@@ -263,7 +271,7 @@ fn trace_other_voxel_lasers(
     players: &[RemotePlayer],
     bodies: &[(DMat4, usize)],
     colors: &[[f32; 3]],
-) -> Vec<(Shot, u32)> {
+) -> Vec<(u32, Shot)> {
     players
         .iter()
         .enumerate()
@@ -276,10 +284,10 @@ fn trace_other_voxel_lasers(
                 .map(|(_, &body)| body)
                 .collect();
             (
+                player.id,
                 world
                     .with_avatars(&others, colors)
                     .trace_laser(player.frame),
-                get_team(player.id),
             )
         })
         .collect()
@@ -287,15 +295,17 @@ fn trace_other_voxel_lasers(
 
 /// `pack_shared_voxel_view` packs a voxel map seen from `camera` with a body for each of
 /// `players`, this player's laser (if on, for team `team`) and the lasers of the players who have
-/// theirs on, all traced through the same map, so beams stop at players and bend like light.
+/// theirs on, all traced through the same map, so beams stop at players and bend like light. It
+/// draws every laser's whole path, or `tracers` instead when given.
 ///
-/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, true, 1, &players, (1280, 800));`
+/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, true, 1, &players, None, (1280, 800));`
 pub fn pack_shared_voxel_view(
     world: &VoxelWorld,
     camera: DMat4,
     is_laser_on: bool,
     team: u32,
     players: &[RemotePlayer],
+    tracers: Option<Tracers>,
     render_px: (u32, u32),
 ) -> SharedVoxelView {
     let colors: Vec<[f32; 3]> = AVATAR_COLORS.to_vec();
@@ -326,14 +336,20 @@ pub fn pack_shared_voxel_view(
         beams.push((own.segments.clone(), team));
         shot = Some(own);
     }
-    for (other, team) in trace_other_voxel_lasers(world, players, &bodies, &colors) {
-        beams.push((other.segments, team));
+    let other_shots: Vec<(u32, Shot)> = trace_other_voxel_lasers(world, players, &bodies, &colors);
+    for (id, other) in &other_shots {
+        beams.push((other.segments.clone(), get_team(*id)));
     }
+    let (beams, spot) = match tracers {
+        Some(tracers) => (tracers.beams, tracers.spot),
+        None => (beams.as_slice(), spot),
+    };
     SharedVoxelView {
-        frame: VoxelFrame::Build(&shared, camera, &beams, spot, render_px),
+        frame: VoxelFrame::Build(&shared, camera, beams, spot, render_px),
         shot,
         hit_player_id,
         is_head_hit,
+        other_shots,
     }
 }
 
@@ -454,6 +470,7 @@ pub fn run_voxel_bot(
                 is_laser_on,
                 get_team(my_id),
                 &client.players,
+                None,
                 BOT_VIEW_PX,
             );
             if let Some(victim_id) = view.hit_player_id {
@@ -465,7 +482,7 @@ pub fn run_voxel_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(camera, is_laser_on, None)?;
+            client.send_state(camera, is_laser_on, false, None)?;
         } else {
             client.keep_joining()?;
         }
@@ -524,6 +541,7 @@ mod tests {
             id: 2,
             frame: target.frame,
             is_laser_on: false,
+            is_rifle: false,
             disabling_console: None,
         };
         let view: SharedView = pack_shared_view(&world, aimed, true, &[other], (64, 40), 0.0);
@@ -547,11 +565,12 @@ mod tests {
             id: 2,
             frame: target.get_camera_frame(&world),
             is_laser_on: false,
+            is_rifle: false,
             disabling_console: None,
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
         let view: SharedVoxelView =
-            pack_shared_voxel_view(&world, camera, true, 0, &[other], (64, 40));
+            pack_shared_voxel_view(&world, camera, true, 0, &[other], None, (64, 40));
         assert_eq!(view.hit_player_id, Some(2));
         assert_eq!(
             describe_voxel_laser(&world, &view),
@@ -571,6 +590,7 @@ mod tests {
             id: 2,
             frame: target.get_camera_frame(&world),
             is_laser_on: true,
+            is_rifle: false,
             disabling_console: None,
         };
         let bodies: Vec<(DMat4, usize)> = vec![(
@@ -578,6 +598,6 @@ mod tests {
             2,
         )];
         let shots = trace_other_voxel_lasers(&world, &[firing], &bodies, &AVATAR_COLORS);
-        assert!(shots[0].0.length_m > MIN_OTHER_BEAM_M);
+        assert!(shots[0].1.length_m > MIN_OTHER_BEAM_M);
     }
 }

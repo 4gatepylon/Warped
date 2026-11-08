@@ -204,6 +204,29 @@ pub struct Shot {
     pub through: Vec<String>,
 }
 
+/// `clip_beam` gives the part of a beam (`segments`, in a world of curvature radius `r`) from
+/// `from_m` to `to_m` along it, meters from its start.
+///
+/// Example: `let flying = clip_beam(&shot.segments, world.r, 20.0, 35.0);`
+pub fn clip_beam(segments: &[BeamSegment], r: f64, from_m: f64, to_m: f64) -> Vec<BeamSegment> {
+    let mut start_m: f64 = 0.0;
+    let mut clipped: Vec<BeamSegment> = Vec::new();
+    for segment in segments {
+        let length_m: f64 = segment.length * r;
+        let (lo_m, hi_m) = (from_m.max(start_m), to_m.min(start_m + length_m));
+        if lo_m < hi_m {
+            let s: f64 = (lo_m - start_m) / r;
+            clipped.push(BeamSegment {
+                a: geodesic_point(segment.a, segment.b, s),
+                b: geodesic_tangent(segment.a, segment.b, s),
+                length: (hi_m - lo_m) / r,
+            });
+        }
+        start_m += length_m;
+    }
+    clipped
+}
+
 /// `normalize_minkowski` scales a vector to unit Minkowski length (either sign).
 ///
 /// Example: `let g = normalize_minkowski(g);`
@@ -1448,6 +1471,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
+    //! | Beam clipped to | its middle (through the wormhole), before its start, past its end | `a_clipped_beam_keeps_its_middle` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
@@ -1594,6 +1618,23 @@ mod tests {
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
         assert_eq!(world.structures[hit].name, "red pylon");
         assert!((shot.length_m - PYLON_DISTANCE_M).abs() < DISTANCE_TOLERANCE_M);
+    }
+
+    #[test]
+    fn a_clipped_beam_keeps_its_middle() {
+        let world: VoxelWorld = load_lunar_surface();
+        let player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0);
+        let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
+        let length_m = |segments: &[BeamSegment]| -> f64 {
+            segments.iter().map(|s| s.length).sum::<f64>() * world.r
+        };
+        let full_m: f64 = length_m(&shot.segments);
+        let (from_m, to_m) = (full_m / 4.0, full_m / 2.0);
+        let middle: Vec<BeamSegment> = clip_beam(&shot.segments, world.r, from_m, to_m);
+        assert!((length_m(&middle) - (to_m - from_m)).abs() < DISTANCE_TOLERANCE_M);
+        assert!(clip_beam(&shot.segments, world.r, -2.0, -1.0).is_empty());
+        assert!(clip_beam(&shot.segments, world.r, full_m + 1.0, full_m + 2.0).is_empty());
     }
 
     #[test]

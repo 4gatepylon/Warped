@@ -685,6 +685,24 @@
   the server takes with a flag, so players can tune the game. The YAML parser is `serde_yaml` 0.9, which its author
   has marked deprecated but which is stable and widely used.
 
+### D61. Beams fly out like tracers
+
+- **Choice:**
+  - **Flight:** on voxel maps each shot's path is traced once, when it is fired, and stays where it was fired. A
+    lit stretch flies along it: its front leaves the gun's tip at `beam_speed_m_per_s` (250 m/s for both guns), and
+    each point stays lit for `beam_trail_s` after the front passes it (0.25 s for the sniper, a 62 m streak; 0.05 s
+    for the rifle, 12 m). The impact glows while the trail reaches it. Both numbers are in `game_settings.yaml`, per
+    gun.
+  - **Other players' shots:** each window traces another player's shot when their laser comes on. The snapshot now
+    says which gun fired (a bit in the laser byte), so each gun keeps its own look.
+  - **Hits:** unchanged. A hit counts at once along the crosshair's path, so the beam is only a picture, as you
+    said.
+  - **Unchanged:** the house, scripted routes and bots still draw whole beams.
+- **Alternatives:** moving the hit to when the beam's front arrives (closer to a bullet, but a hit would lag the
+  shot); re-tracing the path every frame from the current aim (the beam would swing with the view).
+- **Rationale:** you asked for the laser to disappear from the tip onward and fly forward like a bullet, lasting
+  longer for the sniper than the rifle, with both settings in the YAML file.
+
 
 ## Baselines
 
