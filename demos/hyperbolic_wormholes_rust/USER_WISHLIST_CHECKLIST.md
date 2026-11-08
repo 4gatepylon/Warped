@@ -10,6 +10,12 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
+  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
+  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
+  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
+  show a redshift instead. The user wants video or image demos to confirm. Claimed by Claude Code (subagent of
+  session `wizardly-hamilton-23a121`), branch `claude/wormhole-doppler`, 2026-11-07.
 - [~] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": if you crouch, the energy for
   running is recharged at the same rate as when you run (drains it); if you walk, it is recharged at half that. This
   is the default in the YAML, and in general it should be parameterized. Claimed by Claude Code (session
