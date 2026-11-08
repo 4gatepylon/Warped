@@ -29,7 +29,7 @@ use crate::render_metal::{
 };
 use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
 use crate::terrain::MoundGrid;
-use crate::thrown_wormholes::{GREEN_COLOR, PURPLE_COLOR, WormholeColor};
+use crate::thrown_wormholes::{GREEN_COLOR, HIT_FLASH_COLOR, PURPLE_COLOR, WormholeColor};
 use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
@@ -290,13 +290,14 @@ fn format_rgb([r, g, b]: [f32; 3]) -> String {
 }
 
 /// `get_warp_kind` gives the shader's kind of a warp: 0 for a black hole, 1 for a map's wormhole
-/// mouth, and 2 and 3 for a thrown purple and green mouth.
+/// mouth, 2 and 3 for a thrown purple and green mouth, and 4 for a thrown mouth flashing red.
 ///
 /// Example: `let kind = get_warp_kind(&world.warps[0]);`
 fn get_warp_kind(warp: &VoxelWarp) -> f32 {
     match (warp.is_mouth, warp.color) {
         (false, _) => 0.0,
         (true, None) => 1.0,
+        (true, Some(_)) if warp.is_flashing => 4.0,
         (true, Some(WormholeColor::Purple)) => 2.0,
         (true, Some(WormholeColor::Green)) => 3.0,
     }
@@ -677,7 +678,8 @@ impl VoxelGpu {
                 &std::mem::size_of::<VoxelUniforms>().to_string(),
             )
             .replace("__PURPLE_COLOR__", &format_rgb(PURPLE_COLOR))
-            .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR));
+            .replace("__GREEN_COLOR__", &format_rgb(GREEN_COLOR))
+            .replace("__HIT_FLASH_COLOR__", &format_rgb(HIT_FLASH_COLOR));
         let library: Retained<ProtocolObject<dyn MTLLibrary>> = device
             .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
             .map_err(|error| {

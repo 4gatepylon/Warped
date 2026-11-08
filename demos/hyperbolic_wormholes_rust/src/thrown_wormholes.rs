@@ -5,7 +5,7 @@
 //! mouth may go.
 //!
 //! Interface: `WormholeColor`, `MouthPlace`, `Flight`, `fly_throw`, `PlayerWormholes`,
-//! `ThrownWormholes`.
+//! `ThrownWormholes`, `Marker`, `HIT_FLASH_COLOR`.
 //!
 //! Example: `let flight = fly_throw(camera, thrown.get_next_color(), &settings.wormholes, r, find_hit);`
 //!
@@ -23,6 +23,7 @@ use crate::terrain::get_fermi_coordinates;
 
 pub const PURPLE_COLOR: [f32; 3] = [0.62, 0.22, 1.0];
 pub const GREEN_COLOR: [f32; 3] = [0.2, 1.0, 0.4];
+pub const HIT_FLASH_COLOR: [f32; 3] = [1.0, 0.12, 0.06];
 const FLIGHT_STEP_S: f64 = 1.0 / 120.0;
 const BACK_OFF_M: f64 = 0.05;
 const MAX_DROP_M: f64 = 200.0;
@@ -206,6 +207,16 @@ pub fn fly_throw(
     flight
 }
 
+/// `Marker` is a glowing ball drawn for a thrown mouth: its centre, its colour (linear RGB), its
+/// radius in meters, and whether it is a mouth down (which shots hit) rather than a throw in the air.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Marker {
+    pub x: DVec4,
+    pub rgb: [f32; 3],
+    pub radius_m: f64,
+    pub is_mouth: bool,
+}
+
 /// `PlayerWormholes` is what everyone sees of one player's wormholes: each colour's place once it
 /// is down, the throw in the air, if any (its colour and where it is now), and how damaged the
 /// pair is by enemy shots (0 to 1, destroyed at 1; the server's tally, 0 from a client).
@@ -225,15 +236,23 @@ impl PlayerWormholes {
         Some([self.purple?, self.green?])
     }
 
-    /// `get_markers` gives the glowing balls to draw for these wormholes (a centre, a colour and a
-    /// radius in meters): the throw in the air, and a mouth that is down while the other isn't.
+    /// `get_markers` gives the glowing balls to draw for these wormholes: the throw in the air, and a
+    /// mouth that is down while the other isn't.
     ///
     /// Example: `shared.add_markers(&wormholes.get_markers(40.0));`
-    pub fn get_markers(&self, r: f64) -> Vec<(DVec4, WormholeColor, f64)> {
-        let flying = self.flying.map(|(color, x)| (x, color, FLYING_MARKER_M));
+    pub fn get_markers(&self, r: f64) -> Vec<Marker> {
+        let marker = |x: DVec4, color: WormholeColor, radius_m: f64, is_mouth: bool| Marker {
+            x,
+            rgb: color.get_rgb(),
+            radius_m,
+            is_mouth,
+        };
+        let flying = self
+            .flying
+            .map(|(color, x)| marker(x, color, FLYING_MARKER_M, false));
         let unlinked = self
             .get_unlinked()
-            .map(|(color, place)| (place.get_centre(r), color, UNLINKED_MARKER_M));
+            .map(|(color, place)| marker(place.get_centre(r), color, UNLINKED_MARKER_M, true));
         flying.into_iter().chain(unlinked).collect()
     }
 
@@ -536,9 +555,13 @@ mod tests {
         );
         thrown.update(0.0, EYE_M, R_M, |_| true);
         assert_eq!(thrown.get_kept_places(), [purple]);
-        let colors: Vec<WormholeColor> =
-            thrown.placed.get_markers(R_M).iter().map(|m| m.1).collect();
-        assert_eq!(colors, [WormholeColor::Green, WormholeColor::Purple]);
+        let looks: Vec<([f32; 3], bool)> = thrown
+            .placed
+            .get_markers(R_M)
+            .iter()
+            .map(|m| (m.rgb, m.is_mouth))
+            .collect();
+        assert_eq!(looks, [(GREEN_COLOR, false), (PURPLE_COLOR, true)]);
         thrown
             .update(LATE_S, EYE_M, R_M, |_| true)
             .expect("it lands");

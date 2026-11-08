@@ -12,7 +12,8 @@ use glam::{DMat4, DVec3, DVec4, Vec4};
 use crate::geometry::{
     AXIS_W, AXIS_Y, UP_VECTOR, get_distance, get_local_direction, invert_lorentz, normalize_tangent,
 };
-use crate::world::{MAX_BOX_COUNT, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT, World};
+use crate::thrown_wormholes::HIT_FLASH_COLOR;
+use crate::world::{MAX_BOX_COUNT, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT, Mouth, World};
 
 pub const ROW_COUNT: usize = 1 + MAX_MOUTH_COUNT;
 pub const TEXEL_TO_WORLD: usize = 0;
@@ -321,8 +322,13 @@ fn make_uniforms(
     let mut row_tints: [[f32; 4]; MAX_MOUTH_COUNT] = [[0.0; 4]; MAX_MOUTH_COUNT];
     for (k, mouth) in world.mouths.iter().enumerate() {
         next_rows[k] = (1 + mouth.partner_index) as i32;
-        if let Some(color) = world.mouths[mouth.partner_index].color {
-            let [r, g, b] = color.get_rgb();
+        let entered: &Mouth = &world.mouths[mouth.partner_index];
+        if let Some(color) = entered.color {
+            let [r, g, b] = if entered.is_flashing {
+                HIT_FLASH_COLOR
+            } else {
+                color.get_rgb()
+            };
             row_tints[k] = [r, g, b, 1.0];
         }
     }

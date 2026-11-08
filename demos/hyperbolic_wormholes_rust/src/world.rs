@@ -13,7 +13,7 @@
 use glam::{DMat4, DVec4};
 
 use crate::map::{Map, Spawn, Warp, to_frame};
-use crate::thrown_wormholes::{MouthPlace, WormholeColor};
+use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
@@ -139,7 +139,7 @@ pub struct Cluster {
 /// `Mouth` is one end of a wormhole. Its frame's columns are right, up, back and centre; you pass
 /// through cleanly moving along -back. `gluing` maps the space around it to the space around its
 /// partner, with the back axis flipped (or every axis, for a mouth without a partner). A mouth a
-/// player threw has its colour.
+/// player threw has its colour, and flashes red just after a hit.
 #[derive(Clone)]
 pub struct Mouth {
     pub frame: DMat4,
@@ -151,6 +151,7 @@ pub struct Mouth {
     pub pair_index: usize,
     pub name: String,
     pub color: Option<WormholeColor>,
+    pub is_flashing: bool,
 }
 
 /// `World` is the whole scene at one curvature radius; its first `static_mouth_count` mouths are
@@ -329,6 +330,7 @@ impl World {
                     pair_index: k.min(partner_index) / 2,
                     name: warp.name.clone(),
                     color: None,
+                    is_flashing: false,
                 }
             })
             .collect();
@@ -436,12 +438,24 @@ impl World {
                     pair_index: first / 2,
                     name: format!("the {} wormhole", color.get_name().to_lowercase()),
                     color: Some(color),
+                    is_flashing: false,
                 });
             }
             for k in [first, first + 1] {
                 let partner_frame: DMat4 = self.mouths[self.mouths[k].partner_index].frame;
                 self.mouths[k].gluing = partner_frame * flip * self.mouths[k].to_local;
             }
+        }
+    }
+
+    /// `set_flashing_pairs` makes the thrown pairs whose entry in `flashing` is true (in the order
+    /// `set_thrown_wormholes` was given them) flash red.
+    ///
+    /// Example: `world.set_flashing_pairs(&[false, true]);`
+    pub fn set_flashing_pairs(&mut self, flashing: &[bool]) {
+        let first: usize = self.static_mouth_count;
+        for (k, mouth) in self.mouths[first..].iter_mut().enumerate() {
+            mouth.is_flashing = flashing[k / 2];
         }
     }
 
@@ -477,19 +491,24 @@ impl World {
             .filter(|&s| s <= s_max)
     }
 
-    /// `add_markers` adds a glowing cube for each of `markers` (a centre, a colour and a half size
-    /// in meters), all in one cluster: a thrown mouth in the air, or one down whose partner isn't.
-    /// Add them after every avatar, so the avatars' boxes keep their places.
+    /// `add_markers` adds a glowing cube for each of `markers` (its radius the cube's half size),
+    /// all in one cluster: a thrown mouth in the air, or one down whose partner isn't. Add them
+    /// after every avatar, so the avatars' boxes keep their places.
     ///
-    /// Example: `shared.add_markers(&[(x, WormholeColor::Purple, 0.15)]);`
-    pub fn add_markers(&mut self, markers: &[(DVec4, WormholeColor, f64)]) {
-        let Some(&(first, _, _)) = markers.first() else {
+    /// Example: `shared.add_markers(&wormholes.get_markers(world.curvature_radius_m));`
+    pub fn add_markers(&mut self, markers: &[Marker]) {
+        let Some(first) = markers.first() else {
             return;
         };
         let at = |x: DVec4| orthonormalize_frame(DMat4::from_cols(DVec4::X, DVec4::Y, DVec4::Z, x));
-        self.group_boxes(at(first), "a thrown wormhole", |world| {
-            for &(x, color, half_m) in markers {
-                world.add_box(at(x), [half_m; 3], color.get_rgb(), MATERIAL_GLOW);
+        self.group_boxes(at(first.x), "a thrown wormhole", |world| {
+            for marker in markers {
+                world.add_box(
+                    at(marker.x),
+                    [marker.radius_m; 3],
+                    marker.rgb,
+                    MATERIAL_GLOW,
+                );
             }
         });
     }
@@ -891,6 +910,7 @@ impl World {
                     pair_index,
                     name: format!("{}{}", pair_index + 1, if side == 0 { 'A' } else { 'B' }),
                     color: None,
+                    is_flashing: false,
                 });
             }
         }
@@ -972,14 +992,15 @@ mod tests {
     //! | Cluster | house, pylon, tree | `every_box_is_inside_its_cluster_bound` |
     //! | Mouth | each of the demo's mouths | `jump_spheres_hold_no_boxes_or_ground` |
     //! | World's source | built in code, loaded from `common/maps/house_demo` | `the_house_map_loads_the_built_world` |
-    //! | Thrown pair | walked into (the walker comes out of the other mouth) | `a_thrown_pair_carries_a_walker` |
+    //! | Thrown pair | walked into (the walker comes out of the other mouth), shot into (the laser names the mouth it entered), flashing (both mouths) | `a_thrown_pair_carries_a_walker` |
     //! | Thrown mouth's place | in the open, at a map mouth, in a box, near another thrown mouth | `thrown_mouths_keep_clear_of_boxes_and_mouths` |
     //! | Players' thrown mouths and markers | every player's at once | `every_players_wormholes_fit_the_shader` |
 
     use super::*;
     use crate::geometry::{make_rotation_about, minkowski_dot};
     use crate::net::MAX_PLAYER_COUNT;
-    use crate::physics::{Input, Player, update_player};
+    use crate::physics::{Input, Player, trace_laser, update_player};
+    use crate::scene_data::{Beam, SceneData};
     use crate::terrain::get_fermi_coordinates;
     use glam::DVec3;
 
@@ -1107,6 +1128,11 @@ mod tests {
         let mut world: World = World::Empty(DEFAULT_CURVATURE_RADIUS_M);
         world.set_thrown_wormholes(&[[open_place(AHEAD_M, 0.0), open_place(AHEAD_M, ASIDE_M)]]);
         let mut player: Player = Player::AtSpawn(&world);
+        let data: SceneData =
+            SceneData::Build(&world, player.frame, &Beam::default(), (64, 40), 0.0, true);
+        assert_eq!(trace_laser(&world, &data).1.mouths_entered, vec![0]);
+        world.set_flashing_pairs(&[true]);
+        assert!(world.mouths.iter().all(|m| m.is_flashing));
         let input: Input = Input {
             forward: true,
             ..Input::default()

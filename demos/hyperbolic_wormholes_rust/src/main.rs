@@ -78,7 +78,7 @@ use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
 use settings::{PerPlayerSettings, ServerSettings};
-use thrown_wormholes::{MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor, fly_throw};
+use thrown_wormholes::{Marker, MouthPlace, PlayerWormholes, ThrownWormholes, fly_throw};
 use voxel_world::{VoxelPlayer, VoxelWorld};
 use world::{DEFAULT_CURVATURE_RADIUS_M, EYE_HEIGHT_M, World};
 
@@ -2510,7 +2510,7 @@ impl Session {
     /// throws in the air, and mouths down whose partner isn't.
     ///
     /// Example: `let markers = self.get_wormhole_markers();`
-    fn get_wormhole_markers(&self) -> Vec<(DVec4, WormholeColor, f64)> {
+    fn get_wormhole_markers(&self) -> Vec<Marker> {
         let r: f64 = match &self.voxel {
             Some(voxel) => voxel.world.r,
             None => self.world.curvature_radius_m,
@@ -2895,7 +2895,7 @@ impl Session {
     /// Example: `let data = session.pack((1280, 800));`
     fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
         let is_firing: bool = self.is_firing();
-        let markers: Vec<(DVec4, WormholeColor, f64)> = self.get_wormhole_markers();
+        let markers: Vec<Marker> = self.get_wormhole_markers();
         let (off_mask, disabling_fracs) = self.get_console_states();
         let time_s: f64 = self.start.elapsed().as_secs_f64();
         if let Some(voxel) = &mut self.voxel {
