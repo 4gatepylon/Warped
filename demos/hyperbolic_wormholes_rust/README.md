@@ -83,7 +83,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
   (the Terminal, say) when asked; without it, other computers can't reach the game and `auto` finds nothing.
-- Players start on a ring around spawn and see each other as coloured boxes, bent through the wormholes like
+- Joining opens a lobby with each team's head count; `1` joins blue and `2` joins red (bots join the smaller team).
+- Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
 - On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).

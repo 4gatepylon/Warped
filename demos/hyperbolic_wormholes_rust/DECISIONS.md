@@ -826,6 +826,21 @@
   other players' flashlights (each would need a bit in the snapshot and a light in the shader).
 - **Rationale:** you asked for a right-click flashlight that shines in a neat cone.
 
+### D71. A lobby where players choose their team
+
+- **Choice:**
+  - **The lobby:** a window that connects to a server first sees a lobby over a dimmed view, with each team's head
+    count (asked of the server every 0.5 s) and "1 joins blue, 2 joins red". `1` or `2` asks to join that team.
+  - **Teams:** the server keeps each player's team, keeps it when they rejoin after a hit, and ignores any other
+    team in later messages. A join without a team (bots) gets the team with fewer players, blue on a tie.
+  - **What a team decides:** snapshots carry each player's team (a bit in the laser byte). It decides their spawn
+    point, their beam's and tip's colour, and which consoles they can turn off. Before, teams came from odd and even
+    ids. Lasers still hit teammates.
+- **Alternatives:** a separate lobby window or web page (more code than a banner); letting players switch team
+  later (it would need a way back to the lobby).
+- **Rationale:** you asked for a lobby page showing how many players are on each team, where players choose a team
+  and then play as it, with friendly fire on and only the enemy's consoles open to them.
+
 
 ## Baselines
 
