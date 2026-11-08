@@ -25,7 +25,8 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
     (was 60 m), warmer fog [0.74, 0.55, 0.35]. Visibility stays about 250 m. **User?** strength. The wind's
     strength does not yet gust in time and space (requested; needs a shared seed and server time in the protocol).
 12. **Prop jitter** up to 1.5 m, 0.3 rad and ±12% size, seed 121, mirrored across the middle so both teams get the
-    same cover. Pylons, consoles, spawns and the wormhole stay put. **User?** amount.
+    same cover. Pylons, consoles and spawns stay put; the wormhole mouths move by their own seed (item 19).
+    **User?** amount.
 13. **Ground-hit sand** tinted from the fog colour (grains 80%, puffs 120%), puffs drifting downwind at 3 m/s. In
     the storm the puffs read darker than the lit sand around them. **User?** brighter.
 14. **Gusts in strength only**, from the map's seed and the shared UTC clock: ±20% (`strength_frac` 0.2) in
@@ -75,3 +76,30 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
       `wormhole`): the laser's 19 segments, scanned at every chord and every bend step inside the
       mouth, about 4 ms; the puff of sand where it lands, about 1.8 ms; the laser's spot light, nothing measurable.
       Hoisting each segment's midpoint and reach out of `scan_beams` would be the next saving with the same look.
+19. **Plays like Lunar Surface** (W-126, same play in every level). Dust's settings files are Lunar's line for line
+    but for two lines, and its play code is Lunar's; scripted play found two differences, both fixed:
+    - **Jump time:** Dust's map has Earth's gravity (9.81 m/s²) and Lunar's 6 m/s², and a jump's time is a fraction
+      of the map's, so a Dust jump rose as high (1.25 m) but lasted 0.35 s against Lunar's 0.58 s.
+      `jump_time_per_map_jump_time` is now 0.545, as on Snow Planet (same gravity), and a test compares the two
+      jumps under each level's own settings. Changing the setting, not the map's gravity, keeps the sand puffs, which
+      fall at the map's gravity, as they were.
+    - **Level mouths out of a walker's reach:** their centres hung 2.6 m above the sand, so a walker's eye passed a
+      metre under the throat and nobody walked through from any of 12 sides (Lunar's mouth A: all 12). They now sit
+      at eye height (1.6 m above the sand), and each moved up to 1 m by `MOUTH_SEED` (122, mouth B mirroring A), as
+      the user asks of anything moved on a map. **User?** they look a metre lower. The `laser_into_wormhole` bench
+      view stands on a dune 3 m above the mouth's sand, so it now aims 0.2 rad down at the mouth's centre
+      (`LASER_INTO_WORMHOLE_PITCH_RAD`); level, its laser passed over the lowered throat. Frame times (2560x1440,
+      best of 6 alternating rounds of 15 frames, Apple M3 Pro): `wormhole` 10.2 → 9.6 ms, `wormhole_exit` 10.2 → 9.9,
+      `laser_into_wormhole` 15.9 → 13.1; the other views within 0.2 ms of before.
+    - **Checked and found working** (tests in `parity_tests` and `play_tests`): every spawn on open sand with 20 m
+      clear ahead, for 8 players a team; 15 s of walking, sprinting, jumping and crouching in 12 headings from each
+      spawn, never blocked, sunk or past the edge; both ridges crossed on foot along six lines; every console turned
+      off with `E` from 8 sides of its pylon; both level mouths walked and shot through from 12 sides each; a thrown
+      pair walked and shot through. The wind and the laser's bend are untouched (their tests still pass).
+    - **Left as is:**
+      - `tools/make_dust_map.py` still places props on a 5-octave ground while the game draws 3 octaves (item 17);
+        no structure stands more than 3.5 cm off the game's ground, too little to see.
+      - `map_pictures/dust_r50m.png` predates item 17's renderer: a fresh render of the same map differs from it by
+        a mean of 3.3 of 255 (6.5% of pixels past 8), while lowering the mouths changes 0.35% of a fresh render's
+        pixels, around the mouths. Regenerating it (`make make-map-picture MAP=dust`) would change the map page's
+        look, so it waits for the user. **User?**

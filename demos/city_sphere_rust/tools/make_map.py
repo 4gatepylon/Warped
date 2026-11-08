@@ -3,8 +3,9 @@
 Euclidean space, metres, the sphere's centre at the origin. The street is the inside of a sphere of
 `STREET_RADIUS_M`; gravity points outward onto it, so a player's up is towards the centre. The glass
 shell of `GLASS_RADIUS_M` roofs the street, and players can stand on its inner (centre-facing) side,
-the glass level, which has no roof. Lifts are holes in the glass over lift pads. Blue's half is +x,
-red's is -x, and every red thing is the antipode of a blue one.
+the glass level, which has no roof. Lifts are holes in the glass over lift pads. Each team's stairs
+climb from in front of its spawns, through a hole in the glass, onto the glass level toward its
+pylon. Blue's half is +x, red's is -x, and every red thing is the antipode of a blue one.
 
 Example:
     python3 tools/make_map.py
@@ -22,6 +23,21 @@ GLASS_RADIUS_M: float = 17.0
 GLASS_THICKNESS_M: float = 0.25
 CORE_RADIUS_M: float = 2.5
 LIFT_HOLE_RAD: float = 0.11
+STAIRS_COLOR: tuple[float, float, float] = (0.62, 0.5, 0.9)
+STAIRS_KIND: str = "solid"
+STAIRS_BASE_LON_RAD: float = 0.06
+STAIRS_HEADING_RAD: float = 0.14
+STAIRS_STEP_COUNT: int = 48
+STAIRS_TREAD_M: float = 0.22
+STAIRS_HALF_WIDTH_M: float = 1.2
+STAIRS_LANDING_M: float = 1.2
+STAIRS_OVERLAP_M: float = 0.1
+STAIRS_EMBED_M: float = 0.3
+STAIRS_JITTER_RAD: float = 0.02
+STAIRS_JITTER_HEADING_RAD: float = 0.05
+BODY_HEIGHT_M: float = 1.8
+BODY_RADIUS_M: float = 0.4
+HOLE_MARGIN_RAD: float = 0.01
 OUTPUT: Path = Path(__file__).resolve().parents[3] / "common" / "maps" / "city_sphere" / "map.json"
 MATERIALS: list[tuple[str, tuple[float, float, float], str]] = [
     ("air", (0.0, 0.0, 0.0), "empty"),
@@ -36,6 +52,7 @@ MATERIALS: list[tuple[str, tuple[float, float, float], str]] = [
     ("red pylon", (1.0, 0.28, 0.22), "light"),
     ("blue console 0", (0.3, 0.55, 1.0), "light"),
     ("red console 0", (1.0, 0.35, 0.3), "light"),
+    ("stairs", STAIRS_COLOR, STAIRS_KIND),
 ]
 
 
@@ -102,8 +119,67 @@ def make_box(name: str, group: str, d: np.ndarray, base_radius_m: float, half: t
     }
 
 
-def make_team_half(sign: float, team: str) -> tuple[list[dict], list[dict]]:
-    """`make_team_half` gives one team's boxes and spawns; red's (sign -1) are blue's antipodes.
+def make_stairs(team: str, base: np.ndarray, toward: np.ndarray) -> tuple[list[dict], dict]:
+    """`make_stairs` gives a flight of stairs that starts on the street at the unit direction `base`
+    and climbs along the great circle toward the tangent `toward` up to the glass level, and the hole
+    in the glass it climbs through.
+
+    Each step is a box standing on the street (sunk `STAIRS_EMBED_M` into it), as deep as its tread
+    (`STAIRS_TREAD_M`, reaching `STAIRS_OVERLAP_M` under the next step), its top a rise higher than
+    the step before, so the treads stay level however the street curves; the last step is
+    `STAIRS_LANDING_M` deeper, its top flush with the glass level. The hole covers every step on
+    which a player's head would reach the glass from below, with a body radius to the sides.
+
+    Example:
+        >>> len(make_stairs("blue", direction(0.06, 0.0), direction(0.06 + math.pi / 2, 0.0))[0])
+        48
+    """
+    up_glass_m: float = GLASS_RADIUS_M - GLASS_THICKNESS_M / 2
+    rise_m: float = (STREET_RADIUS_M - up_glass_m) / STAIRS_STEP_COUNT
+    t: np.ndarray = toward - base * float(toward @ base)
+    t /= np.linalg.norm(t)
+    at = lambda phi: base * math.cos(phi) + t * math.sin(phi)
+    along = lambda phi: -base * math.sin(phi) + t * math.cos(phi)
+    boxes: list[dict] = []
+    phi: float = 0.0
+    hole_points: list[np.ndarray] = []
+    for k in range(STAIRS_STEP_COUNT):
+        top_m: float = STREET_RADIUS_M - (k + 1) * rise_m
+        is_last: bool = k == STAIRS_STEP_COUNT - 1
+        tread_m: float = STAIRS_TREAD_M + (STAIRS_LANDING_M if is_last else 0.0)
+        depth_m: float = tread_m + (0.0 if is_last else STAIRS_OVERLAP_M)
+        phi_mid: float = phi + depth_m / 2 / top_m
+        d: np.ndarray = at(phi_mid)
+        forward: np.ndarray = along(phi_mid)
+        up: np.ndarray = -d
+        back: np.ndarray = -forward
+        right: np.ndarray = np.cross(up, back)
+        bottom_m: float = STREET_RADIUS_M + STAIRS_EMBED_M
+        center: np.ndarray = d * (bottom_m + top_m) / 2
+        columns = [list(right) + [0.0], list(up) + [0.0], list(back) + [0.0], list(center) + [1.0]]
+        boxes.append({
+            "name": f"{team} stairs {k}",
+            "group": "stairs",
+            "frame": [round(float(v), 6) for column in columns for v in column],
+            "half_size_m": [STAIRS_HALF_WIDTH_M, round((bottom_m - top_m) / 2, 6), round(depth_m / 2, 6)],
+            "material": material_id("stairs"),
+        })
+        if top_m < up_glass_m + BODY_HEIGHT_M + GLASS_THICKNESS_M + rise_m:
+            side: np.ndarray = right * (STAIRS_HALF_WIDTH_M + BODY_RADIUS_M)
+            for phi_edge in (phi - BODY_RADIUS_M / top_m, phi + STAIRS_TREAD_M / top_m):
+                for s in (-1.0, 1.0):
+                    hole_points.append(at(phi_edge) * top_m + s * side)
+        phi += tread_m / top_m
+    center: np.ndarray = sum(q / np.linalg.norm(q) for q in hole_points)
+    center /= np.linalg.norm(center)
+    radius_rad: float = max(math.acos(min(1.0, float(center @ (q / np.linalg.norm(q))))) for q in hole_points) + HOLE_MARGIN_RAD
+    hole: dict = {"direction": [round(float(v), 6) for v in center], "angular_radius_rad": round(radius_rad, 6)}
+    return boxes, hole
+
+
+def make_team_half(sign: float, team: str) -> tuple[list[dict], list[dict], list[dict], dict]:
+    """`make_team_half` gives one team's boxes, spawns, stairs and the stairs' hole in the glass;
+    red's (sign -1) are blue's antipodes, with the same seeded jitter.
 
     Example:
         >>> len(make_team_half(1.0, "blue")[1])
@@ -145,7 +221,12 @@ def make_team_half(sign: float, team: str) -> tuple[list[dict], list[dict]]:
         {"team": team, "frame": make_frame(s(direction(0.0, 0.12)), STREET_RADIUS_M, math.pi / 2)},
         {"team": team, "frame": make_frame(s(direction(0.0, -0.12)), STREET_RADIUS_M, math.pi / 2)},
     ]
-    return boxes, spawns
+    lon, lat, heading = STAIRS_BASE_LON_RAD + rng.uniform(-STAIRS_JITTER_RAD, STAIRS_JITTER_RAD), rng.uniform(-STAIRS_JITTER_RAD, STAIRS_JITTER_RAD), STAIRS_HEADING_RAD + rng.uniform(-STAIRS_JITTER_HEADING_RAD, STAIRS_JITTER_HEADING_RAD)
+    base: np.ndarray = direction(lon, lat)
+    east: np.ndarray = direction(lon + math.pi / 2, 0.0)
+    north: np.ndarray = np.cross(base, east)
+    stairs, hole = make_stairs(team, s(base), s(math.cos(heading) * east + math.sin(heading) * north))
+    return boxes, spawns, stairs, hole
 
 
 def get_lift_directions() -> list[np.ndarray]:
@@ -161,6 +242,10 @@ def get_lift_directions() -> list[np.ndarray]:
 
 
 PYLON_LON_RAD = 0.95
+MAP_WALK_M_PER_S = 5.0
+MAP_SPRINT_M_PER_S = 9.0
+MAP_JUMP_M_PER_S = 5.2
+MAP_GRAVITY_M_PER_S2 = 6.0
 VARIATION_SEED = 1192
 JITTER_RAD = 0.04
 JITTER_HEADING_RAD = 0.15
@@ -176,12 +261,17 @@ def main() -> None:
     """
     boxes: list[dict] = []
     spawns: list[dict] = []
+    stairs: list[dict] = []
+    stairs_holes: list[dict] = []
     for sign, team in ((1.0, "blue"), (-1.0, "red")):
-        team_boxes, team_spawns = make_team_half(sign, team)
+        team_boxes, team_spawns, team_stairs, team_hole = make_team_half(sign, team)
         boxes += team_boxes
         spawns += team_spawns
+        stairs += team_stairs
+        stairs_holes.append(team_hole)
     for k, d in enumerate(get_lift_directions()):
         boxes.append(make_box(f"lift pad {k}", "lifts", d, STREET_RADIUS_M, (0.9, 0.05, 0.9), "lift"))
+    boxes += stairs
     manifest: dict = {
         "format": "warped-map",
         "version": 1,
@@ -189,8 +279,8 @@ def main() -> None:
         "description": "A satellite city inside a hollow sphere in Euclidean space: streets on the inner surface (gravity outward), a glass shell roofing them that is the open glass level, lifts up to it, and a glowing core.",
         "source": "demos/levels/city_sphere/index.html",
         "space": {"kind": "euclidean"},
-        "gravity_m_per_s2": 9.8,
-        "player": {"eye_height_m": 1.6, "walk_m_per_s": 5.0, "sprint_m_per_s": 8.5, "jump_m_per_s": 5.0, "fly_m_per_s": 12.0},
+        "gravity_m_per_s2": MAP_GRAVITY_M_PER_S2,
+        "player": {"eye_height_m": 1.6, "walk_m_per_s": MAP_WALK_M_PER_S, "sprint_m_per_s": MAP_SPRINT_M_PER_S, "jump_m_per_s": MAP_JUMP_M_PER_S, "fly_m_per_s": 12.0},
         "materials": [{"id": k, "name": n, "color": list(c), "kind": kind} for k, (n, c, kind) in enumerate(MATERIALS)],
         "ground": {"material": material_id("street"), "sphere": {"radius_m": STREET_RADIUS_M}},
         "shells": [
@@ -201,7 +291,7 @@ def main() -> None:
                 "material": material_id("glass"),
                 "walkable_side": "inside",
                 "laser": "reflect_inside",
-                "holes": [{"direction": [round(float(v), 6) for v in d], "angular_radius_rad": LIFT_HOLE_RAD} for d in get_lift_directions()],
+                "holes": [{"direction": [round(float(v), 6) for v in d], "angular_radius_rad": LIFT_HOLE_RAD} for d in get_lift_directions()] + stairs_holes,
             },
             {"name": "core", "radius_m": CORE_RADIUS_M, "thickness_m": CORE_RADIUS_M, "material": material_id("core"), "walkable_side": "none", "laser": "stop", "holes": []},
         ],

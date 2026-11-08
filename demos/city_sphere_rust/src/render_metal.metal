@@ -78,6 +78,7 @@ constant float MINIMAP_YOU_BASE_FRAC = 0.6;
 constant float MINIMAP_YOU_SPREAD = 0.5;
 constant float3 MINIMAP_YOU_COLOR = float3(1.0, 1.0, 1.0);
 constant float MINIMAP_TINY = 1e-6;
+constant int MINIMAP_KIND_SPHERE = 1;
 constant float RECT_SHADOW_OPACITY = 0.55;
 constant float RECT_SHADOW_DROP_PER_BLUR = 0.45;
 constant float RECT_GLOW_OPACITY = 0.7;
@@ -2295,7 +2296,9 @@ struct MinimapLine {
 /**
  * @brief `Minimap` is render_metal.rs's `Minimap`: the frame taking the minimap's plane (y = 0, −z up the minimap) into
  * the world; its centre and radius in pixels and the Poincaré disk's radius at its rim; the map picture's top left corner
- * (Fermi u, v), meters per pixel and the curvature radius; the counts of marks and lines; the marks and the lines.
+ * (Fermi u, v), meters per pixel and the curvature radius; the counts of marks and lines, then its kind (0 the
+ * hyperbolic ground, `MINIMAP_KIND_SPHERE` City Sphere's sphere: see `get_sphere_minimap_ground`); the marks and the
+ * lines.
  */
 struct Minimap {
     float4x4 ground_frame;
@@ -2305,6 +2308,40 @@ struct Minimap {
     MinimapMark marks[MAX_MINIMAP_MARK_COUNT];
     MinimapLine lines[MAX_MINIMAP_LINE_COUNT];
 };
+
+/**
+ * @brief `get_sphere_minimap_ground` gives City Sphere's minimap ground at the unit-disk point `q` (x right, y down): the
+ * sphere seen from its centre around the player, a gnomonic map (straight lines through the centre show as straight
+ * lines; `placement.w` is the tangent of the angle from the player to the rim) whose `ground_frame` columns are the
+ * player's right, the way out from the centre under their feet, and their back. The colour comes from the
+ * longitude-latitude picture `map` (`map.xy` its size in pixels), with faint Cartesian grid lines every `map.z` radians
+ * on each face of the cube around the sphere: they lie in planes through the centre, so they show straight, and only
+ * bend where two faces meet.
+ * @par Example
+ * @code
+ * float3 ground = get_sphere_minimap_ground(q, radius_px, m, map);
+ * @endcode
+ */
+static float3 get_sphere_minimap_ground(float2 q, float radius_px, constant Minimap &m, texture2d<float, access::read> map) {
+    float tan_reach = m.placement.w;
+    float3 d = normalize(m.ground_frame[1].xyz + (m.ground_frame[0].xyz * q.x + m.ground_frame[2].xyz * q.y) * tan_reach);
+    float longitude = atan2(d.z, d.x);
+    float latitude = asin(clamp(d.y, -1.0, 1.0));
+    float2 size = m.map.xy;
+    float2 at_px = float2((longitude / (2.0 * M_PI_F) + 0.5) * size.x, (0.5 - latitude / M_PI_F) * size.y);
+    float3 ground = map.read(uint2(clamp(at_px, float2(0.0), size - 1.0))).rgb;
+    float3 a = abs(d);
+    float major = max(a.x, max(a.y, a.z));
+    float2 across = a.x >= major ? d.yz : (a.y >= major ? d.xz : d.xy);
+    float2 face_rad = atan(across / major);
+    float rad_per_px = tan_reach / radius_px / (1.0 + dot(q, q) * tan_reach * tan_reach);
+    float grid_rad = m.map.z;
+    float2 to_line_rad = abs(fract(face_rad / grid_rad + 0.5) - 0.5) * grid_rad;
+    if (min(to_line_rad.x, to_line_rad.y) < MINIMAP_GRID_HALF_WIDTH_PX * rad_per_px) {
+        ground = mix(ground, MINIMAP_GRID_COLOR.rgb, MINIMAP_GRID_COLOR.a);
+    }
+    return ground;
+}
 
 /**
  * @brief `draw_minimap` draws the minimap over `color` at pixel `id`: a disk of radius `placement.z` around
@@ -2325,19 +2362,23 @@ static float3 draw_minimap(float3 color, uint2 id, constant Minimap &m, texture2
     float distance_px = length(offset_px);
     if (distance_px > radius_px + MINIMAP_RIM_PX) return color;
     if (distance_px > radius_px) return mix(color, MINIMAP_RIM_COLOR.rgb, MINIMAP_RIM_COLOR.a);
-    float2 q = offset_px / radius_px * m.placement.w;
-    float qq = dot(q, q);
-    float4 local = float4(2.0 * q.x, 0.0, 2.0 * q.y, 1.0 + qq) / (1.0 - qq);
-    float4 x = m.ground_frame * local;
-    float r = m.map.w;
-    float2 fermi_m = float2(-r * atanh(x.z / x.w), r * asinh(x.x / sqrt(1.0 + x.y * x.y)));
-    float2 at_px = (fermi_m - m.map.xy) / m.map.z;
     float3 ground = MINIMAP_OFF_MAP_COLOR;
-    if (all(at_px >= 0.0) && all(at_px < float2(map.get_width(), map.get_height()))) ground = map.read(uint2(at_px)).rgb;
-    float m_per_px = 2.0 * r * m.placement.w / radius_px / (1.0 - qq);
-    float2 to_grid_m = abs(fract(fermi_m / MINIMAP_GRID_M + 0.5) - 0.5) * MINIMAP_GRID_M;
-    if (min(to_grid_m.x, to_grid_m.y) < MINIMAP_GRID_HALF_WIDTH_PX * m_per_px) {
-        ground = mix(ground, MINIMAP_GRID_COLOR.rgb, MINIMAP_GRID_COLOR.a);
+    if (m.counts.z == MINIMAP_KIND_SPHERE) {
+        ground = get_sphere_minimap_ground(offset_px / radius_px, radius_px, m, map);
+    } else {
+        float2 q = offset_px / radius_px * m.placement.w;
+        float qq = dot(q, q);
+        float4 local = float4(2.0 * q.x, 0.0, 2.0 * q.y, 1.0 + qq) / (1.0 - qq);
+        float4 x = m.ground_frame * local;
+        float r = m.map.w;
+        float2 fermi_m = float2(-r * atanh(x.z / x.w), r * asinh(x.x / sqrt(1.0 + x.y * x.y)));
+        float2 at_px = (fermi_m - m.map.xy) / m.map.z;
+        if (all(at_px >= 0.0) && all(at_px < float2(map.get_width(), map.get_height()))) ground = map.read(uint2(at_px)).rgb;
+        float m_per_px = 2.0 * r * m.placement.w / radius_px / (1.0 - qq);
+        float2 to_grid_m = abs(fract(fermi_m / MINIMAP_GRID_M + 0.5) - 0.5) * MINIMAP_GRID_M;
+        if (min(to_grid_m.x, to_grid_m.y) < MINIMAP_GRID_HALF_WIDTH_PX * m_per_px) {
+            ground = mix(ground, MINIMAP_GRID_COLOR.rgb, MINIMAP_GRID_COLOR.a);
+        }
     }
     for (int i = 0; i < m.counts.y; i++) {
         float2 a = m.lines[i].ends.xy * radius_px;

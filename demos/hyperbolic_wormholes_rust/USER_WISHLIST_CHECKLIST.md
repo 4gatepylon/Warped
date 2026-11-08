@@ -37,7 +37,11 @@ is in [`AGENTS.md`](AGENTS.md).
   - **Where the work is** (for any agent picking it up): a parity audit of every level against Lunar Surface on
     `claude/levels-checks`, then each level's fixes on its own agent's branch (`claude/city-sphere-fixes`,
     `claude/dark-forest-lens-robots`, `claude/snow-planet-torus`, `claude/dust-wormhole-speed`), in worktrees under
-    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started.
+    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. Dust: #427
+    (`claude/dust-parity`, open). Snow Planet: #421
+    (branch `claude/snow-planet-parity`, open). City Sphere: #429
+    (HUD bars, hit effect, movement, jump, exit prompt, zoom, head bob, speckle, walking console bot); still missing
+    there: thrown wormholes, flashlight, third person, ground dust.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
@@ -93,7 +97,7 @@ is in [`AGENTS.md`](AGENTS.md).
   one, and then we're going to want to go on based on feedback." The four maps are W-119 (City Sphere demo), W-120
   (Snow Planet demo), W-121 (Dust demo) and W-122 (Dark Forest demo).
   Merged into `staging/user-4gatepylon` with #393, #396, #397, #399, 2026-11-08. Correctness checks of every level
-  and their fixes: #419, #418; frame times of every level on a real Mac: #422.
+  and their fixes: #419, #418, #428; frame times of every level on a real Mac: #422.
 - [?] **W-119 City Sphere demo.** Part of W-124 (four map demos), the satellite city: "Ideally it can be like a sphere,
   where you walk and the roof is like glass or something, and then you can also go up onto the glass level, and
   there's also going to be like obstacles and stuff, but there's going to be no roof on the glass level. On the glass
@@ -109,8 +113,9 @@ is in [`AGENTS.md`](AGENTS.md).
     station. I separately cannot find how to get on top of the inner sphere, like I'm stuck in the outer sphere.
     There should be like stairs going up. That is extremely important because you need to make it to the pylons.
     Also, the mini map is just like a blank, it's just like doesn't have any mini map stuff. It should have like
-    actual Cartesian lines and it should, um, like show things properly, I guess." Being fixed on branch
-    `claude/city-sphere-fixes`.
+    actual Cartesian lines and it should, um, like show things properly, I guess." Fixed in #429: respawn after the
+    delay with "YOU DIED", sprint 21.6 m/s, stairs from in front of each team's spawns to the glass level, a minimap
+    of the level with straight grid lines; with W-126 (same play in every level)'s City Sphere parity.
 - [?] **W-120 Snow Planet demo.** Part of W-124 (four map demos): "There should be like a really snowy zone where
   you're like slowed and you start to lose health because you're like freezing. And it should be the case that
   there's like multiple of these. And if you shoot through them, like the shot has like a smaller distance it can
@@ -122,7 +127,8 @@ is in [`AGENTS.md`](AGENTS.md).
   wormholes, and obviously, players can place wormholes. And obviously, that one's also hyperbolic, unlike the other
   ones."
   Merged into `staging/user-4gatepylon` with #393, 2026-11-08. Speed: #420 bakes the terrain's height, so every
-  bench view is under 16.7 ms at 2560×1440 with the same pictures (open, 2026-11-08).
+  bench view is under 16.7 ms at 2560×1440 with the same pictures (merged, 2026-11-08). Lunar's jump time and
+  walkable level mouths for W-126 (same play in every level): #427 (open, 2026-11-08).
 - [?] **W-122 Dark Forest demo.** Part of W-124 (four map demos): "I want it to just be kind of just like a normal
   forest. This is just that one's going to be just kind of a normal first-person shooter. Maybe one difference there
   is just to have it have verticality, similar to the Star Wars Endor or whatever, maybe the Wookiee Planet, where

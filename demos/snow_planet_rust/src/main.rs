@@ -31,6 +31,7 @@ mod dust;
 mod exit_prompt;
 mod fps_demo_assets;
 mod geometry;
+mod hit_feedback;
 mod hud_bars;
 mod key_bindings;
 mod map;
@@ -2133,7 +2134,7 @@ struct Session {
     motion_blur_frac: f32,
     hit_effect_frac: f64,
     blueshift_frac: f32,
-    last_health_frac: f64,
+    hit_feedback: hit_feedback::HitFeedback,
     health_pulses: hud_bars::BarPulses,
     energy_pulses: hud_bars::BarPulses,
     is_captured: bool,
@@ -2501,7 +2502,7 @@ impl Session {
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
             blueshift_frac: 0.0,
-            last_health_frac: 1.0,
+            hit_feedback: hit_feedback::HitFeedback::New(),
             health_pulses: hud_bars::BarPulses::New(1.0),
             energy_pulses: hud_bars::BarPulses::New(1.0),
             is_captured: false,
@@ -3483,13 +3484,18 @@ impl Session {
                 }
             }
         }
-        if multiplayer.client.health_frac < self.last_health_frac {
+        let hit_frac: f64 = 1.0 / f64::from(self.settings.rifle.body_hits_to_eliminate);
+        let response: hit_feedback::HitResponse = self
+            .hit_feedback
+            .take_health(multiplayer.client.health_frac, hit_frac);
+        if response.should_show {
             self.hit_effect_frac = 1.0;
-            if let Some(voxel) = &mut self.voxel {
-                voxel.player.slowed_s = self.settings.when_hit.slow_s;
-            }
         }
-        self.last_health_frac = multiplayer.client.health_frac;
+        if response.should_slow
+            && let Some(voxel) = &mut self.voxel
+        {
+            voxel.player.slowed_s = self.settings.when_hit.slow_s;
+        }
         if multiplayer.client.game.number != multiplayer.game_number {
             multiplayer.game_number = multiplayer.client.game.number;
             if let (Some(voxel), Some(id), Some(team)) = (

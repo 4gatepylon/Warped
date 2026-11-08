@@ -1,7 +1,8 @@
 # Snow Planet in Rust
 
 A playable demo of the Snow Planet level (blue, depth 1, mid range): two teams of robots on a small snowfield with
-four black holes, a wormhole and three blizzards, in the Rust + SDL3 + Metal game of
+five black holes, one wormhole pair and one blizzard (a tall white cylinder in the middle), in the Rust + SDL3 +
+Metal game of
 [`../hyperbolic_wormholes_rust/`](../hyperbolic_wormholes_rust/README.md). It started as a verbatim copy of that
 demo (commit `9f249fc`); everything it doesn't describe here (controls, menus, HUD, settings files, the app, the
 server bundle, the renderer and its optimizations) works as described there. The map is
@@ -25,8 +26,11 @@ make join-game SERVER=127.0.0.1      # terminal 2: your window; press 1 (blue) o
 - `WASD` walks, `Shift` sprints, `Space` jumps, the mouse aims and the left button fires; hold `E` on one of the
   other team's two consoles (at the foot of its pylons) for 10 s to turn it off. A team wins when both of the other
   team's consoles are off. `Tab` opens the menu (scores, settings, map, credits).
-- Blizzards (the white columns): inside, you walk at half speed and freeze (health falls 8% a second), and a laser
-  goes only 8 m into one. They are in the map's `regions.blizzards` with their numbers (DECISIONS S3).
+- The blizzard (the white column in the middle, the map's only one): inside, you walk at half speed and freeze
+  (health falls 8% a second, with the same red, blur and shake as a shot), and a laser goes only 8 m into it. It is
+  in the map's `regions.blizzards` with its numbers (DECISIONS S3).
+- Everything else plays as on Lunar Surface, W-126 (same play in every level): the same settings files, and a jump
+  as high and as long (DECISIONS S12).
 
 ## Match interface
 
