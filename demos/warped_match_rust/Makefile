@@ -14,6 +14,7 @@
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make bench-levels LABEL=<label>: time every bench view of the five levels at 2560x1440 into .artifacts/bench_levels/ (tools/bench_levels.sh).
 #     make progression-pictures WIDTH_PX=<n> HEIGHT_PX=<n>: render the progression page for a few match states into .artifacts/progression_pictures/.
+#     make play-all-levels MATCH_PORT=<n> LEVEL_PORT=<n> LABEL=<label>: play a bot match steered through all five levels and check it (.artifacts/play_all_levels/).
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
@@ -30,6 +31,9 @@ AUTOPILOT_WIDTH_PX ?= 640
 AUTOPILOT_HEIGHT_PX ?= 400
 PORT ?= 47852
 MATCH_LEVELS ?= match_levels.yaml
+MATCH_PORT ?= 48110
+LEVEL_PORT ?= 48112
+LABEL ?=
 TEAM ?=
 TEAM_FLAG := $(if $(TEAM),--team $(TEAM))
 SERVER_MATCH ?= 127.0.0.1
@@ -56,7 +60,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help progression-pictures levels serve-match join-match bot-match serve-game join-game build-server-bundle package-mac-app bench-views bench-levels run-autopilot test fmt clean reset-artifacts
+.PHONY: help progression-pictures levels serve-match join-match bot-match e2e-match play-all-levels serve-game join-game build-server-bundle package-mac-app bench-views bench-levels run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -65,6 +69,8 @@ help:
 	@echo "  make join-match SERVER=127.0.0.1 TEAM=blue       Open the match window (progression page); each round opens its level"
 	@echo "  make bot-match TEAM=red                          Join the match with a bot that turns off the other team's consoles"
 	@echo "  make e2e-match                                   A whole match of two bots, consoles off in 1 s (e2e/)"
+	@echo "  make play-all-levels MATCH_PORT=48110 LEVEL_PORT=48112"
+	@echo "                                                   A bot match steered through all five levels, checked (.artifacts/play_all_levels/)"
 	@echo "  make levels LEVEL_SOURCE=checkout                Build the levels from this checkout's demos/<level>_rust/ instead of their branches"
 	@echo "  make serve-game PORT=47852 MAP=lunar-surface     Run a game server, without a window; prints how to join"
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
@@ -193,3 +199,7 @@ e2e-match: levels
 	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --bot --team blue > .build/e2e_blue.log 2>&1 &
 	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --bot --team red > .build/e2e_red.log 2>&1 &
 	./.build/release/hyperbolic-wormholes --serve-match --match-levels e2e/match_levels_fast.yaml --intermission-s 2 --round-over-s 2 --label e2e
+
+play-all-levels: levels
+	cargo build --release
+	python3 -I e2e/play_all_levels.py --match-port $(MATCH_PORT) --level-port $(LEVEL_PORT) $(if $(LABEL),--label $(LABEL))
