@@ -11,9 +11,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
-  demo's `AGENTS.md` that any new asset gets added to that page. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/credits-page`, 2026-11-07.
 - [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
@@ -120,6 +117,8 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
+  demo's `AGENTS.md` that any new asset gets added to that page. #262.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
   bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are

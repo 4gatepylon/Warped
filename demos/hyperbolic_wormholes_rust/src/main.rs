@@ -21,6 +21,7 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod credits;
 mod dust;
 mod exit_prompt;
 mod fps_demo_assets;
@@ -4393,7 +4394,10 @@ mod tests {
         let long_path: String = "/very/long".repeat(20);
         let mut mine: PerPlayerSettings = PerPlayerSettings::Builtin();
         let mut scores_menu: menu::Menu = menu::Menu::New();
-        scores_menu.handle(Control::Key(sdl3::keyboard::Scancode::Q), &mut mine);
+        scores_menu.handle(Control::Key(sdl3::keyboard::Scancode::E), &mut mine);
+        scores_menu.handle(Control::Key(sdl3::keyboard::Scancode::E), &mut mine);
+        let mut credits_menu: menu::Menu = menu::Menu::New();
+        credits_menu.handle(Control::Key(sdl3::keyboard::Scancode::Q), &mut mine);
         let scores: Vec<net::Score> = (0..3 * net::MAX_PLAYER_COUNT as u32)
             .map(|id| net::Score {
                 id: u32::MAX - id,
@@ -4410,7 +4414,7 @@ mod tests {
         for line in scores_menu.get_lines(&mine, &long_path, scoreboard) {
             assert!(line.0.chars().count() <= max_char_count, "{}", line.0);
         }
-        for menu in [menu::Menu::New(), scores_menu] {
+        for menu in [menu::Menu::New(), scores_menu, credits_menu] {
             let menu_text: OverlayText = OverlayText {
                 lines: menu.get_lines(&mine, &long_path, scoreboard),
                 mask_px: MENU_MASK_PX,
