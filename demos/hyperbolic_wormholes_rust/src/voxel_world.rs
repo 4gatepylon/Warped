@@ -729,10 +729,31 @@ impl VoxelWorld {
             .map_or(0.0, |t| t.get_height_m(u_m, v_m))
     }
 
-    /// `is_outside_boundary` says whether a point is outside the playable ellipse (never, without one).
+    /// `get_edge_frac` gives how far a point is into the map's soft edge (`map_edge` in the
+    /// settings): 0 before players start to slow on the crater's wall, 1 where their speed would
+    /// reach 0; always 0 on a map without terrain.
+    ///
+    /// Example: `let edge_frac = world.get_edge_frac(eye);`
+    pub fn get_edge_frac(&self, x: DVec4) -> f64 {
+        let Some(terrain) = &self.terrain else {
+            return 0.0;
+        };
+        let [u_m, v_m, _] = self.get_fermi_coordinates(x);
+        let edge = &self.settings.map_edge;
+        ((terrain.get_wall_frac(u_m, v_m) - edge.start_wall_frac)
+            / (edge.stop_wall_frac - edge.start_wall_frac))
+            .clamp(0.0, 1.0)
+    }
+
+    /// `is_outside_boundary` says whether a point is past the map's edge: on a map with terrain,
+    /// where the soft edge stops players (`get_edge_frac` reaches 1); otherwise outside the
+    /// playable ellipse (never, without one).
     ///
     /// Example: `if world.is_outside_boundary(x) { ... }`
     fn is_outside_boundary(&self, x: DVec4) -> bool {
+        if self.terrain.is_some() {
+            return self.get_edge_frac(x) >= 1.0;
+        }
         match self.regions {
             Some([_, u_max_m, v_max_m]) => {
                 let [u_m, v_m, _] = self.get_fermi_coordinates(x);
@@ -1418,7 +1439,9 @@ impl VoxelPlayer {
     /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
     /// moving along light paths inside a mouth's reach, falling into a black hole (back to the spawn
     /// of index `spawn_index`, the player's team),
-    /// colliding with blocks and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
+    /// slowing down without end on the way out up the crater's wall (`get_edge_frac`: each step
+    /// that goes further out is cut by the share of the way already come), colliding with blocks
+    /// and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
     /// cells rise a little), jumping (the only way onto a block) and falling. A
     /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
     /// level does) only if that fails. It returns messages for the HUD.
@@ -1496,11 +1519,18 @@ impl VoxelPlayer {
             if let Some(w) = warp.filter(|&w| world.warps[w].is_mouth) {
                 (body_new, h_new, crossed) = self.move_optically(world, dir, distance_m, w);
             } else {
-                body_new = renormalize_frame(
-                    self.body
-                        * make_boost(AXIS_Z, dir[1] * distance_m / r)
-                        * make_boost(AXIS_X, dir[0] * distance_m / r),
-                );
+                let move_m = |step_m: f64| -> DMat4 {
+                    renormalize_frame(
+                        self.body
+                            * make_boost(AXIS_Z, dir[1] * step_m / r)
+                            * make_boost(AXIS_X, dir[0] * step_m / r),
+                    )
+                };
+                let edge_frac: f64 = world.get_edge_frac(self.body.col(AXIS_W));
+                body_new = move_m(distance_m);
+                if world.get_edge_frac(body_new.col(AXIS_W)) > edge_frac {
+                    body_new = move_m(distance_m * (1.0 - edge_frac));
+                }
             }
         }
         let messages: Vec<String> = crossed
@@ -1594,6 +1624,7 @@ mod tests {
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
     //! | Walking | upright, crouched (half as far, eye fully lowered) | `crouching_lowers_the_eye_and_slows_walking` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
+    //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
 
     use super::*;
@@ -1687,6 +1718,39 @@ mod tests {
             player.step(world, &input, STEP_S, 0);
             top_m.max(player.h_m)
         })
+    }
+
+    #[test]
+    fn the_crater_wall_slows_without_end() {
+        const START_V_M: f64 = 50.0;
+        const OUT_STEP_COUNT: usize = 3600;
+        const BACK_STEP_COUNT: usize = 60;
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [0.0, START_V_M], [0.0, 2.0 * START_V_M], None, 0.0);
+        let get_v_m =
+            |player: &VoxelPlayer| world.get_fermi_coordinates(player.body.col(AXIS_W))[1];
+        let mut steps_m: Vec<f64> = Vec::new();
+        for _ in 0..OUT_STEP_COUNT {
+            let before_m: f64 = get_v_m(&player);
+            walk_forward(&world, &mut player, 1);
+            steps_m.push(get_v_m(&player) - before_m);
+        }
+        let edge_frac: f64 = world.get_edge_frac(player.body.col(AXIS_W));
+        assert!(edge_frac > 0.9 && edge_frac < 1.0, "{edge_frac}");
+        assert!(
+            steps_m[OUT_STEP_COUNT - 1] < 0.1 * steps_m[0],
+            "{steps_m:?}"
+        );
+        player.look(std::f64::consts::PI / LOOK_RAD_PER_PX, 0.0);
+        let before_m: f64 = get_v_m(&player);
+        walk_forward(&world, &mut player, BACK_STEP_COUNT);
+        let walked_m: f64 = before_m - get_v_m(&player);
+        let expected_m: f64 = world.player.walk_m_per_s * STEP_S * BACK_STEP_COUNT as f64;
+        assert!(
+            (walked_m - expected_m).abs() < DISTANCE_TOLERANCE_M,
+            "{walked_m} of {expected_m}"
+        );
     }
 
     /// `load_lunar_surface` loads the shipped Lunar Surface map as a voxel world.

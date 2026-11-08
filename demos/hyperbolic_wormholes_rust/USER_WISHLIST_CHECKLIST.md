@@ -10,12 +10,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-38 Soft map edge.** Instead of a wall at the map's edge, players get slower and slower as they move off the
-  map, so they can never leave it, and things stretch longer and longer: a relativistic barrier rather than a block.
-  Since the map update (W-59), the hills at the edge may block players from leaving: the "Zeno's paradox" slowdown
-  should start when a player climbs the hill, to stop them from leaving. As they slow down, their view of the world
-  should warp so it looks as if they are being stretched ever further. Claimed by Claude Code
-  (session `wizardly-hamilton-23a121`), branch `claude/soft-map-edge`, 2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
@@ -172,3 +166,8 @@ is in [`AGENTS.md`](AGENTS.md).
 - [x] **W-62 Sniper ammo bar.** The sniper gets an ammo bar too, but of only one block instead of many: it empties
   when the sniper fires and comes back when the timer resets, letting the player shoot again (a 2 s reload,
   `sniper.reload_s`). #156.
+- [x] **W-38 Soft map edge.** Instead of a wall at the map's edge, players get slower and slower as they move off the
+  map, so they can never leave it, and things stretch longer and longer: a relativistic barrier rather than a block.
+  Since the map update (W-59), the hills at the edge may block players from leaving: the "Zeno's paradox" slowdown
+  should start when a player climbs the hill, to stop them from leaving. As they slow down, their view of the world
+  should warp so it looks as if they are being stretched ever further. #PR.
