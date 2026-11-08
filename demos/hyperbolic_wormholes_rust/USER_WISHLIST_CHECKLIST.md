@@ -185,4 +185,4 @@ is in [`AGENTS.md`](AGENTS.md).
 - [x] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
   radius (the rest is slightly darker and blurred), and shows where they are on the map. #166.
 - [x] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
-  exit?", exits if the player presses OK, and otherwise doesn't. #NNN.
+  exit?", exits if the player presses OK, and otherwise doesn't. #175.
