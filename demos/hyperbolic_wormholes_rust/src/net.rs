@@ -1,10 +1,13 @@
 //! `net.rs` lets players on one local network share a game. A server (its own process, without a
-//! window) keeps every player's eye frame and laser switch, sends everyone a snapshot 60 times
-//! a second, removes a player another player's laser hit, and announces itself on the network so
-//! others can find it. A client joins, sends its own player each frame and receives the others.
+//! window) keeps every player's eye frame, laser switch and the console they hold `E` on, sends
+//! everyone a snapshot 60 times a second, removes a player another player's laser hit, turns off a
+//! console held for `CONSOLE_DISABLE_S`, ends the game when a team's consoles are all off, and
+//! announces itself on the network so others can find it. A client joins, sends its own player
+//! each frame and receives the others and the game's state.
 //!
-//! Interface: `DEFAULT_PORT`, `MAX_PLAYER_COUNT`, `bind_server`, `serve`, `find_server`, `Client`,
-//! `RemotePlayer`, `NetEvent`.
+//! Interface: `DEFAULT_PORT`, `MAX_PLAYER_COUNT`, `MAX_CONSOLE_COUNT`, `CONSOLE_DISABLE_S`,
+//! `TEAM_NAMES`, `get_team`, `bind_server`, `serve`, `find_server`, `Client`, `RemotePlayer`,
+//! `GameState`, `NetEvent`.
 //!
 //! Example: `let mut client = Client::Connect(net::find_server(Duration::from_secs(5))?)?;`
 //!
@@ -12,8 +15,9 @@
 //! - Messages are single UDP datagrams, little-endian, starting with a `Kind` byte. A lost state
 //!   or snapshot is replaced by the next one; joins are resent until welcomed. Nothing is
 //!   encrypted or authenticated: it is for a trusted local network.
-//! - Each client decides when its own laser hits someone (it traces the laser anyway), and the
-//!   server takes its word.
+//! - Each client decides when its own laser hits someone (it traces the laser anyway) and which
+//!   console it aims at, and the server takes its word.
+//! - A player keeps their id, and so their team, when they rejoin from the same address.
 
 use std::error::Error;
 use std::io::ErrorKind;
@@ -28,6 +32,11 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub const DEFAULT_PORT: u16 = 47_800;
 pub const MAX_PLAYER_COUNT: usize = 8;
+pub const MAX_CONSOLE_COUNT: usize = 32;
+pub const CONSOLE_DISABLE_S: f64 = 10.0;
+pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
+const NO_CONSOLE: u8 = u8::MAX;
+const NO_WINNER: u8 = u8::MAX;
 const DISCOVERY_PORT: u16 = 47_801;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
 const BEACON_PERIOD_S: f64 = 0.5;
@@ -40,7 +49,8 @@ const FLOATS_PER_FRAME: usize = 16;
 const BYTES_PER_FLOAT: usize = 8;
 const BYTES_PER_ID: usize = 4;
 const BYTES_PER_PORT: usize = 2;
-const BYTES_PER_PLAYER: usize = BYTES_PER_ID + FLOATS_PER_FRAME * BYTES_PER_FLOAT + 1;
+const BYTES_PER_PLAYER: usize = BYTES_PER_ID + FLOATS_PER_FRAME * BYTES_PER_FLOAT + 2;
+const BYTES_PER_GAME: usize = 2 * BYTES_PER_ID + 1;
 
 /// `Kind` is a message's first byte.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -76,12 +86,30 @@ impl Kind {
     }
 }
 
-/// `RemotePlayer` is another player as the last snapshot gave them.
+/// `get_team` gives a player's team, an index into `TEAM_NAMES`: ids alternate between them.
+///
+/// Example: `let team = net::get_team(3);`
+pub fn get_team(id: u32) -> u32 {
+    id % TEAM_NAMES.len() as u32
+}
+
+/// `RemotePlayer` is another player as the last snapshot gave them, with the console they hold
+/// `E` on, if any.
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
     pub frame: DMat4,
     pub is_laser_on: bool,
+    pub disabling_console: Option<u8>,
+}
+
+/// `GameState` is the game as the server keeps it: which game this is (from 0, one more each new
+/// game), the consoles turned off (bit i for console i) and the winning team once there is one.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct GameState {
+    pub number: u32,
+    pub off_mask: u32,
+    pub winner: Option<u32>,
 }
 
 /// `NetEvent` is something the server told this client.
@@ -114,15 +142,27 @@ impl Message {
         self
     }
 
-    /// `player` appends a player: id, eye frame and laser switch.
+    /// `player` appends a player: id, eye frame, laser switch and the console they hold `E` on.
     ///
-    /// Example: `let message = Message::New(Kind::State).player(3, frame, true);`
-    fn player(mut self, id: u32, frame: DMat4, is_laser_on: bool) -> Message {
-        self = self.id(id);
-        for value in frame.to_cols_array() {
+    /// Example: `let message = Message::New(Kind::State).player(&player);`
+    fn player(mut self, player: &RemotePlayer) -> Message {
+        self = self.id(player.id);
+        for value in player.frame.to_cols_array() {
             self.0.extend_from_slice(&value.to_le_bytes());
         }
-        self.0.push(u8::from(is_laser_on));
+        self.0.push(u8::from(player.is_laser_on));
+        self.0.push(player.disabling_console.unwrap_or(NO_CONSOLE));
+        self
+    }
+
+    /// `game` appends the game's state.
+    ///
+    /// Example: `let message = message.game(&server.game);`
+    fn game(mut self, game: &GameState) -> Message {
+        self.0.extend_from_slice(&game.number.to_le_bytes());
+        self.0.extend_from_slice(&game.off_mask.to_le_bytes());
+        self.0
+            .push(game.winner.map_or(NO_WINNER, |team| team as u8));
         self
     }
 }
@@ -162,26 +202,46 @@ impl Reader<'_> {
             *value = f64::from_le_bytes(self.take(BYTES_PER_FLOAT)?.try_into().ok()?);
         }
         let is_laser_on: bool = self.take(1)?[0] != 0;
+        let console: u8 = self.take(1)?[0];
         Some(RemotePlayer {
             id,
             frame: DMat4::from_cols_array(&values),
             is_laser_on,
+            disabling_console: (console != NO_CONSOLE).then_some(console),
+        })
+    }
+
+    /// `game` reads a game state written by `Message::game`.
+    ///
+    /// Example: `let game = reader.game()?;`
+    fn game(&mut self) -> Option<GameState> {
+        let (number, off_mask) = (self.id()?, self.id()?);
+        let winner: u8 = self.take(1)?[0];
+        Some(GameState {
+            number,
+            off_mask,
+            winner: (winner != NO_WINNER).then_some(u32::from(winner)),
         })
     }
 }
 
-/// `Slot` is a joined player on the server.
+/// `Slot` is a joined player on the server, and since when they have held `E` on their console.
 struct Slot {
     player: RemotePlayer,
     address: SocketAddr,
     last_heard: Instant,
+    disabling_since: Option<Instant>,
 }
 
-/// `Server` is the server's state: its socket, the joined players and the next id to give.
+/// `Server` is the server's state: its socket, the joined players, the next id to give, the id
+/// each address had, each console's team and the game.
 struct Server {
     socket: UdpSocket,
     slots: Vec<Slot>,
     next_id: u32,
+    known_ids: Vec<(SocketAddr, u32)>,
+    console_teams: Vec<u32>,
+    game: GameState,
 }
 
 impl Server {
@@ -200,18 +260,27 @@ impl Server {
                 let id: u32 = match existing {
                     Some(id) => id,
                     None if self.slots.len() < MAX_PLAYER_COUNT => {
-                        self.next_id += 1;
+                        let id: u32 = match self.known_ids.iter().find(|(a, _)| *a == address) {
+                            Some(&(_, id)) => id,
+                            None => {
+                                self.next_id += 1;
+                                self.known_ids.push((address, self.next_id));
+                                self.next_id
+                            }
+                        };
                         self.slots.push(Slot {
                             player: RemotePlayer {
-                                id: self.next_id,
+                                id,
                                 frame: DMat4::IDENTITY,
                                 is_laser_on: false,
+                                disabling_console: None,
                             },
                             address,
                             last_heard: Instant::now(),
+                            disabling_since: None,
                         });
-                        println!("player {} joined from {address}", self.next_id);
-                        self.next_id
+                        println!("player {id} joined from {address}");
+                        id
                     }
                     None => return Ok(()),
                 };
@@ -219,12 +288,19 @@ impl Server {
                     .send_to(&Message::New(Kind::Welcome).id(id).0, address)?;
             }
             Some(Kind::State) => {
-                if let Some(player) = reader.player()
+                if let Some(mut player) = reader.player()
                     && let Some(slot) = self
                         .slots
-                        .iter_mut()
-                        .find(|slot| slot.address == address && slot.player.id == player.id)
+                        .iter()
+                        .position(|slot| slot.address == address && slot.player.id == player.id)
                 {
+                    player.disabling_console = player
+                        .disabling_console
+                        .filter(|&console| self.can_disable(player.id, console));
+                    let slot: &mut Slot = &mut self.slots[slot];
+                    if player.disabling_console != slot.player.disabling_console {
+                        slot.disabling_since = player.disabling_console.map(|_| Instant::now());
+                    }
                     slot.player = player;
                     slot.last_heard = Instant::now();
                 }
@@ -244,7 +320,7 @@ impl Server {
                 else {
                     return Ok(());
                 };
-                if !is_shooter_here {
+                if !is_shooter_here || self.game.winner.is_some() {
                     return Ok(());
                 }
                 let victim_address: SocketAddr = self.slots.remove(victim).address;
@@ -270,15 +346,78 @@ impl Server {
         Ok(())
     }
 
-    /// `send_snapshot` sends every player the list of all players.
+    /// `can_disable` says whether player `id` may turn off `console`: an existing console of the
+    /// other team, still on, in a game nobody has won yet.
+    ///
+    /// Example: `if server.can_disable(3, 7) { ... }`
+    fn can_disable(&self, id: u32, console: u8) -> bool {
+        let index: usize = usize::from(console);
+        self.game.winner.is_none()
+            && index < self.console_teams.len()
+            && self.console_teams[index] != get_team(id)
+            && self.game.off_mask >> index & 1 == 0
+    }
+
+    /// `update_consoles` turns off each console a player has held `E` on for `CONSOLE_DISABLE_S`,
+    /// and declares the other team the winner once all of a team's consoles are off.
+    ///
+    /// Example: `server.update_consoles();`
+    fn update_consoles(&mut self) {
+        for slot in &mut self.slots {
+            if let (Some(console), Some(since)) =
+                (slot.player.disabling_console, slot.disabling_since)
+                && since.elapsed().as_secs_f64() >= CONSOLE_DISABLE_S
+            {
+                self.game.off_mask |= 1 << console;
+                (slot.player.disabling_console, slot.disabling_since) = (None, None);
+                println!("player {} turned off console {console}", slot.player.id);
+            }
+        }
+        let losers: Vec<u32> = (0..TEAM_NAMES.len() as u32)
+            .filter(|&team| {
+                let mut consoles = (0..self.console_teams.len())
+                    .filter(|&i| self.console_teams[i] == team)
+                    .peekable();
+                consoles.peek().is_some() && consoles.all(|i| self.game.off_mask >> i & 1 == 1)
+            })
+            .collect();
+        if self.game.winner.is_none()
+            && let [loser] = losers[..]
+        {
+            let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
+            self.game.winner = Some(winner);
+            println!(
+                "The {} team won. Press Enter here to start a new game.",
+                TEAM_NAMES[winner as usize]
+            );
+        }
+    }
+
+    /// `start_new_game` turns every console back on and clears the winner; clients see the game's
+    /// number change and go back to their spawn.
+    ///
+    /// Example: `server.start_new_game();`
+    fn start_new_game(&mut self) {
+        self.game = GameState {
+            number: self.game.number + 1,
+            ..GameState::default()
+        };
+        for slot in &mut self.slots {
+            (slot.player.disabling_console, slot.disabling_since) = (None, None);
+        }
+        println!("Game {} started.", self.game.number);
+    }
+
+    /// `send_snapshot` sends every player the list of all players and the game's state.
     ///
     /// Example: `server.send_snapshot()?;`
     fn send_snapshot(&self) -> Result<()> {
         let mut message: Message = Message::New(Kind::Snapshot);
         message.0.push(self.slots.len() as u8);
         for slot in &self.slots {
-            message = message.player(slot.player.id, slot.player.frame, slot.player.is_laser_on);
+            message = message.player(&slot.player);
         }
+        message = message.game(&self.game);
         for slot in &self.slots {
             self.socket.send_to(&message.0, slot.address)?;
         }
@@ -298,11 +437,23 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 }
 
 /// `serve` runs a server on `socket` (from `bind_server`) until `should_stop` is set: it answers
-/// joins, relays players, removes players who are hit or silent for `PLAYER_TIMEOUT_S`, and
-/// broadcasts a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
+/// joins, relays players, removes players who are hit or silent for `PLAYER_TIMEOUT_S`, turns off
+/// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
+/// starts a new game after that when `should_start_new_game` is set (clearing it), and broadcasts
+/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop)?;`
-pub fn serve(socket: UdpSocket, should_stop: &AtomicBool) -> Result<()> {
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, vec![0, 1], &should_start_new_game)?;`
+pub fn serve(
+    socket: UdpSocket,
+    should_stop: &AtomicBool,
+    console_teams: Vec<u32>,
+    should_start_new_game: &AtomicBool,
+) -> Result<()> {
+    assert!(
+        console_teams.len() <= MAX_CONSOLE_COUNT,
+        "serve: {} consoles, more than {MAX_CONSOLE_COUNT}",
+        console_teams.len()
+    );
     let port: u16 = socket.local_addr()?.port();
     let beacon_socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
     beacon_socket.set_broadcast(true)?;
@@ -313,6 +464,9 @@ pub fn serve(socket: UdpSocket, should_stop: &AtomicBool) -> Result<()> {
         socket,
         slots: Vec::new(),
         next_id: 0,
+        known_ids: Vec::new(),
+        console_teams,
+        game: GameState::default(),
     };
     let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
     let (mut last_snapshot, mut last_beacon) = (Instant::now(), None::<Instant>);
@@ -330,6 +484,13 @@ pub fn serve(socket: UdpSocket, should_stop: &AtomicBool) -> Result<()> {
             }
             is_alive
         });
+        server.update_consoles();
+        if should_start_new_game.swap(false, Ordering::Relaxed) {
+            match server.game.winner {
+                Some(_) => server.start_new_game(),
+                None => println!("No team has won yet, so the game goes on."),
+            }
+        }
         if last_snapshot.elapsed().as_secs_f64() >= SNAPSHOT_PERIOD_S {
             server.send_snapshot()?;
             last_snapshot = Instant::now();
@@ -382,12 +543,13 @@ pub fn find_server(timeout: Duration) -> Result<SocketAddr> {
     .into())
 }
 
-/// `Client` is this player's connection: its id once welcomed, and the other players.
+/// `Client` is this player's connection: its id once welcomed, the other players and the game.
 pub struct Client {
     socket: UdpSocket,
     server: SocketAddr,
     pub id: Option<u32>,
     pub players: Vec<RemotePlayer>,
+    pub game: GameState,
     last_join: Instant,
     pub last_heard: Instant,
 }
@@ -406,6 +568,7 @@ impl Client {
             server,
             id: None,
             players: Vec::new(),
+            game: GameState::default(),
             last_join: Instant::now(),
             last_heard: Instant::now(),
         })
@@ -439,13 +602,14 @@ impl Client {
                 }
                 Some(Kind::Snapshot) => {
                     let count: usize = reader.take(1).map_or(0, |count| usize::from(count[0]));
-                    if length != 2 + count * BYTES_PER_PLAYER {
+                    if length != 2 + count * BYTES_PER_PLAYER + BYTES_PER_GAME {
                         continue;
                     }
                     self.players = (0..count)
                         .filter_map(|_| reader.player())
                         .filter(|player| Some(player.id) != self.id)
                         .collect();
+                    self.game = reader.game().expect("the length was checked");
                 }
                 Some(Kind::Eliminated) => {
                     if let (Some(victim_id), Some(shooter_id)) = (reader.id(), reader.id()) {
@@ -468,12 +632,24 @@ impl Client {
         Ok(events)
     }
 
-    /// `send_state` sends this player's eye frame and laser switch, once joined.
+    /// `send_state` sends this player's eye frame, laser switch and the console they hold `E` on,
+    /// once joined.
     ///
-    /// Example: `client.send_state(player.frame, is_laser_on)?;`
-    pub fn send_state(&mut self, frame: DMat4, is_laser_on: bool) -> Result<()> {
+    /// Example: `client.send_state(player.frame, is_laser_on, None)?;`
+    pub fn send_state(
+        &mut self,
+        frame: DMat4,
+        is_laser_on: bool,
+        disabling_console: Option<u8>,
+    ) -> Result<()> {
         if let Some(id) = self.id {
-            self.send(&Message::New(Kind::State).player(id, frame, is_laser_on))?;
+            let player: RemotePlayer = RemotePlayer {
+                id,
+                frame,
+                is_laser_on,
+                disabling_console,
+            };
+            self.send(&Message::New(Kind::State).player(&player))?;
         }
         Ok(())
     }
@@ -538,8 +714,10 @@ mod tests {
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Datagram length | complete, cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
-    //! | Join | new player, repeated join, server full | `joins_get_ids_once_until_full` |
+    //! | Join | new player, repeated join, server full, rejoin after a hit (same id) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit` |
     //! | Hit | by a joined player, by a stranger, on a player who is gone | `only_joined_players_can_hit` |
+    //! | Console held | the other team's (turned off after `CONSOLE_DISABLE_S`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
+    //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
 
     use super::*;
 
@@ -551,7 +729,32 @@ mod tests {
             socket: UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port"),
             slots: Vec::new(),
             next_id: 0,
+            known_ids: Vec::new(),
+            console_teams: vec![0, 0, 1],
+            game: GameState::default(),
         }
+    }
+
+    /// `hold_console` sends player `id`'s state from `from` holding `E` on `console`, then makes
+    /// the server count it as held for `CONSOLE_DISABLE_S` and update the consoles.
+    ///
+    /// Example: `hold_console(&mut server, 1, address(50_001), 2);`
+    fn hold_console(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
+        let player: RemotePlayer = RemotePlayer {
+            id,
+            frame: DMat4::IDENTITY,
+            is_laser_on: false,
+            disabling_console: Some(console),
+        };
+        server
+            .handle(&Message::New(Kind::State).player(&player).0, from)
+            .expect("a state");
+        for slot in &mut server.slots {
+            slot.disabling_since = slot
+                .disabling_since
+                .map(|since| since - Duration::from_secs_f64(CONSOLE_DISABLE_S));
+        }
+        server.update_consoles();
     }
 
     /// `address` gives a local address with a made-up port, standing for a client.
@@ -564,22 +767,44 @@ mod tests {
     #[test]
     fn players_survive_encoding() {
         let frame: DMat4 = DMat4::from_cols_array(&std::array::from_fn(|i| i as f64 * 0.25 - 1.0));
-        let message: Message = Message::New(Kind::State).player(7, frame, true);
-        let player: RemotePlayer = Reader {
+        let sent: RemotePlayer = RemotePlayer {
+            id: 7,
+            frame,
+            is_laser_on: true,
+            disabling_console: Some(3),
+        };
+        let game: GameState = GameState {
+            number: 2,
+            off_mask: 0b101,
+            winner: Some(1),
+        };
+        let message: Message = Message::New(Kind::State).player(&sent).game(&game);
+        let mut reader: Reader = Reader {
             bytes: &message.0,
             position: 1,
-        }
-        .player()
-        .expect("a complete player");
+        };
+        let player: RemotePlayer = reader.player().expect("a complete player");
         assert_eq!(
-            (player.id, player.frame, player.is_laser_on),
-            (7, frame, true)
+            (
+                player.id,
+                player.frame,
+                player.is_laser_on,
+                player.disabling_console
+            ),
+            (7, frame, true, Some(3))
         );
+        assert_eq!(reader.game(), Some(game));
     }
 
     #[test]
     fn short_datagrams_read_as_nothing() {
-        let message: Message = Message::New(Kind::State).player(7, DMat4::IDENTITY, false);
+        let player: RemotePlayer = RemotePlayer {
+            id: 7,
+            frame: DMat4::IDENTITY,
+            is_laser_on: false,
+            disabling_console: None,
+        };
+        let message: Message = Message::New(Kind::State).player(&player);
         let cut: &[u8] = &message.0[..message.0.len() - 1];
         assert!(
             Reader {
@@ -634,5 +859,31 @@ mod tests {
             .handle(&stranger_hit, address(50_001))
             .expect("a hit on a player who is gone");
         assert_eq!(server.slots.len(), 1);
+        server.handle(&join, address(50_002)).expect("a rejoin");
+        assert_eq!(server.slots[1].player.id, 2);
+    }
+
+    #[test]
+    fn holding_consoles_turns_them_off_and_wins() {
+        let mut server: Server = make_server();
+        let join: Vec<u8> = Message::New(Kind::Join).0;
+        let (blue, red) = (address(50_002), address(50_001));
+        server.handle(&join, red).expect("a join");
+        server.handle(&join, blue).expect("a join");
+        hold_console(&mut server, 2, blue, 0);
+        assert_eq!(server.game.off_mask, 0);
+        hold_console(&mut server, 1, red, 0);
+        assert_eq!((server.game.off_mask, server.game.winner), (0b001, None));
+        hold_console(&mut server, 1, red, 1);
+        assert_eq!((server.game.off_mask, server.game.winner), (0b011, Some(1)));
+        server.start_new_game();
+        assert_eq!(
+            server.game,
+            GameState {
+                number: 1,
+                off_mask: 0,
+                winner: None
+            }
+        );
     }
 }

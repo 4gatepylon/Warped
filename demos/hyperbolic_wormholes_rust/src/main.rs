@@ -104,7 +104,7 @@ const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
 const SHOT_DURATION_S: f64 = 0.25;
 const RESPAWN_DELAY_S: f64 = 3.0;
-const DEATH_MASK_PX: (u32, u32) = (160, 24);
+const DEATH_MASK_PX: (u32, u32) = (240, 24);
 const DEATH_TITLE_Y_PX: f32 = 2.0;
 const DEATH_COUNTDOWN_Y_PX: f32 = 14.0;
 const DEBUG_GLYPH_PX: f32 = 8.0;
@@ -115,6 +115,11 @@ const ENERGY_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.93];
 const ENERGY_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.018];
 const ENERGY_BAR_BACK_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.55];
 const ENERGY_BAR_FILL_COLOR: [f32; 4] = [0.5, 0.82, 1.0, 0.9];
+const CONSOLE_REACH_M: f64 = 3.0;
+const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
+const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
+const DISABLE_BAR_BACK_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.5];
+const DISABLE_BAR_FILL_COLOR: [f32; 4] = [1.0, 0.85, 0.3, 0.9];
 const PERCENT_PER_FRAC: f64 = 100.0;
 const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
@@ -549,16 +554,24 @@ fn get_server_address(arguments: &Arguments) -> Result<SocketAddr> {
     }
 }
 
-/// `start_server` binds the server's port and runs the server on a thread until the returned flag
-/// is set.
+/// `start_server` binds the server's port and runs the server for a map with `console_teams` on a
+/// thread until the returned flag is set, starting a new game after a win at each line read from
+/// standard input (`Enter` in the server's terminal).
 ///
-/// Example: `let (should_stop, thread) = start_server(47800)?;`
-fn start_server(port: u16) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
+/// Example: `let (should_stop, thread) = start_server(47800, vec![0, 1])?;`
+fn start_server(port: u16, console_teams: Vec<u32>) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let flag: Arc<AtomicBool> = Arc::clone(&should_stop);
+    let should_start_new_game: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let new_game_flag: Arc<AtomicBool> = Arc::clone(&should_start_new_game);
+    std::thread::spawn(move || {
+        for _ in std::io::stdin().lines().map_while(std::io::Result::ok) {
+            new_game_flag.store(true, Ordering::Relaxed);
+        }
+    });
     let thread: JoinHandle<()> = std::thread::spawn(move || {
-        if let Err(error) = net::serve(socket, &flag) {
+        if let Err(error) = net::serve(socket, &flag, console_teams, &should_start_new_game) {
             eprintln!("The game server stopped: {error}");
         }
     });
@@ -615,7 +628,10 @@ fn find_lan_address() -> Option<IpAddr> {
 ///
 /// Example: `serve_only(&arguments)?;`
 fn serve_only(arguments: &Arguments) -> Result<()> {
-    let (should_stop, thread) = start_server(arguments.port)?;
+    let map_data: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let consoles: Vec<voxel_world::Console> = voxel_world::find_consoles(&map_data);
+    let (should_stop, thread) =
+        start_server(arguments.port, consoles.iter().map(|c| c.team).collect())?;
     let (map, port) = (get_map_flag(arguments.map), arguments.port);
     let address: String = match find_lan_address() {
         Some(address) => address.to_string(),
@@ -631,6 +647,11 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         "  make join-game MAP={map} PORT={port}  (finds this server on the network by itself)"
     );
     println!("  make join-game MAP={map} SERVER=127.0.0.1 PORT={port}  (on this computer)");
+    if !consoles.is_empty() {
+        println!(
+            "A team wins by turning off the other team's consoles; then press Enter here for a new game."
+        );
+    }
     match arguments.exit_after_s {
         Some(seconds) => std::thread::sleep(Duration::from_secs_f64(seconds)),
         None => loop {
@@ -1620,12 +1641,15 @@ impl PackedFrame {
 }
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
-/// started with `--host`, and whether this player was hit and waits to rejoin.
+/// started with `--host`, whether this player was hit and waits to rejoin, the number of the game
+/// it plays, and the console this player holds `E` on, with the seconds held.
 struct Multiplayer {
     client: net::Client,
     server: Option<Child>,
     is_eliminated: bool,
     respawn_in_s: f64,
+    game_number: u32,
+    disabling: Option<(u8, f64)>,
 }
 
 impl Drop for Multiplayer {
@@ -1700,6 +1724,8 @@ impl Session {
                 server,
                 is_eliminated: false,
                 respawn_in_s: 0.0,
+                game_number: 0,
+                disabling: None,
             })
         } else {
             None
@@ -1870,11 +1896,16 @@ impl Session {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
+        self.update_disabling(keys.is_scancode_pressed(Scancode::E), dt_s);
         self.update_gun(&input, dt_s);
         let eye: DMat4 = self.get_eye_frame();
         let is_firing: bool = self.is_firing();
         if let Some(multiplayer) = &mut self.multiplayer
-            && let Err(error) = multiplayer.client.send_state(eye, is_firing)
+            && let Err(error) = multiplayer.client.send_state(
+                eye,
+                is_firing,
+                multiplayer.disabling.map(|(console, _)| console),
+            )
         {
             self.message = format!("Couldn't reach the server: {error}");
             self.message_time_s = MESSAGE_DURATION_S;
@@ -1891,12 +1922,65 @@ impl Session {
         (self.is_laser_on || self.shot_time_s > 0.0) && self.can_shoot()
     }
 
-    /// `can_shoot` says whether this player may shoot: not while running, and not while jumping or
-    /// falling on a voxel map.
+    /// `can_shoot` says whether this player may shoot: not while running, not while jumping or
+    /// falling on a voxel map, not while holding `E` on a console, and not once a team has won.
     ///
     /// Example: `if self.can_shoot() { ... }`
     fn can_shoot(&self) -> bool {
-        !self.is_running && !self.is_jumping
+        !self.is_running
+            && !self.is_jumping
+            && self
+                .multiplayer
+                .as_ref()
+                .is_none_or(|m| m.disabling.is_none() && m.client.game.winner.is_none())
+    }
+
+    /// `update_disabling` follows this player holding `E` (`is_holding_e`) on one of the other
+    /// team's consoles that is still on, within `CONSOLE_REACH_M` straight ahead: the seconds held
+    /// on that same console, or nothing. The server times it too, and turns the console off.
+    ///
+    /// Example: `self.update_disabling(true, 1.0 / 60.0);`
+    fn update_disabling(&mut self, is_holding_e: bool, dt_s: f64) {
+        let (Some(voxel), Some(multiplayer)) = (&self.voxel, &mut self.multiplayer) else {
+            return;
+        };
+        let game: net::GameState = multiplayer.client.game;
+        let aimed: Option<u8> = match multiplayer.client.id {
+            Some(id) if is_holding_e && game.winner.is_none() => voxel
+                .world
+                .find_aimed_material(voxel.player.get_camera_frame(&voxel.world), CONSOLE_REACH_M)
+                .and_then(|m| voxel.world.consoles.iter().position(|c| c.material == m))
+                .filter(|&i| {
+                    voxel.world.consoles[i].team != net::get_team(id) && game.off_mask >> i & 1 == 0
+                })
+                .map(|i| i as u8),
+            _ => None,
+        };
+        multiplayer.disabling = match (aimed, multiplayer.disabling) {
+            (Some(console), Some((held, held_s))) if console == held => {
+                Some((console, held_s + dt_s))
+            }
+            (Some(console), _) => Some((console, 0.0)),
+            (None, _) => None,
+        };
+    }
+
+    /// `get_console_masks` gives the consoles turned off and those someone holds `E` on (bit i for
+    /// console i), none without a server.
+    ///
+    /// Example: `let (off_mask, disabling_mask) = self.get_console_masks();`
+    fn get_console_masks(&self) -> (u32, u32) {
+        let Some(multiplayer) = &self.multiplayer else {
+            return (0, 0);
+        };
+        let disabling_mask: u32 = multiplayer
+            .client
+            .players
+            .iter()
+            .filter_map(|player| player.disabling_console)
+            .chain(multiplayer.disabling.map(|(console, _)| console))
+            .fold(0, |mask, console| mask | 1 << console);
+        (multiplayer.client.game.off_mask, disabling_mask)
     }
 
     /// `update_gun` notes whether this player runs (sprints while moving) or jumps (is in the air
@@ -2025,6 +2109,7 @@ impl Session {
                     if is_self {
                         multiplayer.is_eliminated = true;
                         multiplayer.respawn_in_s = RESPAWN_DELAY_S;
+                        multiplayer.disabling = None;
                         self.is_laser_on = false;
                         self.shot_time_s = 0.0;
                     }
@@ -2035,6 +2120,16 @@ impl Session {
                     });
                 }
             }
+        }
+        if multiplayer.client.game.number != multiplayer.game_number {
+            multiplayer.game_number = multiplayer.client.game.number;
+            if let (Some(voxel), Some(id)) = (&mut self.voxel, multiplayer.client.id) {
+                voxel.player = multiplayer::get_voxel_spawn(&voxel.world, id);
+            }
+            messages.push(format!(
+                "Game {} started: every console is back on",
+                multiplayer.game_number
+            ));
         }
         let is_out: bool = multiplayer.is_eliminated;
         if !is_out && let Err(error) = multiplayer.client.keep_joining() {
@@ -2075,6 +2170,11 @@ impl Session {
     /// Example: `let data = session.pack((1280, 800));`
     fn pack(&mut self, render_px: (u32, u32)) -> PackedFrame {
         let is_firing: bool = self.is_firing();
+        let (off_mask, disabling_mask) = self.get_console_masks();
+        let time_s: f64 = self.start.elapsed().as_secs_f64();
+        if let Some(voxel) = &mut self.voxel {
+            voxel.world.light_consoles(off_mask, disabling_mask, time_s);
+        }
         if let Some(voxel) = &self.voxel {
             let camera: DMat4 = if self.route.is_empty() {
                 voxel.player.get_camera_frame(&voxel.world)
@@ -2230,12 +2330,25 @@ impl Session {
         true
     }
 
-    /// `get_death_lines` gives the two lines shown over the view while this player is out after a
-    /// hit ("YOU DIED" and the countdown to respawning), or `None`.
+    /// `get_banner_lines` gives the two lines shown over the view once a team has won (the winner,
+    /// and how to start a new game), or else while this player is out after a hit ("YOU DIED" and
+    /// the countdown to respawning), or `None`.
     ///
-    /// Example: `if let Some(lines) = session.get_death_lines() { ... }`
-    fn get_death_lines(&self) -> Option<[String; 2]> {
-        let multiplayer: &Multiplayer = self.multiplayer.as_ref().filter(|m| m.is_eliminated)?;
+    /// Example: `if let Some(lines) = session.get_banner_lines() { ... }`
+    fn get_banner_lines(&self) -> Option<[String; 2]> {
+        let multiplayer: &Multiplayer = self.multiplayer.as_ref()?;
+        if let Some(winner) = multiplayer.client.game.winner {
+            return Some([
+                format!(
+                    "{} TEAM WINS",
+                    net::TEAM_NAMES[winner as usize].to_uppercase()
+                ),
+                "New game: Enter on the server".to_string(),
+            ]);
+        }
+        if !multiplayer.is_eliminated {
+            return None;
+        }
         Some([
             "YOU DIED".to_string(),
             format!(
@@ -2245,17 +2358,33 @@ impl Session {
         ])
     }
 
-    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the gun (unless this player
-    /// is out after a hit) and, on a voxel map, the sprint energy bar (its frame and its fill) in
-    /// the bottom left corner.
+    /// `get_overlay_rects` gives the HUD's rectangles drawn over the view: the gun (unless a banner
+    /// shows), the progress of turning off a console (while holding `E` on one) below the middle
+    /// and, on a voxel map, the sprint energy bar (its frame and its fill) in the bottom left corner.
     ///
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
-        let mut rects: Vec<render_metal::OverlayRect> = if self.get_death_lines().is_none() {
+        let mut rects: Vec<render_metal::OverlayRect> = if self.get_banner_lines().is_none() {
             self.get_gun_rects()
         } else {
             Vec::new()
         };
+        if let Some((_, held_s)) = self.multiplayer.as_ref().and_then(|m| m.disabling) {
+            let ([x, y], [w, h]) = (DISABLE_BAR_MIN_FRAC, DISABLE_BAR_SIZE_FRAC);
+            let fill_frac: f32 = (held_s / net::CONSOLE_DISABLE_S).min(1.0) as f32;
+            rects.extend([
+                render_metal::OverlayRect {
+                    min_frac: [x, y],
+                    max_frac: [x + w, y + h],
+                    color: DISABLE_BAR_BACK_COLOR,
+                },
+                render_metal::OverlayRect {
+                    min_frac: [x, y],
+                    max_frac: [x + w * fill_frac, y + h],
+                    color: DISABLE_BAR_FILL_COLOR,
+                },
+            ]);
+        }
         let Some(voxel) = &self.voxel else {
             return rects;
         };
@@ -2345,7 +2474,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Shift run, Space jump, click shoot (not while running), R respawn, -/= scale, Esc release".to_string()
+            "WASD move, Shift run, Space jump, click shoot (not while running), hold E on an enemy console to turn it off, R respawn, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
@@ -2378,7 +2507,7 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     }
 }
 
-/// `make_death_mask` draws the death lines with SDL's built-in text into a `DEATH_MASK_PX` mask,
+/// `make_death_mask` draws the banner lines (`Session::get_banner_lines`) with SDL's built-in text into a `DEATH_MASK_PX` mask,
 /// one byte a pixel: `DEATH_TITLE_MASK` on the first line's text, `DEATH_COUNTDOWN_MASK` on the
 /// second's, 0 elsewhere, for the Metal overlay.
 ///
@@ -2431,7 +2560,7 @@ fn draw_overlay_rects(
     Ok(())
 }
 
-/// `draw_death_overlay` dims the canvas and draws the death lines large in its middle, for the
+/// `draw_death_overlay` dims the canvas and draws the banner lines large in its middle, for the
 /// SDL-renderer window.
 ///
 /// Example: `draw_death_overlay(&mut canvas, &lines)?;`
@@ -2531,7 +2660,7 @@ fn play_on_canvas(
             )?;
         }
         draw_overlay_rects(&mut canvas, &session.get_overlay_rects())?;
-        if let Some(lines) = session.get_death_lines() {
+        if let Some(lines) = session.get_banner_lines() {
             draw_death_overlay(&mut canvas, &lines)?;
         }
         canvas.present();
@@ -2588,7 +2717,7 @@ fn play_on_layer(
         let render_start: Instant = Instant::now();
         let packed: PackedFrame = session.pack(render_px);
         let death_mask: Option<Vec<u8>> = session
-            .get_death_lines()
+            .get_banner_lines()
             .map(|lines| make_death_mask(&lines))
             .transpose()?;
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
