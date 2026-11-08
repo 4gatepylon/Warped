@@ -41,18 +41,16 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `make serve-game` runs only the server, without a window, and prints this computer's address and the exact
   `make join-game` commands to give the others (`SERVER=127.0.0.1` on the same computer). Leave it running in its
   terminal; `Ctrl-C` ends the game.
-- `make host-game MAP=lunar-surface` does both in one terminal: it starts the same server as its own process, opens
-  your window in it, and stops the server when your window closes.
 - To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight), copy
   `server_settings.yaml`, change its numbers, and start the server with it:
-  `make host-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml` (or `make serve-game ... SERVER_SETTINGS=...`).
+  `make serve-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml`.
   Everyone who joins plays by the server's settings.
 - Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`. The
   easiest way to change them is in the game: press `Tab` for the menu, `Up`/`Down` to pick a row, `Return` and then
   a key, button or the wheel to rebind an action, `Left`/`Right` to change a number, and `Return` on its last row
   to save. Saved choices go to `~/.config/warped/player_settings.yaml`, which every later game on that computer
   loads. `Esc` or `Tab` closes the menu. You can also copy the file, change it, and add `PLAYER_SETTINGS=mine.yaml`
-  to `make host-game` or `make join-game`.
+  to `make join-game`.
 - `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
   within a few seconds, use the address the server printed. When several servers announce themselves, it joins the
   one on the usual port (47800) and prints the others.
@@ -80,7 +78,7 @@ below the crosshair fills, the console pulses faster and faster for everyone (fr
 times a second right before it turns off), and you can't shoot meanwhile. Looking away or letting go starts it over,
 and its pulse slows back down over about a second. A console that is off goes dark. When a team's consoles are all
 off, everyone sees which team won, and a new game starts only when whoever started the server presses `Enter` in its
-terminal (the `make host-game` terminal, for that command): every console comes back on and everyone returns to their
+terminal: every console comes back on and everyone returns to their
 spawn.
 
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
@@ -111,14 +109,16 @@ glow, red and green running lights and a flashing strobe. They follow the UTC cl
 sees the same ships at the same moment. They are far away in the sky: lasers and players never touch them.
 
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
-`PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
+`PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click, then 2 s to reload, shown by one block
 above the energy bar that empties when you fire; one hit eliminates), and gun 2, the
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
-body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s), `E` (held)
+body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s). Each shot strays
+a little from the crosshair: the sniper's by a random few milliradians, the rifle's more and more as it heats up
+during a burst (`DECISIONS.md` D89). `E` (held)
 turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu (`Q`/`E`
 turn between your settings, a map of the whole level with you on it, and SCORES: how many players there are and each
 one's team, kills and deaths in this game). There is no key to respawn:

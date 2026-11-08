@@ -40,6 +40,7 @@ mod render_voxel;
 mod scene_data;
 mod settings;
 mod shapes;
+mod shot_noise;
 mod spaceships;
 mod terrain;
 mod viewmodel;
@@ -146,6 +147,7 @@ const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
+const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route and --export-map.";
 const MENU_DIM_FRAC: f32 = 0.8;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
@@ -501,6 +503,18 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         && arguments.route == RouteKind::WarpTour
     {
         return Err("--route warp-tour is for voxel maps; use --map lunar-surface".into());
+    }
+    if arguments.host {
+        return Err(LOCAL_PLAY_OFF.into());
+    }
+    let is_window_without_server: bool = arguments.join.is_none()
+        && !arguments.serve
+        && !arguments.bench_views
+        && !arguments.autopilot
+        && !arguments.play_route
+        && arguments.export_map.is_none();
+    if is_window_without_server {
+        return Err(LOCAL_PLAY_OFF.into());
     }
     if arguments.bot && (arguments.join.is_none() || arguments.exit_after_s.is_none()) {
         return Err(
@@ -1000,23 +1014,28 @@ fn save_png(path: &Path, pixels: &[u8], width_px: u32, height_px: u32) -> Result
     Ok(())
 }
 
-/// `pack_view` packs the scene for a camera at a render size, with the laser if `is_laser_on`
-/// (traced through the packed scene, then packed again with its beam), and returns the laser's
-/// report.
+/// `pack_view` packs the scene for a camera (`frame`) at a render size, with the laser if it is
+/// on, fired from `laser_aim` (`frame` turned by the shot's noise; traced through the scene packed
+/// from there, then packed again with its beam), and returns the laser's report.
 ///
-/// Example: `let (data, report) = pack_view(&world, frame, true, (1280, 800), 0.0);`
+/// Example: `let (data, report) = pack_view(&world, frame, Some(frame), (1280, 800), 0.0);`
 fn pack_view(
     world: &World,
     frame: DMat4,
-    is_laser_on: bool,
+    laser_aim: Option<DMat4>,
     render_px: (u32, u32),
     time_s: f64,
 ) -> (SceneData, Option<LaserReport>) {
     let data: SceneData = SceneData::Build(world, frame, &Beam::default(), render_px, time_s, true);
-    if !is_laser_on {
+    let Some(aim) = laser_aim else {
         return (data, None);
-    }
-    let (beam, report) = physics::trace_laser(world, &data);
+    };
+    let aimed: SceneData = if aim == frame {
+        data
+    } else {
+        SceneData::Build(world, aim, &Beam::default(), render_px, time_s, true)
+    };
+    let (beam, report) = physics::trace_laser(world, &aimed);
     (
         SceneData::Build(world, frame, &beam, render_px, time_s, true),
         Some(report),
@@ -1038,7 +1057,13 @@ fn render_view(
     renderer: &mut dyn Renderer,
     pixels: &mut [u8],
 ) -> Result<Option<LaserReport>> {
-    let (data, report) = pack_view(world, frame, is_laser_on, render_px, time_s);
+    let (data, report) = pack_view(
+        world,
+        frame,
+        is_laser_on.then_some(frame),
+        render_px,
+        time_s,
+    );
     renderer.render(FrameData::House(&data), output_px, pixels)?;
     Ok(report)
 }
@@ -1734,6 +1759,8 @@ struct Session {
     remote_firing_ids: Vec<u32>,
     rifle_shot_count: u64,
     recoil_frac: f64,
+    shot_noise: shot_noise::ShotNoise,
+    shot_offset: shot_noise::ShotOffset,
     gun_phase_rad: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
@@ -2030,6 +2057,8 @@ impl Session {
             remote_firing_ids: Vec::new(),
             rifle_shot_count: 0,
             recoil_frac: 0.0,
+            shot_noise: shot_noise::ShotNoise::FromClock(),
+            shot_offset: shot_noise::ShotOffset::NONE,
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
@@ -2203,6 +2232,7 @@ impl Session {
         {
             self.shot_time_s = self.settings.sniper.shot_s;
             self.sniper_reload_s = self.settings.sniper.reload_s;
+            self.shot_offset = self.shot_noise.sample_sniper(&self.settings.sniper);
         }
     }
 
@@ -2308,11 +2338,11 @@ impl Session {
         self.update_gun(&input, dt_s);
         self.update_rifle(dt_s);
         let eye: DMat4 = self.get_eye_frame();
-        let is_firing: bool = self.is_firing();
+        let laser_aim: Option<DMat4> = self.get_laser_aim(eye);
         if let Some(multiplayer) = &mut self.multiplayer
             && let Err(error) = multiplayer.client.send_state(
-                eye,
-                is_firing,
+                laser_aim.unwrap_or(eye),
+                laser_aim.is_some(),
                 self.gun == Gun::Rifle,
                 multiplayer.disabling.map(|(console, _)| console),
             )
@@ -2356,6 +2386,15 @@ impl Session {
         (self.is_laser_on || self.shot_time_s > 0.0) && self.can_shoot()
     }
 
+    /// `get_laser_aim` gives the frame this player's laser fires from while it is on: `eye` (the
+    /// eye's frame) turned by this shot's noise (`shot_offset`), or `None` while it is off. The
+    /// window sends it instead of the eye's frame while firing, so others trace the same shot.
+    ///
+    /// Example: `let laser_aim = self.get_laser_aim(self.get_eye_frame());`
+    fn get_laser_aim(&self, eye: DMat4) -> Option<DMat4> {
+        self.is_firing().then(|| self.shot_offset.aim(eye))
+    }
+
     /// `can_shoot` says whether this player may shoot: standing still or crouched (walking while
     /// crouched is fine), so not while walking upright or running, not while jumping or falling on
     /// a voxel map, and, in a game on a server, only once in the game (welcomed, so not in the
@@ -2383,7 +2422,8 @@ impl Session {
     /// `update_rifle` fires the rifle while its trigger is held and this player can shoot: a
     /// `RIFLE_PULSE_S` pulse of the beam every `RIFLE_SHOT_PERIOD_S`, each adding
     /// 1 / `RIFLE_OVERHEAT_SHOT_COUNT` of heat. At full heat it overheats; it cools fully in
-    /// `cool_down_s` while not firing, and fires again once cool. Each shot recoils: the view kicks
+    /// `cool_down_s` while not firing, and fires again once cool. Each shot strays by noise that
+    /// grows with the heat (`shot_noise::ShotNoise::sample_rifle`), and recoils: the view kicks
     /// up by `recoil_up_rad` and sideways by `recoil_sideways_rad`, alternately left and right, and
     /// the rifle jolts back (`recoil_frac`, settling over `recoil_settle_s`); all from the settings.
     ///
@@ -2407,6 +2447,7 @@ impl Session {
             self.shot_time_s = rifle.pulse_s;
             self.rifle_next_shot_s = 1.0 / rifle.shots_per_s;
             self.has_rifle_shot_hit = false;
+            self.shot_offset = self.shot_noise.sample_rifle(&rifle, self.rifle_heat_frac);
             self.rifle_heat_frac += 1.0 / f64::from(rifle.shots_until_overheat);
             self.is_overheated = self.rifle_heat_frac >= 1.0;
             self.rifle_shot_count += 1;
@@ -2749,7 +2790,7 @@ impl Session {
             let view: multiplayer::SharedVoxelView = multiplayer::pack_shared_voxel_view(
                 &voxel.world,
                 camera,
-                is_firing,
+                self.get_laser_aim(camera),
                 team,
                 &players,
                 self.route.is_empty().then_some(multiplayer::Tracers {
@@ -2791,11 +2832,12 @@ impl Session {
             }
             return PackedFrame::Voxel(Box::new(view.frame));
         }
+        let laser_aim: Option<DMat4> = self.get_laser_aim(self.player.frame);
         if let Some(multiplayer) = &mut self.multiplayer {
             let view: multiplayer::SharedView = multiplayer::pack_shared_view(
                 &self.world,
                 self.player.frame,
-                is_firing,
+                laser_aim,
                 &multiplayer.client.players,
                 render_px,
                 self.start.elapsed().as_secs_f64(),
@@ -2817,7 +2859,7 @@ impl Session {
         let (data, report) = pack_view(
             &self.world,
             self.player.frame,
-            is_firing,
+            laser_aim,
             render_px,
             self.start.elapsed().as_secs_f64(),
         );
