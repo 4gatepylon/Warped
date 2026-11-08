@@ -18,7 +18,8 @@
       "additionalProperties": false,
       "properties": {
         "kind": {"enum": ["hyperbolic", "spherical", "euclidean"]},
-        "curvature_radius_m": {"type": "number", "exclusiveMinimum": 0}
+        "curvature_radius_m": {"type": "number", "exclusiveMinimum": 0},
+        "torus_periods_m": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2, "maxItems": 2}
       },
       "if": {"properties": {"kind": {"enum": ["hyperbolic", "spherical"]}}},
       "then": {"required": ["curvature_radius_m"]},
@@ -269,7 +270,8 @@
         "clouds": {"type": "boolean"},
         "zenith_color": {"$ref": "#/$defs/color"},
         "horizon_color": {"$ref": "#/$defs/color"},
-        "fog_m": {"type": "number", "exclusiveMinimum": 0}
+        "fog_m": {"type": "number", "exclusiveMinimum": 0},
+        "snow_per_m3": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },
     "spawns": {
@@ -318,6 +320,26 @@
             "thickness_m": {"type": "number", "exclusiveMinimum": 0},
             "opacity_frac": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
           }
+        },
+        "blizzards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "u_m", "v_m", "radius_m", "height_m", "speed_frac", "freeze_health_per_s", "shot_reach_m", "fog_per_m", "snow_per_m3"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string"},
+              "u_m": {"type": "number"},
+              "v_m": {"type": "number"},
+              "radius_m": {"type": "number", "exclusiveMinimum": 0},
+              "height_m": {"type": "number", "exclusiveMinimum": 0},
+              "speed_frac": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+              "freeze_health_per_s": {"type": "number", "minimum": 0},
+              "shot_reach_m": {"type": "number", "minimum": 0},
+              "fog_per_m": {"type": "number", "minimum": 0},
+              "snow_per_m3": {"type": "number", "minimum": 0}
+            }
+          }
         }
       }
     },
@@ -326,6 +348,7 @@
       "required": ["style", "lighting"],
       "additionalProperties": false,
       "properties": {
+        "laser_color": {"$ref": "#/$defs/color"},
         "style": {"type": "string"},
         "lighting": {
           "oneOf": [

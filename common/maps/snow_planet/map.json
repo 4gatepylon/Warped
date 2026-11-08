@@ -1,0 +1,964 @@
+{
+ "format": "warped-map",
+ "version": 1,
+ "name": "snow_planet",
+ "description": "A snow field on a torus (T\u00b2 \u00d7 \u211d): two pylons a team, five black holes, a wormhole pair, open snow with six rounded mounds, light snowfall and fog, and three blizzards.",
+ "source": "demos/snow_planet_rust/tools/make_map.py, scatter seed 7 (after demos/levels/snow_planet/index.html)",
+ "space": {
+  "kind": "euclidean",
+  "torus_periods_m": [
+   112.0,
+   72.0
+  ]
+ },
+ "gravity_m_per_s2": 9.81,
+ "player": {
+  "eye_height_m": 1.6,
+  "walk_m_per_s": 5.0,
+  "sprint_m_per_s": 9.0,
+  "jump_m_per_s": 5.2,
+  "fly_m_per_s": 14.0
+ },
+ "materials": [
+  {
+   "id": 0,
+   "name": "air",
+   "color": [
+    0,
+    0,
+    0
+   ],
+   "kind": "empty"
+  },
+  {
+   "id": 1,
+   "name": "snow",
+   "color": [
+    0.86,
+    0.9,
+    0.95
+   ],
+   "kind": "solid"
+  },
+  {
+   "id": 2,
+   "name": "packed snow",
+   "color": [
+    0.78,
+    0.83,
+    0.9
+   ],
+   "kind": "solid"
+  },
+  {
+   "id": 3,
+   "name": "ice",
+   "color": [
+    0.62,
+    0.82,
+    0.95
+   ],
+   "kind": "glass"
+  },
+  {
+   "id": 4,
+   "name": "rock",
+   "color": [
+    0.32,
+    0.33,
+    0.36
+   ],
+   "kind": "solid"
+  },
+  {
+   "id": 5,
+   "name": "metal",
+   "color": [
+    0.46,
+    0.48,
+    0.52
+   ],
+   "kind": "solid"
+  },
+  {
+   "id": 6,
+   "name": "blue paint",
+   "color": [
+    0.14,
+    0.3,
+    0.74
+   ],
+   "kind": "solid"
+  },
+  {
+   "id": 7,
+   "name": "red paint",
+   "color": [
+    0.72,
+    0.12,
+    0.1
+   ],
+   "kind": "solid"
+  },
+  {
+   "id": 8,
+   "name": "blue light",
+   "color": [
+    0.25,
+    0.55,
+    1.0
+   ],
+   "kind": "light"
+  },
+  {
+   "id": 9,
+   "name": "red light",
+   "color": [
+    1.0,
+    0.16,
+    0.1
+   ],
+   "kind": "light"
+  },
+  {
+   "id": 10,
+   "name": "white light",
+   "color": [
+    1.0,
+    0.94,
+    0.82
+   ],
+   "kind": "light"
+  },
+  {
+   "id": 11,
+   "name": "blue console 1",
+   "color": [
+    0.3,
+    0.65,
+    1.0
+   ],
+   "kind": "light"
+  },
+  {
+   "id": 12,
+   "name": "blue console 2",
+   "color": [
+    0.3,
+    0.65,
+    1.0
+   ],
+   "kind": "light"
+  },
+  {
+   "id": 13,
+   "name": "red console 1",
+   "color": [
+    1.0,
+    0.28,
+    0.18
+   ],
+   "kind": "light"
+  },
+  {
+   "id": 14,
+   "name": "red console 2",
+   "color": [
+    1.0,
+    0.28,
+    0.18
+   ],
+   "kind": "light"
+  }
+ ],
+ "ground": {
+  "material": 1
+ },
+ "structures": [
+  {
+   "name": "blue snow mound",
+   "frame": [
+    0.9246957489939444,
+    0.0,
+    -0.38070693688522184,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.38070693688522184,
+    0.0,
+    0.9246957489939444,
+    0.0,
+    5.603396695698008,
+    0.0,
+    26.70466894066735,
+    1.0
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "centre_m": [
+      0.0,
+      0.9,
+      0.0
+     ],
+     "half_m": [
+      1.8,
+      0.9,
+      1.4
+     ],
+     "material": 2,
+     "round_m": 0.7
+    }
+   ]
+  },
+  {
+   "name": "red snow mound",
+   "frame": [
+    -0.9246957489939444,
+    0.0,
+    0.3807069368852219,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -0.3807069368852219,
+    0.0,
+    -0.9246957489939444,
+    0.0,
+    -5.603396695698008,
+    0.0,
+    -26.70466894066735,
+    1.0
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "centre_m": [
+      0.0,
+      0.9,
+      0.0
+     ],
+     "half_m": [
+      1.8,
+      0.9,
+      1.4
+     ],
+     "material": 2,
+     "round_m": 0.7
+    }
+   ]
+  },
+  {
+   "name": "blue snow mound",
+   "frame": [
+    0.8361410078342978,
+    0.0,
+    0.5485145531504563,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -0.5485145531504563,
+    0.0,
+    0.8361410078342978,
+    0.0,
+    -30.856471982773243,
+    0.0,
+    13.710254853329829,
+    1.0
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "centre_m": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_m": [
+      2.0,
+      1.0,
+      1.2
+     ],
+     "material": 2,
+     "round_m": 0.7
+    }
+   ]
+  },
+  {
+   "name": "red snow mound",
+   "frame": [
+    -0.8361410078342978,
+    0.0,
+    -0.5485145531504563,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.5485145531504563,
+    0.0,
+    -0.8361410078342978,
+    0.0,
+    30.856471982773243,
+    0.0,
+    -13.710254853329829,
+    1.0
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "centre_m": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_m": [
+      2.0,
+      1.0,
+      1.2
+     ],
+     "material": 2,
+     "round_m": 0.7
+    }
+   ]
+  },
+  {
+   "name": "blue snow mound",
+   "frame": [
+    0.8124248457569241,
+    0.0,
+    -0.5830659225137738,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.5830659225137738,
+    0.0,
+    0.8124248457569241,
+    0.0,
+    27.02974293275768,
+    0.0,
+    43.768004300901175,
+    1.0
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "centre_m": [
+      0.0,
+      0.8,
+      0.0
+     ],
+     "half_m": [
+      1.6,
+      0.8,
+      1.6
+     ],
+     "material": 2,
+     "round_m": 0.7
+    }
+   ]
+  },
+  {
+   "name": "red snow mound",
+   "frame": [
+    -0.8124248457569243,
+    0.0,
+    0.5830659225137735,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -0.5830659225137735,
+    0.0,
+    -0.8124248457569243,
+    0.0,
+    -27.02974293275768,
+    0.0,
+    -43.768004300901175,
+    1.0
+   ],
+   "shapes": [
+    {
+     "kind": "box",
+     "centre_m": [
+      0.0,
+      0.8,
+      0.0
+     ],
+     "half_m": [
+      1.6,
+      0.8,
+      1.6
+     ],
+     "material": 2,
+     "round_m": 0.7
+    }
+   ]
+  },
+  {
+   "name": "blue pylon",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -16.0,
+    0.0,
+    34.0,
+    1.0
+   ],
+   "mesh": {
+    "model": "scifi_beacon",
+    "height_m": 12.0
+   },
+   "shapes": [
+    {
+     "kind": "cylinder",
+     "centre_m": [
+      0.0,
+      5.654,
+      0.0
+     ],
+     "half_m": [
+      1.35,
+      6.346,
+      1.35
+     ],
+     "round_m": 0.0,
+     "axis": 1,
+     "material": 11
+    }
+   ]
+  },
+  {
+   "name": "blue pylon",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    16.0,
+    0.0,
+    34.0,
+    1.0
+   ],
+   "mesh": {
+    "model": "scifi_beacon",
+    "height_m": 12.0
+   },
+   "shapes": [
+    {
+     "kind": "cylinder",
+     "centre_m": [
+      0.0,
+      5.654,
+      0.0
+     ],
+     "half_m": [
+      1.35,
+      6.346,
+      1.35
+     ],
+     "round_m": 0.0,
+     "axis": 1,
+     "material": 12
+    }
+   ]
+  },
+  {
+   "name": "red pylon",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    16.0,
+    0.0,
+    -34.0,
+    1.0
+   ],
+   "mesh": {
+    "model": "scifi_beacon",
+    "height_m": 12.0
+   },
+   "shapes": [
+    {
+     "kind": "cylinder",
+     "centre_m": [
+      0.0,
+      5.654,
+      0.0
+     ],
+     "half_m": [
+      1.35,
+      6.346,
+      1.35
+     ],
+     "round_m": 0.0,
+     "axis": 1,
+     "material": 13
+    }
+   ]
+  },
+  {
+   "name": "red pylon",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -16.0,
+    0.0,
+    -34.0,
+    1.0
+   ],
+   "mesh": {
+    "model": "scifi_beacon",
+    "height_m": 12.0
+   },
+   "shapes": [
+    {
+     "kind": "cylinder",
+     "centre_m": [
+      0.0,
+      5.654,
+      0.0
+     ],
+     "half_m": [
+      1.35,
+      6.346,
+      1.35
+     ],
+     "round_m": 0.0,
+     "axis": 1,
+     "material": 14
+    }
+   ]
+  }
+ ],
+ "warps": [
+  {
+   "kind": "black_hole",
+   "name": "black hole north-west",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    19.765921881853878,
+    6.0,
+    21.572190682461805,
+    1.0
+   ],
+   "law": "isotropic_schwarzschild",
+   "schwarzschild_radius_m": 1.1,
+   "radial_coordinate": "distance",
+   "reach_m": 11.0,
+   "falloff": "taper"
+  },
+  {
+   "kind": "black_hole",
+   "name": "black hole north",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    28.471897407612456,
+    6.0,
+    1.0011650156815883,
+    1.0
+   ],
+   "law": "isotropic_schwarzschild",
+   "schwarzschild_radius_m": 1.1,
+   "radial_coordinate": "distance",
+   "reach_m": 11.0,
+   "falloff": "taper"
+  },
+  {
+   "kind": "black_hole",
+   "name": "black hole north-east",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    17.720482553610765,
+    6.0,
+    -21.994972168647855,
+    1.0
+   ],
+   "law": "isotropic_schwarzschild",
+   "schwarzschild_radius_m": 1.1,
+   "radial_coordinate": "distance",
+   "reach_m": 11.0,
+   "falloff": "taper"
+  },
+  {
+   "kind": "black_hole",
+   "name": "black hole south-west",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -20.874017480942744,
+    6.0,
+    5.6278814487066455,
+    1.0
+   ],
+   "law": "isotropic_schwarzschild",
+   "schwarzschild_radius_m": 1.1,
+   "radial_coordinate": "distance",
+   "reach_m": 11.0,
+   "falloff": "taper"
+  },
+  {
+   "kind": "black_hole",
+   "name": "black hole south-east",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -25.85277355280391,
+    6.0,
+    -20.875687477867146,
+    1.0
+   ],
+   "law": "isotropic_schwarzschild",
+   "schwarzschild_radius_m": 1.1,
+   "radial_coordinate": "distance",
+   "reach_m": 11.0,
+   "falloff": "taper"
+  },
+  {
+   "kind": "wormhole_mouth",
+   "name": "wormhole mouth A",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -26.0,
+    2.4,
+    46.0,
+    1.0
+   ],
+   "law": "foil",
+   "schwarzschild_radius_m": 1.6,
+   "lambda_squared": 0.25,
+   "radial_coordinate": "distance",
+   "reach_m": 9.0,
+   "falloff": "taper",
+   "partner": 6
+  },
+  {
+   "kind": "wormhole_mouth",
+   "name": "wormhole mouth B",
+   "frame": [
+    -1.0,
+    0.0,
+    -1.2246467991473532e-16,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    1.2246467991473532e-16,
+    0.0,
+    -1.0,
+    0.0,
+    26.0,
+    2.4,
+    -46.0,
+    1.0
+   ],
+   "law": "foil",
+   "schwarzschild_radius_m": 1.6,
+   "lambda_squared": 0.25,
+   "radial_coordinate": "distance",
+   "reach_m": 9.0,
+   "falloff": "taper",
+   "partner": 5
+  }
+ ],
+ "lights": [
+  {
+   "position": [
+    -16.0,
+    8.0,
+    34.0,
+    1.0
+   ],
+   "color": [
+    0.3,
+    0.65,
+    1.0
+   ],
+   "radius_m": 8.0
+  },
+  {
+   "position": [
+    16.0,
+    8.0,
+    34.0,
+    1.0
+   ],
+   "color": [
+    0.3,
+    0.65,
+    1.0
+   ],
+   "radius_m": 8.0
+  },
+  {
+   "position": [
+    16.0,
+    8.0,
+    -34.0,
+    1.0
+   ],
+   "color": [
+    1.0,
+    0.28,
+    0.18
+   ],
+   "radius_m": 8.0
+  },
+  {
+   "position": [
+    -16.0,
+    8.0,
+    -34.0,
+    1.0
+   ],
+   "color": [
+    1.0,
+    0.28,
+    0.18
+   ],
+   "radius_m": 8.0
+  }
+ ],
+ "sky": {
+  "transport": "parallel",
+  "sun": {
+   "direction": [
+    -0.5507440069535275,
+    0.42056815076451187,
+    0.7209739727391632
+   ],
+   "color": [
+    1.0,
+    0.95,
+    0.88
+   ]
+  },
+  "stars": false,
+  "clouds": true,
+  "zenith_color": [
+   0.42,
+   0.56,
+   0.74
+  ],
+  "horizon_color": [
+   0.82,
+   0.87,
+   0.93
+  ],
+  "fog_m": 75.0,
+  "snow_per_m3": 0.04
+ },
+ "spawns": [
+  {
+   "team": "blue",
+   "frame": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    48.0,
+    1.0
+   ]
+  },
+  {
+   "team": "red",
+   "frame": [
+    -1.0,
+    0.0,
+    -1.2246467991473532e-16,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    1.2246467991473532e-16,
+    0.0,
+    -1.0,
+    0.0,
+    0.0,
+    0.0,
+    -48.0,
+    1.0
+   ]
+  }
+ ],
+ "regions": {
+  "zones": [
+   {
+    "team": "blue",
+    "u_min_m": null,
+    "u_max_m": -20.0
+   },
+   {
+    "team": "middle",
+    "u_min_m": -20.0,
+    "u_max_m": 20.0
+   },
+   {
+    "team": "red",
+    "u_min_m": 20.0,
+    "u_max_m": null
+   }
+  ],
+  "boundary": {
+   "kind": "fermi_ellipse",
+   "u_m": 60.0,
+   "v_m": 40.0
+  },
+  "zone_walls": {
+   "height_m": 6.0,
+   "thickness_m": 0.6,
+   "opacity_frac": 0.25
+  },
+  "blizzards": [
+   {
+    "name": "white-out",
+    "u_m": 0.0,
+    "v_m": 0.0,
+    "radius_m": 10.0,
+    "height_m": 16.0,
+    "speed_frac": 0.5,
+    "freeze_health_per_s": 0.08,
+    "shot_reach_m": 8.0,
+    "fog_per_m": 0.3,
+    "snow_per_m3": 1.0
+   }
+  ]
+ },
+ "appearance": {
+  "style": "snow",
+  "laser_color": [
+   0.35,
+   1.0,
+   0.45
+  ],
+  "lighting": {
+   "model": "lunar_lambert",
+   "lommel_seeliger_frac": 0.2,
+   "ambient": 0.3,
+   "earthshine": 0.0,
+   "sun_intensity": 1.2,
+   "shadows": true
+  }
+ }
+}
