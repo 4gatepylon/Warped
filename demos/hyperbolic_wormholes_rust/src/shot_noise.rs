@@ -6,8 +6,15 @@
 //! step with the rifle's heat, from `rifle.noise_start_rad` cold to `rifle.noise_max_rad` at full
 //! heat, and shrinks back as it cools.
 //!
-//! Interface: `ShotNoise` (`FromSeed`, `FromClock`, `sample_sniper`, `sample_rifle`),
-//! `ShotOffset` (`NONE`, `aim`), `get_rifle_spread_rad`.
+//! Each shot also gets its beam's dropout (W-84): the share of the beam's pixels that drop out each
+//! frame, so the scene behind shows through. The sniper's is exponential with mean
+//! `sniper.beam_dropout_mean_frac`, cut at `sniper.beam_dropout_max_frac`; the rifle's grows in
+//! step with the heat, from `rifle.beam_dropout_start_frac` cold to `rifle.beam_dropout_max_frac`.
+//! Both are rounded to steps of 1 / `BEAM_DROPOUT_LEVEL_COUNT`, which the network carries.
+//!
+//! Interface: `ShotNoise` (`FromSeed`, `FromClock`, `sample_sniper`, `sample_rifle`,
+//! `sample_sniper_dropout`), `ShotOffset` (`NONE`, `aim`), `get_rifle_spread_rad`,
+//! `get_rifle_dropout_frac`, `BEAM_DROPOUT_LEVEL_COUNT`, `round_dropout_frac`.
 //!
 //! Example: `let laser_frame = noise.sample_sniper(&settings.sniper).aim(camera);`
 //!
@@ -30,6 +37,7 @@ const SPLITMIX_MULTIPLIERS: [u64; 2] = [0xbf58_476d_1ce4_e5b9, 0x94d0_49bb_1331_
 const SPLITMIX_SHIFTS: [u32; 3] = [30, 27, 31];
 const MANTISSA_BITS: u32 = 53;
 const BITS_PER_U64: u32 = 64;
+pub const BEAM_DROPOUT_LEVEL_COUNT: u8 = 31;
 
 /// `ShotOffset` is how far one shot strays from the crosshair: the angle between the shot and the
 /// crosshair's direction, and the direction around the crosshair it strays toward (0 to the
@@ -127,6 +135,17 @@ impl ShotNoise {
             direction_rad: TAU * self.sample_frac(),
         }
     }
+
+    /// `sample_sniper_dropout` gives one sniper shot's beam dropout: a share from an exponential
+    /// distribution with mean `sniper.beam_dropout_mean_frac`, cut at
+    /// `sniper.beam_dropout_max_frac`, and rounded (`round_dropout_frac`).
+    ///
+    /// Example: `self.beam_dropout_frac = self.shot_noise.sample_sniper_dropout(&self.settings.sniper);`
+    pub fn sample_sniper_dropout(&mut self, sniper: &SniperSettings) -> f64 {
+        let exponential_frac: f64 =
+            -sniper.beam_dropout_mean_frac * (1.0 - self.sample_frac()).ln();
+        round_dropout_frac(exponential_frac.min(sniper.beam_dropout_max_frac))
+    }
 }
 
 /// `get_rifle_spread_rad` gives the most a rifle shot fired at `heat_frac` strays: from
@@ -142,6 +161,35 @@ pub fn get_rifle_spread_rad(rifle: &RifleSettings, heat_frac: f64) -> f64 {
     rifle.noise_start_rad * (1.0 - heat_frac) + rifle.noise_max_rad * heat_frac
 }
 
+/// `get_rifle_dropout_frac` gives the beam dropout of a rifle shot fired at `heat_frac`: from
+/// `rifle.beam_dropout_start_frac` cold (0) to `rifle.beam_dropout_max_frac` at full heat (1), in
+/// step with the heat, rounded (`round_dropout_frac`). It panics on a heat outside [0, 1].
+///
+/// Example: `self.beam_dropout_frac = get_rifle_dropout_frac(&rifle, self.rifle_heat_frac);`
+pub fn get_rifle_dropout_frac(rifle: &RifleSettings, heat_frac: f64) -> f64 {
+    assert!(
+        (0.0..=1.0).contains(&heat_frac),
+        "get_rifle_dropout_frac: heat_frac must be in [0, 1], not {heat_frac}"
+    );
+    round_dropout_frac(
+        rifle.beam_dropout_start_frac * (1.0 - heat_frac) + rifle.beam_dropout_max_frac * heat_frac,
+    )
+}
+
+/// `round_dropout_frac` rounds a beam dropout share in [0, 1] to the nearest step of
+/// 1 / `BEAM_DROPOUT_LEVEL_COUNT`, the steps the network carries, so every window draws a shot's
+/// beam with the same share. It panics on a share outside [0, 1].
+///
+/// Example: `let dropout_frac = round_dropout_frac(0.12);`
+pub fn round_dropout_frac(dropout_frac: f64) -> f64 {
+    assert!(
+        (0.0..=1.0).contains(&dropout_frac),
+        "round_dropout_frac: dropout_frac must be in [0, 1], not {dropout_frac}"
+    );
+    let level_count: f64 = f64::from(BEAM_DROPOUT_LEVEL_COUNT);
+    (dropout_frac * level_count).round() / level_count
+}
+
 #[cfg(test)]
 mod tests {
     //! Tests of sampling shots' offsets and turning the camera by them.
@@ -153,6 +201,8 @@ mod tests {
     //! | Rifle heat | cold (0), half, full (1), outside [0, 1] (panics) | `rifle_spread_grows_with_heat`, `heat_outside_its_range_fails` |
     //! | Seed | the same twice, two different | `seeds_repeat_their_offsets` |
     //! | Offset | none (the camera itself), a stray (its angle and direction, the position kept) | `no_noise_keeps_the_crosshair`, `aim_turns_the_crosshair_by_the_offset` |
+    //! | Beam dropout | the sniper's (exponential, cut, rounded), the rifle's (cold, half, full heat), off (0) | `sniper_dropout_is_exponential_up_to_its_cap`, `rifle_dropout_grows_with_heat` |
+    //! | Share to round | 0, 1, between steps, outside [0, 1] (panics) | `dropouts_round_to_network_steps`, `dropout_outside_its_range_fails` |
 
     use super::*;
     use crate::geometry::{
@@ -170,6 +220,8 @@ mod tests {
     const MEAN_PER_SPREAD_OF_A_DISC: f64 = 2.0 / 3.0;
     const HEATS_FRAC: [f64; 3] = [0.0, 0.5, 1.0];
     const BEYOND_FULL_HEAT_FRAC: f64 = 1.5;
+    const ROUNDS_DOWN_STEPS: f64 = 2.4;
+    const ROUNDS_UP_STEPS: f64 = 2.6;
     const REPEAT_COUNT: usize = 100;
     const CAMERA_BOOST: f64 = 0.4;
     const CAMERA_YAW_RAD: f64 = 0.7;
@@ -253,6 +305,64 @@ mod tests {
         }
         assert_eq!(get_rifle_spread_rad(&rifle, 0.0), rifle.noise_start_rad);
         assert_eq!(get_rifle_spread_rad(&rifle, 1.0), rifle.noise_max_rad);
+    }
+
+    #[test]
+    fn sniper_dropout_is_exponential_up_to_its_cap() {
+        let sniper: SniperSettings = ServerSettings::Builtin().sniper;
+        let mut noise: ShotNoise = ShotNoise::FromSeed(SEED);
+        let dropouts_frac: Vec<f64> = (0..SAMPLE_COUNT)
+            .map(|_| noise.sample_sniper_dropout(&sniper))
+            .collect();
+        let (mean_frac, cap_frac) = (sniper.beam_dropout_mean_frac, sniper.beam_dropout_max_frac);
+        let capped_mean_frac: f64 = mean_frac * (1.0 - (-cap_frac / mean_frac).exp());
+        assert!(
+            (get_mean(&dropouts_frac) - capped_mean_frac).abs() < MEAN_TOLERANCE_FRAC * mean_frac
+        );
+        assert!(dropouts_frac.iter().all(|&x| (0.0..=cap_frac).contains(&x)));
+        assert!(dropouts_frac.iter().all(|&x| x == round_dropout_frac(x)));
+        let mut off: SniperSettings = sniper.clone();
+        off.beam_dropout_mean_frac = 0.0;
+        assert!((0..REPEAT_COUNT).all(|_| noise.sample_sniper_dropout(&off) == 0.0));
+    }
+
+    #[test]
+    fn rifle_dropout_grows_with_heat() {
+        let rifle: RifleSettings = ServerSettings::Builtin().rifle;
+        let dropouts_frac: Vec<f64> = HEATS_FRAC
+            .iter()
+            .map(|&heat_frac| get_rifle_dropout_frac(&rifle, heat_frac))
+            .collect();
+        assert!(dropouts_frac.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(
+            dropouts_frac[0],
+            round_dropout_frac(rifle.beam_dropout_start_frac)
+        );
+        assert_eq!(
+            dropouts_frac[HEATS_FRAC.len() - 1],
+            round_dropout_frac(rifle.beam_dropout_max_frac)
+        );
+    }
+
+    #[test]
+    fn dropouts_round_to_network_steps() {
+        let step_frac: f64 = 1.0 / f64::from(BEAM_DROPOUT_LEVEL_COUNT);
+        assert_eq!(round_dropout_frac(0.0), 0.0);
+        assert_eq!(round_dropout_frac(1.0), 1.0);
+        assert_eq!(
+            round_dropout_frac(step_frac * ROUNDS_DOWN_STEPS),
+            step_frac * 2.0
+        );
+        assert_eq!(
+            round_dropout_frac(step_frac * ROUNDS_UP_STEPS),
+            step_frac * 3.0
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "dropout_frac must be in [0, 1]")]
+    fn dropout_outside_its_range_fails() {
+        round_dropout_frac(BEYOND_FULL_HEAT_FRAC);
     }
 
     #[test]

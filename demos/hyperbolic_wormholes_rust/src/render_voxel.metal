@@ -207,6 +207,14 @@ constant float MILKY_WAY_BRIGHTNESS = 0.05;
 constant float MILKY_WAY_DETAIL = 6.0;
 constant float BEAM_HALO_OPACITY = 0.9;
 constant float BEAM_CORE_WHITENESS = 0.6;
+constant float BEAM_DROPOUT_STEPS = 1023.0;
+constant float MIN_BEAM_SURVIVOR_FRAC = 0.05;
+constant float BEAM_WHITE_PER_GAIN = 2.0;
+constant uint3 PIXEL_HASH_PRIMES = uint3(73856093u, 19349663u, 2654435761u);
+constant uint2 PIXEL_HASH_MULTIPLIERS = uint2(0x7feb352du, 0x846ca68bu);
+constant uint3 PIXEL_HASH_SHIFTS = uint3(16u, 15u, 16u);
+constant uint PIXEL_HASH_DROPPED_BITS = 8u;
+constant float PIXEL_HASH_SCALE = 1.0 / 16777216.0;
 constant float3 BLUE_COLOR = float3(0.30, 0.62, 1.0);
 constant float3 RED_COLOR = float3(1.0, 0.16, 0.08);
 constant float3 SUN_COLOR = float3(1.0, 0.96, 0.88);
@@ -353,6 +361,7 @@ struct VoxelUniforms {
     float4 flashlight;
     Spaceship spaceships[SPACESHIP_COUNT];
     int4 dust_counts;
+    float4 beam_noise;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -397,7 +406,7 @@ struct VoxelLight {
     float4 color_radius;
 };
 
-/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, unused, brightness, team). */
+/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, dropout share, brightness, team). */
 struct BeamSegment {
     float4 a;
     float4 b;
@@ -446,8 +455,9 @@ struct Hit {
  * @brief `VoxelRayEnd` is where a ray ended, with what shading needs: the hit point (or the sky direction at the
  * origin, with w = 0), the ray's unit tangent there, the hit's grid point in its structure with the distance
  * travelled, the hit cell with its material (`MAT_GROUND` for the ground), the outcome with the structure (-1 for the
- * ground), face axis and laser team (1 for red), the face's side with the glass count and the laser's core and
- * halo, and the dust in front of it (`scan_dust`).
+ * ground), face axis and laser (bit 0 its team, 1 for red; the bits above its dropout share in steps of
+ * 1 / `BEAM_DROPOUT_STEPS`), the face's side with the glass count and the laser's core and halo, and the dust in front
+ * of it (`scan_dust`).
  */
 struct VoxelRayEnd {
     float4 point;
@@ -1406,8 +1416,9 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form), with the brightest halo's team. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team); @endcode */
-static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &team) {
+/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form), with the brightest halo's team and dropout share. @par Example @code scan_beams(scene, x, v, s, t, core, halo, team, dropout); @endcode */
+static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &team,
+                       thread float &dropout) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
     for (int i = 0; i < scene.u.beam_count; i++) {
         float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
@@ -1426,7 +1437,7 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
         float q = d_m * d_m / (width_m * width_m);
         core = max(core, info.z * exp(-q));
         float hl = info.z * exp(-q / BEAM_REACH);
-        if (hl > halo) { halo = hl; team = info.w; }
+        if (hl > halo) { halo = hl; team = info.w; dropout = info.y; }
     }
 }
 
@@ -1513,7 +1524,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     for (int w = 0; w < u.warp_count; w++) {
         if (-mdot(x, warps[w].centre) < cosh(warps[w].params.z)) inside = w;
     }
-    float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, team = 0.0;
+    float travelled = 0.0, glass = 0.0, core = 0.0, halo = 0.0, team = 0.0, dropout = 0.0;
     float4 dust = float4(0.0);
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
@@ -1539,7 +1550,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             float glass_s = NO_HIT_S;
             trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
-            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
+            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team, dropout);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (entering < 0) {
@@ -1562,7 +1573,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         float glass_s = NO_HIT_S;
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
-        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
+        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team, dropout);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
         float4 xn = geodesic_point(x, v, ds), vn = geodesic_tangent(x, v, ds);
@@ -1577,7 +1588,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         if (prm.x > HALF_KIND && rho < prm.y) { cross_throat(scene, inside, x, v); inside = int(prm.w + 0.5); has_gradient = false; continue; }
         if (rho > prm.z) { last_warp = inside; inside = -1; has_gradient = false; }
     }
-    VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0), int4(outcome, -1, -1, team > HALF_KIND ? 1 : 0),
+    VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0), int4(outcome, -1, -1, (team > HALF_KIND ? 1 : 0) + 2 * int(round(dropout * BEAM_DROPOUT_STEPS))),
                        float4(0.0, glass, core, halo), dust};
     if (outcome == OUTCOME_HIT) {
         end.point = geodesic_point(hit_x, hit_v, hit.s);
@@ -1620,15 +1631,51 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
 }
 
 /**
- * @brief `shade_ray_end` gives a ray's final colour from where it ended: the lit surface or the sky, hazed, tinted by
- * the glass it crossed, behind the dust in front of it (as thick as its optical depth), with the laser's glow and
- * the highlight roll-off; a lost ray is black.
+ * @brief `hash_pixel` gives a pseudo-random number in [0, 1) for pixel `id` and `seed`, independent from pixel to
+ * pixel (a lowbias32 integer hash).
  * @par Example
  * @code
- * float3 color = shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5));
+ * float roll = hash_pixel(id, uint(scene.u.beam_noise.x));
  * @endcode
  */
-static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
+static float hash_pixel(uint2 id, uint seed) {
+    uint h = id.x * PIXEL_HASH_PRIMES.x ^ id.y * PIXEL_HASH_PRIMES.y ^ seed * PIXEL_HASH_PRIMES.z;
+    h ^= h >> PIXEL_HASH_SHIFTS.x;
+    h *= PIXEL_HASH_MULTIPLIERS.x;
+    h ^= h >> PIXEL_HASH_SHIFTS.y;
+    h *= PIXEL_HASH_MULTIPLIERS.y;
+    h ^= h >> PIXEL_HASH_SHIFTS.z;
+    return float(h >> PIXEL_HASH_DROPPED_BITS) * PIXEL_HASH_SCALE;
+}
+
+/**
+ * @brief `get_beam_gain` scales the laser's light at pixel `id` for its shot's dropout share (W-84): 0 on the share
+ * of pixels where the beam drops out this frame (picked anew each frame with the uniforms' `beam_noise.x` seed), so
+ * the scene behind shows through, and on the rest up to 1 / (1 - dropout) as `beam_noise.y` (the contrast, 0 to 1)
+ * grows, so the light lost to the holes gathers in what remains and its middle clips to white.
+ * @par Example
+ * @code
+ * float gain = get_beam_gain(scene, 0.3, id);
+ * @endcode
+ */
+static float get_beam_gain(thread const Scene &scene, float dropout, uint2 id) {
+    if (dropout <= 0.0) return 1.0;
+    if (hash_pixel(id, uint(scene.u.beam_noise.x)) < dropout) return 0.0;
+    return mix(1.0, 1.0 / max(1.0 - dropout, MIN_BEAM_SURVIVOR_FRAC), scene.u.beam_noise.y);
+}
+
+/**
+ * @brief `shade_ray_end` gives pixel `id`'s final colour from where its ray ended: the lit surface or the sky, hazed,
+ * tinted by the glass it crossed, behind the dust in front of it (as thick as its optical depth), with the laser's
+ * glow scaled by `get_beam_gain`, whose surviving pixels also turn whiter toward the beam's middle, by
+ * `BEAM_WHITE_PER_GAIN` times the gain above 1 times the halo (pure white near the axis from a gain of 1.5, a third of
+ * the pixels dropped); a lost ray is black.
+ * @par Example
+ * @code
+ * float3 color = shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5), id);
+ * @endcode
+ */
+static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id) {
     float3 color = float3(0.0);
     if (end.surface.x == OUTCOME_HIT && end.cell.w == MAT_GROUND) {
         color = shade_ground(scene, end.point, end.view, end.grid.w);
@@ -1640,16 +1687,18 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
     }
     color = add_haze(scene, color, end);
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
-    float3 beam_color = to_linear(end.surface.w > 0 ? RED_COLOR : BLUE_COLOR);
+    float3 beam_color = to_linear((end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
+    float gain = get_beam_gain(scene, float(end.surface.w >> 1) / BEAM_DROPOUT_STEPS, id);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
     if (end.dust.w > 0.0) color = mix(color, end.dust.rgb / end.dust.w, 1.0 - exp(-end.dust.w));
-    color = mix(color, beam_color, clamp(BEAM_HALO_OPACITY * halo, 0.0, 1.0)) + mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * core;
+    color = mix(color, beam_color, clamp(BEAM_HALO_OPACITY * halo * gain, 0.0, 1.0)) + mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * core * gain;
+    color = mix(color, float3(1.0), clamp((gain - 1.0) * BEAM_WHITE_PER_GAIN * halo, 0.0, 1.0));
     return max(color, 0.0);
 }
 
 /** @brief `write_pixel` shades a ray end into pixel `id`. @par Example @code write_pixel(scene, end, id, image); @endcode */
 static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, texture2d<float, access::write> image) {
-    image.write(float4(shade_ray_end(scene, end), 1.0), id);
+    image.write(float4(shade_ray_end(scene, end, id), 1.0), id);
 }
 
 /**

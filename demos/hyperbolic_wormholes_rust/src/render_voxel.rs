@@ -53,6 +53,9 @@ const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
+const BEAM_DROPOUT_CONTRAST_FRAC: f32 = 1.0;
+const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
+const MS_PER_S: f64 = 1000.0;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -102,6 +105,7 @@ pub struct VoxelUniforms {
     pub flashlight: [f32; 4],
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
+    pub beam_noise: [f32; 4],
 }
 
 const _: () = assert!(
@@ -280,15 +284,17 @@ fn to_columns(m: DMat4) -> [[f32; 4]; 4] {
 
 impl VoxelFrame {
     /// `Build` packs `world` seen from `camera` at a render size, with laser segments of each team
-    /// (`beams`: segments and team, 0 blue or 1 red; drawn as far as `clip_beam_to_map` allows),
-    /// an optional laser spot and the dust of shots into the ground.
+    /// (`beams`: segments, team, 0 blue or 1 red, and the share of the beam's pixels that drop out
+    /// each frame; drawn as far as `clip_beam_to_map` allows), an optional laser spot and the dust
+    /// of shots into the ground. The dropout picks its pixels anew each millisecond of
+    /// `world.sky_time_s`, and with `BEAM_DROPOUT_CONTRAST_FRAC` the rest of the beam brightens.
     ///
     /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &clouds, (1280, 800));`
     #[allow(non_snake_case)]
     pub fn Build(
         world: &VoxelWorld,
         camera: DMat4,
-        beams: &[(Vec<BeamSegment>, u32)],
+        beams: &[(Vec<BeamSegment>, u32, f64)],
         spot: Option<(DVec4, u32)>,
         dust: &[DustCloud],
         size_px: (u32, u32),
@@ -355,13 +361,18 @@ impl VoxelFrame {
             .collect();
         let gpu_beams: Vec<GpuBeam> = beams
             .iter()
-            .flat_map(|(segments, team)| {
+            .flat_map(|(segments, team, dropout_frac)| {
                 clip_beam_to_map(segments)
                     .into_iter()
                     .map(move |s| GpuBeam {
                         a: to_f32(s.a),
                         b: to_f32(s.b),
-                        info: [s.length as f32, 0.0, BEAM_BRIGHTNESS, *team as f32],
+                        info: [
+                            s.length as f32,
+                            *dropout_frac as f32,
+                            BEAM_BRIGHTNESS,
+                            *team as f32,
+                        ],
                     })
             })
             .collect();
@@ -452,6 +463,12 @@ impl VoxelFrame {
             }),
             spaceships: get_spaceships(world.sky_time_s),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
+            beam_noise: [
+                ((world.sky_time_s * MS_PER_S) as u64 % BEAM_SEED_PERIOD_MS) as f32,
+                BEAM_DROPOUT_CONTRAST_FRAC,
+                0.0,
+                0.0,
+            ],
         };
         assert_eq!(
             world.palette.len(),
