@@ -4,6 +4,7 @@
 //! Example:
 //!     if let Some(shot) = bot.update(&context, dt_s) { ... }
 
+use crate::game::warps::Warps;
 use glam::{Quat, Vec3};
 
 use super::collision::{Aabb, MoveResult, cast_ray, move_body};
@@ -95,6 +96,9 @@ pub struct BotContext<'a> {
     pub is_player_crouched: bool,
 }
 
+/// `BODY_CENTRE_HEIGHT_M` is the middle of a body above its feet, where warps act on it.
+pub const BODY_CENTRE_HEIGHT_M: f32 = 0.9;
+
 /// `Bot` is one enemy robot.
 pub struct Bot {
     pub feet_m: Vec3,
@@ -116,6 +120,21 @@ pub struct Bot {
 }
 
 impl Bot {
+    /// `apply_warps` pulls the bot towards black holes, kills it inside a horizon and carries it
+    /// through a wormhole mouth it walks into.
+    ///
+    /// Example: `bot.apply_warps(&arena.warps, dt_s);`
+    pub fn apply_warps(&mut self, warps: &Warps, dt_s: f32) {
+        let centre_m: Vec3 = self.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
+        self.velocity_m_s += warps.get_pull_m_per_s2(centre_m) * dt_s;
+        if let Some(exit_m) = warps.get_mouth_exit_feet_m(self.feet_m, centre_m) {
+            self.feet_m = exit_m;
+        }
+        if warps.is_inside_horizon(centre_m) {
+            self.take_damage(f32::MAX);
+        }
+    }
+
     /// `new` spawns a bot.
     pub fn new(feet_m: Vec3, seed: u32) -> Bot {
         Bot {

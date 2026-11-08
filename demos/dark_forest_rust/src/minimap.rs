@@ -71,6 +71,9 @@ fn get_surface_rgba(surface: Surface) -> Option<[u8; 4]> {
         Surface::Rope => Some([200, 180, 130, 255]),
         Surface::RedPaint | Surface::RedConsole => Some([190, 50, 40, 255]),
         Surface::BluePaint | Surface::BlueConsole => Some([50, 90, 200, 255]),
+        Surface::Horizon => Some([8, 8, 8, 255]),
+        Surface::Throat => Some([150, 100, 255, 255]),
+        Surface::Accretion => None,
     }
 }
 

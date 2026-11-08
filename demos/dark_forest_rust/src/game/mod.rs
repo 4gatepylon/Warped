@@ -9,5 +9,6 @@ pub mod collision;
 pub mod hud;
 pub mod player;
 pub mod session;
+pub mod warps;
 pub mod weapon;
 pub mod world;

@@ -6,6 +6,7 @@
 //!     let arena: Arena = Arena::from_map(&map::load(&path)?);
 //!     let meshes: Vec<(Surface, MeshData)> = arena.surface_meshes();
 
+use crate::game::warps::Warps;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
 use super::collision::Aabb;
@@ -25,12 +26,15 @@ pub enum Surface {
     BluePaint,
     RedConsole,
     BlueConsole,
+    Horizon,
+    Accretion,
+    Throat,
 }
 
 impl Surface {
     /// `ALL` lists every surface; the first `TEXTURED_COUNT` have their own texture sets, in
     /// the order of `asset_manifest::SURFACE_TEXTURES`.
-    pub const ALL: [Surface; 10] = [
+    pub const ALL: [Surface; 13] = [
         Surface::Ground,
         Surface::Bark,
         Surface::Planks,
@@ -41,6 +45,9 @@ impl Surface {
         Surface::BluePaint,
         Surface::RedConsole,
         Surface::BlueConsole,
+        Surface::Horizon,
+        Surface::Accretion,
+        Surface::Throat,
     ];
     /// `TEXTURED_COUNT` is how many surfaces have their own texture sets.
     pub const TEXTURED_COUNT: usize = 5;
@@ -55,6 +62,7 @@ impl Surface {
             Surface::Rock => 2.5,
             Surface::Rope => 0.5,
             Surface::RedConsole | Surface::BlueConsole => 1.0,
+            Surface::Horizon | Surface::Accretion | Surface::Throat => 1.0,
         }
     }
 
@@ -126,6 +134,7 @@ pub struct Console {
 
 /// `Arena` is the whole level.
 pub struct Arena {
+    pub warps: Warps,
     pub boxes: Vec<WorldBox>,
     pub shapes: Vec<WorldShape>,
     pub ladders: Vec<LadderVolume>,
@@ -141,6 +150,8 @@ pub struct Arena {
 
 /// `CYLINDER_SEGMENT_COUNT` is how many sides a trunk or log mesh has.
 const CYLINDER_SEGMENT_COUNT: usize = 14;
+/// `ACCRETION_DISK_RADIUS_FRAC` is a black hole's glowing disk radius per horizon radius.
+const ACCRETION_DISK_RADIUS_FRAC: f32 = 2.6;
 /// `ELLIPSOID_RING_COUNT` and `ELLIPSOID_SEGMENT_COUNT` are a leaf spray's latitude and longitude
 /// divisions.
 const ELLIPSOID_RING_COUNT: usize = 4;
@@ -261,6 +272,39 @@ impl Arena {
                 color_rgb: Vec3::from(light.color),
             })
             .collect();
+        let warps: Warps = Warps::from_map(&map.warps);
+        let warp_shape = |centre_m: Vec3, half_m: Vec3, surface: Surface| WorldShape {
+            kind: ShapeKind::Ellipsoid,
+            centre_m,
+            half_m,
+            local_half_m: half_m,
+            rotation: Mat3::IDENTITY,
+            surface,
+        };
+        for hole in &warps.black_holes {
+            let r_m: f32 = hole.horizon_radius_m;
+            shapes.push(warp_shape(
+                hole.centre_m,
+                Vec3::splat(r_m),
+                Surface::Horizon,
+            ));
+            shapes.push(warp_shape(
+                hole.centre_m,
+                Vec3::new(
+                    r_m * ACCRETION_DISK_RADIUS_FRAC,
+                    0.04,
+                    r_m * ACCRETION_DISK_RADIUS_FRAC,
+                ),
+                Surface::Accretion,
+            ));
+        }
+        for mouth in &warps.mouths {
+            shapes.push(warp_shape(
+                mouth.centre_m,
+                Vec3::splat(mouth.throat_radius_m),
+                Surface::Throat,
+            ));
+        }
         let mut team_spawns: [Vec<(Vec3, f32)>; 2] = [Vec::new(), Vec::new()];
         let mut player_spawns: Vec<(Vec3, f32)> = Vec::new();
         for spawn in &map.spawns {
@@ -295,6 +339,7 @@ impl Arena {
             bot_spawns,
             bounds_min_m,
             bounds_max_m,
+            warps,
         }
     }
 

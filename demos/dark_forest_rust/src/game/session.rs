@@ -7,6 +7,8 @@
 //!     session.update(&controls, &scene, &audio, dt_s);
 //!     let frame: FrameData = session.frame_data(&scene, width_px, height_px);
 
+use crate::game::bots::BODY_CENTRE_HEIGHT_M;
+use crate::game::warps::Warps;
 use std::collections::VecDeque;
 
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
@@ -539,6 +541,17 @@ impl Session {
         player_input.is_aiming = controls.weapon.is_aim_held && self.weapon.reload_time_s.is_none();
         self.player
             .update(&player_input, &scene.solids, &self.arena.ladders, dt_s);
+        if self.player.is_alive() {
+            let warps: &Warps = &self.arena.warps;
+            let centre_m: Vec3 = self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
+            self.player.velocity_m_s += warps.get_pull_m_per_s2(centre_m) * dt_s;
+            if let Some(exit_m) = warps.get_mouth_exit_feet_m(self.player.feet_m, centre_m) {
+                self.player.feet_m = exit_m;
+            }
+            if warps.is_inside_horizon(self.player.eye_position_m()) {
+                self.player.take_damage(f32::MAX);
+            }
+        }
         if self.player.did_step {
             audio.play(
                 Sound::Footstep,
@@ -589,6 +602,9 @@ impl Session {
             .collect();
         for shot in shots {
             self.apply_bot_shot(shot, scene, audio);
+        }
+        for bot in self.bots.iter_mut().filter(|bot| bot.is_alive()) {
+            bot.apply_warps(&self.arena.warps, dt_s);
         }
         let player_feet_m: Vec3 = self.player.feet_m;
         for index in 0..self.bots.len() {
