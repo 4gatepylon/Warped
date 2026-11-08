@@ -11,6 +11,7 @@ levels:
     branch: devin/dust-demo
     status: plugged in (make levels links and builds devin/dust-demo in .levels/)
     program: .levels/dust/demos/dust_rust/.build/release/hyperbolic-wormholes
+    map_picture: .levels/dust/demos/dust_rust/map_pictures/dust_r50m.png
     map: dust
     server_args: [--server-settings, e2e/fast_dust_server_settings.yaml]
   - name: Snow Planet
@@ -18,6 +19,7 @@ levels:
     branch: devin/snow-planet-demo
     status: plugged in (make levels links and builds devin/snow-planet-demo in .levels/)
     program: .levels/snow_planet/demos/snow_planet_rust/.build/release/snow-planet
+    map_picture: .levels/snow_planet/demos/snow_planet_rust/map_pictures/snow_planet.png
     map: snow-planet
     server_args: [--server-settings, e2e/fast_snow_planet_server_settings.yaml]
   - name: City Sphere
