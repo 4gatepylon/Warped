@@ -139,6 +139,8 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
   on W-68 (reality bend), which adds the pylons and the black hole.
+- [ ] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
+  wishlist having rifle going side to side when jogging like a normal rifle").
 
 ## Pending user review
 
