@@ -64,6 +64,10 @@ Made by the user (2026-11-08):
   in `game/README.md` and `authentication.md`.
 - Another agent (the infra stack) makes the downloadable Mac app (double-click, pick a server, give an address)
   and the cloud deployment.
+- Later the same day: the infra stack pauses its coding. The refactor works on its own, owns every file of the game
+  (what the infra stack made too), and changes `infra/` itself where the game needs it; the infra stack adapts
+  afterwards. The workloads the infra stack built must keep working from `game/` (section 3.1).
+- The goal now is phase A: a working game, refactored into `game/`. Phases B to G come later.
 
 Made by the agent who wrote this plan, for the user to confirm or overturn:
 
@@ -88,7 +92,7 @@ Made by the agent who wrote this plan, for the user to confirm or overturn:
   - Until C1, the game keeps the infra stack's v1 (#181) as the demo has it, but from A5 on, `warped-server`
     already refuses to start without a non-empty password.
   - v2 replaces v1 in one layer, rather than the demo being changed while the infra stack works on it.
-- **The infra stack lands in the demo first, and the game copies it** (step A0), so the app, the Linux server, the
+- **The infra stack lands in the demo first, and the game copies it** (step A0, done in #379 and #381), so the app, the Linux server, the
   password and the title screen arrive in `game/` with the rest of the demo instead of being redone.
 
 ## 3. Target layout
@@ -119,10 +123,9 @@ Dependencies only point downwards: `client` and `server` depend on `core`; nothi
 
 ### 3.1 Who owns what
 
-Two groups of agents work on the game at once: the **refactor** (this plan) and the **infra stack** (the Mac app,
-the Linux server bundle, the cloud). Each file has one owner at a time; the other may change it only in a PR the
-owner reviews. Before step A1 lands, the demo is where the infra stack works; once A1 lands, the infra stack's work
-on the game moves to `game/` and the demo is frozen (section 1).
+The infra stack (the Mac app, the Linux server bundle, the cloud) is paused, so the refactor owns all of it for now
+(section 2). The table says where the infra stack's work lives before and after A1; once A1 lands, the demo is
+frozen (section 1), and the infra stack's future work on the game happens in `game/`.
 
 | What | Before A1 (in the demo) | After A1 (in `game/`) | Owner |
 | --- | --- | --- | --- |
@@ -136,7 +139,19 @@ on the game moves to `game/` and the demo is frozen (section 1).
 | Cloud: `infra/` (Terraform, startup script, download page) | `infra/` | `infra/` | infra stack |
 | The server's command line, which `infra/startup.sh.tftpl` runs | `wormholes_server --port --map --game-password-file` | `warped-server` with the same flags (A5 renames it and updates the startup script in the same PR, reviewed by the infra stack) | refactor |
 
-Interfaces both sides rely on, which change only with both sides' agreement:
+Workloads the game must keep supporting, from the step that brings each into `game/` on. A step that changes one
+updates its users in `infra/` in the same PR and says so:
+
+- `make package-mac-app ONLINE_GAMES=<file>` builds `Warped.app` and zips it into `.build/Warped.zip`, with the
+  icon at `app/app_icon.png` of the game folder (`infra/Makefile`'s `GAME_DIR`).
+- `make build-server-bundle` builds the server alone for `x86_64-unknown-linux-musl` into
+  `.build/server_bundle.tar.gz`, holding the one binary `infra/startup.sh.tftpl` runs.
+- `make serve-game` and `make join-game` with `PORT`, `MAP`, `SERVER_SETTINGS`, `PLAYER_SETTINGS`,
+  `GAME_PASSWORD_FILE`.
+- The window, from `infra/Makefile`'s `check-game-servers`: `--join <address:port> --map <map>
+  --game-password-file <file> --bot --exit-after-s <s> --label <label>`, without a display or Metal device.
+
+Interfaces those workloads rely on:
 
 - The server's flags: `--port`, `--map` (later `--maps`), `--game-password-file`, `--server-settings`; exit on
   SIGTERM; one process per game.
@@ -157,8 +172,8 @@ file goes to each place; the parts are listed.
 
 | Demo file | Lines | Goes to | Notes |
 | --- | --- | --- | --- |
-| `main.rs` | 4,933 | `client/src/main.rs` + `client/src/session/*.rs`, `client/src/bench.rs`, `server/src/main.rs` | Split (step A3): command line, the `Session` (≈1,900 lines: input, weapons, HUD, net glue), offscreen benchmark views, the warp tour; `serve_only` goes to the server. House routes, house views and `--autopilot` are dropped. |
-| `net.rs` | 1,976 | `core/src/net/protocol.rs`, `core/src/net/connection.rs`, `server/src/game.rs` | Split (steps A4, A5): message layouts (`Message`, `Reader`, `Kind`, sizes) and the window's `Client` go to core; `Server`, `serve`, the beacon go to the server. |
+| `main.rs` | 5,136 | `client/src/main.rs` + `client/src/session/*.rs`, `client/src/bench.rs`, `server/src/main.rs` | Split (step A3): command line, the `Session` (≈1,900 lines: input, weapons, HUD, net glue), offscreen benchmark views, the warp tour; `serve_only` goes to the server. House routes, house views and `--autopilot` are dropped. |
+| `net.rs` | 2,428 | `core/src/net/protocol.rs`, `core/src/net/connection.rs`, `server/src/game.rs` | Split (steps A4, A5): message layouts (`Message`, `Reader`, `Kind`, sizes) and the window's `Client` go to core; `Server`, `serve`, the beacon go to the server. |
 | `voxel_world.rs` | 3,550 | `core/src/voxel_world.rs` (+ `core/src/player.rs`, `core/src/laser.rs` later) and `client/src/scene.rs` | Split (step A4): walking, collisions, lasers, consoles, black hole, time rate stay in core; avatars posed for drawing (`with_avatars`, `with_posed_avatars`), clearance grids, markers and material surfaces go to the client. |
 | `settings.rs` | 911 | `core/src/settings.rs` and `client/src/player_settings.rs` | Split: `ServerSettings` to core; `PerPlayerSettings` (keys, through `key_bindings.rs`, which needs SDL) to the client. |
 | `multiplayer.rs` | 963 | `client/src/others.rs` and `core/src/bot.rs` | Split: drawing other players to the client; the windowless bot (`run_voxel_bot`) to core, so tests can run bots without a window. The house half (`pack_shared_view`, `run_bot`) is dropped. |
@@ -171,7 +186,10 @@ file goes to each place; the parts are listed.
 | `fps_demo_assets.rs` | 46 | `client/src/assets.rs` | Points at `common/assets/` after step A6. |
 | `hud_bars.rs`, `menu.rs`, `minimap.rs`, `map_layout.rs`, `exit_prompt.rs`, `credits.rs`, `third_person.rs`, `key_bindings.rs`, `avatar_animation.rs`, `dust.rs`, `spaceships.rs` | 4,600 | `client/src/` | As they are. |
 | `world.rs`, `scene_data.rs`, `render_cpu.rs`, `render_metal.metal`, `physics.rs`, `map_export.rs` | 6,500 | dropped | The house demo's engine. `physics::Input` moves to `core/src/player.rs` first, since `voxel_world.rs` uses it. `--renderer cpu` goes with `render_cpu.rs`. |
-| From the infra stack: `bin/wormholes_server.rs` (#180) | 100 | `server/src/main.rs` | The Linux game server's `main`; A5 builds `warped-server` from it and the server half of `net.rs`. |
+| From the infra stack: `app_bundle.rs` (#183) | 54 | `client/src/app_bundle.rs` | Finds assets and models inside `Warped.app` or in the checkout; its checkout folders are relative to the crate folder, so A1 fixes them for `game/client/`. |
+| From the infra stack: `../build.rs` (#183) | 80 | `client/build.rs` | Builds the Sketchfab-licensed models into the program; its folders are relative to the crate folder, fixed in A1 like `app_bundle.rs`'s. |
+| `../Makefile` | 130 | `game/Makefile` | Its targets join the game's in A1, pointing at `client/`; A5 points the server ones at `warped-server`. |
+| From the infra stack: `bin/wormholes_server.rs` (#180) | 107 | `server/src/main.rs` | The Linux game server's `main`; A5 builds `warped-server` from it and the server half of `net.rs`. |
 | From the infra stack: `title.rs` (#182), the title screen and password dialog in `main.rs` | 260 + 200 | `client/src/title.rs`, `client/src/main.rs` | As they are (infra stack's). |
 | From the infra stack: `../app/` (#183: `Info.plist`, `app_icon.png`, `how_to_open.txt`) | | `client/app/` | Copied verbatim (infra stack's). |
 | `../player_settings.yaml`, `../server_settings.yaml`, `../rustfmt.toml` | | `game/` | Copied verbatim. |
@@ -270,6 +288,8 @@ section 7.
 ### Already in this stack
 
 1. `game: refactor plan` (this file).
+1. `game: build the legacy oracle against the demo with the infra stack merged`: layer 4 predated #379 and #381.
+1. `game: scope the plan to phase A` (this change).
 2. `delete the prototype square game and its management server`: `clients/`, `game_server/`, `management_server/`,
    `common/protocol/`'s square-game docs, and the docs that pointed at them.
 3. `game: workspace scaffold`: the folders of section 3 with their READMEs, crates that build, and the Makefile.
@@ -300,7 +320,11 @@ its own layer.
 - **A4, extract `warped-core`.** Move the modules of section 4 into `core/`, cutting every dependency on SDL, Metal
   and objc2 as listed there. Done when: `cargo check -p warped-core --target x86_64-unknown-linux-gnu` passes
   (7.1), and every oracle test passes against `warped_core` instead of the client.
-- **A5, `warped-server`.** Move the server half of `net.rs` and `serve_only` into `server/`, written sans-IO
+- **A5, `warped-server`, moved as it is.** Build `warped-server` in `server/` from `bin/wormholes_server.rs` and
+  the server half of `net.rs`, unchanged (it still runs its own UDP loop), with the same flags and exit codes.
+  `make build-server-bundle` packs it, and `infra/startup.sh.tftpl` and `infra/Makefile` point at the game. Done
+  when: the demo's server tests pass in `server/`, and 7.3.3 (cross-version) passes.
+- **A5b, sans-IO server.** Rewrite the server half of `net.rs` and `serve_only` into `server/`, written sans-IO
   (`Game::handle(datagram, from, now_s) -> Vec<(to, datagram)>`, `Game::tick(now_s)`), with a thin UDP loop, from
   the infra stack's `wormholes_server` `main`. The binary becomes `warped-server` with the same flags; the same PR
   changes `infra/startup.sh.tftpl` and `make build-server-bundle` to the new name, and the infra stack reviews it.
@@ -617,10 +641,9 @@ the Linux target is installed. Then, if anything is missing:
 - Change a lower layer with `gh stack checkout <branch>`, commit there, then `gh stack rebase --upstack` and
   `gh stack push`.
 - When a step's done, tick it in this file (in that step's own layer) by adding "(done, #<PR>)" after its title.
-- **With the infra stack:** follow section 3.1's owners. Before changing anything the other side owns or relies on
-  (the server's flags, `online_games.txt`, the password files, the app's folders, `infra/`), comment on the other
-  side's open PR and wait for agreement. Run `git log origin/staging/global` and `gh pr list --search
-  "head:claude/infra"` at the start of each session to see what the infra stack has merged or opened since.
+- **With the infra stack** (paused, section 2): keep 3.1's workloads working, and change `infra/` in the same PR
+  when a step changes what it runs. Run `git log origin/staging/global` at the start of each session to see whether
+  the infra stack has started again.
 
 ## 10. Open questions for the user
 

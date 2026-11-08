@@ -15,9 +15,10 @@ Code reads them through `CLAUDE.md` beside this file.
 
 ## Working beside the infra stack
 
-The infra stack (PRs #179 to #185, branches `claude/infra-*`) owns the title screen, the Mac app, the Linux server
-bundle and `infra/` (plan, section 3.1). Don't change those, the server's flags, `online_games.txt`, the password
-files or the app's folders without the infra stack's agreement on its PR. Authentication follows
+The infra stack (the title screen, the Mac app, the Linux server bundle and `infra/`) is paused, so the refactor
+owns its files too and changes `infra/` itself when a step needs it. Keep the workloads of the plan's section 3.1
+working (`make package-mac-app`, `make build-server-bundle`, the server's and window's flags), and say in the PR
+when one changes. Authentication follows
 [`common/protocol/authentication.md`](../common/protocol/authentication.md) exactly; changing it means changing that
 page in the same PR.
 
