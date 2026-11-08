@@ -68,9 +68,11 @@ make join-game SERVER=127.0.0.1
   it lands: the grains fly up to a few meters and fall back, and all of it fades within 2 s (D81).
 - The bars in the bottom left (health in a game on a server, the gun's ammo, and on Lunar Surface the sprint energy)
   are segments that lean like `/`: empty ones dark glass outlined in the bar's colour, filled ones translucent,
-  glossy and glowing (D85). A reddish-orange pulse runs down the health bar (right to left) at each hit, a blue one
-  down the energy bar while you sprint, and a fainter one up the energy bar while it refills; the ammo bar has none.
-  The CPU renderer's window draws them as flat boxes.
+  glossy and glowing (D85). While health or energy changes, soft, wide swells of light run over the bar's filled
+  part: reddish-orange down the health bar from the last hit point after a hit, pale blue down the energy bar from
+  the last filled slot while you sprint, and fainter ones up toward the filled end while it refills. They are as
+  strong, fast and frequent as the value's smoothed rate of change (D94); the ammo bar has none. The CPU renderer's
+  window draws the bars as flat boxes.
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).

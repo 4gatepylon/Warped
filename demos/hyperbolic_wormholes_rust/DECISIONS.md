@@ -1200,6 +1200,8 @@
   rounded, chose "slanted tactical but with the neo background", slightly more translucent than the neon example,
   and asked for a reddish-orange pulse down the health bar when taking damage, a blue one down the energy bar while
   running, none on ammo, and a much more subtle one while regaining things such as energy.
+- **Since D94 (W-80):** wide swells over the filled part, paced by the smoothed rate of change, replace these
+  pulses.
 
 ### D86. Ask before exiting on Escape
 
@@ -1408,6 +1410,40 @@
   - keeping `refill_s` beside a crouch multiplier (two rates in seconds read more plainly).
 - **Rationale:** you asked that crouching recharge the energy for running at the same rate as running uses it, and
   walking at half that, as YAML defaults that can be changed.
+
+### D94. Soft swells along the bars' filled part, paced by how fast they change (W-80)
+
+- **Choice:** you picked variant D from four rendered samples (A quick glints, B rate-paced, C soft swells, D C's
+  swells made wider and rate-paced). It replaces D85's pulses:
+  - **Where:** the swells run over a bar's filled part only. Down from the end of the last filled segment (the last
+    hit point, or the last energy slot) toward the bar's start while the value falls; up from the start toward that
+    end while it rises. They fade in and out smoothly inside both ends, over half a half width (at most half the
+    filled part), so the empty slots stay dark.
+  - **Shape:** a wide Gaussian glow, 4.5% of the screen's width at half width (about a quarter of a bar) and 1.1 bar
+    heights tall, over segments and gaps alike. The overlay shader draws it after the segments (`get_pulse_glow`):
+    it tints toward the pulse's colour and adds 0.6 of that colour as light. Up to 4 swells run on a bar at once.
+  - **Rate:** each bar keeps an exponential moving average of its value (0.3 s time constant), and the average's rate
+    of change drives everything. Strength is that rate over 15% of the bar per second, at most 1. It sets the swells'
+    opacity (50% at full strength while falling, 45% while rising), their speed (0.8 to 2.2 bar widths a second) and
+    the time between them (0.9 s down to 0.45 s). A swell starts each period while the strength is at least 5%.
+  - **What that gives:**
+    - **Hit:** a burst of 2 or 3 swells over about a second, fast and strong at first, then slower and fainter.
+    - **Sprinting:** a steady train.
+    - **Refilling:** about half as strong, as the energy refills at half the rate it drains (faster while crouching,
+      D93).
+    - **Respawn:** a strong rising burst.
+    - **No change, no swell:** full health, full energy, or sprint held with no energy left.
+  - **Colours:** reddish-orange `[1.0, 0.45, 0.2]` on health; pale blue-white `[0.8, 0.94, 1.0]` on energy (lighter
+    than D85's deep blue, which looked dark); the bar's own colour 65% of the way to white while rising. Ammo still
+    never pulses.
+- **Alternatives:**
+  - A, B and C, as rendered (narrow glints, medium rate-paced glows, narrower swells at a fixed pace);
+  - the glow only over the segments (it read as whole segments lighting up);
+  - pulses started by events (a hit, the sprint key) rather than by the value changing (they would not follow how
+    fast it changes, and a server with endless sprint would pulse while the energy stays full).
+- **Rationale:** you asked that the pulsing start where the filled part ends, that the blue be less dark, that the
+  pulses look Gaussian, more subtle and faster, in proportion to the smoothed rate of change; then for "soft swell"
+  but rate based, "really wide gaussian like; think like smoother convolution vibes".
 
 ## Baselines
 

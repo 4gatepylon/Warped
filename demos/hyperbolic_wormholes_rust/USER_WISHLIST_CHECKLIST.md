@@ -11,6 +11,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills.
+  Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/hill-self-shadow`, 2026-11-07.
 - [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
   and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/delta-fighters`, 2026-11-07.
@@ -33,12 +36,6 @@ is in [`AGENTS.md`](AGENTS.md).
   NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
   show a redshift instead. The user wants video or image demos to confirm. Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/wormhole-doppler`, 2026-11-07.
-- [~] **W-80 Smoother bar pulses.** The pulsing should start where the bar's filled part ends: losing health, it starts
-  at the last hit point, not the bar's end (empty slots don't count). The blue pulse going left should be less dark,
-  and it too starts on the last filled slot. Pulses shouldn't light whole segments: they should look more Gaussian
-  and more subtle, at a faster pace in general, and in proportion to how fast the value is changing (smoothed). The
-  user wants samples first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/hud-pulse-refine`, 2026-11-07.
 - [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
@@ -110,8 +107,6 @@ is in [`AGENTS.md`](AGENTS.md).
   character, and the player controls it from there, seeing their own character.
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
-- [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
-  shadows on the hills.
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
 - [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
@@ -258,6 +253,12 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-70 Windows to see and shoot through.** Since the map update (W-59) the habitat modules' and walkways'
   windows are glass panes laid over a solid wall, so they show the wall, not the outside, and glass stops lasers
   (W-57, #174). Asked whether windows should be see-through and let lasers through, the user answered "Both". #222.
+- [?] **W-80 Smoother bar pulses.** The pulsing should start where the bar's filled part ends: losing health, it starts
+  at the last hit point, not the bar's end (empty slots don't count). The blue pulse going left should be less dark,
+  and it too starts on the last filled slot. Pulses shouldn't light whole segments: they should look more Gaussian
+  and more subtle, at a faster pace in general, and in proportion to how fast the value is changing (smoothed). The
+  user wants samples first. From the samples the user picked "soft swells except that it is also rate based (and
+  make the swell really soft, i.e. really wide gaussian like; think like smoother convolution vibes)" (D94). #231.
 - [?] **W-87 No colourful spaceship.** Remove the colourful spaceship from the sky (W-53, #193): "the circular space
   station one is fine and great, but the colourful ones look ugly". That is the container freighter; the ring station
   stays, and so do the grey fighters unless the user says otherwise. #232.
