@@ -43,7 +43,7 @@ and in progress.
 | Zone | One of a level's three regions: the blue zone, the middle zone and the red zone. |
 | Route | One way across the middle zone, from one side to the other. |
 | Floor | One walkable layer inside a level. |
-| Warp object | A black hole or a wormhole. Level designers place them; players can't. |
+| Warp object | A black hole or a wormhole. Level designers place them, and each player throws a pair of wormhole mouths of their own (see [Thrown wormholes](#thrown-wormholes)). |
 | Energy | What sprinting uses up. It refills over time, twice as fast while crouched. |
 | Map edge | The soft edge of a level: players slow down without end as they climb it, so they never leave. |
 
@@ -291,6 +291,7 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | Left click | Shoot, standing still or crouched (walking crouched too), not while walking upright, sprinting, in the air or deactivating a console (hold it for a weapon that fires while held, such as the rifle) |
 | Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |
+| `Q` | Throw your purple wormhole mouth, the next press your green one, then purple again, and so on (see [Thrown wormholes](#thrown-wormholes)) |
 | `1`, `2` (in the lobby) | Join the blue or the red team |
 | `Tab` | Open or close the menu (see [Screen](#screen)). The player stands still while it is open, but the game goes on. |
 | `Q`, `E` (in the menu) | Turn to the menu's previous or next page |
@@ -299,6 +300,28 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | `Esc` | Free the mouse; with the mouse free, ask "Do you want to exit?" (`Return` or `Y` exits, `Esc` or `N` goes back to the game) |
 
 ## Screen
+
+The screens a player meets, in order:
+
+- **Loading:** before the first frame, a black screen titled LOADING names what is loading (the surface textures,
+  the shaders, each gun) over a bar like the console bar, filling as it goes.
+- **Lobby** (the team screen): it says CONNECTING until the server answers, then CONNECTED with how many players
+  each team has. `1` joins blue and `2` joins red; it then says JOINING THE GAME until the server lets the player
+  in. A player can't shoot from the lobby.
+- **Connection banners:** when a window can't play on its server, a banner says why, and the terminal says what to
+  do:
+  - NO ANSWER FROM THE SERVER: nothing came back for 2 s;
+  - SERVER RUNS ANOTHER VERSION: the server's messages don't fit this build, so rebuild both from the same commit;
+  - THE GAME IS FULL: the server already has 8 players.
+- **In play:** the crosshair, bars and minimap below, and the other players as figures in their team's colour.
+- **Death:** the view darkens and says YOU DIED with a countdown until the player respawns (see
+  [Respawning](#respawning)).
+- **Win:** when a team has won, every player sees `<TEAM> TEAM WINS`, and a new game starts when the server's
+  operator presses `Enter` in its terminal.
+- **Exit:** `Esc` frees the mouse; `Esc` again asks "Do you want to exit?", and `Return` or `Y` quits while `Esc` or
+  `N` goes back to the game.
+
+What a player sees while playing:
 
 - **Crosshair** in the middle of the screen.
 - **Bars**, in the bottom left: health, the gun's ammo (one block for the sniper rifle, which
@@ -310,20 +333,34 @@ Every key here is the default. Each player can rebind any action, in the menu or
 - **Minimap**, in a corner (top right by default): a Poincaré disk of the ground within 60 m,
   turned so the player faces up, with other players as dots and shots as lines in their team's
   colours. Straight paths away from the player bend into arcs, as they do in that picture of the
-  hyperbolic plane.
-- **Menu** (`Tab`), with four pages; it opens on SCORES:
-  - SCORES: the player count, and each player's team, kills and deaths, sorted by team and kills,
-    with each team's totals.
-  - SETTINGS: the player's own settings (key bindings, mouse speed and view effects).
+  hyperbolic plane. Each player sets whether it shows, its corner, its size and its reach in
+  `player_settings.yaml` (`minimap`).
+- **Console bar:** while a player holds `E` on a console, a bar below the crosshair fills over the
+  10 s it takes, and they can't shoot (see [Winning a level](#winning-a-level)).
+- **Menu** (`Tab`), with four pages under a tab bar; it opens on SCORES, and `Q` and `E` turn the
+  pages. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
+  bindings say, so a bad binding can always be fixed. The player stands still while it is open,
+  but the game goes on.
+  - SCORES: the player count, and each player's team, kills and deaths in this game, sorted by
+    team and then kills, with the player's own line marked and each team's totals. Before a game
+    on a server it says there is none, and before the server's first scores it says to join a team.
+  - SETTINGS: the player's own settings, one row each: every key binding (`Return`, then the new
+    key, button or wheel; `Esc` cancels), then numbers changed with `Left` and `Right` (mouse look
+    speed, motion blur, head bob walking and sprinting, how red, shaky and blurred a hit looks,
+    the wormhole colour's strength and the Milky Way's brightness), then a row that saves them to
+    `~/.config/warped/player_settings.yaml` (or the `--player-settings` file), which later games
+    load. A line below says what changed or went wrong.
   - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole
     mouths, the black hole, the spawns, the zones' edges and the map edge, the player as a disk
     pointing the way they face, a circle of the minimap's reach around them (the rest darker and
     blurred), and every other player in the game, near or far, as a dot in their team's colour.
+    A legend line names the marks.
   - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
     and the libraries the game is built on.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the
   screen shakes (each player's own setting).
 - **Motion blur:** a slight one (each player's own setting).
+- **Window title:** the frame rate, the render time, the GPU's own time and the render scale.
 
 ## Bullets, lasers and light
 
@@ -337,6 +374,40 @@ Every key here is the default. Each player can rebind any action, in the menu or
   and faster, none standing still or outside the throat's region. Only that player sees it.
 - A shot that hits the ground throws up dust and a puff of mist where it lands, which every player
   sees. The grains fly up a few meters and fall back, and all of it fades within 2 s.
+
+## Thrown wormholes
+
+Each player has a pair of wormhole mouths of their own, one purple and one green, which they throw
+anywhere in the level.
+
+- **Throwing:** `Q` throws the purple mouth, the next press the green one, then purple again, and
+  so on; throwing a mouth again moves it.
+- **Flight:** a mouth is lobbed from the player's hand a little above the crosshair and curves down
+  under its own gravity. It drops to the floor below whatever it hits, and hovers there at eye
+  height, facing back the way it flew.
+- **Fizzling:** a throw fizzles if it hasn't landed within its flight time, or if it lands too close
+  to a wall or another warp object (their reaches may not overlap).
+- **Linking:** once both of a player's mouths are down they link, like a level's wormholes: any
+  player or laser that goes into one comes out of the other, bent on the way like light.
+- **Looks:**
+  - the view through a thrown mouth is tinted its colour;
+  - a mouth in flight, or down while its partner isn't, glows as a small ball;
+  - every player sees every player's mouths, and anyone can walk or shoot through them.
+- **Death:** a player's mouths disappear when they die.
+- **Shooting an enemy's mouths:** a shot that goes through an enemy's mouth, or hits a lone
+  mouth's ball, makes both of that enemy's mouths flash red; enough hits destroy the pair.
+  Teammates' shots don't count.
+
+| Parameter | Value |
+| --- | --- |
+| Throw speed | 16 m/s (`wormholes.throw_speed_m_per_s`) |
+| Throw angle above the crosshair | 0.3 rad (`wormholes.throw_up_rad`) |
+| Gravity on a mouth in flight | 20 m/s² (`wormholes.gravity_m_per_s_per_s`) |
+| Longest flight before it fizzles | 4 s (`wormholes.max_flight_s`) |
+| A mouth's size on Lunar Surface | 1.6 m Schwarzschild radius (`wormholes.schwarzschild_radius_m`); on the house, the house's mouths' size |
+| How far its bending reaches on Lunar Surface | 6 m (`wormholes.reach_m`) |
+| Hits that destroy an enemy's pair | 2 sniper shots or 5 rifle shots (`wormholes.sniper_hits_to_destroy`, `wormholes.rifle_hits_to_destroy`) |
+| Red flash after each hit | 0.25 s (`wormholes.hit_flash_s`) |
 
 ## Weapons
 
@@ -386,6 +457,6 @@ time to kill.
 - **Warp objects:** how many black holes and wormholes each level but Lunar Surface has, and where.
 - **Flashlight:** whether other players should see it.
 
-These may change later: more than one pylon per team per level, players placing warp objects, and
-more than two levels per team. The wishlist has work in progress on both: three pylons per team
-that strengthen the black hole as they go down (W-68), and wormholes each player throws (W-60).
+These may change later: more than one pylon per team per level, and more than two levels per team.
+The wishlist has work in progress on the first: three pylons per team that strengthen the black hole
+as they go down (W-68).

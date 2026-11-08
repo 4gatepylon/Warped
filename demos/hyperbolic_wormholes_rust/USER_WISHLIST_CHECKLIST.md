@@ -21,9 +21,6 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Claimed by Claude Code
-  (subagent of a session on `leah`'s Mac in `Warped-main`), branch `claude/screen-tearing`, worktree
-  `/Users/leah/Documents/dev/Warped-rb-tearing`, 2026-11-08.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -54,6 +51,10 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Open
 
+- [ ] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Found in #319: not vsync
+  tearing (the window presents at vsync, one frame in flight) but bands and strips on far ground under the reality
+  bend, from `BEND_SAG_PIXELS` = 0.5 in `render_voxel.metal`; 0.1 px removes them at 13% more GPU time (34% on the
+  overview view). The user chose to keep 0.5 px for now, 2026-11-08, with W-107 (time dilation) replacing the bend.
 - [ ] **W-40 Graphics caveats.** Fix the Lunar Surface graphics caveats listed in `PLAYTEST.md` ("Graphics on Lunar
   Surface, to fix in later pull requests"); slightly wrong graphics were accepted for playtesting "and we can fix
   them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
