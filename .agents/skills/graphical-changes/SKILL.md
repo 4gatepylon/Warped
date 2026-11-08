@@ -127,9 +127,9 @@ capture.
   that play in step. The page shows the question too.
 - **It's an artifact:** keep it in the same run folder as its pictures, refer to them by relative paths so it still
   works when the folder is copied, and load nothing from the internet.
-- **Opening it:** serve the run folder with `python3 -m http.server <port> --directory <run folder>` on a port of
-  your own, open the page in the browser preview, and give its URL and absolute path beside the files' paths. The
-  question and the option names still go in the chat message.
+- **One command to open it:** the page works from `file://`, so give the user one command that opens it,
+  `open <absolute path of the run folder>/index.html`, beside the files' paths. The question and the option names
+  still go in the chat message.
 - **Interactive demos** of how a look plays are in the `sharing-gameplay` skill.
 
 ## Label every comparison
