@@ -362,11 +362,15 @@ Confirmed by the user after testing.
   testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
   for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
   BLUE but it has to be very close to white as I had asked". #272. Confirmed by the user, 2026-11-07: "wormhole color from motion is almost done: just mark it as done and make a PR that makes it take slightly longer; ideally just double its radius or wahtever (ioe walking at same speed should take exactly trwice as long of time showing me cyan or red)".
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-acc2c2d6bf5b447c3` on the user's Mac, branch
-    `claude/wormhole-tint-crisp` (on this Mac only so far; to be pushed to `origin`), pictures in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-82/`.
-    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: follow-up in progress: the
-    region doubled (twice as long a flash) and crisper colours, to merge as its own PR.
+  After seeing #272's pictures: "for the "at the throat" thing you still need to have the dark red and the light
+  cyan almost white instead of doing this "warm" stuff. It has to be CRISP (not like diffused by this white screen),
+  like the previous pictures I was shown. Still fix the throat timing for the color though", "so overall your throat
+  timing looks good", and "its just the specific colors should be a bit more crisp". #289.
+  - **Where the work is** (for any agent picking it up): branch `claude/wormhole-tint-crisp`, pushed to `origin`,
+    PR #289 into `staging` (crisp colours, and the tint showing twice as long: 0.63 s against 0.32 s at walking
+    speed). Worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-acc2c2d6bf5b447c3` on the user's Mac; pictures
+    in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-82/`
+    (`fix3_*`), which is temporary (it is under `/private/tmp`). State, 2026-11-08: merged into `staging`.
 - [x] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237. Confirmed by the user, 2026-11-07: "also stuck in bunker is fixed so mark that as done".

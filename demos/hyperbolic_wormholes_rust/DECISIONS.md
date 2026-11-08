@@ -1154,7 +1154,7 @@
 ### D84. A crisp colour shift while moving through a wormhole's throat
 
 - **Choice** (W-82 (wormhole colour from motion) replaced the 1.5 s cyan tint after each crossing of W-52 (cyan
-  through a wormhole); after testing, #272 moved it to the throat, and #NNN made the colours crisp and the time twice
+  through a wormhole); after testing, #272 moved it to the throat, and #289 made the colours crisp and the time twice
   as long):
   - **When:** the shift depends only on where the player is and how they move, with no timer. Its strength is the
     tint setting × how deep the eye is inside a mouth × the speed along the view (forward speed × cos pitch +
