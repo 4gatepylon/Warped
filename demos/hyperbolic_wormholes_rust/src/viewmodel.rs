@@ -1,10 +1,13 @@
 //! `viewmodel.rs` draws the fps_demo's energy revolver (the Sketchfab "Sci-fi revolver" glTF's railgun
 //! variant, with its PBR textures) in the player's hand where the wand is, rasterised with 4x MSAA
 //! into a texture of its own that `apply_overlay` lays over the frame.
+//!
+//! Must know:
+//! - The revolver's files are built into the program (`REVOLVER_FILES`), so the game never reads
+//!   them from disk and the app doesn't ship them as files.
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
 use glam::{Mat3, Mat4, Vec3};
@@ -22,16 +25,240 @@ use objc2_metal::{
 };
 use rayon::prelude::*;
 
-use crate::fps_demo_assets::{check_asset, get_asset_path};
 use crate::render_metal::OverlayWand;
-use crate::voxel_textures::{make_array, make_mips};
+use crate::voxel_textures::{make_array, make_mip_chain};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 type Pipeline = Retained<ProtocolObject<dyn MTLRenderPipelineState>>;
 
 const SHADER_SOURCE: &str = include_str!("viewmodel.metal");
-const REVOLVER_GLTF: &str = "sketchfab/sci_fi_revolver/scene.gltf";
+const REVOLVER_GLTF: &str = "scene.gltf";
+const BUFFER_ALIGNMENT_BYTES: usize = 4;
+/// `REVOLVER_FILES` is the Sketchfab "Sci-fi revolver" by Ramhat (Sketchfab Standard license): its
+/// glTF, which keeps the author and license in `asset.extras`, its buffer and its images, each by
+/// its path in the model's folder. They are built into the program, so the app carries the model
+/// inside its executable rather than as files anyone could copy out (the license's §2.2(b)).
+const REVOLVER_FILES: [(&str, &[u8]); 38] = [
+    (
+        "scene.bin",
+        include_bytes!("../../fps_demo/assets/sketchfab/sci_fi_revolver/scene.bin"),
+    ),
+    (
+        "scene.gltf",
+        include_bytes!("../../fps_demo/assets/sketchfab/sci_fi_revolver/scene.gltf"),
+    ),
+    (
+        "textures/BulletBallistic_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/BulletBallistic_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/BulletBallistic_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/BulletBallistic_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/BulletBallistic_normal.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/BulletBallistic_normal.png"
+        ),
+    ),
+    (
+        "textures/BulletRailGun_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/BulletRailGun_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/BulletRailGun_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/BulletRailGun_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/BulletRailGun_normal.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/BulletRailGun_normal.png"
+        ),
+    ),
+    (
+        "textures/CollimatorReticle001__0_baseColor.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/CollimatorReticle001__0_baseColor.png"
+        ),
+    ),
+    (
+        "textures/Collimator_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Collimator_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/Collimator_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Collimator_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/Collimator_normal.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Collimator_normal.png"
+        ),
+    ),
+    (
+        "textures/Glass_baseColor.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Glass_baseColor.png"
+        ),
+    ),
+    (
+        "textures/Glass_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Glass_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/Glass_normal.png",
+        include_bytes!("../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Glass_normal.png"),
+    ),
+    (
+        "textures/Glass_transmission.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Glass_transmission.png"
+        ),
+    ),
+    (
+        "textures/IronSight_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/IronSight_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/IronSight_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/IronSight_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/IronSight_normal.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/IronSight_normal.png"
+        ),
+    ),
+    (
+        "textures/Limbs_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Limbs_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/Limbs_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Limbs_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/Limbs_normal.png",
+        include_bytes!("../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Limbs_normal.png"),
+    ),
+    (
+        "textures/RailGun_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/RailGun_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/RailGun_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/RailGun_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/RailGun_normal.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/RailGun_normal.png"
+        ),
+    ),
+    (
+        "textures/Receiver1_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Receiver1_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/Receiver1_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Receiver1_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/Receiver1_normal.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Receiver1_normal.png"
+        ),
+    ),
+    (
+        "textures/Receiver2_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Receiver2_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/Receiver2_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Receiver2_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/Receiver2_normal.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Receiver2_normal.png"
+        ),
+    ),
+    (
+        "textures/Suppressor_baseColor.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Suppressor_baseColor.jpeg"
+        ),
+    ),
+    (
+        "textures/Suppressor_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Suppressor_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/Suppressor_normal.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/Suppressor_normal.png"
+        ),
+    ),
+    (
+        "textures/VATS_baseColor.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/VATS_baseColor.png"
+        ),
+    ),
+    (
+        "textures/VATS_emissive.jpeg",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/VATS_emissive.jpeg"
+        ),
+    ),
+    (
+        "textures/VATS_metallicRoughness.png",
+        include_bytes!(
+            "../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/VATS_metallicRoughness.png"
+        ),
+    ),
+    (
+        "textures/VATS_normal.png",
+        include_bytes!("../../fps_demo/assets/sketchfab/sci_fi_revolver/textures/VATS_normal.png"),
+    ),
+];
 /// `RAILGUN_NODE_PARTS` are name parts of the revolver's railgun variant; the file also holds a
 /// ballistic one beside it.
 const RAILGUN_NODE_PARTS: [&str; 8] = [
@@ -290,26 +517,37 @@ fn get_map_images(material: &gltf::Material) -> [Option<usize>; 4] {
     ]
 }
 
-/// `check_revolver` fails like `check_asset` when the revolver's glTF is missing.
+/// `get_revolver_file` gives the revolver's file at `path` in its folder, as built into the program.
 ///
-/// Example: `check_revolver()?;`
-pub fn check_revolver() -> Result<()> {
-    check_asset(&get_asset_path(REVOLVER_GLTF))
+/// Example: `let gltf_bytes: &[u8] = get_revolver_file("scene.gltf")?;`
+fn get_revolver_file(path: &str) -> Result<&'static [u8]> {
+    match REVOLVER_FILES.iter().find(|(name, _)| *name == path) {
+        Some(&(_, bytes)) => Ok(bytes),
+        None => Err(format!("viewmodel: the revolver has no built-in file {path}").into()),
+    }
 }
 
 impl Viewmodel {
-    /// `Load` reads the revolver from the fps_demo's `assets/` onto `device`, and fails like
-    /// `check_asset` when it is missing.
+    /// `Load` reads the revolver built into the program (`REVOLVER_FILES`) onto `device`.
     ///
     /// Example: `let revolver = Viewmodel::Load(&device)?;`
     #[allow(non_snake_case)]
     pub fn Load(device: &ProtocolObject<dyn MTLDevice>) -> Result<Viewmodel> {
-        check_revolver()?;
-        let path: PathBuf = get_asset_path(REVOLVER_GLTF);
-        let gltf::Gltf { document, blob } = gltf::Gltf::open(&path)?;
-        let base_dir: &Path = path.parent().expect("a file has a folder");
-        let buffers: Vec<gltf::buffer::Data> =
-            gltf::import_buffers(&document, Some(base_dir), blob)?;
+        let gltf::Gltf { document, mut blob } =
+            gltf::Gltf::from_slice(get_revolver_file(REVOLVER_GLTF)?)?;
+        let buffers: Vec<gltf::buffer::Data> = document
+            .buffers()
+            .map(|buffer| -> Result<gltf::buffer::Data> {
+                let mut data: Vec<u8> = match buffer.source() {
+                    gltf::buffer::Source::Uri(uri) => get_revolver_file(uri)?.to_vec(),
+                    gltf::buffer::Source::Bin => blob
+                        .take()
+                        .ok_or("viewmodel: the revolver's glTF has no binary chunk")?,
+                };
+                data.resize(data.len().next_multiple_of(BUFFER_ALIGNMENT_BYTES), 0);
+                Ok(gltf::buffer::Data(data))
+            })
+            .collect::<Result<_>>()?;
         let mut globals: Vec<Mat4> = vec![Mat4::IDENTITY; document.nodes().len()];
         for scene in document.scenes() {
             for node in scene.nodes() {
@@ -378,10 +616,10 @@ impl Viewmodel {
                 });
             }
         }
-        let image_paths: Vec<Option<PathBuf>> = document
+        let image_uris: Vec<Option<&str>> = document
             .images()
             .map(|image| match image.source() {
-                gltf::image::Source::Uri { uri, .. } => Some(base_dir.join(uri)),
+                gltf::image::Source::Uri { uri, .. } => Some(uri),
                 gltf::image::Source::View { .. } => None,
             })
             .collect();
@@ -401,10 +639,12 @@ impl Viewmodel {
         let decoded: Vec<((usize, usize), Vec<RgbaImage>)> = jobs
             .par_iter()
             .map(|&(image, slot)| {
-                let path: &PathBuf = image_paths[image]
-                    .as_ref()
-                    .ok_or("an embedded revolver image")?;
-                Ok(((image, slot), make_mips(path, TEXTURE_SIDE_PX)?))
+                let uri: &str = image_uris[image].ok_or("an embedded revolver image")?;
+                let bytes: &[u8] = get_revolver_file(uri).map_err(|error| error.to_string())?;
+                let decoded: RgbaImage = ::image::load_from_memory(bytes)
+                    .map_err(|error| format!("{uri}: {error}"))?
+                    .to_rgba8();
+                Ok(((image, slot), make_mip_chain(decoded, TEXTURE_SIDE_PX)))
             })
             .collect::<std::result::Result<_, String>>()?;
         let mut maps: HashMap<(usize, usize), Texture> = HashMap::new();
@@ -613,5 +853,32 @@ impl Viewmodel {
         }
         encoder.endEncoding();
         Ok(targets.resolved.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests of the revolver built into the program.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | File asked for | one the glTF names (all of them, while loading onto the GPU), one not built in | `the_built_in_revolver_loads`, `files_not_built_in_fail_by_name` |
+
+    use super::*;
+
+    #[test]
+    fn the_built_in_revolver_loads() {
+        let device: Retained<ProtocolObject<dyn MTLDevice>> =
+            objc2_metal::MTLCreateSystemDefaultDevice().expect("a GPU Metal can use");
+        Viewmodel::Load(&device).expect("the built-in revolver loads");
+    }
+
+    #[test]
+    fn files_not_built_in_fail_by_name() {
+        let error: String = get_revolver_file("textures/missing.png")
+            .err()
+            .expect("no such file")
+            .to_string();
+        assert!(error.contains("textures/missing.png"), "{error}");
     }
 }

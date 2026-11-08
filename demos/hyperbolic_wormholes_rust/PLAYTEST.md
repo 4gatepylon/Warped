@@ -13,8 +13,8 @@ holds `Warped.app` and a note, `How to open Warped.txt`.
   this step.
 - The app opens on a title screen: online games (with the game's password, asked once), hosting or joining on this
   Wi-Fi, or playing alone. Logs go to `~/Library/Logs/Warped/`, and a failure shows in a pop-up.
-- The app carries the surface textures and the revolver from `demos/fps_demo/assets/` (so its zip is about 110 MB)
-  and reads them from inside itself, so it runs on a Mac without the repository.
+- The app carries the surface textures from `demos/fps_demo/assets/`, and the revolver is built into the game
+  itself (so the zip is about 110 MB); it runs on a Mac without the repository.
 
 ## Set up each Mac (once)
 

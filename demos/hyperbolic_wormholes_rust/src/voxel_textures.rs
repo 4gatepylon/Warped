@@ -82,9 +82,16 @@ pub struct SurfaceTextures {
 ///
 /// Example: `let mips = make_mips(&path, 2048)?;`
 pub(crate) fn make_mips(path: &Path, side_px: u32) -> std::result::Result<Vec<RgbaImage>, String> {
-    let mut image: RgbaImage = image::open(path)
+    let image: RgbaImage = image::open(path)
         .map_err(|e| format!("{}: {e}", path.display()))?
         .to_rgba8();
+    Ok(make_mip_chain(image, side_px))
+}
+
+/// `make_mip_chain` resizes a decoded map to `side_px` square and halves it down to 1x1.
+///
+/// Example: `let mips = make_mip_chain(image, 2048);`
+pub(crate) fn make_mip_chain(mut image: RgbaImage, side_px: u32) -> Vec<RgbaImage> {
     if image.dimensions() != (side_px, side_px) {
         image = image::imageops::resize(&image, side_px, side_px, FilterType::Triangle);
     }
@@ -98,7 +105,7 @@ pub(crate) fn make_mips(path: &Path, side_px: u32) -> std::result::Result<Vec<Rg
             FilterType::Triangle,
         ));
     }
-    Ok(mips)
+    mips
 }
 
 /// `get_mean_albedo` gives the mean linear colour of an sRGB image.

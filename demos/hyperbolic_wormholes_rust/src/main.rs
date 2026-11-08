@@ -586,11 +586,8 @@ fn run(arguments: Arguments) -> Result<()> {
     if arguments.serve {
         return serve_only(&arguments);
     }
-    if arguments.renderer == RendererKind::Metal {
-        viewmodel::check_revolver()?;
-        if arguments.map == MapName::LunarSurface {
-            voxel_textures::check_surface_textures()?;
-        }
+    if arguments.renderer == RendererKind::Metal && arguments.map == MapName::LunarSurface {
+        voxel_textures::check_surface_textures()?;
     }
     let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
     if arguments.bot {

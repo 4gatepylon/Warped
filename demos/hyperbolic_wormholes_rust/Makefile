@@ -95,9 +95,8 @@ package-mac-app:
 	done
 	iconutil -c icns $(APP_ICONSET) -o $(APP)/Contents/Resources/AppIcon.icns
 	$(if $(ONLINE_GAMES),cp $(ONLINE_GAMES) $(APP)/Contents/Resources/online_games.txt)
-	mkdir -p $(APP)/Contents/Resources/assets/sketchfab
+	mkdir -p $(APP)/Contents/Resources/assets
 	cp -R $(FPS_DEMO_ASSETS)/textures $(APP)/Contents/Resources/assets/textures
-	cp -R $(FPS_DEMO_ASSETS)/sketchfab/sci_fi_revolver $(APP)/Contents/Resources/assets/sketchfab/sci_fi_revolver
 	cp app/how_to_open.txt "$(APP_FOLDER)/How to open Warped.txt"
 	codesign --force --deep --sign - $(APP)
 	ditto -c -k --keepParent $(APP_FOLDER) $(APP_ZIP).partial

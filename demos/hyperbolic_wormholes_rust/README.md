@@ -140,8 +140,9 @@ make package-mac-app ONLINE_GAMES=online_games.txt
 - `make package-mac-app` builds `.build/Warped/Warped.app` (the game with its maps built in, the icon from
   [`app/app_icon.png`](app/app_icon.png), [`app/Info.plist`](app/Info.plist) with macOS 13 and the Local Network
   note), signs it ad hoc and zips it with [`app/how_to_open.txt`](app/how_to_open.txt) into `.build/Warped.zip`.
-- The app carries the fps_demo's surface textures and revolver in `Contents/Resources/assets/`, and
-  `fps_demo_assets.rs` reads them from there when the game runs from the app.
+- The app carries the fps_demo's surface textures in `Contents/Resources/assets/`, and `fps_demo_assets.rs` reads
+  them from there when the game runs from the app. The revolver is built into the program (`viewmodel.rs`), not
+  shipped as files, as its Sketchfab Standard license asks; the title screen credits its author.
 - `ONLINE_GAMES=` copies an `online_games.txt` into the app for its title screen (`title.rs` says the format); the
   cloud deploy writes it.
 

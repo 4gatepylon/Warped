@@ -12,3 +12,6 @@ Warped needs a Mac with Apple silicon (M1 or later) and macOS 13 or later.
    - Host or join a game on this Wi-Fi: allow Local Network access when macOS asks.
 
 If the game stops, a pop-up says why, and its log is in ~/Library/Logs/Warped/.
+
+Credits: the revolver is "Sci-fi revolver" by Ramhat (https://sketchfab.com/Ramhat), under the Sketchfab
+Standard license; the surface textures are from Poly Haven (CC0).
