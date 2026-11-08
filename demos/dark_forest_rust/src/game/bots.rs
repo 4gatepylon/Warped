@@ -318,6 +318,23 @@ impl Bot {
         cast_ray(solids, self.eye_m(), to_target / distance_m, distance_m).is_none()
     }
 
+    /// `walk_ahead` moves a held bot straight ahead at `speed_m_s` for `dt_s`, through walls, without
+    /// thinking or shooting (`apply_warps` still carries it through a mouth).
+    ///
+    /// Example: `bot.walk_ahead(1.5, dt_s);`
+    pub fn walk_ahead(&mut self, speed_m_s: f32, dt_s: f32) {
+        self.velocity_m_s = self.facing() * speed_m_s;
+        self.feet_m += self.velocity_m_s * dt_s;
+        let is_walking: bool = speed_m_s > 0.0;
+        self.animation.play(if is_walking {
+            BotClip::Walk
+        } else {
+            BotClip::Idle
+        });
+        self.animation
+            .advance(dt_s, (speed_m_s / WALK_SPEED_M_S).max(0.6));
+    }
+
     /// `update` runs one frame of behavior and returns a bolt if the bot fired.
     pub fn update(&mut self, context: &BotContext, dt_s: f32) -> Option<BotShot> {
         self.hit_flash_frac = (self.hit_flash_frac - dt_s * 4.0).max(0.0);
