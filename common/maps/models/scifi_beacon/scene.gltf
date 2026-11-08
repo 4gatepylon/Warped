@@ -1,0 +1,311 @@
+{
+ "accessors": [
+  {
+   "bufferView": 2,
+   "componentType": 5126,
+   "count": 9200,
+   "max": [
+    0.14191080629825592,
+    0.14191080629825592,
+    1.1567283868789673
+   ],
+   "min": [
+    -0.14191080629825592,
+    -0.14191080629825592,
+    -5.789980050963095e-09
+   ],
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "byteOffset": 110400,
+   "componentType": 5126,
+   "count": 9200,
+   "max": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "min": [
+    -1.0,
+    -1.0,
+    -1.0
+   ],
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 3,
+   "componentType": 5126,
+   "count": 9200,
+   "max": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "min": [
+    -1.0,
+    -1.0,
+    -1.0,
+    -1.0
+   ],
+   "type": "VEC4"
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 9200,
+   "max": [
+    0.9635255336761475,
+    0.9995933771133423
+   ],
+   "min": [
+    0.0004066671244800091,
+    0.0004066739056725055
+   ],
+   "type": "VEC2"
+  },
+  {
+   "bufferView": 0,
+   "componentType": 5125,
+   "count": 45528,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "extras": {
+   "author": "AMMediaGames (https://sketchfab.com/AMMediaGames)",
+   "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+   "source": "https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f",
+   "title": "Sci-Fi Beacon/Way Point Marker Free Model"
+  },
+  "generator": "Sketchfab-16.67.0",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteLength": 182112,
+   "name": "floatBufferViews",
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteLength": 73600,
+   "byteOffset": 182112,
+   "byteStride": 8,
+   "name": "floatBufferViews",
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 220800,
+   "byteOffset": 255712,
+   "byteStride": 12,
+   "name": "floatBufferViews",
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 147200,
+   "byteOffset": 476512,
+   "byteStride": 16,
+   "name": "floatBufferViews",
+   "target": 34962
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 623712,
+   "uri": "scene.bin"
+  }
+ ],
+ "extensionsUsed": [
+  "KHR_materials_emissive_strength"
+ ],
+ "images": [
+  {
+   "uri": "textures/Material_baseColor.jpeg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "textures/Material_metallicRoughness.jpeg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "textures/Material_emissive.jpeg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "textures/Material_normal.jpeg",
+   "mimeType": "image/jpeg"
+  }
+ ],
+ "materials": [
+  {
+   "doubleSided": true,
+   "emissiveFactor": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "emissiveTexture": {
+    "index": 2
+   },
+   "extensions": {
+    "KHR_materials_emissive_strength": {
+     "emissiveStrength": 10.0
+    }
+   },
+   "name": "Material",
+   "normalTexture": {
+    "index": 3
+   },
+   "pbrMetallicRoughness": {
+    "baseColorTexture": {
+     "index": 0
+    },
+    "metallicRoughnessTexture": {
+     "index": 1
+    }
+   }
+  }
+ ],
+ "meshes": [
+  {
+   "name": "StandBase_Material_0",
+   "primitives": [
+    {
+     "attributes": {
+      "NORMAL": 1,
+      "POSITION": 0,
+      "TANGENT": 2,
+      "TEXCOORD_0": 3
+     },
+     "indices": 4,
+     "material": 0,
+     "mode": 4
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "children": [
+    1
+   ],
+   "matrix": [
+    1.1857861280441284,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    2.632974123271411e-16,
+    -1.1857861280441284,
+    0.0,
+    0.0,
+    1.1857861280441284,
+    2.632974123271411e-16,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "name": "Sketchfab_model"
+  },
+  {
+   "children": [
+    2
+   ],
+   "matrix": [
+    0.009999999776482582,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.009999999776482582,
+    0.0,
+    0.0,
+    -0.009999999776482582,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "name": "4ba9116b2e2c4edf84b664d06efb94b9.fbx"
+  },
+  {
+   "children": [
+    3
+   ],
+   "name": "RootNode"
+  },
+  {
+   "children": [
+    4
+   ],
+   "matrix": [
+    100.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    -1.629206793918314e-05,
+    -99.99999999999868,
+    0.0,
+    0.0,
+    99.99999999999868,
+    -1.629206793918314e-05,
+    0.0,
+    1.4756918176317413e-07,
+    0.07674433290958405,
+    0.0,
+    1.0
+   ],
+   "name": "StandBase"
+  },
+  {
+   "mesh": 0,
+   "name": "StandBase_Material_0"
+  }
+ ],
+ "samplers": [
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "name": "Sketchfab_Scene",
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "textures": [
+  {
+   "sampler": 0,
+   "source": 0
+  },
+  {
+   "sampler": 0,
+   "source": 1
+  },
+  {
+   "sampler": 0,
+   "source": 2
+  },
+  {
+   "sampler": 0,
+   "source": 3
+  }
+ ]
+}

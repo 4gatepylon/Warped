@@ -203,10 +203,15 @@ The level as the Rust game builds it, from the map
   slowed player move slowly. On the ground under the black hole, time runs at about 81% with no console off, 45%
   with three off and 25% with five. The HUD shows the black hole's strength and how fast the player's time runs.
 - One wormhole joins a ridge to the red landing pad. Its mouths are 15 m in reach.
-- Blue's side has a lander, the blue pylon, a relay mast, supply crates and a solar array. The
-  middle has derelict habitat modules, a comms dome, a crater walkway, a relay mast, a solar array
-  and crates. Red's side has barriers, a habitat module, a dome, the red pylon, a spawn hangar, a
-  watchtower, a landing pad, an antenna, a walkway, crates and a solar array.
+- Blue's side has a concrete bunker (a kazemat) at its spawn, rows of Hesco barriers, a relay mast, supply crates and
+  a solar array. The middle has derelict field bunkers, a comms dome, a crater walkway, a relay mast, a solar array
+  and crates. Red's side has Hesco barriers, a habitat module, a dome, a bunker garage as its spawn hangar, a
+  watchtower, a landing pad, an antenna, a walkway, crates and a solar array. The bunkers are models players walk
+  into. Each pylon is a 12 m sci-fi beacon whose console is the beacon itself; it beams its team colour 400 m up while
+  its console is on.
+- Players look like a teal robot, animated by what they do: standing, walking, running, in the air, and, once
+  eliminated, falling onto their back where they were hit and lying there until they respawn. Shots hit an invisible
+  cylinder and head the robot's size, not the robot's own shape.
 - Structures have sharp edges. The habitat modules' and walkways' windows are glass: players see
   out of them and shoot through them, but can't climb through them.
 - The sky has the sun, a planet, stars, and spaceships that fly over, purely for looks, on the same

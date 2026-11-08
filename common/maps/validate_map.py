@@ -22,6 +22,7 @@ import numpy as np
 
 SCHEMA_PATH: Path = Path(__file__).parent / "map.schema.json"
 MANIFEST_NAME: str = "map.json"
+MODELS_FOLDER: Path = Path(__file__).parent / "models"
 TOLERANCE: float = 1e-6
 EMPTY_ID: int = 0
 MINKOWSKI: np.ndarray = np.diag([1.0, 1.0, 1.0, -1.0])
@@ -156,6 +157,26 @@ def _get_shape_errors(manifest: dict) -> list[str]:
     ]
 
 
+def _get_mesh_errors(manifest: dict) -> list[str]:
+    """`_get_mesh_errors` checks that each structure's model is in `models/`.
+
+    Args:
+        manifest: The map's manifest (already valid against the schema).
+
+    Returns:
+        One message per problem.
+
+    Example:
+        >>> _get_mesh_errors({"structures": []})
+        []
+    """
+    return [
+        f"structure {structure['name']!r}: model {structure['mesh']['model']!r} isn't in {MODELS_FOLDER}"
+        for structure in (manifest["structures"] if "structures" in manifest else [])
+        if "mesh" in structure and not (MODELS_FOLDER / structure["mesh"]["model"] / "scene.gltf").exists()
+    ]
+
+
 def _get_warp_errors(manifest: dict) -> list[str]:
     """`_get_warp_errors` checks that wormhole mouths pair up, that `flat_effective` is only used in hyperbolic space,
     and that a tapered warp's reach sphere overlaps no other warp's.
@@ -263,6 +284,7 @@ def _validate_map(folder: Path, schema: dict) -> list[str]:
         errors
         + _get_material_errors(manifest)
         + _get_shape_errors(manifest)
+        + _get_mesh_errors(manifest)
         + _get_warp_errors(manifest)
         + _get_geometry_errors(manifest)
     )
