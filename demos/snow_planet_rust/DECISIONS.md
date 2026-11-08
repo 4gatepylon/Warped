@@ -34,7 +34,7 @@ Three blizzard zones, upright cylinders in the map's `regions.blizzards` (format
 | Field | Value | What it does |
 | --- | ---: | --- |
 | `speed_frac` | 0.5 | walking and sprinting speed inside (`VoxelPlayer::step`) |
-| `freeze_health_per_s` | 0.08 | health lost per second inside: dead after 12.5 s (in 50 steps, `FREEZES_TO_KILL`) |
+| `freeze_health_per_s` | 0.08 | health lost per second inside: dead after 12.5 s (`Server::freeze_players`) |
 | `shot_reach_m` | 8 | meters a laser goes inside one before it stops (`VoxelWorld::stop_in_blizzards`) |
 | `fog_per_m` | 0.12 | fog density: 10 m of blizzard lets through 30% of the light |
 | `snow_per_m3` | 0.6 | chance of a flake per cubic meter cell |
@@ -42,9 +42,14 @@ Three blizzard zones, upright cylinders in the map's `regions.blizzards` (format
 - Shots: each blizzard uses up the fraction (length inside / its `shot_reach_m`) of the shot's blizzard budget;
   the shot stops where the fractions add up to 1, and doesn't hit what is behind. So a shot can cross the 7 m
   squall's edge but not its middle, and goes 8 m into the white-out.
-- Freezing is a hit the player's own window sends on itself (`Client::send_freeze`), so the server's health,
-  death and respawn rules apply unchanged. The window decides it is in a blizzard; a cheating client could skip
-  it. The server should own this once there is a real server.
+- Freezing is decided by the server (`net::Server::freeze_players`, each tick): it reads the blizzards from the map
+  (`net::Freezing`), adds `freeze_health_per_s × dt` to the damage of every player whose last reported position is
+  inside one, and eliminates a player at full damage as killed by themselves (a death, no one's kill). Players who
+  haven't reported a position since joining don't freeze, and nothing freezes once a team has won.
+- The slowdown stays in the moving window (`VoxelPlayer::step`): in this demo every window moves its own player and
+  the server takes the position it reports, so a server-side speed limit would need server-side movement for all
+  players (a bigger change). A cheating client could walk at full speed through a blizzard but still freezes.
+  **User:** say if the server should enforce movement speed.
 - Looks: fog and flakes are added per pixel along the first ray segment (straight in Fermi coordinates), after the
   surface or sky is shaded, so they cost nothing where no ray crosses a blizzard. Light bent by a black hole into
   a blizzard isn't fogged along the bent part.

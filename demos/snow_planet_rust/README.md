@@ -53,7 +53,7 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
   done yet (DECISIONS S1).
 - Blizzards: `VoxelWorld::find_blizzard` (a point's blizzard), `get_blizzard_frac` (how much of a shot's reach a
   chord uses) and `stop_in_blizzards` (cuts the laser) in `src/voxel_world.rs`; `VoxelPlayer::step` slows the
-  player; the window sends freezing hits on itself (`Session::freeze_frac`, `net::Client::send_freeze`); the shader's
+  player; the server freezes players standing in one (`net::Server::freeze_players`, `net::Freezing`); the shader's
   `add_blizzards` (`src/render_voxel.metal`) adds the fog and falling flakes.
 - Snow look: `appearance.style: snow` turns on the shader's snow sky, ground and fog (`VoxelUniforms::snow`).
 
@@ -75,26 +75,47 @@ Run on the session's Mac VM (Apple M4 Pro, virtualized GPU), release build, 2026
 
 `--bench-views --width-px 2560 --height-px 1440 --frame-count 20` (milliseconds per frame, median, and GPU time):
 
-| View | Median | GPU | View | Median | GPU |
-| --- | ---: | ---: | --- | ---: | ---: |
-| blue spawn | 12.5 | 10.8 | red spawn | 12.4 | 10.9 |
-| overview (60 m up) | 15.5 | 13.8 | white-out, outside | 16.8 | 15.1 |
-| white-out, inside | 11.2 | 9.6 | white-out, above | 14.2 | 12.5 |
-| north squall | 18.7 | 16.8 | black hole (9 m) | 21.5 | 18.6 |
-| black hole, far | 11.8 | 10.3 | wormhole | 19.1 | 17.2 |
-| blue pylon | 8.1 | 6.8 | red pylon | 7.5 | 6.2 |
-| map edge (seam) | 16.5 | 14.6 | laser into the white-out | 17.9 | 16.2 |
+| View | Snow Planet | GPU | before longer steps | Lunar Surface, same spot | GPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| blue spawn | 12.1 | 10.4 | 12.6 | 23.9 | 20.0 |
+| red spawn | 10.9 | 9.8 | 11.4 | 22.0 | 17.7 |
+| overview (60 m up) | 10.7 | 9.5 | 11.1 | 14.4 | 10.6 |
+| white-out, outside | 12.1 | 10.9 | 13.0 | 23.0 | 18.7 |
+| white-out, inside | 10.5 | 9.3 | 10.8 | 19.8 | 16.1 |
+| white-out, above | 11.4 | 10.2 | 12.1 | 24.1 | 20.4 |
+| north squall | 10.2 | 9.1 | 10.7 | 27.6 | 25.2 |
+| black hole (9 m) | 17.1 | 16.0 | 19.1 | 21.8 | 17.8 |
+| black hole, far | 10.9 | 9.7 | 11.4 | 26.8 | 24.3 |
+| wormhole | 16.0 | 14.9 | 17.7 | 21.4 | 17.4 |
+| blue pylon | 7.2 | 6.1 | 7.2 | 19.3 | 16.3 |
+| red pylon | 7.3 | 6.1 | 7.3 | 23.8 | 19.4 |
+| map edge (seam) | 8.1 | 6.9 | 8.3 | 21.9 | 18.0 |
+| laser into the white-out | 13.9 | 12.8 | 15.1 | 23.6 | 21.6 |
+
+Bent rays near a black hole or mouth step 12% of their distance to it, up to 6 m (`BEND_STEP_FRAC`,
+`MAX_BEND_STEP_M`; were 8% and 3 m): about 2 ms off both warp views with no visible change
+(`.artifacts/pr/bend_steps.png`). The Lunar Surface column is the copied Lunar map seen from the same coordinates
+(`--map lunar-surface --bench-views`), so its views aren't Lunar's own landmarks. Steps of 16% and 10 m gained
+nothing more.
 
 The window adapts its render scale (MetalFX upscaling) to hold 60 fps. Playing the warp tour (circling both black
 holes and both mouths from 80% to 10% of their reach, `--play-route --route warp-tour --width-px 2560 --height-px
-1440`; the VM's screen caps the window at 1600×1053 and 60 Hz): 59.6 fps, median 16.6 ms, 99th percentile 21.8 ms,
-render scale 0.90 on average (full in 58% of frames). The copied Lunar Surface level on the same VM and route:
-57.7 fps, median 16.9 ms, 99th percentile 24.2 ms, scale 0.64. So Snow Planet costs no more than the level it was
-copied from; the VM's virtual GPU is the limit here. The 99th-percentile target (16.7 ms) is not met on this VM;
-it should be measured on a real Mac.
+1440`; the VM's screen caps the window at 1600×1053 and 60 Hz), twice on Snow Planet and once on Lunar Surface, one
+after the other:
+
+| Level | fps | median ms | 99th percentile ms | render scale, mean |
+| --- | ---: | ---: | ---: | ---: |
+| Snow Planet | 58.4, 59.0 | 16.7, 16.5 | 32.8, 33.0 | 0.84, 0.81 |
+| Lunar Surface | 57.1 | 16.8 | 28.2 | 0.64 |
+
+An earlier run (before this change) measured 21.8 ms (Snow) and 24.2 ms (Lunar) at the 99th percentile, so the VM
+varies by about 10 ms between runs; the median is the 60 Hz vsync. Snow Planet holds a higher render scale than
+Lunar Surface. The 99th-percentile target (16.7 ms) and the warp views (16-17 ms) are not met on this VM's virtual
+GPU; they should be measured on a real Mac.
 
 ## Not done yet
 
 - The torus: walking, seeing and shooting across the map's edges (DECISIONS S1).
-- Ice that slides, textures for snow and ice (procedural for now), freezing decided by the server.
+- Ice that slides, textures for snow and ice (procedural for now).
+- The blizzard slowdown is the moving window's own (like all movement in this demo); the server doesn't check it.
 - Fog of light bent into a blizzard by a black hole is only along the first straight part of the ray.
