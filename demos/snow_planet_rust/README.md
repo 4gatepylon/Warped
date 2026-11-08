@@ -98,7 +98,13 @@ Run on the session's Mac VM (Apple M4 Pro, virtualized GPU), release build, 2026
 | map edge (seam) | 8.1 | 6.9 | 8.3 | 21.9 | 18.0 |
 | laser into the white-out | 13.9 | 12.8 | 15.1 | 23.6 | 21.6 |
 
-Bent rays near a black hole or mouth step 12% of their distance to it, up to 6 m (`BEND_STEP_FRAC`,
+Latest run (`--frame-count 40`, Apple VM, Metal), after raising `BEND_STEP_FRAC` from 12% to 20%: every one of
+the 22 views is under 16.7 ms median (worst: north black holes 16.2, black hole 9 m 15.5, all others 8.7-13.1;
+`.artifacts/bench_views/20261108-151402`). Before (12%): black hole 9 m 18.3 ms, all others 8.1-14.7. The
+pictures differ by under 2/255 on average (`.artifacts/pr/perf/bend_step_compare.png`). Warp tour after the
+change: 59.0 fps, median 16.6 ms, 99th percentile 33.6 ms (vsync-quantized), render scale mean 0.89.
+
+Bent rays near a black hole or mouth step 20% of their distance to it, up to 6 m (`BEND_STEP_FRAC`,
 `MAX_BEND_STEP_M`; were 8% and 3 m): about 2 ms off both warp views with no visible change
 (`.artifacts/pr/bend_steps.png`). The Lunar Surface column is the copied Lunar map seen from the same coordinates
 (`--map lunar-surface --bench-views`), so its views aren't Lunar's own landmarks. Steps of 16% and 10 m gained
