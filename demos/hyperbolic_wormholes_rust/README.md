@@ -53,18 +53,22 @@ cargo run --release -- --map lunar-surface --view black_hole
 
 ## Play together
 
-Everyone on the same network can play in one game. One player hosts and the others join. [`PLAYTEST.md`](PLAYTEST.md)
-has the steps for a fresh Mac, the commands for each player and the known caveats.
+Everyone on the same network can play in one game. A game server, without a window, keeps the players in step;
+every player, the one who started it included, is a client with a window. [`PLAYTEST.md`](PLAYTEST.md) has the steps
+for a fresh Mac, the commands for each player and the known caveats.
 
 ```bash
-make host-game
-make join-game
-make join-game SERVER=192.168.1.20
+make serve-game MAP=lunar-surface
+make host-game MAP=lunar-surface
+make join-game MAP=lunar-surface
+make join-game MAP=lunar-surface SERVER=192.168.1.20
 ```
 
-- `make host-game` runs the game server inside the host's game (`--host`). `make join-game` finds a server on the
-  network by its announcement (`--join auto`); give the host's IP address if that fails. `--serve` runs only a
-  server, without a window.
+- `make serve-game` (`--serve`) runs only the server and prints this computer's address with the commands that join
+  it, so it can run on a computer nobody plays on. `make host-game` (`--host`) starts the same server as its own
+  process, joins it from a window, and stops it when the window closes.
+- `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
+  (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
   (the Terminal, say) when asked; without it, other computers can't reach the game and `auto` finds nothing.
 - Players start on a ring around spawn and see each other as coloured boxes, bent through the wormholes like

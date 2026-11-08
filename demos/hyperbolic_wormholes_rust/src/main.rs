@@ -37,8 +37,9 @@ mod world;
 
 use std::error::Error;
 use std::fs;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
@@ -144,6 +145,8 @@ const MAX_APPROACH_STEP_COUNT: usize = 2000;
 const SECONDS_PER_DAY: u64 = 86_400;
 const DISCOVERY_TIMEOUT_S: u64 = 5;
 const JOIN_AUTO: &str = "auto";
+const SERVER_START_S: f64 = 0.3;
+const ROUTE_PROBE_ADDRESS: &str = "192.0.2.1:9";
 
 /// `RendererKind` is which renderer draws the frames.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -246,14 +249,16 @@ struct Arguments {
     /// house), or on a voxel map a tour circling each warp object the same way (`warp-tour`).
     #[arg(long, value_enum, default_value_t = RouteKind::Legs)]
     route: RouteKind,
-    /// Host a game on the local network: run a server in this program and play in it.
+    /// Host a game on the local network: start a game server as its own process (as --serve,
+    /// without a window), play in it, and stop it when this window closes.
     #[arg(long, conflicts_with_all = ["join", "serve", "bench_views", "autopilot", "play_route"])]
     host: bool,
     /// Join a game on the local network: `auto` to find one, or a server's IP address (with an
     /// optional :port).
     #[arg(long, conflicts_with_all = ["serve", "bench_views", "autopilot", "play_route"])]
     join: Option<String>,
-    /// Run only a game server, without a window, until --exit-after-s (or until stopped).
+    /// Run only a game server, without a window, until --exit-after-s (or until stopped); it
+    /// prints this computer's address and the command that joins it.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route"])]
     serve: bool,
     /// With --join and --exit-after-s: play by itself without a window (walk, aim at the nearest
@@ -560,11 +565,72 @@ fn start_server(port: u16) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     Ok((should_stop, thread))
 }
 
-/// `serve_only` runs a game server without a window until `--exit-after-s` passes (or forever).
+/// `start_server_process` starts this program as a game server (`--serve`, without a window) on
+/// `arguments`' port and map, and fails if it stops within `SERVER_START_S` (its port in use, say).
+///
+/// Example: `let server = start_server_process(&arguments)?;`
+fn start_server_process(arguments: &Arguments) -> Result<Child> {
+    let map_name: String = get_map_flag(arguments.map);
+    let mut server: Child = Command::new(std::env::current_exe()?)
+        .args([
+            "--serve",
+            "--port",
+            &arguments.port.to_string(),
+            "--map",
+            &map_name,
+        ])
+        .spawn()?;
+    std::thread::sleep(Duration::from_secs_f64(SERVER_START_S));
+    if let Some(status) = server.try_wait()? {
+        return Err(
+            format!("the game server stopped at once ({status}); see its error above").into(),
+        );
+    }
+    Ok(server)
+}
+
+/// `get_map_flag` gives a map's name as `--map` and `MAP=` take it, e.g. `lunar-surface`.
+///
+/// Example: `let name = get_map_flag(MapName::LunarSurface);`
+fn get_map_flag(map: MapName) -> String {
+    map.to_possible_value()
+        .expect("every MapName has a --map value")
+        .get_name()
+        .to_string()
+}
+
+/// `find_lan_address` gives this computer's address on its network (the one its default route
+/// uses), or `None` without a network. Connecting a UDP socket only picks the route; nothing is
+/// sent.
+///
+/// Example: `let address = find_lan_address();`
+fn find_lan_address() -> Option<IpAddr> {
+    let socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect(ROUTE_PROBE_ADDRESS).ok()?;
+    Some(socket.local_addr().ok()?.ip())
+}
+
+/// `serve_only` runs a game server without a window until `--exit-after-s` passes (or forever),
+/// after printing this computer's address and the commands that join the game.
 ///
 /// Example: `serve_only(&arguments)?;`
 fn serve_only(arguments: &Arguments) -> Result<()> {
     let (should_stop, thread) = start_server(arguments.port)?;
+    let (map, port) = (get_map_flag(arguments.map), arguments.port);
+    let address: String = match find_lan_address() {
+        Some(address) => address.to_string(),
+        None => {
+            eprintln!("Couldn't find this computer's address; `ipconfig getifaddr en0` gives it");
+            "<this computer's address>".to_string()
+        }
+    };
+    println!("Game server for {map} on UDP port {port}, without a window. Stop it with Ctrl-C.");
+    println!("This computer's address: {address}. Join from the Rust demo's folder:");
+    println!("  make join-game MAP={map} SERVER={address} PORT={port}");
+    println!(
+        "  make join-game MAP={map} PORT={port}  (finds this server on the network by itself)"
+    );
+    println!("  make join-game MAP={map} SERVER=127.0.0.1 PORT={port}  (on this computer)");
     match arguments.exit_after_s {
         Some(seconds) => std::thread::sleep(Duration::from_secs_f64(seconds)),
         None => loop {
@@ -1553,11 +1619,11 @@ impl PackedFrame {
     }
 }
 
-/// `Multiplayer` is a window's game on the local network: its connection, the server it runs
-/// with `--host` (a stop flag and the thread), and whether this player was hit and waits to rejoin.
+/// `Multiplayer` is a window's game on the local network: its connection, the server process it
+/// started with `--host`, and whether this player was hit and waits to rejoin.
 struct Multiplayer {
     client: net::Client,
-    server: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
+    server: Option<Child>,
     is_eliminated: bool,
     respawn_in_s: f64,
 }
@@ -1570,11 +1636,10 @@ impl Drop for Multiplayer {
         if let Err(error) = self.client.leave() {
             eprintln!("Couldn't tell the server this player left: {error}");
         }
-        if let Some((should_stop, thread)) = self.server.take() {
-            should_stop.store(true, Ordering::Relaxed);
-            if thread.join().is_err() {
-                eprintln!("The game server's thread panicked");
-            }
+        if let Some(mut server) = self.server.take()
+            && let Err(error) = server.kill().and_then(|()| server.wait().map(drop))
+        {
+            eprintln!("Couldn't stop the game server: {error}");
         }
     }
 }
@@ -1625,8 +1690,8 @@ impl Session {
             ),
         };
         let multiplayer: Option<Multiplayer> = if arguments.host || arguments.join.is_some() {
-            let server: Option<(Arc<AtomicBool>, JoinHandle<()>)> = if arguments.host {
-                Some(start_server(arguments.port)?)
+            let server: Option<Child> = if arguments.host {
+                Some(start_server_process(arguments)?)
             } else {
                 None
             };

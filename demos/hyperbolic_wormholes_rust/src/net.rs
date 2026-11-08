@@ -1,5 +1,5 @@
-//! `net.rs` lets players on one local network share a game. A server (inside the host's game, or
-//! on its own) keeps every player's eye frame and laser switch, sends everyone a snapshot 60 times
+//! `net.rs` lets players on one local network share a game. A server (its own process, without a
+//! window) keeps every player's eye frame and laser switch, sends everyone a snapshot 60 times
 //! a second, removes a player another player's laser hit, and announces itself on the network so
 //! others can find it. A client joins, sends its own player each frame and receives the others.
 //!
@@ -317,7 +317,6 @@ pub fn serve(socket: UdpSocket, should_stop: &AtomicBool) -> Result<()> {
     let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
     let (mut last_snapshot, mut last_beacon) = (Instant::now(), None::<Instant>);
     let mut has_warned_about_beacon: bool = false;
-    eprintln!("Serving on UDP port {port}; players on this network can join with --join auto");
     while !should_stop.load(Ordering::Relaxed) {
         match server.socket.recv_from(&mut buffer) {
             Ok((length, address)) => server.handle(&buffer[..length], address)?,

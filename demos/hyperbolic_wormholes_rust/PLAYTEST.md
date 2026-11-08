@@ -29,17 +29,22 @@ git clone https://github.com/4gatepylon/Warped.git
 
 ## Play
 
-Everyone joins the same Wi-Fi and uses the same `MAP`. One person hosts; everyone else joins:
+Everyone joins the same Wi-Fi and uses the same `MAP`. One person starts a game server; everyone, that person
+included, joins it with a window:
 
 ```bash
 cd Warped/demos/hyperbolic_wormholes_rust
-make host-game MAP=lunar-surface
-make join-game MAP=lunar-surface
+make serve-game MAP=lunar-surface
 make join-game MAP=lunar-surface SERVER=192.168.1.20
 ```
 
-- The host runs `make host-game`; the others run `make join-game`, which finds the host on the network. If it
-  doesn't within a few seconds, join by the host's IP address (the host can get it with `ipconfig getifaddr en0`).
+- `make serve-game` runs only the server, without a window, and prints this computer's address and the exact
+  `make join-game` commands to give the others (`SERVER=127.0.0.1` on the same computer). Leave it running in its
+  terminal; `Ctrl-C` ends the game.
+- `make host-game MAP=lunar-surface` does both in one terminal: it starts the same server as its own process, opens
+  your window in it, and stops the server when your window closes.
+- `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
+  within a few seconds, use the address the server printed.
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
   connections. Without that, nobody can reach the game.
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
