@@ -26,6 +26,7 @@ mod app_bundle;
 mod avatar_animation;
 mod avatar_model;
 mod black_hole_growth;
+mod city;
 mod city_world;
 mod credits;
 mod dust;
@@ -134,7 +135,7 @@ const FRAME_BUDGET_MS: f64 = 1000.0 / 60.0;
 const HUD_TEXT_SCALE: f32 = 2.0;
 const HUD_LINE_PX: f32 = 10.0;
 const HUD_MARGIN_PX: f32 = 4.0;
-const WINDOW_TITLE: &str = "Hyperbolic wormholes (Rust)";
+const WINDOW_TITLE: &str = "City Sphere (Rust)";
 const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
@@ -338,7 +339,7 @@ struct Arguments {
     #[arg(long)]
     player_settings: Option<PathBuf>,
     /// Which map to play, from common/maps/.
-    #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
+    #[arg(long, value_enum, default_value_t = MapName::CitySphere)]
     map: MapName,
     /// With --map lunar-surface: start the window at one of the level's viewpoints (as
     /// --bench-views names them), e.g. black_hole.
@@ -352,6 +353,16 @@ struct Arguments {
     /// replacing the folder's map.json, and exit.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
     export_map: Option<PathBuf>,
+    /// With `--serve`: when a team wins, write `{"winner": "blue"}` or `{"winner": "red"}` to this
+    /// file (atomically, through `<file>.partial`) and keep the game won instead of starting another.
+    #[arg(long, requires = "serve")]
+    level_result_file: Option<PathBuf>,
+    /// Join this team at once instead of waiting in the lobby.
+    #[arg(long, value_enum)]
+    team: Option<city::TeamName>,
+    /// What the bot does: `consoles` holds E on the other team's consoles until its team wins.
+    #[arg(long, value_enum, requires = "bot")]
+    bot_objective: Option<city::BotObjective>,
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -605,6 +616,9 @@ fn main() -> ExitCode {
 /// Example: `run(Arguments::parse())?;`
 fn run(arguments: Arguments) -> Result<()> {
     validate_arguments(&arguments)?;
+    if arguments.map == MapName::CitySphere {
+        return city::run(&arguments);
+    }
     if let Some(folder) = &arguments.export_map {
         let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
         let path: PathBuf = map_export::export_map(&world, folder)?;
@@ -891,6 +905,7 @@ fn start_server(
             &should_start_new_game,
             None,
             game_password,
+            None,
         ) {
             eprintln!("The game server stopped: {error}");
         }

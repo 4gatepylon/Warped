@@ -23,6 +23,7 @@ const TORSO_RADIUS_M: f64 = 0.42;
 const TORSO_HEIGHT_M: f64 = 1.0;
 const HEAD_HEIGHT_M: f64 = 1.55;
 const LIFT_M_PER_S: f64 = 6.0;
+const LIFT_TOP_UNDER_GLASS_M: f64 = 1.0;
 const AIR_CONTROL_FRAC: f64 = 0.35;
 const SHOT_START_M: f64 = 1e-4;
 const SURFACE_OFFSET_M: f64 = 1e-3;
@@ -502,7 +503,8 @@ impl CityWorld {
     }
 
     /// `move_player` moves `player` by `input` for `dt_s`: walking along the ground, gravity
-    /// outward, jumping, riding a lift up through the glass while jump is held, and collisions with
+    /// outward, jumping, riding a lift up through the glass while jump is held (hovering
+    /// `LIFT_TOP_UNDER_GLASS_M` over the glass level until they walk off), and collisions with
     /// the street, the glass (from either side, except in its holes) and the boxes.
     ///
     /// Example: `world.move_player(&mut player, &input, 1.0 / 60.0);`
@@ -534,9 +536,15 @@ impl CityWorld {
         if is_first && input.is_jumping && player.is_on_ground {
             new_up = self.jump_m_per_s;
         }
-        let is_riding: bool = input.is_jumping && self.is_in_lift(player.feet) && self.get_side(player.feet) == Side::Street;
-        if is_riding {
-            new_up = LIFT_M_PER_S;
+        let glass_m: f64 = self.get_glass().map_or(0.0, |glass| glass.radius_m);
+        let top_m: f64 = glass_m - LIFT_TOP_UNDER_GLASS_M;
+        let r: f64 = player.feet.length();
+        if input.is_jumping && self.is_in_lift(player.feet) {
+            new_up = if r > top_m {
+                LIFT_M_PER_S.min((r - top_m) / dt_s)
+            } else {
+                new_up.max(0.0)
+            };
         }
         player.velocity = new_tangent + up * new_up;
         let before: DVec3 = player.feet;

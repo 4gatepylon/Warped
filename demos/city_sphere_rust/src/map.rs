@@ -328,6 +328,7 @@ pub struct Map {
 pub enum MapName {
     HouseDemo,
     LunarSurface,
+    CitySphere,
 }
 
 impl MapName {
@@ -338,6 +339,7 @@ impl MapName {
         match self {
             MapName::HouseDemo => "house_demo",
             MapName::LunarSurface => "lunar_surface",
+            MapName::CitySphere => "city_sphere",
         }
     }
 }

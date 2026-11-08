@@ -111,3 +111,7 @@ black_hole:  # On Lunar Surface, each console turned off grows the black hole, a
   lens_core_per_reach: 0.35  # The wide lens's core radius, as a share of the reach: rays passing that far from the centre turn the most.
   time_dilation_per_general_relativity: 15.0  # How many times stronger than in general relativity time slows near it (1 for real, 0 for none).
   min_time_rate_frac: 0.1  # The slowest a player's time runs near it, as a share of time far away (above 0, so nobody freezes).
+
+glass:  # City Sphere: shots fired on the glass level (inside the glass shell) reflect off the glass about its normal; shots from the street stop at it.
+  max_bounce_count: 2  # The most reflections a shot makes (0 for none); the next time it meets the glass it stops there.
+  range_m: 90.0  # How far a shot goes in all, every leg after a reflection counted (the sphere is 48 m across).

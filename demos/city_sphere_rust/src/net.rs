@@ -50,7 +50,7 @@ use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-pub const DEFAULT_PORT: u16 = 47_800;
+pub const DEFAULT_PORT: u16 = 47_810;
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_PLAYER_COUNT: usize = 8;
 pub const MAX_CONSOLE_COUNT: usize = 32;
@@ -62,7 +62,7 @@ const SPECKLE_FIRST_BIT: u8 = 3;
 const ANY_TEAM: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
 const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
-const DISCOVERY_PORT: u16 = 47_801;
+const DISCOVERY_PORT: u16 = 47_811;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
 const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
@@ -516,6 +516,7 @@ struct Server {
     console_teams: Vec<u32>,
     game: GameState,
     tallies: Vec<Tally>,
+    result_path: Option<std::path::PathBuf>,
 }
 
 impl Server {
@@ -893,6 +894,9 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
+            if let Some(path) = &self.result_path {
+                write_level_result(path, TEAM_NAMES[winner as usize]);
+            }
             println!(
                 "The {} team won. Press Enter here to start a new game.",
                 TEAM_NAMES[winner as usize]
@@ -998,6 +1002,18 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
     Ok(socket)
 }
 
+/// `write_level_result` writes `{"winner": "<team>"}` to `path` once, atomically (to
+/// `<path>.partial`, then renamed), for the match that launched this level (`--level-result-file`).
+///
+/// Example: `write_level_result(Path::new("/tmp/result.json"), "blue");`
+pub fn write_level_result(path: &std::path::Path, team: &str) {
+    let partial: std::path::PathBuf = path.with_extension("partial");
+    let text: String = serde_json::json!({ "winner": team }).to_string();
+    if let Err(error) = std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path)) {
+        eprintln!("Couldn't write the level result {}: {error}", path.display());
+    }
+}
+
 /// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
 /// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
 /// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
@@ -1019,6 +1035,7 @@ pub fn serve(
     should_start_new_game: &AtomicBool,
     new_game_after_win: Option<Duration>,
     game_password: Vec<u8>,
+    result_path: Option<std::path::PathBuf>,
 ) -> Result<()> {
     assert!(
         console_teams.len() <= MAX_CONSOLE_COUNT,
@@ -1032,6 +1049,7 @@ pub fn serve(
     beacon.extend_from_slice(BEACON_MAGIC);
     beacon.extend_from_slice(&port.to_le_bytes());
     let mut server: Server = Server {
+        result_path,
         socket,
         secret: make_random_bytes(),
         password: game_password,
@@ -1735,6 +1753,7 @@ mod tests {
             console_teams: vec![0, 0, 1],
             game: GameState::default(),
             tallies: Vec::new(),
+        result_path: None,
         }
     }
 

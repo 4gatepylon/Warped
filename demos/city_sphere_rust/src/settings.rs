@@ -34,7 +34,8 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 21] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 22] = [
+    "glass.max_bounce_count",
     "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
     "sniper.reload_s",
@@ -355,6 +356,15 @@ pub struct PerPlayerSettings {
     pub minimap: MinimapSettings,
 }
 
+/// `GlassSettings` is how shots meet City Sphere's glass from the glass level: how many times a
+/// shot may reflect off it and how far a shot goes in all (metres, every leg counted).
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct GlassSettings {
+    pub max_bounce_count: u32,
+    pub range_m: f64,
+}
+
 /// `ServerSettings` is everything in `server_settings.yaml`.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
@@ -373,6 +383,7 @@ pub struct ServerSettings {
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
     pub black_hole: BlackHoleSettings,
+    pub glass: GlassSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is

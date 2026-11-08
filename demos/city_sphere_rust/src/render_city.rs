@@ -25,7 +25,7 @@ use rayon::prelude::*;
 
 use crate::city_world::CityWorld;
 use crate::fps_demo_assets::get_asset_path;
-use crate::mesh::MeshModel;
+use crate::mesh::{MeshMaterial, MeshModel};
 use crate::voxel_textures::{make_array, make_mips};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -266,11 +266,13 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
 
 /// `push_mesh` adds a posed model's triangles placed by `world_from_model`, its colours times `tint`.
 ///
-/// Example: `push_mesh(&mut vertices, &posed, frame, [0.4, 0.6, 1.0]);`
-pub fn push_mesh(out: &mut Vec<CityVertex>, model: &MeshModel, world_from_model: Mat4, tint: [f32; 3]) {
+/// Example: `push_mesh(&mut vertices, &posed, body.get_materials(), frame, [0.4, 0.6, 1.0]);`
+pub fn push_mesh(out: &mut Vec<CityVertex>, model: &MeshModel, materials: &[MeshMaterial], world_from_model: Mat4, tint: [f32; 3]) {
     let normal_matrix: glam::Mat3 = glam::Mat3::from_mat4(world_from_model);
     for triangle in &model.triangles {
-        let material = &model.materials[triangle.material];
+        let Some(material) = materials.get(triangle.material) else {
+            continue;
+        };
         let base = material.base_color;
         let glow: bool = material.emissive.iter().sum::<f32>() > 0.5;
         let color: [f32; 4] = [base[0] * tint[0], base[1] * tint[1], base[2] * tint[2], if glow { 1.0 } else { 0.0 }];

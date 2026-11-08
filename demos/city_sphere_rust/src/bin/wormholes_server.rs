@@ -103,5 +103,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         &AtomicBool::new(false),
         Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
         game_password,
+        None,
     )
 }

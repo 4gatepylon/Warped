@@ -54,6 +54,7 @@ fn get_map_label(map: MapName) -> &'static str {
     match map {
         MapName::HouseDemo => "House",
         MapName::LunarSurface => "Lunar Surface",
+        MapName::CitySphere => "City Sphere",
     }
 }
 
