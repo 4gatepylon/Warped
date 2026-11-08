@@ -1418,13 +1418,31 @@ impl VoxelWorld {
         if self.terrain.is_some() {
             return self.get_edge_frac(x) >= 1.0;
         }
+        self.get_ellipse_frac(x) > 1.0
+    }
+
+    /// `get_ellipse_frac` gives (u / a)² + (v / b)² for the playable ellipse's half axes a and b:
+    /// over 1 outside it; 0 without one.
+    ///
+    /// Example: `let frac = world.get_ellipse_frac(x);`
+    fn get_ellipse_frac(&self, x: DVec4) -> f64 {
         match self.regions {
             Some([_, u_max_m, v_max_m]) => {
                 let [u_m, v_m, _] = self.get_fermi_coordinates(x);
-                (u_m / u_max_m).powi(2) + (v_m / v_max_m).powi(2) > 1.0
+                (u_m / u_max_m).powi(2) + (v_m / v_max_m).powi(2)
             }
-            None => false,
+            None => 0.0,
         }
+    }
+
+    /// `is_moving_out` says whether a step from x to y ends past the map's edge and, on a map with
+    /// a playable ellipse, further out than it started, so a player put past the ellipse (out of a
+    /// wormhole) can still walk back in.
+    ///
+    /// Example: `if !world.is_moving_out(x, y) { ... }`
+    fn is_moving_out(&self, x: DVec4, y: DVec4) -> bool {
+        self.is_outside_boundary(y)
+            && (self.terrain.is_some() || self.get_ellipse_frac(y) >= self.get_ellipse_frac(x))
     }
 
     /// `is_body_blocked` says whether a body standing on `body` with its eye `h_m` up touches a
@@ -2453,7 +2471,7 @@ impl VoxelPlayer {
         }
         if crossed.is_some() {
             (self.body, self.h_m) = (body_new, h_new);
-        } else if has_moved && !world.is_outside_boundary(body_new.col(AXIS_W)) {
+        } else if has_moved && !world.is_moving_out(self.body.col(AXIS_W), body_new.col(AXIS_W)) {
             let nearby_new: Vec<usize> =
                 world.find_nearby_structures(body_new.col(AXIS_W), NEARBY_REACH_M);
             if !world.is_body_blocked(body_new, h_new, &nearby_new) {
@@ -3796,6 +3814,375 @@ mod blizzard_tests {
             shot.is_hit || shot.length_m > expected_m + 1.0,
             "{} m",
             shot.length_m
+        );
+    }
+}
+
+#[cfg(test)]
+mod parity_tests {
+    //! Tests that Snow Planet plays as Lunar Surface does, W-126 (same play in every level).
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Level | Snow Planet, Lunar Surface (the reference) | `a_jump_matches_lunar_surface` |
+    //! | Console | each of the four (2 pylons a team) | `every_console_can_be_turned_off_on_foot` |
+    //! | Side of a pylon | each of `SIDE_COUNT` directions around it | `every_console_can_be_turned_off_on_foot` |
+
+    use super::*;
+    use crate::map::{FLAT_CURVATURE_RADIUS_M, Map, get_map_folder};
+
+    const STEP_S: f64 = 1.0 / 60.0;
+    const MAX_JUMP_STEP_COUNT: usize = 120;
+    const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.05;
+    const SIDE_COUNT: usize = 8;
+    const GAP_TO_PYLON_M: f64 = 1.0;
+    const CONSOLE_COUNT: usize = 4;
+    const LUNAR_SETTINGS_PATH: &str = "../hyperbolic_wormholes_rust/server_settings.yaml";
+
+    fn load_snow_planet() -> VoxelWorld {
+        let mut map: Map = Map::Load(&get_map_folder("snow_planet")).expect("the Snow Planet map");
+        map.curve_flat(FLAT_CURVATURE_RADIUS_M);
+        VoxelWorld::FromMap(&map).expect("a voxel world")
+    }
+
+    /// `measure_jump` gives a standing jump's height in meters and its time in the air in steps,
+    /// at Fermi (u, v).
+    fn measure_jump(world: &VoxelWorld, at_m: [f64; 2]) -> (f64, usize) {
+        let mut player: VoxelPlayer =
+            VoxelPlayer::AtView(world, at_m, [at_m[0] + 1.0, at_m[1]], None, 0.0);
+        let start_m: f64 = player.h_m;
+        let jump: Input = Input {
+            up: true,
+            ..Input::default()
+        };
+        player.step(world, &jump, STEP_S, 0);
+        let (mut apex_m, mut air_step_count): (f64, usize) = (player.h_m - start_m, 1);
+        while !player.is_on_ground {
+            assert!(
+                air_step_count < MAX_JUMP_STEP_COUNT,
+                "the jump never landed"
+            );
+            player.step(world, &Input::default(), STEP_S, 0);
+            apex_m = apex_m.max(player.h_m - start_m);
+            air_step_count += 1;
+        }
+        (apex_m, air_step_count)
+    }
+
+    #[test]
+    fn a_jump_matches_lunar_surface() {
+        let lunar_map: Map =
+            Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
+        let mut lunar: VoxelWorld = VoxelWorld::FromMap(&lunar_map).expect("a voxel world");
+        lunar.set_settings(
+            ServerSettings::Load(
+                &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(LUNAR_SETTINGS_PATH),
+            )
+            .expect("Lunar Surface's server settings"),
+        );
+        let (lunar_apex_m, lunar_step_count) = measure_jump(&lunar, [-27.0, 0.0]);
+        let (snow_apex_m, snow_step_count) = measure_jump(&load_snow_planet(), [-30.0, 0.0]);
+        assert!(
+            (snow_apex_m - lunar_apex_m).abs() < JUMP_HEIGHT_TOLERANCE_M,
+            "Snow Planet {snow_apex_m} m, Lunar Surface {lunar_apex_m} m"
+        );
+        assert!(
+            snow_step_count.abs_diff(lunar_step_count) <= 1,
+            "Snow Planet {snow_step_count} steps in the air, Lunar Surface {lunar_step_count}"
+        );
+    }
+
+    #[test]
+    fn every_console_can_be_turned_off_on_foot() {
+        let world: VoxelWorld = load_snow_planet();
+        assert_eq!(world.consoles.len(), CONSOLE_COUNT);
+        for console in &world.consoles {
+            let k: usize = console.pylon.expect("each console has its pylon");
+            let [u_m, v_m, _] = get_fermi_coordinates(world.structures[k].centre, world.r);
+            let gap_m: f64 = world.get_shapes(k)[0].half.x + GAP_TO_PYLON_M;
+            for side in 0..SIDE_COUNT {
+                let angle_rad: f64 = std::f64::consts::TAU * side as f64 / SIDE_COUNT as f64;
+                let at_m: [f64; 2] = [u_m + gap_m * angle_rad.cos(), v_m + gap_m * angle_rad.sin()];
+                let player: VoxelPlayer = VoxelPlayer::AtView(&world, at_m, [u_m, v_m], None, 0.0);
+                let nearby: Vec<usize> =
+                    world.find_nearby_structures(player.body.col(AXIS_W), NEARBY_REACH_M);
+                assert!(
+                    !world.is_body_blocked(player.body, player.h_m, &nearby),
+                    "console {}: no room to stand at {at_m:?}",
+                    console.material
+                );
+                let aimed: Option<u8> = world.find_aimed_material(
+                    player.get_camera_frame(&world),
+                    world.settings.consoles.reach_m,
+                );
+                assert_eq!(aimed, Some(console.material), "from {at_m:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_settings_files_match_lunar_surface() {
+        let root: &std::path::Path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let read = |path: &str| -> Vec<String> {
+            std::fs::read_to_string(root.join(path))
+                .expect("a settings file")
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("jump_time_per_map_jump_time"))
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(read("server_settings.yaml"), read(LUNAR_SETTINGS_PATH));
+        assert_eq!(
+            read("player_settings.yaml"),
+            read("../hyperbolic_wormholes_rust/player_settings.yaml")
+        );
+    }
+}
+
+#[cfg(test)]
+mod play_tests {
+    //! Scripted play on Snow Planet: spawns, walking everywhere, the level's wormhole and a thrown
+    //! pair, W-126 (same play in every level).
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Team | blue, red | `players_spawn_on_open_snow`, `walking_never_sticks_sinks_or_leaves` |
+    //! | Players at a spawn | the first, up to `SPAWN_PLAYER_COUNT` on its rings | `players_spawn_on_open_snow` |
+    //! | Heading from a spawn | each of `HEADING_COUNT` | `walking_never_sticks_sinks_or_leaves` |
+    //! | Gait | walking, sprinting, jumping, crouching | `walking_never_sticks_sinks_or_leaves` |
+    //! | Wormhole | the level's pair, a thrown pair | `the_level_wormhole_carries_walkers_and_lasers`, `a_thrown_pair_carries_walkers_and_lasers` |
+    //! | Way into a level mouth | each of `HEADING_COUNT`, from inside and past the edge | `the_level_wormhole_carries_walkers_and_lasers` |
+    //! | Past the edge, walking | inward (moves), outward (stays) | `a_player_past_the_edge_walks_back_in_only` |
+
+    use super::*;
+    use crate::map::{FLAT_CURVATURE_RADIUS_M, Map, get_map_folder};
+
+    const STEP_S: f64 = 1.0 / 60.0;
+    const SPAWN_PLAYER_COUNT: u32 = 8;
+    const CLEAR_AHEAD_M: f64 = 20.0;
+    const STAND_TOLERANCE_M: f64 = 0.05;
+    const HEADING_COUNT: usize = 12;
+    const WALK_STEP_COUNT: usize = 900;
+    const GAIT_PERIOD_STEP_COUNT: usize = 60;
+    const MIN_FIRST_SECOND_M: f64 = 5.0;
+    const WALK_IN_M: f64 = 6.0;
+    const WALK_THROUGH_STEP_COUNT: usize = 240;
+    const NEAR_EXIT_M: f64 = 10.0;
+    const MIN_WALK_ON_M: f64 = 3.0;
+    const PAST_EDGE_V_M: f64 = 41.0;
+    const EDGE_WALK_STEP_COUNT: usize = 30;
+    const MIN_EDGE_WALK_M: f64 = 2.0;
+    const PURPLE_M: [f64; 2] = [-38.0, 8.0];
+    const GREEN_M: [f64; 2] = [-22.0, -8.0];
+
+    fn load_snow_planet() -> VoxelWorld {
+        let mut map: Map = Map::Load(&get_map_folder("snow_planet")).expect("the Snow Planet map");
+        map.curve_flat(FLAT_CURVATURE_RADIUS_M);
+        VoxelWorld::FromMap(&map).expect("a voxel world")
+    }
+
+    fn get_place_m(world: &VoxelWorld, player: &VoxelPlayer) -> [f64; 2] {
+        let [u_m, v_m, _] = world.get_fermi_coordinates(player.body.col(AXIS_W));
+        [u_m, v_m]
+    }
+
+    /// `walk` walks `player` forward until a step reports a message or `step_count` steps pass,
+    /// and gives the messages.
+    fn walk(world: &VoxelWorld, player: &mut VoxelPlayer, step_count: usize) -> Vec<String> {
+        let input: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        for _ in 0..step_count {
+            let messages: Vec<String> = player.step(world, &input, STEP_S, 0).messages;
+            if !messages.is_empty() {
+                return messages;
+            }
+        }
+        Vec::new()
+    }
+
+    #[test]
+    fn players_spawn_on_open_snow() {
+        let world: VoxelWorld = load_snow_planet();
+        let eye_m: f64 = world.player.eye_height_m;
+        for team in 0..2 {
+            let mut eyes: Vec<DVec4> = Vec::new();
+            for id in 0..SPAWN_PLAYER_COUNT {
+                let player: VoxelPlayer = VoxelPlayer::NearSpawn(&world, team, id, &eyes);
+                let camera: DMat4 = player.get_camera_frame(&world);
+                let [u_m, v_m, h_m] = world.get_fermi_coordinates(camera.col(AXIS_W));
+                let at: String = format!("team {team}, player {id} at ({u_m:.1}, {v_m:.1})");
+                assert!(
+                    (h_m - eye_m).abs() < STAND_TOLERANCE_M,
+                    "{at}: eye {h_m} m up"
+                );
+                let nearby: Vec<usize> =
+                    world.find_nearby_structures(player.body.col(AXIS_W), NEARBY_REACH_M);
+                assert!(
+                    !world.is_body_blocked(player.body, player.h_m, &nearby),
+                    "{at}"
+                );
+                assert!(!world.is_outside_boundary(player.body.col(AXIS_W)), "{at}");
+                let clear_m: f64 =
+                    world.find_clear_m(camera.col(AXIS_W), -camera.col(AXIS_Z), CLEAR_AHEAD_M);
+                assert!(clear_m >= CLEAR_AHEAD_M, "{at}: a wall {clear_m} m ahead");
+                eyes.push(camera.col(AXIS_W));
+            }
+        }
+    }
+
+    #[test]
+    fn walking_never_sticks_sinks_or_leaves() {
+        let world: VoxelWorld = load_snow_planet();
+        let crouch_eye_m: f64 =
+            world.player.eye_height_m * world.settings.movement.crouch_eye_height_frac;
+        for team in 0..2 {
+            for heading in 0..HEADING_COUNT {
+                let spawn: VoxelPlayer = VoxelPlayer::AtSpawn(&world, team);
+                let [u_m, v_m] = get_place_m(&world, &spawn);
+                let angle_rad: f64 = std::f64::consts::TAU * heading as f64 / HEADING_COUNT as f64;
+                let target_m: [f64; 2] = [u_m + angle_rad.cos(), v_m + angle_rad.sin()];
+                let mut player: VoxelPlayer =
+                    VoxelPlayer::AtView(&world, [u_m, v_m], target_m, None, 0.0);
+                for i in 0..WALK_STEP_COUNT {
+                    let phase: usize = i / GAIT_PERIOD_STEP_COUNT % 4;
+                    let input: Input = Input {
+                        forward: true,
+                        sprint: phase == 1,
+                        up: phase == 2 && i % GAIT_PERIOD_STEP_COUNT == 0,
+                        crouch: phase == 3,
+                        ..Input::default()
+                    };
+                    let messages: Vec<String> = player.step(&world, &input, STEP_S, team).messages;
+                    let at: String =
+                        format!("team {team}, heading {heading}, step {i}, {messages:?}");
+                    let nearby: Vec<usize> =
+                        world.find_nearby_structures(player.body.col(AXIS_W), NEARBY_REACH_M);
+                    assert!(
+                        !messages.is_empty()
+                            || !world.is_body_blocked(player.body, player.h_m, &nearby),
+                        "{at}: blocked with the eye {} m up",
+                        player.h_m
+                    );
+                    assert!(
+                        player.h_m > crouch_eye_m - STAND_TOLERANCE_M,
+                        "{at}: {}",
+                        player.h_m
+                    );
+                    assert!(!world.is_outside_boundary(player.body.col(AXIS_W)), "{at}");
+                    if i + 1 == GAIT_PERIOD_STEP_COUNT {
+                        let [u_now_m, v_now_m] = get_place_m(&world, &player);
+                        let moved_m: f64 = (u_now_m - u_m).hypot(v_now_m - v_m);
+                        assert!(moved_m > MIN_FIRST_SECOND_M, "{at}: stuck, {moved_m} m");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_player_past_the_edge_walks_back_in_only() {
+        let world: VoxelWorld = load_snow_planet();
+        for (target_m, should_move) in [([0.0, 0.0], true), ([0.0, PAST_EDGE_V_M * 2.0], false)] {
+            let mut player: VoxelPlayer =
+                VoxelPlayer::AtView(&world, [0.0, PAST_EDGE_V_M], target_m, None, 0.0);
+            walk(&world, &mut player, EDGE_WALK_STEP_COUNT);
+            let [_, v_m] = get_place_m(&world, &player);
+            assert_eq!(
+                v_m < PAST_EDGE_V_M - MIN_EDGE_WALK_M,
+                should_move,
+                "toward {target_m:?}: {v_m}"
+            );
+            assert!(
+                v_m < PAST_EDGE_V_M + STAND_TOLERANCE_M,
+                "toward {target_m:?}: {v_m}"
+            );
+        }
+    }
+
+    fn find_mouth_m(world: &VoxelWorld, name: &str) -> [f64; 2] {
+        let mouth: &VoxelWarp = world
+            .warps
+            .iter()
+            .find(|warp| warp.name == name)
+            .expect("the level's mouth");
+        let [u_m, v_m, _] = world.get_fermi_coordinates(mouth.centre);
+        [u_m, v_m]
+    }
+
+    #[test]
+    fn the_level_wormhole_carries_walkers_and_lasers() {
+        let world: VoxelWorld = load_snow_planet();
+        let mouths_m: [[f64; 2]; 2] = [
+            find_mouth_m(&world, "wormhole mouth A"),
+            find_mouth_m(&world, "wormhole mouth B"),
+        ];
+        for (from, [into_m, out_m]) in [mouths_m, [mouths_m[1], mouths_m[0]]]
+            .into_iter()
+            .enumerate()
+        {
+            let name: String = format!("wormhole mouth {}", ["A", "B"][from]);
+            for angle_index in 0..HEADING_COUNT {
+                let angle_rad: f64 =
+                    std::f64::consts::TAU * angle_index as f64 / HEADING_COUNT as f64;
+                let start_m: [f64; 2] = [
+                    into_m[0] + WALK_IN_M * angle_rad.cos(),
+                    into_m[1] + WALK_IN_M * angle_rad.sin(),
+                ];
+                let mut player: VoxelPlayer =
+                    VoxelPlayer::AtView(&world, start_m, into_m, None, 0.0);
+                let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
+                assert_eq!(shot.through.first(), Some(&name), "shot from {start_m:?}");
+                let messages: Vec<String> = walk(&world, &mut player, WALK_THROUGH_STEP_COUNT);
+                assert_eq!(
+                    messages,
+                    vec![format!("Through {name}")],
+                    "from {start_m:?}"
+                );
+                let [u_m, v_m] = get_place_m(&world, &player);
+                assert!(
+                    (u_m - out_m[0]).hypot(v_m - out_m[1]) < NEAR_EXIT_M,
+                    "from {start_m:?}, came out at ({u_m}, {v_m})"
+                );
+                let exit_m: [f64; 2] = [u_m, v_m];
+                walk(&world, &mut player, WALK_THROUGH_STEP_COUNT);
+                let [u_end_m, v_end_m] = get_place_m(&world, &player);
+                assert!(
+                    (u_end_m - exit_m[0]).hypot(v_end_m - exit_m[1]) > MIN_WALK_ON_M,
+                    "from {start_m:?}, stuck at ({u_end_m}, {v_end_m}) after the throat"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_thrown_pair_carries_walkers_and_lasers() {
+        let mut world: VoxelWorld = load_snow_planet();
+        let eye_m: f64 = world.player.eye_height_m;
+        let place = |at_m: [f64; 2]| MouthPlace {
+            u_m: at_m[0],
+            v_m: at_m[1],
+            h_m: eye_m,
+            yaw_rad: 0.0,
+        };
+        let (purple, green) = (place(PURPLE_M), place(GREEN_M));
+        assert!(world.can_place_mouth(&purple, &[]));
+        assert!(world.can_place_mouth(&green, &[purple]));
+        world.set_thrown_wormholes(&[[purple, green]]);
+        let start_m: [f64; 2] = [PURPLE_M[0] - WALK_IN_M, PURPLE_M[1]];
+        let mut player: VoxelPlayer = VoxelPlayer::AtView(&world, start_m, PURPLE_M, None, 0.0);
+        let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
+        assert_eq!(shot.through, vec!["the purple wormhole".to_string()]);
+        let messages: Vec<String> = walk(&world, &mut player, WALK_THROUGH_STEP_COUNT);
+        assert!(
+            messages.contains(&"Through the purple wormhole".to_string()),
+            "{messages:?}"
+        );
+        let [u_m, v_m] = get_place_m(&world, &player);
+        assert!(
+            (u_m - GREEN_M[0]).hypot(v_m - GREEN_M[1]) < NEAR_EXIT_M,
+            "came out at ({u_m}, {v_m})"
         );
     }
 }

@@ -26,6 +26,10 @@ const LEFT_PX: f32 = 8.0;
 const MAX_WIDTH_FRAC: f32 = 0.95;
 const TEXT_COLOR: Color = Color::RGB(235, 240, 250);
 const HIGHLIGHT_COLOR: Color = Color::RGB(255, 196, 92);
+/// `BANNER_TITLE_COLOR` and `BANNER_TOP_PX` are the Lunar Surface demo's banner ("YOU DIED"): its
+/// title colour (`OVERLAY_TITLE_COLOR`) and the space above its first line (`TEXT_TOP_PX`).
+const BANNER_TITLE_COLOR: Color = Color::RGB(255, 89, 77);
+const BANNER_TOP_PX: f32 = 2.0;
 const BYTES_PER_PIXEL: usize = 4;
 
 /// `TextPicture` is a picture of some lines of text and the lines it shows.
@@ -34,6 +38,8 @@ pub struct TextPicture {
     pub width_px: u32,
     pub height_px: u32,
     shown_lines: Option<(Vec<(String, bool)>, bool)>,
+    title_color: Color,
+    top_px: f32,
 }
 
 impl TextPicture {
@@ -47,6 +53,21 @@ impl TextPicture {
             width_px,
             height_px,
             shown_lines: None,
+            title_color: HIGHLIGHT_COLOR,
+            top_px: TOP_PX,
+        }
+    }
+
+    /// `Banner` is an empty picture of `width_px` by `height_px` in the Lunar Surface demo's banner
+    /// style ("YOU DIED"): its highlighted lines in the banner's red, from 2 px down.
+    ///
+    /// Example: `let banner = TextPicture::Banner(240, 24);`
+    #[allow(non_snake_case)]
+    pub fn Banner(width_px: u32, height_px: u32) -> TextPicture {
+        TextPicture {
+            title_color: BANNER_TITLE_COLOR,
+            top_px: BANNER_TOP_PX,
+            ..TextPicture::New(width_px, height_px)
         }
     }
 
@@ -76,12 +97,12 @@ impl TextPicture {
                 LEFT_PX
             };
             canvas.set_draw_color(if *is_highlighted {
-                HIGHLIGHT_COLOR
+                self.title_color
             } else {
                 TEXT_COLOR
             });
             canvas
-                .draw_debug_text(shown.as_str(), (x_px, TOP_PX + LINE_PX * i as f32))
+                .draw_debug_text(shown.as_str(), (x_px, self.top_px + LINE_PX * i as f32))
                 .expect("SDL debug text");
         }
         canvas.present();

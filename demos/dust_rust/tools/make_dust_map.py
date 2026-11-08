@@ -2,8 +2,10 @@
 
 Dust is a point-symmetric desert basin in hyperbolic space (R = 50 m): blue spawns at u = -104 m,
 red at +104 m, three pylons a team, twin sandstone ridges with an arch each, mesas and pillars in
-the middle, and one fixed wormhole pair across the flanks; no black hole. Heights follow
-`src/terrain.rs` so things stand on the ground. Standard library only.
+the middle, and one fixed wormhole pair across the flanks, centred at eye height so players walk
+through them (W-126, same play in every level), moved up to `MOUTH_JITTER_M` by `MOUTH_SEED` with
+mouth B mirroring A; no black hole. Heights follow `src/terrain.rs` so things stand on the ground.
+Standard library only.
 
 Usage (from demos/dust_rust/): python3 tools/make_dust_map.py [output path]
 """
@@ -20,6 +22,11 @@ JITTER_SEED = 121
 JITTER_M = 1.5
 JITTER_YAW_RAD = 0.3
 JITTER_SCALE_FRAC = 0.12
+EYE_HEIGHT_M = 1.6
+MOUTH_A_SPOT_M = (-50.0, -40.0)
+MOUTH_YAW_RAD = 0.6
+MOUTH_JITTER_M = 1.0
+MOUTH_SEED = JITTER_SEED + 1
 WIND_LOG_INDEX_GRADIENT_PER_M = 0.00144
 GUST_STRENGTH_FRAC = 0.2
 GUST_SIZE_M = 3000
@@ -196,9 +203,12 @@ def main() -> None:
         place_natural("ruin wall", u, v, yaw, [box([0, 0.7, 0], [length, 1.6, 0.4], "sandstone blocks", 0.05)], sink_m=0.3)
     for u, v, rad in [(-26, 18, 1.6), (-44, 46, 2.2), (-14, -30, 1.4), (-88, -40, 2.0)]:
         place_natural("boulder", u, v, 0.0, [box([0, rad * 0.4, 0], [rad, rad * 0.8, rad * 1.2], "boulder", kind="ellipsoid")])
-    mouths = [(-50.0, -40.0, 0.6), (50.0, 40.0, 0.6 + math.pi)]
+    mouth_jitter = random.Random(MOUTH_SEED)
+    du, dv = (mouth_jitter.uniform(-MOUTH_JITTER_M, MOUTH_JITTER_M) for _ in range(2))
+    a_u, a_v = MOUTH_A_SPOT_M[0] + du, MOUTH_A_SPOT_M[1] + dv
+    mouths = [(a_u, a_v, MOUTH_YAW_RAD), (-a_u, -a_v, MOUTH_YAW_RAD + math.pi)]
     warps = [{"kind": "wormhole_mouth", "name": f"wormhole mouth {'AB'[k]}",
-              "frame": make_frame(u, v, ground(u, v) + 2.6, yaw), "law": "foil", "schwarzschild_radius_m": 1.6,
+              "frame": make_frame(u, v, ground(u, v) + EYE_HEIGHT_M, yaw), "law": "foil", "schwarzschild_radius_m": 1.6,
               "lambda_squared": 0.25, "radial_coordinate": "distance", "reach_m": 15, "falloff": "taper",
               "partner": 1 - k} for k, (u, v, yaw) in enumerate(mouths)]
     sun = [0.55, 0.62, -0.42]
@@ -209,7 +219,7 @@ def main() -> None:
         "source": f"demos/dust_rust/tools/make_dust_map.py (layout after demos/levels/dust/index.html; natural props jittered from seed {JITTER_SEED}, mirrored for fairness)",
         "space": {"kind": "hyperbolic", "curvature_radius_m": R_M},
         "gravity_m_per_s2": 9.81,
-        "player": {"eye_height_m": 1.6, "walk_m_per_s": 5, "sprint_m_per_s": 9, "jump_m_per_s": 5.2, "fly_m_per_s": 14},
+        "player": {"eye_height_m": EYE_HEIGHT_M, "walk_m_per_s": 5, "sprint_m_per_s": 9, "jump_m_per_s": 5.2, "fly_m_per_s": 14},
         "materials": [{"id": i, "name": n, "color": c, "kind": k} for i, (n, c, k) in enumerate(MATERIALS)],
         "ground": {"material": MAT["sand"], "tiling": {"kind": "square_order_5", "cells_per_side": 36},
                    "terrain": dict(TERRAIN, mounds=mounds)},

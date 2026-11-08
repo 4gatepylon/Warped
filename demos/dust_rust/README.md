@@ -32,7 +32,8 @@ LAN discovery 47831.
 
 - **Map**: `common/maps/dust/map.json`, written by `tools/make_dust_map.py` (rerun it after editing it): a crater
   basin with dunes, sandstone mesas, pillars, ruin walls and an arch, HESCO rows, bunkers, 3 pylons per team
-  (mirrored), spawns at u = ±104 m, a wormhole pair at (-50, -40) and (50, 40) m.
+  (mirrored), spawns at u = ±104 m, a wormhole pair near (-50, -40) and (50, 40) m, centred at eye height so
+  players walk through it.
 - **Wind**: the map's `atmosphere.wind` is a refractive-index field, ln n = k d, where d is the signed hyperbolic
   distance (m) to the plane through the origin perpendicular to `direction`, and k is
   `log_index_gradient_per_m` (0.00144 /m). Light follows the ray equation, so it curves toward higher n, i.e.
