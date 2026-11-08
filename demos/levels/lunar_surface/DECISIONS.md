@@ -140,9 +140,10 @@
 
 ### D16. Laser
 
-- **Choice:** traced from the eye along the crosshair (bent, through throats, stopped by blocks including glass, the
+- **Choice:** traced from the eye along the crosshair (bent, through throats and glass, stopped by other blocks, the
   ground and horizons, up to 480 m); drawn from a gun 0.22 m right of and 0.25 m below the eye, joining the path 3 m
-  out; no gravity drop; fades over 2 s; at most 3 beams on screen.
+  out; no gravity drop; fades over 2 s; at most 3 beams on screen. Glass stopped the laser until W-70, when the user
+  asked for windows to see and shoot through (the Rust demo's `DECISIONS.md` D90).
 - **Alternatives:** the laser gravity demos' falling beam.
 - **Rationale:** the brief asks for the shot along the crosshair; the short muzzle segment lets the shooter see it.
 
@@ -150,6 +151,16 @@
 
 - **Choice:** within 3 m of an active console, facing within 57° of the pylon's core; one console at a time.
 - **Rationale:** the brief's "about 3 m, facing it".
+
+### D21. Three pylons per team, one console each
+
+- **Choice:** each team has three pylons with one console each (`<team> console 1` to `3`, in `LAYOUT` order), and a
+  team loses when all three are off. The first pylon of each team stays where it was; the other two stand on the
+  flanks, red's at (58, 42) and (56, −50) and blue's mirrored at (−58, 42) and (−56, −50): at least 2 m clear of every
+  other structure's footprint, at least 25 m from every other pylon, and 16 m inside the boundary ellipse.
+- **Alternatives:** five consoles on one pylon (the original brief); new red pylons deeper in the red zone (no spot
+  there clears the dome, module, solar array, hangar and walkway by 2 m).
+- **Rationale:** W-68 (the reality bend) has the black hole grow as pylons fall, and you chose one console per pylon.
 
 ## Environment
 

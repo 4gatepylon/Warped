@@ -24,13 +24,12 @@ only.
 
 ```sh
 pushd demos/fps_demo
-make download-assets
 make run-fps-demo
 popd
 ```
 
-`make download-assets` needs Rust (rustup) and CMake (`brew install cmake`; SDL3 builds from
-source). It downloads about 126 files into `.assets/` once; a second run downloads nothing.
+`make run-fps-demo` needs Rust (rustup) and CMake (`brew install cmake`; SDL3 builds from
+source). The assets are committed in `assets/`, so nothing needs downloading.
 `make help` lists every target, e.g. `make run-fps-demo RENDER_SCALE=0.7 BOT_COUNT=6`.
 `warped-fps-demo --help` lists every flag (`--fullscreen`, `--no-vsync`, `--autopilot`,
 `--show-frame-time`, `--rifle`, ...). `--camera-view yard|indoor|firing` holds the camera at
@@ -58,25 +57,24 @@ summary to `.artifacts/bench_fps_demo/<run_id>/`. Its choices are in
 
 ## Assets
 
-No binaries are committed. `download-assets` writes everything into `.assets/` (git-ignored,
-kept by `make clean`). The list is `src/asset_manifest.rs`.
+Every asset is committed in `assets/` (about 200 MB), so a fresh clone plays without downloading
+anything. The list is `src/asset_manifest.rs`; `make download-assets` downloads them again into
+`assets/`, skipping files that are already there.
 
 | Asset | Source | License |
 | --- | --- | --- |
 | HDRI sky `kloofendal_48d_partly_cloudy_puresky` (4K) | https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky | CC0 |
-| Textures `asphalt_02`, `concrete_floor_worn_001`, `brick_wall_02`, `concrete_wall_008`, `corrugated_iron_02`, `metal_plate`, `rusty_metal_02`, `concrete_pavement_02` (2K) | https://polyhaven.com/a/<name> | CC0 |
+| Textures `asphalt_02`, `concrete_floor_worn_001`, `brick_wall_02`, `concrete_wall_008`, `corrugated_iron_02`, `metal_plate`, `rusty_metal_02`, `concrete_pavement_02`, `moon_01`, `moon_meteor_02` (2K) | https://polyhaven.com/a/<name> | CC0 |
 | Rifle `bolt_action_rifle_7_62` (2K) | https://polyhaven.com/a/bolt_action_rifle_7_62 | CC0 |
 | Props `concrete_road_barrier`, `Barrel_01`, `barrel_03`, `old_military_crate`, `wooden_crate_02`, `metal_trash_can`, `utility_box_01`, `fire_hydrant`, `street_lamp_01`, `exterior_aircon_unit`, `old_tyre`, `portable_generator`, `propane_tank`, `cardboard_box_01`, `mounted_fluorescent_lights` (1K) | https://polyhaven.com/a/<name> | CC0 |
 | Bot `RobotExpressive.glb` by Tomás Laulhé, modified by Don McCurdy | https://github.com/mrdoob/three.js/tree/r170/examples/models/gltf/RobotExpressive | CC0 |
-| "Sci-fi revolver" by Ramhat (optional) | https://sketchfab.com/3d-models/none-f6bd1cbad4174048bcf02f8e52771adb | Sketchfab Standard |
-| "FPS- Arms" by 3DHaupt (optional) | https://sketchfab.com/3d-models/none-22274e479c794377b58671f1652f61fc | CC BY-NC 4.0 (credit the author, non-commercial only) |
+| "Sci-fi revolver" by Ramhat | https://sketchfab.com/3d-models/none-f6bd1cbad4174048bcf02f8e52771adb | Sketchfab Standard |
+| "FPS- Arms" by 3DHaupt | https://sketchfab.com/3d-models/none-22274e479c794377b58671f1652f61fc | CC BY-NC 4.0 (credit the author, non-commercial only) |
 
-The two Sketchfab models need a Sketchfab account. `download-assets` fetches them when
-`SKETCHFAB_API_TOKEN` is set (from https://sketchfab.com/settings/password). Otherwise download
-their glTF zips by hand and unzip them so that these files exist:
-
-- `.assets/sketchfab/sci_fi_revolver/scene.gltf`
-- `.assets/sketchfab/fps_arms/scene.gltf`
+The two Sketchfab models are committed for the team's own use while the repository is private.
+Their licenses limit sharing them further: check them before the repository or the game is made
+public. Downloading them again needs a Sketchfab account: `download-assets` fetches them when
+`SKETCHFAB_API_TOKEN` is set (from https://sketchfab.com/settings/password).
 
 Without the revolver, or with `--rifle`, the viewmodel is the Poly Haven rifle and the beam
 stays. The arms model has six static poses and no rig; the demo uses one pose (`Arms_Obj.001`,

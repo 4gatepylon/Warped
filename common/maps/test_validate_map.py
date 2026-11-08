@@ -2,13 +2,15 @@
 
 | Partitioning | Parts | Tests |
 | --- | --- | --- |
-| Shipped map | boxes only (house_demo), voxels (lunar_surface) | `test_shipped_maps_are_valid` |
+| Shipped map | boxes only (house_demo), shapes and mounds (lunar_surface) | `test_shipped_maps_are_valid` |
 | Manifest against the schema | valid, a required field missing, a wrong type | `test_shipped_maps_are_valid`, `test_schema_errors_are_reported` |
 | Frame | an isometry, not one | `test_shipped_maps_are_valid`, `test_a_bent_frame_is_caught` |
-| voxels.bin | exact, missing, short, too long, an unknown material | `test_shipped_maps_are_valid`, `test_voxel_file_mismatches_are_caught` |
+| Shapes | valid, an unknown material, rounding too big, an unknown kind | `test_shipped_maps_are_valid`, `test_bad_shapes_are_caught` |
 | Mouth partners | paired, unpaired | `test_shipped_maps_are_valid`, `test_unpaired_mouths_are_caught` |
 | Tapered reaches | apart, overlapping | `test_shipped_maps_are_valid`, `test_overlapping_tapered_reaches_are_caught` |
 | Name | matches the folder, doesn't | `test_shipped_maps_are_valid`, `test_a_wrong_name_is_caught` |
+| Zone walls | absent (house_demo), valid (lunar_surface), height or thickness not positive, opacity 0, opacity 1, a field missing (height, thickness) | `test_shipped_maps_are_valid`, `test_bad_zone_walls_are_caught` |
+| Milky Way | none (house_demo), valid (lunar_surface), a pole that isn't a unit vector, a core not perpendicular to the pole | `test_shipped_maps_are_valid`, `test_a_bad_milky_way_is_caught` |
 
 Example:
     uv run pytest
@@ -21,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from validate_map import MANIFEST_NAME, SCHEMA_PATH, VOXELS_NAME, _validate_map
+from validate_map import MANIFEST_NAME, SCHEMA_PATH, _validate_map
 
 MAPS_FOLDER: Path = Path(__file__).parent
 SCHEMA: dict = json.loads(SCHEMA_PATH.read_text())
@@ -73,19 +75,19 @@ def test_a_bent_frame_is_caught(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "damage",
+    ("damage", "expected"),
     [
-        lambda path: path.unlink(),
-        lambda path: path.write_bytes(path.read_bytes()[:-1]),
-        lambda path: path.write_bytes(path.read_bytes() + b"\x01"),
-        lambda path: path.write_bytes(b"\xfe" + path.read_bytes()[1:]),
+        (lambda shape: shape.update(material=254), "isn't in the palette"),
+        (lambda shape: shape.update(round_m=100.0), "exceeds its smallest half size"),
+        (lambda shape: shape.update(kind="torus"), "torus"),
     ],
-    ids=["missing", "short", "too long", "unknown material"],
+    ids=["unknown material", "rounding too big", "unknown kind"],
 )
-def test_voxel_file_mismatches_are_caught(damage: Callable[[Path], None], tmp_path: Path) -> None:
-    folder: Path = _copy_map("lunar_surface", tmp_path)
-    damage(folder / VOXELS_NAME)
-    assert _validate_map(folder, SCHEMA) != []
+def test_bad_shapes_are_caught(damage: Callable[[dict], None], expected: str, tmp_path: Path) -> None:
+    errors: list[str] = _validate_map(
+        _copy_map("lunar_surface", tmp_path, lambda manifest: damage(manifest["structures"][0]["shapes"][0])), SCHEMA
+    )
+    assert any(expected in error for error in errors)
 
 
 def test_unpaired_mouths_are_caught(tmp_path: Path) -> None:
@@ -104,6 +106,47 @@ def test_overlapping_tapered_reaches_are_caught(tmp_path: Path) -> None:
     assert any("overlap" in error for error in errors)
 
 
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda walls: walls.update(height_m=0.0),
+        lambda walls: walls.update(thickness_m=-0.1),
+        lambda walls: walls.update(opacity_frac=0.0),
+        lambda walls: walls.update(opacity_frac=1.0),
+        lambda walls: walls.pop("height_m"),
+        lambda walls: walls.pop("thickness_m"),
+    ],
+    ids=[
+        "height not positive",
+        "thickness not positive",
+        "opacity 0",
+        "opacity 1",
+        "height missing",
+        "thickness missing",
+    ],
+)
+def test_bad_zone_walls_are_caught(damage: Callable[[dict], None], tmp_path: Path) -> None:
+    errors: list[str] = _validate_map(
+        _copy_map("lunar_surface", tmp_path, lambda manifest: damage(manifest["regions"]["zone_walls"])), SCHEMA
+    )
+    assert errors != []
+
+
 def test_a_wrong_name_is_caught(tmp_path: Path) -> None:
     errors: list[str] = _validate_map(_copy_map("house_demo", tmp_path, lambda m: m.update(name="other")), SCHEMA)
     assert any("doesn't match" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("damage", "expected"),
+    [
+        (lambda milky_way: milky_way.update(pole_direction=[0.0, 2.0, 0.0]), "pole's direction is not a unit vector"),
+        (lambda milky_way: milky_way.update(core_direction=milky_way["pole_direction"]), "not perpendicular"),
+    ],
+    ids=["pole not a unit vector", "core not perpendicular"],
+)
+def test_a_bad_milky_way_is_caught(damage: Callable[[dict], None], expected: str, tmp_path: Path) -> None:
+    errors: list[str] = _validate_map(
+        _copy_map("lunar_surface", tmp_path, lambda manifest: damage(manifest["sky"]["milky_way"])), SCHEMA
+    )
+    assert any(expected in error for error in errors)

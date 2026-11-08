@@ -20,6 +20,8 @@ that applies only to some kinds of work goes in a skill, and this file points to
 - State the reviewable line count in the PR description.
 - Write every PR description with the `pr-description` skill (`.agents/skills/pr-description/`).
   Every PR uses its template unchanged.
+- Open every PR against `staging`. Agents may merge into `staging`; only humans merge into `main`,
+  or an agent when a human explicitly asks (details in the `pr-description` skill).
 
 ## Issues
 
@@ -222,6 +224,35 @@ that cover each part in the test file's docstring. Follow the `unit-tests` skill
 
 When the user tests a game or other visual work you made, follow the `playtesting` skill
 (`.agents/skills/playtesting/`).
+
+## Agents working together
+
+Coordinate agents working in parallel (subagents, other sessions, Codex, Devin) with the `managing-agents` skill
+(`.agents/skills/managing-agents/`), and merge into `staging` with the `merging-to-staging` skill
+(`.agents/skills/merging-to-staging/`).
+
+## Assets
+
+Find, get approved, add and credit assets from outside the repository (models, textures, sounds, fonts) with the
+`adding-assets` skill (`.agents/skills/adding-assets/`).
+
+## Compatible changes
+
+Change what outlives one build (saved player settings, server settings, what the network sends, map files) with the
+`compatible-changes` skill (`.agents/skills/compatible-changes/`).
+
+## Changes from others
+
+At the start of every response, check whether anyone else changed `staging` and tell the user at once who did what and
+whether it breaks anything: `git fetch -q origin staging && git log --format='%h %an: %s'
+refs/worktree/last-seen-staging..origin/staging`, then `git update-ref refs/worktree/last-seen-staging origin/staging`.
+Details, and when to ask the user who an author is, are in the `compatible-changes` skill.
+
+## Game design
+
+Before merging any PR, tell the user whether it changes the game's design (rules, controls, screens, menus, weapons,
+levels), whether `game_design/DESIGN.md` describes the change, and anything else you know the design doc gets wrong
+(the `merging-to-staging` skill).
 
 ## Machine-specific workarounds
 

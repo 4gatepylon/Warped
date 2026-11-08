@@ -3,9 +3,11 @@
 #
 # Interface:
 #     make help: list the targets.
-#     make run-demo RENDERER=<metal|cpu> MAP=<house-demo|lunar-surface>: open the window and play.
-#     make host-game PORT=<n> MAP=<map>: open the window and host a game for the local network.
-#     make join-game SERVER=<auto|address> MAP=<map>: open the window and join a game on the local network.
+#     make serve-game PORT=<n> MAP=<lunar-surface|house-demo> SERVER_SETTINGS=<file>: run a game server, without a window, and print how to join it.
+#     make join-game SERVER=<auto|address> PORT=<n> MAP=<map> PLAYER_SETTINGS=<file>: open the window and join that game server.
+#     (SERVER_SETTINGS: a copy of server_settings.yaml with the numbers that shape play; the server sends them to every player.)
+#     (PLAYER_SETTINGS: a copy of player_settings.yaml with this player's own keys, mouse speed and view.)
+#     (Playing is only on a game server: there is no local demo and no host-and-play target.)
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
@@ -22,20 +24,25 @@ FRAME_COUNT ?= 10
 AUTOPILOT_WIDTH_PX ?= 640
 AUTOPILOT_HEIGHT_PX ?= 400
 PORT ?= 47800
-MAP ?= house-demo
+MAP ?= lunar-surface
 SERVER ?= auto
+SERVER_SETTINGS ?=
+SERVER_SETTINGS_FLAG := $(if $(SERVER_SETTINGS),--server-settings $(SERVER_SETTINGS))
+PLAYER_SETTINGS ?=
+PLAYER_SETTINGS_FLAG := $(if $(PLAYER_SETTINGS),--player-settings $(PLAYER_SETTINGS))
 
 RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilot frames and timings). \
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help run-demo host-game join-game bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help serve-game join-game bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
-	@echo "  make run-demo RENDERER=metal MAP=house-demo     Open the window and play (MAP=lunar-surface; RENDERER=cpu: house only)"
-	@echo "  make host-game PORT=47800                        Open the window and host a game for the local network"
-	@echo "  make join-game SERVER=auto                       Open the window and join a game (SERVER=auto finds one)"
+	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run a game server, without a window; prints how to join"
+	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
+	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
+	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of player_settings.yaml)"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
 	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
@@ -47,14 +54,11 @@ help:
 	@echo ""
 	@echo "Example: make bench-views RENDERER=cpu WIDTH_PX=2560 HEIGHT_PX=1600"
 
-run-demo:
-	cargo run --release -- --renderer $(RENDERER) --map $(MAP)
-
-host-game:
-	cargo run --release -- --host --port $(PORT) --map $(MAP)
+serve-game:
+	cargo run --release -- --serve --port $(PORT) --map $(MAP) $(SERVER_SETTINGS_FLAG)
 
 join-game:
-	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP)
+	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) $(PLAYER_SETTINGS_FLAG)
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)

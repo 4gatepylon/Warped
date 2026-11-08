@@ -55,7 +55,7 @@ fn get_material_kind(material: u32) -> &'static str {
 }
 
 /// `export_map` writes `map.json` for the world into `folder` (made if missing) and returns its
-/// path. The demo's boxes have no voxels, so there is no `voxels.bin`.
+/// path.
 ///
 /// Example: `let path = map_export::export_map(&world, Path::new("house_demo"))?;`
 pub fn export_map(world: &World, folder: &Path) -> Result<PathBuf> {

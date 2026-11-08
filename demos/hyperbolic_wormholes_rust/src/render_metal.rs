@@ -5,7 +5,9 @@
 //! benchmark's PNGs) or copied straight into a window's `CAMetalLayer` drawable.
 //!
 //! Interface: `MetalRenderer::New`, `MetalRenderer::render_to_pixels`,
-//! `MetalRenderer::render_to_layer`, `MetalRenderer::get_device`, `MetalRenderer::last_gpu_ms`.
+//! `MetalRenderer::render_to_layer`, `MetalRenderer::render_overlay_to_layer`,
+//! `MetalRenderer::load`, `LoadingStep`, `get_loading_steps`,
+//! `MetalRenderer::get_device`, `MetalRenderer::last_gpu_ms`.
 //!
 //! Example: `let mut renderer = MetalRenderer::New()?; renderer.render_to_pixels(&data, size, &mut pixels)?;`
 //!
@@ -13,6 +15,8 @@
 //! - Performance: it waits for each frame to finish, so the GPU is idle while the CPU packs the
 //!   next frame; `last_gpu_ms` is the GPU's own time for the last frame, upscaling included.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::error::Error;
 use std::ptr::NonNull;
 
@@ -22,7 +26,7 @@ use objc2_foundation::NSString;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
     MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLDevice, MTLLibrary, MTLOrigin, MTLPixelFormat,
+    MTLCreateSystemDefaultDevice, MTLDevice, MTLLibrary, MTLOrigin, MTLPixelFormat, MTLRegion,
     MTLResourceOptions, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 use objc2_metal_fx::{MTLFXSpatialScaler, MTLFXSpatialScalerBase, MTLFXSpatialScalerDescriptor};
@@ -30,11 +34,14 @@ use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 use crate::render_voxel::{VoxelFrame, VoxelGpu};
 use crate::scene_data::{
-    ROW_COUNT, ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS, TEXEL_BOXES,
-    TEXEL_CLUSTER_INFO, TEXEL_CLUSTER_ORDER, TEXEL_CLUSTERS, TEXEL_GLUINGS, TEXEL_GROUND,
-    TEXEL_MOUTH_FIELDS, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD, TEXELS_PER_BEAM_CHUNK,
-    TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING, TEXELS_PER_MOUTH_FIELD, Uniforms,
+    HALF_FOV_RAD, ROW_COUNT, ROW_TEXEL_COUNT, SceneData, TEXEL_BEAM_CHUNKS, TEXEL_BEAM_POINTS,
+    TEXEL_BOXES, TEXEL_CLUSTER_INFO, TEXEL_CLUSTER_ORDER, TEXEL_CLUSTERS, TEXEL_GLUINGS,
+    TEXEL_GROUND, TEXEL_MOUTH_FIELDS, TEXEL_MOUTHS, TEXEL_SPOT, TEXEL_SUN, TEXEL_TO_WORLD,
+    TEXELS_PER_BEAM_CHUNK, TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING,
+    TEXELS_PER_MOUTH_FIELD, Uniforms,
 };
+use crate::viewmodel::{GunModel, Viewmodel};
+use crate::voxel_textures::SurfaceTextures;
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
 /// `Result` is this module's result type.
@@ -42,6 +49,268 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// `Texture` is a Metal texture and its size in pixels.
 type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
+
+/// `LoadingStep` is one part of what `MetalRenderer::load` reads and compiles before the first
+/// frame, so a window can show a loading bar between parts: the surface textures and the voxel
+/// shader (voxel maps only), and each gun model held in hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LoadingStep {
+    SurfaceTextures,
+    VoxelShader,
+    Gun(GunModel),
+}
+
+impl LoadingStep {
+    /// `get_label` says what the step loads, for the loading screen.
+    ///
+    /// Example: `let label: &str = LoadingStep::Gun(GunModel::Revolver).get_label();`
+    pub fn get_label(self) -> &'static str {
+        match self {
+            LoadingStep::SurfaceTextures => "surface textures",
+            LoadingStep::VoxelShader => "voxel shader",
+            LoadingStep::Gun(model) => model.get_label(),
+        }
+    }
+}
+
+/// `get_loading_steps` gives the steps `MetalRenderer::load` takes before the first frame of a
+/// voxel map (`is_voxel_map`) or a house map, in order.
+///
+/// Example: `let steps: &[LoadingStep] = get_loading_steps(true);`
+pub fn get_loading_steps(is_voxel_map: bool) -> &'static [LoadingStep] {
+    if is_voxel_map {
+        &[
+            LoadingStep::SurfaceTextures,
+            LoadingStep::VoxelShader,
+            LoadingStep::Gun(GunModel::Revolver),
+            LoadingStep::Gun(GunModel::BoltActionRifle),
+        ]
+    } else {
+        &[
+            LoadingStep::Gun(GunModel::Revolver),
+            LoadingStep::Gun(GunModel::BoltActionRifle),
+        ]
+    }
+}
+
+/// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
+/// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
+/// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
+/// (the HUD's bars), the player's wand with the gun model drawn in its place, how much of the
+/// previous frame's scene to blend into this one's (motion blur; 0 for none), what a recent hit
+/// does to the scene, how much of the frame's height the mask's text may take, a picture under
+/// the text, how far the scene stretches at the map's soft edge (the shader's
+/// `read_stretched_scene`; 0 for none), the minimap, and how far the scene blueshifts inside a
+/// wormhole mouth (the shader's `blueshift_scene`: 1 for walking straight ahead at the throat,
+/// negative for a redshift, 0 for none).
+pub struct Overlay<'a> {
+    pub dim_frac: f32,
+    pub mask: Option<(&'a [u8], (usize, usize))>,
+    pub rects: &'a [OverlayRect],
+    pub wand: Option<(OverlayWand, GunModel)>,
+    pub blur_frac: f32,
+    pub hit: HitEffect,
+    pub mask_height_frac: f32,
+    pub picture: Option<OverlayPicture<'a>>,
+    pub stretch_frac: f32,
+    pub minimap: Option<OverlayMinimap<'a>>,
+    pub blueshift_frac: f32,
+}
+
+/// `OverlayMinimap` is the minimap: the map's picture from above without labels (RGBA, rows top
+/// first, `map_layout.rs`) with its size, and the shader's `Minimap`.
+pub struct OverlayMinimap<'a> {
+    pub map_pixels: &'a [u8],
+    pub map_size_px: (usize, usize),
+    pub minimap: Minimap,
+}
+
+/// `Minimap` is the shader's `Minimap` (each member a multiple of 16 bytes, as Metal lays it
+/// out): the frame that takes the minimap's plane (its y = 0, with −z up the minimap) into the
+/// world; where it sits (the centre's x and y and the radius in pixels, then the Poincaré disk's
+/// radius at its rim, tanh of half its range in curvature radii); where the map's picture lies
+/// (the Fermi u and v of its top left corner, meters per pixel, then the curvature radius); how
+/// many marks and lines it has (then two zeros); the marks (other players: a point in the
+/// minimap's unit disk, x right and y down, then a radius in pixels and a zero; and a colour);
+/// and the lines (shots: two ends in the unit disk, then a colour).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Minimap {
+    pub ground_frame: [[f32; 4]; 4],
+    pub placement: [f32; 4],
+    pub map: [f32; 4],
+    pub counts: [i32; 4],
+    pub marks: [[[f32; 4]; 2]; MAX_MINIMAP_MARK_COUNT],
+    pub lines: [[[f32; 4]; 2]; MAX_MINIMAP_LINE_COUNT],
+}
+
+impl Minimap {
+    /// `Hidden` is no minimap: a radius of 0, which the shader skips.
+    ///
+    /// Example: `let minimap = Minimap::Hidden();`
+    #[allow(non_snake_case)]
+    pub fn Hidden() -> Minimap {
+        Minimap {
+            ground_frame: [[0.0; 4]; 4],
+            placement: [0.0; 4],
+            map: [0.0; 4],
+            counts: [0; 4],
+            marks: [[[0.0; 4]; 2]; MAX_MINIMAP_MARK_COUNT],
+            lines: [[[0.0; 4]; 2]; MAX_MINIMAP_LINE_COUNT],
+        }
+    }
+}
+
+/// `OverlayPicture` is an RGBA picture (rows top first) of `size_px`, drawn under the overlay's
+/// text and stretched between two corners given in the text mask's pixels.
+pub struct OverlayPicture<'a> {
+    pub pixels: &'a [u8],
+    pub size_px: (usize, usize),
+    pub min_mask_px: [i32; 2],
+    pub max_excl_mask_px: [i32; 2],
+}
+
+/// `HitEffect` is what a recent hit does to the scene (the shader's `read_hit_scene`): how much of
+/// the effect is left (1 just after the hit, 0 for none), how red the edges turn, how wide their
+/// blur is and how far the picture is shifted this frame.
+#[derive(Clone, Copy, Default)]
+pub struct HitEffect {
+    pub strength_frac: f32,
+    pub red_frac: f32,
+    pub blur_px: f32,
+    pub shake_px: [f32; 2],
+}
+
+/// `OverlayWand` is the shader's `OverlayWand`: the wand's shaft centre in camera space (x right,
+/// y up, -z ahead, meters; w unused), its axes as columns (its length along its own -z), its
+/// shaft's half sizes and RGB colour, and its tip's half sizes and RGB colour.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct OverlayWand {
+    pub center_m: [f32; 4],
+    pub axes: [[f32; 4]; 3],
+    pub shaft_half_m: [f32; 4],
+    pub shaft_color: [f32; 4],
+    pub tip_half_m: [f32; 4],
+    pub tip_color: [f32; 4],
+}
+
+impl OverlayWand {
+    /// `get_tip_m` gives the front of the wand's tip in camera space, where the gun's muzzle is.
+    ///
+    /// Example: `let muzzle_m = wand.get_tip_m();`
+    pub fn get_tip_m(&self) -> glam::Vec3 {
+        let reach_m: f32 = self.shaft_half_m[2] + 2.0 * self.tip_half_m[2];
+        glam::Vec4::from(self.center_m).truncate()
+            - glam::Vec4::from(self.axes[2]).truncate() * reach_m
+    }
+}
+
+/// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0),
+/// an RGBA colour (A the opacity), how it looks beyond its colour (`FLAT_RECT_STYLE` for a
+/// plain rectangle) and the pulses it carries for its bar (`NO_RECT_PULSE` for none).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OverlayRect {
+    pub min_frac: [f32; 2],
+    pub max_frac: [f32; 2],
+    pub color: [f32; 4],
+    pub style: RectStyle,
+    pub pulse: RectPulse,
+}
+
+/// `RectPulse` is the shader's `RectPulse`, up to `MAX_RECT_PULSE_COUNT` soft glows running along
+/// a HUD bar, carried by the bar's first `OverlayRect`: their middles' x as fractions of the
+/// screen's width (measured along the rect's slant, at its middle row), their opacities (0 for
+/// none), the x span they show in (the bar's filled part; they fade out just inside its ends), their
+/// half width (of the screen's width) and half height (of its height), and their RGBA colour (A
+/// unused).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RectPulse {
+    pub centers_x_frac: [f32; MAX_RECT_PULSE_COUNT],
+    pub opacities: [f32; MAX_RECT_PULSE_COUNT],
+    pub min_x_frac: f32,
+    pub max_x_frac: f32,
+    pub half_width_frac: f32,
+    pub half_height_frac: f32,
+    pub color: [f32; 4],
+}
+
+/// `MAX_RECT_PULSE_COUNT` is how many pulses one `RectPulse` carries, the shader's.
+pub const MAX_RECT_PULSE_COUNT: usize = 4;
+
+/// `NO_RECT_PULSE` is no pulse: every opacity 0, which the shader skips.
+pub const NO_RECT_PULSE: RectPulse = RectPulse {
+    centers_x_frac: [0.0; MAX_RECT_PULSE_COUNT],
+    opacities: [0.0; MAX_RECT_PULSE_COUNT],
+    min_x_frac: 0.0,
+    max_x_frac: 0.0,
+    half_width_frac: 0.0,
+    half_height_frac: 0.0,
+    color: [0.0; 4],
+};
+
+/// `RectStyle` is the shader's `RectStyle`, how an `OverlayRect` looks beyond its colour, with
+/// lengths as fractions of the output's height so it looks the same at any size: its corners'
+/// radius (at most half its shorter side), an inner outline's width, a gloss highlight's strength
+/// over its top half (0 to 1), a soft drop shadow's blur, a slant (how far its sides lean right
+/// per unit of height, like `/` when positive), a glow's radius in its own colour, how much
+/// lighter its top and darker its bottom are (0 for even), a zero, and the outline's RGBA colour.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RectStyle {
+    pub corner_frac: f32,
+    pub outline_frac: f32,
+    pub gloss_frac: f32,
+    pub shadow_frac: f32,
+    pub slant_x_per_y: f32,
+    pub glow_frac: f32,
+    pub shade_frac: f32,
+    pub padding: f32,
+    pub outline_color: [f32; 4],
+}
+
+/// `FLAT_RECT_STYLE` is a plain rectangle: square corners, no outline, gloss, shadow, slant, glow
+/// or shading.
+pub const FLAT_RECT_STYLE: RectStyle = RectStyle {
+    corner_frac: 0.0,
+    outline_frac: 0.0,
+    gloss_frac: 0.0,
+    shadow_frac: 0.0,
+    slant_x_per_y: 0.0,
+    glow_frac: 0.0,
+    shade_frac: 0.0,
+    padding: 0.0,
+    outline_color: [0.0; 4],
+};
+
+const BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT: usize = 144;
+const _: () = assert!(
+    std::mem::size_of::<OverlayRect>() == BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT,
+    "OverlayRect must match the shader's 144-byte OverlayRect"
+);
+
+/// `OverlayParams` is the shader's `OverlayParams` (8-byte aligned, as its `int2` makes it).
+#[repr(C, align(8))]
+struct OverlayParams {
+    dim_frac: f32,
+    scale: i32,
+    origin: [i32; 2],
+    rect_count: i32,
+    has_mask: i32,
+    has_wand: i32,
+    tan_half_fov: f32,
+    blur_frac: f32,
+    hit_frac: f32,
+    hit_red_frac: f32,
+    hit_blur_px: f32,
+    shake_px: [f32; 2],
+    picture_min_mask_px: [i32; 2],
+    picture_max_excl_mask_px: [i32; 2],
+    stretch_frac: f32,
+    blueshift_frac: f32,
+}
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
 type Scaler = (
@@ -155,7 +424,7 @@ struct PyramidLevels {
 
 const SHADER_SOURCE: &str = include_str!("render_metal.metal");
 const BYTES_PER_RAY_END: usize = 48;
-pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 96;
+pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 112;
 const BYTES_PER_CELL_MARK: usize = 1;
 const BYTES_PER_CELL_INDEX: usize = 4;
 const REFINE_COUNT_BYTES: usize = 16;
@@ -170,6 +439,14 @@ const BYTES_PER_TEXEL: usize = 16;
 const BYTES_PER_LOST_FLAG: usize = 1;
 const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
+pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
+pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
+pub(crate) const MAX_MINIMAP_MARK_COUNT: usize = 16;
+pub(crate) const MAX_MINIMAP_LINE_COUNT: usize = 96;
+/// `GUN_MODEL_WAND` is `has_wand` when a gun model (viewmodel.rs) is drawn in the wand's place.
+const GUN_MODEL_WAND: i32 = 2;
+const EMPTY_MASK_PX: (usize, usize) = (1, 1);
+const BYTES_PER_PICTURE_PIXEL: usize = 4;
 const MS_PER_S: f64 = 1000.0;
 const PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
 const _: () = assert!(
@@ -200,7 +477,8 @@ impl FrameData<'_> {
 }
 
 /// `MetalRenderer` holds the GPU, the compiled ray tracer, the scene buffer, and the textures and
-/// MetalFX scaler for the current render and output sizes.
+/// MetalFX scaler for the current render and output sizes. It keeps the minimap's picture for
+/// where it lies (the shader's `Minimap.map`) and uploads it again when that changes.
 pub struct MetalRenderer {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
@@ -213,8 +491,18 @@ pub struct MetalRenderer {
     pull_holes: Pipeline,
     push_holes: Pipeline,
     fill_holes: Pipeline,
+    apply_overlay: Pipeline,
+    overlay_target: Option<Texture>,
+    overlay_mask: Option<Texture>,
+    overlay_picture: Option<Texture>,
+    overlay_map: Option<Texture>,
+    overlay_map_placement: [f32; 4],
+    blur_histories: Option<(Texture, Texture)>,
     hole_buffers: Option<HoleBuffers>,
+    surface_textures: Option<SurfaceTextures>,
     voxel_gpu: Option<VoxelGpu>,
+    viewmodels: HashMap<GunModel, Viewmodel>,
+    is_voxel_frame: bool,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -274,6 +562,63 @@ fn fill_shader_constants(source: &str) -> String {
         "render_metal.metal has a placeholder render_metal.rs doesn't fill"
     );
     filled
+}
+
+/// `upload_texture` copies `bytes` (rows top first, `bytes_per_pixel` a pixel) into the texture in
+/// `slot`, first making a new one of `pixel_format` if the slot is empty or holds another size.
+///
+/// Example: `upload_texture(&device, &mut self.overlay_mask, mask, (240, 24), MTLPixelFormat::R8Unorm, 1)?;`
+fn upload_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    slot: &mut Option<Texture>,
+    bytes: &[u8],
+    size_px: (usize, usize),
+    pixel_format: MTLPixelFormat,
+    bytes_per_pixel: usize,
+) -> Result<()> {
+    assert_eq!(
+        bytes.len(),
+        size_px.0 * size_px.1 * bytes_per_pixel,
+        "upload_texture: the bytes aren't {}x{} pixels of {bytes_per_pixel} bytes",
+        size_px.0,
+        size_px.1
+    );
+    if slot.as_ref().is_none_or(|(_, size)| *size != size_px) {
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+        let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                pixel_format,
+                size_px.0,
+                size_px.1,
+                false,
+            )
+        };
+        descriptor.setUsage(MTLTextureUsage::ShaderRead);
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        let texture = device
+            .newTextureWithDescriptor(&descriptor)
+            .ok_or("Metal: no memory for an overlay texture")?;
+        *slot = Some((texture, size_px));
+    }
+    let (texture, _) = slot.as_ref().expect("the texture was just made");
+    let region: MTLRegion = MTLRegion {
+        origin: MTLOrigin { x: 0, y: 0, z: 0 },
+        size: MTLSize {
+            width: size_px.0,
+            height: size_px.1,
+            depth: 1,
+        },
+    };
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE BYTES WILL HAPPEN
+    unsafe {
+        texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+            region,
+            0,
+            NonNull::new(bytes.as_ptr() as *mut std::ffi::c_void).expect("a texture's bytes"),
+            size_px.0 * bytes_per_pixel,
+        )
+    };
+    Ok(())
 }
 
 /// `dispatch_grid` runs the encoder's current kernel once per point of a 2D grid, in square
@@ -437,6 +782,7 @@ impl MetalRenderer {
             make_pipeline("pull_holes")?,
         );
         let (push_holes, fill_holes) = (make_pipeline("push_holes")?, make_pipeline("fill_holes")?);
+        let apply_overlay: Pipeline = make_pipeline("apply_overlay")?;
         let build_mouth_fields: Pipeline = make_pipeline("build_mouth_fields")?;
         let make_table = |entry_count: usize| {
             device
@@ -470,8 +816,18 @@ impl MetalRenderer {
             pull_holes,
             push_holes,
             fill_holes,
+            apply_overlay,
+            overlay_target: None,
+            blur_histories: None,
+            overlay_mask: None,
+            overlay_picture: None,
+            overlay_map: None,
+            overlay_map_placement: [0.0; 4],
             hole_buffers: None,
+            surface_textures: None,
             voxel_gpu: None,
+            viewmodels: HashMap::new(),
+            is_voxel_frame: false,
             throat_table,
             camera_table,
             has_throat_table: false,
@@ -519,6 +875,54 @@ impl MetalRenderer {
         Ok((texture, size_px))
     }
 
+    /// `prepare_render_texture` makes the render texture for an output size, if the current one is
+    /// for another.
+    ///
+    /// Example: `self.prepare_render_texture((2560, 1600))?;`
+    fn prepare_render_texture(&mut self, output_px: (usize, usize)) -> Result<()> {
+        if self
+            .render_texture
+            .as_ref()
+            .is_none_or(|(_, size)| *size != output_px)
+        {
+            self.render_texture = Some(self.make_texture(
+                output_px,
+                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
+            )?);
+        }
+        Ok(())
+    }
+
+    /// `load` reads or compiles `step`'s part unless it is already loaded, so that the first
+    /// frame doesn't wait for it; frames load what they need on their own when it wasn't.
+    ///
+    /// Example: `renderer.load(LoadingStep::Gun(GunModel::Revolver))?;`
+    pub fn load(&mut self, step: LoadingStep) -> Result<()> {
+        match step {
+            LoadingStep::SurfaceTextures => {
+                if self.voxel_gpu.is_none() && self.surface_textures.is_none() {
+                    self.surface_textures = Some(SurfaceTextures::Load(&self.device)?);
+                }
+            }
+            LoadingStep::VoxelShader => {
+                if self.voxel_gpu.is_none() {
+                    self.load(LoadingStep::SurfaceTextures)?;
+                    let textures: SurfaceTextures = self
+                        .surface_textures
+                        .take()
+                        .expect("the surface textures were just loaded");
+                    self.voxel_gpu = Some(VoxelGpu::New(&self.device, textures)?);
+                }
+            }
+            LoadingStep::Gun(model) => {
+                if let Entry::Vacant(entry) = self.viewmodels.entry(model) {
+                    entry.insert(Viewmodel::Load(&self.device, model)?);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// `prepare_upscaling` makes the MetalFX scaler and its output texture for an output size, if
     /// the current ones are for another. The scaler takes any input up to that size (its input
     /// content size is set each frame), so changing the render scale needs no new scaler.
@@ -564,17 +968,9 @@ impl MetalRenderer {
             render_px.0 <= output_px.0 && render_px.1 <= output_px.1,
             "Metal: the render size {render_px:?} is larger than the output {output_px:?}"
         );
-        if self
-            .render_texture
-            .as_ref()
-            .is_none_or(|(_, size)| *size != output_px)
-        {
-            self.render_texture = Some(self.make_texture(
-                output_px,
-                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
-            )?);
-        }
+        self.prepare_render_texture(output_px)?;
         self.prepare_upscaling(output_px)?;
+        self.is_voxel_frame = matches!(frame_data, FrameData::Voxel(_));
         if let FrameData::Voxel(voxel_frame) = frame_data {
             return self.encode_voxel_frame(voxel_frame, output_px);
         }
@@ -669,9 +1065,7 @@ impl MetalRenderer {
         output_px: (usize, usize),
     ) -> Result<Frame> {
         let render_px: (usize, usize) = frame.get_render_size();
-        if self.voxel_gpu.is_none() {
-            self.voxel_gpu = Some(VoxelGpu::New(&self.device)?);
-        }
+        self.load(LoadingStep::VoxelShader)?;
         if self.is_adaptive {
             self.prepare_sample_buffers(output_px, VOXEL_BYTES_PER_RAY_END)?;
         }
@@ -686,12 +1080,16 @@ impl MetalRenderer {
             .render_texture
             .as_ref()
             .expect("encode_frame made the render texture");
-        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
-        unsafe { encoder.setTexture_atIndex(Some(render_texture), 0) };
         self.voxel_gpu
             .as_mut()
             .expect("the voxel pipeline was just made")
-            .encode(&self.device, &encoder, frame, self.sample_buffers.as_ref())?;
+            .encode(
+                &self.device,
+                &encoder,
+                frame,
+                self.sample_buffers.as_ref(),
+                render_texture,
+            )?;
         encoder.endEncoding();
         let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
         self.finish_encoding(command_buffer, texture, render_px, output_px != render_px)
@@ -940,18 +1338,288 @@ impl MetalRenderer {
         Ok(())
     }
 
-    /// `render_to_layer` draws one frame straight into the next drawable of a window's
-    /// `CAMetalLayer`, upscaled with MetalFX to the drawable's size, and presents it. It returns
-    /// false if the layer had no drawable to give.
+    /// `encode_overlay` encodes drawing `overlay` over a finished frame into a texture of its own,
+    /// which it returns: the frame blended with the previous frame's scene (kept in one of two
+    /// history textures, swapped each frame; none after a resize) and darkened, the mask (if any)
+    /// scaled by a whole number to at most `mask_height_frac` of the frame's height (and at most
+    /// `OVERLAY_MAX_WIDTH_FRAC` of its width), centred, over the picture (if any), and the
+    /// rectangles.
     ///
-    /// Example: `renderer.render_to_layer(&data, &layer)?;`
-    pub fn render_to_layer(&mut self, data: FrameData, layer: &CAMetalLayer) -> Result<bool> {
+    /// Example: `let shown = self.encode_overlay(&command_buffer, &frame, &overlay, (2560, 1600))?;`
+    fn encode_overlay(
+        &mut self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        frame: &ProtocolObject<dyn MTLTexture>,
+        overlay: &Overlay,
+        output_px: (usize, usize),
+    ) -> Result<Retained<ProtocolObject<dyn MTLTexture>>> {
+        assert!(
+            overlay.rects.len() <= MAX_OVERLAY_RECT_COUNT,
+            "encode_overlay: {} rectangles, more than {MAX_OVERLAY_RECT_COUNT}",
+            overlay.rects.len()
+        );
+        let empty_mask: [u8; 1] = [0];
+        let (mask_bytes, (mask_w, mask_h)) = overlay.mask.unwrap_or((&empty_mask, EMPTY_MASK_PX));
+        if self
+            .overlay_target
+            .as_ref()
+            .is_none_or(|(_, size)| *size != output_px)
+        {
+            self.overlay_target = Some(self.make_texture(
+                output_px,
+                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
+            )?);
+        }
+        let is_blur_history_valid: bool = self
+            .blur_histories
+            .as_ref()
+            .is_some_and(|((_, size), _)| *size == output_px);
+        if !is_blur_history_valid {
+            let usage: MTLTextureUsage = MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead;
+            self.blur_histories = Some((
+                self.make_texture(output_px, usage)?,
+                self.make_texture(output_px, usage)?,
+            ));
+        }
+        let empty_picture: [u8; BYTES_PER_PICTURE_PIXEL] = [0; BYTES_PER_PICTURE_PIXEL];
+        let (picture_bytes, picture_px, picture_corners_mask_px) = match &overlay.picture {
+            Some(picture) => (
+                picture.pixels,
+                picture.size_px,
+                [picture.min_mask_px, picture.max_excl_mask_px],
+            ),
+            None => (&empty_picture[..], EMPTY_MASK_PX, [[0; 2]; 2]),
+        };
+        upload_texture(
+            &self.device,
+            &mut self.overlay_mask,
+            mask_bytes,
+            (mask_w, mask_h),
+            MTLPixelFormat::R8Unorm,
+            1,
+        )?;
+        upload_texture(
+            &self.device,
+            &mut self.overlay_picture,
+            picture_bytes,
+            picture_px,
+            MTLPixelFormat::RGBA8Unorm,
+            BYTES_PER_PICTURE_PIXEL,
+        )?;
+        let (mask, _) = self.overlay_mask.as_ref().expect("the mask was just made");
+        let minimap: Minimap = match &overlay.minimap {
+            Some(minimap) => {
+                let is_uploaded: bool = self
+                    .overlay_map
+                    .as_ref()
+                    .is_some_and(|(_, size)| *size == minimap.map_size_px)
+                    && self.overlay_map_placement == minimap.minimap.map;
+                if !is_uploaded {
+                    self.overlay_map_placement = minimap.minimap.map;
+                    upload_texture(
+                        &self.device,
+                        &mut self.overlay_map,
+                        minimap.map_pixels,
+                        minimap.map_size_px,
+                        MTLPixelFormat::RGBA8Unorm,
+                        BYTES_PER_PICTURE_PIXEL,
+                    )?;
+                }
+                minimap.minimap
+            }
+            None => Minimap::Hidden(),
+        };
+        let (picture, _) = self
+            .overlay_picture
+            .as_ref()
+            .expect("the picture was just made");
+        let map: &ProtocolObject<dyn MTLTexture> = match &self.overlay_map {
+            Some((map, _)) => map,
+            None => picture,
+        };
+        let tan_half_fov: f32 = HALF_FOV_RAD.tan() as f32;
+        let gun_image: Option<Retained<ProtocolObject<dyn MTLTexture>>> = match overlay.wand {
+            Some((wand, model)) => {
+                let viewmodel: &mut Viewmodel = match self.viewmodels.entry(model) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => entry.insert(Viewmodel::Load(&self.device, model)?),
+                };
+                let hand_light: Option<&ProtocolObject<dyn MTLBuffer>> = match &self.voxel_gpu {
+                    Some(gpu) if self.is_voxel_frame => Some(gpu.get_hand_light()),
+                    _ => None,
+                };
+                Some(viewmodel.encode(
+                    &self.device,
+                    command_buffer,
+                    &wand,
+                    output_px,
+                    tan_half_fov,
+                    hand_light,
+                )?)
+            }
+            None => None,
+        };
+        let scale: usize = ((output_px.1 as f32 * overlay.mask_height_frac) as usize / mask_h)
+            .min((output_px.0 as f64 * OVERLAY_MAX_WIDTH_FRAC) as usize / mask_w)
+            .max(1);
+        let params: OverlayParams = OverlayParams {
+            dim_frac: overlay.dim_frac,
+            scale: scale as i32,
+            origin: [
+                (output_px.0 as i32 - (mask_w * scale) as i32) / 2,
+                (output_px.1 as i32 - (mask_h * scale) as i32) / 2,
+            ],
+            rect_count: overlay.rects.len() as i32,
+            has_mask: i32::from(overlay.mask.is_some()),
+            has_wand: if gun_image.is_some() {
+                GUN_MODEL_WAND
+            } else {
+                i32::from(overlay.wand.is_some())
+            },
+            tan_half_fov,
+            blur_frac: if is_blur_history_valid {
+                overlay.blur_frac
+            } else {
+                0.0
+            },
+            hit_frac: overlay.hit.strength_frac,
+            hit_red_frac: overlay.hit.red_frac,
+            hit_blur_px: overlay.hit.blur_px,
+            shake_px: overlay.hit.shake_px,
+            picture_min_mask_px: picture_corners_mask_px[0],
+            picture_max_excl_mask_px: picture_corners_mask_px[1],
+            stretch_frac: overlay.stretch_frac,
+            blueshift_frac: overlay.blueshift_frac,
+        };
+        let wand: OverlayWand = overlay.wand.map_or(
+            OverlayWand {
+                center_m: [0.0; 4],
+                axes: [[0.0; 4]; 3],
+                shaft_half_m: [0.0; 4],
+                shaft_color: [0.0; 4],
+                tip_half_m: [0.0; 4],
+                tip_color: [0.0; 4],
+            },
+            |(wand, _)| wand,
+        );
+        let mut rects: [OverlayRect; MAX_OVERLAY_RECT_COUNT] = [OverlayRect {
+            min_frac: [0.0; 2],
+            max_frac: [0.0; 2],
+            color: [0.0; 4],
+            style: FLAT_RECT_STYLE,
+            pulse: NO_RECT_PULSE,
+        }; MAX_OVERLAY_RECT_COUNT];
+        rects[..overlay.rects.len()].copy_from_slice(overlay.rects);
+        let (target, _) = self
+            .overlay_target
+            .as_ref()
+            .expect("the target was just made");
+        let ((history_in, _), (history_out, _)) = self
+            .blur_histories
+            .as_ref()
+            .expect("the histories were just made");
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .ok_or("Metal: no compute encoder")?;
+        encoder.setComputePipelineState(&self.apply_overlay);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURES WILL HAPPEN
+        unsafe {
+            encoder.setTexture_atIndex(Some(frame), 0);
+            encoder.setTexture_atIndex(Some(mask), 1);
+            encoder.setTexture_atIndex(Some(target), 2);
+            encoder.setTexture_atIndex(Some(history_in), 3);
+            encoder.setTexture_atIndex(Some(history_out), 4);
+            encoder.setTexture_atIndex(Some(gun_image.as_deref().unwrap_or(frame)), 5);
+            encoder.setTexture_atIndex(Some(picture), 6);
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&params).cast(),
+                std::mem::size_of::<OverlayParams>(),
+                0,
+            );
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&rects).cast(),
+                std::mem::size_of_val(&rects),
+                1,
+            );
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&wand).cast(),
+                std::mem::size_of::<OverlayWand>(),
+                2,
+            );
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&minimap).cast(),
+                std::mem::size_of::<Minimap>(),
+                3,
+            );
+            encoder.setTexture_atIndex(Some(map), 7);
+        }
+        dispatch_grid(&encoder, output_px);
+        encoder.endEncoding();
+        let target: Retained<ProtocolObject<dyn MTLTexture>> = target.clone();
+        self.blur_histories = self.blur_histories.take().map(|(a, b)| (b, a));
+        Ok(target)
+    }
+
+    /// `render_overlay_to_layer` draws `overlay` alone into the next drawable of a window's
+    /// `CAMetalLayer`, over a scene its `dim_frac` of 1 turns black: the loading screen, shown
+    /// before any scene is ready. It returns false when the layer had no drawable free.
+    ///
+    /// Example: `renderer.render_overlay_to_layer(layer, &overlay)?;`
+    pub fn render_overlay_to_layer(
+        &mut self,
+        layer: &CAMetalLayer,
+        overlay: &Overlay,
+    ) -> Result<bool> {
         let Some(drawable) = layer.nextDrawable() else {
             return Ok(false);
         };
         let target = drawable.texture();
         let output_px: (usize, usize) = (target.width(), target.height());
-        let (command_buffer, texture) = self.encode_frame(data, output_px)?;
+        self.prepare_render_texture(output_px)?;
+        let (scene, _) = self
+            .render_texture
+            .clone()
+            .expect("the render texture was just made");
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or("Metal: no command buffer")?;
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+            self.encode_overlay(&command_buffer, &scene, overlay, output_px)?;
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .ok_or("Metal: no blit encoder")?;
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A COPY BETWEEN TEXTURES OF DIFFERENT SIZES WILL HAPPEN
+        unsafe { blit.copyFromTexture_toTexture(&texture, &target) };
+        blit.endEncoding();
+        command_buffer.presentDrawable(ProtocolObject::from_ref(&*drawable));
+        self.finish(&command_buffer)?;
+        Ok(true)
+    }
+
+    /// `render_to_layer` draws one frame straight into the next drawable of a window's
+    /// `CAMetalLayer`, upscaled with MetalFX to the drawable's size, with `overlay` drawn over it if
+    /// given, and presents it. It returns false if the layer had no drawable to give.
+    ///
+    /// Example: `renderer.render_to_layer(&data, &layer, None)?;`
+    pub fn render_to_layer(
+        &mut self,
+        data: FrameData,
+        layer: &CAMetalLayer,
+        overlay: Option<&Overlay>,
+    ) -> Result<bool> {
+        let Some(drawable) = layer.nextDrawable() else {
+            return Ok(false);
+        };
+        let target = drawable.texture();
+        let output_px: (usize, usize) = (target.width(), target.height());
+        let (command_buffer, frame_texture) = self.encode_frame(data, output_px)?;
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> = match overlay {
+            Some(overlay) => {
+                self.encode_overlay(&command_buffer, &frame_texture, overlay, output_px)?
+            }
+            None => frame_texture,
+        };
         let blit = command_buffer
             .blitCommandEncoder()
             .ok_or("Metal: no blit encoder")?;

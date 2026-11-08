@@ -67,6 +67,36 @@
             "kind": {"const": "square_order_5"},
             "cells_per_side": {"type": "integer", "minimum": 1}
           }
+        },
+        "terrain": {
+          "type": "object",
+          "required": ["kind", "rim_u_m", "rim_v_m", "wall_m", "rim_height_m", "relief_m", "relief_wavelength_m", "seed"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"const": "crater"},
+            "rim_u_m": {"type": "number", "exclusiveMinimum": 0},
+            "rim_v_m": {"type": "number", "exclusiveMinimum": 0},
+            "wall_m": {"type": "number", "exclusiveMinimum": 0},
+            "rim_height_m": {"type": "number", "minimum": 0},
+            "relief_m": {"type": "number", "minimum": 0},
+            "relief_wavelength_m": {"type": "number", "exclusiveMinimum": 0},
+            "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+            "mounds": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "required": ["u_m", "v_m", "radius_m", "height_m"],
+                "additionalProperties": false,
+                "properties": {
+                  "u_m": {"type": "number"},
+                  "v_m": {"type": "number"},
+                  "radius_m": {"type": "number", "exclusiveMinimum": 0},
+                  "height_m": {"type": "number", "minimum": 0}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -74,20 +104,26 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "frame", "voxels"],
+        "required": ["name", "frame", "shapes"],
         "additionalProperties": false,
         "properties": {
           "name": {"type": "string"},
           "frame": {"$ref": "#/$defs/frame"},
-          "voxels": {
-            "type": "object",
-            "required": ["size", "cell_m", "origin", "offset_bytes"],
-            "additionalProperties": false,
-            "properties": {
-              "size": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 3, "maxItems": 3},
-              "cell_m": {"type": "number", "exclusiveMinimum": 0},
-              "origin": {"type": "array", "items": {"type": "integer"}, "minItems": 3, "maxItems": 3},
-              "offset_bytes": {"type": "integer", "minimum": 0}
+          "shapes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["kind", "centre_m", "half_m", "material"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {"enum": ["box", "cylinder", "ellipsoid"]},
+                "centre_m": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "half_m": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 3, "maxItems": 3},
+                "round_m": {"type": "number", "minimum": 0},
+                "axis": {"type": "integer", "minimum": 0, "maximum": 2},
+                "material": {"$ref": "#/$defs/material_id"}
+              }
             }
           }
         }
@@ -167,6 +203,15 @@
             "angular_radius_rad": {"type": "number", "exclusiveMinimum": 0}
           }
         },
+        "milky_way": {
+          "type": "object",
+          "required": ["pole_direction", "core_direction"],
+          "additionalProperties": false,
+          "properties": {
+            "pole_direction": {"$ref": "#/$defs/vector3"},
+            "core_direction": {"$ref": "#/$defs/vector3"}
+          }
+        },
         "stars": {"type": "boolean"},
         "clouds": {"type": "boolean"},
         "zenith_color": {"$ref": "#/$defs/color"},
@@ -209,6 +254,16 @@
             "kind": {"const": "fermi_ellipse"},
             "u_m": {"type": "number", "exclusiveMinimum": 0},
             "v_m": {"type": "number", "exclusiveMinimum": 0}
+          }
+        },
+        "zone_walls": {
+          "type": "object",
+          "required": ["height_m", "thickness_m", "opacity_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "height_m": {"type": "number", "exclusiveMinimum": 0},
+            "thickness_m": {"type": "number", "exclusiveMinimum": 0},
+            "opacity_frac": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
           }
         }
       }
