@@ -85,6 +85,7 @@ struct CityUniforms {
     float4 glass;
     float4 sky_color;
     float4 beacons[BEACON_SLOT_COUNT];
+    float4 hazard;
 };
 
 struct Fragment {
@@ -126,11 +127,12 @@ static float3 apply_fog(float3 c, float3 world, constant CityUniforms& u) {
 }
 
 // `apply_hazard` paints diagonal yellow and black stripes on the street in a ring around the foot
-// of every lift (under each hole in the glass), a little outside the lift.
+// of every lift (under each of the first `hazard.x` holes in the glass, the lifts'), a little
+// outside the lift.
 static float3 apply_hazard(float3 base, float3 world, constant CityUniforms& u) {
     float3 d = normalize(world);
     float street_r = u.ambient.w;
-    for (uint i = 0; i < uint(u.glass.y) && i < MAX_HOLE_COUNT; i++) {
+    for (uint i = 0; i < uint(u.hazard.x) && i < MAX_HOLE_COUNT; i++) {
         float3 axis = u.holes[i].xyz;
         float c = dot(d, axis);
         float lift_m = u.glass.x * sqrt(max(1.0 - u.holes[i].w * u.holes[i].w, 0.0));

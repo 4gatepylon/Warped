@@ -119,15 +119,18 @@ struct CityUniforms {
     glass: [f32; 4],
     sky_color: [f32; 4],
     beacons: [[f32; 4]; BEACON_SLOT_COUNT],
+    hazard: [f32; 4],
 }
 
 /// `CityScene` is the geometry that never changes: opaque triangles and the glass's, with an id
-/// so the GPU copy is made once.
+/// so the GPU copy is made once, and the glass's holes, the lifts' first (`lift_hole_count` of
+/// them, which get hazard rings on the street) and then the stairs'.
 pub struct CityScene {
     pub id: u64,
     pub opaque: Vec<CityVertex>,
     pub glass: Vec<CityVertex>,
     pub holes: Vec<[f32; 4]>,
+    pub lift_hole_count: usize,
     pub glass_radius_m: f32,
     pub street_radius_m: f32,
 }
@@ -362,7 +365,7 @@ fn get_layer(name: &str) -> f32 {
         "street" => LAYER_STREET,
         "building" => LAYER_CONCRETE,
         "painted panel" => LAYER_BRICK,
-        "glass obstacle" => LAYER_METAL,
+        "glass obstacle" | "stairs" => LAYER_METAL,
         _ => NO_LAYER,
     }
 }
@@ -440,6 +443,7 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     }
     let mut glass: Vec<CityVertex> = Vec::new();
     let mut holes: Vec<[f32; 4]> = Vec::new();
+    let mut lift_hole_count: usize = 0;
     let mut glass_radius_m: f32 = 0.0;
     for shell in &world.shells {
         let material = &world.materials[shell.material as usize];
@@ -470,10 +474,17 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
                 },
             );
             glass_radius_m = shell.radius_m as f32;
-            holes = shell
-                .holes
+            let (lifts, stairs): (Vec<(DVec3, f64)>, Vec<(DVec3, f64)>) =
+                shell.holes.iter().partition(|hole| world.lift_holes.contains(hole));
+            assert!(
+                lifts.len() + stairs.len() <= MAX_HOLE_COUNT,
+                "build_scene: the glass has {} holes, more than the shader's {MAX_HOLE_COUNT}",
+                lifts.len() + stairs.len()
+            );
+            lift_hole_count = lifts.len();
+            holes = lifts
                 .iter()
-                .take(MAX_HOLE_COUNT)
+                .chain(&stairs)
                 .map(|&(d, cos)| [d.x as f32, d.y as f32, d.z as f32, cos as f32])
                 .collect();
         }
@@ -485,6 +496,7 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
         opaque,
         glass,
         holes,
+        lift_hole_count,
         glass_radius_m,
         street_radius_m: street_radius_m as f32,
     }
@@ -637,7 +649,7 @@ fn push_electronics(out: &mut Vec<CityVertex>, world: &CityWorld) {
     for city_box in world
         .boxes
         .iter()
-        .filter(|b| b.group != "consoles" && b.group != "pylons")
+        .filter(|b| b.group != "consoles" && b.group != "pylons" && b.group != "stairs")
     {
         if get_layer(&world.materials[city_box.material as usize].name) < 0.0 {
             continue;
@@ -1109,6 +1121,7 @@ impl CityGpu {
             ],
             sky_color: SKY_COLOR,
             beacons: frame.beacons,
+            hazard: [frame.scene.lift_hole_count as f32, 0.0, 0.0, 0.0],
         };
         let dynamic: Buffer = make_buffer(device, &frame.dynamic)?;
         let beams: Buffer = make_buffer(device, &frame.beams)?;
@@ -1195,7 +1208,7 @@ mod tests {
     //! | Behaviour | Test |
     //! | --- | --- |
     //! | The vertex layout matches the shader's (13 floats) | `vertex_is_13_floats` |
-    //! | The scene has the street, boxes, core, hexagonal glass, glowing details and lift holes | `scene_has_every_part` |
+    //! | The scene has the street, boxes, core, hexagonal glass, glowing details, and the lifts' holes before the stairs' | `scene_has_every_part` |
 
     use super::*;
 
@@ -1220,6 +1233,7 @@ mod tests {
         );
         assert!(scene.opaque.iter().any(|v| v.layer == SCREEN_LAYER));
         assert!(scene.opaque.iter().any(|v| v.layer == LED_LAYER));
-        assert_eq!(scene.holes.len(), 6);
+        assert_eq!(scene.holes.len(), 8);
+        assert_eq!(scene.lift_hole_count, 6);
     }
 }

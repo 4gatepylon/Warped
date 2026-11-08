@@ -110,6 +110,9 @@ const PHASE_NAMES: [&str; PHASE_COUNT] =
     ["events", "update", "pack", "overlay", "render_and_present"];
 const WARMUP_FRAME_COUNT: usize = 30;
 const SLOW_FRAME_MS: f64 = 17.5;
+const STAIRS_ARRIVE_M: f64 = 0.5;
+const PYLON_ARRIVE_M: f64 = 1.8;
+const STAIRS_ROUTE_END_WAIT_S: f64 = 2.0;
 
 /// `TeamName` is a team for `--team`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
@@ -285,6 +288,10 @@ enum Step {
         side: Side,
         arrive_m: f64,
     },
+    WalkTo {
+        direction: DVec3,
+        arrive_m: f64,
+    },
     Aim {
         yaw_rad: f64,
         pitch_rad: f64,
@@ -398,6 +405,10 @@ impl Brain {
                 dt_s,
                 &mut out.input,
             ),
+            Step::WalkTo {
+                direction,
+                arrive_m,
+            } => walk_to(player, direction, arrive_m, dt_s, &mut out.input),
             Step::Aim { yaw_rad, pitch_rad } => {
                 player.look_around(yaw_rad, 0.0);
                 player.pitch_rad = pitch_rad;
@@ -438,7 +449,7 @@ impl Brain {
     }
 
     /// `go_to` walks toward a place, riding the nearest lift up or dropping through the nearest
-    /// hole when the place is on the other level; true once there.
+    /// lift's hole when the place is on the other level; true once there.
     fn go_to(
         &mut self,
         world: &CityWorld,
@@ -466,8 +477,8 @@ impl Brain {
         let is_riding: bool =
             side == Side::Glass && is_in_lift && r > glass.radius_m - RIDE_START_UNDER_GLASS_M;
         let from: DVec3 = player.feet.normalize();
-        let hole: DVec3 = glass
-            .holes
+        let hole: DVec3 = world
+            .lift_holes
             .iter()
             .map(|&(hole, _)| hole)
             .max_by(|a, b| a.dot(from).total_cmp(&b.dot(from)))
@@ -504,6 +515,57 @@ impl Brain {
         }
         false
     }
+}
+
+/// `walk_to` walks `player` straight toward the place above or below the unit `direction`, up or
+/// down whatever is in the way (the stairs), whichever level it is on; true once within
+/// `arrive_m` of it along the ground.
+fn walk_to(
+    player: &mut CityPlayer,
+    direction: DVec3,
+    arrive_m: f64,
+    dt_s: f64,
+    input: &mut CityInput,
+) -> bool {
+    let up: DVec3 = player.get_up();
+    let away: DVec3 = direction.normalize() * player.feet.length() - player.feet;
+    let to: DVec3 = away - up * away.dot(up);
+    if to.length() < arrive_m {
+        return true;
+    }
+    steer(player, to, dt_s, input);
+    false
+}
+
+/// `make_stairs_route` is the walk for `team` from its spawn up its stairs onto the glass level
+/// and to its pylon (`--route stairs`).
+fn make_stairs_route(world: &CityWorld, team: u32) -> Result<Vec<Step>> {
+    let (bottom, top) = world
+        .get_stairs_ends(team)
+        .ok_or("--route stairs needs a map with stairs")?;
+    let console = world
+        .consoles
+        .iter()
+        .find(|c| c.team == team)
+        .ok_or("--route stairs needs the team's console")?;
+    Ok(vec![
+        Step::WalkTo {
+            direction: bottom,
+            arrive_m: STAIRS_ARRIVE_M,
+        },
+        Step::WalkTo {
+            direction: top,
+            arrive_m: STAIRS_ARRIVE_M,
+        },
+        Step::GoTo {
+            direction: world.get_console_center(console),
+            side: Side::Glass,
+            arrive_m: PYLON_ARRIVE_M,
+        },
+        Step::Wait {
+            s: STAIRS_ROUTE_END_WAIT_S,
+        },
+    ])
 }
 
 /// `aim_at` turns `player`'s body and tilts the head so the crosshair points at `point`.
@@ -876,13 +938,12 @@ impl CitySession {
         Ok(CitySession {
             scene: Arc::new(build_scene(&world)),
             body: AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?,
-            brain: arguments.play_route.then(|| {
-                Brain::New(if arguments.route == RouteKind::Rifle {
-                    make_rifle_route()
-                } else {
-                    make_route(&world)
-                })
-            }),
+            brain: match (arguments.play_route, arguments.route) {
+                (false, _) => None,
+                (true, RouteKind::Rifle) => Some(Brain::New(make_rifle_route())),
+                (true, RouteKind::Stairs) => Some(Brain::New(make_stairs_route(&world, 0)?)),
+                (true, _) => Some(Brain::New(make_route(&world))),
+            },
             world,
             settings,
             player_settings,
@@ -2797,7 +2858,89 @@ mod tests {
     //! | Part of the rifle target aimed at from blue's spawn | head, body | `the_rifle_target_is_in_sight_of_blues_spawn` |
     //! | Map picture pixel and direction | round trip at the equator and near a pole | `map_pixels_and_directions_agree` |
     //! | When an eliminated player comes back | before the respawn delay (never), within a join retry after it, at their team's spawn | `an_eliminated_player_respawns_only_after_the_delay` |
+    //! | Walk from a spawn up the stairs | each team, each of its two spawns, walking and sprinting: reaches the glass level, then its pylon, never stuck | `every_spawn_walks_up_the_stairs_to_its_pylon` |
     use super::*;
+
+    const WALK_STEP_S: f64 = 1.0 / 60.0;
+    const WALK_TIMEOUT_S: f64 = 40.0;
+    const GLASS_LEVEL_TOLERANCE_M: f64 = 0.05;
+
+    /// `walk_steps` plays `steps` for `player` with the real movement and settings, a 1/60 s step
+    /// at a time, sprinting if `is_sprinting`, until the steps are done or `WALK_TIMEOUT_S` runs
+    /// out; it panics if the brain ever needs to unstick the player (`STUCK_S` without moving).
+    ///
+    /// Example: `walk_steps(&world, &mut player, vec![Step::WalkTo { direction, arrive_m: 0.5 }], false);`
+    fn walk_steps(
+        world: &CityWorld,
+        player: &mut CityPlayer,
+        steps: Vec<Step>,
+        is_sprinting: bool,
+    ) -> f64 {
+        let settings: ServerSettings = ServerSettings::Builtin();
+        let mut brain: Brain = Brain::New(steps);
+        let mut time_s: f64 = 0.0;
+        while !brain.is_done() && time_s < WALK_TIMEOUT_S {
+            let out: BrainOutput = brain.drive(
+                world,
+                player,
+                WALK_STEP_S,
+                &net::GameState::default(),
+                false,
+                &BrainSight::default(),
+            );
+            assert!(
+                brain.unstick_s <= 0.0,
+                "stuck at {:?} (radius {:.2} m) on step {} after {time_s:.1} s",
+                player.feet,
+                player.feet.length(),
+                brain.index
+            );
+            let input: CityInput = CityInput {
+                is_sprinting,
+                ..out.input
+            };
+            world.move_player(player, &input, &settings, WALK_STEP_S);
+            time_s += WALK_STEP_S;
+        }
+        assert!(brain.is_done(), "the walk took over {WALK_TIMEOUT_S} s");
+        time_s
+    }
+
+    /// `every_spawn_walks_up_the_stairs_to_its_pylon` walks from each spawn of each team up the
+    /// team's stairs (W-119 (City Sphere demo): "There should be like stairs going up ... you need
+    /// to make it to the pylons"), checks it stands on the glass level at the top, then walks on to
+    /// the team's pylon until its console is within reach.
+    #[test]
+    fn every_spawn_walks_up_the_stairs_to_its_pylon() {
+        let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
+        let settings: ServerSettings = ServerSettings::Builtin();
+        let glass: &crate::city_world::Shell = world.get_glass().expect("the glass");
+        let glass_level_m: f64 = glass.radius_m - glass.thickness_m / 2.0;
+        for (team, spawn, is_sprinting) in
+            (0..8_usize).map(|k| ((k / 4) as u32, k / 2 % 2, k % 2 == 1))
+        {
+            let case: String = format!("team {team}, spawn {spawn}, sprinting {is_sprinting}");
+            let mut player: CityPlayer = world.make_player(team, spawn);
+            let mut steps: Vec<Step> = make_stairs_route(&world, team).expect("stairs");
+            let to_pylon: Vec<Step> = steps.split_off(2);
+            let climb_s: f64 = walk_steps(&world, &mut player, steps, is_sprinting);
+            assert_eq!(world.get_side(player.feet), Side::Glass, "{case}");
+            assert!(
+                player.is_on_ground
+                    && (player.feet.length() - glass_level_m).abs() < GLASS_LEVEL_TOLERANCE_M,
+                "{case}: at radius {:.3} m after {climb_s:.1} s",
+                player.feet.length()
+            );
+            walk_steps(&world, &mut player, to_pylon, is_sprinting);
+            let console = world.consoles.iter().find(|c| c.team == team).expect("a console");
+            let eye: DVec3 = player.get_eye_frame().w_axis.truncate();
+            let reach_m: f64 = (world.get_console_center(console) - eye).length();
+            assert!(
+                reach_m <= settings.consoles.reach_m,
+                "{case}: the console is {reach_m:.2} m away"
+            );
+        }
+    }
 
     const TEST_RESPAWN_DELAY_S: f64 = 1.5;
     const TEST_STEP_MS: u64 = 10;

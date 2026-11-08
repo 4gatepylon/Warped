@@ -240,13 +240,14 @@ enum Sampling {
 
 /// `RouteKind` is which route `--play-route` plays: the house's scripted legs, a tour around each
 /// of its mouths from 5 blocks to just outside its throat and back, (on a voxel map) a tour
-/// around each warp object, or (on City Sphere) the rifle check.
+/// around each warp object, or (on City Sphere) the rifle check or the walk up the stairs.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum RouteKind {
     Legs,
     MouthTour,
     WarpTour,
     Rifle,
+    Stairs,
 }
 
 /// `Arguments` is the command line.
@@ -315,7 +316,8 @@ struct Arguments {
     /// blocks to just outside its throat and back while the view swings around (both on the
     /// house), or on a voxel map a tour circling each warp object the same way (`warp-tour`), or
     /// on City Sphere `rifle`: overheat the rifle, let it cool, then eliminate a `--bot-objective
-    /// target` bot with head hits and again with body hits.
+    /// target` bot with head hits and again with body hits, or `stairs`: walk from blue's spawn
+    /// up its stairs onto the glass level and to its pylon.
     #[arg(long, value_enum, default_value_t = RouteKind::Legs)]
     route: RouteKind,
     /// Host a game on the local network: start a game server as its own process (as --serve,
@@ -2372,8 +2374,8 @@ impl Session {
                     .ok_or("--route warp-tour needs a voxel map")?
                     .world,
             ),
-            (true, RouteKind::Rifle) => {
-                return Err("--route rifle is only for --map city-sphere".into());
+            (true, RouteKind::Rifle | RouteKind::Stairs) => {
+                return Err("--route rifle and --route stairs are only for --map city-sphere".into());
             }
         };
         let multiplayer: Option<Multiplayer> = if arguments.host || arguments.join.is_some() {
