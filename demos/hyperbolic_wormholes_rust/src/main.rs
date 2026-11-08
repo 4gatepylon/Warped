@@ -589,7 +589,7 @@ fn main() -> Result<()> {
         return serve_only(&arguments);
     }
     if arguments.renderer == RendererKind::Metal {
-        viewmodel::check_revolver()?;
+        viewmodel::check_gun_models()?;
         if arguments.map == MapName::LunarSurface {
             voxel_textures::check_surface_textures()?;
         }
@@ -2010,6 +2010,19 @@ fn add_dust_burst(
 enum Gun {
     Laser,
     Rifle,
+}
+
+impl Gun {
+    /// `get_model` gives the model drawn in hand for this gun: the energy revolver for the laser
+    /// (the sniper) and the bolt-action rifle for the rifle.
+    ///
+    /// Example: `let model: viewmodel::GunModel = Gun::Rifle.get_model();`
+    fn get_model(self) -> viewmodel::GunModel {
+        match self {
+            Gun::Laser => viewmodel::GunModel::Revolver,
+            Gun::Rifle => viewmodel::GunModel::BoltActionRifle,
+        }
+    }
 }
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
@@ -4485,7 +4498,9 @@ fn play_on_layer(
         let overlay_text: Option<OverlayText> = session.get_overlay_text();
         let text_mask: Option<Vec<u8>> = overlay_text.as_ref().map(make_text_mask).transpose()?;
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
-        let wand: Option<render_metal::OverlayWand> = session.get_wand();
+        let wand: Option<(render_metal::OverlayWand, viewmodel::GunModel)> = session
+            .get_wand()
+            .map(|wand| (wand, session.gun.get_model()));
         let stretch_frac: f32 = session.get_edge_stretch_frac();
         let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
         let blueshift_frac: f32 = session.blueshift_frac;
@@ -4547,8 +4562,8 @@ fn play_on_layer(
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the guns' hit rules, aiming's zoom, where overlay text goes and the tint after a
-    //! wormhole.
+    //! Tests of the guns' hit rules and models in hand, aiming's zoom, where overlay text goes and
+    //! the tint after a wormhole.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
@@ -4557,6 +4572,8 @@ mod tests {
     //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
+    //! | Gun in hand | laser (the revolver), rifle (the bolt-action rifle) | `each_gun_holds_its_model` |
+    //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
@@ -4585,6 +4602,20 @@ mod tests {
         assert!((part_way + HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
         assert!((shift(1.0, SPRINT_M_PER_S, 1.0) - MAX_BLUESHIFT_FRAC).abs() < 1e-6);
         assert!((shift(1.0, -SPRINT_M_PER_S, 1.0) + MAX_BLUESHIFT_FRAC).abs() < 1e-6);
+    }
+
+    #[test]
+    fn each_gun_holds_its_model() {
+        assert_eq!(Gun::Laser.get_model(), viewmodel::GunModel::Revolver);
+        assert_eq!(Gun::Rifle.get_model(), viewmodel::GunModel::BoltActionRifle);
+        for is_voxel_map in [true, false] {
+            let steps: &[render_metal::LoadingStep] = render_metal::get_loading_steps(is_voxel_map);
+            for gun in [Gun::Laser, Gun::Rifle] {
+                let step: render_metal::LoadingStep =
+                    render_metal::LoadingStep::Gun(gun.get_model());
+                assert_eq!(steps.iter().filter(|s| **s == step).count(), 1);
+            }
+        }
     }
 
     #[test]
