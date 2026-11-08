@@ -27,6 +27,16 @@ use crate::render::{
 const GROUND_ALBEDO: Vec3 = Vec3::new(0.11, 0.1, 0.09);
 /// `MIDDLE_EXPOSURE` is the exposed brightness of a white surface in full daylight.
 const MIDDLE_EXPOSURE: f32 = 1.9;
+/// `SWAMP_DIM_FRAC` darkens the exposure below full daylight for the dim, swampy mood.
+const SWAMP_DIM_FRAC: f32 = 0.6;
+/// `SWAMP_FOG_TINT_RGB` turns the sky-coloured haze murky green.
+const SWAMP_FOG_TINT_RGB: Vec3 = Vec3::new(0.8, 0.95, 0.75);
+/// `SWAMP_SKY_TINT_RGB` grades the clear-day HDRI towards a murky green.
+const SWAMP_SKY_TINT_RGB: Vec3 = Vec3::new(0.72, 0.88, 0.66);
+/// `SWAMP_SKY_SATURATION_FRAC` is how much of the HDRI's colour saturation the grade keeps.
+const SWAMP_SKY_SATURATION_FRAC: f32 = 0.35;
+/// `SWAMP_SUN_FRAC` weakens the sun against the sky, for softer, hazier shadows.
+const SWAMP_SUN_FRAC: f32 = 0.55;
 /// `MIN_SUN_PER_SKY_IRRADIANCE_FRAC` is the least ratio of sun to sky light on flat ground; a
 /// clear day is about 3 to 5, and HDRIs with a clipped sun come out near 1.
 const MIN_SUN_PER_SKY_IRRADIANCE_FRAC: f32 = 3.5;
@@ -128,6 +138,9 @@ fn create_surface_materials(
                 Surface::BluePaint => textured(2, Vec4::new(0.35, 0.55, 1.6, 1.0)),
                 Surface::RedConsole => glowing(Vec3::new(1.0, 0.18, 0.1)),
                 Surface::BlueConsole => glowing(Vec3::new(0.15, 0.4, 1.0)),
+                Surface::Ground => textured(index, Vec4::new(0.6, 0.66, 0.5, 1.0)),
+                Surface::Bark => textured(index, Vec4::new(0.78, 0.84, 0.62, 1.0)),
+                Surface::Leaves => textured(index, Vec4::new(0.55, 0.78, 0.42, 1.0)),
                 _ => textured(index, Vec4::ONE),
             };
             (*surface, renderer.create_material(&data))
@@ -154,6 +167,24 @@ pub fn draw_items_for(model: &Model, world: Mat4, does_cast_shadow: bool) -> Vec
             does_cast_shadow,
         })
         .collect()
+}
+
+/// `grade_sky_for_swamp` desaturates and tints the sky, and weakens its sun, for the swampy mood.
+///
+/// Example: `grade_sky_for_swamp(&mut sky);`
+fn grade_sky_for_swamp(sky: &mut Sky) {
+    let grade = |rgb: Vec3| {
+        let grey: f32 = rgb.dot(Vec3::new(0.2126, 0.7152, 0.0722));
+        Vec3::splat(grey).lerp(rgb, SWAMP_SKY_SATURATION_FRAC) * SWAMP_SKY_TINT_RGB
+    };
+    for pixel in sky.rgb_pixels.chunks_exact_mut(3) {
+        let rgb: Vec3 = grade(Vec3::new(pixel[0], pixel[1], pixel[2]));
+        pixel.copy_from_slice(&rgb.to_array());
+    }
+    for coefficient in &mut sky.irradiance_sh9 {
+        *coefficient = grade(*coefficient);
+    }
+    sky.sun_illuminance_rgb = grade(sky.sun_illuminance_rgb) * SWAMP_SUN_FRAC;
 }
 
 /// `environment_from_sky` builds the renderer's environment and picks exposure from the sky.
@@ -191,16 +222,16 @@ fn environment_from_sky(sky: Sky) -> (EnvironmentData, f32) {
         luminance(up_irradiance_rgb),
         daylight_radiance
     );
-    let fog_color_rgb: Vec3 = up_irradiance_rgb * Vec3::new(0.95, 0.98, 1.05);
+    let fog_color_rgb: Vec3 = up_irradiance_rgb * SWAMP_FOG_TINT_RGB;
     let atmosphere: Atmosphere = Atmosphere {
-        exposure: MIDDLE_EXPOSURE / daylight_radiance.max(1e-4),
+        exposure: SWAMP_DIM_FRAC * MIDDLE_EXPOSURE / daylight_radiance.max(1e-4),
         ibl_intensity_frac,
         fog_color_rgb,
-        fog_density_per_m: 0.007,
+        fog_density_per_m: 0.012,
         fog_height_falloff_per_m: 0.12,
         fog_base_height_m: 0.0,
         fog_sun_inscatter_frac: 0.6,
-        fog_max_opacity_frac: 0.8,
+        fog_max_opacity_frac: 0.85,
         bounce_color_rgb: up_irradiance_rgb * Vec3::new(0.36, 0.32, 0.28),
         bloom_mix_frac: 0.06,
     };
@@ -366,7 +397,8 @@ impl Scene {
         options: &SceneOptions,
     ) -> Scene {
         let start: Instant = Instant::now();
-        let sky: Sky = load_sky(&asset_manifest::hdri_path(assets_dir), GROUND_ALBEDO);
+        let mut sky: Sky = load_sky(&asset_manifest::hdri_path(assets_dir), GROUND_ALBEDO);
+        grade_sky_for_swamp(&mut sky);
         let (environment, daylight_radiance) = environment_from_sky(sky);
         renderer.set_environment(&environment);
         let emissive_scale: f32 = daylight_radiance;

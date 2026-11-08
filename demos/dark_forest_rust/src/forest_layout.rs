@@ -767,14 +767,14 @@ pub fn build() -> MapFile {
             sky: Sky {
                 transport: "parallel".to_string(),
                 sun: Sun {
-                    direction: unit_direction([0.45, 0.35, -0.82]),
-                    color: [1.0, 0.72, 0.45],
+                    direction: unit_direction([0.45, 0.2, -0.82]),
+                    color: [0.62, 0.78, 0.55],
                 },
                 stars: false,
                 clouds: true,
-                zenith_color: [0.28, 0.36, 0.52],
-                horizon_color: [0.62, 0.52, 0.42],
-                fog_m: Some(70.0),
+                zenith_color: [0.18, 0.24, 0.22],
+                horizon_color: [0.36, 0.4, 0.32],
+                fog_m: Some(40.0),
             },
             spawns: Vec::new(),
             appearance: Appearance {
