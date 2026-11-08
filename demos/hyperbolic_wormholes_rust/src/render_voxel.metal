@@ -292,6 +292,7 @@ constant int BEAM_RIFLE_BIT = 3;
 constant int BEAM_SPECKLE_FIRST_BIT = 4;
 constant int RIFLE_BEAM_CODE = 2;
 constant int BEACON_BEAM_CODE = 4;
+constant int BEAM_BOUND_CODE = 8;
 constant float BEACON_BEAM_RADIUS_M = 0.12;
 constant float LASER_HALO_OPACITY = 0.9;
 constant float LASER_CORE_WHITENESS = 0.6;
@@ -498,8 +499,9 @@ struct ZoneWalls {
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
  * regions, flashlight, the spaceships, the dust (how many bursts and particles), the beams' speckle (the frame's seed
- * and the shares of speckled pixels painted black and turned white) and the zone walls (`zone_walls.rs`'s `to_gpu`),
- * as `render_voxel.rs` writes them.
+ * and the shares of speckled pixels painted black and turned white), the zone walls (`zone_walls.rs`'s `to_gpu`), the
+ * Milky Way, and in `lens_beams.x` how many beams, from the first, come near a warp's reach (the lasers, then the
+ * beacons' pieces near a warp), as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -546,6 +548,7 @@ struct VoxelUniforms {
     ZoneWalls zone_walls;
     float4 milky_way_pole;
     float4 milky_way_core;
+    int4 lens_beams;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -595,7 +598,7 @@ struct VoxelLight {
     float4 color_radius;
 };
 
-/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, speckle share, brightness, code: the team, 1 for red, plus `RIFLE_BEAM_CODE` for the rifle's, or `BEACON_BEAM_CODE` for a beacon's). */
+/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, speckle share, brightness, code: the team, 1 for red, plus `RIFLE_BEAM_CODE` for the rifle's, or `BEACON_BEAM_CODE` for a beacon's); or, with code `BEAM_BOUND_CODE`, a ball (centre in `a`, radius and how many pieces follow in `info.xy`) that holds the pieces after it, which a ray missing the ball skips. */
 struct BeamSegment {
     float4 a;
     float4 b;
@@ -2127,16 +2130,23 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (the chord's closest approach to the segment's line in closed form, then the chord's point nearest the segment's point nearest that, so a short piece of an arc isn't judged by its line's far reaches): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
-static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
+/** @brief `scan_beams` adds the glow of laser segments near a chord (the chord's closest approach to the segment's line in closed form, then the chord's point nearest the segment's point nearest that, so a short piece of an arc isn't judged by its line's far reaches): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. Only the first `beam_count` beams are scanned. @par Example @code scan_beams(scene, u.beam_count, x, v, s, t, core, halo, code, speckle); @endcode */
+static void scan_beams(thread const Scene &scene, int beam_count, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
                        thread float &speckle) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
-    for (int i = 0; i < scene.u.beam_count; i++) {
+    for (int i = 0; i < beam_count; i++) {
         float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
         int beam_code = int(info.w + HALF_KIND);
+        if (beam_code == BEAM_BOUND_CODE) {
+            float ac = -mdot(x, a), bc = mdot(v, a), s_near = clamp(clamp_atanh(bc / ac) + info.x, 0.0, min(s_end, FAR_S));
+            float bound_reach = info.x + BEAM_REACH * max(BEACON_BEAM_RADIUS_M, pix * r * sinh(min(travelled + s_near, FAR_S))) / r;
+            if (ac * ac - bc * bc > cosh(bound_reach) * cosh(bound_reach)) i += int(info.y + HALF_KIND);
+            continue;
+        }
         float half_len = 0.5 * info.x, radius_m = beam_code >= BEACON_BEAM_CODE ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
         float4 mid = geodesic_point(a, b, half_len);
-        float am = -mdot(x, mid), bm = mdot(v, mid), reach = half_len + BEAM_REACH * max(radius_m, pix * r * sinh(min(travelled + s_end, FAR_S))) / r;
+        float am = -mdot(x, mid), bm = mdot(v, mid), s_mid = clamp(clamp_atanh(bm / am) + half_len, 0.0, min(s_end, FAR_S));
+        float reach = half_len + BEAM_REACH * max(radius_m, pix * r * sinh(min(travelled + s_mid, FAR_S))) / r;
         if (am * am - bm * bm > cosh(reach) * cosh(reach)) continue;
         float al = mdot(x, a), be = mdot(v, a), ga = mdot(x, b), et = mdot(v, b);
         float k1 = 0.5 * ((al * al - ga * ga) + (be * be - et * et)), k2 = al * be - ga * et;
@@ -2373,7 +2383,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             float glass_s = NO_HIT_S;
             trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
-            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+            if (u.beam_count > 0) scan_beams(scene, u.beam_count, x, v, hit.s, travelled, core, halo, code, speckle);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
@@ -2397,7 +2407,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         float glass_s = NO_HIT_S;
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
-        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+        if (u.lens_beams.x > 0) scan_beams(scene, u.lens_beams.x, x, v, hit.s, travelled, core, halo, code, speckle);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
         if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
