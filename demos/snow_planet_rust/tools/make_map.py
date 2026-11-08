@@ -52,6 +52,8 @@ def make_box(name: str, u_m: float, v_m: float, half_m: list[float], material: i
 
 # The whole map's light snowfall (flakes per cubic meter) and fog (meters to fade by 1/e).
 SNOW_PER_M3: float = 0.04
+# Everyone's lasers on Snow Planet are this green, whatever their team.
+LASER_COLOR: list[float] = [0.35, 1.0, 0.45]
 FOG_M: float = 75.0
 # The only cover, few because the warps and blizzards shape play: blue's rounded snow mounds (u, v, half sizes,
 # yaw); red's are the same turned half a turn.
@@ -179,7 +181,7 @@ def make_map() -> dict:
             "zone_walls": {"height_m": 6.0, "thickness_m": 0.6, "opacity_frac": 0.25},
             "blizzards": [{**blizzard, **BLIZZARD_NUMBERS} for blizzard in BLIZZARDS],
         },
-        "appearance": {"style": "snow", "lighting": {"model": "lunar_lambert", "lommel_seeliger_frac": 0.2,
+        "appearance": {"style": "snow", "laser_color": LASER_COLOR, "lighting": {"model": "lunar_lambert", "lommel_seeliger_frac": 0.2,
                                                      "ambient": 0.3, "earthshine": 0.0, "sun_intensity": 1.2,
                                                      "shadows": True}},
     }

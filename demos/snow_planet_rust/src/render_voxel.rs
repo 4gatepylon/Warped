@@ -73,7 +73,7 @@ const BAKE_TARGET_TEXTURE_INDEX: usize = 0;
 const BLOOM_LEVELS: usize = 5;
 const FIRST_BLOOM_TEXTURE_INDEX: usize = 7;
 const THREADGROUP_SIDE: usize = 8;
-const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
+pub const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
 const BEACON_BEAM_M: f64 = 400.0;
@@ -137,6 +137,7 @@ pub struct VoxelUniforms {
     pub snow: [f32; 4],
     pub blizzards: [[f32; 4]; MAX_BLIZZARD_COUNT],
     pub blizzard_air: [[f32; 4]; MAX_BLIZZARD_COUNT],
+    pub laser_color: [f32; 4],
 }
 
 /// `MAX_BLIZZARD_COUNT` is how many blizzards the renderer draws (the rest only slow and freeze).
@@ -662,6 +663,9 @@ impl VoxelFrame {
             blizzard_air: pack_blizzards(&world.blizzards, |b| {
                 [b.fog_per_m, b.snow_per_m3, 0.0, 0.0]
             }),
+            laser_color: world
+                .laser_color
+                .map_or([0.0; 4], |[r, g, b]| [r, g, b, 1.0]),
         };
         assert_eq!(
             world.palette.len(),

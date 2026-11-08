@@ -890,6 +890,11 @@
  },
  "appearance": {
   "style": "snow",
+  "laser_color": [
+   0.35,
+   1.0,
+   0.45
+  ],
   "lighting": {
    "model": "lunar_lambert",
    "lommel_seeliger_frac": 0.2,

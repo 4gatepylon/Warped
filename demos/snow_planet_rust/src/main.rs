@@ -36,6 +36,7 @@ mod key_bindings;
 mod map;
 mod map_export;
 mod map_layout;
+mod map_photo;
 mod menu;
 mod mesh;
 mod minimap;
@@ -175,10 +176,12 @@ const TITLE_FRAME_MS: u64 = 16;
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
-const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route and --export-map.";
+const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --map-picture, --autopilot, --play-route and --export-map.";
 const MENU_DIM_FRAC: f32 = 0.8;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
+/// `MAP_PHOTO_MAX_PX` is the largest the saved picture of a map from above gets, in pixels.
+const MAP_PHOTO_MAX_PX: (u32, u32) = (2048, 1536);
 const PICTURE_PX_PER_MASK_PX: i32 = 2;
 const DEATH_TITLE_MASK: u8 = 255;
 const DEATH_COUNTDOWN_MASK: u8 = 128;
@@ -275,6 +278,10 @@ struct Arguments {
     /// Render fixed views without a window, time them and save them under .artifacts/bench_views/.
     #[arg(long, conflicts_with = "autopilot")]
     bench_views: bool,
+    /// Render the map from above with this renderer for the menu's map page and save it as
+    /// map_pictures/<map>.png (it replaces any older one), then exit.
+    #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "bot"])]
+    map_picture: bool,
     /// Play a scripted route without a window and save frames and timings under .artifacts/autopilot/.
     #[arg(long)]
     autopilot: bool,
@@ -557,6 +564,7 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
     let is_window_without_server: bool = arguments.join.is_none()
         && !arguments.serve
         && !arguments.bench_views
+        && !arguments.map_picture
         && !arguments.autopilot
         && !arguments.play_route
         && arguments.export_map.is_none();
@@ -644,6 +652,8 @@ fn run(arguments: Arguments) -> Result<()> {
         run_bot(&arguments, renderer)
     } else if arguments.bench_views {
         bench_views(&arguments, renderer)
+    } else if arguments.map_picture {
+        save_map_picture(&arguments, renderer)
     } else if arguments.autopilot {
         run_autopilot(&arguments, renderer)
     } else {
@@ -1097,6 +1107,10 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         VoxelView {
             is_laser_on: true,
             ..view("laser_into_whiteout", [-20.0, 0.0], [0.0, 0.0], None, 0.0)
+        },
+        VoxelView {
+            is_laser_on: true,
+            ..view("laser_open", [-45.0, -12.0], [-30.0, -12.0], None, 0.0)
         },
         view(
             "photo_oblique",
@@ -4527,6 +4541,33 @@ struct Picture {
     size_px: (u32, u32),
     min_mask_px: [i32; 2],
     max_excl_mask_px: [i32; 2],
+}
+
+/// `save_map_picture` renders the map from above (`map_photo.rs`) at `MAP_PHOTO_MAX_PX`, covering
+/// what the map page shows, and saves it where `map_layout.rs` looks for it.
+///
+/// Example: `save_map_picture(&arguments, renderer)?;`
+fn save_map_picture(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
+    let map: map::Map = load_map(arguments.map, &load_settings(arguments)?)?;
+    let mut world: VoxelWorld = VoxelWorld::FromMap(&map)?;
+    BlackHoleGrowth::New(arguments.black_hole_strength).update(&mut world, 0, 0.0);
+    let layout: map_layout::MapLayout = map_layout::MapLayout::FromMap(&map, MAP_PHOTO_MAX_PX)?;
+    let (corner_m, m_per_px) = layout.get_placement();
+    let size_px: (u32, u32) = layout.get_size_px();
+    let start: Instant = Instant::now();
+    let pixels: Vec<u8> =
+        map_photo::render_map_photo(&world, renderer.as_mut(), corner_m, m_per_px, size_px)?;
+    let path: PathBuf = map_photo::get_map_photo_path(&map.name);
+    fs::create_dir_all(path.parent().ok_or("a map picture's path has a folder")?)?;
+    save_png(&path, &pixels, size_px.0, size_px.1)?;
+    eprintln!(
+        "Saved {} ({}x{}) in {:.1} s.",
+        path.display(),
+        size_px.0,
+        size_px.1,
+        start.elapsed().as_secs_f64()
+    );
+    Ok(())
 }
 
 /// `get_map_picture_max_px` gives the largest map picture the map page holds, in pixels.

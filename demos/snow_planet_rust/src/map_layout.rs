@@ -4,7 +4,8 @@
 //! relief, everything shaded as if lit from the top left, the consoles, the black hole and wormhole
 //! mouths, the spawns, the team zones' edges, the playable boundary, and, on each frame, the player
 //! with a circle of what is within reach of them (the rest darker and blurred) and the other
-//! players as dots in their team's colour. It also lends the picture without labels, and where it
+//! players as dots in their team's colour. When the map has a picture from above
+//! (`map_photo.rs`), that picture replaces the drawing under the marks. It also lends the picture without labels, and where it
 //! lies, to the minimap.
 //!
 //! Interface: `MapLayout` (`FromMap`, `draw_players`, `get_size_px`, `get_plain_pixels`,
@@ -28,6 +29,7 @@ use sdl3::surface::Surface;
 
 use crate::geometry::{AXIS_W, AXIS_Z, invert_lorentz, make_fermi_point};
 use crate::map::{Map, to_frame};
+use crate::map_photo::get_map_photo_path;
 use crate::net::TEAM_NAMES;
 use crate::shapes::{Shape, find_hit_mu};
 use crate::terrain::{Terrain, get_fermi_coordinates};
@@ -60,6 +62,13 @@ const ANY_TEAM_COLOR: [u8; 3] = [230, 230, 230];
 const LABEL_COLOR: [u8; 3] = [255, 255, 255];
 const LABEL_GAP_PX: f64 = 3.0;
 const LABEL_SHADOW_PX: f32 = 1.0;
+const LABEL_OUTLINE_OFFSETS_PX: [[f32; 2]; 5] = [
+    [-1.0, 0.0],
+    [1.0, 0.0],
+    [0.0, -1.0],
+    [0.0, 1.0],
+    [LABEL_SHADOW_PX, LABEL_SHADOW_PX],
+];
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const PLAYER_RADIUS_PX: f64 = 5.0;
 const PLAYER_OUTLINE_PX: f64 = 1.5;
@@ -202,6 +211,7 @@ impl MapLayout {
             m_per_px,
         };
         layout.paint_tops(map, &footprints, boundary_m)?;
+        let has_photo: bool = layout.paint_photo(&map.name)?;
         if let Some(regions) = &map.regions {
             for zone in regions.zones.iter().flatten() {
                 for u_m in [zone.u_min_m, zone.u_max_m].into_iter().flatten() {
@@ -223,11 +233,15 @@ impl MapLayout {
             let center_px: [f64; 2] = layout.get_px([u_m, v_m]);
             let radius_px: f64 = warp.schwarzschild_radius_m / m_per_px;
             if warp.kind == WARP_KIND_BLACK_HOLE {
-                layout.paint_disk(center_px, radius_px, BLACK_HOLE_COLOR);
-                layout.paint_ring(center_px, radius_px, BLACK_HOLE_RING_COLOR);
+                if !has_photo {
+                    layout.paint_disk(center_px, radius_px, BLACK_HOLE_COLOR);
+                    layout.paint_ring(center_px, radius_px, BLACK_HOLE_RING_COLOR);
+                }
                 labels.push(make_label_right("black hole", center_px, radius_px));
             } else {
-                layout.paint_ring(center_px, radius_px, MOUTH_COLOR);
+                if !has_photo {
+                    layout.paint_ring(center_px, radius_px, MOUTH_COLOR);
+                }
                 let name: &str = warp
                     .name
                     .strip_prefix(MOUTH_NAME_PREFIX)
@@ -261,6 +275,25 @@ impl MapLayout {
         layout.draw_labels(&labels)?;
         layout.dim_pixels = make_dim_pixels(&layout.pixels, size_px);
         Ok(layout)
+    }
+
+    /// `paint_photo` replaces the drawing with the map's picture from above (`map_photo.rs`),
+    /// scaled to this picture's size, and says whether the map has one.
+    ///
+    /// Example: `let has_photo = layout.paint_photo("snow_planet")?;`
+    fn paint_photo(&mut self, map_name: &str) -> Result<bool> {
+        let path: std::path::PathBuf = get_map_photo_path(map_name);
+        if !path.exists() {
+            return Ok(false);
+        }
+        let photo: image::RgbaImage = image::imageops::resize(
+            &image::open(&path)?.to_rgba8(),
+            self.size_px.0,
+            self.size_px.1,
+            image::imageops::FilterType::Triangle,
+        );
+        self.pixels.copy_from_slice(photo.as_raw());
+        Ok(true)
     }
 
     /// `get_size_px` gives the picture's width and height in pixels.
@@ -634,7 +667,9 @@ impl MapLayout {
         for (text, point_px) in labels {
             let (x, y) = (point_px[0] as f32, point_px[1] as f32);
             canvas.set_draw_color(Color::RGB(0, 0, 0));
-            canvas.draw_debug_text(text.as_str(), (x + LABEL_SHADOW_PX, y + LABEL_SHADOW_PX))?;
+            for [dx, dy] in LABEL_OUTLINE_OFFSETS_PX {
+                canvas.draw_debug_text(text.as_str(), (x + dx, y + dy))?;
+            }
             canvas.set_draw_color(Color::RGB(LABEL_COLOR[0], LABEL_COLOR[1], LABEL_COLOR[2]));
             canvas.draw_debug_text(text.as_str(), (x, y))?;
         }

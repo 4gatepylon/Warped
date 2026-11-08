@@ -56,6 +56,12 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
   player; the server freezes players standing in one (`net::Server::freeze_players`, `net::Freezing`); the shader's
   `add_blizzards` (`src/render_voxel.metal`) adds the fog and falling flakes.
 - Snow look: `appearance.style: snow` turns on the shader's snow sky, ground and fog (`VoxelUniforms::snow`).
+- Laser colour: `appearance.laser_color` in the map gives every team's laser one colour (Snow Planet: green);
+  without it lasers keep their team colours. The shader whitens a one-colour beam's core less so it shows on snow.
+- Map page (Tab, then E): `make map-picture` (`--map-picture`, `src/map_photo.rs`) renders the map from 40 m up
+  in 8 m tiles with 2×2 supersampling, without the global snow and fog, and saves `map_pictures/<map>.png`.
+  `MapLayout` (`src/map_layout.rs`) draws it under the live marks, and falls back to its flat drawing if the file is
+  missing. The picture costs nothing per frame.
 
 ## Validation
 

@@ -284,6 +284,8 @@ constant float BEAM_HAZE_BRIGHTNESS = 0.45;
 constant float BEAM_HAZE_WHITENESS = 0.45;
 constant float BEAM_CORE_BRIGHTNESS = 1.6;
 constant float BEAM_CORE_WHITENESS = 0.9;
+/** @brief `ONE_COLOR_LASER_WHITENESS_FRAC` scales how white a beam's core gets on a map whose lasers share one colour (`laser_color`), so the colour shows on snow. */
+constant float ONE_COLOR_LASER_WHITENESS_FRAC = 0.35;
 constant float DARK_PYLON_GLOW_FRAC = 0.12;
 constant float BEAM_SPECKLE_STEPS = 1023.0;
 constant int THROWN_TINT_FIRST_BIT = 1;
@@ -565,6 +567,7 @@ struct VoxelUniforms {
     float4 snow;
     float4 blizzards[MAX_BLIZZARD_COUNT];
     float4 blizzard_air[MAX_BLIZZARD_COUNT];
+    float4 laser_color;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -2631,19 +2634,20 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id
     color = add_haze(scene, color, end);
     color = add_blizzards(scene, color, end, float2(id) + 0.5);
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
-    float3 beam_color = to_linear((end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
+    float3 beam_color = to_linear(scene.u.laser_color.w > 0.5 ? scene.u.laser_color.rgb : (end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
     int tint = end.surface.w >> THROWN_TINT_FIRST_BIT & THROWN_TINT_MASK;
     if (tint > 0) color = mix(color, THROWN_TINTS[tint - 1] * (dot(color, LUMA) + THROWN_TINT_FLOOR), THROWN_TINT_FRAC);
     if (end.dust.w > 0.0) color = mix(color, end.dust.rgb / end.dust.w, 1.0 - exp(-end.dust.w));
     float3 lit;
     float glow;
+    float whiteness_frac = scene.u.laser_color.w > 0.5 ? ONE_COLOR_LASER_WHITENESS_FRAC : 1.0;
     if ((end.surface.w >> BEAM_RIFLE_BIT & 1) != 0) {
-        lit = mix(color, beam_color, saturate(LASER_HALO_OPACITY * halo)) + mix(beam_color, float3(1.0), LASER_CORE_WHITENESS) * core;
+        lit = mix(color, beam_color, saturate(LASER_HALO_OPACITY * halo)) + mix(beam_color, float3(1.0), LASER_CORE_WHITENESS * whiteness_frac) * core;
         glow = saturate(LASER_HALO_OPACITY * halo + core);
     } else {
-        lit = color + mix(beam_color, float3(1.0), BEAM_HAZE_WHITENESS) * BEAM_HAZE_BRIGHTNESS * halo;
-        lit = mix(lit, mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS) * BEAM_CORE_BRIGHTNESS, saturate(core));
+        lit = color + mix(beam_color, float3(1.0), BEAM_HAZE_WHITENESS * whiteness_frac) * BEAM_HAZE_BRIGHTNESS * halo;
+        lit = mix(lit, mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS * whiteness_frac) * BEAM_CORE_BRIGHTNESS, saturate(core));
         glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
     }
     color = speckle_beam(scene, color, lit, glow, float(end.surface.w >> BEAM_SPECKLE_FIRST_BIT) / BEAM_SPECKLE_STEPS, id);

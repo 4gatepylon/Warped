@@ -346,6 +346,7 @@ pub struct VoxelWorld {
     pub is_snow: bool,
     pub snow_fog_m: f64,
     pub snow_per_m3: f64,
+    pub laser_color: Option<[f32; 3]>,
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -869,6 +870,7 @@ impl VoxelWorld {
             is_snow: map.appearance.style == SNOW_STYLE,
             snow_fog_m: map.sky.fog_m.unwrap_or(DEFAULT_SNOW_FOG_M),
             snow_per_m3: map.sky.snow_per_m3.unwrap_or(0.0),
+            laser_color: map.appearance.laser_color,
         };
         world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));

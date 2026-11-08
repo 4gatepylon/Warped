@@ -304,6 +304,7 @@
       "required": ["style", "lighting"],
       "additionalProperties": false,
       "properties": {
+        "laser_color": {"$ref": "#/$defs/color"},
         "style": {"type": "string"},
         "lighting": {
           "oneOf": [

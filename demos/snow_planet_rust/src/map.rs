@@ -336,6 +336,7 @@ pub struct Lighting {
 pub struct Appearance {
     pub style: String,
     pub lighting: Lighting,
+    pub laser_color: Option<[f32; 3]>,
 }
 
 /// `Map` is a whole map: the manifest's parts and the voxel cells.
