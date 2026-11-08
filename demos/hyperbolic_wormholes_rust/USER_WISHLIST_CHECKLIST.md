@@ -223,3 +223,5 @@ is in [`AGENTS.md`](AGENTS.md).
   another version. #209.
 - [x] **W-78 Shooting from the team screen.** A bug: you may be able to shoot a laser before leaving the screen where
   you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #209.
+- [x] **W-79 Only serve and join.** "Make a commit to disable everything except starting a server and connecting to
+  a server; we will not be using the local demo etc." `make serve-game` and `make join-game` remain. #212.
