@@ -18,9 +18,10 @@ use crate::render_voxel::VoxelFrame;
 use crate::voxel_world::{VoxelPlayer, VoxelWorld};
 
 use crate::run_folder::{make_run_folder, save_png};
+use crate::session::scale_size;
 use crate::{
     Arguments, BYTES_PER_PIXEL, MS_PER_S, Renderer, Result, get_sampling_name, load_map,
-    load_settings, map, multiplayer, render_voxel, scale_size, voxel_world,
+    load_settings, map, multiplayer, render_voxel, voxel_world,
 };
 
 /// `VoxelView` is a named viewpoint on a voxel map, from the Lunar Surface level's own list: where

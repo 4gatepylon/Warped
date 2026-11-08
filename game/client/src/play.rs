@@ -14,10 +14,11 @@ use objc2_quartz_core::CAMetalLayer;
 use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 
+use crate::session::{OverlayText, PackedFrame, Session, get_text_positions, make_text_mask};
 use crate::{
     Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_MASK_PX, DISABLE_BAR_MIN_FRAC,
-    DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, MS_PER_S, OverlayText, PackedFrame, Renderer, Result,
-    Session, WINDOW_TITLE, get_text_positions, hud_bars, make_text_mask, render_metal, viewmodel,
+    DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, MS_PER_S, Renderer, Result, WINDOW_TITLE, hud_bars,
+    render_metal, viewmodel,
 };
 
 const HUD_TEXT_SCALE: f32 = 2.0;
