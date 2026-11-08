@@ -54,7 +54,17 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   loads. `Esc` or `Tab` closes the menu. You can also copy the file, change it, and add `PLAYER_SETTINGS=mine.yaml`
   to `make host-game` or `make join-game`.
 - `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
-  within a few seconds, use the address the server printed.
+  within a few seconds, use the address the server printed. When several servers announce themselves, it joins the
+  one on the usual port (47800) and prints the others.
+- If a window can't play on its server, a banner says why, and the terminal says what to do:
+  - **NO ANSWER FROM THE SERVER:** nothing came back for 2 s. Check the address and `PORT=`: use the port the server
+    printed, not the port in its "player 1 joined ... (their window's address: ...)" lines, which belongs to the
+    player's window. Or the server stopped.
+  - **SERVER RUNS ANOTHER VERSION:** its snapshots don't fit this game. Pull, and rebuild and restart the server and
+    every window from the same commit.
+  - **THE GAME IS FULL:** the server already has 8 players.
+  - **JOINING THE GAME:** you pressed `1` or `2`, and the server hasn't let you in yet.
+- You can't shoot until the server has let you into the game (not from the team screen, nor while joining).
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
   connections. Without that, nobody can reach the game.
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
@@ -66,10 +76,12 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 
 To win on Lunar Surface, turn off all five of the other team's consoles, the pulsing blocks around its pylon
 (the red pylon is past the wormhole on the ridge). Stand within 3 m, look straight at one and hold `E` for 10 s: a bar
-below the crosshair fills, the console pulses twice as fast for everyone, and you can't shoot meanwhile. Looking
-away or letting go starts it over. A console that is off goes dark. When a team's consoles are all off, everyone
-sees which team won, and a new game starts only when whoever started the server presses `Enter` in its terminal
-(the `make host-game` terminal, for that command): every console comes back on and everyone returns to their spawn.
+below the crosshair fills, the console pulses faster and faster for everyone (from once a second to a frenzy of 8
+times a second right before it turns off), and you can't shoot meanwhile. Looking away or letting go starts it over,
+and its pulse slows back down over about a second. A console that is off goes dark. When a team's consoles are all
+off, everyone sees which team won, and a new game starts only when whoever started the server presses `Enter` in its
+terminal (the `make host-game` terminal, for that command): every console comes back on and everyone returns to their
+spawn.
 
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
 each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
@@ -77,14 +89,29 @@ each step outward is cut by how far you have already come, so you never get past
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
 
+The bars in the bottom left (health, then the gun's ammo, then sprint energy) lean like `/` and glow in their
+colours. Each hit sends a reddish-orange pulse down the health bar, right to left. While you sprint, blue pulses run
+down the energy bar; while it refills, fainter ones run up it. The ammo bar doesn't pulse.
+
+Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and your whole view turns
+cyan as you come out, as if blueshifted by moving fast toward what you see: reds turn green, greys turn cyan, the
+sky gets a faint teal glow, most of all in the middle of the screen. It fades back within 1.5 s, and only the
+player who went through sees it. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off);
+`view.wormhole_tint_s` in `player_settings.yaml` sets how long it lasts.
+
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
 the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,
 in their team's colours. The menu's MAP page rings the same 60 m around you and darkens the rest. To move, resize
 or hide the minimap, change `minimap` in your `player_settings.yaml` (`corner: top_left`, `top_right`,
 `bottom_left` or `bottom_right`).
 
+Look up on Lunar Surface: spaceships fly slowly across the sky, purely for looks. A container freighter, a ring ship
+with a turning ring, and three fighters in a V each cross from horizon to horizon in 2 to 5 minutes, with engine
+glow, red and green running lights and a flashing strobe. They follow the UTC clock, so everyone whose clock is right
+sees the same ships at the same moment. They are far away in the sky: lasers and players never touch them.
+
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
-`PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
+`PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
 (a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
 the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or

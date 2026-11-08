@@ -5,7 +5,7 @@
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
-//! `VoxelWorld::find_aimed_material`, `Console`, `VoxelPlayer`, `Shot`, `BeamSegment`.
+//! `VoxelWorld::find_aimed_material`, `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
@@ -31,7 +31,8 @@ pub const AVATAR_FIRST_MATERIAL: usize = 240;
 const BOUND_MARGIN_M: f64 = 0.2;
 pub(crate) const BEND_STEP_FRAC: f64 = 0.08;
 const CONSOLE_PULSE_HZ: f64 = 1.0;
-const CONSOLE_DISABLING_PULSE_PER_PULSE: f64 = 2.0;
+const CONSOLE_FRENZY_PULSE_HZ: f64 = 8.0;
+const CONSOLE_PULSE_EASE_TIME_CONSTANT_S: f64 = 0.3;
 const CONSOLE_PULSE_MIN_FRAC: f32 = 0.6;
 const CONSOLE_PULSE_MAX_FRAC: f32 = 2.0;
 const CONSOLE_OFF_FRAC: f32 = 0.12;
@@ -143,12 +144,87 @@ pub struct SpecialMaterials {
 }
 
 /// `Console` is one console of a team's pylon: its material, its team (an index into
-/// `TEAM_NAMES`) and the map's colour for it.
+/// `TEAM_NAMES`), the map's colour for it, and its pulse.
 #[derive(Clone, Copy)]
 pub struct Console {
     pub material: u8,
     pub team: u32,
     color: [f32; 3],
+    pulse: ConsolePulse,
+}
+
+/// `ConsolePulse` is a console's pulse at `time_s`: how far through one pulse it is
+/// (`phase_frac`, from 0 to 1) and how many pulses a second it makes now (`hz`).
+#[derive(Clone, Copy)]
+struct ConsolePulse {
+    phase_frac: f64,
+    hz: f64,
+    time_s: f64,
+}
+
+impl ConsolePulse {
+    /// `Resting` is a pulse at the normal rate, `CONSOLE_PULSE_HZ`, at the start of a pulse at
+    /// time 0.
+    ///
+    /// Example: `let pulse = ConsolePulse::Resting();`
+    #[allow(non_snake_case)]
+    fn Resting() -> ConsolePulse {
+        ConsolePulse {
+            phase_frac: 0.0,
+            hz: CONSOLE_PULSE_HZ,
+            time_s: 0.0,
+        }
+    }
+
+    /// `advance` moves the pulse on to `time_s`, toward the rate `target_hz`: the rate rises to a
+    /// higher target at once, and eases down to a lower one exponentially with the time constant
+    /// `CONSOLE_PULSE_EASE_TIME_CONSTANT_S` (within 4% of the way in 1 s). The phase adds up the
+    /// rate over the time, so it never jumps when the rate changes. `advance` panics if `time_s`
+    /// is before the pulse's own time.
+    ///
+    /// Example: `console.pulse = console.pulse.advance(get_console_pulse_hz(0.5), 12.5);`
+    fn advance(self, target_hz: f64, time_s: f64) -> ConsolePulse {
+        let dt: f64 = time_s - self.time_s;
+        assert!(
+            dt >= 0.0,
+            "ConsolePulse::advance: time_s {time_s} is before the pulse's {}",
+            self.time_s
+        );
+        let hz: f64 = if target_hz >= self.hz {
+            target_hz
+        } else {
+            target_hz + (self.hz - target_hz) * (-dt / CONSOLE_PULSE_EASE_TIME_CONSTANT_S).exp()
+        };
+        ConsolePulse {
+            phase_frac: (self.phase_frac + hz * dt).fract(),
+            hz,
+            time_s,
+        }
+    }
+
+    /// `get_level_frac` gives the console's brightness now, as a fraction of its colour: a sine
+    /// of the phase between `CONSOLE_PULSE_MIN_FRAC` and `CONSOLE_PULSE_MAX_FRAC`.
+    ///
+    /// Example: `let level = console.pulse.get_level_frac();`
+    fn get_level_frac(self) -> f32 {
+        let wave: f32 = (0.5 + 0.5 * (std::f64::consts::TAU * self.phase_frac).sin()) as f32;
+        CONSOLE_PULSE_MIN_FRAC + (CONSOLE_PULSE_MAX_FRAC - CONSOLE_PULSE_MIN_FRAC) * wave
+    }
+}
+
+/// `get_console_pulse_hz` gives how many times a second a console pulses when it is
+/// `disabling_frac` of the way to being turned off (0 when nobody holds `E` on it): from
+/// `CONSOLE_PULSE_HZ` at 0 up to `CONSOLE_FRENZY_PULSE_HZ` at 1, by the same factor for each
+/// equal step of progress, so it speeds up fastest right before the console turns off. It panics
+/// if `disabling_frac` isn't between 0 and 1.
+///
+/// Example: `let hz = get_console_pulse_hz(0.5);`
+fn get_console_pulse_hz(disabling_frac: f64) -> f64 {
+    assert!(
+        (0.0..=1.0).contains(&disabling_frac),
+        "get_console_pulse_hz: disabling_frac must be between 0 and 1, got {disabling_frac}"
+    );
+    CONSOLE_PULSE_HZ * (CONSOLE_FRENZY_PULSE_HZ / CONSOLE_PULSE_HZ).powf(disabling_frac)
 }
 
 /// `find_consoles` lists a map's consoles, the materials named "<team> console <n>" (such as
@@ -167,6 +243,7 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
                 material: m.id,
                 team: team as u32,
                 color: m.color,
+                pulse: ConsolePulse::Resting(),
             })
         })
         .collect();
@@ -179,7 +256,9 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
     consoles
 }
 
-/// `VoxelWorld` is a whole voxel map, ready to trace and to walk on.
+/// `VoxelWorld` is a whole voxel map, ready to trace and to walk on, with the eye of the flashlight
+/// shining this frame and the time the sky shows (`sky_time_s`: the UTC clock in the window, 0 for
+/// fixed views; `spaceships.rs`).
 #[derive(Clone)]
 pub struct VoxelWorld {
     pub name: String,
@@ -205,6 +284,7 @@ pub struct VoxelWorld {
     pub static_structure_count: usize,
     pub consoles: Vec<Console>,
     pub flashlight_eye: Option<DMat4>,
+    pub sky_time_s: f64,
     pub clearance: Arc<ClearanceGrids>,
 }
 
@@ -549,6 +629,7 @@ impl VoxelWorld {
             static_structure_count: structures.len(),
             consoles: find_consoles(map),
             flashlight_eye: None,
+            sky_time_s: 0.0,
             structures,
             shapes,
             warps,
@@ -632,26 +713,28 @@ impl VoxelWorld {
         shared
     }
 
-    /// `light_consoles` sets each console's light at `time_s`: dark (and unlit) once its bit in
-    /// `off_mask` is set, otherwise pulsing `CONSOLE_PULSE_HZ` times a second between
-    /// `CONSOLE_PULSE_MIN_FRAC` and `CONSOLE_PULSE_MAX_FRAC` of its colour, and
-    /// `CONSOLE_DISABLING_PULSE_PER_PULSE` times as fast while its bit in `disabling_mask` is set.
+    /// `light_consoles` sets each console's light at `time_s` (seconds, never going back): dark
+    /// (and unlit) once its bit in `off_mask` is set, otherwise pulsing between
+    /// `CONSOLE_PULSE_MIN_FRAC` and `CONSOLE_PULSE_MAX_FRAC` of its colour. Console i pulses at
+    /// `get_console_pulse_hz(disabling_fracs[i])`, faster and faster as it is turned off, and
+    /// eases back down when that stops (`ConsolePulse::advance`).
     ///
-    /// Example: `world.light_consoles(game.off_mask, 0b100, 12.5);`
-    pub fn light_consoles(&mut self, off_mask: u32, disabling_mask: u32, time_s: f64) {
-        for (i, console) in self.consoles.iter().enumerate() {
+    /// Example: `world.light_consoles(game.off_mask, &[0.0; MAX_CONSOLE_COUNT], 12.5);`
+    pub fn light_consoles(
+        &mut self,
+        off_mask: u32,
+        disabling_fracs: &[f64; MAX_CONSOLE_COUNT],
+        time_s: f64,
+    ) {
+        for (i, console) in self.consoles.iter_mut().enumerate() {
+            console.pulse = console
+                .pulse
+                .advance(get_console_pulse_hz(disabling_fracs[i]), time_s);
             let entry: [f32; 4] = if off_mask >> i & 1 == 1 {
                 let [r, g, b] = console.color.map(|c| c * CONSOLE_OFF_FRAC);
                 [r, g, b, 0.0]
             } else {
-                let hz: f64 = if disabling_mask >> i & 1 == 1 {
-                    CONSOLE_PULSE_HZ * CONSOLE_DISABLING_PULSE_PER_PULSE
-                } else {
-                    CONSOLE_PULSE_HZ
-                };
-                let wave: f32 = (0.5 + 0.5 * (std::f64::consts::TAU * hz * time_s).sin()) as f32;
-                let level: f32 = CONSOLE_PULSE_MIN_FRAC
-                    + (CONSOLE_PULSE_MAX_FRAC - CONSOLE_PULSE_MIN_FRAC) * wave;
+                let level: f32 = console.pulse.get_level_frac();
                 let [r, g, b] = console.color.map(|c| c * level);
                 [r, g, b, 1.0]
             };
@@ -1169,6 +1252,13 @@ impl VoxelWorld {
     }
 }
 
+/// `StepReport` is what one `VoxelPlayer::step` did that the window shows: messages for the HUD,
+/// and whether the player went through a wormhole mouth.
+pub struct StepReport {
+    pub messages: Vec<String>,
+    pub has_crossed_mouth: bool,
+}
+
 /// `VoxelPlayer` is a player on a voxel map, as in the level: a body frame on the ground plane, the
 /// eye's height above it, the view's pitch, the vertical speed, whether they fly or stand, their
 /// sprint energy (1 full, 0 empty) and whether they sprinted on the last step, and the head bob's
@@ -1444,16 +1534,17 @@ impl VoxelPlayer {
     /// and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
     /// cells rise a little), jumping (the only way onto a block) and falling. A
     /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
-    /// level does) only if that fails. It returns messages for the HUD.
+    /// level does) only if that fails. It returns messages for the HUD and whether the player went
+    /// through a mouth.
     ///
-    /// Example: `for message in player.step(&world, &input, 1.0 / 60.0, 0) { ... }`
+    /// Example: `for message in player.step(&world, &input, 1.0 / 60.0, 0).messages { ... }`
     pub fn step(
         &mut self,
         world: &VoxelWorld,
         input: &Input,
         dt_s: f64,
         spawn_index: usize,
-    ) -> Vec<String> {
+    ) -> StepReport {
         let r: f64 = world.r;
         let forward: f64 = f64::from(u8::from(input.forward)) - f64::from(u8::from(input.back));
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
@@ -1509,7 +1600,10 @@ impl VoxelPlayer {
                 < FALL_IN_PER_HORIZON * world.warps[w].m
         {
             *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, 0, &[]);
-            return vec!["You fell into the black hole".to_string()];
+            return StepReport {
+                messages: vec!["You fell into the black hole".to_string()],
+                has_crossed_mouth: false,
+            };
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
         let has_moved: bool = len > 0.0;
@@ -1533,10 +1627,13 @@ impl VoxelPlayer {
                 }
             }
         }
-        let messages: Vec<String> = crossed
-            .iter()
-            .map(|name| format!("Through {name}"))
-            .collect();
+        let report: StepReport = StepReport {
+            messages: crossed
+                .iter()
+                .map(|name| format!("Through {name}"))
+                .collect(),
+            has_crossed_mouth: crossed.is_some(),
+        };
         if self.is_flying {
             (self.body, self.h_m) = (body_new, h_new);
             let climb_m_per_s: f64 = MIN_FLY_CLIMB_M_PER_S.max(self.h_m) * FLY_CLIMB_PER_S;
@@ -1552,7 +1649,7 @@ impl VoxelPlayer {
                 .as_ref()
                 .map_or(0.0, |t| t.get_height_m(u_m, v_m));
             self.h_m = self.h_m.clamp(floor_m + MIN_FLY_HEIGHT_M, MAX_FLY_HEIGHT_M);
-            return messages;
+            return report;
         }
         let nearby: Vec<usize> =
             world.find_nearby_structures(self.body.col(AXIS_W), NEARBY_REACH_M);
@@ -1605,7 +1702,7 @@ impl VoxelPlayer {
             self.is_on_ground = dh < 0.0;
             self.vertical_m_per_s = 0.0;
         }
-        messages
+        report
     }
 }
 
@@ -1624,9 +1721,14 @@ mod tests {
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
     //! | Walking | upright, crouched (half as far, eye fully lowered) | `crouching_lowers_the_eye_and_slows_walking` |
+    //! | Step through a mouth | not yet (no crossing, no message), the step that goes through (one crossing and its message) | `walking_into_a_mouth_reports_the_crossing` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
+    //! | Progress of turning off a console | none (the normal rate), part way (rising, faster each step), done (the frenzy), past done (fails) | `the_pulse_ramps_up_with_progress`, `progress_past_done_fails` |
+    //! | Target rate against the pulse's own | higher (reached at once), the same (kept), lower (eases down: barely after a frame, nearly there after a second, never below) | `the_pulse_eases_back_down` |
+    //! | Rate while the light is watched | steady, ramping up over a whole hold, dropping when the hold stops (the light moves only as fast as the pulse, never jumps) | `the_light_never_jumps` |
+    //! | Console | off (dark, unlit), on and not held (the normal pulse), on and held (its own faster pulse) | `consoles_pulse_by_their_own_progress` |
 
     use super::*;
     use crate::geometry::orthonormalize_frame;
@@ -1661,6 +1763,19 @@ mod tests {
     const MAX_JUMP_STEP_COUNT: usize = 120;
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
     const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
+    const HZ_TOLERANCE: f64 = 1e-9;
+    const RAMP_STEP_COUNT: usize = 10;
+    const HALF_FRAC: f64 = 0.5;
+    const PAST_DONE_FRAC: f64 = 1.5;
+    const EASE_STEP_COUNT: usize = 60;
+    const MIN_KEPT_AFTER_A_FRAME_FRAC: f64 = 0.9;
+    const MAX_LEFT_AFTER_A_SECOND_FRAC: f64 = 0.05;
+    const HOLD_S: f64 = 10.0;
+    const FINE_STEP_S: f64 = 0.001;
+    const STEADY_S: f64 = 1.0;
+    const LEVEL_TOLERANCE_FRAC: f64 = 1e-6;
+    const HELD_CONSOLE: usize = 1;
+    const OFF_CONSOLE: usize = 2;
 
     /// `make_block_world` gives the Lunar Surface world with flat ground and nothing on it but a
     /// box `height_m` tall, 1 m deep and 6 m long at u = -80 m, and a spot on the ground
@@ -1947,6 +2062,28 @@ mod tests {
     }
 
     #[test]
+    fn walking_into_a_mouth_reports_the_crossing() {
+        const MOUTH_A_VIEW_M: [f64; 2] = [-22.0, 40.0];
+        const MOUTH_A_TARGET_M: [f64; 2] = [-14.0, 40.0];
+        const THROUGH_STEP_COUNT: usize = 150;
+        let world: VoxelWorld = load_lunar_surface();
+        let mut player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, MOUTH_A_VIEW_M, MOUTH_A_TARGET_M, None, 0.0);
+        let walk: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        let reports: Vec<StepReport> = (0..THROUGH_STEP_COUNT)
+            .map(|_| player.step(&world, &walk, STEP_S, 0))
+            .collect();
+        let (crossings, others): (Vec<&StepReport>, Vec<&StepReport>) =
+            reports.iter().partition(|report| report.has_crossed_mouth);
+        assert_eq!(crossings.len(), 1);
+        assert_eq!(crossings[0].messages, vec!["Through wormhole mouth A"]);
+        assert!(others.iter().all(|report| report.messages.is_empty()));
+    }
+
+    #[test]
     fn beams_into_the_sky_stop_near_the_map() {
         let world: VoxelWorld = load_lunar_surface();
         let into_wormhole: Shot = world.trace_laser(
@@ -2103,5 +2240,114 @@ mod tests {
                 < JUMP_TIME_TOLERANCE_S,
             "jump took {jump_s} s"
         );
+    }
+
+    #[test]
+    fn the_pulse_ramps_up_with_progress() {
+        assert_eq!(get_console_pulse_hz(0.0), CONSOLE_PULSE_HZ);
+        let half_hz: f64 = get_console_pulse_hz(HALF_FRAC);
+        let middle_hz: f64 = (CONSOLE_PULSE_HZ * CONSOLE_FRENZY_PULSE_HZ).sqrt();
+        assert!((half_hz - middle_hz).abs() < HZ_TOLERANCE, "{half_hz}");
+        assert!((get_console_pulse_hz(1.0) - CONSOLE_FRENZY_PULSE_HZ).abs() < HZ_TOLERANCE);
+        let rates_hz: Vec<f64> = (0..=RAMP_STEP_COUNT)
+            .map(|k| get_console_pulse_hz(k as f64 / RAMP_STEP_COUNT as f64))
+            .collect();
+        let rises_hz: Vec<f64> = rates_hz.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(
+            rises_hz.iter().all(|&rise_hz| rise_hz > 0.0),
+            "{rates_hz:?}"
+        );
+        assert!(rises_hz.windows(2).all(|w| w[1] > w[0]), "{rates_hz:?}");
+    }
+
+    #[test]
+    #[should_panic(expected = "disabling_frac must be between 0 and 1")]
+    fn progress_past_done_fails() {
+        get_console_pulse_hz(PAST_DONE_FRAC);
+    }
+
+    #[test]
+    fn the_pulse_eases_back_down() {
+        let frenzied: ConsolePulse =
+            ConsolePulse::Resting().advance(CONSOLE_FRENZY_PULSE_HZ, STEP_S);
+        assert_eq!(frenzied.hz, CONSOLE_FRENZY_PULSE_HZ);
+        let kept: ConsolePulse = frenzied.advance(CONSOLE_FRENZY_PULSE_HZ, 2.0 * STEP_S);
+        assert_eq!(kept.hz, CONSOLE_FRENZY_PULSE_HZ);
+        let mut pulse: ConsolePulse = kept;
+        let rates_hz: Vec<f64> = (1..=EASE_STEP_COUNT)
+            .map(|k| {
+                pulse = pulse.advance(CONSOLE_PULSE_HZ, kept.time_s + k as f64 * STEP_S);
+                pulse.hz
+            })
+            .collect();
+        let gap_hz: f64 = CONSOLE_FRENZY_PULSE_HZ - CONSOLE_PULSE_HZ;
+        assert!(rates_hz[0] > CONSOLE_PULSE_HZ + MIN_KEPT_AFTER_A_FRAME_FRAC * gap_hz);
+        assert!(
+            rates_hz
+                .windows(2)
+                .all(|w| w[1] < w[0] && w[1] > CONSOLE_PULSE_HZ),
+            "{rates_hz:?}"
+        );
+        let last_hz: f64 = rates_hz[EASE_STEP_COUNT - 1];
+        assert!(last_hz < CONSOLE_PULSE_HZ + MAX_LEFT_AFTER_A_SECOND_FRAC * gap_hz);
+    }
+
+    #[test]
+    fn the_light_never_jumps() {
+        let ramp_step_count: usize = (HOLD_S / FINE_STEP_S) as usize;
+        let steady_step_count: usize = (STEADY_S / FINE_STEP_S) as usize;
+        let max_step_frac: f64 = f64::from(CONSOLE_PULSE_MAX_FRAC - CONSOLE_PULSE_MIN_FRAC)
+            * std::f64::consts::PI
+            * CONSOLE_FRENZY_PULSE_HZ
+            * FINE_STEP_S
+            + LEVEL_TOLERANCE_FRAC;
+        let mut pulse: ConsolePulse = ConsolePulse::Resting();
+        let mut level_frac: f32 = pulse.get_level_frac();
+        let mut has_dropped: bool = false;
+        for k in 1..=steady_step_count + ramp_step_count + steady_step_count {
+            let held_count: usize = k.saturating_sub(steady_step_count);
+            let target_hz: f64 = if held_count == 0 || held_count > ramp_step_count {
+                CONSOLE_PULSE_HZ
+            } else {
+                get_console_pulse_hz(held_count as f64 / ramp_step_count as f64)
+            };
+            let previous_hz: f64 = pulse.hz;
+            pulse = pulse.advance(target_hz, k as f64 * FINE_STEP_S);
+            has_dropped |= target_hz < previous_hz;
+            let next_frac: f32 = pulse.get_level_frac();
+            let step_frac: f64 = f64::from((next_frac - level_frac).abs());
+            assert!(step_frac <= max_step_frac, "step {k}: {step_frac}");
+            level_frac = next_frac;
+        }
+        assert!(has_dropped);
+    }
+
+    #[test]
+    fn consoles_pulse_by_their_own_progress() {
+        let mut world: VoxelWorld = load_lunar_surface();
+        assert!(world.consoles.len() > OFF_CONSOLE);
+        let mut disabling_fracs: [f64; MAX_CONSOLE_COUNT] = [0.0; MAX_CONSOLE_COUNT];
+        disabling_fracs[HELD_CONSOLE] = 1.0;
+        world.light_consoles(1 << OFF_CONSOLE, &disabling_fracs, STEP_S);
+        let rates_hz: Vec<f64> = world.consoles.iter().map(|c| c.pulse.hz).collect();
+        assert_eq!(rates_hz[0], CONSOLE_PULSE_HZ);
+        assert_eq!(rates_hz[HELD_CONSOLE], CONSOLE_FRENZY_PULSE_HZ);
+        for (i, console) in world.consoles.iter().enumerate() {
+            let entry: [f32; 4] = world.palette[usize::from(console.material)];
+            let (level_frac, lit_frac) = if i == OFF_CONSOLE {
+                (CONSOLE_OFF_FRAC, 0.0)
+            } else {
+                (console.pulse.get_level_frac(), 1.0)
+            };
+            assert_eq!(
+                entry,
+                [
+                    console.color[0] * level_frac,
+                    console.color[1] * level_frac,
+                    console.color[2] * level_frac,
+                    lit_frac
+                ]
+            );
+        }
     }
 }
