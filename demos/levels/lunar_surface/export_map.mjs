@@ -25,6 +25,7 @@ const SUN_COLOR = [1.0, 0.96, 0.88];
 const LIGHTING = { model: 'lunar_lambert', lommel_seeliger_frac: 0.7, ambient: 0.11, earthshine: 0.08, sun_intensity: 1.45, shadows: true };
 const SPACE_COLOR = [0, 0, 0];
 const TEAM_NAMES = ['blue', 'red'];
+const ZONE_WALLS = { height_m: 6, opacity_frac: 0.25 };
 const TERRAIN = { kind: 'crater', rim_u_m: 190, rim_v_m: 90, wall_m: 30, rim_height_m: 22, relief_m: 2.5, relief_wavelength_m: 18, seed: 1 };
 
 /**
@@ -126,7 +127,8 @@ function make_map(level) {
         { team: 'middle', u_min_m: -level.ZONE_EDGE_U_M, u_max_m: level.ZONE_EDGE_U_M },
         { team: 'red', u_min_m: level.ZONE_EDGE_U_M, u_max_m: null }
       ],
-      boundary: { kind: 'fermi_ellipse', u_m: level.BOUNDARY_U_M, v_m: level.BOUNDARY_V_M }
+      boundary: { kind: 'fermi_ellipse', u_m: level.BOUNDARY_U_M, v_m: level.BOUNDARY_V_M },
+      zone_walls: ZONE_WALLS
     },
     appearance: { style: 'lunar', lighting: LIGHTING }
   };

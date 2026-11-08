@@ -49,6 +49,7 @@ mod voxel_clearance;
 mod voxel_textures;
 mod voxel_world;
 mod world;
+mod zone_walls;
 
 use std::error::Error;
 use std::fs;

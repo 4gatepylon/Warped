@@ -4,8 +4,8 @@
  * per pixel, as the Lunar Surface level's WebGL fragment shader does (`demos/levels/lunar_surface/index.html`):
  * straight geodesic chords between warp objects, kick–drift–kick steps inside their reach, a voxel walk through each
  * structure in its Klein coordinates, the ground's folded {4,5} tiling, lunar-Lambert light with soft sun shadows, lamps,
- * earthshine, a thin haze, laser beams, the dust of shots into the ground, stars, a planet, spaceships flying over
- * and bloom. Everything here belongs to the `lunar` appearance style.
+ * earthshine, a thin haze, laser beams, the dust of shots into the ground, the zone walls, stars, a planet, spaceships
+ * flying over and bloom. Everything here belongs to the `lunar` appearance style.
  * @par Example
  * @code
  * dispatched by render_voxel.rs, one thread per pixel of the render size.
@@ -136,6 +136,14 @@ constant float EJECTA_OUTER_M = 80.0;
 constant float ZONE_STRIP_M = 0.8;
 constant float ZONE_TINT_GAIN = 1.5;
 constant float ZONE_TINT_FRAC = 0.07;
+constant int MAX_ZONE_WALL_COUNT = __MAX_ZONE_WALL_COUNT__;
+constant float ZONE_WALL_BRIGHTNESS = 0.8;
+constant float ZONE_WALL_FOOT_M = 0.4;
+constant float ZONE_WALL_BODY_FRAC = 0.6;
+constant float ZONE_WALL_TOP_FADE_FRAC = 0.4;
+constant float ZONE_WALL_SOFT_TOP_FRAC = 0.25;
+constant float ZONE_WALL_END_M = 4.0;
+constant float ZONE_WALL_MAX_SLANT = 3.0;
 constant float BOUNDARY_STRIP_FRAC = 0.04;
 constant float CELL_HASH_SCALE = 4096.0;
 constant float HASH_SHRINK = 0.001;
@@ -316,7 +324,8 @@ struct Spaceship {
 
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
- * regions, flashlight, the spaceships and the dust (how many bursts and particles), as `render_voxel.rs` writes them.
+ * regions, flashlight, the spaceships, the dust (how many bursts and particles) and the zone walls (`zone_walls.rs`'s
+ * `to_gpu`), as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -359,6 +368,9 @@ struct VoxelUniforms {
     float4 flashlight;
     Spaceship spaceships[SPACESHIP_COUNT];
     int4 dust_counts;
+    float4 zone_walls[MAX_ZONE_WALL_COUNT];
+    float4 zone_wall_look;
+    int4 zone_wall_counts;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -473,7 +485,7 @@ struct Hit {
  * origin, with w = 0), the ray's unit tangent there, the hit's grid point in its structure with the distance
  * travelled, the hit cell with its material (`MAT_GROUND` for the ground), the outcome with the structure (-1 for the
  * ground), face axis and laser team (1 for red), the face's side with the glass count and the laser's core and
- * halo, and the dust in front of it (`scan_dust`).
+ * halo, and the dust and zone walls in front of it (`scan_dust`, `scan_zone_walls`).
  */
 struct VoxelRayEnd {
     float4 point;
@@ -1175,7 +1187,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     if (u.has_regions != 0) {
         float zone_edge_u_m = u.regions.x, boundary_u_m = u.regions.y, boundary_v_m = u.regions.z;
         if (abs(u_m) > zone_edge_u_m) albedo *= mix(float3(1.0), (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_TINT_GAIN, ZONE_TINT_FRAC);
-        if (abs(abs(u_m) - zone_edge_u_m) < ZONE_STRIP_M && abs(v_m) < boundary_v_m) glow = (u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
+        if (u.zone_wall_counts.x == 0 && abs(abs(u_m) - zone_edge_u_m) < ZONE_STRIP_M && abs(v_m) < boundary_v_m) glow =(u_m < 0.0 ? BLUE_COLOR : RED_COLOR) * ZONE_STRIP_GLOW;
         float e = (u_m / boundary_u_m) * (u_m / boundary_u_m) + (v_m / boundary_v_m) * (v_m / boundary_v_m);
         if (has_terrain) {
         } else if (e > 1.0) {
@@ -1577,6 +1589,41 @@ static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end
 }
 
 /**
+ * @brief `scan_zone_walls` adds the zone walls that the chord from x along v crosses before `s_end` (`travelled` from
+ * the eye) to `dust`, as faint glowing sheets in their team's colour. A wall is the plane straight above its zone's
+ * edge (`zone_walls.rs`), (n_z, -n_w) in `zone_walls[i].xy`, which the chord crosses where tanh s = -⟨x, n⟩ / ⟨v, n⟩.
+ * Its opacity there is the map's at the ground, falling to about `ZONE_WALL_BODY_FRAC` of it within `ZONE_WALL_FOOT_M`
+ * and smoothly on to nothing at the wall's height above the ground, and fading out over the last `ZONE_WALL_END_M` before the
+ * boundary; its optical depth grows as the chord grazes it (up to `ZONE_WALL_MAX_SLANT` times) and thins in the haze.
+ * @par Example
+ * @code
+ * scan_zone_walls(scene, x, v, s, t, dust);
+ * @endcode
+ */
+static void scan_zone_walls(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
+    constant VoxelUniforms &u = scene.u;
+    float r = u.curvature_radius_m;
+    float4 look = u.zone_wall_look;
+    for (int i = 0; i < u.zone_wall_counts.x; i++) {
+        float4 wall = u.zone_walls[i];
+        float a = x.z * wall.x + x.w * wall.y, b = v.z * wall.x + v.w * wall.y;
+        if (a * b >= 0.0 || abs(a) >= abs(b)) continue;
+        float s = atanh(-a / b);
+        if (s >= s_end) continue;
+        float3 f = get_fermi(geodesic_point(x, v, s), r);
+        float v_end_m = look.w > 0.0 ? look.w * sqrt(max(1.0 - (wall.z / look.z) * (wall.z / look.z), 0.0)) : NO_HIT_S;
+        float above_m = max(f.z - (u.has_terrain != 0 ? terrain_height_m(scene, wall.z, f.y) : 0.0), 0.0);
+        float height_frac = above_m / look.x;
+        float profile = mix(ZONE_WALL_BODY_FRAC * (1.0 - ZONE_WALL_TOP_FADE_FRAC * height_frac), 1.0, exp(-above_m / ZONE_WALL_FOOT_M))
+                      * (1.0 - smoothstep(1.0 - ZONE_WALL_SOFT_TOP_FRAC, 1.0, height_frac));
+        float haze_frac = 1.0 - exp(-max((travelled + s) * r - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
+        float opacity = look.y * profile * smoothstep(0.0, ZONE_WALL_END_M, v_end_m - abs(f.y)) * (1.0 - HAZE_MAX_FRAC * haze_frac);
+        float depth = -log(1.0 - opacity) * min(rsqrt(max(b * b - a * a, TINY)), ZONE_WALL_MAX_SLANT);
+        dust += float4(to_linear(wall.w > HALF_KIND ? RED_COLOR : BLUE_COLOR) * ZONE_WALL_BRIGHTNESS * depth, depth);
+    }
+}
+
+/**
  * @brief `back_to_reach` moves a ray that has just left warp w's reach (by up to one step) back along its straight line
  * to the reach's sphere, so that an escaping ray's direction is carried to the eye from where its bending ended rather
  * than from wherever its last step happened to end, which jumps between neighbouring rays.
@@ -1644,6 +1691,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             if (glass_s < hit.s) glass += 1.0;
             if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
+            if (u.zone_wall_counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (entering < 0) {
                 if (last_warp >= 0) back_to_reach(scene, last_warp, x, v);
@@ -1667,6 +1715,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         if (glass_s < hit.s) glass += 1.0;
         if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, team);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
+        if (u.zone_wall_counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
         float4 xn = geodesic_point(x, v, ds), vn = geodesic_tangent(x, v, ds);
         x = xn * rsqrt(-mdot(xn, xn));
@@ -1724,7 +1773,7 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
 
 /**
  * @brief `shade_ray_end` gives a ray's final colour from where it ended: the lit surface or the sky, hazed, tinted by
- * the glass it crossed, behind the dust in front of it (as thick as its optical depth), with the laser's glow and
+ * the glass it crossed, behind the dust and zone walls in front of it (as thick as their optical depth), with the laser's glow and
  * the highlight roll-off; a lost ray is black.
  * @par Example
  * @code

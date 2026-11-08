@@ -33,6 +33,7 @@ use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
 use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld, clip_beam_to_map};
+use crate::zone_walls::MAX_ZONE_WALL_COUNT;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -102,6 +103,9 @@ pub struct VoxelUniforms {
     pub flashlight: [f32; 4],
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
+    pub zone_walls: [[f32; 4]; MAX_ZONE_WALL_COUNT],
+    pub zone_wall_look: [f32; 4],
+    pub zone_wall_counts: [i32; 4],
 }
 
 const _: () = assert!(
@@ -368,6 +372,10 @@ impl VoxelFrame {
             })
             .collect();
         let (dust_bursts, dust_particles) = pack_dust(dust);
+        let (zone_walls, zone_wall_look, zone_wall_counts) = world.zone_walls.as_ref().map_or(
+            ([[0.0; 4]; MAX_ZONE_WALL_COUNT], [0.0; 4], [0; 4]),
+            |walls| walls.to_gpu(r),
+        );
         let tan_half_fov: f64 = HALF_FOV_RAD.tan();
         let (planet, e1, e2) = match world.planet {
             Some((d, radius_rad)) => {
@@ -454,6 +462,9 @@ impl VoxelFrame {
             }),
             spaceships: get_spaceships(world.sky_time_s),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
+            zone_walls,
+            zone_wall_look,
+            zone_wall_counts,
         };
         assert_eq!(
             world.palette.len(),
@@ -639,6 +650,7 @@ impl VoxelGpu {
             )
             .replace("__BLOOM_LEVELS__", &BLOOM_LEVELS.to_string())
             .replace("__SPACESHIP_COUNT__", &SPACESHIP_COUNT.to_string())
+            .replace("__MAX_ZONE_WALL_COUNT__", &MAX_ZONE_WALL_COUNT.to_string())
             .replace(
                 "__BYTES_PER_VOXEL_UNIFORMS__",
                 &std::mem::size_of::<VoxelUniforms>().to_string(),

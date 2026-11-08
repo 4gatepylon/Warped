@@ -213,12 +213,22 @@ pub struct Boundary {
     pub v_m: f64,
 }
 
-/// `Regions` is the map's zones and boundary.
+/// `ZoneWalls` is how the walls along the team zones' edges look: their height above the ground
+/// and their opacity at the ground.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub struct ZoneWalls {
+    pub height_m: f64,
+    pub opacity_frac: f64,
+}
+
+/// `Regions` is the map's zones, boundary and zone walls.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Regions {
     pub zones: Option<Vec<Zone>>,
     pub boundary: Option<Boundary>,
+    pub zone_walls: Option<ZoneWalls>,
 }
 
 /// `Lighting` is the lighting model and its numbers (those of the model; the others are absent).

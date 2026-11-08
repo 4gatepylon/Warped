@@ -7902,6 +7902,10 @@
    "kind": "fermi_ellipse",
    "u_m": 128,
    "v_m": 72
+  },
+  "zone_walls": {
+   "height_m": 6,
+   "opacity_frac": 0.25
   }
  },
  "appearance": {
