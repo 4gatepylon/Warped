@@ -68,9 +68,10 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
 - Up to 8 players. A laser that reaches another player removes them: their view darkens, says "YOU DIED" with a
   countdown, and they come back at their spawn 3 seconds later.
-- Joining opens a lobby that shows how many players each team has: press `1` to join blue or `2` to join red. You
-  keep your team when you come back after being hit. Lasers hit teammates too, but you can only turn off the other
-  team's consoles. Bots join whichever team has fewer players.
+- Joining opens a lobby that says CONNECTING until the server answers, then CONNECTED with how many players each
+  team has: press `1` to join blue or `2` to join red. You keep your team when you come back after being hit. Lasers
+  hit teammates too, but you can only turn off the other team's consoles. Bots join whichever team has fewer
+  players.
 
 To win on Lunar Surface, turn off all three of the other team's consoles, the pulsing block beside each of its three
 pylons (one near its spawn, one on each flank; a red pylon is past the wormhole on the ridge). Stand within 3 m, look
