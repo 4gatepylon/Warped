@@ -22,13 +22,14 @@ use sdl3::event::Event;
 use serde_json::json;
 
 use super::{
-    Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, Gun, MS_PER_S, OverlayText, Renderer,
+    Arguments, BANNER_HEIGHT_FRAC, MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX, PLAYER_SETTINGS_HOME_PATH, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, Gun, MS_PER_S, OverlayText, Renderer,
     RendererKind, Result, WINDOW_TITLE, find_lan_address, get_crosshair_rects, get_lobby_lines, get_server_address,
     load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
 };
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::city_world::{CityInput, CityPlayer, CityWorld, Shot, ShotHit, Side, Target, get_up};
 use crate::key_bindings::{self, Action, KeyBindings};
+use crate::menu;
 use crate::net;
 use crate::render_city::{CityFrame, CityScene, build_scene, push_beam, push_box, push_mesh};
 use crate::render_metal::{self, FrameData};
@@ -43,6 +44,13 @@ const BEAM_WIDTH_M: f64 = 0.06;
 const AVATAR_HEIGHT_M: f64 = 1.8;
 const TEAM_COLORS: [[f32; 4]; 2] = [[0.3, 0.55, 1.0, 1.0], [1.0, 0.3, 0.25, 1.0]];
 const TEAM_TINTS: [[f32; 3]; 2] = [[0.55, 0.8, 1.5], [1.5, 0.6, 0.5]];
+const MINIMAP_RADIUS_FRAC: f64 = 0.12;
+const MINIMAP_MARGIN_FRAC: f64 = 0.03;
+const MINIMAP_CONSOLE_FRAC: f64 = 0.008;
+const MINIMAP_DOT_FRAC: f64 = 0.006;
+const MINIMAP_BACKGROUND_COLOR: [f32; 4] = [0.05, 0.05, 0.08, 0.55];
+const MINIMAP_OFF_COLOR: [f32; 4] = [0.25, 0.25, 0.28, 0.9];
+const MINIMAP_SELF_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 const OFF_COLOR: [f32; 4] = [0.1, 0.1, 0.12, 0.0];
 const PULSE_RAD_PER_S: f64 = 12.0;
 const RUN_M_PER_S: f64 = 6.0;
@@ -496,6 +504,8 @@ struct CitySession {
     body: AvatarModel,
     settings: ServerSettings,
     player_settings: PerPlayerSettings,
+    player_settings_path: Option<PathBuf>,
+    menu: Option<menu::Menu>,
     client: net::Client,
     server: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
     player: CityPlayer,
@@ -536,9 +546,13 @@ impl CitySession {
     fn New(arguments: &Arguments) -> Result<CitySession> {
         let world: CityWorld = CityWorld::Builtin()?;
         let settings: ServerSettings = load_settings(arguments)?;
-        let player_settings: PerPlayerSettings = match &arguments.player_settings {
-            Some(path) => PerPlayerSettings::Load(path)?,
-            None => PerPlayerSettings::Builtin(),
+        let player_settings_path: Option<PathBuf> = arguments
+            .player_settings
+            .clone()
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(PLAYER_SETTINGS_HOME_PATH)));
+        let player_settings: PerPlayerSettings = match &player_settings_path {
+            Some(path) if arguments.player_settings.is_some() || path.exists() => PerPlayerSettings::Load(path)?,
+            _ => PerPlayerSettings::Builtin(),
         };
         let password: Vec<u8> = net::read_game_password(arguments.game_password_file.as_deref())?;
         let (server, address) = match &arguments.join {
@@ -589,6 +603,8 @@ impl CitySession {
             hud: (0.0, 0, 0.0),
             is_aiming: false,
             phase_ms: Vec::new(),
+            player_settings_path,
+            menu: None,
             gun: Gun::Laser,
             rifle_heat_frac: 0.0,
             is_overheated: false,
@@ -747,7 +763,7 @@ impl CitySession {
                 wants_shot = out.is_shooting;
                 console = out.console.and_then(|index| self.find_console(Some(index)));
             }
-        } else if self.is_spawned {
+        } else if self.is_spawned && self.menu.is_none() {
             let is = |action: Action| held.contains(&action);
             let axis = |plus: Action, minus: Action| f64::from(u8::from(is(plus))) - f64::from(u8::from(is(minus)));
             input.forward_frac = axis(Action::MoveForward, Action::MoveBack);
@@ -1028,16 +1044,19 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         );
         let frame: CityFrame = session.pack(render_px);
         lap(2);
-        let text: Option<OverlayText> = session.get_banner_lines().map(|[title, detail]| OverlayText {
+        let text: Option<OverlayText> = get_menu_text(&session).or_else(|| session.get_banner_lines().map(|[title, detail]| OverlayText {
             lines: vec![(title, true), (detail, false)],
             mask_px: DEATH_MASK_PX,
             height_frac: BANNER_HEIGHT_FRAC,
             is_centered: true,
             dim_frac: if session.respawn_in_s.is_some() { DEATH_DIM_FRAC } else { 0.0 },
             picture: None,
-        });
+        }));
         let mask: Option<Vec<u8>> = text.as_ref().map(make_text_mask).transpose()?;
-        let rects: Vec<render_metal::OverlayRect> = if session.is_spawned { get_crosshair_rects(window_px) } else { Vec::new() };
+        let mut rects: Vec<render_metal::OverlayRect> = if session.is_spawned { get_crosshair_rects(window_px) } else { Vec::new() };
+        if session.is_spawned && session.menu.is_none() && session.player_settings.minimap.is_shown {
+            rects.extend(get_minimap_rects(&session, window_px));
+        }
         let wand = session.is_spawned.then(|| {
             let recoil_frac: f64 = session.recoil_left_s / RECOIL_S;
             (make_wand(session.run_frac, session.step_phase_rad, recoil_frac, session.get_team(), session.gun, (0.0, 0.0)), session.gun.get_model())
@@ -1098,7 +1117,15 @@ fn handle_event(session: &mut CitySession, event: Event, window: &sdl3::video::W
         return Ok(true);
     };
     let is = |action: Action| session.player_settings.keys.matches(action, control);
-    if is(Action::ReleaseMouse) || is(Action::OpenMenu) {
+    if session.menu.is_some() {
+        if is(Action::OpenMenu) {
+            session.menu = None;
+        } else {
+            handle_menu_control(session, control);
+        }
+    } else if is(Action::OpenMenu) {
+        session.menu = Some(menu::Menu::New());
+    } else if is(Action::ReleaseMouse) {
         session.is_captured = false;
         mouse.set_relative_mouse_mode(window, false);
     } else if session.client.is_in_lobby() && (is(Action::JoinBlue) || is(Action::JoinRed)) {
@@ -1119,6 +1146,103 @@ fn handle_event(session: &mut CitySession, event: Event, window: &sdl3::video::W
         session.render_scale = (session.render_scale + RENDER_SCALE_STEP).min(1.0);
     }
     Ok(true)
+}
+
+/// `handle_menu_control` passes a pressed key to the open menu: it changes a setting, moves, closes
+/// the menu, or saves the player settings to `player_settings_path` and says where.
+///
+/// Example: `handle_menu_control(&mut session, control);`
+fn handle_menu_control(session: &mut CitySession, control: key_bindings::Control) {
+    let menu: &mut menu::Menu = session.menu.as_mut().expect("the menu is open");
+    match menu.handle(control, &mut session.player_settings) {
+        menu::MenuOutcome::Stay => {}
+        menu::MenuOutcome::Close => session.menu = None,
+        menu::MenuOutcome::Save => {
+            let message: String = match save_player_settings(session) {
+                Ok(path) => format!("Saved to {path}"),
+                Err(error) => format!("Couldn't save: {error}"),
+            };
+            session.menu.as_mut().expect("the menu is open").show_message(message);
+        }
+    }
+}
+
+/// `save_player_settings` writes the player settings to `player_settings_path` and gives the path.
+///
+/// Example: `let path: String = save_player_settings(&session)?;`
+fn save_player_settings(session: &CitySession) -> Result<String> {
+    let path: &PathBuf = session
+        .player_settings_path
+        .as_ref()
+        .ok_or("no file to save to: pass --player-settings (HOME isn't set)")?;
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    std::fs::write(path, session.player_settings.to_yaml())?;
+    Ok(path.display().to_string())
+}
+
+/// `get_menu_text` gives the open menu's page (settings, map, scores or credits) as overlay text,
+/// with the server's scoreboard on the scores page, or `None` while the menu is closed.
+///
+/// Example: `let text: Option<OverlayText> = get_menu_text(&session);`
+fn get_menu_text(session: &CitySession) -> Option<OverlayText> {
+    let menu: &menu::Menu = session.menu.as_ref()?;
+    let save_path: String = match &session.player_settings_path {
+        Some(path) => path.display().to_string(),
+        None => "nowhere: HOME isn't set, pass --player-settings".to_string(),
+    };
+    let scoreboard: menu::Scoreboard = match &session.client.scores {
+        None => menu::Scoreboard::Waiting,
+        Some(scores) => menu::Scoreboard::Scores { scores, own_id: session.client.welcomed_id },
+    };
+    Some(OverlayText {
+        lines: menu.get_lines(&session.player_settings, &save_path, scoreboard),
+        mask_px: MENU_MASK_PX,
+        height_frac: MENU_HEIGHT_FRAC,
+        is_centered: false,
+        dim_frac: MENU_DIM_FRAC,
+        picture: None,
+    })
+}
+
+/// `get_minimap_rects` draws the minimap in the window's top-right corner: the whole sphere
+/// unrolled around the player (straight ahead is up, the antipode is the rim), with consoles as
+/// squares in their team's colour (dark once off) and players as dots, the player in white.
+///
+/// Example: `rects.extend(get_minimap_rects(&session, window_px));`
+fn get_minimap_rects(session: &CitySession, window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> {
+    let (width_px, height_px): (f64, f64) = (f64::from(window_px.0), f64::from(window_px.1));
+    let radius_px: f64 = height_px * MINIMAP_RADIUS_FRAC;
+    let center_px: [f64; 2] = [width_px - radius_px - height_px * MINIMAP_MARGIN_FRAC, radius_px + height_px * MINIMAP_MARGIN_FRAC];
+    let outward: DVec3 = session.player.feet.normalize();
+    let right: DVec3 = session.player.body.x_axis;
+    let forward: DVec3 = -session.player.body.z_axis;
+    let place = |point: DVec3| -> [f64; 2] {
+        let direction: DVec3 = point.normalize();
+        let cos_angle: f64 = outward.dot(direction).clamp(-1.0, 1.0);
+        let tangent: DVec3 = (direction - outward * cos_angle).normalize_or_zero();
+        let r_px: f64 = radius_px * cos_angle.acos() / std::f64::consts::PI;
+        [center_px[0] + tangent.dot(right) * r_px, center_px[1] - tangent.dot(forward) * r_px]
+    };
+    let rect = |at_px: [f64; 2], half_px: f64, color: [f32; 4]| render_metal::OverlayRect {
+        min_frac: [((at_px[0] - half_px) / width_px) as f32, ((at_px[1] - half_px) / height_px) as f32],
+        max_frac: [((at_px[0] + half_px) / width_px) as f32, ((at_px[1] + half_px) / height_px) as f32],
+        color,
+        style: render_metal::FLAT_RECT_STYLE,
+        pulse: render_metal::NO_RECT_PULSE,
+    };
+    let mut rects: Vec<render_metal::OverlayRect> = vec![rect(center_px, radius_px, MINIMAP_BACKGROUND_COLOR)];
+    for console in &session.world.consoles {
+        let is_off: bool = session.client.game.off_mask >> console.index & 1 == 1;
+        let color: [f32; 4] = if is_off { MINIMAP_OFF_COLOR } else { TEAM_COLORS[console.team as usize] };
+        rects.push(rect(place(session.world.get_console_center(console)), height_px * MINIMAP_CONSOLE_FRAC, color));
+    }
+    for player in session.client.players.iter().filter(|p| Some(p.id) != session.client.welcomed_id) {
+        rects.push(rect(place(player.frame.w_axis.truncate()), height_px * MINIMAP_DOT_FRAC, TEAM_COLORS[player.team as usize % 2]));
+    }
+    rects.push(rect(center_px, height_px * MINIMAP_DOT_FRAC, MINIMAP_SELF_COLOR));
+    rects
 }
 
 /// `print_route_report` prints the route's numbers: frame times, GPU times, the winner and shots.
