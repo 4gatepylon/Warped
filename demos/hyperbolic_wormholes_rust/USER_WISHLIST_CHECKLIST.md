@@ -14,7 +14,7 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly. The user asked for the loading screen "in the same style as the progress
   bar while disabling a pylon". Claimed by Claude Code (worktree `Warped-loading`), branch `claude/loading-screen`,
-  2026-11-08.
+  2026-11-08. Loading screen: #292; saying when the server is connected is not done yet.
 - [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
   - **Where the work is** (for any agent picking it up): worktree

@@ -167,6 +167,9 @@ const ENERGY_PULSE_RGB: [f32; 3] = [0.8, 0.94, 1.0];
 const DISABLE_BAR_MIN_FRAC: [f32; 2] = [0.4, 0.62];
 const DISABLE_BAR_SIZE_FRAC: [f32; 2] = [0.2, 0.02];
 const DISABLE_BAR_RGB: [f32; 3] = [1.0, 0.85, 0.3];
+const LOADING_DIM_FRAC: f32 = 1.0;
+const LOADING_TITLE: &str = "LOADING";
+const LOADING_DONE_LABEL: &str = "ready";
 const PERCENT_PER_FRAC: f64 = 100.0;
 const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
@@ -4259,6 +4262,54 @@ fn play_on_canvas(
     }
 }
 
+/// `draw_loading_screen` draws the loading screen on a window's layer: black, the banner
+/// `LOADING_TITLE` over `label` (what is loading), and a bar in the pylon-disabling bar's place and
+/// look, filled to `done_frac`.
+///
+/// Example: `draw_loading_screen(metal, layer, 0.5, "revolver")?;`
+fn draw_loading_screen(
+    metal: &mut render_metal::MetalRenderer,
+    layer: &CAMetalLayer,
+    done_frac: f32,
+    label: &str,
+) -> Result<()> {
+    let text: OverlayText = OverlayText {
+        lines: vec![
+            (LOADING_TITLE.to_string(), true),
+            (label.to_string(), false),
+        ],
+        mask_px: DEATH_MASK_PX,
+        height_frac: BANNER_HEIGHT_FRAC,
+        is_centered: true,
+        dim_frac: LOADING_DIM_FRAC,
+        picture: None,
+    };
+    let mask: Vec<u8> = make_text_mask(&text)?;
+    let rects: Vec<render_metal::OverlayRect> = hud_bars::make_progress_bar(
+        DISABLE_BAR_MIN_FRAC,
+        DISABLE_BAR_SIZE_FRAC,
+        done_frac,
+        DISABLE_BAR_RGB,
+    );
+    metal.render_overlay_to_layer(
+        layer,
+        &render_metal::Overlay {
+            dim_frac: text.dim_frac,
+            mask: Some((&mask, (text.mask_px.0 as usize, text.mask_px.1 as usize))),
+            rects: &rects,
+            wand: None,
+            blur_frac: 0.0,
+            hit: render_metal::HitEffect::default(),
+            mask_height_frac: text.height_frac,
+            picture: None,
+            stretch_frac: 0.0,
+            minimap: None,
+            blueshift_frac: 0.0,
+        },
+    )?;
+    Ok(())
+}
+
 /// `play_on_layer` runs the window with Metal presenting straight to the window's `CAMetalLayer`:
 /// no pixels go through the CPU, MetalFX upscales the ray-traced image to the window's size, and
 /// the HUD is shown in the window's title, since SDL's renderer can't draw on the same layer.
@@ -4290,6 +4341,9 @@ fn play_on_layer(
     layer.setFramebufferOnly(false);
     let mouse: sdl3::mouse::MouseUtil = sdl.mouse();
     let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
+    let loading_steps: &[render_metal::LoadingStep] =
+        render_metal::get_loading_steps(session.voxel.is_some());
+    let mut loading_step_index: usize = 0;
     let result: Result<()> = (|| loop {
         for event in event_pump.poll_iter() {
             if !session.handle_event(event, &window, &mouse) {
@@ -4305,6 +4359,18 @@ fn play_on_layer(
             width: f64::from(window_px.0),
             height: f64::from(window_px.1),
         });
+        if loading_step_index <= loading_steps.len() {
+            let step: Option<render_metal::LoadingStep> =
+                loading_steps.get(loading_step_index).copied();
+            let done_frac: f32 = loading_step_index as f32 / loading_steps.len() as f32;
+            let label: &str = step.map_or(LOADING_DONE_LABEL, render_metal::LoadingStep::get_label);
+            draw_loading_screen(metal, layer, done_frac, label)?;
+            if let Some(step) = step {
+                metal.load(step)?;
+            }
+            loading_step_index += 1;
+            continue;
+        }
         let render_px: (u32, u32) = session.get_render_size(window_px);
         let render_start: Instant = Instant::now();
         let mut packed: PackedFrame = session.pack(render_px);
