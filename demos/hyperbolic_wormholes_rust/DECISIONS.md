@@ -1479,7 +1479,7 @@
 - **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
   room for it, and costs at most 15 more checks, only on a blocked step.
 
-### D96. Every other player on the menu's map page (W-90)
+### D97. Every other player on the menu's map page (W-90)
 
 - **Choice:** the MAP page shows every other player in the game as a dot in their team's colour, 4 px across the
   picture's radius (yours is 5 px), ringed in dark grey (yours is ringed in white and points the way you face). It

@@ -11,6 +11,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
+  (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
   itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
