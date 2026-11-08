@@ -331,11 +331,13 @@ Every key here is the default. Each player can rebind any action, in the menu or
 
 The screens a player meets, in order:
 
-- **Title** (the Mac app, opened without flags): a list of the online games on the server the app was built for,
-  joining a server by the address the player types (its IP and port, remembered for next time), joining a game on
-  this Wi-Fi, and Quit, each game on either map. A game on a server asks once for its password (empty for a
-  server without one) and keeps it; a server that refuses it, or runs another version, stops the window with a
-  pop-up saying why, and the title screen comes back.
+- **Title** (the Mac app, opened without flags): the downloadable app is the match (W-126): "Play online: Warped
+  match" for the match server the app was built for, "Join a match by its address" (its IP and port, remembered for
+  next time), and Quit. Either asks once for the game's password (empty for a server without one) and keeps it; a
+  server that refuses it, or runs another version, stops the window with a pop-up saying why, and the title screen
+  comes back. The match window then asks for a team (1 blue, 2 red) and opens each round's level in its own window.
+  The Lunar Surface demo alone has the older title: its online games, joining a server by its address, joining a
+  game on this Wi-Fi, and Quit.
 - **Loading:** before the first frame, a black screen titled LOADING names what is loading (the surface textures,
   the shaders, each gun) over a bar like the console bar, filling as it goes.
 - **Lobby** (the team screen): it says CONNECTING until the server answers, then CONNECTED with how many players

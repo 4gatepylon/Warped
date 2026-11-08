@@ -101,6 +101,8 @@ package-mac-app:
 	cp -R $(FPS_DEMO_ASSETS)/textures $(APP)/Contents/Resources/assets/textures
 	cp -R $(FPS_DEMO_ASSETS)/models/bolt_action_rifle_7_62 $(APP)/Contents/Resources/assets/models/
 	rsync -a --exclude teal_robot $(MAP_MODELS)/ $(APP)/Contents/Resources/models/
+	mkdir -p $(APP)/Contents/Resources/snow_planet_rust
+	cp -R map_pictures $(APP)/Contents/Resources/snow_planet_rust/
 	cp app/how_to_open.txt "$(APP_FOLDER)/How to open Warped.txt"
 	codesign --force --deep --sign - $(APP)
 	ditto -c -k --keepParent $(APP_FOLDER) $(APP_ZIP).partial

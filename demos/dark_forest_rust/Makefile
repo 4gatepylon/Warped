@@ -7,6 +7,10 @@
 #     make run-dark-forest BOT_COUNT=<0..6>: build and play alone against AI robots.
 #     make serve-game PORT=<port>: run a game server without a window until killed.
 #     make join-game SERVER=<address> PORT=<port> TEAM=<blue|red>: join a game server.
+#     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), for the
+#         online match's server bundle (W-126).
+#     make package-mac-app: build Warped.app (the window and every file it reads) for the online match's app;
+#         run make download-assets first.
 #     make bench-dark-forest BENCH_SECONDS=<s>: walk the vertical route full screen and write frame times to
 #         .artifacts/bench_dark_forest/<run_id>/.
 #     make bench-views BENCH_SECONDS=<s>: hold each fixed view for BENCH_SECONDS full screen and write frame times
@@ -28,6 +32,13 @@ SERVER ?= 127.0.0.1
 TEAM ?=
 TEAM_FLAG = $(if $(TEAM),--team $(TEAM),)
 RUN_ID = $(shell date -u +%Y%m%d-%H%M%S)
+SERVER_TARGET := x86_64-unknown-linux-musl
+SERVER_BUNDLE := .build/server_bundle.tar.gz
+APP_FOLDER := .build/Warped
+APP := $(APP_FOLDER)/Warped.app
+APP_RESOURCES := $(APP)/Contents/Resources
+FPS_DEMO_ASSETS := ../fps_demo/assets
+MAP_MODELS := ../../common/maps/models
 BENCH_COMMAND = ./.build/release/dark-forest --play-route --fullscreen --show-frame-time \
   --benchmark-seconds $(BENCH_SECONDS) --bot-count $(BOT_COUNT)
 BENCH_VIEWS_COMMAND = ./.build/release/dark-forest --fullscreen --bench-views $(BENCH_SECONDS)
@@ -36,8 +47,8 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (frame-time logs, screenshot
   Recreating them means rerunning the benchmarks. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help download-assets run-dark-forest serve-game join-game bench-dark-forest bench-views export-map map-picture \
-  test fmt clean reset-artifacts
+.PHONY: help download-assets run-dark-forest serve-game join-game build-server-bundle package-mac-app bench-dark-forest \
+  bench-views export-map map-picture test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -45,6 +56,8 @@ help:
 	@echo "  make run-dark-forest BOT_COUNT=<0..6>         Build and play alone (default $(BOT_COUNT) robots)"
 	@echo "  make serve-game PORT=<port>                   Run a game server (default port $(PORT))"
 	@echo "  make join-game SERVER=<address> TEAM=<team>   Join a game server (default $(SERVER))"
+	@echo "  make build-server-bundle                      Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"
+	@echo "  make package-mac-app                          Build Warped.app for the online match (after download-assets)"
 	@echo "  make bench-dark-forest BENCH_SECONDS=<s>      Route benchmark into .artifacts/bench_dark_forest/"
 	@echo "  make bench-views BENCH_SECONDS=<s>            Fixed-view benchmark into .artifacts/bench_views/"
 	@echo "  make export-map                               Write common/maps/dark_forest/map.json"
@@ -58,6 +71,23 @@ help:
 
 download-assets:
 	cargo run --release --bin download-assets
+
+build-server-bundle:
+	rustup target add $(SERVER_TARGET)
+	cargo build --release --target $(SERVER_TARGET) --bin dark-forest-server
+	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(SERVER_TARGET)/release dark-forest-server
+	@echo "Server bundle: $(SERVER_BUNDLE)"
+
+package-mac-app:
+	cargo build --release --bin dark-forest
+	rm -rf .build/Warped
+	mkdir -p $(APP)/Contents/MacOS $(APP_RESOURCES)/assets/models $(APP_RESOURCES)/models $(APP_RESOURCES)/dark_forest_rust
+	cp .build/release/dark-forest $(APP)/Contents/MacOS/Warped
+	cp -R $(FPS_DEMO_ASSETS)/hdri $(APP_RESOURCES)/assets/
+	cp -R $(FPS_DEMO_ASSETS)/models/robot_expressive $(FPS_DEMO_ASSETS)/models/bolt_action_rifle_7_62 $(APP_RESOURCES)/assets/models/
+	cp -R $(MAP_MODELS)/scifi_beacon $(APP_RESOURCES)/models/
+	cp -R assets $(APP_RESOURCES)/dark_forest_rust/
+	@echo "App: $(APP) (without the Sketchfab revolver and arms, which may ship only built into a program: it shows the rifle)"
 
 run-dark-forest:
 	cargo run --release --bin dark-forest -- --bot-count $(BOT_COUNT)

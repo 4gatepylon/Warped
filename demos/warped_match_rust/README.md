@@ -67,10 +67,12 @@ rules.
 
 Each level is a program that the match runs once per round. `match_levels.yaml` says which
 program plays each level (`program: self` is this demo's binary, else a path from this folder)
-and its `--map`. A level program implements:
+and its `--map`; a level may also name a separate `server_program` for its server. A level program
+implements:
 
 ```text
-Server: <program> --serve --port <port> [--map <map>] --level-result-file <path> [server_args]
+Server: <server_program> --port <port> [--map <map>] --level-result-file <path> [--game-password-file <file>] [server_args]
+        (or, without a server_program: <program> --serve, then the same flags)
 ```
 
 When one team has turned off every console of the other team, the server writes `<path>` once,
@@ -79,7 +81,7 @@ does not start a new game after that; it keeps running (players see the win) unt
 server kills it.
 
 ```text
-Client: <program> --join <address> --port <port> [--map <map>] --team blue|red [client_args]
+Client: <program> --join <address> --port <port> [--map <map>] --team blue|red [--game-password-file <file>] [client_args]
 Bot:    <program> --join <address> --port <port> [--map <map>] --team <team> --bot --bot-objective consoles --exit-after-s <s> --label <label>
 ```
 
@@ -90,6 +92,47 @@ the hyperbolic demo, doesn't check a player's distance to a console).
 
 Ports: match server UDP 47850 (47851 reserved for its discovery, not used yet: join by
 address); each round's level server 47852, and this copy's level discovery 47853.
+
+The match server and its clients prove the game's password before the server sends its view:
+the client asks with a padded `hello`, the server answers with a cookie (a keyed hash of the
+client's address), and the client proves the password with a keyed hash of the cookie
+(`match_flow.rs`). A wrong password ends the client with exit code 3, as in the levels.
+
+## The online match (W-126)
+
+The cloud VM runs the match, and the downloadable app plays every level. `app/match_levels.yaml`
+is the levels file both ship with: its paths are relative to its own folder, which is the app's
+`Contents/Resources/` for `program` and `map_picture`, and the server bundle's root for
+`server_program`. Each side reads its own copy, and a client plays a round with its own level of
+the same `name`.
+
+- `make package-mac-app SERVER_ADDRESS=<ip>` builds `Warped.app`: this demo (Lunar Surface and the
+  match window) and, for each folder of `SHIPPED_LEVEL_FOLDERS`, that level's own `make
+  download-assets` (if it has one) and `make package-mac-app`, whose program becomes
+  `Contents/MacOS/<folder>` and whose `Contents/Resources/` merges into the app's. Its title screen
+  offers the online match at `<ip>:47850` and joining a match by its address.
+- `make build-server-bundle` builds the bundle for x86-64 Linux: `match_server` (the match without
+  a window, `src/bin/match_server.rs`), this demo's `wormholes_server`, each level's own `make
+  build-server-bundle` unpacked in `levels/<folder>/`, `match_levels.yaml`, and `services.txt`,
+  which the VM runs (`infra/startup.sh.tftpl`). `SERVER_TARGET=aarch64-apple-darwin` builds the
+  same bundle for this Mac, to try it locally.
+- `make -C ../../infra deploy-everything` builds and uploads both; `make check-server
+  SERVER_ADDRESS=<ip>` checks that a match server answers.
+
+To ship a level in the online match, its folder needs:
+
+1. `make package-mac-app`, which builds `.build/Warped/Warped.app` whose `Contents/MacOS/Warped`
+   is the level's window and whose `Contents/Resources/` holds every file it reads while it runs:
+   shared ones in `assets/` and `models/` (as in the hyperbolic demo's `app_bundle.rs`), and its
+   own in `<folder>/`, the level's own `app_bundle::OWN` folder. Maps are built into the program.
+2. `make build-server-bundle`, which builds `.build/server_bundle.tar.gz` holding its server for
+   `SERVER_TARGET` (x86-64 Linux by default): no Mac-only crate in the server's dependencies, and
+   `rust-lld` as the Linux linker in `.cargo/config.toml`.
+3. The server and client flags above, `--game-password-file` and `--level-result-file` included.
+4. Its line in `app/match_levels.yaml` and its folder in `SHIPPED_LEVEL_FOLDERS`.
+
+After a level changes, `make -C infra deploy-everything` from the repository's root ships it:
+nothing in the match or the infra changes unless the level's program or file names do.
 
 ## The five levels (source of truth)
 

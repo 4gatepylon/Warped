@@ -73,6 +73,10 @@ struct Arguments {
     /// no password, so anyone may).
     #[arg(long)]
     game_password_file: Option<PathBuf>,
+    /// For a match: write the winner to this file once, atomically, as {"winner": "blue"} or
+    /// {"winner": "red"}, and never start a new game.
+    #[arg(long)]
+    level_result_file: Option<PathBuf>,
 }
 
 /// `main` serves one game until the process is stopped, failing at once on a bad map, settings
@@ -103,6 +107,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         &AtomicBool::new(false),
         Some(Duration::from_secs(NEW_GAME_AFTER_WIN_S)),
         game_password,
-        None,
+        arguments.level_result_file.as_deref(),
     )
 }

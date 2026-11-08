@@ -3,18 +3,27 @@
 //! the level's winner back from the file the level writes, and tells the match clients
 //! (`MatchClient`) what is on, so each client can start and stop its level window.
 //!
-//! Interface: `LevelEntry`, `LoadLevels`, `Phase`, `MatchView`, `serve_match`, `MatchClient`
-//! (`Connect`, `poll`), `make_level_client_command`, `MATCH_PORT`.
+//! Interface: `LevelEntry`, `LoadLevels`, `find_level`, `Phase`, `MatchView`, `MatchServerOptions`,
+//! `serve_match`, `MatchClient` (`Connect`, `poll`), `MatchPasswordRefused`,
+//! `make_level_client_command`, `MATCH_PORT`.
 //!
-//! Example: `serve_match(&levels, &MatchTimes::default(), &run_folder, MATCH_PORT, 47852)?;`
+//! Example: `serve_match(&options)?;`
 //!
 //! Must know:
-//! - The protocol is one text datagram from each client every `HELLO_PERIOD_S`, `hello <team>`
-//!   (`blue`, `red` or `any`), answered with the `MatchView` as JSON. A client silent for
-//!   `CLIENT_TIMEOUT_S` no longer counts.
-//! - A level program is started as `<program> --serve --port <port> [--map <map>]
-//!   --level-result-file <path> <server_args>` and joined as `<program> --join <address> --port
-//!   <port> [--map <map>] --team <team> <client_args>` (README, "Level interface").
+//! - The protocol is one text datagram from each client every `HELLO_PERIOD_S`. A client first
+//!   says `hello <team>` (`blue`, `red` or `any`), padded to `MIN_HELLO_BYTES`, and the server
+//!   answers `challenge <cookie>`, a keyed hash of the client's address. From then on the client
+//!   says `hello <team> <cookie> <proof>`, the proof a keyed hash of the cookie with the game's
+//!   password, and the server answers with the `MatchView` as JSON, or `refused` for a wrong
+//!   password. So the server sends its large view only to an address that received the cookie
+//!   and knows the password. A client silent for `CLIENT_TIMEOUT_S` no longer counts.
+//! - A level's program paths are relative to the folder of the levels file that names them, and
+//!   each side reads its own levels file: the server starts `server_program`, the clients
+//!   `program` (README, "Level interface").
+//! - A level server is started as `<server_program> --port <port> [--map <map>]
+//!   --level-result-file <path> [--game-password-file <path>] <server_args>`, or without a
+//!   `server_program` as `<program> --serve ...` with the same flags; it is joined as `<program>
+//!   --join <address> --port <port> [--map <map>] --team <team> <client_args>`.
 
 use std::error::Error;
 use std::fs;
@@ -24,7 +33,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 
 use crate::match_state::{MatchState, Outcome, Team};
 
@@ -36,13 +47,20 @@ const HELLO_PERIOD_S: f64 = 0.5;
 const CLIENT_TIMEOUT_S: f64 = 3.0;
 const SOCKET_TIMEOUT_MS: u64 = 50;
 const MAX_DATAGRAM_BYTES: usize = 65_000;
+const MIN_HELLO_BYTES: usize = 64;
+const BYTES_PER_COOKIE: usize = 16;
+const BYTES_PER_SECRET: usize = 32;
+const CHALLENGE_PREFIX: &str = "challenge ";
+const REFUSED: &str = "refused";
 pub const SELF_PROGRAM: &str = "self";
 
-/// `LevelEntry` is one level of the match's map in `match_levels.yaml`: its name, the demo folder
-/// and branch it comes from, whether it is playable yet (`status`), and how to run it: `program`
-/// (`self` for this demo's own binary, else a path from this demo's folder), the `--map` it
-/// takes, extra flags for its server and its clients, and its map picture for the progression
-/// page (`map_picture`, a PNG path from this demo's folder).
+/// `LevelEntry` is one level of the match's map in a levels file: its name, the demo folder and
+/// branch it comes from, whether it is playable yet (`status`), and how to run it: `program`, the
+/// window players join with (`self` for this demo's own binary, else a path from the levels file's
+/// folder), `server_program`, a separate program for its server (a path from the same folder; a
+/// level without one serves with `program --serve`), the `--map` it takes, extra flags for its
+/// server and its clients, and its map picture for the progression page (`map_picture`, a PNG path
+/// from the same folder).
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct LevelEntry {
     pub name: String,
@@ -50,6 +68,8 @@ pub struct LevelEntry {
     pub branch: String,
     pub status: String,
     pub program: String,
+    #[serde(default)]
+    pub server_program: Option<String>,
     pub map: Option<String>,
     #[serde(default)]
     pub server_args: Vec<String>,
@@ -94,6 +114,19 @@ pub fn LoadLevels(path: &Path) -> Result<Vec<LevelEntry>> {
         .into());
     }
     Ok(file.levels)
+}
+
+/// `find_level` gives the level called `name` in `levels`, so a client plays a round with its own
+/// copy of the level the server names.
+///
+/// Example: `let level = find_level(&my_levels, &view.levels[index].name)?;`
+pub fn find_level<'a>(levels: &'a [LevelEntry], name: &str) -> Result<&'a LevelEntry> {
+    levels
+        .iter()
+        .find(|level| level.name == name)
+        .ok_or_else(|| {
+            format!("the match plays a level called {name:?}, which this game doesn't have; get the newest version").into()
+        })
 }
 
 /// `Phase` is what the match is doing: waiting for a player on each team, a pause before the next
@@ -146,15 +179,15 @@ impl Default for MatchTimes {
     }
 }
 
-/// `resolve_program` gives the program a level runs: this binary for `self`, else the path from
-/// this demo's folder.
+/// `resolve_program` gives the path of `program`, one of `level`'s programs: this binary for
+/// `self`, else the path from `levels_folder`, the folder of the levels file.
 ///
-/// Example: `let program = resolve_program(&level)?;`
-fn resolve_program(level: &LevelEntry) -> Result<PathBuf> {
-    if level.program == SELF_PROGRAM {
+/// Example: `let program = resolve_program(&level, &level.program, levels_folder)?;`
+fn resolve_program(level: &LevelEntry, program: &str, levels_folder: &Path) -> Result<PathBuf> {
+    if program == SELF_PROGRAM {
         return Ok(std::env::current_exe()?);
     }
-    let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join(&level.program);
+    let path: PathBuf = levels_folder.join(program);
     if !path.exists() {
         return Err(format!(
             "{}'s program {} doesn't exist; build it in its folder ({}) first",
@@ -167,22 +200,35 @@ fn resolve_program(level: &LevelEntry) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// `start_level_server` starts `level`'s server on `port`, writing its winner to `result_path`
-/// and its output to `log_path`.
+/// `start_level_server` starts `level`'s server on `port` (its `server_program`, else its
+/// `program` with `--serve`), writing its winner to `result_path` and its output to `log_path`,
+/// and admitting only players who know the password in `game_password_file`, if any.
 ///
-/// Example: `let child = start_level_server(&level, 47852, &result_path, &log_path)?;`
+/// Example: `let child = start_level_server(&level, folder, 47852, &result, &log, None)?;`
 fn start_level_server(
     level: &LevelEntry,
+    levels_folder: &Path,
     port: u16,
     result_path: &Path,
     log_path: &Path,
+    game_password_file: Option<&Path>,
 ) -> Result<Child> {
-    let mut command: Command = Command::new(resolve_program(level)?);
-    command.args(["--serve", "--port", &port.to_string()]);
+    let mut command: Command = match &level.server_program {
+        Some(program) => Command::new(resolve_program(level, program, levels_folder)?),
+        None => {
+            let mut command = Command::new(resolve_program(level, &level.program, levels_folder)?);
+            command.arg("--serve");
+            command
+        }
+    };
+    command.args(["--port", &port.to_string()]);
     if let Some(map) = &level.map {
         command.args(["--map", map]);
     }
     command.arg("--level-result-file").arg(result_path);
+    if let Some(path) = game_password_file {
+        command.arg("--game-password-file").arg(path);
+    }
     command.args(&level.server_args);
     let log: fs::File = fs::File::create(log_path)?;
     println!("round level server: {command:?}");
@@ -194,17 +240,18 @@ fn start_level_server(
 }
 
 /// `make_level_client_command` gives the command that joins `level`'s server at `address`:`port`
-/// on `team`, adding `extra_args` (e.g. a bot's flags).
+/// on `team`, adding `extra_args` (e.g. a bot's flags), its program a path from `levels_folder`.
 ///
-/// Example: `let command = make_level_client_command(&level, ip, 47852, Team::Blue, &[])?;`
+/// Example: `let command = make_level_client_command(&level, folder, ip, 47852, Team::Blue, &[])?;`
 pub fn make_level_client_command(
     level: &LevelEntry,
+    levels_folder: &Path,
     address: std::net::IpAddr,
     port: u16,
     team: Team,
     extra_args: &[String],
 ) -> Result<Command> {
-    let mut command: Command = Command::new(resolve_program(level)?);
+    let mut command: Command = Command::new(resolve_program(level, &level.program, levels_folder)?);
     command.args(["--join", &address.to_string(), "--port", &port.to_string()]);
     if let Some(map) = &level.map {
         command.args(["--map", map]);
@@ -244,35 +291,199 @@ pub fn stop_child(child: &mut Option<Child>) {
     }
 }
 
-/// `parse_hello` gives the team a client's `hello <team>` datagram names (`None` for `any`), or
-/// an error for any other datagram.
+/// `Hello` is a client's datagram to the match server: asking for a cookie, or proving the game's
+/// password with one.
+#[derive(Debug, PartialEq)]
+enum Hello {
+    Ask,
+    Proven {
+        team: Option<Team>,
+        cookie: Vec<u8>,
+        proof: Vec<u8>,
+    },
+}
+
+/// `parse_team` gives the team a hello names (`None` for `any`).
 ///
-/// Example: `assert_eq!(parse_hello(b"hello red")?, Some(Team::Red));`
-fn parse_hello(datagram: &[u8]) -> Result<Option<Team>> {
-    match datagram {
-        b"hello blue" => Ok(Some(Team::Blue)),
-        b"hello red" => Ok(Some(Team::Red)),
-        b"hello any" => Ok(None),
+/// Example: `assert_eq!(parse_team("red")?, Some(Team::Red));`
+fn parse_team(word: &str) -> Result<Option<Team>> {
+    match word {
+        "blue" => Ok(Some(Team::Blue)),
+        "red" => Ok(Some(Team::Red)),
+        "any" => Ok(None),
+        _ => Err(format!("a hello names team blue, red or any, not {word:?}").into()),
+    }
+}
+
+/// `parse_hello` reads a client's hello: `hello <team>`, padded to at least `MIN_HELLO_BYTES`, or
+/// `hello <team> <cookie> <proof>` in hexadecimal; anything else is an error.
+///
+/// Example: `let hello = parse_hello(format_hello(Some(Team::Red), None).as_bytes())?;`
+fn parse_hello(datagram: &[u8]) -> Result<Hello> {
+    if datagram.len() < MIN_HELLO_BYTES {
+        return Err(format!("a hello has at least {MIN_HELLO_BYTES} bytes").into());
+    }
+    let words: Vec<&str> = std::str::from_utf8(datagram)?.split_whitespace().collect();
+    match words.as_slice() {
+        ["hello", team] => parse_team(team).map(|_| Hello::Ask),
+        ["hello", team, cookie, proof] => Ok(Hello::Proven {
+            team: parse_team(team)?,
+            cookie: decode_hex(cookie)?,
+            proof: decode_hex(proof)?,
+        }),
         _ => Err("not a hello".into()),
     }
 }
 
-/// `serve_match` runs one match on `levels` until it ends and `times.round_over_s` more (so the
-/// clients see the result), on UDP `match_port`, each round's level server on `level_port`, its
-/// results and logs in `run_folder`. A round starts `times.intermission_s` after a player is on
-/// each team; the match ends in a tie `times.match_s` after its first round started.
+/// `format_hello` gives a client's hello for `team`: asking for a cookie, or proving the password
+/// with `cookie_and_proof`; padded to `MIN_HELLO_BYTES`, so the challenge it gets back is smaller.
 ///
-/// Example: `serve_match(&levels, &MatchTimes::default(), &folder, MATCH_PORT, 47852)?;`
-pub fn serve_match(
-    levels: &[LevelEntry],
-    times: &MatchTimes,
-    run_folder: &Path,
-    match_port: u16,
-    level_port: u16,
-) -> Result<MatchState> {
+/// Example: `let hello = format_hello(Some(Team::Blue), None);`
+fn format_hello(team: Option<Team>, cookie_and_proof: Option<(&[u8], &[u8])>) -> String {
+    let team_name: &str = team.map_or("any", Team::get_name);
+    let text: String = match cookie_and_proof {
+        Some((cookie, proof)) => {
+            format!(
+                "hello {team_name} {} {}",
+                encode_hex(cookie),
+                encode_hex(proof)
+            )
+        }
+        None => format!("hello {team_name}"),
+    };
+    format!("{text:<MIN_HELLO_BYTES$}")
+}
+
+/// `make_cookie` gives the server's cookie for a client at `address`, a keyed hash with the
+/// server's random `secret`, so only that address gets it and the server keeps no state for it.
+///
+/// Example: `let cookie = make_cookie(&secret, address);`
+fn make_cookie(secret: &[u8], address: SocketAddr) -> Vec<u8> {
+    let mut mac: Hmac<Sha256> =
+        Hmac::new_from_slice(secret).expect("HMAC takes a key of any length");
+    mac.update(address.to_string().as_bytes());
+    mac.finalize().into_bytes()[..BYTES_PER_COOKIE].to_vec()
+}
+
+/// `make_proof` gives a client's proof that it knows `password`: a keyed hash of `cookie`.
+///
+/// Example: `let proof = make_proof(b"correct horse", &cookie);`
+fn make_proof(password: &[u8], cookie: &[u8]) -> Vec<u8> {
+    let mut mac: Hmac<Sha256> =
+        Hmac::new_from_slice(password).expect("HMAC takes a key of any length");
+    mac.update(cookie);
+    mac.finalize().into_bytes().to_vec()
+}
+
+/// `is_proof_right` says whether `proof` proves `password` for `cookie`, in constant time.
+///
+/// Example: `if is_proof_right(password, &cookie, &proof) { ... }`
+fn is_proof_right(password: &[u8], cookie: &[u8], proof: &[u8]) -> bool {
+    let mut mac: Hmac<Sha256> =
+        Hmac::new_from_slice(password).expect("HMAC takes a key of any length");
+    mac.update(cookie);
+    mac.verify_slice(proof).is_ok()
+}
+
+/// `is_same_cookie` says whether two cookies are equal, in constant time.
+///
+/// Example: `if is_same_cookie(&sent, &expected) { ... }`
+fn is_same_cookie(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .fold(0, |diff, (a, b)| diff | (a ^ b))
+            == 0
+}
+
+/// `encode_hex` gives `bytes` as lowercase hexadecimal.
+///
+/// Example: `assert_eq!(encode_hex(&[0, 255]), "00ff");`
+fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// `decode_hex` gives the bytes of hexadecimal `text`, or an error for anything else.
+///
+/// Example: `assert_eq!(decode_hex("00ff")?, [0, 255]);`
+fn decode_hex(text: &str) -> Result<Vec<u8>> {
+    if !text.is_ascii() || !text.len().is_multiple_of(2) {
+        return Err(format!("{text:?} isn't hexadecimal bytes").into());
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&text[i..i + 2], 16)
+                .map_err(|error| format!("{text:?} isn't hexadecimal bytes: {error}").into())
+        })
+        .collect()
+}
+
+/// `send_to_client` sends `datagram` to the client at `address`; a failed send only prints why,
+/// so one unreachable or forged address can't stop the match.
+///
+/// Example: `send_to_client(&socket, REFUSED.as_bytes(), address);`
+fn send_to_client(socket: &UdpSocket, datagram: &[u8], address: SocketAddr) {
+    if let Err(error) = socket.send_to(datagram, address) {
+        eprintln!("can't send to {address}: {error}");
+    }
+}
+
+/// `MatchPasswordRefused` is the error a match client gets when the match server refuses its
+/// game password.
+#[derive(Debug)]
+pub struct MatchPasswordRefused(pub SocketAddr);
+
+impl std::fmt::Display for MatchPasswordRefused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "the match server at {} refused the game password",
+            self.0
+        )
+    }
+}
+
+impl Error for MatchPasswordRefused {}
+
+/// `MatchServerOptions` is what a match server needs: the levels and the folder of the levels file
+/// that names them, the times, the folder for each round's result and log, the match's UDP port
+/// and its levels' port, and the game's password and the file that holds it, which each level
+/// server gets.
+pub struct MatchServerOptions<'a> {
+    pub levels: &'a [LevelEntry],
+    pub levels_folder: &'a Path,
+    pub times: MatchTimes,
+    pub run_folder: &'a Path,
+    pub match_port: u16,
+    pub level_port: u16,
+    pub game_password: &'a [u8],
+    pub game_password_file: Option<&'a Path>,
+}
+
+/// `serve_match` runs one match on `options.levels` until it ends and `round_over_s` more (so
+/// the clients see the result), on UDP `match_port`, each round's level server on `level_port`,
+/// its results and logs in `run_folder`. A round starts `intermission_s` after a player is on each
+/// team; the match ends in a tie `match_s` after its first round started.
+///
+/// Example: `serve_match(&options)?;`
+pub fn serve_match(options: &MatchServerOptions) -> Result<MatchState> {
+    let MatchServerOptions {
+        levels,
+        levels_folder,
+        times,
+        run_folder,
+        match_port,
+        level_port,
+        game_password,
+        game_password_file,
+    } = *options;
     let socket: UdpSocket = UdpSocket::bind(("0.0.0.0", match_port))
         .map_err(|error| format!("can't use UDP port {match_port} for the match: {error}"))?;
     socket.set_read_timeout(Some(Duration::from_millis(SOCKET_TIMEOUT_MS)))?;
+    let mut secret: [u8; BYTES_PER_SECRET] = [0; BYTES_PER_SECRET];
+    getrandom::fill(&mut secret).map_err(|error| format!("no random bytes: {error}"))?;
     let mut state: MatchState = MatchState::New(levels.len());
     let mut phase: Phase = Phase::WaitingForTeams;
     let mut phase_ends_at: Option<Instant> = None;
@@ -291,11 +502,30 @@ pub fn serve_match(
             Err(error) => return Err(error.into()),
         };
         clients.retain(|client| client.2.elapsed().as_secs_f64() < CLIENT_TIMEOUT_S);
+        let mut proven_address: Option<SocketAddr> = None;
         if let Some((length, address)) = received
-            && let Ok(team) = parse_hello(&buffer[..length])
+            && let Ok(hello) = parse_hello(&buffer[..length])
         {
-            clients.retain(|client| client.0 != address);
-            clients.push((address, team, Instant::now()));
+            let cookie: Vec<u8> = make_cookie(&secret, address);
+            match hello {
+                Hello::Proven {
+                    team,
+                    cookie: sent_cookie,
+                    proof,
+                } if is_same_cookie(&sent_cookie, &cookie) => {
+                    if is_proof_right(game_password, &cookie, &proof) {
+                        clients.retain(|client| client.0 != address);
+                        clients.push((address, team, Instant::now()));
+                        proven_address = Some(address);
+                    } else {
+                        send_to_client(&socket, REFUSED.as_bytes(), address);
+                    }
+                }
+                Hello::Ask | Hello::Proven { .. } => {
+                    let challenge: String = format!("{CHALLENGE_PREFIX}{}", encode_hex(&cookie));
+                    send_to_client(&socket, challenge.as_bytes(), address);
+                }
+            }
         }
         let team_counts: [u32; 2] = [Team::Blue, Team::Red].map(|team| {
             clients
@@ -333,9 +563,11 @@ pub fn serve_match(
                 let log_path: PathBuf = run_folder.join(format!("round_{round}_server.log"));
                 level_server = Some(start_level_server(
                     &levels[level],
+                    levels_folder,
                     level_port,
                     &result_path,
                     &log_path,
+                    game_password_file,
                 )?);
                 match_started_at.get_or_insert_with(Instant::now);
                 println!(
@@ -402,7 +634,7 @@ pub fn serve_match(
             },
             other => other,
         };
-        if let Some((_, address)) = received {
+        if let Some(address) = proven_address {
             let view: MatchView = MatchView {
                 state: state.clone(),
                 phase: phase.clone(),
@@ -410,7 +642,7 @@ pub fn serve_match(
                 team_counts,
                 match_left_s,
             };
-            socket.send_to(&serde_json::to_vec(&view)?, address)?;
+            send_to_client(&socket, &serde_json::to_vec(&view)?, address);
         }
         if phase == Phase::Over {
             let at: Instant = *over_at.get_or_insert_with(Instant::now);
@@ -421,24 +653,30 @@ pub fn serve_match(
     }
 }
 
-/// `MatchClient` is a connection to a match server: the team it says it plays for and the last
-/// `MatchView` the server sent.
+/// `MatchClient` is a connection to a match server: the team it says it plays for, the game's
+/// password, the cookie the server gave it, and the last `MatchView` the server sent.
 pub struct MatchClient {
     socket: UdpSocket,
     pub server: SocketAddr,
     pub team: Option<Team>,
     pub view: Option<MatchView>,
+    game_password: Vec<u8>,
+    cookie: Option<Vec<u8>>,
     last_hello: Option<Instant>,
     buffer: Vec<u8>,
 }
 
 impl MatchClient {
     /// `Connect` makes a client of the match server at `server` playing for `team` (`None` until
-    /// the player picks one).
+    /// the player picks one), proving it knows `game_password` (empty for none).
     ///
-    /// Example: `let client = MatchClient::Connect(server, Some(Team::Blue))?;`
+    /// Example: `let client = MatchClient::Connect(server, Some(Team::Blue), Vec::new())?;`
     #[allow(non_snake_case)]
-    pub fn Connect(server: SocketAddr, team: Option<Team>) -> Result<MatchClient> {
+    pub fn Connect(
+        server: SocketAddr,
+        team: Option<Team>,
+        game_password: Vec<u8>,
+    ) -> Result<MatchClient> {
         let socket: UdpSocket = UdpSocket::bind(("0.0.0.0", 0))?;
         socket.set_nonblocking(true)?;
         Ok(MatchClient {
@@ -446,12 +684,16 @@ impl MatchClient {
             server,
             team,
             view: None,
+            game_password,
+            cookie: None,
             last_hello: None,
             buffer: vec![0; MAX_DATAGRAM_BYTES],
         })
     }
 
-    /// `poll` says hello every `HELLO_PERIOD_S` and keeps the newest view the server sent.
+    /// `poll` says hello every `HELLO_PERIOD_S` (at once after a new cookie), keeps the server's
+    /// cookie and the newest view it sent, and fails with `MatchPasswordRefused` if the server
+    /// refuses the password.
     ///
     /// Example: `client.poll()?;`
     pub fn poll(&mut self) -> Result<()> {
@@ -459,15 +701,28 @@ impl MatchClient {
             .last_hello
             .is_none_or(|at| at.elapsed().as_secs_f64() >= HELLO_PERIOD_S)
         {
-            let team: &str = self.team.map_or("any", Team::get_name);
-            self.socket
-                .send_to(format!("hello {team}").as_bytes(), self.server)?;
+            let hello: String = match &self.cookie {
+                Some(cookie) => {
+                    let proof: Vec<u8> = make_proof(&self.game_password, cookie);
+                    format_hello(self.team, Some((cookie, &proof)))
+                }
+                None => format_hello(self.team, None),
+            };
+            self.socket.send_to(hello.as_bytes(), self.server)?;
             self.last_hello = Some(Instant::now());
         }
         loop {
             match self.socket.recv_from(&mut self.buffer) {
                 Ok((length, address)) if address == self.server => {
-                    self.view = Some(serde_json::from_slice(&self.buffer[..length])?);
+                    let datagram: &[u8] = &self.buffer[..length];
+                    if let Some(cookie) = datagram.strip_prefix(CHALLENGE_PREFIX.as_bytes()) {
+                        self.cookie = Some(decode_hex(std::str::from_utf8(cookie)?)?);
+                        self.last_hello = None;
+                    } else if datagram == REFUSED.as_bytes() {
+                        return Err(Box::new(MatchPasswordRefused(self.server)));
+                    } else {
+                        self.view = Some(serde_json::from_slice(datagram)?);
+                    }
                 }
                 Ok(_) => {}
                 Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
@@ -496,7 +751,10 @@ mod tests {
     //! | --- | --- | --- |
     //! | Levels file | the shipped one, an even count | `the_shipped_levels_file_loads`, `an_even_level_count_is_refused` |
     //! | Level result | none yet, blue, red, garbage | `level_results_are_read` |
-    //! | Hello | each team, any, garbage | `hellos_name_a_team` |
+    //! | Hello | asking for each team and any, proving, too short, bad team, garbage | `hellos_ask_or_prove` |
+    //! | Proof | right password, wrong password, other cookie; cookies per address | `proofs_check_the_password` |
+    //! | Hexadecimal | round trip, odd length, not hexadecimal, not ASCII | `hex_round_trips` |
+    //! | Level lookup | a level by name, a missing one | `levels_are_found_by_name` |
 
     use super::*;
 
@@ -546,10 +804,59 @@ mod tests {
     }
 
     #[test]
-    fn hellos_name_a_team() {
-        assert_eq!(parse_hello(b"hello blue").unwrap(), Some(Team::Blue));
-        assert_eq!(parse_hello(b"hello red").unwrap(), Some(Team::Red));
-        assert_eq!(parse_hello(b"hello any").unwrap(), None);
-        assert!(parse_hello(b"join").is_err());
+    fn hellos_ask_or_prove() {
+        for team in [Some(Team::Blue), Some(Team::Red), None] {
+            let hello: String = format_hello(team, None);
+            assert_eq!(hello.len(), MIN_HELLO_BYTES);
+            assert_eq!(parse_hello(hello.as_bytes()).unwrap(), Hello::Ask);
+            let proven: String = format_hello(team, Some((&[1, 2], &[3, 255])));
+            assert_eq!(
+                parse_hello(proven.as_bytes()).unwrap(),
+                Hello::Proven {
+                    team,
+                    cookie: vec![1, 2],
+                    proof: vec![3, 255]
+                }
+            );
+        }
+        assert!(parse_hello(b"hello blue").is_err());
+        assert!(parse_hello(format!("{:<64}", "hello green").as_bytes()).is_err());
+        assert!(parse_hello(format!("{:<64}", "join").as_bytes()).is_err());
+    }
+
+    #[test]
+    fn proofs_check_the_password() {
+        let address: SocketAddr = "203.0.113.5:50000".parse().unwrap();
+        let other: SocketAddr = "203.0.113.5:50001".parse().unwrap();
+        let cookie: Vec<u8> = make_cookie(b"secret", address);
+        assert_eq!(cookie.len(), BYTES_PER_COOKIE);
+        assert!(!is_same_cookie(&cookie, &make_cookie(b"secret", other)));
+        assert!(is_same_cookie(&cookie, &make_cookie(b"secret", address)));
+        let proof: Vec<u8> = make_proof(b"correct horse", &cookie);
+        assert!(is_proof_right(b"correct horse", &cookie, &proof));
+        assert!(!is_proof_right(b"wrong horse", &cookie, &proof));
+        assert!(!is_proof_right(
+            b"correct horse",
+            &make_cookie(b"secret", other),
+            &proof
+        ));
+        assert!(is_proof_right(b"", &cookie, &make_proof(b"", &cookie)));
+    }
+
+    #[test]
+    fn hex_round_trips() {
+        assert_eq!(encode_hex(&[0, 16, 255]), "0010ff");
+        assert_eq!(decode_hex("0010ff").unwrap(), [0, 16, 255]);
+        assert!(decode_hex("0").is_err());
+        assert!(decode_hex("zz").is_err());
+        assert!(decode_hex("éé").is_err());
+    }
+
+    #[test]
+    fn levels_are_found_by_name() {
+        let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("match_levels.yaml");
+        let levels: Vec<LevelEntry> = LoadLevels(&path).unwrap();
+        assert_eq!(find_level(&levels, "Dust").unwrap().name, "Dust");
+        assert!(find_level(&levels, "Atlantis").is_err());
     }
 }

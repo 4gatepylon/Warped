@@ -1,0 +1,61 @@
+//! `app_bundle.rs` finds the folders of files the game reads while it runs, the fps_demo's assets,
+//! the maps' models and Dark Forest's own textures and map picture: inside `Warped.app` when the
+//! game runs from it, else in the checkout (W-126).
+//!
+//! Interface: `ResourceFolder` (`get_path`), `ASSETS`, `MODELS`, `OWN`, `get_app_resources_folder`.
+//!
+//! Example: `let rifle: PathBuf = ASSETS.get_path().join("models/bolt_action_rifle_7_62");`
+//!
+//! Must know:
+//! - `make package-mac-app` copies each folder into the app's `Contents/Resources/<name>/`.
+
+use std::path::{Path, PathBuf};
+
+/// `ResourceFolder` is a folder the game reads files from: its `name` inside the app's
+/// `Contents/Resources/`, and its `checkout_folder` relative to this crate's folder.
+pub struct ResourceFolder {
+    pub name: &'static str,
+    checkout_folder: &'static str,
+}
+
+/// `ASSETS` is the fps_demo's assets: surface textures and gun models.
+pub const ASSETS: ResourceFolder = ResourceFolder {
+    name: "assets",
+    checkout_folder: "../fps_demo/assets",
+};
+
+/// `MODELS` is the maps' models: the structures and the players' body.
+pub const MODELS: ResourceFolder = ResourceFolder {
+    name: "models",
+    checkout_folder: "../../common/maps/models",
+};
+
+/// `OWN` is this level's own files that no other level reads, such as its map pictures: this crate's
+/// folder, and `Contents/Resources/dark_forest_rust/` in the app, which holds several levels (W-126).
+pub const OWN: ResourceFolder = ResourceFolder {
+    name: "dark_forest_rust",
+    checkout_folder: ".",
+};
+
+impl ResourceFolder {
+    /// `get_path` gives the folder: inside the app when the game runs from one, else in the
+    /// checkout.
+    ///
+    /// Example: `let models: PathBuf = MODELS.get_path();`
+    pub fn get_path(&self) -> PathBuf {
+        match get_app_resources_folder() {
+            Some(resources) => resources.join(self.name),
+            None => Path::new(env!("CARGO_MANIFEST_DIR")).join(self.checkout_folder),
+        }
+    }
+}
+
+/// `get_app_resources_folder` gives the app's `Contents/Resources/` when this program runs from an
+/// app bundle (`Contents/MacOS/`), or `None`.
+///
+/// Example: `let resources: Option<PathBuf> = get_app_resources_folder();`
+pub fn get_app_resources_folder() -> Option<PathBuf> {
+    let program: PathBuf = std::env::current_exe().ok()?;
+    let folder: &Path = program.parent()?;
+    (folder.file_name()? == "MacOS").then(|| folder.with_file_name("Resources"))
+}

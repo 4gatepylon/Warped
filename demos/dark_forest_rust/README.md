@@ -92,6 +92,22 @@ The match session (`demos/warped_match_rust/`) starts levels with these flags:
 The default port is 47840 (UDP), and server discovery uses 47841. `dark-forest-server` is the same server as its own
 binary. The wire protocol is the hyperbolic demo's, with its wormhole fields always empty (see `DECISIONS.md`).
 
+Every command also takes `--game-password-file <file>`: a server admits only players who prove they know the password
+in it, and a player proves it.
+
+### In the online match (W-126)
+
+The online match ships this level in its app and its cloud server bundle (`demos/warped_match_rust/README.md`, "The
+online match"):
+
+- `make build-server-bundle` builds `dark-forest-server` for x86-64 Linux into `.build/server_bundle.tar.gz`; the
+  Mac-only crates are dependencies only on macOS.
+- `make package-mac-app` (after `make download-assets`) builds `.build/Warped/Warped.app` with every file the window
+  reads: the fps demo's sky, robot and rifle in `Contents/Resources/assets/`, the pylon in `models/`, and this level's
+  own textures and map picture in `dark_forest_rust/` (`src/app_bundle.rs`). The map is built into the program.
+- Known gap: the Sketchfab revolver and arms may ship only built into a program, not as files, so the app's Dark
+  Forest shows the rifle until they are embedded (as `demos/hyperbolic_wormholes_rust/build.rs` does).
+
 ## Tools
 
 - `--bench-views <s>`: holds five fixed views (`spawn`, `bridge`, `lookout`, `treehouse`, `firing`) for `<s>` seconds

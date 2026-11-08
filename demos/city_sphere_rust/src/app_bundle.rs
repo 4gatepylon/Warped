@@ -1,7 +1,7 @@
 //! `app_bundle.rs` finds the folders of files the game reads while it runs, the fps_demo's assets
 //! and the maps' models: inside `Warped.app` when the game runs from it, else in the checkout.
 //!
-//! Interface: `ResourceFolder` (`get_path`), `ASSETS`, `MODELS`, `get_app_resources_folder`.
+//! Interface: `ResourceFolder` (`get_path`), `ASSETS`, `MODELS`, `OWN`, `get_app_resources_folder`.
 //!
 //! Example: `let rifle: PathBuf = ASSETS.get_path().join("models/bolt_action_rifle_7_62");`
 //!
@@ -28,6 +28,13 @@ pub const ASSETS: ResourceFolder = ResourceFolder {
 pub const MODELS: ResourceFolder = ResourceFolder {
     name: "models",
     checkout_folder: "../../common/maps/models",
+};
+
+/// `OWN` is this level's own files that no other level reads, such as its map pictures: this crate's
+/// folder, and `Contents/Resources/city_sphere_rust/` in the app, which holds several levels (W-126).
+pub const OWN: ResourceFolder = ResourceFolder {
+    name: "city_sphere_rust",
+    checkout_folder: ".",
 };
 
 impl ResourceFolder {

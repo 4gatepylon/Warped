@@ -36,7 +36,8 @@ const STRAIGHT_DOWN_RAD: f64 = -std::f64::consts::FRAC_PI_2;
 ///
 /// Example: `let path = get_map_photo_path("snow_planet");`
 pub fn get_map_photo_path(map_name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    crate::app_bundle::OWN
+        .get_path()
         .join("map_pictures")
         .join(format!("{map_name}.png"))
 }

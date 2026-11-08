@@ -648,6 +648,7 @@ mod tests {
                     branch: String::new(),
                     status: String::new(),
                     program: "self".to_string(),
+                    server_program: None,
                     map: None,
                     server_args: Vec::new(),
                     client_args: Vec::new(),

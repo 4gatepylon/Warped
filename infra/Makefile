@@ -9,9 +9,9 @@
 #     make destroy-infra YES_TO_DESTROY_INFRA=1: delete all of them (or INTERACTIVE=1 to be asked).
 #     make create-game-password: write a random GAME_PASSWORD into .env if it has none.
 #     make deploy-game-servers: build the server bundle, upload it and restart the VM, which runs it.
-#     make deploy-download-page: build the app with the online games and upload it with the download page.
+#     make deploy-download-page: build the app with the online match and upload it with the download page.
 #     make deploy-everything: all of the above in order, from an empty project to a download page (one click).
-#     make check-game-servers: join every online game from this Mac with a bot, to check that they answer.
+#     make check-game-servers: join the cloud's games from this Mac with a bot, to check that they answer.
 #     make list-gcp-resources: list what this deploy made (everything labelled app=warped), and its state bucket.
 #     make test: check the Terraform, plan it with and without game servers against a mock provider, and
 #         render and check the VM's startup script.
@@ -23,25 +23,25 @@
 # Must know:
 #     - HAS_GAME_SERVERS=false in .env deploys only the download page: no VM, and no online games in
 #       the app (players join a server by its address).
-#     - GAME_DIR is the game to deploy (the Rust demo by default): any game folder whose Makefile has
-#       build-server-bundle and package-mac-app, and GAMES_FILE lists its games (port, map, name).
+#     - GAME_DIR is the game to deploy (the online match by default, W-126): any game folder whose
+#       Makefile has build-server-bundle (a bundle with a services.txt, see startup.sh.tftpl),
+#       package-mac-app SERVER_ADDRESS=<ip> and check-server SERVER_ADDRESS=<ip>
+#       GAME_PASSWORD_FILE=<file>.
 SHELL := /bin/bash
 .SHELLFLAGS := -eo pipefail -c
 -include .env
 GCLOUD ?= gcloud
 TERRAFORM ?= terraform
 STATE_BUCKET := $(GCP_PROJECT_ID)-tfstate
+BILLING_LINK_URL := https://console.cloud.google.com/billing/linkedaccount?project=$(GCP_PROJECT_ID)
 APIS := compute.googleapis.com storage.googleapis.com iap.googleapis.com billingbudgets.googleapis.com \
   cloudbilling.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com
 TEST_DATA_DIR := .build/terraform-test
-GAME_DIR ?= ../demos/hyperbolic_wormholes_rust
-GAME_PROGRAM := $(GAME_DIR)/.build/release/hyperbolic-wormholes
-GAMES_FILE ?= games.txt
+GAME_DIR ?= ../demos/warped_match_rust
 HAS_GAME_SERVERS ?= true
 WITH_GAME_SERVERS := $(filter true,$(HAS_GAME_SERVERS))
 RESOURCE_LABEL := app=warped
 SITE_BUILD := .build/site
-CHECK_S := 5
 SITE_HOST ?= https://storage.googleapis.com
 export TF_DATA_DIR := .build/terraform
 export TF_VAR_project_id := $(GCP_PROJECT_ID)
@@ -49,7 +49,6 @@ export TF_VAR_region := $(GCP_REGION)
 export TF_VAR_zone := $(GCP_ZONE)
 export TF_VAR_monthly_budget_usd := $(MONTHLY_BUDGET_USD)
 export TF_VAR_game_password := $(GAME_PASSWORD)
-export TF_VAR_games_file := $(abspath $(GAMES_FILE))
 export TF_VAR_has_game_servers := $(HAS_GAME_SERVERS)
 
 DESTROY_INFRA_WARNING := This deletes the game server VM, its IP, both buckets (the download page and the \
@@ -67,9 +66,9 @@ help:
 	@echo "  make destroy-infra YES_TO_DESTROY_INFRA=1   Delete them all (or INTERACTIVE=1 to be asked)"
 	@echo "  make create-game-password                   Write a random GAME_PASSWORD into .env if it has none"
 	@echo "  make deploy-game-servers                    Build and upload the server bundle, then restart the VM"
-	@echo "  make deploy-download-page                   Build the app with the online games and upload the page"
+	@echo "  make deploy-download-page                   Build the app with the online match and upload the page"
 	@echo "  make deploy-everything                      All of the above, from an empty project (one click)"
-	@echo "  make check-game-servers                     Join every online game with a bot from this Mac"
+	@echo "  make check-game-servers                     Join the cloud's games with a bot from this Mac"
 	@echo "  make list-gcp-resources                     List what this deploy made in Google Cloud"
 	@echo "  make test                                   Check the Terraform and the VM's startup script"
 	@echo "  make fmt                                    Format the Terraform"
@@ -80,12 +79,15 @@ check-env:
 	@test -f .env || { echo "No .env here: run cp .env.example .env and fill it in." >&2; exit 2; }
 	@test -n "$(GCP_PROJECT_ID)" -a -n "$(GCP_REGION)" -a -n "$(GCP_ZONE)" -a -n "$(MONTHLY_BUDGET_USD)" || \
 		{ echo ".env needs GCP_PROJECT_ID, GCP_REGION, GCP_ZONE and MONTHLY_BUDGET_USD." >&2; exit 2; }
+	@! grep -qE "^[A-Z_]+=[\"']" .env || \
+		{ echo "Write the values in .env without quotes: make keeps quotes as part of the value." >&2; exit 2; }
 	@test "$(HAS_GAME_SERVERS)" = true -o "$(HAS_GAME_SERVERS)" = false || \
 		{ echo "HAS_GAME_SERVERS in .env must be true or false, not '$(HAS_GAME_SERVERS)'." >&2; exit 2; }
 
 prepare-gcp-project: check-env
-	@test "$$($(GCLOUD) billing projects describe $(GCP_PROJECT_ID) --format='value(billingEnabled)')" = True || \
-		{ echo "Billing isn't enabled for $(GCP_PROJECT_ID); link a billing account in the console first." >&2; exit 1; }
+	@billing_enabled="$$($(GCLOUD) billing projects describe $(GCP_PROJECT_ID) --format='value(billingEnabled)')" || exit 1; \
+		test "$$billing_enabled" = True || { echo "Billing isn't enabled for $(GCP_PROJECT_ID) (billingEnabled: '$$billing_enabled')." >&2; \
+		echo "Link an open billing account to it: $(BILLING_LINK_URL)" >&2; exit 1; }
 	$(GCLOUD) services enable $(APIS) --project $(GCP_PROJECT_ID)
 	$(GCLOUD) storage buckets describe gs://$(STATE_BUCKET) --project $(GCP_PROJECT_ID) > /dev/null 2>&1 || \
 		$(GCLOUD) storage buckets create gs://$(STATE_BUCKET) --project $(GCP_PROJECT_ID) \
@@ -130,9 +132,7 @@ deploy-game-servers: init-terraform
 
 deploy-download-page: init-terraform
 	mkdir -p $(SITE_BUILD)
-	$(if $(WITH_GAME_SERVERS),awk -v ip="$$($(TERRAFORM) output -raw server_ip)" '{ $$1 = ip ":" $$1; print }' \
-		$(GAMES_FILE) > .build/online_games.txt)
-	$(MAKE) -C $(GAME_DIR) package-mac-app $(if $(WITH_GAME_SERVERS),ONLINE_GAMES=$(CURDIR)/.build/online_games.txt)
+	$(MAKE) -C $(GAME_DIR) package-mac-app $(if $(WITH_GAME_SERVERS),SERVER_ADDRESS=$$($(TERRAFORM) output -raw server_ip))
 	site_url="$(SITE_HOST)/$$($(TERRAFORM) output -raw site_bucket)"; \
 		sed "s|@SITE_URL@|$$site_url|g" site/index.html > $(SITE_BUILD)/index.html; \
 		sed "s|@SITE_URL@|$$site_url|g" site/install.sh > $(SITE_BUILD)/install.sh
@@ -141,25 +141,20 @@ deploy-download-page: init-terraform
 	@echo "Download page: $$($(TERRAFORM) output -raw download_page_url)"
 
 deploy-everything: check-env
-	$(MAKE) create-game-password
+	$(if $(WITH_GAME_SERVERS),$(MAKE) create-game-password)
 	$(MAKE) prepare-gcp-project
 	$(MAKE) apply-infra
 	$(if $(WITH_GAME_SERVERS),$(MAKE) deploy-game-servers)
 	$(MAKE) deploy-download-page
 	@echo "Done. Share the download page above$(if $(WITH_GAME_SERVERS), and the game password (GAME_PASSWORD in .env))."
-	@$(if $(WITH_GAME_SERVERS),echo "Give the VM a minute to start the games; then check them with: make check-game-servers")
+	@$(if $(WITH_GAME_SERVERS),echo "Give the VM a minute to start; then check it with: make check-game-servers")
 	@echo "See what exists with: make list-gcp-resources; remove it with: make destroy-infra YES_TO_DESTROY_INFRA=1"
 
 check-game-servers: init-terraform
-	cd $(GAME_DIR) && cargo build --release
 	install -m 600 /dev/null .build/game_password
 	printf '%s\n' "$(GAME_PASSWORD)" > .build/game_password
-	server_ip="$$($(TERRAFORM) output -raw server_ip)"; \
-		while read -r port map name; do \
-			echo "Checking $$name ($$server_ip:$$port, $$map)"; \
-			$(GAME_PROGRAM) --join "$$server_ip:$$port" --map "$$map" \
-				--game-password-file $(CURDIR)/.build/game_password --bot --exit-after-s $(CHECK_S) --label "check-$$port"; \
-		done < $(GAMES_FILE)
+	$(MAKE) -C $(GAME_DIR) check-server SERVER_ADDRESS=$$($(TERRAFORM) output -raw server_ip) \
+		GAME_PASSWORD_FILE=$(CURDIR)/.build/game_password
 
 list-gcp-resources: check-env
 	@echo "Everything labelled $(RESOURCE_LABEL) in $(GCP_PROJECT_ID) (the budget has no labels: see Billing, Budgets):"
@@ -174,7 +169,7 @@ test:
 	TF_DATA_DIR=$(TEST_DATA_DIR) $(TERRAFORM) validate
 	TF_DATA_DIR=$(TEST_DATA_DIR) $(TERRAFORM) test
 	mkdir -p .build/render
-	echo 'templatefile("$(CURDIR)/startup.sh.tftpl", {bucket = "bucket", games = [{port = 47810, map = "lunar-surface"}]})' | \
+	echo 'templatefile("$(CURDIR)/startup.sh.tftpl", {bucket = "bucket"})' | \
 		$(TERRAFORM) -chdir=.build/render console | sed -e '1d' -e '$$d' > .build/startup.sh
 	bash -n .build/startup.sh
 	bash -n site/install.sh

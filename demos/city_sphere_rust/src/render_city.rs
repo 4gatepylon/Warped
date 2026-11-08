@@ -771,7 +771,8 @@ pub fn push_mesh(
 /// `get_texture_path` gives texture `id`'s 2k diffuse image: City Sphere's own (`make
 /// download-assets`, in `assets/textures/`) or else the fps demo's.
 fn get_texture_path(id: &str) -> std::path::PathBuf {
-    let own: std::path::PathBuf = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let own: std::path::PathBuf = crate::app_bundle::OWN
+        .get_path()
         .join(format!("assets/textures/{id}/{id}_diff_2k.jpg"));
     if own.exists() {
         own

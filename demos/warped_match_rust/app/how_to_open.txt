@@ -7,9 +7,11 @@ Warped needs a Mac with Apple silicon (M1 or later) and macOS 13 or later.
    isn't notarized by Apple. Click Done, open System Settings, then Privacy & Security, scroll
    down and click Open Anyway next to Warped. You only do this once.
    (The install command on the download page skips this step.)
-3. Pick a game on the title screen with Up and Down, and start it with Return.
-   - Play online: asks once for the game's password; ask whoever runs the server.
-   - Host or join a game on this Wi-Fi: allow Local Network access when macOS asks.
+3. Pick a match on the title screen with Up and Down, and start it with Return: the online match,
+   or "Join a match by its address" (its IP and port, from whoever runs it). It asks once for the
+   game's password (leave it empty for a match without one).
+4. In the match window, press 1 for blue or 2 for red. Each round opens its level in its own
+   window; the full credits for every level are on its CREDITS page (Tab).
 
 If the game stops, a pop-up says why, and its log is in ~/Library/Logs/Warped/.
 

@@ -214,12 +214,19 @@ pub struct Appearance {
     pub lighting: serde_json::Value,
 }
 
-/// `load` reads a Euclidean map file.
+/// `BUILTIN_MAP_JSON` is `common/maps/dark_forest/map.json`, built into the program so that it
+/// runs from an app or a server bundle without this repository (W-126).
+const BUILTIN_MAP_JSON: &str = include_str!("../../../common/maps/dark_forest/map.json");
+
+/// `load` reads a Euclidean map file; `default_map_path()` gives the map built into the program.
 ///
 /// Example: `let map: MapFile = load(&path)?;`
 pub fn load(path: &Path) -> Result<MapFile, String> {
-    let text: String = std::fs::read_to_string(path)
-        .map_err(|error| format!("cannot read map {}: {error}", path.display()))?;
+    let text: String = match path == default_map_path() {
+        true => BUILTIN_MAP_JSON.to_string(),
+        false => std::fs::read_to_string(path)
+            .map_err(|error| format!("cannot read map {}: {error}", path.display()))?,
+    };
     let map: MapFile = serde_json::from_str(&text)
         .map_err(|error| format!("map {} is not a valid map: {error}", path.display()))?;
     if map.space.kind != "euclidean" {

@@ -210,7 +210,8 @@ fn get_surface_texture_paths() -> Vec<PathBuf> {
                 .map(|id| {
                     let relative: String = format!("textures/{id}/{id}_{map}_2k.jpg");
                     if DUST_SETS.contains(id) {
-                        Path::new(env!("CARGO_MANIFEST_DIR"))
+                        crate::app_bundle::OWN
+                            .get_path()
                             .join("assets")
                             .join(relative)
                     } else {

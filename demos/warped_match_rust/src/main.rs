@@ -169,6 +169,8 @@ const TEXT_LINE_PX: f32 = 12.0;
 const MENU_LEFT_PX: f32 = 4.0;
 const PLAYER_SETTINGS_HOME_PATH: &str = ".config/warped/player_settings.yaml";
 const GAME_PASSWORD_HOME_PATH: &str = "Library/Application Support/Warped/game_password";
+const LAST_SERVER_HOME_PATH: &str = "Library/Application Support/Warped/last_match_address";
+const APP_LEVELS_FILE: &str = "match_levels.yaml";
 const LOGS_HOME_FOLDER: &str = "Library/Logs/Warped";
 const ONLINE_GAMES_FILE: &str = "online_games.txt";
 const OWNER_ONLY_FILE_MODE: u32 = 0o600;
@@ -666,9 +668,13 @@ fn main() -> ExitCode {
     if is_title_screen {
         let _ = show_alert(&error.to_string());
     }
-    match error.downcast_ref::<net::PasswordRefused>() {
-        Some(_) => ExitCode::from(WRONG_PASSWORD_EXIT_CODE),
-        None => ExitCode::FAILURE,
+    let is_password_refused: bool = error.downcast_ref::<net::PasswordRefused>().is_some()
+        || error
+            .downcast_ref::<match_flow::MatchPasswordRefused>()
+            .is_some();
+    match is_password_refused {
+        true => ExitCode::from(WRONG_PASSWORD_EXIT_CODE),
+        false => ExitCode::FAILURE,
     }
 }
 
@@ -721,19 +727,23 @@ fn run(arguments: Arguments) -> Result<()> {
 fn run_match_server(arguments: &Arguments) -> Result<()> {
     let levels: Vec<match_flow::LevelEntry> = match_flow::LoadLevels(&arguments.match_levels)?;
     let folder: PathBuf = make_run_folder("match", arguments.label.as_deref())?;
-    let times: match_flow::MatchTimes = match_flow::MatchTimes {
-        intermission_s: arguments.intermission_s,
-        round_over_s: arguments.round_over_s,
-        match_s: arguments.match_s,
-    };
+    let game_password: Vec<u8> = net::read_game_password(arguments.game_password_file.as_deref())?;
     println!("Join with: make join-match SERVER=<this computer's address> (127.0.0.1 here)");
-    let state: match_state::MatchState = match_flow::serve_match(
-        &levels,
-        &times,
-        &folder,
-        arguments.match_port,
-        net::DEFAULT_PORT,
-    )?;
+    let state: match_state::MatchState =
+        match_flow::serve_match(&match_flow::MatchServerOptions {
+            levels: &levels,
+            levels_folder: get_levels_folder(&arguments.match_levels),
+            times: match_flow::MatchTimes {
+                intermission_s: arguments.intermission_s,
+                round_over_s: arguments.round_over_s,
+                match_s: arguments.match_s,
+            },
+            run_folder: &folder,
+            match_port: arguments.match_port,
+            level_port: net::DEFAULT_PORT,
+            game_password: &game_password,
+            game_password_file: arguments.game_password_file.as_deref(),
+        })?;
     let outcome: match_state::Outcome = state.outcome().expect("serve_match ends with an outcome");
     let rounds: Vec<Value> = state
         .rounds()
@@ -750,10 +760,19 @@ fn run_match_server(arguments: &Arguments) -> Result<()> {
     Ok(())
 }
 
+/// `get_levels_folder` gives the folder that the program paths in the levels file at `path` start
+/// from: the file's own folder.
+///
+/// Example: `let folder: &Path = get_levels_folder(&arguments.match_levels);`
+fn get_levels_folder(path: &Path) -> &Path {
+    path.parent().unwrap_or(Path::new("."))
+}
+
 /// `run_match_client` joins the match server at `address`: it shows the progression page
-/// (`match_menu.rs`) in a window, or prints it with `--bot`, and for each round it starts the
-/// round's level joined to `--team` (a window, or a `--bot-objective consoles` bot) and stops it
-/// when the round ends. It returns once the match is over.
+/// (`match_menu.rs`) in a window, or prints it with `--bot`, and for each round it starts this
+/// game's own copy of the round's level (from `--match-levels`) joined to `--team` (a window, or a
+/// `--bot-objective consoles` bot) and stops it when the round ends. It returns once the match is
+/// over, or after `--exit-after-s` once the server has answered.
 ///
 /// Example: `run_match_client(&arguments, "127.0.0.1")?;`
 fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
@@ -768,7 +787,12 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
     if arguments.bot && team.is_none() {
         return Err("--match with --bot needs --team blue or --team red".into());
     }
-    let mut client: match_flow::MatchClient = match_flow::MatchClient::Connect(server, team)?;
+    let my_levels: Vec<match_flow::LevelEntry> = match_flow::LoadLevels(&arguments.match_levels)?;
+    let levels_folder: &Path = get_levels_folder(&arguments.match_levels);
+    let game_password: Vec<u8> = net::read_game_password(arguments.game_password_file.as_deref())?;
+    let mut client: match_flow::MatchClient =
+        match_flow::MatchClient::Connect(server, team, game_password)?;
+    let started_at: Instant = Instant::now();
     let mut level: Option<(usize, Child)> = None;
     let window: Option<(sdl3::Sdl, sdl3::render::WindowCanvas)> = match arguments.bot {
         true => None,
@@ -796,6 +820,16 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
     let mut is_over_announced: bool = false;
     let result: Result<()> = (|| loop {
         client.poll()?;
+        if let Some(seconds) = arguments.exit_after_s
+            && started_at.elapsed().as_secs_f64() >= seconds
+        {
+            return match client.view {
+                Some(_) => Ok(()),
+                None => {
+                    Err(format!("the match server at {server} didn't answer in {seconds} s").into())
+                }
+            };
+        }
         for event in event_pump
             .iter_mut()
             .flat_map(|pump| pump.poll_iter().collect::<Vec<Event>>())
@@ -838,7 +872,9 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                 match_flow::stop_child(&mut Some(child));
             }
             if let (Some((round, index, port)), Some(team)) = (playing, client.team) {
-                let extra: Vec<String> = match arguments.bot {
+                let my_level: &match_flow::LevelEntry =
+                    match_flow::find_level(&my_levels, &view.levels[index].name)?;
+                let mut extra: Vec<String> = match arguments.bot {
                     true => {
                         let label: String = format!("match-{}-round-{round}", team.get_name());
                         let mut extra: Vec<String> = [
@@ -850,15 +886,22 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
                         ]
                         .map(String::from)
                         .to_vec();
-                        if view.levels[index].takes_bot_label {
+                        if my_level.takes_bot_label {
                             extra.extend(["--label".to_string(), label]);
                         }
                         extra
                     }
                     false => Vec::new(),
                 };
+                if let Some(path) = &arguments.game_password_file {
+                    extra.extend([
+                        "--game-password-file".to_string(),
+                        path.display().to_string(),
+                    ]);
+                }
                 let mut command: Command = match_flow::make_level_client_command(
-                    &view.levels[index],
+                    my_level,
+                    levels_folder,
                     server.ip(),
                     port,
                     team,
@@ -884,7 +927,12 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
         match &mut canvas {
             Some(canvas) => {
                 if let (None, Some(creator)) = (&thumbnails, &texture_creator) {
-                    thumbnails = Some(make_thumbnails(creator, &view.levels)?);
+                    let levels: Vec<match_flow::LevelEntry> = view
+                        .levels
+                        .iter()
+                        .map(|level| match_flow::find_level(&my_levels, &level.name).cloned())
+                        .collect::<Result<_>>()?;
+                    thumbnails = Some(make_thumbnails(creator, &levels, levels_folder)?);
                 }
                 let size_px: (u32, u32) = canvas.window().size_in_pixels();
                 draw_shapes(
@@ -990,25 +1038,42 @@ fn pick_title_choice(title_screen: &mut title::TitleScreen) -> Result<Option<tit
     }
 }
 
-/// `start_title_choice` runs the chosen game as this program with its flags until it ends, its
-/// output in a log under `~/Library/Logs/Warped/`; an online game first asks for the game's
-/// password once and keeps it, and forgets it if the server refuses it.
+/// `start_title_choice` runs the chosen match as this program with its flags until it ends, its
+/// output in a log under `~/Library/Logs/Warped/`: it asks for the address when the choice needs
+/// one, and for the game's password once (empty for none) and keeps it, forgetting it if the
+/// server refuses it. From an app, the match plays the levels in the app's levels file.
 ///
-/// Example: `start_title_choice(&title::Choice::Join(MapName::HouseDemo))?;`
+/// Example: `start_title_choice(&title::Choice::Address)?;`
 fn start_title_choice(choice: &title::Choice) -> Result<()> {
     let home: PathBuf = PathBuf::from(std::env::var_os("HOME").ok_or("HOME isn't set")?);
     let password_path: PathBuf = home.join(GAME_PASSWORD_HOME_PATH);
     let mut flags: Vec<String> = choice.get_flags();
+    if choice.needs_address() {
+        let Some(address) = ask_server_address(&home.join(LAST_SERVER_HOME_PATH))? else {
+            return Ok(());
+        };
+        flags.push(address);
+    }
     if choice.is_online() {
         if !password_path.exists() {
             let Some(password) = ask_game_password()? else {
                 return Ok(());
             };
-            save_game_password(&password_path, &password)?;
+            if !password.is_empty() {
+                save_game_password(&password_path, &password)?;
+            }
         }
+        if password_path.exists() {
+            flags.extend([
+                "--game-password-file".to_string(),
+                password_path.display().to_string(),
+            ]);
+        }
+    }
+    if let Some(resources) = app_bundle::get_app_resources_folder() {
         flags.extend([
-            "--game-password-file".to_string(),
-            password_path.display().to_string(),
+            "--match-levels".to_string(),
+            resources.join(APP_LEVELS_FILE).display().to_string(),
         ]);
     }
     let logs_folder: PathBuf = home.join(LOGS_HOME_FOLDER);
@@ -1020,7 +1085,7 @@ fn start_title_choice(choice: &title::Choice) -> Result<()> {
         .stdout(log.try_clone()?)
         .stderr(log)
         .status()?;
-    if status.code() == Some(i32::from(WRONG_PASSWORD_EXIT_CODE)) {
+    if status.code() == Some(i32::from(WRONG_PASSWORD_EXIT_CODE)) && password_path.exists() {
         fs::remove_file(&password_path)?;
     }
     if status.success() {
@@ -1038,8 +1103,8 @@ fn start_title_choice(choice: &title::Choice) -> Result<()> {
     .into())
 }
 
-/// `ask_game_password` asks the player for the game's password in a dialog, or gives `None` if
-/// they cancel.
+/// `ask_game_password` asks the player for the game's password in a dialog (empty for a server
+/// without one), or gives `None` if they cancel.
 ///
 /// Example: `let password = ask_game_password()?;`
 fn ask_game_password() -> Result<Option<String>> {
@@ -1052,8 +1117,9 @@ fn ask_game_password() -> Result<Option<String>> {
     if !output.status.success() {
         return Ok(None);
     }
-    let password: String = String::from_utf8(output.stdout)?.trim_end().to_string();
-    Ok((!password.is_empty()).then_some(password))
+    Ok(Some(
+        String::from_utf8(output.stdout)?.trim_end().to_string(),
+    ))
 }
 
 /// `save_game_password` writes `password` to `path`, readable only by this user.
@@ -1071,6 +1137,46 @@ fn save_game_password(path: &Path, password: &str) -> Result<()> {
         .open(path)?;
     writeln!(file, "{password}")?;
     Ok(())
+}
+
+/// `ask_server_address` asks the player for a match server's address (`IP:port`) in a dialog that
+/// starts with the last one, kept at `last_address_path`; it gives `None` if they cancel, or if
+/// the text isn't an address (after saying so in a pop-up).
+///
+/// Example: `let address = ask_server_address(&home.join(LAST_SERVER_HOME_PATH))?;`
+fn ask_server_address(last_address_path: &Path) -> Result<Option<String>> {
+    let last_address: String = match last_address_path.exists() {
+        true => fs::read_to_string(last_address_path)?.trim().to_string(),
+        false => String::new(),
+    };
+    let output: std::process::Output = Command::new("osascript")
+        .args([
+            "-e",
+            "on run argv",
+            "-e",
+            "text returned of (display dialog \"The match server's address, its IP and port (ask whoever runs it), e.g. 34.1.2.3:47850:\" default answer (item 1 of argv) with title \"Warped\")",
+            "-e",
+            "end run",
+            &last_address,
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let address: String = String::from_utf8(output.stdout)?.trim().to_string();
+    if parse_server_address(&address, match_flow::MATCH_PORT).is_none() {
+        show_alert(&format!(
+            "{address:?} isn't a server's address; type its IP and port, such as 34.1.2.3:47850."
+        ))?;
+        return Ok(None);
+    }
+    fs::create_dir_all(
+        last_address_path
+            .parent()
+            .ok_or("an address file has a folder")?,
+    )?;
+    fs::write(last_address_path, &address)?;
+    Ok(Some(address))
 }
 
 /// `show_alert` shows `message` in a pop-up and waits for the player to close it.
@@ -5066,7 +5172,11 @@ fn save_progression_pictures(arguments: &Arguments) -> Result<()> {
         let surface = sdl3::surface::Surface::new(width_px, height_px, PixelFormat::RGBA32)?;
         let mut canvas: sdl3::render::Canvas<sdl3::surface::Surface> = surface.into_canvas()?;
         let creator = canvas.texture_creator();
-        let thumbnails: Vec<Option<Thumbnail>> = make_thumbnails(&creator, &levels)?;
+        let thumbnails: Vec<Option<Thumbnail>> = make_thumbnails(
+            &creator,
+            &levels,
+            get_levels_folder(&arguments.match_levels),
+        )?;
         draw_shapes(
             &mut canvas,
             (width_px, height_px),
@@ -5098,20 +5208,22 @@ struct Thumbnail<'creator> {
 }
 
 /// `make_thumbnails` gives each level's map picture as a texture from `creator`, with its size in
-/// pixels, for the progression page: the PNG at the level's `map_picture`, or for a level on
-/// this demo's own map the map page's picture without labels. A level with neither, or whose
-/// PNG isn't there yet (its branch not built by `make levels`), gets `None`.
+/// pixels, for the progression page: the PNG at the level's `map_picture` (a path from
+/// `levels_folder`), or for a level on this demo's own map the map page's picture without labels.
+/// A level with neither, or whose PNG isn't there yet (its branch not built by `make levels`),
+/// gets `None`.
 ///
-/// Example: `let thumbnails = make_thumbnails(&canvas.texture_creator(), &view.levels)?;`
+/// Example: `let thumbnails = make_thumbnails(&canvas.texture_creator(), &levels, folder)?;`
 fn make_thumbnails<'creator, T>(
     creator: &'creator sdl3::render::TextureCreator<T>,
     levels: &[match_flow::LevelEntry],
+    levels_folder: &Path,
 ) -> Result<Vec<Option<Thumbnail<'creator>>>> {
     let mut thumbnails: Vec<Option<Thumbnail>> = Vec::new();
     for level in levels {
         let picture: Option<(Vec<u8>, (u32, u32))> = match (&level.map_picture, &level.map) {
             (Some(path), _) => {
-                let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+                let path: PathBuf = levels_folder.join(path);
                 match path.exists() {
                     true => {
                         let image: image::RgbaImage = image::open(&path)?.to_rgba8();

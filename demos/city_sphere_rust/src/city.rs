@@ -1786,7 +1786,7 @@ fn make_map_base(world: &CityWorld, size_px: (usize, usize)) -> Vec<u8> {
 
 /// `get_map_picture_path` gives where `--map-picture` saves the map page's picture.
 fn get_map_picture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH)
+    crate::app_bundle::OWN.get_path().join(MAP_PICTURE_PATH)
 }
 
 /// `load_map_picture` reads the rendered map picture (`--map-picture`), or gives `None` when it is

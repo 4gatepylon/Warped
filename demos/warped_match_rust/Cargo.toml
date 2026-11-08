@@ -38,3 +38,7 @@ sdl3 = { version = "0.22", features = ["build-from-source-static"] }
 [[bin]]
 name = "wormholes_server"
 test = false
+
+[[bin]]
+name = "match_server"
+test = false

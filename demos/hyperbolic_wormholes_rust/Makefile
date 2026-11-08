@@ -11,6 +11,9 @@
 #     (GAME_PASSWORD_FILE, with serve-game and join-game: a file holding the game's password; only players who know it may join.)
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
+#     make package-mac-app SERVER_ADDRESS=<ip>: the same, with the games of $(GAMES) at <ip> on its title screen.
+#     make check-server SERVER_ADDRESS=<ip> GAME_PASSWORD_FILE=<file>: join each game of $(GAMES) at <ip> with a bot for $(CHECK_S) s.
+#     ($(GAMES) lists the cloud's games, `<port> <map> <name>`; build-server-bundle writes the services.txt that runs them.)
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
@@ -38,6 +41,9 @@ APP_ZIP := .build/Warped.zip
 APP_ICONSET := .build/AppIcon.iconset
 APP_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)
 ONLINE_GAMES ?=
+SERVER_ADDRESS ?=
+GAMES := app/games.txt
+CHECK_S := 5
 FPS_DEMO_ASSETS := ../fps_demo/assets
 MAP_MODELS := ../../common/maps/models
 SERVER_SETTINGS_FLAG := $(if $(SERVER_SETTINGS),--server-settings $(SERVER_SETTINGS))
@@ -50,7 +56,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help serve-game join-game build-server-bundle package-mac-app check-server bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -61,6 +67,8 @@ help:
 	@echo "  (serve-game and join-game take GAME_PASSWORD_FILE=password.txt: only players who know it join)"
 	@echo "  make build-server-bundle                         Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"
 	@echo "  make package-mac-app ONLINE_GAMES=games.txt      Build Warped.app and zip it ($(APP_ZIP)); ONLINE_GAMES is optional"
+	@echo "  make package-mac-app SERVER_ADDRESS=34.1.2.3     The same, listing the games of $(GAMES) at that address"
+	@echo "  make check-server SERVER_ADDRESS=34.1.2.3        Join each game of $(GAMES) there with a bot for $(CHECK_S) s"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
 	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
@@ -78,10 +86,22 @@ serve-game:
 join-game:
 	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) $(PLAYER_SETTINGS_FLAG) $(GAME_PASSWORD_FLAG)
 
+check-server:
+	cargo build --release
+	while read -r port map name; do \
+		echo "Checking $$name ($(SERVER_ADDRESS):$$port, $$map)"; \
+		.build/release/hyperbolic-wormholes --join "$(SERVER_ADDRESS):$$port" --map "$$map" $(GAME_PASSWORD_FLAG) \
+			--bot --exit-after-s $(CHECK_S) --label "check-$$port" || exit 1; \
+	done < $(GAMES)
+
 build-server-bundle:
 	rustup target add $(SERVER_TARGET)
 	cargo build --release --target $(SERVER_TARGET) --bin wormholes_server
-	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(SERVER_TARGET)/release wormholes_server
+	rm -rf .build/server_bundle
+	mkdir -p .build/server_bundle
+	cp .build/$(SERVER_TARGET)/release/wormholes_server .build/server_bundle/
+	awk '{ print $$1, "wormholes_server --map", $$2 }' $(GAMES) > .build/server_bundle/services.txt
+	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/server_bundle .
 	@echo "Server bundle: $(SERVER_BUNDLE)"
 
 package-mac-app:
@@ -96,6 +116,7 @@ package-mac-app:
 	done
 	iconutil -c icns $(APP_ICONSET) -o $(APP)/Contents/Resources/AppIcon.icns
 	$(if $(ONLINE_GAMES),cp $(ONLINE_GAMES) $(APP)/Contents/Resources/online_games.txt)
+	$(if $(SERVER_ADDRESS),awk -v ip=$(SERVER_ADDRESS) '{ $$1 = ip ":" $$1; print }' $(GAMES) > $(APP)/Contents/Resources/online_games.txt)
 	mkdir -p $(APP)/Contents/Resources/assets/models $(APP)/Contents/Resources/models
 	cp -R $(FPS_DEMO_ASSETS)/textures $(APP)/Contents/Resources/assets/textures
 	cp -R $(FPS_DEMO_ASSETS)/models/bolt_action_rifle_7_62 $(APP)/Contents/Resources/assets/models/

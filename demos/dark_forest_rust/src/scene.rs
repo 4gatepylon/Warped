@@ -476,11 +476,9 @@ impl Scene {
         );
 
         let viewmodel: Viewmodel = load_viewmodel(renderer, assets_dir, options, emissive_scale);
-        let beacon_path: PathBuf = crate::map::default_map_path()
-            .parent()
-            .and_then(Path::parent)
-            .expect("the default map sits in common/maps/<map>/")
-            .join("models/scifi_beacon/scene.gltf");
+        let beacon_path: PathBuf = crate::app_bundle::MODELS
+            .get_path()
+            .join("scifi_beacon/scene.gltf");
         let beacon: Model = load_model(
             renderer,
             &beacon_path,

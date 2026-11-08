@@ -1,8 +1,8 @@
 # Infra
 
-The Rust demo's cloud deploy on Google Cloud, in Terraform, so players can play over the internet (W-42 (server
-in the cloud)): one small VM runs a game server for each line of [`games.txt`](games.txt), protected by the game's
-password, and a public bucket serves the download page (W-116 (download page)).
+The cloud deploy on Google Cloud, in Terraform, so players can play over the internet (W-42 (server in the cloud)):
+one small VM runs the online match (W-126 (online match)), every level protected by the game's password, and a public
+bucket serves the download page with the app that plays all five levels (W-116 (download page)).
 
 ## Set up once
 
@@ -14,8 +14,18 @@ password, and a public bucket serves the download page (W-116 (download page)).
 
 ## Deploy in one click
 
-Any game can use this: `GAME_DIR` names its folder (the Rust demo by default), whose Makefile must have
-`build-server-bundle` and `package-mac-app`, and `GAMES_FILE` lists its games (`games.txt` by default).
+Any game can use this: `GAME_DIR` names its folder (the match, `../demos/warped_match_rust`, by default), whose
+Makefile must have:
+
+- `build-server-bundle`: `.build/server_bundle.tar.gz`, unpacked on the VM in `/opt/warped/`, with a `services.txt`
+  of one service a line, `<port> <program> <arguments>`. The VM runs each as `/opt/warped/<program> --port <port>
+  <arguments> --game-password-file <the password>`, in its own writable folder, `/var/lib/warped-<port>`
+  ([`startup.sh.tftpl`](startup.sh.tftpl)). The firewall opens UDP 47800 to 47899.
+- `package-mac-app SERVER_ADDRESS=<ip>`: `.build/Warped.zip`, whose app joins the services at `<ip>`.
+- `check-server SERVER_ADDRESS=<ip> GAME_PASSWORD_FILE=<file>`: a short check that they answer.
+
+`GAME_DIR=../demos/hyperbolic_wormholes_rust` deploys the Lunar Surface demo alone instead, with the games of its
+`app/games.txt`.
 
 ```bash
 make deploy-everything
@@ -24,19 +34,21 @@ make check-game-servers
 
 - `deploy-everything` goes from an empty project to a download page: it writes a random `GAME_PASSWORD` into `.env`
   if there is none, prepares the project, applies the Terraform, uploads the server bundle (built on this Mac for
-  Linux, so the VM never clones the repository) and restarts the VM, then builds the app with the online games at the
+  Linux, so the VM never clones the repository) and restarts the VM, then builds the app with the online match at the
   VM's IP and uploads it with the [download page](site/index.html) and its [install script](site/install.sh). It
   prints the page's address; share it, and the password, with the players.
 - Each step is also its own target: `deploy-game-servers` after changing the server, `deploy-download-page` after
   changing the app or the page.
-- `check-game-servers`, a minute after a deploy, joins every game in `games.txt` with a bot from this Mac.
+- `check-game-servers`, a minute after a deploy, joins the VM's match with a bot from this Mac for 5 s.
+- After a level changes, `make deploy-everything` again ships it: the bundle and the app are rebuilt from the
+  checkout.
 - Downloads are uploaded with `Cache-Control: no-store`, so a new deploy shows at once.
 
 ## Only the download page
 
 `HAS_GAME_SERVERS=false` in `.env` deploys only the download page: its bucket and the budget, with no VM. The app then
-has no online games on its title screen; players join a server by typing its address ("Join a server by its address"),
-such as one run from a checkout with `make serve-game`. Set it back to `true` and run `make deploy-everything` again
+has no online match on its title screen; players join one by typing its address ("Join a match by its address"),
+such as one run from a checkout with `make serve-match`. Set it back to `true` and run `make deploy-everything` again
 to add the game servers.
 
 ## See what's running

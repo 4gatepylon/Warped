@@ -1322,7 +1322,8 @@ const MAP_PICTURE_EYE_H_M: f64 = 60.0;
 ///
 /// Example: `let path = get_map_picture_path(&map, MapName::Dust);`
 fn get_map_picture_path(map: &map::Map, map_name: MapName) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    app_bundle::OWN
+        .get_path()
         .join("map_pictures")
         .join(format!(
             "{}_r{:.0}m.png",

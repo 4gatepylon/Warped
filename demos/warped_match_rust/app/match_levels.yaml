@@ -1,0 +1,47 @@
+# The online match's levels (W-126), as shipped: `make package-mac-app` puts this file in the app's
+# Contents/Resources/ and `make build-server-bundle` at the root of the server bundle, and each side
+# reads its own paths from it, relative to the folder it sits in. `program` is the level's window in
+# the app (Contents/MacOS/<level folder>, or `self` for this demo), `server_program` its server in
+# the bundle (levels/<level folder>/<its server>), and `map_picture` its picture for the progression
+# page, in the level's own folder of the app's Resources. The order and the names match
+# match_levels.yaml, the levels file for the checkout; see README.md, "Level interface".
+levels:
+  - name: Dust
+    folder: demos/dust_rust
+    branch: claude/online-match
+    status: shipped in the app and the server bundle
+    program: ../MacOS/dust_rust
+    server_program: levels/dust_rust/wormholes_server
+    map_picture: dust_rust/map_pictures/dust_r50m.png
+    map: dust
+  - name: Snow Planet
+    folder: demos/snow_planet_rust
+    branch: claude/online-match
+    status: shipped in the app and the server bundle
+    program: ../MacOS/snow_planet_rust
+    server_program: levels/snow_planet_rust/snow_planet_server
+    map_picture: snow_planet_rust/map_pictures/snow_planet.png
+    map: snow-planet
+  - name: City Sphere
+    folder: demos/city_sphere_rust
+    branch: claude/online-match
+    status: shipped in the app and the server bundle
+    program: ../MacOS/city_sphere_rust
+    server_program: levels/city_sphere_rust/city_sphere_server
+    map_picture: city_sphere_rust/assets/map_picture.png
+    map: city-sphere
+  - name: Dark Forest
+    folder: demos/dark_forest_rust
+    branch: claude/online-match
+    status: shipped without the Sketchfab revolver and arms (it shows the rifle)
+    program: ../MacOS/dark_forest_rust
+    server_program: levels/dark_forest_rust/dark-forest-server
+    map_picture: dark_forest_rust/assets/map_picture.png
+    takes_bot_label: false
+  - name: Lunar Surface
+    folder: demos/hyperbolic_wormholes_rust
+    branch: claude/online-match
+    status: shipped (this demo)
+    program: self
+    server_program: wormholes_server
+    map: lunar-surface

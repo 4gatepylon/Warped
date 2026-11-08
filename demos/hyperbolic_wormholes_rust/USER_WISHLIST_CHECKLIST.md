@@ -17,8 +17,11 @@ is in [`AGENTS.md`](AGENTS.md).
   not on `staging/user-4gatepylon` ("staging is going to be unstable"). Claimed by Claude Code (session
   `424fcf46-e362-48b1-8e23-4eed979a478f`), branch `claude/online-match`, 2026-11-08.
   - **Where the work is**: worktree `/Users/4gate/git/Warped/.claude/worktrees/laser-trajectory-demo-bc16f5` on
-    the user's Mac, branch `claude/online-match` (pushed). State on 2026-11-08: surveying what each level needs to
-    run from the app and on the Linux server.
+    the user's Mac, branch `claude/online-match` (pushed). State on 2026-11-08: done and tested locally (a whole
+    7-round bot match across all five levels, from the packaged app and a Mac build of the server bundle); not yet
+    deployed to the cloud VM. Dark Forest shows the rifle until its Sketchfab models are embedded. How it works and
+    the contract a level meets to ship: `demos/warped_match_rust/README.md`, "The online match". Pictures and logs:
+    `demos/warped_match_rust/.artifacts/online_match/` (git-ignored, on the user's Mac).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,

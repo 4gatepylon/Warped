@@ -15,7 +15,6 @@ variables {
   zone               = "us-central1-a"
   monthly_budget_usd = 30
   game_password      = "test password"
-  games_file         = "games.txt"
 }
 
 run "page_only" {
@@ -45,6 +44,10 @@ run "with_game_servers" {
   assert {
     condition     = length(google_compute_instance.game_server) == 1 && length(google_compute_firewall.games) == 1
     error_message = "With game servers there is one VM and its firewall."
+  }
+  assert {
+    condition     = anytrue([for rule in google_compute_firewall.games[0].allow : contains(rule.ports, "47800-47899")])
+    error_message = "The firewall opens Warped's UDP port range, whatever the bundle serves on."
   }
   assert {
     condition     = google_storage_bucket.site.name == "test-project-site"

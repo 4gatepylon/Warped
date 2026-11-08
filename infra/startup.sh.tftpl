@@ -1,11 +1,14 @@
 #!/bin/bash
 # `startup.sh.tftpl` is the game server VM's startup script, which Google Cloud runs as root on
-# every boot: it downloads the newest server bundle from the private bucket, writes the game's
-# password from the VM's metadata, and (re)starts one systemd service per game.
+# every boot: it downloads the newest server bundle from the private bucket into /opt/warped,
+# writes the game's password from the VM's metadata, and (re)starts one systemd service for each
+# line of the bundle's `services.txt` (W-126).
 #
 # Interface:
-#     Template variables (Terraform's `templatefile`): bucket, the private bucket's name; games,
-#     a list of {port, map}.
+#     Template variables (Terraform's `templatefile`): bucket, the private bucket's name.
+#     The bundle's `services.txt`: one service a line, `<port> <program> <arguments>`, which runs as
+#     `/opt/warped/<program> --port <port> <arguments> --game-password-file <the password>`, in
+#     its own writable folder, /var/lib/warped-<port>.
 #
 # Example:
 #     sudo google_metadata_script_runner startup
@@ -15,30 +18,34 @@
 #       serial console's log.
 set -euo pipefail
 metadata_url="http://metadata.google.internal/computeMetadata/v1/instance"
-mkdir -p /opt/warped/games
+mkdir -p /opt/warped
 token="$(curl -fsS -H 'Metadata-Flavor: Google' "$${metadata_url}/service-accounts/default/token" | sed -E 's/.*"access_token":"([^"]+)".*/\1/')"
 curl -fsS -H "Authorization: Bearer $${token}" -o /opt/warped/server_bundle.tar.gz \
   "https://storage.googleapis.com/storage/v1/b/${bucket}/o/server_bundle.tar.gz?alt=media"
 tar -xzf /opt/warped/server_bundle.tar.gz -C /opt/warped
 curl -fsS -H 'Metadata-Flavor: Google' -o /opt/warped/game_password "$${metadata_url}/attributes/game-password"
 chmod 600 /opt/warped/game_password
-cat > /etc/systemd/system/warped-game@.service <<'EOF'
+systemctl stop 'warped-*' || true
+rm -f /etc/systemd/system/warped-*.service
+while read -r port program arguments; do
+  cat > "/etc/systemd/system/warped-$${port}.service" <<EOF
 [Unit]
-Description=Warped game server on UDP port %i
+Description=Warped: $${program} on UDP port $${port}
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-EnvironmentFile=/opt/warped/games/%i.env
 LoadCredential=game_password:/opt/warped/game_password
-ExecStart=/opt/warped/wormholes_server --port %i --map $${MAP} --game-password-file %d/game_password
+ExecStart=/opt/warped/$${program} --port $${port} $${arguments} --game-password-file %d/game_password
 DynamicUser=yes
+StateDirectory=warped-$${port}
+WorkingDirectory=/var/lib/warped-$${port}
 Restart=always
 RestartSec=1
 EOF
+done < /opt/warped/services.txt
 systemctl daemon-reload
-%{ for game in games ~}
-echo "MAP=${game.map}" > /opt/warped/games/${game.port}.env
-systemctl restart warped-game@${game.port}
-%{ endfor ~}
-echo "Warped: started ${length(games)} game servers."
+while read -r port program arguments; do
+  systemctl restart "warped-$${port}"
+done < /opt/warped/services.txt
+echo "Warped: started $(wc -l < /opt/warped/services.txt) services."

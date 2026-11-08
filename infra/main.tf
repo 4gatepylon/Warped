@@ -1,6 +1,6 @@
-# `main.tf` is the Warped cloud deploy on Google Cloud: one small VM that runs a game server per
-# line of `games.txt`, a public bucket for the download page, a private bucket for the server
-# bundle, and a monthly budget.
+# `main.tf` is the Warped cloud deploy on Google Cloud: one small VM that runs the services of the
+# server bundle's `services.txt` (the online match, W-126), a public bucket for the download page, a
+# private bucket for the server bundle, and a monthly budget.
 #
 # Interface:
 #     Variables in `variables.tf`, outputs in `outputs.tf`; the Makefile runs it.
@@ -13,6 +13,8 @@
 #       firewall or server bucket.
 #     - The VM's startup script (`startup.sh.tftpl`) runs on every boot and fetches the newest
 #       bundle, so resetting the VM deploys a new server.
+#     - The firewall opens all of Warped's UDP ports (local.game_port_range), so a bundle may
+#       serve on any of them.
 #     - The e2-micro VM, its 30 GB of standard disk and 200 GB a month of Standard-tier traffic are
 #       free in us-central1, us-west1 and us-east1; the static IP is not.
 
@@ -41,10 +43,7 @@ provider "google" {
 }
 
 locals {
-  games = [for line in compact(split("\n", file(var.games_file))) : {
-    port = tonumber(split(" ", line)[0])
-    map  = split(" ", line)[1]
-  }]
+  game_port_range   = "47800-47899"
   game_server_tag   = "warped-game-server"
   game_server_count = var.has_game_servers ? 1 : 0
 }
@@ -65,7 +64,7 @@ resource "google_compute_firewall" "games" {
   target_tags   = [local.game_server_tag]
   allow {
     protocol = "udp"
-    ports    = [for game in local.games : tostring(game.port)]
+    ports    = [local.game_port_range]
   }
 }
 
@@ -152,7 +151,6 @@ resource "google_compute_instance" "game_server" {
     game-password = var.game_password
     startup-script = templatefile("${path.module}/startup.sh.tftpl", {
       bucket = google_storage_bucket.server[0].name
-      games  = local.games
     })
   }
 }

@@ -8,6 +8,7 @@
 //!
 //! Interface: the command-line flags below; controls are in the README.
 
+mod app_bundle;
 #[allow(dead_code)]
 mod asset_manifest;
 mod assets;
@@ -191,6 +192,10 @@ struct Args {
     /// Join this team at once (`blue` or `red`); otherwise the server picks.
     #[arg(long, value_parser = ["blue", "red"])]
     team: Option<String>,
+    /// A file holding the game's password: a server (--serve, --host) admits only players who prove
+    /// they know it, and a player (--join, --host) proves it. Without it the password is empty.
+    #[arg(long)]
+    game_password_file: Option<PathBuf>,
     /// Let the autopilot play this window (a bot for tests).
     #[arg(long)]
     bot: bool,
@@ -662,6 +667,11 @@ fn main() {
         args.shadow_distance_m = MAP_PICTURE_SHADOW_DISTANCE_M;
     }
     let map_path: PathBuf = args.map.clone().unwrap_or_else(map::default_map_path);
+    let game_password: Vec<u8> = net::read_game_password(args.game_password_file.as_deref())
+        .unwrap_or_else(|error| {
+            eprintln!("error: {error}");
+            std::process::exit(2);
+        });
     if let Some(path) = &args.export_map {
         let json: String = serde_json::to_string(&forest_layout::build()).expect("map JSON");
         std::fs::write(path, json + "\n").expect("can't write the map");
@@ -673,7 +683,7 @@ fn main() {
             port: args.port,
             map_path,
             level_result_file: args.level_result_file.clone(),
-            game_password: Vec::new(),
+            game_password: game_password.clone(),
         };
         if let Err(error) = server::run(&options, &AtomicBool::new(false)) {
             eprintln!("error: {error}");
@@ -681,16 +691,15 @@ fn main() {
         }
         return;
     }
-    let manifest_dir: &Path = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let assets_dir: PathBuf = args.assets_dir.clone().unwrap_or_else(|| {
-        manifest_dir
-            .join("../fps_demo")
+    let assets_dir: PathBuf = args
+        .assets_dir
+        .clone()
+        .unwrap_or_else(|| app_bundle::ASSETS.get_path());
+    let textures_dir: PathBuf = args.textures_dir.clone().unwrap_or_else(|| {
+        app_bundle::OWN
+            .get_path()
             .join(asset_manifest::ASSETS_DIR_NAME)
     });
-    let textures_dir: PathBuf = args
-        .textures_dir
-        .clone()
-        .unwrap_or_else(|| manifest_dir.join(asset_manifest::ASSETS_DIR_NAME));
     let map_file: map::MapFile = map::load(&map_path).unwrap_or_else(|error| {
         eprintln!(
             "error: {error}; write it with --export-map {}",
@@ -775,7 +784,7 @@ fn main() {
                 port: args.port,
                 map_path: map_path.clone(),
                 level_result_file: args.level_result_file.clone(),
-                game_password: Vec::new(),
+                game_password: game_password.clone(),
             };
             std::thread::spawn(move || {
                 if let Err(error) = server::run(&options, &AtomicBool::new(false)) {
@@ -808,7 +817,7 @@ fn main() {
             }
         };
         Some(
-            net::Client::Connect(address, &map_file.name, b"").unwrap_or_else(|error| {
+            net::Client::Connect(address, &map_file.name, &game_password).unwrap_or_else(|error| {
                 eprintln!("error: can't reach {address}: {error}");
                 std::process::exit(2);
             }),
@@ -855,7 +864,7 @@ fn main() {
         std::process::exit(2);
     });
     let mut minimap: Minimap = Minimap::New(&session.arena);
-    minimap.load_photo(&Path::new(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
+    minimap.load_photo(&app_bundle::OWN.get_path().join(MAP_PICTURE_PATH));
     let mut marks: Vec<Mark> = Vec::new();
     let mut menu: Option<Menu> = None;
     let mut menu_picture: TextPicture =
