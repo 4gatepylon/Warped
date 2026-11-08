@@ -13,6 +13,7 @@
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
+#     make download-assets: download the space station's Poly Haven CC0 metal textures into assets/textures/.
 #     make map-picture: render the menu's map picture (the sphere seen from its centre, unrolled) into assets/map_picture.png.
 #     make photos WIDTH_PX=<n> HEIGHT_PX=<n>: render City Sphere's photogenic views once each into .artifacts/photos/.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
@@ -31,6 +32,7 @@ AUTOPILOT_WIDTH_PX ?= 640
 AUTOPILOT_HEIGHT_PX ?= 400
 PORT ?= 47810
 ROUTE ?= legs
+STATION_TEXTURE_IDS := blue_metal_plate metal_plate_02
 MAP ?= city-sphere
 TEAM ?=
 TEAM_FLAG := $(if $(TEAM),--team $(TEAM))
@@ -59,7 +61,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help map-picture photos play-game run-bot play-route serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help download-assets map-picture photos play-game run-bot play-route serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -139,6 +141,9 @@ bench-views:
 
 run-autopilot:
 	cargo run --release -- --renderer $(RENDERER) --autopilot --width-px $(AUTOPILOT_WIDTH_PX) --height-px $(AUTOPILOT_HEIGHT_PX)
+
+download-assets:
+	for id in $(STATION_TEXTURE_IDS); do mkdir -p assets/textures/$$id && curl -fsSL -o assets/textures/$$id/$${id}_diff_2k.jpg https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/$$id/$${id}_diff_2k.jpg; done
 
 test:
 	cargo test --release

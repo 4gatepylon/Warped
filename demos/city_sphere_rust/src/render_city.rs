@@ -41,7 +41,7 @@ const BEACON_TEAM_COLORS: [[f32; 3]; 2] = [[0.3, 0.55, 1.0], [1.0, 0.3, 0.25]];
 const BEACON_FLAG: f32 = 2.0;
 const BEACON_LAYER: usize = TEXTURE_IDS.len();
 const BEACON_MODEL: &str = "scifi_beacon";
-const TEXTURE_IDS: [&str; 4] = ["asphalt_02", "concrete_wall_008", "brick_wall_02", "metal_plate"];
+const TEXTURE_IDS: [&str; 4] = ["metal_plate", "metal_plate_02", "blue_metal_plate", "metal_plate"];
 const LAYER_STREET: f32 = 0.0;
 const LAYER_CONCRETE: f32 = 1.0;
 const LAYER_BRICK: f32 = 2.0;
@@ -58,7 +58,7 @@ const CORE_LON_COUNT: usize = 32;
 const CORE_LAT_COUNT: usize = 16;
 const SKY_COLOR: [f32; 4] = [0.05, 0.03, 0.08, 1.0];
 const CORE_LIGHT: [f32; 4] = [1.0, 0.86, 1.0, 1.0];
-const AMBIENT: [f32; 4] = [0.22, 0.2, 0.28, 0.0];
+const AMBIENT: [f32; 4] = [0.374, 0.34, 0.476, 0.0];
 const FOG_M: f32 = 90.0;
 const GLASS_TINT: [f32; 4] = [0.55, 0.75, 1.0, 0.0];
 
@@ -296,6 +296,13 @@ pub fn push_mesh(out: &mut Vec<CityVertex>, model: &MeshModel, materials: &[Mesh
     }
 }
 
+/// `get_texture_path` gives texture `id`'s 2k diffuse image: City Sphere's own (`make
+/// download-assets`, in `assets/textures/`) or else the fps demo's.
+fn get_texture_path(id: &str) -> std::path::PathBuf {
+    let own: std::path::PathBuf = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("assets/textures/{id}/{id}_diff_2k.jpg"));
+    if own.exists() { own } else { get_asset_path(&format!("textures/{id}/{id}_diff_2k.jpg")) }
+}
+
 /// `push_beacon` adds a pylon's beacon (the hyperbolic demo's `scifi_beacon` model, as on Lunar
 /// Surface) to the still scene with its base colour and emissive textures, recoloured in
 /// `team_color`; the shader reads its console's state from the uniforms' `beacons[slot]` (strip
@@ -444,7 +451,7 @@ impl CityGpu {
             .map_err(|e| format!("Metal: render_city.metal failed: {}", e.localizedDescription()))?;
         let mut layers: Vec<Vec<image::RgbaImage>> = TEXTURE_IDS
             .par_iter()
-            .map(|id| make_mips(&get_asset_path(&format!("textures/{id}/{id}_diff_2k.jpg")), TEXTURE_SIDE_PX))
+            .map(|id| make_mips(&get_texture_path(id), TEXTURE_SIDE_PX))
             .collect::<std::result::Result<_, String>>()?;
         let beacon_material: &MeshMaterial = get_beacon().materials.first().ok_or("the beacon has no material")?;
         for image in [&beacon_material.images[0], &beacon_material.images[3]] {

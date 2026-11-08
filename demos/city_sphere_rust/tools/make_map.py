@@ -24,9 +24,9 @@ LIFT_HOLE_RAD: float = 0.11
 OUTPUT: Path = Path(__file__).resolve().parents[3] / "common" / "maps" / "city_sphere" / "map.json"
 MATERIALS: list[tuple[str, tuple[float, float, float], str]] = [
     ("air", (0.0, 0.0, 0.0), "empty"),
-    ("street", (0.32, 0.32, 0.34), "solid"),
-    ("building", (0.62, 0.6, 0.58), "solid"),
-    ("brick", (0.55, 0.36, 0.3), "solid"),
+    ("street", (0.5, 0.52, 0.56), "solid"),
+    ("building", (0.72, 0.74, 0.78), "solid"),
+    ("brick", (0.62, 0.68, 0.8), "solid"),
     ("glass", (0.55, 0.75, 0.95), "glass"),
     ("glass obstacle", (0.45, 0.47, 0.52), "solid"),
     ("core", (1.0, 0.75, 1.0), "light"),

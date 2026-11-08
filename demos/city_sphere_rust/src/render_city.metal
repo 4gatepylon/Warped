@@ -5,6 +5,12 @@ using namespace metal;
 
 constant uint MAX_HOLE_COUNT = 8;
 constant float BEACON_FLAG = 2.0;
+constant float METAL_SPEC = 0.45;
+constant float METAL_SATURATION = 0.3;
+constant float METAL_SPEC_POWER = 48.0;
+constant float STREET_LAYER = 0.0;
+constant float PANEL_LINE_WIDTH = 0.012;
+constant float3 PANEL_LINE_COLOR = float3(0.25, 0.7, 0.9);
 constant uint BEACON_SLOT_COUNT = 8;
 constant float BEACON_GLOW_BRIGHTNESS = 2.0;
 constant float BEACON_BODY_GLOW = 0.72;
@@ -67,7 +73,8 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     float3 base = in.color.rgb;
     bool is_beacon = in.color.a > BEACON_FLAG - 0.5;
     if (in.layer >= 0.0) {
-        base *= albedo.sample(s, in.uv, uint(in.layer)).rgb;
+        float3 texel = albedo.sample(s, in.uv, uint(in.layer)).rgb;
+        base *= is_beacon ? texel : mix(float3(dot(texel, float3(0.3, 0.59, 0.11))), texel, METAL_SATURATION);
     }
     float4 beacon = is_beacon ? u.beacons[min(uint(in.color.a - BEACON_FLAG + 0.5), BEACON_SLOT_COUNT - 1)] : float4(0.0);
     base *= is_beacon ? beacon.y : 1.0;
@@ -83,9 +90,14 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     float falloff = u.core_light.w * 300.0 / (r * r + 150.0);
     float3 view = normalize(u.camera_m.xyz - in.world);
     float3 h = normalize(view + l);
-    float spec = pow(max(dot(n, h), 0.0), 32.0) * 0.15;
+    float spec = pow(max(dot(n, h), 0.0), METAL_SPEC_POWER) * METAL_SPEC;
     float3 light = u.ambient.rgb * wrap + u.core_light.rgb * (lambert * falloff) + spec * u.core_light.rgb;
     float3 lit = base * light;
+    if (abs(in.layer - STREET_LAYER) < 0.5) {
+        float2 cell = fract(in.uv);
+        float2 edge = min(cell, 1.0 - cell);
+        lit += PANEL_LINE_COLOR * (1.0 - smoothstep(0.0, PANEL_LINE_WIDTH, min(edge.x, edge.y)));
+    }
     if (is_beacon) {
         float3 strips = albedo.sample(s, in.uv, uint(in.layer) + 1).rgb;
         float glow = beacon.x;
