@@ -161,6 +161,8 @@ def get_lift_directions() -> list[np.ndarray]:
 
 
 PYLON_LON_RAD = 0.95
+MAP_WALK_M_PER_S = 2.5
+MAP_SPRINT_M_PER_S = 4.25
 VARIATION_SEED = 1192
 JITTER_RAD = 0.04
 JITTER_HEADING_RAD = 0.15
@@ -190,7 +192,7 @@ def main() -> None:
         "source": "demos/levels/city_sphere/index.html",
         "space": {"kind": "euclidean"},
         "gravity_m_per_s2": 9.8,
-        "player": {"eye_height_m": 1.6, "walk_m_per_s": 5.0, "sprint_m_per_s": 8.5, "jump_m_per_s": 5.0, "fly_m_per_s": 12.0},
+        "player": {"eye_height_m": 1.6, "walk_m_per_s": MAP_WALK_M_PER_S, "sprint_m_per_s": MAP_SPRINT_M_PER_S, "jump_m_per_s": 5.0, "fly_m_per_s": 12.0},
         "materials": [{"id": k, "name": n, "color": list(c), "kind": kind} for k, (n, c, kind) in enumerate(MATERIALS)],
         "ground": {"material": material_id("street"), "sphere": {"radius_m": STREET_RADIUS_M}},
         "shells": [

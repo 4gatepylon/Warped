@@ -11,6 +11,8 @@ use std::error::Error;
 use glam::{DMat3, DMat4, DQuat, DVec3};
 use serde::Deserialize;
 
+use crate::settings::ServerSettings;
+
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -224,8 +226,12 @@ pub struct CityWorld {
     pub street_material: u8,
     pub gravity_m_per_s2: f64,
     pub eye_height_m: f64,
-    pub walk_m_per_s: f64,
-    pub sprint_m_per_s: f64,
+    /// `map_walk_m_per_s` is the map's walking speed, which `server_settings.yaml`'s
+    /// `movement.walk_speed_per_map_speed` multiplies, as on Lunar Surface.
+    pub map_walk_m_per_s: f64,
+    /// `map_sprint_m_per_s` is the map's sprinting speed, which `movement.sprint_speed_per_map_speed`
+    /// multiplies.
+    pub map_sprint_m_per_s: f64,
     pub jump_m_per_s: f64,
     pub materials: Vec<Material>,
     pub shells: Vec<Shell>,
@@ -408,8 +414,8 @@ impl CityWorld {
             street_material: map.ground.material,
             gravity_m_per_s2: map.gravity_m_per_s2,
             eye_height_m: map.player.eye_height_m,
-            walk_m_per_s: map.player.walk_m_per_s,
-            sprint_m_per_s: map.player.sprint_m_per_s,
+            map_walk_m_per_s: map.player.walk_m_per_s,
+            map_sprint_m_per_s: map.player.sprint_m_per_s,
             jump_m_per_s: map.player.jump_m_per_s,
             materials,
             shells,
@@ -569,23 +575,61 @@ impl CityWorld {
         }
     }
 
-    /// `move_player` moves `player` by `input` for `dt_s`: walking along the ground, gravity
-    /// outward, jumping, riding a lift up through the glass while jump is held (hovering
-    /// `LIFT_TOP_UNDER_GLASS_M` over the glass level until they walk off), and collisions with
-    /// the street, the glass (from either side, except in its holes) and the boxes.
+    /// `get_speed_m_per_s` gives the walking or sprinting speed under `settings`: the map's times
+    /// `movement`'s multiplier, as on Lunar Surface.
     ///
-    /// Example: `world.move_player(&mut player, &input, 1.0 / 60.0);`
-    pub fn move_player(&self, player: &mut CityPlayer, input: &CityInput, dt_s: f64) {
+    /// Example: `let sprint_m_per_s = world.get_speed_m_per_s(&settings, true);`
+    pub fn get_speed_m_per_s(&self, settings: &ServerSettings, is_sprinting: bool) -> f64 {
+        if is_sprinting {
+            self.map_sprint_m_per_s * settings.movement.sprint_speed_per_map_speed
+        } else {
+            self.map_walk_m_per_s * settings.movement.walk_speed_per_map_speed
+        }
+    }
+
+    /// `move_player` moves `player` by `input` for `dt_s` under `settings`: sprinting while there
+    /// is sprint energy (`sprint_energy`, as on Lunar Surface: it drains while sprinting and
+    /// refills otherwise), walking along the ground, gravity outward, jumping, riding a lift up
+    /// through the glass while jump is held (hovering `LIFT_TOP_UNDER_GLASS_M` over the glass level
+    /// until they walk off), and collisions with the street, the glass (from either side, except
+    /// in its holes) and the boxes.
+    ///
+    /// Example: `world.move_player(&mut player, &input, &settings, 1.0 / 60.0);`
+    pub fn move_player(
+        &self,
+        player: &mut CityPlayer,
+        input: &CityInput,
+        settings: &ServerSettings,
+        dt_s: f64,
+    ) {
+        let is_moving: bool = input.forward_frac != 0.0 || input.right_frac != 0.0;
+        let wants_to_sprint: bool = input.is_sprinting && is_moving;
+        let energy = &settings.sprint_energy;
+        let energy_change_per_s: f64 = if wants_to_sprint {
+            -1.0 / energy.drain_s
+        } else {
+            1.0 / energy.refill_walking_s
+        };
+        let is_sprinting: bool = wants_to_sprint && player.energy_frac > 0.0;
+        player.energy_frac = (player.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
+        let speed_m_per_s: f64 = self.get_speed_m_per_s(settings, is_sprinting) * input.speed_frac;
         let step_count: usize =
             ((player.velocity.length() * dt_s / MAX_STEP_M).ceil() as usize).clamp(1, 16);
         let step_s: f64 = dt_s / step_count as f64;
         for k in 0..step_count {
-            self.step_player(player, input, step_s, k == 0);
+            self.step_player(player, input, speed_m_per_s, step_s, k == 0);
         }
     }
 
-    /// `step_player` is one sub-step of `move_player`.
-    fn step_player(&self, player: &mut CityPlayer, input: &CityInput, dt_s: f64, is_first: bool) {
+    /// `step_player` is one sub-step of `move_player`, walking at up to `speed_m_per_s`.
+    fn step_player(
+        &self,
+        player: &mut CityPlayer,
+        input: &CityInput,
+        speed_m_per_s: f64,
+        dt_s: f64,
+        is_first: bool,
+    ) {
         player.align_to_ground();
         let up: DVec3 = player.get_up();
         let (right, back) = (player.body.x_axis, player.body.z_axis);
@@ -593,11 +637,6 @@ impl CityWorld {
         if wish.length_squared() > 1.0 {
             wish = wish.normalize();
         }
-        let speed_m_per_s: f64 = if input.is_sprinting {
-            self.sprint_m_per_s
-        } else {
-            self.walk_m_per_s
-        } * input.speed_frac;
         let v_up: f64 = player.velocity.dot(up);
         let tangent: DVec3 = player.velocity - up * v_up;
         let control: f64 = if player.is_on_ground {
@@ -727,6 +766,7 @@ impl CityWorld {
             velocity: DVec3::ZERO,
             is_on_ground: true,
             eye_height_m: self.eye_height_m,
+            energy_frac: 1.0,
         }
     }
 }
@@ -742,7 +782,8 @@ pub struct CityInput {
 }
 
 /// `CityPlayer` is a player's body: feet, the body's axes (columns right, up, back; up toward the
-/// centre), the head's pitch, velocity and whether it stands on something.
+/// centre), the head's pitch, velocity, whether it stands on something, and its sprint energy (1
+/// full, 0 empty).
 #[derive(Clone, Copy, Debug)]
 pub struct CityPlayer {
     pub feet: DVec3,
@@ -751,6 +792,7 @@ pub struct CityPlayer {
     pub velocity: DVec3,
     pub is_on_ground: bool,
     pub eye_height_m: f64,
+    pub energy_frac: f64,
 }
 
 impl CityPlayer {
@@ -818,6 +860,11 @@ mod tests {
         CityWorld::Builtin().expect("the shipped map loads")
     }
 
+    /// `settings` is the built-in `server_settings.yaml`.
+    fn settings() -> ServerSettings {
+        ServerSettings::Builtin()
+    }
+
     #[test]
     fn map_has_one_console_a_team_and_antipodal_spawns() {
         let world: CityWorld = world();
@@ -849,7 +896,7 @@ mod tests {
         let mut player: CityPlayer = world.make_player(0, 0);
         player.feet *= 0.95;
         for _ in 0..120 {
-            world.move_player(&mut player, &CityInput::default(), 1.0 / 60.0);
+            world.move_player(&mut player, &CityInput::default(), &settings(), 1.0 / 60.0);
         }
         assert!((player.feet.length() - world.street_radius_m).abs() < 1e-3);
         assert!(player.is_on_ground);
@@ -869,7 +916,7 @@ mod tests {
             ..CityInput::default()
         };
         for _ in 0..240 {
-            world.move_player(&mut player, &ride, 1.0 / 60.0);
+            world.move_player(&mut player, &ride, &settings(), 1.0 / 60.0);
             if player.feet.length() < glass.radius_m - 1.0 {
                 break;
             }
@@ -882,10 +929,10 @@ mod tests {
         };
         player.body = DMat3::from_cols(player.body.x_axis, player.body.y_axis, player.body.z_axis);
         for _ in 0..90 {
-            world.move_player(&mut player, &step, 1.0 / 60.0);
+            world.move_player(&mut player, &step, &settings(), 1.0 / 60.0);
         }
         for _ in 0..120 {
-            world.move_player(&mut player, &CityInput::default(), 1.0 / 60.0);
+            world.move_player(&mut player, &CityInput::default(), &settings(), 1.0 / 60.0);
         }
         assert_eq!(world.get_side(player.feet), Side::Glass);
         assert!(player.is_on_ground);

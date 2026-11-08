@@ -22,7 +22,10 @@ use sdl3::event::Event;
 use serde_json::json;
 
 use super::{
-    Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX, Gun,
+    Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX,
+    DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, ENERGY_BAR_MIN_FRAC,
+    ENERGY_BAR_RGB, ENERGY_PULSE_RGB, ENERGY_SEGMENT_COUNT, Gun, HEALTH_BAR_MIN_FRAC,
+    HEALTH_BAR_RGB, HEALTH_PULSE_RGB, HEAT_BAR_MIN_FRAC, HEAT_BAR_OVERHEATED_RGB, HEAT_BAR_RGB,
     MAP_AREA_MAX_EXCL_MASK_PX, MAP_AREA_MIN_MASK_PX, MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX,
     MS_PER_S, OverlayText, PICTURE_PX_PER_MASK_PX, PLAYER_SETTINGS_HOME_PATH, Picture, Renderer,
     RendererKind, Result, RouteKind, WINDOW_TITLE, find_lan_address, get_crosshair_rects,
@@ -34,6 +37,7 @@ use crate::city_world::{
     CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,
     get_up,
 };
+use crate::hud_bars;
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
@@ -44,7 +48,7 @@ use crate::render_metal::{self, FrameData};
 use crate::settings::{PerPlayerSettings, ServerSettings};
 use crate::thrown_wormholes::PlayerWormholes;
 use crate::viewmodel;
-use crate::voxel_world::MUZZLE_M;
+use crate::voxel_world::{MUZZLE_M, SPAWN_TURN_RAD};
 
 const MAP_NAME: &str = "city_sphere";
 const TAN_HALF_FOV: f32 = 0.62;
@@ -820,6 +824,12 @@ struct CitySession {
     gun: Gun,
     rifle_heat_frac: f64,
     is_overheated: bool,
+    health_pulses: hud_bars::BarPulses,
+    energy_pulses: hud_bars::BarPulses,
+    hit_effect_frac: f64,
+    last_health_frac: f64,
+    slowed_s: f64,
+    frame_count: u64,
 }
 
 impl CitySession {
@@ -912,6 +922,12 @@ impl CitySession {
             gun: Gun::Laser,
             rifle_heat_frac: 0.0,
             is_overheated: false,
+            health_pulses: hud_bars::BarPulses::New(1.0),
+            energy_pulses: hud_bars::BarPulses::New(1.0),
+            hit_effect_frac: 0.0,
+            last_health_frac: 1.0,
+            slowed_s: 0.0,
+            frame_count: 0,
         })
     }
 
@@ -1088,6 +1104,7 @@ impl CitySession {
             self.settings = settings.clone();
         }
         step_respawn(&mut self.client, &mut self.respawn_in_s, dt_s)?;
+        self.update_hit(dt_s);
         self.reload_left_s = (self.reload_left_s - dt_s).max(0.0);
         self.laser_left_s = (self.laser_left_s - dt_s).max(0.0);
         self.recoil_left_s = (self.recoil_left_s - dt_s).max(0.0);
@@ -1104,7 +1121,7 @@ impl CitySession {
         }
         let is_playing: bool = self.is_spawned && self.client.game.winner.is_none();
         let mut input = CityInput {
-            speed_frac: 1.0,
+            speed_frac: self.get_speed_frac(),
             ..CityInput::default()
         };
         let (mut wants_shot, mut console) = (false, None);
@@ -1119,7 +1136,10 @@ impl CitySession {
                     is_playing && self.reload_left_s <= 0.0,
                     &sight,
                 );
-                input = out.input;
+                input = CityInput {
+                    speed_frac: self.get_speed_frac(),
+                    ..out.input
+                };
                 if out.wants_rifle {
                     self.gun = Gun::Rifle;
                 }
@@ -1142,11 +1162,24 @@ impl CitySession {
         }
         if self.is_spawned {
             let before: DVec3 = self.player.feet;
-            self.world.move_player(&mut self.player, &input, dt_s);
+            self.world
+                .move_player(&mut self.player, &input, &self.settings, dt_s);
             let speed_m_per_s: f64 = (self.player.feet - before).length() / dt_s.max(1e-6);
             self.step_phase_rad += speed_m_per_s * dt_s * STEPS_RAD_PER_M;
-            self.run_frac = (speed_m_per_s / self.world.sprint_m_per_s).min(1.0);
+            self.run_frac = (speed_m_per_s / self.world.get_speed_m_per_s(&self.settings, true)).min(1.0);
         }
+        self.health_pulses.update(
+            dt_s,
+            self.client.health_frac,
+            u32::from(self.settings.rifle.body_hits_to_eliminate),
+            &hud_bars::PULSE_TUNING,
+        );
+        self.energy_pulses.update(
+            dt_s,
+            self.player.energy_frac,
+            ENERGY_SEGMENT_COUNT,
+            &hud_bars::PULSE_TUNING,
+        );
         self.was_trigger_held = wants_shot;
         if wants_shot
             && is_playing
@@ -1181,6 +1214,111 @@ impl CitySession {
             self.message = None;
         }
         Ok(())
+    }
+
+    /// `update_hit` starts Lunar Surface's hit effect and slows this player
+    /// (`when_hit.slow_s`) when their health drops, whatever hurt them, and fades both over `dt_s`.
+    fn update_hit(&mut self, dt_s: f64) {
+        if self.client.health_frac < self.last_health_frac {
+            self.hit_effect_frac = 1.0;
+            self.slowed_s = self.settings.when_hit.slow_s;
+        }
+        self.last_health_frac = self.client.health_frac;
+        self.hit_effect_frac =
+            (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
+        self.slowed_s = (self.slowed_s - dt_s).max(0.0);
+    }
+
+    /// `get_speed_frac` is this player's speed as a fraction: `when_hit.slow_speed_frac` while
+    /// slowed by a hit, else 1.
+    fn get_speed_frac(&self) -> f64 {
+        if self.slowed_s > 0.0 {
+            self.settings.when_hit.slow_speed_frac
+        } else {
+            1.0
+        }
+    }
+
+    /// `get_hit_effect` gives what the last hit on this player still does to the view, as on
+    /// Lunar Surface: red edges, a blur from the edges inward, and a shake in a new direction each
+    /// frame (the golden angle apart), fading over the player settings' `hit_effects.effect_s`.
+    fn get_hit_effect(&self) -> render_metal::HitEffect {
+        let when_hit = &self.player_settings.hit_effects;
+        let shake_rad: f64 = self.frame_count as f64 * SPAWN_TURN_RAD;
+        let shake_px: f64 = when_hit.shake_px * self.hit_effect_frac;
+        render_metal::HitEffect {
+            strength_frac: self.hit_effect_frac as f32,
+            red_frac: when_hit.red_frac as f32,
+            blur_px: when_hit.blur_px as f32,
+            shake_px: [shake_rad.cos(), shake_rad.sin()].map(|c| (c * shake_px) as f32),
+        }
+    }
+
+    /// `get_bar_rects` gives the HUD's bars in the bottom left, as on Lunar Surface
+    /// (`hud_bars.rs`): this player's health (one segment per rifle body hit), the gun in hand's
+    /// ammo (the sniper's one block, empty while it reloads, or the rifle's shots left before it
+    /// overheats) and the sprint energy, health and energy with pulses while they change; and below
+    /// the middle, the progress of turning off a console while holding `E` on one.
+    fn get_bar_rects(&self) -> Vec<render_metal::OverlayRect> {
+        let mut rects: Vec<render_metal::OverlayRect> = Vec::new();
+        let health_segment_count: u32 = u32::from(self.settings.rifle.body_hits_to_eliminate);
+        rects.extend(hud_bars::make_segmented_bar(
+            HEALTH_BAR_MIN_FRAC,
+            health_segment_count,
+            self.client.health_frac,
+            HEALTH_BAR_RGB,
+            self.health_pulses.make_rect_pulse(
+                HEALTH_BAR_MIN_FRAC,
+                health_segment_count,
+                self.client.health_frac,
+                HEALTH_PULSE_RGB,
+                HEALTH_BAR_RGB,
+                &hud_bars::PULSE_TUNING,
+            ),
+        ));
+        rects.extend(match self.gun {
+            Gun::Laser => hud_bars::make_segmented_bar(
+                HEAT_BAR_MIN_FRAC,
+                1,
+                if self.reload_left_s <= 0.0 { 1.0 } else { 0.0 },
+                HEAT_BAR_RGB,
+                render_metal::NO_RECT_PULSE,
+            ),
+            Gun::Rifle => hud_bars::make_segmented_bar(
+                HEAT_BAR_MIN_FRAC,
+                self.settings.rifle.shots_until_overheat,
+                1.0 - self.rifle_heat_frac.min(1.0),
+                if self.is_overheated {
+                    HEAT_BAR_OVERHEATED_RGB
+                } else {
+                    HEAT_BAR_RGB
+                },
+                render_metal::NO_RECT_PULSE,
+            ),
+        });
+        rects.extend(hud_bars::make_segmented_bar(
+            ENERGY_BAR_MIN_FRAC,
+            ENERGY_SEGMENT_COUNT,
+            self.player.energy_frac,
+            ENERGY_BAR_RGB,
+            self.energy_pulses.make_rect_pulse(
+                ENERGY_BAR_MIN_FRAC,
+                ENERGY_SEGMENT_COUNT,
+                self.player.energy_frac,
+                ENERGY_PULSE_RGB,
+                ENERGY_BAR_RGB,
+                &hud_bars::PULSE_TUNING,
+            ),
+        ));
+        if self.disabling.is_some() {
+            rects.extend(hud_bars::make_progress_bar(
+                DISABLE_BAR_MIN_FRAC,
+                DISABLE_BAR_SIZE_FRAC,
+                (self.disabling_s / self.settings.consoles.hold_to_disable_s).min(1.0) as f32,
+                DISABLE_BAR_RGB,
+            ));
+        }
+        rects
     }
 
     /// `update_remote` traces the other players' new shots and follows their robots' motion.
@@ -1315,7 +1453,8 @@ impl CitySession {
     }
 
     /// `get_banner_lines` gives the two centred lines to show, if any: the lobby, joining, a win,
-    /// being out, turning off a console, or a message.
+    /// "YOU DIED" with the countdown to respawning, or a message. Turning off a console shows as a
+    /// bar (`get_bar_rects`), as on Lunar Surface.
     fn get_banner_lines(&self) -> Option<[String; 2]> {
         let keys: &KeyBindings = &self.player_settings.keys;
         if self.client.is_in_lobby() {
@@ -1349,17 +1488,6 @@ impl CitySession {
             return Some([
                 "JOINING THE GAME".to_string(),
                 format!("server {}", self.client.get_server()),
-            ]);
-        }
-        if let Some(index) = self.disabling {
-            let frac: f64 = (self.disabling_s / self.settings.consoles.hold_to_disable_s).min(1.0);
-            return Some([
-                format!("TURNING OFF CONSOLE {index}"),
-                format!(
-                    "{:.0}% (keep holding {})",
-                    frac * 100.0,
-                    keys.get_label(Action::TurnOffConsole)
-                ),
             ]);
         }
         self.message
@@ -1528,6 +1656,9 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         } else {
             Vec::new()
         };
+        if session.is_spawned && session.menu.is_none() {
+            rects.extend(session.get_bar_rects());
+        }
         if session.is_spawned && session.menu.is_none() && session.player_settings.minimap.is_shown
         {
             rects.extend(get_minimap_rects(&session, window_px));
@@ -1566,14 +1697,10 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
             rects: &rects,
             wand,
             blur_frac: 0.0,
-            hit: render_metal::HitEffect {
-                strength_frac: 0.0,
-                red_frac: 0.0,
-                blur_px: 0.0,
-                shake_px: [0.0, 0.0],
-            },
+            hit: session.get_hit_effect(),
             blueshift_frac: 0.0,
         };
+        session.frame_count += 1;
         lap(3);
         let is_shown: bool =
             metal.render_to_layer(FrameData::City(&frame), layer, Some(&overlay))?;
@@ -2591,7 +2718,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 false,
                 &BrainSight::default(),
             );
-            world.move_player(&mut player, &out.input, dt_s);
+            world.move_player(&mut player, &out.input, &settings, dt_s);
             let eye: DMat4 = player.get_eye_frame();
             let targets: Vec<Target> = client
                 .players
