@@ -257,7 +257,7 @@ pub fn get_progression_lines(view: &MatchView, team: Option<Team>) -> Vec<(Strin
     lines
 }
 
-pub const PAGE_SIZE: [f32; 2] = [640.0, 400.0];
+pub const PAGE_SIZE: [f32; 2] = [640.0, 455.0];
 pub const HUD_RGB: [u8; 3] = [235, 240, 250];
 const HIGHLIGHT_RGB: [u8; 3] = [255, 90, 80];
 const DIM_RGB: [u8; 3] = [150, 158, 175];
@@ -269,14 +269,17 @@ const MARGIN: f32 = 20.0;
 const LINE: f32 = 12.0;
 const GLYPH: f32 = 8.0;
 const LEVEL_TOP: f32 = 64.0;
-const LEVEL_HEIGHT: f32 = 92.0;
+const THUMBNAIL_PAD: f32 = 5.0;
+const THUMBNAIL_HEIGHT: f32 = 50.0;
+const LEVEL_HEIGHT: f32 = 92.0 + THUMBNAIL_PAD + THUMBNAIL_HEIGHT;
 const LEVEL_GAP: f32 = 12.0;
 const CAPTURE_BAR: f32 = 6.0;
-const HISTORY_TOP: f32 = 232.0;
+const HISTORY_TOP: f32 = 232.0 + THUMBNAIL_PAD + THUMBNAIL_HEIGHT;
 const CHIP_WIDTH: f32 = 64.0;
 
-/// `Shape` is one thing on the window's page: a filled panel with an optional border, or a line
-/// of text in the menu's font, both in page units (`PAGE_SIZE`).
+/// `Shape` is one thing on the window's page: a filled panel with an optional border, a line of
+/// text in the menu's font, or the box a level's map picture fits in (the window draws the
+/// picture if it has one for that level), all in page units (`PAGE_SIZE`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shape {
     Panel {
@@ -289,6 +292,11 @@ pub enum Shape {
         at: [f32; 2],
         text: String,
         rgb: [u8; 3],
+    },
+    Thumbnail {
+        level: usize,
+        min: [f32; 2],
+        size: [f32; 2],
     },
 }
 
@@ -385,8 +393,13 @@ fn push_level_row(shapes: &mut Vec<Shape>, view: &MatchView) {
             rgba: get_dark_rgba(get_team_rgb(defender)),
             border_rgb,
         });
+        shapes.push(Shape::Thumbnail {
+            level,
+            min: [left + THUMBNAIL_PAD, LEVEL_TOP + THUMBNAIL_PAD],
+            size: [width - 2.0 * THUMBNAIL_PAD, THUMBNAIL_HEIGHT],
+        });
         let text_left: f32 = left + 5.0;
-        let mut y: f32 = LEVEL_TOP + 6.0;
+        let mut y: f32 = LEVEL_TOP + THUMBNAIL_PAD + THUMBNAIL_HEIGHT + 6.0;
         let name: String = entry.name.chars().take(13).collect();
         push_text(shapes, [text_left, y], name, HUD_RGB);
         y += LINE;
@@ -606,7 +619,7 @@ mod tests {
     //! | Start | waiting, no rounds | `the_page_before_the_first_round` |
     //! | Worked example | every row's ownership and history after it, the result | `the_page_after_the_design_docs_example` |
     //! | Long matches | 40 rounds fit `MAX_LINE_COUNT` | `a_long_match_fits_the_page` |
-    //! | Window page | five panels, next level outlined, wavefront markers, chips, result | `the_window_page_shows_levels_wavefronts_and_history` |
+    //! | Window page | five panels, a picture box inside each, next level outlined, wavefront markers, chips, result | `the_window_page_shows_levels_wavefronts_and_history` |
     //! | Window page bounds | every shape inside `PAGE_SIZE` after a long match | `the_window_page_stays_on_the_page` |
 
     use super::*;
@@ -640,6 +653,7 @@ mod tests {
                     client_args: Vec::new(),
                     stand_in_for: None,
                     takes_bot_label: true,
+                    map_picture: None,
                 })
                 .collect(),
             team_counts: [1, 1],
@@ -756,6 +770,35 @@ mod tests {
             })
             .collect();
         assert_eq!(outlined, vec![0], "Dust, red's next level, is outlined");
+        let thumbnails: Vec<(usize, [f32; 2], [f32; 2])> = shapes
+            .iter()
+            .filter_map(|shape| match shape {
+                Shape::Thumbnail { level, min, size } => Some((*level, *min, *size)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            thumbnails
+                .iter()
+                .map(|(level, ..)| *level)
+                .collect::<Vec<usize>>(),
+            vec![0, 1, 2, 3, 4]
+        );
+        for ((_, min, size), panel) in thumbnails.iter().zip(&levels) {
+            let Shape::Panel {
+                min: panel_min,
+                size: panel_size,
+                ..
+            } = panel
+            else {
+                unreachable!()
+            };
+            assert!(
+                (0..2)
+                    .all(|a| min[a] > panel_min[a]
+                        && min[a] + size[a] < panel_min[a] + panel_size[a])
+            );
+        }
         let texts: Vec<(&str, [u8; 3])> = shapes
             .iter()
             .filter_map(|shape| match shape {
@@ -794,7 +837,9 @@ mod tests {
         let shapes: Vec<Shape> = get_progression_shapes(&make_view(state, Phase::Over), None);
         for shape in &shapes {
             let (min, max): ([f32; 2], [f32; 2]) = match shape {
-                Shape::Panel { min, size, .. } => (*min, [min[0] + size[0], min[1] + size[1]]),
+                Shape::Panel { min, size, .. } | Shape::Thumbnail { min, size, .. } => {
+                    (*min, [min[0] + size[0], min[1] + size[1]])
+                }
                 Shape::Text { at, text, .. } => {
                     (*at, [at[0] + text.len() as f32 * GLYPH, at[1] + GLYPH])
                 }

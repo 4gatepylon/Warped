@@ -2,7 +2,8 @@
 # The match's levels, blue's deepest first (game_design/DESIGN.md): Dust, Snow Planet, City Sphere,
 # Dark Forest, Lunar Surface. This file is the source of truth for which program plays each level;
 # see README.md, "Level interface". `program: self` is this demo's own binary; any other program
-# is a path from this folder. `stand_in_for` marks a level played on another map until its own
+# is a path from this folder, as is `map_picture` (the level's picture on the progression page;
+# this demo's own maps draw theirs). `stand_in_for` marks a level played on another map until its own
 # demo is plugged in.
 levels:
   - name: Dust
@@ -24,6 +25,7 @@ levels:
     branch: devin/city-sphere-demo
     status: plugged in (make levels links and builds devin/city-sphere-demo in .levels/)
     program: .levels/city_sphere/demos/city_sphere_rust/.build/release/city-sphere
+    map_picture: .levels/city_sphere/demos/city_sphere_rust/assets/map_picture.png
     map: city-sphere
     server_args: [--server-settings, e2e/fast_city_sphere_server_settings.yaml]
   - name: Dark Forest

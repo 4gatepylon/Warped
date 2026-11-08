@@ -175,6 +175,8 @@ const OWNER_ONLY_FILE_MODE: u32 = 0o600;
 const WRONG_PASSWORD_EXIT_CODE: u8 = 3;
 const TITLE_WINDOW_PX: (u32, u32) = (960, 600);
 const TITLE_FRAME_MS: u64 = 16;
+const THUMBNAIL_EMPTY_ALPHA: u8 = 90;
+const THUMBNAIL_MAX_PX: (u32, u32) = (400, 200);
 const LEVEL_RESTART_S: f64 = 1.0;
 const MATCH_WINDOW_PX: (u32, u32) = (1280, 800);
 const DEBUG_GLYPH_PX: f32 = 8.0;
@@ -778,6 +780,9 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
         None => None,
     };
     let mut canvas: Option<sdl3::render::WindowCanvas> = window.map(|(_, canvas)| canvas);
+    let texture_creator: Option<sdl3::render::TextureCreator<sdl3::video::WindowContext>> =
+        canvas.as_ref().map(|canvas| canvas.texture_creator());
+    let mut thumbnails: Option<Vec<Option<Thumbnail>>> = None;
     let mut printed_phase: Option<match_flow::Phase> = None;
     let mut is_over_announced: bool = false;
     let result: Result<()> = (|| loop {
@@ -869,9 +874,13 @@ fn run_match_client(arguments: &Arguments, address: &str) -> Result<()> {
         lines.truncate(match_menu::MAX_LINE_COUNT);
         match &mut canvas {
             Some(canvas) => {
+                if let (None, Some(creator)) = (&thumbnails, &texture_creator) {
+                    thumbnails = Some(make_thumbnails(creator, &view.levels)?);
+                }
                 draw_shapes(
                     canvas,
                     &match_menu::get_progression_shapes(&view, client.team),
+                    thumbnails.as_deref().unwrap_or_default(),
                 )?;
                 canvas.present();
             }
@@ -4926,6 +4935,7 @@ fn draw_text_overlay(canvas: &mut sdl3::render::WindowCanvas, text: &OverlayText
 fn draw_shapes(
     canvas: &mut sdl3::render::WindowCanvas,
     shapes: &[match_menu::Shape],
+    thumbnails: &[Option<Thumbnail>],
 ) -> Result<()> {
     let (width, height) = canvas.window().size_in_pixels();
     let [page_width, page_height] = match_menu::PAGE_SIZE;
@@ -4957,9 +4967,98 @@ fn draw_shapes(
                 canvas.set_draw_color(Color::RGB(rgb[0], rgb[1], rgb[2]));
                 canvas.draw_debug_text(text.as_str(), (left + at[0], top + at[1]))?;
             }
+            match_menu::Shape::Thumbnail { level, min, size } => {
+                let Some(Some(Thumbnail {
+                    texture,
+                    size_px: (width_px, height_px),
+                })) = thumbnails.get(*level)
+                else {
+                    canvas.set_draw_color(Color::RGBA(0, 0, 0, THUMBNAIL_EMPTY_ALPHA));
+                    canvas.fill_rect(sdl3::render::FRect::new(
+                        left + min[0],
+                        top + min[1],
+                        size[0],
+                        size[1],
+                    ))?;
+                    continue;
+                };
+                let fit: f32 = (size[0] / *width_px as f32).min(size[1] / *height_px as f32);
+                let [fit_width, fit_height] = [*width_px as f32 * fit, *height_px as f32 * fit];
+                canvas.copy(
+                    texture,
+                    None,
+                    sdl3::render::FRect::new(
+                        left + min[0] + (size[0] - fit_width) / 2.0,
+                        top + min[1] + (size[1] - fit_height) / 2.0,
+                        fit_width,
+                        fit_height,
+                    ),
+                )?;
+            }
         }
     }
     Ok(())
+}
+
+/// `Thumbnail` is a level's map picture on the progression page: its texture and its size in
+/// pixels.
+struct Thumbnail<'creator> {
+    texture: Texture<'creator>,
+    size_px: (u32, u32),
+}
+
+/// `make_thumbnails` gives each level's map picture as a texture from `creator`, with its size in
+/// pixels, for the progression page: the PNG at the level's `map_picture`, or for a level on
+/// this demo's own map the map page's picture without labels. A level with neither, or whose
+/// PNG isn't there yet (its branch not built by `make levels`), gets `None`.
+///
+/// Example: `let thumbnails = make_thumbnails(&canvas.texture_creator(), &view.levels)?;`
+fn make_thumbnails<'creator>(
+    creator: &'creator sdl3::render::TextureCreator<sdl3::video::WindowContext>,
+    levels: &[match_flow::LevelEntry],
+) -> Result<Vec<Option<Thumbnail<'creator>>>> {
+    let mut thumbnails: Vec<Option<Thumbnail>> = Vec::new();
+    for level in levels {
+        let picture: Option<(Vec<u8>, (u32, u32))> = match (&level.map_picture, &level.map) {
+            (Some(path), _) => {
+                let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+                match path.exists() {
+                    true => {
+                        let image: image::RgbaImage = image::open(&path)?.to_rgba8();
+                        let size_px: (u32, u32) = image.dimensions();
+                        Some((image.into_raw(), size_px))
+                    }
+                    false => {
+                        println!(
+                            "{}'s map picture {} isn't there yet",
+                            level.name,
+                            path.display()
+                        );
+                        None
+                    }
+                }
+            }
+            (None, Some(map)) if level.program == match_flow::SELF_PROGRAM => {
+                let name: MapName = MapName::from_str(map, true)?;
+                let layout: map_layout::MapLayout = map_layout::MapLayout::FromMap(
+                    &load_map(name, &ServerSettings::Builtin())?,
+                    THUMBNAIL_MAX_PX,
+                )?;
+                Some((layout.get_plain_pixels().to_vec(), layout.get_size_px()))
+            }
+            _ => None,
+        };
+        thumbnails.push(match picture {
+            Some((pixels, size_px)) => {
+                let mut texture: Texture =
+                    creator.create_texture_static(PixelFormat::RGBA32, size_px.0, size_px.1)?;
+                texture.update(None, &pixels, size_px.0 as usize * BYTES_PER_PIXEL)?;
+                Some(Thumbnail { texture, size_px })
+            }
+            None => None,
+        });
+    }
+    Ok(thumbnails)
 }
 
 /// `play_on_canvas` runs the window through SDL's renderer: each frame is drawn into pixels, put

@@ -36,12 +36,13 @@ const HELLO_PERIOD_S: f64 = 0.5;
 const CLIENT_TIMEOUT_S: f64 = 3.0;
 const SOCKET_TIMEOUT_MS: u64 = 50;
 const MAX_DATAGRAM_BYTES: usize = 65_000;
-const SELF_PROGRAM: &str = "self";
+pub const SELF_PROGRAM: &str = "self";
 
 /// `LevelEntry` is one level of the match's map in `match_levels.yaml`: its name, the demo folder
 /// and branch it comes from, whether it is playable yet (`status`), and how to run it: `program`
 /// (`self` for this demo's own binary, else a path from this demo's folder), the `--map` it
-/// takes, and extra flags for its server and its clients.
+/// takes, extra flags for its server and its clients, and its map picture for the progression
+/// page (`map_picture`, a PNG path from this demo's folder).
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct LevelEntry {
     pub name: String,
@@ -59,6 +60,8 @@ pub struct LevelEntry {
     /// Whether the level's bots take `--label` (the name of their artifact folder).
     #[serde(default = "get_true")]
     pub takes_bot_label: bool,
+    #[serde(default)]
+    pub map_picture: Option<String>,
 }
 
 /// `get_true` is serde's default for flags that are on unless a level turns them off.
