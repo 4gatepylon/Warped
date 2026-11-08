@@ -13,6 +13,9 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
+- [~] **W-62 Sniper ammo bar.** The sniper gets an ammo bar too, but of only one block instead of many: it empties
+  when the sniper fires and comes back when the timer resets, letting the player shoot again. Claimed by Claude Code
+  (session `wizardly-hamilton-23a121`), branch `claude/sniper-ammo`, 2026-11-07.
 
 ## Open
 
@@ -37,7 +40,8 @@ is in [`AGENTS.md`](AGENTS.md).
   play but has a dashboard where they can change or reset those settings.
 - [ ] **W-48 Minimap.** A minimap that shows off the map's hyperbolic nature nicely. Its place can be picked at
   least from top or bottom and left or right. Players show on it, and so do laser shots that fall in its range; it
-  doesn't show the entire map.
+  doesn't show the entire map. It is a circle that shows just where the player is and what is around them (the
+  menu's map page, W-49, shows the whole map).
 - [ ] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
   and team.
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
