@@ -23,8 +23,9 @@ Example:
 Must know:
     Limitations:
         - The losing team's bot joins no level in a round, so each round tests one team's level client.
-        - City Sphere's and Dark Forest's console bots still hold `E` from where they stand; the other levels'
-          bots walk to each pylon, and their servers take a hold only from within reach (`_WALKING_LEVELS`).
+        - Only `_WALKING_LEVELS`' bots report each pylon they reach on foot (`bot reached console ...`), so the
+          check that every pylon was reached on foot covers those levels; City Sphere's and Dark Forest's own bots
+          don't report it.
     Side effects:
         - When it exits, `play_all_levels.py` stops every process it started, with the levels they started.
 """
@@ -265,7 +266,7 @@ def _watch_match(
                     levels_log,
                     f"round {won_match[1]} won by {won_match[2]}: {started[0]} in {duration_s:.1f} s; "
                     f"the other team's pylons off: {len(pylon_off_s)}, at {times} s; on foot: "
-                    f"{', '.join(walks) if walks else 'no (its bot holds E from where it stands)'}",
+                    f"{', '.join(walks) if walks else 'not reported by its bot'}",
                 )
                 started = None
     if server.wait() != 0 or match_folder is None:
