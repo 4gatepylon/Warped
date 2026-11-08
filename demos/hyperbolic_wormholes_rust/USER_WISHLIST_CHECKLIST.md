@@ -13,12 +13,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 - [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
-- [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
-  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
-  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
-  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead; that stray is to be turned off
-  by default. Demos first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/beam-shot-noise`, 2026-11-07.
 - [~] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
   bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
   in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
@@ -272,6 +266,12 @@ are here too, since the user hadn't confirmed them.
   stays, and so do the grey fighters unless the user says otherwise. #232.
 - [?] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go
   simple and geometric." Pictures first; the user picked "A wide delta". #242.
+- [?] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
+  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
+  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
+  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
+  dropout: random beam pixels show the background each frame, "if you shoot in the air it gets dark and if you shoot
+  above ground it looks like ground specks". #249.
 
 ## Done
 
