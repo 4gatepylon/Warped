@@ -15,6 +15,7 @@ edition.workspace = true
 [dependencies]
 warped-core.workspace = true
 clap.workspace = true
+glam.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 legacy-oracle = { path = "../legacy_oracle" }
