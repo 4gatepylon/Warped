@@ -40,6 +40,12 @@ const CROUCH_RATE_PER_S: f32 = 9.0;
 const MAX_PITCH_RAD: f32 = 1.54;
 /// `MAX_HEALTH` is full health.
 pub const MAX_HEALTH: f32 = 100.0;
+/// `SPRINT_DRAIN_S`, `SPRINT_REFILL_CROUCHING_S` and `SPRINT_REFILL_WALKING_S` are the Lunar Surface
+/// demo's `sprint_energy` settings: seconds of sprinting that empty a full bar, and seconds to refill
+/// an empty one while crouched and while walking or standing upright.
+const SPRINT_DRAIN_S: f32 = 7.5;
+const SPRINT_REFILL_CROUCHING_S: f32 = 7.5;
+const SPRINT_REFILL_WALKING_S: f32 = 15.0;
 /// `RESPAWN_DELAY_S` is how long the player stays dead.
 const RESPAWN_DELAY_S: f32 = 3.0;
 /// `REGEN_DELAY_S` is how long after being hit health starts to regenerate.
@@ -88,6 +94,7 @@ pub struct Player {
     pub stride_distance_m: f32,
     pub landing_dip_m: f32,
     pub is_sprinting: bool,
+    pub energy_frac: f32,
     pub did_step: bool,
     pub is_climbing: bool,
 }
@@ -110,6 +117,7 @@ impl Player {
             stride_distance_m: 0.0,
             landing_dip_m: 0.0,
             is_sprinting: false,
+            energy_frac: 1.0,
             did_step: false,
             is_climbing: false,
         }
@@ -214,8 +222,17 @@ impl Player {
         let forward: Vec3 = Quat::from_rotation_y(self.yaw_rad) * Vec3::NEG_Z;
         let right: Vec3 = Quat::from_rotation_y(self.yaw_rad) * Vec3::X;
         let axes: Vec2 = input.move_axes.clamp_length_max(1.0);
-        self.is_sprinting =
+        let wants_to_sprint: bool =
             input.is_sprint_held && axes.y > 0.1 && !is_crouched && !input.is_aiming;
+        self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
+        let energy_change_per_s: f32 = if wants_to_sprint {
+            -1.0 / SPRINT_DRAIN_S
+        } else if is_crouched {
+            1.0 / SPRINT_REFILL_CROUCHING_S
+        } else {
+            1.0 / SPRINT_REFILL_WALKING_S
+        };
+        self.energy_frac = (self.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
         let mut speed_m_s: f32 = if is_crouched {
             CROUCH_SPEED_M_S
         } else if self.is_sprinting {

@@ -14,6 +14,7 @@ mod assets;
 mod credits;
 mod forest_layout;
 mod game;
+mod hud_bars;
 mod map;
 mod match_play;
 mod menu;
@@ -240,6 +241,9 @@ struct Args {
     /// 30 simulated frames a second, for --video-seconds, then quit.
     #[arg(long)]
     video_frames: Option<PathBuf>,
+    /// Keep the HUD in --photo and --video-frames pictures, as the window shows it.
+    #[arg(long)]
+    photo_hud: bool,
     /// How many simulated seconds --video-frames records.
     #[arg(long, default_value_t = 8.0)]
     video_seconds: f32,
@@ -372,6 +376,7 @@ fn capture_wormhole_lens(
                     damage_flash_frac: 0.0,
                     lens_draws: &[],
                     lens_particles: &[],
+                    overlay_rects: &[],
                 },
                 &capture_settings,
             );
@@ -454,10 +459,19 @@ fn capture_wormhole_lens(
     }
 }
 
-/// `save_photo` reads the last frame back and writes it to `path` as a PNG, downscaled to
-/// `width_px` if given.
-fn save_photo(renderer: &mut dyn Renderer, path: &std::path::Path, width_px: Option<u32>) {
-    let (frame_width_px, frame_height_px, rgba) = renderer.read_frame_rgba();
+/// `save_photo` reads the last frame back (with its HUD if `is_with_hud`, which needs
+/// `set_is_capturing_hud`) and writes it to `path` as a PNG, downscaled to `width_px` if given.
+fn save_photo(
+    renderer: &mut dyn Renderer,
+    path: &std::path::Path,
+    width_px: Option<u32>,
+    is_with_hud: bool,
+) {
+    let (frame_width_px, frame_height_px, rgba) = if is_with_hud {
+        renderer.read_hud_frame_rgba()
+    } else {
+        renderer.read_frame_rgba()
+    };
     let mut picture: image::RgbaImage =
         image::RgbaImage::from_raw(frame_width_px, frame_height_px, rgba).expect("RGBA frame");
     for pixel in picture.pixels_mut() {
@@ -669,6 +683,7 @@ fn run_title_screen(
                 damage_flash_frac: 0.0,
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
+                overlay_rects: &[],
             },
             settings,
         );
@@ -939,6 +954,9 @@ fn main() {
     minimap.load_photo(&Path::new(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
     let mut marks: Vec<Mark> = Vec::new();
     let mut menu: Option<Menu> = None;
+    if args.photo_hud {
+        renderer.set_is_capturing_hud(true);
+    }
     let mut menu_picture: TextPicture =
         TextPicture::New(menu::MENU_PICTURE_PX.0, menu::MENU_PICTURE_PX.1);
     let mut menu_settings: MenuSettings = MenuSettings {
@@ -1183,6 +1201,7 @@ fn main() {
             .then_some(smoothed_frame_ms);
         let sim_ms: f32 = sim_start.elapsed().as_secs_f32() * 1000.0;
         let build_start: Instant = Instant::now();
+        session.is_view_covered = menu.is_some();
         let mut frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);
         if let Some(fov_deg) = args.fov_deg {
             frame.camera.fov_y_rad = fov_deg.to_radians();
@@ -1199,7 +1218,7 @@ fn main() {
             frame.camera.far_m = f32::MAX;
             renderer.set_is_capturing(true);
         }
-        if is_recording {
+        if is_recording && !args.photo_hud {
             frame.viewmodel_draws.clear();
             frame.viewmodel_particles.clear();
         }
@@ -1258,6 +1277,7 @@ fn main() {
                 damage_flash_frac: frame.damage_flash_frac,
                 lens_draws: &frame.world_draws[frame.lens_draws.clone()],
                 lens_particles: &frame.lens_particles,
+                overlay_rects: &frame.overlay_rects,
             },
             &settings,
         );
@@ -1278,7 +1298,12 @@ fn main() {
                 "frame_{:04}.png",
                 (session.time_s / RECORDING_DT_S).round() as u32
             ));
-            save_photo(&mut renderer, &frame_path, args.photo_width_px);
+            save_photo(
+                &mut renderer,
+                &frame_path,
+                args.photo_width_px,
+                args.photo_hud,
+            );
         }
         if let Some(path) = &args.photo
             && session.time_s > PHOTO_SETTLE_S
@@ -1286,7 +1311,7 @@ fn main() {
             if args.map_picture.is_some() {
                 save_map_picture(&mut renderer, path, &session.arena);
             } else {
-                save_photo(&mut renderer, path, args.photo_width_px);
+                save_photo(&mut renderer, path, args.photo_width_px, args.photo_hud);
             }
             break 'running;
         }

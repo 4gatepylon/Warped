@@ -272,6 +272,7 @@ pub struct MetalRenderer {
     drawable_size_px: (u32, u32),
     lens: Option<(Texture, gpu_types::GpuLensUniforms)>,
     lens_live: Option<LensLive>,
+    hud_capture: Option<Texture>,
     is_capturing: bool,
 }
 
@@ -433,6 +434,7 @@ impl MetalRenderer {
             white_texture,
             lens: None,
             lens_live: None,
+            hud_capture: None,
             is_capturing: false,
             flat_normal_texture,
             shadow_map,
@@ -930,6 +932,26 @@ impl Renderer for MetalRenderer {
         });
     }
 
+    fn set_is_capturing_hud(&mut self, is_capturing_hud: bool) {
+        let (width_px, height_px) = self.drawable_size_px;
+        self.hud_capture = is_capturing_hud.then(|| {
+            create_texture(
+                &self.device,
+                &TextureSpec::render_target(DRAWABLE_FORMAT, width_px as usize, height_px as usize),
+                "hud capture",
+            )
+        });
+    }
+
+    fn read_hud_frame_rgba(&mut self) -> (u32, u32, Vec<u8>) {
+        let capture: Texture = self.hud_capture.clone().expect("the HUD is being captured");
+        let (width_px, height_px, mut bgra) = self.read_texture_bytes(&capture);
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        (width_px, height_px, bgra)
+    }
+
     fn set_is_capturing(&mut self, is_capturing: bool) {
         self.is_capturing = is_capturing;
     }
@@ -1152,6 +1174,7 @@ impl MetalRenderer {
             })
             .collect();
         let hud_offset_bytes: usize = dynamic.push(&hud_rects);
+        let overlay_offset_bytes: usize = dynamic.push(frame.overlay_rects);
         let hud_images: Vec<(GpuHudImage, usize)> = frame
             .hud_images
             .iter()
@@ -1536,10 +1559,18 @@ impl MetalRenderer {
         );
 
         let drawable_start: std::time::Instant = std::time::Instant::now();
-        let drawable = self.layer.nextDrawable();
+        let drawable = match &self.hud_capture {
+            Some(_) => None,
+            None => self.layer.nextDrawable(),
+        };
         let drawable_wait_ms: f64 = drawable_start.elapsed().as_secs_f64() * SECONDS_TO_MS;
-        if let Some(drawable) = drawable {
-            let drawable_texture: Retained<ProtocolObject<dyn MTLTexture>> = drawable.texture();
+        let output_texture: Option<Retained<ProtocolObject<dyn MTLTexture>>> =
+            match (&self.hud_capture, &drawable) {
+                (Some(capture), _) => Some(capture.clone()),
+                (None, Some(drawable)) => Some(drawable.texture()),
+                (None, None) => None,
+            };
+        if let Some(drawable_texture) = output_texture {
             let descriptor: Retained<MTLRenderPassDescriptor> =
                 color_pass(&drawable_texture, MTLLoadAction::DontCare, None);
             let encoder = command_buffer
@@ -1577,6 +1608,28 @@ impl MetalRenderer {
                     );
                 }
             }
+            if !frame.overlay_rects.is_empty() {
+                let window_size_px: Vec2 = Vec2::new(
+                    drawable_texture.width() as f32,
+                    drawable_texture.height() as f32,
+                );
+                let rect_count: u32 = frame.overlay_rects.len() as u32;
+                encoder.setRenderPipelineState(&self.pipelines.overlay_rects);
+                set_fragment_bytes(&encoder, as_bytes(&rect_count), 1);
+                set_fragment_bytes(&encoder, as_bytes(&window_size_px), 2);
+                unsafe {
+                    encoder.setFragmentBuffer_offset_atIndex(
+                        Some(&dynamic_buffer),
+                        overlay_offset_bytes,
+                        0,
+                    );
+                    encoder.drawPrimitives_vertexStart_vertexCount(
+                        MTLPrimitiveType::Triangle,
+                        0,
+                        FULLSCREEN_VERTEX_COUNT,
+                    );
+                }
+            }
             if !hud_images.is_empty() {
                 let window_size_px: Vec2 = Vec2::new(
                     drawable_texture.width() as f32,
@@ -1602,9 +1655,11 @@ impl MetalRenderer {
                 }
             }
             encoder.endEncoding();
-            let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
-                ProtocolObject::from_ref(&*drawable);
-            command_buffer.presentDrawable(metal_drawable);
+            if let Some(drawable) = &drawable {
+                let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
+                    ProtocolObject::from_ref(&**drawable);
+                command_buffer.presentDrawable(metal_drawable);
+            }
         }
         command_buffer.commit();
         self.in_flight.push_back(command_buffer);

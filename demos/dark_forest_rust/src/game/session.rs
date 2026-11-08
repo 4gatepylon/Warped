@@ -17,12 +17,13 @@ use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use super::audio::{Audio, Sound};
 use super::bots::{BOT_HEIGHT_M, Bot, BotClip, BotContext, BotShot, RESPAWN_DELAY_S, SHOT_DAMAGE};
 use super::collision::{Aabb, cast_ray};
-use super::hud::{HudState, build_hud};
+use super::hud::{BarPulsePair, HudState, OverlayHudState, build_hud, build_overlay_rects};
 use super::nav::NavGraph;
 use super::player::{MAX_HEALTH, Player, PlayerInput};
 use super::weapon::{MAGAZINE_SIZE, Weapon, WeaponEvent, WeaponInput};
 use super::world::Arena;
 use crate::assets::gltf_model::Trs;
+use crate::render::overlay::OverlayRect;
 use crate::render::{Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
 use crate::scene::{Scene, draw_items_for};
 
@@ -116,6 +117,7 @@ pub struct FrameData {
     pub world_particles: Vec<Particle>,
     pub viewmodel_particles: Vec<Particle>,
     pub hud_rects: Vec<HudRect>,
+    pub overlay_rects: Vec<OverlayRect>,
     pub damage_flash_frac: f32,
     pub lens_draws: Range<usize>,
     pub lens_particles: Vec<Particle>,
@@ -177,6 +179,8 @@ pub struct Session {
     pub winner: Option<u32>,
     pub laps_done: u32,
     pub is_trigger_down: bool,
+    pub is_view_covered: bool,
+    bar_pulses: BarPulsePair,
     robot_hold: Option<RobotHold>,
     robot_hold_s: f32,
 }
@@ -263,6 +267,8 @@ impl Session {
             winner: None,
             laps_done: 0,
             is_trigger_down: false,
+            is_view_covered: false,
+            bar_pulses: BarPulsePair::New(),
             robot_hold: None,
             robot_hold_s: 0.0,
         }
@@ -633,6 +639,8 @@ impl Session {
             *controls
         };
         self.is_trigger_down = controls.weapon.is_trigger_held && self.weapon.ammo > 0;
+        let bar_state: OverlayHudState = self.overlay_hud_state();
+        self.bar_pulses.update(dt_s, &bar_state);
         let mut player_input: PlayerInput = controls.player;
         player_input.is_aiming = controls.weapon.is_aim_held && self.weapon.reload_time_s.is_none();
         self.player
@@ -827,8 +835,24 @@ impl Session {
             .collect()
     }
 
-    /// `objective_hud` draws the consoles (lit while on, in their team's colour), the hold
-    /// progress while `E` is held on one, and the winner's banner.
+    /// `overlay_hud_state` is what the HUD's bars show now: health in segments of one body hit,
+    /// the magazine in segments of one shot (overheated while reloading), the sprint energy, the
+    /// console hold and whether the menu covers the view.
+    fn overlay_hud_state(&self) -> OverlayHudState {
+        OverlayHudState {
+            health_frac: self.player.health / MAX_HEALTH,
+            health_segment_count: (MAX_HEALTH / BODY_DAMAGE).ceil() as u32,
+            ammo_frac: self.weapon.ammo as f32 / MAGAZINE_SIZE as f32,
+            ammo_segment_count: MAGAZINE_SIZE,
+            is_reloading: self.weapon.reload_time_s.is_some(),
+            energy_frac: self.player.energy_frac,
+            console_hold_frac: self.console_hold_frac,
+            is_view_covered: self.is_view_covered,
+        }
+    }
+
+    /// `objective_hud` draws the consoles (lit while on, in their team's colour) and the winner's
+    /// banner; the progress of holding `E` on a console is an overlay bar (`hud::build_overlay_rects`).
     fn objective_hud(&self, width_px: f32, height_px: f32) -> Vec<HudRect> {
         let scale: f32 = height_px / 1080.0;
         let mut rects: Vec<HudRect> = Vec::new();
@@ -861,25 +885,6 @@ impl Session {
                 } else {
                     color
                 },
-            });
-        }
-        if let Some(frac) = self.console_hold_frac {
-            let bar_px: Vec2 = Vec2::new(320.0, 16.0) * scale;
-            let x_px: f32 = (width_px - bar_px.x) * 0.5;
-            let y_px: f32 = height_px * 0.5 + 70.0 * scale;
-            rects.push(HudRect {
-                x_px,
-                y_px,
-                width_px: bar_px.x,
-                height_px: bar_px.y,
-                color_rgba: Vec4::new(0.0, 0.0, 0.0, 0.55),
-            });
-            rects.push(HudRect {
-                x_px,
-                y_px,
-                width_px: bar_px.x * frac.clamp(0.0, 1.0),
-                height_px: bar_px.y,
-                color_rgba: Vec4::new(1.0, 0.85, 0.35, 0.95),
             });
         }
         if let Some(winner) = self.winner {
@@ -1124,18 +1129,8 @@ impl Session {
             }
         }
 
-        let speed_frac: f32 = (self.player.velocity_m_s.with_y(0.0).length() / 7.0).min(1.0);
         let mut hud_rects: Vec<HudRect> = build_hud(
             &HudState {
-                health_frac: self.player.health / MAX_HEALTH,
-                ammo: self.weapon.ammo,
-                magazine_size: MAGAZINE_SIZE,
-                reload_frac: self.weapon.reload_time_s.map(|_| self.weapon.reload_frac()),
-                spread_frac: (speed_frac + self.weapon.kick_frac * 0.6).min(1.0),
-                ads_frac: self.weapon.ads_frac,
-                hit_marker_frac: (self.hit_marker_s / 0.25).min(1.0),
-                kill_marker_frac: self.kill_marker_s,
-                kill_count: self.kill_count,
                 is_dead: !self.player.is_alive(),
                 frame_ms: self.show_frame_ms,
             },
@@ -1143,6 +1138,11 @@ impl Session {
             height_px,
         );
         hud_rects.extend(self.objective_hud(width_px, height_px));
+        let overlay_rects: Vec<OverlayRect> = build_overlay_rects(
+            &self.overlay_hud_state(),
+            &self.bar_pulses,
+            (width_px as u32, height_px as u32),
+        );
         let lens_particles: Vec<Particle> = world_particles[..robot_particle_count]
             .iter()
             .chain(&world_particles[beacon_particle_end..])
@@ -1160,6 +1160,7 @@ impl Session {
             world_particles,
             viewmodel_particles,
             hud_rects,
+            overlay_rects,
             damage_flash_frac: self.damage_flash_frac,
         }
     }
