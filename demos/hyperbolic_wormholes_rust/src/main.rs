@@ -854,8 +854,15 @@ fn bench_voxel_views(
             VoxelPlayer::AtView(world, view.at_m, view.target_m, view.h_m, view.pitch_rad);
         let camera: DMat4 = player.get_camera_frame(world);
         let shot: Option<voxel_world::Shot> = view.is_laser_on.then(|| world.trace_laser(camera));
-        let beams: Vec<(Vec<voxel_world::BeamSegment>, u32, f64)> =
-            shot.iter().map(|s| (s.segments.clone(), 0, 0.0)).collect();
+        let beams: Vec<render_voxel::LaserBeam> = shot
+            .iter()
+            .map(|s| render_voxel::LaserBeam {
+                segments: s.segments.clone(),
+                team: 0,
+                is_rifle: false,
+                speckle_frac: 0.0,
+            })
+            .collect();
         let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
         let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
@@ -1842,14 +1849,15 @@ impl PackedFrame {
 /// `Tracer` is a fired laser drawn as a beam flying out along its path (`segments`, traced when it
 /// was fired, `length_m` long): its front leaves the muzzle at `fired_s` (seconds into the session)
 /// and moves at `speed_m_per_s`, each point stays lit for `trail_s` after the front passes it, and
-/// `spot` glows where it hit while the trail is there. A share `speckle_frac` of its pixels
-/// speckles each frame (the shot's noise). This player's own shots (`is_own`) stay joined to the
-/// gun in hand while their trail still reaches the muzzle.
+/// `spot` glows where it hit while the trail is there. It is drawn in its gun's style (`is_rifle`),
+/// and a share `speckle_frac` of its pixels speckles each frame (the shot's noise). This player's
+/// own shots (`is_own`) stay joined to the gun in hand while their trail still reaches the muzzle.
 struct Tracer {
     segments: Vec<voxel_world::BeamSegment>,
     length_m: f64,
     spot: Option<glam::DVec4>,
     team: u32,
+    is_rifle: bool,
     speckle_frac: f64,
     fired_s: f64,
     speed_m_per_s: f64,
@@ -1896,6 +1904,7 @@ impl Tracer {
             segments,
             spot: shot.spot,
             team,
+            is_rifle,
             speckle_frac,
             fired_s,
             speed_m_per_s,
@@ -3057,7 +3066,7 @@ impl Session {
                 .iter()
                 .filter_map(|burst| burst.get_cloud(now_s))
                 .collect();
-            let beams: Vec<(Vec<voxel_world::BeamSegment>, u32, f64)> = self.get_lit_beams(r);
+            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
                 .iter()
@@ -3381,12 +3390,12 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team and the shot's speckle share, on a map of curvature radius `r`. While the
+    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r`. While the
     /// trail of one of this player's own shots still reaches the muzzle, its beam starts at the
     /// gun's tip as drawn now (`get_muzzle`), so it stays on the tip as the gun moves.
     ///
     /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
-    fn get_lit_beams(&self, r: f64) -> Vec<(Vec<voxel_world::BeamSegment>, u32, f64)> {
+    fn get_lit_beams(&self, r: f64) -> Vec<render_voxel::LaserBeam> {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
         let muzzle: Option<glam::DVec4> = self.get_muzzle(r);
         self.tracers
@@ -3405,7 +3414,12 @@ impl Session {
                 {
                     *first = joined;
                 }
-                (lit, tracer.team, tracer.speckle_frac)
+                render_voxel::LaserBeam {
+                    segments: lit,
+                    team: tracer.team,
+                    is_rifle: tracer.is_rifle,
+                    speckle_frac: tracer.speckle_frac,
+                }
             })
             .collect()
     }
@@ -3444,7 +3458,7 @@ impl Session {
                 voxel.player.get_feet_frame(&voxel.world),
                 self.get_lit_beams(voxel.world.r)
                     .into_iter()
-                    .map(|(segments, team, _)| (segments, team))
+                    .map(|beam| (beam.segments, beam.team))
                     .collect(),
             ),
             None => (self.player.frame, Vec::new()),

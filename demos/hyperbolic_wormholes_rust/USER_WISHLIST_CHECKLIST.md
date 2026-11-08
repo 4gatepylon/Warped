@@ -116,8 +116,9 @@ are here too, since the user hadn't confirmed them.
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
   (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
   speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
-  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2".
-  #249.
+  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
+  then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
+  that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249.
 - [?] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
   demo's `AGENTS.md` that any new asset gets added to that page. #262.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
@@ -131,7 +132,9 @@ are here too, since the user hadn't confirmed them.
   laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
   see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256. After playtesting
   #256: "move the gun back so the handle of the gun is offscreen. it was fine how it was before, just make the gun
-  larger." #263.
+  larger." #263. Then: "I see Leah made the lightsaber thing. That's OK. Let's do lightsaber for the sniper and do
+  the old laser view for the rifle." The rifle's beam is the laser again in #249, with W-84 (shot noise in the beam
+  itself).
 - [?] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
   player in the game as a dot in their team's colour; the minimap already showed those in reach. #250.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on

@@ -24,12 +24,13 @@ use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 17] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 18] = [
     "map_edge.start_wall_frac",
     "sniper.reload_s",
     "sniper.noise_mean_rad",
     "sniper.noise_max_rad",
     "sniper.beam_speckle_mean_frac",
+    "sniper.beam_speckle_max_frac",
     "rifle.noise_start_rad",
     "rifle.noise_max_rad",
     "rifle.beam_speckle_start_frac",
@@ -99,8 +100,8 @@ pub struct HeadBobSettings {
 /// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
 /// to reload, how many hits eliminate a player, how its beam flies (speed, and how long each
 /// point stays lit), how far a shot strays from the crosshair (the mean of an exponential
-/// distribution, and a cap; `shot_noise.rs`), and the mean share of its beam's pixels that
-/// speckle each frame (exponential per shot, up to 1).
+/// distribution, and a cap; `shot_noise.rs`), and the share of its beam's pixels that speckle each
+/// frame (the same: a mean and a cap).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SniperSettings {
@@ -112,6 +113,7 @@ pub struct SniperSettings {
     pub noise_mean_rad: f64,
     pub noise_max_rad: f64,
     pub beam_speckle_mean_frac: f64,
+    pub beam_speckle_max_frac: f64,
 }
 
 /// `RifleSettings` is gun 2: its fire rate, how long a shot hits, how its beam flies, overheating
@@ -401,8 +403,9 @@ impl ServerSettings {
             .into());
         }
         let speckle: &BeamSpeckleSettings = &settings.beam_speckle;
-        let speckles_frac: [f64; 6] = [
+        let speckles_frac: [f64; 7] = [
             settings.sniper.beam_speckle_mean_frac,
+            settings.sniper.beam_speckle_max_frac,
             rifle.beam_speckle_start_frac,
             rifle.beam_speckle_max_frac,
             speckle.black_frac,
@@ -608,15 +611,12 @@ mod tests {
             .expect_err("a rifle's noise that shrinks with heat fails")
             .to_string();
         assert!(error.contains("noise_start_rad"), "{error}");
-        let shrinking_speckle: String = BUILTIN_SERVER_YAML
-            .replace(
+        for bad in [
+            BUILTIN_SERVER_YAML.replace(
                 "beam_speckle_start_frac: 0.0",
                 "beam_speckle_start_frac: 0.7",
-            )
-            .replace("beam_speckle_max_frac: 1.0", "beam_speckle_max_frac: 0.5");
-        for bad in [
-            shrinking_speckle,
-            BUILTIN_SERVER_YAML.replace("beam_speckle_max_frac: 1.0", "beam_speckle_max_frac: 1.5"),
+            ),
+            BUILTIN_SERVER_YAML.replace("beam_speckle_max_frac: 0.5", "beam_speckle_max_frac: 1.5"),
             BUILTIN_SERVER_YAML
                 .replace("beam_speckle_mean_frac: 0.2", "beam_speckle_mean_frac: 1.5"),
             BUILTIN_SERVER_YAML.replace("dropout_frac: 0.8", "dropout_frac: 0.7"),

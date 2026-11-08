@@ -365,7 +365,8 @@ Every weapon follows these rules:
 | Shot lasts (hits what the crosshair crosses) | 0.25 s | 0.06 s per shot |
 | Laser | Shows once per shot; each point fades 0.25 s after the front passes | Pulses with each shot; each point fades after 0.05 s |
 | Shot noise (each shot strays at random) | Small: 3 mrad on average, sampled exponentially, at most 15 mrad | Up to 2 mrad cold, growing with the rifle's heat to 20 mrad and shrinking as it cools |
-| Beam noise (each frame, a share of the beam's pixels turns black, white or drops out, 1 : 1 : 8) | Random per shot: 0.2 on average, sampled exponentially, up to the whole beam | None cold, growing with the rifle's heat to the whole beam |
+| Beam look | A white lightsaber blade in a pale haze | A laser in the team's colour |
+| Beam noise (each frame, a share of the beam's pixels turns black, white or drops out, 1 : 1 : 8) | Random per shot: 0.2 on average, sampled exponentially, at most 0.5 | None cold, growing with the rifle's heat to 0.5 |
 | Recoil | None | Each shot kicks the view up 7.5 mrad and 2.5 mrad left or right, alternately, settling in 0.08 s |
 | Aim zoom | 2.5× | 1.5× |
 
