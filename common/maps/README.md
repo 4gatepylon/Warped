@@ -56,6 +56,7 @@ Both are exported from the programs that first built them; the map files are wha
 | `ground` | `{"material": id, "tiling": {...}, "terrain": {...}}` (optional `tiling` and `terrain`, below) |
 | `structures` | structures of smooth shapes, optionally drawn as a model (below), optional |
 | `boxes` | boxes (below), optional |
+| `ladders` | climbable volumes (below), optional |
 | `warps` | black holes and wormhole mouths (below), optional |
 | `lights` | lamps (below), optional |
 | `sky` | the sky and the sun (below) |
@@ -93,6 +94,13 @@ coordinates q (meters):
 coordinate planes, whose faces are equidistant surfaces rather than planes), |p_a| ≤ sin(h_a / R) in S³, and
 |q_a| ≤ h_a in E³. `group` names what the box is part of ("the house", "a tree"), for hit reports and for renderers
 that cull groups at once.
+
+### Ladders
+
+`{"name", "frame", "half_size_m": [h_x, h_y, h_z]}`: a volume a player climbs while in it, a box like those above
+that isn't solid. The frame's -z axis points from the ladder into what it climbs (a player faces it to climb), and
+its top is the frame's origin plus h_y up. A renderer draws it however it likes (the Dark Forest draws a rope
+ladder); readers that don't climb can ignore it.
 
 ### Warps
 

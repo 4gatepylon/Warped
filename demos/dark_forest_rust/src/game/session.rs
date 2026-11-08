@@ -118,7 +118,7 @@ pub struct Session {
     damage_flash_frac: f32,
     spawn_counter: usize,
     noise_state: u32,
-    autopilot_waypoint: usize,
+    pub autopilot_waypoint: usize,
     autopilot_trigger_s: f32,
     pub route: Vec<Vec3>,
     pub remote_bots: Vec<RemoteBot>,

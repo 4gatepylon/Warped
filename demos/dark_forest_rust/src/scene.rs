@@ -34,8 +34,6 @@ const MIN_SUN_PER_SKY_IRRADIANCE_FRAC: f32 = 3.5;
 const ROBOT_HEIGHT_M: f32 = 1.85;
 /// `SURFACE_TEXTURE_SIZE_PX` is the size limit of arena textures.
 const SURFACE_TEXTURE_SIZE_PX: u32 = 2048;
-/// `PROP_TEXTURE_SIZE_PX` is the size limit of prop textures.
-const PROP_TEXTURE_SIZE_PX: u32 = 1024;
 /// `ARMS_POSE_NODE` is the arms model's static pose with both arms reaching forward; the other
 /// five poses are display poses.
 const ARMS_POSE_NODE: &str = "Arms_Obj.001";
@@ -136,18 +134,6 @@ fn create_surface_materials(
         .collect()
 }
 
-/// `prop_mesh_filter` keeps one variant of the Poly Haven packs that hold several.
-fn prop_mesh_filter(model_id: &str) -> Box<dyn Fn(&str) -> bool> {
-    match model_id {
-        "fire_hydrant" => Box::new(|name: &str| !name.contains("aged")),
-        "metal_trash_can" => Box::new(|name: &str| !name.contains("rust")),
-        "old_military_crate" => Box::new(|name: &str| name.ends_with("_a")),
-        "exterior_aircon_unit" => Box::new(|name: &str| !name.contains("rusted")),
-        "mounted_fluorescent_lights" => Box::new(|name: &str| name.ends_with("_a")),
-        _ => Box::new(|_: &str| true),
-    }
-}
-
 /// `draw_items_for` makes the draws of one placed model.
 pub fn draw_items_for(model: &Model, world: Mat4, does_cast_shadow: bool) -> Vec<DrawItem> {
     let center: Vec3 = world.transform_point3((model.bounds_min_m + model.bounds_max_m) * 0.5);
@@ -167,35 +153,6 @@ pub fn draw_items_for(model: &Model, world: Mat4, does_cast_shadow: bool) -> Vec
             does_cast_shadow,
         })
         .collect()
-}
-
-/// `world_aabb` returns the world bounds of a model's local bounds under a transform.
-fn world_aabb(model: &Model, world: Mat4) -> Aabb {
-    let mut min_m: Vec3 = Vec3::splat(f32::MAX);
-    let mut max_m: Vec3 = Vec3::splat(f32::MIN);
-    for corner in 0..8 {
-        let local: Vec3 = Vec3::new(
-            if corner & 1 == 0 {
-                model.bounds_min_m.x
-            } else {
-                model.bounds_max_m.x
-            },
-            if corner & 2 == 0 {
-                model.bounds_min_m.y
-            } else {
-                model.bounds_max_m.y
-            },
-            if corner & 4 == 0 {
-                model.bounds_min_m.z
-            } else {
-                model.bounds_max_m.z
-            },
-        );
-        let point: Vec3 = world.transform_point3(local);
-        min_m = min_m.min(point);
-        max_m = max_m.max(point);
-    }
-    Aabb { min_m, max_m }
 }
 
 /// `environment_from_sky` builds the renderer's environment and picks exposure from the sky.
@@ -445,8 +402,6 @@ impl Scene {
             .collect();
         renderer.set_occluders(&occluders, arena.bounds_min_m, arena.bounds_max_m);
         println!("arena ready in {:.1}s", start.elapsed().as_secs_f32());
-
-        println!("props ready in {:.1}s", start.elapsed().as_secs_f32());
 
         let robot_path =
             asset_manifest::direct_download_path(assets_dir, &asset_manifest::ROBOT_MODEL);

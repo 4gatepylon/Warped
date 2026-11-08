@@ -199,7 +199,25 @@ struct Args {
 
 /// `VERTICAL_ROUTE` is `--play-route`'s loop from red's spawn: up a ladder to the treehouse, over
 /// the bridges, up the lookout, down and back.
-const VERTICAL_ROUTE: [Vec3; 0] = [];
+const VERTICAL_ROUTE: [Vec3; 17] = [
+    Vec3::new(0.0, 0.0, 50.0),
+    Vec3::new(11.0, 0.0, 49.5),
+    Vec3::new(11.0, 7.0, 45.0),
+    Vec3::new(14.0, 7.0, 38.0),
+    Vec3::new(14.0, 7.0, 25.0),
+    Vec3::new(12.0, 7.0, 22.0),
+    Vec3::new(14.0, 7.0, 18.0),
+    Vec3::new(14.0, 7.0, 3.0),
+    Vec3::new(12.0, 7.0, 1.5),
+    Vec3::new(10.0, 7.0, 0.0),
+    Vec3::new(3.7, 7.0, 0.0),
+    Vec3::new(3.9, 7.0, 3.5),
+    Vec3::new(1.0, 12.0, 3.5),
+    Vec3::new(-3.8, 7.0, 3.5),
+    Vec3::new(-4.0, 0.0, 9.0),
+    Vec3::new(0.0, 0.0, 30.0),
+    Vec3::new(0.0, 0.0, 46.0),
+];
 
 /// `validate_args` checks every flag before anything starts.
 fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
@@ -546,7 +564,15 @@ fn main() {
             }
             None => controls,
         };
+        let waypoint_before: usize = session.autopilot_waypoint;
         session.update(&controls, &scene, &audio, dt_s);
+        if args.play_route && session.autopilot_waypoint != waypoint_before {
+            println!(
+                "route: reached waypoint {waypoint_before} at {:.1?} after {:.1} s",
+                session.player.feet_m,
+                start.elapsed().as_secs_f32()
+            );
+        }
         let is_e_held: bool = keys.is_scancode_pressed(Scancode::E);
         if let Err(error) = play.update(&mut session, &scene, is_e_held, dt_s) {
             eprintln!("network error: {error}");

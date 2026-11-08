@@ -16,15 +16,15 @@ mod asset_manifest;
 
 use std::fs;
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use clap::Parser;
 use serde_json::Value;
 
 use asset_manifest::{
-    LUNAR_SURFACE_TEXTURES, POLY_HAVEN_FILES_API_URL, PolyHavenModel, SKETCHFAB_DOWNLOAD_API_URL,
-    SKETCHFAB_MODELS, SURFACE_TEXTURES, SketchfabModel,
+    LUNAR_SURFACE_TEXTURES, POLY_HAVEN_FILES_API_URL, SKETCHFAB_DOWNLOAD_API_URL, SKETCHFAB_MODELS,
+    SURFACE_TEXTURES, SketchfabModel,
 };
 
 const USER_AGENT: &str = "warped-fps-demo-asset-downloader";
@@ -75,33 +75,6 @@ fn plan_file(entry: &Value, path: PathBuf) -> PlannedFile {
         path,
         expected_size_bytes: entry["size"].as_u64(),
     }
-}
-
-/// `plan_model` lists the `.gltf`, `.bin` and texture files of one Poly Haven model.
-///
-/// Example: `plan_model(assets_dir, &RIFLE_MODEL)`.
-fn plan_model(assets_dir: &Path, model: &PolyHavenModel) -> Vec<PlannedFile> {
-    let files: Value = fetch_json(&format!("{POLY_HAVEN_FILES_API_URL}/{}", model.id));
-    let gltf_entry: &Value = &files["gltf"][model.resolution]["gltf"];
-    let mut planned_files: Vec<PlannedFile> = vec![plan_file(
-        gltf_entry,
-        asset_manifest::model_gltf_path(assets_dir, model),
-    )];
-    let includes = gltf_entry["include"]
-        .as_object()
-        .unwrap_or_else(|| panic!("model {} has no include list", model.id));
-    for (relative_path, entry) in includes {
-        assert!(
-            Path::new(relative_path)
-                .components()
-                .all(|component| matches!(component, Component::Normal(_))),
-            "model {} include path {relative_path:?} must stay inside its folder",
-            model.id
-        );
-        let path: PathBuf = asset_manifest::model_dir(assets_dir, model).join(relative_path);
-        planned_files.push(plan_file(entry, path));
-    }
-    planned_files
 }
 
 /// `plan_downloads` lists every file of the manifest.

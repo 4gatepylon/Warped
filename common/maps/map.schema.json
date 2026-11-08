@@ -153,6 +153,19 @@
         }
       }
     },
+    "ladders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "frame", "half_size_m"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "frame": {"$ref": "#/$defs/frame"},
+          "half_size_m": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 3, "maxItems": 3}
+        }
+      }
+    },
     "warps": {
       "type": "array",
       "items": {

@@ -57,6 +57,9 @@ const CLIMB_DOWN_PITCH_RAD: f32 = -0.6;
 /// `LADDER_FACING_DOT` is how squarely a player on the ground must walk into a ladder to start
 /// climbing it.
 const LADDER_FACING_DOT: f32 = 0.3;
+/// `CLIMB_TOP_STEP_M` is how far below a ladder's top a climber's feet are when walking forward
+/// steps them off it onto the deck.
+const CLIMB_TOP_STEP_M: f32 = 1.1;
 
 /// `PlayerInput` is one frame's player controls.
 #[derive(Clone, Copy, Debug, Default)]
@@ -253,8 +256,15 @@ impl Player {
             };
             let climb_m_s: f32 = axes.y * down_sign * CLIMB_SPEED_M_S
                 - f32::from(u8::from(input.is_crouch_held)) * CLIMB_SPEED_M_S;
-            self.velocity_m_s =
-                (target_m_s * CLIMB_HORIZONTAL_FRAC).with_y(climb_m_s.max(-CLIMB_SPEED_M_S * 1.5));
+            let ladder: &LadderVolume = ladder.expect("a climber is on a ladder");
+            let facing: Vec3 = -ladder.frame.z_axis.truncate();
+            let is_at_top: bool = self.feet_m.y > ladder.aabb.max_m.y - CLIMB_TOP_STEP_M;
+            let along_m_s: Vec3 = if is_at_top {
+                target_m_s
+            } else {
+                (target_m_s - facing * target_m_s.dot(facing)) * CLIMB_HORIZONTAL_FRAC
+            };
+            self.velocity_m_s = along_m_s.with_y(climb_m_s.max(-CLIMB_SPEED_M_S * 1.5));
         }
 
         let fall_speed_m_s: f32 = -self.velocity_m_s.y;
@@ -301,5 +311,69 @@ trait Vec3Ext {
 impl Vec3Ext for Vec3 {
     fn truncate_y(self) -> Vec2 {
         Vec2::new(self.x, self.z)
+    }
+}
+
+/// `tests` checks climbing a rope ladder onto a deck.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | input at a ladder's foot | walk into it (climbs to the deck), walk past it sideways (stays on the ground) | `test_walking_into_a_ladder_climbs_onto_the_deck`, `test_walking_beside_a_ladder_stays_down` |
+#[cfg(test)]
+mod tests {
+    use glam::Mat4;
+
+    use super::*;
+
+    /// `DECK_TOP_M` is the test deck's height.
+    const DECK_TOP_M: f32 = 7.0;
+
+    /// `walk_s` walks a player from `feet_m` with `move_axes` for `seconds`, past a deck whose
+    /// edge is at z = 47 and a ladder just outside it, and returns where they end up.
+    fn walk_s(feet_m: Vec3, move_axes: Vec2, seconds: f32) -> Vec3 {
+        let solids: [Aabb; 2] = [
+            Aabb {
+                min_m: Vec3::new(-50.0, -1.0, -50.0),
+                max_m: Vec3::new(50.0, 0.0, 50.0),
+            },
+            Aabb {
+                min_m: Vec3::new(9.0, DECK_TOP_M - 0.2, 37.0),
+                max_m: Vec3::new(19.0, DECK_TOP_M, 47.0),
+            },
+        ];
+        let ladders: [LadderVolume; 1] = [LadderVolume {
+            aabb: Aabb {
+                min_m: Vec3::new(10.5, 0.0, 47.0),
+                max_m: Vec3::new(11.5, DECK_TOP_M + 1.0, 47.6),
+            },
+            frame: Mat4::from_translation(Vec3::new(11.0, 4.0, 47.3)),
+            half_m: Vec3::new(0.5, 4.0, 0.3),
+        }];
+        let mut player: Player = Player::new(feet_m, 0.0);
+        let input: PlayerInput = PlayerInput {
+            move_axes,
+            ..PlayerInput::default()
+        };
+        let dt_s: f32 = 1.0 / 120.0;
+        for _ in 0..(seconds / dt_s) as usize {
+            player.update(&input, &solids, &ladders, dt_s);
+        }
+        player.feet_m
+    }
+
+    /// `test_walking_into_a_ladder_climbs_onto_the_deck` checks holding W at a ladder's foot
+    /// ends on the deck above it.
+    #[test]
+    fn test_walking_into_a_ladder_climbs_onto_the_deck() {
+        let feet_m: Vec3 = walk_s(Vec3::new(11.0, 0.0, 48.5), Vec2::Y, 4.0);
+        assert!((feet_m.y - DECK_TOP_M).abs() < 0.05, "ended at {feet_m}");
+        assert!(feet_m.z < 46.5, "ended at {feet_m}");
+    }
+
+    /// `test_walking_beside_a_ladder_stays_down` checks walking past a ladder doesn't climb it.
+    #[test]
+    fn test_walking_beside_a_ladder_stays_down() {
+        let feet_m: Vec3 = walk_s(Vec3::new(14.0, 0.0, 48.5), Vec2::Y, 2.0);
+        assert!(feet_m.y < 0.05, "ended at {feet_m}");
     }
 }

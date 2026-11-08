@@ -583,6 +583,12 @@ fn materials() -> Vec<Material> {
     ]
 }
 
+/// `unit_direction` scales a direction to length 1, in f64 so the map's validator agrees.
+fn unit_direction(direction: [f64; 3]) -> [f64; 3] {
+    let length: f64 = direction.iter().map(|x| x * x).sum::<f64>().sqrt();
+    direction.map(|x| x / length)
+}
+
 /// `build` makes the whole Dark Forest map.
 ///
 /// Example: `let map: MapFile = build();`
@@ -617,7 +623,7 @@ pub fn build() -> MapFile {
             sky: Sky {
                 transport: "parallel".to_string(),
                 sun: Sun {
-                    direction: [0.45, 0.35, -0.82],
+                    direction: unit_direction([0.45, 0.35, -0.82]),
                     color: [1.0, 0.72, 0.45],
                 },
                 stars: false,
@@ -629,7 +635,8 @@ pub fn build() -> MapFile {
             spawns: Vec::new(),
             appearance: Appearance {
                 style: "forest".to_string(),
-            },
+            lighting: serde_json::json!({"model": "ambient_sun", "ambient": 0.6, "sun": 3.7}),
+        },
         },
         footprints: Vec::new(),
         random_state: 0x5eed_f0e5,

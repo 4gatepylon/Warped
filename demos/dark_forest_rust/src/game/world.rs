@@ -83,15 +83,6 @@ pub struct WorldBox {
     pub is_drawn: bool,
 }
 
-/// `PropPlacement` is one placed prop model (the forest has none yet).
-#[derive(Clone, Copy, Debug)]
-pub struct PropPlacement {
-    pub model_id: &'static str,
-    pub position_m: Vec3,
-    pub yaw_rad: f32,
-    pub is_solid: bool,
-}
-
 /// `LightPlacement` is one point light and its color (in multiples of the light scale).
 #[derive(Clone, Copy, Debug)]
 pub struct LightPlacement {
@@ -137,7 +128,6 @@ pub struct Arena {
     pub shapes: Vec<WorldShape>,
     pub ladders: Vec<LadderVolume>,
     pub consoles: Vec<Console>,
-    pub props: Vec<PropPlacement>,
     pub lights: Vec<LightPlacement>,
     pub player_spawns: Vec<(Vec3, f32)>,
     pub team_spawns: [Vec<(Vec3, f32)>; 2],
@@ -288,7 +278,6 @@ impl Arena {
             shapes,
             ladders,
             consoles,
-            props: Vec::new(),
             lights,
             player_spawns,
             team_spawns,
@@ -348,15 +337,6 @@ impl Arena {
     /// Example: `let boxes: Vec<Aabb> = arena.occluders();`
     pub fn occluders(&self) -> Vec<Aabb> {
         self.boxes.iter().skip(1).map(|b| b.aabb).collect()
-    }
-
-    /// `ladder_at` gives the ladder a body overlaps, if any.
-    ///
-    /// Example: `let ladder = arena.ladder_at(&body);`
-    pub fn ladder_at(&self, body: &Aabb) -> Option<&LadderVolume> {
-        self.ladders
-            .iter()
-            .find(|ladder| ladder.aabb.overlaps(body))
     }
 }
 

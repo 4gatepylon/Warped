@@ -145,7 +145,7 @@ pub struct Sky {
 /// `Sun` is the sun's direction and colour.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Sun {
-    pub direction: [f32; 3],
+    pub direction: [f64; 3],
     pub color: [f32; 3],
 }
 
@@ -160,6 +160,7 @@ pub struct Spawn {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Appearance {
     pub style: String,
+    pub lighting: serde_json::Value,
 }
 
 /// `load` reads a Euclidean map file.

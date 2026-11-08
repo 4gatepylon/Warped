@@ -9677,9 +9677,9 @@
     "transport": "parallel",
     "sun": {
       "direction": [
-        0.45,
-        0.35,
-        -0.82
+        0.45058614322726115,
+        0.35045588917675863,
+        -0.8210680832141203
       ],
       "color": [
         1.0,
@@ -9872,6 +9872,11 @@
     }
   ],
   "appearance": {
-    "style": "forest"
+    "style": "forest",
+    "lighting": {
+      "ambient": 0.6,
+      "model": "ambient_sun",
+      "sun": 3.7
+    }
   }
 }
