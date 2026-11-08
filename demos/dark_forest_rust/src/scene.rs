@@ -187,7 +187,7 @@ fn grade_sky_for_swamp(sky: &mut Sky) {
         let grey: f32 = rgb.dot(Vec3::new(0.2126, 0.7152, 0.0722));
         Vec3::splat(grey).lerp(rgb, SWAMP_SKY_SATURATION_FRAC) * SWAMP_SKY_TINT_RGB
     };
-    for pixel in sky.rgb_pixels.chunks_exact_mut(3) {
+    for pixel in sky.rgb_pixels.as_chunks_mut::<3>().0 {
         let rgb: Vec3 = grade(Vec3::new(pixel[0], pixel[1], pixel[2]));
         pixel.copy_from_slice(&rgb.to_array());
     }
