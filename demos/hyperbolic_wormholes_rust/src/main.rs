@@ -44,6 +44,7 @@ mod shapes;
 mod shot_noise;
 mod spaceships;
 mod terrain;
+mod thrown_wormholes;
 mod viewmodel;
 mod voxel_clearance;
 mod voxel_textures;
