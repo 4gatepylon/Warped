@@ -69,6 +69,9 @@ constant float AMBIENT = 0.11;
 constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
 constant float3 EARTHSHINE_COLOR = float3(0.55, 0.7, 1.0);
+constant int HAND_LIGHT_COUNT = 3;
+constant int HAND_LIGHT_BUFFER_INDEX = 28;
+constant float GROUND_ALBEDO = 0.12;
 constant float LIGHT_CUTOFF_FRAC = 3.0;
 constant float LIGHT_WRAP = 0.3;
 constant float BLOCK_NOISE = 0.18;
@@ -874,19 +877,25 @@ static float2 get_env_brdf(float roughness, float n_dot_v) {
     return float2(-1.04, 1.04) * a004 + r.zw;
 }
 
+/** @brief `get_lamp_light` gives lamp i's light reaching x (black past its cutoff) and the unit direction toward it. @par Example @code float3 c = get_lamp_light(scene, i, x, toward); @endcode */
+static float3 get_lamp_light(thread const Scene &scene, int i, float4 x, thread float4 &toward) {
+    float4 lx = scene.lights[i].position;
+    float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
+    toward = normalize_tangent(x, lx);
+    if (d_m > LIGHT_CUTOFF_FRAC * radius_m) return float3(0.0);
+    return scene.lights[i].color_radius.rgb / (1.0 + (d_m / radius_m) * (d_m / radius_m))
+        * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
+}
+
 /** @brief `gather_lights` sums the lamps' light at a surface point. @par Example @code float3 lamps = gather_lights(scene, s, x, view, energy); @endcode */
 static float3 gather_lights(thread const Scene &scene, Surface s, float4 x, float4 view, float3 energy) {
     float3 sum = float3(0.0);
     for (int i = 0; i < scene.u.light_count; i++) {
-        float4 lx = scene.lights[i].position;
-        float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
-        if (d_m > LIGHT_CUTOFF_FRAC * radius_m) continue;
-        float4 toward = lx + mdot(lx, x) * x;
-        toward *= rsqrt(max(mdot(toward, toward), TINY));
-        float falloff = 1.0 / (1.0 + (d_m / radius_m) * (d_m / radius_m))
-                      * (1.0 - smoothstep(LIGHT_FADE_START_FRAC * LIGHT_CUTOFF_FRAC * radius_m, LIGHT_CUTOFF_FRAC * radius_m, d_m));
+        float4 toward;
+        float3 light = get_lamp_light(scene, i, x, toward);
+        if (all(light == 0.0)) continue;
         float3 wrap = LIGHT_WRAP * s.albedo * (1.0 - s.metallic);
-        sum += scene.lights[i].color_radius.rgb * falloff * (wrap + (1.0 - LIGHT_WRAP) * M_PI_F * light_from(s, toward, view, energy));
+        sum += light * (wrap + (1.0 - LIGHT_WRAP) * M_PI_F * light_from(s, toward, view, energy));
     }
     return sum;
 }
@@ -938,6 +947,54 @@ static float3 light_surface(thread const Scene &scene, Surface s, float4 x, floa
         color += scene.u.spot_color.rgb * scene.u.spot_color.a * exp(-d_m * d_m / (SPOT_RADIUS_M * SPOT_RADIUS_M));
     }
     return color;
+}
+
+/**
+ * @brief `HandLight` is viewmodel.metal's `HandLight`: the light at the eye for the held gun, in camera space (+x right,
+ * +y up, -z ahead): the unit directions toward the sun, the lamps and the planet (zero when absent) and each one's
+ * radiance, the local up, and the radiance of the sky and of the ground.
+ */
+struct HandLight {
+    float4 directions[HAND_LIGHT_COUNT];
+    float4 colors[HAND_LIGHT_COUNT];
+    float4 up;
+    float4 sky;
+    float4 ground;
+};
+
+/** @brief `to_camera` gives a tangent vector at the eye in camera coordinates. @par Example @code float3 d = to_camera(u, l); @endcode */
+static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdot(t, u.camera[0]), mdot(t, u.camera[1]), mdot(t, u.camera[2])); }
+
+/**
+ * @brief `probe_hand_light` writes the light at the eye into `hand`, as `light_surface` lights a surface there: the sun
+ * (shadowed), the lamps summed into one light from their weighted mean direction (their wrapped part goes to the
+ * sky), earthshine, the ambient light as the sky, and the ground lit by the sun and the ambient light.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs, one thread, before the frame's rays.
+ * @endcode
+ */
+kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
+    float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
+    float4 toward_lamps = float4(0.0);
+    for (int i = 0; i < u.light_count; i++) {
+        float4 toward;
+        float3 light = get_lamp_light(scene, i, x, toward);
+        lamps += light;
+        toward_lamps += toward * dot(light, float3(1.0));
+    }
+    float4 directions[HAND_LIGHT_COUNT] = {l, toward_lamps, transport_from_centre(u.planet.xyz, x)};
+    float3 colors[HAND_LIGHT_COUNT] = {sun, (1.0 - LIGHT_WRAP) * lamps, EARTHSHINE * EARTHSHINE_COLOR};
+    for (int k = 0; k < HAND_LIGHT_COUNT; k++) {
+        float3 d = to_camera(u, directions[k]);
+        hand.directions[k] = float4(dot(d, d) > TINY ? normalize(d) : float3(0.0), 0.0);
+        hand.colors[k] = float4(colors[k], 0.0);
+    }
+    hand.up = float4(to_camera(u, up), 0.0);
+    hand.sky = float4(float3(AMBIENT) + LIGHT_WRAP * lamps, 0.0);
+    hand.ground = float4(GROUND_ALBEDO * (sun * max(mdot(up, l), 0.0) + AMBIENT), 0.0);
 }
 
 /** @brief `grid_normal` is the unit normal, toward +axis, of the grid plane of structure st through local point p. @par Example @code float4 t = grid_normal(st, p, 0); @endcode */
