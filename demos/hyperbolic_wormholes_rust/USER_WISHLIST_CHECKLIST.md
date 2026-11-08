@@ -102,6 +102,8 @@ is in [`AGENTS.md`](AGENTS.md).
   character, and the player controls it from there, seeing their own character.
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
+- [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills.
 
 ## Done
 
