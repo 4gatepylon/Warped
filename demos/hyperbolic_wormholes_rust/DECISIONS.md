@@ -1546,6 +1546,29 @@
   release build) took 3.3 to 13.6 ms per view at its fastest frame with 24 mouths allowed and 3.6 to 13.9 ms
   with 8.
 
+### D97. Shooting enemy wormholes (W-89)
+
+- **Choice:**
+  - **A hit:** a shot that goes through the throat of a mouth of a player on the other team counts, and goes on
+    out of the other mouth as before; so does a shot that hits the glowing ball of a mouth down alone. Each
+    shot counts once (the sniper's 0.25 s beam and each rifle pulse), whichever mouths it goes through.
+  - **Destroying:** 2 sniper shots or 5 rifle shots destroy both mouths (`wormholes.sniper_hits_to_destroy` and
+    `rifle_hits_to_destroy`), adding up across the pair's two mouths. The damage stays until they are destroyed:
+    moving a mouth by throwing it again keeps it, and dying clears the mouths as before (D96).
+  - **Flash:** each hit makes both mouths of the pair flash red for `wormholes.hit_flash_s` (0.25 s), for everyone,
+    the owner included: the view through them is tinted red instead of their colour, and a lone mouth's ball turns
+    red.
+  - **Who counts:** the server, like hits on players: a shooter's window reports a shot through an enemy's mouths
+    (`WormholeHit`), the server adds it up (ignoring teammates' shots and players with no mouth down) and sends each
+    player's damage in the snapshot (one byte); the owner's window destroys the pair at 1, and the server resets the
+    damage once the owner has no mouth down.
+- **Alternatives:**
+  - mouths that block enemy shots, or any shot through their bending (you chose shots through the throat);
+  - 1 or 5 sniper shots (you chose 2), damage that heals or resets on a new throw (you chose only when destroyed);
+  - flashing only the mouth hit (you chose both).
+- **Rationale:** you asked that shooting enemy wormholes make them flash red, and that a few shots (5 rifle shots)
+  destroy both.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

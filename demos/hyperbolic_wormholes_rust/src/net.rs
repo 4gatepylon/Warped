@@ -1325,6 +1325,7 @@ mod tests {
     //! | Datagram length | complete (progress kept to a 255th), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
     //! | Player's wormholes | none, one down with a green throw in the air, both down and damaged | `players_survive_encoding` |
     //! | Shot at a player's wormholes | by an enemy (adds up to destroyed, then no further), by a teammate (ignored), with none down (ignored); the owner then has none down (reset) | `enemy_shots_destroy_wormholes` |
+    //! | Wormhole damage sent | to its owner's client, in the snapshot | `owners_learn_their_wormholes_are_destroyed` |
     //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
     //! | Servers announcing themselves | one, several with one on the default port (chosen), several without (the first) | `the_default_port_wins_among_servers` |
     //! | A server that can't take this player | full (says so), of another version (snapshots that don't fit) | `full_games_and_other_versions_are_noticed` |
@@ -1706,6 +1707,32 @@ mod tests {
         }
         server.handle(&hit, address(50_001)).expect("the last hit");
         assert_eq!(server.slots.len(), 1);
+    }
+
+    #[test]
+    fn owners_learn_their_wormholes_are_destroyed() {
+        let hits_to_destroy: u8 = ServerSettings::Builtin().wormholes.sniper_hits_to_destroy;
+        let mut server: Server = make_server();
+        let mut owner: Client = connect_client(&mut server, RED);
+        server
+            .handle(&join_team(BLUE), address(50_001))
+            .expect("a join");
+        server.slots[0].player.wormholes.green = Some(MouthPlace {
+            u_m: 0.0,
+            v_m: 0.0,
+            h_m: 1.6,
+            yaw_rad: 0.0,
+        });
+        let mut hit: Message = Message::New(Kind::WormholeHit).id(2).id(1);
+        hit.0.push(hits_to_destroy);
+        for _ in 0..hits_to_destroy {
+            server
+                .handle(&hit.0, address(50_001))
+                .expect("a wormhole hit");
+        }
+        server.send_snapshot().expect("a snapshot");
+        poll_until(&mut owner, |client| client.wormhole_damage_frac >= 1.0);
+        assert_eq!(owner.wormhole_damage_frac, 1.0);
     }
 
     #[test]

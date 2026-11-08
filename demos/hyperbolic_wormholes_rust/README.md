@@ -85,6 +85,8 @@ make join-game SERVER=127.0.0.1
   comes out of the other (`wormholes` in `server_settings.yaml`). The view through a thrown mouth is tinted its
   colour, and a mouth in the air, or down while its partner isn't, glows as a small ball. A throw fizzles if it
   never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
+  A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
+  2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
