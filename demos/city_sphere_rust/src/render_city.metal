@@ -51,6 +51,12 @@ constant float FRAME_ROUGH = 0.2;
 constant float WALL_PANEL_M = 3.0;
 constant float GRIME_HEIGHT_M = 1.2;
 constant float BOLT_INSET_M = 0.08;
+constant float STRIP_LOW_M = 0.25;
+constant float STRIP_HIGH_M = 0.31;
+constant float3 STRIP_COLOR = float3(0.25, 0.85, 1.0);
+constant float STRIP_GAIN = 1.6;
+constant float STRIP_PULSE_HZ = 0.25;
+constant float STRIP_PULSE_FRAC = 0.25;
 constant float BOLT_RADIUS_M = 0.03;
 constant float BOLT_BRIGHT = 1.8;
 constant float BOLT_SHADOW_DARK = 0.55;
@@ -180,13 +186,22 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
         if (is_street) {
             base = apply_hazard(base, in.world, u);
         }
-        float above_m = u.ambient.w - length(in.world);
+        float r_m = length(in.world);
+        float above_m = (r_m > u.glass.x ? u.ambient.w : u.glass.x) - r_m;
         float mottle = 0.5 + 0.25 * sin(dot(in.world, float3(0.83, 1.31, 0.57))) * sin(dot(in.world, float3(-1.13, 0.37, 1.49)))
             + 0.25 * sin(dot(in.world, float3(2.9, -2.3, 1.7)) + 1.3);
         float grime = GRIME_MOTTLE_FRAC * mottle
             + (is_street ? 0.0 : GRIME_FRAC * (1.0 - smoothstep(0.0, GRIME_HEIGHT_M, above_m)) * (0.6 + 0.4 * mottle));
         base *= 1.0 - grime;
         rough = mix(rough, ROUGH_MAX, grime);
+    }
+    float strip = 0.0;
+    if (!is_beacon && !is_street && in.layer >= 0.0 && abs(dot(normalize(in.normal), normalize(in.world))) < 0.5) {
+        float r_m = length(in.world);
+        float above_m = (r_m > u.glass.x ? u.ambient.w : u.glass.x) - r_m;
+        float aa_m = fwidth(above_m);
+        strip = smoothstep(STRIP_LOW_M - aa_m, STRIP_LOW_M + aa_m, above_m) * (1.0 - smoothstep(STRIP_HIGH_M - aa_m, STRIP_HIGH_M + aa_m, above_m));
+        strip *= 1.0 - STRIP_PULSE_FRAC + STRIP_PULSE_FRAC * sin(6.2832 * (u.glass.z * STRIP_PULSE_HZ + dot(in.world, float3(0.05))));
     }
     float4 beacon = is_beacon ? u.beacons[min(uint(in.color.a - BEACON_FLAG + 0.5), BEACON_SLOT_COUNT - 1)] : float4(0.0);
     base *= is_beacon ? beacon.y : 1.0;
@@ -231,6 +246,7 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
         float edge_aa_m = fwidth(edge_m);
         lit += PANEL_LINE_COLOR * (1.0 - smoothstep(PANEL_LINE_HALF_WIDTH_M - edge_aa_m, PANEL_LINE_HALF_WIDTH_M + edge_aa_m, edge_m));
     }
+    lit += STRIP_COLOR * STRIP_GAIN * strip;
     if (is_beacon) {
         float3 strips = albedo.sample(s, in.uv, uint(in.layer) + 1).rgb;
         float glow = beacon.x;
