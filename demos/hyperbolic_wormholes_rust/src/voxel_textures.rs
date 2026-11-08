@@ -4,7 +4,8 @@
 //! tiling and metalness each map material uses. A missing set fails with the command that restores
 //! it.
 //!
-//! Interface: `get_material_surface`, `check_surface_textures`, `SurfaceTextures::Load`.
+//! Interface: `get_material_surface`, `get_albedo_path`, `check_surface_textures`,
+//! `SurfaceTextures::Load`.
 //!
 //! Example: `let textures = SurfaceTextures::Load(&device)?;`
 
@@ -68,6 +69,17 @@ pub fn get_material_surface(name: &str) -> [f32; 4] {
         .iter()
         .find(|s| s.0 == name)
         .map_or([-1.0, 1.0, 0.0, 0.0], |s| [s.1 as f32, s.2, s.3, 0.0])
+}
+
+/// `get_albedo_path` gives a textured material's albedo map file and its blocks per repeat, or
+/// `None` for a material without a texture.
+///
+/// Example: `let (path, blocks_per_repeat) = get_albedo_path("regolith").expect("a texture");`
+pub fn get_albedo_path(name: &str) -> Option<(PathBuf, f32)> {
+    MATERIAL_SURFACES.iter().find(|s| s.0 == name).map(|s| {
+        let id: &str = SURFACE_SETS[s.1];
+        (get_asset_path(&format!("textures/{id}/{id}_diff_2k.jpg")), s.2)
+    })
 }
 
 /// `SurfaceTextures` is the albedo (sRGB), normal (RG) and AO-roughness-metalness arrays, and each
