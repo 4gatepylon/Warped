@@ -225,6 +225,17 @@ that cover each part in the test file's docstring. Follow the `unit-tests` skill
 When the user tests a game or other visual work you made, follow the `playtesting` skill
 (`.agents/skills/playtesting/`).
 
+## Agents working together
+
+Coordinate agents working in parallel (subagents, other sessions, Codex, Devin) with the `managing-agents` skill
+(`.agents/skills/managing-agents/`), and merge into `staging` with the `merging-to-staging` skill
+(`.agents/skills/merging-to-staging/`).
+
+## Assets
+
+Find, get approved, add and credit assets from outside the repository (models, textures, sounds, fonts) with the
+`adding-assets` skill (`.agents/skills/adding-assets/`).
+
 ## Machine-specific workarounds
 
 This repo is used from several machines, so don't write a workaround for one machine (e.g. a

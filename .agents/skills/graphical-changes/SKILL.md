@@ -55,6 +55,10 @@ picture.
 
 ## Screenshots and videos before finishing
 
+How to capture them in the Rust demo (offscreen views, temporary hooks, live games, sharing the machine with other
+agents and the user's game) is in [capturing-screenshots.md](capturing-screenshots.md); read it before your first
+capture.
+
 - **Screenshots, always:** render them from the game or app itself (in `demos/hyperbolic_wormholes_rust/`,
   `--bench-views` and `--view <name>`), at the resolution the user plays at, from several viewpoints: the usual
   player's view, near, far, and the edge cases of the change (edge-on, from inside, at its limits).
