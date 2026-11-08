@@ -128,8 +128,8 @@ a little from the crosshair: the sniper's by a random few milliradians, the rifl
 during a burst (`DECISIONS.md` D89). A shot into the ground, from either gun and anyone, throws up dust and a puff
 of mist that fade within 2 s. `E` (held)
 turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu (`Q`/`E`
-turn between your settings, a map of the whole level with you on it, and SCORES: how many players there are and each
-one's team, kills and deaths in this game). There is no key to respawn:
+turn between your settings, a map of the whole level with you on it, SCORES: how many players there are and each
+one's team, kills and deaths in this game, and CREDITS: where the game's assets come from). There is no key to respawn:
 players come back only after being eliminated.
 
 ## Known caveats

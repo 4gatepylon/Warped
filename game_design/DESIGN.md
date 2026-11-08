@@ -316,6 +316,8 @@ Every key here is the default. Each player can rebind any action, in the menu or
     blurred), and every other player in the game, near or far, as a dot in their team's colour.
   - SCORES: the player count, and each player's team, kills and deaths, sorted by team and kills,
     with each team's totals.
+  - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
+    and the libraries the game is built on.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the
   screen shakes (each player's own setting).
 - **Motion blur:** a slight one (each player's own setting).
