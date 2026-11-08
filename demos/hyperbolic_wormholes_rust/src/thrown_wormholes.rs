@@ -207,12 +207,14 @@ pub fn fly_throw(
 }
 
 /// `PlayerWormholes` is what everyone sees of one player's wormholes: each colour's place once it
-/// is down, and the throw in the air, if any (its colour and where it is now).
+/// is down, the throw in the air, if any (its colour and where it is now), and how damaged the
+/// pair is by enemy shots (0 to 1, destroyed at 1; the server's tally, 0 from a client).
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct PlayerWormholes {
     pub purple: Option<MouthPlace>,
     pub green: Option<MouthPlace>,
     pub flying: Option<(WormholeColor, DVec4)>,
+    pub damage_frac: f64,
 }
 
 impl PlayerWormholes {

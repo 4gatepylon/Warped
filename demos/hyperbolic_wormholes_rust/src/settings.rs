@@ -184,8 +184,9 @@ pub struct AimSettings {
 }
 
 /// `WormholeSettings` is how a thrown wormhole mouth flies (its speed, how far above the aim it
-/// leaves, its gravity and how long it may fly before it fizzles) and, on voxel maps, its size
-/// (Schwarzschild radius and reach; the house's mouths all share the house's size).
+/// leaves, its gravity and how long it may fly before it fizzles), on voxel maps its size
+/// (Schwarzschild radius and reach; the house's mouths all share the house's size), how many shots
+/// of each gun destroy an enemy's pair, and how long a hit pair flashes red.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct WormholeSettings {
@@ -195,6 +196,9 @@ pub struct WormholeSettings {
     pub max_flight_s: f64,
     pub schwarzschild_radius_m: f64,
     pub reach_m: f64,
+    pub sniper_hits_to_destroy: u8,
+    pub rifle_hits_to_destroy: u8,
+    pub hit_flash_s: f64,
 }
 
 /// `MapEdgeSettings` is the map's soft edge on a map with a crater: how far up the crater's wall
