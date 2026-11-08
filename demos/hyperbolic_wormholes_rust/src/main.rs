@@ -34,6 +34,7 @@ mod map;
 mod map_export;
 mod map_layout;
 mod menu;
+mod mesh;
 mod minimap;
 mod multiplayer;
 mod net;
