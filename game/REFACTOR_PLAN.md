@@ -307,7 +307,7 @@ its own layer.
   plan's). A1 starts only after that, so the game copies the app, the Linux server, the password and the title
   screen with everything else. If A1 can't wait, A1 copies the demo as it is, and each infra PR is then ported into
   `game/` as its own layer, in the infra stack's order, by agreement with the infra stack's agent.
-- **A1, copy.** Copy the demo's `src/`, settings files, wishlist and docs into `game/client/` and `game/` verbatim,
+- **A1, copy (done, #385).** Copy the demo's `src/`, settings files, wishlist and docs into `game/client/` and `game/` verbatim,
   then fix only what the new place breaks: the package and binary names (`warped-client`, `warped`), the fps_demo
   assets path (`fps_demo_assets.rs` takes `demos/` as the crate folder's parent, which is now `game/`), and any
   `include_str!` path. The window then plays exactly as the demo does, including `--serve`.
