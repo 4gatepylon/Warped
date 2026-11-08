@@ -11,6 +11,10 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
+  player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
+  page use team colours. The user said to add and fix it ("Yes, add and fix"). Claimed by Claude Code (session
+  `wizardly-hamilton-23a121`), branch `claude/team-colour-figures`, 2026-11-07.
 - [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox"). Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
@@ -104,74 +108,30 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
+- [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
+  on W-68 (reality bend), which adds the pylons and the black hole.
 
 ## Pending user review
 
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
-- [?] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
-  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
-  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
-  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
-  speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
-  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
-  then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
-  that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249.
-- [?] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
-  menu opens on the SCORES page. #265.
-- [?] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
-  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
-  cylinder, just make it a cylinder. #210.
-- [?] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
-  the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
-  #210.
-- [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
-- [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
-  #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
-  velocity: as long as you are in the wormhole and moving, it shows up blue (based on your velocity and your place in
-  the wormhole); it should NOT go down with a timer. Once you're out of the wormhole it should go away immediately.
-  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. After
-  testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
-  for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
-  BLUE but it has to be very close to white as I had asked". #272. The user's picks from the colour sheets: "i like
-  option 8 for the wormhole", and "for red i like r2". #271.
-- [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
-  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
-  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
-  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256. After playtesting
-  #256: "move the gun back so the handle of the gun is offscreen. it was fine how it was before, just make the gun
-  larger." #263. Then: "I see Leah made the lightsaber thing. That's OK. Let's do lightsaber for the sniper and do
-  the old laser view for the rifle." The rifle's beam is the laser again in #249, with W-84 (shot noise in the beam
-  itself).
-- [?] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
-  player in the game as a dot in their team's colour; the minimap already showed those in reach. #250.
-- [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
-  staging at #225 ("i click w and cannot get out"). #237.
-- [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
-  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
-  don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
-  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226. Then: "can you add a little bit more haze". #238.
-- [?] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
-  and on Lunar Surface. #73, #76, #81–#86, #90, #91.
-- [?] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
-  `lunar_surface`, with lasers that eliminate players. #77, #79, #80.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
-- [?] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
-- [?] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
-  throws the other. These are each player's linked wormholes. #197–#204.
-- [?] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
-  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). You chose: a shot through
-  an enemy's mouth (or at a lone mouth's ball) counts, 2 sniper shots, damage kept until destroyed, both mouths flash
-  (D98). #246–#248.
 
 ## Done
 
 Confirmed by the user after testing.
 
+- [x] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
+- [x] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
+  throws the other. These are each player's linked wormholes. #197–#204. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
+- [x] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
+  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). You chose: a shot through
+  an enemy's mouth (or at a lone mouth's ball) counts, 2 sniper shots, damage kept until destroyed, both mouths flash
+  (D98). #246–#248. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
 - [x] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
   be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
   screenshots before it merged ("dust polyhedra looks good plz merge"). #234. Confirmed by the user, 2026-11-07: "dust as small polydra is good so it should be masrked as done".
@@ -316,3 +276,50 @@ Confirmed by the user after testing.
   demo's `AGENTS.md` that any new asset gets added to that page. #262. Confirmed by the user, 2026-11-07: "the credits page looks good yes".
 - [x] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
   and team. #164. Confirmed by the user, 2026-11-07: "kd stuff also looiks good so add that as complete as well".
+- [x] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
+  menu opens on the SCORES page. #265. Confirmed by the user, 2026-11-07: "scores page change looks good, mark it as done in a pr".
+- [x] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
+  the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
+  #210. Confirmed by the user, 2026-11-07: "no spaceship on blue side looks good mark it as done".
+- [x] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
+  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
+  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
+  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256. After playtesting
+  #256: "move the gun back so the handle of the gun is offscreen. it was fine how it was before, just make the gun
+  larger." #263. Then: "I see Leah made the lightsaber thing. That's OK. Let's do lightsaber for the sniper and do
+  the old laser view for the rifle." The rifle's beam is the laser again in #249, with W-84 (shot noise in the beam
+  itself). Confirmed by the user, 2026-11-07: "lightsaber lasers is done, mark it as done".
+- [x] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
+  player in the game as a dot in their team's colour; the minimap already showed those in reach. #250. Confirmed by the user, 2026-11-07: "other players on map is done mark it as done".
+- [x] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
+  don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
+  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226. Then: "can you add a little bit more haze". #238. Confirmed by the user, 2026-11-07: "better scene lighting is done, mark it as done".
+- [x] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
+  and on Lunar Surface. #73, #76, #81–#86, #90, #91. Confirmed by the user, 2026-11-07: "mark fast runst render er as done".
+- [x] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
+  `lunar_surface`, with lasers that eliminate players. #77, #79, #80. Confirmed by the user, 2026-11-07: "mark multiplayer on one network as done".
+- [x] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129. Confirmed by the user, 2026-11-07: "mark flashlight as done".
+- [x] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
+  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
+  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
+  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
+  speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
+  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
+  then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
+  that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249. Confirmed by the user, 2026-11-07: "shot noise is good".
+- [x] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
+  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
+  cylinder, just make it a cylinder. #210. Confirmed by the user, 2026-11-07: "sharp edged shpes is done".
+- [x] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
+  #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
+  velocity: as long as you are in the wormhole and moving, it shows up blue (based on your velocity and your place in
+  the wormhole); it should NOT go down with a timer. Once you're out of the wormhole it should go away immediately.
+  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. After
+  testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
+  for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
+  BLUE but it has to be very close to white as I had asked". #272. The user's picks from the colour sheets: "i like
+  option 8 for the wormhole", and "for red i like r2". Confirmed by the user, 2026-11-07: "wormhole color from motion is almost done: just mark it as done and make a PR that makes it take slightly longer; ideally just double its radius or wahtever (ioe walking at same speed should take exactly trwice as long of time showing me cyan or red)".
+  The picked colours, and the colour lasting exactly twice as long, are in #271.
+- [x] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
+  staging at #225 ("i click w and cannot get out"). #237. Confirmed by the user, 2026-11-07: "also stuck in bunker is fixed so mark that as done".
