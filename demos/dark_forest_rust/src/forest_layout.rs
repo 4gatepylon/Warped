@@ -44,11 +44,31 @@ const CLUMP_SPREAD_FRAC: f32 = 2.2;
 const THIN_CULM_RADIUS_M: f32 = 0.13;
 const MAX_CULM_LEAN_RAD: f32 = 0.08;
 /// `LEAF_SPRAY_COUNT` thin leaf sprays point out from each culm over its top `LEAF_SPRAY_DEPTH_M`.
-const LEAF_SPRAY_COUNT: usize = 10;
+const LEAF_SPRAY_COUNT: usize = 3;
 const LEAF_SPRAY_DEPTH_M: f32 = 4.5;
 const LEAF_HALF_LENGTH_M: f32 = 1.3;
 const LEAF_HALF_WIDTH_M: f32 = 0.22;
 const LEAF_HALF_THICKNESS_M: f32 = 0.03;
+/// `BAMBOO_SEED` seeds the generator that places, sizes and leans the decorative bamboo.
+const BAMBOO_SEED: u32 = 0x5eed_f0e5;
+/// `BAMBOO_SPACING_M` is the grid step of the decorative bamboo before jitter.
+const BAMBOO_SPACING_M: f32 = 3.5;
+/// `BAMBOO_GROW_FRAC` is the chance that a clear grid point grows a clump.
+const BAMBOO_GROW_FRAC: f32 = 0.8;
+/// `BRANCH_MIN_COUNT` to `BRANCH_MIN_COUNT + BRANCH_EXTRA_COUNT` branches fork from each culm's
+/// top into a leafy crown; the crowns together are the canopy that shades the forest.
+const BRANCH_MIN_COUNT: usize = 3;
+const BRANCH_EXTRA_COUNT: usize = 2;
+const BRANCH_RADIUS_M: f32 = 0.05;
+const BRANCH_FORK_DEPTH_M: f32 = 2.5;
+const BRANCH_MIN_TILT_RAD: f32 = 0.6;
+const BRANCH_TILT_SPREAD_RAD: f32 = 0.5;
+const BRANCH_MIN_LENGTH_M: f32 = 2.5;
+const BRANCH_LENGTH_SPREAD_M: f32 = 1.5;
+/// `CROWN_LEAF_COUNT` broad leaves hang off each branch's outer part.
+const CROWN_LEAF_COUNT: usize = 7;
+const CROWN_LEAF_HALF_LENGTH_M: f32 = 1.2;
+const CROWN_LEAF_HALF_WIDTH_M: f32 = 0.55;
 
 const AIR: u8 = 0;
 const FOREST_FLOOR: u8 = 1;
@@ -164,12 +184,12 @@ impl Layout {
             let core_radius_m: f32 = (ring_radius_m - culm_radius_m).max(culm_radius_m);
             culms.push((Vec2::ZERO, core_radius_m, height_m, 0.0));
         } else {
-            let culm_count: usize = 3 + (radius_m * 6.0) as usize;
+            let culm_count: usize = 2 + (radius_m * 4.0) as usize;
             for i in 0..culm_count {
                 let angle_rad: f32 = (i as f32 + 0.6 * random_frac()) / culm_count as f32 * TAU;
                 let spread_m: f32 = radius_m * CLUMP_SPREAD_FRAC * (0.35 + 0.65 * random_frac());
-                let culm_radius_m: f32 = THIN_CULM_RADIUS_M * (0.75 + 0.5 * random_frac());
-                let culm_height_m: f32 = height_m * (0.7 + 0.3 * random_frac());
+                let culm_radius_m: f32 = THIN_CULM_RADIUS_M * (0.6 + 0.9 * random_frac());
+                let culm_height_m: f32 = height_m * (0.6 + 0.4 * random_frac());
                 culms.push((
                     Vec2::from_angle(angle_rad) * spread_m,
                     culm_radius_m,
@@ -225,6 +245,65 @@ impl Layout {
                 frame: frame.to_cols_array(),
                 shapes,
             });
+            let branch_count: usize =
+                BRANCH_MIN_COUNT + (random_frac() * (BRANCH_EXTRA_COUNT + 1) as f32) as usize;
+            for branch in 0..branch_count {
+                let azimuth_rad: f32 =
+                    (branch as f32 + 0.6 * random_frac()) / branch_count as f32 * TAU;
+                let tilt_rad: f32 = BRANCH_MIN_TILT_RAD + BRANCH_TILT_SPREAD_RAD * random_frac();
+                let length_m: f32 = BRANCH_MIN_LENGTH_M + BRANCH_LENGTH_SPREAD_M * random_frac();
+                let fork_y_m: f32 = culm_height_m - BRANCH_FORK_DEPTH_M * random_frac();
+                let branch_frame: Mat4 = frame
+                    * Mat4::from_translation(Vec3::new(0.0, fork_y_m, 0.0))
+                    * Mat4::from_quat(
+                        Quat::from_rotation_y(azimuth_rad) * Quat::from_rotation_z(-tilt_rad),
+                    );
+                let mut branch_shapes: Vec<Shape> = vec![Shape {
+                    kind: "cylinder".to_string(),
+                    centre_m: [0.0, length_m * 0.5, 0.0],
+                    half_m: [BRANCH_RADIUS_M, length_m * 0.5, BRANCH_RADIUS_M],
+                    round_m: 0.0,
+                    axis: 1,
+                    material: BARK,
+                }];
+                for leaf in 0..CROWN_LEAF_COUNT {
+                    let along_frac: f32 = 0.4 + 0.6 * leaf as f32 / (CROWN_LEAF_COUNT - 1) as f32;
+                    let sign: f32 = if leaf % 2 == 0 { 1.0 } else { -1.0 };
+                    let reach_m: f32 = CROWN_LEAF_HALF_LENGTH_M * 0.8;
+                    let (centre_m, half_m) = if leaf % 3 == 2 {
+                        (
+                            [sign * reach_m, along_frac * length_m, 0.0],
+                            [
+                                CROWN_LEAF_HALF_LENGTH_M,
+                                LEAF_HALF_THICKNESS_M,
+                                CROWN_LEAF_HALF_WIDTH_M,
+                            ],
+                        )
+                    } else {
+                        (
+                            [0.0, along_frac * length_m, sign * reach_m],
+                            [
+                                CROWN_LEAF_HALF_WIDTH_M,
+                                LEAF_HALF_THICKNESS_M,
+                                CROWN_LEAF_HALF_LENGTH_M,
+                            ],
+                        )
+                    };
+                    branch_shapes.push(Shape {
+                        kind: "ellipsoid".to_string(),
+                        centre_m,
+                        half_m,
+                        round_m: 0.0,
+                        axis: 1,
+                        material: LEAVES,
+                    });
+                }
+                self.map.structures.push(Structure {
+                    name: format!("{name} culm {index} branch {branch}"),
+                    frame: branch_frame.to_cols_array(),
+                    shapes: branch_shapes,
+                });
+            }
         }
     }
 
@@ -664,21 +743,21 @@ fn add_team_side(layout: &mut Layout, side: Side) {
 /// them onto blue's half, so both teams see the same forest.
 fn add_decorative_trees(layout: &mut Layout) {
     let mut count: usize = 0;
-    let step_m: f32 = 6.5;
+    let step_m: f32 = BAMBOO_SPACING_M;
     let mut z: f32 = 3.0;
     while z < HALF_LENGTH_M - 2.0 {
         let mut x: f32 = -HALF_WIDTH_M + 3.0;
         while x < HALF_WIDTH_M - 2.0 {
             let jitter: Vec2 =
-                Vec2::new(layout.random_frac() - 0.5, layout.random_frac() - 0.5) * 3.5;
+                Vec2::new(layout.random_frac() - 0.5, layout.random_frac() - 0.5) * step_m * 0.6;
             let point: Vec2 = Vec2::new(x, z) + jitter;
             let radius_m: f32 = 0.35 + layout.random_frac() * 0.45;
-            let should_grow: bool = layout.random_frac() < 0.6;
+            let should_grow: bool = layout.random_frac() < BAMBOO_GROW_FRAC;
             let inside: bool = point.x.abs() < HALF_WIDTH_M - 1.5
                 && point.y < HALF_LENGTH_M - 1.5
                 && point.y > 1.5;
             if should_grow && inside && layout.is_clear(point, radius_m * CLUMP_SPREAD_FRAC + 0.4) {
-                let height_m: f32 = 18.0 + layout.random_frac() * 8.0;
+                let height_m: f32 = 16.0 + layout.random_frac() * 12.0;
                 for (side, sign) in [("red", 1.0_f32), ("blue", -1.0)] {
                     let foot_m: Vec3 = Vec3::new(point.x * sign, 0.0, point.y * sign);
                     layout.add_tree(&format!("{side} tree {count}"), foot_m, radius_m, height_m);
@@ -783,7 +862,7 @@ pub fn build() -> MapFile {
         },
         },
         footprints: Vec::new(),
-        random_state: 0x5eed_f0e5,
+        random_state: BAMBOO_SEED,
     };
     let margin_m: f32 = 12.0;
     layout.add_box_between(
