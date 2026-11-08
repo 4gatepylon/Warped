@@ -123,8 +123,9 @@ const AVATAR_SHAPES: [Shape; 2] = [
 /// `VoxelStructure` is one structure: its frame (and inverse), its grid, where its cells start in
 /// the voxel bytes, its map model (`mesh`, which lasers hit) or posed body (`avatar_mesh`, an index
 /// into the world's `avatar_meshes`, only drawn: lasers hit its shapes), its bounding sphere
-/// (radius in curvature units), and whether its glowing shapes are dark (`is_dark`: a pylon whose
-/// console is off).
+/// (radius in curvature units), whether its glowing shapes are dark (`is_dark`: a pylon whose
+/// console is off), and the palette entry of its body's team colour (`body_material`, for a
+/// player's or a corpse's body: `render_voxel.metal` turns the body model's teal into it).
 #[derive(Clone)]
 pub struct VoxelStructure {
     pub name: String,
@@ -136,6 +137,7 @@ pub struct VoxelStructure {
     pub centre: DVec4,
     pub radius: f64,
     pub is_dark: bool,
+    pub body_material: Option<u8>,
 }
 
 /// `VoxelWarp` is a black hole or a wormhole mouth: its frame, m and reach in curvature units,
@@ -599,6 +601,7 @@ fn make_structure(
         centre: frame * centre_local,
         radius: radius + BOUND_MARGIN_M / r,
         is_dark: false,
+        body_material: None,
     }
 }
 
@@ -927,14 +930,15 @@ impl VoxelWorld {
 
     /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
     /// in `poses` (a clip and a time in it, one per body); lasers still hit the shapes. After the
-    /// bodies come `corpses` (a feet frame and a pose each), only drawn: lasers pass through them.
+    /// bodies come `corpses` (a feet frame, an avatar colour index and a pose each), only drawn:
+    /// lasers pass through them.
     ///
     /// Example: `let shared = world.with_posed_avatars(&[(feet, 2)], &[(AvatarClip::Idle, 0.0)], &[], &colors);`
     pub fn with_posed_avatars(
         &self,
         bodies: &[(DMat4, usize)],
         poses: &[(AvatarClip, f64)],
-        corpses: &[(DMat4, (AvatarClip, f64))],
+        corpses: &[(DMat4, usize, (AvatarClip, f64))],
         colors: &[[f32; 3]],
     ) -> VoxelWorld {
         assert_eq!(
@@ -949,12 +953,13 @@ impl VoxelWorld {
             let posed: MeshModel = self.body.make_posed(clip, time_s);
             shared.add_avatar(feet, color_index, colors, Some(posed));
         }
-        for &(feet, (clip, time_s)) in corpses {
+        for &(feet, color_index, (clip, time_s)) in corpses {
             let posed: MeshModel = self.body.make_posed(clip, time_s);
             let drawn: Option<(usize, &MeshModel)> = Some((shared.avatar_meshes.len(), &posed));
             let mut corpse: VoxelStructure =
                 make_structure("corpse", feet, shared.shapes.len(), &[], drawn, self.r);
             corpse.avatar_mesh = corpse.mesh.take();
+            corpse.body_material = Some(shared.set_avatar_color(color_index, colors));
             shared.avatar_meshes.push(Arc::new(posed));
             shared.push_structure(corpse);
         }
@@ -972,14 +977,9 @@ impl VoxelWorld {
         colors: &[[f32; 3]],
         posed: Option<MeshModel>,
     ) {
-        let material: usize = AVATAR_FIRST_MATERIAL + color_index % colors.len();
-        let color: [f32; 3] = colors[color_index % colors.len()];
-        self.palette[material] = [color[0], color[1], color[2], 0.0];
+        let material: u8 = self.set_avatar_color(color_index, colors);
         let first_shape: usize = self.shapes.len();
-        self.shapes.extend(AVATAR_SHAPES.map(|shape| Shape {
-            material: material as u8,
-            ..shape
-        }));
+        self.shapes.extend(AVATAR_SHAPES.map(|shape| Shape { material, ..shape }));
         let body: &[Shape] = &self.shapes[first_shape..];
         let drawn: Option<(usize, &MeshModel)> = posed
             .as_ref()
@@ -987,10 +987,22 @@ impl VoxelWorld {
         let mut avatar: VoxelStructure =
             make_structure("player", feet, first_shape, body, drawn, self.r);
         avatar.avatar_mesh = avatar.mesh.take();
+        avatar.body_material = Some(material);
         if let Some(model) = posed {
             self.avatar_meshes.push(Arc::new(model));
         }
         self.push_structure(avatar);
+    }
+
+    /// `set_avatar_color` puts avatar colour `color_index` of `colors` in its palette entry and
+    /// gives that entry.
+    ///
+    /// Example: `let material: u8 = shared.set_avatar_color(1, &colors);`
+    fn set_avatar_color(&mut self, color_index: usize, colors: &[[f32; 3]]) -> u8 {
+        let material: usize = AVATAR_FIRST_MATERIAL + color_index % colors.len();
+        let color: [f32; 3] = colors[color_index % colors.len()];
+        self.palette[material] = [color[0], color[1], color[2], 0.0];
+        u8::try_from(material).expect("avatar materials fit the 256-entry palette")
     }
 
     /// `add_structure` adds a structure of `shapes` in `frame` after the others, in the list of

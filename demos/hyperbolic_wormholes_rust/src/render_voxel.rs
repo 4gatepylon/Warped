@@ -54,6 +54,7 @@ const NO_CLEARANCE_GRID: ClearanceGrid = ClearanceGrid {
 };
 const SHADER_SOURCE: &str = include_str!("render_voxel.metal");
 const KERNEL_NAME: &str = "trace_voxel_pixels";
+const NO_BODY_MATERIAL: f32 = -1.0;
 const UNIFORMS_BUFFER_INDEX: usize = 16;
 const SCENE_BUFFER_COUNT: usize = 10;
 const MEANS_BUFFER_INDEX: usize = 27;
@@ -438,7 +439,7 @@ impl VoxelFrame {
                                     .iter()
                                     .any(|c| c.material == world.shapes[s.first_shape].material),
                         )),
-                        0.0,
+                        s.body_material.map_or(NO_BODY_MATERIAL, f32::from),
                         0.0,
                     ],
                 }

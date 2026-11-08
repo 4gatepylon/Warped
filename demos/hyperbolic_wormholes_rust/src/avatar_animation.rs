@@ -39,11 +39,12 @@ struct Track {
     left_ground_s: Option<f64>,
 }
 
-/// `Corpse` is an eliminated player's body: where it lies and when it fell.
+/// `Corpse` is an eliminated player's body: where it lies, when it fell and the player's team.
 #[derive(Clone, Copy)]
 pub struct Corpse {
     pub feet: DMat4,
     pub fell_s: f64,
+    pub team: u32,
 }
 
 /// `AvatarAnimator` keeps a `Track` for every player in view and the corpses still lying.
@@ -116,16 +117,17 @@ impl AvatarAnimator {
             .collect()
     }
 
-    /// `add_corpse` lays player `victim_id`'s body where this window last saw them, falling at
-    /// `now_s`; it does nothing for a player never seen. Call it before the `update` that no
-    /// longer lists them, which forgets their track.
+    /// `add_corpse` lays player `victim_id`'s body, of `team`, where this window last saw them,
+    /// falling at `now_s`; it does nothing for a player never seen. Call it before the `update`
+    /// that no longer lists them, which forgets their track.
     ///
-    /// Example: `animator.add_corpse(3, 12.5);`
-    pub fn add_corpse(&mut self, victim_id: u32, now_s: f64) {
+    /// Example: `animator.add_corpse(3, 1, 12.5);`
+    pub fn add_corpse(&mut self, victim_id: u32, team: u32, now_s: f64) {
         if let Some(track) = self.tracks.iter().find(|t| t.id == victim_id) {
             self.corpses.push(Corpse {
                 feet: track.feet,
                 fell_s: now_s,
+                team,
             });
         }
     }
@@ -232,7 +234,7 @@ mod tests {
     //! | Ground | on it, just left (under `MIN_AIR_S`), in the air (`Jump` from takeoff) | `jumping_starts_in_the_air` |
     //! | Snapshots | a repeat within `STALE_SNAPSHOT_S` (speed kept), none for longer (idle) | `snapshots_may_repeat` |
     //! | Stride at the hand-over | walking, then running at the same place in the loop | `the_gait_follows_the_speed` |
-    //! | Corpse | of a player never seen (none), lying, older than its time (gone) | `corpses_lie_until_respawn` |
+    //! | Corpse | of a player never seen (none), lying (with its team), older than its time (gone) | `corpses_lie_until_respawn` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -350,13 +352,14 @@ mod tests {
     fn corpses_lie_until_respawn() {
         let world: VoxelWorld = load_world();
         let mut animator: AvatarAnimator = AvatarAnimator::New();
-        animator.add_corpse(2, 0.0);
+        animator.add_corpse(2, 1, 0.0);
         assert!(animator.get_corpses(0.0, LIE_S).is_empty());
         animator.update(&world, &[make_player(&world, 0.0, 0.0)], 0.0);
-        animator.add_corpse(2, 1.0);
+        animator.add_corpse(2, 1, 1.0);
         let lying: Vec<(Corpse, (AvatarClip, f64))> = animator.get_corpses(2.0, LIE_S);
         assert_eq!(lying.len(), 1);
         assert_eq!(lying[0].1, (AvatarClip::Death, 1.0));
+        assert_eq!(lying[0].0.team, 1);
         assert!(
             animator
                 .get_corpses(1.0 + LIE_S + FRAME_S, LIE_S)

@@ -560,7 +560,8 @@ struct Shape {
  * @brief `VoxelStructure` is one structure: the rows of its inverse frame, its bounding sphere's centre, cosh of its
  * radius, its first shape and shape count, whether its glowing shapes are dark (1: a pylon whose console is off) and
  * its mesh's root node (-1 for none;
- * `FIRST_AVATAR_ROOT_CODE - root` for a posed body in the avatar buffers), and R with whether its first shape is a console (1: a beacon).
+ * `FIRST_AVATAR_ROOT_CODE - root` for a posed body in the avatar buffers), and R with whether its first shape is a console (1: a beacon)
+ * and the palette entry of its body's team colour (-1 for none: not a player's or a corpse's body).
  */
 struct VoxelStructure {
     float4 rows[4];
@@ -1537,9 +1538,23 @@ static float4 to_world(device const VoxelStructure &st, float3 c, float w) {
 }
 
 /**
+ * @brief `recolor_body` turns colour c of the body model into team colour `team`: it keeps c's grey part and swaps its
+ * colourful part (the teal) for one of `team`'s hue with the same luminance, so grey metal and shading stay as they were.
+ * @par Example
+ * @code
+ * base.rgb = recolor_body(base.rgb, get_palette(scene, int(st.scale.z)).rgb);
+ * @endcode
+ */
+static float3 recolor_body(float3 c, float3 team) {
+    float3 grey = float3(min(c.r, min(c.g, c.b))), hue = team - min(team.r, min(team.g, team.b));
+    return grey + hue * dot(c - grey, LUMA) / max(dot(hue, LUMA), TINY);
+}
+
+/**
  * @brief `shade_mesh` shades a model triangle hit at x: its material's base colour, metallic-roughness, normal and
- * emissive maps at the hit's texture coordinates, with the interpolated normal turned toward the viewer; a structure
- * whose first shape is a console (a beacon) glows in the console's colour while the console is on.
+ * emissive maps at the hit's texture coordinates, with the interpolated normal turned toward the viewer, and a body's teal
+ * turned into its team colour; a structure whose first shape is a console (a beacon) glows in the console's colour while
+ * the console is on.
  * @par Example
  * @code
  * float3 c = shade_mesh(scene, hit, x, v, s);
@@ -1570,6 +1585,7 @@ static float3 shade_mesh(thread const Scene &scene, Hit h, float4 x, float4 v, f
     constexpr sampler wrap(address::repeat, filter::linear, mip_filter::linear);
     int4 layers = mat.layers;
     float4 base = mat.base_color * (layers.x >= 0 ? scene.mesh_albedo.sample(wrap, uv, layers.x, level(lod)) : float4(1.0));
+    if (st.scale.z >= 0.0) base.rgb = recolor_body(base.rgb, get_palette(scene, int(st.scale.z)).rgb);
     float3 mr = layers.y >= 0 ? scene.mesh_mr.sample(wrap, uv, layers.y, level(lod)).rgb : float3(1.0);
     float3 emissive = mat.emissive_metallic.rgb * (layers.w >= 0 ? scene.mesh_emissive.sample(wrap, uv, layers.w, level(lod)).rgb : float3(1.0));
     Surface s = {base.rgb, max(mat.params.x * mr.g, MIN_ROUGHNESS), mat.emissive_metallic.w * mr.b, 1.0, n};
