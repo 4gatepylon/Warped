@@ -97,7 +97,8 @@ is in [`AGENTS.md`](AGENTS.md).
   game progression, kind of the game history. Like, some state, I suppose, in the game server has to keep track of the
   game history and which team won what and what the wavefronts are, who has ownership, defensive ownership, offensive
   ownership, etc."
-  Merged into `staging/user-4gatepylon` with #403, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #403, 2026-11-08. #417: `make play-all-levels`, a bot match steered
+  through all five levels and checked (no stall, each level's result, the progression).
 - [?] **W-125 Photo map page.** "I also really liked the 3 dimensional-looking visualization for the snow map, if
   you can for all maps (including lunar base) make the map as shown when you click tab and then e to get to map look
   not like some random 1950s drawing but instead a real like photo from the top that would be very nice (it could
