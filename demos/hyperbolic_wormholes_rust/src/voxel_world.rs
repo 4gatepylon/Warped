@@ -21,6 +21,7 @@ use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
 use crate::settings::GameSettings;
+use crate::shapes::{Shape, ShapeKind, find_hit_mu};
 use crate::terrain::{Terrain, get_fermi_coordinates};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
@@ -75,9 +76,25 @@ const BEAM_TOLERANCE_M: f64 = 0.02;
 pub const LOOK_RAD_PER_PX: f64 = 0.0025;
 const MAX_PITCH_RAD: f64 = 1.55;
 const TINY: f64 = 1e-12;
-const AVATAR_SIZE: [usize; 3] = [1, 4, 1];
-const AVATAR_CELL_M: f64 = 0.5;
-const AVATAR_ORIGIN: [f64; 3] = [0.5, 0.0, 0.5];
+const AVATAR_HEAD_FROM_M: f64 = 1.5;
+const AVATAR_SHAPES: [Shape; 2] = [
+    Shape {
+        kind: ShapeKind::Cylinder,
+        centre: DVec3::new(0.0, 0.75, 0.0),
+        half: DVec3::new(0.25, 0.75, 0.25),
+        round_m: 0.2,
+        axis: 1,
+        material: 0,
+    },
+    Shape {
+        kind: ShapeKind::Ellipsoid,
+        centre: DVec3::new(0.0, 1.75, 0.0),
+        half: DVec3::new(0.22, 0.25, 0.22),
+        round_m: 0.0,
+        axis: 1,
+        material: 0,
+    },
+];
 
 /// `VoxelStructure` is one structure: its frame (and inverse), its grid, where its cells start in
 /// the voxel bytes, and its bounding sphere (radius in curvature units).
@@ -85,10 +102,8 @@ const AVATAR_ORIGIN: [f64; 3] = [0.5, 0.0, 0.5];
 pub struct VoxelStructure {
     pub name: String,
     pub inverse: DMat4,
-    pub size: [usize; 3],
-    pub origin: [f64; 3],
-    pub cell_m: f64,
-    pub offset: usize,
+    pub first_shape: usize,
+    pub shape_count: usize,
     pub centre: DVec4,
     pub radius: f64,
 }
@@ -168,7 +183,7 @@ pub struct VoxelWorld {
     pub name: String,
     pub r: f64,
     pub structures: Vec<VoxelStructure>,
-    pub voxels: Vec<u8>,
+    pub shapes: Vec<Shape>,
     pub warps: Vec<VoxelWarp>,
     pub lights: Vec<(DVec4, [f32; 3], f64)>,
     pub palette: Vec<[f32; 4]>,
@@ -336,7 +351,50 @@ fn find_material(map: &Map, name: &str) -> i32 {
         .map_or(-1, |m| i32::from(m.id))
 }
 
+/// `make_structure` gives a structure of `shapes` (starting at `first_shape` in the world's list)
+/// in `frame`, with a bounding sphere around the corners of their boxes plus `BOUND_MARGIN_M`.
+///
+/// Example: `let st = make_structure("crate", frame, 0, &shapes, 40.0);`
+fn make_structure(
+    name: &str,
+    frame: DMat4,
+    first_shape: usize,
+    shapes: &[Shape],
+    r: f64,
+) -> VoxelStructure {
+    let lo: DVec3 = shapes
+        .iter()
+        .fold(DVec3::MAX, |lo, sh| lo.min(sh.centre - sh.half));
+    let hi: DVec3 = shapes
+        .iter()
+        .fold(DVec3::MIN, |hi, sh| hi.max(sh.centre + sh.half));
+    let centre_local: DVec4 = map_klein((lo + hi) / (2.0 * r));
+    let radius: f64 = (0..8)
+        .map(|c: usize| {
+            let q: DVec3 =
+                DVec3::from_array([0, 1, 2].map(|a| if c >> a & 1 == 1 { hi[a] } else { lo[a] }));
+            get_distance(map_klein(q / r), centre_local)
+        })
+        .fold(0.0, f64::max);
+    VoxelStructure {
+        name: name.to_string(),
+        inverse: invert_lorentz(frame),
+        first_shape,
+        shape_count: shapes.len(),
+        centre: frame * centre_local,
+        radius: radius + BOUND_MARGIN_M / r,
+    }
+}
+
 impl VoxelWorld {
+    /// `get_shapes` gives structure k's shapes.
+    ///
+    /// Example: `let shapes = world.get_shapes(0);`
+    pub fn get_shapes(&self, k: usize) -> &[Shape] {
+        let st: &VoxelStructure = &self.structures[k];
+        &self.shapes[st.first_shape..st.first_shape + st.shape_count]
+    }
+
     /// `FromMap` builds the world from a voxel map: each structure's bounding sphere (around its
     /// grid's corners, plus `BOUND_MARGIN_M`), each warp's list of structures within reach, the
     /// palette (with a glow for `light` materials) and the `lunar` style's special materials.
@@ -354,38 +412,21 @@ impl VoxelWorld {
                 map.name, map.gravity_m_per_s2, map.player.jump_m_per_s
             ));
         }
-        let structures: Vec<VoxelStructure> = map
-            .structures
-            .iter()
-            .map(|s| {
-                let frame: DMat4 = to_frame(&s.frame);
-                let size: [usize; 3] = s.voxels.size.map(|n| n as usize);
-                let origin: [f64; 3] = s.voxels.origin.map(f64::from);
-                let cell_m: f64 = s.voxels.cell_m;
-                let lo: DVec3 = DVec3::from_array(origin.map(|o| -o * cell_m));
-                let hi: DVec3 =
-                    DVec3::from_array([0, 1, 2].map(|a| (size[a] as f64 - origin[a]) * cell_m));
-                let centre_local: DVec4 = map_klein((lo + hi) / (2.0 * r));
-                let radius: f64 = (0..8)
-                    .map(|c: usize| {
-                        let q: DVec3 = DVec3::from_array(
-                            [0, 1, 2].map(|a| if c >> a & 1 == 1 { hi[a] } else { lo[a] }),
-                        );
-                        get_distance(map_klein(q / r), centre_local)
-                    })
-                    .fold(0.0, f64::max);
-                VoxelStructure {
-                    name: s.name.clone(),
-                    inverse: invert_lorentz(frame),
-                    size,
-                    origin,
-                    cell_m,
-                    offset: s.voxels.offset_bytes,
-                    centre: frame * centre_local,
-                    radius: radius + BOUND_MARGIN_M / r,
-                }
-            })
-            .collect();
+        let (mut structures, mut shapes) = (Vec::new(), Vec::new());
+        for s in &map.structures {
+            let first_shape: usize = shapes.len();
+            for shape in &s.shapes {
+                shapes.push(Shape::FromMap(shape).map_err(|e| format!("map {}: {e}", map.name))?);
+            }
+            let frame: DMat4 = to_frame(&s.frame);
+            structures.push(make_structure(
+                &s.name,
+                frame,
+                first_shape,
+                &shapes[first_shape..],
+                r,
+            ));
+        }
         let mut warps: Vec<VoxelWarp> = Vec::new();
         for warp in &map.warps {
             let is_supported: bool = warp.radial_coordinate == "distance"
@@ -468,7 +509,7 @@ impl VoxelWorld {
             static_structure_count: structures.len(),
             consoles: find_consoles(map),
             structures,
-            voxels: map.voxels.clone(),
+            shapes,
             warps,
             lights: map
                 .lights
@@ -529,27 +570,14 @@ impl VoxelWorld {
             let material: usize = AVATAR_FIRST_MATERIAL + color_index % colors.len();
             let color: [f32; 3] = colors[color_index % colors.len()];
             shared.palette[material] = [color[0], color[1], color[2], 0.0];
-            let offset: usize = shared.voxels.len();
-            shared.voxels.extend(std::iter::repeat_n(
-                material as u8,
-                AVATAR_SIZE.iter().product(),
-            ));
-            let r: f64 = self.r;
-            let lo: DVec3 = DVec3::from_array(AVATAR_ORIGIN.map(|o| -o * AVATAR_CELL_M));
-            let hi: DVec3 = DVec3::from_array(
-                [0, 1, 2].map(|a| (AVATAR_SIZE[a] as f64 - AVATAR_ORIGIN[a]) * AVATAR_CELL_M),
-            );
-            let centre_local: DVec4 = map_klein((lo + hi) / (2.0 * r));
-            shared.structures.push(VoxelStructure {
-                name: "player".to_string(),
-                inverse: invert_lorentz(feet),
-                size: AVATAR_SIZE,
-                origin: AVATAR_ORIGIN,
-                cell_m: AVATAR_CELL_M,
-                offset,
-                centre: feet * centre_local,
-                radius: get_distance(map_klein(hi / r), centre_local) + BOUND_MARGIN_M / r,
-            });
+            let first_shape: usize = shared.shapes.len();
+            shared.shapes.extend(AVATAR_SHAPES.map(|shape| Shape {
+                material: material as u8,
+                ..shape
+            }));
+            let body: &[Shape] = &shared.shapes[first_shape..];
+            let avatar: VoxelStructure = make_structure("player", feet, first_shape, body, self.r);
+            shared.structures.push(avatar);
             for warp in &mut shared.warps {
                 let k: usize = shared.structures.len() - 1;
                 if get_distance(shared.structures[k].centre, warp.centre)
@@ -606,9 +634,8 @@ impl VoxelWorld {
     ///
     /// Example: `let is_head = shared.is_head_hit(k, spot);`
     pub fn is_head_hit(&self, k: usize, x: DVec4) -> bool {
-        let s: &VoxelStructure = &self.structures[k];
-        let p: DVec4 = s.inverse * x;
-        p.y / p.w * self.r / s.cell_m + s.origin[1] >= (AVATAR_SIZE[1] - 1) as f64
+        let p: DVec4 = self.structures[k].inverse * x;
+        p.y / p.w * self.r >= AVATAR_HEAD_FROM_M
     }
 
     /// `get_material_at` gives the material of the cell holding point x among `candidates`, or 0.
@@ -616,17 +643,14 @@ impl VoxelWorld {
     /// Example: `let m = world.get_material_at(x, &nearby);`
     fn get_material_at(&self, x: DVec4, candidates: &[usize]) -> u8 {
         for &k in candidates {
-            let s: &VoxelStructure = &self.structures[k];
-            let p: DVec4 = s.inverse * x;
-            let cell: [f64; 3] =
-                [0, 1, 2].map(|a| (p[a] / p.w * self.r / s.cell_m + s.origin[a]).floor());
-            if (0..3).any(|a| cell[a] < 0.0 || cell[a] >= s.size[a] as f64) {
-                continue;
-            }
-            let [i, j, k_] = cell.map(|c| c as usize);
-            let material: u8 = self.voxels[s.offset + i + s.size[0] * (j + s.size[1] * k_)];
-            if material != 0 {
-                return material;
+            let p: DVec4 = self.structures[k].inverse * x;
+            let q: DVec3 = p.truncate() / p.w * self.r;
+            if let Some(shape) = self
+                .get_shapes(k)
+                .iter()
+                .find(|sh| sh.get_distance_m(q) <= 0.0)
+            {
+                return shape.material;
             }
         }
         0
@@ -900,52 +924,11 @@ impl VoxelWorld {
             let lam: f64 = (s - s_star).tanh();
             lam / (p.w * (p.w + lam * t.w))
         };
-        let scale: f64 = self.r / st.cell_m;
-        let g0: [f64; 3] = [0, 1, 2].map(|i| p[i] / p.w * scale + st.origin[i]);
-        let d: [f64; 3] = [0, 1, 2].map(|i| {
-            let c: f64 = (t[i] * p.w - p[i] * t.w) * scale;
-            if c.abs() < TINY { TINY } else { c }
-        });
-        let (mut mu_in, mut mu_out) = (mu_of(s_lo), mu_of(s_hi));
-        for i in 0..3 {
-            let (m0, m1) = (-g0[i] / d[i], (st.size[i] as f64 - g0[i]) / d[i]);
-            mu_in = mu_in.max(m0.min(m1));
-            mu_out = mu_out.min(m0.max(m1));
-        }
-        if mu_in >= mu_out {
-            return None;
-        }
-        let mut cell: [i64; 3] = [0, 1, 2].map(|i| {
-            let nudge: f64 = if d[i] > 0.0 { 1e-9 } else { -1e-9 };
-            ((g0[i] + d[i] * mu_in + nudge).floor() as i64).clamp(0, st.size[i] as i64 - 1)
-        });
-        let step: [i64; 3] = d.map(|c| if c > 0.0 { 1 } else { -1 });
-        let mut mu_next: [f64; 3] =
-            [0, 1, 2].map(|i| (cell[i] as f64 + if d[i] > 0.0 { 1.0 } else { 0.0 } - g0[i]) / d[i]);
-        let mu_delta: [f64; 3] = d.map(|c| (1.0 / c).abs());
-        let mut mu: f64 = mu_in;
-        for _ in 0..st.size.iter().sum::<usize>() + 3 {
-            let index: usize =
-                cell[0] as usize + st.size[0] * (cell[1] as usize + st.size[1] * cell[2] as usize);
-            if self.voxels[st.offset + index] != 0 {
-                let lam: f64 = mu * p.w * p.w / (1.0 - mu * p.w * t.w);
-                return Some(s_star + lam.atanh());
-            }
-            let i: usize = if mu_next[0] < mu_next[1] {
-                if mu_next[0] < mu_next[2] { 0 } else { 2 }
-            } else if mu_next[1] < mu_next[2] {
-                1
-            } else {
-                2
-            };
-            mu = mu_next[i];
-            cell[i] += step[i];
-            mu_next[i] += mu_delta[i];
-            if mu > mu_out || cell[i] < 0 || cell[i] >= st.size[i] as i64 {
-                return None;
-            }
-        }
-        None
+        let q0: DVec3 = p.truncate() / p.w * self.r;
+        let dq: DVec3 = (t.truncate() * p.w - p.truncate() * t.w) * self.r;
+        let (mu, _) = find_hit_mu(self.get_shapes(k), q0, dq, mu_of(s_lo), mu_of(s_hi))?;
+        let lam: f64 = mu * p.w * p.w / (1.0 - mu * p.w * t.w);
+        Some(s_star + lam.atanh())
     }
 
     /// `trace_scene` finds the first thing a chord hits: the ground or a block (among all
@@ -1529,12 +1512,15 @@ mod tests {
 
     const LANDER_DECK_M: f64 = 1.0;
     const STAND_TOLERANCE_M: f64 = 0.06;
-    const PYLON_DISTANCE_M: f64 = 42.4;
+    const MAX_PLINTH_M: f64 = 1.5;
+    const PYLON_DISTANCE_M: f64 = 34.0;
     const DISTANCE_TOLERANCE_M: f64 = 0.5;
-    const WALL_CELLS: usize = 3;
-    const CLEAR_CELLS: usize = 4;
-    const START_OUT_CELLS: f64 = 0.6;
-    const DIAGONAL_CELLS: f64 = 1.5;
+    const BLOCK_U_M: f64 = -80.0;
+    const BLOCK_DEPTH_M: f64 = 6.0;
+    const BLOCK_HALF_WIDTH_M: f64 = 6.0;
+    const WALL_M: f64 = 3.0;
+    const START_OUT_M: f64 = 0.6;
+    const DIAGONAL_M: f64 = 1.5;
     const STEP_S: f64 = 1.0 / 60.0;
     const WALK_STEP_COUNT: usize = 90;
     const MAX_RISE_ALONG_WALL_M: f64 = 0.5;
@@ -1550,80 +1536,37 @@ mod tests {
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
     const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
 
-    /// `find_columns` finds, on structures standing upright on the ground, columns of cells (x, z)
-    /// solid from the ground up to `solid_cells` (and, with `is_top_open`, empty for
-    /// `CLEAR_CELLS` above), the same at (x, z + 1), with the `CLEAR_CELLS` columns beyond their +x
-    /// faces empty from the ground up (outside the grid counts as empty). For each it gives a map
-    /// point on the ground `START_OUT_CELLS` cells out from the face and one a player there faces,
-    /// toward the face and `along_cells` cells along it (map points are (u, v) in meters, as
-    /// `VoxelPlayer::AtView` takes them).
+    /// `make_block_world` gives the Lunar Surface world with flat ground and nothing on it but a
+    /// box `height_m` tall, 1 m deep and 6 m long at u = -80 m, and a spot on the ground
+    /// `START_OUT_M` from its +x face facing toward it and `along_m` along it (map points are
+    /// (u, v) in meters, as `VoxelPlayer::AtView` takes them).
     ///
-    /// Example: `let walls = find_columns(&world, 3, false, 1.5);`
-    fn find_columns(
-        world: &VoxelWorld,
-        solid_cells: usize,
-        is_top_open: bool,
-        along_cells: f64,
-    ) -> Vec<([f64; 2], [f64; 2])> {
-        let height: usize = solid_cells + CLEAR_CELLS;
-        let mut found: Vec<([f64; 2], [f64; 2])> = Vec::new();
-        for st in &world.structures[..world.static_structure_count] {
-            let frame: DMat4 = invert_lorentz(st.inverse);
-            let is_upright: bool = frame.col(AXIS_W).y.abs() < TINY
-                && (frame.col(AXIS_Y) - DVec4::Y).length() < TINY
-                && st.origin[1] == 0.0;
-            if !is_upright {
-                continue;
-            }
-            let [nx, ny, nz] = st.size;
-            let is_solid = |x: usize, y: usize, z: usize| {
-                x < nx && y < ny && z < nz && world.voxels[st.offset + x + nx * (y + ny * z)] != 0
-            };
-            let to_map = |g: DVec3| -> [f64; 2] {
-                let p: DVec4 =
-                    frame * map_klein((g - DVec3::from_array(st.origin)) * st.cell_m / world.r);
-                let v_m: f64 = world.r * p.x.asinh();
-                [-world.r * (p.z / (v_m / world.r).cosh()).asinh(), v_m]
-            };
-            for z in 0..nz.saturating_sub(1) {
-                for x in 0..nx {
-                    let is_column = |z: usize| {
-                        (0..solid_cells).all(|y| is_solid(x, y, z))
-                            && (!is_top_open || (solid_cells..height).all(|y| !is_solid(x, y, z)))
-                    };
-                    let is_clear: bool = (1..=CLEAR_CELLS).all(|dx| {
-                        (0..height).all(|y| !is_solid(x + dx, y, z) && !is_solid(x + dx, y, z + 1))
-                    });
-                    if is_column(z) && is_column(z + 1) && is_clear {
-                        let face: f64 = (x + 1) as f64;
-                        let at_m: [f64; 2] =
-                            to_map(DVec3::new(face + START_OUT_CELLS, 0.0, z as f64 + 0.5));
-                        let target_m: [f64; 2] = to_map(DVec3::new(
-                            face + START_OUT_CELLS - DIAGONAL_CELLS,
-                            0.0,
-                            z as f64 + 0.5 + along_cells,
-                        ));
-                        found.push((at_m, target_m));
-                    }
-                }
-            }
+    /// Example: `let (world, at_m, target_m) = make_block_world(1.0, 0.0);`
+    fn make_block_world(height_m: f64, along_m: f64) -> (VoxelWorld, [f64; 2], [f64; 2]) {
+        let mut world: VoxelWorld = load_lunar_surface();
+        let frame: DMat4 = make_boost(AXIS_Z, -BLOCK_U_M / world.r);
+        world.terrain = None;
+        world.shapes = vec![Shape {
+            kind: ShapeKind::Box,
+            centre: DVec3::new(0.5 - BLOCK_DEPTH_M / 2.0, height_m / 2.0, 0.0),
+            half: DVec3::new(BLOCK_DEPTH_M / 2.0, height_m / 2.0, BLOCK_HALF_WIDTH_M),
+            round_m: 0.0,
+            axis: 1,
+            material: 1,
+        }];
+        world.structures = vec![make_structure("block", frame, 0, &world.shapes, world.r)];
+        world.static_structure_count = 1;
+        for warp in &mut world.warps {
+            warp.list.clear();
         }
-        found
-    }
-
-    /// `place_on_ground` makes a player at the first of `spots` (from `find_columns`) where they
-    /// stand on the ground, not on a block.
-    ///
-    /// Example: `let player = place_on_ground(&world, &walls);`
-    fn place_on_ground(world: &VoxelWorld, spots: &[([f64; 2], [f64; 2])]) -> VoxelPlayer {
-        spots
-            .iter()
-            .map(|&(at_m, target_m)| VoxelPlayer::AtView(world, at_m, target_m, None, 0.0))
-            .find(|player| {
-                (get_eye_above_ground_m(world, player) - world.player.eye_height_m).abs()
-                    < STAND_TOLERANCE_M
-            })
-            .expect("a spot on the ground beside the column")
+        let to_map = |q: DVec3| -> [f64; 2] {
+            let p: DVec4 = frame * map_klein(q / world.r);
+            let v_m: f64 = world.r * p.x.asinh();
+            [-world.r * (p.z / (v_m / world.r).cosh()).asinh(), v_m]
+        };
+        let at_m: [f64; 2] = to_map(DVec3::new(0.5 + START_OUT_M, 0.0, 0.0));
+        let target_m: [f64; 2] = to_map(DVec3::new(0.5 + START_OUT_M - DIAGONAL_M, 0.0, along_m));
+        (world, at_m, target_m)
     }
 
     /// `get_eye_above_ground_m` gives a player's eye height above the ground under them.
@@ -1662,7 +1605,11 @@ mod tests {
         let world: VoxelWorld = load_lunar_surface();
         let eye_m: f64 = world.player.eye_height_m;
         let on_lander: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
-        assert!((on_lander.h_m - (LANDER_DECK_M + eye_m)).abs() < STAND_TOLERANCE_M);
+        let deck_m: f64 = get_eye_above_ground_m(&world, &on_lander) - eye_m;
+        assert!(
+            deck_m > LANDER_DECK_M - STAND_TOLERANCE_M && deck_m < LANDER_DECK_M + MAX_PLINTH_M,
+            "the spawn stands {deck_m} m above the ground"
+        );
         let on_ground: VoxelPlayer =
             VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
         assert!((get_eye_above_ground_m(&world, &on_ground) - eye_m).abs() < STAND_TOLERANCE_M);
@@ -1671,9 +1618,8 @@ mod tests {
     #[test]
     fn the_laser_into_the_wormhole_hits_the_red_pylon() {
         let world: VoxelWorld = load_lunar_surface();
-        let mut player: VoxelPlayer =
-            VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0);
-        player.h_m = world.player.eye_height_m;
+        let player: VoxelPlayer =
+            VoxelPlayer::AtView(&world, [-22.0, 40.5], [-14.0, 40.0], None, 0.0);
         let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
         assert_eq!(shot.through, vec!["wormhole mouth A".to_string()]);
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
@@ -1723,8 +1669,8 @@ mod tests {
 
     #[test]
     fn walking_into_a_block_does_not_climb_it() {
-        let world: VoxelWorld = load_lunar_surface();
-        let mut player: VoxelPlayer = place_on_ground(&world, &find_columns(&world, 1, true, 0.0));
+        let (world, at_m, target_m) = make_block_world(1.0, 0.0);
+        let mut player: VoxelPlayer = VoxelPlayer::AtView(&world, at_m, target_m, None, 0.0);
         let start_m: f64 = player.h_m;
         assert!(
             walk_forward(&world, &mut player, WALK_STEP_COUNT) - start_m < MAX_RISE_ALONG_WALL_M
@@ -1733,8 +1679,8 @@ mod tests {
 
     #[test]
     fn jumping_climbs_onto_a_block() {
-        let world: VoxelWorld = load_lunar_surface();
-        let mut player: VoxelPlayer = place_on_ground(&world, &find_columns(&world, 1, true, 0.0));
+        let (world, at_m, target_m) = make_block_world(1.0, 0.0);
+        let mut player: VoxelPlayer = VoxelPlayer::AtView(&world, at_m, target_m, None, 0.0);
         let input: Input = Input {
             forward: true,
             up: true,
@@ -1755,11 +1701,8 @@ mod tests {
 
     #[test]
     fn turning_along_a_wall_does_not_climb_it() {
-        let world: VoxelWorld = load_lunar_surface();
-        let mut player: VoxelPlayer = place_on_ground(
-            &world,
-            &find_columns(&world, WALL_CELLS, false, DIAGONAL_CELLS),
-        );
+        let (world, at_m, target_m) = make_block_world(WALL_M, DIAGONAL_M);
+        let mut player: VoxelPlayer = VoxelPlayer::AtView(&world, at_m, target_m, None, 0.0);
         let start_m: f64 = player.h_m;
         walk_forward(&world, &mut player, WALK_STEP_COUNT);
         player.look(QUARTER_TURN_RAD / LOOK_RAD_PER_PX, 0.0);

@@ -25,6 +25,7 @@ use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
 };
+use crate::terrain::{MAX_MOUNDS, Terrain};
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
 use crate::voxel_textures::SurfaceTextures;
 use crate::voxel_world::{BeamSegment, MAX_MATERIAL_COUNT, VoxelWorld};
@@ -48,7 +49,7 @@ const MIN_BUFFER_BYTES: usize = 256;
 
 /// `VoxelUniforms` is the shader's `VoxelUniforms`.
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct VoxelUniforms {
     pub camera: [[f32; 4]; 4],
     pub tan_half_fov: f32,
@@ -84,7 +85,58 @@ pub struct VoxelUniforms {
     pub regions: [f32; 4],
     pub terrain: [f32; 4],
     pub relief: [f32; 4],
+    pub mounds: [[f32; 4]; MAX_MOUNDS],
+    pub mound_groups: [[f32; 4]; MAX_MOUND_GROUPS],
 }
+
+/// `MAX_MOUND_GROUPS` is how many groups of nearby mounds the shader skips together.
+const MAX_MOUND_GROUPS: usize = 16;
+/// `MAX_GROUP_RADIUS_M` caps a mound group's bounding circle.
+const MAX_GROUP_RADIUS_M: f64 = 24.0;
+/// `GROUP_INDEX_SCALE` packs a group's first mound and count into one float.
+const GROUP_INDEX_SCALE: usize = 256;
+
+/// `make_mound_groups` groups a terrain's consecutive mounds while their bounding circle stays
+/// under `MAX_GROUP_RADIUS_M`: (centre u, v, radius, first × 256 + count) each, and the count.
+///
+/// Example: `let (groups, count) = make_mound_groups(&terrain);`
+fn make_mound_groups(t: &Terrain) -> ([[f32; 4]; MAX_MOUND_GROUPS], usize) {
+    let bound = |members: &[[f64; 4]]| -> [f64; 3] {
+        let n: f64 = members.len() as f64;
+        let (cu, cv) = members
+            .iter()
+            .fold((0.0, 0.0), |(u, v), m| (u + m[0] / n, v + m[1] / n));
+        let r: f64 = members
+            .iter()
+            .map(|m| (m[0] - cu).hypot(m[1] - cv) + m[2])
+            .fold(0.0, f64::max);
+        [cu, cv, r]
+    };
+    let mounds: &[[f64; 4]] = &t.mounds[..t.mound_count];
+    let mut groups: [[f32; 4]; MAX_MOUND_GROUPS] = [[0.0; 4]; MAX_MOUND_GROUPS];
+    let (mut count, mut first) = (0, 0);
+    while first < mounds.len() {
+        let mut end: usize = first + 1;
+        while end < mounds.len() && bound(&mounds[first..=end])[2] < MAX_GROUP_RADIUS_M {
+            end += 1;
+        }
+        assert!(
+            count < MAX_MOUND_GROUPS,
+            "make_mound_groups: more than {MAX_MOUND_GROUPS} groups"
+        );
+        let [cu, cv, r] = bound(&mounds[first..end]);
+        groups[count] =
+            [cu, cv, r, (first * GROUP_INDEX_SCALE + end - first) as f64].map(|x| x as f32);
+        count += 1;
+        first = end;
+    }
+    (groups, count)
+}
+
+const _: () = assert!(
+    std::mem::size_of::<VoxelUniforms>() <= 4096,
+    "VoxelUniforms fits setBytes"
+);
 
 /// `GpuStructure` is the shader's `VoxelStructure`.
 #[repr(C)]
@@ -95,6 +147,15 @@ struct GpuStructure {
     bound: [f32; 4],
     size: [i32; 4],
     scale: [f32; 4],
+}
+
+/// `GpuShape` is the shader's `Shape`: centre and kind, half sizes and rounding, material and axis.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GpuShape {
+    centre_kind: [f32; 4],
+    half_round: [f32; 4],
+    info: [i32; 4],
 }
 
 /// `GpuWarp` is the shader's `VoxelWarp`.
@@ -130,7 +191,7 @@ struct GpuBeam {
 pub struct VoxelFrame {
     pub uniforms: VoxelUniforms,
     structures: Vec<GpuStructure>,
-    voxels: Vec<u8>,
+    shapes: Vec<GpuShape>,
     warps: Vec<GpuWarp>,
     lists: Vec<[f32; 4]>,
     lights: Vec<GpuLight>,
@@ -190,19 +251,9 @@ impl VoxelFrame {
                 GpuStructure {
                     rows,
                     centre: to_f32(s.centre),
-                    bound: [
-                        s.radius.cosh() as f32,
-                        s.origin[0] as f32,
-                        s.origin[1] as f32,
-                        s.origin[2] as f32,
-                    ],
-                    size: [
-                        s.size[0] as i32,
-                        s.size[1] as i32,
-                        s.size[2] as i32,
-                        s.offset as i32,
-                    ],
-                    scale: [(r / s.cell_m) as f32, 0.0, 0.0, 0.0],
+                    bound: [s.radius.cosh() as f32, 0.0, 0.0, 0.0],
+                    size: [s.first_shape as i32, s.shape_count as i32, 0, 0],
+                    scale: [r as f32, 0.0, 0.0, 0.0],
                 }
             })
             .collect();
@@ -313,8 +364,20 @@ impl VoxelFrame {
                 [t.rim_m[0], t.rim_m[1], t.wall_m, t.rim_height_m].map(|x| x as f32)
             }),
             relief: world.terrain.map_or([0.0; 4], |t| {
-                [t.relief_m, t.wavelength_m, t.get_max_height_m(), 0.0].map(|x| x as f32)
+                [
+                    t.relief_m,
+                    t.wavelength_m,
+                    t.get_max_height_m(),
+                    make_mound_groups(&t).1 as f64,
+                ]
+                .map(|x| x as f32)
             }),
+            mounds: world.terrain.map_or([[0.0; 4]; MAX_MOUNDS], |t| {
+                t.mounds.map(|m| m.map(|x| x as f32))
+            }),
+            mound_groups: world
+                .terrain
+                .map_or([[0.0; 4]; MAX_MOUND_GROUPS], |t| make_mound_groups(&t).0),
         };
         assert_eq!(
             world.palette.len(),
@@ -324,7 +387,25 @@ impl VoxelFrame {
         VoxelFrame {
             uniforms,
             structures,
-            voxels: world.voxels.clone(),
+            shapes: world
+                .shapes
+                .iter()
+                .map(|sh| GpuShape {
+                    centre_kind: [
+                        sh.centre.x as f32,
+                        sh.centre.y as f32,
+                        sh.centre.z as f32,
+                        sh.kind as i32 as f32,
+                    ],
+                    half_round: [
+                        sh.half.x as f32,
+                        sh.half.y as f32,
+                        sh.half.z as f32,
+                        sh.round_m as f32,
+                    ],
+                    info: [i32::from(sh.material), sh.axis as i32, 0, 0],
+                })
+                .collect(),
             warps,
             lists,
             lights,
@@ -512,7 +593,7 @@ impl VoxelGpu {
     ) -> Result<()> {
         let contents: [&[u8]; SCENE_BUFFER_COUNT] = [
             as_bytes(&frame.structures),
-            &frame.voxels,
+            as_bytes(&frame.shapes),
             as_bytes(&frame.warps),
             as_bytes(&frame.lists),
             as_bytes(&frame.lights),

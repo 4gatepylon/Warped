@@ -1,6 +1,5 @@
-//! `map.rs` reads a map in the portable format of `common/maps/` (see its README): `map.json` and,
-//! for voxel structures, `voxels.bin`, into typed values, failing at once with the field's name
-//! when a map breaks the format.
+//! `map.rs` reads a map in the portable format of `common/maps/` (see its README), `map.json`, into
+//! typed values, failing at once with the field's name when a map breaks the format.
 //!
 //! Interface: `Map::Load`, `get_map_folder`, and the types of the manifest's parts.
 //!
@@ -24,7 +23,6 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const MAPS_FOLDER: &str = "../../common/maps";
 const MANIFEST_NAME: &str = "map.json";
-const VOXELS_NAME: &str = "voxels.bin";
 const FORMAT: &str = "warped-map";
 const VERSION: u32 = 1;
 const SPACE_HYPERBOLIC: &str = "hyperbolic";
@@ -78,6 +76,18 @@ pub struct MapTerrain {
     pub relief_m: f64,
     pub relief_wavelength_m: f64,
     pub seed: u32,
+    #[serde(default)]
+    pub mounds: Vec<MapMound>,
+}
+
+/// `MapMound` is a round hill on the terrain: centre (u, v), radius and height in meters.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapMound {
+    pub u_m: f64,
+    pub v_m: f64,
+    pub radius_m: f64,
+    pub height_m: f64,
 }
 
 /// `Ground` is the ground's material, tiling and relief.
@@ -89,23 +99,26 @@ pub struct Ground {
     pub terrain: Option<MapTerrain>,
 }
 
-/// `VoxelGrid` is where a structure's cells are and how big they are.
-#[derive(Deserialize, Clone, Copy)]
+/// `MapShape` is one smooth solid of a structure, in its local chart (meters): a kind (`box`,
+/// `cylinder` or `ellipsoid`), centre, half sizes, edge rounding, a cylinder's axis and a material.
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VoxelGrid {
-    pub size: [u32; 3],
-    pub cell_m: f64,
-    pub origin: [i32; 3],
-    pub offset_bytes: usize,
+pub struct MapShape {
+    pub kind: String,
+    pub centre_m: [f64; 3],
+    pub half_m: [f64; 3],
+    pub round_m: Option<f64>,
+    pub axis: Option<u8>,
+    pub material: u8,
 }
 
-/// `Structure` is a voxel structure: a frame and a grid in its local coordinates.
+/// `Structure` is a group of smooth shapes sharing a frame.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Structure {
     pub name: String,
     pub frame: [f64; 16],
-    pub voxels: VoxelGrid,
+    pub shapes: Vec<MapShape>,
 }
 
 /// `MapBox` is a box: a frame, half sizes and a material.
@@ -255,8 +268,6 @@ pub struct Map {
     pub spawns: Vec<Spawn>,
     pub regions: Option<Regions>,
     pub appearance: Appearance,
-    #[serde(skip)]
-    pub voxels: Vec<u8>,
 }
 
 /// `get_map_folder` gives a shipped map's folder, `common/maps/<name>/`, found from the crate's folder.
@@ -290,9 +301,8 @@ pub fn to_direction(values: &[f64; 3]) -> DVec3 {
 }
 
 impl Map {
-    /// `Load` reads the map in `folder`: its manifest and, if it has voxel structures, their
-    /// cells, checking the format's name and version, that the space is hyperbolic, and that every
-    /// structure's cells are in `voxels.bin`.
+    /// `Load` reads the map in `folder`, checking the format's name and version and that the
+    /// space is hyperbolic.
     ///
     /// Example: `let map = Map::Load(&get_map_folder("house_demo"))?;`
     #[allow(non_snake_case)]
@@ -300,7 +310,7 @@ impl Map {
         let manifest_path: PathBuf = folder.join(MANIFEST_NAME);
         let text: String = fs::read_to_string(&manifest_path)
             .map_err(|error| format!("map: can't read {}: {error}", manifest_path.display()))?;
-        let mut map: Map = serde_json::from_str(&text).map_err(|error| {
+        let map: Map = serde_json::from_str(&text).map_err(|error| {
             format!(
                 "map: {} breaks the format: {error}",
                 manifest_path.display()
@@ -321,24 +331,6 @@ impl Map {
                 map.name, map.space.kind
             )
             .into());
-        }
-        if !map.structures.is_empty() {
-            let voxels_path: PathBuf = folder.join(VOXELS_NAME);
-            map.voxels = fs::read(&voxels_path)
-                .map_err(|error| format!("map: can't read {}: {error}", voxels_path.display()))?;
-            for structure in &map.structures {
-                let [n_x, n_y, n_z] = structure.voxels.size.map(|n| n as usize);
-                let end_excl: usize = structure.voxels.offset_bytes + n_x * n_y * n_z;
-                if end_excl > map.voxels.len() {
-                    return Err(format!(
-                        "map: structure {:?}'s cells end at byte {end_excl}, past {}'s {} bytes",
-                        structure.name,
-                        voxels_path.display(),
-                        map.voxels.len()
-                    )
-                    .into());
-                }
-            }
         }
         Ok(map)
     }

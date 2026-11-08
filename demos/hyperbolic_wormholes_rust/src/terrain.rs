@@ -1,6 +1,6 @@
 //! `terrain.rs` is a map's `ground.terrain` (`common/maps/README.md`): the ground's height over
 //! the world's Fermi (u, v), a crater bowl whose walls rise to an elliptical rim, roughened by
-//! value noise, and where a chord first meets it. `render_voxel.metal` computes the same height.
+//! value noise and raised by round mounds (hills, a ridge, boulders), and where a chord first meets it. `render_voxel.metal` computes the same height.
 //!
 //! Interface: `Terrain::FromMap`, `Terrain::get_height_m`, `Terrain::find_hit_s`,
 //! `get_fermi_coordinates`.
@@ -22,6 +22,10 @@ const MIN_STEP_M: f64 = 0.03;
 const STEP_PER_M: f64 = 0.01;
 const MAX_STEPS: usize = 400;
 const BISECTIONS: usize = 8;
+/// `MAX_MOUNDS` is how many mounds a terrain holds (`render_voxel.metal`'s `TERRAIN_MAX_MOUNDS`).
+pub const MAX_MOUNDS: usize = 64;
+const MOUND_SAMPLE_M: f64 = 0.5;
+const MOUND_BOUND_MARGIN_M: f64 = 0.3;
 
 /// `Terrain` is a crater's shape in meters: rim semi-axes along u and v, the wall's width inward
 /// from the rim along v, the rim's mean height, and noise of `relief_m` at `wavelength_m`.
@@ -33,6 +37,8 @@ pub struct Terrain {
     pub relief_m: f64,
     pub wavelength_m: f64,
     pub seed: u32,
+    pub mounds: [[f64; 4]; MAX_MOUNDS],
+    pub mound_count: usize,
 }
 
 /// `get_fermi_coordinates` gives (u, v, h) of a point in meters, for curvature radius `r`.
@@ -92,6 +98,14 @@ impl Terrain {
     /// Example: `let terrain = map.ground.terrain.as_ref().map(Terrain::FromMap);`
     #[allow(non_snake_case)]
     pub fn FromMap(terrain: &MapTerrain) -> Terrain {
+        assert!(
+            terrain.mounds.len() <= MAX_MOUNDS,
+            "Terrain::FromMap: more than {MAX_MOUNDS} mounds"
+        );
+        let mut mounds: [[f64; 4]; MAX_MOUNDS] = [[0.0; 4]; MAX_MOUNDS];
+        for (slot, m) in mounds.iter_mut().zip(&terrain.mounds) {
+            *slot = [m.u_m, m.v_m, m.radius_m, m.height_m];
+        }
         Terrain {
             rim_m: [terrain.rim_u_m, terrain.rim_v_m],
             wall_m: terrain.wall_m,
@@ -99,6 +113,8 @@ impl Terrain {
             relief_m: terrain.relief_m,
             wavelength_m: terrain.relief_wavelength_m,
             seed: terrain.seed,
+            mounds,
+            mound_count: terrain.mounds.len(),
         }
     }
 
@@ -106,7 +122,53 @@ impl Terrain {
     ///
     /// Example: `let top_m = terrain.get_max_height_m();`
     pub fn get_max_height_m(&self) -> f64 {
-        self.rim_height_m * (1.0 + RIM_NOISE_FRAC / 2.0) + self.relief_m * (1.0 + WALL_RELIEF_GAIN)
+        self.rim_height_m * (1.0 + RIM_NOISE_FRAC / 2.0)
+            + self.get_max_mounds_height_m()
+            + self.relief_m * (1.0 + WALL_RELIEF_GAIN)
+    }
+
+    /// `get_max_mounds_height_m` bounds `get_mounds_height_m`: its most over a
+    /// `MOUND_SAMPLE_M` grid across each mound, plus `MOUND_BOUND_MARGIN_M` (the sum is smooth,
+    /// flat at its peaks, so a sample near a peak is within centimetres of it).
+    ///
+    /// Example: `let top_m = terrain.get_max_mounds_height_m();`
+    fn get_max_mounds_height_m(&self) -> f64 {
+        let mut top_m: f64 = 0.0;
+        for m in &self.mounds[..self.mound_count] {
+            let n: i32 = (m[2] / MOUND_SAMPLE_M).ceil() as i32;
+            for i in -n..=n {
+                for j in -n..=n {
+                    let (u_m, v_m) = (
+                        m[0] + f64::from(i) * MOUND_SAMPLE_M,
+                        m[1] + f64::from(j) * MOUND_SAMPLE_M,
+                    );
+                    top_m = top_m.max(self.get_mounds_height_m(u_m, v_m));
+                }
+            }
+        }
+        if self.mound_count == 0 {
+            0.0
+        } else {
+            top_m + MOUND_BOUND_MARGIN_M
+        }
+    }
+
+    /// `get_mounds_height_m` sums the mounds at (u, v), each h (1 - d²)² within its radius,
+    /// d the distance over the radius.
+    ///
+    /// Example: `let h_m = terrain.get_mounds_height_m(0.0, 0.0);`
+    fn get_mounds_height_m(&self, u_m: f64, v_m: f64) -> f64 {
+        self.mounds[..self.mound_count]
+            .iter()
+            .map(|m| {
+                let d2: f64 = ((u_m - m[0]).powi(2) + (v_m - m[1]).powi(2)) / (m[2] * m[2]);
+                if d2 < 1.0 {
+                    m[3] * (1.0 - d2).powi(2)
+                } else {
+                    0.0
+                }
+            })
+            .sum()
     }
 
     /// `get_height_m` gives the ground's height at Fermi (u, v): the wall rising from the floor
@@ -126,7 +188,9 @@ impl Terrain {
             sample_noise(u_m / RIM_NOISE_M, v_m / RIM_NOISE_M, self.seed ^ RIM_SEED);
         let rim_m: f64 = self.rim_height_m * (1.0 + RIM_NOISE_FRAC * (rim_noise - 0.5));
         let relief: f64 = sample_fbm(u_m / self.wavelength_m, v_m / self.wavelength_m, self.seed);
-        rim_m * wall + self.relief_m * relief * (1.0 + WALL_RELIEF_GAIN * wall)
+        rim_m * wall
+            + self.get_mounds_height_m(u_m, v_m)
+            + self.relief_m * relief * (1.0 + WALL_RELIEF_GAIN * wall)
     }
 
     /// `find_hit_s` gives where the chord from x along unit tangent v first goes under the ground
@@ -185,6 +249,8 @@ mod tests {
         relief_m: 1.0,
         wavelength_m: 24.0,
         seed: 1,
+        mounds: [[0.0; 4]; MAX_MOUNDS],
+        mound_count: 0,
     };
 
     #[test]

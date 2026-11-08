@@ -32,6 +32,7 @@ mod render_metal;
 mod render_voxel;
 mod scene_data;
 mod settings;
+mod shapes;
 mod terrain;
 mod voxel_clearance;
 mod voxel_textures;
@@ -765,7 +766,7 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
             is_laser_on: true,
             ..view(
                 "laser_into_wormhole",
-                [-22.0, 40.0],
+                [-22.0, 40.5],
                 [-14.0, 40.0],
                 None,
                 0.0,
