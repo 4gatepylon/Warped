@@ -13,9 +13,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
   relativistic effect on colour if possible. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/wormhole-cyan`, 2026-11-07.
-- [~] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
-  look cool and pretty. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/spaceships`, 2026-11-07.
 - [~] **W-54 Professional HUD bars.** Make the health, ammo and other bars look more professional: at the very least
   slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
   implementing. Claimed by Claude Code (subagent of session
@@ -187,3 +184,5 @@ is in [`AGENTS.md`](AGENTS.md).
   menu's map page, W-49, shows the whole map). #166.
 - [x] **W-66 Your range on the map page.** The map in the menu shows a circle around where the player is, with a
   radius (the rest is slightly darker and blurred), and shows where they are on the map. #166.
+- [x] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
+  look cool and pretty. #193.
