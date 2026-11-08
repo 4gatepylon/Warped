@@ -48,11 +48,11 @@ make join-game SERVER=127.0.0.1
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
-  you through. For the split second you are inside the mouth (within about 2 m of its throat), moving, your view
-  flashes almost white, as if you moved near light speed (D84): a pale blue-white walking forward, a warm white
-  walking backward. It is strongest at the throat and with speed, none standing still, and gone once you are 2 m
-  out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for
-  none). Only you see your own flash (Metal renderer, voxel maps).
+  you through. For the moment you are inside the mouth (within about 3.6 m of its centre), moving, your view's
+  colours shift as if you moved near light speed (D84): a light cyan, almost white, walking forward, a dark red
+  walking backward, crisp, with dark staying dark. It is strongest at the throat and with speed, none standing
+  still, and gone once you are 3.6 m out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the
+  menu) sets its strength (0 for none). Only you see your own shift (Metal renderer, voxel maps).
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
   `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy

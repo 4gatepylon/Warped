@@ -3110,20 +3110,15 @@ impl Session {
             let camera: DMat4 = third_person_view.map_or(eye, |(placed, _)| placed.frame);
             let laser_aim: Option<DMat4> =
                 self.get_laser_aim(third_person_view.map_or(eye, |(_, shot_eye)| shot_eye));
-            let own_id: u32 = self
-                .multiplayer
-                .as_ref()
-                .and_then(|m| m.client.id)
-                .unwrap_or(0);
+            let team: u32 = self.get_team();
             let own_body: Option<(DMat4, usize)> = third_person_view
                 .filter(|(placed, _)| placed.is_body_shown)
-                .map(|_| multiplayer::get_body(&voxel.world, laser_aim.unwrap_or(eye), own_id));
+                .map(|_| multiplayer::get_body(&voxel.world, laser_aim.unwrap_or(eye), team));
             self.is_own_body_shown = own_body.is_some();
             let players: Vec<net::RemotePlayer> = self
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
-            let team: u32 = self.get_team();
             let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
