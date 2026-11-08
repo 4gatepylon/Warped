@@ -204,7 +204,8 @@ These values are configurable and may change after playtests.
 | `Shift` (held) | Sprint, while there is energy (see [Sprinting](#sprinting)) |
 | `Space` | Jump |
 | `Ctrl` (held) | Crouch: a lower view and half the walking speed |
-| Right button (held) | Flashlight: a cone of light from the eye while held |
+| Right button (held) | Aim: zoom in (more with the sniper rifle) and turn more slowly while held |
+| `F` (held) | Flashlight: a cone of light from the eye while held |
 | Left click | Shoot, standing still or crouched, not while walking upright, sprinting or in the air (hold it for a weapon that fires while held, such as the rifle) |
 | Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
 | `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |

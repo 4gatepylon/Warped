@@ -1696,6 +1696,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
+    //! | Laser at a window (the red habitat module's) | shot from inside touching the pane, close (the muzzle past the pane), across the room, slantwise; from outside | `the_laser_stops_on_a_window_pane` |
     //! | Players spawning | up to the player limit, and a late id whose own slot is next to player 1's (it moves on) | `players_spawn_apart` |
     //! | Beam drawn | inside the map (whole), out into the sky (stops 4 curvature radii from the origin) | `beams_into_the_sky_stop_near_the_map` |
     //! | Beam clipped to | its middle (through the wormhole), before its start, past its end | `a_clipped_beam_keeps_its_middle` |
@@ -1711,6 +1712,7 @@ mod tests {
     //! | Console | off (dark, unlit), on and not held (the normal pulse), on and held (its own faster pulse) | `consoles_pulse_by_their_own_progress` |
 
     use super::*;
+    use crate::geometry::orthonormalize_frame;
     use crate::map::{Map, get_map_folder};
 
     const LANDER_DECK_M: f64 = 1.0;
@@ -1882,6 +1884,88 @@ mod tests {
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
         assert_eq!(world.structures[hit].name, "red pylon");
         assert!((shot.length_m - PYLON_DISTANCE_M).abs() < DISTANCE_TOLERANCE_M);
+    }
+
+    /// `aim_camera` gives a camera at point `from_m` of structure k's local chart, looking along the
+    /// chart's straight line (a geodesic) toward point `to_m`, upright along the chart's y.
+    ///
+    /// Example: `let camera = aim_camera(&world, k, DVec3::new(0.0, 2.5, 0.0), DVec3::new(-6.0, 2.5, 0.0));`
+    fn aim_camera(world: &VoxelWorld, k: usize, from_m: DVec3, to_m: DVec3) -> DMat4 {
+        let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
+        let to_world = |q_m: DVec3| -> DVec4 { frame * map_klein(q_m / world.r) };
+        let basis: DMat4 = orthonormalize_frame(DMat4::from_cols(
+            to_world(2.0 * from_m - to_m),
+            to_world(from_m + DVec3::Y),
+            to_world(from_m + (to_m - from_m).cross(DVec3::Y)),
+            to_world(from_m),
+        ));
+        DMat4::from_cols(basis.col(2), basis.col(1), basis.col(0), basis.col(3))
+    }
+
+    /// `the_laser_stops_on_a_window_pane` checks that a shot at a window of the red habitat module
+    /// stops on its glass pane's near face, however close to it the shooter stands (W-57).
+    #[test]
+    fn the_laser_stops_on_a_window_pane() {
+        const TOUCHING_M: f64 = 0.05;
+        const CLOSE_M: f64 = 0.3;
+        const ACROSS_ROOM_M: f64 = 3.5;
+        const OUTSIDE_M: f64 = 2.0;
+        const AIM_PAST_M: f64 = 4.0;
+        const SLANT_FROM_M: f64 = 0.4;
+        const SLANT_TO_M: f64 = -1.5;
+        const FACE_TOLERANCE_M: f64 = 0.01;
+        const PROBE_PAST_M: f64 = 0.01;
+        let world: VoxelWorld = load_lunar_surface();
+        let k: usize = world
+            .structures
+            .iter()
+            .position(|st| st.name == "red habitat module")
+            .expect("the red habitat module");
+        let pane: Shape = *world
+            .get_shapes(k)
+            .iter()
+            .filter(|sh| i32::from(sh.material) == world.special.glass && sh.centre.x < 0.0)
+            .min_by(|a, b| a.centre.z.abs().total_cmp(&b.centre.z.abs()))
+            .expect("a window in the module's -x wall");
+        let (inner_x_m, outer_x_m) = (pane.centre.x + pane.half.x, pane.centre.x - pane.half.x);
+        let at = |x_m: f64, along_m: f64| -> DVec3 {
+            DVec3::new(x_m, pane.centre.y, pane.centre.z + along_m)
+        };
+        let (out_m, in_m) = (
+            at(pane.centre.x - AIM_PAST_M, 0.0),
+            at(pane.centre.x + AIM_PAST_M, 0.0),
+        );
+        for (from_m, to_m, face_x_m) in [
+            (at(inner_x_m + TOUCHING_M, 0.0), out_m, inner_x_m),
+            (at(inner_x_m + CLOSE_M, 0.0), out_m, inner_x_m),
+            (at(inner_x_m + ACROSS_ROOM_M, 0.0), out_m, inner_x_m),
+            (
+                at(inner_x_m + CLOSE_M, SLANT_FROM_M),
+                at(pane.centre.x - AIM_PAST_M, SLANT_TO_M),
+                inner_x_m,
+            ),
+            (at(outer_x_m - OUTSIDE_M, 0.0), in_m, outer_x_m),
+        ] {
+            let shot: Shot = world.trace_laser(aim_camera(&world, k, from_m, to_m));
+            assert_eq!(shot.hit_structure, Some(k), "shot from {from_m}");
+            let p: DVec4 = world.structures[k].inverse * shot.spot.expect("a hit's spot");
+            let hit_m: DVec3 = p.truncate() / p.w * world.r;
+            assert!(
+                (hit_m.x - face_x_m).abs() < FACE_TOLERANCE_M,
+                "shot from {from_m} stops at {hit_m}, not on the pane's face x = {face_x_m}"
+            );
+            let past_m: DVec3 = hit_m + (to_m - from_m).normalize() * PROBE_PAST_M;
+            let material: Option<u8> = world
+                .get_shapes(k)
+                .iter()
+                .find(|sh| sh.get_distance_m(past_m) <= 0.0)
+                .map(|sh| sh.material);
+            assert_eq!(
+                material.map(i32::from),
+                Some(world.special.glass),
+                "shot from {from_m}"
+            );
+        }
     }
 
     #[test]
