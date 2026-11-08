@@ -14,8 +14,8 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use glam::{Mat4, Quat, Vec2, Vec3};
 
 use crate::map::{
-    Appearance, Ground, Ladder, LaserLook, Light, MapBox, MapFile, Material, PlayerSpec, Shape,
-    Sky, Space, Spawn, Structure, Sun, Warp, translation_frame, yaw_frame,
+    Appearance, Ground, Ladder, LaserLook, Light, MapBox, MapFile, Material, PlayerSpec, Scatter,
+    Shape, Sky, Space, Spawn, Structure, Sun, Warp, translation_frame, yaw_frame,
 };
 
 /// `HALF_WIDTH_M` is half the forest's extent along x.
@@ -55,6 +55,11 @@ const BAMBOO_SEED: u32 = 0x5eed_f0e5;
 const BAMBOO_SPACING_M: f32 = 3.5;
 /// `BAMBOO_GROW_FRAC` is the chance that a clear grid point grows a clump.
 const BAMBOO_GROW_FRAC: f32 = 0.8;
+/// `PROP_JITTER_M` is how far a log or rock may move from its listed spot; both halves move alike.
+const PROP_JITTER_M: f32 = 0.6;
+/// `LOG_JITTER_SALT` and `ROCK_JITTER_SALT` give logs and rocks different jitter streams.
+const LOG_JITTER_SALT: u32 = 0x1065;
+const ROCK_JITTER_SALT: u32 = 0x60c4;
 /// `BRANCH_MIN_COUNT` to `BRANCH_MIN_COUNT + BRANCH_EXTRA_COUNT` branches fork from each culm's
 /// top into a leafy crown; the crowns together are the canopy that shades the forest.
 const BRANCH_MIN_COUNT: usize = 3;
@@ -704,7 +709,8 @@ fn add_team_side(layout: &mut Layout, side: Side) {
     .into_iter()
     .enumerate()
     {
-        let centre: Vec2 = flat(side.at(x, 0.0, z));
+        let jitter_m: Vec2 = get_prop_jitter_m(LOG_JITTER_SALT, index);
+        let centre: Vec2 = flat(side.at(x + jitter_m.x, 0.0, z + jitter_m.y));
         layout.add_log(
             &format!("{team} log {index}"),
             centre,
@@ -728,7 +734,8 @@ fn add_team_side(layout: &mut Layout, side: Side) {
     .into_iter()
     .enumerate()
     {
-        let centre: Vec3 = side.at(x, half * 0.6, z);
+        let jitter_m: Vec2 = get_prop_jitter_m(ROCK_JITTER_SALT, index);
+        let centre: Vec3 = side.at(x + jitter_m.x, half * 0.6, z + jitter_m.y);
         layout.add_box(
             &format!("{team} rock {index}"),
             centre,
@@ -802,6 +809,22 @@ fn get_clump_seed(foot_m: Vec3) -> u32 {
     (x.wrapping_mul(73_856_093) ^ z.wrapping_mul(19_349_663)) | 1
 }
 
+/// `get_prop_jitter_m` is the seeded offset of prop `index` of a kind, written for red's side so
+/// mirroring gives blue the same offset.
+fn get_prop_jitter_m(salt: u32, index: usize) -> Vec2 {
+    let mut state: u32 = (BAMBOO_SEED
+        ^ salt.wrapping_mul(0x9e37_79b9)
+        ^ (index as u32 + 1).wrapping_mul(0x85eb_ca6b))
+        | 1;
+    let mut next_frac = || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state as f32 / u32::MAX as f32
+    };
+    Vec2::new(next_frac() - 0.5, next_frac() - 0.5) * 2.0 * PROP_JITTER_M
+}
+
 /// `unit_direction` scales a direction to length 1, in f64 so the map's validator agrees.
 fn unit_direction(direction: [f64; 3]) -> [f64; 3] {
     let length: f64 = direction.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -839,6 +862,11 @@ pub fn build() -> MapFile {
             boxes: Vec::new(),
             ladders: Vec::new(),
             warps: Vec::new(),
+            scatter: Some(Scatter {
+                seed: BAMBOO_SEED,
+                spacing_m: BAMBOO_SPACING_M,
+                grow_frac: BAMBOO_GROW_FRAC,
+            }),
             laser: Some(LaserLook {
                 rgb: GOLDEN_WHITE_LASER_RGB,
             }),

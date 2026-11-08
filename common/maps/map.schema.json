@@ -290,6 +290,16 @@
         }
       }
     },
+    "scatter": {
+      "type": "object",
+      "required": ["seed", "spacing_m", "grow_frac"],
+      "additionalProperties": false,
+      "properties": {
+        "seed": {"type": "integer", "minimum": 0},
+        "spacing_m": {"type": "number", "exclusiveMinimum": 0},
+        "grow_frac": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
     "laser": {
       "type": "object",
       "required": ["rgb"],

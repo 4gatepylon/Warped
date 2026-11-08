@@ -36,11 +36,22 @@ pub struct MapFile {
     pub warps: Vec<Warp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub laser: Option<LaserLook>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scatter: Option<Scatter>,
     #[serde(default)]
     pub lights: Vec<Light>,
     pub sky: Sky,
     pub spawns: Vec<Spawn>,
     pub appearance: Appearance,
+}
+
+/// `Scatter` records how a generator scattered the map's decorative plants: its seed, the grid
+/// step before jitter and the chance that a clear grid point grows a plant.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Scatter {
+    pub seed: u32,
+    pub spacing_m: f32,
+    pub grow_frac: f32,
 }
 
 /// `Space` is the map's geometry; this demo reads only `euclidean`.

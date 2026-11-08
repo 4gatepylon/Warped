@@ -63,6 +63,7 @@ Both are exported from the programs that first built them; the map files are wha
 | `spawns` | where players start (below) |
 | `regions` | zones and the boundary (below), optional |
 | `appearance` | `{"style": name, ...}`: how the renderer details surfaces (below) |
+| `scatter` (optional) | `{"seed", "spacing_m", "grow_frac"}`: how the map's generator scattered its decorative plants (seed, grid step before jitter, chance a clear point grows one), so the layout can be regenerated or re-seeded |
 | `laser` (optional) | `{"rgb": [r, g, b]}`: the linear colour every team's lasers share on this map; without it, lasers take team colours |
 
 ### Materials
