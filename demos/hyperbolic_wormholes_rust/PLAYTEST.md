@@ -98,8 +98,8 @@ blue ones run down the energy bar from its last filled slot; while it refills, f
 ammo bar doesn't pulse.
 
 Walk into a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, within about 15 m of
-its centre, your view Doppler-shifts as if you moved near light speed. Walking forward it turns a bluish cyan, deep
-blue in the middle of the screen (reds turn green); walking backward it turns red. It grows toward the throat and
+its centre, your view Doppler-shifts as if you moved near light speed. Walking forward it turns toward a pale light
+cyan (option 8, which you picked); walking backward it turns a darker red (R2). It grows toward the throat and
 with your speed (sprinting deepens it), goes away the moment you stand still, and is gone once you are out of the
 mouth's reach on the other side. Only you see your own shift. In the menu, `wormhole tint 0-1` sets how strong it
 is (0 turns it off). A saved `player_settings.yaml` that still has the old `wormhole_tint_s` line loads as before;

@@ -49,7 +49,7 @@ make join-game SERVER=127.0.0.1
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
   you through. While you move inside a mouth's reach, your view Doppler-shifts as if you moved near light speed
-  (D84): walking forward turns it a bluish cyan, deep blue in the middle; walking backward turns it red. It is
+  (D84, D99): walking forward turns it toward a pale light cyan; walking backward turns it a darker red. It is
   strongest at the throat and with speed, none standing still, and gone once you are out of the reach.
   `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for none).
   Only you see your own shift (Metal renderer, voxel maps).

@@ -1193,6 +1193,8 @@
 - **Rationale:** you asked for a more bluish cyan, not greenish; for the colour to depend on where you are in the
   wormhole and how fast you move, not on a timer; for it to go away once you are out; and for a redshift when
   walking backwards.
+- **Superseded in part by:** D99, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
+  backward, which you picked.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1578,6 +1580,31 @@
   scene differs a little: its mouths and eye are 4.5 blocks up, and it has no laser.
 - **Alternatives:** moving the WebGL demo's mouths to match first.
 - **Rationale:** it is the version you found too slow.
+
+### D99. The wormhole Doppler shift in the colours you picked, for W-82 (wormhole colour from motion)
+
+- **Choice:** D84's shift keeps when and how strongly it shows (depth in a mouth × speed along the view, no timer),
+  and its colours are now the ones you picked from sheets made by an exact Python copy of the shader. The real
+  shader matches that copy to within 1 level in 255 on the `middle` and `red_pylon` views.
+  - **The Doppler step:** as in D84, but D = √(1 − β²) / (1 − β cos θ′), cos θ′ = 1 − (1 − cos θ) / 2, with β 0.09
+    forward at walking speed (was 0.2) and −0.3 backward, growing with it beyond.
+  - **Forward, option 8 "toward light cyan":** D² as bright (was D) plus the blue glow (0, 0.12, 0.4) × (D² − 1);
+    paled 30% toward its grey (luminance 0.2126 R + 0.7152 G + 0.0722 B); moved 60% toward light cyan #E0FFFF at
+    the same luminance; × 1.5 through a shoulder that rolls the brightest channel off above 0.8 toward 1, so
+    nothing clips to flat white; then green moved into blue and held to 0.95 of blue, so nothing turns green. On
+    the `middle` view the ground turns from #A7A294 to #B2E2EE.
+  - **Backward, R2 "darker":** the redshift as before (D as bright plus the red glow (0.4, 0.04, 0) × |D − 1|),
+    then × 0.7. On the `middle` view the ground turns #540F00.
+  - **Below walking strength:** the picked colour fades in, the gain and the green cap with it.
+  - **Knobs:** named constants at the top of `render_metal.metal` (`BLUESHIFT_PALE_FRAC`, `BLUESHIFT_WHITE_FRAC`,
+    `BLUESHIFT_TINT`, `BLUESHIFT_GAIN`, `BLUESHIFT_SHOULDER_KNEE`, `BLUESHIFT_LIFT_FRAC` at 0,
+    `BLUESHIFT_MAX_GREEN_PER_BLUE`, `REDSHIFT_GAIN`). `view.wormhole_tint_frac` still fades the whole shift in.
+- **Alternatives:**
+  - the other forward options on the sheet: 1 to 7 (bluer or greener, less white), 9 to 12 (nearly white, #E0FFFF
+    to #F0FFFF, keeping less of the scene's texture), and lifting the blacks toward the tint (options 7 and 12);
+  - the redshift as it was, or another darkness (R1, R3, R4);
+  - D84's deep blue (β 0.2, D¹, no paling or whitening).
+- **Rationale:** from the sheets you said "i like option 8 for the wormhole" and "for red i like r2".
 
 ## Workload
 
