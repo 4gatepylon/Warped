@@ -41,6 +41,12 @@ is in [`AGENTS.md`](AGENTS.md).
   pages: one page for the hotkeys, another showing a layout of the entire map.
 - [ ] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
   and team.
+- [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
+  dark.
+- [ ] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
+  relativistic effect on colour if possible.
+- [ ] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
+  look cool and pretty.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
 
