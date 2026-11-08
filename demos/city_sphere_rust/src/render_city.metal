@@ -5,6 +5,7 @@ using namespace metal;
 
 constant uint MAX_HOLE_COUNT = 8;
 constant float BEACON_FLAG = 2.0;
+constant uint BEACON_SLOT_COUNT = 8;
 constant float BEACON_GLOW_BRIGHTNESS = 2.0;
 constant float BEACON_BODY_GLOW = 0.72;
 
@@ -24,6 +25,7 @@ struct CityUniforms {
     float4 holes[MAX_HOLE_COUNT];
     float4 glass;
     float4 sky_color;
+    float4 beacons[BEACON_SLOT_COUNT];
 };
 
 struct Fragment {
@@ -67,6 +69,8 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     if (in.layer >= 0.0) {
         base *= albedo.sample(s, in.uv, uint(in.layer)).rgb;
     }
+    float4 beacon = is_beacon ? u.beacons[min(uint(in.color.a - BEACON_FLAG + 0.5), BEACON_SLOT_COUNT - 1)] : float4(0.0);
+    base *= is_beacon ? beacon.y : 1.0;
     if (!is_beacon && in.color.a > 0.5) {
         return float4(encode_srgb(apply_fog(base * 1.6, in.world, u)), 1.0);
     }
@@ -84,7 +88,7 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     float3 lit = base * light;
     if (is_beacon) {
         float3 strips = albedo.sample(s, in.uv, uint(in.layer) + 1).rgb;
-        float glow = in.color.a - BEACON_FLAG;
+        float glow = beacon.x;
         lit += (strips * mix(in.color.rgb, float3(1.0), 0.5) * BEACON_GLOW_BRIGHTNESS + in.color.rgb * BEACON_BODY_GLOW) * glow;
     }
     return float4(encode_srgb(apply_fog(lit, in.world, u)), 1.0);

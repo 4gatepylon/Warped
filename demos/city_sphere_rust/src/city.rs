@@ -31,8 +31,7 @@ use crate::city_world::{CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, S
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
-use crate::mesh::MeshModel;
-use crate::render_city::{CityFrame, CityScene, build_scene, get_beacon, push_beacon, push_beam, push_mesh};
+use crate::render_city::{CityFrame, CityScene, BEACON_SLOT_COUNT, build_scene, push_beam, push_mesh};
 use crate::render_metal::{self, FrameData};
 use crate::settings::{PerPlayerSettings, ServerSettings};
 use crate::thrown_wormholes::PlayerWormholes;
@@ -46,6 +45,7 @@ const AVATAR_HEIGHT_M: f64 = 1.8;
 const TEAM_COLORS: [[f32; 4]; 2] = [[0.3, 0.55, 1.0, 1.0], [1.0, 0.3, 0.25, 1.0]];
 const OVERHEAT_PITCH_RAD: f64 = 1.2;
 const PHOTO_TIME_S: f64 = 0.4;
+const BEACON_OFF_BODY_FRAC: f32 = 0.25;
 const PHOTO_CENTRE_EYE_M: f64 = 3.5;
 const MAP_PICTURE_PATH: &str = "assets/map_picture.png";
 const MAP_PICTURE_FACE_PX: usize = 1536;
@@ -559,29 +559,16 @@ fn make_frame(
     let (off_mask, disabling_mask) = masks;
     let mut dynamic = Vec::new();
     let pulse: f32 = (0.55 + 0.45 * (now_s * PULSE_RAD_PER_S).sin()) as f32;
-    let beacon: &MeshModel = get_beacon();
-    for b in world.boxes.iter().filter(|b| b.group == "pylons") {
-        let team: u32 = u32::from(b.name.starts_with("red"));
-        let console_index: Option<u8> = world
-            .consoles
-            .iter()
-            .filter(|c| c.team == team)
-            .min_by(|x, y| (world.get_console_center(x) - b.center).length().total_cmp(&(world.get_console_center(y) - b.center).length()))
-            .map(|c| c.index);
-        let is_off: bool = console_index.is_some_and(|i| off_mask >> i & 1 == 1);
-        let level: f32 = if console_index.is_some_and(|i| disabling_mask >> i & 1 == 1) { pulse } else { 1.0 };
-        let up: DVec3 = get_up(b.center);
-        let height_m: f64 = 2.0 * b.half_m.y;
-        let back: DVec3 = (b.axes.z_axis - up * b.axes.z_axis.dot(up)).normalize_or(up.any_orthonormal_vector());
-        let right: DVec3 = up.cross(back);
-        let world_from_model: Mat4 = DMat4::from_cols(
-            (right * height_m).extend(0.0),
-            (up * height_m).extend(0.0),
-            (back * height_m).extend(0.0),
-            (b.center - up * b.half_m.y).extend(1.0),
-        )
-        .as_mat4();
-        push_beacon(&mut dynamic, beacon, world_from_model, TEAM_COLORS[team as usize], level, is_off);
+    let mut beacons: [[f32; 4]; BEACON_SLOT_COUNT] = [[1.0, 1.0, 0.0, 0.0]; BEACON_SLOT_COUNT];
+    for console in &world.consoles {
+        let i: u8 = console.index;
+        beacons[usize::from(i)] = if off_mask >> i & 1 == 1 {
+            [0.0, BEACON_OFF_BODY_FRAC, 0.0, 0.0]
+        } else if disabling_mask >> i & 1 == 1 {
+            [pulse, 1.0, 0.0, 0.0]
+        } else {
+            [1.0, 1.0, 0.0, 0.0]
+        };
     }
     let mut posed_clips: Vec<(AvatarClip, crate::mesh::MeshModel)> = Vec::new();
     for robot in robots {
@@ -611,6 +598,7 @@ fn make_frame(
         camera_from_world: eye.inverse().as_mat4(),
         camera_m: camera.as_vec3(),
         tan_half_fov: TAN_HALF_FOV,
+        beacons,
         dynamic,
         beams: beam_vertices,
     }

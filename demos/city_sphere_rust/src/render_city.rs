@@ -23,7 +23,7 @@ use objc2_metal::{
 };
 use rayon::prelude::*;
 
-use crate::city_world::CityWorld;
+use crate::city_world::{CityWorld, get_up};
 use crate::fps_demo_assets::get_asset_path;
 use crate::mesh::{MeshMaterial, MeshModel};
 use crate::voxel_textures::{make_array, make_mips};
@@ -36,7 +36,8 @@ type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
 const SHADER_SOURCE: &str = include_str!("render_city.metal");
 pub const MAX_HOLE_COUNT: usize = 8;
 const TEXTURE_SIDE_PX: u32 = 1024;
-const BEACON_OFF_FRAC: f32 = 0.25;
+pub const BEACON_SLOT_COUNT: usize = 8;
+const BEACON_TEAM_COLORS: [[f32; 3]; 2] = [[0.3, 0.55, 1.0], [1.0, 0.3, 0.25]];
 const BEACON_FLAG: f32 = 2.0;
 const BEACON_LAYER: usize = TEXTURE_IDS.len();
 const BEACON_MODEL: &str = "scifi_beacon";
@@ -85,6 +86,7 @@ struct CityUniforms {
     holes: [[f32; 4]; MAX_HOLE_COUNT],
     glass: [f32; 4],
     sky_color: [f32; 4],
+    beacons: [[f32; 4]; BEACON_SLOT_COUNT],
 }
 
 /// `CityScene` is the geometry that never changes: opaque triangles and the glass's, with an id
@@ -105,6 +107,7 @@ pub struct CityFrame {
     pub camera_from_world: Mat4,
     pub camera_m: Vec3,
     pub tan_half_fov: f32,
+    pub beacons: [[f32; 4]; BEACON_SLOT_COUNT],
     pub dynamic: Vec<CityVertex>,
     pub beams: Vec<CityVertex>,
 }
@@ -259,6 +262,7 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
                 .collect();
         }
     }
+    push_pylon_beacons(&mut opaque, world);
     CityScene {
         id: 1,
         opaque,
@@ -293,16 +297,15 @@ pub fn push_mesh(out: &mut Vec<CityVertex>, model: &MeshModel, materials: &[Mesh
 }
 
 /// `push_beacon` adds a pylon's beacon (the hyperbolic demo's `scifi_beacon` model, as on Lunar
-/// Surface) with its base colour and emissive textures, recoloured in the team's colour: while
-/// its console is on its glowing strips shine at `level` (0 to 1, pulsing while a player turns the
-/// console off); once off, the body darkens and the strips go out.
+/// Surface) to the still scene with its base colour and emissive textures, recoloured in
+/// `team_color`; the shader reads its console's state from the uniforms' `beacons[slot]` (strip
+/// glow, body brightness), so it pulses while a player turns the console off and darkens once off.
 ///
-/// Example: `push_beacon(&mut dynamic, &beacon, world_from_model, [0.3, 0.55, 1.0, 1.0], 1.0, false);`
-pub fn push_beacon(out: &mut Vec<CityVertex>, model: &MeshModel, world_from_model: Mat4, team_color: [f32; 4], level: f32, is_off: bool) {
+/// Example: `push_beacon(&mut opaque, &beacon, world_from_model, [0.3, 0.55, 1.0], 0);`
+pub fn push_beacon(out: &mut Vec<CityVertex>, model: &MeshModel, world_from_model: Mat4, team_color: [f32; 3], slot: usize) {
+    assert!(slot < BEACON_SLOT_COUNT, "beacon slot {slot} out of range");
     let normal_matrix: glam::Mat3 = glam::Mat3::from_mat4(world_from_model);
-    let body_frac: f32 = if is_off { BEACON_OFF_FRAC } else { 1.0 };
-    let glow: f32 = if is_off { 0.0 } else { level };
-    let color: [f32; 4] = [team_color[0] * body_frac, team_color[1] * body_frac, team_color[2] * body_frac, BEACON_FLAG + glow];
+    let color: [f32; 4] = [team_color[0], team_color[1], team_color[2], BEACON_FLAG + slot as f32];
     for triangle in &model.triangles {
         for k in 0..3 {
             out.push(CityVertex {
@@ -313,6 +316,35 @@ pub fn push_beacon(out: &mut Vec<CityVertex>, model: &MeshModel, world_from_mode
                 layer: BEACON_LAYER as f32,
             });
         }
+    }
+}
+
+/// `push_pylon_beacons` adds a beacon (`push_beacon`) on every pylon box, standing on its level
+/// and as tall as the box, in the slot of its team's nearest console.
+fn push_pylon_beacons(out: &mut Vec<CityVertex>, world: &CityWorld) {
+    let beacon: &MeshModel = get_beacon();
+    for b in world.boxes.iter().filter(|b| b.group == "pylons") {
+        let team: u32 = u32::from(b.name.starts_with("red"));
+        let Some(console) = world
+            .consoles
+            .iter()
+            .filter(|c| c.team == team)
+            .min_by(|x, y| (world.get_console_center(x) - b.center).length().total_cmp(&(world.get_console_center(y) - b.center).length()))
+        else {
+            continue;
+        };
+        let up: DVec3 = get_up(b.center);
+        let height_m: f64 = 2.0 * b.half_m.y;
+        let back: DVec3 = (b.axes.z_axis - up * b.axes.z_axis.dot(up)).normalize_or(up.any_orthonormal_vector());
+        let right: DVec3 = up.cross(back);
+        let world_from_model: Mat4 = glam::DMat4::from_cols(
+            (right * height_m).extend(0.0),
+            (up * height_m).extend(0.0),
+            (back * height_m).extend(0.0),
+            (b.center - up * b.half_m.y).extend(1.0),
+        )
+        .as_mat4();
+        push_beacon(out, beacon, world_from_model, BEACON_TEAM_COLORS[team as usize % 2], usize::from(console.index));
     }
 }
 
@@ -478,6 +510,7 @@ impl CityGpu {
             holes,
             glass: [frame.scene.glass_radius_m, frame.scene.holes.len() as f32, 0.0, FOG_M],
             sky_color: SKY_COLOR,
+            beacons: frame.beacons,
         };
         let dynamic: Buffer = make_buffer(device, &frame.dynamic)?;
         let beams: Buffer = make_buffer(device, &frame.beams)?;
