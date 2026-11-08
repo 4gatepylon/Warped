@@ -64,13 +64,6 @@ is in [`AGENTS.md`](AGENTS.md).
     hull), committed as WIP (`14d8ccb`) with temporary screenshot hooks; waiting for the user to pick, then remove the
     hooks and the unpicked options, make the station hover, add tests, a decision, README and PLAYTEST, and open the
     PR.
-- [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
-  center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
-  it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
-  pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
-  console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
-  down.
-  Claimed by Claude Code (session `08e70e8b-f763-4c5c-828c-f939a12fad13`), branch `reality-bend`, 2026-11-07.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -145,6 +138,12 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
+  center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
+  it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
+  pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
+  console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
+  down. #298, #299, #300, #301.
 - [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). After seeing 2x speckle far from the map's middle, the user chose 1.5x
   as the default: "1.5x curvature is fine". #285.
