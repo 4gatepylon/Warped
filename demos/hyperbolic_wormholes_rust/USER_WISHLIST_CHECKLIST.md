@@ -109,6 +109,8 @@ is in [`AGENTS.md`](AGENTS.md).
   shadows on the hills.
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
+- [ ] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": crouching recharges (presumably
+  the sprint energy) faster than walking does.
 
 ## Done
 
