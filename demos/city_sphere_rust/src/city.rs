@@ -24,19 +24,20 @@ use serde_json::json;
 use super::{
     Arguments, BANNER_HEIGHT_FRAC, BYTES_PER_PIXEL, DEATH_DIM_FRAC, DEATH_MASK_PX,
     DISABLE_BAR_MIN_FRAC, DISABLE_BAR_RGB, DISABLE_BAR_SIZE_FRAC, ENERGY_BAR_MIN_FRAC,
-    ENERGY_BAR_RGB, ENERGY_PULSE_RGB, ENERGY_SEGMENT_COUNT, Gun, HEALTH_BAR_MIN_FRAC,
-    HEALTH_BAR_RGB, HEALTH_PULSE_RGB, HEAT_BAR_MIN_FRAC, HEAT_BAR_OVERHEATED_RGB, HEAT_BAR_RGB,
-    MAP_AREA_MAX_EXCL_MASK_PX, MAP_AREA_MIN_MASK_PX, MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX,
-    MS_PER_S, OverlayText, PICTURE_PX_PER_MASK_PX, PLAYER_SETTINGS_HOME_PATH, Picture, Renderer,
-    RendererKind, Result, RouteKind, WINDOW_TITLE, find_lan_address, get_crosshair_rects,
-    get_lobby_lines, get_server_address, load_settings, make_renderer, make_run_folder,
-    make_text_mask, make_wand, save_png,
+    ENERGY_BAR_RGB, ENERGY_PULSE_RGB, ENERGY_SEGMENT_COUNT, GUN_POSE_PER_S, Gun,
+    HEALTH_BAR_MIN_FRAC, HEALTH_BAR_RGB, HEALTH_PULSE_RGB, HEAT_BAR_MIN_FRAC,
+    HEAT_BAR_OVERHEATED_RGB, HEAT_BAR_RGB, MAP_AREA_MAX_EXCL_MASK_PX, MAP_AREA_MIN_MASK_PX,
+    MENU_DIM_FRAC, MENU_HEIGHT_FRAC, MENU_MASK_PX, MS_PER_S, OverlayText, PICTURE_PX_PER_MASK_PX,
+    PLAYER_SETTINGS_HOME_PATH, Picture, Renderer, RendererKind, Result, RouteKind, WINDOW_TITLE,
+    find_lan_address, get_aim_zoom, get_crosshair_rects, get_lobby_lines, get_server_address,
+    get_sway, load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
 };
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::city_world::{
     CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,
     get_up,
 };
+use crate::exit_prompt;
 use crate::hud_bars;
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
@@ -93,7 +94,6 @@ const PULSE_RAD_PER_S: f64 = 12.0;
 const CORE_HALO_RADIUS_PER_CORE_RADIUS: f64 = 3.0;
 const RUN_M_PER_S: f64 = 6.0;
 const WALK_M_PER_S: f64 = 0.6;
-const STEPS_RAD_PER_M: f64 = 2.2;
 const RECOIL_S: f64 = 0.25;
 const TURN_RAD_PER_S: f64 = 5.0;
 const STUCK_S: f64 = 1.2;
@@ -949,8 +949,9 @@ struct CitySession {
     reload_left_s: f64,
     laser_left_s: f64,
     recoil_left_s: f64,
-    step_phase_rad: f64,
-    run_frac: f64,
+    bob_phase_rad: f64,
+    bob_frac: f64,
+    run_pose_frac: f64,
     remote_lasers: HashMap<u32, bool>,
     remote_motion: HashMap<u32, Motion>,
     disabling: Option<u8>,
@@ -971,6 +972,8 @@ struct CitySession {
     minimap_base: Vec<u8>,
     hud: (f64, u32, f64),
     is_aiming: bool,
+    aim_frac: f64,
+    exit_prompt: exit_prompt::ExitPrompt,
     phase_ms: Vec<[f64; PHASE_COUNT]>,
     gun: Gun,
     rifle_heat_frac: f64,
@@ -1047,8 +1050,9 @@ impl CitySession {
             reload_left_s: 0.0,
             laser_left_s: 0.0,
             recoil_left_s: 0.0,
-            step_phase_rad: 0.0,
-            run_frac: 0.0,
+            bob_phase_rad: 0.0,
+            bob_frac: 0.0,
+            run_pose_frac: 0.0,
             remote_lasers: HashMap::new(),
             remote_motion: HashMap::new(),
             disabling: None,
@@ -1068,10 +1072,16 @@ impl CitySession {
             minimap_base,
             hud: (0.0, 0, 0.0),
             is_aiming: false,
+            aim_frac: 0.0,
+            exit_prompt: exit_prompt::ExitPrompt::New(),
             phase_ms: Vec::new(),
             player_settings_path,
             menu: None,
-            gun: Gun::Laser,
+            gun: if arguments.play_route {
+                Gun::Laser
+            } else {
+                Gun::Rifle
+            },
             rifle_heat_frac: 0.0,
             is_overheated: false,
             health_pulses: hud_bars::BarPulses::New(1.0),
@@ -1295,7 +1305,7 @@ impl CitySession {
                 wants_shot = out.is_shooting;
                 console = out.console.and_then(|index| self.find_console(Some(index)));
             }
-        } else if self.is_spawned && self.menu.is_none() {
+        } else if self.is_spawned && self.menu.is_none() && !self.exit_prompt.is_shown() {
             let is = |action: Action| held.contains(&action);
             let axis = |plus: Action, minus: Action| {
                 f64::from(u8::from(is(plus))) - f64::from(u8::from(is(minus)))
@@ -1310,13 +1320,9 @@ impl CitySession {
             }
         }
         if self.is_spawned {
-            let before: DVec3 = self.player.feet;
             self.world
                 .move_player(&mut self.player, &input, &self.settings, dt_s);
-            let speed_m_per_s: f64 = (self.player.feet - before).length() / dt_s.max(1e-6);
-            self.step_phase_rad += speed_m_per_s * dt_s * STEPS_RAD_PER_M;
-            self.run_frac =
-                (speed_m_per_s / self.world.get_speed_m_per_s(&self.settings, true)).min(1.0);
+            self.update_gun_motion(&input, dt_s);
         }
         self.health_pulses.update(
             dt_s,
@@ -1364,6 +1370,43 @@ impl CitySession {
             self.message = None;
         }
         Ok(())
+    }
+
+    /// `update_gun_motion` moves the head bob and the gun as Lunar Surface does on its voxel maps:
+    /// the step phase advances at the head bob's walking or sprinting steps a second while moving
+    /// on the ground, `bob_frac` eases in and out over its `fade_s`, and the gun's pose goes
+    /// toward jogging while sprinting and back to aiming otherwise.
+    fn update_gun_motion(&mut self, input: &CityInput, dt_s: f64) {
+        let bob = &self.player_settings.view.head_bob;
+        let is_moving: bool = input.forward_frac != 0.0 || input.right_frac != 0.0;
+        let is_stepping: bool = is_moving && self.player.is_on_ground;
+        if is_stepping {
+            let steps_per_s: f64 = if self.player.is_sprinting {
+                bob.sprint_steps_per_s
+            } else {
+                bob.walk_steps_per_s
+            };
+            self.bob_phase_rad = (self.bob_phase_rad + std::f64::consts::TAU * steps_per_s * dt_s)
+                % std::f64::consts::TAU;
+        }
+        let fade_frac: f64 = dt_s / bob.fade_s;
+        self.bob_frac +=
+            (f64::from(u8::from(is_stepping)) - self.bob_frac).clamp(-fade_frac, fade_frac);
+        let pose_target: f64 = f64::from(u8::from(self.player.is_sprinting && is_moving));
+        self.run_pose_frac +=
+            (pose_target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
+    }
+
+    /// `get_bob_m` gives the head bob, as on Lunar Surface: the eye dips at each footstep, deeper
+    /// when sprinting, by the player settings' `view.head_bob`.
+    fn get_bob_m(&self) -> f64 {
+        let bob = &self.player_settings.view.head_bob;
+        let depth_m: f64 = if self.player.is_sprinting {
+            bob.sprint_depth_m
+        } else {
+            bob.walk_depth_m
+        };
+        self.bob_frac * depth_m * self.bob_phase_rad.sin().abs()
     }
 
     /// `update_hit` starts Lunar Surface's hit effect and slows this player
@@ -1521,7 +1564,9 @@ impl CitySession {
     /// in the game.
     fn get_eye(&self) -> DMat4 {
         if self.is_spawned {
-            return self.player.get_eye_frame();
+            let mut eye: DMat4 = self.player.get_eye_frame();
+            eye.w_axis -= (self.player.get_up() * self.get_bob_m()).extend(0.0);
+            return eye;
         }
         let angle: f64 = self.now_s() * LOBBY_ORBIT_RAD_PER_S;
         let radius_m: f64 =
@@ -1596,16 +1641,30 @@ impl CitySession {
             now_s,
             render_px,
         );
-        if self.is_spawned && self.brain.is_none() && self.is_aiming {
-            frame.zoom_in(self.settings.aim.sniper_zoom);
+        if self.is_spawned && self.brain.is_none() {
+            frame.zoom_in(self.get_zoom());
         }
         frame
     }
 
-    /// `get_banner_lines` gives the two centred lines to show, if any: the lobby, joining, a win,
+    /// `get_zoom` gives how much closer the world looks now, as on Lunar Surface: the gun in
+    /// hand's full zoom (`aim` in the server settings), eased in by how far this player has aimed.
+    fn get_zoom(&self) -> f64 {
+        let full_zoom: f64 = match self.gun {
+            Gun::Laser => self.settings.aim.sniper_zoom,
+            Gun::Rifle => self.settings.aim.rifle_zoom,
+        };
+        get_aim_zoom(self.aim_frac, full_zoom)
+    }
+
+    /// `get_banner_lines` gives the two centred lines to show, if any: the exit prompt (`Esc` with
+    /// the mouse free, as on Lunar Surface), the lobby, joining, a win,
     /// "YOU DIED" with the countdown to respawning, or a message. Turning off a console shows as a
     /// bar (`get_bar_rects`), as on Lunar Surface.
     fn get_banner_lines(&self) -> Option<[String; 2]> {
+        if self.exit_prompt.is_shown() {
+            return Some(exit_prompt::get_lines());
+        }
         let keys: &KeyBindings = &self.player_settings.keys;
         if self.client.is_in_lobby() {
             return Some(get_lobby_lines(
@@ -1759,7 +1818,19 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 })
                 .collect()
         };
-        session.is_aiming = held.contains(&Action::Aim);
+        session.is_aiming = session.is_captured
+            && session.is_spawned
+            && !session.exit_prompt.is_shown()
+            && held.contains(&Action::Aim);
+        let aim_step: f64 =
+            (session.now_s() - session.last_s).clamp(0.0, MAX_DT_S) / session.settings.aim.zoom_s;
+        session.aim_frac = (session.aim_frac
+            + if session.is_aiming {
+                aim_step
+            } else {
+                -aim_step
+            })
+        .clamp(0.0, 1.0);
         lap(0);
         session.update(&held)?;
         lap(1);
@@ -1821,12 +1892,18 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
             let recoil_frac: f64 = session.recoil_left_s / RECOIL_S;
             (
                 make_wand(
-                    session.run_frac,
-                    session.step_phase_rad,
+                    session.run_pose_frac,
+                    session.bob_phase_rad,
                     recoil_frac,
                     session.get_team(),
                     session.gun,
-                    (0.0, 0.0),
+                    get_sway(
+                        session.gun.get_model(),
+                        session.bob_frac,
+                        session.run_pose_frac,
+                        session.bob_phase_rad,
+                        &session.player_settings.view.head_bob,
+                    ),
                 ),
                 session.gun.get_model(),
             )
@@ -1888,7 +1965,9 @@ fn handle_event(
 ) -> Result<bool> {
     match event {
         Event::Quit { .. } => return Ok(false),
-        Event::MouseButtonDown { .. } if !session.is_captured => {
+        Event::MouseButtonDown { .. }
+            if !session.is_captured && !session.exit_prompt.is_shown() =>
+        {
             session.is_captured = true;
             mouse.set_relative_mouse_mode(window, true);
             return Ok(true);
@@ -1896,12 +1975,7 @@ fn handle_event(
         Event::MouseMotion { xrel, yrel, .. }
             if session.is_captured && session.is_spawned && session.brain.is_none() =>
         {
-            let zoom: f64 = if session.is_aiming {
-                session.settings.aim.sniper_zoom
-            } else {
-                1.0
-            };
-            let rad_per_px: f64 = session.player_settings.view.look_rad_per_px / zoom;
+            let rad_per_px: f64 = session.player_settings.view.look_rad_per_px / session.get_zoom();
             session
                 .player
                 .look_around(-f64::from(xrel) * rad_per_px, -f64::from(yrel) * rad_per_px);
@@ -1912,6 +1986,9 @@ fn handle_event(
         return Ok(true);
     };
     let is = |action: Action| session.player_settings.keys.matches(action, control);
+    if session.exit_prompt.is_shown() {
+        return Ok(session.exit_prompt.answer(control) != exit_prompt::ExitOutcome::Exit);
+    }
     if session.menu.is_some() {
         if is(Action::OpenMenu) {
             session.menu = None;
@@ -1921,8 +1998,12 @@ fn handle_event(
     } else if is(Action::OpenMenu) {
         session.menu = Some(menu::Menu::New());
     } else if is(Action::ReleaseMouse) {
-        session.is_captured = false;
-        mouse.set_relative_mouse_mode(window, false);
+        if session.exit_prompt.press_release_mouse(session.is_captured)
+            == exit_prompt::ExitOutcome::ReleaseMouse
+        {
+            session.is_captured = false;
+            mouse.set_relative_mouse_mode(window, false);
+        }
     } else if session.client.is_in_lobby() && (is(Action::JoinBlue) || is(Action::JoinRed)) {
         let team: u32 = u32::from(is(Action::JoinRed));
         session.client.join(Some(team))?;

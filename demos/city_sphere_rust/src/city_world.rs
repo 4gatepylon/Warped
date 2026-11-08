@@ -845,6 +845,7 @@ impl CityWorld {
             1.0 / energy.refill_walking_s
         };
         let is_sprinting: bool = wants_to_sprint && player.energy_frac > 0.0;
+        player.is_sprinting = is_sprinting;
         player.energy_frac = (player.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
         let speed_m_per_s: f64 = self.get_speed_m_per_s(settings, is_sprinting) * input.speed_frac;
         let (jump_m_per_s, gravity_m_per_s2) = self.get_jump(settings);
@@ -1037,6 +1038,7 @@ impl CityWorld {
             is_on_ground: true,
             eye_height_m: self.eye_height_m,
             energy_frac: 1.0,
+            is_sprinting: false,
         }
     }
 }
@@ -1060,8 +1062,8 @@ pub struct CityInput {
 }
 
 /// `CityPlayer` is a player's body: feet, the body's axes (columns right, up, back; up toward the
-/// centre), the head's pitch, velocity, whether it stands on something, and its sprint energy (1
-/// full, 0 empty).
+/// centre), the head's pitch, velocity, whether it stands on something, its sprint energy (1
+/// full, 0 empty) and whether it sprinted in its last move.
 #[derive(Clone, Copy, Debug)]
 pub struct CityPlayer {
     pub feet: DVec3,
@@ -1071,6 +1073,7 @@ pub struct CityPlayer {
     pub is_on_ground: bool,
     pub eye_height_m: f64,
     pub energy_frac: f64,
+    pub is_sprinting: bool,
 }
 
 impl CityPlayer {
