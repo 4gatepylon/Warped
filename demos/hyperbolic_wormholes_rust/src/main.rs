@@ -22,6 +22,7 @@
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
 mod exit_prompt;
+mod fps_demo_assets;
 mod geometry;
 mod key_bindings;
 mod map;
@@ -545,6 +546,12 @@ fn main() -> Result<()> {
     }
     if arguments.serve {
         return serve_only(&arguments);
+    }
+    if arguments.renderer == RendererKind::Metal {
+        viewmodel::check_revolver()?;
+        if arguments.map == MapName::LunarSurface {
+            voxel_textures::check_surface_textures()?;
+        }
     }
     let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
     if arguments.bot {
