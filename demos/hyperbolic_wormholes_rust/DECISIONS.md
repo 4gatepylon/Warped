@@ -1055,6 +1055,43 @@
   - slowing walking while aiming (not asked for).
 - **Rationale:** you asked for a way to aim on the right button, with the flashlight moved to another key.
 
+### D85. Slanted neon HUD bars that pulse (W-54)
+
+- **Choice:**
+  - **Look:** you picked, from four options rendered over Lunar Surface, B's shape with C's background, a bit more
+    translucent than C. Each segment leans like `/` (its sides shift 0.45 of its height) with corners rounded to
+    0.15% of the screen's height. An empty segment is a slot of dark glass (`[0.02, 0.04, 0.08]`, 38% opaque, C's was
+    45%) outlined faintly in the bar's colour (35%). A filled one is the bar's colour at 60% (C's was 70%), lighter
+    at the top and darker at the bottom (±20%), with a gloss over its top half (30%), an outline in its colour
+    lightened 35% toward white (85%), and a glow in its colour 0.6% of the screen's height wide. Bars are 1.6% of
+    the screen's height tall (1.8% before), with 0.35% of its width between segments. The console bar below the
+    crosshair has the same look, as one slot with a filled part.
+  - **Pulses:** a band of light (a Gaussian, 2% of the screen's width at half width, leaning with the segments)
+    crosses a bar from 2.5 half widths beyond one end to as far beyond the other:
+    - **Hit:** each hit sends one reddish-orange (`[1.0, 0.38, 0.12]`, 80%) pulse down the health bar, right to left,
+      in 0.5 s. Another hit restarts it.
+    - **Sprinting:** while you sprint, blue (`[0.15, 0.4, 1.0]`, 80%) pulses run down the energy bar, right to left,
+      in 0.5 s, one every 0.8 s.
+    - **Refilling:** while the energy refills, a fainter pulse (the bar's colour 65% of the way to white, 40%) runs up
+      it, left to right, in 1 s, one every 1.6 s. Health gets one when it rises (a respawn or a new game); it doesn't
+      regenerate. A sprint pulse cuts a refill pulse short; a refill pulse waits for a sprint pulse to finish.
+    - **Ammo:** the rifle's heat and the sniper's block get no pulse, not even while the rifle cools, as you said
+      ammo is normal.
+  - **Drawing:** each overlay rectangle carries a style (corner radius, outline, gloss, drop shadow, slant, glow,
+    shading) and a pulse. The overlay shader draws it from a rounded box's signed distance with half-pixel
+    antialiasing: first every rectangle's shadow and glow (the strongest of each at a pixel), then the rectangles in
+    order. The crosshair keeps a flat style. The look and the pulses are in `hud_bars.rs`. The CPU renderer's window
+    draws the same rectangles as flat boxes, without style or pulse.
+- **Alternatives:**
+  - the four options as they were: A, glass capsules (rounded pills, a strong gloss, drop shadows); B, slanted
+    tactical (on one dark panel); C, neon (upright slots); D, a slim track (thin segments in a dark rounded track);
+  - pulses lighting whole segments one after another, computed on the CPU (a coarser, stepped band);
+  - a refill pulse while the rifle cools (it would run nearly all the time while firing).
+- **Rationale:** you asked for bars that look more professional, at least slightly translucent, slightly shiny and
+  rounded, chose "slanted tactical but with the neo background", slightly more translucent than the neon example,
+  and asked for a reddish-orange pulse down the health bar when taking damage, a blue one down the energy bar while
+  running, none on ammo, and a much more subtle one while regaining things such as energy.
+
 ### D88. Lasers still stop on window glass (W-57)
 
 - **Choice:**

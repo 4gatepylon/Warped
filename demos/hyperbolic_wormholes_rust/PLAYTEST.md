@@ -77,6 +77,10 @@ each step outward is cut by how far you have already come, so you never get past
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
 
+The bars in the bottom left (health, then the gun's ammo, then sprint energy) lean like `/` and glow in their
+colours. Each hit sends a reddish-orange pulse down the health bar, right to left. While you sprint, blue pulses run
+down the energy bar; while it refills, fainter ones run up it. The ammo bar doesn't pulse.
+
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
 the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,
 in their team's colours. The menu's MAP page rings the same 60 m around you and darkens the rest. To move, resize

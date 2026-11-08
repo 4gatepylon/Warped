@@ -2244,12 +2244,28 @@ struct RectStyle {
     float4 outline_color;
 };
 
-/** @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), its colour and opacity, and its style. */
+/**
+ * @brief `RectPulse` is render_metal.rs's `RectPulse`, a band of light across an `OverlayRect` (a pulse running along a HUD
+ * bar): its middle's x and its half width as fractions of the screen's width (measured along the rect's slant, at its
+ * middle row), two zeros, and its colour with, in `.a`, its opacity at its middle (0 for none).
+ */
+struct RectPulse {
+    float center_x_frac;
+    float half_width_frac;
+    float2 padding;
+    float4 color;
+};
+
+/**
+ * @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), its
+ * colour and opacity, its style and the pulse across it.
+ */
 struct OverlayRect {
     float2 min_frac;
     float2 max_frac;
     float4 color;
     RectStyle style;
+    RectPulse pulse;
 };
 
 /**
@@ -2329,7 +2345,8 @@ static float4 get_rect_halo(constant OverlayRect &rect, float2 at_px, float2 siz
 /**
  * @brief `get_rect_layer` gives `rect` at pixel centre `at_px` as premultiplied colour and opacity (zero outside it, soft
  * over half a pixel at its edge): its colour shaded from top to bottom by `shade_frac`, a gloss highlight over its top
- * half (inset from its edge by `RECT_GLOSS_INSET_PER_HEIGHT` of its height), then its inner outline.
+ * half (inset from its edge by `RECT_GLOSS_INSET_PER_HEIGHT` of its height), its pulse (a Gaussian band of its colour
+ * across the rect, leaning with its slant), then its inner outline.
  * @par Example
  * @code
  * float4 layer = get_rect_layer(rects[i], at_px, size_px);
@@ -2351,6 +2368,13 @@ static float4 get_rect_layer(constant OverlayRect &rect, float2 at_px, float2 si
         float top = 1.0 - smoothstep(RECT_GLOSS_END_FRAC - RECT_GLOSS_SOFT_FRAC, RECT_GLOSS_END_FRAC, t);
         float gloss_a = s.gloss_frac * inset * top * mix(RECT_GLOSS_TOP_OPACITY, RECT_GLOSS_MIDDLE_OPACITY, t / RECT_GLOSS_END_FRAC);
         layer = float4(gloss_a, gloss_a, gloss_a, gloss_a) + layer * (1.0 - gloss_a);
+    }
+    if (rect.pulse.color.a > 0.0) {
+        float middle_y_px = (rect.min_frac.y + rect.max_frac.y) * 0.5 * size_px.y;
+        float along_px = at_px.x + s.slant_x_per_y * (at_px.y - middle_y_px) - rect.pulse.center_x_frac * size_px.x;
+        float u = along_px / max(rect.pulse.half_width_frac * size_px.x, 1.0);
+        float pulse_a = rect.pulse.color.a * exp(-u * u);
+        layer = float4(rect.pulse.color.rgb * pulse_a, pulse_a) + layer * (1.0 - pulse_a);
     }
     if (s.outline_frac > 0.0) {
         float half_width_px = s.outline_frac * size_px.y * 0.5;
