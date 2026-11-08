@@ -11,6 +11,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
+  shadows on the hills.
+  Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/hill-self-shadow`, 2026-11-07.
 - [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
   and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/delta-fighters`, 2026-11-07.
@@ -114,8 +117,6 @@ is in [`AGENTS.md`](AGENTS.md).
   character, and the player controls it from there, seeing their own character.
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
-- [ ] **W-71 Shadows on the hills.** Fix the shadow bugs on the hills: there is horrible aliasing, and random, ugly
-  shadows on the hills.
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
 - [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
