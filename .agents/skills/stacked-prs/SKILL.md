@@ -14,6 +14,8 @@ description: Split a change into stacked pull requests and manage the stack with
 - By default, stack with GitHub's native stacked PRs, using the `gh stack` CLI extension
   (`gh extension install github/gh-stack`). It needs Git 2.36 or later, and stacked PRs must be
   enabled for the repository.
+  - `gh stack` switches branches, so run it only in a worktree of your own, NEVER in the user's
+    checkout (the `managing-agents` skill).
   - `gh stack init --base staging/user-<username> <branch>` starts the stack on your user's
     staging branch (see the `merging-to-staging` skill) with its first branch. Commit the first piece there.
     If `<branch>` already exists (e.g. the branch of the worktree you are in), `gh stack init`
