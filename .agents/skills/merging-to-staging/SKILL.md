@@ -84,8 +84,9 @@ The PR's base is `staging/user-<username>` for a feature branch and `staging/glo
 
 ## Small things that save time
 
-- **Fresh branches:** cut each new branch from the user's branch:
-  `git checkout -b <branch> origin/staging/user-<username>`.
+- **Fresh branches:** cut each new branch from the user's branch, in a worktree of its own, NEVER in the user's
+  checkout (the `managing-agents` skill):
+  `git worktree add -b <branch> .devin/worktrees/<name> origin/staging/user-<username>`.
 - **Checklist-only changes** (add, claim, confirm) go in their own small PR into the user's branch, merged at once.
 - **Two steps for the PR number:** to mark your item pending with its PR number, open the PR first, then commit the
   number in a second commit.

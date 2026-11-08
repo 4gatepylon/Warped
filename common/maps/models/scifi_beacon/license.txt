@@ -1,0 +1,11 @@
+Model Information:
+* title:	Sci-Fi Beacon/Way Point Marker Free Model
+* source:	https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f
+* author:	AMMediaGames (https://sketchfab.com/AMMediaGames)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Sci-Fi Beacon/Way Point Marker Free Model" (https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f) by AMMediaGames (https://sketchfab.com/AMMediaGames) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

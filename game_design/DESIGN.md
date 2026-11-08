@@ -38,7 +38,7 @@ and in progress.
 | Defender | The team that owns the level being played. |
 | Lobby | The screen a player joins on: it shows each team's head count, and the player picks a team. |
 | Spawn | Where a team's players enter a level. |
-| Pylon | A team's objective in a level, near its spawn. |
+| Pylon | One of a team's 2 or 3 objectives in a level, near its spawn. |
 | Console | One part of a pylon. The opposing team deactivates consoles to win the level. |
 | Zone | One of a level's three regions: the blue zone, the middle zone and the red zone. |
 | Route | One way across the middle zone, from one side to the other. |
@@ -70,19 +70,23 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 
 ### Winning a level
 
-- Each team has a spawn and, near it, a pylon. The two spawns are on opposite sides of the level.
-- A team wins a level by deactivating every console on the opposing team's pylon, as in capture
+- Each team has a spawn and, near it, its pylons: 3 on Dust and Lunar Surface, 2 on every other
+  level. The two spawns are on opposite sides of the level.
+- A team wins a level by deactivating every console on the opposing team's pylons, as in capture
   the flag. The [wavefront](#wavefront) then decides which level is played next.
 - A pylon with more consoles takes longer to deactivate.
 - A console pulses with light once a second while it is on. While someone holds `E` on it, it
   pulses faster and faster, up to 8 times a second just before it turns off, and eases back down
   over about a second if the hold stops. It goes dark once it is off.
 - A player can only deactivate the other team's consoles.
+- What deactivating a pylon does, besides bringing its team closer to losing, varies per level: on
+  Lunar Surface it grows the black hole (see [Lunar Surface](#lunar-surface)); on the other levels
+  it is TBD.
 
 | Parameter | Value |
 | --- | --- |
-| Pylons per team per level | 1 |
-| Consoles per pylon | Set per level (see [Levels](#levels)) |
+| Pylons per team per level | Set per level: 3 on Dust and Lunar Surface, 2 on the others (see [Levels](#levels)) |
+| Consoles per pylon | 1 on every level |
 | Control to deactivate a console | Hold `E` while aiming at it from within 3 m |
 | Time to deactivate one console | 10 s |
 | While deactivating | The player must keep aiming at the console and can't shoot. |
@@ -145,7 +149,8 @@ full health and energy. A player can't choose to respawn early.
 | Gravity | Down, onto the ground | Down | Outward, onto the sphere | Down | Down, onto the ground, ≈30 m/s² |
 | Warp objects | Yes | Yes | No | Yes | 1 black hole, 1 wormhole |
 | Size | Very large | Large | Smallest | Large | Very large: 256 m × 144 m playable |
-| Consoles per pylon | 5 | 4 | 4 | 4 | 5 |
+| Pylons per team | 3 | 2 | 2 | 2 | 3 |
+| Consoles per pylon | 1 | 1 | 1 | 1 | 1 |
 | Combat focus | Long range | Mid range | Close quarters | Mid range | Long range |
 | Zone layout | Open | Paired bands | Bands | Paired bands | Open |
 | Detailed layout | TBD | TBD | See [City Sphere](#city-sphere) | TBD | See [Lunar Surface](#lunar-surface) |
@@ -171,7 +176,7 @@ full health and energy. A player can't choose to respawn early.
 
 ### City Sphere
 
-- The blue spawn and pylon form a short segment. The red spawn and pylon are that segment
+- The blue spawn and its two pylons sit close together. The red spawn and pylons are blue's
   reflected through the sphere's center, so the two sides sit at antipodes.
 - Walls divide the space into close quarters.
 - City Sphere has two floors: the sphere's surface, and the surface of a smaller sphere with the
@@ -194,11 +199,28 @@ The level as the Rust game builds it, from the map
   players nor lasers.
 - A black hole hangs about 17 m above the middle of the level; its pull reaches 24 m. A player who falls into
   it goes back to their spawn.
+- Each console turned off, on either team's pylons, grows the black hole over 4 s, up to full strength with one
+  console left. Its black part grows only a little (Schwarzschild radius 1.2 m to 2 m), while the area it distorts
+  grows a lot: its reach grows to 28 m, and a wide lens around it bends light across that whole area.
+- Time runs slower near the black hole, as in general relativity but 15 times stronger: each player's own
+  movement, jumps and falls, sprint energy, turning off a console, and firing, reloading and cooling their guns
+  slow down, never below 10% speed. Looking around, menus and respawning keep normal time. Other players see a
+  slowed player move slowly. On the ground under the black hole, time runs at about 81% with no console off, 45%
+  with three off and 25% with five. The HUD shows the black hole's strength and how fast the player's time runs.
 - One wormhole joins a ridge to the red landing pad. Its mouths are 15 m in reach.
-- Blue's side has a lander, the blue pylon, a relay mast, supply crates and a solar array. The
-  middle has derelict habitat modules, a comms dome, a crater walkway, a relay mast, a solar array
-  and crates. Red's side has barriers, a habitat module, a dome, the red pylon, a spawn hangar, a
-  watchtower, a landing pad, an antenna, a walkway, crates and a solar array.
+- Each player throws their own pair of wormhole mouths ([Thrown wormholes](#thrown-wormholes)): `Q` throws the
+  purple one, then the green one, and nothing more once both are down. A lone mouth glows as a ball until its
+  partner lands: shooting your own or a teammate's ball does nothing, and one shot at an enemy's ball destroys it.
+- Blue's side has a concrete bunker (a kazemat) at its spawn, rows of Hesco barriers, a relay mast, supply crates and
+  a solar array. The middle has derelict field bunkers, a comms dome, a crater walkway, a relay mast, a solar array
+  and crates. Red's side has Hesco barriers, a habitat module, a dome, a bunker garage as its spawn hangar, a
+  watchtower, a landing pad, an antenna, a walkway, crates and a solar array. The bunkers are models players walk
+  into. Each pylon is a 12 m sci-fi beacon whose console is the beacon itself; it beams its team colour 400 m up while
+  its console is on.
+- Players look like a robot in their team's colour (blue or red, its grey and black parts unchanged), animated by
+  what they do: standing, walking, running, in the air, and, once eliminated, falling onto their back where they
+  were hit and lying there until they respawn. Shots hit an invisible
+  cylinder and head the robot's size, not the robot's own shape.
 - Structures have sharp edges. The habitat modules' and walkways' windows are glass: players see
   out of them and shoot through them, but can't climb through them.
 - The sky has the sun, a planet, stars, and spaceships that fly over, purely for looks, on the same
@@ -214,7 +236,7 @@ Directions in a level:
 
 Every level follows these rules:
 
-- A level splits lengthwise into three zones: the blue zone around blue's spawn and pylon, the
+- A level splits lengthwise into three zones: the blue zone around blue's spawn and pylons, the
   middle zone, and the red zone around red's. The middle zone is always the biggest.
 - The middle zone has 2–3 routes across it lengthwise. A route is a sequence of rooms and/or paths,
   with corners to defend.
@@ -291,9 +313,9 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | Right button (held) | Aim: zoom in (more with the sniper rifle) and turn more slowly while held |
 | `F` (held) | Flashlight: a cone of light from the eye while held (other players don't see it yet) |
 | `V` | Switch between first person and a third-person view from slightly behind and above the character, which pulls in when a wall is behind it; shots still leave the eye toward the crosshair, and aiming looks from the eye |
-| Left click | Shoot, standing still or crouched (walking crouched too), not while walking upright, sprinting, in the air or deactivating a console (hold it for a weapon that fires while held, such as the rifle) |
+| Left click | Shoot, once no movement key has been held for 0.25 s (walking crouched doesn't count, and in the air with no key held is fine), so not while walking upright, sprinting, jumping or deactivating a console (hold it for a weapon that fires while held, such as the rifle) |
 | Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
-| `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |
+| `E` (held) | Deactivate a console of the opposing team's pylons (see [Winning a level](#winning-a-level)) |
 | `Q` | Throw your purple wormhole mouth, the next press your green one, then purple again, and so on (see [Thrown wormholes](#thrown-wormholes)) |
 | `1`, `2` (in the lobby) | Join the blue or the red team |
 | `Tab` | Open or close the menu (see [Screen](#screen)). The player stands still while it is open, but the game goes on. |
@@ -383,8 +405,9 @@ What a player sees while playing:
 Each player has a pair of wormhole mouths of their own, one purple and one green, which they throw
 anywhere in the level.
 
-- **Throwing:** `Q` throws the purple mouth, the next press the green one, then purple again, and
-  so on; throwing a mouth again moves it.
+- **Throwing:** `Q` throws the purple mouth and the next press the green one. Once both are down,
+  `Q` does nothing until the pair is gone (death or destruction); a throw that fizzles can be
+  thrown again.
 - **Flight:** a mouth is lobbed from the player's hand a little above the crosshair and curves down
   under its own gravity. It drops to the floor below whatever it hits, and hovers there at eye
   height, facing back the way it flew.
@@ -397,9 +420,10 @@ anywhere in the level.
   - a mouth in flight, or down while its partner isn't, glows as a small ball;
   - every player sees every player's mouths, and anyone can walk or shoot through them.
 - **Death:** a player's mouths disappear when they die.
-- **Shooting an enemy's mouths:** a shot that goes through an enemy's mouth, or hits a lone
-  mouth's ball, makes both of that enemy's mouths flash red; enough hits destroy the pair.
-  Teammates' shots don't count.
+- **Shooting an enemy's mouths:** a shot that goes through an enemy's linked mouth makes both of
+  that enemy's mouths flash red; enough hits destroy the pair. A shot that hits an enemy's lone
+  mouth's ball (down, its partner not yet thrown) destroys it at once. A shot at a player's own or
+  a teammate's mouths, or at a ball still in flight, does nothing.
 
 | Parameter | Value |
 | --- | --- |
@@ -410,6 +434,7 @@ anywhere in the level.
 | A mouth's size on Lunar Surface | 1.6 m Schwarzschild radius (`wormholes.schwarzschild_radius_m`); on the house, the house's mouths' size |
 | How far its bending reaches on Lunar Surface | 6 m (`wormholes.reach_m`) |
 | Hits that destroy an enemy's pair | 2 sniper shots or 5 rifle shots (`wormholes.sniper_hits_to_destroy`, `wormholes.rifle_hits_to_destroy`) |
+| Hits that destroy an enemy's lone mouth | 1 shot of either gun |
 | Red flash after each hit | 0.25 s (`wormholes.hit_flash_s`) |
 
 ## Weapons
@@ -460,6 +485,4 @@ time to kill.
 - **Warp objects:** how many black holes and wormholes each level but Lunar Surface has, and where.
 - **Flashlight:** whether other players should see it.
 
-These may change later: more than one pylon per team per level, and more than two levels per team.
-The wishlist has work in progress on the first: three pylons per team that strengthen the black hole
-as they go down (W-68).
+These may change later: more than two levels per team.

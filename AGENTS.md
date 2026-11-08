@@ -224,14 +224,14 @@ that cover each part in the test file's docstring. Follow the `unit-tests` skill
 ## Playtesting
 
 When the user tests a game or other visual work you made, follow the `playtesting` skill
-(`.agents/skills/playtesting/`). Let the user play gameplay changes with the `interactive-review` skill.
+(`.agents/skills/playtesting/`), and `interactive-review` for gameplay.
 
 ## Agents working together
 
 Coordinate agents working in parallel (subagents, other sessions, Codex, Devin) with the `managing-agents` skill
 (`.agents/skills/managing-agents/`), and merge with the `merging-to-staging` skill
-(`.agents/skills/merging-to-staging/`). Each Devin session and subagent works in its own worktree, like Claude Code's
-(`devin-worktrees` skill).
+(`.agents/skills/merging-to-staging/`). NEVER change the branch of the user's own checkout, for any reason: do git
+work in a worktree of your own: one per Devin session or subagent (`devin-worktrees`).
 
 ## Assets
 
