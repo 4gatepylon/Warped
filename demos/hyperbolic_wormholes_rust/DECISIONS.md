@@ -1899,6 +1899,34 @@
   picked option C from the pictures ("get milky way photo like merged"). You didn't pick a placement, so the arch
   from base to base was chosen for you, since it gives both teams the same view; tell us if you want it elsewhere.
 
+### D107. Both guns sway left and right with your steps, by their size, W-102 (rifle sways when jogging)
+
+- **Choice:**
+  - **Slide:** the hands slide the gun in hand left on one step and right on the next (`get_sway` in `main.rs`): 2 cm
+    each way while walking, growing to 4 cm while sprinting (with the run pose's easing), the same for both guns.
+  - **Swing by length:** a longer, heavier gun lags behind the hands, so its muzzle turns the other way: 0.03 rad
+    (1.7°) walking and 0.06 rad (3.4°) sprinting for a gun as long as the bolt-action rifle (1.23 m in its glTF,
+    the sniper since #318), scaled by each model's real length (`GunModel::get_modelled_length_m`), so the 0.30 m
+    revolver (the rifle, gun 2) swings a quarter as much and mostly slides.
+  - **Kept:** today's dip at each step and the sprint pose's tilt stay as they were.
+  - **In step with the eye:** on a voxel map the gun takes the head bob's step phase and fade (`fade_s`), so it moves
+    with each footstep the camera dips on and eases in and out; the house keeps the gun's own step clock, at the same
+    rates.
+  - **Settings:** `view.head_bob.gun_walk_sway_m`, `gun_sprint_sway_m`, `rifle_walk_swing_rad` and
+    `rifle_sprint_swing_rad` in `player_settings.yaml` (0 for none). Older saved settings files without them load
+    with the built-in values (`ADDED_PLAYER_KEYS`).
+  - **Shooting:** a shot leaves from the fixed muzzle point (`voxel_world::MUZZLE_M`), so while moving crouched the
+    drawn gun can be up to 2 cm beside it; standing still there is no offset, and you can't shoot walking upright or
+    sprinting.
+- **Alternatives:**
+  - no change: the sprint pose already tilted the gun back and forth with each stride;
+  - the slide on the rifle (gun 2) only, as first built; a stronger sway (5 cm walking, 8 cm sprinting);
+  - the same swing for both guns, whatever their size.
+- **Rationale:** you asked for the rifle "going side to side when jogging like a normal rifle", chose the slide as
+  built from the first pictures ("ok menrge to staging", "i like your animation"), then, after #318 swapped the
+  models, asked for both guns: "I want them both swaying ... get both working realistically based on their size",
+  and approved the result ("merge this").
+
 ## Workload
 
 ### D7. Eight fixed views

@@ -58,6 +58,12 @@ const FAR_M: f32 = 4.0;
 const MUZZLE_SLICE_M: f32 = 0.01;
 /// `REVOLVER_SCALE` is how many times its modelled size the revolver is drawn.
 const REVOLVER_SCALE: f32 = 1.6;
+/// `REVOLVER_MODELLED_LENGTH_M` is the revolver's length in its glTF (the railgun's parts), from
+/// its grip's back to its muzzle: about a real revolver's.
+const REVOLVER_MODELLED_LENGTH_M: f32 = 0.302;
+/// `BOLT_ACTION_RIFLE_MODELLED_LENGTH_M` is the bolt-action rifle's length in its glTF, from its
+/// stock's end to its muzzle: a real rifle's.
+pub const BOLT_ACTION_RIFLE_MODELLED_LENGTH_M: f32 = 1.231;
 /// `BOLT_ACTION_RIFLE_SCALE` is how many times its modelled size (1.23 m long) the rifle is drawn:
 /// small enough that its scope, bolt and stock come into the corner of the view with its muzzle at
 /// the wand's tip, where a full-size rifle shows only its barrel.
@@ -108,6 +114,17 @@ impl GunModel {
         match self {
             GunModel::Revolver => "revolver",
             GunModel::BoltActionRifle => "rifle",
+        }
+    }
+
+    /// `get_modelled_length_m` gives how long the model is in its glTF, its real size, before it is
+    /// drawn smaller or larger in hand.
+    ///
+    /// Example: `let length_m: f32 = GunModel::Revolver.get_modelled_length_m();`
+    pub fn get_modelled_length_m(self) -> f32 {
+        match self {
+            GunModel::Revolver => REVOLVER_MODELLED_LENGTH_M,
+            GunModel::BoltActionRifle => BOLT_ACTION_RIFLE_MODELLED_LENGTH_M,
         }
     }
 
@@ -760,13 +777,11 @@ mod tests {
     //! | Gun model | the revolver, the bolt-action rifle | `every_gun_model_is_found`, `the_muzzle_is_the_front_of_the_barrel`, `every_gun_model_points_ahead` |
     //! | Model file | present, missing (fails naming the restore command) | `every_gun_model_is_found`, `a_missing_model_fails_with_the_fix` |
     //! | Where a vertex is along the barrel | on the muzzle's face (z = 0), behind it (z > 0); none ahead of it | `the_muzzle_is_the_front_of_the_barrel` |
-    //! | Turn about the up axis | none (the revolver), a quarter turn (the rifle, modelled along +x) | `every_gun_model_points_ahead`, `the_rifle_is_drawn_at_its_scale` |
+    //! | Turn about the up axis | none (the revolver), a quarter turn (the rifle, modelled along +x) | `every_gun_model_points_ahead`, `every_gun_model_is_drawn_at_its_scale` |
+    //! | Modelled length | the revolver (0.30 m), the bolt-action rifle (1.23 m): each matches its mesh | `every_gun_model_is_drawn_at_its_scale` |
 
     use super::*;
 
-    /// `RIFLE_MODELLED_LENGTH_M` is the bolt-action rifle's length in its glTF, from its stock's
-    /// end to its muzzle.
-    const RIFLE_MODELLED_LENGTH_M: f32 = 1.231;
     const LENGTH_TOLERANCE_M: f32 = 0.01;
     const POSITION_TOLERANCE_M: f32 = 1e-5;
     /// `MIN_LENGTH_PER_WIDTH` is how many times longer than wide a gun model is at least.
@@ -864,13 +879,15 @@ mod tests {
     }
 
     #[test]
-    fn the_rifle_is_drawn_at_its_scale() {
-        let (_, max_m) = get_extent_m(&get_positions_from_muzzle_m(GunModel::BoltActionRifle));
-        let drawn_length_m: f32 = RIFLE_MODELLED_LENGTH_M * BOLT_ACTION_RIFLE_SCALE;
-        assert!(
-            (max_m.z - drawn_length_m).abs() < LENGTH_TOLERANCE_M,
-            "the rifle reaches {} m behind its muzzle, not {drawn_length_m} m",
-            max_m.z
-        );
+    fn every_gun_model_is_drawn_at_its_scale() {
+        for model in GunModel::ALL {
+            let (_, max_m) = get_extent_m(&get_positions_from_muzzle_m(model));
+            let drawn_length_m: f32 = model.get_modelled_length_m() * model.get_spec().scale;
+            assert!(
+                (max_m.z - drawn_length_m).abs() < LENGTH_TOLERANCE_M,
+                "{model:?} reaches {} m behind its muzzle, not {drawn_length_m} m",
+                max_m.z
+            );
+        }
     }
 }

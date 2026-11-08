@@ -21,14 +21,6 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
-  wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac (the same agent as W-96 (a
-    different rifle model)), branch `claude/rifle-sway`, to be cut from `staging` once W-96 merges; pictures will be in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-102/`
-    (temporary, under `/private/tmp`). State, 2026-11-08: not started; starts after W-96 (a different rifle model) merges.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -164,6 +156,17 @@ are here too, since the user hadn't confirmed them.
     worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, built by Claude
     Code and finished by Devin; final pictures in
     `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-98/final/`. State,
+    2026-11-08: on `staging`, waiting for the user to test it.
+- [?] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
+  wishlist having rifle going side to side when jogging like a normal rifle"). From before and after pictures (the
+  sprint pose already tilted it), the user chose the sway as built ("ok menrge to staging", "i like your animation");
+  after #318 swapped the gun models, "I want them both swaying ... get both working realistically based on their
+  size": both guns slide 2 cm walking and 4 cm sprinting in step with the head bob, and swing by their length, the
+  1.23 m rifle 1.7° to 3.4° and the 0.30 m revolver a quarter of that ("merge this") (D107). #324.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/rifle-sway` (pushed to `origin`),
+    worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac, started by
+    Claude Code and finished by Devin; pictures in
+    `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-102/both_guns/`. State,
     2026-11-08: on `staging`, waiting for the user to test it.
 
 ## Done
