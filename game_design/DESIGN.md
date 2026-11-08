@@ -397,8 +397,9 @@ What a player sees while playing:
 Each player has a pair of wormhole mouths of their own, one purple and one green, which they throw
 anywhere in the level.
 
-- **Throwing:** `Q` throws the purple mouth, the next press the green one, then purple again, and
-  so on; throwing a mouth again moves it.
+- **Throwing:** `Q` throws the purple mouth and the next press the green one. Once both are down,
+  `Q` does nothing until the pair is gone (death or destruction); a throw that fizzles can be
+  thrown again.
 - **Flight:** a mouth is lobbed from the player's hand a little above the crosshair and curves down
   under its own gravity. It drops to the floor below whatever it hits, and hovers there at eye
   height, facing back the way it flew.
