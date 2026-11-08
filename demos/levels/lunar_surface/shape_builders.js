@@ -174,17 +174,10 @@ function find_standing_height(B) {
 }
 
 function build_lander() {
-  const model = new ShapeModel('blue lander');
+  const model = new ShapeModel('blue landing pad');
   model.cylinder([0, 0.5, 0], 8, 0.5, MAT.HAZARD);
   model.cylinder([0, 0.55, 0], 6.6, 0.5, MAT.PAD);
   model.box(-4, 0, -1, 3, 0, 0, MAT.BLUE_PAINT); model.box(-1, 0, -4, 0, 0, 3, MAT.BLUE_PAINT);
-  for (const [x, z] of [[2.3, 2.3], [-2.3, 2.3], [2.3, -2.3], [-2.3, -2.3]]) model.cylinder([x, 2, z], 0.3, 1, MAT.METAL);
-  model.box(-2, 3, -2, 1, 5, 1, MAT.GOLD_FOIL);
-  model.box(-2, 6, -2, 1, 8, 1, MAT.HULL);
-  model.box(-2.1, 6, -2.1, 1.1, 6, 1.1, MAT.BLUE_PAINT);
-  model.box(-1, 7, -2.1, 0, 7, -2.1, MAT.GLASS);
-  model.cylinder([0.5, 10, 0.5], 0.2, 1, MAT.METAL);
-  model.ellipsoid([0.5, 11.5, 0.5], [0.4, 0.4, 0.4], MAT.BLUE_LIGHT);
   for (const [x, z] of [[5.5, 5.5], [-5.5, 5.5], [5.5, -5.5], [-5.5, -5.5]]) model.ellipsoid([x, 1.3, z], [0.35, 0.35, 0.35], MAT.BLUE_LIGHT);
   model.addLamp([0, 6, -4], TEAM_COLORS[BLUE], 14);
   return model;
