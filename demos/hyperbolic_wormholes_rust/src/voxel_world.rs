@@ -6,10 +6,11 @@
 //! On a map with team consoles (W-68), the black hole grows as consoles turn off, and time runs
 //! slower near it (W-107, `get_time_rate_frac`).
 //!
-//! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
+//! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::with_posed_avatars`,
+//! `VoxelWorld::light_consoles`,
 //! `VoxelWorld::set_thrown_wormholes`, `VoxelWorld::can_place_mouth`, `VoxelWorld::find_hit_s`,
 //! `VoxelWorld::add_markers`, `VoxelWorld::find_aimed_material`, `VoxelWorld::find_clear_m`,
-//! `VoxelWorld::find_crosshair_point`, `VoxelWorld::is_sunlit`, `VoxelWorld::get_mouth_depth_frac`,
+//! `VoxelWorld::find_crosshair_point`, `VoxelWorld::is_sunlit`, `VoxelWorld::is_eye_supported`, `VoxelWorld::get_mouth_depth_frac`,
 //! `VoxelWorld::can_grow_black_hole`, `VoxelWorld::grow_black_hole`, `VoxelWorld::get_time_rate_frac`,
 //! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
@@ -19,11 +20,13 @@ use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
+use crate::mesh::MeshModel;
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
 use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
@@ -59,6 +62,7 @@ const HORIZON_CAPTURE_FRAC: f64 = 1.02;
 const FALL_IN_PER_HORIZON: f64 = 2.0;
 const SUPPORTED_LAMBDA_SQUARED: f64 = 0.25;
 const BODY_RADIUS_M: f64 = 0.25;
+const MESH_WALL_M: f64 = 0.1;
 const HEAD_CLEARANCE_M: f64 = 0.15;
 const PROBE_LOW_M: f64 = 0.02;
 const PROBE_KNEE_M: f64 = 0.3;
@@ -68,7 +72,8 @@ const MAX_FLY_HEIGHT_M: f64 = 240.0;
 const UNSTICK_STEP_M: f64 = 0.25;
 const UNSTICK_MAX_STEPS: usize = 160;
 const PUSH_OUT_STEP_M: f64 = 0.05;
-const MAX_WALK_RISE_M: f64 = 0.3;
+const MAX_WALK_RISE_M: f64 = 0.5;
+const RING_PROBE_COUNT: usize = 8;
 const WALK_RISE_STEP_M: f64 = 0.02;
 const SUN_SHADOW_M: f64 = 80.0;
 const PUSH_OUT_STEP_COUNT: usize = 6;
@@ -94,6 +99,8 @@ pub const LOOK_RAD_PER_PX: f64 = 0.0025;
 const MAX_PITCH_RAD: f64 = 1.55;
 const TINY: f64 = 1e-12;
 const AVATAR_HEAD_FROM_M: f64 = 1.5;
+const AVATAR_HEIGHT_M: f64 = 2.0;
+const GROUND_PROBE_M: f64 = 0.1;
 const AVATAR_SHAPES: [Shape; 2] = [
     Shape {
         kind: ShapeKind::Cylinder,
@@ -114,14 +121,18 @@ const AVATAR_SHAPES: [Shape; 2] = [
 ];
 
 /// `VoxelStructure` is one structure: its frame (and inverse), its grid, where its cells start in
-/// the voxel bytes, its bounding sphere (radius in curvature units), and whether its glowing
-/// shapes are dark (`is_dark`: a pylon whose console is off).
+/// the voxel bytes, its map model (`mesh`, which lasers hit) or posed body (`avatar_mesh`, an index
+/// into the world's `avatar_meshes`, only drawn: lasers hit its shapes), its bounding sphere
+/// (radius in curvature units), and whether its glowing shapes are dark (`is_dark`: a pylon whose
+/// console is off).
 #[derive(Clone)]
 pub struct VoxelStructure {
     pub name: String,
     pub inverse: DMat4,
     pub first_shape: usize,
     pub shape_count: usize,
+    pub mesh: Option<usize>,
+    pub avatar_mesh: Option<usize>,
     pub centre: DVec4,
     pub radius: f64,
     pub is_dark: bool,
@@ -285,13 +296,18 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
 /// `VoxelWorld` is a whole voxel map, ready to trace and to walk on, with the eye of the flashlight
 /// shining this frame, the time the sky shows (`sky_time_s`: the UTC clock in the window, 0 for
 /// fixed views; `spaceships.rs`), and how bright this player sees the Milky Way (`milky_way`: its
-/// pole and core directions, if the map has one), from their `view.milky_way_brightness_frac`.
+/// pole and core directions, if the map has one), from their `view.milky_way_brightness_frac`. `body` is the players' body model, whose materials
+/// are map model `body_mesh` (with no triangles), and `avatar_meshes` are this frame's posed bodies.
 #[derive(Clone)]
 pub struct VoxelWorld {
     pub name: String,
     pub r: f64,
     pub structures: Vec<VoxelStructure>,
     pub shapes: Vec<Shape>,
+    pub meshes: Arc<Vec<MeshModel>>,
+    pub body: Arc<AvatarModel>,
+    pub body_mesh: usize,
+    pub avatar_meshes: Vec<Arc<MeshModel>>,
     pub warps: Vec<VoxelWarp>,
     pub lights: Vec<(DVec4, [f32; 3], f64)>,
     pub palette: Vec<[f32; 4]>,
@@ -541,22 +557,30 @@ fn find_material(map: &Map, name: &str) -> i32 {
 }
 
 /// `make_structure` gives a structure of `shapes` (starting at `first_shape` in the world's list)
-/// in `frame`, with a bounding sphere around the corners of their boxes plus `BOUND_MARGIN_M`.
+/// drawn as `mesh` (its index in the world's meshes and the model) if it has one, in `frame`,
+/// with a bounding sphere around the corners of their boxes plus `BOUND_MARGIN_M`.
 ///
-/// Example: `let st = make_structure("crate", frame, 0, &shapes, 40.0);`
+/// Example: `let st = make_structure("crate", frame, 0, &shapes, None, 40.0);`
 fn make_structure(
     name: &str,
     frame: DMat4,
     first_shape: usize,
     shapes: &[Shape],
+    mesh: Option<(usize, &MeshModel)>,
     r: f64,
 ) -> VoxelStructure {
+    let mesh_box: Option<(DVec3, DVec3)> =
+        mesh.map(|(_, model)| (model.nodes[0].lo.as_dvec3(), model.nodes[0].hi.as_dvec3()));
     let lo: DVec3 = shapes
         .iter()
-        .fold(DVec3::MAX, |lo, sh| lo.min(sh.centre - sh.half));
+        .map(|sh| sh.centre - sh.half)
+        .chain(mesh_box.map(|b| b.0))
+        .fold(DVec3::MAX, DVec3::min);
     let hi: DVec3 = shapes
         .iter()
-        .fold(DVec3::MIN, |hi, sh| hi.max(sh.centre + sh.half));
+        .map(|sh| sh.centre + sh.half)
+        .chain(mesh_box.map(|b| b.1))
+        .fold(DVec3::MIN, DVec3::max);
     let centre_local: DVec4 = map_klein((lo + hi) / (2.0 * r));
     let radius: f64 = (0..8)
         .map(|c: usize| {
@@ -570,6 +594,8 @@ fn make_structure(
         inverse: invert_lorentz(frame),
         first_shape,
         shape_count: shapes.len(),
+        mesh: mesh.map(|(index, _)| index),
+        avatar_mesh: None,
         centre: frame * centre_local,
         radius: radius + BOUND_MARGIN_M / r,
         is_dark: false,
@@ -583,6 +609,37 @@ impl VoxelWorld {
     pub fn get_shapes(&self, k: usize) -> &[Shape] {
         let st: &VoxelStructure = &self.structures[k];
         &self.shapes[st.first_shape..st.first_shape + st.shape_count]
+    }
+
+    /// `find_hit_mu` gives where the chart line q0 + dq mu first meets structure k within
+    /// [mu_lo, mu_hi] and which shape or triangle: its mesh's triangles if it has one, else its
+    /// shapes but those of material `see_through` (glass, as light and lasers pass it), if any.
+    ///
+    /// Example: `let hit = world.find_hit_mu(3, q0, dq, 0.0, 1.0, None);`
+    pub fn find_hit_mu(
+        &self,
+        k: usize,
+        q0: DVec3,
+        dq: DVec3,
+        mu_lo: f64,
+        mu_hi: f64,
+        see_through: Option<u8>,
+    ) -> Option<(f64, usize)> {
+        match self.structures[k].mesh {
+            Some(m) => self.meshes[m].find_hit_mu(q0, dq, mu_lo, mu_hi),
+            None => find_hit_mu(self.get_shapes(k), q0, dq, mu_lo, mu_hi, see_through),
+        }
+    }
+
+    /// `get_distance_m` bounds the distance from chart point q to what light meets in structure
+    /// k from below: its mesh if it has one, else its shapes.
+    ///
+    /// Example: `let d_m = world.get_distance_m(3, q);`
+    pub fn get_distance_m(&self, k: usize, q: DVec3) -> f64 {
+        match self.structures[k].mesh {
+            Some(m) => self.meshes[m].get_distance_m(q),
+            None => crate::shapes::get_distance_m(self.get_shapes(k), q).0,
+        }
     }
 
     /// `FromMap` builds the world from a voxel map: each structure's bounding sphere (around its
@@ -604,17 +661,30 @@ impl VoxelWorld {
             ));
         }
         let (mut structures, mut shapes) = (Vec::new(), Vec::new());
+        let (mut meshes, mut mesh_keys) = (Vec::<MeshModel>::new(), Vec::<(String, f64)>::new());
         for s in &map.structures {
             let first_shape: usize = shapes.len();
             for shape in &s.shapes {
                 shapes.push(Shape::FromMap(shape).map_err(|e| format!("map {}: {e}", map.name))?);
             }
+            let mesh: Option<usize> = match &s.mesh {
+                None => None,
+                Some(mesh) => {
+                    let key: (String, f64) = (mesh.model.clone(), mesh.height_m);
+                    if !mesh_keys.contains(&key) {
+                        meshes.push(MeshModel::Load(&mesh.model, mesh.height_m)?);
+                        mesh_keys.push(key.clone());
+                    }
+                    mesh_keys.iter().position(|k| *k == key)
+                }
+            };
             let frame: DMat4 = to_frame(&s.frame);
             structures.push(make_structure(
                 &s.name,
                 frame,
                 first_shape,
                 &shapes[first_shape..],
+                mesh.map(|m| (m, &meshes[m])),
                 r,
             ));
         }
@@ -713,6 +783,13 @@ impl VoxelWorld {
             let boundary = regions.boundary.as_ref()?;
             Some([edge_m, boundary.u_m, boundary.v_m])
         });
+        let body: AvatarModel = AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?;
+        let body_mesh: usize = meshes.len();
+        meshes.push(MeshModel {
+            triangles: Vec::new(),
+            nodes: Vec::new(),
+            materials: body.get_materials().to_vec(),
+        });
         let mut world: VoxelWorld = VoxelWorld {
             name: map.name.clone(),
             r,
@@ -725,6 +802,10 @@ impl VoxelWorld {
             sky_time_s: 0.0,
             structures,
             shapes,
+            meshes: Arc::new(meshes),
+            body: Arc::new(body),
+            body_mesh,
+            avatar_meshes: Vec::new(),
             warps,
             lights: map
                 .lights
@@ -832,29 +913,90 @@ impl VoxelWorld {
     }
 
     /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame
-    /// and an avatar colour index): a 1 × 4 grid of half-meter cells in its own material, so it is
-    /// drawn, lensed and hit by lasers like any structure.
+    /// and an avatar colour index): a cylinder and a head in its own material, so it is lensed and
+    /// hit by lasers like any structure, and drawn as such.
     ///
-    /// Example: `let shared = world.with_avatars(&[(feet, 2)]);`
+    /// Example: `let shared = world.with_avatars(&[(feet, 2)], &colors);`
     pub fn with_avatars(&self, bodies: &[(DMat4, usize)], colors: &[[f32; 3]]) -> VoxelWorld {
         let mut shared: VoxelWorld = self.clone();
         for &(feet, color_index) in bodies {
-            let material: usize = AVATAR_FIRST_MATERIAL + color_index % colors.len();
-            let color: [f32; 3] = colors[color_index % colors.len()];
-            shared.palette[material] = [color[0], color[1], color[2], 0.0];
-            let body = AVATAR_SHAPES.map(|shape| Shape {
-                material: material as u8,
-                ..shape
-            });
-            shared.add_structure("player", feet, &body);
+            shared.add_avatar(feet, color_index, colors, None);
         }
         shared
+    }
+
+    /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
+    /// in `poses` (a clip and a time in it, one per body); lasers still hit the shapes. After the
+    /// bodies come `corpses` (a feet frame and a pose each), only drawn: lasers pass through them.
+    ///
+    /// Example: `let shared = world.with_posed_avatars(&[(feet, 2)], &[(AvatarClip::Idle, 0.0)], &[], &colors);`
+    pub fn with_posed_avatars(
+        &self,
+        bodies: &[(DMat4, usize)],
+        poses: &[(AvatarClip, f64)],
+        corpses: &[(DMat4, (AvatarClip, f64))],
+        colors: &[[f32; 3]],
+    ) -> VoxelWorld {
+        assert_eq!(
+            bodies.len(),
+            poses.len(),
+            "with_posed_avatars: {} bodies but {} poses",
+            bodies.len(),
+            poses.len()
+        );
+        let mut shared: VoxelWorld = self.clone();
+        for (&(feet, color_index), &(clip, time_s)) in bodies.iter().zip(poses) {
+            let posed: MeshModel = self.body.make_posed(clip, time_s);
+            shared.add_avatar(feet, color_index, colors, Some(posed));
+        }
+        for &(feet, (clip, time_s)) in corpses {
+            let posed: MeshModel = self.body.make_posed(clip, time_s);
+            let drawn: Option<(usize, &MeshModel)> = Some((shared.avatar_meshes.len(), &posed));
+            let mut corpse: VoxelStructure =
+                make_structure("corpse", feet, shared.shapes.len(), &[], drawn, self.r);
+            corpse.avatar_mesh = corpse.mesh.take();
+            shared.avatar_meshes.push(Arc::new(posed));
+            shared.push_structure(corpse);
+        }
+        shared
+    }
+
+    /// `add_avatar` adds a body standing on `feet` in avatar colour `color_index`, drawn as
+    /// `posed` if given, and puts it in the list of every warp it comes within reach of.
+    ///
+    /// Example: `shared.add_avatar(feet, 2, &colors, None);`
+    fn add_avatar(
+        &mut self,
+        feet: DMat4,
+        color_index: usize,
+        colors: &[[f32; 3]],
+        posed: Option<MeshModel>,
+    ) {
+        let material: usize = AVATAR_FIRST_MATERIAL + color_index % colors.len();
+        let color: [f32; 3] = colors[color_index % colors.len()];
+        self.palette[material] = [color[0], color[1], color[2], 0.0];
+        let first_shape: usize = self.shapes.len();
+        self.shapes.extend(AVATAR_SHAPES.map(|shape| Shape {
+            material: material as u8,
+            ..shape
+        }));
+        let body: &[Shape] = &self.shapes[first_shape..];
+        let drawn: Option<(usize, &MeshModel)> = posed
+            .as_ref()
+            .map(|model| (self.avatar_meshes.len(), model));
+        let mut avatar: VoxelStructure =
+            make_structure("player", feet, first_shape, body, drawn, self.r);
+        avatar.avatar_mesh = avatar.mesh.take();
+        if let Some(model) = posed {
+            self.avatar_meshes.push(Arc::new(model));
+        }
+        self.push_structure(avatar);
     }
 
     /// `add_structure` adds a structure of `shapes` in `frame` after the others, in the list of
     /// every warp it comes within reach of.
     ///
-    /// Example: `world.add_structure("player", feet, &body);`
+    /// Example: `world.add_structure("a thrown wormhole", frame, &[ball]);`
     fn add_structure(&mut self, name: &str, frame: DMat4, shapes: &[Shape]) {
         let first_shape: usize = self.shapes.len();
         self.shapes.extend_from_slice(shapes);
@@ -863,11 +1005,21 @@ impl VoxelWorld {
             frame,
             first_shape,
             &self.shapes[first_shape..],
+            None,
             self.r,
         );
+        self.push_structure(structure);
+    }
+
+    /// `push_structure` adds `structure` after the others, in the list of every warp it comes
+    /// within reach of.
+    ///
+    /// Example: `shared.push_structure(avatar);`
+    fn push_structure(&mut self, structure: VoxelStructure) {
+        let k: usize = self.structures.len();
         for warp in &mut self.warps {
             if get_distance(structure.centre, warp.centre) < structure.radius + warp.reach {
-                warp.list.push(self.structures.len());
+                warp.list.push(k);
             }
         }
         self.structures.push(structure);
@@ -1082,6 +1234,16 @@ impl VoxelWorld {
         Some(self.get_material_at(inside, &[hit.structure?]))
     }
 
+    /// `is_eye_supported` says whether a player whose eye frame is `eye` (from the network) stands
+    /// on something: their body, `GROUND_PROBE_M` lower, would meet the ground or a block.
+    ///
+    /// Example: `let is_on_ground = world.is_eye_supported(player.frame);`
+    pub fn is_eye_supported(&self, eye: DMat4) -> bool {
+        let player: VoxelPlayer = VoxelPlayer::FromEye(self, eye);
+        let nearby: Vec<usize> = self.find_nearby_structures(eye.col(AXIS_W), NEARBY_REACH_M);
+        self.is_body_blocked(player.body, player.h_m - GROUND_PROBE_M, &nearby)
+    }
+
     /// `find_clear_m` gives how far the straight chord from point x along unit tangent v goes, up to
     /// `max_m`, before it meets the ground or a block, glass included: a camera can't pass a pane.
     ///
@@ -1116,12 +1278,20 @@ impl VoxelWorld {
     }
 
     /// `get_material_at` gives the material of the cell holding point x among `candidates`, or 0.
+    /// A structure drawn as a mesh holds the points within `MESH_WALL_M` of its triangles, in the
+    /// material of its first shape.
     ///
     /// Example: `let m = world.get_material_at(x, &nearby);`
     fn get_material_at(&self, x: DVec4, candidates: &[usize]) -> u8 {
         for &k in candidates {
             let p: DVec4 = self.structures[k].inverse * x;
             let q: DVec3 = p.truncate() / p.w * self.r;
+            if let Some(m) = self.structures[k].mesh {
+                if self.meshes[m].is_within_m(q, MESH_WALL_M) {
+                    return self.get_shapes(k)[0].material;
+                }
+                continue;
+            }
             if let Some(shape) = self
                 .get_shapes(k)
                 .iter()
@@ -1199,23 +1369,24 @@ impl VoxelWorld {
     }
 
     /// `is_body_blocked` says whether a body standing on `body` with its eye `h_m` up touches a
-    /// block or the ground, by probe points at its feet, knees, waist and head.
+    /// block or the ground, by probe points at its feet and head and rings of `RING_PROBE_COUNT`
+    /// at its knees and waist, so turning in place doesn't swing a probe into a wall.
     ///
     /// Example: `if world.is_body_blocked(body, h_m, &nearby) { ... }`
     fn is_body_blocked(&self, body: DMat4, h_m: f64, nearby: &[usize]) -> bool {
         let eye_m: f64 = self.player.eye_height_m;
-        let probes: [[f64; 3]; 10] = [
+        let ring = (0..RING_PROBE_COUNT)
+            .map(|i| std::f64::consts::TAU * i as f64 / RING_PROBE_COUNT as f64);
+        let probes: Vec<[f64; 3]> = [
             [0.0, PROBE_LOW_M, 0.0],
-            [BODY_RADIUS_M, PROBE_KNEE_M, 0.0],
-            [-BODY_RADIUS_M, PROBE_KNEE_M, 0.0],
-            [0.0, PROBE_KNEE_M, BODY_RADIUS_M],
-            [0.0, PROBE_KNEE_M, -BODY_RADIUS_M],
-            [BODY_RADIUS_M, PROBE_WAIST_M, 0.0],
-            [-BODY_RADIUS_M, PROBE_WAIST_M, 0.0],
-            [0.0, PROBE_WAIST_M, BODY_RADIUS_M],
-            [0.0, PROBE_WAIST_M, -BODY_RADIUS_M],
             [0.0, eye_m + HEAD_CLEARANCE_M, 0.0],
-        ];
+        ]
+        .into_iter()
+        .chain([PROBE_KNEE_M, PROBE_WAIST_M].into_iter().flat_map(|y_m| {
+            ring.clone()
+                .map(move |a: f64| [BODY_RADIUS_M * a.cos(), y_m, BODY_RADIUS_M * a.sin()])
+        }))
+        .collect();
         probes.iter().any(|&[dx, dy, dz]| {
             let y_m: f64 = h_m - eye_m + dy;
             let probe: DVec4 =
@@ -1501,14 +1672,7 @@ impl VoxelWorld {
         };
         let q0: DVec3 = p.truncate() / p.w * self.r;
         let dq: DVec3 = (t.truncate() * p.w - p.truncate() * t.w) * self.r;
-        let (mu, _) = find_hit_mu(
-            self.get_shapes(k),
-            q0,
-            dq,
-            mu_of(s_lo),
-            mu_of(s_hi),
-            see_through,
-        )?;
+        let (mu, _) = self.find_hit_mu(k, q0, dq, mu_of(s_lo), mu_of(s_hi), see_through)?;
         let lam: f64 = mu * p.w * p.w / (1.0 - mu * p.w * t.w);
         Some(s_star + lam.atanh())
     }
@@ -2170,7 +2334,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Where a player starts | on a structure (the blue landing pad), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
+    //! | Where a player starts | on the ground at the blue spawn, beside the blue kazemat, and at a viewpoint | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Laser at a window (the red habitat module's) | shot from inside touching the pane, close (the muzzle past the pane), across the room, slantwise (each leaves); from outside (comes in to the floor) | `a_laser_passes_through_a_window` |
     //! | What a window's pane stops | lasers (no), players (yes: its middle is solid) | `a_laser_passes_through_a_window` |
@@ -2186,6 +2350,8 @@ mod tests {
     //! | Refilling energy | crouched (at the crouched rate), walking upright (at the walking rate) | `crouching_refills_energy_faster` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
     //! | Low way walked out of | a habitat module's doors (each module, each way), a walkway's ends (each walkway, each way) | `players_walk_out_of_modules_and_walkways` |
+    //! | Turning while pressed on a bunker wall | the garage's corners (straight, diagonal), the field bunker's forecourt corner (diagonal); each walks away | `players_turning_at_bunker_walls_get_away` |
+    //! | Bunker model walked out of | the kazemat's door, each of the garage's two doorways, the field bunker's room, forecourt and steps | `players_walk_out_of_bunkers` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
     //! | Black hole growth | 1 (the settings' maximum, with its wide lens), back to 0 (the map's, no lens) | `the_black_hole_grows_in_place` |
     //! | Distance from the black hole (time rate) | at its centre and inside k horizons (the floor), within its reach (between, slower closer in), at and past its reach (1) | `time_slows_near_the_black_hole` |
@@ -2207,10 +2373,10 @@ mod tests {
     use crate::settings::MAX_CURVATURE_PER_MAP_CURVATURE;
     use crate::thrown_wormholes::GREEN_COLOR;
 
-    const LANDER_DECK_M: f64 = 1.0;
     const STAND_TOLERANCE_M: f64 = 0.06;
-    const MAX_PLINTH_M: f64 = 1.5;
-    const PYLON_DISTANCE_M: f64 = 34.0;
+    const PYLON_DISTANCE_M: f64 = 41.5;
+    const PYLON_AIM_M: [f64; 2] = [-14.0, 40.05];
+    const PYLON_AIM_PITCH_RAD: f64 = -0.004;
     const DISTANCE_TOLERANCE_M: f64 = 0.5;
     const BLOCK_U_M: f64 = -80.0;
     const BLOCK_DEPTH_M: f64 = 6.0;
@@ -2275,7 +2441,14 @@ mod tests {
             axis: 1,
             material: 1,
         }];
-        world.structures = vec![make_structure("block", frame, 0, &world.shapes, world.r)];
+        world.structures = vec![make_structure(
+            "block",
+            frame,
+            0,
+            &world.shapes,
+            None,
+            world.r,
+        )];
         world.static_structure_count = 1;
         for warp in &mut world.warps {
             warp.list.clear();
@@ -2455,11 +2628,11 @@ mod tests {
     fn players_stand_where_the_level_puts_them() {
         let world: VoxelWorld = load_lunar_surface();
         let eye_m: f64 = world.player.eye_height_m;
-        let on_lander: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
-        let deck_m: f64 = get_eye_above_ground_m(&world, &on_lander) - eye_m;
+        let at_spawn: VoxelPlayer = VoxelPlayer::AtSpawn(&world, 0);
+        let feet_m: f64 = get_eye_above_ground_m(&world, &at_spawn) - eye_m;
         assert!(
-            deck_m > LANDER_DECK_M - STAND_TOLERANCE_M && deck_m < LANDER_DECK_M + MAX_PLINTH_M,
-            "the spawn stands {deck_m} m above the ground"
+            feet_m.abs() < STAND_TOLERANCE_M,
+            "the spawn stands {feet_m} m above the ground"
         );
         let on_ground: VoxelPlayer =
             VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
@@ -2469,8 +2642,13 @@ mod tests {
     #[test]
     fn the_laser_into_the_wormhole_hits_the_red_pylon() {
         let world: VoxelWorld = load_lunar_surface();
-        let player: VoxelPlayer =
-            VoxelPlayer::AtView(&world, [-22.0, 40.5], [-14.0, 40.0], None, 0.0);
+        let player: VoxelPlayer = VoxelPlayer::AtView(
+            &world,
+            [-22.0, 40.5],
+            PYLON_AIM_M,
+            None,
+            PYLON_AIM_PITCH_RAD,
+        );
         let shot: Shot = world.trace_laser(player.get_camera_frame(&world));
         assert_eq!(shot.through, vec!["wormhole mouth A".to_string()]);
         let hit: usize = shot.hit_structure.expect("the laser hits a structure");
@@ -2916,12 +3094,12 @@ mod tests {
             .iter()
             .enumerate()
             .filter_map(|(k, st)| match st.name.as_str() {
-                "red habitat module" | "derelict habitat module" => Some((k, MODULE_OUT_M)),
+                "red habitat module" => Some((k, MODULE_OUT_M)),
                 "red walkway" | "crater walkway" => Some((k, WALKWAY_OUT_M)),
                 _ => None,
             })
             .collect();
-        assert_eq!(ways.len(), 5, "three habitat modules and two walkways");
+        assert_eq!(ways.len(), 3, "one habitat module and two walkways");
         for (k, out_m) in ways {
             let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
             for turn_rad in [0.0, std::f64::consts::PI] {
@@ -2934,6 +3112,176 @@ mod tests {
                     z_m.abs() > out_m,
                     "{} #{k}, turned {turn_rad} rad: stopped at z = {z_m} m",
                     world.structures[k].name
+                );
+            }
+        }
+    }
+
+    /// `BunkerRoute` is a walk out of a bunker: the structure's name, the start in its chart
+    /// (x, z), the turns before each leg, and the chart (x, z) the walk must end past.
+    struct BunkerRoute {
+        name: &'static str,
+        start_m: [f64; 2],
+        turns_rad: &'static [f64],
+        out_m: [f64; 2],
+    }
+
+    /// `players_walk_out_of_bunkers` checks that a player inside each bunker model walks out of
+    /// its door (the field bunker's through its forecourt and down its steps), as the mesh's
+    /// triangles, not boxes, stop players.
+    #[test]
+    fn players_walk_out_of_bunkers() {
+        const LEG_S: f64 = 6.0;
+        let world: VoxelWorld = load_lunar_surface();
+        let route = |name: &'static str,
+                     start_m: [f64; 2],
+                     turns_rad: &'static [f64],
+                     out_m: [f64; 2]| BunkerRoute {
+            name,
+            start_m,
+            turns_rad,
+            out_m,
+        };
+        let routes: [BunkerRoute; 4] = [
+            route(
+                "blue kazemat",
+                [-0.2, 0.0],
+                &[std::f64::consts::PI],
+                [f64::MIN, 4.2],
+            ),
+            route(
+                "red spawn hangar",
+                [-7.4, 0.0],
+                &[std::f64::consts::PI],
+                [f64::MIN, 7.8],
+            ),
+            route(
+                "red spawn hangar",
+                [1.5, 0.0],
+                &[std::f64::consts::PI],
+                [f64::MIN, 7.8],
+            ),
+            route(
+                "derelict field bunker",
+                [0.0, 3.85],
+                &[0.0, std::f64::consts::FRAC_PI_2],
+                [6.0, f64::MIN],
+            ),
+        ];
+        for BunkerRoute {
+            name,
+            start_m,
+            turns_rad,
+            out_m,
+        } in routes
+        {
+            let k: usize = world
+                .structures
+                .iter()
+                .position(|st| st.name == name)
+                .expect(name);
+            let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
+            let start: DVec4 = frame * map_klein(DVec3::new(start_m[0], 0.0, start_m[1]) / world.r);
+            let body: DMat4 = orthonormalize_frame(DMat4::from_cols(
+                frame.col(0),
+                frame.col(1),
+                frame.col(2),
+                start,
+            ));
+            let mut player: VoxelPlayer = VoxelPlayer::Standing(&world, body);
+            for &turn_rad in turns_rad {
+                player.body *= make_rotation(AXIS_X, AXIS_Z, turn_rad);
+                walk_forward(&world, &mut player, (LEG_S / STEP_S) as usize);
+            }
+            let p: DVec4 = world.structures[k].inverse * player.body.col(AXIS_W);
+            let (x_m, z_m) = (p.x / p.w * world.r, p.z / p.w * world.r);
+            assert!(
+                x_m > out_m[0] && z_m > out_m[1],
+                "{name} from {start_m:?}: stopped at ({x_m}, {z_m})"
+            );
+        }
+    }
+
+    /// `players_turning_at_bunker_walls_get_away` checks that a player who sprints into a bunker
+    /// wall and turns while pressing on it can still walk away: each probe ring has
+    /// `RING_PROBE_COUNT` probes, so turning doesn't swing one into the wall.
+    #[test]
+    fn players_turning_at_bunker_walls_get_away() {
+        const TURN_RAD: f64 = 0.3;
+        const TURN_COUNT: usize = 12;
+        const TURN_FRAME_COUNT: usize = 10;
+        const MIN_ESCAPE_M: f64 = 0.5;
+        const FRAME_S: f64 = 1.0 / 30.0;
+        let world: VoxelWorld = load_lunar_surface();
+        let escapes: [Input; 4] = [
+            Input {
+                back: true,
+                ..Input::default()
+            },
+            Input {
+                left: true,
+                ..Input::default()
+            },
+            Input {
+                right: true,
+                ..Input::default()
+            },
+            Input {
+                forward: true,
+                ..Input::default()
+            },
+        ];
+        let eighth = |n: f64, radius_m: f64| -> [f64; 2] {
+            let angle_rad: f64 = n * std::f64::consts::FRAC_PI_4;
+            [radius_m * angle_rad.cos(), radius_m * angle_rad.sin()]
+        };
+        for (name, start_m, is_diagonal) in [
+            ("red spawn hangar", eighth(7.0, 16.0), false),
+            ("red spawn hangar", eighth(0.0, 16.0), true),
+            ("derelict field bunker", eighth(5.0, 11.0), true),
+        ] {
+            let sprint: Input = Input {
+                forward: true,
+                left: is_diagonal,
+                sprint: true,
+                ..Input::default()
+            };
+            let k: usize = world
+                .structures
+                .iter()
+                .position(|st| st.name == name)
+                .expect(name);
+            let frame: DMat4 = invert_lorentz(world.structures[k].inverse);
+            let start: DVec4 = frame * map_klein(DVec3::new(start_m[0], 0.0, start_m[1]) / world.r);
+            let body: DMat4 = orthonormalize_frame(DMat4::from_cols(
+                frame.col(0),
+                frame.col(1),
+                frame.col(2),
+                start,
+            ));
+            let facing: DMat4 = make_rotation(AXIS_X, AXIS_Z, (-start_m[0]).atan2(start_m[1]));
+            let mut player: VoxelPlayer = VoxelPlayer::Standing(&world, body * facing);
+            for _ in 0..(4.0 / FRAME_S) as usize {
+                player.step(&world, &sprint, FRAME_S, 0);
+            }
+            for turn in 0..TURN_COUNT {
+                player.body *= make_rotation(AXIS_X, AXIS_Z, TURN_RAD);
+                for _ in 0..TURN_FRAME_COUNT {
+                    player.step(&world, &sprint, FRAME_S, 0);
+                }
+                let escape_m: f64 = escapes
+                    .iter()
+                    .map(|input| {
+                        let mut moved: VoxelPlayer = player;
+                        for _ in 0..(1.0 / FRAME_S) as usize {
+                            moved.step(&world, input, FRAME_S, 0);
+                        }
+                        get_distance(moved.body.col(AXIS_W), player.body.col(AXIS_W)) * world.r
+                    })
+                    .fold(0.0, f64::max);
+                assert!(
+                    escape_m > MIN_ESCAPE_M,
+                    "{name} from {start_m:?}, turn {turn}: got only {escape_m} m away"
                 );
             }
         }
@@ -3165,7 +3513,7 @@ mod tests {
         disabling_fracs[HELD_CONSOLE] = 1.0;
         world.light_consoles(1 << OFF_CONSOLE, &disabling_fracs, STEP_S);
         let rates_hz: Vec<f64> = world.consoles.iter().map(|c| c.pulse.hz).collect();
-        assert_eq!(rates_hz[0], CONSOLE_PULSE_HZ);
+        assert_eq!(rates_hz[OFF_CONSOLE], CONSOLE_PULSE_HZ);
         assert_eq!(rates_hz[HELD_CONSOLE], CONSOLE_FRENZY_PULSE_HZ);
         for (i, console) in world.consoles.iter().enumerate() {
             let entry: [f32; 4] = world.palette[usize::from(console.material)];

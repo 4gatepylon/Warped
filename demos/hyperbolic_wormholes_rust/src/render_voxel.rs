@@ -22,7 +22,12 @@ use objc2_metal::{
 };
 
 use crate::dust::DustCloud;
-use crate::geometry::{AXIS_W, AXIS_Z, get_distance, invert_lorentz};
+use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
+use crate::mesh::MeshModel;
+use crate::render_mesh::{
+    FIRST_AVATAR_ROOT_CODE, GpuNode, GpuTriangle, MeshGpu, NO_MESH, get_first_materials,
+    get_mesh_roots, pack_avatar_meshes,
+};
 use crate::render_metal::{
     AdaptivePipelines, Pipeline, REFINE_GROUP_SIZE, SampleBuffers, VOXEL_BYTES_PER_RAY_END,
     encode_adaptive_sampling, make_pipeline,
@@ -53,6 +58,7 @@ const UNIFORMS_BUFFER_INDEX: usize = 16;
 const SCENE_BUFFER_COUNT: usize = 10;
 const MEANS_BUFFER_INDEX: usize = 27;
 const DUST_BUFFER_INDICES: [usize; 2] = [29, 30];
+const AVATAR_BUFFER_INDICES: [usize; 2] = [8, 10];
 const HAND_LIGHT_BUFFER_INDEX: usize = 28;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
@@ -66,7 +72,9 @@ const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
+const BEACON_BEAM_M: f64 = 400.0;
 const RIFLE_BEAM_CODE: u32 = 2;
+const BEACON_BEAM_CODE: u32 = 4;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const MS_PER_S: f64 = 1000.0;
 const MIN_BUFFER_BYTES: usize = 256;
@@ -236,6 +244,53 @@ pub struct VoxelFrame {
     mound_grid: Option<Arc<MoundGrid>>,
     dust_bursts: Vec<GpuDustBurst>,
     dust_particles: Vec<GpuDustParticle>,
+    meshes: Arc<Vec<MeshModel>>,
+    avatar_triangles: Vec<GpuTriangle>,
+    avatar_nodes: Vec<GpuNode>,
+}
+
+/// `get_beacon_beams` gives each beacon's beam: from the top of the model of each structure drawn
+/// as a mesh whose first shape is a console, straight up for `BEACON_BEAM_M` (as far as
+/// `clip_beam_to_map` allows), in its console's team colour and `BEACON_BEAM_CODE` (so the shader
+/// draws it wider), bright while its console is on and gone once it is off.
+///
+/// Example: `let beams = get_beacon_beams(&world);`
+fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
+    let mut beams: Vec<GpuBeam> = Vec::new();
+    for st in &world.structures {
+        let Some(m) = st.mesh else { continue };
+        let Some(console) = world
+            .consoles
+            .iter()
+            .find(|c| st.shape_count > 0 && c.material == world.shapes[st.first_shape].material)
+        else {
+            continue;
+        };
+        let on_frac: f32 = if world.palette[usize::from(console.material)][3] > 0.0 {
+            1.0
+        } else {
+            0.0
+        };
+        let frame: DMat4 = invert_lorentz(st.inverse);
+        let top: f64 = f64::from(world.meshes[m].nodes[0].hi.y) / world.r;
+        let (x, v) = (frame.col(AXIS_W), frame.col(AXIS_Y));
+        let segment: BeamSegment = BeamSegment {
+            a: top.cosh() * x + top.sinh() * v,
+            b: top.sinh() * x + top.cosh() * v,
+            length: BEACON_BEAM_M / world.r,
+        };
+        let code: u32 = console.team + BEACON_BEAM_CODE;
+        beams.extend(
+            clip_beam_to_map(&[segment], world.r)
+                .into_iter()
+                .map(|s| GpuBeam {
+                    a: to_f32(s.a),
+                    b: to_f32(s.b),
+                    info: [s.length as f32, 0.0, BEAM_BRIGHTNESS * on_frac, code as f32],
+                }),
+        );
+    }
+    beams
 }
 
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
@@ -351,6 +406,10 @@ impl VoxelFrame {
         size_px: (u32, u32),
     ) -> VoxelFrame {
         let r: f64 = world.r;
+        let mesh_roots: Vec<i32> = get_mesh_roots(&world.meshes);
+        let body_first_material: i32 = get_first_materials(&world.meshes)[world.body_mesh];
+        let (avatar_triangles, avatar_nodes, avatar_roots) =
+            pack_avatar_meshes(&world.avatar_meshes, body_first_material);
         let structures: Vec<GpuStructure> = world
             .structures
             .iter()
@@ -364,9 +423,24 @@ impl VoxelFrame {
                         s.first_shape as i32,
                         s.shape_count as i32,
                         i32::from(s.is_dark),
-                        0,
+                        match (s.mesh, s.avatar_mesh) {
+                            (Some(m), _) => mesh_roots[m],
+                            (None, Some(a)) => FIRST_AVATAR_ROOT_CODE - avatar_roots[a],
+                            (None, None) => NO_MESH,
+                        },
                     ],
-                    scale: [r as f32, 0.0, 0.0, 0.0],
+                    scale: [
+                        r as f32,
+                        f32::from(u8::from(
+                            s.shape_count > 0
+                                && world
+                                    .consoles
+                                    .iter()
+                                    .any(|c| c.material == world.shapes[s.first_shape].material),
+                        )),
+                        0.0,
+                        0.0,
+                    ],
                 }
             })
             .collect();
@@ -420,7 +494,7 @@ impl VoxelFrame {
                 color_radius: [color[0], color[1], color[2], radius_m as f32],
             })
             .collect();
-        let gpu_beams: Vec<GpuBeam> = beams
+        let mut gpu_beams: Vec<GpuBeam> = beams
             .iter()
             .flat_map(|beam| {
                 let code: u32 = beam.team + RIFLE_BEAM_CODE * u32::from(beam.is_rifle);
@@ -438,6 +512,7 @@ impl VoxelFrame {
                     })
             })
             .collect();
+        gpu_beams.extend(get_beacon_beams(world));
         let (dust_bursts, dust_particles) = pack_dust(dust);
         let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
             GpuZoneWalls {
@@ -587,6 +662,9 @@ impl VoxelFrame {
             mound_grid: get_mound_grid(&world.terrain).cloned(),
             dust_bursts,
             dust_particles,
+            meshes: Arc::clone(&world.meshes),
+            avatar_triangles,
+            avatar_nodes,
         }
     }
 
@@ -719,6 +797,7 @@ pub struct VoxelGpu {
     bake_milky_way: Pipeline,
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
+    meshes: Option<(*const Vec<MeshModel>, MeshGpu)>,
     post: Option<PostTextures>,
     milky_way: Texture,
     is_milky_way_baked: bool,
@@ -770,10 +849,13 @@ impl VoxelGpu {
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
             bake_milky_way: make_pipeline(device, &library, "bake_milky_way")?,
-            buffers: (0..SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len())
+            buffers: (0..SCENE_BUFFER_COUNT
+                + DUST_BUFFER_INDICES.len()
+                + AVATAR_BUFFER_INDICES.len())
                 .map(|_| GrowableBuffer { buffer: None })
                 .collect(),
             textures,
+            meshes: None,
             post: None,
             milky_way: make_hdr_texture(device, MILKY_WAY_TEXTURE_PX)?,
             is_milky_way_baked: false,
@@ -841,6 +923,15 @@ impl VoxelGpu {
             }
             encoder.setTexture_atIndex(Some(&self.milky_way), MILKY_WAY_TEXTURE_INDEX);
         }
+        let mesh_key: *const Vec<MeshModel> = Arc::as_ptr(&frame.meshes);
+        if self.meshes.as_ref().is_none_or(|(key, _)| *key != mesh_key) {
+            self.meshes = Some((mesh_key, MeshGpu::New(device, &frame.meshes)?));
+        }
+        self.meshes
+            .as_ref()
+            .expect("the meshes were just uploaded")
+            .1
+            .bind(encoder);
         let uniforms: NonNull<VoxelUniforms> = NonNull::from(&frame.uniforms);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
         unsafe {
@@ -866,6 +957,16 @@ impl VoxelGpu {
                 self.buffers[SCENE_BUFFER_COUNT + k].write(device, bytes)?;
             // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
             unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, DUST_BUFFER_INDICES[k]) };
+        }
+        let avatars: [&[u8]; AVATAR_BUFFER_INDICES.len()] = [
+            as_bytes(&frame.avatar_triangles),
+            as_bytes(&frame.avatar_nodes),
+        ];
+        for (k, bytes) in avatars.iter().enumerate() {
+            let slot: usize = SCENE_BUFFER_COUNT + DUST_BUFFER_INDICES.len() + k;
+            let buffer: &ProtocolObject<dyn MTLBuffer> = self.buffers[slot].write(device, bytes)?;
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG BUFFERS WILL HAPPEN
+            unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, AVATAR_BUFFER_INDICES[k]) };
         }
         let (width, height) = frame.get_render_size();
         if self
@@ -924,15 +1025,18 @@ impl VoxelGpu {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of packing a frame's laser beams for the shader.
+    //! Tests of packing a frame's laser beams and the beacons' beams for the shader.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
     //! | Gun | the sniper's (code = team), the rifle's (code = team + `RIFLE_BEAM_CODE`) | `beams_carry_their_gun_team_and_speckle` |
     //! | Team | blue, red | `beams_carry_their_gun_team_and_speckle` |
     //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
+    //! | A beacon's console | on (its beam is bright), off (its beam goes, the others stay) | `beacon_beams_go_with_their_consoles` |
 
     use super::*;
+    use crate::map::{Map, get_map_folder};
+    use crate::net::MAX_CONSOLE_COUNT;
     use crate::voxel_world::{Shot, VoxelPlayer, VoxelWorld};
 
     const SPECKLE_FRAC: f64 = 0.4;
@@ -956,13 +1060,42 @@ mod tests {
         let frame: VoxelFrame = VoxelFrame::Build(&world, camera, &beams, None, &[], RENDER_PX);
         let sniper: [f32; 2] = [0.0, 0.0];
         let rifle: [f32; 2] = [SPECKLE_FRAC as f32, (1 + RIFLE_BEAM_CODE) as f32];
-        let packed: Vec<[f32; 2]> = frame.beams.iter().map(|b| [b.info[1], b.info[3]]).collect();
+        let laser_beam_count: usize = frame.beams.len() - get_beacon_beams(&world).len();
+        let packed: Vec<[f32; 2]> = frame.beams[..laser_beam_count]
+            .iter()
+            .map(|b| [b.info[1], b.info[3]])
+            .collect();
         assert!(packed.contains(&sniper) && packed.contains(&rifle));
         assert!(packed.iter().all(|p| *p == sniper || *p == rifle));
         let kinds: &crate::settings::BeamSpeckleSettings = &world.settings.beam_speckle;
         assert_eq!(
             frame.uniforms.beam_speckle[1..3],
             [kinds.black_frac as f32, kinds.white_frac as f32]
+        );
+    }
+
+    #[test]
+    fn beacon_beams_go_with_their_consoles() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
+        let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let beacon_count: usize = world.consoles.len();
+        let get_brightness = |world: &mut VoxelWorld, off_mask: u32| -> Vec<f32> {
+            world.light_consoles(off_mask, &[0.0; MAX_CONSOLE_COUNT], 0.0);
+            get_beacon_beams(world).iter().map(|b| b.info[2]).collect()
+        };
+        assert_eq!(
+            get_brightness(&mut world, 0),
+            vec![BEAM_BRIGHTNESS; beacon_count]
+        );
+        let brightness: Vec<f32> = get_brightness(&mut world, 1);
+        assert_eq!(
+            brightness.iter().filter(|&&b| b == 0.0).count(),
+            1,
+            "{brightness:?}"
+        );
+        assert_eq!(
+            brightness.iter().filter(|&&b| b == BEAM_BRIGHTNESS).count(),
+            beacon_count - 1
         );
     }
 }

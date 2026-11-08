@@ -1,0 +1,11 @@
+Model Information:
+* title:	Desert Planet Bunker Garage Thing
+* source:	https://sketchfab.com/3d-models/desert-planet-bunker-garage-thing-ebe3177a1c7947b98328d8cab6aa8600
+* author:	Santeri Riikonen (https://sketchfab.com/eKross)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Desert Planet Bunker Garage Thing" (https://sketchfab.com/3d-models/desert-planet-bunker-garage-thing-ebe3177a1c7947b98328d8cab6aa8600) by Santeri Riikonen (https://sketchfab.com/eKross) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

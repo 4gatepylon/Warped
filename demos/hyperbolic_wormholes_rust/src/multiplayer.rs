@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::avatar_model::AvatarClip;
 use crate::black_hole_growth::BlackHoleGrowth;
 use crate::dust::DustCloud;
 use crate::geometry::{
@@ -40,6 +41,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const AVATAR_HALF_M: [f64; 3] = [0.3, 0.95, 0.3];
 const AVATAR_DROP_M: f64 = 0.75;
 const SPAWN_RING_M: f64 = 3.0;
+const IDLE_POSE: (AvatarClip, f64) = (AvatarClip::Idle, 0.0);
 const BOT_STEP_S: f64 = 1.0 / 60.0;
 const BOT_HITS_TO_KILL: u8 = 1;
 const BOT_RANGE_M: f64 = 12.0;
@@ -373,15 +375,16 @@ fn trace_other_voxel_lasers(
 }
 
 /// `pack_shared_voxel_view` packs a voxel map seen from `camera` with a body for each of
-/// `players` and a glowing ball for each of `markers`, this player's laser (if on, fired from
+/// `players` (each in its pose in `poses`, as the body model) and a glowing ball for each of `markers`, this player's laser (if on, fired from
 /// `laser_aim`, the eye turned by the shot's noise, for team `team`) and the lasers of the players
 /// who have theirs on, all traced through the same map, so beams stop at players and bend like
 /// light. In third person it also draws this player's own body (`own_body`, from `get_body`),
 /// which the other players' lasers stop at but this player's own passes, as it leaves from inside
 /// it. It draws every laser's whole path (this player's as the sniper's, without speckle; the
-/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given.
+/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given. `own_body` takes the pose after the players' in `poses`, and
+/// the `corpses` still lying are drawn last, where lasers pass through them.
 ///
-/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &[], None, None, (1280, 800));`
+/// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &poses, &[], None, &[], None, (1280, 800));`
 #[allow(clippy::too_many_arguments)]
 pub fn pack_shared_voxel_view(
     world: &VoxelWorld,
@@ -389,14 +392,26 @@ pub fn pack_shared_voxel_view(
     laser_aim: Option<DMat4>,
     team: u32,
     players: &[RemotePlayer],
+    poses: &[(AvatarClip, f64)],
     markers: &[Marker],
     own_body: Option<(DMat4, usize)>,
+    corpses: &[(DMat4, (AvatarClip, f64))],
     tracers: Option<Tracers>,
     render_px: (u32, u32),
 ) -> SharedVoxelView {
     let colors: Vec<[f32; 3]> = get_team_colors();
     let bodies: Vec<(DMat4, usize)> = get_avatar_bodies(world, players);
-    let mut shared: VoxelWorld = world.with_avatars(&bodies, &colors);
+    let own_bodies: Vec<(DMat4, usize)> = own_body.into_iter().collect();
+    assert_eq!(
+        poses.len(),
+        bodies.len() + own_bodies.len(),
+        "pack_shared_voxel_view: {} poses for {} players and {} own body",
+        poses.len(),
+        bodies.len(),
+        own_bodies.len()
+    );
+    let (player_poses, own_poses) = poses.split_at(bodies.len());
+    let mut shared: VoxelWorld = world.with_posed_avatars(&bodies, player_poses, &[], &colors);
     shared.add_markers(markers);
     let mut beams: Vec<LaserBeam> = Vec::new();
     let (mut shot, mut hit_player_id, mut spot, mut is_head_hit) = (None, None, None, false);
@@ -440,10 +455,7 @@ pub fn pack_shared_voxel_view(
         Some(tracers) => (tracers.beams, tracers.spot, tracers.dust),
         None => (beams.as_slice(), spot, no_dust),
     };
-    let drawn: VoxelWorld = match own_body {
-        Some(body) => shared.with_avatars(&[body], &colors),
-        None => shared,
-    };
+    let drawn: VoxelWorld = shared.with_posed_avatars(&own_bodies, own_poses, corpses, &colors);
     SharedVoxelView {
         frame: VoxelFrame::Build(&drawn, camera, beams, spot, dust, render_px),
         shot,
@@ -585,8 +597,10 @@ pub fn run_voxel_bot(
                 is_laser_on.then_some(camera),
                 team,
                 &client.players,
+                &vec![IDLE_POSE; client.players.len()],
                 &[],
                 None,
+                &[],
                 None,
                 BOT_VIEW_PX,
             );
@@ -714,8 +728,10 @@ mod tests {
             Some(camera),
             0,
             &[],
+            &[],
             &[marker],
             None,
+            &[],
             None,
             (64, 40),
         );
@@ -750,8 +766,10 @@ mod tests {
             Some(camera),
             0,
             &[other],
+            &[IDLE_POSE],
             &[],
             None,
+            &[],
             None,
             (64, 40),
         );
@@ -792,8 +810,10 @@ mod tests {
             Some(aim),
             0,
             &[remote(2, target_camera, false)],
+            &[IDLE_POSE],
             &[],
             None,
+            &[],
             None,
             (64, 40),
         );
@@ -808,8 +828,10 @@ mod tests {
             None,
             0,
             &[remote(1, aim, true)],
+            &[IDLE_POSE],
             &[],
             None,
+            &[],
             None,
             (64, 40),
         );
@@ -902,8 +924,10 @@ mod tests {
                 Some(eye),
                 0,
                 std::slice::from_ref(&firing),
+                &vec![IDLE_POSE; 1 + usize::from(own_body.is_some())],
                 &[],
                 own_body,
+                &[],
                 None,
                 (64, 40),
             )

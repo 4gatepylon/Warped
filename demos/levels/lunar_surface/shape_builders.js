@@ -12,10 +12,15 @@ const STAND_PROBE_STEP_M = 0.02;
 const TERRAIN_OCTAVES = 5, TERRAIN_RIM_NOISE_M = 60, TERRAIN_RIM_NOISE_FRAC = 0.5, TERRAIN_OUTER_FLANK = 3;
 const TERRAIN_WALL_RELIEF_GAIN = 3, TERRAIN_RIM_SEED = 9;
 const WINDOW_Y = 2;
+const KAZEMAT_HEIGHT_M = 6, GARAGE_HEIGHT_M = 9, FIELD_BUNKER_HEIGHT_M = 5.5, BEACON_HEIGHT_M = 12, HESCO_HEIGHT_M = 1.4;
+const HESCO_WIDTH_M = 1.55, HESCO_GAP_M = 3, HESCO_ROW_M = 16, BEACON_RADIUS_M = 1.35, RED_SPAWN_U_M = 119;
+const MAX_EXPORTED_STRUCTURE_COUNT = 128, BUNKER_LAMP_COLOR = [1.0, 0.92, 0.8];
+const BLUE_HESCO_ROWS = [[-52, -14], [-52, 14], [-64, 0], [-66, -30], [-66, 32], [-84, -4], [-82, -44]];
+SPAWNS[RED].u_m = RED_SPAWN_U_M;
 
 /** `ShapeModel` collects one structure's shapes, lamps and consoles, like `VoxelModel`. */
 class ShapeModel {
-  constructor(name) { this.name = name; this.shapes = []; this.lamps = []; this.consoles = []; }
+  constructor(name) { this.name = name; this.shapes = []; this.lamps = []; this.consoles = []; this.mesh = null; this.parts = []; this.turn_rad = 0; }
   /** `box` adds a box over the voxel-style inclusive cell range [x0, x1] x [y0, y1] x [z0, z1]. */
   box(x0, y0, z0, x1, y1, z1, material) {
     const lo = [x0, y0, z0], hi = [x1 + 1, y1 + 1, z1 + 1];
@@ -109,22 +114,35 @@ function get_shape_distance_m(shape, q) {
   return (Math.hypot(...p.map((c, i) => c / h[i])) - 1) * Math.min(...h);
 }
 
-function place_shapes(name, frame, shapes, model_lamps) {
+function place_shapes(name, frame, shapes, model_lamps, mesh = null) {
   const R = CURVATURE_RADIUS_M, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const s of shapes) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], s.centre_m[a] - s.half_m[a]); hi[a] = Math.max(hi[a], s.centre_m[a] + s.half_m[a]); }
   const centre_local = map_klein(lo.map((l, a) => (l + hi[a]) / (2 * R)));
   let radius = 0;
   for (let c = 0; c < 8; c++) radius = Math.max(radius, measure_distance(map_klein([0, 1, 2].map(a => ((c >> a) & 1 ? hi[a] : lo[a]) / R)), centre_local));
-  if (structures.length >= MAX_STRUCTS) throw new Error(`place_shapes: more than ${MAX_STRUCTS} structures`);
-  structures.push({ name, frame, inv: invert_lorentz(frame), shapes, centre: apply_matrix(frame, centre_local), radius: radius + BOUND_MARGIN_M / R });
+  if (structures.length >= MAX_EXPORTED_STRUCTURE_COUNT) throw new Error(`place_shapes: more than ${MAX_EXPORTED_STRUCTURE_COUNT} structures`);
+  structures.push({ name, frame, inv: invert_lorentz(frame), shapes, mesh, centre: apply_matrix(frame, centre_local), radius: radius + BOUND_MARGIN_M / R });
   for (const lamp of model_lamps) lamps.push({ x: map_local(frame, lamp.q_m), color: lamp.color.map(c => c * LAMP_BRIGHTNESS), radius_m: lamp.radius_m });
   return structures.length - 1;
 }
 
-/** `place_model` sets a model on the terrain: lifted to the highest ground under it, its ground shapes extended down to the lowest. */
+/**
+ * `place_model` sets a model on the terrain at (u, v), turned by `yaw_rad` plus its own `turn_rad`, and each of its
+ * parts (`{model, x_m}`) `x_m` along its local x, each as its own structure.
+ */
 function place_model(model, u_m, v_m, yaw_rad) {
+  const base = make_frame(u_m, v_m, yaw_rad + model.turn_rad);
+  for (const part of model.parts) place_model_at(part.model, multiply_matrices(base, make_boost(X, part.x_m / CURVATURE_RADIUS_M)));
+  return place_model_at(model, base);
+}
+
+/**
+ * `place_model_at` sets a model on the terrain at frame `base`: lifted to the highest ground under it, so a model's floor
+ * covers the ground inside it, its ground shapes extended down to the lowest.
+ */
+function place_model_at(model, base) {
   if (!model.shapes.length) return -1;
-  const R = CURVATURE_RADIUS_M, base = make_frame(u_m, v_m, yaw_rad), heights = [];
+  const R = CURVATURE_RADIUS_M, heights = [], { u_m, v_m } = get_fermi_coordinates(get_column(base, W));
   for (const s of model.shapes) for (const sx of [-1, 0, 1]) for (const sz of [-1, 0, 1]) {
     const q = [s.centre_m[0] + sx * s.half_m[0], 0, s.centre_m[2] + sz * s.half_m[2]], g = get_fermi_coordinates(map_local(base, q));
     heights.push(get_terrain_height_m(g.u_m, g.v_m));
@@ -139,7 +157,7 @@ function place_model(model, u_m, v_m, yaw_rad) {
   let reach_m = 0;
   for (const s of model.shapes) reach_m = Math.max(reach_m, Math.hypot(Math.abs(s.centre_m[0]) + s.half_m[0], Math.abs(s.centre_m[2]) + s.half_m[2]));
   PLACED_MODELS.push({ u_m, v_m, reach_m, top_m });
-  return place_shapes(model.name, multiply_matrices(base, make_boost(Y, top_m / R)), shapes, model.lamps);
+  return place_shapes(model.name, multiply_matrices(base, make_boost(Y, top_m / R)), shapes, model.lamps, model.mesh);
 }
 
 /** `get_ground_lift_m` gives the height a point's ground is raised to: the top of a placed model under it, or else the terrain. */
@@ -166,7 +184,7 @@ function find_standing_height(B) {
   for (let h_m = ground_m + STAND_PROBE_TOP_M; h_m > ground_m; h_m -= STAND_PROBE_STEP_M) {
     const x = get_column(multiply_matrices(B, make_boost(Y, h_m / R)), W);
     for (const st of structures) {
-      if (measure_distance(x, st.centre) > st.radius) continue;
+      if (st.mesh || measure_distance(x, st.centre) > st.radius) continue;
       const local = apply_matrix(st.inv, x), q = [0, 1, 2].map(a => local[a] / local[3] * R);
       if (st.shapes.some(s => get_shape_distance_m(s, q) < 0)) return h_m + EYE_HEIGHT_M;
     }
@@ -174,38 +192,29 @@ function find_standing_height(B) {
   return ground_m + EYE_HEIGHT_M;
 }
 
+/**
+ * `make_mesh_model` gives a model drawn as the map model `mesh_model`, `height_m` tall, whose players are stopped by
+ * boxes (each its centre and half sizes in meters).
+ */
+function make_mesh_model(name, mesh_model, height_m, boxes, material, boxes_height_m = height_m) {
+  const model = new ShapeModel(name), scale = height_m / boxes_height_m;
+  model.mesh = { model: mesh_model, height_m };
+  for (const [centre_m, half_m] of boxes) model.add('box', centre_m.map(c => c * scale), half_m.map(h => h * scale), material);
+  return model;
+}
+
 function build_lander() {
-  const model = new ShapeModel('blue landing pad');
-  model.cylinder([0, 0.5, 0], 8, 0.5, MAT.HAZARD);
-  model.cylinder([0, 0.55, 0], 6.6, 0.5, MAT.PAD);
-  model.box(-4, 0, -1, 3, 0, 0, MAT.BLUE_PAINT); model.box(-1, 0, -4, 0, 0, 3, MAT.BLUE_PAINT);
-  for (const [x, z] of [[5.5, 5.5], [-5.5, 5.5], [5.5, -5.5], [-5.5, -5.5]]) model.ellipsoid([x, 1.3, z], [0.35, 0.35, 0.35], MAT.BLUE_LIGHT);
-  model.addLamp([0, 6, -4], TEAM_COLORS[BLUE], 14);
+  const model = make_mesh_model('blue kazemat', 'stekelvarken_kazemat', KAZEMAT_HEIGHT_M, [[[0, 1.5, 0], [3, 1.5, 2]]], MAT.HULL, 3.5);
+  model.turn_rad = Math.PI;
+  model.addLamp([0, 0.55 * KAZEMAT_HEIGHT_M, 0], TEAM_COLORS[BLUE], 6);
   return model;
 }
 
 function build_pylon(team, pylon_index) {
-  const t = TEAMS[team], model = new ShapeModel(`${t.name} pylon`), half = 6;
-  model.box(-half, 0, -half, half - 1, 0, half - 1, t.paint);
-  model.box(-half + 1, 0, -half + 1, half - 2, 0, half - 2, MAT.PAD); model.shapes.at(-1).half_m[1] += 0.03;
-  model.box(-2, 1, -2, 1, 1, 1, MAT.METAL);
-  model.cylinder([0, 5.5, 0], 1, 3.5, t.core);
-  for (const [x, z] of [[-1.5, -1.5], [1.5, -1.5], [-1.5, 1.5], [1.5, 1.5]]) model.cylinder([x, 5.5, z], 0.35, 3.5, MAT.METAL);
-  model.box(-2, 9, -2, 1, 9, 1, MAT.METAL);
-  model.ellipsoid([0, 10.6, 0], [0.9, 0.6, 0.9], t.light);
-  for (let i = 0; i < CONSOLES_PER_PYLON; i++) {
-    const angle_rad = Math.PI / 2 + i * 2 * Math.PI / CONSOLES_PER_PYLON;
-    const x = Math.floor(PYLON_CONSOLE_RADIUS_M * Math.cos(angle_rad)), z = Math.floor(PYLON_CONSOLE_RADIUS_M * Math.sin(angle_rad));
-    model.cylinder([x + 0.5, 1.5, z + 0.5], 0.35, 0.5, MAT.METAL);
-    model.box(x, 2, z, x, 2, z, t.console + pylon_index * CONSOLES_PER_PYLON + i);
-    model.consoles.push([x + 0.5, 2.5, z + 0.5]);
-  }
-  for (const [x, z] of [[-half, -half], [half - 1, half - 1]]) {
-    model.cylinder([x + 0.5, 3.5, z + 0.5], 0.25, 2.5, MAT.METAL);
-    const dz = z < 0 ? 1 : -2;
-    model.box(x, 4, z + dz, x, 5, z + dz + 1, t.paint); model.shapes.at(-1).half_m[0] = 0.08;
-  }
-  model.addLamp([0, PYLON_CORE_HEIGHT_M, 0], t.color, 10);
+  const t = TEAMS[team], model = make_mesh_model(`${t.name} pylon`, 'scifi_beacon', BEACON_HEIGHT_M, [], MAT.METAL);
+  model.cylinder([0, BEACON_HEIGHT_M / 2, 0], BEACON_RADIUS_M, BEACON_HEIGHT_M / 2, t.console + pylon_index * CONSOLES_PER_PYLON);
+  model.consoles.push([0, PYLON_CORE_HEIGHT_M / 2, 0]);
+  model.addLamp([0, BEACON_HEIGHT_M * 0.75, 0], t.color, 14);
   return model;
 }
 
@@ -232,7 +241,7 @@ function add_wall_around_windows(model, x, top_y, z0, z1, is_window) {
   }
 }
 
-function build_habitat(name, length_m, stripe, light) {
+function build_habitat_shapes(name, length_m, stripe, light) {
   const model = new ShapeModel(name), z0 = -Math.floor(length_m / 2), z1 = z0 + length_m - 1, window_period = 3;
   const is_window = z => z > z0 && z < z1 && (z - z0) % window_period === 1;
   model.box(-3, 0, z0, 2, 0, z1, MAT.FLOOR);
@@ -247,6 +256,13 @@ function build_habitat(name, length_m, stripe, light) {
     model.box(-3, 0, z, -2, 4, z, MAT.HULL); model.box(1, 0, z, 2, 4, z, MAT.HULL); model.box(-1, 3, z, 0, 4, z, MAT.HULL);
     for (const x of [-3, 2]) model.ellipsoid([x + 0.5, 3.5, z + (z === z0 ? 0 : 1)], [0.3, 0.3, 0.15], light);
   }
+  return model;
+}
+
+function build_habitat(name, length_m, stripe, light) {
+  if (name !== 'derelict habitat module') return build_habitat_shapes(name, length_m, stripe, light);
+  const model = make_mesh_model('derelict field bunker', 'ww2_field_bunker', FIELD_BUNKER_HEIGHT_M, [[[0, 1.75, 2.45], [3.6, 1.75, 3.75]], [[-0.65, 1.1, -3.75], [2.95, 1.1, 2.45]]], MAT.HULL, 3.5);
+  model.addLamp([0, 0.45 * FIELD_BUNKER_HEIGHT_M, 0.4 * FIELD_BUNKER_HEIGHT_M], BUNKER_LAMP_COLOR, 6);
   return model;
 }
 
@@ -312,27 +328,17 @@ function build_watchtower(name, team) {
 }
 
 function build_hangar(name, team) {
-  const t = TEAMS[team], model = new ShapeModel(name);
-  model.box(-7, 0, -6, 6, 0, 5, MAT.FLOOR);
-  model.box(-7, 0, -6, -7, 6, 5, MAT.HULL); model.box(6, 0, -6, 6, 6, 5, MAT.HULL);
-  model.box(-7, 0, 5, 6, 6, 5, MAT.HULL);
-  model.box(-7, 0, -6, -5, 6, -6, MAT.HULL); model.box(4, 0, -6, 6, 6, -6, MAT.HULL); model.box(-4, 5, -6, 3, 6, -6, MAT.HULL);
-  model.box(-7, 6, -6, 6, 6, 5, MAT.HULL);
-  for (const x of [-7, 6]) { model.box(x, 2, -5, x, 2, 4, t.paint); model.shapes.at(-1).half_m[0] = 0.55; }
-  model.box(-1, 6, -6, 0, 6, 5, t.paint); model.shapes.at(-1).half_m[1] = 0.55;
-  model.box(-4, 5, -6, 3, 5, -6, t.light); model.shapes.at(-1).half_m[2] = 0.55;
-  for (let x = -6; x <= 5; x += 2) model.ellipsoid([x + 0.5, 4.5, 6.05], [0.3, 0.3, 0.1], t.light);
-  model.addLamp([0, 3, 0], t.color, 12);
-  model.addLamp([0, 5, -8], t.color, 12);
+  const model = make_mesh_model(name, 'desert_bunker_garage', GARAGE_HEIGHT_M, [[[0, 1.6, 0], [9.1, 1.6, 4.6]], [[0, 4, 0], [9.1, 0.8, 3.2]]], MAT.HULL, 6);
+  model.turn_rad = Math.PI;
+  model.addLamp([0, 0.4 * GARAGE_HEIGHT_M, 0.2 * GARAGE_HEIGHT_M], TEAMS[team].color, 10);
   return model;
 }
 
 function build_barrier(name, length_m, team) {
-  const model = new ShapeModel(name), x0 = -Math.floor(length_m / 2), x1 = x0 + length_m - 1, gap = 2;
-  for (const [a, b] of [[x0, -gap], [gap - 1, x1]]) {
-    model.box(a, 0, 0, b, 0, 1, MAT.METAL);
-    model.box(a, 1, 0, b, 1, 1, MAT.HULL);
-    model.box(a, 1, 0, b, 1, 1, TEAMS[team].paint); model.shapes.at(-1).half_m[1] = 0.12; model.shapes.at(-1).centre_m[1] = 1.5;
+  const model = new ShapeModel(name), side_count = Math.floor((length_m - HESCO_GAP_M) / 2 / HESCO_WIDTH_M);
+  for (const sign of [-1, 1]) for (let k = 0; k < side_count; k++) {
+    const block = make_mesh_model('hesco block', 'hesco_barrier', HESCO_HEIGHT_M, [[[0, HESCO_HEIGHT_M / 2, 0], [HESCO_WIDTH_M / 2, HESCO_HEIGHT_M / 2, HESCO_WIDTH_M / 2]]], MAT.METAL);
+    model.parts.push({ model: block, x_m: sign * (HESCO_GAP_M / 2 + (k + 0.5) * HESCO_WIDTH_M) });
   }
   return model;
 }
@@ -361,3 +367,5 @@ function build_solar_array(name, rows, length_m) {
 
 /** `build_boulders` builds nothing: boulders are terrain mounds (`make_mounds`). */
 function build_boulders(name) { return new ShapeModel(name); }
+
+for (const [u_m, v_m] of BLUE_HESCO_ROWS) place_model(build_barrier('blue hesco row', HESCO_ROW_M, BLUE), u_m, v_m, get_facing_yaw(u_m, v_m, 0, 0));
