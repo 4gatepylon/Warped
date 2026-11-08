@@ -11,6 +11,9 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
+  can find something for that." Pictures first. Claimed by Claude Code (subagent of session
+  `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
 - [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
@@ -30,12 +33,6 @@ is in [`AGENTS.md`](AGENTS.md).
   (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead; that stray is to be turned off
   by default. Demos first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/beam-shot-noise`, 2026-11-07.
-- [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
-  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
-  cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
-  `claude/square-shapes`, 2026-11-07.
-- [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
-  (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
 - [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
   center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
@@ -111,14 +108,21 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
+- [ ] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
 
 ## Pending user review
 
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
-- [?] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
-  demo's `AGENTS.md` that any new asset gets added to that page. #262.
+- [?] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
+  menu opens on the SCORES page. #265.
+- [?] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
+  things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
+  cylinder, just make it a cylinder. #210.
+- [?] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
+  the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
+  #210.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
   bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
@@ -148,8 +152,6 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
-- [?] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
-  and team. #164.
 - [?] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. #197–#204.
 - [?] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
@@ -301,3 +303,7 @@ Confirmed by the user after testing.
   stays, and so do the grey fighters unless the user says otherwise. #232. Confirmed by the user, 2026-11-07.
 - [x] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go
   simple and geometric." Pictures first; the user picked "A wide delta". #242. Confirmed by the user, 2026-11-07.
+- [x] **W-95 Credits page.** A credits page in the `Tab` menu that says where the assets came from, and a rule in this
+  demo's `AGENTS.md` that any new asset gets added to that page. #262. Confirmed by the user, 2026-11-07: "the credits page looks good yes".
+- [x] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
+  and team. #164. Confirmed by the user, 2026-11-07: "kd stuff also looiks good so add that as complete as well".

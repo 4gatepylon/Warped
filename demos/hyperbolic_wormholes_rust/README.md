@@ -24,21 +24,21 @@ make join-game SERVER=127.0.0.1
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
   (`--player-settings`) to `make join-game`.
-- `Tab` opens a menu of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
+- `Tab` opens the menu on its SCORES page (below); `E` turns to the settings page, of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
   (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
   stands still while it is open, but the game goes on.
-- `Q` and `E` turn the menu's pages: SETTINGS (above) and MAP, the whole map from above with you on it as a disk in
+- `Q` and `E` turn the menu's pages: SCORES, SETTINGS (above), MAP and CREDITS. MAP is the whole map from above with you on it as a disk in
   your team's colour pointing the way you face: the ground's relief, structures brighter the higher they are,
   consoles as small squares, wormhole mouths as rings, the black hole, the spawns, and on Lunar Surface the team
   zones' edges (dashed) and the playable boundary. The map is drawn in its Fermi coordinates
   (`common/maps/README.md`), so things far above and below its middle line look squeezed from side to side: that is
-  the hyperbolic plane. The third page, SCORES, shows in a game on a server how many players there are and each
+  the hyperbolic plane. The SCORES page, where the menu opens, shows in a game on a server how many players there are and each
   one's team, kills and deaths in this game, sorted by team and then kills, with your line highlighted and each
   team's totals. The MAP page also rings everything within the minimap's reach of you (60 m by default); the rest is
   darker and blurred. The ring is a hyperbolic circle, so on the map it comes out lopsided. In a game on a server,
   every other player in the game shows as a smaller dot in their team's colour, ringed in dark grey, near or far.
-  The fourth page, CREDITS, says where the game's assets come from: their authors, sources and licenses
+  The last page, CREDITS, says where the game's assets come from: their authors, sources and licenses
   (`src/credits.rs`).
 - The minimap, in the top right, is a Poincaré disk of the ground within 60 m of you, turned so you face up (the
   white arrow in the middle): faint lines every 10 m and paths away from you bend into arcs, as straight lines do
