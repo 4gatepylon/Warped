@@ -152,8 +152,8 @@ your `player_settings.yaml`).
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
 `PLAYER_SETTINGS=mine.yaml` to `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again asks "Do you want to exit?": `Return` or `Y` exits, `Esc` or `N` goes back to the game). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting; once you let go of `Shift` it refills in 7.5 s crouched (`Ctrl`) or 15 s walking or standing),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button aims (zooms in, 2.5 times with the sniper and 1.5 times with the rifle, and turns more slowly), holding `F` shines your flashlight (a cone of light that only you see for now), `V` switches to a third-person view from 3 m behind and a little above your character and back (it pulls in when a wall or the ground is behind you; shots still leave your head toward the crosshair, and aiming looks from your eye again), `Ctrl` (held) crouches
-(a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
-the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
+(a lower view, half speed), click to shoot (once no movement key has been held for a quarter of a second: walking crouched is fine,
+and so is falling or floating in the air with no key held; not while walking upright, running or holding `Space`), the mouse wheel or
 `1`/`2` switch between gun 1, the sniper (a wooden bolt-action rifle with a scope, drawn small in the lower right; a quarter-second shot per click, then 2 s to reload, shown by one block
 above the energy bar that empties when you fire; one hit eliminates), and gun 2, the
 rifle (the energy revolver; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the

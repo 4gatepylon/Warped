@@ -29,7 +29,8 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 18] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 19] = [
+    "movement.shoot_after_moving_s",
     "map_edge.start_wall_frac",
     "sniper.reload_s",
     "sniper.noise_mean_rad",
@@ -80,7 +81,8 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// `MovementSettings` is walking and sprinting speed as multiples of the map's, a jump's height and
 /// time in the air as a fraction of the map's jump (gravity follows from the two), and crouching:
-/// its speed and eye height as fractions of walking's, and how long it takes to crouch or stand.
+/// its speed and eye height as fractions of walking's, and how long it takes to crouch or stand;
+/// and how long after the last movement key a player can shoot.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct MovementSettings {
@@ -91,6 +93,7 @@ pub struct MovementSettings {
     pub crouch_speed_frac: f64,
     pub crouch_eye_height_frac: f64,
     pub crouch_s: f64,
+    pub shoot_after_moving_s: f64,
 }
 
 /// `SprintEnergySettings` is how long a full sprint bar lasts, and how long an empty one takes to

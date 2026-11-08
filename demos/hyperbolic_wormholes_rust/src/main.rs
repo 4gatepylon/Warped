@@ -1794,9 +1794,7 @@ struct Session {
     shot_time_s: f64,
     aim_frac: f64,
     sniper_reload_s: f64,
-    is_running: bool,
-    is_jumping: bool,
-    is_walking_upright: bool,
+    since_movement_key_s: f64,
     settings: ServerSettings,
     player_settings: PerPlayerSettings,
     player_settings_path: Option<PathBuf>,
@@ -2166,9 +2164,7 @@ impl Session {
             shot_time_s: 0.0,
             aim_frac: 0.0,
             sniper_reload_s: 0.0,
-            is_running: false,
-            is_jumping: false,
-            is_walking_upright: false,
+            since_movement_key_s: f64::INFINITY,
             gun: Gun::Rifle,
             is_trigger_held: false,
             is_flashlight_on: false,
@@ -2796,17 +2792,15 @@ impl Session {
             .map_or_else(|| self.get_eye_frame(), |(_, shot_eye)| shot_eye)
     }
 
-    /// `can_shoot` says whether this player may shoot: standing still or crouched (walking while
-    /// crouched is fine), so not while walking upright or running, not while jumping or falling on
-    /// a voxel map, and, in a game on a server, only once in the game (welcomed, so not in the
-    /// lobby, while joining or while out after a hit), not while holding `E` on a console, and not
-    /// once a team has won.
+    /// `can_shoot` says whether this player may shoot: once no movement key has been held for the
+    /// server settings' `movement.shoot_after_moving_s` (walking crouched doesn't count, and
+    /// standing, falling or flying with no key held may shoot), and, in a game on a server, only
+    /// once in the game (welcomed, so not in the lobby, while joining or while out after a hit),
+    /// not while holding `E` on a console, and not once a team has won.
     ///
     /// Example: `if self.can_shoot() { ... }`
     fn can_shoot(&self) -> bool {
-        !self.is_running
-            && !self.is_jumping
-            && !self.is_walking_upright
+        self.since_movement_key_s >= self.settings.movement.shoot_after_moving_s
             && self.multiplayer.as_ref().is_none_or(|m| {
                 m.client.id.is_some() && m.disabling.is_none() && m.client.game.winner.is_none()
             })
@@ -2930,9 +2924,9 @@ impl Session {
         (multiplayer.client.game.off_mask, disabling_fracs)
     }
 
-    /// `update_gun` notes whether this player runs (sprints while moving), walks upright (moves
-    /// without crouching on a voxel map) or jumps (is in the air on a voxel map, not flying),
-    /// dropping a shot in flight if any, and moves the gun: its step phase while walking or
+    /// `update_gun` counts the time since this player last held a movement key (moving without
+    /// crouching on a voxel map, or jumping), dropping a shot in flight while one is held, and
+    /// moves the gun: its step phase while walking or
     /// running on the ground (on a voxel map the head bob's, so the gun steps with the eye), how
     /// far into stepping it is (`step_frac`: easing in and out over the head bob's `fade_s`), and
     /// its pose toward jogging while running and back to aiming otherwise.
@@ -2947,12 +2941,12 @@ impl Session {
             ),
             None => (input.sprint && is_moving, self.player.is_on_ground),
         };
-        self.is_running = is_running;
-        self.is_walking_upright = is_moving && !(input.crouch && self.voxel.is_some());
-        self.is_jumping = self
-            .voxel
-            .as_ref()
-            .is_some_and(|voxel| !voxel.player.is_on_ground && !voxel.player.is_flying);
+        let is_walking_upright: bool = is_moving && !(input.crouch && self.voxel.is_some());
+        self.since_movement_key_s = if is_walking_upright || input.up {
+            0.0
+        } else {
+            self.since_movement_key_s + dt_s
+        };
         if !self.can_shoot() {
             self.shot_time_s = 0.0;
         }

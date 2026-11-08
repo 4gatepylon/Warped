@@ -524,7 +524,7 @@
   before running again.
 - **Rationale:** you asked that a player can run only while there is energy.
 
-### D50. No shooting in the air
+### D50. No shooting in the air (replaced by D108)
 
 - **Choice:** on voxel maps a player can't shoot while jumping or falling (in the air and not flying), as while
   running (D46): clicks don't shoot, and a shot in flight stops when the player leaves the ground. On the house,
@@ -1926,6 +1926,21 @@
   built from the first pictures ("ok menrge to staging", "i like your animation"), then, after #318 swapped the
   models, asked for both guns: "I want them both swaying ... get both working realistically based on their size",
   and approved the result ("merge this").
+
+### D108. Shoot once no movement key is held, in the air too, W-108 (shoot whenever not moving)
+
+- **Choice:**
+  - **Rule:** a player can shoot once no movement key has been held for 0.25 s (`movement.shoot_after_moving_s` in
+    `server_settings.yaml`, 0 for none). The movement keys are `W`/`A`/`S`/`D` while upright, `Shift` with them, and
+    `Space`. Letting go starts the cooldown; pressing one again stops a shot in flight, as before.
+  - **In the air:** falling or floating with no key held may shoot, which replaces D50 (no shooting in the air).
+  - **Kept:** walking crouched still shoots (D67), and nothing else about shooting changed (consoles, the lobby, a
+    won level).
+  - **The house:** holding `Space` for its jetpack now stops shooting too, since `Space` is a movement key.
+- **Alternatives:** no cooldown; a longer one (0.5 s); counting crouched walking as moving; a constant in code
+  instead of a server setting (which would let windows from before this change still join).
+- **Rationale:** you asked: "with a slight cooldown, you should be able to shoot as long as no keys are pressed. No
+  movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
 
 ## Workload
 
