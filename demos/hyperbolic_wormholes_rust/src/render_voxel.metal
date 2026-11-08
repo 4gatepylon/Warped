@@ -20,7 +20,10 @@ using namespace metal;
     device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], device const float *mound_heights [[buffer(26)]], \
     constant float4 *means [[buffer(27)]], device const DustBurst *dust_bursts [[buffer(29)]], \
     device const DustParticle *dust_particles [[buffer(30)]], \
-    texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]]
+    texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]], \
+    device const MeshTriangle *mesh_triangles [[buffer(0)]], device const BvhNode *mesh_nodes [[buffer(1)]], \
+    device const MeshMaterial *mesh_materials [[buffer(7)]], texture2d_array<float> mesh_albedo [[texture(12)]], \
+    texture2d_array<float> mesh_mr [[texture(13)]], texture2d_array<float> mesh_normal [[texture(14)]], texture2d_array<float> mesh_emissive [[texture(15)]]
 
 constant int MAX_ITERATIONS = 240;
 constant int MAX_SHAPE_STEPS = 96;
@@ -33,6 +36,10 @@ constant int OUTCOME_LOST = 0;
 constant int OUTCOME_SKY = 1;
 constant int OUTCOME_HIT = 2;
 constant int MAT_GROUND = 255;
+constant int MAT_MESH = 254;
+constant int MESH_STACK_SIZE = 48;
+constant float MESH_PARALLEL_DET = 1.0e-9;
+constant float MESH_TEXTURE_SIDE_PX = 1024.0;
 constant int NO_MATERIAL = -1;
 constant float NO_HIT_S = 1.0e9;
 constant float LAMBDA_LIMIT = 0.99999994;
@@ -488,6 +495,27 @@ struct VoxelRayEnd {
 };
 static_assert(sizeof(VoxelRayEnd) == __BYTES_PER_RAY_END__, "render_voxel.rs sizes the sample buffers by VOXEL_BYTES_PER_RAY_END");
 
+/** @brief `MeshTriangle` is one map model triangle in its structure's chart (meters): corners with u, normals with v, and (material, unused...). */
+struct MeshTriangle {
+    float4 p[3];
+    float4 n[3];
+    int4 info;
+};
+
+/** @brief `BvhNode` is a box around model triangles, with its first child or triangle in `lo.w` and its triangle count (0 for an inner node) in `hi.w`. */
+struct BvhNode {
+    float4 lo;
+    float4 hi;
+};
+
+/** @brief `MeshMaterial` is a model material: base colour, emissive colour with metallic, (roughness, unused...), and each map's layer (-1 for none). */
+struct MeshMaterial {
+    float4 base_color;
+    float4 emissive_metallic;
+    float4 params;
+    int4 layers;
+};
+
 /** @brief `Scene` bundles a frame's buffers for the functions below. */
 struct Scene {
     constant VoxelUniforms &u;
@@ -507,6 +535,13 @@ struct Scene {
     texture2d_array<float> arm_maps;
     device const DustBurst *dust_bursts;
     device const DustParticle *dust_particles;
+    device const MeshTriangle *mesh_triangles;
+    device const BvhNode *mesh_nodes;
+    device const MeshMaterial *mesh_materials;
+    texture2d_array<float> mesh_albedo;
+    texture2d_array<float> mesh_mr;
+    texture2d_array<float> mesh_normal;
+    texture2d_array<float> mesh_emissive;
 };
 
 /** @brief `mdot` is the Minkowski product. @par Example @code float c = mdot(a, b); @endcode */
@@ -605,6 +640,38 @@ static float march_shapes(thread const Scene &scene, device const VoxelStructure
     return INFINITY;
 }
 
+/** @brief `hit_mesh_triangle` gives where the chart line q0 + dq mu crosses a triangle (Möller-Trumbore), or INFINITY. @par Example @code float mu = hit_mesh_triangle(scene.mesh_triangles[i], q0, dq); @endcode */
+static float hit_mesh_triangle(device const MeshTriangle &t, float3 q0, float3 dq) {
+    float3 a = t.p[0].xyz, e1 = t.p[1].xyz - a, e2 = t.p[2].xyz - a, h = cross(dq, e2), s = q0 - a, g = cross(s, e1);
+    float det = dot(e1, h);
+    if (abs(det) < MESH_PARALLEL_DET * length(dq)) return INFINITY;
+    float b1 = dot(s, h) / det, b2 = dot(dq, g) / det;
+    return b1 >= 0.0 && b2 >= 0.0 && b1 + b2 <= 1.0 ? dot(e2, g) / det : INFINITY;
+}
+
+/** @brief `march_mesh` walks a model's BVH from node `root` and gives where the chart line first meets a triangle within [mu_lo, mu_hi] (or INFINITY), and which. @par Example @code float mu = march_mesh(scene, st.size.z, q0, dq, 0.0, 1.0, index); @endcode */
+static float march_mesh(thread const Scene &scene, int root, float3 q0, float3 dq, float mu_lo, float mu_hi, thread int &index) {
+    int stack[MESH_STACK_SIZE];
+    int top = 0;
+    stack[top++] = root;
+    float3 inv = 1.0 / dq;
+    while (top > 0) {
+        device const BvhNode &node = scene.mesh_nodes[stack[--top]];
+        float3 a = (node.lo.xyz - q0) * inv, b = (node.hi.xyz - q0) * inv, near = min(a, b), far = max(a, b);
+        if (max(max(max(near.x, near.y), near.z), mu_lo) > min(min(min(far.x, far.y), far.z), mu_hi)) continue;
+        int first = int(node.lo.w), count = int(node.hi.w);
+        if (count == 0) {
+            if (top + 2 <= MESH_STACK_SIZE) { stack[top++] = first; stack[top++] = first + 1; }
+            continue;
+        }
+        for (int i = first; i < first + count; i++) {
+            float mu = hit_mesh_triangle(scene.mesh_triangles[i], q0, dq);
+            if (mu >= mu_lo && mu < mu_hi) { mu_hi = mu; index = i; }
+        }
+    }
+    return index >= 0 ? mu_hi : INFINITY;
+}
+
 /**
  * @brief `trace_structure` finds where a chord first enters a solid cell of structure k, by a voxel walk along the
  * chord's straight line in the structure's Klein coordinates (taken at the chord's closest approach for precision);
@@ -631,7 +698,10 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     float3 q0 = p.xyz / p.w * scale, dq = (t.xyz * p.w - p.xyz * t.w) * scale;
     int index = st.size.x;
     float mu;
-    if (is_shadow) {
+    if (st.size.z >= 0) {
+        index = -1;
+        mu = march_mesh(scene, st.size.z, q0, dq, mu_lo, mu_hi, index);
+    } else if (is_shadow) {
         float lam_from = -tanh(s_star), mu_from = lam_from / (p.w * (p.w + lam_from * t.w));
         mu = march_shapes<true>(scene, st, q0, dq, mu_lo, mu_hi, false, index, mu_from, hit.lit);
     } else {
@@ -643,8 +713,9 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     if (mu == INFINITY) return;
     float s_hit = s_star + clamp_atanh(mu * p.w * p.w / (1.0 - mu * p.w * t.w));
     if (s_hit < hit.s) {
-        hit.s = s_hit; hit.mat = scene.shapes[index].info.x; hit.k = k; hit.axis = 0;
-        hit.sgn = 1.0; hit.g = q0 + dq * mu; hit.cell = int3(index, 0, 0);
+        bool is_mesh = st.size.z >= 0;
+        hit.s = s_hit; hit.mat = is_mesh ? MAT_MESH : scene.shapes[index].info.x; hit.k = k; hit.axis = 0;
+        hit.sgn = 1.0; hit.g = q0 + dq * mu; hit.cell = int3(index, is_mesh ? 1 : 0, 0);
     }
 }
 
@@ -1068,7 +1139,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
  * @endcode
  */
 kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive};
     float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
     float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
     float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
@@ -1250,6 +1321,56 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM);
     Surface s = sample_surface(scene, m, albedo, g, u.curvature_radius_m / st.scale.x, dist_s, x, n, t, b, v);
     return light_surface(scene, s, x, n, v);
+}
+
+/** @brief `to_world` carries a local vector (c, w) of structure st to the world, by the transpose of its inverse frame's rows. @par Example @code float4 n = to_world(st, grad, 0.0); @endcode */
+static float4 to_world(device const VoxelStructure &st, float3 c, float w) {
+    float4 o = st.rows[0] * c.x + st.rows[1] * c.y + st.rows[2] * c.z - st.rows[3] * w;
+    o.w = -o.w;
+    return o;
+}
+
+/**
+ * @brief `shade_mesh` shades a model triangle hit at x: its material's base colour, metallic-roughness, normal and
+ * emissive maps at the hit's texture coordinates, with the interpolated normal turned toward the viewer.
+ * @par Example
+ * @code
+ * float3 c = shade_mesh(scene, hit, x, v, s);
+ * @endcode
+ */
+static float3 shade_mesh(thread const Scene &scene, Hit h, float4 x, float4 v, float dist_s) {
+    device const VoxelStructure &st = scene.structures[h.k];
+    float4 r0 = st.rows[0], r1 = st.rows[1], r2 = st.rows[2], r3 = st.rows[3];
+    float4 p = float4(dot(r0, x), dot(r1, x), dot(r2, x), dot(r3, x));
+    device const MeshTriangle &tri = scene.mesh_triangles[h.cell.x];
+    device const MeshMaterial &mat = scene.mesh_materials[tri.info.x];
+    float3 a = tri.p[0].xyz, e1 = tri.p[1].xyz - a, e2 = tri.p[2].xyz - a, d = h.g - a;
+    float d11 = dot(e1, e1), d12 = dot(e1, e2), d22 = dot(e2, e2), det = max(d11 * d22 - d12 * d12, TINY);
+    float b1 = (d22 * dot(d, e1) - d12 * dot(d, e2)) / det, b2 = (d11 * dot(d, e2) - d12 * dot(d, e1)) / det, b0 = 1.0 - b1 - b2;
+    float2 uv0 = float2(tri.p[0].w, tri.n[0].w), uv1 = float2(tri.p[1].w, tri.n[1].w), uv2 = float2(tri.p[2].w, tri.n[2].w);
+    float2 uv = b0 * uv0 + b1 * uv1 + b2 * uv2, du1 = uv1 - uv0, du2 = uv2 - uv0;
+    float3 grad = normalize(b0 * tri.n[0].xyz + b1 * tri.n[1].xyz + b2 * tri.n[2].xyz + float3(TINY));
+    float uv_det = du1.x * du2.y - du2.x * du1.y;
+    float3 tangent = abs(uv_det) > TINY ? (e1 * du2.y - e2 * du1.y) / uv_det : e1, bitangent = abs(uv_det) > TINY ? (e2 * du1.x - e1 * du2.x) / uv_det : e2;
+    float4 n_local = float4(grad, dot(grad, p.xyz / p.w));
+    n_local *= rsqrt(max(1.0 - n_local.w * n_local.w, TINY));
+    float4 n = to_world(st, n_local.xyz, n_local.w);
+    if (mdot(n, v) > 0.0) n = -n;
+    float4 t = orthonormal(to_world(st, tangent, 0.0), n), b = orthonormal(to_world(st, bitangent, 0.0), n);
+    float area_m2 = length(cross(e1, e2)), uv_area = max(abs(uv_det), TINY);
+    float pixel_m = scene.u.pixel_angle_rad * scene.u.curvature_radius_m * sinh(min(dist_s, FAR_S)) * rsqrt(max(abs(mdot(n, v)), MIN_FACING));
+    float lod = log2(max(pixel_m * MESH_TEXTURE_SIDE_PX * sqrt(uv_area / max(area_m2, TINY)), 1.0));
+    constexpr sampler wrap(address::repeat, filter::linear, mip_filter::linear);
+    int4 layers = mat.layers;
+    float4 base = mat.base_color * (layers.x >= 0 ? scene.mesh_albedo.sample(wrap, uv, layers.x, level(lod)) : float4(1.0));
+    float3 mr = layers.y >= 0 ? scene.mesh_mr.sample(wrap, uv, layers.y, level(lod)).rgb : float3(1.0);
+    float3 emissive = mat.emissive_metallic.rgb * (layers.w >= 0 ? scene.mesh_emissive.sample(wrap, uv, layers.w, level(lod)).rgb : float3(1.0));
+    Surface s = {base.rgb, max(mat.params.x * mr.g, MIN_ROUGHNESS), mat.emissive_metallic.w * mr.b, 1.0, n};
+    if (layers.z >= 0) {
+        float2 bend = scene.mesh_normal.sample(wrap, uv, layers.z, level(lod)).rg * 2.0 - 1.0;
+        s.n = normalize_tangent(x, t * bend.x + b * bend.y + n * sqrt(saturate(1.0 - dot(bend, bend))));
+    }
+    return light_surface(scene, s, x, n, v) + emissive * GLOW_BRIGHTNESS;
 }
 
 /** @brief `sample_star_layer` draws one layer of stars from a grid on the cube around the sky. @par Example @code float s = sample_star_layer(scene, d, 60.0, 0.03); @endcode */
@@ -1739,7 +1860,7 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end) {
         color = shade_ground(scene, end.point, end.view, end.grid.w);
     } else if (end.surface.x == OUTCOME_HIT) {
         Hit hit = {0.0, end.cell.w, end.surface.y, end.surface.z, end.glow.x, end.grid.xyz, end.cell.xyz};
-        color = shade_block(scene, hit, end.point, end.view, end.grid.w);
+        color = end.cell.w == MAT_MESH ? shade_mesh(scene, hit, end.point, end.view, end.grid.w) : shade_block(scene, hit, end.point, end.view, end.grid.w);
     } else if (end.surface.x == OUTCOME_SKY) {
         color = to_linear(sample_sky(scene, end.point.xyz));
     }
@@ -1767,7 +1888,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -1874,7 +1995,7 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive};
     coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
 }
 
@@ -1898,7 +2019,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
@@ -1935,7 +2056,7 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive};
     samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
 }
 
@@ -1990,7 +2111,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2009,7 +2130,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {
