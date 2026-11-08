@@ -4649,6 +4649,10 @@ mod tests {
     //! | Gun in hand | laser (the revolver), rifle (the bolt-action rifle) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
+    //! | Gun swaying | rifle (sways), laser (never sways) | `rifle_sways_with_the_steps` |
+    //! | Stepping fraction | standing (0: no sway), easing in (0.5: half), stepping (1) | `rifle_sways_with_the_steps` |
+    //! | Run pose | walking (0: the walking sway), sprinting (1: the sprinting sway), half way (eased between) | `rifle_sways_with_the_steps` |
+    //! | Step phase | between steps (0: centred), one step (a quarter turn: right), the next (three quarters: left) | `rifle_sways_with_the_steps` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
@@ -4676,6 +4680,37 @@ mod tests {
         assert!((part_way + HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
         assert!((shift(1.0, SPRINT_M_PER_S, 1.0) - MAX_BLUESHIFT_FRAC).abs() < 1e-6);
         assert!((shift(1.0, -SPRINT_M_PER_S, 1.0) + MAX_BLUESHIFT_FRAC).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rifle_sways_with_the_steps() {
+        const TOLERANCE_M: f64 = 1e-6;
+        const HALF_FRAC: f64 = 0.5;
+        let head_bob: settings::HeadBobSettings = PerPlayerSettings::Builtin().view.head_bob;
+        let (walk_m, sprint_m) = (head_bob.rifle_walk_sway_m, head_bob.rifle_sprint_sway_m);
+        let right_rad: f64 = std::f64::consts::FRAC_PI_2;
+        let left_rad: f64 = 3.0 * std::f64::consts::FRAC_PI_2;
+        let sway = |gun: Gun, step_frac: f64, run_pose_frac: f64, phase_rad: f64| -> f64 {
+            f64::from(get_sway_m(
+                gun,
+                step_frac,
+                run_pose_frac,
+                phase_rad,
+                &head_bob,
+            ))
+        };
+        assert!(walk_m > 0.0 && sprint_m > walk_m);
+        assert_eq!(sway(Gun::Laser, 1.0, 1.0, right_rad), 0.0);
+        assert_eq!(sway(Gun::Rifle, 0.0, 1.0, right_rad), 0.0);
+        assert!(sway(Gun::Rifle, 1.0, 0.0, 0.0).abs() < TOLERANCE_M);
+        assert!((sway(Gun::Rifle, 1.0, 0.0, right_rad) - walk_m).abs() < TOLERANCE_M);
+        assert!((sway(Gun::Rifle, 1.0, 0.0, left_rad) + walk_m).abs() < TOLERANCE_M);
+        assert!((sway(Gun::Rifle, 1.0, 1.0, right_rad) - sprint_m).abs() < TOLERANCE_M);
+        assert!(
+            (sway(Gun::Rifle, HALF_FRAC, 0.0, right_rad) - HALF_FRAC * walk_m).abs() < TOLERANCE_M
+        );
+        let half_way_m: f64 = sway(Gun::Rifle, 1.0, HALF_FRAC, right_rad);
+        assert!((half_way_m - (walk_m + sprint_m) * HALF_FRAC).abs() < TOLERANCE_M);
     }
 
     #[test]

@@ -1899,6 +1899,24 @@
   picked option C from the pictures ("get milky way photo like merged"). You didn't pick a placement, so the arch
   from base to base was chosen for you, since it gives both teams the same view; tell us if you want it elsewhere.
 
+### D107. The rifle sways left and right with your steps, W-102 (rifle sways when jogging)
+
+- **Choice:**
+  - **Sway:** the rifle in hand (gun 2) slides left on one step and right on the next, `get_sway_m` in `main.rs`: 2 cm
+    each way while walking, growing to 4 cm while sprinting (with the run pose's easing), on top of today's dip and
+    the sprint pose's tilt, which stay as they were. The sniper doesn't sway.
+  - **In step with the eye:** on a voxel map the gun takes the head bob's step phase and its fade (`fade_s`), so the
+    rifle moves with each footstep the camera dips on, eases in when you start moving and out when you stop; the
+    house keeps the gun's own step clock, at the same rates.
+  - **Settings:** `view.head_bob.rifle_walk_sway_m` and `rifle_sprint_sway_m` in `player_settings.yaml` (0 for none).
+    Older saved settings files without them load with the built-in values (`ADDED_PLAYER_KEYS`).
+- **Alternatives:**
+  - no change: the sprint pose already tilts the gun back and forth with each stride;
+  - a stronger sway (5 cm walking, 8 cm sprinting), offered as option C;
+  - more tilt rather than a slide.
+- **Rationale:** you asked for the rifle "going side to side when jogging like a normal rifle". From the before and
+  after pictures you chose the sway as built ("ok menrge to staging", "i like your animation").
+
 ## Workload
 
 ### D7. Eight fixed views

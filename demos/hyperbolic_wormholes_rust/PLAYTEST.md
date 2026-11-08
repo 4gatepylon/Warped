@@ -45,7 +45,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   wormholes, the curvature), copy `server_settings.yaml`, change its numbers, and start the server with it:
   `make serve-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml`.
   Everyone who joins plays by the server's settings.
-- Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`. The
+- Your own choices (keys, mouse speed, head bob, how far the rifle sways with your steps, motion blur, how a hit
+  looks) are in `player_settings.yaml`. The
   easiest way to change them is in the game: press `Tab` for the menu, `Up`/`Down` to pick a row, `Return` and then
   a key, button or the wheel to rebind an action, `Left`/`Right` to change a number, and `Return` on its last row
   to save. Saved choices go to `~/.config/warped/player_settings.yaml`, which every later game on that computer
