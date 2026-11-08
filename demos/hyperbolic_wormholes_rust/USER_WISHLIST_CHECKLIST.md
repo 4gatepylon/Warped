@@ -34,13 +34,6 @@ is in [`AGENTS.md`](AGENTS.md).
     (runs `*-team-robot-*`). State 2026-11-08: built and tested, screenshots sent to the user.
 ## Open
 
-- [ ] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
-  get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
-  second touches the ground; shooting a ball before then crashes the game.
-- [ ] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
-  but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
-  nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
-  again and moves it.
 - [ ] **W-113 A black hole for every pylon.** "Instead of making the black hole bigger, BOTH make it bigger AND also
   add another black hole for every pylon solved." Builds on W-107 (time dilation), where each console turned off grows
   the black hole at the centre.
@@ -205,6 +198,14 @@ are here too, since the user hadn't confirmed them.
 
 Confirmed by the user after testing.
 
+- [x] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
+  get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
+  second touches the ground; shooting a ball before then crashes the game. Fixed by the user, who marked it done,
+  2026-11-08.
+- [x] **W-112 No third throw.** "You should not be able to throw at all after 2." Today "you can throw more than 2,
+  but currently after the 2nd throw it does nothing and disappears": the third `Q` press throws a ball that does
+  nothing. Contradicts `game_design/DESIGN.md` ("Thrown wormholes"), where the third press throws the purple mouth
+  again and moves it. Fixed by the user, who marked it done, 2026-11-08.
 - [x] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly. The user asked for the loading screen "in the same style as the progress
   bar while disabling a pylon". Loading screen: #292, #293; connected: the lobby says CONNECTING, then CONNECTED,
