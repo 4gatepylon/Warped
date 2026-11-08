@@ -1016,7 +1016,8 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 ///
 /// Example: `write_level_result(Path::new("round_1.json"), 0)?;`
 fn write_level_result(path: &std::path::Path, winner: u32) -> Result<()> {
-    let partial: std::path::PathBuf = path.with_extension("partial");
+    let mut partial: std::ffi::OsString = path.as_os_str().to_owned();
+    partial.push(".partial");
     let team: &str = TEAM_NAMES[winner as usize];
     std::fs::write(&partial, format!("{{\"winner\": \"{team}\"}}\n"))?;
     std::fs::rename(&partial, path)?;
@@ -1649,6 +1650,7 @@ mod tests {
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
+    //! | Level result file's neighbours | one named like it without its extension, plus `.partial` (left alone) | `level_results_leave_files_named_like_them_alone` |
 
     use super::*;
 
@@ -2176,6 +2178,28 @@ mod tests {
         assert_eq!(shoot(&mut server, 1, 50_001), 1.0);
         send_wormholes(&mut server, PlayerWormholes::default());
         assert_eq!(server.slots[1].wormhole_damage_frac, 0.0);
+    }
+
+    #[test]
+    fn level_results_leave_files_named_like_them_alone() {
+        let folder: std::path::PathBuf =
+            std::env::temp_dir().join(format!("match_level_result_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let neighbour: std::path::PathBuf = folder.join("round_1.partial");
+        std::fs::write(&neighbour, "another file").expect("a neighbour");
+        write_level_result(&folder.join("round_1.json"), 1).expect("a result");
+        let result: Option<String> = std::fs::read_to_string(folder.join("round_1.json")).ok();
+        let neighbour_text: Option<String> = std::fs::read_to_string(&neighbour).ok();
+        let is_partial_left: bool = folder.join("round_1.json.partial").exists();
+        std::fs::remove_dir_all(&folder).expect("cleaned up");
+        assert_eq!(
+            (
+                result.as_deref(),
+                neighbour_text.as_deref(),
+                is_partial_left
+            ),
+            (Some("{\"winner\": \"red\"}\n"), Some("another file"), false)
+        );
     }
 
     #[test]

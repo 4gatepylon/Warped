@@ -1025,7 +1025,8 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 ///
 /// Example: `write_level_result(Path::new("/tmp/result.json"), "blue");`
 pub fn write_level_result(path: &std::path::Path, team: &str) {
-    let partial: std::path::PathBuf = path.with_extension("partial");
+    let mut partial: std::ffi::OsString = path.as_os_str().to_owned();
+    partial.push(".partial");
     let text: String = serde_json::json!({ "winner": team }).to_string();
     if let Err(error) =
         std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path))
@@ -1658,6 +1659,7 @@ mod tests {
     //! | Progress of turning off a console, in a snapshot | none held (0), part way (the seconds held over `hold_to_disable_s`), past the hold time (1) | `snapshots_carry_how_far_consoles_are_turned_off` |
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
     //! | Last consoles off in one update | both teams' (the first team to finish wins) | `the_first_team_to_finish_in_an_update_wins` |
+    //! | Level result file's neighbours | one named like it without its extension, plus `.partial` (left alone) | `level_results_leave_files_named_like_them_alone` |
     //! | Scores datagram | complete (several players, none), cut short, too long, an unknown team | `scores_survive_encoding` |
     //! | Who a hit eliminates | nobody (a hit short of the limit), the other team's player (a kill and a death), a teammate (a death only) | `eliminations_count_kills_and_deaths` |
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
@@ -2191,6 +2193,28 @@ mod tests {
         assert_eq!(shoot(&mut server, 1, 50_001), 1.0);
         send_wormholes(&mut server, PlayerWormholes::default());
         assert_eq!(server.slots[1].wormhole_damage_frac, 0.0);
+    }
+
+    #[test]
+    fn level_results_leave_files_named_like_them_alone() {
+        let folder: std::path::PathBuf =
+            std::env::temp_dir().join(format!("city_level_result_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let neighbour: std::path::PathBuf = folder.join("round_1.partial");
+        std::fs::write(&neighbour, "another file").expect("a neighbour");
+        write_level_result(&folder.join("round_1.json"), "red");
+        let result: Option<String> = std::fs::read_to_string(folder.join("round_1.json")).ok();
+        let neighbour_text: Option<String> = std::fs::read_to_string(&neighbour).ok();
+        let is_partial_left: bool = folder.join("round_1.json.partial").exists();
+        std::fs::remove_dir_all(&folder).expect("cleaned up");
+        assert_eq!(
+            (
+                result.as_deref(),
+                neighbour_text.as_deref(),
+                is_partial_left
+            ),
+            (Some("{\"winner\":\"red\"}"), Some("another file"), false)
+        );
     }
 
     #[test]
