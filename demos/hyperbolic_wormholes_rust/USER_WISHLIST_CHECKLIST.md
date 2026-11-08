@@ -11,18 +11,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
-  are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
-  Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched).
-  Claimed by Claude Code (session on `leah`'s Mac), branch `claude/shoot-when-still`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-shoot-still` on
-    `leah`'s Mac, branch `claude/shoot-when-still` (pushed to `origin` once it has commits). State, 2026-11-08: started.
-- [~] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
-  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
-  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere.
-  Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch `claude/time-dilation`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-time-dilation` on
-    `leah`'s Mac, branch `claude/time-dilation` (pushed to `origin` once it has commits). State, 2026-11-08: started.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
@@ -112,10 +100,19 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
+- [?] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
+  are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
+  Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched). #331.
 Merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`), waiting for the user to test and
 confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
+  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
+  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere. After
+  playing: "make the time dilation more intense all around, and then make the effect also be that when the black hole
+  gets bigger it's the black part grows a little but mostly the distortion area grows"; the user said "this looks
+  good" (D108). #329.
 - [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
   reality bending version). #316.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
@@ -134,7 +131,7 @@ are here too, since the user hadn't confirmed them.
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
   pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
   console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
-  down. #298, #299, #300, #301.
+  down. #298, #299, #300, #301. The warping into a sphere was removed by W-107 (time dilation), #329.
 - [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). After seeing 2x speckle far from the map's middle, the user chose 1.5x
   as the default: "1.5x curvature is fine". #285.

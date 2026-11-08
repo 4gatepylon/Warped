@@ -1,6 +1,6 @@
 # `server_settings.yaml` holds the numbers that shape play in the Rust demo: movement, sprint energy, both
 # guns and how their beams speckle, consoles, respawning, how a hit slows a player, the flashlight, aiming,
-# the map's edge, thrown wormholes, how curved space is and the reality bend. The game server reads it and
+# the map's edge, thrown wormholes, how curved space is and the black hole. The game server reads it and
 # sends it to every player who joins, so everyone in a game plays by the same numbers; a game without a server
 # uses it too. What only changes a player's own experience (keys, mouse speed, head bob, motion blur, how a hit
 # looks) is in `player_settings.yaml` instead.
@@ -103,8 +103,11 @@ wormholes:  # Q throws your purple wormhole mouth, then your green one, and so o
 space:  # How curved Lunar Surface is (the house demo keeps its own); a window that joins builds the map by the server's.
   curvature_per_map_curvature: 1.5  # Times the map's own curvature (1 / its 40 m radius), from 1 to 2: 1.5 makes the radius 26.7 m.
 
-reality_bend:  # On Lunar Surface, each console turned off strengthens the black hole and curls the map up into a sphere (W-68).
-  edge_radius_m: 160.0  # Distance from the map's middle beyond which the bent map is cut away; it closes the sphere at full strength.
-  transition_s: 4.0  # Seconds the bend takes to ease to a new strength after a console turns off (or a new game starts).
-  max_schwarzschild_radius_m: 6.0  # The black hole's Schwarzschild radius at full strength (the map's at none).
-  max_reach_m: 40.0  # How far the black hole bends light at full strength (the map's reach at none).
+black_hole:  # On Lunar Surface, each console turned off grows the black hole, and time runs slower near it (W-68, W-107).
+  transition_s: 4.0  # Seconds the black hole takes to grow to a new size after a console turns off (or a new game starts).
+  max_schwarzschild_radius_m: 2.0  # The black part's Schwarzschild radius at full strength (the map's at none): it grows only a little.
+  max_reach_m: 28.0  # How far the black hole bends light and slows time at full strength (the map's reach at none); under 31 m keeps clear of mouth A's reach.
+  max_lens_rad: 0.35  # Its wide lens at full strength (none at none): the most it turns a ray, in radians. It distorts the view around the black part without growing it.
+  lens_core_per_reach: 0.35  # The wide lens's core radius, as a share of the reach: rays passing that far from the centre turn the most.
+  time_dilation_per_general_relativity: 15.0  # How many times stronger than in general relativity time slows near it (1 for real, 0 for none).
+  min_time_rate_frac: 0.1  # The slowest a player's time runs near it, as a share of time far away (above 0, so nobody freezes).

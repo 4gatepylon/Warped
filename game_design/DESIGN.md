@@ -81,7 +81,7 @@ depth 2      depth 1             depth 0             depth 1             depth 2
 
 | Parameter | Value |
 | --- | --- |
-| Pylons per team per level | 1 |
+| Pylons per team per level | Set per level: 1, or 3 on Lunar Surface |
 | Consoles per pylon | Set per level (see [Levels](#levels)) |
 | Control to deactivate a console | Hold `E` while aiming at it from within 3 m |
 | Time to deactivate one console | 10 s |
@@ -145,7 +145,7 @@ full health and energy. A player can't choose to respawn early.
 | Gravity | Down, onto the ground | Down | Outward, onto the sphere | Down | Down, onto the ground, ≈30 m/s² |
 | Warp objects | Yes | Yes | No | Yes | 1 black hole, 1 wormhole |
 | Size | Very large | Large | Smallest | Large | Very large: 256 m × 144 m playable |
-| Consoles per pylon | 5 | 4 | 4 | 4 | 5 |
+| Consoles per pylon | 5 | 4 | 4 | 4 | 1 (3 pylons per team) |
 | Combat focus | Long range | Mid range | Close quarters | Mid range | Long range |
 | Zone layout | Open | Paired bands | Bands | Paired bands | Open |
 | Detailed layout | TBD | TBD | See [City Sphere](#city-sphere) | TBD | See [Lunar Surface](#lunar-surface) |
@@ -194,6 +194,14 @@ The level as the Rust game builds it, from the map
   players nor lasers.
 - A black hole hangs about 17 m above the middle of the level; its pull reaches 24 m. A player who falls into
   it goes back to their spawn.
+- Each console turned off, on either team's pylons, grows the black hole over 4 s, up to full strength with one
+  console left. Its black part grows only a little (Schwarzschild radius 1.2 m to 2 m), while the area it distorts
+  grows a lot: its reach grows to 28 m, and a wide lens around it bends light across that whole area.
+- Time runs slower near the black hole, as in general relativity but 15 times stronger: each player's own
+  movement, jumps and falls, sprint energy, turning off a console, and firing, reloading and cooling their guns
+  slow down, never below 10% speed. Looking around, menus and respawning keep normal time. Other players see a
+  slowed player move slowly. On the ground under the black hole, time runs at about 81% with no console off, 45%
+  with three off and 25% with five. The HUD shows the black hole's strength and how fast the player's time runs.
 - One wormhole joins a ridge to the red landing pad. Its mouths are 15 m in reach.
 - Blue's side has a lander, the blue pylon, a relay mast, supply crates and a solar array. The
   middle has derelict habitat modules, a comms dome, a crater walkway, a relay mast, a solar array
