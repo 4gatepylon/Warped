@@ -110,14 +110,6 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
-- [?] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
-  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
-  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
-  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
-  speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
-  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
-  then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
-  that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249.
 - [?] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. #210.
@@ -315,3 +307,11 @@ Confirmed by the user after testing.
 - [x] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
   `lunar_surface`, with lasers that eliminate players. #77, #79, #80. Confirmed by the user, 2026-11-07: "mark multiplayer on one network as done".
 - [x] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129. Confirmed by the user, 2026-11-07: "mark flashlight as done".
+- [x] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
+  itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
+  sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
+  (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead. After samples, the user chose
+  speckled pixels that turn black, white or drop out to show the background, "a combination of black AND dropout AND
+  white", then "stick with 118 and goes from amount 0 to 1 as you fire more, exponential average should be at 0.2",
+  then "Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add the SPECKLE on top of
+  that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for sniper". #249. Confirmed by the user, 2026-11-07: "shot noise is good".
