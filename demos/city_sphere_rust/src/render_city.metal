@@ -32,13 +32,22 @@ constant float LED_DUTY_FRAC = 0.6;
 constant float LED_OFF_FRAC = 0.12;
 constant float CORE_HALO_POWER = 2.0;
 constant float METAL_SATURATION = 0.3;
-constant float METAL_SPEC_POWER = 48.0;
 constant float STREET_LAYER = 0.0;
 constant float PANEL_LINE_HALF_WIDTH_M = 0.03;
 constant float3 PANEL_LINE_COLOR = float3(0.05, 0.14, 0.18);
 constant uint BEACON_SLOT_COUNT = 8;
 constant float BEACON_GLOW_BRIGHTNESS = 2.0;
 constant float BEACON_BODY_GLOW = 0.72;
+constant float ROUGH_MIN = 0.1;
+constant float ROUGH_MAX = 0.85;
+constant float SMOOTH_SPEC_POWER = 96.0;
+constant float ROUGH_SPEC_POWER = 10.0;
+constant float FRAME_WIDTH_M = 0.16;
+constant float FRAME_GROOVE_M = 0.025;
+constant float FRAME_BRIGHT = 1.6;
+constant float FRAME_GROOVE_DARK = 0.6;
+constant float FRAME_ROUGH = 0.2;
+constant float WALL_PANEL_M = 3.0;
 
 struct CityVertex {
     packed_float3 position;
@@ -86,6 +95,11 @@ static float3 encode_srgb(float3 c) {
     return pow(clamp(c, 0.0, 1.0), float3(1.0 / 2.2));
 }
 
+// `hash13` gives a pseudo-random number in [0, 1) for a point.
+static float hash13(float3 p) {
+    return fract(sin(dot(p, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
 // `apply_fog` mixes in the sky colour with distance.
 static float3 apply_fog(float3 c, float3 world, constant CityUniforms& u) {
     float d = length(u.camera_m.xyz - world);
@@ -101,9 +115,23 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
         float3 texel = albedo.sample(s, in.uv, uint(in.layer)).rgb;
         base *= is_beacon ? texel : mix(float3(dot(texel, float3(0.3, 0.59, 0.11))), texel, METAL_SATURATION);
         if (!is_beacon) {
-            float3 cell = floor(in.world * WEAR_CELLS_PER_M);
-            float wear = fract(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+            float wear = hash13(floor(in.world * WEAR_CELLS_PER_M));
             base *= 1.0 - WEAR_FRAC * wear * wear;
+        }
+    }
+    bool is_street = abs(in.layer - STREET_LAYER) < 0.5;
+    float rough = 0.5;
+    if (!is_beacon && in.layer >= 0.0) {
+        float2 panel = is_street ? float2(0.0) : floor(in.uv);
+        rough = mix(ROUGH_MIN, ROUGH_MAX, hash13(float3(panel, dot(in.color.rgb, float3(97.0, 57.0, 31.0)))));
+        if (!is_street) {
+            float2 to_edge = min(fract(in.uv), 1.0 - fract(in.uv));
+            float edge_m = min(to_edge.x, to_edge.y) * WALL_PANEL_M;
+            float edge_aa_m = fwidth(edge_m);
+            float frame = 1.0 - smoothstep(FRAME_WIDTH_M - edge_aa_m, FRAME_WIDTH_M + edge_aa_m, edge_m);
+            float groove = 1.0 - smoothstep(FRAME_GROOVE_M - edge_aa_m, FRAME_GROOVE_M + edge_aa_m, edge_m);
+            base = mix(base, base * FRAME_BRIGHT, frame) * (1.0 - FRAME_GROOVE_DARK * groove);
+            rough = mix(rough, FRAME_ROUGH, frame);
         }
     }
     float4 beacon = is_beacon ? u.beacons[min(uint(in.color.a - BEACON_FLAG + 0.5), BEACON_SLOT_COUNT - 1)] : float4(0.0);
@@ -133,18 +161,18 @@ fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u
     float falloff = u.core_light.w * 300.0 / (r * r + 150.0);
     float3 view = normalize(u.camera_m.xyz - in.world);
     float3 h = normalize(view + l);
-    float spec = pow(max(dot(n, h), 0.0), METAL_SPEC_POWER) * METAL_SPEC;
+    float spec = pow(max(dot(n, h), 0.0), mix(SMOOTH_SPEC_POWER, ROUGH_SPEC_POWER, rough)) * METAL_SPEC * (1.5 - rough);
     float3 light = u.ambient.rgb * wrap + u.core_light.rgb * (lambert * falloff) + spec * u.core_light.rgb;
     float3 lit = base * light;
     if (!is_beacon && in.layer >= 0.0) {
         float3 mirror = reflect(-view, n);
         float core_frac = dot(mirror, l);
         float3 env = mix(ENV_FLOOR_COLOR, u.core_light.rgb * ENV_CORE_GAIN, smoothstep(-0.3, 1.0, core_frac))
-            + u.core_light.rgb * pow(max(core_frac, 0.0), ENV_HIGHLIGHT_POWER) * ENV_HIGHLIGHT_GAIN;
+            + u.core_light.rgb * pow(max(core_frac, 0.0), ENV_HIGHLIGHT_POWER * (1.0 - 0.8 * rough)) * ENV_HIGHLIGHT_GAIN * (1.0 - 0.6 * rough);
         float fresnel = METAL_REFLECT_MIN + (1.0 - METAL_REFLECT_MIN) * pow(1.0 - max(dot(n, view), 0.0), 5.0);
-        lit += env * mix(base, float3(1.0), 0.3) * fresnel * METAL_REFLECT;
+        lit += env * mix(base, float3(1.0), 0.3) * fresnel * METAL_REFLECT * (1.3 - rough);
     }
-    if (abs(in.layer - STREET_LAYER) < 0.5) {
+    if (is_street) {
         float edge_m = -in.color.a;
         float edge_aa_m = fwidth(edge_m);
         lit += PANEL_LINE_COLOR * (1.0 - smoothstep(PANEL_LINE_HALF_WIDTH_M - edge_aa_m, PANEL_LINE_HALF_WIDTH_M + edge_aa_m, edge_m));

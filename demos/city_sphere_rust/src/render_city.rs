@@ -56,6 +56,8 @@ const NEAR_M: f32 = 0.05;
 const FAR_M: f32 = 200.0;
 const STREET_TILE_M: f64 = 4.0;
 const WALL_TILE_M: f64 = 3.0;
+const STREET_TINT_FRAC: f32 = 0.08;
+const CELL_KEY_PER_UNIT: f64 = 1.0e4;
 const GLASS_FREQUENCY: usize = 7;
 const GLASS_SUBDIVISION_COUNT: usize = 2;
 const STREET_FREQUENCY: usize = 7;
@@ -191,6 +193,15 @@ fn get_variation_frac(seed: u32, k: usize) -> f32 {
     ((x ^ (x >> 31)) >> 40) as f32 / (1u64 << 24) as f32
 }
 
+/// `get_cell_key` gives a key for a cell of the street from its centre's direction, the same for
+/// every vertex of the cell.
+///
+/// Example: `let key: usize = get_cell_key(DVec3::X);`
+fn get_cell_key(center: DVec3) -> usize {
+    let [x, y, z] = (center * CELL_KEY_PER_UNIT).round().as_i64vec3().to_array();
+    (x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663) ^ z.wrapping_mul(83_492_791)) as usize
+}
+
 /// `push_rounded_box` adds a box (`center`, `axes`, `half_m`) of quads, its edges and corners rounded to radius
 /// `ROUND_RADIUS_M` (at most `ROUND_MAX_FRAC` of its smallest half size): each face is a grid whose
 /// points near an edge are pushed onto the rounding, with the rounding's normals.
@@ -234,7 +245,7 @@ pub fn push_rounded_box(out: &mut Vec<CityVertex>, center: DVec3, axes: DMat3, h
                             CityVertex {
                                 position: position.as_vec3().to_array(),
                                 normal: normal.as_vec3().to_array(),
-                                uv: [((a + half_m[u]) / WALL_TILE_M) as f32, ((b + half_m[v]) / WALL_TILE_M) as f32],
+                                uv: [get_panel_uv(a, half_m[u]), get_panel_uv(b, half_m[v])],
                                 color,
                                 layer,
                             }
@@ -245,6 +256,15 @@ pub fn push_rounded_box(out: &mut Vec<CityVertex>, center: DVec3, axes: DMat3, h
             }
         }
     }
+}
+
+/// `get_panel_uv` gives the texture coordinate of `a` (-`half_m` to `half_m`) along a box face that
+/// whole panels of about `WALL_TILE_M` cover, so the shader's panel frames meet both edges.
+///
+/// Example: `let u: f32 = get_panel_uv(0.5, 2.0);`
+fn get_panel_uv(a: f64, half_m: f64) -> f32 {
+    let panel_count: f64 = (2.0 * half_m / WALL_TILE_M).round().max(1.0);
+    ((a + half_m) / (2.0 * half_m) * panel_count) as f32
 }
 
 /// `push_sphere` adds a latitude-longitude sphere about the centre, its normals inward if
@@ -302,7 +322,8 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     let street_radius_m: f64 = world.street_radius_m;
     push_goldberg(&mut opaque, street_radius_m, STREET_FREQUENCY, STREET_SUBDIVISION_COUNT, |d, edge_m, center, e1, e2| {
         let p: DVec3 = d * street_radius_m;
-        let [r, g, b, _] = street_color;
+        let tint: f32 = 1.0 + STREET_TINT_FRAC * (2.0 * get_variation_frac(world.variation_seed, get_cell_key(center)) - 1.0);
+        let [r, g, b] = [street_color[0] * tint, street_color[1] * tint, street_color[2] * tint];
         CityVertex {
             position: to_f32(p),
             normal: to_f32(-d),
