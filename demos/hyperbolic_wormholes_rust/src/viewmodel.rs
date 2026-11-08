@@ -50,6 +50,8 @@ const NEAR_M: f32 = 0.01;
 const FAR_M: f32 = 4.0;
 /// `MUZZLE_SLICE_M` is how far behind the revolver's front its vertices count as the muzzle's face.
 const MUZZLE_SLICE_M: f32 = 0.01;
+/// `REVOLVER_SCALE` is how many times its modelled size the revolver is drawn.
+const REVOLVER_SCALE: f32 = 1.6;
 /// `TRANSMISSION_OPACITY` is how opaque the transmissive glass is drawn.
 const TRANSMISSION_OPACITY: f32 = 0.18;
 /// `SLOT_FORMATS` are the formats of a material's base colour, metallic-roughness, normal and
@@ -486,6 +488,7 @@ impl Viewmodel {
             parts,
             materials,
             muzzle_from_gltf: Mat4::from_rotation_y(std::f32::consts::PI)
+                * Mat4::from_scale(Vec3::splat(REVOLVER_SCALE))
                 * Mat4::from_translation(-muzzle_m),
             opaque: make_pipeline(device, &library, false)?,
             blended: make_pipeline(device, &library, true)?,

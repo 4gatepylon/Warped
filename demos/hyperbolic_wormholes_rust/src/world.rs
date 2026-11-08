@@ -1169,7 +1169,7 @@ mod tests {
         let (others, markers) = (MAX_PLAYER_COUNT - 1, 2 * MAX_PLAYER_COUNT);
         assert!(world.mouths.len() + 2 * MAX_PLAYER_COUNT <= MAX_MOUTH_COUNT);
         assert!(world.boxes.len() + others + markers <= MAX_BOX_COUNT);
-        assert!(world.clusters.len() + others + 1 <= MAX_CLUSTER_COUNT);
+        assert!(world.clusters.len() + others < MAX_CLUSTER_COUNT);
     }
 
     /// `open_place` gives a mouth place at eye height over (u, v), facing back toward the origin

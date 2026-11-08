@@ -26,9 +26,9 @@ use crate::settings::PerPlayerSettings;
 
 const VISIBLE_ROW_COUNT: usize = 20;
 const PAGES: [(Page, &str); 4] = [
+    (Page::Scores, "SCORES"),
     (Page::Settings, "SETTINGS"),
     (Page::Map, "MAP"),
-    (Page::Scores, "SCORES"),
     (Page::Credits, "CREDITS"),
 ];
 const MAP_LEGEND: &str = "You: arrow  Squares: consoles  Rings: wormholes  Dashes: zones";
@@ -230,7 +230,7 @@ pub struct Menu {
 }
 
 impl Menu {
-    /// `New` opens the menu on its first row.
+    /// `New` opens the menu on its first page, SCORES, with the settings page's first row chosen.
     ///
     /// Example: `let menu = Menu::New();`
     #[allow(non_snake_case)]
@@ -393,7 +393,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Row kind | an action (rebound, or cancelled with Escape), a number (stepped, clamped), saving | `rows_rebind_step_and_save` |
     //! | Closing | Escape, the open-menu control | `escape_and_the_menu_key_close_it` |
-    //! | Page | turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
+    //! | Page | the first (SCORES, where the menu opens), turned forward past the last and back past the first; the map page ignoring the settings keys | `q_and_e_turn_pages` |
     //! | Credits page | its lines, ignoring the settings keys | `the_credits_page_lists_the_assets` |
     //! | Scoreboard | no server, waiting for scores, scores (two teams, ties in kills, this player known or not yet) | `the_scores_page_sorts_and_totals` |
 
@@ -411,6 +411,7 @@ mod tests {
     #[test]
     fn rows_rebind_step_and_save() {
         let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
+        menu.handle(Control::Key(Scancode::E), &mut mine);
         let jump: Row = Row::Key(Action::Jump, "jump");
         move_to(&mut menu, &mut mine, jump);
         menu.handle(Control::Key(Scancode::Return), &mut mine);
@@ -438,11 +439,12 @@ mod tests {
     #[test]
     fn q_and_e_turn_pages() {
         let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
-        for expected in [Page::Map, Page::Scores, Page::Credits, Page::Settings] {
+        assert_eq!(menu.get_page(), Page::Scores);
+        for expected in [Page::Settings, Page::Map, Page::Credits, Page::Scores] {
             menu.handle(Control::Key(Scancode::E), &mut mine);
             assert_eq!(menu.get_page(), expected);
         }
-        for expected in [Page::Credits, Page::Scores, Page::Map] {
+        for expected in [Page::Credits, Page::Map] {
             menu.handle(Control::Key(Scancode::Q), &mut mine);
             assert_eq!(menu.get_page(), expected);
         }
@@ -489,9 +491,7 @@ mod tests {
 
     #[test]
     fn the_scores_page_sorts_and_totals() {
-        let (mut menu, mut mine) = (Menu::New(), PerPlayerSettings::Builtin());
-        menu.handle(Control::Key(Scancode::E), &mut mine);
-        menu.handle(Control::Key(Scancode::E), &mut mine);
+        let (menu, mine) = (Menu::New(), PerPlayerSettings::Builtin());
         assert_eq!(menu.get_page(), Page::Scores);
         let get_texts = |scoreboard: Scoreboard| -> Vec<(String, bool)> {
             menu.get_lines(&mine, "", scoreboard)[2..].to_vec()

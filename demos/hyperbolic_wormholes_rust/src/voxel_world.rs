@@ -79,7 +79,7 @@ const NEARBY_REACH_M: f64 = 6.0;
 const LASER_MAX_LENGTH_M: f64 = 480.0;
 const LASER_MAX_ITERATIONS: usize = 4000;
 const LASER_MUZZLE_M: f64 = 3.0;
-pub const MUZZLE_M: DVec3 = DVec3::new(0.262, -0.22, -0.777);
+pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
 const BEAM_TOLERANCE_M: f64 = 0.02;
 const MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS: f64 = 4.0;
 const BEAM_CLIP_BISECTION_COUNT: usize = 40;
@@ -1932,7 +1932,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
+    //! | Where a player starts | on a structure (the blue landing pad), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Laser at a window (the red habitat module's) | shot from inside touching the pane, close (the muzzle past the pane), across the room, slantwise (each leaves); from outside (comes in to the floor) | `a_laser_passes_through_a_window` |
     //! | What a window's pane stops | lasers (no), players (yes: its middle is solid) | `a_laser_passes_through_a_window` |
