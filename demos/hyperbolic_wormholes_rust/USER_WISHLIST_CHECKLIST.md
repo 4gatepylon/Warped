@@ -10,8 +10,7 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-39 Key bindings.** Which key crouches, moves, jumps, switches weapons and so on can be set in YAML. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/key-bindings`, 2026-11-07.
+Nothing yet.
 
 ## Open
 
@@ -27,6 +26,8 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
   together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
   Mac over loopback.
+- [ ] **W-44 Smooth wormhole interior.** Inside a wormhole, looking sideways shows a grainy texture; it should look
+  pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
 
@@ -90,3 +91,5 @@ is in [`AGENTS.md`](AGENTS.md).
 - [x] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
 - [x] **W-43 Hold for the flashlight.** The flashlight stays on only while the right button is held. #133.
+- [x] **W-39 Key bindings.** Which key crouches, moves, jumps, switches weapons and so on can be set in YAML
+  (`key_bindings.yaml`, each player's own). #135.

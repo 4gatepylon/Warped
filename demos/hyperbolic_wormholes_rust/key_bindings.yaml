@@ -1,0 +1,35 @@
+# `key_bindings.yaml` says which keys, mouse buttons and wheel do what in the game window. Unlike
+# `game_settings.yaml`, which the server sends to everyone, these are each player's own.
+#
+# Interface:
+#     Copy this file, change the keys, and start the game with the copy: `KEY_BINDINGS=` with
+#     `make run-demo`, `make host-game` or `make join-game` (`--key-bindings`). Every action is
+#     required and takes a list of one or more controls:
+#     - a key by SDL's name for it: W, Space, Left Shift, Right Ctrl, Escape, Return, Tab, Up,
+#       F1 and so on; digits and symbols in quotes ("1", "-", "=");
+#     - Mouse Left, Mouse Right, Mouse Middle, Mouse X1, Mouse X2;
+#     - Wheel (turning the mouse wheel either way), only for actions done once per press.
+#     Two actions can share a key; the lobby's team keys come before the gun keys.
+#
+# Example:
+#     cp key_bindings.yaml my_keys.yaml  # change move_forward to [Up], then:
+#     make join-game MAP=lunar-surface KEY_BINDINGS=my_keys.yaml
+
+move_forward: [W]  # Walk forward (held).
+move_back: [S]  # Walk back (held).
+move_left: [A]  # Step left (held).
+move_right: [D]  # Step right (held).
+jump: [Space]  # Jump (held: on the house, the jetpack).
+sprint: [Left Shift, Right Shift]  # Run while held, using sprint energy.
+crouch: [Left Ctrl, Right Ctrl]  # Crouch while held.
+shoot: [Mouse Left]  # Fire (the rifle fires while held).
+flashlight: [Mouse Right]  # Shine the flashlight while held.
+turn_off_console: [E]  # Hold on one of the other team's consoles to turn it off.
+gun_1: ["1"]  # Take the sniper.
+gun_2: ["2"]  # Take the rifle.
+switch_gun: [Wheel]  # Swap between the two guns.
+join_blue: ["1"]  # In the lobby, join the blue team.
+join_red: ["2"]  # In the lobby, join the red team.
+lower_resolution: ["-"]  # Render at a lower resolution.
+raise_resolution: ["="]  # Render at a higher resolution.
+release_mouse: [Escape]  # Free the mouse; again to quit.

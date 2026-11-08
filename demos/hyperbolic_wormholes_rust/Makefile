@@ -7,6 +7,7 @@
 #     make serve-game PORT=<n> MAP=<map> SETTINGS=<file>: run only a game server, without a window, and print how to join it.
 #     make host-game PORT=<n> MAP=<map> SETTINGS=<file>: start a game server (its own process, no window) and play in it.
 #     (SETTINGS: a copy of game_settings.yaml with the game's numbers changed; the server sends them to every player.)
+#     (KEY_BINDINGS, with run-demo, host-game and join-game: a copy of key_bindings.yaml with this player's own keys.)
 #     make join-game SERVER=<auto|address> MAP=<map>: open the window and join a game on the local network.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
@@ -28,6 +29,8 @@ MAP ?= house-demo
 SERVER ?= auto
 SETTINGS ?=
 SETTINGS_FLAG := $(if $(SETTINGS),--settings $(SETTINGS))
+KEY_BINDINGS ?=
+KEY_BINDINGS_FLAG := $(if $(KEY_BINDINGS),--key-bindings $(KEY_BINDINGS))
 
 RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilot frames and timings). \
   Recreating them means rerunning make bench-views and make run-autopilot. \
@@ -41,6 +44,7 @@ help:
 	@echo "  make serve-game PORT=47800 MAP=lunar-surface     Run only a game server, without a window; prints how to join"
 	@echo "  make host-game PORT=47800                        Start a game server (no window) and play in it"
 	@echo "                                                   (both take SETTINGS=my_settings.yaml, a copy of game_settings.yaml)"
+	@echo "  (run-demo, host-game and join-game take KEY_BINDINGS=my_keys.yaml, a copy of key_bindings.yaml)"
 	@echo "  make join-game SERVER=auto                       Open the window and join a game (SERVER=auto finds one)"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
@@ -54,16 +58,16 @@ help:
 	@echo "Example: make bench-views RENDERER=cpu WIDTH_PX=2560 HEIGHT_PX=1600"
 
 run-demo:
-	cargo run --release -- --renderer $(RENDERER) --map $(MAP) $(SETTINGS_FLAG)
+	cargo run --release -- --renderer $(RENDERER) --map $(MAP) $(SETTINGS_FLAG) $(KEY_BINDINGS_FLAG)
 
 serve-game:
 	cargo run --release -- --serve --port $(PORT) --map $(MAP) $(SETTINGS_FLAG)
 
 host-game:
-	cargo run --release -- --host --port $(PORT) --map $(MAP) $(SETTINGS_FLAG)
+	cargo run --release -- --host --port $(PORT) --map $(MAP) $(SETTINGS_FLAG) $(KEY_BINDINGS_FLAG)
 
 join-game:
-	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP)
+	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) $(KEY_BINDINGS_FLAG)
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)
