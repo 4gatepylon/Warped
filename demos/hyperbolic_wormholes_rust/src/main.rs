@@ -104,6 +104,22 @@ const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
 const SHOT_DURATION_S: f64 = 0.25;
+const LASER_HITS_TO_KILL: u8 = 1;
+const RIFLE_SHOT_PERIOD_S: f64 = 0.125;
+const RIFLE_PULSE_S: f64 = 0.06;
+const RIFLE_OVERHEAT_SHOT_COUNT: f64 = 20.0;
+const RIFLE_COOL_S: f64 = 2.0;
+const RIFLE_BODY_HITS_TO_KILL: u8 = 12;
+const RIFLE_HEAD_HITS_TO_KILL: u8 = 2;
+const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
+const HEAT_BAR_FILL_COLOR: [f32; 4] = [1.0, 0.6, 0.2, 0.9];
+const HEAT_BAR_OVERHEATED_COLOR: [f32; 4] = [1.0, 0.15, 0.1, 0.9];
+const WAND_LASER_SHAFT_HALF_M: [f32; 4] = [0.011, 0.011, 0.16, 0.0];
+const WAND_LASER_SHAFT_COLOR: [f32; 4] = [0.2, 0.17, 0.22, 1.0];
+const WAND_LASER_TIP_HALF_M: [f32; 4] = [0.016, 0.016, 0.028, 0.0];
+const WAND_RIFLE_SHAFT_HALF_M: [f32; 4] = [0.024, 0.032, 0.17, 0.0];
+const WAND_RIFLE_SHAFT_COLOR: [f32; 4] = [0.42, 0.45, 0.5, 1.0];
+const WAND_RIFLE_TIP_HALF_M: [f32; 4] = [0.007, 0.007, 0.07, 0.0];
 const RESPAWN_DELAY_S: f64 = 3.0;
 const DEATH_MASK_PX: (u32, u32) = (240, 24);
 const DEATH_TITLE_Y_PX: f32 = 2.0;
@@ -1595,6 +1611,12 @@ struct Session {
     shot_time_s: f64,
     is_running: bool,
     is_jumping: bool,
+    gun: Gun,
+    is_trigger_held: bool,
+    rifle_next_shot_s: f64,
+    rifle_heat_frac: f64,
+    is_overheated: bool,
+    has_rifle_shot_hit: bool,
     gun_phase_rad: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
@@ -1637,6 +1659,15 @@ impl PackedFrame {
             PackedFrame::Voxel(frame) => FrameData::Voxel(frame),
         }
     }
+}
+
+/// `Gun` is the weapon a player holds: gun 1, the laser (a quarter-second shot per click; one
+/// hit eliminates), or gun 2, the design's rifle (fires while the button is held, its beam
+/// pulsing; two hits to the head or twelve to the body eliminate; overheats).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Gun {
+    Laser,
+    Rifle,
 }
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
@@ -1750,6 +1781,12 @@ impl Session {
             shot_time_s: 0.0,
             is_running: false,
             is_jumping: false,
+            gun: Gun::Laser,
+            is_trigger_held: false,
+            rifle_next_shot_s: 0.0,
+            rifle_heat_frac: 0.0,
+            is_overheated: false,
+            has_rifle_shot_hit: false,
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
@@ -1813,6 +1850,8 @@ impl Session {
                     self.is_auto_scale = false;
                     self.render_scale = (self.render_scale * RENDER_SCALE_STEP).min(1.0);
                 }
+                Keycode::_1 => self.switch_gun(Gun::Laser),
+                Keycode::_2 => self.switch_gun(Gun::Rifle),
                 _ => {}
             },
             Event::MouseButtonDown { .. } if !self.is_captured => {
@@ -1822,11 +1861,23 @@ impl Session {
             Event::MouseButtonDown {
                 mouse_btn: MouseButton::Left,
                 ..
-            } if self.can_shoot()
-                && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated) =>
-            {
-                self.shot_time_s = SHOT_DURATION_S;
+            } => {
+                self.is_trigger_held = true;
+                if self.gun == Gun::Laser
+                    && self.can_shoot()
+                    && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
+                {
+                    self.shot_time_s = SHOT_DURATION_S;
+                }
             }
+            Event::MouseButtonUp {
+                mouse_btn: MouseButton::Left,
+                ..
+            } => self.is_trigger_held = false,
+            Event::MouseWheel { y, .. } if y != 0.0 => self.switch_gun(match self.gun {
+                Gun::Laser => Gun::Rifle,
+                Gun::Rifle => Gun::Laser,
+            }),
             Event::MouseMotion { xrel, yrel, .. } if self.is_captured => match &mut self.voxel {
                 Some(voxel) => voxel.player.look(f64::from(xrel), f64::from(yrel)),
                 None => {
@@ -1899,6 +1950,7 @@ impl Session {
         }
         self.update_disabling(keys.is_scancode_pressed(Scancode::E), dt_s);
         self.update_gun(&input, dt_s);
+        self.update_rifle(dt_s);
         let eye: DMat4 = self.get_eye_frame();
         let is_firing: bool = self.is_firing();
         if let Some(multiplayer) = &mut self.multiplayer
@@ -1934,6 +1986,38 @@ impl Session {
                 .multiplayer
                 .as_ref()
                 .is_none_or(|m| m.disabling.is_none() && m.client.game.winner.is_none())
+    }
+
+    /// `switch_gun` makes `gun` the one in hand, stopping a shot in flight.
+    ///
+    /// Example: `self.switch_gun(Gun::Rifle);`
+    fn switch_gun(&mut self, gun: Gun) {
+        self.gun = gun;
+        self.shot_time_s = 0.0;
+    }
+
+    /// `update_rifle` fires the rifle while its trigger is held and this player can shoot: a
+    /// `RIFLE_PULSE_S` pulse of the beam every `RIFLE_SHOT_PERIOD_S`, each adding
+    /// 1 / `RIFLE_OVERHEAT_SHOT_COUNT` of heat. At full heat it overheats; it cools fully in
+    /// `RIFLE_COOL_S` while not firing, and fires again once cool.
+    ///
+    /// Example: `self.update_rifle(1.0 / 60.0);`
+    fn update_rifle(&mut self, dt_s: f64) {
+        self.rifle_next_shot_s = (self.rifle_next_shot_s - dt_s).max(0.0);
+        let is_firing_rifle: bool = self.gun == Gun::Rifle
+            && self.is_trigger_held
+            && self.can_shoot()
+            && !self.is_overheated;
+        if !is_firing_rifle {
+            self.rifle_heat_frac = (self.rifle_heat_frac - dt_s / RIFLE_COOL_S).max(0.0);
+            self.is_overheated &= self.rifle_heat_frac > 0.0;
+        } else if self.rifle_next_shot_s <= 0.0 {
+            self.shot_time_s = RIFLE_PULSE_S;
+            self.rifle_next_shot_s = RIFLE_SHOT_PERIOD_S;
+            self.has_rifle_shot_hit = false;
+            self.rifle_heat_frac += 1.0 / RIFLE_OVERHEAT_SHOT_COUNT;
+            self.is_overheated = self.rifle_heat_frac >= 1.0;
+        }
     }
 
     /// `update_disabling` follows this player holding `E` (`is_holding_e`) on one of the other
@@ -2028,7 +2112,7 @@ impl Session {
             .map_or(0, |voxel| net::get_team(voxel.spawn_index as u32));
         self.get_banner_lines()
             .is_none()
-            .then(|| make_wand(self.run_pose_frac, self.gun_phase_rad, team))
+            .then(|| make_wand(self.run_pose_frac, self.gun_phase_rad, team, self.gun))
     }
 
     /// `get_eye_frame` gives the eye's frame: the house player's frame, or the voxel player's camera.
@@ -2173,8 +2257,10 @@ impl Session {
             );
             self.laser = multiplayer::describe_voxel_laser(&voxel.world, &view);
             if let Some(victim_id) = view.hit_player_id
+                && let Some(hits_to_kill) =
+                    take_hit_weight(self.gun, &mut self.has_rifle_shot_hit, view.is_head_hit)
                 && let Some(multiplayer) = &mut self.multiplayer
-                && let Err(error) = multiplayer.client.send_hit(victim_id)
+                && let Err(error) = multiplayer.client.send_hit(victim_id, hits_to_kill)
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
@@ -2191,7 +2277,9 @@ impl Session {
             );
             self.laser = view.report.as_ref().map(describe_laser);
             if let Some(victim_id) = view.hit_player_id
-                && let Err(error) = multiplayer.client.send_hit(victim_id)
+                && let Some(hits_to_kill) =
+                    take_hit_weight(self.gun, &mut self.has_rifle_shot_hit, false)
+                && let Err(error) = multiplayer.client.send_hit(victim_id, hits_to_kill)
             {
                 self.show_message(format!("Couldn't reach the server: {error}"));
             }
@@ -2342,6 +2430,25 @@ impl Session {
     /// Example: `let rects = session.get_overlay_rects();`
     fn get_overlay_rects(&self) -> Vec<render_metal::OverlayRect> {
         let mut rects: Vec<render_metal::OverlayRect> = Vec::new();
+        if self.gun == Gun::Rifle {
+            let ([x, y], [w, h]) = (HEAT_BAR_MIN_FRAC, ENERGY_BAR_SIZE_FRAC);
+            rects.extend([
+                render_metal::OverlayRect {
+                    min_frac: [x, y],
+                    max_frac: [x + w, y + h],
+                    color: ENERGY_BAR_BACK_COLOR,
+                },
+                render_metal::OverlayRect {
+                    min_frac: [x, y],
+                    max_frac: [x + w * self.rifle_heat_frac.min(1.0) as f32, y + h],
+                    color: if self.is_overheated {
+                        HEAT_BAR_OVERHEATED_COLOR
+                    } else {
+                        HEAT_BAR_FILL_COLOR
+                    },
+                },
+            ]);
+        }
         if let Some((_, held_s)) = self.multiplayer.as_ref().and_then(|m| m.disabling) {
             let ([x, y], [w, h]) = (DISABLE_BAR_MIN_FRAC, DISABLE_BAR_SIZE_FRAC);
             let fill_frac: f32 = (held_s / net::CONSOLE_DISABLE_S).min(1.0) as f32;
@@ -2399,6 +2506,14 @@ impl Session {
                 voxel.player.energy_frac * PERCENT_PER_FRAC
             )
         });
+        let gun: String = match (self.gun, self.is_overheated) {
+            (Gun::Laser, _) => ", gun 1 (laser)".to_string(),
+            (Gun::Rifle, true) => ", gun 2 (rifle) overheated".to_string(),
+            (Gun::Rifle, false) => format!(
+                ", gun 2 (rifle) heat {:.0}%",
+                self.rifle_heat_frac * PERCENT_PER_FRAC
+            ),
+        };
         let (is_flying, is_on_ground, height_m) = match &self.voxel {
             Some(voxel) => (
                 voxel.player.is_flying,
@@ -2428,7 +2543,7 @@ impl Session {
                 render_px.0,
                 render_px.1
             ),
-            format!("{movement}, height {:.1} blocks{energy}", height_m),
+            format!("{movement}, height {:.1} blocks{energy}{gun}", height_m),
         ];
         if let Some(laser) = &self.laser {
             lines.push(format!("laser {laser}"));
@@ -2447,7 +2562,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Shift run, Space jump, click shoot (not while running), hold E on an enemy console to turn it off, R respawn, -/= scale, Esc release".to_string()
+            "WASD move, Shift run, Space jump, click shoot (not while running), 1/2 or wheel switch gun, hold E on an enemy console to turn it off, R respawn, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
@@ -2480,13 +2595,34 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     }
 }
 
+/// `take_hit_weight` gives how many hits like this one `gun` needs to eliminate someone (a rifle
+/// hit to the head counts more), or `None` when this rifle shot already hit (`has_rifle_shot_hit`,
+/// which it then sets): the laser reports every frame it hits, the rifle once per shot.
+///
+/// Example: `if let Some(hits_to_kill) = take_hit_weight(Gun::Rifle, &mut has_hit, false) { ... }`
+fn take_hit_weight(gun: Gun, has_rifle_shot_hit: &mut bool, is_head_hit: bool) -> Option<u8> {
+    match (gun, is_head_hit) {
+        (Gun::Laser, _) => Some(LASER_HITS_TO_KILL),
+        (Gun::Rifle, _) if *has_rifle_shot_hit => None,
+        (Gun::Rifle, is_head) => {
+            *has_rifle_shot_hit = true;
+            Some(if is_head {
+                RIFLE_HEAD_HITS_TO_KILL
+            } else {
+                RIFLE_BODY_HITS_TO_KILL
+            })
+        }
+    }
+}
+
 /// `make_wand` places the wand in camera space: held on the right with its tip toward the
 /// crosshair, dipping a little at each step (`phase_rad`), and, as `run_pose_frac` goes to 1
 /// (eased), lowered, tipped down and rolled, bouncing and swinging with each stride; its tip has
-/// `team`'s colour.
+/// `team`'s colour. The laser (`gun`) is a thin dark wand with a short glowing tip; the rifle is a
+/// thick grey block with a long, thin glowing barrel.
 ///
-/// Example: `let wand = make_wand(0.0, 1.2, 1);`
-fn make_wand(run_pose_frac: f64, phase_rad: f64, team: u32) -> render_metal::OverlayWand {
+/// Example: `let wand = make_wand(0.0, 1.2, 1, Gun::Laser);`
+fn make_wand(run_pose_frac: f64, phase_rad: f64, team: u32, gun: Gun) -> render_metal::OverlayWand {
     let jog: f32 = (run_pose_frac * run_pose_frac * (3.0 - 2.0 * run_pose_frac)) as f32;
     let (step, swing) = (phase_rad.sin().abs() as f32, phase_rad.sin() as f32);
     let lerp = |aim: f32, run: f32| aim + (run - aim) * jog;
@@ -2504,6 +2640,18 @@ fn make_wand(run_pose_frac: f64, phase_rad: f64, team: u32) -> render_metal::Ove
         center_m: center.extend(0.0).to_array(),
         axes: [rotation.x_axis, rotation.y_axis, rotation.z_axis]
             .map(|axis| axis.extend(0.0).to_array()),
+        shaft_half_m: match gun {
+            Gun::Laser => WAND_LASER_SHAFT_HALF_M,
+            Gun::Rifle => WAND_RIFLE_SHAFT_HALF_M,
+        },
+        shaft_color: match gun {
+            Gun::Laser => WAND_LASER_SHAFT_COLOR,
+            Gun::Rifle => WAND_RIFLE_SHAFT_COLOR,
+        },
+        tip_half_m: match gun {
+            Gun::Laser => WAND_LASER_TIP_HALF_M,
+            Gun::Rifle => WAND_RIFLE_TIP_HALF_M,
+        },
         tip_color: if team == 1 {
             WAND_RED_TIP_COLOR
         } else {
@@ -2761,4 +2909,37 @@ fn play_on_layer(
     // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A METAL VIEW OUTLIVING ITS WINDOW WILL HAPPEN
     unsafe { sdl3::sys::metal::SDL_Metal_DestroyView(view) };
     result
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests of the guns' hit rules.
+    //!
+    //! | Partitioning | Parts | Tests |
+    //! | --- | --- | --- |
+    //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
+    //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
+
+    use super::*;
+
+    #[test]
+    fn hits_weigh_by_gun_and_place() {
+        let mut has_hit: bool = false;
+        for _ in 0..2 {
+            assert_eq!(
+                take_hit_weight(Gun::Laser, &mut has_hit, false),
+                Some(LASER_HITS_TO_KILL)
+            );
+        }
+        assert_eq!(
+            take_hit_weight(Gun::Rifle, &mut has_hit, true),
+            Some(RIFLE_HEAD_HITS_TO_KILL)
+        );
+        assert_eq!(take_hit_weight(Gun::Rifle, &mut has_hit, false), None);
+        has_hit = false;
+        assert_eq!(
+            take_hit_weight(Gun::Rifle, &mut has_hit, false),
+            Some(RIFLE_BODY_HITS_TO_KILL)
+        );
+    }
 }

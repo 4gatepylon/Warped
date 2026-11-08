@@ -58,13 +58,16 @@ pub struct Overlay<'a> {
 }
 
 /// `OverlayWand` is the shader's `OverlayWand`: the wand's shaft centre in camera space (x right,
-/// y up, -z ahead, meters; w unused), its axes as columns (its length along its own -z) and its
-/// tip's RGB colour.
+/// y up, -z ahead, meters; w unused), its axes as columns (its length along its own -z), its
+/// shaft's half sizes and RGB colour, and its tip's half sizes and RGB colour.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct OverlayWand {
     pub center_m: [f32; 4],
     pub axes: [[f32; 4]; 3],
+    pub shaft_half_m: [f32; 4],
+    pub shaft_color: [f32; 4],
+    pub tip_half_m: [f32; 4],
     pub tip_color: [f32; 4],
 }
 
@@ -1111,6 +1114,9 @@ impl MetalRenderer {
         let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
             center_m: [0.0; 4],
             axes: [[0.0; 4]; 3],
+            shaft_half_m: [0.0; 4],
+            shaft_color: [0.0; 4],
+            tip_half_m: [0.0; 4],
             tip_color: [0.0; 4],
         });
         let mut rects: [OverlayRect; MAX_OVERLAY_RECT_COUNT] = [OverlayRect {

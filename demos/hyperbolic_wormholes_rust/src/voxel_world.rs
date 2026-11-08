@@ -555,6 +555,16 @@ impl VoxelWorld {
         Some(self.get_material_at(inside, &[hit.structure?]))
     }
 
+    /// `is_head_hit` says whether point x, on an avatar (structure `k`, from `with_avatars`), is in
+    /// its top cell, its head.
+    ///
+    /// Example: `let is_head = shared.is_head_hit(k, spot);`
+    pub fn is_head_hit(&self, k: usize, x: DVec4) -> bool {
+        let s: &VoxelStructure = &self.structures[k];
+        let p: DVec4 = s.inverse * x;
+        p.y / p.w * self.r / s.cell_m + s.origin[1] >= (AVATAR_SIZE[1] - 1) as f64
+    }
+
     /// `get_material_at` gives the material of the cell holding point x among `candidates`, or 0.
     ///
     /// Example: `let m = world.get_material_at(x, &nearby);`

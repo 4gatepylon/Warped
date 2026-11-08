@@ -195,6 +195,18 @@ which has nothing to do with the guns' heat.
 
 These values are configurable and may change after playtests.
 
+## Controls
+
+| Key | Action |
+| --- | --- |
+| Mouse | Look around |
+| `W`, `A`, `S`, `D` | Walk forward, left, back, right |
+| `Shift` (held) | Sprint, while there is energy (see [Sprinting](#sprinting)) |
+| `Space` | Jump |
+| Left click | Shoot (hold it for a weapon that fires while held, such as the rifle) |
+| Mouse wheel, `1`, `2` | Switch weapons (see [Weapons](#weapons)) |
+| `E` (held) | Deactivate a console of the opposing team's pylon (see [Winning a level](#winning-a-level)) |
+
 ## Bullets, lasers and light
 
 - Warp objects bend light, so players see the world bent around them.
@@ -211,6 +223,8 @@ Every weapon follows these rules:
   the shooter is.
 - A player who is hit is slowed.
 - The rules are a simplified version of those of tactical shooters such as CS:GO.
+- A player who carries two weapons switches between them with the mouse wheel (either way swaps
+  them), or with `1` for the first and `2` for the second.
 
 | Parameter | Sniper rifle | Rifle |
 | --- | --- | --- |

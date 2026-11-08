@@ -26,10 +26,6 @@ constant float OVERLAY_TITLE_LEVEL = 0.75;
 constant float OVERLAY_TEXT_LEVEL = 0.25;
 constant float4 OVERLAY_TITLE_COLOR = float4(1.0, 0.35, 0.3, 1.0);
 constant float4 OVERLAY_TEXT_COLOR = float4(0.92, 0.94, 0.98, 1.0);
-constant float3 WAND_SHAFT_HALF_M = float3(0.011, 0.011, 0.16);
-constant float3 WAND_TIP_HALF_M = float3(0.016, 0.016, 0.028);
-constant float3 WAND_TIP_OFFSET_M = float3(0.0, 0.0, -0.188);
-constant float3 WAND_SHAFT_COLOR = float3(0.2, 0.17, 0.22);
 constant float3 WAND_LIGHT_DIRECTION = float3(-0.42, 0.78, 0.46);
 constant float WAND_AMBIENT = 0.3;
 constant float WAND_SPECULAR = 0.45;
@@ -1995,11 +1991,15 @@ struct OverlayParams {
 
 /**
  * @brief `OverlayWand` is the wand in camera space (x right, y up, -z ahead, meters): its shaft's centre, its axes (its
- * length along its own -z) and its tip's colour.
+ * length along its own -z), its shaft's half sizes and colour, and its tip's half sizes and colour (the tip sits at the
+ * shaft's front end).
  */
 struct OverlayWand {
     float4 center_m;
     float4 axes[3];
+    float4 shaft_half_m;
+    float4 shaft_color;
+    float4 tip_half_m;
     float4 tip_color;
 };
 
@@ -2035,11 +2035,11 @@ static float hit_box(float3 d, float3 center, float3x3 axes, float3 half_m, thre
  */
 static float4 shade_wand(float3 d, constant OverlayWand &wand) {
     float3x3 axes = float3x3(wand.axes[0].xyz, wand.axes[1].xyz, wand.axes[2].xyz);
-    float3 tip_center = wand.center_m.xyz + axes * WAND_TIP_OFFSET_M;
+    float3 tip_center = wand.center_m.xyz + axes * float3(0.0, 0.0, -(wand.shaft_half_m.z + wand.tip_half_m.z));
     float3 shaft_normal, tip_normal;
     float shaft_edge_m, tip_edge_m;
-    float t_shaft = hit_box(d, wand.center_m.xyz, axes, WAND_SHAFT_HALF_M, shaft_normal, shaft_edge_m);
-    float t_tip = hit_box(d, tip_center, axes, WAND_TIP_HALF_M, tip_normal, tip_edge_m);
+    float t_shaft = hit_box(d, wand.center_m.xyz, axes, wand.shaft_half_m.xyz, shaft_normal, shaft_edge_m);
+    float t_tip = hit_box(d, tip_center, axes, wand.tip_half_m.xyz, tip_normal, tip_edge_m);
     float3 light = normalize(WAND_LIGHT_DIRECTION);
     if (t_tip > 0.0 && (t_shaft < 0.0 || t_tip < t_shaft)) {
         return float4(wand.tip_color.rgb * (WAND_TIP_GLOW + WAND_AMBIENT * max(dot(tip_normal, light), 0.0)), 1.0);
@@ -2048,7 +2048,7 @@ static float4 shade_wand(float3 d, constant OverlayWand &wand) {
         float diffuse = max(dot(shaft_normal, light), 0.0);
         float highlight = pow(max(dot(reflect(-light, shaft_normal), -d), 0.0), WAND_SHININESS);
         float edge = mix(WAND_EDGE_DARKEN, 1.0, smoothstep(0.0, WAND_EDGE_M, shaft_edge_m));
-        return float4(WAND_SHAFT_COLOR * (WAND_AMBIENT + diffuse) * edge + WAND_SPECULAR * highlight, 1.0);
+        return float4(wand.shaft_color.rgb * (WAND_AMBIENT + diffuse) * edge + WAND_SPECULAR * highlight, 1.0);
     }
     float miss_m = length(cross(d, tip_center));
     return float4(wand.tip_color.rgb * WAND_HALO_STRENGTH * exp(-miss_m / WAND_HALO_M), 0.0);
