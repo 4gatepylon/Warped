@@ -802,6 +802,15 @@
   any viewpoint).
 - **Rationale:** you asked to get rid of respawning by choice.
 
+### D69. A crosshair
+
+- **Choice:** four short white arms around the middle of the window, where shots and console holds aim. Each arm
+  is 1.2% of the window's height long, 0.6% from the middle and 0.25% thick, sized by the height so it looks the
+  same at any window size. It hides while a banner ("YOU DIED", a win) shows.
+- **Alternatives:** a dot (harder to see on bright blocks); arms with a dark outline (more rectangles; white reads
+  well on the dark sky and the lit blocks).
+- **Rationale:** you asked for a crosshair.
+
 
 ## Baselines
 
