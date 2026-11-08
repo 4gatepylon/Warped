@@ -10,10 +10,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-46 Settings menu.** A screen to exit to a menu where a player changes their own choices (hotkeys and the
-  rest of the per-player settings). Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/settings-menu`, 2026-11-07.
-
 ## Open
 
 - [ ] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
@@ -121,3 +117,5 @@ is in [`AGENTS.md`](AGENTS.md).
   (now the `keys` of `player_settings.yaml`, each player's own). #135.
 - [x] **W-45 Player and server settings.** The YAML settings are split into `player_settings.yaml`, each
   player's own, and `server_settings.yaml`, the server's. #140.
+- [x] **W-46 Settings menu.** A screen to exit to a menu where a player changes their own choices (hotkeys and the
+  rest of the per-player settings): `Tab` opens it. #143.
