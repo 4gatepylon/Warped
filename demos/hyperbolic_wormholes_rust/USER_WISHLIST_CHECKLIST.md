@@ -45,6 +45,15 @@ is in [`AGENTS.md`](AGENTS.md).
   relativistic effect on colour if possible.
 - [ ] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
   look cool and pretty.
+- [ ] **W-54 Professional HUD bars.** Make the health, ammo and other bars look more professional: at the very least
+  slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
+  implementing.
+- [ ] **W-55 Aiming.** Players can aim (right click by default), so the flashlight moves off right click to a
+  different key.
+- [ ] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
+- [ ] **W-57 Laser stuck in a room.** In one of the rooms on the red side, the one with windows one block wide,
+  shooting out from close to a window hits some sort of hitbox (or looks like it) and the laser doesn't leave the
+  room.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
 
