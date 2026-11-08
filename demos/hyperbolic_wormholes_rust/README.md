@@ -52,7 +52,9 @@ make run-demo RENDERER=cpu
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
-  The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
+  The laser is a light ray from your hand that bends near mouths and goes through them, and through glass; the HUD
+  says what it hits. On Lunar Surface the habitat modules' and walkways' windows are glass in real openings: you
+  see out of them and shoot through them, but can't climb through them.
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).

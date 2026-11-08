@@ -130,6 +130,7 @@ impl Footprint {
                     DVec3::new(0.0, end_m - start_m, 0.0),
                     0.0,
                     1.0,
+                    None,
                 )?;
                 Some((
                     self.center_h_m + start_m + mu * (end_m - start_m),

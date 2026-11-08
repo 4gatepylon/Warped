@@ -1099,6 +1099,43 @@
   - window holes in the walls without glass, as doorways are (players could climb through).
 - **Rationale:** you reported that a laser shot out of a window close up doesn't leave the room; it stops on the
   glass by design, so whether lasers should pass through windows is your call.
+- **Superseded by:** D90 (W-70): lasers now pass through glass, and the windows are real openings.
+
+### D90. Windows you see and shoot through (W-70)
+
+- **Choice:**
+  - **Walls:** the level's exporter (`demos/levels/lunar_surface/shape_builders.js`, `add_wall_around_windows`)
+    builds each habitat module's and walkway's side wall as a piece below the window row, a piece above it, and a
+    pillar between each pair of windows, so each glass pane fills a real 1 m hole. The pieces keep the wall's 1 m
+    thickness and 0.3 m rounding. Each pillar reaches one cell into the pieces above and below, so its rounded ends
+    are buried and no seam shows. The panes are unchanged: 1 m blocks, 6 cm proud of each face. The map goes from
+    340 to 398 shapes (a habitat module from 29 to 41); no other structure changes.
+  - **Format:** `glass` is now see-through for light and lasers, and stops players (`common/maps/README.md`). The
+    schema and validator never encoded it.
+  - **Lunar Surface:** the laser's tracer leaves glass shapes out (`find_hit_mu` takes a see-through material), so
+    the drawn beam and its spot go on to whatever lies behind. The console aim ray (`E`) passes through glass too.
+    The picture already did; `render_voxel.metal` needed no change.
+  - **Players:** glass still stops them: their collision probes count every shape.
+  - **House:** its laser passes through glass boxes too (`Scene::ForLaser`). But the house's windows are glass laid
+    on solid plank walls, and both house renderers draw glass as an opaque sheen, so a shot at a house window stops
+    on the wall 6 cm behind the glass, which looks the same as before.
+  - **WebGL level:** its laser passes through glass too (one line in `trace_structure_cpu`). Its voxel walls
+    already had holes behind the panes.
+  - **Tests:** `the_laser_stops_on_a_window_pane` (D88) became `a_laser_passes_through_a_window`: shots from inside
+    (touching the pane, close, across the room, slantwise) leave the module, a shot from outside comes in to the
+    floor, and the pane's middle is still solid for players. `the_laser_passes_through_a_house_window` and
+    `a_line_passes_through_a_see_through_pane` cover the house and the tracer.
+  - **Frame time:** no change measured. The machine's GPU was shared with other agents' renders, so the same view
+    varied by up to 40% between runs at 2560 × 1600.
+- **Alternatives:**
+  - a second glass kind that stops lasers (City Sphere's design in `game_design/DESIGN.md` wants a glass floor that
+    players see through but can't shoot through; the format can add one when that level is built);
+  - thinner panes in the middle of the wall (the level's 1 m panes were kept);
+  - holes without glass, as doorways are (nothing would show it is a window, and players could climb through);
+  - see-through glass in the house as well (its walls would need holes and its two renderers a glass pass);
+  - a stronger glass look, such as a reflection, so panes show from outside (the voxel renderer tints glass 20%
+    darker, so from outside a window reads mostly as an opening).
+- **Rationale:** asked whether windows should be see-through and let lasers through, you answered "Both".
 
 
 ## Baselines
