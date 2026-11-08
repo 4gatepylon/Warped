@@ -1,0 +1,164 @@
+# `main.tf` is the Warped cloud deploy on Google Cloud: one small VM that runs a game server per
+# line of `games.txt`, a public bucket for the download page, a private bucket for the server
+# bundle, and a monthly budget.
+#
+# Interface:
+#     Variables in `variables.tf`, outputs in `outputs.tf`; the Makefile runs it.
+#
+# Example:
+#     make apply-infra
+#
+# Must know:
+#     - The VM's startup script (`startup.sh.tftpl`) runs on every boot and fetches the newest
+#       bundle, so resetting the VM deploys a new server.
+#     - The e2-micro VM, its 30 GB of standard disk and 200 GB a month of Standard-tier traffic are
+#       free in us-central1, us-west1 and us-east1; the static IP is not.
+
+terraform {
+  required_version = ">= 1.5"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+  backend "gcs" {
+    prefix = "warped"
+  }
+}
+
+provider "google" {
+  project               = var.project_id
+  region                = var.region
+  zone                  = var.zone
+  billing_project       = var.project_id
+  user_project_override = true
+}
+
+locals {
+  games = [for line in compact(split("\n", file(var.games_file))) : {
+    port = tonumber(split(" ", line)[0])
+    map  = split(" ", line)[1]
+  }]
+  game_server_tag = "warped-game-server"
+}
+
+data "google_project" "this" {}
+
+resource "google_compute_network" "warped" {
+  name                    = "warped"
+  auto_create_subnetworks = true
+}
+
+resource "google_compute_firewall" "games" {
+  name          = "warped-games"
+  network       = google_compute_network.warped.id
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = [local.game_server_tag]
+  allow {
+    protocol = "udp"
+    ports    = [for game in local.games : tostring(game.port)]
+  }
+}
+
+resource "google_compute_firewall" "ssh_through_iap" {
+  name          = "warped-ssh-through-iap"
+  network       = google_compute_network.warped.id
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = [local.game_server_tag]
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
+resource "google_compute_address" "game_server" {
+  name         = "warped-game-server"
+  region       = var.region
+  network_tier = "STANDARD"
+}
+
+resource "google_storage_bucket" "site" {
+  name                        = "${var.project_id}-site"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+}
+
+resource "google_storage_bucket_iam_member" "site_is_public" {
+  bucket = google_storage_bucket.site.name
+  role   = "roles/storage.objectViewer"
+  member = "allUsers"
+}
+
+resource "google_storage_bucket" "server" {
+  name                        = "${var.project_id}-server"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = true
+}
+
+resource "google_service_account" "game_server" {
+  account_id   = "warped-game-server"
+  display_name = "Warped game server"
+}
+
+resource "google_storage_bucket_iam_member" "game_server_reads_bundle" {
+  bucket = google_storage_bucket.server.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.game_server.email}"
+}
+
+resource "google_compute_instance" "game_server" {
+  name                      = "warped-game-server"
+  machine_type              = "e2-micro"
+  zone                      = var.zone
+  tags                      = [local.game_server_tag]
+  allow_stopping_for_update = true
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+      size  = 10
+      type  = "pd-standard"
+    }
+  }
+  network_interface {
+    network = google_compute_network.warped.id
+    access_config {
+      nat_ip       = google_compute_address.game_server.address
+      network_tier = "STANDARD"
+    }
+  }
+  service_account {
+    email  = google_service_account.game_server.email
+    scopes = ["cloud-platform"]
+  }
+  metadata = {
+    game-password = var.game_password
+    startup-script = templatefile("${path.module}/startup.sh.tftpl", {
+      bucket = google_storage_bucket.server.name
+      games  = local.games
+    })
+  }
+}
+
+resource "google_billing_budget" "monthly" {
+  billing_account = data.google_project.this.billing_account
+  display_name    = "Warped monthly budget"
+  budget_filter {
+    projects = ["projects/${data.google_project.this.number}"]
+  }
+  amount {
+    specified_amount {
+      currency_code = "USD"
+      units         = tostring(var.monthly_budget_usd)
+    }
+  }
+  threshold_rules {
+    threshold_percent = 0.5
+  }
+  threshold_rules {
+    threshold_percent = 1.0
+  }
+}
