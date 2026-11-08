@@ -351,6 +351,7 @@ pub struct Wind {
     pub log_index_gradient_per_m: f64,
     pub segment_m: f64,
     pub gust: Option<Gust>,
+    pub laser_gradient_per_view_gradient: Option<f64>,
 }
 
 /// `Gust` makes a wind's strength (never its direction) vary smoothly in space and time (W-121):

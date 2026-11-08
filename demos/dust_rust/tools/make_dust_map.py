@@ -21,7 +21,9 @@ JITTER_M = 1.5
 JITTER_YAW_RAD = 0.3
 JITTER_SCALE_FRAC = 0.12
 WIND_LOG_INDEX_GRADIENT_PER_M = 0.00144
-GUST_STRENGTH_FRAC = 0.4
+GUST_STRENGTH_FRAC = 0.2
+GUST_SIZE_M = 3000
+LASER_GRADIENT_PER_VIEW_GRADIENT = 2.4
 OUTPUT = Path(__file__).resolve().parents[3] / "common/maps/dust/map.json"
 TERRAIN = {"kind": "crater", "rim_u_m": 170, "rim_v_m": 85, "wall_m": 25, "rim_height_m": 16,
            "relief_m": 0.7, "relief_wavelength_m": 22, "seed": 5}
@@ -219,7 +221,8 @@ def main() -> None:
             "fog": {"color": [0.74, 0.55, 0.35], "start_m": 4, "distance_m": 50, "max_frac": 0.94},
             "sand": {"gust_frac": 0.5, "streak_frac": 0.45, "sheet_frac": 0.35},
             "wind": {"direction": [1, 0, 0], "log_index_gradient_per_m": WIND_LOG_INDEX_GRADIENT_PER_M, "segment_m": 48,
-                     "gust": {"seed": JITTER_SEED, "strength_frac": GUST_STRENGTH_FRAC, "size_m": 45, "speed_m_per_s": 14}},
+                     "gust": {"seed": JITTER_SEED, "strength_frac": GUST_STRENGTH_FRAC, "size_m": GUST_SIZE_M, "speed_m_per_s": 14},
+                     "laser_gradient_per_view_gradient": LASER_GRADIENT_PER_VIEW_GRADIENT},
         },
         "spawns": [{"team": "blue", "frame": make_frame(-104, 0, ground(-104, 0), 0.0)},
                    {"team": "red", "frame": make_frame(104, 0, ground(104, 0), math.pi)}],

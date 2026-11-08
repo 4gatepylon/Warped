@@ -3653,10 +3653,11 @@
    "segment_m": 48,
    "gust": {
     "seed": 121,
-    "strength_frac": 0.4,
-    "size_m": 45,
+    "strength_frac": 0.2,
+    "size_m": 3000,
     "speed_m_per_s": 14
-   }
+   },
+   "laser_gradient_per_view_gradient": 2.4
   }
  },
  "spawns": [

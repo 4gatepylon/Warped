@@ -39,7 +39,20 @@ LAN discovery 47831.
   downwind, with curvature k per meter. Rays and the laser integrate it kick-drift-kick in chords of `segment_m`
   (48 m; 12 m looked the same and cost 5 ms more a frame): half a kick by ∇ln n's part across the ray, a geodesic chord, half a kick. Inside wormhole mouths the
   wind's gradient adds to the mouth's own. The Metal shader (`wind_gradient`, `wind_kick`) and the CPU laser
-  (`WindField` in `src/voxel_world.rs`) use the same rule, so the laser lands where the crosshair shows.
+  (`WindField` in `src/voxel_world.rs`) use the same rule. Dust's `direction` is the map's x, which is the
+  Fermi v axis, so the wind blows across the line between the spawns.
+- **Gusts** (`atmosphere.wind.gust`): the wind keeps one direction and only its strength changes, by 1 plus
+  `strength_frac` (20%) times the mean of three sine waves with phases from `seed`, periods of 5, 7 and 11 s and
+  wavelengths of a few `size_m` (3000 m, so almost the same everywhere on the map). Every window and the server
+  evaluate them at the shared UTC clock, so lasers, views, fog and streaks agree (`two_worlds_agree_on_the_gusts`).
+- **Laser bend** (`atmosphere.wind.laser_gradient_per_view_gradient`, Dust: 2.4): the laser feels 2.4 times the
+  light's wind, so it visibly curves downwind: fired across the wind it lands about 3 m downwind of the
+  crosshair at 50 m and about 8 m at 80 m (light alone bends 2 m and 6 m there). The window draws the beam and
+  the server decides hits from the same `trace_laser` path. Maps without the key bend the laser like light, so it
+  lands on the crosshair.
+- **Storm sky** (`paint_storm_sky` in the shader, only for rays that leave the world): haze bands drifting
+  downwind, a darker brown storm wall on the horizon and faded mesa silhouettes below it. Nothing in the world
+  changes; it costs 0 to 1.3 ms a frame (noisy on this VM).
 - **Sandstorm**: `atmosphere.fog` replaces the haze: colour, start (4 m), e-folding distance (60 m) and the most
   it hides (94%). Rays stop 5 e-foldings past the start (304 m), where the fog hides all but 0.7%.
 - **Blowing sand** (`blow_sand` in the shader, on maps with fog; strengths in the map's `atmosphere.sand`, a map

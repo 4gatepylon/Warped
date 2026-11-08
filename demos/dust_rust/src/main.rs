@@ -286,6 +286,10 @@ struct Arguments {
     /// With --bench-views: render photogenic views (low sun, robots, thinner fog from above) instead.
     #[arg(long, requires = "bench_views")]
     photo_views: bool,
+    /// With --bench-views: also render this many frames of each laser view, 1/30 s apart, as the
+    /// gusts, the blowing sand, the laser's bend and its burst of sand move, under <view>_clip/.
+    #[arg(long, requires = "bench_views")]
+    clip_frame_count: Option<u32>,
     /// Render the map from straight above for the menu's map page, without fog or wind, and save
     /// it in map_pictures/ (the window reads it there).
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot"])]
@@ -1054,7 +1058,8 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
 }
 
 /// `VoxelView` is a named viewpoint on a voxel map, from the Lunar Surface level's own list: where
-/// the eye stands (Fermi coordinates), what it faces, its height when flying and its pitch.
+/// the eye stands (Fermi coordinates), what it faces, its height when flying, its pitch and, when
+/// someone else fires the laser, that shooter's feet and target.
 struct VoxelView {
     name: &'static str,
     at_m: [f64; 2],
@@ -1064,10 +1069,11 @@ struct VoxelView {
     is_laser_on: bool,
     robots: Vec<([f64; 2], [f64; 2], usize)>,
     fog_scale: f64,
+    shooter_m: Option<([f64; 2], [f64; 2])>,
 }
 
 /// `make_voxel_bench_views` gives the voxel benchmark's viewpoints on Dust (W-121), with the laser
-/// fired into a wormhole and across the wind.
+/// fired into a wormhole, downwind and (watched from behind its shooter) across the wind.
 ///
 /// Example: `let views = make_voxel_bench_views();`
 fn make_voxel_bench_views() -> Vec<VoxelView> {
@@ -1080,6 +1086,7 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         is_laser_on: false,
         robots: Vec::new(),
         fog_scale: 1.0,
+        shooter_m: None,
     };
     vec![
         view("blue_spawn", [-104.0, 0.0], [0.0, 0.0], None, 0.0),
@@ -1116,7 +1123,18 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         },
         VoxelView {
             is_laser_on: true,
-            ..view("laser_cross_wind", [0.0, -40.0], [0.0, 40.0], None, 0.0)
+            ..view("laser_downwind", [0.0, -40.0], [0.0, 40.0], None, 0.0)
+        },
+        VoxelView {
+            is_laser_on: true,
+            shooter_m: Some(([-70.0, -20.0], [70.0, -20.0])),
+            ..view(
+                "laser_across_wind",
+                [-85.0, -20.0],
+                [0.0, -20.0],
+                Some(14.0),
+                -0.2,
+            )
         },
     ]
 }
@@ -1138,6 +1156,7 @@ fn make_voxel_photo_views() -> Vec<VoxelView> {
         is_laser_on: false,
         robots,
         fog_scale,
+        shooter_m: None,
     };
     vec![
         view(
@@ -1213,6 +1232,65 @@ fn make_voxel_photo_views() -> Vec<VoxelView> {
 /// picture's pixels (3: 9 samples a pixel).
 /// `BENCH_DUST_AGE_S` is how old a laser view's dust burst is when the benchmark draws it.
 const BENCH_DUST_AGE_S: f64 = 0.5;
+
+/// `CLIP_START_UTC_S` is the shared UTC time a clip starts at, `CLIP_FRAMES_PER_S` its frame rate, and
+/// `CLIP_BURST_PERIOD_S` how often its laser's burst of sand starts again.
+const CLIP_START_UTC_S: f64 = 1.79e9;
+const CLIP_FRAMES_PER_S: f64 = 30.0;
+const CLIP_BURST_PERIOD_S: f64 = 1.5;
+
+/// `VoxelClip` is a clip of a bench view: its name, its camera, the shooter's camera and how many frames it has.
+struct VoxelClip {
+    name: &'static str,
+    camera: DMat4,
+    shot_camera: DMat4,
+    frame_count: u32,
+}
+
+/// `save_voxel_clip` renders `clip`'s frames of `world` firing the laser, `CLIP_FRAMES_PER_S` apart on the shared
+/// UTC clock from `CLIP_START_UTC_S` (the gusts, the blowing sand, the laser's bend and its burst of sand all move),
+/// and saves them as `<name>_clip/<frame>.png` in `folder`.
+///
+/// Example: `save_voxel_clip(&folder, &clip, world, render_px, size_px, renderer.as_mut(), &mut pixels)?;`
+fn save_voxel_clip(
+    folder: &Path,
+    clip: &VoxelClip,
+    world: &VoxelWorld,
+    render_px: (u32, u32),
+    size_px: (u32, u32),
+    renderer: &mut dyn Renderer,
+    pixels: &mut [u8],
+) -> Result<()> {
+    let clip_folder: PathBuf = folder.join(format!("{}_clip", clip.name));
+    fs::create_dir_all(&clip_folder)?;
+    let mut world: VoxelWorld = world.clone();
+    for i in 0..clip.frame_count {
+        let age_s: f64 = f64::from(i) / CLIP_FRAMES_PER_S;
+        world.set_sky_time_s(CLIP_START_UTC_S + age_s);
+        let shot: voxel_world::Shot = world.trace_laser(clip.shot_camera);
+        let beams: Vec<render_voxel::LaserBeam> = vec![render_voxel::LaserBeam {
+            segments: shot.segments.clone(),
+            team: 0,
+            is_rifle: false,
+            speckle_frac: 0.0,
+        }];
+        let clouds: Vec<dust::DustCloud> = dust::DustBurst::FromShot(&world, &shot, 0.0, false)
+            .and_then(|burst| burst.get_cloud(age_s % CLIP_BURST_PERIOD_S))
+            .into_iter()
+            .collect();
+        let spot: Option<(glam::DVec4, u32)> = shot.spot.map(|x| (x, 0));
+        let frame: VoxelFrame =
+            VoxelFrame::Build(&world, clip.camera, &beams, spot, &clouds, render_px);
+        renderer.render(FrameData::Voxel(&frame), size_px, pixels)?;
+        save_png(
+            &clip_folder.join(format!("{i:04}.png")),
+            pixels,
+            size_px.0,
+            size_px.1,
+        )?;
+    }
+    Ok(())
+}
 const MAP_PICTURE_SAMPLES_PER_PX: u32 = 3;
 /// `MAP_PICTURE_EYE_H_M` is the height the map picture's rays start from, above every structure.
 const MAP_PICTURE_EYE_H_M: f64 = 60.0;
@@ -1371,7 +1449,11 @@ fn bench_voxel_views(
         let player: VoxelPlayer =
             VoxelPlayer::AtView(world, view.at_m, view.target_m, view.h_m, view.pitch_rad);
         let camera: DMat4 = player.get_camera_frame(world);
-        let shot: Option<voxel_world::Shot> = view.is_laser_on.then(|| world.trace_laser(camera));
+        let shot_camera: DMat4 = view.shooter_m.map_or(camera, |(at_m, target_m)| {
+            VoxelPlayer::AtView(world, at_m, target_m, None, 0.0).get_camera_frame(world)
+        });
+        let shot: Option<voxel_world::Shot> =
+            view.is_laser_on.then(|| world.trace_laser(shot_camera));
         let beams: Vec<render_voxel::LaserBeam> = shot
             .iter()
             .map(|s| render_voxel::LaserBeam {
@@ -1412,9 +1494,27 @@ fn bench_voxel_views(
             "view": view.name,
             "median_ms": times_ms[times_ms.len() / 2],
             "fastest_ms": times_ms[0],
+            "p99_ms": times_ms[(times_ms.len() * 99 / 100).min(times_ms.len() - 1)],
             "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
             "laser": shot.as_ref().map(|s| multiplayer::describe_shot(world, s)),
         }));
+        if let Some(frame_count) = arguments.clip_frame_count.filter(|_| view.is_laser_on) {
+            let clip: VoxelClip = VoxelClip {
+                name: view.name,
+                camera,
+                shot_camera,
+                frame_count,
+            };
+            save_voxel_clip(
+                &folder,
+                &clip,
+                world,
+                render_px,
+                size_px,
+                renderer.as_mut(),
+                &mut pixels,
+            )?;
+        }
     }
     report_bench(arguments, &folder, renderer.name(), render_px, results)
 }
@@ -1777,6 +1877,7 @@ fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result
             "view": view.name,
             "median_ms": times_ms[times_ms.len() / 2],
             "fastest_ms": times_ms[0],
+            "p99_ms": times_ms[(times_ms.len() * 99 / 100).min(times_ms.len() - 1)],
             "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
             "laser": report.as_ref().map(describe_laser),
         }));
@@ -1815,14 +1916,15 @@ fn report_bench(
         println!("{summary}");
     } else {
         println!(
-            "{:<18} {:>10} {:>10} {:>10}  laser",
-            "view", "median ms", "fastest ms", "GPU ms"
+            "{:<18} {:>10} {:>10} {:>10} {:>10}  laser",
+            "view", "median ms", "p99 ms", "fastest ms", "GPU ms"
         );
         for view in &results {
             println!(
-                "{:<18} {:>10.1} {:>10.1} {:>10}  {}",
+                "{:<18} {:>10.1} {:>10.1} {:>10.1} {:>10}  {}",
                 view["view"].as_str().unwrap_or_default(),
                 view["median_ms"].as_f64().unwrap_or_default(),
+                view["p99_ms"].as_f64().unwrap_or_default(),
                 view["fastest_ms"].as_f64().unwrap_or_default(),
                 view["median_gpu_ms"]
                     .as_f64()

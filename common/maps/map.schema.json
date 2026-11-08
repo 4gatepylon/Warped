@@ -343,6 +343,7 @@
             "direction": {"$ref": "#/$defs/vector3"},
             "log_index_gradient_per_m": {"type": "number"},
             "segment_m": {"type": "number", "exclusiveMinimum": 0},
+            "laser_gradient_per_view_gradient": {"type": "number", "minimum": 0, "description": "How many times more strongly lasers bend than light (default 1, light and lasers alike)."},
             "gust": {
               "type": "object",
               "description": "Gusts: the wind's strength (not its direction) times 1 plus up to strength_frac, from three waves size_m across seeded by seed, drifting downwind at speed_m_per_s, on the shared UTC clock.",

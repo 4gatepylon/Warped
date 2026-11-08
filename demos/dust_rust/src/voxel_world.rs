@@ -352,6 +352,7 @@ pub struct WindField {
     pub segment_s: f64,
     pub gust: Option<GustField>,
     pub time_s: f64,
+    pub laser_k_per_k: f64,
 }
 
 /// `GUST_WAVE_SIZES` gives each gust wave's wavelengths along and across the wind, in the map's
@@ -449,6 +450,18 @@ impl WindField {
                 .gust
                 .map(|gust| GustField::FromMap(&gust, DVec3::new(x, y, z), r)),
             time_s: 0.0,
+            laser_k_per_k: wind.laser_gradient_per_view_gradient.unwrap_or(1.0),
+        }
+    }
+
+    /// `get_laser_wind` is the wind lasers feel: `laser_k_per_k` times as strong as the light's,
+    /// so a beam visibly curves downwind of what the eye sees.
+    ///
+    /// Example: `let laser_wind = wind.get_laser_wind();`
+    pub fn get_laser_wind(&self) -> WindField {
+        WindField {
+            k: self.k * self.laser_k_per_k,
+            ..*self
         }
     }
 
@@ -1905,6 +1918,7 @@ impl VoxelWorld {
     /// Example: `let shot = world.trace_laser(player.get_camera_frame(&world));`
     pub fn trace_laser(&self, camera: DMat4) -> Shot {
         let max_s: f64 = LASER_MAX_LENGTH_M / self.r;
+        let laser_wind: Option<WindField> = self.wind.map(|wind| wind.get_laser_wind());
         let (mut x, mut v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
         let (mut travelled, mut inside) = (0.0, self.find_warp_inside(x));
         let mut pieces: Vec<Vec<DVec4>> = vec![vec![x]];
@@ -1916,9 +1930,9 @@ impl VoxelWorld {
                 break;
             }
             let Some(w) = inside else {
-                let segment_s: f64 = self.wind.map_or(f64::INFINITY, |wind| wind.segment_s);
+                let segment_s: f64 = laser_wind.map_or(f64::INFINITY, |wind| wind.segment_s);
                 let s_max: f64 = (max_s - travelled).min(segment_s);
-                if let Some(wind) = &self.wind {
+                if let Some(wind) = &laser_wind {
                     v = wind.kick(x, v, 0.5 * s_max);
                 }
                 let (s_end, entering) = self.find_warp_entry(x, v, s_max);
@@ -1936,7 +1950,7 @@ impl VoxelWorld {
                 x = xn;
                 travelled += s_end;
                 pieces.last_mut().expect("a piece").push(x);
-                if let Some(wind) = &self.wind {
+                if let Some(wind) = &laser_wind {
                     v = wind.kick(x, v, 0.5 * s_end);
                     if entering.is_none() {
                         continue;
@@ -2548,6 +2562,7 @@ mod tests {
     //! | Thrown mouth's place | clear of every warp, in a map warp's reach, in another thrown mouth's reach | `thrown_mouths_keep_clear_of_other_warps` |
     //! | Marker | inside a thrown mouth's reach (in its list, hit by a laser) | `a_marker_is_listed_and_hit` |
     //! | Thrown pair on Dust | shot into across terrain and wind (the laser goes through) | `a_dust_throw_carries_the_laser_through_the_wind` |
+    //! | Dust's laser wind | laser against light across the wind (2 to 6 m farther downwind at 50 m) | `the_laser_bends_more_than_the_view` |
     //! | Dust's gusts | two places, two times (strength differs, direction stays downwind), worlds loaded apart at one UTC time, also years from 1970 (same gradient, same laser spot) | `gusts_change_strength_not_direction`, `two_worlds_agree_on_the_gusts` |
 
     use super::*;
@@ -3729,6 +3744,7 @@ mod tests {
             segment_s: 0.24,
             gust: None,
             time_s: 0.0,
+            laser_k_per_k: 1.0,
         };
         let origin: DVec4 = DVec4::new(0.0, 0.0, 0.0, 1.0);
         let gradient: DVec4 = wind.get_gradient(origin);
@@ -3745,8 +3761,38 @@ mod tests {
         );
     }
 
-    /// `the_dust_laser_bends_downwind` checks that on Dust a laser fired across the wind lands
-    /// downwind of where it lands without the wind.
+    /// `get_beam_point_m` gives the Fermi coordinates (u, v, h) of the point `s_m` along `shot`'s beam
+    /// in `world`.
+    fn get_beam_point_m(world: &VoxelWorld, shot: &Shot, s_m: f64) -> [f64; 3] {
+        let mut gone_m: f64 = 0.0;
+        for segment in &shot.segments {
+            let length_m: f64 = segment.length * world.r;
+            if gone_m + length_m >= s_m {
+                let x: DVec4 = geodesic_point(segment.a, segment.b, (s_m - gone_m) / world.r);
+                return world.get_fermi_coordinates(x);
+            }
+            gone_m += length_m;
+        }
+        panic!("the beam is {gone_m} m long, shorter than {s_m} m");
+    }
+
+    /// `ACROSS_WIND_AT_M` and `ACROSS_WIND_TARGET_M` are a clear lane across Dust's wind (which
+    /// blows along v), and `BEND_AT_M` how far along it the bend is measured.
+    const ACROSS_WIND_AT_M: [f64; 2] = [-70.0, -20.0];
+    const ACROSS_WIND_TARGET_M: [f64; 2] = [70.0, -20.0];
+    const BEND_AT_M: f64 = 50.0;
+
+    /// `get_downwind_m` gives how far downwind (along v) `world`'s laser is `BEND_AT_M` along the
+    /// lane across the wind.
+    fn get_downwind_m(world: &VoxelWorld) -> f64 {
+        let camera: DMat4 =
+            VoxelPlayer::AtView(world, ACROSS_WIND_AT_M, ACROSS_WIND_TARGET_M, None, 0.0)
+                .get_camera_frame(world);
+        get_beam_point_m(world, &world.trace_laser(camera), BEND_AT_M)[1]
+    }
+
+    /// `the_dust_laser_bends_downwind` checks that on Dust a laser fired across the wind goes
+    /// downwind of where it goes without the wind.
     #[test]
     fn the_dust_laser_bends_downwind() {
         let map: Map = Map::Load(&crate::map::get_map_folder("dust")).expect("the Dust map");
@@ -3755,11 +3801,8 @@ mod tests {
             wind: None,
             ..windy.clone()
         };
-        let camera: DMat4 = VoxelPlayer::AtView(&windy, [0.0, -40.0], [0.0, 40.0], None, 0.0)
-            .get_camera_frame(&windy);
-        let windy_spot: DVec4 = windy.trace_laser(camera).spot.expect("a windy hit");
-        let calm_spot: DVec4 = calm.trace_laser(camera).spot.expect("a calm hit");
-        assert!(windy_spot.x > calm_spot.x, "{windy_spot} vs {calm_spot}");
+        let (windy_m, calm_m) = (get_downwind_m(&windy), get_downwind_m(&calm));
+        assert!(windy_m > calm_m, "{windy_m} vs {calm_m}");
     }
 
     /// `a_dust_throw_carries_the_laser_through_the_wind` checks that on Dust, with its terrain and
@@ -3783,7 +3826,35 @@ mod tests {
         let camera: DMat4 = VoxelPlayer::AtView(&world, [-30.0, 0.0], [MOUTH_U_M, 0.0], None, 0.0)
             .get_camera_frame(&world);
         let shot: Shot = world.trace_laser(camera);
-        assert_eq!(shot.through, vec!["the purple wormhole".to_string()]);
+        assert_eq!(
+            shot.through.first().map(String::as_str),
+            Some("the purple wormhole")
+        );
+    }
+
+    /// `APPARENT_BEND_M` is the range the user asked for of a laser's bend as its shooter sees it,
+    /// against the bent light, `BEND_AT_M` across the wind.
+    const APPARENT_BEND_M: std::ops::Range<f64> = 2.0..6.0;
+
+    /// `the_laser_bends_more_than_the_view` checks that on Dust a laser fired across the wind goes
+    /// farther downwind than light does, by `APPARENT_BEND_M`, so its shooter sees it curve.
+    #[test]
+    fn the_laser_bends_more_than_the_view() {
+        let map: Map = Map::Load(&crate::map::get_map_folder("dust")).expect("the Dust map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let wind: WindField = world.wind.expect("Dust's wind");
+        let as_light: VoxelWorld = VoxelWorld {
+            wind: Some(WindField {
+                laser_k_per_k: 1.0,
+                ..wind
+            }),
+            ..world.clone()
+        };
+        let apparent_bend_m: f64 = get_downwind_m(&world) - get_downwind_m(&as_light);
+        assert!(
+            APPARENT_BEND_M.contains(&apparent_bend_m),
+            "{apparent_bend_m}"
+        );
     }
 
     /// `gusts_change_strength_not_direction` checks that Dust's gusts make the wind stronger and

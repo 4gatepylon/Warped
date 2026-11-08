@@ -132,6 +132,22 @@ constant float DUST_CUTOFF_WIDTHS = 3.0;
 constant float DUST_WRAP = 0.4;
 constant float DUST_FORWARD_GLOW = 0.8;
 constant float DUST_FORWARD_POWER = 6.0;
+constant float SKY_DRIFT_RAD_PER_S = 0.01;
+constant float SKY_BAND_AZIMUTH_SCALE = 3.0;
+constant float SKY_BAND_ELEVATION_SCALE = 9.0;
+constant float SKY_BAND_FRAC = 0.12;
+constant float SKY_WALL_AZIMUTH_SCALE = 2.0;
+constant float SKY_WALL_NOISE_Z = 7.3;
+constant float SKY_WALL_FRAC = 0.55;
+constant float SKY_WALL_HEIGHT = 0.12;
+constant float3 SKY_WALL_COLOR = float3(0.62, 0.47, 0.34);
+constant float SKY_MESA_HEIGHT = 0.06;
+constant float2 SKY_MESA_EDGES = float2(0.35, 0.55);
+constant float SKY_MESA_AZIMUTH_SCALE = 4.0;
+constant float SKY_MESA_NOISE_Z = 3.1;
+constant float SKY_MESA_SOFT = 0.004;
+constant float3 SKY_MESA_COLOR = float3(0.72, 0.58, 0.46);
+constant float SKY_MESA_FRAC = 0.7;
 constant int GUST_WAVE_COUNT = 3;
 constant float DUST_EARTHSHINE_FRAC = 0.5;
 constant float DUST_FOG_SKYLIGHT = 1.2;
@@ -2537,6 +2553,28 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
 }
 
 /**
+ * @brief `paint_storm_sky` gives the fog seen along escaping direction `d` (Fermi, z up) a storm sky: haze bands
+ * sliding downwind on the clock `time_s`, a dark brown storm wall low over the horizon, and far mesas faded by haze.
+ * @par Example
+ * @code
+ * fog = paint_storm_sky(fog, d, wind, across, u.sand.x);
+ * @endcode
+ */
+static float3 paint_storm_sky(float3 fog, float3 d, float2 wind, float2 across, float time_s) {
+    float azimuth_rad = atan2(dot(d.xy, across), dot(d.xy, wind)), elevation = d.z;
+    float2 ring = float2(cos(azimuth_rad - time_s * SKY_DRIFT_RAD_PER_S), sin(azimuth_rad - time_s * SKY_DRIFT_RAD_PER_S));
+    float band = sample_noise_3d(float3(ring * SKY_BAND_AZIMUTH_SCALE, elevation * SKY_BAND_ELEVATION_SCALE));
+    float wall = sample_noise_3d(float3(ring * SKY_WALL_AZIMUTH_SCALE, SKY_WALL_NOISE_Z));
+    float3 sky = fog * (1.0 + SKY_BAND_FRAC * (2.0 * band - 1.0));
+    float wall_frac = SKY_WALL_FRAC * (0.6 + 0.4 * wall) * exp(-max(elevation, 0.0) / SKY_WALL_HEIGHT);
+    sky = mix(sky, fog * SKY_WALL_COLOR, wall_frac);
+    float2 still = float2(cos(azimuth_rad), sin(azimuth_rad));
+    float ridge = SKY_MESA_HEIGHT * smoothstep(SKY_MESA_EDGES.x, SKY_MESA_EDGES.y, sample_noise_3d(float3(still * SKY_MESA_AZIMUTH_SCALE, SKY_MESA_NOISE_Z)));
+    float mesa = 1.0 - smoothstep(ridge - SKY_MESA_SOFT, ridge, elevation);
+    return mix(sky, fog * SKY_MESA_COLOR, SKY_MESA_FRAC * mesa * step(SKY_MESA_SOFT, ridge));
+}
+
+/**
  * @brief `blow_sand` mixes fog of opacity `fog_frac` (thickened and thinned by gusts drifting downwind halfway along
  * the ray) and sheets of sand `u.sand.w` opaque (noise `SAND_SHEET_SIZE_M`, a third of the way, thinner on near
  * surfaces) into `color`, then streaks of blowing sand at `SAND_LAYER_COUNT` distances in front of the camera, all
@@ -2556,6 +2594,7 @@ static float3 blow_sand(thread const Scene &scene, float3 color, float3 fog, flo
     float4 x = u.camera[3], v = u.camera[0] * d_cam.x + u.camera[1] * d_cam.y + u.camera[2] * d_cam.z;
     float3 eye = get_fermi(x, r), d = normalize(get_fermi(x * cosh(SAND_PROBE_S) + v * sinh(SAND_PROBE_S), r) - eye);
     float drift_m = u.sand.x * SAND_SPEED_M_PER_S;
+    if (travelled_m == INFINITY) fog = paint_storm_sky(fog, d, wind, across, u.sand.x);
     float gust_s = 0.5 * min(travelled_m, SAND_GUST_REACH_M) / r;
     float far_wind = gust_strength(u, x * cosh(gust_s) + v * sinh(gust_s)), near_wind = gust_strength(u, x);
     float3 g = eye + d * 0.5 * min(travelled_m, SAND_GUST_REACH_M);

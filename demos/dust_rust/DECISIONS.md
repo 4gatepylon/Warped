@@ -28,3 +28,12 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
     same cover. Pylons, consoles, spawns and the wormhole stay put. **User?** amount.
 13. **Ground-hit sand** tinted from the fog colour (grains 80%, puffs 120%), puffs drifting downwind at 3 m/s. In
     the storm the puffs read darker than the lit sand around them. **User?** brighter.
+14. **Gusts in strength only**, from the map's seed and the shared UTC clock: ±20% (`strength_frac` 0.2) in
+    periods of 5–11 s, with wavelengths of thousands of meters so it is "roughly similar everywhere" (the user's
+    words). **User?** amount and speed.
+15. **Laser multiplier 2.4** (`laser_gradient_per_view_gradient`): the user asked for a bend you "can tell",
+    3–6 m over 50–80 m. Against the bent view, a laser across the wind lands 2.9 m downwind at 50 m and 8.4 m at
+    80 m; 2.0 would give about 2 m and 6 m. A test keeps the 50 m bend between 2 and 6 m. The crosshair no
+    longer shows where a long shot lands across the wind: players aim upwind. **User?** strength.
+16. **Storm sky in the shader**, only where a ray escapes (no texture, no geometry): haze bands, a brown storm
+    wall and mesa silhouettes. Alternating runs with it off and on differ by 0–1.3 ms a frame. **User?** look.
