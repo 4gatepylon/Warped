@@ -1847,17 +1847,16 @@ impl CitySession {
     }
 
     /// `add_dust` throws up Lunar Surface's dust (`dust.rs`) where `shot`, fired from `shooter` by
-    /// the rifle or the sniper, ended on a floor (the street or the glass), sprayed back toward
-    /// the shooter; at most `MAX_DUST_BURST_COUNT` bursts are kept, the oldest dropped first.
+    /// the rifle or the sniper, ended on a floor (the street, or the glass seen from the glass
+    /// level, not its underside), sprayed back toward the shooter; at most `MAX_DUST_BURST_COUNT` bursts are kept, the oldest dropped first.
     fn add_dust(&mut self, shot: &Shot, shooter: DVec3, is_rifle: bool) {
         let ShotHit::Surface { material } = shot.hit else {
             return;
         };
         let is_floor: bool = material == self.world.street_material
-            || self
-                .world
-                .get_glass()
-                .is_some_and(|glass| glass.material == material);
+            || self.world.get_glass().is_some_and(|glass| {
+                glass.material == material && shooter.length() < glass.radius_m
+            });
         let end: DVec3 = *shot.points.last().expect("a shot has an end");
         if !is_floor {
             return;
