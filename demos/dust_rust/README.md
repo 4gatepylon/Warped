@@ -57,4 +57,6 @@ reference Lunar Surface level takes 21-71 ms per frame at the same size on this 
 - `--bench-views --width-px 2560 --height-px 1440` (Metal, median ms): blue_spawn 24.1, red_spawn 24.9,
   overview 27.7, middle 16.0, salt_flats_long 22.9, cross_wind 17.4, wormhole 38.8, wormhole_exit 38.7,
   blue_pylons 24.0, arch 17.9, overlook 22.9, blue_kazemat 31.2, laser_into_wormhole 53.1. Not yet under
-  16.7 ms on this machine; not yet measured on the user's Mac, nor with `--play-route`.
+  16.7 ms on this machine; not yet measured on the user's Mac.
+- `--play-route --route warp-tour` (1600x1053 window, dynamic render scale stuck at 0.5): 1195 frames, median
+  21.9 ms, 99th percentile 189.1 ms, 92.6% over 16.7 ms. Fails the target on this machine.
