@@ -233,4 +233,4 @@ is in [`AGENTS.md`](AGENTS.md).
   a server; we will not be using the local demo etc." `make serve-game` and `make join-game` remain. #212.
 - [x] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": if you crouch, the energy for
   running is recharged at the same rate as when you run (drains it); if you walk, it is recharged at half that. This
-  is the default in the YAML, and in general it should be parameterized. #PR.
+  is the default in the YAML, and in general it should be parameterized. #219.
