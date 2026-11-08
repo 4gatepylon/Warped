@@ -841,6 +841,12 @@
 - **Rationale:** you asked for a lobby page showing how many players are on each team, where players choose a team
   and then play as it, with friendly fire on and only the enemy's consoles open to them.
 
+### D72. Hold the right button for the flashlight
+
+- **Choice:** the flashlight shines only while the right button is held, instead of toggling on each click (D70).
+- **Alternatives:** none considered; you asked for click and hold.
+- **Rationale:** you asked for the flashlight to stay on only while the button is held.
+
 
 ## Baselines
 

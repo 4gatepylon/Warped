@@ -1952,7 +1952,7 @@ impl Session {
 
     /// `handle_event` reacts to one window event and returns false when the player quits: Esc
     /// releases the mouse (or quits if it is free), a click captures it (and once captured, a left
-    /// click fires a shot), a right click turns the flashlight on or off, the mouse looks, `1`, `2`
+    /// click fires a shot), the flashlight shines while the right button is held, the mouse looks, `1`, `2`
     /// and the wheel switch guns, and - and = change the render scale. Players can't respawn by
     /// choice.
     ///
@@ -2024,7 +2024,11 @@ impl Session {
             Event::MouseButtonDown {
                 mouse_btn: MouseButton::Right,
                 ..
-            } => self.is_flashlight_on = !self.is_flashlight_on,
+            } => self.is_flashlight_on = true,
+            Event::MouseButtonUp {
+                mouse_btn: MouseButton::Right,
+                ..
+            } => self.is_flashlight_on = false,
             Event::MouseWheel { y, .. } if y != 0.0 => self.switch_gun(match self.gun {
                 Gun::Laser => Gun::Rifle,
                 Gun::Rifle => Gun::Laser,
@@ -2871,7 +2875,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Shift run, Space jump, click shoot, 1/2 or wheel switch gun, right-click flashlight, Ctrl crouch (shoot standing still or crouched), hold E on an enemy console to turn it off, -/= scale, Esc release".to_string()
+            "WASD move, Shift run, Space jump, click shoot, 1/2 or wheel switch gun, hold right button flashlight, Ctrl crouch (shoot standing still or crouched), hold E on an enemy console to turn it off, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });
