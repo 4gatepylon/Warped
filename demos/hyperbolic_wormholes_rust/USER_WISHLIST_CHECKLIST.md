@@ -37,7 +37,8 @@ is in [`AGENTS.md`](AGENTS.md).
   - **Where the work is** (for any agent picking it up): a parity audit of every level against Lunar Surface on
     `claude/levels-checks`, then each level's fixes on its own agent's branch (`claude/city-sphere-fixes`,
     `claude/dark-forest-lens-robots`, `claude/snow-planet-torus`, `claude/dust-wormhole-speed`), in worktrees under
-    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started.
+    `/Users/4gate/git/Warped/.claude/worktrees/` on the user's Mac. State, 2026-11-08: started. Snow Planet: #421
+    (branch `claude/snow-planet-parity`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
