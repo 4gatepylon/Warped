@@ -41,9 +41,6 @@ is in [`AGENTS.md`](AGENTS.md).
   `claude/square-shapes`, 2026-11-07.
 - [~] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. Claimed by Claude Code
   (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch `claude/square-shapes`, 2026-11-07.
-- [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
-  throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
-  `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
 - [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
   center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
@@ -156,6 +153,8 @@ are here too, since the user hadn't confirmed them.
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
 - [?] **W-50 Scoreboard page.** A menu page that shows how many players there are, and each player's kills, deaths
   and team. #164.
+- [?] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
+  throws the other. These are each player's linked wormholes. #197–#204.
 
 ## Done
 
