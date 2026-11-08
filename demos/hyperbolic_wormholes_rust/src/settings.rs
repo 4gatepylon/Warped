@@ -12,7 +12,10 @@
 //! Must know:
 //! - Every key is required and unknown keys fail, so a typo can't silently keep a default.
 //! - The built-in settings are the two files themselves, compiled in.
+//! - `PerPlayerSettings` exists only on macOS, where the game's window runs (its keys are SDL's);
+//!   the game server also builds for Linux.
 
+#[cfg(target_os = "macos")]
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::Path;
@@ -20,9 +23,11 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[cfg(target_os = "macos")]
 use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
+#[cfg(target_os = "macos")]
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 const SERVER_ZERO_ALLOWED_KEYS: [&str; 11] = [
     "map_edge.start_wall_frac",
@@ -37,6 +42,7 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 11] = [
     "respawn.delay_s",
     "wormholes.throw_up_rad",
 ];
+#[cfg(target_os = "macos")]
 const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
@@ -248,6 +254,7 @@ pub struct MinimapSettings {
 }
 
 /// `PlayerFile` is `player_settings.yaml` as written: the keys by name, the view and how a hit looks.
+#[cfg(target_os = "macos")]
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlayerFile {
@@ -258,6 +265,7 @@ struct PlayerFile {
 }
 
 /// `PerPlayerSettings` is everything in `player_settings.yaml`, with the keys read into controls.
+#[cfg(target_os = "macos")]
 pub struct PerPlayerSettings {
     pub keys: KeyBindings,
     pub view: ViewSettings,
@@ -422,6 +430,7 @@ impl ServerSettings {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl PerPlayerSettings {
     /// `FromYaml` reads a player's settings from YAML text, naming `source` in errors: the keys
     /// (`KeyBindings::FromNames`), and every number checked as `check_numbers` does, with

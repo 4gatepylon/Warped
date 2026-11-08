@@ -8,6 +8,7 @@
 #     (SERVER_SETTINGS: a copy of server_settings.yaml with the numbers that shape play; the server sends them to every player.)
 #     (PLAYER_SETTINGS: a copy of player_settings.yaml with this player's own keys, mouse speed and view.)
 #     (Playing is only on a game server: there is no local demo and no host-and-play target.)
+#     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
@@ -27,6 +28,8 @@ PORT ?= 47800
 MAP ?= lunar-surface
 SERVER ?= auto
 SERVER_SETTINGS ?=
+SERVER_TARGET := x86_64-unknown-linux-musl
+SERVER_BUNDLE := .build/server_bundle.tar.gz
 SERVER_SETTINGS_FLAG := $(if $(SERVER_SETTINGS),--server-settings $(SERVER_SETTINGS))
 PLAYER_SETTINGS ?=
 PLAYER_SETTINGS_FLAG := $(if $(PLAYER_SETTINGS),--player-settings $(PLAYER_SETTINGS))
@@ -35,7 +38,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help serve-game join-game bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help serve-game join-game build-server-bundle bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -43,6 +46,7 @@ help:
 	@echo "                                                   (SERVER_SETTINGS=my_server.yaml: a copy of server_settings.yaml)"
 	@echo "  make join-game SERVER=auto PORT=47800            Open the window and join the game server (SERVER=auto finds one)"
 	@echo "                                                   (PLAYER_SETTINGS=mine.yaml: a copy of player_settings.yaml)"
+	@echo "  make build-server-bundle                         Build the game server alone for x86-64 Linux ($(SERVER_BUNDLE))"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (.artifacts/bench_views/)"
 	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
@@ -59,6 +63,12 @@ serve-game:
 
 join-game:
 	cargo run --release -- --join $(SERVER) --port $(PORT) --map $(MAP) $(PLAYER_SETTINGS_FLAG)
+
+build-server-bundle:
+	rustup target add $(SERVER_TARGET)
+	cargo build --release --target $(SERVER_TARGET) --bin wormholes_server
+	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(SERVER_TARGET)/release wormholes_server
+	@echo "Server bundle: $(SERVER_BUNDLE)"
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)

@@ -74,6 +74,7 @@ use serde_json::{Value, json};
 
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use key_bindings::{Action, Control};
+use map::MapName;
 use physics::{Input, LaserReport, Player};
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
@@ -209,25 +210,6 @@ enum RendererKind {
 enum Sampling {
     Adaptive,
     EveryPixel,
-}
-
-/// `MapName` is which map to play, from `common/maps/`.
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum MapName {
-    HouseDemo,
-    LunarSurface,
-}
-
-impl MapName {
-    /// `get_folder_name` gives the map's folder name in `common/maps/`.
-    ///
-    /// Example: `let name = MapName::HouseDemo.get_folder_name();`
-    fn get_folder_name(self) -> &'static str {
-        match self {
-            MapName::HouseDemo => "house_demo",
-            MapName::LunarSurface => "lunar_surface",
-        }
-    }
 }
 
 /// `RouteKind` is which route `--play-route` plays: the house's scripted legs, a tour around each
@@ -654,6 +636,7 @@ fn start_server(
             settings,
             console_teams,
             &should_start_new_game,
+            None,
         ) {
             eprintln!("The game server stopped: {error}");
         }

@@ -1,7 +1,8 @@
 //! `map.rs` reads a map in the portable format of `common/maps/` (see its README), `map.json`, into
 //! typed values, failing at once with the field's name when a map breaks the format.
 //!
-//! Interface: `Map::Builtin`, `Map::Load`, `get_map_folder`, and the types of the manifest's parts.
+//! Interface: `Map::Builtin`, `Map::Load`, `MapName`, `get_console_team`, `get_map_folder`, and the
+//! types of the manifest's parts.
 //!
 //! Example: `let map = Map::Builtin("lunar_surface")?;`
 //!
@@ -17,8 +18,11 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use clap::ValueEnum;
 use glam::{DMat4, DVec3, DVec4};
 use serde::Deserialize;
+
+use crate::net::TEAM_NAMES;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -282,6 +286,36 @@ pub struct Map {
     pub appearance: Appearance,
 }
 
+/// `MapName` is which map to play, from `common/maps/`.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum MapName {
+    HouseDemo,
+    LunarSurface,
+}
+
+impl MapName {
+    /// `get_folder_name` gives the map's folder name in `common/maps/`.
+    ///
+    /// Example: `let name = MapName::HouseDemo.get_folder_name();`
+    pub fn get_folder_name(self) -> &'static str {
+        match self {
+            MapName::HouseDemo => "house_demo",
+            MapName::LunarSurface => "lunar_surface",
+        }
+    }
+}
+
+/// `get_console_team` gives the team (an index into `TEAM_NAMES`) of a console's material, one
+/// named "<team> console <n>" such as "red console 2", or `None` for any other material.
+///
+/// Example: `let teams: Vec<u32> = map.materials.iter().filter_map(get_console_team).collect();`
+pub fn get_console_team(material: &Material) -> Option<u32> {
+    TEAM_NAMES
+        .iter()
+        .position(|name| material.name.starts_with(&format!("{name} console ")))
+        .map(|team| team as u32)
+}
+
 /// `get_map_folder` gives a shipped map's folder, `common/maps/<name>/`, found from the crate's folder.
 ///
 /// Example: `let folder = get_map_folder("house_demo");`
@@ -415,7 +449,10 @@ mod tests {
 
     #[test]
     fn unknown_names_fail_listing_the_builtins() {
-        let error: String = Map::Builtin("moon_base").err().expect("no such map").to_string();
+        let error: String = Map::Builtin("moon_base")
+            .err()
+            .expect("no such map")
+            .to_string();
         assert!(error.contains("moon_base"), "{error}");
         assert!(error.contains("house_demo, lunar_surface"), "{error}");
     }

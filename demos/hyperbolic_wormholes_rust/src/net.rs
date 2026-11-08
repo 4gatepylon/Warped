@@ -821,10 +821,11 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 /// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
 /// `PLAYER_TIMEOUT_S`, turns off
 /// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
-/// starts a new game after that when `should_start_new_game` is set (clearing it), and broadcasts
+/// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
+/// `new_game_after_win`, that long after a team won, and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game)?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None)?;`
 pub fn serve(
     socket: UdpSocket,
     should_stop: &AtomicBool,
@@ -832,6 +833,7 @@ pub fn serve(
     settings: ServerSettings,
     console_teams: Vec<u32>,
     should_start_new_game: &AtomicBool,
+    new_game_after_win: Option<Duration>,
 ) -> Result<()> {
     assert!(
         console_teams.len() <= MAX_CONSOLE_COUNT,
@@ -859,6 +861,7 @@ pub fn serve(
     let (mut last_snapshot, mut last_beacon) = (Instant::now(), None::<Instant>);
     let mut last_scores: Instant = Instant::now();
     let mut has_warned_about_beacon: bool = false;
+    let mut won_at: Option<Instant> = None;
     while !should_stop.load(Ordering::Relaxed) {
         match server.socket.recv_from(&mut buffer) {
             Ok((length, address)) => server.handle(&buffer[..length], address)?,
@@ -873,6 +876,12 @@ pub fn serve(
             is_alive
         });
         server.update_consoles();
+        won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
+        if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
+            && time.elapsed() >= delay
+        {
+            server.start_new_game();
+        }
         if should_start_new_game.swap(false, Ordering::Relaxed) {
             match server.game.winner {
                 Some(_) => server.start_new_game(),
