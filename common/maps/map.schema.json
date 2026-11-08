@@ -382,6 +382,7 @@
       "properties": {
         "laser_color": {"$ref": "#/$defs/color"},
         "style": {"type": "string"},
+        "laser_color": {"$ref": "#/$defs/color", "description": "One laser colour (display RGB, 0 to 1) for every team on this map; without it, each team fires its own colour."},
         "lighting": {
           "oneOf": [
             {
@@ -404,6 +405,57 @@
               }
             }
           ]
+        }
+      }
+    },
+    "atmosphere": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fog": {
+          "type": "object",
+          "required": ["color", "start_m", "distance_m", "max_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "color": {"$ref": "#/$defs/color"},
+            "start_m": {"type": "number", "minimum": 0},
+            "distance_m": {"type": "number", "exclusiveMinimum": 0},
+            "max_frac": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "sand": {
+          "type": "object",
+          "description": "How strong the fog's blowing sand is: gusts thickening the fog, streaks near the eye, sheets drifting downwind (each 0 to 1).",
+          "required": ["gust_frac", "streak_frac", "sheet_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "gust_frac": {"type": "number", "minimum": 0, "maximum": 1},
+            "streak_frac": {"type": "number", "minimum": 0, "maximum": 1},
+            "sheet_frac": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "wind": {
+          "type": "object",
+          "required": ["direction", "log_index_gradient_per_m", "segment_m"],
+          "additionalProperties": false,
+          "properties": {
+            "direction": {"$ref": "#/$defs/vector3"},
+            "log_index_gradient_per_m": {"type": "number"},
+            "segment_m": {"type": "number", "exclusiveMinimum": 0},
+            "laser_gradient_per_view_gradient": {"type": "number", "minimum": 0, "description": "How many times more strongly lasers bend than light (default 1, light and lasers alike)."},
+            "gust": {
+              "type": "object",
+              "description": "Gusts: the wind's strength (not its direction) times 1 plus up to strength_frac, from three waves size_m across seeded by seed, drifting downwind at speed_m_per_s, on the shared UTC clock.",
+              "required": ["seed", "strength_frac", "size_m", "speed_m_per_s"],
+              "additionalProperties": false,
+              "properties": {
+                "seed": {"type": "integer", "minimum": 0},
+                "strength_frac": {"type": "number", "minimum": 0, "maximum": 1},
+                "size_m": {"type": "number", "exclusiveMinimum": 0},
+                "speed_m_per_s": {"type": "number"}
+              }
+            }
+          }
         }
       }
     }
