@@ -10,7 +10,7 @@ exactly as the demo does; the later steps split it into the crates below.
 | Folder | Crate | What goes there |
 | --- | --- | --- |
 | `core/` | `warped-core` (library) | Maps, the world and walking in it, lasers, thrown wormholes, settings, the network's messages and the window's side of a connection, bots for tests. No window, GPU or Apple dependency, so it builds on Linux. |
-| `client/` | `warped-client`, binary `warped` | The window: title screen, rendering (Metal), HUD, menus, input, sound. macOS only. Until steps A4 and A5 it also holds the demo's simulation and its server binary `wormholes_server`. |
+| `client/` | `warped-client`, binary `warped` | The window: title screen, rendering (Metal), HUD, menus, input, sound. macOS only. |
 | `server/` | `warped-server`, binary `warped-server` | One game per process on a UDP port, behind the game's password. Builds on macOS and Linux. |
 | `legacy_oracle/` | `legacy-oracle` (tests only) | The demo's own source files compiled in place, so tests can compare the game with the demo (plan, 7.3.1). |
 | `tools/udp_impair/` (planned) | `udp-impair` | A UDP proxy that adds latency, jitter, loss and reordering, for network tests (plan, 7.6). |

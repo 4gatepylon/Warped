@@ -2,7 +2,7 @@
 # section 5).
 #
 # Example:
-#     cargo run --release -p warped-server -- --port 47800 --map lunar-surface
+#     cargo run --release -p warped-server -- --port 47800 --map lunar-surface --game-password-file <file>
 #
 # Must know:
 #     - Limitations: warped-server must build on Linux, so it depends only on warped-core and
@@ -14,3 +14,7 @@ edition.workspace = true
 
 [dependencies]
 warped-core.workspace = true
+clap.workspace = true
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+legacy-oracle = { path = "../legacy_oracle" }

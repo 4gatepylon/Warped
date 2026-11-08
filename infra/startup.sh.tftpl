@@ -31,7 +31,7 @@ Wants=network-online.target
 [Service]
 EnvironmentFile=/opt/warped/games/%i.env
 LoadCredential=game_password:/opt/warped/game_password
-ExecStart=/opt/warped/wormholes_server --port %i --map $${MAP} --game-password-file %d/game_password
+ExecStart=/opt/warped/warped-server --port %i --map $${MAP} --game-password-file %d/game_password
 DynamicUser=yes
 Restart=always
 RestartSec=1

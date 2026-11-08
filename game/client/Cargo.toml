@@ -3,14 +3,13 @@
 #
 # Interface:
 #     warped: the game (macOS only: Metal and SDL), what `cargo run -p warped-client` runs.
-#     wormholes_server: a game server alone (src/bin/wormholes_server.rs), which also builds for
-#     Linux; step A5 moves it to warped-server.
 #
 # Example:
 #     cargo run --release -p warped-client -- --join 127.0.0.1
 #
 # Must know:
-#     - Limitations: the window is macOS only (Metal, MetalFX, SDL3); `wormholes_server` isn't.
+#     - Limitations: the window is macOS only (Metal, MetalFX, SDL3); the game server is
+#       warped-server.
 [package]
 name = "warped-client"
 version.workspace = true
@@ -20,10 +19,6 @@ default-run = "warped"
 [[bin]]
 name = "warped"
 path = "src/main.rs"
-
-[[bin]]
-name = "wormholes_server"
-test = false
 
 [dependencies]
 warped-core.workspace = true

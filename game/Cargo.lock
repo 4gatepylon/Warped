@@ -1014,6 +1014,8 @@ dependencies = [
 name = "warped-server"
 version = "0.1.0"
 dependencies = [
+ "clap",
+ "legacy-oracle",
  "warped-core",
 ]
 

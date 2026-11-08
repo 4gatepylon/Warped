@@ -189,7 +189,7 @@ file goes to each place; the parts are listed.
 | From the infra stack: `app_bundle.rs` (#183) | 54 | `client/src/app_bundle.rs` | Finds assets and models inside `Warped.app` or in the checkout; its checkout folders are relative to the crate folder, so A1 fixes them for `game/client/`. |
 | From the infra stack: `../build.rs` (#183) | 80 | `client/build.rs` | Builds the Sketchfab-licensed models into the program; its folders are relative to the crate folder, fixed in A1 like `app_bundle.rs`'s. |
 | `../Makefile` | 130 | `game/Makefile` | Its targets join the game's in A1, pointing at `client/`; A5 points the server ones at `warped-server`. |
-| From the infra stack: `bin/wormholes_server.rs` (#180) | 107 | `server/src/main.rs` | The Linux game server's `main`; A5 builds `warped-server` from it and the server half of `net.rs`. |
+| From the infra stack: `bin/wormholes_server.rs` (#180) | 107 | `server/src/main.rs` | The Linux game server's `main`; A5 builds `warped-server` from it and the server half of `net.rs`. Step A5 moved it, as the binary `warped-server`; `net::serve` stays in core until A5b, because the window's `--serve` still runs it. |
 | From the infra stack: `title.rs` (#182), the title screen and password dialog in `main.rs` | 260 + 200 | `client/src/title.rs`, `client/src/main.rs` | As they are (infra stack's). |
 | From the infra stack: `../app/` (#183: `Info.plist`, `app_icon.png`, `how_to_open.txt`) | | `client/app/` | Copied verbatim (infra stack's). |
 | `../player_settings.yaml`, `../server_settings.yaml`, `../rustfmt.toml` | | `game/` | Copied verbatim. |

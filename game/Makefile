@@ -33,7 +33,7 @@ PLAYER_SETTINGS_FLAG := $(if $(PLAYER_SETTINGS),--player-settings $(PLAYER_SETTI
 GAME_PASSWORD_FILE ?=
 GAME_PASSWORD_FLAG := $(if $(GAME_PASSWORD_FILE),--game-password-file $(GAME_PASSWORD_FILE))
 RUN_WINDOW := cargo run --release -p warped-client --bin warped --
-SERVER_PROGRAM := wormholes_server
+SERVER_PROGRAM := warped-server
 SERVER_BUNDLE := .build/server_bundle.tar.gz
 APP_FOLDER := .build/Warped
 APP := $(APP_FOLDER)/Warped.app
@@ -79,7 +79,7 @@ join-game:
 
 build-server-bundle:
 	rustup target add $(LINUX_TARGET)
-	cargo build --release --target $(LINUX_TARGET) -p warped-client --bin $(SERVER_PROGRAM)
+	cargo build --release --target $(LINUX_TARGET) -p $(SERVER_PROGRAM)
 	COPYFILE_DISABLE=1 tar -czf $(SERVER_BUNDLE) -C .build/$(LINUX_TARGET)/release $(SERVER_PROGRAM)
 	@echo "Server bundle: $(SERVER_BUNDLE)"
 
