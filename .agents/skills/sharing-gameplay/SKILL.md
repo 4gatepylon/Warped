@@ -31,9 +31,11 @@ agent gives the user something to play. This skill is a start and will grow.
   else without the user's OK.
 - **Where it goes:** a throwaway demo is a run output, in the component's `.artifacts/<script>/<run_id>/` (root
   `AGENTS.md`). A demo worth keeping goes under `demos/` with a README, only if the user agrees.
-- **Serving it:** serve its folder with `python3 -m http.server <port> --directory <folder>` on a port of your own
-  (not the user's playtest port), open it in the browser preview, and give the URL and the page's absolute path.
-  Stop the server once the user is done.
+- **One command to open it:** give the user one command that opens the demo, usually `open <absolute path>/index.html`,
+  so keep a demo to one HTML file that works from `file://` where you can. A demo that needs a server (it loads its
+  own JavaScript modules) gets one command that starts it on a port of your own (not the user's playtest port) and
+  opens it: `python3 -m http.server <port> --directory <folder> & open http://localhost:<port>/index.html`. Stop that
+  server once the user is done.
 - **Check it first:** before handing it over, check that the page loads without console errors and that every key
   and option does what it says.
 - **Rounds:** keep each round's demo, and quote the user's words from each round, as `graphical-changes` does for
