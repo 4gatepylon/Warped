@@ -108,6 +108,10 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code.
+- [ ] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
+  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
+  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
+  see more of the weapon on screen. And the laser should be touching the tip of the rifle."
 
 ## Pending user review
 
