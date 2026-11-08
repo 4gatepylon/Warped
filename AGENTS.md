@@ -236,6 +236,18 @@ Coordinate agents working in parallel (subagents, other sessions, Codex, Devin) 
 Find, get approved, add and credit assets from outside the repository (models, textures, sounds, fonts) with the
 `adding-assets` skill (`.agents/skills/adding-assets/`).
 
+## Compatible changes
+
+Change what outlives one build (saved player settings, server settings, what the network sends, map files) with the
+`compatible-changes` skill (`.agents/skills/compatible-changes/`).
+
+## Changes from others
+
+At the start of every response, check whether anyone else changed `staging` and tell the user at once who did what and
+whether it breaks anything: `git fetch -q origin staging && git log --format='%h %an: %s'
+refs/worktree/last-seen-staging..origin/staging`, then `git update-ref refs/worktree/last-seen-staging origin/staging`.
+Details, and when to ask the user who an author is, are in the `compatible-changes` skill.
+
 ## Machine-specific workarounds
 
 This repo is used from several machines, so don't write a workaround for one machine (e.g. a
