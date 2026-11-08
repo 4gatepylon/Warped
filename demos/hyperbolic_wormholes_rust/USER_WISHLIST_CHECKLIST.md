@@ -27,8 +27,6 @@ is in [`AGENTS.md`](AGENTS.md).
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
-- [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
-  (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
   itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
@@ -128,6 +126,7 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
   bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
   in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
