@@ -219,6 +219,18 @@ pub struct HudRect {
     pub color_rgba: Vec4,
 }
 
+/// `HudImage` is an RGBA picture (8 bits a channel, sRGB, rows top first) drawn over the HUD's
+/// rectangles with its top left at `x_px`, `y_px`, each of its pixels `scale` window pixels wide.
+#[derive(Clone, Copy, Debug)]
+pub struct HudImage<'a> {
+    pub pixels_rgba: &'a [u8],
+    pub width_px: u32,
+    pub height_px: u32,
+    pub x_px: f32,
+    pub y_px: f32,
+    pub scale: f32,
+}
+
 /// `FrameDescription` is everything the backend draws in one frame.
 pub struct FrameDescription<'a> {
     pub camera: Camera,
@@ -230,6 +242,7 @@ pub struct FrameDescription<'a> {
     pub world_particles: &'a [Particle],
     pub viewmodel_particles: &'a [Particle],
     pub hud_rects: &'a [HudRect],
+    pub hud_images: &'a [HudImage<'a>],
     pub time_s: f32,
     pub damage_flash_frac: f32,
 }

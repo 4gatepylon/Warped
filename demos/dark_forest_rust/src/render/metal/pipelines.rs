@@ -102,6 +102,7 @@ pub struct Pipelines {
     pub tonemap: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub fxaa: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub hud: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    pub hud_image: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub convert_equirect_to_cube: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
     pub prefilter_specular: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
     pub integrate_brdf: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
@@ -302,6 +303,10 @@ impl Pipelines {
             function(&library, "hud_vertex", None);
         let hud_fragment: Retained<ProtocolObject<dyn MTLFunction>> =
             function(&library, "hud_fragment", None);
+        let hud_image_vertex: Retained<ProtocolObject<dyn MTLFunction>> =
+            function(&library, "hud_image_vertex", None);
+        let hud_image_fragment: Retained<ProtocolObject<dyn MTLFunction>> =
+            function(&library, "hud_image_fragment", None);
         Pipelines {
             shadow: scene_pair(device, &library, None, None, Blend::None, "shadow"),
             shadow_masked: scene_pair(
@@ -370,6 +375,17 @@ impl Pipelines {
                     depth_format: None,
                     blend: Blend::Alpha,
                     label: "hud",
+                },
+            ),
+            hud_image: render_pipeline(
+                device,
+                RenderPipelineSpec {
+                    vertex: &hud_image_vertex,
+                    fragment: Some(&hud_image_fragment),
+                    color_format: Some(DRAWABLE_FORMAT),
+                    depth_format: None,
+                    blend: Blend::Alpha,
+                    label: "hud image",
                 },
             ),
             convert_equirect_to_cube: compute_pipeline(

@@ -106,6 +106,7 @@ pub struct Session {
     pub weapon: Weapon,
     pub bots: Vec<Bot>,
     pub kill_count: u32,
+    pub death_count: u32,
     pub time_s: f32,
     pub is_autopilot: bool,
     pub show_frame_ms: Option<f32>,
@@ -176,6 +177,7 @@ impl Session {
             weapon: Weapon::new(),
             bots,
             kill_count: 0,
+            death_count: 0,
             time_s: 0.0,
             is_autopilot,
             show_frame_ms: None,
@@ -538,6 +540,7 @@ impl Session {
             None => {}
         }
         if self.player.should_respawn() {
+            self.death_count += 1;
             let bot_positions: Vec<Vec3> = self.bots.iter().map(|bot| bot.feet_m).collect();
             let team_spawns: &[(Vec3, f32)] = &self.arena.team_spawns[self.team as usize % 2];
             let spawns: Vec<Vec3> = team_spawns.iter().map(|(p, _)| *p).collect();

@@ -6,7 +6,8 @@
  * @par Interface
  * - Vertex: `fullscreen_vertex`, `hud_vertex`.
  * - Fragment: `ssao_fragment`, `ssao_blur_fragment`, `bloom_downsample_fragment`,
- *   `bloom_upsample_fragment`, `tonemap_fragment`, `fxaa_fragment`, `hud_fragment`.
+ *   `bloom_upsample_fragment`, `tonemap_fragment`, `fxaa_fragment`, `hud_fragment`,
+ *   `hud_image_vertex`, `hud_image_fragment`.
  *
  * @par Example
  * @code
@@ -466,4 +467,49 @@ vertex HudVertexOut hud_vertex(uint vertex_id [[vertex_id]], uint instance_id [[
  */
 fragment float4 hud_fragment(HudVertexOut in [[stage_in]]) {
     return in.color;
+}
+
+/** @brief `GpuHudImage` is where a HUD picture goes, in window pixels, and its size in pixels. */
+struct GpuHudImage {
+    float4 rect_px;
+    uint2 size_px;
+    uint2 padding;
+};
+
+/** @brief `HudImageVertexOut` is one corner of a HUD picture and where it is in the picture. */
+struct HudImageVertexOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+/**
+ * @brief `hud_image_vertex` places one corner of a HUD picture, given in window pixels.
+ * @par Example
+ * @code
+ * drawPrimitives(triangle_strip, 0, 4)
+ * @endcode
+ */
+vertex HudImageVertexOut hud_image_vertex(uint vertex_id [[vertex_id]],
+                                          constant GpuHudImage& image [[buffer(0)]],
+                                          constant float2& window_size_px [[buffer(1)]]) {
+    float2 corner = float2(vertex_id & 1, vertex_id >> 1);
+    float2 pixel = image.rect_px.xy + corner * image.rect_px.zw;
+    HudImageVertexOut out;
+    out.position = float4(pixel / window_size_px * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    out.uv = corner;
+    return out;
+}
+
+/**
+ * @brief `hud_image_fragment` reads the HUD picture's nearest pixel from the frame's buffer.
+ * @par Example
+ * @code
+ * pipeline(hud_image_vertex, hud_image_fragment) with alpha blending into the drawable
+ * @endcode
+ */
+fragment float4 hud_image_fragment(HudImageVertexOut in [[stage_in]],
+                                   constant GpuHudImage& image [[buffer(0)]],
+                                   device const uchar4* pixels [[buffer(1)]]) {
+    uint2 pixel = min(uint2(in.uv * float2(image.size_px)), image.size_px - 1);
+    return float4(pixels[pixel.y * image.size_px.x + pixel.x]) / 255.0;
 }

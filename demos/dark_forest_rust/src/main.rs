@@ -11,10 +11,13 @@
 #[allow(dead_code)]
 mod asset_manifest;
 mod assets;
+mod credits;
 mod forest_layout;
 mod game;
 mod map;
 mod match_play;
+mod menu;
+mod minimap;
 #[allow(dead_code)]
 mod net;
 mod platform;
@@ -25,15 +28,17 @@ mod server;
 mod settings;
 #[allow(dead_code)]
 mod shot_noise;
+mod text_overlay;
 #[allow(dead_code)]
 mod thrown_wormholes;
+mod title;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
-use glam::{Vec2, Vec3};
+use glam::{Vec2, Vec3, Vec4};
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
 
@@ -43,10 +48,13 @@ use game::session::{Controls, FrameData, Session};
 use game::weapon::WeaponInput;
 use game::world::Arena;
 use match_play::{MatchOptions, MatchPlay};
+use menu::{Menu, MenuOutcome, MenuSettings, Scoreboard};
+use minimap::{Mark, Minimap};
 use platform::Platform;
 use render::metal::MetalRenderer;
-use render::{FrameDescription, FrameTiming, RenderSettings, Renderer};
+use render::{FrameDescription, FrameTiming, HudImage, HudRect, RenderSettings, Renderer};
 use scene::{Scene, SceneOptions};
+use text_overlay::TextPicture;
 
 /// `MOUSE_RAD_PER_PT` is the look speed per point of mouse motion.
 const MOUSE_RAD_PER_PT: f32 = 0.0022;
@@ -198,6 +206,9 @@ struct Args {
     /// A name the match server gives this window or bot; accepted and ignored.
     #[arg(long)]
     label: Option<String>,
+    /// Start playing at once instead of on the title screen (flags such as --join already do).
+    #[arg(long)]
+    no_title: bool,
 }
 
 /// `VERTICAL_ROUTE` is `--play-route`'s loop from red's spawn: up a ladder to the treehouse, over
@@ -254,6 +265,138 @@ fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// `MENU_DIM_FRAC` is how much the menu darkens the view behind it.
+const MENU_DIM_FRAC: f32 = 0.75;
+/// `MENU_HEIGHT_FRAC` is the most of the window's height the menu's text takes.
+const MENU_HEIGHT_FRAC: f32 = 0.85;
+/// `TITLE_PICTURE_PX` is the size of the title screen's text picture.
+const TITLE_PICTURE_PX: (u32, u32) = (416, 168);
+/// `TITLE_HEIGHT_FRAC` is the most of the window's height the title screen's text takes.
+const TITLE_HEIGHT_FRAC: f32 = 0.5;
+/// `TITLE_DIM_FRAC` is how much the title screen darkens the forest behind it.
+const TITLE_DIM_FRAC: f32 = 0.45;
+/// `TITLE_TURN_RAD_PER_S` is how fast the view behind the title screen turns.
+const TITLE_TURN_RAD_PER_S: f32 = 0.05;
+const TEAM_MARK_RGBA: [[u8; 4]; 2] = [[80, 140, 255, 255], [240, 80, 60, 255]];
+const ROBOT_MARK_RGBA: [u8; 4] = [255, 170, 40, 255];
+const OFF_CONSOLE_MARK_RGBA: [u8; 4] = [130, 130, 130, 255];
+const PLAYER_MARK_PX: f32 = 3.0;
+const CONSOLE_MARK_PX: f32 = 4.5;
+
+/// `fill_marks` replaces `marks` with what the minimap and map show: each console (grey once
+/// off), each robot alone and each other player online in their team's colour.
+///
+/// Example: `fill_marks(&session, &mut marks);`
+fn fill_marks(session: &Session, marks: &mut Vec<Mark>) {
+    marks.clear();
+    for (i, console) in session.arena.consoles.iter().enumerate() {
+        let is_off: bool = session.console_off.get(i).copied().unwrap_or(false);
+        marks.push(Mark {
+            position_m: console.centre_m,
+            rgba: if is_off {
+                OFF_CONSOLE_MARK_RGBA
+            } else {
+                TEAM_MARK_RGBA[console.team as usize]
+            },
+            radius_px: CONSOLE_MARK_PX,
+        });
+    }
+    for bot in session.bots.iter().filter(|bot| bot.health > 0.0) {
+        marks.push(Mark {
+            position_m: bot.feet_m,
+            rgba: ROBOT_MARK_RGBA,
+            radius_px: PLAYER_MARK_PX,
+        });
+    }
+    for remote in &session.remote_bots {
+        marks.push(Mark {
+            position_m: remote.bot.feet_m,
+            rgba: TEAM_MARK_RGBA[remote.team as usize % TEAM_MARK_RGBA.len()],
+            radius_px: PLAYER_MARK_PX,
+        });
+    }
+}
+
+/// `run_title_screen` shows the title screen over a slowly turning view of the forest until a
+/// choice is made with Return, or `None` if the window closes or Escape is pressed.
+///
+/// Example: `let choice = run_title_screen(&mut platform, &mut renderer, &mut event_pump, &scene, &map_file, &settings);`
+fn run_title_screen(
+    platform: &mut Platform,
+    renderer: &mut MetalRenderer,
+    event_pump: &mut sdl3::EventPump,
+    scene: &Scene,
+    map_file: &map::MapFile,
+    settings: &RenderSettings,
+) -> Option<title::Choice> {
+    let mut title_screen: title::TitleScreen = title::TitleScreen::New();
+    let mut picture: TextPicture = TextPicture::New(TITLE_PICTURE_PX.0, TITLE_PICTURE_PX.1);
+    let mut preview: Session = Session::new(Arena::from_map(map_file), 0, false);
+    let (feet_m, yaw_rad, pitch_rad) = CameraView::Lookout.pose();
+    let start: Instant = Instant::now();
+    let mut size_px: (u32, u32) = platform.window.size_in_pixels();
+    loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. } => return None,
+                Event::KeyDown {
+                    scancode: Some(scancode),
+                    repeat: false,
+                    ..
+                } => match scancode {
+                    Scancode::Escape => return None,
+                    Scancode::Up | Scancode::W => title_screen.move_selection(-1),
+                    Scancode::Down | Scancode::S => title_screen.move_selection(1),
+                    Scancode::Return | Scancode::KpEnter | Scancode::Space => {
+                        return Some(title_screen.get_selected());
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        let new_size_px: (u32, u32) = platform.window.size_in_pixels();
+        if new_size_px != size_px && new_size_px.0 > 0 && new_size_px.1 > 0 {
+            size_px = new_size_px;
+            renderer.resize(size_px.0, size_px.1);
+        }
+        let (width_px, height_px) = (size_px.0 as f32, size_px.1 as f32);
+        preview.player = Player::new(
+            feet_m,
+            yaw_rad + start.elapsed().as_secs_f32() * TITLE_TURN_RAD_PER_S,
+        );
+        preview.player.pitch_rad = pitch_rad;
+        picture.draw(&title_screen.get_lines(), true);
+        let mut frame: FrameData = preview.frame_data(scene, width_px, height_px);
+        frame.viewmodel_draws.clear();
+        frame.hud_rects.clear();
+        frame.hud_rects.push(HudRect {
+            x_px: 0.0,
+            y_px: 0.0,
+            width_px,
+            height_px,
+            color_rgba: Vec4::new(0.0, 0.0, 0.0, TITLE_DIM_FRAC),
+        });
+        renderer.render_frame(
+            &FrameDescription {
+                camera: frame.camera,
+                world_draws: &frame.world_draws,
+                viewmodel_draws: &frame.viewmodel_draws,
+                joint_matrices: &frame.joint_matrices,
+                point_lights: &frame.point_lights,
+                decals: &frame.decals,
+                world_particles: &frame.world_particles,
+                viewmodel_particles: &frame.viewmodel_particles,
+                hud_rects: &frame.hud_rects,
+                hud_images: &[picture.get_image(width_px, height_px, TITLE_HEIGHT_FRAC)],
+                time_s: start.elapsed().as_secs_f32(),
+                damage_flash_frac: 0.0,
+            },
+            settings,
+        );
+    }
 }
 
 /// `FrameStats` collects frame times for reports.
@@ -313,7 +456,7 @@ impl FrameStats {
 }
 
 fn main() {
-    let args: Args = Args::parse();
+    let mut args: Args = Args::parse();
     let map_path: PathBuf = args.map.clone().unwrap_or_else(map::default_map_path);
     if let Some(path) = &args.export_map {
         let json: String = serde_json::to_string_pretty(&forest_layout::build()).expect("map JSON");
@@ -351,6 +494,66 @@ fn main() {
         );
         std::process::exit(2);
     });
+    if let Err(message) = validate_args(&args, &assets_dir) {
+        eprintln!("error: {message}");
+        std::process::exit(2);
+    }
+
+    let mut platform: Platform = Platform::new(
+        "Dark Forest",
+        args.width_pt,
+        args.height_pt,
+        args.fullscreen,
+    );
+    let mut renderer: MetalRenderer = MetalRenderer::new(platform.metal_layer());
+    println!("GPU: {}", renderer.device_name());
+    let (mut width_px, mut height_px) = platform.window.size_in_pixels();
+    renderer.resize(width_px, height_px);
+    let audio: Audio = Audio::new(&platform.sdl);
+    let arena: Arena = Arena::from_map(&map_file);
+    let scene: Scene = Scene::load(
+        &mut renderer,
+        &assets_dir,
+        &textures_dir,
+        &arena,
+        &SceneOptions {
+            should_use_rifle: args.rifle,
+        },
+    );
+    let mut event_pump = platform.sdl.event_pump().expect("SDL event pump failed");
+    let mut settings: RenderSettings = RenderSettings {
+        render_scale_frac: args.render_scale,
+        is_ssao_enabled: !args.disable_effect.contains(&Effect::Ssao),
+        is_bloom_enabled: !args.disable_effect.contains(&Effect::Bloom),
+        is_fxaa_enabled: !args.disable_effect.contains(&Effect::Fxaa),
+        is_color_grade_enabled: !args.disable_effect.contains(&Effect::ColorGrade),
+        is_volumetric_haze_enabled: !args.disable_effect.contains(&Effect::VolumetricHaze),
+        is_material_response_enabled: !args.disable_effect.contains(&Effect::MaterialResponse),
+        is_vsync_enabled: !args.no_vsync,
+    };
+    let is_title_shown: bool = !(args.no_title
+        || args.host
+        || args.join.is_some()
+        || args.bot
+        || args.autopilot
+        || args.play_route
+        || args.bench_views.is_some()
+        || args.camera_view.is_some());
+    if is_title_shown {
+        match run_title_screen(
+            &mut platform,
+            &mut renderer,
+            &mut event_pump,
+            &scene,
+            &map_file,
+            &settings,
+        ) {
+            None | Some(title::Choice::Quit) => return,
+            Some(title::Choice::PlayAlone) => {}
+            Some(title::Choice::Host) => args.host = true,
+            Some(title::Choice::Join) => args.join = Some("auto".to_string()),
+        }
+    }
     let client: Option<net::Client> = if args.host || args.join.is_some() {
         if args.host {
             let options: server::ServerOptions = server::ServerOptions {
@@ -398,32 +601,6 @@ fn main() {
     } else {
         None
     };
-    if let Err(message) = validate_args(&args, &assets_dir) {
-        eprintln!("error: {message}");
-        std::process::exit(2);
-    }
-
-    let mut platform: Platform = Platform::new(
-        "Dark Forest",
-        args.width_pt,
-        args.height_pt,
-        args.fullscreen,
-    );
-    let mut renderer: MetalRenderer = MetalRenderer::new(platform.metal_layer());
-    println!("GPU: {}", renderer.device_name());
-    let (mut width_px, mut height_px) = platform.window.size_in_pixels();
-    renderer.resize(width_px, height_px);
-    let audio: Audio = Audio::new(&platform.sdl);
-    let arena: Arena = Arena::from_map(&map_file);
-    let scene: Scene = Scene::load(
-        &mut renderer,
-        &assets_dir,
-        &textures_dir,
-        &arena,
-        &SceneOptions {
-            should_use_rifle: args.rifle,
-        },
-    );
     let is_online: bool = client.is_some();
     let bot_count: usize = if is_online { 0 } else { args.bot_count };
     let mut session: Session = Session::new(
@@ -445,27 +622,27 @@ fn main() {
         eprintln!("error: can't join: {error}");
         std::process::exit(2);
     });
+    let mut minimap: Minimap = Minimap::New(&session.arena);
+    let mut marks: Vec<Mark> = Vec::new();
+    let mut menu: Option<Menu> = None;
+    let mut menu_picture: TextPicture =
+        TextPicture::New(menu::MENU_PICTURE_PX.0, menu::MENU_PICTURE_PX.1);
+    let mut menu_settings: MenuSettings = MenuSettings {
+        look_rad_per_pt: MOUSE_RAD_PER_PT,
+        render_scale_frac: settings.render_scale_frac,
+        is_vsync_enabled: settings.is_vsync_enabled,
+        is_showing_frame_time: args.show_frame_time,
+        is_showing_minimap: true,
+    };
     let mut last_title: Instant = Instant::now();
     let mut view_stats: Vec<FrameStats> = CameraView::ALL
         .iter()
         .map(|_| FrameStats::default())
         .collect();
-    let mut settings: RenderSettings = RenderSettings {
-        render_scale_frac: args.render_scale,
-        is_ssao_enabled: !args.disable_effect.contains(&Effect::Ssao),
-        is_bloom_enabled: !args.disable_effect.contains(&Effect::Bloom),
-        is_fxaa_enabled: !args.disable_effect.contains(&Effect::Fxaa),
-        is_color_grade_enabled: !args.disable_effect.contains(&Effect::ColorGrade),
-        is_volumetric_haze_enabled: !args.disable_effect.contains(&Effect::VolumetricHaze),
-        is_material_response_enabled: !args.disable_effect.contains(&Effect::MaterialResponse),
-        is_vsync_enabled: !args.no_vsync,
-    };
-    let mut is_showing_frame_time: bool = args.show_frame_time;
 
     let mouse = platform.sdl.mouse();
     let mut is_mouse_captured: bool = true;
     mouse.set_relative_mouse_mode(&platform.window, true);
-    let mut event_pump = platform.sdl.event_pump().expect("SDL event pump failed");
     let start: Instant = Instant::now();
     let mut last_frame: Instant = Instant::now();
     let mut stats: FrameStats = FrameStats::default();
@@ -484,18 +661,42 @@ fn main() {
                     scancode: Some(scancode),
                     repeat: false,
                     ..
+                } if menu.is_some() => {
+                    match menu
+                        .as_mut()
+                        .expect("the menu is open")
+                        .handle(scancode, &mut menu_settings)
+                    {
+                        MenuOutcome::Stay => {}
+                        MenuOutcome::Close => {
+                            menu = None;
+                            is_mouse_captured = true;
+                            mouse.set_relative_mouse_mode(&platform.window, true);
+                        }
+                        MenuOutcome::Quit => break 'running,
+                    }
+                    settings.render_scale_frac = menu_settings.render_scale_frac;
+                    settings.is_vsync_enabled = menu_settings.is_vsync_enabled;
+                }
+                Event::KeyDown {
+                    scancode: Some(scancode),
+                    repeat: false,
+                    ..
                 } => match scancode {
-                    Scancode::Escape if is_mouse_captured => {
+                    Scancode::Escape | Scancode::Tab => {
+                        menu = Some(Menu::New());
+                        menu_settings.render_scale_frac = settings.render_scale_frac;
                         is_mouse_captured = false;
                         mouse.set_relative_mouse_mode(&platform.window, false);
                     }
-                    Scancode::Escape => break 'running,
                     Scancode::Space => is_jump_pressed = true,
                     Scancode::R => is_reload_pressed = true,
                     Scancode::F1 => settings.is_ssao_enabled = !settings.is_ssao_enabled,
                     Scancode::F2 => settings.is_bloom_enabled = !settings.is_bloom_enabled,
                     Scancode::F3 => settings.is_fxaa_enabled = !settings.is_fxaa_enabled,
-                    Scancode::F4 => is_showing_frame_time = !is_showing_frame_time,
+                    Scancode::F4 => {
+                        menu_settings.is_showing_frame_time = !menu_settings.is_showing_frame_time
+                    }
                     Scancode::F5 => session.is_autopilot = !session.is_autopilot,
                     Scancode::F6 => {
                         settings.is_color_grade_enabled = !settings.is_color_grade_enabled
@@ -517,7 +718,7 @@ fn main() {
                     }
                     _ => {}
                 },
-                Event::MouseButtonDown { .. } if !is_mouse_captured => {
+                Event::MouseButtonDown { .. } if !is_mouse_captured && menu.is_none() => {
                     is_mouse_captured = true;
                     mouse.set_relative_mouse_mode(&platform.window, true);
                 }
@@ -552,7 +753,7 @@ fn main() {
                     axis(Scancode::D, Scancode::A),
                     axis(Scancode::W, Scancode::S),
                 ),
-                look_delta_rad: look_delta_pt * MOUSE_RAD_PER_PT,
+                look_delta_rad: look_delta_pt * menu_settings.look_rad_per_pt,
                 is_sprint_held: keys.is_scancode_pressed(Scancode::LShift),
                 is_crouch_held: keys.is_scancode_pressed(Scancode::LCtrl)
                     || keys.is_scancode_pressed(Scancode::C),
@@ -564,6 +765,11 @@ fn main() {
                 is_reload_pressed,
                 is_aim_held: is_mouse_captured && mouse_state.right(),
             },
+        };
+        let controls: Controls = if menu.is_some() {
+            Controls::default()
+        } else {
+            controls
         };
         let bench_view: Option<usize> = args
             .bench_views
@@ -603,7 +809,7 @@ fn main() {
                 start.elapsed().as_secs_f32()
             );
         }
-        let is_e_held: bool = keys.is_scancode_pressed(Scancode::E);
+        let is_e_held: bool = menu.is_none() && keys.is_scancode_pressed(Scancode::E);
         if let Err(error) = play.update(&mut session, &scene, is_e_held, dt_s) {
             eprintln!("network error: {error}");
         }
@@ -613,10 +819,50 @@ fn main() {
         }
 
         smoothed_frame_ms += (frame_s * 1000.0 - smoothed_frame_ms) * 0.05;
-        session.show_frame_ms = is_showing_frame_time.then_some(smoothed_frame_ms);
+        session.show_frame_ms = menu_settings
+            .is_showing_frame_time
+            .then_some(smoothed_frame_ms);
         let sim_ms: f32 = sim_start.elapsed().as_secs_f32() * 1000.0;
         let build_start: Instant = Instant::now();
-        let frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);
+        let mut frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);
+        let (window_width_px, window_height_px) = (width_px as f32, height_px as f32);
+        fill_marks(&session, &mut marks);
+        let mut hud_images: Vec<HudImage> = Vec::new();
+        if let Some(open_menu) = &menu {
+            let scoreboard: Scoreboard = match &play.client {
+                None => Scoreboard::Alone {
+                    kill_count: session.kill_count,
+                    death_count: session.death_count,
+                },
+                Some(client) => match &client.scores {
+                    None => Scoreboard::Waiting,
+                    Some(scores) => Scoreboard::Scores {
+                        scores,
+                        own_id: client.welcomed_id,
+                    },
+                },
+            };
+            menu_picture.draw(&open_menu.get_lines(&menu_settings, scoreboard), false);
+            frame.hud_rects.push(HudRect {
+                x_px: 0.0,
+                y_px: 0.0,
+                width_px: window_width_px,
+                height_px: window_height_px,
+                color_rgba: Vec4::new(0.0, 0.0, 0.0, MENU_DIM_FRAC),
+            });
+            hud_images.push(menu_picture.get_image(
+                window_width_px,
+                window_height_px,
+                MENU_HEIGHT_FRAC,
+            ));
+            if open_menu.get_page() == menu::Page::Map {
+                minimap.draw_map(session.player.feet_m, session.player.yaw_rad, &marks);
+                hud_images.push(minimap.get_map_image(window_width_px, window_height_px));
+            }
+        } else if menu_settings.is_showing_minimap && bench_view.is_none() && !args.play_route {
+            minimap.draw_minimap(session.player.feet_m, session.player.yaw_rad, &marks);
+            hud_images.push(minimap.get_minimap_image(window_width_px, window_height_px));
+        }
         let build_ms: f32 = build_start.elapsed().as_secs_f32() * 1000.0;
         timing = renderer.render_frame(
             &FrameDescription {
@@ -629,7 +875,7 @@ fn main() {
                 world_particles: &frame.world_particles,
                 viewmodel_particles: &frame.viewmodel_particles,
                 hud_rects: &frame.hud_rects,
-                hud_images: &[],
+                hud_images: &hud_images,
                 time_s: session.time_s,
                 damage_flash_frac: frame.damage_flash_frac,
             },

@@ -122,6 +122,19 @@ pub struct GpuHudRect {
     pub color: Vec4,
 }
 
+/// `GpuHudImage` is one HUD picture's window rectangle (x, y, width, height) and its size in
+/// pixels; its pixels follow it in the frame's buffer.
+///
+/// Example:
+///     let image: GpuHudImage = GpuHudImage { rect_px: [0.0; 4], size_px: [1, 1], padding: [0; 2] };
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct GpuHudImage {
+    pub rect_px: [f32; 4],
+    pub size_px: [u32; 2],
+    pub padding: [u32; 2],
+}
+
 /// `GpuOccluderBox` is one axis-aligned box that blocks the sky.
 ///
 /// Example:

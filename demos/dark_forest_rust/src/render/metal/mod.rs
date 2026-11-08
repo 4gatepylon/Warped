@@ -34,8 +34,8 @@ use self::environment::{
     IblTextures, PREFILTERED_MIP_COUNT, SkyVisibility, bake_sky_visibility, build_ibl,
 };
 use self::gpu_types::{
-    GpuDecal, GpuDrawUniforms, GpuFrameUniforms, GpuHudRect, GpuMaterialUniforms, GpuParticle,
-    GpuPassUniforms, GpuPointLight,
+    GpuDecal, GpuDrawUniforms, GpuFrameUniforms, GpuHudImage, GpuHudRect, GpuMaterialUniforms,
+    GpuParticle, GpuPassUniforms, GpuPointLight,
 };
 use self::pipelines::{
     AO_FORMAT, DEPTH_FORMAT, DRAWABLE_FORMAT, HDR_FORMAT, LDR_FORMAT, NORMAL_FORMAT, PipelinePair,
@@ -800,6 +800,23 @@ impl MetalRenderer {
             })
             .collect();
         let hud_offset_bytes: usize = dynamic.push(&hud_rects);
+        let hud_images: Vec<(GpuHudImage, usize)> = frame
+            .hud_images
+            .iter()
+            .map(|image| {
+                let gpu_image: GpuHudImage = GpuHudImage {
+                    rect_px: [
+                        image.x_px,
+                        image.y_px,
+                        image.width_px as f32 * image.scale,
+                        image.height_px as f32 * image.scale,
+                    ],
+                    size_px: [image.width_px, image.height_px],
+                    padding: [0, 0],
+                };
+                (gpu_image, dynamic.push(image.pixels_rgba))
+            })
+            .collect();
         let dynamic_buffer: Buffer = dynamic.buffer.clone();
         let buffers: FrameBuffers = FrameBuffers {
             dynamic: &dynamic_buffer,
@@ -1166,6 +1183,30 @@ impl MetalRenderer {
                         QUAD_VERTEX_COUNT,
                         hud_rects.len(),
                     );
+                }
+            }
+            if !hud_images.is_empty() {
+                let window_size_px: Vec2 = Vec2::new(
+                    drawable_texture.width() as f32,
+                    drawable_texture.height() as f32,
+                );
+                encoder.setRenderPipelineState(&self.pipelines.hud_image);
+                set_vertex_bytes(&encoder, as_bytes(&window_size_px), 1);
+                for (gpu_image, offset_bytes) in &hud_images {
+                    set_vertex_bytes(&encoder, as_bytes(gpu_image), 0);
+                    set_fragment_bytes(&encoder, as_bytes(gpu_image), 0);
+                    unsafe {
+                        encoder.setFragmentBuffer_offset_atIndex(
+                            Some(&dynamic_buffer),
+                            *offset_bytes,
+                            1,
+                        );
+                        encoder.drawPrimitives_vertexStart_vertexCount(
+                            MTLPrimitiveType::TriangleStrip,
+                            0,
+                            QUAD_VERTEX_COUNT,
+                        );
+                    }
                 }
             }
             encoder.endEncoding();
