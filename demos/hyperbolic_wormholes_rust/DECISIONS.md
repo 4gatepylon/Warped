@@ -1569,6 +1569,61 @@
 
 ## Baselines
 
+### D99. Shot noise in the beam, for W-84 (shot noise in the beam itself): pixels turn black, white or drop out
+
+- **Choice:**
+  - **Each gun's beam:** the sniper's is the lightsaber blade of W-92 (lightsaber lasers, rifle first, guns further
+    out; #256): a flat-topped white core in a soft, pale haze. The rifle's is the laser from before #256: a Gaussian
+    core whitened at its middle over a halo in the team's colour. Each beam carries its gun (`LaserBeam.is_rifle`,
+    packed into `GpuBeam.info.w` as the team plus 2 for the rifle), so `scan_beams` shapes its core and
+    `shade_ray_end` shades it by gun. Other windows know the gun from the rifle bit already in the player record.
+  - **The speckle:** each frame, a share of the beam's screen pixels is speckled, and the rest is the gun's normal
+    beam. A speckled pixel is one of three kinds, picked by its own roll in the shares of `beam_speckle` in
+    `server_settings.yaml`, 1 : 1 : 8 by default:
+    - black (`black_frac`, 0.1): the colour darkened by the beam's glow there, black where the glow is full;
+    - white (`white_frac`, 0.1): the colour moved toward white by the glow, never brighter than white;
+    - dropout (`dropout_frac`, 0.8): the beam is left out, so what is behind shows through: the sky over the sky,
+      ground specks over the ground.
+    Only pixels where the glow is above 2% count as the beam's, so no specks show beyond its visible edge. The
+    pixels are picked anew each frame and independently for each pixel (`hash_pixel` on the pixel and a seed from
+    the frame's clock, in milliseconds), so they flicker as single pixels.
+  - **The share, per shot (`shot_noise.rs`), from 0 to 0.5:** the sniper's is exponential with mean
+    `sniper.beam_speckle_mean_frac` (0.2), cut at `sniper.beam_speckle_max_frac` (0.5, for 8% of shots), so most
+    shots are lightly speckled and some heavily. The rifle's grows in step with the heat, from
+    `rifle.beam_speckle_start_frac` (0) on a cold rifle to `rifle.beam_speckle_max_frac` (0.5) at full heat, like a
+    weapon malfunctioning as it overheats: the heat is the one before the shot adds its own, so a burst's first shot
+    is clean and its 20th is 47% speckled, and it falls back as the rifle cools. The shares are 0 for none; a share
+    above 1, a rifle start above its maximum, or kinds that don't add up to 1 fail.
+  - **Every window draws a shot alike:** the share is rounded to steps of 1/30 (so 0.5 and 0.2 are steps) and sent
+    in the five unused high bits of the laser byte of the player record (bits 3 to 7; bits 0 to 2 are the laser, the
+    rifle and the team), so the snapshot keeps its length. Older windows read only the low bits and draw plain
+    beams; an older server drops the bits, so others' beams show plain. Other windows start a tracer with the share
+    they receive with the shot; the kinds' shares come with the server's settings.
+  - **On the GPU:** each beam segment carries its share in `GpuBeam.info.y`; the ray keeps the share and code of the
+    beam whose halo is brightest, packed in `VoxelRayEnd.surface.w` beside the team bit and the tint bits of W-60
+    (throw wormholes): bit 0 the team, bits 1 and 2 the tint, bit 3 the rifle, the share from bit 4. The tint
+    used to read every bit above bit 0 and now reads its two. `shade_ray_end` hands the pixel's colour with and
+    without the beam to `speckle_beam`.
+  - **Kept:** #216's aim stray (D89), unchanged: you called it neutral.
+- **Alternatives:**
+  - the lightsaber for both guns (#256) or the laser for both (before it);
+  - shares from 0 to 1 (the version just before: you then asked for 0 to 0.5);
+  - dropout alone, with the surviving pixels brighter and whiter (the version this PR first had; you asked for the
+    beam otherwise to stay the normal beam);
+  - other ratios of black : white : dropout (1:1:4, 1:1:2, 2:1:7, 1:2:7, 1:1:18, in the samples);
+  - grain inside the glow, bright motes around the beam, or a glitchy beam with gaps and jumps (the first samples);
+  - deriving the share in each window from the shooter's id and shot count (the rifle's depends on its heat, which
+    other windows don't know);
+  - picking pixels after MetalFX upscaling (the overlay pass doesn't know where beams are): at a render scale under 1
+    the specks are render pixels, up to 2 window pixels across.
+- **Rationale:** you asked that the laser beam itself have shot noise, "a combination of black AND dropout AND
+  white": "i recommend the ratio is always 1 black to 1 white to 8 dropout and the total amount at this fixed ratio
+  is scaled as I had described" (random per sniper shot, rising with the rifle's shots). Then: "stick with 118 and
+  goes from amount 0 to 1 as you fire more, exponential average should be at 0.2". Then: "I see Leah made the
+  lightsaber thing. That's OK. Let's do lightsaber for the sniper and do the old laser view for the rifle. ALSO add
+  the SPECKLE on top of that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for
+  sniper."
+
 ### D15. WebGL at the same drawing-buffer sizes
 
 - **Choice:** the browser demo from PR 58, unchanged, in the Claude desktop app's built-in browser (Chromium 152,

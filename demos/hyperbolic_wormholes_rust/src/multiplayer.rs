@@ -23,11 +23,11 @@ use crate::geometry::{
 };
 use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
-use crate::render_voxel::VoxelFrame;
+use crate::render_voxel::{LaserBeam, VoxelFrame};
 use crate::scene_data::{Beam, SceneData};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
-    BeamSegment, LOOK_RAD_PER_PX, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
+    LOOK_RAD_PER_PX, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
 };
 use crate::world::{Color, EYE_HEIGHT_M, World};
 
@@ -254,6 +254,7 @@ pub fn run_bot(
                 is_laser_on,
                 false,
                 None,
+                0.0,
                 PlayerWormholes::default(),
             )?;
         } else {
@@ -277,9 +278,9 @@ pub struct SharedVoxelView {
 }
 
 /// `Tracers` is what to draw for lasers instead of every laser's whole path: beam pieces with
-/// their teams, an impact glow, and the dust of shots into the ground.
+/// their teams and speckle shares, an impact glow, and the dust of shots into the ground.
 pub struct Tracers<'a> {
-    pub beams: &'a [(Vec<BeamSegment>, u32)],
+    pub beams: &'a [LaserBeam],
     pub spot: Option<(DVec4, u32)>,
     pub dust: &'a [DustCloud],
 }
@@ -320,7 +321,8 @@ fn trace_other_voxel_lasers(
 /// `players` and a glowing ball for each of `markers`, this player's laser (if on, fired from
 /// `laser_aim`, `camera` turned by the shot's noise, for team `team`) and the lasers of the players
 /// who have theirs on, all traced through the same map, so beams stop at players and bend like
-/// light. It draws every laser's whole path, or `tracers` instead when given.
+/// light. It draws every laser's whole path (this player's as the sniper's, without speckle; the
+/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given.
 ///
 /// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &[], None, (1280, 800));`
 #[allow(clippy::too_many_arguments)]
@@ -346,7 +348,7 @@ pub fn pack_shared_voxel_view(
         .collect();
     let mut shared: VoxelWorld = world.with_avatars(&bodies, &colors);
     shared.add_markers(markers);
-    let mut beams: Vec<(Vec<BeamSegment>, u32)> = Vec::new();
+    let mut beams: Vec<LaserBeam> = Vec::new();
     let (mut shot, mut hit_player_id, mut spot, mut is_head_hit) = (None, None, None, false);
     let mut hit_marker: Option<usize> = None;
     if let Some(aim) = laser_aim {
@@ -364,17 +366,28 @@ pub fn pack_shared_voxel_view(
                 .zip(own.spot)
                 .is_some_and(|(k, x)| shared.is_head_hit(k, x));
         spot = own.spot.map(|x| (x, team));
-        beams.push((own.segments.clone(), team));
+        beams.push(LaserBeam {
+            segments: own.segments.clone(),
+            team,
+            is_rifle: false,
+            speckle_frac: 0.0,
+        });
         shot = Some(own);
     }
     let other_shots: Vec<(u32, Shot)> = trace_other_voxel_lasers(world, players, &bodies, &colors);
     for (id, other) in &other_shots {
-        let team: u32 = players.iter().find(|p| p.id == *id).map_or(0, |p| p.team);
-        beams.push((other.segments.clone(), team));
+        let shooter: Option<&RemotePlayer> = players.iter().find(|p| p.id == *id);
+        beams.push(LaserBeam {
+            segments: other.segments.clone(),
+            team: shooter.map_or(0, |p| p.team),
+            is_rifle: shooter.is_some_and(|p| p.is_rifle),
+            speckle_frac: shooter.map_or(0.0, |p| p.beam_speckle_frac),
+        });
     }
-    let (beams, spot, dust): (&[(Vec<BeamSegment>, u32)], _, &[DustCloud]) = match tracers {
+    let no_dust: &[DustCloud] = &[];
+    let (beams, spot, dust) = match tracers {
         Some(tracers) => (tracers.beams, tracers.spot, tracers.dust),
-        None => (beams.as_slice(), spot, &[]),
+        None => (beams.as_slice(), spot, no_dust),
     };
     SharedVoxelView {
         frame: VoxelFrame::Build(&shared, camera, beams, spot, dust, render_px),
@@ -520,7 +533,14 @@ pub fn run_voxel_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(camera, is_laser_on, false, None, PlayerWormholes::default())?;
+            client.send_state(
+                camera,
+                is_laser_on,
+                false,
+                None,
+                0.0,
+                PlayerWormholes::default(),
+            )?;
         } else {
             client.keep_joining()?;
         }
@@ -592,6 +612,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            beam_speckle_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let view: SharedView =
@@ -650,6 +671,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            beam_speckle_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
@@ -690,6 +712,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            beam_speckle_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let target_camera: DMat4 = target.get_camera_frame(&world);
@@ -741,6 +764,7 @@ mod tests {
             team: 0,
             disabling_console: None,
             disabling_frac: 0.0,
+            beam_speckle_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let bodies: Vec<(DMat4, usize)> = vec![(
