@@ -154,7 +154,7 @@ are here too, since the user hadn't confirmed them.
 
 - [?] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
   player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
-  page use team colours. The user said to add and fix it ("Yes, add and fix"). #PRNUM.
+  page use team colours. The user said to add and fix it ("Yes, add and fix"). #290.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
