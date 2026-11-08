@@ -517,7 +517,14 @@ struct Server {
     game: GameState,
     tallies: Vec<Tally>,
     result_path: Option<std::path::PathBuf>,
+    console_check: Option<console_check_t>,
 }
+
+/// `console_check_t` says whether a player whose eye frame is the first argument may hold `E` on
+/// the console of the second (an index into the server's consoles): within reach of it and aiming
+/// at it, as the level decides. A server without one takes the player's word.
+#[allow(non_camel_case_types)]
+pub type console_check_t = Box<dyn Fn(DMat4, u8) -> bool + Send>;
 
 impl Server {
     /// `handle` reacts to one datagram from `address`.
@@ -617,9 +624,13 @@ impl Server {
                     && let Some(slot) = self.find_sender(address, token, player.id)
                 {
                     player.team = self.slots[slot].player.team;
-                    player.disabling_console = player
-                        .disabling_console
-                        .filter(|&console| self.can_disable(player.team, console));
+                    player.disabling_console = player.disabling_console.filter(|&console| {
+                        self.can_disable(player.team, console)
+                            && self
+                                .console_check
+                                .as_ref()
+                                .is_none_or(|check| check(player.frame, console))
+                    });
                     let slot: &mut Slot = &mut self.slots[slot];
                     if player.disabling_console != slot.player.disabling_console {
                         slot.disabling_since = player.disabling_console.map(|_| Instant::now());
@@ -869,8 +880,8 @@ impl Server {
     /// `update_consoles` turns off each console a player has held `E` on for `consoles.hold_to_disable_s`,
     /// and declares the other team the winner once all of a team's consoles are off.
     ///
-    /// Example: `server.update_consoles();`
-    fn update_consoles(&mut self) {
+    /// Example: `server.update_consoles()?;`
+    fn update_consoles(&mut self) -> Result<()> {
         for index in 0..self.slots.len() {
             let slot: &mut Slot = &mut self.slots[index];
             if let (Some(console), Some(since)) =
@@ -882,18 +893,19 @@ impl Server {
                 if self.game.winner.is_none() {
                     self.game.off_mask |= 1 << console;
                     println!("player {id} turned off console {console}");
-                    self.update_winner();
+                    self.update_winner()?;
                 }
             }
         }
+        Ok(())
     }
 
     /// `update_winner` declares the other team the winner once all of a team's consoles are off;
     /// `update_consoles` calls it after each console, so the first team to finish wins even when
     /// both teams' last consoles go off in the same update.
     ///
-    /// Example: `self.update_winner();`
-    fn update_winner(&mut self) {
+    /// Example: `self.update_winner()?;`
+    fn update_winner(&mut self) -> Result<()> {
         let losers: Vec<u32> = (0..TEAM_NAMES.len() as u32)
             .filter(|&team| {
                 let mut consoles = (0..self.console_teams.len())
@@ -908,7 +920,7 @@ impl Server {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
             if let Some(path) = &self.result_path {
-                write_level_result(path, TEAM_NAMES[winner as usize]);
+                write_level_result(path, TEAM_NAMES[winner as usize])?;
             }
             println!(
                 "The {} team won.{}",
@@ -920,6 +932,7 @@ impl Server {
                 }
             );
         }
+        Ok(())
     }
 
     /// `start_new_game` turns every console back on, clears the winner and sets every player's kills
@@ -1021,20 +1034,23 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 }
 
 /// `write_level_result` writes `{"winner": "<team>"}` to `path` once, atomically (to
-/// `<path>.partial`, then renamed), for the match that launched this level (`--level-result-file`).
+/// `<path>.partial`, then renamed), for the match that launched this level (`--level-result-file`),
+/// and fails, naming the file, if it can't: the match waits for that file, so the server stops
+/// loudly rather than play on.
 ///
-/// Example: `write_level_result(Path::new("/tmp/result.json"), "blue");`
-pub fn write_level_result(path: &std::path::Path, team: &str) {
+/// Example: `write_level_result(Path::new("/tmp/result.json"), "blue")?;`
+pub fn write_level_result(path: &std::path::Path, team: &str) -> Result<()> {
     let partial: std::path::PathBuf = path.with_extension("partial");
     let text: String = serde_json::json!({ "winner": team }).to_string();
-    if let Err(error) =
-        std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path))
-    {
-        eprintln!(
-            "Couldn't write the level result {}: {error}",
-            path.display()
-        );
-    }
+    std::fs::write(&partial, text)
+        .and_then(|()| std::fs::rename(&partial, path))
+        .map_err(|error| {
+            format!(
+                "net: can't write the level result to {} ({error})",
+                path.display()
+            )
+        })?;
+    Ok(())
 }
 
 /// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
@@ -1045,9 +1061,11 @@ pub fn write_level_result(path: &std::path::Path, team: &str) {
 /// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
 /// `new_game_after_win`, that long after a team won, admits only players who prove they know
 /// `game_password` (empty for anyone), and broadcasts
-/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
+/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it. With
+/// `console_check`, a player's hold on a console counts only while the check allows it (within
+/// reach and aiming). It stops with an error if it can't write the level result.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new(), None, true, None)?;`
 #[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
@@ -1060,6 +1078,7 @@ pub fn serve(
     game_password: Vec<u8>,
     result_path: Option<std::path::PathBuf>,
     should_announce: bool,
+    console_check: Option<console_check_t>,
 ) -> Result<()> {
     assert!(
         console_teams.len() <= MAX_CONSOLE_COUNT,
@@ -1074,6 +1093,7 @@ pub fn serve(
     beacon.extend_from_slice(&port.to_le_bytes());
     let mut server: Server = Server {
         result_path,
+        console_check,
         socket,
         secret: make_random_bytes(),
         password: game_password,
@@ -1104,7 +1124,7 @@ pub fn serve(
             }
             is_alive
         });
-        server.update_consoles();
+        server.update_consoles()?;
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
             && time.elapsed() >= delay
@@ -1658,6 +1678,8 @@ mod tests {
     //! | Progress of turning off a console, in a snapshot | none held (0), part way (the seconds held over `hold_to_disable_s`), past the hold time (1) | `snapshots_carry_how_far_consoles_are_turned_off` |
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
     //! | Last consoles off in one update | both teams' (the first team to finish wins) | `the_first_team_to_finish_in_an_update_wins` |
+    //! | Console check | allows the hold (counts), refuses it (never counts) | `holds_count_only_where_the_check_allows` |
+    //! | Level result file | can't be written (an error) | `a_level_result_that_cant_be_written_fails` |
     //! | Scores datagram | complete (several players, none), cut short, too long, an unknown team | `scores_survive_encoding` |
     //! | Who a hit eliminates | nobody (a hit short of the limit), the other team's player (a kill and a death), a teammate (a death only) | `eliminations_count_kills_and_deaths` |
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
@@ -1781,6 +1803,7 @@ mod tests {
             game: GameState::default(),
             tallies: Vec::new(),
             result_path: None,
+            console_check: None,
         }
     }
 
@@ -1817,7 +1840,7 @@ mod tests {
     /// Example: `hold_console(&mut server, 1, address(50_001), 2);`
     fn hold_console(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
         start_holding(server, id, from, console);
-        server.update_consoles();
+        server.update_consoles().expect("the consoles update");
     }
 
     /// `start_holding` is `hold_console` without the update, so several players' holds can end in
@@ -2202,8 +2225,36 @@ mod tests {
         hold_console(&mut server, 1, red, 0);
         start_holding(&mut server, 1, red, 1);
         start_holding(&mut server, 2, blue, 2);
-        server.update_consoles();
+        server.update_consoles().expect("the consoles update");
         assert_eq!((server.game.off_mask, server.game.winner), (0b011, Some(1)));
+    }
+
+    /// `holds_count_only_where_the_check_allows` gives the server a console check that allows
+    /// only console 0: holding `E` on console 1 never turns it off, while console 0 goes off as
+    /// usual (W-126 (same play in every level): the server took a bot's word from anywhere).
+    #[test]
+    fn holds_count_only_where_the_check_allows() {
+        let mut server: Server = make_server();
+        server.console_check = Some(Box::new(|_, console| console == 0));
+        let red: SocketAddr = address(50_001);
+        join(&mut server, red, RED);
+        hold_console(&mut server, 1, red, 1);
+        assert_eq!(
+            (server.game.off_mask, server.slots[0].disabling_since),
+            (0, None)
+        );
+        hold_console(&mut server, 1, red, 0);
+        assert_eq!(server.game.off_mask, 0b001);
+    }
+
+    /// `a_level_result_that_cant_be_written_fails` writes a level result into a folder that
+    /// doesn't exist, which must fail rather than only print, so a match never waits for it.
+    #[test]
+    fn a_level_result_that_cant_be_written_fails() {
+        let path: std::path::PathBuf = std::env::temp_dir()
+            .join(format!("city_no_such_folder_{}", std::process::id()))
+            .join("result.json");
+        assert!(write_level_result(&path, "blue").is_err());
     }
 
     #[test]

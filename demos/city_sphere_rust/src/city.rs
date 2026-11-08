@@ -45,7 +45,7 @@ use crate::render_city::{
     BEACON_SLOT_COUNT, CityFrame, CityScene, build_scene, push_beam, push_core_halo, push_mesh,
 };
 use crate::render_metal::{self, FrameData};
-use crate::settings::{PerPlayerSettings, ServerSettings};
+use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
 use crate::thrown_wormholes::PlayerWormholes;
 use crate::viewmodel;
 use crate::voxel_world::{MUZZLE_M, SPAWN_TURN_RAD};
@@ -76,13 +76,19 @@ const MAP_PLAYER_HALF_PX: i32 = 4;
 const MAP_SELF_HALF_PX: i32 = 6;
 const MAP_COVER_ABOVE_GLASS_M: f64 = 1.0;
 const TEAM_TINTS: [[f32; 3]; 2] = [[0.55, 0.8, 1.5], [1.5, 0.6, 0.5]];
-const MINIMAP_RADIUS_FRAC: f64 = 0.12;
 const MINIMAP_MARGIN_FRAC: f64 = 0.03;
-const MINIMAP_CONSOLE_FRAC: f64 = 0.008;
-const MINIMAP_DOT_FRAC: f64 = 0.006;
-const MINIMAP_BACKGROUND_COLOR: [f32; 4] = [0.05, 0.05, 0.08, 0.55];
+const MINIMAP_MAP_PX: (usize, usize) = (1536, 768);
+const MINIMAP_GRID_M: f64 = 5.0;
+const MINIMAP_CONSOLE_RADIUS_PX: f32 = 7.0;
+const MINIMAP_PLAYER_RADIUS_PX: f32 = 8.0;
+const MINIMAP_SAMPLES_PER_SEGMENT: usize = 6;
+const MINIMAP_MIN_COS: f64 = 0.05;
+const MINIMAP_MAX_REACH_RAD: f64 = 1.0;
 const MINIMAP_OFF_COLOR: [f32; 4] = [0.25, 0.25, 0.28, 0.9];
 const MINIMAP_SELF_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+const MINIMAP_STAIRS_COLORS: [[u8; 4]; 2] = [[120, 150, 235, 255], [235, 130, 120, 255]];
+const MINIMAP_LIFT_COLOR: [u8; 4] = [190, 150, 255, 255];
+const MINIMAP_STAIRS_HOLE_COLOR: [u8; 4] = [60, 150, 170, 255];
 const PULSE_RAD_PER_S: f64 = 12.0;
 const CORE_HALO_RADIUS_PER_CORE_RADIUS: f64 = 3.0;
 const RUN_M_PER_S: f64 = 6.0;
@@ -98,7 +104,6 @@ const STEER_MIN_M: f64 = 0.3;
 const MESSAGE_S: f64 = 3.0;
 const MAX_DT_S: f64 = 0.1;
 const BOT_STEP_S: f64 = 1.0 / 60.0;
-const CONSOLE_REACH_SLACK_M: f64 = 0.6;
 const LOBBY_ORBIT_RAD_PER_S: f64 = 0.08;
 const RENDER_SCALE_STEP: f64 = 0.1;
 const MIN_RENDER_SCALE: f64 = 0.3;
@@ -111,7 +116,8 @@ const PHASE_NAMES: [&str; PHASE_COUNT] =
 const WARMUP_FRAME_COUNT: usize = 30;
 const SLOW_FRAME_MS: f64 = 17.5;
 const STAIRS_ARRIVE_M: f64 = 0.5;
-const PYLON_ARRIVE_M: f64 = 1.8;
+const STAIRS_LEAD_IN_M: f64 = 2.0;
+const SERVE_POLL_MS: u64 = 50;
 const STAIRS_ROUTE_END_WAIT_S: f64 = 2.0;
 
 /// `TeamName` is a team for `--team`.
@@ -187,14 +193,38 @@ fn step_respawn(client: &mut net::Client, respawn_in_s: &mut Option<f64>, dt_s: 
     Ok(())
 }
 
+/// `find_aimed_console` gives the console of the team other than `team`, still on in `game`, that
+/// a player whose eye frame is `eye` aims at within `reach_m` (`CityWorld::is_console_aimed`).
+///
+/// Example: `let console = find_aimed_console(&world, eye, 0, &client.game, 3.0);`
+fn find_aimed_console(
+    world: &CityWorld,
+    eye: DMat4,
+    team: u32,
+    game: &net::GameState,
+    reach_m: f64,
+) -> Option<u8> {
+    world
+        .consoles
+        .iter()
+        .filter(|c| c.team != team && game.off_mask >> c.index & 1 == 0)
+        .find(|c| world.is_console_aimed(eye, c.index, reach_m))
+        .map(|c| c.index)
+}
+
 /// `get_console_teams` lists each console's team in the server's console order.
 fn get_console_teams(world: &CityWorld) -> Vec<u32> {
     world.consoles.iter().map(|console| console.team).collect()
 }
 
+/// `ServerThread` is a game server's thread, ending with its error, if any, as text.
+type ServerThread = JoinHandle<std::result::Result<(), String>>;
+
 /// `start_server` starts a game server for City Sphere on `port` in a thread; a new game starts
 /// when Enter is pressed in the terminal unless `result_path` is set (then the won game stays won
-/// and the winner is written there); it announces itself on the network if `should_announce`.
+/// and the winner is written there); it announces itself on the network if `should_announce`. A
+/// hold on a console counts only while the player aims at it within reach
+/// (`CityWorld::into_console_check`).
 ///
 /// Example: `let (stop, thread) = start_server(47810, settings, &world, Vec::new(), None, true)?;`
 fn start_server(
@@ -204,7 +234,7 @@ fn start_server(
     game_password: Vec<u8>,
     result_path: Option<PathBuf>,
     should_announce: bool,
-) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
+) -> Result<(Arc<AtomicBool>, ServerThread)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let stop_flag: Arc<AtomicBool> = Arc::clone(&should_stop);
@@ -218,8 +248,10 @@ fn start_server(
         });
     }
     let console_teams: Vec<u32> = get_console_teams(world);
-    let thread: JoinHandle<()> = std::thread::spawn(move || {
-        if let Err(error) = net::serve(
+    let console_check: net::console_check_t =
+        CityWorld::Builtin()?.into_console_check(settings.consoles.reach_m);
+    let thread: ServerThread = std::thread::spawn(move || {
+        net::serve(
             socket,
             &stop_flag,
             MAP_NAME.to_string(),
@@ -230,14 +262,19 @@ fn start_server(
             game_password,
             result_path,
             should_announce,
-        ) {
+            Some(console_check),
+        )
+        .map_err(|error| {
             eprintln!("The game server stopped: {error}");
-        }
+            error.to_string()
+        })
     });
     Ok((should_stop, thread))
 }
 
-/// `serve_only` runs a City Sphere server without a window until stopped (or `--exit-after-s`).
+/// `serve_only` runs a City Sphere server without a window until stopped (or `--exit-after-s`),
+/// and fails if the server does (it can't write the level result, say), so a match that launched
+/// it sees the level end instead of waiting for it.
 fn serve_only(arguments: &Arguments) -> Result<()> {
     let world: CityWorld = CityWorld::Builtin()?;
     let (should_stop, thread) = start_server(
@@ -263,16 +300,16 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
             "A team wins by turning off the other team's consoles; then press Enter here for a new game."
         ),
     }
-    match arguments.exit_after_s {
-        Some(seconds) => std::thread::sleep(Duration::from_secs_f64(seconds)),
-        None => loop {
-            std::thread::park();
-        },
+    let stop_at: Option<Instant> = arguments
+        .exit_after_s
+        .map(|seconds| Instant::now() + Duration::from_secs_f64(seconds));
+    while !thread.is_finished() && stop_at.is_none_or(|at| Instant::now() < at) {
+        std::thread::sleep(Duration::from_millis(SERVE_POLL_MS));
     }
     should_stop.store(true, Ordering::Relaxed);
     thread
         .join()
-        .map_err(|_| "the game server's thread panicked")?;
+        .map_err(|_| "the game server's thread panicked")??;
     Ok(())
 }
 
@@ -419,6 +456,9 @@ impl Brain {
                 can_shoot
             }
             Step::HoldConsole { index } => {
+                if let Some(console) = world.consoles.iter().find(|c| c.index == index) {
+                    aim_at(player, world.get_console_center(console));
+                }
                 out.console = Some(index);
                 game.off_mask >> index & 1 == 1 || game.winner.is_some()
             }
@@ -530,42 +570,82 @@ fn walk_to(
     let up: DVec3 = player.get_up();
     let away: DVec3 = direction.normalize() * player.feet.length() - player.feet;
     let to: DVec3 = away - up * away.dot(up);
-    if to.length() < arrive_m {
+    let step_m: f64 = (player.velocity - up * player.velocity.dot(up)).length() * dt_s;
+    if to.length() < arrive_m.max(step_m) {
         return true;
     }
     steer(player, to, dt_s, input);
     false
 }
 
-/// `make_stairs_route` is the walk for `team` from its spawn up its stairs onto the glass level
-/// and to its pylon (`--route stairs`).
-fn make_stairs_route(world: &CityWorld, team: u32) -> Result<Vec<Step>> {
+/// `make_walk_to_console` is the walk for a player of `team` from its spawn to console `index`
+/// on foot: to a point `STAIRS_LEAD_IN_M` before the team's stairs on their line, up the stairs
+/// onto the glass level, then along the glass level's planned path (`CityWorld::find_glass_path`)
+/// to the console, ending next to it.
+///
+/// Example: `let steps = make_walk_to_console(&world, 0, 1)?;`
+fn make_walk_to_console(world: &CityWorld, team: u32, index: u8) -> Result<Vec<Step>> {
     let (bottom, top) = world
         .get_stairs_ends(team)
-        .ok_or("--route stairs needs a map with stairs")?;
+        .ok_or("the walk to a console needs a map with stairs")?;
     let console = world
         .consoles
         .iter()
-        .find(|c| c.team == team)
-        .ok_or("--route stairs needs the team's console")?;
-    Ok(vec![
+        .find(|c| c.index == index)
+        .ok_or_else(|| format!("make_walk_to_console: no console {index}"))?;
+    let up_the_stairs: DVec3 = (top - bottom * top.dot(bottom)).normalize();
+    let lead_in_rad: f64 = STAIRS_LEAD_IN_M / world.street_radius_m;
+    let lead_in: DVec3 = bottom * lead_in_rad.cos() - up_the_stairs * lead_in_rad.sin();
+    let mut steps: Vec<Step> = vec![
         Step::WalkTo {
-            direction: bottom,
+            direction: lead_in,
             arrive_m: STAIRS_ARRIVE_M,
         },
         Step::WalkTo {
             direction: top,
             arrive_m: STAIRS_ARRIVE_M,
         },
-        Step::GoTo {
-            direction: world.get_console_center(console),
-            side: Side::Glass,
-            arrive_m: PYLON_ARRIVE_M,
-        },
-        Step::Wait {
-            s: STAIRS_ROUTE_END_WAIT_S,
-        },
-    ])
+    ];
+    let waypoints: Vec<DVec3> = world
+        .find_glass_path(top, world.get_console_center(console).normalize())
+        .ok_or_else(|| format!("make_walk_to_console: no walk to console {index}"))?;
+    steps.extend(waypoints.into_iter().map(|direction| Step::WalkTo {
+        direction,
+        arrive_m: STAIRS_ARRIVE_M,
+    }));
+    Ok(steps)
+}
+
+/// `make_stairs_route` is the walk for `team` from its spawn up its stairs onto the glass level
+/// and to its pylon, then a wait (`--route stairs`).
+fn make_stairs_route(world: &CityWorld, team: u32) -> Result<Vec<Step>> {
+    let console = world
+        .consoles
+        .iter()
+        .find(|c| c.team == team)
+        .ok_or("--route stairs needs the team's console")?;
+    let mut steps: Vec<Step> = make_walk_to_console(world, team, console.index)?;
+    steps.push(Step::Wait {
+        s: STAIRS_ROUTE_END_WAIT_S,
+    });
+    Ok(steps)
+}
+
+/// `make_console_route` is `--bot-objective consoles`'s plan for a bot of `team`: walk on foot to
+/// each of the other team's consoles in turn (`make_walk_to_console`) and hold `E` on it, aiming
+/// at it, until it is off. The server counts the hold only within reach and while aiming, so the
+/// bot's win shows every pylon can be reached on foot.
+///
+/// Example: `let steps = make_console_route(&world, 1)?;`
+fn make_console_route(world: &CityWorld, team: u32) -> Result<Vec<Step>> {
+    let mut steps: Vec<Step> = Vec::new();
+    for console in world.consoles.iter().filter(|c| c.team != team) {
+        steps.extend(make_walk_to_console(world, team, console.index)?);
+        steps.push(Step::HoldConsole {
+            index: console.index,
+        });
+    }
+    Ok(steps)
 }
 
 /// `aim_at` turns `player`'s body and tilts the head so the crosshair points at `point`.
@@ -852,7 +932,7 @@ struct CitySession {
     player_settings_path: Option<PathBuf>,
     menu: Option<menu::Menu>,
     client: net::Client,
-    server: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
+    server: Option<(Arc<AtomicBool>, ServerThread)>,
     player: CityPlayer,
     is_spawned: bool,
     respawn_in_s: Option<f64>,
@@ -880,6 +960,7 @@ struct CitySession {
     rifle_log: RifleLog,
     was_trigger_held: bool,
     map_base: std::cell::OnceCell<Vec<u8>>,
+    minimap_base: Vec<u8>,
     hud: (f64, u32, f64),
     is_aiming: bool,
     phase_ms: Vec<[f64; PHASE_COUNT]>,
@@ -935,6 +1016,7 @@ impl CitySession {
             client.join(Some(team))?;
         }
         let player: CityPlayer = world.make_player(team.unwrap_or(0), 0);
+        let minimap_base: Vec<u8> = make_minimap_base(&world, MINIMAP_MAP_PX);
         Ok(CitySession {
             scene: Arc::new(build_scene(&world)),
             body: AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?,
@@ -975,6 +1057,7 @@ impl CitySession {
             rifle_log: RifleLog::default(),
             was_trigger_held: false,
             map_base: std::cell::OnceCell::new(),
+            minimap_base,
             hud: (0.0, 0, 0.0),
             is_aiming: false,
             phase_ms: Vec::new(),
@@ -1023,20 +1106,17 @@ impl CitySession {
             .collect()
     }
 
-    /// `find_console` gives the other team's console `index` (or the nearest one if `None`) that
-    /// is on and within reach.
+    /// `find_console` gives the other team's console `index` (or any if `None`) that is on and
+    /// that this player aims at within `consoles.reach_m`, as on Lunar Surface.
     fn find_console(&self, index: Option<u8>) -> Option<u8> {
-        let eye: DVec3 = self.player.get_eye_frame().w_axis.truncate();
-        let reach_m: f64 = self.settings.consoles.reach_m + CONSOLE_REACH_SLACK_M;
-        self.world
-            .consoles
-            .iter()
-            .filter(|c| c.team != self.get_team() && self.client.game.off_mask >> c.index & 1 == 0)
-            .filter(|c| index.is_none_or(|i| i == c.index))
-            .map(|c| (c.index, (self.world.get_console_center(c) - eye).length()))
-            .filter(|&(_, d)| d <= reach_m)
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(i, _)| i)
+        find_aimed_console(
+            &self.world,
+            self.player.get_eye_frame(),
+            self.get_team(),
+            &self.client.game,
+            self.settings.consoles.reach_m,
+        )
+        .filter(|&aimed| index.is_none_or(|i| i == aimed))
     }
 
     /// `get_brain_sight` gives the route's brain the rifle's heat, the nearest enemy's head and
@@ -1227,7 +1307,8 @@ impl CitySession {
                 .move_player(&mut self.player, &input, &self.settings, dt_s);
             let speed_m_per_s: f64 = (self.player.feet - before).length() / dt_s.max(1e-6);
             self.step_phase_rad += speed_m_per_s * dt_s * STEPS_RAD_PER_M;
-            self.run_frac = (speed_m_per_s / self.world.get_speed_m_per_s(&self.settings, true)).min(1.0);
+            self.run_frac =
+                (speed_m_per_s / self.world.get_speed_m_per_s(&self.settings, true)).min(1.0);
         }
         self.health_pulses.update(
             dt_s,
@@ -1720,10 +1801,14 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         if session.is_spawned && session.menu.is_none() {
             rects.extend(session.get_bar_rects());
         }
-        if session.is_spawned && session.menu.is_none() && session.player_settings.minimap.is_shown
-        {
-            rects.extend(get_minimap_rects(&session, window_px));
-        }
+        let minimap = (session.is_spawned
+            && session.menu.is_none()
+            && session.player_settings.minimap.is_shown)
+            .then(|| render_metal::OverlayMinimap {
+                map_pixels: &session.minimap_base,
+                map_size_px: MINIMAP_MAP_PX,
+                minimap: make_minimap(&session, window_px),
+            });
         let wand = session.is_spawned.then(|| {
             let recoil_frac: f64 = session.recoil_left_s / RECOIL_S;
             (
@@ -1754,18 +1839,18 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 }
             }),
             stretch_frac: 0.0,
-            minimap: None,
+            minimap,
             rects: &rects,
             wand,
             blur_frac: 0.0,
             hit: session.get_hit_effect(),
             blueshift_frac: 0.0,
         };
-        session.frame_count += 1;
         lap(3);
         let is_shown: bool =
             metal.render_to_layer(FrameData::City(&frame), layer, Some(&overlay))?;
         lap(4);
+        session.frame_count += 1;
         session.phase_ms.push(phases);
         if is_shown {
             let gpu_ms: f64 = metal.last_gpu_ms;
@@ -2161,80 +2246,197 @@ fn make_map_picture(session: &CitySession) -> Picture {
     }
 }
 
-/// `get_minimap_rects` draws the minimap in the window's top-right corner: the whole sphere
-/// unrolled around the player (straight ahead is up, the antipode is the rim), with consoles as
-/// squares in their team's colour (dark once off) and players as dots, the player in white.
+/// `make_minimap_base` draws the minimap's ground as a longitude-latitude picture of `size_px`
+/// (`get_map_direction`), the sphere seen from its centre, so from above: the street, buildings, the
+/// glass level's covers, each team's stairs in a light shade of its colour, the lift pads, and the
+/// glass's holes (the lifts' and the stairs'). The consoles and players are marks drawn each frame.
 ///
-/// Example: `rects.extend(get_minimap_rects(&session, window_px));`
-fn get_minimap_rects(
-    session: &CitySession,
-    window_px: (u32, u32),
-) -> Vec<render_metal::OverlayRect> {
-    let (width_px, height_px): (f64, f64) = (f64::from(window_px.0), f64::from(window_px.1));
-    let radius_px: f64 = height_px * MINIMAP_RADIUS_FRAC;
+/// Example: `let pixels = make_minimap_base(&world, MINIMAP_MAP_PX);`
+fn make_minimap_base(world: &CityWorld, size_px: (usize, usize)) -> Vec<u8> {
+    let bounds: Vec<(DVec3, f64)> = world
+        .boxes
+        .iter()
+        .map(|b| {
+            let distance_m: f64 = b.center.length();
+            let reach_m: f64 = b.half_m.length();
+            let cos: f64 = if reach_m < distance_m {
+                (1.0 - (reach_m / distance_m).powi(2)).sqrt()
+            } else {
+                -1.0
+            };
+            (b.center / distance_m, cos)
+        })
+        .collect();
+    let glass: Option<&crate::city_world::Shell> = world.get_glass();
+    let mut pixels: Vec<u8> = Vec::with_capacity(size_px.0 * size_px.1 * BYTES_PER_PIXEL);
+    for y in 0..size_px.1 {
+        for x in 0..size_px.0 {
+            let d: DVec3 = get_map_direction(x, y, size_px);
+            let nearest = world
+                .boxes
+                .iter()
+                .zip(&bounds)
+                .filter(|(b, (at, cos))| {
+                    d.dot(*at) >= *cos && b.group != "pylons" && b.group != "consoles"
+                })
+                .filter_map(|(b, _)| b.find_hit_m(DVec3::ZERO, d).map(|(t, _)| (t, b)))
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            let color: [u8; 4] = match nearest {
+                Some((_, b)) => match b.group.as_str() {
+                    "glass level" => MAP_COVER_COLOR,
+                    "stairs" => MINIMAP_STAIRS_COLORS[usize::from(b.name.starts_with("red"))],
+                    "lifts" => MINIMAP_LIFT_COLOR,
+                    _ => MAP_BUILDING_COLOR,
+                },
+                None if world.is_in_lift(d) => MAP_HOLE_COLOR,
+                None if glass.is_some_and(|glass| glass.is_in_hole(d)) => MINIMAP_STAIRS_HOLE_COLOR,
+                None => MAP_STREET_COLOR,
+            };
+            pixels.extend_from_slice(&color);
+        }
+    }
+    pixels
+}
+
+/// `project_to_minimap` gives where `point` shows on the sphere's minimap (`make_minimap`), in its
+/// unit disk (x right, y down), or `None` if it is a quarter of the sphere or more away: its
+/// direction from the centre, projected gnomonically from the direction `outward` under the
+/// player's feet, `tan_reach` the tangent of the angle to the rim, turned so the player's `back`
+/// is down.
+///
+/// Example: `let q = project_to_minimap(enemy_feet, outward, right, back, 1.5);`
+fn project_to_minimap(
+    point: DVec3,
+    outward: DVec3,
+    right: DVec3,
+    back: DVec3,
+    tan_reach: f64,
+) -> Option<[f64; 2]> {
+    let d: DVec3 = point.normalize();
+    let cos: f64 = outward.dot(d);
+    if cos < MINIMAP_MIN_COS {
+        return None;
+    }
+    let scale: f64 = 1.0 / (cos * tan_reach);
+    Some([d.dot(right) * scale, d.dot(back) * scale])
+}
+
+/// `make_minimap` builds the shader's sphere minimap (`render_metal.metal`'s
+/// `get_sphere_minimap_ground`), placed and sized by the player settings' `minimap` as on Lunar
+/// Surface: the sphere seen from its centre around this player (the way they face is up), out to
+/// `minimap.range_m` of street but at most `MINIMAP_MAX_REACH_RAD` of arc, over
+/// `session.minimap_base` with straight grid lines every `MINIMAP_GRID_M`; the consoles as marks
+/// in their team's colour (grey once off), the other players as marks in theirs, the shots as
+/// lines in their team's colour, and this player as the shader's white arrow.
+///
+/// Example: `let minimap = make_minimap(&session, (2560, 1600));`
+fn make_minimap(session: &CitySession, window_px: (u32, u32)) -> render_metal::Minimap {
+    let settings = &session.player_settings.minimap;
+    let (width_px, height_px) = (f64::from(window_px.0), f64::from(window_px.1));
+    let radius_px: f64 = settings.radius_frac * height_px;
+    let inset_px: f64 = MINIMAP_MARGIN_FRAC * height_px + radius_px;
+    let (is_left, is_top) = match settings.corner {
+        MinimapCorner::TopLeft => (true, true),
+        MinimapCorner::TopRight => (false, true),
+        MinimapCorner::BottomLeft => (true, false),
+        MinimapCorner::BottomRight => (false, false),
+    };
     let center_px: [f64; 2] = [
-        width_px - radius_px - height_px * MINIMAP_MARGIN_FRAC,
-        radius_px + height_px * MINIMAP_MARGIN_FRAC,
+        if is_left {
+            inset_px
+        } else {
+            width_px - inset_px
+        },
+        if is_top {
+            inset_px
+        } else {
+            height_px - inset_px
+        },
     ];
+    let tan_reach: f64 = (settings.range_m / session.world.street_radius_m)
+        .min(MINIMAP_MAX_REACH_RAD)
+        .tan();
     let outward: DVec3 = session.player.feet.normalize();
-    let right: DVec3 = session.player.body.x_axis;
-    let forward: DVec3 = -session.player.body.z_axis;
-    let place = |point: DVec3| -> [f64; 2] {
-        let direction: DVec3 = point.normalize();
-        let cos_angle: f64 = outward.dot(direction).clamp(-1.0, 1.0);
-        let tangent: DVec3 = (direction - outward * cos_angle).normalize_or_zero();
-        let r_px: f64 = radius_px * cos_angle.acos() / std::f64::consts::PI;
-        [
-            center_px[0] + tangent.dot(right) * r_px,
-            center_px[1] - tangent.dot(forward) * r_px,
-        ]
-    };
-    let rect = |at_px: [f64; 2], half_px: f64, color: [f32; 4]| render_metal::OverlayRect {
-        min_frac: [
-            ((at_px[0] - half_px) / width_px) as f32,
-            ((at_px[1] - half_px) / height_px) as f32,
-        ],
-        max_frac: [
-            ((at_px[0] + half_px) / width_px) as f32,
-            ((at_px[1] + half_px) / height_px) as f32,
-        ],
-        color,
-        style: render_metal::FLAT_RECT_STYLE,
-        pulse: render_metal::NO_RECT_PULSE,
-    };
-    let mut rects: Vec<render_metal::OverlayRect> =
-        vec![rect(center_px, radius_px, MINIMAP_BACKGROUND_COLOR)];
-    for console in &session.world.consoles {
+    let (right, back) = (session.player.body.x_axis, session.player.body.z_axis);
+    let project = |point: DVec3| project_to_minimap(point, outward, right, back, tan_reach);
+    let is_on_disk = |q: Option<[f64; 2]>| q.is_some_and(|q| q[0].hypot(q[1]) <= 1.0);
+    let mut minimap: render_metal::Minimap = render_metal::Minimap::Hidden();
+    minimap.ground_frame =
+        [right, outward, back, DVec3::ZERO].map(|v| v.extend(0.0).as_vec4().to_array());
+    minimap.placement = [center_px[0], center_px[1], radius_px, tan_reach].map(|x| x as f32);
+    minimap.map = [
+        MINIMAP_MAP_PX.0 as f64,
+        MINIMAP_MAP_PX.1 as f64,
+        MINIMAP_GRID_M / session.world.street_radius_m,
+        0.0,
+    ]
+    .map(|x| x as f32);
+    let consoles = session.world.consoles.iter().map(|console| {
         let is_off: bool = session.client.game.off_mask >> console.index & 1 == 1;
         let color: [f32; 4] = if is_off {
             MINIMAP_OFF_COLOR
         } else {
-            TEAM_COLORS[console.team as usize]
+            TEAM_COLORS[console.team as usize % 2]
         };
-        rects.push(rect(
-            place(session.world.get_console_center(console)),
-            height_px * MINIMAP_CONSOLE_FRAC,
+        (
+            session.world.get_console_center(console),
+            MINIMAP_CONSOLE_RADIUS_PX,
             color,
-        ));
-    }
-    for player in session
+        )
+    });
+    let players = session
         .client
         .players
         .iter()
-        .filter(|p| Some(p.id) != session.client.welcomed_id)
-    {
-        rects.push(rect(
-            place(player.frame.w_axis.truncate()),
-            height_px * MINIMAP_DOT_FRAC,
-            TEAM_COLORS[player.team as usize % 2],
-        ));
-    }
-    rects.push(rect(
-        center_px,
-        height_px * MINIMAP_DOT_FRAC,
-        MINIMAP_SELF_COLOR,
-    ));
-    rects
+        .filter(|p| Some(p.id) != session.client.id)
+        .map(|p| {
+            let (feet, _) = CityPlayer::get_feet_up(p.frame, session.world.eye_height_m);
+            (
+                feet,
+                MINIMAP_PLAYER_RADIUS_PX,
+                TEAM_COLORS[p.team as usize % 2],
+            )
+        });
+    let marks: Vec<[[f32; 4]; 2]> = consoles
+        .chain(players)
+        .map(|(point, mark_radius_px, color)| (project(point), mark_radius_px, color))
+        .filter(|&(q, _, _)| is_on_disk(q))
+        .take(render_metal::MAX_MINIMAP_MARK_COUNT)
+        .filter_map(|(q, mark_radius_px, color)| {
+            q.map(|[x, y]| [[x as f32, y as f32, mark_radius_px, 0.0], color])
+        })
+        .collect();
+    let lines: Vec<[[f32; 4]; 2]> = session
+        .shots
+        .iter()
+        .flat_map(|shot| {
+            let color: [f32; 4] = TEAM_COLORS[shot.team as usize % 2];
+            shot.shot.points.windows(2).flat_map(move |pair| {
+                (0..MINIMAP_SAMPLES_PER_SEGMENT).map(move |k| {
+                    let at = |s: usize| {
+                        pair[0].lerp(pair[1], s as f64 / MINIMAP_SAMPLES_PER_SEGMENT as f64)
+                    };
+                    (at(k), at(k + 1), color)
+                })
+            })
+        })
+        .map(|(a, b, color)| (project(a), project(b), color))
+        .filter(|&(a, b, _)| a.is_some() && b.is_some() && (is_on_disk(a) || is_on_disk(b)))
+        .take(render_metal::MAX_MINIMAP_LINE_COUNT)
+        .filter_map(|(a, b, color)| {
+            let (a, b) = (a?, b?);
+            Some([[a[0], a[1], b[0], b[1]].map(|x| x as f32), color])
+        })
+        .collect();
+    minimap.marks[..marks.len()].copy_from_slice(&marks);
+    minimap.lines[..lines.len()].copy_from_slice(&lines);
+    minimap.counts = [
+        marks.len() as i32,
+        lines.len() as i32,
+        render_metal::MINIMAP_KIND_SPHERE,
+        0,
+    ];
+    minimap
 }
 
 /// `print_route_report` prints the route's numbers: frame times, GPU times, the winner and shots.
@@ -2689,8 +2891,9 @@ impl Rng {
 }
 
 /// `run_bot` plays without a window on `--join`'s server for `--exit-after-s`: it wanders between
-/// the levels shooting enemies it can hit, or with `--bot-objective consoles` holds `E` on the
-/// other team's consoles until its team wins.
+/// the levels shooting enemies it can hit, or with `--bot-objective consoles` walks up its stairs
+/// to each of the other team's consoles and holds `E` on it, aiming at it, until its team wins
+/// (`make_console_route`).
 fn run_bot(arguments: &Arguments) -> Result<()> {
     let world: CityWorld = CityWorld::Builtin()?;
     let mut client: net::Client = net::Client::Connect(
@@ -2722,6 +2925,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                     player = world.make_player(client.team.unwrap_or(0), spawn_count);
                     spawn_count += 1;
                     is_spawned = true;
+                    brain.restart();
                 }
                 net::NetEvent::Eliminated { is_self: true, .. } => {
                     is_spawned = false;
@@ -2746,11 +2950,28 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         laser_left_s = f64::max(laser_left_s - dt_s, 0.0);
         let mut disabling: Option<u8> = None;
         if arguments.bot_objective == Some(BotObjective::Consoles) {
-            disabling = world
-                .consoles
-                .iter()
-                .find(|c| c.team != team && client.game.off_mask >> c.index & 1 == 0)
-                .map(|c| c.index);
+            if brain.is_done() {
+                brain = Brain::New(make_console_route(&world, team)?);
+            }
+            let out: BrainOutput = brain.drive(
+                &world,
+                &mut player,
+                dt_s,
+                &client.game,
+                false,
+                &BrainSight::default(),
+            );
+            world.move_player(&mut player, &out.input, &settings, dt_s);
+            disabling = out.console.and_then(|index| {
+                find_aimed_console(
+                    &world,
+                    player.get_eye_frame(),
+                    team,
+                    &client.game,
+                    settings.consoles.reach_m,
+                )
+                .filter(|&aimed| aimed == index)
+            });
         } else if arguments.bot_objective == Some(BotObjective::Target) {
             player = make_target_player(&world);
         } else if client.game.winner.is_none() {
@@ -2859,22 +3080,28 @@ mod tests {
     //! | Map picture pixel and direction | round trip at the equator and near a pole | `map_pixels_and_directions_agree` |
     //! | When an eliminated player comes back | before the respawn delay (never), within a join retry after it, at their team's spawn | `an_eliminated_player_respawns_only_after_the_delay` |
     //! | Walk from a spawn up the stairs | each team, each of its two spawns, walking and sprinting: reaches the glass level, then its pylon, never stuck | `every_spawn_walks_up_the_stairs_to_its_pylon` |
+    //! | Level jumped in | City Sphere, Lunar Surface (the reference, its own settings and code): the same height and time in the air | `a_jump_matches_lunar_surface` |
+    //! | Settings file | server (all but the sprint and City's `glass`), player: the same as Lunar Surface's | `the_settings_files_match_lunar_surface` |
+    //! | Walk on foot from a spawn to a console | each team, spawn and console (own, the other team's), 60 and 20 updates a second: aimed within reach at the end; not when facing away or with too short a reach | `every_pylon_is_reachable_on_foot_from_every_spawn` |
     use super::*;
 
     const WALK_STEP_S: f64 = 1.0 / 60.0;
+    const SLOW_WALK_STEP_S: f64 = 1.0 / 20.0;
+    const TOO_SHORT_REACH_M: f64 = 0.5;
     const WALK_TIMEOUT_S: f64 = 40.0;
     const GLASS_LEVEL_TOLERANCE_M: f64 = 0.05;
 
-    /// `walk_steps` plays `steps` for `player` with the real movement and settings, a 1/60 s step
-    /// at a time, sprinting if `is_sprinting`, until the steps are done or `WALK_TIMEOUT_S` runs
-    /// out; it panics if the brain ever needs to unstick the player (`STUCK_S` without moving).
+    /// `walk_steps` plays `steps` for `player` with the real movement and settings, `step_s` at a
+    /// time, sprinting if `is_sprinting`, until the steps are done or `WALK_TIMEOUT_S` runs out; it
+    /// panics if the brain ever needs to unstick the player (`STUCK_S` without moving).
     ///
-    /// Example: `walk_steps(&world, &mut player, vec![Step::WalkTo { direction, arrive_m: 0.5 }], false);`
+    /// Example: `walk_steps(&world, &mut player, vec![Step::WalkTo { direction, arrive_m: 0.5 }], false, 1.0 / 60.0);`
     fn walk_steps(
         world: &CityWorld,
         player: &mut CityPlayer,
         steps: Vec<Step>,
         is_sprinting: bool,
+        step_s: f64,
     ) -> f64 {
         let settings: ServerSettings = ServerSettings::Builtin();
         let mut brain: Brain = Brain::New(steps);
@@ -2883,7 +3110,7 @@ mod tests {
             let out: BrainOutput = brain.drive(
                 world,
                 player,
-                WALK_STEP_S,
+                step_s,
                 &net::GameState::default(),
                 false,
                 &BrainSight::default(),
@@ -2899,8 +3126,8 @@ mod tests {
                 is_sprinting,
                 ..out.input
             };
-            world.move_player(player, &input, &settings, WALK_STEP_S);
-            time_s += WALK_STEP_S;
+            world.move_player(player, &input, &settings, step_s);
+            time_s += step_s;
         }
         assert!(brain.is_done(), "the walk took over {WALK_TIMEOUT_S} s");
         time_s
@@ -2923,7 +3150,7 @@ mod tests {
             let mut player: CityPlayer = world.make_player(team, spawn);
             let mut steps: Vec<Step> = make_stairs_route(&world, team).expect("stairs");
             let to_pylon: Vec<Step> = steps.split_off(2);
-            let climb_s: f64 = walk_steps(&world, &mut player, steps, is_sprinting);
+            let climb_s: f64 = walk_steps(&world, &mut player, steps, is_sprinting, WALK_STEP_S);
             assert_eq!(world.get_side(player.feet), Side::Glass, "{case}");
             assert!(
                 player.is_on_ground
@@ -2931,8 +3158,12 @@ mod tests {
                 "{case}: at radius {:.3} m after {climb_s:.1} s",
                 player.feet.length()
             );
-            walk_steps(&world, &mut player, to_pylon, is_sprinting);
-            let console = world.consoles.iter().find(|c| c.team == team).expect("a console");
+            walk_steps(&world, &mut player, to_pylon, is_sprinting, WALK_STEP_S);
+            let console = world
+                .consoles
+                .iter()
+                .find(|c| c.team == team)
+                .expect("a console");
             let eye: DVec3 = player.get_eye_frame().w_axis.truncate();
             let reach_m: f64 = (world.get_console_center(console) - eye).length();
             assert!(
@@ -2940,6 +3171,185 @@ mod tests {
                 "{case}: the console is {reach_m:.2} m away"
             );
         }
+    }
+
+    /// `every_pylon_is_reachable_on_foot_from_every_spawn` walks from each spawn of each team to
+    /// every console, own and the other team's, by the stairs and the planned path on the glass
+    /// level (the console bot's walk, `make_walk_to_console`), at 60 and at 20 updates a second,
+    /// and checks that the player can then aim at the console within reach, which the server
+    /// requires to count a hold; and that facing away or a shorter reach doesn't count (W-126
+    /// (same play in every level): "They all need to be possible to win, which means it needs to
+    /// be possible to get to the pylon").
+    #[test]
+    fn every_pylon_is_reachable_on_foot_from_every_spawn() {
+        let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
+        let settings: ServerSettings = ServerSettings::Builtin();
+        for team in 0..2 {
+            for spawn in 0..2 {
+                for console in &world.consoles {
+                    for step_s in [WALK_STEP_S, SLOW_WALK_STEP_S] {
+                        let case: String = format!(
+                            "team {team}, spawn {spawn}, console {}, step {step_s:.3} s",
+                            console.index
+                        );
+                        let mut player: CityPlayer = world.make_player(team, spawn);
+                        let steps: Vec<Step> =
+                            make_walk_to_console(&world, team, console.index).expect("a walk");
+                        walk_steps(&world, &mut player, steps, false, step_s);
+                        aim_at(&mut player, world.get_console_center(console));
+                        let eye: DMat4 = player.get_eye_frame();
+                        assert!(
+                            world.is_console_aimed(eye, console.index, settings.consoles.reach_m),
+                            "{case}: not aimed within reach from {:?}",
+                            player.feet
+                        );
+                        assert!(
+                            !world.is_console_aimed(eye, console.index, TOO_SHORT_REACH_M),
+                            "{case}: aimed within {TOO_SHORT_REACH_M} m"
+                        );
+                        player.look_around(std::f64::consts::PI, 0.0);
+                        assert!(
+                            !world.is_console_aimed(
+                                player.get_eye_frame(),
+                                console.index,
+                                settings.consoles.reach_m
+                            ),
+                            "{case}: aimed while facing away"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    const LUNAR_FOLDER: &str = "../hyperbolic_wormholes_rust";
+    const MAX_JUMP_STEP_COUNT: usize = 120;
+    const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.05;
+    const LUNAR_JUMP_AT_M: [f64; 2] = [-27.0, 0.0];
+    const CITY_ONLY_SECTION: &str = "glass:";
+    const CITY_ONLY_SETTING: &str = "  sprint_speed_per_map_speed:";
+
+    /// `read_lunar_file` reads one of Lunar Surface's own files (the hyperbolic demo's).
+    fn read_lunar_file(name: &str) -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(LUNAR_FOLDER)
+                .join(name),
+        )
+        .expect("a Lunar Surface file")
+    }
+
+    /// `measure_city_jump` gives a standing jump's height in meters and its time in the air in
+    /// 1/60 s steps, from blue's spawn, under City Sphere's own settings.
+    fn measure_city_jump() -> (f64, usize) {
+        let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
+        let settings: ServerSettings = ServerSettings::Builtin();
+        let mut player: CityPlayer = world.make_player(0, 0);
+        let jump: CityInput = CityInput {
+            is_jumping: true,
+            speed_frac: 1.0,
+            ..CityInput::default()
+        };
+        world.move_player(&mut player, &jump, &settings, WALK_STEP_S);
+        let height_m = |player: &CityPlayer| world.street_radius_m - player.feet.length();
+        let (mut apex_m, mut air_step_count): (f64, usize) = (height_m(&player), 1);
+        while !player.is_on_ground {
+            assert!(
+                air_step_count < MAX_JUMP_STEP_COUNT,
+                "the jump never landed"
+            );
+            world.move_player(&mut player, &CityInput::default(), &settings, WALK_STEP_S);
+            apex_m = apex_m.max(height_m(&player));
+            air_step_count += 1;
+        }
+        (apex_m, air_step_count)
+    }
+
+    /// `measure_lunar_jump` gives the same as `measure_city_jump` on Lunar Surface, with Lunar
+    /// Surface's own movement settings (its `server_settings.yaml`) and its own code
+    /// (`VoxelWorld::set_settings`, `VoxelPlayer::step`).
+    fn measure_lunar_jump() -> (f64, usize) {
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str(&read_lunar_file("server_settings.yaml")).expect("YAML");
+        let mut settings: ServerSettings = ServerSettings::Builtin();
+        settings.movement =
+            serde_yaml::from_value(yaml["movement"].clone()).expect("Lunar's movement");
+        let map: crate::map::Map =
+            crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface")).expect("Lunar");
+        let mut world: crate::voxel_world::VoxelWorld =
+            crate::voxel_world::VoxelWorld::FromMap(&map).expect("a voxel world");
+        world.set_settings(settings);
+        let at_m: [f64; 2] = LUNAR_JUMP_AT_M;
+        let mut player: crate::voxel_world::VoxelPlayer = crate::voxel_world::VoxelPlayer::AtView(
+            &world,
+            at_m,
+            [at_m[0] + 1.0, at_m[1]],
+            None,
+            0.0,
+        );
+        let start_m: f64 = player.h_m;
+        let jump: crate::physics::Input = crate::physics::Input {
+            up: true,
+            ..crate::physics::Input::default()
+        };
+        player.step(&world, &jump, WALK_STEP_S, 0);
+        let (mut apex_m, mut air_step_count): (f64, usize) = (player.h_m - start_m, 1);
+        while !player.is_on_ground {
+            assert!(
+                air_step_count < MAX_JUMP_STEP_COUNT,
+                "the jump never landed"
+            );
+            player.step(&world, &crate::physics::Input::default(), WALK_STEP_S, 0);
+            apex_m = apex_m.max(player.h_m - start_m);
+            air_step_count += 1;
+        }
+        (apex_m, air_step_count)
+    }
+
+    /// `a_jump_matches_lunar_surface` jumps from standing in City Sphere and on Lunar Surface
+    /// (W-126 (same play in every level): City's map gravity made its jump last 0.34 s against
+    /// Lunar's 0.58 s): the same height and time in the air, within a step.
+    #[test]
+    fn a_jump_matches_lunar_surface() {
+        let (city_apex_m, city_step_count) = measure_city_jump();
+        let (lunar_apex_m, lunar_step_count) = measure_lunar_jump();
+        assert!(
+            (city_apex_m - lunar_apex_m).abs() < JUMP_HEIGHT_TOLERANCE_M,
+            "City Sphere {city_apex_m} m, Lunar Surface {lunar_apex_m} m"
+        );
+        assert!(
+            city_step_count.abs_diff(lunar_step_count) <= 1,
+            "City Sphere {city_step_count} steps in the air, Lunar Surface {lunar_step_count}"
+        );
+    }
+
+    /// `the_settings_files_match_lunar_surface` checks City Sphere's settings files against Lunar
+    /// Surface's, line for line (W-126 (same play in every level): "Respawn timers and all that
+    /// stuff should be the same throughout"), except the faster sprint the user asked for and
+    /// City Sphere's own `glass` section at the end.
+    #[test]
+    fn the_settings_files_match_lunar_surface() {
+        let city_server: String = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("server_settings.yaml"),
+        )
+        .expect("City's server settings");
+        let shared = |text: &str| -> Vec<String> {
+            text.lines()
+                .take_while(|line| !line.starts_with(CITY_ONLY_SECTION))
+                .filter(|line| !line.starts_with(CITY_ONLY_SETTING))
+                .map(|line| line.trim_end().to_string())
+                .filter(|line| !line.is_empty())
+                .collect()
+        };
+        assert_eq!(
+            shared(&city_server),
+            shared(&read_lunar_file("server_settings.yaml"))
+        );
+        let city_player: String = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("player_settings.yaml"),
+        )
+        .expect("City's player settings");
+        assert_eq!(city_player, read_lunar_file("player_settings.yaml"));
     }
 
     const TEST_RESPAWN_DELAY_S: f64 = 1.5;
@@ -3003,6 +3413,7 @@ mod tests {
                 Vec::new(),
                 None,
                 false,
+                None,
             )
             .expect("the server runs");
         });

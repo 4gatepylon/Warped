@@ -474,8 +474,16 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
                 },
             );
             glass_radius_m = shell.radius_m as f32;
-            let (lifts, stairs): (Vec<(DVec3, f64)>, Vec<(DVec3, f64)>) =
-                shell.holes.iter().partition(|hole| world.lift_holes.contains(hole));
+            let lifts: Vec<&(DVec3, f64)> = shell
+                .holes
+                .iter()
+                .filter(|hole| world.lift_holes.contains(hole))
+                .collect();
+            let stairs: Vec<&(DVec3, f64)> = shell
+                .holes
+                .iter()
+                .filter(|hole| !world.lift_holes.contains(hole))
+                .collect();
             assert!(
                 lifts.len() + stairs.len() <= MAX_HOLE_COUNT,
                 "build_scene: the glass has {} holes, more than the shader's {MAX_HOLE_COUNT}",
@@ -485,7 +493,7 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
             holes = lifts
                 .iter()
                 .chain(&stairs)
-                .map(|&(d, cos)| [d.x as f32, d.y as f32, d.z as f32, cos as f32])
+                .map(|&&(d, cos)| [d.x as f32, d.y as f32, d.z as f32, cos as f32])
                 .collect();
         }
     }

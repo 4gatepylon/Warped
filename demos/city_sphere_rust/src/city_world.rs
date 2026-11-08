@@ -6,6 +6,8 @@
 //! Interface: `CityWorld::Builtin`, `CityWorld::FromJson`, `CityPlayer`, `CityInput`, `Shot`,
 //! `ShotHit`, `CityWorld::trace_shot`, `CityWorld::move_player`, `Side`, `get_up`.
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::error::Error;
 
 use glam::{DMat3, DMat4, DQuat, DVec3};
@@ -34,8 +36,16 @@ const MAX_STEP_UP_M: f64 = 0.2;
 const MIN_PITCH_RAD: f64 = -1.5;
 const MAX_PITCH_RAD: f64 = 1.5;
 const GROUND_NORMAL_COS: f64 = 0.6;
+const SPAWN_PITCH_RAD: f64 = 0.25;
 const LIFT_GROUP: &str = "lifts";
 const STAIRS_GROUP: &str = "stairs";
+const PYLON_GROUP: &str = "pylons";
+const PATH_CELL_RAD: f64 = 0.025;
+const PATH_CLEARANCE_M: f64 = 0.35;
+const PATH_COST_PER_RAD: f64 = 1e6;
+/// `CONSOLE_REACH_SLACK_M` is how much further than `consoles.reach_m` the server lets a hold
+/// count, so a window that turns a console off at the edge of its reach isn't refused.
+pub const CONSOLE_REACH_SLACK_M: f64 = 0.6;
 
 #[derive(Deserialize)]
 struct JsonMaterial {
@@ -495,13 +505,181 @@ impl CityWorld {
         Some((bottom.normalize(), top.normalize()))
     }
 
+    /// `is_console_aimed` says whether a player whose eye frame is `eye` aims at console `index`
+    /// within `reach_m`, as on Lunar Surface (`find_aimed_material`): the first box the ray along
+    /// their crosshair meets is the console, or the pylon around it, at most `reach_m` away. An
+    /// index that isn't a console (from the network) isn't aimed at.
+    ///
+    /// Example: `if world.is_console_aimed(player.get_eye_frame(), 1, 3.0) { ... }`
+    pub fn is_console_aimed(&self, eye: DMat4, index: u8, reach_m: f64) -> bool {
+        let Some(console) = self.consoles.iter().find(|c| c.index == index) else {
+            return false;
+        };
+        let console_center: DVec3 = self.boxes[console.box_index].center;
+        let (origin, direction) = (eye.w_axis.truncate(), -eye.z_axis.truncate().normalize());
+        let nearest: Option<(f64, usize)> = self
+            .boxes
+            .iter()
+            .enumerate()
+            .filter_map(|(k, b)| b.find_hit_m(origin, direction).map(|(t, _)| (t, k)))
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        nearest.is_some_and(|(t, k)| {
+            let hit: &CityBox = &self.boxes[k];
+            let is_pylon_around: bool = hit.group == PYLON_GROUP
+                && hit.to_local(console_center).abs().cmple(hit.half_m).all();
+            t <= reach_m && (k == console.box_index || is_pylon_around)
+        })
+    }
+
+    /// `into_console_check` turns the world into the game server's console check: a hold counts
+    /// while the player aims at the console within `reach_m` plus `CONSOLE_REACH_SLACK_M`
+    /// (`is_console_aimed`).
+    ///
+    /// Example: `let check = CityWorld::Builtin()?.into_console_check(3.0);`
+    pub fn into_console_check(self, reach_m: f64) -> Box<dyn Fn(DMat4, u8) -> bool + Send> {
+        Box::new(move |eye, index| {
+            self.is_console_aimed(eye, index, reach_m + CONSOLE_REACH_SLACK_M)
+        })
+    }
+
+    /// `find_glass_path` plans a walk on the glass level from the unit direction `from` toward
+    /// the unit direction `goal`, avoiding the glass's holes and whatever stands on the glass level
+    /// (covers, pylons) by a body radius and `PATH_CLEARANCE_M`: an A* search on a
+    /// longitude-latitude grid of `PATH_CELL_RAD` cells, from the free cell nearest `from` (the
+    /// first waypoint) to the free cell nearest `goal`, then pulled taut into the fewest straight
+    /// legs. It gives the legs' ends as unit directions, or `None` when no walk exists.
+    ///
+    /// Example: `let waypoints = world.find_glass_path(top, console_direction).expect("a path");`
+    pub fn find_glass_path(&self, from: DVec3, goal: DVec3) -> Option<Vec<DVec3>> {
+        let glass: &Shell = self.get_glass()?;
+        let level_m: f64 = glass.radius_m - glass.thickness_m / 2.0;
+        let lat_count: usize = (std::f64::consts::PI / PATH_CELL_RAD).round() as usize;
+        let lon_count: usize = (std::f64::consts::TAU / PATH_CELL_RAD).round() as usize;
+        let to_direction = |cell: usize| -> DVec3 {
+            let (i, j) = (cell / lon_count, cell % lon_count);
+            let lat: f64 = (i as f64 + 0.5) / lat_count as f64 * std::f64::consts::PI
+                - std::f64::consts::FRAC_PI_2;
+            let lon: f64 = j as f64 / lon_count as f64 * std::f64::consts::TAU;
+            DVec3::new(lat.cos() * lon.cos(), lat.sin(), lat.cos() * lon.sin())
+        };
+        let clearance_m: f64 = BODY_RADIUS_M + PATH_CLEARANCE_M;
+        let standing: Vec<&CityBox> = self
+            .boxes
+            .iter()
+            .filter(|b| {
+                let (near_m, far_m) = (
+                    b.center.length() - b.half_m.length(),
+                    b.center.length() + b.half_m.length(),
+                );
+                near_m < level_m && far_m > level_m - BODY_HEIGHT_M
+            })
+            .filter(|b| b.group != STAIRS_GROUP)
+            .collect();
+        let is_free = |d: DVec3| -> bool {
+            let is_near_hole: bool = glass.holes.iter().any(|&(hole, cos)| {
+                d.dot(hole).clamp(-1.0, 1.0).acos() < cos.acos() + clearance_m / level_m
+            });
+            !is_near_hole
+                && standing.iter().all(|b| {
+                    [
+                        BODY_RADIUS_M,
+                        BODY_HEIGHT_M / 2.0,
+                        BODY_HEIGHT_M - BODY_RADIUS_M,
+                    ]
+                    .iter()
+                    .all(|&height_m| {
+                        let local: DVec3 = b.to_local(d * (level_m - height_m));
+                        (local - local.clamp(-b.half_m, b.half_m)).length() >= clearance_m
+                    })
+                })
+        };
+        let cell_count: usize = lat_count * lon_count;
+        let free: Vec<bool> = (0..cell_count)
+            .map(|cell| is_free(to_direction(cell)))
+            .collect();
+        let find_nearest_free = |d: DVec3| -> Option<usize> {
+            (0..cell_count)
+                .filter(|&cell| free[cell])
+                .min_by(|&a, &b| d.dot(to_direction(b)).total_cmp(&d.dot(to_direction(a))))
+        };
+        let start: usize = find_nearest_free(from)?;
+        let end: usize = find_nearest_free(goal)?;
+        let angle =
+            |a: usize, b: usize| to_direction(a).dot(to_direction(b)).clamp(-1.0, 1.0).acos();
+        let mut cost: Vec<f64> = vec![f64::INFINITY; cell_count];
+        let mut came_from: Vec<usize> = vec![usize::MAX; cell_count];
+        let mut open: BinaryHeap<Reverse<(u64, usize)>> = BinaryHeap::new();
+        cost[start] = 0.0;
+        open.push(Reverse((
+            (angle(start, end) * PATH_COST_PER_RAD) as u64,
+            start,
+        )));
+        while let Some(Reverse((_, cell))) = open.pop() {
+            if cell == end {
+                break;
+            }
+            let (i, j) = (cell / lon_count, cell % lon_count);
+            for (di, dj) in [
+                (-1, -1),
+                (-1, 0),
+                (-1, 1),
+                (0, -1),
+                (0, 1),
+                (1, -1),
+                (1, 0),
+                (1, 1),
+            ] {
+                let ni: i64 = i as i64 + di;
+                if ni < 0 || ni >= lat_count as i64 {
+                    continue;
+                }
+                let nj: usize = (j as i64 + dj).rem_euclid(lon_count as i64) as usize;
+                let next: usize = ni as usize * lon_count + nj;
+                let next_cost: f64 = cost[cell] + angle(cell, next);
+                if free[next] && next_cost < cost[next] {
+                    cost[next] = next_cost;
+                    came_from[next] = cell;
+                    let priority: f64 = (next_cost + angle(next, end)) * PATH_COST_PER_RAD;
+                    open.push(Reverse((priority as u64, next)));
+                }
+            }
+        }
+        if !cost[end].is_finite() {
+            return None;
+        }
+        let mut cells: Vec<usize> = vec![end];
+        while *cells.last().expect("the path has a cell") != start {
+            cells.push(came_from[*cells.last().expect("the path has a cell")]);
+        }
+        cells.reverse();
+        let is_leg_free = |a: DVec3, b: DVec3| -> bool {
+            let sample_count: usize =
+                (a.dot(b).clamp(-1.0, 1.0).acos() / (PATH_CELL_RAD / 2.0)).ceil() as usize;
+            (1..sample_count)
+                .all(|k| is_free(a.lerp(b, k as f64 / sample_count as f64).normalize()))
+        };
+        let mut waypoints: Vec<DVec3> = vec![to_direction(start)];
+        let mut at: usize = 0;
+        while at + 1 < cells.len() {
+            let reach: usize = (at + 1..cells.len())
+                .rev()
+                .find(|&k| is_leg_free(to_direction(cells[at]), to_direction(cells[k])))
+                .unwrap_or(at + 1);
+            waypoints.push(to_direction(cells[reach]));
+            at = reach;
+        }
+        Some(waypoints)
+    }
+
     /// `is_in_lift` says whether `feet` are over a lift pad, under its hole in the glass (not in
     /// the stairs' holes, where holding jump does nothing).
     ///
     /// Example: `let can_ride = world.is_in_lift(feet);`
     pub fn is_in_lift(&self, feet: DVec3) -> bool {
         let d: DVec3 = feet.normalize_or_zero();
-        self.lift_holes.iter().any(|&(hole, cos)| d.dot(hole) >= cos)
+        self.lift_holes
+            .iter()
+            .any(|&(hole, cos)| d.dot(hole) >= cos)
     }
 
     /// `trace_shot` follows a shot from `origin` along `direction` for up to `range_m`: it stops
@@ -708,7 +886,7 @@ impl CityWorld {
         let new_tangent: DVec3 = tangent + (target - tangent) * (control * 12.0 * dt_s).min(1.0);
         let mut new_up: f64 = v_up - motion.gravity_m_per_s2 * dt_s;
         if is_first && input.is_jumping && player.is_on_ground {
-            new_up = motion.jump_m_per_s;
+            new_up = motion.jump_m_per_s - motion.gravity_m_per_s2 * dt_s;
         }
         let glass_m: f64 = self.get_glass().map_or(0.0, |glass| glass.radius_m);
         let top_m: f64 = glass_m - LIFT_TOP_UNDER_GLASS_M;
@@ -833,7 +1011,9 @@ impl CityWorld {
         player.is_on_ground = true;
     }
 
-    /// `make_player` puts a new player at a team's spawn (`index` picks among them).
+    /// `make_player` puts a new player at a team's spawn (`index` picks among them), looking a
+    /// little up (`SPAWN_PITCH_RAD`), since level ground inside the sphere rises ahead and would
+    /// fill the view.
     ///
     /// Example: `let player = world.make_player(0, 1);`
     pub fn make_player(&self, team: u32, index: usize) -> CityPlayer {
@@ -849,7 +1029,7 @@ impl CityWorld {
         CityPlayer {
             feet: frame.w_axis.truncate(),
             body: DMat3::from_mat4(frame),
-            pitch_rad: 0.0,
+            pitch_rad: SPAWN_PITCH_RAD,
             velocity: DVec3::ZERO,
             is_on_ground: true,
             eye_height_m: self.eye_height_m,

@@ -928,6 +928,7 @@ fn start_server(
             game_password,
             None,
             true,
+            None,
         ) {
             eprintln!("The game server stopped: {error}");
         }
@@ -2375,7 +2376,9 @@ impl Session {
                     .world,
             ),
             (true, RouteKind::Rifle | RouteKind::Stairs) => {
-                return Err("--route rifle and --route stairs are only for --map city-sphere".into());
+                return Err(
+                    "--route rifle and --route stairs are only for --map city-sphere".into(),
+                );
             }
         };
         let multiplayer: Option<Multiplayer> = if arguments.host || arguments.join.is_some() {
