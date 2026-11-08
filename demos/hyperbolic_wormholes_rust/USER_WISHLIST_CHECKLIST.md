@@ -10,6 +10,12 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-80 Smoother bar pulses.** The pulsing should start where the bar's filled part ends: losing health, it starts
+  at the last hit point, not the bar's end (empty slots don't count). The blue pulse going left should be less dark,
+  and it too starts on the last filled slot. Pulses shouldn't light whole segments: they should look more Gaussian
+  and more subtle, at a faster pace in general, and in proportion to how fast the value is changing (smoothed). The
+  user wants samples first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
+  `claude/hud-pulse-refine`, 2026-11-07.
 - [~] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
   it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom").
   Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/scene-haze-soft-shadows`, 2026-11-07.
