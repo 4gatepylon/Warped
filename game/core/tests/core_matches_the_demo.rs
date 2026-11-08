@@ -2,8 +2,9 @@
 //! the demo's results (through `legacy-oracle`) on the same inputs: Lunar Surface's map, its
 //! terrain and models, the hyperbolic geometry under them, the built-in server settings, shot noise, landed thrown
 //! wormholes, the zone walls, walking and lasers in the voxel world, and the network protocol (the
-//! game's server and window each admit or refuse the demo's). Values without a shared type are compared through `Debug`, which
-//! prints every digit of a float.
+//! demo's server admits or refuses the game's window; `warped-server`'s `server_admits_players.rs`
+//! checks the game's server with the demo's window). Values without a shared type are compared
+//! through `Debug`, which prints every digit of a float.
 //!
 //! Partitions and the tests that cover each part:
 //!
@@ -18,9 +19,9 @@
 //! | | `thrown_wormholes` | `landed_mouths_match_the_demo` |
 //! | | `zone_walls` | `zone_walls_match_the_demo` |
 //! | | `voxel_world` | `walks_and_lasers_match_the_demo` |
-//! | | `net` | `servers_admit_each_others_windows`, `servers_refuse_each_others_wrong_passwords` |
-//! | Server and window | game and demo, demo and game | both `net` tests |
-//! | Game password | right, wrong | `servers_admit_each_others_windows`, `servers_refuse_each_others_wrong_passwords` |
+//! | | `net` | `the_demos_server_admits_the_games_window`, `the_demos_server_refuses_wrong_passwords` |
+//! | Server and window | the demo's server, the game's window | both `net` tests |
+//! | Game password | right, wrong | `the_demos_server_admits_the_games_window`, `the_demos_server_refuses_wrong_passwords` |
 //! | Team spawned on | blue, red | `walks_and_lasers_match_the_demo` |
 //! | Movement | walking, sprinting while turning | `walks_and_lasers_match_the_demo` |
 //! | Rifle heat | cold, half, hot | `shot_noise_matches_the_demo` |
@@ -357,24 +358,20 @@ macro_rules! try_join {
 }
 
 #[test]
-fn servers_admit_each_others_windows() {
+fn the_demos_server_admits_the_games_window() {
     let should_stop: AtomicBool = AtomicBool::new(false);
     std::thread::scope(|scope| {
-        let game_server = start_server!(core::net, core::settings, scope, &should_stop);
         let demo_server = start_server!(demo::net, demo::settings, scope, &should_stop);
-        assert!(try_join!(demo::net, game_server, GAME_PASSWORD));
         assert!(try_join!(core::net, demo_server, GAME_PASSWORD));
         should_stop.store(true, Ordering::Relaxed);
     });
 }
 
 #[test]
-fn servers_refuse_each_others_wrong_passwords() {
+fn the_demos_server_refuses_wrong_passwords() {
     let should_stop: AtomicBool = AtomicBool::new(false);
     std::thread::scope(|scope| {
-        let game_server = start_server!(core::net, core::settings, scope, &should_stop);
         let demo_server = start_server!(demo::net, demo::settings, scope, &should_stop);
-        assert!(!try_join!(demo::net, game_server, WRONG_PASSWORD));
         assert!(!try_join!(core::net, demo_server, WRONG_PASSWORD));
         should_stop.store(true, Ordering::Relaxed);
     });

@@ -7,6 +7,9 @@
 //! | Partitioning | Parts | Tests |
 //! | --- | --- | --- |
 //! | Client's password | the server's (welcomed), another (fails, naming the password) | `clients_join_with_the_password_only` |
+//! | Client's map | the server's (welcomed), another (fails, naming both maps) | `clients_join_with_the_password_only`, `clients_of_another_map_fail` |
+//! | Players already in the game | fewer than `MAX_PLAYER_COUNT` (welcomed), `MAX_PLAYER_COUNT` (full, and the client says so) | `full_games_are_noticed` |
+//! | What a joined client hears | the scores, the damage enemy shots did to its wormholes | `clients_receive_scores`, `owners_learn_their_wormholes_are_destroyed` |
 
 use std::error::Error;
 use std::net::SocketAddr;
@@ -14,8 +17,10 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use warped_core::net::{Client, NetEvent, PasswordRefused};
+use glam::DMat4;
+use warped_core::net::{Client, MAX_PLAYER_COUNT, NetEvent, PasswordRefused, Score};
 use warped_core::settings::ServerSettings;
+use warped_core::thrown_wormholes::{MouthPlace, PlayerWormholes};
 use warped_server::game::Game;
 use warped_server::udp_loop;
 
@@ -91,5 +96,88 @@ fn clients_join_with_the_password_only() {
             .err()
             .expect("a refusal");
         assert!(error.downcast_ref::<PasswordRefused>().is_some(), "{error}");
+    });
+}
+
+#[test]
+fn clients_of_another_map_fail() {
+    with_server(|server| {
+        let mut client: Client = connect(server, "house_demo", PASSWORD);
+        let error: String = poll_until(&mut client, |c| c.id.is_some())
+            .err()
+            .expect("a failure")
+            .to_string();
+        assert!(
+            error.contains(MAP_NAME) && error.contains("house_demo"),
+            "{error}"
+        );
+    });
+}
+
+#[test]
+fn full_games_are_noticed() {
+    with_server(|server| {
+        let mut players: Vec<Client> = Vec::new();
+        for _ in 0..MAX_PLAYER_COUNT {
+            players.push(connect(server, MAP_NAME, PASSWORD));
+            poll_until(players.last_mut().expect("a player"), |c| c.id.is_some()).expect("a join");
+        }
+        let mut late: Client = connect(server, MAP_NAME, PASSWORD);
+        poll_until(&mut late, Client::is_full).expect("a full game");
+        assert!(late.is_waiting_for_welcome());
+    });
+}
+
+#[test]
+fn clients_receive_scores() {
+    with_server(|server| {
+        let mut client: Client = connect(server, MAP_NAME, PASSWORD);
+        poll_until(&mut client, |c| c.scores.is_some()).expect("the welcome and the scores");
+        assert_eq!(client.welcomed_id, Some(1));
+        let only_score: Score = Score {
+            id: 1,
+            team: 0,
+            kills: 0,
+            deaths: 0,
+        };
+        assert_eq!(client.scores, Some(vec![only_score]));
+    });
+}
+
+#[test]
+fn owners_learn_their_wormholes_are_destroyed() {
+    let hits_to_destroy: u8 = ServerSettings::Builtin().wormholes.sniper_hits_to_destroy;
+    with_server(|server| {
+        let (mut owner, mut enemy) = (
+            connect(server, MAP_NAME, PASSWORD),
+            connect(server, MAP_NAME, PASSWORD),
+        );
+        poll_until(&mut owner, |c| c.id.is_some()).expect("the owner's welcome");
+        poll_until(&mut enemy, |c| c.id.is_some()).expect("the enemy's welcome");
+        let place: MouthPlace = MouthPlace {
+            u_m: 0.0,
+            v_m: 0.0,
+            h_m: 1.6,
+            yaw_rad: 0.0,
+        };
+        let wormholes: PlayerWormholes = PlayerWormholes {
+            green: Some(place),
+            ..PlayerWormholes::default()
+        };
+        owner
+            .send_state(DMat4::IDENTITY, false, false, None, 0.0, wormholes)
+            .expect("a state");
+        let has_wormholes = |c: &Client| {
+            c.players
+                .iter()
+                .any(|p| !p.wormholes.get_places().is_empty())
+        };
+        poll_until(&mut enemy, has_wormholes).expect("the owner's wormholes");
+        for _ in 0..hits_to_destroy {
+            enemy
+                .send_wormhole_hit(1, hits_to_destroy)
+                .expect("a wormhole hit");
+        }
+        poll_until(&mut owner, |c| c.wormhole_damage_frac >= 1.0).expect("the damage");
     });
 }
