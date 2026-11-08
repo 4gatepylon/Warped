@@ -19,6 +19,7 @@ use crate::geometry::{
     minkowski_dot, normalize_tangent, transport_from_centre,
 };
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
+use crate::mesh::MeshModel;
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
 use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
@@ -110,6 +111,7 @@ pub struct VoxelStructure {
     pub inverse: DMat4,
     pub first_shape: usize,
     pub shape_count: usize,
+    pub mesh: Option<usize>,
     pub centre: DVec4,
     pub radius: f64,
 }
@@ -268,6 +270,7 @@ pub struct VoxelWorld {
     pub r: f64,
     pub structures: Vec<VoxelStructure>,
     pub shapes: Vec<Shape>,
+    pub meshes: Arc<Vec<MeshModel>>,
     pub warps: Vec<VoxelWarp>,
     pub lights: Vec<(DVec4, [f32; 3], f64)>,
     pub palette: Vec<[f32; 4]>,
@@ -490,22 +493,30 @@ fn find_material(map: &Map, name: &str) -> i32 {
 }
 
 /// `make_structure` gives a structure of `shapes` (starting at `first_shape` in the world's list)
-/// in `frame`, with a bounding sphere around the corners of their boxes plus `BOUND_MARGIN_M`.
+/// drawn as `mesh` (its index in the world's meshes and the model) if it has one, in `frame`,
+/// with a bounding sphere around the corners of their boxes plus `BOUND_MARGIN_M`.
 ///
-/// Example: `let st = make_structure("crate", frame, 0, &shapes, 40.0);`
+/// Example: `let st = make_structure("crate", frame, 0, &shapes, None, 40.0);`
 fn make_structure(
     name: &str,
     frame: DMat4,
     first_shape: usize,
     shapes: &[Shape],
+    mesh: Option<(usize, &MeshModel)>,
     r: f64,
 ) -> VoxelStructure {
+    let mesh_box: Option<(DVec3, DVec3)> =
+        mesh.map(|(_, model)| (model.nodes[0].lo.as_dvec3(), model.nodes[0].hi.as_dvec3()));
     let lo: DVec3 = shapes
         .iter()
-        .fold(DVec3::MAX, |lo, sh| lo.min(sh.centre - sh.half));
+        .map(|sh| sh.centre - sh.half)
+        .chain(mesh_box.map(|b| b.0))
+        .fold(DVec3::MAX, DVec3::min);
     let hi: DVec3 = shapes
         .iter()
-        .fold(DVec3::MIN, |hi, sh| hi.max(sh.centre + sh.half));
+        .map(|sh| sh.centre + sh.half)
+        .chain(mesh_box.map(|b| b.1))
+        .fold(DVec3::MIN, DVec3::max);
     let centre_local: DVec4 = map_klein((lo + hi) / (2.0 * r));
     let radius: f64 = (0..8)
         .map(|c: usize| {
@@ -519,6 +530,7 @@ fn make_structure(
         inverse: invert_lorentz(frame),
         first_shape,
         shape_count: shapes.len(),
+        mesh: mesh.map(|(index, _)| index),
         centre: frame * centre_local,
         radius: radius + BOUND_MARGIN_M / r,
     }
@@ -531,6 +543,43 @@ impl VoxelWorld {
     pub fn get_shapes(&self, k: usize) -> &[Shape] {
         let st: &VoxelStructure = &self.structures[k];
         &self.shapes[st.first_shape..st.first_shape + st.shape_count]
+    }
+
+    /// `find_hit_mu` gives where the chart line q0 + dq mu first meets structure k within
+    /// [mu_lo, mu_hi] and which shape or triangle: its mesh's triangles if it has one, else its
+    /// shapes but glass.
+    ///
+    /// Example: `let hit = world.find_hit_mu(3, q0, dq, 0.0, 1.0);`
+    pub fn find_hit_mu(
+        &self,
+        k: usize,
+        q0: DVec3,
+        dq: DVec3,
+        mu_lo: f64,
+        mu_hi: f64,
+    ) -> Option<(f64, usize)> {
+        match self.structures[k].mesh {
+            Some(m) => self.meshes[m].find_hit_mu(q0, dq, mu_lo, mu_hi),
+            None => find_hit_mu(
+                self.get_shapes(k),
+                q0,
+                dq,
+                mu_lo,
+                mu_hi,
+                u8::try_from(self.special.glass).ok(),
+            ),
+        }
+    }
+
+    /// `get_distance_m` bounds the distance from chart point q to what light meets in structure
+    /// k from below: its mesh if it has one, else its shapes.
+    ///
+    /// Example: `let d_m = world.get_distance_m(3, q);`
+    pub fn get_distance_m(&self, k: usize, q: DVec3) -> f64 {
+        match self.structures[k].mesh {
+            Some(m) => self.meshes[m].get_distance_m(q),
+            None => crate::shapes::get_distance_m(self.get_shapes(k), q).0,
+        }
     }
 
     /// `FromMap` builds the world from a voxel map: each structure's bounding sphere (around its
@@ -551,17 +600,30 @@ impl VoxelWorld {
             ));
         }
         let (mut structures, mut shapes) = (Vec::new(), Vec::new());
+        let (mut meshes, mut mesh_keys) = (Vec::<MeshModel>::new(), Vec::<(String, f64)>::new());
         for s in &map.structures {
             let first_shape: usize = shapes.len();
             for shape in &s.shapes {
                 shapes.push(Shape::FromMap(shape).map_err(|e| format!("map {}: {e}", map.name))?);
             }
+            let mesh: Option<usize> = match &s.mesh {
+                None => None,
+                Some(mesh) => {
+                    let key: (String, f64) = (mesh.model.clone(), mesh.height_m);
+                    if !mesh_keys.contains(&key) {
+                        meshes.push(MeshModel::Load(&mesh.model, mesh.height_m)?);
+                        mesh_keys.push(key.clone());
+                    }
+                    mesh_keys.iter().position(|k| *k == key)
+                }
+            };
             let frame: DMat4 = to_frame(&s.frame);
             structures.push(make_structure(
                 &s.name,
                 frame,
                 first_shape,
                 &shapes[first_shape..],
+                mesh.map(|m| (m, &meshes[m])),
                 r,
             ));
         }
@@ -650,6 +712,7 @@ impl VoxelWorld {
             sky_time_s: 0.0,
             structures,
             shapes,
+            meshes: Arc::new(meshes),
             warps,
             lights: map
                 .lights
@@ -735,7 +798,8 @@ impl VoxelWorld {
                 ..shape
             }));
             let body: &[Shape] = &shared.shapes[first_shape..];
-            let avatar: VoxelStructure = make_structure("player", feet, first_shape, body, self.r);
+            let avatar: VoxelStructure =
+                make_structure("player", feet, first_shape, body, None, self.r);
             shared.structures.push(avatar);
             for warp in &mut shared.warps {
                 let k: usize = shared.structures.len() - 1;
@@ -1115,8 +1179,7 @@ impl VoxelWorld {
         };
         let q0: DVec3 = p.truncate() / p.w * self.r;
         let dq: DVec3 = (t.truncate() * p.w - p.truncate() * t.w) * self.r;
-        let glass: Option<u8> = u8::try_from(self.special.glass).ok();
-        let (mu, _) = find_hit_mu(self.get_shapes(k), q0, dq, mu_of(s_lo), mu_of(s_hi), glass)?;
+        let (mu, _) = self.find_hit_mu(k, q0, dq, mu_of(s_lo), mu_of(s_hi))?;
         let lam: f64 = mu * p.w * p.w / (1.0 - mu * p.w * t.w);
         Some(s_star + lam.atanh())
     }
@@ -1832,7 +1895,14 @@ mod tests {
             axis: 1,
             material: 1,
         }];
-        world.structures = vec![make_structure("block", frame, 0, &world.shapes, world.r)];
+        world.structures = vec![make_structure(
+            "block",
+            frame,
+            0,
+            &world.shapes,
+            None,
+            world.r,
+        )];
         world.static_structure_count = 1;
         for warp in &mut world.warps {
             warp.list.clear();
