@@ -1461,6 +1461,24 @@
 - **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
   room for it, and costs at most 15 more checks, only on a blocked step.
 
+### D96. Every other player on the menu's map page (W-90)
+
+- **Choice:** the MAP page shows every other player in the game as a dot in their team's colour, 4 px across the
+  picture's radius (yours is 5 px), ringed in dark grey (yours is ringed in white and points the way you face). It
+  shows both teams, as the minimap does, and players beyond your 60 m ring too, undimmed. A dot sits over the ground
+  point under the player's eye, and your own disk is drawn over any dot under it. The list is the one the minimap
+  uses, the server's last snapshot, so it already leaves out players who are dead or still in the lobby: the
+  server sends only players who have joined a team and drops a player when they are hit, until they rejoin.
+- **Alternatives:**
+  - teammates only (you can ask for it; the minimap shows both teams too);
+  - only players within your ring, like the minimap (the page shows the whole map, so far players are worth seeing);
+  - a label with each player's number, as the spawns have (more clutter, and the scores page lists the numbers);
+  - a line for the dots in the legend (it is full: 62 of the 63 characters that fit, so a new line would push out
+    another one).
+- **Rationale:** you asked to show where other people are on the map, like the minimap's dots. A dark ring keeps a
+  dot apart from your own white-ringed disk, the console markers and the spawns, and shows on both the bright and
+  the dimmed ground.
+
 ### D15. WebGL at the same drawing-buffer sizes
 
 - **Choice:** the browser demo from PR 58, unchanged, in the Claude desktop app's built-in browser (Chromium 152,

@@ -3,13 +3,14 @@
 //! every structure and box in its material's colour (brighter the higher it stands), the ground's
 //! relief, everything shaded as if lit from the top left, the consoles, the black hole and wormhole
 //! mouths, the spawns, the team zones' edges, the playable boundary, and, on each frame, the player
-//! with a circle of what is within reach of them (the rest darker and blurred). It also lends the
-//! picture without labels, and where it lies, to the minimap.
+//! with a circle of what is within reach of them (the rest darker and blurred) and the other
+//! players as dots in their team's colour. It also lends the picture without labels, and where it
+//! lies, to the minimap.
 //!
-//! Interface: `MapLayout` (`FromMap`, `draw_player`, `get_size_px`, `get_plain_pixels`,
+//! Interface: `MapLayout` (`FromMap`, `draw_players`, `get_size_px`, `get_plain_pixels`,
 //! `get_placement`, `get_curvature_radius_m`).
 //!
-//! Example: `let pixels = MapLayout::FromMap(&map, (992, 536))?.draw_player(feet_frame, 0);`
+//! Example: `let pixels = layout.draw_players(feet_frame, 0, 60.0, &others);`
 //!
 //! Must know:
 //! - Fermi coordinates aren't distances: along u, a meter at v from the middle line takes only
@@ -66,6 +67,9 @@ const PLAYER_HEADING_PX: f64 = 16.0;
 const PLAYER_HEADING_HALF_WIDTH_PX: f64 = 1.2;
 const HEADING_PROBE_M: f64 = 1.0;
 const PLAYER_OUTLINE_COLOR: [u8; 3] = [255, 255, 255];
+const OTHER_PLAYER_RADIUS_PX: f64 = 4.0;
+const OTHER_PLAYER_OUTLINE_PX: f64 = 1.5;
+const OTHER_PLAYER_OUTLINE_COLOR: [u8; 3] = [20, 20, 20];
 const WARP_KIND_BLACK_HOLE: &str = "black_hole";
 const MOUTH_NAME_PREFIX: &str = "wormhole mouth ";
 const MATERIAL_KIND_LIGHT: &str = "light";
@@ -151,7 +155,7 @@ impl Footprint {
 
 /// `MapLayout` is a map's picture seen from above (RGBA, top row first), the same picture without
 /// labels (for the minimap) and darkened and blurred (out of the player's range), and what
-/// `draw_player` needs to place a player on it: the curvature radius, the Fermi coordinates of the
+/// `draw_players` needs to place players on it: the curvature radius, the Fermi coordinates of the
 /// picture's top left corner and the meters per pixel.
 pub struct MapLayout {
     pixels: Vec<u8>,
@@ -289,13 +293,21 @@ impl MapLayout {
         self.r_m
     }
 
-    /// `draw_player` gives the picture with a player standing at `feet` (a frame: its position,
-    /// and its −z the way they face) as a disk in their team's colour (an index into
+    /// `draw_players` gives the picture with this player standing at `feet` (a frame: its
+    /// position, and its −z the way they face) as a disk in their team's colour (an index into
     /// `TEAM_NAMES`), ringed in white, with a white line the way they face, and everything farther
-    /// than `range_m` from them (along the ground) darker and blurred, behind a white rim.
+    /// than `range_m` from them (along the ground) darker and blurred, behind a white rim. Each of
+    /// `others` (a point in the world and a team) shows as a smaller disk in its team's colour,
+    /// ringed in dark grey, over the ground point under it, near or far, under this player's disk.
     ///
-    /// Example: `let pixels = layout.draw_player(voxel.player.get_feet_frame(&world), 0, 60.0);`
-    pub fn draw_player(&self, feet: DMat4, team: u32, range_m: f64) -> Vec<u8> {
+    /// Example: `let pixels = layout.draw_players(feet, 0, 60.0, &others);`
+    pub fn draw_players(
+        &self,
+        feet: DMat4,
+        team: u32,
+        range_m: f64,
+        others: &[(DVec4, u32)],
+    ) -> Vec<u8> {
         let x: DVec4 = feet.col(AXIS_W);
         let forward: DVec4 = -feet.col(AXIS_Z);
         let probe: f64 = HEADING_PROBE_M / self.r_m;
@@ -313,6 +325,19 @@ impl MapLayout {
             corner_m: self.corner_m,
             m_per_px: self.m_per_px,
         };
+        for &(other, other_team) in others {
+            let other_px: [f64; 2] = picture.get_ground_px(other);
+            picture.paint_disk(
+                other_px,
+                OTHER_PLAYER_RADIUS_PX + OTHER_PLAYER_OUTLINE_PX,
+                OTHER_PLAYER_OUTLINE_COLOR,
+            );
+            picture.paint_disk(
+                other_px,
+                OTHER_PLAYER_RADIUS_PX,
+                TEAM_COLORS[other_team as usize],
+            );
+        }
         for step in 0..=PLAYER_HEADING_PX as usize {
             let along_px: f64 = step as f64;
             let point_px: [f64; 2] = [
@@ -384,6 +409,15 @@ impl MapLayout {
             }
         }
         pixels
+    }
+
+    /// `get_ground_px` gives where the ground point under world point `x` (its Fermi u, v) falls
+    /// on the picture, in pixels from its top left corner.
+    ///
+    /// Example: `let [x_px, y_px] = layout.get_ground_px(player.frame.col(AXIS_W));`
+    fn get_ground_px(&self, x: DVec4) -> [f64; 2] {
+        let [u_m, v_m, _] = get_fermi_coordinates(x, self.r_m);
+        self.get_px([u_m, v_m])
     }
 
     /// `get_px` gives where ground point (u, v), in meters, falls on the picture, in pixels from
@@ -807,6 +841,10 @@ mod tests {
     //! | Map | with a boundary, terrain, structures and consoles (Lunar Surface); without one, with boxes (the house) | `lunar_surface_fits_its_boundary`, `house_shows_its_boxes` |
     //! | Pixel | ground, a structure's top (blue and red), a box's top, a console | `lunar_surface_fits_its_boundary`, `house_shows_its_boxes` |
     //! | Player | at the world origin facing −z, which is +u | `player_points_along_u` |
+    //! | Other players' count | none, one, several | `player_points_along_u`, `this_player_shows_over_other_players`, `other_players_show_in_their_teams_colour` |
+    //! | Other player's team | blue, red | `other_players_show_in_their_teams_colour` |
+    //! | Other player's place | within range, beyond it (not dimmed), off the picture (left out), under this player (this player on top) | `other_players_show_in_their_teams_colour`, `other_players_off_the_picture_are_left_out`, `this_player_shows_over_other_players` |
+    //! | Other player's height | on the ground, above it (shown at the ground point under it) | `other_players_show_in_their_teams_colour` |
     //! | Pixel and the player's range | within it (as drawn), beyond it (darker), across its edge (a white rim) | `the_range_circle_dims_what_is_beyond` |
     //! | Fermi coordinates | the ground, above it | `fermi_coordinates_round_trip` |
 
@@ -815,6 +853,7 @@ mod tests {
 
     const MAX_SIZE_PX: (u32, u32) = (992, 536);
     const RANGE_M: f64 = 30.0;
+    const EYE_HEIGHT_M: f64 = 1.7;
 
     /// `get_rgb` gives a picture's pixel at (x, y).
     ///
@@ -922,7 +961,7 @@ mod tests {
     fn player_points_along_u() {
         let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("Lunar Surface loads");
         let layout: MapLayout = MapLayout::FromMap(&map, MAX_SIZE_PX).expect("a layout");
-        let pixels: Vec<u8> = layout.draw_player(DMat4::IDENTITY, 1, RANGE_M);
+        let pixels: Vec<u8> = layout.draw_players(DMat4::IDENTITY, 1, RANGE_M, &[]);
         let [x, y] = layout.get_px([0.0, 0.0]).map(|p| p as usize);
         assert_eq!(get_rgb(&pixels, layout.size_px, x, y), TEAM_COLORS[1]);
         let ahead_x: usize = x + (PLAYER_HEADING_PX - 1.0) as usize;
@@ -935,5 +974,51 @@ mod tests {
             get_rgb(&pixels, layout.size_px, behind_x, y),
             PLAYER_OUTLINE_COLOR
         );
+    }
+
+    #[test]
+    fn other_players_show_in_their_teams_colour() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("Lunar Surface loads");
+        let layout: MapLayout = MapLayout::FromMap(&map, MAX_SIZE_PX).expect("a layout");
+        let near_m: [f64; 3] = [RANGE_M / 2.0, -RANGE_M / 3.0, 0.0];
+        let far_m: [f64; 3] = [-2.0 * RANGE_M, RANGE_M, EYE_HEIGHT_M];
+        let others: Vec<(DVec4, u32)> = [(near_m, 0), (far_m, 1)]
+            .map(|([u_m, v_m, h_m], team)| (make_fermi_point(u_m, v_m, h_m, layout.r_m), team))
+            .to_vec();
+        let pixels: Vec<u8> = layout.draw_players(DMat4::IDENTITY, 0, RANGE_M, &others);
+        for ([u_m, v_m, _], team) in [(near_m, 0), (far_m, 1)] {
+            let center_px: [f64; 2] = layout.get_px([u_m, v_m]);
+            let [x, y] = center_px.map(|p| p as usize);
+            assert_eq!(get_rgb(&pixels, layout.size_px, x, y), TEAM_COLORS[team]);
+            let rim_x: usize =
+                (center_px[0] + OTHER_PLAYER_RADIUS_PX + OTHER_PLAYER_OUTLINE_PX / 2.0) as usize;
+            assert_eq!(
+                get_rgb(&pixels, layout.size_px, rim_x, y),
+                OTHER_PLAYER_OUTLINE_COLOR
+            );
+        }
+    }
+
+    #[test]
+    fn other_players_off_the_picture_are_left_out() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("Lunar Surface loads");
+        let layout: MapLayout = MapLayout::FromMap(&map, MAX_SIZE_PX).expect("a layout");
+        let (width, _) = layout.get_size_px();
+        let beyond_m: f64 = layout.corner_m[0] + 2.0 * f64::from(width) * layout.m_per_px;
+        let others: Vec<(DVec4, u32)> = vec![(make_fermi_point(beyond_m, 0.0, 0.0, layout.r_m), 1)];
+        assert!(
+            layout.draw_players(DMat4::IDENTITY, 0, RANGE_M, &others)
+                == layout.draw_players(DMat4::IDENTITY, 0, RANGE_M, &[])
+        );
+    }
+
+    #[test]
+    fn this_player_shows_over_other_players() {
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("Lunar Surface loads");
+        let layout: MapLayout = MapLayout::FromMap(&map, MAX_SIZE_PX).expect("a layout");
+        let others: Vec<(DVec4, u32)> = vec![(DMat4::IDENTITY.col(AXIS_W), 1)];
+        let pixels: Vec<u8> = layout.draw_players(DMat4::IDENTITY, 0, RANGE_M, &others);
+        let [x, y] = layout.get_px([0.0, 0.0]).map(|p| p as usize);
+        assert_eq!(get_rgb(&pixels, layout.size_px, x, y), TEAM_COLORS[0]);
     }
 }
