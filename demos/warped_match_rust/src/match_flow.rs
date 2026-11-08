@@ -74,7 +74,7 @@ pub fn LoadLevels(path: &Path) -> Result<Vec<LevelEntry>> {
         .map_err(|error| format!("can't read the levels file {}: {error}", path.display()))?;
     let file: LevelFile = serde_yaml::from_str(&text)
         .map_err(|error| format!("{} isn't a levels file: {error}", path.display()))?;
-    if file.levels.len() < 3 || file.levels.len() % 2 == 0 {
+    if file.levels.len() < 3 || file.levels.len().is_multiple_of(2) {
         return Err(format!(
             "{} has {} levels; a match needs an odd number, at least 3",
             path.display(),

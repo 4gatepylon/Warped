@@ -8,8 +8,8 @@ the progression in each player's match window. W-123.
 
 It is a copy of `demos/hyperbolic_wormholes_rust/` (first commit on the branch, verbatim) plus
 the match (`src/match_state.rs`, `src/match_flow.rs`, `src/match_menu.rs`, `match_levels.yaml`)
-and the level interface below added to the copied level code. Until the four other levels are
-plugged in, Lunar Surface stands in for them (the house map has no consoles, so it can't be won).
+and the level interface below added to the copied level code. Lunar Surface stands in for the
+levels not plugged in yet (the house map has no consoles, so it can't be won).
 
 ## Play
 
@@ -86,14 +86,16 @@ address); each round's level server 47852, and this copy's level discovery 47853
 | # | Level | Side, depth | Pylons a team | Folder | Branch | In the match |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Dust | blue 2 | 3 | `demos/dust_rust/` | `devin/dust-demo` | Lunar Surface stands in |
-| 2 | Snow Planet | blue 1 | 2 | `demos/snow_planet_rust/` | `devin/snow-planet-demo` | Lunar Surface stands in |
+| 2 | Snow Planet | blue 1 | 2 | `demos/snow_planet_rust/` | `devin/snow-planet-demo` | plugged in (`make levels`) |
 | 3 | City Sphere | purple 0 | 2 | `demos/city_sphere_rust/` | `devin/city-sphere-demo` | Lunar Surface stands in |
 | 4 | Dark Forest | red 1 | 2 | `demos/dark_forest_rust/` | `devin/dark-forest-demo` | Lunar Surface stands in |
 | 5 | Lunar Surface | red 2 | 3 | `demos/hyperbolic_wormholes_rust/` | `staging/user-4gatepylon` | playable (copied here) |
 
-To plug a level in: build it in its folder, then in `match_levels.yaml` set its `program` to its
-binary (e.g. `../city_sphere_rust/.build/release/<binary>`), its `map`, drop `stand_in_for`, and
-update this table.
+To plug a level in: add `<folder name>:<branch>` to `LEVEL_BRANCHES` in the `Makefile` (`make
+levels` checks the branch out as a git worktree in `.levels/<folder name>/` and builds it there;
+`make serve-match` runs it first), then in `match_levels.yaml` set the level's `program` to the
+binary (e.g. `.levels/snow_planet/demos/snow_planet_rust/.build/release/snow-planet`) and `map`,
+drop `stand_in_for`, and update this table.
 
 ## Results
 

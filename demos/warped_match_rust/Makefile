@@ -54,10 +54,11 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help serve-match join-match bot-match serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help levels serve-match join-match bot-match serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
+	@echo "  make levels                                      Link (git worktree) and build the plugged-in levels' branches in .levels/"
 	@echo "  make serve-match                                 Run a match server (UDP 47850) over the levels of match_levels.yaml"
 	@echo "  make join-match SERVER=127.0.0.1 TEAM=blue       Open the match window (progression page); each round opens its level"
 	@echo "  make bot-match TEAM=red                          Join the match with a bot that turns off the other team's consoles"
@@ -141,8 +142,19 @@ else
 	@printf '%s\nTo be asked instead, pass INTERACTIVE=1.\n' "$(RESET_ARTIFACTS_WARNING)" >&2; exit 2
 endif
 
+# The plugged-in levels (match_levels.yaml): each level's branch as a git worktree in .levels/, built there.
+LEVEL_BRANCHES := snow_planet:devin/snow-planet-demo
+
+levels:
+	git fetch origin $(foreach level,$(LEVEL_BRANCHES),$(word 2,$(subst :, ,$(level))))
+	$(foreach level,$(LEVEL_BRANCHES),\
+	  $(eval name := $(word 1,$(subst :, ,$(level))))$(eval branch := $(word 2,$(subst :, ,$(level))))\
+	  (test -d .levels/$(name) || git worktree add --detach .levels/$(name) origin/$(branch)) && \
+	  git -C .levels/$(name) checkout --detach origin/$(branch) && \
+	  (cd .levels/$(name)/demos/$(name)_rust && cargo build --release) &&) true
+
 # The match (README, "Match"): a match server, a window or bot per player.
-serve-match:
+serve-match: levels
 	cargo run --release -- --serve-match --match-levels $(MATCH_LEVELS)
 
 join-match:
@@ -151,7 +163,7 @@ join-match:
 bot-match:
 	cargo run --release -- --match $(SERVER_MATCH) --bot --team $(or $(TEAM),red)
 
-e2e-match:
+e2e-match: levels
 	cargo build --release
 	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --bot --team blue > .build/e2e_blue.log 2>&1 &
 	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --bot --team red > .build/e2e_red.log 2>&1 &

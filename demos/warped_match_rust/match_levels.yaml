@@ -14,10 +14,9 @@ levels:
   - name: Snow Planet
     folder: demos/snow_planet_rust
     branch: devin/snow-planet-demo
-    status: stand-in (Lunar Surface) until devin/snow-planet-demo is plugged in
-    program: self
-    map: lunar-surface
-    stand_in_for: Snow Planet
+    status: plugged in (make levels links and builds devin/snow-planet-demo in .levels/)
+    program: .levels/snow_planet/demos/snow_planet_rust/.build/release/snow-planet
+    map: snow-planet
   - name: City Sphere
     folder: demos/city_sphere_rust
     branch: devin/city-sphere-demo

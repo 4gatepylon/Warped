@@ -588,7 +588,10 @@ pub fn run_voxel_bot(
                     -local.y.clamp(-1.0, 1.0).asin() / LOOK_RAD_PER_PX,
                 );
                 input.forward = distance_m > VOXEL_SPAWN_RING_M * 2.0;
-                is_laser_on = distance_m < VOXEL_BOT_LASER_RANGE_M;
+                is_laser_on = distance_m < VOXEL_BOT_LASER_RANGE_M
+                    && (objective == BotObjective::Fight
+                        || get_console_to_disable(world, client, client.team.unwrap_or(0))
+                            .is_none());
             } else {
                 input.forward = true;
                 player.look(BOT_WANDER_PX_PER_S * BOT_STEP_S, 0.0);
@@ -631,7 +634,7 @@ pub fn run_voxel_bot(
             };
             client.send_state(
                 camera,
-                is_laser_on && console.is_none(),
+                is_laser_on,
                 false,
                 console,
                 0.0,
