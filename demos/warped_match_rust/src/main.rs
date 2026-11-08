@@ -1287,10 +1287,15 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         "  make join-game MAP={map} PORT={port}  (finds this server on the network by itself)"
     );
     println!("  make join-game MAP={map} SERVER=127.0.0.1 PORT={port}  (on this computer)");
-    if !consoles.is_empty() {
-        println!(
+    match (&arguments.level_result_file, consoles.is_empty()) {
+        (_, true) => {}
+        (Some(path), false) => println!(
+            "A team wins by turning off the other team's consoles; the winner goes to {}.",
+            path.display()
+        ),
+        (None, false) => println!(
             "A team wins by turning off the other team's consoles; then press Enter here for a new game."
-        );
+        ),
     }
     match arguments.exit_after_s {
         Some(seconds) => std::thread::sleep(Duration::from_secs_f64(seconds)),

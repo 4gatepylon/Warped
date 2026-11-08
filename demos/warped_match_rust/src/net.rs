@@ -906,10 +906,7 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
-            println!(
-                "The {} team won. Press Enter here to start a new game.",
-                TEAM_NAMES[winner as usize]
-            );
+            println!("The {} team won.", TEAM_NAMES[winner as usize]);
         }
     }
 
@@ -1094,6 +1091,9 @@ pub fn serve(
         if let (Some(winner), None, Some(path)) = (server.game.winner, won_at, level_result_file) {
             write_level_result(path, winner)?;
         }
+        if server.game.winner.is_some() && won_at.is_none() && level_result_file.is_none() {
+            println!("Press Enter here to start a new game.");
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
             && time.elapsed() >= delay
@@ -1102,6 +1102,9 @@ pub fn serve(
         }
         if should_start_new_game.swap(false, Ordering::Relaxed) {
             match server.game.winner {
+                Some(_) if level_result_file.is_some() => {
+                    println!("This level's result is written; the match server ends it.");
+                }
                 Some(_) => server.start_new_game(),
                 None => println!("No team has won yet, so the game goes on."),
             }
