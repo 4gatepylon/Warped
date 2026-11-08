@@ -73,24 +73,16 @@ impl LoadingStep {
     }
 }
 
-/// `get_loading_steps` gives the steps `MetalRenderer::load` takes before the first frame of a
-/// voxel map (`is_voxel_map`) or a house map, in order.
+/// `get_loading_steps` gives the steps `MetalRenderer::load` takes before the first frame, in order.
 ///
-/// Example: `let steps: &[LoadingStep] = get_loading_steps(true);`
-pub fn get_loading_steps(is_voxel_map: bool) -> &'static [LoadingStep] {
-    if is_voxel_map {
-        &[
-            LoadingStep::SurfaceTextures,
-            LoadingStep::VoxelShader,
-            LoadingStep::Gun(GunModel::Revolver),
-            LoadingStep::Gun(GunModel::BoltActionRifle),
-        ]
-    } else {
-        &[
-            LoadingStep::Gun(GunModel::Revolver),
-            LoadingStep::Gun(GunModel::BoltActionRifle),
-        ]
-    }
+/// Example: `let steps: &[LoadingStep] = get_loading_steps();`
+pub fn get_loading_steps() -> &'static [LoadingStep] {
+    &[
+        LoadingStep::SurfaceTextures,
+        LoadingStep::VoxelShader,
+        LoadingStep::Gun(GunModel::Revolver),
+        LoadingStep::Gun(GunModel::BoltActionRifle),
+    ]
 }
 
 /// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
@@ -457,6 +449,8 @@ const _: () = assert!(
 /// `FrameData` is one frame to draw: the house demo's packed rows, or a voxel map's frame.
 #[derive(Clone, Copy)]
 pub enum FrameData<'a> {
+    // The house engine's frame, deleted in the next layer.
+    #[allow(dead_code)]
     House(&'a SceneData),
     Voxel(&'a VoxelFrame),
 }

@@ -3,13 +3,13 @@
 //! like everything else; everyone's laser is traced and drawn; and this player's laser reaching
 //! another player is a hit. It also has the windowless bot that `--bot` runs to test a game.
 //!
-//! On voxel maps the same happens with `VoxelWorld`: bodies are voxel structures and lasers are
-//! traced through the map (`pack_shared_voxel_view`, `run_voxel_bot`).
+//! Bodies are voxel structures and lasers are traced through the map (`pack_shared_voxel_view`,
+//! `run_voxel_bot`).
 //!
-//! Interface: `get_spawn_player`, `SharedView`, `pack_shared_view`, `run_bot`,
+//! Interface:
 //! `SharedVoxelView`, `get_body`, `with_bodies`, `pack_shared_voxel_view`, `run_voxel_bot`.
 //!
-//! Example: `let view = multiplayer::pack_shared_view(&world, frame, Some(frame), &client.players, &[], (1280, 800), 0.0);`
+//! Example: `let world = multiplayer::with_bodies(&world, &client.players);`
 
 use std::error::Error;
 use std::time::{Duration, Instant};
@@ -19,88 +19,28 @@ use glam::{DMat4, DVec3, DVec4};
 use crate::avatar_model::AvatarClip;
 use crate::black_hole_growth::BlackHoleGrowth;
 use crate::dust::DustCloud;
-use crate::geometry::{
-    AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
-    normalize_tangent,
-};
+use crate::geometry::{AXIS_W, get_distance, get_local_direction, normalize_tangent};
 use crate::minimap::TEAM_COLORS;
 use crate::net::{Client, NetEvent, RemotePlayer};
-use crate::physics::{self, Input, LaserReport, Player};
+use crate::physics::Input;
 use crate::render_voxel::{LaserBeam, VoxelFrame};
-use crate::scene_data::{Beam, SceneData};
 use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
-use crate::voxel_world::{
-    LOOK_RAD_PER_PX, MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
-};
-use crate::world::{Color, EYE_HEIGHT_M, World};
+use crate::voxel_world::{LOOK_RAD_PER_PX, MARKER_NAME, Shot, VoxelPlayer, VoxelWorld};
+use crate::world::Color;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const AVATAR_HALF_M: [f64; 3] = [0.3, 0.95, 0.3];
-const AVATAR_DROP_M: f64 = 0.75;
-const SPAWN_RING_M: f64 = 3.0;
 const IDLE_POSE: (AvatarClip, f64) = (AvatarClip::Idle, 0.0);
 const BOT_STEP_S: f64 = 1.0 / 60.0;
 const BOT_HITS_TO_KILL: u8 = 1;
-const BOT_RANGE_M: f64 = 12.0;
 const BOT_WANDER_PX_PER_S: f64 = 120.0;
 const BOT_REJOIN_S: f64 = 2.0;
 const BOT_STUCK_FRAC: f64 = 0.5;
 const BOT_VIEW_PX: (u32, u32) = (1280, 800);
 const VOXEL_SPAWN_RING_M: f64 = 3.0;
-const SPAWN_SLOT_COUNT: u32 = 16;
 const VOXEL_BOT_LASER_RANGE_M: f64 = 120.0;
-
-/// `get_spawn_player` makes player `id`'s starting player on the house: on a ring around spawn,
-/// facing the middle, at the first bearing (starting from the id's own) at least
-/// `MIN_SPAWN_GAP_M` from every eye in `others`, or the last one tried.
-///
-/// Example: `let player = multiplayer::get_spawn_player(&world, 3, &other_eyes);`
-pub fn get_spawn_player(world: &World, id: u32, others: &[DVec4]) -> Player {
-    let mut player: Player = Player::AtSpawn(world);
-    for k in 0..SPAWN_SLOT_COUNT {
-        player.frame = world
-            .make_frame_from_spawn(f64::from(id + k) * SPAWN_TURN_RAD, SPAWN_RING_M)
-            * make_boost(AXIS_Y, EYE_HEIGHT_M / world.curvature_radius_m)
-            * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
-        let eye: DVec4 = player.frame.col(AXIS_W);
-        if others
-            .iter()
-            .all(|&x| get_distance(eye, x) * world.curvature_radius_m >= MIN_SPAWN_GAP_M)
-        {
-            break;
-        }
-    }
-    player
-}
-
-/// `get_avatar_frame` gives the frame of the box drawn for a player whose eye is at `eye`: upright
-/// (whatever their pitch), facing their way, its centre `AVATAR_DROP_M` below the eye.
-///
-/// Example: `let frame = get_avatar_frame(&world, player.frame);`
-fn get_avatar_frame(world: &World, eye: DMat4) -> DMat4 {
-    let up: DVec3 = physics::get_up_local(eye);
-    let back: DVec3 = (DVec3::Z - up * up.z).try_normalize().unwrap_or(DVec3::Y);
-    let level: DMat4 = DMat4::from_cols(
-        up.cross(back).extend(0.0),
-        up.extend(0.0),
-        back.extend(0.0),
-        DVec4::W,
-    );
-    eye * level * make_boost(AXIS_Y, -AVATAR_DROP_M / world.curvature_radius_m)
-}
-
-/// `SharedView` is one frame's packed scene with the other players and every laser, this
-/// player's laser report, the player its laser hit, if any, and the marker it hit (an index into
-/// the markers given), if any.
-pub struct SharedView {
-    pub data: SceneData,
-    pub report: Option<LaserReport>,
-    pub hit_player_id: Option<u32>,
-    pub hit_marker: Option<usize>,
-}
 
 /// `get_team_colors` gives each team's colour for players' bodies, the same as the minimap's and
 /// the map page's marks (`minimap::TEAM_COLORS`), indexed by team.
@@ -119,66 +59,6 @@ fn get_avatar_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> Vec<(DMat4
         .iter()
         .map(|p| get_body(world, p.frame, p.team))
         .collect()
-}
-
-/// `pack_shared_view` packs the scene seen from `frame` with a box for each of `players` and a
-/// glowing cube for each of `markers`, this player's laser (if on, fired from `laser_aim`: `frame`
-/// turned by the shot's noise) and the lasers of the players who have theirs on, each traced
-/// through the same scene, so beams stop at players and bend through wormholes.
-///
-/// Example: `let view = multiplayer::pack_shared_view(&world, frame, Some(frame), &players, &[], (1280, 800), 0.0);`
-pub fn pack_shared_view(
-    world: &World,
-    frame: DMat4,
-    laser_aim: Option<DMat4>,
-    players: &[RemotePlayer],
-    markers: &[Marker],
-    render_px: (u32, u32),
-    time_s: f64,
-) -> SharedView {
-    let mut shared: World = world.clone();
-    let first_avatar_box: usize = shared.boxes.len();
-    for player in players {
-        let color: Color = get_team_colors()[player.team as usize];
-        let name: String = format!("player {}", player.id);
-        shared.add_avatar(
-            get_avatar_frame(world, player.frame),
-            &name,
-            AVATAR_HALF_M,
-            color,
-        );
-    }
-    shared.add_markers(markers);
-    let trace_from = |eye: DMat4| {
-        let data: SceneData =
-            SceneData::Build(&shared, eye, &Beam::default(), render_px, time_s, true);
-        physics::trace_laser(&shared, &data)
-    };
-    let (mut beam, mut report, mut hit_player_id, mut hit_marker) =
-        (Beam::default(), None, None, None);
-    if let Some(aim) = laser_aim {
-        let (own_beam, mut own_report) = trace_from(aim);
-        let past_avatars: Option<usize> = own_report
-            .hit_box
-            .and_then(|b| b.checked_sub(first_avatar_box));
-        hit_player_id = past_avatars
-            .and_then(|k| players.get(k))
-            .map(|player| player.id);
-        hit_marker = past_avatars.and_then(|k| k.checked_sub(players.len()));
-        if let Some(id) = hit_player_id {
-            own_report.hit = Some(format!("player {id}"));
-        }
-        (beam, report) = (own_beam, Some(own_report));
-    }
-    for player in players.iter().filter(|player| player.is_laser_on) {
-        beam.runs.extend(trace_from(player.frame).0.runs);
-    }
-    SharedView {
-        data: SceneData::Build(&shared, frame, &beam, render_px, time_s, true),
-        report,
-        hit_player_id,
-        hit_marker,
-    }
 }
 
 /// `check_bot_space` fails if the server that welcomed `client` curves space other than the
@@ -200,105 +80,6 @@ fn check_bot_space(client: &Client) -> Result<()> {
         .into());
     }
     Ok(())
-}
-
-/// `run_bot` plays for `duration_s` seconds without a window, to test a game: it walks and turns
-/// until another player is within `BOT_RANGE_M`, then turns toward them with its laser on; when
-/// its laser hits someone it reports the hit and calls `save_view` with its view and the victim's
-/// id; when it is hit it waits `BOT_REJOIN_S` and joins again. It returns how many players it hit
-/// and how often it was hit.
-///
-/// Example: `let (hit_count, eliminated_count) = multiplayer::run_bot(&world, &mut client, 30.0, |data, id| Ok(()))?;`
-pub fn run_bot(
-    world: &World,
-    client: &mut Client,
-    duration_s: f64,
-    mut save_view: impl FnMut(&SceneData, u32) -> Result<()>,
-) -> Result<(u32, u32)> {
-    let start: Instant = Instant::now();
-    let mut player: Player = Player::AtSpawn(world);
-    let (mut hit_count, mut eliminated_count) = (0, 0);
-    let mut rejoin_at: Option<Instant> = None;
-    let mut last_victim: Option<u32> = None;
-    while start.elapsed().as_secs_f64() < duration_s {
-        let tick: Instant = Instant::now();
-        for event in client.poll()? {
-            match event {
-                NetEvent::Joined(id) => {
-                    let others: Vec<DVec4> =
-                        client.players.iter().map(|p| p.frame.col(AXIS_W)).collect();
-                    player = get_spawn_player(world, id, &others);
-                    println!("bot joined as player {id}");
-                }
-                NetEvent::Eliminated {
-                    victim_id,
-                    shooter_id,
-                    is_self,
-                } => {
-                    println!("player {victim_id} was hit by player {shooter_id}");
-                    if is_self {
-                        eliminated_count += 1;
-                        rejoin_at = Some(Instant::now() + Duration::from_secs_f64(BOT_REJOIN_S));
-                    }
-                }
-            }
-        }
-        if let Some(time) = rejoin_at {
-            if Instant::now() >= time {
-                rejoin_at = None;
-                client.rejoin()?;
-            }
-        } else if client.id.is_some() {
-            let x: DVec4 = player.frame.col(AXIS_W);
-            let target: Option<&RemotePlayer> = client
-                .players
-                .iter()
-                .map(|other| (other, get_distance(x, other.frame.col(AXIS_W))))
-                .filter(|(_, distance)| distance * world.curvature_radius_m < BOT_RANGE_M)
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(other, _)| other);
-            let mut input: Input = Input::default();
-            if let Some(other) = target {
-                physics::turn_toward(&mut player.frame, other.frame.col(AXIS_W));
-            } else {
-                input.forward = true;
-                physics::look_around(&mut player.frame, BOT_WANDER_PX_PER_S * BOT_STEP_S, 0.0);
-            }
-            physics::update_player(world, &mut player, &input, BOT_STEP_S);
-            let is_laser_on: bool = target.is_some();
-            let view: SharedView = pack_shared_view(
-                world,
-                player.frame,
-                is_laser_on.then_some(player.frame),
-                &client.players,
-                &[],
-                BOT_VIEW_PX,
-                start.elapsed().as_secs_f64(),
-            );
-            if let Some(victim_id) = view.hit_player_id {
-                client.send_hit(victim_id, BOT_HITS_TO_KILL)?;
-                if last_victim != Some(victim_id) {
-                    hit_count += 1;
-                    println!("bot hit player {victim_id}");
-                    save_view(&view.data, victim_id)?;
-                }
-            }
-            last_victim = view.hit_player_id;
-            client.send_state(
-                player.frame,
-                is_laser_on,
-                false,
-                None,
-                0.0,
-                PlayerWormholes::default(),
-            )?;
-        } else {
-            client.keep_joining()?;
-        }
-        std::thread::sleep(Duration::from_secs_f64(BOT_STEP_S).saturating_sub(tick.elapsed()));
-    }
-    client.leave()?;
-    Ok((hit_count, eliminated_count))
 }
 
 /// `SharedVoxelView` is one frame of a voxel map with the other players, every laser, this
@@ -655,9 +436,8 @@ mod tests {
     //! | This player's own body | not drawn (first person), drawn (third person: others' lasers stop at it, this player's own passes it) | `an_own_body_stops_others_lasers_only` |
 
     use super::*;
-    use crate::net::MAX_PLAYER_COUNT;
+    use crate::geometry::{AXIS_Z, make_boost};
     use crate::shot_noise::ShotOffset;
-    use crate::world::DEFAULT_CURVATURE_RADIUS_M;
 
     const LUNAR_SHOOTER_M: [f64; 2] = [-27.0, 0.0];
     const LUNAR_TARGET_M: [f64; 2] = [-20.0, 0.0];
@@ -669,52 +449,6 @@ mod tests {
         direction_rad: -std::f64::consts::FRAC_PI_4,
     };
     const SAME_SPOT_M: f64 = 1e-6;
-
-    #[test]
-    fn spawn_points_are_apart_and_clear_of_mouths() {
-        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
-        let r: f64 = world.curvature_radius_m;
-        let mut points: Vec<DVec4> = Vec::new();
-        for id in 1..=MAX_PLAYER_COUNT as u32 {
-            points.push(get_spawn_player(&world, id, &points).frame.col(AXIS_W));
-        }
-        for (i, a) in points.iter().enumerate() {
-            for b in &points[i + 1..] {
-                assert!(get_distance(*a, *b) * r >= MIN_SPAWN_GAP_M);
-            }
-            for mouth in &world.mouths {
-                assert!(get_distance(*a, mouth.center) * r > world.get_jump_radius_m());
-            }
-        }
-    }
-
-    #[test]
-    fn a_laser_hits_the_player_it_points_at() {
-        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
-        let shooter: Player = get_spawn_player(&world, 1, &[]);
-        let mut target: Player = get_spawn_player(&world, 2, &[]);
-        physics::turn_toward(&mut target.frame, shooter.frame.col(AXIS_W));
-        let mut aimed: DMat4 = shooter.frame;
-        physics::turn_toward(&mut aimed, target.frame.col(AXIS_W));
-        let other: RemotePlayer = RemotePlayer {
-            id: 2,
-            frame: target.frame,
-            is_laser_on: false,
-            is_rifle: false,
-            team: 0,
-            disabling_console: None,
-            disabling_frac: 0.0,
-            beam_speckle_frac: 0.0,
-            wormholes: PlayerWormholes::default(),
-        };
-        let view: SharedView =
-            pack_shared_view(&world, aimed, Some(aimed), &[other], &[], (64, 40), 0.0);
-        assert_eq!(view.hit_player_id, Some(2));
-        let away: DMat4 = aimed * make_rotation(AXIS_X, AXIS_Z, std::f64::consts::PI);
-        let view: SharedView =
-            pack_shared_view(&world, away, Some(away), &[other], &[], (64, 40), 0.0);
-        assert_eq!(view.hit_player_id, None);
-    }
 
     #[test]
     fn a_shot_at_a_marker_names_it() {
