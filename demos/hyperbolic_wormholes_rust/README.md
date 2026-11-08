@@ -96,8 +96,8 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   `house-demo` (the default: the house, rails and three wormholes, R = 8) or `lunar-surface` (the Lunar Surface level of
   [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m, with its black hole and wormhole).
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
-  steps, lighting with sun shadows, lamps, ground, stars and planet, so it looks like the level, with the house's
-  adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
+  steps, lighting with soft sun shadows, lamps, ground, stars and planet, so it looks like the level (plus a thin haze
+  and stronger bloom, W-76), with the house's adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
   flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 15 s, a head bob, jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.

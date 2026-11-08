@@ -26,9 +26,6 @@ is in [`AGENTS.md`](AGENTS.md).
   and more subtle, at a faster pace in general, and in proportion to how fast the value is changing (smoothed). The
   user wants samples first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/hud-pulse-refine`, 2026-11-07.
-- [~] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
-  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom").
-  Claimed by Claude Code (worktree `Warped-lighting`), branch `claude/scene-haze-soft-shadows`, 2026-11-07.
 - [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
@@ -118,6 +115,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Done
 
+- [x] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214.
 - [x] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
   and on Lunar Surface. #73, #76, #81–#86, #90, #91.
 - [x] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
