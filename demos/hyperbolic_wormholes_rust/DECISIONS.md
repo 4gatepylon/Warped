@@ -1036,17 +1036,76 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D81. Dust and mist from shots into the ground
+
+- **Choice:**
+  - **When:** a shot of either gun, by any player, that hits the ground (the flat ground or the crater's terrain)
+    throws up a burst where it lands, when its beam front gets there. Shots into blocks or players raise none. At
+    most 12 bursts show at once; a new one replaces the oldest.
+  - **Grains:** a sniper shot throws 33 grains of grey-brown dust, a rifle shot 12 at 0.65 times the speed. Each is
+    a small polyhedron (a tetrahedron, a cube or an octahedron, picked at random) 2 to 3.2 cm in radius, turned at
+    random and tumbling at 4 to 14 rad/s while it flies. They fly up a cone (0.5 rad) around the ground's normal,
+    tilted a little back toward the shooter, at 2 to 6 m/s, rising up to 3 m, then land on the ground's slope and lie
+    there, still.
+  - **W-86 (after you saw the first version):** the grains were spheres, 44 and 16 of them, 2 to 4.5 cm; you asked
+    for polyhedra, smaller big ones and slightly less dust, so there are 25% fewer and the largest radius is 3.2 cm.
+  - **Mist:** 7 puffs for a sniper shot, 3 for a rifle shot (0.65 times as big), lighter than the grains. They drift
+    out at 1.5 to 3.5 m/s, slowing to a stop within about half a second, while they swell from 0.12 m to 0.6 to
+    1.2 m.
+  - **Fading:** each particle fades from a third of its life (0.9 to 2 s) to nothing, so a burst is gone within 2 s.
+  - **Gravity:** the map's own, 6 m/s² on Lunar Surface, not the 30 m/s² the server settings give players for their
+    quick jumps. At 30 m/s² the grains would be back on the ground within half a second, before anyone saw them in
+    the air.
+  - **Light:** the sun lights the dust like the ground: a grain's faces are flat, each as bright as it faces the
+    sun (a little light wraps round, 0.2), so a tumbling grain flickers; a puff's side that faces the sun is
+    brighter, and dust seen toward the sun glows. A burst in shadow (checked once, when it starts) gets the ambient light and
+    some earthshine only.
+  - **Drawing:** in the world, by the voxel ray tracer (`scan_dust`), so the dust is seen from any angle, through
+    wormholes and behind blocks. Each straight piece of a ray is tested against each burst's bounding sphere, then
+    against its particles in the burst's Klein coordinates, where the piece is a straight line. A grain is its
+    polyhedron's faces (`GRAIN_PLANES`, hardcoded) turned by its quaternion: the face the ray enters gives the normal,
+    and the ray's distance outside the faces, midway between where it crosses them, gives a pixel-wide soft edge
+    (`cover_grain`). Grains are at least 1.5 pixels wide, puffs are Gaussians, and their optical depths add up along
+    the ray. Each ray end carries
+    its dust, so it grows from 96 to 112 bytes, and adaptive sampling blends dust between samples only where its
+    depth changes by less than 0.02.
+  - **Cost:** Apple M3 Pro, macOS 15.7.3, Rust 1.98.1, release build, 2560 × 1600 with adaptive sampling, medians of
+    10 frames, runs alternated. With no dust on screen, each bench view takes 0.4 to 1.8 ms more GPU time than
+    before (about 2%, from the larger ray ends). One sniper burst 12 m away adds 0.1 to 1 ms to a 33 ms frame; the
+    rifle held on one spot 5 m away (12 bursts, 193 particles) adds 2.7 ms to 34 ms. Twelve sniper bursts at once
+    (513 particles, out of reach in play with its 2 s reload) would add 11 to 20 ms. The polyhedra cost no more than
+    the spheres did, as there are fewer of them: one sniper burst 6.5 m away added 2.6 to 3.2 ms with spheres and 1.5
+    to 2.9 ms with polyhedra, one 2.7 m away 3.7 ms and 2.6 ms.
+- **Alternatives:**
+  - sprites drawn over the picture at the hit's place on screen (cheaper, but they would not bend through
+    wormholes, hide behind blocks, or move in 3D as you walk around them);
+  - the players' 30 m/s² gravity (see above);
+  - sending the particles over the network (each window makes them from the shots it already draws, so everyone sees
+    a burst where a shot lands, though the grains differ from screen to screen);
+  - keeping ray ends at 96 bytes by storing the laser glow and the dust as half floats, which might win back the 2%
+    at some cost in the glow's precision;
+  - grains as spheres or soft discs (the first version; you asked for polyhedra), or as rocks of many faces (more
+    work per ray for a difference too small to see at a few pixels).
+- **Rationale:** you asked that shooting the ground throw some mist and dust particles up into the air, and then
+  that the particles be polyhedra, the big ones smaller, and the dust slightly less.
+
 ### D82. Spaceships flying over Lunar Surface
 
 - **Choice:**
-  - **Ships:** five, purely for looks: a container freighter, a ring ship whose ring turns, and three fighters
-    flying in a V. Each is a flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s
-    `draw_spaceship`) from boxes and tapered capsules (tables `HULL_*`), lit by the sun on the edges that face it
-    and from below by the sunlit ground, with glowing engines and a short plume, red lights to port and green to
-    starboard, a flashing white strobe, a pulsing red beacon and lit windows.
-  - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) to 300 s
-    (the ring ship), highest at 58° to 84° above the horizon, then comes back round below the horizon in a fifth of
-    that time. So a view straight up nearly always has a ship in it.
+  - **Ships:** four, purely for looks: a ring ship whose ring turns, and three fighters flying in a V. Each is a
+    flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s `draw_spaceship`) from boxes,
+    tapered capsules and triangles (tables `HULL_*`), lit by the sun on the edges that face it and from below by the
+    sunlit ground, with glowing engines and a short plume, red lights to port and green to starboard, a flashing
+    white strobe and lit windows.
+  - **Delta fighters (W-88):** each fighter is one flat triangle, about as wide as it is long, with a darker spine
+    and a dark glass canopy painted on (`HULL_INSETS`, which colour a hull without changing its outline), two
+    engines at the back and nearly plain panels. Until W-88 they had a thin fuselage, thin swept wings and engine
+    pods. You picked this wide delta over a slimmer one.
+  - **No freighter (W-87):** a fifth ship, a container freighter with coloured containers, a lit bridge and orange
+    engines, flew from #193 until W-87 removed it, with its hull tables and its pulsing red beacon.
+  - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) or 300 s
+    (the ring ship), highest at 84° and 74° above the horizon, then comes back round below the horizon in a fifth of
+    that time. So a view straight up often has a ship in it.
   - **Shared time:** where the ships are depends only on the UTC clock (`spaceships.rs`), so every window whose
     clock is set by the network shows the same ships in the same place, to within its clock's error (tens of
     milliseconds, under a pixel). The game has no clock all clients share (the server sends no time). Fixed views
@@ -1059,7 +1118,8 @@
   - **Cost:** each sky pixel rules a ship out with a few dot products; only pixels within 1.5 half lengths of a ship
     shade its hull. On D10's shared machine, the window at 1280×800 ran 85.5 fps (11.1 ms on the GPU) with the
     ships and 85.7 fps (11.1 ms) without; `--bench-views` at 2560×1600 moved by −4 to +4 ms per view (mean +1 ms),
-    within the noise, and views straight up with all five ships in sight took about 0.4 ms more on the GPU.
+    within the noise, and views straight up with all five ships of then (the freighter too) in sight took about
+    0.4 ms more on the GPU.
 - **Alternatives:**
   - ships as structures traced like the blocks (properly shadowed, but every ray would pay for them, and they would
     be in the game's world);
@@ -1068,7 +1128,9 @@
   - whole orbits at a steady speed (half of each below the horizon, so looking up often showed an empty sky);
   - ships described in the map format (`common/maps/`), which only this renderer would read.
 - **Rationale:** you asked for a few spaceships flying overhead in the sky, purely background world-building, to
-  look cool and pretty.
+  look cool and pretty; then, seeing them, that the colourful freighter go ("the freighter is indeed meant to be
+  deleted and is ugly") and the ring station stay; and that the fighters become simple, geometric deltas without
+  thin arms ("A wide delta").
 
 ### D83. Aiming zooms in, and the flashlight moves to F
 
@@ -1089,36 +1151,48 @@
   - slowing walking while aiming (not asked for).
 - **Rationale:** you asked for a way to aim on the right button, with the flashlight moved to another key.
 
-### D84. A blueshift toward cyan after going through a wormhole
+### D84. A Doppler shift while moving inside a wormhole mouth
 
-- **Choice:**
-  - **When:** the step that takes a player through a mouth (`StepReport::has_crossed_mouth` on a voxel map, any
-    crossing message on the house) starts the tint at its peak. It fades over `view.wormhole_tint_s`, 1.5 s, along
-    a smoothstep, so it lingers a moment at the peak and eases out. Each window steps only its own player, so in a
-    game on a server only the player who went through sees it.
+- **Choice** (W-82 replaced W-52's 1.5 s cyan tint after each crossing, which turned greys greenish):
+  - **When:** the shift depends only on where the player is and how they move, with no timer. Its strength is the
+    tint setting × how deep the eye is in a mouth × the speed along the view (forward speed × cos pitch + vertical
+    speed × sin pitch) in walking speeds, held within ±1.25. Forward gives a blueshift, backward a redshift, standing
+    still or stepping sideways none.
+  - **How deep:** 1 − (ρ / reach)², with ρ the eye's distance to the centre of the mouth whose reach holds it, the
+    same taper as the mouth's bending: 1 at the throat, 3/4 halfway out, 0 at the reach's edge (15 m on Lunar
+    Surface), where the bending ends, and 0 beyond it. Through the throat the eye is at the other mouth's throat, so
+    the shift carries on there and falls as the player walks out.
   - **The shift:** the overlay shader's `blueshift_scene` reads each pixel's red, green and blue as samples of a
-    spectrum at 610, 550 and 465 nm, joined by straight lines, and falling past red to a quarter of red's at 700 nm
-    (the infrared a blueshift brings into view). Moving straight ahead at β = 0.15 of light speed at the peak, the
-    relativistic Doppler factor D = √(1 − β²) / (1 − β cos θ), with θ the angle off the middle of the screen, is
-    1.16 in the middle and 1.08 in the corners of a 16:10 window. Each channel shows the light at D times its
-    wavelength: red fades, green takes red's light and blue takes green's, so greys turn cyan and reds turn green.
-    The pixel is also D^1.5 times as bright (beaming), plus a faint teal glow, (D^1.5 − 1) × (0, 0.3, 0.36), so the
-    black sky, often half the screen, turns too.
+    spectrum at 610, 550 and 465 nm, joined by straight lines and falling to 0 at the eye's limits, 400 and 700 nm.
+    Each channel shows the light at D times its wavelength, with the relativistic Doppler factor
+    D = √(1 − β²) / (1 − β cos θ). At strength 1 (walking at the throat), β is 0.2 forward and −0.3 backward;
+    beyond 1 (sprinting), β grows with it; below 1, the colour at strength 1 fades in instead. Forward, red fades and
+    green takes red's light, so greys turn a bluish cyan, deep blue in the middle; backward, blue fades and greys
+    turn red. The pixel is D times as bright, plus a faint blue (or red) glow, (0, 0.12, 0.4) (or (0.4, 0.04, 0))
+    times |D − 1|, so the black sky turns too.
   - **What it touches:** the scene only, after motion blur; the HUD, text, minimap and the gun in your hand stay as
-    they are, since they move with you.
+    they are, since they move with you. Each window steps only its own player, so in a game on a server only that
+    player sees it. The house map has no mouth reach, so it shows no shift.
   - **Settings:** each player's `view.wormhole_tint_frac` (1 by default; 0 to 1, 0 for none; also in the menu as
-    `wormhole tint 0-1`) scales β, and `view.wormhole_tint_s` (1.5 s; 0 for none) sets the fade.
+    `wormhole tint 0-1`). `view.wormhole_tint_s` is gone. A saved settings file that still has it loads, because
+    `REMOVED_PLAYER_KEYS` in `settings.rs` names it to be dropped; any other unknown key still fails.
+  - **Defaults you can change** (chosen while the questions were open): the shift carries on past the throat while
+    walking out of the other mouth; the middle goes deep blue (not a lighter β of 0.18); red objects turn green under
+    a blueshift, the real effect; the shift snaps on and off with movement, with no smoothing.
 - **Alternatives:**
-  - a flat cyan overlay, or a hue rotation (you asked for something like the relativistic effect on colour; with
-    them a red object would stay reddish);
-  - β = 0.10 or 0.12 (warm ground turned mint green rather than cyan);
-  - real beaming, D³ to D⁴ (1.6 times as bright in the middle, washing out the ground);
-  - aberration too: the scene squeezed toward the middle of the screen, as it would really be at that speed (left
-    out because you asked about colour, and the map's edge already warps the view);
-  - the player's real direction through the mouth instead of straight ahead (players nearly always walk in facing
-    it).
-- **Rationale:** you asked that going through a wormhole turn your whole screen kind of cyan, simulating the
-  relativistic effect on colour if possible.
+  - a smaller shift below strength 1 instead of fading in (a small shift first turns greys greenish cyan, or
+    yellowish backward, since removing only red or only blue leaves the other two);
+  - the real dependence on θ (the corners stayed greenish while the middle went deep blue); it keeps half (cos θ is
+    taken half way from 1), which is not physical;
+  - the same β backward as forward (greys turned yellow, not red: green sits 85 nm from blue but 60 nm from red);
+  - a depth that is 1 across most of the reach (it would not say where in the mouth you are), or one that follows
+    the bending's strength (it is concentrated within about 2 m of the throat, a fifth of a second at walking speed);
+  - the player's real velocity direction per pixel (stepping sideways would blueshift one side of the screen and
+    redshift the other), instead of the speed along the view;
+  - real beaming, D³ to D⁴ (washes out the ground when blueshifted).
+- **Rationale:** you asked for a more bluish cyan, not greenish; for the colour to depend on where you are in the
+  wormhole and how fast you move, not on a timer; for it to go away once you are out; and for a redshift when
+  walking backwards.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1156,6 +1230,8 @@
   rounded, chose "slanted tactical but with the neo background", slightly more translucent than the neon example,
   and asked for a reddish-orange pulse down the health bar when taking damage, a blue one down the energy bar while
   running, none on ammo, and a much more subtle one while regaining things such as energy.
+- **Since D94 (W-80):** wide swells over the filled part, paced by the smoothed rate of change, replace these
+  pulses.
 
 ### D86. Ask before exiting on Escape
 
@@ -1230,6 +1306,84 @@
   - window holes in the walls without glass, as doorways are (players could climb through).
 - **Rationale:** you reported that a laser shot out of a window close up doesn't leave the room; it stops on the
   glass by design, so whether lasers should pass through windows is your call.
+- **Superseded by:** D90 (W-70): lasers now pass through glass, and the windows are real openings.
+
+### D89. Shot noise: each shot strays a little (W-69)
+
+- **Choice:**
+  - **Per shot:** each shot strays from the crosshair by a random angle, toward a random direction around it,
+    sampled once per shot (`shot_noise.rs`): once for the sniper's whole quarter-second shot, and once for each
+    rifle pulse. The crosshair stays in the middle; only the shot moves.
+  - **Sniper:** the angle is exponential with mean `sniper.noise_mean_rad` (3 mrad), cut at `sniper.noise_max_rad`
+    (15 mrad, five means, so 0.7% of shots are cut). Most shots land within a few centimeters at 20 m, and about 1
+    in 30 strays past 10 mrad. Cutting keeps the mean at 99.3% of the setting.
+  - **Rifle:** a shot lands uniformly over a disc around the crosshair, of angular radius
+    `rifle.noise_start_rad` (2 mrad) cold, growing in step with the heat to `rifle.noise_max_rad` (20 mrad) at full
+    heat, the 20th shot in a row. The heat already falls over `rifle.cool_down_s` when the trigger is let go, so the
+    spread recovers with it. The shot uses the heat before it adds its own, so a burst's first shot is the most
+    accurate.
+  - **Sizes:** in a 1280 × 800 window 1 mrad is half a pixel at the middle, so the strays are hard to see on screen
+    but count at range: at 20 m the sniper's mean is 6 cm and the rifle's full-heat limit 40 cm, against a body
+    50 cm wide. A sniper shot centred on a body hits it 99.5% of the time at 20 m, 97.5% at 30 m and 91% at 50 m; a
+    rifle shot at full heat 74% at 20 m and 52% at 30 m (simulated with these defaults, sideways misses only).
+    Aiming's zoom (D83) doesn't change them. Each setting can be 0 for none; `noise_start_rad` above
+    `noise_max_rad` fails.
+  - **One frame for everything:** the shot is traced from the camera turned by its offset (the smallest rotation
+    taking the crosshair's direction to the strayed one), so the drawn beam, the glow where it lands, the HUD's
+    line and the hit decision all come from the same trace. This holds on the house too.
+  - **Other players:** while the laser is on, the window sends that turned frame as its eye frame, and other
+    windows already trace a firing player's laser from the frame they receive, so they draw the same strayed beam.
+    The network format doesn't change, so older windows draw it too. The body others see turns with it, by at most
+    1.1° (the rifle at full heat) and only while the shot lasts, which doesn't show.
+  - **Randomness:** a SplitMix64 generator (a few lines, no new dependency), seeded by the clock when the window
+    starts. The tests use a fixed seed.
+- **Alternatives:**
+  - a new field in the player record for the offset (a snapshot's length is checked exactly, so an older window
+    would drop every snapshot from a newer server), or a new message kind for it (more code for the same result);
+  - a Gaussian spread for the rifle (no hard limit; the disc makes the limit the ring players can learn);
+  - spread by shots in a row rather than heat (heat already counts them and cools gradually, so the spread
+    recovers gradually rather than all at once);
+  - rerolling a sniper stray beyond the cap instead of cutting it (the same mean within 1%; cutting is simpler).
+- **Rationale:** you asked for a little random shot noise on the laser, sampled per shot, growing as the rifle keeps
+  shooting, exponential for the sniper, and all of it in the YAML settings. The defaults keep the crosshair
+  meaningful: the sniper still hits what it is centred on nearly always within 30 m, while a long rifle burst
+  spreads wide enough that short bursts pay off.
+
+### D90. Windows you see and shoot through (W-70)
+
+- **Choice:**
+  - **Walls:** the level's exporter (`demos/levels/lunar_surface/shape_builders.js`, `add_wall_around_windows`)
+    builds each habitat module's and walkway's side wall as a piece below the window row, a piece above it, and a
+    pillar between each pair of windows, so each glass pane fills a real 1 m hole. The pieces keep the wall's 1 m
+    thickness and 0.3 m rounding. Each pillar reaches one cell into the pieces above and below, so its rounded ends
+    are buried and no seam shows. The panes are unchanged: 1 m blocks, 6 cm proud of each face. The map goes from
+    340 to 398 shapes (a habitat module from 29 to 41); no other structure changes.
+  - **Format:** `glass` is now see-through for light and lasers, and stops players (`common/maps/README.md`). The
+    schema and validator never encoded it.
+  - **Lunar Surface:** the laser's tracer leaves glass shapes out (`find_hit_mu` takes a see-through material), so
+    the drawn beam and its spot go on to whatever lies behind. The console aim ray (`E`) passes through glass too.
+    The picture already did; `render_voxel.metal` needed no change.
+  - **Players:** glass still stops them: their collision probes count every shape.
+  - **House:** its laser passes through glass boxes too (`Scene::ForLaser`). But the house's windows are glass laid
+    on solid plank walls, and both house renderers draw glass as an opaque sheen, so a shot at a house window stops
+    on the wall 6 cm behind the glass, which looks the same as before.
+  - **WebGL level:** its laser passes through glass too (one line in `trace_structure_cpu`). Its voxel walls
+    already had holes behind the panes.
+  - **Tests:** `the_laser_stops_on_a_window_pane` (D88) became `a_laser_passes_through_a_window`: shots from inside
+    (touching the pane, close, across the room, slantwise) leave the module, a shot from outside comes in to the
+    floor, and the pane's middle is still solid for players. `the_laser_passes_through_a_house_window` and
+    `a_line_passes_through_a_see_through_pane` cover the house and the tracer.
+  - **Frame time:** no change measured. The machine's GPU was shared with other agents' renders, so the same view
+    varied by up to 40% between runs at 2560 × 1600.
+- **Alternatives:**
+  - a second glass kind that stops lasers (City Sphere's design in `game_design/DESIGN.md` wants a glass floor that
+    players see through but can't shoot through; the format can add one when that level is built);
+  - thinner panes in the middle of the wall (the level's 1 m panes were kept);
+  - holes without glass, as doorways are (nothing would show it is a window, and players could climb through);
+  - see-through glass in the house as well (its walls would need holes and its two renderers a glass pass);
+  - a stronger glass look, such as a reflection, so panes show from outside (the voxel renderer tints glass 20%
+    darker, so from outside a window reads mostly as an opening).
+- **Rationale:** asked whether windows should be see-through and let lasers through, you answered "Both".
 
 ### D91. A window says why it can't play on its server (W-72, W-78)
 
@@ -1255,6 +1409,165 @@
 - **Rationale:** you couldn't join with `1` or `2`, which turned out to be a join sent to a port no server listened
   on, and nothing said so. You asked to cover the cases where a server doesn't answer, and that you can't shoot
   before leaving the team screen.
+
+### D92. Playing is only on a game server
+
+- **Choice:**
+  - **Make targets:** only `make serve-game` and `make join-game` play. `make run-demo` (the local demo) and
+    `make host-game` (a server and a window in one) are gone.
+  - **Default map:** Lunar Surface for both targets, so a server and a window started with the defaults play the
+    same map.
+  - **The program:** it refuses `--host`, and a window started without `--join`, with a message saying to start a
+    server and join it.
+  - **Tools kept:** `--serve`, `--join` (with bots), and the tools that need no server (`--bench-views`,
+    `--autopilot`, `--play-route` and `--export-map`) still run, because the tests, benchmarks and screenshots use
+    them.
+  - **Code kept:** the `--host` code path stays, so turning it back on is a one-line change.
+- **Alternatives:**
+  - deleting the local play and `--host` code (a bigger change, and harder to undo);
+  - keeping `host-game` (you asked for only starting a server and connecting to one).
+- **Rationale:** you recommended disabling everything except starting a server and connecting to one, since nobody
+  will use the local demo.
+
+### D93. Crouching refills the sprint energy faster
+
+- **Choice:** `sprint_energy.refill_s` becomes two settings. `refill_crouching_s` (7.5 s, as fast as sprinting
+  empties the bar) applies while crouched; `refill_walking_s` (15 s, half as fast, the old rate) applies while
+  walking or standing upright. Sprinting drains the bar as before (`drain_s`, 7.5 s).
+- **Alternatives:**
+  - a third rate for standing still upright (you named only crouching and walking, so standing keeps the walking
+    rate);
+  - keeping `refill_s` beside a crouch multiplier (two rates in seconds read more plainly).
+- **Rationale:** you asked that crouching recharge the energy for running at the same rate as running uses it, and
+  walking at half that, as YAML defaults that can be changed.
+
+### D94. Soft swells along the bars' filled part, paced by how fast they change (W-80)
+
+- **Choice:** you picked variant D from four rendered samples (A quick glints, B rate-paced, C soft swells, D C's
+  swells made wider and rate-paced). It replaces D85's pulses:
+  - **Where:** the swells run over a bar's filled part only. Down from the end of the last filled segment (the last
+    hit point, or the last energy slot) toward the bar's start while the value falls; up from the start toward that
+    end while it rises. They fade in and out smoothly inside both ends, over half a half width (at most half the
+    filled part), so the empty slots stay dark.
+  - **Shape:** a wide Gaussian glow, 4.5% of the screen's width at half width (about a quarter of a bar) and 1.1 bar
+    heights tall, over segments and gaps alike. The overlay shader draws it after the segments (`get_pulse_glow`):
+    it tints toward the pulse's colour and adds 0.6 of that colour as light. Up to 4 swells run on a bar at once.
+  - **Rate:** each bar keeps an exponential moving average of its value (0.3 s time constant), and the average's rate
+    of change drives everything. Strength is that rate over 15% of the bar per second, at most 1. It sets the swells'
+    opacity (50% at full strength while falling, 45% while rising), their speed (0.8 to 2.2 bar widths a second) and
+    the time between them (0.9 s down to 0.45 s). A swell starts each period while the strength is at least 5%.
+  - **What that gives:**
+    - **Hit:** a burst of 2 or 3 swells over about a second, fast and strong at first, then slower and fainter.
+    - **Sprinting:** a steady train.
+    - **Refilling:** about half as strong, as the energy refills at half the rate it drains (faster while crouching,
+      D93).
+    - **Respawn:** a strong rising burst.
+    - **No change, no swell:** full health, full energy, or sprint held with no energy left.
+  - **Colours:** reddish-orange `[1.0, 0.45, 0.2]` on health; pale blue-white `[0.8, 0.94, 1.0]` on energy (lighter
+    than D85's deep blue, which looked dark); the bar's own colour 65% of the way to white while rising. Ammo still
+    never pulses.
+- **Alternatives:**
+  - A, B and C, as rendered (narrow glints, medium rate-paced glows, narrower swells at a fixed pace);
+  - the glow only over the segments (it read as whole segments lighting up);
+  - pulses started by events (a hit, the sprint key) rather than by the value changing (they would not follow how
+    fast it changes, and a server with endless sprint would pulse while the energy stays full).
+- **Rationale:** you asked that the pulsing start where the filled part ends, that the blue be less dark, that the
+  pulses look Gaussian, more subtle and faster, in proportion to the smoothed rate of change; then for "soft swell"
+  but rate based, "really wide gaussian like; think like smoother convolution vibes".
+
+### D95. A step up is searched from the bottom (W-85)
+
+- **Choice:** when a step forward is blocked, the walk tries lifts of 2, 4, 6 cm and so on up to 30 cm
+  (`MAX_WALK_RISE_M`), takes the first that clears, and bisects between it and the lift before it. It used to try 30
+  cm first and give up if that didn't clear.
+- **Why it got stuck:** a structure's floor is a geodesic plane, so a step toward a habitat module's door or along a
+  walkway lifts it 1 to 2 cm into the feet, and the walk needs a small lift. The doorways and walkways are only 2 m
+  high, so a 30 cm lift put the head (15 cm above the 1.6 m eye) into the lintel or the roof, and the walk gave up.
+  The player stopped about 1 m before a module's door and moved only 0.3 to 0.5 m in a walkway.
+- **Alternatives:**
+  - a smaller `MAX_WALK_RISE_M` (it would stop climbing the low curbs and plinths it climbs now);
+  - a lower head probe (the head would show inside low ceilings);
+  - a taller doorway in the map (only those doorways, and any low ceiling added later would trap players again).
+- **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
+  room for it, and costs at most 15 more checks, only on a blocked step.
+
+### D97. Every other player on the menu's map page (W-90)
+
+- **Choice:** the MAP page shows every other player in the game as a dot in their team's colour, 4 px across the
+  picture's radius (yours is 5 px), ringed in dark grey (yours is ringed in white and points the way you face). It
+  shows both teams, as the minimap does, and players beyond your 60 m ring too, undimmed. A dot sits over the ground
+  point under the player's eye, and your own disk is drawn over any dot under it. The list is the one the minimap
+  uses, the server's last snapshot, so it already leaves out players who are dead or still in the lobby: the
+  server sends only players who have joined a team and drops a player when they are hit, until they rejoin.
+- **Alternatives:**
+  - teammates only (you can ask for it; the minimap shows both teams too);
+  - only players within your ring, like the minimap (the page shows the whole map, so far players are worth seeing);
+  - a label with each player's number, as the spawns have (more clutter, and the scores page lists the numbers);
+  - a line for the dots in the legend (it is full: 62 of the 63 characters that fit, so a new line would push out
+    another one).
+- **Rationale:** you asked to show where other people are on the map, like the minimap's dots. A dark ring keeps a
+  dot apart from your own white-ringed disk, the console markers and the spawns, and shows on both the bright and
+  the dimmed ground.
+
+### D96. Thrown wormholes
+
+- **Choice:**
+  - **Keys and colours:** `throw_wormhole` (`Q` by default) throws the player's purple mouth, the next press the
+    green one, then purple again, and so on; a press while a throw is in the air does nothing. Each new throw moves
+    that colour's mouth once it comes down.
+  - **Flight:** the mouth leaves the eye 0.3 rad above the crosshair at 16 m/s and falls at 20 m/s² (`wormholes` in
+    `server_settings.yaml`), straight through other warps' bending. From whatever it hits (the ground, or on Lunar
+    Surface any structure) it drops to the floor below and hovers at the map's eye height there, its back axis
+    facing back along its flight, so a player walking the way it flew goes through.
+  - **Fizzling:** a throw that hasn't landed in 4 s, or lands where its mouth doesn't fit, fizzles with a message;
+    the old mouth of that colour stays and the next throw is the same colour. On Lunar Surface a thrown mouth is
+    1.6 m (Schwarzschild radius) with a 6 m reach, which may not overlap any warp's reach (the tapered bending
+    adds up wrongly where they do). On the house mouths share the house's size, and a thrown mouth's 1.6 m jump
+    sphere must hold no box or ground and stay clear of every other mouth's (D23).
+  - **Linking:** once both are down, the pair is added to the world after the map's own warps, so the renderer,
+    walking and lasers all use it; anyone and any laser goes through, teammates or not.
+  - **Looks:** a ray that came through a thrown mouth is tinted its colour (45%, by brightness), which colours the
+    mouth's disk. A mouth in the air, or down while its partner isn't, is a glowing ball (a cube on the house).
+  - **Network:** every player's state carries their mouths (each colour's place as u, v, h and heading) and the
+    throw in the air (its point), 49 bytes, so a snapshot of 8 players stays under the 2048-byte datagram. A
+    player who dies is out of the snapshot until they rejoin, so their mouths vanish for everyone, and their own
+    window clears them.
+  - **House limit:** the house shader holds 24 mouths instead of 8 (6 the map's, 2 for each of 8 players).
+- **Alternatives:**
+  - a throw that flies straight to the first surface, or one placed a set distance ahead (you chose a lob);
+  - keeping mouths after death, or allowing only two throws (you chose alternating, cleared on death);
+  - mouths only the thrower's team can use (you chose everyone; the renderer would need a world per team);
+  - gravity of 9.8 m/s²: on the house (R = 8 m) a 16 m/s throw then curves away from the ground for good;
+  - bending throws near warps like light (they would cross wormholes, at the cost of the flight's simple path);
+  - checking another player's mouths for overlap again on arrival (two throws landing at once may overlap).
+- **Rationale:** you asked for each player to throw a linked purple and green pair with `Q`, on both maps, lobbed,
+  alternating, cleared on death, and usable by everyone. With no thrown mouths, the house's 24-mouth limit costs
+  nothing measurable: `make bench-views` at 1280×800 (30 frames, Metal, Apple M3 Pro, macOS 26.5.2, Rust 1.98.0,
+  release build) took 3.3 to 13.6 ms per view at its fastest frame with 24 mouths allowed and 3.6 to 13.9 ms
+  with 8.
+
+### D98. Shooting enemy wormholes (W-89)
+
+- **Choice:**
+  - **A hit:** a shot that goes through the throat of a mouth of a player on the other team counts, and goes on
+    out of the other mouth as before; so does a shot that hits the glowing ball of a mouth down alone. Each
+    shot counts once (the sniper's 0.25 s beam and each rifle pulse), whichever mouths it goes through.
+  - **Destroying:** 2 sniper shots or 5 rifle shots destroy both mouths (`wormholes.sniper_hits_to_destroy` and
+    `rifle_hits_to_destroy`), adding up across the pair's two mouths. The damage stays until they are destroyed:
+    moving a mouth by throwing it again keeps it, and dying clears the mouths as before (D96).
+  - **Flash:** each hit makes both mouths of the pair flash red for `wormholes.hit_flash_s` (0.25 s), for everyone,
+    the owner included: the view through them is tinted red instead of their colour, and a lone mouth's ball turns
+    red.
+  - **Who counts:** the server, like hits on players: a shooter's window reports a shot through an enemy's mouths
+    (`WormholeHit`), the server adds it up (ignoring teammates' shots and players with no mouth down) and sends each
+    player's damage in the snapshot (one byte); the owner's window destroys the pair at 1, and the server resets the
+    damage once the owner has no mouth down.
+- **Alternatives:**
+  - mouths that block enemy shots, or any shot through their bending (you chose shots through the throat);
+  - 1 or 5 sniper shots (you chose 2), damage that heals or resets on a new throw (you chose only when destroyed);
+  - flashing only the mouth hit (you chose both).
+- **Rationale:** you asked that shooting enemy wormholes make them flash red, and that a few shots (5 rifle shots)
+  destroy both.
 
 ## Baselines
 

@@ -52,8 +52,9 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
 /// frame's height the mask's text may take, a picture under the text, how far the scene
 /// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), the
-/// minimap, and how far into the blueshift after a wormhole the scene is (the shader's
-/// `blueshift_scene`: 1 at its peak, 0 for none).
+/// minimap, and how far the scene blueshifts inside a wormhole mouth (the shader's
+/// `blueshift_scene`: 1 for walking straight ahead at the throat, negative for a redshift, 0 for
+/// none).
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
@@ -146,9 +147,20 @@ pub struct OverlayWand {
     pub tip_color: [f32; 4],
 }
 
+impl OverlayWand {
+    /// `get_tip_m` gives the front of the wand's tip in camera space, where the gun's muzzle is.
+    ///
+    /// Example: `let muzzle_m = wand.get_tip_m();`
+    pub fn get_tip_m(&self) -> glam::Vec3 {
+        let reach_m: f32 = self.shaft_half_m[2] + 2.0 * self.tip_half_m[2];
+        glam::Vec4::from(self.center_m).truncate()
+            - glam::Vec4::from(self.axes[2]).truncate() * reach_m
+    }
+}
+
 /// `OverlayRect` is the shader's `OverlayRect`: corners as fractions of the screen (top left 0, 0),
 /// an RGBA colour (A the opacity), how it looks beyond its colour (`FLAT_RECT_STYLE` for a
-/// plain rectangle) and the pulse across it (`NO_RECT_PULSE` for none).
+/// plain rectangle) and the pulses it carries for its bar (`NO_RECT_PULSE` for none).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OverlayRect {
@@ -159,24 +171,35 @@ pub struct OverlayRect {
     pub pulse: RectPulse,
 }
 
-/// `RectPulse` is the shader's `RectPulse`, a band of light across an `OverlayRect` (a pulse
-/// running along a HUD bar): its middle's x and its half width as fractions of the screen's width
-/// (measured along the rect's slant, at its middle row), two zeros, and its RGBA colour, A its
-/// opacity at its middle (0 for none).
+/// `RectPulse` is the shader's `RectPulse`, up to `MAX_RECT_PULSE_COUNT` soft glows running along
+/// a HUD bar, carried by the bar's first `OverlayRect`: their middles' x as fractions of the
+/// screen's width (measured along the rect's slant, at its middle row), their opacities (0 for
+/// none), the x span they show in (the bar's filled part; they fade out just inside its ends), their
+/// half width (of the screen's width) and half height (of its height), and their RGBA colour (A
+/// unused).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RectPulse {
-    pub center_x_frac: f32,
+    pub centers_x_frac: [f32; MAX_RECT_PULSE_COUNT],
+    pub opacities: [f32; MAX_RECT_PULSE_COUNT],
+    pub min_x_frac: f32,
+    pub max_x_frac: f32,
     pub half_width_frac: f32,
-    pub padding: [f32; 2],
+    pub half_height_frac: f32,
     pub color: [f32; 4],
 }
 
-/// `NO_RECT_PULSE` is no pulse: an opacity of 0, which the shader skips.
+/// `MAX_RECT_PULSE_COUNT` is how many pulses one `RectPulse` carries, the shader's.
+pub const MAX_RECT_PULSE_COUNT: usize = 4;
+
+/// `NO_RECT_PULSE` is no pulse: every opacity 0, which the shader skips.
 pub const NO_RECT_PULSE: RectPulse = RectPulse {
-    center_x_frac: 0.0,
+    centers_x_frac: [0.0; MAX_RECT_PULSE_COUNT],
+    opacities: [0.0; MAX_RECT_PULSE_COUNT],
+    min_x_frac: 0.0,
+    max_x_frac: 0.0,
     half_width_frac: 0.0,
-    padding: [0.0; 2],
+    half_height_frac: 0.0,
     color: [0.0; 4],
 };
 
@@ -214,10 +237,10 @@ pub const FLAT_RECT_STYLE: RectStyle = RectStyle {
     outline_color: [0.0; 4],
 };
 
-const BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT: usize = 112;
+const BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT: usize = 144;
 const _: () = assert!(
     std::mem::size_of::<OverlayRect>() == BYTES_PER_OVERLAY_RECT_ACCORDING_TO_METAL_LAYOUT,
-    "OverlayRect must match the shader's 112-byte OverlayRect"
+    "OverlayRect must match the shader's 144-byte OverlayRect"
 );
 
 /// `OverlayParams` is the shader's `OverlayParams` (8-byte aligned, as its `int2` makes it).
@@ -353,7 +376,7 @@ struct PyramidLevels {
 
 const SHADER_SOURCE: &str = include_str!("render_metal.metal");
 const BYTES_PER_RAY_END: usize = 48;
-pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 96;
+pub(crate) const VOXEL_BYTES_PER_RAY_END: usize = 112;
 const BYTES_PER_CELL_MARK: usize = 1;
 const BYTES_PER_CELL_INDEX: usize = 4;
 const REFINE_COUNT_BYTES: usize = 16;
@@ -428,6 +451,7 @@ pub struct MetalRenderer {
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
     viewmodel: Option<Viewmodel>,
+    is_voxel_frame: bool,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     has_throat_table: bool,
@@ -750,6 +774,7 @@ impl MetalRenderer {
             hole_buffers: None,
             voxel_gpu: None,
             viewmodel: None,
+            is_voxel_frame: false,
             throat_table,
             camera_table,
             has_throat_table: false,
@@ -853,6 +878,7 @@ impl MetalRenderer {
             )?);
         }
         self.prepare_upscaling(output_px)?;
+        self.is_voxel_frame = matches!(frame_data, FrameData::Voxel(_));
         if let FrameData::Voxel(voxel_frame) = frame_data {
             return self.encode_voxel_frame(voxel_frame, output_px);
         }
@@ -1329,12 +1355,17 @@ impl MetalRenderer {
                     .viewmodel
                     .as_mut()
                     .expect("the revolver was just loaded");
+                let hand_light: Option<&ProtocolObject<dyn MTLBuffer>> = match &self.voxel_gpu {
+                    Some(gpu) if self.is_voxel_frame => Some(gpu.get_hand_light()),
+                    _ => None,
+                };
                 Some(revolver.encode(
                     &self.device,
                     command_buffer,
                     &wand,
                     output_px,
                     tan_half_fov,
+                    hand_light,
                 )?)
             }
             None => None,

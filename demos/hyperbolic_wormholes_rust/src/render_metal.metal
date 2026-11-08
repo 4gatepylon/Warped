@@ -46,10 +46,13 @@ constant float STRETCH_SMEAR_FRAC = 0.35;
 constant float STRETCH_FRINGE_FRAC = 0.03;
 constant float3 BLUESHIFT_CHANNEL_NM = float3(610.0, 550.0, 465.0);
 constant float BLUESHIFT_INFRARED_NM = 700.0;
-constant float BLUESHIFT_INFRARED_PER_RED = 0.25;
-constant float BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED = 0.15;
-constant float BLUESHIFT_BEAMING_POWER = 1.5;
-constant float3 BLUESHIFT_GLOW_COLOR = float3(0.0, 0.3, 0.36);
+constant float BLUESHIFT_ULTRAVIOLET_NM = 400.0;
+constant float BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED = 0.2;
+constant float REDSHIFT_WALK_SPEED_PER_LIGHT_SPEED = 0.3;
+constant float BLUESHIFT_ANGLE_FRAC = 0.5;
+constant float BLUESHIFT_BEAMING_POWER = 1.0;
+constant float3 BLUESHIFT_GLOW_COLOR = float3(0.0, 0.12, 0.4);
+constant float3 REDSHIFT_GLOW_COLOR = float3(0.4, 0.04, 0.0);
 constant int MAX_MINIMAP_MARK_COUNT = 16;
 constant int MAX_MINIMAP_LINE_COUNT = 96;
 constant float MINIMAP_OPACITY = 0.88;
@@ -60,7 +63,7 @@ constant float MINIMAP_GRID_M = 10.0;
 constant float MINIMAP_GRID_HALF_WIDTH_PX = 0.6;
 constant float4 MINIMAP_GRID_COLOR = float4(1.0, 1.0, 1.0, 0.16);
 constant float MINIMAP_LINE_HALF_WIDTH_PX = 1.2;
-constant float MINIMAP_YOU_PX = 7.0;
+constant float MINIMAP_YOU_PX = 14.0;
 constant float MINIMAP_YOU_BASE_FRAC = 0.6;
 constant float MINIMAP_YOU_SPREAD = 0.5;
 constant float3 MINIMAP_YOU_COLOR = float3(1.0, 1.0, 1.0);
@@ -75,6 +78,10 @@ constant float RECT_GLOSS_TOP_OPACITY = 0.6;
 constant float RECT_GLOSS_MIDDLE_OPACITY = 0.15;
 constant float RECT_GLOSS_INSET_PER_HEIGHT = 0.12;
 constant float RECT_EDGE_SOFT_PX = 0.5;
+constant int MAX_RECT_PULSE_COUNT = 4;
+constant float RECT_PULSE_REACH_PER_HALF_SIZE = 3.0;
+constant float RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH = 0.5;
+constant float RECT_PULSE_LIGHT_GAIN = 0.6;
 
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
@@ -137,13 +144,19 @@ constant float3 SKY_ZENITH_COLOR = float3(0.30, 0.52, 0.88);
 constant float3 CLOUD_COLOR = float3(1.0);
 constant float3 SUN_COLOR = float3(1.0, 0.92, 0.75);
 constant float3 LOST_COLOR = float3(0.02, 0.02, 0.03);
+constant float3 TINT_LUMA = float3(0.2126, 0.7152, 0.0722);
+constant float THROWN_TINT_FRAC = 0.45;
+constant float THROWN_TINT_FLOOR = 0.08;
 constant float3 ROAD_COLOR = float3(0.58, 0.58, 0.60);
 constant float3 DIRT_COLOR = float3(0.55, 0.42, 0.27);
 constant float3 GRASS_DARK_COLOR = float3(0.36, 0.60, 0.25);
 constant float3 GRASS_LIGHT_COLOR = float3(0.40, 0.65, 0.28);
 constant float3 GLASS_SHEEN_COLOR = float3(0.95);
 constant float3 LASER_HALO_COLOR = float3(1.0, 0.06, 0.03);
-constant float3 LASER_CORE_COLOR = float3(1.0, 0.62, 0.52);
+constant float3 LASER_CORE_COLOR = float3(1.0, 0.92, 0.9);
+constant float LASER_HAZE_BRIGHTNESS = 0.45;
+constant float LASER_HAZE_WHITENESS = 0.45;
+constant float LASER_CORE_BRIGHTNESS = 1.6;
 constant float DIRT_FRACTION = 0.04;
 constant float TEXTURE_CELLS_PER_BLOCK = 8.0;
 constant float TEXTURE_MIN = 0.86;
@@ -185,12 +198,16 @@ constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
 constant float TILE_SIDE_COUNT = 4.0;
 constant float TILES_PER_VERTEX = 5.0;
 
-/** @brief `Uniforms` matches the Rust `Uniforms` struct field by field (240 bytes). */
+/**
+ * @brief `Uniforms` matches the Rust `Uniforms` struct field by field (688 bytes). `row_tints[k]` is the colour of
+ * the thrown mouth a ray went through to come out in row k + 1, with w = 1 (w = 0 for a map's mouth).
+ */
 struct Uniforms {
     float4x4 world_to_camera;
     float4 sky_basis[3];
     float4 sun_ideal_world;
     int next_rows[MAX_MOUTH_COUNT];
+    float4 row_tints[MAX_MOUTH_COUNT];
     float curvature_radius_m;
     float tan_half_fov;
     float aspect;
@@ -873,7 +890,8 @@ static void add_beam_glow(thread const Scene &scene, int row, float4 a, float4 b
             float t_m = t0_m + s * (t1_m - t0_m);
             float sigma = max(beam_radius, scene.u.pixel_angle_rad * tanh(t_m / r));
             float fade = exp(-q0.w / BEAM_FADE_M);
-            core = max(core, fade * exp(-d2 / (sigma * sigma)));
+            float q = d2 / (sigma * sigma);
+            core = max(core, fade * exp(-q * q * q));
             halo = max(halo, fade * exp(-d2 / (4.8 * sigma * sigma)));
             q0 = q1;
         }
@@ -1564,7 +1582,10 @@ static float3 shade_ray_end(thread const Scene &scene, RayEnd end) {
         halo = max(halo, spot);
         core = max(core, spot * spot);
     }
-    color = mix(color, LASER_HALO_COLOR, clamp(0.9 * halo, 0.0, 1.0)) + LASER_CORE_COLOR * core;
+    float4 tint = end.row > 0 ? scene.u.row_tints[end.row - 1] : float4(0.0);
+    if (tint.w > 0.0) color = mix(color, tint.rgb * (dot(color, TINT_LUMA) + THROWN_TINT_FLOOR), THROWN_TINT_FRAC);
+    color += mix(LASER_HALO_COLOR, float3(1.0), LASER_HAZE_WHITENESS) * LASER_HAZE_BRIGHTNESS * halo;
+    color = mix(color, LASER_CORE_COLOR * LASER_CORE_BRIGHTNESS, saturate(core));
     color = color / (1.0 + max(color - 1.0, 0.0) * HIGHLIGHT_ROLLOFF);
     return clamp(color, 0.0, 1.0);
 }
@@ -2015,8 +2036,8 @@ kernel void build_mouth_fields(device float4 *rows [[buffer(0)]], constant Unifo
 /**
  * @brief `OverlayParams` is how `apply_overlay` draws: how much to darken, mask pixels to screen pixels, the mask's top
  * left, how many rectangles there are, whether there is a mask and a wand, the camera's tan(half vertical fov), how
- * much of the previous frame's scene to blend in (motion blur), and how far into the blueshift after a wormhole the
- * scene is (`blueshift_scene`; 0 for none).
+ * much of the previous frame's scene to blend in (motion blur), and how far the scene blueshifts inside a wormhole
+ * mouth (`blueshift_scene`: 1 for walking straight ahead at the throat, negative for a redshift, 0 for none).
  */
 struct OverlayParams {
     float dim_frac;
@@ -2039,8 +2060,8 @@ struct OverlayParams {
 
 /**
  * @brief `sample_spectrum` gives a colour's light at wavelength `nm`, reading its red, green and blue as samples of a
- * spectrum at `BLUESHIFT_CHANNEL_NM` joined by straight lines: blue's below blue, and past red falling to
- * `BLUESHIFT_INFRARED_PER_RED` of red's at `BLUESHIFT_INFRARED_NM` and beyond (the infrared a blueshift brings in).
+ * spectrum at `BLUESHIFT_CHANNEL_NM` joined by straight lines, falling to 0 at the eye's limits,
+ * `BLUESHIFT_ULTRAVIOLET_NM` and `BLUESHIFT_INFRARED_NM` (a picture holds no light beyond them for a shift to bring in).
  * @par Example
  * @code
  * float red_seen = sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.r * D);
@@ -2048,38 +2069,49 @@ struct OverlayParams {
  */
 static float sample_spectrum(float3 rgb, float nm) {
     float3 at_nm = BLUESHIFT_CHANNEL_NM;
-    if (nm <= at_nm.b) return rgb.b;
+    if (nm <= at_nm.b) return rgb.b * saturate((nm - BLUESHIFT_ULTRAVIOLET_NM) / (at_nm.b - BLUESHIFT_ULTRAVIOLET_NM));
     if (nm <= at_nm.g) return mix(rgb.b, rgb.g, (nm - at_nm.b) / (at_nm.g - at_nm.b));
     if (nm <= at_nm.r) return mix(rgb.g, rgb.r, (nm - at_nm.g) / (at_nm.r - at_nm.g));
-    return rgb.r * mix(1.0, BLUESHIFT_INFRARED_PER_RED, saturate((nm - at_nm.r) / (BLUESHIFT_INFRARED_NM - at_nm.r)));
+    return rgb.r * saturate((BLUESHIFT_INFRARED_NM - nm) / (BLUESHIFT_INFRARED_NM - at_nm.r));
 }
 
 /**
- * @brief `blueshift_scene` gives a pixel's colour as seen moving straight ahead at `blueshift_frac` of
- * `BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED` (0 for none): the relativistic Doppler factor D = sqrt(1 - β²) / (1 - β cos θ),
- * with θ the angle between the pixel's ray and straight ahead, makes each channel show the light the scene sends at
- * D times its wavelength (`sample_spectrum`: red fades, green takes red's light and blue green's, so greys turn cyan),
- * D^`BLUESHIFT_BEAMING_POWER` times as bright (relativistic beaming), plus `BLUESHIFT_GLOW_COLOR` times that gain
- * above 1, so black sky turns faintly teal; D is largest at the middle of the screen.
+ * @brief `blueshift_scene` gives a pixel's colour as seen moving along the view, `blueshift_frac` giving how fast
+ * (1 for walking at a mouth's throat; negative backward; 0 for none). The relativistic Doppler factor
+ * D = sqrt(1 - β²) / (1 - β cos θ), with θ the angle between the pixel's ray and straight ahead, makes each channel
+ * show the light the scene sends at D times its wavelength (`sample_spectrum`). Moving forward (D > 1), red fades,
+ * green takes red's light and blue green's, so greys turn a bluish cyan and reds green; moving backward (D < 1), blue
+ * fades and greys turn red. The pixel is D^`BLUESHIFT_BEAMING_POWER` times as bright (relativistic beaming), plus
+ * `BLUESHIFT_GLOW_COLOR` (or `REDSHIFT_GLOW_COLOR`) times how far that gain is from 1, so the black sky turns faintly
+ * blue (or red).
+ * - Speed: β is `BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED` (backward, `REDSHIFT_WALK_SPEED_PER_LIGHT_SPEED`) at
+ *   |`blueshift_frac`| = 1 and grows with it beyond; below 1, the shifted colour fades in by |`blueshift_frac`|
+ *   instead, since a smaller shift would first turn greys greenish (or yellowish).
+ * - Backward: green sits further from blue than from red, so a redshift needs more speed to look as red.
+ * - Angle: θ keeps only `BLUESHIFT_ANGLE_FRAC` of its effect (cos θ is taken that much of the way from 1), so the
+ *   corners stay bluish instead of turning greenish while the middle turns deep blue.
  * @par Example
  * @code
  * float3 seen = blueshift_scene(scene, id, float2(out.get_width(), out.get_height()), p);
  * @endcode
  * @par Must know
  * - Limitations:
- *   - `blueshift_scene` takes the motion to be straight ahead, wherever the player really goes through the mouth.
- *   - Real beaming brightens by D³ or more; `BLUESHIFT_BEAMING_POWER` keeps it gentler so bright scenes don't wash out.
+ *   - `blueshift_scene` takes the motion to be along the view, wherever the player really goes.
+ *   - Real beaming changes brightness by D³ or more; `BLUESHIFT_BEAMING_POWER` keeps it gentler so scenes don't wash out.
  */
 static float3 blueshift_scene(float3 rgb, uint2 id, float2 size, constant OverlayParams &p) {
-    if (p.blueshift_frac <= 0.0) return rgb;
+    if (p.blueshift_frac == 0.0) return rgb;
     float2 ndc = 2.0 * (float2(id) + 0.5) / size - 1.0;
     float3 ray = normalize(float3(ndc.x * p.tan_half_fov * size.x / size.y, ndc.y * p.tan_half_fov, -1.0));
-    float beta = BLUESHIFT_PEAK_SPEED_PER_LIGHT_SPEED * p.blueshift_frac;
-    float D = sqrt(1.0 - beta * beta) / (1.0 + beta * ray.z);
+    float speed_frac = abs(p.blueshift_frac);
+    float walk_beta = p.blueshift_frac > 0.0 ? BLUESHIFT_WALK_SPEED_PER_LIGHT_SPEED : -REDSHIFT_WALK_SPEED_PER_LIGHT_SPEED;
+    float beta = walk_beta * max(speed_frac, 1.0);
+    float D = sqrt(1.0 - beta * beta) / (1.0 - beta * mix(1.0, -ray.z, BLUESHIFT_ANGLE_FRAC));
     float3 shifted = float3(sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.r * D), sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.g * D),
                             sample_spectrum(rgb, BLUESHIFT_CHANNEL_NM.b * D));
     float beaming = pow(D, BLUESHIFT_BEAMING_POWER);
-    return shifted * beaming + BLUESHIFT_GLOW_COLOR * (beaming - 1.0);
+    float3 glow = beaming > 1.0 ? BLUESHIFT_GLOW_COLOR : REDSHIFT_GLOW_COLOR;
+    return mix(rgb, shifted * beaming + glow * abs(beaming - 1.0), min(speed_frac, 1.0));
 }
 
 /**
@@ -2298,20 +2330,25 @@ struct RectStyle {
 };
 
 /**
- * @brief `RectPulse` is render_metal.rs's `RectPulse`, a band of light across an `OverlayRect` (a pulse running along a HUD
- * bar): its middle's x and its half width as fractions of the screen's width (measured along the rect's slant, at its
- * middle row), two zeros, and its colour with, in `.a`, its opacity at its middle (0 for none).
+ * @brief `RectPulse` is render_metal.rs's `RectPulse`, up to `MAX_RECT_PULSE_COUNT` soft glows running along a HUD bar,
+ * carried by the bar's first `OverlayRect`: their middles' x as fractions of the screen's width (measured along the rect's
+ * slant, at its middle row), their opacities (0 for none), the x span they show in (the bar's filled part, fading out
+ * over `RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH` of a half width, at most half the span, inside each end), their half width
+ * (of the screen's width) and half height (of its height), and their colour (`.a` unused).
  */
 struct RectPulse {
-    float center_x_frac;
+    float4 centers_x_frac;
+    float4 opacities;
+    float min_x_frac;
+    float max_x_frac;
     float half_width_frac;
-    float2 padding;
+    float half_height_frac;
     float4 color;
 };
 
 /**
  * @brief `OverlayRect` is a rectangle drawn over the frame: its corners as fractions of the screen (top left 0, 0), its
- * colour and opacity, its style and the pulse across it.
+ * colour and opacity, its style and the pulses it carries for its bar.
  */
 struct OverlayRect {
     float2 min_frac;
@@ -2396,10 +2433,40 @@ static float4 get_rect_halo(constant OverlayRect &rect, float2 at_px, float2 siz
 }
 
 /**
+ * @brief `get_pulse_glow` gives how much of `rect`'s pulse colour covers pixel centre `at_px` (0 to 1): the sum of its
+ * pulses' Gaussians along the bar (leaning with its slant) times a Gaussian across it, faded out smoothly inside both
+ * ends of its span, so it never reaches the empty slots. The glow covers the segments and the gaps between them alike.
+ * @par Example
+ * @code
+ * color.rgb = mix(color.rgb, rect.pulse.color.rgb, get_pulse_glow(rect, at_px, size_px));
+ * @endcode
+ */
+static float get_pulse_glow(constant OverlayRect &rect, float2 at_px, float2 size_px) {
+    RectPulse pulse = rect.pulse;
+    if (all(pulse.opacities <= 0.0)) return 0.0;
+    float half_width_px = max(pulse.half_width_frac * size_px.x, 1.0);
+    float half_height_px = max(pulse.half_height_frac * size_px.y, 1.0);
+    float across_px = at_px.y - (rect.min_frac.y + rect.max_frac.y) * 0.5 * size_px.y;
+    if (abs(across_px) > RECT_PULSE_REACH_PER_HALF_SIZE * half_height_px) return 0.0;
+    float along_px = at_px.x + rect.style.slant_x_per_y * across_px;
+    float min_px = pulse.min_x_frac * size_px.x;
+    float max_px = pulse.max_x_frac * size_px.x;
+    float soft_px = max(min(RECT_PULSE_EDGE_SOFT_PER_HALF_WIDTH * half_width_px, (max_px - min_px) * 0.5), 1.0);
+    float span = smoothstep(min_px, min_px + soft_px, along_px) * (1.0 - smoothstep(max_px - soft_px, max_px, along_px));
+    if (span <= 0.0) return 0.0;
+    float sum = 0.0;
+    for (int k = 0; k < MAX_RECT_PULSE_COUNT; k++) {
+        float u = (along_px - pulse.centers_x_frac[k] * size_px.x) / half_width_px;
+        sum += pulse.opacities[k] * exp(-u * u);
+    }
+    float v = across_px / half_height_px;
+    return min(sum, 1.0) * exp(-v * v) * span;
+}
+
+/**
  * @brief `get_rect_layer` gives `rect` at pixel centre `at_px` as premultiplied colour and opacity (zero outside it, soft
  * over half a pixel at its edge): its colour shaded from top to bottom by `shade_frac`, a gloss highlight over its top
- * half (inset from its edge by `RECT_GLOSS_INSET_PER_HEIGHT` of its height), its pulse (a Gaussian band of its colour
- * across the rect, leaning with its slant), then its inner outline.
+ * half (inset from its edge by `RECT_GLOSS_INSET_PER_HEIGHT` of its height), then its inner outline.
  * @par Example
  * @code
  * float4 layer = get_rect_layer(rects[i], at_px, size_px);
@@ -2422,13 +2489,6 @@ static float4 get_rect_layer(constant OverlayRect &rect, float2 at_px, float2 si
         float gloss_a = s.gloss_frac * inset * top * mix(RECT_GLOSS_TOP_OPACITY, RECT_GLOSS_MIDDLE_OPACITY, t / RECT_GLOSS_END_FRAC);
         layer = float4(gloss_a, gloss_a, gloss_a, gloss_a) + layer * (1.0 - gloss_a);
     }
-    if (rect.pulse.color.a > 0.0) {
-        float middle_y_px = (rect.min_frac.y + rect.max_frac.y) * 0.5 * size_px.y;
-        float along_px = at_px.x + s.slant_x_per_y * (at_px.y - middle_y_px) - rect.pulse.center_x_frac * size_px.x;
-        float u = along_px / max(rect.pulse.half_width_frac * size_px.x, 1.0);
-        float pulse_a = rect.pulse.color.a * exp(-u * u);
-        layer = float4(rect.pulse.color.rgb * pulse_a, pulse_a) + layer * (1.0 - pulse_a);
-    }
     if (s.outline_frac > 0.0) {
         float half_width_px = s.outline_frac * size_px.y * 0.5;
         float stroke = clamp(half_width_px - abs(d_px + half_width_px) + RECT_EDGE_SOFT_PX, 0.0, 1.0);
@@ -2446,8 +2506,10 @@ static float4 get_rect_layer(constant OverlayRect &rect, float2 at_px, float2 si
  * `picture_max_excl_mask_px` in mask pixels (none when that box is empty), the wand (`shade_wand`, 2 × 2 rays a pixel)
  * when `has_wand` is set (or the revolver from viewmodel.rs, `revolver`, when it is `REVOLVER_WAND`), the minimap
  * (`draw_minimap`, from `minimap` and the map's picture `minimap_map`), and `rects` over that: first all their shadows
- * and glows (`get_rect_halo`, the strongest of each), then the rectangles themselves blended in order (`get_rect_layer`)
- * (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
+ * and glows (`get_rect_halo`, the strongest of each), then the rectangles themselves blended in order (`get_rect_layer`),
+ * then the bars' pulses (`get_pulse_glow`: tinting toward their colour and adding `RECT_PULSE_LIGHT_GAIN` of it as
+ * light) (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the
+ * energy bar).
  * @par Example
  * @code
  * dispatched by render_metal.rs, one thread per output pixel.
@@ -2511,6 +2573,11 @@ kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], t
     for (int i = 0; i < p.rect_count; i++) {
         float4 layer = get_rect_layer(rects[i], at_px, size);
         color.rgb = color.rgb * (1.0 - layer.a) + layer.rgb;
+    }
+    for (int i = 0; i < p.rect_count; i++) {
+        float pulse_glow = get_pulse_glow(rects[i], at_px, size);
+        float3 pulse_rgb = rects[i].pulse.color.rgb;
+        color.rgb = mix(color.rgb, pulse_rgb, pulse_glow) + pulse_rgb * pulse_glow * RECT_PULSE_LIGHT_GAIN;
     }
     out.write(color, id);
 }

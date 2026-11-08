@@ -140,9 +140,10 @@
 
 ### D16. Laser
 
-- **Choice:** traced from the eye along the crosshair (bent, through throats, stopped by blocks including glass, the
+- **Choice:** traced from the eye along the crosshair (bent, through throats and glass, stopped by other blocks, the
   ground and horizons, up to 480 m); drawn from a gun 0.22 m right of and 0.25 m below the eye, joining the path 3 m
-  out; no gravity drop; fades over 2 s; at most 3 beams on screen.
+  out; no gravity drop; fades over 2 s; at most 3 beams on screen. Glass stopped the laser until W-70, when the user
+  asked for windows to see and shoot through (the Rust demo's `DECISIONS.md` D90).
 - **Alternatives:** the laser gravity demos' falling beam.
 - **Rationale:** the brief asks for the shot along the crosshair; the short muzzle segment lets the shooter see it.
 

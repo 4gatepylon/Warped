@@ -12,15 +12,18 @@ done.
 ## Play
 
 ```bash
-make run-demo
-make run-demo RENDERER=cpu
+make serve-game
+make join-game SERVER=127.0.0.1
 ```
 
+- Playing is only on a game server: `make serve-game` runs one (Lunar Surface by default), and every player joins
+  it with `make join-game` (`SERVER=127.0.0.1` on the same computer, or the address the server prints). There is no
+  local demo or host-and-play command; without a server, only the tools below run.
 - Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
   `Esc` or `N` goes back to the game). The window's close button quits at once.
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
   choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
-  (`--player-settings`) to `make run-demo`, `host-game` or `join-game`.
+  (`--player-settings`) to `make join-game`.
 - `Tab` opens a menu of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
   an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
   (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
@@ -33,7 +36,10 @@ make run-demo RENDERER=cpu
   the hyperbolic plane. The third page, SCORES, shows in a game on a server how many players there are and each
   one's team, kills and deaths in this game, sorted by team and then kills, with your line highlighted and each
   team's totals. The MAP page also rings everything within the minimap's reach of you (60 m by default); the rest is
-  darker and blurred. The ring is a hyperbolic circle, so on the map it comes out lopsided.
+  darker and blurred. The ring is a hyperbolic circle, so on the map it comes out lopsided. In a game on a server,
+  every other player in the game shows as a smaller dot in their team's colour, ringed in dark grey, near or far.
+  The fourth page, CREDITS, says where the game's assets come from: their authors, sources and licenses
+  (`src/credits.rs`).
 - The minimap, in the top right, is a Poincaré disk of the ground within 60 m of you, turned so you face up (the
   white arrow in the middle): faint lines every 10 m and paths away from you bend into arcs, as straight lines do
   in that picture of the hyperbolic plane. Other players show as dots and laser shots as lines, in their team's
@@ -42,28 +48,47 @@ make run-demo RENDERER=cpu
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
-  you through. Coming out, your view blueshifts toward cyan, as if you moved at 15% of light speed (D84): red fades,
-  green takes red's light and blue green's, most of all straight ahead, then it fades back over 1.5 s.
-  `view.wormhole_tint_frac` (0 to 1, also in the menu) and `view.wormhole_tint_s` in `player_settings.yaml` set its
-  strength and length (0 for none). Only the player who goes through sees it (Metal renderer).
+  you through. While you move inside a mouth's reach, your view Doppler-shifts as if you moved near light speed
+  (D84): walking forward turns it a bluish cyan, deep blue in the middle; walking backward turns it red. It is
+  strongest at the throat and with speed, none standing still, and gone once you are out of the reach.
+  `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the menu) sets its strength (0 for none).
+  Only you see your own shift (Metal renderer, voxel maps).
 - Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
   `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
   bar, is empty until it can fire again.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
   eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots.
+  Each shot strays a little from the crosshair, by a random angle sampled for that shot (D89): with the sniper
+  usually by a hair (3 mrad on average, at most 15), with the rifle by up to 2 mrad cold, growing with its heat to 20
+  mrad and shrinking as it cools (`noise_*_rad` under `sniper` and `rifle` in `server_settings.yaml`).
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
-  The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
+  The laser is a light ray from your hand that bends near mouths and goes through them, and through glass; the HUD
+  says what it hits. On Lunar Surface the habitat modules' and walkways' windows are glass in real openings: you
+  see out of them and shoot through them, but can't climb through them.
+  On Lunar Surface, a shot into the ground (yours or anyone's) throws up grey-brown dust and a puff of mist where
+  it lands: the grains, small tumbling polyhedra, fly up to a few meters and fall back, and all of it fades within
+  2 s (D81).
 - The bars in the bottom left (health in a game on a server, the gun's ammo, and on Lunar Surface the sprint energy)
   are segments that lean like `/`: empty ones dark glass outlined in the bar's colour, filled ones translucent,
-  glossy and glowing (D85). A reddish-orange pulse runs down the health bar (right to left) at each hit, a blue one
-  down the energy bar while you sprint, and a fainter one up the energy bar while it refills; the ammo bar has none.
-  The CPU renderer's window draws them as flat boxes.
+  glossy and glowing (D85). While health or energy changes, soft, wide swells of light run over the bar's filled
+  part: reddish-orange down the health bar from the last hit point after a hit, pale blue down the energy bar from
+  the last filled slot while you sprint, and fainter ones up toward the filled end while it refills. They are as
+  strong, fast and frequent as the value's smoothed rate of change (D94); the ammo bar has none. The CPU renderer's
+  window draws the bars as flat boxes.
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
+- `Q` throws your purple wormhole mouth, the next press your green one, then purple again, and so on, on both maps.
+  A throw is lobbed under its own gravity, drops to the floor below whatever it hits, and hovers there at eye
+  height facing back the way it flew; once both are down they link, and any player or laser that goes into one
+  comes out of the other (`wormholes` in `server_settings.yaml`). The view through a thrown mouth is tinted its
+  colour, and a mouth in the air, or down while its partner isn't, glows as a small ball. A throw fizzles if it
+  never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
+  A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
+  2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
@@ -81,20 +106,21 @@ about 50 blocks down the rails), and far left (to high above the rails, where yo
 ## Maps
 
 ```bash
-make run-demo MAP=lunar-surface
-cargo run --release -- --map lunar-surface --view black_hole
+make serve-game MAP=house-demo
+make join-game MAP=house-demo SERVER=127.0.0.1
+cargo run --release -- --map lunar-surface --bench-views --view black_hole
 ```
 
 - The demo reads its maps from [`common/maps/`](../../common/maps/README.md) (the portable map format):
   `house-demo` (the default: the house, rails and three wormholes, R = 8) or `lunar-surface` (the Lunar Surface level of
   [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m, with its black hole and wormhole).
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
-  steps, lighting with sun shadows, lamps, ground, stars and planet, so it looks like the level, with the house's
-  adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
-  flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 15 s, a head bob, jumping onto blocks with `Space`, moving
+  steps, lighting with soft sun shadows, lamps, ground, stars and planet, so it looks like the level (plus a thin haze
+  and stronger bloom, W-76), with the house's adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
+  flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 7.5 s crouched or 15 s walking or standing, a head bob, jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
-- Spaceships fly over Lunar Surface, purely for looks (D82): a freighter, a ring ship and three fighters in a V, each
+- Spaceships fly over Lunar Surface, purely for looks (D82): a ring ship and three delta-wing fighters in a V, each
   crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
@@ -107,17 +133,15 @@ for a fresh Mac, the commands for each player and the known caveats.
 
 ```bash
 make serve-game MAP=lunar-surface
-make host-game MAP=lunar-surface
 make join-game MAP=lunar-surface
 make join-game MAP=lunar-surface SERVER=192.168.1.20
 ```
 
 - `make serve-game` (`--serve`) runs only the server and prints this computer's address with the commands that join
-  it, so it can run on a computer nobody plays on. `make host-game` (`--host`) starts the same server as its own
-  process, joins it from a window, and stops it when the window closes.
+  it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
-  consoles, respawn, the hit slowdown, the flashlight); it sends them to every player who joins.
+  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes); it sends them to every player who joins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
@@ -169,6 +193,9 @@ make run-autopilot
 
 ## How it works
 
+- `thrown_wormholes.rs`: each player's purple and green mouths: the lobbed throw, where a mouth hovers once down,
+  and which colour is next. Each map adds the linked pairs as mouths of its own (after the map's), and
+  `net.rs` sends every player's mouths in each snapshot.
 - `geometry.rs`: Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
 - `world.rs`: the scene: hyperbolic boxes grouped in clusters, and the wormholes' mouths with their gluing maps.
 - `scene_data.rs`: each frame, packs the scene into rows of float 4-vectors, one row in the camera's coordinates and
@@ -192,6 +219,8 @@ make run-autopilot
   the laser's light path, and walking on the map. `render_voxel.metal` and `render_voxel.rs` draw it on the GPU.
 - `voxel_clearance.rs`: each warp's clearance grid, a lower bound on the distance to the nearest block, so the GPU
   skips blocks a bent step can't reach.
+- `dust.rs`: the dust and mist a shot throws up where it hits the ground, which `render_voxel.metal` draws in the
+  world (D81).
 - `main.rs`: the command line, the SDL3 window and HUD, and the benchmark and autopilot runs.
 
 Distances are compared through q = 4 sinh²(d/2), computed from the difference of two points, instead of the
