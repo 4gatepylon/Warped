@@ -81,6 +81,10 @@ off, everyone sees which team won, and a new game starts only when whoever start
 terminal: every console comes back on and everyone returns to their
 spawn.
 
+The habitat modules (the red one stands near the red base, on the side away from the ridge) and the covered walkways
+have windows: glass in real 1 m openings at eye height. You see out of them, and a laser goes through them both ways,
+but you can't climb through.
+
 The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
 each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
 14 m high). Your view stretches out from the middle of the screen, more and more as you slow. Walking back in is at
@@ -134,8 +138,9 @@ Multiplayer:
   map.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too. On the SCORES page, eliminating a teammate counts their death but no kill.
-- Lasers stop on glass, windows included, as in the WebGL level (`DECISIONS.md` D88). Since the smooth shapes
-  (#147), the habitat modules' and walkways' windows are panes on a solid wall, so they don't show the outside.
+- Lasers pass through glass; players don't (`DECISIONS.md` D90). The house's windows are glass laid on solid
+  plank walls and drawn opaque, so there a shot at a window still stops on the wall behind it.
+- Glass is drawn as a faint tint, so from outside a habitat module's windows look mostly like open holes.
 - Health, shown in the bottom left, resets when a player respawns.
 - The menu doesn't pause the game: a player in it stands still and can still be hit.
 - A file saved from the menu has no comments. If a later version adds a setting, that file stops loading and the

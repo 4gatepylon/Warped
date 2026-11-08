@@ -66,7 +66,7 @@ Both are exported from the programs that first built them; the map files are wha
 ### Materials
 
 `{"id", "name", "color": [r, g, b], "kind"}`, ids from 0 to 255, each once. `kind` is `empty` (id 0 only), `solid`,
-`glass` (see-through for light, stops lasers and players) or `light` (solid and glowing in its own colour, unlit).
+`glass` (see-through for light and lasers; stops players) or `light` (solid and glowing in its own colour, unlit).
 
 ### Structures
 
