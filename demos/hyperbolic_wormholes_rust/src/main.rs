@@ -15,12 +15,14 @@
 //! - `--host`, `--join auto|<address>`, `--serve`, `--bot`, `--port`: play with others on the local
 //!   network (see `net.rs` and `multiplayer.rs`).
 //! - `--export-map <folder>`: write the world as a portable map (`common/maps/`).
+//! - `--bend-strength <0..1>`: on lunar-surface, force the reality bend's strength (W-68).
 //!
 //! Example: `cargo run --release -- --bench-views --width-px 2560 --height-px 1600`
 //!
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod bend;
 mod credits;
 mod dust;
 mod exit_prompt;
@@ -36,6 +38,7 @@ mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
+mod reality_bend;
 mod render_cpu;
 mod render_metal;
 mod render_voxel;
@@ -73,9 +76,11 @@ use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
 
+use bend::Bend;
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use key_bindings::{Action, Control};
 use physics::{Input, LaserReport, Player};
+use reality_bend::RealityBend;
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
@@ -336,6 +341,10 @@ struct Arguments {
     /// --bench-views names them), e.g. black_hole.
     #[arg(long)]
     view: Option<String>,
+    /// On a map that bends (lunar-surface): force the reality bend's strength (0 to 1) instead of
+    /// following the consoles (W-68).
+    #[arg(long)]
+    bend_strength: Option<f64>,
     /// Write the world as a map in the portable format of common/maps/ (map.json) into this folder,
     /// replacing the folder's map.json, and exit.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
@@ -504,6 +513,14 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
             "--view needs --map lunar-surface; e.g. --map lunar-surface --view black_hole".into(),
         );
     }
+    if let Some(strength_frac) = arguments.bend_strength
+        && (!(0.0..=1.0).contains(&strength_frac) || arguments.map != MapName::LunarSurface)
+    {
+        return Err(format!(
+            "--bend-strength must be in [0, 1] with --map lunar-surface, got {strength_frac}; e.g. --map lunar-surface --bend-strength 0.6"
+        )
+        .into());
+    }
     if arguments.map == MapName::LunarSurface
         && (arguments.autopilot || (arguments.play_route && arguments.route != RouteKind::WarpTour))
     {
@@ -589,13 +606,26 @@ fn main() -> Result<()> {
     }
 }
 
-/// `load_world` loads a map from `common/maps/` as the world of boxes and mouths this renderer
-/// draws.
+/// `load_map` loads a map from `common/maps/` and, on a voxel map (one with structures, such as
+/// Lunar Surface), curves its space as `settings` say (`Map::scale_curvature`). The house demo
+/// keeps its own curvature: at twice it, its far pylon sits 13 curvature radii out, too far for
+/// the renderer's single precision, and its scripted route breaks.
 ///
-/// Example: `let world = load_world(MapName::HouseDemo)?;`
-fn load_world(name: MapName) -> Result<World> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
-    Ok(World::FromMap(&map)?)
+/// Example: `let map = load_map(MapName::LunarSurface, &ServerSettings::Builtin())?;`
+fn load_map(name: MapName, settings: &ServerSettings) -> Result<map::Map> {
+    let mut map: map::Map = map::Map::Load(&map::get_map_folder(name.get_folder_name()))?;
+    if !map.structures.is_empty() {
+        map.scale_curvature(settings.space.curvature_per_map_curvature)?;
+    }
+    Ok(map)
+}
+
+/// `load_world` loads a map from `common/maps/` (`load_map`) as the world of boxes and mouths
+/// this renderer draws.
+///
+/// Example: `let world = load_world(MapName::HouseDemo, &ServerSettings::Builtin())?;`
+fn load_world(name: MapName, settings: &ServerSettings) -> Result<World> {
+    Ok(World::FromMap(&load_map(name, settings)?)?)
 }
 
 /// `parse_server_address` reads `--join`'s address: an IP address with an optional port (`port`
@@ -729,12 +759,13 @@ fn find_lan_address() -> Option<IpAddr> {
 ///
 /// Example: `serve_only(&arguments)?;`
 fn serve_only(arguments: &Arguments) -> Result<()> {
-    let map_data: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let settings: ServerSettings = load_settings(arguments)?;
+    let map_data: map::Map = load_map(arguments.map, &settings)?;
     let consoles: Vec<voxel_world::Console> = voxel_world::find_consoles(&map_data);
     let (should_stop, thread) = start_server(
         arguments.port,
         arguments.map.get_folder_name(),
-        load_settings(arguments)?,
+        settings,
         consoles.iter().map(|c| c.team).collect(),
     )?;
     println!(
@@ -839,6 +870,9 @@ fn bench_voxel_views(
     mut renderer: Box<dyn Renderer>,
     world: &VoxelWorld,
 ) -> Result<()> {
+    let mut bent_world: VoxelWorld = world.clone();
+    RealityBend::New(arguments.bend_strength).update(&mut bent_world, 0, 0.0);
+    let world: &VoxelWorld = &bent_world;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
@@ -867,13 +901,17 @@ fn bench_voxel_views(
                 speckle_frac: 0.0,
             })
             .collect();
-        let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
-        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+        let spot: Option<(glam::DVec4, u32)> =
+            shot.as_ref().and_then(|s| s.drawn_spot).map(|x| (x, 0));
+        let (camera, bend) = (world.bend.bend_frame(camera), world.bend);
+        let warm_up: VoxelFrame =
+            VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+            let frame: VoxelFrame =
+                VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());
@@ -903,7 +941,7 @@ fn bench_voxel_views(
 ///
 /// Example: `run_bot(&arguments, renderer)?;`
 fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map: map::Map = load_map(arguments.map, &ServerSettings::Builtin())?;
     let mut client: net::Client = net::Client::Connect(
         get_server_address(arguments)?,
         arguments.map.get_folder_name(),
@@ -936,9 +974,13 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         })?
     } else {
         let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
-        multiplayer::run_voxel_bot(&world, &mut client, duration_s, |frame, id| {
-            save(FrameData::Voxel(frame), id)
-        })?
+        multiplayer::run_voxel_bot(
+            &world,
+            &mut client,
+            duration_s,
+            arguments.bend_strength,
+            |frame, id| save(FrameData::Voxel(frame), id),
+        )?
     };
     if arguments.json {
         println!(
@@ -1183,7 +1225,7 @@ fn make_bench_views(world: &World) -> Vec<View> {
 ///
 /// Example: `bench_views(&arguments, renderer)?;`
 fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
+    let map: map::Map = load_map(arguments.map, &load_settings(arguments)?)?;
     if !map.structures.is_empty() {
         return bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?);
     }
@@ -1578,7 +1620,7 @@ fn make_warp_tour(world: &VoxelWorld) -> Vec<RouteFrame> {
 ///
 /// Example: `run_autopilot(&arguments, renderer)?;`
 fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = load_world(arguments.map)?;
+    let world: World = load_world(arguments.map, &load_settings(arguments)?)?;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("autopilot", arguments.label.as_deref())?;
@@ -1730,9 +1772,10 @@ fn get_blueshift_frac(
         .clamp(-MAX_BLUESHIFT_FRAC, MAX_BLUESHIFT_FRAC) as f32
 }
 
-/// `Session` is the state of a played window: the world, the player, the toggles and the HUD's
-/// running averages.
+/// `Session` is the state of a played window: the map it loaded, the world, the player, the
+/// toggles and the HUD's running averages.
 struct Session {
+    map_name: MapName,
     world: World,
     player: Player,
     render_scale: f64,
@@ -1808,11 +1851,13 @@ struct Session {
     has_shot_hit_wormholes: bool,
 }
 
-/// `VoxelState` is a window's game on a voxel map: the map, the player and their spawn point.
+/// `VoxelState` is a window's game on a voxel map: the map, the player, their spawn point and the
+/// reality bend's strength.
 struct VoxelState {
     world: VoxelWorld,
     player: VoxelPlayer,
     spawn_index: usize,
+    reality_bend: RealityBend,
 }
 
 /// `PackedFrame` is one frame packed for the renderer: the house's rows or a voxel map's frame.
@@ -1908,7 +1953,7 @@ impl Tracer {
         Tracer {
             length_m: segments.iter().map(|s| s.length).sum::<f64>() * r,
             segments,
-            spot: shot.spot,
+            spot: shot.drawn_spot,
             team,
             is_rifle,
             speckle_frac,
@@ -2014,8 +2059,8 @@ impl Session {
     /// Example: `let mut session = Session::New(&arguments);`
     #[allow(non_snake_case)]
     fn New(arguments: &Arguments) -> Result<Session> {
-        let map: map::Map = map::Map::Load(&map::get_map_folder(arguments.map.get_folder_name()))?;
         let settings: ServerSettings = load_settings(arguments)?;
+        let map: map::Map = load_map(arguments.map, &settings)?;
         let player_settings_path: Option<PathBuf> =
             arguments.player_settings.clone().or_else(|| {
                 std::env::var_os("HOME")
@@ -2050,6 +2095,7 @@ impl Session {
                 world,
                 player,
                 spawn_index: 0,
+                reality_bend: RealityBend::New(arguments.bend_strength),
             })
         };
         let world: World = match voxel {
@@ -2089,6 +2135,7 @@ impl Session {
             None
         };
         Ok(Session {
+            map_name: arguments.map,
             world,
             player,
             settings,
@@ -2985,8 +3032,9 @@ impl Session {
         self.message_time_s = MESSAGE_DURATION_S;
     }
 
-    /// `update_multiplayer` reads the server's news: a welcome puts this player at its spawn
-    /// point, and a hit is announced (and, if this player was hit, starts the respawn countdown).
+    /// `update_multiplayer` reads the server's news: a welcome rebuilds a voxel map at the server's
+    /// curvature if it differs from this window's and puts this player at its spawn point, and a
+    /// hit is announced (and, if this player was hit, starts the respawn countdown).
     /// It returns whether this player is out of the game for now, and fails if the server can't be
     /// read.
     ///
@@ -3002,11 +3050,27 @@ impl Session {
                 net::NetEvent::Joined(id) => {
                     let others: Vec<DVec4> = get_eyes(&multiplayer.client.players);
                     let team: u32 = multiplayer.client.team.expect("a welcome brings the team");
-                    self.settings = multiplayer
+                    let server_settings: ServerSettings = multiplayer
                         .client
                         .settings
                         .clone()
                         .expect("a welcome brings the server's settings");
+                    if server_settings.space != self.settings.space
+                        && let Some(voxel) = &mut self.voxel
+                    {
+                        let map: map::Map = load_map(self.map_name, &server_settings)?;
+                        self.map_layout =
+                            map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?;
+                        let head_bob: settings::HeadBobSettings = voxel.world.head_bob.clone();
+                        voxel.world = VoxelWorld::FromMap(&map)?;
+                        voxel.world.head_bob = head_bob;
+                        self.world = World::Empty(map.get_curvature_radius_m());
+                        messages.push(format!(
+                            "The server curves space {} times as much as the map",
+                            server_settings.space.curvature_per_map_curvature
+                        ));
+                    }
+                    self.settings = server_settings;
                     match &mut self.voxel {
                         Some(voxel) => {
                             voxel.world.set_settings(self.settings.clone());
@@ -3112,6 +3176,9 @@ impl Session {
                 .world
                 .light_consoles(off_mask, &disabling_fracs, time_s);
             voxel.world.sky_time_s = spaceships::get_utc_s();
+            voxel
+                .reality_bend
+                .update(&mut voxel.world, off_mask, time_s);
             let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
             voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }
@@ -3135,7 +3202,11 @@ impl Session {
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
-            let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
+            let (now_s, r, bend) = (
+                self.start.elapsed().as_secs_f64(),
+                voxel.world.r,
+                voxel.world.bend,
+            );
             self.tracers
                 .retain(|tracer| tracer.get_lit_m(now_s).0 < tracer.length_m);
             self.dust_bursts.retain(|burst| !burst.is_over(now_s));
@@ -3144,7 +3215,7 @@ impl Session {
                 .iter()
                 .filter_map(|burst| burst.get_cloud(now_s))
                 .collect();
-            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r);
+            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r, bend);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
                 .iter()
@@ -3469,14 +3540,15 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r`. While the
-    /// trail of one of this player's own shots still reaches the muzzle, its beam starts at the
-    /// gun's tip as drawn now (`get_muzzle`), so it stays on the tip as the gun moves.
+    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r` under
+    /// the reality bend `bend`. While the trail of one of this player's own shots still reaches the
+    /// muzzle, its beam starts at the gun's tip as drawn now (`get_muzzle`), so it stays on the tip
+    /// as the gun moves.
     ///
-    /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
-    fn get_lit_beams(&self, r: f64) -> Vec<render_voxel::LaserBeam> {
+    /// Example: `let beams = self.get_lit_beams(voxel.world.r, voxel.world.bend);`
+    fn get_lit_beams(&self, r: f64, bend: Bend) -> Vec<render_voxel::LaserBeam> {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
-        let muzzle: Option<glam::DVec4> = self.get_muzzle(r);
+        let muzzle: Option<glam::DVec4> = self.get_muzzle(r, bend);
         self.tracers
             .iter()
             .map(|tracer| {
@@ -3503,16 +3575,17 @@ impl Session {
             .collect()
     }
 
-    /// `get_muzzle` gives where the tip of the gun in hand shows in the world, on a map of
-    /// curvature radius `r`: the wand's tip in camera space, moved toward the view's centre by the
-    /// aim zoom (which magnifies the scene but not the gun), or `None` with no gun in view.
+    /// `get_muzzle` gives where the tip of the gun in hand shows in the world (bent by `bend`, as
+    /// the beams are), on a map of curvature radius `r`: the wand's tip in camera space, moved
+    /// toward the view's centre by the aim zoom (which magnifies the scene but not the gun), or
+    /// `None` with no gun in view.
     ///
-    /// Example: `let muzzle = self.get_muzzle(voxel.world.r);`
-    fn get_muzzle(&self, r: f64) -> Option<glam::DVec4> {
+    /// Example: `let muzzle = self.get_muzzle(voxel.world.r, voxel.world.bend);`
+    fn get_muzzle(&self, r: f64, bend: Bend) -> Option<glam::DVec4> {
         let tip_m: glam::DVec3 = self.get_wand()?.get_tip_m().as_dvec3();
         let zoom: f64 = self.get_zoom();
         Some(
-            self.get_eye_frame()
+            bend.bend_frame(self.get_eye_frame())
                 * voxel_world::map_exp(
                     glam::DVec3::new(tip_m.x / zoom, tip_m.y / zoom, tip_m.z),
                     r,
@@ -3535,7 +3608,7 @@ impl Session {
         let (feet, beams): (DMat4, Vec<(Vec<voxel_world::BeamSegment>, u32)>) = match &self.voxel {
             Some(voxel) => (
                 voxel.player.get_feet_frame(&voxel.world),
-                self.get_lit_beams(voxel.world.r)
+                self.get_lit_beams(voxel.world.r, voxel.world.bend)
                     .into_iter()
                     .map(|beam| (beam.segments, beam.team))
                     .collect(),
@@ -3811,6 +3884,10 @@ impl Session {
         ];
         if let Some(laser) = &self.laser {
             lines.push(format!("laser {laser}"));
+        }
+        if let Some(voxel) = self.voxel.as_ref().filter(|voxel| voxel.world.can_bend()) {
+            let strength_pct: f64 = voxel.reality_bend.strength_frac * PERCENT_PER_FRAC;
+            lines.push(format!("REALITY {strength_pct:.0}%"));
         }
         if let Some(multiplayer) = &self.multiplayer {
             lines.push(match multiplayer.client.id {

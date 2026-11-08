@@ -49,7 +49,7 @@ make join-game SERVER=127.0.0.1
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
   you through. For the moment you are inside the mouth (within about 3.6 m of its centre), moving, your view's
-  colours shift as if you moved near light speed (D84): a light cyan, almost white, walking forward, a dark red
+  colours shift as if you moved near light speed (D84, D105): a light cyan, almost white, walking forward, a dark red
   walking backward, crisp, with dark staying dark. It is strongest at the throat and with speed, none standing
   still, and gone once you are 3.6 m out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the
   menu) sets its strength (0 for none). Only you see your own shift (Metal renderer, voxel maps).
@@ -104,6 +104,11 @@ make join-game SERVER=127.0.0.1
 - On Lunar Surface the crater's wall is the map's edge: climbing it, you slow down without end and never get past
   halfway up (`map_edge` in `server_settings.yaml`), while your view stretches out from the middle of the screen
   (`view.edge_stretch_frac` in `player_settings.yaml`). Walking back in is at full speed.
+- Lunar Surface's space is 1.5 times as curved as its map file says: its curvature radius is 26.7 m, not 40 m
+  (`space.curvature_per_map_curvature` in `server_settings.yaml`, from 1 to 2, default 1.5). Buildings, players and
+  distances along the middle line keep their size in meters; far things shrink faster with distance, and the
+  structures away from the middle line spread apart along it. At 2, surfaces more than about 90 m from the middle
+  speckle. The house demo keeps its own curvature (D100).
 - `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
@@ -125,7 +130,8 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
 
 - The demo reads its maps from [`common/maps/`](../../common/maps/README.md) (the portable map format):
   `house-demo` (the default: the house, rails and three wormholes, R = 8) or `lunar-surface` (the Lunar Surface level of
-  [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m, with its black hole and wormhole).
+  [`../levels/lunar_surface/`](../levels/lunar_surface/README.md), R = 40 m in its map file, played at 26.7 m: see
+  below, with its black hole and wormhole).
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
   steps, lighting with soft sun shadows, lamps, ground, stars and planet, so it looks like the level (plus a thin haze
   and stronger bloom, W-76), with the house's adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
@@ -136,6 +142,11 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
+- `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and
+  `--view`: the map's edges curl up into a bowl, and at 1 it closes into the inside of a sphere. The Metal ray tracer
+  walks each ray through the bent world in short pieces, halved until each one's map chord follows the bent path within
+  2 cm (or half a pixel far away), and traces every piece through the unbent map; flat frames use the unchanged tracer
+  (`render_voxel.metal` is compiled with and without `HAS_BEND`).
 
 ## Play together
 
@@ -153,7 +164,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   it, so it can run on a computer nobody plays on; players on that computer join it too.
 - `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
-  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes); it sends them to every player who joins.
+  consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature); it sends them to every
+  player who joins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
@@ -162,7 +174,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
-- On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).
+- On Lunar Surface each team has three pylons with one console each, and a team wins by turning off all three of the
+  other team's consoles (hold `E` on one for 10 s within 3 m).
   Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
   just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
   go dark when off. After a win, `Enter` in the server's terminal starts a new game.

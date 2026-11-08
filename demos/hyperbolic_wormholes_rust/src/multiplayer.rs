@@ -24,8 +24,10 @@ use crate::geometry::{
 use crate::minimap::TEAM_COLORS;
 use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
+use crate::reality_bend::RealityBend;
 use crate::render_voxel::{LaserBeam, VoxelFrame};
 use crate::scene_data::{Beam, SceneData};
+use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
     LOOK_RAD_PER_PX, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
@@ -175,6 +177,27 @@ pub fn pack_shared_view(
         hit_player_id,
         hit_marker,
     }
+}
+
+/// `check_bot_space` fails if the server that welcomed `client` curves space other than the
+/// built-in settings do, which a bot builds its world with.
+///
+/// Example: `check_bot_space(&client)?;`
+fn check_bot_space(client: &Client) -> Result<()> {
+    let space: &SpaceSettings = &client
+        .settings
+        .as_ref()
+        .expect("a welcome brings the server's settings")
+        .space;
+    let builtin: SpaceSettings = ServerSettings::Builtin().space;
+    if *space != builtin {
+        return Err(format!(
+            "the bot builds the map at the built-in space.curvature_per_map_curvature ({}), but the server uses {}; give the server the built-in value",
+            builtin.curvature_per_map_curvature, space.curvature_per_map_curvature
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// `run_bot` plays for `duration_s` seconds without a window, to test a game: it walks and turns
@@ -356,7 +379,8 @@ fn trace_other_voxel_lasers(
 /// light. In third person it also draws this player's own body (`own_body`, from `get_body`),
 /// which the other players' lasers stop at but this player's own passes, as it leaves from inside
 /// it. It draws every laser's whole path (this player's as the sniper's, without speckle; the
-/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given.
+/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given,
+/// under the world's own bend.
 ///
 /// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &[], None, None, (1280, 800));`
 #[allow(clippy::too_many_arguments)]
@@ -392,7 +416,7 @@ pub fn pack_shared_voxel_view(
                 .hit_structure
                 .zip(own.spot)
                 .is_some_and(|(k, x)| shared.is_head_hit(k, x));
-        spot = own.spot.map(|x| (x, team));
+        spot = own.drawn_spot.map(|x| (x, team));
         beams.push(LaserBeam {
             segments: own.segments.clone(),
             team,
@@ -422,7 +446,15 @@ pub fn pack_shared_voxel_view(
         None => shared,
     };
     SharedVoxelView {
-        frame: VoxelFrame::Build(&drawn, camera, beams, spot, dust, render_px),
+        frame: VoxelFrame::Build(
+            &drawn,
+            drawn.bend.bend_frame(camera),
+            beams,
+            spot,
+            dust,
+            render_px,
+            drawn.bend,
+        ),
         shot,
         hit_player_id,
         hit_marker,
@@ -470,16 +502,19 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
 /// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
-/// view) and rejoins `BOT_REJOIN_S` after being hit. It returns how many players it hit and how
-/// often it was hit.
+/// view) and rejoins `BOT_REJOIN_S` after being hit. The world bends with the server's consoles,
+/// or to `bend_strength` when given. It returns how many players it hit and how often it was hit,
+/// and fails if the server curves space other than the built-in settings (`check_bot_space`).
 ///
-/// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, |frame, id| Ok(()))?;`
+/// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, |frame, id| Ok(()))?;`
 pub fn run_voxel_bot(
     world: &VoxelWorld,
     client: &mut Client,
     duration_s: f64,
+    bend_strength: Option<f64>,
     mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
+    let (mut bent_world, mut reality_bend) = (world.clone(), RealityBend::New(bend_strength));
     let start: Instant = Instant::now();
     let mut player: VoxelPlayer = VoxelPlayer::AtSpawn(world, 0);
     let (mut hit_count, mut eliminated_count) = (0, 0);
@@ -488,12 +523,16 @@ pub fn run_voxel_bot(
     let mut is_stuck: bool = false;
     while start.elapsed().as_secs_f64() < duration_s {
         let tick: Instant = Instant::now();
+        let now_s: f64 = start.elapsed().as_secs_f64();
+        reality_bend.update(&mut bent_world, client.game.off_mask, now_s);
+        let world: &VoxelWorld = &bent_world;
         for event in client.poll()? {
             match event {
                 NetEvent::Joined(id) => {
                     let others: Vec<DVec4> =
                         client.players.iter().map(|p| p.frame.col(AXIS_W)).collect();
                     let team: u32 = client.team.expect("a welcome brings the team");
+                    check_bot_space(client)?;
                     player = VoxelPlayer::NearSpawn(world, team, id, &others);
                     println!("bot joined as player {id}");
                 }

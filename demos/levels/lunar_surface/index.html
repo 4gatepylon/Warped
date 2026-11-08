@@ -50,7 +50,7 @@
   <div class="row">Click to capture the mouse (<kbd>Esc</kbd> releases), or drag to look.<br>
     <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump<br>
     <kbd>H</kbd> fly mode (<kbd>Space</kbd> up, <kbd>C</kbd> down)<br>
-    <kbd>E</kbd> (hold) deactivate a console of the other team's pylon<br>
+    <kbd>E</kbd> (hold) deactivate a console of one of the other team's pylons<br>
     Click (captured) or <kbd>R</kbd> fire the laser · <kbd>T</kbd> switch team<br>
     <kbd>1</kbd>–<kbd>9</kbd> viewpoints</div>
   <div class="row" id="view_buttons"></div>
@@ -65,7 +65,7 @@
   <div class="muted" id="mode_text">–</div>
   <div>Energy</div>
   <div class="bar"><div id="energy_fill"></div></div>
-  <div>Blue pylon <span id="blue_consoles" class="blue">–</span> · red pylon <span id="red_consoles" class="red">–</span></div>
+  <div>Blue pylons <span id="blue_consoles" class="blue">–</span> · red pylons <span id="red_consoles" class="red">–</span></div>
   <div id="console_text" class="muted">–</div>
   <div class="bar"><div id="console_fill"></div></div>
   <div>Laser: <span id="laser_text">–</span></div>
@@ -82,7 +82,7 @@
     <li><b>Far more room than it looks.</b> From the overview (<kbd>3</kbd>) the whole infinite plain shrinks to a disc: the crater fills the middle and both spawns, 227 m apart, are squeezed against its rim. Distances along the flanks stretch by cosh(v/R): the ridge, 57 m off the centre line, is 211 m long though it spans only 96 m of the centre line, and a flank route that bows out 36 m is 36% longer than the 90 m centre route (28% in flat space).</li>
     <li><b>Long sight lines.</b> Climb the ridge (<kbd>9</kbd>) and look across the crater. Things shrink faster with distance than in flat space (by R·sinh(d/R)/d: 2.4 times at 100 m), so a player 100 m away looks like one 240 m away would on Earth. Aim low: a level shot is a geodesic and the ground curves away beneath it, so 100 m out it passes 10 m up.</li>
     <li><b>Harsh light, long shadows.</b> The sun hangs 17° above the horizon at the same height everywhere on the level, so every building throws a shadow three times its height. The planet low over the red base lights the shadows faintly.</li>
-    <li><b>Take the red pylon</b> (<kbd>8</kbd>): hold <kbd>E</kbd> near a console, facing the pylon, for 10 s per console; letting go resets it. <kbd>T</kbd> switches team to attack the blue pylon.</li>
+    <li><b>Take the red pylons</b> (<kbd>8</kbd> shows one of the three): hold <kbd>E</kbd> near a pylon's console, facing the pylon, for 10 s; letting go resets it. Red loses when all three are off. <kbd>T</kbd> switches team to attack the blue pylons.</li>
     <li><b>Fly</b> (<kbd>H</kbd>) and climb: the horizon sinks below eye level, and the infinite ground closes into a shrinking disc under you.</li>
   </ol>
   </div>
@@ -145,7 +145,9 @@ const STAND_SEARCH_STEP_M = 0.05;
 const STAND_SEARCH_MAX_STEPS = 400;
 const ENERGY_DRAIN_S = 30;
 const ENERGY_REFILL_S = 60;
-const CONSOLES_PER_PYLON = 5;
+const PYLONS_PER_TEAM = 3;
+const CONSOLES_PER_PYLON = 1;
+const CONSOLES_PER_TEAM = PYLONS_PER_TEAM * CONSOLES_PER_PYLON;
 const CONSOLE_TIME_S = 10;
 const CONSOLE_REACH_M = 3;
 const CONSOLE_FACING_RAD = 1.0;
@@ -250,7 +252,7 @@ const BLUE = 0, RED = 1;
 
 const MAT = { AIR: 0, REGOLITH: 1, DARK_REGOLITH: 2, BASALT: 3, BOULDER: 4, HULL: 5, METAL: 6, GLASS: 7, RED_LIGHT: 8,
   BLUE_LIGHT: 9, SOLAR: 10, RED_PAINT: 11, BLUE_PAINT: 12, PAD: 13, HAZARD: 14, GOLD_FOIL: 15, FLOOR: 16,
-  WHITE_LIGHT: 17, BLUE_CORE: 18, RED_CORE: 19, BLUE_CONSOLE: 20, RED_CONSOLE: 25 };
+  WHITE_LIGHT: 17, BLUE_CORE: 18, RED_CORE: 19, BLUE_CONSOLE: 20, RED_CONSOLE: 20 + CONSOLES_PER_TEAM };
 const MATERIALS = [
   ['air', [0, 0, 0], 0], ['regolith', [0.55, 0.55, 0.53], 0], ['dark regolith', [0.42, 0.42, 0.41], 0],
   ['basalt', [0.30, 0.30, 0.32], 0], ['boulder', [0.52, 0.49, 0.45], 0], ['hull', [0.86, 0.87, 0.88], 0],
@@ -259,8 +261,8 @@ const MATERIALS = [
   ['blue paint', [0.14, 0.30, 0.74], 0], ['landing pad', [0.70, 0.69, 0.66], 0], ['hazard paint', [0.88, 0.70, 0.12], 0],
   ['gold foil', [0.86, 0.66, 0.24], 0], ['floor', [0.22, 0.22, 0.25], 0], ['white light', [1.0, 0.94, 0.82], 1],
   ['blue pylon core', [0.40, 0.75, 1.0], 1], ['red pylon core', [1.0, 0.30, 0.22], 1],
-  ...Array.from({ length: CONSOLES_PER_PYLON }, (_, i) => [`blue console ${i + 1}`, [0.30, 0.65, 1.0], 1]),
-  ...Array.from({ length: CONSOLES_PER_PYLON }, (_, i) => [`red console ${i + 1}`, [1.0, 0.28, 0.18], 1])
+  ...Array.from({ length: CONSOLES_PER_TEAM }, (_, i) => [`blue console ${i + 1}`, [0.30, 0.65, 1.0], 1]),
+  ...Array.from({ length: CONSOLES_PER_TEAM }, (_, i) => [`red console ${i + 1}`, [1.0, 0.28, 0.18], 1])
 ];
 const TEAMS = [
   { name: 'blue', light: MAT.BLUE_LIGHT, paint: MAT.BLUE_PAINT, core: MAT.BLUE_CORE, console: MAT.BLUE_CONSOLE, color: TEAM_COLORS[BLUE] },
@@ -268,11 +270,11 @@ const TEAMS = [
 ];
 const SPAWNS = [{ u_m: -107, v_m: 0 }, { u_m: 120, v_m: 0 }];
 const LAYOUT = {
-  blue_lander: [-114, 0], blue_pylon: [-96, -16], blue_mast: [-104, 18], blue_crates: [[-80, 12], [-74, -22]], blue_solar: [-90, 28],
+  blue_lander: [-114, 0], blue_pylons: [[-96, -16], [-58, 42], [-56, -50]], blue_mast: [-104, 18], blue_crates: [[-80, 12], [-74, -22]], blue_solar: [-90, 28],
   blue_boulders: [[-62, -4], [-58, 30], [-66, -38]], crater_boulders: [[-9, 9], [10, -8]],
   derelict_modules: [[-30, -40], [24, -41]], comms_dome: [-2, -45], crater_walkway: [0, -32], relay_mast: [-18, -53], row_solar: [40, -31], row_crates: [8, -36],
   flank_boulders: [[-34, 31], [2, 31], [24, 38], [42, 26]],
-  red_barriers: [[56, -15], [56, 15]], red_module: [68, -37], red_dome: [98, -25], red_pylon: [94, 6], red_hangar: [121, 0], red_watchtower: [91, 31],
+  red_barriers: [[56, -15], [56, 15]], red_module: [68, -37], red_dome: [98, -25], red_pylons: [[94, 6], [58, 42], [56, -50]], red_hangar: [121, 0], red_watchtower: [91, 31],
   red_mast: [108, 22], red_walkway: [108, -12], red_walkway_toward: [108, -30], red_crates: [86, -8], red_solar: [82, -30]
 };
 
@@ -636,7 +638,7 @@ class VoxelModel {
   }
 }
 
-const structures = [], warps = [], lamps = [], pylons = [];
+const structures = [], warps = [], lamps = [], pylons = [[], []];
 
 /**
  * `add_structure` registers a structure: its frame, its grid (cropped to the occupied cells), its bounding sphere, lamps and consoles.
@@ -774,12 +776,13 @@ function build_lander() {
 }
 
 /**
- * `build_pylon` builds a team's pylon: a glowing core on a pad, ringed by its consoles.
+ * `build_pylon` builds one of a team's pylons: a glowing core on a pad, with its consoles.
  * @param {number} team BLUE or RED.
+ * @param {number} pylon_index Which of the team's PYLONS_PER_TEAM pylons it is, which picks its console materials.
  * @return {VoxelModel} The model; `consoles` lists the console blocks' centres.
- * @example const model = build_pylon(RED);
+ * @example const model = build_pylon(RED, 0);
  */
-function build_pylon(team) {
+function build_pylon(team, pylon_index) {
   const t = TEAMS[team], model = new VoxelModel(`${t.name} pylon`), half = 6;
   for (let x = -half; x < half; x++) for (let z = -half; z < half; z++) model.setBlock(x, 0, z, (x === -half || x === half - 1 || z === -half || z === half - 1) ? t.paint : MAT.PAD);
   model.fillBox(-2, 1, -2, 1, 1, 1, MAT.METAL);
@@ -791,7 +794,7 @@ function build_pylon(team) {
     const angle_rad = Math.PI / 2 + i * 2 * Math.PI / CONSOLES_PER_PYLON;
     const x = Math.floor(PYLON_CONSOLE_RADIUS_M * Math.cos(angle_rad)), z = Math.floor(PYLON_CONSOLE_RADIUS_M * Math.sin(angle_rad));
     model.setBlock(x, 1, z, MAT.METAL);
-    model.setBlock(x, 2, z, t.console + i);
+    model.setBlock(x, 2, z, t.console + pylon_index * CONSOLES_PER_PYLON + i);
     model.consoles.push([x + 0.5, 2.5, z + 0.5]);
   }
   for (const [x, z] of [[-half, -half], [half - 1, half - 1]]) { model.fillBox(x, 1, z, x, 5, z, MAT.METAL); model.fillBox(x, 4, z + (z < 0 ? 1 : -1), x, 5, z + (z < 0 ? 2 : -2), t.paint); }
@@ -1039,15 +1042,19 @@ function add_warp(warp) {
  */
 function build_level() {
   const R = CURVATURE_RADIUS_M, rng = make_rng(LEVEL_SEED), toward_centre = (u_m, v_m) => get_facing_yaw(u_m, v_m, 0, 0);
-  const add_pylon = (team, u_m, v_m) => {
-    const model = build_pylon(team), yaw_rad = toward_centre(u_m, v_m), frame = make_frame(u_m, v_m, yaw_rad);
-    place_model(model, u_m, v_m, yaw_rad);
-    pylons[team] = { team, u_m, v_m, core: map_local(frame, [0, PYLON_CORE_HEIGHT_M, 0]), consoles: model.consoles.map(q => ({ x: map_local(frame, q), is_off: false })), progress_s: 0 };
+  const add_pylons = (team, positions) => {
+    if (positions.length !== PYLONS_PER_TEAM) throw new Error(`build_level: ${TEAMS[team].name} has ${positions.length} pylons in LAYOUT, not ${PYLONS_PER_TEAM}`);
+    positions.forEach(([u_m, v_m], pylon_index) => {
+      const model = build_pylon(team, pylon_index), yaw_rad = toward_centre(u_m, v_m), frame = make_frame(u_m, v_m, yaw_rad);
+      const first_index = team * CONSOLES_PER_TEAM + pylon_index * CONSOLES_PER_PYLON;
+      place_model(model, u_m, v_m, yaw_rad);
+      pylons[team].push({ team, u_m, v_m, core: map_local(frame, [0, PYLON_CORE_HEIGHT_M, 0]), consoles: model.consoles.map((q, i) => ({ x: map_local(frame, q), index: first_index + i, is_off: false })) });
+    });
   };
 
   const place_at = (model, [u_m, v_m], yaw_rad) => place_model(model, u_m, v_m, yaw_rad);
   place_at(build_lander(), LAYOUT.blue_lander, 0);
-  add_pylon(BLUE, ...LAYOUT.blue_pylon);
+  add_pylons(BLUE, LAYOUT.blue_pylons);
   place_at(build_antenna('blue relay mast', 9, MAT.BLUE_LIGHT), LAYOUT.blue_mast, 0);
   for (const [k, at] of LAYOUT.blue_crates.entries()) place_at(build_crates('blue supply crates', rng, 9 - 2 * k), at, rng() * Math.PI);
   place_at(build_solar_array('blue solar array', 3, 10), LAYOUT.blue_solar, Math.PI / 2);
@@ -1082,10 +1089,10 @@ function build_level() {
   place_at(module_model, LAYOUT.red_module, 0);
   const red_dome = build_dome('red dome', 7, MAT.RED_LIGHT); red_dome.addLamp([0, 3, 0], TEAM_COLORS[RED], 12);
   place_at(red_dome, LAYOUT.red_dome, toward_centre(...LAYOUT.red_dome));
-  add_pylon(RED, ...LAYOUT.red_pylon);
+  add_pylons(RED, LAYOUT.red_pylons);
   place_at(build_hangar('red spawn hangar', RED), LAYOUT.red_hangar, toward_centre(...LAYOUT.red_hangar));
   place_at(build_watchtower('red watchtower', RED), LAYOUT.red_watchtower, get_facing_yaw(...LAYOUT.red_watchtower, MOUTH_B.u_m, MOUTH_B.v_m));
-  const pad_yaw = get_facing_yaw(MOUTH_B.u_m, MOUTH_B.v_m, ...LAYOUT.red_pylon);
+  const pad_yaw = get_facing_yaw(MOUTH_B.u_m, MOUTH_B.v_m, ...LAYOUT.red_pylons[0]);
   place_model(build_landing_pad('red landing pad', RED), MOUTH_B.u_m, MOUTH_B.v_m, pad_yaw);
   const mast = build_antenna('red antenna', 12, MAT.RED_LIGHT); mast.addLamp([0, 15, 0], TEAM_COLORS[RED], 8);
   place_at(mast, LAYOUT.red_mast, 0);
@@ -1468,7 +1475,7 @@ const int MAT_PAD = ${MAT.PAD};
 const int MAT_HULL = ${MAT.HULL};
 const int MAT_GOLD_FOIL = ${MAT.GOLD_FOIL};
 const int MAT_CONSOLE_FIRST = ${MAT.BLUE_CONSOLE};
-const int CONSOLE_COUNT = ${2 * CONSOLES_PER_PYLON};
+const int CONSOLE_COUNT = ${2 * CONSOLES_PER_TEAM};
 const float FAR_S = ${glsl(FAR_S)};
 const float SHADOW_S = ${glsl(SHADOW_M / CURVATURE_RADIUS_M)};
 const float SURFACE_OFFSET_S = ${glsl(0.02 / CURVATURE_RADIUS_M)};
@@ -2309,7 +2316,7 @@ const camera = new THREE.Camera();
 const state = {
   B: make_frame(SPAWNS[BLUE].u_m, SPAWNS[BLUE].v_m, 0), h_m: EYE_HEIGHT_M, vh_m_per_s: 0, pitch_rad: 0, is_on_ground: false,
   is_flying: false, team: BLUE, energy_frac: 1, beams: [], is_laser_held: false, is_won: false, message: '', message_s: 0,
-  quality: 'auto', pixel_budget: AUTO_PIXEL_BUDGET, view: '', last_shot: null, console_hint: ''
+  quality: 'auto', pixel_budget: AUTO_PIXEL_BUDGET, view: '', last_shot: null, console_hint: '', console_progress_s: 0
 };
 const keys = {};
 
@@ -2604,26 +2611,25 @@ function describe_shot(shot) {
 }
 
 /**
- * `update_consoles` runs console deactivation: holding E within CONSOLE_REACH_M of an active console of the other team's pylon, facing the pylon, deactivates it in CONSOLE_TIME_S; anything else resets its progress.
+ * `update_consoles` runs console deactivation: holding E within CONSOLE_REACH_M of an active console of one of the other team's pylons, facing that pylon, deactivates it in CONSOLE_TIME_S; anything else resets the progress. The team wins once all the other team's consoles are off.
  * @param {number} dt The time step, in seconds.
  * @return {void}
  * @example update_consoles(1 / 60);
  */
 function update_consoles(dt) {
-  const pylon = pylons[1 - state.team], C = get_camera_frame(), eye = get_column(C, W), forward = get_column(C, Z).map(c => -c);
-  const active = pylon.consoles.filter(c => !c.is_off);
-  const nearest = active.reduce((best, c) => { const d_m = measure_distance(eye, c.x) * CURVATURE_RADIUS_M; return d_m < best.d_m ? { c, d_m } : best; }, { c: null, d_m: Infinity });
-  const toward = combine_vectors(pylon.core, 1, eye, dot_minkowski(pylon.core, eye));
-  const facing_rad = Math.acos(Math.max(-1, Math.min(1, dot_minkowski(forward, toward) / Math.sqrt(dot_minkowski(toward, toward)))));
-  state.console_hint = !active.length ? 'all consoles deactivated' : nearest.d_m > CONSOLE_REACH_M ? `nearest ${TEAMS[pylon.team].name} console ${nearest.d_m.toFixed(0)} m away` : facing_rad > CONSOLE_FACING_RAD ? 'face the pylon' : 'hold E';
-  if (!keys.KeyE || !nearest.c || nearest.d_m > CONSOLE_REACH_M || facing_rad > CONSOLE_FACING_RAD || state.is_won) { pylon.progress_s = 0; return; }
-  pylon.progress_s += dt;
-  if (pylon.progress_s < CONSOLE_TIME_S) return;
-  nearest.c.is_off = true; pylon.progress_s = 0;
-  const index = pylon.team * CONSOLES_PER_PYLON + pylon.consoles.indexOf(nearest.c);
-  uniforms.u_console_off.value[Math.floor(index / 4)].setComponent(index % 4, 1);
-  say(`${TEAMS[pylon.team].name} console deactivated`);
-  if (pylon.consoles.every(c => c.is_off)) { state.is_won = true; document.getElementById('banner').style.display = 'block'; document.getElementById('banner').textContent = `Level won by ${TEAMS[state.team].name}`; }
+  const other_team = 1 - state.team, C = get_camera_frame(), eye = get_column(C, W), forward = get_column(C, Z).map(c => -c);
+  const active = pylons[other_team].flatMap(pylon => pylon.consoles.filter(c => !c.is_off).map(c => ({ c, pylon })));
+  const nearest = active.reduce((best, { c, pylon }) => { const d_m = measure_distance(eye, c.x) * CURVATURE_RADIUS_M; return d_m < best.d_m ? { c, pylon, d_m } : best; }, { c: null, pylon: null, d_m: Infinity });
+  const toward = nearest.c && combine_vectors(nearest.pylon.core, 1, eye, dot_minkowski(nearest.pylon.core, eye));
+  const facing_rad = nearest.c ? Math.acos(Math.max(-1, Math.min(1, dot_minkowski(forward, toward) / Math.sqrt(dot_minkowski(toward, toward))))) : Infinity;
+  state.console_hint = !active.length ? 'all consoles deactivated' : nearest.d_m > CONSOLE_REACH_M ? `nearest ${TEAMS[other_team].name} console ${nearest.d_m.toFixed(0)} m away` : facing_rad > CONSOLE_FACING_RAD ? 'face the pylon' : 'hold E';
+  if (!keys.KeyE || !nearest.c || nearest.d_m > CONSOLE_REACH_M || facing_rad > CONSOLE_FACING_RAD || state.is_won) { state.console_progress_s = 0; return; }
+  state.console_progress_s += dt;
+  if (state.console_progress_s < CONSOLE_TIME_S) return;
+  nearest.c.is_off = true; state.console_progress_s = 0;
+  uniforms.u_console_off.value[Math.floor(nearest.c.index / 4)].setComponent(nearest.c.index % 4, 1);
+  say(`${TEAMS[other_team].name} console deactivated`);
+  if (pylons[other_team].every(pylon => pylon.consoles.every(c => c.is_off))) { state.is_won = true; document.getElementById('banner').style.display = 'block'; document.getElementById('banner').textContent = `Level won by ${TEAMS[state.team].name}`; }
 }
 
 /**
@@ -2787,14 +2793,14 @@ function render_frame(now_ms) {
   state.message_s -= dt;
   if ((hud_s += dt) > HUD_PERIOD_S) {
     hud_s = 0;
-    const { u_m, v_m } = get_fermi_coordinates(get_column(state.B, W)), other = pylons[1 - state.team];
+    const { u_m, v_m } = get_fermi_coordinates(get_column(state.B, W)), other_team = 1 - state.team;
     $('team_text').textContent = TEAMS[state.team].name; $('team_text').className = TEAMS[state.team].name;
     $('zone_text').textContent = u_m < -ZONE_EDGE_U_M ? 'blue' : u_m > ZONE_EDGE_U_M ? 'red' : 'middle';
     $('mode_text').textContent = `${state.is_flying ? 'flying' : state.is_on_ground ? 'walking' : 'in the air'} · eye ${state.h_m.toFixed(1)} m above the ground`;
     $('energy_fill').style.width = `${(100 * state.energy_frac).toFixed(0)}%`;
-    for (const team of [BLUE, RED]) $(`${TEAMS[team].name}_consoles`).textContent = pylons[team].consoles.map(c => c.is_off ? '○' : '●').join('');
-    $('console_text').textContent = `Attack the ${TEAMS[other.team].name} pylon: ${state.console_hint || ''}`;
-    $('console_fill').style.width = `${(100 * other.progress_s / CONSOLE_TIME_S).toFixed(0)}%`;
+    for (const team of [BLUE, RED]) $(`${TEAMS[team].name}_consoles`).textContent = pylons[team].map(pylon => pylon.consoles.map(c => c.is_off ? '○' : '●').join('')).join(' ');
+    $('console_text').textContent = `Attack the ${TEAMS[other_team].name} pylons: ${state.console_hint || ''}`;
+    $('console_fill').style.width = `${(100 * state.console_progress_s / CONSOLE_TIME_S).toFixed(0)}%`;
     $('laser_text').textContent = describe_shot(state.last_shot);
     $('position_text').textContent = `u ${u_m.toFixed(0)} m, v ${v_m.toFixed(0)} m`;
     $('message').textContent = state.message_s > 0 ? state.message : '';

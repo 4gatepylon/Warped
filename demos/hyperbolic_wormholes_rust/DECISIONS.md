@@ -1204,6 +1204,8 @@
   just the specific colors should be a bit more crisp". Then: "make a PR that makes it take slightly longer; ideally
   just double its radius or whatever (i.e. walking at same speed should take exactly twice as long of time showing
   me cyan or red)".
+- **Superseded in part by:** D105, W-82 (wormhole colour from motion): the colours are now option 8 forward and R2
+  backward, which you picked from the colour sheets; where and how long the shift shows stays as here.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1637,6 +1639,47 @@
   the SPECKLE on top of that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for
   sniper."
 
+### D100. A stronger curvature, set in the server's settings, for W-37 (stronger curvature)
+
+- **Choice:**
+  - **Setting:** `space.curvature_per_map_curvature` in `server_settings.yaml`, from 1 to 2, default 1.5: the
+    curvature (1 over the curvature radius) as a multiple of the map's own. Lunar Surface's 40 m radius becomes
+    26.7 m (20 m at 2). A value outside 1 to 2 fails with the key's name. A curvature k times as strong in this sense
+    makes the Gaussian curvature, −1/R², k² times as strong.
+  - **Default 1.5, not 2:** the item asked for twice the curvature by default. After seeing pictures at 1, 1.5 and
+    2, with the speckle at 2 described below, you chose 1.5: "1.5x curvature is fine". 2 stays allowed.
+  - **What stays in meters:** every frame (structures, warps, spawns) and lamp keeps its Fermi coordinates (u, v, h)
+    and its turn against the Fermi axes there (`Map::scale_curvature`). Shapes in their charts, the terrain, the
+    zones, the warps' reach and the players' speeds and jump keep their meters. So distances along the middle line
+    (v = 0) and straight across it stay; along u away from it, a stretch Δu is cosh(v/R) Δu long, which at
+    v = 40 m grows from 1.5 Δu (at 1) to 2.4 Δu (at 1.5) and 3.8 Δu (at 2). A structure's chart must reach less
+    than R from its origin; Lunar Surface's furthest shape corner is 15.8 m, so it could go up to 2.5.
+  - **Where:** voxel maps only (Lunar Surface). The house demo keeps R = 8 m: at 2 its far pylon would sit 13
+    curvature radii out (coordinates near 2 × 10⁵), and its scripted route (`--autopilot`) flies back and forth
+    through wormhole 1 without end.
+  - **Networking:** the server sends its settings in the welcome (as before). A window that joins builds the map at
+    the built-in value; if the welcome's differs, it rebuilds the map, the minimap and the map page at the server's
+    and says so in the HUD. The renderer uploads the minimap's picture again when its placement changes. A bot
+    (`--bot`) fails with a clear error on a server with another value.
+  - **Beams:** they are drawn up to 160 m from the map's origin at any curvature, instead of 4 curvature radii (D64),
+    which at 1.5 would have hidden beams fired from either spawn (both lie beyond 4 radii, 107 m).
+- **Speckle at 2:** the renderer works in the map's coordinates in single precision, and a point's error there grows
+  as cosh² of its distance from the origin in curvature radii. Beyond about 90 m at 2 (both spawns, the red pylon
+  and the buildings around it) surfaces and shadows speckle; at 1.5 the limit is about 120 m (a faint grain at the
+  red spawn's roof), and at 1 about 170 m, outside the map. The cure is to trace relative to the camera, a larger
+  change to the shaders (D64 and D66 put it off too); until then, 2 speckles at the spawns.
+- **Tests at the map's own curvature:** the tests that aim or walk by the map's numbers load it at 1 (`Map::Load`
+  doesn't scale): at 2, the laser into the wormhole misses the red pylon, the walk into the mouth misses it, and
+  the dust test's shots land elsewhere.
+- **Alternatives:**
+  - a default of 2, as the item first asked (speckle at both spawns until the renderer traces relative to the
+    camera);
+  - keeping geodesic distance and direction from the map's origin instead of Fermi coordinates (spacing around the
+    origin would grow by sinh: 10 times at the spawns at 2, and structures would leave the terrain they stand on);
+  - scaling the curvature radius by 1/√k for k times the Gaussian curvature (you asked for the radius ÷ factor).
+- **Rationale:** you asked that the curvature be set in the YAML settings, higher than now, at most twice the
+  current curvature, and then chose 1.5 as the default after seeing the speckle at 2.
+
 ### D104. A third-person view on `V`, W-61 (third-person view)
 
 - **Choice:**
@@ -1713,6 +1756,34 @@
   scene differs a little: its mouths and eye are 4.5 blocks up, and it has no laser.
 - **Alternatives:** moving the WebGL demo's mouths to match first.
 - **Rationale:** it is the version you found too slow.
+
+### D105. The wormhole colour shift in the colours you picked, for W-82 (wormhole colour from motion)
+
+- **Choice:** D84 keeps where, when and how long the shift shows (inside the mouth, × the speed along the view, no
+  timer, 0.63 s walking through mouth A); its colours are now the two you picked from sheets made by an exact Python
+  copy of the shader. The real shader matches that copy to within 1 level in 255 on the `middle` and `red_pylon`
+  views.
+  - **The Doppler step:** each channel shows the light at D times its wavelength (the spectrum at 610, 550 and 465
+    nm, 0 at 400 and 700 nm), with D = √(1 − β²) / (1 − β cos θ′), cos θ′ = 1 − (1 − cos θ) / 2, θ the angle off
+    the middle of the screen. β is 0.09 forward and −0.3 backward at walking speed, growing with it beyond.
+  - **Forward, option 8 "toward light cyan":** D² as bright plus a blue glow (0, 0.12, 0.4) × (D² − 1); paled 30%
+    toward its grey (luminance 0.2126 R + 0.7152 G + 0.0722 B); moved 60% toward light cyan #E0FFFF at the same
+    luminance, so dark stays dark; × 1.5 through a shoulder that rolls the brightest channel off above 0.8 toward
+    1, so nothing clips to flat white; then green moved into blue and held to 0.95 of blue, so nothing turns green.
+    On the `middle` view the ground turns from #A8A295 to #B3E3EF.
+  - **Backward, R2 "darker":** D as bright plus the red glow (0.4, 0.04, 0) × |D − 1|, then × 0.7. On the `middle`
+    view the ground turns #540F00.
+  - **Below walking strength:** the picked colour fades in, the gain and the green cap with it.
+  - **Knobs:** named constants at the top of `render_metal.metal` (`BLUESHIFT_PALE_FRAC`, `BLUESHIFT_WHITE_FRAC`,
+    `BLUESHIFT_TINT`, `BLUESHIFT_GAIN`, `BLUESHIFT_SHOULDER_KNEE`, `BLUESHIFT_LIFT_FRAC` at 0,
+    `BLUESHIFT_MAX_GREEN_PER_BLUE`, `REDSHIFT_GAIN`). `view.wormhole_tint_frac` still fades the whole shift in.
+- **Alternatives:**
+  - the other forward options on the sheet: 1 to 7 (bluer or greener, less white), 9 to 12 (nearly white, #E0FFFF
+    to #F0FFFF, keeping less of the scene's texture), and lifting the blacks toward the tint (options 7 and 12);
+  - the redshift as it was (#259 and #289), or another darkness (R1, R3, R4);
+  - #289's forward look (β 0.16, D³, shown at 45%), chosen from side-by-side renders before your picks reached it.
+- **Rationale:** from the sheets you said "i like option 8 for the wormhole" and "for red i like r2"; after #272 you
+  asked for "the dark red and the light cyan almost white", crisp, "like the previous pictures I was shown".
 
 ## Workload
 
