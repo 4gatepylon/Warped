@@ -703,6 +703,20 @@
 - **Rationale:** you asked for the laser to disappear from the tip onward and fly forward like a bullet, lasting
   longer for the sniper than the rifle, with both settings in the YAML file.
 
+### D62. Players never spawn on top of each other
+
+- **Choice:**
+  - **Slots:** every spawn tries slots around the team's spawn point, starting from the player's own (the golden
+    angle times their id on a 3 m ring). It takes the first slot at least 1.5 m from every other player it can
+    see, going on to rings 5 m and 7 m out (24 slots in all, 16 on the house).
+  - **Where it applies:** joining, a new game, `R`, and falling into a black hole. Before, `R` and the black hole
+    put players exactly on the spawn point.
+  - **Why ids alone weren't enough:** a player's slot came from their id alone, and ids keep growing over a
+    session (each new address gets the next one), so two players could share a slot: ids 1 and 35 are 5° apart.
+- **Alternatives:** the server handing out spawn slots (it would know every player even before snapshots arrive,
+  but it needs another message).
+- **Rationale:** you asked that players never spawn one on top of another.
+
 
 ## Baselines
 
