@@ -15,6 +15,8 @@
 //! - Performance: it waits for each frame to finish, so the GPU is idle while the CPU packs the
 //!   next frame; `last_gpu_ms` is the GPU's own time for the last frame, upscaling included.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::error::Error;
 use std::ptr::NonNull;
 
@@ -38,7 +40,7 @@ use crate::scene_data::{
     TEXELS_PER_BEAM_CHUNK, TEXELS_PER_BOX, TEXELS_PER_CLUSTER, TEXELS_PER_GLUING,
     TEXELS_PER_MOUTH_FIELD, Uniforms,
 };
-use crate::viewmodel::Viewmodel;
+use crate::viewmodel::{GunModel, Viewmodel};
 use crate::voxel_textures::SurfaceTextures;
 use crate::world::{MATERIAL_GLASS, MATERIAL_GLOW, MAX_CLUSTER_COUNT, MAX_MOUTH_COUNT};
 
@@ -50,23 +52,23 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 
 /// `LoadingStep` is one part of what `MetalRenderer::load` reads and compiles before the first
 /// frame, so a window can show a loading bar between parts: the surface textures and the voxel
-/// shader (voxel maps only), and the revolver.
+/// shader (voxel maps only), and each gun model held in hand.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LoadingStep {
     SurfaceTextures,
     VoxelShader,
-    Revolver,
+    Gun(GunModel),
 }
 
 impl LoadingStep {
     /// `get_label` says what the step loads, for the loading screen.
     ///
-    /// Example: `let label: &str = LoadingStep::Revolver.get_label();`
+    /// Example: `let label: &str = LoadingStep::Gun(GunModel::Revolver).get_label();`
     pub fn get_label(self) -> &'static str {
         match self {
             LoadingStep::SurfaceTextures => "surface textures",
             LoadingStep::VoxelShader => "voxel shader",
-            LoadingStep::Revolver => "revolver",
+            LoadingStep::Gun(model) => model.get_label(),
         }
     }
 }
@@ -80,28 +82,32 @@ pub fn get_loading_steps(is_voxel_map: bool) -> &'static [LoadingStep] {
         &[
             LoadingStep::SurfaceTextures,
             LoadingStep::VoxelShader,
-            LoadingStep::Revolver,
+            LoadingStep::Gun(GunModel::Revolver),
+            LoadingStep::Gun(GunModel::BoltActionRifle),
         ]
     } else {
-        &[LoadingStep::Revolver]
+        &[
+            LoadingStep::Gun(GunModel::Revolver),
+            LoadingStep::Gun(GunModel::BoltActionRifle),
+        ]
     }
 }
 
 /// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
 /// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
-/// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
-/// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
-/// frame's height the mask's text may take, a picture under the text, how far the scene
-/// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none), the
-/// minimap, and how far the scene blueshifts inside a wormhole mouth (the shader's
-/// `blueshift_scene`: 1 for walking straight ahead at the throat, negative for a redshift, 0 for
-/// none).
+/// (the HUD's bars), the player's wand with the gun model drawn in its place, how much of the
+/// previous frame's scene to blend into this one's (motion blur; 0 for none), what a recent hit
+/// does to the scene, how much of the frame's height the mask's text may take, a picture under
+/// the text, how far the scene stretches at the map's soft edge (the shader's
+/// `read_stretched_scene`; 0 for none), the minimap, and how far the scene blueshifts inside a
+/// wormhole mouth (the shader's `blueshift_scene`: 1 for walking straight ahead at the throat,
+/// negative for a redshift, 0 for none).
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
     pub rects: &'a [OverlayRect],
-    pub wand: Option<OverlayWand>,
+    pub wand: Option<(OverlayWand, GunModel)>,
     pub blur_frac: f32,
     pub hit: HitEffect,
     pub mask_height_frac: f32,
@@ -437,8 +443,8 @@ pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
 pub(crate) const MAX_MINIMAP_MARK_COUNT: usize = 16;
 pub(crate) const MAX_MINIMAP_LINE_COUNT: usize = 96;
-/// `REVOLVER_WAND` is `has_wand` when the revolver (viewmodel.rs) is drawn in the wand's place.
-const REVOLVER_WAND: i32 = 2;
+/// `GUN_MODEL_WAND` is `has_wand` when a gun model (viewmodel.rs) is drawn in the wand's place.
+const GUN_MODEL_WAND: i32 = 2;
 const EMPTY_MASK_PX: (usize, usize) = (1, 1);
 const BYTES_PER_PICTURE_PIXEL: usize = 4;
 const MS_PER_S: f64 = 1000.0;
@@ -493,7 +499,7 @@ pub struct MetalRenderer {
     hole_buffers: Option<HoleBuffers>,
     surface_textures: Option<SurfaceTextures>,
     voxel_gpu: Option<VoxelGpu>,
-    viewmodel: Option<Viewmodel>,
+    viewmodels: HashMap<GunModel, Viewmodel>,
     is_voxel_frame: bool,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
     camera_table: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -817,7 +823,7 @@ impl MetalRenderer {
             hole_buffers: None,
             surface_textures: None,
             voxel_gpu: None,
-            viewmodel: None,
+            viewmodels: HashMap::new(),
             is_voxel_frame: false,
             throat_table,
             camera_table,
@@ -887,7 +893,7 @@ impl MetalRenderer {
     /// `load` reads or compiles `step`'s part unless it is already loaded, so that the first
     /// frame doesn't wait for it; frames load what they need on their own when it wasn't.
     ///
-    /// Example: `renderer.load(LoadingStep::Revolver)?;`
+    /// Example: `renderer.load(LoadingStep::Gun(GunModel::Revolver))?;`
     pub fn load(&mut self, step: LoadingStep) -> Result<()> {
         match step {
             LoadingStep::SurfaceTextures => {
@@ -905,9 +911,9 @@ impl MetalRenderer {
                     self.voxel_gpu = Some(VoxelGpu::New(&self.device, textures)?);
                 }
             }
-            LoadingStep::Revolver => {
-                if self.viewmodel.is_none() {
-                    self.viewmodel = Some(Viewmodel::Load(&self.device)?);
+            LoadingStep::Gun(model) => {
+                if let Entry::Vacant(entry) = self.viewmodels.entry(model) {
+                    entry.insert(Viewmodel::Load(&self.device, model)?);
                 }
             }
         }
@@ -1427,20 +1433,17 @@ impl MetalRenderer {
             None => picture,
         };
         let tan_half_fov: f32 = HALF_FOV_RAD.tan() as f32;
-        let revolver_image: Option<Retained<ProtocolObject<dyn MTLTexture>>> = match overlay.wand {
-            Some(wand) => {
-                if self.viewmodel.is_none() {
-                    self.viewmodel = Some(Viewmodel::Load(&self.device)?);
-                }
-                let revolver: &mut Viewmodel = self
-                    .viewmodel
-                    .as_mut()
-                    .expect("the revolver was just loaded");
+        let gun_image: Option<Retained<ProtocolObject<dyn MTLTexture>>> = match overlay.wand {
+            Some((wand, model)) => {
+                let viewmodel: &mut Viewmodel = match self.viewmodels.entry(model) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => entry.insert(Viewmodel::Load(&self.device, model)?),
+                };
                 let hand_light: Option<&ProtocolObject<dyn MTLBuffer>> = match &self.voxel_gpu {
                     Some(gpu) if self.is_voxel_frame => Some(gpu.get_hand_light()),
                     _ => None,
                 };
-                Some(revolver.encode(
+                Some(viewmodel.encode(
                     &self.device,
                     command_buffer,
                     &wand,
@@ -1463,8 +1466,8 @@ impl MetalRenderer {
             ],
             rect_count: overlay.rects.len() as i32,
             has_mask: i32::from(overlay.mask.is_some()),
-            has_wand: if revolver_image.is_some() {
-                REVOLVER_WAND
+            has_wand: if gun_image.is_some() {
+                GUN_MODEL_WAND
             } else {
                 i32::from(overlay.wand.is_some())
             },
@@ -1483,14 +1486,17 @@ impl MetalRenderer {
             stretch_frac: overlay.stretch_frac,
             blueshift_frac: overlay.blueshift_frac,
         };
-        let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
-            center_m: [0.0; 4],
-            axes: [[0.0; 4]; 3],
-            shaft_half_m: [0.0; 4],
-            shaft_color: [0.0; 4],
-            tip_half_m: [0.0; 4],
-            tip_color: [0.0; 4],
-        });
+        let wand: OverlayWand = overlay.wand.map_or(
+            OverlayWand {
+                center_m: [0.0; 4],
+                axes: [[0.0; 4]; 3],
+                shaft_half_m: [0.0; 4],
+                shaft_color: [0.0; 4],
+                tip_half_m: [0.0; 4],
+                tip_color: [0.0; 4],
+            },
+            |(wand, _)| wand,
+        );
         let mut rects: [OverlayRect; MAX_OVERLAY_RECT_COUNT] = [OverlayRect {
             min_frac: [0.0; 2],
             max_frac: [0.0; 2],
@@ -1518,7 +1524,7 @@ impl MetalRenderer {
             encoder.setTexture_atIndex(Some(target), 2);
             encoder.setTexture_atIndex(Some(history_in), 3);
             encoder.setTexture_atIndex(Some(history_out), 4);
-            encoder.setTexture_atIndex(Some(revolver_image.as_deref().unwrap_or(frame)), 5);
+            encoder.setTexture_atIndex(Some(gun_image.as_deref().unwrap_or(frame)), 5);
             encoder.setTexture_atIndex(Some(picture), 6);
             encoder.setBytes_length_atIndex(
                 NonNull::from(&params).cast(),

@@ -1678,6 +1678,34 @@
 - **Rationale:** you asked for a way to switch to a third-person view, the camera slightly behind the character,
   controlled from there, seeing your own character.
 
+### D105. The rifle is a bolt-action rifle in hand, W-96 (a different rifle model)
+
+- **Choice:**
+  - **Model:** gun 2, the rifle, is drawn as Poly Haven's "Bolt Action Rifle 7.62" by Mateusz Sadek (CC0), already
+    committed for the fps_demo in `demos/fps_demo/assets/models/bolt_action_rifle_7_62/`; nothing was downloaded. Gun
+    1, the sniper, keeps the energy revolver. `Gun::get_model` in `main.rs` picks the model, and `viewmodel.rs`
+    loads each model (`GunModel`) once, both before the first frame (two loading-screen steps, "revolver" and
+    "rifle").
+  - **Size:** `BOLT_ACTION_RIFLE_SCALE` = 0.28, so the 1.23 m rifle is drawn 0.34 m long. With its muzzle at the
+    wand's tip, at full size (or 1.6x like the revolver) only its barrel shows; at 0.28x its scope, bolt, magazine,
+    trigger and the start of its stock come into the lower right corner. 0.25x shows more of the stock but makes the
+    rifle look thin and far; 0.35x and up push the stock and then the scope off the bottom of the view.
+  - **Placement:** the model is turned a quarter turn about its up axis (its barrel lies along +x in its glTF), and
+    its muzzle (the middle of its front face) is put at the wand's tip, as the revolver's is, so the beam still
+    leaves the muzzle. The pose, bob and recoil are the wand's, unchanged.
+  - **Missing file:** the game checks both models at start and fails naming the file and the command that restores
+    the fps_demo's assets, as it did for the revolver.
+  - **Credit:** the CREDITS page names the rifle, its author, Poly Haven and its link.
+- **Alternatives:**
+  - a sci-fi rifle from Sketchfab under CC BY (AR-H470 by Frostoise, Sci-FI Sniper Rifle by Matija Švaco and
+    others): a closer match to the revolver's look, but it needs a download with a Sketchfab account;
+  - the Kenney Blaster Kit (CC0): toy-like low-poly blasters that clash with the textured revolver;
+  - drawing the rifle at the revolver's 1.6x or at full size (only the barrel shows), or moving the gun so a
+    full-size rifle fits (the beam's start would move).
+- **Rationale:** you asked for the rifle to be a different gun ("for the rifle the gun has to change to a different
+  one ideally; see if you can find something for that"), and chose the bolt-action from the pictures ("bolt action
+  is good"). The wooden rifle stands out from the sci-fi look, which also makes the two guns easy to tell apart.
+
 ### D15. WebGL at the same drawing-buffer sizes
 
 - **Choice:** the browser demo from PR 58, unchanged, in the Claude desktop app's built-in browser (Chromium 152,
