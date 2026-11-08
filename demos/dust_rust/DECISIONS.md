@@ -48,4 +48,30 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
     - **For a future agent:** the costs measured are terrain height (noise octaves, in the primary march, the
       shadow march and normals) and per-pixel shading; wind chords, the sand, the storm sky and fog length cost
       little. The next step would be baking the whole terrain height into the existing 0.25 m `MoundGrid` buffer
-      (CPU and GPU read it the same way), then lower `--render-scale` only for the wormhole views.
+      (CPU and GPU read it the same way), then lower `--render-scale` only for the wormhole views. Item 18 did the
+      bake, and the render-scale cut is no longer needed.
+18. **The whole terrain height baked into a 0.25 m grid** (handoff known gap 1, Dust speed): `Terrain::bake_heights`
+    samples the terrain's shape (crater wall, rim noise, the 3 relief octaves and the mounds) every 0.25 m wherever a
+    ray from inside the boundary can reach before the fog ends it: the boundary's box grown by the fog's end
+    (4 m + 5 × 50 m = 254 m), so |u| ≤ 382 m and |v| ≤ 318 m, 3058 × 2546 points, 31 MB, baked in 0.07–0.16 s at
+    start-up on 12 busy cores. Its points are the mound grid's, so the mounds keep their exact heights. Walking, the
+    laser's hits, the ground puffs and the shader's primary and shadow marches all read it bilinearly; outside it
+    both fall back to the shape, so `OCTAVE_COUNT` and `TERRAIN_OCTAVES` must still match. The shader keeps the grid
+    in an R32Float texture and fetches a cell's four points with one `gather`, unfiltered, then interpolates them as
+    `terrain.rs` does; at the test's points (`the_shader_draws_the_ground_the_cpu_walks_and_hits_on`) the CPU and the
+    shader agree to 1e-7 m. Normals still come from the shape's height, because bilinear heights kink at every cell
+    edge, which would show in the light as a 0.25 m grid on the crater walls. **User?** none expected: nothing looks
+    different.
+    - **Look:** per view, the mean difference is 0.003–0.23 of 255 and at most 0.012% of pixels differ by more
+      than 8, at edges where a hit moved by under a millimetre. The laser views' puff of sand differs more (mean 0.52
+      and 0.33% of pixels in `laser_ground`), because its particles are seeded from the hit point.
+    - **Speed** (Apple M3 Pro, 18-core GPU, macOS 15.7.3, rustc 1.98.1): median GPU ms at 2560x1440, render scale
+      0.6, 30 frames a view, the best of 4 alternating rounds, while other agents built and ran bots on the
+      machine. `wormhole` 14.5 → 10.3 (p99 15.0 → 10.5), `wormhole_exit` 14.3 → 10.3 (14.8 → 10.6),
+      `laser_into_wormhole` 20.5 → 15.8 (21.1 → 16.4); the other 21 views 6.9–13.2 → 5.4–10.3. Every view's median
+      and p99 is now under 16.7 ms.
+    - **Where `laser_into_wormhole`'s time goes** (it has the least headroom; 60-frame runs with parts of the shot
+      left out, in rounds where `wormhole` was not slowed by other agents; without the shot it takes 10.6 ms, like
+      `wormhole`): the laser's 19 segments, scanned at every chord and every bend step inside the
+      mouth, about 4 ms; the puff of sand where it lands, about 1.8 ms; the laser's spot light, nothing measurable.
+      Hoisting each segment's midpoint and reach out of `scan_beams` would be the next saving with the same look.

@@ -73,6 +73,11 @@ LAN discovery 47831.
   live marks over it, so it costs nothing a frame; without the file (or at another curvature) it falls back to the
   drawn map. The sun keeps one direction in the map's Fermi frame there, so shadows fall one way as in a photo. The
   spokes and the round patch in the middle are the ground's hyperbolic tiling.
+- **Ground height**: `terrain.rs` bakes the whole terrain (crater wall, rim noise, 3 relief octaves, mounds) into
+  a 0.25 m grid at start-up (about 0.1 s, 31 MB) over everywhere a ray from inside the boundary reaches before
+  the fog ends it, |u| ≤ 382 m and |v| ≤ 318 m. Walking, laser hits and the shader's terrain marches read it
+  bilinearly in the same way, and the shader's normals come from the unbaked height, so the light shows no
+  grid (DECISIONS.md, item 18).
 - **Textures**: `aerial_sand` (sand), `gravelly_sand` (dark sand), `cliff_side` (sandstone),
   `large_sandstone_blocks` (ruins), from `tools/download_textures.sh` into `assets/textures/` (git-ignored).
 
@@ -100,6 +105,10 @@ reference Lunar Surface level takes 21-71 ms per frame at the same size on this 
   slower than Lunar's (the fog chords after the mouth). Not under 16.7 ms on this machine.
 - Since then the renderer starts at render scale 0.6 with 3 terrain octaves (DECISIONS.md, item 17): at 2560x1440
   every view but `wormhole`, `wormhole_exit` and `laser_into_wormhole` (17.6–19.3 ms) has a median under 16.7 ms.
+- With the terrain's height baked (DECISIONS.md, item 18), on an Apple M3 Pro (18-core GPU, macOS 15.7.3) at
+  2560x1440, best of 4 alternating rounds of 30 frames: every view's median and 99th percentile GPU time is under
+  16.7 ms. `wormhole` 14.5 → 10.3 ms, `wormhole_exit` 14.3 → 10.3, `laser_into_wormhole` 20.5 → 15.8 (p99
+  16.4), the other views 5.4–10.3 ms. The pictures are the same.
 - `--play-route --route warp-tour` at 1280x800 (frame times include 60 Hz vsync; the first 5 frames are skipped):
 
   | | median ms | 99th percentile ms | worst ms | render scale mean |

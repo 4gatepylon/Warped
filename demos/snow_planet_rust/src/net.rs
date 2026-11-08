@@ -984,10 +984,7 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
-            println!(
-                "The {} team won. Press Enter here to start a new game.",
-                TEAM_NAMES[winner as usize]
-            );
+            println!("The {} team won.", TEAM_NAMES[winner as usize]);
         }
     }
 
@@ -1089,18 +1086,6 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
     Ok(socket)
 }
 
-/// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
-/// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
-/// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
-/// `PLAYER_TIMEOUT_S`, turns off
-/// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
-/// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
-/// `new_game_after_win`, that long after a team won, admits only players who prove they know
-/// `game_password` (empty for anyone), and broadcasts
-/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
-///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
-#[allow(clippy::too_many_arguments)]
 /// `write_level_result` writes a level's winner (an index into `TEAM_NAMES`) to `path` for a match
 /// server (`--level-result-file`), as JSON such as `{"winner": "blue"}`, atomically: into
 /// `<path>.partial`, then renamed onto `path`.
@@ -1116,6 +1101,17 @@ pub fn write_level_result(path: &Path, winner: u32) -> Result<()> {
     Ok(())
 }
 
+/// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
+/// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
+/// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
+/// `PLAYER_TIMEOUT_S`, turns off
+/// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
+/// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
+/// `new_game_after_win`, that long after a team won, admits only players who prove they know
+/// `game_password` (empty for anyone), and broadcasts
+/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
+///
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
 #[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
@@ -1177,6 +1173,9 @@ pub fn serve(
         server.update_consoles();
         server.freeze_players(last_freeze.elapsed().as_secs_f64());
         last_freeze = Instant::now();
+        if server.game.winner.is_some() && won_at.is_none() && level_result_file.is_none() {
+            println!("Press Enter here to start a new game.");
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(path), Some(winner)) = (level_result_file, server.game.winner)
             && !has_written_result
@@ -1390,8 +1389,9 @@ impl Client {
     }
 
     /// `poll` reads every datagram that arrived, keeps the latest players (all but this one) and
-    /// scores, and returns what happened; while not yet welcomed it asks to join again every `JOIN_RETRY_S`. It
-    /// fails if the server plays another map.
+    /// scores, and returns what happened; while not yet welcomed it asks to join again every `JOIN_RETRY_S`. Once
+    /// the server has left this welcomed player unanswered for longer than its `PLAYER_TIMEOUT_S`, after which it has
+    /// dropped them, it joins the same team again (`rejoin`). It fails if the server plays another map.
     ///
     /// Example: `for event in client.poll()? { ... }`
     pub fn poll(&mut self) -> Result<Vec<NetEvent>> {
@@ -1515,6 +1515,12 @@ impl Client {
                 }
                 _ => {}
             }
+        }
+        if self.id.is_some() && self.get_silent_s() > PLAYER_TIMEOUT_S {
+            println!(
+                "No answer from the server for {PLAYER_TIMEOUT_S} s, so it dropped this player; joining again."
+            );
+            self.rejoin()?;
         }
         Ok(events)
     }
@@ -1744,6 +1750,7 @@ mod tests {
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
+    //! | Server silent to a welcomed client | shorter than its timeout (stays), longer (the server dropped it: joins the same team again) | `clients_the_server_dropped_join_again` |
 
     use super::*;
 
@@ -2443,6 +2450,29 @@ mod tests {
         assert_eq!(get_kills_and_deaths(&server), vec![(1, 1, 0), (2, 0, 1)]);
         server.start_new_game();
         assert_eq!(get_kills_and_deaths(&server), vec![(1, 0, 0), (2, 0, 0)]);
+    }
+
+    #[test]
+    fn clients_the_server_dropped_join_again() {
+        const SHORT_SILENCE_S: f64 = 1.0;
+        let mut server: Server = make_server();
+        let mut client: Client = connect_client(&mut server, RED);
+        poll_until(&mut client, |client| client.id.is_some());
+        let silent_since = |silent_s: f64| Some(Instant::now() - Duration::from_secs_f64(silent_s));
+        client.first_unanswered.set(silent_since(SHORT_SILENCE_S));
+        client.poll().expect("no datagrams");
+        assert_eq!(client.id, Some(1));
+        server.slots.clear();
+        client
+            .first_unanswered
+            .set(silent_since(PLAYER_TIMEOUT_S + SHORT_SILENCE_S));
+        client.poll().expect("no datagrams");
+        assert_eq!(client.id, None);
+        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
+        let (length, from) = server.socket.recv_from(&mut buffer).expect("the join");
+        server.handle(&buffer[..length], from).expect("the join");
+        poll_until(&mut client, |client| client.id.is_some());
+        assert_eq!((client.team, server.slots.len()), (Some(u32::from(RED)), 1));
     }
 
     #[test]

@@ -33,7 +33,9 @@ The match's `match_levels.yaml` says which program plays each level. `make level
 1. **Dust speed.** 20 of 24 bench views are under 16.7 ms at 2560×1440; `wormhole`, `wormhole_exit` and
    `laser_into_wormhole` are 17.6–19.3 ms. Next step: precompute ground height into the 0.25 m `MoundGrid`
    (the bump-layer count is set in both `terrain.rs` and the shader; keep them equal or hits won't match
-   what players see). `demos/dust_rust/DECISIONS.md` item 17.
+   what players see). `demos/dust_rust/DECISIONS.md` item 17. Done on `claude/dust-wormhole-speed`
+   (DECISIONS.md item 18): with the whole height baked, every view's median and p99 is under 16.7 ms on an
+   M3 Pro; `laser_into_wormhole`, at 15.8 ms (p99 16.4), has the least headroom.
 2. **Match coverage.** On the merged tree, `make e2e-match` (two bots) played City Sphere, Dark Forest, Snow
    Planet and Dust with no stall, and red won in 4 rounds; Lunar Surface wasn't reached. Unsteered bots end
    matches early, so a run through all five levels still needs steering. The defender usually wins: three

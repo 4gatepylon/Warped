@@ -34,6 +34,17 @@ joined to your team; a team wins it by turning off all of the other team's conso
 stays open 5 s to show the win, closes, and the match window shows the progression until the next
 round. `make e2e-match` plays a whole match of two bots with consoles off in 1 s.
 
+`make play-all-levels` plays a bot match steered through all five levels and checks it
+(`e2e/play_all_levels.py`): each bot gets `--bot-round-winners blue,blue,red,red,red` and joins no
+level in the rounds its team should lose, so the rounds are City Sphere (blue), Dark Forest (blue
+attacks and wins), Lunar Surface (red defends and wins), Snow Planet (red attacks and wins) and
+Dust (red wins the match). It fails on a stall (a round over `--round-timeout-s`), a process that
+stops early, or a round, level result file or outcome off that plan, and writes
+`.artifacts/play_all_levels/<run>/`: `levels.log` (each level's start, winner and duration), the
+match server's and both bots' logs, `summary.json` and `pictures/` (blue's progression page at each
+round's start and at the end, `--progression-pictures` with `--match`). It uses UDP 48110 for the
+match and 48112 for the levels (`MATCH_PORT`, `LEVEL_PORT`), away from a running match's.
+
 `make levels` puts each branch level in `.levels/<name>/` and builds it there; `match_levels.yaml`
 reads `.levels/<name>/demos/<name>_rust/.build/release/<binary>` and its `map_picture`. The default
 `LEVEL_SOURCE=checkout` makes `.levels/<name>` a symlink to this checkout, so the match builds and runs
@@ -88,8 +99,9 @@ round ends, so a level needs no exit logic. `--bot-objective consoles` holds `E`
 team's consoles in turn until its team wins (the copy's bot doesn't walk there: the server, as in
 the hyperbolic demo, doesn't check a player's distance to a console).
 
-Ports: match server UDP 47850 (47851 reserved for its discovery, not used yet: join by
-address); each round's level server 47852, and this copy's level discovery 47853.
+Ports: match server UDP 47850 (`--match-port`; 47851 reserved for its discovery, not used yet:
+join by address); each round's level server 47852 (`--port` with `--serve-match`), and this copy's
+level discovery 47853.
 
 ## The five levels (source of truth)
 
@@ -124,6 +136,14 @@ With the branch tips of 2026-11-08 14:06 UTC (Dust `3c23593`, Snow Planet `9095d
 `191b9d4`, Dark Forest `8f9b0ab`), a 9-round bot match ended with red winning, no stall.
 With the tips of 14:50 UTC (Dust `91924f4`, Snow Planet `0d0e450`, City Sphere `ce2bdc2`, Dark
 Forest `a6b3482`), a bot match ended in 3 rounds (red swept City Sphere, Snow Planet and Dust), no stall.
+On `staging/user-4gatepylon` at `f1c57cd` (levels from this checkout), `make play-all-levels` passed all seven runs,
+every level played, no stall, red winning in 5 rounds (Apple M3 Pro, macOS 15.7.3). Seconds from a round's
+start to its win: City Sphere 1.2–1.4, Dark Forest 14.7–22.7 (its own console time; its bot opens a window), Lunar
+Surface 3.3–4.0, Snow Planet 2.6–2.9, Dust 3.5–4.3 (consoles off in 1 s). With Dark Forest's client killed 6 s into
+its round, the match client started it again and the round ended at 37 s. Pylons a team, counted as the consoles the
+winner turned off (and the other team's with a lone bot): City Sphere 1, Dark Forest 2, Lunar Surface 3, Snow Planet
+2, Dust 3, as `game_design/DESIGN.md` says. No level's console bot walks to a pylon (each holds `E` from where it
+stands, and the servers take its word), so these runs don't show that every pylon can be reached on foot.
 
 The match takes no pylon or console count: each level program has its own (the column above
 follows `game_design/DESIGN.md`, 3-2-1-2-3 from the outside in) and reports only the winner.

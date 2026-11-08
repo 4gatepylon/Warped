@@ -906,10 +906,7 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
-            println!(
-                "The {} team won. Press Enter here to start a new game.",
-                TEAM_NAMES[winner as usize]
-            );
+            println!("The {} team won.", TEAM_NAMES[winner as usize]);
         }
     }
 
@@ -1016,7 +1013,8 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 ///
 /// Example: `write_level_result(Path::new("round_1.json"), 0)?;`
 fn write_level_result(path: &std::path::Path, winner: u32) -> Result<()> {
-    let partial: std::path::PathBuf = path.with_extension("partial");
+    let mut partial: std::ffi::OsString = path.as_os_str().to_owned();
+    partial.push(".partial");
     let team: &str = TEAM_NAMES[winner as usize];
     std::fs::write(&partial, format!("{{\"winner\": \"{team}\"}}\n"))?;
     std::fs::rename(&partial, path)?;
@@ -1094,6 +1092,9 @@ pub fn serve(
         if let (Some(winner), None, Some(path)) = (server.game.winner, won_at, level_result_file) {
             write_level_result(path, winner)?;
         }
+        if server.game.winner.is_some() && won_at.is_none() && level_result_file.is_none() {
+            println!("Press Enter here to start a new game.");
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
             && time.elapsed() >= delay
@@ -1102,6 +1103,9 @@ pub fn serve(
         }
         if should_start_new_game.swap(false, Ordering::Relaxed) {
             match server.game.winner {
+                Some(_) if level_result_file.is_some() => {
+                    println!("This level's result is written; the match server ends it.");
+                }
                 Some(_) => server.start_new_game(),
                 None => println!("No team has won yet, so the game goes on."),
             }
@@ -1296,8 +1300,9 @@ impl Client {
     }
 
     /// `poll` reads every datagram that arrived, keeps the latest players (all but this one) and
-    /// scores, and returns what happened; while not yet welcomed it asks to join again every `JOIN_RETRY_S`. It
-    /// fails if the server plays another map.
+    /// scores, and returns what happened; while not yet welcomed it asks to join again every `JOIN_RETRY_S`. Once
+    /// the server has left this welcomed player unanswered for longer than its `PLAYER_TIMEOUT_S`, after which it has
+    /// dropped them, it joins the same team again (`rejoin`). It fails if the server plays another map.
     ///
     /// Example: `for event in client.poll()? { ... }`
     pub fn poll(&mut self) -> Result<Vec<NetEvent>> {
@@ -1421,6 +1426,12 @@ impl Client {
                 }
                 _ => {}
             }
+        }
+        if self.id.is_some() && self.get_silent_s() > PLAYER_TIMEOUT_S {
+            println!(
+                "No answer from the server for {PLAYER_TIMEOUT_S} s, so it dropped this player; joining again."
+            );
+            self.rejoin()?;
         }
         Ok(events)
     }
@@ -1649,6 +1660,8 @@ mod tests {
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
+    //! | Server silent to a welcomed client | shorter than its timeout (stays), longer (the server dropped it: joins the same team again) | `clients_the_server_dropped_join_again` |
+    //! | Level result file's neighbours | one named like it without its extension, plus `.partial` (left alone) | `level_results_leave_files_named_like_them_alone` |
 
     use super::*;
 
@@ -2179,6 +2192,28 @@ mod tests {
     }
 
     #[test]
+    fn level_results_leave_files_named_like_them_alone() {
+        let folder: std::path::PathBuf =
+            std::env::temp_dir().join(format!("match_level_result_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let neighbour: std::path::PathBuf = folder.join("round_1.partial");
+        std::fs::write(&neighbour, "another file").expect("a neighbour");
+        write_level_result(&folder.join("round_1.json"), 1).expect("a result");
+        let result: Option<String> = std::fs::read_to_string(folder.join("round_1.json")).ok();
+        let neighbour_text: Option<String> = std::fs::read_to_string(&neighbour).ok();
+        let is_partial_left: bool = folder.join("round_1.json.partial").exists();
+        std::fs::remove_dir_all(&folder).expect("cleaned up");
+        assert_eq!(
+            (
+                result.as_deref(),
+                neighbour_text.as_deref(),
+                is_partial_left
+            ),
+            (Some("{\"winner\": \"red\"}\n"), Some("another file"), false)
+        );
+    }
+
+    #[test]
     fn the_first_team_to_finish_in_an_update_wins() {
         let mut server: Server = make_server();
         let (blue, red) = (address(50_002), address(50_001));
@@ -2294,6 +2329,29 @@ mod tests {
         assert_eq!(get_kills_and_deaths(&server), vec![(1, 1, 0), (2, 0, 1)]);
         server.start_new_game();
         assert_eq!(get_kills_and_deaths(&server), vec![(1, 0, 0), (2, 0, 0)]);
+    }
+
+    #[test]
+    fn clients_the_server_dropped_join_again() {
+        const SHORT_SILENCE_S: f64 = 1.0;
+        let mut server: Server = make_server();
+        let mut client: Client = connect_client(&mut server, RED);
+        poll_until(&mut client, |client| client.id.is_some());
+        let silent_since = |silent_s: f64| Some(Instant::now() - Duration::from_secs_f64(silent_s));
+        client.first_unanswered.set(silent_since(SHORT_SILENCE_S));
+        client.poll().expect("no datagrams");
+        assert_eq!(client.id, Some(1));
+        server.slots.clear();
+        client
+            .first_unanswered
+            .set(silent_since(PLAYER_TIMEOUT_S + SHORT_SILENCE_S));
+        client.poll().expect("no datagrams");
+        assert_eq!(client.id, None);
+        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
+        let (length, from) = server.socket.recv_from(&mut buffer).expect("the join");
+        server.handle(&buffer[..length], from).expect("the join");
+        poll_until(&mut client, |client| client.id.is_some());
+        assert_eq!((client.team, server.slots.len()), (Some(u32::from(RED)), 1));
     }
 
     #[test]

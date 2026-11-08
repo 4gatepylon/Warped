@@ -4,6 +4,13 @@
 using namespace metal;
 
 constant uint MAX_HOLE_COUNT = 8;
+constant float MIN_SPECKLE_GLOW = 0.02;
+constant uint SPECKLE_KIND_SALT = 0x9e3779b9u;
+constant uint3 PIXEL_HASH_PRIMES = uint3(73856093u, 19349663u, 2654435761u);
+constant uint2 PIXEL_HASH_MULTIPLIERS = uint2(0x7feb352du, 0x846ca68bu);
+constant uint3 PIXEL_HASH_SHIFTS = uint3(16u, 15u, 16u);
+constant uint PIXEL_HASH_DROPPED_BITS = 8u;
+constant float PIXEL_HASH_SCALE = 1.0 / 16777216.0;
 constant float BEACON_FLAG = 2.0;
 constant float METAL_SPEC = 0.45;
 constant float METAL_REFLECT = 0.6;
@@ -85,6 +92,8 @@ struct CityUniforms {
     float4 glass;
     float4 sky_color;
     float4 beacons[BEACON_SLOT_COUNT];
+    float4 hazard;
+    float4 beam_speckle;
 };
 
 struct Fragment {
@@ -126,11 +135,12 @@ static float3 apply_fog(float3 c, float3 world, constant CityUniforms& u) {
 }
 
 // `apply_hazard` paints diagonal yellow and black stripes on the street in a ring around the foot
-// of every lift (under each hole in the glass), a little outside the lift.
+// of every lift (under each of the first `hazard.x` holes in the glass, the lifts'), a little
+// outside the lift.
 static float3 apply_hazard(float3 base, float3 world, constant CityUniforms& u) {
     float3 d = normalize(world);
     float street_r = u.ambient.w;
-    for (uint i = 0; i < uint(u.glass.y) && i < MAX_HOLE_COUNT; i++) {
+    for (uint i = 0; i < uint(u.hazard.x) && i < MAX_HOLE_COUNT; i++) {
         float3 axis = u.holes[i].xyz;
         float c = dot(d, axis);
         float lift_m = u.glass.x * sqrt(max(1.0 - u.holes[i].w * u.holes[i].w, 0.0));
@@ -281,7 +291,24 @@ fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& 
     return float4(encode_srgb(tint) * alpha, alpha);
 }
 
-fragment float4 beam_fragment(Fragment in [[stage_in]]) {
+// `hash_pixel` gives a pseudo-random number in [0, 1) for pixel `id` and `seed`, independent from
+// pixel to pixel: Lunar Surface's (`render_voxel.metal`), so the speckle looks the same.
+static float hash_pixel(uint2 id, uint seed) {
+    uint h = id.x * PIXEL_HASH_PRIMES.x ^ id.y * PIXEL_HASH_PRIMES.y ^ seed * PIXEL_HASH_PRIMES.z;
+    h ^= h >> PIXEL_HASH_SHIFTS.x;
+    h *= PIXEL_HASH_MULTIPLIERS.x;
+    h ^= h >> PIXEL_HASH_SHIFTS.y;
+    h *= PIXEL_HASH_MULTIPLIERS.y;
+    h ^= h >> PIXEL_HASH_SHIFTS.z;
+    return float(h >> PIXEL_HASH_DROPPED_BITS) * PIXEL_HASH_SCALE;
+}
+
+// `beam_fragment` draws a laser beam (or, with a normal of length 1, the core's halo) over the
+// scene, adding its glow (alpha 0). On the share `in.layer` of the beam's pixels, picked anew each
+// frame with `u.beam_speckle.x`, a pixel speckles as on Lunar Surface: black (the scene darkened
+// by the glow, through alpha), white (white light by the glow) in the shares `u.beam_speckle.y`
+// and `.z`, or else a dropout (nothing added, the scene shows through).
+fragment float4 beam_fragment(Fragment in [[stage_in]], constant CityUniforms& u [[buffer(1)]]) {
     if (length(in.normal) > 0.5) {
         float halo = pow(saturate(1.0 - length(in.uv * 2.0 - 1.0)), CORE_HALO_POWER) * in.color.a;
         return float4(encode_srgb(in.color.rgb) * halo, 0.0);
@@ -289,5 +316,14 @@ fragment float4 beam_fragment(Fragment in [[stage_in]]) {
     float across = 1.0 - abs(in.uv.x * 2.0 - 1.0);
     float glow = pow(across, 1.5) * in.color.a;
     float3 core = mix(in.color.rgb, float3(1.0), pow(across, 6.0));
+    uint2 id = uint2(in.position.xy);
+    uint seed = uint(u.beam_speckle.x);
+    if (in.layer > 0.0 && glow > MIN_SPECKLE_GLOW && hash_pixel(id, seed) < in.layer) {
+        float kind = hash_pixel(id, seed ^ SPECKLE_KIND_SALT);
+        float strength = saturate(glow);
+        if (kind < u.beam_speckle.y) return float4(0.0, 0.0, 0.0, strength);
+        if (kind < u.beam_speckle.y + u.beam_speckle.z) return float4(float3(strength), 0.0);
+        return float4(0.0);
+    }
     return float4(encode_srgb(core) * glow, 0.0);
 }
