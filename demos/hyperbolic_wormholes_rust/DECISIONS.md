@@ -1042,9 +1042,13 @@
   - **When:** a shot of either gun, by any player, that hits the ground (the flat ground or the crater's terrain)
     throws up a burst where it lands, when its beam front gets there. Shots into blocks or players raise none. At
     most 12 bursts show at once; a new one replaces the oldest.
-  - **Grains:** a sniper shot throws 44 grains of grey-brown dust (2 to 4.5 cm), a rifle shot 16 at 0.65 times the
-    speed. They fly up a cone (0.5 rad) around the ground's normal, tilted a little back toward the shooter, at 2 to
-    6 m/s, rising up to 3 m, then land on the ground's slope and lie there.
+  - **Grains:** a sniper shot throws 33 grains of grey-brown dust, a rifle shot 12 at 0.65 times the speed. Each is
+    a small polyhedron (a tetrahedron, a cube or an octahedron, picked at random) 2 to 3.2 cm in radius, turned at
+    random and tumbling at 4 to 14 rad/s while it flies. They fly up a cone (0.5 rad) around the ground's normal,
+    tilted a little back toward the shooter, at 2 to 6 m/s, rising up to 3 m, then land on the ground's slope and lie
+    there, still.
+  - **W-86 (after you saw the first version):** the grains were spheres, 44 and 16 of them, 2 to 4.5 cm; you asked
+    for polyhedra, smaller big ones and slightly less dust, so there are 25% fewer and the largest radius is 3.2 cm.
   - **Mist:** 7 puffs for a sniper shot, 3 for a rifle shot (0.65 times as big), lighter than the grains. They drift
     out at 1.5 to 3.5 m/s, slowing to a stop within about half a second, while they swell from 0.12 m to 0.6 to
     1.2 m.
@@ -1052,20 +1056,26 @@
   - **Gravity:** the map's own, 6 m/s² on Lunar Surface, not the 30 m/s² the server settings give players for their
     quick jumps. At 30 m/s² the grains would be back on the ground within half a second, before anyone saw them in
     the air.
-  - **Light:** the sun lights the dust like the ground: the side of a grain or puff that faces the sun is brighter,
-    and dust seen toward the sun glows. A burst in shadow (checked once, when it starts) gets the ambient light and
+  - **Light:** the sun lights the dust like the ground: a grain's faces are flat, each as bright as it faces the
+    sun (a little light wraps round, 0.2), so a tumbling grain flickers; a puff's side that faces the sun is
+    brighter, and dust seen toward the sun glows. A burst in shadow (checked once, when it starts) gets the ambient light and
     some earthshine only.
   - **Drawing:** in the world, by the voxel ray tracer (`scan_dust`), so the dust is seen from any angle, through
     wormholes and behind blocks. Each straight piece of a ray is tested against each burst's bounding sphere, then
-    against its particles in the burst's Klein coordinates, where the piece is a straight line. Grains are discs at
-    least 1.5 pixels wide, puffs are Gaussians, and their optical depths add up along the ray. Each ray end carries
+    against its particles in the burst's Klein coordinates, where the piece is a straight line. A grain is its
+    polyhedron's faces (`GRAIN_PLANES`, hardcoded) turned by its quaternion: the face the ray enters gives the normal,
+    and the ray's distance outside the faces, midway between where it crosses them, gives a pixel-wide soft edge
+    (`cover_grain`). Grains are at least 1.5 pixels wide, puffs are Gaussians, and their optical depths add up along
+    the ray. Each ray end carries
     its dust, so it grows from 96 to 112 bytes, and adaptive sampling blends dust between samples only where its
     depth changes by less than 0.02.
   - **Cost:** Apple M3 Pro, macOS 15.7.3, Rust 1.98.1, release build, 2560 × 1600 with adaptive sampling, medians of
     10 frames, runs alternated. With no dust on screen, each bench view takes 0.4 to 1.8 ms more GPU time than
     before (about 2%, from the larger ray ends). One sniper burst 12 m away adds 0.1 to 1 ms to a 33 ms frame; the
     rifle held on one spot 5 m away (12 bursts, 193 particles) adds 2.7 ms to 34 ms. Twelve sniper bursts at once
-    (513 particles, out of reach in play with its 2 s reload) would add 11 to 20 ms.
+    (513 particles, out of reach in play with its 2 s reload) would add 11 to 20 ms. The polyhedra cost no more than
+    the spheres did, as there are fewer of them: one sniper burst 6.5 m away added 2.6 to 3.2 ms with spheres and 1.5
+    to 2.9 ms with polyhedra, one 2.7 m away 3.7 ms and 2.6 ms.
 - **Alternatives:**
   - sprites drawn over the picture at the hit's place on screen (cheaper, but they would not bend through
     wormholes, hide behind blocks, or move in 3D as you walk around them);
@@ -1073,17 +1083,24 @@
   - sending the particles over the network (each window makes them from the shots it already draws, so everyone sees
     a burst where a shot lands, though the grains differ from screen to screen);
   - keeping ray ends at 96 bytes by storing the laser glow and the dust as half floats, which might win back the 2%
-    at some cost in the glow's precision.
-- **Rationale:** you asked that shooting the ground throw some mist and dust particles up into the air.
+    at some cost in the glow's precision;
+  - grains as spheres or soft discs (the first version; you asked for polyhedra), or as rocks of many faces (more
+    work per ray for a difference too small to see at a few pixels).
+- **Rationale:** you asked that shooting the ground throw some mist and dust particles up into the air, and then
+  that the particles be polyhedra, the big ones smaller, and the dust slightly less.
 
 ### D82. Spaceships flying over Lunar Surface
 
 - **Choice:**
   - **Ships:** four, purely for looks: a ring ship whose ring turns, and three fighters flying in a V. Each is a
-    flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s `draw_spaceship`) from boxes
-    and tapered capsules (tables `HULL_*`), lit by the sun on the edges that face it and from below by the sunlit
-    ground, with glowing engines and a short plume, red lights to port and green to starboard, a flashing white
-    strobe and lit windows.
+    flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s `draw_spaceship`) from boxes,
+    tapered capsules and triangles (tables `HULL_*`), lit by the sun on the edges that face it and from below by the
+    sunlit ground, with glowing engines and a short plume, red lights to port and green to starboard, a flashing
+    white strobe and lit windows.
+  - **Delta fighters (W-88):** each fighter is one flat triangle, about as wide as it is long, with a darker spine
+    and a dark glass canopy painted on (`HULL_INSETS`, which colour a hull without changing its outline), two
+    engines at the back and nearly plain panels. Until W-88 they had a thin fuselage, thin swept wings and engine
+    pods. You picked this wide delta over a slimmer one.
   - **No freighter (W-87):** a fifth ship, a container freighter with coloured containers, a lit bridge and orange
     engines, flew from #193 until W-87 removed it, with its hull tables and its pulsing red beacon.
   - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) or 300 s
@@ -1112,7 +1129,8 @@
   - ships described in the map format (`common/maps/`), which only this renderer would read.
 - **Rationale:** you asked for a few spaceships flying overhead in the sky, purely background world-building, to
   look cool and pretty; then, seeing them, that the colourful freighter go ("the freighter is indeed meant to be
-  deleted and is ugly") and the ring station stay.
+  deleted and is ugly") and the ring station stay; and that the fighters become simple, geometric deltas without
+  thin arms ("A wide delta").
 
 ### D83. Aiming zooms in, and the flashlight moves to F
 
@@ -1445,7 +1463,21 @@
   pulses look Gaussian, more subtle and faster, in proportion to the smoothed rate of change; then for "soft swell"
   but rate based, "really wide gaussian like; think like smoother convolution vibes".
 
-## Baselines
+### D95. A step up is searched from the bottom (W-85)
+
+- **Choice:** when a step forward is blocked, the walk tries lifts of 2, 4, 6 cm and so on up to 30 cm
+  (`MAX_WALK_RISE_M`), takes the first that clears, and bisects between it and the lift before it. It used to try 30
+  cm first and give up if that didn't clear.
+- **Why it got stuck:** a structure's floor is a geodesic plane, so a step toward a habitat module's door or along a
+  walkway lifts it 1 to 2 cm into the feet, and the walk needs a small lift. The doorways and walkways are only 2 m
+  high, so a 30 cm lift put the head (15 cm above the 1.6 m eye) into the lintel or the roof, and the walk gave up.
+  The player stopped about 1 m before a module's door and moved only 0.3 to 0.5 m in a walkway.
+- **Alternatives:**
+  - a smaller `MAX_WALK_RISE_M` (it would stop climbing the low curbs and plinths it climbs now);
+  - a lower head probe (the head would show inside low ceilings);
+  - a taller doorway in the map (only those doorways, and any low ceiling added later would trap players again).
+- **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
+  room for it, and costs at most 15 more checks, only on a blocked step.
 
 ### D15. WebGL at the same drawing-buffer sizes
 

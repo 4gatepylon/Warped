@@ -106,6 +106,8 @@ constant float DUST_FORWARD_GLOW = 0.8;
 constant float DUST_FORWARD_POWER = 6.0;
 constant float DUST_EARTHSHINE_FRAC = 0.5;
 constant float DUST_SMOOTH_DEPTH = 0.02;
+constant int DUST_PUFF = 0;
+constant float GRAIN_WRAP = 0.2;
 constant float3 HASH_DIRECTION = float3(12.9898, 78.233, 37.719);
 constant float HASH_SCALE = 43758.5453;
 constant int FBM_OCTAVES = 4;
@@ -253,7 +255,6 @@ constant float SHIP_BEVEL_TILT_RAD = 1.2;
 constant float SHIP_SUNLIT = 1.1;
 constant float3 SHIP_GROUNDSHINE_COLOR = float3(0.5, 0.48, 0.46);
 constant float SHIP_PANELS_PER_HALF_LENGTH = 4.0;
-constant float SHIP_PANEL_VARIATION = 0.3;
 constant float SHIP_LIGHT_MIN_PIXELS = 1.0;
 constant float SHIP_ENGINE_BRIGHTNESS = 2.6;
 constant float SHIP_PLUME_BRIGHTNESS = 0.7;
@@ -277,29 +278,34 @@ constant float4 HULL_BOXES[] = {float4(0.82, 0.0, 0.1, 0.09), float4(-0.85, 0.0,
 /** @brief `HULL_BOX_COLORS` are the colours of `HULL_BOXES`. */
 constant float3 HULL_BOX_COLORS[] = {float3(0.7, 0.7, 0.72), float3(0.36, 0.36, 0.38)};
 /** @brief `HULL_CAPSULES` are the spaceships' tapered capsules (the two ends of the axis), mirrored across the keel. */
-constant float4 HULL_CAPSULES[] = {
-    float4(-0.8, 0.0, 0.62, 0.0), float4(0.62, 0.0, 1.0, 0.0), float4(0.15, 0.08, -0.6, 0.8), float4(-0.95, 0.17, -0.38, 0.17),
-    float4(-0.8, 0.0, 0.8, 0.0), float4(-0.06, 0.0, 0.06, 0.0),
-};
+constant float4 HULL_CAPSULES[] = {float4(-0.8, 0.0, 0.8, 0.0), float4(-0.06, 0.0, 0.06, 0.0)};
 /** @brief `HULL_CAPSULE_RADII` are the radii of `HULL_CAPSULES` at their two ends. */
-constant float2 HULL_CAPSULE_RADII[] = {
-    float2(0.12, 0.1), float2(0.1, 0.015), float2(0.2, 0.05), float2(0.065, 0.065),
-    float2(0.06, 0.05), float2(0.12, 0.12),
-};
+constant float2 HULL_CAPSULE_RADII[] = {float2(0.06, 0.05), float2(0.12, 0.12)};
 /** @brief `HULL_CAPSULE_COLORS` are the colours of `HULL_CAPSULES`. */
-constant float3 HULL_CAPSULE_COLORS[] = {
-    float3(0.68, 0.7, 0.74), float3(0.68, 0.7, 0.74), float3(0.6, 0.62, 0.66), float3(0.4, 0.4, 0.44),
-    float3(0.58, 0.58, 0.6), float3(0.66, 0.66, 0.68),
-};
+constant float3 HULL_CAPSULE_COLORS[] = {float3(0.58, 0.58, 0.6), float3(0.66, 0.66, 0.68)};
 /** @brief `HULL_PART_RANGES` gives each hull's first box, box count, first capsule and capsule count. */
-constant int4 HULL_PART_RANGES[HULL_COUNT] = {int4(0, 0, 0, 4), int4(0, 2, 4, 2)};
+constant int4 HULL_PART_RANGES[HULL_COUNT] = {int4(0, 0, 0, 0), int4(0, 2, 0, 2)};
+/** @brief `HULL_TRIANGLES` are the spaceships' flat triangles (three corners), each symmetric across the keel. */
+constant float2 HULL_TRIANGLES[][3] = {{float2(1.0, 0.0), float2(-0.75, 0.82), float2(-0.75, -0.82)}};
+/** @brief `HULL_TRIANGLE_COLORS` are the colours of `HULL_TRIANGLES`. */
+constant float3 HULL_TRIANGLE_COLORS[] = {float3(0.66, 0.68, 0.72)};
+/** @brief `HULL_INSETS` are triangles painted on a hull without changing its outline (three corners), later ones on top. */
+constant float2 HULL_INSETS[][3] = {
+    {float2(0.72, 0.0), float2(-0.75, 0.2), float2(-0.75, -0.2)}, {float2(0.5, 0.0), float2(0.12, 0.08), float2(0.12, -0.08)},
+};
+/** @brief `HULL_INSET_COLORS` are the colours of `HULL_INSETS`: a darker spine and a dark glass canopy. */
+constant float3 HULL_INSET_COLORS[] = {float3(0.44, 0.46, 0.52), float3(0.14, 0.2, 0.3)};
+/** @brief `HULL_TRIANGLE_RANGES` gives each hull's first triangle, triangle count, first inset and inset count. */
+constant int4 HULL_TRIANGLE_RANGES[HULL_COUNT] = {int4(0, 1, 0, 2), int4(0, 0, 0, 0)};
 /** @brief `HULL_ENGINES` are the spaceships' engine nozzles (centre, radius, unused), mirrored across the keel. */
-constant float4 HULL_ENGINES[] = {float4(-0.97, 0.17, 0.06, 0.0), float4(-0.95, 0.0, 0.09, 0.0)};
+constant float4 HULL_ENGINES[] = {float4(-0.77, 0.12, 0.055, 0.0), float4(-0.95, 0.0, 0.09, 0.0)};
+/** @brief `HULL_PANEL_VARIATIONS` are how much each hull's panels vary in brightness (plain on the fighters' deltas). */
+constant float HULL_PANEL_VARIATIONS[HULL_COUNT] = {0.06, 0.3};
 /** @brief `HULL_ENGINE_COLORS` are each hull's engine colours. */
 constant float3 HULL_ENGINE_COLORS[HULL_COUNT] = {float3(0.45, 0.7, 1.0), float3(0.5, 0.95, 1.0)};
 /** @brief `HULL_LIGHTS` are the spaceships' lights (centre, `LIGHT_*` kind or else a window, radius), mirrored across the keel. */
 constant float4 HULL_LIGHTS[] = {
-    float4(-0.63, 0.83, 0.0, 0.035), float4(-0.82, 0.0, 1.0, 0.04),
+    float4(-0.7, 0.76, 0.0, 0.035), float4(-0.74, 0.0, 1.0, 0.04),
     float4(0.85, 0.1, 0.0, 0.025), float4(-0.85, 0.15, 1.0, 0.03), float4(0.86, 0.0, 2.0, 0.015),
 };
 /** @brief `HULL_GLOW_RANGES` gives each hull's first engine, engine count, first light and light count. */
@@ -414,6 +420,24 @@ struct BeamSegment {
 };
 
 /**
+ * @brief `GRAIN_PLANES` are the faces of the dust grains' polyhedra (unit outward normal, distance from the centre in
+ * radii): a tetrahedron, a cube and an octahedron, their vertices 1.56, 1.2 and 1.26 radii out, so they look about
+ * as big as a ball of that radius.
+ */
+constant float4 GRAIN_PLANES[] = {
+    float4(-0.57735027, -0.57735027, -0.57735027, 0.52), float4(-0.57735027, 0.57735027, 0.57735027, 0.52),
+    float4(0.57735027, -0.57735027, 0.57735027, 0.52), float4(0.57735027, 0.57735027, -0.57735027, 0.52),
+    float4(1.0, 0.0, 0.0, 0.69282032), float4(-1.0, 0.0, 0.0, 0.69282032), float4(0.0, 1.0, 0.0, 0.69282032),
+    float4(0.0, -1.0, 0.0, 0.69282032), float4(0.0, 0.0, 1.0, 0.69282032), float4(0.0, 0.0, -1.0, 0.69282032),
+    float4(0.57735027, 0.57735027, 0.57735027, 0.72746134), float4(0.57735027, 0.57735027, -0.57735027, 0.72746134),
+    float4(0.57735027, -0.57735027, 0.57735027, 0.72746134), float4(0.57735027, -0.57735027, -0.57735027, 0.72746134),
+    float4(-0.57735027, 0.57735027, 0.57735027, 0.72746134), float4(-0.57735027, 0.57735027, -0.57735027, 0.72746134),
+    float4(-0.57735027, -0.57735027, 0.57735027, 0.72746134), float4(-0.57735027, -0.57735027, -0.57735027, 0.72746134),
+};
+/** @brief `GRAIN_PLANE_RANGES` gives each `DustShape` (`dust.rs`) its first face in `GRAIN_PLANES` and face count; a puff has none. */
+constant int2 GRAIN_PLANE_RANGES[] = {int2(0, 0), int2(0, 4), int2(4, 6), int2(10, 8)};
+
+/**
  * @brief `DustBurst` is the dust of one shot into the ground (`dust.rs`): the rows of the inverse of its frame (at the
  * hit point, y up), the sun's direction in that frame with how much sunlight reaches it, where its particles start and
  * how many there are, and how far its farthest particle centre is and its largest radius, in meters.
@@ -427,12 +451,14 @@ struct DustBurst {
 
 /**
  * @brief `DustParticle` is one grain or puff of mist: its centre in its burst's Klein coordinates (meters) and its
- * radius, its linear albedo and its opacity at its centre, and how soft its edge is (0 a sharp disc, 1 a Gaussian).
+ * radius, its linear albedo and its opacity at its centre, its `DustShape` (`dust.rs`), and the unit quaternion that
+ * turns it from its own axes into the burst's.
  */
 struct DustParticle {
     float4 position_radius;
     float4 color_opacity;
     float4 shape;
+    float4 orientation;
 };
 
 /**
@@ -1304,6 +1330,25 @@ static float get_capsule_distance_2d(float2 p, float4 ends, float2 radii) {
     return length(pa - ba * t) - mix(radii.x, radii.y, t);
 }
 
+/**
+ * @brief `get_triangle_distance_2d` gives the signed distance from p to the triangle with corners a, b and c (either
+ * winding), negative inside.
+ * @par Example
+ * @code
+ * float d = get_triangle_distance_2d(p, HULL_TRIANGLES[0][0], HULL_TRIANGLES[0][1], HULL_TRIANGLES[0][2]);
+ * @endcode
+ */
+static float get_triangle_distance_2d(float2 p, float2 a, float2 b, float2 c) {
+    float2 ab = b - a, bc = c - b, ca = a - c, pa = p - a, pb = p - b, pc = p - c;
+    float2 qa = pa - ab * clamp(dot(pa, ab) / dot(ab, ab), 0.0, 1.0);
+    float2 qb = pb - bc * clamp(dot(pb, bc) / dot(bc, bc), 0.0, 1.0);
+    float2 qc = pc - ca * clamp(dot(pc, ca) / dot(ca, ca), 0.0, 1.0);
+    float winding = sign(ab.x * ca.y - ab.y * ca.x);
+    float2 nearest = min(min(float2(dot(qa, qa), winding * (pa.x * ab.y - pa.y * ab.x)), float2(dot(qb, qb), winding * (pb.x * bc.y - pb.y * bc.x))),
+                         float2(dot(qc, qc), winding * (pc.x * ca.y - pc.y * ca.x)));
+    return -sqrt(nearest.x) * sign(nearest.y);
+}
+
 /** @brief `turn_into_sector` turns p by `-turn_rad`, then into the sector of `count` around the origin that holds the +x axis. @par Example @code float2 q = turn_into_sector(p, 0.3, 6.0); @endcode */
 static float2 turn_into_sector(float2 p, float turn_rad, float count) {
     float sector_rad = 2.0 * M_PI_F / count, angle_rad = atan2(p.y, p.x) - turn_rad;
@@ -1332,6 +1377,11 @@ static float get_hull_distance(int hull, float2 p, float ring_rad, thread float3
         float d = get_capsule_distance_2d(m, HULL_CAPSULES[i], HULL_CAPSULE_RADII[i]);
         if (d < distance) { distance = d; albedo = HULL_CAPSULE_COLORS[i]; }
     }
+    int4 triangles = HULL_TRIANGLE_RANGES[hull];
+    for (int i = triangles.x; i < triangles.x + triangles.y; i++) {
+        float d = get_triangle_distance_2d(m, HULL_TRIANGLES[i][0], HULL_TRIANGLES[i][1], HULL_TRIANGLES[i][2]);
+        if (d < distance) { distance = d; albedo = HULL_TRIANGLE_COLORS[i]; }
+    }
     if (hull == HULL_RING_SHIP) {
         float ring = abs(length(p) - RING_RADIUS_HALF_LENGTHS) - RING_HALF_WIDTH_HALF_LENGTHS;
         float spoke = get_capsule_distance_2d(turn_into_sector(p, ring_rad, RING_SPOKE_COUNT), float4(0.0, 0.0, RING_RADIUS_HALF_LENGTHS, 0.0),
@@ -1340,6 +1390,24 @@ static float get_hull_distance(int hull, float2 p, float ring_rad, thread float3
         if (d < distance) { distance = d; albedo = RING_COLOR; }
     }
     return distance;
+}
+
+/**
+ * @brief `paint_hull_insets` paints a hull's insets (`HULL_INSETS`) over its colour `albedo` at p (its own frame, in
+ * half lengths, with pixels `px` half lengths wide), with smooth edges.
+ * @par Example
+ * @code
+ * albedo = paint_hull_insets(HULL_FIGHTER, p, px, albedo);
+ * @endcode
+ */
+static float3 paint_hull_insets(int hull, float2 p, float px, float3 albedo) {
+    float2 m = float2(p.x, abs(p.y));
+    int4 triangles = HULL_TRIANGLE_RANGES[hull];
+    for (int i = triangles.z; i < triangles.z + triangles.w; i++) {
+        float d = get_triangle_distance_2d(m, HULL_INSETS[i][0], HULL_INSETS[i][1], HULL_INSETS[i][2]);
+        albedo = mix(albedo, HULL_INSET_COLORS[i], clamp(0.5 - d / px, 0.0, 1.0));
+    }
+    return albedo;
 }
 
 /**
@@ -1402,7 +1470,8 @@ static float3 draw_spaceship(thread const Scene &scene, Spaceship ship, float3 d
         g /= max(length(g), TINY);
         float tilt_rad = SHIP_BEVEL_TILT_RAD * clamp(1.0 + distance / SHIP_BEVEL_HALF_LENGTHS, 0.0, 1.0);
         float3 n = -c * cos(tilt_rad) + (g.x * h + g.y * side) * sin(tilt_rad);
-        float panel = 1.0 + SHIP_PANEL_VARIATION * (hash_3d(float3(floor(p * SHIP_PANELS_PER_HALF_LENGTH), float(hull) + sign(p.y))) - 0.5);
+        albedo = paint_hull_insets(hull, p, px, albedo);
+        float panel = 1.0 + HULL_PANEL_VARIATIONS[hull] * (hash_3d(float3(floor(p * SHIP_PANELS_PER_HALF_LENGTH), float(hull) + sign(p.y))) - 0.5);
         float3 light = SUN_COLOR * SHIP_SUNLIT * max(dot(n, scene.u.sun.xyz), 0.0) + SHIP_GROUNDSHINE_COLOR * max(-n.y, 0.0);
         color = mix(color, albedo * panel * light, coverage);
     }
@@ -1444,15 +1513,47 @@ static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_en
 /**
  * @brief `scan_dust` adds the dust of shots into the ground near a chord (x along v for s_end, `travelled` from the
  * eye) to `dust`: the summed colour times optical depth and the summed depth. Each burst the chord comes near is
- * scanned in its Klein coordinates (meters), where the chord is straight: a particle is a disc with a pixel-wide edge
- * (a grain) or a Gaussian (a puff) of its radius, at least `DUST_MIN_WIDTH_PX` pixels wide (and fainter as it
- * widens), and its colour is its albedo lit by the sun (more on the side facing it, glowing when seen toward it) and
- * the ambient light.
+ * scanned in its Klein coordinates (meters), where the chord is straight: a grain is a flat-faced polyhedron
+ * (`cover_grain`) and a puff a Gaussian ball, at least `DUST_MIN_WIDTH_PX` pixels wide (and fainter as it widens),
+ * and its colour is its albedo lit by the sun (more on the side facing it, glowing when seen toward it) and the
+ * ambient light.
  * @par Example
  * @code
  * scan_dust(scene, x, v, s, t, dust);
  * @endcode
  */
+/** @brief `rotate_by` turns v by unit quaternion q. @par Example @code float3 w = rotate_by(q, v); @endcode */
+static float3 rotate_by(float4 q, float3 v) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }
+
+/**
+ * @brief `cover_grain` gives how much of a pixel a grain covers, for the ray through `p` (from the grain's centre, in
+ * units of the grain's size) along unit vector u, both in the burst's axes: the polyhedron of `shape` turned by
+ * `orientation`, with a pixel-wide edge (`pixels_per_size` pixels per unit), and the normal of the face the ray enters
+ * (in the burst's axes) into n. The ray's gap to the polyhedron is measured midway between where it crosses into the
+ * last face's inside and out of the first: inside the polyhedron when the ray goes through it, near the closest point
+ * when it misses.
+ * @par Example
+ * @code
+ * float coverage = cover_grain(2, particle.orientation, off / width_m, dir, width_m / pixel_m, n);
+ * @endcode
+ */
+static float cover_grain(int shape, float4 orientation, float3 p, float3 u, float pixels_per_size, thread float3 &n) {
+    float4 inverse = float4(-orientation.xyz, orientation.w);
+    float3 p_local = rotate_by(inverse, p), u_local = rotate_by(inverse, u), n_local = float3(0.0, 1.0, 0.0);
+    float entry = -NO_HIT_S, exit = NO_HIT_S, gap = -NO_HIT_S;
+    int2 range = GRAIN_PLANE_RANGES[shape];
+    for (int i = range.x; i < range.x + range.y; i++) {
+        float4 plane = GRAIN_PLANES[i];
+        float a = dot(plane.xyz, p_local) - plane.w, b = dot(plane.xyz, u_local);
+        if (b < 0.0 && -a / b > entry) { entry = -a / b; n_local = plane.xyz; }
+        if (b > 0.0) exit = min(exit, -a / b);
+    }
+    float3 middle = p_local + 0.5 * (entry + exit) * u_local;
+    for (int i = range.x; i < range.x + range.y; i++) gap = max(gap, dot(GRAIN_PLANES[i].xyz, middle) - GRAIN_PLANES[i].w);
+    n = rotate_by(orientation, n_local);
+    return saturate(0.5 - gap * pixels_per_size);
+}
+
 static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float4 &dust) {
     float r = scene.u.curvature_radius_m, s_max = min(s_end, FAR_S);
     float3 ambient = float3(AMBIENT) + EARTHSHINE * DUST_EARTHSHINE_FRAC * EARTHSHINE_COLOR;
@@ -1475,10 +1576,12 @@ static void scan_dust(thread const Scene &scene, float4 x, float4 v, float s_end
             float3 off = q0 + clamp(dot(pr.xyz - q0, d) / dd, 0.0, 1.0) * d - pr.xyz;
             float width_m = max(pr.w, footprint_m), q = dot(off, off) / (width_m * width_m);
             if (q > DUST_CUTOFF_WIDTHS * DUST_CUTOFF_WIDTHS) continue;
-            float disc = saturate((1.0 - sqrt(q)) * width_m / pixel_m + 0.5);
-            float depth = co.w * (pr.w / width_m) * (pr.w / width_m) * mix(disc, exp(-q), particle.shape.x);
+            int shape = int(particle.shape.x + HALF_KIND);
             float3 n = q < 1.0 ? off / width_m - sqrt(1.0 - q) * dir : off * rsqrt(max(dot(off, off), TINY));
-            float facing = saturate((dot(n, sun) + DUST_WRAP) / (1.0 + DUST_WRAP));
+            float coverage = shape == DUST_PUFF ? exp(-q) : cover_grain(shape, particle.orientation, off / width_m, dir, width_m / pixel_m, n);
+            float depth = co.w * (pr.w / width_m) * (pr.w / width_m) * coverage;
+            float wrap = shape == DUST_PUFF ? DUST_WRAP : GRAIN_WRAP;
+            float facing = saturate((dot(n, sun) + wrap) / (1.0 + wrap));
             dust += float4(co.rgb * (SUN_INTENSITY * SUN_COLOR * burst.sun.w * (facing + forward) + ambient) * depth, depth);
         }
     }

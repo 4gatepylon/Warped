@@ -65,7 +65,8 @@ make join-game SERVER=127.0.0.1
   says what it hits. On Lunar Surface the habitat modules' and walkways' windows are glass in real openings: you
   see out of them and shoot through them, but can't climb through them.
   On Lunar Surface, a shot into the ground (yours or anyone's) throws up grey-brown dust and a puff of mist where
-  it lands: the grains fly up to a few meters and fall back, and all of it fades within 2 s (D81).
+  it lands: the grains, small tumbling polyhedra, fly up to a few meters and fall back, and all of it fades within
+  2 s (D81).
 - The bars in the bottom left (health in a game on a server, the gun's ammo, and on Lunar Surface the sprint energy)
   are segments that lean like `/`: empty ones dark glass outlined in the bar's colour, filled ones translucent,
   glossy and glowing (D85). While health or energy changes, soft, wide swells of light run over the bar's filled
@@ -107,8 +108,8 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 7.5 s crouched or 15 s walking or standing, a head bob, jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
-- Spaceships fly over Lunar Surface, purely for looks (D82): a ring ship and three fighters in a V, each crossing the
-  sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
+- Spaceships fly over Lunar Surface, purely for looks (D82): a ring ship and three delta-wing fighters in a V, each
+  crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
 

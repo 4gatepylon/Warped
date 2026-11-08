@@ -11,16 +11,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
-  and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/delta-fighters`, 2026-11-07.
-- [~] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
-  staging at #225. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch `claude/fix-bunker-exit`,
-  2026-11-07.
-- [~] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
-  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user wants to see it
-  before it merges. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
-  `claude/dust-polyhedra`, 2026-11-07.
+- [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
+  session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
   itself has shot noise (i.e. it looks almost kind of buggy or like a bunch of small shiny particles)". The amount is
   sampled per shot, grows as the rifle keeps shooting, and is sampled exponentially for the sniper, all in the YAML
@@ -49,6 +41,14 @@ is in [`AGENTS.md`](AGENTS.md).
   console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
   down.
   Claimed by Claude Code (session `08e70e8b-f763-4c5c-828c-f939a12fad13`), branch `reality-bend`, 2026-11-07.
+- [~] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
+  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). Claimed by Claude Code
+  (session `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/shoot-wormholes`, 2026-11-07.
+- [~] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
+  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
+  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
+  see more of the weapon on screen. And the laser should be touching the tip of the rifle." Claimed by Devin
+  (session Devin Desktop 2026-11-07), branch `devin/laser-blade`, 2026-11-07.
 
 ## Open
 
@@ -109,8 +109,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code.
-- [ ] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
-  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204).
 
 ## Pending user review
 
@@ -119,6 +117,13 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
+  be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
+  screenshots before it merged ("dust polyhedra looks good plz merge"). #234.
+- [?] **W-91 One laser on the minimap.** A bug: when you shoot, the minimap shows two lasers instead of one ("like
+  a triangle of some kind"). #243.
+- [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
+  staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
   it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
   don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
@@ -265,6 +270,8 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-87 No colourful spaceship.** Remove the colourful spaceship from the sky (W-53, #193): "the circular space
   station one is fine and great, but the colourful ones look ugly". That is the container freighter; the ring station
   stays, and so do the grey fighters unless the user says otherwise. #232.
+- [?] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go
+  simple and geometric." Pictures first; the user picked "A wide delta". #242.
 
 ## Done
 

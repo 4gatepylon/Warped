@@ -59,7 +59,7 @@ const MS_PER_S: f64 = 1000.0;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
-const FLOAT4S_PER_DUST_PARTICLE: usize = 3;
+const FLOAT4S_PER_DUST_PARTICLE: usize = 4;
 
 /// `VoxelUniforms` is the shader's `VoxelUniforms`.
 #[repr(C)]
@@ -184,6 +184,7 @@ struct GpuDustParticle {
     position_radius: [f32; 4],
     color_opacity: [f32; 4],
     shape: [f32; 4],
+    orientation: [f32; 4],
 }
 
 const _: () = assert!(
@@ -251,7 +252,8 @@ fn pack_dust(clouds: &[DustCloud]) -> (Vec<GpuDustBurst>, Vec<GpuDustParticle>) 
             particles.extend(cloud.particles.iter().map(|p| GpuDustParticle {
                 position_radius: p.position_m.extend(p.radius_m).as_vec4().to_array(),
                 color_opacity: [p.albedo[0], p.albedo[1], p.albedo[2], p.opacity_frac as f32],
-                shape: [p.softness_frac as f32, 0.0, 0.0, 0.0],
+                shape: [p.shape as i32 as f32, 0.0, 0.0, 0.0],
+                orientation: p.orientation.as_quat().to_array(),
             }));
             let inverse: DMat4 = invert_lorentz(cloud.frame);
             let farthest_m: f64 = cloud
