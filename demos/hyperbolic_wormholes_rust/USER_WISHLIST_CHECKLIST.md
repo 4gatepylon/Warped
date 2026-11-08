@@ -119,7 +119,7 @@ is in [`AGENTS.md`](AGENTS.md).
 ## Done
 
 - [x] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
-  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214.
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214, #226.
 - [x] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
   and on Lunar Surface. #73, #76, #81–#86, #90, #91.
 - [x] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
