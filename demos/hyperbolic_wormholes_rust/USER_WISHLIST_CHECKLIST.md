@@ -130,26 +130,8 @@ are here too, since the user hadn't confirmed them.
   testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
   for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
   BLUE but it has to be very close to white as I had asked". #272.
-- [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
-  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
-  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
-  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256. After playtesting
-  #256: "move the gun back so the handle of the gun is offscreen. it was fine how it was before, just make the gun
-  larger." #263. Then: "I see Leah made the lightsaber thing. That's OK. Let's do lightsaber for the sniper and do
-  the old laser view for the rifle." The rifle's beam is the laser again in #249, with W-84 (shot noise in the beam
-  itself).
-- [?] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
-  player in the game as a dot in their team's colour; the minimap already showed those in reach. #250.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237.
-- [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
-  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
-  don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
-  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226. Then: "can you add a little bit more haze". #238.
-- [?] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
-  and on Lunar Surface. #73, #76, #81–#86, #90, #91.
-- [?] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
-  `lunar_surface`, with lasers that eliminate players. #77, #79, #80.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-35 Flashlight.** Right-click turns on a flashlight that shines in a neat cone. #129.
@@ -315,3 +297,21 @@ Confirmed by the user after testing.
 - [x] **W-75 No spaceship on the blue side.** Get rid of the spaceship on the blue side. The landing pad stays, since
   the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
   #210. Confirmed by the user, 2026-11-07: "no spaceship on blue side looks good mark it as done".
+- [x] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
+  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
+  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
+  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256. After playtesting
+  #256: "move the gun back so the handle of the gun is offscreen. it was fine how it was before, just make the gun
+  larger." #263. Then: "I see Leah made the lightsaber thing. That's OK. Let's do lightsaber for the sniper and do
+  the old laser view for the rifle." The rifle's beam is the laser again in #249, with W-84 (shot noise in the beam
+  itself). Confirmed by the user, 2026-11-07: "lightsaber lasers is done, mark it as done".
+- [x] **W-90 Other players on the map.** Show where other people are on the map. The menu's MAP page shows every other
+  player in the game as a dot in their team's colour; the minimap already showed those in reach. #250. Confirmed by the user, 2026-11-07: "other players on map is done mark it as done".
+- [x] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
+  it's the moon, which doesn't make sense), and soften shadows. Also bloom ("like i also want bloom"). #214. After playtesting #214: "turn down the haze. i
+  don't like the haze. can you actually just turn off the haze in the near distance i want just the distance to be
+  hazy. everything is overexposed too", and "these changes have made the game much much slower". #226. Then: "can you add a little bit more haze". #238. Confirmed by the user, 2026-11-07: "better scene lighting is done, mark it as done".
+- [x] **W-01 Fast Rust renderer.** The wormholes demo in Rust and Metal at 60+ fps at full resolution, on the house
+  and on Lunar Surface. #73, #76, #81–#86, #90, #91. Confirmed by the user, 2026-11-07: "mark fast runst render er as done".
+- [x] **W-02 Multiplayer on one network.** Host and join a game on the same Wi-Fi, on `house_demo` and
+  `lunar_surface`, with lasers that eliminate players. #77, #79, #80. Confirmed by the user, 2026-11-07: "mark multiplayer on one network as done".
