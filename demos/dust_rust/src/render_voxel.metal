@@ -56,9 +56,10 @@ constant float SURFACE_OFFSET_M = 0.02;
 constant float TERRAIN_SHADOW_START_M = 1.0;
 constant float FOIL_LAMBDA_SQ = 0.25;
 constant float HORIZON_CAPTURE_FRAC = 1.02;
-constant float BEND_STEP_FRAC = 0.08;
+constant float BEND_STEP_FRAC = 0.16;
 constant int LATE_STEP_COUNT = 90;
-constant float LATE_BEND_STEP_FRAC = 0.24;
+constant float LATE_BEND_STEP_FRAC = 0.48;
+constant float POST_CROSSING_FOG_DEPTHS = 3.0;
 constant float MIN_BEND_STEP_M = 0.004;
 constant float MAX_BEND_STEP_M = 3.0;
 constant float GROUND_DETAIL_S = 7.0;
@@ -509,8 +510,9 @@ struct ZoneWalls {
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
  * regions, flashlight, the spaceships, the dust (how many bursts and particles), the beams' speckle (the frame's seed
- * and the shares of speckled pixels painted black and turned white) and the zone walls (`zone_walls.rs`'s `to_gpu`),
- * as `render_voxel.rs` writes them.
+ * and the shares of speckled pixels painted black and turned white), the zone walls (`zone_walls.rs`'s `to_gpu`),
+ * the overhead camera (corner u and v, meters per pixel and height; meters per pixel 0: the perspective camera) and
+ * the one laser colour (alpha 0: team colours), as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -561,6 +563,8 @@ struct VoxelUniforms {
     float4 atmosphere;
     float4 fog_color;
     float4 sand;
+    float4 overhead;
+    float4 laser_color;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -1305,6 +1309,23 @@ static float3 light_flashlight(thread const Scene &scene, float4 x, float4 n) {
 }
 
 /**
+ * @brief `get_sun_at` gives the direction toward the sun at x: carried from the world origin by parallel transport, or,
+ * for the overhead map picture (`is_overhead`), held fixed in the Fermi frame at x (along the map's u, v and up), so
+ * shadows fall one way across the whole picture as in a photo.
+ * @par Example
+ * @code
+ * float4 l = get_sun_at(scene.u.sun.xyz, x, scene.u.overhead.z > 0.0);
+ * @endcode
+ */
+static float4 get_sun_at(float3 d, float4 x, bool is_overhead) {
+    if (!is_overhead) return transport_from_centre(d, x);
+    float4 up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
+    float4 eu = orthonormal(float4(0.0, 0.0, -x.w, -x.z), up);
+    float4 ev = orthonormal(orthonormal(normalize_tangent(x, float4(1.0, 0.0, 0.0, 0.0)), up), eu);
+    return d.x * ev + d.y * up - d.z * eu;
+}
+
+/**
  * @brief `light_surface` lights a surface point with face normal n: the sun (GGX with lunar-Lambert diffuse, shadowed),
  * earthshine, the haze's skylight and the ambient light (split-sum specular with multiple-scattering compensation), lamps
  * and the laser spot.
@@ -1314,7 +1335,7 @@ static float3 light_flashlight(thread const Scene &scene, float4 x, float4 n) {
  * @endcode
  */
 static float3 light_surface(thread const Scene &scene, Surface s, float4 x, float4 n, float4 v) {
-    float4 l = transport_from_centre(scene.u.sun.xyz, x), view = -v;
+    float4 l = get_sun_at(scene.u.sun.xyz, x, scene.u.overhead.z > 0.0), view = -v;
     float2 env = get_env_brdf(s.roughness, max(mdot(s.n, view), 1e-4));
     float3 f0 = mix(float3(0.04), s.albedo, s.metallic);
     float3 energy = 1.0 + f0 * (1.0 / max(env.x + env.y, 1e-3) - 1.0);
@@ -2371,6 +2392,13 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float2 ndc = float2(2.0 * pixel.x / float(u.width_px) - 1.0, 1.0 - 2.0 * pixel.y / float(u.height_px));
     float3 d_cam = normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0));
     float4 x = u.camera[3], v = u.camera[0] * d_cam.x + u.camera[1] * d_cam.y + u.camera[2] * d_cam.z;
+    if (u.overhead.z > 0.0) {
+        float2 uv = (u.overhead.xy + pixel * u.overhead.z) / r;
+        float4 ground = float4(sinh(uv.y), 0.0, -sinh(uv.x) * cosh(uv.y), cosh(uv.x) * cosh(uv.y)), up = float4(0.0, 1.0, 0.0, 0.0);
+        float h = u.overhead.w / r;
+        x = cosh(h) * ground + sinh(h) * up;
+        v = -(sinh(h) * ground + cosh(h) * up);
+    }
     int inside = -1;
     for (int w = 0; w < u.warp_count; w++) {
         if (-mdot(x, warps[w].centre) < cosh(warps[w].params.z)) inside = w;
@@ -2385,13 +2413,14 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
     float4 gradient = float4(0.0);
     float3 local = float3(0.0);
-    bool has_gradient = false;
+    bool has_gradient = false, has_fog = u.fog_color.w > 0.0;
+    float fog_end_s = u.atmosphere.y;
     for (int it = 0; it < MAX_ITERATIONS; it++) {
         bool has_wind = u.wind.w != 0.0;
         if (inside < 0) {
             float s_end = FAR_S;
             if (has_wind) {
-                s_end = min(u.atmosphere.x, u.atmosphere.y - travelled);
+                s_end = min(u.atmosphere.x, fog_end_s - travelled);
                 if (s_end <= 0.0) { outcome = OUTCOME_SKY; break; }
                 v = wind_kick(u, x, v, 0.5 * s_end);
             }
@@ -2448,6 +2477,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         x = xn * rsqrt(-mdot(xn, xn));
         v = normalize_tangent(x, vn);
         travelled += ds;
+        if (has_fog && travelled > fog_end_s) { outcome = OUTCOME_SKY; break; }
         gradient = compute_gradient(scene, inside, x, rho, local) + wind_gradient(u, x);
         v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
         has_gradient = true;
@@ -2456,6 +2486,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         if (prm.x > HALF_KIND && rho < prm.y) {
             if (prm.x > FIRST_THROWN_KIND) tint = int(prm.x + 0.5) - 1;
             cross_throat(scene, inside, x, v);
+            if (has_fog) fog_end_s = min(fog_end_s, (u.atmosphere.z + POST_CROSSING_FOG_DEPTHS * u.atmosphere.w) / r);
             inside = int(prm.w + 0.5);
             has_gradient = false;
             continue;
@@ -2527,7 +2558,7 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end,
     float haze_frac, sun_cos;
     if (end.surface.x == OUTCOME_HIT) {
         haze_frac = 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - HAZE_START_M, 0.0) / HAZE_DISTANCE_M);
-        sun_cos = mdot(end.view, transport_from_centre(scene.u.sun.xyz, end.point));
+        sun_cos = mdot(end.view, get_sun_at(scene.u.sun.xyz, end.point, scene.u.overhead.z > 0.0));
     } else if (end.surface.x == OUTCOME_SKY) {
         haze_frac = exp(-max(end.point.y, 0.0) / HAZE_HORIZON_HEIGHT_FRAC);
         sun_cos = dot(end.point.xyz, scene.u.sun.xyz);
@@ -2605,7 +2636,7 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id
     }
     color = add_haze(scene, color, end, id);
     float glass = end.glow.y, core = end.glow.z, halo = end.glow.w;
-    float3 beam_color = to_linear((end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
+    float3 beam_color = to_linear(scene.u.laser_color.w > 0.0 ? scene.u.laser_color.rgb : (end.surface.w & 1) != 0 ? RED_COLOR : BLUE_COLOR);
     if (glass > 0.0) color = color * pow(GLASS_TINT, glass) + to_linear(GLASS_SHEEN);
     int tint = end.surface.w >> THROWN_TINT_FIRST_BIT & THROWN_TINT_MASK;
     if (tint > 0) color = mix(color, THROWN_TINTS[tint - 1] * (dot(color, LUMA) + THROWN_TINT_FLOOR), THROWN_TINT_FRAC);

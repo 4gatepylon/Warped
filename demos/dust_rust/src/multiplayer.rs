@@ -106,7 +106,7 @@ pub struct SharedView {
 /// the map page's marks (`minimap::TEAM_COLORS`), indexed by team.
 ///
 /// Example: `let blue = get_team_colors()[0];`
-fn get_team_colors() -> Vec<Color> {
+pub(crate) fn get_team_colors() -> Vec<Color> {
     TEAM_COLORS.iter().map(|&[r, g, b, _]| [r, g, b]).collect()
 }
 

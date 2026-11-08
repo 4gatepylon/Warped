@@ -183,6 +183,8 @@ renderers choose the fade and the glow.
   `{"model": "ambient_sun", "ambient", "sun"}` (a constant plus Lambert sunlight) or
   `{"model": "lunar_lambert", "lommel_seeliger_frac", "ambient", "earthshine", "sun_intensity", "shadows": bool}`
   (that mix of Lommel–Seeliger and Lambert reflectance, with straight shadow rays toward the sun if `shadows`).
+  `appearance.laser_color` (optional, display RGB 0 to 1) is one laser colour every team fires on the map (Dust's
+  golden white); without it each team fires its own colour.
 
 ## Models
 

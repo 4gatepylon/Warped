@@ -12,6 +12,7 @@
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
+#     make make-map-picture MAP=<map>: render the map from above for the menu's map page into map_pictures/.
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
@@ -50,7 +51,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (benchmark results, autopilo
   Recreating them means rerunning make bench-views and make run-autopilot. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help download-assets serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt clean reset-artifacts
+.PHONY: help download-assets serve-game join-game build-server-bundle package-mac-app bench-views make-map-picture run-autopilot test fmt clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -113,6 +114,9 @@ download-assets:
 
 bench-views:
 	cargo run --release -- --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)
+
+make-map-picture:
+	cargo run --release -- --renderer metal --map $(MAP) --make-map-picture
 
 run-autopilot:
 	cargo run --release -- --renderer $(RENDERER) --autopilot --width-px $(AUTOPILOT_WIDTH_PX) --height-px $(AUTOPILOT_HEIGHT_PX)

@@ -7,7 +7,7 @@
 //! players as dots in their team's colour. It also lends the picture without labels, and where it
 //! lies, to the minimap.
 //!
-//! Interface: `MapLayout` (`FromMap`, `draw_players`, `get_size_px`, `get_plain_pixels`,
+//! Interface: `MapLayout` (`FromMap`, `FromMapWithPhoto`, `draw_players`, `get_size_px`, `get_plain_pixels`,
 //! `get_placement`, `get_curvature_radius_m`).
 //!
 //! Example: `let pixels = layout.draw_players(feet_frame, 0, 60.0, &others);`
@@ -174,6 +174,20 @@ impl MapLayout {
     /// Example: `let layout = MapLayout::FromMap(&map, (992, 536))?;`
     #[allow(non_snake_case)]
     pub fn FromMap(map: &Map, max_size_px: (u32, u32)) -> Result<MapLayout> {
+        MapLayout::FromMapWithPhoto(map, max_size_px, None)
+    }
+
+    /// `FromMapWithPhoto` is `FromMap` with the drawn tops replaced by `photo` (RGBA, top row
+    /// first: the map rendered from above, `--make-map-picture`), if it is the picture's size;
+    /// the marks, labels, boundary and zone edges are drawn over it all the same.
+    ///
+    /// Example: `let layout = MapLayout::FromMapWithPhoto(&map, (992, 536), Some(&photo))?;`
+    #[allow(non_snake_case)]
+    pub fn FromMapWithPhoto(
+        map: &Map,
+        max_size_px: (u32, u32),
+        photo: Option<&image::RgbaImage>,
+    ) -> Result<MapLayout> {
         let r_m: f64 = map.get_curvature_radius_m();
         let footprints: Vec<Footprint> = make_footprints(map, r_m)?;
         let boundary_m: Option<[f64; 2]> = map
@@ -201,7 +215,10 @@ impl MapLayout {
             corner_m: min_m,
             m_per_px,
         };
-        layout.paint_tops(map, &footprints, boundary_m)?;
+        let photo_pixels: Option<&[u8]> = photo
+            .filter(|photo| photo.dimensions() == size_px)
+            .map(|photo| photo.as_raw().as_slice());
+        layout.paint_tops(map, &footprints, boundary_m, photo_pixels)?;
         if let Some(regions) = &map.regions {
             for zone in regions.zones.iter().flatten() {
                 for u_m in [zone.u_min_m, zone.u_max_m].into_iter().flatten() {
@@ -434,14 +451,16 @@ impl MapLayout {
     /// `paint_tops` paints every pixel: the highest top of the footprints there above the ground in
     /// its material's colour (lights at full brightness, the rest brighter the higher above the
     /// ground), else the ground; then lit from the top left by the slope of those heights, darker
-    /// outside the boundary, which gets a white outline.
+    /// outside the boundary, which gets a white outline. With `photo` (the picture's size), the
+    /// photo's pixels stand in for the drawn and lit tops.
     ///
-    /// Example: `layout.paint_tops(&map, &footprints, Some([128.0, 72.0]))?;`
+    /// Example: `layout.paint_tops(&map, &footprints, Some([128.0, 72.0]), None)?;`
     fn paint_tops(
         &mut self,
         map: &Map,
         footprints: &[Footprint],
         boundary_m: Option<[f64; 2]>,
+        photo: Option<&[u8]>,
     ) -> Result<()> {
         let (width, height) = (self.size_px.0 as usize, self.size_px.1 as usize);
         let (corner_m, m_per_px, r_m) = (self.corner_m, self.m_per_px, self.r_m);
@@ -528,6 +547,14 @@ impl MapLayout {
                     .any(|(nx, ny)| nx < width && ny < height && !is_inside(nx, ny));
                 let rgb: [u8; 3] = if is_edge {
                     BOUNDARY_COLOR
+                } else if let Some(photo) = photo {
+                    let outside_frac: f32 = if is_inside(x, y) {
+                        1.0
+                    } else {
+                        OUTSIDE_SHADE_FRAC
+                    };
+                    [0, 1, 2]
+                        .map(|c| (f32::from(photo[i * BYTES_PER_PIXEL + c]) * outside_frac) as u8)
                 } else {
                     colors[i].map(|c| encode_srgb(c * frac))
                 };

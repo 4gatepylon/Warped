@@ -145,6 +145,8 @@ pub struct VoxelUniforms {
     pub atmosphere: [f32; 4],
     pub fog_color: [f32; 4],
     pub sand: [f32; 4],
+    pub overhead: [f32; 4],
+    pub laser_color: [f32; 4],
 }
 
 const _: () = assert!(
@@ -652,7 +654,12 @@ impl VoxelFrame {
                 ]
             }),
             fog_color: world.fog.map_or([0.0; 4], |fog| {
-                [fog.color[0], fog.color[1], fog.color[2], fog.max_frac as f32]
+                [
+                    fog.color[0],
+                    fog.color[1],
+                    fog.color[2],
+                    fog.max_frac as f32,
+                ]
             }),
             sand: world.fog.map_or([0.0; 4], |_| {
                 [
@@ -662,6 +669,10 @@ impl VoxelFrame {
                     0.0,
                 ]
             }),
+            overhead: [0.0; 4],
+            laser_color: world
+                .laser_color
+                .map_or([0.0; 4], |[r, g, b]| [r, g, b, 1.0]),
         };
         assert_eq!(
             world.palette.len(),

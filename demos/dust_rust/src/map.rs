@@ -288,12 +288,15 @@ pub struct Lighting {
     pub shadows: Option<bool>,
 }
 
-/// `Appearance` is the renderer's style for surface detail, and the lighting.
+/// `Appearance` is the renderer's style for surface detail, the lighting, and the one laser
+/// colour every team fires on the map (none: each team fires its own colour).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Appearance {
     pub style: String,
     pub lighting: Lighting,
+    #[serde(default)]
+    pub laser_color: Option<[f32; 3]>,
 }
 
 /// `Map` is a whole map: the manifest's parts and the voxel cells.
@@ -545,7 +548,9 @@ impl Map {
                 .into());
             }
             if wind.segment_m <= 0.0 {
-                return Err(format!("map: {}: atmosphere.wind.segment_m must be > 0", map.name).into());
+                return Err(
+                    format!("map: {}: atmosphere.wind.segment_m must be > 0", map.name).into(),
+                );
             }
         }
         Ok(map)

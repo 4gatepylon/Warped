@@ -283,6 +283,7 @@
       "additionalProperties": false,
       "properties": {
         "style": {"type": "string"},
+        "laser_color": {"$ref": "#/$defs/color", "description": "One laser colour (display RGB, 0 to 1) for every team on this map; without it, each team fires its own colour."},
         "lighting": {
           "oneOf": [
             {

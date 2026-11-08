@@ -25,7 +25,9 @@ use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
-use crate::map::{Fog, Map, PlayerSettings, Wind, get_console_team, to_direction, to_frame, to_point};
+use crate::map::{
+    Fog, Map, PlayerSettings, Wind, get_console_team, to_direction, to_frame, to_point,
+};
 use crate::mesh::MeshModel;
 use crate::net::MAX_CONSOLE_COUNT;
 use crate::physics::Input;
@@ -43,7 +45,7 @@ pub const MARKER_NAME: &str = "a thrown wormhole";
 const MAX_MARKER_COUNT: usize = 16;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
-pub(crate) const BEND_STEP_FRAC: f64 = 0.08;
+pub(crate) const BEND_STEP_FRAC: f64 = 0.16;
 const CONSOLE_PULSE_HZ: f64 = 1.0;
 const CONSOLE_FRENZY_PULSE_HZ: f64 = 8.0;
 const CONSOLE_PULSE_EASE_TIME_CONSTANT_S: f64 = 0.3;
@@ -319,6 +321,7 @@ pub struct VoxelWorld {
     pub terrain: Option<Terrain>,
     pub wind: Option<WindField>,
     pub fog: Option<Fog>,
+    pub laser_color: Option<[f32; 3]>,
     pub sun: DVec3,
     pub planet: Option<(DVec3, f64)>,
     pub milky_way: Option<(DVec3, DVec3)>,
@@ -845,6 +848,7 @@ impl VoxelWorld {
                 .and_then(|a| a.wind)
                 .map(|wind| WindField::FromMap(&wind, r)),
             fog: map.atmosphere.and_then(|a| a.fog),
+            laser_color: map.appearance.laser_color,
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),
             consoles: team_consoles,
@@ -3623,11 +3627,17 @@ mod tests {
         };
         let origin: DVec4 = DVec4::new(0.0, 0.0, 0.0, 1.0);
         let gradient: DVec4 = wind.get_gradient(origin);
-        assert!((gradient - DVec4::new(K, 0.0, 0.0, 0.0)).length() < 1e-12, "{gradient}");
+        assert!(
+            (gradient - DVec4::new(K, 0.0, 0.0, 0.0)).length() < 1e-12,
+            "{gradient}"
+        );
         let across: DVec4 = wind.kick(origin, DVec4::new(0.0, 0.0, -1.0, 0.0), 0.5);
         assert!(across.x > 0.0 && across.z < 0.0, "{across}");
         let along: DVec4 = wind.kick(origin, DVec4::new(1.0, 0.0, 0.0, 0.0), 0.5);
-        assert!((along - DVec4::new(1.0, 0.0, 0.0, 0.0)).length() < 1e-12, "{along}");
+        assert!(
+            (along - DVec4::new(1.0, 0.0, 0.0, 0.0)).length() < 1e-12,
+            "{along}"
+        );
     }
 
     /// `the_dust_laser_bends_downwind` checks that on Dust a laser fired across the wind lands
@@ -3640,8 +3650,8 @@ mod tests {
             wind: None,
             ..windy.clone()
         };
-        let camera: DMat4 =
-            VoxelPlayer::AtView(&windy, [0.0, -40.0], [0.0, 40.0], None, 0.0).get_camera_frame(&windy);
+        let camera: DMat4 = VoxelPlayer::AtView(&windy, [0.0, -40.0], [0.0, 40.0], None, 0.0)
+            .get_camera_frame(&windy);
         let windy_spot: DVec4 = windy.trace_laser(camera).spot.expect("a windy hit");
         let calm_spot: DVec4 = calm.trace_laser(camera).spot.expect("a calm hit");
         assert!(windy_spot.x > calm_spot.x, "{windy_spot} vs {calm_spot}");

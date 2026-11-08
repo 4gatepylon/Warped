@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 R_M = 50.0
+LASER_COLOR = [1.0, 0.7, 0.25]
 OUTPUT = Path(__file__).resolve().parents[3] / "common/maps/dust/map.json"
 TERRAIN = {"kind": "crater", "rim_u_m": 170, "rim_v_m": 85, "wall_m": 25, "rim_height_m": 16,
            "relief_m": 0.7, "relief_wavelength_m": 22, "seed": 5}
@@ -199,7 +200,7 @@ def main() -> None:
                               {"team": "red", "u_min_m": 48, "u_max_m": None}],
                     "boundary": {"kind": "fermi_ellipse", "u_m": 128, "v_m": 64},
                     "zone_walls": {"height_m": 6, "thickness_m": 0.6, "opacity_frac": 0.25}},
-        "appearance": {"style": "desert", "lighting": {"model": "lunar_lambert", "lommel_seeliger_frac": 0.2, "ambient": 0.26,
+        "appearance": {"style": "desert", "laser_color": LASER_COLOR, "lighting": {"model": "lunar_lambert", "lommel_seeliger_frac": 0.2, "ambient": 0.26,
                                                        "earthshine": 0.0, "sun_intensity": 1.25, "shadows": True}},
     }
     output = Path(sys.argv[1]) if len(sys.argv) > 1 else OUTPUT

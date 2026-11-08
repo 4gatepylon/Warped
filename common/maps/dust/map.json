@@ -3723,6 +3723,11 @@
  },
  "appearance": {
   "style": "desert",
+  "laser_color": [
+   1.0,
+   0.7,
+   0.25
+  ],
   "lighting": {
    "model": "lunar_lambert",
    "lommel_seeliger_frac": 0.2,

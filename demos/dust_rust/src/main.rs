@@ -72,6 +72,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use avatar_model::AvatarClip;
 use clap::{Parser, ValueEnum};
 use glam::{DMat4, DVec3, DVec4, EulerRot, Mat3, Vec3};
 use objc2_core_foundation::CGSize;
@@ -175,7 +176,7 @@ const TITLE_FRAME_MS: u64 = 16;
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
-const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route and --export-map.";
+const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route, --make-map-picture and --export-map.";
 const MENU_DIM_FRAC: f32 = 0.8;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
@@ -282,6 +283,13 @@ struct Arguments {
     /// Render fixed views without a window, time them and save them under .artifacts/bench_views/.
     #[arg(long, conflicts_with = "autopilot")]
     bench_views: bool,
+    /// With --bench-views: render photogenic views (low sun, robots, thinner fog from above) instead.
+    #[arg(long, requires = "bench_views")]
+    photo_views: bool,
+    /// Render the map from straight above for the menu's map page, without fog or wind, and save
+    /// it in map_pictures/ (the window reads it there).
+    #[arg(long, conflicts_with_all = ["bench_views", "autopilot"])]
+    make_map_picture: bool,
     /// Play a scripted route without a window and save frames and timings under .artifacts/autopilot/.
     #[arg(long)]
     autopilot: bool,
@@ -563,6 +571,7 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
     let is_window_without_server: bool = arguments.join.is_none()
         && !arguments.serve
         && !arguments.bench_views
+        && !arguments.make_map_picture
         && !arguments.autopilot
         && !arguments.play_route
         && arguments.export_map.is_none();
@@ -645,6 +654,8 @@ fn run(arguments: Arguments) -> Result<()> {
     let renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
     if arguments.bot {
         run_bot(&arguments, renderer)
+    } else if arguments.make_map_picture {
+        make_map_picture(&arguments, renderer)
     } else if arguments.bench_views {
         bench_views(&arguments, renderer)
     } else if arguments.autopilot {
@@ -1051,6 +1062,8 @@ struct VoxelView {
     h_m: Option<f64>,
     pitch_rad: f64,
     is_laser_on: bool,
+    robots: Vec<([f64; 2], [f64; 2], usize)>,
+    fog_scale: f64,
 }
 
 /// `make_voxel_bench_views` gives the voxel benchmark's viewpoints on Dust (W-121), with the laser
@@ -1065,6 +1078,8 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         h_m,
         pitch_rad,
         is_laser_on: false,
+        robots: Vec::new(),
+        fog_scale: 1.0,
     };
     vec![
         view("blue_spawn", [-104.0, 0.0], [0.0, 0.0], None, 0.0),
@@ -1087,13 +1102,210 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         view("crater_wall", [-30.0, -30.0], [-60.0, -90.0], None, 0.1),
         VoxelView {
             is_laser_on: true,
-            ..view("laser_into_wormhole", [-62.0, -46.5], [-50.0, -40.0], None, 0.0)
+            ..view(
+                "laser_into_wormhole",
+                [-62.0, -46.5],
+                [-50.0, -40.0],
+                None,
+                0.0,
+            )
         },
         VoxelView {
             is_laser_on: true,
             ..view("laser_cross_wind", [0.0, -40.0], [0.0, 40.0], None, 0.0)
         },
     ]
+}
+
+/// `PHOTO_SUN` is the low, golden sun direction the photo views light Dust with.
+const PHOTO_SUN: [f64; 3] = [0.78, 0.26, -0.59];
+
+/// `make_voxel_photo_views` gives photogenic viewpoints on Dust: an oblique overview, a top-down view and hero
+/// shots with robots (feet, facing and team colour index), through the wormhole and across the wind.
+///
+/// Example: `let views = make_voxel_photo_views();`
+fn make_voxel_photo_views() -> Vec<VoxelView> {
+    let view = |name, at_m, target_m, h_m, pitch_rad, robots, fog_scale| VoxelView {
+        name,
+        at_m,
+        target_m,
+        h_m,
+        pitch_rad,
+        is_laser_on: false,
+        robots,
+        fog_scale,
+    };
+    vec![
+        view(
+            "photo_oblique",
+            [-75.0, -45.0],
+            [-15.0, 0.0],
+            Some(20.0),
+            -0.45,
+            vec![],
+            1000.0,
+        ),
+        view(
+            "photo_top_down",
+            [0.0, 0.0],
+            [0.0, -10.0],
+            Some(46.0),
+            -1.55,
+            vec![],
+            1000.0,
+        ),
+        view(
+            "photo_blue_pylons",
+            [-58.0, 9.0],
+            [-86.0, 0.0],
+            None,
+            0.06,
+            vec![
+                ([-70.0, 2.0], [-86.0, 0.0], 0),
+                ([-66.0, -6.0], [-50.0, 0.0], 0),
+            ],
+            1.0,
+        ),
+        VoxelView {
+            is_laser_on: true,
+            ..view(
+                "photo_wormhole",
+                [-63.0, -47.5],
+                [-50.0, -40.0],
+                None,
+                0.02,
+                vec![([-56.0, -48.0], [-50.0, -40.0], 1)],
+                1.0,
+            )
+        },
+        view(
+            "photo_storm",
+            [-44.0, -8.0],
+            [20.0, -2.0],
+            Some(2.5),
+            0.02,
+            vec![
+                ([-30.0, -12.0], [-44.0, -8.0], 1),
+                ([-22.0, -2.0], [-44.0, -8.0], 1),
+            ],
+            1.0,
+        ),
+        view(
+            "photo_red_base",
+            [62.0, -14.0],
+            [88.0, 2.0],
+            Some(4.0),
+            -0.05,
+            vec![
+                ([69.0, -10.0], [62.0, -14.0], 1),
+                ([72.0, -4.0], [62.0, -14.0], 1),
+            ],
+            1.0,
+        ),
+    ]
+}
+
+/// `MAP_PICTURE_SAMPLES_PER_PX` is how many rendered pixels across and down make one of the map
+/// picture's pixels (3: 9 samples a pixel).
+const MAP_PICTURE_SAMPLES_PER_PX: u32 = 3;
+/// `MAP_PICTURE_EYE_H_M` is the height the map picture's rays start from, above every structure.
+const MAP_PICTURE_EYE_H_M: f64 = 60.0;
+
+/// `get_map_picture_path` gives where the map page's photo of `map` (`map_name`'s folder, at its
+/// curvature) is kept: under map_pictures/, named by map and curvature radius, so a map with
+/// its curvature scaled by a server's settings falls back to the drawn picture.
+///
+/// Example: `let path = get_map_picture_path(&map, MapName::Dust);`
+fn get_map_picture_path(map: &map::Map, map_name: MapName) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("map_pictures")
+        .join(format!(
+            "{}_r{:.0}m.png",
+            map_name.get_folder_name(),
+            map.get_curvature_radius_m()
+        ))
+}
+
+/// `make_map_layout` gives the menu's map page for `map`, over its photo from above when
+/// `--make-map-picture` saved one, else drawn.
+///
+/// Example: `let layout = make_map_layout(&map, MapName::Dust)?;`
+fn make_map_layout(map: &map::Map, map_name: MapName) -> Result<map_layout::MapLayout> {
+    let path: PathBuf = get_map_picture_path(map, map_name);
+    let photo: Option<image::RgbaImage> = if path.exists() {
+        Some(image::open(&path)?.to_rgba8())
+    } else {
+        None
+    };
+    map_layout::MapLayout::FromMapWithPhoto(map, get_map_picture_max_px(), photo.as_ref())
+}
+
+/// `make_map_picture` renders `--map` from straight above in the map page's picture (its size,
+/// corner and meters per pixel), with sun shadows and without fog or wind,
+/// `MAP_PICTURE_SAMPLES_PER_PX` squared samples a pixel, and saves it at `get_map_picture_path`,
+/// and the map page without labels, drawn and over the photo, under .artifacts/make_map_picture/.
+///
+/// Example: `make_map_picture(&arguments, renderer)?;`
+fn make_map_picture(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
+    let map: map::Map = load_map(arguments.map, &ServerSettings::Builtin())?;
+    let layout: map_layout::MapLayout =
+        map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?;
+    let (corner_m, m_per_px) = layout.get_placement();
+    let size_px: (u32, u32) = layout.get_size_px();
+    let n: u32 = MAP_PICTURE_SAMPLES_PER_PX;
+    let render_px: (u32, u32) = (size_px.0 * n, size_px.1 * n);
+    let mut world: VoxelWorld = VoxelWorld::FromMap(&map)?;
+    (world.fog, world.wind) = (None, None);
+    let center_m: [f64; 2] =
+        [0, 1].map(|a| corner_m[a] + m_per_px * f64::from([size_px.0, size_px.1][a]) / 2.0);
+    let target_m: [f64; 2] = [center_m[0], center_m[1] - 1.0];
+    let player: VoxelPlayer = VoxelPlayer::AtView(&world, center_m, target_m, None, 0.0);
+    let mut frame: VoxelFrame = VoxelFrame::Build(
+        &world,
+        player.get_camera_frame(&world),
+        &[],
+        None,
+        &[],
+        render_px,
+    );
+    let sample_m: f64 = m_per_px / f64::from(n);
+    frame.uniforms.overhead = [
+        corner_m[0] as f32,
+        corner_m[1] as f32,
+        sample_m as f32,
+        MAP_PICTURE_EYE_H_M as f32,
+    ];
+    frame.uniforms.pixel_angle_rad = (sample_m / MAP_PICTURE_EYE_H_M) as f32;
+    let mut samples: Vec<u8> =
+        vec![0; render_px.0 as usize * render_px.1 as usize * BYTES_PER_PIXEL];
+    renderer.render(FrameData::Voxel(&frame), render_px, &mut samples)?;
+    let picture: image::RgbaImage = image::imageops::resize(
+        &image::RgbaImage::from_raw(render_px.0, render_px.1, samples)
+            .ok_or("make_map_picture: the render is the size asked for")?,
+        size_px.0,
+        size_px.1,
+        image::imageops::FilterType::Triangle,
+    );
+    let path: PathBuf = get_map_picture_path(&map, arguments.map);
+    fs::create_dir_all(path.parent().expect("a folder"))?;
+    save_png(&path, picture.as_raw(), size_px.0, size_px.1)?;
+    println!("Saved the map picture: {}", path.display());
+    let folder: PathBuf = make_run_folder("make_map_picture", arguments.label.as_deref())?;
+    let with_photo: map_layout::MapLayout =
+        map_layout::MapLayout::FromMapWithPhoto(&map, get_map_picture_max_px(), Some(&picture))?;
+    for (name, layout) in [("drawn", &layout), ("photo", &with_photo)] {
+        save_png(
+            &folder.join(format!("{name}.png")),
+            layout.get_plain_pixels(),
+            size_px.0,
+            size_px.1,
+        )?;
+    }
+    println!(
+        "Saved the map page drawn and over the photo: {}",
+        folder.display()
+    );
+    Ok(())
 }
 
 /// `bench_voxel_views` renders a voxel map's viewpoints without a window, timing each, as
@@ -1112,7 +1324,11 @@ fn bench_voxel_views(
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
     let mut pixels: Vec<u8> = vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL];
-    let views: Vec<VoxelView> = make_voxel_bench_views();
+    let views: Vec<VoxelView> = if arguments.photo_views {
+        make_voxel_photo_views()
+    } else {
+        make_voxel_bench_views()
+    };
     eprintln!(
         "Benchmarking {} views of {} at {}x{} with the {} renderer...",
         views.len(),
@@ -1123,6 +1339,29 @@ fn bench_voxel_views(
     );
     let mut results: Vec<Value> = Vec::new();
     for view in views {
+        let mut posed: VoxelWorld = world.clone();
+        if arguments.photo_views {
+            posed.sun = DVec3::from_array(PHOTO_SUN).normalize();
+            posed.fog = posed.fog.map(|fog| map::Fog {
+                distance_m: fog.distance_m * view.fog_scale,
+                ..fog
+            });
+        }
+        let bodies: Vec<(DMat4, usize)> = view
+            .robots
+            .iter()
+            .map(|&(feet_m, facing_m, team)| {
+                (
+                    VoxelPlayer::AtView(&posed, feet_m, facing_m, None, 0.0).get_feet_frame(&posed),
+                    team,
+                )
+            })
+            .collect();
+        let poses: Vec<(AvatarClip, f64)> =
+            bodies.iter().map(|_| (AvatarClip::Idle, 0.0)).collect();
+        let posed: VoxelWorld =
+            posed.with_posed_avatars(&bodies, &poses, &[], &multiplayer::get_team_colors());
+        let world: &VoxelWorld = &posed;
         let player: VoxelPlayer =
             VoxelPlayer::AtView(world, view.at_m, view.target_m, view.h_m, view.pitch_rad);
         let camera: DMat4 = player.get_camera_frame(world);
@@ -2391,7 +2630,7 @@ impl Session {
             menu: None,
             last_connection_problem: None,
             exit_prompt: exit_prompt::ExitPrompt::New(),
-            map_layout: map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?,
+            map_layout: make_map_layout(&map, arguments.map)?,
             render_scale: arguments
                 .render_scale
                 .unwrap_or(get_default_render_scale(arguments.renderer)),
@@ -3350,8 +3589,7 @@ impl Session {
                         && let Some(voxel) = &mut self.voxel
                     {
                         let map: map::Map = load_map(self.map_name, &server_settings)?;
-                        self.map_layout =
-                            map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?;
+                        self.map_layout = make_map_layout(&map, self.map_name)?;
                         let head_bob: settings::HeadBobSettings = voxel.world.head_bob.clone();
                         voxel.world = VoxelWorld::FromMap(&map)?;
                         voxel.world.head_bob = head_bob;
@@ -3687,13 +3925,21 @@ impl Session {
     /// Example: `session.print_route_statistics();`
     fn print_route_statistics(&self) {
         let mut csv: String = String::from("frame,frame_ms,render_scale\n");
-        for (n, (ms, scale)) in self.frame_times_ms.iter().zip(&self.render_scales).enumerate() {
+        for (n, (ms, scale)) in self
+            .frame_times_ms
+            .iter()
+            .zip(&self.render_scales)
+            .enumerate()
+        {
             csv += &format!("{n},{ms:.3},{scale:.3}\n");
         }
         match make_run_folder("play_route", None)
             .and_then(|folder| Ok(std::fs::write(folder.join("frames.csv"), csv).map(|_| folder)?))
         {
-            Ok(folder) => println!("Wrote the route's frame times to {}.", folder.join("frames.csv").display()),
+            Ok(folder) => println!(
+                "Wrote the route's frame times to {}.",
+                folder.join("frames.csv").display()
+            ),
             Err(error) => eprintln!("Couldn't write the route's frame times: {error}"),
         }
         let mut times_ms: Vec<f64> = self.frame_times_ms[ROUTE_WARMUP_FRAME_COUNT..].to_vec();

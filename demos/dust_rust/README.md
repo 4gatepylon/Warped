@@ -46,6 +46,14 @@ LAN discovery 47831.
   tall, drifting downwind at 9 m/s, thicken or thin the fog by up to 30% where each ray is halfway to its end
   (or 60 m out); thin streaks (4 m by 8 cm) at 2.5 m and 6.5 m in front of the camera drift the same way. The
   clock is the window's sky time, so `--bench-views` pictures are still frames. Cost: about 1 ms a frame.
+- **Laser colour**: the map's `appearance.laser_color` (Dust: golden white, [1, 0.7, 0.25]) is the one colour
+  every team's laser takes; a map without it keeps the team colours.
+- **Map page** (Tab, then E) and minimap: `make make-map-picture MAP=dust` (`--make-map-picture`) renders the map
+  straight down along the vertical geodesics from 60 m, with sun shadows, no fog or wind, 3×3 samples a pixel,
+  into `map_pictures/dust_r50m.png` (committed, 0.8 MB). The window reads it at start-up and draws the labels and
+  live marks over it, so it costs nothing a frame; without the file (or at another curvature) it falls back to the
+  drawn map. The sun keeps one direction in the map's Fermi frame there, so shadows fall one way as in a photo. The
+  spokes and the round patch in the middle are the ground's hyperbolic tiling.
 - **Textures**: `aerial_sand` (sand), `gravelly_sand` (dark sand), `cliff_side` (sandstone),
   `large_sandstone_blocks` (ruins), from `tools/download_textures.sh` into `assets/textures/` (git-ignored).
 

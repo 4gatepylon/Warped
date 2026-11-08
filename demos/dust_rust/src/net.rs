@@ -1094,8 +1094,7 @@ pub fn serve(
             is_alive
         });
         server.update_consoles();
-        if let (Some(path), Some(winner), None) = (&level_result_path, server.game.winner, won_at)
-        {
+        if let (Some(path), Some(winner), None) = (&level_result_path, server.game.winner, won_at) {
             write_level_result(path, winner)?;
         }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));

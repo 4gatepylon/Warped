@@ -16,3 +16,8 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
 7. **Wind chords of 48 m**, not 12 m: a 48 m chord strays from the curved ray by k·48²/8 = 0.35 m, invisible at
    that range, and saves about 5 ms a frame.
 8. **Package and binary names kept** (`hyperbolic-wormholes`, `wormholes_server`) so the copy stays a clean diff.
+9. **Laser colour [1, 0.7, 0.25]** (display RGB) for every team, from the map file: warmer than the house map's
+   near-white core so the gold shows through the core's whitening. **User?** shade.
+10. **Map picture straight down, not oblique**, so marks drawn at map coordinates land on what they mark; height
+    60 m, 3×3 supersampling, fog and wind off, sun fixed in the Fermi frame. Committed (0.8 MB) rather than
+    rendered at each start, which would need the GPU before the window opens. **User?** look.
