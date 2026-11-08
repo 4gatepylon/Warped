@@ -312,8 +312,8 @@ Every key here is the default. Each player can rebind any action, in the menu or
   - SETTINGS: the player's own settings (key bindings, mouse speed and view effects).
   - MAP: the whole level from above, with the ground's relief, structures, consoles, wormhole
     mouths, the black hole, the spawns, the zones' edges and the map edge, the player as a disk
-    pointing the way they face, and a circle of the minimap's reach around them (the rest darker
-    and blurred).
+    pointing the way they face, a circle of the minimap's reach around them (the rest darker and
+    blurred), and every other player in the game, near or far, as a dot in their team's colour.
   - SCORES: the player count, and each player's team, kills and deaths, sorted by team and kills,
     with each team's totals.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the

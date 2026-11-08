@@ -3267,13 +3267,18 @@ impl Session {
     }
 
     /// `make_map_picture` gives the map page's picture: the whole map from above
-    /// (`map_layout.rs`) with this player on it, centred in the page's area for it.
+    /// (`map_layout.rs`) with this player on it and, in a game on a server, every other player in
+    /// the game, centred in the page's area for it.
     ///
     /// Example: `let picture = self.make_map_picture();`
     fn make_map_picture(&self) -> Picture {
         let feet: glam::DMat4 = match &self.voxel {
             Some(voxel) => voxel.player.get_feet_frame(&voxel.world),
             None => self.player.frame,
+        };
+        let others: Vec<(DVec4, u32)> = match &self.multiplayer {
+            Some(multiplayer) => get_points_and_teams(&multiplayer.client.players),
+            None => Vec::new(),
         };
         let size_px: (u32, u32) = self.map_layout.get_size_px();
         let size_mask_px: [i32; 2] =
@@ -3283,10 +3288,11 @@ impl Session {
                 + (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a] - size_mask_px[a]) / 2
         });
         Picture {
-            pixels: self.map_layout.draw_player(
+            pixels: self.map_layout.draw_players(
                 feet,
                 self.get_team(),
                 self.player_settings.minimap.range_m,
+                &others,
             ),
             size_px,
             min_mask_px,
@@ -3536,6 +3542,17 @@ fn get_eyes(players: &[net::RemotePlayer]) -> Vec<DVec4> {
     players
         .iter()
         .map(|player| player.frame.col(AXIS_W))
+        .collect()
+}
+
+/// `get_points_and_teams` gives where other players are (their eyes) and their teams (indices
+/// into `net::TEAM_NAMES`), for the map page.
+///
+/// Example: `let others = get_points_and_teams(&client.players);`
+fn get_points_and_teams(players: &[net::RemotePlayer]) -> Vec<(DVec4, u32)> {
+    players
+        .iter()
+        .map(|player| (player.frame.col(AXIS_W), player.team))
         .collect()
 }
 
