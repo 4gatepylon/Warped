@@ -40,6 +40,7 @@ constant float TINY = 1.0e-9;
 constant float FAR_S = 12.0;
 constant float SHADOW_M = 80.0;
 constant float SURFACE_OFFSET_M = 0.02;
+constant float TERRAIN_SHADOW_START_M = 1.0;
 constant float FOIL_LAMBDA_SQ = 0.25;
 constant float HORIZON_CAPTURE_FRAC = 1.02;
 constant float BEND_STEP_FRAC = 0.08;
@@ -696,18 +697,18 @@ static float3 get_fermi(float4 x, float r) {
 }
 
 /**
- * @brief `trace_terrain` is terrain.rs's `find_hit_s` on the chord from x along v within `hit.s`: steps of a fraction
- * of the gap to the ground, at least a little more each meter out, then bisection of the step that went under; with
+ * @brief `trace_terrain` is terrain.rs's `find_hit_s` on the chord from x along v from `s_start` to `hit.s`: steps of a
+ * fraction of the gap to the ground, at least a little more each meter out, then bisection of the step that went under; with
  * `should_track_lit` (shadow rays only), it lowers `hit.lit` to the least gap over the distance travelled times
  * `SHADOW_PENUMBRA_TAN`.
  * @par Example
  * @code
- * trace_terrain<false>(scene, x, v, hit);
+ * trace_terrain<false>(scene, x, v, 0.0, hit);
  * @endcode
  */
 template <bool should_track_lit>
-static void trace_terrain(thread const Scene &scene, float4 x, float4 v, thread Hit &hit) {
-    float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = 0.0, previous = 0.0;
+static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s_start, thread Hit &hit) {
+    float r = scene.u.curvature_radius_m, top_m = scene.u.relief.z, s = s_start, previous = s_start;
     for (int i = 0; i < TERRAIN_MAX_STEPS; i++) {
         float4 p = geodesic_point(x, v, s);
         float3 f = get_fermi(p, r);
@@ -781,7 +782,7 @@ static bool is_clear_of_blocks(thread const Scene &scene, int w, float3 local, f
  * @endcode
  */
 static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, thread Hit &hit, thread float &glass_s) {
-    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, hit); else trace_ground(x, v, hit);
+    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, 0.0, hit); else trace_ground(x, v, hit);
     if (warp < 0) {
         for (int k = 0; k < scene.u.structure_count; k++) trace_structure(scene, k, x, v, 0.0, false, hit, glass_s);
     } else {
@@ -797,7 +798,8 @@ static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp,
 
 /**
  * @brief `trace_shadow` gives 0 if something blocks the straight path toward the sun within `SHADOW_M`, else how lit
- * x is, from 0 to 1: a path that passes close to a surface, compared with how far it has gone, is in the penumbra.
+ * x is, from 0 to 1: a path that passes close to a surface, compared with how far it has gone, is in the penumbra. The
+ * terrain counts only from `TERRAIN_SHADOW_START_M` on, so a ground point doesn't shadow itself.
  * @par Example
  * @code
  * float lit = trace_shadow(scene, x, l);
@@ -810,7 +812,7 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
     h.lit = 1.0;
     float glass_s = NO_HIT_S;
     if (scene.u.has_terrain != 0) {
-        trace_terrain<true>(scene, x, l, h);
+        trace_terrain<true>(scene, x, l, TERRAIN_SHADOW_START_M / scene.u.curvature_radius_m, h);
         if (h.mat != 0) return SHADOW_FLOOR;
     }
     for (int k = 0; k < scene.u.structure_count; k++) {
