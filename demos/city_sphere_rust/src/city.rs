@@ -31,7 +31,7 @@ use crate::city_world::{CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, S
 use crate::key_bindings::{self, Action, KeyBindings};
 use crate::menu;
 use crate::net;
-use crate::render_city::{CityFrame, CityScene, BEACON_SLOT_COUNT, build_scene, push_beam, push_mesh};
+use crate::render_city::{CityFrame, CityScene, BEACON_SLOT_COUNT, build_scene, push_beam, push_core_halo, push_mesh};
 use crate::render_metal::{self, FrameData};
 use crate::settings::{PerPlayerSettings, ServerSettings};
 use crate::thrown_wormholes::PlayerWormholes;
@@ -72,6 +72,7 @@ const MINIMAP_BACKGROUND_COLOR: [f32; 4] = [0.05, 0.05, 0.08, 0.55];
 const MINIMAP_OFF_COLOR: [f32; 4] = [0.25, 0.25, 0.28, 0.9];
 const MINIMAP_SELF_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 const PULSE_RAD_PER_S: f64 = 12.0;
+const CORE_HALO_RADIUS_PER_CORE_RADIUS: f64 = 3.0;
 const RUN_M_PER_S: f64 = 6.0;
 const WALK_M_PER_S: f64 = 0.6;
 const STEPS_RAD_PER_M: f64 = 2.2;
@@ -592,6 +593,9 @@ fn make_frame(
         for pair in points.windows(2) {
             push_beam(&mut beam_vertices, pair[0], pair[1], camera, BEAM_WIDTH_M, [c[0], c[1], c[2], (*alpha * 1.4) as f32]);
         }
+    }
+    if let Some(core) = world.shells.iter().find(|s| s.is_ball()) {
+        push_core_halo(&mut beam_vertices, core.radius_m * CORE_HALO_RADIUS_PER_CORE_RADIUS, camera);
     }
     CityFrame {
         render_px,

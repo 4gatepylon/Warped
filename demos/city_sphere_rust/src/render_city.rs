@@ -81,6 +81,7 @@ const CORE_LON_COUNT: usize = 32;
 const CORE_LAT_COUNT: usize = 16;
 const SKY_COLOR: [f32; 4] = [0.05, 0.03, 0.08, 1.0];
 const CORE_LIGHT: [f32; 4] = [1.0, 0.86, 1.0, 1.0];
+const CORE_HALO_COLOR: [f32; 4] = [1.0, 0.7, 1.0, 1.1];
 const AMBIENT: [f32; 4] = [0.374, 0.34, 0.476, 0.0];
 const FOG_M: f32 = 90.0;
 const GLASS_TINT: [f32; 4] = [0.55, 0.75, 1.0, 0.0];
@@ -602,6 +603,18 @@ pub fn push_beam(out: &mut Vec<CityVertex>, a: DVec3, b: DVec3, camera_m: DVec3,
         return;
     }
     push_quad(out, [a - side, a + side, b + side, b - side], [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], DVec3::ZERO, color, NO_LAYER);
+}
+
+/// `push_core_halo` adds a soft glow of `radius_m` around the core at the centre, as a quad facing
+/// `camera_m` for the additive beam pipeline; its normal of length 1 tells the shader to fade it
+/// by distance from the middle instead of across a beam.
+///
+/// Example: `push_core_halo(&mut beams, 7.5, camera);`
+pub fn push_core_halo(out: &mut Vec<CityVertex>, radius_m: f64, camera_m: DVec3) {
+    let forward: DVec3 = camera_m.normalize_or(DVec3::Z);
+    let right: DVec3 = forward.any_orthonormal_vector() * radius_m;
+    let up: DVec3 = forward.cross(right);
+    push_quad(out, [-right - up, right - up, right + up, up - right], [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], DVec3::Z, CORE_HALO_COLOR, NO_LAYER);
 }
 
 /// `CityGpu` holds City Sphere's Metal state: pipelines, the textures and the scene's buffers.

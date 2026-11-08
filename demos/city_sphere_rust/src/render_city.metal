@@ -30,6 +30,7 @@ constant float SCREEN_REFRESH_HZ = 1.5;
 constant float LED_BLINK_HZ = 1.2;
 constant float LED_DUTY_FRAC = 0.6;
 constant float LED_OFF_FRAC = 0.12;
+constant float CORE_HALO_POWER = 2.0;
 constant float METAL_SATURATION = 0.3;
 constant float METAL_SPEC_POWER = 48.0;
 constant float STREET_LAYER = 0.0;
@@ -183,6 +184,10 @@ fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& 
 }
 
 fragment float4 beam_fragment(Fragment in [[stage_in]]) {
+    if (length(in.normal) > 0.5) {
+        float halo = pow(saturate(1.0 - length(in.uv * 2.0 - 1.0)), CORE_HALO_POWER) * in.color.a;
+        return float4(encode_srgb(in.color.rgb) * halo, 0.0);
+    }
     float across = 1.0 - abs(in.uv.x * 2.0 - 1.0);
     float glow = pow(across, 1.5) * in.color.a;
     float3 core = mix(in.color.rgb, float3(1.0), pow(across, 6.0));
