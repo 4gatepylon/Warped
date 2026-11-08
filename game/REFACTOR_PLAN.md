@@ -60,6 +60,8 @@ Made by the user (2026-11-08):
   [`common/protocol/authentication.md`](../common/protocol/authentication.md).
 - Traffic is encrypted with a scheme in common use for real traffic. Every server must have a password; running
   without one is not allowed. The earlier proposal may be changed to be more secure.
+- Use `snow` (Noise) for the encryption for now. That `snow` has had no formal audit is a known limitation, written
+  in `game/README.md` and `authentication.md`.
 - Another agent (the infra stack) makes the downloadable Mac app (double-click, pick a server, give an address)
   and the cloud deployment.
 
