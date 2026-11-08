@@ -59,11 +59,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
   few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). Claimed by Claude Code
   (session `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/shoot-wormholes`, 2026-11-07.
-- [~] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
-  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
-  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
-  see more of the weapon on screen. And the laser should be touching the tip of the rifle." Claimed by Devin
-  (session Devin Desktop 2026-11-07), branch `devin/laser-blade`, 2026-11-07.
 
 ## Open
 
@@ -121,6 +116,10 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
+  lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
+  laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
+  see more of the weapon on screen. And the laser should be touching the tip of the rifle." #256.
 - [?] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237.
 - [?] **W-76 Better scene lighting.** Make better scene lighting: add a slight atmosphere/haze (even though
