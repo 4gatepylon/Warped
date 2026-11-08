@@ -87,6 +87,13 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
+- [?] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
+  on W-68 (reality bend), which adds the pylons and the black hole. The user's later requests, 2026-11-08: "Make the
+  lasers coming out of the pylons go higher into the sky", filed as W-109 (taller pylon beams), then "is it possible
+  for you to make the beams from the pylons go up and arc through the sky to the black hole in the center"; the user
+  chose a high arch that replaces the straight beams, so W-109 (taller pylon beams) is folded into this item. Each
+  beacon's beam arches about 80 m above the ground into the black hole (the user chose 80 m over 120 m in the game).
+  #361.
 - [?] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
   are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
   Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched). #331.

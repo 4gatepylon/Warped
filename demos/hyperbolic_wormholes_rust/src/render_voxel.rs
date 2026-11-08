@@ -22,7 +22,10 @@ use objc2_metal::{
 };
 
 use crate::dust::DustCloud;
-use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
+use crate::geometry::{
+    AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_fermi_point, minkowski_dot,
+    normalize_point,
+};
 use crate::mesh::MeshModel;
 use crate::render_mesh::{
     FIRST_AVATAR_ROOT_CODE, GpuNode, GpuTriangle, MeshGpu, NO_MESH, get_first_materials,
@@ -33,7 +36,7 @@ use crate::render_metal::{
     encode_adaptive_sampling, make_pipeline,
 };
 use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
-use crate::terrain::MoundGrid;
+use crate::terrain::{MoundGrid, get_fermi_coordinates};
 use crate::thrown_wormholes::{GREEN_COLOR, HIT_FLASH_COLOR, PURPLE_COLOR, WormholeColor};
 use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
@@ -73,9 +76,18 @@ const THREADGROUP_SIDE: usize = 8;
 const HALF_FOV_RAD: f64 = 37.5 * std::f64::consts::PI / 180.0;
 const SPOT_BRIGHTNESS: f32 = 4.0;
 const BEAM_BRIGHTNESS: f32 = 1.0;
-const BEACON_BEAM_M: f64 = 400.0;
+const BEACON_ARC_APEX_M: f64 = 80.0;
+const BEACON_ARC_SEGMENT_COUNT: usize = 32;
+const BEACON_ARC_DROP_M: f64 = 40.0;
+const BEACON_GAP_PER_SCHWARZSCHILD_RADIUS: f64 = 2.5;
+const SCHWARZSCHILD_RADIUS_PER_MASS: f64 = 4.0;
+const CUBIC_MIDPOINT_WEIGHT_COUNT: f64 = 8.0;
+const CUBIC_INNER_WEIGHT: f64 = 3.0;
+const LENS_BEAM_MARGIN_M: f64 = 8.0;
 const RIFLE_BEAM_CODE: u32 = 2;
 const BEACON_BEAM_CODE: u32 = 4;
+const BEAM_BOUND_CODE: u32 = 8;
+const BEACON_PIECES_PER_BOUND: usize = 8;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const MS_PER_S: f64 = 1000.0;
 const MIN_BUFFER_BYTES: usize = 256;
@@ -131,6 +143,7 @@ pub struct VoxelUniforms {
     pub zone_walls: GpuZoneWalls,
     pub milky_way_pole: [f32; 4],
     pub milky_way_core: [f32; 4],
+    pub lens_beams: [i32; 4],
 }
 
 const _: () = assert!(
@@ -250,10 +263,11 @@ pub struct VoxelFrame {
     avatar_nodes: Vec<GpuNode>,
 }
 
-/// `get_beacon_beams` gives each beacon's beam: from the top of the model of each structure drawn
-/// as a mesh whose first shape is a console, straight up for `BEACON_BEAM_M` (as far as
-/// `clip_beam_to_map` allows), in its console's team colour and `BEACON_BEAM_CODE` (so the shader
-/// draws it wider), bright while its console is on and gone once it is off.
+/// `get_beacon_beams` gives each beacon's beam: an arc from the top of the model of each structure
+/// drawn as a mesh whose first shape is a console down to `BEACON_GAP_PER_SCHWARZSCHILD_RADIUS`
+/// of its current Schwarzschild radii above the centre of the map's black hole, in its console's
+/// team colour and `BEACON_BEAM_CODE` (so the shader draws it wider), bright while its
+/// console is on and gone once it is off. A map with beacons has one black hole.
 ///
 /// Example: `let beams = get_beacon_beams(&world);`
 fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
@@ -267,6 +281,14 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
         else {
             continue;
         };
+        let black_holes: Vec<&VoxelWarp> = world.warps.iter().filter(|w| !w.is_mouth).collect();
+        let [hole] = black_holes[..] else {
+            panic!(
+                "get_beacon_beams: map {} has beacons, so it needs one black hole, not {}",
+                world.name,
+                black_holes.len()
+            )
+        };
         let on_frac: f32 = if world.palette[usize::from(console.material)][3] > 0.0 {
             1.0
         } else {
@@ -274,24 +296,130 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
         };
         let frame: DMat4 = invert_lorentz(st.inverse);
         let top: f64 = f64::from(world.meshes[m].nodes[0].hi.y) / world.r;
-        let (x, v) = (frame.col(AXIS_W), frame.col(AXIS_Y));
-        let segment: BeamSegment = BeamSegment {
-            a: top.cosh() * x + top.sinh() * v,
-            b: top.sinh() * x + top.cosh() * v,
-            length: BEACON_BEAM_M / world.r,
-        };
+        let top_x: DVec4 = top.cosh() * frame.col(AXIS_W) + top.sinh() * frame.col(AXIS_Y);
         let code: u32 = console.team + BEACON_BEAM_CODE;
         beams.extend(
-            clip_beam_to_map(&[segment], world.r)
-                .into_iter()
-                .map(|s| GpuBeam {
-                    a: to_f32(s.a),
-                    b: to_f32(s.b),
-                    info: [s.length as f32, 0.0, BEAM_BRIGHTNESS * on_frac, code as f32],
-                }),
+            make_arc_segments(
+                top_x,
+                hole.centre,
+                BEACON_GAP_PER_SCHWARZSCHILD_RADIUS
+                    * SCHWARZSCHILD_RADIUS_PER_MASS
+                    * hole.m
+                    * world.r,
+                world.r,
+            )
+            .into_iter()
+            .map(|s| GpuBeam {
+                a: to_f32(s.a),
+                b: to_f32(s.b),
+                info: [s.length as f32, 0.0, BEAM_BRIGHTNESS * on_frac, code as f32],
+            }),
         );
     }
     beams
+}
+
+/// `make_arc_segments` gives the geodesic pieces of an arch from point `start` to `gap_m` above
+/// point `end`, on a map of curvature radius `r`: a cubic Bézier curve in Fermi coordinates that
+/// leaves `start` straight up, is `BEACON_ARC_APEX_M` above the ground halfway, and ends
+/// `BEACON_ARC_DROP_M` straight above `end`, cut into `BEACON_ARC_SEGMENT_COUNT` pieces; then one
+/// last piece drops straight down to `gap_m` above `end`. Only that piece comes near a black
+/// hole's reach, so the shader scans few pieces there, and the gap keeps the beam out of the
+/// black hole's black part.
+///
+/// Example: `let segments = make_arc_segments(beacon_top, hole.centre, 3.0, world.r);`
+fn make_arc_segments(start: DVec4, end: DVec4, gap_m: f64, r: f64) -> Vec<BeamSegment> {
+    let [u0_m, v0_m, h0_m] = get_fermi_coordinates(start, r);
+    let [u3_m, v3_m, hole_h_m] = get_fermi_coordinates(end, r);
+    let h3_m: f64 = hole_h_m + BEACON_ARC_DROP_M;
+    let control_h_m: f64 = (CUBIC_MIDPOINT_WEIGHT_COUNT * BEACON_ARC_APEX_M - h0_m - h3_m)
+        / (2.0 * CUBIC_INNER_WEIGHT);
+    let get_point = |t: f64| -> DVec4 {
+        let (w0, w1, w2, w3) = (
+            (1.0 - t).powi(3),
+            CUBIC_INNER_WEIGHT * (1.0 - t).powi(2) * t,
+            CUBIC_INNER_WEIGHT * (1.0 - t) * t * t,
+            t.powi(3),
+        );
+        make_fermi_point(
+            (w0 + w1) * u0_m + (w2 + w3) * u3_m,
+            (w0 + w1) * v0_m + (w2 + w3) * v3_m,
+            w0 * h0_m + (w1 + w2) * control_h_m + w3 * h3_m,
+            r,
+        )
+    };
+    let points: Vec<DVec4> = (0..=BEACON_ARC_SEGMENT_COUNT)
+        .map(|i| get_point(i as f64 / BEACON_ARC_SEGMENT_COUNT as f64))
+        .chain(std::iter::once(make_fermi_point(
+            u3_m,
+            v3_m,
+            hole_h_m + gap_m,
+            r,
+        )))
+        .collect();
+    points
+        .windows(2)
+        .map(|pair| {
+            let (a, next) = (pair[0], pair[1]);
+            let length: f64 = get_distance(a, next);
+            BeamSegment {
+                a,
+                b: (next - length.cosh() * a) / length.sinh(),
+                length,
+            }
+        })
+        .collect()
+}
+
+/// `is_beam_near_warps` says whether `beam` comes within `LENS_BEAM_MARGIN_M` of the reach of any
+/// of `warps`, on a map of curvature radius `r`, so the shader must scan it while a ray bends
+/// inside a warp's reach.
+///
+/// Example: `let is_near: bool = is_beam_near_warps(&beam, &world.warps, world.r);`
+fn is_beam_near_warps(beam: &GpuBeam, warps: &[VoxelWarp], r: f64) -> bool {
+    let a: DVec4 = DVec4::from_array(beam.a.map(f64::from));
+    let b: DVec4 = DVec4::from_array(beam.b.map(f64::from));
+    let length: f64 = f64::from(beam.info[0]);
+    warps.iter().any(|warp| {
+        let sigma: f64 = (minkowski_dot(warp.centre, b) / -minkowski_dot(warp.centre, a))
+            .clamp(-1.0, 1.0)
+            .atanh()
+            .clamp(0.0, length);
+        let nearest: DVec4 = sigma.cosh() * a + sigma.sinh() * b;
+        get_distance(warp.centre, nearest) <= warp.reach + LENS_BEAM_MARGIN_M / r
+    })
+}
+
+/// `make_beam_bound` gives the entry the shader reads before the beam pieces of `group`: a ball,
+/// centre in `a` and radius in `info[0]`, that holds every piece, with the group's size in
+/// `info[1]` and `BEAM_BOUND_CODE` in `info[3]`, so a ray that misses the ball skips the group.
+///
+/// Example: `let bound: GpuBeam = make_beam_bound(&pieces[..8]);`
+fn make_beam_bound(group: &[GpuBeam]) -> GpuBeam {
+    let ends: Vec<DVec4> = group
+        .iter()
+        .flat_map(|piece| {
+            let a: DVec4 = DVec4::from_array(piece.a.map(f64::from));
+            let b: DVec4 = DVec4::from_array(piece.b.map(f64::from));
+            let length: f64 = f64::from(piece.info[0]);
+            [a, length.cosh() * a + length.sinh() * b]
+        })
+        .collect();
+    let centre: DVec4 = normalize_point(ends.iter().sum());
+    let radius: f64 = ends
+        .iter()
+        .map(|&end| get_distance(centre, end))
+        .fold(0.0, f64::max);
+    GpuBeam {
+        a: to_f32(centre),
+        b: [0.0; 4],
+        info: [
+            radius as f32,
+            group.len() as f32,
+            0.0,
+            BEAM_BOUND_CODE as f32,
+        ],
+    }
 }
 
 /// `get_mound_grid` gives a terrain's mound height grid, if it has mounds.
@@ -513,7 +641,16 @@ impl VoxelFrame {
                     })
             })
             .collect();
-        gpu_beams.extend(get_beacon_beams(world));
+        let (lens_beacon_beams, other_beacon_beams): (Vec<GpuBeam>, Vec<GpuBeam>) =
+            get_beacon_beams(world)
+                .into_iter()
+                .partition(|beam| is_beam_near_warps(beam, &world.warps, r));
+        let lens_beam_count: usize = gpu_beams.len() + lens_beacon_beams.len();
+        gpu_beams.extend(lens_beacon_beams);
+        for group in other_beacon_beams.chunks(BEACON_PIECES_PER_BOUND) {
+            gpu_beams.push(make_beam_bound(group));
+            gpu_beams.extend_from_slice(group);
+        }
         let (dust_bursts, dust_particles) = pack_dust(dust);
         let zone_walls: GpuZoneWalls = world.zone_walls.as_ref().map_or(
             GpuZoneWalls {
@@ -625,6 +762,7 @@ impl VoxelFrame {
             milky_way_core: world
                 .milky_way
                 .map_or([0.0; 4], |(_, core)| core.as_vec3().extend(0.0).to_array()),
+            lens_beams: [lens_beam_count as i32, 0, 0, 0],
         };
         assert_eq!(
             world.palette.len(),
@@ -1034,6 +1172,8 @@ mod tests {
     //! | Team | blue, red | `beams_carry_their_gun_team_and_speckle` |
     //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
     //! | A beacon's console | on (its beam is bright), off (its beam goes, the others stay) | `beacon_beams_go_with_their_consoles` |
+    //! | Point along a beacon's arc | its start, a join between pieces, halfway, its end (a gap above the black hole) | `beacon_arcs_join_the_beacon_to_the_black_hole` |
+    //! | A beam piece | a laser's, a beacon's drop into the black hole, the rest of a beacon's arc | `only_lasers_and_drops_are_scanned_in_a_lens` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -1061,7 +1201,7 @@ mod tests {
         let frame: VoxelFrame = VoxelFrame::Build(&world, camera, &beams, None, &[], RENDER_PX);
         let sniper: [f32; 2] = [0.0, 0.0];
         let rifle: [f32; 2] = [SPECKLE_FRAC as f32, (1 + RIFLE_BEAM_CODE) as f32];
-        let laser_beam_count: usize = frame.beams.len() - get_beacon_beams(&world).len();
+        let laser_beam_count: usize = frame.uniforms.lens_beams[0] as usize - world.consoles.len();
         let packed: Vec<[f32; 2]> = frame.beams[..laser_beam_count]
             .iter()
             .map(|b| [b.info[1], b.info[3]])
@@ -1079,24 +1219,86 @@ mod tests {
     fn beacon_beams_go_with_their_consoles() {
         let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
         let mut world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
-        let beacon_count: usize = world.consoles.len();
+        let piece_count: usize = get_beacon_beams(&world).len();
         let get_brightness = |world: &mut VoxelWorld, off_mask: u32| -> Vec<f32> {
             world.light_consoles(off_mask, &[0.0; MAX_CONSOLE_COUNT], 0.0);
             get_beacon_beams(world).iter().map(|b| b.info[2]).collect()
         };
         assert_eq!(
             get_brightness(&mut world, 0),
-            vec![BEAM_BRIGHTNESS; beacon_count]
+            vec![BEAM_BRIGHTNESS; piece_count]
         );
         let brightness: Vec<f32> = get_brightness(&mut world, 1);
-        assert_eq!(
-            brightness.iter().filter(|&&b| b == 0.0).count(),
-            1,
-            "{brightness:?}"
-        );
+        let off_count: usize = brightness.iter().filter(|&&b| b == 0.0).count();
+        assert!(off_count > 0 && off_count < piece_count, "{brightness:?}");
         assert_eq!(
             brightness.iter().filter(|&&b| b == BEAM_BRIGHTNESS).count(),
-            beacon_count - 1
+            piece_count - off_count
         );
+    }
+
+    #[test]
+    fn beacon_arcs_join_the_beacon_to_the_black_hole() {
+        const R_M: f64 = 40.0;
+        const TOLERANCE_M: f64 = 1e-6;
+        const MAX_FIRST_PIECE_SIDEWAYS_PER_UP: f64 = 0.1;
+        const GAP_M: f64 = 3.0;
+        let start: DVec4 = make_fermi_point(-100.0, 10.0, 12.0, R_M);
+        let end: DVec4 = make_fermi_point(0.0, 0.0, 17.0, R_M);
+        let segments: Vec<BeamSegment> = make_arc_segments(start, end, GAP_M, R_M);
+        let get_end = |s: &BeamSegment| s.length.cosh() * s.a + s.length.sinh() * s.b;
+        let is_near = |p: DVec4, q: DVec4| get_distance(p, q) * R_M < TOLERANCE_M;
+        assert!(is_near(segments[0].a, start));
+        assert!(
+            segments
+                .windows(2)
+                .all(|pair| is_near(get_end(&pair[0]), pair[1].a))
+        );
+        let last_end: DVec4 = get_end(segments.last().expect("pieces"));
+        assert!((get_distance(last_end, end) * R_M - GAP_M).abs() < TOLERANCE_M);
+        assert!(segments.iter().any(|s| {
+            let [_, _, h_m] = get_fermi_coordinates(s.a, R_M);
+            (h_m - BEACON_ARC_APEX_M).abs() < TOLERANCE_M
+        }));
+        let [u0_m, v0_m, h0_m] = get_fermi_coordinates(segments[0].a, R_M);
+        let [u1_m, v1_m, h1_m] = get_fermi_coordinates(get_end(&segments[0]), R_M);
+        let sideways_m: f64 = (u1_m - u0_m).hypot(v1_m - v0_m);
+        assert!(sideways_m < MAX_FIRST_PIECE_SIDEWAYS_PER_UP * (h1_m - h0_m));
+    }
+
+    #[test]
+    fn only_lasers_and_drops_are_scanned_in_a_lens() {
+        const DROP_TOLERANCE_M: f64 = 0.01;
+        let map: Map = Map::Load(&get_map_folder("lunar_surface")).expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let camera: DMat4 = VoxelPlayer::AtSpawn(&world, 0).get_camera_frame(&world);
+        let shot: Shot = world.trace_laser(camera);
+        let laser: LaserBeam = LaserBeam {
+            segments: shot.segments,
+            team: 0,
+            is_rifle: false,
+            speckle_frac: 0.0,
+        };
+        let beacon_count: usize = world.consoles.len();
+        for beams in [vec![], vec![laser]] {
+            let frame: VoxelFrame = VoxelFrame::Build(&world, camera, &beams, None, &[], RENDER_PX);
+            let laser_piece_count: usize = clip_beam_to_map(
+                &beams
+                    .iter()
+                    .flat_map(|b| b.segments.clone())
+                    .collect::<Vec<_>>(),
+                world.r,
+            )
+            .len();
+            assert_eq!(
+                frame.uniforms.lens_beams[0] as usize,
+                laser_piece_count + beacon_count
+            );
+            assert!(
+                frame.beams[laser_piece_count..beacon_count + laser_piece_count]
+                    .iter()
+                    .all(|b| f64::from(b.info[0]) * world.r <= BEACON_ARC_DROP_M + DROP_TOLERANCE_M)
+            );
+        }
     }
 }

@@ -215,8 +215,9 @@ The level as the Rust game builds it, from the map
   a solar array. The middle has derelict field bunkers, a comms dome, a crater walkway, a relay mast, a solar array
   and crates. Red's side has Hesco barriers, a habitat module, a dome, a bunker garage as its spawn hangar, a
   watchtower, a landing pad, an antenna, a walkway, crates and a solar array. The bunkers are models players walk
-  into. Each pylon is a 12 m sci-fi beacon whose console is the beacon itself; it beams its team colour 400 m up while
-  its console is on.
+  into. Each pylon is a 12 m sci-fi beacon whose console is the beacon itself; while its console is on, its beam in
+  its team colour rises from its top, arches about 80 m above the ground and comes down into the black hole, so the
+  pylons seem to hold the black hole.
 - Players look like a robot in their team's colour (blue or red, its grey and black parts unchanged), animated by
   what they do: standing, walking, running, in the air, and, once eliminated, falling onto their back where they
   were hit and lying there until they respawn. Shots hit an invisible
