@@ -861,7 +861,7 @@ current tolerances), none applied, and none worth it so far:
   let adaptive sampling interpolate more.
 - **A looser near tolerance for the pieces** (`BEND_SAG_M` 5 or 10 cm instead of 2 cm, which also lengthens the nominal
   piece): mixed, from 15% faster (blue spawn at 0.5) to 20% slower (crater wall at 0.5), within the machine's noise on
-  most views, while 3 to 34% of the pixels change by more than 30 of 765 (SSIM down to 0.51), as near walls and ground
+  most views, while 3 to 37% of the pixels change by more than 30 of 765 (SSIM down to 0.51), as near walls and ground
   bend visibly less smoothly.
 - **A tighter far tolerance** (`BEND_SAG_PIXELS` 0.1 instead of 0.5) removes bands on the far ground for about 13%
   more GPU time (measured for W-105 (screen tearing)); the user kept 0.5.
