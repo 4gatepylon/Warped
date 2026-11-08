@@ -238,7 +238,8 @@ pub struct MapEdgeSettings {
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
-/// flashes near white while moving through a wormhole's throat (0 to 1), and the head bob.
+/// shifts colour (light cyan forward, dark red backward) while moving through a wormhole's throat
+/// (0 to 1), and the head bob.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSettings {

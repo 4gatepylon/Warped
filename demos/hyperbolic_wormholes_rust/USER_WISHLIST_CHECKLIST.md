@@ -11,24 +11,68 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox"). Claimed by Claude Code (subagent of
-  session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
+- [~] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
+  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
+  bar while disabling a pylon". Claimed by Claude Code (worktree `Warped-loading`), branch `claude/loading-screen`,
+  2026-11-08.
+- [~] **W-98 Milky Way.** Have a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox").
+  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/milky-way`, 2026-11-07.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, branch `claude/milky-way`
+    (on this Mac only so far; to be pushed to `origin`), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-98/`.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: making mock-up pictures of 3
+    styles; nothing to build until the user picks.
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." Pictures first. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac, branch `claude/rifle-model`
+    (on this Mac only so far; to be pushed to `origin`), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-96/`.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: options and pictures done, no
+    code; waiting for the user to pick a model (and approve any download).
 - [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-ada9a91a495af6bb8` on the user's Mac, branch
+    `claude/stronger-curvature` (pushed to `origin`), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-37/`.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: PR #285 open, not merged;
+    waiting for the user's OK (keep the default at 2 despite speckle on surfaces beyond about 90 m from the map's
+    middle, or use 1.5).
 - [~] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/zone-planes`, 2026-11-07.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-ad1ea566e085a76ee` on the user's Mac, branch `claude/zone-planes`
+    (on this Mac only so far; to be pushed to `origin`), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-07: building and rendering two
+    levels of translucency; waits for the user's OK before merging.
 - [~] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
   character, and the player controls it from there, seeing their own character. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/third-person`, 2026-11-07.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-adb5321f113e35420` on the user's Mac, branch
+    `claude/third-person` (pushed to `origin`), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-61/`.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: done and tested, PR #286 open
+    into `staging` (`V` toggles; 150 tests pass); waits for the user's OK before merging.
 - [~] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/giant-ships`, 2026-11-07.
+  - **Where the work is** (for any agent picking it up): worktree
+    `/Users/4gate/git/Warped/.claude/worktrees/agent-a58a7f92ff135229f` on the user's Mac, branch `claude/giant-ships`
+    (pushed to `origin`), pictures in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-83/`.
+    The pictures folder is temporary (it is under `/private/tmp`). State, 2026-11-08: both ships drawn in the sky
+    shader with two options each (station: dish on the equator or in the upper half; capital ship: plain or detailed
+    hull), committed as WIP (`14d8ccb`) with temporary screenshot hooks; waiting for the user to pick, then remove the
+    hooks and the unpicked options, make the station hover, add tests, a decision, README and PLAYTEST, and open the
+    PR.
 - [~] **W-68 Reality bend.** Place three pylons on each side; each pylon is a "disabler" for the black hole in the
   center. The more pylons get disabled, the bigger the strength of the black hole gets, causing reality to warp around
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
@@ -102,30 +146,33 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
-- [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
-  when the server is connected properly.
+- [ ] **W-101 Pylons hold the black hole.** "Make it look like the pylons are holding the black hole (beams?)". Builds
+  on W-68 (reality bend), which adds the pylons and the black hole.
 
 ## Pending user review
 
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
-- [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
+- [?] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
+  player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
+  page use team colours. The user said to add and fix it ("Yes, add and fix"). #290.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
   play as that team; friendly fire stays on, and only the enemy's consoles can be turned off. #131.
-- [?] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
-  throws the other. These are each player's linked wormholes. #197–#204.
-- [?] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
-  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). You chose: a shot through
-  an enemy's mouth (or at a lone mouth's ball) counts, 2 sniper shots, damage kept until destroyed, both mouths flash
-  (D98). #246–#248.
 
 ## Done
 
 Confirmed by the user after testing.
 
+- [x] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
+- [x] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
+  throws the other. These are each player's linked wormholes. #197–#204. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
+- [x] **W-89 Shoot enemy wormholes.** "If you shoot enemy wormholes it makes the wormhole flash red, and after a
+  few shots (5 rifle shots) the wormholes are both destroyed." Builds on W-60 (#197–#204). You chose: a shot through
+  an enemy's mouth (or at a lone mouth's ball) counts, 2 sniper shots, damage kept until destroyed, both mouths flash
+  (D98). #246–#248. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
 - [x] **W-86 Dust as small polyhedra.** For the ground-shot dust (W-56, #208): make the particles polyhedra (they can
   be hardcoded) rather than spheres, make the big ones smaller, and make slightly less dust. The user OKed the
   screenshots before it merged ("dust polyhedra looks good plz merge"). #234. Confirmed by the user, 2026-11-07: "dust as small polydra is good so it should be masrked as done".
@@ -313,5 +360,15 @@ Confirmed by the user after testing.
   testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
   for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
   BLUE but it has to be very close to white as I had asked". #272. Confirmed by the user, 2026-11-07: "wormhole color from motion is almost done: just mark it as done and make a PR that makes it take slightly longer; ideally just double its radius or wahtever (ioe walking at same speed should take exactly trwice as long of time showing me cyan or red)".
+  After seeing #272's pictures: "for the "at the throat" thing you still need to have the dark red and the light
+  cyan almost white instead of doing this "warm" stuff. It has to be CRISP (not like diffused by this white screen),
+  like the previous pictures I was shown. Still fix the throat timing for the color though", "so overall your throat
+  timing looks good", and "its just the specific colors should be a bit more crisp". #289.
+  - **Where the work is** (for any agent picking it up): branch `claude/wormhole-tint-crisp`, pushed to `origin`,
+    PR #289 into `staging` (crisp colours, and the tint showing twice as long: 0.63 s against 0.32 s at walking
+    speed). Worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-acc2c2d6bf5b447c3` on the user's Mac; pictures
+    in
+    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-82/`
+    (`fix3_*`), which is temporary (it is under `/private/tmp`). State, 2026-11-08: merged into `staging`.
 - [x] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237. Confirmed by the user, 2026-11-07: "also stuck in bunker is fixed so mark that as done".
