@@ -43,10 +43,16 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   terminal; `Ctrl-C` ends the game.
 - `make host-game MAP=lunar-surface` does both in one terminal: it starts the same server as its own process, opens
   your window in it, and stops the server when your window closes.
-- To tune the game (speeds, jump, head bob, both guns, consoles, respawn delay, motion blur), copy
-  `game_settings.yaml`, change its numbers, and start the server with it:
-  `make host-game MAP=lunar-surface SETTINGS=my_settings.yaml` (or `make serve-game ... SETTINGS=...`). Everyone who
-  joins plays by the server's settings.
+- To tune play (speeds, jump, both guns, consoles, respawn delay, the hit slowdown, the flashlight), copy
+  `server_settings.yaml`, change its numbers, and start the server with it:
+  `make host-game MAP=lunar-surface SERVER_SETTINGS=my_server.yaml` (or `make serve-game ... SERVER_SETTINGS=...`).
+  Everyone who joins plays by the server's settings.
+- Your own choices (keys, mouse speed, head bob, motion blur, how a hit looks) are in `player_settings.yaml`. The
+  easiest way to change them is in the game: press `Tab` for the menu, `Up`/`Down` to pick a row, `Return` and then
+  a key, button or the wheel to rebind an action, `Left`/`Right` to change a number, and `Return` on its last row
+  to save. Saved choices go to `~/.config/warped/player_settings.yaml`, which every later game on that computer
+  loads. `Esc` or `Tab` closes the menu. You can also copy the file, change it, and add `PLAYER_SETTINGS=mine.yaml`
+  to `make host-game` or `make join-game`.
 - `make join-game MAP=lunar-surface` without `SERVER=` finds the server on the network by itself. If it doesn't
   within a few seconds, use the address the server printed.
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
@@ -54,7 +60,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
 - Up to 8 players. A laser that reaches another player removes them: their view darkens, says "YOU DIED" with a
   countdown, and they come back at their spawn 3 seconds later.
-- Players alternate between the blue and red teams as they join, and keep their team when they come back.
+- Joining opens a lobby that shows how many players each team has: press `1` to join blue or `2` to join red. You
+  keep your team when you come back after being hit. Lasers hit teammates too, but you can only turn off the other
+  team's consoles. Bots join whichever team has fewer players.
 
 To win on Lunar Surface, turn off all five of the other team's consoles, the pulsing blocks around its pylon
 (the red pylon is past the wormhole on the ridge). Stand within 3 m, look straight at one and hold `E` for 10 s: a bar
@@ -63,13 +71,17 @@ away or letting go starts it over. A console that is off goes dark. When a team'
 sees which team won, and a new game starts only when whoever started the server presses `Enter` in its terminal
 (the `make host-game` terminal, for that command): every console comes back on and everyone returns to their spawn.
 
-Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
-`Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), click to shoot (a
-quarter-second laser shot; not while running, when the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
+Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
+`PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
+`Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
+(a lower view, half speed), click to shoot (only standing still or crouched: not while walking upright, running, when
+the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click; one hit eliminates), and gun 2, the
 rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s), `E` (held)
-turns off one of the other team's consoles, `R` respawns, `-` and `=` change the render resolution.
+turns off one of the other team's consoles, `-` and `=` change the render resolution, `Tab` opens the menu of your
+own settings. There is no key to respawn:
+players come back only after being eliminated.
 
 ## Known caveats
 
@@ -82,6 +94,9 @@ Multiplayer:
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
 - Lasers hit teammates too.
 - Health, shown in the bottom left, resets when a player respawns.
+- The menu doesn't pause the game: a player in it stands still and can still be hit.
+- A file saved from the menu has no comments. If a later version adds a setting, that file stops loading and the
+  error names it: delete it (`~/.config/warped/player_settings.yaml`) or add the new setting.
 - Consoles are found by name: a map's materials named "blue console …" and "red console …". The house has none,
   so nobody can win there.
 - Local network only: no play over the internet. Networks that keep devices apart (many guest and office Wi-Fi

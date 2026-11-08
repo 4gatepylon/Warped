@@ -5,6 +5,10 @@ fast its ray tracer runs natively. It is the same scene and the same light paths
 wormholes), with gravity and a laser added, drawn either on the GPU with Metal (the default) or on every CPU core.
 It is a demo for measuring speed, so it does no more than that.
 
+Features the user has asked for, and who is working on which, are in
+[`USER_WISHLIST_CHECKLIST.md`](USER_WISHLIST_CHECKLIST.md); [`AGENTS.md`](AGENTS.md) says how to claim one and mark it
+done.
+
 ## Play
 
 ```bash
@@ -13,18 +17,28 @@ make run-demo RENDERER=cpu
 ```
 
 - Click to capture the mouse (`Esc` releases it; `Esc` again quits).
+- Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
+  choices (mouse speed, head bob, motion blur, how a hit looks); a copy is passed with `PLAYER_SETTINGS=mine.yaml`
+  (`--player-settings`) to `make run-demo`, `host-game` or `join-game`.
+- `Tab` opens a menu of those choices: `Up`/`Down` pick a row, `Return` then any key, button or the wheel rebinds
+  an action, `Left`/`Right` change a number, and its last row saves them to `~/.config/warped/player_settings.yaml`
+  (or the `--player-settings` file), which later games load by themselves. `Esc` or `Tab` closes it. Your player
+  stands still while it is open, but the game goes on.
 - `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
   house you collide with the ground only.
 - Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
   you through.
-- Click (once the mouse is captured) to fire a laser shot for a quarter of a second; not while running, nor in the air on Lunar Surface.
+- Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
+  `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
   eliminates with 2 hits to the head or 12 to the body, and overheats after 20 shots.
   You can't shoot while running (sprinting while moving): the wand in your right hand (a 3D prism with a tip in your
   team's colour, drawn with the Metal renderer) drops and swings with your stride, and points ahead again when you
   walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
-- `R` respawns. `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
+- Holding the right button shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it
+  yet).
+- `-` and `=` lower and raise the render resolution. Metal starts at the window's full resolution and,
   on frames that take more than about 14 ms of GPU time (close to a mouth), ray-traces fewer pixels and upscales
   them with MetalFX, down to half per side, until you press `-` or `=`. The CPU starts at 0.35 per side.
 - The HUD shows the frame rate, the render time and, with Metal, the GPU's own time and the render scale; with Metal
@@ -70,14 +84,15 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `make serve-game` (`--serve`) runs only the server and prints this computer's address with the commands that join
   it, so it can run on a computer nobody plays on. `make host-game` (`--host`) starts the same server as its own
   process, joins it from a window, and stops it when the window closes.
-- `SETTINGS=my_settings.yaml` (`--settings`) gives the server a copy of [`game_settings.yaml`](game_settings.yaml)
-  with other numbers (speeds, jump, head bob, both guns, consoles, respawn, motion blur); it sends them to every
-  player who joins.
+- `SERVER_SETTINGS=my_server.yaml` (`--server-settings`) gives the server a copy of
+  [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
+  consoles, respawn, the hit slowdown, the flashlight); it sends them to every player who joins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
   (the Terminal, say) when asked; without it, other computers can't reach the game and `auto` finds nothing.
-- Players start on a ring around spawn and see each other as coloured boxes, bent through the wormholes like
+- Joining opens a lobby with each team's head count; `1` joins blue and `2` joins red (bots join the smaller team).
+- Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
 - On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).

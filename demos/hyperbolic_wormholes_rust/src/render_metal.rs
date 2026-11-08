@@ -48,14 +48,28 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// `Overlay` is what to draw over a frame before it is shown: how much to darken the frame (while a
 /// player is out after a hit), a text mask with its size (one byte a pixel, rows top first; see the
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
-/// (the HUD's bars), the player's wand, and how much of the previous frame's scene to blend into
-/// this one's (motion blur; 0 for none).
+/// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
+/// this one's (motion blur; 0 for none), what a recent hit does to the scene, and how much of the
+/// frame's height the mask's text may take.
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
     pub rects: &'a [OverlayRect],
     pub wand: Option<OverlayWand>,
     pub blur_frac: f32,
+    pub hit: HitEffect,
+    pub mask_height_frac: f32,
+}
+
+/// `HitEffect` is what a recent hit does to the scene (the shader's `read_hit_scene`): how much of
+/// the effect is left (1 just after the hit, 0 for none), how red the edges turn, how wide their
+/// blur is and how far the picture is shifted this frame.
+#[derive(Clone, Copy, Default)]
+pub struct HitEffect {
+    pub strength_frac: f32,
+    pub red_frac: f32,
+    pub blur_px: f32,
+    pub shake_px: [f32; 2],
 }
 
 /// `OverlayWand` is the shader's `OverlayWand`: the wand's shaft centre in camera space (x right,
@@ -93,6 +107,10 @@ struct OverlayParams {
     has_wand: i32,
     tan_half_fov: f32,
     blur_frac: f32,
+    hit_frac: f32,
+    hit_red_frac: f32,
+    hit_blur_px: f32,
+    shake_px: [f32; 2],
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -222,8 +240,7 @@ const BYTES_PER_TEXEL: usize = 16;
 const BYTES_PER_LOST_FLAG: usize = 1;
 const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
-const OVERLAY_HEIGHT_PER_MASK: usize = 5;
-const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
+pub(crate) const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 pub(crate) const MAX_OVERLAY_RECT_COUNT: usize = 64;
 /// `REVOLVER_WAND` is `has_wand` when the revolver (viewmodel.rs) is drawn in the wand's place.
 const REVOLVER_WAND: i32 = 2;
@@ -1015,9 +1032,9 @@ impl MetalRenderer {
 
     /// `encode_overlay` encodes drawing `overlay` over a finished frame into a texture of its own,
     /// which it returns: the frame blended with the previous frame's scene (kept in one of two
-    /// history textures, swapped each frame; none after a resize) and darkened, the mask (if any) scaled by a whole number to about a
-    /// fifth of the frame's height (and at most `OVERLAY_MAX_WIDTH_FRAC` of its width), centred,
-    /// and the rectangles.
+    /// history textures, swapped each frame; none after a resize) and darkened, the mask (if any)
+    /// scaled by a whole number to at most `mask_height_frac` of the frame's height (and at most
+    /// `OVERLAY_MAX_WIDTH_FRAC` of its width), centred, and the rectangles.
     ///
     /// Example: `let shown = self.encode_overlay(&command_buffer, &frame, &overlay, (2560, 1600))?;`
     fn encode_overlay(
@@ -1119,7 +1136,7 @@ impl MetalRenderer {
             }
             None => None,
         };
-        let scale: usize = (output_px.1 / (mask_h * OVERLAY_HEIGHT_PER_MASK))
+        let scale: usize = ((output_px.1 as f32 * overlay.mask_height_frac) as usize / mask_h)
             .min((output_px.0 as f64 * OVERLAY_MAX_WIDTH_FRAC) as usize / mask_w)
             .max(1);
         let params: OverlayParams = OverlayParams {
@@ -1142,6 +1159,10 @@ impl MetalRenderer {
             } else {
                 0.0
             },
+            hit_frac: overlay.hit.strength_frac,
+            hit_red_frac: overlay.hit.red_frac,
+            hit_blur_px: overlay.hit.blur_px,
+            shake_px: overlay.hit.shake_px,
         };
         let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
             center_m: [0.0; 4],

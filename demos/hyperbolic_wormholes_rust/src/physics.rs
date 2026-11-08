@@ -69,6 +69,7 @@ pub struct Input {
     pub up: bool,
     pub down: bool,
     pub sprint: bool,
+    pub crouch: bool,
 }
 
 /// `LaserReport` describes the laser's path: how many wormholes it went through, what it hit and

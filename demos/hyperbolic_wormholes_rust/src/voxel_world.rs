@@ -20,7 +20,7 @@ use crate::geometry::{
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
-use crate::settings::GameSettings;
+use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 
@@ -71,6 +71,8 @@ const LASER_MAX_ITERATIONS: usize = 4000;
 const LASER_MUZZLE_M: f64 = 3.0;
 pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
 const BEAM_TOLERANCE_M: f64 = 0.02;
+const MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS: f64 = 4.0;
+const BEAM_CLIP_BISECTION_COUNT: usize = 40;
 pub const LOOK_RAD_PER_PX: f64 = 0.0025;
 const MAX_PITCH_RAD: f64 = 1.55;
 const TINY: f64 = 1e-12;
@@ -180,10 +182,12 @@ pub struct VoxelWorld {
     pub gravity_m_per_s2: f64,
     map_player: PlayerSettings,
     map_gravity_m_per_s2: f64,
-    pub settings: GameSettings,
+    pub settings: ServerSettings,
+    pub head_bob: HeadBobSettings,
     pub spawns: Vec<DMat4>,
     pub static_structure_count: usize,
     pub consoles: Vec<Console>,
+    pub flashlight_eye: Option<DMat4>,
     pub clearance: Arc<ClearanceGrids>,
 }
 
@@ -233,6 +237,42 @@ pub fn clip_beam(segments: &[BeamSegment], r: f64, from_m: f64, to_m: f64) -> Ve
         start_m += length_m;
     }
     clipped
+}
+
+/// `clip_beam_to_map` gives a beam up to where it first gets farther than
+/// `MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS` curvature radii from the map's origin. Past
+/// there, out over the sky, the shader's single-precision maths of a beam's glow turns to noise
+/// (coordinates grow as cosh of that distance) that floods the sky; the map lies well inside.
+///
+/// Example: `let drawn = clip_beam_to_map(&shot.segments);`
+pub fn clip_beam_to_map(segments: &[BeamSegment]) -> Vec<BeamSegment> {
+    let max_w: f64 = MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS.cosh();
+    let mut drawn: Vec<BeamSegment> = Vec::new();
+    for segment in segments {
+        let get_w = |s: f64| geodesic_point(segment.a, segment.b, s).w;
+        if get_w(0.0) > max_w {
+            break;
+        }
+        if get_w(segment.length) <= max_w {
+            drawn.push(*segment);
+            continue;
+        }
+        let (mut lo, mut hi) = (0.0, segment.length);
+        for _ in 0..BEAM_CLIP_BISECTION_COUNT {
+            let mid: f64 = (lo + hi) / 2.0;
+            if get_w(mid) > max_w {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        drawn.push(BeamSegment {
+            length: lo,
+            ..*segment
+        });
+        break;
+    }
+    drawn
 }
 
 /// `normalize_minkowski` scales a vector to unit Minkowski length (either sign).
@@ -464,6 +504,7 @@ impl VoxelWorld {
             r,
             static_structure_count: structures.len(),
             consoles: find_consoles(map),
+            flashlight_eye: None,
             structures,
             voxels: map.voxels.clone(),
             warps,
@@ -486,11 +527,12 @@ impl VoxelWorld {
             gravity_m_per_s2: map.gravity_m_per_s2,
             map_player: map.player,
             map_gravity_m_per_s2: map.gravity_m_per_s2,
-            settings: GameSettings::Builtin(),
+            settings: ServerSettings::Builtin(),
+            head_bob: PerPlayerSettings::Builtin().view.head_bob,
             spawns: map.spawns.iter().map(|s| to_frame(&s.frame)).collect(),
             clearance: Arc::new(ClearanceGrids::default()),
         };
-        world.set_settings(GameSettings::Builtin());
+        world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
         Ok(world)
     }
@@ -499,8 +541,8 @@ impl VoxelWorld {
     /// walking and sprinting at multiples of the map's speeds, and a jump that rises
     /// `jump_height_m` in `jump_time_per_map_jump_time` of the map's jump time (gravity follows).
     ///
-    /// Example: `world.set_settings(GameSettings::Load(Path::new("fast.yaml"))?);`
-    pub fn set_settings(&mut self, settings: GameSettings) {
+    /// Example: `world.set_settings(ServerSettings::Load(Path::new("fast.yaml"))?);`
+    pub fn set_settings(&mut self, settings: ServerSettings) {
         let movement = &settings.movement;
         let half_jump_s: f64 = self.map_player.jump_m_per_s / self.map_gravity_m_per_s2
             * movement.jump_time_per_map_jump_time;
@@ -1119,7 +1161,9 @@ impl VoxelWorld {
 /// `VoxelPlayer` is a player on a voxel map, as in the level: a body frame on the ground plane, the
 /// eye's height above it, the view's pitch, the vertical speed, whether they fly or stand, their
 /// sprint energy (1 full, 0 empty) and whether they sprinted on the last step, and the head bob's
-/// phase and how much of it shows (0 standing still, 1 walking).
+/// phase and how much of it shows (0 standing still, 1 walking), and the seconds left of being
+/// slowed after a hit (moving at the settings' `when_hit.slow_speed_frac`), and how far they are
+/// crouched (0 standing, 1 crouched).
 #[derive(Clone, Copy)]
 pub struct VoxelPlayer {
     pub body: DMat4,
@@ -1132,6 +1176,8 @@ pub struct VoxelPlayer {
     pub is_sprinting: bool,
     pub bob_phase_rad: f64,
     pub bob_frac: f64,
+    pub slowed_s: f64,
+    pub crouch_frac: f64,
 }
 
 impl VoxelPlayer {
@@ -1154,18 +1200,20 @@ impl VoxelPlayer {
             is_sprinting: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
+            slowed_s: 0.0,
+            crouch_frac: 0.0,
         }
     }
 
-    /// `NearSpawn` makes player `id` standing near their team's spawn point (ids alternate between
-    /// the map's spawns), clear of blocks, at the first slot at least `MIN_SPAWN_GAP_M` from every
-    /// eye in `others`: slots go around rings `SPAWN_RING_STEP_M` apart from `SPAWN_RING_M`,
+    /// `NearSpawn` makes player `id` standing near the spawn point of `team` (the map's spawn of
+    /// that index), clear of blocks, at the first slot at least `MIN_SPAWN_GAP_M` from every eye in
+    /// `others`: slots go around rings `SPAWN_RING_STEP_M` apart from `SPAWN_RING_M`,
     /// `SPAWN_TURN_RAD` apart, starting from the id's own. If all are taken it uses the last.
     ///
-    /// Example: `let player = VoxelPlayer::NearSpawn(&world, 3, &other_eyes);`
+    /// Example: `let player = VoxelPlayer::NearSpawn(&world, 1, 3, &other_eyes);`
     #[allow(non_snake_case)]
-    pub fn NearSpawn(world: &VoxelWorld, id: u32, others: &[DVec4]) -> VoxelPlayer {
-        let spawn: DMat4 = VoxelPlayer::AtSpawn(world, id as usize).body;
+    pub fn NearSpawn(world: &VoxelWorld, team: u32, id: u32, others: &[DVec4]) -> VoxelPlayer {
+        let spawn: DMat4 = VoxelPlayer::AtSpawn(world, team as usize).body;
         let slot_count: u32 = SPAWN_SLOTS_PER_RING * SPAWN_RING_COUNT;
         let mut player: Option<VoxelPlayer> = None;
         for k in 0..slot_count {
@@ -1203,6 +1251,8 @@ impl VoxelPlayer {
             is_sprinting: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
+            slowed_s: 0.0,
+            crouch_frac: 0.0,
         }
     }
 
@@ -1237,6 +1287,8 @@ impl VoxelPlayer {
             is_sprinting: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
+            slowed_s: 0.0,
+            crouch_frac: 0.0,
         }
     }
 
@@ -1268,6 +1320,8 @@ impl VoxelPlayer {
             is_sprinting: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
+            slowed_s: 0.0,
+            crouch_frac: 0.0,
         }
     }
 
@@ -1277,8 +1331,20 @@ impl VoxelPlayer {
     /// Example: `let camera = player.get_camera_frame(&world);`
     pub fn get_camera_frame(&self, world: &VoxelWorld) -> DMat4 {
         self.body
-            * make_boost(AXIS_Y, (self.h_m + self.get_bob_m(world)) / world.r)
+            * make_boost(
+                AXIS_Y,
+                (self.h_m + self.get_bob_m(world) - self.get_crouch_drop_m(world)) / world.r,
+            )
             * make_rotation(AXIS_Z, AXIS_Y, -self.pitch_rad)
+    }
+
+    /// `get_crouch_drop_m` gives how far crouching lowers the eye now: up to the settings'
+    /// `crouch_eye_height_frac` of the standing eye height.
+    ///
+    /// Example: `let drop_m = player.get_crouch_drop_m(&world);`
+    pub fn get_crouch_drop_m(&self, world: &VoxelWorld) -> f64 {
+        let crouched_frac: f64 = world.settings.movement.crouch_eye_height_frac;
+        self.crouch_frac * world.player.eye_height_m * (1.0 - crouched_frac)
     }
 
     /// `get_bob_m` gives the head bob: the eye dips at each footstep, deeper when sprinting, by
@@ -1286,7 +1352,7 @@ impl VoxelPlayer {
     ///
     /// Example: `let bob_m = player.get_bob_m(&world);`
     pub fn get_bob_m(&self, world: &VoxelWorld) -> f64 {
-        let bob = &world.settings.head_bob;
+        let bob = &world.head_bob;
         let depth_m: f64 = if self.is_sprinting {
             bob.sprint_depth_m
         } else {
@@ -1360,7 +1426,8 @@ impl VoxelPlayer {
 
     /// `step` moves the player one time step as the level does: walking or sprinting (or flying;
     /// sprinting only while there is energy, which refills only while `Shift` isn't held to move),
-    /// moving along light paths inside a mouth's reach, falling into a black hole (back to spawn),
+    /// moving along light paths inside a mouth's reach, falling into a black hole (back to the spawn
+    /// of index `spawn_index`, the player's team),
     /// colliding with blocks and the boundary (rising up to `MAX_WALK_RISE_M` where a floor's
     /// cells rise a little), jumping (the only way onto a block) and falling. A
     /// body that starts the step inside a block is first pushed out sideways, and lifted (as the
@@ -1379,8 +1446,11 @@ impl VoxelPlayer {
         let side: f64 = f64::from(u8::from(input.right)) - f64::from(u8::from(input.left));
         let len: f64 = forward.hypot(side);
         let settings: PlayerSettings = world.player;
-        let (energy, bob) = (&world.settings.sprint_energy, &world.settings.head_bob);
-        let wants_to_sprint: bool = input.sprint && len > 0.0;
+        let (energy, bob) = (&world.settings.sprint_energy, &world.head_bob);
+        let crouch_step: f64 = dt_s / world.settings.movement.crouch_s;
+        let crouch_target: f64 = f64::from(u8::from(input.crouch));
+        self.crouch_frac += (crouch_target - self.crouch_frac).clamp(-crouch_step, crouch_step);
+        let wants_to_sprint: bool = input.sprint && !input.crouch && len > 0.0;
         self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
         self.energy_frac = (self.energy_frac
             + if wants_to_sprint {
@@ -1401,12 +1471,23 @@ impl VoxelPlayer {
             self.bob_phase_rad =
                 (self.bob_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
         }
-        let speed_m_per_s: f64 = match (self.is_flying, self.is_sprinting) {
-            (true, true) => settings.fly_m_per_s * FLY_SPRINT_PER_FLY,
-            (true, false) => settings.fly_m_per_s,
-            (false, true) => settings.sprint_m_per_s,
-            (false, false) => settings.walk_m_per_s,
+        let slow_frac: f64 = if self.slowed_s > 0.0 {
+            world.settings.when_hit.slow_speed_frac
+        } else {
+            1.0
+        } * if input.crouch && !self.is_flying {
+            world.settings.movement.crouch_speed_frac
+        } else {
+            1.0
         };
+        self.slowed_s = (self.slowed_s - dt_s).max(0.0);
+        let speed_m_per_s: f64 = slow_frac
+            * match (self.is_flying, self.is_sprinting) {
+                (true, true) => settings.fly_m_per_s * FLY_SPRINT_PER_FLY,
+                (true, false) => settings.fly_m_per_s,
+                (false, true) => settings.sprint_m_per_s,
+                (false, false) => settings.walk_m_per_s,
+            };
         let eye: DVec4 = (self.body * make_boost(AXIS_Y, self.h_m / r)).col(AXIS_W);
         let warp: Option<usize> = world.find_warp_inside(eye);
         if let Some(w) = warp
@@ -1414,7 +1495,7 @@ impl VoxelPlayer {
             && world.compute_bend(w, eye, self.body.col(AXIS_X)).1
                 < FALL_IN_PER_HORIZON * world.warps[w].m
         {
-            *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, &[]);
+            *self = VoxelPlayer::NearSpawn(world, spawn_index as u32, 0, &[]);
             return vec!["You fell into the black hole".to_string()];
         }
         let (mut body_new, mut h_new, mut crossed) = (self.body, self.h_m, None);
@@ -1512,9 +1593,11 @@ mod tests {
     //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Players spawning | up to the player limit, and a late id whose own slot is next to player 1's (it moves on) | `players_spawn_apart` |
+    //! | Beam drawn | inside the map (whole), out into the sky (stops 4 curvature radii from the origin) | `beams_into_the_sky_stop_near_the_map` |
     //! | Beam clipped to | its middle (through the wormhole), before its start, past its end | `a_clipped_beam_keeps_its_middle` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
+    //! | Walking | upright, crouched (half as far, eye fully lowered) | `crouching_lowers_the_eye_and_slows_walking` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
 
@@ -1539,6 +1622,10 @@ mod tests {
     const QUARTER_TURN_RAD: f64 = std::f64::consts::FRAC_PI_4;
     const EMPTY_SPRINT_STEP_COUNT: usize = 10;
     const FAR_ID_NEAR_ONE: u32 = 35;
+    const SPAWN_TEAM_COUNT: u32 = 2;
+    const SKY_PITCH_RAD: f64 = 0.5;
+    const CROUCH_STEP_COUNT: usize = 30;
+    const CROUCH_TOLERANCE_FRAC: f64 = 0.02;
     const MAX_JUMP_STEP_COUNT: usize = 120;
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
     const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
@@ -1667,7 +1754,8 @@ mod tests {
         let world: VoxelWorld = load_lunar_surface();
         let mut eyes: Vec<DVec4> = Vec::new();
         for id in (1..=crate::net::MAX_PLAYER_COUNT as u32).chain([FAR_ID_NEAR_ONE]) {
-            let player: VoxelPlayer = VoxelPlayer::NearSpawn(&world, id, &eyes);
+            let team: u32 = id % SPAWN_TEAM_COUNT;
+            let player: VoxelPlayer = VoxelPlayer::NearSpawn(&world, team, id, &eyes);
             let nearby: Vec<usize> =
                 world.find_nearby_structures(player.body.col(AXIS_W), NEARBY_REACH_M);
             assert!(
@@ -1700,6 +1788,61 @@ mod tests {
         assert!((length_m(&middle) - (to_m - from_m)).abs() < DISTANCE_TOLERANCE_M);
         assert!(clip_beam(&shot.segments, world.r, -2.0, -1.0).is_empty());
         assert!(clip_beam(&shot.segments, world.r, full_m + 1.0, full_m + 2.0).is_empty());
+    }
+
+    #[test]
+    fn crouching_lowers_the_eye_and_slows_walking() {
+        let world: VoxelWorld = load_lunar_surface();
+        let start: VoxelPlayer = VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+        let walk: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        let walk_for = |input: &Input| -> VoxelPlayer {
+            let mut player: VoxelPlayer = start;
+            for _ in 0..CROUCH_STEP_COUNT {
+                player.step(&world, input, STEP_S, 0);
+            }
+            player
+        };
+        let moved_m = |player: &VoxelPlayer| -> f64 {
+            get_distance(start.body.col(AXIS_W), player.body.col(AXIS_W)) * world.r
+        };
+        let (upright, crouched) = (
+            walk_for(&walk),
+            walk_for(&Input {
+                crouch: true,
+                ..walk
+            }),
+        );
+        let movement = &world.settings.movement;
+        let speed_frac: f64 = moved_m(&crouched) / moved_m(&upright);
+        assert!((speed_frac - movement.crouch_speed_frac).abs() < CROUCH_TOLERANCE_FRAC);
+        let full_drop_m: f64 = world.player.eye_height_m * (1.0 - movement.crouch_eye_height_frac);
+        assert_eq!(upright.get_crouch_drop_m(&world), 0.0);
+        assert!((crouched.get_crouch_drop_m(&world) - full_drop_m).abs() < 1e-9);
+    }
+
+    #[test]
+    fn beams_into_the_sky_stop_near_the_map() {
+        let world: VoxelWorld = load_lunar_surface();
+        let into_wormhole: Shot = world.trace_laser(
+            VoxelPlayer::AtView(&world, [-22.0, 40.0], [-14.0, 40.0], None, 0.0)
+                .get_camera_frame(&world),
+        );
+        assert_eq!(
+            clip_beam_to_map(&into_wormhole.segments).len(),
+            into_wormhole.segments.len()
+        );
+        let into_sky: Shot = world.trace_laser(
+            VoxelPlayer::AtView(&world, [-107.0, 0.0], [0.0, 0.0], None, SKY_PITCH_RAD)
+                .get_camera_frame(&world),
+        );
+        let max_w: f64 = MAX_DRAWN_BEAM_DISTANCE_PER_CURVATURE_RADIUS.cosh();
+        let drawn: Vec<BeamSegment> = clip_beam_to_map(&into_sky.segments);
+        let end: &BeamSegment = drawn.last().expect("the beam starts inside the map");
+        let end_w: f64 = geodesic_point(end.a, end.b, end.length).w;
+        assert!(into_sky.hit_structure.is_none() && end_w <= max_w && end_w > max_w * 0.99);
     }
 
     #[test]
