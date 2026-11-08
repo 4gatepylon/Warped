@@ -1624,7 +1624,7 @@
   the SPECKLE on top of that with the 1/1/8 and 0.0-0.5 ratio with the 0.2 mean for exponential distribution for
   sniper."
 
-### D100. A third-person view on `V`, W-61 (third-person view)
+### D104. A third-person view on `V`, W-61 (third-person view)
 
 - **Choice:**
   - **Key:** `switch_view` in `player_settings.yaml`, `V` by default, switches between first and third person, on
