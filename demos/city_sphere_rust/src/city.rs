@@ -128,6 +128,9 @@ const STEER_WALK_ERROR_RAD: f64 = 0.35;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const DUST_LIFT_M: f64 = 0.02;
 const BODY_MIDDLE_M: f64 = 0.9;
+const WORMHOLE_ROUTE_WAIT_S: f64 = 1.2;
+const WORMHOLE_ROUTE_THROW_PITCH_RAD: f64 = -0.15;
+const WORMHOLE_ROUTE_WALK_S: f64 = 1.6;
 const MAX_WORMHOLE_LEGS: usize = 2;
 const WORMHOLE_EXIT_M: f64 = 0.01;
 const UNLINKED_MOUTH_BALL_M: f64 = 0.3;
@@ -357,6 +360,10 @@ enum Step {
         s: f64,
     },
     SelectRifle,
+    Throw,
+    WalkForward {
+        s: f64,
+    },
     Overheat,
     CoolDown,
     FireAt {
@@ -371,6 +378,7 @@ struct BrainOutput {
     is_shooting: bool,
     console: Option<u8>,
     wants_rifle: bool,
+    wants_throw: bool,
 }
 
 /// `BrainSight` is what a brain knows besides the world and its player: the rifle's heat, the
@@ -438,6 +446,7 @@ impl Brain {
             is_shooting: false,
             console: None,
             wants_rifle: false,
+            wants_throw: false,
         };
         let Some(&step) = self.steps.get(self.index) else {
             return out;
@@ -479,6 +488,14 @@ impl Brain {
                 game.off_mask >> index & 1 == 1 || game.winner.is_some()
             }
             Step::Wait { s } => self.step_s >= s,
+            Step::Throw => {
+                out.wants_throw = true;
+                true
+            }
+            Step::WalkForward { s } => {
+                out.input.forward_frac = 1.0;
+                self.step_s >= s
+            }
             Step::SelectRifle => {
                 out.wants_rifle = true;
                 true
@@ -645,6 +662,32 @@ fn make_stairs_route(world: &CityWorld, team: u32) -> Result<Vec<Step>> {
         s: STAIRS_ROUTE_END_WAIT_S,
     });
     Ok(steps)
+}
+
+/// `make_wormhole_route` is `--route wormholes` for blue at its spawn: turn around and throw the
+/// purple mouth onto the open street behind, turn a quarter and throw the green one, turn back to
+/// the purple one, shoot through it (the shot comes out of the green one), then walk through it.
+fn make_wormhole_route() -> Vec<Step> {
+    let turn = |yaw_rad: f64, pitch_rad: f64| Step::Aim { yaw_rad, pitch_rad };
+    let wait = || Step::Wait {
+        s: WORMHOLE_ROUTE_WAIT_S,
+    };
+    vec![
+        wait(),
+        turn(std::f64::consts::PI, WORMHOLE_ROUTE_THROW_PITCH_RAD),
+        Step::Throw,
+        wait(),
+        turn(std::f64::consts::FRAC_PI_2, WORMHOLE_ROUTE_THROW_PITCH_RAD),
+        Step::Throw,
+        wait(),
+        turn(-std::f64::consts::FRAC_PI_2, 0.0),
+        Step::Shoot,
+        wait(),
+        Step::WalkForward {
+            s: WORMHOLE_ROUTE_WALK_S,
+        },
+        wait(),
+    ]
 }
 
 /// `make_console_route` is `--bot-objective consoles`'s plan for a bot of `team`: walk on foot to
@@ -1075,6 +1118,7 @@ impl CitySession {
                 (false, _) => None,
                 (true, RouteKind::Rifle) => Some(Brain::New(make_rifle_route())),
                 (true, RouteKind::Stairs) => Some(Brain::New(make_stairs_route(&world, 0)?)),
+                (true, RouteKind::Wormholes) => Some(Brain::New(make_wormhole_route())),
                 (true, _) => Some(Brain::New(make_route(&world))),
             },
             world,
@@ -1299,7 +1343,17 @@ impl CitySession {
         for event in self.client.poll()? {
             match event {
                 net::NetEvent::Joined(id) => {
-                    self.player = self.world.make_player(self.get_team(), self.spawn_count);
+                    let others: Vec<DVec3> = self
+                        .client
+                        .players
+                        .iter()
+                        .filter(|p| Some(p.id) != self.client.id)
+                        .map(|p| CityPlayer::get_feet_up(p.frame, self.world.eye_height_m).0)
+                        .collect();
+                    let spawn: usize =
+                        self.world
+                            .find_clear_spawn(self.get_team(), &others, self.spawn_count);
+                    self.player = self.world.make_player(self.get_team(), spawn);
                     self.spawn_count += 1;
                     self.is_spawned = true;
                     if let Some(brain) = &mut self.brain {
@@ -1371,6 +1425,15 @@ impl CitySession {
                     speed_frac: self.get_speed_frac(),
                     ..out.input
                 };
+                if out.wants_throw && self.thrown.can_throw() {
+                    let flight = fly_city_throw(
+                        &self.world,
+                        self.player.get_eye_frame(),
+                        self.thrown.get_next_color(),
+                        &self.settings.wormholes,
+                    );
+                    self.thrown.throw(flight, now_s);
+                }
                 if out.wants_rifle {
                     self.gun = Gun::Rifle;
                 }
@@ -3433,7 +3496,15 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         for event in client.poll()? {
             match event {
                 net::NetEvent::Joined(_) => {
-                    player = world.make_player(client.team.unwrap_or(0), spawn_count);
+                    let team: u32 = client.team.unwrap_or(0);
+                    let others: Vec<DVec3> = client
+                        .players
+                        .iter()
+                        .filter(|p| Some(p.id) != client.id)
+                        .map(|p| CityPlayer::get_feet_up(p.frame, world.eye_height_m).0)
+                        .collect();
+                    player =
+                        world.make_player(team, world.find_clear_spawn(team, &others, spawn_count));
                     spawn_count += 1;
                     is_spawned = true;
                     brain.restart();

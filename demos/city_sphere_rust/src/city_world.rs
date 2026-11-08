@@ -1015,6 +1015,33 @@ impl CityWorld {
         player.is_on_ground = true;
     }
 
+    /// `find_clear_spawn` gives the index of `team`'s spawn farthest from the nearest of `others`
+    /// (other players' feet), from `first` on in turn when none are near, so players who join or
+    /// come back together don't stand on top of each other.
+    ///
+    /// Example: `let player = world.make_player(0, world.find_clear_spawn(0, &others, 1));`
+    pub fn find_clear_spawn(&self, team: u32, others: &[DVec3], first: usize) -> usize {
+        let spawns: Vec<DVec3> = self
+            .spawns
+            .iter()
+            .filter(|(t, _)| *t == team)
+            .map(|(_, frame)| frame.w_axis.truncate())
+            .collect();
+        let gap_m = |k: usize| -> f64 {
+            others
+                .iter()
+                .map(|other| (*other - spawns[k]).length())
+                .fold(f64::INFINITY, f64::min)
+        };
+        (0..spawns.len())
+            .map(|k| (first + k) % spawns.len())
+            .fold(None, |best: Option<(usize, f64)>, k| match best {
+                Some((_, best_m)) if gap_m(k) <= best_m => best,
+                _ => Some((k, gap_m(k))),
+            })
+            .map_or(0, |(k, _)| k)
+    }
+
     /// `make_player` puts a new player at a team's spawn (`index` picks among them), looking a
     /// little up (`SPAWN_PITCH_RAD`), since level ground inside the sphere rises ahead and would
     /// fill the view.
@@ -1129,6 +1156,7 @@ mod tests {
     //! | --- | --- |
     //! | The map loads with 2 consoles a team and antipodal spawns | `map_has_one_console_a_team_and_antipodal_spawns` |
     //! | A player stands on the street and falls outward onto it | `players_fall_outward_onto_the_street` |
+    //! | A player spawns where no other player stands (none near: the next in turn; one on the first: the other) | `spawns_keep_clear_of_other_players` |
     //! | A lift carries a player up onto the glass level, and they stand on the glass | `lifts_carry_players_onto_the_glass` |
     //! | A shot from the glass level reflects off the glass, at most the set number of times | `shots_reflect_off_the_glass_up_to_the_limit` |
     //! | A shot from the street stops at the glass | `street_shots_stop_at_the_glass` |
@@ -1169,6 +1197,17 @@ mod tests {
             .w_axis
             .truncate();
         assert!((blue + red).length() < 1e-4);
+    }
+
+    /// `spawns_keep_clear_of_other_players` picks the first spawn with nobody around, and the
+    /// other spawn when a player stands on the first.
+    #[test]
+    fn spawns_keep_clear_of_other_players() {
+        let world: CityWorld = world();
+        assert_eq!(world.find_clear_spawn(0, &[], 0), 0);
+        assert_eq!(world.find_clear_spawn(0, &[], 1), 1);
+        let on_first: DVec3 = world.make_player(0, 0).feet;
+        assert_eq!(world.find_clear_spawn(0, &[on_first], 0), 1);
     }
 
     #[test]
