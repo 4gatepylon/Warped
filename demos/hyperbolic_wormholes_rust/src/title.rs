@@ -28,7 +28,6 @@ const HEADER_LINES: [&str; 3] = [
     "Up and Down choose, Return starts, Escape quits.",
     "",
 ];
-const CREDIT_LINES: [&str; 2] = ["", "Revolver: \"Sci-fi revolver\" by Ramhat (Sketchfab)"];
 
 /// `Choice` is one line of the title screen: a game to start, or quitting.
 #[derive(Clone, PartialEq, Debug)]
@@ -139,7 +138,7 @@ impl TitleScreen {
     }
 
     /// `get_lines` gives the title screen's lines, each with whether it is highlighted (the
-    /// title and the selected choice), ending with the credit for the revolver's model.
+    /// title and the selected choice).
     ///
     /// Example: `let lines = title.get_lines();`
     pub fn get_lines(&self) -> Vec<(String, bool)> {
@@ -154,8 +153,7 @@ impl TitleScreen {
                 i == self.selected,
             )
         });
-        let credits = CREDIT_LINES.iter().map(|line| (line.to_string(), false));
-        header.chain(choices).chain(credits).collect()
+        header.chain(choices).collect()
     }
 
     /// `move_selection` selects the choice `step` lines below the selected one (above for a
