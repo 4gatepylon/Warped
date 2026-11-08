@@ -459,6 +459,7 @@ const _: () = assert!(
 pub enum FrameData<'a> {
     House(&'a SceneData),
     Voxel(&'a VoxelFrame),
+    City(&'a crate::render_city::CityFrame),
 }
 
 impl FrameData<'_> {
@@ -472,6 +473,7 @@ impl FrameData<'_> {
                 data.uniforms.height_px as usize,
             ),
             FrameData::Voxel(frame) => frame.get_render_size(),
+            FrameData::City(frame) => frame.get_render_size(),
         }
     }
 }
@@ -501,6 +503,7 @@ pub struct MetalRenderer {
     hole_buffers: Option<HoleBuffers>,
     surface_textures: Option<SurfaceTextures>,
     voxel_gpu: Option<VoxelGpu>,
+    city_gpu: Option<crate::render_city::CityGpu>,
     viewmodels: HashMap<GunModel, Viewmodel>,
     is_voxel_frame: bool,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -826,6 +829,7 @@ impl MetalRenderer {
             hole_buffers: None,
             surface_textures: None,
             voxel_gpu: None,
+            city_gpu: None,
             viewmodels: HashMap::new(),
             is_voxel_frame: false,
             throat_table,
@@ -887,7 +891,7 @@ impl MetalRenderer {
         {
             self.render_texture = Some(self.make_texture(
                 output_px,
-                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
+                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget,
             )?);
         }
         Ok(())
@@ -971,6 +975,9 @@ impl MetalRenderer {
         self.prepare_render_texture(output_px)?;
         self.prepare_upscaling(output_px)?;
         self.is_voxel_frame = matches!(frame_data, FrameData::Voxel(_));
+        if let FrameData::City(city_frame) = frame_data {
+            return self.encode_city_frame(city_frame, output_px);
+        }
         if let FrameData::Voxel(voxel_frame) = frame_data {
             return self.encode_voxel_frame(voxel_frame, output_px);
         }
@@ -1091,6 +1098,35 @@ impl MetalRenderer {
                 render_texture,
             )?;
         encoder.endEncoding();
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
+        self.finish_encoding(command_buffer, texture, render_px, output_px != render_px)
+    }
+
+    /// `encode_city_frame` rasterizes a City Sphere frame into the render texture, then upscales it
+    /// like the other frames.
+    ///
+    /// Example: `let frame = self.encode_city_frame(city_frame, output_px)?;`
+    fn encode_city_frame(
+        &mut self,
+        frame: &crate::render_city::CityFrame,
+        output_px: (usize, usize),
+    ) -> Result<Frame> {
+        let render_px: (usize, usize) = frame.get_render_size();
+        if self.city_gpu.is_none() {
+            self.city_gpu = Some(crate::render_city::CityGpu::New(&self.device)?);
+        }
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or("Metal: no command buffer")?;
+        let (render_texture, _) = self
+            .render_texture
+            .as_ref()
+            .expect("encode_frame made the render texture");
+        self.city_gpu
+            .as_mut()
+            .expect("the city pipeline was just made")
+            .encode(&self.device, &command_buffer, frame, render_texture)?;
         let texture: Retained<ProtocolObject<dyn MTLTexture>> = render_texture.clone();
         self.finish_encoding(command_buffer, texture, render_px, output_px != render_px)
     }
@@ -1367,7 +1403,7 @@ impl MetalRenderer {
         {
             self.overlay_target = Some(self.make_texture(
                 output_px,
-                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
+                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget,
             )?);
         }
         let is_blur_history_valid: bool = self
