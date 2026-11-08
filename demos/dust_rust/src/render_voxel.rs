@@ -84,10 +84,12 @@ const FOG_DEPTHS: f64 = 5.0;
 /// `SAND_PERIOD_S` is how often the blowing sand's clock wraps, short enough to keep the shader's
 /// float positions precise.
 const SAND_PERIOD_S: f64 = 600.0;
-/// `SAND_GUST_FRAC` is how much the gusts thicken or thin a fog (0.3: by up to 30%).
-const SAND_GUST_FRAC: f32 = 0.3;
-/// `SAND_STREAK_FRAC` is how opaque the nearest streak of blowing sand is.
-const SAND_STREAK_FRAC: f32 = 0.15;
+/// `DEFAULT_SAND` is the blowing sand of a fog whose map gives no `atmosphere.sand`.
+const DEFAULT_SAND: crate::map::Sand = crate::map::Sand {
+    gust_frac: 0.3,
+    streak_frac: 0.15,
+    sheet_frac: 0.0,
+};
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -582,7 +584,7 @@ impl VoxelFrame {
             planet_e2: e2.as_vec3().extend(0.0).to_array(),
             spot: spot.map_or([0.0, 0.0, 0.0, 1.0], |(x, _)| to_f32(x)),
             spot_color: spot.map_or([0.0; 4], |(_, team)| {
-                let c: [f32; 3] = team_colors[team as usize % 2];
+                let c: [f32; 3] = world.laser_color.unwrap_or(team_colors[team as usize % 2]);
                 [c[0], c[1], c[2], SPOT_BRIGHTNESS]
             }),
             regions: world.regions.map_or([0.0; 4], |[edge, u_m, v_m]| {
@@ -662,11 +664,12 @@ impl VoxelFrame {
                 ]
             }),
             sand: world.fog.map_or([0.0; 4], |_| {
+                let sand: crate::map::Sand = world.sand.unwrap_or(DEFAULT_SAND);
                 [
                     (world.sky_time_s % SAND_PERIOD_S) as f32,
-                    SAND_GUST_FRAC,
-                    SAND_STREAK_FRAC,
-                    0.0,
+                    sand.gust_frac,
+                    sand.streak_frac,
+                    sand.sheet_frac,
                 ]
             }),
             overhead: [0.0; 4],

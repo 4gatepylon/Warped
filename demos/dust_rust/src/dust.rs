@@ -1,4 +1,5 @@
-//! `dust.rs` throws up lunar dust and a puff of mist where a laser shot hits the ground. A
+//! `dust.rs` throws up dust (on a fogged map, sand in its fog's colour) and a puff of mist where a
+//! laser shot hits the ground; on a windy map the mist drifts downwind. A
 //! `DustBurst` starts when the shot's beam front reaches the ground: its grains (small tumbling
 //! tetrahedra, cubes and octahedra) fly up and fall back under the map's gravity onto the ground's
 //! slope, its mist puffs swell and drift, and all of them fade out within two seconds. Each frame,
@@ -66,6 +67,9 @@ const PUFF_OPACITY_FRAC: f64 = 0.45;
 const FADE_START_FRAC: f64 = 0.35;
 const DUST_SRGB: [f64; 3] = [0.62, 0.57, 0.50];
 const MIST_SRGB: [f64; 3] = [0.74, 0.70, 0.64];
+const SAND_GRAIN_SHADE_FRAC: f64 = 0.8;
+const SAND_MIST_GAIN: f64 = 1.2;
+const PUFF_WIND_M_PER_S: f64 = 3.0;
 const SHADE_VARIATION_FRAC: f64 = 0.15;
 const DISPLAY_GAMMA: f64 = 2.2;
 const SLOPE_PROBE_M: f64 = 0.25;
@@ -120,11 +124,17 @@ pub struct DustCloud {
 }
 
 /// `Motion` is how a particle moves: a grain flies until it lands on the ground (`landing_s` after
-/// the burst starts), and a puff slows to a stop while it swells to `final_radius_m`.
+/// the burst starts), and a puff slows to a stop while it swells to `final_radius_m` and the wind
+/// carries it at `wind_m_per_s`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Motion {
-    Ballistic { landing_s: f64 },
-    Drifting { final_radius_m: f64 },
+    Ballistic {
+        landing_s: f64,
+    },
+    Drifting {
+        final_radius_m: f64,
+        wind_m_per_s: DVec3,
+    },
 }
 
 /// `Particle` is how one grain or puff starts (position, velocity and turn in the burst's frame,
@@ -146,13 +156,16 @@ struct Particle {
 
 /// `Impact` is where a shot hit the ground, seen from the frame of the hit point (y up, z along the
 /// ground toward the shooter): the ground's unit normal, the sun's unit direction and how much
-/// sunlight reaches it.
+/// sunlight reaches it; the colours of its grains and mist, and the wind its mist drifts with.
 #[derive(Clone, Copy)]
 struct Impact {
     frame: DMat4,
     normal: DVec3,
     sun: DVec3,
     sun_frac: f64,
+    grain_srgb: [f64; 3],
+    mist_srgb: [f64; 3],
+    wind_m_per_s: DVec3,
 }
 
 /// `DustBurst` is the dust and mist of one shot into the ground, from `start_s` (seconds into the
@@ -310,7 +323,7 @@ impl Particle {
     /// random, thrown from near the hit point (`impact`'s ground normal) up a cone around `axis`,
     /// which lands on the ground plane under `gravity_m_per_s2`.
     ///
-    /// Example: `let grain = Particle::MakeGrain(&mut random, &impact, axis, 6.0, &SNIPER_BURST);`
+    /// Example: `let grain = Particle::MakeGrain(&mut random, DVec3::Y, axis, 6.0, &SNIPER_BURST, DUST_SRGB);`
     #[allow(non_snake_case)]
     fn MakeGrain(
         random: &mut Random,
@@ -318,6 +331,7 @@ impl Particle {
         axis: DVec3,
         gravity_m_per_s2: f64,
         size: &BurstSize,
+        srgb: [f64; 3],
     ) -> Particle {
         let direction: DVec3 = random.next_in_cone(axis, GRAIN_CONE_HALF_ANGLE_RAD);
         let speed_m_per_s: f64 =
@@ -339,24 +353,28 @@ impl Particle {
             radius_m: random.next_between(GRAIN_MIN_RADIUS_M, GRAIN_MAX_RADIUS_M),
             life_s: random.next_between(GRAIN_MIN_LIFE_S, GRAIN_MAX_LIFE_S),
             opacity_frac: GRAIN_OPACITY_FRAC,
-            albedo: random.next_albedo(DUST_SRGB),
+            albedo: random.next_albedo(srgb),
             shape: GRAIN_SHAPES[(random.next_frac() * GRAIN_SHAPES.len() as f64) as usize],
         }
     }
 
     /// `MakePuff` makes a puff of mist that drifts out from just above the hit point along a cone
-    /// around `axis`, slowing, while it swells.
+    /// around `axis`, slowing, while it swells and the wind (`impact.wind_m_per_s`) carries it.
     ///
-    /// Example: `let puff = Particle::MakePuff(&mut random, DVec3::Y, axis, &SNIPER_BURST);`
+    /// Example: `let puff = Particle::MakePuff(&mut random, &impact, axis, &SNIPER_BURST);`
     #[allow(non_snake_case)]
-    fn MakePuff(random: &mut Random, normal: DVec3, axis: DVec3, size: &BurstSize) -> Particle {
+    fn MakePuff(random: &mut Random, impact: &Impact, axis: DVec3, size: &BurstSize) -> Particle {
+        let normal: DVec3 = impact.normal;
         let direction: DVec3 = random.next_in_cone(axis, PUFF_CONE_HALF_ANGLE_RAD);
         let speed_m_per_s: f64 =
             size.size_frac * random.next_between(PUFF_MIN_SPEED_M_PER_S, PUFF_MAX_SPEED_M_PER_S);
         let final_radius_m: f64 =
             size.size_frac * random.next_between(PUFF_MIN_RADIUS_M, PUFF_MAX_RADIUS_M);
         Particle {
-            motion: Motion::Drifting { final_radius_m },
+            motion: Motion::Drifting {
+                final_radius_m,
+                wind_m_per_s: impact.wind_m_per_s,
+            },
             start_m: normal * PUFF_LIFT_M + random.next_on_disk(normal, PUFF_SPREAD_M),
             velocity_m_per_s: direction * speed_m_per_s,
             start_orientation: DQuat::IDENTITY,
@@ -364,7 +382,7 @@ impl Particle {
             radius_m: PUFF_START_RADIUS_M,
             life_s: random.next_between(PUFF_MIN_LIFE_S, PUFF_MAX_LIFE_S),
             opacity_frac: PUFF_OPACITY_FRAC,
-            albedo: random.next_albedo(MIST_SRGB),
+            albedo: random.next_albedo(impact.mist_srgb),
             shape: DustShape::Puff,
         }
     }
@@ -385,9 +403,13 @@ impl Particle {
                     t_s,
                 )
             }
-            Motion::Drifting { final_radius_m } => (
+            Motion::Drifting {
+                final_radius_m,
+                wind_m_per_s,
+            } => (
                 self.start_m
-                    + self.velocity_m_per_s * (PUFF_DRAG_S * (1.0 - (-age_s / PUFF_DRAG_S).exp())),
+                    + self.velocity_m_per_s * (PUFF_DRAG_S * (1.0 - (-age_s / PUFF_DRAG_S).exp()))
+                    + wind_m_per_s * age_s,
                 final_radius_m + (self.radius_m - final_radius_m) * (-age_s / PUFF_GROW_S).exp(),
                 0.0,
             ),
@@ -429,11 +451,25 @@ impl DustBurst {
         let sun: DVec3 =
             get_local_direction(frame, transport_from_centre(world.sun, spot)).normalize();
         let probe: DVec4 = frame * map_klein(normal * SUN_PROBE_M / world.r);
+        let mist_srgb: [f64; 3] = world.fog.map_or(MIST_SRGB, |fog| {
+            fog.color.map(|c| (f64::from(c) * SAND_MIST_GAIN).min(1.0))
+        });
+        let grain_srgb: [f64; 3] = world
+            .fog
+            .map_or(DUST_SRGB, |_| mist_srgb.map(|c| c * SAND_GRAIN_SHADE_FRAC));
+        let wind_m_per_s: DVec3 = world.wind.map_or(DVec3::ZERO, |wind| {
+            let d: DVec3 =
+                get_local_direction(frame, transport_from_centre(wind.normal.truncate(), spot));
+            (d - normal * normal.dot(d)).normalize_or_zero() * PUFF_WIND_M_PER_S
+        });
         let impact: Impact = Impact {
             frame,
             normal,
             sun,
             sun_frac: if world.is_sunlit(probe) { 1.0 } else { 0.0 },
+            grain_srgb,
+            mist_srgb,
+            wind_m_per_s,
         };
         let size: &BurstSize = if is_rifle {
             &RIFLE_BURST
@@ -467,10 +503,19 @@ impl DustBurst {
         let axis: DVec3 = (normal + back * BACKSPRAY_FRAC).normalize();
         let mut random: Random = Random { state: seed };
         let mut particles: Vec<Particle> = (0..size.grain_count)
-            .map(|_| Particle::MakeGrain(&mut random, normal, axis, gravity_m_per_s2, size))
+            .map(|_| {
+                Particle::MakeGrain(
+                    &mut random,
+                    normal,
+                    axis,
+                    gravity_m_per_s2,
+                    size,
+                    impact.grain_srgb,
+                )
+            })
             .collect();
         particles.extend(
-            (0..size.puff_count).map(|_| Particle::MakePuff(&mut random, normal, axis, size)),
+            (0..size.puff_count).map(|_| Particle::MakePuff(&mut random, &impact, axis, size)),
         );
         let life_s: f64 = particles.iter().map(|p| p.life_s).fold(0.0, f64::max);
         DustBurst {
@@ -521,6 +566,7 @@ mod tests {
     //! | Time since the beam arrived | before it, grains in the air, grains landed, every particle faded | `nothing_shows_before_the_beam_arrives`, `grains_rise_then_land_and_stay`, `the_burst_fades_and_ends` |
     //! | Ground at the hit | flat, sloped | `grains_never_sink_below_the_ground` |
     //! | Particle kind | grain, puff | `grains_rise_then_land_and_stay`, `puffs_swell_and_slow` |
+    //! | Wind | none, along +x | `puffs_swell_and_slow`, `puffs_drift_downwind` |
     //! | Grain's turn | in flight (tumbling), landed (still) | `grains_are_tumbling_polyhedra` |
     //! | Gun | sniper, rifle | `rifle_bursts_are_smaller` |
     //! | Seed | the same, another | `bursts_depend_only_on_their_seed` |
@@ -561,6 +607,9 @@ mod tests {
             normal: normal.normalize(),
             sun: DVec3::Y,
             sun_frac: 1.0,
+            grain_srgb: DUST_SRGB,
+            mist_srgb: MIST_SRGB,
+            wind_m_per_s: DVec3::ZERO,
         };
         DustBurst::New(impact, GRAVITY_M_PER_S2, START_S, size, seed)
     }
@@ -694,6 +743,26 @@ mod tests {
         }
     }
 
+    /// `puffs_drift_downwind` checks that in a wind along +x every puff ends farther along +x than
+    /// the same puff without wind, by the wind's drift, and that grains don't move with it.
+    #[test]
+    fn puffs_drift_downwind() {
+        let still: DustBurst = make_burst(DVec3::Y, &SNIPER_BURST, SEED);
+        let mut impact: Impact = still.impact;
+        impact.wind_m_per_s = DVec3::X * PUFF_WIND_M_PER_S;
+        let windy: DustBurst =
+            DustBurst::New(impact, GRAVITY_M_PER_S2, START_S, &SNIPER_BURST, SEED);
+        for (a, b) in still.particles.iter().zip(&windy.particles) {
+            let drift_m: DVec3 = b.get_state(PUFF_LATE_S, GRAVITY_M_PER_S2).position_m
+                - a.get_state(PUFF_LATE_S, GRAVITY_M_PER_S2).position_m;
+            let expected_m: DVec3 = match a.motion {
+                Motion::Drifting { .. } => DVec3::X * PUFF_WIND_M_PER_S * PUFF_LATE_S,
+                Motion::Ballistic { .. } => DVec3::ZERO,
+            };
+            assert!((drift_m - expected_m).length() < TOLERANCE_M);
+        }
+    }
+
     /// `rifle_bursts_are_smaller` checks that a rifle's burst has fewer particles and smaller puffs.
     #[test]
     fn rifle_bursts_are_smaller() {
@@ -705,7 +774,7 @@ mod tests {
                 .particles
                 .iter()
                 .map(|p| match p.motion {
-                    Motion::Drifting { final_radius_m } => final_radius_m,
+                    Motion::Drifting { final_radius_m, .. } => final_radius_m,
                     Motion::Ballistic { .. } => 0.0,
                 })
                 .fold(0.0, f64::max)

@@ -321,6 +321,7 @@ pub struct VoxelWorld {
     pub terrain: Option<Terrain>,
     pub wind: Option<WindField>,
     pub fog: Option<Fog>,
+    pub sand: Option<crate::map::Sand>,
     pub laser_color: Option<[f32; 3]>,
     pub sun: DVec3,
     pub planet: Option<(DVec3, f64)>,
@@ -848,6 +849,7 @@ impl VoxelWorld {
                 .and_then(|a| a.wind)
                 .map(|wind| WindField::FromMap(&wind, r)),
             fog: map.atmosphere.and_then(|a| a.fog),
+            sand: map.atmosphere.and_then(|a| a.sand),
             laser_color: map.appearance.laser_color,
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),

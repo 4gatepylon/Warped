@@ -10,11 +10,17 @@ Usage (from demos/dust_rust/): python3 tools/make_dust_map.py [output path]
 
 import json
 import math
+import random
 import sys
 from pathlib import Path
 
 R_M = 50.0
-LASER_COLOR = [1.0, 0.7, 0.25]
+LASER_COLOR = [1.0, 0.8, 0.3]
+JITTER_SEED = 121
+JITTER_M = 1.5
+JITTER_YAW_RAD = 0.3
+JITTER_SCALE_FRAC = 0.12
+WIND_LOG_INDEX_GRADIENT_PER_M = 0.00144
 OUTPUT = Path(__file__).resolve().parents[3] / "common/maps/dust/map.json"
 TERRAIN = {"kind": "crater", "rim_u_m": 170, "rim_v_m": 85, "wall_m": 25, "rim_height_m": 16,
            "relief_m": 0.7, "relief_wavelength_m": 22, "seed": 5}
@@ -114,14 +120,29 @@ def mirror(team: str) -> str:
     return {"blue": "red", "red": "blue"}.get(team, team)
 
 
+def scale_shapes(shapes: list[dict], s: float) -> list[dict]:
+    """`scale_shapes` scales the centres, half sizes and rounding of `shapes` by `s` about the frame's origin."""
+    return [dict(sh, centre_m=[c * s for c in sh["centre_m"]], half_m=[c * s for c in sh["half_m"]],
+                 round_m=sh["round_m"] * s) for sh in shapes]
+
+
 def main() -> None:
+    jitter = random.Random(JITTER_SEED)
+
+    def nudge(u: float, v: float, yaw: float) -> tuple[float, float, float, float]:
+        """`nudge` jitters a natural prop's place, turn and size from `JITTER_SEED`; `place` mirrors the result."""
+        return (u + jitter.uniform(-JITTER_M, JITTER_M), v + jitter.uniform(-JITTER_M, JITTER_M),
+                yaw + jitter.uniform(-JITTER_YAW_RAD, JITTER_YAW_RAD),
+                1.0 + jitter.uniform(-JITTER_SCALE_FRAC, JITTER_SCALE_FRAC))
+
     mounds: list[dict] = []
-    for sign in (1, -1):
-        for u in [-40, -32, -24, -16, -9, 9, 16, 24, 32, 40]:
-            mounds.append({"u_m": sign * u, "v_m": sign * (25 + 2.5 * math.sin(u / 7.0)), "radius_m": 8.5, "height_m": 3.4})
-        for u, v, r, h in [(-70, 50, 16, 4.0), (-30, 52, 14, 3.2), (10, 55, 18, 4.5), (60, 50, 15, 3.6),
-                           (-95, 30, 10, 1.8), (-62, -6, 7, 1.4), (-40, -52, 13, 3.0), (-8, -44, 9, 2.0)]:
-            mounds.append({"u_m": sign * u, "v_m": sign * v, "radius_m": r, "height_m": h})
+    dunes = [(u, 25 + 2.5 * math.sin(u / 7.0), 8.5, 3.4) for u in [-40, -32, -24, -16, -9, 9, 16, 24, 32, 40]]
+    dunes += [(-70, 50, 16, 4.0), (-30, 52, 14, 3.2), (10, 55, 18, 4.5), (60, 50, 15, 3.6),
+              (-95, 30, 10, 1.8), (-62, -6, 7, 1.4), (-40, -52, 13, 3.0), (-8, -44, 9, 2.0)]
+    for u, v, r, h in dunes:
+        u, v, _, s = nudge(u, v, 0.0)
+        for sign in (1, -1):
+            mounds.append({"u_m": sign * u, "v_m": sign * v, "radius_m": r * s, "height_m": h * s})
     ground = lambda u, v: get_height_m(u, v, mounds)  # noqa: E731
     structures: list[dict] = []
     lights: list[dict] = []
@@ -160,14 +181,18 @@ def main() -> None:
         place("sandstone arch", 0.0, v, 0.0, [box([-3.6, 2.6, 0], [1.3, 3.6, 1.6], "sandstone", 0.4),
                                              box([3.6, 2.6, 0], [1.3, 3.6, 1.6], "sandstone", 0.4),
                                              box([0, 6.9, 0], [4.9, 1.0, 1.7], "sandstone", 0.5)], sink_m=1.0)
-    place("sandstone mesa", -18, 9, 0.4, [box([0, 2.5, 0], [5.0, 3.5, 4.0], "sandstone", 1.2)], sink_m=1.0)
-    place("sandstone mesa", -52, 34, -0.3, [box([0, 3.0, 0], [4.0, 4.0, 6.0], "sandstone", 1.0)], sink_m=1.0)
+    def place_natural(name, u, v, yaw, shapes, sink_m=0.0):
+        u, v, yaw, s = nudge(u, v, yaw)
+        place(name, u, v, yaw, scale_shapes(shapes, s), sink_m=sink_m * s)
+
+    place_natural("sandstone mesa", -18, 9, 0.4, [box([0, 2.5, 0], [5.0, 3.5, 4.0], "sandstone", 1.2)], sink_m=1.0)
+    place_natural("sandstone mesa", -52, 34, -0.3, [box([0, 3.0, 0], [4.0, 4.0, 6.0], "sandstone", 1.0)], sink_m=1.0)
     for u, v, rad, h in [(-40, 0, 1.3, 6.0), (-10, -12, 1.1, 5.0), (-36, -18, 1.5, 7.0), (-66, 4, 1.0, 4.5), (-5, 40, 1.4, 6.5)]:
-        place("sandstone pillar", u, v, 0.0, [box([0, h / 2 - 0.5, 0], [rad, h / 2 + 0.5, rad], "sandstone", 0.3, "cylinder")])
+        place_natural("sandstone pillar", u, v, 0.0, [box([0, h / 2 - 0.5, 0], [rad, h / 2 + 0.5, rad], "sandstone", 0.3, "cylinder")])
     for u, v, yaw, length in [(-24, -6, 0.5, 3.0), (-12, 36, 1.2, 2.5), (-36, 12, -0.2, 3.5), (-48, -22, 1.0, 2.5)]:
-        place("ruin wall", u, v, yaw, [box([0, 0.7, 0], [length, 1.6, 0.4], "sandstone blocks", 0.05)], sink_m=0.3)
+        place_natural("ruin wall", u, v, yaw, [box([0, 0.7, 0], [length, 1.6, 0.4], "sandstone blocks", 0.05)], sink_m=0.3)
     for u, v, rad in [(-26, 18, 1.6), (-44, 46, 2.2), (-14, -30, 1.4), (-88, -40, 2.0)]:
-        place("boulder", u, v, 0.0, [box([0, rad * 0.4, 0], [rad, rad * 0.8, rad * 1.2], "boulder", kind="ellipsoid")])
+        place_natural("boulder", u, v, 0.0, [box([0, rad * 0.4, 0], [rad, rad * 0.8, rad * 1.2], "boulder", kind="ellipsoid")])
     mouths = [(-50.0, -40.0, 0.6), (50.0, 40.0, 0.6 + math.pi)]
     warps = [{"kind": "wormhole_mouth", "name": f"wormhole mouth {'AB'[k]}",
               "frame": make_frame(u, v, ground(u, v) + 2.6, yaw), "law": "foil", "schwarzschild_radius_m": 1.6,
@@ -178,7 +203,7 @@ def main() -> None:
     manifest = {
         "format": "warped-map", "version": 1, "name": "dust",
         "description": "Dust: a desert basin in hyperbolic space (R = 50 m) under a constant sandstorm whose wind bends light, three pylons a team, fixed and thrown wormholes, no black hole.",
-        "source": "demos/dust_rust/tools/make_dust_map.py (layout after demos/levels/dust/index.html)",
+        "source": f"demos/dust_rust/tools/make_dust_map.py (layout after demos/levels/dust/index.html; natural props jittered from seed {JITTER_SEED}, mirrored for fairness)",
         "space": {"kind": "hyperbolic", "curvature_radius_m": R_M},
         "gravity_m_per_s2": 9.81,
         "player": {"eye_height_m": 1.6, "walk_m_per_s": 5, "sprint_m_per_s": 9, "jump_m_per_s": 5.2, "fly_m_per_s": 14},
@@ -190,8 +215,9 @@ def main() -> None:
                 "stars": False, "clouds": False, "zenith_color": [0.62, 0.5, 0.36], "horizon_color": [0.8, 0.66, 0.48],
                 "fog_m": 150},
         "atmosphere": {
-            "fog": {"color": [0.7, 0.56, 0.4], "start_m": 4, "distance_m": 60, "max_frac": 0.94},
-            "wind": {"direction": [1, 0, 0], "log_index_gradient_per_m": 0.0012, "segment_m": 48},
+            "fog": {"color": [0.74, 0.55, 0.35], "start_m": 4, "distance_m": 50, "max_frac": 0.94},
+            "sand": {"gust_frac": 0.5, "streak_frac": 0.45, "sheet_frac": 0.35},
+            "wind": {"direction": [1, 0, 0], "log_index_gradient_per_m": WIND_LOG_INDEX_GRADIENT_PER_M, "segment_m": 48},
         },
         "spawns": [{"team": "blue", "frame": make_frame(-104, 0, ground(-104, 0), 0.0)},
                    {"team": "red", "frame": make_frame(104, 0, ground(104, 0), math.pi)}],

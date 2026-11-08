@@ -1102,6 +1102,10 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         view("crater_wall", [-30.0, -30.0], [-60.0, -90.0], None, 0.1),
         VoxelView {
             is_laser_on: true,
+            ..view("laser_ground", [-80.0, -50.0], [-80.0, -42.0], None, -0.25)
+        },
+        VoxelView {
+            is_laser_on: true,
             ..view(
                 "laser_into_wormhole",
                 [-62.0, -46.5],
@@ -1207,6 +1211,8 @@ fn make_voxel_photo_views() -> Vec<VoxelView> {
 
 /// `MAP_PICTURE_SAMPLES_PER_PX` is how many rendered pixels across and down make one of the map
 /// picture's pixels (3: 9 samples a pixel).
+/// `BENCH_DUST_AGE_S` is how old a laser view's dust burst is when the benchmark draws it.
+const BENCH_DUST_AGE_S: f64 = 0.5;
 const MAP_PICTURE_SAMPLES_PER_PX: u32 = 3;
 /// `MAP_PICTURE_EYE_H_M` is the height the map picture's rays start from, above every structure.
 const MAP_PICTURE_EYE_H_M: f64 = 60.0;
@@ -1376,12 +1382,20 @@ fn bench_voxel_views(
             })
             .collect();
         let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
-        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+        let clouds: Vec<dust::DustCloud> = shot
+            .as_ref()
+            .and_then(|s| dust::DustBurst::FromShot(world, s, 0.0, false))
+            .and_then(|burst| burst.get_cloud(BENCH_DUST_AGE_S))
+            .into_iter()
+            .collect();
+        let warm_up: VoxelFrame =
+            VoxelFrame::Build(world, camera, &beams, spot, &clouds, render_px);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+            let frame: VoxelFrame =
+                VoxelFrame::Build(world, camera, &beams, spot, &clouds, render_px);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());

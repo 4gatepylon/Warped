@@ -324,6 +324,17 @@
             "max_frac": {"type": "number", "minimum": 0, "maximum": 1}
           }
         },
+        "sand": {
+          "type": "object",
+          "description": "How strong the fog's blowing sand is: gusts thickening the fog, streaks near the eye, sheets drifting downwind (each 0 to 1).",
+          "required": ["gust_frac", "streak_frac", "sheet_frac"],
+          "additionalProperties": false,
+          "properties": {
+            "gust_frac": {"type": "number", "minimum": 0, "maximum": 1},
+            "streak_frac": {"type": "number", "minimum": 0, "maximum": 1},
+            "sheet_frac": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
         "wind": {
           "type": "object",
           "required": ["direction", "log_index_gradient_per_m", "segment_m"],

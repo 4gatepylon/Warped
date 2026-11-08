@@ -35,18 +35,24 @@ LAN discovery 47831.
   (mirrored), spawns at u = ±104 m, a wormhole pair at (-50, -40) and (50, 40) m.
 - **Wind**: the map's `atmosphere.wind` is a refractive-index field, ln n = k d, where d is the signed hyperbolic
   distance (m) to the plane through the origin perpendicular to `direction`, and k is
-  `log_index_gradient_per_m` (0.0012 /m). Light follows the ray equation, so it curves toward higher n, i.e.
+  `log_index_gradient_per_m` (0.00144 /m). Light follows the ray equation, so it curves toward higher n, i.e.
   downwind, with curvature k per meter. Rays and the laser integrate it kick-drift-kick in chords of `segment_m`
   (48 m; 12 m looked the same and cost 5 ms more a frame): half a kick by ∇ln n's part across the ray, a geodesic chord, half a kick. Inside wormhole mouths the
   wind's gradient adds to the mouth's own. The Metal shader (`wind_gradient`, `wind_kick`) and the CPU laser
   (`WindField` in `src/voxel_world.rs`) use the same rule, so the laser lands where the crosshair shows.
 - **Sandstorm**: `atmosphere.fog` replaces the haze: colour, start (4 m), e-folding distance (60 m) and the most
   it hides (94%). Rays stop 5 e-foldings past the start (304 m), where the fog hides all but 0.7%.
-- **Blowing sand** (`blow_sand` in the shader, on maps with fog): gusts, value noise 40 m long, 14 m wide and 6 m
-  tall, drifting downwind at 9 m/s, thicken or thin the fog by up to 30% where each ray is halfway to its end
-  (or 60 m out); thin streaks (4 m by 8 cm) at 2.5 m and 6.5 m in front of the camera drift the same way. The
+- **Blowing sand** (`blow_sand` in the shader, on maps with fog; strengths in the map's `atmosphere.sand`, a map
+  without it keeps 30% gusts and 15% streaks): gusts, value noise 40 m long, 14 m wide and 6 m tall, drifting
+  downwind at 14 m/s, thicken or thin the fog by up to `gust_frac` (Dust: 50%); sheets 28 m by 5 m by 2.2 m
+  within 70 m add up to `sheet_frac` (35%) more fog. Gusts thicken the fog where each ray is halfway to its end
+  (or 60 m out); thin streaks (4 m by 8 cm, `streak_frac` 45%) in three layers from 2.5 m in front of the camera drift the same way. The
   clock is the window's sky time, so `--bench-views` pictures are still frames. Cost: about 1 ms a frame.
-- **Laser colour**: the map's `appearance.laser_color` (Dust: golden white, [1, 0.7, 0.25]) is the one colour
+- **Ground hits** (`src/dust.rs`, the hyperbolic demo's `DustBurst`): on a map with fog, grains take 80% of the
+  fog's colour and mist puffs 120% of it, and puffs drift downwind at 3 m/s.
+- **Natural props** (dunes, rocks, debris): `tools/make_dust_map.py` jitters each by up to 1.5 m, 0.3 rad and 12% in
+  size from seed 121 (named in the map's `source`), and mirrors the result onto the other team's half.
+- **Laser colour**: the map's `appearance.laser_color` (Dust: golden white, [1, 0.8, 0.3]) is the one colour
   every team's laser takes; a map without it keeps the team colours.
 - **Map page** (Tab, then E) and minimap: `make make-map-picture MAP=dust` (`--make-map-picture`) renders the map
   straight down along the vertical geodesics from 60 m, with sun shadows, no fog or wind, 3×3 samples a pixel,

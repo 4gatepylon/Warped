@@ -94,17 +94,20 @@ constant float HAZE_HORIZON_HEIGHT_FRAC = 0.08;
 constant float HAZE_SUN_GLOW = 0.5;
 constant float HAZE_SUN_POWER = 8.0;
 constant float HAZE_SKYLIGHT = 0.2;
-constant float SAND_SPEED_M_PER_S = 9.0;
+constant float SAND_SPEED_M_PER_S = 14.0;
 constant float SAND_PROBE_S = 0.02;
 constant float SAND_GUST_REACH_M = 120.0;
 constant float3 SAND_GUST_SIZE_M = float3(40.0, 14.0, 6.0);
-constant int SAND_LAYER_COUNT = 2;
+constant int SAND_LAYER_COUNT = 3;
 constant float SAND_LAYER_FIRST_M = 2.5;
 constant float SAND_LAYER_RATIO = 2.6;
 constant float SAND_LAYER_OFFSET = 17.0;
 constant float3 SAND_STREAK_SIZE_M = float3(4.0, 0.08, 0.08);
 constant float2 SAND_STREAK_EDGES = float2(0.7, 0.95);
 constant float SAND_STREAK_BRIGHTNESS = 1.15;
+constant float SAND_SHEET_REACH_M = 70.0;
+constant float3 SAND_SHEET_SIZE_M = float3(28.0, 5.0, 2.2);
+constant float2 SAND_SHEET_EDGES = float2(0.5, 0.85);
 constant float BLOOM_KARIS_LUMA = 4.0;
 constant float BLOOM_GLOW = 1.0;
 constant float2 BLOOM_GLOW_LUMA_EDGES = float2(0.5, 2.0);
@@ -2517,7 +2520,8 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
 
 /**
  * @brief `blow_sand` mixes fog of opacity `fog_frac` (thickened and thinned by gusts drifting downwind halfway along
- * the ray) into `color`, then streaks of blowing sand at `SAND_LAYER_COUNT` distances in front of the camera, all
+ * the ray) and sheets of sand `u.sand.w` opaque (noise `SAND_SHEET_SIZE_M`, a third of the way, thinner on near
+ * surfaces) into `color`, then streaks of blowing sand at `SAND_LAYER_COUNT` distances in front of the camera, all
  * moving with the wind at `SAND_SPEED_M_PER_S` on the clock `u.sand.x`.
  * @par Example
  * @code
@@ -2536,7 +2540,9 @@ static float3 blow_sand(thread const Scene &scene, float3 color, float3 fog, flo
     float drift_m = u.sand.x * SAND_SPEED_M_PER_S;
     float3 g = eye + d * 0.5 * min(travelled_m, SAND_GUST_REACH_M);
     float gust = sample_noise_3d(float3(dot(g.xy, wind) - drift_m, dot(g.xy, across), g.z) / SAND_GUST_SIZE_M);
-    color = mix(color, fog, saturate(fog_frac * (1.0 + u.sand.y * (2.0 * gust - 1.0))));
+    float3 q = eye + d * 0.35 * min(travelled_m, SAND_SHEET_REACH_M);
+    float sheet = smoothstep(SAND_SHEET_EDGES.x, SAND_SHEET_EDGES.y, sample_noise_3d(float3(dot(q.xy, wind) - drift_m, dot(q.xy, across), q.z) / SAND_SHEET_SIZE_M));
+    color = mix(color, fog, saturate(fog_frac * (1.0 + u.sand.y * (2.0 * gust - 1.0)) + u.sand.w * sheet * saturate(travelled_m / SAND_SHEET_REACH_M)));
     float streak = 0.0, layer_m = SAND_LAYER_FIRST_M;
     for (int i = 0; i < SAND_LAYER_COUNT && layer_m < travelled_m; i++, layer_m *= SAND_LAYER_RATIO) {
         float3 p = eye + d * layer_m;

@@ -352,11 +352,23 @@ pub struct Wind {
     pub segment_m: f64,
 }
 
-/// `Atmosphere` is a map's optional air: a fog and a wind.
+/// `Sand` is how strong a fog's blowing sand is (W-121): `gust_frac` how much gusts thicken or
+/// thin the fog, `streak_frac` how opaque the nearest streak is, `sheet_frac` how opaque the
+/// sheets of sand drifting downwind are (each 0 to 1).
+#[derive(Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub struct Sand {
+    pub gust_frac: f32,
+    pub streak_frac: f32,
+    pub sheet_frac: f32,
+}
+
+/// `Atmosphere` is a map's optional air: a fog, its blowing sand and a wind.
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub struct Atmosphere {
     pub fog: Option<Fog>,
+    pub sand: Option<Sand>,
     pub wind: Option<Wind>,
 }
 
