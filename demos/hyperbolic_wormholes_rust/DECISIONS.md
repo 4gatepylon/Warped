@@ -496,6 +496,16 @@
 - **Rationale:** you asked for a simple moving gun of rectangles that jogs when running and points forward when
   walking, and for no shooting while running.
 
+### D47. Only the game's own keys
+
+- **Choice:** the window's keys are WASD to move, `Shift` to run, `Space` to jump, click to shoot, `R` to respawn,
+  `-`/`=` for the render resolution and `Esc` to free the mouse. `E` no longer jumps, and the keys for flying (`H`,
+  `Q`), a laser that stays on (`L`), aiming through a mouth (`G`) and walking on its own (`F`) are gone. Flying and the
+  steady laser remain in the code for the scripted routes.
+- **Alternatives:** removing only `E`; removing `R` and `-`/`=` as well.
+- **Rationale:** you asked for WASD to move, `Space` to jump and click to shoot, and chose to drop the keys that gave
+  an edge (flying, a steady laser, auto-aim, auto-walk) while keeping respawn and resolution.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

@@ -13,12 +13,11 @@ make run-demo RENDERER=cpu
 ```
 
 - Click to capture the mouse (`Esc` releases it; `Esc` again quits).
-- `W`/`A`/`S`/`D` walk, `Shift` sprint, `Space` jumps (hold it for the jetpack), `H` toggles flying (then `Space`/`E`
-  and `Q` go up and down). You collide with the ground only.
-- Your path bends near a mouth like light does, and the view turns with it, so walking or flying at a mouth's
-  dark disk takes you through. `G` aims through the exact middle of the mouth nearest the crosshair; `F` keeps
-  moving forward.
-- Click (once the mouse is captured) to fire a laser shot for a quarter of a second; `L` toggles a laser that stays on.
+- `W`/`A`/`S`/`D` walk, `Shift` runs, `Space` jumps (hold it on the house for the jetpack), click shoots. On the
+  house you collide with the ground only.
+- Your path bends near a mouth like light does, and the view turns with it, so walking at a mouth's dark disk takes
+  you through.
+- Click (once the mouse is captured) to fire a laser shot for a quarter of a second.
   You can't shoot while running (sprinting while moving): the gun in the bottom right drops into a jogging pose, and
   points ahead again when you walk.
   The laser is a light ray from your hand that bends near mouths and goes through them; the HUD says what it hits.
