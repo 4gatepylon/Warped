@@ -1,8 +1,8 @@
 //! `settings.rs` reads the game's two settings files, so players can tune it without rebuilding:
 //! `server_settings.yaml`, the numbers that shape play for everyone (movement, sprint energy, both
-//! guns, consoles, respawning, how a hit slows, the flashlight), which the game server sends to every
-//! player who joins; and `player_settings.yaml`, each player's own choices (keys, mouse speed, head
-//! bob, motion blur, how a hit looks).
+//! guns, consoles, respawning, how a hit slows, the flashlight, thrown wormholes), which the game
+//! server sends to every player who joins; and `player_settings.yaml`, each player's own choices
+//! (keys, mouse speed, head bob, motion blur, how a hit looks).
 //!
 //! Interface: `ServerSettings` (`Builtin`, `Load`, `FromJson`, `to_json`), `PerPlayerSettings`
 //! (`Builtin`, `Load`) and their sections.
@@ -24,7 +24,7 @@ use crate::key_bindings::KeyBindings;
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 10] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 11] = [
     "map_edge.start_wall_frac",
     "sniper.reload_s",
     "sniper.noise_mean_rad",
@@ -35,6 +35,7 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 10] = [
     "rifle.recoil_sideways_rad",
     "rifle.recoil_settle_s",
     "respawn.delay_s",
+    "wormholes.throw_up_rad",
 ];
 const PLAYER_ZERO_ALLOWED_KEYS: [&str; 8] = [
     "view.motion_blur_s",
@@ -182,6 +183,20 @@ pub struct AimSettings {
     pub zoom_s: f64,
 }
 
+/// `WormholeSettings` is how a thrown wormhole mouth flies (its speed, how far above the aim it
+/// leaves, its gravity and how long it may fly before it fizzles) and, on voxel maps, its size
+/// (Schwarzschild radius and reach; the house's mouths all share the house's size).
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct WormholeSettings {
+    pub throw_speed_m_per_s: f64,
+    pub throw_up_rad: f64,
+    pub gravity_m_per_s_per_s: f64,
+    pub max_flight_s: f64,
+    pub schwarzschild_radius_m: f64,
+    pub reach_m: f64,
+}
+
 /// `MapEdgeSettings` is the map's soft edge on a map with a crater: how far up the crater's wall
 /// (0 at its foot, 1 at the rim) players start to slow down, and how far up their speed would
 /// reach 0, which they never get to (each step outward is cut by the share of the way they have
@@ -260,6 +275,7 @@ pub struct ServerSettings {
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
     pub aim: AimSettings,
+    pub wormholes: WormholeSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
