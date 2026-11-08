@@ -29,8 +29,8 @@ user confirmed it).
   the claim before the work starts.
 - **Mark it pending user review, never done.** In the PR that delivers the item, change `[~]` to `[?]`, move it under
   "Pending user review", and replace the claim with the PR's number (`#NNN`; add it once the PR is open, before
-  merging). Tell the user it is on `staging` to test, with screenshots of anything visual. A fix for an item adds its
-  PR number to that item and keeps it pending.
+  merging). Tell the user it is on `staging` to test, with screenshots of anything visual (see "Graphical changes"
+  below). A fix for an item adds its PR number to that item and keeps it pending.
 - **Only the user's confirmation makes it done.** The user tests every claimed fix and every visual before it counts
   as finished. When the user says, in chat, that they tested an item and it works, change `[?]` to `[x]`, move it
   under "Done" and add `Confirmed by the user, <YYYY-MM-DD>.`, in a `wishlist: W-NN (<short name>) confirmed` PR
@@ -40,6 +40,20 @@ user confirmed it).
   was in the PR description.
 - **Unclaim.** If you stop working on an item, change it back to `[ ]` under "Open" in a `wishlist: unclaim W-NN
   (<short name>)` PR.
+
+## Graphical changes
+
+Every agent that changes how the demo looks follows the `graphical-changes` skill
+([`.agents/skills/graphical-changes/`](../../.agents/skills/graphical-changes/SKILL.md)). In short:
+
+- **Screenshots before finishing.** Share screenshots of the change, and ideally videos of anything that moves, with
+  the user before finishing, with today's look beside it.
+- **Options when unsure.** When the look is uncertain, offer a few options and ask which the user likes; when the user
+  gives or implies a range of looks or parameters, search that range and offer options from it.
+- **Clear names.** Give every option a clear name (`A, faint (opacity 0.25)`) and use it everywhere.
+- **File paths.** List the absolute path of every image and video, in case the agent manager doesn't show them.
+- **At most 5 × 5.** A collage has at most 5 images across and 5 down; split larger sets into several files.
+- **Labels.** Every comparison collage labels each image, or each row and column, with what it shows.
 
 ## Credits for assets
 
