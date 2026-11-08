@@ -122,10 +122,6 @@ are here too, since the user hadn't confirmed them.
     `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-64/`
     (temporary, under `/private/tmp`; the `*_slab*` and `6*_recheck_*` files show the result). State, 2026-11-08: on
     `staging`, waiting for the user to test it.
-- [?] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
-  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
-  bar while disabling a pylon". Loading screen: #292, #293; the user confirmed it ("i love hte loading screen"),
-  2026-11-08. Connected: the lobby says CONNECTING, then CONNECTED, #307.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." The user picked Poly Haven's bolt-action rifle from the pictures ("bolt action is
   good"): gun 2 is held as it, drawn at 0.28x so its scope, bolt and stock show; the sniper keeps the revolver
@@ -167,6 +163,10 @@ are here too, since the user hadn't confirmed them.
 
 Confirmed by the user after testing.
 
+- [x] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
+  when the server is connected properly. The user asked for the loading screen "in the same style as the progress
+  bar while disabling a pylon". Loading screen: #292, #293; connected: the lobby says CONNECTING, then CONNECTED,
+  #307. Confirmed by the user, 2026-11-08: "i love hte loading screen", then "looks good".
 - [x] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
 - [x] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. #197–#204. Confirmed by the user, 2026-11-07: "larger player icons. and throw wormholes and shoot enemy wormholes are done".
