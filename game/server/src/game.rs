@@ -614,57 +614,50 @@ impl Game {
 
 #[cfg(test)]
 mod tests {
-    //! Tests of the message encoding and the server's handling of joins, hits and scores.
+    //! Tests of the server's handling of joins, hits, consoles and scores, and of its clock, fed
+    //! datagrams and times directly, without sockets.
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Datagram length | complete (progress kept to a 255th; the beam speckle's top level beside the laser, rifle and red-team bits), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
-    //! | Player's wormholes | none, one down with a green throw in the air, both down and damaged | `players_survive_encoding` |
     //! | Shot at a player's wormholes | by an enemy (adds up to destroyed, then no further), by a teammate (ignored), with none down (ignored); the owner then has none down (reset) | `enemy_shots_destroy_wormholes` |
-    //! | Wormhole damage sent | to its owner's client, in the snapshot | `owners_learn_their_wormholes_are_destroyed` |
-    //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
-    //! | Servers announcing themselves | one, several with one on the default port (chosen), several without (the first) | `the_default_port_wins_among_servers` |
-    //! | A server that can't take this player | full (says so), of another version (snapshots that don't fit) | `full_games_and_other_versions_are_noticed` |
+    //! | Join | new player, repeated join, server full, rejoin after a hit (same id) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit` |
     //! | Join's version | this game's (goes on), another (refused, naming the server's) | `joins_get_ids_once_until_full`, `other_versions_and_wrong_passwords_are_refused` |
     //! | Join's challenge answer | none yet or another address's (challenged again), this address's (goes on) | `joins_need_the_challenge_answered` |
     //! | Join's proof of the password | right (welcomed), wrong (refused) | `joins_get_ids_once_until_full`, `other_versions_and_wrong_passwords_are_refused` |
-    //! | Client's password | the server's (welcomed), another (fails, naming the password) | `clients_join_with_the_password_only` |
     //! | Token on a player's message | their own (taken), none or another player's (ignored) | `messages_need_the_senders_token` |
     //! | Lobby query | as long as the answer (answered), shorter (ignored) | `short_lobby_queries_are_ignored` |
     //! | Team asked for | blue or red (given), any or none (the smaller team), a different one on a repeated join (kept) | `players_join_the_team_they_choose_or_the_smaller` |
     //! | Hit | by a joined player, by a stranger, on a player who is gone | `only_joined_players_can_hit` |
-    //! | Welcome size | the built-in settings with the longest map name | `the_welcome_fits_a_datagram` |
     //! | Hits to kill | 1 (eliminated at once), several (eliminated at the last) | `only_joined_players_can_hit`, `rifle_hits_add_up` |
     //! | Console held | the other team's (turned off after the settings' `hold_to_disable_s`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
     //! | Progress of turning off a console, in a snapshot | none held (0), part way (the seconds held over `hold_to_disable_s`), past the hold time (1) | `snapshots_carry_how_far_consoles_are_turned_off` |
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
-    //! | Scores datagram | complete (several players, none), cut short, too long, an unknown team | `scores_survive_encoding` |
     //! | Who a hit eliminates | nobody (a hit short of the limit), the other team's player (a kill and a death), a teammate (a death only) | `eliminations_count_kills_and_deaths` |
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
-    //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
+    //! | Time since a player was last heard | less than `PLAYER_TIMEOUT_S` (kept), `PLAYER_TIMEOUT_S` (removed) | `silent_players_time_out` |
+    //! | Time since the last snapshot and scores | less than their period (nothing sent), a snapshot's period, both periods (both sent to every player) | `snapshots_and_scores_follow_their_periods` |
+    //! | Next game after a win | by itself, before `new_game_after_win_s` (not yet) and at it (started); never by itself (`None`) | `the_next_game_starts_after_a_win` |
+    //! | Time given | later or the same (taken), earlier (fails) | every test, `time_cannot_go_back` |
 
     use super::*;
+    use warped_core::thrown_wormholes::MouthPlace;
 
     const TEST_MAP_NAME: &str = "lunar_surface";
     const TEST_PASSWORD: &[u8] = b"correct horse";
-    const LISTEN_MS: u64 = 200;
-    const LOBBY_QUERY_AND_JOIN_COUNT: usize = 2;
     const BLUE: u8 = 0;
-    const SENT_DAMAGE_BYTE: u8 = 51;
     const RED: u8 = 1;
-    const SENT_DISABLING_FRAC: f64 = 0.37;
-    const SENT_SPECKLE_FRAC: f64 = 1.0;
     const DISABLING_FRAC_STEP: f64 = 1.0 / u8::MAX as f64;
     const HALF: f64 = 0.5;
     const TWICE: f64 = 2.0;
+    const NEW_GAME_AFTER_WIN_S: f64 = 10.0;
 
     /// `make_join` makes `from`'s join request for `team` (or `ANY_TEAM`) with `version`,
     /// answering `server`'s challenge with a proof of `password`.
     ///
     /// Example: `let message = make_join(&server, from, RED, PROTOCOL_VERSION, TEST_PASSWORD);`
     fn make_join(
-        server: &Server,
+        server: &Game,
         from: SocketAddr,
         team: u8,
         version: u16,
@@ -680,18 +673,18 @@ mod tests {
     }
 
     /// `join` has the player at `from` join `server` on `team` with this game's version and the
-    /// right password.
+    /// right password, at the server's time.
     ///
     /// Example: `join(&mut server, address(50_001), RED);`
-    fn join(server: &mut Server, from: SocketAddr, team: u8) {
+    fn join(server: &mut Game, from: SocketAddr, team: u8) {
         let message: Vec<u8> = make_join(server, from, team, PROTOCOL_VERSION, TEST_PASSWORD);
-        server.handle(&message, from).expect("a join");
+        server.handle(&message, from, server.now_s);
     }
 
     /// `get_token` gives the token the welcome gave the player at `from`, or 0 for a stranger.
     ///
     /// Example: `let token = get_token(&server, address(50_001));`
-    fn get_token(server: &Server, from: SocketAddr) -> u64 {
+    fn get_token(server: &Game, from: SocketAddr) -> u64 {
         server
             .slots
             .iter()
@@ -699,74 +692,24 @@ mod tests {
             .map_or(0, |slot| slot.token)
     }
 
-    /// `make_listener` opens a local socket standing for a client, to read what the server sends.
-    ///
-    /// Example: `let listener = make_listener();`
-    fn make_listener() -> UdpSocket {
-        let listener: UdpSocket =
-            UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port");
-        listener
-            .set_read_timeout(Some(Duration::from_millis(LISTEN_MS)))
-            .expect("a timeout");
-        listener
-    }
-
-    /// `receive` gives the next datagram `listener` gets, or `None` if none comes in `LISTEN_MS`.
-    ///
-    /// Example: `let reply = receive(&listener);`
-    fn receive(listener: &UdpSocket) -> Option<Vec<u8>> {
-        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
-        let (length, _) = listener.recv_from(&mut buffer).ok()?;
-        Some(buffer[..length].to_vec())
-    }
-
-    /// `exchange` passes datagrams between `server` and `client` for up to a second, until the
-    /// client is welcomed (giving its events) or fails (giving its error).
-    ///
-    /// Example: `let error = exchange(&mut server, &mut client).err();`
-    fn exchange(server: &mut Server, client: &mut Client) -> Result<Vec<NetEvent>> {
-        server
-            .socket
-            .set_read_timeout(Some(Duration::from_millis(SERVER_POLL_MS)))
-            .expect("a timeout");
-        let deadline: Instant = Instant::now() + Duration::from_secs(1);
-        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
-        while Instant::now() < deadline {
-            while let Ok((length, from)) = server.socket.recv_from(&mut buffer) {
-                server.handle(&buffer[..length], from).expect("a datagram");
-            }
-            let events: Vec<NetEvent> = client.poll()?;
-            if client.id.is_some() {
-                return Ok(events);
-            }
-        }
-        panic!("the client was neither welcomed nor refused within a second");
-    }
-
-    /// `make_server` makes a server on a free local port, with no players, admitting players who
-    /// know `TEST_PASSWORD`.
+    /// `make_server` makes a server with no players, admitting players who know `TEST_PASSWORD`,
+    /// that starts the next game after a win only when asked.
     ///
     /// Example: `let mut server = make_server();`
-    fn make_server() -> Server {
-        Server {
-            socket: UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free local port"),
-            secret: make_random_bytes(),
-            password: TEST_PASSWORD.to_vec(),
-            map_name: TEST_MAP_NAME.to_string(),
-            settings: ServerSettings::Builtin(),
-            slots: Vec::new(),
-            next_id: 0,
-            known_ids: Vec::new(),
-            console_teams: vec![0, 0, 1],
-            game: GameState::default(),
-            tallies: Vec::new(),
-        }
+    fn make_server() -> Game {
+        Game::New(
+            TEST_MAP_NAME.to_string(),
+            ServerSettings::Builtin(),
+            vec![0, 0, 1],
+            TEST_PASSWORD.to_vec(),
+            None,
+        )
     }
 
     /// `make_hit` makes player `shooter_id`'s report, with `token`, of one hit on player
     /// `victim_id` with a weapon that eliminates in `hits_to_kill` hits.
     ///
-    /// Example: `server.handle(&make_hit(token, 1, 2, 1), address(50_001))?;`
+    /// Example: `server.handle(&make_hit(token, 1, 2, 1), address(50_001), 0.0);`
     fn make_hit(token: u64, shooter_id: u32, victim_id: u32, hits_to_kill: u8) -> Vec<u8> {
         let mut message: Message = Message::New(Kind::Hit)
             .token(token)
@@ -780,7 +723,7 @@ mod tests {
     /// by id.
     ///
     /// Example: `assert_eq!(get_kills_and_deaths(&server), vec![(1, 1, 0)]);`
-    fn get_kills_and_deaths(server: &Server) -> Vec<(u32, u32, u32)> {
+    fn get_kills_and_deaths(server: &Game) -> Vec<(u32, u32, u32)> {
         let mut scores: Vec<(u32, u32, u32)> = server
             .get_scores()
             .iter()
@@ -790,205 +733,59 @@ mod tests {
         scores
     }
 
-    /// `hold_console` sends player `id`'s state from `from` holding `E` on `console`, then makes
-    /// the server count it as held for its settings' `hold_to_disable_s` and update the consoles.
+    /// `make_state` makes player `id`'s state, with the token the welcome gave the player at
+    /// `from`, holding `E` on `console` if any.
     ///
-    /// Example: `hold_console(&mut server, 1, address(50_001), 2);`
-    fn hold_console(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
+    /// Example: `server.handle(&make_state(&server, 1, address(50_001), Some(2)), address(50_001), 1.0);`
+    fn make_state(server: &Game, id: u32, from: SocketAddr, console: Option<u8>) -> Vec<u8> {
         let player: RemotePlayer = RemotePlayer {
             id,
             frame: DMat4::IDENTITY,
             is_laser_on: false,
             is_rifle: false,
             team: 0,
-            disabling_console: Some(console),
+            disabling_console: console,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
-        let state: Message = Message::New(Kind::State)
+        Message::New(Kind::State)
             .token(get_token(server, from))
-            .player(&player);
-        server.handle(&state.0, from).expect("a state");
-        let disable_s: f64 = server.settings.consoles.hold_to_disable_s;
-        for slot in &mut server.slots {
-            slot.disabling_since = slot
-                .disabling_since
-                .map(|since| since - Duration::from_secs_f64(disable_s));
-        }
-        server.update_consoles();
+            .player(&player)
+            .0
     }
 
-    /// `connect_client` connects a client to `server` and joins it on `team`, letting the server
-    /// handle its lobby query and join, then, once the client has the challenge, its answer.
+    /// `hold_console` sends player `id`'s state from `from` holding `E` on `console`, then makes
+    /// the server count it as held for its settings' `hold_to_disable_s` and update the consoles.
     ///
-    /// Example: `let client = connect_client(&mut server, RED);`
-    fn connect_client(server: &mut Server, team: u8) -> Client {
-        let server_address: SocketAddr = server.socket.local_addr().expect("an address");
-        let mut client: Client =
-            Client::Connect(server_address, TEST_MAP_NAME, TEST_PASSWORD).expect("a socket");
-        client.join(Some(u32::from(team))).expect("a join request");
-        let mut buffer: [u8; MAX_DATAGRAM_BYTES] = [0; MAX_DATAGRAM_BYTES];
-        for _ in 0..LOBBY_QUERY_AND_JOIN_COUNT {
-            let (length, from) = server.socket.recv_from(&mut buffer).expect("a datagram");
-            server
-                .handle(&buffer[..length], from)
-                .expect("a lobby query or join");
+    /// Example: `hold_console(&mut server, 1, address(50_001), 2);`
+    fn hold_console(server: &mut Game, id: u32, from: SocketAddr, console: u8) {
+        let state: Vec<u8> = make_state(server, id, from, Some(console));
+        server.handle(&state, from, server.now_s);
+        let disable_s: f64 = server.settings.consoles.hold_to_disable_s;
+        for slot in &mut server.slots {
+            slot.disabling_since_s = slot.disabling_since_s.map(|since_s| since_s - disable_s);
         }
-        poll_until(&mut client, |client| client.cookie != [0; BYTES_PER_COOKIE]);
-        let (length, from) = server
-            .socket
-            .recv_from(&mut buffer)
-            .expect("the answered join");
-        server
-            .handle(&buffer[..length], from)
-            .expect("the answered join");
-        client
+        server.update_consoles();
     }
 
     /// `address` gives a local address with a made-up port, standing for a client.
     ///
     /// Example: `let a = address(50000);`
     fn address(port: u16) -> SocketAddr {
-        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+        SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), port)
     }
 
-    /// `poll_until` polls `client` until `is_done` holds, for at most a second.
+    /// `get_kinds` gives the address and `Kind` byte of each datagram in `outgoing`.
     ///
-    /// Example: `poll_until(&mut client, |c| c.is_full());`
-    fn poll_until(client: &mut Client, is_done: impl Fn(&Client) -> bool) {
-        let start: Instant = Instant::now();
-        while !is_done(client) && start.elapsed() < Duration::from_secs(1) {
-            client.poll().expect("datagrams");
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    }
-
-    #[test]
-    fn full_games_and_other_versions_are_noticed() {
-        let mut server: Server = make_server();
-        for port in 0..MAX_PLAYER_COUNT as u16 {
-            join(&mut server, address(50_100 + port), ANY_TEAM);
-        }
-        let mut client: Client = connect_client(&mut server, RED);
-        poll_until(&mut client, Client::is_full);
-        assert!(client.is_full() && client.is_waiting_for_welcome());
-        assert!(!client.is_other_version());
-        let client_address: SocketAddr =
-            address(client.socket.local_addr().expect("an address").port());
-        let short_snapshot: [u8; 3] = [Kind::Snapshot as u8, 1, 0];
-        server
-            .socket
-            .send_to(&short_snapshot, client_address)
-            .expect("a snapshot");
-        poll_until(&mut client, Client::is_other_version);
-        assert!(client.is_other_version());
-    }
-
-    #[test]
-    fn the_default_port_wins_among_servers() {
-        let other: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT + 170);
-        let usual: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT);
-        let third: SocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT + 171);
-        assert_eq!(choose_server(&[other]), other);
-        assert_eq!(choose_server(&[other, usual, third]), usual);
-        assert_eq!(choose_server(&[third, other]), third);
-    }
-
-    #[test]
-    fn players_survive_encoding() {
-        let frame: DMat4 = DMat4::from_cols_array(&std::array::from_fn(|i| i as f64 * 0.25 - 1.0));
-        let place = |u_m: f64| MouthPlace {
-            u_m,
-            v_m: -2.5,
-            h_m: 1.75,
-            yaw_rad: 0.5,
-        };
-        let flying: (WormholeColor, DVec4) =
-            (WormholeColor::Green, DVec4::new(0.5, 0.25, 0.0, 1.5));
-        for wormholes in [
-            PlayerWormholes::default(),
-            PlayerWormholes {
-                purple: Some(place(12.0)),
-                green: None,
-                flying: Some(flying),
-                damage_frac: 0.0,
-            },
-            PlayerWormholes {
-                purple: Some(place(12.0)),
-                green: Some(place(-30.0)),
-                flying: None,
-                damage_frac: f64::from(SENT_DAMAGE_BYTE) / f64::from(u8::MAX),
-            },
-        ] {
-            let sent: RemotePlayer = RemotePlayer {
-                id: 7,
-                frame,
-                is_laser_on: true,
-                is_rifle: true,
-                team: 1,
-                disabling_console: Some(3),
-                disabling_frac: SENT_DISABLING_FRAC,
-                beam_speckle_frac: SENT_SPECKLE_FRAC,
-                wormholes,
-            };
-            let game: GameState = GameState {
-                number: 2,
-                off_mask: 0b101,
-                winner: Some(1),
-            };
-            let message: Message = Message::New(Kind::State).player(&sent).game(&game);
-            let mut reader: Reader = Reader {
-                bytes: &message.0,
-                position: 1,
-            };
-            let player: RemotePlayer = reader.player().expect("a complete player");
-            assert_eq!(
-                (
-                    player.id,
-                    player.frame,
-                    player.is_laser_on,
-                    player.is_rifle,
-                    player.disabling_console,
-                    player.wormholes
-                ),
-                (7, frame, true, true, Some(3), wormholes)
-            );
-            assert!((player.disabling_frac - SENT_DISABLING_FRAC).abs() <= DISABLING_FRAC_STEP);
-            assert_eq!(player.beam_speckle_frac, SENT_SPECKLE_FRAC);
-            assert_eq!(player.team, 1);
-            assert_eq!(reader.game(), Some(game));
-        }
-    }
-
-    #[test]
-    fn short_datagrams_read_as_nothing() {
-        let player: RemotePlayer = RemotePlayer {
-            id: 7,
-            frame: DMat4::IDENTITY,
-            is_laser_on: false,
-            is_rifle: false,
-            team: 0,
-            disabling_console: None,
-            disabling_frac: 0.0,
-            beam_speckle_frac: 0.0,
-            wormholes: PlayerWormholes::default(),
-        };
-        let message: Message = Message::New(Kind::State).player(&player);
-        let cut: &[u8] = &message.0[..message.0.len() - 1];
-        assert!(
-            Reader {
-                bytes: cut,
-                position: 1
-            }
-            .player()
-            .is_none()
-        );
+    /// Example: `assert_eq!(get_kinds(&server.tick(1.0)), vec![(address(50_001), Kind::Snapshot as u8)]);`
+    fn get_kinds(outgoing: &[(SocketAddr, Vec<u8>)]) -> Vec<(SocketAddr, u8)> {
+        outgoing.iter().map(|(to, bytes)| (*to, bytes[0])).collect()
     }
 
     #[test]
     fn joins_get_ids_once_until_full() {
-        let mut server: Server = make_server();
+        let mut server: Game = make_server();
         join(&mut server, address(50_000), ANY_TEAM);
         join(&mut server, address(50_000), ANY_TEAM);
         assert_eq!(server.slots.len(), 1);
@@ -1000,16 +797,14 @@ mod tests {
 
     #[test]
     fn only_joined_players_can_hit() {
-        let mut server: Server = make_server();
+        let mut server: Game = make_server();
         join(&mut server, address(50_001), ANY_TEAM);
         join(&mut server, address(50_002), ANY_TEAM);
         let stranger_hit: Vec<u8> = make_hit(0, 1, 2, 1);
-        server
-            .handle(&stranger_hit, address(50_003))
-            .expect("a stranger's hit");
+        server.handle(&stranger_hit, address(50_003), 0.0);
         assert_eq!(server.slots.len(), 2);
         let hit: Vec<u8> = make_hit(get_token(&server, address(50_001)), 1, 2, 1);
-        server.handle(&hit, address(50_001)).expect("a hit");
+        server.handle(&hit, address(50_001), 0.0);
         assert_eq!(
             server
                 .slots
@@ -1018,40 +813,15 @@ mod tests {
                 .collect::<Vec<u32>>(),
             vec![1]
         );
-        server
-            .handle(&hit, address(50_001))
-            .expect("a hit on a player who is gone");
+        server.handle(&hit, address(50_001), 0.0);
         assert_eq!(server.slots.len(), 1);
         join(&mut server, address(50_002), ANY_TEAM);
         assert_eq!(server.slots[1].player.id, 2);
     }
 
     #[test]
-    fn clients_of_another_map_fail() {
-        let mut server: Server = make_server();
-        let server_address: SocketAddr = server.socket.local_addr().expect("an address");
-        let mut client: Client =
-            Client::Connect(server_address, "house_demo", TEST_PASSWORD).expect("a socket");
-        client.join(None).expect("a join request");
-        let error: String = exchange(&mut server, &mut client)
-            .err()
-            .expect("a failure")
-            .to_string();
-        assert!(
-            error.contains(TEST_MAP_NAME) && error.contains("house_demo"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn the_welcome_fits_a_datagram() {
-        let header_bytes: usize = 1 + BYTES_PER_ID + BYTES_PER_TOKEN + 1 + usize::from(u8::MAX);
-        assert!(header_bytes + ServerSettings::Builtin().to_json().len() <= MAX_DATAGRAM_BYTES);
-    }
-
-    #[test]
     fn players_join_the_team_they_choose_or_the_smaller() {
-        let mut server: Server = make_server();
+        let mut server: Game = make_server();
         join(&mut server, address(50_001), RED);
         join(&mut server, address(50_002), RED);
         join(&mut server, address(50_003), ANY_TEAM);
@@ -1063,9 +833,7 @@ mod tests {
             TEST_PASSWORD,
         );
         without_team.pop();
-        server
-            .handle(&without_team, address(50_004))
-            .expect("a join");
+        server.handle(&without_team, address(50_004), 0.0);
         let teams: Vec<u32> = server.slots.iter().map(|slot| slot.player.team).collect();
         assert_eq!(teams, vec![1, 1, 0, 0]);
         assert_eq!(server.count_teams(), [2, 2]);
@@ -1076,71 +844,42 @@ mod tests {
     #[test]
     fn rifle_hits_add_up() {
         const HITS_TO_KILL: u8 = 3;
-        let mut server: Server = make_server();
+        let mut server: Game = make_server();
         join(&mut server, address(50_001), ANY_TEAM);
         join(&mut server, address(50_002), ANY_TEAM);
         let hit: Vec<u8> = make_hit(get_token(&server, address(50_001)), 1, 2, HITS_TO_KILL);
         for _ in 1..HITS_TO_KILL {
-            server.handle(&hit, address(50_001)).expect("a hit");
+            server.handle(&hit, address(50_001), 0.0);
             assert_eq!(server.slots.len(), 2);
         }
-        server.handle(&hit, address(50_001)).expect("the last hit");
+        server.handle(&hit, address(50_001), 0.0);
         assert_eq!(server.slots.len(), 1);
-    }
-
-    #[test]
-    fn owners_learn_their_wormholes_are_destroyed() {
-        let hits_to_destroy: u8 = ServerSettings::Builtin().wormholes.sniper_hits_to_destroy;
-        let mut server: Server = make_server();
-        let mut owner: Client = connect_client(&mut server, RED);
-        join(&mut server, address(50_001), BLUE);
-        server.slots[0].player.wormholes.green = Some(MouthPlace {
-            u_m: 0.0,
-            v_m: 0.0,
-            h_m: 1.6,
-            yaw_rad: 0.0,
-        });
-        let mut hit: Message = Message::New(Kind::WormholeHit)
-            .token(get_token(&server, address(50_001)))
-            .id(2)
-            .id(1);
-        hit.0.push(hits_to_destroy);
-        for _ in 0..hits_to_destroy {
-            server
-                .handle(&hit.0, address(50_001))
-                .expect("a wormhole hit");
-        }
-        server.send_snapshot().expect("a snapshot");
-        poll_until(&mut owner, |client| client.wormhole_damage_frac >= 1.0);
-        assert_eq!(owner.wormhole_damage_frac, 1.0);
     }
 
     #[test]
     fn enemy_shots_destroy_wormholes() {
         let hits_to_destroy: u8 = ServerSettings::Builtin().wormholes.rifle_hits_to_destroy;
-        let mut server: Server = make_server();
+        let mut server: Game = make_server();
         for (team, port) in [(BLUE, 50_001), (RED, 50_002), (RED, 50_003)] {
             join(&mut server, address(port), team);
         }
-        let shoot = |server: &mut Server, shooter_id: u32, port: u16| {
+        let shoot = |server: &mut Game, shooter_id: u32, port: u16| {
             let mut message: Message = Message::New(Kind::WormholeHit)
                 .token(get_token(server, address(port)))
                 .id(shooter_id)
                 .id(2);
             message.0.push(hits_to_destroy);
-            server
-                .handle(&message.0, address(port))
-                .expect("a wormhole hit");
+            server.handle(&message.0, address(port), 0.0);
             server.slots[1].wormhole_damage_frac
         };
-        let send_wormholes = |server: &mut Server, wormholes: PlayerWormholes| {
+        let send_wormholes = |server: &mut Game, wormholes: PlayerWormholes| {
             let mut owner: RemotePlayer = server.slots[1].player;
             owner.wormholes = wormholes;
             let state: Vec<u8> = Message::New(Kind::State)
                 .token(get_token(server, address(50_002)))
                 .player(&owner)
                 .0;
-            server.handle(&state, address(50_002)).expect("a state");
+            server.handle(&state, address(50_002), 0.0);
         };
         assert_eq!(shoot(&mut server, 1, 50_001), 0.0);
         let place: MouthPlace = MouthPlace {
@@ -1166,7 +905,7 @@ mod tests {
 
     #[test]
     fn holding_consoles_turns_them_off_and_wins() {
-        let mut server: Server = make_server();
+        let mut server: Game = make_server();
         let (blue, red) = (address(50_002), address(50_001));
         join(&mut server, red, RED);
         join(&mut server, blue, BLUE);
@@ -1188,166 +927,76 @@ mod tests {
     }
 
     #[test]
-    fn scores_survive_encoding() {
-        let sent: Vec<Score> = vec![
-            Score {
-                id: 1,
-                team: 1,
-                kills: 3,
-                deaths: 70_000,
-            },
-            Score {
-                id: 4,
-                team: 0,
-                kills: 0,
-                deaths: 2,
-            },
-        ];
-        let read = |bytes: &[u8]| Reader { bytes, position: 1 }.scores();
-        let message: Message = Message::New(Kind::Scores).scores(&sent);
-        assert_eq!(read(&message.0), Some(sent.clone()));
-        assert_eq!(
-            read(&Message::New(Kind::Scores).scores(&[]).0),
-            Some(Vec::new())
-        );
-        assert_eq!(read(&message.0[..message.0.len() - 1]), None);
-        let mut too_long: Vec<u8> = message.0.clone();
-        too_long.push(0);
-        assert_eq!(read(&too_long), None);
-        let unknown_team: Score = Score {
-            team: TEAM_NAMES.len() as u32,
-            ..sent[0]
-        };
-        assert_eq!(
-            read(&Message::New(Kind::Scores).scores(&[unknown_team]).0),
-            None
-        );
-    }
-
-    #[test]
     fn eliminations_count_kills_and_deaths() {
         const RIFLE_HITS_TO_KILL: u8 = 2;
-        let mut server: Server = make_server();
+        let mut server: Game = make_server();
         let (red_one, blue_two, red_three) = (address(50_001), address(50_002), address(50_003));
         join(&mut server, red_one, RED);
         join(&mut server, blue_two, BLUE);
         join(&mut server, red_three, RED);
-        server
-            .handle(
-                &make_hit(get_token(&server, red_one), 1, 2, RIFLE_HITS_TO_KILL),
-                red_one,
-            )
-            .expect("a hit short of the limit");
+        let hit: Vec<u8> = make_hit(get_token(&server, red_one), 1, 2, RIFLE_HITS_TO_KILL);
+        server.handle(&hit, red_one, 0.0);
         assert_eq!(
             get_kills_and_deaths(&server),
             vec![(1, 0, 0), (2, 0, 0), (3, 0, 0)]
         );
-        server
-            .handle(
-                &make_hit(get_token(&server, red_one), 1, 2, RIFLE_HITS_TO_KILL),
-                red_one,
-            )
-            .expect("the last hit");
+        server.handle(&hit, red_one, 0.0);
         assert_eq!(server.slots.len(), 2);
         assert_eq!(
             get_kills_and_deaths(&server),
             vec![(1, 1, 0), (2, 0, 1), (3, 0, 0)]
         );
-        server
-            .handle(&make_hit(get_token(&server, red_one), 1, 3, 1), red_one)
-            .expect("a hit on a teammate");
+        server.handle(
+            &make_hit(get_token(&server, red_one), 1, 3, 1),
+            red_one,
+            0.0,
+        );
         assert_eq!(
             get_kills_and_deaths(&server),
             vec![(1, 1, 0), (2, 0, 1), (3, 0, 1)]
         );
         join(&mut server, blue_two, BLUE);
         let wait_s: f64 = server.settings.respawn.delay_s + PLAYER_TIMEOUT_S;
-        server.get_tally_mut(3).eliminated_at =
-            Some(Instant::now() - Duration::from_secs_f64(wait_s));
+        server.get_tally_mut(3).eliminated_at_s = Some(server.now_s - wait_s);
         assert_eq!(get_kills_and_deaths(&server), vec![(1, 1, 0), (2, 0, 1)]);
         server.start_new_game();
         assert_eq!(get_kills_and_deaths(&server), vec![(1, 0, 0), (2, 0, 0)]);
     }
 
     #[test]
-    fn clients_receive_scores() {
-        let mut server: Server = make_server();
-        let mut client: Client = connect_client(&mut server, RED);
-        server.send_scores().expect("the scores");
-        let deadline: Instant = Instant::now() + Duration::from_secs(1);
-        while client.scores.is_none() {
-            assert!(Instant::now() < deadline, "the scores never arrived");
-            client.poll().expect("the welcome and the scores");
-        }
-        assert_eq!(client.welcomed_id, Some(1));
-        assert_eq!(
-            client.scores,
-            Some(vec![Score {
-                id: 1,
-                team: u32::from(RED),
-                kills: 0,
-                deaths: 0
-            }])
-        );
-    }
-
-    #[test]
     fn snapshots_carry_how_far_consoles_are_turned_off() {
-        let mut server: Server = make_server();
-        let mut watcher: Client = connect_client(&mut server, BLUE);
-        let (holder, idle) = (address(50_001), address(50_002));
+        let mut server: Game = make_server();
+        let (watcher, holder, idle) = (address(50_000), address(50_001), address(50_002));
+        join(&mut server, watcher, BLUE);
         join(&mut server, holder, RED);
         join(&mut server, idle, RED);
-        let holding: RemotePlayer = RemotePlayer {
-            id: 2,
-            frame: DMat4::IDENTITY,
-            is_laser_on: false,
-            is_rifle: false,
-            team: u32::from(RED),
-            disabling_console: Some(0),
-            disabling_frac: 0.0,
-            beam_speckle_frac: 0.0,
-            wormholes: PlayerWormholes::default(),
-        };
-        server
-            .handle(
-                &Message::New(Kind::State)
-                    .token(get_token(&server, holder))
-                    .player(&holding)
-                    .0,
-                holder,
-            )
-            .expect("a state");
+        server.handle(&make_state(&server, 2, holder, Some(0)), holder, 0.0);
         let hold_s: f64 = server.settings.consoles.hold_to_disable_s;
-        server.slots[1].disabling_since =
-            Some(Instant::now() - Duration::from_secs_f64(HALF * hold_s));
-        server.send_snapshot().expect("a snapshot");
-        let deadline: Instant = Instant::now() + Duration::from_secs(1);
-        while watcher.players.len() < 2 {
-            assert!(Instant::now() < deadline, "the snapshot never arrived");
-            watcher.poll().expect("the welcome and a snapshot");
-        }
-        let fracs: Vec<(u32, Option<u8>, f64)> = watcher
-            .players
-            .iter()
+        server.slots[1].disabling_since_s = Some(server.now_s - HALF * hold_s);
+        server.send_snapshot();
+        let snapshot: Vec<u8> = server.outbox[0].1.clone();
+        let mut reader: Reader = Reader {
+            bytes: &snapshot,
+            position: 2,
+        };
+        let fracs: Vec<(u32, Option<u8>, f64)> = (0..server.slots.len())
+            .map(|_| reader.player().expect("a player"))
             .map(|p| (p.id, p.disabling_console, p.disabling_frac))
             .collect();
-        assert_eq!((fracs[0].0, fracs[0].1), (2, Some(0)));
+        assert_eq!((fracs[1].0, fracs[1].1), (2, Some(0)));
         assert!(
-            (fracs[0].2 - HALF).abs() <= DISABLING_FRAC_STEP,
+            (fracs[1].2 - HALF).abs() <= DISABLING_FRAC_STEP,
             "{fracs:?}"
         );
-        assert_eq!(fracs[1], (3, None, 0.0));
-        server.slots[1].disabling_since =
-            Some(Instant::now() - Duration::from_secs_f64(TWICE * hold_s));
+        assert_eq!(fracs[2], (3, None, 0.0));
+        server.slots[1].disabling_since_s = Some(server.now_s - TWICE * hold_s);
         assert_eq!(server.get_disabling_frac(&server.slots[1]), 1.0);
     }
 
     #[test]
     fn joins_need_the_challenge_answered() {
-        let mut server: Server = make_server();
-        let listener: UdpSocket = make_listener();
-        let from: SocketAddr = listener.local_addr().expect("an address");
+        let mut server: Game = make_server();
+        let from: SocketAddr = address(50_001);
         let mut unanswered: Vec<u8> =
             make_join(&server, from, ANY_TEAM, PROTOCOL_VERSION, TEST_PASSWORD);
         unanswered[1 + BYTES_PER_VERSION..1 + BYTES_PER_VERSION + BYTES_PER_COOKIE].fill(0);
@@ -1359,16 +1008,13 @@ mod tests {
             TEST_PASSWORD,
         );
         for message in [unanswered, others] {
-            server.handle(&message, from).expect("a join");
-            let challenge: Vec<u8> = receive(&listener).expect("a challenge");
-            assert_eq!(
-                challenge,
-                [
-                    vec![Kind::Challenge as u8],
-                    server.make_cookie(from).to_vec()
-                ]
-                .concat()
-            );
+            let replies: Vec<(SocketAddr, Vec<u8>)> = server.handle(&message, from, 0.0);
+            let challenge: Vec<u8> = [
+                vec![Kind::Challenge as u8],
+                server.make_cookie(from).to_vec(),
+            ]
+            .concat();
+            assert_eq!(replies, vec![(from, challenge)]);
             assert!(server.slots.is_empty());
         }
         join(&mut server, from, ANY_TEAM);
@@ -1377,9 +1023,8 @@ mod tests {
 
     #[test]
     fn other_versions_and_wrong_passwords_are_refused() {
-        let mut server: Server = make_server();
-        let listener: UdpSocket = make_listener();
-        let from: SocketAddr = listener.local_addr().expect("an address");
+        let mut server: Game = make_server();
+        let from: SocketAddr = address(50_001);
         let version: [u8; BYTES_PER_VERSION] = PROTOCOL_VERSION.to_le_bytes();
         for (message, reason) in [
             (
@@ -1391,63 +1036,105 @@ mod tests {
                 REFUSED_FOR_PASSWORD,
             ),
         ] {
-            server.handle(&message, from).expect("a join");
-            let refusal: Vec<u8> = receive(&listener).expect("a refusal");
-            assert_eq!(
-                refusal,
-                [Kind::Refused as u8, reason, version[0], version[1]]
-            );
+            let refusal: Vec<u8> = vec![Kind::Refused as u8, reason, version[0], version[1]];
+            assert_eq!(server.handle(&message, from, 0.0), vec![(from, refusal)]);
             assert!(server.slots.is_empty());
         }
     }
 
     #[test]
-    fn clients_join_with_the_password_only() {
-        let mut server: Server = make_server();
-        let server_address: SocketAddr = server.socket.local_addr().expect("an address");
-        let mut client: Client =
-            Client::Connect(server_address, TEST_MAP_NAME, TEST_PASSWORD).expect("a socket");
-        client.join(None).expect("a join request");
-        let events: Vec<NetEvent> = exchange(&mut server, &mut client).expect("a welcome");
-        assert!(matches!(events[..], [NetEvent::Joined(1)]));
-        let mut stranger: Client =
-            Client::Connect(server_address, TEST_MAP_NAME, b"wrong horse").expect("a socket");
-        stranger.join(None).expect("a join request");
-        let error: Box<dyn Error> = exchange(&mut server, &mut stranger)
-            .err()
-            .expect("a refusal");
-        assert!(error.downcast_ref::<PasswordRefused>().is_some(), "{error}");
-        assert_eq!(server.slots.len(), 1);
-    }
-
-    #[test]
     fn messages_need_the_senders_token() {
-        let mut server: Server = make_server();
+        let mut server: Game = make_server();
         let (shooter, victim) = (address(50_001), address(50_002));
         join(&mut server, shooter, ANY_TEAM);
         join(&mut server, victim, ANY_TEAM);
         for token in [0, get_token(&server, victim)] {
-            server
-                .handle(&make_hit(token, 1, 2, 1), shooter)
-                .expect("a hit");
+            server.handle(&make_hit(token, 1, 2, 1), shooter, 0.0);
             assert_eq!(server.slots.len(), 2);
         }
-        server
-            .handle(&make_hit(get_token(&server, shooter), 1, 2, 1), shooter)
-            .expect("a hit");
+        server.handle(
+            &make_hit(get_token(&server, shooter), 1, 2, 1),
+            shooter,
+            0.0,
+        );
         assert_eq!(server.slots.len(), 1);
     }
 
     #[test]
     fn short_lobby_queries_are_ignored() {
-        let mut server: Server = make_server();
-        let listener: UdpSocket = make_listener();
-        let from: SocketAddr = listener.local_addr().expect("an address");
-        server
-            .handle(&[Kind::LobbyQuery as u8], from)
-            .expect("a short query");
-        assert_eq!(receive(&listener), None);
-        server.handle(&make_lobby_query().0, from).expect("a query");
-        assert_eq!(receive(&listener), Some(vec![Kind::Lobby as u8, 0, 0]));
+        let mut server: Game = make_server();
+        let from: SocketAddr = address(50_001);
+        assert_eq!(server.handle(&[Kind::LobbyQuery as u8], from, 0.0), vec![]);
+        let mut query: Vec<u8> = vec![Kind::LobbyQuery as u8];
+        query.resize(BYTES_PER_LOBBY, 0);
+        let lobby: Vec<u8> = vec![Kind::Lobby as u8, 0, 0];
+        assert_eq!(server.handle(&query, from, 0.0), vec![(from, lobby)]);
+    }
+
+    #[test]
+    fn silent_players_time_out() {
+        let mut server: Game = make_server();
+        let (talking, silent) = (address(50_001), address(50_002));
+        join(&mut server, talking, ANY_TEAM);
+        join(&mut server, silent, ANY_TEAM);
+        server.handle(&make_state(&server, 1, talking, None), talking, HALF);
+        server.tick(PLAYER_TIMEOUT_S);
+        let ids: Vec<u32> = server.slots.iter().map(|slot| slot.player.id).collect();
+        assert_eq!(ids, vec![1]);
+    }
+
+    #[test]
+    fn snapshots_and_scores_follow_their_periods() {
+        let mut server: Game = make_server();
+        let (one, two) = (address(50_001), address(50_002));
+        join(&mut server, one, ANY_TEAM);
+        join(&mut server, two, ANY_TEAM);
+        assert_eq!(get_kinds(&server.tick(HALF * SNAPSHOT_PERIOD_S)), vec![]);
+        let snapshot: u8 = Kind::Snapshot as u8;
+        let scores: u8 = Kind::Scores as u8;
+        assert_eq!(
+            get_kinds(&server.tick(SNAPSHOT_PERIOD_S)),
+            vec![(one, snapshot), (two, snapshot)]
+        );
+        assert_eq!(
+            get_kinds(&server.tick(SCORES_PERIOD_S)),
+            vec![
+                (one, snapshot),
+                (two, snapshot),
+                (one, scores),
+                (two, scores)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_next_game_starts_after_a_win() {
+        let mut by_itself: Game = Game::New(
+            TEST_MAP_NAME.to_string(),
+            ServerSettings::Builtin(),
+            vec![0, 0, 1],
+            TEST_PASSWORD.to_vec(),
+            Some(NEW_GAME_AFTER_WIN_S),
+        );
+        let mut never: Game = make_server();
+        for server in [&mut by_itself, &mut never] {
+            join(server, address(50_001), RED);
+            hold_console(server, 1, address(50_001), 0);
+            hold_console(server, 1, address(50_001), 1);
+            server.tick(0.0);
+            server.tick(HALF * NEW_GAME_AFTER_WIN_S);
+            assert_eq!((server.game.number, server.game.winner), (0, Some(1)));
+            server.tick(NEW_GAME_AFTER_WIN_S);
+        }
+        assert_eq!((by_itself.game.number, by_itself.game.winner), (1, None));
+        assert_eq!((never.game.number, never.game.winner), (0, Some(1)));
+    }
+
+    #[test]
+    #[should_panic(expected = "the time went back")]
+    fn time_cannot_go_back() {
+        let mut server: Game = make_server();
+        server.tick(1.0);
+        server.handle(&[Kind::LobbyQuery as u8], address(50_001), HALF);
     }
 }
