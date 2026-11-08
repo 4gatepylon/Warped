@@ -33,7 +33,7 @@ TERRAFORM ?= terraform
 STATE_BUCKET := $(GCP_PROJECT_ID)-tfstate
 BILLING_LINK_URL := https://console.cloud.google.com/billing/linkedaccount?project=$(GCP_PROJECT_ID)
 APIS := compute.googleapis.com storage.googleapis.com iap.googleapis.com billingbudgets.googleapis.com \
-  cloudbilling.googleapis.com cloudresourcemanager.googleapis.com
+  cloudbilling.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com
 TEST_DATA_DIR := .build/terraform-test
 GAME_DIR ?= ../demos/hyperbolic_wormholes_rust
 GAME_PROGRAM := $(GAME_DIR)/.build/release/hyperbolic-wormholes
