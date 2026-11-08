@@ -12,7 +12,7 @@
 //!   `main.rs`), which `overlay_text_fits_its_mask` checks; a long link goes over two lines.
 
 /// `CREDITS_LINES` is the CREDITS page's text, one menu line each.
-pub const CREDITS_LINES: [&str; 28] = [
+pub const CREDITS_LINES: [&str; 24] = [
     "Warped: hyperbolic wormholes",
     "",
     "SURFACES  Poly Haven textures, CC0 (polyhaven.com/a/<name>)",
@@ -24,16 +24,12 @@ pub const CREDITS_LINES: [&str; 28] = [
     "RIFLE     \"Sci-fi revolver\" by Ramhat, Sketchfab Standard",
     "  sketchfab.com/3d-models/",
     "  sci-fi-revolver-f6bd1cbad4174048bcf02f8e52771adb",
-    "MODELS    Sketchfab, CC BY 4.0 (links in common/maps/README.md)",
-    "  \"'Stekelvarken S3' Kazemat\" by Sjoerd van Riel",
-    "  \"Desert Planet Bunker Garage Thing\" by Santeri Riikonen",
-    "  \"WW2 Field Bunker\" by Golden",
-    "  \"Sci-Fi Beacon/Way Point Marker Free Model\" by AMMediaGames",
-    "  \"Hesco Barrier PBR\" by polbrainstorm",
-    "PLAYERS   \"Teal V.2\" by Lagst, Sketchfab Standard",
+    "MODELS    Sketchfab, CC BY 4.0, links in common/maps/README.md",
+    "  Sjoerd van Riel (kazemat), Santeri Riikonen (garage),",
+    "  Golden (bunker), AMMediaGames (beacon), polbrainstorm (Hesco)",
+    "PLAYERS   \"Teal V.2\" by Lagst, Sketchfab Standard, clips here",
     "  sketchfab.com/3d-models/",
     "  teal-v2-d6a54ff9468c451bbdbd879afa03f20a",
-    "  (its idle, walk, run, jump and death clips are made here)",
     "TEXT      SDL3's built-in 8x8 debug font (libsdl.org, zlib)",
     "CODE      Rust crates: sdl3, glam, gltf, image, png, rayon,",
     "  objc2 and objc2-metal (Metal, MetalFX), serde, serde_yaml,",
