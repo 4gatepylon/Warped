@@ -130,6 +130,7 @@ at 2560x1440 has not been measured yet.
 | Texture `old_planks_02` (1K) | https://polyhaven.com/a/old_planks_02 | Rob Tuytel | CC0 | 1.0 MB |
 | Texture `forest_leaves_02` (1K) | https://polyhaven.com/a/forest_leaves_02 | Rob Tuytel | CC0 | 1.3 MB |
 | Texture `mossy_rock` (1K) | https://polyhaven.com/a/mossy_rock | Rob Tuytel | CC0 | 2.9 MB |
+| Pylon model `scifi_beacon` (shared: `common/maps/models/scifi_beacon/`) | https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f | AMMediaGames | CC BY 4.0 | 1.0 MB (committed) |
 
 `make download-assets` saves them in `assets/textures/` (git-ignored). The sky, robot, rifle, revolver and arms are
 `../fps_demo/assets/`, credited in [its README](../fps_demo/README.md#assets); its arms are CC BY-NC 4.0 and its

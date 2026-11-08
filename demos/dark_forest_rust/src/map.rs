@@ -90,7 +90,17 @@ pub struct Ground {
 pub struct Structure {
     pub name: String,
     pub frame: [f32; 16],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<StructureMesh>,
     pub shapes: Vec<Shape>,
+}
+
+/// `StructureMesh` draws a structure as the glTF model `models/<model>/scene.gltf`, scaled to
+/// `height_m` tall, instead of its shapes.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StructureMesh {
+    pub model: String,
+    pub height_m: f32,
 }
 
 /// `Shape` is one box, cylinder or ellipsoid of a structure, in the structure's frame.

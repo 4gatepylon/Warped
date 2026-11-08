@@ -6,7 +6,7 @@
 //!     let scene: Scene = Scene::load(&mut renderer, &assets_dir, &arena, &options);
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
@@ -75,6 +75,7 @@ pub struct Scene {
     pub robot_material_names: Vec<String>,
     pub viewmodel: Viewmodel,
     pub light_scale: f32,
+    pub beacon: Model,
 }
 
 /// `surface_texture` returns a surface's Poly Haven texture set.
@@ -475,6 +476,20 @@ impl Scene {
         );
 
         let viewmodel: Viewmodel = load_viewmodel(renderer, assets_dir, options, emissive_scale);
+        let beacon_path: PathBuf = crate::map::default_map_path()
+            .parent()
+            .and_then(Path::parent)
+            .expect("the default map sits in common/maps/<map>/")
+            .join("models/scifi_beacon/scene.gltf");
+        let beacon: Model = load_model(
+            renderer,
+            &beacon_path,
+            &ModelOptions {
+                should_recenter: false,
+                emissive_scale,
+                ..ModelOptions::default()
+            },
+        );
         println!("all assets ready in {:.1}s", start.elapsed().as_secs_f32());
         let _ = AlphaMode::Opaque;
         Scene {
@@ -487,6 +502,7 @@ impl Scene {
             robot_material_names,
             viewmodel,
             light_scale,
+            beacon,
         }
     }
 }

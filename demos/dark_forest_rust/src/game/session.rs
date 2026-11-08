@@ -103,6 +103,13 @@ pub struct FrameData {
     pub damage_flash_frac: f32,
 }
 
+/// `OFF_PYLON_TINT` darkens a pylon whose console is off.
+const OFF_PYLON_TINT: Vec3 = Vec3::new(0.3, 0.3, 0.3);
+/// `BEACON_BEAM_M`, `BEACON_BEAM_WIDTH_M` and `BEACON_BEAM_RGB` are the beam a pylon sends up
+/// while its console is on, in its team's colour (blue, red), as in the hyperbolic demo.
+const BEACON_BEAM_M: f32 = 25.0;
+const BEACON_BEAM_WIDTH_M: f32 = 0.12;
+const BEACON_BEAM_RGB: [Vec3; 2] = [Vec3::new(0.3, 0.6, 2.0), Vec3::new(2.0, 0.35, 0.2)];
 /// `FLICKER_SLOW_RAD_PER_S` and `FLICKER_FAST_RAD_PER_S` are the two waves a flame flickers by.
 const FLICKER_SLOW_RAD_PER_S: f32 = 11.0;
 const FLICKER_FAST_RAD_PER_S: f32 = 27.0;
@@ -887,6 +894,43 @@ impl Session {
                 radius_m: flash.radius_m,
                 color_rgb: flash.color_rgb * frac * frac,
             });
+        }
+        let beacon_height_m: f32 = scene.beacon.bounds_max_m.y - scene.beacon.bounds_min_m.y;
+        for pylon in &self.arena.pylons {
+            let is_off: bool = self
+                .console_off
+                .get(pylon.console_index)
+                .copied()
+                .unwrap_or(false);
+            let scale: f32 = pylon.height_m / beacon_height_m.max(1e-3);
+            let model: Mat4 = Mat4::from_translation(
+                pylon.foot_m - Vec3::Y * (scene.beacon.bounds_min_m.y * scale),
+            ) * Mat4::from_scale(Vec3::splat(scale));
+            let tint: Vec3 = if is_off { OFF_PYLON_TINT } else { Vec3::ONE };
+            for part in &scene.beacon.parts {
+                world_draws.push(DrawItem {
+                    mesh: part.mesh,
+                    material: part.material,
+                    model,
+                    tint: tint.extend(1.0),
+                    joint_offset: None,
+                    bounds_center_m: pylon.foot_m + Vec3::Y * (pylon.height_m * 0.5),
+                    bounds_radius_m: pylon.height_m,
+                    does_cast_shadow: true,
+                });
+            }
+            if !is_off {
+                let team: usize = self.arena.consoles[pylon.console_index].team as usize % 2;
+                let top_m: Vec3 = pylon.foot_m + Vec3::Y * pylon.height_m;
+                world_particles.push(Particle {
+                    position_m: top_m + Vec3::Y * (BEACON_BEAM_M * 0.5),
+                    stretch_m: Vec3::Y * BEACON_BEAM_M,
+                    size_m: BEACON_BEAM_WIDTH_M,
+                    color_rgba: (BEACON_BEAM_RGB[team] * scene.light_scale).extend(0.0),
+                    kind: ParticleKind::Tracer,
+                    seed: 0.0,
+                });
+            }
         }
         for beam in &self.beams {
             let frac: f32 = 1.0 - beam.age_s / beam.life_s;

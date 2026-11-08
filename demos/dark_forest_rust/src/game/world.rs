@@ -140,8 +140,17 @@ pub struct Console {
     pub centre_m: Vec3,
 }
 
+/// `Pylon` is a pylon drawn as the shared beacon model; `console_index` is its console.
+#[derive(Clone, Copy, Debug)]
+pub struct Pylon {
+    pub foot_m: Vec3,
+    pub height_m: f32,
+    pub console_index: usize,
+}
+
 /// `Arena` is the whole level.
 pub struct Arena {
+    pub pylons: Vec<Pylon>,
     pub warps: Warps,
     pub boxes: Vec<WorldBox>,
     pub shapes: Vec<WorldShape>,
@@ -218,8 +227,39 @@ impl Arena {
             }
         }
         let mut shapes: Vec<WorldShape> = Vec::new();
+        let mut pylons: Vec<Pylon> = Vec::new();
         for structure in &map.structures {
             let frame: Mat4 = Mat4::from_cols_array(&structure.frame);
+            if let Some(mesh) = &structure.mesh {
+                assert_eq!(
+                    mesh.model, "scifi_beacon",
+                    "structure {:?} draws a model this demo lacks",
+                    structure.name
+                );
+                for shape in &structure.shapes {
+                    let centre_m: Vec3 = frame.transform_point3(Vec3::from(shape.centre_m));
+                    let half_m: Vec3 =
+                        map::frame_half_extent_m(&structure.frame, Vec3::from(shape.half_m));
+                    let surface: Surface = surface_of(shape.material);
+                    boxes.push(WorldBox {
+                        aabb: Aabb::from_center(centre_m, half_m),
+                        surface,
+                        is_drawn: false,
+                    });
+                    let team: u32 = match surface {
+                        Surface::RedConsole => 1,
+                        Surface::BlueConsole => 0,
+                        _ => continue,
+                    };
+                    pylons.push(Pylon {
+                        foot_m: map::frame_translation_m(&structure.frame),
+                        height_m: mesh.height_m,
+                        console_index: consoles.len(),
+                    });
+                    consoles.push(Console { team, centre_m });
+                }
+                continue;
+            }
             for shape in &structure.shapes {
                 let centre_m: Vec3 = frame.transform_point3(Vec3::from(shape.centre_m));
                 let half_m: Vec3 =
@@ -352,6 +392,7 @@ impl Arena {
             bounds_min_m,
             bounds_max_m,
             warps,
+            pylons,
         }
     }
 

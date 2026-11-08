@@ -15,7 +15,7 @@ use glam::{Mat4, Quat, Vec2, Vec3};
 
 use crate::map::{
     Appearance, Ground, Ladder, LaserLook, Light, MapBox, MapFile, Material, PlayerSpec, Scatter,
-    Shape, Sky, Space, Spawn, Structure, Sun, Warp, translation_frame, yaw_frame,
+    Shape, Sky, Space, Spawn, Structure, StructureMesh, Sun, Warp, translation_frame, yaw_frame,
 };
 
 /// `HALF_WIDTH_M` is half the forest's extent along x.
@@ -87,6 +87,9 @@ const BLUE_PAINT: u8 = 8;
 const RED_CONSOLE: u8 = 9;
 const BLUE_CONSOLE: u8 = 10;
 const CANDLE_WAX: u8 = 11;
+/// `PYLON_HEIGHT_M` and `PYLON_RADIUS_M` size a pylon, in the hyperbolic demo's beacon's proportions.
+const PYLON_HEIGHT_M: f32 = 3.2;
+const PYLON_RADIUS_M: f32 = 0.36;
 const CANDLE_FLAME: u8 = 12;
 /// `CANDLE_RADIUS_M` and `CANDLE_HALF_HEIGHT_M` size a candle's wax.
 const CANDLE_RADIUS_M: f32 = 0.05;
@@ -265,6 +268,7 @@ impl Layout {
             }
             self.map.structures.push(Structure {
                 name: format!("{name} culm {index}"),
+                mesh: None,
                 frame: frame.to_cols_array(),
                 shapes,
             });
@@ -323,6 +327,7 @@ impl Layout {
                 }
                 self.map.structures.push(Structure {
                     name: format!("{name} culm {index} branch {branch}"),
+                    mesh: None,
                     frame: branch_frame.to_cols_array(),
                     shapes: branch_shapes,
                 });
@@ -346,6 +351,7 @@ impl Layout {
         };
         self.map.structures.push(Structure {
             name: name.to_string(),
+            mesh: None,
             frame: translation_frame(Vec3::new(centre.x, radius_m, centre.y)),
             shapes: vec![Shape {
                 kind: "cylinder".to_string(),
@@ -363,6 +369,7 @@ impl Layout {
         let flame_y_m: f32 = 2.0 * CANDLE_HALF_HEIGHT_M + FLAME_HALF_HEIGHT_M;
         self.map.structures.push(Structure {
             name: name.to_string(),
+            mesh: None,
             frame: translation_frame(foot_m),
             shapes: vec![
                 Shape {
@@ -484,34 +491,32 @@ impl Layout {
         self.keep_clear(centre, Vec2::splat(1.0));
     }
 
-    /// `add_pylon` adds a team's pylon: a painted plinth, its glowing console and a light.
+    /// `add_pylon` adds a team's pylon: the shared `scifi_beacon` model, whose round collider is
+    /// its console, and a light.
     fn add_pylon(&mut self, side: Side, index: usize, foot_m: Vec3) {
-        let group: String = format!("{} pylon {index}", side.team);
-        self.add_box(
-            &group,
-            foot_m + Vec3::Y * 0.5,
-            Vec3::new(0.4, 0.5, 0.4),
-            side.paint,
-        );
-        self.add_box(
-            &group,
-            foot_m + Vec3::Y * 1.15,
-            Vec3::new(0.3, 0.15, 0.3),
-            side.console,
-        );
-        self.add_box(
-            &group,
-            foot_m + Vec3::Y * 1.8,
-            Vec3::new(0.06, 0.5, 0.06),
-            side.paint,
-        );
+        self.map.structures.push(Structure {
+            name: format!("{} pylon {index}", side.team),
+            mesh: Some(StructureMesh {
+                model: "scifi_beacon".to_string(),
+                height_m: PYLON_HEIGHT_M,
+            }),
+            frame: translation_frame(foot_m),
+            shapes: vec![Shape {
+                kind: "cylinder".to_string(),
+                centre_m: [0.0, PYLON_HEIGHT_M * 0.5, 0.0],
+                half_m: [PYLON_RADIUS_M, PYLON_HEIGHT_M * 0.5, PYLON_RADIUS_M],
+                round_m: 0.0,
+                axis: 1,
+                material: side.console,
+            }],
+        });
         let color: [f32; 3] = if side.sign > 0.0 {
             [1.0, 0.2, 0.12]
         } else {
             [0.2, 0.4, 1.0]
         };
         self.map.lights.push(Light {
-            position: [foot_m.x, foot_m.y + 1.9, foot_m.z, 1.0],
+            position: [foot_m.x, foot_m.y + PYLON_HEIGHT_M + 0.3, foot_m.z, 1.0],
             color,
             radius_m: 3.5,
             flicker_frac: None,
@@ -1055,10 +1060,14 @@ mod tests {
     fn test_each_team_has_two_consoles_and_spawns() {
         let map: MapFile = build();
         for (console, team) in [(RED_CONSOLE, "red"), (BLUE_CONSOLE, "blue")] {
-            assert_eq!(
-                map.boxes.iter().filter(|b| b.material == console).count(),
-                2
-            );
+            let pylon_count: usize = map
+                .structures
+                .iter()
+                .filter(|s| {
+                    s.mesh.is_some() && s.shapes.iter().any(|shape| shape.material == console)
+                })
+                .count();
+            assert_eq!(pylon_count, 2);
             assert_eq!(map.spawns.iter().filter(|s| s.team == team).count(), 4);
         }
     }
