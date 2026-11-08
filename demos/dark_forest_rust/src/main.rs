@@ -195,6 +195,9 @@ struct Args {
     /// With --serve: write {"winner": "blue"|"red"} here on a win, and start no new game.
     #[arg(long)]
     level_result_file: Option<PathBuf>,
+    /// A name the match server gives this window or bot; accepted and ignored.
+    #[arg(long)]
+    label: Option<String>,
 }
 
 /// `VERTICAL_ROUTE` is `--play-route`'s loop from red's spawn: up a ladder to the treehouse, over
@@ -626,6 +629,7 @@ fn main() {
                 world_particles: &frame.world_particles,
                 viewmodel_particles: &frame.viewmodel_particles,
                 hud_rects: &frame.hud_rects,
+                hud_images: &[],
                 time_s: session.time_s,
                 damage_flash_frac: frame.damage_flash_frac,
             },
