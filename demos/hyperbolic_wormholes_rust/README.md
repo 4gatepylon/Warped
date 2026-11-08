@@ -5,6 +5,10 @@ fast its ray tracer runs natively. It is the same scene and the same light paths
 wormholes), with gravity and a laser added, drawn either on the GPU with Metal (the default) or on every CPU core.
 It is a demo for measuring speed, so it does no more than that.
 
+Features the user has asked for, and who is working on which, are in
+[`USER_WISHLIST_CHECKLIST.md`](USER_WISHLIST_CHECKLIST.md); [`AGENTS.md`](AGENTS.md) says how to claim one and mark it
+done.
+
 ## Play
 
 ```bash
