@@ -11,6 +11,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." Claimed by Devin
+  (session Devin Desktop 2026-11-07), branch `devin/minimap-icons`, 2026-11-07.
 - [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
   session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
 - [~] **W-84 Shot noise in the beam itself.** The user's correction of W-69: "by shot noise I mean that the laser BEAM
@@ -109,7 +111,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-83 Giant ships in the distance.** Add a Death Star and a Star Wars Star Destroyer-looking spaceship off in
   the distance. To be built as original designs in that spirit (a moon-sized battle station with a dish, a long
   wedge-shaped capital ship), not copies of the films' models, and without their names in the code.
-- [ ] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap."
 
 ## Pending user review
 
