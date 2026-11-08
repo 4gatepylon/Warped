@@ -506,6 +506,15 @@
 - **Rationale:** you asked for WASD to move, `Space` to jump and click to shoot, and chose to drop the keys that gave
   an edge (flying, a steady laser, auto-aim, auto-walk) while keeping respawn and resolution.
 
+### D48. A smaller energy bar and a deeper head bob
+
+- **Choice:** the sprint energy bar holds a quarter of D45's: it empties in 7.5 s of sprinting and refills in 15 s
+  (the refill rate is unchanged). The eye dips twice as deep at each footstep: 8 cm walking, 14 cm sprinting, at the
+  same 2 and 2.8 bobs a second.
+- **Alternatives:** draining 4 times faster but refilling in 60 s as before; a sideways sway as well as the dip.
+- **Rationale:** you asked for the bar to run out 4 times faster by shrinking it 4 times, and for more head bob;
+  twice the depth is a first guess, easy to change (`BOB_WALK_M`, `BOB_SPRINT_M` in `src/voxel_world.rs`).
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
