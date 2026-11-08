@@ -1,0 +1,8 @@
+Model Information:
+* title:	Sci-fi revolver
+* source:	https://sketchfab.com/3d-models/sci-fi-revolver-f6bd1cbad4174048bcf02f8e52771adb
+* author:	Ramhat (https://sketchfab.com/Ramhat)
+
+Model License:
+* license type:	SKETCHFAB Standard (https://sketchfab.com/licenses)
+* requirements:	Under basic restrictions, use worldwide, on all types of media, commercially or not, and in all types of derivative works

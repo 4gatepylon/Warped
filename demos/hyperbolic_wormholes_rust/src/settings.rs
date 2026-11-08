@@ -160,6 +160,17 @@ pub struct FlashlightSettings {
     pub brightness_frac: f64,
 }
 
+/// `AimSettings` is aiming (holding the aim control): how much closer things look with each gun at
+/// full zoom, and how long zooming fully in or out takes. The mouse turns the view more slowly by
+/// the same factor.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct AimSettings {
+    pub sniper_zoom: f64,
+    pub rifle_zoom: f64,
+    pub zoom_s: f64,
+}
+
 /// `MapEdgeSettings` is the map's soft edge on a map with a crater: how far up the crater's wall
 /// (0 at its foot, 1 at the rim) players start to slow down, and how far up their speed would
 /// reach 0, which they never get to (each step outward is cut by the share of the way they have
@@ -239,6 +250,7 @@ pub struct ServerSettings {
     pub when_hit: WhenHitSettings,
     pub flashlight: FlashlightSettings,
     pub map_edge: MapEdgeSettings,
+    pub aim: AimSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -302,6 +314,14 @@ impl ServerSettings {
             &SERVER_ZERO_ALLOWED_KEYS,
             source,
         )?;
+        let aim: &AimSettings = &settings.aim;
+        if aim.sniper_zoom < 1.0 || aim.rifle_zoom < 1.0 {
+            return Err(format!(
+                "settings {source}: aim zooms must be at least 1 (1 for none), not {} and {}",
+                aim.sniper_zoom, aim.rifle_zoom
+            )
+            .into());
+        }
         let edge: &MapEdgeSettings = &settings.map_edge;
         if edge.start_wall_frac >= edge.stop_wall_frac || edge.stop_wall_frac > 1.0 {
             return Err(format!(
@@ -471,6 +491,12 @@ mod tests {
                     .to_string();
             assert!(error.contains(key), "{error}");
         }
+        let shrinking_aim: String =
+            BUILTIN_SERVER_YAML.replace("rifle_zoom: 1.5", "rifle_zoom: 0.5");
+        let error: String = ServerSettings::FromYaml(&shrinking_aim, "test")
+            .expect_err("a zoom below 1 fails")
+            .to_string();
+        assert!(error.contains("aim"), "{error}");
         let backward_edge: String =
             BUILTIN_SERVER_YAML.replace("start_wall_frac: 0.0", "start_wall_frac: 0.6");
         let error: String = ServerSettings::FromYaml(&backward_edge, "test")

@@ -1036,6 +1036,25 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D83. Aiming zooms in, and the flashlight moves to F
+
+- **Choice:**
+  - **Keys:** a new `aim` control, the right button by default. The flashlight moves from the right button to `F`.
+    It still shines only while held.
+  - **Zoom:** holding `aim` zooms in, 2.5 times with the sniper and 1.5 times with the rifle (`aim.sniper_zoom` and
+    `aim.rifle_zoom` in `server_settings.yaml`, at least 1). It eases in and out over `aim.zoom_s` (0.15 s, a
+    smoothstep). The zoom divides the camera's `tan_half_fov` and `pixel_angle_rad` in the frame after it is packed
+    (`PackedFrame::zoom_in`), for both renderers and both maps.
+  - **Turning:** the mouse turns the view more slowly by the same factor, so aiming is steadier.
+  - **The gun stays put** and keeps its normal field of view: the laser leaves its tip as before, and other
+    players' windows, which don't know who is aiming, draw the same beams.
+- **Alternatives:**
+  - moving the gun to the middle of the view (the laser would then start somewhere else than other windows draw
+    it);
+  - zoom as a player's own setting (it changes what a player can see, so it is the server's, like recoil);
+  - slowing walking while aiming (not asked for).
+- **Rationale:** you asked for a way to aim on the right button, with the flashlight moved to another key.
+
 ### D84. A blueshift toward cyan after going through a wormhole
 
 - **Choice:**
@@ -1047,10 +1066,10 @@
     spectrum at 610, 550 and 465 nm, joined by straight lines, and falling past red to a quarter of red's at 700 nm
     (the infrared a blueshift brings into view). Moving straight ahead at β = 0.15 of light speed at the peak, the
     relativistic Doppler factor D = √(1 − β²) / (1 − β cos θ), with θ the angle off the middle of the screen, is
-    1.16 in the middle and 1.08 in the corners of a 16:10 window. Each channel shows the light at D times its wavelength: red fades,
-    green takes red's light and blue takes green's, so greys turn cyan and reds turn green. The pixel is also
-    D^1.5 times as bright (beaming), plus a faint teal glow, (D^1.5 − 1) × (0, 0.3, 0.36), so the black sky, often
-    half the screen, turns too.
+    1.16 in the middle and 1.08 in the corners of a 16:10 window. Each channel shows the light at D times its
+    wavelength: red fades, green takes red's light and blue takes green's, so greys turn cyan and reds turn green.
+    The pixel is also D^1.5 times as bright (beaming), plus a faint teal glow, (D^1.5 − 1) × (0, 0.3, 0.36), so the
+    black sky, often half the screen, turns too.
   - **What it touches:** the scene only, after motion blur; the HUD, text, minimap and the gun in your hand stay as
     they are, since they move with you.
   - **Settings:** each player's `view.wormhole_tint_frac` (1 by default; 0 to 1, 0 for none; also in the menu as
@@ -1066,6 +1085,27 @@
     it).
 - **Rationale:** you asked that going through a wormhole turn your whole screen kind of cyan, simulating the
   relativistic effect on colour if possible.
+
+### D88. Lasers still stop on window glass (W-57)
+
+- **Choice:**
+  - **Finding:** the room is the red habitat module (and its twins, the derelict modules), with four windows one
+    meter wide in each long wall. A shot at a window stops on the window's glass pane. It always did: the voxel walk
+    stopped at any filled cell, glass included, while the picture looked through glass, so the window looked open
+    but held the laser. That is the "hitbox". It isn't a fault of the tracer: the shot stops exactly on the pane's
+    near face whether the shooter stands 5 cm, 30 cm or 3.5 m from it, aims square on or slantwise, or shoots in
+    from outside. The shot is traced from the eye, so the gun's muzzle (`MUZZLE_M`, 0.555 m ahead) reaching past
+    the pane changes only where the drawn beam starts.
+  - **No change:** the map format makes `glass` see-through for light but a stop for lasers and players, as the
+    WebGL level does (`demos/levels/lunar_surface/DECISIONS.md` D16). A new test,
+    `the_laser_stops_on_a_window_pane`, keeps it so.
+  - **Since #147 (W-59):** the smooth-shape export lays each pane over a solid hull wall, so the habitat modules'
+    and walkways' windows no longer show the outside. A laser through glass would now stop on the hull 6 cm behind.
+- **Alternatives:**
+  - lasers through glass (the format and the level would change, and the walls would need holes behind the panes);
+  - window holes in the walls without glass, as doorways are (players could climb through).
+- **Rationale:** you reported that a laser shot out of a window close up doesn't leave the room; it stops on the
+  glass by design, so whether lasers should pass through windows is your call.
 
 
 ## Baselines

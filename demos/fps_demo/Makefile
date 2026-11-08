@@ -3,8 +3,8 @@
 #
 # Interface:
 #     make help: list the targets.
-#     make download-assets: download the CC0 assets (and the Sketchfab models if
-#         SKETCHFAB_API_TOKEN is set) into .assets/.
+#     make download-assets: download the committed CC0 assets again (and the Sketchfab models if
+#         SKETCHFAB_API_TOKEN is set) into assets/.
 #     make run-fps-demo RENDER_SCALE=<0.25..1> BOT_COUNT=<0..6>: build and play.
 #     make bench-fps-demo BENCH_SECONDS=<s>: let the autopilot play and write frame times to
 #         .artifacts/bench_fps_demo/<run_id>/.
@@ -14,7 +14,7 @@
 #     make reset-artifacts YES_TO_RESET_ARTIFACTS=1: delete .artifacts/.
 #
 # Example:
-#     make download-assets && make run-fps-demo RENDER_SCALE=0.8
+#     make run-fps-demo RENDER_SCALE=0.8
 SHELL := /bin/bash
 RENDER_SCALE ?= 1.0
 BOT_COUNT ?= 4
@@ -31,7 +31,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (frame-time logs and screens
 
 help:
 	@echo "Targets:"
-	@echo "  make download-assets                         Download the assets into .assets/ (once)"
+	@echo "  make download-assets                         Download the assets into assets/ again"
 	@echo "  make run-fps-demo RENDER_SCALE=<0.25..1> BOT_COUNT=<0..6>"
 	@echo "                                               Build and play (defaults $(RENDER_SCALE), $(BOT_COUNT))"
 	@echo "  make bench-fps-demo BENCH_SECONDS=<s>        Autopilot benchmark into .artifacts/bench_fps_demo/"
@@ -40,7 +40,7 @@ help:
 	@echo "  make clean                                   Remove .build/"
 	@echo "  make reset-artifacts YES_TO_RESET_ARTIFACTS=1  Delete .artifacts/"
 	@echo ""
-	@echo "Example: make download-assets && make run-fps-demo RENDER_SCALE=0.8"
+	@echo "Example: make run-fps-demo RENDER_SCALE=0.8"
 
 download-assets:
 	cargo run --release --bin download-assets
