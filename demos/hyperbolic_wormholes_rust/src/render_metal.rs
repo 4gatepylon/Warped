@@ -22,7 +22,7 @@ use objc2_foundation::NSString;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
     MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLDevice, MTLLibrary, MTLOrigin, MTLPixelFormat,
+    MTLCreateSystemDefaultDevice, MTLDevice, MTLLibrary, MTLOrigin, MTLPixelFormat, MTLRegion,
     MTLResourceOptions, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 use objc2_metal_fx::{MTLFXSpatialScaler, MTLFXSpatialScalerBase, MTLFXSpatialScalerDescriptor};
@@ -42,6 +42,23 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// `Texture` is a Metal texture and its size in pixels.
 type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
+
+/// `Overlay` is what to draw over a frame before it is shown (while a player is out after a hit):
+/// a mask, one byte a pixel (`mask_px` in size, rows top first; see the shader's
+/// `apply_overlay` for what its levels mean), and how much to darken the frame.
+pub struct Overlay<'a> {
+    pub mask: &'a [u8],
+    pub mask_px: (usize, usize),
+    pub dim_frac: f32,
+}
+
+/// `OverlayParams` is the shader's `OverlayParams`.
+#[repr(C)]
+struct OverlayParams {
+    dim_frac: f32,
+    scale: i32,
+    origin: [i32; 2],
+}
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
 type Scaler = (
@@ -170,6 +187,8 @@ const BYTES_PER_TEXEL: usize = 16;
 const BYTES_PER_LOST_FLAG: usize = 1;
 const BYTES_PER_PYRAMID_TEXEL: usize = 8;
 const THREADGROUP_SIDE: usize = 8;
+const OVERLAY_HEIGHT_PER_MASK: usize = 5;
+const OVERLAY_MAX_WIDTH_FRAC: f64 = 0.8;
 const MS_PER_S: f64 = 1000.0;
 const PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
 const _: () = assert!(
@@ -213,6 +232,9 @@ pub struct MetalRenderer {
     pull_holes: Pipeline,
     push_holes: Pipeline,
     fill_holes: Pipeline,
+    apply_overlay: Pipeline,
+    overlay_target: Option<Texture>,
+    overlay_mask: Option<Texture>,
     hole_buffers: Option<HoleBuffers>,
     voxel_gpu: Option<VoxelGpu>,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -437,6 +459,7 @@ impl MetalRenderer {
             make_pipeline("pull_holes")?,
         );
         let (push_holes, fill_holes) = (make_pipeline("push_holes")?, make_pipeline("fill_holes")?);
+        let apply_overlay: Pipeline = make_pipeline("apply_overlay")?;
         let build_mouth_fields: Pipeline = make_pipeline("build_mouth_fields")?;
         let make_table = |entry_count: usize| {
             device
@@ -470,6 +493,9 @@ impl MetalRenderer {
             pull_holes,
             push_holes,
             fill_holes,
+            apply_overlay,
+            overlay_target: None,
+            overlay_mask: None,
             hole_buffers: None,
             voxel_gpu: None,
             throat_table,
@@ -940,18 +966,133 @@ impl MetalRenderer {
         Ok(())
     }
 
-    /// `render_to_layer` draws one frame straight into the next drawable of a window's
-    /// `CAMetalLayer`, upscaled with MetalFX to the drawable's size, and presents it. It returns
-    /// false if the layer had no drawable to give.
+    /// `encode_overlay` encodes drawing `overlay` over a finished frame into a texture of its own,
+    /// which it returns: the frame darkened, and the mask scaled by a whole number to about a fifth
+    /// of the frame's height (and at most `OVERLAY_MAX_WIDTH_FRAC` of its width), centred.
     ///
-    /// Example: `renderer.render_to_layer(&data, &layer)?;`
-    pub fn render_to_layer(&mut self, data: FrameData, layer: &CAMetalLayer) -> Result<bool> {
+    /// Example: `let shown = self.encode_overlay(&command_buffer, &frame, &overlay, (2560, 1600))?;`
+    fn encode_overlay(
+        &mut self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        frame: &ProtocolObject<dyn MTLTexture>,
+        overlay: &Overlay,
+        output_px: (usize, usize),
+    ) -> Result<Retained<ProtocolObject<dyn MTLTexture>>> {
+        let (mask_w, mask_h) = overlay.mask_px;
+        assert_eq!(
+            overlay.mask.len(),
+            mask_w * mask_h,
+            "encode_overlay: the mask isn't {mask_w}x{mask_h} bytes"
+        );
+        if self
+            .overlay_target
+            .as_ref()
+            .is_none_or(|(_, size)| *size != output_px)
+        {
+            self.overlay_target = Some(self.make_texture(
+                output_px,
+                MTLTextureUsage::ShaderWrite | MTLTextureUsage::ShaderRead,
+            )?);
+        }
+        if self
+            .overlay_mask
+            .as_ref()
+            .is_none_or(|(_, size)| *size != overlay.mask_px)
+        {
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A MASK TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+            let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+                MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                    MTLPixelFormat::R8Unorm,
+                    mask_w,
+                    mask_h,
+                    false,
+                )
+            };
+            descriptor.setUsage(MTLTextureUsage::ShaderRead);
+            descriptor.setStorageMode(MTLStorageMode::Shared);
+            let mask = self
+                .device
+                .newTextureWithDescriptor(&descriptor)
+                .ok_or("Metal: no memory for the overlay's mask")?;
+            self.overlay_mask = Some((mask, overlay.mask_px));
+        }
+        let (mask, _) = self.overlay_mask.as_ref().expect("the mask was just made");
+        let region: MTLRegion = MTLRegion {
+            origin: MTLOrigin { x: 0, y: 0, z: 0 },
+            size: MTLSize {
+                width: mask_w,
+                height: mask_h,
+                depth: 1,
+            },
+        };
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A READ PAST THE MASK WILL HAPPEN
+        unsafe {
+            mask.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                region,
+                0,
+                NonNull::new(overlay.mask.as_ptr() as *mut std::ffi::c_void)
+                    .expect("a mask's bytes"),
+                mask_w,
+            )
+        };
+        let scale: usize = (output_px.1 / (mask_h * OVERLAY_HEIGHT_PER_MASK))
+            .min((output_px.0 as f64 * OVERLAY_MAX_WIDTH_FRAC) as usize / mask_w)
+            .max(1);
+        let params: OverlayParams = OverlayParams {
+            dim_frac: overlay.dim_frac,
+            scale: scale as i32,
+            origin: [
+                (output_px.0 as i32 - (mask_w * scale) as i32) / 2,
+                (output_px.1 as i32 - (mask_h * scale) as i32) / 2,
+            ],
+        };
+        let (target, _) = self
+            .overlay_target
+            .as_ref()
+            .expect("the target was just made");
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .ok_or("Metal: no compute encoder")?;
+        encoder.setComputePipelineState(&self.apply_overlay);
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURES WILL HAPPEN
+        unsafe {
+            encoder.setTexture_atIndex(Some(frame), 0);
+            encoder.setTexture_atIndex(Some(mask), 1);
+            encoder.setTexture_atIndex(Some(target), 2);
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&params).cast(),
+                std::mem::size_of::<OverlayParams>(),
+                0,
+            );
+        }
+        dispatch_grid(&encoder, output_px);
+        encoder.endEncoding();
+        Ok(target.clone())
+    }
+
+    /// `render_to_layer` draws one frame straight into the next drawable of a window's
+    /// `CAMetalLayer`, upscaled with MetalFX to the drawable's size, with `overlay` drawn over it if
+    /// given, and presents it. It returns false if the layer had no drawable to give.
+    ///
+    /// Example: `renderer.render_to_layer(&data, &layer, None)?;`
+    pub fn render_to_layer(
+        &mut self,
+        data: FrameData,
+        layer: &CAMetalLayer,
+        overlay: Option<&Overlay>,
+    ) -> Result<bool> {
         let Some(drawable) = layer.nextDrawable() else {
             return Ok(false);
         };
         let target = drawable.texture();
         let output_px: (usize, usize) = (target.width(), target.height());
-        let (command_buffer, texture) = self.encode_frame(data, output_px)?;
+        let (command_buffer, frame_texture) = self.encode_frame(data, output_px)?;
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> = match overlay {
+            Some(overlay) => {
+                self.encode_overlay(&command_buffer, &frame_texture, overlay, output_px)?
+            }
+            None => frame_texture,
+        };
         let blit = command_buffer
             .blitCommandEncoder()
             .ok_or("Metal: no blit encoder")?;

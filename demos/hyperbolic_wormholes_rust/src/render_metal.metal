@@ -22,6 +22,11 @@
 #include <metal_stdlib>
 using namespace metal;
 
+constant float OVERLAY_TITLE_LEVEL = 0.75;
+constant float OVERLAY_TEXT_LEVEL = 0.25;
+constant float4 OVERLAY_TITLE_COLOR = float4(1.0, 0.35, 0.3, 1.0);
+constant float4 OVERLAY_TEXT_COLOR = float4(0.92, 0.94, 0.98, 1.0);
+
 constant int MAX_MOUTH_COUNT = __MAX_MOUTH_COUNT__;
 constant int ROW_TEXEL_COUNT = __ROW_TEXEL_COUNT__;
 constant int TEXEL_TO_WORLD = __TEXEL_TO_WORLD__;
@@ -1956,4 +1961,37 @@ kernel void build_mouth_fields(device float4 *rows [[buffer(0)]], constant Unifo
     }
     field[0] = get_others_gradient(scene, row, c, mouth);
     for (int i = 0; i < 4; i++) field[1 + i] = change[i];
+}
+
+/** @brief `OverlayParams` is how `apply_overlay` draws: how much to darken, mask pixels to screen pixels, and the mask's top left. */
+struct OverlayParams {
+    float dim_frac;
+    int scale;
+    int2 origin;
+};
+
+/**
+ * @brief `apply_overlay` copies a finished frame into `out` darkened by `dim_frac`, with a mask's text drawn over it at
+ * `scale` screen pixels per mask pixel from `origin`: the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
+ * the text's above `OVERLAY_TEXT_LEVEL` (render_metal.rs's `Overlay`, e.g. "YOU DIED" and a countdown).
+ * @par Example
+ * @code
+ * dispatched by render_metal.rs, one thread per output pixel.
+ * @endcode
+ */
+kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], texture2d<float, access::read> mask [[texture(1)]],
+                          texture2d<float, access::write> out [[texture(2)]], constant OverlayParams &p [[buffer(0)]],
+                          uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= out.get_width() || id.y >= out.get_height()) return;
+    float4 color = float4(frame.read(id).rgb * (1.0 - p.dim_frac), 1.0);
+    int2 offset = int2(id) - p.origin;
+    if (all(offset >= int2(0))) {
+        uint2 cell = uint2(offset / p.scale);
+        if (cell.x < mask.get_width() && cell.y < mask.get_height()) {
+            float level = mask.read(cell).r;
+            if (level > OVERLAY_TITLE_LEVEL) color = OVERLAY_TITLE_COLOR;
+            else if (level > OVERLAY_TEXT_LEVEL) color = OVERLAY_TEXT_COLOR;
+        }
+    }
+    out.write(color, id);
 }

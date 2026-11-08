@@ -67,8 +67,8 @@ make join-game SERVER=192.168.1.20
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from
   (the Terminal, say) when asked; without it, other computers can't reach the game and `auto` finds nothing.
 - Players start on a ring around spawn and see each other as coloured boxes, bent through the wormholes like
-  everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game; they
-  press `Enter` to rejoin at their spawn point.
+  everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
+  view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
 - Up to 8 players. The UDP port is 47800 (`PORT=` or `--port`); discovery uses 47801.
 - `--join <address> --bot --exit-after-s <seconds>` plays by itself without a window (it walks until another player
   is within 12 blocks, then turns toward them and fires), to test a game; it saves its view at each hit under

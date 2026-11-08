@@ -102,6 +102,14 @@ const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
 const SHOT_DURATION_S: f64 = 0.25;
+const RESPAWN_DELAY_S: f64 = 3.0;
+const DEATH_MASK_PX: (u32, u32) = (160, 24);
+const DEATH_TITLE_Y_PX: f32 = 2.0;
+const DEATH_COUNTDOWN_Y_PX: f32 = 14.0;
+const DEBUG_GLYPH_PX: f32 = 8.0;
+const DEATH_DIM_FRAC: f32 = 0.55;
+const DEATH_TITLE_MASK: u8 = 255;
+const DEATH_COUNTDOWN_MASK: u8 = 128;
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
@@ -1525,6 +1533,7 @@ struct Multiplayer {
     client: net::Client,
     server: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
     is_eliminated: bool,
+    respawn_in_s: f64,
 }
 
 impl Drop for Multiplayer {
@@ -1599,6 +1608,7 @@ impl Session {
                 client: net::Client::Connect(get_server_address(arguments)?)?,
                 server,
                 is_eliminated: false,
+                respawn_in_s: 0.0,
             })
         } else {
             None
@@ -1683,16 +1693,6 @@ impl Session {
                     self.player.velocity = glam::DVec4::ZERO;
                 }
                 Keycode::L => self.is_laser_on = !self.is_laser_on,
-                Keycode::Return => {
-                    if let Some(multiplayer) = &mut self.multiplayer
-                        && multiplayer.is_eliminated
-                    {
-                        multiplayer.is_eliminated = false;
-                        if let Err(error) = multiplayer.client.rejoin() {
-                            self.show_message(format!("Couldn't rejoin: {error}"));
-                        }
-                    }
-                }
                 Keycode::F => self.is_auto_forward = !self.is_auto_forward,
                 Keycode::R => self.player = Player::AtSpawn(&self.world),
                 Keycode::G => {
@@ -1752,6 +1752,18 @@ impl Session {
             return;
         }
         self.shot_time_s = (self.shot_time_s - dt_s).max(0.0);
+        if let Some(multiplayer) = &mut self.multiplayer
+            && multiplayer.is_eliminated
+        {
+            multiplayer.respawn_in_s -= dt_s;
+            if multiplayer.respawn_in_s <= 0.0 {
+                multiplayer.is_eliminated = false;
+                if let Err(error) = multiplayer.client.rejoin() {
+                    self.message = format!("Couldn't rejoin: {error}");
+                    self.message_time_s = MESSAGE_DURATION_S;
+                }
+            }
+        }
         if self.update_multiplayer() {
             self.message_time_s -= dt_s;
             self.hud_time_s += dt_s;
@@ -1821,7 +1833,7 @@ impl Session {
     }
 
     /// `update_multiplayer` reads the server's news: a welcome puts this player at its spawn
-    /// point, and a hit is announced (and, if this player was hit, it waits for Enter to rejoin).
+    /// point, and a hit is announced (and, if this player was hit, starts the respawn countdown).
     /// It returns whether this player is out of the game for now.
     ///
     /// Example: `if session.update_multiplayer() { return; }`
@@ -1856,11 +1868,12 @@ impl Session {
                 } => {
                     if is_self {
                         multiplayer.is_eliminated = true;
+                        multiplayer.respawn_in_s = RESPAWN_DELAY_S;
                         self.is_laser_on = false;
                         self.shot_time_s = 0.0;
                     }
                     messages.push(if is_self {
-                        format!("You were hit by player {shooter_id}; press Enter to rejoin")
+                        format!("You died: hit by player {shooter_id}")
                     } else {
                         format!("Player {victim_id} was hit by player {shooter_id}")
                     });
@@ -2061,6 +2074,21 @@ impl Session {
         true
     }
 
+    /// `get_death_lines` gives the two lines shown over the view while this player is out after a
+    /// hit ("YOU DIED" and the countdown to respawning), or `None`.
+    ///
+    /// Example: `if let Some(lines) = session.get_death_lines() { ... }`
+    fn get_death_lines(&self) -> Option<[String; 2]> {
+        let multiplayer: &Multiplayer = self.multiplayer.as_ref().filter(|m| m.is_eliminated)?;
+        Some([
+            "YOU DIED".to_string(),
+            format!(
+                "Respawning in {:.0}",
+                multiplayer.respawn_in_s.ceil().max(1.0)
+            ),
+        ])
+    }
+
     /// `get_hud_lines` gives the HUD's lines: speed, movement, laser, the last message and the
     /// controls.
     ///
@@ -2113,7 +2141,10 @@ impl Session {
         if let Some(multiplayer) = &self.multiplayer {
             lines.push(match multiplayer.client.id {
                 Some(id) => format!("player {id}, {} others", multiplayer.client.players.len()),
-                None if multiplayer.is_eliminated => "hit; press Enter to rejoin".to_string(),
+                None if multiplayer.is_eliminated => format!(
+                    "You died; respawning in {:.0} s",
+                    multiplayer.respawn_in_s.ceil()
+                ),
                 None => "joining".to_string(),
             });
         }
@@ -2152,6 +2183,60 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
         Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
         None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
     }
+}
+
+/// `make_death_mask` draws the death lines with SDL's built-in text into a `DEATH_MASK_PX` mask,
+/// one byte a pixel: `DEATH_TITLE_MASK` on the first line's text, `DEATH_COUNTDOWN_MASK` on the
+/// second's, 0 elsewhere, for the Metal overlay.
+///
+/// Example: `let mask = make_death_mask(&lines)?;`
+fn make_death_mask(lines: &[String; 2]) -> Result<Vec<u8>> {
+    let (width, height) = DEATH_MASK_PX;
+    let surface = sdl3::surface::Surface::new(width, height, PixelFormat::RGBA32)?;
+    let mut canvas = surface.into_canvas()?;
+    canvas.set_draw_color(Color::RGB(255, 255, 255));
+    for (line, y) in lines.iter().zip([DEATH_TITLE_Y_PX, DEATH_COUNTDOWN_Y_PX]) {
+        let x: f32 = (width as f32 - DEBUG_GLYPH_PX * line.len() as f32) / 2.0;
+        canvas.draw_debug_text(line.as_str(), (x, y))?;
+    }
+    canvas.present();
+    let surface = canvas.into_surface();
+    let pitch: usize = surface.pitch() as usize;
+    Ok(surface.with_lock(|pixels: &[u8]| {
+        (0..height as usize)
+            .flat_map(|y| (0..width as usize).map(move |x| (x, y)))
+            .map(|(x, y)| match pixels[y * pitch + x * BYTES_PER_PIXEL] {
+                0 => 0,
+                _ if (y as f32) < DEATH_COUNTDOWN_Y_PX => DEATH_TITLE_MASK,
+                _ => DEATH_COUNTDOWN_MASK,
+            })
+            .collect()
+    }))
+}
+
+/// `draw_death_overlay` dims the canvas and draws the death lines large in its middle, for the
+/// SDL-renderer window.
+///
+/// Example: `draw_death_overlay(&mut canvas, &lines)?;`
+fn draw_death_overlay(canvas: &mut sdl3::render::WindowCanvas, lines: &[String; 2]) -> Result<()> {
+    let (width, height) = canvas.window().size_in_pixels();
+    let scale: f32 = (height / DEATH_MASK_PX.1 / 2).max(1) as f32 / 2.0;
+    canvas.set_scale(1.0, 1.0)?;
+    canvas.set_blend_mode(sdl3::render::BlendMode::Blend);
+    canvas.set_draw_color(Color::RGBA(0, 0, 0, (DEATH_DIM_FRAC * 255.0) as u8));
+    canvas.fill_rect(None)?;
+    canvas.set_scale(scale, scale)?;
+    for (line, y) in lines.iter().zip([DEATH_TITLE_Y_PX, DEATH_COUNTDOWN_Y_PX]) {
+        canvas.set_draw_color(if y == DEATH_TITLE_Y_PX {
+            Color::RGB(255, 90, 80)
+        } else {
+            HUD_COLOR
+        });
+        let x: f32 = (width as f32 / scale - DEBUG_GLYPH_PX * line.len() as f32) / 2.0;
+        let top: f32 = (height as f32 / scale - DEATH_MASK_PX.1 as f32) / 2.0;
+        canvas.draw_debug_text(line.as_str(), (x, top + y))?;
+    }
+    Ok(())
 }
 
 /// `play_on_canvas` runs the window through SDL's renderer: each frame is drawn into pixels, put
@@ -2228,6 +2313,9 @@ fn play_on_canvas(
                 (HUD_MARGIN_PX, HUD_MARGIN_PX + HUD_LINE_PX * i as f32),
             )?;
         }
+        if let Some(lines) = session.get_death_lines() {
+            draw_death_overlay(&mut canvas, &lines)?;
+        }
         canvas.present();
     }
 }
@@ -2281,7 +2369,17 @@ fn play_on_layer(
         let render_px: (u32, u32) = session.get_render_size(window_px);
         let render_start: Instant = Instant::now();
         let packed: PackedFrame = session.pack(render_px);
-        if metal.render_to_layer(packed.as_frame_data(), layer)? {
+        let death_mask: Option<Vec<u8>> = session
+            .get_death_lines()
+            .map(|lines| make_death_mask(&lines))
+            .transpose()?;
+        let overlay: Option<render_metal::Overlay> =
+            death_mask.as_deref().map(|pixels| render_metal::Overlay {
+                mask: pixels,
+                mask_px: (DEATH_MASK_PX.0 as usize, DEATH_MASK_PX.1 as usize),
+                dim_frac: DEATH_DIM_FRAC,
+            });
+        if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(
                 render_start.elapsed().as_secs_f64() * MS_PER_S,
                 Some(metal.last_gpu_ms),

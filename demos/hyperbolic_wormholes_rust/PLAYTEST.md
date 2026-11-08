@@ -43,7 +43,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - When macOS asks, allow Local Network access (for Terminal or whichever app runs the game) and allow incoming
   connections. Without that, nobody can reach the game.
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
-- Up to 8 players. A laser that reaches another player removes them; they press `Enter` to rejoin at their spawn.
+- Up to 8 players. A laser that reaches another player removes them: their view darkens, says "YOU DIED" with a
+  countdown, and they come back at their spawn 3 seconds later.
 
 Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints,
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), `H` toggles flying (`Space`/`E` and `Q` go up and down), click to shoot (a
