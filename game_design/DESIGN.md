@@ -329,8 +329,8 @@ Every key here is the default. Each player can rebind any action, in the menu or
   250 m/s, and each point of it fades soon after the front passes.
 - Warp objects bend lasers as they bend light, and lasers pass through wormholes.
 - Glass lets light through. On Lunar Surface the windows let lasers through too.
-- A player moving through a wormhole's throat sees the world Doppler-shift for a split second, as if moving near
-  light speed: toward a pale light cyan walking forward, a darker red walking backward, stronger nearer the throat
+- A player moving through a wormhole's throat sees the world's colours shift for a moment, as if moving near light
+  speed: a crisp light cyan, almost white, walking forward, a dark red walking backward, stronger nearer the throat
   and faster, none standing still or outside the throat's region. Only that player sees it.
 - A shot that hits the ground throws up dust and a puff of mist where it lands, which every player
   sees. The grains fly up a few meters and fall back, and all of it fades within 2 s.
