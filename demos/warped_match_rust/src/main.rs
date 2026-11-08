@@ -1352,10 +1352,15 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         "  make join-game MAP={map} PORT={port}  (finds this server on the network by itself)"
     );
     println!("  make join-game MAP={map} SERVER=127.0.0.1 PORT={port}  (on this computer)");
-    if !consoles.is_empty() {
-        println!(
+    match (&arguments.level_result_file, consoles.is_empty()) {
+        (_, true) => {}
+        (Some(path), false) => println!(
+            "A team wins by turning off the other team's consoles; the winner goes to {}.",
+            path.display()
+        ),
+        (None, false) => println!(
             "A team wins by turning off the other team's consoles; then press Enter here for a new game."
-        );
+        ),
     }
     match arguments.exit_after_s {
         Some(seconds) => std::thread::sleep(Duration::from_secs_f64(seconds)),
@@ -1504,6 +1509,7 @@ fn bench_voxel_views(
             "median_ms": times_ms[times_ms.len() / 2],
             "fastest_ms": times_ms[0],
             "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
+            "p99_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() * 99 / 100),
             "laser": shot.as_ref().map(|s| multiplayer::describe_shot(world, s)),
         }));
     }
@@ -2645,7 +2651,8 @@ impl Gun {
 
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
 /// started with `--host`, whether this player was hit and waits to rejoin, the number of the game
-/// it plays, and the console this player holds `E` on, with the seconds held.
+/// it plays, the console this player holds `E` on, with the seconds held, and the team `--team`
+/// asked for, joined once the window has loaded (`join_after_loading`).
 struct Multiplayer {
     client: net::Client,
     server: Option<Child>,
@@ -2653,6 +2660,7 @@ struct Multiplayer {
     respawn_in_s: f64,
     game_number: u32,
     disabling: Option<(u8, f64)>,
+    team_after_loading: Option<u32>,
 }
 
 impl Drop for Multiplayer {
@@ -2739,21 +2747,18 @@ impl Session {
             } else {
                 None
             };
-            let mut client: net::Client = net::Client::Connect(
-                get_server_address(arguments)?,
-                arguments.map.get_folder_name(),
-                &net::read_game_password(arguments.game_password_file.as_deref())?,
-            )?;
-            if let Some(team) = get_team_index(arguments) {
-                client.join(Some(team))?;
-            }
             Some(Multiplayer {
-                client,
+                client: net::Client::Connect(
+                    get_server_address(arguments)?,
+                    arguments.map.get_folder_name(),
+                    &net::read_game_password(arguments.game_password_file.as_deref())?,
+                )?,
                 server,
                 is_eliminated: false,
                 respawn_in_s: 0.0,
                 game_number: 0,
                 disabling: None,
+                team_after_loading: get_team_index(arguments),
             })
         } else {
             None
@@ -3644,6 +3649,20 @@ impl Session {
             .as_ref()
             .and_then(|m| m.client.team)
             .unwrap_or(0)
+    }
+
+    /// `join_after_loading` joins the team `--team` asked for, once the window has loaded its
+    /// textures, shaders and guns: joining earlier let a slow load keep this player silent past the
+    /// server's timeout, which dropped them for good.
+    ///
+    /// Example: `session.join_after_loading()?;`
+    fn join_after_loading(&mut self) -> Result<()> {
+        if let Some(multiplayer) = &mut self.multiplayer
+            && let Some(team) = multiplayer.team_after_loading.take()
+        {
+            multiplayer.client.join(Some(team))?;
+        }
+        Ok(())
     }
 
     /// `is_in_lobby` says whether this player is on a server and hasn't chosen a team yet.
@@ -5300,6 +5319,7 @@ fn play_on_canvas(
     let mut texture: Option<(Texture, (u32, u32))> = None;
     let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
     let mut pixels: Vec<u8> = Vec::new();
+    session.join_after_loading()?;
     loop {
         for event in event_pump.poll_iter() {
             if !session.handle_event(event, canvas.window(), &mouse) {
@@ -5462,8 +5482,9 @@ fn play_on_layer(
             let done_frac: f32 = loading_step_index as f32 / loading_steps.len() as f32;
             let label: &str = step.map_or(LOADING_DONE_LABEL, render_metal::LoadingStep::get_label);
             draw_loading_screen(metal, layer, done_frac, label)?;
-            if let Some(step) = step {
-                metal.load(step)?;
+            match step {
+                Some(step) => metal.load(step)?,
+                None => session.join_after_loading()?,
             }
             loading_step_index += 1;
             continue;
@@ -5551,6 +5572,7 @@ mod tests {
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Gun in hand | laser (the bolt-action rifle), rifle (the revolver) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
+    //! | Window with `--team` | before loading (only asks the lobby), after loading (joins) | `windows_join_their_team_only_after_loading` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
     //! | Gun model swaying | the bolt-action rifle (full swing), the revolver (its swing scaled by its length) | `guns_sway_with_the_steps_by_their_length` |
     //! | Stepping fraction | standing (0: no sway), easing in (0.5: half), stepping (1) | `guns_sway_with_the_steps_by_their_length` |
@@ -5642,6 +5664,32 @@ mod tests {
             sway(revolver, 1.0, 1.0, right_rad),
             (sprint_m, sprint_rad * length_frac)
         ));
+    }
+
+    #[test]
+    fn windows_join_their_team_only_after_loading() {
+        const LOBBY_QUERY_KIND: u8 = 9;
+        const JOIN_KIND: u8 = 1;
+        const LISTEN_MS: u64 = 300;
+        const DATAGRAM_BYTES: usize = 4096;
+        let server = std::net::UdpSocket::bind("127.0.0.1:0").expect("a socket");
+        server
+            .set_read_timeout(Some(Duration::from_millis(LISTEN_MS)))
+            .expect("a timeout");
+        let port: u16 = server.local_addr().expect("an address").port();
+        let command_line: String = format!(
+            "x --join 127.0.0.1 --port {port} --team red --map house-demo --player-settings {}",
+            "player_settings.yaml"
+        );
+        let arguments: Arguments =
+            Arguments::try_parse_from(command_line.split(' ')).expect("arguments");
+        let mut session: Session = Session::New(&arguments).expect("a session");
+        let mut buffer: [u8; DATAGRAM_BYTES] = [0; DATAGRAM_BYTES];
+        let mut receive_kind = || server.recv_from(&mut buffer).ok().map(|_| buffer[0]);
+        assert_eq!(receive_kind(), Some(LOBBY_QUERY_KIND));
+        assert_eq!(receive_kind(), None);
+        session.join_after_loading().expect("a join");
+        assert_eq!(receive_kind(), Some(JOIN_KIND));
     }
 
     #[test]

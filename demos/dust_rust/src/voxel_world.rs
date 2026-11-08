@@ -42,6 +42,9 @@ use crate::zone_walls::ZoneWalls;
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
 pub const MARKER_NAME: &str = "a thrown wormhole";
+/// `FOG_DEPTHS` is how many of a fog's e-folding distances past its start a ray goes before it
+/// ends in the fog (5: the fog hides all but 0.7% of what lies beyond).
+pub const FOG_DEPTHS: f64 = 5.0;
 const MAX_MARKER_COUNT: usize = 16;
 const FIRST_GAME_MATERIAL: usize = AVATAR_FIRST_MATERIAL - MAX_MARKER_COUNT;
 const BOUND_MARGIN_M: f64 = 0.2;
@@ -708,6 +711,24 @@ fn find_material(map: &Map, name: &str) -> i32 {
         .map_or(-1, |m| i32::from(m.id))
 }
 
+/// `make_terrain` reads a map's terrain and bakes its height everywhere a ray from inside the
+/// map's boundary reaches before the fog ends it (`FOG_DEPTHS`); a map without a boundary or fog
+/// keeps it unbaked.
+///
+/// Example: `let terrain = make_terrain(&map);`
+fn make_terrain(map: &Map) -> Option<Terrain> {
+    let terrain: Terrain = Terrain::FromMap(map.ground.terrain.as_ref()?);
+    let boundary = map.regions.as_ref().and_then(|r| r.boundary.as_ref());
+    let fog: Option<Fog> = map.atmosphere.and_then(|a| a.fog);
+    Some(match (boundary, fog) {
+        (Some(boundary), Some(fog)) => {
+            let reach_m: f64 = fog.start_m + FOG_DEPTHS * fog.distance_m;
+            terrain.bake_heights([boundary.u_m + reach_m, boundary.v_m + reach_m])
+        }
+        _ => terrain,
+    })
+}
+
 /// `make_structure` gives a structure of `shapes` (starting at `first_shape` in the world's list)
 /// drawn as `mesh` (its index in the world's meshes and the model) if it has one, in `frame`,
 /// with a bounding sphere around the corners of their boxes plus `BOUND_MARGIN_M`.
@@ -957,7 +978,7 @@ impl VoxelWorld {
         let mut world: VoxelWorld = VoxelWorld {
             name: map.name.clone(),
             r,
-            terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
+            terrain: make_terrain(map),
             wind: map
                 .atmosphere
                 .and_then(|a| a.wind)

@@ -911,10 +911,7 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
-            println!(
-                "The {} team won. Press Enter here to start a new game.",
-                TEAM_NAMES[winner as usize]
-            );
+            println!("The {} team won.", TEAM_NAMES[winner as usize]);
         }
     }
 
@@ -1021,7 +1018,8 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 ///
 /// Example: `write_level_result(Path::new("round_1.json"), 0)?;`
 fn write_level_result(path: &std::path::Path, winner: u32) -> Result<()> {
-    let partial: std::path::PathBuf = path.with_extension("partial");
+    let mut partial: std::ffi::OsString = path.as_os_str().to_owned();
+    partial.push(".partial");
     let team: &str = TEAM_NAMES[winner as usize];
     std::fs::write(&partial, format!("{{\"winner\": \"{team}\"}}\n"))?;
     std::fs::rename(&partial, path)?;
@@ -1100,6 +1098,9 @@ pub fn serve(
         if let (Some(winner), None, Some(path)) = (server.game.winner, won_at, level_result_file) {
             write_level_result(path, winner)?;
         }
+        if server.game.winner.is_some() && won_at.is_none() && level_result_file.is_none() {
+            println!("Press Enter here to start a new game.");
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
             && time.elapsed() >= delay
@@ -1108,6 +1109,9 @@ pub fn serve(
         }
         if should_start_new_game.swap(false, Ordering::Relaxed) {
             match server.game.winner {
+                Some(_) if level_result_file.is_some() => {
+                    println!("This level's result is written; the match server ends it.");
+                }
                 Some(_) => server.start_new_game(),
                 None => println!("No team has won yet, so the game goes on."),
             }
@@ -1656,6 +1660,7 @@ mod tests {
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
+    //! | Level result file's neighbours | one named like it without its extension, plus `.partial` (left alone) | `level_results_leave_files_named_like_them_alone` |
 
     use super::*;
     use crate::geometry::{AXIS_X, AXIS_Z, make_boost, make_rotation};
@@ -2227,6 +2232,28 @@ mod tests {
         assert_eq!(shoot(&mut server, 1, 50_001), 1.0);
         send_wormholes(&mut server, PlayerWormholes::default());
         assert_eq!(server.slots[1].wormhole_damage_frac, 0.0);
+    }
+
+    #[test]
+    fn level_results_leave_files_named_like_them_alone() {
+        let folder: std::path::PathBuf =
+            std::env::temp_dir().join(format!("match_level_result_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let neighbour: std::path::PathBuf = folder.join("round_1.partial");
+        std::fs::write(&neighbour, "another file").expect("a neighbour");
+        write_level_result(&folder.join("round_1.json"), 1).expect("a result");
+        let result: Option<String> = std::fs::read_to_string(folder.join("round_1.json")).ok();
+        let neighbour_text: Option<String> = std::fs::read_to_string(&neighbour).ok();
+        let is_partial_left: bool = folder.join("round_1.json.partial").exists();
+        std::fs::remove_dir_all(&folder).expect("cleaned up");
+        assert_eq!(
+            (
+                result.as_deref(),
+                neighbour_text.as_deref(),
+                is_partial_left
+            ),
+            (Some("{\"winner\": \"red\"}\n"), Some("another file"), false)
+        );
     }
 
     #[test]

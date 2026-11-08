@@ -92,7 +92,8 @@ is in [`AGENTS.md`](AGENTS.md).
   ideas I've described and just do the simplest possible version of it. You can start with a very small map for each
   one, and then we're going to want to go on based on feedback." The four maps are W-119 (City Sphere demo), W-120
   (Snow Planet demo), W-121 (Dust demo) and W-122 (Dark Forest demo).
-  Merged into `staging/user-4gatepylon` with #393, #396, #397, #399, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #393, #396, #397, #399, 2026-11-08. Correctness checks of every level
+  and their fixes: #419, #418; frame times of every level on a real Mac: #422.
 - [?] **W-119 City Sphere demo.** Part of W-124 (four map demos), the satellite city: "Ideally it can be like a sphere,
   where you walk and the roof is like glass or something, and then you can also go up onto the glass level, and
   there's also going to be like obstacles and stuff, but there's going to be no roof on the glass level. On the glass
@@ -120,7 +121,8 @@ is in [`AGENTS.md`](AGENTS.md).
   should kind of bend in the direction of the wind. There will be no black hole there, but there will still be
   wormholes, and obviously, players can place wormholes. And obviously, that one's also hyperbolic, unlike the other
   ones."
-  Merged into `staging/user-4gatepylon` with #393, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #393, 2026-11-08. Speed: #420 bakes the terrain's height, so every
+  bench view is under 16.7 ms at 2560×1440 with the same pictures (open, 2026-11-08).
 - [?] **W-122 Dark Forest demo.** Part of W-124 (four map demos): "I want it to just be kind of just like a normal
   forest. This is just that one's going to be just kind of a normal first-person shooter. Maybe one difference there
   is just to have it have verticality, similar to the Star Wars Endor or whatever, maybe the Wookiee Planet, where

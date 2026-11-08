@@ -911,10 +911,7 @@ impl Server {
         {
             let winner: u32 = (loser + 1) % TEAM_NAMES.len() as u32;
             self.game.winner = Some(winner);
-            println!(
-                "The {} team won. Press Enter here to start a new game.",
-                TEAM_NAMES[winner as usize]
-            );
+            println!("The {} team won.", TEAM_NAMES[winner as usize]);
         }
     }
 
@@ -1102,6 +1099,9 @@ pub fn serve(
         server.update_consoles();
         if let (Some(path), Some(winner), None) = (&level_result_path, server.game.winner, won_at) {
             write_level_result(path, winner)?;
+        }
+        if server.game.winner.is_some() && won_at.is_none() && level_result_path.is_none() {
+            println!("Press Enter here to start a new game.");
         }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
         if level_result_path.is_some() {
