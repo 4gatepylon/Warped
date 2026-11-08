@@ -23,7 +23,7 @@ Only standard, widely deployed cryptography, through one maintained library; not
 | X25519 (Curve25519 Diffie-Hellman) | fresh keys for each session, so a password leaked later can't decrypt recorded games (forward secrecy) | TLS 1.3 (most HTTPS connections), SSH, Signal, WireGuard |
 | ChaCha20-Poly1305 (RFC 8439) | encrypts each datagram and detects any change to it (an AEAD cipher) | TLS 1.3, QUIC (HTTP/3), WireGuard, SSH |
 | SHA-256, HKDF (RFC 5869) | hashing inside Noise; turning the password into a 32-byte key | everywhere |
-| [`snow`](https://docs.rs/snow) 0.10 (Rust) | implements Noise, including a "stateless" transport mode made for UDP, where the sender numbers each datagram | the standard Rust implementation of Noise; pure Rust, builds on Linux |
+| [`snow`](https://docs.rs/snow) 0.10 (Rust) | implements Noise, including a "stateless" transport mode made for UDP, where the sender numbers each datagram | the most used Rust implementation of Noise (about 1,100 GitHub stars, 600 commits since 2017, tested against the Noise test vectors and fuzzed). It has had **no formal audit** of its own. The ciphers it runs by default are the RustCrypto `chacha20poly1305` and `sha2` crates and `curve25519-dalek`, pure Rust, so the server still builds for Linux with the infra stack's musl target. |
 
 ### The game password
 
