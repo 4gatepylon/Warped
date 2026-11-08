@@ -8,13 +8,10 @@
 //! - `--render-scale <fraction>`: fraction of the window's pixels (per side) to render.
 //! - `--bench-views`: render fixed views without a window, time them, and save them under
 //!   `.artifacts/bench_views/<run_id>/`. `--frame-count`, `--width-px`, `--height-px` set it up.
-//! - `--autopilot`: play a scripted route without a window at a fixed time step, and save frames,
-//!   timings and events under `.artifacts/autopilot/<run_id>/`. `--snapshot-every` sets how often.
 //! - `--json`: print results as one JSON object. `--label`: suffix for the run folder.
 //! - `--exit-after-s <seconds>`: close the window after that long and print its frame rate.
 //! - `--host`, `--join auto|<address>`, `--serve`, `--bot`, `--port`: play with others on the local
 //!   network (see `net.rs` and `multiplayer.rs`).
-//! - `--export-map <folder>`: write the world as a portable map (`common/maps/`).
 //! - `--black-hole-strength <0..1>`: on lunar-surface, force the black hole's strength (W-68).
 //!
 //! Example: `cargo run --release -- --bench-views --width-px 2560 --height-px 1600`
@@ -34,13 +31,14 @@ mod geometry;
 mod hud_bars;
 mod key_bindings;
 mod map;
-mod map_export;
 mod map_layout;
 mod menu;
 mod mesh;
 mod minimap;
 mod multiplayer;
 mod net;
+// The house engine, whose tools are gone; the next layers delete what play still uses of it.
+#[allow(dead_code)]
 mod physics;
 mod render_cpu;
 mod render_mesh;
@@ -59,6 +57,8 @@ mod viewmodel;
 mod voxel_clearance;
 mod voxel_textures;
 mod voxel_world;
+// The house engine, whose tools are gone; the next layers delete what play still uses of it.
+#[allow(dead_code)]
 mod world;
 mod zone_walls;
 
@@ -73,7 +73,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, ValueEnum};
-use glam::{DMat4, DVec3, DVec4, EulerRot, Mat3, Vec3};
+use glam::{DMat4, DVec4, EulerRot, Mat3, Vec3};
 use objc2_core_foundation::CGSize;
 use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
@@ -84,7 +84,7 @@ use sdl3::render::Texture;
 use serde_json::{Value, json};
 
 use black_hole_growth::BlackHoleGrowth;
-use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
+use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, make_boost, make_rotation};
 use key_bindings::{Action, Control};
 use map::MapName;
 use physics::{Input, LaserReport, Player};
@@ -96,7 +96,7 @@ use thrown_wormholes::{
     HIT_FLASH_COLOR, Marker, MouthPlace, PlayerWormholes, ThrownWormholes, fly_throw,
 };
 use voxel_world::{VoxelPlayer, VoxelWorld};
-use world::{DEFAULT_CURVATURE_RADIUS_M, EYE_HEIGHT_M, World};
+use world::{EYE_HEIGHT_M, World};
 
 /// `Result` is this program's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -115,12 +115,8 @@ const RENDER_SCALE_ROUNDING: f64 = 1e-6;
 const RENDER_SCALE_STEP: f64 = 1.25;
 const MIN_RENDER_SCALE: f64 = 0.05;
 const MAX_FRAME_DT_S: f64 = 0.05;
-const AUTOPILOT_DT_S: f64 = 1.0 / 60.0;
 const HUD_PERIOD_S: f64 = 0.25;
 const ROUTE_WARMUP_FRAME_COUNT: usize = 5;
-const TOUR_FRAMES_PER_MOUTH: usize = 300;
-const TOUR_FAR_M: f64 = 5.0;
-const TOUR_NEAR_M: f64 = 0.45;
 const TOUR_YAW_RAD: f64 = 0.8;
 const TOUR_PITCH_RAD: f64 = 0.4;
 const TOUR_YAW_TURNS: f64 = 2.0;
@@ -175,7 +171,8 @@ const TITLE_FRAME_MS: u64 = 16;
 const DEBUG_GLYPH_PX: f32 = 8.0;
 const DEATH_DIM_FRAC: f32 = 0.55;
 const SERVER_SILENT_S: f64 = 2.0;
-const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views, --autopilot, --play-route and --export-map.";
+const LOCAL_PLAY_OFF: &str = "Playing is only on a game server now: start one with `make serve-game` (--serve) and join it with `make join-game SERVER=<address> PORT=<port>` (--join <address>). Without a server, only the tools run: --bench-views and --play-route.";
+const HOUSE_IN_DEMO: &str = "The house demo plays only in demos/hyperbolic_wormholes_rust/ now (make -C demos/hyperbolic_wormholes_rust join-game MAP=house-demo); the game plays lunar-surface.";
 const MENU_DIM_FRAC: f32 = 0.8;
 const MAP_AREA_MIN_MASK_PX: [i32; 2] = [8, 28];
 const MAP_AREA_MAX_EXCL_MASK_PX: [i32; 2] = [504, 306];
@@ -208,12 +205,6 @@ const WAND_BLUE_TIP_COLOR: [f32; 4] = [0.35, 0.68, 1.0, 1.0];
 const WAND_RED_TIP_COLOR: [f32; 4] = [1.0, 0.28, 0.14, 1.0];
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
-const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
-const NEAR_VIEW_DISTANCE_M: f64 = 2.5;
-const SIDE_VIEW_DISTANCE_M: f64 = 0.4;
-const SIDE_VIEW_YAW_RAD: f64 = std::f64::consts::FRAC_PI_2;
-const THROAT_APPROACH_STEP_M: f64 = 0.1;
-const MAX_APPROACH_STEP_COUNT: usize = 2000;
 const SECONDS_PER_DAY: u64 = 86_400;
 const DISCOVERY_TIMEOUT_S: u64 = 5;
 const JOIN_AUTO: &str = "auto";
@@ -235,13 +226,9 @@ enum Sampling {
     EveryPixel,
 }
 
-/// `RouteKind` is which route `--play-route` plays: the house's scripted legs, a tour around each
-/// of its mouths from 5 blocks to just outside its throat and back, or (on a voxel map) a tour
-/// around each warp object.
+/// `RouteKind` is which route `--play-route` plays: a tour around each warp object.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum RouteKind {
-    Legs,
-    MouthTour,
     WarpTour,
 }
 
@@ -266,24 +253,18 @@ struct Arguments {
     #[arg(long)]
     render_scale: Option<f64>,
     /// Render fixed views without a window, time them and save them under .artifacts/bench_views/.
-    #[arg(long, conflicts_with = "autopilot")]
-    bench_views: bool,
-    /// Play a scripted route without a window and save frames and timings under .artifacts/autopilot/.
     #[arg(long)]
-    autopilot: bool,
-    /// Image width for --bench-views and --autopilot, and the window's starting width (in screen
+    bench_views: bool,
+    /// Image width for --bench-views, and the window's starting width (in screen
     /// points, which are pixels on a 1x display).
     #[arg(long, default_value_t = 1280)]
     width_px: u32,
-    /// Image height for --bench-views and --autopilot, and the window's starting height.
+    /// Image height for --bench-views, and the window's starting height.
     #[arg(long, default_value_t = 800)]
     height_px: u32,
     /// Timed frames per view for --bench-views.
     #[arg(long, default_value_t = 10)]
     frame_count: u32,
-    /// Save every n-th --autopilot frame as a PNG.
-    #[arg(long, default_value_t = 30)]
-    snapshot_every: u32,
     /// Print results as one JSON object.
     #[arg(long)]
     json: bool,
@@ -295,24 +276,23 @@ struct Arguments {
     exit_after_s: Option<f64>,
     /// Play the scripted route in the window, one 1/60 s step per frame, instead of taking input,
     /// then close it and print frame-time statistics (to check the window's frame rate in motion).
-    #[arg(long, conflicts_with_all = ["bench_views", "autopilot"])]
+    #[arg(long, conflicts_with = "bench_views")]
     play_route: bool,
-    /// Which route --play-route plays: the scripted legs, or a tour circling every mouth from 5
-    /// blocks to just outside its throat and back while the view swings around (both on the
-    /// house), or on a voxel map a tour circling each warp object the same way (`warp-tour`).
-    #[arg(long, value_enum, default_value_t = RouteKind::Legs)]
+    /// Which route --play-route plays: a tour circling each warp object, from near to far and
+    /// back, while the view swings around.
+    #[arg(long, value_enum, default_value_t = RouteKind::WarpTour)]
     route: RouteKind,
     /// Host a game on the local network: start a game server as its own process (as --serve,
     /// without a window), play in it, and stop it when this window closes.
-    #[arg(long, conflicts_with_all = ["join", "serve", "bench_views", "autopilot", "play_route"])]
+    #[arg(long, conflicts_with_all = ["join", "serve", "bench_views", "play_route"])]
     host: bool,
     /// Join a game on the local network: `auto` to find one, or a server's IP address (with an
     /// optional :port).
-    #[arg(long, conflicts_with_all = ["serve", "bench_views", "autopilot", "play_route"])]
+    #[arg(long, conflicts_with_all = ["serve", "bench_views", "play_route"])]
     join: Option<String>,
     /// Run only a game server, without a window, until --exit-after-s (or until stopped); it
     /// prints this computer's address and the command that joins it.
-    #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route"])]
+    #[arg(long, conflicts_with_all = ["bench_views", "play_route"])]
     serve: bool,
     /// With --join and --exit-after-s: play by itself without a window (walk, aim at the nearest
     /// player and fire), to test a game; saves its view under .artifacts/bot/ at each hit.
@@ -336,7 +316,7 @@ struct Arguments {
     #[arg(long)]
     player_settings: Option<PathBuf>,
     /// Which map to play, from common/maps/.
-    #[arg(long, value_enum, default_value_t = MapName::HouseDemo)]
+    #[arg(long, value_enum, default_value_t = MapName::LunarSurface)]
     map: MapName,
     /// With --map lunar-surface: start the window at one of the level's viewpoints (as
     /// --bench-views names them), e.g. black_hole.
@@ -346,10 +326,6 @@ struct Arguments {
     /// instead of following the consoles (W-68).
     #[arg(long)]
     black_hole_strength: Option<f64>,
-    /// Write the world as a map in the portable format of common/maps/ (map.json) into this folder,
-    /// replacing the folder's map.json, and exit.
-    #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
-    export_map: Option<PathBuf>,
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -504,10 +480,8 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         )
         .into());
     }
-    if arguments.frame_count == 0 || arguments.snapshot_every == 0 {
-        return Err(
-            "--frame-count and --snapshot-every must be at least 1; e.g. --frame-count 10".into(),
-        );
+    if arguments.frame_count == 0 {
+        return Err("--frame-count must be at least 1; e.g. --frame-count 10".into());
     }
     if arguments.view.is_some() && arguments.map != MapName::LunarSurface {
         return Err(
@@ -522,16 +496,8 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         )
         .into());
     }
-    if arguments.map == MapName::LunarSurface
-        && (arguments.autopilot || (arguments.play_route && arguments.route != RouteKind::WarpTour))
-    {
-        return Err("--autopilot and the house's routes need --map house-demo; on lunar-surface use --play-route --route warp-tour".into());
-    }
-    if arguments.map == MapName::HouseDemo
-        && arguments.play_route
-        && arguments.route == RouteKind::WarpTour
-    {
-        return Err("--route warp-tour is for voxel maps; use --map lunar-surface".into());
+    if arguments.map == MapName::HouseDemo {
+        return Err(HOUSE_IN_DEMO.into());
     }
     if arguments.host {
         return Err(LOCAL_PLAY_OFF.into());
@@ -539,9 +505,7 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
     let is_window_without_server: bool = arguments.join.is_none()
         && !arguments.serve
         && !arguments.bench_views
-        && !arguments.autopilot
-        && !arguments.play_route
-        && arguments.export_map.is_none();
+        && !arguments.play_route;
     if is_window_without_server {
         return Err(LOCAL_PLAY_OFF.into());
     }
@@ -574,9 +538,9 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
     Ok(())
 }
 
-/// `main` validates the command line and runs the window, the benchmark or the autopilot.
+/// `main` validates the command line and runs the server, the window or the benchmark.
 ///
-/// Example: `cargo run --release -- --autopilot`
+/// Example: `cargo run --release -- --bench-views`
 fn main() -> ExitCode {
     let is_title_screen: bool = std::env::args_os().len() == 1;
     let result: Result<()> = if is_title_screen {
@@ -597,18 +561,12 @@ fn main() -> ExitCode {
     }
 }
 
-/// `run` validates the command line and runs what it asks for: the window, a server, the bot, the
-/// benchmark or the autopilot.
+/// `run` validates the command line and runs what it asks for: the window, a server, the bot or
+/// the benchmark.
 ///
 /// Example: `run(Arguments::parse())?;`
 fn run(arguments: Arguments) -> Result<()> {
     validate_arguments(&arguments)?;
-    if let Some(folder) = &arguments.export_map {
-        let world: World = World::Build(DEFAULT_CURVATURE_RADIUS_M);
-        let path: PathBuf = map_export::export_map(&world, folder)?;
-        println!("Wrote {}", path.display());
-        return Ok(());
-    }
     if arguments.serve {
         return serve_only(&arguments);
     }
@@ -623,8 +581,6 @@ fn run(arguments: Arguments) -> Result<()> {
         run_bot(&arguments, renderer)
     } else if arguments.bench_views {
         bench_views(&arguments, renderer)
-    } else if arguments.autopilot {
-        run_autopilot(&arguments, renderer)
     } else {
         play(&arguments, renderer)
     }
@@ -816,14 +772,6 @@ fn load_map(name: MapName, settings: &ServerSettings) -> Result<map::Map> {
         map.scale_curvature(settings.space.curvature_per_map_curvature)?;
     }
     Ok(map)
-}
-
-/// `load_world` loads a map from `common/maps/` (`load_map`) as the world of boxes and mouths
-/// this renderer draws.
-///
-/// Example: `let world = load_world(MapName::HouseDemo, &ServerSettings::Builtin())?;`
-fn load_world(name: MapName, settings: &ServerSettings) -> Result<World> {
-    Ok(World::FromMap(&load_map(name, settings)?)?)
 }
 
 /// `parse_server_address` reads `--join`'s address: an IP address with an optional port (`port`
@@ -1323,32 +1271,6 @@ fn pack_view(
     )
 }
 
-/// `render_view` packs and renders the scene for a camera at `render_px`, delivered at
-/// `output_px`, and returns the laser report.
-///
-/// Example: `let report = render_view(&world, frame, true, (1280, 800), (2560, 1600), 0.0, renderer, &mut pixels)?;`
-#[allow(clippy::too_many_arguments)]
-fn render_view(
-    world: &World,
-    frame: DMat4,
-    is_laser_on: bool,
-    render_px: (u32, u32),
-    output_px: (u32, u32),
-    time_s: f64,
-    renderer: &mut dyn Renderer,
-    pixels: &mut [u8],
-) -> Result<Option<LaserReport>> {
-    let (data, report) = pack_view(
-        world,
-        frame,
-        is_laser_on.then_some(frame),
-        render_px,
-        time_s,
-    );
-    renderer.render(FrameData::House(&data), output_px, pixels)?;
-    Ok(report)
-}
-
 /// `describe_laser` turns a laser report into one line for the HUD and results.
 ///
 /// Example: `let text = describe_laser(&report);`
@@ -1364,153 +1286,13 @@ fn describe_laser(report: &LaserReport) -> String {
     }
 }
 
-/// `View` is a named camera for the benchmark.
-struct View {
-    name: &'static str,
-    frame: DMat4,
-    is_laser_on: bool,
-}
-
-/// `make_bench_views` makes the benchmark's cameras: spawn, aimed at mouth 1A, a few blocks from it,
-/// right at its throat, above the rails, high above spawn, looking sideways just outside 1A's
-/// throat (where some rays stay trapped circling it), and aimed at 1A with the laser on.
-///
-/// Example: `let views = make_bench_views(&world);`
-fn make_bench_views(world: &World) -> Vec<View> {
-    let r: f64 = world.curvature_radius_m;
-    let spawn: Player = Player::AtSpawn(world);
-    let mut aimed: Player = spawn.clone();
-    physics::aim_through_mouth(world, &mut aimed.frame, &world.mouths[0]);
-    let approach = |distance_m: f64| -> DMat4 {
-        let mut player: Player = aimed.clone();
-        player.is_flying = true;
-        for _ in 0..MAX_APPROACH_STEP_COUNT {
-            if get_distance(player.get_position(), world.mouths[0].center) * r < distance_m {
-                break;
-            }
-            physics::fly_along_light(world, &mut player, DVec3::NEG_Z, THROAT_APPROACH_STEP_M);
-        }
-        player.frame
-    };
-    let above_rails: DMat4 = world.make_ground_frame(0.0, -12.0, 0.0)
-        * make_boost(AXIS_Y, 1.1)
-        * make_rotation(AXIS_Z, AXIS_Y, 1.2);
-    let way_up: DMat4 = make_boost(AXIS_Y, 1.7) * make_rotation(AXIS_Z, AXIS_Y, 1.45);
-    vec![
-        View {
-            name: "spawn",
-            frame: spawn.frame,
-            is_laser_on: false,
-        },
-        View {
-            name: "aimed_at_1A",
-            frame: aimed.frame,
-            is_laser_on: false,
-        },
-        View {
-            name: "near_1A",
-            frame: approach(NEAR_VIEW_DISTANCE_M),
-            is_laser_on: false,
-        },
-        View {
-            name: "at_throat_1A",
-            frame: approach(THROAT_VIEW_DISTANCE_M),
-            is_laser_on: false,
-        },
-        View {
-            name: "above_rails",
-            frame: above_rails,
-            is_laser_on: false,
-        },
-        View {
-            name: "fly_way_up",
-            frame: way_up,
-            is_laser_on: false,
-        },
-        View {
-            name: "side_at_throat_1A",
-            frame: approach(SIDE_VIEW_DISTANCE_M)
-                * make_rotation(AXIS_Z, AXIS_X, SIDE_VIEW_YAW_RAD),
-            is_laser_on: false,
-        },
-        View {
-            name: "laser_through_1A",
-            frame: aimed.frame,
-            is_laser_on: true,
-        },
-    ]
-}
-
 /// `bench_views` renders each benchmark view `--frame-count` times without a window, reports the
 /// median and fastest frame times, and saves each view as a PNG in the run folder.
 ///
 /// Example: `bench_views(&arguments, renderer)?;`
-fn bench_views(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
+fn bench_views(arguments: &Arguments, renderer: Box<dyn Renderer>) -> Result<()> {
     let map: map::Map = load_map(arguments.map, &load_settings(arguments)?)?;
-    if !map.structures.is_empty() {
-        return bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?);
-    }
-    let world: World = World::FromMap(&map)?;
-    let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
-    let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
-    let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
-    let mut pixels: Vec<u8> = vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL];
-    let mut results: Vec<Value> = Vec::new();
-    let views: Vec<View> = make_bench_views(&world);
-    eprintln!(
-        "Benchmarking {} views at {}x{} (rendered at {}x{}) with the {} renderer...",
-        views.len(),
-        size_px.0,
-        size_px.1,
-        render_px.0,
-        render_px.1,
-        renderer.name()
-    );
-    for view in views {
-        let report: Option<LaserReport> = render_view(
-            &world,
-            view.frame,
-            view.is_laser_on,
-            render_px,
-            size_px,
-            0.0,
-            renderer.as_mut(),
-            &mut pixels,
-        )?;
-        let mut times_ms: Vec<f64> = Vec::new();
-        let mut gpu_times_ms: Vec<f64> = Vec::new();
-        for _ in 0..arguments.frame_count {
-            let start: Instant = Instant::now();
-            render_view(
-                &world,
-                view.frame,
-                view.is_laser_on,
-                render_px,
-                size_px,
-                0.0,
-                renderer.as_mut(),
-                &mut pixels,
-            )?;
-            times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
-            gpu_times_ms.extend(renderer.gpu_ms());
-        }
-        times_ms.sort_by(f64::total_cmp);
-        gpu_times_ms.sort_by(f64::total_cmp);
-        save_png(
-            &folder.join(format!("{}.png", view.name)),
-            &pixels,
-            size_px.0,
-            size_px.1,
-        )?;
-        results.push(json!({
-            "view": view.name,
-            "median_ms": times_ms[times_ms.len() / 2],
-            "fastest_ms": times_ms[0],
-            "median_gpu_ms": gpu_times_ms.get(gpu_times_ms.len() / 2),
-            "laser": report.as_ref().map(describe_laser),
-        }));
-    }
-    report_bench(arguments, &folder, renderer.name(), render_px, results)
+    bench_voxel_views(arguments, renderer, &VoxelWorld::FromMap(&map)?)
 }
 
 /// `report_bench` writes a benchmark's results to `results.json` in its run folder and prints them
@@ -1564,235 +1346,10 @@ fn report_bench(
     Ok(())
 }
 
-/// `Leg` is one part of the autopilot's route: where it starts, what it holds, and when it ends.
-struct Leg {
-    name: &'static str,
-    is_reset_to_spawn: bool,
-    is_flying: bool,
-    aim_at_mouth: Option<&'static str>,
-    input: Input,
-    is_laser_on: bool,
-    end: LegEnd,
-    after_end_s: f64,
-    max_s: f64,
-}
-
-/// `LegEnd` is what ends a leg: going through a wormhole, landing on the ground, or time.
-#[derive(Clone, Copy, PartialEq)]
-enum LegEnd {
-    Crossing,
-    Landing,
-    Time,
-}
-
-/// `make_route` makes the autopilot's route: walk into mouth 1A to the house, use the jetpack and
-/// land, fly into 2A to the red pylon, walk into 3A and fall from above the rails, and fire the
-/// laser through 1A.
-///
-/// Example: `let route = make_route();`
-fn make_route() -> Vec<Leg> {
-    let forward: Input = Input {
-        forward: true,
-        ..Input::default()
-    };
-    vec![
-        Leg {
-            name: "walk_into_1A",
-            is_reset_to_spawn: true,
-            is_flying: false,
-            aim_at_mouth: Some("1A"),
-            input: forward,
-            is_laser_on: false,
-            end: LegEnd::Crossing,
-            after_end_s: 1.0,
-            max_s: 10.0,
-        },
-        Leg {
-            name: "jetpack_and_land",
-            is_reset_to_spawn: false,
-            is_flying: false,
-            aim_at_mouth: None,
-            input: Input {
-                up: true,
-                ..Input::default()
-            },
-            is_laser_on: false,
-            end: LegEnd::Time,
-            after_end_s: 0.0,
-            max_s: 1.0,
-        },
-        Leg {
-            name: "fall_after_jetpack",
-            is_reset_to_spawn: false,
-            is_flying: false,
-            aim_at_mouth: None,
-            input: Input::default(),
-            is_laser_on: false,
-            end: LegEnd::Landing,
-            after_end_s: 0.5,
-            max_s: 5.0,
-        },
-        Leg {
-            name: "fly_into_2A",
-            is_reset_to_spawn: true,
-            is_flying: true,
-            aim_at_mouth: Some("2A"),
-            input: forward,
-            is_laser_on: false,
-            end: LegEnd::Crossing,
-            after_end_s: 1.0,
-            max_s: 10.0,
-        },
-        Leg {
-            name: "walk_into_3A",
-            is_reset_to_spawn: true,
-            is_flying: false,
-            aim_at_mouth: Some("3A"),
-            input: forward,
-            is_laser_on: false,
-            end: LegEnd::Crossing,
-            after_end_s: 0.0,
-            max_s: 10.0,
-        },
-        Leg {
-            name: "fall_from_3B",
-            is_reset_to_spawn: false,
-            is_flying: false,
-            aim_at_mouth: None,
-            input: Input::default(),
-            is_laser_on: false,
-            end: LegEnd::Landing,
-            after_end_s: 0.5,
-            max_s: 6.0,
-        },
-        Leg {
-            name: "laser_through_1A",
-            is_reset_to_spawn: true,
-            is_flying: false,
-            aim_at_mouth: Some("1A"),
-            input: Input::default(),
-            is_laser_on: true,
-            end: LegEnd::Time,
-            after_end_s: 0.0,
-            max_s: 0.5,
-        },
-    ]
-}
-
-/// `RouteFrame` is one `AUTOPILOT_DT_S` step of the scripted route: its leg, the player's camera
-/// and state after the step, and the messages (wormhole crossings) the step produced.
+/// `RouteFrame` is one frame of a `--play-route` route: the camera, and whether the laser fires.
 struct RouteFrame {
-    leg: usize,
     frame: DMat4,
     is_laser_on: bool,
-    height_m: f64,
-    is_flying: bool,
-    is_on_ground: bool,
-    messages: Vec<String>,
-}
-
-/// `Route` is the scripted route played without rendering: its legs, every step, and when each
-/// leg's ending event happened.
-struct Route {
-    legs: Vec<Leg>,
-    frames: Vec<RouteFrame>,
-    ended_at_s: Vec<Option<f64>>,
-}
-
-/// `simulate_route` plays the scripted route's physics at a fixed `AUTOPILOT_DT_S` step, without
-/// rendering.
-///
-/// Example: `let route = simulate_route(&world)?;`
-fn simulate_route(world: &World) -> Result<Route> {
-    let legs: Vec<Leg> = make_route();
-    let mut player: Player = Player::AtSpawn(world);
-    let mut frames: Vec<RouteFrame> = Vec::new();
-    let mut ended: Vec<Option<f64>> = Vec::new();
-    for (index, leg) in legs.iter().enumerate() {
-        if leg.is_reset_to_spawn {
-            player = Player::AtSpawn(world);
-        }
-        player.is_flying = leg.is_flying;
-        if let Some(name) = leg.aim_at_mouth {
-            let mouth = world
-                .mouths
-                .iter()
-                .find(|m| m.name == name)
-                .ok_or(format!("no mouth named {name}"))?;
-            physics::aim_through_mouth(world, &mut player.frame, mouth);
-        }
-        let (mut leg_time_s, mut ended_at_s): (f64, Option<f64>) = (0.0, None);
-        while leg_time_s < leg.max_s && ended_at_s.is_none_or(|t| leg_time_s < t + leg.after_end_s)
-        {
-            let input: Input = if ended_at_s.is_some() && leg.end == LegEnd::Landing {
-                Input::default()
-            } else {
-                leg.input
-            };
-            let messages: Vec<String> =
-                physics::update_player(world, &mut player, &input, AUTOPILOT_DT_S);
-            physics::level_out(&mut player.frame, AUTOPILOT_DT_S);
-            leg_time_s += AUTOPILOT_DT_S;
-            if ended_at_s.is_none()
-                && ((leg.end == LegEnd::Crossing && !messages.is_empty())
-                    || (leg.end == LegEnd::Landing && player.is_on_ground))
-            {
-                ended_at_s = Some(leg_time_s);
-            }
-            frames.push(RouteFrame {
-                leg: index,
-                frame: player.frame,
-                is_laser_on: leg.is_laser_on,
-                height_m: player.get_height_m(world),
-                is_flying: player.is_flying,
-                is_on_ground: player.is_on_ground,
-                messages,
-            });
-        }
-        ended.push(ended_at_s);
-    }
-    Ok(Route {
-        legs,
-        frames,
-        ended_at_s: ended,
-    })
-}
-
-/// `make_mouth_tour` makes a tour of every mouth: for each, the eye circles it once at its own
-/// height, from `TOUR_FAR_M` blocks to `TOUR_NEAR_M` (inside its jump sphere, just outside the
-/// throat) and back, looking at it with the view swinging up to `TOUR_YAW_RAD` sideways and
-/// `TOUR_PITCH_RAD` up and down, over `TOUR_FRAMES_PER_MOUTH` frames.
-///
-/// Example: `let tour = make_mouth_tour(&world);`
-fn make_mouth_tour(world: &World) -> Vec<RouteFrame> {
-    let r: f64 = world.curvature_radius_m;
-    let mut frames: Vec<RouteFrame> = Vec::new();
-    for (k, mouth) in world.mouths.iter().enumerate() {
-        for n in 0..TOUR_FRAMES_PER_MOUTH {
-            let turn: f64 = std::f64::consts::TAU * n as f64 / (TOUR_FRAMES_PER_MOUTH - 1) as f64;
-            let distance_m: f64 =
-                TOUR_NEAR_M + (TOUR_FAR_M - TOUR_NEAR_M) * (0.5 + 0.5 * turn.cos());
-            let frame: DMat4 = mouth.frame
-                * make_rotation(AXIS_X, AXIS_Z, turn)
-                * make_boost(AXIS_Z, distance_m / r)
-                * make_rotation(AXIS_X, AXIS_Z, TOUR_YAW_RAD * (TOUR_YAW_TURNS * turn).sin())
-                * make_rotation(
-                    AXIS_Y,
-                    AXIS_Z,
-                    TOUR_PITCH_RAD * (TOUR_PITCH_TURNS * turn).sin(),
-                );
-            frames.push(RouteFrame {
-                leg: k,
-                frame,
-                is_laser_on: false,
-                height_m: r * frame.col(AXIS_W)[AXIS_Y].asinh(),
-                is_flying: true,
-                is_on_ground: false,
-                messages: Vec::new(),
-            });
-        }
-    }
-    frames
 }
 
 /// `make_warp_tour` makes a tour of a voxel map's warp objects: for each, the eye circles it once
@@ -1803,7 +1360,7 @@ fn make_mouth_tour(world: &World) -> Vec<RouteFrame> {
 /// Example: `let tour = make_warp_tour(&world);`
 fn make_warp_tour(world: &VoxelWorld) -> Vec<RouteFrame> {
     let mut frames: Vec<RouteFrame> = Vec::new();
-    for (k, warp) in world.warps.iter().enumerate() {
+    for warp in world.warps.iter() {
         for n in 0..WARP_TOUR_FRAMES_PER_WARP {
             let turn: f64 =
                 std::f64::consts::TAU * n as f64 / (WARP_TOUR_FRAMES_PER_WARP - 1) as f64;
@@ -1821,160 +1378,12 @@ fn make_warp_tour(world: &VoxelWorld) -> Vec<RouteFrame> {
                     TOUR_PITCH_RAD * (TOUR_PITCH_TURNS * turn).sin(),
                 );
             frames.push(RouteFrame {
-                leg: k,
                 frame,
                 is_laser_on: false,
-                height_m: world.r * frame.col(AXIS_W)[AXIS_Y].asinh(),
-                is_flying: true,
-                is_on_ground: false,
-                messages: Vec::new(),
             });
         }
     }
     frames
-}
-
-/// `run_autopilot` plays the scripted route without a window at a fixed 1/60 s time step,
-/// rendering every frame. It records each frame (time, render time, height, events) in
-/// `frames.csv`, saves every n-th frame as a PNG, and reports each leg: how long it took, whether
-/// it ended as planned, and its frame rate.
-///
-/// Example: `run_autopilot(&arguments, renderer)?;`
-fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
-    let world: World = load_world(arguments.map, &load_settings(arguments)?)?;
-    let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
-    let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
-    let folder: PathBuf = make_run_folder("autopilot", arguments.label.as_deref())?;
-    let mut pixels: Vec<u8> = vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL];
-    let mut csv: String =
-        String::from("frame,time_s,leg,render_ms,height_m,is_flying,is_on_ground,event\n");
-    eprintln!(
-        "Running the autopilot at {}x{} with the {} renderer...",
-        size_px.0,
-        size_px.1,
-        renderer.name()
-    );
-    let Route {
-        legs: route,
-        frames,
-        ended_at_s: ended,
-    } = simulate_route(&world)?;
-    let mut render_totals_ms: Vec<f64> = vec![0.0; route.len()];
-    let mut frame_counts: Vec<u64> = vec![0; route.len()];
-    let mut max_heights_m: Vec<f64> = vec![0.0; route.len()];
-    let mut events: Vec<Vec<String>> = vec![Vec::new(); route.len()];
-    let mut laser_texts: Vec<Option<String>> = vec![None; route.len()];
-    for (frame_index, step) in frames.iter().enumerate() {
-        let leg: &Leg = &route[step.leg];
-        let start: Instant = Instant::now();
-        let report: Option<LaserReport> = render_view(
-            &world,
-            step.frame,
-            step.is_laser_on,
-            render_px,
-            size_px,
-            frame_index as f64 * AUTOPILOT_DT_S,
-            renderer.as_mut(),
-            &mut pixels,
-        )?;
-        let render_ms: f64 = start.elapsed().as_secs_f64() * MS_PER_S;
-        if let Some(report) = report {
-            laser_texts[step.leg] = Some(describe_laser(&report));
-        }
-        render_totals_ms[step.leg] += render_ms;
-        frame_counts[step.leg] += 1;
-        max_heights_m[step.leg] = max_heights_m[step.leg].max(step.height_m);
-        events[step.leg].extend(step.messages.iter().cloned());
-        csv.push_str(&format!(
-            "{frame_index},{:.4},{},{render_ms:.2},{:.3},{},{},{}\n",
-            frame_index as f64 * AUTOPILOT_DT_S,
-            leg.name,
-            step.height_m,
-            step.is_flying,
-            step.is_on_ground,
-            step.messages.join(" / "),
-        ));
-        if (frame_index as u64).is_multiple_of(u64::from(arguments.snapshot_every))
-            || !step.messages.is_empty()
-        {
-            save_png(
-                &folder.join(format!("frame_{frame_index:05}_{}.png", leg.name)),
-                &pixels,
-                size_px.0,
-                size_px.1,
-            )?;
-        }
-    }
-    let legs: Vec<Value> = route
-        .iter()
-        .enumerate()
-        .map(|(k, leg)| {
-            json!({
-                "leg": leg.name,
-                "is_as_planned": leg.end == LegEnd::Time || ended[k].is_some(),
-                "ended_at_s": ended[k],
-                "frame_count": frame_counts[k],
-                "mean_render_ms": render_totals_ms[k] / frame_counts[k].max(1) as f64,
-                "max_height_m": max_heights_m[k],
-                "events": events[k],
-                "laser": laser_texts[k],
-            })
-        })
-        .collect();
-    fs::write(folder.join("frames.csv"), csv)?;
-    let summary: Value = json!({
-        "run_folder": folder.display().to_string(),
-        "renderer": renderer.name(),
-        "sampling": get_sampling_name(arguments),
-        "width_px": size_px.0,
-        "height_px": size_px.1,
-        "render_width_px": render_px.0,
-        "render_height_px": render_px.1,
-        "legs": legs,
-    });
-    fs::write(
-        folder.join("results.json"),
-        serde_json::to_string_pretty(&summary)?,
-    )?;
-    if arguments.json {
-        println!("{summary}");
-    } else {
-        println!(
-            "{:<20} {:>7} {:>9} {:>8} {:>9}  events",
-            "leg", "planned", "ended s", "fps", "max h m"
-        );
-        for leg in &legs {
-            let mean_ms: f64 = leg["mean_render_ms"].as_f64().unwrap_or_default();
-            println!(
-                "{:<20} {:>7} {:>9} {:>8.1} {:>9.1}  {}{}",
-                leg["leg"].as_str().unwrap_or_default(),
-                if leg["is_as_planned"].as_bool().unwrap_or_default() {
-                    "yes"
-                } else {
-                    "NO"
-                },
-                leg["ended_at_s"]
-                    .as_f64()
-                    .map_or("-".to_string(), |t| format!("{t:.2}")),
-                1000.0 / mean_ms.max(1e-9),
-                leg["max_height_m"].as_f64().unwrap_or_default(),
-                leg["events"]
-                    .as_array()
-                    .map(|e| e
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .collect::<Vec<_>>()
-                        .join("; "))
-                    .unwrap_or_default(),
-                leg["laser"]
-                    .as_str()
-                    .map(|t| format!(" laser {t}"))
-                    .unwrap_or_default(),
-            );
-        }
-        println!("Run folder: {}", folder.display());
-    }
-    Ok(())
 }
 
 /// `get_blueshift_frac` gives how far the scene blueshifts (the overlay's `blueshift_frac`: 1 for
@@ -2327,8 +1736,6 @@ impl Session {
         let player: Player = Player::AtSpawn(&world);
         let route: Vec<RouteFrame> = match (arguments.play_route, arguments.route) {
             (false, _) => Vec::new(),
-            (true, RouteKind::Legs) => simulate_route(&world)?.frames,
-            (true, RouteKind::MouthTour) => make_mouth_tour(&world),
             (true, RouteKind::WarpTour) => make_warp_tour(
                 &voxel
                     .as_ref()

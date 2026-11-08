@@ -3,13 +3,12 @@
 #
 # Interface:
 #     make help: list the targets.
-#     make serve-game PORT=<n> MAP=<lunar-surface|house-demo> SERVER_SETTINGS=<file>: run a game server, without a window, and print how to join it.
+#     make serve-game PORT=<n> MAP=<lunar-surface> SERVER_SETTINGS=<file>: run a game server, without a window, and print how to join it.
 #     make join-game SERVER=<auto|address> PORT=<n> MAP=<map> PLAYER_SETTINGS=<file>: open the window and join that game server.
 #     (GAME_PASSWORD_FILE, with serve-game and join-game: a file holding the game's password; only players who know it may join.)
 #     make build-server-bundle: build the game server alone for x86-64 Linux into $(SERVER_BUNDLE), to upload to a server.
 #     make package-mac-app ONLINE_GAMES=<file>: build Warped.app (icon, ad-hoc signature) and zip it with its note into $(APP_ZIP); ONLINE_GAMES is an online_games.txt for its title screen.
 #     make bench-views RENDERER=<metal|cpu> MAP=<map> WIDTH_PX=<n> HEIGHT_PX=<n> FRAME_COUNT=<n>: time fixed views.
-#     make run-autopilot RENDERER=<metal|cpu> AUTOPILOT_WIDTH_PX=<n> AUTOPILOT_HEIGHT_PX=<n>: play a scripted route.
 #     make test: check formatting, lint with clippy, and run every crate's tests.
 #     make fmt: format with rustfmt and lint with clippy.
 #     make check-linux: check that warped-core and warped-server build for x86-64 Linux.
@@ -24,8 +23,6 @@ RENDERER ?= metal
 WIDTH_PX ?= 1280
 HEIGHT_PX ?= 800
 FRAME_COUNT ?= 10
-AUTOPILOT_WIDTH_PX ?= 640
-AUTOPILOT_HEIGHT_PX ?= 400
 PORT ?= 47800
 MAP ?= lunar-surface
 SERVER ?= auto
@@ -52,7 +49,7 @@ RESET_ARTIFACTS_WARNING := This deletes .artifacts/ (test logs, benchmark result
   Recreating them means rerunning the targets that wrote them. \
   To skip this question, pass YES_TO_RESET_ARTIFACTS=1.
 
-.PHONY: help serve-game join-game build-server-bundle package-mac-app bench-views run-autopilot test fmt check-linux check-environment clean reset-artifacts
+.PHONY: help serve-game join-game build-server-bundle package-mac-app bench-views test fmt check-linux check-environment clean reset-artifacts
 
 help:
 	@echo "Targets:"
@@ -65,8 +62,6 @@ help:
 	@echo "  make package-mac-app ONLINE_GAMES=games.txt      Build Warped.app and zip it ($(APP_ZIP)); ONLINE_GAMES is optional"
 	@echo "  make bench-views RENDERER=metal WIDTH_PX=1280 HEIGHT_PX=800 FRAME_COUNT=10"
 	@echo "                                                   Time fixed views without a window (client/.artifacts/bench_views/)"
-	@echo "  make run-autopilot RENDERER=metal AUTOPILOT_WIDTH_PX=640 AUTOPILOT_HEIGHT_PX=400"
-	@echo "                                                   Play a scripted route without a window (client/.artifacts/autopilot/)"
 	@echo "  make test                                        Check formatting, lint, and run every crate's tests"
 	@echo "  make fmt                                         Format with rustfmt and lint with clippy"
 	@echo "  make check-linux                                 Check that warped-core and warped-server build for Linux"
@@ -113,9 +108,6 @@ package-mac-app:
 
 bench-views:
 	$(RUN_WINDOW) --renderer $(RENDERER) --map $(MAP) --bench-views --width-px $(WIDTH_PX) --height-px $(HEIGHT_PX) --frame-count $(FRAME_COUNT)
-
-run-autopilot:
-	$(RUN_WINDOW) --renderer $(RENDERER) --autopilot --width-px $(AUTOPILOT_WIDTH_PX) --height-px $(AUTOPILOT_HEIGHT_PX)
 
 test:
 	cargo fmt --all --check

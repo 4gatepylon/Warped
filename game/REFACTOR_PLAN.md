@@ -315,7 +315,10 @@ its own layer.
   match the demo's pixel for pixel where Metal runs.
 - **A2, drop the house engine.** Delete `world.rs`, `scene_data.rs`, `render_cpu.rs`, `render_metal.metal`,
   `physics.rs` (keep `Input`), `map_export.rs` and their uses, after splitting `render_metal.rs` (keep presenting,
-  upscaling, overlays). Done when: the same tests as A1 pass with `--map lunar-surface`.
+  upscaling, overlays). Done when: the same tests as A1 pass with `--map lunar-surface`. Three layers: A2a drops
+  the house's tools (`--autopilot`, `--export-map`, the house routes and benchmark views) and makes lunar-surface
+  the default map, refusing `--map house-demo` with a pointer to the demo; A2b makes play voxel-only (no
+  `--renderer cpu`, no house half in `multiplayer.rs`); A2c deletes the files.
 - **A3, split `main.rs`** into modules, no behaviour change (several layers; each moves code verbatim).
 - **A4, extract `warped-core`.** Move the modules of section 4 into `core/`, cutting every dependency on SDL, Metal
   and objc2 as listed there. Done when: `cargo check -p warped-core --target x86_64-unknown-linux-gnu` passes
