@@ -9,6 +9,9 @@ constant float3 FLASHLIGHT_COLOR = float3(1.0, 0.95, 0.85);
 constant float FLASHLIGHT_INTENSITY = 1.45;
 constant float FLASHLIGHT_TINY_M = 1e-3;
 constant float BEAM_HALF_WIDTH_M = 0.08;
+constant float DUST_GRAIN_EDGE = 0.6;
+constant float DUST_PUFF_FALLOFF = 3.0;
+constant float3 DUST_LIGHT = float3(0.95, 0.85, 1.0);
 constant float BEAM_RADIUS_M = 0.02;
 constant float BEAM_REACH = 4.8;
 constant float RIFLE_BEAM_MARK = 0.25;
@@ -177,6 +180,22 @@ static float3 apply_hazard(float3 base, float3 world, constant CityUniforms& u) 
     return base;
 }
 
+// `light_flashlight` gives the light of the player's flashlight on a surface at `world` with normal
+// `n`, as on Lunar Surface: from `u.flashlight_position` along `u.flashlight_direction`, full inside
+// the cone and softening to nothing at its outer edge (`u.flashlight.x` and `.y`, their cosines),
+// falling to half at `u.flashlight.z` meters, as much as the surface faces it, times its brightness
+// `u.flashlight.w` (0 when off).
+static float3 light_flashlight(float3 world, float3 n, constant CityUniforms& u) {
+    float4 f = u.flashlight;
+    if (f.w <= 0.0) return float3(0.0);
+    float3 toward = world - u.flashlight_position.xyz;
+    float d_m = max(length(toward), FLASHLIGHT_TINY_M);
+    float cone = smoothstep(f.y, f.x, dot(toward / d_m, u.flashlight_direction.xyz));
+    float facing = max(dot(n, -toward / d_m), 0.0);
+    float falloff = d_m / f.z;
+    return FLASHLIGHT_INTENSITY * FLASHLIGHT_COLOR * f.w * cone * facing / (1.0 + falloff * falloff);
+}
+
 fragment float4 city_fragment(Fragment in [[stage_in]], constant CityUniforms& u [[buffer(1)]],
                               texture2d_array<float> albedo [[texture(0)]]) {
     constexpr sampler s(address::repeat, filter::linear, mip_filter::linear, max_anisotropy(8));
@@ -308,22 +327,6 @@ fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& 
     return float4(encode_srgb(tint) * alpha, alpha);
 }
 
-// `light_flashlight` gives the light of the player's flashlight on a surface at `world` with normal
-// `n`, as on Lunar Surface: from `u.flashlight_position` along `u.flashlight_direction`, full inside
-// the cone and softening to nothing at its outer edge (`u.flashlight.x` and `.y`, their cosines),
-// falling to half at `u.flashlight.z` meters, as much as the surface faces it, times its brightness
-// `u.flashlight.w` (0 when off).
-static float3 light_flashlight(float3 world, float3 n, constant CityUniforms& u) {
-    float4 f = u.flashlight;
-    if (f.w <= 0.0) return float3(0.0);
-    float3 toward = world - u.flashlight_position.xyz;
-    float d_m = max(length(toward), FLASHLIGHT_TINY_M);
-    float cone = smoothstep(f.y, f.x, dot(toward / d_m, u.flashlight_direction.xyz));
-    float facing = max(dot(n, -toward / d_m), 0.0);
-    float falloff = d_m / f.z;
-    return FLASHLIGHT_INTENSITY * FLASHLIGHT_COLOR * f.w * cone * facing / (1.0 + falloff * falloff);
-}
-
 // `hash_pixel` gives a pseudo-random number in [0, 1) for pixel `id` and `seed`, independent from
 // pixel to pixel: Lunar Surface's (`render_voxel.metal`), so the speckle looks the same.
 static float hash_pixel(uint2 id, uint seed) {
@@ -336,8 +339,8 @@ static float hash_pixel(uint2 id, uint seed) {
     return float(h >> PIXEL_HASH_DROPPED_BITS) * PIXEL_HASH_SCALE;
 }
 
-// `beam_fragment` draws a laser beam (or, with a normal of length 1, the core's halo) over the
-// scene as premultiplied light, in Lunar Surface's two looks (`render_voxel.metal`'s
+// `beam_fragment` draws a laser beam (or, with a normal along z, the core's halo; along x, a dust
+// particle, `push_dust_particle`) over the scene as premultiplied light, in Lunar Surface's two looks (`render_voxel.metal`'s
 // `scan_beams` and `shade_ray_end`), its brightness `in.color.a`, from how far the pixel is from
 // the beam's line against `BEAM_RADIUS_M` (or a pixel, if wider): the sniper's a white blade
 // (`exp(-q^3)`) in a soft team-coloured haze, and the rifle's (a normal with y `RIFLE_BEAM_MARK`) a
@@ -346,6 +349,12 @@ static float hash_pixel(uint2 id, uint seed) {
 // Surface: black (the scene darkened by the glow, through alpha), white (white light by the glow)
 // in the shares `u.beam_speckle.y` and `.z`, or else a dropout (the scene shows through).
 fragment float4 beam_fragment(Fragment in [[stage_in]], constant CityUniforms& u [[buffer(1)]]) {
+    if (in.normal.x > 0.5) {
+        float radial = length(in.uv * 2.0 - 1.0);
+        float shape = in.layer > 0.5 ? 1.0 - smoothstep(DUST_GRAIN_EDGE, 1.0, radial) : exp(-radial * radial * DUST_PUFF_FALLOFF);
+        float cover = saturate(in.color.a) * shape * step(radial, 1.0);
+        return float4(encode_srgb(in.color.rgb * DUST_LIGHT) * cover, cover);
+    }
     if (length(in.normal) > 0.5) {
         float halo = pow(saturate(1.0 - length(in.uv * 2.0 - 1.0)), CORE_HALO_POWER) * in.color.a;
         return float4(encode_srgb(in.color.rgb) * halo, 0.0);

@@ -37,6 +37,7 @@ use crate::city_world::{
     CityInput, CityPlayer, CityWorld, HEAD_HEIGHT_M, Shot, ShotHit, Side, TORSO_HEIGHT_M, Target,
     get_up,
 };
+use crate::dust::{DustBurst, MAX_DUST_BURST_COUNT};
 use crate::exit_prompt;
 use crate::hud_bars;
 use crate::key_bindings::{self, Action, KeyBindings};
@@ -44,7 +45,7 @@ use crate::menu;
 use crate::net;
 use crate::render_city::{
     BEACON_SLOT_COUNT, BEAM_WIDTH_M, CityFrame, CityScene, build_scene, push_beam, push_core_halo,
-    push_mesh,
+    push_dust_particle, push_mesh,
 };
 use crate::render_metal::{self, FrameData};
 use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
@@ -121,6 +122,7 @@ const STAIRS_ARRIVE_M: f64 = 0.5;
 const STAIRS_LEAD_IN_M: f64 = 2.0;
 const STEER_WALK_ERROR_RAD: f64 = 0.35;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
+const DUST_LIFT_M: f64 = 0.02;
 const CONSOLE_REPLAN_S: f64 = 3.0;
 const SERVE_POLL_MS: u64 = 50;
 const STAIRS_ROUTE_END_WAIT_S: f64 = 2.0;
@@ -1007,6 +1009,7 @@ struct CitySession {
     beam_speckle_frac: f64,
     is_flashlight_on: bool,
     view_switch: third_person::ViewSwitch,
+    dust: Vec<DustBurst>,
     hit_effect_frac: f64,
     last_health_frac: f64,
     slowed_s: f64,
@@ -1117,6 +1120,7 @@ impl CitySession {
             beam_speckle_frac: 0.0,
             is_flashlight_on: false,
             view_switch: third_person::ViewSwitch::FirstPerson(),
+            dust: Vec::new(),
             hit_effect_frac: 0.0,
             last_health_frac: 1.0,
             slowed_s: 0.0,
@@ -1228,6 +1232,7 @@ impl CitySession {
                 shot_noise::get_rifle_speckle_frac(&self.settings.rifle, self.rifle_heat_frac)
             }
         });
+        self.add_dust(&shot, eye.w_axis.truncate(), self.gun == Gun::Rifle);
         self.shots.push(LiveShot {
             shot,
             start_s: self.now_s(),
@@ -1401,6 +1406,7 @@ impl CitySession {
         }
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
         self.shots.retain(|shot| now_s - shot.start_s < life_s);
+        self.dust.retain(|burst| !burst.is_over(now_s));
         if self
             .message
             .as_ref()
@@ -1617,6 +1623,43 @@ impl CitySession {
         rects
     }
 
+    /// `add_dust` throws up Lunar Surface's dust (`dust.rs`) where `shot`, fired from `shooter` by
+    /// the rifle or the sniper, ended on a floor (the street or the glass), sprayed back toward
+    /// the shooter; at most `MAX_DUST_BURST_COUNT` bursts are kept, the oldest dropped first.
+    fn add_dust(&mut self, shot: &Shot, shooter: DVec3, is_rifle: bool) {
+        let ShotHit::Surface { material } = shot.hit else {
+            return;
+        };
+        let is_floor: bool = material == self.world.street_material
+            || self
+                .world
+                .get_glass()
+                .is_some_and(|glass| glass.material == material);
+        let end: DVec3 = *shot.points.last().expect("a shot has an end");
+        if !is_floor {
+            return;
+        }
+        let up: DVec3 = get_up(end);
+        let toward: DVec3 = shooter - end;
+        let back: DVec3 = (toward - up * toward.dot(up)).normalize_or(up.any_orthonormal_vector());
+        let right: DVec3 = up.cross(back);
+        let frame: DMat4 = DMat4::from_cols(
+            right.extend(0.0),
+            up.extend(0.0),
+            back.extend(0.0),
+            (end + up * DUST_LIFT_M).extend(1.0),
+        );
+        if self.dust.len() >= MAX_DUST_BURST_COUNT {
+            self.dust.remove(0);
+        }
+        self.dust.push(DustBurst::FromFloor(
+            frame,
+            self.now_s(),
+            self.world.map_gravity_m_per_s2,
+            is_rifle,
+        ));
+    }
+
     /// `update_remote` traces the other players' new shots and follows their robots' motion.
     fn update_remote(&mut self, now_s: f64, dt_s: f64) {
         let mut new_shots: Vec<LiveShot> = Vec::new();
@@ -1661,6 +1704,9 @@ impl CitySession {
             let speed: f64 = (feet - motion.feet).length() / dt_s.max(1e-6);
             motion.speed_m_per_s += (speed - motion.speed_m_per_s) * (dt_s * 8.0).min(1.0);
             motion.feet = feet;
+        }
+        for new_shot in &new_shots {
+            self.add_dust(&new_shot.shot, new_shot.shot.points[0], new_shot.is_rifle);
         }
         self.shots.extend(new_shots);
     }
@@ -1778,6 +1824,19 @@ impl CitySession {
                 },
             ],
         ];
+        for cloud in self.dust.iter().filter_map(|burst| burst.get_cloud(now_s)) {
+            for particle in &cloud.particles {
+                push_dust_particle(
+                    &mut frame.beams,
+                    (cloud.frame * particle.position_m.extend(1.0)).truncate(),
+                    particle.radius_m,
+                    eye.w_axis.truncate(),
+                    particle.albedo,
+                    particle.opacity_frac as f32,
+                    particle.shape != crate::dust::DustShape::Puff,
+                );
+            }
+        }
         let kinds = &self.settings.beam_speckle;
         frame.beam_speckle = [
             ((now_s * MS_PER_S) as u64 % BEAM_SEED_PERIOD_MS) as f32,

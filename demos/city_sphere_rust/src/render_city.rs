@@ -937,6 +937,40 @@ pub fn push_beam(
     );
 }
 
+/// `push_dust_particle` adds one particle of a shot's dust (`dust.rs`) at `center_m`, of
+/// `radius_m`, as a quad facing `camera_m` for the beam pipeline: a soft puff of mist, or a small
+/// grain (`is_grain`) with a firmer edge, in `albedo` lit by the core, covering the scene by
+/// `opacity_frac` at its centre. Its normal along x tells the shader it is dust, and its layer
+/// whether it is a grain.
+///
+/// Example: `push_dust_particle(&mut beams, hit, 0.05, eye, [0.5, 0.5, 0.5], 0.8, true);`
+pub fn push_dust_particle(
+    out: &mut Vec<CityVertex>,
+    center_m: DVec3,
+    radius_m: f64,
+    camera_m: DVec3,
+    albedo: [f32; 3],
+    opacity_frac: f32,
+    is_grain: bool,
+) {
+    let forward: DVec3 = (camera_m - center_m).normalize_or(DVec3::Z);
+    let right: DVec3 = forward.any_orthonormal_vector() * radius_m;
+    let up: DVec3 = forward.cross(right);
+    push_quad(
+        out,
+        [
+            center_m - right - up,
+            center_m + right - up,
+            center_m + right + up,
+            center_m + up - right,
+        ],
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        DVec3::X,
+        [albedo[0], albedo[1], albedo[2], opacity_frac],
+        f32::from(u8::from(is_grain)),
+    );
+}
+
 /// `push_core_halo` adds a soft glow of `radius_m` around the core at the centre, as a quad facing
 /// `camera_m` for the additive beam pipeline; its normal of length 1 tells the shader to fade it
 /// by distance from the middle instead of across a beam.
