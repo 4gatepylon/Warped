@@ -65,6 +65,10 @@ const MIN_RENDER_SCALE: f64 = 0.3;
 const HUD_PERIOD_S: f64 = 0.25;
 const ROUTE_TIMEOUT_S: f64 = 240.0;
 const BENCH_ROBOT_COUNT: usize = 8;
+const PHASE_COUNT: usize = 5;
+const PHASE_NAMES: [&str; PHASE_COUNT] = ["events", "update", "pack", "overlay", "render_and_present"];
+const WARMUP_FRAME_COUNT: usize = 30;
+const SLOW_FRAME_MS: f64 = 17.5;
 
 /// `TeamName` is a team for `--team`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
@@ -520,6 +524,7 @@ struct CitySession {
     hit_count: u32,
     hud: (f64, u32, f64),
     is_aiming: bool,
+    phase_ms: Vec<[f64; PHASE_COUNT]>,
 }
 
 impl CitySession {
@@ -580,6 +585,7 @@ impl CitySession {
             hit_count: 0,
             hud: (0.0, 0, 0.0),
             is_aiming: false,
+            phase_ms: Vec::new(),
         })
     }
 
@@ -945,12 +951,19 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
     layer.setDevice(Some(metal.get_device()));
     layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
     layer.setFramebufferOnly(false);
+    layer.setDisplaySyncEnabled(!arguments.no_vsync);
     for step in render_metal::get_loading_steps(false) {
         metal.load(*step)?;
     }
     let mouse: sdl3::mouse::MouseUtil = sdl.mouse();
     let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
     let result: Result<()> = (|| loop {
+        let mut phase_start: Instant = Instant::now();
+        let mut phases: [f64; PHASE_COUNT] = [0.0; PHASE_COUNT];
+        let mut lap = |k: usize| {
+            phases[k] = phase_start.elapsed().as_secs_f64() * MS_PER_S;
+            phase_start = Instant::now();
+        };
         for event in event_pump.poll_iter() {
             if !handle_event(&mut session, event, &window, &mouse)? {
                 return Ok(());
@@ -965,7 +978,9 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 .collect()
         };
         session.is_aiming = held.contains(&Action::Aim);
+        lap(0);
         session.update(&held)?;
+        lap(1);
         let now_s: f64 = session.now_s();
         if session.brain.as_ref().is_some_and(Brain::is_done) || now_s > ROUTE_TIMEOUT_S && session.brain.is_some() {
             print_route_report(&session, arguments, window.size_in_pixels());
@@ -981,6 +996,7 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
             ((f64::from(window_px.1) * session.render_scale) as usize).max(1),
         );
         let frame: CityFrame = session.pack(render_px);
+        lap(2);
         let text: Option<OverlayText> = session.get_banner_lines().map(|[title, detail]| OverlayText {
             lines: vec![(title, true), (detail, false)],
             mask_px: DEATH_MASK_PX,
@@ -1008,7 +1024,11 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
             hit: render_metal::HitEffect { strength_frac: 0.0, red_frac: 0.0, blur_px: 0.0, shake_px: [0.0, 0.0] },
             blueshift_frac: 0.0,
         };
-        if metal.render_to_layer(FrameData::City(&frame), layer, Some(&overlay))? {
+        lap(3);
+        let is_shown: bool = metal.render_to_layer(FrameData::City(&frame), layer, Some(&overlay))?;
+        lap(4);
+        session.phase_ms.push(phases);
+        if is_shown {
             let gpu_ms: f64 = metal.last_gpu_ms;
             session.record_frame(gpu_ms);
             let (time_s, count, gpu_sum) = &mut session.hud;
@@ -1063,13 +1083,30 @@ fn handle_event(session: &mut CitySession, event: Event, window: &sdl3::video::W
 
 /// `print_route_report` prints the route's numbers: frame times, GPU times, the winner and shots.
 fn print_route_report(session: &CitySession, arguments: &Arguments, window_px: (u32, u32)) {
+    let start: usize = WARMUP_FRAME_COUNT.min(session.frame_ms.len());
+    let frame_ms: &[f64] = &session.frame_ms[start..];
+    let gpu_ms: &[f64] = &session.gpu_ms[start..];
+    let phases: &[[f64; PHASE_COUNT]] = &session.phase_ms[start.min(session.phase_ms.len())..];
+    let slow: Vec<usize> = (0..frame_ms.len().min(phases.len().saturating_sub(1))).filter(|&k| frame_ms[k] > SLOW_FRAME_MS).collect();
+    let phase_report: serde_json::Map<String, serde_json::Value> = PHASE_NAMES
+        .iter()
+        .enumerate()
+        .map(|(k, name)| {
+            let all: Vec<f64> = phases.iter().map(|p| p[k]).collect();
+            let in_slow: Vec<f64> = slow.iter().map(|&i| phases[i + 1][k]).collect();
+            let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
+            (name.to_string(), json!({"median_ms": get_percentile_ms(&all, 0.5), "p99_ms": get_percentile_ms(&all, 0.99), "mean_in_slow_frames_ms": mean(&in_slow)}))
+        })
+        .collect();
     let report = json!({
         "window_px": [window_px.0, window_px.1],
-        "frame_count": session.frame_ms.len(),
-        "frame_ms_median": get_percentile_ms(&session.frame_ms, 0.5),
-        "frame_ms_p99": get_percentile_ms(&session.frame_ms, 0.99),
-        "gpu_ms_median": get_percentile_ms(&session.gpu_ms, 0.5),
-        "gpu_ms_p99": get_percentile_ms(&session.gpu_ms, 0.99),
+        "slow_frame_count": slow.len(),
+        "phases": phase_report,
+        "frame_count": frame_ms.len(),
+        "frame_ms_median": get_percentile_ms(frame_ms, 0.5),
+        "frame_ms_p99": get_percentile_ms(frame_ms, 0.99),
+        "gpu_ms_median": get_percentile_ms(gpu_ms, 0.5),
+        "gpu_ms_p99": get_percentile_ms(gpu_ms, 0.99),
         "winner": session.client.game.winner.map(|team| net::TEAM_NAMES[team as usize % 2]),
         "off_mask": session.client.game.off_mask,
         "route_done": session.brain.as_ref().is_some_and(Brain::is_done),

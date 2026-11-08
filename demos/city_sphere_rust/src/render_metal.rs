@@ -504,6 +504,7 @@ pub struct MetalRenderer {
     surface_textures: Option<SurfaceTextures>,
     voxel_gpu: Option<VoxelGpu>,
     city_gpu: Option<crate::render_city::CityGpu>,
+    layer_frame_in_flight: Option<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
     viewmodels: HashMap<GunModel, Viewmodel>,
     is_voxel_frame: bool,
     throat_table: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -830,6 +831,7 @@ impl MetalRenderer {
             surface_textures: None,
             voxel_gpu: None,
             city_gpu: None,
+            layer_frame_in_flight: None,
             viewmodels: HashMap::new(),
             is_voxel_frame: false,
             throat_table,
@@ -1290,6 +1292,14 @@ impl MetalRenderer {
     /// Example: `self.finish(&command_buffer)?;`
     fn finish(&mut self, command_buffer: &ProtocolObject<dyn MTLCommandBuffer>) -> Result<()> {
         command_buffer.commit();
+        self.wait_for(command_buffer)
+    }
+
+    /// `wait_for` waits for a committed frame's command buffer, fails if it failed, and keeps its
+    /// GPU time in `last_gpu_ms`.
+    ///
+    /// Example: `self.wait_for(&command_buffer)?;`
+    fn wait_for(&mut self, command_buffer: &ProtocolObject<dyn MTLCommandBuffer>) -> Result<()> {
         command_buffer.waitUntilCompleted();
         if command_buffer.status() != MTLCommandBufferStatus::Completed {
             let reason: String = command_buffer
@@ -1635,7 +1645,9 @@ impl MetalRenderer {
 
     /// `render_to_layer` draws one frame straight into the next drawable of a window's
     /// `CAMetalLayer`, upscaled with MetalFX to the drawable's size, with `overlay` drawn over it if
-    /// given, and presents it. It returns false if the layer had no drawable to give.
+    /// given, and presents it without waiting for it (it waits for the frame before, so at most two
+    /// are in flight, and `last_gpu_ms` is that frame's). It returns false if the layer had no
+    /// drawable to give.
     ///
     /// Example: `renderer.render_to_layer(&data, &layer, None)?;`
     pub fn render_to_layer(
@@ -1663,7 +1675,11 @@ impl MetalRenderer {
         unsafe { blit.copyFromTexture_toTexture(&texture, &target) };
         blit.endEncoding();
         command_buffer.presentDrawable(ProtocolObject::from_ref(&*drawable));
-        self.finish(&command_buffer)?;
+        if let Some(previous) = self.layer_frame_in_flight.take() {
+            self.wait_for(&previous)?;
+        }
+        command_buffer.commit();
+        self.layer_frame_in_flight = Some(command_buffer);
         Ok(true)
     }
 }

@@ -363,6 +363,10 @@ struct Arguments {
     /// What the bot does: `consoles` holds E on the other team's consoles until its team wins.
     #[arg(long, value_enum, requires = "bot")]
     bot_objective: Option<city::BotObjective>,
+    /// City Sphere: present frames as soon as they are drawn instead of waiting for the display's
+    /// refresh, to time the frames without the display's pacing.
+    #[arg(long)]
+    no_vsync: bool,
 }
 
 /// `Renderer` draws one frame's packed scene into an RGBA pixel buffer.
@@ -4236,7 +4240,7 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     let mut session: Session = Session::New(arguments)?;
     let window_size: (u32, u32) = (arguments.width_px, arguments.height_px);
     match renderer.as_metal() {
-        Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal),
+        Some(metal) => play_on_layer(&sdl, &video, window_size, &mut session, metal, arguments.no_vsync),
         None => play_on_canvas(&sdl, &video, window_size, &mut session, renderer.as_mut()),
     }
 }
@@ -4803,6 +4807,7 @@ fn play_on_layer(
     window_size: (u32, u32),
     session: &mut Session,
     metal: &mut render_metal::MetalRenderer,
+    is_vsync_off: bool,
 ) -> Result<()> {
     let mut builder: sdl3::video::WindowBuilder =
         video.window(WINDOW_TITLE, window_size.0, window_size.1);
@@ -4821,6 +4826,7 @@ fn play_on_layer(
     layer.setDevice(Some(metal.get_device()));
     layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
     layer.setFramebufferOnly(false);
+    layer.setDisplaySyncEnabled(!is_vsync_off);
     let mouse: sdl3::mouse::MouseUtil = sdl.mouse();
     let mut event_pump: sdl3::EventPump = sdl.event_pump()?;
     let loading_steps: &[render_metal::LoadingStep] =
