@@ -31,6 +31,7 @@ mod geometry;
 mod hud_bars;
 mod key_bindings;
 mod map;
+mod map_cells;
 mod map_export;
 mod map_layout;
 mod menu;
