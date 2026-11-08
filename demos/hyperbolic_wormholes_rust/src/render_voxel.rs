@@ -21,6 +21,7 @@ use objc2_metal::{
     MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
+use crate::bend::Bend;
 use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, AXIS_Z, get_distance, invert_lorentz};
 use crate::render_metal::{
@@ -328,11 +329,11 @@ fn to_columns(m: DMat4) -> [[f32; 4]; 4] {
 impl VoxelFrame {
     /// `Build` packs `world` seen from `camera` at a render size, with laser segments of each team
     /// (`beams`, each drawn in its gun's style as far as `clip_beam_to_map` allows), an optional
-    /// laser spot and the dust
-    /// of shots into the ground. The speckle picks its pixels anew each millisecond of
+    /// laser spot and the dust of shots into the ground, all in the world bent by `_bend` (W-68;
+    /// not drawn bent yet). The speckle picks its pixels anew each millisecond of
     /// `world.sky_time_s`, and their kinds in the shares of `world.settings.beam_speckle`.
     ///
-    /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &clouds, (1280, 800));`
+    /// Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &clouds, (1280, 800), world.bend);`
     #[allow(non_snake_case)]
     pub fn Build(
         world: &VoxelWorld,
@@ -341,6 +342,7 @@ impl VoxelFrame {
         spot: Option<(DVec4, u32)>,
         dust: &[DustCloud],
         size_px: (u32, u32),
+        _bend: Bend,
     ) -> VoxelFrame {
         let r: f64 = world.r;
         let structures: Vec<GpuStructure> = world
@@ -905,7 +907,8 @@ mod tests {
             speckle_frac,
         };
         let beams: [LaserBeam; 2] = [beam(0, false, 0.0), beam(1, true, SPECKLE_FRAC)];
-        let frame: VoxelFrame = VoxelFrame::Build(&world, camera, &beams, None, &[], RENDER_PX);
+        let frame: VoxelFrame =
+            VoxelFrame::Build(&world, camera, &beams, None, &[], RENDER_PX, world.bend);
         let sniper: [f32; 2] = [0.0, 0.0];
         let rifle: [f32; 2] = [SPECKLE_FRAC as f32, (1 + RIFLE_BEAM_CODE) as f32];
         let packed: Vec<[f32; 2]> = frame.beams.iter().map(|b| [b.info[1], b.info[3]]).collect();

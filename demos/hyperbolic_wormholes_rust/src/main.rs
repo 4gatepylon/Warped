@@ -15,6 +15,7 @@
 //! - `--host`, `--join auto|<address>`, `--serve`, `--bot`, `--port`: play with others on the local
 //!   network (see `net.rs` and `multiplayer.rs`).
 //! - `--export-map <folder>`: write the world as a portable map (`common/maps/`).
+//! - `--bend-strength <0..1>`: on lunar-surface, force the reality bend's strength (W-68).
 //!
 //! Example: `cargo run --release -- --bench-views --width-px 2560 --height-px 1600`
 //!
@@ -37,6 +38,7 @@ mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
+mod reality_bend;
 mod render_cpu;
 mod render_metal;
 mod render_voxel;
@@ -77,6 +79,7 @@ use serde_json::{Value, json};
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use key_bindings::{Action, Control};
 use physics::{Input, LaserReport, Player};
+use reality_bend::RealityBend;
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
@@ -337,6 +340,10 @@ struct Arguments {
     /// --bench-views names them), e.g. black_hole.
     #[arg(long)]
     view: Option<String>,
+    /// On a map that bends (lunar-surface): force the reality bend's strength (0 to 1) instead of
+    /// following the consoles (W-68).
+    #[arg(long)]
+    bend_strength: Option<f64>,
     /// Write the world as a map in the portable format of common/maps/ (map.json) into this folder,
     /// replacing the folder's map.json, and exit.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
@@ -504,6 +511,14 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
         return Err(
             "--view needs --map lunar-surface; e.g. --map lunar-surface --view black_hole".into(),
         );
+    }
+    if let Some(strength_frac) = arguments.bend_strength
+        && (!(0.0..=1.0).contains(&strength_frac) || arguments.map != MapName::LunarSurface)
+    {
+        return Err(format!(
+            "--bend-strength must be in [0, 1] with --map lunar-surface, got {strength_frac}; e.g. --map lunar-surface --bend-strength 0.6"
+        )
+        .into());
     }
     if arguments.map == MapName::LunarSurface
         && (arguments.autopilot || (arguments.play_route && arguments.route != RouteKind::WarpTour))
@@ -854,6 +869,9 @@ fn bench_voxel_views(
     mut renderer: Box<dyn Renderer>,
     world: &VoxelWorld,
 ) -> Result<()> {
+    let mut bent_world: VoxelWorld = world.clone();
+    RealityBend::New(arguments.bend_strength).update(&mut bent_world, 0, 0.0);
+    let world: &VoxelWorld = &bent_world;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
@@ -883,12 +901,15 @@ fn bench_voxel_views(
             })
             .collect();
         let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
-        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+        let (camera, bend) = (world.bend.bend_frame(camera), world.bend);
+        let warm_up: VoxelFrame =
+            VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
+            let frame: VoxelFrame =
+                VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());
@@ -951,9 +972,13 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         })?
     } else {
         let world: VoxelWorld = VoxelWorld::FromMap(&map)?;
-        multiplayer::run_voxel_bot(&world, &mut client, duration_s, |frame, id| {
-            save(FrameData::Voxel(frame), id)
-        })?
+        multiplayer::run_voxel_bot(
+            &world,
+            &mut client,
+            duration_s,
+            arguments.bend_strength,
+            |frame, id| save(FrameData::Voxel(frame), id),
+        )?
     };
     if arguments.json {
         println!(
@@ -1824,11 +1849,13 @@ struct Session {
     has_shot_hit_wormholes: bool,
 }
 
-/// `VoxelState` is a window's game on a voxel map: the map, the player and their spawn point.
+/// `VoxelState` is a window's game on a voxel map: the map, the player, their spawn point and the
+/// reality bend's strength.
 struct VoxelState {
     world: VoxelWorld,
     player: VoxelPlayer,
     spawn_index: usize,
+    reality_bend: RealityBend,
 }
 
 /// `PackedFrame` is one frame packed for the renderer: the house's rows or a voxel map's frame.
@@ -2053,6 +2080,7 @@ impl Session {
                 world,
                 player,
                 spawn_index: 0,
+                reality_bend: RealityBend::New(arguments.bend_strength),
             })
         };
         let world: World = match voxel {
@@ -3133,6 +3161,9 @@ impl Session {
                 .world
                 .light_consoles(off_mask, &disabling_fracs, time_s);
             voxel.world.sky_time_s = spaceships::get_utc_s();
+            voxel
+                .reality_bend
+                .update(&mut voxel.world, off_mask, time_s);
             let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
             voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
         }
@@ -3832,6 +3863,10 @@ impl Session {
         ];
         if let Some(laser) = &self.laser {
             lines.push(format!("laser {laser}"));
+        }
+        if let Some(voxel) = self.voxel.as_ref().filter(|voxel| voxel.world.can_bend()) {
+            let strength_pct: f64 = voxel.reality_bend.strength_frac * PERCENT_PER_FRAC;
+            lines.push(format!("REALITY {strength_pct:.0}%"));
         }
         if let Some(multiplayer) = &self.multiplayer {
             lines.push(match multiplayer.client.id {

@@ -3,11 +3,14 @@
 //! objects with the structures in their reach, a voxel walk, the laser's light path, and walking on
 //! the map (collisions, stepping up blocks, gravity, jumping, flying, and moving along light paths
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
+//! On a map that bends (W-68), players move in the map while the camera looks from the bent world
+//! (`bend.rs`), and the black hole grows with the bend's strength.
 //!
 //! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
 //! `VoxelWorld::set_thrown_wormholes`, `VoxelWorld::can_place_mouth`, `VoxelWorld::find_hit_s`,
 //! `VoxelWorld::add_markers`, `VoxelWorld::find_aimed_material`, `VoxelWorld::find_clear_m`,
 //! `VoxelWorld::find_crosshair_point`, `VoxelWorld::is_sunlit`, `VoxelWorld::get_mouth_depth_frac`,
+//! `VoxelWorld::can_bend`, `VoxelWorld::set_bend_strength`,
 //! `Console`, `VoxelPlayer`, `StepReport`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
@@ -16,6 +19,7 @@ use std::sync::Arc;
 
 use glam::{DMat4, DVec3, DVec4};
 
+use crate::bend::{Bend, DEFAULT_EDGE_RADIUS_M};
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
@@ -86,6 +90,7 @@ pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
 const BEAM_TOLERANCE_M: f64 = 0.02;
 const MAX_DRAWN_BEAM_DISTANCE_M: f64 = 160.0;
 const BEAM_CLIP_BISECTION_COUNT: usize = 40;
+const MAX_HOLE_OFF_AXIS_M: f64 = 1e-6;
 pub const LOOK_RAD_PER_PX: f64 = 0.0025;
 const MAX_PITCH_RAD: f64 = 1.55;
 const TINY: f64 = 1e-12;
@@ -300,6 +305,8 @@ pub struct VoxelWorld {
     pub flashlight_eye: Option<DMat4>,
     pub sky_time_s: f64,
     pub clearance: Arc<ClearanceGrids>,
+    pub bend: Bend,
+    bend_hole: Option<(usize, VoxelWarp)>,
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -552,7 +559,8 @@ impl VoxelWorld {
     /// palette (with a glow for `light` materials) and the `lunar` style's special materials.
     /// Warps must use the `distance` radius and the `taper` falloff, and foils λ² = 0.25. The
     /// player moves by the built-in game settings (`set_settings`), so the map's gravity and jump
-    /// speed must be above 0.
+    /// speed must be above 0. A map with team consoles and one black hole bends (`can_bend`), and
+    /// its black hole must be on o's vertical axis.
     ///
     /// Example: `let world = VoxelWorld::FromMap(&map)?;`
     #[allow(non_snake_case)]
@@ -656,6 +664,20 @@ impl VoxelWorld {
             console_first: consoles.first().copied().unwrap_or(-1),
             console_count: consoles.len() as i32,
         };
+        let team_consoles: Vec<Console> = find_consoles(map);
+        let black_holes: Vec<usize> = (0..warps.len()).filter(|&w| !warps[w].is_mouth).collect();
+        let bend_hole: Option<(usize, VoxelWarp)> = match black_holes[..] {
+            [w] if !team_consoles.is_empty() => Some((w, warps[w].clone())),
+            _ => None,
+        };
+        if let Some((_, hole)) = &bend_hole
+            && hole.centre.x.hypot(hole.centre.z) * r > MAX_HOLE_OFF_AXIS_M
+        {
+            return Err(format!(
+                "map {}: a map that bends needs its black hole on o's vertical axis, not at {}",
+                map.name, hole.centre
+            ));
+        }
         let regions: Option<[f64; 3]> = map.regions.as_ref().and_then(|regions| {
             let edge_m: f64 = regions
                 .zones
@@ -672,8 +694,10 @@ impl VoxelWorld {
             terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),
-            consoles: find_consoles(map),
+            consoles: team_consoles,
             flashlight_eye: None,
+            bend: Bend::FromStrength(0.0, DEFAULT_EDGE_RADIUS_M, r),
+            bend_hole,
             sky_time_s: 0.0,
             structures,
             shapes,
@@ -934,6 +958,42 @@ impl VoxelWorld {
             };
             self.palette[usize::from(console.material)] = entry;
         }
+    }
+
+    /// `can_bend` says whether this map bends (W-68): it has team consoles and one black hole.
+    ///
+    /// Example: `if world.can_bend() { world.set_bend_strength(0.4) }`
+    pub fn can_bend(&self) -> bool {
+        self.bend_hole.is_some()
+    }
+
+    /// `set_bend_strength` bends the world to `strength_frac` (0 to 1) by the settings'
+    /// `reality_bend`: the bend itself, and the black hole risen up o's vertical axis from the
+    /// map's height toward the bent sphere's centre, its Schwarzschild radius and reach growing
+    /// from the map's to the settings' maximum, all in proportion to the strength.
+    ///
+    /// Example: `world.set_bend_strength(0.4);`
+    pub fn set_bend_strength(&mut self, strength_frac: f64) {
+        let (index, hole) = self
+            .bend_hole
+            .clone()
+            .unwrap_or_else(|| panic!("set_bend_strength: map {} doesn't bend", self.name));
+        let settings = &self.settings.reality_bend;
+        self.bend = Bend::FromStrength(strength_frac, settings.edge_radius_m, self.r);
+        let height_m: f64 = self.r * hole.centre.y.asinh();
+        let rise_m: f64 =
+            (settings.edge_radius_m / std::f64::consts::PI - height_m) * strength_frac;
+        let frame: DMat4 = make_boost(AXIS_Y, rise_m / self.r) * hole.frame;
+        let full_strength_mass: f64 = settings.max_schwarzschild_radius_m / 4.0 / self.r;
+        let full_strength_reach: f64 = settings.max_reach_m / self.r;
+        self.warps[index] = VoxelWarp {
+            frame,
+            inverse: invert_lorentz(frame),
+            centre: frame.col(AXIS_W),
+            m: hole.m + (full_strength_mass - hole.m) * strength_frac,
+            reach: hole.reach + (full_strength_reach - hole.reach) * strength_frac,
+            ..hole
+        };
     }
 
     /// `find_aimed_material` gives the material of the block straight ahead of `camera`'s eye
