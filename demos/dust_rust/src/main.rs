@@ -1118,7 +1118,7 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
                 [-62.0, -46.5],
                 [-50.0, -40.0],
                 None,
-                0.0,
+                LASER_INTO_WORMHOLE_PITCH_RAD,
             )
         },
         VoxelView {
@@ -1253,6 +1253,9 @@ fn make_voxel_photo_views() -> Vec<VoxelView> {
 /// picture's pixels (3: 9 samples a pixel).
 /// `BENCH_DUST_AGE_S` is how old a laser view's dust burst is when the benchmark draws it.
 const BENCH_DUST_AGE_S: f64 = 0.5;
+/// `LASER_INTO_WORMHOLE_PITCH_RAD` aims the `laser_into_wormhole` view down from its dune at mouth A's
+/// centre, which sits at eye height above the sand (W-126, same play in every level).
+const LASER_INTO_WORMHOLE_PITCH_RAD: f64 = -0.2;
 
 /// `CLIP_START_UTC_S` is the shared UTC time a clip starts at, `CLIP_FRAMES_PER_S` its frame rate, and
 /// `CLIP_BURST_PERIOD_S` how often its laser's burst of sand starts again.
