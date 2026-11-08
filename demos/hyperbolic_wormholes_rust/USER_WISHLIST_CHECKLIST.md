@@ -10,10 +10,6 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
-- [~] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": if you crouch, the energy for
-  running is recharged at the same rate as when you run (drains it); if you walk, it is recharged at half that. This
-  is the default in the YAML, and in general it should be parameterized. Claimed by Claude Code (session
-  `wizardly-hamilton-23a121`), branch `claude/crouch-recharge`, 2026-11-07.
 - [~] **W-80 Smoother bar pulses.** The pulsing should start where the bar's filled part ends: losing health, it starts
   at the last hit point, not the bar's end (empty slots don't count). The blue pulse going left should be less dark,
   and it too starts on the last filled slot. Pulses shouldn't light whole segments: they should look more Gaussian
@@ -235,3 +231,6 @@ is in [`AGENTS.md`](AGENTS.md).
   you press `1` or `2` to choose a team. Players can shoot only once the server has let them in. #209.
 - [x] **W-79 Only serve and join.** "Make a commit to disable everything except starting a server and connecting to
   a server; we will not be using the local demo etc." `make serve-game` and `make join-game` remain. #212.
+- [x] **W-81 Crouching recharges faster.** "Having crouch recharge walking faster": if you crouch, the energy for
+  running is recharged at the same rate as when you run (drains it); if you walk, it is recharged at half that. This
+  is the default in the YAML, and in general it should be parameterized. #PR.

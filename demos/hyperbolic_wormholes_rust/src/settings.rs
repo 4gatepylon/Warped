@@ -62,13 +62,14 @@ pub struct MovementSettings {
     pub crouch_s: f64,
 }
 
-/// `SprintEnergySettings` is how long a full sprint bar lasts and how long an empty one takes to
-/// refill.
+/// `SprintEnergySettings` is how long a full sprint bar lasts, and how long an empty one takes to
+/// refill while crouched and while walking or standing upright.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SprintEnergySettings {
     pub drain_s: f64,
-    pub refill_s: f64,
+    pub refill_crouching_s: f64,
+    pub refill_walking_s: f64,
 }
 
 /// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, and how long
@@ -468,7 +469,7 @@ mod tests {
     fn unknown_and_missing_keys_fail() {
         let unknown: String = BUILTIN_SERVER_YAML.replace("drain_s:", "drain_seconds:");
         assert!(ServerSettings::FromYaml(&unknown, "test").is_err());
-        let missing: String = BUILTIN_SERVER_YAML.replace("  refill_s: 15.0", "");
+        let missing: String = BUILTIN_SERVER_YAML.replace("  refill_walking_s: 15.0", "");
         assert!(ServerSettings::FromYaml(&missing, "test").is_err());
         let unknown_view: String = BUILTIN_PLAYER_YAML.replace("motion_blur_s:", "blur_s:");
         assert!(PerPlayerSettings::FromYaml(&unknown_view, "test").is_err());

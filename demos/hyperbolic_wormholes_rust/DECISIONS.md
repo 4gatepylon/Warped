@@ -1275,6 +1275,18 @@
 - **Rationale:** you recommended disabling everything except starting a server and connecting to one, since nobody
   will use the local demo.
 
+### D93. Crouching refills the sprint energy faster
+
+- **Choice:** `sprint_energy.refill_s` becomes two settings. `refill_crouching_s` (7.5 s, as fast as sprinting
+  empties the bar) applies while crouched; `refill_walking_s` (15 s, half as fast, the old rate) applies while
+  walking or standing upright. Sprinting drains the bar as before (`drain_s`, 7.5 s).
+- **Alternatives:**
+  - a third rate for standing still upright (you named only crouching and walking, so standing keeps the walking
+    rate);
+  - keeping `refill_s` beside a crouch multiplier (two rates in seconds read more plainly).
+- **Rationale:** you asked that crouching recharge the energy for running at the same rate as running uses it, and
+  walking at half that, as YAML defaults that can be changed.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

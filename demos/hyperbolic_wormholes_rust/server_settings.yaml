@@ -25,7 +25,8 @@ movement:
 
 sprint_energy:
   drain_s: 7.5  # Seconds of sprinting that empty a full bar.
-  refill_s: 15.0  # Seconds to refill an empty bar while Shift is up.
+  refill_crouching_s: 7.5  # Seconds to refill an empty bar while crouched (as fast as sprinting empties it).
+  refill_walking_s: 15.0  # Seconds to refill it while walking or standing upright (half as fast).
 
 sniper:  # Gun 1 (key 1): the thin laser wand, one shot per click.
   shot_s: 0.25  # How long each shot hits whatever the crosshair crosses.
