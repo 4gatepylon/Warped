@@ -1151,36 +1151,48 @@
   - slowing walking while aiming (not asked for).
 - **Rationale:** you asked for a way to aim on the right button, with the flashlight moved to another key.
 
-### D84. A blueshift toward cyan after going through a wormhole
+### D84. A Doppler shift while moving inside a wormhole mouth
 
-- **Choice:**
-  - **When:** the step that takes a player through a mouth (`StepReport::has_crossed_mouth` on a voxel map, any
-    crossing message on the house) starts the tint at its peak. It fades over `view.wormhole_tint_s`, 1.5 s, along
-    a smoothstep, so it lingers a moment at the peak and eases out. Each window steps only its own player, so in a
-    game on a server only the player who went through sees it.
+- **Choice** (W-82 replaced W-52's 1.5 s cyan tint after each crossing, which turned greys greenish):
+  - **When:** the shift depends only on where the player is and how they move, with no timer. Its strength is the
+    tint setting × how deep the eye is in a mouth × the speed along the view (forward speed × cos pitch + vertical
+    speed × sin pitch) in walking speeds, held within ±1.25. Forward gives a blueshift, backward a redshift, standing
+    still or stepping sideways none.
+  - **How deep:** 1 − (ρ / reach)², with ρ the eye's distance to the centre of the mouth whose reach holds it, the
+    same taper as the mouth's bending: 1 at the throat, 3/4 halfway out, 0 at the reach's edge (15 m on Lunar
+    Surface), where the bending ends, and 0 beyond it. Through the throat the eye is at the other mouth's throat, so
+    the shift carries on there and falls as the player walks out.
   - **The shift:** the overlay shader's `blueshift_scene` reads each pixel's red, green and blue as samples of a
-    spectrum at 610, 550 and 465 nm, joined by straight lines, and falling past red to a quarter of red's at 700 nm
-    (the infrared a blueshift brings into view). Moving straight ahead at β = 0.15 of light speed at the peak, the
-    relativistic Doppler factor D = √(1 − β²) / (1 − β cos θ), with θ the angle off the middle of the screen, is
-    1.16 in the middle and 1.08 in the corners of a 16:10 window. Each channel shows the light at D times its
-    wavelength: red fades, green takes red's light and blue takes green's, so greys turn cyan and reds turn green.
-    The pixel is also D^1.5 times as bright (beaming), plus a faint teal glow, (D^1.5 − 1) × (0, 0.3, 0.36), so the
-    black sky, often half the screen, turns too.
+    spectrum at 610, 550 and 465 nm, joined by straight lines and falling to 0 at the eye's limits, 400 and 700 nm.
+    Each channel shows the light at D times its wavelength, with the relativistic Doppler factor
+    D = √(1 − β²) / (1 − β cos θ). At strength 1 (walking at the throat), β is 0.2 forward and −0.3 backward;
+    beyond 1 (sprinting), β grows with it; below 1, the colour at strength 1 fades in instead. Forward, red fades and
+    green takes red's light, so greys turn a bluish cyan, deep blue in the middle; backward, blue fades and greys
+    turn red. The pixel is D times as bright, plus a faint blue (or red) glow, (0, 0.12, 0.4) (or (0.4, 0.04, 0))
+    times |D − 1|, so the black sky turns too.
   - **What it touches:** the scene only, after motion blur; the HUD, text, minimap and the gun in your hand stay as
-    they are, since they move with you.
+    they are, since they move with you. Each window steps only its own player, so in a game on a server only that
+    player sees it. The house map has no mouth reach, so it shows no shift.
   - **Settings:** each player's `view.wormhole_tint_frac` (1 by default; 0 to 1, 0 for none; also in the menu as
-    `wormhole tint 0-1`) scales β, and `view.wormhole_tint_s` (1.5 s; 0 for none) sets the fade.
+    `wormhole tint 0-1`). `view.wormhole_tint_s` is gone. A saved settings file that still has it loads, because
+    `REMOVED_PLAYER_KEYS` in `settings.rs` names it to be dropped; any other unknown key still fails.
+  - **Defaults you can change** (chosen while the questions were open): the shift carries on past the throat while
+    walking out of the other mouth; the middle goes deep blue (not a lighter β of 0.18); red objects turn green under
+    a blueshift, the real effect; the shift snaps on and off with movement, with no smoothing.
 - **Alternatives:**
-  - a flat cyan overlay, or a hue rotation (you asked for something like the relativistic effect on colour; with
-    them a red object would stay reddish);
-  - β = 0.10 or 0.12 (warm ground turned mint green rather than cyan);
-  - real beaming, D³ to D⁴ (1.6 times as bright in the middle, washing out the ground);
-  - aberration too: the scene squeezed toward the middle of the screen, as it would really be at that speed (left
-    out because you asked about colour, and the map's edge already warps the view);
-  - the player's real direction through the mouth instead of straight ahead (players nearly always walk in facing
-    it).
-- **Rationale:** you asked that going through a wormhole turn your whole screen kind of cyan, simulating the
-  relativistic effect on colour if possible.
+  - a smaller shift below strength 1 instead of fading in (a small shift first turns greys greenish cyan, or
+    yellowish backward, since removing only red or only blue leaves the other two);
+  - the real dependence on θ (the corners stayed greenish while the middle went deep blue); it keeps half (cos θ is
+    taken half way from 1), which is not physical;
+  - the same β backward as forward (greys turned yellow, not red: green sits 85 nm from blue but 60 nm from red);
+  - a depth that is 1 across most of the reach (it would not say where in the mouth you are), or one that follows
+    the bending's strength (it is concentrated within about 2 m of the throat, a fifth of a second at walking speed);
+  - the player's real velocity direction per pixel (stepping sideways would blueshift one side of the screen and
+    redshift the other), instead of the speed along the view;
+  - real beaming, D³ to D⁴ (washes out the ground when blueshifted).
+- **Rationale:** you asked for a more bluish cyan, not greenish; for the colour to depend on where you are in the
+  wormhole and how fast you move, not on a timer; for it to go away once you are out; and for a redshift when
+  walking backwards.
 
 ### D85. Slanted neon HUD bars that pulse (W-54)
 
@@ -1478,6 +1490,24 @@
   - a taller doorway in the map (only those doorways, and any low ceiling added later would trap players again).
 - **Rationale:** the smallest lift that clears is what a step needs. Searching from below finds it wherever there is
   room for it, and costs at most 15 more checks, only on a blocked step.
+
+### D97. Every other player on the menu's map page (W-90)
+
+- **Choice:** the MAP page shows every other player in the game as a dot in their team's colour, 4 px across the
+  picture's radius (yours is 5 px), ringed in dark grey (yours is ringed in white and points the way you face). It
+  shows both teams, as the minimap does, and players beyond your 60 m ring too, undimmed. A dot sits over the ground
+  point under the player's eye, and your own disk is drawn over any dot under it. The list is the one the minimap
+  uses, the server's last snapshot, so it already leaves out players who are dead or still in the lobby: the
+  server sends only players who have joined a team and drops a player when they are hit, until they rejoin.
+- **Alternatives:**
+  - teammates only (you can ask for it; the minimap shows both teams too);
+  - only players within your ring, like the minimap (the page shows the whole map, so far players are worth seeing);
+  - a label with each player's number, as the spawns have (more clutter, and the scores page lists the numbers);
+  - a line for the dots in the legend (it is full: 62 of the 63 characters that fit, so a new line would push out
+    another one).
+- **Rationale:** you asked to show where other people are on the map, like the minimap's dots. A dark ring keeps a
+  dot apart from your own white-ringed disk, the console markers and the spawns, and shows on both the bright and
+  the dimmed ground.
 
 ### D15. WebGL at the same drawing-buffer sizes
 

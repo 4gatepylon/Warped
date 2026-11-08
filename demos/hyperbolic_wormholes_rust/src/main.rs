@@ -117,6 +117,7 @@ const WINDOW_TITLE: &str = "Hyperbolic wormholes (Rust)";
 const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
+const MAX_BLUESHIFT_FRAC: f64 = 1.25;
 const WAND_RECOIL_M: f32 = 0.035;
 const WAND_RECOIL_TILT_RAD: f32 = 0.12;
 const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
@@ -166,9 +167,9 @@ const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
 const GUN_POSE_PER_S: f64 = 6.0;
 const WAND_JOG_CENTER_M: [f32; 3] = [0.22, -0.22, -0.34];
-const WAND_AIM_YAW_RAD: f32 = 0.06;
+const WAND_AIM_YAW_RAD: f32 = 0.117;
 const WAND_JOG_YAW_RAD: f32 = 0.35;
-const WAND_AIM_PITCH_RAD: f32 = 0.06;
+const WAND_AIM_PITCH_RAD: f32 = 0.098;
 const WAND_JOG_PITCH_RAD: f32 = -0.35;
 const WAND_JOG_ROLL_RAD: f32 = 0.5;
 const WAND_JOG_SWING_RAD: f32 = 0.18;
@@ -1697,25 +1698,20 @@ fn run_autopilot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Resu
     Ok(())
 }
 
-/// `fade_wormhole_tint` gives how much of the blueshift after a wormhole is left `dt_s` after
-/// `left_frac` was (1 just after going through, 0 none), fading linearly over `tint_s` (0 for none).
+/// `get_blueshift_frac` gives how far the scene blueshifts (the overlay's `blueshift_frac`: 1 for
+/// walking straight ahead at a mouth's throat, negative for a redshift, 0 for none): `strength_frac`
+/// times how deep the eye is in a mouth (`VoxelWorld::get_mouth_depth_frac`) times the speed
+/// along the view in walking speeds, held within ±`MAX_BLUESHIFT_FRAC`.
 ///
-/// Example: `let left_frac = fade_wormhole_tint(1.0, 1.0 / 60.0, 1.5);`
-fn fade_wormhole_tint(left_frac: f64, dt_s: f64, tint_s: f64) -> f64 {
-    if tint_s > 0.0 {
-        (left_frac - dt_s / tint_s).max(0.0)
-    } else {
-        0.0
-    }
-}
-
-/// `get_blueshift_frac` gives how far into its blueshift the scene is (the overlay's
-/// `blueshift_frac`) with `left_frac` of the fade left: `strength_frac` times the smoothstep
-/// 3x² − 2x³ of `left_frac`, so the tint lingers a moment at its peak and eases out at the end.
-///
-/// Example: `let blueshift_frac = get_blueshift_frac(0.5, 1.0);`
-fn get_blueshift_frac(left_frac: f64, strength_frac: f64) -> f32 {
-    (strength_frac * left_frac * left_frac * (3.0 - 2.0 * left_frac)) as f32
+/// Example: `let blueshift_frac = get_blueshift_frac(0.5, -10.0, 10.0, 1.0);`
+fn get_blueshift_frac(
+    depth_frac: f64,
+    view_m_per_s: f64,
+    walk_m_per_s: f64,
+    strength_frac: f64,
+) -> f32 {
+    (strength_frac * depth_frac * view_m_per_s / walk_m_per_s)
+        .clamp(-MAX_BLUESHIFT_FRAC, MAX_BLUESHIFT_FRAC) as f32
 }
 
 /// `Session` is the state of a played window: the world, the player, the toggles and the HUD's
@@ -1767,7 +1763,7 @@ struct Session {
     run_pose_frac: f64,
     motion_blur_frac: f32,
     hit_effect_frac: f64,
-    wormhole_tint_left_frac: f64,
+    blueshift_frac: f32,
     last_health_frac: f64,
     health_pulses: hud_bars::BarPulses,
     energy_pulses: hud_bars::BarPulses,
@@ -1834,7 +1830,8 @@ impl PackedFrame {
 /// `Tracer` is a fired laser drawn as a beam flying out along its path (`segments`, traced when it
 /// was fired, `length_m` long): its front leaves the muzzle at `fired_s` (seconds into the session)
 /// and moves at `speed_m_per_s`, each point stays lit for `trail_s` after the front passes it, and
-/// `spot` glows where it hit while the trail is there.
+/// `spot` glows where it hit while the trail is there. This player's own shots (`is_own`) stay
+/// joined to the gun in hand while their trail still reaches the muzzle.
 struct Tracer {
     segments: Vec<voxel_world::BeamSegment>,
     length_m: f64,
@@ -1843,6 +1840,7 @@ struct Tracer {
     fired_s: f64,
     speed_m_per_s: f64,
     trail_s: f64,
+    is_own: bool,
 }
 
 impl Tracer {
@@ -1885,6 +1883,7 @@ impl Tracer {
             fired_s,
             speed_m_per_s,
             trail_s,
+            is_own: false,
         }
     }
 
@@ -2075,7 +2074,7 @@ impl Session {
             is_running: false,
             is_jumping: false,
             is_walking_upright: false,
-            gun: Gun::Laser,
+            gun: Gun::Rifle,
             is_trigger_held: false,
             is_flashlight_on: false,
             rifle_next_shot_s: 0.0,
@@ -2094,7 +2093,7 @@ impl Session {
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
-            wormhole_tint_left_frac: 0.0,
+            blueshift_frac: 0.0,
             last_health_frac: 1.0,
             health_pulses: hud_bars::BarPulses::New(1.0),
             energy_pulses: hud_bars::BarPulses::New(1.0),
@@ -2281,11 +2280,7 @@ impl Session {
         self.hit_effect_frac =
             (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
         self.update_bar_pulses(dt_s);
-        self.wormhole_tint_left_frac = fade_wormhole_tint(
-            self.wormhole_tint_left_frac,
-            dt_s,
-            self.player_settings.view.wormhole_tint_s,
-        );
+        self.blueshift_frac = 0.0;
         self.motion_blur_frac = if blur_s > 0.0 {
             (-dt_s / blur_s).exp() as f32
         } else {
@@ -2345,22 +2340,30 @@ impl Session {
             (self.aim_frac + if is_aiming { aim_step } else { -aim_step }).clamp(0.0, 1.0);
         let is_holding_e: bool = held(Action::TurnOffConsole);
         let team: usize = self.get_team() as usize;
-        let report: voxel_world::StepReport = match &mut self.voxel {
-            Some(voxel) => voxel.player.step(&voxel.world, &input, dt_s, team),
+        let messages: Vec<String> = match &mut self.voxel {
+            Some(voxel) => {
+                let report: voxel_world::StepReport =
+                    voxel.player.step(&voxel.world, &input, dt_s, team);
+                let pitch_rad: f64 = voxel.player.pitch_rad;
+                let view_m_per_s: f64 = report.forward_m_per_s * pitch_rad.cos()
+                    + voxel.player.vertical_m_per_s * pitch_rad.sin();
+                let eye: DVec4 = voxel.player.get_camera_frame(&voxel.world).col(AXIS_W);
+                self.blueshift_frac = get_blueshift_frac(
+                    voxel.world.get_mouth_depth_frac(eye),
+                    view_m_per_s,
+                    voxel.world.player.walk_m_per_s,
+                    self.player_settings.view.wormhole_tint_frac,
+                );
+                report.messages
+            }
             None => {
                 let messages: Vec<String> =
                     physics::update_player(&self.world, &mut self.player, &input, dt_s);
                 physics::level_out(&mut self.player.frame, dt_s);
-                voxel_world::StepReport {
-                    has_crossed_mouth: !messages.is_empty(),
-                    messages,
-                }
+                messages
             }
         };
-        if report.has_crossed_mouth {
-            self.wormhole_tint_left_frac = 1.0;
-        }
-        for message in report.messages {
+        for message in messages {
             self.message = message;
             self.message_time_s = MESSAGE_DURATION_S;
         }
@@ -2837,7 +2840,10 @@ impl Session {
                 && let Some(shot) = &view.shot
             {
                 let is_rifle: bool = self.gun == Gun::Rifle;
-                let tracer = Tracer::New(shot, team, now_s, is_rifle, &self.settings, r);
+                let tracer = Tracer {
+                    is_own: true,
+                    ..Tracer::New(shot, team, now_s, is_rifle, &self.settings, r)
+                };
                 add_dust_burst(&mut self.dust_bursts, &voxel.world, shot, &tracer, is_rifle);
                 self.tracers.push(tracer);
             }
@@ -3108,21 +3114,50 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team, on a map of curvature radius `r`.
+    /// shooter's team, on a map of curvature radius `r`. While the trail of one of this player's
+    /// own shots still reaches the muzzle, its beam starts at the gun's tip as drawn now
+    /// (`get_muzzle`), so it stays on the tip as the gun moves.
     ///
     /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
     fn get_lit_beams(&self, r: f64) -> Vec<(Vec<voxel_world::BeamSegment>, u32)> {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
+        let muzzle: Option<glam::DVec4> = self.get_muzzle(r);
         self.tracers
             .iter()
             .map(|tracer| {
                 let (tail_m, head_m) = tracer.get_lit_m(now_s);
-                (
-                    voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m),
-                    tracer.team,
-                )
+                let mut lit: Vec<voxel_world::BeamSegment> =
+                    voxel_world::clip_beam(&tracer.segments, r, tail_m, head_m);
+                if tracer.is_own
+                    && tail_m <= 0.0
+                    && let (Some(muzzle), Some(first)) = (muzzle, lit.first_mut())
+                    && let Some(joined) = voxel_world::BeamSegment::Between(
+                        muzzle,
+                        voxel_world::geodesic_point(first.a, first.b, first.length),
+                    )
+                {
+                    *first = joined;
+                }
+                (lit, tracer.team)
             })
             .collect()
+    }
+
+    /// `get_muzzle` gives where the tip of the gun in hand shows in the world, on a map of
+    /// curvature radius `r`: the wand's tip in camera space, moved toward the view's centre by the
+    /// aim zoom (which magnifies the scene but not the gun), or `None` with no gun in view.
+    ///
+    /// Example: `let muzzle = self.get_muzzle(voxel.world.r);`
+    fn get_muzzle(&self, r: f64) -> Option<glam::DVec4> {
+        let tip_m: glam::DVec3 = self.get_wand()?.get_tip_m().as_dvec3();
+        let zoom: f64 = self.get_zoom();
+        Some(
+            self.get_eye_frame()
+                * voxel_world::map_exp(
+                    glam::DVec3::new(tip_m.x / zoom, tip_m.y / zoom, tip_m.z),
+                    r,
+                ),
+        )
     }
 
     /// `make_overlay_minimap` gives the minimap for a window of `window_px` (`minimap.rs`): around
@@ -3232,13 +3267,18 @@ impl Session {
     }
 
     /// `make_map_picture` gives the map page's picture: the whole map from above
-    /// (`map_layout.rs`) with this player on it, centred in the page's area for it.
+    /// (`map_layout.rs`) with this player on it and, in a game on a server, every other player in
+    /// the game, centred in the page's area for it.
     ///
     /// Example: `let picture = self.make_map_picture();`
     fn make_map_picture(&self) -> Picture {
         let feet: glam::DMat4 = match &self.voxel {
             Some(voxel) => voxel.player.get_feet_frame(&voxel.world),
             None => self.player.frame,
+        };
+        let others: Vec<(DVec4, u32)> = match &self.multiplayer {
+            Some(multiplayer) => get_points_and_teams(&multiplayer.client.players),
+            None => Vec::new(),
         };
         let size_px: (u32, u32) = self.map_layout.get_size_px();
         let size_mask_px: [i32; 2] =
@@ -3248,10 +3288,11 @@ impl Session {
                 + (MAP_AREA_MAX_EXCL_MASK_PX[a] - MAP_AREA_MIN_MASK_PX[a] - size_mask_px[a]) / 2
         });
         Picture {
-            pixels: self.map_layout.draw_player(
+            pixels: self.map_layout.draw_players(
                 feet,
                 self.get_team(),
                 self.player_settings.minimap.range_m,
+                &others,
             ),
             size_px,
             min_mask_px,
@@ -3501,6 +3542,17 @@ fn get_eyes(players: &[net::RemotePlayer]) -> Vec<DVec4> {
     players
         .iter()
         .map(|player| player.frame.col(AXIS_W))
+        .collect()
+}
+
+/// `get_points_and_teams` gives where other players are (their eyes) and their teams (indices
+/// into `net::TEAM_NAMES`), for the map page.
+///
+/// Example: `let others = get_points_and_teams(&client.players);`
+fn get_points_and_teams(players: &[net::RemotePlayer]) -> Vec<(DVec4, u32)> {
+    players
+        .iter()
+        .map(|player| (player.frame.col(AXIS_W), player.team))
         .collect()
 }
 
@@ -3946,15 +3998,12 @@ fn play_on_layer(
         let wand: Option<render_metal::OverlayWand> = session.get_wand();
         let stretch_frac: f32 = session.get_edge_stretch_frac();
         let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
-        let blueshift_frac: f32 = get_blueshift_frac(
-            session.wormhole_tint_left_frac,
-            session.player_settings.view.wormhole_tint_frac,
-        );
+        let blueshift_frac: f32 = session.blueshift_frac;
         let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
             || !rects.is_empty()
             || wand.is_some()
             || stretch_frac > 0.0
-            || blueshift_frac > 0.0
+            || blueshift_frac != 0.0
             || minimap.is_some())
         .then(|| render_metal::Overlay {
             dim_frac: match &overlay_text {
@@ -4013,9 +4062,9 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Wormhole tint left | all (just through), part, none (stays none) | `wormhole_tint_peaks_and_fades` |
-    //! | Wormhole tint fade time | above 0 (fades over it), 0 (no tint) | `wormhole_tint_peaks_and_fades` |
-    //! | Wormhole tint strength | 1, between 0 and 1, 0 | `wormhole_tint_peaks_and_fades` |
+    //! | Depth in a mouth | at the throat (1), part way, outside (0) | `wormhole_shift_follows_depth_and_speed` |
+    //! | Speed along the view | forward (blueshift), backward (redshift), still (none), past the cap (held at it) | `wormhole_shift_follows_depth_and_speed` |
+    //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
     //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
     //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
@@ -4024,26 +4073,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wormhole_tint_peaks_and_fades() {
-        const TINT_S: f64 = 1.5;
-        const DT_S: f64 = 1.0 / 60.0;
+    fn wormhole_shift_follows_depth_and_speed() {
+        const WALK_M_PER_S: f64 = 10.0;
+        const SPRINT_M_PER_S: f64 = 18.0;
         const HALF_FRAC: f64 = 0.5;
         const WEAK_STRENGTH_FRAC: f64 = 0.4;
-        assert_eq!(get_blueshift_frac(1.0, 1.0), 1.0);
-        assert_eq!(get_blueshift_frac(1.0, 0.0), 0.0);
-        assert_eq!(get_blueshift_frac(0.0, 1.0), 0.0);
-        let half_way: f32 = get_blueshift_frac(HALF_FRAC, WEAK_STRENGTH_FRAC);
-        assert!((f64::from(half_way) - HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
-        let mut left_frac: f64 = 1.0;
-        let mut fade_frames: Vec<f64> = Vec::new();
-        while left_frac > 0.0 {
-            left_frac = fade_wormhole_tint(left_frac, DT_S, TINT_S);
-            fade_frames.push(left_frac);
-        }
-        assert!((fade_frames.len() as f64 * DT_S - TINT_S).abs() <= DT_S);
-        assert!(fade_frames.windows(2).all(|pair| pair[1] < pair[0]));
-        assert_eq!(fade_wormhole_tint(0.0, DT_S, TINT_S), 0.0);
-        assert_eq!(fade_wormhole_tint(1.0, DT_S, 0.0), 0.0);
+        let shift = |depth_frac: f64, view_m_per_s: f64, strength_frac: f64| -> f64 {
+            f64::from(get_blueshift_frac(
+                depth_frac,
+                view_m_per_s,
+                WALK_M_PER_S,
+                strength_frac,
+            ))
+        };
+        assert_eq!(shift(1.0, WALK_M_PER_S, 1.0), 1.0);
+        assert_eq!(shift(1.0, -WALK_M_PER_S, 1.0), -1.0);
+        assert_eq!(shift(1.0, 0.0, 1.0), 0.0);
+        assert_eq!(shift(0.0, WALK_M_PER_S, 1.0), 0.0);
+        assert_eq!(shift(1.0, WALK_M_PER_S, 0.0), 0.0);
+        let part_way: f64 = shift(HALF_FRAC, -WALK_M_PER_S, WEAK_STRENGTH_FRAC);
+        assert!((part_way + HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
+        assert!((shift(1.0, SPRINT_M_PER_S, 1.0) - MAX_BLUESHIFT_FRAC).abs() < 1e-6);
+        assert!((shift(1.0, -SPRINT_M_PER_S, 1.0) + MAX_BLUESHIFT_FRAC).abs() < 1e-6);
     }
 
     #[test]
