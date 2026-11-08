@@ -180,6 +180,27 @@ renderers choose the fade and the glow.
   `{"model": "lunar_lambert", "lommel_seeliger_frac", "ambient", "earthshine", "sun_intensity", "shadows": bool}`
   (that mix of Lommel–Seeliger and Lambert reflectance, with straight shadow rays toward the sun if `shadows`).
 
+## Models
+
+`models/<name>/` holds glTF models that maps draw (`scene.gltf`, `scene.bin`, `textures/`, `license.txt`), small
+copies that `prepare_models.py` writes from Sketchfab downloads: same geometry, textures shrunk to 1024 px, spec-gloss
+materials turned into metallic-roughness. It downloads into the git-ignored `.build/sketchfab/` and needs
+`SKETCHFAB_API_TOKEN` only for models not downloaded yet:
+
+```bash
+SKETCHFAB_API_TOKEN=... uv run python prepare_models.py
+```
+
+All are licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) and need their authors credited:
+
+| Folder | Model | Author |
+| --- | --- | --- |
+| `stekelvarken_kazemat/` | ["'Stekelvarken S3' Kazemat (Dutch WWII bunker)"](https://sketchfab.com/3d-models/stekelvarken-s3-kazemat-dutch-wwii-bunker-f409a77deaaf4e3888d47f76ec48dbdd) | [Sjoerd van Riel](https://sketchfab.com/sjoerdnijkerk) |
+| `desert_bunker_garage/` | ["Desert Planet Bunker Garage Thing"](https://sketchfab.com/3d-models/desert-planet-bunker-garage-thing-ebe3177a1c7947b98328d8cab6aa8600) | [Santeri Riikonen](https://sketchfab.com/eKross) |
+| `ww2_field_bunker/` | ["WW2 Field Bunker"](https://sketchfab.com/3d-models/ww2-field-bunker-6ea5cebdaa82455aa3aad26baa6e0375) | [Golden](https://sketchfab.com/goldenblack4) |
+| `scifi_beacon/` | ["Sci-Fi Beacon/Way Point Marker Free Model"](https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f) | [AMMediaGames](https://sketchfab.com/AMMediaGames) |
+| `hesco_barrier/` | ["Hesco Barrier PBR"](https://sketchfab.com/3d-models/hesco-barrier-pbr-ab21217481094e9a84f989e71fd56a59) | [polbrainstorm](https://sketchfab.com/polbrainstorm) |
+
 ## Checking a map
 
 ```bash
