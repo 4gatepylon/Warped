@@ -11,7 +11,8 @@ use crate::settings::ServerSettings;
 use crate::voxel_world::{VoxelPlayer, VoxelWorld};
 
 use super::{Multiplayer, Session, VoxelState, get_eyes, get_map_picture_max_px};
-use crate::{Result, load_map, map, map_layout, net, settings};
+use crate::server_process::load_map;
+use crate::{Result, map, map_layout, net, settings};
 
 const SERVER_SILENT_S: f64 = 2.0;
 

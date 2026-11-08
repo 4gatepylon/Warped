@@ -30,17 +30,22 @@ use crate::thrown_wormholes::{Marker, MouthPlace, ThrownWormholes};
 use crate::voxel_world::{VoxelPlayer, VoxelWorld};
 
 use crate::{
-    Arguments, ENERGY_SEGMENT_COUNT, MIN_IMAGE_SIDE_PX, MS_PER_S, RendererKind, Result, RouteKind,
-    avatar_animation, avatar_model, dust, exit_prompt, get_default_render_scale,
-    get_server_address, hud_bars, key_bindings, load_map, load_settings, map, map_layout, menu,
-    multiplayer, net, render_voxel, shot_noise, spaceships, start_server_process, third_person,
-    viewmodel, voxel_world,
+    Arguments, ENERGY_SEGMENT_COUNT, MIN_IMAGE_SIDE_PX, MS_PER_S, Result, avatar_animation,
+    avatar_model, dust, exit_prompt, hud_bars, key_bindings, map, map_layout, menu, multiplayer,
+    net, render_voxel, shot_noise, spaceships, third_person, viewmodel, voxel_world,
 };
 
 mod hud;
 mod online;
 mod weapons;
 
+use crate::cli::RendererKind;
+use crate::cli::RouteKind;
+use crate::cli::get_default_render_scale;
+use crate::server_process::get_server_address;
+use crate::server_process::load_map;
+use crate::server_process::load_settings;
+use crate::server_process::start_server_process;
 pub(crate) use hud::{OverlayText, get_text_positions, make_text_mask};
 use hud::{get_blueshift_frac, get_map_picture_max_px};
 use online::ConnectionProblem;
@@ -1199,6 +1204,8 @@ mod tests {
     use super::hud::*;
     use super::weapons::*;
     use super::*;
+    use std::net::SocketAddr;
+
     use crate::*;
 
     #[test]
