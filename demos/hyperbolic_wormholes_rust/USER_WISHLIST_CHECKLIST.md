@@ -32,12 +32,6 @@ is in [`AGENTS.md`](AGENTS.md).
   (W-69's own words). W-69 (#216) built shots that stray from the crosshair instead; that stray is to be turned off
   by default. Demos first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/beam-shot-noise`, 2026-11-07.
-- [~] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
-  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
-  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
-  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
-  show a redshift instead. The user wants video or image demos to confirm. Claimed by Claude Code (subagent of
-  session `wizardly-hamilton-23a121`), branch `claude/wormhole-doppler`, 2026-11-07.
 - [~] **W-74 Sharp-edged shapes.** Get rid of the rounded corners on the map's assets (e.g. the buildings): some
   things are cylinders but are kind of blobby, with rounded corners on the top and bottom. If something is a
   cylinder, just make it a cylinder. Claimed by Claude Code (session `77380c25-3707-4944-bac7-d88bb0a7d9e1`), branch
@@ -130,6 +124,11 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
+  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
+  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
+  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
+  show a redshift instead. The user wants video or image demos to confirm. #259.
 - [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
   lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
   laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can
