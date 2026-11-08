@@ -591,7 +591,10 @@ pub fn run_voxel_bot(
             && let Some(walker) = walker.as_mut().filter(|_| client.game.winner.is_none())
         {
             let team: u32 = client.team.expect("a welcome brings the team");
-            let settings: &ServerSettings = client.settings.as_ref().expect("a welcome brings the settings");
+            let settings: &ServerSettings = client
+                .settings
+                .as_ref()
+                .expect("a welcome brings the settings");
             let own_step_s: f64 =
                 BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
             let walk: WalkStep = walker.step(

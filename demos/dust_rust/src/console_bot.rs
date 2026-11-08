@@ -7,12 +7,12 @@
 //!
 //! Interface: `ConsoleWalker` (`New`, `step`), `WalkStep`, `Danger`, `find_warp_dangers`.
 //!
-//! Example: `let walk = walker.step(&world, &mut player, client.game.off_mask, team, 3.0, now_s);`
+//! Example: `let walk = walker.step(&world, &mut player, off_mask, team, 3.0, now_s, 1.0 / 60.0);`
 //!
 //! Must know:
-//! - Limitations: it steers by sight of its goal, without a map of the level's blocks, so a pylon
-//!   behind a long wall may take it several sidesteps; it gives a console up after
-//!   `GIVE_UP_S` and says where it stood.
+//! - Limitations: it steers by sight of its goal, without a map of the level's blocks: along a wall
+//!   it sidesteps ever further, to alternating sides, until its way toward the console is clear,
+//!   so a long wall costs it time; it gives a console up after `GIVE_UP_S` and says where it stood.
 
 use glam::{DMat4, DVec3, DVec4};
 
@@ -206,9 +206,9 @@ impl ConsoleWalker {
             true => world.player.sprint_m_per_s,
             false => world.player.walk_m_per_s,
         };
-        let moved_m: f64 = self
-            .last_point
-            .map_or(speed_m_per_s * dt_s, |last| get_distance(last, body_point) * world.r);
+        let moved_m: f64 = self.last_point.map_or(speed_m_per_s * dt_s, |last| {
+            get_distance(last, body_point) * world.r
+        });
         self.last_point = Some(body_point);
         self.stuck_s = match moved_m < STUCK_MOVED_FRAC * speed_m_per_s * dt_s {
             true => self.stuck_s + dt_s,
@@ -284,7 +284,10 @@ fn turn_toward(player: &mut VoxelPlayer, point: DVec4) {
 /// Example: `aim_pitch(&mut player, camera, aim_point);`
 fn aim_pitch(player: &mut VoxelPlayer, camera: DMat4, point: DVec4) {
     let local: DVec3 = get_local_direction(camera, normalize_tangent(camera.col(AXIS_W), point));
-    player.look(0.0, -local.normalize().y.clamp(-1.0, 1.0).asin() / LOOK_RAD_PER_PX);
+    player.look(
+        0.0,
+        -local.normalize().y.clamp(-1.0, 1.0).asin() / LOOK_RAD_PER_PX,
+    );
 }
 
 /// `find_warp_dangers` gives each of `world`'s wormhole mouths and black holes as a danger: a
@@ -314,13 +317,23 @@ mod tests {
     //! | --- | --- | --- |
     //! | Angle to wrap | inside (-π, π], above it, below it | `angles_wrap_into_one_turn` |
     //! | A danger on the way | none, beside the way (kept), across the way (bent around), around the bot (away) | `the_way_bends_around_dangers` |
+    //! | A window's hold on a built-in map's pylon | from each side, near and at the edge of reach, standing (the server takes every hold the window's own aim makes) | `the_server_takes_every_hold_a_window_makes` |
+
+    use clap::ValueEnum;
 
     use super::*;
-    use crate::geometry::{AXIS_X, AXIS_Z, make_boost};
+    use crate::console_reach::find_console_places;
+    use crate::geometry::{AXIS_X, AXIS_Y, AXIS_Z, make_boost, make_rotation};
+    use crate::map::{Map, MapName};
 
     const R_M: f64 = 40.0;
+    const REACH_M: f64 = 3.0;
     const GOAL_M: f64 = 30.0;
     const ANGLE_TOLERANCE_RAD: f64 = 1e-9;
+    const SIDE_COUNT: usize = 12;
+    const GAPS_M: [f64; 3] = [0.5, 1.5, 2.9];
+    const PYLON_RADIUS_M: f64 = 1.35;
+    const EYE_HEIGHT_M: f64 = 1.6;
 
     /// `point_at` gives the ground point `along_m` ahead (-z) and `right_m` to the right (+x) of
     /// the origin.
@@ -357,11 +370,52 @@ mod tests {
             radius_m: 5.0,
         };
         let bent_rad: f64 = heading(vec![across]);
-        assert!(bent_rad < 0.0, "a danger a little to the right sends the bot left");
+        assert!(
+            bent_rad < 0.0,
+            "a danger a little to the right sends the bot left"
+        );
         let around: Danger = Danger {
             point: point_at(-1.0, 0.0),
             radius_m: 5.0,
         };
         assert!(heading(vec![around]).abs() < ANGLE_TOLERANCE_RAD);
+    }
+
+    #[test]
+    fn the_server_takes_every_hold_a_window_makes() {
+        for name in MapName::value_variants() {
+            let map: Map = Map::Builtin(name.get_folder_name()).expect("a built-in map");
+            if map.space.curvature_radius_m.is_none() || map.structures.is_empty() {
+                continue;
+            }
+            let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a world");
+            let places: Vec<ConsolePlace> = find_console_places(&map).expect("console places");
+            let mut window_hold_count: usize = 0;
+            for (index, place) in places.iter().enumerate() {
+                for side in 0..SIDE_COUNT {
+                    for gap_m in GAPS_M {
+                        let turn_rad: f64 = std::f64::consts::TAU * side as f64 / SIDE_COUNT as f64;
+                        let eye: DMat4 = place.frame
+                            * make_rotation(AXIS_X, AXIS_Z, turn_rad)
+                            * make_boost(AXIS_Z, (PYLON_RADIUS_M + gap_m) / world.r)
+                            * make_boost(AXIS_Y, EYE_HEIGHT_M / world.r);
+                        let aimed: Option<u8> = world.find_aimed_material(eye, REACH_M);
+                        if aimed == Some(world.consoles[index].material) {
+                            window_hold_count += 1;
+                            assert!(
+                                place.is_held_from(eye, REACH_M),
+                                "map {:?}, console {index}, side {side}, gap {gap_m} m",
+                                map.name
+                            );
+                        }
+                    }
+                }
+            }
+            assert!(
+                window_hold_count > 0,
+                "map {:?}: no window aim met a console",
+                map.name
+            );
+        }
     }
 }

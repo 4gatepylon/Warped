@@ -203,10 +203,7 @@ mod tests {
     fn a_console_is_held_only_within_reach() {
         let pylon: ConsolePlace = make_pylon();
         assert!(pylon.is_held_from(make_eye(REACH_M - SMALL_M, 0.0), REACH_M));
-        assert!(pylon.is_held_from(
-            make_eye(REACH_M + REACH_TOLERANCE_M, 0.0),
-            REACH_M
-        ));
+        assert!(pylon.is_held_from(make_eye(REACH_M + REACH_TOLERANCE_M, 0.0), REACH_M));
         assert!(!pylon.is_held_from(
             make_eye(REACH_M + 2.0 * REACH_TOLERANCE_M + SMALL_M, 0.0),
             REACH_M
@@ -218,10 +215,7 @@ mod tests {
         let pylon: ConsolePlace = make_pylon();
         assert!(pylon.is_held_from(make_eye(1.0, 0.0), REACH_M));
         assert!(!pylon.is_held_from(make_eye(1.0, std::f64::consts::PI), REACH_M));
-        assert!(!pylon.is_held_from(
-            make_eye(1.0, std::f64::consts::FRAC_PI_2),
-            REACH_M
-        ));
+        assert!(!pylon.is_held_from(make_eye(1.0, std::f64::consts::FRAC_PI_2), REACH_M));
         let looking_up: DMat4 = make_eye(1.0, 0.0) * make_rotation(AXIS_Z, AXIS_Y, -1.5);
         assert!(!pylon.is_held_from(looking_up, REACH_M));
     }
@@ -239,7 +233,10 @@ mod tests {
             let aimed: DMat4 = eye
                 * make_rotation(AXIS_X, AXIS_Z, yaw_rad)
                 * make_rotation(AXIS_Z, AXIS_Y, -pitch_rad);
-            assert!(pylon.is_held_from(aimed, REACH_M), "gap {gap_m}, rise {rise_m}");
+            assert!(
+                pylon.is_held_from(aimed, REACH_M),
+                "gap {gap_m}, rise {rise_m}"
+            );
         }
     }
 

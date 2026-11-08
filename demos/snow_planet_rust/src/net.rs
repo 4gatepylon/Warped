@@ -45,8 +45,8 @@ use glam::{DMat4, DVec4};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
-use crate::map::{Blizzard, FLAT_CURVATURE_RADIUS_M, Map};
 use crate::console_reach::ConsolePlace;
+use crate::map::{Blizzard, FLAT_CURVATURE_RADIUS_M, Map};
 use crate::settings::ServerSettings;
 use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 use crate::terrain::get_fermi_coordinates;

@@ -1529,7 +1529,8 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         .expect("validate_arguments checked --bot");
     let (hit_count, eliminated_count) = if map.structures.is_empty() {
         let world: World = World::FromMap(&map)?;
-        let mut renderer: Box<dyn Renderer> = make_renderer(arguments.renderer, arguments.sampling)?;
+        let mut renderer: Box<dyn Renderer> =
+            make_renderer(arguments.renderer, arguments.sampling)?;
         let mut saved_count: usize = 0;
         multiplayer::run_bot(&world, &mut client, duration_s, |data, id| {
             saved_count += 1;

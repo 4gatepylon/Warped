@@ -1286,8 +1286,7 @@ impl VoxelWorld {
         (1..=step_count).all(|i| {
             let along_m: f64 = distance_m * i as f64 / step_count as f64;
             let ahead: DMat4 = renormalize_frame(body * make_boost(AXIS_Z, -along_m / self.r));
-            let nearby: Vec<usize> =
-                self.find_nearby_structures(ahead.col(AXIS_W), NEARBY_REACH_M);
+            let nearby: Vec<usize> = self.find_nearby_structures(ahead.col(AXIS_W), NEARBY_REACH_M);
             !self.is_outside_boundary(ahead.col(AXIS_W))
                 && (!self.is_body_blocked(ahead, h_m, &nearby)
                     || self.find_walk_rise_m(ahead, h_m, &nearby).is_some())
