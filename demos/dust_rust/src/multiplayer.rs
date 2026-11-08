@@ -516,15 +516,18 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
 /// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
 /// view) and rejoins `BOT_REJOIN_S` after being hit. The black hole grows with the server's
-/// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. It returns how many players it hit and how often it was hit,
+/// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. With
+/// `objective_console_teams` (each console's team), it holds `E` on the first of the other team's
+/// consoles still on until a team wins. It returns how many players it hit and how often it was hit,
 /// and fails if the server curves space other than the built-in settings (`check_bot_space`).
 ///
-/// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, |frame, id| Ok(()))?;`
+/// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, None, |frame, id| Ok(()))?;`
 pub fn run_voxel_bot(
     world: &VoxelWorld,
     client: &mut Client,
     duration_s: f64,
     black_hole_strength: Option<f64>,
+    objective_console_teams: Option<&[u32]>,
     mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
     let (mut grown_world, mut black_hole_growth) =
@@ -623,11 +626,19 @@ pub fn run_voxel_bot(
                 }
             }
             last_victim = view.hit_player_id;
+            let disabling_console: Option<u8> = objective_console_teams
+                .filter(|_| client.game.winner.is_none())
+                .and_then(|teams| {
+                    (0..teams.len()).find(|&i| {
+                        Some(teams[i]) != client.team && client.game.off_mask >> i & 1 == 0
+                    })
+                })
+                .map(|i| i as u8);
             client.send_state(
                 camera,
                 is_laser_on,
                 false,
-                None,
+                disabling_console,
                 0.0,
                 PlayerWormholes::default(),
             )?;

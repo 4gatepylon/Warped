@@ -35,7 +35,7 @@ use std::cell::Cell;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -998,6 +998,21 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
     Ok(socket)
 }
 
+/// `write_level_result` writes `{"winner": "<team>"}` to `path` atomically: to `<path>.partial`,
+/// then renamed.
+///
+/// Example: `write_level_result(Path::new("result.json"), 0)?;`
+fn write_level_result(path: &Path, winner: u32) -> Result<()> {
+    let partial_path: PathBuf = PathBuf::from(format!("{}.partial", path.display()));
+    std::fs::write(
+        &partial_path,
+        format!("{{\"winner\": \"{}\"}}\n", TEAM_NAMES[winner as usize]),
+    )?;
+    std::fs::rename(&partial_path, path)?;
+    println!("Wrote the level result to {}.", path.display());
+    Ok(())
+}
+
 /// `serve` runs a server for the map `map_name` with `settings` on `socket` (from `bind_server`)
 /// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
 /// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
@@ -1006,9 +1021,11 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 /// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
 /// `new_game_after_win`, that long after a team won, admits only players who prove they know
 /// `game_password` (empty for anyone), and broadcasts
-/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
+/// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it. With
+/// `level_result_path` (a match's `--level-result-file`), it writes the winner there once, as
+/// `{"winner": "blue"}`, and never starts a new game.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new())?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "dust".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, Vec::new(), None)?;`
 #[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
@@ -1019,6 +1036,7 @@ pub fn serve(
     should_start_new_game: &AtomicBool,
     new_game_after_win: Option<Duration>,
     game_password: Vec<u8>,
+    level_result_path: Option<PathBuf>,
 ) -> Result<()> {
     assert!(
         console_teams.len() <= MAX_CONSOLE_COUNT,
@@ -1063,8 +1081,14 @@ pub fn serve(
             is_alive
         });
         server.update_consoles();
+        if let (Some(path), Some(winner), None) = (&level_result_path, server.game.winner, won_at)
+        {
+            write_level_result(path, winner)?;
+        }
         won_at = server.game.winner.and(won_at.or(Some(Instant::now())));
-        if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
+        if level_result_path.is_some() {
+            should_start_new_game.store(false, Ordering::Relaxed);
+        } else if let (Some(delay), Some(time)) = (new_game_after_win, won_at)
             && time.elapsed() >= delay
         {
             server.start_new_game();

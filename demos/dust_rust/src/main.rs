@@ -220,6 +220,20 @@ const JOIN_AUTO: &str = "auto";
 const SERVER_START_S: f64 = 0.3;
 const ROUTE_PROBE_ADDRESS: &str = "192.0.2.1:9";
 
+/// `TeamFlag` is a team as `--team` takes it, in `net::TEAM_NAMES`' order.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum TeamFlag {
+    Blue,
+    Red,
+}
+
+/// `BotObjective` is what `--bot` plays for besides shooting: `consoles`, holding `E` on the other
+/// team's consoles (the server takes its word for which one) until its team wins.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum BotObjective {
+    Consoles,
+}
+
 /// `RendererKind` is which renderer draws the frames.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum RendererKind {
@@ -318,6 +332,16 @@ struct Arguments {
     /// player and fire), to test a game; saves its view under .artifacts/bot/ at each hit.
     #[arg(long)]
     bot: bool,
+    /// With --serve, for a match: write the winner to this file once, atomically, as
+    /// {"winner": "blue"} or {"winner": "red"}, and never start a new game.
+    #[arg(long, requires = "serve")]
+    level_result_file: Option<PathBuf>,
+    /// With --join (or --bot): join this team at once instead of choosing in the lobby.
+    #[arg(long, value_enum, requires = "join")]
+    team: Option<TeamFlag>,
+    /// With --bot: `consoles` holds E on the other team's consoles until its team wins.
+    #[arg(long, value_enum, requires = "bot")]
+    bot_objective: Option<BotObjective>,
     /// UDP port the server listens on (--host, --serve), and --join's port when its address has none.
     #[arg(long, default_value_t = net::DEFAULT_PORT)]
     port: u16,
@@ -867,6 +891,7 @@ fn start_server(
     settings: ServerSettings,
     console_teams: Vec<u32>,
     game_password: Vec<u8>,
+    level_result_path: Option<PathBuf>,
 ) -> Result<(Arc<AtomicBool>, JoinHandle<()>)> {
     let socket: std::net::UdpSocket = net::bind_server(port)?;
     let should_stop: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -889,6 +914,7 @@ fn start_server(
             &should_start_new_game,
             None,
             game_password,
+            level_result_path,
         ) {
             eprintln!("The game server stopped: {error}");
         }
@@ -972,6 +998,7 @@ fn serve_only(arguments: &Arguments) -> Result<()> {
         settings,
         consoles.iter().map(|c| c.team).collect(),
         net::read_game_password(arguments.game_password_file.as_deref())?,
+        arguments.level_result_file.clone(),
     )?;
     println!(
         "Server settings: {} (players who join get them).",
@@ -1026,8 +1053,8 @@ struct VoxelView {
     is_laser_on: bool,
 }
 
-/// `make_voxel_bench_views` gives the voxel benchmark's viewpoints: the Lunar Surface level's
-/// views, and the laser fired into the wormhole from its viewpoint.
+/// `make_voxel_bench_views` gives the voxel benchmark's viewpoints on Dust (W-121), with the laser
+/// fired into a wormhole and across the wind.
 ///
 /// Example: `let views = make_voxel_bench_views();`
 fn make_voxel_bench_views() -> Vec<VoxelView> {
@@ -1040,47 +1067,31 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         is_laser_on: false,
     };
     vec![
-        view("blue_spawn", [-107.0, 0.0], [0.0, 0.0], None, 0.0),
-        view("red_spawn", [112.0, 0.0], [0.0, 0.0], None, 0.0),
+        view("blue_spawn", [-104.0, 0.0], [0.0, 0.0], None, 0.0),
+        view("red_spawn", [104.0, 0.0], [0.0, 0.0], None, 0.0),
         view("overview", [0.0, 0.0], [0.0, -10.0], Some(46.0), -1.55),
-        view("middle", [-27.0, 0.0], [40.0, 0.0], None, 0.1),
-        view("black_hole", [-12.0, 4.0], [0.0, 0.0], Some(19.0), -0.42),
-        view("wormhole", [-22.0, 40.0], [-14.0, 40.0], None, 0.0),
-        view("wormhole_exit", [81.0, 26.0], [78.0, 30.0], None, 0.0),
-        view("red_pylon", [82.0, -1.0], [94.0, 6.0], None, 0.05),
-        view("ridge", [10.0, 58.5], [45.0, -5.0], None, -0.12),
-        view("einstein_ring", [-10.0, -3.0], [0.0, 0.0], Some(11.0), 0.15),
+        view("middle", [-30.0, 0.0], [40.0, 0.0], None, 0.05),
+        view("salt_flats_long", [-70.0, -4.0], [70.0, 4.0], None, 0.0),
+        view("cross_wind", [0.0, -40.0], [0.0, 40.0], None, 0.0),
+        view("wormhole", [-62.0, -46.0], [-50.0, -40.0], None, 0.0),
+        view("wormhole_exit", [38.0, 34.0], [50.0, 40.0], None, 0.0),
+        view("blue_pylons", [-60.0, 0.0], [-86.0, 0.0], None, 0.1),
+        view("red_pylons", [60.0, 0.0], [86.0, 0.0], None, 0.1),
+        view("arch", [-14.0, 25.0], [0.0, 25.0], None, 0.05),
+        view("ridge_top", [-24.0, 25.0], [30.0, 0.0], Some(6.0), -0.1),
         view("overlook", [-85.0, 0.0], [0.0, 0.0], Some(28.0), -0.7),
-        view("habitat_row", [-46.0, -36.0], [0.0, -42.0], None, 0.0),
+        view("mesa", [-28.0, 2.0], [-18.0, 9.0], None, 0.0),
+        view("blue_kazemat", [-86.0, -6.0], [-94.0, -12.0], None, 0.0),
+        view("field_bunker", [-18.0, -26.0], [-30.0, -32.0], None, 0.0),
+        view("hesco_rows", [-48.0, 0.0], [-60.0, 18.0], None, 0.0),
         view("crater_wall", [-30.0, -30.0], [-60.0, -90.0], None, 0.1),
-        view("red_hangar", [100.0, 9.0], [121.0, 0.0], None, 0.1),
-        view("blue_kazemat", [-100.0, 9.0], [-114.0, 0.0], None, 0.0),
-        view(
-            "blue_hesco_rows",
-            [-40.0, 4.0],
-            [-80.0, 0.0],
-            Some(9.0),
-            -0.25,
-        ),
-        view("field_bunker", [-18.0, -30.0], [-30.0, -40.0], None, 0.0),
-        view(
-            "field_bunker_above",
-            [-22.0, -46.0],
-            [-30.0, -40.0],
-            Some(14.0),
-            -0.7,
-        ),
-        view("hesco_barrier", [46.0, -8.0], [56.0, -15.0], None, 0.0),
-        view("beacon", [87.0, 2.0], [94.0, 6.0], None, 0.2),
         VoxelView {
             is_laser_on: true,
-            ..view(
-                "laser_into_wormhole",
-                [-22.0, 40.5],
-                [-14.0, 40.0],
-                None,
-                0.0,
-            )
+            ..view("laser_into_wormhole", [-62.0, -46.5], [-50.0, -40.0], None, 0.0)
+        },
+        VoxelView {
+            is_laser_on: true,
+            ..view("laser_cross_wind", [0.0, -40.0], [0.0, 40.0], None, 0.0)
         },
     ]
 }
@@ -1167,7 +1178,13 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
         arguments.map.get_folder_name(),
         &net::read_game_password(arguments.game_password_file.as_deref())?,
     )?;
-    client.join(None)?;
+    client.join(arguments.team.map(|team| team as u32))?;
+    let objective_console_teams: Option<Vec<u32>> = arguments.bot_objective.map(|_| {
+        voxel_world::find_consoles(&map)
+            .iter()
+            .map(|console| console.team)
+            .collect()
+    });
     let folder: PathBuf = make_run_folder("bot", arguments.label.as_deref())?;
     let mut saved_count: usize = 0;
     let duration_s: f64 = arguments
@@ -1200,6 +1217,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
             &mut client,
             duration_s,
             arguments.black_hole_strength,
+            objective_console_teams.as_deref(),
             |frame, id| save(FrameData::Voxel(frame), id),
         )?
     };
@@ -2343,11 +2361,17 @@ impl Session {
                 None
             };
             Some(Multiplayer {
-                client: net::Client::Connect(
-                    get_server_address(arguments)?,
-                    arguments.map.get_folder_name(),
-                    &net::read_game_password(arguments.game_password_file.as_deref())?,
-                )?,
+                client: {
+                    let mut client: net::Client = net::Client::Connect(
+                        get_server_address(arguments)?,
+                        arguments.map.get_folder_name(),
+                        &net::read_game_password(arguments.game_password_file.as_deref())?,
+                    )?;
+                    if let Some(team) = arguments.team {
+                        client.join(Some(team as u32))?;
+                    }
+                    client
+                },
                 server,
                 is_eliminated: false,
                 respawn_in_s: 0.0,
