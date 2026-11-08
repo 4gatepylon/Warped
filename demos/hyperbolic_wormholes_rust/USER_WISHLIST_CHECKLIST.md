@@ -121,7 +121,8 @@ is in [`AGENTS.md`](AGENTS.md).
   should kind of bend in the direction of the wind. There will be no black hole there, but there will still be
   wormholes, and obviously, players can place wormholes. And obviously, that one's also hyperbolic, unlike the other
   ones."
-  Merged into `staging/user-4gatepylon` with #393, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #393, 2026-11-08. Speed: #420 bakes the terrain's height, so every
+  bench view is under 16.7 ms at 2560×1440 with the same pictures (open, 2026-11-08).
 - [?] **W-122 Dark Forest demo.** Part of W-124 (four map demos): "I want it to just be kind of just like a normal
   forest. This is just that one's going to be just kind of a normal first-person shooter. Maybe one difference there
   is just to have it have verticality, similar to the Star Wars Endor or whatever, maybe the Wookiee Planet, where
