@@ -125,11 +125,14 @@ are here too, since the user hadn't confirmed them.
   the blue spawn stands on it; W-94 (Sketchfab models for the voxel assets) replaces the pad with a model later.
   #210.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
-- [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
-  bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
-  in the wormhole and moving, it shows up blue (based on your velocity and your place in the wormhole); it should
-  NOT go down with a timer. Once you're out of the wormhole it should go away immediately. Walking backwards should
-  show a redshift instead. The user wants video or image demos to confirm. #259.
+- [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52 (cyan through a wormhole),
+  #178): it should be a more bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and
+  velocity: as long as you are in the wormhole and moving, it shows up blue (based on your velocity and your place in
+  the wormhole); it should NOT go down with a timer. Once you're out of the wormhole it should go away immediately.
+  Walking backwards should show a redshift instead. The user wants video or image demos to confirm. #259. After
+  testing #259: "You cannot start the transformation so early when going into the wormhole, it should happen only
+  for a split second as you are in it. It happens when you are INSIDE it", and "the transformation is still DARK
+  BLUE but it has to be very close to white as I had asked". #272.
 - [?] **W-92 Lightsaber lasers, rifle first, guns further out.** "Make the lasers look more like this [a photo of a
   lightsaber blade: a white blade with a pale blue glow]. Lighter haze, almost totally uniform on the blade of the
   laser. Make the rifle the default weapon. Make you hold both weapons a little further from the camera so you can

@@ -45,7 +45,7 @@ view:
   look_rad_per_px: 0.0025  # How far the view turns for each pixel the mouse moves (mouse sensitivity).
   motion_blur_s: 0.01  # How long motion smears (0 for none).
   edge_stretch_frac: 1.0  # How strongly the view stretches as you slow down at the map's edge (0 for none).
-  wormhole_tint_frac: 1.0  # How strongly the view blueshifts (moving forward) or redshifts (backward) inside a wormhole, 0 to 1 (0 for none).
+  wormhole_tint_frac: 1.0  # How strongly the view flashes white (blue-white forward, warm white backward) in a wormhole's throat, 0 to 1 (0 for none).
   head_bob:
     walk_depth_m: 0.08  # How far the eye dips at each step while walking (0 for none).
     sprint_depth_m: 0.14  # How far the eye dips at each step while sprinting (0 for none).
