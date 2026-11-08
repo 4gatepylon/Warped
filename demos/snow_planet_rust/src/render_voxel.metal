@@ -331,12 +331,13 @@ constant int REFINED_PIXELS_PER_CELL = 3;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
 constant int SPACESHIP_COUNT = __SPACESHIP_COUNT__;
 constant int MAX_BLIZZARD_COUNT = __MAX_BLIZZARD_COUNT__;
-/** @brief The snow map's look (`snow.x` on): sky, distance fog, ground, and the blizzards' fog and flakes. */
+/** @brief The snow map's look (`snow.x` the fog's meters, 0 off; `snow.w` the light snowfall's flakes per cubic meter): sky, distance fog, ground, falling snow, and the blizzards' fog and flakes. */
 constant float3 SNOW_ZENITH = float3(0.42, 0.56, 0.74);
 constant float3 SNOW_HORIZON = float3(0.84, 0.88, 0.93);
 constant float3 SNOW_CLOUD = float3(0.9, 0.92, 0.95);
 constant float SNOW_FOG_START_M = 12.0;
-constant float SNOW_FOG_M = 110.0;
+constant float SNOW_FLAKE_M = 18.0;
+constant float SNOW_FLAKE_STEP_M = 0.9;
 constant float SNOW_FOG_MAX_FRAC = 0.82;
 constant float3 BLIZZARD_FOG = float3(0.86, 0.89, 0.93);
 constant float BLIZZARD_SKY_M = 400.0;
@@ -2486,7 +2487,7 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
         return color;
     }
     if (scene.u.snow.x > 0.5) {
-        float far = end.surface.x == OUTCOME_HIT ? 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - SNOW_FOG_START_M, 0.0) / SNOW_FOG_M) : haze_frac;
+        float far = end.surface.x == OUTCOME_HIT ? 1.0 - exp(-max(end.grid.w * scene.u.curvature_radius_m - SNOW_FOG_START_M, 0.0) / scene.u.snow.x) : haze_frac;
         float3 fog = to_linear(SNOW_HORIZON) + SUN_COLOR * HAZE_SUN_GLOW * pow(max(sun_cos, 0.0), HAZE_SUN_POWER);
         return mix(color, fog, SNOW_FOG_MAX_FRAC * far);
     }
@@ -2505,7 +2506,7 @@ static float3 add_haze(thread const Scene &scene, float3 color, VoxelRayEnd end)
 static float3 add_blizzards(thread const Scene &scene, float3 color, VoxelRayEnd end, float2 pixel) {
     constant VoxelUniforms &u = scene.u;
     int count = int(u.snow.y);
-    if (count == 0 || end.surface.x == OUTCOME_LOST) return color;
+    if ((count == 0 && u.snow.w <= 0.0) || end.surface.x == OUTCOME_LOST) return color;
     float r = u.curvature_radius_m;
     float2 ndc = float2(2.0 * pixel.x / float(u.width_px) - 1.0, 1.0 - 2.0 * pixel.y / float(u.height_px));
     float3 d_cam = normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0));
@@ -2517,6 +2518,17 @@ static float3 add_blizzards(thread const Scene &scene, float3 color, VoxelRayEnd
     float transmit = 1.0;
     float3 added = float3(0.0);
     float now_s = u.snow.z;
+    int light_steps = int(min(length_m, SNOW_FLAKE_M) / SNOW_FLAKE_STEP_M);
+    for (int k = 0; k < light_steps; k++) {
+        float t = (float(k) + 0.5) * SNOW_FLAKE_STEP_M;
+        float3 p = a + dir * t - FLAKE_FALL_M_PER_S.xzy * now_s;
+        float3 cell = floor(p);
+        if (hash_3d(cell + 71.0) > u.snow.w) continue;
+        float3 q = p - (cell + float3(hash_3d(cell + 17.0), hash_3d(cell + 31.0), hash_3d(cell + 47.0)));
+        float miss = length(q - dir * dot(q, dir));
+        float size_m = max(FLAKE_RADIUS_M, u.pixel_angle_rad * t * 0.7);
+        added += saturate(1.0 - miss / size_m) * min(1.0, FLAKE_RADIUS_M / size_m * 2.0) * snow_light;
+    }
     for (int i = 0; i < min(count, MAX_BLIZZARD_COUNT); i++) {
         float4 b = u.blizzards[i], air = u.blizzard_air[i];
         float2 o = a.xy - b.xy, dd = dir.xy;

@@ -238,6 +238,7 @@ pub struct Sky {
     pub zenith_color: [f32; 3],
     pub horizon_color: [f32; 3],
     pub fog_m: Option<f64>,
+    pub snow_per_m3: Option<f64>,
 }
 
 /// `Spawn` is where a player of a team starts.

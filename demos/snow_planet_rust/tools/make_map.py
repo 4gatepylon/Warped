@@ -20,7 +20,7 @@ PYLON_CORE_M: float = 5.654
 ICE, SNOW, PACKED, ROCK, METAL = 3, 1, 2, 4, 5
 BLUE_PAINT, RED_PAINT = 6, 7
 CONSOLES: dict[str, list[int]] = {"blue": [11, 12], "red": [13, 14]}
-TEAM_LIGHT: dict[str, list[float]] = {"blue": [0.25, 0.55, 1.0], "red": [1.0, 0.28, 0.18]}
+TEAM_LIGHT: dict[str, list[float]] = {"blue": [0.3, 0.65, 1.0], "red": [1.0, 0.28, 0.18]}
 
 
 def make_frame(u_m: float, v_m: float, h_m: float = 0.0, yaw_rad: float = 0.0) -> list[float]:
@@ -35,7 +35,7 @@ def make_frame(u_m: float, v_m: float, h_m: float = 0.0, yaw_rad: float = 0.0) -
 
 
 def make_box(name: str, u_m: float, v_m: float, half_m: list[float], material: int, yaw_rad: float = 0.0,
-             kind: str = "box") -> dict:
+             kind: str = "box", round_m: "float | None" = None) -> dict:
     """`make_box` gives a structure of one shape standing on the ground at (u, v).
 
     Example:
@@ -44,27 +44,23 @@ def make_box(name: str, u_m: float, v_m: float, half_m: list[float], material: i
     """
     shape: dict = {"kind": kind, "centre_m": [0.0, half_m[1], 0.0], "half_m": half_m, "material": material}
     if kind == "box":
-        shape["round_m"] = min(0.25, min(half_m) / 2)
+        shape["round_m"] = min(0.25, min(half_m) / 2) if round_m is None else round_m
     if kind == "cylinder":
         shape["axis"] = 1
     return {"name": name, "frame": make_frame(u_m, v_m, 0.0, yaw_rad), "shapes": [shape]}
 
 
-# Blue's half: (name, u, v, half sizes, material, yaw, kind). Red's is the same turned half a turn.
-BLUE_COVER: list[tuple] = [
-    ("spawn snow wall", -40.0, 0.0, [4.0, 1.1, 0.6], PACKED, math.pi / 2, "box"),
-    ("ice wall", -27.0, 0.0, [3.5, 1.6, 0.35], ICE, math.pi / 2, "box"),
-    ("snow bank", -30.0, 9.0, [2.6, 0.8, 1.1], PACKED, 0.3, "box"),
-    ("snow bank", -30.0, -9.0, [2.6, 0.8, 1.1], PACKED, -0.3, "box"),
-    ("ice pillar", -18.0, 7.0, [1.1, 2.6, 1.1], ICE, 0.0, "cylinder"),
-    ("ice pillar", -18.0, -7.0, [1.1, 2.6, 1.1], ICE, 0.0, "cylinder"),
-    ("rock", -12.0, 26.0, [3.2, 2.0, 2.6], ROCK, 0.4, "ellipsoid"),
-    ("rock", -34.0, -26.0, [2.8, 1.8, 2.2], ROCK, -0.6, "ellipsoid"),
-    ("ice block", -22.0, 18.0, [1.6, 1.4, 1.6], ICE, 0.5, "box"),
-    ("snow bank", -8.0, -12.0, [2.2, 0.9, 1.0], PACKED, 1.2, "box"),
-    ("pylon wall", -34.0, 11.0, [2.5, 1.2, 0.4], PACKED, 0.0, "box"),
-    ("pylon wall", -34.0, -11.0, [2.5, 1.2, 0.4], PACKED, 0.0, "box"),
+# The whole map's light snowfall (flakes per cubic meter) and fog (meters to fade by 1/e).
+SNOW_PER_M3: float = 0.04
+FOG_M: float = 75.0
+# The only cover, few because the warps and blizzards shape play: blue's rounded snow mounds (u, v, half sizes,
+# yaw); red's are the same turned half a turn.
+BLUE_MOUNDS: list[tuple] = [
+    (-26.0, 7.0, [1.8, 0.9, 1.4], 0.3),
+    (-12.0, -31.0, [2.0, 1.0, 1.2], -0.5),
+    (-42.0, 27.0, [1.6, 0.8, 1.6], 0.9),
 ]
+MOUND_ROUND_M: float = 0.7
 BLIZZARDS: list[dict] = [
     {"name": "white-out", "u_m": 0.0, "v_m": 0.0, "radius_m": 10.0},
     {"name": "north squall", "u_m": -14.0, "v_m": 24.0, "radius_m": 7.0},
@@ -75,8 +71,8 @@ BLIZZARD_NUMBERS: dict = {
     "speed_frac": 0.5,
     "freeze_health_per_s": 0.08,
     "shot_reach_m": 8.0,
-    "fog_per_m": 0.12,
-    "snow_per_m3": 0.6,
+    "fog_per_m": 0.3,
+    "snow_per_m3": 1.0,
 }
 
 
@@ -115,10 +111,10 @@ def make_map() -> dict:
         'euclidean'
     """
     structures: list[dict] = []
-    for name, u_m, v_m, half_m, material, yaw_rad, kind in BLUE_COVER:
-        structures.append(make_box(f"blue {name}", u_m, v_m, half_m, material, yaw_rad, kind))
+    for u_m, v_m, half_m, yaw_rad in BLUE_MOUNDS:
+        structures.append(make_box("blue snow mound", u_m, v_m, half_m, PACKED, yaw_rad, "box", MOUND_ROUND_M))
         ru, rv, ryaw = mirror(u_m, v_m, yaw_rad)
-        structures.append(make_box(f"red {name}", ru, rv, half_m, material, ryaw, kind))
+        structures.append(make_box("red snow mound", ru, rv, half_m, PACKED, ryaw, "box", MOUND_ROUND_M))
     lights: list[dict] = []
     for team, sign in (("blue", -1.0), ("red", 1.0)):
         for index, v_m in enumerate((16.0, -16.0)):
@@ -159,7 +155,7 @@ def make_map() -> dict:
         "version": 1,
         "name": "snow_planet",
         "description": "A snow field on a torus (T² × ℝ): two pylons a team, two black holes, a wormhole pair, "
-        "ice cover and three blizzards.",
+        "open snow with six rounded mounds, light snowfall and fog, and three blizzards.",
         "source": "demos/snow_planet_rust/tools/make_map.py (after demos/levels/snow_planet/index.html)",
         "space": {"kind": "euclidean", "torus_periods_m": [PERIOD_U_M, PERIOD_V_M]},
         "gravity_m_per_s2": 9.81,
@@ -172,7 +168,7 @@ def make_map() -> dict:
         "lights": lights,
         "sky": {"transport": "parallel", "sun": {"direction": [c / norm for c in sun], "color": [1.0, 0.95, 0.88]},
                 "stars": False, "clouds": True, "zenith_color": [0.42, 0.56, 0.74],
-                "horizon_color": [0.82, 0.87, 0.93], "fog_m": 90.0},
+                "horizon_color": [0.82, 0.87, 0.93], "fog_m": FOG_M, "snow_per_m3": SNOW_PER_M3},
         "spawns": [{"team": "blue", "frame": make_frame(-48.0, 0.0)},
                    {"team": "red", "frame": make_frame(48.0, 0.0, 0.0, math.pi)}],
         "regions": {

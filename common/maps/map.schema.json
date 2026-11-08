@@ -226,7 +226,8 @@
         "clouds": {"type": "boolean"},
         "zenith_color": {"$ref": "#/$defs/color"},
         "horizon_color": {"$ref": "#/$defs/color"},
-        "fog_m": {"type": "number", "exclusiveMinimum": 0}
+        "fog_m": {"type": "number", "exclusiveMinimum": 0},
+        "snow_per_m3": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },
     "spawns": {

@@ -649,10 +649,14 @@ impl VoxelFrame {
                 .milky_way
                 .map_or([0.0; 4], |(_, core)| core.as_vec3().extend(0.0).to_array()),
             snow: [
-                f32::from(u8::from(world.is_snow)),
+                if world.is_snow {
+                    world.snow_fog_m as f32
+                } else {
+                    0.0
+                },
                 world.blizzards.len().min(MAX_BLIZZARD_COUNT) as f32,
                 (world.sky_time_s % SNOW_CLOCK_PERIOD_S) as f32,
-                0.0,
+                world.snow_per_m3 as f32,
             ],
             blizzards: pack_blizzards(&world.blizzards, |b| [b.u_m, b.v_m, b.radius_m, b.height_m]),
             blizzard_air: pack_blizzards(&world.blizzards, |b| {

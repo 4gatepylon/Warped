@@ -1061,7 +1061,8 @@ struct VoxelView {
 
 /// `make_voxel_bench_views` gives the voxel benchmark's viewpoints on Snow Planet (u, v in meters,
 /// blue at negative u): the spawns, the white-out and a squall from inside and outside, the black
-/// holes, the wormhole, the pylons, the torus seam, and the laser fired into the white-out.
+/// holes, the wormhole, the pylons, the torus seam, the laser fired into the white-out, and photo views
+/// (`photo_*`) for pictures of the map.
 ///
 /// Example: `let views = make_voxel_bench_views();`
 fn make_voxel_bench_views() -> Vec<VoxelView> {
@@ -1097,6 +1098,35 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
             is_laser_on: true,
             ..view("laser_into_whiteout", [-20.0, 0.0], [0.0, 0.0], None, 0.0)
         },
+        view(
+            "photo_oblique",
+            [-52.0, -30.0],
+            [0.0, 0.0],
+            Some(34.0),
+            -0.5,
+        ),
+        view("photo_top", [0.0, 0.0], [0.0, -10.0], Some(95.0), -1.57),
+        view(
+            "photo_pylon_whiteout",
+            [-42.0, 6.0],
+            [0.0, 0.0],
+            Some(2.2),
+            0.04,
+        ),
+        view(
+            "photo_black_hole",
+            [-20.0, 25.0],
+            [0.0, 17.0],
+            Some(4.0),
+            -0.05,
+        ),
+        view(
+            "photo_wormhole_squall",
+            [-36.0, -14.0],
+            [-22.0, -27.0],
+            Some(3.0),
+            0.0,
+        ),
     ]
 }
 

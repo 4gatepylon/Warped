@@ -144,6 +144,7 @@ angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/
   circle. Both are unit directions in the world origin's local frame, perpendicular to each other. How the band looks
   (brightness, colour, dust) is the appearance style's.
 - `fog_m` (optional): a surface d meters away keeps e^(−d/`fog_m`) of its colour, and the rest is `horizon_color`.
+- `snow_per_m3` (optional, 0 to 1): light snow falling everywhere, as the chance that a cubic meter of air holds a flake (Snow Planet, 0.04). A program without falling snow ignores it.
 
 ### Spawns
 

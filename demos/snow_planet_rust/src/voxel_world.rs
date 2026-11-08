@@ -43,6 +43,8 @@ pub const AVATAR_FIRST_MATERIAL: usize = 240;
 pub const MARKER_NAME: &str = "a thrown wormhole";
 /// `SNOW_STYLE` is the `appearance.style` of a snow map, which the renderer draws as snow.
 const SNOW_STYLE: &str = "snow";
+/// `DEFAULT_SNOW_FOG_M` is the snow map's fog distance when its map gives none.
+const DEFAULT_SNOW_FOG_M: f64 = 110.0;
 /// `BLIZZARD_CUT_ITERATIONS` is how many halvings find where a shot runs out of reach in a blizzard.
 const BLIZZARD_CUT_ITERATIONS: usize = 24;
 const MAX_MARKER_COUNT: usize = 16;
@@ -342,6 +344,8 @@ pub struct VoxelWorld {
     growing_hole: Option<(usize, VoxelWarp)>,
     pub blizzards: Vec<Blizzard>,
     pub is_snow: bool,
+    pub snow_fog_m: f64,
+    pub snow_per_m3: f64,
 }
 
 /// `Hit` is where a light path met something: the structure (or `None` for the ground) and the point.
@@ -863,6 +867,8 @@ impl VoxelWorld {
             clearance: Arc::new(ClearanceGrids::default()),
             blizzards: map.get_blizzards(),
             is_snow: map.appearance.style == SNOW_STYLE,
+            snow_fog_m: map.sky.fog_m.unwrap_or(DEFAULT_SNOW_FOG_M),
+            snow_per_m3: map.sky.snow_per_m3.unwrap_or(0.0),
         };
         world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
