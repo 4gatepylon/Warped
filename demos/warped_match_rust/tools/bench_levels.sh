@@ -34,7 +34,9 @@ LEVELS=(
   "Dark-Forest dark_forest_rust dark-forest $WINDOWED_MAP"
   "Lunar-Surface warped_match_rust hyperbolic-wormholes lunar-surface"
 )
-JQ_ROWS='.views[] | "| \($level) | \(.view) | \(.median_gpu_ms * 10 | round / 10) | \(.p99_gpu_ms * 10 | round / 10) |"'
+JQ_MEDIAN='(.median_gpu_ms // .gpu_ms_median) * 10 | round / 10'
+JQ_P99='(.p99_gpu_ms // .gpu_ms_p99) * 10 | round / 10'
+JQ_ROWS=".views[] | \"| \\(\$level) | \\(.view) | \\($JQ_MEDIAN) | \\($JQ_P99) |\""
 EXAMPLE="e.g. $0 --width-px 2560 --height-px 1440 --label quiet"
 
 width_px=2560
