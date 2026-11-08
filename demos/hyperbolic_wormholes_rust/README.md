@@ -138,6 +138,9 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
 - Spaceships fly over Lunar Surface, purely for looks (D82): a ring ship and three delta-wing fighters in a V, each
   crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
+- Two giant ships hang far behind them (D101): a moon-sized battle station with a dish, hovering low over the horizon
+  ahead of the blue spawn, and a long wedge-shaped capital ship with rows of lit windows, crossing the sky in 30
+  minutes.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
 - `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and
