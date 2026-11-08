@@ -119,12 +119,22 @@ pub struct MapShape {
     pub material: u8,
 }
 
-/// `Structure` is a group of smooth shapes sharing a frame.
+/// `MapMesh` is the glTF model a structure is drawn as: its folder in `common/maps/models/` and
+/// its height in meters.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapMesh {
+    pub model: String,
+    pub height_m: f64,
+}
+
+/// `Structure` is a group of smooth shapes sharing a frame, drawn as its `mesh` when it has one.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Structure {
     pub name: String,
     pub frame: [f64; 16],
+    pub mesh: Option<MapMesh>,
     pub shapes: Vec<MapShape>,
 }
 
@@ -305,6 +315,13 @@ pub fn get_map_folder(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(MAPS_FOLDER)
         .join(name)
+}
+
+/// `get_model_path` gives the `scene.gltf` of the model folder `model` in `common/maps/models/`.
+///
+/// Example: `let path: PathBuf = get_model_path("hesco_barrier");`
+pub fn get_model_path(model: &str) -> PathBuf {
+    get_map_folder("models").join(model).join("scene.gltf")
 }
 
 /// `to_frame` turns a frame's 16 numbers (column-major) into a matrix.

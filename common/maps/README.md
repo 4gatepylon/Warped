@@ -54,7 +54,7 @@ Both are exported from the programs that first built them; the map files are wha
 | `player` | `{"eye_height_m", "walk_m_per_s", "sprint_m_per_s", "jump_m_per_s", "fly_m_per_s"}` |
 | `materials` | the palette (below); material 0 is always empty space |
 | `ground` | `{"material": id, "tiling": {...}, "terrain": {...}}` (optional `tiling` and `terrain`, below) |
-| `structures` | structures of smooth shapes (below), optional |
+| `structures` | structures of smooth shapes, optionally drawn as a model (below), optional |
 | `boxes` | boxes (below), optional |
 | `warps` | black holes and wormhole mouths (below), optional |
 | `lights` | lamps (below), optional |
@@ -81,6 +81,10 @@ coordinates q (meters):
 - `ellipsoid`: the ellipsoid with semi-axes h centred at c.
 - A ray or a player meets the structure where it enters any shape. `demos/hyperbolic_wormholes_rust/src/shapes.rs`
   defines the shapes' distance bounds exactly.
+- `mesh` (optional): `{"model", "height_m"}` draws the glTF model `models/<model>/scene.gltf` (see Models) instead of
+  the shapes, scaled evenly to `height_m` tall, with the bottom centre of its bounding box at the local origin, its
+  +y up and its −z forward. Its triangles stop light and lasers; the shapes then only stop players, and a renderer
+  that doesn't draw models draws them instead.
 
 ### Boxes
 
