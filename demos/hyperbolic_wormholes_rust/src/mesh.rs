@@ -2,7 +2,8 @@
 //! where straight lines are geodesics, so its triangles are exact geodesic faces): its triangles,
 //! a bounding volume hierarchy over them for ray hits and distance bounds, and its materials.
 //!
-//! Interface: `MeshModel::Load`, `MeshModel`, `MeshTriangle`, `BvhNode`, `MeshMaterial`.
+//! Interface: `MeshModel::Load`, `MeshModel::FromTriangles`, `MeshModel`, `MeshTriangle`, `BvhNode`,
+//! `MeshMaterial`, `read_materials`.
 //!
 //! Example: `let model = MeshModel::Load("hesco_barrier", 1.4)?;`
 
@@ -72,6 +73,28 @@ fn get_globals(document: &gltf::Document) -> Vec<Mat4> {
         .nodes()
         .for_each(|node| visit(node, Mat4::IDENTITY, &mut globals));
     globals
+}
+
+/// `read_materials` reads every material of glTF document `document`, whose images are files in
+/// `folder`, for model `model`.
+///
+/// Example: `let materials = read_materials(&document, folder, "teal_robot")?;`
+pub fn read_materials(
+    document: &gltf::Document,
+    folder: &Path,
+    model: &str,
+) -> Result<Vec<MeshMaterial>, String> {
+    let image_paths: Vec<PathBuf> = document
+        .images()
+        .map(|image| match image.source() {
+            gltf::image::Source::Uri { uri, .. } => Ok(folder.join(uri)),
+            gltf::image::Source::View { .. } => Err(format!("mesh: {model} embeds an image")),
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(document
+        .materials()
+        .map(|m| read_material(&m, &image_paths))
+        .collect())
 }
 
 /// `read_material` reads one glTF material, its image paths relative to `folder`.
@@ -150,30 +173,53 @@ impl MeshModel {
         for t in &mut triangles {
             t.p = t.p.map(|p| (p - offset) * scale);
         }
-        let image_paths: Vec<PathBuf> = document
-            .images()
-            .map(|image| match image.source() {
-                gltf::image::Source::Uri { uri, .. } => Ok(folder.join(uri)),
-                gltf::image::Source::View { .. } => Err(format!("mesh: {model} embeds an image")),
-            })
-            .collect::<Result<_, String>>()?;
-        let materials: Vec<MeshMaterial> = document
-            .materials()
-            .map(|m| read_material(&m, &image_paths))
-            .collect();
-        let (lo, hi) = get_bounds(&triangles);
+        let materials: Vec<MeshMaterial> = read_materials(&document, folder, model)?;
+        Ok(MeshModel::FromTriangles(triangles, materials).0)
+    }
+
+    /// `FromTriangles` builds the BVH over `triangles` and gives the model, its triangles reordered
+    /// so each leaf's are contiguous, and for each placed triangle its index in `triangles`.
+    ///
+    /// Example: `let (model, order) = MeshModel::FromTriangles(triangles, materials);`
+    #[allow(non_snake_case)]
+    pub fn FromTriangles(
+        triangles: Vec<MeshTriangle>,
+        materials: Vec<MeshMaterial>,
+    ) -> (MeshModel, Vec<usize>) {
+        let corners = |item: &(MeshTriangle, usize)| item.0.p;
+        let mut items: Vec<(MeshTriangle, usize)> = triangles.into_iter().zip(0..).collect();
+        let (lo, hi) = get_item_bounds(&items, &corners);
         let mut nodes: Vec<BvhNode> = vec![BvhNode {
             lo,
             hi,
             first: 0,
-            count: triangles.len(),
+            count: items.len(),
         }];
-        split_node(&mut nodes, 0, &mut triangles);
-        Ok(MeshModel {
+        split_node(&mut nodes, 0, &mut items, &corners);
+        let (triangles, order): (Vec<MeshTriangle>, Vec<usize>) = items.into_iter().unzip();
+        let model: MeshModel = MeshModel {
             triangles,
             nodes,
             materials,
-        })
+        };
+        (model, order)
+    }
+
+    /// `refit` fits every BVH box around its triangles again after they moved, keeping the tree,
+    /// children before their parent (each node's children come after it).
+    ///
+    /// Example: `posed.refit();`
+    pub fn refit(&mut self) {
+        for k in (0..self.nodes.len()).rev() {
+            let BvhNode { first, count, .. } = self.nodes[k];
+            let (lo, hi) = if count == 0 {
+                let (a, b) = (self.nodes[first], self.nodes[first + 1]);
+                (a.lo.min(b.lo), a.hi.max(b.hi))
+            } else {
+                get_bounds(&self.triangles[first..first + count])
+            };
+            (self.nodes[k].lo, self.nodes[k].hi) = (lo, hi);
+        }
     }
 
     /// `find_hit_mu` gives where the line q0 + dq mu first meets a triangle within [mu_lo, mu_hi],
@@ -301,23 +347,35 @@ fn get_triangle_distance_m(t: &MeshTriangle, q: DVec3) -> f64 {
 ///
 /// Example: `let (lo, hi) = get_bounds(&triangles);`
 fn get_bounds(triangles: &[MeshTriangle]) -> (Vec3, Vec3) {
-    triangles
+    get_item_bounds(triangles, &|t: &MeshTriangle| t.p)
+}
+
+/// `get_item_bounds` gives the box around the triangles `corners` gives for `items`.
+///
+/// Example: `let (lo, hi) = get_item_bounds(&items, &|item| item.0.p);`
+fn get_item_bounds<T>(items: &[T], corners: &impl Fn(&T) -> [Vec3; 3]) -> (Vec3, Vec3) {
+    items
         .iter()
-        .flat_map(|t| t.p)
+        .flat_map(corners)
         .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)))
 }
 
 /// `split_node` splits node k's triangles at the median along the longest axis of their centres,
 /// until leaves hold at most `LEAF_TRIANGLE_COUNT`.
 ///
-/// Example: `split_node(&mut nodes, 0, &mut triangles);`
-fn split_node(nodes: &mut Vec<BvhNode>, k: usize, triangles: &mut [MeshTriangle]) {
+/// Example: `split_node(&mut nodes, 0, &mut items, &|item| item.0.p);`
+fn split_node<T>(
+    nodes: &mut Vec<BvhNode>,
+    k: usize,
+    triangles: &mut [T],
+    corners: &impl Fn(&T) -> [Vec3; 3],
+) {
     let BvhNode { first, count, .. } = nodes[k];
     if count <= LEAF_TRIANGLE_COUNT {
         return;
     }
-    let part: &mut [MeshTriangle] = &mut triangles[first..first + count];
-    let centre = |t: &MeshTriangle| t.p[0] + t.p[1] + t.p[2];
+    let part: &mut [T] = &mut triangles[first..first + count];
+    let centre = |t: &T| corners(t).into_iter().sum::<Vec3>();
     let (lo, hi) = part
         .iter()
         .map(centre)
@@ -327,7 +385,7 @@ fn split_node(nodes: &mut Vec<BvhNode>, k: usize, triangles: &mut [MeshTriangle]
     part.select_nth_unstable_by(half, |a, b| centre(a)[axis].total_cmp(&centre(b)[axis]));
     let children: usize = nodes.len();
     for (start, length) in [(first, half), (first + half, count - half)] {
-        let (lo, hi) = get_bounds(&triangles[start..start + length]);
+        let (lo, hi) = get_item_bounds(&triangles[start..start + length], corners);
         nodes.push(BvhNode {
             lo,
             hi,
@@ -340,8 +398,8 @@ fn split_node(nodes: &mut Vec<BvhNode>, k: usize, triangles: &mut [MeshTriangle]
         count: 0,
         ..nodes[k]
     };
-    split_node(nodes, children, triangles);
-    split_node(nodes, children + 1, triangles);
+    split_node(nodes, children, triangles, corners);
+    split_node(nodes, children + 1, triangles, corners);
 }
 
 /// `hit_triangle` gives where the line q0 + dq mu crosses triangle t (Möller-Trumbore), or `None`.

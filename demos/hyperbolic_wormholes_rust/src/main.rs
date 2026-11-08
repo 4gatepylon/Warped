@@ -21,6 +21,7 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod avatar_model;
 mod dust;
 mod exit_prompt;
 mod fps_demo_assets;
