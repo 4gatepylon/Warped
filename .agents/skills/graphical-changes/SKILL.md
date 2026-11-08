@@ -1,6 +1,6 @@
 ---
 name: graphical-changes
-description: Show the user screenshots, videos and clearly named options for every change to how something looks, before finishing it. Use whenever you add or change anything visual - a model, colour, shape, light, sky, effect, animation, HUD or menu, shader or render setting - in a game, demo or app; whenever a visual choice is uncertain or the user asks (or implies) a range of looks or parameters to explore; whenever you make a collage, comparison sheet or HTML comparison page; and whenever the user's words about a look allow more than one reading, or a look has edge cases to raise with the user.
+description: Show the user screenshots, videos and clearly named options for every change to how something looks, before finishing it, and attach them to the change's PR. Use whenever you add or change anything visual - a model, colour, shape, light, sky, effect, animation, HUD or menu, shader or render setting - in a game, demo or app; whenever a visual choice is uncertain or the user asks (or implies) a range of looks or parameters to explore; whenever you make a collage, comparison sheet or HTML comparison page; whenever you open or update a PR with a visual change; and whenever the user's words about a look allow more than one reading, or a look has edge cases to raise with the user.
 ---
 
 # Graphical changes
@@ -83,6 +83,8 @@ capture.
   (other agents' runs, the user's playtest), since the numbers are then only rough.
 - **Shared before finishing:** send them to the user before you call the work done, open the PR for review, mark a
   wishlist item pending or merge, and again whenever the look changes after the user's feedback.
+- **In the PR:** attach the final screenshots and videos to the PR description's Pictures section with `gh pr create`
+  or `gh pr edit` and `--attach`, so reviewers see the change in the PR itself (the `pr-description` skill says how).
 
 ## Feedback in rounds
 
@@ -150,3 +152,6 @@ capture.
   your worktree before running it.
 - If ImageMagick or ffmpeg is missing (seen on the user's Mac, 2026-11-08), use Pillow for sheets and GIFs, and ask
   the user before installing anything.
+- **MP4 without ffmpeg** (or PNGs and GIFs without Pillow, which `python3 -I` lacked on the user's Mac, 2026-11-08):
+  a Swift script run with `swift <script>.swift`, using only macOS frameworks (CoreGraphics and ImageIO for PNG and
+  GIF, AVFoundation's `AVAssetWriter` for H.264 MP4), writes them without installing anything.
