@@ -50,7 +50,8 @@ type Texture = (Retained<ProtocolObject<dyn MTLTexture>>, (usize, usize));
 /// shader's `apply_overlay` for what its levels mean), up to `MAX_OVERLAY_RECT_COUNT` rectangles
 /// (the HUD's bars), the player's wand, how much of the previous frame's scene to blend into
 /// this one's (motion blur; 0 for none), what a recent hit does to the scene, how much of the
-/// frame's height the mask's text may take, and a picture under the text.
+/// frame's height the mask's text may take, a picture under the text, and how far the scene
+/// stretches at the map's soft edge (the shader's `read_stretched_scene`; 0 for none).
 pub struct Overlay<'a> {
     pub dim_frac: f32,
     pub mask: Option<(&'a [u8], (usize, usize))>,
@@ -60,6 +61,7 @@ pub struct Overlay<'a> {
     pub hit: HitEffect,
     pub mask_height_frac: f32,
     pub picture: Option<OverlayPicture<'a>>,
+    pub stretch_frac: f32,
 }
 
 /// `OverlayPicture` is an RGBA picture (rows top first) of `size_px`, drawn under the overlay's
@@ -123,6 +125,7 @@ struct OverlayParams {
     shake_px: [f32; 2],
     picture_min_mask_px: [i32; 2],
     picture_max_excl_mask_px: [i32; 2],
+    stretch_frac: f32,
 }
 
 /// `Scaler` is a MetalFX spatial scaler with the input and output sizes it was made for.
@@ -1223,6 +1226,7 @@ impl MetalRenderer {
             shake_px: overlay.hit.shake_px,
             picture_min_mask_px: picture_corners_mask_px[0],
             picture_max_excl_mask_px: picture_corners_mask_px[1],
+            stretch_frac: overlay.stretch_frac,
         };
         let wand: OverlayWand = overlay.wand.unwrap_or(OverlayWand {
             center_m: [0.0; 4],

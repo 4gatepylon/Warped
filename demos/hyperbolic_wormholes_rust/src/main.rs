@@ -2846,6 +2846,22 @@ impl Session {
         ])
     }
 
+    /// `get_edge_stretch_frac` gives how far this player's view stretches at the map's soft edge:
+    /// the square of how far into it they stand (`VoxelWorld::get_edge_frac`), so it starts gently
+    /// and builds near the stop, times their `view.edge_stretch_frac`; 0 off a voxel map.
+    ///
+    /// Example: `let stretch_frac = session.get_edge_stretch_frac();`
+    fn get_edge_stretch_frac(&self) -> f32 {
+        match &self.voxel {
+            Some(voxel) => {
+                let feet: DVec4 = voxel.player.get_feet_frame(&voxel.world).col(AXIS_W);
+                (voxel.world.get_edge_frac(feet).powi(2)
+                    * self.player_settings.view.edge_stretch_frac) as f32
+            }
+            None => 0.0,
+        }
+    }
+
     /// `is_view_covered` says whether text covers the view: the menu or a banner.
     ///
     /// Example: `if !self.is_view_covered() { ... }`
@@ -3553,36 +3569,39 @@ fn play_on_layer(
         let text_mask: Option<Vec<u8>> = overlay_text.as_ref().map(make_text_mask).transpose()?;
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
         let wand: Option<render_metal::OverlayWand> = session.get_wand();
-        let overlay: Option<render_metal::Overlay> = (text_mask.is_some()
-            || !rects.is_empty()
-            || wand.is_some())
-        .then(|| render_metal::Overlay {
-            dim_frac: match &overlay_text {
-                Some(text) => text.dim_frac,
-                None => 0.0,
-            },
-            mask: text_mask
-                .as_deref()
-                .zip(overlay_text.as_ref())
-                .map(|(pixels, text)| (pixels, (text.mask_px.0 as usize, text.mask_px.1 as usize))),
-            mask_height_frac: match &overlay_text {
-                Some(text) => text.height_frac,
-                None => 0.0,
-            },
-            picture: overlay_text
-                .as_ref()
-                .and_then(|text| text.picture.as_ref())
-                .map(|picture| render_metal::OverlayPicture {
-                    pixels: &picture.pixels,
-                    size_px: (picture.size_px.0 as usize, picture.size_px.1 as usize),
-                    min_mask_px: picture.min_mask_px,
-                    max_excl_mask_px: picture.max_excl_mask_px,
-                }),
-            rects: &rects,
-            wand,
-            blur_frac: session.motion_blur_frac,
-            hit: session.get_hit_effect(),
-        });
+        let stretch_frac: f32 = session.get_edge_stretch_frac();
+        let overlay: Option<render_metal::Overlay> =
+            (text_mask.is_some() || !rects.is_empty() || wand.is_some() || stretch_frac > 0.0)
+                .then(|| render_metal::Overlay {
+                    dim_frac: match &overlay_text {
+                        Some(text) => text.dim_frac,
+                        None => 0.0,
+                    },
+                    mask: text_mask
+                        .as_deref()
+                        .zip(overlay_text.as_ref())
+                        .map(|(pixels, text)| {
+                            (pixels, (text.mask_px.0 as usize, text.mask_px.1 as usize))
+                        }),
+                    mask_height_frac: match &overlay_text {
+                        Some(text) => text.height_frac,
+                        None => 0.0,
+                    },
+                    picture: overlay_text
+                        .as_ref()
+                        .and_then(|text| text.picture.as_ref())
+                        .map(|picture| render_metal::OverlayPicture {
+                            pixels: &picture.pixels,
+                            size_px: (picture.size_px.0 as usize, picture.size_px.1 as usize),
+                            min_mask_px: picture.min_mask_px,
+                            max_excl_mask_px: picture.max_excl_mask_px,
+                        }),
+                    stretch_frac,
+                    rects: &rects,
+                    wand,
+                    blur_frac: session.motion_blur_frac,
+                    hit: session.get_hit_effect(),
+                });
         if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(
                 render_start.elapsed().as_secs_f64() * MS_PER_S,

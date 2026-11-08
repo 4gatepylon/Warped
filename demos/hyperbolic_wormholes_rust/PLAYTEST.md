@@ -71,6 +71,12 @@ away or letting go starts it over. A console that is off goes dark. When a team'
 sees which team won, and a new game starts only when whoever started the server presses `Enter` in its terminal
 (the `make host-game` terminal, for that command): every console comes back on and everyone returns to their spawn.
 
+The crater's wall is Lunar Surface's edge, with no invisible wall any more. Climb it and you slow down without end:
+each step outward is cut by how far you have already come, so you never get past halfway up the wall (about 10 to
+14 m high). Your view stretches out from the middle of the screen, more and more as you slow. Walking back in is at
+full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
+`view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
+
 Controls (the defaults; to change them, edit the `keys` in a copy of `player_settings.yaml` and add
 `PLAYER_SETTINGS=mine.yaml` to `make host-game` or `make join-game`): click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), holding the right button shines your flashlight (a cone of light that only you see for now), `Ctrl` (held) crouches
