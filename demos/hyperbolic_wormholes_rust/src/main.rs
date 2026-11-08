@@ -1657,6 +1657,7 @@ struct Session {
     shot_time_s: f64,
     is_running: bool,
     is_jumping: bool,
+    is_walking_upright: bool,
     settings: GameSettings,
     gun: Gun,
     is_trigger_held: bool,
@@ -1908,6 +1909,7 @@ impl Session {
             shot_time_s: 0.0,
             is_running: false,
             is_jumping: false,
+            is_walking_upright: false,
             gun: Gun::Laser,
             is_trigger_held: false,
             rifle_next_shot_s: 0.0,
@@ -2089,6 +2091,8 @@ impl Session {
             down: false,
             sprint: keys.is_scancode_pressed(Scancode::LShift)
                 || keys.is_scancode_pressed(Scancode::RShift),
+            crouch: keys.is_scancode_pressed(Scancode::LCtrl)
+                || keys.is_scancode_pressed(Scancode::RCtrl),
         };
         let messages: Vec<String> = match &mut self.voxel {
             Some(voxel) => voxel
@@ -2134,13 +2138,15 @@ impl Session {
         (self.is_laser_on || self.shot_time_s > 0.0) && self.can_shoot()
     }
 
-    /// `can_shoot` says whether this player may shoot: not while running, not while jumping or
-    /// falling on a voxel map, not while holding `E` on a console, and not once a team has won.
+    /// `can_shoot` says whether this player may shoot: standing still or crouched (walking while
+    /// crouched is fine), so not while walking upright or running, not while jumping or falling on
+    /// a voxel map, not while holding `E` on a console, and not once a team has won.
     ///
     /// Example: `if self.can_shoot() { ... }`
     fn can_shoot(&self) -> bool {
         !self.is_running
             && !self.is_jumping
+            && !self.is_walking_upright
             && self
                 .multiplayer
                 .as_ref()
@@ -2253,8 +2259,9 @@ impl Session {
         (multiplayer.client.game.off_mask, disabling_mask)
     }
 
-    /// `update_gun` notes whether this player runs (sprints while moving) or jumps (is in the air
-    /// on a voxel map, not flying), dropping a shot in flight if either, and moves the gun: its
+    /// `update_gun` notes whether this player runs (sprints while moving), walks upright (moves
+    /// without crouching on a voxel map) or jumps (is in the air on a voxel map, not flying),
+    /// dropping a shot in flight if any, and moves the gun: its
     /// step phase while walking or running on the ground, and its pose toward jogging while
     /// running and back to aiming otherwise.
     ///
@@ -2269,6 +2276,7 @@ impl Session {
             None => (input.sprint && is_moving, self.player.is_on_ground),
         };
         self.is_running = is_running;
+        self.is_walking_upright = is_moving && !(input.crouch && self.voxel.is_some());
         self.is_jumping = self
             .voxel
             .as_ref()
@@ -2828,7 +2836,7 @@ impl Session {
             lines.push(self.message.clone());
         }
         lines.push(if self.is_captured {
-            "WASD move, Shift run, Space jump, click shoot (not while running), 1/2 or wheel switch gun, hold E on an enemy console to turn it off, R respawn, -/= scale, Esc release".to_string()
+            "WASD move, Shift run, Space jump, click shoot (not while running), 1/2 or wheel switch gun, Ctrl crouch (shoot standing still or crouched), hold E on an enemy console to turn it off, R respawn, -/= scale, Esc release".to_string()
         } else {
             "Click to capture the mouse; Esc quits".to_string()
         });

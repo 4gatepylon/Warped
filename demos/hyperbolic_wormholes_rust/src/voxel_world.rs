@@ -1153,7 +1153,8 @@ impl VoxelWorld {
 /// eye's height above it, the view's pitch, the vertical speed, whether they fly or stand, their
 /// sprint energy (1 full, 0 empty) and whether they sprinted on the last step, and the head bob's
 /// phase and how much of it shows (0 standing still, 1 walking), and the seconds left of being
-/// slowed after a hit (moving at the settings' `when_hit.slow_speed_frac`).
+/// slowed after a hit (moving at the settings' `when_hit.slow_speed_frac`), and how far they are
+/// crouched (0 standing, 1 crouched).
 #[derive(Clone, Copy)]
 pub struct VoxelPlayer {
     pub body: DMat4,
@@ -1167,6 +1168,7 @@ pub struct VoxelPlayer {
     pub bob_phase_rad: f64,
     pub bob_frac: f64,
     pub slowed_s: f64,
+    pub crouch_frac: f64,
 }
 
 impl VoxelPlayer {
@@ -1190,6 +1192,7 @@ impl VoxelPlayer {
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
+            crouch_frac: 0.0,
         }
     }
 
@@ -1240,6 +1243,7 @@ impl VoxelPlayer {
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
+            crouch_frac: 0.0,
         }
     }
 
@@ -1275,6 +1279,7 @@ impl VoxelPlayer {
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
+            crouch_frac: 0.0,
         }
     }
 
@@ -1307,6 +1312,7 @@ impl VoxelPlayer {
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
             slowed_s: 0.0,
+            crouch_frac: 0.0,
         }
     }
 
@@ -1316,8 +1322,20 @@ impl VoxelPlayer {
     /// Example: `let camera = player.get_camera_frame(&world);`
     pub fn get_camera_frame(&self, world: &VoxelWorld) -> DMat4 {
         self.body
-            * make_boost(AXIS_Y, (self.h_m + self.get_bob_m(world)) / world.r)
+            * make_boost(
+                AXIS_Y,
+                (self.h_m + self.get_bob_m(world) - self.get_crouch_drop_m(world)) / world.r,
+            )
             * make_rotation(AXIS_Z, AXIS_Y, -self.pitch_rad)
+    }
+
+    /// `get_crouch_drop_m` gives how far crouching lowers the eye now: up to the settings'
+    /// `crouch_eye_height_frac` of the standing eye height.
+    ///
+    /// Example: `let drop_m = player.get_crouch_drop_m(&world);`
+    pub fn get_crouch_drop_m(&self, world: &VoxelWorld) -> f64 {
+        let crouched_frac: f64 = world.settings.movement.crouch_eye_height_frac;
+        self.crouch_frac * world.player.eye_height_m * (1.0 - crouched_frac)
     }
 
     /// `get_bob_m` gives the head bob: the eye dips at each footstep, deeper when sprinting, by
@@ -1419,7 +1437,10 @@ impl VoxelPlayer {
         let len: f64 = forward.hypot(side);
         let settings: PlayerSettings = world.player;
         let (energy, bob) = (&world.settings.sprint_energy, &world.settings.head_bob);
-        let wants_to_sprint: bool = input.sprint && len > 0.0;
+        let crouch_step: f64 = dt_s / world.settings.movement.crouch_s;
+        let crouch_target: f64 = f64::from(u8::from(input.crouch));
+        self.crouch_frac += (crouch_target - self.crouch_frac).clamp(-crouch_step, crouch_step);
+        let wants_to_sprint: bool = input.sprint && !input.crouch && len > 0.0;
         self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
         self.energy_frac = (self.energy_frac
             + if wants_to_sprint {
@@ -1442,6 +1463,10 @@ impl VoxelPlayer {
         }
         let slow_frac: f64 = if self.slowed_s > 0.0 {
             world.settings.when_hit.slow_speed_frac
+        } else {
+            1.0
+        } * if input.crouch && !self.is_flying {
+            world.settings.movement.crouch_speed_frac
         } else {
             1.0
         };
@@ -1562,6 +1587,7 @@ mod tests {
     //! | Beam clipped to | its middle (through the wormhole), before its start, past its end | `a_clipped_beam_keeps_its_middle` |
     //! | Obstacle walked into | one block (stops the player), one block while jumping (climbed), a wall turned along after touching it at an angle (not climbed) | `walking_into_a_block_does_not_climb_it`, `jumping_climbs_onto_a_block`, `turning_along_a_wall_does_not_climb_it` |
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
+    //! | Walking | upright, crouched (half as far, eye fully lowered) | `crouching_lowers_the_eye_and_slows_walking` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Floor walked on | the ground, a structure's deck above the ground (its cells' tops rise a little against the ground's height) | `walking_into_a_block_does_not_climb_it` (walks on the ground first), `walking_on_a_deck_moves` |
 
@@ -1587,6 +1613,8 @@ mod tests {
     const EMPTY_SPRINT_STEP_COUNT: usize = 10;
     const FAR_ID_NEAR_ONE: u32 = 35;
     const SKY_PITCH_RAD: f64 = 0.5;
+    const CROUCH_STEP_COUNT: usize = 30;
+    const CROUCH_TOLERANCE_FRAC: f64 = 0.02;
     const MAX_JUMP_STEP_COUNT: usize = 120;
     const JUMP_HEIGHT_TOLERANCE_M: f64 = 0.1;
     const JUMP_TIME_TOLERANCE_S: f64 = 0.05;
@@ -1748,6 +1776,39 @@ mod tests {
         assert!((length_m(&middle) - (to_m - from_m)).abs() < DISTANCE_TOLERANCE_M);
         assert!(clip_beam(&shot.segments, world.r, -2.0, -1.0).is_empty());
         assert!(clip_beam(&shot.segments, world.r, full_m + 1.0, full_m + 2.0).is_empty());
+    }
+
+    #[test]
+    fn crouching_lowers_the_eye_and_slows_walking() {
+        let world: VoxelWorld = load_lunar_surface();
+        let start: VoxelPlayer = VoxelPlayer::AtView(&world, [-27.0, 0.0], [40.0, 0.0], None, 0.0);
+        let walk: Input = Input {
+            forward: true,
+            ..Input::default()
+        };
+        let walk_for = |input: &Input| -> VoxelPlayer {
+            let mut player: VoxelPlayer = start;
+            for _ in 0..CROUCH_STEP_COUNT {
+                player.step(&world, input, STEP_S, 0);
+            }
+            player
+        };
+        let moved_m = |player: &VoxelPlayer| -> f64 {
+            get_distance(start.body.col(AXIS_W), player.body.col(AXIS_W)) * world.r
+        };
+        let (upright, crouched) = (
+            walk_for(&walk),
+            walk_for(&Input {
+                crouch: true,
+                ..walk
+            }),
+        );
+        let movement = &world.settings.movement;
+        let speed_frac: f64 = moved_m(&crouched) / moved_m(&upright);
+        assert!((speed_frac - movement.crouch_speed_frac).abs() < CROUCH_TOLERANCE_FRAC);
+        let full_drop_m: f64 = world.player.eye_height_m * (1.0 - movement.crouch_eye_height_frac);
+        assert_eq!(upright.get_crouch_drop_m(&world), 0.0);
+        assert!((crouched.get_crouch_drop_m(&world) - full_drop_m).abs() < 1e-9);
     }
 
     #[test]

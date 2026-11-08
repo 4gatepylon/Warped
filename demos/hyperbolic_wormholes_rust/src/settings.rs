@@ -33,8 +33,9 @@ const ZERO_ALLOWED_KEYS: [&str; 10] = [
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-/// `MovementSettings` is walking and sprinting speed as multiples of the map's, and a jump's height
-/// and time in the air as a fraction of the map's jump (gravity follows from the two).
+/// `MovementSettings` is walking and sprinting speed as multiples of the map's, a jump's height and
+/// time in the air as a fraction of the map's jump (gravity follows from the two), and crouching:
+/// its speed and eye height as fractions of walking's, and how long it takes to crouch or stand.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct MovementSettings {
@@ -42,6 +43,9 @@ pub struct MovementSettings {
     pub sprint_speed_per_map_speed: f64,
     pub jump_height_m: f64,
     pub jump_time_per_map_jump_time: f64,
+    pub crouch_speed_frac: f64,
+    pub crouch_eye_height_frac: f64,
+    pub crouch_s: f64,
 }
 
 /// `SprintEnergySettings` is how long a full sprint bar lasts and how long an empty one takes to
