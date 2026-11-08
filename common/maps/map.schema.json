@@ -160,6 +160,19 @@
         }
       }
     },
+    "ladders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "frame", "half_size_m"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "frame": {"$ref": "#/$defs/frame"},
+          "half_size_m": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 3, "maxItems": 3}
+        }
+      }
+    },
     "warps": {
       "type": "array",
       "items": {
@@ -232,7 +245,8 @@
         "properties": {
           "position": {"$ref": "#/$defs/vector4"},
           "color": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 3, "maxItems": 3},
-          "radius_m": {"type": "number", "exclusiveMinimum": 0}
+          "radius_m": {"type": "number", "exclusiveMinimum": 0},
+          "flicker_frac": {"type": "number", "minimum": 0, "maximum": 1}
         }
       }
     },
@@ -341,6 +355,24 @@
             }
           }
         }
+      }
+    },
+    "scatter": {
+      "type": "object",
+      "required": ["seed", "spacing_m", "grow_frac"],
+      "additionalProperties": false,
+      "properties": {
+        "seed": {"type": "integer", "minimum": 0},
+        "spacing_m": {"type": "number", "exclusiveMinimum": 0},
+        "grow_frac": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "laser": {
+      "type": "object",
+      "required": ["rgb"],
+      "additionalProperties": false,
+      "properties": {
+        "rgb": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 3, "maxItems": 3}
       }
     },
     "appearance": {

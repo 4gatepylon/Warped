@@ -56,12 +56,15 @@ Both are exported from the programs that first built them; the map files are wha
 | `ground` | `{"material": id, "tiling": {...}, "terrain": {...}}` (optional `tiling` and `terrain`, below) |
 | `structures` | structures of smooth shapes, optionally drawn as a model (below), optional |
 | `boxes` | boxes (below), optional |
+| `ladders` | climbable volumes (below), optional |
 | `warps` | black holes and wormhole mouths (below), optional |
 | `lights` | lamps (below), optional |
 | `sky` | the sky and the sun (below) |
 | `spawns` | where players start (below) |
 | `regions` | zones and the boundary (below), optional |
 | `appearance` | `{"style": name, ...}`: how the renderer details surfaces (below) |
+| `scatter` (optional) | `{"seed", "spacing_m", "grow_frac"}`: how the map's generator scattered its decorative plants (seed, grid step before jitter, chance a clear point grows one), so the layout can be regenerated or re-seeded |
+| `laser` (optional) | `{"rgb": [r, g, b]}`: the linear colour every team's lasers share on this map; without it, lasers take team colours |
 
 ### Materials
 
@@ -93,6 +96,13 @@ coordinates q (meters):
 coordinate planes, whose faces are equidistant surfaces rather than planes), |p_a| ≤ sin(h_a / R) in S³, and
 |q_a| ≤ h_a in E³. `group` names what the box is part of ("the house", "a tree"), for hit reports and for renderers
 that cull groups at once.
+
+### Ladders
+
+`{"name", "frame", "half_size_m": [h_x, h_y, h_z]}`: a volume a player climbs while in it, a box like those above
+that isn't solid. The frame's -z axis points from the ladder into what it climbs (a player faces it to climb), and
+its top is the frame's origin plus h_y up. A renderer draws it however it likes (the Dark Forest draws a rope
+ladder); readers that don't climb can ignore it.
 
 ### Warps
 
@@ -127,6 +137,7 @@ distance d to its centre, the origin of its `frame`:
 `{"position": [x, y, z, w], "color": [r, g, b], "radius_m"}`: a lamp. At distance d from it, a surface facing it at
 angle θ gets `color` (already scaled by the lamp's brightness) times 1/(1 + (d/radius_m)²), times
 0.3 + 0.7 max(cos θ, 0), faded smoothly to nothing between 1.8 and 3 times `radius_m`.
+An optional `"flicker_frac"` (0 to 1) makes it a flame: its brightness wavers, dimming by up to that fraction.
 
 ### Sky
 
