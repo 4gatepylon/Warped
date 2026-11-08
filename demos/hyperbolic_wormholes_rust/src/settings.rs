@@ -1,8 +1,9 @@
 //! `settings.rs` reads the game's two settings files, so players can tune it without rebuilding:
 //! `server_settings.yaml`, the numbers that shape play for everyone (movement, sprint energy, both
 //! guns, consoles, respawning, how a hit slows, the flashlight, thrown wormholes, how curved space
-//! is), which the game server sends to every player who joins; and `player_settings.yaml`, each
-//! player's own choices (keys, mouse speed, head bob, motion blur, how a hit looks).
+//! is, the reality bend), which the game server sends to every player who joins; and
+//! `player_settings.yaml`, each player's own choices (keys, mouse speed, head bob, motion blur, how
+//! a hit looks).
 //!
 //! Interface: `ServerSettings` (`Builtin`, `Load`, `FromJson`, `to_json`), `PerPlayerSettings`
 //! (`Builtin`, `Load`) and their sections.
@@ -250,6 +251,18 @@ pub struct SpaceSettings {
     pub curvature_per_map_curvature: f64,
 }
 
+/// `RealityBendSettings` is the reality bend (W-68): the edge radius beyond which the bent map is
+/// cut away, how long the bend eases to a new strength, and the black hole's Schwarzschild radius
+/// and reach at full strength.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct RealityBendSettings {
+    pub edge_radius_m: f64,
+    pub transition_s: f64,
+    pub max_schwarzschild_radius_m: f64,
+    pub max_reach_m: f64,
+}
+
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
 /// long motion smears, how strongly the view stretches near the map's edge, how strongly the scene
 /// shifts colour (light cyan forward, dark red backward) while moving through a wormhole's throat
@@ -321,6 +334,7 @@ pub struct ServerSettings {
     pub aim: AimSettings,
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
+    pub reality_bend: RealityBendSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is

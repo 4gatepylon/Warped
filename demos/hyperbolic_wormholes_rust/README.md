@@ -140,6 +140,11 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   crossing the sky in 2 to 5 minutes. They follow the UTC clock, so every player sees the same ships.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
+- `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and
+  `--view`: the map's edges curl up into a bowl, and at 1 it closes into the inside of a sphere. The Metal ray tracer
+  walks each ray through the bent world in short pieces, halved until each one's map chord follows the bent path within
+  2 cm (or half a pixel far away), and traces every piece through the unbent map; flat frames use the unchanged tracer
+  (`render_voxel.metal` is compiled with and without `HAS_BEND`).
 
 ## Play together
 
@@ -167,7 +172,8 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
-- On Lunar Surface a team wins by turning off the other team's five consoles (hold `E` on one for 10 s within 3 m).
+- On Lunar Surface each team has three pylons with one console each, and a team wins by turning off all three of the
+  other team's consoles (hold `E` on one for 10 s within 3 m).
   Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
   just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
   go dark when off. After a win, `Enter` in the server's terminal starts a new game.
