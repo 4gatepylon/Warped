@@ -650,6 +650,16 @@
 - **Rationale:** you found that turning off a console did nothing. A scripted client holding a console against a
   Lunar Surface server saw it turn off after 10.02 s, so a server on another map is the likeliest cause.
 
+### D59. Rifle recoil
+
+- **Choice:** each rifle shot kicks the view up 0.0075 rad (0.43°) and 0.0025 rad sideways, alternately left and
+  right. A full 20-shot burst climbs 8.6° that the player pulls back down, as in tactical shooters. The rifle
+  jolts 3.5 cm back toward the eye and tips up 0.12 rad, settling over 0.08 s, before the next shot 0.125 s later.
+  The laser wand has no recoil.
+- **Alternatives:** a random sideways kick (the zigzag is predictable to learn, as in CS:GO's patterns); the view
+  drifting back down by itself.
+- **Rationale:** you asked for recoil on the rifle.
+
 
 ## Baselines
 

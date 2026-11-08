@@ -63,7 +63,7 @@ Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), click to shoot (a
 quarter-second laser shot; not while running, when the wand in your hand swings low, nor in the air on Lunar Surface), the mouse wheel or
 `1`/`2` switch between gun 1, the laser wand (a quarter-second shot per click; one hit eliminates), and gun 2, the
-rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second; 2 hits to the head or 12 to the
+rifle (a grey block with a thin barrel; hold the button to fire 8 pulses a second, each kicking your view up a little; 2 hits to the head or 12 to the
 body eliminate; it overheats after 20 shots, shown in a bar above the energy bar, and cools in 2 s), `E` (held)
 turns off one of the other team's consoles, `R` respawns, `-` and `=` change the render resolution.
 
