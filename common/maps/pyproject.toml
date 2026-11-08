@@ -2,6 +2,7 @@
 #
 # Interface:
 #     validate_map.py: checks map folders against README.md and map.schema.json.
+#     prepare_models.py: writes the Sketchfab models in models/ (needs Pillow).
 #     dev dependency group: pytest and ruff.
 #     ruff: SIM401 is off, as this repository reads optional keys with an explicit `in` check,
 #     never `dict.get` (AGENTS.md, Failing fast).
@@ -17,6 +18,7 @@ dependencies = [
     "click>=8.1",
     "jsonschema>=4.23",
     "numpy>=2.1",
+    "pillow>=13.0.0",
 ]
 
 [dependency-groups]

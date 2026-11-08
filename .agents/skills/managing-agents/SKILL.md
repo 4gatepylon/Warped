@@ -1,6 +1,6 @@
 ---
 name: managing-agents
-description: Coordinate several agents working in parallel on this repo - subagents you start, other sessions, Codex and Devin - so their work doesn't collide, survives a lost session, and reaches the user with their own words relayed faithfully. Use whenever you start, brief, message, check on, relay the user's answers to, or stop another agent, or several agents work on the same component at once.
+description: Coordinate several agents working in parallel on this repo - subagents you start, other sessions, Codex and Devin - so their work doesn't collide, survives a lost session, and reaches the user with their own words relayed faithfully. Use whenever you start, brief, message, check on, relay the user's answers to, or stop another agent, or several agents work on the same component at once; and before any git command that changes a branch, so that no agent ever changes the user's own checkout.
 ---
 
 # Managing agents
@@ -29,6 +29,17 @@ So every agent's work must be findable, pushed, and kept apart from every other 
 
 ## Keeping agents apart
 
+- **NEVER change the user's checkout.** The user's own checkout (the repository's main folder, e.g.
+  `/Users/<user>/git/Warped`) stays on the branch the user last chose. No agent, anywhere, at any time, for any
+  reason, changes its branch, commits or files: no `git switch`, `git checkout`, `git reset`, `git rebase`,
+  `git merge`, `git pull`, `git stash`, `gh pr checkout` or `gh stack` there, not even to undo another agent's
+  mistake (tell the user instead). Reading there (`git status`, `git log`, `git fetch`) and `git worktree add` are
+  fine.
+  - **Every agent that changes git state works in a worktree of its own:**
+    `git worktree add -b <branch> .devin/worktrees/<name> origin/staging/user-<username>` (Claude Code uses
+    `.claude/worktrees/`), and removes it with `git worktree remove` once its work is pushed and its PR is open.
+  - On 2026-11-08 an agent switched the user's checkout off `staging/user-theaquarium` onto its own PR branches; the
+    user found their terminal on a branch they never chose.
 - **One writer per branch and worktree.** Never give two agents the same branch or worktree. Before each push, an
   agent fetches and checks the branch's log on `origin`; if someone else pushed, it stops and reports rather than
   overwriting. (On W-84 (shot noise in the beam itself), a second agent committed to the same branch and work was

@@ -524,7 +524,7 @@
   before running again.
 - **Rationale:** you asked that a player can run only while there is energy.
 
-### D50. No shooting in the air
+### D50. No shooting in the air (replaced by D109)
 
 - **Choice:** on voxel maps a player can't shoot while jumping or falling (in the air and not flying), as while
   running (D46): clicks don't shoot, and a shot in flight stops when the player leaves the ground. On the house,
@@ -1875,6 +1875,47 @@
   one ideally; see if you can find something for that"), and chose the bolt-action from the pictures ("bolt action
   is good"). The wooden rifle stands out from the sci-fi look, which also makes the two guns easy to tell apart.
 
+### D108. Time slows near the black hole instead of the map bending, W-107 (time dilation)
+
+- **Choice:**
+  - **No more bend:** W-68 (reality bend)'s curling of the map into a sphere is gone: `bend.rs`, the laser's trace
+    through the bent world, and the shader's `HAS_BEND` tracer. `reality_bend.rs` became `black_hole_growth.rs`,
+    the `reality_bend` server settings became `black_hole` (without `edge_radius_m`), and `--bend-strength` became
+    `--black-hole-strength`.
+  - **The black part grows a little, the distortion a lot:** each console turned off grows the black hole's
+    Schwarzschild radius from 1.2 m to only 2 m, its reach from 24 m to 28 m, and a wide lens around it from none to
+    one that turns a ray by up to 0.35 rad (`max_lens_rad`). The lens is ln n = h a / √(ρ² + a²), with a core a of
+    0.35 of the reach (`lens_core_per_reach`): it bends light across the whole reach, most for rays passing a from the
+    centre, and has no horizon, so it adds no black. The CPU (the laser) and the shader use the same index. The black
+    hole stays where the map puts it, 17 m above the map's middle; it used to rise toward the bent sphere's centre.
+  - **How slow:** `VoxelWorld::get_time_rate_frac` is general relativity's clock rate for someone standing still
+    near a black hole, (1 − q) / (1 + q) in isotropic coordinates with q = k m / ρ, with k =
+    `time_dilation_per_general_relativity` = 15. The wide lens slows time too, as a weak field does: the rate's log
+    falls by k times half its ln n. The rate's log fades to 0 at the reach, along the window the light bending uses,
+    and never drops below `min_time_rate_frac` = 0.1, so a player near the horizon crawls rather than freezes. On the
+    ground under the black hole (15.4 m from its centre) time runs at 81% with no console off, 45% with three off and
+    25% with five.
+  - **Whose time:** each player's own. Their window steps their movement (walking, gravity, jumping, sprint
+    energy), turning off a console, both guns' firing, reload and heat, and the gun's sway by their own time.
+    Looking around, the menus, the HUD and respawning keep the window's time. Bots step the same way. Other players
+    see a slowed player move slowly, since each window sends where its player is.
+  - **Shown:** the HUD's line `BLACK HOLE <n>%, your time runs at <n>%` replaces `REALITY <n>%`.
+  - **Reach at most 28 m:** mouth A is 46 m from the black hole with a 15 m reach, and reaches may not overlap; the
+    nearest structure (29.6 m) stays outside, since the black hole's list of structures is built at the map's reach.
+- **Alternatives:**
+  - growing the Schwarzschild radius to 6 m (the first version): the black part filled the view; you asked for "the
+    black part grows a little but mostly the distortion area grows";
+  - k = 3 (the first version): 65% under the black hole at full strength and 96% with no console off, which you
+    didn't notice; k = 1, real general relativity, is weaker still;
+  - no fade at the reach: everyone on the map would run a little slow, all the time;
+  - slowing the whole game: impossible with several players, who are at different distances;
+  - slowing looking around too: the mouse would feel broken rather than time slowed;
+  - a colour cue (blueshift toward the black hole): left for later.
+- **Rationale:** you asked for the black hole to grow as pylons fall and for time to slow "time dilation style"
+  closer to it, then for "more intense" dilation "all around". The rate keeps general relativity's shape, so it
+  slows ever faster toward the horizon, and k makes it strong enough to feel at the distances players stand. All
+  the numbers are server settings, to tune in a playtest.
+
 ### D102. A photo-like Milky Way across the sky, W-98 (Milky Way)
 
 - **Choice:**
@@ -1926,6 +1967,23 @@
   built from the first pictures ("ok menrge to staging", "i like your animation"), then, after #318 swapped the
   models, asked for both guns: "I want them both swaying ... get both working realistically based on their size",
   and approved the result ("merge this").
+
+### D109. Shoot once no movement key is held, in the air too, W-108 (shoot whenever not moving)
+
+- **Choice:**
+  - **Rule:** a player can shoot once no movement key has been held for 0.25 s (`movement.shoot_after_moving_s` in
+    `server_settings.yaml`, 0 for none). The movement keys are `W`/`A`/`S`/`D` while upright, `Shift` with them, and
+    `Space`. Letting go starts the cooldown; pressing one again stops a shot in flight, as before.
+  - **In the air:** falling or floating with no key held may shoot, which replaces D50 (no shooting in the air).
+  - **Kept:** walking crouched still shoots (D67), and nothing else about shooting changed (consoles, the lobby, a
+    won level).
+  - **The house:** holding `Space` for its jetpack now stops shooting too, since `Space` is a movement key.
+  - **Time dilation:** the cooldown counts the player's own time, as the reload does (D108), so near the black hole
+    it lasts longer in real time, in step with everything else the player does.
+- **Alternatives:** no cooldown; a longer one (0.5 s); counting crouched walking as moving; a constant in code
+  instead of a server setting (which would let windows from before this change still join).
+- **Rationale:** you asked: "with a slight cooldown, you should be able to shoot as long as no keys are pressed. No
+  movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
 
 ## Workload
 

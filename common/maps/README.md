@@ -54,7 +54,7 @@ Both are exported from the programs that first built them; the map files are wha
 | `player` | `{"eye_height_m", "walk_m_per_s", "sprint_m_per_s", "jump_m_per_s", "fly_m_per_s"}` |
 | `materials` | the palette (below); material 0 is always empty space |
 | `ground` | `{"material": id, "tiling": {...}, "terrain": {...}}` (optional `tiling` and `terrain`, below) |
-| `structures` | structures of smooth shapes (below), optional |
+| `structures` | structures of smooth shapes, optionally drawn as a model (below), optional |
 | `boxes` | boxes (below), optional |
 | `warps` | black holes and wormhole mouths (below), optional |
 | `lights` | lamps (below), optional |
@@ -81,6 +81,10 @@ coordinates q (meters):
 - `ellipsoid`: the ellipsoid with semi-axes h centred at c.
 - A ray or a player meets the structure where it enters any shape. `demos/hyperbolic_wormholes_rust/src/shapes.rs`
   defines the shapes' distance bounds exactly.
+- `mesh` (optional): `{"model", "height_m"}` draws the glTF model `models/<model>/scene.gltf` (see Models) instead of
+  the shapes, scaled evenly to `height_m` tall, with the bottom centre of its bounding box at the local origin, its
+  +y up and its −z forward. Its triangles stop light and lasers; the shapes then only stop players, and a renderer
+  that doesn't draw models draws them instead.
 
 ### Boxes
 
@@ -179,6 +183,33 @@ renderers choose the fade and the glow.
   `{"model": "ambient_sun", "ambient", "sun"}` (a constant plus Lambert sunlight) or
   `{"model": "lunar_lambert", "lommel_seeliger_frac", "ambient", "earthshine", "sun_intensity", "shadows": bool}`
   (that mix of Lommel–Seeliger and Lambert reflectance, with straight shadow rays toward the sun if `shadows`).
+
+## Models
+
+`models/<name>/` holds glTF models that maps draw (`scene.gltf`, `scene.bin`, `textures/`, `license.txt`), small
+copies that `prepare_models.py` writes from Sketchfab downloads: same geometry, textures shrunk to 1024 px, spec-gloss
+materials turned into metallic-roughness. It downloads into the git-ignored `.build/sketchfab/` and needs
+`SKETCHFAB_API_TOKEN` only for models not downloaded yet:
+
+```bash
+SKETCHFAB_API_TOKEN=... uv run python prepare_models.py
+```
+
+All are licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) and need their authors credited:
+
+| Folder | Model | Author |
+| --- | --- | --- |
+| `stekelvarken_kazemat/` | ["'Stekelvarken S3' Kazemat (Dutch WWII bunker)"](https://sketchfab.com/3d-models/stekelvarken-s3-kazemat-dutch-wwii-bunker-f409a77deaaf4e3888d47f76ec48dbdd) | [Sjoerd van Riel](https://sketchfab.com/sjoerdnijkerk) |
+| `desert_bunker_garage/` | ["Desert Planet Bunker Garage Thing"](https://sketchfab.com/3d-models/desert-planet-bunker-garage-thing-ebe3177a1c7947b98328d8cab6aa8600) | [Santeri Riikonen](https://sketchfab.com/eKross) |
+| `ww2_field_bunker/` | ["WW2 Field Bunker"](https://sketchfab.com/3d-models/ww2-field-bunker-6ea5cebdaa82455aa3aad26baa6e0375) | [Golden](https://sketchfab.com/goldenblack4) |
+| `scifi_beacon/` | ["Sci-Fi Beacon/Way Point Marker Free Model"](https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f) | [AMMediaGames](https://sketchfab.com/AMMediaGames) |
+| `hesco_barrier/` | ["Hesco Barrier PBR"](https://sketchfab.com/3d-models/hesco-barrier-pbr-ab21217481094e9a84f989e71fd56a59) | [polbrainstorm](https://sketchfab.com/polbrainstorm) |
+
+`teal_robot/` is the players' body, not part of any map: ["Teal V.2"](https://sketchfab.com/3d-models/teal-v2-d6a54ff9468c451bbdbd879afa03f20a)
+by [Lagst](https://sketchfab.com/Lagst), under the [Sketchfab Standard](https://sketchfab.com/licenses) license (use
+in any project, no redistribution of the model on its own; the repository is private). `prepare_models.py` runs
+`animate_teal_blender.py` in Blender on it first (`--blender-path`), which gives it a clean rig and the clips `Idle`,
+`Walk`, `Run`, `Jump` and `Death`.
 
 ## Checking a map
 

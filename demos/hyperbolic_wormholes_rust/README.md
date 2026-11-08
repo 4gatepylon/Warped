@@ -53,8 +53,9 @@ make join-game SERVER=127.0.0.1
   walking backward, crisp, with dark staying dark. It is strongest at the throat and with speed, none standing
   still, and gone once you are 3.6 m out. `view.wormhole_tint_frac` in `player_settings.yaml` (0 to 1, also in the
   menu) sets its strength (0 for none). Only you see your own shift (Metal renderer, voxel maps).
-- Click (once the mouse is captured) to fire a laser shot for a quarter of a second, standing still or crouched (hold
-  `Ctrl`: a lower view and half speed); not while walking upright, running, nor in the air on Lunar Surface. The
+- Click (once the mouse is captured) to fire a laser shot for a quarter of a second, once no movement key has been held
+  for 0.25 s (`movement.shoot_after_moving_s`): walking crouched (hold `Ctrl`: a lower view and half speed) is fine,
+  and so is the air with no key held; not while walking upright, running or holding `Space`. The
   wand then reloads for 2 s (`sniper.reload_s` in `server_settings.yaml`): its ammo bar, one block above the energy
   bar, is empty until it can fire again.
   The mouse wheel or `1`/`2` switch to gun 2, the rifle, which fires 8 pulses a second while the button is held,
@@ -88,14 +89,16 @@ make join-game SERVER=127.0.0.1
 - Holding the right button aims: the view zooms in, 2.5 times with the sniper (gun 1) and 1.5 times with the rifle
   (gun 2), over 0.15 s, and the mouse turns it more slowly by the same factor (`aim` in `server_settings.yaml`).
 - Holding `F` shines a flashlight: a cone of light from your eye (on voxel maps; others don't see it yet).
-- `Q` throws your purple wormhole mouth, the next press your green one, then purple again, and so on, on both maps.
+- `Q` throws your purple wormhole mouth and the next press your green one, on both maps; once both are down, `Q`
+  does nothing until the pair is gone.
   A throw is lobbed under its own gravity, drops to the floor below whatever it hits, and hovers there at eye
   height facing back the way it flew; once both are down they link, and any player or laser that goes into one
   comes out of the other (`wormholes` in `server_settings.yaml`). The view through a thrown mouth is tinted its
   colour, and a mouth in the air, or down while its partner isn't, glows as a small ball. A throw fizzles if it
   never lands, or lands too close to a wall or another warp; your mouths disappear when you die.
-  A shot that goes through an enemy's mouth (or hits their lone mouth's ball) makes both their mouths flash red;
-  2 sniper shots or 5 rifle shots destroy the pair (`wormholes` in `server_settings.yaml`).
+  A shot that goes through an enemy's mouth makes both their mouths flash red; 2 sniper shots or 5 rifle shots
+  destroy the pair (`wormholes` in `server_settings.yaml`). One shot at an enemy's lone mouth's ball destroys it;
+  a shot at your own or a teammate's ball does nothing.
 - On Lunar Surface the blue and red zones' edges are walls you see through (D103): faint slabs in the team's colour
   straight above each edge, 6 m high above the ground and 0.6 m thick (a player's width), brightest at their foot
   and fading out at the top. They stop neither you nor lasers. The map sets their height, thickness and opacity
@@ -152,11 +155,9 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   none). It is drawn once into a texture when the map loads.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
-- `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and
-  `--view`: the map's edges curl up into a bowl, and at 1 it closes into the inside of a sphere. The Metal ray tracer
-  walks each ray through the bent world in short pieces, halved until each one's map chord follows the bent path within
-  2 cm (or half a pixel far away), and traces every piece through the unbent map; flat frames use the unchanged tracer
-  (`render_voxel.metal` is compiled with and without `HAS_BEND`).
+- `--black-hole-strength <0..1>` grows Lunar Surface's black hole to that strength in the window, `--bench-views`
+  and `--view` (1 is full strength, with one console left; W-68, `black_hole_growth.rs`); otherwise it follows the
+  consoles. Time runs slower near the black hole (W-107, D108): the HUD shows how fast yours runs.
 
 ## Play together
 
@@ -184,8 +185,9 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - Players start on a ring around their team's spawn and see each other as coloured boxes, bent through the wormholes like
   everything else. Everyone's laser is drawn. A laser that reaches another player removes them from the game: their
   view darkens and says "YOU DIED" with a countdown, and they come back at their spawn point 3 seconds later.
-- On Lunar Surface each team has three pylons with one console each, and a team wins by turning off all three of the
-  other team's consoles (hold `E` on one for 10 s within 3 m).
+- On Lunar Surface each team has three pylons, each a beacon that is its own console, and a team wins by turning off all
+  three of the other team's beacons (hold `E` on one for 10 s within 3 m). A beacon glows and beams its team colour up
+  while it is on.
   Consoles pulse once a second while on, faster and faster while someone holds `E` on them (up to 8 times a second
   just before they turn off, the same in every window), easing back down over about a second if the hold stops, and
   go dark when off. After a win, `Enter` in the server's terminal starts a new game.

@@ -1,0 +1,327 @@
+{
+ "accessors": [
+  {
+   "bufferView": 2,
+   "componentType": 5126,
+   "count": 6694,
+   "max": [
+    7.006319999694824,
+    -1.8053417205810547,
+    40.80839157104492
+   ],
+   "min": [
+    -37.791587829589844,
+    -46.38758087158203,
+    0.2799110412597656
+   ],
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "byteOffset": 80328,
+   "componentType": 5126,
+   "count": 6694,
+   "max": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "min": [
+    -1.0,
+    -1.0,
+    -1.0
+   ],
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 3,
+   "componentType": 5126,
+   "count": 6694,
+   "max": [
+    0.9999998211860657,
+    0.9999999403953552,
+    1.0,
+    1.0
+   ],
+   "min": [
+    -1.0,
+    -0.999999463558197,
+    -1.0,
+    -1.0
+   ],
+   "type": "VEC4"
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 6694,
+   "max": [
+    1.005764365196228,
+    1.0019738674163818
+   ],
+   "min": [
+    -0.001490056631155312,
+    0.0014060662360861897
+   ],
+   "type": "VEC2"
+  },
+  {
+   "bufferView": 0,
+   "componentType": 5125,
+   "count": 20868,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "extras": {
+   "author": "polbrainstorm (https://sketchfab.com/polbrainstorm)",
+   "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+   "source": "https://sketchfab.com/3d-models/hesco-barrier-pbr-ab21217481094e9a84f989e71fd56a59",
+   "title": "Hesco Barrier PBR"
+  },
+  "generator": "Sketchfab-14.91.0",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteLength": 83472,
+   "name": "floatBufferViews",
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteLength": 53552,
+   "byteOffset": 83472,
+   "byteStride": 8,
+   "name": "floatBufferViews",
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 160656,
+   "byteOffset": 137024,
+   "byteStride": 12,
+   "name": "floatBufferViews",
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 107104,
+   "byteOffset": 297680,
+   "byteStride": 16,
+   "name": "floatBufferViews",
+   "target": 34962
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 404784,
+   "uri": "scene.bin"
+  }
+ ],
+ "extensionsUsed": [
+  "KHR_materials_specular"
+ ],
+ "images": [
+  {
+   "uri": "textures/Material_25_baseColor.jpeg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "textures/Material_25_metallicRoughness.jpeg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "textures/Material_25_normal.jpeg",
+   "mimeType": "image/jpeg"
+  }
+ ],
+ "materials": [
+  {
+   "doubleSided": true,
+   "extensions": {
+    "KHR_materials_specular": {
+     "specularColorFactor": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "specularFactor": 0.0
+    }
+   },
+   "name": "Material_25",
+   "normalTexture": {
+    "index": 2
+   },
+   "occlusionTexture": {
+    "index": 1
+   },
+   "pbrMetallicRoughness": {
+    "baseColorTexture": {
+     "index": 0
+    },
+    "metallicRoughnessTexture": {
+     "index": 1
+    }
+   }
+  }
+ ],
+ "meshes": [
+  {
+   "name": "HescoBarrier_LOW_Material #25_0",
+   "primitives": [
+    {
+     "attributes": {
+      "NORMAL": 1,
+      "POSITION": 0,
+      "TANGENT": 2,
+      "TEXCOORD_0": 3
+     },
+     "indices": 4,
+     "material": 0,
+     "mode": 4
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "children": [
+    1
+   ],
+   "matrix": [
+    1.6215344667434692,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    3.6005298004037495e-16,
+    -1.6215344667434692,
+    0.0,
+    0.0,
+    1.6215344667434692,
+    3.6005298004037495e-16,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "name": "Sketchfab_model"
+  },
+  {
+   "children": [
+    2
+   ],
+   "matrix": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "name": "281737ad719d48a389c17c84ef9e9762.fbx"
+  },
+  {
+   "children": [
+    3
+   ],
+   "name": "RootNode"
+  },
+  {
+   "children": [
+    4
+   ],
+   "matrix": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    2.220446049250313e-16,
+    -1.0,
+    0.0,
+    0.0,
+    1.0,
+    2.220446049250313e-16,
+    0.0,
+    -1.0407485961914062,
+    19.42588233947754,
+    -3.1034812927246094,
+    1.0
+   ],
+   "name": "HescoBarrier_LOW"
+  },
+  {
+   "children": [
+    5
+   ],
+   "matrix": [
+    1.0,
+    0.0,
+    -0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    15.368633270263672,
+    24.141258239746094,
+    -20.305463790893555,
+    1.0
+   ],
+   "name": "Object_4"
+  },
+  {
+   "mesh": 0,
+   "name": "HescoBarrier_LOW_Material #25_0"
+  }
+ ],
+ "samplers": [
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "name": "Sketchfab_Scene",
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "textures": [
+  {
+   "sampler": 0,
+   "source": 0
+  },
+  {
+   "sampler": 0,
+   "source": 1
+  },
+  {
+   "sampler": 0,
+   "source": 2
+  }
+ ]
+}
