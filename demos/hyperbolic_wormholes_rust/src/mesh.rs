@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use glam::{DVec3, Mat3, Mat4, Vec2, Vec3};
 
+use crate::fps_demo_assets::import_gltf;
 use crate::map::get_model_path;
 
 const LEAF_TRIANGLE_COUNT: usize = 4;
@@ -128,8 +129,7 @@ impl MeshModel {
     pub fn Load(model: &str, height_m: f64) -> Result<MeshModel, String> {
         let path: PathBuf = get_model_path(model);
         let folder: &Path = path.parent().expect("a file has a folder");
-        let (document, buffers, _) =
-            gltf::import(&path).map_err(|e| format!("mesh: {}: {e}", path.display()))?;
+        let (document, buffers) = import_gltf(&path).map_err(|e| format!("mesh: {e}"))?;
         let globals: Vec<Mat4> = get_globals(&document);
         let mut triangles: Vec<MeshTriangle> = Vec::new();
         for node in document.nodes() {

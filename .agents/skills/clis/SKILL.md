@@ -142,6 +142,7 @@ The same concept has the same name in every CLI:
 | Run only a game server | `--serve` | `--dedicated`, `--headless` |
 | The settings a server sends to every player | `--server-settings <path>` | `--settings`, `--config`, `--game-settings` |
 | A player's own settings (keys, view) | `--player-settings <path>` | `--key-bindings`, `--keys`, `--prefs` |
+| A file holding a game's password | `--game-password-file <path>` | `--password`, `--secret`, `--key` |
 | A network port | `--port <port>` | `-p`, `--listen-port` |
 
 - Flags are kebab-case long options. The only short options are `-h` and the math letters of

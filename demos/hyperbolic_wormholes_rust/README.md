@@ -19,6 +19,11 @@ make join-game SERVER=127.0.0.1
 - Playing is only on a game server: `make serve-game` runs one (Lunar Surface by default), and every player joins
   it with `make join-game` (`SERVER=127.0.0.1` on the same computer, or the address the server prints). There is no
   local demo or host-and-play command; without a server, only the tools below run.
+- Started without flags (a double-click on the app, or `cargo run --release`), the game opens on a title screen:
+  the online games (from the app's `online_games.txt`), or joining a game on this Wi-Fi on either map. It runs
+  the chosen game as itself with that game's flags, logs it to `~/Library/Logs/Warped/`, and shows a pop-up if
+  it fails. An online game asks once for the game's password and keeps it in
+  `~/Library/Application Support/Warped/game_password`; a server that refuses it makes the game ask again.
 - Click to capture the mouse (`Esc` releases it; `Esc` again asks "Do you want to exit?": `Return` or `Y` exits,
   `Esc` or `N` goes back to the game). The window's close button quits at once.
 - Every key below is the default. [`player_settings.yaml`](player_settings.yaml) lists them all with your other own
@@ -159,6 +164,22 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   and `--view` (1 is full strength, with one console left; W-68, `black_hole_growth.rs`); otherwise it follows the
   consoles. Time runs slower near the black hole (W-107, D108): the HUD shows how fast yours runs.
 
+## Mac app
+
+```bash
+make package-mac-app
+make package-mac-app ONLINE_GAMES=online_games.txt
+```
+
+- `make package-mac-app` builds `.build/Warped/Warped.app` (the game with its maps built in, the icon from
+  [`app/app_icon.png`](app/app_icon.png), [`app/Info.plist`](app/Info.plist) with macOS 13 and the Local Network
+  note), signs it ad hoc and zips it with [`app/how_to_open.txt`](app/how_to_open.txt) into `.build/Warped.zip`.
+- The app carries the fps_demo's surface textures in `Contents/Resources/assets/`, and `fps_demo_assets.rs` reads
+  them from there when the game runs from the app. The revolver is built into the program (`viewmodel.rs`), not
+  shipped as files, as its Sketchfab Standard license asks; the menu's CREDITS page credits its author.
+- `ONLINE_GAMES=` copies an `online_games.txt` into the app for its title screen (`title.rs` says the format); the
+  cloud deploy writes it.
+
 ## Play together
 
 Everyone on the same network can play in one game. A game server, without a window, keeps the players in step;
@@ -177,6 +198,14 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
   [`server_settings.yaml`](server_settings.yaml) with other numbers that shape play (speeds, jump, both guns,
   consoles, respawn, the hit slowdown, the flashlight, thrown wormholes, the curvature); it sends them to every
   player who joins.
+- `GAME_PASSWORD_FILE=password.txt` (`--game-password-file`) gives a server a password, and players the same file:
+  the server challenges each join and admits only players who prove they know it, without the password crossing
+  the network, and refuses a game of another version with a clear message. Without it anyone can join, which
+  suits a local network.
+- `make build-server-bundle` builds the server alone (`wormholes_server`, from `src/bin/`) for x86-64 Linux into
+  `.build/server_bundle.tar.gz`, one static program with the maps built in, to upload to a server in the cloud. It
+  takes `--port`, `--map`, `--server-settings` and `--game-password-file` like `--serve`, and starts a new game
+  10 s after a team wins.
 - `make join-game` finds a server on the network by its announcement (`--join auto`); give the server's address
   (`SERVER=`) if that fails.
 - On macOS, the host and every joining computer must allow Local Network access for the app the game runs from

@@ -1,14 +1,16 @@
 //! `map.rs` reads a map in the portable format of `common/maps/` (see its README), `map.json`, into
 //! typed values, failing at once with the field's name when a map breaks the format.
 //!
-//! Interface: `Map::Load`, `Map::scale_curvature`, `get_map_folder`, and the types of the
-//! manifest's parts.
+//! Interface: `Map::Builtin`, `Map::Load`, `Map::scale_curvature`, `MapName`, `get_console_team`,
+//! `get_map_folder`, and the types of the manifest's parts.
 //!
-//! Example: `let map = Map::Load(&get_map_folder("lunar_surface"))?;`
+//! Example: `let map = Map::Builtin("lunar_surface")?;`
 //!
 //! Must know:
 //! - Every field of the format is read, so any valid map parses (`deny_unknown_fields`), even the
 //!   ones this demo doesn't use; hence `dead_code` is allowed here.
+//! - The game plays the maps built into the program (`Map::Builtin`), so it runs without the
+//!   repository; `Map::Load` reads a map from a folder, for tests and tools.
 
 #![allow(dead_code)]
 
@@ -16,12 +18,15 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use clap::ValueEnum;
 use glam::{DMat4, DQuat, DVec3, DVec4};
 use serde::Deserialize;
 
+use crate::app_bundle::MODELS;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, invert_lorentz, make_boost, make_fermi_point,
 };
+use crate::net::TEAM_NAMES;
 use crate::terrain::get_fermi_coordinates;
 
 /// `Result` is this module's result type.
@@ -33,6 +38,16 @@ const FORMAT: &str = "warped-map";
 const VERSION: u32 = 1;
 const SPACE_HYPERBOLIC: &str = "hyperbolic";
 const DIRECTION_TOLERANCE: f64 = 1e-6;
+const BUILTIN_MAPS: [(&str, &str); 2] = [
+    (
+        "house_demo",
+        include_str!("../../../common/maps/house_demo/map.json"),
+    ),
+    (
+        "lunar_surface",
+        include_str!("../../../common/maps/lunar_surface/map.json"),
+    ),
+];
 
 /// `Space` is the map's space; this demo reads hyperbolic maps only.
 #[derive(Deserialize)]
@@ -308,6 +323,36 @@ pub struct Map {
     pub appearance: Appearance,
 }
 
+/// `MapName` is which map to play, from `common/maps/`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+pub enum MapName {
+    HouseDemo,
+    LunarSurface,
+}
+
+impl MapName {
+    /// `get_folder_name` gives the map's folder name in `common/maps/`.
+    ///
+    /// Example: `let name = MapName::HouseDemo.get_folder_name();`
+    pub fn get_folder_name(self) -> &'static str {
+        match self {
+            MapName::HouseDemo => "house_demo",
+            MapName::LunarSurface => "lunar_surface",
+        }
+    }
+}
+
+/// `get_console_team` gives the team (an index into `TEAM_NAMES`) of a console's material, one
+/// named "<team> console <n>" such as "red console 2", or `None` for any other material.
+///
+/// Example: `let teams: Vec<u32> = map.materials.iter().filter_map(get_console_team).collect();`
+pub fn get_console_team(material: &Material) -> Option<u32> {
+    TEAM_NAMES
+        .iter()
+        .position(|name| material.name.starts_with(&format!("{name} console ")))
+        .map(|team| team as u32)
+}
+
 /// `get_map_folder` gives a shipped map's folder, `common/maps/<name>/`, found from the crate's folder.
 ///
 /// Example: `let folder = get_map_folder("house_demo");`
@@ -317,11 +362,12 @@ pub fn get_map_folder(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// `get_model_path` gives the `scene.gltf` of the model folder `model` in `common/maps/models/`.
+/// `get_model_path` gives the `scene.gltf` of the model folder `model` in `common/maps/models/`, or in
+/// the app's copy of it when the game runs from `Warped.app` (`app_bundle.rs`).
 ///
 /// Example: `let path: PathBuf = get_model_path("hesco_barrier");`
 pub fn get_model_path(model: &str) -> PathBuf {
-    get_map_folder("models").join(model).join("scene.gltf")
+    MODELS.get_path().join(model).join("scene.gltf")
 }
 
 /// `to_frame` turns a frame's 16 numbers (column-major) into a matrix.
@@ -398,8 +444,24 @@ fn check_milky_way(milky_way: &MilkyWay) -> std::result::Result<(), String> {
 }
 
 impl Map {
-    /// `Load` reads the map in `folder`, checking the format's name and version, that the space is
-    /// hyperbolic and that a Milky Way's pole and core are perpendicular unit directions.
+    /// `Builtin` gives the map called `name` (its folder's name in `common/maps/`) from the copy
+    /// built into the program, checked as `Load` checks a map.
+    ///
+    /// Example: `let map = Map::Builtin("house_demo")?;`
+    #[allow(non_snake_case)]
+    pub fn Builtin(name: &str) -> Result<Map> {
+        let Some(&(_, text)) = BUILTIN_MAPS.iter().find(|(builtin, _)| *builtin == name) else {
+            let names: Vec<&str> = BUILTIN_MAPS.iter().map(|(builtin, _)| *builtin).collect();
+            return Err(format!(
+                "map: no built-in map {name:?}; built-in maps: {}",
+                names.join(", ")
+            )
+            .into());
+        };
+        Map::Parse(text, &format!("the built-in {name}"))
+    }
+
+    /// `Load` reads the map in `folder`, checked as `Parse` checks it.
     ///
     /// Example: `let map = Map::Load(&get_map_folder("house_demo"))?;`
     #[allow(non_snake_case)]
@@ -407,18 +469,22 @@ impl Map {
         let manifest_path: PathBuf = folder.join(MANIFEST_NAME);
         let text: String = fs::read_to_string(&manifest_path)
             .map_err(|error| format!("map: can't read {}: {error}", manifest_path.display()))?;
-        let map: Map = serde_json::from_str(&text).map_err(|error| {
-            format!(
-                "map: {} breaks the format: {error}",
-                manifest_path.display()
-            )
-        })?;
+        Map::Parse(&text, &manifest_path.display().to_string())
+    }
+
+    /// `Parse` reads a map from its `map.json` text, checking the format's name and version, that
+    /// the space is hyperbolic and that a Milky Way's pole and core are perpendicular unit
+    /// directions; `source` names the text in errors.
+    ///
+    /// Example: `let map = Map::Parse(&text, "house_demo/map.json")?;`
+    #[allow(non_snake_case)]
+    fn Parse(text: &str, source: &str) -> Result<Map> {
+        let map: Map = serde_json::from_str(text)
+            .map_err(|error| format!("map: {source} breaks the format: {error}"))?;
         if map.format != FORMAT || map.version != VERSION {
             return Err(format!(
-                "map: {} is {:?} version {}, not {FORMAT:?} version {VERSION}",
-                manifest_path.display(),
-                map.format,
-                map.version
+                "map: {source} is {:?} version {}, not {FORMAT:?} version {VERSION}",
+                map.format, map.version
             )
             .into());
         }
@@ -518,6 +584,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
+    //! | Built-in map asked for | one built in (`house_demo`, `lunar_surface`), one not built in | `builtin_maps_match_their_files`, `unknown_names_fail_listing_the_builtins` |
     //! | Milky Way in the map | none (the house), valid (Lunar Surface) | `shipped_milky_ways_load` |
     //! | Milky Way's directions | perpendicular unit directions, pole not unit, core not unit, not perpendicular | `milky_way_needs_perpendicular_unit_directions` |
     //! | Factor | 1 (nothing moves), between 1 and 2 (the house at 1.25), 2 (Lunar Surface: the radius halves) | `scaling_by_1_moves_nothing`, `scaling_keeps_fermi_coordinates_and_turns` |
@@ -690,5 +757,26 @@ mod tests {
         let own_r_m: f64 = load("lunar_surface").get_curvature_radius_m();
         assert_eq!(map.get_curvature_radius_m(), own_r_m);
         assert_eq!(get_frames(&map), before);
+    }
+
+    #[test]
+    fn builtin_maps_match_their_files() {
+        for (name, _) in BUILTIN_MAPS {
+            let builtin: Map = Map::Builtin(name).expect("the built-in map parses");
+            let loaded: Map = Map::Load(&get_map_folder(name)).expect("the map's file parses");
+            assert_eq!(builtin.name, loaded.name);
+            assert_eq!(builtin.materials.len(), loaded.materials.len());
+            assert_eq!(builtin.spawns.len(), loaded.spawns.len());
+        }
+    }
+
+    #[test]
+    fn unknown_names_fail_listing_the_builtins() {
+        let error: String = Map::Builtin("moon_base")
+            .err()
+            .expect("no such map")
+            .to_string();
+        assert!(error.contains("moon_base"), "{error}");
+        assert!(error.contains("house_demo, lunar_surface"), "{error}");
     }
 }

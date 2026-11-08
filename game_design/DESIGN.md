@@ -124,6 +124,8 @@ For example:
 
 - A player joins a game server and lands in the lobby, which shows each team's head count. `1`
   joins blue and `2` joins red. A player can't shoot until the server has let them in.
+- A game server on the internet has a password, which its operator shares with the players; the server admits only
+  players who prove they know it, and the password itself never crosses the network.
 - Friendly fire is on: a shot eliminates a teammate as it would an enemy, but only an enemy counts
   as a kill.
 - The game counts each player's kills and deaths, shown on the scoreboard (see [Screen](#screen)).
@@ -328,6 +330,10 @@ Every key here is the default. Each player can rebind any action, in the menu or
 
 The screens a player meets, in order:
 
+- **Title** (the Mac app, opened without flags): a list of the online games on the server the app was built for, joining
+  a game on this Wi-Fi on either map, and Quit. An online game asks once for its password and keeps it; a server
+  that refuses it, or runs another version, stops the window with a pop-up saying why, and the title screen comes
+  back.
 - **Loading:** before the first frame, a black screen titled LOADING names what is loading (the surface textures,
   the shaders, each gun) over a bar like the console bar, filling as it goes.
 - **Lobby** (the team screen): it says CONNECTING until the server answers, then CONNECTED with how many players
@@ -342,7 +348,7 @@ The screens a player meets, in order:
 - **Death:** the view darkens and says YOU DIED with a countdown until the player respawns (see
   [Respawning](#respawning)).
 - **Win:** when a team has won, every player sees `<TEAM> TEAM WINS`, and a new game starts when the server's
-  operator presses `Enter` in its terminal.
+  operator presses `Enter` in its terminal, or, on a server in the cloud, 10 s after the win.
 - **Exit:** `Esc` frees the mouse; `Esc` again asks "Do you want to exit?", and `Return` or `Y` quits while `Esc` or
   `N` goes back to the game.
 

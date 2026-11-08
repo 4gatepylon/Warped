@@ -3,6 +3,19 @@
 How to get a few people into one game of the Rust wormholes demo, and what is known to be rough. Report anything
 else you notice.
 
+## Play from the app (no terminal)
+
+Players who only want to play don't need the repository: `make package-mac-app` builds `.build/Warped.zip`, which
+holds `Warped.app` and a note, `How to open Warped.txt`.
+
+- Unzip it and drag `Warped.app` into Applications. The first time, macOS can't check the app (it isn't notarized):
+  click Done, then System Settings → Privacy & Security → Open Anyway. The download page's install command skips
+  this step.
+- The app opens on a title screen: online games (with the game's password, asked once), hosting or joining on this
+  Wi-Fi, or playing alone. Logs go to `~/Library/Logs/Warped/`, and a failure shows in a pop-up.
+- The app carries the surface textures from `demos/fps_demo/assets/`, and the revolver is built into the game
+  itself (so the zip is about 110 MB); it runs on a Mac without the repository.
+
 ## Set up each Mac (once)
 
 You need a Mac with Apple silicon (the game draws with Metal and upscales with MetalFX).

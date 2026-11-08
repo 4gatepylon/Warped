@@ -25,9 +25,9 @@ use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, make_boost, make_rotation,
     minkowski_dot, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
-use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
+use crate::map::{Map, PlayerSettings, get_console_team, to_direction, to_frame, to_point};
 use crate::mesh::MeshModel;
-use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
+use crate::net::MAX_CONSOLE_COUNT;
 use crate::physics::Input;
 use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
 use crate::shapes::{Shape, ShapeKind, find_hit_mu};
@@ -274,12 +274,10 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
         .materials
         .iter()
         .filter_map(|m| {
-            let team: usize = TEAM_NAMES
-                .iter()
-                .position(|name| m.name.starts_with(&format!("{name} console ")))?;
+            let team: u32 = get_console_team(m)?;
             Some(Console {
                 material: m.id,
-                team: team as u32,
+                team,
                 color: m.color,
                 pulse: ConsolePulse::Resting(),
                 pylon: None,

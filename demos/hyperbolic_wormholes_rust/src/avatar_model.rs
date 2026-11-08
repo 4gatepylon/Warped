@@ -19,6 +19,7 @@ use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use gltf::animation::Property;
 use gltf::animation::util::ReadOutputs;
 
+use crate::fps_demo_assets::import_gltf;
 use crate::map::get_model_path;
 use crate::mesh::{MeshMaterial, MeshModel, MeshTriangle, read_materials};
 
@@ -180,8 +181,7 @@ impl AvatarModel {
     pub fn Load(model: &str, height_m: f64) -> Result<AvatarModel, String> {
         let path: PathBuf = get_model_path(model);
         let folder: &Path = path.parent().expect("a file has a folder");
-        let (document, buffers, _) =
-            gltf::import(&path).map_err(|e| format!("avatar_model: {}: {e}", path.display()))?;
+        let (document, buffers) = import_gltf(&path).map_err(|e| format!("avatar_model: {e}"))?;
         let mut parents: Vec<Option<usize>> = vec![None; document.nodes().len()];
         for node in document.nodes() {
             node.children()
