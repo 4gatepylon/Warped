@@ -13,7 +13,7 @@
 use glam::DVec4;
 
 use crate::map::Regions;
-use crate::net::TEAM_NAMES;
+use crate::map::TEAM_NAMES;
 
 /// `Result` is this module's result type, with `VoxelWorld::FromMap`'s errors.
 type Result<T> = std::result::Result<T, String>;

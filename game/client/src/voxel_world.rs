@@ -28,7 +28,7 @@ use crate::geometry::{
 use crate::map::{Map, PlayerSettings, get_console_team, to_direction, to_frame, to_point};
 use crate::mesh::MeshModel;
 use crate::net::MAX_CONSOLE_COUNT;
-use crate::physics::Input;
+use crate::player::Input;
 use crate::player_settings::PerPlayerSettings;
 use crate::settings::{HeadBobSettings, ServerSettings};
 use crate::shapes::{Shape, ShapeKind, find_hit_mu};

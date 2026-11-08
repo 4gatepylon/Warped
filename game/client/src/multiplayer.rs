@@ -22,7 +22,7 @@ use crate::dust::DustCloud;
 use crate::geometry::{AXIS_W, get_distance, get_local_direction, normalize_tangent};
 use crate::minimap::TEAM_COLORS;
 use crate::net::{Client, NetEvent, RemotePlayer};
-use crate::physics::Input;
+use crate::player::Input;
 use crate::render_voxel::{LaserBeam, VoxelFrame};
 use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};

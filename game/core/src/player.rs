@@ -1,4 +1,4 @@
-//! `physics.rs` holds the movement keys a player holds, which `voxel_world.rs` moves the player by.
+//! `player.rs` holds the movement keys a player holds, which `voxel_world.rs` moves the player by.
 //!
 //! Interface: `Input`.
 //!

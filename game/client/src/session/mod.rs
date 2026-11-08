@@ -22,7 +22,7 @@ use crate::black_hole_growth::BlackHoleGrowth;
 use crate::geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, make_boost, make_rotation};
 use crate::key_bindings::{Action, Control};
 use crate::map::MapName;
-use crate::physics::Input;
+use crate::player::Input;
 use crate::player_settings::PerPlayerSettings;
 use crate::render_metal::FrameData;
 use crate::render_voxel::VoxelFrame;

@@ -8,22 +8,15 @@
 //! Example: `.build/x86_64-unknown-linux-musl/release/wormholes_server --port 47810 --map lunar-surface`
 //!
 //! Must know:
-//! - It shares `net.rs` and the modules it needs (`map.rs`, `settings.rs`, `thrown_wormholes.rs`,
-//!   `shot_noise.rs`, `terrain.rs`, `geometry.rs`, `app_bundle.rs`) with the game, so both speak
-//!   the same protocol.
+//! - It shares `net.rs` with the game, and `warped-core` (maps, settings, thrown wormholes, shot
+//!   noise) with it too, so both speak the same protocol.
 //! - It exits on the first error, so a supervisor such as systemd can restart it.
 
 #[allow(dead_code)]
 #[path = "../net.rs"]
 mod net;
-#[allow(dead_code)]
-#[path = "../shot_noise.rs"]
-mod shot_noise;
-#[allow(dead_code)]
-#[path = "../thrown_wormholes.rs"]
-mod thrown_wormholes;
 
-use warped_core::{geometry, map, settings, terrain};
+use warped_core::{map, settings, shot_noise, thrown_wormholes};
 
 use std::error::Error;
 use std::path::PathBuf;

@@ -8,7 +8,7 @@
 use glam::{DMat4, EulerRot, Mat3, Vec3};
 
 use crate::geometry::AXIS_W;
-use crate::physics::Input;
+use crate::player::Input;
 use crate::settings::ServerSettings;
 use crate::thrown_wormholes::{HIT_FLASH_COLOR, Marker, MouthPlace, PlayerWormholes, fly_throw};
 use crate::voxel_world::VoxelWorld;
