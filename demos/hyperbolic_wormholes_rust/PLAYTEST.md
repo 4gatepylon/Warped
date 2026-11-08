@@ -103,11 +103,11 @@ changes: after a hit, reddish-orange ones run down the health bar from your last
 blue ones run down the energy bar from its last filled slot; while it refills, fainter ones run up toward it. The
 ammo bar doesn't pulse.
 
-Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, for the split second
-you are inside it, within about 2 m of its throat on either side (about 0.3 s at walking speed), your view flashes
-almost white, as if you moved near light speed: a pale blue-white walking forward, a warm white walking backward.
-It is strongest at the throat and with your speed, goes away the moment you stand still, and is gone 2 m out. Only
-you see your own flash. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off). A saved
+Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and, for the moment you
+are inside it, within about 3.6 m of its centre on either side (about 0.6 s at walking speed), your view's colours
+shift as if you moved near light speed: a light cyan, almost white, walking forward, a dark red walking backward,
+crisp, with dark staying dark. It is strongest at the throat and with your speed, goes away the moment you stand
+still, and is gone 3.6 m out. Only you see your own shift. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off). A saved
 `player_settings.yaml` that still has the old `wormhole_tint_s` line loads as before; that line is ignored.
 
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so

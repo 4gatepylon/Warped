@@ -78,6 +78,7 @@ const MIN_FLY_CLIMB_M_PER_S: f64 = 5.0;
 const FLY_SPRINT_PER_FLY: f64 = 40.0 / 14.0;
 const NEARBY_REACH_M: f64 = 6.0;
 const INSIDE_MOUTH_PER_THROAT: f64 = 5.0;
+const INSIDE_MOUTH_SCALE: f64 = 1.8;
 const LASER_MAX_LENGTH_M: f64 = 480.0;
 const LASER_MAX_ITERATIONS: usize = 4000;
 const LASER_MUZZLE_M: f64 = 3.0;
@@ -1203,10 +1204,16 @@ impl VoxelWorld {
             .position(|w| -minkowski_dot(x, w.centre) < w.reach.cosh())
     }
 
-    /// `get_mouth_depth_frac` gives how deep x is inside a wormhole mouth: 1 within its throat
-    /// (ρ ≤ m, with ρ the distance to the mouth's centre), falling along the smoothstep
-    /// 1 − t²(3 − 2t) to 0 at `INSIDE_MOUTH_PER_THROAT` throat radii, where the mouth bends space
-    /// strongly; 0 farther out, and near a black hole.
+    /// `get_mouth_depth_frac` gives how deep x is inside a wormhole mouth: 1 within
+    /// `INSIDE_MOUTH_SCALE` throat radii (ρ ≤ `INSIDE_MOUTH_SCALE` m, with ρ the distance to the
+    /// mouth's centre), falling along the smoothstep 1 − t²(3 − 2t) to 0 at `INSIDE_MOUTH_SCALE` ×
+    /// `INSIDE_MOUTH_PER_THROAT` throat radii, where the mouth bends space strongly; 0 farther out,
+    /// and near a black hole. `INSIDE_MOUTH_SCALE` scales both radii together, and with them how
+    /// long a walk through shows the tint.
+    ///
+    /// Must know:
+    /// - Gotchas: walking through mouth A on Lunar Surface, the eye passes 1.2 throat radii from
+    ///   the centre, not through it, so scaling 1.8 (not 2) is what doubles the tint's time.
     ///
     /// Example: `let depth_frac = world.get_mouth_depth_frac(eye);`
     pub fn get_mouth_depth_frac(&self, x: DVec4) -> f64 {
@@ -1214,8 +1221,9 @@ impl VoxelWorld {
             Some(w) if self.warps[w].is_mouth => {
                 let warp: &VoxelWarp = &self.warps[w];
                 let rho: f64 = (-minkowski_dot(x, warp.centre)).max(1.0).acosh();
-                let t: f64 =
-                    ((rho - warp.m) / ((INSIDE_MOUTH_PER_THROAT - 1.0) * warp.m)).clamp(0.0, 1.0);
+                let full_rho: f64 = INSIDE_MOUTH_SCALE * warp.m;
+                let t: f64 = ((rho - full_rho) / ((INSIDE_MOUTH_PER_THROAT - 1.0) * full_rho))
+                    .clamp(0.0, 1.0);
                 1.0 - t * t * (3.0 - 2.0 * t)
             }
             _ => 0.0,
@@ -1953,7 +1961,7 @@ mod tests {
     //! | Jump on open ground | rises the settings' jump height and lands in their fraction of the map's jump time | `a_jump_is_low_and_quick` |
     //! | Walking | upright, crouched (half as far, eye fully lowered) | `crouching_lowers_the_eye_and_slows_walking` |
     //! | Speed a step reports | standing still (0), forward (walking speed), backward (minus it), sideways (0), forward and sideways (its forward part), into a block (0) | `steps_report_speed_along_the_facing` |
-    //! | Mouth depth at | a mouth's centre and its throat (1), 3 throat radii (1/2), the inside's edge at 5 (0), halfway out the reach (0), inside the black hole's reach (0) | `mouth_depth_is_only_near_the_throat` |
+    //! | Mouth depth at | a mouth's centre and 1.8 throat radii (1), 5.4 throat radii (1/2), the inside's edge at 9 (0), halfway out the reach (0), inside the black hole's reach (0) | `mouth_depth_is_only_near_the_throat` |
     //! | Sprint energy | full (sprints at sprint speed, drains), empty with `Shift` held (walks, stays empty), `Shift` released (refills) | `sprinting_uses_energy` |
     //! | Refilling energy | crouched (at the crouched rate), walking upright (at the walking rate) | `crouching_refills_energy_faster` |
     //! | Map edge | walking out up the crater's wall (ever slower, never past the stop), walking back in (full speed) | `the_crater_wall_slows_without_end` |
@@ -2455,7 +2463,9 @@ mod tests {
 
     #[test]
     fn mouth_depth_is_only_near_the_throat() {
-        const HALF_WAY_PER_THROAT: f64 = 3.0;
+        const FULL_PER_THROAT: f64 = 1.8;
+        const HALF_WAY_PER_THROAT: f64 = 5.4;
+        const EDGE_PER_THROAT: f64 = 9.0;
         const HALF_WAY_DEPTH_FRAC: f64 = 0.5;
         let world: VoxelWorld = load_lunar_surface();
         let at = |warp: &VoxelWarp, rho: f64| -> DVec4 {
@@ -2467,10 +2477,11 @@ mod tests {
             .find(|warp| warp.is_mouth)
             .expect("Lunar Surface has a mouth");
         assert!((world.get_mouth_depth_frac(mouth.centre) - 1.0).abs() < 1e-9);
-        assert!((world.get_mouth_depth_frac(at(mouth, mouth.m)) - 1.0).abs() < 1e-9);
+        let full: f64 = world.get_mouth_depth_frac(at(mouth, FULL_PER_THROAT * mouth.m));
+        assert!((full - 1.0).abs() < 1e-9);
         let half_way: f64 = world.get_mouth_depth_frac(at(mouth, HALF_WAY_PER_THROAT * mouth.m));
         assert!((half_way - HALF_WAY_DEPTH_FRAC).abs() < 1e-6);
-        let edge: DVec4 = at(mouth, INSIDE_MOUTH_PER_THROAT * mouth.m);
+        let edge: DVec4 = at(mouth, EDGE_PER_THROAT * mouth.m);
         assert!(world.get_mouth_depth_frac(edge) < 1e-6);
         assert_eq!(
             world.get_mouth_depth_frac(at(mouth, mouth.reach / 2.0)),
