@@ -21,6 +21,13 @@ is in [`AGENTS.md`](AGENTS.md).
   - **Where the work is**: worktree `/Users/leah/Documents/dev/Warped-main` on `leah`'s Mac, branch
     `claude/taller-beacon-beams` (pushed); screenshots under `demos/hyperbolic_wormholes_rust/.artifacts/bench_views/`.
     State 2026-11-08: rendering height options for the user to pick from.
+- [~] **W-110 Team-coloured robots.** "is it possible for you to recolor the teal robot? to be other colors than
+  teal?", then "yep team colors!": the players' body of W-106 (Teal robot player model) in each team's colour, blue
+  or red, instead of teal. Claimed by Claude Code (session on `leah`'s Mac), branch `claude/team-color-robot`,
+  2026-11-08.
+  - **Where the work is**: worktree `/Users/leah/Documents/dev/Warped-team-robot` on `leah`'s Mac, branch
+    `claude/team-color-robot` (pushed); screenshots under `demos/hyperbolic_wormholes_rust/.artifacts/bench_views/`
+    (runs `*-team-robot-*`). State 2026-11-08: built and tested, screenshots sent to the user.
 ## Open
 
 - [ ] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Found in #319: not vsync
