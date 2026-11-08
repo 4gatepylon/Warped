@@ -595,6 +595,21 @@
   drawing it into the scene's rays (it would be lensed by warps, though it is in the player's hand).
 - **Rationale:** you asked for a prettier gun, "a rectangular prism with a colored tip" that turns like a real object.
 
+### D55. A little motion blur
+
+- **Choice:** in the window, each frame's scene is blended with the previous frame's blended scene, weighted
+  e^(-dt / 10 ms) for a frame of dt: 0.19 at 60 frames a second, 0.43 at 120. Whatever the frame rate, a moving
+  scene smears over about 10 ms. The HUD, the banner and the wand are drawn after the blend, so they stay sharp. The
+  blend happens in the overlay pass with two history textures, swapped each frame; after a resize the first frame
+  isn't blended. It costs about 0.2 ms of GPU time a frame at 1280×800. Benchmarks (`--bench-views`, the
+  autopilot) have no overlay and so no blur.
+- **Alternatives:**
+  - a fixed weight (the blur would shrink as the frame rate rises);
+  - per-pixel velocity blur from the camera's motion (more correct for fast turns, but much more code in curved
+    space).
+- **Rationale:** you asked for a tiny bit of motion blur; 10 ms is about half a frame at 60 fps. The time is
+  `MOTION_BLUR_S` in `src/main.rs`.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes

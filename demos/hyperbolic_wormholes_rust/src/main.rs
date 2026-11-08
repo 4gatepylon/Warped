@@ -81,6 +81,7 @@ const RENDER_SCALE_ROUNDING: f64 = 1e-6;
 const RENDER_SCALE_STEP: f64 = 1.25;
 const MIN_RENDER_SCALE: f64 = 0.05;
 const MAX_FRAME_DT_S: f64 = 0.05;
+const MOTION_BLUR_S: f64 = 0.01;
 const AUTOPILOT_DT_S: f64 = 1.0 / 60.0;
 const HUD_PERIOD_S: f64 = 0.25;
 const ROUTE_WARMUP_FRAME_COUNT: usize = 5;
@@ -1596,6 +1597,7 @@ struct Session {
     is_jumping: bool,
     gun_phase_rad: f64,
     run_pose_frac: f64,
+    motion_blur_frac: f32,
     is_captured: bool,
     message: String,
     message_time_s: f64,
@@ -1750,6 +1752,7 @@ impl Session {
             is_jumping: false,
             gun_phase_rad: 0.0,
             run_pose_frac: 0.0,
+            motion_blur_frac: 0.0,
             is_captured: false,
             message: String::new(),
             message_time_s: 0.0,
@@ -1841,6 +1844,7 @@ impl Session {
     fn update(&mut self, keys: &sdl3::keyboard::KeyboardState) {
         let frame_s: f64 = self.last.elapsed().as_secs_f64();
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
+        self.motion_blur_frac = (-dt_s / MOTION_BLUR_S).exp() as f32;
         self.last = Instant::now();
         if self.route_index < self.route.len() {
             self.frame_times_ms.push(frame_s * MS_PER_S);
@@ -2737,6 +2741,7 @@ fn play_on_layer(
                 .map(|pixels| (pixels, (DEATH_MASK_PX.0 as usize, DEATH_MASK_PX.1 as usize))),
             rects: &rects,
             wand,
+            blur_frac: session.motion_blur_frac,
         });
         if metal.render_to_layer(packed.as_frame_data(), layer, overlay.as_ref())? {
             session.record_frame(

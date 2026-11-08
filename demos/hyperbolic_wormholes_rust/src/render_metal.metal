@@ -1979,7 +1979,8 @@ kernel void build_mouth_fields(device float4 *rows [[buffer(0)]], constant Unifo
 
 /**
  * @brief `OverlayParams` is how `apply_overlay` draws: how much to darken, mask pixels to screen pixels, the mask's top
- * left, how many rectangles there are, whether there is a mask and a wand, and the camera's tan(half vertical fov).
+ * left, how many rectangles there are, whether there is a mask and a wand, the camera's tan(half vertical fov), and how
+ * much of the previous frame's scene to blend in (motion blur).
  */
 struct OverlayParams {
     float dim_frac;
@@ -1989,6 +1990,7 @@ struct OverlayParams {
     int has_mask;
     int has_wand;
     float tan_half_fov;
+    float blur_frac;
 };
 
 /**
@@ -2060,7 +2062,8 @@ struct OverlayRect {
 };
 
 /**
- * @brief `apply_overlay` copies a finished frame into `out` darkened by `dim_frac`, with a mask's text drawn over it at
+ * @brief `apply_overlay` copies a finished frame into `out`, blended with the previous frame's scene (`history_in`, by
+ * `blur_frac`; the blend is kept in `history_out` for the next frame) and darkened by `dim_frac`, with a mask's text drawn over it at
  * `scale` screen pixels per mask pixel from `origin` (the title's colour where the mask is above `OVERLAY_TITLE_LEVEL`,
  * the text's above `OVERLAY_TEXT_LEVEL`), the wand (`shade_wand`, 2 × 2 rays a pixel) when `has_wand` is set, and `rects`
  * blended over that in order (render_metal.rs's `Overlay`: e.g. "YOU DIED" and a countdown, and the energy bar).
@@ -2072,9 +2075,12 @@ struct OverlayRect {
 kernel void apply_overlay(texture2d<float, access::read> frame [[texture(0)]], texture2d<float, access::read> mask [[texture(1)]],
                           texture2d<float, access::write> out [[texture(2)]], constant OverlayParams &p [[buffer(0)]],
                           constant OverlayRect *rects [[buffer(1)]], constant OverlayWand &wand [[buffer(2)]],
-                          uint2 id [[thread_position_in_grid]]) {
+                          texture2d<float, access::read> history_in [[texture(3)]],
+                          texture2d<float, access::write> history_out [[texture(4)]], uint2 id [[thread_position_in_grid]]) {
     if (id.x >= out.get_width() || id.y >= out.get_height()) return;
-    float4 color = float4(frame.read(id).rgb * (1.0 - p.dim_frac), 1.0);
+    float3 scene = mix(frame.read(id).rgb, history_in.read(id).rgb, p.blur_frac);
+    history_out.write(float4(scene, 1.0), id);
+    float4 color = float4(scene * (1.0 - p.dim_frac), 1.0);
     int2 offset = int2(id) - p.origin;
     if (p.has_mask != 0 && all(offset >= int2(0))) {
         uint2 cell = uint2(offset / p.scale);
