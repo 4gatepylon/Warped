@@ -54,6 +54,10 @@ is in [`AGENTS.md`](AGENTS.md).
   room.
 - [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
+- [ ] **W-58 Installable bundle.** Define the map in some kind of declarative form so that it can be put into an app
+  bundle that other people can install or port without needing the GitHub repository; more generally, refactor
+  things so there is an easy "bundle, then give the bundle to another person, and they can run it easily". Before
+  starting, talk with the user about how to do it, rather than doing it in some random way.
 
 ## Done
 
