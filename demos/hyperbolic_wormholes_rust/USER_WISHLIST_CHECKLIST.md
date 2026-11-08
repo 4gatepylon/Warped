@@ -21,9 +21,6 @@ is in [`AGENTS.md`](AGENTS.md).
   noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
   All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/shot-noise`, 2026-11-07.
-- [~] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
-  relativistic effect on colour if possible. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/wormhole-cyan`, 2026-11-07.
 - [~] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
   look cool and pretty. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/spaceships`, 2026-11-07.
@@ -205,3 +202,5 @@ is in [`AGENTS.md`](AGENTS.md).
 - [x] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
   continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
   pulsing slows down smoothly instead of jumping back. #176.
+- [x] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
+  relativistic effect on colour if possible. #178.

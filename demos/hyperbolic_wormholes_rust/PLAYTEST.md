@@ -79,6 +79,12 @@ each step outward is cut by how far you have already come, so you never get past
 full speed. The server's `map_edge` settings set where the slowdown starts and stops; your own
 `view.edge_stretch_frac` sets how strongly the view stretches (0 for none).
 
+Walk through a wormhole (on Lunar Surface, the one on the ridge leads to the red pylon) and your whole view turns
+cyan as you come out, as if blueshifted by moving fast toward what you see: reds turn green, greys turn cyan, the
+sky gets a faint teal glow, most of all in the middle of the screen. It fades back within 1.5 s, and only the
+player who went through sees it. In the menu, `wormhole tint 0-1` sets how strong it is (0 turns it off);
+`view.wormhole_tint_s` in `player_settings.yaml` sets how long it lasts.
+
 The minimap in the top right shows the ground within 60 m of you, turned so you face up. It is a Poincaré disk, so
 the faint 10 m grid and straight paths bend into arcs toward its rim. Other players are dots and shots are lines,
 in their team's colours. The menu's MAP page rings the same 60 m around you and darkens the rest. To move, resize
