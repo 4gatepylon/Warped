@@ -20,7 +20,7 @@ use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
     normalize_tangent,
 };
-use crate::net::{Client, NetEvent, RemotePlayer};
+use crate::net::{Client, NetEvent, RemotePlayer, get_team};
 use crate::physics::{self, Input, LaserReport, Player};
 use crate::render_voxel::VoxelFrame;
 use crate::scene_data::{Beam, SceneData};
@@ -52,7 +52,6 @@ const BOT_STUCK_FRAC: f64 = 0.5;
 const BOT_VIEW_PX: (u32, u32) = (1280, 800);
 const VOXEL_SPAWN_RING_M: f64 = 3.0;
 const VOXEL_BOT_LASER_RANGE_M: f64 = 120.0;
-const TEAM_COUNT: u32 = 2;
 
 /// `get_spawn_player` makes player `id`'s starting player: on a ring around spawn, each id at
 /// another bearing, facing the middle.
@@ -221,7 +220,7 @@ pub fn run_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(player.frame, is_laser_on)?;
+            client.send_state(player.frame, is_laser_on, None)?;
         } else {
             client.keep_joining()?;
         }
@@ -242,13 +241,6 @@ pub fn get_voxel_spawn(world: &VoxelWorld, id: u32) -> VoxelPlayer {
     let body: DMat4 =
         spawn.body * turn * make_boost(AXIS_Z, -VOXEL_SPAWN_RING_M / world.r) * turn.inverse();
     VoxelPlayer::Standing(world, body)
-}
-
-/// `get_team` gives a player's team for the beam colour: 0 (blue) or 1 (red), as their spawn.
-///
-/// Example: `let team = get_team(3);`
-fn get_team(id: u32) -> u32 {
-    id % TEAM_COUNT
 }
 
 /// `SharedVoxelView` is one frame of a voxel map with the other players, every laser, this
@@ -465,7 +457,7 @@ pub fn run_voxel_bot(
                 }
             }
             last_victim = view.hit_player_id;
-            client.send_state(camera, is_laser_on)?;
+            client.send_state(camera, is_laser_on, None)?;
         } else {
             client.keep_joining()?;
         }
@@ -524,6 +516,7 @@ mod tests {
             id: 2,
             frame: target.frame,
             is_laser_on: false,
+            disabling_console: None,
         };
         let view: SharedView = pack_shared_view(&world, aimed, true, &[other], (64, 40), 0.0);
         assert_eq!(view.hit_player_id, Some(2));
@@ -546,6 +539,7 @@ mod tests {
             id: 2,
             frame: target.get_camera_frame(&world),
             is_laser_on: false,
+            disabling_console: None,
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
         let view: SharedVoxelView =
@@ -569,6 +563,7 @@ mod tests {
             id: 2,
             frame: target.get_camera_frame(&world),
             is_laser_on: true,
+            disabling_console: None,
         };
         let bodies: Vec<(DMat4, usize)> = vec![(
             VoxelPlayer::FromEye(&world, firing.frame).get_feet_frame(&world),

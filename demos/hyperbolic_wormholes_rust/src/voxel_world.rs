@@ -4,7 +4,8 @@
 //! the map (collisions, stepping up blocks, gravity, jumping, flying, and moving along light paths
 //! near a wormhole mouth). `render_voxel.metal` draws the same world, with `voxel_clearance.rs`'s grids.
 //!
-//! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelPlayer`, `Shot`, `BeamSegment`.
+//! Interface: `VoxelWorld::FromMap`, `VoxelWorld::with_avatars`, `VoxelWorld::light_consoles`,
+//! `VoxelWorld::find_aimed_material`, `Console`, `VoxelPlayer`, `Shot`, `BeamSegment`.
 //!
 //! Example: `let world = VoxelWorld::FromMap(&Map::Load(&get_map_folder("lunar_surface"))?)?;`
 
@@ -17,6 +18,7 @@ use crate::geometry::{
     minkowski_dot, normalize_tangent,
 };
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
+use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
 use crate::voxel_clearance::ClearanceGrids;
 
@@ -34,6 +36,12 @@ const BOB_SPRINT_HZ: f64 = 2.8;
 const BOB_WALK_M: f64 = 0.08;
 const BOB_SPRINT_M: f64 = 0.14;
 const BOB_FADE_PER_S: f64 = 6.0;
+const CONSOLE_PULSE_HZ: f64 = 1.0;
+const CONSOLE_DISABLING_PULSE_PER_PULSE: f64 = 2.0;
+const CONSOLE_PULSE_MIN_FRAC: f32 = 0.6;
+const CONSOLE_PULSE_MAX_FRAC: f32 = 2.0;
+const CONSOLE_OFF_FRAC: f32 = 0.12;
+const CONSOLE_PROBE_M: f64 = 0.05;
 const MIN_BEND_STEP_M: f64 = 0.004;
 const MAX_BEND_STEP_M: f64 = 3.0;
 const HORIZON_CAPTURE_FRAC: f64 = 1.02;
@@ -118,6 +126,43 @@ pub struct SpecialMaterials {
     pub console_count: i32,
 }
 
+/// `Console` is one console of a team's pylon: its material, its team (an index into
+/// `TEAM_NAMES`) and the map's colour for it.
+#[derive(Clone, Copy)]
+pub struct Console {
+    pub material: u8,
+    pub team: u32,
+    color: [f32; 3],
+}
+
+/// `find_consoles` lists a map's consoles, the materials named "<team> console <n>" (such as
+/// "red console 2"), in the map's material order, which numbers them for the game server.
+///
+/// Example: `let teams: Vec<u32> = find_consoles(&map).iter().map(|c| c.team).collect();`
+pub fn find_consoles(map: &Map) -> Vec<Console> {
+    let consoles: Vec<Console> = map
+        .materials
+        .iter()
+        .filter_map(|m| {
+            let team: usize = TEAM_NAMES
+                .iter()
+                .position(|name| m.name.starts_with(&format!("{name} console ")))?;
+            Some(Console {
+                material: m.id,
+                team: team as u32,
+                color: m.color,
+            })
+        })
+        .collect();
+    assert!(
+        consoles.len() <= MAX_CONSOLE_COUNT,
+        "map {}: {} consoles, more than the game's {MAX_CONSOLE_COUNT}",
+        map.name,
+        consoles.len()
+    );
+    consoles
+}
+
 /// `VoxelWorld` is a whole voxel map, ready to trace and to walk on.
 #[derive(Clone)]
 pub struct VoxelWorld {
@@ -136,6 +181,7 @@ pub struct VoxelWorld {
     pub gravity_m_per_s2: f64,
     pub spawns: Vec<DMat4>,
     pub static_structure_count: usize,
+    pub consoles: Vec<Console>,
     pub clearance: Arc<ClearanceGrids>,
 }
 
@@ -394,6 +440,7 @@ impl VoxelWorld {
             name: map.name.clone(),
             r,
             static_structure_count: structures.len(),
+            consoles: find_consoles(map),
             structures,
             voxels: map.voxels.clone(),
             warps,
@@ -467,6 +514,45 @@ impl VoxelWorld {
             }
         }
         shared
+    }
+
+    /// `light_consoles` sets each console's light at `time_s`: dark (and unlit) once its bit in
+    /// `off_mask` is set, otherwise pulsing `CONSOLE_PULSE_HZ` times a second between
+    /// `CONSOLE_PULSE_MIN_FRAC` and `CONSOLE_PULSE_MAX_FRAC` of its colour, and
+    /// `CONSOLE_DISABLING_PULSE_PER_PULSE` times as fast while its bit in `disabling_mask` is set.
+    ///
+    /// Example: `world.light_consoles(game.off_mask, 0b100, 12.5);`
+    pub fn light_consoles(&mut self, off_mask: u32, disabling_mask: u32, time_s: f64) {
+        for (i, console) in self.consoles.iter().enumerate() {
+            let entry: [f32; 4] = if off_mask >> i & 1 == 1 {
+                let [r, g, b] = console.color.map(|c| c * CONSOLE_OFF_FRAC);
+                [r, g, b, 0.0]
+            } else {
+                let hz: f64 = if disabling_mask >> i & 1 == 1 {
+                    CONSOLE_PULSE_HZ * CONSOLE_DISABLING_PULSE_PER_PULSE
+                } else {
+                    CONSOLE_PULSE_HZ
+                };
+                let wave: f32 = (0.5 + 0.5 * (std::f64::consts::TAU * hz * time_s).sin()) as f32;
+                let level: f32 = CONSOLE_PULSE_MIN_FRAC
+                    + (CONSOLE_PULSE_MAX_FRAC - CONSOLE_PULSE_MIN_FRAC) * wave;
+                let [r, g, b] = console.color.map(|c| c * level);
+                [r, g, b, 1.0]
+            };
+            self.palette[usize::from(console.material)] = entry;
+        }
+    }
+
+    /// `find_aimed_material` gives the material of the block straight ahead of `camera`'s eye
+    /// within `reach_m`, or `None` when the ground or nothing is there. The ray isn't bent: over a
+    /// few meters only a mouth's throat would bend it much.
+    ///
+    /// Example: `let material = world.find_aimed_material(camera, 3.0);`
+    pub fn find_aimed_material(&self, camera: DMat4, reach_m: f64) -> Option<u8> {
+        let (x, v) = (camera.col(AXIS_W), -camera.col(AXIS_Z));
+        let hit: Hit = self.trace_scene(x, v, reach_m / self.r, None)?;
+        let inside: DVec4 = geodesic_point(x, v, hit.s + CONSOLE_PROBE_M / self.r);
+        Some(self.get_material_at(inside, &[hit.structure?]))
     }
 
     /// `get_material_at` gives the material of the cell holding point x among `candidates`, or 0.

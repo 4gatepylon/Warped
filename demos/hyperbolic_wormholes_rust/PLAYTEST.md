@@ -50,11 +50,19 @@ make join-game MAP=lunar-surface SERVER=192.168.1.20
 - `MAP=house-demo` (the default) plays the house with its three wormholes instead.
 - Up to 8 players. A laser that reaches another player removes them: their view darkens, says "YOU DIED" with a
   countdown, and they come back at their spawn 3 seconds later.
+- Players alternate between the blue and red teams as they join, and keep their team when they come back.
+
+To win on Lunar Surface, turn off all five of the other team's consoles, the pulsing blocks around its pylon
+(the red pylon is past the wormhole on the ridge). Stand within 3 m, look straight at one and hold `E` for 10 s: a bar
+below the crosshair fills, the console pulses twice as fast for everyone, and you can't shoot meanwhile. Looking
+away or letting go starts it over. A console that is off goes dark. When a team's consoles are all off, everyone
+sees which team won, and a new game starts only when whoever started the server presses `Enter` in its terminal
+(the `make host-game` terminal, for that command): every console comes back on and everyone returns to their spawn.
 
 Controls: click to capture the mouse (`Esc` releases it, `Esc` again quits). `W`/`A`/`S`/`D` walk, `Shift` sprints (on Lunar Surface it uses the energy bar in the bottom left: 7.5 s of sprinting, 15 s to refill once you let go of `Shift`),
 `Space` jumps (on Lunar Surface, jump to get onto a block; hold it on the house for the jetpack), click to shoot (a
-quarter-second laser shot; not while running, when the gun in the bottom right jogs, nor in the air on Lunar Surface), `R` respawns, `-` and `=`
-change the render resolution.
+quarter-second laser shot; not while running, when the gun in the bottom right jogs, nor in the air on Lunar Surface), `E` (held)
+turns off one of the other team's consoles, `R` respawns, `-` and `=` change the render resolution.
 
 ## Known caveats
 
@@ -65,6 +73,9 @@ Multiplayer:
 - The game doesn't check that everyone uses the same map; a player on another map sees the others in the wrong
   places.
 - Each computer is trusted with its own moves and hits, so there is no protection against cheating.
+- Lasers hit teammates too.
+- Consoles are found by name: a map's materials named "blue console …" and "red console …". The house has none,
+  so nobody can win there.
 - Local network only: no play over the internet. Networks that keep devices apart (many guest and office Wi-Fi
   networks) stop players from reaching each other; a home network or a phone's hotspot works.
 - The game uses UDP port 47800 and announces itself on UDP port 47801 (`PORT=` changes the first).

@@ -559,6 +559,28 @@
 - **Rationale:** you asked for a headless server that prints its address, with clients connecting to it directly,
   and for the launcher to start its own client, so the server can later run in the cloud.
 
+### D53. Winning by turning off consoles
+
+- **Choice:**
+  - As the game design says, a player holds `E` for 10 s on one of the other team's consoles, looking straight at
+    it from within 3 m; letting go or looking away resets it, and they can't shoot meanwhile.
+  - Consoles pulse once a second between 0.6 and 2 times their colour, twice a second while anyone holds `E` on
+    them, and go dark (an eighth of their colour, unlit) once off.
+  - The server times each hold from the players' states, turns the console off, and declares the other team the
+    winner once all of a team's consoles are off. It then ignores hits and holds until `Enter` in its terminal
+    starts a new game, which turns every console back on and sends everyone to their spawn.
+  - The window shows the winner over a dimmed view.
+  - A player who rejoins from the same address keeps their id, so they stay on their team.
+  - Consoles are the map's materials named "<team> console <n>".
+- **Alternatives:**
+  - one press of `E` (your first words; but you also asked for a faster pulse during disabling, which needs it to
+    take time, and the design says hold for 10 s);
+  - a new game from a key in the launcher's window;
+  - restarting the server for a new game (everyone would have to rejoin);
+  - listing consoles in the map format (it would need a format change).
+- **Rationale:** you asked for consoles that pulse until disabled and darken after, a faster pulse while being
+  disabled, the game to end with the winner shown, and the server's launcher to start the next game.
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
