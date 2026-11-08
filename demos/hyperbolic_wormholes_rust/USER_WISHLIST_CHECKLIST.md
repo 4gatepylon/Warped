@@ -107,11 +107,11 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
-- [?] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). The window is vsynced; the
-  bent tracer tore far ground into bands, now traced within a tenth of a pixel (a GPU cost under the bend to decide). #319.
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). The window is vsynced; the
+  bent tracer tore far ground into bands, now traced within a tenth of a pixel (a GPU cost under the bend to decide). #319.
 - [?] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones. Then, from the pictures: "Level A, faint", and
   "the blates should also have a little bit of thickness (rougly 1 player worth of thickenss)". #291.
