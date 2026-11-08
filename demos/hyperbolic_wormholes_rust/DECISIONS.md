@@ -1080,10 +1080,14 @@
 
 - **Choice:**
   - **Ships:** four, purely for looks: a ring ship whose ring turns, and three fighters flying in a V. Each is a
-    flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s `draw_spaceship`) from boxes
-    and tapered capsules (tables `HULL_*`), lit by the sun on the edges that face it and from below by the sunlit
-    ground, with glowing engines and a short plume, red lights to port and green to starboard, a flashing white
-    strobe and lit windows.
+    flat silhouette seen from below, drawn by the sky shader (`render_voxel.metal`'s `draw_spaceship`) from boxes,
+    tapered capsules and triangles (tables `HULL_*`), lit by the sun on the edges that face it and from below by the
+    sunlit ground, with glowing engines and a short plume, red lights to port and green to starboard, a flashing
+    white strobe and lit windows.
+  - **Delta fighters (W-88):** each fighter is one flat triangle, about as wide as it is long, with a darker spine
+    and a dark glass canopy painted on (`HULL_INSETS`, which colour a hull without changing its outline), two
+    engines at the back and nearly plain panels. Until W-88 they had a thin fuselage, thin swept wings and engine
+    pods. You picked this wide delta over a slimmer one.
   - **No freighter (W-87):** a fifth ship, a container freighter with coloured containers, a lit bridge and orange
     engines, flew from #193 until W-87 removed it, with its hull tables and its pulsing red beacon.
   - **Paths:** each crosses the sky on a great circle from horizon to horizon, in 110 s (the fighters) or 300 s
@@ -1112,7 +1116,8 @@
   - ships described in the map format (`common/maps/`), which only this renderer would read.
 - **Rationale:** you asked for a few spaceships flying overhead in the sky, purely background world-building, to
   look cool and pretty; then, seeing them, that the colourful freighter go ("the freighter is indeed meant to be
-  deleted and is ugly") and the ring station stay.
+  deleted and is ugly") and the ring station stay; and that the fighters become simple, geometric deltas without
+  thin arms ("A wide delta").
 
 ### D83. Aiming zooms in, and the flashlight moves to F
 
