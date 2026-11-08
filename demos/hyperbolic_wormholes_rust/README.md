@@ -154,7 +154,7 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
 - `--black-hole-strength <0..1>` grows Lunar Surface's black hole to that strength in the window, `--bench-views`
   and `--view` (1 is full strength, with one console left; W-68, `black_hole_growth.rs`); otherwise it follows the
-  consoles. Time runs slower near the black hole (W-107, D107): the HUD shows how fast yours runs.
+  consoles. Time runs slower near the black hole (W-107, D108): the HUD shows how fast yours runs.
 
 ## Play together
 

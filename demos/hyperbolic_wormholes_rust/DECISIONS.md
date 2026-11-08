@@ -1875,7 +1875,7 @@
   one ideally; see if you can find something for that"), and chose the bolt-action from the pictures ("bolt action
   is good"). The wooden rifle stands out from the sci-fi look, which also makes the two guns easy to tell apart.
 
-### D107. Time slows near the black hole instead of the map bending, W-107 (time dilation)
+### D108. Time slows near the black hole instead of the map bending, W-107 (time dilation)
 
 - **Choice:**
   - **No more bend:** W-68 (reality bend)'s curling of the map into a sphere is gone: `bend.rs`, the laser's trace
