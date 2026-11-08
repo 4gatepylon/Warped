@@ -43,3 +43,22 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
 - **D14. Compact map JSON.** Every culm and leaf stays listed (the format has no generator), so the map is written
   without indentation: 8.6 MB instead of about 20 MB, under the 10 MB limit.
 
+## Follow-ups for the next agent
+
+- **Robots and players through wormholes (deferred by the user):** the lens samples a static
+  atlas made at start-up, so movers on the far side don't show. Branch
+  `devin/dark-forest-lens-robots` holds an unfinished, untested overlay: it redraws the skinned
+  draws within 30 m of the nearest two visible mouths' partners into six faces and composites
+  them over a copy of the partner's atlas row (`encode_lens_live`). It builds; it was measured
+  once at about +0.5 ms GPU at the lift close-up (2560x1440), but nothing checked that robots
+  actually appear.
+- **Ground mist:** dropped by the user; don't add it.
+- **Server console count:** `map::console_teams` once read boxes only, so the server saw 0
+  consoles (the pylons are `scifi_beacon` mesh structures) and no online match could be won. It
+  now counts mesh-structure console shapes in `game::world`'s order; rerun the two-bot match
+  (`--serve --level-result-file`, two `--join --bot` windows, one with `--bot-objective
+  consoles`) to confirm a win end to end.
+- **Benchmarks:** at 2560x1440 (1280x720 pt at render scale 2) every `--bench-views` view has
+  a median of 16.6-16.7 ms (vsync) and a GPU mean of 10.6-12.4 ms on the Apple Paravirtual
+  GPU of a macOS VM; p99s of 20-36 ms are drawable waits on that VM.
+

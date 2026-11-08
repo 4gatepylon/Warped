@@ -162,7 +162,8 @@ revolver Sketchfab Standard, which limit sharing the game.
 
 ## Limits
 
-- AI robots walk on the ground only; they don't climb ladders or cross bridges.
+- Robots and players on the far side of a wormhole don't show through it: the lens shows a static picture of each partner's surroundings drawn at start-up. A parked, unfinished overlay is on branch `devin/dark-forest-lens-robots` (see DECISIONS.md).
+- The online bot match (`--bot --bot-objective consoles`) was not rerun to a win after the server's console count was fixed; rerun it first.
 - Through a wormhole you see the scenery and lights around its partner, drawn at start-up, but not robots, players or
   lasers there.
 - Lasers of other players online are traced locally; their hits come from the shooter's own trace.
