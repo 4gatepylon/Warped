@@ -15,10 +15,6 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-118 Join any server.** "The client should be able to connect to any server": a player types a server's
-  IP in the app ("I'm not entirely sure if it's possible to put the IP in the IP for the client"), so the
-  downloaded app can join a local server now and the GCP server later. Claimed by Claude Code (session
-  `424fcf46-e362-48b1-8e23-4eed979a478f`), branch `claude/download-page-only`, 2026-11-08.
 - [~] **W-124 Four map demos.** "Have a team of sub-agents each try to make a demo analogous to the Rust wormholes
   hyperbolic space demo but for the other 4 maps. I want to have playable versions of each of the other 4 maps." The
   agents may need to get textures so the other maps don't look too bad; they can reuse the robot skins and guns. "You're
@@ -113,6 +109,9 @@ is in [`AGENTS.md`](AGENTS.md).
   dark.
 ## Pending user review
 
+- [?] **W-118 Join any server.** "The client should be able to connect to any server": a player types a server's
+  IP in the app ("I'm not entirely sure if it's possible to put the IP in the IP for the client"), so the
+  downloaded app can join a local server now and the GCP server later. #405.
 - [?] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
   The user asked on 2026-11-07: running servers so that people can play; it "does not need to be highly
@@ -123,7 +122,7 @@ is in [`AGENTS.md`](AGENTS.md).
   the hyperbolic Rust demo on Mac", set up to be "slightly more generalizable" for a bigger game later, "but
   please do not overcomplicate this". #379, #381.
 - [?] **W-116 Download page.** "A webpage people can go to download the app and an easy installation (and other
-  stuff like it has a nice icon etc)"; "think as simple as possible". #379, #381.
+  stuff like it has a nice icon etc)"; "think as simple as possible". #379, #381, #405.
 - [?] **W-58 Installable bundle.** Define the map in some kind of declarative form so that it can be put into an app
   bundle that other people can install or port without needing the GitHub repository; more generally, refactor
   things so there is an easy "bundle, then give the bundle to another person, and they can run it easily". Before

@@ -32,6 +32,41 @@ make check-game-servers
 - `check-game-servers`, a minute after a deploy, joins every game in `games.txt` with a bot from this Mac.
 - Downloads are uploaded with `Cache-Control: no-store`, so a new deploy shows at once.
 
+## Only the download page
+
+`HAS_GAME_SERVERS=false` in `.env` deploys only the download page: its bucket and the budget, with no VM. The app then
+has no online games on its title screen; players join a server by typing its address ("Join a server by its address"),
+such as one run from a checkout with `make serve-game`. Set it back to `true` and run `make deploy-everything` again
+to add the game servers.
+
+## See what's running
+
+Everything this deploy makes carries the label `app=warped`:
+
+```bash
+make list-gcp-resources
+```
+
+In the console (replace `<project>` with `GCP_PROJECT_ID`):
+
+- VMs: `https://console.cloud.google.com/compute/instances?project=<project>`
+- static IPs: `https://console.cloud.google.com/networking/addresses/list?project=<project>`
+- buckets (the page, the server bundle, Terraform's state): `https://console.cloud.google.com/storage/browser?project=<project>`
+- everything with the label: the console's search bar, `labels.app:warped`
+- spending and the budget: Billing, then Reports and Budgets & alerts.
+
+## Shut everything down
+
+```bash
+make destroy-infra YES_TO_DESTROY_INFRA=1
+gcloud storage rm -r gs://<project>-tfstate
+```
+
+- `destroy-infra` deletes the VM, its IP, the firewall rules, both buckets and the budget; the second line deletes
+  Terraform's state bucket, which `prepare-gcp-project` made. The APIs stay enabled, which costs nothing.
+- If the project exists only for this, `gcloud projects delete <project>` removes all of it at once.
+- Afterwards `make list-gcp-resources` lists nothing.
+
 ## Make it step by step
 
 ```bash
