@@ -1036,6 +1036,37 @@
   with players and shots in range, in a corner you can pick; and for the map page to ring your range and dim the
   rest.
 
+### D84. A blueshift toward cyan after going through a wormhole
+
+- **Choice:**
+  - **When:** the step that takes a player through a mouth (`StepReport::has_crossed_mouth` on a voxel map, any
+    crossing message on the house) starts the tint at its peak. It fades over `view.wormhole_tint_s`, 1.5 s, along
+    a smoothstep, so it lingers a moment at the peak and eases out. Each window steps only its own player, so in a
+    game on a server only the player who went through sees it.
+  - **The shift:** the overlay shader's `blueshift_scene` reads each pixel's red, green and blue as samples of a
+    spectrum at 610, 550 and 465 nm, joined by straight lines, and falling past red to a quarter of red's at 700 nm
+    (the infrared a blueshift brings into view). Moving straight ahead at β = 0.15 of light speed at the peak, the
+    relativistic Doppler factor D = √(1 − β²) / (1 − β cos θ), with θ the angle off the middle of the screen, is
+    1.16 in the middle and 1.08 in the corners of a 16:10 window. Each channel shows the light at D times its wavelength: red fades,
+    green takes red's light and blue takes green's, so greys turn cyan and reds turn green. The pixel is also
+    D^1.5 times as bright (beaming), plus a faint teal glow, (D^1.5 − 1) × (0, 0.3, 0.36), so the black sky, often
+    half the screen, turns too.
+  - **What it touches:** the scene only, after motion blur; the HUD, text, minimap and the gun in your hand stay as
+    they are, since they move with you.
+  - **Settings:** each player's `view.wormhole_tint_frac` (1 by default; 0 to 1, 0 for none; also in the menu as
+    `wormhole tint 0-1`) scales β, and `view.wormhole_tint_s` (1.5 s; 0 for none) sets the fade.
+- **Alternatives:**
+  - a flat cyan overlay, or a hue rotation (you asked for something like the relativistic effect on colour; with
+    them a red object would stay reddish);
+  - β = 0.10 or 0.12 (warm ground turned mint green rather than cyan);
+  - real beaming, D³ to D⁴ (1.6 times as bright in the middle, washing out the ground);
+  - aberration too: the scene squeezed toward the middle of the screen, as it would really be at that speed (left
+    out because you asked about colour, and the map's edge already warps the view);
+  - the player's real direction through the mouth instead of straight ahead (players nearly always walk in facing
+    it).
+- **Rationale:** you asked that going through a wormhole turn your whole screen kind of cyan, simulating the
+  relativistic effect on colour if possible.
+
 
 ## Baselines
 
