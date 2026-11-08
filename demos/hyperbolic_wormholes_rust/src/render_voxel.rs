@@ -665,14 +665,7 @@ impl VoxelGpu {
     /// Example: `let gpu = VoxelGpu::New(&device)?;`
     #[allow(non_snake_case)]
     pub fn New(device: &ProtocolObject<dyn MTLDevice>) -> Result<VoxelGpu> {
-        let temp_mw_source: String = std::env::var("TEMP_MW_SHADER")
-            .map(|p| std::fs::read_to_string(p).expect("TEMP_MW_SHADER"))
-            .unwrap_or_else(|_| SHADER_SOURCE.to_string());
-        let source: String = temp_mw_source
-            .replace(
-                "__TEMP_MW_OPTION__",
-                &std::env::var("TEMP_MW").unwrap_or_else(|_| "0".to_string()),
-            )
+        let source: String = SHADER_SOURCE
             .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
             .replace(
                 "__BYTES_PER_RAY_END__",

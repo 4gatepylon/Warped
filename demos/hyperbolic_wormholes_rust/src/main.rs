@@ -799,43 +799,6 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         pitch_rad,
         is_laser_on: false,
     };
-    if let Ok(temp_mw_views) = std::env::var("TEMP_MW_VIEWS") {
-        let temp_all = vec![
-            view("mw_up45", [-60.0, -10.0], [-27.8, 13.8], None, 0.785),
-            view("mw_up45b", [-60.0, 10.0], [-14.7, -11.1], None, 0.785),
-            view("mw_horizon", [-107.0, 0.0], [-9.2, 20.8], None, 0.3),
-            view("mw_horizon_b", [-60.0, -50.0], [-20.0, 10.0], None, 0.2),
-            view("mw_black_hole", [-13.0, -9.6], [0.0, 0.0], Some(5.2), 0.63),
-            view("mw_wormhole", [-22.0, 40.0], [-14.0, 40.0], None, 0.3),
-            view("mw_red_spawn", [120.0, 0.0], [0.0, 0.0], None, 0.1),
-            view("mw_red_field", [90.0, 10.0], [0.0, 0.0], None, 0.3),
-        ];
-        let mut temp_chosen: Vec<VoxelView> = temp_all
-            .into_iter()
-            .filter(|v| {
-                temp_mw_views == "all"
-                    || temp_mw_views == "timing"
-                    || temp_mw_views.split(',').any(|n| n == v.name)
-            })
-            .collect();
-        if temp_mw_views == "timing" {
-            temp_chosen.extend(temp_standard_views());
-        }
-        return temp_chosen;
-    }
-    temp_standard_views()
-}
-
-/// `temp_standard_views` TEMP hook.
-fn temp_standard_views() -> Vec<VoxelView> {
-    let view = |name, at_m, target_m, h_m, pitch_rad| VoxelView {
-        name,
-        at_m,
-        target_m,
-        h_m,
-        pitch_rad,
-        is_laser_on: false,
-    };
     vec![
         view("blue_spawn", [-107.0, 0.0], [0.0, 0.0], None, 0.0),
         view("red_spawn", [120.0, 0.0], [0.0, 0.0], None, 0.0),
