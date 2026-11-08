@@ -45,6 +45,7 @@ const AVATAR_COLORS: [Color; 8] = [
     [0.2, 0.85, 0.85],
 ];
 const BOT_STEP_S: f64 = 1.0 / 60.0;
+const BOT_HITS_TO_KILL: u8 = 1;
 const BOT_RANGE_M: f64 = 12.0;
 const BOT_WANDER_PX_PER_S: f64 = 120.0;
 const BOT_REJOIN_S: f64 = 2.0;
@@ -212,7 +213,7 @@ pub fn run_bot(
                 start.elapsed().as_secs_f64(),
             );
             if let Some(victim_id) = view.hit_player_id {
-                client.send_hit(victim_id)?;
+                client.send_hit(victim_id, BOT_HITS_TO_KILL)?;
                 if last_victim != Some(victim_id) {
                     hit_count += 1;
                     println!("bot hit player {victim_id}");
@@ -244,11 +245,12 @@ pub fn get_voxel_spawn(world: &VoxelWorld, id: u32) -> VoxelPlayer {
 }
 
 /// `SharedVoxelView` is one frame of a voxel map with the other players, every laser, this
-/// player's laser shot and the player it hit, if any.
+/// player's laser shot and the player it hit, if any, and whether it hit their head.
 pub struct SharedVoxelView {
     pub frame: VoxelFrame,
     pub shot: Option<Shot>,
     pub hit_player_id: Option<u32>,
+    pub is_head_hit: bool,
 }
 
 /// `trace_other_voxel_lasers` traces the laser of each of `players` who has theirs on (their
@@ -308,13 +310,18 @@ pub fn pack_shared_voxel_view(
         .collect();
     let shared: VoxelWorld = world.with_avatars(&bodies, &colors);
     let mut beams: Vec<(Vec<BeamSegment>, u32)> = Vec::new();
-    let (mut shot, mut hit_player_id, mut spot) = (None, None, None);
+    let (mut shot, mut hit_player_id, mut spot, mut is_head_hit) = (None, None, None, false);
     if is_laser_on {
         let own: Shot = shared.trace_laser(camera);
         hit_player_id = own
             .hit_structure
             .and_then(|k| k.checked_sub(shared.static_structure_count))
             .map(|k| players[k].id);
+        is_head_hit = hit_player_id.is_some()
+            && own
+                .hit_structure
+                .zip(own.spot)
+                .is_some_and(|(k, x)| shared.is_head_hit(k, x));
         spot = own.spot.map(|x| (x, team));
         beams.push((own.segments.clone(), team));
         shot = Some(own);
@@ -326,6 +333,7 @@ pub fn pack_shared_voxel_view(
         frame: VoxelFrame::Build(&shared, camera, &beams, spot, render_px),
         shot,
         hit_player_id,
+        is_head_hit,
     }
 }
 
@@ -449,7 +457,7 @@ pub fn run_voxel_bot(
                 BOT_VIEW_PX,
             );
             if let Some(victim_id) = view.hit_player_id {
-                client.send_hit(victim_id)?;
+                client.send_hit(victim_id, BOT_HITS_TO_KILL)?;
                 if last_victim != Some(victim_id) {
                     hit_count += 1;
                     println!("bot hit player {victim_id}");

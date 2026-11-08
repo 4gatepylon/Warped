@@ -37,6 +37,7 @@ pub const CONSOLE_DISABLE_S: f64 = 10.0;
 pub const TEAM_NAMES: [&str; 2] = ["blue", "red"];
 const NO_CONSOLE: u8 = u8::MAX;
 const NO_WINNER: u8 = u8::MAX;
+const DAMAGE_TOLERANCE_FRAC: f64 = 1e-9;
 const DISCOVERY_PORT: u16 = 47_801;
 const SNAPSHOT_PERIOD_S: f64 = 1.0 / 60.0;
 const BEACON_PERIOD_S: f64 = 0.5;
@@ -225,12 +226,14 @@ impl Reader<'_> {
     }
 }
 
-/// `Slot` is a joined player on the server, and since when they have held `E` on their console.
+/// `Slot` is a joined player on the server, since when they have held `E` on their console, and
+/// the damage they took since joining (1 eliminates them).
 struct Slot {
     player: RemotePlayer,
     address: SocketAddr,
     last_heard: Instant,
     disabling_since: Option<Instant>,
+    damage_frac: f64,
 }
 
 /// `Server` is the server's state: its socket, the joined players, the next id to give, the id
@@ -278,6 +281,7 @@ impl Server {
                             address,
                             last_heard: Instant::now(),
                             disabling_since: None,
+                            damage_frac: 0.0,
                         });
                         println!("player {id} joined from {address}");
                         id
@@ -306,7 +310,9 @@ impl Server {
                 }
             }
             Some(Kind::Hit) => {
-                let (Some(shooter_id), Some(victim_id)) = (reader.id(), reader.id()) else {
+                let (Some(shooter_id), Some(victim_id), Some(&[hits_to_kill])) =
+                    (reader.id(), reader.id(), reader.take(1))
+                else {
                     return Ok(());
                 };
                 let is_shooter_here: bool = self
@@ -320,7 +326,11 @@ impl Server {
                 else {
                     return Ok(());
                 };
-                if !is_shooter_here || self.game.winner.is_some() {
+                if !is_shooter_here || self.game.winner.is_some() || hits_to_kill == 0 {
+                    return Ok(());
+                }
+                self.slots[victim].damage_frac += 1.0 / f64::from(hits_to_kill);
+                if self.slots[victim].damage_frac < 1.0 - DAMAGE_TOLERANCE_FRAC {
                     return Ok(());
                 }
                 let victim_address: SocketAddr = self.slots.remove(victim).address;
@@ -654,12 +664,15 @@ impl Client {
         Ok(())
     }
 
-    /// `send_hit` tells the server this player's laser hit player `victim_id`.
+    /// `send_hit` tells the server this player's laser hit player `victim_id` once, with a weapon
+    /// that eliminates in `hits_to_kill` such hits.
     ///
-    /// Example: `client.send_hit(4)?;`
-    pub fn send_hit(&mut self, victim_id: u32) -> Result<()> {
+    /// Example: `client.send_hit(4, 12)?;`
+    pub fn send_hit(&mut self, victim_id: u32, hits_to_kill: u8) -> Result<()> {
         if let Some(id) = self.id {
-            self.send(&Message::New(Kind::Hit).id(id).id(victim_id))?;
+            let mut message: Message = Message::New(Kind::Hit).id(id).id(victim_id);
+            message.0.push(hits_to_kill);
+            self.send(&message)?;
         }
         Ok(())
     }
@@ -716,6 +729,7 @@ mod tests {
     //! | Datagram length | complete, cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
     //! | Join | new player, repeated join, server full, rejoin after a hit (same id) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit` |
     //! | Hit | by a joined player, by a stranger, on a player who is gone | `only_joined_players_can_hit` |
+    //! | Hits to kill | 1 (eliminated at once), several (eliminated at the last) | `only_joined_players_can_hit`, `rifle_hits_add_up` |
     //! | Console held | the other team's (turned off after `CONSOLE_DISABLE_S`), one's own team's (ignored) | `holding_consoles_turns_them_off_and_wins` |
     //! | Consoles off | some of a team's (no winner), all of a team's (the other team wins), then a new game (all back on) | `holding_consoles_turns_them_off_and_wins` |
 
@@ -839,7 +853,8 @@ mod tests {
         let join: Vec<u8> = Message::New(Kind::Join).0;
         server.handle(&join, address(50_001)).expect("a join");
         server.handle(&join, address(50_002)).expect("a join");
-        let stranger_hit: Vec<u8> = Message::New(Kind::Hit).id(1).id(2).0;
+        let mut stranger_hit: Vec<u8> = Message::New(Kind::Hit).id(1).id(2).0;
+        stranger_hit.push(1);
         server
             .handle(&stranger_hit, address(50_003))
             .expect("a stranger's hit");
@@ -861,6 +876,23 @@ mod tests {
         assert_eq!(server.slots.len(), 1);
         server.handle(&join, address(50_002)).expect("a rejoin");
         assert_eq!(server.slots[1].player.id, 2);
+    }
+
+    #[test]
+    fn rifle_hits_add_up() {
+        const HITS_TO_KILL: u8 = 3;
+        let mut server: Server = make_server();
+        let join: Vec<u8> = Message::New(Kind::Join).0;
+        server.handle(&join, address(50_001)).expect("a join");
+        server.handle(&join, address(50_002)).expect("a join");
+        let mut hit: Vec<u8> = Message::New(Kind::Hit).id(1).id(2).0;
+        hit.push(HITS_TO_KILL);
+        for _ in 1..HITS_TO_KILL {
+            server.handle(&hit, address(50_001)).expect("a hit");
+            assert_eq!(server.slots.len(), 2);
+        }
+        server.handle(&hit, address(50_001)).expect("the last hit");
+        assert_eq!(server.slots.len(), 1);
     }
 
     #[test]

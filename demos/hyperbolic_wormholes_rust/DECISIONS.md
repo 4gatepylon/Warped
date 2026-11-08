@@ -610,6 +610,27 @@
 - **Rationale:** you asked for a tiny bit of motion blur; 10 ms is about half a frame at 60 fps. The time is
   `MOTION_BLUR_S` in `src/main.rs`.
 
+### D56. A second gun: the rifle
+
+- **Choice:**
+  - **Switching:** gun 1 is the laser so far (a quarter-second shot per click; one hit eliminates; the design's
+    sniper rifle without its fire-rate limit or overheating yet). Gun 2 is the design's rifle. The mouse wheel
+    (either way) swaps them, and `1` and `2` pick one.
+  - **Firing:** the rifle fires while the button is held: a 0.06 s pulse of the beam every 0.125 s (8 shots a
+    second, within the design's 2–10). Each shot counts at most one hit. Two hits to the head (the avatar's top
+    half-meter cell) or twelve to the body eliminate, so sustained body fire kills in 1.5 s (the design: 1–2 s).
+    The server adds up each player's damage until they rejoin.
+  - **Heat:** it overheats after 20 shots in a row (the design: 15–25), shown as a bar above the energy bar, and
+    cools fully in 2 s without firing (the design leaves the cooling time open).
+  - **Looks:** the rifle is a thick grey block with a long, thin glowing barrel; the laser stays a thin dark wand.
+  - **Design document:** `game_design/DESIGN.md` now says that a player with two weapons switches with the wheel or
+    `1`/`2`, and has a table of the controls.
+- **Alternatives:** a health bar for the player who is hit (it needs damage in the snapshots); slowing a player
+  who is hit, as the design says (not yet).
+- **Rationale:** you asked for a second gun, the rifle from the design, switched with the scroll wheel or `1`/`2`,
+  looking different from the first.
+
+
 ## Baselines
 
 ### D15. WebGL at the same drawing-buffer sizes
