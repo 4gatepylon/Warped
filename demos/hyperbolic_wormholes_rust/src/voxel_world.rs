@@ -1708,7 +1708,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Where a player starts | on a structure (the blue lander), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
+    //! | Where a player starts | on a structure (the blue landing pad), on the ground (a viewpoint) | `players_stand_where_the_level_puts_them` |
     //! | Laser path | through a wormhole to a structure | `the_laser_into_the_wormhole_hits_the_red_pylon` |
     //! | Laser at a window (the red habitat module's) | shot from inside touching the pane, close (the muzzle past the pane), across the room, slantwise; from outside | `the_laser_stops_on_a_window_pane` |
     //! | Players spawning | up to the player limit, and a late id whose own slot is next to player 1's (it moves on) | `players_spawn_apart` |
