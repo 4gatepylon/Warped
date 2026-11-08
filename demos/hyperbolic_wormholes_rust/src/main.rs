@@ -21,6 +21,7 @@
 //! Must know:
 //! - Gotchas: run folders are found from the crate folder, not the current directory.
 
+mod exit_prompt;
 mod fps_demo_assets;
 mod geometry;
 mod key_bindings;
@@ -1698,6 +1699,7 @@ struct Session {
     player_settings: PerPlayerSettings,
     player_settings_path: Option<PathBuf>,
     menu: Option<menu::Menu>,
+    exit_prompt: exit_prompt::ExitPrompt,
     map_layout: map_layout::MapLayout,
     gun: Gun,
     is_trigger_held: bool,
@@ -1967,6 +1969,7 @@ impl Session {
             player_settings,
             player_settings_path,
             menu: None,
+            exit_prompt: exit_prompt::ExitPrompt::New(),
             map_layout: map_layout::MapLayout::FromMap(&map, get_map_picture_max_px())?,
             render_scale: arguments
                 .render_scale
@@ -2023,11 +2026,12 @@ impl Session {
         })
     }
 
-    /// `handle_event` reacts to one window event and returns false when the player quits: Esc
-    /// releases the mouse (or quits if it is free), a click captures it (and once captured, a left
-    /// click fires a shot), the mouse looks (more slowly while aiming zooms in, by the same factor),
-    /// `1`, `2` and the wheel switch guns, and - and = change the render scale. Players can't respawn by
-    /// choice.
+    /// `handle_event` reacts to one window event and returns false when the player quits: the
+    /// window's close button quits, Esc releases the mouse (or asks whether to exit if it is free,
+    /// and while it asks every pressed control answers it), a click captures it (and once captured,
+    /// a left click fires a shot), the mouse looks (more slowly while aiming zooms in, by the same
+    /// factor), `1`, `2` and the wheel switch guns, and - and = change the render scale. Players
+    /// can't respawn by choice.
     ///
     /// Example: `if !session.handle_event(event, &window, &mouse) { break; }`
     fn handle_event(
@@ -2038,7 +2042,7 @@ impl Session {
     ) -> bool {
         match event {
             Event::Quit { .. } => return false,
-            Event::MouseButtonDown { .. } if !self.is_captured => {
+            Event::MouseButtonDown { .. } if !self.is_captured && !self.exit_prompt.is_shown() => {
                 self.is_captured = true;
                 mouse.set_relative_mouse_mode(window, true);
                 return true;
@@ -2056,6 +2060,9 @@ impl Session {
             _ => {}
         }
         match key_bindings::get_pressed_control(&event) {
+            Some(control) if self.exit_prompt.is_shown() => {
+                self.exit_prompt.answer(control) != exit_prompt::ExitOutcome::Exit
+            }
             Some(control) if self.menu.is_some() => {
                 self.handle_menu_control(control);
                 true
@@ -2064,7 +2071,10 @@ impl Session {
                 self.menu = Some(menu::Menu::New());
                 true
             }
-            Some(control) => self.handle_control(control, window, mouse),
+            Some(control) => {
+                self.handle_control(control, window, mouse);
+                true
+            }
             None => true,
         }
     }
@@ -2110,26 +2120,27 @@ impl Session {
         Ok(path.display().to_string())
     }
 
-    /// `handle_control` does what a pressed control (key, mouse button or wheel) is bound to, and
-    /// returns false when the player quits: releasing the mouse (or quitting when it is free),
-    /// the render resolution, choosing a team in the lobby (before the guns, which may share its
-    /// keys), the guns, and firing the sniper.
+    /// `handle_control` does what a pressed control (key, mouse button or wheel) is bound to:
+    /// releasing the mouse (or asking whether to exit when it is free), the render resolution,
+    /// choosing a team in the lobby (before the guns, which may share its keys), the guns, and
+    /// firing the sniper.
     ///
-    /// Example: `if !self.handle_control(control, window, mouse) { return false; }`
+    /// Example: `self.handle_control(control, window, mouse);`
     fn handle_control(
         &mut self,
         control: Control,
         window: &sdl3::video::Window,
         mouse: &sdl3::mouse::MouseUtil,
-    ) -> bool {
+    ) {
         let actions: Vec<Action> = self.player_settings.keys.get_actions(control);
         let is = |action: Action| actions.contains(&action);
         if is(Action::ReleaseMouse) {
-            if !self.is_captured {
-                return false;
+            if self.exit_prompt.press_release_mouse(self.is_captured)
+                == exit_prompt::ExitOutcome::ReleaseMouse
+            {
+                self.is_captured = false;
+                mouse.set_relative_mouse_mode(window, false);
             }
-            self.is_captured = false;
-            mouse.set_relative_mouse_mode(window, false);
         } else if is(Action::LowerResolution) || is(Action::RaiseResolution) {
             self.is_auto_scale = false;
             self.render_scale = if is(Action::LowerResolution) {
@@ -2163,7 +2174,6 @@ impl Session {
             self.shot_time_s = self.settings.sniper.shot_s;
             self.sniper_reload_s = self.settings.sniper.reload_s;
         }
-        true
     }
 
     /// `update` moves the player by the held keys for the time since the last frame, and fails if
@@ -2213,7 +2223,7 @@ impl Session {
             self.hud_time_s += dt_s;
             return Ok(());
         }
-        let is_playing: bool = self.menu.is_none();
+        let is_playing: bool = self.menu.is_none() && !self.exit_prompt.is_shown();
         let held = |action: Action| {
             is_playing && self.player_settings.keys.is_held(action, keyboard, mouse)
         };
@@ -2840,13 +2850,16 @@ impl Session {
         true
     }
 
-    /// `get_banner_lines` gives the two lines shown over the view: in the lobby, each team's head
-    /// count and the keys that join a team; once a team has won, the winner and how to start a new
-    /// game; while this player is out after a hit, "YOU DIED" and the countdown to respawning; or
-    /// `None`.
+    /// `get_banner_lines` gives the two lines shown over the view: while the exit prompt shows,
+    /// its question and keys; in the lobby, each team's head count and the keys that join a team;
+    /// once a team has won, the winner and how to start a new game; while this player is out after
+    /// a hit, "YOU DIED" and the countdown to respawning; or `None`.
     ///
     /// Example: `if let Some(lines) = session.get_banner_lines() { ... }`
     fn get_banner_lines(&self) -> Option<[String; 2]> {
+        if self.exit_prompt.is_shown() {
+            return Some(exit_prompt::get_lines());
+        }
         let multiplayer: &Multiplayer = self.multiplayer.as_ref()?;
         if multiplayer.client.is_in_lobby() {
             let counts: String = match multiplayer.client.lobby_counts {
@@ -3198,7 +3211,7 @@ impl Session {
         lines.push(if self.is_captured {
             self.player_settings.keys.describe()
         } else {
-            "Click to capture the mouse; Esc quits".to_string()
+            "Click to capture the mouse; Esc to exit".to_string()
         });
         lines
     }
@@ -3762,7 +3775,7 @@ mod tests {
     //! | Bar fill | empty, a sliver (one segment), 11 of 12 after the network's byte rounding, full | `segmented_bars_count_whole_segments` |
     //! | Segment count | 12, 1 (the sniper's block, empty or full and as wide as the whole bar) | `segmented_bars_count_whole_segments` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
-    //! | Overlay text | a centred two-line banner, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
+    //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
 
@@ -3841,6 +3854,10 @@ mod tests {
                 assert_eq!(x, MENU_LEFT_PX);
                 assert!(line.chars().count() <= max_char_count, "{line}");
             }
+        }
+        let banner_char_count: usize = (DEATH_MASK_PX.0 as f32 / DEBUG_GLYPH_PX) as usize;
+        for line in exit_prompt::get_lines() {
+            assert!(line.chars().count() <= banner_char_count, "{line}");
         }
     }
 

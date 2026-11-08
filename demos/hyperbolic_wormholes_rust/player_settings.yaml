@@ -37,7 +37,7 @@ keys:
   join_red: ["2"]  # In the lobby, join the red team.
   lower_resolution: ["-"]  # Render at a lower resolution.
   raise_resolution: ["="]  # Render at a higher resolution.
-  release_mouse: [Escape]  # Free the mouse; again to quit.
+  release_mouse: [Escape]  # Free the mouse; again to ask whether to quit.
   open_menu: [Tab]  # Open or close the menu (settings).
 
 view:

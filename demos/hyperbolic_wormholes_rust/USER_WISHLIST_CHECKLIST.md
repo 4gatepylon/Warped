@@ -10,6 +10,10 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-69 Shot noise.** Each laser shot strays a little, by a random amount sampled for each shot. With the rifle the
+  noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
+  All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
+  `claude/shot-noise`, 2026-11-07.
 - [~] **W-52 Cyan through a wormhole.** Going through a wormhole turns the whole screen somewhat cyan, simulating a
   relativistic effect on colour if possible. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/wormhole-cyan`, 2026-11-07.
@@ -23,9 +27,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
   2026-11-07.
-- [~] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
-  exit?", exits if the player presses OK, and otherwise doesn't.
-  Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/exit-confirm`, 2026-11-07.
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
@@ -190,6 +191,8 @@ is in [`AGENTS.md`](AGENTS.md).
   missing". The game fails when they are not there ("it's fine if they are not committed"), and "the error (client
   side) should say what to do to fix it". #168 committed them in `demos/fps_demo/assets/`; #173 stops the client at
   start with the command that restores a missing one.
+- [x] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
+  exit?", exits if the player presses OK, and otherwise doesn't. #175.
 - [x] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
   continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
   pulsing slows down smoothly instead of jumping back. #176.
