@@ -26,6 +26,60 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
+- [~] **W-124 Four map demos.** "Have a team of sub-agents each try to make a demo analogous to the Rust wormholes
+  hyperbolic space demo but for the other 4 maps. I want to have playable versions of each of the other 4 maps." The
+  agents may need to get textures so the other maps don't look too bad; they can reuse the robot skins and guns. "You're
+  going to make this all in demos, and you're just going to make one folder for each demo." "It's very important to
+  have high performance for all of these." "Try to get to a working version as fast as possible for each of them, and
+  especially try to get to a working end-to-end version as fast as possible while staying correct. So, you can take the
+  ideas I've described and just do the simplest possible version of it. You can start with a very small map for each
+  one, and then we're going to want to go on based on feedback." The four maps are W-119 (City Sphere demo), W-120
+  (Snow Planet demo), W-121 (Dust demo) and W-122 (Dark Forest demo).
+  Claimed by Devin (session c8a2905e196044538cc52f7667d01d6d, the parent coordinating W-119 to W-123), no branch of its own, 2026-11-08.
+  - **Where the work is:** on the session's own Devin machine; pushed to `origin` as it goes, with one PR into
+    `staging/user-4gatepylon` that the user merges.
+- [~] **W-119 City Sphere demo.** Part of W-124 (four map demos), the satellite city: "Ideally it can be like a sphere,
+  where you walk and the roof is like glass or something, and then you can also go up onto the glass level, and
+  there's also going to be like obstacles and stuff, but there's going to be no roof on the glass level. On the glass
+  level, you can actually shoot directly across. Remember, of course, this is Euclidean space. And additionally, on
+  the glass level, if you are on top of the glass, the laser or weapon shots will reflect using just like normal
+  reflections off the normal. So the idea is that in the lower, below the glass, everything's just like a normal
+  shooter. And above the glass, it's like this more interesting situation where laser reflects off the glass and then
+  it also can also be shot directly across. And there should be a well defined parameter for how long it goes. I think
+  usually it should be no more than two bounces at most."
+  Claimed by Devin (session 9f480d75ff384998bc6f7e2f5d3bdbcb), branch `devin/city-sphere-demo`, folder `demos/city_sphere_rust/`, 2026-11-08.
+  - **Where the work is:** on the session's own Devin machine; pushed to `origin` as it goes, with one PR into
+    `staging/user-4gatepylon` that the user merges.
+- [~] **W-120 Snow Planet demo.** Part of W-124 (four map demos): "There should be like a really snowy zone where
+  you're like slowed and you start to lose health because you're like freezing. And it should be the case that
+  there's like multiple of these. And if you shoot through them, like the shot has like a smaller distance it can
+  pass. These can be like blizzard zones or something like that."
+  Claimed by Devin (session 4b645dc0cda04a3db594e92c0dddb456), branch `devin/snow-planet-demo`, folder `demos/snow_planet_rust/`, 2026-11-08.
+  - **Where the work is:** on the session's own Devin machine; pushed to `origin` as it goes, with one PR into
+    `staging/user-4gatepylon` that the user merges.
+- [~] **W-121 Dust demo.** Part of W-124 (four map demos): "Dust has, by default, a fog of sorts, like there's kind of
+  a sandstorm going on, and that should refract the light. There should be like a wind always happening, and the light
+  should kind of bend in the direction of the wind. There will be no black hole there, but there will still be
+  wormholes, and obviously, players can place wormholes. And obviously, that one's also hyperbolic, unlike the other
+  ones."
+  Claimed by Devin (session 89b82bc115284948b6fefd3f1d1dac31), branch `devin/dust-demo`, folder `demos/dust_rust/`, 2026-11-08.
+  - **Where the work is:** on the session's own Devin machine; pushed to `origin` as it goes, with one PR into
+    `staging/user-4gatepylon` that the user merges.
+- [~] **W-122 Dark Forest demo.** Part of W-124 (four map demos): "I want it to just be kind of just like a normal
+  forest. This is just that one's going to be just kind of a normal first-person shooter. Maybe one difference there
+  is just to have it have verticality, similar to the Star Wars Endor or whatever, maybe the Wookiee Planet, where
+  there's like tree houses and stuff. Maybe have some like rope ladders and ways of going up trees. And crossing
+  across them."
+  Claimed by Devin (session 1dbf51bb588d4725b5c6fa565c9597c3), branch `devin/dark-forest-demo`, folder `demos/dark_forest_rust/`, 2026-11-08.
+  - **Where the work is:** on the session's own Devin machine; pushed to `origin` as it goes, with one PR into
+    `staging/user-4gatepylon` that the user merges.
+- [~] **W-123 Match progression menu.** "Make sure that the menus, when you see, like, there's a menu that shows the
+  game progression, kind of the game history. Like, some state, I suppose, in the game server has to keep track of the
+  game history and which team won what and what the wavefronts are, who has ownership, defensive ownership, offensive
+  ownership, etc."
+  Claimed by Devin (session 3a4deef16fcd4485af78c9f74b5158ff), branch `devin/match-progression-demo`, folder `demos/warped_match_rust/`, 2026-11-08.
+  - **Where the work is:** on the session's own Devin machine; pushed to `origin` as it goes, with one PR into
+    `staging/user-4gatepylon` that the user merges.
 
 ## Open
 
