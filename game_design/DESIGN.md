@@ -239,6 +239,7 @@ Every weapon follows these rules:
 | Hits to kill, body | 1 | 10–20 |
 | Time to kill, sustained fire | One shot | At most ≈1–2 s |
 | Laser | Shows once per shot, then fades slowly | Pulses on and off while firing |
+| Shot noise (each shot strays at random) | Small: most shots near the crosshair, a few further | Grows as a burst heats the rifle, recovers as it cools |
 
 The rifle's fire rate and body hits to kill are tuned together, so that body shots kill within the
 time to kill.

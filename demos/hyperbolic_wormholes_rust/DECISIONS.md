@@ -1076,6 +1076,47 @@
 - **Rationale:** you reported that a laser shot out of a window close up doesn't leave the room; it stops on the
   glass by design, so whether lasers should pass through windows is your call.
 
+### D89. Shot noise: each shot strays a little (W-69)
+
+- **Choice:**
+  - **Per shot:** each shot strays from the crosshair by a random angle, toward a random direction around it,
+    sampled once per shot (`shot_noise.rs`): once for the sniper's whole quarter-second shot, and once for each
+    rifle pulse. The crosshair stays in the middle; only the shot moves.
+  - **Sniper:** the angle is exponential with mean `sniper.noise_mean_rad` (3 mrad), cut at `sniper.noise_max_rad`
+    (15 mrad, five means, so 0.7% of shots are cut). Most shots land within a few centimeters at 20 m, and about 1
+    in 30 strays past 10 mrad. Cutting keeps the mean at 99.3% of the setting.
+  - **Rifle:** a shot lands uniformly over a disc around the crosshair, of angular radius
+    `rifle.noise_start_rad` (2 mrad) cold, growing in step with the heat to `rifle.noise_max_rad` (20 mrad) at full
+    heat, the 20th shot in a row. The heat already falls over `rifle.cool_down_s` when the trigger is let go, so the
+    spread recovers with it. The shot uses the heat before it adds its own, so a burst's first shot is the most
+    accurate.
+  - **Sizes:** in a 1280 × 800 window 1 mrad is half a pixel at the middle, so the strays are hard to see on screen
+    but count at range: at 20 m the sniper's mean is 6 cm and the rifle's full-heat limit 40 cm, against a body
+    50 cm wide. A sniper shot centred on a body hits it 99.5% of the time at 20 m, 97.5% at 30 m and 91% at 50 m; a
+    rifle shot at full heat 74% at 20 m and 52% at 30 m (simulated with these defaults, sideways misses only).
+    Aiming's zoom (D83) doesn't change them. Each setting can be 0 for none; `noise_start_rad` above
+    `noise_max_rad` fails.
+  - **One frame for everything:** the shot is traced from the camera turned by its offset (the smallest rotation
+    taking the crosshair's direction to the strayed one), so the drawn beam, the glow where it lands, the HUD's
+    line and the hit decision all come from the same trace. This holds on the house too.
+  - **Other players:** while the laser is on, the window sends that turned frame as its eye frame, and other
+    windows already trace a firing player's laser from the frame they receive, so they draw the same strayed beam.
+    The network format doesn't change, so older windows draw it too. The body others see turns with it, by at most
+    1.1° (the rifle at full heat) and only while the shot lasts, which doesn't show.
+  - **Randomness:** a SplitMix64 generator (a few lines, no new dependency), seeded by the clock when the window
+    starts. The tests use a fixed seed.
+- **Alternatives:**
+  - a new field in the player record for the offset (a snapshot's length is checked exactly, so an older window
+    would drop every snapshot from a newer server), or a new message kind for it (more code for the same result);
+  - a Gaussian spread for the rifle (no hard limit; the disc makes the limit the ring players can learn);
+  - spread by shots in a row rather than heat (heat already counts them and cools gradually, so the spread
+    recovers gradually rather than all at once);
+  - rerolling a sniper stray beyond the cap instead of cutting it (the same mean within 1%; cutting is simpler).
+- **Rationale:** you asked for a little random shot noise on the laser, sampled per shot, growing as the rifle keeps
+  shooting, exponential for the sniper, and all of it in the YAML settings. The defaults keep the crosshair
+  meaningful: the sniper still hits what it is centred on nearly always within 30 m, while a long rifle burst
+  spreads wide enough that short bursts pay off.
+
 
 ## Baselines
 
