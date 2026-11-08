@@ -148,10 +148,6 @@ are here too, since the user hadn't confirmed them.
 - [?] **W-99 Players in team colours.** A bug found while taking screenshots: a player's figure is coloured by their
   player number, not their team (a red-team player can be drawn blue, a blue one yellow), while the minimap and MAP
   page use team colours. The user said to add and fix it ("Yes, add and fix"). #290.
-- [?] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
-  character, and the player controls it from there, seeing their own character. `V` switches to a view from 3 m
-  behind and 0.6 m above the head, pulled in when a wall or the ground is behind it; shots go from the head into the
-  crosshair, and aiming looks from the eye again. #286.
 - [?] **W-03 Playtest guide.** Setup and the commands to play together, with known caveats; `main` official,
   `staging` the latest. #92, #94, #98, #99.
 - [?] **W-36 Lobby.** A lobby page where players see how many players are on each team, choose a team, and then
@@ -367,3 +363,7 @@ Confirmed by the user after testing.
     (`fix3_*`), which is temporary (it is under `/private/tmp`). State, 2026-11-08: merged into `staging`.
 - [x] **W-85 Stuck leaving a bunker.** A bug: if you try to exit one of the bunkers, you get stuck. Still happening on
   staging at #225 ("i click w and cannot get out"). #237. Confirmed by the user, 2026-11-07: "also stuck in bunker is fixed so mark that as done".
+- [x] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
+  character, and the player controls it from there, seeing their own character. `V` switches to a view from 3 m
+  behind and 0.6 m above the head, pulled in when a wall or the ground is behind it; shots go from the head into the
+  crosshair, and aiming looks from the eye again. #286. Confirmed by the user, 2026-11-08: "third person looks good its done mark at such".
