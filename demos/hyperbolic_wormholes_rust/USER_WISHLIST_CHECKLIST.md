@@ -15,9 +15,6 @@ is in [`AGENTS.md`](AGENTS.md).
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
-  reality bending version). Claimed by Claude Code (subagent of a session on `leah`'s Mac in `Warped-main`), branch
-  `claude/shot-sky-flash`, worktree `/Users/leah/Documents/dev/Warped-rb-sky-flash`, 2026-11-08.
 - [~] **W-105 Screen tearing.** "There is screen tearing" (in the reality bending version). Claimed by Claude Code
   (subagent of a session on `leah`'s Mac in `Warped-main`), branch `claude/screen-tearing`, worktree
   `/Users/leah/Documents/dev/Warped-rb-tearing`, 2026-11-08.
@@ -120,6 +117,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
+- [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
+  reality bending version). #316.
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
