@@ -98,3 +98,16 @@ Fairness: the teams spawn west (blue) and east (red), so each sees the same thre
 holes are not mirrored between the halves: blue's half has the north-west hole and the south one nearest the
 centre, red's has the north-east one and the south one 19 m out; the north hole is on the middle line. Pylons,
 spawns, mounds and the wormhole stay point-symmetric.
+
+## S10. Performance cut and handoff notes
+
+`BEND_STEP_FRAC` is 0.2 (was 0.12): the only view over 16.7 ms median at 2560×1440 (black hole at 9 m, 18.3 ms)
+drops to 15.5 ms with no visible change. The user froze the visuals, so no other quality changes were made.
+
+For a future agent:
+- Checked on this branch: a server with `--level-result-file` and two `--bot --bot-objective consoles --team
+  blue|red --label` bots ends with `{"winner":"red"}` written atomically; two `--join --team` windows over UDP
+  both join one server.
+- The looping flat torus (S1 option A) is not on this branch. Work in progress is on the unpushed local branch
+  `devin/snow-planet-torus` (worktree `.devin/worktrees/snow-planet-torus`); the blizzard light bending is parked
+  on `devin/snow-planet-swirl-parked`. Neither is in any PR.
