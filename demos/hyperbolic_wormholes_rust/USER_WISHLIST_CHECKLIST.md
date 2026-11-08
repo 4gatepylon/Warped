@@ -14,9 +14,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
   can find something for that." Pictures first. Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/rifle-model`, 2026-11-07.
-- [~] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
-  menu opens on the SCORES page. Claimed by Claude Code (session `wizardly-hamilton-23a121`), branch
-  `claude/scores-first`, 2026-11-07.
 - [~] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). Claimed by Claude Code (subagent of session
   `wizardly-hamilton-23a121`), branch `claude/stronger-curvature`, 2026-11-07.
@@ -123,6 +120,8 @@ is in [`AGENTS.md`](AGENTS.md).
 Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-97 Scores page first.** "Change the page ordering also so kd is the default thing to show up": the `Tab`
+  menu opens on the SCORES page. #PRNUM.
 - [?] **W-93 Larger player icons on the minimap.** "Make the player icons larger on the minimap." #253.
 - [?] **W-82 Wormhole colour from motion.** Fix the wormhole transition colouring (W-52, #178): it should be a more
   bluish cyan, NOT greenish cyan. It should NOT be a function of time but of space and velocity: as long as you are
