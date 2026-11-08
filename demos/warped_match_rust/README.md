@@ -107,6 +107,9 @@ rounds, blue winning: City Sphere blue; Dark Forest and Snow Planet held by thei
 for six rounds; Snow Planet red, then Dust held by blue three times; Dark Forest blue, Lunar
 Surface blue. `make e2e-match` writes `.artifacts/match/<run>/match.json`
 (rounds, winners, outcome) and each round's level server log.
+After all four level branches took the first-to-finish console fix, three more bot matches all
+finished with no stall: 3 rounds (blue), 6 rounds (blue: City Sphere blue, Dark Forest and Snow
+Planet red, then Dust, Dark Forest and Lunar Surface blue) and 3 rounds (blue).
 
 ## Performance
 
