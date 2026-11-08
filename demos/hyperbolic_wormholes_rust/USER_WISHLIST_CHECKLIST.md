@@ -94,6 +94,9 @@ is in [`AGENTS.md`](AGENTS.md).
   of the ground, just barely translucent, to mark out the real zones.
 - [ ] **W-65 Confirm before exiting.** Pressing `Escape` doesn't exit straight away: the game asks "Do you want to
   exit?", exits if the player presses OK, and otherwise doesn't.
+- [ ] **W-67 Consoles pulse faster and faster.** While a console is being turned off, its pulsing gets faster
+  continuously, reaching a fervor right before the console turns off. If the turning off stops (a "disconnect"), the
+  pulsing slows down smoothly instead of jumping back.
 
 ## Done
 
