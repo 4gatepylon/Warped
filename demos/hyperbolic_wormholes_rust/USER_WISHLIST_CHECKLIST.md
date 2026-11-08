@@ -40,6 +40,12 @@ is in [`AGENTS.md`](AGENTS.md).
 - [~] **W-60 Throw wormholes.** Each player has a purple and a green wormhole. `Q` throws one, then the next press
   throws the other. These are each player's linked wormholes. Claimed by Claude Code (session
   `bc330d62-7d04-4172-98e2-16546720d58b`), branch `claude/throw-wormholes`, 2026-11-07.
+- [~] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
+  fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
+  missing". The textures come from `make download-assets` in `demos/fps_demo` and aren't committed ("it's fine if
+  they are not committed"); the game fails when they are not there, and "the error (client side) should say what to
+  do to fix it". Claimed by Claude Code (session `61edc3fe-1e25-49a4-a003-782bb81c534d`), branch
+  `claude/require-textures`, 2026-11-07.
 
 ## Open
 
@@ -93,9 +99,6 @@ is in [`AGENTS.md`](AGENTS.md).
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
 - [ ] **W-61 Third-person view.** A way to switch to a third-person view: the camera zooms out to slightly behind the
   character, and the player controls it from there, seeing their own character.
-- [ ] **W-63 Missing textures.** Get the proper textures, and/or fail fast when textures are missing: "the aquarium's
-  fork merge into this forgot to git add the textures and I think they'll be added soon but they are still
-  missing".
 - [ ] **W-64 Zone planes.** The painted lines that mark the edges of the blue and red zones become planes jutting out
   of the ground, just barely translucent, to mark out the real zones.
 
