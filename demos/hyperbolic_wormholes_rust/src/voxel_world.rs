@@ -25,6 +25,7 @@ use crate::geometry::{
     minkowski_dot, normalize_point, normalize_tangent, orthonormalize_frame, transport_from_centre,
 };
 use crate::map::{Map, PlayerSettings, to_direction, to_frame, to_point};
+use crate::map_cells::make_terrain_tops_m;
 use crate::net::{MAX_CONSOLE_COUNT, TEAM_NAMES};
 use crate::physics::Input;
 use crate::settings::{HeadBobSettings, PerPlayerSettings, ServerSettings};
@@ -288,8 +289,10 @@ pub fn find_consoles(map: &Map) -> Vec<Console> {
 
 /// `VoxelWorld` is a whole voxel map, ready to trace and to walk on, with the eye of the flashlight
 /// shining this frame, the time the sky shows (`sky_time_s`: the UTC clock in the window, 0 for
-/// fixed views; `spaceships.rs`), and how bright this player sees the Milky Way (`milky_way`: its
-/// pole and core directions, if the map has one), from their `view.milky_way_brightness_frac`.
+/// fixed views; `spaceships.rs`), how bright this player sees the Milky Way (`milky_way`: its
+/// pole and core directions, if the map has one), from their `view.milky_way_brightness_frac`,
+/// and each map cell's bound on the terrain's height for the bent ray tracer
+/// (`map_terrain_tops_m`, `map_cells.rs`).
 #[derive(Clone)]
 pub struct VoxelWorld {
     pub name: String,
@@ -321,6 +324,7 @@ pub struct VoxelWorld {
     pub flashlight_eye: Option<DMat4>,
     pub sky_time_s: f64,
     pub clearance: Arc<ClearanceGrids>,
+    pub map_terrain_tops_m: Arc<Vec<f32>>,
     pub bend: Bend,
     bend_hole: Option<(usize, VoxelWarp)>,
 }
@@ -711,6 +715,7 @@ impl VoxelWorld {
             name: map.name.clone(),
             r,
             terrain: map.ground.terrain.as_ref().map(Terrain::FromMap),
+            map_terrain_tops_m: Arc::new(Vec::new()),
             static_structure_count: structures.len(),
             static_warp_count: warps.len(),
             consoles: team_consoles,
@@ -758,6 +763,12 @@ impl VoxelWorld {
         };
         world.set_settings(ServerSettings::Builtin());
         world.clearance = Arc::new(ClearanceGrids::Build(&world));
+        world.map_terrain_tops_m = Arc::new(
+            world
+                .terrain
+                .as_ref()
+                .map_or(Vec::new(), make_terrain_tops_m),
+        );
         world.find_console_pylons();
         Ok(world)
     }

@@ -2059,7 +2059,9 @@ static float get_empty_s(thread const Scene &scene, float4 x) {
 /**
  * @brief `trace_map_chord` gives `trace_scene`'s hit, with no warp, for a chord of the map from x along v, `hit.s`
  * long. When the chord is at most `MAP_CELL_REACH_M` long and starts in a map cell (map_cells.rs), it tests only the
- * structures in the cell's mask, as it can't reach the others.
+ * structures in the cell's mask, and the terrain only if the chord comes down to the cell's bound on the terrain's
+ * height; what it skips the chord can't reach. Along the chord sinh h = y = x.y cosh s + v.y sinh s, lowest at an end
+ * or, if x.y > 0 and tanh s = -v.y / x.y on the chord, at sqrt(x.y² - v.y²).
  * @par Example
  * @code
  * trace_map_chord(scene, m0, chord_v, hit, glass_s);
@@ -2073,7 +2075,10 @@ static void trace_map_chord(thread const Scene &scene, float4 x, float4 v, threa
         return;
     }
     uint4 cell = scene.map_cells[c.y * MAP_CELL_COUNT + c.x];
-    if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, 0.0, hit); else trace_ground(x, v, hit);
+    float lowest_y = min(x.y, cosh(hit.s) * x.y + sinh(hit.s) * v.y);
+    if (x.y > 0.0 && v.y < 0.0 && -v.y < tanh(hit.s) * x.y) lowest_y = sqrt(x.y * x.y - v.y * v.y);
+    if (scene.u.has_terrain == 0) trace_ground(x, v, hit);
+    else if (r * asinh(lowest_y) <= as_type<float>(cell.x)) trace_terrain<false>(scene, x, v, 0.0, hit);
     for (int word = 0; word < MASK_WORD_COUNT; word++) {
         for (uint bits = cell[word + 1]; bits != 0; bits &= bits - 1) {
             trace_structure(scene, word * STRUCTURES_PER_WORD + int(ctz(bits)), x, v, 0.0, false, hit, glass_s);

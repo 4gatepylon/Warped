@@ -3,7 +3,7 @@
 //! value noise and raised by round mounds (hills, a ridge, boulders) baked into a height grid,
 //! and where a chord first meets it. `render_voxel.metal` computes the same height.
 //!
-//! Interface: `Terrain::FromMap`, `Terrain::get_height_m`, `Terrain::get_wall_frac`,
+//! Interface: `Terrain::FromMap`, `Terrain::get_height_m`, `Terrain::get_max_bowl_height_m`, `Terrain::get_wall_frac`,
 //! `Terrain::find_hit_s`, `get_fermi_coordinates`.
 //!
 //! Example: `let h_m = terrain.get_height_m(12.0, -3.5);`
@@ -218,12 +218,7 @@ impl Terrain {
     ///
     /// Example: `let h_m = terrain.get_height_m(0.0, 0.0);`
     pub fn get_height_m(&self, u_m: f64, v_m: f64) -> f64 {
-        let inside_m: f64 = self.get_inside_m(u_m, v_m);
-        let wall: f64 = if inside_m >= 0.0 {
-            smooth(1.0 - inside_m / self.wall_m)
-        } else {
-            1.0 - smooth(-inside_m / (OUTER_FLANK_PER_WALL * self.wall_m))
-        };
+        let wall: f64 = self.get_wall(self.get_inside_m(u_m, v_m));
         let rim_noise: f64 =
             sample_noise(u_m / RIM_NOISE_M, v_m / RIM_NOISE_M, self.seed ^ RIM_SEED);
         let rim_m: f64 = self.rim_height_m * (1.0 + RIM_NOISE_FRAC * (rim_noise - 0.5));
@@ -231,6 +226,51 @@ impl Terrain {
         rim_m * wall
             + self.get_mounds_height_m(u_m, v_m)
             + self.relief_m * relief * (1.0 + WALL_RELIEF_GAIN * wall)
+    }
+
+    /// `get_wall` gives the wall's smoothstep `inside_m` inside the rim (negative outside): rising
+    /// from 0 at the wall's foot to 1 at the rim, then falling away outside.
+    ///
+    /// Example: `let wall = terrain.get_wall(10.0);`
+    fn get_wall(&self, inside_m: f64) -> f64 {
+        if inside_m >= 0.0 {
+            smooth(1.0 - inside_m / self.wall_m)
+        } else {
+            1.0 - smooth(-inside_m / (OUTER_FLANK_PER_WALL * self.wall_m))
+        }
+    }
+
+    /// `get_max_bowl_height_m` bounds the ground's height from above over the rectangle `u_m` ×
+    /// `v_m` (each a range in meters), leaving out the mounds: the rim at its noise's highest, times
+    /// the wall's highest there (1 if the rim's ellipse crosses it, as the wall peaks on the rim),
+    /// plus the relief at its highest.
+    ///
+    /// Example: `let top_m = terrain.get_max_bowl_height_m([-4.0, 4.0], [0.0, 8.0]);`
+    pub fn get_max_bowl_height_m(&self, u_m: [f64; 2], v_m: [f64; 2]) -> f64 {
+        assert!(
+            u_m[0] <= u_m[1]
+                && v_m[0] <= v_m[1]
+                && self.rim_height_m >= 0.0
+                && self.relief_m >= 0.0,
+            "get_max_bowl_height_m: ranges {u_m:?} × {v_m:?} with rim {} m and relief {} m, expected ordered ranges and heights ≥ 0",
+            self.rim_height_m,
+            self.relief_m
+        );
+        let nearest = |r: [f64; 2]| 0.0_f64.clamp(r[0], r[1]);
+        let farthest = |r: [f64; 2]| r[0].abs().max(r[1].abs());
+        let ellipse = |u: f64, v: f64| (u / self.rim_m[0]).hypot(v / self.rim_m[1]);
+        let (e_min, e_max) = (
+            ellipse(nearest(u_m), nearest(v_m)),
+            ellipse(farthest(u_m), farthest(v_m)),
+        );
+        let wall_max: f64 = if e_min <= 1.0 && e_max >= 1.0 {
+            1.0
+        } else {
+            self.get_wall((1.0 - e_min) * self.rim_m[1])
+                .max(self.get_wall((1.0 - e_max) * self.rim_m[1]))
+        };
+        self.rim_height_m * (1.0 + RIM_NOISE_FRAC / 2.0) * wall_max
+            + self.relief_m * (1.0 + WALL_RELIEF_GAIN * wall_max)
     }
 
     /// `get_inside_m` gives how far inside the rim (u, v) is, along v's scale: negative outside.
