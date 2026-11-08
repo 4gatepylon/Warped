@@ -11,6 +11,8 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Claimed
 
+- [~] **W-90 Other players on the map.** Show where other people are on the map. Claimed by Claude Code (subagent of
+  session `wizardly-hamilton-23a121`), branch `claude/players-on-map`, 2026-11-07.
 - [~] **W-88 Delta fighters.** "Make the fighters look more like delta shaped instead of with such thin arms, go simple
   and geometric." Pictures first. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/delta-fighters`, 2026-11-07.
