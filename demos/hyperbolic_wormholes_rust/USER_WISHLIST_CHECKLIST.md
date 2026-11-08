@@ -36,10 +36,6 @@ is in [`AGENTS.md`](AGENTS.md).
   noise grows as the player keeps shooting; with the sniper the amount is sampled from an exponential distribution.
   All of it is in the YAML settings. Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch
   `claude/shot-noise`, 2026-11-07.
-- [~] **W-54 Professional HUD bars.** Make the health, ammo and other bars look more professional: at the very least
-  slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
-  implementing. Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/hud-bars`, 2026-11-07.
 - [~] **W-56 Dust from ground shots.** Shooting the ground throws some mist and dust particles up into the air.
   Claimed by Claude Code (subagent of session `wizardly-hamilton-23a121`), branch `claude/dust-particles`,
   2026-11-07.
@@ -220,3 +216,10 @@ is in [`AGENTS.md`](AGENTS.md).
   relativistic effect on colour if possible. #178.
 - [x] **W-53 Spaceships overhead.** A few spaceships flying overhead in the sky, purely background world-building, to
   look cool and pretty. #193.
+- [x] **W-54 Professional HUD bars.** Make the health, ammo and other bars look more professional: at the very least
+  slightly translucent, slightly shiny and rounded. Show the user a few options to pick the best from before
+  implementing. The user picked "slanted tactical but with the neo background but also make them slightly slightly
+  more translucent than the neon example", and asked: "also ideally also make them pulse when in use (i.e. when
+  taking damage the health bar pulses with a reddish orange pulse traveling downwards, when you run a blue pulse goes
+  from right to left (down), ammo is normal though; another pulse (but much more subtle) occurs when you are
+  regaining things such as energy" (D85). #207.
