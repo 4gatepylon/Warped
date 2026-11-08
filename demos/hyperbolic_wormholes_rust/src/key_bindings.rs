@@ -26,7 +26,7 @@ const MOUSE_BUTTON_NAMES: [(&str, MouseButton); 5] = [
     ("Mouse X1", MouseButton::X1),
     ("Mouse X2", MouseButton::X2),
 ];
-const ACTION_NAMES: [(Action, &str); 20] = [
+const ACTION_NAMES: [(Action, &str); 21] = [
     (Action::MoveForward, "move_forward"),
     (Action::MoveBack, "move_back"),
     (Action::MoveLeft, "move_left"),
@@ -41,6 +41,7 @@ const ACTION_NAMES: [(Action, &str); 20] = [
     (Action::Gun1, "gun_1"),
     (Action::Gun2, "gun_2"),
     (Action::SwitchGun, "switch_gun"),
+    (Action::SwitchView, "switch_view"),
     (Action::JoinBlue, "join_blue"),
     (Action::JoinRed, "join_red"),
     (Action::LowerResolution, "lower_resolution"),
@@ -48,10 +49,11 @@ const ACTION_NAMES: [(Action, &str); 20] = [
     (Action::ReleaseMouse, "release_mouse"),
     (Action::OpenMenu, "open_menu"),
 ];
-const PRESS_ONLY_ACTIONS: [Action; 9] = [
+const PRESS_ONLY_ACTIONS: [Action; 10] = [
     Action::Gun1,
     Action::Gun2,
     Action::SwitchGun,
+    Action::SwitchView,
     Action::JoinBlue,
     Action::JoinRed,
     Action::LowerResolution,
@@ -59,7 +61,7 @@ const PRESS_ONLY_ACTIONS: [Action; 9] = [
     Action::ReleaseMouse,
     Action::OpenMenu,
 ];
-const HELP_GROUPS: [(&[Action], &str); 12] = [
+const HELP_GROUPS: [(&[Action], &str); 13] = [
     (
         &[
             Action::MoveForward,
@@ -79,6 +81,7 @@ const HELP_GROUPS: [(&[Action], &str); 12] = [
     (&[Action::Aim], "aim"),
     (&[Action::Flashlight], "flashlight"),
     (&[Action::Gun1, Action::Gun2, Action::SwitchGun], "guns"),
+    (&[Action::SwitchView], "third person"),
     (
         &[Action::TurnOffConsole],
         "hold on an enemy console to turn it off",
@@ -108,6 +111,7 @@ pub enum Action {
     Gun1,
     Gun2,
     SwitchGun,
+    SwitchView,
     JoinBlue,
     JoinRed,
     LowerResolution,
@@ -329,7 +333,7 @@ mod tests {
     //!
     //! | Partitioning | Parts | Tests |
     //! | --- | --- | --- |
-    //! | Controls | keys, mouse buttons (shooting, aiming), the wheel | `builtin_bindings_read_every_kind_of_control` |
+    //! | Controls | keys (the view switch among them), mouse buttons (shooting, aiming), the wheel | `builtin_bindings_read_every_kind_of_control` |
     //! | Mistakes | an unknown action, a missing action, an unknown key, the wheel on a held action | `mistakes_name_what_is_wrong` |
 
     use super::*;
@@ -354,6 +358,7 @@ mod tests {
         assert!(keys.matches(Action::Aim, Control::Mouse(MouseButton::Right)));
         assert!(keys.matches(Action::Flashlight, Control::Key(Scancode::F)));
         assert!(keys.matches(Action::SwitchGun, Control::Wheel));
+        assert!(keys.matches(Action::SwitchView, Control::Key(Scancode::V)));
         assert!(keys.describe().starts_with("W/A/S/D move, Left Shift run"));
     }
 

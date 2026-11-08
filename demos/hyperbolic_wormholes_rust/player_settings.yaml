@@ -33,6 +33,7 @@ keys:
   gun_1: ["1"]  # Take the sniper.
   gun_2: ["2"]  # Take the rifle.
   switch_gun: [Wheel]  # Swap between the two guns.
+  switch_view: [V]  # Switch between first and third person (on voxel maps).
   join_blue: ["1"]  # In the lobby, join the blue team.
   join_red: ["2"]  # In the lobby, join the red team.
   lower_resolution: ["-"]  # Render at a lower resolution.
