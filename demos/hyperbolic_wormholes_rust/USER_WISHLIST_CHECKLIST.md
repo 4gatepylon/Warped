@@ -53,26 +53,17 @@ is in [`AGENTS.md`](AGENTS.md).
   The user chose: ray-trace the real triangles; the laser hits the triangles while walking uses hand-fitted boxes;
   commit the models with textures downscaled (about 20 MB).
   Claimed by Devin (session Devin Desktop 2026-11-07), branch `devin/models-prepare`, 2026-11-07.
-
-## Open
-
-- [ ] **W-40 Graphics caveats.** Fix the Lunar Surface graphics caveats listed in `PLAYTEST.md` ("Graphics on Lunar
-  Surface, to fix in later pull requests"); slightly wrong graphics were accepted for playtesting "and we can fix
-  them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
-  when turning inside a wormhole, which the house already paints from the pixels around it; "it doesn't need to be
-  100% correct physically"), and Lunar Surface should match the WebGL level.
-- [ ] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
-  together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
-  Mac over loopback.
-- [ ] **W-44 Smooth wormhole interior.** Inside a wormhole, looking sideways shows a grainy texture; it should look
-  pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
-- [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
-  play but has a dashboard where they can change or reset those settings.
-- [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
-  dark.
-- [ ] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
+- [~] **W-42 Server in the cloud.** Run the headless game server in the cloud so players can join over the internet
   (the user's "launch from i.e. cloud in the near future"); today the game works on a local network only.
-- [ ] **W-58 Installable bundle.** Define the map in some kind of declarative form so that it can be put into an app
+  The user asked on 2026-11-07: running servers so that people can play; it "does not need to be highly
+  available or performant", it "just has to work in happy path with <= 20 concurrent players, i.e. across <= 3
+  games". On GCP, project `warped` (`warped-zq607d`), "completely reproducible using either their Terraform
+  format or some scripts (whichever is simplest and easiest to use)"; no git clone on the server ("locally build
+  for the right target and then just scp or run a script to upload and do the Terraform"); ideally a "one click
+  setup".
+  Claimed by Claude Code (session `424fcf46-e362-48b1-8e23-4eed979a478f`), branches `claude/infra-*` into
+  `infra`, 2026-11-07.
+- [~] **W-58 Installable bundle.** Define the map in some kind of declarative form so that it can be put into an app
   bundle that other people can install or port without needing the GitHub repository; more generally, refactor
   things so there is an easy "bundle, then give the bundle to another person, and they can run it easily". Before
   starting, talk with the user about how to do it, rather than doing it in some random way.
@@ -102,6 +93,38 @@ is in [`AGENTS.md`](AGENTS.md).
 
   Not part of this item: Apple notarization (needs the paid account), the App Store, Windows and Linux (the Metal
   renderer would need a wgpu port), Intel Macs, and play over the internet (W-42).
+
+  On 2026-11-07 the user asked for all of W-58 to be done together with W-42 and W-99, and the zip is hosted on
+  the W-99 download page; after W-79 the title screen offers only online games and joining on this Wi-Fi.
+  Claimed by Claude Code (session `424fcf46-e362-48b1-8e23-4eed979a478f`), branches `claude/infra-*` into
+  `infra`, 2026-11-07.
+- [~] **W-99 Download page.** "A webpage people can go to download the app and an easy installation (and other
+  stuff like it has a nice icon etc)"; "think as simple as possible".
+  Claimed by Claude Code (session `424fcf46-e362-48b1-8e23-4eed979a478f`), branches `claude/infra-*` into
+  `infra`, 2026-11-07.
+- [~] **W-100 Server DoS protection.** "Bare minimum security/auth in the form of 'people can't DoS my server' or
+  something like that." The user chose a game password with a challenge: the server sends a random challenge
+  and the client answers with a keyed hash of the password, so the password never crosses the network, and every
+  later message carries a per-player token.
+  Claimed by Claude Code (session `424fcf46-e362-48b1-8e23-4eed979a478f`), branches `claude/infra-*` into
+  `infra`, 2026-11-07.
+
+## Open
+
+- [ ] **W-40 Graphics caveats.** Fix the Lunar Surface graphics caveats listed in `PLAYTEST.md` ("Graphics on Lunar
+  Surface, to fix in later pull requests"); slightly wrong graphics were accepted for playtesting "and we can fix
+  them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
+  when turning inside a wormhole, which the house already paints from the pixels around it; "it doesn't need to be
+  100% correct physically"), and Lunar Surface should match the WebGL level.
+- [ ] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
+  together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
+  Mac over loopback.
+- [ ] **W-44 Smooth wormhole interior.** Inside a wormhole, looking sideways shows a grainy texture; it should look
+  pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
+- [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
+  play but has a dashboard where they can change or reset those settings.
+- [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
+  dark.
 - [ ] **W-77 Loading and connected.** Show a loading bar or circle (the window takes a few seconds to load), and say
   when the server is connected properly.
 
