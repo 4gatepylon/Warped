@@ -6,29 +6,21 @@ is in [`AGENTS.md`](AGENTS.md).
 
 - `[ ]` open: nobody has started it.
 - `[~]` claimed: someone is working on it; the line says who, on which branch, since when.
-- `[?]` pending user review: merged into `staging`; the line names the PR; the user hasn't confirmed it works yet.
+- `[?]` pending user review: merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`); the line names the PR; the user hasn't confirmed it works yet.
 - `[x]` done: the user tested it and confirmed it works.
 
 ## Claimed
 
-- [~] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
-  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
-  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere.
-  Claimed by Claude Code (session on `leah`'s Mac in `Warped-main`), branch `claude/time-dilation`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-time-dilation` on
-    `leah`'s Mac, branch `claude/time-dilation` (pushed to `origin` once it has commits). State, 2026-11-08: started.
+- [~] **W-108 Shoot whenever not moving.** "With a slight cooldown, you should be able to shoot as long as no keys
+  are pressed. No movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
+  Loosens D50 (no shooting in the air) and D67 (shooting only standing still or crouched).
+  Claimed by Claude Code (session on `leah`'s Mac), branch `claude/shoot-when-still`, 2026-11-08.
+  - **Where the work is** (for any agent picking it up): worktree `/Users/leah/Documents/dev/Warped-shoot-still` on
+    `leah`'s Mac, branch `claude/shoot-when-still` (pushed to `origin` once it has commits). State, 2026-11-08: started.
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
   2026-11-08.
-- [~] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
-  wishlist having rifle going side to side when jogging like a normal rifle"). Claimed by Claude Code (subagent of session
-  `wizardly-hamilton-23a121`), branch `claude/rifle-sway`, 2026-11-08.
-  - **Where the work is** (for any agent picking it up): worktree
-    `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac (the same agent as W-96 (a
-    different rifle model)), branch `claude/rifle-sway`, to be cut from `staging` once W-96 merges; pictures will be in
-    `/private/tmp/claude-501/-Users-4gate-git-Warped--claude-worktrees-wizardly-hamilton-23a121/6463b76f-4842-4353-8c38-5e49bbbd5dcd/scratchpad/shots/W-102/`
-    (temporary, under `/private/tmp`). State, 2026-11-08: not started; starts after W-96 (a different rifle model) merges.
 - [~] **W-94 Sketchfab models for the voxel assets.** "Replace the assets that were formerly voxels like the bunkers
   and spaceship" on Lunar Surface with these CC BY 4.0 Sketchfab models, crediting their authors, in the Rust game:
   1. "Stekelvarken S3 Kazemat" by sjoerdnijkerk (`f409a77deaaf4e3888d47f76ec48dbdd`) replaces the blue spaceship
@@ -114,9 +106,16 @@ is in [`AGENTS.md`](AGENTS.md).
 
 ## Pending user review
 
-Merged into `staging`, waiting for the user to test and confirm. Items done before this status existed (2026-11-07)
+Merged into a `staging/user-<username>` branch (before 2026-11-08, `staging`), waiting for the user to test and
+confirm. Items done before this status existed (2026-11-07)
 are here too, since the user hadn't confirmed them.
 
+- [?] **W-107 Time dilation.** "Get rid of the world warping mechanic. Instead we're going to build time dilation. The
+  more pylons you disable, the more the black hole at the center grows. Then, when you get closer to the black hole,
+  time slows down time dilation style." Replaces W-68 (reality bend)'s warping of the map into a sphere. After
+  playing: "make the time dilation more intense all around, and then make the effect also be that when the black hole
+  gets bigger it's the black part grows a little but mostly the distortion area grows"; the user said "this looks
+  good" (D108). #329.
 - [?] **W-104 Sky flashes when shooting.** "There are some very odd bugs, ex when shooting the sky flashes" (in the
   reality bending version). #316.
 - [?] **W-96 A different rifle model.** "For the rifle the gun has to change to a different one ideally; see if you
@@ -135,7 +134,7 @@ are here too, since the user hadn't confirmed them.
   it: the stronger the black hole gets, the more the edges of the map start to warp up into a sphere. With only one
   pylon left, the map is completely projected onto the inside surface of a sphere. On Lunar Surface itself, with one
   console per pylon; the black hole rises to the sphere's centre, and a team loses when all three of its pylons are
-  down. #298, #299, #300, #301.
+  down. #298, #299, #300, #301. The warping into a sphere was removed by W-107 (time dilation), #329.
 - [?] **W-37 Stronger curvature.** The curvature can be set in the YAML settings, higher than now: twice the current
   curvature by default (and at most twice). After seeing 2x speckle far from the map's middle, the user chose 1.5x
   as the default: "1.5x curvature is fine". #285.
@@ -164,6 +163,17 @@ are here too, since the user hadn't confirmed them.
     worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a6ce576a32709d775` on the user's Mac, built by Claude
     Code and finished by Devin; final pictures in
     `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-98/final/`. State,
+    2026-11-08: on `staging`, waiting for the user to test it.
+- [?] **W-102 Rifle sways when jogging.** The rifle goes side to side when jogging, like a normal rifle ("add to
+  wishlist having rifle going side to side when jogging like a normal rifle"). From before and after pictures (the
+  sprint pose already tilted it), the user chose the sway as built ("ok menrge to staging", "i like your animation");
+  after #318 swapped the gun models, "I want them both swaying ... get both working realistically based on their
+  size": both guns slide 2 cm walking and 4 cm sprinting in step with the head bob, and swing by their length, the
+  1.23 m rifle 1.7° to 3.4° and the 0.30 m revolver a quarter of that ("merge this") (D107). #324.
+  - **Where the work is** (for any agent picking it up): merged from branch `claude/rifle-sway` (pushed to `origin`),
+    worktree `/Users/4gate/git/Warped/.claude/worktrees/agent-a74067ef49c6e1c4e` on the user's Mac, started by
+    Claude Code and finished by Devin; pictures in
+    `/Users/4gate/git/Warped/demos/hyperbolic_wormholes_rust/.artifacts/wishlist_pictures/W-102/both_guns/`. State,
     2026-11-08: on `staging`, waiting for the user to test it.
 
 ## Done

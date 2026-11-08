@@ -15,7 +15,7 @@
 //! - `--host`, `--join auto|<address>`, `--serve`, `--bot`, `--port`: play with others on the local
 //!   network (see `net.rs` and `multiplayer.rs`).
 //! - `--export-map <folder>`: write the world as a portable map (`common/maps/`).
-//! - `--bend-strength <0..1>`: on lunar-surface, force the reality bend's strength (W-68).
+//! - `--black-hole-strength <0..1>`: on lunar-surface, force the black hole's strength (W-68).
 //!
 //! Example: `cargo run --release -- --bench-views --width-px 2560 --height-px 1600`
 //!
@@ -24,7 +24,7 @@
 
 mod avatar_animation;
 mod avatar_model;
-mod bend;
+mod black_hole_growth;
 mod credits;
 mod dust;
 mod exit_prompt;
@@ -41,7 +41,6 @@ mod minimap;
 mod multiplayer;
 mod net;
 mod physics;
-mod reality_bend;
 mod render_cpu;
 mod render_mesh;
 mod render_metal;
@@ -81,11 +80,10 @@ use sdl3::pixels::{Color, PixelFormat};
 use sdl3::render::Texture;
 use serde_json::{Value, json};
 
-use bend::Bend;
+use black_hole_growth::BlackHoleGrowth;
 use geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, make_boost, make_rotation};
 use key_bindings::{Action, Control};
 use physics::{Input, LaserReport, Player};
-use reality_bend::RealityBend;
 use render_metal::FrameData;
 use render_voxel::VoxelFrame;
 use scene_data::{Beam, SceneData};
@@ -346,10 +344,10 @@ struct Arguments {
     /// --bench-views names them), e.g. black_hole.
     #[arg(long)]
     view: Option<String>,
-    /// On a map that bends (lunar-surface): force the reality bend's strength (0 to 1) instead of
-    /// following the consoles (W-68).
+    /// On a map whose black hole grows (lunar-surface): force the black hole's strength (0 to 1)
+    /// instead of following the consoles (W-68).
     #[arg(long)]
-    bend_strength: Option<f64>,
+    black_hole_strength: Option<f64>,
     /// Write the world as a map in the portable format of common/maps/ (map.json) into this folder,
     /// replacing the folder's map.json, and exit.
     #[arg(long, conflicts_with_all = ["bench_views", "autopilot", "play_route", "host", "join", "serve", "bot"])]
@@ -518,11 +516,11 @@ fn validate_arguments(arguments: &Arguments) -> Result<()> {
             "--view needs --map lunar-surface; e.g. --map lunar-surface --view black_hole".into(),
         );
     }
-    if let Some(strength_frac) = arguments.bend_strength
+    if let Some(strength_frac) = arguments.black_hole_strength
         && (!(0.0..=1.0).contains(&strength_frac) || arguments.map != MapName::LunarSurface)
     {
         return Err(format!(
-            "--bend-strength must be in [0, 1] with --map lunar-surface, got {strength_frac}; e.g. --map lunar-surface --bend-strength 0.6"
+            "--black-hole-strength must be in [0, 1] with --map lunar-surface, got {strength_frac}; e.g. --map lunar-surface --black-hole-strength 0.6"
         )
         .into());
     }
@@ -894,9 +892,9 @@ fn bench_voxel_views(
     mut renderer: Box<dyn Renderer>,
     world: &VoxelWorld,
 ) -> Result<()> {
-    let mut bent_world: VoxelWorld = world.clone();
-    RealityBend::New(arguments.bend_strength).update(&mut bent_world, 0, 0.0);
-    let world: &VoxelWorld = &bent_world;
+    let mut grown_world: VoxelWorld = world.clone();
+    BlackHoleGrowth::New(arguments.black_hole_strength).update(&mut grown_world, 0, 0.0);
+    let world: &VoxelWorld = &grown_world;
     let size_px: (u32, u32) = (arguments.width_px, arguments.height_px);
     let render_px: (u32, u32) = scale_size(size_px, arguments.render_scale.unwrap_or(1.0));
     let folder: PathBuf = make_run_folder("bench_views", arguments.label.as_deref())?;
@@ -925,17 +923,13 @@ fn bench_voxel_views(
                 speckle_frac: 0.0,
             })
             .collect();
-        let spot: Option<(glam::DVec4, u32)> =
-            shot.as_ref().and_then(|s| s.drawn_spot).map(|x| (x, 0));
-        let (camera, bend) = (world.bend.bend_frame(camera), world.bend);
-        let warm_up: VoxelFrame =
-            VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
+        let spot: Option<(glam::DVec4, u32)> = shot.as_ref().and_then(|s| s.spot).map(|x| (x, 0));
+        let warm_up: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
         renderer.render(FrameData::Voxel(&warm_up), size_px, &mut pixels)?;
         let (mut times_ms, mut gpu_times_ms): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
         for _ in 0..arguments.frame_count {
             let start: Instant = Instant::now();
-            let frame: VoxelFrame =
-                VoxelFrame::Build(world, camera, &beams, spot, &[], render_px, bend);
+            let frame: VoxelFrame = VoxelFrame::Build(world, camera, &beams, spot, &[], render_px);
             renderer.render(FrameData::Voxel(&frame), size_px, &mut pixels)?;
             times_ms.push(start.elapsed().as_secs_f64() * MS_PER_S);
             gpu_times_ms.extend(renderer.gpu_ms());
@@ -1002,7 +996,7 @@ fn run_bot(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()>
             &world,
             &mut client,
             duration_s,
-            arguments.bend_strength,
+            arguments.black_hole_strength,
             |frame, id| save(FrameData::Voxel(frame), id),
         )?
     };
@@ -1847,6 +1841,7 @@ struct Session {
     shot_offset: shot_noise::ShotOffset,
     beam_speckle_frac: f64,
     gun_phase_rad: f64,
+    step_frac: f64,
     run_pose_frac: f64,
     motion_blur_frac: f32,
     hit_effect_frac: f64,
@@ -1877,12 +1872,12 @@ struct Session {
 }
 
 /// `VoxelState` is a window's game on a voxel map: the map, the player, their spawn point and the
-/// reality bend's strength.
+/// black hole's growth.
 struct VoxelState {
     world: VoxelWorld,
     player: VoxelPlayer,
     spawn_index: usize,
-    reality_bend: RealityBend,
+    black_hole_growth: BlackHoleGrowth,
 }
 
 /// `PackedFrame` is one frame packed for the renderer: the house's rows or a voxel map's frame.
@@ -1978,7 +1973,7 @@ impl Tracer {
         Tracer {
             length_m: segments.iter().map(|s| s.length).sum::<f64>() * r,
             segments,
-            spot: shot.drawn_spot,
+            spot: shot.spot,
             team,
             is_rifle,
             speckle_frac,
@@ -2121,7 +2116,7 @@ impl Session {
                 world,
                 player,
                 spawn_index: 0,
-                reality_bend: RealityBend::New(arguments.bend_strength),
+                black_hole_growth: BlackHoleGrowth::New(arguments.black_hole_strength),
             })
         };
         let world: World = match voxel {
@@ -2212,6 +2207,7 @@ impl Session {
             shot_offset: shot_noise::ShotOffset::NONE,
             beam_speckle_frac: 0.0,
             gun_phase_rad: 0.0,
+            step_frac: 0.0,
             run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
@@ -2403,7 +2399,9 @@ impl Session {
     }
 
     /// `update` moves the player by the held keys for the time since the last frame, and fails if
-    /// the game server can't be read (it plays another map, say).
+    /// the game server can't be read (it plays another map, say). Near a black hole the player's
+    /// own time runs slower (W-107, `get_time_rate_frac`): moving, turning off a console and the
+    /// guns go by that time, while looking around, the menus and respawning keep the window's.
     ///
     /// Example: `session.update(&event_pump.keyboard_state(), &event_pump.mouse_state())?;`
     fn update(
@@ -2413,6 +2411,7 @@ impl Session {
     ) -> Result<()> {
         let frame_s: f64 = self.last.elapsed().as_secs_f64();
         let dt_s: f64 = frame_s.min(MAX_FRAME_DT_S);
+        let own_dt_s: f64 = dt_s * self.get_time_rate_frac();
         let blur_s: f64 = self.player_settings.view.motion_blur_s;
         self.hit_effect_frac =
             (self.hit_effect_frac - dt_s / self.player_settings.hit_effects.effect_s).max(0.0);
@@ -2433,8 +2432,8 @@ impl Session {
             self.hud_time_s += dt_s;
             return Ok(());
         }
-        self.shot_time_s = (self.shot_time_s - dt_s).max(0.0);
-        self.sniper_reload_s = (self.sniper_reload_s - dt_s).max(0.0);
+        self.shot_time_s = (self.shot_time_s - own_dt_s).max(0.0);
+        self.sniper_reload_s = (self.sniper_reload_s - own_dt_s).max(0.0);
         if let Some(multiplayer) = &mut self.multiplayer
             && multiplayer.is_eliminated
         {
@@ -2481,7 +2480,7 @@ impl Session {
         let messages: Vec<String> = match &mut self.voxel {
             Some(voxel) => {
                 let report: voxel_world::StepReport =
-                    voxel.player.step(&voxel.world, &input, dt_s, team);
+                    voxel.player.step(&voxel.world, &input, own_dt_s, team);
                 let pitch_rad: f64 = voxel.player.pitch_rad;
                 let view_m_per_s: f64 = report.forward_m_per_s * pitch_rad.cos()
                     + voxel.player.vertical_m_per_s * pitch_rad.sin();
@@ -2506,9 +2505,9 @@ impl Session {
             self.message_time_s = MESSAGE_DURATION_S;
         }
         self.update_wormholes();
-        self.update_disabling(is_holding_e, dt_s);
-        self.update_gun(&input, dt_s);
-        self.update_rifle(dt_s);
+        self.update_disabling(is_holding_e, own_dt_s);
+        self.update_gun(&input, own_dt_s);
+        self.update_rifle(own_dt_s);
         let eye: DMat4 = self.get_eye_frame();
         let laser_aim: Option<DMat4> = self.get_laser_aim(self.get_shot_eye());
         if let Some(multiplayer) = &mut self.multiplayer
@@ -2843,6 +2842,18 @@ impl Session {
         self.shot_time_s = 0.0;
     }
 
+    /// `get_time_rate_frac` gives how fast this player's own time runs where their eye is, as a
+    /// share of time far from the black hole (`VoxelWorld::get_time_rate_frac`, W-107): 1 off a
+    /// voxel map.
+    ///
+    /// Example: `let own_dt_s = dt_s * self.get_time_rate_frac();`
+    fn get_time_rate_frac(&self) -> f64 {
+        self.voxel.as_ref().map_or(1.0, |voxel| {
+            let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
+            voxel.world.get_time_rate_frac(eye.col(AXIS_W))
+        })
+    }
+
     /// `update_rifle` fires the rifle while its trigger is held and this player can shoot: a
     /// `RIFLE_PULSE_S` pulse of the beam every `RIFLE_SHOT_PERIOD_S`, each adding
     /// 1 / `RIFLE_OVERHEAT_SHOT_COUNT` of heat. At full heat it overheats; it cools fully in
@@ -2955,9 +2966,10 @@ impl Session {
 
     /// `update_gun` notes whether this player runs (sprints while moving), walks upright (moves
     /// without crouching on a voxel map) or jumps (is in the air on a voxel map, not flying),
-    /// dropping a shot in flight if any, and moves the gun: its
-    /// step phase while walking or running on the ground, and its pose toward jogging while
-    /// running and back to aiming otherwise.
+    /// dropping a shot in flight if any, and moves the gun: its step phase while walking or
+    /// running on the ground (on a voxel map the head bob's, so the gun steps with the eye), how
+    /// far into stepping it is (`step_frac`: easing in and out over the head bob's `fade_s`), and
+    /// its pose toward jogging while running and back to aiming otherwise.
     ///
     /// Example: `self.update_gun(&input, dt_s);`
     fn update_gun(&mut self, input: &Input, dt_s: f64) {
@@ -2978,10 +2990,22 @@ impl Session {
         if !self.can_shoot() {
             self.shot_time_s = 0.0;
         }
-        if is_moving && is_on_ground {
-            let hz: f64 = if is_running { GUN_JOG_HZ } else { GUN_WALK_HZ };
-            self.gun_phase_rad =
-                (self.gun_phase_rad + std::f64::consts::TAU * hz * dt_s) % std::f64::consts::TAU;
+        match &self.voxel {
+            Some(voxel) => {
+                (self.gun_phase_rad, self.step_frac) =
+                    (voxel.player.bob_phase_rad, voxel.player.bob_frac);
+            }
+            None => {
+                let is_stepping: bool = is_moving && is_on_ground;
+                if is_stepping {
+                    let hz: f64 = if is_running { GUN_JOG_HZ } else { GUN_WALK_HZ };
+                    self.gun_phase_rad = (self.gun_phase_rad + std::f64::consts::TAU * hz * dt_s)
+                        % std::f64::consts::TAU;
+                }
+                let fade_frac: f64 = dt_s / self.player_settings.view.head_bob.fade_s;
+                self.step_frac += (f64::from(u8::from(is_stepping)) - self.step_frac)
+                    .clamp(-fade_frac, fade_frac);
+            }
         }
         let target: f64 = f64::from(u8::from(is_running));
         self.run_pose_frac +=
@@ -3039,6 +3063,13 @@ impl Session {
                 self.recoil_frac,
                 team,
                 self.gun,
+                get_sway(
+                    self.gun.get_model(),
+                    self.step_frac,
+                    self.run_pose_frac,
+                    self.gun_phase_rad,
+                    &self.player_settings.view.head_bob,
+                ),
             )
         })
     }
@@ -3212,7 +3243,7 @@ impl Session {
                 .light_consoles(off_mask, &disabling_fracs, time_s);
             voxel.world.sky_time_s = spaceships::get_utc_s();
             voxel
-                .reality_bend
+                .black_hole_growth
                 .update(&mut voxel.world, off_mask, time_s);
             let eye: DMat4 = voxel.player.get_camera_frame(&voxel.world);
             voxel.world.flashlight_eye = self.is_flashlight_on.then_some(eye);
@@ -3237,11 +3268,7 @@ impl Session {
                 .multiplayer
                 .as_ref()
                 .map_or(Vec::new(), |m| m.client.players.clone());
-            let (now_s, r, bend) = (
-                self.start.elapsed().as_secs_f64(),
-                voxel.world.r,
-                voxel.world.bend,
-            );
+            let (now_s, r) = (self.start.elapsed().as_secs_f64(), voxel.world.r);
             let mut eyes: Vec<(u32, DMat4)> = players.iter().map(|p| (p.id, p.frame)).collect();
             eyes.push((avatar_animation::OWN_TRACK_ID, laser_aim.unwrap_or(eye)));
             let mut poses: Vec<(avatar_model::AvatarClip, f64)> =
@@ -3261,7 +3288,7 @@ impl Session {
                 .iter()
                 .filter_map(|burst| burst.get_cloud(now_s))
                 .collect();
-            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r, bend);
+            let beams: Vec<render_voxel::LaserBeam> = self.get_lit_beams(r);
             let spot: Option<(glam::DVec4, u32)> = self
                 .tracers
                 .iter()
@@ -3585,15 +3612,14 @@ impl Session {
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
-    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r` under
-    /// the reality bend `bend`. While the trail of one of this player's own shots still reaches the
+    /// shooter's team and gun and the shot's speckle share, on a map of curvature radius `r`. While the trail of one of this player's own shots still reaches the
     /// muzzle, its beam starts at the gun's tip as drawn now (`get_muzzle`), so it stays on the tip
     /// as the gun moves.
     ///
-    /// Example: `let beams = self.get_lit_beams(voxel.world.r, voxel.world.bend);`
-    fn get_lit_beams(&self, r: f64, bend: Bend) -> Vec<render_voxel::LaserBeam> {
+    /// Example: `let beams = self.get_lit_beams(voxel.world.r);`
+    fn get_lit_beams(&self, r: f64) -> Vec<render_voxel::LaserBeam> {
         let now_s: f64 = self.start.elapsed().as_secs_f64();
-        let muzzle: Option<glam::DVec4> = self.get_muzzle(r, bend);
+        let muzzle: Option<glam::DVec4> = self.get_muzzle(r);
         self.tracers
             .iter()
             .map(|tracer| {
@@ -3620,17 +3646,17 @@ impl Session {
             .collect()
     }
 
-    /// `get_muzzle` gives where the tip of the gun in hand shows in the world (bent by `bend`, as
-    /// the beams are), on a map of curvature radius `r`: the wand's tip in camera space, moved
+    /// `get_muzzle` gives where the tip of the gun in hand shows in the world, on a map of
+    /// curvature radius `r`: the wand's tip in camera space, moved
     /// toward the view's centre by the aim zoom (which magnifies the scene but not the gun), or
     /// `None` with no gun in view.
     ///
-    /// Example: `let muzzle = self.get_muzzle(voxel.world.r, voxel.world.bend);`
-    fn get_muzzle(&self, r: f64, bend: Bend) -> Option<glam::DVec4> {
+    /// Example: `let muzzle = self.get_muzzle(voxel.world.r);`
+    fn get_muzzle(&self, r: f64) -> Option<glam::DVec4> {
         let tip_m: glam::DVec3 = self.get_wand()?.get_tip_m().as_dvec3();
         let zoom: f64 = self.get_zoom();
         Some(
-            bend.bend_frame(self.get_eye_frame())
+            self.get_eye_frame()
                 * voxel_world::map_exp(
                     glam::DVec3::new(tip_m.x / zoom, tip_m.y / zoom, tip_m.z),
                     r,
@@ -3653,7 +3679,7 @@ impl Session {
         let (feet, beams): (DMat4, Vec<(Vec<voxel_world::BeamSegment>, u32)>) = match &self.voxel {
             Some(voxel) => (
                 voxel.player.get_feet_frame(&voxel.world),
-                self.get_lit_beams(voxel.world.r, voxel.world.bend)
+                self.get_lit_beams(voxel.world.r)
                     .into_iter()
                     .map(|beam| (beam.segments, beam.team))
                     .collect(),
@@ -3930,9 +3956,16 @@ impl Session {
         if let Some(laser) = &self.laser {
             lines.push(format!("laser {laser}"));
         }
-        if let Some(voxel) = self.voxel.as_ref().filter(|voxel| voxel.world.can_bend()) {
-            let strength_pct: f64 = voxel.reality_bend.strength_frac * PERCENT_PER_FRAC;
-            lines.push(format!("REALITY {strength_pct:.0}%"));
+        if let Some(voxel) = self
+            .voxel
+            .as_ref()
+            .filter(|voxel| voxel.world.can_grow_black_hole())
+        {
+            let strength_pct: f64 = voxel.black_hole_growth.strength_frac * PERCENT_PER_FRAC;
+            let rate_pct: f64 = self.get_time_rate_frac() * PERCENT_PER_FRAC;
+            lines.push(format!(
+                "BLACK HOLE {strength_pct:.0}%, your time runs at {rate_pct:.0}%"
+            ));
         }
         if let Some(multiplayer) = &self.multiplayer {
             lines.push(match multiplayer.client.id {
@@ -4072,17 +4105,20 @@ fn take_hit_weight(
 /// (eased), lowered, tipped down and rolled, bouncing and swinging with each stride; its tip has
 /// `team`'s colour. The laser (`gun`) is a thin dark wand with a short glowing tip; the rifle is a
 /// thick grey block with a long, thin glowing barrel. Recoil (`recoil_frac`, 1 just after a shot)
-/// pushes it back toward the eye and tips it up.
+/// pushes it back toward the eye and tips it up, and `sway` (`get_sway`: metres right, radians of
+/// muzzle turned left) slides and swings it with the steps.
 ///
-/// Example: `let wand = make_wand(0.0, 1.2, 0.0, 1, Gun::Laser);`
+/// Example: `let wand = make_wand(0.0, 1.2, 0.0, 1, Gun::Laser, (0.0, 0.0));`
 fn make_wand(
     run_pose_frac: f64,
     phase_rad: f64,
     recoil_frac: f64,
     team: u32,
     gun: Gun,
+    sway: (f32, f32),
 ) -> render_metal::OverlayWand {
-    let jog: f32 = (run_pose_frac * run_pose_frac * (3.0 - 2.0 * run_pose_frac)) as f32;
+    let (sway_m, swing_rad) = sway;
+    let jog: f32 = ease_frac(run_pose_frac) as f32;
     let (step, swing) = (phase_rad.sin().abs() as f32, phase_rad.sin() as f32);
     let lerp = |aim: f32, run: f32| aim + (run - aim) * jog;
     let bob_m: f32 = lerp(WAND_WALK_BOB_M, WAND_JOG_BOB_M) * step;
@@ -4096,10 +4132,11 @@ fn make_wand(
         + aim_rotation * (Vec3::Z * (shaft_half_m[2] + 2.0 * tip_half_m[2]));
     let kick: f32 = recoil_frac as f32;
     let center: Vec3 = aim_center.lerp(Vec3::from(WAND_JOG_CENTER_M), jog) - Vec3::Y * bob_m
-        + Vec3::Z * WAND_RECOIL_M * kick;
+        + Vec3::Z * WAND_RECOIL_M * kick
+        + Vec3::X * sway_m;
     let rotation: Mat3 = Mat3::from_euler(
         EulerRot::YXZ,
-        lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD),
+        lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD) + swing_rad,
         lerp(WAND_AIM_PITCH_RAD, WAND_JOG_PITCH_RAD) + WAND_RECOIL_TILT_RAD * kick,
         (WAND_JOG_ROLL_RAD + WAND_JOG_SWING_RAD * swing) * jog,
     );
@@ -4119,6 +4156,43 @@ fn make_wand(
             WAND_BLUE_TIP_COLOR
         },
     }
+}
+
+/// `ease_frac` eases a fraction from 0 to 1 (smoothstep): slow at both ends.
+///
+/// Example: `let jog: f64 = ease_frac(0.5);`
+fn ease_frac(frac: f64) -> f64 {
+    frac * frac * (3.0 - 2.0 * frac)
+}
+
+/// `get_sway` gives how the gun in hand sways now with the steps (`phase_rad`, the step phase: a
+/// step each half turn), as (metres slid right, radians its muzzle turns left): the hands slide it
+/// left on one step and right on the next by `head_bob`'s walking slide, and a longer, heavier gun
+/// lags behind them, its muzzle swinging the other way by `head_bob`'s swing for a gun as long as
+/// the bolt-action rifle, times `model`'s length over the rifle's. Both grow to their sprinting
+/// sizes as the run pose (`run_pose_frac`, eased as `make_wand` eases it) goes to 1, and fade in
+/// and out with `step_frac` (0 standing still, 1 stepping).
+///
+/// Example: `let sway = get_sway(GunModel::Revolver, 1.0, 0.0, 0.5, &settings.view.head_bob);`
+fn get_sway(
+    model: viewmodel::GunModel,
+    step_frac: f64,
+    run_pose_frac: f64,
+    phase_rad: f64,
+    head_bob: &settings::HeadBobSettings,
+) -> (f32, f32) {
+    let jog: f64 = ease_frac(run_pose_frac);
+    let lerp = |walk: f64, sprint: f64| walk + (sprint - walk) * jog;
+    let length_frac: f64 =
+        f64::from(model.get_modelled_length_m() / viewmodel::BOLT_ACTION_RIFLE_MODELLED_LENGTH_M);
+    let side: f64 = step_frac * phase_rad.sin();
+    let sway_m: f64 = lerp(head_bob.gun_walk_sway_m, head_bob.gun_sprint_sway_m) * side;
+    let swing_rad: f64 = lerp(
+        head_bob.rifle_walk_swing_rad,
+        head_bob.rifle_sprint_swing_rad,
+    ) * length_frac
+        * side;
+    (sway_m as f32, swing_rad as f32)
 }
 
 /// `ConnectionProblem` is why a window can't play on its server: nothing comes from it (no server
@@ -4636,6 +4710,10 @@ mod tests {
     //! | Gun in hand | laser (the bolt-action rifle), rifle (the revolver) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
     //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
+    //! | Gun model swaying | the bolt-action rifle (full swing), the revolver (its swing scaled by its length) | `guns_sway_with_the_steps_by_their_length` |
+    //! | Stepping fraction | standing (0: no sway), easing in (0.5: half), stepping (1) | `guns_sway_with_the_steps_by_their_length` |
+    //! | Run pose | walking (0: the walking sway), sprinting (1: the sprinting sway), half way (eased between) | `guns_sway_with_the_steps_by_their_length` |
+    //! | Step phase | between steps (0: centred), one step (a quarter turn: right), the next (three quarters: left) | `guns_sway_with_the_steps_by_their_length` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
@@ -4663,6 +4741,65 @@ mod tests {
         assert!((part_way + HALF_FRAC * WEAK_STRENGTH_FRAC).abs() < 1e-6);
         assert!((shift(1.0, SPRINT_M_PER_S, 1.0) - MAX_BLUESHIFT_FRAC).abs() < 1e-6);
         assert!((shift(1.0, -SPRINT_M_PER_S, 1.0) + MAX_BLUESHIFT_FRAC).abs() < 1e-6);
+    }
+
+    #[test]
+    fn guns_sway_with_the_steps_by_their_length() {
+        const TOLERANCE: f64 = 1e-6;
+        const HALF_FRAC: f64 = 0.5;
+        let head_bob: settings::HeadBobSettings = PerPlayerSettings::Builtin().view.head_bob;
+        let right_rad: f64 = std::f64::consts::FRAC_PI_2;
+        let left_rad: f64 = 3.0 * std::f64::consts::FRAC_PI_2;
+        let sway =
+            |model: viewmodel::GunModel, step_frac: f64, run_pose_frac: f64, phase_rad: f64| {
+                let (sway_m, swing_rad) =
+                    get_sway(model, step_frac, run_pose_frac, phase_rad, &head_bob);
+                (f64::from(sway_m), f64::from(swing_rad))
+            };
+        let is_near = |a: (f64, f64), b: (f64, f64)| {
+            (a.0 - b.0).abs() < TOLERANCE && (a.1 - b.1).abs() < TOLERANCE
+        };
+        let rifle = viewmodel::GunModel::BoltActionRifle;
+        let revolver = viewmodel::GunModel::Revolver;
+        let (walk_m, sprint_m) = (head_bob.gun_walk_sway_m, head_bob.gun_sprint_sway_m);
+        let (walk_rad, sprint_rad) = (
+            head_bob.rifle_walk_swing_rad,
+            head_bob.rifle_sprint_swing_rad,
+        );
+        assert!(walk_m > 0.0 && sprint_m > walk_m && walk_rad > 0.0 && sprint_rad > walk_rad);
+        assert!(is_near(sway(rifle, 0.0, 1.0, right_rad), (0.0, 0.0)));
+        assert!(is_near(sway(rifle, 1.0, 0.0, 0.0), (0.0, 0.0)));
+        assert!(is_near(
+            sway(rifle, 1.0, 0.0, right_rad),
+            (walk_m, walk_rad)
+        ));
+        assert!(is_near(
+            sway(rifle, 1.0, 0.0, left_rad),
+            (-walk_m, -walk_rad)
+        ));
+        assert!(is_near(
+            sway(rifle, 1.0, 1.0, right_rad),
+            (sprint_m, sprint_rad)
+        ));
+        assert!(is_near(
+            sway(rifle, HALF_FRAC, 0.0, right_rad),
+            (HALF_FRAC * walk_m, HALF_FRAC * walk_rad)
+        ));
+        let half_way: (f64, f64) = sway(rifle, 1.0, HALF_FRAC, right_rad);
+        assert!(is_near(
+            half_way,
+            (
+                (walk_m + sprint_m) * HALF_FRAC,
+                (walk_rad + sprint_rad) * HALF_FRAC
+            )
+        ));
+        let length_frac: f64 =
+            f64::from(revolver.get_modelled_length_m() / rifle.get_modelled_length_m());
+        assert!(length_frac < 1.0);
+        assert!(is_near(
+            sway(revolver, 1.0, 1.0, right_rad),
+            (sprint_m, sprint_rad * length_frac)
+        ));
     }
 
     #[test]

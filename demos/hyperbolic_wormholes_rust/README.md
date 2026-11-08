@@ -139,7 +139,7 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
 - Lunar Surface is drawn by a Metal port of that level's ray tracer (`render_voxel.metal`): the same voxel walks, warp
   steps, lighting with soft sun shadows, lamps, ground, stars and planet, so it looks like the level (plus a thin haze
   and stronger bloom, W-76), with the house's adaptive sampling (interpolating ray ends on one block face, the ground or the sky, D37). Walking, jumping,
-  flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 7.5 s crouched or 15 s walking or standing, a head bob, jumping onto blocks with `Space`, moving
+  flying, the laser and multiplayer follow the level's rules there (a short, quick jump: 1.25 m high, high enough for a block, in 0.58 s, a third of the level's jump time, so about 30 m/s² of gravity; walking and sprinting twice as fast as the level, `Shift` sprinting on an energy bar that empties in 7.5 s and refills in 7.5 s crouched or 15 s walking or standing, a head bob, with the gun in hand swaying left and right in step, the long rifle swinging more than the revolver (D107), jumping onto blocks with `Space`, moving
   along light paths into the wormhole, falling into the black hole sends you back to spawn). Players start on their
   team's spawn (blue, then red, alternating) and the laser is blue or red by team. The CPU renderer draws the house only.
 - Spaceships fly over Lunar Surface, purely for looks (D82): a ring ship and three delta-wing fighters in a V, each
@@ -152,11 +152,9 @@ cargo run --release -- --map lunar-surface --bench-views --view black_hole
   none). It is drawn once into a texture when the map loads.
 - `--view <name>` starts the window at one of the level's viewpoints (`blue_spawn`, `black_hole`, `wormhole`,
   `wormhole_exit`, `einstein_ring`, `overview`, and the others `--bench-views` renders).
-- `--bend-strength <0..1>` draws the map under the reality bend (W-68, `bend.rs`) in the window, `--bench-views` and
-  `--view`: the map's edges curl up into a bowl, and at 1 it closes into the inside of a sphere. The Metal ray tracer
-  walks each ray through the bent world in short pieces, halved until each one's map chord follows the bent path within
-  2 cm (or half a pixel far away), and traces every piece through the unbent map; flat frames use the unchanged tracer
-  (`render_voxel.metal` is compiled with and without `HAS_BEND`).
+- `--black-hole-strength <0..1>` grows Lunar Surface's black hole to that strength in the window, `--bench-views`
+  and `--view` (1 is full strength, with one console left; W-68, `black_hole_growth.rs`); otherwise it follows the
+  consoles. Time runs slower near the black hole (W-107, D108): the HUD shows how fast yours runs.
 
 ## Play together
 

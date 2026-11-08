@@ -1,6 +1,6 @@
 ---
 name: compatible-changes
-description: Change things that outlive one build of a game - a player's saved settings file, the bytes game windows and servers send each other, the server settings sent to players, and map files - without breaking what users already have or what another player still runs. Use whenever you add, remove or rename a setting or a key binding, change what the network sends (a snapshot, a message, a bit), or change the map format or a map file; and at the start of every response, to check whether anyone else changed `staging` and tell the user whether it breaks anything.
+description: Change things that outlive one build of a game - a player's saved settings file, the bytes game windows and servers send each other, the server settings sent to players, and map files - without breaking what users already have or what another player still runs. Use whenever you add, remove or rename a setting or a key binding, change what the network sends (a snapshot, a message, a bit), or change the map format or a map file; and at the start of every response, to check whether anyone else changed `staging/global` and tell the user whether it breaks anything.
 ---
 
 # Compatible changes
@@ -13,17 +13,17 @@ user's saved settings from loading.)
 
 ## Changes from others
 
-Tell the user at once, in every response, when someone else changed `staging` since you last looked, and whether it
-breaks anything.
+Tell the user at once, in every response, when someone else changed `staging/global` since you last looked, and
+whether it breaks anything.
 
-- **Check at the start of each response.** Keep the last `staging` you saw in a ref of your own worktree, which lasts
-  across responses and sessions:
-  - **List what's new:** `git fetch -q origin staging && git log --format='%h %an: %s'
-    refs/worktree/last-seen-staging..origin/staging`
-  - **After you've reported it:** `git update-ref refs/worktree/last-seen-staging origin/staging`
+- **Check at the start of each response.** Keep the last `staging/global` you saw in a ref of your own worktree, which
+  lasts across responses and sessions:
+  - **List what's new:** `git fetch -q origin staging/global && git log --format='%h %an: %s'
+    refs/worktree/last-seen-staging..origin/staging/global`
+  - **After you've reported it:** `git update-ref refs/worktree/last-seen-staging origin/staging/global`
   - **First time in a worktree:** create the ref with that same `update-ref` command (`git rev-parse -q --verify
     refs/worktree/last-seen-staging` prints nothing until then), and say you're starting to track from here.
-  - **Just the head's hash:** `git fetch -q origin staging && git rev-parse --short origin/staging`
+  - **Just the head's hash:** `git fetch -q origin staging/global && git rev-parse --short origin/staging/global`
 - **Who is the user.** `gh api user -q .login` gives the GitHub account you work as, and `git config user.name` the
   name this machine commits under. Agents working for the user commit under the user's name too. Names are only
   circumstantial evidence:
@@ -38,7 +38,7 @@ breaks anything.
   a command or flag changed), or **not breaking**.
   - Look for changes to the surfaces in this skill: settings keys, server settings, `src/net.rs` layouts, the map
     format.
-  - If code changed, build and run the tests on the new `staging` before giving the verdict.
+  - If code changed, build and run the tests on the new `staging/global` before giving the verdict.
 
 ## Saved player settings
 

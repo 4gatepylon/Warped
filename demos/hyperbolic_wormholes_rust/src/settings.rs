@@ -1,7 +1,7 @@
 //! `settings.rs` reads the game's two settings files, so players can tune it without rebuilding:
 //! `server_settings.yaml`, the numbers that shape play for everyone (movement, sprint energy, both
 //! guns, consoles, respawning, how a hit slows, the flashlight, thrown wormholes, how curved space
-//! is, the reality bend), which the game server sends to every player who joins; and
+//! is, the black hole), which the game server sends to every player who joins; and
 //! `player_settings.yaml`, each player's own choices (keys, mouse speed, head bob, motion blur, the
 //! Milky Way's brightness, how a hit looks).
 //!
@@ -29,7 +29,7 @@ const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 const BUILTIN_PLAYER_YAML: &str = include_str!("../player_settings.yaml");
 pub const MIN_CURVATURE_PER_MAP_CURVATURE: f64 = 1.0;
 pub const MAX_CURVATURE_PER_MAP_CURVATURE: f64 = 2.0;
-const SERVER_ZERO_ALLOWED_KEYS: [&str; 18] = [
+const SERVER_ZERO_ALLOWED_KEYS: [&str; 20] = [
     "map_edge.start_wall_frac",
     "sniper.reload_s",
     "sniper.noise_mean_rad",
@@ -48,21 +48,34 @@ const SERVER_ZERO_ALLOWED_KEYS: [&str; 18] = [
     "rifle.recoil_settle_s",
     "respawn.delay_s",
     "wormholes.throw_up_rad",
+    "black_hole.time_dilation_per_general_relativity",
+    "black_hole.max_lens_rad",
 ];
 const SPECKLE_KINDS_SUM_TOLERANCE_FRAC: f64 = 1e-9;
-const PLAYER_ZERO_ALLOWED_KEYS: [&str; 9] = [
+const PLAYER_ZERO_ALLOWED_KEYS: [&str; 13] = [
     "view.motion_blur_s",
     "view.edge_stretch_frac",
     "view.wormhole_tint_frac",
     "view.milky_way_brightness_frac",
     "view.head_bob.walk_depth_m",
     "view.head_bob.sprint_depth_m",
+    "view.head_bob.gun_walk_sway_m",
+    "view.head_bob.gun_sprint_sway_m",
+    "view.head_bob.rifle_walk_swing_rad",
+    "view.head_bob.rifle_sprint_swing_rad",
     "hit_effects.red_frac",
     "hit_effects.shake_px",
     "hit_effects.blur_px",
 ];
 const REMOVED_PLAYER_KEYS: [&str; 1] = ["view.wormhole_tint_s"];
-const ADDED_PLAYER_KEYS: [&str; 2] = ["keys.switch_view", "view.milky_way_brightness_frac"];
+const ADDED_PLAYER_KEYS: [&str; 6] = [
+    "keys.switch_view",
+    "view.milky_way_brightness_frac",
+    "view.head_bob.gun_walk_sway_m",
+    "view.head_bob.gun_sprint_sway_m",
+    "view.head_bob.rifle_walk_swing_rad",
+    "view.head_bob.rifle_sprint_swing_rad",
+];
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -92,8 +105,10 @@ pub struct SprintEnergySettings {
     pub refill_walking_s: f64,
 }
 
-/// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, and how long
-/// the bob takes to start or stop.
+/// `HeadBobSettings` is how deep the eye dips at each step, how many steps a second, how long the
+/// bob takes to start or stop, and how the gun in hand sways with the steps while walking and
+/// while sprinting: how far it slides left and right, and how far a gun as long as the bolt-action
+/// rifle swings (its muzzle lagging the slide; shorter guns swing in proportion).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct HeadBobSettings {
@@ -102,6 +117,10 @@ pub struct HeadBobSettings {
     pub walk_steps_per_s: f64,
     pub sprint_steps_per_s: f64,
     pub fade_s: f64,
+    pub gun_walk_sway_m: f64,
+    pub gun_sprint_sway_m: f64,
+    pub rifle_walk_swing_rad: f64,
+    pub rifle_sprint_swing_rad: f64,
 }
 
 /// `SniperSettings` is gun 1, the laser wand: how long a click's shot hits, how long it then takes
@@ -252,16 +271,22 @@ pub struct SpaceSettings {
     pub curvature_per_map_curvature: f64,
 }
 
-/// `RealityBendSettings` is the reality bend (W-68): the edge radius beyond which the bent map is
-/// cut away, how long the bend eases to a new strength, and the black hole's Schwarzschild radius
-/// and reach at full strength.
+/// `BlackHoleSettings` is the black hole that grows as consoles turn off (W-68) and slows time
+/// near it (W-107): how long it eases to a new size, its Schwarzschild radius and reach at full
+/// strength, its wide lens at full strength (the most it turns a ray, and its core radius as a
+/// share of the reach), how many times stronger than in general relativity time slows near it (0
+/// for not at all), and the slowest its time runs (a share of the time far away, above 0 so that
+/// nobody freezes).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct RealityBendSettings {
-    pub edge_radius_m: f64,
+pub struct BlackHoleSettings {
     pub transition_s: f64,
     pub max_schwarzschild_radius_m: f64,
     pub max_reach_m: f64,
+    pub max_lens_rad: f64,
+    pub lens_core_per_reach: f64,
+    pub time_dilation_per_general_relativity: f64,
+    pub min_time_rate_frac: f64,
 }
 
 /// `ViewSettings` is how a player's view moves: how far it turns for each pixel the mouse moves, how
@@ -336,7 +361,7 @@ pub struct ServerSettings {
     pub aim: AimSettings,
     pub wormholes: WormholeSettings,
     pub space: SpaceSettings,
-    pub reality_bend: RealityBendSettings,
+    pub black_hole: BlackHoleSettings,
 }
 
 /// `check_numbers` fails, naming the key and `source`, on the first number in `value` that is
@@ -497,6 +522,13 @@ impl ServerSettings {
             )
             .into());
         }
+        let min_time_rate_frac: f64 = settings.black_hole.min_time_rate_frac;
+        if min_time_rate_frac > 1.0 {
+            return Err(format!(
+                "settings {source}: black_hole.min_time_rate_frac must be above 0 and at most 1, not {min_time_rate_frac}"
+            )
+            .into());
+        }
         Ok(settings)
     }
 
@@ -620,8 +652,10 @@ mod tests {
     //! | Wormhole tint strength | 0, between 0 and 1, 1 (built in), above 1 | `wormhole_tint_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
     //! | Removed key (`view.wormhole_tint_s`) | absent (built in), present in an old save (dropped, loads), a similar key never removed (fails) | `builtin_settings_read_and_survive_json`, `removed_keys_are_dropped_and_others_still_fail` |
     //! | Curvature per map curvature | below 1, 1, between 1 and 2 (1.5, built in), 2, above 2 | `curvature_takes_1_to_2`, `builtin_settings_read_and_survive_json` |
-    //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`) | present (built in), missing in an old save (gets the built-in `V` and 1), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
+    //! | Added key (`keys.switch_view`, `view.milky_way_brightness_frac`, the four `view.head_bob` sway and swing keys) | present (built in), missing in an old save (gets its built-in value), another key missing (fails) | `builtin_settings_read_and_survive_json`, `added_keys_take_their_defaults_and_others_still_fail` |
     //! | Milky Way brightness | 0, between 0 and 1, 1 (built in), above 1 | `milky_way_brightness_takes_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Slowest time rate near the black hole | 0, between 0 and 1 (0.1, built in), 1, above 1 | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
+    //! | Time dilation per general relativity | 0 (allowed: none), 15 (built in) | `min_time_rate_takes_above_0_to_1`, `builtin_settings_read_and_survive_json` |
 
     use super::*;
     use crate::key_bindings::{Action, Control};
@@ -809,6 +843,33 @@ mod tests {
     }
 
     #[test]
+    fn min_time_rate_takes_above_0_to_1() {
+        let with_values = |rate_frac: &str, dilation: &str| -> Result<ServerSettings> {
+            let yaml: String = BUILTIN_SERVER_YAML
+                .replace(
+                    "min_time_rate_frac: 0.1",
+                    &format!("min_time_rate_frac: {rate_frac}"),
+                )
+                .replace(
+                    "time_dilation_per_general_relativity: 15.0",
+                    &format!("time_dilation_per_general_relativity: {dilation}"),
+                );
+            ServerSettings::FromYaml(&yaml, "test")
+        };
+        for (rate_frac, is_valid) in [("0.0", false), ("1.0", true), ("1.5", false)] {
+            let result: Result<ServerSettings> = with_values(rate_frac, "15.0");
+            assert_eq!(result.is_ok(), is_valid, "{rate_frac}");
+            if let Err(error) = result {
+                assert!(
+                    error.to_string().contains("black_hole.min_time_rate_frac"),
+                    "{error}"
+                );
+            }
+        }
+        assert!(with_values("0.1", "0.0").is_ok());
+    }
+
+    #[test]
     fn added_keys_take_their_defaults_and_others_still_fail() {
         let without_key = |name: &str| -> String {
             let prefix: String = format!("{name}:");
@@ -818,7 +879,14 @@ mod tests {
                 .collect();
             lines.join("\n")
         };
-        for name in ["switch_view", "milky_way_brightness_frac"] {
+        for name in [
+            "switch_view",
+            "milky_way_brightness_frac",
+            "gun_walk_sway_m",
+            "gun_sprint_sway_m",
+            "rifle_walk_swing_rad",
+            "rifle_sprint_swing_rad",
+        ] {
             let old_save: String = without_key(name);
             assert!(!old_save.contains(name));
             let loaded: PerPlayerSettings =

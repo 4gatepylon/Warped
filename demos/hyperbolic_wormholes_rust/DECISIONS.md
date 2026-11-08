@@ -1875,6 +1875,47 @@
   one ideally; see if you can find something for that"), and chose the bolt-action from the pictures ("bolt action
   is good"). The wooden rifle stands out from the sci-fi look, which also makes the two guns easy to tell apart.
 
+### D108. Time slows near the black hole instead of the map bending, W-107 (time dilation)
+
+- **Choice:**
+  - **No more bend:** W-68 (reality bend)'s curling of the map into a sphere is gone: `bend.rs`, the laser's trace
+    through the bent world, and the shader's `HAS_BEND` tracer. `reality_bend.rs` became `black_hole_growth.rs`,
+    the `reality_bend` server settings became `black_hole` (without `edge_radius_m`), and `--bend-strength` became
+    `--black-hole-strength`.
+  - **The black part grows a little, the distortion a lot:** each console turned off grows the black hole's
+    Schwarzschild radius from 1.2 m to only 2 m, its reach from 24 m to 28 m, and a wide lens around it from none to
+    one that turns a ray by up to 0.35 rad (`max_lens_rad`). The lens is ln n = h a / √(ρ² + a²), with a core a of
+    0.35 of the reach (`lens_core_per_reach`): it bends light across the whole reach, most for rays passing a from the
+    centre, and has no horizon, so it adds no black. The CPU (the laser) and the shader use the same index. The black
+    hole stays where the map puts it, 17 m above the map's middle; it used to rise toward the bent sphere's centre.
+  - **How slow:** `VoxelWorld::get_time_rate_frac` is general relativity's clock rate for someone standing still
+    near a black hole, (1 − q) / (1 + q) in isotropic coordinates with q = k m / ρ, with k =
+    `time_dilation_per_general_relativity` = 15. The wide lens slows time too, as a weak field does: the rate's log
+    falls by k times half its ln n. The rate's log fades to 0 at the reach, along the window the light bending uses,
+    and never drops below `min_time_rate_frac` = 0.1, so a player near the horizon crawls rather than freezes. On the
+    ground under the black hole (15.4 m from its centre) time runs at 81% with no console off, 45% with three off and
+    25% with five.
+  - **Whose time:** each player's own. Their window steps their movement (walking, gravity, jumping, sprint
+    energy), turning off a console, both guns' firing, reload and heat, and the gun's sway by their own time.
+    Looking around, the menus, the HUD and respawning keep the window's time. Bots step the same way. Other players
+    see a slowed player move slowly, since each window sends where its player is.
+  - **Shown:** the HUD's line `BLACK HOLE <n>%, your time runs at <n>%` replaces `REALITY <n>%`.
+  - **Reach at most 28 m:** mouth A is 46 m from the black hole with a 15 m reach, and reaches may not overlap; the
+    nearest structure (29.6 m) stays outside, since the black hole's list of structures is built at the map's reach.
+- **Alternatives:**
+  - growing the Schwarzschild radius to 6 m (the first version): the black part filled the view; you asked for "the
+    black part grows a little but mostly the distortion area grows";
+  - k = 3 (the first version): 65% under the black hole at full strength and 96% with no console off, which you
+    didn't notice; k = 1, real general relativity, is weaker still;
+  - no fade at the reach: everyone on the map would run a little slow, all the time;
+  - slowing the whole game: impossible with several players, who are at different distances;
+  - slowing looking around too: the mouse would feel broken rather than time slowed;
+  - a colour cue (blueshift toward the black hole): left for later.
+- **Rationale:** you asked for the black hole to grow as pylons fall and for time to slow "time dilation style"
+  closer to it, then for "more intense" dilation "all around". The rate keeps general relativity's shape, so it
+  slows ever faster toward the horizon, and k makes it strong enough to feel at the distances players stand. All
+  the numbers are server settings, to tune in a playtest.
+
 ### D102. A photo-like Milky Way across the sky, W-98 (Milky Way)
 
 - **Choice:**
@@ -1898,6 +1939,34 @@
 - **Rationale:** you asked for a Milky Way in the skybox ("add to wishlist having a milky way", "in teh skybox") and
   picked option C from the pictures ("get milky way photo like merged"). You didn't pick a placement, so the arch
   from base to base was chosen for you, since it gives both teams the same view; tell us if you want it elsewhere.
+
+### D107. Both guns sway left and right with your steps, by their size, W-102 (rifle sways when jogging)
+
+- **Choice:**
+  - **Slide:** the hands slide the gun in hand left on one step and right on the next (`get_sway` in `main.rs`): 2 cm
+    each way while walking, growing to 4 cm while sprinting (with the run pose's easing), the same for both guns.
+  - **Swing by length:** a longer, heavier gun lags behind the hands, so its muzzle turns the other way: 0.03 rad
+    (1.7°) walking and 0.06 rad (3.4°) sprinting for a gun as long as the bolt-action rifle (1.23 m in its glTF,
+    the sniper since #318), scaled by each model's real length (`GunModel::get_modelled_length_m`), so the 0.30 m
+    revolver (the rifle, gun 2) swings a quarter as much and mostly slides.
+  - **Kept:** today's dip at each step and the sprint pose's tilt stay as they were.
+  - **In step with the eye:** on a voxel map the gun takes the head bob's step phase and fade (`fade_s`), so it moves
+    with each footstep the camera dips on and eases in and out; the house keeps the gun's own step clock, at the same
+    rates.
+  - **Settings:** `view.head_bob.gun_walk_sway_m`, `gun_sprint_sway_m`, `rifle_walk_swing_rad` and
+    `rifle_sprint_swing_rad` in `player_settings.yaml` (0 for none). Older saved settings files without them load
+    with the built-in values (`ADDED_PLAYER_KEYS`).
+  - **Shooting:** a shot leaves from the fixed muzzle point (`voxel_world::MUZZLE_M`), so while moving crouched the
+    drawn gun can be up to 2 cm beside it; standing still there is no offset, and you can't shoot walking upright or
+    sprinting.
+- **Alternatives:**
+  - no change: the sprint pose already tilted the gun back and forth with each stride;
+  - the slide on the rifle (gun 2) only, as first built; a stronger sway (5 cm walking, 8 cm sprinting);
+  - the same swing for both guns, whatever their size.
+- **Rationale:** you asked for the rifle "going side to side when jogging like a normal rifle", chose the slide as
+  built from the first pictures ("ok menrge to staging", "i like your animation"), then, after #318 swapped the
+  models, asked for both guns: "I want them both swaying ... get both working realistically based on their size",
+  and approved the result ("merge this").
 
 ## Workload
 

@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use glam::{DMat4, DVec3, DVec4};
 
 use crate::avatar_model::AvatarClip;
+use crate::black_hole_growth::BlackHoleGrowth;
 use crate::dust::DustCloud;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, get_distance, get_local_direction, make_boost, make_rotation,
@@ -25,7 +26,6 @@ use crate::geometry::{
 use crate::minimap::TEAM_COLORS;
 use crate::net::{Client, NetEvent, RemotePlayer};
 use crate::physics::{self, Input, LaserReport, Player};
-use crate::reality_bend::RealityBend;
 use crate::render_voxel::{LaserBeam, VoxelFrame};
 use crate::scene_data::{Beam, SceneData};
 use crate::settings::{ServerSettings, SpaceSettings};
@@ -381,9 +381,8 @@ fn trace_other_voxel_lasers(
 /// light. In third person it also draws this player's own body (`own_body`, from `get_body`),
 /// which the other players' lasers stop at but this player's own passes, as it leaves from inside
 /// it. It draws every laser's whole path (this player's as the sniper's, without speckle; the
-/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given,
-/// under the world's own bend. `own_body` takes the pose after the players' in `poses`, and the
-/// `corpses` still lying are drawn last, where lasers pass through them.
+/// others' in their gun's style, with their shots' speckle), or `tracers` instead when given. `own_body` takes the pose after the players' in `poses`, and
+/// the `corpses` still lying are drawn last, where lasers pass through them.
 ///
 /// Example: `let view = multiplayer::pack_shared_voxel_view(&world, camera, Some(camera), 1, &players, &poses, &[], None, &[], None, (1280, 800));`
 #[allow(clippy::too_many_arguments)]
@@ -431,7 +430,7 @@ pub fn pack_shared_voxel_view(
                 .hit_structure
                 .zip(own.spot)
                 .is_some_and(|(k, x)| shared.is_head_hit(k, x));
-        spot = own.drawn_spot.map(|x| (x, team));
+        spot = own.spot.map(|x| (x, team));
         beams.push(LaserBeam {
             segments: own.segments.clone(),
             team,
@@ -458,15 +457,7 @@ pub fn pack_shared_voxel_view(
     };
     let drawn: VoxelWorld = shared.with_posed_avatars(&own_bodies, own_poses, corpses, &colors);
     SharedVoxelView {
-        frame: VoxelFrame::Build(
-            &drawn,
-            drawn.bend.bend_frame(camera),
-            beams,
-            spot,
-            dust,
-            render_px,
-            drawn.bend,
-        ),
+        frame: VoxelFrame::Build(&drawn, camera, beams, spot, dust, render_px),
         shot,
         hit_player_id,
         hit_marker,
@@ -514,8 +505,8 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
 
 /// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
 /// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits (calling `save_view` with its
-/// view) and rejoins `BOT_REJOIN_S` after being hit. The world bends with the server's consoles,
-/// or to `bend_strength` when given. It returns how many players it hit and how often it was hit,
+/// view) and rejoins `BOT_REJOIN_S` after being hit. The black hole grows with the server's
+/// consoles, or to `black_hole_strength` when given, and the bot's own time slows near it. It returns how many players it hit and how often it was hit,
 /// and fails if the server curves space other than the built-in settings (`check_bot_space`).
 ///
 /// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, |frame, id| Ok(()))?;`
@@ -523,10 +514,11 @@ pub fn run_voxel_bot(
     world: &VoxelWorld,
     client: &mut Client,
     duration_s: f64,
-    bend_strength: Option<f64>,
+    black_hole_strength: Option<f64>,
     mut save_view: impl FnMut(&VoxelFrame, u32) -> Result<()>,
 ) -> Result<(u32, u32)> {
-    let (mut bent_world, mut reality_bend) = (world.clone(), RealityBend::New(bend_strength));
+    let (mut grown_world, mut black_hole_growth) =
+        (world.clone(), BlackHoleGrowth::New(black_hole_strength));
     let start: Instant = Instant::now();
     let mut player: VoxelPlayer = VoxelPlayer::AtSpawn(world, 0);
     let (mut hit_count, mut eliminated_count) = (0, 0);
@@ -536,8 +528,8 @@ pub fn run_voxel_bot(
     while start.elapsed().as_secs_f64() < duration_s {
         let tick: Instant = Instant::now();
         let now_s: f64 = start.elapsed().as_secs_f64();
-        reality_bend.update(&mut bent_world, client.game.off_mask, now_s);
-        let world: &VoxelWorld = &bent_world;
+        black_hole_growth.update(&mut grown_world, client.game.off_mask, now_s);
+        let world: &VoxelWorld = &grown_world;
         for event in client.poll()? {
             match event {
                 NetEvent::Joined(id) => {
@@ -592,10 +584,12 @@ pub fn run_voxel_bot(
             input.up = input.forward && is_stuck;
             let before: DVec4 = player.body.col(AXIS_W);
             let team: u32 = client.team.unwrap_or(0);
-            player.step(world, &input, BOT_STEP_S, team as usize);
+            let own_step_s: f64 =
+                BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));
+            player.step(world, &input, own_step_s, team as usize);
             is_stuck = input.forward
                 && get_distance(before, player.body.col(AXIS_W)) * world.r
-                    < BOT_STUCK_FRAC * world.player.walk_m_per_s * BOT_STEP_S;
+                    < BOT_STUCK_FRAC * world.player.walk_m_per_s * own_step_s;
             let camera: DMat4 = player.get_camera_frame(world);
             let view: SharedVoxelView = pack_shared_voxel_view(
                 world,
