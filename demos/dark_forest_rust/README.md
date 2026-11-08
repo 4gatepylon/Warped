@@ -1,12 +1,11 @@
 # Dark Forest in Rust
 
-A playable Rust demo of the Dark Forest level (W-122): a normal first-person shooter in an ordinary, bounded
-Euclidean forest, whose feature is verticality. Each team's base has a treehouse on a 7 m deck, rope ladders up the
-trunks, plank bridges between the decks, and a 12 m lookout in the middle. It is built on
-[`../fps_demo/`](../fps_demo/README.md) (Rust, SDL3, a Metal PBR rasterizer) with the UDP multiplayer of
-[`../hyperbolic_wormholes_rust/`](../hyperbolic_wormholes_rust/README.md). There are no black holes, wormholes or
-curved space: the user asked for "just kind of a normal first-person shooter". Decisions made instead of the user are
-in [`DECISIONS.md`](DECISIONS.md).
+A playable Rust demo of the Dark Forest level (W-122): a first-person shooter in a dim, swampy bamboo labyrinth in
+bounded Euclidean space, whose features are verticality and wormholes. Each team's base has a treehouse on a 7 m deck,
+rope ladders, plank bridges between the decks, and a 12 m lookout in the middle; five fixed wormholes, drawn as real
+lensed wormholes, are shortcuts through the maze. It is built on [`../fps_demo/`](../fps_demo/README.md) (Rust, SDL3, a
+Metal PBR rasterizer) with the UDP multiplayer of [`../hyperbolic_wormholes_rust/`](../hyperbolic_wormholes_rust/README.md).
+Decisions made instead of the user are in [`DECISIONS.md`](DECISIONS.md).
 
 ## Play
 
@@ -53,20 +52,32 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 ## The level
 
 - **Map:** [`../../common/maps/dark_forest/map.json`](../../common/maps/dark_forest/map.json), written by
-  `src/forest_layout.rs` (`make export-map`) and read by both the game and the server. It is 60 m by 112 m, fenced by
-  rock walls: 152 boxes, 93 round shapes (trunks and canopies), 10 ladders, 15 lights. Red's base is at +z and blue's
-  is red's turned half a turn about the centre, so the two sides are the same.
+  `src/forest_layout.rs` (`make export-map`, compact JSON, 8.6 MB) and read by both the game and the server. It is
+  60 m by 112 m, fenced by rock walls. Red's base is at +z and blue's is red's turned half a turn about the centre, so
+  the two sides are the same.
+- **Bamboo labyrinth:** `add_labyrinth` carves red's half into a seeded maze of 4 m cells (a winding depth-first tree
+  plus about 12% extra openings for loops, so there are dead ends and loops), grows a wall of bamboo clumps on every
+  closed side where nothing else stands, and mirrors it onto blue's half. Corridors are about 1.5-3 m wide. The seed
+  and cell size are in the map's `scatter` field. A walk-grid flood test checks that every spawn, ground pylon,
+  ladder foot and wormhole mouth can be reached. Each culm forks at the top into leafy branches whose shadows keep
+  the forest dark, with light shafts through the gaps.
 - **Heights:** the ground; decks at 7 m (each team's treehouse, a middle deck and a flank deck, joined by bridges with
-  rope rails); the lookout at 12 m on the great tree in the centre, with bridges from both sides.
-- **Ladders:** a new optional `ladders` field in the map format (`common/maps/README.md`): a volume that isn't solid.
-  A player inside one who walks toward it climbs at 3.2 m/s and steps onto the deck at its top; walking beside it
-  does nothing (`src/game/player.rs`, with unit tests).
-- **Objective:** two pylons per team (`game_design/DESIGN.md`), each with one console: one on the ground near the
-  base, one on the treehouse deck. Hold `E` at an enemy console for 3 s to turn it off; a team wins once every console
-  of the other team is off. The pips at the top of the screen show each console (lit or off), and a banner shows the
-  winner.
-- **Combat:** the FPS demo's hitscan revolver (or the CC0 rifle with `--rifle`), robots in team colours. Offline, AI
-  robots fight you; online, other players are robots tinted blue or red.
+  rope rails), held up by bundles of thick culms; the lookout at 12 m in the centre.
+- **Ladders:** the optional `ladders` field of the map format: a volume that isn't solid. A player inside one who
+  walks toward it climbs at 3.2 m/s and steps onto the deck at its top.
+- **Wormholes:** five fixed pairs, no black holes: three across the ground and each team's lift from the ground to its
+  treehouse deck. Each mouth is the hyperbolic demo's foil lens in flat space (`src/game/warps.rs`): it bends light
+  and lasers within its reach, and whatever enters its throat leaves the partner's through the partner's mirror in z.
+  The tonemap pass traces each pixel's ray through the lens (`get_lens_color` in `src/shaders/post.metal`) and shows
+  the far side from a cube atlas of every mouth, drawn once at start-up (about 0.8 s).
+- **Objective:** two pylons per team (the hyperbolic demo's `scifi_beacon`), one on the ground near the base, one on
+  the treehouse deck, each sending up a beam in its team's colour while its console is on. Hold `E` at an enemy
+  console for 3 s to turn it off; a team wins once every console of the other team is off.
+- **Look:** a murky green grade of the HDRI sky, thick green haze, golden-white lasers for everyone (the map's
+  `laser.rgb`), and 31 flickering candles (warm map lights with `flicker_frac`) on the decks, bridges and support
+  bundles.
+- **Map page:** the menu's map page (Tab, then E) is `assets/map_picture.png`, a photo of the forest from straight
+  above made by `make map-picture`, with live marks over it; without it the page shows the old drawing.
 
 ## Match interface
 
@@ -85,9 +96,11 @@ binary. The wire protocol is the hyperbolic demo's, with its wormhole fields alw
 
 - `--bench-views <s>`: holds five fixed views (`spawn`, `bridge`, `lookout`, `treehouse`, `firing`) for `<s>` seconds
   each and prints their frame times; `make bench-views` writes them to `.artifacts/bench_views/<run_id>/`.
-- `--play-route`: the autopilot walks the vertical route from red's spawn: up the treehouse ladder, over the bridges
-  to the middle and flank decks, up the lookout ladder, down the other side and back, printing each waypoint;
-  `make bench-dark-forest` runs it full screen into `.artifacts/bench_dark_forest/<run_id>/`.
+- `--play-route`: the autopilot walks the vertical route from red's spawn; `make bench-dark-forest` runs it full
+  screen into `.artifacts/bench_dark_forest/<run_id>/`.
+- `--photo <png> [--photo-width-px <px>] [--camera-pose x,y,z,yaw,pitch] [--fov-deg <deg>] [--hide-canopy]`: saves
+  one frame without the HUD and quits; `--photo-map-page` opens the menu's map page.
+- `--map-picture <png>` (`make map-picture`): renders the map page's picture.
 - `--camera-view <view>`, `--autopilot`, `--show-frame-time`, `--benchmark-seconds <s>`: as in `../fps_demo/`.
 - `--export-map <path>`: writes the map and quits.
 
@@ -107,18 +120,29 @@ Paravirtual GPU, 1600x1200 display at 60 Hz), Rust 1.99.0, Xcode 26.6, full scre
 
 The median sits on the 60 Hz vsync interval and the GPU needs 10-12 ms a frame, so there is headroom on the GPU, but
 the p99 misses the 16.7 ms target on this virtual GPU: it has a frame or two of 20-34 ms in every window. A real Mac
-at 2560x1440 has not been measured yet.
+at 2560x1440 has not been measured yet. The table above is from before the labyrinth and wormholes.
+
+With the labyrinth (about 8,900 culms) and the five lensed wormholes, `--photo` runs in a 1600x900 pt window with 4
+robots (60 frames each, vsync on, median at the 60 Hz interval in every run) give these GPU times:
+
+| View | Render scale 2.0 | Render scale 1.0 |
+| --- | --- | --- |
+| No mouth in view | 11.8 ms | 7.3 ms |
+| One mouth in view | 14.5-15.9 ms | not measured |
+| A mouth filling the screen | 16.6 ms | 9.8 ms |
 
 ## Code
 
-- `src/forest_layout.rs`: generates the map (trees, decks, bridges, ladders, pylons, spawns, lights).
+- `src/forest_layout.rs`: generates the map (labyrinth, bamboo, decks, bridges, ladders, pylons, wormholes, candles,
+  spawns, lights).
 - `src/map.rs`: reads and writes the portable map format.
-- `src/game/world.rs`: turns the map into collision boxes, drawable shapes, ladders and consoles.
+- `src/game/world.rs`: turns the map into collision boxes, drawable shapes, ladders, consoles and pylons.
+- `src/game/warps.rs`: the wormholes' lens, throat crossing and laser paths (and black holes, unused here).
 - `src/game/player.rs`: walking, jumping and climbing.
 - `src/match_play.rs`: consoles, the win, and the online client (state, hits, remote robots).
+- `src/shaders/post.metal` (`get_lens_color`) and `capture_wormhole_lens` in `src/main.rs`: the wormhole lens pass.
 - `src/net.rs`, `src/server.rs`, `src/bin/dark_forest_server.rs`: the UDP server and protocol, copied from the
-  hyperbolic demo. `src/settings.rs`, `src/thrown_wormholes.rs` and `src/shot_noise.rs` keep only what that protocol
-  needs.
+  hyperbolic demo.
 - Everything else (renderer, assets, weapon, bots, audio, HUD) is the FPS demo's.
 
 ## Assets
@@ -138,7 +162,9 @@ revolver Sketchfab Standard, which limit sharing the game.
 
 ## Limits
 
-- No title screen, menus, minimap or in-game credits page yet (the hyperbolic demo has them).
-- AI robots walk on the ground only; they don't climb.
+- AI robots walk on the ground only; they don't climb ladders or cross bridges.
+- Through a wormhole you see the scenery and lights around its partner, drawn at start-up, but not robots, players or
+  lasers there.
+- Lasers of other players online are traced locally; their hits come from the shooter's own trace.
 - Online, the server trusts the client about which console it holds and about its hits.
 - The protocol still carries the hyperbolic demo's wormhole fields, always empty.
