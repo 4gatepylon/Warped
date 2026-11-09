@@ -8,6 +8,7 @@
 //! Example: `let mesh: MeshHandle = renderer.create_mesh(&mesh_data);`
 
 pub mod culling;
+pub mod frame_trace;
 pub mod metal;
 pub mod overlay;
 
@@ -363,13 +364,15 @@ pub struct RenderSettings {
     pub shadow_distance_m: f32,
 }
 
-/// `FrameTiming` is how long the GPU took for a frame finished earlier.
+/// `FrameTiming` is how long the GPU took for a frame finished earlier, how long this frame's
+/// encoding waited and took, and this frame's index (for `frame_trace`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameTiming {
     pub gpu_ms: f64,
     pub slot_wait_ms: f64,
     pub drawable_wait_ms: f64,
     pub cpu_render_ms: f64,
+    pub frame_index: usize,
 }
 
 /// `Renderer` is the whole backend interface.

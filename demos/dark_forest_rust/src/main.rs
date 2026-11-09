@@ -54,6 +54,7 @@ use minimap::{Mark, Minimap};
 use platform::Platform;
 use render::metal::MetalRenderer;
 use render::overlay::HitEffect;
+use render::frame_trace::{CpuFrameRow, FrameTrace};
 use render::{FrameDescription, FrameTiming, HudImage, HudRect, RenderSettings, Renderer};
 use scene::{Scene, SceneOptions};
 use text_overlay::TextPicture;
@@ -171,6 +172,9 @@ struct Args {
     /// Show the frame time in the top-left corner.
     #[arg(long)]
     show_frame_time: bool,
+    /// Write every frame's timing (CPU phases, GPU, when it was shown) to this CSV on exit.
+    #[arg(long)]
+    frame_times_file: Option<PathBuf>,
     /// Use the CC0 Poly Haven rifle even if the Sketchfab revolver is present.
     #[arg(long)]
     rifle: bool,
@@ -1013,6 +1017,8 @@ fn main() {
     let mut last_report_s: f32 = 0.0;
     let mut smoothed_frame_ms: f32 = 8.3;
     let mut timing: FrameTiming = FrameTiming::default();
+    let mut frame_trace: FrameTrace = FrameTrace::default();
+    renderer.set_is_tracing_frames(args.frame_times_file.is_some());
     if args.photo_map_page {
         let mut opened: Menu = Menu::New();
         for _ in 0..menu::PAGE_COUNT {
@@ -1111,6 +1117,7 @@ fn main() {
         }
 
         let now: Instant = Instant::now();
+        let loop_start_s: f64 = objc2_quartz_core::CACurrentMediaTime();
         let frame_s: f32 = (now - last_frame).as_secs_f32();
         last_frame = now;
         let is_recording: bool = args.photo.is_some() || args.video_frames.is_some();
@@ -1345,6 +1352,17 @@ fn main() {
             timing.drawable_wait_ms as f32,
             timing.cpu_render_ms as f32,
         ];
+        frame_trace.push(CpuFrameRow {
+            frame_index: timing.frame_index,
+            loop_start_s,
+            frame_ms: frame_s * 1000.0,
+            dt_ms: dt_s * 1000.0,
+            sim_ms,
+            build_ms,
+            slot_wait_ms: phase_ms[2],
+            drawable_wait_ms: phase_ms[3],
+            render_ms: phase_ms[4],
+        });
         let elapsed_s: f32 = start.elapsed().as_secs_f32();
         if let Some(directory) = &args.video_frames {
             if session.time_s > args.video_seconds {
@@ -1406,6 +1424,13 @@ fn main() {
         }
     }
     let _ = timing;
+    if let Some(path) = &args.frame_times_file {
+        let completed = renderer.take_completed_frames();
+        match frame_trace.write(path, &completed) {
+            Ok(summary) => println!("frame trace: {summary}; wrote {}", path.display()),
+            Err(error) => eprintln!("error: can't write {}: {error}", path.display()),
+        }
+    }
     if args.bench_views.is_some() {
         for (view, view_stat) in CameraView::ALL.iter().zip(&view_stats) {
             println!(

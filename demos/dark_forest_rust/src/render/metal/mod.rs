@@ -17,6 +17,9 @@ mod resources;
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr::NonNull;
+use std::sync::{Arc, Mutex};
+
+use block2::RcBlock;
 
 use glam::{Mat4, UVec4, Vec2, Vec3, Vec4};
 use objc2::rc::Retained;
@@ -47,6 +50,7 @@ use self::resources::{
     upload_texture_2d,
 };
 use crate::render::culling::{CASCADE_COUNT, CascadeCamera, Cascades, Frustum, fit_cascades};
+use crate::render::frame_trace::CompletedFrame;
 use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
     LensMouth, MAX_LIVE_LENS_SLOT_COUNT, MaterialData, MaterialHandle, MeshData, MeshHandle,
@@ -267,8 +271,11 @@ pub struct MetalRenderer {
     targets: Option<Targets>,
     dynamic_buffers: Vec<DynamicBuffer>,
     frame_index: usize,
-    in_flight: VecDeque<CommandBuffer>,
+    in_flight: VecDeque<(usize, CommandBuffer)>,
     last_gpu_ms: f64,
+    is_tracing_frames: bool,
+    gpu_times: Vec<CompletedFrame>,
+    presented_times: Arc<Mutex<Vec<(usize, f64)>>>,
     drawable_size_px: (u32, u32),
     lens: Option<(Texture, gpu_types::GpuLensUniforms)>,
     lens_live: Option<LensLive>,
@@ -445,6 +452,9 @@ impl MetalRenderer {
             frame_index: 0,
             in_flight: VecDeque::new(),
             last_gpu_ms: 0.0,
+            is_tracing_frames: false,
+            gpu_times: Vec::new(),
+            presented_times: Arc::new(Mutex::new(Vec::new())),
             drawable_size_px: (0, 0),
         }
     }
@@ -457,25 +467,74 @@ impl MetalRenderer {
         self.device.name().to_string()
     }
 
+    /// `set_is_tracing_frames` starts or stops keeping every frame's GPU times and the time it
+    /// was shown, for `take_completed_frames`.
+    ///
+    /// Example: `renderer.set_is_tracing_frames(true);`
+    pub fn set_is_tracing_frames(&mut self, is_tracing_frames: bool) {
+        self.is_tracing_frames = is_tracing_frames;
+    }
+
+    /// `take_completed_frames` waits for the frames in flight and returns every traced frame's
+    /// GPU times and the time it was shown (0 if never), by frame index.
+    ///
+    /// Example: `let completed: Vec<CompletedFrame> = renderer.take_completed_frames();`
+    pub fn take_completed_frames(&mut self) -> Vec<CompletedFrame> {
+        while !self.in_flight.is_empty() {
+            self.complete_oldest_frame();
+        }
+        let presented_s_by_index: std::collections::HashMap<usize, f64> = std::mem::take(
+            &mut *self
+                .presented_times
+                .lock()
+                .expect("a presented handler panicked"),
+        )
+        .into_iter()
+        .collect();
+        std::mem::take(&mut self.gpu_times)
+            .into_iter()
+            .map(|frame| CompletedFrame {
+                presented_s: presented_s_by_index
+                    .get(&frame.frame_index)
+                    .copied()
+                    .unwrap_or(0.0),
+                ..frame
+            })
+            .collect()
+    }
+
+    /// `complete_oldest_frame` waits for the oldest frame in flight, recording its GPU time.
+    fn complete_oldest_frame(&mut self) {
+        let (frame_index, command_buffer) =
+            self.in_flight.pop_front().expect("a frame is in flight");
+        command_buffer.waitUntilCompleted();
+        let gpu_s: f64 = command_buffer.GPUEndTime() - command_buffer.GPUStartTime();
+        if gpu_s > 0.0 {
+            self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
+        }
+        if self.is_tracing_frames {
+            self.gpu_times.push(CompletedFrame {
+                frame_index,
+                gpu_start_s: command_buffer.GPUStartTime(),
+                gpu_end_s: command_buffer.GPUEndTime(),
+                presented_s: 0.0,
+            });
+        }
+    }
+
     /// `wait_for_frame_slot` blocks until fewer than `FRAMES_IN_FLIGHT` frames are on the GPU,
     /// recording the GPU time of the frame it waited for.
     fn wait_for_frame_slot(&mut self) {
         while self.in_flight.len() >= FRAMES_IN_FLIGHT {
-            let command_buffer: CommandBuffer =
-                self.in_flight.pop_front().expect("queue was not empty");
-            command_buffer.waitUntilCompleted();
-            let gpu_s: f64 = command_buffer.GPUEndTime() - command_buffer.GPUStartTime();
-            if gpu_s > 0.0 {
-                self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
-            }
+            self.complete_oldest_frame();
         }
     }
 
     /// `read_texture_bytes` waits for the frames in flight and copies a 4-byte-per-pixel texture
     /// back: (width_px, height_px, bytes, rows top first).
     fn read_texture_bytes(&mut self, texture: &Texture) -> (u32, u32, Vec<u8>) {
-        for command_buffer in self.in_flight.drain(..) {
-            command_buffer.waitUntilCompleted();
+        while !self.in_flight.is_empty() {
+            self.complete_oldest_frame();
         }
         let (width_px, height_px) = (texture.width(), texture.height());
         let bytes_per_row: usize = width_px * 4;
@@ -1144,7 +1203,8 @@ impl MetalRenderer {
             point_lights.push(GpuPointLight::default());
         }
 
-        let slot: usize = self.frame_index % FRAMES_IN_FLIGHT;
+        let frame_index: usize = self.frame_index;
+        let slot: usize = frame_index % FRAMES_IN_FLIGHT;
         self.frame_index += 1;
         let dynamic: &mut DynamicBuffer = &mut self.dynamic_buffers[slot];
         dynamic.offset_bytes = 0;
@@ -1686,14 +1746,28 @@ impl MetalRenderer {
             if let Some(drawable) = &drawable {
                 let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
                     ProtocolObject::from_ref(&**drawable);
+                if self.is_tracing_frames {
+                    let presented_times: Arc<Mutex<Vec<(usize, f64)>>> = Arc::clone(&self.presented_times);
+                    let handler = RcBlock::new(
+                        move |shown: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+                            let presented_s: f64 = unsafe { shown.as_ref() }.presentedTime();
+                            presented_times
+                                .lock()
+                                .expect("the frame trace's lock is poisoned")
+                                .push((frame_index, presented_s));
+                        },
+                    );
+                    unsafe { metal_drawable.addPresentedHandler(RcBlock::as_ptr(&handler)) };
+                }
                 command_buffer.presentDrawable(metal_drawable);
             }
         }
         command_buffer.commit();
-        self.in_flight.push_back(command_buffer);
+        self.in_flight.push_back((frame_index, command_buffer));
         FrameTiming {
             gpu_ms: self.last_gpu_ms,
             drawable_wait_ms,
+            frame_index,
             ..FrameTiming::default()
         }
     }
@@ -1758,7 +1832,7 @@ impl MetalRenderer {
 
 impl Drop for MetalRenderer {
     fn drop(&mut self) {
-        for command_buffer in self.in_flight.drain(..) {
+        for (_, command_buffer) in self.in_flight.drain(..) {
             command_buffer.waitUntilCompleted();
         }
     }
