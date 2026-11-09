@@ -553,7 +553,7 @@ impl Brain {
         let hole: DVec3 = world
             .lift_holes
             .iter()
-            .map(|&(hole, _)| hole)
+            .map(|hole| hole.direction)
             .max_by(|a, b| a.dot(from).total_cmp(&b.dot(from)))
             .unwrap_or(from);
         let waypoint: DVec3 = if is_riding {
@@ -3078,7 +3078,8 @@ fn make_bench_views(world: &CityWorld) -> Vec<BenchView> {
     glass.feet = DVec3::new(0.9, 0.2, -0.3).normalize() * glass_m;
     glass.align_to_ground();
     let mut lift: CityPlayer = street;
-    lift.feet = world.get_glass().map_or(DVec3::X, |g| g.holes[0].0) * world.street_radius_m;
+    lift.feet =
+        world.get_glass().map_or(DVec3::X, |g| g.holes[0].direction) * world.street_radius_m;
     lift.align_to_ground();
     let _ = eye_m;
     vec![

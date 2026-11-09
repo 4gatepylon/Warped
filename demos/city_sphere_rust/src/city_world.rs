@@ -151,16 +151,28 @@ pub struct Material {
     pub is_light: bool,
 }
 
+/// `Hole` is a hole in a shell: the directions within its angular radius of `direction` (`cos` is
+/// the radius's cosine) and, for a stairs' hole, only those over its stairs: within
+/// `half_width_m` of the plane through the centre along the flight, measured at the shell's
+/// radius (`side` is that plane's unit normal, the steps' right axis). A round hole's
+/// `half_width_m` is infinite.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Hole {
+    pub direction: DVec3,
+    pub cos: f64,
+    pub side: DVec3,
+    pub half_width_m: f64,
+}
+
 /// `Shell` is a sphere about the centre: the glass (walkable on its inner side, reflecting shots
-/// from that side) or the core (a solid ball). Holes are (unit direction, cosine of their angular
-/// radius).
+/// from that side) or the core (a solid ball), with its holes.
 pub struct Shell {
     pub radius_m: f64,
     pub thickness_m: f64,
     pub material: u8,
     pub is_walkable_inside: bool,
     pub is_reflective_inside: bool,
-    pub holes: Vec<(DVec3, f64)>,
+    pub holes: Vec<Hole>,
 }
 
 impl Shell {
@@ -168,8 +180,19 @@ impl Shell {
     ///
     /// Example: `let is_open = shell.is_in_hole(feet);`
     pub fn is_in_hole(&self, point: DVec3) -> bool {
+        self.is_in_widened_hole(point, 0.0)
+    }
+
+    /// `is_in_widened_hole` is `is_in_hole` with every stairs' hole `side_margin_m` wider on each
+    /// side (a round hole is unchanged).
+    ///
+    /// Example: `let can_climb = shell.is_in_widened_hole(feet, BODY_RADIUS_M);`
+    pub fn is_in_widened_hole(&self, point: DVec3, side_margin_m: f64) -> bool {
         let d: DVec3 = point.normalize_or_zero();
-        self.holes.iter().any(|&(hole, cos)| d.dot(hole) >= cos)
+        self.holes.iter().any(|hole| {
+            d.dot(hole.direction) >= hole.cos
+                && d.dot(hole.side).abs() * self.radius_m <= hole.half_width_m + side_margin_m
+        })
     }
 
     /// `is_ball` says whether the shell is solid to its centre (the core).
@@ -256,9 +279,9 @@ pub struct CityWorld {
     pub boxes: Vec<CityBox>,
     pub consoles: Vec<Console>,
     pub spawns: Vec<(u32, DMat4)>,
-    /// `lift_holes` are the glass's holes over a lift pad (a box in the group `lifts`), as (unit
-    /// direction, cosine of the angular radius); the stairs' holes have none.
-    pub lift_holes: Vec<(DVec3, f64)>,
+    /// `lift_holes` are the glass's holes over a lift pad (a box in the group `lifts`); the
+    /// stairs' holes have none.
+    pub lift_holes: Vec<Hole>,
     pub laser_colors: [[f32; 3]; 2],
     /// `variation_seed` seeds the map's small look variation (panel tint), 0 without one.
     pub variation_seed: u32,
@@ -327,6 +350,25 @@ fn find_sphere_hits_m(
 /// `get_material_kind` maps a material kind to (is it a light).
 fn parse_frame(values: &[f64; 16]) -> DMat4 {
     DMat4::from_cols_array(values)
+}
+
+/// `fit_hole_to_stairs` reads the map's round hole `json` and, when a step of stairs (a box in
+/// the group `stairs`) stands in it, narrows it to that flight's width, so the glass beside the
+/// stairs stays whole (W-132 (City Sphere stairs hole)); a hole without a step stays round.
+///
+/// Example: `let hole = fit_hole_to_stairs(&map.shells[0].holes[6], &boxes);`
+fn fit_hole_to_stairs(json: &JsonHole, boxes: &[CityBox]) -> Hole {
+    let direction: DVec3 = DVec3::from(json.direction).normalize();
+    let cos: f64 = json.angular_radius_rad.cos();
+    let step: Option<&CityBox> = boxes
+        .iter()
+        .find(|b| b.group == STAIRS_GROUP && b.center.normalize().dot(direction) >= cos);
+    Hole {
+        direction,
+        cos,
+        side: step.map_or(DVec3::ZERO, |b| b.axes.x_axis),
+        half_width_m: step.map_or(f64::INFINITY, |b| b.half_m.x),
+    }
 }
 
 impl CityWorld {
@@ -411,23 +453,18 @@ impl CityWorld {
                 holes: s
                     .holes
                     .iter()
-                    .map(|h| {
-                        (
-                            DVec3::from(h.direction).normalize(),
-                            h.angular_radius_rad.cos(),
-                        )
-                    })
+                    .map(|h| fit_hole_to_stairs(h, &boxes))
                     .collect(),
             })
             .collect();
-        let lift_holes: Vec<(DVec3, f64)> = shells
+        let lift_holes: Vec<Hole> = shells
             .iter()
             .filter(|s| s.is_walkable_inside)
             .flat_map(|s| s.holes.iter().copied())
-            .filter(|&(hole, cos)| {
-                boxes
-                    .iter()
-                    .any(|b| b.group == LIFT_GROUP && b.center.normalize().dot(hole) >= cos)
+            .filter(|hole| {
+                boxes.iter().any(|b| {
+                    b.group == LIFT_GROUP && b.center.normalize().dot(hole.direction) >= hole.cos
+                })
             })
             .collect();
         let spawns: Vec<(u32, DMat4)> = map
@@ -578,9 +615,9 @@ impl CityWorld {
             .filter(|b| b.group != STAIRS_GROUP)
             .collect();
         let is_free = |d: DVec3| -> bool {
-            let is_near_hole: bool = glass.holes.iter().any(|&(hole, cos)| {
-                d.dot(hole).clamp(-1.0, 1.0).acos()
-                    < cos.acos() + (BODY_RADIUS_M + PATH_HOLE_CLEARANCE_M) / level_m
+            let is_near_hole: bool = glass.holes.iter().any(|hole| {
+                d.dot(hole.direction).clamp(-1.0, 1.0).acos()
+                    < hole.cos.acos() + (BODY_RADIUS_M + PATH_HOLE_CLEARANCE_M) / level_m
             });
             !is_near_hole
                 && standing.iter().all(|b| {
@@ -682,7 +719,7 @@ impl CityWorld {
         let d: DVec3 = feet.normalize_or_zero();
         self.lift_holes
             .iter()
-            .any(|&(hole, cos)| d.dot(hole) >= cos)
+            .any(|hole| d.dot(hole.direction) >= hole.cos)
     }
 
     /// `trace_shot` follows a shot from `origin` along `direction` for up to `range_m`: it stops
@@ -913,7 +950,9 @@ impl CityWorld {
     /// `collide` pushes `player` out of the street, glass and boxes, `before` being where its feet
     /// were before this step (which side of the glass it is on). A player who was on the ground
     /// steps up onto a box whose top is at most `MAX_STEP_UP_M` above their feet (a stair's step)
-    /// instead of being pushed back by its edge.
+    /// instead of being pushed back by its edge. A player under the glass passes through a stairs'
+    /// hole a body radius wider on each side, so the glass doesn't push down one climbing at a
+    /// step's edge; on the glass level, the glass holds a player up to the stairs' edge.
     fn collide(&self, player: &mut CityPlayer, before: DVec3, was_on_ground: bool) {
         let up: DVec3 = get_up(player.feet);
         let r: f64 = player.feet.length();
@@ -921,16 +960,16 @@ impl CityWorld {
             player.feet *= self.street_radius_m / r;
             self.land(player, up);
         }
-        if let Some(glass) = self.get_glass()
-            && !glass.is_in_hole(player.feet)
-        {
+        if let Some(glass) = self.get_glass() {
+            let was_above: bool = before.length() <= glass.radius_m;
+            let side_margin_m: f64 = if was_above { 0.0 } else { BODY_RADIUS_M };
+            let is_in_hole: bool = glass.is_in_widened_hole(player.feet, side_margin_m);
             let half_m: f64 = glass.thickness_m / 2.0;
             let r: f64 = player.feet.length();
-            let was_above: bool = before.length() <= glass.radius_m;
-            if was_above && r > glass.radius_m - half_m {
+            if !is_in_hole && was_above && r > glass.radius_m - half_m {
                 player.feet *= (glass.radius_m - half_m) / r;
                 self.land(player, up);
-            } else if !was_above && r - BODY_HEIGHT_M < glass.radius_m + half_m {
+            } else if !is_in_hole && !was_above && r - BODY_HEIGHT_M < glass.radius_m + half_m {
                 player.feet *= (glass.radius_m + half_m + BODY_HEIGHT_M) / r;
                 let v_up: f64 = player.velocity.dot(up);
                 if v_up > 0.0 {
@@ -1162,11 +1201,58 @@ mod tests {
     //! | A shot from the street stops at the glass | `street_shots_stop_at_the_glass` |
     //! | A shot from the glass level goes straight across and hits a player | `glass_shots_cross_the_sphere` |
     //! | Range ends a shot | `range_ends_shots` |
+    //! | Where a stairs' hole is open, across it (W-132 (City Sphere stairs hole)): its middle, just inside its stairs' edge, just outside it (inside the map's round hole), a body radius wider for a climber; a lift's hole stays round | `stairs_holes_open_only_over_their_stairs` |
+    //! | A shot at the glass beside a stairs' hole: from the street (stops), from the glass level (reflects); straight down into it (ends on a step) | `shots_beside_the_stairs_hole_meet_the_glass` |
+    //! | A player on the glass level beside a stairs' hole: walking its whole length just past the edge (stays on the glass); standing over the stairs (falls in) | `players_walk_on_the_glass_beside_the_stairs_hole` |
+    //! | A player climbing each team's stairs at the edge of the steps, either side: reaches the glass level | `players_climb_the_stairs_at_their_edge` |
 
     use super::*;
 
+    const EDGE_M: f64 = 0.1;
+    const BESIDE_STAIRS_M: f64 = 0.8;
+    const SHOOTER_SIDE_M: f64 = 4.0;
+    const ALONG_HOLE_M: f64 = 3.0;
+    const FALL_S: f64 = 1.0;
+    const CLIMB_S: f64 = 20.0;
+    const LEAD_IN_M: f64 = 1.0;
+    const GLASS_LEVEL_TOLERANCE_M: f64 = 0.05;
+    const STEP_S: f64 = 1.0 / 60.0;
+
     fn world() -> CityWorld {
         CityWorld::Builtin().expect("the shipped map loads")
+    }
+
+    /// `get_stairs_holes` gives the glass's stairs' holes, one a team.
+    fn get_stairs_holes(glass: &Shell) -> Vec<Hole> {
+        let holes: Vec<Hole> = glass
+            .holes
+            .iter()
+            .copied()
+            .filter(|hole| hole.half_width_m.is_finite())
+            .collect();
+        assert_eq!(holes.len(), TEAM_NAMES.len());
+        holes
+    }
+
+    /// `get_beside` gives the point `side_m` to the side of `hole`'s middle along its stairs'
+    /// side axis, `along_m` along the stairs, at `radius_m` from the centre.
+    fn get_beside(hole: &Hole, side_m: f64, along_m: f64, radius_m: f64) -> DVec3 {
+        let along: DVec3 = hole.side.cross(hole.direction);
+        (hole.direction * radius_m + hole.side * side_m + along * along_m).normalize() * radius_m
+    }
+
+    /// `walk_toward` walks `player` toward `target` for one step of `STEP_S`, turned to face it.
+    fn walk_toward(world: &CityWorld, player: &mut CityPlayer, target: DVec3) {
+        let up: DVec3 = get_up(player.feet);
+        let to: DVec3 = target - player.feet;
+        let back: DVec3 = -(to - up * to.dot(up)).normalize();
+        player.body = DMat3::from_cols(up.cross(back), up, back);
+        let input: CityInput = CityInput {
+            forward_frac: 1.0,
+            speed_frac: 1.0,
+            ..CityInput::default()
+        };
+        world.move_player(player, &input, &settings(), STEP_S);
     }
 
     /// `settings` is the built-in `server_settings.yaml`.
@@ -1227,7 +1313,7 @@ mod tests {
     fn lifts_carry_players_onto_the_glass() {
         let world: CityWorld = world();
         let glass: &Shell = world.get_glass().unwrap();
-        let hole: DVec3 = glass.holes[0].0;
+        let hole: DVec3 = glass.holes[0].direction;
         let mut player: CityPlayer = world.make_player(0, 0);
         player.feet = hole * world.street_radius_m;
         let ride = CityInput {
@@ -1329,5 +1415,148 @@ mod tests {
         let shot: Shot = world.trace_shot(origin, DVec3::Y, 1.0, 2, &[], None);
         assert_eq!(shot.hit, ShotHit::Range);
         assert!((shot.points[1] - origin - DVec3::Y).length() < 1e-9);
+    }
+
+    /// `stairs_holes_open_only_over_their_stairs` checks across each stairs' hole that it is open
+    /// over its stairs and shut beside them, though the map's round hole reaches there, except a
+    /// body radius wider for a player climbing; and that the lifts' holes stay round.
+    #[test]
+    fn stairs_holes_open_only_over_their_stairs() {
+        let world: CityWorld = world();
+        let glass: &Shell = world.get_glass().unwrap();
+        for hole in get_stairs_holes(glass) {
+            let at = |side_m: f64| get_beside(&hole, side_m, 0.0, glass.radius_m);
+            let (inside_m, outside_m) = (hole.half_width_m - EDGE_M, hole.half_width_m + EDGE_M);
+            let widened_outside_m: f64 = outside_m + BODY_RADIUS_M;
+            assert!(glass.is_in_hole(at(0.0)));
+            assert!(glass.is_in_hole(at(inside_m)) && glass.is_in_hole(at(-inside_m)));
+            assert!(at(widened_outside_m).normalize().dot(hole.direction) >= hole.cos);
+            assert!(!glass.is_in_hole(at(outside_m)) && !glass.is_in_hole(at(-outside_m)));
+            assert!(glass.is_in_widened_hole(at(outside_m), BODY_RADIUS_M));
+            assert!(!glass.is_in_widened_hole(at(widened_outside_m), BODY_RADIUS_M));
+        }
+        assert_eq!(world.lift_holes.len(), glass.holes.len() - TEAM_NAMES.len());
+        for hole in &world.lift_holes {
+            let sin: f64 = (1.0 - hole.cos * hole.cos).sqrt() * (1.0 - EDGE_M / glass.radius_m);
+            let edge: DVec3 = hole.direction * (1.0 - sin * sin).sqrt()
+                + hole.direction.any_orthonormal_vector() * sin;
+            assert!(hole.half_width_m.is_infinite() && glass.is_in_hole(edge));
+        }
+    }
+
+    /// `shots_beside_the_stairs_hole_meet_the_glass` shoots at the glass just beside each stairs'
+    /// hole, where the map's round hole reaches: from the street the shot stops on the glass, and
+    /// from the glass level it reflects there; a shot straight down into the hole ends on a step.
+    #[test]
+    fn shots_beside_the_stairs_hole_meet_the_glass() {
+        let world: CityWorld = world();
+        let glass: &Shell = world.get_glass().unwrap();
+        let level_m: f64 = glass.radius_m - glass.thickness_m / 2.0;
+        let stairs_material: u8 = world
+            .boxes
+            .iter()
+            .find(|b| b.group == STAIRS_GROUP)
+            .unwrap()
+            .material;
+        for hole in get_stairs_holes(glass) {
+            let beside_m: f64 = hole.half_width_m + BESIDE_STAIRS_M;
+            let beside: DVec3 = get_beside(&hole, beside_m, 0.0, glass.radius_m);
+            assert!(beside.normalize().dot(hole.direction) >= hole.cos);
+            let street_eye: DVec3 = get_beside(
+                &hole,
+                SHOOTER_SIDE_M,
+                0.0,
+                world.street_radius_m - world.eye_height_m,
+            );
+            let glass_eye: DVec3 =
+                get_beside(&hole, SHOOTER_SIDE_M, 0.0, level_m - world.eye_height_m);
+            for (eye, bounce_count) in [(street_eye, 0), (glass_eye, 1)] {
+                let shot: Shot =
+                    world.trace_shot(eye, (beside - eye).normalize(), 500.0, 1, &[], None);
+                assert!(
+                    (shot.points[1] - beside).length() < EDGE_M
+                        && shot.bounce_count == bounce_count,
+                    "{shot:?}"
+                );
+            }
+            let eye: DVec3 = hole.direction * (level_m - world.eye_height_m);
+            let down: Shot = world.trace_shot(eye, hole.direction, 500.0, 1, &[], None);
+            assert_eq!(
+                down.hit,
+                ShotHit::Surface {
+                    material: stairs_material
+                }
+            );
+        }
+    }
+
+    /// `players_walk_on_the_glass_beside_the_stairs_hole` walks a player on the glass level along
+    /// each stairs' hole, past its whole length, with their feet just beyond the stairs' edge where
+    /// the map's round hole reaches: they stay on the glass level. A player standing over the
+    /// stairs falls in.
+    #[test]
+    fn players_walk_on_the_glass_beside_the_stairs_hole() {
+        let world: CityWorld = world();
+        let glass: &Shell = world.get_glass().unwrap();
+        let level_m: f64 = glass.radius_m - glass.thickness_m / 2.0;
+        for hole in get_stairs_holes(glass) {
+            for side_m in [hole.half_width_m + EDGE_M, -hole.half_width_m - EDGE_M] {
+                let mut player: CityPlayer = world.make_player(0, 0);
+                player.feet = get_beside(&hole, side_m, -ALONG_HOLE_M, level_m);
+                let target: DVec3 = get_beside(&hole, side_m, ALONG_HOLE_M, level_m);
+                while (target - player.feet).length() > EDGE_M {
+                    walk_toward(&world, &mut player, target);
+                    assert!(
+                        (player.feet.length() - level_m).abs() < GLASS_LEVEL_TOLERANCE_M,
+                        "fell in at {:?}",
+                        player.feet
+                    );
+                }
+            }
+            let mut player: CityPlayer = world.make_player(0, 0);
+            player.feet = hole.direction * level_m;
+            for _ in 0..(FALL_S / STEP_S) as usize {
+                world.move_player(&mut player, &CityInput::default(), &settings(), STEP_S);
+            }
+            assert!(player.feet.length() > glass.radius_m + glass.thickness_m);
+        }
+    }
+
+    /// `players_climb_the_stairs_at_their_edge` walks up each team's stairs with the feet just
+    /// beyond the steps' edge, on either side: the glass, a body radius away, doesn't push the
+    /// player down off the stairs, and they reach the glass level.
+    #[test]
+    fn players_climb_the_stairs_at_their_edge() {
+        let world: CityWorld = world();
+        let glass: &Shell = world.get_glass().unwrap();
+        let level_m: f64 = glass.radius_m - glass.thickness_m / 2.0;
+        for team in 0..TEAM_NAMES.len() as u32 {
+            let (bottom, top) = world.get_stairs_ends(team).unwrap();
+            let step: &CityBox = world
+                .boxes
+                .iter()
+                .find(|b| b.group == STAIRS_GROUP && b.name.starts_with(TEAM_NAMES[team as usize]))
+                .unwrap();
+            let up_stairs: DVec3 = (top - bottom * top.dot(bottom)).normalize();
+            for side_m in [step.half_m.x + EDGE_M, -step.half_m.x - EDGE_M] {
+                let at = |d: DVec3, radius_m: f64| {
+                    (d * radius_m + step.axes.x_axis * side_m).normalize() * radius_m
+                };
+                let mut player: CityPlayer = world.make_player(team, 0);
+                let start: DVec3 = bottom - up_stairs * (LEAD_IN_M / world.street_radius_m);
+                player.feet = at(start.normalize(), world.street_radius_m);
+                let target: DVec3 = at(top, level_m);
+                let mut time_s: f64 = 0.0;
+                while (target - player.feet).length() > EDGE_M && time_s < CLIMB_S {
+                    walk_toward(&world, &mut player, target);
+                    time_s += STEP_S;
+                }
+                assert!(
+                    (player.feet.length() - level_m).abs() < GLASS_LEVEL_TOLERANCE_M,
+                    "team {team}, side {side_m} m: stopped at radius {:.2} m",
+                    player.feet.length()
+                );
+            }
+        }
     }
 }
