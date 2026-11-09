@@ -1,0 +1,43 @@
+//! `warped_shared` is the code every Rust level demo of Warped shares: Lunar Surface
+//! (`../hyperbolic_wormholes_rust/`), Dust, Snow Planet, City Sphere and the match. Each level is
+//! its own program; a level crate depends on this one and brings its modules in at its root
+//! (`use warped_shared::geometry;`), so the level's own files keep naming them `crate::geometry`.
+//!
+//! Interface: the modules below; the ones that need Metal or SDL build on macOS only, so a level's
+//! game server alone still builds for Linux.
+//! - `geometry`: the hyperboloid model's maths.
+//! - `app_bundle`, `fps_demo_assets`: where the game's files are, in the checkout or in `Warped.app`.
+//! - `shapes`: the smooth solids structures are made of.
+//! - `mesh`, `avatar_model`: glTF models of the maps' structures and the players' robot body.
+//! - `spaceships`: the spaceships in the sky.
+//! - `key_bindings`, `exit_prompt`: a player's controls, and the "leave the game?" prompt.
+//! - `texture_arrays`, `render_mesh`, `viewmodel`: Metal textures, models and the gun held in hand.
+//! - `overlay`, `hud_bars`: what is drawn over a frame, and the HUD's bars.
+//!
+//! Example: `use warped_shared::geometry::{AXIS_W, make_boost};`
+//!
+//! Must know:
+//! - Gotchas: a file here is the same for every level; a level that needs it to differ passes the
+//!   difference in, rather than keeping its own copy (`README.md`, "Adding a level").
+
+pub mod app_bundle;
+pub mod avatar_model;
+#[cfg(target_os = "macos")]
+pub mod exit_prompt;
+pub mod fps_demo_assets;
+pub mod geometry;
+#[cfg(target_os = "macos")]
+pub mod hud_bars;
+#[cfg(target_os = "macos")]
+pub mod key_bindings;
+pub mod mesh;
+#[cfg(target_os = "macos")]
+pub mod overlay;
+#[cfg(target_os = "macos")]
+pub mod render_mesh;
+pub mod shapes;
+pub mod spaceships;
+#[cfg(target_os = "macos")]
+pub mod texture_arrays;
+#[cfg(target_os = "macos")]
+pub mod viewmodel;

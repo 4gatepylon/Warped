@@ -175,9 +175,10 @@ make package-mac-app ONLINE_GAMES=online_games.txt
 - `make package-mac-app` builds `.build/Warped/Warped.app` (the game with its maps built in, the icon from
   [`app/app_icon.png`](app/app_icon.png), [`app/Info.plist`](app/Info.plist) with macOS 13 and the Local Network
   note), signs it ad hoc and zips it with [`app/how_to_open.txt`](app/how_to_open.txt) into `.build/Warped.zip`.
-- The app carries the fps_demo's surface textures in `Contents/Resources/assets/`, and `fps_demo_assets.rs` reads
-  them from there when the game runs from the app. The revolver is built into the program (`viewmodel.rs`), not
-  shipped as files, as its Sketchfab Standard license asks; the menu's CREDITS page credits its author.
+- The app carries the fps_demo's surface textures in `Contents/Resources/assets/`, and `fps_demo_assets.rs`
+  (`../warped_shared_rust/`) reads them from there when the game runs from the app. The revolver is built into the
+  program (`viewmodel.rs`), not shipped as files, as its Sketchfab Standard license asks; the menu's CREDITS page
+  credits its author.
 - `ONLINE_GAMES=` copies an `online_games.txt` into the app for its title screen (`title.rs` says the format); the
   cloud deploy writes it.
 
@@ -261,10 +262,13 @@ make run-autopilot
 
 ## How it works
 
+- [`../warped_shared_rust/`](../warped_shared_rust/README.md): the code every Rust level shares, used as a
+  library: `geometry.rs`, the gun held in hand (`viewmodel.rs`), the HUD's bars and overlay types, the maps'
+  models and the robot body, the smooth shapes, the key bindings, and finding assets.
 - `thrown_wormholes.rs`: each player's purple and green mouths: the lobbed throw, where a mouth hovers once down,
   and which colour is next. Each map adds the linked pairs as mouths of its own (after the map's), and
   `net.rs` sends every player's mouths in each snapshot.
-- `geometry.rs`: Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
+- `geometry.rs` (shared): Lorentz-matrix maths in double precision (the hyperboloid model, as in the WebGL demo).
 - `world.rs`: the scene: hyperbolic boxes grouped in clusters, and the wormholes' mouths with their gluing maps.
 - `scene_data.rs`: each frame, packs the scene into rows of float 4-vectors, one row in the camera's coordinates and
   one per mouth, so a ray that goes through a mouth stays in small coordinates (the same layout as the WebGL demo's

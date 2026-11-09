@@ -1,0 +1,29 @@
+# `Cargo.toml` builds `warped_shared`, the library of code every Rust level demo of Warped shares
+# (Lunar Surface, Dust, Snow Planet, City Sphere and the match), so each level is its own program
+# but the code they have in common is written once.
+#
+# Interface:
+#     warped_shared: a library; each level crate depends on it by path (`../warped_shared_rust`).
+#
+# Example:
+#     cargo test
+[package]
+name = "warped_shared"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+glam = "0.34"
+gltf = { version = "1.4", features = ["KHR_materials_emissive_strength", "KHR_materials_transmission"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+rayon = "1.12"
+serde = { version = "1.0", features = ["derive"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-metal = "0.3"
+sdl3 = { version = "0.22", features = ["build-from-source-static"] }
+
+[dev-dependencies]
+serde_yaml = "0.9"
