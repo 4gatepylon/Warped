@@ -115,11 +115,14 @@ is in [`AGENTS.md`](AGENTS.md).
 - [?] **W-139 Dark Forest thrown-wormhole sheet.** A bug found by agents on 2026-11-09: in Dark Forest's `spawn` view, a hard straight-edged sheet covers part of a thrown wormhole's lens (upper right), like a clipping glitch in the lens capture.
   #478: it was red's lift mouth on its deck, its lens reaching through the deck; no lens is drawn from below a
   mouth's floor now, so the deck's underside (the sheet) hides it whole.
-- [ ] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
 - [ ] **W-141 One window for the whole game.** The user, 2026-11-09: "please make it so that all this stuff is one window (if you need to make it one app thats fine, yuo can make a new demo for that and in the main readme say that the official mvp version is in that new folder)", and "thing 2 is to be able to play against gbots or alone selecting from the game itself".
 
 ## Pending user review
 
+- [?] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
+  #486: in every level (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest): holding `Tab`
+  shows the map over the game while play goes on; `Esc` opens the menu (freeing the mouse), `Esc` again closes it;
+  the menu's new QUIT page leaves the level, and a MATCH page shows the app's match status. Shared `warped_shared::menu_and_map`; old saved key bindings upgrade.
 - [?] **W-138 No aliasing.** The user, 2026-11-09, about W-136 (sharp centre, soft edges): "I think middle sharp is fine but there has to be enough blur to remove aliasing elsewhere", "aliasing is a big issue", "like no one ever ever like aliasing so you gota figure out how to deal with. that in particular". Applies to every level: the soft edges, half-resolution lenses and the rest of the image.
   #469: Lunar Surface, the match, Dust and Snow Planet: soft edges and Lunar's half-resolution lens shown through a
   smooth cubic B-spline, lasers kept sharp in lenses, and FXAA on every frame (0.2-0.8 ms at 3440x1440).

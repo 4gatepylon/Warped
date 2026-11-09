@@ -321,11 +321,11 @@ Every key here is the default. Each player can rebind any action, in the menu or
 | `E` (held) | Deactivate a console of the opposing team's pylons (see [Winning a level](#winning-a-level)) |
 | `Q` | Throw your purple wormhole mouth, the next press your green one, then purple again, and so on (see [Thrown wormholes](#thrown-wormholes)) |
 | `1`, `2` (in the lobby) | Join the blue or the red team |
-| `Tab` | Open or close the menu (see [Screen](#screen)). The player stands still while it is open, but the game goes on. |
+| `Tab` (held) | Show the whole level's map (the menu's MAP page) over the game while held; the game goes on and the player can still move and look. Letting go hides it. |
+| `Esc` | Open or close the menu (see [Screen](#screen)), which frees the mouse while it is open; its QUIT page leaves the game. The player stands still while it is open, but the game goes on. |
 | `Q`, `E` (in the menu) | Turn to the menu's previous or next page |
 | `Up`, `Down`, `Return`, `Left`, `Right` (in the menu) | Pick a setting, rebind a key (`Return`, then the new key), change a number |
 | `-`, `=` | Lower or raise the render resolution |
-| `Esc` | Free the mouse; with the mouse free, ask "Do you want to exit?" (`Return` or `Y` exits, `Esc` or `N` goes back to the game) |
 
 ## Screen
 
@@ -351,8 +351,8 @@ The screens a player meets, in order:
   [Respawning](#respawning)).
 - **Win:** when a team has won, every player sees `<TEAM> TEAM WINS`, and a new game starts when the server's
   operator presses `Enter` in its terminal, or, on a server in the cloud, 10 s after the win.
-- **Exit:** `Esc` frees the mouse; `Esc` again asks "Do you want to exit?", and `Return` or `Y` quits while `Esc` or
-  `N` goes back to the game.
+- **Exit:** `Esc` opens the menu; on its QUIT page (`Q` from SCORES, where it opens) "Do you want to leave the
+  game?" leaves with `Return` or `Y`, and `Esc` goes back to the game.
 
 What a player sees while playing:
 
@@ -370,8 +370,12 @@ What a player sees while playing:
   `player_settings.yaml` (`minimap`).
 - **Console bar:** while a player holds `E` on a console, a bar below the crosshair fills over the
   10 s it takes, and they can't shoot (see [Winning a level](#winning-a-level)).
-- **Menu** (`Tab`), with four pages under a tab bar; it opens on SCORES, and `Q` and `E` turn the
-  pages. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
+- **Map while `Tab` is held:** the MAP page's picture and legend over the dimmed game, which goes on taking the
+  player's input, until `Tab` is let go.
+- **Menu** (`Esc`, which frees the mouse; `Esc` again closes it and captures the mouse), with five pages under a tab
+  bar; it opens on SCORES, and `Q` and `E` turn the pages. Inside the one-window app a sixth page, MATCH, comes
+  first, with the match's status (the current level, the round, which team attacks and the scores), and the menu
+  opens on it. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
   bindings say, so a bad binding can always be fixed. The player stands still while it is open,
   but the game goes on.
   - SCORES: the player count, and each player's team, kills and deaths in this game, sorted by
@@ -390,6 +394,8 @@ What a player sees while playing:
     A legend line names the marks.
   - CREDITS: where the game's assets come from (their authors, sources and licenses), the font
     and the libraries the game is built on.
+  - QUIT: "Do you want to leave the game?"; `Return` or `Y` leaves it (a level run alone quits; the one-window app
+    goes back to its game menu), and `Esc` goes back to the game.
 - **Hit effects:** a player who is hit sees red and a blur come in from the screen's edges, and the
   screen shakes (each player's own setting).
 - **Motion blur:** a slight one (each player's own setting).

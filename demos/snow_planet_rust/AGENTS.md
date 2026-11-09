@@ -58,7 +58,7 @@ Every agent that changes how the demo looks follows the `graphical-changes` skil
 
 ## Credits for assets
 
-The game's CREDITS page (the `Tab` menu, text in [`src/credits.rs`](src/credits.rs)) says where every asset comes from.
+The game's CREDITS page (the `Esc` menu, text in [`src/credits.rs`](src/credits.rs)) says where every asset comes from.
 
 - **Add credits with the asset.** Any change that adds an asset to the game (a texture, model, sound, font, picture or
   data from outside this repository) adds it to `CREDITS_LINES` in the same PR: what it is, its author, where it came
