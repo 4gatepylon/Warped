@@ -1,22 +1,22 @@
 //! `scene` loads every asset into the renderer: the arena's surfaces, the props, the robot,
-//! the first-person weapon (the Sketchfab energy revolver and arms, or the Poly Haven rifle if
-//! they are missing), and the sky. It also picks exposure and light levels from the sky.
+//! both guns in hand as Lunar Surface draws them (the Poly Haven bolt-action rifle for the sniper
+//! and the Sketchfab energy revolver for the rifle), and the sky. It also picks exposure and light levels from the sky.
 //!
 //! Example:
-//!     let scene: Scene = Scene::load(&mut renderer, &assets_dir, &arena, &options);
+//!     let scene: Scene = Scene::load(&mut renderer, &assets_dir, &textures_dir, &arena);
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 
 use crate::asset_manifest::{self, PolyHavenTexture};
 use crate::assets::gltf_model::{Model, ModelOptions, load_model};
 use crate::assets::sky::{Sky, load_sky};
 use crate::assets::textures::{TextureRequest, TextureSource, decode_textures};
 use crate::game::collision::Aabb;
-use crate::game::weapon::ViewmodelPose;
+use crate::game::guns::GunModel;
 use crate::game::world::{Arena, Surface};
 use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, MaterialData, MaterialHandle, MeshHandle,
@@ -47,24 +47,13 @@ const SURFACE_TEXTURE_SIZE_PX: u32 = 2048;
 /// `STATIC_TILE_M` is the width of the tiles the arena's surfaces are cut into, so each pass
 /// draws only the tiles in its view.
 const STATIC_TILE_M: f32 = 8.0;
-/// `ARMS_POSE_NODE` is the arms model's static pose with both arms reaching forward; the other
-/// five poses are display poses.
-const ARMS_POSE_NODE: &str = "Arms_Obj.001";
 
-/// `SceneOptions` are the loading choices.
-pub struct SceneOptions {
-    pub should_use_rifle: bool,
-}
-
-/// `Viewmodel` is the first-person weapon: its parts, placement, and where its muzzle is.
-pub struct Viewmodel {
-    pub weapon: Model,
-    pub arms: Option<Model>,
-    pub arms_local: Mat4,
-    pub weapon_local: Mat4,
-    pub pose: ViewmodelPose,
-    pub muzzle_local_m: Vec3,
-    pub is_energy_weapon: bool,
+/// `GunViewmodel` is a gun model drawn in hand: its parts, and `muzzle_from_gltf`, which takes its
+/// glTF's space to its muzzle's (the muzzle at the origin, the barrel along -z) at its size in hand,
+/// as Lunar Surface's `viewmodel.rs` places it.
+pub struct GunViewmodel {
+    pub model: Model,
+    pub muzzle_from_gltf: Mat4,
 }
 
 /// `Scene` is everything loaded into the renderer.
@@ -76,7 +65,8 @@ pub struct Scene {
     pub robot_scale: f32,
     pub robot_clips: [usize; 4],
     pub robot_material_names: Vec<String>,
-    pub viewmodel: Viewmodel,
+    pub revolver: GunViewmodel,
+    pub bolt_action_rifle: GunViewmodel,
     pub light_scale: f32,
     pub beacon: Model,
 }
@@ -261,23 +251,16 @@ fn environment_from_sky(sky: Sky) -> (EnvironmentData, f32) {
     (environment, daylight_radiance)
 }
 
-/// `REVOLVER_ANCHOR_INSET_M` is how far the revolver's pivot sits below its top and ahead of its
-/// rear; the pivot is the point the hip and ADS offsets place.
-const REVOLVER_ANCHOR_INSET_M: Vec3 = Vec3::new(0.0, 0.02, 0.05);
-/// `REVOLVER_BORE_DEPTH_M` is how far the bore sits below the revolver's top.
-const REVOLVER_BORE_DEPTH_M: f32 = 0.05;
-/// `REVOLVER_HIP_OFFSET_M` is the revolver pivot's camera-space position when hip firing.
-const REVOLVER_HIP_OFFSET_M: Vec3 = Vec3::new(0.085, -0.115, -0.27);
-/// `REVOLVER_ADS_OFFSET_M` puts the collimator reticle on the screen centre.
-const REVOLVER_ADS_OFFSET_M: Vec3 = Vec3::new(0.0, -0.013, -0.22);
-/// `ARMS_OFFSET_M` places the right arm's hand behind the revolver grip.
-const ARMS_OFFSET_M: Vec3 = Vec3::new(0.03, -0.17, -0.14);
-/// `ARMS_SKIN_TINT_RGB` tones down the arms texture's saturated orange skin to match the scene.
-const ARMS_SKIN_TINT_RGB: Vec3 = Vec3::new(0.62, 0.58, 0.6);
-/// `ARMS_M_PER_MODEL_UNIT` scales the arms model to human size.
-const ARMS_M_PER_MODEL_UNIT: f32 = 0.17;
-/// `ARMS_MIN_X` keeps only the right arm; the left hand would float in the air.
-const ARMS_MIN_X: f32 = 0.0;
+/// `REVOLVER_SCALE` and `BOLT_ACTION_RIFLE_SCALE` are how many times their modelled size the
+/// guns are drawn in hand, `BOLT_ACTION_RIFLE_TURN_RAD` turns the rifle so that its barrel, along
+/// +x in its glTF, points along +z like the revolver's, and `MUZZLE_SLICE_M` is how far behind a gun
+/// model's front its vertices count as the muzzle's face: Lunar Surface's `viewmodel.rs`.
+const REVOLVER_SCALE: f32 = 1.6;
+const BOLT_ACTION_RIFLE_SCALE: f32 = 0.28;
+const BOLT_ACTION_RIFLE_TURN_RAD: f32 = -std::f32::consts::FRAC_PI_2;
+const MUZZLE_SLICE_M: f32 = 0.01;
+/// `REVOLVER_EMISSIVE_PER_SCENE` brightens the revolver's glowing parts against the scene's.
+const REVOLVER_EMISSIVE_PER_SCENE: f32 = 4.0;
 
 /// `RAILGUN_REVOLVER_NODE_PARTS` are name parts of the revolver's railgun variant; the file also
 /// holds a ballistic variant beside it.
@@ -299,101 +282,80 @@ fn is_railgun_revolver_node(name: &str) -> bool {
         .any(|part| name.contains(part))
 }
 
-/// `load_viewmodel` loads the energy revolver and arms, or the rifle as a fallback.
-fn load_viewmodel(
+/// `get_muzzle_m` gives a gun model's muzzle in model space: the middle of its front face (the
+/// vertices within `MUZZLE_SLICE_M` of its frontmost, the largest z), on that front.
+///
+/// Example: `let muzzle_m: Vec3 = get_muzzle_m(&positions_m);`
+fn get_muzzle_m(positions_m: &[Vec3]) -> Vec3 {
+    let front_z_m: f32 = positions_m.iter().map(|p| p.z).fold(f32::MIN, f32::max);
+    let (face_min_m, face_max_m) = positions_m
+        .iter()
+        .filter(|p| p.z > front_z_m - MUZZLE_SLICE_M)
+        .fold(
+            (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+        );
+    ((face_min_m + face_max_m) * 0.5).with_z(front_z_m)
+}
+
+/// `get_muzzle_from_model` takes a gun model's space to its muzzle's: `muzzle_m` to the origin,
+/// the barrel along -z (the camera's ahead), drawn `scale` times its modelled size.
+///
+/// Example: `let muzzle_from_model: Mat4 = get_muzzle_from_model(muzzle_m, 1.6);`
+fn get_muzzle_from_model(muzzle_m: Vec3, scale: f32) -> Mat4 {
+    Mat4::from_rotation_y(std::f32::consts::PI)
+        * Mat4::from_scale(Vec3::splat(scale))
+        * Mat4::from_translation(-muzzle_m)
+}
+
+/// `load_gun_viewmodel` loads `gun_model` from the fps_demo's assets and finds its muzzle, as
+/// Lunar Surface's `Viewmodel::Load` does: the revolver's railgun parts drawn 1.6 times their size,
+/// or the whole bolt-action rifle, turned, at 0.28 times.
+///
+/// Example: `let revolver = load_gun_viewmodel(renderer, assets_dir, GunModel::Revolver, 1.0);`
+fn load_gun_viewmodel(
     renderer: &mut dyn Renderer,
     assets_dir: &Path,
-    options: &SceneOptions,
+    gun_model: GunModel,
     emissive_scale: f32,
-) -> Viewmodel {
-    let revolver_path =
-        asset_manifest::sketchfab_gltf_path(assets_dir, asset_manifest::SKETCHFAB_REVOLVER_DIR);
-    let arms_path =
-        asset_manifest::sketchfab_gltf_path(assets_dir, asset_manifest::SKETCHFAB_ARMS_DIR);
-    if revolver_path.exists() && !options.should_use_rifle {
-        let weapon: Model = load_model(
-            renderer,
-            &revolver_path,
-            &ModelOptions {
-                should_include_mesh_node: &is_railgun_revolver_node,
-                should_recenter: false,
-                emissive_scale: emissive_scale * 4.0,
-                ..ModelOptions::default()
-            },
-        );
-        println!(
-            "revolver bounds {:?} .. {:?}",
-            weapon.bounds_min_m, weapon.bounds_max_m
-        );
-        let arms: Option<Model> = arms_path.exists().then(|| {
-            let filter = |name: &str| name == ARMS_POSE_NODE;
-            let arms: Model = load_model(
-                renderer,
-                &arms_path,
-                &ModelOptions {
-                    should_include_mesh_node: &filter,
-                    min_x_m: ARMS_MIN_X,
-                    base_color_tint_rgb: ARMS_SKIN_TINT_RGB,
-                    ..ModelOptions::default()
-                },
-            );
-            println!(
-                "arms bounds {:?} .. {:?}",
-                arms.bounds_min_m, arms.bounds_max_m
-            );
-            arms
-        });
-        let anchor_m: Vec3 = Vec3::new(
-            (weapon.bounds_min_m.x + weapon.bounds_max_m.x) * 0.5,
-            weapon.bounds_max_m.y - REVOLVER_ANCHOR_INSET_M.y,
-            weapon.bounds_min_m.z + REVOLVER_ANCHOR_INSET_M.z,
-        );
-        let arms_local: Mat4 = Mat4::from_translation(ARMS_OFFSET_M)
-            * Mat4::from_scale(Vec3::splat(ARMS_M_PER_MODEL_UNIT));
-        let muzzle_local_m: Vec3 = Vec3::new(
-            anchor_m.x,
-            weapon.bounds_max_m.y - REVOLVER_BORE_DEPTH_M,
-            weapon.bounds_max_m.z,
-        );
-        return Viewmodel {
-            weapon,
-            arms,
-            arms_local,
-            weapon_local: Mat4::from_rotation_y(std::f32::consts::PI)
-                * Mat4::from_translation(-anchor_m),
-            pose: ViewmodelPose {
-                hip_offset_m: REVOLVER_HIP_OFFSET_M,
-                ads_offset_m: REVOLVER_ADS_OFFSET_M,
-                base_rotation: Quat::IDENTITY,
-            },
-            muzzle_local_m,
-            is_energy_weapon: true,
-        };
-    }
-    let weapon: Model = load_model(
+) -> GunViewmodel {
+    let (path, turn_rad, scale, emissive_scale): (PathBuf, f32, f32, f32) = match gun_model {
+        GunModel::Revolver => (
+            asset_manifest::sketchfab_gltf_path(assets_dir, asset_manifest::SKETCHFAB_REVOLVER_DIR),
+            0.0,
+            REVOLVER_SCALE,
+            emissive_scale * REVOLVER_EMISSIVE_PER_SCENE,
+        ),
+        GunModel::BoltActionRifle => (
+            asset_manifest::model_gltf_path(assets_dir, &asset_manifest::RIFLE_MODEL),
+            BOLT_ACTION_RIFLE_TURN_RAD,
+            BOLT_ACTION_RIFLE_SCALE,
+            emissive_scale,
+        ),
+    };
+    let model: Model = load_model(
         renderer,
-        &asset_manifest::model_gltf_path(assets_dir, &asset_manifest::RIFLE_MODEL),
+        &path,
         &ModelOptions {
+            should_include_mesh_node: match gun_model {
+                GunModel::Revolver => &is_railgun_revolver_node,
+                GunModel::BoltActionRifle => &|_: &str| true,
+            },
             should_recenter: false,
+            emissive_scale,
+            should_keep_positions: true,
             ..ModelOptions::default()
         },
     );
-    println!(
-        "rifle bounds {:?} .. {:?}",
-        weapon.bounds_min_m, weapon.bounds_max_m
-    );
-    Viewmodel {
-        weapon,
-        arms: None,
-        arms_local: Mat4::IDENTITY,
-        weapon_local: Mat4::IDENTITY,
-        pose: ViewmodelPose {
-            hip_offset_m: Vec3::new(0.14, -0.16, -0.3),
-            ads_offset_m: Vec3::new(0.0, -0.1, -0.24),
-            base_rotation: Quat::from_euler(EulerRot::YXZ, 0.0, 0.0, 0.0),
-        },
-        muzzle_local_m: Vec3::new(0.0, 0.0, -0.8),
-        is_energy_weapon: false,
+    let turn: Mat4 = Mat4::from_rotation_y(turn_rad);
+    let turned_m: Vec<Vec3> = model
+        .positions_m
+        .iter()
+        .map(|position_m| turn.transform_point3(*position_m))
+        .collect();
+    GunViewmodel {
+        muzzle_from_gltf: get_muzzle_from_model(get_muzzle_m(&turned_m), scale) * turn,
+        model,
     }
 }
 
@@ -401,13 +363,12 @@ impl Scene {
     /// `load` loads everything and uploads the environment and occluders.
     ///
     /// Example:
-    ///     let scene: Scene = Scene::load(&mut renderer, &assets_dir, &arena, &options);
+    ///     let scene: Scene = Scene::load(&mut renderer, &assets_dir, &textures_dir, &arena);
     pub fn load(
         renderer: &mut dyn Renderer,
         assets_dir: &Path,
         textures_dir: &Path,
         arena: &Arena,
-        options: &SceneOptions,
     ) -> Scene {
         let start: Instant = Instant::now();
         let mut sky: Sky = load_sky(&asset_manifest::hdri_path(assets_dir), GROUND_ALBEDO);
@@ -480,7 +441,14 @@ impl Scene {
             robot.bounds_min_m, robot.bounds_max_m
         );
 
-        let viewmodel: Viewmodel = load_viewmodel(renderer, assets_dir, options, emissive_scale);
+        let revolver: GunViewmodel =
+            load_gun_viewmodel(renderer, assets_dir, GunModel::Revolver, emissive_scale);
+        let bolt_action_rifle: GunViewmodel = load_gun_viewmodel(
+            renderer,
+            assets_dir,
+            GunModel::BoltActionRifle,
+            emissive_scale,
+        );
         let beacon_path: PathBuf = crate::map::default_map_path()
             .parent()
             .and_then(Path::parent)
@@ -505,7 +473,8 @@ impl Scene {
             robot_scale,
             robot_clips,
             robot_material_names,
-            viewmodel,
+            revolver,
+            bolt_action_rifle,
             light_scale,
             beacon,
         }

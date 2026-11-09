@@ -31,8 +31,6 @@ const ENGAGE_DISTANCE_M: f32 = 15.0;
 const RETREAT_DISTANCE_M: f32 = 6.0;
 /// `REACTION_DELAY_S` is how long a bot waits after spotting the player before shooting.
 const REACTION_DELAY_S: f32 = 0.7;
-/// `SHOT_DAMAGE` is the damage of one bot hit.
-pub const SHOT_DAMAGE: f32 = 9.0;
 /// `RESPAWN_DELAY_S` is how long a dead bot lies before respawning.
 pub const RESPAWN_DELAY_S: f32 = 6.0;
 /// `ANIMATION_BLEND_S` is the cross-fade time between clips.
