@@ -620,8 +620,9 @@ impl VoxelFrame {
                 let c: [f32; 3] = team_colors[team as usize % 2];
                 [c[0], c[1], c[2], SPOT_BRIGHTNESS]
             }),
-            regions: world.regions.map_or([0.0; 4], |[edge, u_m, v_m]| {
-                [edge as f32, u_m as f32, v_m as f32, 0.0]
+            regions: world.regions.map_or([0.0; 4], |[edge, u_m, v_m]| match world.torus {
+                Some(_) => [edge as f32, f32::INFINITY, f32::INFINITY, 0.0],
+                None => [edge as f32, u_m as f32, v_m as f32, 0.0],
             }),
             terrain: world.terrain.as_ref().map_or([0.0; 4], |t| {
                 [t.rim_m[0], t.rim_m[1], t.wall_m, t.rim_height_m].map(|x| x as f32)
@@ -1112,6 +1113,7 @@ mod tests {
     //! | Speckle share | none, some; the kinds' shares from the settings | `beams_carry_their_gun_team_and_speckle` |
     //! | A beacon's console | on (its beam is bright), off (its beam goes, the others stay) | `beacon_beams_go_with_their_consoles` |
     //! | Eye on a looping world | on the black hole's side of the seam, across it | `each_black_hole_bends_light_at_its_copy_nearest_the_eye` |
+    //! | Ground's boundary | bounded level (Lunar Surface: its ellipse), looping level (none) | `only_a_bounded_ground_shows_its_boundary` |
 
     use super::*;
     use crate::map::{Map, get_map_folder};
@@ -1142,6 +1144,22 @@ mod tests {
                     w.copy_offset_m
                 );
             }
+        }
+    }
+
+    #[test]
+    fn only_a_bounded_ground_shows_its_boundary() {
+        for (name, is_bounded) in [("lunar_surface", true), ("snow_planet", false)] {
+            let mut map: Map = Map::Load(&get_map_folder(name)).expect("a map");
+            if map.is_euclidean() {
+                map.curve_flat(crate::map::FLAT_CURVATURE_RADIUS_M);
+            }
+            let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+            let camera: DMat4 = VoxelPlayer::AtView(&world, [0.0, 0.0], [1.0, 0.0], None, 0.0)
+                .get_camera_frame(&world);
+            let frame: VoxelFrame = VoxelFrame::Build(&world, camera, &[], None, &[], (64, 64));
+            let [_, u_m, v_m, _] = frame.uniforms.regions;
+            assert_eq!(u_m.is_finite() && v_m.is_finite(), is_bounded, "{name}: {u_m} x {v_m}");
         }
     }
 

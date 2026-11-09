@@ -60,8 +60,8 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
   past u = ±56 m or v = ±36 m carries on from the other side, and copies ("ghosts") of what stands near a seam
   stand past the opposite one, so it blocks and bends light from both sides. Light rays cross the seams too, out to
   112 m (`MAX_COPY_DISTANCE_M`), so the level is seen repeating (far black holes as plain dark disks, copies without
-  beams); past that, only the empty snowfield. Shooting across
-  the seams comes next.
+  beams); past that, only the empty snowfield. Lasers cross the seams too (S16). The minimap and the map page wrap
+  (S17): other players and shots show at their copy nearest you, and the picture repeats past each seam.
 - Blizzards: `VoxelWorld::find_blizzard` (a point's blizzard), `get_blizzard_frac` (how much of a shot's reach a
   chord uses) and `stop_in_blizzards` (cuts the laser) in `src/voxel_world.rs`; `VoxelPlayer::step` slows the
   player; the server freezes players standing in one (`net::Server::freeze_players`, `net::Freezing`); the shader's
@@ -72,7 +72,8 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
 - Map page (Tab, then E): `make map-picture` (`--map-picture`, `src/map_photo.rs`) renders the map from 40 m up
   in 8 m tiles with 2×2 supersampling, without the global snow and fog, and saves `map_pictures/<map>.png`.
   `MapLayout` (`src/map_layout.rs`) draws it under the live marks, and falls back to its flat drawing if the file is
-  missing. The picture costs nothing per frame.
+  missing. The picture costs nothing per frame. On a looping map the page shows the cell, dashed seams and a 4 m
+  margin repeating the far side, and the minimap's copy of the picture repeats the cell 80 m further.
 
 ## Validation
 
