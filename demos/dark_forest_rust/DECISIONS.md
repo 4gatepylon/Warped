@@ -197,6 +197,12 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   speeds part where Lunar meets its terrain and structures; the speeds themselves are Lunar's
   (`test_movement_matches_lunar_surface`), and a unit test checks every step's rules state is the shared
   `MoveState`'s, bit for bit.
+- **D38. Smooth wormhole lenses and 16x anisotropic filtering** (W-138, no aliasing). The lens picture is drawn at
+  half resolution; tone mapping now reads it through a cubic B-spline in four bilinear taps (`sample_spline`) instead
+  of one bilinear tap, so a lens's content and rim show no 2-pixel steps. Materials sample with 16x anisotropy (was
+  8x), which calms planks and decks seen edge-on a little; the bridge plank's grain still shows a faint zig-zag at a
+  grazing angle. FXAA was already on and covers the rest; `--photo --photo-hud` captures the frame as the player
+  sees it (after FXAA), `--photo` alone before it. Cost at 3440x1440: within 0.2 ms per view.
 
 ## Follow-ups for the next agent
 
