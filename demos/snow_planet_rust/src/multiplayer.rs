@@ -521,11 +521,12 @@ pub enum BotObjective {
     Consoles,
 }
 
-/// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
-/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits
+/// `run_voxel_bot` is `run_bot` on a voxel map: it walks after the nearest enemy around blocks and
+/// dangers and, once it sees them, faces them and fires (`console_bot::Fighter`), reports hits
 /// (handing `save_view` its view, which it may save on another thread) and rejoins the server
-/// settings' `respawn.delay_s` after being hit. With `objective` `Consoles` it instead walks to the other team's consoles
-/// (`consoles`, each one's place) and turns them off on foot (`console_bot.rs`) until a team wins.
+/// settings' `respawn.delay_s` after being hit.
+/// With `objective` `Consoles` it walks to the other team's consoles instead (`consoles`, each
+/// one's place) and turns them off on foot (`console_bot::ConsoleWalker`) until a team wins.
 /// The black hole grows with the server's consoles, or to `black_hole_strength` when given, and the
 /// bot's own time slows near it. It returns how many players it hit and how often it was hit, and
 /// fails if the server curves space other than the built-in settings (`check_bot_space`).

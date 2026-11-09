@@ -508,13 +508,13 @@ pub fn describe_voxel_laser(world: &VoxelWorld, view: &SharedVoxelView) -> Optio
     }
 }
 
-/// `run_voxel_bot` is `run_bot` on a voxel map: it walks toward the nearest other player (jumping
-/// when a block stops it), faces them, fires when within `VOXEL_BOT_LASER_RANGE_M`, reports hits
+/// `run_voxel_bot` is `run_bot` on a voxel map: it walks after the nearest enemy around blocks and
+/// dangers and, once it sees them, faces them and fires (`console_bot::Fighter`), reports hits
 /// (handing `save_view` its view, which it may save on another thread) and rejoins the server
-/// settings' `respawn.delay_s` after being hit. The black hole grows with the server's consoles, or to `black_hole_strength`
-/// when given, and the bot's own time slows near it. It returns how many players it hit and how
-/// often it was hit, and fails if the server curves space other than the built-in settings
-/// (`check_bot_space`).
+/// settings' `respawn.delay_s` after being hit.
+/// The black hole grows with the server's consoles, or to `black_hole_strength` when given, and the
+/// bot's own time slows near it. It returns how many players it hit and how often it was hit, and
+/// fails if the server curves space other than the built-in settings (`check_bot_space`).
 ///
 /// Example: `let (hit_count, eliminated_count) = multiplayer::run_voxel_bot(&world, &mut client, 30.0, None, |frame, id| Ok(()))?;`
 pub fn run_voxel_bot(
