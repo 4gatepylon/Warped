@@ -2,9 +2,11 @@
 //! `VoxelWorld` (with any avatars), the laser beams and the dust of shots into the ground
 //! (`dust.rs`) into buffers each frame and traces them into the render texture that
 //! `render_metal.rs` upscales and presents, every pixel or with the house's adaptive sampling
-//! (`render_metal.rs`'s `encode_adaptive_sampling`).
+//! (`render_metal.rs`'s `encode_adaptive_sampling`), sharp in the middle of the image and softer
+//! toward its edges (`SharpCentre`, W-136, sharp centre, soft edges).
 //!
-//! Interface: `VoxelUniforms`, `VoxelFrame::Build`, `VoxelGpu`.
+//! Interface: `VoxelUniforms`, `SharpCentre`, `ALL_SHARP`, `DEFAULT_SHARP_CENTRE`,
+//! `VoxelFrame::Build`, `VoxelFrame::set_sharp_centre`, `VoxelGpu`.
 //!
 //! Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &[], (1280, 800));`
 
@@ -144,6 +146,54 @@ pub struct VoxelUniforms {
     pub zone_walls: GpuZoneWalls,
     pub milky_way_pole: [f32; 4],
     pub milky_way_core: [f32; 4],
+    pub fovea: [f32; 4],
+}
+
+/// `SharpCentre` is how much of the image is drawn sharp, W-136 (sharp centre, soft edges): pixels
+/// within `sharp_width_frac` of the image's width across (a circle around its centre) at full
+/// resolution, those within `half_width_frac` at half resolution each way (the even pixels shaded,
+/// the rest blended from them) and the rest at a quarter (every fourth pixel each way shaded).
+/// `f64::INFINITY` keeps every pixel sharp.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SharpCentre {
+    pub sharp_width_frac: f64,
+    pub half_width_frac: f64,
+}
+
+/// `ALL_SHARP` draws every pixel at full resolution, as before W-136 (sharp centre, soft edges);
+/// every frame starts with it, so pictures such as a map's stay sharp.
+pub const ALL_SHARP: SharpCentre = SharpCentre {
+    sharp_width_frac: f64::INFINITY,
+    half_width_frac: f64::INFINITY,
+};
+
+/// `DEFAULT_SHARP_CENTRE` is what the window and the bench views draw unless told otherwise: the
+/// middle two thirds of the width sharp, the rest at half resolution.
+pub const DEFAULT_SHARP_CENTRE: SharpCentre = SharpCentre {
+    sharp_width_frac: 0.66,
+    half_width_frac: f64::INFINITY,
+};
+
+impl SharpCentre {
+    /// `get_fovea` gives the shader's `fovea` for an image `size_px` wide and high: the sharp and
+    /// half-resolution radii in pixels.
+    ///
+    /// Example: `let fovea: [f32; 4] = DEFAULT_SHARP_CENTRE.get_fovea((2560, 1440));`
+    fn get_fovea(&self, size_px: (usize, usize)) -> [f32; 4] {
+        assert!(
+            self.sharp_width_frac > 0.0 && self.half_width_frac >= self.sharp_width_frac,
+            "SharpCentre: the sharp width ({}) must be positive and at most the half-resolution width ({})",
+            self.sharp_width_frac,
+            self.half_width_frac
+        );
+        let half_width_px: f64 = 0.5 * size_px.0 as f64;
+        [
+            (self.sharp_width_frac * half_width_px) as f32,
+            (self.half_width_frac * half_width_px) as f32,
+            0.0,
+            0.0,
+        ]
+    }
 }
 
 const _: () = assert!(
@@ -760,6 +810,7 @@ impl VoxelFrame {
             milky_way_core: world
                 .milky_way
                 .map_or([0.0; 4], |(_, core)| core.as_vec3().extend(0.0).to_array()),
+            fovea: ALL_SHARP.get_fovea((size_px.0 as usize, size_px.1 as usize)),
         };
         assert_eq!(
             world.palette.len(),
@@ -813,6 +864,14 @@ impl VoxelFrame {
             self.uniforms.width_px as usize,
             self.uniforms.height_px as usize,
         )
+    }
+
+    /// `set_sharp_centre` sets how much of the frame is drawn sharp (W-136, sharp centre, soft
+    /// edges); a frame starts with `ALL_SHARP`.
+    ///
+    /// Example: `frame.set_sharp_centre(DEFAULT_SHARP_CENTRE);`
+    pub fn set_sharp_centre(&mut self, sharp_centre: SharpCentre) {
+        self.uniforms.fovea = sharp_centre.get_fovea(self.get_render_size());
     }
 }
 
@@ -1358,6 +1417,7 @@ mod tests {
     //! | Mounds | on a mound, off the mounds | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
     //! | Where in a grid cell | at a grid point, inside a cell | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
     //! | Baked grid | inside it, just inside its edge, past its edge along u and along v (the shape's height) | `the_shader_draws_the_ground_the_cpu_walks_and_hits_on` |
+    //! | Sharp centre | all sharp, the default, sharp wider than the half-resolution circle (fails) | `sharp_centre_radii_follow_the_width`, `sharp_centre_wider_than_half_fails` |
 
     use objc2_metal::{
         MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCreateSystemDefaultDevice,
@@ -1379,6 +1439,33 @@ mod tests {
     const IN_CELL_FRAC: [f64; 2] = [0.37, 0.61];
     const PAST_EDGE_M: f64 = 3.0;
     const BEFORE_EDGE_M: f64 = 0.1;
+
+    #[test]
+    fn sharp_centre_radii_follow_the_width() {
+        let width_px: usize = 3440;
+        let fovea: [f32; 4] = DEFAULT_SHARP_CENTRE.get_fovea((width_px, 1440));
+        let expected_px: f64 = DEFAULT_SHARP_CENTRE.sharp_width_frac * 0.5 * width_px as f64;
+        assert!(
+            (f64::from(fovea[0]) - expected_px).abs() < 0.01,
+            "{fovea:?}"
+        );
+        assert!(fovea[1] >= fovea[0], "{fovea:?}");
+        let all_sharp: [f32; 4] = ALL_SHARP.get_fovea((width_px, 1440));
+        assert!(
+            all_sharp[0].is_infinite() && all_sharp[1].is_infinite(),
+            "{all_sharp:?}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "SharpCentre")]
+    fn sharp_centre_wider_than_half_fails() {
+        let sharp_centre: SharpCentre = SharpCentre {
+            sharp_width_frac: 0.8,
+            half_width_frac: 0.5,
+        };
+        sharp_centre.get_fovea((2560, 1440));
+    }
 
     /// `measure_ground_on_gpu` runs the shader's `measure_terrain_heights` on `world`'s frame at
     /// `points` (Fermi u, v in meters) and gives the heights it draws there.

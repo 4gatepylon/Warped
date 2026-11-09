@@ -2105,6 +2105,36 @@
 - **Gives up:** detail finer than two pixels deep in a lens.
 - **Rationale:** the user chose it from D112's options sheet.
 
+### D115. A sharp centre with softer edges, W-136 (sharp centre, soft edges)
+
+- **Choice:** the window and the bench views draw a circle around the image's centre, `sharp_width_frac` of the
+  image's width across, exactly as before (adaptive sampling), and the rest at half resolution: there only the even
+  pixels (every second each way) are shaded and the others are blended from them, with no refinement. Beyond a second
+  circle, `half_width_frac` of the width across, only every fourth pixel each way is shaded (a quarter resolution).
+  The default (`DEFAULT_SHARP_CENTRE`) is the middle 66% sharp with the rest at half (option B); `--sharp-width-frac`
+  and `--half-width-frac` choose others (`inf` for none), and every other picture (the map's, tests) stays all sharp.
+  The same code is in Dust's and Snow Planet's renderers.
+- **How:** `get_fovea_level` gives each 4 × 4 pixel block its level from its centre's distance to the image's centre.
+  `fill_samples` skips the fine samples no half or sharp block needs (`is_sample_needed`, 8 pixels of margin);
+  `classify_cells` marks no cell outside the centre smooth and lists them all with their level; `resolve_pixels`
+  shades only the even pixels whose sample is needed and every fourth pixel; `refine_pixels` blends the rest
+  bilinearly from pixels `resolve_pixels` wrote, so no thread reads a pixel another writes in the same pass.
+- **Options measured** (Lunar Surface, 3440×1440, median GPU ms, best of 3 alternating rounds under the exclusive
+  lock; red_hangar / blue_hesco_rows / beacon / wormhole_exit): A all sharp 16.0 / 15.7 / 15.6 / 24.9; B middle 66%
+  sharp, rest half 15.5 / 13.9 / 14.8 / 24.6; C middle 50%, rest half 15.3 / 13.2 / 14.1 / 24.5; D middle 66%, half
+  to 100%, corners quarter 15.4 / 13.7 / 14.8 / 24.5; E middle 50%, half to 75%, rest quarter 14.8 / 12.7 / 13.6 /
+  23.4.
+- **Why the savings are small:** about 5.5 ms of a 3440×1440 frame doesn't depend on how many pixels are shaded
+  (filling and classifying the sample grid, bloom, tone mapping, the passes over every pixel), and the coarse pass
+  (every fourth pixel, always traced) costs 3-10 ms; even the whole image at a quarter takes 8.9 ms on red_hangar and
+  15.9 ms on wormhole_exit, whose lens fills the middle.
+- **Look:** the centre is the same picture (at most 1-2 of 255, through the bloom); outside it, edges between
+  surfaces are stepped at 2 pixels (half) or 4 pixels (quarter) and fine texture is softer.
+- **Gives up:** detail at the image's edges; nothing in the middle.
+- **Rationale:** the user (2026-11-09): "Try to at least have the ability to see a nice, good resolution for the
+  important things that are right in front of you." B keeps the centre identical and gives each heavy view a margin
+  under 16.7 ms; E is there for slower machines. The user picks.
+
 ## Workload
 
 ### D7. Eight fixed views

@@ -304,6 +304,13 @@ constant int STRAIGHT_RAY_BIT = 14;
 constant int BENT_STEPS_FIRST_BIT = 15;
 constant int BENT_STEPS_MASK = 255;
 constant int LENS_HALF_RES_STEPS = 8;
+constant int FOVEA_SHARP = 0;
+constant int FOVEA_HALF = 1;
+constant int FOVEA_QUARTER = 2;
+constant uint FOVEA_BLOCK_PX = 4;
+constant float FOVEA_SAMPLE_MARGIN_PX = 8.0;
+constant uint REFINE_CELL_MASK = (1u << 24) - 1;
+constant int REFINE_LEVEL_FIRST_BIT = 24;
 constant float FINE_SAMPLE_SPACING_PX = 2.0;
 constant float COARSE_SAMPLE_SPACING_PX = 4.0;
 constant int RIFLE_BEAM_CODE = 2;
@@ -516,8 +523,9 @@ struct ZoneWalls {
 /**
  * @brief `VoxelUniforms` is one frame's camera and the map's counts, special materials, sky bodies, laser spot,
  * regions, flashlight, the spaceships, the dust (how many bursts and particles), the beams' speckle (the frame's seed
- * and the shares of speckled pixels painted black and turned white) and the zone walls (`zone_walls.rs`'s `to_gpu`),
- * as `render_voxel.rs` writes them.
+ * and the shares of speckled pixels painted black and turned white), the zone walls (`zone_walls.rs`'s `to_gpu`) and
+ * the sharp centre (`fovea`: the radii in pixels from the image's centre within which pixels are sharp and beyond which
+ * they are at a quarter resolution, then unused), as `render_voxel.rs` writes them.
  */
 struct VoxelUniforms {
     float4x4 camera;
@@ -566,6 +574,7 @@ struct VoxelUniforms {
     ZoneWalls zone_walls;
     float4 milky_way_pole;
     float4 milky_way_core;
+    float4 fovea;
 };
 static_assert(sizeof(VoxelUniforms) == __BYTES_PER_VOXEL_UNIFORMS__, "render_voxel.rs's VoxelUniforms has the same layout");
 
@@ -3025,6 +3034,55 @@ static int get_sample_columns(constant VoxelUniforms &u) { return u.width_px / 2
 /** @brief `get_coarse_columns` gives how many samples a row of the coarse grid has (one per fourth pixel column, enough past the edge to cover the fine grid). @par Example @code int columns = get_coarse_columns(u); @endcode */
 static int get_coarse_columns(constant VoxelUniforms &u) { return u.width_px / 4 + 3; }
 
+/** @brief `get_centre_distance_px` gives how far a pixel lies from the image's centre, in pixels. @par Example @code float r_px = get_centre_distance_px(u, float2(id)); @endcode */
+static float get_centre_distance_px(constant VoxelUniforms &u, float2 pixel) {
+    return length(pixel + 0.5 - 0.5 * float2(u.width_px, u.height_px));
+}
+
+/**
+ * @brief `get_fovea_level` gives the resolution of the 4 × 4 pixel block holding a pixel, from its centre's distance to
+ * the image's centre (W-136, sharp centre, soft edges): `FOVEA_SHARP` (adaptive sampling as everywhere before) within
+ * `u.fovea.x`, `FOVEA_HALF` (the even pixels shaded, the rest blended from them) within `u.fovea.y`, and beyond it a
+ * quarter (only every fourth pixel each way shaded, the rest blended from them).
+ * @par Example
+ * @code
+ * int level = get_fovea_level(u, id);
+ * @endcode
+ */
+static int get_fovea_level(constant VoxelUniforms &u, uint2 pixel) {
+    float r_px = get_centre_distance_px(u, float2(pixel / FOVEA_BLOCK_PX * FOVEA_BLOCK_PX + FOVEA_BLOCK_PX / 2));
+    return r_px < u.fovea.x ? FOVEA_SHARP : (r_px < u.fovea.y ? FOVEA_HALF : FOVEA_QUARTER);
+}
+
+/**
+ * @brief `is_sample_needed` says whether the fine sample at an even pixel must be traced or interpolated: it may be
+ * shaded or read by a block that isn't at a quarter resolution, which lies within `FOVEA_SAMPLE_MARGIN_PX` of it (the
+ * half block's diagonal and the two samples `is_cell_smooth` reads beyond a cell).
+ * @par Example
+ * @code
+ * if (!is_sample_needed(u, uint2(2 * i, 2 * j))) return;
+ * @endcode
+ */
+static bool is_sample_needed(constant VoxelUniforms &u, uint2 pixel) {
+    return get_centre_distance_px(u, float2(pixel)) - FOVEA_SAMPLE_MARGIN_PX < u.fovea.y;
+}
+
+/**
+ * @brief `blend_pixels` gives the colour at pixel `id` blended bilinearly from the colours already written at the four
+ * pixels `lo`, `lo` + (`spacing_px`, 0), `lo` + (0, `spacing_px`) and `lo` + (`spacing_px`, `spacing_px`); a corner past
+ * the image's edge falls back to `lo`'s row or column.
+ * @par Example
+ * @code
+ * image.write(blend_pixels(u, image, uint2(8, 4), 4, id), id);
+ * @endcode
+ */
+static float4 blend_pixels(constant VoxelUniforms &u, texture2d<float, access::read_write> image, uint2 lo, uint spacing_px, uint2 id) {
+    uint2 hi = select(lo + spacing_px, lo, lo + spacing_px >= uint2(u.width_px, u.height_px));
+    float2 w = float2(id - lo) / float(spacing_px);
+    float4 c00 = image.read(lo), c10 = image.read(uint2(hi.x, lo.y)), c01 = image.read(uint2(lo.x, hi.y)), c11 = image.read(hi);
+    return mix(mix(c00, c10, w.x), mix(c01, c11, w.x), w.y);
+}
+
 /**
  * @brief `trace_coarse` traces the rays of every fourth pixel each way (coarse sample (i, j) is pixel (4i, 4j)), the
  * first pass of adaptive sampling, and starts this frame's lists empty.
@@ -3048,8 +3106,8 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
 /**
  * @brief `fill_samples` fills the fine grid (sample (i, j) is pixel (2i, 2j)), the second pass of adaptive sampling:
  * a sample on the coarse grid copies it, one inside a smooth coarse cell (with half the fine grid's threshold, for
- * the same error in pixels) interpolates the cell's corners and traces its own sun (`with_ground_sun`), and any other
- * is listed for `trace_listed_samples`.
+ * the same error in pixels) interpolates the cell's corners and traces its own sun (`with_ground_sun`), one no block
+ * needs (`is_sample_needed`) copies its cell's first corner, and any other is listed for `trace_listed_samples`.
  * @par Example
  * @code
  * dispatched by render_metal.rs's encode_adaptive_sampling, one thread per fine sample.
@@ -3062,7 +3120,7 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
     int i = int(id.x), j = int(id.y);
     if (i >= columns || j >= sample_rows) return;
     int ci = i / 2, cj = j / 2, di = i & 1, dj = j & 1, k = cj * coarse_columns + ci;
-    if (di + dj == 0) {
+    if (di + dj == 0 || !is_sample_needed(u, 2 * id)) {
         samples[j * columns + i] = coarse[k];
         return;
     }
@@ -3108,8 +3166,9 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
 }
 
 /**
- * @brief `classify_cells` marks each cell between four fine samples smooth (1) when the twelve samples around it
- * ended on one surface and map nearly linearly, and lists every other cell that covers pixels, for `refine_pixels`.
+ * @brief `classify_cells` marks each cell between four fine samples smooth (1) when it lies in the sharp centre and
+ * the twelve samples around it ended on one surface and map nearly linearly, and lists every other cell that covers
+ * pixels, with its `get_fovea_level` from `REFINE_LEVEL_FIRST_BIT`, for `refine_pixels`.
  * @par Example
  * @code
  * dispatched by render_metal.rs's encode_adaptive_sampling, one thread per cell (sample (i, j) to (i + 1, j + 1)).
@@ -3121,10 +3180,12 @@ kernel void classify_cells(constant VoxelUniforms &u [[buffer(16)]], device cons
     int columns = get_sample_columns(u), sample_rows = u.height_px / 2 + 2;
     int i = int(id.x), j = int(id.y);
     if (i >= columns || j >= sample_rows) return;
-    uchar is_smooth = is_cell_smooth(u, samples, columns, sample_rows, i, j, FINE_SAMPLE_SPACING_PX, SMOOTH_SECOND_DIFFERENCE_PER_FIRST) ? 1 : 0;
-    smooth_cells[j * columns + i] = is_smooth;
-    if (is_smooth == 0 && 2 * i < u.width_px && 2 * j < u.height_px) {
-        refine_cells[atomic_fetch_add_explicit(refine_count, 1, memory_order_relaxed)] = uint(j * columns + i);
+    int level = get_fovea_level(u, 2 * id);
+    bool is_smooth = level == FOVEA_SHARP
+        && is_cell_smooth(u, samples, columns, sample_rows, i, j, FINE_SAMPLE_SPACING_PX, SMOOTH_SECOND_DIFFERENCE_PER_FIRST);
+    smooth_cells[j * columns + i] = is_smooth ? 1 : 0;
+    if (!is_smooth && 2 * i < u.width_px && 2 * j < u.height_px) {
+        refine_cells[atomic_fetch_add_explicit(refine_count, 1, memory_order_relaxed)] = uint(j * columns + i) | uint(level) << REFINE_LEVEL_FIRST_BIT;
     }
 }
 
@@ -3147,7 +3208,10 @@ kernel void prepare_refinement(device atomic_uint *refine_count [[buffer(5)]], d
  * @brief `refine_pixels` traces the three odd pixels of each listed cell, packed densely so that thread groups don't
  * wait on the few pixels that need a full trace. Deep in a lens, where all four of the cell's samples took at least
  * `LENS_HALF_RES_STEPS` bent steps, it blends the colours `resolve_pixels` gave the four even pixels instead (a
- * half-resolution lens, the user's option D for W-131, Lunar wormhole_exit slow at full size).
+ * half-resolution lens, the user's option D for W-131, Lunar wormhole_exit slow at full size). Outside the sharp centre
+ * (W-136, sharp centre, soft edges) it always blends: from the cell's four even pixels at `FOVEA_HALF`, and from its
+ * 4 × 4 block's four corners at `FOVEA_QUARTER`, where the third pixel's thread also writes the cell's even pixel
+ * unless `resolve_pixels` shaded it. It only reads pixels `resolve_pixels` wrote, so its threads never race.
  * @par Example
  * @code
  * dispatched by render_metal.rs's encode_adaptive_sampling indirectly, one thread per listed pixel.
@@ -3158,15 +3222,22 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
                           uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(refine_count, memory_order_relaxed) * REFINED_PIXELS_PER_CELL) return;
     int columns = get_sample_columns(u);
-    int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
-    uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
+    uint entry = refine_cells[t / REFINED_PIXELS_PER_CELL];
+    int cell = int(entry & REFINE_CELL_MASK), level = int(entry >> REFINE_LEVEL_FIRST_BIT), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
+    uint2 lo = uint2(2 * (cell % columns), 2 * (cell / columns)), id = lo + uint2(corner & 1, corner >> 1);
+    uint2 block = lo / FOVEA_BLOCK_PX * FOVEA_BLOCK_PX;
+    if (level == FOVEA_QUARTER && corner == REFINED_PIXELS_PER_CELL && any(lo != block) && !is_sample_needed(u, lo)) {
+        image.write(blend_pixels(u, image, block, FOVEA_BLOCK_PX, lo), lo);
+    }
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
+    if (level == FOVEA_QUARTER) {
+        image.write(blend_pixels(u, image, block, FOVEA_BLOCK_PX, id), id);
+        return;
+    }
     int least_steps = BENT_STEPS_MASK;
     for (int c = 0; c < 4; c++) least_steps = min(least_steps, samples[cell + (c & 1) + (c >> 1) * columns].surface.w >> BENT_STEPS_FIRST_BIT & BENT_STEPS_MASK);
-    if (least_steps >= LENS_HALF_RES_STEPS) {
-        uint2 lo = uint2(2 * (cell % columns), 2 * (cell / columns)), hi = min(lo + 2, uint2(u.width_px - 2, u.height_px - 2) & ~1u);
-        float4 c00 = image.read(lo), c10 = image.read(uint2(hi.x, lo.y)), c01 = image.read(uint2(lo.x, hi.y)), c11 = image.read(hi);
-        image.write(corner == 1 ? 0.5 * (c00 + c10) : (corner == 2 ? 0.5 * (c00 + c01) : 0.25 * (c00 + c10 + c01 + c11)), id);
+    if (level == FOVEA_HALF || least_steps >= LENS_HALF_RES_STEPS) {
+        image.write(blend_pixels(u, image, lo, 2, id), id);
         return;
     }
     Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, terrain_slope_bounds, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
@@ -3176,7 +3247,8 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
 /**
  * @brief `resolve_pixels` writes the pixels that need no listed ray: an even pixel takes its sample, and a pixel in a
  * smooth cell interpolates the cell's corners and shades the result (tracing its own ray if the blended cell isn't a
- * visible face). `refine_pixels` writes the rest.
+ * visible face). Outside the sharp centre it writes only even pixels whose sample is needed and every fourth pixel
+ * each way. `refine_pixels` writes the rest.
  * @par Example
  * @code
  * dispatched by render_metal.rs's encode_adaptive_sampling, one thread per pixel.
@@ -3188,6 +3260,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
+    if (any(id % FOVEA_BLOCK_PX != 0) && !is_sample_needed(u, id)) return;
     Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, terrain_slope_bounds, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
