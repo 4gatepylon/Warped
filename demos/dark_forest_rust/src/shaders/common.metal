@@ -96,6 +96,25 @@ struct DrawUniforms {
     uint4 flags;
 };
 
+/** @brief `LUMA` weighs linear RGB into luminance (Rec. 709), as Lunar Surface's `render_voxel.metal`. */
+constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);
+/** @brief `BODY_FLASH_RGB` is how a player's body reddens just after a hit, times its base colour. */
+constant float3 BODY_FLASH_RGB = float3(2.0, 0.3, 0.2);
+
+/**
+ * @brief `recolor_body` turns colour c of the body model into team colour `team`, as Lunar Surface's: it keeps c's
+ * grey part and swaps its colourful part (the teal) for one of `team`'s hue with the same luminance, so grey metal and
+ * shading stay as they were.
+ * @par Example
+ * @code
+ * float3 c = recolor_body(texel.rgb, draw.tint.rgb);
+ * @endcode
+ */
+inline float3 recolor_body(float3 c, float3 team) {
+    float3 grey = float3(min(c.r, min(c.g, c.b))), hue = team - min(team.r, min(team.g, team.b));
+    return grey + hue * dot(c - grey, LUMA) / max(dot(hue, LUMA), 1e-6);
+}
+
 /** @brief `MaterialUniforms` matches `GpuMaterialUniforms`: one material's constant factors. */
 struct MaterialUniforms {
     float4 base_color_factor;

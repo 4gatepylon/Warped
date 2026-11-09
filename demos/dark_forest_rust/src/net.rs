@@ -50,6 +50,7 @@ use crate::console_reach::ConsolePlace;
 use crate::settings::ServerSettings;
 use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
+use warped_shared::movement::{decode_crouch_level, encode_crouch_level};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -97,6 +98,7 @@ const PURPLE_DOWN_BIT: u8 = 0;
 const GREEN_DOWN_BIT: u8 = 1;
 const FLYING_BIT: u8 = 2;
 const FLYING_GREEN_BIT: u8 = 3;
+const CROUCH_FIRST_BIT: u8 = 4;
 const BYTES_PER_PLAYER: usize =
     BYTES_PER_ID + FLOATS_PER_FRAME * BYTES_PER_FLOAT + 3 + BYTES_PER_WORMHOLES;
 const BYTES_PER_GAME: usize = 2 * BYTES_PER_ID + 1;
@@ -165,7 +167,8 @@ impl Kind {
 /// hold `E` on, if any, how far along turning it off they are, from 0 to 1, as the server times
 /// it (`disabling_frac`, in steps of 1/255; a client sends 0, and the server sets it), the share of
 /// their shot's beam pixels that speckle (`beam_speckle_frac`, in steps of
-/// 1 / `shot_noise::BEAM_SPECKLE_LEVEL_COUNT`), and their thrown wormholes.
+/// 1 / `shot_noise::BEAM_SPECKLE_LEVEL_COUNT`), their thrown wormholes, and how far down a
+/// crouch they are (`crouch_frac`, in steps of 1 / `movement::CROUCH_LEVEL_COUNT`).
 #[derive(Clone, Copy)]
 pub struct RemotePlayer {
     pub id: u32,
@@ -177,6 +180,7 @@ pub struct RemotePlayer {
     pub disabling_frac: f64,
     pub beam_speckle_frac: f64,
     pub wormholes: PlayerWormholes,
+    pub crouch_frac: f64,
 }
 
 /// `GameState` is the game as the server keeps it: which game this is (from 0, one more each new
@@ -256,21 +260,24 @@ impl Message {
         self.0.push(player.disabling_console.unwrap_or(NO_CONSOLE));
         self.0
             .push((player.disabling_frac.clamp(0.0, 1.0) * f64::from(u8::MAX)).round() as u8);
-        self.wormholes(&player.wormholes)
+        self.wormholes(&player.wormholes, player.crouch_frac)
     }
 
     /// `wormholes` appends a player's wormholes: which are down or flying (and the flying one's
-    /// colour), each colour's place (u, v, h, yaw), and the flying one's point, as `f32`s (zeros
+    /// colour), with the player's crouch share `crouch_frac` in the same byte's bits from
+    /// `CROUCH_FIRST_BIT` up (W-137 (crouched robots sink); older windows read only the bits
+    /// below), each colour's place (u, v, h, yaw), and the flying one's point, as `f32`s (zeros
     /// for what isn't there), then the pair's damage (a byte, 255 for destroyed).
     ///
-    /// Example: `let message = message.wormholes(&PlayerWormholes::default());`
-    fn wormholes(mut self, wormholes: &PlayerWormholes) -> Message {
+    /// Example: `let message = message.wormholes(&PlayerWormholes::default(), 0.0);`
+    fn wormholes(mut self, wormholes: &PlayerWormholes, crouch_frac: f64) -> Message {
         let flying_color: Option<WormholeColor> = wormholes.flying.map(|(color, _)| color);
         self.0.push(
             u8::from(wormholes.purple.is_some()) << PURPLE_DOWN_BIT
                 | u8::from(wormholes.green.is_some()) << GREEN_DOWN_BIT
                 | u8::from(flying_color.is_some()) << FLYING_BIT
-                | u8::from(flying_color == Some(WormholeColor::Green)) << FLYING_GREEN_BIT,
+                | u8::from(flying_color == Some(WormholeColor::Green)) << FLYING_GREEN_BIT
+                | encode_crouch_level(crouch_frac) << CROUCH_FIRST_BIT,
         );
         let place_values = |place: Option<MouthPlace>| {
             place.map_or([0.0; F32S_PER_PLACE], |p| [p.u_m, p.v_m, p.h_m, p.yaw_rad])
@@ -376,6 +383,7 @@ impl Reader<'_> {
         let laser: u8 = self.take(1)?[0];
         let console: u8 = self.take(1)?[0];
         let disabling: u8 = self.take(1)?[0];
+        let (wormholes, crouch_frac) = self.wormholes()?;
         Some(RemotePlayer {
             id,
             frame: DMat4::from_cols_array(&values),
@@ -386,14 +394,15 @@ impl Reader<'_> {
             disabling_frac: f64::from(disabling) / f64::from(u8::MAX),
             beam_speckle_frac: f64::from(laser >> SPECKLE_FIRST_BIT)
                 / f64::from(BEAM_SPECKLE_LEVEL_COUNT),
-            wormholes: self.wormholes()?,
+            wormholes,
+            crouch_frac,
         })
     }
 
-    /// `wormholes` reads a player's wormholes written by `Message::wormholes`.
+    /// `wormholes` reads a player's wormholes and crouch share written by `Message::wormholes`.
     ///
-    /// Example: `let wormholes = reader.wormholes()?;`
-    fn wormholes(&mut self) -> Option<PlayerWormholes> {
+    /// Example: `let (wormholes, crouch_frac) = reader.wormholes()?;`
+    fn wormholes(&mut self) -> Option<(PlayerWormholes, f64)> {
         let flags: u8 = self.take(1)?[0];
         let mut values: [f64; 2 * F32S_PER_PLACE + F32S_PER_POINT] = [0.0; 12];
         for value in &mut values {
@@ -417,12 +426,15 @@ impl Reader<'_> {
             WormholeColor::Purple
         };
         let point: DVec4 = DVec4::from_slice(&values[2 * F32S_PER_PLACE..]);
-        Some(PlayerWormholes {
-            purple: place(0, PURPLE_DOWN_BIT),
-            green: place(F32S_PER_PLACE, GREEN_DOWN_BIT),
-            flying: is_set(FLYING_BIT).then_some((color, point)),
-            damage_frac: f64::from(self.take(1)?[0]) / f64::from(u8::MAX),
-        })
+        Some((
+            PlayerWormholes {
+                purple: place(0, PURPLE_DOWN_BIT),
+                green: place(F32S_PER_PLACE, GREEN_DOWN_BIT),
+                flying: is_set(FLYING_BIT).then_some((color, point)),
+                damage_frac: f64::from(self.take(1)?[0]) / f64::from(u8::MAX),
+            },
+            decode_crouch_level(flags >> CROUCH_FIRST_BIT),
+        ))
     }
 
     /// `game` reads a game state written by `Message::game`.
@@ -589,6 +601,7 @@ impl Server {
                                 disabling_console: None,
                                 disabling_frac: 0.0,
                                 beam_speckle_frac: 0.0,
+                                crouch_frac: 0.0,
                                 wormholes: PlayerWormholes::default(),
                             },
                             address,
@@ -1562,7 +1575,8 @@ impl Client {
     /// console they hold `E` on, their shot's beam speckle and their wormholes, once joined. The
     /// server times the hold itself, so the progress sent is 0.
     ///
-    /// Example: `client.send_state(player.frame, is_laser_on, false, None, 0.0, PlayerWormholes::default())?;`
+    /// Example: `client.send_state(player.frame, is_laser_on, false, None, 0.0, PlayerWormholes::default(), 0.0)?;`
+    #[allow(clippy::too_many_arguments)]
     pub fn send_state(
         &mut self,
         frame: DMat4,
@@ -1571,6 +1585,7 @@ impl Client {
         disabling_console: Option<u8>,
         beam_speckle_frac: f64,
         wormholes: PlayerWormholes,
+        crouch_frac: f64,
     ) -> Result<()> {
         if let (Some(id), Some(token)) = (self.id, self.token) {
             let player: RemotePlayer = RemotePlayer {
@@ -1583,6 +1598,7 @@ impl Client {
                 disabling_frac: 0.0,
                 beam_speckle_frac,
                 wormholes,
+                crouch_frac,
             };
             self.send(&Message::New(Kind::State).token(token).player(&player))?;
         }
@@ -1759,6 +1775,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Datagram length | complete (progress kept to a 255th; the beam speckle's top level beside the laser, rifle and red-team bits), cut short | `players_survive_encoding`, `short_datagrams_read_as_nothing` |
     //! | Player's wormholes | none, one down with a green throw in the air, both down and damaged | `players_survive_encoding` |
+    //! | Player's crouch, beside their wormholes (W-137 (crouched robots sink)) | standing, crouched with none down, crouched with one down: the same length | `crouch_rides_in_the_wormholes_byte` |
     //! | Shot at a player's wormholes | by an enemy (adds up to destroyed, then no further), by a teammate (ignored), with none down (ignored); the owner then has none down (reset) | `enemy_shots_destroy_wormholes` |
     //! | Wormhole damage sent | to its owner's client, in the snapshot | `owners_learn_their_wormholes_are_destroyed` |
     //! | Join | new player, repeated join, server full, rejoin after a hit (same id), a client of another map (fails) | `joins_get_ids_once_until_full`, `only_joined_players_can_hit`, `clients_of_another_map_fail` |
@@ -1992,6 +2009,7 @@ mod tests {
             disabling_console: Some(console),
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let state: Message = Message::New(Kind::State)
@@ -2117,6 +2135,7 @@ mod tests {
                 disabling_console: Some(3),
                 disabling_frac: SENT_DISABLING_FRAC,
                 beam_speckle_frac: SENT_SPECKLE_FRAC,
+                crouch_frac: 0.0,
                 wormholes,
             };
             let game: GameState = GameState {
@@ -2149,6 +2168,51 @@ mod tests {
     }
 
     #[test]
+    fn crouch_rides_in_the_wormholes_byte() {
+        let purple: MouthPlace = MouthPlace {
+            u_m: 1.0,
+            v_m: 2.0,
+            h_m: 0.5,
+            yaw_rad: 0.25,
+        };
+        for (crouch_frac, wormholes) in [
+            (0.0, PlayerWormholes::default()),
+            (1.0, PlayerWormholes::default()),
+            (
+                1.0,
+                PlayerWormholes {
+                    purple: Some(purple),
+                    ..PlayerWormholes::default()
+                },
+            ),
+        ] {
+            let sent: RemotePlayer = RemotePlayer {
+                id: 3,
+                frame: DMat4::IDENTITY,
+                is_laser_on: false,
+                is_rifle: false,
+                team: 0,
+                disabling_console: None,
+                disabling_frac: 0.0,
+                beam_speckle_frac: 0.0,
+                wormholes,
+                crouch_frac,
+            };
+            let message: Message = Message::New(Kind::State).player(&sent);
+            assert_eq!(message.0.len(), 1 + BYTES_PER_PLAYER);
+            let mut reader: Reader = Reader {
+                bytes: &message.0,
+                position: 1,
+            };
+            let player: RemotePlayer = reader.player().expect("a complete player");
+            assert_eq!(
+                (player.crouch_frac, player.wormholes),
+                (crouch_frac, wormholes)
+            );
+        }
+    }
+
+    #[test]
     fn short_datagrams_read_as_nothing() {
         let player: RemotePlayer = RemotePlayer {
             id: 7,
@@ -2159,6 +2223,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let message: Message = Message::New(Kind::State).player(&player);
@@ -2544,6 +2609,7 @@ mod tests {
             disabling_console: Some(0),
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         server

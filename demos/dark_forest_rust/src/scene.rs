@@ -11,6 +11,9 @@ use std::time::Instant;
 
 use glam::{Mat4, Vec3, Vec4};
 
+use warped_shared::app_bundle::get_model_path;
+use warped_shared::avatar_model::{AvatarClip, BODY_MODEL};
+
 use crate::asset_manifest::{self, PolyHavenTexture};
 use crate::assets::gltf_model::{Model, ModelOptions, load_model};
 use crate::assets::sky::{Sky, load_sky};
@@ -40,8 +43,22 @@ const SWAMP_SUN_FRAC: f32 = 0.55;
 /// `MIN_SUN_PER_SKY_IRRADIANCE_FRAC` is the least ratio of sun to sky light on flat ground; a
 /// clear day is about 3 to 5, and HDRIs with a clipped sun come out near 1.
 const MIN_SUN_PER_SKY_IRRADIANCE_FRAC: f32 = 3.5;
-/// `ROBOT_HEIGHT_M` is the height the robot model is scaled to.
-const ROBOT_HEIGHT_M: f32 = 1.85;
+/// `ROBOT_HEIGHT_M` is the height the players' and robots' body is drawn at: Lunar Surface's
+/// `AVATAR_HEIGHT_M`, so the teal robot is the same size in every level.
+const ROBOT_HEIGHT_M: f32 = 2.0;
+/// `ROBOT_EMISSIVE_SCALE` dims the body model's glowing face (its glTF's emissive strength of 10)
+/// so the forest's bloom shows its eyes and mouth in their yellow, as Lunar Surface draws them,
+/// rather than as a white star.
+const ROBOT_EMISSIVE_SCALE: f32 = 0.1;
+/// `ROBOT_CLIPS` are the body's clips the robots play, in the order `Scene::robot_clips` keeps
+/// their animations.
+const ROBOT_CLIPS: [AvatarClip; 5] = [
+    AvatarClip::Idle,
+    AvatarClip::Walk,
+    AvatarClip::Run,
+    AvatarClip::Jump,
+    AvatarClip::Death,
+];
 /// `SURFACE_TEXTURE_SIZE_PX` is the size limit of arena textures.
 const SURFACE_TEXTURE_SIZE_PX: u32 = 2048;
 /// `STATIC_TILE_M` is the width of the tiles the arena's surfaces are cut into, so each pass
@@ -63,7 +80,7 @@ pub struct Scene {
     pub solids: Vec<Aabb>,
     pub robot: Model,
     pub robot_scale: f32,
-    pub robot_clips: [usize; 4],
+    pub robot_clips: [usize; ROBOT_CLIPS.len()],
     pub robot_material_names: Vec<String>,
     pub revolver: GunViewmodel,
     pub bolt_action_rifle: GunViewmodel,
@@ -168,6 +185,7 @@ pub fn draw_items_for(model: &Model, world: Mat4, does_cast_shadow: bool) -> Vec
             bounds_center_m: center,
             bounds_radius_m: radius_m,
             does_cast_shadow,
+            body_flash_frac: None,
         })
         .collect()
 }
@@ -360,6 +378,16 @@ fn load_gun_viewmodel(
 }
 
 impl Scene {
+    /// `get_robot_clip` gives the index of `clip`'s animation in the robot's skeleton.
+    ///
+    /// Example: `let walk: usize = scene.get_robot_clip(AvatarClip::Walk);`
+    pub fn get_robot_clip(&self, clip: AvatarClip) -> usize {
+        self.robot_clips[ROBOT_CLIPS
+            .iter()
+            .position(|&c| c == clip)
+            .expect("every clip the robots play is listed")]
+    }
+
     /// `load` loads everything and uploads the environment and occluders.
     ///
     /// Example:
@@ -399,6 +427,7 @@ impl Scene {
                     bounds_center_m: tile.bounds_center_m,
                     bounds_radius_m: tile.bounds_radius_m,
                     does_cast_shadow: true,
+                    body_flash_frac: None,
                 });
             }
         }
@@ -414,14 +443,14 @@ impl Scene {
         renderer.set_occluders(&occluders, arena.bounds_min_m, arena.bounds_max_m);
         println!("arena ready in {:.1}s", start.elapsed().as_secs_f32());
 
-        let robot_path =
-            asset_manifest::direct_download_path(assets_dir, &asset_manifest::ROBOT_MODEL);
+        let robot_path: PathBuf = get_model_path(BODY_MODEL);
         let robot: Model = load_model(
             renderer,
             &robot_path,
             &ModelOptions {
                 is_animated: true,
                 should_recenter: false,
+                emissive_scale: ROBOT_EMISSIVE_SCALE,
                 ..ModelOptions::default()
             },
         );
@@ -429,12 +458,7 @@ impl Scene {
         let robot_scale: f32 = ROBOT_HEIGHT_M / robot_height_m.max(1e-3);
         let skeleton = robot.skeleton.as_ref().expect("the robot is animated");
         let clip = |name: &str| skeleton.animation_index(name).unwrap_or(0);
-        let robot_clips: [usize; 4] = [
-            clip("Idle"),
-            clip("Walking"),
-            clip("Running"),
-            clip("Death"),
-        ];
+        let robot_clips: [usize; ROBOT_CLIPS.len()] = ROBOT_CLIPS.map(|c| clip(c.get_name()));
         let robot_material_names: Vec<String> = robot.material_names.clone();
         println!(
             "robot bounds {:?} .. {:?}",

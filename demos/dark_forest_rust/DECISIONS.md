@@ -169,6 +169,21 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   swaps, aiming, sprinting steps, moments it may not shoot) gives the same state, view kicks, gun poses and muzzle
   points before and after, byte for byte. Kept as the forest's own: its controls (`GunInput`, `GunStep`) and the
   beams' flight (`Tracer`), which traces in the forest's own space.
+- **D36. The robots are Lunar Surface's teal robot, moving by Lunar's rules** (W-126 (same play in every level), "the
+  same health bars and weapons and sprites"). Every robot, the forest's enemies and other players alike, is
+  `common/maps/models/teal_robot` drawn by this renderer's own GPU skinning (not posed on the CPU as Lunar's ray
+  tracer needs it, which would cost more here), 2 m tall as Lunar draws it. As on Lunar Surface: its teal turns into
+  the team's colour at the same brightness (`recolor_body` in `scene.metal`, Lunar's formula, flagged per draw by
+  `flags.z`), its see-through face glass is left out, and which clip it plays and where in it come from the shared
+  `gait` rules (Lunar's `avatar_animation`, now in `warped_shared`): idle below 0.8 m/s, walking, running from
+  halfway between walking and sprinting speed, the stride kept in step with the ground covered, the jump from 0.08 s
+  after leaving the ground (a ladder counts as ground). The old cross-fade between clips is gone, as Lunar has none.
+  Its face's glow is dimmed to a tenth (`ROBOT_EMISSIVE_SCALE`) and the white eye flare now shows only while it
+  fires, so the face shows yellow as on Lunar rather than a white star in the forest's bloom. Its hit box grew with
+  it (1.85 to 2 m). Other players' robots stand one eye height (the map's 1.68 m, not 1.6 m) below the eye they send,
+  as crouched: each window sends its crouch, and a crouched player's robot stands on the floor squashed to the
+  crouched share (W-137 (crouched robots sink)). **Gives up:** the hit flash is now a reddening of the robot's own
+  colours rather than an added tint.
 
 ## Follow-ups for the next agent
 

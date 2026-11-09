@@ -93,8 +93,12 @@ inline Surface read_surface(SceneVertexOut in, constant MaterialUniforms& materi
                             bool is_front_face, thread float& alpha) {
     constexpr sampler material_sampler(coord::normalized, filter::linear, mip_filter::linear,
                                        address::repeat, max_anisotropy(8));
-    float4 base_color = textures.base_color.sample(material_sampler, in.uv) *
-                        material.base_color_factor * draw.tint;
+    float4 texel = textures.base_color.sample(material_sampler, in.uv) * material.base_color_factor;
+    float4 base_color = texel * draw.tint;
+    if (draw.flags.z != 0) {
+        float flash = as_type<float>(draw.flags.w);
+        base_color = float4(recolor_body(texel.rgb, draw.tint.rgb) * (1.0 + flash * BODY_FLASH_RGB), texel.a);
+    }
     float2 normal_xy = textures.normal.sample(material_sampler, in.uv).rg * 2.0 - 1.0;
     float3 normal_tangent = float3(normal_xy, sqrt(saturate(1.0 - dot(normal_xy, normal_xy))));
     float4 orm = textures.occlusion_roughness_metal.sample(material_sampler, in.uv);

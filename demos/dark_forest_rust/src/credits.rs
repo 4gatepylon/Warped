@@ -11,7 +11,7 @@
 //!   `menu`'s tests check.
 
 /// `CREDITS_LINES` is the CREDITS page's text, one menu line each.
-pub const CREDITS_LINES: [&str; 22] = [
+pub const CREDITS_LINES: [&str; 23] = [
     "Warped: Dark Forest",
     "",
     "SURFACES  Poly Haven textures, CC0 (polyhaven.com/a/<name>)",
@@ -20,8 +20,9 @@ pub const CREDITS_LINES: [&str; 22] = [
     "  mossy_rock (Rob Tuytel)",
     "PYLONS    Sci-Fi Beacon, AMMediaGames, CC BY 4.0 (Sketchfab)",
     "SKY       kloofendal_48d_partly_cloudy_puresky, Poly Haven, CC0",
-    "ROBOTS    RobotExpressive by Tomas Laulhe, modified by",
-    "  Don McCurdy, CC0 (three.js examples)",
+    "PLAYERS   \"Teal V.2\" by Lagst, Sketchfab Standard, clips here",
+    "  sketchfab.com/3d-models/",
+    "  teal-v2-d6a54ff9468c451bbdbd879afa03f20a",
     "RIFLE     bolt_action_rifle_7_62, Mateusz Sadek, Poly Haven, CC0",
     "REVOLVER  \"Sci-fi revolver\" by Ramhat, Sketchfab Standard",
     "  sketchfab.com/3d-models/none-f6bd1cbad4174048bcf02f8e52771adb",

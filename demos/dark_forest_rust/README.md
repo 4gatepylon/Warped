@@ -197,7 +197,9 @@ started or the frame before it ended, whichever is later, to when it ended.
   rectangles, the two guns (`weapons`), each shot's stray (`shot_noise`) and the settings sections, the same code
   every level uses (D34, D35).
 - `src/render/camera_math.rs`: the view and projection matrices, with glam 0.30's arithmetic (D34).
-- Everything else (renderer, assets, robots, audio) is the FPS demo's.
+- Robots (`src/game/bots.rs`, drawn in `src/game/session.rs`): Lunar Surface's teal robot through this renderer's
+  GPU skinning, its teal in the team's colour, its clip and stride by the shared `gait` (D36).
+- Everything else (renderer, assets, audio) is the FPS demo's.
 
 ## Assets
 
@@ -208,9 +210,10 @@ started or the frame before it ended, whichever is later, to when it ended.
 | Texture `old_planks_02` (1K) | https://polyhaven.com/a/old_planks_02 | Rob Tuytel | CC0 | 1.0 MB |
 | Texture `forest_leaves_02` (1K) | https://polyhaven.com/a/forest_leaves_02 | Rob Tuytel | CC0 | 1.3 MB |
 | Texture `mossy_rock` (1K) | https://polyhaven.com/a/mossy_rock | Rob Tuytel | CC0 | 2.9 MB |
+| Players' robot `teal_robot` (shared: `common/maps/models/teal_robot/`, Lunar Surface's) | https://sketchfab.com/3d-models/teal-v2-d6a54ff9468c451bbdbd879afa03f20a | Lagst (clips made in this repository) | Sketchfab Standard | committed |
 | Pylon model `scifi_beacon` (shared: `common/maps/models/scifi_beacon/`) | https://sketchfab.com/3d-models/sci-fi-beaconway-point-marker-free-model-a1d91ebb3e2d41bba31c02b11423d97f | AMMediaGames | CC BY 4.0 | 1.0 MB (committed) |
 
-`make download-assets` saves them in `assets/textures/` (git-ignored). The sky, robot, rifle, revolver and arms are
+`make download-assets` saves them in `assets/textures/` (git-ignored). The sky, rifle, revolver and arms are
 `../fps_demo/assets/`, credited in [its README](../fps_demo/README.md#assets); its arms are CC BY-NC 4.0 and its
 revolver Sketchfab Standard, which limit sharing the game.
 

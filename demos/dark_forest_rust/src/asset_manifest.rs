@@ -3,7 +3,7 @@
 //!
 //! Interface: `ASSETS_DIR_NAME`, `HDRI`, `SURFACE_TEXTURES`, `LUNAR_SURFACE_TEXTURES`,
 //! `PROP_MODELS`, `RIFLE_MODEL`,
-//! `ROBOT_MODEL`, `PolyHavenModel`, `PolyHavenTexture`, and the `*_path` functions.
+//! `PolyHavenModel`, `PolyHavenTexture`, and the `*_path` functions.
 //!
 //! Example: `let path = hdri_path(&assets_dir);`
 //!
@@ -148,14 +148,6 @@ pub const PROP_MODELS: [PolyHavenModel; 15] = [
         resolution: "1k",
     },
 ];
-
-/// `ROBOT_MODEL` is the enemy bot: a rigged, animated robot.
-pub const ROBOT_MODEL: DirectDownload = DirectDownload {
-    id: "robot_expressive",
-    url: "https://raw.githubusercontent.com/mrdoob/three.js/r170/examples/models/gltf/RobotExpressive/RobotExpressive.glb",
-    file_name: "RobotExpressive.glb",
-    source_page_url: "https://github.com/mrdoob/three.js/tree/r170/examples/models/gltf/RobotExpressive",
-};
 
 /// `hdri_path` returns where the HDRI is saved.
 ///

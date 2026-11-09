@@ -80,15 +80,6 @@ impl Trs {
     pub fn matrix(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
-
-    /// `lerp` blends two transforms.
-    pub fn lerp(&self, other: &Trs, frac: f32) -> Trs {
-        Trs {
-            translation: self.translation.lerp(other.translation, frac),
-            rotation: self.rotation.slerp(other.rotation, frac),
-            scale: self.scale.lerp(other.scale, frac),
-        }
-    }
 }
 
 /// `Channel` is one animated property of one node.

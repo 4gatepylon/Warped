@@ -13,6 +13,7 @@
 //! - `play_settings`: the settings files' sections every level reads alike.
 //! - `shot_noise`: how far each shot strays from the crosshair, and its beam's speckle.
 //! - `mesh`, `avatar_model`: glTF models of the maps' structures and the players' robot body.
+//! - `gait`: which of the robot's clips another player shows, and where in it, from their motion.
 //! - `spaceships`: the spaceships in the sky.
 //! - `key_bindings`, `exit_prompt`: a player's controls, and the "leave the game?" prompt.
 //! - `texture_arrays`, `render_mesh`, `viewmodel`: Metal textures, models and the gun held in hand.
@@ -31,6 +32,7 @@ pub mod avatar_model;
 #[cfg(target_os = "macos")]
 pub mod exit_prompt;
 pub mod fps_demo_assets;
+pub mod gait;
 pub mod geometry;
 pub mod health;
 #[cfg(target_os = "macos")]
