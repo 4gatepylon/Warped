@@ -37,6 +37,8 @@ pub struct GpuFrameUniforms {
     pub post_params: Vec4,
     pub bounce_color: Vec4,
     pub effect_params: Vec4,
+    pub foveation: Vec4,
+    pub noise_offset_px: Vec4,
 }
 
 /// `GpuLensUniforms` is the wormhole lens pass's mouths: (centre, lens throat) and (reach, λ²,
@@ -202,6 +204,21 @@ pub struct GpuSkyVisibilityParams {
     pub counts: UVec4,
 }
 
+/// `GpuFoveaResolve` is the foveated frame's resolve pass: the screen's (width, height, window pixels per
+/// screen pixel, unused), the physical targets' (width, height, 1 / width, 1 / height), and the sharp circle around
+/// the crosshair (its radius, where its soft edge is complete, unused, unused), in pixels; `post.metal`'s
+/// `FoveaResolve` agrees.
+///
+/// Example:
+///     let resolve: GpuFoveaResolve = GpuFoveaResolve::default();
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct GpuFoveaResolve {
+    pub screen_px: Vec4,
+    pub physical_px: Vec4,
+    pub circle_px: Vec4,
+}
+
 /// `tests` checks that the GPU structs match the shaders' layouts.
 ///
 /// | Partitioning | Part | Covered by |
@@ -214,7 +231,7 @@ mod tests {
     /// `test_layouts_match_shaders` checks the sizes that the shaders' structs have.
     #[test]
     fn test_layouts_match_shaders() {
-        assert_eq!(std::mem::size_of::<GpuFrameUniforms>(), 64 * 10 + 16 * 23);
+        assert_eq!(std::mem::size_of::<GpuFrameUniforms>(), 64 * 10 + 16 * 25);
         assert_eq!(std::mem::size_of::<GpuDrawUniforms>(), 96);
         assert_eq!(std::mem::size_of::<GpuParticle>(), 64);
         assert_eq!(std::mem::size_of::<crate::render::Vertex>(), 48);

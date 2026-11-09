@@ -129,9 +129,12 @@ is in [`AGENTS.md`](AGENTS.md).
   #465: Snow Planet's half-resolution lens, smoothed the same way, with lasers kept sharp in it.
   #476: Dark Forest: the half-resolution wormhole lens upsampled with a smooth B-spline, 16x anisotropic filtering
   (its FXAA was already on).
+  #477: Dark Forest: the lower-rate edges of its sharp centre shown through a smooth B-spline, after FXAA.
 - [?] **W-136 Sharp centre, soft edges.** The user, 2026-11-09: "if you need to lower resolution in different places, you can just like blur things. One thing you could also consider doing is having like a narrower field of view where like the center of the screen is clear and fully, you know, full resolution, everything, but the edges are blurry or something like that." And: "Try to at least have the ability to see a nice, good resolution for the important things that are right in front of you." Applies to every level's speed work (60 FPS).
   #464: the middle 66% of the width drawn as before and the rest at half resolution, blended (option B, the
   default; options A-E with timings in the PR for the user), in Lunar Surface, the match, Dust and Snow Planet.
+  #477: Dark Forest: Metal's variable rasterization rate, full rate 288 px around the crosshair easing to a third
+  toward the edges (3440x1440 drawn at 2172x1054), 30-45% less GPU time per view.
 - [?] **W-137 Crouched robots sink.** A bug found by agents on 2026-11-09: other windows place a remote player's feet one standing eye height below the eye they receive (`VoxelPlayer::FromEye`), so a crouched player's robot sinks about 0.7 m into the floor (Lunar Surface and its copies).
   #463: each window sends its crouch, and other windows stand a crouched robot on the floor, squashed to the crouched eye height, with its hit shapes (Lunar Surface, Dust, Snow Planet, the match, City Sphere); #473: Dark Forest too, with its robots' switch to the teal robot.
 - [?] **W-127 Dark Forest canopy flicker.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): In about one fixed-step capture in three or four, a few thousand canopy pixels differ, also on the base build before any of the 2026-11-08 work; it looks like a GPU race in the FPS-demo renderer.

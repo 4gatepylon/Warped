@@ -85,7 +85,8 @@ fragment float4 prepass_fragment(SceneVertexOut in [[stage_in]],
 constant int MATERIAL_MAX_ANISOTROPY = 16;
 
 /**
- * @brief `read_surface` samples a material at one fragment.
+ * @brief `read_surface` samples a material at one fragment; the caller fills in its screen position and SSAO
+ * coordinates.
  * @par Example
  * @code
  * Surface surface = read_surface(in, material, textures, is_front_face);
@@ -124,7 +125,6 @@ inline Surface read_surface(SceneVertexOut in, constant MaterialUniforms& materi
     surface.metallic = orm.b * material.params.y;
     surface.occlusion = material.params.w > 0.5 ? orm.r : 1.0;
     surface.emissive = emissive;
-    surface.screen_position = in.position.xy;
     surface.should_use_ssao = draw.flags.y == 0;
     alpha = base_color.a;
     return surface;
@@ -159,9 +159,11 @@ inline float4 shade_forward(SceneVertexOut in, constant FrameUniforms& frame,
     if (should_alpha_test && alpha < material.params.z) {
         discard_fragment();
     }
+    surface.screen_position = get_noise_px(frame, in.position.xy);
+    surface.ssao_uv = in.position.xy * frame.foveation.xy;
     float3 color = shade_surface(frame, surface, textures, point_lights);
     color = apply_shadowed_fog(frame, color, in.world_position, textures.shadow_map,
-                               textures.sky_visibility, in.position.xy);
+                               textures.sky_visibility, surface.screen_position);
     return float4(color, alpha);
 }
 
@@ -259,7 +261,7 @@ fragment float4 sky_fragment(SkyVertexOut in [[stage_in]],
     color += frame.sun_illuminance.rgb * SUN_GLOW_STRENGTH * pow(saturate(cos_sun), 600.0);
     float3 far_point = frame.camera_position_m.xyz + direction * FOG_MAX_DISTANCE_M;
     color = apply_shadowed_fog(frame, color, far_point, shadow_map, sky_visibility,
-                               in.position.xy);
+                               get_noise_px(frame, in.position.xy));
     return float4(color, 1.0);
 }
 
@@ -342,12 +344,13 @@ fragment float4 decal_fragment(DecalVertexOut in [[stage_in]],
     surface.metallic = 0.0;
     surface.occlusion = 1.0 - hole * 0.9;
     surface.emissive = 0.0;
-    surface.screen_position = in.position.xy;
+    surface.screen_position = get_noise_px(frame, in.position.xy);
+    surface.ssao_uv = in.position.xy * frame.foveation.xy;
     surface.should_use_ssao = true;
     SceneTextures textures = {shadow_map, sky_visibility, prefiltered, brdf_lut, ssao};
     float3 color = shade_surface(frame, surface, textures, point_lights);
     color = apply_shadowed_fog(frame, color, in.world_position, textures.shadow_map,
-                               textures.sky_visibility, in.position.xy);
+                               textures.sky_visibility, surface.screen_position);
     return float4(color, alpha);
 }
 

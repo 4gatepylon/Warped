@@ -6,7 +6,7 @@
  * @par Interface
  * - Vertex: `fullscreen_vertex`, `hud_vertex`.
  * - Fragment: `ssao_fragment`, `ssao_blur_fragment`, `bloom_downsample_fragment`,
- *   `bloom_upsample_fragment`, `tonemap_fragment`, `fxaa_fragment`, `hud_fragment`,
+ *   `bloom_upsample_fragment`, `tonemap_fragment`, `fxaa_fragment`, `resolve_fragment`, `hud_fragment`,
  *   `hud_image_vertex`, `hud_image_fragment`.
  *
  * @par Example
@@ -78,13 +78,17 @@ inline float3 view_position_from_depth(constant FrameUniforms& frame, float2 uv,
 fragment float4 ssao_fragment(FullscreenVertexOut in [[stage_in]],
                               constant FrameUniforms& frame [[buffer(1)]],
                               depth2d<float> depth [[texture(0)]],
-                              texture2d<float> normals [[texture(1)]]) {
+                              texture2d<float> normals [[texture(1)]],
+                              constant rasterization_rate_map_data& rate_map [[buffer(9)]]) {
     constexpr sampler point_sampler(coord::normalized, filter::nearest, address::clamp_to_edge);
     float center_depth = depth.sample(point_sampler, in.uv);
     if (center_depth <= 0.0) {
         return float4(1.0);
     }
-    float3 p = view_position_from_depth(frame, in.uv, center_depth);
+    float2 screen_uv = frame.foveation.z < 0.5
+                           ? in.uv
+                           : get_screen_px(frame, rate_map, in.uv / frame.foveation.xy) * frame.screen_size.zw;
+    float3 p = view_position_from_depth(frame, screen_uv, center_depth);
     float3 n = normalize(normals.sample(point_sampler, in.uv).xyz);
     float noise = interleaved_gradient_noise(in.position.xy);
     float3 random_vector = normalize(float3(cos(noise * 2.0 * PI), sin(noise * 2.0 * PI), 0.3));
@@ -102,7 +106,7 @@ fragment float4 ssao_fragment(FullscreenVertexOut in [[stage_in]],
             p + (t * hemisphere.x + b * hemisphere.y + n * hemisphere.z) * SSAO_RADIUS_M * scale;
         float4 clip = frame.proj * float4(sample_position, 1.0);
         float2 sample_uv = clip.xy / clip.w * float2(0.5, -0.5) + 0.5;
-        float scene_depth = depth.sample(point_sampler, sample_uv);
+        float scene_depth = depth.sample(point_sampler, get_physical_uv(frame, rate_map, sample_uv));
         float scene_z = view_position_from_depth(frame, sample_uv, scene_depth).z;
         float range_check = smoothstep(0.0, 1.0, SSAO_RADIUS_M / max(abs(p.z - scene_z), 1e-4));
         occlusion += (scene_z >= sample_position.z + SSAO_BIAS_M ? 1.0 : 0.0) * range_check;
@@ -812,32 +816,35 @@ fragment float4 tonemap_fragment(FullscreenVertexOut in [[stage_in]],
                                  texture2d<float> bloom [[texture(1)]],
                                  constant LensUniforms& lens [[buffer(2)]],
                                  depth2d<float> depth [[texture(2)]],
-                                 texture2d<float> lens_picture [[texture(3)]]) {
+                                 texture2d<float> lens_picture [[texture(3)]],
+                                 constant rasterization_rate_map_data& rate_map [[buffer(9)]]) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+    float2 screen_px = get_screen_px(frame, rate_map, in.position.xy);
+    float2 screen_uv = frame.foveation.z < 0.5 ? in.uv : screen_px * frame.screen_size.zw;
     float3 color = hdr.sample(linear_sampler, in.uv).rgb;
     float is_kept_plain = lens.params.y;
     float3 bloom_color = bloom.sample(linear_sampler, in.uv).rgb / frame.effect_params.w;
     color = get_graded_color(frame, mix(color, bloom_color, frame.render_params.y));
-    float2 centered = in.uv - 0.5;
+    float2 centered = screen_uv - 0.5;
     float vignette = 1.0 - VIGNETTE_STRENGTH * (1.0 - is_kept_plain) * smoothstep(0.2, 0.85, length(centered * float2(1.1, 1.0)));
     color *= vignette;
     float3 encoded = linear_to_srgb(saturate(color));
-    float grain = interleaved_gradient_noise(in.position.xy + fract(frame.camera_position_m.w) * 97.0) - 0.5;
+    float grain = interleaved_gradient_noise(get_noise_px(frame, in.position.xy) + fract(frame.camera_position_m.w) * 97.0) - 0.5;
     encoded = saturate(encoded + grain * GRAIN_STRENGTH * (1.0 - is_kept_plain));
     float4 lensed = float4(0.0);
     float entry_m, closest_m;
     float3 dir;
-    if (lens.params.x > 0.5 && find_lens_mouth(frame, lens, in.uv, entry_m, closest_m, dir) >= 0) {
+    if (lens.params.x > 0.5 && find_lens_mouth(frame, lens, screen_uv, entry_m, closest_m, dir) >= 0) {
         constexpr sampler point_sampler(coord::normalized, filter::nearest, address::clamp_to_edge);
         float scene_depth = depth.sample(point_sampler, in.uv);
         float scene_m = 1e30;
         if (scene_depth > 0.0) {
-            float2 ndc = float2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
+            float2 ndc = float2(screen_uv.x * 2.0 - 1.0, 1.0 - screen_uv.y * 2.0);
             float4 p = frame.inv_view_proj * float4(ndc, scene_depth, 1.0);
             scene_m = length(p.xyz / p.w - frame.camera_position_m.xyz);
         }
         if (entry_m < scene_m) {
-            lensed = sample_spline(lens_picture, in.uv);
+            lensed = sample_spline(lens_picture, screen_uv);
         }
     }
     encoded = mix(encoded, lensed.rgb, lensed.a);
@@ -1009,6 +1016,75 @@ static float3 get_fxaa_color(texture2d<float> ldr, float2 uv, float is_enabled) 
         final_uv.x += final_offset * step_length;
     }
     return ldr.sample(linear_sampler, final_uv).rgb;
+}
+
+/**
+ * @brief `FoveaResolve` matches `gpu_types::GpuFoveaResolve`: the screen's size in pixels (width, height, and the
+ * window's pixels per screen pixel), the physical targets' (width, height, 1 / width, 1 / height), and the sharp
+ * circle around the crosshair (its radius and where the soft edge is complete, in screen pixels).
+ */
+struct FoveaResolve {
+    float4 screen_px;
+    float4 physical_px;
+    float4 circle_px;
+};
+
+/**
+ * @brief `read_foveated` is the anti-aliased frame at screen pixel `screen_px`, read out of the foveated (physical)
+ * picture `aa` (W-136, sharp centre, soft edges; W-138, no aliasing): a bilinear tap inside the sharp circle, where
+ * the picture is at full rate and the tap lands on a texel's centre, so the centre shows exactly as unfoveated; past
+ * it a cubic B-spline (`sample_spline`), so the lower rate toward the edges shows smooth, without steps.
+ * @par Example
+ * @code
+ * float3 color = read_foveated(aa, rate_map, resolve, in.position.xy);
+ * @endcode
+ */
+static float3 read_foveated(texture2d<float> aa, constant rasterization_rate_map_data& rate_map,
+                            constant FoveaResolve& resolve, float2 screen_px) {
+    constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+    rasterization_rate_map_decoder decoder(rate_map);
+    float2 physical_uv = decoder.map_screen_to_physical_coordinates(screen_px) * resolve.physical_px.zw;
+    float soft = smoothstep(resolve.circle_px.x, resolve.circle_px.y, length(screen_px - 0.5 * resolve.screen_px.xy));
+    float3 sharp = soft < 1.0 ? aa.sample(linear_sampler, physical_uv).rgb : float3(0.0);
+    float3 smooth = soft > 0.0 ? sample_spline(aa, physical_uv).rgb : float3(0.0);
+    return mix(sharp, smooth, soft);
+}
+
+/**
+ * @brief `resolve_fragment` shows the foveated frame in the window: each window pixel reads its screen point out of
+ * the anti-aliased physical picture (`read_foveated`), with `fxaa_fragment`'s hit effect (shake, blurred red
+ * edges) on top.
+ * @par Example
+ * @code
+ * pipeline(fullscreen_vertex, resolve_fragment) into the drawable, after fxaa_fragment into the physical picture
+ * @endcode
+ */
+fragment float4 resolve_fragment(FullscreenVertexOut in [[stage_in]],
+                                 constant FoveaResolve& resolve [[buffer(0)]],
+                                 constant HitEffect& hit [[buffer(1)]],
+                                 constant float2& window_px [[buffer(2)]],
+                                 constant rasterization_rate_map_data& rate_map [[buffer(9)]],
+                                 texture2d<float> aa [[texture(0)]]) {
+    float window_to_screen = 1.0 / resolve.screen_px.z;
+    if (hit.strength_frac <= 0.0) {
+        return float4(read_foveated(aa, rate_map, resolve, in.position.xy * window_to_screen), 1.0);
+    }
+    constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+    rasterization_rate_map_decoder decoder(rate_map);
+    float2 at_px = clamp(in.position.xy + round(float2(hit.shake_px)), float2(0.5), window_px - 0.5);
+    float3 sharp = read_foveated(aa, rate_map, resolve, at_px * window_to_screen);
+    float corner = length(in.position.xy / window_px - 0.5) * M_SQRT2_F;
+    float edge = hit.strength_frac * smoothstep(1.0 - HIT_EDGE_REACH_FRAC * hit.strength_frac, 1.0, corner);
+    float3 sum = sharp;
+    for (int k = 0; k < HIT_BLUR_TAP_COUNT; k++) {
+        float angle = 2.0 * M_PI_F * float(k) / float(HIT_BLUR_TAP_COUNT);
+        float2 tap_px = clamp(at_px + round(hit.blur_px * edge * float2(cos(angle), sin(angle))), float2(0.5),
+                              window_px - 0.5);
+        float2 tap_uv = decoder.map_screen_to_physical_coordinates(tap_px * window_to_screen) * resolve.physical_px.zw;
+        sum += aa.sample(linear_sampler, tap_uv).rgb;
+    }
+    float3 blurred = mix(sharp, sum / float(HIT_BLUR_TAP_COUNT + 1), edge);
+    return float4(mix(blurred, HIT_RED_COLOR, edge * hit.red_frac), 1.0);
 }
 
 /** @brief `HudVertexOut` is one corner of a HUD rectangle. */
@@ -1214,9 +1290,11 @@ static float hash_pixel(uint2 id, uint seed) {
 fragment float4 beam_fragment(BeamVertexOut in [[stage_in]], constant GpuBeam* beams [[buffer(0)]],
                               constant FrameUniforms& frame [[buffer(1)]],
                               constant BeamPass& pass [[buffer(2)]],
-                              depth2d<float> depth [[texture(0)]]) {
+                              depth2d<float> depth [[texture(0)]],
+                              constant rasterization_rate_map_data& rate_map [[buffer(9)]]) {
     GpuBeam beam = beams[in.beam];
-    float2 uv = in.position.xy * frame.screen_size.zw;
+    float2 screen_px = get_screen_px(frame, rate_map, in.position.xy);
+    float2 uv = screen_px * frame.screen_size.zw;
     float3 eye = frame.camera_position_m.xyz;
     float4 near_point = frame.inv_view_proj * float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1.0, 1.0);
     float3 v = normalize(near_point.xyz / near_point.w - eye);
@@ -1257,7 +1335,7 @@ fragment float4 beam_fragment(BeamVertexOut in [[stage_in]], constant GpuBeam* b
         glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
     }
     uint seed = uint(pass.params.w);
-    uint2 id = uint2(in.position.xy);
+    uint2 id = uint2(screen_px);
     float speckle = beam.end_speckle.w;
     if (speckle > 0.0 && glow > MIN_SPECKLE_GLOW && hash_pixel(id, seed) < speckle) {
         float kind = hash_pixel(id, seed ^ SPECKLE_KIND_SALT);
