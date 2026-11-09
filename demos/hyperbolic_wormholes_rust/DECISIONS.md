@@ -1270,6 +1270,38 @@
 - **Rationale:** you asked that `Escape` ask "do you want to exit?" instead of exiting, exiting only if you press
   OK.
 
+### D118. Hold Tab for the map, Esc for the menu, W-140 (hold Tab for the map, Esc for the menu)
+
+The user (2026-11-09): "one more request is to be able to click tab to see the map and instead if you press escape
+then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", and "the point is that
+users will want to see where on the map they are pretty often". This replaces D86's exit prompt.
+
+- **Choice:**
+  - **Map:** a new held action, `show_map` (`Tab`), shows the MAP page's picture and legend over the game, dimmed 60%
+    (the menu dims 80%), while it is held. Play goes on: moving, looking, aiming and shooting all still work. The
+    window reads whether it is held from the keyboard's state every frame, so a missed key-up can't leave the map up.
+    The menu, when open, covers it.
+  - **Menu:** `open_menu` moves to `Escape`. Opening the menu frees the mouse; `Escape` again (or the open-menu
+    control) closes it and captures the mouse again. `release_mouse` is gone: opening the menu is how to free the
+    mouse.
+  - **Quit:** the menu has a fifth page, QUIT, last, so `Esc` then `Q` reaches it from SCORES. `Return` or `Y` there
+    leaves the level (`MenuOutcome::LeaveLevel`, then `PlayOutcome::LeaveLevel` from `handle_event`): a level run
+    alone quits, and the one-window app (W-141, one window for the whole game) will go back to its game menu. The
+    window's close button still quits at once.
+  - **MATCH page:** inside the one-window app the menu also shows a MATCH page first, with the match's status as
+    lines the app supplies (`Menu::set_match_lines`); a level run alone supplies none, so the page doesn't show.
+  - **Shared:** `warped_shared::menu_and_map` (`MenuAndMap`) holds the menu, whether the map is held and what covers
+    the view, the same in every level; `exit_prompt.rs` is removed.
+  - **Saved settings:** a save from before (it has `release_mouse` and no `show_map`) is upgraded as it loads
+    (`key_bindings::upgrade_saved_names`): `show_map` gets `Tab`, and `open_menu` keeps its own controls other than
+    the old `Tab` and gains `release_mouse`'s (`Escape`). Any other unknown key still fails.
+- **Alternatives:**
+  - toggling the map with `Tab` (the user asked for it only while held);
+  - keeping D86's prompt behind the QUIT page (a second question after choosing QUIT and pressing `Return`);
+  - keeping `release_mouse` on another key (the menu already frees the mouse).
+- **Rationale:** the user's request; the QUIT page is itself the question D86 asked, so a stray `Escape` still
+  can't end a game.
+
 ### D87. Consoles pulse faster and faster while being turned off
 
 - **Choice:**

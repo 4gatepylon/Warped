@@ -13,7 +13,6 @@ mod asset_manifest;
 mod assets;
 mod console_reach;
 mod credits;
-mod exit_prompt;
 mod forest_layout;
 mod game;
 mod map;
@@ -34,6 +33,7 @@ mod thrown_wormholes;
 mod title;
 
 use warped_shared::hud::get_death_lines;
+use warped_shared::menu_and_map::{Cover, MenuAndMap};
 use warped_shared::shot_noise;
 
 use std::path::{Path, PathBuf};
@@ -47,7 +47,6 @@ use sdl3::keyboard::Scancode;
 use sdl3::mouse::MouseButton;
 use shot_noise::ShotNoise;
 
-use exit_prompt::{ExitOutcome, ExitPrompt};
 use game::audio::Audio;
 use game::console_bot::BotWalker;
 use game::guns::{Gun, GunInput, make_weapons};
@@ -690,6 +689,8 @@ fn validate_args(args: &Args, assets_dir: &Path) -> Result<(), String> {
 
 /// `MENU_DIM_FRAC` is how much the menu darkens the view behind it.
 const MENU_DIM_FRAC: f32 = 0.75;
+/// `HELD_MAP_DIM_FRAC` is how much the map shown while `Tab` is held darkens the game behind it.
+const HELD_MAP_DIM_FRAC: f32 = 0.6;
 /// `MENU_HEIGHT_FRAC` is the most of the window's height the menu's text takes.
 const MENU_HEIGHT_FRAC: f32 = 0.85;
 /// `TITLE_PICTURE_PX` is the size of the title screen's text picture.
@@ -1105,8 +1106,7 @@ fn main() {
     let mut minimap: Minimap = Minimap::New(&session.arena);
     minimap.load_photo(&Path::new(env!("CARGO_MANIFEST_DIR")).join(MAP_PICTURE_PATH));
     let mut marks: Vec<Mark> = Vec::new();
-    let mut menu: Option<Menu> = None;
-    let mut exit_prompt: ExitPrompt = ExitPrompt::New();
+    let mut menu_and_map: MenuAndMap<Menu> = MenuAndMap::New();
     if args.photo_hud {
         renderer.set_is_capturing_hud(true);
     }
@@ -1150,7 +1150,7 @@ fn main() {
             }
             let _outcome: MenuOutcome = opened.handle(Scancode::E, &mut menu_settings);
         }
-        menu = Some(opened);
+        menu_and_map.open_menu(opened);
     }
     'running: loop {
         let mut look_delta_pt: Vec2 = Vec2::ZERO;
@@ -1166,28 +1166,21 @@ fn main() {
                     scancode: Some(scancode),
                     repeat: false,
                     ..
-                } if exit_prompt.is_shown() => {
-                    if exit_prompt.answer(scancode) == ExitOutcome::Exit {
-                        break 'running;
-                    }
-                }
-                Event::KeyDown {
-                    scancode: Some(scancode),
-                    repeat: false,
-                    ..
-                } if menu.is_some() => {
-                    match menu
-                        .as_mut()
+                } if menu_and_map.is_menu_open() => {
+                    match menu_and_map
+                        .get_menu_mut()
                         .expect("the menu is open")
                         .handle(scancode, &mut menu_settings)
                     {
                         MenuOutcome::Stay => {}
                         MenuOutcome::Close => {
-                            menu = None;
-                            is_mouse_captured = true;
-                            mouse.set_relative_mouse_mode(&platform.window, true);
+                            menu_and_map.close_menu().apply(
+                                &mut is_mouse_captured,
+                                &platform.window,
+                                &mouse,
+                            );
                         }
-                        MenuOutcome::Quit => break 'running,
+                        MenuOutcome::LeaveLevel => break 'running,
                     }
                     settings.render_scale_frac = menu_settings.render_scale_frac;
                     settings.is_vsync_enabled = menu_settings.is_vsync_enabled;
@@ -1198,18 +1191,12 @@ fn main() {
                     ..
                 } => match scancode {
                     Scancode::Escape => {
-                        if exit_prompt.press_release_mouse(is_mouse_captured)
-                            == ExitOutcome::ReleaseMouse
-                        {
-                            is_mouse_captured = false;
-                            mouse.set_relative_mouse_mode(&platform.window, false);
-                        }
-                    }
-                    Scancode::Tab => {
-                        menu = Some(Menu::New());
+                        menu_and_map.open_menu(Menu::New()).apply(
+                            &mut is_mouse_captured,
+                            &platform.window,
+                            &mouse,
+                        );
                         menu_settings.render_scale_frac = settings.render_scale_frac;
-                        is_mouse_captured = false;
-                        mouse.set_relative_mouse_mode(&platform.window, false);
                     }
                     Scancode::Space => is_jump_pressed = true,
                     Scancode::Q => is_throw_pressed = is_mouse_captured,
@@ -1245,7 +1232,7 @@ fn main() {
                     _ => {}
                 },
                 Event::MouseButtonDown { .. }
-                    if !is_mouse_captured && menu.is_none() && !exit_prompt.is_shown() =>
+                    if !is_mouse_captured && !menu_and_map.is_menu_open() =>
                 {
                     is_mouse_captured = true;
                     mouse.set_relative_mouse_mode(&platform.window, true);
@@ -1323,7 +1310,8 @@ fn main() {
                 || (is_mouse_captured && keys.is_scancode_pressed(Scancode::F)),
             is_throw_pressed,
         };
-        let controls: Controls = if menu.is_some() || exit_prompt.is_shown() {
+        menu_and_map.set_map_held(keys.is_scancode_pressed(Scancode::Tab));
+        let controls: Controls = if menu_and_map.is_menu_open() {
             Controls::default()
         } else {
             controls
@@ -1407,8 +1395,8 @@ fn main() {
                 start.elapsed().as_secs_f32()
             );
         }
-        let is_e_held: bool =
-            menu.is_none() && (args.hold_console || keys.is_scancode_pressed(Scancode::E));
+        let is_e_held: bool = !menu_and_map.is_menu_open()
+            && (args.hold_console || keys.is_scancode_pressed(Scancode::E));
         if let Err(error) = play.update(&mut session, &scene, is_e_held, dt_s) {
             eprintln!("network error: {error}");
         }
@@ -1435,7 +1423,8 @@ fn main() {
             continue;
         }
         let build_start: Instant = Instant::now();
-        session.is_view_covered = menu.is_some() || !session.player.is_alive();
+        session.is_view_covered =
+            menu_and_map.get_cover() != Cover::Nothing || !session.player.is_alive();
         let mut frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);
         if let Some(fov_deg) = args.fov_deg {
             frame.camera.fov_y_rad = fov_deg.to_radians();
@@ -1460,7 +1449,7 @@ fn main() {
         let (window_width_px, window_height_px) = (width_px as f32, height_px as f32);
         fill_marks(&session, &mut marks);
         let mut hud_images: Vec<HudImage> = Vec::new();
-        if let Some(open_menu) = &menu {
+        if let Some(open_menu) = menu_and_map.get_menu() {
             let scoreboard: Scoreboard = match &play.client {
                 None => Scoreboard::Alone {
                     kill_count: session.kill_count,
@@ -1491,19 +1480,27 @@ fn main() {
                 minimap.draw_map(session.player.feet_m, session.player.yaw_rad, &marks);
                 hud_images.push(minimap.get_map_image(window_width_px, window_height_px));
             }
+        } else if menu_and_map.get_cover() == Cover::Map {
+            menu_picture.draw(&menu::get_held_map_lines(), false);
+            frame.hud_rects.push(HudRect {
+                x_px: 0.0,
+                y_px: 0.0,
+                width_px: window_width_px,
+                height_px: window_height_px,
+                color_rgba: Vec4::new(0.0, 0.0, 0.0, HELD_MAP_DIM_FRAC),
+            });
+            hud_images.push(menu_picture.get_image(
+                window_width_px,
+                window_height_px,
+                MENU_HEIGHT_FRAC,
+            ));
+            minimap.draw_map(session.player.feet_m, session.player.yaw_rad, &marks);
+            hud_images.push(minimap.get_map_image(window_width_px, window_height_px));
         } else if menu_settings.is_showing_minimap && bench_view.is_none() && !args.play_route {
             minimap.draw_minimap(session.player.feet_m, session.player.yaw_rad, &marks);
             hud_images.push(minimap.get_minimap_image(window_width_px, window_height_px));
         }
-        if exit_prompt.is_shown() {
-            let [question, keys] = exit_prompt::get_lines();
-            death_picture.draw(&[(question, true), (keys, false)], true);
-            hud_images.push(death_picture.get_image(
-                window_width_px,
-                window_height_px,
-                BANNER_HEIGHT_FRAC,
-            ));
-        } else if menu.is_none()
+        if !menu_and_map.is_menu_open()
             && let Some(respawn_in_s) = session
                 .player
                 .get_respawn_in_s(session.settings.respawn.delay_s as f32)
@@ -1521,7 +1518,7 @@ fn main() {
                 BANNER_HEIGHT_FRAC,
             ));
         }
-        if menu.is_none()
+        if menu_and_map.get_cover() == Cover::Nothing
             && let Some((text, _)) = &session.message
         {
             message_picture.draw(&[(text.clone(), false)], true);

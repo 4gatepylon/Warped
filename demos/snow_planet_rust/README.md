@@ -25,7 +25,8 @@ make join-game SERVER=127.0.0.1      # terminal 2: your window; press 1 (blue) o
 - On another computer: `make join-game SERVER=<the address the server prints>`.
 - `WASD` walks, `Shift` sprints, `Space` jumps, the mouse aims and the left button fires; hold `E` on one of the
   other team's two consoles (at the foot of its pylons) for 10 s to turn it off. A team wins when both of the other
-  team's consoles are off. `Tab` opens the menu (scores, settings, map, credits).
+  team's consoles are off. `Esc` opens the menu (scores, settings, map, credits, quit) and frees the mouse; holding `Tab` shows the whole map
+  over the game while you keep playing.
 - The blizzard (the white column in the middle, the map's only one): inside, you walk at half speed and freeze
   (health falls 8% a second, with the same red, blur and shake as a shot), and a laser goes only 8 m into it. It is
   in the map's `regions.blizzards` with its numbers (DECISIONS S3).
@@ -66,7 +67,7 @@ cargo run --release -- --join 127.0.0.1 --port 47820 --bot --exit-after-s 60 --t
 - Snow look: `appearance.style: snow` turns on the shader's snow sky, ground and fog (`VoxelUniforms::snow`).
 - Laser colour: `appearance.laser_color` in the map gives every team's laser one colour (Snow Planet: green);
   without it lasers keep their team colours. The shader whitens a one-colour beam's core less so it shows on snow.
-- Map page (Tab, then E): `make map-picture` (`--map-picture`, `src/map_photo.rs`) renders the map from 40 m up
+- Map page (held `Tab`, or `Esc` then E): `make map-picture` (`--map-picture`, `src/map_photo.rs`) renders the map from 40 m up
   in 8 m tiles with 2×2 supersampling, without the global snow and fog, and saves `map_pictures/<map>.png`.
   `MapLayout` (`src/map_layout.rs`) draws it under the live marks, and falls back to its flat drawing if the file is
   missing. The picture costs nothing per frame.

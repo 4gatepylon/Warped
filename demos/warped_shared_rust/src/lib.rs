@@ -15,7 +15,8 @@
 //! - `mesh`, `avatar_model`: glTF models of the maps' structures and the players' robot body.
 //! - `gait`: which of the robot's clips another player shows, and where in it, from their motion.
 //! - `spaceships`: the spaceships in the sky.
-//! - `key_bindings`, `exit_prompt`: a player's controls, and the "leave the game?" prompt.
+//! - `key_bindings`, `menu_and_map`: a player's controls, and what covers the view (the menu on
+//!   `Esc`, the map while `Tab` is held) with what that does to the mouse.
 //! - `texture_arrays`, `render_mesh`, `viewmodel`: Metal textures, models and the gun held in hand.
 //! - `overlay`, `hud_bars`, `hud`: what is drawn over a frame, the HUD's bars, its pulses, its
 //!   crosshair, the hit effect and the banner's lobby and "YOU DIED" lines.
@@ -32,8 +33,6 @@
 
 pub mod app_bundle;
 pub mod avatar_model;
-#[cfg(target_os = "macos")]
-pub mod exit_prompt;
 pub mod fps_demo_assets;
 pub mod gait;
 pub mod geometry;
@@ -44,6 +43,8 @@ pub mod hud;
 pub mod hud_bars;
 #[cfg(target_os = "macos")]
 pub mod key_bindings;
+#[cfg(target_os = "macos")]
+pub mod menu_and_map;
 pub mod mesh;
 pub mod movement;
 #[cfg(target_os = "macos")]
