@@ -48,6 +48,7 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | Left mouse | fire: the sniper (gun 1) once a click, then 2 s to reload; the rifle (gun 2) while held, until it overheats |
 | Right mouse | aim: zoom in 2.5 times (sniper) or 1.5 times (rifle); the mouse turns the view more slowly by as much |
 | `1` / `2` / wheel | take the sniper / take the rifle / swap guns |
+| `Q` | throw a wormhole mouth: purple first, then green; once both are down they link (Lunar Surface's thrown wormholes) |
 | `E` (hold) | turn off an enemy console: look at it from within 3 m and hold 10 s |
 | `Esc` | release the mouse; a second `Esc` asks "Do you want to exit?" (`Return`/`Y` exits, `Esc`/`N` stays) |
 | `Tab` | menu (scores, settings, map, credits) |
@@ -91,6 +92,15 @@ countdown.
   near the mouths in view are drawn live each frame from the mouths' centres (`encode_lens_live` in
   `src/render/metal/mod.rs`), so they show through the wormholes too, hidden by the forest where it stands in front
   (DECISIONS.md D15).
+- **Thrown wormholes:** `Q` throws a wormhole mouth, as on Lunar Surface (W-126, same play in every level; the
+  throw, the colours, the hits that destroy a pair and the messages are Lunar's, DECISIONS.md D43): it is lobbed from
+  the eye, drops to the floor below whatever it hits and hovers there at eye height, purple first, then green. A
+  mouth that would sit within another warp's reach, inside a solid or outside the arena fizzles. Once both are down
+  they link, and players, robots and lasers go through them as through the map's mouths; what shows through a
+  thrown mouth's throat takes its colour. A throw in the air, and a mouth whose partner isn't down, glow as a ball.
+  Shots through an enemy's pair count toward destroying it (2 sniper or 5 rifle shots; one shot at a lone mouth),
+  and the pair flashes red at each hit; dying clears a player's pair. Each thrown mouth's view of the forest is drawn
+  on the GPU over the frames after it lands (`src/render/metal/thrown_lens.rs`).
 - **Objective:** two pylons per team (the hyperbolic demo's `scifi_beacon`), one on the ground near the base, one on
   the treehouse deck, each sending up a beam in its team's colour while its console is on. Hold `E` at an enemy
   console for 3 s to turn it off; a team wins once every console of the other team is off.
@@ -111,7 +121,7 @@ The match session (`demos/warped_match_rust/`) starts levels with these flags:
 | `dark-forest --join <address> --port <port> --bot --exit-after-s <s> --team <team> [--bot-objective consoles]` | a bot for tests and matches, in a hidden window that draws nothing. It hunts the other team's players and shoots them; with `--bot-objective consoles` it walks instead (by the ladders where needed) to each of the other team's consoles, holds `E` once in reach (which the server checks), and logs `bot reached console <i> on foot in <t> s`, until its team wins. |
 
 The default port is 47840 (UDP), and server discovery uses 47841. `dark-forest-server` is the same server as its own
-binary. The wire protocol is the hyperbolic demo's, with its wormhole fields always empty (see `DECISIONS.md`).
+binary. The wire protocol is the hyperbolic demo's; its wormhole fields carry the players' thrown wormholes.
 
 ## Tools
 
@@ -132,6 +142,11 @@ binary. The wire protocol is the hyperbolic demo's, with its wormhole fields alw
 - `--map-picture <png>` (`make map-picture`): renders the map page's picture.
 - `--camera-view <view>`, `--autopilot`, `--show-frame-time`, `--benchmark-seconds <s>`: as in `../fps_demo/`.
 - `--export-map <path>`: writes the map and quits.
+- `--throw-yaws-rad <purple>,<green>`: throws both wormhole mouths by script, turned to those yaws, at 0.5 s and 1.5 s
+  of simulated time; `--walk-into-thrown-at-s <s>` then walks the player into their purple mouth (it logs `went
+  through a thrown wormhole`), and `--shoot-thrown-at-s <s>` aims at the nearest thrown mouth and holds the trigger
+  (it logs `shot went through thrown wormhole mouths` and, at an enemy's, `shot hit the wormholes of players`). For
+  tests and pictures.
 - `--frame-times-file <csv>`: on exit, writes every frame's timing (the loop's interval and simulated step, the CPU's
   phases, the GPU's time, and when the frame reached the display) and prints how evenly frames were shown, for
   chasing stutter.
@@ -256,4 +271,3 @@ revolver Sketchfab Standard, which limit sharing the game.
   does, without walls in between).
 - The beams are drawn as the forest's tracers, without Lunar Surface's blade and laser looks or their speckle, and
   the ground dust as smoke (DECISIONS.md D20).
-- The protocol still carries the hyperbolic demo's wormhole fields, always empty.
