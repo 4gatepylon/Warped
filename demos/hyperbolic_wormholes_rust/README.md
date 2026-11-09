@@ -403,6 +403,13 @@ with adaptive sampling (and tracing every pixel):
 | overlook | 6.1 (5.2) | habitat row | 6.2 (6.5) |
 | laser into the wormhole | 18.7 (32.6) | | |
 
+Those times predate the bigger map, its models and the 1.5× curvature: on 2026-11-08 the same views took 13 to 109
+ms at 2560×1440. D110 (W-131, Lunar wormhole_exit slow at full size) baked the ground and culled what each ray tests,
+with the same pictures: measured under the agents' exclusive GPU lock (median GPU ms, best of 3 alternating rounds of
+20 frames, Apple M3 Pro, macOS 15.7.3, rustc 1.98.1), 19 of the 21 views now take 8 to 16.5 ms at 2560×1440 (before:
+13 to 42), with p99 within 0.4 ms of the median; `laser_into_wormhole` takes 17.5 (40.7) and `wormhole_exit` 49.5
+(109.0). At 3440×1440, 12 views are under 16.7 ms; the rest take 16.8 to 22 ms and `wormhole_exit` 59.
+
 In a full-screen window (2560×1336, automatic scale, `--view`), every view runs at 72 fps or more, all at full
 resolution but the wormhole exit, at render scales 0.96 to 0.98: blue spawn 181 fps, middle 166, Einstein ring 152,
 overview 118, black hole 108, wormhole 91, wormhole exit 73. At that size and full resolution every view takes under 11

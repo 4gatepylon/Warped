@@ -114,6 +114,11 @@ reference Lunar Surface level takes 21-71 ms per frame at the same size on this 
   2560x1440, best of 4 alternating rounds of 30 frames: every view's median and 99th percentile GPU time is under
   16.7 ms. `wormhole` 14.5 → 10.3 ms, `wormhole_exit` 14.3 → 10.3, `laser_into_wormhole` 20.5 → 15.8 (p99
   16.4), the other views 5.4–10.3 ms. The pictures are the same.
+- With Lunar Surface's renderer speed-ups (DECISIONS.md, item 20), under the agents' exclusive GPU lock, best of 3
+  alternating rounds of 20 frames: at render scale 1 (full resolution) and 2560x1440 every view's median and p99 is
+  at most 16.7 ms but `laser_into_wormhole` (25.2 → 21.0 ms); the others take 10–16.3 ms (before: 12–20.1). At the
+  default 0.6, every view is under 11.6 ms. At 3440x1440 and scale 1, 13 of 24 views are under 16.7 ms, the rest
+  17–25 ms. The pictures are the same.
 - `--play-route --route warp-tour` at 1280x800 (frame times include 60 Hz vsync; the first 5 frames are skipped):
 
   | | median ms | 99th percentile ms | worst ms | render scale mean |

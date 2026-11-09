@@ -100,7 +100,6 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
-- [ ] **W-131 Lunar wormhole_exit slow at full size.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lunar Surface's `wormhole_exit` bench view takes about 109 ms of GPU time at full 2560x1440 (the reference and the match's copy alike); in play the window's render scale drops to keep frames fast, but the view itself is far over 16.7 ms.
 
 ## Pending user review
 
@@ -325,6 +324,9 @@ are here too, since the user hadn't confirmed them.
     2026-11-08: on `staging`, waiting for the user to test it.
 - [?] **W-134 Dust map page picture stale.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Dust's committed MAP page picture (`map_pictures/dust_r50m.png`) was drawn before the ground switched to 3 noise octaves; a fresh render differs in 6.5% of its pixels.
   #440: redrawn with `make make-map-picture MAP=dust`.
+- [?] **W-131 Lunar wormhole_exit slow at full size.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Lunar Surface's `wormhole_exit` bench view takes about 109 ms of GPU time at full 2560x1440 (the reference and the match's copy alike); in play the window's render scale drops to keep frames fast, but the view itself is far over 16.7 ms.
+  #450: Lunar Surface's ground is baked and each ray tests less; 19 of 21 bench views now take at most 16.6 ms at
+  2560x1440 at full resolution (`wormhole_exit` 109 → 49.5 ms, still over; in play the render scale drops there).
 
 ## Done
 

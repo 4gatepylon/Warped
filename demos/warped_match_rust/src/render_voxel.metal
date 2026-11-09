@@ -18,6 +18,7 @@ using namespace metal;
     device const Shape *shapes [[buffer(18)]], device const VoxelWarp *warps [[buffer(19)]], device const float4 *warp_lists [[buffer(20)]], \
     device const VoxelLight *lights [[buffer(21)]], device const float4 *palette [[buffer(22)]], device const BeamSegment *beams [[buffer(23)]], \
     device const uchar *clearances [[buffer(24)]], device const float4 *surfaces [[buffer(25)]], device const float *mound_heights [[buffer(26)]], \
+    texture2d<float> terrain_heights [[texture(16)]], texture2d<float> terrain_slopes [[texture(17)]], \
     constant float4 *means [[buffer(27)]], device const DustBurst *dust_bursts [[buffer(29)]], \
     device const DustParticle *dust_particles [[buffer(30)]], \
     texture2d_array<float> albedo_maps [[texture(4)]], texture2d_array<float> normal_maps [[texture(5)]], texture2d_array<float> arm_maps [[texture(6)]], \
@@ -29,6 +30,8 @@ using namespace metal;
 
 constant int MAX_ITERATIONS = 240;
 constant int MAX_SHAPE_STEPS = 96;
+constant int MAX_MASKED_SHAPE_COUNT = 64;
+constant float MIN_CHART_SPEED = 1.0e-12;
 constant float SHAPE_HIT_M = 0.003;
 constant float SHAPE_NORMAL_M = 0.002;
 constant int SHAPE_BOX = 0;
@@ -84,6 +87,8 @@ constant float3 GRADE_HIGHLIGHT_TINT = float3(1.04, 1.0, 0.95);
 constant float AMBIENT = 0.11;
 constant float EARTHSHINE = 0.08;
 constant float SHADOW_FLOOR = 0.0;
+constant float SUN_UNKNOWN = -1.0;
+constant float NEAR_STRUCTURE_LIT = 0.999;
 constant float SHADOW_PENUMBRA_TAN = 0.015;
 constant float3 HAZE_COLOR = float3(0.15, 0.17, 0.21);
 constant float HAZE_START_M = 60.0;
@@ -111,6 +116,9 @@ constant float GLASS_TINT = 0.8;
 constant float3 GLASS_SHEEN = float3(0.05, 0.07, 0.09);
 constant float BEAM_RADIUS_M = 0.02;
 constant float BEAM_REACH = 4.8;
+constant float BEAM_MASK_WIDTHS = 7.2;
+constant int BEAM_MASK_BITS = 32;
+constant float BEAM_MASK_REACHES = 4.0;
 constant float SPOT_RADIUS_M = 0.15;
 constant float DUST_MIN_WIDTH_PX = 1.5;
 constant float DUST_CUTOFF_WIDTHS = 3.0;
@@ -537,11 +545,13 @@ struct VoxelUniforms {
     float4 terrain;
     float4 relief;
     float4 mound_grid;
+    float4 height_grid;
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
     Spaceship spaceships[SPACESHIP_COUNT];
     int4 dust_counts;
+    int4 structure_groups;
     float4 beam_speckle;
     ZoneWalls zone_walls;
     float4 milky_way_pole;
@@ -595,10 +605,11 @@ struct VoxelLight {
     float4 color_radius;
 };
 
-/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, and (length, speckle share, brightness, code: the team, 1 for red, plus `RIFLE_BEAM_CODE` for the rifle's, or `BEACON_BEAM_CODE` for a beacon's). */
+/** @brief `BeamSegment` is one geodesic piece of a laser: start, unit tangent, midpoint, and (length, speckle share, brightness, code: the team, 1 for red, plus `RIFLE_BEAM_CODE` for the rifle's, or `BEACON_BEAM_CODE` for a beacon's). */
 struct BeamSegment {
     float4 a;
     float4 b;
+    float4 mid;
     float4 info;
 };
 
@@ -715,6 +726,8 @@ struct Scene {
     device const uchar *clearances;
     device const float4 *surfaces;
     device const float *mound_heights;
+    texture2d<float> terrain_heights;
+    texture2d<float> terrain_slopes;
     constant float4 *means;
     texture2d_array<float> albedo_maps;
     texture2d_array<float> normal_maps;
@@ -806,10 +819,52 @@ static float structure_distance(thread const Scene &scene, device const VoxelStr
     return best;
 }
 
+/** @brief `masked_distance` is `structure_distance` over the shapes in `mask` (bit k: the structure's shape k). @par Example @code float d = masked_distance(scene, st, q, mask, index); @endcode */
+static float masked_distance(thread const Scene &scene, device const VoxelStructure &st, float3 q, ulong mask, thread int &index) {
+    float best = INFINITY;
+    for (ulong m = mask; m != 0; m &= m - 1) {
+        int i = st.size.x + int(ctz(m));
+        float d = shape_distance(scene.shapes[i], q);
+        if (d < best) { best = d; index = i; }
+    }
+    return best;
+}
+
+/**
+ * @brief `get_shape_mask` marks (bit k for the structure's shape k) each glass (or other) shape whose box, grown by
+ * `margin`, the chart segment q0 + dq mu for mu in [mu_lo, mu_hi] crosses: the only shapes a march along it can meet, or
+ * come within `margin` of.
+ * @par Example
+ * @code
+ * ulong mask = get_shape_mask(scene, st, q0, dq, mu_lo, mu_hi, false, SHAPE_HIT_M);
+ * @endcode
+ */
+static ulong get_shape_mask(thread const Scene &scene, device const VoxelStructure &st, float3 q0, float3 dq, float mu_lo, float mu_hi, bool is_glass,
+                            float margin) {
+    float3 inv = 1.0 / select(dq, float3(MIN_CHART_SPEED), abs(dq) < MIN_CHART_SPEED);
+    ulong mask = 0;
+    for (int k = 0; k < st.size.y; k++) {
+        device const Shape &sh = scene.shapes[st.size.x + k];
+        if ((sh.info.x == scene.u.mat_glass) != is_glass) continue;
+        float3 extent = sh.half_round.xyz;
+        if (int(sh.centre_kind.w) == SHAPE_CYLINDER) {
+            int a = sh.info.y, b = (a + 1) % 3, c = (a + 2) % 3;
+            float radius = max(extent[b], extent[c]);
+            extent[b] = radius;
+            extent[c] = radius;
+        }
+        float3 t1 = (sh.centre_kind.xyz - extent - margin - q0) * inv, t2 = (sh.centre_kind.xyz + extent + margin - q0) * inv;
+        float3 near = min(t1, t2), far = max(t1, t2);
+        if (max(max(max(near.x, near.y), near.z), mu_lo) <= min(min(min(far.x, far.y), far.z), mu_hi)) mask |= 1ul << ulong(k);
+    }
+    return mask;
+}
+
 /**
  * @brief `march_shapes` sphere-traces the chart line q0 + dq mu from mu to mu_hi and gives where it meets a shape (or
  * INFINITY); with `should_track_lit` (shadow rays only, since it slows the camera's rays), it lowers `lit` to the
- * least gap to a shape over the chart distance from `mu_from` times `SHADOW_PENUMBRA_TAN`.
+ * least gap to a shape over the chart distance from `mu_from` times `SHADOW_PENUMBRA_TAN`, and to `NEAR_STRUCTURE_LIT`
+ * when it passes near a shape without meeting it.
  * @par Example
  * @code
  * float mu = march_shapes<false>(scene, st, q0, dq, 0.0, 1.0, false, index, 0.0, lit);
@@ -819,13 +874,21 @@ template <bool should_track_lit>
 static float march_shapes(thread const Scene &scene, device const VoxelStructure &st, float3 q0, float3 dq, float mu, float mu_hi, bool is_glass, thread int &index,
                           float mu_from, thread float &lit) {
     float speed = max(length(dq), TINY);
+    bool is_masked = st.size.y <= MAX_MASKED_SHAPE_COUNT;
+    ulong mask = 0;
+    if (is_masked) {
+        float margin = SHAPE_HIT_M + (should_track_lit ? (mu_hi - mu_from) * speed * SHADOW_PENUMBRA_TAN : 0.0);
+        mask = get_shape_mask(scene, st, q0, dq, mu, mu_hi, is_glass, margin);
+        if (mask == 0) return INFINITY;
+    }
     for (int i = 0; i < MAX_SHAPE_STEPS; i++) {
-        float d = structure_distance(scene, st, q0 + dq * mu, is_glass, index);
+        float d = is_masked ? masked_distance(scene, st, q0 + dq * mu, mask, index) : structure_distance(scene, st, q0 + dq * mu, is_glass, index);
         if (d < SHAPE_HIT_M) return mu;
         if (should_track_lit) lit = min(lit, d / max((mu - mu_from) * speed * SHADOW_PENUMBRA_TAN, TINY));
         mu += d / speed;
         if (mu > mu_hi) break;
     }
+    if (should_track_lit) lit = min(lit, NEAR_STRUCTURE_LIT);
     return INFINITY;
 }
 
@@ -838,24 +901,54 @@ static float hit_mesh_triangle(device const MeshTriangle &t, float3 q0, float3 d
     return b1 >= 0.0 && b2 >= 0.0 && b1 + b2 <= 1.0 ? dot(e2, g) / det : INFINITY;
 }
 
-/** @brief `march_mesh` walks a model's BVH (in `nodes`, over `triangles`) from node `root` and gives where the chart line first meets a triangle within [mu_lo, mu_hi] (or INFINITY), and which. @par Example @code float mu = march_mesh(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, 0.0, 1.0, index); @endcode */
-static float march_mesh(device const MeshTriangle *triangles, device const BvhNode *nodes, int root, float3 q0, float3 dq, float mu_lo, float mu_hi, thread int &index) {
+/** @brief `enter_node` gives where the chart line q0 + dq mu (`inv` = 1 / dq) enters a BVH node's box within [mu_lo, mu_hi], or INFINITY if it misses it there. @par Example @code float mu = enter_node(nodes[k], q0, inv, 0.0, 1.0); @endcode */
+static float enter_node(device const BvhNode &node, float3 q0, float3 inv, float mu_lo, float mu_hi) {
+    float3 a = (node.lo.xyz - q0) * inv, b = (node.hi.xyz - q0) * inv, near = min(a, b), far = max(a, b);
+    float mu_in = max(max(max(near.x, near.y), near.z), mu_lo);
+    return mu_in > min(min(min(far.x, far.y), far.z), mu_hi) ? INFINITY : mu_in;
+}
+
+/**
+ * @brief `march_mesh` walks a model's BVH (in `nodes`, over `triangles`) from node `root`, nearer child first, and gives
+ * where the chart line first meets a triangle within [mu_lo, mu_hi] (or INFINITY), and which; with `is_any_hit` (shadow
+ * rays) it stops at the first triangle it meets, and lowers `lit` to `NEAR_STRUCTURE_LIT` once it reaches a leaf.
+ * @par Example
+ * @code
+ * float mu = march_mesh<false>(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, 0.0, 1.0, index, hit.lit);
+ * @endcode
+ */
+template <bool is_any_hit>
+static float march_mesh(device const MeshTriangle *triangles, device const BvhNode *nodes, int root, float3 q0, float3 dq, float mu_lo, float mu_hi, thread int &index,
+                        thread float &lit) {
     int stack[MESH_STACK_SIZE];
-    int top = 0;
-    stack[top++] = root;
+    float entries[MESH_STACK_SIZE];
     float3 inv = 1.0 / dq;
+    int top = 0;
+    float root_mu = enter_node(nodes[root], q0, inv, mu_lo, mu_hi);
+    if (root_mu == INFINITY) return INFINITY;
+    stack[top] = root;
+    entries[top++] = root_mu;
     while (top > 0) {
-        device const BvhNode &node = nodes[stack[--top]];
-        float3 a = (node.lo.xyz - q0) * inv, b = (node.hi.xyz - q0) * inv, near = min(a, b), far = max(a, b);
-        if (max(max(max(near.x, near.y), near.z), mu_lo) > min(min(min(far.x, far.y), far.z), mu_hi)) continue;
+        top--;
+        if (entries[top] > mu_hi) continue;
+        device const BvhNode &node = nodes[stack[top]];
         int first = int(node.lo.w), count = int(node.hi.w);
         if (count == 0) {
-            if (top + 2 <= MESH_STACK_SIZE) { stack[top++] = first; stack[top++] = first + 1; }
+            float mu_a = enter_node(nodes[first], q0, inv, mu_lo, mu_hi), mu_b = enter_node(nodes[first + 1], q0, inv, mu_lo, mu_hi);
+            int near_child = mu_a <= mu_b ? first : first + 1, far_child = mu_a <= mu_b ? first + 1 : first;
+            float mu_near = min(mu_a, mu_b), mu_far = max(mu_a, mu_b);
+            if (mu_far < INFINITY && top < MESH_STACK_SIZE) { stack[top] = far_child; entries[top++] = mu_far; }
+            if (mu_near < INFINITY && top < MESH_STACK_SIZE) { stack[top] = near_child; entries[top++] = mu_near; }
             continue;
         }
+        if (is_any_hit) lit = min(lit, NEAR_STRUCTURE_LIT);
         for (int i = first; i < first + count; i++) {
             float mu = hit_mesh_triangle(triangles[i], q0, dq);
-            if (mu >= mu_lo && mu < mu_hi) { mu_hi = mu; index = i; }
+            if (mu >= mu_lo && mu < mu_hi) {
+                mu_hi = mu;
+                index = i;
+                if (is_any_hit) return mu;
+            }
         }
     }
     return index >= 0 ? mu_hi : INFINITY;
@@ -890,8 +983,13 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     bool is_avatar = st.size.w <= FIRST_AVATAR_ROOT_CODE, is_mesh = is_avatar || st.size.w >= 0;
     if (is_mesh) {
         index = -1;
-        mu = is_avatar ? march_mesh(scene.avatar_triangles, scene.avatar_nodes, FIRST_AVATAR_ROOT_CODE - st.size.w, q0, dq, mu_lo, mu_hi, index)
-                       : march_mesh(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, mu_lo, mu_hi, index);
+        if (is_shadow) {
+            mu = is_avatar ? march_mesh<true>(scene.avatar_triangles, scene.avatar_nodes, FIRST_AVATAR_ROOT_CODE - st.size.w, q0, dq, mu_lo, mu_hi, index, hit.lit)
+                           : march_mesh<true>(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, mu_lo, mu_hi, index, hit.lit);
+        } else {
+            mu = is_avatar ? march_mesh<false>(scene.avatar_triangles, scene.avatar_nodes, FIRST_AVATAR_ROOT_CODE - st.size.w, q0, dq, mu_lo, mu_hi, index, hit.lit)
+                           : march_mesh<false>(scene.mesh_triangles, scene.mesh_nodes, st.size.w, q0, dq, mu_lo, mu_hi, index, hit.lit);
+        }
     } else if (is_shadow) {
         float lam_from = -tanh(s_star), mu_from = lam_from / (p.w * (p.w + lam_from * t.w));
         mu = march_shapes<true>(scene, st, q0, dq, mu_lo, mu_hi, false, index, mu_from, hit.lit);
@@ -906,6 +1004,49 @@ static void trace_structure(thread const Scene &scene, int k, float4 x, float4 v
     if (s_hit < hit.s) {
         hit.s = s_hit; hit.mat = is_mesh ? MAT_MESH : scene.shapes[index].info.x; hit.k = k; hit.axis = 0;
         hit.sgn = 1.0; hit.g = q0 + dq * mu; hit.cell = int3(index, is_avatar ? CELL_AVATAR : is_mesh ? CELL_MAP_MODEL : 0, 0);
+    }
+}
+
+/**
+ * @brief `can_reach_sphere` says whether a chord from x along v, `s_max` long, comes within the ball about `centre`
+ * whose radius has cosine hyperbolic `cosh_radius`, as `trace_structure` tests a structure's bounding sphere.
+ * @par Example
+ * @code
+ * if (!can_reach_sphere(x, v, centre, info.x, hit.s)) continue;
+ * @endcode
+ */
+static bool can_reach_sphere(float4 x, float4 v, float4 centre, float cosh_radius, float s_max) {
+    float a = -mdot(x, centre), b = mdot(v, centre), closest_sq = a * a - b * b;
+    if (closest_sq >= cosh_radius * cosh_radius) return false;
+    float s_star = clamp_atanh(b / a), half_window = acosh(cosh_radius * rsqrt(max(closest_sq, 1.0)));
+    return s_star + half_window > 0.0 && s_star - half_window < s_max;
+}
+
+/**
+ * @brief `trace_structures` runs `trace_structure` on every structure a chord can reach: the static ones group by group
+ * (`structure_groups`: how many groups, where their headers start in `warp_lists`, how many structures are static),
+ * skipping each group whose bounding sphere the chord can't reach, then the avatars and markers after them one by one.
+ * A shadow ray stops at its first hit.
+ * @par Example
+ * @code
+ * trace_structures<false>(scene, x, v, hit, glass_s);
+ * @endcode
+ */
+template <bool is_shadow>
+static void trace_structures(thread const Scene &scene, float4 x, float4 v, thread Hit &hit, thread float &glass_s) {
+    int4 groups = scene.u.structure_groups;
+    for (int g = 0; g < groups.x; g++) {
+        float4 centre = scene.warp_lists[groups.y + 2 * g], info = scene.warp_lists[groups.y + 2 * g + 1];
+        if (!can_reach_sphere(x, v, centre, info.x, hit.s)) continue;
+        int first = int(info.y);
+        for (int j = first; j < first + int(info.z); j++) {
+            trace_structure(scene, int(scene.warp_lists[j].x), x, v, 0.0, is_shadow, hit, glass_s);
+            if (is_shadow && hit.mat != 0) return;
+        }
+    }
+    for (int k = groups.z; k < scene.u.structure_count; k++) {
+        trace_structure(scene, k, x, v, 0.0, is_shadow, hit, glass_s);
+        if (is_shadow && hit.mat != 0) return;
     }
 }
 
@@ -950,8 +1091,8 @@ static float mound_height_m(thread const Scene &scene, float u_m, float v_m) {
     return mix(bottom, top, f.y);
 }
 
-/** @brief `terrain_height_m` is terrain.rs's `get_height_m`: the ground's height at Fermi (u, v), mounds included. @par Example @code float h = terrain_height_m(scene, u_m, v_m); @endcode */
-static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
+/** @brief `terrain_shape_height_m` is terrain.rs's `get_shape_height_m`: the ground's height at Fermi (u, v) from its shape, mounds included. @par Example @code float h = terrain_shape_height_m(scene, u_m, v_m); @endcode */
+static float terrain_shape_height_m(thread const Scene &scene, float u_m, float v_m) {
     float4 t = scene.u.terrain, rl = scene.u.relief;
     uint seed = scene.u.terrain_seed;
     float inside_m = (1.0 - length(float2(u_m / t.x, v_m / t.y))) * t.y;
@@ -962,6 +1103,26 @@ static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
     for (uint o = 0; o < uint(TERRAIN_OCTAVES); o++) { sum += amplitude * terrain_noise(p, seed + o); amplitude *= 0.5; p *= 2.0; }
     float mounds_m = mound_height_m(scene, u_m, v_m);
     return rim_m * wall + mounds_m + rl.x * sum / (1.0 - exp2(-float(TERRAIN_OCTAVES))) * (1.0 + TERRAIN_WALL_RELIEF_GAIN * wall);
+}
+
+/**
+ * @brief `terrain_height_m` is terrain.rs's `get_height_m`: the baked grid (origin u, v and cells per meter in `height_grid`,
+ * whose w is 1 when there is one) read bilinearly at Fermi (u, v), and `terrain_shape_height_m` outside it. One gather at
+ * the corner shared by texels i and i + 1 fetches the cell's four points, w at (i, j), z at (i + 1, j), x at (i, j + 1) and
+ * y at (i + 1, j + 1), unfiltered.
+ * @par Example
+ * @code
+ * float h = terrain_height_m(scene, u_m, v_m);
+ * @endcode
+ */
+static float terrain_height_m(thread const Scene &scene, float u_m, float v_m) {
+    constexpr sampler corners(filter::nearest, address::clamp_to_edge);
+    float4 g = scene.u.height_grid;
+    float2 x = (float2(u_m, v_m) - g.xy) * g.z, i = floor(x), f = x - i;
+    float2 size = float2(scene.terrain_heights.get_width(), scene.terrain_heights.get_height());
+    if (g.w == 0.0 || any(i < 0.0) || any(i >= size - 1.0)) return terrain_shape_height_m(scene, u_m, v_m);
+    float4 q = scene.terrain_heights.gather(corners, (i + 1.0) / size);
+    return mix(mix(q.w, q.z, f.x), mix(q.x, q.y, f.x), f.y);
 }
 
 /** @brief `get_fermi` gives a point's Fermi (u, v, h) in meters. @par Example @code float3 f = get_fermi(x, r); @endcode */
@@ -1005,6 +1166,37 @@ static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s
 }
 
 /**
+ * @brief `terrain_shape_slope` is the slope of `terrain_shape_height_m` along u and v at Fermi (u, v): central differences
+ * `TERRAIN_NORMAL_STEP_M` to each side.
+ * @par Example
+ * @code
+ * float2 g = terrain_shape_slope(scene, u_m, v_m);
+ * @endcode
+ */
+static float2 terrain_shape_slope(thread const Scene &scene, float u_m, float v_m) {
+    float d = TERRAIN_NORMAL_STEP_M;
+    return float2(terrain_shape_height_m(scene, u_m + d, v_m) - terrain_shape_height_m(scene, u_m - d, v_m),
+                  terrain_shape_height_m(scene, u_m, v_m + d) - terrain_shape_height_m(scene, u_m, v_m - d)) / (2.0 * d);
+}
+
+/**
+ * @brief `terrain_slope` is `terrain_shape_slope` baked at the height grid's points (`bake_terrain_slopes`) and read
+ * bilinearly inside the grid, which keeps the light smooth across cells, or `terrain_shape_slope` outside it.
+ * @par Example
+ * @code
+ * float2 g = terrain_slope(scene, u_m, v_m);
+ * @endcode
+ */
+static float2 terrain_slope(thread const Scene &scene, float u_m, float v_m) {
+    constexpr sampler bilinear(filter::linear, address::clamp_to_edge);
+    float4 g = scene.u.height_grid;
+    float2 x = (float2(u_m, v_m) - g.xy) * g.z;
+    float2 size = float2(scene.terrain_slopes.get_width(), scene.terrain_slopes.get_height());
+    if (g.w == 0.0 || any(x < 0.0) || any(x > size - 1.0)) return terrain_shape_slope(scene, u_m, v_m);
+    return scene.terrain_slopes.sample(bilinear, (x + 0.5) / size).xy;
+}
+
+/**
  * @brief `terrain_normal` is the unit normal of the terrain at Fermi (u, v, h): ∂h less the height's gradient along
  * ∂u and ∂v, which are orthogonal with lengths cosh h cosh v and cosh h.
  * @par Example
@@ -1013,9 +1205,9 @@ static void trace_terrain(thread const Scene &scene, float4 x, float4 v, float s
  * @endcode
  */
 static float4 terrain_normal(thread const Scene &scene, float3 f) {
-    float r = scene.u.curvature_radius_m, d = TERRAIN_NORMAL_STEP_M;
-    float g_u = (terrain_height_m(scene, f.x + d, f.y) - terrain_height_m(scene, f.x - d, f.y)) / (2.0 * d);
-    float g_v = (terrain_height_m(scene, f.x, f.y + d) - terrain_height_m(scene, f.x, f.y - d)) / (2.0 * d);
+    float r = scene.u.curvature_radius_m;
+    float2 g = terrain_slope(scene, f.x, f.y);
+    float g_u = g.x, g_v = g.y;
     float3 c = cosh(f / r), sh = sinh(f / r);
     float4 du = float4(0.0, 0.0, -c.z * c.y * c.x, c.z * c.y * sh.x);
     float4 dv = float4(c.z * c.y, 0.0, -c.z * sh.y * sh.x, c.z * sh.y * c.x);
@@ -1057,7 +1249,7 @@ static bool is_clear_of_blocks(thread const Scene &scene, int w, float3 local, f
 static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp, float rho, float3 local, thread Hit &hit, thread float &glass_s) {
     if (scene.u.has_terrain != 0) trace_terrain<false>(scene, x, v, 0.0, hit); else trace_ground(x, v, hit);
     if (warp < 0) {
-        for (int k = 0; k < scene.u.structure_count; k++) trace_structure(scene, k, x, v, 0.0, false, hit, glass_s);
+        trace_structures<false>(scene, x, v, hit, glass_s);
     } else {
         int4 list = scene.warps[warp].list;
         float reach = hit.s;
@@ -1088,10 +1280,8 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
         trace_terrain<true>(scene, x, l, TERRAIN_SHADOW_START_M / scene.u.curvature_radius_m, h);
         if (h.mat != 0) return SHADOW_FLOOR;
     }
-    for (int k = 0; k < scene.u.structure_count; k++) {
-        trace_structure(scene, k, x, l, 0.0, true, h, glass_s);
-        if (h.mat != 0) return SHADOW_FLOOR;
-    }
+    trace_structures<true>(scene, x, l, h, glass_s);
+    if (h.mat != 0) return SHADOW_FLOOR;
     return smoothstep(0.0, 1.0, h.lit);
 }
 
@@ -1246,10 +1436,15 @@ static float2 get_env_brdf(float roughness, float n_dot_v) {
     return float2(-1.04, 1.04) * a004 + r.zw;
 }
 
-/** @brief `get_lamp_light` gives lamp i's light reaching x (black past its cutoff) and the unit direction toward it. @par Example @code float3 c = get_lamp_light(scene, i, x, toward); @endcode */
+/** @brief `get_lamp_light` gives lamp i's light reaching x (black past its cutoff) and the unit direction toward it (zero well past the cutoff, which the cheap test of the cosh of the distance finds first). @par Example @code float3 c = get_lamp_light(scene, i, x, toward); @endcode */
 static float3 get_lamp_light(thread const Scene &scene, int i, float4 x, thread float4 &toward) {
     float4 lx = scene.lights[i].position;
-    float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m, radius_m = scene.lights[i].color_radius.w;
+    float radius_m = scene.lights[i].color_radius.w;
+    if (-mdot(lx, x) > cosh(LIGHT_CUTOFF_FRAC * radius_m / scene.u.curvature_radius_m)) {
+        toward = float4(0.0);
+        return float3(0.0);
+    }
+    float d_m = measure_gap(lx, x) * scene.u.curvature_radius_m;
     toward = normalize_tangent(x, lx);
     if (d_m > LIGHT_CUTOFF_FRAC * radius_m) return float3(0.0);
     return scene.lights[i].color_radius.rgb / (1.0 + (d_m / radius_m) * (d_m / radius_m))
@@ -1292,20 +1487,20 @@ static float3 light_flashlight(thread const Scene &scene, float4 x, float4 n) {
 /**
  * @brief `light_surface` lights a surface point with face normal n: the sun (GGX with lunar-Lambert diffuse, shadowed),
  * earthshine, the haze's skylight and the ambient light (split-sum specular with multiple-scattering compensation), lamps
- * and the laser spot.
+ * and the laser spot. The sun's shadow is `known_sun` when it is known (not `SUN_UNKNOWN`), else traced.
  * @par Example
  * @code
- * float3 c = light_surface(scene, s, x, n, v);
+ * float3 c = light_surface(scene, s, x, n, v, SUN_UNKNOWN);
  * @endcode
  */
-static float3 light_surface(thread const Scene &scene, Surface s, float4 x, float4 n, float4 v) {
+static float3 light_surface(thread const Scene &scene, Surface s, float4 x, float4 n, float4 v, float known_sun) {
     float4 l = transport_from_centre(scene.u.sun.xyz, x), view = -v;
     float2 env = get_env_brdf(s.roughness, max(mdot(s.n, view), 1e-4));
     float3 f0 = mix(float3(0.04), s.albedo, s.metallic);
     float3 energy = 1.0 + f0 * (1.0 / max(env.x + env.y, 1e-3) - 1.0);
     float3 color = float3(0.0);
     if (mdot(n, l) > 0.0) {
-        float sun = trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / scene.u.curvature_radius_m), l);
+        float sun = known_sun != SUN_UNKNOWN ? known_sun : trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / scene.u.curvature_radius_m), l);
         if (sun > 0.0) color += M_PI_F * SUN_INTENSITY * sun * SUN_COLOR * light_from(s, l, view, energy);
     }
     float earth = max(mdot(s.n, transport_from_centre(scene.u.planet.xyz, x)), 0.0);
@@ -1345,7 +1540,7 @@ static float3 to_camera(constant VoxelUniforms &u, float4 t) { return float3(mdo
  * @endcode
  */
 kernel void probe_hand_light(SCENE_BUFFERS, device HandLight &hand [[buffer(HAND_LIGHT_BUFFER_INDEX)]]) {
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     float4 x = u.camera[3], l = transport_from_centre(u.sun.xyz, x), up = normalize_tangent(x, float4(0.0, 1.0, 0.0, 0.0));
     float3 sun = SUN_INTENSITY * SUN_COLOR * trace_shadow(scene, x, l), lamps = float3(0.0);
     float3 ambient = float3(AMBIENT) + HAZE_SKYLIGHT * HAZE_COLOR;
@@ -1388,13 +1583,14 @@ static float detail_fraction(thread const Scene &scene, float dist_s) {
 
 /**
  * @brief `shade_ground` shades the ground at x: the {4,5} tiling folded into the central tile gives block cells, and
- * cell centres decide the regolith, crater floor, ejecta, craterlets, zone tints and the boundary.
+ * cell centres decide the regolith, crater floor, ejecta, craterlets, zone tints and the boundary; `known_sun` is its
+ * shadow when known (`SUN_UNKNOWN`: traced).
  * @par Example
  * @code
- * float3 c = shade_ground(scene, x, v, s);
+ * float3 c = shade_ground(scene, x, v, s, SUN_UNKNOWN);
  * @endcode
  */
-static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float dist_s) {
+static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float dist_s, float known_sun) {
     constant VoxelUniforms &u = scene.u;
     float r = u.curvature_radius_m;
     float tile_klein_half = tanh(acosh(cos(M_PI_F / 5.0) / sin(M_PI_F / 4.0)));
@@ -1479,7 +1675,7 @@ static float3 shade_ground(thread const Scene &scene, float4 x, float4 v, float 
     b4 += mdot(b4, x) * x;
     float4 t = orthonormal(t4, n), b = -orthonormal(b4, n);
     Surface s = sample_surface(scene, u.mat_regolith, albedo, a, cell_s * r, dist_s, x, n, t, b, v);
-    return light_surface(scene, s, x, n, v) + glow;
+    return light_surface(scene, s, x, n, v, known_sun) + glow;
 }
 
 /**
@@ -1527,7 +1723,7 @@ static float3 shade_block(thread const Scene &scene, Hit h, float4 x, float4 v, 
     if (glow > 0.5 && st.size.z != 0) { albedo *= DARK_PYLON_GLOW_FRAC; glow = 0.0; }
     if (glow > 0.5) return albedo * (GLOW_BRIGHTNESS + GLOW_RIM);
     Surface s = sample_surface(scene, m, albedo, g, u.curvature_radius_m / st.scale.x, dist_s, x, n, t, b, v);
-    return light_surface(scene, s, x, n, v);
+    return light_surface(scene, s, x, n, v, SUN_UNKNOWN);
 }
 
 /** @brief `to_world` carries a local vector (c, w) of structure st to the world, by the transpose of its inverse frame's rows. @par Example @code float4 n = to_world(st, grad, 0.0); @endcode */
@@ -1597,7 +1793,7 @@ static float3 shade_mesh(thread const Scene &scene, Hit h, float4 x, float4 v, f
         float4 entry = get_palette(scene, scene.shapes[st.size.x].info.x);
         emissive += entry.rgb * entry.a * BEACON_GLOW;
     }
-    return light_surface(scene, s, x, n, v) + emissive * GLOW_BRIGHTNESS;
+    return light_surface(scene, s, x, n, v, SUN_UNKNOWN) + emissive * GLOW_BRIGHTNESS;
 }
 
 /** @brief `sample_star_layer` draws one layer of stars from a grid on the cube around the sky. @par Example @code float s = sample_star_layer(scene, d, 60.0, 0.03); @endcode */
@@ -2127,17 +2323,42 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
-static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
-                       thread float &speckle) {
-    float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
-    for (int i = 0; i < scene.u.beam_count; i++) {
+/**
+ * @brief `get_beam_mask` marks (bit i) each of the first 32 beams whose segment comes within warp w's reach, one longest
+ * bent step and `BEAM_MASK_WIDTHS` of its glow's widths at `travel_limit` of the warp's centre: the only beams whose glow
+ * a ray inside the reach can see before it has travelled `travel_limit`. Later beams are always scanned.
+ * @par Example
+ * @code
+ * uint mask = get_beam_mask(scene, inside, travelled + BEAM_MASK_REACHES * warps[inside].params.z);
+ * @endcode
+ */
+static uint get_beam_mask(thread const Scene &scene, int w, float travel_limit) {
+    float r = scene.u.curvature_radius_m, far_width_m = scene.u.pixel_angle_rad * r * sinh(min(travel_limit, FAR_S));
+    float4 c = scene.warps[w].centre;
+    float reach_m = (scene.warps[w].params.z + MAX_BEND_STEP_M / r) * r;
+    uint mask = 0;
+    for (int i = 0; i < min(scene.u.beam_count, BEAM_MASK_BITS); i++) {
         float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
+        float radius_m = int(info.w + HALF_KIND) >= BEACON_BEAM_CODE ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
+        float sigma = clamp(clamp_atanh(mdot(c, b) / -mdot(c, a)), 0.0, info.x);
+        float d_m = measure_gap(c, geodesic_point(a, b, sigma)) * r;
+        if (d_m - reach_m <= BEAM_MASK_WIDTHS * max(radius_m, far_width_m)) mask |= 1u << uint(i);
+    }
+    return mask;
+}
+
+/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. Of the first 32 beams it scans only those in `mask` (`get_beam_mask`). @par Example @code scan_beams(scene, x, v, s, t, ~0u, core, halo, code, speckle); @endcode */
+static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, uint mask, thread float &core, thread float &halo,
+                       thread float &code, thread float &speckle) {
+    float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad, far_width_m = pix * r * sinh(min(travelled + s_end, FAR_S));
+    for (int i = 0; i < scene.u.beam_count; i++) {
+        if (i < BEAM_MASK_BITS && (mask >> uint(i) & 1u) == 0) continue;
+        float4 mid = scene.beams[i].mid, info = scene.beams[i].info;
         int beam_code = int(info.w + HALF_KIND);
         float half_len = 0.5 * info.x, radius_m = beam_code >= BEACON_BEAM_CODE ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
-        float4 mid = geodesic_point(a, b, half_len);
-        float am = -mdot(x, mid), bm = mdot(v, mid), reach = half_len + BEAM_REACH * max(radius_m, pix * r * sinh(min(travelled + s_end, FAR_S))) / r;
+        float am = -mdot(x, mid), bm = mdot(v, mid), reach = half_len + BEAM_REACH * max(radius_m, far_width_m) / r;
         if (am * am - bm * bm > cosh(reach) * cosh(reach)) continue;
+        float4 a = scene.beams[i].a, b = scene.beams[i].b;
         float al = mdot(x, a), be = mdot(v, a), ga = mdot(x, b), et = mdot(v, b);
         float k1 = 0.5 * ((al * al - ga * ga) + (be * be - et * et)), k2 = al * be - ga * et;
         float s_c = k1 > abs(k2) ? 0.5 * clamp_atanh(-k2 / k1) : (k2 < 0.0 ? s_end : 0.0);
@@ -2348,7 +2569,9 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float4 dust = float4(0.0);
     Hit hit;
     hit.s = NO_HIT_S; hit.mat = 0; hit.k = -1; hit.axis = -1; hit.sgn = 0.0; hit.g = float3(0.0); hit.cell = int3(0);
-    int outcome = OUTCOME_LOST, last_warp = -1, tint = 0;
+    int outcome = OUTCOME_LOST, last_warp = -1, tint = 0, mask_warp = -1;
+    uint beam_mask = 0;
+    float mask_travel_limit = 0.0;
     float4 hit_x = x, hit_v = v;
     float hit_travelled = 0.0;
     float min_step = MIN_BEND_STEP_M / r, max_step = MAX_BEND_STEP_M / r, rho = 0.0;
@@ -2370,7 +2593,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             float glass_s = NO_HIT_S;
             trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
-            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, ~0u, core, halo, code, speckle);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
@@ -2394,7 +2617,14 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         float glass_s = NO_HIT_S;
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
-        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+        if (u.beam_count > 0) {
+            if (mask_warp != inside || travelled + ds > mask_travel_limit) {
+                mask_warp = inside;
+                mask_travel_limit = travelled + ds + BEAM_MASK_REACHES * warps[inside].params.z;
+                beam_mask = get_beam_mask(scene, inside, mask_travel_limit);
+            }
+            scan_beams(scene, x, v, hit.s, travelled, beam_mask, core, halo, code, speckle);
+        }
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
         if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
@@ -2426,6 +2656,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         end.view = geodesic_tangent(hit_x, hit_v, hit.s);
         end.grid.w = hit_travelled + hit.s;
         end.cell.w = hit.mat;
+        end.grid.x = SUN_UNKNOWN;
         if (hit.mat != MAT_GROUND) {
             end.grid.xyz = hit.g;
             end.cell.xyz = hit.cell;
@@ -2512,7 +2743,7 @@ static float3 speckle_beam(thread const Scene &scene, float3 bare, float3 lit, f
 static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id) {
     float3 color = float3(0.0);
     if (end.surface.x == OUTCOME_HIT && end.cell.w == MAT_GROUND) {
-        color = shade_ground(scene, end.point, end.view, end.grid.w);
+        color = shade_ground(scene, end.point, end.view, end.grid.w, end.grid.x);
     } else if (end.surface.x == OUTCOME_HIT) {
         Hit hit = {0.0, end.cell.w, end.surface.y, end.surface.z, end.glow.x, end.grid.xyz, end.cell.xyz};
         color = end.cell.w == MAT_MESH ? shade_mesh(scene, hit, end.point, end.view, end.grid.w) : shade_block(scene, hit, end.point, end.view, end.grid.w);
@@ -2546,6 +2777,35 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
 }
 
 /**
+ * @brief `measure_terrain_heights` writes the ground's height `terrain_height_m` at each Fermi (u, v) of `points`, so
+ * render_voxel.rs's tests can check that the CPU walks and hits on the ground this shader draws.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs's tests, one thread per point.
+ * @endcode
+ */
+kernel void measure_terrain_heights(SCENE_BUFFERS, device const float2 *points [[buffer(2)]], device float *heights [[buffer(3)]],
+                                    uint t [[thread_position_in_grid]]) {
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    heights[t] = terrain_height_m(scene, points[t].x, points[t].y);
+}
+
+/**
+ * @brief `bake_terrain_slopes` writes `terrain_shape_slope` at each point of the height grid (texel (i, j) is the grid's
+ * point i along u and j along v) into `slopes`, once per terrain, for `terrain_slope`.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs, one thread per grid point.
+ * @endcode
+ */
+kernel void bake_terrain_slopes(SCENE_BUFFERS, texture2d<float, access::write> slopes [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= slopes.get_width() || id.y >= slopes.get_height()) return;
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    float2 point_m = u.height_grid.xy + float2(id) / u.height_grid.z;
+    slopes.write(float4(terrain_shape_slope(scene, point_m.x, point_m.y), 0.0, 0.0), id);
+}
+
+/**
  * @brief `trace_voxel_pixels` traces every pixel's ray and writes its colour (`--sampling every-pixel`).
  * @par Example
  * @code
@@ -2554,7 +2814,7 @@ static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, te
  */
 kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2619,7 +2879,9 @@ static bool is_cell_smooth(device const VoxelRayEnd *grid, int columns, int grid
  * `end`: the point (back on the hyperboloid, or the unit sphere for the sky), tangent, grid point, distance and dust
  * blend, and the rest is the first sample's. On a block face the cell under the blended grid point gives the
  * material, and the result is false (trace the ray instead) unless that cell is solid and the one in front of the
- * face is open.
+ * face is open. On the ground the four samples' sun (`with_ground_sun`) carries over when they are all fully in the
+ * sun with no structure near their shadow rays (`NEAR_STRUCTURE_LIT`), and is otherwise `SUN_UNKNOWN`, so the pixel
+ * traces its own.
  * @par Example
  * @code
  * if (!interpolate_ray_end(scene, a, b, c, d, 0.5, 0.0, end)) end = trace_ray(scene, pixel);
@@ -2635,8 +2897,32 @@ static bool interpolate_ray_end(thread const Scene &scene, VoxelRayEnd a, VoxelR
     if (a.surface.x != OUTCOME_HIT) return true;
     end.point = point * rsqrt(-mdot(point, point));
     end.view = normalize_tangent(end.point, mix(mix(a.view, b.view, wx), mix(c.view, d.view, wx), wy));
-    if (a.surface.y < 0) return true;
+    if (a.surface.y < 0) {
+        float sun = a.grid.x;
+        bool is_shared = sun == 1.0 && b.grid.x == sun && c.grid.x == sun && d.grid.x == sun;
+        end.grid.x = is_shared ? sun : SUN_UNKNOWN;
+        return true;
+    }
     return all(int3(b.surface.y, c.surface.y, d.surface.y) == a.surface.y) && all(int3(b.cell.x, c.cell.x, d.cell.x) == a.cell.x);
+}
+
+/**
+ * @brief `with_ground_sun` gives a ray end that hit the ground with the sun's shadow there in `grid.x`, traced from just
+ * above it as `light_surface` traces it, so that the pixels between fine samples (2 pixels apart) that all lie fully
+ * in the sun or fully in shadow take that shadow instead of tracing their own; any other ray end is left as it is, and
+ * ground facing away from the sun gets `SUN_UNKNOWN`.
+ * @par Example
+ * @code
+ * coarse[k] = with_ground_sun(scene, trace_ray(scene, pixel));
+ * @endcode
+ */
+static VoxelRayEnd with_ground_sun(thread const Scene &scene, VoxelRayEnd end) {
+    if (end.surface.x != OUTCOME_HIT || end.cell.w != MAT_GROUND) return end;
+    float r = scene.u.curvature_radius_m;
+    float4 x = end.point, n = float4(0.0, 1.0, 0.0, 0.0), l = transport_from_centre(scene.u.sun.xyz, x);
+    if (scene.u.has_terrain != 0) n = terrain_normal(scene, get_fermi(x, r));
+    end.grid.x = mdot(n, l) > 0.0 ? trace_shadow(scene, geodesic_point(x, n, SURFACE_OFFSET_M / r), l) : SUN_UNKNOWN;
+    return end;
 }
 
 /** @brief `get_sample_columns` gives how many samples a row of the fine grid has (one per even pixel column, one past the edge). @par Example @code int columns = get_sample_columns(u); @endcode */
@@ -2661,14 +2947,15 @@ kernel void trace_coarse(SCENE_BUFFERS, device VoxelRayEnd *coarse [[buffer(9)]]
         atomic_store_explicit(fill_count, 0, memory_order_relaxed);
     }
     if (int(id.x) >= columns || int(id.y) >= coarse_rows) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
-    coarse[int(id.y) * columns + int(id.x)] = trace_ray(scene, 4.0 * float2(id) + 0.5);
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    coarse[int(id.y) * columns + int(id.x)] = with_ground_sun(scene, trace_ray(scene, 4.0 * float2(id) + 0.5));
 }
 
 /**
  * @brief `fill_samples` fills the fine grid (sample (i, j) is pixel (2i, 2j)), the second pass of adaptive sampling:
  * a sample on the coarse grid copies it, one inside a smooth coarse cell (with half the fine grid's threshold, for
- * the same error in pixels) interpolates the cell's corners, and any other is listed for `trace_listed_samples`.
+ * the same error in pixels) interpolates the cell's corners and traces its own sun (`with_ground_sun`), and any other
+ * is listed for `trace_listed_samples`.
  * @par Example
  * @code
  * dispatched by render_metal.rs's encode_adaptive_sampling, one thread per fine sample.
@@ -2685,12 +2972,12 @@ kernel void fill_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[buffer(2)]
         samples[j * columns + i] = coarse[k];
         return;
     }
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     VoxelRayEnd end;
     if (is_cell_smooth(coarse, coarse_columns, coarse_rows, ci, cj, 0.5 * SMOOTH_SECOND_DIFFERENCE_PER_FIRST)
         && interpolate_ray_end(scene, coarse[k], coarse[k + di], coarse[k + dj * coarse_columns], coarse[k + dj * coarse_columns + di],
                                0.5 * float(di), 0.5 * float(dj), end)) {
-        samples[j * columns + i] = end;
+        samples[j * columns + i] = with_ground_sun(scene, end);
     } else {
         fill_list[atomic_fetch_add_explicit(fill_count, 1, memory_order_relaxed)] = uint(j * columns + i);
     }
@@ -2722,8 +3009,8 @@ kernel void trace_listed_samples(SCENE_BUFFERS, device VoxelRayEnd *samples [[bu
                                  device atomic_uint *fill_count [[buffer(12)]], uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(fill_count, memory_order_relaxed)) return;
     int columns = get_sample_columns(u), k = int(fill_list[t]);
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
-    samples[k] = trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5);
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    samples[k] = with_ground_sun(scene, trace_ray(scene, 2.0 * float2(k % columns, k / columns) + 0.5));
 }
 
 /**
@@ -2777,7 +3064,7 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
     int cell = int(refine_cells[t / REFINED_PIXELS_PER_CELL]), corner = int(t % REFINED_PIXELS_PER_CELL) + 1;
     uint2 id = uint2(2 * (cell % columns) + (corner & 1), 2 * (cell / columns) + (corner >> 1));
     if (int(id.x) >= u.width_px || int(id.y) >= u.height_px) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     write_pixel(scene, trace_ray(scene, float2(id) + 0.5), id, image);
 }
 
@@ -2796,7 +3083,7 @@ kernel void resolve_pixels(SCENE_BUFFERS, device const VoxelRayEnd *samples [[bu
     int columns = get_sample_columns(u);
     int i = int(id.x) / 2, j = int(id.y) / 2, di = int(id.x) & 1, dj = int(id.y) & 1, k = j * columns + i;
     if (di + dj > 0 && smooth_cells[k] == 0) return;
-    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
+    Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, terrain_heights, terrain_slopes, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
     VoxelRayEnd end = samples[k];
     if (di + dj > 0
         && !interpolate_ray_end(scene, end, samples[k + di], samples[k + dj * columns], samples[k + dj * columns + di], 0.5 * float(di), 0.5 * float(dj), end)) {
