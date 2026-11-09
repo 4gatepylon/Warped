@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn test_a_thrown_pair_carries_walkers_and_lasers() {
         let purple_m: Vec3 = Vec3::new(0.0, 1.7, 20.0);
-        let green_m: Vec3 = Vec3::new(0.0, 1.7, 40.0);
+        let green_m: Vec3 = Vec3::new(10.0, 1.7, 40.0);
         let warps: Warps = warps().with_thrown_pairs(&[[purple_m, green_m]]);
         assert_eq!((warps.mouths[2].partner, warps.mouths[3].partner), (3, 2));
         let feet_m: Vec3 = purple_m + Vec3::new(0.0, -1.7, 0.5);
@@ -476,7 +476,11 @@ mod tests {
         let path: BeamPath =
             warps.trace_beam(purple_m + Vec3::Z * 10.0, Vec3::NEG_Z, 30.0, |_, _, _| None);
         assert_eq!(path.crossed_mouths, [2]);
-        assert!(path.end_m.distance(green_m) < 20.0, "{:?}", path.end_m);
+        assert!(
+            (path.end_m.x - green_m.x).abs() < 0.5 && path.end_m.z < green_m.z,
+            "{:?}",
+            path.end_m
+        );
     }
 
     /// `test_thrown_mouths_keep_clear_of_other_reaches` checks a thrown mouth is placed in the

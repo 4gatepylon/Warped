@@ -309,6 +309,16 @@ const MARKER_LIGHT_M: f32 = 4.0;
 const MARKER_LIGHT_FRAC: f32 = 0.6;
 /// `MOUTH_FLOOR_PROBE_M` is how far below a thrown mouth the lens looks for its floor.
 const MOUTH_FLOOR_PROBE_M: f32 = 20.0;
+/// `MIN_WARP_JUMP_M` is how far a robot must move in one update to have gone through a mouth.
+const MIN_WARP_JUMP_M: f32 = 2.0;
+/// `EXIT_BODY_RADIUS_M`, `EXIT_FLOOR_GAP_M`, `EXIT_CLEARANCE_M` and `EXIT_DIRECTION_COUNT` are
+/// how wide a body stepping out of a mouth must fit (a little wider than a player), how far above
+/// the floor its box starts, how far beyond the throat it may step out instead, and how many ways
+/// each side of the gluing's exit it tries (`find_clear_exit_feet_m`).
+const EXIT_BODY_RADIUS_M: f32 = 0.35;
+const EXIT_FLOOR_GAP_M: f32 = 0.05;
+const EXIT_CLEARANCE_M: f32 = 0.4;
+const EXIT_DIRECTION_COUNT: usize = 8;
 
 /// `TEAM_BODY_RGB` are the teams' colours (blue, red) that a robot's teal turns into: Lunar
 /// Surface's `minimap::TEAM_COLORS`, which its bodies take.
@@ -1018,6 +1028,9 @@ impl Session {
         markers: &[(Option<u32>, Marker)],
     ) {
         let first: usize = self.arena.warps.mouths.len();
+        if !self.was_firing && crossed_mouths.iter().any(|&index| index >= first) {
+            println!("shot went through thrown wormhole mouths {crossed_mouths:?}");
+        }
         let gun_hits_to_destroy: u8 = match self.weapons.gun {
             Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
             Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
@@ -1302,16 +1315,17 @@ impl Session {
             {
                 let yaw_rad: f32 = self.player.yaw_rad;
                 let facing: Vec3 = turn * Vec3::new(-yaw_rad.sin(), 0.0, -yaw_rad.cos());
+                let entered_m: Vec3 = self.player.feet_m;
+                self.player.feet_m = find_clear_exit_feet_m(warps, &scene.solids, exit_m);
                 if self.warps.mouths[self.arena.warps.mouths.len()..]
                     .iter()
                     .any(|mouth| mouth.centre_m.distance(centre_m) < mouth.throat_radius_m)
                 {
                     println!(
-                        "went through a thrown wormhole from {:.1?} to {exit_m:.1?}",
+                        "went through a thrown wormhole from {entered_m:.1?} to {:.1?}",
                         self.player.feet_m
                     );
                 }
-                self.player.feet_m = exit_m;
                 self.player.velocity_m_s = turn * self.player.velocity_m_s;
                 self.player.yaw_rad = (-facing.x).atan2(-facing.z);
             }
@@ -1394,7 +1408,11 @@ impl Session {
             self.apply_bot_shot(shot, scene, audio);
         }
         for bot in self.bots.iter_mut().filter(|bot| bot.is_alive()) {
+            let before_m: Vec3 = bot.feet_m;
             bot.apply_warps(&self.warps, dt_s);
+            if bot.feet_m.distance(before_m) > MIN_WARP_JUMP_M {
+                bot.feet_m = find_clear_exit_feet_m(&self.warps, &scene.solids, bot.feet_m);
+            }
         }
         let player_feet_m: Vec3 = self.player.feet_m;
         for index in 0..self.bots.len() {
@@ -1907,7 +1925,7 @@ impl Session {
                 stretch_m: Vec3::ZERO,
                 size_m: marker.radius_m * MARKER_GLOW_PER_RADIUS,
                 color_rgba: rgb.extend(0.0),
-                kind: ParticleKind::MuzzleFlash,
+                kind: ParticleKind::Spark,
                 seed: 0.5,
             });
             point_lights.push(PointLight {
@@ -2042,6 +2060,56 @@ impl Session {
             thrown_lens_mouths: self.thrown_lens_mouths.clone(),
         }
     }
+}
+
+/// `find_clear_exit_feet_m` gives where a body whose feet a wormhole just put at `feet_m` stands:
+/// there, raised to the floor under the mouth it left (the nearest of `warps`) if it came out
+/// lower, unless its body would be inside one of `solids`; then at the nearest spot as far around
+/// that mouth (at least its throat and `EXIT_CLEARANCE_M` out) where it fits. A thrown mouth
+/// often lands against a bamboo wall, so the gluing's own exit can fall inside the wall; where no
+/// spot fits, the body stays at the gluing's exit.
+///
+/// Example: `self.player.feet_m = find_clear_exit_feet_m(&self.warps, &scene.solids, exit_m);`
+fn find_clear_exit_feet_m(warps: &Warps, solids: &[Aabb], feet_m: Vec3) -> Vec3 {
+    let body_centre_m: Vec3 = feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
+    let Some(mouth) = warps.mouths.iter().min_by(|a, b| {
+        let distance_m = |centre_m: Vec3| centre_m.distance(body_centre_m);
+        distance_m(a.centre_m).total_cmp(&distance_m(b.centre_m))
+    }) else {
+        return feet_m;
+    };
+    let floor_m: Option<f32> = cast_ray(solids, mouth.centre_m, Vec3::NEG_Y, MOUTH_FLOOR_PROBE_M)
+        .map(|(_, hit)| mouth.centre_m.y - hit.distance_m);
+    let raise = |at_m: Vec3| floor_m.map_or(at_m, |y_m| at_m.with_y(at_m.y.max(y_m)));
+    let fits = |at_m: Vec3| {
+        let body: Aabb = Aabb {
+            min_m: at_m + Vec3::new(-EXIT_BODY_RADIUS_M, EXIT_FLOOR_GAP_M, -EXIT_BODY_RADIUS_M),
+            max_m: at_m + Vec3::new(EXIT_BODY_RADIUS_M, BOT_HEIGHT_M, EXIT_BODY_RADIUS_M),
+        };
+        !solids.iter().any(|solid| solid.overlaps(&body))
+    };
+    let first_m: Vec3 = raise(feet_m);
+    if fits(first_m) {
+        return first_m;
+    }
+    let offset: Vec2 = Vec2::new(feet_m.x - mouth.centre_m.x, feet_m.z - mouth.centre_m.z);
+    let radius_m: f32 = offset.length().max(mouth.throat_radius_m + EXIT_CLEARANCE_M);
+    let start_rad: f32 = offset.y.atan2(offset.x);
+    let step_rad: f32 = std::f32::consts::PI / EXIT_DIRECTION_COUNT as f32;
+    for turn in 1..=EXIT_DIRECTION_COUNT {
+        for side in [1.0, -1.0] {
+            let angle_rad: f32 = start_rad + side * turn as f32 * step_rad;
+            let at_m: Vec3 = raise(Vec3::new(
+                mouth.centre_m.x + radius_m * angle_rad.cos(),
+                feet_m.y,
+                mouth.centre_m.z + radius_m * angle_rad.sin(),
+            ));
+            if fits(at_m) {
+                return at_m;
+            }
+        }
+    }
+    first_m
 }
 
 /// `cast_ray_at_ball` gives how far a ray from `origin_m` heading the unit `direction` goes before

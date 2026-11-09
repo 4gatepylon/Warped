@@ -332,8 +332,9 @@ pub const LENS_FACES: [(Vec3, Vec3); 6] = [
     (Vec3::NEG_Z, Vec3::Y),
 ];
 
-/// `MAX_LENS_MOUTH_COUNT` is how many mouths the lens pass takes.
-pub const MAX_LENS_MOUTH_COUNT: usize = 16;
+/// `MAX_LENS_MOUTH_COUNT` is how many mouths the lens pass takes, the map's and the thrown ones;
+/// `post.metal`'s `LensUniforms` agrees.
+pub const MAX_LENS_MOUTH_COUNT: usize = 32;
 /// `LENS_DEPTH_NEAR_M` and `LENS_DEPTH_FAR_M` bound the lens atlas's alpha: the static world's
 /// distance along each face's axis, log-encoded from 0 at the near bound to 1 at the far bound (and
 /// the sky); `post.metal` decodes it with the same bounds.

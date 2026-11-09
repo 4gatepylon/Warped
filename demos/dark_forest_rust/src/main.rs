@@ -328,7 +328,7 @@ const THROW_SCRIPT_S: [f32; 2] = [0.5, 1.5];
 /// `MESSAGE_PICTURE_PX` is the size of the picture of a message (a wormhole placed or destroyed),
 /// `MESSAGE_HEIGHT_FRAC` the most of the window's height it takes, and `MESSAGE_TOP_FRAC` how far
 /// down the window its top is.
-const MESSAGE_PICTURE_PX: (u32, u32) = (360, 16);
+const MESSAGE_PICTURE_PX: (u32, u32) = (480, 16);
 const MESSAGE_HEIGHT_FRAC: f32 = 0.035;
 const MESSAGE_TOP_FRAC: f32 = 0.62;
 
