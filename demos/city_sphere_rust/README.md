@@ -92,6 +92,11 @@ laser. `make play-route ROUTE=wormholes` throws both mouths, shoots and walks th
 - **Shots** (`CityWorld::trace_shot`): a ray from the eye stops at the nearest of the street, a box, the core, another
   player (torso and head spheres) or the glass met from outside; the glass met from inside reflects it (`d - 2(d·n)n`)
   while bounces are left; the total length is capped at `glass.range_m`.
+- **Guns** (`CitySession`, the shared `warped_shared::weapons::Weapons`): Lunar Surface's guns, the same code as
+  there (DECISIONS 35): the sniper fires on a click when loaded, the rifle while held (heat, overheat, cooling);
+  each shot strays from the crosshair by the sniper's noise or the rifle's heat, is traced on every frame it hits
+  (the sniper's hit counts on each, the rifle's once a shot), kicks the view and jolts the gun (the rifle), and
+  can't fire until `movement.shoot_after_moving_s` after the last walk or jump. The bot fires the same `Weapons`.
 - **Rendering** (`src/render_city.rs`, `src/render_city.metal`): one Metal render pass into the shared renderer's
   render texture: the static scene (street and glass spheres, boxes, core) in buffers made once, then per frame the
   consoles and pylons (dark once off, pulsing while being turned off), the robots (the teal robot posed once per clip,

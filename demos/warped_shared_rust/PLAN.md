@@ -90,8 +90,8 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
    read the shared one.
 2. `health`, then `weapons` (with `shot_noise`), then `hud`. Done in part (`claude/shared-weapons`): `Weapons`
    holds the guns' state with Lunar's gun logic, and `Gun`, `make_wand`, `get_sway`, `take_hit_weight`,
-   `get_aim_zoom` and the crosshair are shared; the HUD's bars and lines, health and `Tracer` still wait, and
-   City Sphere's `CitySession` still has its own guns. Then the rest, each moved out of the Lunar copies'
+   `get_aim_zoom` and the crosshair are shared, and City Sphere's `CitySession` plays its guns with `Weapons`
+   too (`claude/city-shared-guns`); the HUD's bars and lines, health and `Tracer` still wait. Then the rest, each moved out of the Lunar copies'
    `main.rs` and called from there and from City Sphere's. These also move the last files that only waited for
    `settings` (`menu` once `credits` and `net::Score` are parameters).
 3. `movement` with the `Ground` trait. Done for the rules (`claude/shared-movement`): `MoveState::step` is
