@@ -82,7 +82,12 @@ Each module is pure logic, without a window or a GPU, so it is testable alone an
 ## Order (one PR each, each level switched in its own commit)
 
 1. `play_settings`, used by the four Lunar copies and City Sphere. Shows nothing changed: each level's parsed
-   settings and welcome JSON are equal before and after (a test per level).
+   settings and welcome JSON are equal before and after. Done for the sections and `shot_noise`
+   (`claude/shared-play-settings`): the sections moved byte for byte (so their keys, checks and JSON field order are
+   unchanged), and each level's `settings.rs` re-exports them. Each
+   level still composes its own `ServerSettings` and `PerPlayerSettings` and embeds its own two files, since the
+   levels' W-126 tests compare those files with Lunar's; one built-in `player_settings.yaml` waits until those tests
+   read the shared one.
 2. `health`, then `weapons` (with `shot_noise`), then `hud`, each moved out of the Lunar copies' `main.rs` and
    called from there and from City Sphere's. These also move the last files that only waited for `settings`
    (`shot_noise`, `menu` once `credits` and `net::Score` are parameters).

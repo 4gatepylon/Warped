@@ -9,8 +9,8 @@
 //!
 //! Must know:
 //! - It shares `net.rs` and the modules it needs (`map.rs`, `settings.rs`, `thrown_wormholes.rs`,
-//!   `shot_noise.rs`, `terrain.rs`, `console_reach.rs`, and `geometry` and `shapes` from
-//!   `../warped_shared_rust/`) with the game, so both speak the same protocol and check consoles alike.
+//!   `terrain.rs`, `console_reach.rs`, and `geometry`, `play_settings`, `shapes` and `shot_noise`
+//!   from `../warped_shared_rust/`) with the game, so both speak the same protocol and check consoles alike.
 //! - It loads the map as the game does (its curvature scaled by the server settings), so the
 //!   consoles' places match the players' map.
 //! - It exits on the first error, so a supervisor such as systemd can restart it.
@@ -27,9 +27,6 @@ mod net;
 #[path = "../settings.rs"]
 mod settings;
 #[allow(dead_code)]
-#[path = "../shot_noise.rs"]
-mod shot_noise;
-#[allow(dead_code)]
 #[path = "../terrain.rs"]
 mod terrain;
 #[allow(dead_code)]
@@ -44,7 +41,7 @@ use std::time::Duration;
 use clap::Parser;
 #[cfg(target_os = "macos")]
 use warped_shared::key_bindings;
-use warped_shared::{geometry, shapes};
+use warped_shared::{geometry, play_settings, shapes, shot_noise};
 
 use map::{Map, MapName};
 use settings::ServerSettings;
