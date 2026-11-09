@@ -65,14 +65,19 @@ impl Frustum {
     }
 }
 
-/// `Cascades` is the fitted set of shadow cascades for one frame.
+/// `Cascades` is the fitted set of shadow cascades for one frame, with each cascade's centre in
+/// the light's space and its half size, which the next frame's fit keeps while they still cover
+/// its slice.
 ///
 /// Example:
-///     let cascades: Cascades = fit_cascades(&camera_info, sun_direction, 120.0, 2048);
+///     let cascades: Cascades = fit_cascades(&camera_info, sun_direction, 120.0, 2048, None);
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cascades {
     pub view_proj: [Mat4; CASCADE_COUNT],
     pub split_far_m: [f32; CASCADE_COUNT],
     pub texel_size_m: [f32; CASCADE_COUNT],
+    pub center_light_m: [Vec3; CASCADE_COUNT],
+    pub radius_m: [f32; CASCADE_COUNT],
 }
 
 /// `CascadeCamera` is the part of the camera that cascade fitting needs.
@@ -101,18 +106,23 @@ pub fn cascade_split_far_m(shadow_distance_m: f32) -> [f32; CASCADE_COUNT] {
     splits
 }
 
-/// `fit_cascades` fits one orthographic sun projection around each slice of the view frustum.
+/// `fit_cascades` fits one orthographic sun projection for each slice of the view frustum.
 ///
-/// Each cascade is a sphere around its slice, so its size doesn't change when the camera turns,
-/// and its origin snaps to whole shadow texels, so shadow edges don't shimmer when it moves.
+/// Each cascade is a square, in the sun's view, centred on the camera, as wide as the sphere around
+/// its slice (so its texels are that sphere's size whichever way the camera turns), and its centre
+/// snaps to whole shadow texels, so shadow edges don't shimmer when it moves. A cascade of
+/// `previous` with the same size is kept while it still covers everything within its slice's far
+/// distance of the camera, so turning never moves it and walking moves it only now and then: the
+/// renderer can keep its static casters' depth between frames.
 ///
 /// Example:
-///     let cascades: Cascades = fit_cascades(&camera, Vec3::Y, 120.0, 2048);
+///     let cascades: Cascades = fit_cascades(&camera, Vec3::Y, 120.0, 2048, Some(&last_cascades));
 pub fn fit_cascades(
     camera: &CascadeCamera,
     sun_direction: Vec3,
     shadow_distance_m: f32,
     resolution_px: u32,
+    previous: Option<&Cascades>,
 ) -> Cascades {
     let split_far_m: [f32; CASCADE_COUNT] = cascade_split_far_m(shadow_distance_m);
     let tan_half_y: f32 = (camera.fov_y_rad * 0.5).tan();
@@ -123,8 +133,14 @@ pub fn fit_cascades(
         Vec3::Y
     };
     let light_view: Mat4 = Mat4::look_to_rh(Vec3::ZERO, -sun_direction, up);
-    let mut view_proj: [Mat4; CASCADE_COUNT] = [Mat4::IDENTITY; CASCADE_COUNT];
-    let mut texel_size_m: [f32; CASCADE_COUNT] = [0.0; CASCADE_COUNT];
+    let camera_light: Vec3 = light_view.transform_point3(camera.inverse_view.w_axis.truncate());
+    let mut cascades: Cascades = Cascades {
+        view_proj: [Mat4::IDENTITY; CASCADE_COUNT],
+        split_far_m,
+        texel_size_m: [0.0; CASCADE_COUNT],
+        center_light_m: [Vec3::ZERO; CASCADE_COUNT],
+        radius_m: [0.0; CASCADE_COUNT],
+    };
     let mut near_m: f32 = CASCADE_NEAR_M;
     for index in 0..CASCADE_COUNT {
         let far_m: f32 = split_far_m[index];
@@ -135,29 +151,36 @@ pub fn fit_cascades(
         let radius_m: f32 = far_corner
             .distance(center_view)
             .max(near_corner.distance(center_view))
+            .max(far_m)
             .ceil();
-        let center_world: Vec3 = camera.inverse_view.transform_point3(center_view);
         let texel_m: f32 = 2.0 * radius_m / resolution_px as f32;
-        let center_light: Vec3 = light_view.transform_point3(center_world);
-        let snapped_x: f32 = (center_light.x / texel_m).floor() * texel_m;
-        let snapped_y: f32 = (center_light.y / texel_m).floor() * texel_m;
+        let slack_m: f32 = radius_m - far_m - texel_m;
+        let kept: Option<Vec3> = previous
+            .filter(|previous| previous.radius_m[index] == radius_m)
+            .map(|previous| previous.center_light_m[index])
+            .filter(|center| (*center - camera_light).abs().max_element() <= slack_m);
+        let center_light: Vec3 = kept.unwrap_or_else(|| {
+            Vec3::new(
+                (camera_light.x / texel_m).floor() * texel_m,
+                (camera_light.y / texel_m).floor() * texel_m,
+                camera_light.z,
+            )
+        });
         let projection: Mat4 = Mat4::orthographic_rh(
-            snapped_x - radius_m,
-            snapped_x + radius_m,
-            snapped_y - radius_m,
-            snapped_y + radius_m,
+            center_light.x - radius_m,
+            center_light.x + radius_m,
+            center_light.y - radius_m,
+            center_light.y + radius_m,
             -center_light.z - radius_m - CASCADE_CASTER_MARGIN_M,
             -center_light.z + radius_m,
         );
-        view_proj[index] = projection * light_view;
-        texel_size_m[index] = texel_m;
+        cascades.view_proj[index] = projection * light_view;
+        cascades.texel_size_m[index] = texel_m;
+        cascades.center_light_m[index] = center_light;
+        cascades.radius_m[index] = radius_m;
         near_m = far_m;
     }
-    Cascades {
-        view_proj,
-        split_far_m,
-        texel_size_m,
-    }
+    cascades
 }
 
 /// `tests` checks frustum culling and the shadow cascades.
@@ -201,7 +224,7 @@ mod tests {
             aspect: 1.6,
         };
         let sun: Vec3 = Vec3::new(0.3, 0.8, 0.2).normalize();
-        let cascades: Cascades = fit_cascades(&camera, sun, 120.0, 2048);
+        let cascades: Cascades = fit_cascades(&camera, sun, 120.0, 2048, None);
         let point: Vec3 = Vec3::new(0.0, 0.0, -cascades.split_far_m[0] * 0.5);
         let ndc: Vec3 = cascades.view_proj[0].project_point3(point);
         assert!(ndc.x.abs() < 1.0 && ndc.y.abs() < 1.0);

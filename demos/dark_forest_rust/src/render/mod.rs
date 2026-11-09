@@ -235,7 +235,9 @@ pub struct HudImage<'a> {
     pub scale: f32,
 }
 
-/// `FrameDescription` is everything the backend draws in one frame. `lens_draws` and
+/// `FrameDescription` is everything the backend draws in one frame. The first
+/// `static_draw_count` of `world_draws` are the same every frame (the arena), so the backend may
+/// keep their shadows between frames. `lens_draws` and
 /// `lens_particles` are the robots and laser effects among `world_draws` and `world_particles`,
 /// which wormhole lenses also show live (the lens atlas holds only the static world).
 /// `overlay_rects` are the HUD's bars and crosshair, in the Lunar Surface demo's look, drawn over
@@ -243,6 +245,7 @@ pub struct HudImage<'a> {
 pub struct FrameDescription<'a> {
     pub camera: Camera,
     pub world_draws: &'a [DrawItem],
+    pub static_draw_count: usize,
     pub viewmodel_draws: &'a [DrawItem],
     pub joint_matrices: &'a [Mat4],
     pub point_lights: &'a [PointLight],

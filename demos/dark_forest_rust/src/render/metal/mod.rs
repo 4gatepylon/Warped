@@ -26,11 +26,11 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
 use objc2_metal::{
-    MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue,
-    MTLCreateSystemDefaultDevice, MTLCullMode, MTLDevice, MTLDrawable, MTLIndexType, MTLLoadAction,
-    MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLResourceOptions, MTLScissorRect, MTLStoreAction, MTLTexture, MTLTextureType,
-    MTLTextureUsage, MTLViewport, MTLWinding,
+    MTLBlitCommandEncoder, MTLBuffer, MTLClearColor, MTLCommandBuffer, MTLCommandEncoder,
+    MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLCullMode, MTLDevice, MTLDrawable,
+    MTLIndexType, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder,
+    MTLRenderPassDescriptor, MTLResourceOptions, MTLScissorRect, MTLStoreAction, MTLTexture,
+    MTLTextureType, MTLTextureUsage, MTLViewport, MTLWinding,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
@@ -271,6 +271,9 @@ pub struct MetalRenderer {
     white_texture: Texture,
     flat_normal_texture: Texture,
     shadow_map: Texture,
+    static_shadow_map: Texture,
+    static_shadow_keys: [Option<(Mat4, usize)>; CASCADE_COUNT],
+    previous_cascades: Option<Cascades>,
     environment: Option<EnvironmentState>,
     sky_visibility: Option<SkyVisibility>,
     targets: Option<Targets>,
@@ -278,6 +281,7 @@ pub struct MetalRenderer {
     frame_index: usize,
     in_flight: VecDeque<(usize, CommandBuffer)>,
     last_gpu_ms: f64,
+    last_gpu_end_s: f64,
     is_tracing_frames: bool,
     refresh_interval_s: Option<f64>,
     refreshes_per_frame: u32,
@@ -414,19 +418,17 @@ impl MetalRenderer {
             pixel_texture(MTLPixelFormat::RGBA8Unorm, &[255, 255, 255, 255], "white");
         let flat_normal_texture: Texture =
             pixel_texture(MTLPixelFormat::RG8Unorm, &[128, 128], "flat_normal");
-        let shadow_map: Texture = create_texture(
-            &device,
-            &TextureSpec {
-                texture_type: MTLTextureType::Type2DArray,
-                array_length: CASCADE_COUNT,
-                ..TextureSpec::render_target(
-                    DEPTH_FORMAT,
-                    SHADOW_MAP_SIZE_PX as usize,
-                    SHADOW_MAP_SIZE_PX as usize,
-                )
-            },
-            "shadow_map",
-        );
+        let shadow_spec: TextureSpec = TextureSpec {
+            texture_type: MTLTextureType::Type2DArray,
+            array_length: CASCADE_COUNT,
+            ..TextureSpec::render_target(
+                DEPTH_FORMAT,
+                SHADOW_MAP_SIZE_PX as usize,
+                SHADOW_MAP_SIZE_PX as usize,
+            )
+        };
+        let shadow_map: Texture = create_texture(&device, &shadow_spec, "shadow_map");
+        let static_shadow_map: Texture = create_texture(&device, &shadow_spec, "static shadow_map");
         let dynamic_buffers: Vec<DynamicBuffer> = (0..FRAMES_IN_FLIGHT)
             .map(|_| DynamicBuffer {
                 buffer: device
@@ -454,6 +456,9 @@ impl MetalRenderer {
             is_capturing: false,
             flat_normal_texture,
             shadow_map,
+            static_shadow_map,
+            static_shadow_keys: [None; CASCADE_COUNT],
+            previous_cascades: None,
             environment: None,
             sky_visibility: None,
             targets: None,
@@ -461,6 +466,7 @@ impl MetalRenderer {
             frame_index: 0,
             in_flight: VecDeque::new(),
             last_gpu_ms: 0.0,
+            last_gpu_end_s: 0.0,
             is_tracing_frames: false,
             refresh_interval_s: None,
             refreshes_per_frame: 1,
@@ -572,12 +578,16 @@ impl MetalRenderer {
             .collect()
     }
 
-    /// `complete_oldest_frame` waits for the oldest frame in flight, recording its GPU time.
+    /// `complete_oldest_frame` waits for the oldest frame in flight, recording its own GPU time:
+    /// from when it started or the frame before it ended, whichever is later, to when it ended,
+    /// since a frame's work overlaps the end of the one before it.
     fn complete_oldest_frame(&mut self) {
         let (frame_index, command_buffer) =
             self.in_flight.pop_front().expect("a frame is in flight");
         command_buffer.waitUntilCompleted();
-        let gpu_s: f64 = command_buffer.GPUEndTime() - command_buffer.GPUStartTime();
+        let own_start_s: f64 = command_buffer.GPUStartTime().max(self.last_gpu_end_s);
+        let gpu_s: f64 = command_buffer.GPUEndTime() - own_start_s;
+        self.last_gpu_end_s = command_buffer.GPUEndTime();
         if gpu_s > 0.0 {
             self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
             self.gpu_ms_since_cadence.push(self.last_gpu_ms);
@@ -1278,7 +1288,15 @@ impl MetalRenderer {
             environment.sun_direction.truncate(),
             settings.shadow_distance_m.min(frame.camera.far_m),
             SHADOW_MAP_SIZE_PX,
+            self.previous_cascades.as_ref(),
         );
+        self.previous_cascades = Some(cascades);
+        let mut should_redraw_static: [bool; CASCADE_COUNT] = [false; CASCADE_COUNT];
+        for (cascade, should_redraw) in should_redraw_static.iter_mut().enumerate() {
+            let key: (Mat4, usize) = (cascades.view_proj[cascade], frame.static_draw_count);
+            *should_redraw = self.static_shadow_keys[cascade] != Some(key);
+            self.static_shadow_keys[cascade] = Some(key);
+        }
         let frame_uniforms: GpuFrameUniforms =
             self.frame_uniforms(frame, settings, targets, &cascades, proj, viewmodel_proj);
         let mut point_lights: Vec<GpuPointLight> = frame
@@ -1355,7 +1373,13 @@ impl MetalRenderer {
             .queue
             .commandBuffer()
             .expect("command buffer creation failed");
-        self.encode_shadows(&command_buffer, frame, &cascades, &buffers);
+        self.encode_shadows(
+            &command_buffer,
+            frame,
+            &cascades,
+            &buffers,
+            should_redraw_static,
+        );
 
         let camera_frustum: Frustum = Frustum::from_view_proj(frame_uniforms.view_proj);
         let visible: Vec<&DrawItem> = frame
@@ -1881,61 +1905,135 @@ impl MetalRenderer {
         }
     }
 
-    /// `encode_shadows` renders the shadow casters into each cascade.
+    /// `encode_shadows` renders the shadow casters into each cascade: the static ones (the first
+    /// `frame.static_draw_count` draws) into the static cache only where `should_redraw_static`
+    /// says the cascade moved, then copies the cache into the shadow map and draws the moving
+    /// casters on top.
     fn encode_shadows(
         &self,
         command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
         frame: &FrameDescription,
         cascades: &Cascades,
         buffers: &FrameBuffers,
+        should_redraw_static: [bool; CASCADE_COUNT],
     ) {
-        for cascade in 0..CASCADE_COUNT {
-            let descriptor: Retained<MTLRenderPassDescriptor> = MTLRenderPassDescriptor::new();
-            let depth_attachment = descriptor.depthAttachment();
-            depth_attachment.setTexture(Some(&self.shadow_map));
-            depth_attachment.setSlice(cascade);
-            depth_attachment.setLoadAction(MTLLoadAction::Clear);
-            depth_attachment.setStoreAction(MTLStoreAction::Store);
-            depth_attachment.setClearDepth(1.0);
-            let encoder = command_buffer
-                .renderCommandEncoderWithDescriptor(&descriptor)
-                .expect("render encoder creation failed");
-            encoder.setDepthStencilState(Some(&self.pipelines.depth_states.less_write));
-            encoder.setCullMode(MTLCullMode::None);
-            encoder.setDepthBias_slopeScale_clamp(SHADOW_DEPTH_BIAS, SHADOW_SLOPE_BIAS, 0.0);
-            let pass: GpuPassUniforms = GpuPassUniforms {
-                view_proj: cascades.view_proj[cascade],
-                flags: Vec4::ZERO,
-            };
-            set_vertex_bytes(&encoder, as_bytes(buffers.frame), 1);
-            set_vertex_bytes(&encoder, as_bytes(&pass), 2);
+        let casters_in = |cascade: usize, is_static: bool| -> Vec<&DrawItem> {
             let frustum: Frustum = Frustum::from_view_proj(cascades.view_proj[cascade]);
-            let (masked_casters, opaque_casters): (Vec<&DrawItem>, Vec<&DrawItem>) = frame
+            frame
                 .world_draws
                 .iter()
-                .filter(|draw| {
-                    draw.does_cast_shadow
+                .enumerate()
+                .filter(|&(index, draw)| {
+                    (index < frame.static_draw_count) == is_static
+                        && draw.does_cast_shadow
                         && self.materials[draw.material.0 as usize].alpha_mode != AlphaMode::Blend
                         && frustum.contains_sphere(draw.bounds_center_m, draw.bounds_radius_m)
                 })
-                .partition(|draw| {
-                    self.materials[draw.material.0 as usize].alpha_mode == AlphaMode::Mask
-                });
-            for (pipeline_pair, casters) in [
-                (&self.pipelines.shadow, &opaque_casters),
-                (&self.pipelines.shadow_masked, &masked_casters),
-            ] {
-                self.draw_meshes(
-                    &encoder,
-                    pipeline_pair,
-                    casters,
-                    ScenePass::Shadow,
-                    buffers,
-                    false,
+                .map(|(_, draw)| draw)
+                .collect()
+        };
+        for cascade in (0..CASCADE_COUNT).filter(|&cascade| should_redraw_static[cascade]) {
+            self.encode_shadow_casters(
+                command_buffer,
+                &self.static_shadow_map,
+                cascade,
+                MTLLoadAction::Clear,
+                &casters_in(cascade, true),
+                cascades,
+                buffers,
+            );
+        }
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .expect("blit encoder creation failed");
+        let size: objc2_metal::MTLSize = objc2_metal::MTLSize {
+            width: SHADOW_MAP_SIZE_PX as usize,
+            height: SHADOW_MAP_SIZE_PX as usize,
+            depth: 1,
+        };
+        let origin: objc2_metal::MTLOrigin = objc2_metal::MTLOrigin { x: 0, y: 0, z: 0 };
+        for cascade in 0..CASCADE_COUNT {
+            unsafe {
+                blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                    &self.static_shadow_map,
+                    cascade,
+                    0,
+                    origin,
+                    size,
+                    &self.shadow_map,
+                    cascade,
+                    0,
+                    origin,
                 );
             }
-            encoder.endEncoding();
         }
+        blit.endEncoding();
+        for cascade in 0..CASCADE_COUNT {
+            let moving: Vec<&DrawItem> = casters_in(cascade, false);
+            if !moving.is_empty() {
+                self.encode_shadow_casters(
+                    command_buffer,
+                    &self.shadow_map,
+                    cascade,
+                    MTLLoadAction::Load,
+                    &moving,
+                    cascades,
+                    buffers,
+                );
+            }
+        }
+    }
+
+    /// `encode_shadow_casters` draws `casters` into one cascade's slice of `target`, after
+    /// clearing or keeping (`load`) what it holds.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_shadow_casters(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        target: &Texture,
+        cascade: usize,
+        load: MTLLoadAction,
+        casters: &[&DrawItem],
+        cascades: &Cascades,
+        buffers: &FrameBuffers,
+    ) {
+        let descriptor: Retained<MTLRenderPassDescriptor> = MTLRenderPassDescriptor::new();
+        let depth_attachment = descriptor.depthAttachment();
+        depth_attachment.setTexture(Some(target));
+        depth_attachment.setSlice(cascade);
+        depth_attachment.setLoadAction(load);
+        depth_attachment.setStoreAction(MTLStoreAction::Store);
+        depth_attachment.setClearDepth(1.0);
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&descriptor)
+            .expect("render encoder creation failed");
+        encoder.setDepthStencilState(Some(&self.pipelines.depth_states.less_write));
+        encoder.setCullMode(MTLCullMode::None);
+        encoder.setDepthBias_slopeScale_clamp(SHADOW_DEPTH_BIAS, SHADOW_SLOPE_BIAS, 0.0);
+        let pass: GpuPassUniforms = GpuPassUniforms {
+            view_proj: cascades.view_proj[cascade],
+            flags: Vec4::ZERO,
+        };
+        set_vertex_bytes(&encoder, as_bytes(buffers.frame), 1);
+        set_vertex_bytes(&encoder, as_bytes(&pass), 2);
+        let (masked_casters, opaque_casters): (Vec<&DrawItem>, Vec<&DrawItem>) =
+            casters.iter().partition(|draw| {
+                self.materials[draw.material.0 as usize].alpha_mode == AlphaMode::Mask
+            });
+        for (pipeline_pair, pass_casters) in [
+            (&self.pipelines.shadow, &opaque_casters),
+            (&self.pipelines.shadow_masked, &masked_casters),
+        ] {
+            self.draw_meshes(
+                &encoder,
+                pipeline_pair,
+                pass_casters,
+                ScenePass::Shadow,
+                buffers,
+                false,
+            );
+        }
+        encoder.endEncoding();
     }
 }
 
