@@ -17,6 +17,9 @@ mod resources;
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr::NonNull;
+use std::sync::{Arc, Mutex};
+
+use block2::RcBlock;
 
 use glam::{Mat4, UVec4, Vec2, Vec3, Vec4};
 use objc2::rc::Retained;
@@ -47,6 +50,8 @@ use self::resources::{
     upload_texture_2d,
 };
 use crate::render::culling::{CASCADE_COUNT, CascadeCamera, Cascades, Frustum, fit_cascades};
+use crate::render::frame_clock::{MIN_CADENCE_SAMPLE_COUNT, choose_refreshes_per_frame};
+use crate::render::frame_trace::CompletedFrame;
 use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
     LensMouth, MAX_LENS_GLOW_SEGMENT_COUNT, MAX_LIVE_LENS_SLOT_COUNT, MaterialData, MaterialHandle,
@@ -81,6 +86,9 @@ const FULLSCREEN_VERTEX_COUNT: usize = 3;
 const SECONDS_TO_MS: f64 = 1000.0;
 /// `MATRIX_BYTES` is the size of one joint matrix.
 const MATRIX_BYTES: usize = 64;
+/// `PRESENT_STALE_S` is how long after the last frame reached the display the frames count as not
+/// shown (a sleeping display, a hidden window), which turns the even cadence off.
+const PRESENT_STALE_S: f64 = 0.25;
 /// `MAX_LENS_MOVER_COUNT` is how many robots' bounding spheres the lens pass looks for robots in;
 /// `post.metal`'s `LensUniforms` agrees.
 const MAX_LENS_MOVER_COUNT: usize = 16;
@@ -268,8 +276,15 @@ pub struct MetalRenderer {
     targets: Option<Targets>,
     dynamic_buffers: Vec<DynamicBuffer>,
     frame_index: usize,
-    in_flight: VecDeque<CommandBuffer>,
+    in_flight: VecDeque<(usize, CommandBuffer)>,
     last_gpu_ms: f64,
+    is_tracing_frames: bool,
+    refresh_interval_s: Option<f64>,
+    refreshes_per_frame: u32,
+    gpu_ms_since_cadence: Vec<f64>,
+    shown_s_since_cadence: Arc<Mutex<Vec<f64>>>,
+    gpu_times: Vec<CompletedFrame>,
+    presented_times: Arc<Mutex<Vec<(usize, f64)>>>,
     drawable_size_px: (u32, u32),
     lens: Option<(Texture, gpu_types::GpuLensUniforms)>,
     lens_live: Option<LensLive>,
@@ -446,6 +461,13 @@ impl MetalRenderer {
             frame_index: 0,
             in_flight: VecDeque::new(),
             last_gpu_ms: 0.0,
+            is_tracing_frames: false,
+            refresh_interval_s: None,
+            refreshes_per_frame: 1,
+            gpu_ms_since_cadence: Vec::new(),
+            shown_s_since_cadence: Arc::new(Mutex::new(Vec::new())),
+            gpu_times: Vec::new(),
+            presented_times: Arc::new(Mutex::new(Vec::new())),
             drawable_size_px: (0, 0),
         }
     }
@@ -458,25 +480,134 @@ impl MetalRenderer {
         self.device.name().to_string()
     }
 
+    /// `set_refresh_interval_s` tells the renderer the display's refresh interval when frames wait
+    /// for the display (None when they don't), so it shows each frame for a whole number of
+    /// refreshes.
+    ///
+    /// Example: `renderer.set_refresh_interval_s(Some(0.01));`
+    pub fn set_refresh_interval_s(&mut self, refresh_interval_s: Option<f32>) {
+        self.refresh_interval_s = refresh_interval_s.map(f64::from);
+    }
+
+    /// `get_frame_interval_s` is how long each frame stays on screen when frames wait for the
+    /// display (a whole number of refreshes, chosen from the GPU's recent times), None otherwise.
+    ///
+    /// Example: `let dt_s: f32 = clock.step_s(measured_s, renderer.get_frame_interval_s());`
+    pub fn get_frame_interval_s(&self) -> Option<f32> {
+        self.refresh_interval_s
+            .map(|interval_s| (interval_s * f64::from(self.refreshes_per_frame)) as f32)
+    }
+
+    /// `update_cadence` picks how many refreshes each frame stays on screen, from the intervals
+    /// at which the last frames were shown and their GPU times; while frames don't reach a display
+    /// (it sleeps, or vsync is off), or `PRESENT_STALE_S` has passed since one did, it shows every
+    /// frame as soon as it can.
+    fn update_cadence(&mut self) {
+        let mut shown_s = self
+            .shown_s_since_cadence
+            .lock()
+            .expect("the cadence's lock is poisoned");
+        let is_showing: bool = shown_s.last().is_some_and(|&last_s| {
+            objc2_quartz_core::CACurrentMediaTime() - last_s < PRESENT_STALE_S
+        });
+        let Some(refresh_s) = self.refresh_interval_s.filter(|_| is_showing) else {
+            self.refreshes_per_frame = 1;
+            return;
+        };
+        if shown_s.len() <= MIN_CADENCE_SAMPLE_COUNT
+            || self.gpu_ms_since_cadence.len() < MIN_CADENCE_SAMPLE_COUNT
+        {
+            return;
+        }
+        let shown_intervals_ms: Vec<f64> = shown_s
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]) * SECONDS_TO_MS)
+            .collect();
+        let refreshes_per_frame: u32 = choose_refreshes_per_frame(
+            self.refreshes_per_frame,
+            &shown_intervals_ms,
+            &self.gpu_ms_since_cadence,
+            refresh_s * SECONDS_TO_MS,
+        );
+        if refreshes_per_frame != self.refreshes_per_frame {
+            self.refreshes_per_frame = refreshes_per_frame;
+            self.gpu_ms_since_cadence.clear();
+            shown_s.clear();
+        }
+    }
+
+    /// `set_is_tracing_frames` starts or stops keeping every frame's GPU times and the time it
+    /// was shown, for `take_completed_frames`.
+    ///
+    /// Example: `renderer.set_is_tracing_frames(true);`
+    pub fn set_is_tracing_frames(&mut self, is_tracing_frames: bool) {
+        self.is_tracing_frames = is_tracing_frames;
+    }
+
+    /// `take_completed_frames` waits for the frames in flight and returns every traced frame's
+    /// GPU times and the time it was shown (0 if never), by frame index.
+    ///
+    /// Example: `let completed: Vec<CompletedFrame> = renderer.take_completed_frames();`
+    pub fn take_completed_frames(&mut self) -> Vec<CompletedFrame> {
+        while !self.in_flight.is_empty() {
+            self.complete_oldest_frame();
+        }
+        let presented_s_by_index: std::collections::HashMap<usize, f64> = std::mem::take(
+            &mut *self
+                .presented_times
+                .lock()
+                .expect("a presented handler panicked"),
+        )
+        .into_iter()
+        .collect();
+        std::mem::take(&mut self.gpu_times)
+            .into_iter()
+            .map(|frame| CompletedFrame {
+                presented_s: presented_s_by_index
+                    .get(&frame.frame_index)
+                    .copied()
+                    .unwrap_or(0.0),
+                ..frame
+            })
+            .collect()
+    }
+
+    /// `complete_oldest_frame` waits for the oldest frame in flight, recording its GPU time.
+    fn complete_oldest_frame(&mut self) {
+        let (frame_index, command_buffer) =
+            self.in_flight.pop_front().expect("a frame is in flight");
+        command_buffer.waitUntilCompleted();
+        let gpu_s: f64 = command_buffer.GPUEndTime() - command_buffer.GPUStartTime();
+        if gpu_s > 0.0 {
+            self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
+            self.gpu_ms_since_cadence.push(self.last_gpu_ms);
+            if self.gpu_ms_since_cadence.len() > MIN_CADENCE_SAMPLE_COUNT {
+                self.gpu_ms_since_cadence.remove(0);
+            }
+        }
+        if self.is_tracing_frames {
+            self.gpu_times.push(CompletedFrame {
+                frame_index,
+                gpu_start_s: command_buffer.GPUStartTime(),
+                gpu_end_s: command_buffer.GPUEndTime(),
+                presented_s: 0.0,
+            });
+        }
+    }
+
     /// `wait_for_frame_slot` blocks until fewer than `FRAMES_IN_FLIGHT` frames are on the GPU,
     /// recording the GPU time of the frame it waited for.
     fn wait_for_frame_slot(&mut self) {
         while self.in_flight.len() >= FRAMES_IN_FLIGHT {
-            let command_buffer: CommandBuffer =
-                self.in_flight.pop_front().expect("queue was not empty");
-            command_buffer.waitUntilCompleted();
-            let gpu_s: f64 = command_buffer.GPUEndTime() - command_buffer.GPUStartTime();
-            if gpu_s > 0.0 {
-                self.last_gpu_ms = gpu_s * SECONDS_TO_MS;
-            }
+            self.complete_oldest_frame();
         }
     }
 
     /// `read_texture_bytes` waits for the frames in flight and copies a 4-byte-per-pixel texture
     /// back: (width_px, height_px, bytes, rows top first).
     fn read_texture_bytes(&mut self, texture: &Texture) -> (u32, u32, Vec<u8>) {
-        for command_buffer in self.in_flight.drain(..) {
-            command_buffer.waitUntilCompleted();
+        while !self.in_flight.is_empty() {
+            self.complete_oldest_frame();
         }
         let (width_px, height_px) = (texture.width(), texture.height());
         let bytes_per_row: usize = width_px * 4;
@@ -1163,7 +1294,8 @@ impl MetalRenderer {
             point_lights.push(GpuPointLight::default());
         }
 
-        let slot: usize = self.frame_index % FRAMES_IN_FLIGHT;
+        let frame_index: usize = self.frame_index;
+        let slot: usize = frame_index % FRAMES_IN_FLIGHT;
         self.frame_index += 1;
         let dynamic: &mut DynamicBuffer = &mut self.dynamic_buffers[slot];
         dynamic.offset_bytes = 0;
@@ -1705,14 +1837,46 @@ impl MetalRenderer {
             if let Some(drawable) = &drawable {
                 let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
                     ProtocolObject::from_ref(&**drawable);
-                command_buffer.presentDrawable(metal_drawable);
+                let is_tracing_frames: bool = self.is_tracing_frames;
+                let presented_times: Arc<Mutex<Vec<(usize, f64)>>> =
+                    Arc::clone(&self.presented_times);
+                let shown_s: Arc<Mutex<Vec<f64>>> = Arc::clone(&self.shown_s_since_cadence);
+                let handler =
+                    RcBlock::new(move |shown: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+                        let presented_s: f64 = unsafe { shown.as_ref() }.presentedTime();
+                        if is_tracing_frames {
+                            presented_times
+                                .lock()
+                                .expect("the frame trace's lock is poisoned")
+                                .push((frame_index, presented_s));
+                        }
+                        if presented_s > 0.0 {
+                            let mut recent_s =
+                                shown_s.lock().expect("the cadence's lock is poisoned");
+                            recent_s.push(presented_s);
+                            if recent_s.len() > MIN_CADENCE_SAMPLE_COUNT + 1 {
+                                recent_s.remove(0);
+                            }
+                        }
+                    });
+                unsafe { metal_drawable.addPresentedHandler(RcBlock::as_ptr(&handler)) };
+                self.update_cadence();
+                match self.get_frame_interval_s() {
+                    Some(frame_interval_s) if self.refreshes_per_frame > 1 => command_buffer
+                        .presentDrawable_afterMinimumDuration(
+                            metal_drawable,
+                            f64::from(frame_interval_s),
+                        ),
+                    _ => command_buffer.presentDrawable(metal_drawable),
+                }
             }
         }
         command_buffer.commit();
-        self.in_flight.push_back(command_buffer);
+        self.in_flight.push_back((frame_index, command_buffer));
         FrameTiming {
             gpu_ms: self.last_gpu_ms,
             drawable_wait_ms,
+            frame_index,
             ..FrameTiming::default()
         }
     }
@@ -1777,7 +1941,7 @@ impl MetalRenderer {
 
 impl Drop for MetalRenderer {
     fn drop(&mut self) {
-        for command_buffer in self.in_flight.drain(..) {
+        for (_, command_buffer) in self.in_flight.drain(..) {
             command_buffer.waitUntilCompleted();
         }
     }
