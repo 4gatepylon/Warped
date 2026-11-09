@@ -99,7 +99,9 @@ laser. `make play-route ROUTE=wormholes` throws both mouths, shoots and walks th
   `movement.sprint_speed_per_map_speed: 2.4`; the rest are the hyperbolic demo's, line for line (a test checks it).
 - **Stairs** (`tools/make_map.py`): 48 steps a team, each a box standing on the street, from 2 to 4 m in front of the
   spawns up through a hole in the glass to the glass level, about 5 m short of the team's pylon, with the map's
-  seeded, mirrored jitter.
+  seeded, mirrored jitter. The map's hole is round and wider than the stairs; the game opens it only as wide as the
+  stairs under it (`fit_hole_to_stairs`), in collisions, shots and the drawn glass, and a body radius wider on each
+  side for a player climbing (W-132 (City Sphere stairs hole), DECISIONS 34).
 
 ## Measure
 
