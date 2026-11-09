@@ -3,10 +3,11 @@
 //! (`dust.rs`) into buffers each frame and traces them into the render texture that
 //! `render_metal.rs` upscales and presents, every pixel or with the house's adaptive sampling
 //! (`render_metal.rs`'s `encode_adaptive_sampling`), sharp in the middle of the image and softer
-//! toward its edges (`SharpCentre`, W-136, sharp centre, soft edges).
+//! toward its edges (`SharpCentre`, W-136, sharp centre, soft edges), and in the player's visuals
+//! (`VoxelFrame::set_visuals`, W-51, basic visuals).
 //!
 //! Interface: `VoxelUniforms`, `SharpCentre`, `ALL_SHARP`, `DEFAULT_SHARP_CENTRE`,
-//! `VoxelFrame::Build`, `VoxelFrame::set_sharp_centre`, `VoxelGpu`.
+//! `VoxelFrame::Build`, `VoxelFrame::set_sharp_centre`, `VoxelFrame::set_visuals`, `VoxelGpu`.
 //!
 //! Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &[], (1280, 800));`
 
@@ -46,6 +47,7 @@ use crate::voxel_world::{
     BeamSegment, MAX_MATERIAL_COUNT, VoxelWarp, VoxelWorld, clip_beam_to_map,
 };
 use crate::zone_walls::{GpuZoneWalls, MAX_ZONE_WALL_COUNT};
+use warped_shared::visuals::{GpuPlayerVisuals, PLAYER_VISUALS_METAL};
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -65,6 +67,7 @@ const MEANS_BUFFER_INDEX: usize = 27;
 const DUST_BUFFER_INDICES: [usize; 2] = [29, 30];
 const AVATAR_BUFFER_INDICES: [usize; 2] = [8, 10];
 const HAND_LIGHT_BUFFER_INDEX: usize = 28;
+const VISUALS_BUFFER_INDEX: usize = 15;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
 const TERRAIN_HEIGHTS_TEXTURE_INDEX: usize = 16;
@@ -332,6 +335,7 @@ pub struct VoxelFrame {
     meshes: Arc<Vec<MeshModel>>,
     avatar_triangles: Vec<GpuTriangle>,
     avatar_nodes: Vec<GpuNode>,
+    visuals: GpuPlayerVisuals,
 }
 
 /// `get_beacon_beams` gives each beacon's beam: from the top of the model of each structure drawn
@@ -854,6 +858,7 @@ impl VoxelFrame {
             meshes: Arc::clone(&world.meshes),
             avatar_triangles,
             avatar_nodes,
+            visuals: GpuPlayerVisuals::IDENTITY,
         }
     }
 
@@ -873,6 +878,14 @@ impl VoxelFrame {
     /// Example: `frame.set_sharp_centre(DEFAULT_SHARP_CENTRE);`
     pub fn set_sharp_centre(&mut self, sharp_centre: SharpCentre) {
         self.uniforms.fovea = sharp_centre.get_fovea(self.get_render_size());
+    }
+
+    /// `set_visuals` sets the player's brightness, contrast, saturation and gamma, which the tone
+    /// map applies to the finished picture (W-51, basic visuals); a frame starts with the identity.
+    ///
+    /// Example: `frame.set_visuals(mine.visuals.to_gpu());`
+    pub fn set_visuals(&mut self, visuals: GpuPlayerVisuals) {
+        self.visuals = visuals;
     }
 }
 
@@ -966,7 +979,7 @@ fn make_hdr_texture(
 fn make_library(
     device: &ProtocolObject<dyn MTLDevice>,
 ) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
-    let source: String = SHADER_SOURCE
+    let source: String = format!("{PLAYER_VISUALS_METAL}\n{SHADER_SOURCE}")
         .replace("__REFINE_GROUP_SIZE__", &REFINE_GROUP_SIZE.to_string())
         .replace(
             "__BYTES_PER_RAY_END__",
@@ -1401,6 +1414,14 @@ impl VoxelGpu {
         unsafe {
             encoder.setTexture_atIndex(Some(&post.hdr), 1);
             encoder.setTexture_atIndex(Some(&post.ldr), 0);
+        }
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE TONE MAP READING THE WRONG VISUALS WILL HAPPEN
+        unsafe {
+            encoder.setBytes_length_atIndex(
+                NonNull::from(&frame.visuals).cast(),
+                std::mem::size_of::<GpuPlayerVisuals>(),
+                VISUALS_BUFFER_INDEX,
+            );
         }
         dispatch(encoder, &self.tonemap, (width, height));
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN ANTI-ALIASING THE WRONG TEXTURE WILL HAPPEN
