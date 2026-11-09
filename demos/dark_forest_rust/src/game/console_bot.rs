@@ -42,9 +42,10 @@ const SPRINT_FROM_M: f32 = 12.0;
 const MIN_SPRINT_ENERGY_FRAC: f32 = 0.2;
 /// `GIVE_UP_S` is how long the bot walks to a console before it gives it up.
 const GIVE_UP_S: f32 = 120.0;
-/// `LADDER_FRONT_M` is how near a ladder's middle the bot turns to it to climb, `LADDER_STEP_OFF_M`
-/// how far in front of it the bot aims to step off a deck onto it (and behind it, on the deck, to
-/// line up first), and `LADDER_BOTTOM_M` how near its foot's height the bot hops off it.
+/// `LADDER_FRONT_M` is how far in front of a ladder's middle the bot lines up to climb it (clear of
+/// the deck above, which would stop its head), `LADDER_STEP_OFF_M` how far in front of it the bot
+/// aims to step off a deck onto it (and behind it, on the deck, to line up first), and
+/// `LADDER_BOTTOM_M` how near its foot's height the bot hops off it.
 const LADDER_FRONT_M: f32 = 0.7;
 const LADDER_STEP_OFF_M: f32 = 0.8;
 const LADDER_BOTTOM_M: f32 = 0.3;
@@ -251,21 +252,10 @@ impl BotWalker {
                 ..walk_toward(player, goal_m, false)
             };
         };
+        let is_at_ladder_foot: bool = is_at_ladder_foot(player, ladders);
         let Some(ladder_index) = step.ladder else {
-            let should_hop_off: bool = ladders.iter().any(|ladder| {
-                let grown_min_m: Vec3 =
-                    ladder.aabb.min_m - Vec3::new(BODY_RADIUS_M, 0.0, BODY_RADIUS_M);
-                let grown_max_m: Vec3 =
-                    ladder.aabb.max_m + Vec3::new(BODY_RADIUS_M, 0.0, BODY_RADIUS_M);
-                let feet_m: Vec3 = player.feet_m;
-                feet_m.x > grown_min_m.x
-                    && feet_m.x < grown_max_m.x
-                    && feet_m.z > grown_min_m.z
-                    && feet_m.z < grown_max_m.z
-                    && feet_m.y < ladder.aabb.min_m.y + LADDER_HOP_M
-            });
             return PlayerInput {
-                is_jump_pressed: is_jump_pressed || should_hop_off,
+                is_jump_pressed: is_jump_pressed || is_at_ladder_foot,
                 ..walk_toward(player, step.position_m, should_sprint)
             };
         };
@@ -276,10 +266,17 @@ impl BotWalker {
         let centre_m: Vec3 =
             ((ladder.aabb.min_m + ladder.aabb.max_m) * 0.5).with_y(player.feet_m.y);
         let is_going_up: bool = step.position_m.y > player.feet_m.y;
+        let front_m: Vec3 = centre_m - facing * LADDER_FRONT_M;
         let from_centre_m: Vec3 = player.feet_m - centre_m;
         let is_beside: bool =
             (from_centre_m - facing * from_centre_m.dot(facing)).length() > LADDER_LINE_M;
+        let is_near_foot: bool = player.feet_m.y < ladder.aabb.min_m.y + LADDER_HOP_M;
+        let is_under_deck: bool = from_centre_m.dot(facing) > -LADDER_FRONT_M * 0.5;
         match (player.is_climbing, is_going_up) {
+            (true, true) if is_near_foot && is_under_deck => PlayerInput {
+                is_jump_pressed: true,
+                ..walk_toward(player, front_m, false)
+            },
             (true, true) => PlayerInput {
                 move_axes: Vec2::Y,
                 ..look_along(player, facing, CLIMB_UP_PITCH_RAD)
@@ -292,14 +289,16 @@ impl BotWalker {
                 is_crouch_held: true,
                 ..look_along(player, facing, 0.0)
             },
-            (false, true) if (centre_m - player.feet_m).length() < LADDER_FRONT_M => PlayerInput {
-                move_axes: Vec2::Y,
-                is_jump_pressed,
-                ..look_along(player, facing, CLIMB_UP_PITCH_RAD)
-            },
+            (false, true) if (front_m - player.feet_m).length() < LADDER_LINE_M * 2.0 => {
+                PlayerInput {
+                    move_axes: Vec2::Y,
+                    is_jump_pressed,
+                    ..look_along(player, facing, CLIMB_UP_PITCH_RAD)
+                }
+            }
             (false, true) => PlayerInput {
-                is_jump_pressed,
-                ..walk_toward(player, centre_m - facing * LADDER_FRONT_M * 0.5, false)
+                is_jump_pressed: is_jump_pressed || is_at_ladder_foot,
+                ..walk_toward(player, front_m, false)
             },
             (false, false) if is_beside => PlayerInput {
                 is_jump_pressed,
@@ -311,6 +310,23 @@ impl BotWalker {
             },
         }
     }
+}
+
+/// `is_at_ladder_foot` says whether `player`'s body is in one of `ladders` within `LADDER_HOP_M`
+/// of its foot, where the bot keeps jumping while it walks, so the ladder doesn't grab it.
+///
+/// Example: `let should_hop: bool = is_at_ladder_foot(&player, &ladders);`
+fn is_at_ladder_foot(player: &Player, ladders: &[LadderVolume]) -> bool {
+    let reach_m: Vec3 = Vec3::new(BODY_RADIUS_M, 0.0, BODY_RADIUS_M);
+    ladders.iter().any(|ladder| {
+        let (low_m, high_m) = (ladder.aabb.min_m - reach_m, ladder.aabb.max_m + reach_m);
+        let feet_m: Vec3 = player.feet_m;
+        feet_m.x > low_m.x
+            && feet_m.x < high_m.x
+            && feet_m.z > low_m.z
+            && feet_m.z < high_m.z
+            && feet_m.y < ladder.aabb.min_m.y + LADDER_HOP_M
+    })
 }
 
 /// `get_foot_m` gives where a console's box meets the floor under its middle, the goal of a walk
@@ -362,6 +378,7 @@ fn walk_toward(player: &Player, point_m: Vec3, should_sprint: bool) -> PlayerInp
 /// | Partitioning | Part | Covered by |
 /// | --- | --- | --- |
 /// | team | blue (to red's pylons), red (to blue's) | `test_bots_walk_to_every_enemy_pylon` |
+/// | start | each spawn of its own team, each of the other team's (beside their ground pylon) | `test_bots_walk_to_every_enemy_pylon` |
 /// | pylon | on the ground, on a treehouse deck (up a ladder, and down again after) | `test_bots_walk_to_every_enemy_pylon` |
 #[cfg(test)]
 mod tests {
@@ -376,8 +393,9 @@ mod tests {
     const MAX_WALK_S: f32 = 90.0;
     const HOLD_S: f32 = 1.0;
 
-    /// `test_bots_walk_to_every_enemy_pylon` walks a bot from each team's first spawn and checks it
-    /// reaches every console of the other team in turn, each within `MAX_WALK_S`.
+    /// `test_bots_walk_to_every_enemy_pylon` walks a bot of each team from every spawn of both teams
+    /// (so it meets the pylons in both orders) and checks it reaches every console of the other team
+    /// in turn, each within `MAX_WALK_S`.
     #[test]
     fn test_bots_walk_to_every_enemy_pylon() {
         let map: MapFile = map::load(&map::default_map_path()).expect("the map loads");
@@ -391,8 +409,10 @@ mod tests {
             arena.bounds_min_m,
             arena.bounds_max_m,
         );
-        for team in 0..2_u32 {
-            let (spawn_m, yaw_rad) = arena.team_spawns[team as usize][0];
+        let starts: Vec<(Vec3, f32)> = arena.team_spawns.concat();
+        for (team, &(spawn_m, yaw_rad)) in
+            (0..2_u32).flat_map(|team| starts.iter().map(move |start| (team, start)))
+        {
             let mut player: Player = Player::new(spawn_m, yaw_rad);
             let mut walker: BotWalker = BotWalker::New();
             let mut console_off: Vec<bool> = vec![false; places.len()];
@@ -428,7 +448,7 @@ mod tests {
                 }
                 assert!(
                     walk_s < MAX_WALK_S,
-                    "team {team}'s bot is stuck at {:?}",
+                    "team {team}'s bot from {spawn_m} is stuck at {:?}",
                     player.feet_m
                 );
             }

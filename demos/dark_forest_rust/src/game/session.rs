@@ -198,6 +198,7 @@ pub struct Session {
     pub walker: Option<BotWalker>,
     pub is_console_objective: bool,
     pub bot_console: Option<usize>,
+    pub is_team_known: bool,
     bar_pulses: BarPulsePair,
     robot_hold: Option<RobotHold>,
     robot_hold_s: f32,
@@ -293,6 +294,7 @@ impl Session {
             walker: None,
             is_console_objective: false,
             bot_console: None,
+            is_team_known: true,
             bar_pulses: BarPulsePair::New(),
             robot_hold: None,
             robot_hold_s: 0.0,
@@ -312,6 +314,25 @@ impl Session {
             self.robot_hold = hold;
             self.robot_hold_s = ROBOT_HOLD_RESTART_S;
         }
+    }
+
+    /// `respawn_player` brings the player back, whole, at their team's spawn farthest from the
+    /// robots (`farthest_spawn`), with a fresh weapon: after the respawn delay, and when they join
+    /// a team.
+    ///
+    /// Example: `session.respawn_player();`
+    pub fn respawn_player(&mut self) {
+        let bot_positions: Vec<Vec3> = self.bots.iter().map(|bot| bot.feet_m).collect();
+        let team_spawns: &[(Vec3, f32)] = &self.arena.team_spawns[self.team as usize % 2];
+        let spawns: Vec<Vec3> = team_spawns.iter().map(|(p, _)| *p).collect();
+        let spawn_m: Vec3 = Session::farthest_spawn(&spawns, &bot_positions, self.spawn_counter);
+        let yaw_rad: f32 = team_spawns
+            .iter()
+            .find(|(p, _)| *p == spawn_m)
+            .map_or(0.0, |(_, yaw)| *yaw);
+        self.spawn_counter += 1;
+        self.player = Player::new(spawn_m, yaw_rad);
+        self.weapon = Weapon::new();
     }
 
     /// `random_signed` returns a pseudo-random number in [-1, 1].
@@ -600,7 +621,12 @@ impl Session {
     /// `autopilot_controls` plays the game: walk to the other team's consoles and hold `E` on each
     /// (`is_console_objective`, with `walker`); or aim at visible robots and fire, walk toward the
     /// nearest enemy player when none is visible (with `walker`), and else walk the waypoint loop.
+    /// It waits while its team is not known yet (`is_team_known`: an online game before the
+    /// server's welcome).
     fn autopilot_controls(&mut self, scene: &Scene, dt_s: f32) -> Controls {
+        if !self.is_team_known {
+            return Controls::default();
+        }
         if self.is_console_objective
             && let Some(walker) = &mut self.walker
         {
@@ -776,18 +802,7 @@ impl Session {
         }
         if self.player.should_respawn() {
             self.death_count += 1;
-            let bot_positions: Vec<Vec3> = self.bots.iter().map(|bot| bot.feet_m).collect();
-            let team_spawns: &[(Vec3, f32)] = &self.arena.team_spawns[self.team as usize % 2];
-            let spawns: Vec<Vec3> = team_spawns.iter().map(|(p, _)| *p).collect();
-            let spawn_m: Vec3 =
-                Session::farthest_spawn(&spawns, &bot_positions, self.spawn_counter);
-            let yaw_rad: f32 = self.arena.team_spawns[self.team as usize % 2]
-                .iter()
-                .find(|(p, _)| *p == spawn_m)
-                .map_or(0.0, |(_, yaw)| *yaw);
-            self.spawn_counter += 1;
-            self.player = Player::new(spawn_m, yaw_rad);
-            self.weapon = Weapon::new();
+            self.respawn_player();
         }
 
         let context: BotContext = BotContext {

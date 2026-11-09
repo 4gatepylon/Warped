@@ -960,6 +960,7 @@ fn main() {
         session.route = VERTICAL_ROUTE.to_vec();
     }
     session.console_places = console_reach::find_console_places(&map_file);
+    session.is_team_known = !is_online;
     if args.bot {
         session.walker = Some(BotWalker::New());
         session.is_console_objective = args.bot_objective.is_some();
@@ -1042,7 +1043,10 @@ fn main() {
         let mut is_reload_pressed: bool = false;
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit { .. } => break 'running,
+                Event::Quit { .. } => {
+                    eprintln!("DEBUG quit event at {:.1} s", start.elapsed().as_secs_f32());
+                    break 'running;
+                }
                 Event::KeyDown {
                     scancode: Some(scancode),
                     repeat: false,

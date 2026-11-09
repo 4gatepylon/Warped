@@ -206,7 +206,11 @@ impl MatchPlay {
             session.settings = settings.clone();
         }
         if let Some(team) = client.team {
-            session.team = team;
+            if team != session.team {
+                session.team = team;
+                session.respawn_player();
+            }
+            session.is_team_known = true;
         }
         let is_dead: bool = !session.player.is_alive();
         if self.was_dead && !is_dead {
