@@ -668,7 +668,9 @@ static int find_lens_mouth(constant FrameUniforms& frame, constant LensUniforms&
  * @brief `get_lens_color` traces the eye ray through `uv` into the nearest wormhole mouth: bent
  * by its lens, through its throat to the partner (inversion, then the mirror diag(1, 1, -1)),
  * until it leaves a reach or meets the floor; it returns the atlas color there (lined up on the
- * floor or a `LENS_PROXY_M` sphere) and how much it covers the scene, before any depth test.
+ * floor or a `LENS_PROXY_M` sphere) and how much it covers the scene, before any depth test. A ray that reaches
+ * the mouth from below its floor (a deck's mouth seen from the ground) shows no lens, since the floor hides the
+ * mouth from there (W-139).
  * Where the ray ends near a mouth with a live slot, it also shows the first robot on its way (bent
  * or straight, unless the static world hides it) and the lasers drawn there. From inside a mouth's visible
  * sphere, the lens covers the scene as far as it bends the ray (fully through the throat).
@@ -692,6 +694,9 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
     float b = dot(oc, dir);
     float start_m = max(-b - sqrt(max(reach * reach - (dot(oc, oc) - b * b), 0.0)), 0.0);
     float3 x = eye + dir * start_m, v = dir;
+    if (x.y < lens.shapes[w].w) {
+        return float4(0.0);
+    }
     int current = w;
     bool is_hit = false;
     bool has_crossed = false;
