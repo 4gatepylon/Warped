@@ -2135,6 +2135,28 @@
   important things that are right in front of you." B keeps the centre identical and gives each heavy view a margin
   under 16.7 ms; E is there for slower machines. The user picks.
 
+### D116. No aliasing: smooth soft edges and lenses, and FXAA, W-138 (no aliasing)
+
+- **Choice:** three changes to `render_voxel.*` (Lunar Surface and the match's copy; Dust and Snow Planet have the
+  first and third):
+  - **Smooth soft edges:** tone mapping (`tonemap_voxel`) reads each pixel through `get_soft_color`: outside W-136's
+    sharp circle it blends, over `SOFT_BAND_PX` (48 px), into a cubic B-spline of the 4 × 4 shaded pixels around it
+    (`get_spline_color`) on the half-resolution grid, and toward and beyond the quarter circle on the quarter grid.
+    The B-spline is a smooth, ring-free blur about two grid steps wide, so the edges show no steps.
+  - **Smooth lenses:** a pixel deep in a lens (its ray took at least 8 bent steps and shows no laser core) is
+    written with alpha `LENS_BLEND_ALPHA` (`get_lens_alpha`), and tone mapping shows it as the half-resolution
+    B-spline; a cell with a laser's core in it is traced at full resolution instead of blended, so the beam stays
+    sharp and unbroken.
+  - **FXAA:** tone mapping writes into an intermediate texture with the luma in alpha, and `fxaa_voxel` anti-aliases
+    it into the target with FXAA 3.11 (quality), the same as Dark Forest's.
+- **Cost** (median GPU ms at 3440x1440, best of 3 alternating rounds under the exclusive lock): 0.2-0.8 ms more per
+  view, 1.2 ms on `laser_into_wormhole` (its beam is now traced at full resolution in the lens); FXAA alone 0.1-0.3 ms.
+- **Not taken:** a quarter-resolution deep lens (fine samples deep in a lens copying the coarse ones, shown as the
+  quarter-resolution B-spline): `wormhole_exit` 25.5 → 19.2 ms at 3440x1440, still over 16.7 ms, with stars and the
+  lens's thin rings turned into soft blobs; smoothing from 4 bent steps instead of 8: no better.
+- **Rationale:** the user (2026-11-09): "there has to be enough blur to remove aliasing elsewhere", "aliasing is a
+  big issue", and the half-resolution lens "is worse ONLY BECAUSE it has aliasing".
+
 ## Workload
 
 ### D7. Eight fixed views

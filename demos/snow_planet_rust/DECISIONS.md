@@ -155,3 +155,10 @@ rest at half resolution (the even pixels shaded, the rest blended), by default i
 (`--sharp-width-frac`, `--half-width-frac`). At 3440x1440, median GPU ms: `wormhole` 23.1 → 19.3, `laser_open` 20.7 →
 18.7, `black_hole` 18.3 → 17.6, the spawns 15.0 → 13.5; at 2560x1440 every view is now under 16.7 ms (`wormhole`
 17.2 → 14.6). The centre is the same picture (at most 2 of 255, through the bloom).
+
+## S15. No aliasing, W-138 (no aliasing)
+
+The same code as Lunar Surface's renderer (its D116) without its half-resolution lens (#465 adds that, with its
+smoothing): outside the sharp centre tone mapping shows a cubic B-spline of the half- or quarter-resolution pixels,
+blended in over 48 px, so the soft edges show no steps, and FXAA 3.11 anti-aliases the whole image. At 3440x1440:
+0.3-1.3 ms more per view. (S14 is #465's half-resolution lens.)
