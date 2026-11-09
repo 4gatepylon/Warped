@@ -1020,7 +1020,7 @@ static float4x4 invert_lorentz(float4x4 m) {
     return t;
 }
 
-/** @brief `is_fog_wall_on` says whether far surfaces fade fully into the snow fog by `FOG_END_M` and rays heading down stop there (the user's "Fog at 80 m + home lens"): on a looping snow world, seen from a player's height (below `SCENE_TOP_M`), so views from high above keep today's fog. @par Example @code if (is_fog_wall_on(scene)) { ... } @endcode */
+/** @brief `is_fog_wall_on` says whether far surfaces fade fully into the snow fog by `FOG_END_M`, where rays heading down end in fog and rays heading up go to the sky (the user's "Fog at 80 m + home lens"): on a looping snow world, seen from a player's height (below `SCENE_TOP_M`), so views from high above keep today's fog. @par Example @code if (is_fog_wall_on(scene)) { ... } @endcode */
 static bool is_fog_wall_on(thread const Scene &scene) {
     return scene.u.torus.w > 0.5 && scene.u.snow.x > 0.5 && scene.u.camera[3].y < sinh(SCENE_TOP_M / scene.u.curvature_radius_m);
 }
@@ -2280,13 +2280,14 @@ static float3 sample_sky(thread const Scene &scene, float3 d) {
     return color;
 }
 
-/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide. @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
+/** @brief `scan_beams` adds the glow of laser segments near a chord (closest approach in closed form): a core (a flat-topped blade for the sniper's, a Gaussian for the rifle's) and a soft haze (`halo`), with the brightest haze's code (team and gun) and speckle share. A beacon's beam (code at least `BEACON_BEAM_CODE`) is `BEACON_BEAM_RADIUS_M` wide, and isn't drawn past a seam of the looping world (`is_past_seam`). @par Example @code scan_beams(scene, x, v, s, t, core, halo, code, speckle); @endcode */
 static void scan_beams(thread const Scene &scene, float4 x, float4 v, float s_end, float travelled, thread float &core, thread float &halo, thread float &code,
-                       thread float &speckle) {
+                       thread float &speckle, bool is_past_seam = false) {
     float r = scene.u.curvature_radius_m, pix = scene.u.pixel_angle_rad;
     for (int i = 0; i < scene.u.beam_count; i++) {
         float4 a = scene.beams[i].a, b = scene.beams[i].b, info = scene.beams[i].info;
         int beam_code = int(info.w + HALF_KIND);
+        if (is_past_seam && beam_code >= BEACON_BEAM_CODE) continue;
         float half_len = 0.5 * info.x, radius_m = beam_code >= BEACON_BEAM_CODE ? BEACON_BEAM_RADIUS_M : BEAM_RADIUS_M;
         float4 mid = geodesic_point(a, b, half_len);
         float am = -mdot(x, mid), bm = mdot(v, mid), reach = half_len + BEAM_REACH * max(radius_m, pix * r * sinh(min(travelled + s_end, FAR_S))) / r;
@@ -2536,7 +2537,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             }
             bool is_disk = disk_s < s_end;
             if (is_disk) { s_end = disk_s; entering = -1; seam_axis = -1; }
-            float fog_s = is_fog_wall_on(scene) && v.y <= 0.0 ? max(FOG_END_M / r - travelled, 0.0) : NO_HIT_S;
+            float fog_s = is_fog_wall_on(scene) ? max(FOG_END_M / r - travelled, 0.0) : NO_HIT_S;
             bool is_fog = fog_s < s_end;
             if (is_fog) { s_end = fog_s; entering = -1; seam_axis = -1; is_disk = false; }
             hit.s = s_end;
@@ -2544,10 +2545,17 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
             float glass_s = NO_HIT_S;
             trace_scene(scene, x, v, -1, 0.0, float3(0.0), hit, glass_s);
             if (glass_s < hit.s) glass += 1.0;
-            if (u.beam_count > 0 && seam_count == 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+            if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle, seam_count > 0);
             if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
             if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
             if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
+            if (is_fog && v.y > 0.0) {
+                float4 xn = geodesic_point(x, v, s_end);
+                v = geodesic_tangent(x, v, s_end);
+                x = xn;
+                outcome = OUTCOME_SKY;
+                break;
+            }
             if (is_disk || is_fog) { outcome = OUTCOME_DISK; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
             if (seam_axis >= 0) {
                 float4 xn = geodesic_point(x, v, s_end);
@@ -2579,7 +2587,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         float glass_s = NO_HIT_S;
         trace_scene(scene, x, v, inside, rho, local, hit, glass_s);
         if (glass_s < hit.s) glass += 1.0;
-        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle);
+        if (u.beam_count > 0) scan_beams(scene, x, v, hit.s, travelled, core, halo, code, speckle, seam_count > 0);
         if (u.dust_counts.x > 0) scan_dust(scene, x, v, hit.s, travelled, dust);
         if (u.zone_walls.counts.x > 0) scan_zone_walls(scene, x, v, hit.s, travelled, dust);
         if (hit.mat != 0) { outcome = OUTCOME_HIT; hit_x = x; hit_v = v; hit_travelled = travelled; break; }
