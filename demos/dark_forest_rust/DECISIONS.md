@@ -184,6 +184,19 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   as crouched: each window sends its crouch, and a crouched player's robot stands on the floor squashed to the
   crouched share (W-137 (crouched robots sink)). **Gives up:** the hit flash is now a reddening of the robot's own
   colours rather than an added tint.
+- **D37. The player moves by the shared rules, through a `Ground`** (W-126 (same play in every level)).
+  `Player::update` steps the shared `MoveState` (crouching, sprint energy, the head bob, a hit's and crouching's slow)
+  as Lunar Surface's `VoxelPlayer::step` does, and hands the step's `MoveIntent` to `Forest`, the forest as the shared
+  `Ground` trait: its gravity, jump, rope ladders, box collisions and landing dip. The forest keeps one thing of its
+  own: standing up still waits for room, so a crouch the roof blocks keeps its old share. The rules now count in
+  `f64`, as Lunar's do, not `f32`: the forest's own play trace (Lunar's script on open ground, `game/play_trace.rs`)
+  is the same as before but for that rounding (energy within 4e-6, crouch within 1e-7) and one step's speed at the
+  end of a hit's slow, which `f32` had ended a step sooner. Against Lunar Surface's own trace, the rules' state
+  agrees within 5e-8 while both stand on the ground alike: the forest's frame time is an `f32` (1/60 s rounds to
+  0.0166666675), which the rules then count in. Lunar's spawn isn't flat, so the two traces' ground contact and
+  speeds part where Lunar meets its terrain and structures; the speeds themselves are Lunar's
+  (`test_movement_matches_lunar_surface`), and a unit test checks every step's rules state is the shared
+  `MoveState`'s, bit for bit.
 
 ## Follow-ups for the next agent
 
