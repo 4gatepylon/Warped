@@ -17,6 +17,10 @@ use crate::settings::{
     HEAD_BOB, MovementSettings, ServerSettings, SprintEnergySettings, WhenHitSettings,
 };
 
+/// `MAX_MOVE_STEP_M` is the longest move tried at once: collision checks only where a move ends,
+/// so a sprint during a slow frame is cut into steps shorter than the body is wide, and never
+/// skips through a thin rail or wall.
+const MAX_MOVE_STEP_M: f32 = 0.25;
 /// `MAX_FALL_SPEED_M_PER_S` is the fastest a player falls (Lunar Surface's).
 const MAX_FALL_SPEED_M_PER_S: f32 = 40.0;
 /// `LADDER_WALK_M_S` is the walking speed the rope ladders were made for: a climber moves sideways
@@ -246,7 +250,7 @@ impl Player {
     /// crouched) while energy lasts, the head bob, a speed of walking or sprinting times the
     /// crouching share and a hit's slowing, set at once on the ground and in the air, a jump, gravity
     /// up to `MAX_FALL_SPEED_M_PER_S`; then the forest's rope ladders, collision (stepping up
-    /// ledges, `collision::STEP_HEIGHT_M`) and landing dip. A footstep (`did_step`) falls at each
+    /// ledges, `collision::STEP_HEIGHT_M`, in steps of at most `MAX_MOVE_STEP_M`) and landing dip. A footstep (`did_step`) falls at each
     /// dip of the head bob.
     pub fn update(
         &mut self,
@@ -372,18 +376,24 @@ impl Player {
 
         let fall_speed_m_s: f32 = -self.velocity_m_s.y;
         let was_on_ground: bool = self.is_on_ground;
-        let result: MoveResult = move_body(
-            solids,
-            self.feet_m,
-            Player::half_extent_m(self.height_m),
-            self.velocity_m_s * dt_s,
-            self.is_on_ground || self.is_climbing,
-        );
-        self.feet_m = result.position_m;
-        self.is_on_ground = result.is_on_ground;
-        if result.is_on_ground || result.did_hit_ceiling {
+        let delta_m: Vec3 = self.velocity_m_s * dt_s;
+        let step_count: usize = (delta_m.length() / MAX_MOVE_STEP_M).ceil().max(1.0) as usize;
+        let mut did_hit_ceiling: bool = false;
+        for _ in 0..step_count {
+            let result: MoveResult = move_body(
+                solids,
+                self.feet_m,
+                Player::half_extent_m(self.height_m),
+                delta_m / step_count as f32,
+                self.is_on_ground || self.is_climbing,
+            );
+            self.feet_m = result.position_m;
+            self.is_on_ground = result.is_on_ground;
+            did_hit_ceiling |= result.did_hit_ceiling;
+        }
+        if self.is_on_ground || did_hit_ceiling {
             self.velocity_m_s.y = self.velocity_m_s.y.clamp(-0.5, 0.0);
-            if result.did_hit_ceiling {
+            if did_hit_ceiling {
                 self.velocity_m_s.y = 0.0;
             }
         }
@@ -411,6 +421,7 @@ impl Player {
 /// | gait on open ground | walking, sprinting, crouching (speed), slowed by a hit | `test_speeds_are_lunar_surfaces` |
 /// | jump | a standing jump on flat ground, against Lunar Surface's own settings and map | `test_a_jump_matches_lunar_surface` |
 /// | crouching | down (eye at its share of the standing eye, in `crouch_s`), up again, up under a low roof (waits) | `test_crouching_lowers_the_eye_and_waits_for_room` |
+/// | sprint into a thin rail | at 60 frames a second, in a slow frame of 0.05 s | `test_sprinting_never_skips_through_a_thin_rail` |
 /// | input at a ladder's foot | walk into it (climbs to the deck), walk past it sideways (stays on the ground) | `test_walking_into_a_ladder_climbs_onto_the_deck`, `test_walking_beside_a_ladder_stays_down` |
 /// | sprint energy while sprinting | some left, empty | `test_sprinting_drains_energy_then_stops` |
 /// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
@@ -576,6 +587,33 @@ mod tests {
         hit.update(&walk, &movement, &open_ground(), &[], 1.0 / 120.0);
         let slow_m_s: f32 = movement.walk_m_per_s * movement.when_hit.slow_speed_frac as f32;
         assert!((speed(&hit) - slow_m_s).abs() < SPEED_TOLERANCE_M_S);
+    }
+
+    /// `test_sprinting_never_skips_through_a_thin_rail` checks a sprinter stops at a 6 cm rail,
+    /// even when slow frames move them farther in one frame than their body is wide.
+    #[test]
+    fn test_sprinting_never_skips_through_a_thin_rail() {
+        let rail_z_m: f32 = -3.0;
+        let solids: [Aabb; 2] = [
+            open_ground()[0],
+            Aabb {
+                min_m: Vec3::new(-5.0, 0.0, rail_z_m - 0.06),
+                max_m: Vec3::new(5.0, 2.5, rail_z_m),
+            },
+        ];
+        let sprint: PlayerInput = PlayerInput {
+            move_axes: Vec2::Y,
+            is_sprint_held: true,
+            ..PlayerInput::default()
+        };
+        let movement: Movement = forest_movement();
+        for dt_s in [1.0 / 60.0, 0.05] {
+            let mut player: Player = Player::new(Vec3::ZERO, 0.0);
+            for _ in 0..(1.0 / dt_s) as usize {
+                player.update(&sprint, &movement, &solids, &[], dt_s);
+            }
+            assert!(player.feet_m.z > rail_z_m, "went through at {dt_s} s a frame");
+        }
     }
 
     /// `test_crouching_lowers_the_eye_and_waits_for_room` checks crouching takes `crouch_s` to lower
