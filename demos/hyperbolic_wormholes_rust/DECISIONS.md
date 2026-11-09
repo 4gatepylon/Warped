@@ -1985,6 +1985,40 @@
 - **Rationale:** you asked: "with a slight cooldown, you should be able to shoot as long as no keys are pressed. No
   movement keys I mean, so if you're in the air while time dilated you should be able to shoot."
 
+### D110. Lunar Surface at full resolution: baked ground, culled structures and shared sunlight, W-131 (Lunar wormhole_exit slow at full size)
+
+- **Choice:** make the voxel renderer (`render_voxel.rs`, `render_voxel.metal`, `terrain.rs`, `voxel_world.rs`, the
+  same in `demos/warped_match_rust/` and, for the shader, `demos/dust_rust/`) faster with changes that keep the
+  pictures, profiled by switching parts of the shader off one at a time (shadows, shading, structures, terrain, beams):
+  - **Baked ground** (Dust's #420): the whole terrain height, 5 octaves, in a 0.25 m grid over the boundary's box
+    grown by 250 m (`BAKED_TERRAIN_REACH_M`), which walking, laser hits and the shader read alike; its slopes are
+    baked on the GPU at the same points (`bake_terrain_slopes`) and read bilinearly for the ground's normal, instead
+    of four 5-octave heights per pixel.
+  - **Structure groups:** static structures grouped by 12 m cells of Fermi (u, v), each with a bounding sphere, so a
+    ray or shadow ray tests a group's members only if it can reach the group (`trace_structures`).
+  - **Shapes a chord can reach:** a structure's sphere tracing evaluates only the shapes whose box (grown by the
+    hit tolerance, and by the penumbra's reach for shadow rays) the chord crosses (`get_shape_mask`).
+  - **Mesh BVHs nearer child first,** and a shadow ray stops at its first triangle.
+  - **Beams:** each beam's midpoint is packed once; in bent steps only the beams that come near the warp are
+    scanned (`get_beam_mask`); far lamps are skipped before their distance is measured.
+  - **Shared sunlight (the one heuristic):** each fine sample (every second pixel each way) on the ground traces its
+    sun shadow once; a pixel between four samples that are all fully in the sun, with no structure near their shadow
+    rays, takes full sun instead of tracing its own. Everything else (penumbra, shadow edges, structures, near misses)
+    is traced per pixel as before.
+- **Look:** before against after, 2560×1440, every bench view: see the PR (#NNN) for the table and the difference
+  pictures; the changes are sub-millimetre shifts of ground hits (the bake's bilinear heights, at most a few
+  millimetres off the 5-octave shape), which move the regolith's fine texture by a pixel here and there, and
+  sunlight 0.0003% brighter beside structures (`NEAR_STRUCTURE_LIT`).
+- **Gives up:** a shadow narrower than two pixels between four fully lit samples whose shadow rays pass no structure
+  is lost; no such shadow was found in the bench views (thin shadows are cast by structures, whose rays are near).
+- **Alternatives tried and not taken:** longer bent steps (Dust's 0.16 and 0.48 of the distance to the centre, or steps
+  that grow beyond 4 throat radii): `wormhole_exit` 49 → 36 or 41 ms, but the lens's rings move by a few pixels, so
+  they wait for the user; interpolating the sun between samples 4 pixels apart broke thin shadows into dashes; a 2 cm
+  limit on sharing kept them but lost most of the gain.
+- **Rationale:** the user wants 60 frames a second at full resolution in every level, and pictures that look the
+  same. `wormhole_exit` (4 m from a mouth, the lens filling the view) stays far over 16.7 ms: its rays take a hundred
+  or more bent steps each; in play the window's automatic render scale keeps it fast there.
+
 ## Workload
 
 ### D7. Eight fixed views
