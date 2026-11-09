@@ -33,7 +33,7 @@ use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
 };
-use warped_shared::movement::MoveState;
+use warped_shared::movement::{MoveState, get_crouched_height_frac};
 use warped_shared::shot_noise::ShotNoise;
 use warped_shared::weapons::{Weapons, take_hit_weight};
 
@@ -875,12 +875,14 @@ struct Motion {
     speed_m_per_s: f64,
 }
 
-/// `Robot` is one robot to draw.
+/// `Robot` is one robot to draw: its feet, the way it faces, its team, its clip, and its height
+/// as a share of standing (less while crouched, W-137 (crouched robots sink)).
 struct Robot {
     feet: DVec3,
     forward: DVec3,
     team: u32,
     clip: AvatarClip,
+    height_frac: f64,
 }
 
 /// `make_frame` packs a frame: the scene, the consoles and pylons in their state, robots and beams.
@@ -910,20 +912,20 @@ fn make_frame(
             [1.0, 1.0, 0.0, 0.0]
         };
     }
-    let mut posed_clips: Vec<(AvatarClip, crate::mesh::MeshModel)> = Vec::new();
+    let mut posed_clips: Vec<(AvatarClip, f64, crate::mesh::MeshModel)> = Vec::new();
     for robot in robots {
-        if !posed_clips.iter().any(|(clip, _)| *clip == robot.clip) {
+        let is_posed = |(clip, height_frac, _): &&(AvatarClip, f64, crate::mesh::MeshModel)| {
+            *clip == robot.clip && *height_frac == robot.height_frac
+        };
+        if !posed_clips.iter().any(|posed| is_posed(&posed)) {
             let duration_s: f64 = body.get_duration_s(robot.clip).max(1e-3);
             posed_clips.push((
                 robot.clip,
-                body.make_posed(robot.clip, now_s.rem_euclid(duration_s)),
+                robot.height_frac,
+                body.make_squashed(robot.clip, now_s.rem_euclid(duration_s), robot.height_frac),
             ));
         }
-        let posed = &posed_clips
-            .iter()
-            .find(|(clip, _)| *clip == robot.clip)
-            .expect("posed above")
-            .1;
+        let posed = &posed_clips.iter().find(is_posed).expect("posed above").2;
         let up: DVec3 = get_up(robot.feet);
         let tangent: DVec3 =
             (robot.forward - up * robot.forward.dot(up)).normalize_or(up.any_orthonormal_vector());
@@ -981,6 +983,22 @@ fn make_frame(
         beam_speckle: [0.0; 4],
         flashlight: [[0.0; 4]; 3],
     }
+}
+
+/// `get_remote_body` gives player `p`'s feet, up and height as a share of standing as this window
+/// places their robot and its hit spheres: their eye height as crouched below the eye they sent
+/// (W-137 (crouched robots sink): a full standing eye height would sink a crouched robot into the
+/// floor).
+///
+/// Example: `let (feet, up, height_frac) = get_remote_body(&world, &settings, p);`
+fn get_remote_body(
+    world: &CityWorld,
+    settings: &ServerSettings,
+    p: &net::RemotePlayer,
+) -> (DVec3, DVec3, f64) {
+    let height_frac: f64 = get_crouched_height_frac(p.crouch_frac, &settings.movement);
+    let (feet, up) = CityPlayer::get_feet_up(p.frame, world.eye_height_m * height_frac);
+    (feet, up, height_frac)
 }
 
 /// `get_clip` gives the robot animation for a body moving at `speed_m_per_s`: running, walking or
@@ -1183,8 +1201,13 @@ impl CitySession {
                 Some(p.id) != self.client.id && enemies_of.is_none_or(|team| p.team != team)
             })
             .map(|p| {
-                let (feet, up) = CityPlayer::get_feet_up(p.frame, self.world.eye_height_m);
-                Target { id: p.id, feet, up }
+                let (feet, up, height_frac) = get_remote_body(&self.world, &self.settings, p);
+                Target {
+                    id: p.id,
+                    feet,
+                    up,
+                    height_frac,
+                }
             })
             .collect()
     }
@@ -1212,9 +1235,14 @@ impl CitySession {
             .players
             .iter()
             .filter(|p| Some(p.id) != self.client.id && p.team != team)
-            .map(|p| CityPlayer::get_feet_up(p.frame, self.world.eye_height_m))
+            .map(|p| get_remote_body(&self.world, &self.settings, p))
             .min_by(|a, b| (a.0 - eye).length().total_cmp(&(b.0 - eye).length()))
-            .map(|(feet, up)| (feet + up * HEAD_HEIGHT_M, feet + up * TORSO_HEIGHT_M));
+            .map(|(feet, up, height_frac)| {
+                (
+                    feet + up * (HEAD_HEIGHT_M * height_frac),
+                    feet + up * (TORSO_HEIGHT_M * height_frac),
+                )
+            });
         BrainSight {
             is_overheated: self.weapons.is_overheated,
             heat_frac: self.weapons.rifle_heat_frac,
@@ -1373,7 +1401,7 @@ impl CitySession {
                         .players
                         .iter()
                         .filter(|p| Some(p.id) != self.client.id)
-                        .map(|p| CityPlayer::get_feet_up(p.frame, self.world.eye_height_m).0)
+                        .map(|p| get_remote_body(&self.world, &self.settings, p).0)
                         .collect();
                     let spawn: usize =
                         self.world
@@ -1499,6 +1527,7 @@ impl CitySession {
                 self.disabling,
                 self.weapons.beam_speckle_frac,
                 self.thrown.placed,
+                self.player.move_state.crouch_frac,
             )?;
         }
         let life_s: f64 = self.settings.sniper.shot_s + self.settings.sniper.beam_trail_s;
@@ -1851,7 +1880,7 @@ impl CitySession {
                 .remote_lasers
                 .insert(p.id, p.is_laser_on)
                 .unwrap_or(false);
-            let (feet, _) = CityPlayer::get_feet_up(p.frame, self.world.eye_height_m);
+            let (feet, _, _) = get_remote_body(&self.world, &self.settings, p);
             if p.is_laser_on && !was_on {
                 let targets: Vec<Target> = self
                     .get_targets(None)
@@ -1917,6 +1946,10 @@ impl CitySession {
             forward: -self.player.body.z_axis,
             team: self.get_team(),
             clip: get_clip(own_speed_m_per_s),
+            height_frac: get_crouched_height_frac(
+                self.player.move_state.crouch_frac,
+                &self.settings.movement,
+            ),
         });
         let robots: Vec<Robot> = self
             .client
@@ -1933,6 +1966,7 @@ impl CitySession {
                     forward: -p.frame.z_axis.truncate(),
                     team: p.team,
                     clip: get_clip(motion.speed_m_per_s),
+                    height_frac: get_crouched_height_frac(p.crouch_frac, &self.settings.movement),
                 }
             })
             .chain(own)
@@ -2907,7 +2941,7 @@ fn make_minimap(session: &CitySession, window_px: (u32, u32)) -> render_metal::M
         .iter()
         .filter(|p| Some(p.id) != session.client.id)
         .map(|p| {
-            let (feet, _) = CityPlayer::get_feet_up(p.frame, session.world.eye_height_m);
+            let (feet, _, _) = get_remote_body(&session.world, &session.settings, p);
             (
                 feet,
                 MINIMAP_PLAYER_RADIUS_PX,
@@ -3087,6 +3121,7 @@ fn make_crowd(world: &CityWorld) -> (Vec<Robot>, Vec<Beam>) {
             forward: DVec3::X,
             team: (k % 2) as u32,
             clip: AvatarClip::Run,
+            height_frac: 1.0,
         });
         let eye: DVec3 = d * (glass_m - world.eye_height_m);
         let shot: Shot = world.trace_shot(
@@ -3227,6 +3262,7 @@ fn make_photo_views(world: &CityWorld) -> Vec<PhotoView> {
         forward: toward - feet,
         team,
         clip,
+        height_frac: 1.0,
     };
     let shot = |from: DVec3, to: DVec3, team: u32| -> Beam {
         let up: DVec3 = get_up(from);
@@ -3482,7 +3518,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                         .players
                         .iter()
                         .filter(|p| Some(p.id) != client.id)
-                        .map(|p| CityPlayer::get_feet_up(p.frame, world.eye_height_m).0)
+                        .map(|p| get_remote_body(&world, &settings, p).0)
                         .collect();
                     player =
                         world.make_player(team, world.find_clear_spawn(team, &others, spawn_count));
@@ -3551,7 +3587,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 .players
                 .iter()
                 .filter(|p| Some(p.id) != client.id && p.team != team)
-                .map(|p| CityPlayer::get_feet_up(p.frame, world.eye_height_m).0)
+                .map(|p| get_remote_body(&world, &settings, p).0)
                 .min_by(|a, b| a.distance(feet).total_cmp(&b.distance(feet)));
             if brain.is_done() || now_s >= retarget_at_s {
                 retarget_at_s = now_s + FIGHT_RETARGET_S;
@@ -3589,8 +3625,13 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 .iter()
                 .filter(|p| Some(p.id) != client.id && p.team != team)
                 .map(|p| {
-                    let (feet, up) = CityPlayer::get_feet_up(p.frame, world.eye_height_m);
-                    Target { id: p.id, feet, up }
+                    let (feet, up, height_frac) = get_remote_body(&world, &settings, p);
+                    Target {
+                        id: p.id,
+                        feet,
+                        up,
+                        height_frac,
+                    }
                 })
                 .collect();
             if weapons.sniper_reload_s <= 0.0
@@ -3638,6 +3679,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
             disabling,
             weapons.beam_speckle_frac,
             PlayerWormholes::default(),
+            0.0,
         )?;
     }
     let winner: Option<&str> = client
@@ -3669,6 +3711,7 @@ mod tests {
     //! | Walk from a spawn up the stairs | each team, each of its two spawns, walking and sprinting: reaches the glass level, then its pylon, never stuck | `every_spawn_walks_up_the_stairs_to_its_pylon` |
     //! | Level jumped in | City Sphere, Lunar Surface (the reference, its own settings and code): the same height and time in the air | `a_jump_matches_lunar_surface` |
     //! | Level crouched in, walking | City Sphere, Lunar Surface: the same time to crouch, crouched eye height and crouched speed, as shares of standing | `crouching_matches_lunar_surface` |
+    //! | Another player as this window places them (W-137 (crouched robots sink)) | standing, crouched: feet where they stand, height share as crouched | `a_crouched_player_stands_on_the_street` |
     //! | Settings file | server (all but the sprint and City's `glass`), player: the same as Lunar Surface's | `the_settings_files_match_lunar_surface` |
     //! | Walk on foot from a spawn to a console | each team, spawn and console (own, the other team's), 60 and 20 updates a second: aimed within reach at the end; not when facing away or with too short a reach | `every_pylon_is_reachable_on_foot_from_every_spawn` |
     use super::*;
@@ -4023,6 +4066,44 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_crouched_player_stands_on_the_street() {
+        let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
+        let settings: ServerSettings = ServerSettings::Builtin();
+        for is_crouching in [false, true] {
+            let mut player: CityPlayer = world.make_player(0, 0);
+            let input: CityInput = CityInput {
+                is_crouching,
+                ..CityInput::default()
+            };
+            for _ in 0..(CROUCH_WALK_S / WALK_STEP_S).round() as usize {
+                world.move_player(&mut player, &input, &settings, &head_bob(), WALK_STEP_S);
+            }
+            let crouch_frac: f64 = player.move_state.crouch_frac;
+            let seen: net::RemotePlayer = net::RemotePlayer {
+                id: 2,
+                frame: player.get_eye_frame(),
+                is_laser_on: false,
+                is_rifle: false,
+                team: 0,
+                disabling_console: None,
+                disabling_frac: 0.0,
+                beam_speckle_frac: 0.0,
+                wormholes: PlayerWormholes::default(),
+                crouch_frac,
+            };
+            let (feet, _, height_frac) = get_remote_body(&world, &settings, &seen);
+            assert!(
+                (feet - player.feet).length() < 1e-9,
+                "crouching {is_crouching}"
+            );
+            assert_eq!(
+                height_frac,
+                get_crouched_height_frac(crouch_frac, &settings.movement)
+            );
+        }
+    }
+
     /// `the_settings_files_match_lunar_surface` checks City Sphere's settings files against Lunar
     /// Surface's, line for line (W-126 (same play in every level): "Respawn timers and all that
     /// stuff should be the same throughout"), except the faster sprint the user asked for and
@@ -4161,7 +4242,12 @@ mod tests {
         let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
         let target: CityPlayer = make_target_player(&world);
         let (feet, up) = (target.feet, target.get_up());
-        let targets: [Target; 1] = [Target { id: 1, feet, up }];
+        let targets: [Target; 1] = [Target {
+            id: 1,
+            feet,
+            up,
+            height_frac: 1.0,
+        }];
         for (height_m, is_head) in [(HEAD_HEIGHT_M, true), (TORSO_HEIGHT_M, false)] {
             let mut shooter: CityPlayer = world.make_player(0, 0);
             aim_at(&mut shooter, feet + up * height_m);

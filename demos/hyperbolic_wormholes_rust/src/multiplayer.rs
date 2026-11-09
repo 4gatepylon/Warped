@@ -29,9 +29,10 @@ use crate::scene_data::{Beam, SceneData};
 use crate::settings::{ServerSettings, SpaceSettings};
 use crate::thrown_wormholes::{Marker, PlayerWormholes};
 use crate::voxel_world::{
-    MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
+    AvatarBody, MARKER_NAME, MIN_SPAWN_GAP_M, SPAWN_TURN_RAD, Shot, VoxelPlayer, VoxelWorld,
 };
 use crate::world::{Color, EYE_HEIGHT_M, World};
+use warped_shared::movement::get_crouched_height_frac;
 
 /// `Result` is this module's result type.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -109,10 +110,10 @@ fn get_team_colors() -> Vec<Color> {
 /// index of its colour in `get_team_colors`, which is its team.
 ///
 /// Example: `let bodies = get_avatar_bodies(&world, &players);`
-fn get_avatar_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> Vec<(DMat4, usize)> {
+fn get_avatar_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> Vec<AvatarBody> {
     players
         .iter()
-        .map(|p| get_body(world, p.frame, p.team))
+        .map(|p| get_body(world, p.frame, p.crouch_frac, p.team))
         .collect()
 }
 
@@ -286,6 +287,7 @@ pub fn run_bot(
                 None,
                 0.0,
                 PlayerWormholes::default(),
+                0.0,
             )?;
         } else {
             client.keep_joining()?;
@@ -315,14 +317,19 @@ pub struct Tracers<'a> {
     pub dust: &'a [DustCloud],
 }
 
-/// `get_body` gives the body drawn for a player of `team` whose eye frame is `eye`: its feet frame
-/// and the index of its colour in `get_team_colors`, which is its team, as every window draws them.
+/// `get_body` gives the body drawn for a player of `team` whose eye frame is `eye` and who is
+/// `crouch_frac` of the way down a crouch: its feet frame on the ground (under the eye raised by
+/// the crouch's drop, W-137 (crouched robots sink)), the index of its colour in
+/// `get_team_colors`, which is its team, and its height as a share of standing, as every window
+/// draws them.
 ///
-/// Example: `let body = multiplayer::get_body(&world, player.frame, player.team);`
-pub fn get_body(world: &VoxelWorld, eye: DMat4, team: u32) -> (DMat4, usize) {
+/// Example: `let body = multiplayer::get_body(&world, player.frame, player.crouch_frac, player.team);`
+pub fn get_body(world: &VoxelWorld, eye: DMat4, crouch_frac: f64, team: u32) -> AvatarBody {
+    let standing_eye: DMat4 = world.raise_crouched_eye(eye, crouch_frac);
     (
-        VoxelPlayer::FromEye(world, eye).get_feet_frame(world),
+        VoxelPlayer::FromEye(world, standing_eye).get_feet_frame(world),
         team as usize,
+        get_crouched_height_frac(crouch_frac, &world.settings.movement),
     )
 }
 
@@ -343,8 +350,8 @@ pub fn with_bodies(world: &VoxelWorld, players: &[RemotePlayer]) -> VoxelWorld {
 fn trace_other_voxel_lasers(
     world: &VoxelWorld,
     players: &[RemotePlayer],
-    bodies: &[(DMat4, usize)],
-    own_body: Option<(DMat4, usize)>,
+    bodies: &[AvatarBody],
+    own_body: Option<AvatarBody>,
     colors: &[[f32; 3]],
 ) -> Vec<(u32, Shot)> {
     players
@@ -352,7 +359,7 @@ fn trace_other_voxel_lasers(
         .enumerate()
         .filter(|(_, player)| player.is_laser_on)
         .map(|(i, player)| {
-            let others: Vec<(DMat4, usize)> = bodies
+            let others: Vec<AvatarBody> = bodies
                 .iter()
                 .enumerate()
                 .filter(|&(j, _)| j != i)
@@ -390,14 +397,14 @@ pub fn pack_shared_voxel_view(
     players: &[RemotePlayer],
     poses: &[(AvatarClip, f64)],
     markers: &[Marker],
-    own_body: Option<(DMat4, usize)>,
+    own_body: Option<AvatarBody>,
     corpses: &[(DMat4, usize, (AvatarClip, f64))],
     tracers: Option<Tracers>,
     render_px: (u32, u32),
 ) -> SharedVoxelView {
     let colors: Vec<[f32; 3]> = get_team_colors();
-    let bodies: Vec<(DMat4, usize)> = get_avatar_bodies(world, players);
-    let own_bodies: Vec<(DMat4, usize)> = own_body.into_iter().collect();
+    let bodies: Vec<AvatarBody> = get_avatar_bodies(world, players);
+    let own_bodies: Vec<AvatarBody> = own_body.into_iter().collect();
     assert_eq!(
         poses.len(),
         bodies.len() + own_bodies.len(),
@@ -615,6 +622,7 @@ pub fn run_voxel_bot(
                 None,
                 0.0,
                 PlayerWormholes::default(),
+                0.0,
             )?;
         } else {
             client.keep_joining()?;
@@ -638,6 +646,7 @@ mod tests {
     //! | Body colour | players of both teams, with ids whose old per-id colours differ from their team's | `players_are_drawn_in_their_teams_colours` |
     //! | Whose laser | this player's, another player's on Lunar Surface (drawn from their gun, out of their own body; strayed as in its shooter's window) | the tests above, `other_players_lasers_leave_their_bodies`, `a_strayed_shot_misses_alike_in_both_windows` |
     //! | This player's own body | not drawn (first person), drawn (third person: others' lasers stop at it, this player's own passes it) | `an_own_body_stops_others_lasers_only` |
+    //! | Another player's crouch (W-137 (crouched robots sink)) | standing (hit in the head at standing head height), crouched (feet where they stand; a shot at standing head height passes over, one at the squashed head hits it) | `a_crouched_player_stands_on_the_ground_and_is_hit_lower` |
 
     use super::*;
     use crate::net::MAX_PLAYER_COUNT;
@@ -654,6 +663,7 @@ mod tests {
         direction_rad: -std::f64::consts::FRAC_PI_4,
     };
     const SAME_SPOT_M: f64 = 1e-6;
+    const STANDING_HEAD_M: f64 = 1.75;
 
     #[test]
     fn spawn_points_are_apart_and_clear_of_mouths() {
@@ -690,6 +700,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let view: SharedView =
@@ -754,6 +765,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let camera: DMat4 = shooter.get_camera_frame(&world);
@@ -798,6 +810,7 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
         let target_camera: DMat4 = target.get_camera_frame(&world);
@@ -840,6 +853,74 @@ mod tests {
     }
 
     #[test]
+    fn a_crouched_player_stands_on_the_ground_and_is_hit_lower() {
+        let map: crate::map::Map =
+            crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
+                .expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let standing: VoxelPlayer =
+            VoxelPlayer::AtView(&world, LUNAR_TARGET_M, LUNAR_SHOOTER_M, None, 0.0);
+        let crouched: VoxelPlayer = VoxelPlayer {
+            crouch_frac: 1.0,
+            ..standing
+        };
+        let (feet, _, height_frac) = get_body(&world, crouched.get_camera_frame(&world), 1.0, 0);
+        let standing_feet: DMat4 = standing.get_feet_frame(&world);
+        assert!(get_distance(feet.col(AXIS_W), standing_feet.col(AXIS_W)) * world.r < SAME_SPOT_M);
+        assert_eq!(height_frac, world.settings.movement.crouch_eye_height_frac);
+        let floor_m: f64 = standing.h_m - world.player.eye_height_m;
+        let crouched_head_m: f64 = STANDING_HEAD_M * height_frac;
+        for (crouch_frac, aim_m, is_hit_and_head) in [
+            (0.0, STANDING_HEAD_M, (true, true)),
+            (1.0, STANDING_HEAD_M, (false, false)),
+            (1.0, crouched_head_m, (true, true)),
+        ] {
+            let body: VoxelPlayer = VoxelPlayer {
+                crouch_frac,
+                ..standing
+            };
+            let target: RemotePlayer = RemotePlayer {
+                id: 2,
+                frame: body.get_camera_frame(&world),
+                is_laser_on: false,
+                is_rifle: false,
+                team: 0,
+                disabling_console: None,
+                disabling_frac: 0.0,
+                beam_speckle_frac: 0.0,
+                wormholes: PlayerWormholes::default(),
+                crouch_frac,
+            };
+            let camera: DMat4 = VoxelPlayer::AtView(
+                &world,
+                LUNAR_SHOOTER_M,
+                LUNAR_TARGET_M,
+                Some(floor_m + aim_m),
+                0.0,
+            )
+            .get_camera_frame(&world);
+            let view: SharedVoxelView = pack_shared_voxel_view(
+                &world,
+                camera,
+                Some(camera),
+                1,
+                &[target],
+                &[IDLE_POSE],
+                &[],
+                None,
+                &[],
+                None,
+                (64, 40),
+            );
+            assert_eq!(
+                (view.hit_player_id.is_some(), view.is_head_hit),
+                is_hit_and_head,
+                "crouched {crouch_frac}, aimed {aim_m} m up"
+            );
+        }
+    }
+
+    #[test]
     fn other_players_lasers_leave_their_bodies() {
         let map: crate::map::Map =
             crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
@@ -856,9 +937,10 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
-        let bodies: Vec<(DMat4, usize)> = get_avatar_bodies(&world, std::slice::from_ref(&firing));
+        let bodies: Vec<AvatarBody> = get_avatar_bodies(&world, std::slice::from_ref(&firing));
         let shots = trace_other_voxel_lasers(&world, &[firing], &bodies, None, &get_team_colors());
         assert!(shots[0].1.length_m > MIN_OTHER_BEAM_M);
     }
@@ -883,11 +965,13 @@ mod tests {
                 disabling_console: None,
                 disabling_frac: 0.0,
                 beam_speckle_frac: 0.0,
+                crouch_frac: 0.0,
                 wormholes: PlayerWormholes::default(),
             })
             .to_vec();
         let colors: Vec<Color> = get_team_colors();
-        for (player, (_, color_index)) in players.iter().zip(get_avatar_bodies(&world, &players)) {
+        for (player, (_, color_index, _)) in players.iter().zip(get_avatar_bodies(&world, &players))
+        {
             let [r, g, b, _] = TEAM_COLORS[player.team as usize];
             assert_eq!(colors[color_index], [r, g, b], "player {}", player.id);
         }
@@ -912,9 +996,10 @@ mod tests {
             disabling_console: None,
             disabling_frac: 0.0,
             beam_speckle_frac: 0.0,
+            crouch_frac: 0.0,
             wormholes: PlayerWormholes::default(),
         };
-        let pack = |own_body: Option<(DMat4, usize)>| -> SharedVoxelView {
+        let pack = |own_body: Option<AvatarBody>| -> SharedVoxelView {
             pack_shared_voxel_view(
                 &world,
                 eye,
@@ -930,7 +1015,7 @@ mod tests {
             )
         };
         let first_person: SharedVoxelView = pack(None);
-        let third_person: SharedVoxelView = pack(Some(get_body(&world, eye, OWN_TEAM)));
+        let third_person: SharedVoxelView = pack(Some(get_body(&world, eye, 0.0, OWN_TEAM)));
         assert_eq!(
             third_person.frame.uniforms.structure_count,
             first_person.frame.uniforms.structure_count + 1,
