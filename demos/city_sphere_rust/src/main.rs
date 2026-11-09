@@ -53,6 +53,8 @@ mod voxel_world;
 mod world;
 mod zone_walls;
 
+use warped_shared::hud::get_crosshair_rects;
+use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 use warped_shared::{
     app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, hud_bars, key_bindings, mesh,
     overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel,
@@ -69,7 +71,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, ValueEnum};
-use glam::{DMat4, DVec3, DVec4, EulerRot, Mat3, Vec3};
+use glam::{DMat4, DVec3, DVec4};
 use objc2_core_foundation::CGSize;
 use objc2_metal::MTLPixelFormat;
 use objc2_quartz_core::CAMetalLayer;
@@ -133,8 +135,6 @@ const MS_PER_S: f64 = 1000.0;
 const HUD_COLOR: Color = Color::RGB(235, 240, 250);
 const MESSAGE_DURATION_S: f64 = 3.0;
 const MAX_BLUESHIFT_FRAC: f64 = 1.25;
-const WAND_RECOIL_M: f32 = 0.035;
-const WAND_RECOIL_TILT_RAD: f32 = 0.12;
 const HEAT_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.9];
 const HEAT_BAR_RGB: [f32; 3] = [1.0, 0.6, 0.2];
 const HEALTH_BAR_MIN_FRAC: [f32; 2] = [0.03, 0.87];
@@ -142,17 +142,7 @@ const HEALTH_BAR_RGB: [f32; 3] = [0.35, 0.95, 0.45];
 const HEALTH_PULSE_RGB: [f32; 3] = [1.0, 0.45, 0.2];
 const ENERGY_SEGMENT_COUNT: u32 = 10;
 const SKY_TRACER_M: f64 = 80.0;
-const CROSSHAIR_GAP_FRAC: f32 = 0.006;
-const CROSSHAIR_ARM_FRAC: f32 = 0.012;
-const CROSSHAIR_THICKNESS_FRAC: f32 = 0.0025;
-const CROSSHAIR_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.85];
 const HEAT_BAR_OVERHEATED_RGB: [f32; 3] = [1.0, 0.15, 0.1];
-const WAND_LASER_SHAFT_HALF_M: [f32; 4] = [0.011, 0.011, 0.16, 0.0];
-const WAND_LASER_SHAFT_COLOR: [f32; 4] = [0.2, 0.17, 0.22, 1.0];
-const WAND_LASER_TIP_HALF_M: [f32; 4] = [0.016, 0.016, 0.028, 0.0];
-const WAND_RIFLE_SHAFT_HALF_M: [f32; 4] = [0.024, 0.032, 0.17, 0.0];
-const WAND_RIFLE_SHAFT_COLOR: [f32; 4] = [0.42, 0.45, 0.5, 1.0];
-const WAND_RIFLE_TIP_HALF_M: [f32; 4] = [0.007, 0.007, 0.07, 0.0];
 const DEATH_MASK_PX: (u32, u32) = (240, 24);
 const MENU_MASK_PX: (u32, u32) = (512, 312);
 const BANNER_HEIGHT_FRAC: f32 = 0.2;
@@ -191,17 +181,6 @@ const PERCENT_PER_FRAC: f64 = 100.0;
 const GUN_WALK_HZ: f64 = 2.0;
 const GUN_JOG_HZ: f64 = 2.8;
 const GUN_POSE_PER_S: f64 = 6.0;
-const WAND_JOG_CENTER_M: [f32; 3] = [0.22, -0.22, -0.34];
-const WAND_AIM_YAW_RAD: f32 = 0.076;
-const WAND_JOG_YAW_RAD: f32 = 0.35;
-const WAND_AIM_PITCH_RAD: f32 = 0.064;
-const WAND_JOG_PITCH_RAD: f32 = -0.35;
-const WAND_JOG_ROLL_RAD: f32 = 0.5;
-const WAND_JOG_SWING_RAD: f32 = 0.18;
-const WAND_WALK_BOB_M: f32 = 0.006;
-const WAND_JOG_BOB_M: f32 = 0.03;
-const WAND_BLUE_TIP_COLOR: [f32; 4] = [0.35, 0.68, 1.0, 1.0];
-const WAND_RED_TIP_COLOR: [f32; 4] = [1.0, 0.28, 0.14, 1.0];
 const MIN_IMAGE_SIDE_PX: u32 = 16;
 const MAX_IMAGE_SIDE_PX: u32 = 8192;
 const THROAT_VIEW_DISTANCE_M: f64 = 0.8;
@@ -2045,10 +2024,6 @@ struct Session {
     total_frame_count: u64,
     total_gpu_ms: f64,
     last_output_px: (u32, u32),
-    is_laser_on: bool,
-    shot_time_s: f64,
-    aim_frac: f64,
-    sniper_reload_s: f64,
     since_movement_key_s: f64,
     settings: ServerSettings,
     player_settings: PerPlayerSettings,
@@ -2057,28 +2032,15 @@ struct Session {
     last_connection_problem: Option<ConnectionProblem>,
     exit_prompt: exit_prompt::ExitPrompt,
     map_layout: map_layout::MapLayout,
-    gun: Gun,
-    is_trigger_held: bool,
+    weapons: Weapons,
     is_flashlight_on: bool,
     view_switch: third_person::ViewSwitch,
     is_own_body_shown: bool,
-    rifle_next_shot_s: f64,
-    rifle_heat_frac: f64,
-    is_overheated: bool,
-    has_rifle_shot_hit: bool,
     tracers: Vec<Tracer>,
     dust_bursts: Vec<dust::DustBurst>,
     was_firing: bool,
     remote_firing_ids: Vec<u32>,
     avatars: avatar_animation::AvatarAnimator,
-    rifle_shot_count: u64,
-    recoil_frac: f64,
-    shot_noise: shot_noise::ShotNoise,
-    shot_offset: shot_noise::ShotOffset,
-    beam_speckle_frac: f64,
-    gun_phase_rad: f64,
-    step_frac: f64,
-    run_pose_frac: f64,
     motion_blur_frac: f32,
     hit_effect_frac: f64,
     blueshift_frac: f32,
@@ -2259,28 +2221,6 @@ fn add_dust_burst(
     bursts.drain(..excess_count);
 }
 
-/// `Gun` is the weapon a player holds: gun 1, the laser (a quarter-second shot per click; one
-/// hit eliminates), or gun 2, the design's rifle (fires while the button is held, its beam
-/// pulsing; two hits to the head or twelve to the body eliminate; overheats).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Gun {
-    Laser,
-    Rifle,
-}
-
-impl Gun {
-    /// `get_model` gives the model drawn in hand for this gun: the bolt-action rifle for the laser
-    /// (the sniper) and the energy revolver for the rifle.
-    ///
-    /// Example: `let model: viewmodel::GunModel = Gun::Rifle.get_model();`
-    fn get_model(self) -> viewmodel::GunModel {
-        match self {
-            Gun::Laser => viewmodel::GunModel::BoltActionRifle,
-            Gun::Rifle => viewmodel::GunModel::Revolver,
-        }
-    }
-}
-
 /// `Multiplayer` is a window's game on the local network: its connection, the server process it
 /// started with `--host`, whether this player was hit and waits to rejoin, the number of the game
 /// it plays, and the console this player holds `E` on, with the seconds held.
@@ -2422,33 +2362,16 @@ impl Session {
             total_frame_count: 0,
             total_gpu_ms: 0.0,
             last_output_px: (0, 0),
-            is_laser_on: false,
-            shot_time_s: 0.0,
-            aim_frac: 0.0,
-            sniper_reload_s: 0.0,
             since_movement_key_s: f64::INFINITY,
-            gun: Gun::Rifle,
-            is_trigger_held: false,
+            weapons: Weapons::New(shot_noise::ShotNoise::FromClock()),
             is_flashlight_on: false,
             view_switch: third_person::ViewSwitch::FirstPerson(),
             is_own_body_shown: false,
-            rifle_next_shot_s: 0.0,
-            rifle_heat_frac: 0.0,
-            is_overheated: false,
-            has_rifle_shot_hit: false,
             tracers: Vec::new(),
             dust_bursts: Vec::new(),
             was_firing: false,
             remote_firing_ids: Vec::new(),
             avatars: avatar_animation::AvatarAnimator::New(),
-            rifle_shot_count: 0,
-            recoil_frac: 0.0,
-            shot_noise: shot_noise::ShotNoise::FromClock(),
-            shot_offset: shot_noise::ShotOffset::NONE,
-            beam_speckle_frac: 0.0,
-            gun_phase_rad: 0.0,
-            step_frac: 0.0,
-            run_pose_frac: 0.0,
             motion_blur_frac: 0.0,
             hit_effect_frac: 0.0,
             blueshift_frac: 0.0,
@@ -2613,7 +2536,7 @@ impl Session {
         } else if is(Action::Gun2) {
             self.switch_gun(Gun::Rifle);
         } else if is(Action::SwitchGun) {
-            self.switch_gun(match self.gun {
+            self.switch_gun(match self.weapons.gun {
                 Gun::Laser => Gun::Rifle,
                 Gun::Rifle => Gun::Laser,
             });
@@ -2625,16 +2548,13 @@ impl Session {
         }
         if is(Action::Shoot)
             && self.is_captured
-            && self.gun == Gun::Laser
-            && self.sniper_reload_s <= 0.0
+            && self.weapons.gun == Gun::Laser
+            && self.weapons.sniper_reload_s <= 0.0
             && self.can_shoot()
             && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated)
         {
-            self.shot_time_s = self.settings.sniper.shot_s;
             self.has_shot_hit_wormholes = false;
-            self.sniper_reload_s = self.settings.sniper.reload_s;
-            self.shot_offset = self.shot_noise.sample_sniper(&self.settings.sniper);
-            self.beam_speckle_frac = self.shot_noise.sample_sniper_speckle(&self.settings.sniper);
+            self.weapons.fire_sniper(&self.settings.sniper);
         }
     }
 
@@ -2667,13 +2587,12 @@ impl Session {
         if self.route_index < self.route.len() {
             self.frame_times_ms.push(frame_s * MS_PER_S);
             let step: &RouteFrame = &self.route[self.route_index];
-            (self.player.frame, self.is_laser_on) = (step.frame, step.is_laser_on);
+            (self.player.frame, self.weapons.is_laser_on) = (step.frame, step.is_laser_on);
             self.route_index += 1;
             self.hud_time_s += dt_s;
             return Ok(());
         }
-        self.shot_time_s = (self.shot_time_s - own_dt_s).max(0.0);
-        self.sniper_reload_s = (self.sniper_reload_s - own_dt_s).max(0.0);
+        self.weapons.tick(own_dt_s);
         if let Some(multiplayer) = &mut self.multiplayer
             && multiplayer.is_eliminated
         {
@@ -2707,14 +2626,12 @@ impl Session {
             sprint: held(Action::Sprint),
             crouch: held(Action::Crouch),
         };
-        self.is_trigger_held = self.is_captured && held(Action::Shoot);
+        self.weapons.is_trigger_held = self.is_captured && held(Action::Shoot);
         self.is_flashlight_on = self.is_captured && held(Action::Flashlight);
         let is_aiming: bool = self.is_captured
             && held(Action::Aim)
             && !self.multiplayer.as_ref().is_some_and(|m| m.is_eliminated);
-        let aim_step: f64 = dt_s / self.settings.aim.zoom_s;
-        self.aim_frac =
-            (self.aim_frac + if is_aiming { aim_step } else { -aim_step }).clamp(0.0, 1.0);
+        self.weapons.update_aim(is_aiming, dt_s, &self.settings.aim);
         let is_holding_e: bool = held(Action::TurnOffConsole);
         let team: usize = self.get_team() as usize;
         let messages: Vec<String> = match &mut self.voxel {
@@ -2754,9 +2671,9 @@ impl Session {
             && let Err(error) = multiplayer.client.send_state(
                 laser_aim.unwrap_or(eye),
                 laser_aim.is_some(),
-                self.gun == Gun::Rifle,
+                self.weapons.gun == Gun::Rifle,
                 multiplayer.disabling.map(|(console, _)| console),
-                self.beam_speckle_frac,
+                self.weapons.beam_speckle_frac,
                 self.thrown.placed,
             )
         {
@@ -2969,7 +2886,7 @@ impl Session {
             let player = multiplayer.client.players.iter().find(|p| p.id == id);
             player.is_some_and(|p| Some(p.team) != team)
         };
-        let gun_hits_to_destroy: u8 = match self.gun {
+        let gun_hits_to_destroy: u8 = match self.weapons.gun {
             Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
             Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
         };
@@ -3004,7 +2921,7 @@ impl Session {
     ///
     /// Example: `let is_firing = self.is_firing();`
     fn is_firing(&self) -> bool {
-        (self.is_laser_on || self.shot_time_s > 0.0) && self.can_shoot()
+        self.weapons.is_firing(self.can_shoot())
     }
 
     /// `get_laser_aim` gives the frame this player's laser fires from while it is on: `eye` (the
@@ -3014,7 +2931,7 @@ impl Session {
     ///
     /// Example: `let laser_aim = self.get_laser_aim(self.get_shot_eye());`
     fn get_laser_aim(&self, eye: DMat4) -> Option<DMat4> {
-        self.is_firing().then(|| self.shot_offset.aim(eye))
+        self.is_firing().then(|| self.weapons.shot_offset.aim(eye))
     }
 
     /// `get_boom_frac` gives how far out along its boom this player's camera is now
@@ -3026,7 +2943,7 @@ impl Session {
         if self.voxel.is_none() || !self.route.is_empty() {
             return 0.0;
         }
-        self.view_switch.get_boom_frac(self.aim_frac)
+        self.view_switch.get_boom_frac(self.weapons.aim_frac)
     }
 
     /// `get_third_person_view` gives, while the camera is out of the eye on a voxel map, where it
@@ -3079,8 +2996,7 @@ impl Session {
     ///
     /// Example: `self.switch_gun(Gun::Rifle);`
     fn switch_gun(&mut self, gun: Gun) {
-        self.gun = gun;
-        self.shot_time_s = 0.0;
+        self.weapons.switch_gun(gun);
     }
 
     /// `get_time_rate_frac` gives how fast this player's own time runs where their eye is, as a
@@ -3105,45 +3021,21 @@ impl Session {
     ///
     /// Example: `self.update_rifle(1.0 / 60.0);`
     fn update_rifle(&mut self, dt_s: f64) {
-        let rifle: settings::RifleSettings = self.settings.rifle.clone();
-        self.rifle_next_shot_s = (self.rifle_next_shot_s - dt_s).max(0.0);
-        self.recoil_frac = if rifle.recoil_settle_s > 0.0 {
-            (self.recoil_frac - dt_s / rifle.recoil_settle_s).max(0.0)
-        } else {
-            0.0
+        let can_shoot: bool = self.can_shoot();
+        let Some([sideways_rad, up_rad]) =
+            self.weapons
+                .update_rifle(&self.settings.rifle, can_shoot, dt_s)
+        else {
+            return;
         };
-        let is_firing_rifle: bool = self.gun == Gun::Rifle
-            && self.is_trigger_held
-            && self.can_shoot()
-            && !self.is_overheated;
-        if !is_firing_rifle {
-            self.rifle_heat_frac = (self.rifle_heat_frac - dt_s / rifle.cool_down_s).max(0.0);
-            self.is_overheated &= self.rifle_heat_frac > 0.0;
-        } else if self.rifle_next_shot_s <= 0.0 {
-            self.shot_time_s = rifle.pulse_s;
-            self.rifle_next_shot_s = 1.0 / rifle.shots_per_s;
-            self.has_rifle_shot_hit = false;
-            self.has_shot_hit_wormholes = false;
-            self.shot_offset = self.shot_noise.sample_rifle(&rifle, self.rifle_heat_frac);
-            self.beam_speckle_frac =
-                shot_noise::get_rifle_speckle_frac(&rifle, self.rifle_heat_frac);
-            self.rifle_heat_frac += 1.0 / f64::from(rifle.shots_until_overheat);
-            self.is_overheated = self.rifle_heat_frac >= 1.0;
-            self.rifle_shot_count += 1;
-            self.recoil_frac = f64::from(u8::from(rifle.recoil_settle_s > 0.0));
-            let side: f64 = if self.rifle_shot_count.is_multiple_of(2) {
-                1.0
-            } else {
-                -1.0
-            };
-            let (dx_px, dy_px) = (
-                side * rifle.recoil_sideways_rad / voxel_world::LOOK_RAD_PER_PX,
-                -rifle.recoil_up_rad / voxel_world::LOOK_RAD_PER_PX,
-            );
-            match &mut self.voxel {
-                Some(voxel) => voxel.player.look(dx_px, dy_px),
-                None => physics::look_around(&mut self.player.frame, dx_px, dy_px),
-            }
+        self.has_shot_hit_wormholes = false;
+        let (dx_px, dy_px) = (
+            sideways_rad / voxel_world::LOOK_RAD_PER_PX,
+            up_rad / voxel_world::LOOK_RAD_PER_PX,
+        );
+        match &mut self.voxel {
+            Some(voxel) => voxel.player.look(dx_px, dy_px),
+            None => physics::look_around(&mut self.player.frame, dx_px, dy_px),
         }
     }
 
@@ -3229,28 +3121,30 @@ impl Session {
             self.since_movement_key_s + dt_s
         };
         if !self.can_shoot() {
-            self.shot_time_s = 0.0;
+            self.weapons.shot_time_s = 0.0;
         }
         match &self.voxel {
             Some(voxel) => {
-                (self.gun_phase_rad, self.step_frac) =
+                (self.weapons.gun_phase_rad, self.weapons.step_frac) =
                     (voxel.player.bob_phase_rad, voxel.player.bob_frac);
             }
             None => {
                 let is_stepping: bool = is_moving && is_on_ground;
                 if is_stepping {
                     let hz: f64 = if is_running { GUN_JOG_HZ } else { GUN_WALK_HZ };
-                    self.gun_phase_rad = (self.gun_phase_rad + std::f64::consts::TAU * hz * dt_s)
+                    self.weapons.gun_phase_rad = (self.weapons.gun_phase_rad
+                        + std::f64::consts::TAU * hz * dt_s)
                         % std::f64::consts::TAU;
                 }
                 let fade_frac: f64 = dt_s / self.player_settings.view.head_bob.fade_s;
-                self.step_frac += (f64::from(u8::from(is_stepping)) - self.step_frac)
+                self.weapons.step_frac += (f64::from(u8::from(is_stepping))
+                    - self.weapons.step_frac)
                     .clamp(-fade_frac, fade_frac);
             }
         }
         let target: f64 = f64::from(u8::from(is_running));
-        self.run_pose_frac +=
-            (target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
+        self.weapons.run_pose_frac += (target - self.weapons.run_pose_frac)
+            .clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
     }
 
     /// `get_hit_effect` gives what the last hit on this player still does to the scene, fading over
@@ -3299,16 +3193,16 @@ impl Session {
         let team: u32 = self.get_team();
         (!self.is_view_covered() && !self.is_own_body_shown).then(|| {
             make_wand(
-                self.run_pose_frac,
-                self.gun_phase_rad,
-                self.recoil_frac,
+                self.weapons.run_pose_frac,
+                self.weapons.gun_phase_rad,
+                self.weapons.recoil_frac,
                 team,
-                self.gun,
+                self.weapons.gun,
                 get_sway(
-                    self.gun.get_model(),
-                    self.step_frac,
-                    self.run_pose_frac,
-                    self.gun_phase_rad,
+                    self.weapons.gun.get_model(),
+                    self.weapons.step_frac,
+                    self.weapons.run_pose_frac,
+                    self.weapons.gun_phase_rad,
                     &self.player_settings.view.head_bob,
                 ),
             )
@@ -3401,8 +3295,8 @@ impl Session {
                         multiplayer.is_eliminated = true;
                         multiplayer.respawn_in_s = self.settings.respawn.delay_s;
                         multiplayer.disabling = None;
-                        self.is_laser_on = false;
-                        self.shot_time_s = 0.0;
+                        self.weapons.is_laser_on = false;
+                        self.weapons.shot_time_s = 0.0;
                         self.thrown.clear();
                     }
                     if !is_self
@@ -3566,8 +3460,8 @@ impl Session {
                 && !self.was_firing
                 && let Some(shot) = &view.shot
             {
-                let is_rifle: bool = self.gun == Gun::Rifle;
-                let speckle_frac: f64 = self.beam_speckle_frac;
+                let is_rifle: bool = self.weapons.gun == Gun::Rifle;
+                let speckle_frac: f64 = self.weapons.beam_speckle_frac;
                 let tracer = Tracer {
                     is_own: true,
                     ..Tracer::New(shot, team, now_s, is_rifle, speckle_frac, &self.settings, r)
@@ -3593,9 +3487,10 @@ impl Session {
             let first: usize = voxel.world.static_warp_count;
             if let Some(victim_id) = view.hit_player_id
                 && let Some(hits_to_kill) = take_hit_weight(
-                    &self.settings,
-                    self.gun,
-                    &mut self.has_rifle_shot_hit,
+                    &self.settings.sniper,
+                    &self.settings.rifle,
+                    self.weapons.gun,
+                    &mut self.weapons.has_rifle_shot_hit,
                     view.is_head_hit,
                 )
                 && let Some(multiplayer) = &mut self.multiplayer
@@ -3626,9 +3521,10 @@ impl Session {
             self.laser = view.report.as_ref().map(describe_laser);
             if let Some(victim_id) = view.hit_player_id
                 && let Some(hits_to_kill) = take_hit_weight(
-                    &self.settings,
-                    self.gun,
-                    &mut self.has_rifle_shot_hit,
+                    &self.settings.sniper,
+                    &self.settings.rifle,
+                    self.weapons.gun,
+                    &mut self.weapons.has_rifle_shot_hit,
                     false,
                 )
                 && let Err(error) = multiplayer.client.send_hit(victim_id, hits_to_kill)
@@ -3854,11 +3750,7 @@ impl Session {
     ///
     /// Example: `let zoom = self.get_zoom();`
     fn get_zoom(&self) -> f64 {
-        let full_zoom: f64 = match self.gun {
-            Gun::Laser => self.settings.aim.sniper_zoom,
-            Gun::Rifle => self.settings.aim.rifle_zoom,
-        };
-        get_aim_zoom(self.aim_frac, full_zoom)
+        self.weapons.get_zoom(&self.settings.aim)
     }
 
     /// `get_lit_beams` gives the lit part of each laser shot now (`Tracer::get_lit_m`), with the
@@ -4090,8 +3982,8 @@ impl Session {
                 ),
             ));
         }
-        if self.gun == Gun::Laser {
-            let is_loaded: bool = self.sniper_reload_s <= 0.0;
+        if self.weapons.gun == Gun::Laser {
+            let is_loaded: bool = self.weapons.sniper_reload_s <= 0.0;
             rects.extend(hud_bars::make_segmented_bar(
                 HEAT_BAR_MIN_FRAC,
                 1,
@@ -4100,12 +3992,12 @@ impl Session {
                 render_metal::NO_RECT_PULSE,
             ));
         }
-        if self.gun == Gun::Rifle {
+        if self.weapons.gun == Gun::Rifle {
             rects.extend(hud_bars::make_segmented_bar(
                 HEAT_BAR_MIN_FRAC,
                 self.settings.rifle.shots_until_overheat,
-                1.0 - self.rifle_heat_frac.min(1.0),
-                if self.is_overheated {
+                1.0 - self.weapons.rifle_heat_frac.min(1.0),
+                if self.weapons.is_overheated {
                     HEAT_BAR_OVERHEATED_RGB
                 } else {
                     HEAT_BAR_RGB
@@ -4164,12 +4056,12 @@ impl Session {
                 voxel.player.energy_frac * PERCENT_PER_FRAC
             )
         });
-        let gun: String = match (self.gun, self.is_overheated) {
+        let gun: String = match (self.weapons.gun, self.weapons.is_overheated) {
             (Gun::Laser, _) => ", gun 1 (laser)".to_string(),
             (Gun::Rifle, true) => ", gun 2 (rifle) overheated".to_string(),
             (Gun::Rifle, false) => format!(
                 ", gun 2 (rifle) heat {:.0}%",
-                self.rifle_heat_frac * PERCENT_PER_FRAC
+                self.weapons.rifle_heat_frac * PERCENT_PER_FRAC
             ),
         };
         let (is_flying, is_on_ground, height_m) = match &self.voxel {
@@ -4271,45 +4163,6 @@ fn play(arguments: &Arguments, mut renderer: Box<dyn Renderer>) -> Result<()> {
     }
 }
 
-/// `get_crosshair_rects` gives the crosshair in the middle of a window of `window_px` pixels: four
-/// arms `CROSSHAIR_ARM_FRAC` long, `CROSSHAIR_GAP_FRAC` from the middle, in fractions of the window's
-/// height so they look the same at any size.
-///
-/// Example: `let rects = get_crosshair_rects((2560, 1600));`
-fn get_crosshair_rects(window_px: (u32, u32)) -> Vec<render_metal::OverlayRect> {
-    let x_per_y: f32 = window_px.1 as f32 / window_px.0.max(1) as f32;
-    let (near, far, half) = (
-        CROSSHAIR_GAP_FRAC,
-        CROSSHAIR_GAP_FRAC + CROSSHAIR_ARM_FRAC,
-        CROSSHAIR_THICKNESS_FRAC / 2.0,
-    );
-    [(near, far), (-far, -near)]
-        .into_iter()
-        .flat_map(|(lo, hi)| {
-            [
-                ([lo * x_per_y, -half], [hi * x_per_y, half]),
-                ([-half * x_per_y, lo], [half * x_per_y, hi]),
-            ]
-        })
-        .map(|([x0, y0], [x1, y1])| render_metal::OverlayRect {
-            min_frac: [0.5 + x0, 0.5 + y0],
-            max_frac: [0.5 + x1, 0.5 + y1],
-            color: CROSSHAIR_COLOR,
-            style: render_metal::FLAT_RECT_STYLE,
-            pulse: render_metal::NO_RECT_PULSE,
-        })
-        .collect()
-}
-
-/// `get_aim_zoom` gives how much closer the world looks at aim fraction `aim_frac` (0 not aiming,
-/// 1 fully aimed), eased in and out, toward `full_zoom`.
-///
-/// Example: `let zoom = get_aim_zoom(0.5, 2.5);`
-fn get_aim_zoom(aim_frac: f64, full_zoom: f64) -> f64 {
-    let t: f64 = aim_frac.clamp(0.0, 1.0);
-    1.0 + (full_zoom - 1.0) * t * t * (3.0 - 2.0 * t)
-}
-
 /// `get_eyes` gives where other players' eyes are, so spawning players can keep clear of them.
 ///
 /// Example: `let others = get_eyes(&client.players);`
@@ -4329,127 +4182,6 @@ fn get_points_and_teams(players: &[net::RemotePlayer]) -> Vec<(DVec4, u32)> {
         .iter()
         .map(|player| (player.frame.col(AXIS_W), player.team))
         .collect()
-}
-
-/// `take_hit_weight` gives how many hits like this one `gun` needs to eliminate someone by
-/// `settings` (a rifle hit to the head counts more), or `None` when this rifle shot already hit
-/// (`has_rifle_shot_hit`, which it then sets): the laser reports every frame it hits, the rifle
-/// once per shot.
-///
-/// Example: `if let Some(hits_to_kill) = take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false) { ... }`
-fn take_hit_weight(
-    settings: &ServerSettings,
-    gun: Gun,
-    has_rifle_shot_hit: &mut bool,
-    is_head_hit: bool,
-) -> Option<u8> {
-    match (gun, is_head_hit) {
-        (Gun::Laser, _) => Some(settings.sniper.hits_to_eliminate),
-        (Gun::Rifle, _) if *has_rifle_shot_hit => None,
-        (Gun::Rifle, is_head) => {
-            *has_rifle_shot_hit = true;
-            Some(if is_head {
-                settings.rifle.head_hits_to_eliminate
-            } else {
-                settings.rifle.body_hits_to_eliminate
-            })
-        }
-    }
-}
-
-/// `make_wand` places the wand in camera space: held on the right, aimed toward the crosshair with
-/// the front of its tip at the muzzle (`voxel_world::MUZZLE_M`, where the laser starts), dipping a little at each step (`phase_rad`), and, as `run_pose_frac` goes to 1
-/// (eased), lowered, tipped down and rolled, bouncing and swinging with each stride; its tip has
-/// `team`'s colour. The laser (`gun`) is a thin dark wand with a short glowing tip; the rifle is a
-/// thick grey block with a long, thin glowing barrel. Recoil (`recoil_frac`, 1 just after a shot)
-/// pushes it back toward the eye and tips it up, and `sway` (`get_sway`: metres right, radians of
-/// muzzle turned left) slides and swings it with the steps.
-///
-/// Example: `let wand = make_wand(0.0, 1.2, 0.0, 1, Gun::Laser, (0.0, 0.0));`
-fn make_wand(
-    run_pose_frac: f64,
-    phase_rad: f64,
-    recoil_frac: f64,
-    team: u32,
-    gun: Gun,
-    sway: (f32, f32),
-) -> render_metal::OverlayWand {
-    let (sway_m, swing_rad) = sway;
-    let jog: f32 = ease_frac(run_pose_frac) as f32;
-    let (step, swing) = (phase_rad.sin().abs() as f32, phase_rad.sin() as f32);
-    let lerp = |aim: f32, run: f32| aim + (run - aim) * jog;
-    let bob_m: f32 = lerp(WAND_WALK_BOB_M, WAND_JOG_BOB_M) * step;
-    let (shaft_half_m, tip_half_m) = match gun {
-        Gun::Laser => (WAND_LASER_SHAFT_HALF_M, WAND_LASER_TIP_HALF_M),
-        Gun::Rifle => (WAND_RIFLE_SHAFT_HALF_M, WAND_RIFLE_TIP_HALF_M),
-    };
-    let aim_rotation: Mat3 =
-        Mat3::from_euler(EulerRot::YXZ, WAND_AIM_YAW_RAD, WAND_AIM_PITCH_RAD, 0.0);
-    let aim_center: Vec3 = voxel_world::MUZZLE_M.as_vec3()
-        + aim_rotation * (Vec3::Z * (shaft_half_m[2] + 2.0 * tip_half_m[2]));
-    let kick: f32 = recoil_frac as f32;
-    let center: Vec3 = aim_center.lerp(Vec3::from(WAND_JOG_CENTER_M), jog) - Vec3::Y * bob_m
-        + Vec3::Z * WAND_RECOIL_M * kick
-        + Vec3::X * sway_m;
-    let rotation: Mat3 = Mat3::from_euler(
-        EulerRot::YXZ,
-        lerp(WAND_AIM_YAW_RAD, WAND_JOG_YAW_RAD) + swing_rad,
-        lerp(WAND_AIM_PITCH_RAD, WAND_JOG_PITCH_RAD) + WAND_RECOIL_TILT_RAD * kick,
-        (WAND_JOG_ROLL_RAD + WAND_JOG_SWING_RAD * swing) * jog,
-    );
-    render_metal::OverlayWand {
-        center_m: center.extend(0.0).to_array(),
-        axes: [rotation.x_axis, rotation.y_axis, rotation.z_axis]
-            .map(|axis| axis.extend(0.0).to_array()),
-        shaft_half_m,
-        shaft_color: match gun {
-            Gun::Laser => WAND_LASER_SHAFT_COLOR,
-            Gun::Rifle => WAND_RIFLE_SHAFT_COLOR,
-        },
-        tip_half_m,
-        tip_color: if team == 1 {
-            WAND_RED_TIP_COLOR
-        } else {
-            WAND_BLUE_TIP_COLOR
-        },
-    }
-}
-
-/// `ease_frac` eases a fraction from 0 to 1 (smoothstep): slow at both ends.
-///
-/// Example: `let jog: f64 = ease_frac(0.5);`
-fn ease_frac(frac: f64) -> f64 {
-    frac * frac * (3.0 - 2.0 * frac)
-}
-
-/// `get_sway` gives how the gun in hand sways now with the steps (`phase_rad`, the step phase: a
-/// step each half turn), as (metres slid right, radians its muzzle turns left): the hands slide it
-/// left on one step and right on the next by `head_bob`'s walking slide, and a longer, heavier gun
-/// lags behind them, its muzzle swinging the other way by `head_bob`'s swing for a gun as long as
-/// the bolt-action rifle, times `model`'s length over the rifle's. Both grow to their sprinting
-/// sizes as the run pose (`run_pose_frac`, eased as `make_wand` eases it) goes to 1, and fade in
-/// and out with `step_frac` (0 standing still, 1 stepping).
-///
-/// Example: `let sway = get_sway(GunModel::Revolver, 1.0, 0.0, 0.5, &settings.view.head_bob);`
-fn get_sway(
-    model: viewmodel::GunModel,
-    step_frac: f64,
-    run_pose_frac: f64,
-    phase_rad: f64,
-    head_bob: &settings::HeadBobSettings,
-) -> (f32, f32) {
-    let jog: f64 = ease_frac(run_pose_frac);
-    let lerp = |walk: f64, sprint: f64| walk + (sprint - walk) * jog;
-    let length_frac: f64 =
-        f64::from(model.get_modelled_length_m() / viewmodel::BOLT_ACTION_RIFLE_MODELLED_LENGTH_M);
-    let side: f64 = step_frac * phase_rad.sin();
-    let sway_m: f64 = lerp(head_bob.gun_walk_sway_m, head_bob.gun_sprint_sway_m) * side;
-    let swing_rad: f64 = lerp(
-        head_bob.rifle_walk_swing_rad,
-        head_bob.rifle_sprint_swing_rad,
-    ) * length_frac
-        * side;
-    (sway_m as f32, swing_rad as f32)
 }
 
 /// `ConnectionProblem` is why a window can't play on its server: nothing comes from it (no server
@@ -4894,7 +4626,7 @@ fn play_on_layer(
         let rects: Vec<render_metal::OverlayRect> = session.get_overlay_rects();
         let wand: Option<(render_metal::OverlayWand, viewmodel::GunModel)> = session
             .get_wand()
-            .map(|wand| (wand, session.gun.get_model()));
+            .map(|wand| (wand, session.weapons.gun.get_model()));
         let stretch_frac: f32 = session.get_edge_stretch_frac();
         let minimap: Option<render_metal::OverlayMinimap> = session.make_overlay_minimap(window_px);
         let blueshift_frac: f32 = session.blueshift_frac;
@@ -4964,15 +4696,8 @@ mod tests {
     //! | Depth in a mouth | at the throat (1), part way, outside (0) | `wormhole_shift_follows_depth_and_speed` |
     //! | Speed along the view | forward (blueshift), backward (redshift), still (none), past the cap (held at it) | `wormhole_shift_follows_depth_and_speed` |
     //! | Tint strength setting | 1, between 0 and 1, 0 | `wormhole_shift_follows_depth_and_speed` |
-    //! | Gun | laser (every frame's hit counts, one eliminates), rifle (one hit per shot) | `hits_weigh_by_gun_and_place` |
-    //! | Where a rifle hits | the head, the body | `hits_weigh_by_gun_and_place` |
     //! | Gun in hand | laser (the bolt-action rifle), rifle (the revolver) | `each_gun_holds_its_model` |
     //! | Map kind loading | voxel map, house map: each loads every gun model | `each_gun_holds_its_model` |
-    //! | Aim fraction | not aiming, half way (eased, half the extra zoom), fully aimed, past either end (clamped) | `aiming_zooms_in_eased` |
-    //! | Gun model swaying | the bolt-action rifle (full swing), the revolver (its swing scaled by its length) | `guns_sway_with_the_steps_by_their_length` |
-    //! | Stepping fraction | standing (0: no sway), easing in (0.5: half), stepping (1) | `guns_sway_with_the_steps_by_their_length` |
-    //! | Run pose | walking (0: the walking sway), sprinting (1: the sprinting sway), half way (eased between) | `guns_sway_with_the_steps_by_their_length` |
-    //! | Step phase | between steps (0: centred), one step (a quarter turn: right), the next (three quarters: left) | `guns_sway_with_the_steps_by_their_length` |
     //! | Overlay text | a centred two-line banner, the exit prompt's banner uncut, the lobby's banner connecting to the longest address and connected with full teams, the left-aligned menu with a line too long for its mask, the scores page with more players than it shows and five-digit kills and deaths | `overlay_text_fits_its_mask` |
 
     use super::*;
@@ -5003,65 +4728,6 @@ mod tests {
     }
 
     #[test]
-    fn guns_sway_with_the_steps_by_their_length() {
-        const TOLERANCE: f64 = 1e-6;
-        const HALF_FRAC: f64 = 0.5;
-        let head_bob: settings::HeadBobSettings = PerPlayerSettings::Builtin().view.head_bob;
-        let right_rad: f64 = std::f64::consts::FRAC_PI_2;
-        let left_rad: f64 = 3.0 * std::f64::consts::FRAC_PI_2;
-        let sway =
-            |model: viewmodel::GunModel, step_frac: f64, run_pose_frac: f64, phase_rad: f64| {
-                let (sway_m, swing_rad) =
-                    get_sway(model, step_frac, run_pose_frac, phase_rad, &head_bob);
-                (f64::from(sway_m), f64::from(swing_rad))
-            };
-        let is_near = |a: (f64, f64), b: (f64, f64)| {
-            (a.0 - b.0).abs() < TOLERANCE && (a.1 - b.1).abs() < TOLERANCE
-        };
-        let rifle = viewmodel::GunModel::BoltActionRifle;
-        let revolver = viewmodel::GunModel::Revolver;
-        let (walk_m, sprint_m) = (head_bob.gun_walk_sway_m, head_bob.gun_sprint_sway_m);
-        let (walk_rad, sprint_rad) = (
-            head_bob.rifle_walk_swing_rad,
-            head_bob.rifle_sprint_swing_rad,
-        );
-        assert!(walk_m > 0.0 && sprint_m > walk_m && walk_rad > 0.0 && sprint_rad > walk_rad);
-        assert!(is_near(sway(rifle, 0.0, 1.0, right_rad), (0.0, 0.0)));
-        assert!(is_near(sway(rifle, 1.0, 0.0, 0.0), (0.0, 0.0)));
-        assert!(is_near(
-            sway(rifle, 1.0, 0.0, right_rad),
-            (walk_m, walk_rad)
-        ));
-        assert!(is_near(
-            sway(rifle, 1.0, 0.0, left_rad),
-            (-walk_m, -walk_rad)
-        ));
-        assert!(is_near(
-            sway(rifle, 1.0, 1.0, right_rad),
-            (sprint_m, sprint_rad)
-        ));
-        assert!(is_near(
-            sway(rifle, HALF_FRAC, 0.0, right_rad),
-            (HALF_FRAC * walk_m, HALF_FRAC * walk_rad)
-        ));
-        let half_way: (f64, f64) = sway(rifle, 1.0, HALF_FRAC, right_rad);
-        assert!(is_near(
-            half_way,
-            (
-                (walk_m + sprint_m) * HALF_FRAC,
-                (walk_rad + sprint_rad) * HALF_FRAC
-            )
-        ));
-        let length_frac: f64 =
-            f64::from(revolver.get_modelled_length_m() / rifle.get_modelled_length_m());
-        assert!(length_frac < 1.0);
-        assert!(is_near(
-            sway(revolver, 1.0, 1.0, right_rad),
-            (sprint_m, sprint_rad * length_frac)
-        ));
-    }
-
-    #[test]
     fn each_gun_holds_its_model() {
         assert_eq!(Gun::Laser.get_model(), viewmodel::GunModel::BoltActionRifle);
         assert_eq!(Gun::Rifle.get_model(), viewmodel::GunModel::Revolver);
@@ -5073,31 +4739,6 @@ mod tests {
                 assert_eq!(steps.iter().filter(|s| **s == step).count(), 1);
             }
         }
-    }
-
-    #[test]
-    fn hits_weigh_by_gun_and_place() {
-        let settings: ServerSettings = ServerSettings::Builtin();
-        let mut has_hit: bool = false;
-        for _ in 0..2 {
-            assert_eq!(
-                take_hit_weight(&settings, Gun::Laser, &mut has_hit, false),
-                Some(settings.sniper.hits_to_eliminate)
-            );
-        }
-        assert_eq!(
-            take_hit_weight(&settings, Gun::Rifle, &mut has_hit, true),
-            Some(settings.rifle.head_hits_to_eliminate)
-        );
-        assert_eq!(
-            take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false),
-            None
-        );
-        has_hit = false;
-        assert_eq!(
-            take_hit_weight(&settings, Gun::Rifle, &mut has_hit, false),
-            Some(settings.rifle.body_hits_to_eliminate)
-        );
     }
 
     #[test]
@@ -5167,19 +4808,5 @@ mod tests {
         for line in connecting.iter().chain(&connected) {
             assert!(line.chars().count() <= banner_char_count, "{line}");
         }
-    }
-
-    #[test]
-    fn aiming_zooms_in_eased() {
-        const FULL_ZOOM: f64 = 2.5;
-        assert_eq!(get_aim_zoom(0.0, FULL_ZOOM), 1.0);
-        assert_eq!(get_aim_zoom(0.5, FULL_ZOOM), 1.0 + (FULL_ZOOM - 1.0) / 2.0);
-        assert_eq!(get_aim_zoom(1.0, FULL_ZOOM), FULL_ZOOM);
-        assert_eq!(get_aim_zoom(-1.0, FULL_ZOOM), 1.0);
-        assert_eq!(get_aim_zoom(2.0, FULL_ZOOM), FULL_ZOOM);
-        assert!(
-            get_aim_zoom(0.1, FULL_ZOOM) - 1.0 < 0.1 * (FULL_ZOOM - 1.0),
-            "eased in"
-        );
     }
 }

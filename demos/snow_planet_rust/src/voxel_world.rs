@@ -100,7 +100,7 @@ const INSIDE_MOUTH_SCALE: f64 = 1.8;
 const LASER_MAX_LENGTH_M: f64 = 480.0;
 const LASER_MAX_ITERATIONS: usize = 4000;
 const LASER_MUZZLE_M: f64 = 3.0;
-pub const MUZZLE_M: DVec3 = DVec3::new(0.187, -0.157, -0.555);
+pub use warped_shared::weapons::MUZZLE_M;
 const BEAM_TOLERANCE_M: f64 = 0.02;
 const MAX_DRAWN_BEAM_DISTANCE_M: f64 = 160.0;
 const BEAM_CLIP_BISECTION_COUNT: usize = 40;
