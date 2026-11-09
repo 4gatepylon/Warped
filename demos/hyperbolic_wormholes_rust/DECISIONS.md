@@ -2005,7 +2005,7 @@
     sun shadow once; a pixel between four samples that are all fully in the sun, with no structure near their shadow
     rays, takes full sun instead of tracing its own. Everything else (penumbra, shadow edges, structures, near misses)
     is traced per pixel as before.
-- **Look:** before against after, 2560×1440, every bench view: see the PR (#NNN) for the table and the difference
+- **Look:** before against after, 2560×1440, every bench view: see #450 for the table and the difference
   pictures; the changes are sub-millimetre shifts of ground hits (the bake's bilinear heights, at most a few
   millimetres off the 5-octave shape), which move the regolith's fine texture by a pixel here and there, and
   sunlight 0.0003% brighter beside structures (`NEAR_STRUCTURE_LIT`).
