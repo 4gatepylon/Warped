@@ -1,7 +1,7 @@
 //! `settings` is the game server's settings that `net.rs` sends to players in its welcome: how
 //! long a console takes to switch off, how far it reaches, how long a player waits to respawn,
 //! both guns (with the rifle hits that eliminate a player), aiming, movement, sprint energy, how a
-//! hit slows and the flashlight; and the head bob, a player setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
+//! hit slows, the flashlight and thrown wormholes; and the head bob, a player setting. The forest keeps only what it uses from `../hyperbolic_wormholes_rust/`'s much larger
 //! settings, under the same names and with the same values (W-126).
 //!
 //! Example: `let settings: ServerSettings = ServerSettings::Builtin();`
@@ -22,13 +22,20 @@ pub use warped_shared::play_settings::{
     SprintEnergySettings, WhenHitSettings,
 };
 
-/// `WormholeSettings` is how many hits destroy thrown wormholes; the forest has none, but the
-/// protocol's hit messages carry the counts.
+/// `WormholeSettings` is how players throw their wormhole mouths (`Q`, `thrown_wormholes.rs`) and
+/// how many enemy shots through a pair destroy it: Lunar Surface's `wormholes` settings
+/// (`demos/hyperbolic_wormholes_rust/server_settings.yaml`, W-126) but for the mouth's size, which
+/// is the forest's own (`game::warps::THROWN_MOUTH_REACH_M` and its neighbours).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct WormholeSettings {
+    pub throw_speed_m_per_s: f64,
+    pub throw_up_rad: f64,
+    pub gravity_m_per_s_per_s: f64,
+    pub max_flight_s: f64,
     pub sniper_hits_to_destroy: u8,
     pub rifle_hits_to_destroy: u8,
+    pub hit_flash_s: f64,
 }
 
 /// `HIT_EFFECTS` is the Lunar Surface demo's `hit_effects` player setting
@@ -87,8 +94,13 @@ impl ServerSettings {
             },
             respawn: RespawnSettings { delay_s: 3.0 },
             wormholes: WormholeSettings {
-                sniper_hits_to_destroy: 1,
-                rifle_hits_to_destroy: 3,
+                throw_speed_m_per_s: 16.0,
+                throw_up_rad: 0.3,
+                gravity_m_per_s_per_s: 20.0,
+                max_flight_s: 4.0,
+                sniper_hits_to_destroy: 2,
+                rifle_hits_to_destroy: 5,
+                hit_flash_s: 0.25,
             },
             sniper: SniperSettings {
                 shot_s: 0.25,
@@ -224,6 +236,7 @@ pub fn read_lunar_setting(file_name: &str, section_path: &[&str], key: &str) -> 
 /// | | movement, sprint energy, when hit, flashlight | `test_movement_matches_lunar_surface` |
 /// | | `player_settings.yaml` (head bob, hit effects) | `test_head_bob_matches_lunar_surface` |
 /// | | consoles and respawn | `test_consoles_and_respawn_are_lunar_surface` |
+/// | | thrown wormholes, but for the mouth's size | `test_thrown_wormholes_are_lunar_surface` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +340,18 @@ mod tests {
         );
         assert_eq!(settings.consoles.reach_m, lunar("consoles", "reach_m"));
         assert_eq!(settings.respawn.delay_s, lunar("respawn", "delay_s"));
+    }
+
+    /// `test_thrown_wormholes_are_lunar_surface` checks every thrown-wormhole setting is Lunar
+    /// Surface's.
+    #[test]
+    fn test_thrown_wormholes_are_lunar_surface() {
+        let settings: serde_json::Value =
+            serde_json::to_value(ServerSettings::Builtin().wormholes).unwrap();
+        for (key, value) in settings.as_object().unwrap() {
+            let lunar: f64 = read_lunar_setting("server_settings.yaml", &["wormholes"], key);
+            assert_eq!(value.as_f64().unwrap(), lunar, "wormholes.{key}");
+        }
     }
 
     /// `test_builtin_survives_json` checks `FromJson` inverts `to_json`.

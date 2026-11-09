@@ -262,6 +262,8 @@ pub struct HudImage<'a> {
 /// `lens_draws` and
 /// `lens_particles` are the robots and laser effects among `world_draws` and `world_particles`,
 /// which wormhole lenses also show live (the lens atlas holds only the static world).
+/// `thrown_lens_mouths` are the players' thrown mouths, in linked pairs; the backend draws each
+/// one's view of the static world over a few frames once it appears, and shows its lens from then.
 /// `overlay_rects` are the HUD's bars and crosshair, in the Lunar Surface demo's look, drawn over
 /// `hud_rects` and under `hud_images`.
 pub struct FrameDescription<'a> {
@@ -280,6 +282,7 @@ pub struct FrameDescription<'a> {
     pub hit_effect: overlay::HitEffect,
     pub lens_draws: &'a [DrawItem],
     pub lens_particles: &'a [Particle],
+    pub thrown_lens_mouths: &'a [ThrownLensMouth],
     pub overlay_rects: &'a [overlay::OverlayRect],
     pub beams: &'a [Beam],
     pub beam_speckle_shares: glam::Vec2,
@@ -296,6 +299,20 @@ pub struct LensMouth {
     pub floor_m: f32,
     pub partner: usize,
 }
+
+/// `ThrownLensMouth` is a player's thrown mouth as the lens pass sees it: `mouth`, whose `partner`
+/// indexes the frame's `thrown_lens_mouths`, and the colour (linear RGB) that tints what shows
+/// through it (its own, or red while it flashes from a hit).
+#[derive(Clone, Copy, Debug)]
+pub struct ThrownLensMouth {
+    pub mouth: LensMouth,
+    pub tint_rgb: Vec3,
+}
+
+/// `MAX_THROWN_LENS_MOUTH_COUNT` is how many thrown mouths the lens shows at once (every player's
+/// pair), and `THROWN_LENS_FACE_PX` the side of each face of a thrown mouth's view of the world.
+pub const MAX_THROWN_LENS_MOUTH_COUNT: usize = 16;
+pub const THROWN_LENS_FACE_PX: usize = 128;
 
 /// `WormholeLens` is what the lens pass needs: every mouth, and `atlas`, the world seen from each
 /// mouth's centre: one row per mouth of six square 90° faces, oriented as `LENS_FACES`.
