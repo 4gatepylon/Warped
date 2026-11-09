@@ -1,10 +1,13 @@
 //! `play_trace.rs` records a play trace: a player walked by a fixed script of keys at 60 steps a
 //! second from a spawn of a voxel map, through `VoxelPlayer::step`, with every step's state
 //! written exactly (`{:?}` of each `f64` is its shortest exact form), so two builds' traces can
-//! be compared byte for byte to show a change left play the same.
+//! be compared byte for byte to show a change left play the same. `record_city_play_trace` does
+//! the same on the City Sphere map, through `CityWorld::move_player`.
 //!
-//! Interface: the ignored test `record_play_trace`, run with `PLAY_TRACE_MAP` (a `--map` name)
-//! and `PLAY_TRACE_FILE` (where to write the trace).
+//! Interface: the ignored tests `record_play_trace`, run with `PLAY_TRACE_MAP` (a `--map` name)
+//! and `PLAY_TRACE_FILE` (where to write the trace), and `record_city_play_trace`, run with
+//! `PLAY_TRACE_FILE`, and `PLAY_TRACE_CROUCH=0` or `PLAY_TRACE_HIT=0` to leave out the script's
+//! crouching or its hit.
 //!
 //! Example: `PLAY_TRACE_MAP=dust PLAY_TRACE_FILE=/tmp/dust.txt cargo test --release record_play_trace -- --ignored`
 
@@ -151,6 +154,74 @@ fn record_play_trace() {
             for message in report.messages {
                 writeln!(trace, "{step} message {message}").expect("a string takes writes");
             }
+            step += 1;
+        }
+    }
+    std::fs::write(&path, trace).expect("the trace file is written");
+}
+
+/// `TURN_RAD_PER_STEP` is how far City Sphere's trace turns the body each step a `d` leg holds.
+const TURN_RAD_PER_STEP: f64 = 0.004;
+
+/// `get_city_input` gives City Sphere's movement keys of `keys`, as the window reads them.
+fn get_city_input(keys: &str) -> crate::city_world::CityInput {
+    let axis = |plus: char, minus: char| -> f64 {
+        f64::from(u8::from(keys.contains(plus))) - f64::from(u8::from(keys.contains(minus)))
+    };
+    crate::city_world::CityInput {
+        forward_frac: axis('w', 's'),
+        right_frac: axis('d', 'a'),
+        is_sprinting: keys.contains('r'),
+        is_jumping: keys.contains('j'),
+        is_crouching: keys.contains('c'),
+    }
+}
+
+#[test]
+#[ignore]
+fn record_city_play_trace() {
+    let path: String =
+        std::env::var("PLAY_TRACE_FILE").expect("PLAY_TRACE_FILE names the trace file");
+    let is_crouch_kept: bool = std::env::var("PLAY_TRACE_CROUCH").as_deref() != Ok("0");
+    let is_hit_kept: bool = std::env::var("PLAY_TRACE_HIT").as_deref() != Ok("0");
+    let world = crate::city_world::CityWorld::Builtin().expect("the built-in map");
+    let settings: ServerSettings = ServerSettings::Builtin();
+    let bob = crate::settings::PerPlayerSettings::Builtin().view.head_bob;
+    let mut player = world.make_player(0, 0);
+    let mut trace: String = String::new();
+    let mut step: usize = 0;
+    for leg in &SCRIPT {
+        let keys: String = leg
+            .keys
+            .chars()
+            .filter(|&key| is_crouch_kept || key != 'c')
+            .collect();
+        if leg.is_hit && is_hit_kept {
+            player.move_state.slowed_s = SLOWED_AFTER_HIT_S;
+        }
+        for _ in 0..(leg.duration_s / STEP_S).round() as usize {
+            if keys.contains('d') {
+                player.look_around(-TURN_RAD_PER_STEP, 0.0);
+            }
+            let input = get_city_input(&keys);
+            world.move_player(&mut player, &input, &settings, &bob, STEP_S);
+            let moves = player.move_state;
+            writeln!(
+                trace,
+                "{step} feet={:?} body={:?} pitch={:?} v={:?} ground={} energy={:?} sprint={} bob={:?} {:?} slowed={:?} eye={:?}",
+                player.feet.to_array(),
+                player.body.to_cols_array(),
+                player.pitch_rad,
+                player.velocity.to_array(),
+                player.is_on_ground,
+                moves.energy_frac,
+                moves.is_sprinting,
+                moves.bob_phase_rad,
+                moves.bob_frac,
+                moves.slowed_s,
+                player.get_eye_frame().to_cols_array(),
+            )
+            .expect("a string takes writes");
             step += 1;
         }
     }

@@ -121,7 +121,7 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
     measuring smoothness by their points. At render scale 1, 4 to 13% faster: at 2560x1440 every view but
     `laser_into_wormhole` (20.2 → 19.4 ms) takes at most 15.3 ms; at 3440x1440, 16 of 24 views are under 16.7 ms
     (before: 14), the rest 17.0–22.9 ms. At most 0.005% of pixels change by more than 8 of 255.
-23. **A sharp centre with softer edges** (W-136, sharp centre, soft edges; Lunar Surface's D114), the same code as
+23. **A sharp centre with softer edges** (W-136, sharp centre, soft edges; Lunar Surface's D115), the same code as
     Lunar Surface's renderer: the middle 66% of the width is drawn exactly as before and the rest at half
     resolution (the even pixels shaded, the rest blended), by default in the window and the bench views
     (`--sharp-width-frac`, `--half-width-frac`). At render scale 1, 3440x1440, median GPU ms: `salt_flats_long`

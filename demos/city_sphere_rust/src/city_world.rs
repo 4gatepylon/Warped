@@ -13,6 +13,9 @@ use std::error::Error;
 use glam::{DMat3, DMat4, DQuat, DVec3};
 use serde::Deserialize;
 
+use warped_shared::movement::{MoveInput, MoveRules, MoveState};
+
+use crate::play_settings::HeadBobSettings;
 use crate::settings::ServerSettings;
 
 /// `Result` is this module's result type.
@@ -312,12 +315,14 @@ pub struct Shot {
     pub hit: ShotHit,
 }
 
-/// `Target` is a player a shot can hit: id, feet and up.
+/// `Target` is a player a shot can hit: id, feet, up, and height as a share of standing (less
+/// while crouched, W-137 (crouched robots sink): the torso and head spheres come down with it).
 #[derive(Clone, Copy)]
 pub struct Target {
     pub id: u32,
     pub feet: DVec3,
     pub up: DVec3,
+    pub height_frac: f64,
 }
 
 /// `get_up` is the up direction at `point`: toward the centre.
@@ -799,7 +804,7 @@ impl CityWorld {
                     (TORSO_HEIGHT_M, TORSO_RADIUS_M, false),
                     (HEAD_HEIGHT_M, HEAD_RADIUS_M, true),
                 ] {
-                    let center: DVec3 = target.feet + target.up * height_m;
+                    let center: DVec3 = target.feet + target.up * (height_m * target.height_frac);
                     if let Some((near, _)) = find_sphere_hits_m(o, d, center, radius_m) {
                         consider(
                             near,
@@ -858,33 +863,42 @@ impl CityWorld {
         (jump_m_per_s, jump_m_per_s / half_jump_s)
     }
 
-    /// `move_player` moves `player` by `input` for `dt_s` under `settings`: sprinting while there
-    /// is sprint energy (`sprint_energy`, as on Lunar Surface: it drains while sprinting and
-    /// refills otherwise), walking along the ground, gravity outward, jumping, riding a lift up
-    /// through the glass while jump is held (hovering `LIFT_TOP_UNDER_GLASS_M` over the glass level
-    /// until they walk off), and collisions with the street, the glass (from either side, except
-    /// in its holes) and the boxes.
+    /// `move_player` moves `player` by `input` for `dt_s` under `settings` and the head bob
+    /// `head_bob`: first the movement rules every level shares (`MoveState::step`: crouching,
+    /// sprint energy, the head bob's steps, a hit's and crouching's slow), then walking along the
+    /// ground at the speed they allow, gravity outward, jumping, riding a lift up through the
+    /// glass while jump is held (hovering `LIFT_TOP_UNDER_GLASS_M` over the glass level until they
+    /// walk off), and collisions with the street, the glass (from either side, except in its
+    /// holes) and the boxes.
     ///
-    /// Example: `world.move_player(&mut player, &input, &settings, 1.0 / 60.0);`
+    /// Example: `world.move_player(&mut player, &input, &settings, &head_bob, 1.0 / 60.0);`
     pub fn move_player(
         &self,
         player: &mut CityPlayer,
         input: &CityInput,
         settings: &ServerSettings,
+        head_bob: &HeadBobSettings,
         dt_s: f64,
     ) {
-        let is_moving: bool = input.forward_frac != 0.0 || input.right_frac != 0.0;
-        let wants_to_sprint: bool = input.is_sprinting && is_moving;
-        let energy = &settings.sprint_energy;
-        let energy_change_per_s: f64 = if wants_to_sprint {
-            -1.0 / energy.drain_s
-        } else {
-            1.0 / energy.refill_walking_s
+        let move_input: MoveInput = MoveInput {
+            is_moving: input.forward_frac != 0.0 || input.right_frac != 0.0,
+            is_sprint_held: input.is_sprinting,
+            is_crouch_held: input.is_crouching,
+            is_flying: false,
+            is_on_ground: player.is_on_ground,
         };
-        let is_sprinting: bool = wants_to_sprint && player.energy_frac > 0.0;
-        player.is_sprinting = is_sprinting;
-        player.energy_frac = (player.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
-        let speed_m_per_s: f64 = self.get_speed_m_per_s(settings, is_sprinting) * input.speed_frac;
+        let rules: MoveRules = MoveRules {
+            movement: &settings.movement,
+            energy: &settings.sprint_energy,
+            when_hit: &settings.when_hit,
+            head_bob,
+        };
+        let slow_frac: f64 = player.move_state.step(&move_input, &rules, dt_s);
+        player.crouch_drop_m = player.move_state.crouch_frac
+            * player.eye_height_m
+            * (1.0 - settings.movement.crouch_eye_height_frac);
+        let speed_m_per_s: f64 =
+            self.get_speed_m_per_s(settings, player.move_state.is_sprinting) * slow_frac;
         let (jump_m_per_s, gravity_m_per_s2) = self.get_jump(settings);
         let motion: StepMotion = StepMotion {
             speed_m_per_s,
@@ -1103,8 +1117,15 @@ impl CityWorld {
             velocity: DVec3::ZERO,
             is_on_ground: true,
             eye_height_m: self.eye_height_m,
-            energy_frac: 1.0,
-            is_sprinting: false,
+            crouch_drop_m: 0.0,
+            move_state: MoveState {
+                crouch_frac: 0.0,
+                energy_frac: 1.0,
+                is_sprinting: false,
+                bob_phase_rad: 0.0,
+                bob_frac: 0.0,
+                slowed_s: 0.0,
+            },
         }
     }
 }
@@ -1117,19 +1138,22 @@ struct StepMotion {
     gravity_m_per_s2: f64,
 }
 
-/// `CityInput` is what a player asks of their body this frame.
+/// `CityInput` is what a player asks of their body this frame: walking (forward and right, -1
+/// to 1), sprint, jump and crouch held.
 #[derive(Clone, Copy, Default)]
 pub struct CityInput {
     pub forward_frac: f64,
     pub right_frac: f64,
     pub is_sprinting: bool,
     pub is_jumping: bool,
-    pub speed_frac: f64,
+    pub is_crouching: bool,
 }
 
 /// `CityPlayer` is a player's body: feet, the body's axes (columns right, up, back; up toward the
-/// centre), the head's pitch, velocity, whether it stands on something, its sprint energy (1
-/// full, 0 empty) and whether it sprinted in its last move.
+/// centre), the head's pitch, velocity, whether it stands on something, its standing eye height
+/// and how far crouching lowers it now, and the state of the movement rules every level shares
+/// (`move_state`: crouch, sprint energy, sprinting, the head bob, a hit's slow), as Lunar
+/// Surface's `VoxelPlayer` keeps them.
 #[derive(Clone, Copy, Debug)]
 pub struct CityPlayer {
     pub feet: DVec3,
@@ -1138,8 +1162,8 @@ pub struct CityPlayer {
     pub velocity: DVec3,
     pub is_on_ground: bool,
     pub eye_height_m: f64,
-    pub energy_frac: f64,
-    pub is_sprinting: bool,
+    pub crouch_drop_m: f64,
+    pub move_state: MoveState,
 }
 
 impl CityPlayer {
@@ -1166,8 +1190,8 @@ impl CityPlayer {
         self.pitch_rad = (self.pitch_rad + pitch_rad).clamp(MIN_PITCH_RAD, MAX_PITCH_RAD);
     }
 
-    /// `get_eye_frame` is the camera: the body's axes tilted by the pitch, at eye height (columns
-    /// right, up, back, position; it looks along -z).
+    /// `get_eye_frame` is the camera: the body's axes tilted by the pitch, at eye height, lowered
+    /// by crouching (columns right, up, back, position; it looks along -z).
     ///
     /// Example: `let eye = player.get_eye_frame();`
     pub fn get_eye_frame(&self) -> DMat4 {
@@ -1176,7 +1200,7 @@ impl CityPlayer {
             axes.x_axis.extend(0.0),
             axes.y_axis.extend(0.0),
             axes.z_axis.extend(0.0),
-            (self.feet + self.body.y_axis * self.eye_height_m).extend(1.0),
+            (self.feet + self.body.y_axis * (self.eye_height_m - self.crouch_drop_m)).extend(1.0),
         )
     }
 
@@ -1249,10 +1273,14 @@ mod tests {
         player.body = DMat3::from_cols(up.cross(back), up, back);
         let input: CityInput = CityInput {
             forward_frac: 1.0,
-            speed_frac: 1.0,
             ..CityInput::default()
         };
-        world.move_player(player, &input, &settings(), STEP_S);
+        world.move_player(player, &input, &settings(), &head_bob(), STEP_S);
+    }
+
+    /// `head_bob` is the built-in player settings' head bob.
+    fn head_bob() -> HeadBobSettings {
+        crate::settings::PerPlayerSettings::Builtin().view.head_bob
     }
 
     /// `settings` is the built-in `server_settings.yaml`.
@@ -1302,7 +1330,13 @@ mod tests {
         let mut player: CityPlayer = world.make_player(0, 0);
         player.feet *= 0.95;
         for _ in 0..120 {
-            world.move_player(&mut player, &CityInput::default(), &settings(), 1.0 / 60.0);
+            world.move_player(
+                &mut player,
+                &CityInput::default(),
+                &settings(),
+                &head_bob(),
+                1.0 / 60.0,
+            );
         }
         assert!((player.feet.length() - world.street_radius_m).abs() < 1e-3);
         assert!(player.is_on_ground);
@@ -1318,11 +1352,10 @@ mod tests {
         player.feet = hole * world.street_radius_m;
         let ride = CityInput {
             is_jumping: true,
-            speed_frac: 1.0,
             ..CityInput::default()
         };
         for _ in 0..240 {
-            world.move_player(&mut player, &ride, &settings(), 1.0 / 60.0);
+            world.move_player(&mut player, &ride, &settings(), &head_bob(), 1.0 / 60.0);
             if player.feet.length() < glass.radius_m - 1.0 {
                 break;
             }
@@ -1330,15 +1363,20 @@ mod tests {
         assert_eq!(world.get_side(player.feet), Side::Glass);
         let step = CityInput {
             forward_frac: 1.0,
-            speed_frac: 1.0,
             ..CityInput::default()
         };
         player.body = DMat3::from_cols(player.body.x_axis, player.body.y_axis, player.body.z_axis);
         for _ in 0..90 {
-            world.move_player(&mut player, &step, &settings(), 1.0 / 60.0);
+            world.move_player(&mut player, &step, &settings(), &head_bob(), 1.0 / 60.0);
         }
         for _ in 0..120 {
-            world.move_player(&mut player, &CityInput::default(), &settings(), 1.0 / 60.0);
+            world.move_player(
+                &mut player,
+                &CityInput::default(),
+                &settings(),
+                &head_bob(),
+                1.0 / 60.0,
+            );
         }
         assert_eq!(world.get_side(player.feet), Side::Glass);
         assert!(player.is_on_ground);
@@ -1395,6 +1433,7 @@ mod tests {
             id: 7,
             feet,
             up: get_up(feet),
+            height_frac: 1.0,
         };
         let aim: DVec3 = (feet + target.up * TORSO_HEIGHT_M - a).normalize();
         let shot: Shot = world.trace_shot(a, aim, 500.0, 2, &[target], Some(1));
@@ -1516,7 +1555,13 @@ mod tests {
             let mut player: CityPlayer = world.make_player(0, 0);
             player.feet = hole.direction * level_m;
             for _ in 0..(FALL_S / STEP_S) as usize {
-                world.move_player(&mut player, &CityInput::default(), &settings(), STEP_S);
+                world.move_player(
+                    &mut player,
+                    &CityInput::default(),
+                    &settings(),
+                    &head_bob(),
+                    STEP_S,
+                );
             }
             assert!(player.feet.length() > glass.radius_m + glass.thickness_m);
         }

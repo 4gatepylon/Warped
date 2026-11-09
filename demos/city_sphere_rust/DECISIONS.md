@@ -162,3 +162,13 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
     reload, and switching guns keeps the sniper's reload; (f) the bot fires a `Weapons` sniper (its stray, reload
     and per-frame hits) at a target it can see, instead of a hit sent at once. What City keeps: its tracing through
     the glass and wormholes, its beam drawing, and enemy wormholes hit once a shot.
+36. **City Sphere moves by Lunar Surface's rules, crouch included** (W-126 (same play in every level)): `CityPlayer`
+    keeps the shared `MoveState`, and `CityWorld::move_player` steps it first, as Lunar's `VoxelPlayer::step` does, in
+    place of City's own sprint energy, head bob and hit slow. So City gains Lunar's crouch (`Ctrl`): it takes
+    `movement.crouch_s`, lowers the eye to `crouch_eye_height_frac` of standing, walks at `crouch_speed_frac`, refills
+    sprint energy at the crouched rate, stops sprinting, and lets the guns fire while walking crouched (a test compares
+    the first three with Lunar's). Two things now follow Lunar's order instead of City's, each by one 1/60 s step: (a)
+    the head bob steps by whether the player stood on the ground before the move (City's own code used after it), so
+    the bob's phase differs from the first take-off on (positions don't); (b) a hit's slow lasts one more step, since
+    the rules count it down after using it. City's play trace (`record_city_play_trace`) without crouching is
+    otherwise byte for byte the same as before. As on Lunar, crouching doesn't shrink the body for collisions.

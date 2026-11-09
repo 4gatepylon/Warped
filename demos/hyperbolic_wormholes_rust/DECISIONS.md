@@ -2067,7 +2067,25 @@
 - **Rationale:** the user wants 60 frames a second at full size on the 3440×1440 display. At 3440×1440, 19 of 21 views
   are now under 16.7 ms (before: 14); `wormhole_exit` and `laser_into_wormhole` (the lens) are left.
 
-### D113. Lunar's lens at half resolution with Dust's longer bent steps (option D), W-131 (Lunar wormhole_exit slow at full size)
+### D113. A crouched player's robot stands on the ground, squashed, W-137 (crouched robots sink)
+
+- **Choice:** each window sends how far down a crouch its player is (0 to 1 in 15 steps) in the 4 spare high bits of
+  the wormholes byte of its state, which the server relays in its snapshots. Other windows raise the eye they receive
+  by the crouch's drop before placing the robot (`VoxelWorld::raise_crouched_eye`), so its feet stay on the ground,
+  and squash the drawn body (`AvatarModel::make_squashed`), its hit shapes and its head line toward the feet to the
+  crouched eye height's share of standing (0.6 crouched). The same in Dust, Snow Planet, the match and City Sphere
+  (City squashes its robots and lowers its torso and head spheres alike).
+- **Gives up:** a squashed robot is a shorter robot, not a crouching one: the body model has no crouch clip, and
+  bending its skeleton by hand was left out. Adding a clip would need a new animation asset, which needs the user's
+  approval.
+- **Compatibility:** the snapshot's length is unchanged, so windows and servers from before this change still play
+  with it: an older window ignores the new bits (and draws a crouched player sunk, as before), and an older server
+  relays nothing in them. A standing player's robot is drawn exactly as before.
+- **Rationale:** a crouched player's robot sank about 0.64 m into the ground (a standing eye height below its
+  lowered eye), and its hit shapes with it. The lead asked for this heuristic, for the user, who wants cheap
+  heuristics that look right.
+
+### D114. Lunar's lens at half resolution with Dust's longer bent steps (option D), W-131 (Lunar wormhole_exit slow at full size)
 
 - **Choice:** the user's option D from D112 (2026-11-09), in `render_voxel.metal` (Lunar Surface and the match's
   copy):
@@ -2087,7 +2105,7 @@
 - **Gives up:** detail finer than two pixels deep in a lens.
 - **Rationale:** the user chose it from D112's options sheet.
 
-### D114. A sharp centre with softer edges, W-136 (sharp centre, soft edges)
+### D115. A sharp centre with softer edges, W-136 (sharp centre, soft edges)
 
 - **Choice:** the window and the bench views draw a circle around the image's centre, `sharp_width_frac` of the
   image's width across, exactly as before (adaptive sampling), and the rest at half resolution: there only the even

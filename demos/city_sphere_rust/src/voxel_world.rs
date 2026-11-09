@@ -36,7 +36,7 @@ use crate::thrown_wormholes::{Marker, MouthPlace, WormholeColor};
 use crate::voxel_clearance::ClearanceGrids;
 use crate::voxel_textures::get_material_surface;
 use crate::zone_walls::ZoneWalls;
-use warped_shared::movement::{MoveInput, MoveRules, MoveState};
+use warped_shared::movement::{MoveInput, MoveRules, MoveState, get_crouched_height_frac};
 
 pub const MAX_MATERIAL_COUNT: usize = 256;
 pub const AVATAR_FIRST_MATERIAL: usize = 240;
@@ -103,6 +103,10 @@ const TINY: f64 = 1e-12;
 const AVATAR_HEAD_FROM_M: f64 = 1.5;
 const AVATAR_HEIGHT_M: f64 = 2.0;
 const GROUND_PROBE_M: f64 = 0.1;
+/// `AvatarBody` is a player's body as `with_avatars` adds it: its feet frame, the index of its
+/// colour, and its height as a share of standing (less while crouched, W-137 (crouched robots
+/// sink)).
+pub type AvatarBody = (DMat4, usize, f64);
 const AVATAR_SHAPES: [Shape; 2] = [
     Shape {
         kind: ShapeKind::Cylinder,
@@ -126,8 +130,10 @@ const AVATAR_SHAPES: [Shape; 2] = [
 /// the voxel bytes, its map model (`mesh`, which lasers hit) or posed body (`avatar_mesh`, an index
 /// into the world's `avatar_meshes`, only drawn: lasers hit its shapes), its bounding sphere
 /// (radius in curvature units), whether its glowing shapes are dark (`is_dark`: a pylon whose
-/// console is off), and the palette entry of its body's team colour (`body_material`, for a
-/// player's or a corpse's body: `render_voxel.metal` turns the body model's teal into it).
+/// console is off), the palette entry of its body's team colour (`body_material`, for a
+/// player's or a corpse's body: `render_voxel.metal` turns the body model's teal into it), and a
+/// player's body's height as a share of standing (`avatar_height_frac`: less while crouched; 1
+/// for anything else).
 #[derive(Clone)]
 pub struct VoxelStructure {
     pub name: String,
@@ -140,6 +146,7 @@ pub struct VoxelStructure {
     pub radius: f64,
     pub is_dark: bool,
     pub body_material: Option<u8>,
+    pub avatar_height_frac: f64,
 }
 
 /// `VoxelWarp` is a black hole or a wormhole mouth: its frame, m and reach in curvature units,
@@ -602,6 +609,7 @@ fn make_structure(
         radius: radius + BOUND_MARGIN_M / r,
         is_dark: false,
         body_material: None,
+        avatar_height_frac: 1.0,
     }
 }
 
@@ -915,28 +923,30 @@ impl VoxelWorld {
             .is_none()
     }
 
-    /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame
-    /// and an avatar colour index): a cylinder and a head in its own material, so it is lensed and
-    /// hit by lasers like any structure, and drawn as such.
+    /// `with_avatars` gives a copy of the world with a body for each of `bodies` (a feet frame,
+    /// an avatar colour index and a height share): a cylinder and a head in its own material,
+    /// squashed to the height share, so it is lensed and hit by lasers like any structure, and
+    /// drawn as such.
     ///
     /// Example: `let shared = world.with_avatars(&[(feet, 2)], &colors);`
-    pub fn with_avatars(&self, bodies: &[(DMat4, usize)], colors: &[[f32; 3]]) -> VoxelWorld {
+    pub fn with_avatars(&self, bodies: &[AvatarBody], colors: &[[f32; 3]]) -> VoxelWorld {
         let mut shared: VoxelWorld = self.clone();
-        for &(feet, color_index) in bodies {
-            shared.add_avatar(feet, color_index, colors, None);
+        for &(feet, color_index, height_frac) in bodies {
+            shared.add_avatar(feet, color_index, colors, None, height_frac);
         }
         shared
     }
 
     /// `with_posed_avatars` is `with_avatars`, but draws each body as the body model in its pose
-    /// in `poses` (a clip and a time in it, one per body); lasers still hit the shapes. After the
+    /// in `poses` (a clip and a time in it, one per body), squashed to its height share; lasers
+    /// still hit the shapes. After the
     /// bodies come `corpses` (a feet frame, an avatar colour index and a pose each), only drawn:
     /// lasers pass through them.
     ///
     /// Example: `let shared = world.with_posed_avatars(&[(feet, 2)], &[(AvatarClip::Idle, 0.0)], &[], &colors);`
     pub fn with_posed_avatars(
         &self,
-        bodies: &[(DMat4, usize)],
+        bodies: &[AvatarBody],
         poses: &[(AvatarClip, f64)],
         corpses: &[(DMat4, usize, (AvatarClip, f64))],
         colors: &[[f32; 3]],
@@ -949,9 +959,9 @@ impl VoxelWorld {
             poses.len()
         );
         let mut shared: VoxelWorld = self.clone();
-        for (&(feet, color_index), &(clip, time_s)) in bodies.iter().zip(poses) {
-            let posed: MeshModel = self.body.make_posed(clip, time_s);
-            shared.add_avatar(feet, color_index, colors, Some(posed));
+        for (&(feet, color_index, height_frac), &(clip, time_s)) in bodies.iter().zip(poses) {
+            let posed: MeshModel = self.body.make_squashed(clip, time_s, height_frac);
+            shared.add_avatar(feet, color_index, colors, Some(posed), height_frac);
         }
         for &(feet, color_index, (clip, time_s)) in corpses {
             let posed: MeshModel = self.body.make_posed(clip, time_s);
@@ -966,21 +976,29 @@ impl VoxelWorld {
         shared
     }
 
-    /// `add_avatar` adds a body standing on `feet` in avatar colour `color_index`, drawn as
-    /// `posed` if given, and puts it in the list of every warp it comes within reach of.
+    /// `add_avatar` adds a body standing on `feet` in avatar colour `color_index`, its shapes
+    /// squashed toward the feet to `height_frac` of their height, drawn as `posed` if given, and
+    /// puts it in the list of every warp it comes within reach of.
     ///
-    /// Example: `shared.add_avatar(feet, 2, &colors, None);`
+    /// Example: `shared.add_avatar(feet, 2, &colors, None, 1.0);`
     fn add_avatar(
         &mut self,
         feet: DMat4,
         color_index: usize,
         colors: &[[f32; 3]],
         posed: Option<MeshModel>,
+        height_frac: f64,
     ) {
         let material: u8 = self.set_avatar_color(color_index, colors);
         let first_shape: usize = self.shapes.len();
-        self.shapes
-            .extend(AVATAR_SHAPES.map(|shape| Shape { material, ..shape }));
+        let squash: DVec3 = DVec3::new(1.0, height_frac, 1.0);
+        self.shapes.extend(AVATAR_SHAPES.map(|shape| Shape {
+            material,
+            centre: shape.centre * squash,
+            half: shape.half * squash,
+            round_m: shape.round_m.min(shape.half.y * height_frac),
+            ..shape
+        }));
         let body: &[Shape] = &self.shapes[first_shape..];
         let drawn: Option<(usize, &MeshModel)> = posed
             .as_ref()
@@ -989,6 +1007,7 @@ impl VoxelWorld {
             make_structure("player", feet, first_shape, body, drawn, self.r);
         avatar.avatar_mesh = avatar.mesh.take();
         avatar.body_material = Some(material);
+        avatar.avatar_height_frac = height_frac;
         if let Some(model) = posed {
             self.avatar_meshes.push(Arc::new(model));
         }
@@ -1247,6 +1266,23 @@ impl VoxelWorld {
         Some(self.get_material_at(inside, &[hit.structure?]))
     }
 
+    /// `raise_crouched_eye` gives the eye frame a player whose eye frame is `eye` (from the
+    /// network) and who is `crouch_frac` of the way down a crouch would have standing: raised
+    /// along the vertical by the drop crouching gave it, so the body under it stands on the
+    /// ground (W-137 (crouched robots sink)). It is `eye` itself when not crouched.
+    ///
+    /// Example: `let standing_eye = world.raise_crouched_eye(player.frame, player.crouch_frac);`
+    pub fn raise_crouched_eye(&self, eye: DMat4, crouch_frac: f64) -> DMat4 {
+        let drop_m: f64 = self.player.eye_height_m
+            * (1.0 - get_crouched_height_frac(crouch_frac, &self.settings.movement));
+        if drop_m == 0.0 {
+            return eye;
+        }
+        let seen: VoxelPlayer = VoxelPlayer::FromEye(self, eye);
+        let at_eye: DMat4 = seen.body * make_boost(AXIS_Y, seen.h_m / self.r);
+        at_eye * make_boost(AXIS_Y, drop_m / self.r) * invert_lorentz(at_eye) * eye
+    }
+
     /// `is_eye_supported` says whether a player whose eye frame is `eye` (from the network) stands
     /// on something: their body, `GROUND_PROBE_M` lower, would meet the ground or a block.
     ///
@@ -1282,12 +1318,12 @@ impl VoxelWorld {
     }
 
     /// `is_head_hit` says whether point x, on an avatar (structure `k`, from `with_avatars`), is in
-    /// its top cell, its head.
+    /// its top cell, its head (lower by the body's height share while crouched).
     ///
     /// Example: `let is_head = shared.is_head_hit(k, spot);`
     pub fn is_head_hit(&self, k: usize, x: DVec4) -> bool {
         let p: DVec4 = self.structures[k].inverse * x;
-        p.y / p.w * self.r >= AVATAR_HEAD_FROM_M
+        p.y / p.w * self.r >= AVATAR_HEAD_FROM_M * self.structures[k].avatar_height_frac
     }
 
     /// `get_material_at` gives the material of the cell holding point x among `candidates`, or 0.

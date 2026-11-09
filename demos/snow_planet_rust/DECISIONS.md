@@ -150,7 +150,7 @@ Checked against Lunar Surface (`../hyperbolic_wormholes_rust/`), the reference, 
 
 ## S13. A sharp centre with softer edges, W-136 (sharp centre, soft edges)
 
-The same code as Lunar Surface's renderer (its D114): the middle 66% of the width is drawn exactly as before and the
+The same code as Lunar Surface's renderer (its D115): the middle 66% of the width is drawn exactly as before and the
 rest at half resolution (the even pixels shaded, the rest blended), by default in the window and the bench views
 (`--sharp-width-frac`, `--half-width-frac`). At 3440x1440, median GPU ms: `wormhole` 23.1 → 19.3, `laser_open` 20.7 →
 18.7, `black_hole` 18.3 → 17.6, the spawns 15.0 → 13.5; at 2560x1440 every view is now under 16.7 ms (`wormhole`

@@ -59,7 +59,9 @@ is in [`AGENTS.md`](AGENTS.md).
     merged), #452 (the guns' state and helpers shared, `claude/shared-weapons`, merged), #456 (the movement rules
     shared, with a play trace per level, `claude/shared-movement`, open), #457 (City Sphere's guns on the shared
     `Weapons`, Lunar's rules, `claude/city-shared-guns`, merged), #459 (the HUD's bars, pulses, hit effect, lobby and
-    "YOU DIED" lines, the hit feedback and the server's damage count shared, `claude/shared-hud-health`, open).
+    "YOU DIED" lines, the hit feedback and the server's damage count shared, `claude/shared-hud-health`, open),
+    #461 (City Sphere moves by the shared movement rules and gains Lunar's crouch, `claude/city-crouch`,
+    open).
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
@@ -105,13 +107,14 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
-- [ ] **W-137 Crouched robots sink.** A bug found by agents on 2026-11-09 and not fixed yet: other windows place a remote player's feet one standing eye height below the eye they receive (`VoxelPlayer::FromEye`), so a crouched player's robot sinks about 0.7 m into the floor (Lunar Surface and its copies).
 
 ## Pending user review
 
 - [?] **W-136 Sharp centre, soft edges.** The user, 2026-11-09: "if you need to lower resolution in different places, you can just like blur things. One thing you could also consider doing is having like a narrower field of view where like the center of the screen is clear and fully, you know, full resolution, everything, but the edges are blurry or something like that." And: "Try to at least have the ability to see a nice, good resolution for the important things that are right in front of you." Applies to every level's speed work (60 FPS).
   #464: the middle 66% of the width drawn as before and the rest at half resolution, blended (option B, the
   default; options A-E with timings in the PR for the user), in Lunar Surface, the match, Dust and Snow Planet.
+- [?] **W-137 Crouched robots sink.** A bug found by agents on 2026-11-09: other windows place a remote player's feet one standing eye height below the eye they receive (`VoxelPlayer::FromEye`), so a crouched player's robot sinks about 0.7 m into the floor (Lunar Surface and its copies).
+  #463: each window sends its crouch, and other windows stand a crouched robot on the floor, squashed to the crouched eye height, with its hit shapes (Lunar Surface, Dust, Snow Planet, the match, City Sphere; Dark Forest with its robots' switch to the teal robot).
 - [?] **W-127 Dark Forest canopy flicker.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): In about one fixed-step capture in three or four, a few thousand canopy pixels differ, also on the base build before any of the 2026-11-08 work; it looks like a GPU race in the FPS-demo renderer.
   #444: the forest is drawn in 8 m tiles, and repeat captures no longer differ in thousands of canopy pixels (8 of 20 differ in at most 28 pixels by 1-2/255, against 4 of 20 by up to 4,173 pixels and 23/255 before).
 - [?] **W-128 Dark Forest double lens.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): Standing within 4 m of a gate shows a faint second image of the wormhole's lens over the direct view.
@@ -340,7 +343,7 @@ are here too, since the user hadn't confirmed them.
   #458: exact ground hits far from the origin, shadow safe steps, blocks of groups (D112): at 3440x1440, 19 of 21
   views under 16.7 ms (`red_spawn` 21.0 → 14.5 ms); `wormhole_exit` (57.7 ms) and `laser_into_wormhole` (18.9 ms) left,
   with options for the lens (half resolution, longer bent steps) in the PR for the user.
-  #462: the user's option D (half-resolution lens, Dust's longer bent steps, D113): at 3440x1440 `wormhole_exit` 57.7
+  #462: the user's option D (half-resolution lens, Dust's longer bent steps, D114): at 3440x1440 `wormhole_exit` 57.7
   → 24.5 ms and `laser_into_wormhole` 18.6 → 13.1 ms; 20 of 21 views under 16.7 ms.
 
 ## Done
