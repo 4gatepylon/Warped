@@ -1,9 +1,10 @@
 // `render_city.metal` rasterizes City Sphere: lit, textured streets and buildings, glowing lights,
-// the see-through glass shell (with its lift holes cut out) and additive laser beams.
+// the see-through glass shell (with its lift and stairs holes cut out) and additive laser beams.
 #include <metal_stdlib>
 using namespace metal;
 
 constant uint MAX_HOLE_COUNT = 8;
+constant float HOLE_RIM_COS = 0.004;
 constant float MIN_SPECKLE_GLOW = 0.02;
 constant float3 FLASHLIGHT_COLOR = float3(1.0, 0.95, 0.85);
 constant float FLASHLIGHT_INTENSITY = 1.45;
@@ -113,6 +114,7 @@ struct CityUniforms {
     float4 flashlight_position;
     float4 flashlight_direction;
     float4 flashlight;
+    float4 hole_sides[MAX_HOLE_COUNT];
 };
 
 struct Fragment {
@@ -305,7 +307,7 @@ fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& 
     float3 d = normalize(in.world);
     uint hole_count = uint(u.glass.y);
     for (uint i = 0; i < hole_count && i < MAX_HOLE_COUNT; i++) {
-        if (dot(d, u.holes[i].xyz) >= u.holes[i].w) {
+        if (dot(d, u.holes[i].xyz) >= u.holes[i].w && abs(dot(d, u.hole_sides[i].xyz)) <= u.hole_sides[i].w) {
             discard_fragment();
         }
     }
@@ -318,7 +320,9 @@ fragment float4 glass_fragment(Fragment in [[stage_in]], constant CityUniforms& 
     float rim = 0.0;
     for (uint i = 0; i < hole_count && i < MAX_HOLE_COUNT; i++) {
         float c = dot(d, u.holes[i].xyz);
-        rim = max(rim, smoothstep(u.holes[i].w - 0.004, u.holes[i].w, c));
+        float side_rim_width = HOLE_RIM_COS / sqrt(1.0 - u.holes[i].w * u.holes[i].w);
+        float side_rim = 1.0 - smoothstep(u.hole_sides[i].w, u.hole_sides[i].w + side_rim_width, abs(dot(d, u.hole_sides[i].xyz)));
+        rim = max(rim, min(smoothstep(u.holes[i].w - HOLE_RIM_COS, u.holes[i].w, c), side_rim));
     }
     float alpha = clamp(GLASS_BASE_ALPHA + fresnel * (1.0 - line) + RIB_ALPHA * line + 0.6 * rim, 0.0, 0.95);
     float3 l = normalize(-in.world);
