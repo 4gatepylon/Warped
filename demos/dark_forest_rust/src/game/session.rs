@@ -27,7 +27,7 @@ use super::guns::{
 };
 use super::hud::{BarPulsePair, HudState, OverlayHudState, build_hud, build_overlay_rects};
 use super::nav::NavGraph;
-use super::player::{MAX_HEALTH, Player, PlayerInput};
+use super::player::{MAX_HEALTH, Movement, Player, PlayerInput};
 use super::world::{Arena, Surface};
 use crate::assets::gltf_model::Trs;
 use crate::console_reach::ConsolePlace;
@@ -45,6 +45,12 @@ const TEAM_PLAYER_BEAM_COLOR: Vec3 = Vec3::new(0.35, 0.8, 1.6);
 const MAP_BEAM_HDR_SCALE: f32 = 1.8;
 /// `TEAM_BOT_BEAM_COLOR` is the HDR color of the bots' bolts (times the light scale).
 const TEAM_BOT_BEAM_COLOR: Vec3 = Vec3::new(1.8, 0.25, 0.12);
+/// `AUTOPILOT_TURN_PER_S` is how fast the autopilot turns toward what it looks at (the share of
+/// the way left it turns each second, as an exponential rate): fast enough to follow a sprinter.
+const AUTOPILOT_TURN_PER_S: f32 = 15.0;
+/// `AUTOPILOT_AIM_SLACK_M` is how near the target a shot aimed straight at it must still end,
+/// after any wormhole's bending, for the autopilot to count the target as in sight.
+const AUTOPILOT_AIM_SLACK_M: f32 = 0.3;
 /// `AUTOPILOT_HIP_FIRE_RANGE_M` is the range inside which the autopilot fires from the hip.
 const AUTOPILOT_HIP_FIRE_RANGE_M: f32 = 14.0;
 /// `NEAR_M` is the camera's near plane.
@@ -62,6 +68,18 @@ const BEAM_HDR_SCALE: f32 = 1.8;
 /// would show only there.
 const BEAM_DASH_SPACING_M: f32 = 0.15;
 const BEAM_DASH_OVERLAP: f32 = 2.0;
+/// `FLASHLIGHT_RGB` is the flashlight's colour, a warm white; `FLASHLIGHT_REACH_PER_RANGE` how far
+/// it reaches, in its half-light ranges; `FLASHLIGHT_SPOT_STANDOFF_M` and
+/// `FLASHLIGHT_SPOT_MARGIN_M` how far before the lit surface its spot light sits and how much wider
+/// than the cone it reaches; and `FLASHLIGHT_NEAR_M`, `FLASHLIGHT_NEAR_RADIUS_M` and
+/// `FLASHLIGHT_NEAR_FRAC` place, size and dim the light for what is close.
+const FLASHLIGHT_RGB: Vec3 = Vec3::new(1.0, 0.95, 0.85);
+const FLASHLIGHT_REACH_PER_RANGE: f32 = 2.0;
+const FLASHLIGHT_SPOT_STANDOFF_M: f32 = 0.5;
+const FLASHLIGHT_SPOT_MARGIN_M: f32 = 0.5;
+const FLASHLIGHT_NEAR_M: f32 = 1.0;
+const FLASHLIGHT_NEAR_RADIUS_M: f32 = 4.0;
+const FLASHLIGHT_NEAR_FRAC: f32 = 0.15;
 /// `GRAIN_SPRITE_PER_RADIUS` is how much larger than a dust grain its smoke sprite is.
 const GRAIN_SPRITE_PER_RADIUS: f32 = 1.5;
 /// `LUNAR_TEAM_BEAM_RGB` are Lunar Surface's laser colours per team (blue, red), linear, for a map
@@ -80,6 +98,7 @@ const BOT_GROUND_HIT_M: f32 = 0.05;
 pub struct Controls {
     pub player: PlayerInput,
     pub gun: GunInput,
+    pub is_flashlight_held: bool,
 }
 
 /// `RobotHold` holds robot 0 for pictures and benchmarks: it stands at `feet_m` facing `yaw_rad`,
@@ -197,6 +216,8 @@ pub struct Session {
     pub player: Player,
     pub guns: Guns,
     pub settings: ServerSettings,
+    pub movement: Movement,
+    since_movement_key_s: f32,
     pub bots: Vec<Bot>,
     pub kill_count: u32,
     pub death_count: u32,
@@ -235,6 +256,7 @@ pub struct Session {
     pub is_console_objective: bool,
     pub bot_console: Option<usize>,
     pub is_team_known: bool,
+    pub is_flashlight_on: bool,
     bar_pulses: BarPulsePair,
     robot_hold: Option<RobotHold>,
     robot_hold_s: f32,
@@ -291,11 +313,18 @@ impl Session {
                 )
             })
             .collect();
+        let movement: Movement = Movement::New(
+            &arena.map_player,
+            arena.map_gravity_m_per_s2,
+            &ServerSettings::Builtin(),
+        );
         Session {
             player: Player::new(spawn_m, yaw_rad),
             arena,
             nav,
             guns: Guns::New(ShotNoise::FromClock()),
+            movement,
+            since_movement_key_s: 0.0,
             settings: ServerSettings::Builtin(),
             bots,
             kill_count: 0,
@@ -336,6 +365,7 @@ impl Session {
             is_console_objective: false,
             bot_console: None,
             is_team_known: true,
+            is_flashlight_on: false,
             bar_pulses: BarPulsePair::New(),
             robot_hold: None,
             robot_hold_s: 0.0,
@@ -355,6 +385,19 @@ impl Session {
             self.robot_hold = hold;
             self.robot_hold_s = ROBOT_HOLD_RESTART_S;
         }
+    }
+
+    /// `set_settings` makes `settings` the match's (the game server's, once it welcomes this
+    /// window) and works out the player's movement from them.
+    ///
+    /// Example: `session.set_settings(settings.clone());`
+    pub fn set_settings(&mut self, settings: ServerSettings) {
+        self.movement = Movement::New(
+            &self.arena.map_player,
+            self.arena.map_gravity_m_per_s2,
+            &settings,
+        );
+        self.settings = settings;
     }
 
     /// `respawn_player` brings the player back, whole, at their team's spawn farthest from the
@@ -750,7 +793,9 @@ impl Session {
     /// `autopilot_controls` plays the game: walk to the other team's consoles and hold `E` on each
     /// (`is_console_objective`, with `walker`); or aim at visible robots and fire, walk toward the
     /// nearest enemy player when none is visible (with `walker`), and else walk the waypoint loop.
-    /// It waits while its team is not known yet (`is_team_known`: an online game before the
+    /// A robot or player counts as in sight only along a straight line clear of the forest that a
+    /// shot would follow to it (`AUTOPILOT_AIM_SLACK_M`), not bent away by a wormhole. It stands still while it has one in sight, since a shot fires only
+    /// `shoot_after_moving_s` after the last step. It waits while its team is not known yet (`is_team_known`: an online game before the
     /// server's welcome).
     fn autopilot_controls(&mut self, scene: &Scene, dt_s: f32) -> Controls {
         if !self.is_team_known {
@@ -774,6 +819,7 @@ impl Session {
             return Controls {
                 player: walk.input,
                 gun: GunInput::default(),
+                is_flashlight_held: false,
             };
         }
         let eye_m: Vec3 = self.player.eye_position_m();
@@ -803,6 +849,13 @@ impl Session {
                 let to_bot: Vec3 = *aim_m - eye_m;
                 to_bot.length() < 45.0
                     && cast_ray(&scene.solids, eye_m, to_bot.normalize(), to_bot.length()).is_none()
+                    && self
+                        .arena
+                        .warps
+                        .trace_beam(eye_m, to_bot, to_bot.length(), |_, _, _| None)
+                        .end_m
+                        .distance(*aim_m)
+                        < AUTOPILOT_AIM_SLACK_M
             })
             .min_by(|a, b| a.distance(eye_m).total_cmp(&b.distance(eye_m)));
         let feet_m: Vec3 = self.player.feet_m;
@@ -828,6 +881,7 @@ impl Session {
             return Controls {
                 player,
                 gun: GunInput::default(),
+                is_flashlight_held: false,
             };
         }
         let look_direction: Vec3 = match visible_bot {
@@ -840,7 +894,7 @@ impl Session {
         yaw_delta_rad = (yaw_delta_rad + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
             - std::f32::consts::PI;
         let pitch_delta_rad: f32 = target_pitch_rad - self.player.pitch_rad;
-        let turn_frac: f32 = 1.0 - (-5.0 * dt_s).exp();
+        let turn_frac: f32 = 1.0 - (-AUTOPILOT_TURN_PER_S * dt_s).exp();
         let look_delta_rad: Vec2 = Vec2::new(-yaw_delta_rad, -pitch_delta_rad) * turn_frac;
         let forward: Vec2 = Vec2::new(-self.player.yaw_rad.sin(), -self.player.yaw_rad.cos());
         let right: Vec2 = Vec2::new(self.player.yaw_rad.cos(), -self.player.yaw_rad.sin());
@@ -855,7 +909,7 @@ impl Session {
         Controls {
             player: PlayerInput {
                 move_axes: Vec2::new(walk_direction.dot(right), walk_direction.dot(forward))
-                    * if visible_bot.is_some() { 0.5 } else { 1.0 },
+                    * if visible_bot.is_some() { 0.0 } else { 1.0 },
                 look_delta_rad,
                 is_sprint_held: visible_bot.is_none(),
                 is_crouch_held: false,
@@ -867,6 +921,7 @@ impl Session {
                 is_aim_held: should_aim,
                 ..GunInput::default()
             },
+            is_flashlight_held: false,
         }
     }
 
@@ -881,14 +936,29 @@ impl Session {
         self.frame_count += 1;
         if self.player.health < self.last_health {
             self.hit_effect_frac = 1.0;
+            self.player.slow_down(&self.movement);
         }
+        let is_walking_upright: bool =
+            controls.player.move_axes != Vec2::ZERO && !controls.player.is_crouch_held;
+        self.since_movement_key_s = if is_walking_upright || controls.player.is_jump_pressed {
+            0.0
+        } else {
+            self.since_movement_key_s + dt_s
+        };
         self.last_health = self.player.health;
         let bar_state: OverlayHudState = self.overlay_hud_state();
         self.bar_pulses.update(dt_s, &bar_state);
         let mut player_input: PlayerInput = controls.player;
-        player_input.look_delta_rad /= self.guns.get_zoom(&self.settings) as f32;
-        self.player
-            .update(&player_input, &scene.solids, &self.arena.ladders, dt_s);
+        if !self.is_autopilot {
+            player_input.look_delta_rad /= self.guns.get_zoom(&self.settings) as f32;
+        }
+        self.player.update(
+            &player_input,
+            &self.movement,
+            &scene.solids,
+            &self.arena.ladders,
+            dt_s,
+        );
         if self.player.is_alive() {
             let warps: &Warps = &self.arena.warps;
             let centre_m: Vec3 = self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
@@ -912,8 +982,10 @@ impl Session {
                 0.0,
             );
         }
-        let can_shoot: bool =
-            self.player.is_alive() && self.console_hold_frac.is_none() && self.winner.is_none();
+        let can_shoot: bool = self.player.is_alive()
+            && self.console_hold_frac.is_none()
+            && self.winner.is_none()
+            && f64::from(self.since_movement_key_s) >= self.settings.movement.shoot_after_moving_s;
         let step: GunStep = GunStep {
             is_sprinting: self.player.is_sprinting,
             bob_phase_rad: self.player.bob_phase_rad,
@@ -934,8 +1006,12 @@ impl Session {
             self.shoot_player_laser(scene, audio);
         }
         self.was_firing = is_firing;
+        self.is_flashlight_on = controls.is_flashlight_held && self.player.is_alive();
         self.is_trigger_down = is_firing;
-        if self.player.should_respawn() {
+        if self
+            .player
+            .should_respawn(self.settings.respawn.delay_s as f32)
+        {
             self.death_count += 1;
             self.respawn_player();
         }
@@ -947,7 +1023,7 @@ impl Session {
             player_eye_m: self.player.eye_position_m(),
             player_velocity_m_s: self.player.velocity_m_s,
             is_player_alive: self.player.is_alive(),
-            is_player_crouched: self.player.height_m < 1.5,
+            is_player_crouched: self.player.crouch_frac > 0.5,
         };
         let held_count: usize = usize::from(self.robot_hold.is_some());
         let shots: Vec<BotShot> = self
@@ -1120,6 +1196,40 @@ impl Session {
             .zip(&current)
             .map(|(a, b)| a.lerp(b, animation.blend_frac))
             .collect()
+    }
+
+    /// `get_flashlight_lights` lights what the player looks at as Lunar Surface's flashlight does,
+    /// with point lights since this renderer has no spot lights: one where the view meets the
+    /// world (up to `FLASHLIGHT_REACH_PER_RANGE` times the settings' `range_m`), as wide as the
+    /// cone there, as bright as the settings' share of sunlight, halved at `range_m`; and a dim one
+    /// just ahead of the eye for what is close.
+    ///
+    /// Example: `point_lights.extend(self.get_flashlight_lights(scene));`
+    fn get_flashlight_lights(&self, scene: &Scene) -> [PointLight; 2] {
+        let flashlight = &self.settings.flashlight;
+        let eye_m: Vec3 = self.player.eye_position_m();
+        let ahead: Vec3 = self.player.rotation() * Vec3::NEG_Z;
+        let range_m: f32 = flashlight.range_m as f32;
+        let reach_m: f32 = range_m * FLASHLIGHT_REACH_PER_RANGE;
+        let distance_m: f32 = cast_ray(&scene.solids, eye_m, ahead, reach_m)
+            .map_or(reach_m, |(_, hit)| hit.distance_m);
+        let cone_rad: f32 = (flashlight.cone_half_angle_rad + flashlight.soft_edge_rad) as f32;
+        let spot_radius_m: f32 = distance_m * cone_rad.tan() + FLASHLIGHT_SPOT_MARGIN_M;
+        let falloff: f32 = 1.0 / (1.0 + (distance_m / range_m).powi(2));
+        let color_rgb: Vec3 =
+            FLASHLIGHT_RGB * scene.light_scale * flashlight.brightness_frac as f32;
+        [
+            PointLight {
+                position_m: eye_m + ahead * (distance_m - FLASHLIGHT_SPOT_STANDOFF_M).max(0.0),
+                radius_m: spot_radius_m + FLASHLIGHT_SPOT_STANDOFF_M,
+                color_rgb: color_rgb * falloff,
+            },
+            PointLight {
+                position_m: eye_m + ahead * FLASHLIGHT_NEAR_M,
+                radius_m: FLASHLIGHT_NEAR_RADIUS_M,
+                color_rgb: color_rgb * FLASHLIGHT_NEAR_FRAC,
+            },
+        ]
     }
 
     /// `get_hit_effect` is what the last hit on the player still does to the view, as the Lunar
@@ -1313,6 +1423,9 @@ impl Session {
                 radius_m: flash.radius_m,
                 color_rgb: flash.color_rgb * frac * frac,
             });
+        }
+        if self.is_flashlight_on {
+            point_lights.extend(self.get_flashlight_lights(scene));
         }
         let lens_draws: Range<usize> = scene.static_draws.len()..world_draws.len();
         let robot_particle_count: usize = world_particles.len();

@@ -26,6 +26,8 @@ use crate::thrown_wormholes::PlayerWormholes;
 const STATE_PERIOD_S: f64 = 1.0 / 30.0;
 /// `EYE_HEIGHT_M` is how far a player's eye is above their feet, to place remote robots.
 const EYE_HEIGHT_M: f32 = 1.6;
+/// `MIN_WALK_M_PER_S` is the slowest a remote player moves and still walks, Lunar Surface's.
+const MIN_WALK_M_PER_S: f32 = 0.8;
 
 /// `MatchOptions` is how this window takes part in the game.
 pub struct MatchOptions {
@@ -126,7 +128,7 @@ impl MatchPlay {
         match self.client.take() {
             None => self.update_local(session, hold_needed_s),
             Some(mut client) => {
-                let result = self.update_online(&mut client, session, scene);
+                let result = self.update_online(&mut client, session, scene, dt_s);
                 self.client = Some(client);
                 result?;
             }
@@ -198,6 +200,7 @@ impl MatchPlay {
         client: &mut Client,
         session: &mut Session,
         scene: &Scene,
+        dt_s: f32,
     ) -> Result<(), Box<dyn Error>> {
         for event in client.poll()? {
             if let NetEvent::Eliminated { is_self: true, .. } = event {
@@ -209,7 +212,9 @@ impl MatchPlay {
         }
         if let Some(settings) = &client.settings {
             self.settings = settings.clone();
-            session.settings = settings.clone();
+            if session.settings != *settings {
+                session.set_settings(settings.clone());
+            }
         }
         if let Some(team) = client.team {
             if team != session.team {
@@ -231,7 +236,7 @@ impl MatchPlay {
             *is_off = client.game.off_mask & (1 << index) != 0;
         }
         session.winner = client.game.winner;
-        self.sync_remotes(client, session, scene);
+        self.sync_remotes(client, session, scene, dt_s);
         for (victim_id, hits_to_kill) in std::mem::take(&mut session.pending_hits) {
             client.send_hit(victim_id, hits_to_kill)?;
         }
@@ -256,12 +261,16 @@ impl MatchPlay {
         Ok(())
     }
 
-    /// `sync_remotes` makes one robot per other player, placed and animated from their frames.
-    fn sync_remotes(&mut self, client: &Client, session: &mut Session, scene: &Scene) {
+    /// `sync_remotes` makes one robot per other player, placed and animated from their frames: idle
+    /// below `MIN_WALK_M_PER_S`, running from halfway between walking and sprinting, as Lunar
+    /// Surface's `choose_gait`, with the speed over this frame's `dt_s`.
+    fn sync_remotes(&mut self, client: &Client, session: &mut Session, scene: &Scene, dt_s: f32) {
         let _ = scene;
         let own_id: Option<u32> = client.id;
         let mut remotes: Vec<RemoteBot> = Vec::new();
         let mut old: Vec<RemoteBot> = std::mem::take(&mut session.remote_bots);
+        let run_from_m_per_s: f32 =
+            (session.movement.walk_m_per_s + session.movement.sprint_m_per_s) / 2.0;
         for player in client.players.iter().filter(|p| Some(p.id) != own_id) {
             let frame: Mat4 = player.frame.as_mat4();
             let eye_m: Vec3 = frame.w_axis.truncate();
@@ -288,10 +297,10 @@ impl MatchPlay {
                 }
             };
             let last_m: Vec3 = self.last_feet_m.insert(player.id, feet_m).unwrap_or(feet_m);
-            let speed_m_s: f32 = (feet_m - last_m).with_y(0.0).length() * 60.0;
-            remote.bot.animation.play(match speed_m_s {
-                s if s > 4.5 => BotClip::Run,
-                s if s > 0.4 => BotClip::Walk,
+            let speed_m_per_s: f32 = (feet_m - last_m).with_y(0.0).length() / dt_s;
+            remote.bot.animation.play(match speed_m_per_s {
+                s if s >= run_from_m_per_s => BotClip::Run,
+                s if s >= MIN_WALK_M_PER_S => BotClip::Walk,
                 _ => BotClip::Idle,
             });
             remote.team = player.team;
