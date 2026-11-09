@@ -20,10 +20,11 @@ use crate::assets::sky::{Sky, load_sky};
 use crate::assets::textures::{TextureRequest, TextureSource, decode_textures};
 use crate::game::collision::Aabb;
 use crate::game::guns::GunModel;
-use crate::game::world::{Arena, Surface};
+use crate::game::world::{Arena, FAR_LEAF_DETAIL, NEAR_LEAF_DETAIL, Surface};
 use crate::render::{
-    AlphaMode, Atmosphere, DrawItem, EnvironmentData, MaterialData, MaterialHandle, MeshHandle,
-    OccluderBox, Renderer, TextureFormat, TextureHandle, tiles::split_mesh_into_tiles,
+    AlphaMode, Atmosphere, DrawItem, EnvironmentData, MaterialData, MaterialHandle, MeshData,
+    MeshHandle, OccluderBox, Renderer, TextureFormat, TextureHandle,
+    tiles::{MeshTile, split_mesh_into_tiles},
 };
 
 /// `GROUND_ALBEDO` colors the sky's empty lower hemisphere.
@@ -73,10 +74,12 @@ pub struct GunViewmodel {
     pub muzzle_from_gltf: Mat4,
 }
 
-/// `Scene` is everything loaded into the renderer.
+/// `Scene` is everything loaded into the renderer; `far_leaf_meshes` pairs each leaf tile's index
+/// in `static_draws` with its mesh at `FAR_LEAF_DETAIL`, to draw from afar.
 pub struct Scene {
     pub static_draws: Vec<DrawItem>,
     pub static_surfaces: Vec<Surface>,
+    pub far_leaf_meshes: Vec<(usize, MeshHandle)>,
     pub solids: Vec<Aabb>,
     pub robot: Model,
     pub robot_scale: f32,
@@ -414,7 +417,31 @@ impl Scene {
             create_surface_materials(renderer, textures_dir, emissive_scale);
         let mut static_draws: Vec<DrawItem> = Vec::new();
         let mut static_surfaces: Vec<Surface> = Vec::new();
+        let mut far_leaf_meshes: Vec<(usize, MeshHandle)> = Vec::new();
         for (surface, mesh_data) in arena.surface_meshes() {
+            if surface == Surface::Leaves {
+                let near_tiles: Vec<MeshData> =
+                    arena.leaf_tile_meshes(STATIC_TILE_M, NEAR_LEAF_DETAIL);
+                let far_tiles: Vec<MeshData> =
+                    arena.leaf_tile_meshes(STATIC_TILE_M, FAR_LEAF_DETAIL);
+                for (near, far) in near_tiles.into_iter().zip(far_tiles) {
+                    let tile: MeshTile = MeshTile::Bounding(near);
+                    far_leaf_meshes.push((static_draws.len(), renderer.create_mesh(&far)));
+                    static_surfaces.push(surface);
+                    static_draws.push(DrawItem {
+                        mesh: renderer.create_mesh(&tile.mesh),
+                        material: surface_materials[&surface],
+                        model: Mat4::IDENTITY,
+                        tint: Vec4::ONE,
+                        joint_offset: None,
+                        bounds_center_m: tile.bounds_center_m,
+                        bounds_radius_m: tile.bounds_radius_m,
+                        does_cast_shadow: true,
+                        body_flash_frac: None,
+                    });
+                }
+                continue;
+            }
             for tile in split_mesh_into_tiles(&mesh_data, STATIC_TILE_M) {
                 static_surfaces.push(surface);
                 let mesh: MeshHandle = renderer.create_mesh(&tile.mesh);
@@ -492,6 +519,7 @@ impl Scene {
         Scene {
             static_draws,
             static_surfaces,
+            far_leaf_meshes,
             solids,
             robot,
             robot_scale,

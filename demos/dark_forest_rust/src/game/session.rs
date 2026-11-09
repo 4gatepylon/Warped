@@ -57,6 +57,10 @@ const AUTOPILOT_TURN_PER_S: f32 = 15.0;
 const AUTOPILOT_AIM_SLACK_M: f32 = 0.3;
 /// `AUTOPILOT_HIP_FIRE_RANGE_M` is the range inside which the autopilot fires from the hip.
 const AUTOPILOT_HIP_FIRE_RANGE_M: f32 = 14.0;
+/// `FAR_LEAF_M` is how far beyond a leaf tile the camera must be (times the aim's zoom) for the
+/// tile to be drawn at the far detail (`scene.far_leaf_meshes`), where the haze leaves only the
+/// sprays' outlines.
+const FAR_LEAF_M: f32 = 20.0;
 /// `NEAR_M` is the camera's near plane.
 const NEAR_M: f32 = 0.05;
 /// `FAR_M` is the camera's far plane.
@@ -1420,6 +1424,13 @@ impl Session {
             far_m: FAR_M,
         };
         let mut world_draws: Vec<DrawItem> = scene.static_draws.clone();
+        for &(index, far_mesh) in &scene.far_leaf_meshes {
+            let draw: &mut DrawItem = &mut world_draws[index];
+            let gap_m: f32 = draw.bounds_center_m.distance(camera.position_m) - draw.bounds_radius_m;
+            if gap_m > FAR_LEAF_M * zoom {
+                draw.mesh = far_mesh;
+            }
+        }
         let mut joint_matrices: Vec<Mat4> = Vec::new();
         let skeleton = scene
             .robot
