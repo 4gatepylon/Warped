@@ -834,10 +834,11 @@ fn as_bytes<T: Copy>(values: &[T]) -> &[u8] {
 /// `Texture` is a Metal texture.
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 
-/// `PostTextures` is the HDR image the rays are traced into, and its bloom chain (each level half
-/// the last).
+/// `PostTextures` is the HDR image the rays are traced into, its bloom chain (each level half
+/// the last), and the tone-mapped image `fxaa_voxel` anti-aliases into the target.
 struct PostTextures {
     hdr: Texture,
+    ldr: Texture,
     bloom: Vec<Texture>,
 }
 
@@ -897,6 +898,7 @@ pub struct VoxelGpu {
     adaptive: AdaptivePipelines,
     bloom_down: Pipeline,
     tonemap: Pipeline,
+    fxaa: Pipeline,
     bake_milky_way: Pipeline,
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
@@ -952,6 +954,7 @@ impl VoxelGpu {
             adaptive: AdaptivePipelines::FromLibrary(device, &library)?,
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
+            fxaa: make_pipeline(device, &library, "fxaa_voxel")?,
             bake_milky_way: make_pipeline(device, &library, "bake_milky_way")?,
             buffers: (0..SCENE_BUFFER_COUNT
                 + DUST_BUFFER_INDICES.len()
@@ -976,7 +979,7 @@ impl VoxelGpu {
 
     /// `encode` uploads a frame, probes the light at the eye for the held gun, and traces it into
     /// the HDR texture (with `samples`, by adaptive sampling into those buffers, otherwise one ray
-    /// per pixel), then blooms, grades and tone maps it into `target`. The first call bakes the
+    /// per pixel), then blooms, grades and tone maps it, and anti-aliases it into `target` (FXAA). The first call bakes the
     /// Milky Way into its texture first; later frames only read it.
     ///
     /// Example: `gpu.encode(&device, &encoder, &frame, None, &render_texture)?;`
@@ -1080,6 +1083,7 @@ impl VoxelGpu {
         {
             self.post = Some(PostTextures {
                 hdr: make_hdr_texture(device, (width, height))?,
+                ldr: make_hdr_texture(device, (width, height))?,
                 bloom: (1..=BLOOM_LEVELS)
                     .map(|k| make_hdr_texture(device, (width >> k, height >> k)))
                     .collect::<Result<_>>()?,
@@ -1120,9 +1124,15 @@ impl VoxelGpu {
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN TONE MAPPING THE WRONG TEXTURE WILL HAPPEN
         unsafe {
             encoder.setTexture_atIndex(Some(&post.hdr), 1);
-            encoder.setTexture_atIndex(Some(target), 0);
+            encoder.setTexture_atIndex(Some(&post.ldr), 0);
         }
         dispatch(encoder, &self.tonemap, (width, height));
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN ANTI-ALIASING THE WRONG TEXTURE WILL HAPPEN
+        unsafe {
+            encoder.setTexture_atIndex(Some(&post.ldr), 1);
+            encoder.setTexture_atIndex(Some(target), 0);
+        }
+        dispatch(encoder, &self.fxaa, (width, height));
         Ok(())
     }
 }
