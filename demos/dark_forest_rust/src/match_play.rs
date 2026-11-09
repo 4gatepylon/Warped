@@ -15,6 +15,7 @@ use glam::{DMat4, Mat4, Vec3};
 
 use crate::console_reach::ConsolePlace;
 use crate::game::bots::{Bot, BotClip};
+use crate::game::guns::Gun;
 use crate::game::session::{RemoteBot, Session};
 use crate::net::{Client, NetEvent};
 use crate::scene::Scene;
@@ -231,13 +232,19 @@ impl MatchPlay {
         }
         if self.last_state.elapsed().as_secs_f64() >= STATE_PERIOD_S && client.id.is_some() {
             self.last_state = Instant::now();
-            let frame: DMat4 = session.player.camera_world().as_dmat4();
+            let is_firing: bool = session.is_trigger_down && !is_dead;
+            let eye: DMat4 = session.player.camera_world().as_dmat4();
+            let frame: DMat4 = if is_firing {
+                session.guns.shot_offset.aim(eye)
+            } else {
+                eye
+            };
             client.send_state(
                 frame,
-                session.is_trigger_down && !is_dead,
-                true,
+                is_firing,
+                session.guns.gun == Gun::Rifle,
                 self.held_console.map(|i| i as u8),
-                0.0,
+                session.guns.beam_speckle_frac,
                 PlayerWormholes::default(),
             )?;
         }
@@ -267,8 +274,11 @@ impl MatchPlay {
                         id: player.id,
                         team: player.team,
                         bot: Bot::new(feet_m, player.id),
+                        frame,
                         is_firing: false,
-                        fire_cooldown_s: 0.0,
+                        was_firing: false,
+                        is_rifle: false,
+                        beam_speckle_frac: 0.0,
                     }
                 }
             };
@@ -282,7 +292,10 @@ impl MatchPlay {
             remote.team = player.team;
             remote.bot.feet_m = feet_m;
             remote.bot.yaw_rad = forward.x.atan2(forward.z);
+            remote.frame = frame;
             remote.is_firing = player.is_laser_on;
+            remote.is_rifle = player.is_rifle;
+            remote.beam_speckle_frac = player.beam_speckle_frac;
             remotes.push(remote);
         }
         session.remote_bots = remotes;
