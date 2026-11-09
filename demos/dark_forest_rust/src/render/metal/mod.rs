@@ -53,7 +53,9 @@ use self::resources::{
     upload_texture_2d,
 };
 use crate::render::culling::{CASCADE_COUNT, CascadeCamera, Cascades, Frustum, fit_cascades};
-use crate::render::frame_clock::{MIN_CADENCE_SAMPLE_COUNT, choose_refreshes_per_frame};
+use crate::render::frame_clock::{
+    CadenceHold, MIN_CADENCE_SAMPLE_COUNT, choose_refreshes_per_frame,
+};
 use crate::render::frame_trace::CompletedFrame;
 use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, FrameDescription, FrameTiming, LENS_FACES,
@@ -330,6 +332,7 @@ pub struct MetalRenderer {
     is_tracing_frames: bool,
     refresh_interval_s: Option<f64>,
     refreshes_per_frame: u32,
+    cadence_hold: CadenceHold,
     gpu_ms_since_cadence: Vec<f64>,
     shown_s_since_cadence: Arc<Mutex<Vec<f64>>>,
     gpu_times: Vec<CompletedFrame>,
@@ -595,6 +598,7 @@ impl MetalRenderer {
             is_tracing_frames: false,
             refresh_interval_s: None,
             refreshes_per_frame: 1,
+            cadence_hold: CadenceHold::New(),
             gpu_ms_since_cadence: Vec::new(),
             shown_s_since_cadence: Arc::new(Mutex::new(Vec::new())),
             gpu_times: Vec::new(),
@@ -654,13 +658,17 @@ impl MetalRenderer {
             .windows(2)
             .map(|pair| (pair[1] - pair[0]) * SECONDS_TO_MS)
             .collect();
+        let now_s: f64 = objc2_quartz_core::CACurrentMediaTime();
         let refreshes_per_frame: u32 = choose_refreshes_per_frame(
             self.refreshes_per_frame,
             &shown_intervals_ms,
             &self.gpu_ms_since_cadence,
             refresh_s * SECONDS_TO_MS,
+            self.cadence_hold.can_speed_up(now_s),
         );
         if refreshes_per_frame != self.refreshes_per_frame {
+            self.cadence_hold
+                .note_change(self.refreshes_per_frame, refreshes_per_frame, now_s);
             self.refreshes_per_frame = refreshes_per_frame;
             self.gpu_ms_since_cadence.clear();
             shown_s.clear();

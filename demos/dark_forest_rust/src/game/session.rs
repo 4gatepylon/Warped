@@ -1426,7 +1426,8 @@ impl Session {
         let mut world_draws: Vec<DrawItem> = scene.static_draws.clone();
         for &(index, far_mesh) in &scene.far_leaf_meshes {
             let draw: &mut DrawItem = &mut world_draws[index];
-            let gap_m: f32 = draw.bounds_center_m.distance(camera.position_m) - draw.bounds_radius_m;
+            let gap_m: f32 =
+                draw.bounds_center_m.distance(camera.position_m) - draw.bounds_radius_m;
             if gap_m > FAR_LEAF_M * zoom {
                 draw.mesh = far_mesh;
             }
