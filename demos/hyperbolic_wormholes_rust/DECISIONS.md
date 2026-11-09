@@ -2036,6 +2036,37 @@
 - **Rationale:** 2 to 6% off every view but `wormhole_exit`; `laser_into_wormhole` 17.5 → 16.6 ms at 2560×1440
   (p99 17.0). The 3440×1440 views over 16.7 ms (16.9 to 21 ms) and `wormhole_exit` need more than this.
 
+### D112. Exact ground hits far from the origin, shadow safe steps, blocks of groups, W-131 (Lunar wormhole_exit slow at full size)
+
+- **Choice:** five more changes to `render_voxel.*` (Lunar Surface, the match's copy and Dust):
+  - **Fermi u from a logarithm:** `get_fermi` took u from atanh(z / w), which near the spawns (u ≈ 4.2 R, z / w ≈
+    0.9995) turns a float's rounding into several millimetres; ln((w + |z|) / √(1 + x² + y²)) is the same on the
+    hyperboloid and good to micrometres. Camera rays also end their bisection with a secant step.
+  - **Smoothness from the eye:** a float world point there is itself only good to about a millimetre, more than the
+    step between neighbouring pixels' hits on the near ground, so `is_cell_smooth` found the near ground and walls
+    rough and traced them pixel by pixel (a third of `red_spawn`'s time). A ray that went straight from the eye
+    (`STRAIGHT_RAY_BIT`) is now measured by its direction from the eye times its distance (`get_eye_point`), which is
+    exact; cells with a bent ray keep the world points.
+  - **Shadow safe steps:** a shadow ray's terrain march takes the camera ray's safe step, shortened so that its gap
+    can't fall below its least penumbra ratio so far (`hit.lit`) on the way: the penumbra is unchanged.
+  - **Shared full shadow:** a ground pixel between four fine samples whose sun rays all hit something takes their
+    shadow, as one between four fully lit samples already took their light (D110).
+  - **Blocks of groups:** the static structure groups (12 m cells) are packed by 4 × 4 blocks with a bounding sphere
+    each (`pack_structure_groups`), so a ray, above all a shadow ray, tests a block before its groups.
+- **Look:** the same, but where the ground hits moved: they are now on the ground rather than up to a bisection's
+  width under it, which moves the regolith's fine texture by a pixel here and there (`red_spawn`: 3.7% of pixels past
+  8 of 255, mean 1.1; `red_hangar` 0.9%; elsewhere under 0.7%). The shared shadow changed at most 0.003% of a view's
+  pixels; the blocks and the shadow steps none.
+- **Gives up:** a lit gap narrower than two pixels between four fully shadowed samples is lost; none was found in the
+  bench views.
+- **Not taken, for the user** (`wormhole_exit`, the lens filling the view; options sheet in the PR): a half-resolution
+  lens (cells whose four corners took 8 or more bent steps blend their corners' colours instead of tracing): 50 → 25.5
+  ms at 2560×1440, edges a little stepped; Dust's longer bent steps: 36.7 ms, rings move a few pixels; both: 21.2 ms;
+  the half-resolution lens tracing edges between surfaces: 34.4 ms; both, with the long late steps after 40 steps
+  instead of 90: 20.1 ms. None reaches 16.7 ms at 3440×1440 (24.6 ms at best).
+- **Rationale:** the user wants 60 frames a second at full size on the 3440×1440 display. At 3440×1440, 19 of 21 views
+  are now under 16.7 ms (before: 14); `wormhole_exit` and `laser_into_wormhole` (the lens) are left.
+
 ## Workload
 
 ### D7. Eight fixed views

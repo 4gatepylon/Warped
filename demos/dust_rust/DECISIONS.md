@@ -116,3 +116,8 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
     full size; Lunar Surface's D111), shared with Lunar Surface's renderer. At render scale 1 and 2560x1440:
     `laser_into_wormhole` 21.0 → 20.2 ms, the other views 0 to 4% faster; at most 0.1% of pixels change by more than
     8 of 255.
+22. **Exact ground hits far from the origin, shadow safe steps, blocks of groups** (W-131, Lunar wormhole_exit slow at
+    full size; Lunar Surface's D112), shared with Lunar Surface's renderer; the map picture's straight-down rays keep
+    measuring smoothness by their points. At render scale 1, 4 to 13% faster: at 2560x1440 every view but
+    `laser_into_wormhole` (20.2 → 19.4 ms) takes at most 15.3 ms; at 3440x1440, 16 of 24 views are under 16.7 ms
+    (before: 14), the rest 17.0–22.9 ms. At most 0.005% of pixels change by more than 8 of 255.

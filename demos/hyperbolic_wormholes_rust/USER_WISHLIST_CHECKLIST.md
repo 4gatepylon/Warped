@@ -331,6 +331,9 @@ are here too, since the user hadn't confirmed them.
   #450: Lunar Surface's ground is baked and each ray tests less; 19 of 21 bench views now take at most 16.6 ms at
   2560x1440 at full resolution (`wormhole_exit` 109 → 49.5 ms, still over; in play the render scale drops there).
   #454: safe terrain steps and the beam's haze between samples, 2-6% more; `laser_into_wormhole` 16.6 ms.
+  #PRNUM: exact ground hits far from the origin, shadow safe steps, blocks of groups (D112): at 3440x1440, 19 of 21
+  views under 16.7 ms (`red_spawn` 21.0 → 14.5 ms); `wormhole_exit` (57.7 ms) and `laser_into_wormhole` (18.9 ms) left,
+  with options for the lens (half resolution, longer bent steps) in the PR for the user.
 
 ## Done
 
