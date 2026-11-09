@@ -623,11 +623,18 @@ pub fn run_voxel_bot(
             )?;
         } else if client.id.is_some() {
             let team: u32 = client.team.expect("a welcome brings the team");
+            let eye: DVec4 = player.get_camera_frame(world).col(AXIS_W);
             let enemies: Vec<(u32, DVec4)> = client
                 .players
                 .iter()
                 .filter(|other| other.team != team)
-                .map(|other| (other.id, other.frame.col(AXIS_W)))
+                .map(|other| {
+                    let at: DVec4 = other.frame.col(AXIS_W);
+                    (
+                        other.id,
+                        world.torus.map_or(at, |torus| torus.move_nearest(eye, at)),
+                    )
+                })
                 .collect();
             let own_step_s: f64 =
                 BOT_STEP_S * world.get_time_rate_frac(player.get_camera_frame(world).col(AXIS_W));

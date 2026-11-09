@@ -17,6 +17,10 @@ use glam::{DMat4, DVec4};
 use crate::geometry::{AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, invert_lorentz, make_boost};
 use crate::terrain::get_fermi_coordinates;
 
+/// `SEAM_MIN_M` is how near a seam crossing may be and still not count: the seam a ray was just carried
+/// across (as the shader's constant of the same name).
+const SEAM_MIN_M: f64 = 0.001;
+
 /// `get_cell_offset_m` gives the multiple of the periods that brings ground spot (u, v) into the
 /// cell around the origin, [-period/2, period/2) each way.
 ///
@@ -125,6 +129,77 @@ impl Torus {
         }
         let frame: DMat4 = self.make_fermi_frame(get_fermi_coordinates(to, self.r_m));
         self.shift_frame(frame, offset_m).col(AXIS_W)
+    }
+
+    /// `find_seam_s` gives how far (curvature units) the geodesic from point x along unit tangent
+    /// v goes before it first crosses a seam (u or v at ± half its period), with the seam's axis
+    /// (0 for u, 1 for v), as the shader's `find_seam_s` does: a linear equation in the chord's
+    /// Klein parameter λ = tanh s for u, a quadratic for v. Crossings nearer than `SEAM_MIN_M`
+    /// don't count, so a ray just carried across a seam goes on.
+    ///
+    /// Example: `if let Some((s, axis)) = torus.find_seam_s(x, v) { ... }`
+    pub fn find_seam_s(&self, x: DVec4, v: DVec4) -> Option<(f64, usize)> {
+        let lam_min: f64 = (SEAM_MIN_M / self.r_m).tanh();
+        let mut best: Option<(f64, usize)> = None;
+        let mut take = |lam: f64, axis: usize| {
+            if lam > lam_min && lam < 1.0 && best.is_none_or(|(s, _)| lam.atanh() < s) {
+                best = Some((lam.atanh(), axis));
+            }
+        };
+        let k: f64 = (0.5 * self.periods_m[0] / self.r_m).tanh();
+        for side in [-1.0, 1.0] {
+            let den: f64 = v.z + side * k * v.w;
+            if den.abs() > f64::EPSILON {
+                take(-(x.z + side * k * x.w) / den, 0);
+            }
+        }
+        let half_v: f64 = 0.5 * self.periods_m[1] / self.r_m;
+        let (c2, s2) = (half_v.cosh().powi(2), half_v.sinh().powi(2));
+        let qa: f64 = c2 * v.x * v.x - s2 * (v.w * v.w - v.z * v.z);
+        let qb: f64 = 2.0 * (c2 * x.x * v.x - s2 * (x.w * v.w - x.z * v.z));
+        let qc: f64 = c2 * x.x * x.x - s2 * (x.w * x.w - x.z * x.z);
+        let disc: f64 = qb * qb - 4.0 * qa * qc;
+        if disc >= 0.0 && qa.abs() > f64::EPSILON {
+            for root in [-disc.sqrt(), disc.sqrt()] {
+                take((-qb + root) / (2.0 * qa), 1);
+            }
+        }
+        best
+    }
+
+    /// `cross_seam` carries a ray at a seam (point x, tangent v) across it by the glue: to its
+    /// Fermi (u, v, h) less a period along `axis`, turned the same way against the Fermi axes.
+    ///
+    /// Example: `let (x, v) = torus.cross_seam(x, v, 0);`
+    pub fn cross_seam(&self, x: DVec4, v: DVec4, axis: usize) -> (DVec4, DVec4) {
+        let [u_m, v_m] = self.get_spot_m(x);
+        let mut offset_m: [f64; 2] = [0.0, 0.0];
+        offset_m[axis] = -[u_m, v_m][axis].signum() * self.periods_m[axis];
+        self.move_ray(x, v, offset_m)
+    }
+
+    /// `wrap_ray` moves a ray past a seam (one that left a warp's reach there) back into the cell.
+    ///
+    /// Example: `let (x, v) = torus.wrap_ray(x, v);`
+    pub fn wrap_ray(&self, x: DVec4, v: DVec4) -> (DVec4, DVec4) {
+        let offset_m: [f64; 2] = get_cell_offset_m(self.get_spot_m(x), self.periods_m);
+        if offset_m == [0.0, 0.0] {
+            return (x, v);
+        }
+        self.move_ray(x, v, offset_m)
+    }
+
+    /// `move_ray` moves a ray (point x, tangent v) `offset_m` (u, v) along the ground by the glue.
+    fn move_ray(&self, x: DVec4, v: DVec4, offset_m: [f64; 2]) -> (DVec4, DVec4) {
+        let fermi_m: [f64; 3] = get_fermi_coordinates(x, self.r_m);
+        let to_m: [f64; 3] = [
+            fermi_m[0] + offset_m[0],
+            fermi_m[1] + offset_m[1],
+            fermi_m[2],
+        ];
+        let glue: DMat4 =
+            self.make_fermi_frame(to_m) * invert_lorentz(self.make_fermi_frame(fermi_m));
+        (glue * x, glue * v)
     }
 
     /// `make_fermi_frame` is the frame at Fermi (u, v, h) whose axes are the Fermi axes there,

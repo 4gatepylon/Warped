@@ -322,3 +322,30 @@ Built on `claude/snow-planet-torus-rays`, 2026-11-08 (Claude Code), on layer 2 (
     ghosts (layer 2: the ghost black holes' lenses past the seam); 18.1 with the loop's sky, sun and blizzard
     copies but no rays across seams; 25.8 with rays across seams (before the heuristics), 22.5 after them. The rest
     is the copies themselves within 112 m: their pylons, mounds and nearby black-hole lenses.
+  - **More heuristics after "Fog at 80 m + home lens"** (the user: "the game has to be performant and look good
+    and have fun mechanics, but you can use heuristics..."), each from a player's height only:
+    - the sun's shadow fades out between 45 and 60 m (`SHADOW_FADE_START_M`, `SHADOW_FADE_END_M`), where the fog
+      already hides most of it; gives up far shadows;
+    - a black hole more than 60 m along the ray (`LENS_FAR_M`) is a dark disk even at its nearest copy; gives up far
+      lensing rings, which the fog had mostly hidden;
+    - rays stop crossing seams at 80 m, and a ray that has gone 80 m ends: heading down in fog, heading up in the
+      sky; gives up copies seen in the sky band just above the horizon;
+    - past a seam only the beacon beams are skipped, so lasers fired across a seam stay visible.
+  - **Tried and dropped:** at most one or two black-hole lenses per ray (no clear gain on a busy Mac, and the main
+    black hole view loses the images of its neighbours); no ghost copies at all (under 1 ms, and they are needed).
+
+## S16. Shooting around the loop, layer 4
+
+Built on `claude/snow-planet-torus-shots`, 2026-11-09 (Claude Code), on layer 3 (S15).
+
+- **Lasers:** `trace_laser` cuts a shot at each seam (`Torus::find_seam_s`, as the shader does) and carries it across
+  (`Torus::cross_seam`), starting a new piece as at a throat, and moves it back into the cell when it leaves a warp
+  past a seam (`Torus::wrap_ray`). A shot hits players and pylons across a seam; the shooter's own body is never in
+  the world it is traced through, so a shot around the loop can't hit its own shooter.
+- **Bots** aim and walk at the nearest copy of each player (`Torus::move_nearest`).
+- **Thrown mouths** must keep their reach clear of the seams (they have no ghosts, so their lens would be cut), and
+  clear of other thrown mouths measured the short way round.
+- **Not done:** a robot within about a meter of a seam is cut at it (bodies have no ghosts; it is whole once it
+  crosses); a robot's walking pose can jump for an instant when its player crosses a seam (`avatar_animation.rs`
+  takes the jump as speed, and that file is shared with the other levels, so it is left alone); the minimap and the
+  map page still show the cell only (layer 5).
