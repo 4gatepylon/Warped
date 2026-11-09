@@ -145,14 +145,16 @@ def _start(arguments: list[str], log_path: Path | None, program: Path = _PROGRAM
 
 
 def _stop(process: subprocess.Popen[str]) -> None:
-    """`_stop` stops a process that `_start` started, and everything it started (its process group).
+    """`_stop` stops a process that `_start` started, and everything it started (its process group). A group with
+    nothing left running (gone, or only processes that already ended, which macOS refuses to signal) is only reaped.
 
     Example:
         >>> _stop(server)
     """
     try:
         os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
+        process.wait()
         return
     try:
         process.wait(timeout=_STOP_TIMEOUT_S)
