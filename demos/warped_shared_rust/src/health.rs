@@ -182,9 +182,15 @@ mod tests {
         for hits_to_kill in HITS_TO_KILL {
             let mut damage_frac: f64 = 0.0;
             for _ in 1..hits_to_kill {
-                assert!(!add_damage(&mut damage_frac, get_hit_damage_frac(hits_to_kill)));
+                assert!(!add_damage(
+                    &mut damage_frac,
+                    get_hit_damage_frac(hits_to_kill)
+                ));
             }
-            assert!(add_damage(&mut damage_frac, get_hit_damage_frac(hits_to_kill)));
+            assert!(add_damage(
+                &mut damage_frac,
+                get_hit_damage_frac(hits_to_kill)
+            ));
         }
     }
 

@@ -119,7 +119,11 @@ pub fn make_bar_rects(
         Gun::Laser => hud_bars::make_segmented_bar(
             HEAT_BAR_MIN_FRAC,
             1,
-            if weapons.sniper_reload_s <= 0.0 { 1.0 } else { 0.0 },
+            if weapons.sniper_reload_s <= 0.0 {
+                1.0
+            } else {
+                0.0
+            },
             HEAT_BAR_RGB,
             NO_RECT_PULSE,
         ),
@@ -305,7 +309,10 @@ mod tests {
             rifle.shots_until_overheat as usize
         );
         weapons.switch_gun(Gun::Laser);
-        assert_eq!(make_bar_rects(&gun_only, &weapons, &rifle, &pulses).len(), 1);
+        assert_eq!(
+            make_bar_rects(&gun_only, &weapons, &rifle, &pulses).len(),
+            1
+        );
         let all: HudBars = HudBars {
             health_frac: Some(HALF_FRAC),
             energy_frac: Some(HALF_FRAC),

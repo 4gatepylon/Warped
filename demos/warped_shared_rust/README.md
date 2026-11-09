@@ -27,6 +27,7 @@ included.
 | `fps_demo_assets` (+ `build.rs`) | reads assets from disk or from the models built into the program | yes |
 | `shapes` | the smooth solids structures are made of, and `MapShape`, a map file's description of one | yes |
 | `play_settings` | the settings files' sections every level reads alike: movement, sprint energy, both guns, consoles, respawn, a hit's slowing and look, aiming, thrown wormholes, the view and the minimap | yes |
+| `health` | the damage a hit adds and when it eliminates (the game server's count), what a fall in this player's health shows and does (`HitFeedback`: a shot shows the hit effect and slows, a blizzard's slow damage shows once per hit's worth), the hit effect's fading | yes |
 | `shot_noise` | how far each shot strays from the crosshair, and its beam's speckle | yes |
 | `movement` | the rules of moving (`MoveState::step`): crouching, sprint energy, the head bob's steps, a hit's and crouching's slow; each level's `VoxelPlayer::step` moves the player in its own space | yes |
 | `mesh`, `avatar_model` | glTF models of the maps' structures and the players' robot body | yes |
@@ -37,7 +38,7 @@ included.
 | `viewmodel` (+ `viewmodel.metal`) | the gun held in hand, drawn over the scene | no (Metal) |
 | `overlay` | what is drawn over a frame: HUD rectangles, the wand, the minimap, the text mask, a hit's effect | no (Metal) |
 | `hud_bars` | the HUD's bars: health, ammo, sprint energy, the console bar, and their glows | no (Metal) |
-| `hud` | the crosshair | no (Metal) |
+| `hud` | the HUD: the crosshair, the bars (health, ammo or heat, sprint energy, the console being turned off; `HudBars`, `make_bar_rects`) and their pulses (`HudPulses`), the hit effect's look (`make_hit_effect`), the banner's lobby and "YOU DIED" lines, the HUD line's gun | no (Metal) |
 | `weapons` | the two guns' state (`Weapons`: fire, reload, heat and overheat, recoil, aim, each shot's noise), `Gun`, how much a hit weighs, the gun in hand's place and sway (`make_wand`, `get_sway`), `MUZZLE_M` | no (Metal) |
 
 `overlay` and `texture_arrays` are parts of files that differ per level, taken out verbatim: the overlay types of
@@ -59,7 +60,9 @@ Everything else differs between levels, or needs a module that does:
   `map_export`) needs `map` and `thrown_wormholes`.
 - In each `main.rs`, the `Session` keeps its guns in `weapons: Weapons` and calls it; what stays is what needs
   the level's world: `Tracer` (a shot's beam, `voxel_world`'s segments), tracing shots, the view's recoil,
-  `update_gun` (the step phase from the level's walking), the HUD's bars and lines. City Sphere's own
+  `update_gun` (the step phase from the level's walking), the HUD's text lines (speed, height, the map's
+  own lines); its bars, hit effect and banner's lobby and death lines come from `hud`, and its hit feedback
+  and the server's damage count from `health`. City Sphere's own
   `CitySession` (`city.rs`) keeps its guns in a `Weapons` too and traces each shot through its glass and wormholes.
 - Files identical in all but City Sphere: `render_metal.*` (City adds its own frame kind), `thrown_wormholes`
   (City adds `update_placing`, which Lunar's `update` could call), `third_person` (City makes four constants

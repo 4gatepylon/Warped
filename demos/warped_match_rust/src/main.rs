@@ -64,9 +64,9 @@ use warped_shared::hud::{
 };
 use warped_shared::weapons::{Gun, Weapons, get_sway, make_wand, take_hit_weight};
 use warped_shared::{
-    app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, health, hud_bars, key_bindings,
-    mesh,
-    overlay, play_settings, render_mesh, shapes, shot_noise, spaceships, texture_arrays, viewmodel,
+    app_bundle, avatar_model, exit_prompt, fps_demo_assets, geometry, health, hud_bars,
+    key_bindings, mesh, overlay, play_settings, render_mesh, shapes, shot_noise, spaceships,
+    texture_arrays, viewmodel,
 };
 
 use std::error::Error;

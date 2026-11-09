@@ -1637,8 +1637,8 @@ mod tests {
     //! | Server silent to a welcomed client | shorter than its timeout (stays), longer (the server dropped it: joins the same team again) | `clients_the_server_dropped_join_again` |
 
     use super::*;
-    use crate::health::DAMAGE_TOLERANCE_FRAC;
     use crate::geometry::{AXIS_X, AXIS_Z, make_boost, make_rotation};
+    use crate::health::DAMAGE_TOLERANCE_FRAC;
     use crate::shapes::{Shape, ShapeKind};
     use glam::DVec3;
 

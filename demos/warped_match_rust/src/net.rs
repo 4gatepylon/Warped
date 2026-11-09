@@ -1673,8 +1673,8 @@ mod tests {
     //! | Level result file's neighbours | one named like it without its extension, plus `.partial` (left alone) | `level_results_leave_files_named_like_them_alone` |
 
     use super::*;
-    use crate::health::DAMAGE_TOLERANCE_FRAC;
     use crate::geometry::{AXIS_X, AXIS_Z, make_boost, make_rotation};
+    use crate::health::DAMAGE_TOLERANCE_FRAC;
     use crate::shapes::{Shape, ShapeKind};
     use glam::DVec3;
 
