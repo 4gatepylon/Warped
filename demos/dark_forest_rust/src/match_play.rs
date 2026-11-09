@@ -257,13 +257,20 @@ impl MatchPlay {
             let feet_m: Vec3 = eye_m - Vec3::Y * EYE_HEIGHT_M;
             let mut remote: RemoteBot = match old.iter().position(|r| r.id == player.id) {
                 Some(i) => old.swap_remove(i),
-                None => RemoteBot {
-                    id: player.id,
-                    team: player.team,
-                    bot: Bot::new(feet_m, player.id),
-                    is_firing: false,
-                    fire_cooldown_s: 0.0,
-                },
+                None => {
+                    println!(
+                        "sees player {} of the {} team",
+                        player.id,
+                        ["blue", "red"][player.team as usize % 2]
+                    );
+                    RemoteBot {
+                        id: player.id,
+                        team: player.team,
+                        bot: Bot::new(feet_m, player.id),
+                        is_firing: false,
+                        fire_cooldown_s: 0.0,
+                    }
+                }
             };
             let last_m: Vec3 = self.last_feet_m.insert(player.id, feet_m).unwrap_or(feet_m);
             let speed_m_s: f32 = (feet_m - last_m).with_y(0.0).length() * 60.0;

@@ -961,7 +961,7 @@ fn main() {
     }
     session.console_places = console_reach::find_console_places(&map_file);
     session.is_team_known = !is_online;
-    if args.bot {
+    if args.bot || (args.autopilot && is_online) {
         session.walker = Some(BotWalker::New());
         session.is_console_objective = args.bot_objective.is_some();
     }
