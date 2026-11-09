@@ -15,6 +15,7 @@
 #     make bench-levels LABEL=<label>: time every bench view of the five levels at 2560x1440 into .artifacts/bench_levels/ (tools/bench_levels.sh).
 #     make progression-pictures WIDTH_PX=<n> HEIGHT_PX=<n>: render the progression page for a few match states into .artifacts/progression_pictures/.
 #     make play-all-levels MATCH_PORT=<n> LEVEL_PORT=<n> LABEL=<label>: play a bot match steered through all five levels and check it (.artifacts/play_all_levels/).
+#     make e2e-match MATCH_PORT=<n> LEVEL_PORT=<n>: play a whole match of two bots, consoles off in 1 s (.artifacts/e2e_match/).
 #     make run-autopilot RENDERER=<metal|cpu> WIDTH_PX=<n> HEIGHT_PX=<n>: play a scripted route.
 #     make test: run the tests.
 #     make fmt: format with rustfmt and lint with clippy.
@@ -33,6 +34,7 @@ PORT ?= 47852
 MATCH_LEVELS ?= match_levels.yaml
 MATCH_PORT ?= 48110
 LEVEL_PORT ?= 48112
+E2E_MATCH_RUN := .artifacts/e2e_match/$(shell date -u +%Y%m%d-%H%M%S)
 LABEL ?=
 TEAM ?=
 TEAM_FLAG := $(if $(TEAM),--team $(TEAM))
@@ -68,7 +70,8 @@ help:
 	@echo "  make serve-match                                 Run a match server (UDP 47850) over the levels of match_levels.yaml"
 	@echo "  make join-match SERVER=127.0.0.1 TEAM=blue       Open the match window (progression page); each round opens its level"
 	@echo "  make bot-match TEAM=red                          Join the match with a bot that turns off the other team's consoles"
-	@echo "  make e2e-match                                   A whole match of two bots, consoles off in 1 s (e2e/)"
+	@echo "  make e2e-match MATCH_PORT=48110 LEVEL_PORT=48112"
+	@echo "                                                   A whole match of two bots, consoles off in 1 s (e2e/; .artifacts/e2e_match/)"
 	@echo "  make play-all-levels MATCH_PORT=48110 LEVEL_PORT=48112"
 	@echo "                                                   A bot match steered through all five levels, checked (.artifacts/play_all_levels/)"
 	@echo "  make levels LEVEL_SOURCE=checkout                Build the levels from this checkout's demos/<level>_rust/ instead of their branches"
@@ -196,9 +199,11 @@ bot-match:
 
 e2e-match: levels
 	cargo build --release
-	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --bot --team blue > .build/e2e_blue.log 2>&1 &
-	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --bot --team red > .build/e2e_red.log 2>&1 &
-	./.build/release/hyperbolic-wormholes --serve-match --match-levels e2e/match_levels_fast.yaml --intermission-s 2 --round-over-s 2 --label e2e
+	mkdir -p $(E2E_MATCH_RUN)
+	printf '%s\ncommit: %s\n' "make e2e-match MATCH_PORT=$(MATCH_PORT) LEVEL_PORT=$(LEVEL_PORT)" "$$(git describe --always --dirty)" > $(E2E_MATCH_RUN)/command.txt
+	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --match-port $(MATCH_PORT) --bot --team blue > $(E2E_MATCH_RUN)/blue.log 2>&1 &
+	./.build/release/hyperbolic-wormholes --match 127.0.0.1 --match-port $(MATCH_PORT) --bot --team red > $(E2E_MATCH_RUN)/red.log 2>&1 &
+	./.build/release/hyperbolic-wormholes --serve-match --match-levels e2e/match_levels_fast.yaml --match-port $(MATCH_PORT) --port $(LEVEL_PORT) --intermission-s 2 --round-over-s 2 --label e2e 2>&1 | tee $(E2E_MATCH_RUN)/server.log
 
 play-all-levels: levels
 	cargo build --release
