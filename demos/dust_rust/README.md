@@ -30,6 +30,10 @@ LAN discovery 47831.
 
 ## How it works
 
+- **Shared code**: the files every Rust level shares (geometry, the gun held in hand, the HUD's bars and overlay
+  types, the maps' models and the robot body, the smooth shapes, the key bindings, finding assets) are in
+  [`../warped_shared_rust/`](../warped_shared_rust/README.md), a library this crate depends on; the rest of the
+  copied Lunar Surface code is still in `src/`.
 - **Map**: `common/maps/dust/map.json`, written by `tools/make_dust_map.py` (rerun it after editing it): a crater
   basin with dunes, sandstone mesas, pillars, ruin walls and an arch, HESCO rows, bunkers, 3 pylons per team
   (mirrored), spawns at u = ±104 m, a wormhole pair near (-50, -40) and (50, 40) m, centred at eye height so

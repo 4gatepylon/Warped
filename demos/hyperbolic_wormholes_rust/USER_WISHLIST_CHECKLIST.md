@@ -51,6 +51,10 @@ is in [`AGENTS.md`](AGENTS.md).
     sprint energy, crouch, jump, air control, step, a hit's slowing, the shot delay after moving, the settings'
     respawn delay; Lunar's flashlight and exit prompt; `claude/dark-forest-movement`, open, 2026-11-09); still
     missing there: Lunar's beam looks and speckle, the Tab pages, the minimap, third person, thrown wormholes.
+    Shared code: #447 (`demos/warped_shared_rust/`, the files identical in Lunar Surface, Dust, Snow Planet, City
+    Sphere and the match, moved into one library they all use, no change in play or pictures;
+    `claude/shared-level-code`, open); its `PLAN.md` is the next step, one movement, guns, health, HUD and robots
+    for all five levels.
     Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
     and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":

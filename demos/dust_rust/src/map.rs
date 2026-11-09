@@ -22,11 +22,11 @@ use clap::ValueEnum;
 use glam::{DMat4, DQuat, DVec3, DVec4};
 use serde::Deserialize;
 
-use crate::app_bundle::MODELS;
 use crate::geometry::{
     AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, invert_lorentz, make_boost, make_fermi_point,
 };
 use crate::net::TEAM_NAMES;
+pub use crate::shapes::MapShape;
 use crate::terrain::get_fermi_coordinates;
 
 /// `Result` is this module's result type.
@@ -120,19 +120,6 @@ pub struct Ground {
     pub material: u8,
     pub tiling: Option<Tiling>,
     pub terrain: Option<MapTerrain>,
-}
-
-/// `MapShape` is one smooth solid of a structure, in its local chart (meters): a kind (`box`,
-/// `cylinder` or `ellipsoid`), centre, half sizes, edge rounding, a cylinder's axis and a material.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MapShape {
-    pub kind: String,
-    pub centre_m: [f64; 3],
-    pub half_m: [f64; 3],
-    pub round_m: Option<f64>,
-    pub axis: Option<u8>,
-    pub material: u8,
 }
 
 /// `MapMesh` is the glTF model a structure is drawn as: its folder in `common/maps/models/` and
@@ -425,14 +412,6 @@ pub fn get_map_folder(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(MAPS_FOLDER)
         .join(name)
-}
-
-/// `get_model_path` gives the `scene.gltf` of the model folder `model` in `common/maps/models/`, or in
-/// the app's copy of it when the game runs from `Warped.app` (`app_bundle.rs`).
-///
-/// Example: `let path: PathBuf = get_model_path("hesco_barrier");`
-pub fn get_model_path(model: &str) -> PathBuf {
-    MODELS.get_path().join(model).join("scene.gltf")
 }
 
 /// `to_frame` turns a frame's 16 numbers (column-major) into a matrix.

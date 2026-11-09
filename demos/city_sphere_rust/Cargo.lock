@@ -151,6 +151,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "warped_shared",
 ]
 
 [[package]]
@@ -970,6 +971,21 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "warped_shared"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "gltf",
+ "image",
+ "objc2",
+ "objc2-foundation",
+ "objc2-metal",
+ "rayon",
+ "sdl3",
+ "serde",
+]
 
 [[package]]
 name = "windows-link"
