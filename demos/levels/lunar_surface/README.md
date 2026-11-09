@@ -32,8 +32,8 @@ first try at the README checklist's first item for this level; the layout is a p
   the planet shows twice. `Einstein ring` (a panel button) lines the black hole up with the planet.
 - **The laser** (`R` or click): shoot past the black hole and the beam bends exactly as the light you see does, so you
   hit what the crosshair covers; its lensed second image shows next to the shadow. Shoot into the wormhole (`6`) and
-  it hits the red pylon 42 m away.
-- **The wormhole** (`6`): its disc shows the red landing pad 116 m away. Walk in and you come out on that pad (`7`
+  it hits the red pylon 46 m away.
+- **The wormhole** (`6`): its disc shows the red landing pad 116 m away. Walk in and you come out beside that pad (`7`
   looks back at the exit), in view of the red watchtower.
 - **Room grows exponentially:** the overview (`3`) shows the whole infinite plain as a disc. Lengths along the flanks
   stretch by cosh(v/R): the ridge, 57 m off the axis, is 211 m long but spans only 96 m of the axis.

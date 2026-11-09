@@ -72,6 +72,11 @@
 - **Rationale:** a fast but exposed way to the pylon, as the brief suggests. The pad is open ground under the
   watchtower, so red can hold it.
 - **Revisit if:** attackers win too easily through it; move B farther out or behind the barrier line.
+- **Changed (2026-11-09, an option for the user, W-131 (Lunar wormhole_exit slow at full size)):** mouth B stands
+  12-14 m from the pad's centre toward the middle of the map, beside the pad rather than over it (`RED_PAD`,
+  `MOUTH_B_FROM_PAD_M`, a seeded offset of up to 0.5 m each way), still facing the red pylon. Over the pad, every ray
+  near the mouth tested the pad's 14 shapes at each bent step, so the view at the exit took 24 ms at 3440x1440 in the
+  Rust renderer; beside it, 15.5 ms. The laser through the wormhole still hits the red pylon, now 46 m away.
 
 ### D8. Gravity, jumps and speeds **(needs input)**
 

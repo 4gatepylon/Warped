@@ -1407,7 +1407,7 @@ fn make_voxel_bench_views() -> Vec<VoxelView> {
         view("middle", [-27.0, 0.0], [40.0, 0.0], None, 0.1),
         view("black_hole", [-12.0, 4.0], [0.0, 0.0], Some(19.0), -0.42),
         view("wormhole", [-22.0, 40.0], [-14.0, 40.0], None, 0.0),
-        view("wormhole_exit", [81.0, 26.0], [78.0, 30.0], None, 0.0),
+        view("wormhole_exit", [68.9, 18.2], [65.9, 22.2], None, 0.0),
         view("red_pylon", [82.0, -1.0], [94.0, 6.0], None, 0.05),
         view("ridge", [10.0, 58.5], [45.0, -5.0], None, -0.12),
         view("einstein_ring", [-10.0, -3.0], [0.0, 0.0], Some(11.0), 0.15),

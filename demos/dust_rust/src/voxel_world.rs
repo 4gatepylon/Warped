@@ -2645,7 +2645,7 @@ mod tests {
     use crate::thrown_wormholes::GREEN_COLOR;
 
     const STAND_TOLERANCE_M: f64 = 0.06;
-    const PYLON_DISTANCE_M: f64 = 41.5;
+    const PYLON_DISTANCE_M: f64 = 45.7;
     const PYLON_AIM_M: [f64; 2] = [-14.0, 40.05];
     const PYLON_AIM_PITCH_RAD: f64 = -0.004;
     const DISTANCE_TOLERANCE_M: f64 = 0.5;

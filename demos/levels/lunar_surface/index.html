@@ -78,7 +78,7 @@
   <div id="tips_body">
   <ol>
     <li><b>The black hole over the crater</b> (<kbd>5</kbd>, or walk in from <kbd>4</kbd>). Light bends around it: the crater rim behind it curves into an arc, a thin Einstein ring wraps the black shadow, and sight lines across the crater bend upward. Shoot the laser past it: the beam bends exactly as the light you see does, so you hit what the crosshair covers.</li>
-    <li><b>The wormhole on the ridge route</b> (<kbd>6</kbd>). Its disc shows the red landing pad, 116 m away. Walk into it (you move along light paths near a mouth, so aim at the disc) and you come out on that pad, 30 m from the red pylon, in full view of the red watchtower (<kbd>7</kbd> looks back at the exit). Fast, but exposed. Shoot into it and the beam comes out there too.</li>
+    <li><b>The wormhole on the ridge route</b> (<kbd>6</kbd>). Its disc shows the red landing pad, 116 m away. Walk into it (you move along light paths near a mouth, so aim at the disc) and you come out beside that pad, 25 m from the red pylon, in full view of the red watchtower (<kbd>7</kbd> looks back at the exit). Fast, but exposed. Shoot into it and the beam comes out there too.</li>
     <li><b>Far more room than it looks.</b> From the overview (<kbd>3</kbd>) the whole infinite plain shrinks to a disc: the crater fills the middle and both spawns, 227 m apart, are squeezed against its rim. Distances along the flanks stretch by cosh(v/R): the ridge, 57 m off the centre line, is 211 m long though it spans only 96 m of the centre line, and a flank route that bows out 36 m is 36% longer than the 90 m centre route (28% in flat space).</li>
     <li><b>Long sight lines.</b> Climb the ridge (<kbd>9</kbd>) and look across the crater. Things shrink faster with distance than in flat space (by R·sinh(d/R)/d: 2.4 times at 100 m), so a player 100 m away looks like one 240 m away would on Earth. Aim low: a level shot is a geodesic and the ground curves away beneath it, so 100 m out it passes 10 m up.</li>
     <li><b>Harsh light, long shadows.</b> The sun hangs 17° above the horizon at the same height everywhere on the level, so every building throws a shadow three times its height. The planet low over the red base lights the shadows faintly.</li>
@@ -198,7 +198,15 @@ const WORMHOLE_REACH_M = 15;
 const MOUTH_HEIGHT_M = 1.7;
 const PAD_HEIGHT_M = 1;
 const MOUTH_A = { u_m: -14, v_m: 40 };
-const MOUTH_B = { u_m: 78, v_m: 30 };
+const RED_PAD = { u_m: 78, v_m: 30 };
+const MOUTH_B_FROM_PAD_M = { u_m: -12, v_m: -8 };
+const MOUTH_B_JITTER_M = 0.5;
+const MOUTH_B_SEED = 136;
+const MOUTH_B_RNG = make_rng(MOUTH_B_SEED);
+const MOUTH_B = {
+  u_m: RED_PAD.u_m + MOUTH_B_FROM_PAD_M.u_m + MOUTH_B_JITTER_M * (2 * MOUTH_B_RNG() - 1),
+  v_m: RED_PAD.v_m + MOUTH_B_FROM_PAD_M.v_m + MOUTH_B_JITTER_M * (2 * MOUTH_B_RNG() - 1)
+};
 const FOIL_LAMBDA_SQ = 0.25;
 const ISOTROPIC_RADIUS_PER_RS = 0.25;
 const HORIZON_CAPTURE_FRAC = 1.02;
@@ -1091,9 +1099,10 @@ function build_level() {
   place_at(red_dome, LAYOUT.red_dome, toward_centre(...LAYOUT.red_dome));
   add_pylons(RED, LAYOUT.red_pylons);
   place_at(build_hangar('red spawn hangar', RED), LAYOUT.red_hangar, toward_centre(...LAYOUT.red_hangar));
-  place_at(build_watchtower('red watchtower', RED), LAYOUT.red_watchtower, get_facing_yaw(...LAYOUT.red_watchtower, MOUTH_B.u_m, MOUTH_B.v_m));
-  const pad_yaw = get_facing_yaw(MOUTH_B.u_m, MOUTH_B.v_m, ...LAYOUT.red_pylons[0]);
-  place_model(build_landing_pad('red landing pad', RED), MOUTH_B.u_m, MOUTH_B.v_m, pad_yaw);
+  place_at(build_watchtower('red watchtower', RED), LAYOUT.red_watchtower, get_facing_yaw(...LAYOUT.red_watchtower, RED_PAD.u_m, RED_PAD.v_m));
+  const pad_yaw = get_facing_yaw(RED_PAD.u_m, RED_PAD.v_m, ...LAYOUT.red_pylons[0]);
+  place_model(build_landing_pad('red landing pad', RED), RED_PAD.u_m, RED_PAD.v_m, pad_yaw);
+  const mouth_b_yaw = get_facing_yaw(MOUTH_B.u_m, MOUTH_B.v_m, ...LAYOUT.red_pylons[0]);
   const mast = build_antenna('red antenna', 12, MAT.RED_LIGHT); mast.addLamp([0, 15, 0], TEAM_COLORS[RED], 8);
   place_at(mast, LAYOUT.red_mast, 0);
   place_at(build_walkway('red walkway', 8), LAYOUT.red_walkway, get_facing_yaw(...LAYOUT.red_walkway, ...LAYOUT.red_walkway_toward));
@@ -1104,7 +1113,7 @@ function build_level() {
     size_c: ISOTROPIC_RADIUS_PER_RS * BLACK_HOLE_RS_M / R, reach_c: BLACK_HOLE_REACH_M / R, partner: -1 });
   const mouth_a = add_warp({ kind: KIND_MOUTH, name: 'wormhole mouth A', frame: multiply_matrices(make_frame(MOUTH_A.u_m, MOUTH_A.v_m, 0), make_boost(Y, MOUTH_HEIGHT_M / R)),
     size_c: ISOTROPIC_RADIUS_PER_RS * WORMHOLE_RS_M / R, reach_c: WORMHOLE_REACH_M / R, partner: -1 });
-  const mouth_b = add_warp({ kind: KIND_MOUTH, name: 'wormhole mouth B', frame: multiply_matrices(make_frame(MOUTH_B.u_m, MOUTH_B.v_m, pad_yaw), make_boost(Y, (PAD_HEIGHT_M + MOUTH_HEIGHT_M) / R)),
+  const mouth_b = add_warp({ kind: KIND_MOUTH, name: 'wormhole mouth B', frame: multiply_matrices(make_frame(MOUTH_B.u_m, MOUTH_B.v_m, mouth_b_yaw), make_boost(Y, (PAD_HEIGHT_M + MOUTH_HEIGHT_M) / R)),
     size_c: ISOTROPIC_RADIUS_PER_RS * WORMHOLE_RS_M / R, reach_c: WORMHOLE_REACH_M / R, partner: mouth_a });
   warps[mouth_a].partner = mouth_b;
   warps.forEach((warp, w) => {
@@ -2514,7 +2523,7 @@ const VIEWS = {
   middle: { label: 'Middle', u_m: -27, v_m: 0, target: [40, 0], pitch_rad: 0.1 },
   black_hole: { label: 'Black hole', u_m: -12, v_m: 4, target: [0, 0], h_m: 19, pitch_rad: -0.42, is_flying: true },
   wormhole: { label: 'Wormhole', u_m: MOUTH_A.u_m - 8, v_m: MOUTH_A.v_m, target: [MOUTH_A.u_m, MOUTH_A.v_m], pitch_rad: 0 },
-  wormhole_exit: { label: 'Wormhole exit', u_m: 81, v_m: 26, target: [MOUTH_B.u_m, MOUTH_B.v_m], pitch_rad: 0 },
+  wormhole_exit: { label: 'Wormhole exit', u_m: MOUTH_B.u_m + 3, v_m: MOUTH_B.v_m - 4, target: [MOUTH_B.u_m, MOUTH_B.v_m], pitch_rad: 0 },
   red_pylon: { label: 'Red pylon', u_m: 82, v_m: -1, target: [94, 6], pitch_rad: 0.05 },
   ridge: { label: 'Ridge', u_m: 10, v_m: 58.5, target: [45, -5], pitch_rad: -0.12 },
   einstein_ring: { label: 'Einstein ring', u_m: -10, v_m: -3, target: [0, 0], h_m: 11, pitch_rad: 0.15, is_flying: true },
