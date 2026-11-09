@@ -128,3 +128,10 @@ Decisions made instead of the user (W-121, Dust demo). **User?** marks ones to w
     17.5 → 14.8, `laser_ground` 17.4 → 14.9, `laser_across_wind_eye` 19.9 → 16.5, `laser_across_wind_above` 17.0 →
     16.6; still over 16.7: `wormhole` 18.1, `wormhole_exit` 17.9, `crater_wall` 18.0, `laser_into_wormhole` 21.6.
     The default render scale stays 0.6 (the user, 2026-11-09).
+24. **No aliasing** (W-138, no aliasing; Lunar Surface's D116), the same code as Lunar Surface's renderer without its
+    half-resolution lens: outside the sharp centre tone mapping shows a cubic B-spline of the half- or
+    quarter-resolution pixels, blended in over 48 px, so the soft edges show no steps, and FXAA 3.11 anti-aliases the
+    whole image. At render scale 1, 3440x1440: 0.4-0.8 ms more per view.
+25. **Option E is the default sharp centre** (W-136, sharp centre, soft edges; Lunar Surface's D117): the middle half of
+    the width sharp, half resolution out to three quarters, a quarter beyond, all smoothed (item 24). At render scale
+    1, 3440x1440: 0.1-2.3 ms faster than B (`laser_across_wind_eye` 17.3 → 15.0 ms, `salt_flats_long` 15.5 → 13.6).

@@ -110,10 +110,16 @@ is in [`AGENTS.md`](AGENTS.md).
 - [ ] **W-51 Basic visuals.** Players can change some basic visuals, such as saturation, so the game isn't always so
   dark.
 - [ ] **W-130 No own body through a wormhole.** A bug found by agents on 2026-11-08 and not fixed (the user: "for non-trivial bugs you can just note them and mention them in wishlist"): You don't see yourself through a wormhole, since the player has no body outside the third-person view (seen in Dark Forest).
-- [ ] **W-138 No aliasing.** The user, 2026-11-09, about W-136 (sharp centre, soft edges): "I think middle sharp is fine but there has to be enough blur to remove aliasing elsewhere", "aliasing is a big issue", "like no one ever ever like aliasing so you gota figure out how to deal with. that in particular". Applies to every level: the soft edges, half-resolution lenses and the rest of the image.
 
 ## Pending user review
 
+- [?] **W-138 No aliasing.** The user, 2026-11-09, about W-136 (sharp centre, soft edges): "I think middle sharp is fine but there has to be enough blur to remove aliasing elsewhere", "aliasing is a big issue", "like no one ever ever like aliasing so you gota figure out how to deal with. that in particular". Applies to every level: the soft edges, half-resolution lenses and the rest of the image.
+  #469: Lunar Surface, the match, Dust and Snow Planet: soft edges and Lunar's half-resolution lens shown through a
+  smooth cubic B-spline, lasers kept sharp in lenses, and FXAA on every frame (0.2-0.8 ms at 3440x1440).
+  #470: option E is the default sharp centre (the middle half sharp, half resolution to three quarters, a quarter
+  beyond, all smoothed), 0.3-2.4 ms faster than B at 3440x1440.
+  #471: City Sphere: 4x MSAA on its rasterized pass.
+  #465: Snow Planet's half-resolution lens, smoothed the same way, with lasers kept sharp in it.
 - [?] **W-136 Sharp centre, soft edges.** The user, 2026-11-09: "if you need to lower resolution in different places, you can just like blur things. One thing you could also consider doing is having like a narrower field of view where like the center of the screen is clear and fully, you know, full resolution, everything, but the edges are blurry or something like that." And: "Try to at least have the ability to see a nice, good resolution for the important things that are right in front of you." Applies to every level's speed work (60 FPS).
   #464: the middle 66% of the width drawn as before and the rest at half resolution, blended (option B, the
   default; options A-E with timings in the PR for the user), in Lunar Surface, the match, Dust and Snow Planet.
@@ -162,7 +168,8 @@ is in [`AGENTS.md`](AGENTS.md).
   you're like slowed and you start to lose health because you're like freezing. And it should be the case that
   there's like multiple of these. And if you shoot through them, like the shot has like a smaller distance it can
   pass. These can be like blizzard zones or something like that."
-  Merged into `staging/user-4gatepylon` with #396, 2026-11-08.
+  Merged into `staging/user-4gatepylon` with #396, 2026-11-08. Speed: #465 gives it Lunar Surface's half-resolution
+  lens (with #464's sharp centre, every bench view under 16.7 ms at 3440x1440; Snow's S14).
 - [?] **W-121 Dust demo.** Part of W-124 (four map demos): "Dust has, by default, a fog of sorts, like there's kind of
   a sandstorm going on, and that should refract the light. There should be like a wind always happening, and the light
   should kind of bend in the direction of the wind. There will be no black hole there, but there will still be

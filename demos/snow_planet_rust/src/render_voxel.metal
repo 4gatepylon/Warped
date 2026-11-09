@@ -292,6 +292,10 @@ constant int THROWN_TINT_FIRST_BIT = 1;
 constant int THROWN_TINT_MASK = 3;
 constant int BEAM_RIFLE_BIT = 3;
 constant int BEAM_SPECKLE_FIRST_BIT = 4;
+constant int BEAM_SPECKLE_MASK = 1023;
+constant int BENT_STEPS_FIRST_BIT = 15;
+constant int BENT_STEPS_MASK = 255;
+constant int LENS_HALF_RES_STEPS = 8;
 constant int RIFLE_BEAM_CODE = 2;
 constant int BEACON_BEAM_CODE = 4;
 constant float BEACON_BEAM_RADIUS_M = 0.12;
@@ -335,6 +339,13 @@ constant int FOVEA_HALF = 1;
 constant int FOVEA_QUARTER = 2;
 constant uint FOVEA_BLOCK_PX = 4;
 constant float FOVEA_SAMPLE_MARGIN_PX = 8.0;
+constant float SOFT_BAND_PX = 48.0;
+constant float LENS_BLEND_ALPHA = 0.0;
+constant float LENS_BLEND_ALPHA_LIMIT = 0.5;
+constant float FXAA_EDGE_THRESHOLD = 0.125;
+constant float FXAA_EDGE_THRESHOLD_MIN = 0.0312;
+constant int FXAA_SEARCH_STEP_COUNT = 10;
+constant float FXAA_SUBPIXEL_QUALITY = 0.75;
 constant uint REFINE_CELL_MASK = (1u << 24) - 1;
 constant int REFINE_LEVEL_FIRST_BIT = 24;
 constant int REFINE_GROUP_SIZE = __REFINE_GROUP_SIZE__;
@@ -697,7 +708,8 @@ struct Hit {
  * travelled, the hit cell with its material (`MAT_GROUND` for the ground), the outcome with the structure (-1 for the
  * ground), face axis and laser and tint (bit 0 the laser's team, 1 for red; from `THROWN_TINT_FIRST_BIT`, two bits
  * for the thrown wormhole it went through, 0 for none; `BEAM_RIFLE_BIT` set for the rifle's laser, clear for the
- * sniper's blade; from `BEAM_SPECKLE_FIRST_BIT`, the laser's speckle share in steps of 1 / `BEAM_SPECKLE_STEPS`), the
+ * sniper's blade; from `BEAM_SPECKLE_FIRST_BIT`, the laser's speckle share in steps of 1 / `BEAM_SPECKLE_STEPS`;
+ * from `BENT_STEPS_FIRST_BIT`, how many bent steps it took, up to `BENT_STEPS_MASK`), the
  * face's side with the glass count and the laser's core and halo, and the dust and zone walls in front of it
  * (`scan_dust`, `scan_zone_walls`).
  */
@@ -2368,7 +2380,8 @@ static void back_to_reach(thread const Scene &scene, int w, thread float4 &x, th
  * @brief `trace_ray` traces a ray backwards from the eye through a point of the image (in pixels from its top left
  * corner): straight chords between warp objects, bent steps inside their reach, through wormhole throats, until a
  * surface, the sky or a horizon. After `LATE_STEP_COUNT` iterations (rays winding near a throat or the black hole,
- * which land in the lens's most compressed, aliased images) its bent steps are three times longer.
+ * which land in the lens's most compressed, aliased images) its bent steps are three times longer. It counts its bent
+ * steps for `refine_pixels`.
  * @par Example
  * @code
  * VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
@@ -2381,7 +2394,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     float2 ndc = float2(2.0 * pixel.x / float(u.width_px) - 1.0, 1.0 - 2.0 * pixel.y / float(u.height_px));
     float3 d_cam = normalize(float3(ndc.x * u.tan_half_fov * u.aspect, ndc.y * u.tan_half_fov, -1.0));
     float4 x = u.camera[3], v = u.camera[0] * d_cam.x + u.camera[1] * d_cam.y + u.camera[2] * d_cam.z;
-    int inside = -1;
+    int inside = -1, bent_steps = 0;
     for (int w = 0; w < u.warp_count; w++) {
         if (-mdot(x, warps[w].centre) < cosh(warps[w].params.z)) inside = w;
     }
@@ -2429,6 +2442,7 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
         }
         if (!has_gradient) gradient = compute_gradient(scene, inside, x, rho, local);
         float ds = clamp((it < LATE_STEP_COUNT ? BEND_STEP_FRAC : LATE_BEND_STEP_FRAC) * rho, min_step, max_step);
+        bent_steps++;
         v = normalize_tangent(x, v + (gradient - mdot(gradient, v) * v) * (0.5 * ds));
         hit.s = ds;
         hit.mat = 0;
@@ -2460,7 +2474,8 @@ static VoxelRayEnd trace_ray(thread const Scene &scene, float2 pixel) {
     int beam_code = int(code + HALF_KIND);
     VoxelRayEnd end = {float4(0.0), float4(0.0), float4(0.0, 0.0, 0.0, travelled), int4(0),
                        int4(outcome, -1, -1, (beam_code & 1) | tint << THROWN_TINT_FIRST_BIT | ((beam_code & RIFLE_BEAM_CODE) != 0 ? 1 : 0) << BEAM_RIFLE_BIT
-                                                 | int(round(speckle * BEAM_SPECKLE_STEPS)) << BEAM_SPECKLE_FIRST_BIT),
+                                                 | int(round(speckle * BEAM_SPECKLE_STEPS)) << BEAM_SPECKLE_FIRST_BIT
+                                                 | min(bent_steps, BENT_STEPS_MASK) << BENT_STEPS_FIRST_BIT),
                        float4(0.0, glass, core, halo), dust};
     if (outcome == OUTCOME_HIT) {
         end.point = geodesic_point(hit_x, hit_v, hit.s);
@@ -2659,13 +2674,27 @@ static float3 shade_ray_end(thread const Scene &scene, VoxelRayEnd end, uint2 id
         lit = mix(lit, mix(beam_color, float3(1.0), BEAM_CORE_WHITENESS * whiteness_frac) * BEAM_CORE_BRIGHTNESS, saturate(core));
         glow = saturate(core + BEAM_HAZE_BRIGHTNESS * halo);
     }
-    color = speckle_beam(scene, color, lit, glow, float(end.surface.w >> BEAM_SPECKLE_FIRST_BIT) / BEAM_SPECKLE_STEPS, id);
+    color = speckle_beam(scene, color, lit, glow, float(end.surface.w >> BEAM_SPECKLE_FIRST_BIT & BEAM_SPECKLE_MASK) / BEAM_SPECKLE_STEPS, id);
     return max(color, 0.0);
 }
 
-/** @brief `write_pixel` shades a ray end into pixel `id`. @par Example @code write_pixel(scene, end, id, image); @endcode */
+/**
+ * @brief `get_lens_alpha` gives the alpha a pixel's colour is written with: `LENS_BLEND_ALPHA` deep in a lens (the ray
+ * took at least `LENS_HALF_RES_STEPS` bent steps and shows no laser core), so that `tonemap_voxel` smooths it (W-138,
+ * no aliasing), else 1.
+ * @par Example
+ * @code
+ * image.write(float4(color, get_lens_alpha(end)), id);
+ * @endcode
+ */
+static float get_lens_alpha(VoxelRayEnd end) {
+    bool is_deep = (end.surface.w >> BENT_STEPS_FIRST_BIT & BENT_STEPS_MASK) >= LENS_HALF_RES_STEPS && end.glow.z < GLOW_FLOOR;
+    return is_deep ? LENS_BLEND_ALPHA : 1.0;
+}
+
+/** @brief `write_pixel` shades a ray end into pixel `id`, with `get_lens_alpha`. @par Example @code write_pixel(scene, end, id, image); @endcode */
 static void write_pixel(thread const Scene &scene, VoxelRayEnd end, uint2 id, texture2d<float, access::write> image) {
-    image.write(float4(shade_ray_end(scene, end, id), 1.0), id);
+    image.write(float4(shade_ray_end(scene, end, id), get_lens_alpha(end)), id);
 }
 
 /**
@@ -2684,7 +2713,8 @@ kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> im
 /**
  * @brief `is_same_surface` says whether two samples ended the same way with no laser glow, so the pixels between them
  * can be interpolated: both on one face plane of one structure (same axis, side and layer of cells), both on the
- * ground, both in the sky or both lost, behind the same number of glass faces and nearly as much dust.
+ * ground, both in the sky or both lost, behind the same number of glass faces and nearly as much dust (how many bent
+ * steps each took may differ).
  * @par Example
  * @code
  * if (!is_same_surface(a, b)) return false;
@@ -2693,7 +2723,8 @@ kernel void trace_voxel_pixels(SCENE_BUFFERS, texture2d<float, access::write> im
 static bool is_same_surface(VoxelRayEnd a, VoxelRayEnd b) {
     int axis = a.surface.z;
     bool is_inside_cell = a.surface.x == OUTCOME_HIT && a.surface.y >= 0 && axis < 0;
-    return all(a.surface == b.surface) && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
+    return all(a.surface.xyz == b.surface.xyz) && ((a.surface.w ^ b.surface.w) & ~(BENT_STEPS_MASK << BENT_STEPS_FIRST_BIT)) == 0
+        && a.glow.x == b.glow.x && a.glow.y == b.glow.y && !is_inside_cell
         && (axis < 0 || a.cell[axis] == b.cell[axis]) && b.glow.z < GLOW_FLOOR && b.glow.w < GLOW_FLOOR
         && abs(b.dust.w - a.dust.w) <= DUST_SMOOTH_DEPTH;
 }
@@ -2940,7 +2971,10 @@ kernel void prepare_refinement(device atomic_uint *refine_count [[buffer(5)]], d
 
 /**
  * @brief `refine_pixels` traces the three odd pixels of each listed cell, packed densely so that thread groups don't
- * wait on the few pixels that need a full trace. Outside the sharp centre (W-136, sharp centre, soft edges) it blends
+ * wait on the few pixels that need a full trace. Deep in a lens, where all four of the cell's samples took at least
+ * `LENS_HALF_RES_STEPS` bent steps, it blends the colours `resolve_pixels` gave the four even pixels instead (a
+ * half-resolution lens, Lunar Surface's option D), unless a laser's core shows there, and marks those pixels with
+ * alpha `LENS_BLEND_ALPHA` for `tonemap_voxel` to smooth. Outside the sharp centre (W-136, sharp centre, soft edges) it blends
  * instead: from the cell's four even pixels at `FOVEA_HALF`, and from its 4 × 4 block's four corners at
  * `FOVEA_QUARTER`, where the third pixel's thread also writes the cell's even pixel unless `resolve_pixels` shaded it.
  * It only reads pixels `resolve_pixels` wrote, so its threads never race.
@@ -2950,7 +2984,8 @@ kernel void prepare_refinement(device atomic_uint *refine_count [[buffer(5)]], d
  * @endcode
  */
 kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffer(4)]], device atomic_uint *refine_count [[buffer(5)]],
-                          texture2d<float, access::read_write> image [[texture(0)]], uint t [[thread_position_in_grid]]) {
+                          device const VoxelRayEnd *samples [[buffer(2)]], texture2d<float, access::read_write> image [[texture(0)]],
+                          uint t [[thread_position_in_grid]]) {
     if (t >= atomic_load_explicit(refine_count, memory_order_relaxed) * REFINED_PIXELS_PER_CELL) return;
     int columns = get_sample_columns(u);
     uint entry = refine_cells[t / REFINED_PIXELS_PER_CELL];
@@ -2965,8 +3000,20 @@ kernel void refine_pixels(SCENE_BUFFERS, device const uint *refine_cells [[buffe
         image.write(level == FOVEA_QUARTER ? blend_pixels(u, image, block, FOVEA_BLOCK_PX, id) : blend_pixels(u, image, lo, 2, id), id);
         return;
     }
+    int least_steps = BENT_STEPS_MASK;
+    float most_core = 0.0;
+    for (int c = 0; c < 4; c++) {
+        VoxelRayEnd corner_end = samples[cell + (c & 1) + (c >> 1) * columns];
+        least_steps = min(least_steps, corner_end.surface.w >> BENT_STEPS_FIRST_BIT & BENT_STEPS_MASK);
+        most_core = max(most_core, corner_end.glow.z);
+    }
+    if (least_steps >= LENS_HALF_RES_STEPS && most_core < GLOW_FLOOR) {
+        image.write(float4(blend_pixels(u, image, lo, 2, id).rgb, LENS_BLEND_ALPHA), id);
+        return;
+    }
     Scene scene = {u, structures, shapes, warps, warp_lists, lights, palette, beams, clearances, surfaces, mound_heights, means, albedo_maps, normal_maps, arm_maps, dust_bursts, dust_particles, milky_way, mesh_triangles, mesh_nodes, mesh_materials, mesh_albedo, mesh_mr, mesh_normal, mesh_emissive, avatar_triangles, avatar_nodes};
-    image.write(float4(shade_ray_end(scene, trace_ray(scene, float2(id) + 0.5), id), 1.0), id);
+    VoxelRayEnd end = trace_ray(scene, float2(id) + 0.5);
+    image.write(float4(shade_ray_end(scene, end, id), get_lens_alpha(end)), id);
 }
 
 /**
@@ -3048,15 +3095,62 @@ kernel void bloom_down(texture2d<float> source [[texture(1)]], texture2d<float, 
 }
 
 /**
+ * @brief `get_spline_color` gives the HDR colour at pixel `id` as a cubic B-spline of the 4 × 4 shaded pixels around
+ * it on the grid every `spacing_px` pixels each way: a smooth, ring-free blur about two grid steps wide, so a region
+ * shaded at half or a quarter resolution shows no steps (W-138, no aliasing).
+ * @par Example
+ * @code
+ * float3 c = get_spline_color(u, hdr, id, 2);
+ * @endcode
+ */
+static float3 get_spline_color(constant VoxelUniforms &u, texture2d<float> hdr, uint2 id, uint spacing_px) {
+    float2 g = float2(id) / float(spacing_px), f = fract(g), f2 = f * f, f3 = f2 * f;
+    int2 base = int2(floor(g)) - 1, last = (int2(u.width_px, u.height_px) - 1) / int(spacing_px);
+    float2 w[4] = {(1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0, (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0,
+                   f3 / 6.0};
+    float3 sum = float3(0.0);
+    for (int b = 0; b < 4; b++) {
+        for (int a = 0; a < 4; a++) {
+            int2 k = clamp(base + int2(a, b), int2(0), last);
+            sum += w[a].x * w[b].y * hdr.read(uint2(k * int(spacing_px))).rgb;
+        }
+    }
+    return sum;
+}
+
+/**
+ * @brief `get_soft_color` gives the HDR colour `tonemap_voxel` shows at pixel `id`: the pixel itself in the sharp
+ * centre, blending over `SOFT_BAND_PX` into `get_spline_color` of the half-resolution grid outside it and deep in a
+ * lens (pixels marked `LENS_BLEND_ALPHA` by `get_lens_alpha`), and of the quarter-resolution grid toward and beyond
+ * `u.fovea.y`.
+ * @par Example
+ * @code
+ * float3 c = get_soft_color(u, hdr, id);
+ * @endcode
+ */
+static float3 get_soft_color(constant VoxelUniforms &u, texture2d<float> hdr, uint2 id) {
+    float3 color = hdr.read(id).rgb;
+    float r_px = get_centre_distance_px(u, float2(id));
+    bool is_lens = hdr.read(id).a < LENS_BLEND_ALPHA_LIMIT;
+    float half_frac = is_lens ? 1.0 : (r_px <= u.fovea.x ? 0.0 : smoothstep(u.fovea.x, u.fovea.x + SOFT_BAND_PX, r_px));
+    float quarter_frac = r_px <= u.fovea.y - SOFT_BAND_PX ? 0.0 : smoothstep(u.fovea.y - SOFT_BAND_PX, u.fovea.y, r_px);
+    if (half_frac > 0.0 && quarter_frac < 1.0) color = mix(color, get_spline_color(u, hdr, id, 2), half_frac);
+    if (quarter_frac > 0.0) color = mix(color, get_spline_color(u, hdr, id, FOVEA_BLOCK_PX), quarter_frac);
+    return color;
+}
+
+/**
  * @brief `tonemap_voxel` finishes the HDR image (texture 1) like the fps_demo: mixes in the bloom levels, adds the
- * bloom's bright parts as a glow, exposes, grades, tone maps with ACES, vignettes and encodes sRGB into texture 0.
+ * bloom's bright parts as a glow, exposes, grades, tone maps with ACES, vignettes and encodes sRGB into texture 0,
+ * with its luma in alpha for `fxaa_voxel`. It reads each pixel through `get_soft_color`.
  * @par Example
  * @code
  * dispatched by render_voxel.rs after tracing, one thread per pixel.
  * @endcode
  */
-kernel void tonemap_voxel(texture2d<float> hdr [[texture(1)]], array<texture2d<float>, BLOOM_LEVELS> bloom [[texture(7)]],
-                          texture2d<float, access::write> image [[texture(0)]], uint2 id [[thread_position_in_grid]]) {
+kernel void tonemap_voxel(constant VoxelUniforms &u [[buffer(16)]], texture2d<float> hdr [[texture(1)]],
+                          array<texture2d<float>, BLOOM_LEVELS> bloom [[texture(7)]], texture2d<float, access::write> image [[texture(0)]],
+                          uint2 id [[thread_position_in_grid]]) {
     if (id.x >= hdr.get_width() || id.y >= hdr.get_height()) return;
     constexpr sampler edge(filter::linear, address::clamp_to_edge);
     float2 uv = (float2(id) + 0.5) / float2(hdr.get_width(), hdr.get_height());
@@ -3064,8 +3158,81 @@ kernel void tonemap_voxel(texture2d<float> hdr [[texture(1)]], array<texture2d<f
     for (int k = 0; k < BLOOM_LEVELS; k++) bloom_color += bloom[k].sample(edge, uv).rgb;
     float3 bloom_mean = bloom_color / float(BLOOM_LEVELS);
     float3 glow = bloom_mean * smoothstep(BLOOM_GLOW_LUMA_EDGES.x, BLOOM_GLOW_LUMA_EDGES.y, dot(bloom_mean, LUMA));
-    float3 color = (mix(hdr.read(id).rgb, bloom_mean, BLOOM_STRENGTH) + BLOOM_GLOW * glow) * EXPOSURE;
+    float3 color = (mix(get_soft_color(u, hdr, id), bloom_mean, BLOOM_STRENGTH) + BLOOM_GLOW * glow) * EXPOSURE;
     color = grade_display(aces_fitted(grade_scene(color)));
     color *= 1.0 - VIGNETTE_STRENGTH * smoothstep(0.2, 0.85, length((uv - 0.5) * float2(1.1, 1.0)));
-    image.write(float4(linear_to_srgb(saturate(color)), 1.0), id);
+    float3 encoded = linear_to_srgb(saturate(color));
+    image.write(float4(encoded, dot(encoded, LUMA)), id);
+}
+
+/**
+ * @brief `fxaa_voxel` anti-aliases the tone-mapped image (texture 1, luma in alpha) into texture 0 with FXAA 3.11
+ * (quality), as Dark Forest's `get_fxaa_color` does (W-138, no aliasing): it finds the edge through each pixel whose
+ * local contrast is high enough, searches along it for its ends, and samples across it by how far the pixel is from
+ * the nearer end, plus a sub-pixel blend for isolated bright or dark pixels.
+ * @par Example
+ * @code
+ * dispatched by render_voxel.rs after tone mapping, one thread per pixel.
+ * @endcode
+ */
+kernel void fxaa_voxel(texture2d<float> ldr [[texture(1)]], texture2d<float, access::write> image [[texture(0)]],
+                       uint2 id [[thread_position_in_grid]]) {
+    if (id.x >= ldr.get_width() || id.y >= ldr.get_height()) return;
+    constexpr sampler edge(filter::linear, address::clamp_to_edge);
+    float2 texel = 1.0 / float2(ldr.get_width(), ldr.get_height()), uv = (float2(id) + 0.5) * texel;
+    float4 centre = ldr.read(id);
+    float luma_centre = centre.a;
+    float luma_down = ldr.sample(edge, uv + float2(0, 1) * texel).a, luma_up = ldr.sample(edge, uv + float2(0, -1) * texel).a;
+    float luma_left = ldr.sample(edge, uv + float2(-1, 0) * texel).a, luma_right = ldr.sample(edge, uv + float2(1, 0) * texel).a;
+    float luma_min = min(luma_centre, min(min(luma_down, luma_up), min(luma_left, luma_right)));
+    float luma_max = max(luma_centre, max(max(luma_down, luma_up), max(luma_left, luma_right)));
+    float luma_range = luma_max - luma_min;
+    if (luma_range < max(FXAA_EDGE_THRESHOLD_MIN, luma_max * FXAA_EDGE_THRESHOLD)) {
+        image.write(float4(centre.rgb, 1.0), id);
+        return;
+    }
+    float luma_down_left = ldr.sample(edge, uv + float2(-1, 1) * texel).a, luma_up_right = ldr.sample(edge, uv + float2(1, -1) * texel).a;
+    float luma_up_left = ldr.sample(edge, uv + float2(-1, -1) * texel).a, luma_down_right = ldr.sample(edge, uv + float2(1, 1) * texel).a;
+    float luma_down_up = luma_down + luma_up, luma_left_right = luma_left + luma_right;
+    float luma_left_corners = luma_down_left + luma_up_left, luma_down_corners = luma_down_left + luma_down_right;
+    float luma_right_corners = luma_down_right + luma_up_right, luma_up_corners = luma_up_right + luma_up_left;
+    float edge_horizontal = abs(-2.0 * luma_left + luma_left_corners) + abs(-2.0 * luma_centre + luma_down_up) * 2.0
+        + abs(-2.0 * luma_right + luma_right_corners);
+    float edge_vertical = abs(-2.0 * luma_up + luma_up_corners) + abs(-2.0 * luma_centre + luma_left_right) * 2.0
+        + abs(-2.0 * luma_down + luma_down_corners);
+    bool is_horizontal = edge_horizontal >= edge_vertical;
+    float luma_1 = is_horizontal ? luma_up : luma_left, luma_2 = is_horizontal ? luma_down : luma_right;
+    float gradient_1 = luma_1 - luma_centre, gradient_2 = luma_2 - luma_centre;
+    bool is_1_steepest = abs(gradient_1) >= abs(gradient_2);
+    float gradient_scaled = 0.25 * max(abs(gradient_1), abs(gradient_2));
+    float step_length = (is_horizontal ? texel.y : texel.x) * (is_1_steepest ? -1.0 : 1.0);
+    float luma_local_average = 0.5 * ((is_1_steepest ? luma_1 : luma_2) + luma_centre);
+    float2 current_uv = uv + (is_horizontal ? float2(0.0, 0.5 * step_length) : float2(0.5 * step_length, 0.0));
+    float2 offset = is_horizontal ? float2(texel.x, 0.0) : float2(0.0, texel.y);
+    float2 uv_1 = current_uv - offset, uv_2 = current_uv + offset;
+    float luma_end_1 = ldr.sample(edge, uv_1).a - luma_local_average, luma_end_2 = ldr.sample(edge, uv_2).a - luma_local_average;
+    bool is_reached_1 = abs(luma_end_1) >= gradient_scaled, is_reached_2 = abs(luma_end_2) >= gradient_scaled;
+    for (int i = 0; i < FXAA_SEARCH_STEP_COUNT && !(is_reached_1 && is_reached_2); i++) {
+        float quality = i < 2 ? 1.0 : (i < 5 ? 1.5 : (i < 8 ? 2.0 : 4.0));
+        if (!is_reached_1) {
+            uv_1 -= offset * quality;
+            luma_end_1 = ldr.sample(edge, uv_1).a - luma_local_average;
+            is_reached_1 = abs(luma_end_1) >= gradient_scaled;
+        }
+        if (!is_reached_2) {
+            uv_2 += offset * quality;
+            luma_end_2 = ldr.sample(edge, uv_2).a - luma_local_average;
+            is_reached_2 = abs(luma_end_2) >= gradient_scaled;
+        }
+    }
+    float distance_1 = is_horizontal ? uv.x - uv_1.x : uv.y - uv_1.y, distance_2 = is_horizontal ? uv_2.x - uv.x : uv_2.y - uv.y;
+    bool is_direction_1 = distance_1 < distance_2, is_luma_centre_smaller = luma_centre < luma_local_average;
+    bool is_correct_variation = ((is_direction_1 ? luma_end_1 : luma_end_2) < 0.0) != is_luma_centre_smaller;
+    float final_offset = is_correct_variation ? 0.5 - min(distance_1, distance_2) / (distance_1 + distance_2) : 0.0;
+    float luma_average = (2.0 * (luma_down_up + luma_left_right) + luma_left_corners + luma_right_corners) / 12.0;
+    float subpixel_1 = saturate(abs(luma_average - luma_centre) / luma_range);
+    float subpixel_2 = (3.0 - 2.0 * subpixel_1) * subpixel_1 * subpixel_1;
+    final_offset = max(final_offset, subpixel_2 * subpixel_2 * FXAA_SUBPIXEL_QUALITY);
+    float2 final_uv = uv + (is_horizontal ? float2(0.0, final_offset * step_length) : float2(final_offset * step_length, 0.0));
+    image.write(float4(ldr.sample(edge, final_uv).rgb, 1.0), id);
 }
