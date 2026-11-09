@@ -108,7 +108,8 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   5.2 m/s jump under 6 m/s²), so the same server settings give the same play here as on every other level; nothing
   else reads those numbers. Kept from the forest: its body (0.3 m radius, 1.8 m tall, eye 1.68 m up; a crouched body
   shrinks with its eye, so it fits under what the eye does), its rope ladders at the 4.4 m/s pace they were made for,
-  and the landing dip. Tests check the numbers against Lunar's own `server_settings.yaml` and map.
+  and the landing dip. Tests check the numbers against Lunar's own `server_settings.yaml` and map. The player also
+  waits the server settings' `respawn.delay_s` before respawning, as Lunar does, instead of its own 3 s.
 - **D24. A shot fires only 0.25 s after the last step upright or jump, as on Lunar Surface.** The autopilot and the
   fighting bots therefore stand still while they have a target in sight.
 - **D25. The flashlight is two point lights, and `Esc` asks before quitting.** Lunar's flashlight is a cone of light
