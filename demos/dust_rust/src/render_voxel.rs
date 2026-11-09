@@ -8,6 +8,7 @@
 //!
 //! Example: `let frame = VoxelFrame::Build(&world, camera, &beams, spot, &[], (1280, 800));`
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -23,7 +24,7 @@ use objc2_metal::{
 };
 
 use crate::dust::DustCloud;
-use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz};
+use crate::geometry::{AXIS_W, AXIS_Y, AXIS_Z, get_distance, invert_lorentz, minkowski_dot};
 use crate::mesh::MeshModel;
 use crate::render_mesh::{
     FIRST_AVATAR_ROOT_CODE, GpuNode, GpuTriangle, MeshGpu, NO_MESH, get_first_materials,
@@ -34,7 +35,7 @@ use crate::render_metal::{
     encode_adaptive_sampling, make_pipeline,
 };
 use crate::spaceships::{GpuSpaceship, SPACESHIP_COUNT, get_spaceships};
-use crate::terrain::HeightGrid;
+use crate::terrain::{HeightGrid, get_fermi_coordinates};
 use crate::thrown_wormholes::{GREEN_COLOR, HIT_FLASH_COLOR, PURPLE_COLOR, WormholeColor};
 use crate::viewmodel::HAND_LIGHT_BYTES;
 use crate::voxel_clearance::{ClearanceGrid, ClearanceGrids, STORED_M_PER_UNIT};
@@ -65,6 +66,7 @@ const HAND_LIGHT_BUFFER_INDEX: usize = 28;
 const HAND_LIGHT_GRID: (usize, usize) = (1, 1);
 const NO_MOUNDS: [f32; 1] = [0.0];
 const TERRAIN_HEIGHTS_TEXTURE_INDEX: usize = 16;
+const TERRAIN_SLOPES_TEXTURE_INDEX: usize = 17;
 const BYTES_PER_FLOAT: usize = 4;
 const FIRST_SURFACE_TEXTURE_INDEX: usize = 4;
 const MILKY_WAY_TEXTURE_INDEX: usize = 3;
@@ -81,6 +83,8 @@ const RIFLE_BEAM_CODE: u32 = 2;
 const BEACON_BEAM_CODE: u32 = 4;
 const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const MS_PER_S: f64 = 1000.0;
+const GROUP_CELL_M: f64 = 12.0;
+const GROUP_MARGIN_M: f64 = 0.05;
 /// `SAND_PERIOD_S` is how often the blowing sand's clock wraps, short enough to keep the shader's
 /// float positions precise.
 const SAND_PERIOD_S: f64 = 600.0;
@@ -140,6 +144,7 @@ pub struct VoxelUniforms {
     pub flashlight: [f32; 4],
     pub spaceships: [GpuSpaceship; SPACESHIP_COUNT],
     pub dust_counts: [i32; 4],
+    pub structure_groups: [i32; 4],
     pub beam_speckle: [f32; 4],
     pub zone_walls: GpuZoneWalls,
     pub milky_way_pole: [f32; 4],
@@ -205,13 +210,31 @@ struct GpuLight {
     color_radius: [f32; 4],
 }
 
-/// `GpuBeam` is the shader's `BeamSegment`.
+/// `GpuBeam` is the shader's `BeamSegment`: its ends, its midpoint and its length, glow and code.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct GpuBeam {
     a: [f32; 4],
     b: [f32; 4],
+    mid: [f32; 4],
     info: [f32; 4],
+}
+
+impl GpuBeam {
+    /// `FromSegment` packs a beam segment with the rest of its `info` (speckle share, glow, code)
+    /// after its length, and its midpoint, which the shader's `scan_beams` tests chords against.
+    ///
+    /// Example: `let beam = GpuBeam::FromSegment(&segment, [0.0, 1.0, 0.0]);`
+    #[allow(non_snake_case)]
+    fn FromSegment(segment: &BeamSegment, info: [f32; 3]) -> GpuBeam {
+        let half_s: f64 = 0.5 * segment.length;
+        GpuBeam {
+            a: to_f32(segment.a),
+            b: to_f32(segment.b),
+            mid: to_f32(half_s.cosh() * segment.a + half_s.sinh() * segment.b),
+            info: [segment.length as f32, info[0], info[1], info[2]],
+        }
+    }
 }
 
 /// `GpuDustBurst` is the shader's `DustBurst`.
@@ -306,11 +329,7 @@ fn get_beacon_beams(world: &VoxelWorld) -> Vec<GpuBeam> {
         beams.extend(
             clip_beam_to_map(&[segment], world.r)
                 .into_iter()
-                .map(|s| GpuBeam {
-                    a: to_f32(s.a),
-                    b: to_f32(s.b),
-                    info: [s.length as f32, 0.0, BEAM_BRIGHTNESS * on_frac, code as f32],
-                }),
+                .map(|s| GpuBeam::FromSegment(&s, [0.0, BEAM_BRIGHTNESS * on_frac, code as f32])),
         );
     }
     beams
@@ -328,6 +347,61 @@ fn get_mound_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<Heig
 /// Example: `let grid = get_height_grid(&world.terrain);`
 fn get_height_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<HeightGrid>> {
     terrain.as_ref().and_then(|t| t.height_grid.as_ref())
+}
+
+/// `pack_structure_groups` appends to `lists` the world's static structures grouped by the
+/// `GROUP_CELL_M` cell of Fermi (u, v) their centre is in: each group's header (its centre, then
+/// the cosh of a radius that holds its members' bounding spheres, the index in `lists` of its
+/// first member and how many it has), then each member's index. It gives what the shader's
+/// `trace_structures` reads: the group count, the first header's index and the static count.
+///
+/// Example: `let groups = pack_structure_groups(&world, &mut lists);`
+fn pack_structure_groups(world: &VoxelWorld, lists: &mut Vec<[f32; 4]>) -> [i32; 4] {
+    let mut cells: BTreeMap<(i64, i64), Vec<usize>> = BTreeMap::new();
+    for (k, st) in world.structures[..world.static_structure_count]
+        .iter()
+        .enumerate()
+    {
+        let [u_m, v_m, _] = get_fermi_coordinates(st.centre, world.r);
+        let cell: (i64, i64) = (
+            (u_m / GROUP_CELL_M).floor() as i64,
+            (v_m / GROUP_CELL_M).floor() as i64,
+        );
+        cells.entry(cell).or_default().push(k);
+    }
+    let first_header: usize = lists.len();
+    let mut first_member: usize = first_header + 2 * cells.len();
+    let mut headers: Vec<[f32; 4]> = Vec::new();
+    let mut members: Vec<[f32; 4]> = Vec::new();
+    for group in cells.values() {
+        let sum: DVec4 = group.iter().map(|&k| world.structures[k].centre).sum();
+        let centre: DVec4 = sum / (-minkowski_dot(sum, sum)).sqrt();
+        let radius: f64 = group
+            .iter()
+            .map(|&k| {
+                let st = &world.structures[k];
+                get_distance(centre, st.centre) + st.radius
+            })
+            .fold(0.0, f64::max)
+            + GROUP_MARGIN_M / world.r;
+        headers.push(to_f32(centre));
+        headers.push([
+            radius.cosh() as f32,
+            first_member as f32,
+            group.len() as f32,
+            0.0,
+        ]);
+        members.extend(group.iter().map(|&k| [k as f32, 0.0, 0.0, 0.0]));
+        first_member += group.len();
+    }
+    lists.extend(headers);
+    lists.extend(members);
+    [
+        cells.len() as i32,
+        first_header as i32,
+        world.static_structure_count as i32,
+        0,
+    ]
 }
 
 /// `to_f32` converts a double 4-vector to floats.
@@ -516,6 +590,7 @@ impl VoxelFrame {
                 }
             })
             .collect();
+        let structure_groups: [i32; 4] = pack_structure_groups(world, &mut lists);
         let lights: Vec<GpuLight> = world
             .lights
             .iter()
@@ -530,15 +605,11 @@ impl VoxelFrame {
                 let code: u32 = beam.team + RIFLE_BEAM_CODE * u32::from(beam.is_rifle);
                 clip_beam_to_map(&beam.segments, world.r)
                     .into_iter()
-                    .map(move |s| GpuBeam {
-                        a: to_f32(s.a),
-                        b: to_f32(s.b),
-                        info: [
-                            s.length as f32,
-                            beam.speckle_frac as f32,
-                            BEAM_BRIGHTNESS,
-                            code as f32,
-                        ],
+                    .map(move |s| {
+                        GpuBeam::FromSegment(
+                            &s,
+                            [beam.speckle_frac as f32, BEAM_BRIGHTNESS, code as f32],
+                        )
                     })
             })
             .collect();
@@ -642,6 +713,7 @@ impl VoxelFrame {
             }),
             spaceships: get_spaceships(world.sky_time_s),
             dust_counts: [dust_bursts.len() as i32, dust_particles.len() as i32, 0, 0],
+            structure_groups,
             beam_speckle: [
                 ((world.sky_time_s * MS_PER_S) as u64 % BEAM_SEED_PERIOD_MS) as f32,
                 world.settings.beam_speckle.black_frac as f32,
@@ -927,6 +999,32 @@ fn make_height_texture(
     Ok(texture)
 }
 
+/// `make_slope_texture` makes the texture `bake_terrain_slopes` fills with the terrain's slopes
+/// along u and v at each point of a baked height grid (one texel without a grid), which the shader
+/// reads bilinearly.
+///
+/// Example: `let texture = make_slope_texture(device, Some(&grid))?;`
+fn make_slope_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    grid: Option<&HeightGrid>,
+) -> Result<Texture> {
+    let size: [usize; 2] = grid.map_or([1, 1], |g| g.size);
+    // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN A TEXTURE OF THE WRONG FORMAT OR SIZE WILL HAPPEN
+    let descriptor: Retained<MTLTextureDescriptor> = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::RG16Float,
+            size[0],
+            size[1],
+            false,
+        )
+    };
+    descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite);
+    descriptor.setStorageMode(MTLStorageMode::Private);
+    Ok(device
+        .newTextureWithDescriptor(&descriptor)
+        .ok_or("Metal: no memory for the terrain's slopes")?)
+}
+
 /// `dispatch` runs a kernel over a size, one thread per pixel.
 ///
 /// Example: `dispatch(encoder, &self.tonemap, (1280, 800));`
@@ -961,10 +1059,13 @@ pub struct VoxelGpu {
     bloom_down: Pipeline,
     tonemap: Pipeline,
     bake_milky_way: Pipeline,
+    bake_terrain_slopes: Pipeline,
     buffers: Vec<GrowableBuffer>,
     textures: SurfaceTextures,
     meshes: Option<(*const Vec<MeshModel>, MeshGpu)>,
     terrain_heights: (*const HeightGrid, Texture),
+    terrain_slopes: Texture,
+    are_slopes_baked: bool,
     post: Option<PostTextures>,
     milky_way: Texture,
     is_milky_way_baked: bool,
@@ -993,6 +1094,7 @@ impl VoxelGpu {
             bloom_down: make_pipeline(device, &library, "bloom_down")?,
             tonemap: make_pipeline(device, &library, "tonemap_voxel")?,
             bake_milky_way: make_pipeline(device, &library, "bake_milky_way")?,
+            bake_terrain_slopes: make_pipeline(device, &library, "bake_terrain_slopes")?,
             buffers: (0..SCENE_BUFFER_COUNT
                 + DUST_BUFFER_INDICES.len()
                 + AVATAR_BUFFER_INDICES.len())
@@ -1001,6 +1103,8 @@ impl VoxelGpu {
             textures,
             meshes: None,
             terrain_heights: (std::ptr::null(), make_height_texture(device, None)?),
+            terrain_slopes: make_slope_texture(device, None)?,
+            are_slopes_baked: false,
             post: None,
             milky_way: make_hdr_texture(device, MILKY_WAY_TEXTURE_PX)?,
             is_milky_way_baked: false,
@@ -1081,6 +1185,8 @@ impl VoxelGpu {
         let grid_key: *const HeightGrid = grid.map_or(std::ptr::null(), std::ptr::from_ref);
         if self.terrain_heights.0 != grid_key {
             self.terrain_heights = (grid_key, make_height_texture(device, grid)?);
+            self.terrain_slopes = make_slope_texture(device, grid)?;
+            self.are_slopes_baked = false;
         }
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURE WILL HAPPEN
         unsafe {
@@ -1139,6 +1245,23 @@ impl VoxelGpu {
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG BUFFER WILL HAPPEN
         unsafe {
             encoder.setBuffer_offset_atIndex(Some(&self.hand_light), 0, HAND_LIGHT_BUFFER_INDEX)
+        };
+        if !self.are_slopes_baked {
+            // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE BAKE WRITING THE WRONG TEXTURE WILL HAPPEN
+            unsafe {
+                encoder.setTexture_atIndex(Some(&self.terrain_slopes), BAKE_TARGET_TEXTURE_INDEX);
+                encoder.setTexture_atIndex(
+                    Some(&self.terrain_heights.1),
+                    TERRAIN_SLOPES_TEXTURE_INDEX,
+                );
+            }
+            let size: (usize, usize) = (self.terrain_slopes.width(), self.terrain_slopes.height());
+            dispatch(encoder, &self.bake_terrain_slopes, size);
+            self.are_slopes_baked = true;
+        }
+        // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER READING THE WRONG TEXTURE WILL HAPPEN
+        unsafe {
+            encoder.setTexture_atIndex(Some(&self.terrain_slopes), TERRAIN_SLOPES_TEXTURE_INDEX)
         };
         dispatch(encoder, &self.probe_hand_light, HAND_LIGHT_GRID);
         // DANGEROUS DANGEROUS DANGEROUS IF YOU CHANGE THIS THEN THE SHADER WRITING THE WRONG TEXTURE WILL HAPPEN
