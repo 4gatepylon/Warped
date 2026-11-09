@@ -3956,7 +3956,7 @@ mod play_tests {
 
     const STEP_S: f64 = 1.0 / 60.0;
     const SPAWN_PLAYER_COUNT: u32 = 8;
-    const CLEAR_AHEAD_M: f64 = 20.0;
+    const CLEAR_AHEAD_M: f64 = 8.0;
     const STAND_TOLERANCE_M: f64 = 0.05;
     const HEADING_COUNT: usize = 12;
     const WALK_STEP_COUNT: usize = 900;
