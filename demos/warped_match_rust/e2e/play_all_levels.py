@@ -75,6 +75,7 @@ _PICTURE_FOLDER_LINE: re.Pattern[str] = re.compile(r"^Run folder: (.+/progressio
 _PROGRAM_LINE: re.Pattern[str] = re.compile(r"^\s*program: (\S+)$", re.MULTILINE)
 _LEVEL_BLOCK: re.Pattern[str] = re.compile(r"^  - name: .*?(?=^  - name: |\Z)", re.MULTILINE | re.DOTALL)
 _FOLDER_LINE: re.Pattern[str] = re.compile(r"^\s*folder: (\S+)$", re.MULTILINE)
+_BUILTIN_SETTINGS_FILES: dict[str, str] = {"Dark Forest": "demos/hyperbolic_wormholes_rust/server_settings.yaml"}
 _SETTINGS_ARGUMENT: re.Pattern[str] = re.compile(r"--server-settings, (\S+?)\]")
 _HOLD_KEY: str = "hold_to_disable_s"
 _PYLON_OFF_LINE: re.Pattern[str] = re.compile(r"turned off console (\d+)")
@@ -237,9 +238,14 @@ def _find_level_block(level: str) -> str:
 def _get_respawn_delay_s(level: str) -> float:
     """`_get_respawn_delay_s` gives the `respawn.delay_s` of the server settings `level` plays by in this test.
 
+    A level with built-in settings and no settings file (`_BUILTIN_SETTINGS_FILES`) reads the file its built-in
+    settings match: Dark Forest's are Lunar Surface's, which its `settings.rs` test checks.
+
     Example:
         >>> delay_s = _get_respawn_delay_s("Dust")
     """
+    if level in _BUILTIN_SETTINGS_FILES:
+        return float(_RESPAWN_DELAY.search((_REPO_FOLDER / _BUILTIN_SETTINGS_FILES[level]).read_text())[1])
     block: str = _find_level_block(level)
     argument: re.Match[str] | None = _SETTINGS_ARGUMENT.search(block)
     is_self: bool = _PROGRAM_LINE.search(block)[1] == "self"
