@@ -28,7 +28,8 @@ const DEFAULT_MAX_TEXTURE_SIZE_PX: u32 = 2048;
 /// `MIN_TANGENT_LENGTH` is the length below which a tangent or UV determinant is degenerate.
 const MIN_TANGENT_LENGTH: f32 = 1e-8;
 
-/// `ModelOptions` says how to load a model.
+/// `ModelOptions` says how to load a model; `should_keep_positions` keeps its vertices' positions
+/// in `Model::positions_m` (the guns, to find their muzzles).
 ///
 /// Example:
 ///     let options = ModelOptions { is_animated: true, ..ModelOptions::default() };
@@ -40,6 +41,7 @@ pub struct ModelOptions<'a> {
     pub emissive_scale: f32,
     pub min_x_m: f32,
     pub base_color_tint_rgb: Vec3,
+    pub should_keep_positions: bool,
 }
 
 impl Default for ModelOptions<'_> {
@@ -52,6 +54,7 @@ impl Default for ModelOptions<'_> {
             emissive_scale: 1.0,
             min_x_m: f32::MIN,
             base_color_tint_rgb: Vec3::ONE,
+            should_keep_positions: false,
         }
     }
 }
@@ -184,13 +187,15 @@ fn sample_channel(channel: &Channel, time_s: f32) -> Vec4 {
     channel.values[previous].lerp(channel.values[next], frac)
 }
 
-/// `Model` is a loaded model.
+/// `Model` is a loaded model; `positions_m` holds its vertices' positions when its options keep
+/// them, and is empty otherwise.
 pub struct Model {
     pub parts: Vec<ModelPart>,
     pub bounds_min_m: Vec3,
     pub bounds_max_m: Vec3,
     pub skeleton: Option<Skeleton>,
     pub material_names: Vec<String>,
+    pub positions_m: Vec<Vec3>,
 }
 
 /// `MeshBuilder` accumulates one material's vertices.
@@ -684,6 +689,15 @@ pub fn load_model(renderer: &mut dyn Renderer, path: &Path, options: &ModelOptio
     } else {
         Vec3::ZERO
     };
+    let positions_m: Vec<Vec3> = if options.should_keep_positions {
+        builders
+            .values()
+            .flat_map(|builder| builder.vertices.iter())
+            .map(|vertex| Vec3::from(vertex.position) + offset)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut material_indices: Vec<Option<usize>> = builders.keys().copied().collect();
     material_indices.sort();
     let parts: Vec<ModelPart> = material_indices
@@ -724,5 +738,6 @@ pub fn load_model(renderer: &mut dyn Renderer, path: &Path, options: &ModelOptio
             .materials()
             .map(|material| material.name().unwrap_or_default().to_string())
             .collect(),
+        positions_m,
     }
 }

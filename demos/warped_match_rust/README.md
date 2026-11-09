@@ -100,7 +100,7 @@ Bot:    <program> --join <address> --port <port> [--map <map>] --team <team> --b
 `--team` joins that team at once, without the lobby. The match client kills the level when the
 round ends, so a level needs no exit logic. `--bot-objective consoles` walks to the other team's
 consoles in turn and holds `E` on each once in reach, until its team wins: in this copy (Lunar
-Surface), Dust and Snow Planet the server takes a hold only from within the settings'
+Surface), Dust, Snow Planet and Dark Forest the server takes a hold only from within the settings'
 `consoles.reach_m` of the console, aimed at it (`console_reach.rs`), so a bot win shows every
 pylon can be reached on foot (`console_bot.rs`).
 

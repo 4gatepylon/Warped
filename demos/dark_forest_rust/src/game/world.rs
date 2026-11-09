@@ -665,14 +665,56 @@ fn append_box(mesh: &mut MeshData, aabb: &Aabb, tile_size_m: f32) {
     }
 }
 
-/// `tests` checks the arena's box meshes.
+/// `tests` checks the arena's box meshes and the Dark Forest map's spawns.
 ///
 /// | Partitioning | Part | Covered by |
 /// | --- | --- | --- |
 /// | box face | each of the six faces | `test_box_faces_wind_outward` |
+/// | spawn | each of both teams' (on the ground, the body clear, facing open forest) | `test_every_spawn_stands_clear_facing_open_forest` |
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::collision::cast_ray;
+
+    const BODY_RADIUS_M: f32 = 0.3;
+    const BODY_HEIGHT_M: f32 = 1.8;
+    const EYE_HEIGHT_M: f32 = 1.68;
+    const LIFT_M: f32 = 0.05;
+    const GROUND_PROBE_M: f32 = 0.2;
+    const MIN_OPEN_VIEW_M: f32 = 3.0;
+
+    /// `test_every_spawn_stands_clear_facing_open_forest` checks each team spawn of the Dark Forest
+    /// map stands on something solid, with room for a body, and faces at least `MIN_OPEN_VIEW_M`
+    /// of open forest rather than a wall.
+    #[test]
+    fn test_every_spawn_stands_clear_facing_open_forest() {
+        let map = crate::map::load(&crate::map::default_map_path()).expect("the map loads");
+        let arena: Arena = Arena::from_map(&map);
+        let solids: Vec<Aabb> = arena.boxes.iter().map(|world_box| world_box.aabb).collect();
+        let spawns: Vec<(Vec3, f32)> = arena.team_spawns.concat();
+        assert_eq!(spawns.len(), 8);
+        for (feet_m, yaw_rad) in spawns {
+            let below = cast_ray(
+                &solids,
+                feet_m + Vec3::Y * LIFT_M,
+                Vec3::NEG_Y,
+                GROUND_PROBE_M,
+            );
+            assert!(below.is_some(), "the spawn at {feet_m} floats");
+            let body: Aabb = Aabb {
+                min_m: feet_m - Vec3::new(BODY_RADIUS_M, -LIFT_M, BODY_RADIUS_M),
+                max_m: feet_m + Vec3::new(BODY_RADIUS_M, BODY_HEIGHT_M, BODY_RADIUS_M),
+            };
+            assert!(
+                !solids.iter().any(|solid| solid.overlaps(&body)),
+                "the spawn at {feet_m} is inside something"
+            );
+            let ahead: Vec3 = Vec3::new(-yaw_rad.sin(), 0.0, -yaw_rad.cos());
+            let eye_m: Vec3 = feet_m + Vec3::Y * EYE_HEIGHT_M;
+            let wall = cast_ray(&solids, eye_m, ahead, MIN_OPEN_VIEW_M);
+            assert!(wall.is_none(), "the spawn at {feet_m} faces a wall");
+        }
+    }
 
     /// `test_box_faces_wind_outward` checks every triangle faces along its vertex normal.
     #[test]

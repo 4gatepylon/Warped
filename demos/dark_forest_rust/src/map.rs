@@ -232,36 +232,22 @@ pub fn load(path: &Path) -> Result<MapFile, String> {
     Ok(map)
 }
 
-/// `console_teams` gives each console's team (0 blue, 1 red, as `net::TEAM_NAMES`), in the order
-/// `game::world` numbers them: first the boxes, then the shapes of mesh structures (pylons), whose
-/// material is named `blue console` or `red console`.
+/// `get_console_team` gives the team (0 blue, 1 red, as `net::TEAM_NAMES`) of a console made of
+/// `material`, or `None` when the material isn't named `blue console` or `red console`.
 ///
-/// Example: `let teams: Vec<u32> = console_teams(&map);`
-pub fn console_teams(map: &MapFile) -> Vec<u32> {
-    let team_of = |material: u8| -> Option<u32> {
-        match map
-            .materials
-            .iter()
-            .find(|m| m.id == material)?
-            .name
-            .as_str()
-        {
-            "blue console" => Some(0),
-            "red console" => Some(1),
-            _ => None,
-        }
-    };
-    let box_teams = map
-        .boxes
+/// Example: `let team: Option<u32> = get_console_team(&map, shape.material);`
+pub fn get_console_team(map: &MapFile, material: u8) -> Option<u32> {
+    match map
+        .materials
         .iter()
-        .filter_map(|map_box| team_of(map_box.material));
-    let pylon_teams = map
-        .structures
-        .iter()
-        .filter(|structure| structure.mesh.is_some())
-        .flat_map(|structure| structure.shapes.iter())
-        .filter_map(|shape| team_of(shape.material));
-    box_teams.chain(pylon_teams).collect()
+        .find(|m| m.id == material)?
+        .name
+        .as_str()
+    {
+        "blue console" => Some(0),
+        "red console" => Some(1),
+        _ => None,
+    }
 }
 
 /// `default_map_path` is `common/maps/dark_forest/map.json` in this repository.
@@ -320,7 +306,6 @@ pub fn frame_half_extent_m(frame: &[f32; 16], half_m: Vec3) -> Vec3 {
 /// | --- | --- | --- |
 /// | yaw | 0, a quarter turn, a half turn | `test_yaw_round_trips` |
 /// | frame rotation | none, a quarter turn | `test_half_extent_follows_rotation` |
-/// | where consoles are | pylon meshes (the Dark Forest map) | `test_console_teams_count_pylons` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,17 +329,5 @@ mod tests {
         let turned =
             frame_half_extent_m(&yaw_frame(Vec3::ZERO, std::f32::consts::FRAC_PI_2), half_m);
         assert!((turned - Vec3::new(3.0, 2.0, 1.0)).length() < 1e-5);
-    }
-
-    /// `test_console_teams_count_pylons` checks the server finds the Dark Forest map's two consoles
-    /// per team, which are pylon meshes rather than boxes.
-    #[test]
-    fn test_console_teams_count_pylons() {
-        let map: MapFile = load(&default_map_path()).expect("the Dark Forest map loads");
-        let teams: Vec<u32> = console_teams(&map);
-        assert_eq!(
-            (teams.len(), teams.iter().filter(|team| **team == 0).count()),
-            (4, 2)
-        );
     }
 }

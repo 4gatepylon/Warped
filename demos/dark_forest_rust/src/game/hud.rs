@@ -171,15 +171,15 @@ const CROSSHAIR_THICKNESS_FRAC: f32 = 0.0025;
 const CROSSHAIR_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.85];
 
 /// `OverlayHudState` is what the HUD's bars show: health in segments of one body hit each, the
-/// gun's ammo in segments of one shot each (drawn in the overheated colour while it reloads), the
-/// sprint energy, how far an enemy console has been held toward off (if one is), and whether text
+/// gun's ammo (the sniper's one block, or the rifle's heat in segments of one shot each, drawn in
+/// the overheated colour once it overheats), the sprint energy, how far an enemy console has been held toward off (if one is), and whether text
 /// covers the view (which hides the crosshair).
 pub struct OverlayHudState {
     pub health_frac: f32,
     pub health_segment_count: u32,
     pub ammo_frac: f32,
     pub ammo_segment_count: u32,
-    pub is_reloading: bool,
+    pub is_overheated: bool,
     pub energy_frac: f32,
     pub console_hold_frac: Option<f32>,
     pub is_view_covered: bool,
@@ -257,7 +257,7 @@ pub fn build_overlay_rects(
         HEAT_BAR_MIN_FRAC,
         state.ammo_segment_count,
         f64::from(state.ammo_frac),
-        if state.is_reloading {
+        if state.is_overheated {
             HEAT_BAR_OVERHEATED_RGB
         } else {
             HEAT_BAR_RGB
@@ -334,10 +334,10 @@ mod tests {
     fn state() -> OverlayHudState {
         OverlayHudState {
             health_frac: 1.0,
-            health_segment_count: 3,
+            health_segment_count: 12,
             ammo_frac: 1.0,
-            ammo_segment_count: 14,
-            is_reloading: false,
+            ammo_segment_count: 20,
+            is_overheated: false,
             energy_frac: 1.0,
             console_hold_frac: None,
             is_view_covered: false,

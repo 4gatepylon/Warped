@@ -30,8 +30,7 @@ Must know:
     Limitations:
         - The losing team's bot joins no level in a round, so each round tests one team's level client.
         - Only `_WALKING_LEVELS`' bots report each pylon they reach on foot (`bot reached console ...`), so the
-          check that every pylon was reached on foot covers those levels; City Sphere's and Dark Forest's own bots
-          don't report it.
+          check that every pylon was reached on foot covers those levels; City Sphere's own bots don't report it.
     Side effects:
         - When it exits, `play_all_levels.py` stops every process it started, with the levels they started.
 """
@@ -88,7 +87,7 @@ _FIGHTLESS_LEVELS: tuple[str, ...] = ("Dark Forest",)
 _RESPAWN_EARLY_S: float = 0.5
 _RESPAWN_LATE_S: float = 3.0
 _FAILURE_LINE: re.Pattern[str] = re.compile(r"panicked at|^Error: ", re.MULTILINE)
-_WALKING_LEVELS: tuple[str, ...] = ("Lunar Surface", "Snow Planet", "Dust")
+_WALKING_LEVELS: tuple[str, ...] = ("Lunar Surface", "Snow Planet", "Dust", "Dark Forest")
 _ROUND_COMMAND_LINE: re.Pattern[str] = re.compile(r'^round (\d+): "', re.MULTILINE)
 _REACHED_LINE: re.Pattern[str] = re.compile(r"^bot reached console (\d+) on foot in ([\d.]+) s", re.MULTILINE)
 _round_t = dict[str, Any]

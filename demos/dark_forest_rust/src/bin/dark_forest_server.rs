@@ -5,9 +5,12 @@
 //! Interface: `--port <port>`, `--map <path to map.json>`, `--level-result-file <path>`,
 //! `--game-password-file <path>`.
 //!
-//! Must know: it shares `net.rs`, `server.rs`, `map.rs` and `settings.rs` with the game, so both
-//! speak the same protocol.
+//! Must know: it shares `net.rs`, `server.rs`, `map.rs`, `console_reach.rs` and `settings.rs` with
+//! the game, so both speak the same protocol and check console holds alike.
 
+#[allow(dead_code)]
+#[path = "../console_reach.rs"]
+mod console_reach;
 #[allow(dead_code)]
 #[path = "../map.rs"]
 mod map;
