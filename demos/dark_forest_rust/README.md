@@ -52,6 +52,7 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | `Esc` | release the mouse; a second `Esc` asks "Do you want to exit?" (`Return`/`Y` exits, `Esc`/`N` stays) |
 | `Tab` | menu (scores, settings, map, credits) |
 | `F1`-`F8`, `[` / `]` | effects and render scale, as in `../fps_demo/` |
+| `F9` | sharp centre on or off (foveation: full resolution around the crosshair, softer toward the edges; on by default) |
 
 The guns, hits, console holds and movement are the Lunar Surface demo's too (W-126; DECISIONS.md D17 to D22 and D26 to D28): one
 sniper hit eliminates a player, the rifle takes 12 hits to the body or 2 to the head; you walk at 10 m/s and sprint at
@@ -162,6 +163,29 @@ robots (60 frames each, vsync on, median at the 60 Hz interval in every run) giv
 | One mouth in view | 14.5-15.9 ms | not measured |
 | A mouth filling the screen | 16.6 ms | 9.8 ms |
 
+### Sharp centre (foveation)
+
+The scene is drawn at full resolution in a square around the crosshair (0.2 of the screen's height to each side)
+and at a lower rate toward the edges, through Metal's variable rasterization rate (`src/render/metal/foveation.rs`,
+DECISIONS.md D40, W-136): a 3440x1440 screen is drawn at 2172x1054 px. A resolve pass shows the centre as before
+and the edges through a smooth B-spline, so they are soft but not stepped (W-138). `F9` or `--disable-effect
+foveation` turns it off. GPU ms per view, offscreen (`--bench-views 3 --photo-hud`, so no display paces the
+frames), median / p99, best of 3 alternating rounds, on an Apple M3 Pro (18-core GPU), macOS 15.7.3, load averages
+2.6-4.3 with another app drawing on the GPU:
+
+| View | 3440x1440 before | 3440x1440 after | 2560x1440 before | 2560x1440 after |
+| --- | --- | --- | --- | --- |
+| `spawn` | 14.7 / 16.5 | 9.9 / 12.7 | 9.8 / 11.9 | 7.3 / 9.8 |
+| `bridge` | 13.3 / 15.2 | 8.7 / 11.1 | 9.8 / 14.7 | 6.5 / 8.0 |
+| `lookout` | 11.2 / 13.9 | 7.0 / 9.1 | 9.0 / 10.8 | 5.0 / 6.1 |
+| `treehouse` | 11.6 / 13.2 | 7.5 / 9.6 | 8.8 / 10.6 | 5.0 / 6.7 |
+| `firing` | 13.2 / 15.3 | 7.6 / 10.8 | 10.2 / 13.6 | 6.3 / 8.3 |
+| `gate` | 14.3 / 16.4 | 8.6 / 11.6 | 9.9 / 12.9 | 7.2 / 8.9 |
+| `lift` | 15.5 / 17.4 | 9.9 / 13.0 | 11.0 / 14.5 | 8.0 / 10.2 |
+
+On a quieter GPU earlier the same day the 3440x1440 "before" column was 9.5-13.2 ms and "after" 5.8-9.0 ms (`lift`
+9.0 / 10.3).
+
 ### Frame pacing
 
 With vsync on, each frame stays on screen a whole number of display refreshes, the same for every frame: one while
@@ -200,6 +224,8 @@ started or the frame before it ended, whichever is later, to when it ended.
   rectangles, the two guns (`weapons`), each shot's stray (`shot_noise`) and the settings sections, the same code
   every level uses (D34, D35).
 - `src/render/camera_math.rs`: the view and projection matrices, with glam 0.30's arithmetic (D34).
+- `src/render/metal/foveation.rs`: the rasterization rate map of the sharp centre (D40); `resolve_fragment` in
+  `src/shaders/post.metal` shows its picture in the window.
 - Robots (`src/game/bots.rs`, drawn in `src/game/session.rs`): Lunar Surface's teal robot through this renderer's
   GPU skinning, its teal in the team's colour, its clip and stride by the shared `gait` (D36).
 - Everything else (renderer, assets, audio) is the FPS demo's.

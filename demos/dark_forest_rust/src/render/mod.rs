@@ -427,6 +427,7 @@ pub struct RenderSettings {
     pub is_volumetric_haze_enabled: bool,
     pub is_material_response_enabled: bool,
     pub is_vsync_enabled: bool,
+    pub is_foveation_enabled: bool,
     pub shadow_distance_m: f32,
 }
 

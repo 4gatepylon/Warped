@@ -3,13 +3,16 @@
 //!
 //! A frame is: four shadow cascades, a depth and normal prepass, SSAO and its blur, the forward
 //! PBR pass (with sky, decals, transparent surfaces, and particles), the viewmodel, bloom, ACES
-//! tone mapping, and FXAA plus the HUD into the drawable.
+//! tone mapping, and FXAA plus the HUD into the drawable. While foveated (`foveation`), the scene
+//! passes draw through a rasterization rate map into smaller physical targets, FXAA runs on the
+//! physical picture, and a resolve pass shows it in the drawable before the HUD.
 //!
 //! Example:
 //!     let mut renderer: MetalRenderer = MetalRenderer::new(layer);
 //!     let timing: FrameTiming = renderer.render_frame(&frame, &settings);
 
 mod environment;
+mod foveation;
 mod gpu_types;
 mod pipelines;
 mod resources;
@@ -85,6 +88,11 @@ const BEAM_RADIUS_M: f32 = 0.02;
 const BEAM_SEED_PERIOD: usize = 1 << 20;
 /// `MAX_BEAM_COUNT` is how many beam pieces fit in the beam pass's 4 KB of inline bytes.
 const MAX_BEAM_COUNT: usize = 60;
+/// `RATE_MAP_PLACEHOLDER_BYTES` is the size of the buffer bound where shaders read the rate map
+/// while nothing is foveated (they don't read it then).
+const RATE_MAP_PLACEHOLDER_BYTES: usize = 256;
+/// `RATE_MAP_BUFFER_INDEX` is where the fragment shaders read the rate map's parameters.
+const RATE_MAP_BUFFER_INDEX: usize = 9;
 /// `QUAD_VERTEX_COUNT` is the vertex count of a triangle-strip quad.
 const QUAD_VERTEX_COUNT: usize = 4;
 /// `FULLSCREEN_VERTEX_COUNT` is the vertex count of a full-screen triangle.
@@ -135,10 +143,17 @@ struct GpuMaterial {
     alpha_mode: AlphaMode,
 }
 
-/// `Targets` are the render targets that depend on the internal resolution.
+/// `Targets` are the render targets that depend on the internal resolution. `width_px` and
+/// `height_px` are the screen's; while foveated (`rate_map`), the scene passes draw through the
+/// rate map into the smaller physical size of `depth`, `normals`, `hdr` and `ldr` (and half it for
+/// `ao` and `bloom`), and `aa` holds the anti-aliased physical picture that the resolve pass shows.
 struct Targets {
     width_px: usize,
     height_px: usize,
+    physical_width_px: usize,
+    physical_height_px: usize,
+    rate_map: Option<foveation::RateMap>,
+    aa: Option<Texture>,
     depth: Texture,
     normals: Texture,
     ao: Texture,
@@ -150,10 +165,29 @@ struct Targets {
 }
 
 impl Targets {
-    /// `new` creates the targets for one internal resolution.
-    fn new(device: &ProtocolObject<dyn MTLDevice>, width_px: usize, height_px: usize) -> Targets {
-        let half_width_px: usize = (width_px / 2).max(1);
-        let half_height_px: usize = (height_px / 2).max(1);
+    /// `new` creates the targets for one internal resolution, foveated through `rate_map` if
+    /// given.
+    fn new(
+        device: &ProtocolObject<dyn MTLDevice>,
+        width_px: usize,
+        height_px: usize,
+        rate_map: Option<foveation::RateMap>,
+    ) -> Targets {
+        let (physical_width_px, physical_height_px): (usize, usize) =
+            rate_map.as_ref().map_or((width_px, height_px), |map| {
+                (map.physical_width_px, map.physical_height_px)
+            });
+        let half_width_px: usize = (physical_width_px / 2).max(1);
+        let half_height_px: usize = (physical_height_px / 2).max(1);
+        let lens_width_px: usize = (width_px / 2).max(1);
+        let lens_height_px: usize = (height_px / 2).max(1);
+        let aa: Option<Texture> = rate_map.as_ref().map(|_| {
+            create_texture(
+                device,
+                &TextureSpec::render_target(LDR_FORMAT, physical_width_px, physical_height_px),
+                "aa",
+            )
+        });
         let bloom: Texture = create_texture(
             device,
             &TextureSpec {
@@ -168,14 +202,18 @@ impl Targets {
         Targets {
             width_px,
             height_px,
+            physical_width_px,
+            physical_height_px,
+            rate_map,
+            aa,
             depth: create_texture(
                 device,
-                &TextureSpec::render_target(DEPTH_FORMAT, width_px, height_px),
+                &TextureSpec::render_target(DEPTH_FORMAT, physical_width_px, physical_height_px),
                 "depth",
             ),
             normals: create_texture(
                 device,
-                &TextureSpec::render_target(NORMAL_FORMAT, width_px, height_px),
+                &TextureSpec::render_target(NORMAL_FORMAT, physical_width_px, physical_height_px),
                 "normals",
             ),
             ao: create_texture(
@@ -190,18 +228,18 @@ impl Targets {
             ),
             hdr: create_texture(
                 device,
-                &TextureSpec::render_target(HDR_FORMAT, width_px, height_px),
+                &TextureSpec::render_target(HDR_FORMAT, physical_width_px, physical_height_px),
                 "hdr",
             ),
             bloom_levels,
             ldr: create_texture(
                 device,
-                &TextureSpec::render_target(LDR_FORMAT, width_px, height_px),
+                &TextureSpec::render_target(LDR_FORMAT, physical_width_px, physical_height_px),
                 "ldr",
             ),
             lens: create_texture(
                 device,
-                &TextureSpec::render_target(LDR_FORMAT, half_width_px, half_height_px),
+                &TextureSpec::render_target(LDR_FORMAT, lens_width_px, lens_height_px),
                 "lens",
             ),
         }
@@ -301,6 +339,8 @@ pub struct MetalRenderer {
     lens_live: Option<LensLive>,
     hud_capture: Option<Texture>,
     is_capturing: bool,
+    has_rate_maps: bool,
+    rate_map_placeholder: Buffer,
 }
 
 /// `as_bytes` views a plain value as its bytes.
@@ -354,6 +394,13 @@ fn color_pass(
         depth_attachment.setClearDepth(0.0);
     }
     descriptor
+}
+
+/// `foveate_pass` makes a scene pass draw through the targets' rate map, if they have one.
+fn foveate_pass(descriptor: &MTLRenderPassDescriptor, targets: &Targets) {
+    if let Some(rate_map) = &targets.rate_map {
+        descriptor.setRasterizationRateMap(Some(&rate_map.map));
+    }
 }
 
 /// `draw_fullscreen` draws one full-screen triangle into a single target.
@@ -515,6 +562,8 @@ impl MetalRenderer {
                 offset_bytes: 0,
             })
             .collect();
+        let rate_map_placeholder: Buffer =
+            create_buffer(&device, &[0_u8; RATE_MAP_PLACEHOLDER_BYTES]);
         MetalRenderer {
             device,
             queue,
@@ -528,6 +577,8 @@ impl MetalRenderer {
             lens_live: None,
             hud_capture: None,
             is_capturing: false,
+            has_rate_maps: true,
+            rate_map_placeholder,
             flat_normal_texture,
             shadow_map,
             static_shadow_map,
@@ -920,6 +971,8 @@ impl MetalRenderer {
                     self.frame_uniforms(&face_frame, settings, targets, cascades, proj, proj);
                 face_uniforms.screen_size =
                     Vec4::new(face_px, face_px, face_px.recip(), face_px.recip());
+                face_uniforms.foveation = Vec4::new(face_px.recip(), face_px.recip(), 0.0, 0.0);
+                face_uniforms.noise_offset_px = Vec4::ZERO;
                 face_uniforms.render_params.z = 0.0;
                 face_uniforms.cascade_split_far_m = Vec4::new(
                     LENS_LIVE_UNUSED_SPLIT_M,
@@ -1023,6 +1076,11 @@ impl MetalRenderer {
         set_fragment_bytes(encoder, as_bytes(buffers.frame), 1);
         set_fragment_bytes(encoder, slice_bytes(buffers.point_lights), 5);
         unsafe {
+            encoder.setFragmentBuffer_offset_atIndex(
+                Some(self.rate_map_parameters(targets)),
+                0,
+                RATE_MAP_BUFFER_INDEX,
+            );
             encoder.setFragmentTexture_atIndex(Some(&self.shadow_map), 4);
             encoder.setFragmentTexture_atIndex(Some(&sky_visibility.volume), 5);
             encoder.setFragmentTexture_atIndex(Some(&environment.ibl.prefiltered), 6);
@@ -1109,21 +1167,50 @@ impl MetalRenderer {
                 },
                 BLOOM_LEVEL_COUNT as f32,
             ),
+            foveation: Vec4::new(
+                1.0 / targets.physical_width_px as f32,
+                1.0 / targets.physical_height_px as f32,
+                if targets.rate_map.is_some() { 1.0 } else { 0.0 },
+                0.0,
+            ),
+            noise_offset_px: targets.rate_map.as_ref().map_or(Vec4::ZERO, |rate_map| {
+                rate_map.centre_offset_px.extend(0.0).extend(0.0)
+            }),
         }
     }
 
-    /// `ensure_targets` recreates the render targets when the internal resolution changes.
-    fn ensure_targets(&mut self, render_scale_frac: f32) {
+    /// `rate_map_parameters` is the buffer bound at `RATE_MAP_BUFFER_INDEX`: the rate map's
+    /// parameters while foveated, a placeholder otherwise.
+    fn rate_map_parameters<'a>(
+        &'a self,
+        targets: &'a Targets,
+    ) -> &'a ProtocolObject<dyn MTLBuffer> {
+        targets
+            .rate_map
+            .as_ref()
+            .map_or(&self.rate_map_placeholder, |rate_map| &rate_map.parameters)
+    }
+
+    /// `ensure_targets` makes the targets for the drawable at `render_scale_frac`, foveated
+    /// through a rasterization rate map if `is_foveated` and the GPU has rate maps.
+    fn ensure_targets(&mut self, render_scale_frac: f32, is_foveated: bool) {
         let (drawable_width_px, drawable_height_px) = self.drawable_size_px;
         let width_px: usize =
             ((drawable_width_px as f32 * render_scale_frac).round() as usize).max(1);
         let height_px: usize =
             ((drawable_height_px as f32 * render_scale_frac).round() as usize).max(1);
+        let should_foveate: bool = is_foveated && self.has_rate_maps;
         let is_current: bool = self.targets.as_ref().is_some_and(|targets: &Targets| {
-            targets.width_px == width_px && targets.height_px == height_px
+            targets.width_px == width_px
+                && targets.height_px == height_px
+                && targets.rate_map.is_some() == should_foveate
         });
         if !is_current {
-            self.targets = Some(Targets::new(&self.device, width_px, height_px));
+            let rate_map: Option<foveation::RateMap> = should_foveate
+                .then(|| foveation::RateMap::new(&self.device, width_px, height_px))
+                .flatten();
+            self.has_rate_maps &= rate_map.is_some() || !should_foveate;
+            self.targets = Some(Targets::new(&self.device, width_px, height_px, rate_map));
         }
     }
 }
@@ -1326,7 +1413,10 @@ impl Renderer for MetalRenderer {
         self.wait_for_frame_slot();
         let slot_wait_ms: f64 = start.elapsed().as_secs_f64() * SECONDS_TO_MS;
         self.layer.setDisplaySyncEnabled(settings.is_vsync_enabled);
-        self.ensure_targets(settings.render_scale_frac.clamp(0.25, 2.0));
+        self.ensure_targets(
+            settings.render_scale_frac.clamp(0.25, 2.0),
+            settings.is_foveation_enabled && !self.is_capturing,
+        );
         let targets: Targets = self.targets.take().expect("targets were just created");
         let timing: FrameTiming = self.encode_frame(frame, settings, &targets);
         self.targets = Some(targets);
@@ -1520,6 +1610,7 @@ impl MetalRenderer {
                 MTLLoadAction::Clear,
                 Some((&targets.depth, MTLLoadAction::Clear, MTLStoreAction::Store)),
             );
+            foveate_pass(&descriptor, targets);
             let encoder = command_buffer
                 .renderCommandEncoderWithDescriptor(&descriptor)
                 .expect("render encoder creation failed");
@@ -1549,6 +1640,11 @@ impl MetalRenderer {
                 |encoder: &Encoder| {
                     set_fragment_bytes(encoder, as_bytes(&frame_uniforms), 1);
                     unsafe {
+                        encoder.setFragmentBuffer_offset_atIndex(
+                            Some(self.rate_map_parameters(targets)),
+                            0,
+                            RATE_MAP_BUFFER_INDEX,
+                        );
                         encoder.setFragmentTexture_atIndex(Some(&targets.depth), 0);
                         encoder.setFragmentTexture_atIndex(Some(&targets.normals), 1);
                     }
@@ -1585,6 +1681,7 @@ impl MetalRenderer {
                     MTLStoreAction::DontCare,
                 )),
             );
+            foveate_pass(&descriptor, targets);
             let encoder = command_buffer
                 .renderCommandEncoderWithDescriptor(&descriptor)
                 .expect("render encoder creation failed");
@@ -1689,6 +1786,7 @@ impl MetalRenderer {
             };
             let descriptor: Retained<MTLRenderPassDescriptor> =
                 color_pass(&targets.hdr, MTLLoadAction::Load, None);
+            foveate_pass(&descriptor, targets);
             let encoder = command_buffer
                 .renderCommandEncoderWithDescriptor(&descriptor)
                 .expect("render encoder creation failed");
@@ -1700,6 +1798,11 @@ impl MetalRenderer {
             set_vertex_bytes(&encoder, as_bytes(&beam_pass), 2);
             set_fragment_bytes(&encoder, as_bytes(&beam_pass), 2);
             unsafe {
+                encoder.setFragmentBuffer_offset_atIndex(
+                    Some(self.rate_map_parameters(targets)),
+                    0,
+                    RATE_MAP_BUFFER_INDEX,
+                );
                 encoder.setFragmentTexture_atIndex(Some(&targets.depth), 0);
                 encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
                     MTLPrimitiveType::TriangleStrip,
@@ -1721,6 +1824,7 @@ impl MetalRenderer {
                     MTLStoreAction::DontCare,
                 )),
             );
+            foveate_pass(&descriptor, targets);
             let encoder = command_buffer
                 .renderCommandEncoderWithDescriptor(&descriptor)
                 .expect("render encoder creation failed");
@@ -1882,6 +1986,11 @@ impl MetalRenderer {
                 }
                 set_fragment_bytes(encoder, as_bytes(&lens_uniforms), 2);
                 unsafe {
+                    encoder.setFragmentBuffer_offset_atIndex(
+                        Some(self.rate_map_parameters(targets)),
+                        0,
+                        RATE_MAP_BUFFER_INDEX,
+                    );
                     encoder.setFragmentTexture_atIndex(Some(&targets.hdr), 0);
                     encoder.setFragmentTexture_atIndex(Some(bloom_source), 1);
                     encoder.setFragmentTexture_atIndex(Some(&targets.depth), 2);
@@ -1890,6 +1999,29 @@ impl MetalRenderer {
             },
         );
 
+        let is_fxaa_enabled: f32 = if settings.is_fxaa_enabled { 1.0 } else { 0.0 };
+        if let Some(aa) = &targets.aa {
+            let physical_size_px: Vec2 = Vec2::new(
+                targets.physical_width_px as f32,
+                targets.physical_height_px as f32,
+            );
+            draw_fullscreen(
+                &command_buffer,
+                aa,
+                &self.pipelines.fxaa_physical,
+                MTLLoadAction::DontCare,
+                |encoder: &Encoder| {
+                    set_fragment_bytes(encoder, as_bytes(&is_fxaa_enabled), 0);
+                    set_fragment_bytes(
+                        encoder,
+                        as_bytes(&crate::render::overlay::HitEffect::default()),
+                        1,
+                    );
+                    set_fragment_bytes(encoder, as_bytes(&physical_size_px), 2);
+                    unsafe { encoder.setFragmentTexture_atIndex(Some(&targets.ldr), 0) };
+                },
+            );
+        }
         let drawable_start: std::time::Instant = std::time::Instant::now();
         let drawable = match &self.hud_capture {
             Some(_) => None,
@@ -1908,17 +2040,49 @@ impl MetalRenderer {
             let encoder = command_buffer
                 .renderCommandEncoderWithDescriptor(&descriptor)
                 .expect("render encoder creation failed");
-            encoder.setRenderPipelineState(&self.pipelines.fxaa);
-            let is_fxaa_enabled: f32 = if settings.is_fxaa_enabled { 1.0 } else { 0.0 };
-            set_fragment_bytes(&encoder, as_bytes(&is_fxaa_enabled), 0);
-            set_fragment_bytes(&encoder, as_bytes(&frame.hit_effect), 1);
             let output_size_px: Vec2 = Vec2::new(
                 drawable_texture.width() as f32,
                 drawable_texture.height() as f32,
             );
+            set_fragment_bytes(&encoder, as_bytes(&frame.hit_effect), 1);
             set_fragment_bytes(&encoder, as_bytes(&output_size_px), 2);
+            match &targets.aa {
+                Some(aa) => {
+                    let (sharp_px, soft_px): (f32, f32) =
+                        foveation::get_circle_px(targets.width_px, targets.height_px);
+                    let resolve: gpu_types::GpuFoveaResolve = gpu_types::GpuFoveaResolve {
+                        screen_px: Vec4::new(
+                            targets.width_px as f32,
+                            targets.height_px as f32,
+                            output_size_px.x / targets.width_px as f32,
+                            0.0,
+                        ),
+                        physical_px: Vec4::new(
+                            targets.physical_width_px as f32,
+                            targets.physical_height_px as f32,
+                            1.0 / targets.physical_width_px as f32,
+                            1.0 / targets.physical_height_px as f32,
+                        ),
+                        circle_px: Vec4::new(sharp_px, soft_px, 0.0, 0.0),
+                    };
+                    encoder.setRenderPipelineState(&self.pipelines.resolve);
+                    set_fragment_bytes(&encoder, as_bytes(&resolve), 0);
+                    unsafe {
+                        encoder.setFragmentBuffer_offset_atIndex(
+                            Some(self.rate_map_parameters(targets)),
+                            0,
+                            RATE_MAP_BUFFER_INDEX,
+                        );
+                        encoder.setFragmentTexture_atIndex(Some(aa), 0);
+                    }
+                }
+                None => {
+                    encoder.setRenderPipelineState(&self.pipelines.fxaa);
+                    set_fragment_bytes(&encoder, as_bytes(&is_fxaa_enabled), 0);
+                    unsafe { encoder.setFragmentTexture_atIndex(Some(&targets.ldr), 0) };
+                }
+            }
             unsafe {
-                encoder.setFragmentTexture_atIndex(Some(&targets.ldr), 0);
                 encoder.drawPrimitives_vertexStart_vertexCount(
                     MTLPrimitiveType::Triangle,
                     0,

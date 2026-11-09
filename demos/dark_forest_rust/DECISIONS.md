@@ -211,6 +211,25 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   8x), which calms planks and decks seen edge-on a little; the bridge plank's grain still shows a faint zig-zag at a
   grazing angle. FXAA was already on and covers the rest; `--photo --photo-hud` captures the frame as the player
   sees it (after FXAA), `--photo` alone before it. Cost at 3440x1440: within 0.2 ms per view.
+- **D40. A sharp centre and soft edges through Metal's variable rasterization rate** (W-136, sharp centre, soft
+  edges; W-138, no aliasing; 60 FPS). At 3440x1440 the views took 9.5-13 ms of GPU time, so the even cadence (#444)
+  showed them at 50 FPS on a 100 Hz display. The scene passes (depth prepass, lit pass, lasers, gun) now draw
+  through an `MTLRasterizationRateMap` into smaller "physical" targets: full rate in a square 0.2 of the screen's
+  height to each side of the crosshair (288 px at 1440), easing (smoothstep) along each axis to quality 0.3 at 70%
+  of the way to that edge (`render/metal/foveation.rs`); a 3440x1440 screen is drawn at 2172x1054 px (46% of the
+  pixels). SSAO, bloom, tone mapping and FXAA run on the physical picture; a resolve pass reads each window pixel's
+  point out of it, a plain tap inside a circle of 288 px (where the rate is full and the tap lands on a texel's
+  centre, so the centre shows as before) and a cubic B-spline beyond, blended out to 396 px, so the edges are soft,
+  never stepped. Noise (shadow and haze dither, grain) is seeded by the screen pixel, so the centre's dither is the
+  same; shaders that need true screen positions (SSAO's samples, lasers, the lens, the vignette) decode the map.
+  `F9` and `--disable-effect foveation` turn it off (the old path, unchanged byte for byte); `--photo` without
+  `--photo-hud`, the map picture and the lens capture never foveate. **What it gives up:** the outer edges are
+  blurred (the gun in the lower right too), bloom spreads a little wider there, and in the centre about 1% of pixels
+  (thin bamboo edges) differ by up to 12/255, since SSAO's half-resolution grid lands on other pixels. **Options
+  tried** (spawn and lift, GPU ms at 3440x1440, offscreen): full rate to the edges' quality 0 (rate about 1/8 at
+  the edges) was fastest but blocky and smeared there; rate falling only along the width (an ultrawide's long
+  axis) left lift over 10 ms. **Weigh in:** the size of the sharp centre and how soft the edges get are the
+  constants at the top of `foveation.rs`.
 
 ## Follow-ups for the next agent
 
