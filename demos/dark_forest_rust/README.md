@@ -125,6 +125,9 @@ binary. The wire protocol is the hyperbolic demo's, with its wormhole fields alw
 - `--map-picture <png>` (`make map-picture`): renders the map page's picture.
 - `--camera-view <view>`, `--autopilot`, `--show-frame-time`, `--benchmark-seconds <s>`: as in `../fps_demo/`.
 - `--export-map <path>`: writes the map and quits.
+- `--frame-times-file <csv>`: on exit, writes every frame's timing (the loop's interval and simulated step, the CPU's
+  phases, the GPU's time, and when the frame reached the display) and prints how evenly frames were shown, for
+  chasing stutter.
 
 ## Performance
 
@@ -152,6 +155,15 @@ robots (60 frames each, vsync on, median at the 60 Hz interval in every run) giv
 | No mouth in view | 11.8 ms | 7.3 ms |
 | One mouth in view | 14.5-15.9 ms | not measured |
 | A mouth filling the screen | 16.6 ms | 9.8 ms |
+
+### Frame pacing
+
+With vsync on, each frame stays on screen a whole number of display refreshes, the same for every frame: one when
+the GPU's recent frames fit in a refresh, else two (or more), chosen from the last 30 frames' GPU times
+(`render::frame_clock::choose_refreshes_per_frame`), and the game simulates exactly that long a step per frame. So
+on a 100 Hz display a frame the GPU can't finish in 10 ms is shown for a steady 20 ms (50 fps) instead of a mix of
+10 and 20 ms, which looked like constant jitter. The forest is cut into 8 m tiles so that each pass (four shadow
+cascades, the depth prepass and the lit pass) draws only the tiles it sees.
 
 ## Code
 
