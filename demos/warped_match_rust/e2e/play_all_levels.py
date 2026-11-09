@@ -2,20 +2,26 @@
 
 `play_all_levels.py` starts a match server on `e2e/match_levels_fast.yaml` and a bot for each team, steered with
 `--bot-round-winners` (the bot of the team that should lose a round joins no level in it), so the match visits every
-level in `_PLAN`. It logs each level's start, winner and duration, and when each of the loser's pylons (consoles) went
-off, and fails on a stall (a round longer than `--round-timeout-s`), a process that stops early, a round, level
-result file, pylon count or outcome that differs from `_PLAN`, a level joined twice, or a panic or error in a log.
+level in `_PLAN`. In each round it also runs a fighting bot of each team (`--fight-s`), which walks
+after the nearest enemy and shoots. It logs each level's start, winner and duration, when each of the loser's pylons
+(consoles) went off, which pylons the console bot reached on foot, the eliminations and the respawns, then a table of
+them per level, and fails on a stall (a round longer than `--round-timeout-s`), a process that stops early, a round,
+level result file, pylon count or outcome that differs from `_PLAN`, a pylon turned off but not reached on foot, a
+fighting level without an elimination or a respawn, a respawn early or late against the settings' `respawn.delay_s`,
+a player more than the level's bots, or a panic or error in a log.
 
 Interface:
     --match-port: The match server's UDP port (default 48110, away from the game's 47850).
     --level-port: Each round's level server's UDP port (default 48112, away from the game's 47852).
     --round-timeout-s: Seconds a round may last before it counts as a stall (default 600).
+    --fight-s: Seconds the fighting bots play in each round (default 45; 0 for none).
     --width-px, --height-px: Size of the progression pictures (default 1280 x 800).
     --label: Suffix for the run folder's name.
     --dry-run: Print the plan and the commands, and start nothing.
     --json: Print the summary as one JSON object.
     Output: `.artifacts/play_all_levels/<run_id>/` with `command.txt`, `levels.log`, `summary.json`, `server.log`,
-    `blue.log`, `red.log` and `pictures/` (blue's progression page at each round's start and at the end).
+    `blue.log`, `red.log`, each fighter's `round_<n>_<team>_fighter.log` and `pictures/` (blue's progression page at
+    each round's start and at the end).
 
 Example:
     $ make levels && cargo build --release && python3 -I e2e/play_all_levels.py
@@ -24,8 +30,7 @@ Must know:
     Limitations:
         - The losing team's bot joins no level in a round, so each round tests one team's level client.
         - Only `_WALKING_LEVELS`' bots report each pylon they reach on foot (`bot reached console ...`), so the
-          check that every pylon was reached on foot covers those levels; City Sphere's and Dark Forest's own bots
-          don't report it.
+          check that every pylon was reached on foot covers those levels; City Sphere's own bots don't report it.
     Side effects:
         - When it exits, `play_all_levels.py` stops every process it started, with the levels they started.
 """
@@ -70,15 +75,22 @@ _PICTURE_FOLDER_LINE: re.Pattern[str] = re.compile(r"^Run folder: (.+/progressio
 _PROGRAM_LINE: re.Pattern[str] = re.compile(r"^\s*program: (\S+)$", re.MULTILINE)
 _LEVEL_BLOCK: re.Pattern[str] = re.compile(r"^  - name: .*?(?=^  - name: |\Z)", re.MULTILINE | re.DOTALL)
 _FOLDER_LINE: re.Pattern[str] = re.compile(r"^\s*folder: (\S+)$", re.MULTILINE)
+_BUILTIN_SETTINGS_FILES: dict[str, str] = {"Dark Forest": "demos/hyperbolic_wormholes_rust/server_settings.yaml"}
 _SETTINGS_ARGUMENT: re.Pattern[str] = re.compile(r"--server-settings, (\S+?)\]")
 _HOLD_KEY: str = "hold_to_disable_s"
-_PYLON_OFF_LINE: re.Pattern[str] = re.compile(r"turned off console \d+")
-_JOIN_LINE: re.Pattern[str] = re.compile(r"joined the (?:blue|red) team")
+_PYLON_OFF_LINE: re.Pattern[str] = re.compile(r"turned off console (\d+)")
+_JOIN_LINE: re.Pattern[str] = re.compile(r"^player (\d+) joined the (blue|red) team", re.MULTILINE)
+_KILL_LINE: re.Pattern[str] = re.compile(r"^player (\d+) (?:was hit by player (\d+)|froze in a blizzard)", re.MULTILINE)
+_MAP_LINE: re.Pattern[str] = re.compile(r"^\s*map: (\S+)$", re.MULTILINE)
+_RESPAWN_DELAY: re.Pattern[str] = re.compile(r"^respawn:.*\n\s+delay_s: ([\d.]+)", re.MULTILINE)
+_NO_BOT_LABEL: str = "takes_bot_label: false"
+_RESPAWN_EARLY_S: float = 0.5
+_RESPAWN_LATE_S: float = 3.0
 _FAILURE_LINE: re.Pattern[str] = re.compile(r"panicked at|^Error: ", re.MULTILINE)
-_WALKING_LEVELS: tuple[str, ...] = ("Lunar Surface", "Snow Planet", "Dust")
+_WALKING_LEVELS: tuple[str, ...] = ("Lunar Surface", "Snow Planet", "Dust", "Dark Forest")
 _ROUND_COMMAND_LINE: re.Pattern[str] = re.compile(r'^round (\d+): "', re.MULTILINE)
 _REACHED_LINE: re.Pattern[str] = re.compile(r"^bot reached console (\d+) on foot in ([\d.]+) s", re.MULTILINE)
-_round_t = tuple[str, str, str, list[float], list[str]]
+_round_t = dict[str, Any]
 
 
 class _MatchCheckFailed(Exception):
@@ -105,12 +117,13 @@ def _log(levels_log: TextIO, message: str) -> None:
     click.echo(line, err=True)
 
 
-def _start(arguments: list[str], log_path: Path | None) -> subprocess.Popen[str]:
-    """`_start` runs this crate's program with `arguments` in a process group of its own.
+def _start(arguments: list[str], log_path: Path | None, program: Path = _PROGRAM) -> subprocess.Popen[str]:
+    """`_start` runs `program` (this crate's by default) with `arguments` in a process group of its own.
 
     Args:
         arguments: The program's arguments.
         log_path: The file that gets its output, or `None` to pipe it back.
+        program: The program to run.
 
     Returns:
         The running process.
@@ -118,7 +131,7 @@ def _start(arguments: list[str], log_path: Path | None) -> subprocess.Popen[str]
     Example:
         >>> server = _start(["--serve-match"], None)
     """
-    command: list[str] = [str(_PROGRAM), *arguments]
+    command: list[str] = [str(program), *arguments]
     if log_path is None:
         return subprocess.Popen(
             command, cwd=_CRATE_FOLDER, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -131,14 +144,16 @@ def _start(arguments: list[str], log_path: Path | None) -> subprocess.Popen[str]
 
 
 def _stop(process: subprocess.Popen[str]) -> None:
-    """`_stop` stops a process that `_start` started, and everything it started (its process group).
+    """`_stop` stops a process that `_start` started, and everything it started (its process group). A group with
+    nothing left running (gone, or only processes that already ended, which macOS refuses to signal) is only reaped.
 
     Example:
         >>> _stop(server)
     """
     try:
         os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
+        process.wait()
         return
     try:
         process.wait(timeout=_STOP_TIMEOUT_S)
@@ -147,29 +162,131 @@ def _stop(process: subprocess.Popen[str]) -> None:
         process.wait()
 
 
-def _note_pylons_off(level_log_path: Path, offset_bytes: int, start_s: float, pylon_off_s: list[float]) -> int:
-    """`_note_pylons_off` adds the time of each pylon that a level server's log says went off since `offset_bytes`.
+class _LevelLog:
+    """`_LevelLog` reads a round's level server log as it grows and times each event from the round's start.
 
     Args:
-        level_log_path: The round's level server log (it may not exist yet).
-        offset_bytes: How much of the log was read before.
+        path: The round's level server log (it may not exist yet).
         start_s: The round's start, on `time.monotonic()`.
-        pylon_off_s: Seconds from the round's start to each pylon going off, appended to.
 
-    Returns:
-        How much of the log has been read now (whole lines only).
+    Attributes:
+        pylons_off: Each console turned off: seconds from the start and its index.
+        kills: Each elimination: seconds, the victim's id and the shooter's (`None` for a blizzard).
+        joins: Each join or rejoin: seconds, the player's id and team.
 
     Example:
-        >>> offset_bytes = _note_pylons_off(match_folder / "round_1_server.log", 0, start_s, pylon_off_s)
+        >>> level_log = _LevelLog(match_folder / "round_1_server.log", time.monotonic())
     """
-    if not level_log_path.exists():
-        return offset_bytes
-    with level_log_path.open("rb") as level_log:
-        level_log.seek(offset_bytes)
-        text: bytes = level_log.read()
-    whole_lines: bytes = text[: text.rfind(b"\n") + 1]
-    pylon_off_s += [time.monotonic() - start_s] * len(_PYLON_OFF_LINE.findall(whole_lines.decode()))
-    return offset_bytes + len(whole_lines)
+
+    def __init__(self, path: Path, start_s: float) -> None:
+        self.path: Path = path
+        self.start_s: float = start_s
+        self.offset_bytes: int = 0
+        self.pylons_off: list[tuple[float, int]] = []
+        self.kills: list[tuple[float, int, int | None]] = []
+        self.joins: list[tuple[float, int, str]] = []
+
+    def read(self) -> None:
+        """`read` notes the events of the whole lines written since the last read, timed now.
+
+        Example:
+            >>> level_log.read()
+        """
+        if not self.path.exists():
+            return
+        with self.path.open("rb") as level_log:
+            level_log.seek(self.offset_bytes)
+            text: bytes = level_log.read()
+        whole_lines: str = text[: text.rfind(b"\n") + 1].decode()
+        self.offset_bytes += len(whole_lines.encode())
+        now_s: float = time.monotonic() - self.start_s
+        self.pylons_off += [(now_s, int(line[1])) for line in _PYLON_OFF_LINE.finditer(whole_lines)]
+        self.kills += [
+            (now_s, int(line[1]), int(line[2]) if line[2] else None) for line in _KILL_LINE.finditer(whole_lines)
+        ]
+        self.joins += [(now_s, int(line[1]), line[2]) for line in _JOIN_LINE.finditer(whole_lines)]
+
+    def get_respawn_delays_s(self) -> list[float]:
+        """`get_respawn_delays_s` gives, for each elimination followed by a rejoin of its victim, the seconds between.
+
+        Example:
+            >>> delays_s = level_log.get_respawn_delays_s()
+        """
+        delays_s: list[float] = []
+        for kill_s, victim, _ in self.kills:
+            rejoins_s: list[float] = [join_s for join_s, id_, _ in self.joins if id_ == victim and join_s > kill_s]
+            if rejoins_s:
+                delays_s.append(min(rejoins_s) - kill_s)
+        return delays_s
+
+
+def _find_level_block(level: str) -> str:
+    """`_find_level_block` gives the levels file's block for `level`.
+
+    Raises:
+        KeyError: The levels file has no such level.
+
+    Example:
+        >>> block = _find_level_block("Dust")
+    """
+    blocks: dict[str, str] = {
+        block.split("\n")[0].split("name: ")[1]: block for block in _LEVEL_BLOCK.findall(_LEVELS_FILE.read_text())
+    }
+    return blocks[level]
+
+
+def _get_respawn_delay_s(level: str) -> float:
+    """`_get_respawn_delay_s` gives the `respawn.delay_s` of the server settings `level` plays by in this test.
+
+    A level with built-in settings and no settings file (`_BUILTIN_SETTINGS_FILES`) reads the file its built-in
+    settings match: Dark Forest's are Lunar Surface's, which its `settings.rs` test checks.
+
+    Example:
+        >>> delay_s = _get_respawn_delay_s("Dust")
+    """
+    if level in _BUILTIN_SETTINGS_FILES:
+        return float(_RESPAWN_DELAY.search((_REPO_FOLDER / _BUILTIN_SETTINGS_FILES[level]).read_text())[1])
+    block: str = _find_level_block(level)
+    argument: re.Match[str] | None = _SETTINGS_ARGUMENT.search(block)
+    is_self: bool = _PROGRAM_LINE.search(block)[1] == "self"
+    level_folder: Path = _CRATE_FOLDER if is_self else _REPO_FOLDER / _FOLDER_LINE.search(block)[1]
+    settings_path: Path = _CRATE_FOLDER / argument[1] if argument else level_folder / "server_settings.yaml"
+    return float(_RESPAWN_DELAY.search(settings_path.read_text())[1])
+
+
+def _start_fighters(
+    level: str, level_port: int, run_folder: Path, number: int, fight_s: float
+) -> list[subprocess.Popen[str]]:
+    """`_start_fighters` starts a fighting bot of each team in round `number`'s level, for `fight_s` seconds.
+
+    Args:
+        level: The round's level.
+        level_port: The level server's UDP port.
+        run_folder: The run folder, for each fighter's log.
+        number: The round, from 1.
+        fight_s: Seconds the fighters play before they leave.
+
+    Returns:
+        The fighters' processes, none with `fight_s` 0.
+
+    Example:
+        >>> fighters = _start_fighters("Dust", 48112, run_folder, 5, 45.0)
+    """
+    if fight_s == 0:
+        return []
+    block: str = _find_level_block(level)
+    program_name: str = _PROGRAM_LINE.search(block)[1]
+    program: Path = _PROGRAM if program_name == "self" else _CRATE_FOLDER / program_name
+    map_arguments: list[str] = ["--map", map_match[1]] if (map_match := _MAP_LINE.search(block)) else []
+    fighters: list[subprocess.Popen[str]] = []
+    for team in ("blue", "red"):
+        label: list[str] = [] if _NO_BOT_LABEL in block else ["--label", f"fighter-{team}-round-{number}"]
+        arguments: list[str] = [
+            "--join", "127.0.0.1", "--port", str(level_port), *map_arguments, "--team", team, "--bot",
+            "--exit-after-s", str(fight_s), *label,
+        ]
+        fighters.append(_start(arguments, run_folder / f"round_{number}_{team}_fighter.log", program))
+    return fighters
 
 
 def _find_walks(run_folder: Path, number: int, winner: str) -> list[str]:
@@ -197,25 +314,33 @@ def _find_walks(run_folder: Path, number: int, winner: str) -> list[str]:
 
 
 def _watch_match(
-    server: subprocess.Popen[str], bots: dict[str, subprocess.Popen[str]], run_folder: Path, round_timeout_s: float
+    server: subprocess.Popen[str],
+    bots: dict[str, subprocess.Popen[str]],
+    run_folder: Path,
+    round_timeout_s: float,
+    level_port: int,
+    fight_s: float,
 ) -> tuple[Path, list[_round_t]]:
-    """`_watch_match` follows the match server's output until it exits, logging each round to `levels.log`.
+    """`_watch_match` follows the match server's output until it exits, starting each round's fighting bots and logging
+    each round to `levels.log`.
 
     Args:
         server: The match server, its output piped.
         bots: Each team's bot match client.
-        run_folder: The run folder, for `server.log` and `levels.log`.
+        run_folder: The run folder, for `server.log`, `levels.log` and the fighters' logs.
         round_timeout_s: Seconds a round may last before it counts as a stall.
+        level_port: The level servers' UDP port, for the fighters.
+        fight_s: Seconds the fighters play in each round (0 for none).
 
     Returns:
-        The match server's run folder, and each round's level, attacker, winner, pylons' times off and the pylons
-        its bot reached on foot (`_find_walks`).
+        The match server's run folder, and each round: its level, attacker, winner, duration, level log
+        (`_LevelLog`), the pylons its console bot reached on foot (`_find_walks`) and whether it had fighters.
 
     Raises:
         _MatchCheckFailed: A round stalled, or a process stopped before the match was over.
 
     Example:
-        >>> match_folder, rounds = _watch_match(server, bots, run_folder, 600.0)
+        >>> match_folder, rounds = _watch_match(server, bots, run_folder, 600.0, 48112, 45.0)
     """
     lines: queue.Queue[str | None] = queue.Queue()
 
@@ -232,80 +357,149 @@ def _watch_match(
     match_folder: Path | None = None
     rounds: list[_round_t] = []
     started: tuple[str, str, float] | None = None
-    pylon_off_s: list[float] = []
-    offset_bytes: int = 0
+    level_log: _LevelLog | None = None
+    fighters: list[subprocess.Popen[str]] = []
     deadline_s: float = time.monotonic() + _START_TIMEOUT_S
-    with (run_folder / "levels.log").open("w") as levels_log:
-        while True:
-            if started is not None and match_folder is not None:
-                level_log_path: Path = match_folder / f"round_{len(rounds) + 1}_server.log"
-                offset_bytes = _note_pylons_off(level_log_path, offset_bytes, started[2], pylon_off_s)
-            for team, bot in bots.items():
-                if bot.poll() is not None and (bot.returncode != 0 or len(rounds) < len(_PLAN)):
-                    raise _MatchCheckFailed(f"{team}'s bot stopped ({bot.returncode}) mid-match; see {team}.log")
-            if time.monotonic() > deadline_s:
-                level: str = started[0] if started else "not started"
-                raise _MatchCheckFailed(f"stall in round {len(rounds) + 1} ({level}); see server.log")
-            try:
-                line: str | None = lines.get(timeout=_POLL_S)
-            except queue.Empty:
-                continue
-            if line is None:
-                break
-            if folder_match := _MATCH_FOLDER_LINE.match(line):
-                match_folder = Path(folder_match[1])
-            elif start_match := _START_LINE.match(line):
-                started = (start_match[2], _ATTACKER_NAMES[start_match[3]], time.monotonic())
-                pylon_off_s, offset_bytes = [], 0
-                deadline_s = started[2] + round_timeout_s
-                _log(levels_log, f"round {start_match[1]} started: {started[0]}, attacker {started[1]}")
-            elif (won_match := _WON_LINE.match(line)) and started is not None:
-                duration_s: float = time.monotonic() - started[2]
-                level_log_path = match_folder / f"round_{won_match[1]}_server.log"
-                _note_pylons_off(level_log_path, offset_bytes, started[2], pylon_off_s)
-                walks: list[str] = _find_walks(run_folder, int(won_match[1]), won_match[2])
-                rounds.append((started[0], started[1], won_match[2], pylon_off_s, walks))
-                deadline_s = time.monotonic() + _START_TIMEOUT_S
-                times: str = ", ".join(f"{off_s:.1f}" for off_s in pylon_off_s)
-                _log(
-                    levels_log,
-                    f"round {won_match[1]} won by {won_match[2]}: {started[0]} in {duration_s:.1f} s; "
-                    f"the other team's pylons off: {len(pylon_off_s)}, at {times} s; on foot: "
-                    f"{', '.join(walks) if walks else 'not reported by its bot'}",
-                )
-                started = None
+    try:
+        with (run_folder / "levels.log").open("w") as levels_log:
+            while True:
+                if level_log is not None:
+                    level_log.read()
+                for team, bot in bots.items():
+                    if bot.poll() is not None and (bot.returncode != 0 or len(rounds) < len(_PLAN)):
+                        raise _MatchCheckFailed(f"{team}'s bot stopped ({bot.returncode}) mid-match; see {team}.log")
+                if time.monotonic() > deadline_s:
+                    level: str = started[0] if started else "not started"
+                    raise _MatchCheckFailed(f"stall in round {len(rounds) + 1} ({level}); see server.log")
+                try:
+                    line: str | None = lines.get(timeout=_POLL_S)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    break
+                if folder_match := _MATCH_FOLDER_LINE.match(line):
+                    match_folder = Path(folder_match[1])
+                elif (start_match := _START_LINE.match(line)) and match_folder is not None:
+                    number: int = int(start_match[1])
+                    started = (start_match[2], _ATTACKER_NAMES[start_match[3]], time.monotonic())
+                    level_log = _LevelLog(match_folder / f"round_{number}_server.log", started[2])
+                    fighters = _start_fighters(started[0], level_port, run_folder, number, fight_s)
+                    deadline_s = started[2] + round_timeout_s
+                    _log(levels_log, f"round {number} started: {started[0]}, attacker {started[1]}")
+                elif (won_match := _WON_LINE.match(line)) and started is not None and level_log is not None:
+                    for fighter in fighters:
+                        _stop(fighter)
+                    duration_s: float = time.monotonic() - started[2]
+                    level_log.read()
+                    walks: list[str] = _find_walks(run_folder, int(won_match[1]), won_match[2])
+                    round_: _round_t = {
+                        "level": started[0], "attacker": started[1], "winner": won_match[2],
+                        "duration_s": duration_s, "level_log": level_log, "walks": walks,
+                        "has_fighters": bool(fighters),
+                    }
+                    rounds.append(round_)
+                    deadline_s = time.monotonic() + _START_TIMEOUT_S
+                    _log(levels_log, f"round {won_match[1]} won by {won_match[2]}: {_describe_round(round_)}")
+                    started, level_log, fighters = None, None, []
+            _log(levels_log, "per level:\n" + _make_table(rounds))
+    finally:
+        for fighter in fighters:
+            _stop(fighter)
     if server.wait() != 0 or match_folder is None:
         raise _MatchCheckFailed(f"the match server stopped ({server.returncode}); see server.log")
     return match_folder, rounds
 
 
+def _describe_round(round_: _round_t) -> str:
+    """`_describe_round` gives one round's line for `levels.log`: duration, pylons off, walks, eliminations, respawns.
+
+    Example:
+        >>> line = _describe_round(rounds[0])
+    """
+    level_log: _LevelLog = round_["level_log"]
+    times: str = ", ".join(f"{off_s:.1f}" for off_s, _ in level_log.pylons_off)
+    delays: str = ", ".join(f"{delay_s:.1f}" for delay_s in level_log.get_respawn_delays_s())
+    walks: list[str] = round_["walks"]
+    return (
+        f"{round_['level']} in {round_['duration_s']:.1f} s; the other team's pylons off: {len(level_log.pylons_off)}, "
+        f"at {times} s; on foot: {', '.join(walks) if walks else 'not reported by its bot'}; "
+        f"eliminations: {len(level_log.kills)}; respawns after {delays or 'none'} s"
+    )
+
+
+def _make_table(rounds: list[_round_t]) -> str:
+    """`_make_table` gives a Markdown table of each round: kills by team, deaths, respawns and walks.
+
+    Example:
+        >>> table = _make_table(rounds)
+    """
+    rows: list[str] = [
+        "| Level | Won in | Kills blue / red | Deaths blue / red | Respawns (mean s) | Pylons on foot (s per walk) |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for round_ in rounds:
+        level_log: _LevelLog = round_["level_log"]
+        teams: dict[int, str] = {id_: team for _, id_, team in level_log.joins}
+        kills: list[int] = [
+            sum(1 for _, _, shooter in level_log.kills if shooter is not None and teams.get(shooter) == team)
+            for team in ("blue", "red")
+        ]
+        deaths: list[int] = [
+            sum(1 for _, victim, _ in level_log.kills if teams.get(victim) == team) for team in ("blue", "red")
+        ]
+        delays_s: list[float] = level_log.get_respawn_delays_s()
+        mean: str = f" ({sum(delays_s) / len(delays_s):.1f})" if delays_s else ""
+        walks: str = ", ".join(walk.split(" in ")[1].removesuffix(" s") for walk in round_["walks"]) or "not reported"
+        rows.append(
+            f"| {round_['level']} | {round_['duration_s']:.1f} s | {kills[0]} / {kills[1]} | {deaths[0]} / {deaths[1]} "
+            f"| {len(delays_s)}{mean} | {walks} |"
+        )
+    return "\n".join(rows)
+
+
 def _check_match(match_folder: Path, rounds: list[_round_t]) -> None:
-    """`_check_match` checks rounds, result files, pylons (on foot where bots walk), one join a level and the
-    outcome against `_PLAN`.
+    """`_check_match` checks rounds, result files, pylons (reached on foot where bots walk), the fights, the players
+    in each level and the outcome against `_PLAN`.
 
     Args:
         match_folder: The match server's run folder.
-        rounds: Each round's level, attacker, winner, pylons' times off and walks, from `_watch_match`.
+        rounds: Each round, from `_watch_match`.
 
     Raises:
-        _MatchCheckFailed: Something differs from `_PLAN`.
+        _MatchCheckFailed: Something differs from `_PLAN`, or a fight check fails.
 
     Example:
         >>> _check_match(match_folder, rounds)
     """
-    played: list[tuple[str, str, str, int]] = [(*round_[:3], len(round_[3])) for round_ in rounds]
-    for level, _, _, pylon_off_s, walks in rounds:
-        if level in _WALKING_LEVELS and len(walks) != len(pylon_off_s):
-            raise _MatchCheckFailed(f"{level}'s bot reached {len(walks)} of {len(pylon_off_s)} pylons on foot")
+    played: list[tuple[str, str, str, int]] = [
+        (round_["level"], round_["attacker"], round_["winner"], len(round_["level_log"].pylons_off))
+        for round_ in rounds
+    ]
     if played != _PLAN:
         raise _MatchCheckFailed(f"rounds (level, attacker, winner, pylons off) {played} differ from the plan {_PLAN}")
-    for number, (level, _, winner, _) in enumerate(_PLAN, start=1):
+    for number, round_ in enumerate(rounds, start=1):
+        level: str = round_["level"]
+        level_log: _LevelLog = round_["level_log"]
+        off_consoles: set[int] = {console for _, console in level_log.pylons_off}
+        reached: set[int] = {int(walk.split()[1]) for walk in round_["walks"]}
+        if level in _WALKING_LEVELS and not off_consoles <= reached:
+            missed: list[int] = sorted(off_consoles - reached)
+            raise _MatchCheckFailed(f"{level}: pylons {missed} went off but weren't reached on foot")
         result_path: Path = match_folder / f"round_{number}.json"
-        if not result_path.exists() or json.loads(result_path.read_text()) != {"winner": winner}:
-            raise _MatchCheckFailed(f"{result_path} (round {number}, {level}) doesn't say {winner} won")
-        level_log: str = (match_folder / f"round_{number}_server.log").read_text()
-        if (join_count := len(_JOIN_LINE.findall(level_log))) != 1:
-            raise _MatchCheckFailed(f"{join_count} players joined {level} in round {number}, not the one bot")
+        if not result_path.exists() or json.loads(result_path.read_text()) != {"winner": round_["winner"]}:
+            raise _MatchCheckFailed(f"{result_path} (round {number}, {level}) doesn't say {round_['winner']} won")
+        player_count: int = len({id_ for _, id_, _ in level_log.joins})
+        expected_count: int = 3 if round_["has_fighters"] else 1
+        if player_count != expected_count:
+            raise _MatchCheckFailed(f"{player_count} players joined {level} in round {number}, not {expected_count}")
+        if not round_["has_fighters"]:
+            continue
+        delays_s: list[float] = level_log.get_respawn_delays_s()
+        if not level_log.kills or not delays_s:
+            raise _MatchCheckFailed(f"{level}: {len(level_log.kills)} eliminations and {len(delays_s)} respawns")
+        delay_s: float = _get_respawn_delay_s(level)
+        if wrong := [d for d in delays_s if not delay_s - _RESPAWN_EARLY_S <= d <= delay_s + _RESPAWN_LATE_S]:
+            raise _MatchCheckFailed(f"{level}: respawns after {wrong} s, not about {delay_s} s")
     report: dict[str, Any] = json.loads((match_folder / "match.json").read_text())
     if report["outcome"] != _OUTCOME:
         raise _MatchCheckFailed(f"the match ended {report['outcome']}, not {_OUTCOME}")
@@ -375,14 +569,17 @@ def _validate_args(match_port: int, level_port: int, label: str | None) -> None:
 @click.option(
     "--round-timeout-s", type=click.FloatRange(min=1.0), default=600.0, show_default=True, help="Stall after this."
 )
+@click.option(
+    "--fight-s", type=click.FloatRange(min=0.0), default=45.0, show_default=True, help="Fighters' time a round."
+)
 @click.option("--width-px", type=click.IntRange(64, 7680), default=1280, show_default=True, help="Picture width.")
 @click.option("--height-px", type=click.IntRange(64, 4320), default=800, show_default=True, help="Picture height.")
 @click.option("--label", type=str, default=None, help="Suffix for the run folder's name.")
 @click.option("--dry-run", is_flag=True, help="Print the plan and the commands, and start nothing.")
 @click.option("--json", "is_json", is_flag=True, help="Print the summary as one JSON object.")
 def main(
-    match_port: int, level_port: int, round_timeout_s: float, width_px: int, height_px: int, label: str | None,
-    dry_run: bool, is_json: bool,
+    match_port: int, level_port: int, round_timeout_s: float, fight_s: float, width_px: int, height_px: int,
+    label: str | None, dry_run: bool, is_json: bool,
 ) -> None:
     """`main` plays one bot match steered through all five levels and checks it (see the file's docstring).
 
@@ -426,7 +623,7 @@ def main(
             team: _start(arguments, run_folder / f"{team}.log") for team, arguments in bot_arguments.items()
         }
         processes += bots.values()
-        match_folder, rounds = _watch_match(processes[0], bots, run_folder, round_timeout_s)
+        match_folder, rounds = _watch_match(processes[0], bots, run_folder, round_timeout_s, level_port, fight_s)
         _check_match(match_folder, rounds)
         for team, bot in bots.items():
             if bot.wait(timeout=_START_TIMEOUT_S) != 0:
@@ -445,8 +642,18 @@ def main(
     finally:
         for process in processes:
             _stop(process)
+    rounds_json: list[dict[str, Any]] = [
+        {
+            **{key: value for key, value in round_.items() if key != "level_log"},
+            "pylons_off": round_["level_log"].pylons_off,
+            "kills": round_["level_log"].kills,
+            "joins": round_["level_log"].joins,
+            "respawn_delays_s": round_["level_log"].get_respawn_delays_s(),
+        }
+        for round_ in rounds
+    ]
     summary: dict[str, Any] = {
-        "is_passed": failure is None, "failure": failure, "rounds": rounds, "run_folder": str(run_folder)
+        "is_passed": failure is None, "failure": failure, "rounds": rounds_json, "run_folder": str(run_folder)
     }
     (run_folder / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     click.echo(json.dumps(summary) if is_json else f"{'FAIL: ' + failure if failure else 'PASS'}; see {run_folder}")

@@ -1,6 +1,6 @@
-//! `session` runs a match: it updates the player, weapon, and bots, resolves shots, spawns
-//! effects (beams, sparks, smoke, decals, light flashes), plays sounds, and turns the state
-//! into the renderer's per-frame data. An optional autopilot plays the game by itself for
+//! `session` runs a match: it updates the player, their guns (`guns.rs`, Lunar Surface's) and
+//! the bots, resolves shots, spawns effects (beams flying out, sparks, smoke, ground dust, decals,
+//! light flashes), plays sounds, and turns the state into the renderer's per-frame data. An optional autopilot plays the game by itself for
 //! screenshots and benchmarks.
 //!
 //! Example:
@@ -15,46 +15,90 @@ use std::ops::Range;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::audio::{Audio, Sound};
-use super::bots::{BOT_HEIGHT_M, Bot, BotClip, BotContext, BotShot, RESPAWN_DELAY_S, SHOT_DAMAGE};
+use super::bots::{
+    BOT_HEIGHT_M, BOT_MAX_HEALTH, Bot, BotClip, BotContext, BotShot, RESPAWN_DELAY_S,
+};
 use super::collision::{Aabb, cast_ray};
+use super::console_bot::{BotWalker, WalkStep};
+use super::dust::{DustBurst, DustParticle, DustShape, MAX_DUST_BURST_COUNT};
+use super::guns::{
+    Gun, GunInput, GunStep, Guns, HALF_FOV_RAD, LASER_MAX_LENGTH_M, MUZZLE_M, Tracer,
+    take_hit_weight,
+};
 use super::hud::{BarPulsePair, HudState, OverlayHudState, build_hud, build_overlay_rects};
 use super::nav::NavGraph;
-use super::player::{MAX_HEALTH, Player, PlayerInput};
-use super::weapon::{MAGAZINE_SIZE, Weapon, WeaponEvent, WeaponInput};
-use super::world::Arena;
+use super::player::{MAX_HEALTH, Movement, Player, PlayerInput};
+use super::world::{Arena, Surface};
 use crate::assets::gltf_model::Trs;
+use crate::console_reach::ConsolePlace;
 use crate::render::overlay::{HitEffect, OverlayRect};
 use crate::render::{Camera, Decal, DrawItem, HudRect, Particle, ParticleKind, PointLight};
-use crate::scene::{Scene, draw_items_for};
+use crate::scene::{GunViewmodel, Scene, draw_items_for};
+use crate::settings::ServerSettings;
+use crate::shot_noise::ShotNoise;
 
 /// `MAX_DECAL_COUNT` is how many impact marks stay in the world.
 const MAX_DECAL_COUNT: usize = 160;
-/// `BODY_DAMAGE` is the damage of a body hit.
-const BODY_DAMAGE: f32 = 34.0;
-/// `HEAD_DAMAGE` is the damage of a headshot.
-const HEAD_DAMAGE: f32 = 75.0;
-/// `SHOT_RANGE_M` is the weapon's range.
-const SHOT_RANGE_M: f32 = 250.0;
 /// `TEAM_PLAYER_BEAM_COLOR` is the HDR color of the player's beam (times the light scale).
 const TEAM_PLAYER_BEAM_COLOR: Vec3 = Vec3::new(0.35, 0.8, 1.6);
 /// `MAP_BEAM_HDR_SCALE` brightens a map's laser colour (`Arena::laser_rgb`) to a beam's HDR level.
 const MAP_BEAM_HDR_SCALE: f32 = 1.8;
 /// `TEAM_BOT_BEAM_COLOR` is the HDR color of the bots' bolts (times the light scale).
 const TEAM_BOT_BEAM_COLOR: Vec3 = Vec3::new(1.8, 0.25, 0.12);
+/// `AUTOPILOT_TURN_PER_S` is how fast the autopilot turns toward what it looks at (the share of
+/// the way left it turns each second, as an exponential rate): fast enough to follow a sprinter.
+const AUTOPILOT_TURN_PER_S: f32 = 15.0;
+/// `AUTOPILOT_AIM_SLACK_M` is how near the target a shot aimed straight at it must still end,
+/// after any wormhole's bending, for the autopilot to count the target as in sight.
+const AUTOPILOT_AIM_SLACK_M: f32 = 0.3;
 /// `AUTOPILOT_HIP_FIRE_RANGE_M` is the range inside which the autopilot fires from the hip.
 const AUTOPILOT_HIP_FIRE_RANGE_M: f32 = 14.0;
 /// `NEAR_M` is the camera's near plane.
 const NEAR_M: f32 = 0.05;
 /// `FAR_M` is the camera's far plane.
 const FAR_M: f32 = 600.0;
-/// `VIEWMODEL_FOV_Y_RAD` is the viewmodel's field of view.
-const VIEWMODEL_FOV_Y_RAD: f32 = 0.95;
+/// `BEAM_RADIUS_M` is a laser beam's half width (Lunar Surface's narrowest), and `BEAM_HDR_SCALE`
+/// brightens its colour to a beam's HDR level, times the light scale: the beams are drawn as this
+/// level's tracers (with the shot's speckle share in the particle's seed) until the renderer draws
+/// Lunar Surface's beam looks and speckle.
+const BEAM_RADIUS_M: f32 = 0.02;
+const BEAM_HDR_SCALE: f32 = 1.8;
+/// `BEAM_DASH_SPACING_M` and `BEAM_DASH_OVERLAP` cut a beam into short tracers, each this many times
+/// as long as their spacing: one tracer glows only around its middle, so a long beam drawn as one
+/// would show only there.
+const BEAM_DASH_SPACING_M: f32 = 0.15;
+const BEAM_DASH_OVERLAP: f32 = 2.0;
+/// `FLASHLIGHT_RGB` is the flashlight's colour, a warm white; `FLASHLIGHT_REACH_PER_RANGE` how far
+/// it reaches, in its half-light ranges; `FLASHLIGHT_SPOT_STANDOFF_M` and
+/// `FLASHLIGHT_SPOT_MARGIN_M` how far before the lit surface its spot light sits and how much wider
+/// than the cone it reaches; and `FLASHLIGHT_NEAR_M`, `FLASHLIGHT_NEAR_RADIUS_M` and
+/// `FLASHLIGHT_NEAR_FRAC` place, size and dim the light for what is close.
+const FLASHLIGHT_RGB: Vec3 = Vec3::new(1.0, 0.95, 0.85);
+const FLASHLIGHT_REACH_PER_RANGE: f32 = 2.0;
+const FLASHLIGHT_SPOT_STANDOFF_M: f32 = 0.5;
+const FLASHLIGHT_SPOT_MARGIN_M: f32 = 0.5;
+const FLASHLIGHT_NEAR_M: f32 = 1.0;
+const FLASHLIGHT_NEAR_RADIUS_M: f32 = 4.0;
+const FLASHLIGHT_NEAR_FRAC: f32 = 0.15;
+/// `GRAIN_SPRITE_PER_RADIUS` is how much larger than a dust grain its smoke sprite is.
+const GRAIN_SPRITE_PER_RADIUS: f32 = 1.5;
+/// `LUNAR_TEAM_BEAM_RGB` are Lunar Surface's laser colours per team (blue, red), linear, for a map
+/// without a laser colour of its own.
+const LUNAR_TEAM_BEAM_RGB: [Vec3; 2] = [
+    Vec3::new(0.0707, 0.3491, 1.0),
+    Vec3::new(1.0, 0.0177, 0.0039),
+];
+/// `MIN_GROUND_NORMAL_Y` is how upright a ground hit's normal must be to throw up dust, and
+/// `BOT_GROUND_HIT_M` how low a bot's bolt must land to count as hitting the ground.
+const MIN_GROUND_NORMAL_Y: f32 = 0.7;
+const BOT_GROUND_HIT_M: f32 = 0.05;
 
 /// `Controls` is one frame of input from the keyboard and mouse.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Controls {
     pub player: PlayerInput,
-    pub weapon: WeaponInput,
+    pub gun: GunInput,
+    pub is_flashlight_held: bool,
 }
 
 /// `RobotHold` holds robot 0 for pictures and benchmarks: it stands at `feet_m` facing `yaw_rad`,
@@ -84,15 +128,25 @@ struct SimParticle {
     seed: f32,
 }
 
-/// `Beam` is a fading energy beam between two points.
+/// `Landing` is what a shot does where its beam ends, once the beam's front gets there: sparks,
+/// smoke and a light flash in `color_rgb` (an HDR multiple of the light scale) at `position_m` on a
+/// surface facing `normal`, a scorch mark when `has_decal`, and ground dust thrown up against
+/// `direction` (the shot's) when it hit the ground.
 #[derive(Clone, Copy, Debug)]
-struct Beam {
-    start_m: Vec3,
-    end_m: Vec3,
-    age_s: f32,
-    life_s: f32,
+struct Landing {
+    position_m: Vec3,
+    normal: Vec3,
     color_rgb: Vec3,
-    width_m: f32,
+    has_decal: bool,
+    is_ground: bool,
+    direction: Vec3,
+}
+
+/// `ShotFlight` is a shot's beam flying out (`tracer`) and what it does when its front lands,
+/// until it does.
+struct ShotFlight {
+    tracer: Tracer,
+    landing: Option<Landing>,
 }
 
 /// `Flash` is a short-lived point light.
@@ -160,7 +214,10 @@ pub struct Session {
     pub arena: Arena,
     pub nav: NavGraph,
     pub player: Player,
-    pub weapon: Weapon,
+    pub guns: Guns,
+    pub settings: ServerSettings,
+    pub movement: Movement,
+    since_movement_key_s: f32,
     pub bots: Vec<Bot>,
     pub kill_count: u32,
     pub death_count: u32,
@@ -169,7 +226,9 @@ pub struct Session {
     pub show_frame_ms: Option<f32>,
     decals: VecDeque<Decal>,
     particles: Vec<SimParticle>,
-    beams: Vec<Beam>,
+    flights: Vec<ShotFlight>,
+    dust_bursts: Vec<DustBurst>,
+    was_firing: bool,
     flashes: Vec<Flash>,
     hit_marker_s: f32,
     kill_marker_s: f32,
@@ -182,7 +241,7 @@ pub struct Session {
     autopilot_trigger_s: f32,
     pub route: Vec<Vec3>,
     pub remote_bots: Vec<RemoteBot>,
-    pub pending_hits: Vec<u32>,
+    pub pending_hits: Vec<(u32, u8)>,
     pub team: u32,
     pub console_off: Vec<bool>,
     pub player_beam_color: Vec3,
@@ -192,24 +251,33 @@ pub struct Session {
     pub laps_done: u32,
     pub is_trigger_down: bool,
     pub is_view_covered: bool,
+    pub console_places: Vec<ConsolePlace>,
+    pub walker: Option<BotWalker>,
+    pub is_console_objective: bool,
+    pub bot_console: Option<usize>,
+    pub is_team_known: bool,
+    pub is_flashlight_on: bool,
     bar_pulses: BarPulsePair,
     robot_hold: Option<RobotHold>,
     robot_hold_s: f32,
 }
 
-/// `RemoteBot` is another player of a network game, drawn as a robot in their team's colour.
+/// `RemoteBot` is another player of a network game, drawn as a robot in their team's colour: their
+/// camera's frame (while firing, the frame their shot is traced from), whether their laser is on
+/// (and was last frame), with which gun, and their shot's speckle.
 pub struct RemoteBot {
     pub id: u32,
     pub team: u32,
     pub bot: Bot,
+    pub frame: Mat4,
     pub is_firing: bool,
-    pub fire_cooldown_s: f32,
+    pub was_firing: bool,
+    pub is_rifle: bool,
+    pub beam_speckle_frac: f64,
 }
 
 /// `TEAM_TINTS` are the robots' main colours per team (blue, red).
 const TEAM_TINTS: [Vec3; 2] = [Vec3::new(0.12, 0.25, 0.75), Vec3::new(0.75, 0.14, 0.1)];
-/// `REMOTE_FIRE_PERIOD_S` is how often a firing remote player's tracer is drawn.
-const REMOTE_FIRE_PERIOD_S: f32 = 0.11;
 
 /// `GROUND_PATROL` is the loop the autopilot walks by default, on the ground.
 const GROUND_PATROL: [Vec3; 6] = [
@@ -245,11 +313,19 @@ impl Session {
                 )
             })
             .collect();
+        let movement: Movement = Movement::New(
+            &arena.map_player,
+            arena.map_gravity_m_per_s2,
+            &ServerSettings::Builtin(),
+        );
         Session {
             player: Player::new(spawn_m, yaw_rad),
             arena,
             nav,
-            weapon: Weapon::new(),
+            guns: Guns::New(ShotNoise::FromClock()),
+            movement,
+            since_movement_key_s: 0.0,
+            settings: ServerSettings::Builtin(),
             bots,
             kill_count: 0,
             death_count: 0,
@@ -258,7 +334,9 @@ impl Session {
             show_frame_ms: None,
             decals: VecDeque::new(),
             particles: Vec::new(),
-            beams: Vec::new(),
+            flights: Vec::new(),
+            dust_bursts: Vec::new(),
+            was_firing: false,
             flashes: Vec::new(),
             hit_marker_s: 0.0,
             kill_marker_s: 0.0,
@@ -282,6 +360,12 @@ impl Session {
             laps_done: 0,
             is_trigger_down: false,
             is_view_covered: false,
+            console_places: Vec::new(),
+            walker: None,
+            is_console_objective: false,
+            bot_console: None,
+            is_team_known: true,
+            is_flashlight_on: false,
             bar_pulses: BarPulsePair::New(),
             robot_hold: None,
             robot_hold_s: 0.0,
@@ -301,6 +385,37 @@ impl Session {
             self.robot_hold = hold;
             self.robot_hold_s = ROBOT_HOLD_RESTART_S;
         }
+    }
+
+    /// `set_settings` makes `settings` the match's (the game server's, once it welcomes this
+    /// window) and works out the player's movement from them.
+    ///
+    /// Example: `session.set_settings(settings.clone());`
+    pub fn set_settings(&mut self, settings: ServerSettings) {
+        self.movement = Movement::New(
+            &self.arena.map_player,
+            self.arena.map_gravity_m_per_s2,
+            &settings,
+        );
+        self.settings = settings;
+    }
+
+    /// `respawn_player` brings the player back, whole, at their team's spawn farthest from the
+    /// robots (`farthest_spawn`): after the respawn delay, and when they join
+    /// a team.
+    ///
+    /// Example: `session.respawn_player();`
+    pub fn respawn_player(&mut self) {
+        let bot_positions: Vec<Vec3> = self.bots.iter().map(|bot| bot.feet_m).collect();
+        let team_spawns: &[(Vec3, f32)] = &self.arena.team_spawns[self.team as usize % 2];
+        let spawns: Vec<Vec3> = team_spawns.iter().map(|(p, _)| *p).collect();
+        let spawn_m: Vec3 = Session::farthest_spawn(&spawns, &bot_positions, self.spawn_counter);
+        let yaw_rad: f32 = team_spawns
+            .iter()
+            .find(|(p, _)| *p == spawn_m)
+            .map_or(0.0, |(_, yaw)| *yaw);
+        self.spawn_counter += 1;
+        self.player = Player::new(spawn_m, yaw_rad);
     }
 
     /// `random_signed` returns a pseudo-random number in [-1, 1].
@@ -334,13 +449,72 @@ impl Session {
         (1.0 / (1.0 + distance_m * 0.07), pan)
     }
 
-    /// `muzzle_world_m` returns where the viewmodel's muzzle is in the world.
-    fn muzzle_world_m(&self, scene: &Scene) -> Vec3 {
-        let local: Mat4 =
-            self.weapon
-                .viewmodel_local(&self.player, &scene.viewmodel.pose, self.time_s);
-        (self.player.camera_world() * local * scene.viewmodel.weapon_local)
-            .transform_point3(scene.viewmodel.muzzle_local_m)
+    /// `muzzle_world_m` gives where the tip of the gun in hand shows in the world
+    /// (`Guns::get_muzzle_m`), where this player's beams start.
+    fn muzzle_world_m(&self) -> Vec3 {
+        let zoom: f64 = self.guns.get_zoom(&self.settings);
+        self.player
+            .camera_world()
+            .transform_point3(self.guns.get_muzzle_m(zoom))
+    }
+
+    /// `get_beam_rgb` is the linear colour of `team`'s lasers: the map's, or Lunar Surface's team
+    /// colours without one.
+    fn get_beam_rgb(&self, team: u32) -> Vec3 {
+        self.arena
+            .laser_rgb
+            .unwrap_or(LUNAR_TEAM_BEAM_RGB[team as usize % 2])
+    }
+
+    /// `add_flight` starts a beam flying out along `path` (`Tracer::New`), landing as `landing`
+    /// when its front arrives.
+    #[allow(clippy::too_many_arguments)]
+    fn add_flight(
+        &mut self,
+        path: &BeamPath,
+        landing: Option<Landing>,
+        muzzle_m: Vec3,
+        is_rifle: bool,
+        speckle_frac: f64,
+        team: u32,
+        is_own: bool,
+    ) {
+        let tracer: Tracer = Tracer {
+            is_own,
+            ..Tracer::New(
+                &path.pieces,
+                landing.is_some(),
+                muzzle_m,
+                f64::from(self.time_s),
+                is_rifle,
+                speckle_frac,
+                self.get_beam_rgb(team),
+                &self.settings,
+            )
+        };
+        self.flights.push(ShotFlight { tracer, landing });
+    }
+
+    /// `land_shot` makes `landing` happen: sparks, smoke, a scorch mark and a flash
+    /// (`add_impact`), and ground dust when the shot hit the ground (`DustBurst::FromShot`).
+    fn land_shot(&mut self, landing: Landing, is_rifle: bool, light_scale: f32) {
+        self.add_impact(
+            landing.position_m,
+            landing.normal,
+            landing.color_rgb,
+            light_scale,
+            landing.has_decal,
+        );
+        if landing.is_ground {
+            self.dust_bursts.push(DustBurst::FromShot(
+                landing.position_m.as_dvec3(),
+                landing.direction.as_dvec3(),
+                f64::from(self.time_s),
+                is_rifle,
+            ));
+            let excess_count: usize = self.dust_bursts.len().saturating_sub(MAX_DUST_BURST_COUNT);
+            self.dust_bursts.drain(..excess_count);
+        }
     }
 
     /// `add_impact` spawns sparks, smoke, a decal, and a flash where a shot hit a surface.
@@ -405,29 +579,39 @@ impl Session {
         });
     }
 
-    /// `fire_player_shot` resolves one player shot against the world and the bots.
-    fn fire_player_shot(&mut self, scene: &Scene, audio: &Audio) {
+    /// `shoot_player_laser` traces this frame's laser while it is on, as Lunar Surface does: from
+    /// the eye turned by the shot's stray, through the warps, to the world, a bot or another player.
+    /// A hit on a player or bot counts as `take_hit_weight` gives it (every frame for the sniper,
+    /// once a shot for the rifle); a bot loses that share of its health. The laser's first frame
+    /// starts its beam flying out from the gun in hand, landing where the shot ends.
+    fn shoot_player_laser(&mut self, scene: &Scene, audio: &Audio) {
         /// `ShotHit` is what a laser hit first.
         #[derive(Clone, Copy)]
         enum ShotHit {
-            World(Vec3),
+            World(usize, Vec3),
             Bot(usize, bool, Vec3),
-            Remote(u32, Vec3),
+            Remote(u32, bool, Vec3),
         }
-        let origin_m: Vec3 = self.player.eye_position_m();
-        let direction: Vec3 = self.weapon.shot_direction(&self.player);
+        let aim: Mat4 = self
+            .guns
+            .shot_offset
+            .aim(self.player.camera_world().as_dmat4())
+            .as_mat4();
+        let origin_m: Vec3 = aim.w_axis.truncate();
+        let direction: Vec3 = -aim.z_axis.truncate().normalize();
         let mut shot_hit: Option<ShotHit> = None;
         let path: BeamPath = self.arena.warps.trace_beam(
             origin_m,
             direction,
-            SHOT_RANGE_M,
+            LASER_MAX_LENGTH_M,
             |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
                 let mut nearest_m: f32 = length_m;
                 let mut found: Option<ShotHit> = None;
-                if let Some((_, hit)) = cast_ray(&scene.solids, start_m, piece_direction, nearest_m)
+                if let Some((index, hit)) =
+                    cast_ray(&scene.solids, start_m, piece_direction, nearest_m)
                 {
                     nearest_m = hit.distance_m;
-                    found = Some(ShotHit::World(hit.normal));
+                    found = Some(ShotHit::World(index, hit.normal));
                 }
                 for (index, bot) in self
                     .bots
@@ -443,10 +627,10 @@ impl Session {
                     }
                 }
                 for remote in self.remote_bots.iter().filter(|r| r.bot.is_alive()) {
-                    for aabb in [remote.bot.head(), remote.bot.body()] {
+                    for (aabb, is_head) in [(remote.bot.head(), true), (remote.bot.body(), false)] {
                         if let Some(hit) = aabb.cast_ray(start_m, piece_direction, nearest_m) {
                             nearest_m = hit.distance_m;
-                            found = Some(ShotHit::Remote(remote.id, hit.normal));
+                            found = Some(ShotHit::Remote(remote.id, is_head, hit.normal));
                         }
                     }
                 }
@@ -457,48 +641,31 @@ impl Session {
             },
         );
         let end_m: Vec3 = path.end_m;
-        let muzzle_m: Vec3 = self.muzzle_world_m(scene);
-        for (index, (start_m, piece_end_m)) in path.pieces.iter().enumerate() {
-            self.beams.push(Beam {
-                start_m: if index == 0 { muzzle_m } else { *start_m },
-                end_m: *piece_end_m,
-                age_s: 0.0,
-                life_s: 0.16,
-                color_rgb: self.player_beam_color * scene.light_scale,
-                width_m: 0.022,
-            });
-        }
-        self.flashes.push(Flash {
-            position_m: muzzle_m,
-            color_rgb: self.player_beam_color * scene.light_scale * 0.5,
-            radius_m: 7.0,
-            age_s: 0.0,
-            life_s: 0.07,
-        });
-        audio.play(Sound::Shot, 0.9, 0.0);
-        match shot_hit {
-            Some(ShotHit::Remote(id, normal)) => {
-                self.pending_hits.push(id);
-                self.add_impact(
-                    end_m,
-                    normal,
-                    self.player_beam_color,
-                    scene.light_scale,
-                    false,
-                );
+        let gun: Gun = self.guns.gun;
+        let is_head_hit: bool = matches!(
+            shot_hit,
+            Some(ShotHit::Bot(_, true, _) | ShotHit::Remote(_, true, _))
+        );
+        let hit_weight: Option<u8> =
+            matches!(shot_hit, Some(ShotHit::Bot(..) | ShotHit::Remote(..)))
+                .then(|| {
+                    take_hit_weight(
+                        &self.settings,
+                        gun,
+                        &mut self.guns.has_rifle_shot_hit,
+                        is_head_hit,
+                    )
+                })
+                .flatten();
+        match (shot_hit, hit_weight) {
+            (Some(ShotHit::Remote(id, _, _)), Some(hits_to_kill)) => {
+                self.pending_hits.push((id, hits_to_kill));
                 self.hit_marker_s = 0.25;
                 audio.play(Sound::HitMarker, 0.5, 0.0);
             }
-            Some(ShotHit::Bot(index, is_head, normal)) => {
-                let damage: f32 = if is_head { HEAD_DAMAGE } else { BODY_DAMAGE };
-                let did_kill: bool = self.bots[index].take_damage(damage);
-                self.add_impact(
-                    end_m,
-                    normal,
-                    self.player_beam_color,
-                    scene.light_scale,
-                    false,
-                );
+            (Some(ShotHit::Bot(index, _, _)), Some(hits_to_kill)) => {
+                let did_kill: bool =
+                    self.bots[index].take_damage(BOT_MAX_HEALTH / f32::from(hits_to_kill));
                 self.hit_marker_s = 0.25;
                 audio.play(Sound::HitMarker, 0.5, 0.0);
                 if did_kill {
@@ -508,31 +675,89 @@ impl Session {
                     audio.play(Sound::BotDeath, gain * 1.4, pan);
                 }
             }
-            Some(ShotHit::World(normal)) => {
-                self.add_impact(
-                    end_m,
+            _ => {}
+        }
+        let is_first_frame: bool = !self.was_firing;
+        if !is_first_frame {
+            return;
+        }
+        let landing: Option<Landing> = shot_hit.map(|hit| {
+            let (normal, has_decal, is_ground) = match hit {
+                ShotHit::World(index, normal) => (
                     normal,
-                    self.player_beam_color,
-                    scene.light_scale,
                     true,
-                );
-                let (gain, pan) = self.sound_placement(end_m);
-                audio.play(Sound::Impact, gain, pan);
+                    self.arena.boxes[index].surface == Surface::Ground
+                        && normal.y > MIN_GROUND_NORMAL_Y,
+                ),
+                ShotHit::Bot(_, _, normal) | ShotHit::Remote(_, _, normal) => {
+                    (normal, false, false)
+                }
+            };
+            Landing {
+                position_m: end_m,
+                normal,
+                color_rgb: self.player_beam_color,
+                has_decal,
+                is_ground,
+                direction,
             }
-            None => {}
+        });
+        let muzzle_m: Vec3 = self.muzzle_world_m();
+        self.add_flight(
+            &path,
+            landing,
+            muzzle_m,
+            gun == Gun::Rifle,
+            self.guns.beam_speckle_frac,
+            self.team,
+            true,
+        );
+        self.flashes.push(Flash {
+            position_m: muzzle_m,
+            color_rgb: self.player_beam_color * scene.light_scale * 0.5,
+            radius_m: 7.0,
+            age_s: 0.0,
+            life_s: 0.07,
+        });
+        audio.play(Sound::Shot, 0.9, 0.0);
+    }
+
+    /// `get_hits_to_eliminate` gives how many hits like this one (to the head when `is_head`)
+    /// eliminate a player or a bot: the server settings' rifle hits, as on Lunar Surface.
+    ///
+    /// Example: `let hits_to_kill: u8 = self.get_hits_to_eliminate(false);`
+    fn get_hits_to_eliminate(&self, is_head: bool) -> u8 {
+        if is_head {
+            self.settings.rifle.head_hits_to_eliminate
+        } else {
+            self.settings.rifle.body_hits_to_eliminate
         }
     }
 
-    /// `apply_bot_shot` shows a bot's bolt and applies its damage.
+    /// `apply_bot_shot` sends a bot's bolt flying out as a rifle shot's beam (landing where it
+    /// ends unless it hit the player) and applies its damage.
     fn apply_bot_shot(&mut self, shot: BotShot, scene: &Scene, audio: &Audio) {
-        self.beams.push(Beam {
-            start_m: shot.origin_m,
+        let path: BeamPath = BeamPath {
+            pieces: vec![(shot.origin_m, shot.end_m)],
             end_m: shot.end_m,
-            age_s: 0.0,
-            life_s: 0.22,
-            color_rgb: self.bot_beam_color * scene.light_scale,
-            width_m: 0.03,
+        };
+        let landing: Option<Landing> = (!shot.did_hit_player).then_some(Landing {
+            position_m: shot.end_m,
+            normal: shot.end_normal,
+            color_rgb: self.bot_beam_color,
+            has_decal: true,
+            is_ground: shot.end_m.y < BOT_GROUND_HIT_M && shot.end_normal.y > MIN_GROUND_NORMAL_Y,
+            direction: (shot.end_m - shot.origin_m).normalize_or(Vec3::NEG_Y),
         });
+        self.add_flight(
+            &path,
+            landing,
+            shot.origin_m,
+            true,
+            0.0,
+            self.team + 1,
+            false,
+        );
         self.flashes.push(Flash {
             position_m: shot.origin_m,
             color_rgb: self.bot_beam_color * scene.light_scale * 0.4,
@@ -543,16 +768,9 @@ impl Session {
         let (gain, pan) = self.sound_placement(shot.origin_m);
         audio.play(Sound::BotShot, gain * 1.3, pan);
         if shot.did_hit_player {
-            self.player.take_damage(SHOT_DAMAGE);
+            let body_hits: f32 = f32::from(self.get_hits_to_eliminate(false));
+            self.player.take_damage(MAX_HEALTH / body_hits);
             audio.play(Sound::Hurt, 0.8, pan);
-        } else {
-            self.add_impact(
-                shot.end_m,
-                shot.end_normal,
-                self.bot_beam_color,
-                scene.light_scale,
-                true,
-            );
         }
     }
 
@@ -572,8 +790,38 @@ impl Session {
         ranked[counter % ranked.len().min(2)].1
     }
 
-    /// `autopilot_controls` plays the game: walk the waypoint loop, aim at visible bots, fire.
+    /// `autopilot_controls` plays the game: walk to the other team's consoles and hold `E` on each
+    /// (`is_console_objective`, with `walker`); or aim at visible robots and fire, walk toward the
+    /// nearest enemy player when none is visible (with `walker`), and else walk the waypoint loop.
+    /// A robot or player counts as in sight only along a straight line clear of the forest that a
+    /// shot would follow to it (`AUTOPILOT_AIM_SLACK_M`), not bent away by a wormhole. It stands still while it has one in sight, since a shot fires only
+    /// `shoot_after_moving_s` after the last step. It waits while its team is not known yet (`is_team_known`: an online game before the
+    /// server's welcome).
     fn autopilot_controls(&mut self, scene: &Scene, dt_s: f32) -> Controls {
+        if !self.is_team_known {
+            return Controls::default();
+        }
+        if self.is_console_objective
+            && let Some(walker) = &mut self.walker
+        {
+            let walk: WalkStep = walker.step_consoles(
+                &self.player,
+                &self.nav,
+                &self.arena.ladders,
+                &self.console_places,
+                &self.console_off,
+                self.team,
+                self.settings.consoles.reach_m,
+                self.time_s,
+                dt_s,
+            );
+            self.bot_console = walk.console;
+            return Controls {
+                player: walk.input,
+                gun: GunInput::default(),
+                is_flashlight_held: false,
+            };
+        }
         let eye_m: Vec3 = self.player.eye_position_m();
         let waypoint: Vec3 = self.route[self.autopilot_waypoint % self.route.len()];
         let target: Vec2 = Vec2::new(waypoint.x, waypoint.z);
@@ -601,8 +849,41 @@ impl Session {
                 let to_bot: Vec3 = *aim_m - eye_m;
                 to_bot.length() < 45.0
                     && cast_ray(&scene.solids, eye_m, to_bot.normalize(), to_bot.length()).is_none()
+                    && self
+                        .arena
+                        .warps
+                        .trace_beam(eye_m, to_bot, to_bot.length(), |_, _, _| None)
+                        .end_m
+                        .distance(*aim_m)
+                        < AUTOPILOT_AIM_SLACK_M
             })
             .min_by(|a, b| a.distance(eye_m).total_cmp(&b.distance(eye_m)));
+        let feet_m: Vec3 = self.player.feet_m;
+        let hunted_m: Option<Vec3> = self
+            .remote_bots
+            .iter()
+            .filter(|remote| remote.team != my_team && remote.bot.is_alive())
+            .map(|remote| remote.bot.feet_m)
+            .min_by(|a, b| a.distance(feet_m).total_cmp(&b.distance(feet_m)));
+        if visible_bot.is_none()
+            && let (Some(goal_m), Some(walker)) = (hunted_m, &mut self.walker)
+        {
+            let player: PlayerInput = walker.walk_to(
+                &self.player,
+                &self.nav,
+                &self.arena.ladders,
+                goal_m,
+                0.0,
+                self.time_s,
+                dt_s,
+            );
+            self.autopilot_trigger_s = 0.0;
+            return Controls {
+                player,
+                gun: GunInput::default(),
+                is_flashlight_held: false,
+            };
+        }
         let look_direction: Vec3 = match visible_bot {
             Some(aim_m) => (aim_m - eye_m).normalize(),
             None => Vec3::new(walk_direction.x, -0.04, walk_direction.y).normalize_or(Vec3::NEG_Z),
@@ -613,7 +894,7 @@ impl Session {
         yaw_delta_rad = (yaw_delta_rad + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
             - std::f32::consts::PI;
         let pitch_delta_rad: f32 = target_pitch_rad - self.player.pitch_rad;
-        let turn_frac: f32 = 1.0 - (-5.0 * dt_s).exp();
+        let turn_frac: f32 = 1.0 - (-AUTOPILOT_TURN_PER_S * dt_s).exp();
         let look_delta_rad: Vec2 = Vec2::new(-yaw_delta_rad, -pitch_delta_rad) * turn_frac;
         let forward: Vec2 = Vec2::new(-self.player.yaw_rad.sin(), -self.player.yaw_rad.cos());
         let right: Vec2 = Vec2::new(self.player.yaw_rad.cos(), -self.player.yaw_rad.sin());
@@ -628,18 +909,19 @@ impl Session {
         Controls {
             player: PlayerInput {
                 move_axes: Vec2::new(walk_direction.dot(right), walk_direction.dot(forward))
-                    * if visible_bot.is_some() { 0.5 } else { 1.0 },
+                    * if visible_bot.is_some() { 0.0 } else { 1.0 },
                 look_delta_rad,
                 is_sprint_held: visible_bot.is_none(),
                 is_crouch_held: false,
                 is_jump_pressed: false,
-                is_aiming: should_aim,
             },
-            weapon: WeaponInput {
+            gun: GunInput {
                 is_trigger_held: self.autopilot_trigger_s > 0.25,
-                is_reload_pressed: self.weapon.ammo == 0,
+                is_shoot_pressed: self.autopilot_trigger_s > 0.25,
                 is_aim_held: should_aim,
+                ..GunInput::default()
             },
+            is_flashlight_held: false,
         }
     }
 
@@ -654,15 +936,29 @@ impl Session {
         self.frame_count += 1;
         if self.player.health < self.last_health {
             self.hit_effect_frac = 1.0;
+            self.player.slow_down(&self.movement);
         }
+        let is_walking_upright: bool =
+            controls.player.move_axes != Vec2::ZERO && !controls.player.is_crouch_held;
+        self.since_movement_key_s = if is_walking_upright || controls.player.is_jump_pressed {
+            0.0
+        } else {
+            self.since_movement_key_s + dt_s
+        };
         self.last_health = self.player.health;
-        self.is_trigger_down = controls.weapon.is_trigger_held && self.weapon.ammo > 0;
         let bar_state: OverlayHudState = self.overlay_hud_state();
         self.bar_pulses.update(dt_s, &bar_state);
         let mut player_input: PlayerInput = controls.player;
-        player_input.is_aiming = controls.weapon.is_aim_held && self.weapon.reload_time_s.is_none();
-        self.player
-            .update(&player_input, &scene.solids, &self.arena.ladders, dt_s);
+        if !self.is_autopilot {
+            player_input.look_delta_rad /= self.guns.get_zoom(&self.settings) as f32;
+        }
+        self.player.update(
+            &player_input,
+            &self.movement,
+            &scene.solids,
+            &self.arena.ladders,
+            dt_s,
+        );
         if self.player.is_alive() {
             let warps: &Warps = &self.arena.warps;
             let centre_m: Vec3 = self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
@@ -686,33 +982,38 @@ impl Session {
                 0.0,
             );
         }
-        match self.weapon.update(
-            &controls.weapon,
-            &mut self.player,
-            controls.player.look_delta_rad,
-            dt_s,
-        ) {
-            Some(WeaponEvent::Fired) => {
-                self.fire_player_shot(scene, audio);
-                self.weapon.apply_recoil(&mut self.player);
-            }
-            Some(WeaponEvent::ReloadStarted) => audio.play(Sound::Reload, 0.6, 0.15),
-            None => {}
+        let can_shoot: bool = self.player.is_alive()
+            && self.console_hold_frac.is_none()
+            && self.winner.is_none()
+            && f64::from(self.since_movement_key_s) >= self.settings.movement.shoot_after_moving_s;
+        let step: GunStep = GunStep {
+            is_sprinting: self.player.is_sprinting,
+            bob_phase_rad: self.player.bob_phase_rad,
+            bob_frac: self.player.bob_frac,
+        };
+        let mut gun_input: GunInput = controls.gun;
+        gun_input.is_aim_held &= self.player.is_alive();
+        let kick_rad: Vec2 = self.guns.update(
+            &gun_input,
+            &self.settings,
+            can_shoot,
+            &step,
+            f64::from(dt_s),
+        );
+        self.player.kick_view(kick_rad);
+        let is_firing: bool = self.guns.is_firing();
+        if is_firing {
+            self.shoot_player_laser(scene, audio);
         }
-        if self.player.should_respawn() {
+        self.was_firing = is_firing;
+        self.is_flashlight_on = controls.is_flashlight_held && self.player.is_alive();
+        self.is_trigger_down = is_firing;
+        if self
+            .player
+            .should_respawn(self.settings.respawn.delay_s as f32)
+        {
             self.death_count += 1;
-            let bot_positions: Vec<Vec3> = self.bots.iter().map(|bot| bot.feet_m).collect();
-            let team_spawns: &[(Vec3, f32)] = &self.arena.team_spawns[self.team as usize % 2];
-            let spawns: Vec<Vec3> = team_spawns.iter().map(|(p, _)| *p).collect();
-            let spawn_m: Vec3 =
-                Session::farthest_spawn(&spawns, &bot_positions, self.spawn_counter);
-            let yaw_rad: f32 = self.arena.team_spawns[self.team as usize % 2]
-                .iter()
-                .find(|(p, _)| *p == spawn_m)
-                .map_or(0.0, |(_, yaw)| *yaw);
-            self.spawn_counter += 1;
-            self.player = Player::new(spawn_m, yaw_rad);
-            self.weapon = Weapon::new();
+            self.respawn_player();
         }
 
         let context: BotContext = BotContext {
@@ -722,7 +1023,7 @@ impl Session {
             player_eye_m: self.player.eye_position_m(),
             player_velocity_m_s: self.player.velocity_m_s,
             is_player_alive: self.player.is_alive(),
-            is_player_crouched: self.player.height_m < 1.5,
+            is_player_crouched: self.player.crouch_frac > 0.5,
         };
         let held_count: usize = usize::from(self.robot_hold.is_some());
         let shots: Vec<BotShot> = self
@@ -758,36 +1059,39 @@ impl Session {
             }
         }
 
-        let mut remote_beams: Vec<Beam> = Vec::new();
+        let starting: Vec<(Mat4, bool, f64, u32)> = self
+            .remote_bots
+            .iter()
+            .filter(|remote| remote.is_firing && !remote.was_firing && remote.bot.is_alive())
+            .map(|remote| {
+                (
+                    remote.frame,
+                    remote.is_rifle,
+                    remote.beam_speckle_frac,
+                    remote.team,
+                )
+            })
+            .collect();
         for remote in &mut self.remote_bots {
-            remote.fire_cooldown_s -= dt_s;
             remote.bot.animation.advance(dt_s, 1.0);
-            if remote.is_firing && remote.bot.is_alive() && remote.fire_cooldown_s <= 0.0 {
-                remote.fire_cooldown_s = REMOTE_FIRE_PERIOD_S;
-                let origin_m: Vec3 = remote.bot.eye_m();
-                let direction: Vec3 = remote.bot.facing();
-                let path: BeamPath = self.arena.warps.trace_beam(
-                    origin_m,
-                    direction,
-                    SHOT_RANGE_M,
-                    |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
-                        cast_ray(&scene.solids, start_m, piece_direction, length_m)
-                            .map(|(_, hit)| hit.distance_m)
-                    },
-                );
-                for (start_m, end_m) in path.pieces {
-                    remote_beams.push(Beam {
-                        start_m,
-                        end_m,
-                        age_s: 0.0,
-                        life_s: 0.12,
-                        color_rgb: self.bot_beam_color * scene.light_scale,
-                        width_m: 0.022,
-                    });
-                }
-            }
+            remote.was_firing = remote.is_firing;
         }
-        self.beams.extend(remote_beams);
+        for (frame, is_rifle, speckle_frac, team) in starting {
+            self.add_remote_flight(frame, is_rifle, speckle_frac, team, scene);
+        }
+        let now_s: f64 = f64::from(self.time_s);
+        let landed: Vec<(Landing, bool)> = self
+            .flights
+            .iter_mut()
+            .filter(|flight| now_s >= flight.tracer.get_arrival_s())
+            .filter_map(|flight| Some((flight.landing.take()?, flight.tracer.is_rifle)))
+            .collect();
+        for (landing, is_rifle) in landed {
+            self.land_shot(landing, is_rifle, scene.light_scale);
+        }
+        self.flights
+            .retain(|flight| !flight.tracer.is_over(now_s) || flight.landing.is_some());
+        self.dust_bursts.retain(|burst| !burst.is_over(now_s));
         for particle in &mut self.particles {
             particle.age_s += dt_s;
             particle.velocity_m_s.y -= 9.8 * particle.gravity_frac * dt_s;
@@ -800,10 +1104,6 @@ impl Session {
         }
         self.particles
             .retain(|particle| particle.age_s < particle.life_s);
-        for beam in &mut self.beams {
-            beam.age_s += dt_s;
-        }
-        self.beams.retain(|beam| beam.age_s < beam.life_s);
         for flash in &mut self.flashes {
             flash.age_s += dt_s;
         }
@@ -811,6 +1111,51 @@ impl Session {
         self.hit_marker_s = (self.hit_marker_s - dt_s).max(0.0);
         self.kill_marker_s = (self.kill_marker_s - dt_s).max(0.0);
         self.hit_effect_frac = (self.hit_effect_frac - dt_s / HIT_EFFECT_S).max(0.0);
+    }
+
+    /// `add_remote_flight` starts the beam of another player's shot as Lunar Surface draws it: traced
+    /// from `frame` (their camera turned by their shot's stray) through the warps to the world, from
+    /// their muzzle (`MUZZLE_M` in their camera), in their gun's look (`is_rifle`) and speckle.
+    fn add_remote_flight(
+        &mut self,
+        frame: Mat4,
+        is_rifle: bool,
+        speckle_frac: f64,
+        team: u32,
+        scene: &Scene,
+    ) {
+        let origin_m: Vec3 = frame.w_axis.truncate();
+        let direction: Vec3 = -frame.z_axis.truncate().normalize();
+        let mut hit_box: Option<(usize, Vec3)> = None;
+        let path: BeamPath = self.arena.warps.trace_beam(
+            origin_m,
+            direction,
+            LASER_MAX_LENGTH_M,
+            |start_m: Vec3, piece_direction: Vec3, length_m: f32| {
+                cast_ray(&scene.solids, start_m, piece_direction, length_m).map(|(index, hit)| {
+                    hit_box = Some((index, hit.normal));
+                    hit.distance_m
+                })
+            },
+        );
+        let landing: Option<Landing> = hit_box.map(|(index, normal)| Landing {
+            position_m: path.end_m,
+            normal,
+            color_rgb: self.bot_beam_color,
+            has_decal: true,
+            is_ground: self.arena.boxes[index].surface == Surface::Ground
+                && normal.y > MIN_GROUND_NORMAL_Y,
+            direction,
+        });
+        self.add_flight(
+            &path,
+            landing,
+            frame.transform_point3(MUZZLE_M),
+            is_rifle,
+            speckle_frac,
+            team,
+            false,
+        );
     }
 
     /// `bot_pose` samples a bot's blended animation pose.
@@ -853,9 +1198,40 @@ impl Session {
             .collect()
     }
 
-    /// `overlay_hud_state` is what the HUD's bars show now: health in segments of one body hit,
-    /// the magazine in segments of one shot (overheated while reloading), the sprint energy, the
-    /// console hold and whether the menu covers the view.
+    /// `get_flashlight_lights` lights what the player looks at as Lunar Surface's flashlight does,
+    /// with point lights since this renderer has no spot lights: one where the view meets the
+    /// world (up to `FLASHLIGHT_REACH_PER_RANGE` times the settings' `range_m`), as wide as the
+    /// cone there, as bright as the settings' share of sunlight, halved at `range_m`; and a dim one
+    /// just ahead of the eye for what is close.
+    ///
+    /// Example: `point_lights.extend(self.get_flashlight_lights(scene));`
+    fn get_flashlight_lights(&self, scene: &Scene) -> [PointLight; 2] {
+        let flashlight = &self.settings.flashlight;
+        let eye_m: Vec3 = self.player.eye_position_m();
+        let ahead: Vec3 = self.player.rotation() * Vec3::NEG_Z;
+        let range_m: f32 = flashlight.range_m as f32;
+        let reach_m: f32 = range_m * FLASHLIGHT_REACH_PER_RANGE;
+        let distance_m: f32 = cast_ray(&scene.solids, eye_m, ahead, reach_m)
+            .map_or(reach_m, |(_, hit)| hit.distance_m);
+        let cone_rad: f32 = (flashlight.cone_half_angle_rad + flashlight.soft_edge_rad) as f32;
+        let spot_radius_m: f32 = distance_m * cone_rad.tan() + FLASHLIGHT_SPOT_MARGIN_M;
+        let falloff: f32 = 1.0 / (1.0 + (distance_m / range_m).powi(2));
+        let color_rgb: Vec3 =
+            FLASHLIGHT_RGB * scene.light_scale * flashlight.brightness_frac as f32;
+        [
+            PointLight {
+                position_m: eye_m + ahead * (distance_m - FLASHLIGHT_SPOT_STANDOFF_M).max(0.0),
+                radius_m: spot_radius_m + FLASHLIGHT_SPOT_STANDOFF_M,
+                color_rgb: color_rgb * falloff,
+            },
+            PointLight {
+                position_m: eye_m + ahead * FLASHLIGHT_NEAR_M,
+                radius_m: FLASHLIGHT_NEAR_RADIUS_M,
+                color_rgb: color_rgb * FLASHLIGHT_NEAR_FRAC,
+            },
+        ]
+    }
+
     /// `get_hit_effect` is what the last hit on the player still does to the view, as the Lunar
     /// Surface demo's `get_hit_effect` gives it: red edges, a blur from the edges inward, and a
     /// shake in a new direction each frame (the golden angle apart), fading over `HIT_EFFECT_S`.
@@ -873,13 +1249,24 @@ impl Session {
         }
     }
 
+    /// `overlay_hud_state` is what the HUD's bars show now, as Lunar Surface's: health in segments
+    /// of one rifle hit to the body; the sniper's one block while it is loaded, or the rifle's heat
+    /// in segments of one shot (red once overheated); the sprint energy, the console hold and
+    /// whether the menu covers the view.
     fn overlay_hud_state(&self) -> OverlayHudState {
+        let (ammo_frac, ammo_segment_count) = match self.guns.gun {
+            Gun::Laser => (f32::from(u8::from(self.guns.sniper_reload_s <= 0.0)), 1),
+            Gun::Rifle => (
+                1.0 - self.guns.rifle_heat_frac.min(1.0) as f32,
+                self.settings.rifle.shots_until_overheat,
+            ),
+        };
         OverlayHudState {
             health_frac: self.player.health / MAX_HEALTH,
-            health_segment_count: (MAX_HEALTH / BODY_DAMAGE).ceil() as u32,
-            ammo_frac: self.weapon.ammo as f32 / MAGAZINE_SIZE as f32,
-            ammo_segment_count: MAGAZINE_SIZE,
-            is_reloading: self.weapon.reload_time_s.is_some(),
+            health_segment_count: u32::from(self.settings.rifle.body_hits_to_eliminate),
+            ammo_frac,
+            ammo_segment_count,
+            is_overheated: self.guns.gun == Gun::Rifle && self.guns.is_overheated,
             energy_frac: self.player.energy_frac,
             console_hold_frac: self.console_hold_frac,
             is_view_covered: self.is_view_covered,
@@ -937,11 +1324,12 @@ impl Session {
     /// `frame_data` turns the match into one frame for the renderer.
     pub fn frame_data(&self, scene: &Scene, width_px: f32, height_px: f32) -> FrameData {
         let camera_world: Mat4 = self.player.camera_world();
+        let zoom: f32 = self.guns.get_zoom(&self.settings) as f32;
         let camera: Camera = Camera {
             view: camera_world.inverse(),
             position_m: self.player.eye_position_m(),
-            fov_y_rad: self.weapon.fov_y_rad(),
-            viewmodel_fov_y_rad: VIEWMODEL_FOV_Y_RAD,
+            fov_y_rad: 2.0 * (HALF_FOV_RAD.tan() / zoom).atan(),
+            viewmodel_fov_y_rad: 2.0 * HALF_FOV_RAD,
             near_m: NEAR_M,
             far_m: FAR_M,
         };
@@ -1036,6 +1424,9 @@ impl Session {
                 color_rgb: flash.color_rgb * frac * frac,
             });
         }
+        if self.is_flashlight_on {
+            point_lights.extend(self.get_flashlight_lights(scene));
+        }
         let lens_draws: Range<usize> = scene.static_draws.len()..world_draws.len();
         let robot_particle_count: usize = world_particles.len();
         let beacon_height_m: f32 = scene.beacon.bounds_max_m.y - scene.beacon.bounds_min_m.y;
@@ -1076,16 +1467,32 @@ impl Session {
             }
         }
         let beacon_particle_end: usize = world_particles.len();
-        for beam in &self.beams {
-            let frac: f32 = 1.0 - beam.age_s / beam.life_s;
-            world_particles.push(Particle {
-                position_m: (beam.start_m + beam.end_m) * 0.5,
-                stretch_m: beam.end_m - beam.start_m,
-                size_m: beam.width_m * (0.4 + frac * 0.6),
-                color_rgba: (beam.color_rgb * frac * frac).extend(0.0),
-                kind: ParticleKind::Tracer,
-                seed: 0.0,
-            });
+        let now_s: f64 = f64::from(self.time_s);
+        let muzzle_m: Vec3 = self.muzzle_world_m();
+        for flight in &self.flights {
+            let tracer: &Tracer = &flight.tracer;
+            for (start_m, end_m) in tracer.get_lit_pieces(now_s, muzzle_m) {
+                let length_m: f32 = start_m.distance(end_m);
+                let dash_count: usize = (length_m / BEAM_DASH_SPACING_M).ceil().max(1.0) as usize;
+                let step_m: Vec3 = (end_m - start_m) / dash_count as f32;
+                for dash in 0..dash_count {
+                    world_particles.push(Particle {
+                        position_m: start_m + step_m * (dash as f32 + 0.5),
+                        stretch_m: step_m * BEAM_DASH_OVERLAP,
+                        size_m: BEAM_RADIUS_M,
+                        color_rgba: (tracer.rgb * BEAM_HDR_SCALE * scene.light_scale).extend(0.0),
+                        kind: ParticleKind::Tracer,
+                        seed: tracer.speckle_frac,
+                    });
+                }
+            }
+        }
+        for dust in self
+            .dust_bursts
+            .iter()
+            .flat_map(|burst| burst.get_cloud(now_s))
+        {
+            world_particles.push(get_dust_particle(&dust));
         }
         for particle in &self.particles {
             let frac: f32 = 1.0 - particle.age_s / particle.life_s;
@@ -1112,56 +1519,17 @@ impl Session {
         }
 
         let mut viewmodel_draws: Vec<DrawItem> = Vec::new();
-        let mut viewmodel_particles: Vec<Particle> = Vec::new();
+        let viewmodel_particles: Vec<Particle> = Vec::new();
         if self.player.is_alive() {
-            let viewmodel = &scene.viewmodel;
-            let weapon_world: Mat4 = camera_world
-                * self
-                    .weapon
-                    .viewmodel_local(&self.player, &viewmodel.pose, self.time_s);
+            let viewmodel: &GunViewmodel = match self.guns.gun {
+                Gun::Laser => &scene.bolt_action_rifle,
+                Gun::Rifle => &scene.revolver,
+            };
             viewmodel_draws.extend(draw_items_for(
-                &viewmodel.weapon,
-                weapon_world * viewmodel.weapon_local,
+                &viewmodel.model,
+                camera_world * self.guns.get_camera_from_muzzle() * viewmodel.muzzle_from_gltf,
                 false,
             ));
-            if let Some(arms) = &viewmodel.arms {
-                viewmodel_draws.extend(draw_items_for(
-                    arms,
-                    weapon_world * viewmodel.arms_local,
-                    false,
-                ));
-            }
-            let flash_frac: f32 = (1.0 - self.weapon.since_shot_s / 0.06).max(0.0);
-            let muzzle_m: Vec3 =
-                (weapon_world * viewmodel.weapon_local).transform_point3(viewmodel.muzzle_local_m);
-            if flash_frac > 0.0 {
-                viewmodel_particles.push(Particle {
-                    position_m: muzzle_m,
-                    stretch_m: Vec3::ZERO,
-                    size_m: 0.06 + flash_frac * 0.05,
-                    color_rgba: (self.player_beam_color * scene.light_scale * flash_frac * 1.5)
-                        .extend(0.0),
-                    kind: ParticleKind::MuzzleFlash,
-                    seed: self.weapon.since_shot_s,
-                });
-            }
-            if viewmodel.is_energy_weapon {
-                let charge_frac: f32 = self.weapon.ammo as f32 / MAGAZINE_SIZE as f32;
-                let pulse: f32 = 0.75 + 0.25 * (self.time_s * 3.0).sin();
-                viewmodel_particles.push(Particle {
-                    position_m: muzzle_m,
-                    stretch_m: Vec3::ZERO,
-                    size_m: 0.012,
-                    color_rgba: (self.player_beam_color
-                        * scene.light_scale
-                        * 0.12
-                        * pulse
-                        * charge_frac)
-                        .extend(0.0),
-                    kind: ParticleKind::MuzzleFlash,
-                    seed: 0.5,
-                });
-            }
         }
 
         let mut hud_rects: Vec<HudRect> = build_hud(
@@ -1198,5 +1566,27 @@ impl Session {
             overlay_rects,
             hit_effect: self.get_hit_effect(),
         }
+    }
+}
+
+/// `get_dust_particle` draws a grain or puff of ground dust (`dust.rs`) as this level's smoke, in
+/// its albedo and opacity, turned by its tumble; a grain's sprite is `GRAIN_SPRITE_PER_RADIUS`
+/// times its radius, as the smoke's soft edge leaves its middle smaller (the renderer has no grain
+/// shapes yet).
+///
+/// Example: `world_particles.push(get_dust_particle(&dust));`
+fn get_dust_particle(dust: &DustParticle) -> Particle {
+    let sprite_per_radius: f32 = if dust.shape == DustShape::Puff {
+        1.0
+    } else {
+        GRAIN_SPRITE_PER_RADIUS
+    };
+    Particle {
+        position_m: dust.position_m.as_vec3(),
+        stretch_m: Vec3::ZERO,
+        size_m: dust.radius_m as f32 * sprite_per_radius,
+        color_rgba: Vec3::from(dust.albedo).extend(dust.opacity_frac as f32),
+        kind: ParticleKind::Smoke,
+        seed: (dust.orientation.to_axis_angle().1 / std::f64::consts::TAU) as f32,
     }
 }

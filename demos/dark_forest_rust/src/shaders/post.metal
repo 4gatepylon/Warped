@@ -284,7 +284,8 @@ inline float3 grade_display(float3 color) {
  * @brief `LensUniforms` matches `GpuLensUniforms`: each mouth's (centre, lens throat) and (reach, λ²,
  * partner, floor height), and (mouth count, 1 while capturing, atlas rows, unused); then each
  * mouth's live slot plus 1 (0 for none, negative when a robot is within its reach), the robots'
- * bounding spheres, and (unused, sphere count, near plane, unused).
+ * bounding spheres, (unused, sphere count, near plane, glow segment count), and the lasers' and other
+ * glows' segments (start and end, w their radius).
  */
 struct LensUniforms {
     float4 centres[16];
@@ -293,6 +294,8 @@ struct LensUniforms {
     float4 live_slots[4];
     float4 movers[16];
     float4 live_params;
+    float4 glow_starts[24];
+    float4 glow_ends[24];
 };
 
 /**
@@ -318,6 +321,15 @@ constant float LENS_FADE_FRAC = 0.6;
 /** @brief `LENS_PROXY_M` is the distance of the world around a mouth that its atlas lookups assume. */
 constant float LENS_PROXY_M = 12.0;
 constant int LENS_MAX_STEP_COUNT = 64;
+/**
+ * @brief From inside a mouth's visible sphere, how much a ray shows the lens depends on how much it bends, not on
+ * how near it passes the centre: none below `LENS_INSIDE_BEND_MIN_RAD`, fully from `LENS_INSIDE_BEND_FULL_RAD`
+ * (and fully through the throat), so no ray shows a faint lens picture over the direct view; this takes over
+ * across the last `LENS_INSIDE_BLEND_M` inside the sphere.
+ */
+constant float LENS_INSIDE_BEND_MIN_RAD = 0.02;
+constant float LENS_INSIDE_BEND_FULL_RAD = 0.07;
+constant float LENS_INSIDE_BLEND_M = 0.5;
 
 /**
  * @brief `get_lens_bend` is ∇ln n of mouth w's foil lens at x, tapered by (1 − (ρ/reach)²)² to
@@ -504,6 +516,43 @@ static float find_live_mover_m(constant LensUniforms& lens, depth2d_array<float>
 }
 
 /**
+ * @brief `find_live_glow_offset` says whether the straight ray from x heading v (from `reach_m` behind x, where
+ * the bent part is close to straight, to `far_m` ahead) passes a laser or other glow segment within its radius
+ * plus a live face's texel at that distance, and gives the offset from mouth w's centre of the point on the ray
+ * nearest the first one it passes.
+ * @par Example
+ * @code
+ * bool has_glow = find_live_glow_offset(lens, w, face_px, x, v, reach, far_m, glow_offset);
+ * @endcode
+ */
+static bool find_live_glow_offset(constant LensUniforms& lens, int w, float face_px, float3 x, float3 v,
+                                  float reach_m, float far_m, thread float3& glow_offset) {
+    float3 c = lens.centres[w].xyz;
+    float3 ray_start = x - v * reach_m;
+    float ray_length_m = reach_m + far_m;
+    float best_t = 1e30;
+    int glow_count = int(lens.live_params.w + 0.5);
+    for (int i = 0; i < glow_count; i++) {
+        float3 a = lens.glow_starts[i].xyz;
+        float3 ab = lens.glow_ends[i].xyz - a;
+        float3 r = ray_start - a;
+        float ab_sq = dot(ab, ab), v_ab = dot(v, ab), v_r = dot(v, r), ab_r = dot(ab, r);
+        float denominator = ab_sq - v_ab * v_ab;
+        float t = denominator > 1e-8 ? clamp((v_ab * ab_r - ab_sq * v_r) / denominator, 0.0, ray_length_m)
+                                     : clamp(-v_r, 0.0, ray_length_m);
+        float s = ab_sq > 1e-8 ? clamp((dot(ab, ray_start + v * t - a)) / ab_sq, 0.0, 1.0) : 0.0;
+        t = clamp(dot(a + ab * s - ray_start, v), 0.0, ray_length_m);
+        float3 on_ray = ray_start + v * t;
+        float reach = lens.glow_starts[i].w + 2.0 * length(on_ray - c) / face_px;
+        if (distance(on_ray, a + ab * s) < reach && t < best_t) {
+            best_t = t;
+            glow_offset = on_ray - c;
+        }
+    }
+    return best_t < 1e30;
+}
+
+/**
  * @brief `get_graded_color` exposes a scene-linear color, tone maps it with ACES and grades it
  * (`frame.effect_params.x` turns the grade on): the display-linear color before any vignette.
  * @par Example
@@ -534,16 +583,18 @@ static float3 get_display_color(constant FrameUniforms& frame, float3 color) {
 /**
  * @brief `add_live_color` puts what live slot `slot` shows over the atlas color `color` of mouth w:
  * the robot at `hit_offset` from w's centre if the ray hit one that the static world doesn't hide
- * (`is_hit`), otherwise the lasers' light in the atlas's direction d.
+ * (`is_hit`), otherwise, if the ray passes a laser or glow (`has_glow`), its light at `glow_offset` from w's
+ * centre, unless the static world hides it.
  * @par Example
  * @code
- * color = add_live_color(frame, atlas, live_color, live_depth, lens, w, slot, is_hit, hit_offset, d, color);
+ * color = add_live_color(frame, atlas, live_color, live_depth, lens, w, slot, is_hit, hit_offset, has_glow,
+ *                        glow_offset, color);
  * @endcode
  */
 static float3 add_live_color(constant FrameUniforms& frame, texture2d<float> atlas,
                              texture2d_array<float> live_color, depth2d_array<float> live_depth,
                              constant LensUniforms& lens, int w, int slot, bool is_hit,
-                             float3 hit_offset, float3 d, float3 color) {
+                             float3 hit_offset, bool has_glow, float3 glow_offset, float3 color) {
     constexpr sampler linear_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
     float face_px = float(live_color.get_width()) / 6.0;
     float axis_cos;
@@ -557,7 +608,10 @@ static float3 add_live_color(constant FrameUniforms& frame, texture2d<float> atl
         float coverage = saturate(robot.a);
         return mix(color, get_display_color(frame, robot.rgb / max(coverage, 1e-4)), coverage);
     }
-    float2 uv = get_lens_face_uv(d, face_px, axis_cos);
+    if (!has_glow || length(glow_offset) > get_static_distance_m(atlas, w, glow_offset) * (1.0 + LENS_DEPTH_SLACK_FRAC)) {
+        return color;
+    }
+    float2 uv = get_lens_face_uv(glow_offset, face_px, axis_cos);
     float4 glow = live_color.sample(linear_sampler, uv, uint(slot), level(0.0));
     float3 light = glow.rgb * (1.0 - saturate(glow.a));
     if (all(light <= 0.0)) {
@@ -612,7 +666,8 @@ static int find_lens_mouth(constant FrameUniforms& frame, constant LensUniforms&
  * until it leaves a reach or meets the floor; it returns the atlas color there (lined up on the
  * floor or a `LENS_PROXY_M` sphere) and how much it covers the scene, before any depth test.
  * Where the ray ends near a mouth with a live slot, it also shows the first robot on its way (bent
- * or straight, unless the static world hides it) and the lasers drawn there.
+ * or straight, unless the static world hides it) and the lasers drawn there. From inside a mouth's visible
+ * sphere, the lens covers the scene as far as it bends the ray (fully through the throat).
  * @par Example
  * @code
  * float4 lensed = get_lens_color(frame, lens, atlas, live_color, live_depth, in.uv);
@@ -635,6 +690,7 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
     float3 x = eye + dir * start_m, v = dir;
     int current = w;
     bool is_hit = false;
+    bool has_crossed = false;
     for (int k = 0; k < LENS_MAX_STEP_COUNT && !is_hit; k++) {
         float3 offset = x - lens.centres[current].xyz;
         float rho = length(offset);
@@ -652,6 +708,7 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
             v = normalize((v - 2.0 * dot(v, n) * n) * mirror);
             x = lens.centres[partner].xyz + n * mirror * (lens.centres[partner].w * pt / max(rho, 1e-4));
             current = partner;
+            has_crossed = true;
             continue;
         }
         float h = clamp(0.3 * (rho - 0.5 * pt), 0.05, reach_now / 8.0);
@@ -681,10 +738,19 @@ static float4 get_lens_color(constant FrameUniforms& frame, constant LensUniform
             is_hit = mover_t >= 0.0;
             hit_offset = x + v * mover_t - c;
         }
-        color = add_live_color(frame, atlas, live_color, live_depth, lens, current, slot, is_hit, hit_offset, d, color);
+        float3 glow_offset = float3(0.0);
+        bool has_glow = !is_hit && find_live_glow_offset(lens, current, float(live_color.get_width()) / 6.0, x, v,
+                                                         lens.shapes[current].x, min(floor_t, LENS_MOVER_FAR_M),
+                                                         glow_offset);
+        color = add_live_color(frame, atlas, live_color, live_depth, lens, current, slot, is_hit, hit_offset,
+                               has_glow, glow_offset, color);
     }
     float weight = 1.0 - smoothstep(LENS_FADE_FRAC * reach, LENS_VISIBLE_FRAC * reach, closest_m);
-    return float4(color, weight);
+    float inside_frac = smoothstep(LENS_VISIBLE_FRAC * reach, LENS_VISIBLE_FRAC * reach - LENS_INSIDE_BLEND_M,
+                                   length(oc));
+    float bend_frac = has_crossed ? 1.0 : smoothstep(LENS_INSIDE_BEND_MIN_RAD, LENS_INSIDE_BEND_FULL_RAD,
+                                                     acos(clamp(dot(dir, v), -1.0, 1.0)));
+    return float4(color, mix(weight, bend_frac, inside_frac));
 }
 
 /**

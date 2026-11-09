@@ -23,8 +23,10 @@
 //!   message carries the token the welcome gave, so nobody else can speak for a player.
 //! - A failed send is logged, not fatal, and no reply is bigger than its request until the sender
 //!   has proven its address, so the server can't be used to flood someone else.
-//! - Each client decides when its own laser hits someone (it traces the laser anyway) and which
-//!   console it aims at, and the server takes its word.
+//! - Each client decides when its own laser hits someone (it traces the laser anyway), and the
+//!   server takes its word. A client also says which console it holds `E` on, and the server takes
+//!   that only from a player within the settings' `consoles.reach_m` of it who aims at it
+//!   (`console_reach.rs`), so nobody turns a console off from afar.
 //! - A player keeps their id, and so their team, when they rejoin from the same address.
 //! - The server's welcome names its map and carries its game settings; a client of another map
 //!   fails rather than playing on.
@@ -32,6 +34,7 @@
 //!   the same team. Scores go back to 0 when a new game starts.
 
 use std::cell::Cell;
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
@@ -39,10 +42,11 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use glam::{DMat4, DVec4};
+use glam::{DMat4, DQuat, DVec4};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
+use crate::console_reach::ConsolePlace;
 use crate::settings::ServerSettings;
 use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
@@ -68,6 +72,14 @@ const SCORES_PERIOD_S: f64 = 0.25;
 const BEACON_PERIOD_S: f64 = 0.5;
 const JOIN_RETRY_S: f64 = 0.5;
 const PLAYER_TIMEOUT_S: f64 = 3.0;
+/// `REMOTE_DELAY_S` is how far in the past other players are shown: about two of their state sends
+/// (30 a second) and a snapshot, so a newer pose has nearly always arrived to blend toward.
+const REMOTE_DELAY_S: f64 = 0.07;
+/// `REMOTE_HISTORY_S` is how long the poses received for a player are kept.
+const REMOTE_HISTORY_S: f64 = 1.0;
+/// `MAX_BLENDED_STEP_M` is the longest move between two received poses that is blended; a longer
+/// one (a wormhole, a respawn) is a jump, shown as one.
+const MAX_BLENDED_STEP_M: f64 = 3.0;
 const BEACON_GATHER_S: f64 = 1.0;
 const OTHER_VERSION_WINDOW_S: f64 = 1.0;
 const SERVER_POLL_MS: u64 = 2;
@@ -513,7 +525,7 @@ struct Server {
     slots: Vec<Slot>,
     next_id: u32,
     known_ids: Vec<(SocketAddr, u32)>,
-    console_teams: Vec<u32>,
+    consoles: Vec<ConsolePlace>,
     game: GameState,
     tallies: Vec<Tally>,
 }
@@ -618,7 +630,7 @@ impl Server {
                     player.team = self.slots[slot].player.team;
                     player.disabling_console = player
                         .disabling_console
-                        .filter(|&console| self.can_disable(player.team, console));
+                        .filter(|&console| self.can_disable(player.team, console, player.frame));
                     let slot: &mut Slot = &mut self.slots[slot];
                     if player.disabling_console != slot.player.disabling_console {
                         slot.disabling_since = player.disabling_console.map(|_| Instant::now());
@@ -853,16 +865,18 @@ impl Server {
             .expect("there are teams")
     }
 
-    /// `can_disable` says whether a player of `team` may turn off `console`: an existing console of
-    /// the other team, still on, in a game nobody has won yet.
+    /// `can_disable` says whether a player of `team` whose eye frame is `eye` may turn off
+    /// `console`: an existing console of the other team, still on, in a game nobody has won yet,
+    /// within the settings' `consoles.reach_m` of the eye and aimed at (`ConsolePlace::is_held_from`).
     ///
-    /// Example: `if server.can_disable(1, 7) { ... }`
-    fn can_disable(&self, team: u32, console: u8) -> bool {
+    /// Example: `if server.can_disable(1, 7, player.frame) { ... }`
+    fn can_disable(&self, team: u32, console: u8, eye: DMat4) -> bool {
         let index: usize = usize::from(console);
         self.game.winner.is_none()
-            && index < self.console_teams.len()
-            && self.console_teams[index] != team
+            && index < self.consoles.len()
+            && self.consoles[index].team != team
             && self.game.off_mask >> index & 1 == 0
+            && self.consoles[index].is_held_from(eye, self.settings.consoles.reach_m)
     }
 
     /// `update_consoles` turns off each console a player has held `E` on for `consoles.hold_to_disable_s`,
@@ -895,8 +909,8 @@ impl Server {
     fn update_winner(&mut self) {
         let losers: Vec<u32> = (0..TEAM_NAMES.len() as u32)
             .filter(|&team| {
-                let mut consoles = (0..self.console_teams.len())
-                    .filter(|&i| self.console_teams[i] == team)
+                let mut consoles = (0..self.consoles.len())
+                    .filter(|&i| self.consoles[i].team == team)
                     .peekable();
                 consoles.peek().is_some() && consoles.all(|i| self.game.off_mask >> i & 1 == 1)
             })
@@ -1012,29 +1026,30 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 /// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
 /// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
 /// `PLAYER_TIMEOUT_S`, turns off
-/// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
+/// consoles (`consoles` gives each one's team and place; a hold counts only from a player in reach
+/// who aims at it) and ends the game when a team's are all off,
 /// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
 /// `new_game_after_win`, that long after a team won, admits only players who prove they know
 /// `game_password` (empty for anyone), and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, None, Vec::new())?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), places, &should_start_new_game, None, None, Vec::new())?;`
 #[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
     should_stop: &AtomicBool,
     map_name: String,
     settings: ServerSettings,
-    console_teams: Vec<u32>,
+    consoles: Vec<ConsolePlace>,
     should_start_new_game: &AtomicBool,
     new_game_after_win: Option<Duration>,
     level_result_file: Option<&Path>,
     game_password: Vec<u8>,
 ) -> Result<()> {
     assert!(
-        console_teams.len() <= MAX_CONSOLE_COUNT,
+        consoles.len() <= MAX_CONSOLE_COUNT,
         "serve: {} consoles, more than {MAX_CONSOLE_COUNT}",
-        console_teams.len()
+        consoles.len()
     );
     let port: u16 = socket.local_addr()?.port();
     let beacon_socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
@@ -1051,7 +1066,7 @@ pub fn serve(
         slots: Vec::new(),
         next_id: 0,
         known_ids: Vec::new(),
-        console_teams,
+        consoles,
         game: GameState::default(),
         tallies: Vec::new(),
     };
@@ -1229,9 +1244,97 @@ fn make_lobby_query() -> Message {
     query
 }
 
+/// `get_pose_at` is a player's pose at `shown_at` from the poses received for them (oldest first,
+/// with when each arrived): blended between the two around it, the first before them all, the
+/// last after them all, and the earlier one across a jump longer than `MAX_BLENDED_STEP_M`.
+///
+/// Example: `let frame: DMat4 = get_pose_at(&poses, Instant::now() - delay);`
+fn get_pose_at(poses: &VecDeque<(Instant, DMat4)>, shown_at: Instant) -> DMat4 {
+    let after: usize = poses.partition_point(|&(arrived_at, _)| arrived_at <= shown_at);
+    if after == 0 {
+        return poses.front().expect("a player has at least one pose").1;
+    }
+    let (from_at, from) = poses[after - 1];
+    let Some(&(to_at, to)) = poses.get(after) else {
+        return from;
+    };
+    if from.w_axis.distance(to.w_axis) > MAX_BLENDED_STEP_M {
+        return from;
+    }
+    let frac: f64 = (shown_at - from_at).as_secs_f64() / (to_at - from_at).as_secs_f64();
+    let rotation: DQuat = DQuat::from_mat4(&from).slerp(DQuat::from_mat4(&to), frac);
+    DMat4::from_rotation_translation(
+        rotation,
+        from.w_axis.truncate().lerp(to.w_axis.truncate(), frac),
+    )
+}
+
+/// `remote_pose_tests` checks how other players' poses are blended over time.
+///
+/// | Partitioning | Part | Covered by |
+/// | --- | --- | --- |
+/// | time shown | before every pose, between two, after every pose | `test_poses_blend_between_arrivals` |
+/// | step between poses | a walk (blended), a jump through a wormhole (not blended) | `test_poses_blend_between_arrivals`, `test_jumps_are_not_blended` |
+/// | turn between poses | none, a quarter turn (half way at the middle) | `test_poses_blend_between_arrivals` |
+#[cfg(test)]
+mod remote_pose_tests {
+    use super::*;
+
+    /// `STEP_S` is the time between the test poses' arrivals.
+    const STEP_S: f64 = 0.04;
+
+    /// `make_poses` is a history of `frames` arriving `STEP_S` apart from `start`.
+    fn make_poses(start: Instant, frames: &[DMat4]) -> VecDeque<(Instant, DMat4)> {
+        frames
+            .iter()
+            .enumerate()
+            .map(|(i, &frame)| (start + Duration::from_secs_f64(STEP_S * i as f64), frame))
+            .collect()
+    }
+
+    /// `test_poses_blend_between_arrivals` checks a 1 m walk with a quarter turn: the first pose
+    /// before it arrives, half of both half way, the last pose after the last arrival.
+    #[test]
+    fn test_poses_blend_between_arrivals() {
+        let start: Instant = Instant::now();
+        let from: DMat4 = DMat4::from_translation(glam::DVec3::new(0.0, 1.7, 0.0));
+        let to: DMat4 = DMat4::from_rotation_translation(
+            DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2),
+            glam::DVec3::new(1.0, 1.7, 0.0),
+        );
+        let poses: VecDeque<(Instant, DMat4)> =
+            make_poses(start + Duration::from_secs(1), &[from, to]);
+        assert_eq!(get_pose_at(&poses, start), from);
+        let middle: DMat4 =
+            get_pose_at(&poses, start + Duration::from_secs_f64(1.0 + STEP_S * 0.5));
+        assert!((middle.w_axis.x - 0.5).abs() < 1e-9, "{middle:?}");
+        let middle_yaw_rad: f64 = DQuat::from_mat4(&middle).to_euler(glam::EulerRot::YXZ).0;
+        assert!((middle_yaw_rad - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+        assert_eq!(get_pose_at(&poses, start + Duration::from_secs(2)), to);
+    }
+
+    /// `test_jumps_are_not_blended` checks that a 20 m jump keeps the earlier pose until the later
+    /// one arrives.
+    #[test]
+    fn test_jumps_are_not_blended() {
+        let start: Instant = Instant::now();
+        let from: DMat4 = DMat4::from_translation(glam::DVec3::new(0.0, 1.7, 24.0));
+        let to: DMat4 = DMat4::from_translation(glam::DVec3::new(0.0, 1.7, 4.0));
+        let poses: VecDeque<(Instant, DMat4)> = make_poses(start, &[from, to]);
+        assert_eq!(
+            get_pose_at(&poses, start + Duration::from_secs_f64(STEP_S * 0.9)),
+            from
+        );
+        assert_eq!(
+            get_pose_at(&poses, start + Duration::from_secs_f64(STEP_S * 1.1)),
+            to
+        );
+    }
+}
+
 /// `Client` is this player's connection: its map's name, its id and the server's game settings
-/// once welcomed, the id of the latest welcome (kept while waiting to respawn), the other players,
-/// the game, this player's health (1 full, from the server), the damage enemy shots did to this
+/// once welcomed, the id of the latest welcome (kept while waiting to respawn), the other players
+/// (shown `REMOTE_DELAY_S` in the past, blended between the poses received), the game, this player's health (1 full, from the server), the damage enemy shots did to this
 /// player's wormholes (1 destroys them, from the server), and the latest scores of every player in
 /// the game (`None` until the server sends them).
 pub struct Client {
@@ -1258,6 +1361,7 @@ pub struct Client {
     first_unanswered: Cell<Option<Instant>>,
     last_bad_snapshot: Option<Instant>,
     last_good_snapshot: Option<Instant>,
+    poses_by_player: HashMap<u32, VecDeque<(Instant, DMat4)>>,
 }
 
 impl Client {
@@ -1295,6 +1399,7 @@ impl Client {
             first_unanswered: Cell::new(Some(Instant::now())),
             last_bad_snapshot: None,
             last_good_snapshot: None,
+            poses_by_player: HashMap::new(),
         })
     }
 
@@ -1405,6 +1510,7 @@ impl Client {
                         .into_iter()
                         .filter(|player| Some(player.id) != self.id)
                         .collect();
+                    self.keep_poses();
                 }
                 Some(Kind::Eliminated) => {
                     if let (Some(victim_id), Some(shooter_id)) = (reader.id(), reader.id()) {
@@ -1415,6 +1521,7 @@ impl Client {
                             self.players.clear();
                         }
                         self.players.retain(|player| player.id != victim_id);
+                        self.poses_by_player.remove(&victim_id);
                         events.push(NetEvent::Eliminated {
                             victim_id,
                             shooter_id,
@@ -1425,7 +1532,30 @@ impl Client {
                 _ => {}
             }
         }
+        let shown_at: Instant = Instant::now() - Duration::from_secs_f64(REMOTE_DELAY_S);
+        for player in &mut self.players {
+            player.frame = get_pose_at(&self.poses_by_player[&player.id], shown_at);
+        }
         Ok(events)
+    }
+
+    /// `keep_poses` adds each player's pose from the snapshot just read to their history when it
+    /// changed, forgets players no longer in the game and poses older than `REMOTE_HISTORY_S`.
+    fn keep_poses(&mut self) {
+        let now: Instant = Instant::now();
+        let players: &[RemotePlayer] = &self.players;
+        self.poses_by_player
+            .retain(|id, _| players.iter().any(|player| player.id == *id));
+        for player in players {
+            let poses: &mut VecDeque<(Instant, DMat4)> =
+                self.poses_by_player.entry(player.id).or_default();
+            if poses.back().is_none_or(|&(_, frame)| frame != player.frame) {
+                poses.push_back((now, player.frame));
+            }
+            while poses.len() > 2 && (now - poses[0].0).as_secs_f64() > REMOTE_HISTORY_S {
+                poses.pop_front();
+            }
+        }
     }
 
     /// `send_state` sends this player's eye frame, laser switch, whether the gun is the rifle, the
@@ -1654,8 +1784,10 @@ mod tests {
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
+    //! | Who holds a console | from afar (ignored), turned away from it (ignored), in reach and aiming at it (turned off) | `a_console_is_turned_off_only_from_within_reach_and_aimed_at` |
 
     use super::*;
+    use glam::DVec3;
 
     const TEST_MAP_NAME: &str = "lunar_surface";
     const TEST_PASSWORD: &[u8] = b"correct horse";
@@ -1669,6 +1801,10 @@ mod tests {
     const DISABLING_FRAC_STEP: f64 = 1.0 / u8::MAX as f64;
     const HALF: f64 = 0.5;
     const TWICE: f64 = 2.0;
+    const PYLON_RADIUS_M: f64 = 0.36;
+    const PYLON_HALF_HEIGHT_M: f64 = 1.6;
+    const CONSOLE_GAP_M: f64 = 1.0;
+    const FAR_M: f64 = 10.0;
 
     /// `make_join` makes `from`'s join request for `team` (or `ANY_TEAM`) with `version`,
     /// answering `server`'s challenge with a proof of `password`.
@@ -1768,7 +1904,7 @@ mod tests {
             slots: Vec::new(),
             next_id: 0,
             known_ids: Vec::new(),
-            console_teams: vec![0, 0, 1],
+            consoles: [BLUE, BLUE, RED].map(make_console_ahead).to_vec(),
             game: GameState::default(),
             tallies: Vec::new(),
         }
@@ -1801,6 +1937,30 @@ mod tests {
         scores
     }
 
+    /// `make_console_ahead` gives a console of `team` shaped like the forest's pylons, standing
+    /// `CONSOLE_GAP_M` in front of an eye at the origin that looks along its view (-z).
+    ///
+    /// Example: `let console = make_console_ahead(RED);`
+    fn make_console_ahead(team: u8) -> ConsolePlace {
+        let centre_m: DVec3 = DVec3::new(0.0, 0.0, -(PYLON_RADIUS_M + CONSOLE_GAP_M));
+        let half_m: DVec3 = DVec3::new(PYLON_RADIUS_M, PYLON_HALF_HEIGHT_M, PYLON_RADIUS_M);
+        ConsolePlace {
+            team: u32::from(team),
+            min_m: centre_m - half_m,
+            max_m: centre_m + half_m,
+        }
+    }
+
+    /// `hold_console_from` sends player `id`'s state from `from`, their eye frame `eye`, holding
+    /// `E` on `console`, then makes the server count it as held for its settings'
+    /// `hold_to_disable_s` and update the consoles.
+    ///
+    /// Example: `hold_console_from(&mut server, 1, address(50_001), 2, DMat4::IDENTITY);`
+    fn hold_console_from(server: &mut Server, id: u32, from: SocketAddr, console: u8, eye: DMat4) {
+        start_holding_from(server, id, from, console, eye);
+        server.update_consoles();
+    }
+
     /// `hold_console` sends player `id`'s state from `from` holding `E` on `console`, then makes
     /// the server count it as held for its settings' `hold_to_disable_s` and update the consoles.
     ///
@@ -1815,9 +1975,17 @@ mod tests {
     ///
     /// Example: `start_holding(&mut server, 1, address(50_001), 2);`
     fn start_holding(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
+        start_holding_from(server, id, from, console, DMat4::IDENTITY);
+    }
+
+    /// `start_holding_from` is `start_holding` with the eye frame `eye` (`start_holding` puts it at
+    /// the origin, looking at the consoles `make_server` gives).
+    ///
+    /// Example: `start_holding_from(&mut server, 1, address(50_001), 2, DMat4::IDENTITY);`
+    fn start_holding_from(server: &mut Server, id: u32, from: SocketAddr, console: u8, eye: DMat4) {
         let player: RemotePlayer = RemotePlayer {
             id,
-            frame: DMat4::IDENTITY,
+            frame: eye,
             is_laser_on: false,
             is_rifle: false,
             team: 0,
@@ -2216,6 +2384,21 @@ mod tests {
         start_holding(&mut server, 2, blue, 2);
         server.update_consoles();
         assert_eq!((server.game.off_mask, server.game.winner), (0b011, Some(1)));
+    }
+
+    #[test]
+    fn a_console_is_turned_off_only_from_within_reach_and_aimed_at() {
+        let mut server: Server = make_server();
+        let red: SocketAddr = address(50_001);
+        join(&mut server, red, RED);
+        let far: DMat4 = DMat4::from_translation(DVec3::new(0.0, 0.0, FAR_M));
+        hold_console_from(&mut server, 1, red, 0, far);
+        assert_eq!(server.game.off_mask, 0);
+        let turned_away: DMat4 = DMat4::from_rotation_y(std::f64::consts::PI);
+        hold_console_from(&mut server, 1, red, 0, turned_away);
+        assert_eq!(server.game.off_mask, 0);
+        hold_console_from(&mut server, 1, red, 0, DMat4::IDENTITY);
+        assert_eq!(server.game.off_mask, 0b001);
     }
 
     #[test]

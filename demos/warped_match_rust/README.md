@@ -32,7 +32,8 @@ network: `make join-match SERVER=<server's address> TEAM=red`. Without `TEAM`, p
 A round starts 10 s after each team has a player. Each round opens the level in its own window,
 joined to your team; a team wins it by turning off all of the other team's consoles. The level
 stays open 5 s to show the win, closes, and the match window shows the progression until the next
-round. `make e2e-match` plays a whole match of two bots with consoles off in 1 s.
+round. `make e2e-match` plays a whole match of two bots with consoles off in 1 s, on `MATCH_PORT` and
+`LEVEL_PORT` (48110 and 48112 by default), and writes its logs to `.artifacts/e2e_match/<run_id>/`.
 
 `make play-all-levels` plays a bot match steered through all five levels and checks it
 (`e2e/play_all_levels.py`): each bot gets `--bot-round-winners blue,blue,red,red,red` and joins no
@@ -100,7 +101,7 @@ Bot:    <program> --join <address> --port <port> [--map <map>] --team <team> --b
 `--team` joins that team at once, without the lobby. The match client kills the level when the
 round ends, so a level needs no exit logic. `--bot-objective consoles` walks to the other team's
 consoles in turn and holds `E` on each once in reach, until its team wins: in this copy (Lunar
-Surface), Dust and Snow Planet the server takes a hold only from within the settings'
+Surface), Dust, Snow Planet and Dark Forest the server takes a hold only from within the settings'
 `consoles.reach_m` of the console, aimed at it (`console_reach.rs`), so a bot win shows every
 pylon can be reached on foot (`console_bot.rs`).
 

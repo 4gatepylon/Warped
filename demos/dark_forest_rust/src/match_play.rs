@@ -13,8 +13,9 @@ use std::time::Instant;
 
 use glam::{DMat4, Mat4, Vec3};
 
+use crate::console_reach::ConsolePlace;
 use crate::game::bots::{Bot, BotClip};
-use crate::game::collision::cast_ray;
+use crate::game::guns::Gun;
 use crate::game::session::{RemoteBot, Session};
 use crate::net::{Client, NetEvent};
 use crate::scene::Scene;
@@ -23,10 +24,10 @@ use crate::thrown_wormholes::PlayerWormholes;
 
 /// `STATE_PERIOD_S` is how often this player's state goes to the server.
 const STATE_PERIOD_S: f64 = 1.0 / 30.0;
-/// `CONSOLE_REACH_M` is how far from a console's centre a player's eye may be to hold `E` on it.
-const CONSOLE_REACH_M: f32 = 3.0;
 /// `EYE_HEIGHT_M` is how far a player's eye is above their feet, to place remote robots.
 const EYE_HEIGHT_M: f32 = 1.6;
+/// `MIN_WALK_M_PER_S` is the slowest a remote player moves and still walks, Lunar Surface's.
+const MIN_WALK_M_PER_S: f32 = 0.8;
 
 /// `MatchOptions` is how this window takes part in the game.
 pub struct MatchOptions {
@@ -114,7 +115,7 @@ impl MatchPlay {
         if session.console_off.len() != session.arena.consoles.len() {
             session.console_off = vec![false; session.arena.consoles.len()];
         }
-        let target: Option<usize> = self.console_target(session, scene, is_e_held);
+        let target: Option<usize> = self.console_target(session, is_e_held);
         if target != self.held_console {
             self.hold_s = 0.0;
         }
@@ -127,7 +128,7 @@ impl MatchPlay {
         match self.client.take() {
             None => self.update_local(session, hold_needed_s),
             Some(mut client) => {
-                let result = self.update_online(&mut client, session, scene);
+                let result = self.update_online(&mut client, session, scene, dt_s);
                 self.client = Some(client);
                 result?;
             }
@@ -135,39 +136,34 @@ impl MatchPlay {
         Ok(())
     }
 
-    /// `console_target` is the other team's console this player holds `E` on (the console bot
-    /// claims the first one still on, from anywhere: the server takes its word).
-    fn console_target(&self, session: &Session, scene: &Scene, is_e_held: bool) -> Option<usize> {
+    /// `console_target` is the other team's console this player holds `E` on: for the console bot,
+    /// the one it holds once in reach (`console_bot.rs`); for a player holding `E`, the nearest one
+    /// still on that their view meets within the settings' `consoles.reach_m`
+    /// (`ConsolePlace::is_held_from`, the server's own test).
+    fn console_target(&self, session: &Session, is_e_held: bool) -> Option<usize> {
         if !session.player.is_alive() || session.winner.is_some() {
             return None;
         }
-        let consoles = session.arena.consoles.iter().enumerate();
-        let mut enemy =
-            consoles.filter(|(i, c)| c.team != session.team && !session.console_off[*i]);
         if self.options.is_console_bot {
-            return enemy.next().map(|(i, _)| i);
+            return session.bot_console;
         }
         if !is_e_held {
             return None;
         }
-        let eye_m: Vec3 = session.player.camera_world().w_axis.truncate();
-        enemy
-            .filter(|(_, c)| {
-                let to_console: Vec3 = c.centre_m - eye_m;
-                let distance_m: f32 = to_console.length();
-                distance_m < CONSOLE_REACH_M
-                    && cast_ray(
-                        &scene.solids,
-                        eye_m,
-                        to_console / distance_m,
-                        distance_m - 0.5,
-                    )
-                    .is_none()
+        let eye: DMat4 = session.player.camera_world().as_dmat4();
+        session
+            .console_places
+            .iter()
+            .enumerate()
+            .filter(|(i, place)| {
+                place.team != session.team
+                    && !session.console_off[*i]
+                    && place.is_held_from(eye, self.settings.consoles.reach_m)
             })
             .min_by(|(_, a), (_, b)| {
-                a.centre_m
-                    .distance(eye_m)
-                    .total_cmp(&b.centre_m.distance(eye_m))
+                let distance =
+                    |place: &ConsolePlace| place.get_centre_m().distance(eye.w_axis.truncate());
+                distance(a).total_cmp(&distance(b))
             })
             .map(|(i, _)| i)
     }
@@ -195,24 +191,37 @@ impl MatchPlay {
         }
     }
 
-    /// `update_online` exchanges this frame's state with the server.
+    /// `update_online` exchanges this frame's state with the server. A player eliminated by the
+    /// server asks to join again only once their respawn delay has passed (`client.rejoin`), not
+    /// every `JOIN_RETRY_S` while dead, so the server sees them back after the same delay as in
+    /// every level.
     fn update_online(
         &mut self,
         client: &mut Client,
         session: &mut Session,
         scene: &Scene,
+        dt_s: f32,
     ) -> Result<(), Box<dyn Error>> {
         for event in client.poll()? {
             if let NetEvent::Eliminated { is_self: true, .. } = event {
                 session.player.take_damage(f32::MAX);
             }
         }
-        client.keep_joining()?;
+        if session.player.is_alive() {
+            client.keep_joining()?;
+        }
         if let Some(settings) = &client.settings {
             self.settings = settings.clone();
+            if session.settings != *settings {
+                session.set_settings(settings.clone());
+            }
         }
         if let Some(team) = client.team {
-            session.team = team;
+            if team != session.team {
+                session.team = team;
+                session.respawn_player();
+            }
+            session.is_team_known = true;
         }
         let is_dead: bool = !session.player.is_alive();
         if self.was_dead && !is_dead {
@@ -227,32 +236,41 @@ impl MatchPlay {
             *is_off = client.game.off_mask & (1 << index) != 0;
         }
         session.winner = client.game.winner;
-        self.sync_remotes(client, session, scene);
-        let hits_to_kill: u8 = self.settings.rifle_hits_to_kill;
-        for victim_id in std::mem::take(&mut session.pending_hits) {
+        self.sync_remotes(client, session, scene, dt_s);
+        for (victim_id, hits_to_kill) in std::mem::take(&mut session.pending_hits) {
             client.send_hit(victim_id, hits_to_kill)?;
         }
         if self.last_state.elapsed().as_secs_f64() >= STATE_PERIOD_S && client.id.is_some() {
             self.last_state = Instant::now();
-            let frame: DMat4 = session.player.camera_world().as_dmat4();
+            let is_firing: bool = session.is_trigger_down && !is_dead;
+            let eye: DMat4 = session.player.camera_world().as_dmat4();
+            let frame: DMat4 = if is_firing {
+                session.guns.shot_offset.aim(eye)
+            } else {
+                eye
+            };
             client.send_state(
                 frame,
-                session.is_trigger_down && !is_dead,
-                true,
+                is_firing,
+                session.guns.gun == Gun::Rifle,
                 self.held_console.map(|i| i as u8),
-                0.0,
+                session.guns.beam_speckle_frac,
                 PlayerWormholes::default(),
             )?;
         }
         Ok(())
     }
 
-    /// `sync_remotes` makes one robot per other player, placed and animated from their frames.
-    fn sync_remotes(&mut self, client: &Client, session: &mut Session, scene: &Scene) {
+    /// `sync_remotes` makes one robot per other player, placed and animated from their frames: idle
+    /// below `MIN_WALK_M_PER_S`, running from halfway between walking and sprinting, as Lunar
+    /// Surface's `choose_gait`, with the speed over this frame's `dt_s`.
+    fn sync_remotes(&mut self, client: &Client, session: &mut Session, scene: &Scene, dt_s: f32) {
         let _ = scene;
         let own_id: Option<u32> = client.id;
         let mut remotes: Vec<RemoteBot> = Vec::new();
         let mut old: Vec<RemoteBot> = std::mem::take(&mut session.remote_bots);
+        let run_from_m_per_s: f32 =
+            (session.movement.walk_m_per_s + session.movement.sprint_m_per_s) / 2.0;
         for player in client.players.iter().filter(|p| Some(p.id) != own_id) {
             let frame: Mat4 = player.frame.as_mat4();
             let eye_m: Vec3 = frame.w_axis.truncate();
@@ -260,25 +278,38 @@ impl MatchPlay {
             let feet_m: Vec3 = eye_m - Vec3::Y * EYE_HEIGHT_M;
             let mut remote: RemoteBot = match old.iter().position(|r| r.id == player.id) {
                 Some(i) => old.swap_remove(i),
-                None => RemoteBot {
-                    id: player.id,
-                    team: player.team,
-                    bot: Bot::new(feet_m, player.id),
-                    is_firing: false,
-                    fire_cooldown_s: 0.0,
-                },
+                None => {
+                    println!(
+                        "sees player {} of the {} team",
+                        player.id,
+                        ["blue", "red"][player.team as usize % 2]
+                    );
+                    RemoteBot {
+                        id: player.id,
+                        team: player.team,
+                        bot: Bot::new(feet_m, player.id),
+                        frame,
+                        is_firing: false,
+                        was_firing: false,
+                        is_rifle: false,
+                        beam_speckle_frac: 0.0,
+                    }
+                }
             };
             let last_m: Vec3 = self.last_feet_m.insert(player.id, feet_m).unwrap_or(feet_m);
-            let speed_m_s: f32 = (feet_m - last_m).with_y(0.0).length() * 60.0;
-            remote.bot.animation.play(match speed_m_s {
-                s if s > 4.5 => BotClip::Run,
-                s if s > 0.4 => BotClip::Walk,
+            let speed_m_per_s: f32 = (feet_m - last_m).with_y(0.0).length() / dt_s;
+            remote.bot.animation.play(match speed_m_per_s {
+                s if s >= run_from_m_per_s => BotClip::Run,
+                s if s >= MIN_WALK_M_PER_S => BotClip::Walk,
                 _ => BotClip::Idle,
             });
             remote.team = player.team;
             remote.bot.feet_m = feet_m;
             remote.bot.yaw_rad = forward.x.atan2(forward.z);
+            remote.frame = frame;
             remote.is_firing = player.is_laser_on;
+            remote.is_rifle = player.is_rifle;
+            remote.beam_speckle_frac = player.beam_speckle_frac;
             remotes.push(remote);
         }
         session.remote_bots = remotes;

@@ -1019,12 +1019,12 @@ pub fn build() -> MapFile {
             space: Space {
                 kind: "euclidean".to_string(),
             },
-            gravity_m_per_s2: 16.0,
+            gravity_m_per_s2: 6.0,
             player: PlayerSpec {
                 eye_height_m: 1.68,
-                walk_m_per_s: 4.4,
-                sprint_m_per_s: 7.0,
-                jump_m_per_s: 5.4,
+                walk_m_per_s: 5.0,
+                sprint_m_per_s: 9.0,
+                jump_m_per_s: 5.2,
                 fly_m_per_s: 6.0,
             },
             materials: materials(),

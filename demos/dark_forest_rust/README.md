@@ -42,15 +42,25 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | --- | --- |
 | Mouse | look (click the window to capture the mouse) |
 | `WASD` | move; walk into a ladder to climb it (`W` up, `S` or `Ctrl` down, or look down and `W`) |
-| `Shift` / `Ctrl` or `C` / `Space` | sprint / crouch / jump (`Space` lets go of a ladder) |
-| Left / right mouse | fire / aim down sights |
-| `R` | reload |
-| `E` (hold) | turn off an enemy console within 2.5 m (3 s) |
-| `Esc` | release the mouse; a second `Esc` quits |
+| `Shift` / `Ctrl` or `C` / `Space` | sprint (any direction, while the energy bar lasts) / crouch (half speed, eye lowered) / jump (`Space` lets go of a ladder) |
+| `F` (hold) | flashlight |
+| Left mouse | fire: the sniper (gun 1) once a click, then 2 s to reload; the rifle (gun 2) while held, until it overheats |
+| Right mouse | aim: zoom in 2.5 times (sniper) or 1.5 times (rifle); the mouse turns the view more slowly by as much |
+| `1` / `2` / wheel | take the sniper / take the rifle / swap guns |
+| `E` (hold) | turn off an enemy console: look at it from within 3 m and hold 10 s |
+| `Esc` | release the mouse; a second `Esc` asks "Do you want to exit?" (`Return`/`Y` exits, `Esc`/`N` stays) |
+| `Tab` | menu (scores, settings, map, credits) |
 | `F1`-`F8`, `[` / `]` | effects and render scale, as in `../fps_demo/` |
 
+The guns, hits, console holds and movement are the Lunar Surface demo's too (W-126; DECISIONS.md D17 to D22 and D26 to D28): one
+sniper hit eliminates a player, the rifle takes 12 hits to the body or 2 to the head; you walk at 10 m/s and sprint at
+18 m/s (no run-up, the same in the air), crouch to half speed with the eye at 0.6 of its height, a jump rises 1.25 m
+and lasts 0.58 s, a hit slows you to half speed for 1 s, and a shot fires only 0.25 s after your last step upright or
+jump (crouch-walking doesn't count). Ladders keep the forest's own pace.
+
 The HUD is the Lunar Surface demo's (W-126, same play in every level; DECISIONS.md D16): in the bottom left the
-health bar (a segment per body hit), the gun's ammo bar and the sprint energy bar (sprinting empties it in 7.5 s),
+health bar (a segment per rifle hit to the body), the gun's ammo bar (the sniper's one block while loaded, the
+rifle's heat in 20 segments, red once it overheats) and the sprint energy bar (sprinting empties it in 7.5 s),
 with glows that run along a bar while it changes; Lunar's crosshair; the console bar below the middle while `E` is
 held on an enemy console; red, blurred edges and a shake when you take any damage; and "YOU DIED" with the respawn
 countdown.
@@ -96,7 +106,7 @@ The match session (`demos/warped_match_rust/`) starts levels with these flags:
 | --- | --- |
 | `dark-forest --serve --port <port> [--map <map.json>] [--level-result-file <path>]` | runs a server without a window. With `--level-result-file`, once a team has turned off every console of the other, it writes `{"winner": "blue"}` or `{"winner": "red"}` to `<path>.partial`, renames it to `<path>`, and keeps running (no new game) until killed. Without it, a new game starts 10 s after a win. |
 | `dark-forest --join <address> --port <port> [--map <map.json>] [--team blue\|red]` | joins a server, on that team at once if `--team` is given. |
-| `dark-forest --join <address> --port <port> --bot --exit-after-s <s> --team <team> [--bot-objective consoles]` | a bot window for tests; with `--bot-objective consoles` it holds `E` on the other team's consoles (the server takes its word for which one) until its team wins. |
+| `dark-forest --join <address> --port <port> --bot --exit-after-s <s> --team <team> [--bot-objective consoles]` | a bot for tests and matches, in a hidden window that draws nothing. It hunts the other team's players and shoots them; with `--bot-objective consoles` it walks instead (by the ladders where needed) to each of the other team's consoles, holds `E` once in reach (which the server checks), and logs `bot reached console <i> on foot in <t> s`, until its team wins. |
 
 The default port is 47840 (UDP), and server discovery uses 47841. `dark-forest-server` is the same server as its own
 binary. The wire protocol is the hyperbolic demo's, with its wormhole fields always empty (see `DECISIONS.md`).
@@ -120,6 +130,9 @@ binary. The wire protocol is the hyperbolic demo's, with its wormhole fields alw
 - `--map-picture <png>` (`make map-picture`): renders the map page's picture.
 - `--camera-view <view>`, `--autopilot`, `--show-frame-time`, `--benchmark-seconds <s>`: as in `../fps_demo/`.
 - `--export-map <path>`: writes the map and quits.
+- `--frame-times-file <csv>`: on exit, writes every frame's timing (the loop's interval and simulated step, the CPU's
+  phases, the GPU's time, and when the frame reached the display) and prints how evenly frames were shown, for
+  chasing stutter.
 
 ## Performance
 
@@ -148,6 +161,17 @@ robots (60 frames each, vsync on, median at the 60 Hz interval in every run) giv
 | One mouth in view | 14.5-15.9 ms | not measured |
 | A mouth filling the screen | 16.6 ms | 9.8 ms |
 
+### Frame pacing
+
+With vsync on, each frame stays on screen a whole number of display refreshes, the same for every frame: one while
+frames are shown on time, two (or three) once more than a tenth of the last 30 were shown late, and one again when
+the GPU's recent frames fit well inside one refresh (`render::frame_clock::choose_refreshes_per_frame`, fed by Metal's
+presented times); the game simulates exactly that long a step per frame. So on a 100 Hz display a frame the GPU can't
+finish in 10 ms is shown for a steady 20 ms (50 fps) instead of a mix of 10 and 20 ms, which looked like constant
+jitter. While no frame reaches a display (it sleeps, or the window is hidden), frames are shown as soon as they are
+ready. The forest is cut into 8 m tiles so that each pass (four shadow
+cascades, the depth prepass and the lit pass) draws only the tiles it sees.
+
 ## Code
 
 - `src/forest_layout.rs`: generates the map (labyrinth, bamboo, decks, bridges, ladders, pylons, wormholes, candles,
@@ -156,11 +180,15 @@ robots (60 frames each, vsync on, median at the 60 Hz interval in every run) giv
 - `src/game/world.rs`: turns the map into collision boxes, drawable shapes, ladders, consoles and pylons.
 - `src/game/warps.rs`: the wormholes' lens, throat crossing and laser paths (and black holes, unused here).
 - `src/game/player.rs`: walking, jumping and climbing.
+- `src/game/guns.rs`, `src/game/dust.rs`, `src/shot_noise.rs`: the Lunar Surface demo's two guns, their beams'
+  flight and ground dust, and each shot's stray.
+- `src/console_reach.rs`: who may hold `E` on a console (in reach and aimed at), for the server and the windows.
+- `src/game/console_bot.rs`: the bots' walking, along `src/game/nav.rs`'s paths and up and down the ladders.
 - `src/match_play.rs`: consoles, the win, and the online client (state, hits, remote robots).
 - `src/shaders/post.metal` (`get_lens_color`) and `capture_wormhole_lens` in `src/main.rs`: the wormhole lens pass.
 - `src/net.rs`, `src/server.rs`, `src/bin/dark_forest_server.rs`: the UDP server and protocol, copied from the
   hyperbolic demo.
-- Everything else (renderer, assets, weapon, bots, audio, HUD) is the FPS demo's.
+- Everything else (renderer, assets, robots, audio) is the FPS demo's.
 
 ## Assets
 
@@ -182,7 +210,9 @@ revolver Sketchfab Standard, which limit sharing the game.
 - Through a wormhole, robots, players and lasers show live, but the scenery and lights around the partner are a
   picture drawn at start-up, and pylons and their beams don't show (DECISIONS.md D15). At most 4 mouths' surroundings
   are live at once, and a robot more than 50 m from a mouth doesn't show through it.
-- The online bot match (`--bot --bot-objective consoles`) was not rerun to a win after the server's console count was fixed; rerun it first.
 - Lasers of other players online are traced locally; their hits come from the shooter's own trace.
-- Online, the server trusts the client about which console it holds and about its hits.
+- Online, the server trusts the client about its hits; it checks a console hold's reach and aim (as Lunar Surface's
+  does, without walls in between).
+- The beams are drawn as the forest's tracers, without Lunar Surface's blade and laser looks or their speckle, and
+  the ground dust as smoke (DECISIONS.md D20).
 - The protocol still carries the hyperbolic demo's wormhole fields, always empty.

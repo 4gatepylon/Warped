@@ -1,7 +1,7 @@
 //! `platform` opens the SDL window and hands its `CAMetalLayer` to the renderer.
 //!
 //! Example:
-//!     let platform: Platform = Platform::new("Warped FPS demo", 1600, 900, false);
+//!     let platform: Platform = Platform::new("Warped FPS demo", 1600, 900, false, false);
 
 use objc2::rc::Retained;
 use objc2_quartz_core::CAMetalLayer;
@@ -18,11 +18,18 @@ pub struct Platform {
 }
 
 impl Platform {
-    /// `new` opens a high-pixel-density Metal window.
+    /// `new` opens a high-pixel-density Metal window, hidden when `is_hidden` (a bot's, which
+    /// draws nothing).
     ///
     /// Example:
-    ///     let platform: Platform = Platform::new("demo", 1280, 720, false);
-    pub fn new(title: &str, width_pt: u32, height_pt: u32, is_fullscreen: bool) -> Platform {
+    ///     let platform: Platform = Platform::new("demo", 1280, 720, false, false);
+    pub fn new(
+        title: &str,
+        width_pt: u32,
+        height_pt: u32,
+        is_fullscreen: bool,
+        is_hidden: bool,
+    ) -> Platform {
         let sdl: sdl3::Sdl = sdl3::init().expect("SDL failed to start");
         let video = sdl.video().expect("SDL video failed to start");
         let mut builder = video.window(title, width_pt, height_pt);
@@ -33,6 +40,9 @@ impl Platform {
             .position_centered();
         if is_fullscreen {
             builder.fullscreen();
+        }
+        if is_hidden {
+            builder.hidden();
         }
         let window: Window = builder.build().expect("SDL window creation failed");
         let metal_view: SDL_MetalView = unsafe { SDL_Metal_CreateView(window.raw()) };

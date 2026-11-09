@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use crate::console_reach::{self, ConsolePlace};
 use crate::map::{self, MapFile};
 use crate::net;
 use crate::settings::ServerSettings;
@@ -32,13 +33,13 @@ pub struct ServerOptions {
 /// Example: `server::run(&options, &AtomicBool::new(false))?;`
 pub fn run(options: &ServerOptions, should_stop: &AtomicBool) -> Result<(), Box<dyn Error>> {
     let map: MapFile = map::load(&options.map_path)?;
-    let console_teams: Vec<u32> = map::console_teams(&map);
+    let consoles: Vec<ConsolePlace> = console_reach::find_console_places(&map);
     let socket: std::net::UdpSocket = net::bind_server(options.port)?;
     println!(
         "Dark Forest game server for {} on UDP port {} ({} consoles).",
         map.name,
         options.port,
-        console_teams.len()
+        consoles.len()
     );
     let new_game_after_win: Option<Duration> = match options.level_result_file {
         Some(_) => None,
@@ -49,7 +50,7 @@ pub fn run(options: &ServerOptions, should_stop: &AtomicBool) -> Result<(), Box<
         should_stop,
         map.name.clone(),
         ServerSettings::Builtin(),
-        console_teams,
+        consoles,
         &AtomicBool::new(false),
         new_game_after_win,
         options.level_result_file.as_deref(),
