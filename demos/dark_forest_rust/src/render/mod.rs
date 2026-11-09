@@ -256,8 +256,9 @@ pub struct HudImage<'a> {
 }
 
 /// `FrameDescription` is everything the backend draws in one frame. The first
-/// `static_draw_count` of `world_draws` are the same every frame (the arena), so the backend may
-/// keep their shadows between frames. `beams` are the lasers in flight, drawn after the lit pass,
+/// `static_draw_count` of `world_draws` are the arena, the same every frame but for far canopy
+/// tiles drawn at a lower detail; `static_shadow_draws` are the arena at full detail, whose shadows
+/// the backend may keep between frames. `beams` are the lasers in flight, drawn after the lit pass,
 /// whose speckled pixels are black and white in `beam_speckle_shares` (the rest drop out).
 /// `lens_draws` and
 /// `lens_particles` are the robots and laser effects among `world_draws` and `world_particles`,
@@ -268,6 +269,7 @@ pub struct FrameDescription<'a> {
     pub camera: Camera,
     pub world_draws: &'a [DrawItem],
     pub static_draw_count: usize,
+    pub static_shadow_draws: &'a [DrawItem],
     pub viewmodel_draws: &'a [DrawItem],
     pub joint_matrices: &'a [Mat4],
     pub point_lights: &'a [PointLight],

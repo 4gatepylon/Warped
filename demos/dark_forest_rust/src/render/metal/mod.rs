@@ -2234,8 +2234,8 @@ impl MetalRenderer {
         }
     }
 
-    /// `encode_shadows` renders the shadow casters into each cascade: the static ones (the first
-    /// `frame.static_draw_count` draws) into the static cache only where `should_redraw_static`
+    /// `encode_shadows` renders the shadow casters into each cascade: the static ones
+    /// (`frame.static_shadow_draws`, the arena at full detail) into the static cache only where `should_redraw_static`
     /// says the cascade moved, then copies the cache into the shadow map and draws the moving
     /// casters on top.
     fn encode_shadows(
@@ -2248,17 +2248,18 @@ impl MetalRenderer {
     ) {
         let casters_in = |cascade: usize, is_static: bool| -> Vec<&DrawItem> {
             let frustum: Frustum = Frustum::from_view_proj(cascades.view_proj[cascade]);
-            frame
-                .world_draws
+            let draws: &[DrawItem] = if is_static {
+                frame.static_shadow_draws
+            } else {
+                &frame.world_draws[frame.static_draw_count..]
+            };
+            draws
                 .iter()
-                .enumerate()
-                .filter(|&(index, draw)| {
-                    (index < frame.static_draw_count) == is_static
-                        && draw.does_cast_shadow
+                .filter(|draw| {
+                    draw.does_cast_shadow
                         && self.materials[draw.material.0 as usize].alpha_mode != AlphaMode::Blend
                         && frustum.contains_sphere(draw.bounds_center_m, draw.bounds_radius_m)
                 })
-                .map(|(_, draw)| draw)
                 .collect()
         };
         for cascade in (0..CASCADE_COUNT).filter(|&cascade| should_redraw_static[cascade]) {
