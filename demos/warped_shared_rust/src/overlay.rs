@@ -100,8 +100,10 @@ pub struct OverlayPicture<'a> {
 
 /// `HitEffect` is what a recent hit does to the scene (the shader's `read_hit_scene`): how much of
 /// the effect is left (1 just after the hit, 0 for none), how red the edges turn, how wide their
-/// blur is and how far the picture is shifted this frame.
-#[derive(Clone, Copy, Default)]
+/// blur is and how far the picture is shifted this frame. It is laid out as a shader reads it
+/// (Dark Forest's `post.metal` takes it as it is).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct HitEffect {
     pub strength_frac: f32,
     pub red_frac: f32,

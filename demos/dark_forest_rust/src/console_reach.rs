@@ -105,7 +105,7 @@ mod tests {
 
     /// `eye_at` is an eye at `position_m` looking along `direction`.
     fn eye_at(position_m: DVec3, direction: DVec3) -> DMat4 {
-        DMat4::look_to_rh(position_m, direction, DVec3::Y).inverse()
+        glam::dcamera::rh::view::look_to_mat4(position_m, direction, DVec3::Y).inverse()
     }
 
     /// `test_a_console_is_held_only_in_reach_and_aimed_at` checks a pylon-shaped console is held

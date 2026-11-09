@@ -151,6 +151,16 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   pass costs only the pixels near a beam. Lunar's display colours go into the HDR target divided by the exposure, so
   the tone map shows them about as bright as Lunar does (a gain of 2 turned the gold white). The old dashes still
   draw the lasers in the wormholes' live faces.
+- **D34. The forest uses the shared crate's HUD, hit effect, shot noise and settings sections** (W-126 (same play in
+  every level), `../warped_shared_rust/PLAN.md` step 4). Its copies of `hud_bars.rs`, `shot_noise.rs`, the overlay
+  rectangle types, `HitEffect`, the HUD's layout and the settings sections are gone; it calls the shared ones, as
+  Lunar Surface does. Raising `glam` from 0.30 to the shared crate's 0.34 removed `Mat4::look_to_rh`,
+  `orthographic_rh` and `perspective_infinite_reverse_rh`; `render/camera_math.rs` keeps glam 0.30's arithmetic for
+  them, since glam 0.34's `camera` module computes the same matrices another way (its last bits differ), so the
+  forest looks exactly as before. What changes: a hit's effect fades and shakes in `f64`, as Lunar's does, instead
+  of `f32` (the shake differs by under a millionth of a pixel). Kept as the forest's own: `WormholeSettings` (the
+  shared one adds the thrown wormholes, which the forest doesn't have yet), the frame-time readout and the dark tint
+  while dead.
 
 ## Follow-ups for the next agent
 

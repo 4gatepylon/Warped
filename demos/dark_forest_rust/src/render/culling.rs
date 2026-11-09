@@ -137,7 +137,7 @@ pub fn fit_cascades(
     } else {
         Vec3::Y
     };
-    let light_view: Mat4 = Mat4::look_to_rh(Vec3::ZERO, -sun_direction, up);
+    let light_view: Mat4 = crate::render::camera_math::make_view_rh(Vec3::ZERO, -sun_direction, up);
     let camera_light: Vec3 = light_view.transform_point3(camera.inverse_view.w_axis.truncate());
     let mut cascades: Cascades = Cascades {
         view_proj: [Mat4::IDENTITY; CASCADE_COUNT],
@@ -191,7 +191,7 @@ pub fn fit_cascades(
                 camera_light.z,
             ),
         };
-        let projection: Mat4 = Mat4::orthographic_rh(
+        let projection: Mat4 = crate::render::camera_math::make_orthographic_rh(
             center_light.x - radius_m,
             center_light.x + radius_m,
             center_light.y - radius_m,
@@ -223,7 +223,8 @@ mod tests {
     /// `test_frustum_contains_sphere` checks spheres in front of, behind, and beside the camera.
     #[test]
     fn test_frustum_contains_sphere() {
-        let proj: Mat4 = Mat4::perspective_infinite_reverse_rh(1.2, 1.5, 0.05);
+        let proj: Mat4 =
+            crate::render::camera_math::make_perspective_infinite_reverse_rh(1.2, 1.5, 0.05);
         let frustum: Frustum = Frustum::from_view_proj(proj);
         assert!(frustum.contains_sphere(Vec3::new(0.0, 0.0, -10.0), 1.0));
         assert!(!frustum.contains_sphere(Vec3::new(0.0, 0.0, 10.0), 1.0));

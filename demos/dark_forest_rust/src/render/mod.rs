@@ -7,6 +7,7 @@
 //!
 //! Example: `let mesh: MeshHandle = renderer.create_mesh(&mesh_data);`
 
+pub mod camera_math;
 pub mod culling;
 pub mod frame_clock;
 pub mod frame_trace;
