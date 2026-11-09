@@ -239,6 +239,11 @@ Decisions made without the user, with the reason for each. **Weigh in** marks th
   mouth from there, so the deck's underside shows whole, cut by its own edge. Every other bench view is unchanged.
   **Gives up:** a ray passing just beside a deck's edge below its top isn't bent either (the lens's reach goes 1.3 m
   below the deck's top).
+- **D42. Dark Forest slower, halfway to City Sphere** (the user, 2026-11-09, while playtesting: "only lunar and dune
+  should be at the speed lunear is at; everything else should be slower; snow and forest should be halfway between
+  city sphere and dune/lkunar"). `walk_speed_per_map_speed` 2.0 → 1.6 (10 → 8 m/s) and `sprint_speed_per_map_speed`
+  2.0 → 1.72 (18 → 15.5 m/s), halfway between City Sphere's 6 and 13 m/s and Lunar Surface's 10 and 18. The
+  movement test still checks every other setting against Lunar Surface's file.
 
 ## Follow-ups for the next agent
 
