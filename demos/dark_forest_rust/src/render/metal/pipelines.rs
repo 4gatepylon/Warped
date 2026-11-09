@@ -96,6 +96,7 @@ pub struct Pipelines {
     pub sky: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub decal: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub particle: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    pub beam: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub ssao: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub ssao_blur: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     pub bloom_downsample: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
@@ -355,6 +356,17 @@ impl Pipelines {
             sky: hdr_pipeline("sky_vertex", "sky_fragment", Blend::None),
             decal: hdr_pipeline("decal_vertex", "decal_fragment", Blend::Alpha),
             particle: hdr_pipeline("particle_vertex", "particle_fragment", Blend::Premultiplied),
+            beam: render_pipeline(
+                device,
+                RenderPipelineSpec {
+                    vertex: &function(&library, "beam_vertex", None),
+                    fragment: Some(&function(&library, "beam_fragment", None)),
+                    color_format: Some(HDR_FORMAT),
+                    depth_format: None,
+                    blend: Blend::Premultiplied,
+                    label: "beam",
+                },
+            ),
             ssao: fullscreen_pipeline("ssao_fragment", AO_FORMAT, Blend::None),
             ssao_blur: fullscreen_pipeline("ssao_blur_fragment", AO_FORMAT, Blend::None),
             bloom_downsample: fullscreen_pipeline(
