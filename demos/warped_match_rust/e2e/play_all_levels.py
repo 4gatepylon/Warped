@@ -2,7 +2,7 @@
 
 `play_all_levels.py` starts a match server on `e2e/match_levels_fast.yaml` and a bot for each team, steered with
 `--bot-round-winners` (the bot of the team that should lose a round joins no level in it), so the match visits every
-level in `_PLAN`. In each round but Dark Forest's it also runs a fighting bot of each team (`--fight-s`), which walks
+level in `_PLAN`. In each round it also runs a fighting bot of each team (`--fight-s`), which walks
 after the nearest enemy and shoots. It logs each level's start, winner and duration, when each of the loser's pylons
 (consoles) went off, which pylons the console bot reached on foot, the eliminations and the respawns, then a table of
 them per level, and fails on a stall (a round longer than `--round-timeout-s`), a process that stops early, a round,
@@ -83,7 +83,6 @@ _KILL_LINE: re.Pattern[str] = re.compile(r"^player (\d+) (?:was hit by player (\
 _MAP_LINE: re.Pattern[str] = re.compile(r"^\s*map: (\S+)$", re.MULTILINE)
 _RESPAWN_DELAY: re.Pattern[str] = re.compile(r"^respawn:.*\n\s+delay_s: ([\d.]+)", re.MULTILINE)
 _NO_BOT_LABEL: str = "takes_bot_label: false"
-_FIGHTLESS_LEVELS: tuple[str, ...] = ("Dark Forest",)
 _RESPAWN_EARLY_S: float = 0.5
 _RESPAWN_LATE_S: float = 3.0
 _FAILURE_LINE: re.Pattern[str] = re.compile(r"panicked at|^Error: ", re.MULTILINE)
@@ -262,12 +261,12 @@ def _start_fighters(
         fight_s: Seconds the fighters play before they leave.
 
     Returns:
-        The fighters' processes, none in `_FIGHTLESS_LEVELS` or with `fight_s` 0.
+        The fighters' processes, none with `fight_s` 0.
 
     Example:
         >>> fighters = _start_fighters("Dust", 48112, run_folder, 5, 45.0)
     """
-    if level in _FIGHTLESS_LEVELS or fight_s == 0:
+    if fight_s == 0:
         return []
     block: str = _find_level_block(level)
     program_name: str = _PROGRAM_LINE.search(block)[1]
