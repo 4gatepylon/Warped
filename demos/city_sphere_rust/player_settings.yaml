@@ -39,8 +39,8 @@ keys:
   join_red: ["2"]  # In the lobby, join the red team.
   lower_resolution: ["-"]  # Render at a lower resolution.
   raise_resolution: ["="]  # Render at a higher resolution.
-  release_mouse: [Escape]  # Free the mouse; again to ask whether to quit.
-  open_menu: [Tab]  # Open or close the menu (settings).
+  show_map: [Tab]  # Show the level's map over the game while held; play goes on.
+  open_menu: [Escape]  # Open or close the menu (scores, settings, map, credits, quit); it frees the mouse.
 
 view:
   look_rad_per_px: 0.0025  # How far the view turns for each pixel the mouse moves (mouse sensitivity).

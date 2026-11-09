@@ -1,6 +1,7 @@
 //! `session` runs a match: it updates the player, their guns (`guns.rs`, Lunar Surface's) and
 //! the bots, resolves shots, spawns effects (beams flying out, sparks, smoke, ground dust, decals,
-//! light flashes), plays sounds, and turns the state into the renderer's per-frame data. An optional autopilot plays the game by itself for
+//! light flashes), throws and lands the player's wormholes and puts every player's linked pairs into
+//! the warps, plays sounds, and turns the state into the renderer's per-frame data. An optional autopilot plays the game by itself for
 //! screenshots and benchmarks.
 //!
 //! Example:
@@ -9,6 +10,10 @@
 
 use crate::game::bots::BODY_CENTRE_HEIGHT_M;
 use crate::game::warps::{BeamPath, Warps};
+use crate::render::{LensMouth, ThrownLensMouth};
+use crate::thrown_wormholes::{
+    HIT_FLASH_COLOR, Marker, MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor, fly_throw,
+};
 use std::collections::VecDeque;
 use std::ops::Range;
 
@@ -97,12 +102,14 @@ const LUNAR_TEAM_BEAM_RGB: [Vec3; 2] = [
 const MIN_GROUND_NORMAL_Y: f32 = 0.7;
 const BOT_GROUND_HIT_M: f32 = 0.05;
 
-/// `Controls` is one frame of input from the keyboard and mouse.
+/// `Controls` is one frame of input from the keyboard and mouse; `is_throw_pressed` is a press of
+/// `Q`, which throws the next wormhole mouth.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Controls {
     pub player: PlayerInput,
     pub gun: GunInput,
     pub is_flashlight_held: bool,
+    pub is_throw_pressed: bool,
 }
 
 /// `RobotHold` holds robot 0 for pictures and benchmarks: it stands at `feet_m` facing `yaw_rad`,
@@ -164,7 +171,8 @@ struct Flash {
 }
 
 /// `FrameData` owns everything a frame description points at; `lens_draws` are the robots among
-/// `world_draws`, and `lens_particles` the robots' eye glows, lasers and their sparks and smoke.
+/// `world_draws`, `lens_particles` the robots' eye glows, lasers and their sparks and smoke, and
+/// `thrown_lens_mouths` the players' linked thrown mouths.
 pub struct FrameData {
     pub camera: Camera,
     pub world_draws: Vec<DrawItem>,
@@ -181,6 +189,7 @@ pub struct FrameData {
     pub lens_particles: Vec<Particle>,
     pub beams: Vec<Beam>,
     pub beam_speckle_shares: Vec2,
+    pub thrown_lens_mouths: Vec<ThrownLensMouth>,
 }
 
 /// `OFF_PYLON_TINT` darkens a pylon whose console is off.
@@ -259,11 +268,23 @@ pub struct Session {
     hud_pulses: HudPulses,
     robot_hold: Option<RobotHold>,
     robot_hold_s: f32,
+    pub thrown: ThrownWormholes,
+    pub warps: Warps,
+    thrown_pairs: Vec<[MouthPlace; 2]>,
+    thrown_pair_owners: Vec<Option<u32>>,
+    thrown_lens_mouths: Vec<ThrownLensMouth>,
+    pub own_wormhole_damage_frac: f64,
+    wormhole_damages: Vec<(Option<u32>, f64)>,
+    wormhole_flashes: Vec<(Option<u32>, f64)>,
+    pub pending_wormhole_hits: Vec<(u32, u8)>,
+    has_shot_hit_wormholes: bool,
+    last_rifle_shot_count: u64,
+    pub message: Option<(String, f32)>,
 }
 
 /// `RemoteBot` is another player of a network game, drawn as a robot in their team's colour: their
 /// camera's frame (while firing, the frame their shot is traced from), whether their laser is on
-/// (and was last frame), with which gun, and their shot's speckle.
+/// (and was last frame), with which gun, their shot's speckle, and their thrown wormholes.
 pub struct RemoteBot {
     pub id: u32,
     pub team: u32,
@@ -273,7 +294,31 @@ pub struct RemoteBot {
     pub was_firing: bool,
     pub is_rifle: bool,
     pub beam_speckle_frac: f64,
+    pub wormholes: PlayerWormholes,
 }
+
+/// `MESSAGE_S` is how long a message (a wormhole placed or destroyed) stays on screen.
+const MESSAGE_S: f32 = 3.0;
+/// `LONE_MOUTH_HITS_TO_DESTROY` is how many hits destroy a mouth down whose partner isn't (Lunar
+/// Surface's).
+const LONE_MOUTH_HITS_TO_DESTROY: u8 = 1;
+/// `MARKER_GLOW_PER_RADIUS` sizes a thrown mouth's glowing ball's sprite by its radius, and
+/// `MARKER_LIGHT_M` and `MARKER_LIGHT_FRAC` its light.
+const MARKER_GLOW_PER_RADIUS: f32 = 2.0;
+const MARKER_LIGHT_M: f32 = 4.0;
+const MARKER_LIGHT_FRAC: f32 = 0.6;
+/// `MOUTH_FLOOR_PROBE_M` is how far below a thrown mouth the lens looks for its floor.
+const MOUTH_FLOOR_PROBE_M: f32 = 20.0;
+/// `MIN_WARP_JUMP_M` is how far a robot must move in one update to have gone through a mouth.
+const MIN_WARP_JUMP_M: f32 = 2.0;
+/// `EXIT_BODY_RADIUS_M`, `EXIT_FLOOR_GAP_M`, `EXIT_CLEARANCE_M` and `EXIT_DIRECTION_COUNT` are
+/// how wide a body stepping out of a mouth must fit (a little wider than a player), how far above
+/// the floor its box starts, how far beyond the throat it may step out instead, and how many ways
+/// each side of the gluing's exit it tries (`find_clear_exit_feet_m`).
+const EXIT_BODY_RADIUS_M: f32 = 0.35;
+const EXIT_FLOOR_GAP_M: f32 = 0.05;
+const EXIT_CLEARANCE_M: f32 = 0.4;
+const EXIT_DIRECTION_COUNT: usize = 8;
 
 /// `TEAM_BODY_RGB` are the teams' colours (blue, red) that a robot's teal turns into: Lunar
 /// Surface's `minimap::TEAM_COLORS`, which its bodies take.
@@ -305,6 +350,7 @@ impl Session {
     /// `new` starts a match with a number of bots.
     pub fn new(arena: Arena, bot_count: usize, is_autopilot: bool) -> Session {
         let laser_rgb: Option<Vec3> = arena.laser_rgb;
+        let map_warps: Warps = arena.warps.clone();
         let solids: Vec<Aabb> = arena.boxes.iter().map(|world_box| world_box.aabb).collect();
         let nav: NavGraph = NavGraph::build(
             &solids,
@@ -384,6 +430,18 @@ impl Session {
             hud_pulses: HudPulses::New(),
             robot_hold: None,
             robot_hold_s: 0.0,
+            thrown: ThrownWormholes::New(),
+            warps: map_warps,
+            thrown_pairs: Vec::new(),
+            thrown_pair_owners: Vec::new(),
+            thrown_lens_mouths: Vec::new(),
+            own_wormhole_damage_frac: 0.0,
+            wormhole_damages: Vec::new(),
+            wormhole_flashes: Vec::new(),
+            pending_wormhole_hits: Vec::new(),
+            has_shot_hit_wormholes: false,
+            last_rifle_shot_count: 0,
+            message: None,
         }
     }
 
@@ -606,6 +664,12 @@ impl Session {
             World(usize, Vec3),
             Bot(usize, bool, Vec3),
             Remote(u32, bool, Vec3),
+            Marker(usize, Vec3),
+        }
+        let markers: Vec<(Option<u32>, Marker)> = self.get_wormhole_markers();
+        if !self.was_firing || self.weapons.rifle_shot_count != self.last_rifle_shot_count {
+            self.has_shot_hit_wormholes = false;
+            self.last_rifle_shot_count = self.weapons.rifle_shot_count;
         }
         let aim: Mat4 = self
             .weapons
@@ -615,7 +679,7 @@ impl Session {
         let origin_m: Vec3 = aim.w_axis.truncate();
         let direction: Vec3 = -aim.z_axis.truncate().normalize();
         let mut shot_hit: Option<ShotHit> = None;
-        let path: BeamPath = self.arena.warps.trace_beam(
+        let path: BeamPath = self.warps.trace_beam(
             origin_m,
             direction,
             LASER_MAX_LENGTH_M,
@@ -649,12 +713,28 @@ impl Session {
                         }
                     }
                 }
+                for (index, (_, marker)) in markers.iter().enumerate() {
+                    if let Some(hit_m) =
+                        cast_ray_at_ball(start_m, piece_direction, marker.centre_m, marker.radius_m)
+                            .filter(|&hit_m| marker.is_mouth && hit_m < nearest_m)
+                    {
+                        nearest_m = hit_m;
+                        let normal: Vec3 = (start_m + piece_direction * hit_m - marker.centre_m)
+                            .normalize_or(-piece_direction);
+                        found = Some(ShotHit::Marker(index, normal));
+                    }
+                }
                 found.map(|hit| {
                     shot_hit = Some(hit);
                     nearest_m
                 })
             },
         );
+        let hit_marker: Option<usize> = match shot_hit {
+            Some(ShotHit::Marker(index, _)) => Some(index),
+            _ => None,
+        };
+        self.report_wormhole_hits(&path.crossed_mouths, hit_marker, &markers);
         let end_m: Vec3 = path.end_m;
         let gun: Gun = self.weapons.gun;
         let is_head_hit: bool = matches!(
@@ -705,9 +785,9 @@ impl Session {
                     self.arena.boxes[index].surface == Surface::Ground
                         && normal.y > MIN_GROUND_NORMAL_Y,
                 ),
-                ShotHit::Bot(_, _, normal) | ShotHit::Remote(_, _, normal) => {
-                    (normal, false, false)
-                }
+                ShotHit::Bot(_, _, normal)
+                | ShotHit::Remote(_, _, normal)
+                | ShotHit::Marker(_, normal) => (normal, false, false),
             };
             Landing {
                 position_m: end_m,
@@ -738,6 +818,246 @@ impl Session {
         audio.play(Sound::Shot, 0.9, 0.0);
     }
 
+    /// `show_message` shows `text` on screen for `MESSAGE_S` and prints it.
+    ///
+    /// Example: `self.show_message("Purple wormhole placed".to_string());`
+    fn show_message(&mut self, text: String) {
+        println!("message: {text}");
+        self.message = Some((text, MESSAGE_S));
+    }
+
+    /// `can_throw` says whether this player may throw a wormhole mouth now: alive, before a team
+    /// has won, without a throw in the air, and without both mouths down.
+    ///
+    /// Example: `if self.can_throw() { self.throw_wormhole(scene); }`
+    fn can_throw(&self) -> bool {
+        self.player.is_alive() && self.winner.is_none() && self.thrown.can_throw()
+    }
+
+    /// `throw_wormhole` throws this player's next wormhole mouth from their eye; it flies until it
+    /// meets the forest's solids (`fly_throw`).
+    ///
+    /// Example: `self.throw_wormhole(scene);`
+    pub fn throw_wormhole(&mut self, scene: &Scene) {
+        let eye: DMat4 = self.player.camera_world().as_dmat4();
+        let flight = fly_throw(
+            eye,
+            self.thrown.get_next_color(),
+            &self.settings.wormholes,
+            |x: DVec3, v: DVec3, length_m: f64| {
+                cast_ray(&scene.solids, x.as_vec3(), v.as_vec3(), length_m as f32)
+                    .map(|(_, hit)| f64::from(hit.distance_m))
+            },
+        );
+        self.thrown.throw(flight, f64::from(self.time_s));
+    }
+
+    /// `update_wormholes` clears this player's wormholes once dead, lands their throw once it comes
+    /// down (inside the forest, out of every solid, clear of every warp's reach and of the other
+    /// mouths down, other players' too), flashes and destroys wormholes by the server's damage
+    /// (`update_wormhole_damage`), and puts every linked pair, this player's first, into the warps
+    /// when they change.
+    ///
+    /// Example: `self.update_wormholes(scene);`
+    fn update_wormholes(&mut self, scene: &Scene) {
+        let now_s: f64 = f64::from(self.time_s);
+        if !self.player.is_alive() {
+            self.thrown.clear();
+        }
+        let mut others_m: Vec<Vec3> = self
+            .thrown
+            .get_kept_places()
+            .iter()
+            .map(MouthPlace::get_centre_m)
+            .collect();
+        for remote in &self.remote_bots {
+            others_m.extend(
+                remote
+                    .wormholes
+                    .get_places()
+                    .iter()
+                    .map(MouthPlace::get_centre_m),
+            );
+        }
+        let (arena, solids) = (&self.arena, &scene.solids);
+        let message: Option<String> = self.thrown.update(
+            now_s,
+            f64::from(self.movement.eye_height_m),
+            |place: &MouthPlace| {
+                let centre_m: Vec3 = place.get_centre_m();
+                let point: Aabb = Aabb::from_center(centre_m, Vec3::ZERO);
+                centre_m.cmpge(arena.bounds_min_m).all()
+                    && centre_m.cmple(arena.bounds_max_m).all()
+                    && !solids.iter().any(|solid| solid.overlaps(&point))
+                    && arena.warps.is_clear_for_thrown_mouth(centre_m, &others_m)
+            },
+        );
+        if let Some(message) = message {
+            self.show_message(message);
+        }
+        self.update_wormhole_damage(now_s);
+        let (owners, pairs): (Vec<Option<u32>>, Vec<[MouthPlace; 2]>) = self
+            .get_all_wormholes()
+            .into_iter()
+            .filter_map(|(owner, wormholes)| Some((owner, wormholes.get_pair()?)))
+            .unzip();
+        if pairs != self.thrown_pairs {
+            let centres_m: Vec<[Vec3; 2]> = pairs
+                .iter()
+                .map(|pair| pair.map(|place| place.get_centre_m()))
+                .collect();
+            self.warps = self.arena.warps.with_thrown_pairs(&centres_m);
+            let first: usize = self.arena.warps.mouths.len();
+            self.thrown_lens_mouths = self.warps.mouths[first..]
+                .iter()
+                .map(|mouth| ThrownLensMouth {
+                    mouth: LensMouth {
+                        centre_m: mouth.centre_m,
+                        lens_throat_m: mouth.get_lens_throat_m(),
+                        reach_m: mouth.reach_m,
+                        lambda_squared: mouth.lambda_squared,
+                        floor_m: cast_ray(solids, mouth.centre_m, Vec3::NEG_Y, MOUTH_FLOOR_PROBE_M)
+                            .map_or(0.0, |(_, hit)| mouth.centre_m.y - hit.distance_m),
+                        partner: mouth.partner - first,
+                    },
+                    tint_rgb: Vec3::ZERO,
+                })
+                .collect();
+            (self.thrown_pairs, self.thrown_pair_owners) = (pairs, owners);
+        }
+        for (pair, owner) in self.thrown_pair_owners.iter().enumerate() {
+            let is_flashing: bool = self.is_flashing(*owner, now_s);
+            for (side, color) in [WormholeColor::Purple, WormholeColor::Green]
+                .into_iter()
+                .enumerate()
+            {
+                self.thrown_lens_mouths[2 * pair + side].tint_rgb = Vec3::from(if is_flashing {
+                    HIT_FLASH_COLOR
+                } else {
+                    color.get_rgb()
+                });
+            }
+        }
+    }
+
+    /// `update_wormhole_damage` makes the wormholes of every player whose damage (from the server)
+    /// rose flash red for the settings' `wormholes.hit_flash_s` from `now_s`, and destroys this
+    /// player's once theirs reaches 1.
+    ///
+    /// Example: `self.update_wormhole_damage(now_s);`
+    fn update_wormhole_damage(&mut self, now_s: f64) {
+        let all: Vec<(Option<u32>, PlayerWormholes)> = self.get_all_wormholes();
+        for &(owner, wormholes) in &all {
+            let last_frac: f64 = match self.wormhole_damages.iter().find(|(o, _)| *o == owner) {
+                Some(&(_, frac)) => frac,
+                None => 0.0,
+            };
+            if wormholes.damage_frac > last_frac {
+                self.wormhole_flashes.retain(|(o, _)| *o != owner);
+                let until_s: f64 = now_s + self.settings.wormholes.hit_flash_s;
+                self.wormhole_flashes.push((owner, until_s));
+            }
+        }
+        self.wormhole_damages = all.iter().map(|&(o, w)| (o, w.damage_frac)).collect();
+        if all[0].1.damage_frac >= 1.0 && !self.thrown.placed.get_places().is_empty() {
+            self.thrown.clear();
+            self.show_message("Your wormholes were destroyed".to_string());
+        }
+    }
+
+    /// `is_flashing` says whether `owner`'s wormholes (`None` for this player's) flash red at `now_s`.
+    ///
+    /// Example: `let is_red = self.is_flashing(Some(3), now_s);`
+    fn is_flashing(&self, owner: Option<u32>, now_s: f64) -> bool {
+        self.wormhole_flashes
+            .iter()
+            .any(|&(o, until_s)| o == owner && until_s > now_s)
+    }
+
+    /// `get_all_wormholes` gives every player's wormholes with their owner: this player's first
+    /// (`None`, with the damage the server counts for them), then the others'.
+    ///
+    /// Example: `let all = self.get_all_wormholes();`
+    fn get_all_wormholes(&self) -> Vec<(Option<u32>, PlayerWormholes)> {
+        let own: PlayerWormholes = PlayerWormholes {
+            damage_frac: self.own_wormhole_damage_frac,
+            ..self.thrown.placed
+        };
+        std::iter::once((None, own))
+            .chain(
+                self.remote_bots
+                    .iter()
+                    .map(|remote| (Some(remote.id), remote.wormholes)),
+            )
+            .collect()
+    }
+
+    /// `get_wormhole_markers` lists the glowing balls to draw for every player's thrown mouths, with
+    /// their owner (as `get_all_wormholes`): throws in the air, and mouths down whose partner isn't
+    /// (red while they flash).
+    ///
+    /// Example: `let markers = self.get_wormhole_markers();`
+    fn get_wormhole_markers(&self) -> Vec<(Option<u32>, Marker)> {
+        let now_s: f64 = f64::from(self.time_s);
+        let mut markers: Vec<(Option<u32>, Marker)> = Vec::new();
+        for (owner, wormholes) in self.get_all_wormholes() {
+            for mut marker in wormholes.get_markers() {
+                if marker.is_mouth && self.is_flashing(owner, now_s) {
+                    marker.rgb = HIT_FLASH_COLOR;
+                }
+                markers.push((owner, marker));
+            }
+        }
+        markers
+    }
+
+    /// `report_wormhole_hits` queues for the server, once per shot, whose enemy wormholes this
+    /// player's shot went into (`crossed_mouths`, indices into `self.warps.mouths`), which counts
+    /// toward destroying them by the gun, or hit (`hit_marker`, an index into `markers`, a lone
+    /// mouth's ball), which destroys it at once. A shot at this player's own or a teammate's
+    /// wormholes does nothing.
+    ///
+    /// Example: `self.report_wormhole_hits(&path.crossed_mouths, None, &markers);`
+    fn report_wormhole_hits(
+        &mut self,
+        crossed_mouths: &[usize],
+        hit_marker: Option<usize>,
+        markers: &[(Option<u32>, Marker)],
+    ) {
+        let first: usize = self.arena.warps.mouths.len();
+        if !self.was_firing && crossed_mouths.iter().any(|&index| index >= first) {
+            println!("shot went through thrown wormhole mouths {crossed_mouths:?}");
+        }
+        let gun_hits_to_destroy: u8 = match self.weapons.gun {
+            Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
+            Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
+        };
+        let is_enemy = |&(id, _): &(u32, u8)| {
+            self.remote_bots
+                .iter()
+                .any(|remote| remote.id == id && remote.team != self.team)
+        };
+        let mut enemy_hits: Vec<(u32, u8)> = crossed_mouths
+            .iter()
+            .filter_map(|&index| index.checked_sub(first))
+            .filter_map(|thrown| self.thrown_pair_owners[thrown / 2])
+            .map(|id| (id, gun_hits_to_destroy))
+            .chain(
+                hit_marker
+                    .and_then(|index| markers[index].0)
+                    .map(|id| (id, LONE_MOUTH_HITS_TO_DESTROY)),
+            )
+            .filter(is_enemy)
+            .collect();
+        enemy_hits.dedup_by_key(|&mut (id, _)| id);
+        if self.has_shot_hit_wormholes || enemy_hits.is_empty() {
+            return;
+        }
+        self.has_shot_hit_wormholes = true;
+        println!("shot hit the wormholes of players {enemy_hits:?}");
+        self.pending_wormhole_hits.extend(enemy_hits);
+    }
+
     /// `get_hits_to_eliminate` gives how many hits like this one (to the head when `is_head`)
     /// eliminate a player or a bot: the server settings' rifle hits, as on Lunar Surface.
     ///
@@ -756,6 +1076,7 @@ impl Session {
         let path: BeamPath = BeamPath {
             pieces: vec![(shot.origin_m, shot.end_m)],
             end_m: shot.end_m,
+            crossed_mouths: Vec::new(),
         };
         let landing: Option<Landing> = (!shot.did_hit_player).then_some(Landing {
             position_m: shot.end_m,
@@ -836,6 +1157,7 @@ impl Session {
                 player: walk.input,
                 gun: GunInput::default(),
                 is_flashlight_held: false,
+                is_throw_pressed: false,
             };
         }
         let eye_m: Vec3 = self.player.eye_position_m();
@@ -866,7 +1188,6 @@ impl Session {
                 to_bot.length() < 45.0
                     && cast_ray(&scene.solids, eye_m, to_bot.normalize(), to_bot.length()).is_none()
                     && self
-                        .arena
                         .warps
                         .trace_beam(eye_m, to_bot, to_bot.length(), |_, _, _| None)
                         .end_m
@@ -898,6 +1219,7 @@ impl Session {
                 player,
                 gun: GunInput::default(),
                 is_flashlight_held: false,
+                is_throw_pressed: false,
             };
         }
         let look_direction: Vec3 = match visible_bot {
@@ -938,6 +1260,7 @@ impl Session {
                 ..GunInput::default()
             },
             is_flashlight_held: false,
+            is_throw_pressed: false,
         }
     }
 
@@ -977,15 +1300,29 @@ impl Session {
             dt_s,
         );
         self.shot_eye = self.aim_at_crosshair(scene);
+        if controls.is_throw_pressed && self.can_throw() {
+            self.throw_wormhole(scene);
+        }
+        self.update_wormholes(scene);
         if self.player.is_alive() {
-            let warps: &Warps = &self.arena.warps;
+            let warps: &Warps = &self.warps;
             let centre_m: Vec3 = self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
             self.player.velocity_m_s += warps.get_pull_m_per_s2(centre_m) * dt_s;
             if let Some((exit_m, turn)) = warps.get_mouth_exit_feet_m(self.player.feet_m, centre_m)
             {
                 let yaw_rad: f32 = self.player.yaw_rad;
                 let facing: Vec3 = turn * Vec3::new(-yaw_rad.sin(), 0.0, -yaw_rad.cos());
-                self.player.feet_m = exit_m;
+                let entered_m: Vec3 = self.player.feet_m;
+                self.player.feet_m = find_clear_exit_feet_m(warps, &scene.solids, exit_m);
+                if self.warps.mouths[self.arena.warps.mouths.len()..]
+                    .iter()
+                    .any(|mouth| mouth.centre_m.distance(centre_m) < mouth.throat_radius_m)
+                {
+                    println!(
+                        "went through a thrown wormhole from {entered_m:.1?} to {:.1?}",
+                        self.player.feet_m
+                    );
+                }
                 self.player.velocity_m_s = turn * self.player.velocity_m_s;
                 self.player.yaw_rad = (-facing.x).atan2(-facing.z);
             }
@@ -1068,7 +1405,11 @@ impl Session {
             self.apply_bot_shot(shot, scene, audio);
         }
         for bot in self.bots.iter_mut().filter(|bot| bot.is_alive()) {
-            bot.apply_warps(&self.arena.warps, dt_s);
+            let before_m: Vec3 = bot.feet_m;
+            bot.apply_warps(&self.warps, dt_s);
+            if bot.feet_m.distance(before_m) > MIN_WARP_JUMP_M {
+                bot.feet_m = find_clear_exit_feet_m(&self.warps, &scene.solids, bot.feet_m);
+            }
         }
         let player_feet_m: Vec3 = self.player.feet_m;
         for index in 0..self.bots.len() {
@@ -1132,6 +1473,12 @@ impl Session {
         self.flashes.retain(|flash| flash.age_s < flash.life_s);
         self.hit_marker_s = (self.hit_marker_s - dt_s).max(0.0);
         self.kill_marker_s = (self.kill_marker_s - dt_s).max(0.0);
+        if let Some((_, left_s)) = &mut self.message {
+            *left_s -= dt_s;
+            if *left_s <= 0.0 {
+                self.message = None;
+            }
+        }
         self.hit_effect_frac =
             fade_effect_frac(self.hit_effect_frac, f64::from(dt_s), HIT_EFFECTS.effect_s);
         self.view_switch.update(f64::from(dt_s));
@@ -1233,7 +1580,7 @@ impl Session {
         let origin_m: Vec3 = frame.w_axis.truncate();
         let direction: Vec3 = -frame.z_axis.truncate().normalize();
         let mut hit_box: Option<(usize, Vec3)> = None;
-        let path: BeamPath = self.arena.warps.trace_beam(
+        let path: BeamPath = self.warps.trace_beam(
             origin_m,
             direction,
             LASER_MAX_LENGTH_M,
@@ -1568,6 +1915,22 @@ impl Session {
             }
         }
         let beacon_particle_end: usize = world_particles.len();
+        for (_, marker) in self.get_wormhole_markers() {
+            let rgb: Vec3 = Vec3::from(marker.rgb) * scene.light_scale;
+            world_particles.push(Particle {
+                position_m: marker.centre_m,
+                stretch_m: Vec3::ZERO,
+                size_m: marker.radius_m * MARKER_GLOW_PER_RADIUS,
+                color_rgba: rgb.extend(0.0),
+                kind: ParticleKind::Spark,
+                seed: 0.5,
+            });
+            point_lights.push(PointLight {
+                position_m: marker.centre_m,
+                radius_m: MARKER_LIGHT_M,
+                color_rgb: rgb * MARKER_LIGHT_FRAC,
+            });
+        }
         let now_s: f64 = f64::from(self.time_s);
         let muzzle_m: Vec3 = self.muzzle_world_m();
         let mut beams: Vec<Beam> = Vec::new();
@@ -1691,8 +2054,73 @@ impl Session {
             hud_rects,
             overlay_rects,
             hit_effect: self.get_hit_effect(),
+            thrown_lens_mouths: self.thrown_lens_mouths.clone(),
         }
     }
+}
+
+/// `find_clear_exit_feet_m` gives where a body whose feet a wormhole just put at `feet_m` stands:
+/// there, raised to the floor under the mouth it left (the nearest of `warps`) if it came out
+/// lower, unless its body would be inside one of `solids`; then at the nearest spot as far around
+/// that mouth (at least its throat and `EXIT_CLEARANCE_M` out) where it fits. A thrown mouth
+/// often lands against a bamboo wall, so the gluing's own exit can fall inside the wall; where no
+/// spot fits, the body stays at the gluing's exit.
+///
+/// Example: `self.player.feet_m = find_clear_exit_feet_m(&self.warps, &scene.solids, exit_m);`
+fn find_clear_exit_feet_m(warps: &Warps, solids: &[Aabb], feet_m: Vec3) -> Vec3 {
+    let body_centre_m: Vec3 = feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
+    let Some(mouth) = warps.mouths.iter().min_by(|a, b| {
+        let distance_m = |centre_m: Vec3| centre_m.distance(body_centre_m);
+        distance_m(a.centre_m).total_cmp(&distance_m(b.centre_m))
+    }) else {
+        return feet_m;
+    };
+    let floor_m: Option<f32> = cast_ray(solids, mouth.centre_m, Vec3::NEG_Y, MOUTH_FLOOR_PROBE_M)
+        .map(|(_, hit)| mouth.centre_m.y - hit.distance_m);
+    let raise = |at_m: Vec3| floor_m.map_or(at_m, |y_m| at_m.with_y(at_m.y.max(y_m)));
+    let fits = |at_m: Vec3| {
+        let body: Aabb = Aabb {
+            min_m: at_m + Vec3::new(-EXIT_BODY_RADIUS_M, EXIT_FLOOR_GAP_M, -EXIT_BODY_RADIUS_M),
+            max_m: at_m + Vec3::new(EXIT_BODY_RADIUS_M, BOT_HEIGHT_M, EXIT_BODY_RADIUS_M),
+        };
+        !solids.iter().any(|solid| solid.overlaps(&body))
+    };
+    let first_m: Vec3 = raise(feet_m);
+    if fits(first_m) {
+        return first_m;
+    }
+    let offset: Vec2 = Vec2::new(feet_m.x - mouth.centre_m.x, feet_m.z - mouth.centre_m.z);
+    let radius_m: f32 = offset
+        .length()
+        .max(mouth.throat_radius_m + EXIT_CLEARANCE_M);
+    let start_rad: f32 = offset.y.atan2(offset.x);
+    let step_rad: f32 = std::f32::consts::PI / EXIT_DIRECTION_COUNT as f32;
+    for turn in 1..=EXIT_DIRECTION_COUNT {
+        for side in [1.0, -1.0] {
+            let angle_rad: f32 = start_rad + side * turn as f32 * step_rad;
+            let at_m: Vec3 = raise(Vec3::new(
+                mouth.centre_m.x + radius_m * angle_rad.cos(),
+                feet_m.y,
+                mouth.centre_m.z + radius_m * angle_rad.sin(),
+            ));
+            if fits(at_m) {
+                return at_m;
+            }
+        }
+    }
+    first_m
+}
+
+/// `cast_ray_at_ball` gives how far a ray from `origin_m` heading the unit `direction` goes before
+/// it meets the ball of `radius_m` around `centre_m`, if it does ahead of its origin.
+///
+/// Example: `let hit_m: Option<f32> = cast_ray_at_ball(eye_m, forward, marker.centre_m, 0.3);`
+fn cast_ray_at_ball(origin_m: Vec3, direction: Vec3, centre_m: Vec3, radius_m: f32) -> Option<f32> {
+    let offset_m: Vec3 = origin_m - centre_m;
+    let b: f32 = offset_m.dot(direction);
+    let discriminant: f32 = b * b - (offset_m.length_squared() - radius_m * radius_m);
+    let hit_m: f32 = -b - discriminant.max(0.0).sqrt();
+    (discriminant >= 0.0 && hit_m >= 0.0).then_some(hit_m)
 }
 
 /// `get_dust_particle` draws a grain or puff of ground dust (`dust.rs`) as this level's smoke, in

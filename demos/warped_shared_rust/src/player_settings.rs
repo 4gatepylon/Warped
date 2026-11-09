@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::key_bindings::KeyBindings;
+use crate::key_bindings::{self, KeyBindings};
 use crate::play_settings::{HitEffectSettings, MinimapSettings, ViewSettings};
 
 /// `Result` is this module's result type.
@@ -241,14 +241,16 @@ impl PerPlayerSettings {
     }
 
     /// `FromValue` reads a player's settings from the file's keys as a JSON value (what a
-    /// settings page edits), naming `source` in errors: the keys (`KeyBindings::FromNames`), and
+    /// settings page edits), naming `source` in errors: the keys (`KeyBindings::FromNames`, after
+    /// `key_bindings::upgrade_saved_names` upgrades keys saved before W-140), and
     /// every number checked as `check_numbers` does, with the tint and the Milky Way at most 1.
     ///
     /// Example: `let mine = PerPlayerSettings::FromValue(&edited, "the settings page")?;`
     #[allow(non_snake_case)]
     pub fn FromValue(value: &Value, source: &str) -> Result<PerPlayerSettings> {
-        let file: PlayerFile = serde_json::from_value(value.clone())
+        let mut file: PlayerFile = serde_json::from_value(value.clone())
             .map_err(|error| format!("settings {source}: {error}"))?;
+        key_bindings::upgrade_saved_names(&mut file.keys);
         let numbers: Value = serde_json::json!({"view": file.view, "hit_effects": file.hit_effects, "minimap": file.minimap});
         check_numbers(&numbers, &PLAYER_ZERO_ALLOWED_KEYS, source)?;
         for key in AT_MOST_1_KEYS {
@@ -336,6 +338,7 @@ mod tests {
     //! | Numbers | above 0, 0 where allowed, 0 elsewhere, above 1 where at most 1 | `edited_values_are_checked` |
     //! | Removed key (`view.wormhole_tint_s`) | absent, present in an old save (dropped) | `old_saves_load` |
     //! | Added key (`keys.switch_view`) | present, missing in an old save (its built-in value) | `old_saves_load` |
+    //! | Keys from before W-140 (`release_mouse`, `open_menu` on Tab) | upgraded to `show_map` and `open_menu` on Escape | `old_saves_load` |
     //! | Number rows | every row's key is a number of the file, inside its row's range | `number_rows_name_numbers_in_range` |
     //! | Same file as the levels | the match's copy of `player_settings.yaml` | `the_levels_use_the_same_file` |
 
@@ -419,7 +422,11 @@ mod tests {
         );
         assert_ne!(old_tint, BUILTIN_PLAYER_YAML);
         let without_switch_view: String = BUILTIN_PLAYER_YAML.replace("  switch_view: [V]", "");
-        for old_save in [old_tint, without_switch_view] {
+        let before_held_map: String = BUILTIN_PLAYER_YAML
+            .replacen("  show_map: [Tab]", "  release_mouse: [Escape]", 1)
+            .replacen("  open_menu: [Escape]", "  open_menu: [Tab]", 1);
+        assert!(!before_held_map.contains("show_map"));
+        for old_save in [old_tint, without_switch_view, before_held_map] {
             let loaded: PerPlayerSettings =
                 PerPlayerSettings::FromYaml(&old_save, "test").expect("an old save loads");
             assert_eq!(loaded.to_yaml(), PerPlayerSettings::Builtin().to_yaml());

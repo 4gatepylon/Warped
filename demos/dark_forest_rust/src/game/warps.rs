@@ -3,6 +3,10 @@
 //! mouth's foil lens bends lasers within its reach, and a body or laser entering its throat comes
 //! out of its partner's, through the partner's mirror in z (the hyperbolic demo's gluing).
 //!
+//! Players' thrown mouths (`thrown_wormholes.rs`) join the map's as more pairs
+//! (`Warps::with_thrown_pairs`), sized as the forest's lift mouths, with the same world-fixed
+//! mirror: a heuristic that keeps one gluing for the shader and the walkers.
+//!
 //! Example: `let warps: Warps = Warps::from_map(&map.warps);`
 
 use glam::{Mat3, Vec3};
@@ -26,11 +30,19 @@ const LENS_STEP_COUNT: f32 = 32.0;
 /// `MAX_BEAM_STEP_COUNT` caps a laser's steps, for one that circles a throat.
 const MAX_BEAM_STEP_COUNT: usize = 600;
 
-/// `BeamPath` is a laser's path: its pieces (straight, or one bent step each) and where it stopped.
+/// `THROWN_MOUTH_SCHWARZSCHILD_RADIUS_M`, `THROWN_MOUTH_REACH_M` and `THROWN_MOUTH_LAMBDA_SQUARED`
+/// size a thrown mouth as the forest's lift mouths (the map's smaller gates), so a corridor holds it.
+pub const THROWN_MOUTH_SCHWARZSCHILD_RADIUS_M: f32 = 2.4;
+pub const THROWN_MOUTH_REACH_M: f32 = 3.0;
+const THROWN_MOUTH_LAMBDA_SQUARED: f32 = 0.25;
+
+/// `BeamPath` is a laser's path: its pieces (straight, or one bent step each), where it stopped,
+/// and the mouths whose throats it went into, in order.
 #[derive(Clone, Debug)]
 pub struct BeamPath {
     pub pieces: Vec<(Vec3, Vec3)>,
     pub end_m: Vec3,
+    pub crossed_mouths: Vec<usize>,
 }
 
 /// `BlackHole` is one black hole: its centre, horizon and reach.
@@ -92,7 +104,8 @@ impl WormholeMouth {
     }
 }
 
-/// `Warps` is every black hole and wormhole mouth of a map.
+/// `Warps` is every black hole and wormhole mouth of a map, and the players' thrown pairs after the
+/// map's mouths.
 #[derive(Clone, Debug, Default)]
 pub struct Warps {
     pub black_holes: Vec<BlackHole>,
@@ -100,6 +113,46 @@ pub struct Warps {
 }
 
 impl Warps {
+    /// `with_thrown_pairs` gives these warps with the mouths of `pairs` (each a purple and a green
+    /// centre) after their own: pair k's purple at index `self.mouths.len() + 2k`, its green next.
+    ///
+    /// Example: `let warps: Warps = map_warps.with_thrown_pairs(&[[purple_m, green_m]]);`
+    pub fn with_thrown_pairs(&self, pairs: &[[Vec3; 2]]) -> Warps {
+        let first: usize = self.mouths.len();
+        let mut warps: Warps = self.clone();
+        for (pair, centres_m) in pairs.iter().enumerate() {
+            for (side, centre_m) in centres_m.iter().enumerate() {
+                warps.mouths.push(WormholeMouth {
+                    centre_m: *centre_m,
+                    throat_radius_m: THROWN_MOUTH_SCHWARZSCHILD_RADIUS_M
+                        * THROAT_RADIUS_PER_SCHWARZSCHILD_RADIUS_FRAC,
+                    reach_m: THROWN_MOUTH_REACH_M,
+                    lambda_squared: THROWN_MOUTH_LAMBDA_SQUARED,
+                    partner: first + 2 * pair + 1 - side,
+                });
+            }
+        }
+        warps
+    }
+
+    /// `is_clear_for_thrown_mouth` says whether a thrown mouth may hover at `centre_m`: its reach
+    /// clear of every mouth's here and of every black hole's, and of the reaches of thrown mouths at
+    /// `others_m`, so no two lenses overlap.
+    ///
+    /// Example: `if warps.is_clear_for_thrown_mouth(centre_m, &others_m) { place(); }`
+    pub fn is_clear_for_thrown_mouth(&self, centre_m: Vec3, others_m: &[Vec3]) -> bool {
+        self.mouths
+            .iter()
+            .all(|mouth| mouth.centre_m.distance(centre_m) >= mouth.reach_m + THROWN_MOUTH_REACH_M)
+            && self
+                .black_holes
+                .iter()
+                .all(|hole| hole.centre_m.distance(centre_m) >= hole.reach_m + THROWN_MOUTH_REACH_M)
+            && others_m
+                .iter()
+                .all(|other_m| other_m.distance(centre_m) >= 2.0 * THROWN_MOUTH_REACH_M)
+    }
+
     /// `from_map` reads the map's warps; a mouth's `partner` must be another mouth.
     ///
     /// Example: `let warps: Warps = Warps::from_map(&map.warps);`
@@ -243,6 +296,7 @@ impl Warps {
         mut hit: impl FnMut(Vec3, Vec3, f32) -> Option<f32>,
     ) -> BeamPath {
         let mut pieces: Vec<(Vec3, Vec3)> = Vec::new();
+        let mut crossed_mouths: Vec<usize> = Vec::new();
         let mut x: Vec3 = origin_m;
         let mut v: Vec3 = direction.normalize();
         let mut left_m: f32 = range_m;
@@ -270,7 +324,11 @@ impl Warps {
             if let Some(distance_m) = hit(x, v, step_m) {
                 let end_m: Vec3 = x + v * distance_m;
                 pieces.push((x, end_m));
-                return BeamPath { pieces, end_m };
+                return BeamPath {
+                    pieces,
+                    end_m,
+                    crossed_mouths,
+                };
             }
             let next_m: Vec3 = x + v * step_m;
             pieces.push((x, next_m));
@@ -280,11 +338,16 @@ impl Warps {
                 && self.mouths[index].centre_m.distance(x) < self.mouths[index].get_lens_throat_m()
             {
                 let (_, crossed_m, crossed_v) = self.cross_throat(index, x, v);
+                crossed_mouths.push(index);
                 x = crossed_m;
                 v = crossed_v.normalize();
             }
         }
-        BeamPath { pieces, end_m: x }
+        BeamPath {
+            pieces,
+            end_m: x,
+            crossed_mouths,
+        }
     }
 }
 
@@ -295,6 +358,8 @@ impl Warps {
 /// | distance from a black hole | inside reach, outside reach, inside horizon | `test_black_hole_pulls_within_reach_and_kills_inside` |
 /// | body vs a mouth | outside throat, inside throat | `test_walking_into_a_mouth_steps_out_beyond_its_partner` |
 /// | laser vs a mouth | through its centre, beside it within reach | `test_laser_through_a_mouth_comes_out_of_its_partner`, `test_laser_beside_a_mouth_bends_towards_it` |
+/// | thrown pair | walked into (out of its partner), shot into (out of its partner, named) | `test_a_thrown_pair_carries_walkers_and_lasers` |
+/// | thrown mouth's place | clear, in a map mouth's reach, in another thrown mouth's reach | `test_thrown_mouths_keep_clear_of_other_reaches` |
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,5 +457,41 @@ mod tests {
             "{direction:?} {:?}",
             path.end_m
         );
+    }
+
+    /// `test_a_thrown_pair_carries_walkers_and_lasers` checks a body walking into a thrown purple
+    /// mouth steps out beyond its green partner, and a laser fired into it comes out of the green
+    /// one, naming the purple mouth it entered.
+    #[test]
+    fn test_a_thrown_pair_carries_walkers_and_lasers() {
+        let purple_m: Vec3 = Vec3::new(0.0, 1.7, 20.0);
+        let green_m: Vec3 = Vec3::new(10.0, 1.7, 40.0);
+        let warps: Warps = warps().with_thrown_pairs(&[[purple_m, green_m]]);
+        assert_eq!((warps.mouths[2].partner, warps.mouths[3].partner), (3, 2));
+        let feet_m: Vec3 = purple_m + Vec3::new(0.0, -1.7, 0.5);
+        let (exit_m, _) = warps
+            .get_mouth_exit_feet_m(feet_m, feet_m + Vec3::Y * 0.9)
+            .expect("inside the purple throat");
+        assert!(exit_m.distance(green_m) < 3.0, "{exit_m:?}");
+        let path: BeamPath =
+            warps.trace_beam(purple_m + Vec3::Z * 10.0, Vec3::NEG_Z, 30.0, |_, _, _| None);
+        assert_eq!(path.crossed_mouths, [2]);
+        assert!(
+            (path.end_m.x - green_m.x).abs() < 0.5 && path.end_m.z < green_m.z,
+            "{:?}",
+            path.end_m
+        );
+    }
+
+    /// `test_thrown_mouths_keep_clear_of_other_reaches` checks a thrown mouth is placed in the
+    /// open, but not within a map mouth's reach plus its own, nor within two reaches of another
+    /// thrown mouth.
+    #[test]
+    fn test_thrown_mouths_keep_clear_of_other_reaches() {
+        let warps: Warps = warps();
+        let open_m: Vec3 = Vec3::new(0.0, 1.7, 30.0);
+        assert!(warps.is_clear_for_thrown_mouth(open_m, &[Vec3::new(0.0, 1.7, 20.0)]));
+        assert!(!warps.is_clear_for_thrown_mouth(Vec3::new(14.0, 1.7, 0.0), &[]));
+        assert!(!warps.is_clear_for_thrown_mouth(open_m, &[Vec3::new(0.0, 1.7, 25.0)]));
     }
 }

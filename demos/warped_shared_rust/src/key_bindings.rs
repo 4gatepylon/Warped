@@ -3,13 +3,14 @@
 //!
 //! Interface: `Action`, `Control`, `KeyBindings` (`FromNames`, `get_all`, `set_controls`,
 //! `get_names`, `to_names`, `is_held`, `matches`, `get_actions`, `get_label`, `describe`),
-//! `get_pressed_control`.
+//! `get_pressed_control`, `upgrade_saved_names`.
 //!
 //! Example: `let keys = KeyBindings::FromNames(&names, "mine.yaml")?;`
 //!
 //! Must know:
 //! - Every action is required and unknown actions or controls fail, naming them, so a typo can't
-//!   silently leave an action without a key.
+//!   silently leave an action without a key. Saves from older builds are upgraded first
+//!   (`upgrade_saved_names`).
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -19,6 +20,10 @@ use sdl3::keyboard::{KeyboardState, Scancode};
 use sdl3::mouse::{MouseButton, MouseState};
 
 const WHEEL_NAME: &str = "Wheel";
+const OLD_RELEASE_MOUSE_NAME: &str = "release_mouse";
+const SHOW_MAP_NAME: &str = "show_map";
+const OPEN_MENU_NAME: &str = "open_menu";
+const SHOW_MAP_KEY_NAME: &str = "Tab";
 const MOUSE_BUTTON_NAMES: [(&str, MouseButton); 5] = [
     ("Mouse Left", MouseButton::Left),
     ("Mouse Right", MouseButton::Right),
@@ -47,10 +52,10 @@ const ACTION_NAMES: [(Action, &str); 22] = [
     (Action::JoinRed, "join_red"),
     (Action::LowerResolution, "lower_resolution"),
     (Action::RaiseResolution, "raise_resolution"),
-    (Action::ReleaseMouse, "release_mouse"),
+    (Action::ShowMap, "show_map"),
     (Action::OpenMenu, "open_menu"),
 ];
-const PRESS_ONLY_ACTIONS: [Action; 11] = [
+const PRESS_ONLY_ACTIONS: [Action; 10] = [
     Action::ThrowWormhole,
     Action::Gun1,
     Action::Gun2,
@@ -60,7 +65,6 @@ const PRESS_ONLY_ACTIONS: [Action; 11] = [
     Action::JoinRed,
     Action::LowerResolution,
     Action::RaiseResolution,
-    Action::ReleaseMouse,
     Action::OpenMenu,
 ];
 const HELP_GROUPS: [(&[Action], &str); 14] = [
@@ -87,7 +91,7 @@ const HELP_GROUPS: [(&[Action], &str); 14] = [
     ),
     (&[Action::ThrowWormhole], "throw a wormhole"),
     (&[Action::LowerResolution, Action::RaiseResolution], "scale"),
-    (&[Action::ReleaseMouse], "release"),
+    (&[Action::ShowMap], "map (hold)"),
     (&[Action::OpenMenu], "menu"),
 ];
 
@@ -117,7 +121,7 @@ pub enum Action {
     JoinRed,
     LowerResolution,
     RaiseResolution,
-    ReleaseMouse,
+    ShowMap,
     OpenMenu,
 }
 
@@ -178,6 +182,32 @@ pub fn get_pressed_control(event: &Event) -> Option<Control> {
         Event::MouseWheel { y, .. } if y != 0.0 => Some(Control::Wheel),
         _ => None,
     }
+}
+
+/// `upgrade_saved_names` brings the key names of a save from before W-140 (hold Tab for the map,
+/// Esc for the menu) up to date; a save that has `release_mouse` and no `show_map` is one. Its
+/// `release_mouse` controls (`Escape`) now open the menu, which frees the mouse, beside the save's
+/// own `open_menu` controls other than the old `Tab`; and `show_map` takes `Tab`. Other saves are
+/// left alone.
+///
+/// Example: `upgrade_saved_names(&mut file.keys);`
+pub fn upgrade_saved_names(names: &mut BTreeMap<String, Vec<String>>) {
+    if !names.contains_key(OLD_RELEASE_MOUSE_NAME) || names.contains_key(SHOW_MAP_NAME) {
+        return;
+    }
+    let release_names: Vec<String> = names.remove(OLD_RELEASE_MOUSE_NAME).expect("checked above");
+    if let Some(menu_names) = names.get_mut(OPEN_MENU_NAME) {
+        menu_names.retain(|name| name != SHOW_MAP_KEY_NAME);
+        for name in release_names {
+            if !menu_names.contains(&name) {
+                menu_names.push(name);
+            }
+        }
+    }
+    names.insert(
+        SHOW_MAP_NAME.to_string(),
+        vec![SHOW_MAP_KEY_NAME.to_string()],
+    );
 }
 
 /// `KeyBindings` is the controls of every action.
@@ -336,6 +366,7 @@ mod tests {
     //! | --- | --- | --- |
     //! | Controls | keys (the view switch among them), mouse buttons (shooting, aiming), the wheel | `builtin_bindings_read_every_kind_of_control` |
     //! | Mistakes | an unknown action, a missing action, an unknown key, the wheel on a held action | `mistakes_name_what_is_wrong` |
+    //! | Save's age (W-140, hold Tab for the map, Esc for the menu) | current (left alone); from before, with `open_menu` on `Tab` (`Escape` opens the menu), on another key (both open it), or with `release_mouse` rebound (that key opens it) | `old_saves_move_the_menu_to_escape_and_the_map_to_tab` |
 
     use super::*;
 
@@ -345,9 +376,16 @@ mod tests {
     ///
     /// Example: `let keys = read_keys(PLAYER_YAML)?;`
     fn read_keys(text: &str) -> Result<KeyBindings> {
-        let file: BTreeMap<String, serde_yaml::Value> = serde_yaml::from_str(text)?;
-        let names: BTreeMap<String, Vec<String>> = serde_yaml::from_value(file["keys"].clone())?;
-        KeyBindings::FromNames(&names, "test")
+        KeyBindings::FromNames(&read_names(text), "test")
+    }
+
+    /// `read_names` reads the control names in the `keys` section of a player settings file.
+    ///
+    /// Example: `let names = read_names(PLAYER_YAML);`
+    fn read_names(text: &str) -> BTreeMap<String, Vec<String>> {
+        let file: BTreeMap<String, serde_yaml::Value> =
+            serde_yaml::from_str(text).expect("a YAML file");
+        serde_yaml::from_value(file["keys"].clone()).expect("a keys section of names")
     }
 
     #[test]
@@ -360,7 +398,37 @@ mod tests {
         assert!(keys.matches(Action::Flashlight, Control::Key(Scancode::F)));
         assert!(keys.matches(Action::SwitchGun, Control::Wheel));
         assert!(keys.matches(Action::SwitchView, Control::Key(Scancode::V)));
+        assert!(keys.matches(Action::ShowMap, Control::Key(Scancode::Tab)));
+        assert!(keys.matches(Action::OpenMenu, Control::Key(Scancode::Escape)));
         assert!(keys.describe().starts_with("W/A/S/D move, Left Shift run"));
+        assert!(keys.describe().ends_with("Tab map (hold), Escape menu"));
+    }
+
+    #[test]
+    fn old_saves_move_the_menu_to_escape_and_the_map_to_tab() {
+        let current: BTreeMap<String, Vec<String>> = read_names(PLAYER_YAML);
+        let mut upgraded: BTreeMap<String, Vec<String>> = current.clone();
+        upgrade_saved_names(&mut upgraded);
+        assert_eq!(upgraded, current);
+        for (old_menu, old_release, expected_menu) in [
+            ("[Tab]", "[Escape]", vec!["Escape"]),
+            ("[M]", "[Escape]", vec!["M", "Escape"]),
+            ("[Tab]", "[F10]", vec!["F10"]),
+        ] {
+            let old_save: String = PLAYER_YAML
+                .replace("show_map: [Tab]", &format!("release_mouse: {old_release}"))
+                .replace("open_menu: [Escape]", &format!("open_menu: {old_menu}"));
+            let mut names: BTreeMap<String, Vec<String>> = read_names(&old_save);
+            assert!(names.contains_key("release_mouse"), "{old_save}");
+            upgrade_saved_names(&mut names);
+            assert_eq!(
+                names["open_menu"], expected_menu,
+                "{old_menu} {old_release}"
+            );
+            assert_eq!(names["show_map"], vec!["Tab"]);
+            assert!(!names.contains_key("release_mouse"));
+            KeyBindings::FromNames(&names, "test").expect("an upgraded save reads");
+        }
     }
 
     #[test]

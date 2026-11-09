@@ -51,7 +51,8 @@ is in [`AGENTS.md`](AGENTS.md).
     sprint energy, crouch, jump, air control, step, a hit's slowing, the shot delay after moving, the settings'
     respawn delay; Lunar's flashlight and exit prompt; `claude/dark-forest-movement`, open, 2026-11-09) and #455
     (Lunar's beam looks and speckle, in gold; `claude/dark-forest-beams`, open, 2026-11-08); still missing there: the
-    Tab pages, the minimap, third person, thrown wormholes.
+    Tab pages, the minimap, third person, thrown wormholes. Dark Forest's thrown wormholes (`Q`): #479
+    (`claude/dark-forest-thrown-wormholes`, open, 2026-11-09).
     Shared code: #447 (`demos/warped_shared_rust/`, the files identical in Lunar Surface, Dust, Snow Planet, City
     Sphere and the match, moved into one library they all use, no change in play or pictures;
     `claude/shared-level-code`, merged); its `PLAN.md` is the next step, one movement, guns, health, HUD and robots
@@ -104,9 +105,6 @@ is in [`AGENTS.md`](AGENTS.md).
   them in a following PR". Among them: rays trapped near a throat are black on Lunar Surface (the black band seen
   when turning inside a wormhole, which the house already paints from the pixels around it; "it doesn't need to be
   100% correct physically"), and Lunar Surface should match the WebGL level.
-- [ ] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
-  together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
-  Mac over loopback.
 - [ ] **W-44 Smooth wormhole interior.** Inside a wormhole, looking sideways shows a grainy texture; it should look
   pretty, and a trivial fix such as blurring is fine. Looking at a wormhole from outside must stay correct.
 - [ ] **W-47 Admin dashboard.** Change the server's settings in real time: someone connects as an "admin", who can't
@@ -117,11 +115,17 @@ is in [`AGENTS.md`](AGENTS.md).
 - [?] **W-139 Dark Forest thrown-wormhole sheet.** A bug found by agents on 2026-11-09: in Dark Forest's `spawn` view, a hard straight-edged sheet covers part of a thrown wormhole's lens (upper right), like a clipping glitch in the lens capture.
   #478: it was red's lift mouth on its deck, its lens reaching through the deck; no lens is drawn from below a
   mouth's floor now, so the deck's underside (the sheet) hides it whole.
-- [ ] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
 - [ ] **W-141 One window for the whole game.** The user, 2026-11-09: "please make it so that all this stuff is one window (if you need to make it one app thats fine, yuo can make a new demo for that and in the main readme say that the official mvp version is in that new folder)", and "thing 2 is to be able to play against gbots or alone selecting from the game itself".
+- [ ] **W-143 Declarative levels.** The user, 2026-11-09: "Please use proper dry and come up with a clear way to specify maps. Imagine—in the future we want to be able to DEFINE new maps. Not yet, but that will be out there in the future. to enable that, you will ned to set things up a declarative format properly for that. Assume we won't need to support new map topologies/space/types than waht is currently therE". Design in #485 (`common/maps/LEVELS.md`).
+- [ ] **W-144 Gravity toward black holes and wormholes.** The user, 2026-11-09: "make gravitational attraction to black holes and wormholes", "it should be relatively weak, but noticeable; i.e if you run towards a black hole you are sped up, if you are runing aw4ay you are slowed", "the acceleration should be elss than walking speed but can be more than coruch speed (in all maps, so it might vary)".
+- [ ] **W-145 No walls at map edges.** The user, 2026-11-09: "on all maps there are NOT walls on the ends and as you walk off the edges of the map you get slowd with the same efefct as dust and lunar (i.e. it should zenos paradox you basically)", "also you can get rid of the toroidal topology to have just euclidean specificalyl for dark forest and snow planet", "(so snow planet and dark forest have perma slow mechanics", "since dark forest wont have a wall it needs to be such that you are slowed in teh forest so that you see trees in front of you as you walk off the map (ie you should never see empty space", "(you an put a caveat in game design that the toroidal maps are not actually toroidal and that that is a worok in progress btw)".
 
 ## Pending user review
 
+- [?] **W-140 Hold Tab for the map, Esc for the menu.** The user, 2026-11-09: "one more request is to be able to click tab to see the map and instead if you press escape then you see the overal menu", "when you hit tab you see the map only as long as you hold tab", "(and you can update hotkeys to reflect this)", "the point is that users will want to see where on the map they are pretty often". In every level.
+  #486: in every level (Lunar Surface, the match, Dust, Snow Planet, City Sphere, Dark Forest): holding `Tab`
+  shows the map over the game while play goes on; `Esc` opens the menu (freeing the mouse), `Esc` again closes it;
+  the menu's new QUIT page leaves the level, and a MATCH page shows the app's match status. Shared `warped_shared::menu_and_map`; old saved key bindings upgrade.
 - [?] **W-138 No aliasing.** The user, 2026-11-09, about W-136 (sharp centre, soft edges): "I think middle sharp is fine but there has to be enough blur to remove aliasing elsewhere", "aliasing is a big issue", "like no one ever ever like aliasing so you gota figure out how to deal with. that in particular". Applies to every level: the soft edges, half-resolution lenses and the rest of the image.
   #469: Lunar Surface, the match, Dust and Snow Planet: soft edges and Lunar's half-resolution lens shown through a
   smooth cubic B-spline, lasers kept sharp in lenses, and FXAA on every frame (0.2-0.8 ms at 3440x1440).
@@ -378,6 +382,11 @@ are here too, since the user hadn't confirmed them.
 ## Done
 
 Confirmed by the user after testing.
+
+- [x] **W-41 Play across computers.** Check that people on two or more computers on the same Wi-Fi can play
+  together ("the user can play the game with other humans on the same wifi"); so far it has only been tested on one
+  Mac over loopback.
+  Confirmed by the user, 2026-11-09: "it ahs been tested between multiple players on mac and it owrks".
 
 - [x] **W-111 Crash shooting a wormhole ball.** A bug: "if you shoot a wormhole ball (before creating a wormhole) you
   get a crash". The first thrown ball drops on the ground, the second one also, and they become a wormhole when the
