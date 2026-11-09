@@ -41,7 +41,7 @@ const REPLAN_AFTER_STUCK_S: f32 = 2.0;
 const AIM_LEVEL_M: f32 = 1.0;
 /// `SPRINT_FROM_M` is how far from its goal the bot sprints, while it has `MIN_SPRINT_ENERGY_FRAC`.
 const SPRINT_FROM_M: f32 = 12.0;
-const MIN_SPRINT_ENERGY_FRAC: f32 = 0.2;
+const MIN_SPRINT_ENERGY_FRAC: f64 = 0.2;
 /// `GIVE_UP_S` is how long the bot walks to a console before it gives it up.
 const GIVE_UP_S: f32 = 120.0;
 /// `LADDER_FRONT_M` is how far in front of a ladder's middle the bot lines up to climb it (clear of
@@ -246,7 +246,7 @@ impl BotWalker {
             })
             .1;
         let should_sprint: bool =
-            left_m > SPRINT_FROM_M && player.energy_frac > MIN_SPRINT_ENERGY_FRAC;
+            left_m > SPRINT_FROM_M && player.moves.energy_frac > MIN_SPRINT_ENERGY_FRAC;
         let is_jump_pressed: bool = self.stuck_s > JUMP_AFTER_STUCK_S;
         let Some(step) = self.path.get(self.path_index).copied() else {
             return PlayerInput {

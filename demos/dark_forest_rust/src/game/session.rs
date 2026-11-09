@@ -975,7 +975,11 @@ impl Session {
         if self.player.did_step {
             audio.play(
                 Sound::Footstep,
-                if self.player.is_sprinting { 0.35 } else { 0.22 },
+                if self.player.moves.is_sprinting {
+                    0.35
+                } else {
+                    0.22
+                },
                 0.0,
             );
         }
@@ -984,9 +988,9 @@ impl Session {
             && self.winner.is_none()
             && f64::from(self.since_movement_key_s) >= self.settings.movement.shoot_after_moving_s;
         let step: GunStep = GunStep {
-            is_sprinting: self.player.is_sprinting,
-            bob_phase_rad: self.player.bob_phase_rad,
-            bob_frac: self.player.bob_frac,
+            is_sprinting: self.player.moves.is_sprinting,
+            bob_phase_rad: self.player.moves.bob_phase_rad,
+            bob_frac: self.player.moves.bob_frac,
         };
         let mut gun_input: GunInput = controls.gun;
         gun_input.is_aim_held &= self.player.is_alive();
@@ -1021,7 +1025,7 @@ impl Session {
             player_eye_m: self.player.eye_position_m(),
             player_velocity_m_s: self.player.velocity_m_s,
             is_player_alive: self.player.is_alive(),
-            is_player_crouched: self.player.crouch_frac > 0.5,
+            is_player_crouched: self.player.moves.crouch_frac > 0.5,
         };
         let held_count: usize = usize::from(self.robot_hold.is_some());
         let shots: Vec<BotShot> = self
@@ -1244,7 +1248,7 @@ impl Session {
     fn get_hud_bars(&self) -> HudBars {
         HudBars {
             health_frac: Some(f64::from(self.player.health / MAX_HEALTH)),
-            energy_frac: Some(f64::from(self.player.energy_frac)),
+            energy_frac: Some(self.player.moves.energy_frac),
             console_hold_frac: self.console_hold_frac.map(f64::from),
         }
     }

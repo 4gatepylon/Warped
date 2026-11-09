@@ -11,6 +11,8 @@ pub mod dust;
 pub mod guns;
 pub mod hud;
 pub mod nav;
+#[cfg(test)]
+mod play_trace;
 pub mod player;
 pub mod session;
 pub mod warps;
