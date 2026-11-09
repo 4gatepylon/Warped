@@ -99,7 +99,8 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
     with the glass level. They start 3 to 4 m in front of the spawns (which face them, slightly to the right) and
     climb toward the team's own pylon, turned 0.14 rad north so their hole clears the glass covers; the landing ends
     about 5 m from the pylon. Seeded jitter like the blocks' (base ±0.02 rad, heading ±0.05 rad), mirrored. Their
-    hole (0.151 rad) covers every step where a head would reach the glass. Steps rather than a ramp: the user asked for
+    hole (0.151 rad) covers every step where a head would reach the glass; the game opens it only as wide as the
+    stairs (34). Steps rather than a ramp: the user asked for
     stairs, treads don't slide a standing player, and the map format needs nothing new. Players on the ground step up
     onto a box at most 0.2 m higher (new; nothing else in the level is that low except the lift pads), so stairs climb
     at walking and sprinting speed (a test walks from every spawn at both). Look: lit station metal tinted violet
@@ -137,3 +138,14 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
     haze fits.
 33. **Players spawn clear of teammates**: a window or bot takes the team's spawn farthest from the other players (two
     windows of one team both took the first spawn, on top of each other).
+34. **A stairs' hole is only as wide as its stairs** (W-132 (City Sphere stairs hole)): the map's round hole (0.151
+    rad, a radius of 2.6 m on the glass) reached 1.4 m past each side of the 2.4 m stairs, so shots passed the glass there
+    and players on the glass level fell in beside the steps. The map keeps its round hole (the format has only round
+    holes), and the game opens it only within the steps' half width (1.2 m) of the flight's middle plane, taken from
+    the steps under the hole (`fit_hole_to_stairs`): in collisions, shots, thrown wormholes, the minimap, the map page
+    and the drawn glass, whose glowing rim now follows the cut. A player under the glass, climbing, gets a body radius
+    (0.4 m) more on each side, so the glass doesn't knock off the stairs a player whose feet hang over a step's edge
+    (a test fails without it); on the glass level the glass holds a player up to the stairs' edge. The console bot's
+    path planning still keeps clear of the whole round hole. **Weigh in:** this changes the look: the glass now covers
+    the round hole's sides, and the hole's rim hugs the stairs. Cutting only the collisions would keep today's look
+    but leave players standing, and shots stopping, on glass that isn't drawn.

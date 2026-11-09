@@ -25,7 +25,7 @@ use objc2_metal::{
 };
 use rayon::prelude::*;
 
-use crate::city_world::{CityWorld, get_up};
+use crate::city_world::{CityWorld, Hole, get_up};
 use crate::fps_demo_assets::get_asset_path;
 use crate::mesh::{MeshMaterial, MeshModel};
 use crate::texture_arrays::{make_array, make_mips};
@@ -37,6 +37,7 @@ type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
 
 const SHADER_SOURCE: &str = include_str!("render_city.metal");
 pub const MAX_HOLE_COUNT: usize = 8;
+const ROUND_HOLE_SIDE_DOT: f64 = 2.0;
 const MOUTH_RING_SEGMENT_COUNT: usize = 32;
 const MOUTH_RING_WIDTH_FRAC: f64 = 0.12;
 const MOUTH_DISC_TINT: f32 = 0.25;
@@ -131,16 +132,20 @@ struct CityUniforms {
     flashlight_position: [f32; 4],
     flashlight_direction: [f32; 4],
     flashlight: [f32; 4],
+    hole_sides: [[f32; 4]; MAX_HOLE_COUNT],
 }
 
 /// `CityScene` is the geometry that never changes: opaque triangles and the glass's, with an id
 /// so the GPU copy is made once, and the glass's holes, the lifts' first (`lift_hole_count` of
-/// them, which get hazard rings on the street) and then the stairs'.
+/// them, which get hazard rings on the street) and then the stairs': each hole's unit direction
+/// and the cosine of its radius in `holes`, and in `hole_sides` the side axis of its stairs and the
+/// largest `|direction · side|` in it (`ROUND_HOLE_SIDE_DOT` for a round hole).
 pub struct CityScene {
     pub id: u64,
     pub opaque: Vec<CityVertex>,
     pub glass: Vec<CityVertex>,
     pub holes: Vec<[f32; 4]>,
+    pub hole_sides: Vec<[f32; 4]>,
     pub lift_hole_count: usize,
     pub glass_radius_m: f32,
     pub street_radius_m: f32,
@@ -461,6 +466,7 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
     }
     let mut glass: Vec<CityVertex> = Vec::new();
     let mut holes: Vec<[f32; 4]> = Vec::new();
+    let mut hole_sides: Vec<[f32; 4]> = Vec::new();
     let mut lift_hole_count: usize = 0;
     let mut glass_radius_m: f32 = 0.0;
     for shell in &world.shells {
@@ -492,12 +498,12 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
                 },
             );
             glass_radius_m = shell.radius_m as f32;
-            let lifts: Vec<&(DVec3, f64)> = shell
+            let lifts: Vec<&Hole> = shell
                 .holes
                 .iter()
                 .filter(|hole| world.lift_holes.contains(hole))
                 .collect();
-            let stairs: Vec<&(DVec3, f64)> = shell
+            let stairs: Vec<&Hole> = shell
                 .holes
                 .iter()
                 .filter(|hole| !world.lift_holes.contains(hole))
@@ -511,7 +517,15 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
             holes = lifts
                 .iter()
                 .chain(&stairs)
-                .map(|&&(d, cos)| [d.x as f32, d.y as f32, d.z as f32, cos as f32])
+                .map(|hole| hole.direction.as_vec3().extend(hole.cos as f32).to_array())
+                .collect();
+            hole_sides = lifts
+                .iter()
+                .chain(&stairs)
+                .map(|hole| {
+                    let max_dot: f64 = (hole.half_width_m / radius_m).min(ROUND_HOLE_SIDE_DOT);
+                    hole.side.as_vec3().extend(max_dot as f32).to_array()
+                })
                 .collect();
         }
     }
@@ -522,6 +536,7 @@ pub fn build_scene(world: &CityWorld) -> CityScene {
         opaque,
         glass,
         holes,
+        hole_sides,
         lift_hole_count,
         glass_radius_m,
         street_radius_m: street_radius_m as f32,
@@ -1260,8 +1275,12 @@ impl CityGpu {
             self.depth = Some((texture, target_px));
         }
         let mut holes: [[f32; 4]; MAX_HOLE_COUNT] = [[0.0; 4]; MAX_HOLE_COUNT];
+        let mut hole_sides: [[f32; 4]; MAX_HOLE_COUNT] = [[0.0; 4]; MAX_HOLE_COUNT];
         for (slot, hole) in holes.iter_mut().zip(&frame.scene.holes) {
             *slot = *hole;
+        }
+        for (slot, side) in hole_sides.iter_mut().zip(&frame.scene.hole_sides) {
+            *slot = *side;
         }
         let uniforms = CityUniforms {
             clip_from_world: frame.get_clip_from_world().to_cols_array_2d(),
@@ -1287,6 +1306,7 @@ impl CityGpu {
             flashlight_position: frame.flashlight[0],
             flashlight_direction: frame.flashlight[1],
             flashlight: frame.flashlight[2],
+            hole_sides,
         };
         let dynamic: Buffer = make_buffer(device, &frame.dynamic)?;
         let beams: Buffer = make_buffer(device, &frame.beams)?;
@@ -1373,7 +1393,7 @@ mod tests {
     //! | Behaviour | Test |
     //! | --- | --- |
     //! | The vertex layout matches the shader's (13 floats) | `vertex_is_13_floats` |
-    //! | The scene has the street, boxes, core, hexagonal glass, glowing details, and the lifts' holes before the stairs' | `scene_has_every_part` |
+    //! | The scene has the street, boxes, core, hexagonal glass, glowing details, and the lifts' holes (round) before the stairs' (as wide as their stairs) | `scene_has_every_part` |
 
     use super::*;
 
@@ -1400,5 +1420,25 @@ mod tests {
         assert!(scene.opaque.iter().any(|v| v.layer == LED_LAYER));
         assert_eq!(scene.holes.len(), 8);
         assert_eq!(scene.lift_hole_count, 6);
+        let step_half_width_m: f64 = world
+            .boxes
+            .iter()
+            .find(|b| b.group == "stairs")
+            .unwrap()
+            .half_m
+            .x;
+        let stairs_max_dot: f64 = step_half_width_m / world.get_glass().unwrap().radius_m;
+        for (k, side) in scene.hole_sides.iter().enumerate() {
+            let is_lift: bool = k < scene.lift_hole_count;
+            let max_dot: f64 = if is_lift {
+                ROUND_HOLE_SIDE_DOT
+            } else {
+                stairs_max_dot
+            };
+            assert!(
+                (f64::from(side[3]) - max_dot).abs() < 1e-6,
+                "hole {k}: {side:?}"
+            );
+        }
     }
 }
