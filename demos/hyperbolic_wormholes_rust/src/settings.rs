@@ -34,10 +34,10 @@ pub use crate::play_settings::{
     SpaceSettings, SprintEnergySettings, WhenHitSettings, WormholeSettings,
 };
 #[cfg(target_os = "macos")]
-pub use crate::play_settings::{HitEffectSettings, MinimapSettings, ViewSettings};
-#[cfg(target_os = "macos")]
 #[allow(unused_imports)]
 pub use crate::play_settings::{HeadBobSettings, MinimapCorner};
+#[cfg(target_os = "macos")]
+pub use crate::play_settings::{HitEffectSettings, MinimapSettings, ViewSettings};
 
 const BUILTIN_SERVER_YAML: &str = include_str!("../server_settings.yaml");
 #[cfg(target_os = "macos")]
