@@ -21,6 +21,8 @@
 //!   crosshair, the hit effect and the banner's lobby and "YOU DIED" lines.
 //! - `weapons`: the two guns, aiming, hit weights and the gun in hand's motion.
 //! - `third_person`: the third-person view's switch, and its boom in flat space.
+//! - `visuals`: a player's brightness, contrast, saturation and gamma, applied to the finished
+//!   picture (W-51, basic visuals), with the shaders' colour maths.
 //!
 //! Example: `use warped_shared::geometry::{AXIS_W, make_boost};`
 //!
@@ -57,5 +59,6 @@ pub mod texture_arrays;
 pub mod third_person;
 #[cfg(target_os = "macos")]
 pub mod viewmodel;
+pub mod visuals;
 #[cfg(target_os = "macos")]
 pub mod weapons;
