@@ -2,7 +2,7 @@
 //! (on the ground, decks and bridges, `CELL_M` apart) joined to neighbours a step up or down and
 //! through ladders, searched with A*.
 //!
-//! Interface: `NavGraph` (`build`, `find_path`), `NavStep`.
+//! Interface: `NavGraph` (`build`, `find_path`, `find_path_near`), `NavStep`.
 //!
 //! Example: `let path: Option<Vec<NavStep>> = nav.find_path(bot_feet_m, player_feet_m);`
 //!
@@ -246,24 +246,62 @@ impl NavGraph {
     ///
     /// Example: `let path = nav.find_path(bot.feet_m, player.feet_m).unwrap_or_default();`
     pub fn find_path(&self, from_m: Vec3, to_m: Vec3) -> Option<Vec<NavStep>> {
-        let start: u32 = self.find_nearest(from_m, ENDPOINT_REACH_M)?;
         let goal: u32 = self.find_nearest(to_m, ENDPOINT_REACH_M)?;
         let goal_m: Vec3 = self.positions_m[goal as usize];
+        self.search(from_m, goal_m, 0.0, |node: u32| node == goal)
+    }
+
+    /// `find_path_near` is the shortest path of spots from near `from_m` to any spot within
+    /// `radius_m` of `to_m` across the ground and `height_m` up or down, or `None` if no such spot
+    /// can be reached; the nearest spot to `to_m` may be cut off (inside a hut whose door is too
+    /// narrow for a robot), where a spot around it is not.
+    ///
+    /// Example: `let path = nav.find_path_near(feet_m, console_foot_m, 3.0, 1.0).unwrap_or_default();`
+    pub fn find_path_near(
+        &self,
+        from_m: Vec3,
+        to_m: Vec3,
+        radius_m: f32,
+        height_m: f32,
+    ) -> Option<Vec<NavStep>> {
+        self.search(from_m, to_m, radius_m, |node: u32| {
+            let offset_m: Vec3 = self.positions_m[node as usize] - to_m;
+            offset_m.with_y(0.0).length() <= radius_m && offset_m.y.abs() <= height_m
+        })
+    }
+
+    /// `search` runs A* from the spot nearest `from_m` to the first spot where `is_goal` holds,
+    /// estimating the way left as the distance to `goal_m` less `slack_m` (so it never guesses
+    /// too much), and gives the path's spots after the start.
+    ///
+    /// Example: `let path = self.search(from_m, goal_m, 0.0, |node| node == goal);`
+    fn search(
+        &self,
+        from_m: Vec3,
+        goal_m: Vec3,
+        slack_m: f32,
+        is_goal: impl Fn(u32) -> bool,
+    ) -> Option<Vec<NavStep>> {
+        let start: u32 = self.find_nearest(from_m, ENDPOINT_REACH_M)?;
+        let estimate =
+            |node: u32| (self.positions_m[node as usize].distance(goal_m) - slack_m).max(0.0);
         let mut cost_m: Vec<f32> = vec![f32::INFINITY; self.positions_m.len()];
         let mut came_from: Vec<(u32, Option<usize>)> =
             vec![(u32::MAX, None); self.positions_m.len()];
         let mut frontier: BinaryHeap<Frontier> = BinaryHeap::new();
         cost_m[start as usize] = 0.0;
         frontier.push(Frontier {
-            estimate_m: self.positions_m[start as usize].distance(goal_m),
+            estimate_m: estimate(start),
             node: start,
         });
+        let mut reached: Option<u32> = None;
         while let Some(Frontier { estimate_m, node }) = frontier.pop() {
-            if node == goal {
+            if is_goal(node) {
+                reached = Some(node);
                 break;
             }
             let here_m: Vec3 = self.positions_m[node as usize];
-            if estimate_m > cost_m[node as usize] + here_m.distance(goal_m) + 1e-3 {
+            if estimate_m > cost_m[node as usize] + estimate(node) + 1e-3 {
                 continue;
             }
             for &(next, ladder) in &self.edges[node as usize] {
@@ -273,17 +311,14 @@ impl NavGraph {
                     cost_m[next as usize] = new_cost_m;
                     came_from[next as usize] = (node, ladder);
                     frontier.push(Frontier {
-                        estimate_m: new_cost_m + next_m.distance(goal_m),
+                        estimate_m: new_cost_m + estimate(next),
                         node: next,
                     });
                 }
             }
         }
-        if cost_m[goal as usize].is_infinite() {
-            return None;
-        }
+        let mut node: u32 = reached?;
         let mut steps: Vec<NavStep> = Vec::new();
-        let mut node: u32 = goal;
         while node != start {
             let (previous, ladder) = came_from[node as usize];
             steps.push(NavStep {
@@ -302,6 +337,7 @@ impl NavGraph {
 /// | Partitioning | Part | Covered by |
 /// | --- | --- | --- |
 /// | path's levels | ground to deck (a ladder), ground to ground across the maze | `test_path_climbs_to_the_treehouse`, `test_path_crosses_the_labyrinth` |
+/// | goal's nearest spot | reachable, cut off (inside the treehouse's pylon hut: a spot around it) | `test_path_reaches_near_the_deck_pylon` |
 /// | robot following a path | up a ladder | `test_robot_climbs_onto_the_treehouse_deck` |
 #[cfg(test)]
 mod tests {
@@ -332,6 +368,23 @@ mod tests {
             .expect("a path to the treehouse");
         assert!(path.iter().any(|step| step.ladder.is_some()));
         assert!(path.last().expect("steps").position_m.y > 6.5);
+    }
+
+    /// `test_path_reaches_near_the_deck_pylon` checks no path reaches the pylon in red's
+    /// treehouse hut itself (a bamboo clump narrows its door for robots), but one reaches the deck
+    /// within 3.5 m of it, a player's reach.
+    #[test]
+    fn test_path_reaches_near_the_deck_pylon() {
+        let (_, _, nav) = forest();
+        let (spawn_m, pylon_m) = (Vec3::new(-6.0, 0.0, 52.0), Vec3::new(17.7, 7.0, 42.0));
+        assert!(nav.find_path(spawn_m, pylon_m).is_none());
+        let path: Vec<NavStep> = nav
+            .find_path_near(spawn_m, pylon_m, 3.5, 1.0)
+            .expect("a path near the pylon");
+        let end_m: Vec3 = path.last().expect("steps").position_m;
+        assert!(
+            (end_m - pylon_m).with_y(0.0).length() <= 3.5 && (end_m.y - pylon_m.y).abs() <= 1.0
+        );
     }
 
     /// `test_path_crosses_the_labyrinth` checks red's spawn reaches blue's on foot.

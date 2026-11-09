@@ -23,8 +23,10 @@
 //!   message carries the token the welcome gave, so nobody else can speak for a player.
 //! - A failed send is logged, not fatal, and no reply is bigger than its request until the sender
 //!   has proven its address, so the server can't be used to flood someone else.
-//! - Each client decides when its own laser hits someone (it traces the laser anyway) and which
-//!   console it aims at, and the server takes its word.
+//! - Each client decides when its own laser hits someone (it traces the laser anyway), and the
+//!   server takes its word. A client also says which console it holds `E` on, and the server takes
+//!   that only from a player within the settings' `consoles.reach_m` of it who aims at it
+//!   (`console_reach.rs`), so nobody turns a console off from afar.
 //! - A player keeps their id, and so their team, when they rejoin from the same address.
 //! - The server's welcome names its map and carries its game settings; a client of another map
 //!   fails rather than playing on.
@@ -43,6 +45,7 @@ use glam::{DMat4, DVec4};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
+use crate::console_reach::ConsolePlace;
 use crate::settings::ServerSettings;
 use crate::shot_noise::{self, BEAM_SPECKLE_LEVEL_COUNT};
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, WormholeColor};
@@ -513,7 +516,7 @@ struct Server {
     slots: Vec<Slot>,
     next_id: u32,
     known_ids: Vec<(SocketAddr, u32)>,
-    console_teams: Vec<u32>,
+    consoles: Vec<ConsolePlace>,
     game: GameState,
     tallies: Vec<Tally>,
 }
@@ -618,7 +621,7 @@ impl Server {
                     player.team = self.slots[slot].player.team;
                     player.disabling_console = player
                         .disabling_console
-                        .filter(|&console| self.can_disable(player.team, console));
+                        .filter(|&console| self.can_disable(player.team, console, player.frame));
                     let slot: &mut Slot = &mut self.slots[slot];
                     if player.disabling_console != slot.player.disabling_console {
                         slot.disabling_since = player.disabling_console.map(|_| Instant::now());
@@ -853,16 +856,18 @@ impl Server {
             .expect("there are teams")
     }
 
-    /// `can_disable` says whether a player of `team` may turn off `console`: an existing console of
-    /// the other team, still on, in a game nobody has won yet.
+    /// `can_disable` says whether a player of `team` whose eye frame is `eye` may turn off
+    /// `console`: an existing console of the other team, still on, in a game nobody has won yet,
+    /// within the settings' `consoles.reach_m` of the eye and aimed at (`ConsolePlace::is_held_from`).
     ///
-    /// Example: `if server.can_disable(1, 7) { ... }`
-    fn can_disable(&self, team: u32, console: u8) -> bool {
+    /// Example: `if server.can_disable(1, 7, player.frame) { ... }`
+    fn can_disable(&self, team: u32, console: u8, eye: DMat4) -> bool {
         let index: usize = usize::from(console);
         self.game.winner.is_none()
-            && index < self.console_teams.len()
-            && self.console_teams[index] != team
+            && index < self.consoles.len()
+            && self.consoles[index].team != team
             && self.game.off_mask >> index & 1 == 0
+            && self.consoles[index].is_held_from(eye, self.settings.consoles.reach_m)
     }
 
     /// `update_consoles` turns off each console a player has held `E` on for `consoles.hold_to_disable_s`,
@@ -895,8 +900,8 @@ impl Server {
     fn update_winner(&mut self) {
         let losers: Vec<u32> = (0..TEAM_NAMES.len() as u32)
             .filter(|&team| {
-                let mut consoles = (0..self.console_teams.len())
-                    .filter(|&i| self.console_teams[i] == team)
+                let mut consoles = (0..self.consoles.len())
+                    .filter(|&i| self.consoles[i].team == team)
                     .peekable();
                 consoles.peek().is_some() && consoles.all(|i| self.game.off_mask >> i & 1 == 1)
             })
@@ -1012,29 +1017,30 @@ pub fn bind_server(port: u16) -> Result<UdpSocket> {
 /// until `should_stop` is set: it answers joins (naming the map and sending the settings), relays
 /// players, sends the scores every `SCORES_PERIOD_S`, removes players who are hit or silent for
 /// `PLAYER_TIMEOUT_S`, turns off
-/// consoles (`console_teams` gives each one's team) and ends the game when a team's are all off,
+/// consoles (`consoles` gives each one's team and place; a hold counts only from a player in reach
+/// who aims at it) and ends the game when a team's are all off,
 /// starts a new game after that when `should_start_new_game` is set (clearing it) or, with
 /// `new_game_after_win`, that long after a team won, admits only players who prove they know
 /// `game_password` (empty for anyone), and broadcasts
 /// a beacon on the local network every `BEACON_PERIOD_S` so `find_server` can find it.
 ///
-/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), vec![0, 1], &should_start_new_game, None, None, Vec::new())?;`
+/// Example: `net::serve(net::bind_server(net::DEFAULT_PORT)?, &should_stop, "lunar_surface".to_string(), ServerSettings::Builtin(), places, &should_start_new_game, None, None, Vec::new())?;`
 #[allow(clippy::too_many_arguments)]
 pub fn serve(
     socket: UdpSocket,
     should_stop: &AtomicBool,
     map_name: String,
     settings: ServerSettings,
-    console_teams: Vec<u32>,
+    consoles: Vec<ConsolePlace>,
     should_start_new_game: &AtomicBool,
     new_game_after_win: Option<Duration>,
     level_result_file: Option<&Path>,
     game_password: Vec<u8>,
 ) -> Result<()> {
     assert!(
-        console_teams.len() <= MAX_CONSOLE_COUNT,
+        consoles.len() <= MAX_CONSOLE_COUNT,
         "serve: {} consoles, more than {MAX_CONSOLE_COUNT}",
-        console_teams.len()
+        consoles.len()
     );
     let port: u16 = socket.local_addr()?.port();
     let beacon_socket: UdpSocket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
@@ -1051,7 +1057,7 @@ pub fn serve(
         slots: Vec::new(),
         next_id: 0,
         known_ids: Vec::new(),
-        console_teams,
+        consoles,
         game: GameState::default(),
         tallies: Vec::new(),
     };
@@ -1654,8 +1660,10 @@ mod tests {
     //! | Player in the scores | joined, waiting to respawn, rejoined (tally kept), waiting too long (left out) | `eliminations_count_kills_and_deaths` |
     //! | Game | the same, a new one (scores back to 0) | `eliminations_count_kills_and_deaths` |
     //! | Scores sent | to a joined client (read with its id from the welcome) | `clients_receive_scores` |
+    //! | Who holds a console | from afar (ignored), turned away from it (ignored), in reach and aiming at it (turned off) | `a_console_is_turned_off_only_from_within_reach_and_aimed_at` |
 
     use super::*;
+    use glam::DVec3;
 
     const TEST_MAP_NAME: &str = "lunar_surface";
     const TEST_PASSWORD: &[u8] = b"correct horse";
@@ -1669,6 +1677,10 @@ mod tests {
     const DISABLING_FRAC_STEP: f64 = 1.0 / u8::MAX as f64;
     const HALF: f64 = 0.5;
     const TWICE: f64 = 2.0;
+    const PYLON_RADIUS_M: f64 = 0.36;
+    const PYLON_HALF_HEIGHT_M: f64 = 1.6;
+    const CONSOLE_GAP_M: f64 = 1.0;
+    const FAR_M: f64 = 10.0;
 
     /// `make_join` makes `from`'s join request for `team` (or `ANY_TEAM`) with `version`,
     /// answering `server`'s challenge with a proof of `password`.
@@ -1768,7 +1780,7 @@ mod tests {
             slots: Vec::new(),
             next_id: 0,
             known_ids: Vec::new(),
-            console_teams: vec![0, 0, 1],
+            consoles: [BLUE, BLUE, RED].map(make_console_ahead).to_vec(),
             game: GameState::default(),
             tallies: Vec::new(),
         }
@@ -1801,6 +1813,30 @@ mod tests {
         scores
     }
 
+    /// `make_console_ahead` gives a console of `team` shaped like the forest's pylons, standing
+    /// `CONSOLE_GAP_M` in front of an eye at the origin that looks along its view (-z).
+    ///
+    /// Example: `let console = make_console_ahead(RED);`
+    fn make_console_ahead(team: u8) -> ConsolePlace {
+        let centre_m: DVec3 = DVec3::new(0.0, 0.0, -(PYLON_RADIUS_M + CONSOLE_GAP_M));
+        let half_m: DVec3 = DVec3::new(PYLON_RADIUS_M, PYLON_HALF_HEIGHT_M, PYLON_RADIUS_M);
+        ConsolePlace {
+            team: u32::from(team),
+            min_m: centre_m - half_m,
+            max_m: centre_m + half_m,
+        }
+    }
+
+    /// `hold_console_from` sends player `id`'s state from `from`, their eye frame `eye`, holding
+    /// `E` on `console`, then makes the server count it as held for its settings'
+    /// `hold_to_disable_s` and update the consoles.
+    ///
+    /// Example: `hold_console_from(&mut server, 1, address(50_001), 2, DMat4::IDENTITY);`
+    fn hold_console_from(server: &mut Server, id: u32, from: SocketAddr, console: u8, eye: DMat4) {
+        start_holding_from(server, id, from, console, eye);
+        server.update_consoles();
+    }
+
     /// `hold_console` sends player `id`'s state from `from` holding `E` on `console`, then makes
     /// the server count it as held for its settings' `hold_to_disable_s` and update the consoles.
     ///
@@ -1815,9 +1851,17 @@ mod tests {
     ///
     /// Example: `start_holding(&mut server, 1, address(50_001), 2);`
     fn start_holding(server: &mut Server, id: u32, from: SocketAddr, console: u8) {
+        start_holding_from(server, id, from, console, DMat4::IDENTITY);
+    }
+
+    /// `start_holding_from` is `start_holding` with the eye frame `eye` (`start_holding` puts it at
+    /// the origin, looking at the consoles `make_server` gives).
+    ///
+    /// Example: `start_holding_from(&mut server, 1, address(50_001), 2, DMat4::IDENTITY);`
+    fn start_holding_from(server: &mut Server, id: u32, from: SocketAddr, console: u8, eye: DMat4) {
         let player: RemotePlayer = RemotePlayer {
             id,
-            frame: DMat4::IDENTITY,
+            frame: eye,
             is_laser_on: false,
             is_rifle: false,
             team: 0,
@@ -2216,6 +2260,21 @@ mod tests {
         start_holding(&mut server, 2, blue, 2);
         server.update_consoles();
         assert_eq!((server.game.off_mask, server.game.winner), (0b011, Some(1)));
+    }
+
+    #[test]
+    fn a_console_is_turned_off_only_from_within_reach_and_aimed_at() {
+        let mut server: Server = make_server();
+        let red: SocketAddr = address(50_001);
+        join(&mut server, red, RED);
+        let far: DMat4 = DMat4::from_translation(DVec3::new(0.0, 0.0, FAR_M));
+        hold_console_from(&mut server, 1, red, 0, far);
+        assert_eq!(server.game.off_mask, 0);
+        let turned_away: DMat4 = DMat4::from_rotation_y(std::f64::consts::PI);
+        hold_console_from(&mut server, 1, red, 0, turned_away);
+        assert_eq!(server.game.off_mask, 0);
+        hold_console_from(&mut server, 1, red, 0, DMat4::IDENTITY);
+        assert_eq!(server.game.off_mask, 0b001);
     }
 
     #[test]

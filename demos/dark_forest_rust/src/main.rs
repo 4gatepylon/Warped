@@ -11,6 +11,7 @@
 #[allow(dead_code)]
 mod asset_manifest;
 mod assets;
+mod console_reach;
 mod credits;
 mod forest_layout;
 mod game;
@@ -42,11 +43,14 @@ use clap::{Parser, ValueEnum};
 use glam::{Vec2, Vec3, Vec4};
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
+use sdl3::mouse::MouseButton;
+use shot_noise::ShotNoise;
 
 use game::audio::Audio;
+use game::console_bot::BotWalker;
+use game::guns::{Gun, GunInput, Guns};
 use game::player::{Player, PlayerInput};
 use game::session::{Controls, FrameData, RobotHold, Session};
-use game::weapon::WeaponInput;
 use game::world::Arena;
 use match_play::{MatchOptions, MatchPlay};
 use menu::{Menu, MenuOutcome, MenuSettings, Scoreboard};
@@ -55,7 +59,7 @@ use platform::Platform;
 use render::metal::MetalRenderer;
 use render::overlay::HitEffect;
 use render::{FrameDescription, FrameTiming, HudImage, HudRect, RenderSettings, Renderer};
-use scene::{Scene, SceneOptions};
+use scene::Scene;
 use text_overlay::TextPicture;
 
 /// `MOUSE_RAD_PER_PT` is the look speed per point of mouse motion.
@@ -171,11 +175,11 @@ struct Args {
     /// Show the frame time in the top-left corner.
     #[arg(long)]
     show_frame_time: bool,
-    /// Use the CC0 Poly Haven rifle even if the Sketchfab revolver is present.
+    /// Start with gun 2, the rifle (the energy revolver), in hand instead of gun 1, the sniper.
     #[arg(long)]
     rifle: bool,
     /// Hold the camera at a fixed view (no autopilot, no mouse look); `firing` holds the trigger
-    /// and reloads when the magazine is empty.
+    /// (the rifle fires while it is held, the sniper each time it has reloaded).
     #[arg(long, value_enum, conflicts_with = "autopilot")]
     camera_view: Option<CameraView>,
     /// Turn an effect off at start (repeatable); the F keys still toggle it.
@@ -214,10 +218,12 @@ struct Args {
     /// Join this team at once (`blue` or `red`); otherwise the server picks.
     #[arg(long, value_parser = ["blue", "red"])]
     team: Option<String>,
-    /// Let the autopilot play this window (a bot for tests).
+    /// Let a bot play this window, hidden and drawing nothing (for tests and matches): it hunts the
+    /// other team's players, or turns off their consoles with --bot-objective consoles.
     #[arg(long)]
     bot: bool,
-    /// What the bot does: `consoles` holds E on the other team's consoles until its team wins.
+    /// What the bot does: `consoles` walks to the other team's consoles and holds E on each, in
+    /// reach, until its team wins (logging `bot reached console <i> on foot in <t> s`).
     #[arg(long, value_parser = ["consoles"])]
     bot_objective: Option<String>,
     /// Quit after this many seconds.
@@ -275,7 +281,7 @@ struct Args {
     /// starts again from its pose every 10 s.
     #[arg(long, default_value_t = 0.0)]
     robot_walk_m_per_s: f32,
-    /// Hold the trigger (and reload when the magazine is empty), for pictures of lasers.
+    /// Hold the trigger (the sniper fires each time it has reloaded), for pictures of lasers.
     #[arg(long)]
     hold_trigger: bool,
     /// Leave out the tree canopies (for pictures from above).
@@ -293,11 +299,16 @@ struct Args {
 /// `PHOTO_SETTLE_S` is how long --photo lets the robots, shadows and exposure settle, in simulated
 /// seconds.
 const PHOTO_SETTLE_S: f32 = 3.0;
-/// `HURT_PLAYER_DAMAGE` is how much --hurt-player-every-s takes each time: a robot's shot.
-const HURT_PLAYER_DAMAGE: f32 = game::bots::SHOT_DAMAGE;
+/// `HURT_PLAYER_DAMAGE` is how much --hurt-player-every-s takes each time: one rifle hit to the
+/// body (of the server settings' 12).
+const HURT_PLAYER_DAMAGE: f32 = game::player::MAX_HEALTH / 12.0;
+/// `BOT_STEP_S` is how often a `--bot` (hidden, drawing nothing) steps its game.
+const BOT_STEP_S: f32 = 1.0 / 60.0;
 /// `RECORDING_DT_S` is the fixed step of --photo and --video-frames, so the same command gives the
 /// same picture.
 const RECORDING_DT_S: f32 = 1.0 / 30.0;
+/// `RECORDING_SHOT_NOISE_SEED` seeds the shots' stray while recording, so pictures repeat.
+const RECORDING_SHOT_NOISE_SEED: u64 = 69;
 
 /// `MAP_PICTURE_PATH` is where `make map-picture` saves the map page's picture, from this demo's
 /// folder.
@@ -832,6 +843,7 @@ fn main() {
         args.width_pt,
         args.height_pt,
         args.fullscreen,
+        args.bot,
     );
     let mut renderer: MetalRenderer = MetalRenderer::new(platform.metal_layer());
     println!("GPU: {}", renderer.device_name());
@@ -839,15 +851,7 @@ fn main() {
     renderer.resize(width_px, height_px);
     let audio: Audio = Audio::new(&platform.sdl);
     let arena: Arena = Arena::from_map(&map_file);
-    let mut scene: Scene = Scene::load(
-        &mut renderer,
-        &assets_dir,
-        &textures_dir,
-        &arena,
-        &SceneOptions {
-            should_use_rifle: args.rifle,
-        },
-    );
+    let mut scene: Scene = Scene::load(&mut renderer, &assets_dir, &textures_dir, &arena);
     if args.hide_canopy {
         let surfaces: Vec<game::world::Surface> = std::mem::take(&mut scene.static_surfaces);
         let draws: Vec<render::DrawItem> = std::mem::take(&mut scene.static_draws);
@@ -951,7 +955,19 @@ fn main() {
     if args.play_route {
         session.route = VERTICAL_ROUTE.to_vec();
     }
-    if !session.arena.warps.mouths.is_empty() {
+    session.console_places = console_reach::find_console_places(&map_file);
+    session.is_team_known = !is_online;
+    if args.bot || (args.autopilot && is_online) {
+        session.walker = Some(BotWalker::New());
+        session.is_console_objective = args.bot_objective.is_some();
+    }
+    if args.photo.is_some() || args.video_frames.is_some() {
+        session.guns = Guns::New(ShotNoise::FromSeed(RECORDING_SHOT_NOISE_SEED));
+    }
+    if args.rifle {
+        session.guns.switch_gun(Gun::Rifle);
+    }
+    if !session.arena.warps.mouths.is_empty() && !args.bot {
         let capture_start: Instant = Instant::now();
         let lens: render::WormholeLens = capture_wormhole_lens(
             &mut renderer,
@@ -1026,7 +1042,9 @@ fn main() {
     'running: loop {
         let mut look_delta_pt: Vec2 = Vec2::ZERO;
         let mut is_jump_pressed: bool = false;
-        let mut is_reload_pressed: bool = false;
+        let mut is_shoot_pressed: bool = false;
+        let mut is_swap_pressed: bool = false;
+        let mut picked_gun: Option<Gun> = None;
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'running,
@@ -1063,7 +1081,8 @@ fn main() {
                         mouse.set_relative_mouse_mode(&platform.window, false);
                     }
                     Scancode::Space => is_jump_pressed = true,
-                    Scancode::R => is_reload_pressed = true,
+                    Scancode::_1 => picked_gun = Some(Gun::Laser),
+                    Scancode::_2 => picked_gun = Some(Gun::Rifle),
                     Scancode::F1 => settings.is_ssao_enabled = !settings.is_ssao_enabled,
                     Scancode::F2 => settings.is_bloom_enabled = !settings.is_bloom_enabled,
                     Scancode::F3 => settings.is_fxaa_enabled = !settings.is_fxaa_enabled,
@@ -1094,6 +1113,13 @@ fn main() {
                 Event::MouseButtonDown { .. } if !is_mouse_captured && menu.is_none() => {
                     is_mouse_captured = true;
                     mouse.set_relative_mouse_mode(&platform.window, true);
+                }
+                Event::MouseButtonDown {
+                    mouse_btn: MouseButton::Left,
+                    ..
+                } if is_mouse_captured => is_shoot_pressed = true,
+                Event::MouseWheel { y, .. } if is_mouse_captured && y != 0.0 => {
+                    is_swap_pressed = true;
                 }
                 Event::MouseMotion { xrel, yrel, .. } if is_mouse_captured => {
                     look_delta_pt += Vec2::new(xrel, yrel);
@@ -1136,12 +1162,13 @@ fn main() {
                 is_crouch_held: keys.is_scancode_pressed(Scancode::LCtrl)
                     || keys.is_scancode_pressed(Scancode::C),
                 is_jump_pressed,
-                is_aiming: false,
             },
-            weapon: WeaponInput {
+            gun: GunInput {
                 is_trigger_held: is_mouse_captured && mouse_state.left(),
-                is_reload_pressed,
+                is_shoot_pressed,
                 is_aim_held: is_mouse_captured && mouse_state.right(),
+                picked_gun,
+                is_swap_pressed,
             },
         };
         let controls: Controls = if menu.is_some() {
@@ -1185,10 +1212,10 @@ fn main() {
                 session.is_autopilot = false;
                 let is_firing_view: bool = view == CameraView::Firing;
                 Controls {
-                    weapon: WeaponInput {
+                    gun: GunInput {
                         is_trigger_held: is_firing_view,
-                        is_reload_pressed: is_firing_view && session.weapon.ammo == 0,
-                        ..WeaponInput::default()
+                        is_shoot_pressed: is_firing_view,
+                        ..GunInput::default()
                     },
                     ..Controls::default()
                 }
@@ -1197,10 +1224,10 @@ fn main() {
         };
         let controls: Controls = if args.hold_trigger {
             Controls {
-                weapon: WeaponInput {
+                gun: GunInput {
                     is_trigger_held: true,
-                    is_reload_pressed: session.weapon.ammo == 0,
-                    ..controls.weapon
+                    is_shoot_pressed: true,
+                    ..controls.gun
                 },
                 ..controls
             }
@@ -1237,6 +1264,18 @@ fn main() {
             .is_showing_frame_time
             .then_some(smoothed_frame_ms);
         let sim_ms: f32 = sim_start.elapsed().as_secs_f32() * 1000.0;
+        if args.bot {
+            if args
+                .exit_after_s
+                .is_some_and(|seconds| start.elapsed().as_secs_f32() > seconds)
+            {
+                break 'running;
+            }
+            std::thread::sleep(Duration::from_secs_f32(
+                (BOT_STEP_S - now.elapsed().as_secs_f32()).max(0.0),
+            ));
+            continue;
+        }
         let build_start: Instant = Instant::now();
         session.is_view_covered = menu.is_some() || !session.player.is_alive();
         let mut frame: FrameData = session.frame_data(&scene, width_px as f32, height_px as f32);

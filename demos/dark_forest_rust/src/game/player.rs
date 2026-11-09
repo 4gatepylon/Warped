@@ -9,6 +9,7 @@ use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
 
 use super::collision::{Aabb, MoveResult, move_body};
 use super::world::LadderVolume;
+use crate::settings::HEAD_BOB;
 
 /// `WALK_SPEED_M_S` is the walking speed.
 const WALK_SPEED_M_S: f32 = 4.4;
@@ -16,16 +17,19 @@ const WALK_SPEED_M_S: f32 = 4.4;
 const SPRINT_SPEED_M_S: f32 = 7.0;
 /// `CROUCH_SPEED_M_S` is the crouched walking speed.
 const CROUCH_SPEED_M_S: f32 = 2.2;
-/// `ADS_SPEED_FRAC` scales speed while aiming down sights.
-const ADS_SPEED_FRAC: f32 = 0.6;
 /// `GROUND_ACCELERATION_PER_S` is how fast velocity approaches the target on the ground.
 const GROUND_ACCELERATION_PER_S: f32 = 12.0;
 /// `AIR_ACCELERATION_PER_S` is how fast velocity approaches the target in the air.
 const AIR_ACCELERATION_PER_S: f32 = 2.0;
-/// `JUMP_SPEED_M_S` is the upward speed of a jump.
-const JUMP_SPEED_M_S: f32 = 5.4;
-/// `GRAVITY_M_S2` is the downward acceleration.
-const GRAVITY_M_S2: f32 = 16.0;
+/// `JUMP_HEIGHT_M` and `JUMP_AIR_S` are Lunar Surface's jump (W-126): how high it rises
+/// (`movement.jump_height_m` in its server settings) and how long it stays in the air
+/// (`jump_time_per_map_jump_time`, a third, of its map's 2 × 5.2 m/s ÷ 6 m/s², 0.58 s).
+const JUMP_HEIGHT_M: f32 = 1.25;
+const JUMP_AIR_S: f32 = 2.0 * 5.2 / 6.0 / 3.0;
+/// `JUMP_SPEED_M_S` is the upward speed of a jump, and `GRAVITY_M_S2` the downward acceleration,
+/// that give that jump.
+const JUMP_SPEED_M_S: f32 = 4.0 * JUMP_HEIGHT_M / JUMP_AIR_S;
+const GRAVITY_M_S2: f32 = 8.0 * JUMP_HEIGHT_M / (JUMP_AIR_S * JUMP_AIR_S);
 /// `STAND_HEIGHT_M` is the standing body height.
 const STAND_HEIGHT_M: f32 = 1.8;
 /// `CROUCH_HEIGHT_M` is the crouched body height.
@@ -75,7 +79,6 @@ pub struct PlayerInput {
     pub is_sprint_held: bool,
     pub is_crouch_held: bool,
     pub is_jump_pressed: bool,
-    pub is_aiming: bool,
 }
 
 /// `Player` is the player's body and view.
@@ -84,13 +87,13 @@ pub struct Player {
     pub velocity_m_s: Vec3,
     pub yaw_rad: f32,
     pub pitch_rad: f32,
-    pub recoil_pitch_rad: f32,
     pub is_on_ground: bool,
     pub height_m: f32,
     pub health: f32,
     pub dead_time_s: Option<f32>,
     pub since_hit_s: f32,
-    pub stride_phase_rad: f32,
+    pub bob_phase_rad: f64,
+    pub bob_frac: f64,
     pub stride_distance_m: f32,
     pub landing_dip_m: f32,
     pub is_sprinting: bool,
@@ -107,13 +110,13 @@ impl Player {
             velocity_m_s: Vec3::ZERO,
             yaw_rad,
             pitch_rad: 0.0,
-            recoil_pitch_rad: 0.0,
             is_on_ground: false,
             height_m: STAND_HEIGHT_M,
             health: MAX_HEALTH,
             dead_time_s: None,
             since_hit_s: REGEN_DELAY_S,
-            stride_phase_rad: 0.0,
+            bob_phase_rad: 0.0,
+            bob_frac: 0.0,
             stride_distance_m: 0.0,
             landing_dip_m: 0.0,
             is_sprinting: false,
@@ -128,22 +131,37 @@ impl Player {
         Vec3::new(BODY_RADIUS_M, height_m * 0.5, BODY_RADIUS_M)
     }
 
-    /// `rotation` is the view rotation, including recoil.
+    /// `rotation` is the view rotation.
     pub fn rotation(&self) -> Quat {
-        let pitch_rad: f32 =
-            (self.pitch_rad + self.recoil_pitch_rad).clamp(-MAX_PITCH_RAD, MAX_PITCH_RAD);
-        Quat::from_euler(EulerRot::YXZ, self.yaw_rad, pitch_rad, 0.0)
+        Quat::from_euler(EulerRot::YXZ, self.yaw_rad, self.pitch_rad, 0.0)
     }
 
-    /// `eye_position_m` is the camera position, with walking bob and landing dip.
+    /// `kick_view` turns the view by a gun's recoil, `kick_rad` (x right, y up), as Lunar
+    /// Surface's mouse look turns it.
+    ///
+    /// Example: `player.kick_view(Vec2::new(0.0025, 0.0075));`
+    pub fn kick_view(&mut self, kick_rad: Vec2) {
+        self.yaw_rad -= kick_rad.x;
+        self.pitch_rad = (self.pitch_rad + kick_rad.y).clamp(-MAX_PITCH_RAD, MAX_PITCH_RAD);
+    }
+
+    /// `eye_position_m` is the camera position, with the head bob (`get_bob_m`) and landing dip.
     pub fn eye_position_m(&self) -> Vec3 {
-        let speed_frac: f32 = (self.velocity_m_s.truncate_y().length() / SPRINT_SPEED_M_S).min(1.0);
-        let bob_m: f32 = if self.is_on_ground {
-            (self.stride_phase_rad * 2.0).sin().abs() * 0.035 * speed_frac
-        } else {
-            0.0
-        };
+        let bob_m: f32 = self.get_bob_m() as f32;
         self.feet_m + Vec3::Y * (self.height_m - EYE_BELOW_TOP_M - self.landing_dip_m + bob_m)
+    }
+
+    /// `get_bob_m` gives the head bob as Lunar Surface's: the eye dips at each footstep, deeper
+    /// when sprinting, by `HEAD_BOB`.
+    ///
+    /// Example: `let bob_m: f64 = player.get_bob_m();`
+    pub fn get_bob_m(&self) -> f64 {
+        let depth_m: f64 = if self.is_sprinting {
+            HEAD_BOB.sprint_depth_m
+        } else {
+            HEAD_BOB.walk_depth_m
+        };
+        -self.bob_frac * depth_m * self.bob_phase_rad.sin().abs()
     }
 
     /// `camera_world` is the camera's world transform.
@@ -230,8 +248,7 @@ impl Player {
         let forward: Vec3 = Quat::from_rotation_y(self.yaw_rad) * Vec3::NEG_Z;
         let right: Vec3 = Quat::from_rotation_y(self.yaw_rad) * Vec3::X;
         let axes: Vec2 = input.move_axes.clamp_length_max(1.0);
-        let wants_to_sprint: bool =
-            input.is_sprint_held && axes.y > 0.1 && !is_crouched && !input.is_aiming;
+        let wants_to_sprint: bool = input.is_sprint_held && axes.y > 0.1 && !is_crouched;
         self.is_sprinting = wants_to_sprint && self.energy_frac > 0.0;
         let energy_change_per_s: f32 = if wants_to_sprint {
             -1.0 / SPRINT_DRAIN_S
@@ -241,16 +258,27 @@ impl Player {
             1.0 / SPRINT_REFILL_WALKING_S
         };
         self.energy_frac = (self.energy_frac + energy_change_per_s * dt_s).clamp(0.0, 1.0);
-        let mut speed_m_s: f32 = if is_crouched {
+        let is_walking: bool = axes.length() > 0.0 && self.is_on_ground;
+        let fade_frac: f64 = f64::from(dt_s) / HEAD_BOB.fade_s;
+        self.bob_frac +=
+            (f64::from(u8::from(is_walking)) - self.bob_frac).clamp(-fade_frac, fade_frac);
+        if is_walking {
+            let steps_per_s: f64 = if self.is_sprinting {
+                HEAD_BOB.sprint_steps_per_s
+            } else {
+                HEAD_BOB.walk_steps_per_s
+            };
+            self.bob_phase_rad = (self.bob_phase_rad
+                + std::f64::consts::TAU * steps_per_s * f64::from(dt_s))
+                % std::f64::consts::TAU;
+        }
+        let speed_m_s: f32 = if is_crouched {
             CROUCH_SPEED_M_S
         } else if self.is_sprinting {
             SPRINT_SPEED_M_S
         } else {
             WALK_SPEED_M_S
         };
-        if input.is_aiming {
-            speed_m_s *= ADS_SPEED_FRAC;
-        }
         let target_m_s: Vec3 = (forward * axes.y + right * axes.x) * speed_m_s;
         let acceleration_per_s: f32 = if self.is_on_ground {
             GROUND_ACCELERATION_PER_S
@@ -316,33 +344,20 @@ impl Player {
         self.landing_dip_m = (self.landing_dip_m - dt_s * 0.5).max(0.0);
         self.did_step = false;
         if self.is_on_ground {
-            self.stride_phase_rad += moved_m / STRIDE_M * std::f32::consts::PI;
             self.stride_distance_m += moved_m;
             if self.stride_distance_m > STRIDE_M * 0.5 {
                 self.stride_distance_m = 0.0;
                 self.did_step = true;
             }
         }
-        self.recoil_pitch_rad *= (-8.0 * dt_s).exp();
     }
 }
 
-/// `Vec3Ext` adds a helper for dropping the vertical component.
-trait Vec3Ext {
-    /// `truncate_y` returns the horizontal part of a vector.
-    fn truncate_y(self) -> Vec2;
-}
-
-impl Vec3Ext for Vec3 {
-    fn truncate_y(self) -> Vec2 {
-        Vec2::new(self.x, self.z)
-    }
-}
-
-/// `tests` checks climbing a rope ladder onto a deck, and sprint energy.
+/// `tests` checks climbing a rope ladder onto a deck, sprint energy, and the jump.
 ///
 /// | Partitioning | Part | Covered by |
 /// | --- | --- | --- |
+/// | jump | a standing jump on flat ground, against Lunar Surface's own settings and map | `test_a_jump_matches_lunar_surface` |
 /// | input at a ladder's foot | walk into it (climbs to the deck), walk past it sideways (stays on the ground) | `test_walking_into_a_ladder_climbs_onto_the_deck`, `test_walking_beside_a_ladder_stays_down` |
 /// | sprint energy while sprinting | some left, empty | `test_sprinting_drains_energy_then_stops` |
 /// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
@@ -433,6 +448,53 @@ mod tests {
         assert!(half.is_sprinting && (half.energy_frac - 0.5).abs() < 0.01);
         let empty: Player = run_s(&sprint, 1.0, SPRINT_DRAIN_S + 0.5);
         assert!(!empty.is_sprinting && empty.energy_frac == 0.0);
+    }
+
+    /// `test_a_jump_matches_lunar_surface` checks a standing jump rises as high and stays in the
+    /// air as long as on Lunar Surface, computed from Lunar Surface's own server settings and map
+    /// as its `set_settings` computes them, within a step of the simulation.
+    #[test]
+    fn test_a_jump_matches_lunar_surface() {
+        let lunar_map_path: std::path::PathBuf = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../common/maps/lunar_surface/map.json");
+        let lunar_map: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(lunar_map_path).unwrap()).unwrap();
+        let map_jump_s: f64 = 2.0 * lunar_map["player"]["jump_m_per_s"].as_f64().unwrap()
+            / lunar_map["gravity_m_per_s2"].as_f64().unwrap();
+        let movement = |key: &str| -> f64 {
+            crate::settings::read_lunar_setting("server_settings.yaml", &["movement"], key)
+        };
+        let air_s: f64 = map_jump_s * movement("jump_time_per_map_jump_time");
+        let height_m: f64 = movement("jump_height_m");
+        let solids: [Aabb; 1] = [Aabb {
+            min_m: Vec3::new(-50.0, -1.0, -50.0),
+            max_m: Vec3::new(50.0, 0.0, 50.0),
+        }];
+        let dt_s: f32 = 1.0 / 240.0;
+        let mut player: Player = Player::new(Vec3::ZERO, 0.0);
+        player.update(&PlayerInput::default(), &solids, &[], dt_s);
+        assert!(player.is_on_ground);
+        let jump: PlayerInput = PlayerInput {
+            is_jump_pressed: true,
+            ..PlayerInput::default()
+        };
+        player.update(&jump, &solids, &[], dt_s);
+        let (mut apex_m, mut step_count) = (player.feet_m.y, 1_usize);
+        while !player.is_on_ground {
+            player.update(&PlayerInput::default(), &solids, &[], dt_s);
+            apex_m = apex_m.max(player.feet_m.y);
+            step_count += 1;
+            assert!(step_count < 10_000, "the jump never landed");
+        }
+        let measured_air_s: f64 = step_count as f64 * f64::from(dt_s);
+        assert!(
+            (measured_air_s - air_s).abs() < 2.0 * f64::from(dt_s),
+            "{measured_air_s} s, not {air_s} s"
+        );
+        assert!(
+            (f64::from(apex_m) - height_m).abs() < 0.02,
+            "{apex_m} m, not {height_m} m"
+        );
     }
 
     /// `test_energy_refills_faster_crouched` checks an empty bar refills in
