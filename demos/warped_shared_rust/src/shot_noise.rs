@@ -31,7 +31,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use glam::{DMat4, DVec3};
 
 use crate::geometry::make_rotation_between;
-use crate::settings::{RifleSettings, SniperSettings};
+use crate::play_settings::{RifleSettings, SniperSettings};
 
 const SPLITMIX_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
 const SPLITMIX_MULTIPLIERS: [u64; 2] = [0xbf58_476d_1ce4_e5b9, 0x94d0_49bb_1331_11eb];
@@ -209,8 +209,27 @@ mod tests {
     use crate::geometry::{
         AXIS_W, AXIS_X, AXIS_Y, AXIS_Z, make_boost, make_rotation, minkowski_dot,
     };
-    use crate::settings::ServerSettings;
     use glam::DVec4;
+    use serde::Deserialize;
+
+    const LUNAR_SERVER_YAML: &str =
+        include_str!("../../hyperbolic_wormholes_rust/server_settings.yaml");
+
+    /// `ServerSettings` is the guns' sections of Lunar Surface's `server_settings.yaml`, which every
+    /// level's copy shares (each level's own tests check theirs against it).
+    #[derive(Deserialize)]
+    struct ServerSettings {
+        sniper: SniperSettings,
+        rifle: RifleSettings,
+    }
+
+    impl ServerSettings {
+        /// `Builtin` reads the guns' sections of Lunar Surface's built-in server settings.
+        #[allow(non_snake_case)]
+        fn Builtin() -> ServerSettings {
+            serde_yaml::from_str(LUNAR_SERVER_YAML).expect("Lunar Surface's server settings")
+        }
+    }
 
     const SEED: u64 = 69;
     const SAMPLE_COUNT: usize = 200_000;
