@@ -30,9 +30,6 @@ constant float FOG_MAX_DISTANCE_M = 2000.0;
 constant float FOG_SUN_LOBE_G = 0.7;
 constant float3 FOG_EXTINCTION_TINT = float3(0.82, 1.0, 1.24);
 constant uint HAZE_STEP_COUNT = 12;
-/** @brief A haze march takes a step per `HAZE_STEP_M` of its length, from `HAZE_MIN_STEP_COUNT` to `HAZE_STEP_COUNT`. */
-constant float HAZE_STEP_M = 1.5;
-constant uint HAZE_MIN_STEP_COUNT = 4;
 constant float HAZE_MAX_DISTANCE_M = 64.0;
 constant float DUST_DENSITY_PER_M = 0.05;
 constant float DUST_AMBIENT_FRAC = 0.2;
@@ -537,8 +534,7 @@ inline float3 apply_fog(constant FrameUniforms& frame, float3 color, float3 worl
  * @return The radiance after fog.
  * @par Interface
  * `frame.effect_params.y` is 0 to fall back to `apply_fog`. The march covers the first
- * `HAZE_MAX_DISTANCE_M`, in a step per `HAZE_STEP_M` (at least `HAZE_MIN_STEP_COUNT`, at most
- * `HAZE_STEP_COUNT`); the rest of the ray is treated as lit.
+ * `HAZE_MAX_DISTANCE_M`; the rest of the ray is treated as lit.
  * @par Example
  * @code
  * color = apply_shadowed_fog(frame, color, p, shadow_map, sky_visibility, in.position.xy);
@@ -559,14 +555,13 @@ inline float3 apply_shadowed_fog(constant FrameUniforms& frame, float3 color,
     float3 ray_direction = normalize(ray);
     float3 fog_amount = min(fog_opacity(frame, ray_direction, ray_length_m), frame.fog_params.w);
     float march_length_m = min(ray_length_m, HAZE_MAX_DISTANCE_M);
-    uint step_count = clamp(uint(ceil(march_length_m / HAZE_STEP_M)), HAZE_MIN_STEP_COUNT, HAZE_STEP_COUNT);
-    float dt = march_length_m / float(step_count);
+    float dt = march_length_m / float(HAZE_STEP_COUNT);
     float jitter = interleaved_gradient_noise(screen_position);
     float3 lit_opacity = float3(0.0);
     float3 previous_opacity = float3(0.0);
     float dust_transmittance = 1.0;
     float dust_lit_opacity = 0.0;
-    for (uint i = 0; i < step_count; ++i) {
+    for (uint i = 0; i < HAZE_STEP_COUNT; ++i) {
         float t = (float(i) + 1.0) * dt;
         float3 opacity = fog_opacity(frame, ray_direction, t);
         float3 p = camera_position + ray_direction * ((float(i) + jitter) * dt);
