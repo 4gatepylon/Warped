@@ -2067,6 +2067,26 @@
 - **Rationale:** the user wants 60 frames a second at full size on the 3440×1440 display. At 3440×1440, 19 of 21 views
   are now under 16.7 ms (before: 14); `wormhole_exit` and `laser_into_wormhole` (the lens) are left.
 
+### D113. Lunar's lens at half resolution with Dust's longer bent steps (option D), W-131 (Lunar wormhole_exit slow at full size)
+
+- **Choice:** the user's option D from D112 (2026-11-09), in `render_voxel.metal` (Lunar Surface and the match's
+  copy):
+  - **Half-resolution lens:** `trace_ray` counts its bent steps (`BENT_STEPS_FIRST_BIT` in `surface.w`, up to 255).
+    `refine_pixels` blends the colours of a cell's four even pixels into its three odd ones, instead of tracing them,
+    when all four samples took at least `LENS_HALF_RES_STEPS` (8) bent steps: deep in a lens, where neighbouring
+    rays land far apart anyway.
+  - **Dust's longer bent steps:** `BEND_STEP_FRAC` 0.08 → 0.16 of the distance to the warp's centre, and
+    `LATE_BEND_STEP_FRAC` 0.24 → 0.48. `voxel_world.rs`'s `BEND_STEP_FRAC` (the CPU's laser paths, the clearance caps)
+    changes with it, so lasers still hit where they are drawn.
+- **Measured** (median GPU ms, best of 3 alternating rounds under the exclusive GPU lock, 2560×1440 / 3440×1440):
+  `wormhole_exit` 48.8 / 57.7 → 20.2 / 24.5; `laser_into_wormhole` 16.1 / 18.6 → 10.8 / 13.1; `wormhole` 13.1 / 15.6
+  → 9.9 / 12.2; views with a warp object in sight up to 3.3 ms faster, the rest within noise. At 3440×1440, 20 of 21
+  views are under 16.7 ms; `wormhole_exit` (24.5 ms) is left.
+- **Look:** a lens's most compressed rings are a little stepped and move a few pixels; nothing outside a warp's reach
+  changes (the pictures are identical there; the views without a warp object in sight are identical).
+- **Gives up:** detail finer than two pixels deep in a lens.
+- **Rationale:** the user chose it from D112's options sheet.
+
 ## Workload
 
 ### D7. Eight fixed views
