@@ -186,3 +186,11 @@ blended in over 48 px, so the soft edges show no steps, and FXAA 3.11 anti-alias
 
 As Lunar Surface's D117: the middle half of the width sharp, half resolution out to three quarters, a quarter beyond,
 all smoothed (S15). At 3440x1440: up to 2.4 ms faster than B (`wormhole` 20.2 → 17.8 ms, `laser_open` 20.2 → 18.4).
+
+## S17. Snow Planet slower, halfway to City Sphere
+
+- **Why:** the user, 2026-11-09, while playtesting: "only lunar and dune should be
+  at the speed lunear is at; everything else should be slower; snow and forest should be halfway between city sphere
+  and dune/lkunar". `walk_speed_per_map_speed` 2.0 → 1.6 (10 → 8 m/s) and `sprint_speed_per_map_speed` 2.0 → 1.72
+  (18 → 15.5 m/s), halfway between City Sphere's 6 and 13 m/s and Lunar Surface's 10 and 18. The settings test lets
+  these two lines differ from Lunar Surface's.

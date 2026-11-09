@@ -177,3 +177,7 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
     them into the render texture, so structure, glass-hole and beam edges are anti-aliased. Lines drawn by the fragment
     shader (the glass's hexagons, panel seams) were already filtered by their textures and are unchanged. At 3440x1440:
     0.1-0.3 ms more GPU time per view (every view 1.6-2.6 ms median).
+38. **City Sphere 40% slower** (the user, 2026-11-09, while playtesting: "make the movement speed lwoer for the city
+    sphere", then "40% slower"): `walk_speed_per_map_speed` 2.0 → 1.2 (10 → 6 m/s) and `sprint_speed_per_map_speed`
+    2.4 → 1.44 (21.6 → 13 m/s), replacing item 27's faster sprint. Crouching (half of walking) and the jump are
+    unchanged. The settings test now lets City Sphere's two speed lines differ from Lunar Surface's.
