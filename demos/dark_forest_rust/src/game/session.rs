@@ -57,6 +57,11 @@ const FAR_M: f32 = 600.0;
 /// Lunar Surface's beam looks and speckle.
 const BEAM_RADIUS_M: f32 = 0.02;
 const BEAM_HDR_SCALE: f32 = 1.8;
+/// `BEAM_DASH_SPACING_M` and `BEAM_DASH_OVERLAP` cut a beam into short tracers, each this many times
+/// as long as their spacing: one tracer glows only around its middle, so a long beam drawn as one
+/// would show only there.
+const BEAM_DASH_SPACING_M: f32 = 0.15;
+const BEAM_DASH_OVERLAP: f32 = 2.0;
 /// `GRAIN_SPRITE_PER_RADIUS` is how much larger than a dust grain its smoke sprite is.
 const GRAIN_SPRITE_PER_RADIUS: f32 = 1.5;
 /// `LUNAR_TEAM_BEAM_RGB` are Lunar Surface's laser colours per team (blue, red), linear, for a map
@@ -1354,14 +1359,19 @@ impl Session {
         for flight in &self.flights {
             let tracer: &Tracer = &flight.tracer;
             for (start_m, end_m) in tracer.get_lit_pieces(now_s, muzzle_m) {
-                world_particles.push(Particle {
-                    position_m: (start_m + end_m) * 0.5,
-                    stretch_m: end_m - start_m,
-                    size_m: BEAM_RADIUS_M,
-                    color_rgba: (tracer.rgb * BEAM_HDR_SCALE * scene.light_scale).extend(0.0),
-                    kind: ParticleKind::Tracer,
-                    seed: tracer.speckle_frac,
-                });
+                let length_m: f32 = start_m.distance(end_m);
+                let dash_count: usize = (length_m / BEAM_DASH_SPACING_M).ceil().max(1.0) as usize;
+                let step_m: Vec3 = (end_m - start_m) / dash_count as f32;
+                for dash in 0..dash_count {
+                    world_particles.push(Particle {
+                        position_m: start_m + step_m * (dash as f32 + 0.5),
+                        stretch_m: step_m * BEAM_DASH_OVERLAP,
+                        size_m: BEAM_RADIUS_M,
+                        color_rgba: (tracer.rgb * BEAM_HDR_SCALE * scene.light_scale).extend(0.0),
+                        kind: ParticleKind::Tracer,
+                        seed: tracer.speckle_frac,
+                    });
+                }
             }
         }
         for dust in self
