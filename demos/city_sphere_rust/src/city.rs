@@ -33,9 +33,9 @@ use warped_shared::health::{HitFeedback, HitResponse, fade_effect_frac};
 use warped_shared::hud::{
     HudBars, HudPulses, get_death_lines, get_lobby_lines, make_bar_rects, make_hit_effect,
 };
-use warped_shared::third_person::{ThirdPersonCamera, place_camera_flat};
 use warped_shared::movement::{MoveState, get_crouched_height_frac};
 use warped_shared::shot_noise::ShotNoise;
+use warped_shared::third_person::{ThirdPersonCamera, place_camera_flat};
 use warped_shared::weapons::{Weapons, take_hit_weight};
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};

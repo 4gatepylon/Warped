@@ -100,10 +100,10 @@ mod tests {
     //! | Crosshair's ray | ahead and straight, ahead through the black hole's reach (bent alike), behind the player (the eye doesn't turn) | `a_shot_lands_where_the_crosshair_points` |
 
     use super::*;
-    use warped_shared::third_person::SWITCH_S;
     use crate::geometry::{AXIS_X, invert_lorentz, make_rotation};
     use crate::map::{Map, get_map_folder};
     use crate::voxel_world::{Shot, VoxelPlayer};
+    use warped_shared::third_person::SWITCH_S;
 
     const OPEN_AT_M: [f64; 2] = [-27.0, 0.0];
     const OPEN_TOWARD_M: [f64; 2] = [-20.0, 0.0];

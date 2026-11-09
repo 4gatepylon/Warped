@@ -12,7 +12,7 @@ use crate::game::warps::{BeamPath, Warps};
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+use glam::{DMat4, DVec3, Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::audio::{Audio, Sound};
 use super::bots::{BOT_HEIGHT_M, BOT_MAX_HEALTH, Bot, BotContext, BotShot, RESPAWN_DELAY_S};
@@ -37,6 +37,8 @@ use crate::shot_noise::ShotNoise;
 use warped_shared::avatar_model::AvatarClip;
 use warped_shared::health::fade_effect_frac;
 use warped_shared::hud::{AmmoBar, HudBars, HudPulses, make_hit_effect};
+use warped_shared::movement::get_crouched_height_frac;
+use warped_shared::third_person::{ThirdPersonCamera, ViewSwitch, place_camera_flat};
 use warped_shared::weapons::take_hit_weight;
 
 /// `MAX_DECAL_COUNT` is how many impact marks stay in the world.
@@ -213,6 +215,9 @@ pub struct Session {
     pub movement: Movement,
     since_movement_key_s: f32,
     pub bots: Vec<Bot>,
+    pub view_switch: ViewSwitch,
+    own_body: Bot,
+    pub shot_eye: Mat4,
     pub kill_count: u32,
     pub death_count: u32,
     pub time_s: f32,
@@ -276,6 +281,9 @@ const TEAM_BODY_RGB: [Vec3; 2] = [Vec3::new(0.35, 0.6, 1.0), Vec3::new(1.0, 0.35
 /// `ROBOT_SCREEN_MATERIAL` is the body model's see-through face glass, left out as Lunar Surface
 /// leaves it out (it would hide the glowing eyes).
 const ROBOT_SCREEN_MATERIAL: &str = "Screen";
+/// `MAX_AIM_TURN_RAD` is the most a shot in third person turns from the way the eye looks toward
+/// the crosshair's point (Lunar Surface's).
+const MAX_AIM_TURN_RAD: f32 = 0.6;
 /// `MIN_CLIP_S` is the shortest a clip is taken to last, so a clip without keys doesn't divide by 0.
 const MIN_CLIP_S: f64 = 1e-3;
 /// `GROUND_PROBE_M` is how far below a robot's feet something must be for it to stand on it, and
@@ -331,6 +339,9 @@ impl Session {
             since_movement_key_s: 0.0,
             settings: ServerSettings::Builtin(),
             bots,
+            view_switch: ViewSwitch::FirstPerson(),
+            own_body: Bot::new(Vec3::ZERO, 0),
+            shot_eye: Mat4::IDENTITY,
             kill_count: 0,
             death_count: 0,
             time_s: 0.0,
@@ -599,7 +610,7 @@ impl Session {
         let aim: Mat4 = self
             .weapons
             .shot_offset
-            .aim(self.player.camera_world().as_dmat4())
+            .aim(self.shot_eye.as_dmat4())
             .as_mat4();
         let origin_m: Vec3 = aim.w_axis.truncate();
         let direction: Vec3 = -aim.z_axis.truncate().normalize();
@@ -965,6 +976,7 @@ impl Session {
             &self.arena.ladders,
             dt_s,
         );
+        self.shot_eye = self.aim_at_crosshair(scene);
         if self.player.is_alive() {
             let warps: &Warps = &self.arena.warps;
             let centre_m: Vec3 = self.player.feet_m + Vec3::Y * BODY_CENTRE_HEIGHT_M;
@@ -1122,7 +1134,56 @@ impl Session {
         self.kill_marker_s = (self.kill_marker_s - dt_s).max(0.0);
         self.hit_effect_frac =
             fade_effect_frac(self.hit_effect_frac, f64::from(dt_s), HIT_EFFECTS.effect_s);
+        self.view_switch.update(f64::from(dt_s));
+        self.own_body.feet_m = self.player.feet_m;
+        self.own_body.yaw_rad = self.player.yaw_rad + std::f32::consts::PI;
+        self.own_body.height_frac =
+            get_crouched_height_frac(self.player.moves.crouch_frac, &self.settings.movement) as f32;
+        self.own_body.dead_time_s = self.player.dead_time_s;
         self.follow_robot_gaits(scene, f64::from(dt_s));
+    }
+
+    /// `place_camera` gives where the camera is now: on the shared third-person boom out from the
+    /// eye (`place_camera_flat`, by the view switch, back to the eye while aiming), each leg
+    /// stopping short of the forest's boxes, and whether this player's own robot shows from there.
+    pub fn place_camera(&self, scene: &Scene) -> ThirdPersonCamera {
+        let eye: DMat4 = self.player.camera_world().as_dmat4();
+        let boom_frac: f64 = self.view_switch.get_boom_frac(self.weapons.aim_frac);
+        place_camera_flat(eye, DVec3::Y, boom_frac, |from, direction, max_m| {
+            cast_ray(
+                &scene.solids,
+                from.as_vec3(),
+                direction.as_vec3(),
+                max_m as f32,
+            )
+            .map_or(max_m, |(_, hit)| f64::from(hit.distance_m))
+        })
+    }
+
+    /// `aim_at_crosshair` gives the eye this player shoots from: in third person turned toward the
+    /// point the camera's crosshair covers (the first box it meets, or `LASER_MAX_LENGTH_M` away),
+    /// as Lunar Surface's `third_person::aim_at_crosshair` does, unless that is more than
+    /// `MAX_AIM_TURN_RAD` off the way the eye looks; the eye itself in first person.
+    fn aim_at_crosshair(&self, scene: &Scene) -> Mat4 {
+        let eye: Mat4 = self.player.camera_world();
+        let camera: Mat4 = self.place_camera(scene).frame.as_mat4();
+        if camera == eye {
+            return eye;
+        }
+        let from_m: Vec3 = camera.w_axis.truncate();
+        let ahead: Vec3 = -camera.z_axis.truncate().normalize();
+        let reach_m: f32 = cast_ray(&scene.solids, from_m, ahead, LASER_MAX_LENGTH_M)
+            .map_or(LASER_MAX_LENGTH_M, |(_, hit)| hit.distance_m);
+        let eye_m: Vec3 = eye.w_axis.truncate();
+        let eye_ahead: Vec3 = -eye.z_axis.truncate().normalize();
+        let toward: Vec3 = (from_m + ahead * reach_m - eye_m).normalize_or_zero();
+        if toward.dot(eye_ahead) < MAX_AIM_TURN_RAD.cos() {
+            return eye;
+        }
+        Mat4::from_translation(eye_m)
+            * Mat4::from_quat(Quat::from_rotation_arc(eye_ahead, toward))
+            * Mat4::from_translation(-eye_m)
+            * eye
     }
 
     /// `follow_robot_gaits` moves every robot's gait on (`Bot::follow_gait`), the enemies' and the
@@ -1135,6 +1196,7 @@ impl Session {
             .bots
             .iter_mut()
             .chain(self.remote_bots.iter_mut().map(|remote| &mut remote.bot))
+            .chain(std::iter::once(&mut self.own_body))
         {
             let is_on_ground: bool = bot.is_climbing()
                 || ladders
@@ -1346,11 +1408,12 @@ impl Session {
 
     /// `frame_data` turns the match into one frame for the renderer.
     pub fn frame_data(&self, scene: &Scene, width_px: f32, height_px: f32) -> FrameData {
-        let camera_world: Mat4 = self.player.camera_world();
+        let placed: ThirdPersonCamera = self.place_camera(scene);
+        let camera_world: Mat4 = placed.frame.as_mat4();
         let zoom: f32 = self.weapons.get_zoom(&self.settings.aim) as f32;
         let camera: Camera = Camera {
             view: camera_world.inverse(),
-            position_m: self.player.eye_position_m(),
+            position_m: camera_world.w_axis.truncate(),
             fov_y_rad: 2.0 * (HALF_FOV_RAD.tan() / zoom).atan(),
             viewmodel_fov_y_rad: 2.0 * HALF_FOV_RAD,
             near_m: NEAR_M,
@@ -1380,7 +1443,12 @@ impl Session {
         let remote_entries = self
             .remote_bots
             .iter()
-            .map(|remote| (&remote.bot, TEAM_BODY_RGB[remote.team as usize % 2]));
+            .map(|remote| (&remote.bot, TEAM_BODY_RGB[remote.team as usize % 2]))
+            .chain(
+                placed
+                    .is_body_shown
+                    .then_some((&self.own_body, TEAM_BODY_RGB[self.team as usize % 2])),
+            );
         for (bot, main_tint) in self
             .bots
             .iter()
@@ -1566,14 +1634,16 @@ impl Session {
 
         let mut viewmodel_draws: Vec<DrawItem> = Vec::new();
         let viewmodel_particles: Vec<Particle> = Vec::new();
-        if self.player.is_alive() {
+        if self.player.is_alive() && !placed.is_body_shown {
             let viewmodel: &GunViewmodel = match self.weapons.gun {
                 Gun::Laser => &scene.bolt_action_rifle,
                 Gun::Rifle => &scene.revolver,
             };
             viewmodel_draws.extend(draw_items_for(
                 &viewmodel.model,
-                camera_world * get_camera_from_muzzle(&self.weapons) * viewmodel.muzzle_from_gltf,
+                self.player.camera_world()
+                    * get_camera_from_muzzle(&self.weapons)
+                    * viewmodel.muzzle_from_gltf,
                 false,
             ));
         }

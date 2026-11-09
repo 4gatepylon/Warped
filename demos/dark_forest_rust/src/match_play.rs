@@ -237,7 +237,7 @@ impl MatchPlay {
         if self.last_state.elapsed().as_secs_f64() >= STATE_PERIOD_S && client.id.is_some() {
             self.last_state = Instant::now();
             let is_firing: bool = session.is_trigger_down && !is_dead;
-            let eye: DMat4 = session.player.camera_world().as_dmat4();
+            let eye: DMat4 = session.shot_eye.as_dmat4();
             let frame: DMat4 = if is_firing {
                 session.weapons.shot_offset.aim(eye)
             } else {
