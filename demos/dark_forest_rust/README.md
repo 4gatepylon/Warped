@@ -184,7 +184,9 @@ started or the frame before it ended, whichever is later, to when it ended.
 - `src/map.rs`: reads and writes the portable map format.
 - `src/game/world.rs`: turns the map into collision boxes, drawable shapes, ladders, consoles and pylons.
 - `src/game/warps.rs`: the wormholes' lens, throat crossing and laser paths (and black holes, unused here).
-- `src/game/player.rs`: walking, jumping and climbing.
+- `src/game/player.rs`: walking, jumping and climbing: the shared movement rules (`MoveState`), carried out in
+  the forest by `Forest`, a shared `Ground` (D37); `src/game/play_trace.rs` records a play trace to compare with
+  Lunar Surface's.
 - `src/game/guns.rs` (on the shared `Weapons`), `src/game/dust.rs`, and the shared `shot_noise`: the Lunar Surface demo's two guns, their beams'
   flight and ground dust, and each shot's stray.
 - `src/console_reach.rs`: who may hold `E` on a console (in reach and aimed at), for the server and the windows.

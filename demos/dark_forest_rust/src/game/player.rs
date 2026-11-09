@@ -444,6 +444,7 @@ impl Ground for Forest<'_> {
 /// | sprint energy while sprinting | some left, empty | `test_sprinting_drains_energy_then_stops` |
 /// | sprint energy while not sprinting | standing, crouched | `test_energy_refills_faster_crouched` |
 /// | time since death | before the settings' respawn delay, after it | `test_respawn_waits_the_settings_delay` |
+/// | rules' state each step | walking, sprinting, crouching, jumping, standing, hit: the shared `MoveState` stepped with the same keys and ground, bit for bit | `test_the_rules_are_the_shared_ones` |
 #[cfg(test)]
 mod tests {
     use glam::Mat4;
@@ -749,6 +750,55 @@ mod tests {
             "{}",
             crouched.moves.energy_frac
         );
+    }
+
+    /// `test_the_rules_are_the_shared_ones` checks every step's crouch, sprint energy, sprinting,
+    /// head bob and slow are those of the shared `MoveState` stepped with the same keys and the
+    /// same ground under the player (W-126 (same play in every level)).
+    #[test]
+    fn test_the_rules_are_the_shared_ones() {
+        let movement: Movement = forest_movement();
+        let solids: [Aabb; 1] = open_ground();
+        let dt_s: f32 = 1.0 / 60.0;
+        let rules: MoveRules = MoveRules {
+            movement: &movement.settings,
+            energy: &movement.sprint_energy,
+            when_hit: &movement.when_hit,
+            head_bob: &HEAD_BOB,
+        };
+        let mut player: Player = Player::new(Vec3::ZERO, 0.0);
+        let mut shared: MoveState = MoveState::New();
+        let legs: [(Vec2, bool, bool, bool, usize); 6] = [
+            (Vec2::Y, false, false, false, 60),
+            (Vec2::Y, true, false, false, 240),
+            (Vec2::Y, true, true, false, 60),
+            (Vec2::new(1.0, 1.0), false, false, true, 90),
+            (Vec2::ZERO, false, false, false, 60),
+            (Vec2::NEG_Y, false, true, false, 60),
+        ];
+        player.slow_down(&movement);
+        shared.slowed_s = movement.when_hit.slow_s;
+        for (move_axes, is_sprint_held, is_crouch_held, is_jump_pressed, step_count) in legs {
+            let input: PlayerInput = PlayerInput {
+                move_axes,
+                is_sprint_held,
+                is_crouch_held,
+                is_jump_pressed,
+                ..PlayerInput::default()
+            };
+            for _ in 0..step_count {
+                let shared_input: MoveInput = MoveInput {
+                    is_moving: move_axes != Vec2::ZERO,
+                    is_sprint_held,
+                    is_crouch_held,
+                    is_flying: false,
+                    is_on_ground: player.is_on_ground,
+                };
+                shared.step(&shared_input, &rules, f64::from(dt_s));
+                player.update(&input, &movement, &solids, &[], dt_s);
+                assert_eq!(player.moves, shared);
+            }
+        }
     }
 
     /// `test_respawn_waits_the_settings_delay` checks a dead player respawns once the delay it is

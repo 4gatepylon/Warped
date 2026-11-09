@@ -250,7 +250,7 @@ impl MatchPlay {
                 self.held_console.map(|i| i as u8),
                 session.weapons.beam_speckle_frac,
                 PlayerWormholes::default(),
-                f64::from(session.player.crouch_frac),
+                session.player.moves.crouch_frac,
             )?;
         }
         Ok(())
