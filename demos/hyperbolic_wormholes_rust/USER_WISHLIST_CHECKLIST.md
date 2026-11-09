@@ -49,6 +49,8 @@ is in [`AGENTS.md`](AGENTS.md).
     only in reach and aimed at, 10 s; console bots walk to every pylon by the ladders; both guns with Lunar's hits;
     Lunar's jump; hidden bot windows; `claude/dark-forest-playable`, open); still missing there: Lunar's beam looks and
     speckle, the Tab pages, the minimap, flashlight, third person, thrown wormholes, exit prompt, movement speeds.
+    Every level: #442 (fighting bots that walk to the nearest enemy and shoot, respawn after the server's delay,
+    and `make play-all-levels` checks eliminations, respawns and walks per level; `claude/playable-end-to-end`, open).
 - [~] **W-103 Reality bend performance.** "Performance optimization on the reality bending version of the game":
   frames under the reality bend (W-68 (reality bend)) are slow. Claimed by Claude Code (subagent of a session on
   `leah`'s Mac in `Warped-main`), branch `claude/reality-bend-perf`, worktree `/Users/leah/Documents/dev/Warped-rb-perf`,
