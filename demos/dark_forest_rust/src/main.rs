@@ -52,9 +52,10 @@ use match_play::{MatchOptions, MatchPlay};
 use menu::{Menu, MenuOutcome, MenuSettings, Scoreboard};
 use minimap::{Mark, Minimap};
 use platform::Platform;
+use render::frame_clock::FrameClock;
+use render::frame_trace::{CpuFrameRow, FrameTrace};
 use render::metal::MetalRenderer;
 use render::overlay::HitEffect;
-use render::frame_trace::{CpuFrameRow, FrameTrace};
 use render::{FrameDescription, FrameTiming, HudImage, HudRect, RenderSettings, Renderer};
 use scene::{Scene, SceneOptions};
 use text_overlay::TextPicture;
@@ -1018,6 +1019,7 @@ fn main() {
     let mut smoothed_frame_ms: f32 = 8.3;
     let mut timing: FrameTiming = FrameTiming::default();
     let mut frame_trace: FrameTrace = FrameTrace::default();
+    let mut frame_clock: FrameClock = FrameClock::default();
     renderer.set_is_tracing_frames(args.frame_times_file.is_some());
     if args.photo_map_page {
         let mut opened: Menu = Menu::New();
@@ -1121,10 +1123,21 @@ fn main() {
         let frame_s: f32 = (now - last_frame).as_secs_f32();
         last_frame = now;
         let is_recording: bool = args.photo.is_some() || args.video_frames.is_some();
+        let refresh_interval_s: Option<f32> = settings
+            .is_vsync_enabled
+            .then(|| {
+                platform
+                    .window
+                    .get_display()
+                    .and_then(|display| display.get_mode())
+            })
+            .and_then(Result::ok)
+            .filter(|mode| mode.refresh_rate > 0.0)
+            .map(|mode| mode.refresh_rate.recip());
         let dt_s: f32 = if is_recording {
             RECORDING_DT_S
         } else {
-            frame_s.min(MAX_FRAME_S)
+            frame_clock.step_s(frame_s.min(MAX_FRAME_S), refresh_interval_s)
         };
         let keys = event_pump.keyboard_state();
         let mouse_state = event_pump.mouse_state();

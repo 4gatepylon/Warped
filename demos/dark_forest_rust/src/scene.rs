@@ -20,7 +20,7 @@ use crate::game::weapon::ViewmodelPose;
 use crate::game::world::{Arena, Surface};
 use crate::render::{
     AlphaMode, Atmosphere, DrawItem, EnvironmentData, MaterialData, MaterialHandle, MeshHandle,
-    OccluderBox, Renderer, TextureFormat, TextureHandle,
+    OccluderBox, Renderer, TextureFormat, TextureHandle, tiles::split_mesh_into_tiles,
 };
 
 /// `GROUND_ALBEDO` colors the sky's empty lower hemisphere.
@@ -44,6 +44,9 @@ const MIN_SUN_PER_SKY_IRRADIANCE_FRAC: f32 = 3.5;
 const ROBOT_HEIGHT_M: f32 = 1.85;
 /// `SURFACE_TEXTURE_SIZE_PX` is the size limit of arena textures.
 const SURFACE_TEXTURE_SIZE_PX: u32 = 2048;
+/// `STATIC_TILE_M` is the width of the tiles the arena's surfaces are cut into, so each pass
+/// draws only the tiles in its view.
+const STATIC_TILE_M: f32 = 8.0;
 /// `ARMS_POSE_NODE` is the arms model's static pose with both arms reaching forward; the other
 /// five poses are display poses.
 const ARMS_POSE_NODE: &str = "Arms_Obj.001";
@@ -423,18 +426,20 @@ impl Scene {
         let mut static_draws: Vec<DrawItem> = Vec::new();
         let mut static_surfaces: Vec<Surface> = Vec::new();
         for (surface, mesh_data) in arena.surface_meshes() {
-            static_surfaces.push(surface);
-            let mesh: MeshHandle = renderer.create_mesh(&mesh_data);
-            static_draws.push(DrawItem {
-                mesh,
-                material: surface_materials[&surface],
-                model: Mat4::IDENTITY,
-                tint: Vec4::ONE,
-                joint_offset: None,
-                bounds_center_m: Vec3::ZERO,
-                bounds_radius_m: 1.0e4,
-                does_cast_shadow: true,
-            });
+            for tile in split_mesh_into_tiles(&mesh_data, STATIC_TILE_M) {
+                static_surfaces.push(surface);
+                let mesh: MeshHandle = renderer.create_mesh(&tile.mesh);
+                static_draws.push(DrawItem {
+                    mesh,
+                    material: surface_materials[&surface],
+                    model: Mat4::IDENTITY,
+                    tint: Vec4::ONE,
+                    joint_offset: None,
+                    bounds_center_m: tile.bounds_center_m,
+                    bounds_radius_m: tile.bounds_radius_m,
+                    does_cast_shadow: true,
+                });
+            }
         }
         let solids: Vec<Aabb> = arena.boxes.iter().map(|world_box| world_box.aabb).collect();
         let occluders: Vec<OccluderBox> = arena

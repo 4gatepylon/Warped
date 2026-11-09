@@ -8,9 +8,11 @@
 //! Example: `let mesh: MeshHandle = renderer.create_mesh(&mesh_data);`
 
 pub mod culling;
+pub mod frame_clock;
 pub mod frame_trace;
 pub mod metal;
 pub mod overlay;
+pub mod tiles;
 
 use glam::{Mat4, Vec3, Vec4};
 

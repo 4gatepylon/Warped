@@ -1747,16 +1747,16 @@ impl MetalRenderer {
                 let metal_drawable: &ProtocolObject<dyn MTLDrawable> =
                     ProtocolObject::from_ref(&**drawable);
                 if self.is_tracing_frames {
-                    let presented_times: Arc<Mutex<Vec<(usize, f64)>>> = Arc::clone(&self.presented_times);
-                    let handler = RcBlock::new(
-                        move |shown: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+                    let presented_times: Arc<Mutex<Vec<(usize, f64)>>> =
+                        Arc::clone(&self.presented_times);
+                    let handler =
+                        RcBlock::new(move |shown: NonNull<ProtocolObject<dyn MTLDrawable>>| {
                             let presented_s: f64 = unsafe { shown.as_ref() }.presentedTime();
                             presented_times
                                 .lock()
                                 .expect("the frame trace's lock is poisoned")
                                 .push((frame_index, presented_s));
-                        },
-                    );
+                        });
                     unsafe { metal_drawable.addPresentedHandler(RcBlock::as_ptr(&handler)) };
                 }
                 command_buffer.presentDrawable(metal_drawable);
