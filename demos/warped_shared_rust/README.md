@@ -60,7 +60,7 @@ Everything else differs between levels, or needs a module that does:
 - In each `main.rs`, the `Session` keeps its guns in `weapons: Weapons` and calls it; what stays is what needs
   the level's world: `Tracer` (a shot's beam, `voxel_world`'s segments), tracing shots, the view's recoil,
   `update_gun` (the step phase from the level's walking), the HUD's bars and lines. City Sphere's own
-  `CitySession` (`city.rs`) still has its own guns, written apart from Lunar Surface's.
+  `CitySession` (`city.rs`) keeps its guns in a `Weapons` too and traces each shot through its glass and wormholes.
 - Files identical in all but City Sphere: `render_metal.*` (City adds its own frame kind), `thrown_wormholes`
   (City adds `update_placing`, which Lunar's `update` could call), `third_person` (City makes four constants
   `pub(crate)`), and `console_reach` and `picture_saver` (City has none). `zone_walls` differs in Snow Planet only

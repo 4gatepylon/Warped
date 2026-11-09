@@ -149,3 +149,16 @@ The copied hyperbolic demo's decisions are in [`../hyperbolic_wormholes_rust/DEC
     path planning still keeps clear of the whole round hole. **Weigh in:** this changes the look: the glass now covers
     the round hole's sides, and the hole's rim hugs the stairs. Cutting only the collisions would keep today's look
     but leave players standing, and shots stopping, on glass that isn't drawn.
+35. **City Sphere's guns are Lunar Surface's code** (W-126 (same play in every level), the user: "the same guns
+    everywhere"): `CitySession` keeps its guns in the shared `Weapons`, as Lunar's `Session` does, so the differences
+    City had are gone, each now as on Lunar: (a) a shot is traced on every frame it hits, not once when fired, and
+    hits weigh by `take_hit_weight` (the sniper's on every frame, the rifle's once a shot); the beam is still drawn
+    once, from the shot's first frame, as Lunar's `Tracer` is; (b) shots stray from the crosshair (the sniper's
+    noise, the rifle's heat), and the window sends the strayed aim while firing so other windows draw the same shot;
+    (c) the rifle kicks the view up and alternately sideways and its jolt settles over `rifle.recoil_settle_s`, and
+    the sniper has no jolt, instead of a fixed 0.25 s jolt for both; (d) no shot until
+    `movement.shoot_after_moving_s` after the last walk or jump, and moving ends a shot under way; (e) the sniper
+    fires on a click, not while the button is held, the rifle cools only while not firing, each gun keeps its own
+    reload, and switching guns keeps the sniper's reload; (f) the bot fires a `Weapons` sniper (its stray, reload
+    and per-frame hits) at a target it can see, instead of a hit sent at once. What City keeps: its tracing through
+    the glass and wormholes, its beam drawing, and enemy wormholes hit once a shot.

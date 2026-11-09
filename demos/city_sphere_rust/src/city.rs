@@ -32,7 +32,8 @@ use super::{
     find_lan_address, get_crosshair_rects, get_lobby_lines, get_server_address, get_sway,
     load_settings, make_renderer, make_run_folder, make_text_mask, make_wand, save_png,
 };
-use warped_shared::weapons::get_aim_zoom;
+use warped_shared::shot_noise::ShotNoise;
+use warped_shared::weapons::{Weapons, take_hit_weight};
 
 use crate::avatar_model::{AvatarClip, AvatarModel, BODY_MODEL};
 use crate::city_world::{
@@ -55,7 +56,6 @@ use crate::render_city::{
 };
 use crate::render_metal::{self, FrameData};
 use crate::settings::{MinimapCorner, PerPlayerSettings, ServerSettings};
-use crate::shot_noise;
 use crate::third_person;
 use crate::thrown_wormholes::{MouthPlace, PlayerWormholes, ThrownWormholes, WormholeColor};
 use crate::viewmodel;
@@ -103,7 +103,6 @@ const PULSE_RAD_PER_S: f64 = 12.0;
 const CORE_HALO_RADIUS_PER_CORE_RADIUS: f64 = 3.0;
 const RUN_M_PER_S: f64 = 6.0;
 const WALK_M_PER_S: f64 = 0.6;
-const RECOIL_S: f64 = 0.25;
 const TURN_RAD_PER_S: f64 = 5.0;
 const STUCK_S: f64 = 1.2;
 const STUCK_M: f64 = 0.5;
@@ -1027,12 +1026,12 @@ struct CitySession {
     respawn_in_s: Option<f64>,
     spawn_count: usize,
     shots: Vec<LiveShot>,
-    reload_left_s: f64,
-    laser_left_s: f64,
-    recoil_left_s: f64,
+    weapons: Weapons,
+    since_movement_key_s: f64,
+    was_firing: bool,
+    has_shot_hit_wormholes: bool,
     bob_phase_rad: f64,
     bob_frac: f64,
-    run_pose_frac: f64,
     remote_lasers: HashMap<u32, bool>,
     remote_motion: HashMap<u32, Motion>,
     disabling: Option<u8>,
@@ -1046,23 +1045,14 @@ struct CitySession {
     frame_ms: Vec<f64>,
     gpu_ms: Vec<f64>,
     last_frame: Option<Instant>,
-    hit_count: u32,
     rifle_log: RifleLog,
-    was_trigger_held: bool,
     map_base: std::cell::OnceCell<Vec<u8>>,
     minimap_base: Vec<u8>,
     hud: (f64, u32, f64),
-    is_aiming: bool,
-    aim_frac: f64,
     exit_prompt: exit_prompt::ExitPrompt,
     phase_ms: Vec<[f64; PHASE_COUNT]>,
-    gun: Gun,
-    rifle_heat_frac: f64,
-    is_overheated: bool,
     health_pulses: hud_bars::BarPulses,
     energy_pulses: hud_bars::BarPulses,
-    shot_noise: shot_noise::ShotNoise,
-    beam_speckle_frac: f64,
     is_flashlight_on: bool,
     view_switch: third_person::ViewSwitch,
     dust: Vec<DustBurst>,
@@ -1115,6 +1105,10 @@ impl CitySession {
         }
         let player: CityPlayer = world.make_player(team.unwrap_or(0), 0);
         let minimap_base: Vec<u8> = make_minimap_base(&world, MINIMAP_MAP_PX);
+        let mut weapons: Weapons = Weapons::New(ShotNoise::FromClock());
+        if arguments.play_route {
+            weapons.switch_gun(Gun::Laser);
+        }
         Ok(CitySession {
             scene: Arc::new(build_scene(&world)),
             body: AvatarModel::Load(BODY_MODEL, AVATAR_HEIGHT_M)?,
@@ -1135,12 +1129,12 @@ impl CitySession {
             respawn_in_s: None,
             spawn_count: 0,
             shots: Vec::new(),
-            reload_left_s: 0.0,
-            laser_left_s: 0.0,
-            recoil_left_s: 0.0,
+            weapons,
+            since_movement_key_s: f64::INFINITY,
+            was_firing: false,
+            has_shot_hit_wormholes: false,
             bob_phase_rad: 0.0,
             bob_frac: 0.0,
-            run_pose_frac: 0.0,
             remote_lasers: HashMap::new(),
             remote_motion: HashMap::new(),
             disabling: None,
@@ -1153,29 +1147,16 @@ impl CitySession {
             frame_ms: Vec::new(),
             gpu_ms: Vec::new(),
             last_frame: None,
-            hit_count: 0,
             rifle_log: RifleLog::default(),
-            was_trigger_held: false,
             map_base: std::cell::OnceCell::new(),
             minimap_base,
             hud: (0.0, 0, 0.0),
-            is_aiming: false,
-            aim_frac: 0.0,
             exit_prompt: exit_prompt::ExitPrompt::New(),
             phase_ms: Vec::new(),
             player_settings_path,
             menu: None,
-            gun: if arguments.play_route {
-                Gun::Laser
-            } else {
-                Gun::Rifle
-            },
-            rifle_heat_frac: 0.0,
-            is_overheated: false,
             health_pulses: hud_bars::BarPulses::New(1.0),
             energy_pulses: hud_bars::BarPulses::New(1.0),
-            shot_noise: shot_noise::ShotNoise::FromClock(),
-            beam_speckle_frac: 0.0,
             is_flashlight_on: false,
             view_switch: third_person::ViewSwitch::FirstPerson(),
             dust: Vec::new(),
@@ -1245,48 +1226,119 @@ impl CitySession {
             .min_by(|a, b| (a.0 - eye).length().total_cmp(&(b.0 - eye).length()))
             .map(|(feet, up)| (feet + up * HEAD_HEIGHT_M, feet + up * TORSO_HEIGHT_M));
         BrainSight {
-            is_overheated: self.is_overheated,
-            heat_frac: self.rifle_heat_frac,
+            is_overheated: self.weapons.is_overheated,
+            heat_frac: self.weapons.rifle_heat_frac,
             enemy,
             kill_count: self.rifle_log.kills.len() as u32,
         }
     }
 
-    /// `fire` shoots from the eye along the crosshair, telling the server about a hit.
-    fn fire(&mut self) -> Result<()> {
-        let eye: DMat4 = self.get_shot_eye();
+    /// `can_shoot` says whether this player may shoot, as on Lunar Surface: once no movement key
+    /// has been held for the server settings' `movement.shoot_after_moving_s` (standing or
+    /// falling with no key held may shoot), and only while in the game (spawned and welcomed), not
+    /// holding `E` on a console, and before a team has won.
+    fn can_shoot(&self) -> bool {
+        self.since_movement_key_s >= self.settings.movement.shoot_after_moving_s
+            && self.is_spawned
+            && self.client.id.is_some()
+            && self.disabling.is_none()
+            && self.client.game.winner.is_none()
+    }
+
+    /// `fire_sniper` fires the sniper on a click, as on Lunar Surface: only with the sniper in
+    /// hand, loaded, and while this player `can_shoot`; its shot then hits for `sniper.shot_s`
+    /// (`trace_own_shot`).
+    fn fire_sniper(&mut self) {
+        if self.weapons.gun == Gun::Laser && self.weapons.sniper_reload_s <= 0.0 && self.can_shoot()
+        {
+            self.has_shot_hit_wormholes = false;
+            self.weapons.fire_sniper(&self.settings.sniper);
+        }
+    }
+
+    /// `update_rifle` fires the rifle while its trigger is held (`Weapons::update_rifle`: its rate,
+    /// heat, overheating, cooling and stray), turns the view by each shot's kick, and logs the
+    /// rifle check's shots until it overheated and how long it took to cool.
+    fn update_rifle(&mut self, dt_s: f64) {
+        let can_shoot: bool = self.can_shoot();
+        let kick: Option<[f64; 2]> =
+            self.weapons
+                .update_rifle(&self.settings.rifle, can_shoot, dt_s);
+        if let Some([right_rad, down_rad]) = kick {
+            self.has_shot_hit_wormholes = false;
+            self.player.look_around(-right_rad, -down_rad);
+            self.rifle_log.cold_shot_count += 1;
+            if self.weapons.is_overheated && self.rifle_log.shots_until_overheat.is_none() {
+                self.rifle_log.shots_until_overheat = Some(self.rifle_log.cold_shot_count);
+                self.rifle_log.overheated_at_s = Some(self.now_s());
+            }
+        }
+        if let Some(at_s) = self.rifle_log.overheated_at_s
+            && !self.weapons.is_overheated
+            && self.rifle_log.cool_down_s.is_none()
+        {
+            self.rifle_log.cool_down_s = Some(self.now_s() - at_s);
+        }
+    }
+
+    /// `get_laser_aim` gives the frame this player's shot leaves from while one hits
+    /// (`get_shot_eye` turned by the shot's stray, `ShotOffset::aim`), or `None` between shots.
+    /// The window sends it instead of the eye while firing, so other windows draw the same shot.
+    fn get_laser_aim(&self) -> Option<DMat4> {
+        self.weapons
+            .is_firing(self.can_shoot())
+            .then(|| self.weapons.shot_offset.aim(self.get_shot_eye()))
+    }
+
+    /// `trace_own_shot` traces this player's shot on every frame it hits, as Lunar Surface does,
+    /// from the strayed aim (`get_laser_aim`) through the glass and wormholes: each frame's hit on
+    /// an enemy counts by `take_hit_weight` (the sniper's on every frame, the rifle's once a
+    /// shot), enemy wormholes it passes through are hit once a shot, and a shot's first frame
+    /// draws its beam and throws up its dust.
+    fn trace_own_shot(&mut self) -> Result<()> {
+        let Some(aim) = self.get_laser_aim() else {
+            self.was_firing = false;
+            return Ok(());
+        };
         let team: u32 = self.get_team();
         let targets: Vec<Target> = self.get_targets(Some(team));
         let (mut legs, owners) = self.trace_through_wormholes(
-            eye.w_axis.truncate(),
-            -eye.z_axis.truncate(),
+            aim.w_axis.truncate(),
+            -aim.z_axis.truncate(),
             &targets,
             self.client.id,
         );
         let shot: Shot = legs.pop().expect("a shot has a leg");
-        for owner in owners {
-            if self
-                .client
-                .players
-                .iter()
-                .any(|p| p.id == owner && p.team != team)
-            {
-                let hits_to_destroy: u8 = match self.gun {
-                    Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
-                    Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
-                };
+        let enemy_owners: Vec<u32> = owners
+            .into_iter()
+            .filter(|&owner| {
+                self.client
+                    .players
+                    .iter()
+                    .any(|p| p.id == owner && p.team != team)
+            })
+            .collect();
+        if !self.has_shot_hit_wormholes && !enemy_owners.is_empty() {
+            self.has_shot_hit_wormholes = true;
+            let hits_to_destroy: u8 = match self.weapons.gun {
+                Gun::Laser => self.settings.wormholes.sniper_hits_to_destroy,
+                Gun::Rifle => self.settings.wormholes.rifle_hits_to_destroy,
+            };
+            for owner in enemy_owners {
                 self.client.send_wormhole_hit(owner, hits_to_destroy)?;
             }
         }
-        if let ShotHit::Player { id, is_head } = shot.hit {
-            let hits_to_kill: u8 = match (self.gun, is_head) {
-                (Gun::Laser, _) => self.settings.sniper.hits_to_eliminate,
-                (Gun::Rifle, true) => self.settings.rifle.head_hits_to_eliminate,
-                (Gun::Rifle, false) => self.settings.rifle.body_hits_to_eliminate,
-            };
+        if let ShotHit::Player { id, is_head } = shot.hit
+            && let Some(hits_to_kill) = take_hit_weight(
+                &self.settings.sniper,
+                &self.settings.rifle,
+                self.weapons.gun,
+                &mut self.weapons.has_rifle_shot_hit,
+                is_head,
+            )
+        {
             self.client.send_hit(id, hits_to_kill)?;
-            self.hit_count += 1;
-            if self.gun == Gun::Rifle {
+            if self.weapons.gun == Gun::Rifle {
                 if is_head {
                     self.rifle_log.head_hit_count += 1;
                 } else {
@@ -1298,43 +1350,22 @@ impl CitySession {
                 shot.bounce_count
             ));
         }
-        self.beam_speckle_frac = shot_noise::round_speckle_frac(match self.gun {
-            Gun::Laser => self.shot_noise.sample_sniper_speckle(&self.settings.sniper),
-            Gun::Rifle => {
-                shot_noise::get_rifle_speckle_frac(&self.settings.rifle, self.rifle_heat_frac)
-            }
-        });
-        self.add_dust(&shot, eye.w_axis.truncate(), self.gun == Gun::Rifle);
-        let now_s: f64 = self.now_s();
-        for (k, leg) in legs.into_iter().chain([shot]).enumerate() {
-            self.shots.push(LiveShot {
-                shot: leg,
-                start_s: now_s,
-                team,
-                is_own: k == 0,
-                speckle_frac: self.beam_speckle_frac,
-                is_rifle: self.gun == Gun::Rifle,
-            });
-        }
-        match self.gun {
-            Gun::Laser => {
-                self.reload_left_s = self.settings.sniper.reload_s;
-                self.laser_left_s = self.settings.sniper.shot_s;
-            }
-            Gun::Rifle => {
-                let rifle = &self.settings.rifle;
-                self.reload_left_s = 1.0 / rifle.shots_per_s;
-                self.laser_left_s = rifle.pulse_s;
-                self.rifle_heat_frac += 1.0 / f64::from(rifle.shots_until_overheat);
-                self.is_overheated = self.rifle_heat_frac >= 1.0;
-                self.rifle_log.cold_shot_count += 1;
-                if self.is_overheated && self.rifle_log.shots_until_overheat.is_none() {
-                    self.rifle_log.shots_until_overheat = Some(self.rifle_log.cold_shot_count);
-                    self.rifle_log.overheated_at_s = Some(self.now_s());
-                }
+        if !self.was_firing {
+            let is_rifle: bool = self.weapons.gun == Gun::Rifle;
+            self.add_dust(&shot, aim.w_axis.truncate(), is_rifle);
+            let now_s: f64 = self.now_s();
+            for (k, leg) in legs.into_iter().chain([shot]).enumerate() {
+                self.shots.push(LiveShot {
+                    shot: leg,
+                    start_s: now_s,
+                    team,
+                    is_own: k == 0,
+                    speckle_frac: self.weapons.beam_speckle_frac,
+                    is_rifle,
+                });
             }
         }
-        self.recoil_left_s = RECOIL_S;
+        self.was_firing = true;
         Ok(())
     }
 
@@ -1394,20 +1425,7 @@ impl CitySession {
         }
         step_respawn(&mut self.client, &mut self.respawn_in_s, dt_s)?;
         self.update_hit(dt_s);
-        self.reload_left_s = (self.reload_left_s - dt_s).max(0.0);
-        self.laser_left_s = (self.laser_left_s - dt_s).max(0.0);
-        self.recoil_left_s = (self.recoil_left_s - dt_s).max(0.0);
-        if self.gun == Gun::Laser || !self.was_trigger_held || self.is_overheated {
-            self.rifle_heat_frac =
-                (self.rifle_heat_frac - dt_s / self.settings.rifle.cool_down_s).max(0.0);
-            self.is_overheated &= self.rifle_heat_frac > 0.0;
-            if let Some(at_s) = self.rifle_log.overheated_at_s
-                && !self.is_overheated
-                && self.rifle_log.cool_down_s.is_none()
-            {
-                self.rifle_log.cool_down_s = Some(now_s - at_s);
-            }
-        }
+        self.weapons.tick(dt_s);
         let is_playing: bool = self.is_spawned && self.client.game.winner.is_none();
         let mut input = CityInput {
             speed_frac: self.get_speed_frac(),
@@ -1415,6 +1433,8 @@ impl CitySession {
         };
         let (mut wants_shot, mut console) = (false, None);
         let sight: BrainSight = self.get_brain_sight();
+        let can_brain_shoot: bool = self.can_shoot()
+            && (self.weapons.gun == Gun::Rifle || self.weapons.sniper_reload_s <= 0.0);
         if let Some(brain) = &mut self.brain {
             if self.is_spawned {
                 let out: BrainOutput = brain.drive(
@@ -1422,7 +1442,7 @@ impl CitySession {
                     &mut self.player,
                     dt_s,
                     &self.client.game,
-                    is_playing && self.reload_left_s <= 0.0,
+                    can_brain_shoot,
                     &sight,
                 );
                 input = CityInput {
@@ -1439,7 +1459,7 @@ impl CitySession {
                     self.thrown.throw(flight, now_s);
                 }
                 if out.wants_rifle {
-                    self.gun = Gun::Rifle;
+                    self.weapons.switch_gun(Gun::Rifle);
                 }
                 wants_shot = out.is_shooting;
                 console = out.console.and_then(|index| self.find_console(Some(index)));
@@ -1478,27 +1498,26 @@ impl CitySession {
             ENERGY_SEGMENT_COUNT,
             &hud_bars::PULSE_TUNING,
         );
-        self.was_trigger_held = wants_shot;
-        if wants_shot
-            && is_playing
-            && self.reload_left_s <= 0.0
-            && !(self.gun == Gun::Rifle && self.is_overheated)
-        {
-            self.fire()?;
-        }
         match console.filter(|_| is_playing) {
             Some(index) if self.disabling == Some(index) => self.disabling_s += dt_s,
             Some(index) => (self.disabling, self.disabling_s) = (Some(index), 0.0),
             None => (self.disabling, self.disabling_s) = (None, 0.0),
         }
+        self.weapons.is_trigger_held = wants_shot;
+        if wants_shot && self.brain.is_some() {
+            self.fire_sniper();
+        }
+        self.update_rifle(dt_s);
+        self.trace_own_shot()?;
         self.update_remote(now_s, dt_s);
         if self.is_spawned && self.client.id.is_some() {
+            let laser_aim: Option<DMat4> = self.get_laser_aim();
             self.client.send_state(
-                self.player.get_eye_frame(),
-                self.laser_left_s > 0.0,
-                self.gun == Gun::Rifle,
+                laser_aim.unwrap_or_else(|| self.player.get_eye_frame()),
+                laser_aim.is_some(),
+                self.weapons.gun == Gun::Rifle,
                 self.disabling,
-                self.beam_speckle_frac,
+                self.weapons.beam_speckle_frac,
                 self.thrown.placed,
             )?;
         }
@@ -1518,10 +1537,20 @@ impl CitySession {
     /// `update_gun_motion` moves the head bob and the gun as Lunar Surface does on its voxel maps:
     /// the step phase advances at the head bob's walking or sprinting steps a second while moving
     /// on the ground, `bob_frac` eases in and out over its `fade_s`, and the gun's pose goes
-    /// toward jogging while sprinting and back to aiming otherwise.
+    /// toward jogging while sprinting and back to aiming otherwise. As on Lunar Surface, it counts
+    /// the time since a movement key (walking or jumping) was last held, and moving ends the shot
+    /// under way (`can_shoot`).
     fn update_gun_motion(&mut self, input: &CityInput, dt_s: f64) {
-        let bob = &self.player_settings.view.head_bob;
         let is_moving: bool = input.forward_frac != 0.0 || input.right_frac != 0.0;
+        self.since_movement_key_s = if is_moving || input.is_jumping {
+            0.0
+        } else {
+            self.since_movement_key_s + dt_s
+        };
+        if !self.can_shoot() {
+            self.weapons.shot_time_s = 0.0;
+        }
+        let bob = &self.player_settings.view.head_bob;
         let is_stepping: bool = is_moving && self.player.is_on_ground;
         if is_stepping {
             let steps_per_s: f64 = if self.player.is_sprinting {
@@ -1535,9 +1564,10 @@ impl CitySession {
         let fade_frac: f64 = dt_s / bob.fade_s;
         self.bob_frac +=
             (f64::from(u8::from(is_stepping)) - self.bob_frac).clamp(-fade_frac, fade_frac);
+        (self.weapons.gun_phase_rad, self.weapons.step_frac) = (self.bob_phase_rad, self.bob_frac);
         let pose_target: f64 = f64::from(u8::from(self.player.is_sprinting && is_moving));
-        self.run_pose_frac +=
-            (pose_target - self.run_pose_frac).clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
+        self.weapons.run_pose_frac += (pose_target - self.weapons.run_pose_frac)
+            .clamp(-GUN_POSE_PER_S * dt_s, GUN_POSE_PER_S * dt_s);
     }
 
     /// `place_camera` puts the camera for the eye frame `eye`, as Lunar Surface's
@@ -1547,7 +1577,7 @@ impl CitySession {
     /// of the street, the glass or a box. It gives the camera's frame and whether this player's own
     /// body shows from there (the pivot cleared `MIN_PIVOT_UP_M`) rather than the gun.
     fn place_camera(&self, eye: DMat4) -> (DMat4, bool) {
-        let boom_frac: f64 = self.view_switch.get_boom_frac(self.aim_frac);
+        let boom_frac: f64 = self.view_switch.get_boom_frac(self.weapons.aim_frac);
         let along_m: f64 = boom_frac * (third_person::PIVOT_UP_M + third_person::BOOM_BACK_M);
         if along_m <= 0.0 {
             return (eye, false);
@@ -1676,19 +1706,23 @@ impl CitySession {
                 &hud_bars::PULSE_TUNING,
             ),
         ));
-        rects.extend(match self.gun {
+        rects.extend(match self.weapons.gun {
             Gun::Laser => hud_bars::make_segmented_bar(
                 HEAT_BAR_MIN_FRAC,
                 1,
-                if self.reload_left_s <= 0.0 { 1.0 } else { 0.0 },
+                if self.weapons.sniper_reload_s <= 0.0 {
+                    1.0
+                } else {
+                    0.0
+                },
                 HEAT_BAR_RGB,
                 render_metal::NO_RECT_PULSE,
             ),
             Gun::Rifle => hud_bars::make_segmented_bar(
                 HEAT_BAR_MIN_FRAC,
                 self.settings.rifle.shots_until_overheat,
-                1.0 - self.rifle_heat_frac.min(1.0),
-                if self.is_overheated {
+                1.0 - self.weapons.rifle_heat_frac.min(1.0),
+                if self.weapons.is_overheated {
                     HEAT_BAR_OVERHEATED_RGB
                 } else {
                     HEAT_BAR_RGB
@@ -2116,11 +2150,7 @@ impl CitySession {
     /// `get_zoom` gives how much closer the world looks now, as on Lunar Surface: the gun in
     /// hand's full zoom (`aim` in the server settings), eased in by how far this player has aimed.
     fn get_zoom(&self) -> f64 {
-        let full_zoom: f64 = match self.gun {
-            Gun::Laser => self.settings.aim.sniper_zoom,
-            Gun::Rifle => self.settings.aim.rifle_zoom,
-        };
-        get_aim_zoom(self.aim_frac, full_zoom)
+        self.weapons.get_zoom(&self.settings.aim)
     }
 
     /// `get_banner_lines` gives the two centred lines to show, if any: the exit prompt (`Esc` with
@@ -2188,13 +2218,15 @@ impl CitySession {
             "{WINDOW_TITLE}: {team} | {level} | consoles on: blue {} red {} | {} | {fps:.0} fps, GPU {gpu_ms:.2} ms at {}x{}",
             on(0),
             on(1),
-            match self.gun {
-                Gun::Laser if self.reload_left_s > 0.0 =>
-                    format!("laser reloading {:.1} s", self.reload_left_s),
+            match self.weapons.gun {
+                Gun::Laser if self.weapons.sniper_reload_s > 0.0 =>
+                    format!("laser reloading {:.1} s", self.weapons.sniper_reload_s),
                 Gun::Laser => "laser ready".to_string(),
-                Gun::Rifle if self.is_overheated =>
-                    format!("rifle overheated {:.0}%", self.rifle_heat_frac * 100.0),
-                Gun::Rifle => format!("rifle heat {:.0}%", self.rifle_heat_frac * 100.0),
+                Gun::Rifle if self.weapons.is_overheated => format!(
+                    "rifle overheated {:.0}%",
+                    self.weapons.rifle_heat_frac * 100.0
+                ),
+                Gun::Rifle => format!("rifle heat {:.0}%", self.weapons.rifle_heat_frac * 100.0),
             },
             render_px.0,
             render_px.1
@@ -2291,19 +2323,14 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
         session
             .view_switch
             .update((session.now_s() - session.last_s).clamp(0.0, MAX_DT_S));
-        session.is_aiming = session.is_captured
+        let is_aiming: bool = session.is_captured
             && session.is_spawned
             && !session.exit_prompt.is_shown()
             && held.contains(&Action::Aim);
-        let aim_step: f64 =
-            (session.now_s() - session.last_s).clamp(0.0, MAX_DT_S) / session.settings.aim.zoom_s;
-        session.aim_frac = (session.aim_frac
-            + if session.is_aiming {
-                aim_step
-            } else {
-                -aim_step
-            })
-        .clamp(0.0, 1.0);
+        let aim_dt_s: f64 = (session.now_s() - session.last_s).clamp(0.0, MAX_DT_S);
+        session
+            .weapons
+            .update_aim(is_aiming, aim_dt_s, &session.settings.aim);
         lap(0);
         session.update(&held)?;
         lap(1);
@@ -2362,23 +2389,23 @@ fn play(arguments: &Arguments, metal: &mut render_metal::MetalRenderer) -> Resul
                 minimap: make_minimap(&session, window_px),
             });
         let wand = (session.is_spawned && !session.is_own_body_shown()).then(|| {
-            let recoil_frac: f64 = session.recoil_left_s / RECOIL_S;
+            let weapons: &Weapons = &session.weapons;
             (
                 make_wand(
-                    session.run_pose_frac,
-                    session.bob_phase_rad,
-                    recoil_frac,
+                    weapons.run_pose_frac,
+                    weapons.gun_phase_rad,
+                    weapons.recoil_frac,
                     session.get_team(),
-                    session.gun,
+                    weapons.gun,
                     get_sway(
-                        session.gun.get_model(),
-                        session.bob_frac,
-                        session.run_pose_frac,
-                        session.bob_phase_rad,
+                        weapons.gun.get_model(),
+                        weapons.step_frac,
+                        weapons.run_pose_frac,
+                        weapons.gun_phase_rad,
                         &session.player_settings.view.head_bob,
                     ),
                 ),
-                session.gun.get_model(),
+                weapons.gun.get_model(),
             )
         });
         let overlay = render_metal::Overlay {
@@ -2459,6 +2486,7 @@ fn handle_event(
         return Ok(true);
     };
     let is = |action: Action| session.player_settings.keys.matches(action, control);
+    let is_shoot_pressed: bool = is(Action::Shoot);
     if session.exit_prompt.is_shown() {
         return Ok(session.exit_prompt.answer(control) != exit_prompt::ExitOutcome::Exit);
     }
@@ -2481,16 +2509,13 @@ fn handle_event(
         let team: u32 = u32::from(is(Action::JoinRed));
         session.client.join(Some(team))?;
     } else if is(Action::Gun1) || is(Action::Gun2) || is(Action::SwitchGun) {
-        session.gun = if is(Action::Gun1) {
+        session.weapons.switch_gun(if is(Action::Gun1) {
             Gun::Laser
-        } else if is(Action::Gun2) || session.gun == Gun::Laser {
+        } else if is(Action::Gun2) || session.weapons.gun == Gun::Laser {
             Gun::Rifle
         } else {
             Gun::Laser
-        };
-        session.reload_left_s = session
-            .reload_left_s
-            .min(1.0 / session.settings.rifle.shots_per_s);
+        });
     } else if is(Action::SwitchView) {
         session.view_switch.toggle();
     } else if is(Action::ThrowWormhole) && session.is_spawned && session.thrown.can_throw() {
@@ -2506,6 +2531,10 @@ fn handle_event(
         session.render_scale = (session.render_scale - RENDER_SCALE_STEP).max(MIN_RENDER_SCALE);
     } else if is(Action::RaiseResolution) {
         session.render_scale = (session.render_scale + RENDER_SCALE_STEP).min(1.0);
+    }
+    if is_shoot_pressed && session.is_captured && session.menu.is_none() && session.brain.is_none()
+    {
+        session.fire_sniper();
     }
     Ok(true)
 }
@@ -3466,9 +3495,37 @@ impl Rng {
     }
 }
 
+/// `find_bot_aim` gives the direction from `player`'s eye to the middle of the first of `targets`
+/// a shot along it would hit (through the glass's reflections), or `None` when none is in sight.
+///
+/// Example: `let aim: Option<DVec3> = find_bot_aim(&world, &settings, &player, &targets, client.id);`
+fn find_bot_aim(
+    world: &CityWorld,
+    settings: &ServerSettings,
+    player: &CityPlayer,
+    targets: &[Target],
+    shooter_id: Option<u32>,
+) -> Option<DVec3> {
+    let origin: DVec3 = player.get_eye_frame().w_axis.truncate();
+    targets.iter().find_map(|target| {
+        let aim: DVec3 = (target.feet + target.up - origin).normalize();
+        let shot: Shot = world.trace_shot(
+            origin,
+            aim,
+            settings.glass.range_m,
+            settings.glass.max_bounce_count,
+            targets,
+            shooter_id,
+        );
+        matches!(shot.hit, ShotHit::Player { .. }).then_some(aim)
+    })
+}
+
 /// `run_bot` plays without a window on `--join`'s server for `--exit-after-s`: it walks after the
 /// nearest enemy (on the street or the glass level, choosing again every `FIGHT_RETARGET_S`; it
-/// wanders when nobody is there) shooting enemies it can hit, or with `--bot-objective consoles` walks up its stairs
+/// wanders when nobody is there) and, once one is in sight, faces them and fires the
+/// sniper as a window does (`Weapons`: its stray, its hits on every frame of its shot, its
+/// reload), or with `--bot-objective consoles` walks up its stairs
 /// to each of the other team's consoles and holds `E` on it, aiming at it, until its team wins
 /// (`make_console_route`); if it can't aim at the console for `CONSOLE_REPLAN_S` (it fell off the
 /// glass level, say), it starts the walk again from its stairs.
@@ -3485,8 +3542,10 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
     let mut settings: ServerSettings = ServerSettings::Builtin();
     let mut player: CityPlayer = world.make_player(0, 0);
     let (mut is_spawned, mut respawn_in_s, mut spawn_count) = (false, None::<f64>, 0);
-    let (mut hit_count, mut eliminated_count, mut reload_left_s, mut laser_left_s) =
-        (0u32, 0u32, 0.0, 0.0);
+    let (mut hit_count, mut eliminated_count) = (0u32, 0u32);
+    let mut weapons: Weapons = Weapons::New(ShotNoise::FromClock());
+    weapons.switch_gun(Gun::Laser);
+    let mut has_shot_hit: bool = false;
     let mut rng: Rng = Rng(0x9e37_79b9_7f4a_7c15
         ^ u64::from(start.elapsed().subsec_nanos())
         ^ u64::from(std::process::id()));
@@ -3534,8 +3593,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         if !is_spawned || client.id.is_none() {
             continue;
         }
-        reload_left_s = f64::max(reload_left_s - dt_s, 0.0);
-        laser_left_s = f64::max(laser_left_s - dt_s, 0.0);
+        weapons.tick(dt_s);
         let mut disabling: Option<u8> = None;
         if arguments.bot_objective == Some(BotObjective::Consoles) {
             if brain.is_done() {
@@ -3610,7 +3668,6 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                 &BrainSight::default(),
             );
             world.move_player(&mut player, &out.input, &settings, dt_s);
-            let eye: DMat4 = player.get_eye_frame();
             let targets: Vec<Target> = client
                 .players
                 .iter()
@@ -3620,45 +3677,50 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
                     Target { id: p.id, feet, up }
                 })
                 .collect();
-            if reload_left_s <= 0.0 {
-                for target in &targets {
-                    let origin: DVec3 = eye.w_axis.truncate();
-                    let aim: DVec3 = (target.feet + target.up - origin).normalize();
-                    let shot: Shot = world.trace_shot(
-                        origin,
-                        aim,
-                        settings.glass.range_m,
-                        settings.glass.max_bounce_count,
-                        &targets,
-                        client.id,
-                    );
-                    if let ShotHit::Player { id, .. } = shot.hit {
-                        let up: DVec3 = player.get_up();
-                        let flat: DVec3 = aim - up * aim.dot(up);
-                        let forward: DVec3 = -player.body.z_axis;
-                        player.look_around(
-                            forward
-                                .cross(flat.normalize())
-                                .dot(up)
-                                .atan2(forward.dot(flat.normalize())),
-                            0.0,
-                        );
-                        player.pitch_rad = aim.dot(up).asin();
-                        client.send_hit(id, settings.sniper.hits_to_eliminate)?;
-                        hit_count += 1;
-                        reload_left_s = settings.sniper.reload_s;
-                        laser_left_s = settings.sniper.shot_s;
-                        break;
-                    }
+            if weapons.sniper_reload_s <= 0.0
+                && let Some(aim) = find_bot_aim(&world, &settings, &player, &targets, client.id)
+            {
+                let eye_point: DVec3 = player.get_eye_frame().w_axis.truncate();
+                aim_at(&mut player, eye_point + aim);
+                weapons.fire_sniper(&settings.sniper);
+                has_shot_hit = false;
+            }
+            if weapons.is_firing(true) {
+                let shot_eye: DMat4 = weapons.shot_offset.aim(player.get_eye_frame());
+                let shot: Shot = world.trace_shot(
+                    shot_eye.w_axis.truncate(),
+                    -shot_eye.z_axis.truncate(),
+                    settings.glass.range_m,
+                    settings.glass.max_bounce_count,
+                    &targets,
+                    client.id,
+                );
+                if let ShotHit::Player { id, is_head } = shot.hit
+                    && let Some(hits_to_kill) = take_hit_weight(
+                        &settings.sniper,
+                        &settings.rifle,
+                        weapons.gun,
+                        &mut weapons.has_rifle_shot_hit,
+                        is_head,
+                    )
+                {
+                    client.send_hit(id, hits_to_kill)?;
+                    hit_count += u32::from(!has_shot_hit);
+                    has_shot_hit = true;
                 }
             }
         }
+        let is_laser_on: bool = weapons.is_firing(true);
         client.send_state(
-            player.get_eye_frame(),
-            laser_left_s > 0.0,
+            if is_laser_on {
+                weapons.shot_offset.aim(player.get_eye_frame())
+            } else {
+                player.get_eye_frame()
+            },
+            is_laser_on,
             false,
             disabling,
-            0.0,
+            weapons.beam_speckle_frac,
             PlayerWormholes::default(),
         )?;
     }
