@@ -6,10 +6,12 @@
 //! with a circle of what is within reach of them (the rest darker and blurred) and the other
 //! players as dots in their team's colour. When the map has a picture from above
 //! (`map_photo.rs`), that picture replaces the drawing under the marks. It also lends the picture without labels, and where it
-//! lies, to the minimap.
+//! lies, to the minimap. On a looping map (`torus_periods_m`), the picture is the cell with a margin that repeats
+//! the far side, dashed lines along the seams and no boundary, and the minimap's picture repeats the cell
+//! `MINIMAP_REACH_M` beyond that.
 //!
 //! Interface: `MapLayout` (`FromMap`, `draw_players`, `get_size_px`, `get_plain_pixels`,
-//! `get_placement`, `get_curvature_radius_m`).
+//! `get_plain_size_px`, `get_placement`, `get_photo_placement`, `get_curvature_radius_m`).
 //!
 //! Example: `let pixels = layout.draw_players(feet_frame, 0, 60.0, &others);`
 //!
@@ -33,6 +35,7 @@ use crate::map_photo::get_map_photo_path;
 use crate::net::TEAM_NAMES;
 use crate::shapes::{Shape, find_hit_mu};
 use crate::terrain::{Terrain, get_fermi_coordinates};
+use crate::torus::get_cell_offset_m;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -50,6 +53,8 @@ const COLUMN_TOP_MARGIN_M: f64 = 0.5;
 const GAMMA: f32 = 2.2;
 const ZONE_DASH_PX: usize = 6;
 const ZONE_COLOR: [u8; 3] = [230, 230, 230];
+const SEAM_COLOR: [u8; 3] = [120, 120, 130];
+const MINIMAP_REACH_M: f64 = 80.0;
 const BOUNDARY_COLOR: [u8; 3] = [255, 255, 255];
 const BLACK_HOLE_COLOR: [u8; 3] = [0, 0, 0];
 const BLACK_HOLE_RING_COLOR: [u8; 3] = [255, 170, 60];
@@ -163,17 +168,21 @@ impl Footprint {
 }
 
 /// `MapLayout` is a map's picture seen from above (RGBA, top row first), the same picture without
-/// labels (for the minimap) and darkened and blurred (out of the player's range), and what
-/// `draw_players` needs to place players on it: the curvature radius, the Fermi coordinates of the
-/// picture's top left corner and the meters per pixel.
+/// labels (for the minimap, its size and the Fermi coordinates of its top left corner) and darkened
+/// and blurred (out of the player's range), and what `draw_players` needs to place players on it:
+/// the curvature radius, the Fermi coordinates of the picture's top left corner, the meters per
+/// pixel and, on a looping map, the periods.
 pub struct MapLayout {
     pixels: Vec<u8>,
     plain_pixels: Vec<u8>,
+    plain_size_px: (u32, u32),
+    plain_corner_m: [f64; 2],
     dim_pixels: Vec<u8>,
     size_px: (u32, u32),
     r_m: f64,
     corner_m: [f64; 2],
     m_per_px: f64,
+    periods_m: Option<[f64; 2]>,
 }
 
 impl MapLayout {
@@ -185,12 +194,19 @@ impl MapLayout {
     pub fn FromMap(map: &Map, max_size_px: (u32, u32)) -> Result<MapLayout> {
         let r_m: f64 = map.get_curvature_radius_m();
         let footprints: Vec<Footprint> = make_footprints(map, r_m)?;
+        let periods_m: Option<[f64; 2]> = map.space.torus_periods_m;
         let boundary_m: Option<[f64; 2]> = map
             .regions
             .as_ref()
             .and_then(|regions| regions.boundary.as_ref())
+            .filter(|_| periods_m.is_none())
             .map(|boundary| [boundary.u_m, boundary.v_m]);
-        let [min_m, max_m] = get_bounds_m(map, &footprints, boundary_m, r_m);
+        let [min_m, max_m] = match periods_m {
+            Some(periods_m) => {
+                [-1.0, 1.0].map(|sign| periods_m.map(|p| sign * (p / 2.0 + MARGIN_M)))
+            }
+            None => get_bounds_m(map, &footprints, boundary_m, r_m),
+        };
         let m_per_px: f64 = ((max_m[0] - min_m[0]) / f64::from(max_size_px.0))
             .max((max_m[1] - min_m[1]) / f64::from(max_size_px.1));
         let size_px: (u32, u32) = (
@@ -204,43 +220,58 @@ impl MapLayout {
         let mut layout: MapLayout = MapLayout {
             pixels: vec![0; size_px.0 as usize * size_px.1 as usize * BYTES_PER_PIXEL],
             plain_pixels: Vec::new(),
+            plain_size_px: size_px,
+            plain_corner_m: min_m,
             dim_pixels: Vec::new(),
             size_px,
             r_m,
             corner_m: min_m,
             m_per_px,
+            periods_m,
         };
         layout.paint_tops(map, &footprints, boundary_m)?;
         let has_photo: bool = layout.paint_photo(&map.name)?;
+        if periods_m.is_some() {
+            layout.pixels = layout.get_tiled_pixels(min_m, size_px);
+            layout.paint_seams();
+        }
+        let copy_offsets_m: Vec<[f64; 2]> = layout.get_copy_offsets_m();
         if let Some(regions) = &map.regions {
             for zone in regions.zones.iter().flatten() {
                 for u_m in [zone.u_min_m, zone.u_max_m].into_iter().flatten() {
-                    layout.paint_zone_edge(u_m, boundary_m);
+                    for offset_m in copy_offsets_m.iter().filter(|offset_m| offset_m[1] == 0.0) {
+                        layout.paint_zone_edge(u_m + offset_m[0], boundary_m);
+                    }
                 }
             }
         }
         let mut labels: Vec<(String, [f64; 2])> = Vec::new();
         for (point_m, team) in find_console_points(map, r_m) {
-            let center_px: [f64; 2] = layout.get_px(point_m);
-            layout.paint_disk(
-                center_px,
-                CONSOLE_MARKER_RADIUS_PX,
-                TEAM_COLORS[team as usize],
-            );
+            for offset_m in &copy_offsets_m {
+                let center_px: [f64; 2] =
+                    layout.get_px([point_m[0] + offset_m[0], point_m[1] + offset_m[1]]);
+                layout.paint_disk(
+                    center_px,
+                    CONSOLE_MARKER_RADIUS_PX,
+                    TEAM_COLORS[team as usize],
+                );
+            }
         }
         for warp in &map.warps {
             let [u_m, v_m, _] = get_fermi_coordinates(to_frame(&warp.frame).col(AXIS_W), r_m);
             let center_px: [f64; 2] = layout.get_px([u_m, v_m]);
             let radius_px: f64 = warp.schwarzschild_radius_m / m_per_px;
             if warp.kind == WARP_KIND_BLACK_HOLE {
-                if !has_photo {
-                    layout.paint_disk(center_px, radius_px, BLACK_HOLE_COLOR);
-                    layout.paint_ring(center_px, radius_px, BLACK_HOLE_RING_COLOR);
+                for offset_m in copy_offsets_m.iter().filter(|_| !has_photo) {
+                    let copy_px: [f64; 2] = layout.get_px([u_m + offset_m[0], v_m + offset_m[1]]);
+                    layout.paint_disk(copy_px, radius_px, BLACK_HOLE_COLOR);
+                    layout.paint_ring(copy_px, radius_px, BLACK_HOLE_RING_COLOR);
                 }
                 labels.push(make_label_right("black hole", center_px, radius_px));
             } else {
-                if !has_photo {
-                    layout.paint_ring(center_px, radius_px, MOUTH_COLOR);
+                for offset_m in copy_offsets_m.iter().filter(|_| !has_photo) {
+                    let copy_px: [f64; 2] = layout.get_px([u_m + offset_m[0], v_m + offset_m[1]]);
+                    layout.paint_ring(copy_px, radius_px, MOUTH_COLOR);
                 }
                 let name: &str = warp
                     .name
@@ -262,7 +293,10 @@ impl MapLayout {
                     (TEAM_COLORS[index], format!("{team} spawn"))
                 }
             };
-            layout.paint_disk(center_px, SPAWN_MARKER_RADIUS_PX, color);
+            for offset_m in &copy_offsets_m {
+                let copy_px: [f64; 2] = layout.get_px([u_m + offset_m[0], v_m + offset_m[1]]);
+                layout.paint_disk(copy_px, SPAWN_MARKER_RADIUS_PX, color);
+            }
             labels.push((
                 label.clone(),
                 [
@@ -272,6 +306,13 @@ impl MapLayout {
             ));
         }
         layout.plain_pixels = layout.pixels.clone();
+        if periods_m.is_some() {
+            let reach_px: u32 = (MINIMAP_REACH_M / m_per_px).ceil() as u32;
+            layout.plain_corner_m = min_m.map(|c| c - f64::from(reach_px) * m_per_px);
+            layout.plain_size_px = (size_px.0 + 2 * reach_px, size_px.1 + 2 * reach_px);
+            layout.plain_pixels =
+                layout.get_tiled_pixels(layout.plain_corner_m, layout.plain_size_px);
+        }
         layout.draw_labels(&labels)?;
         layout.dim_pixels = make_dim_pixels(&layout.pixels, size_px);
         Ok(layout)
@@ -311,12 +352,91 @@ impl MapLayout {
         &self.plain_pixels
     }
 
-    /// `get_placement` gives where the picture lies: the Fermi (u, v) of its top left corner and
-    /// its meters per pixel.
+    /// `get_plain_size_px` gives the width and height in pixels of the picture without labels.
+    ///
+    /// Example: `let (width_px, height_px) = layout.get_plain_size_px();`
+    pub fn get_plain_size_px(&self) -> (u32, u32) {
+        self.plain_size_px
+    }
+
+    /// `get_placement` gives where the picture without labels lies, for the minimap: the Fermi
+    /// (u, v) of its top left corner and its meters per pixel.
     ///
     /// Example: `let (corner_m, m_per_px) = layout.get_placement();`
     pub fn get_placement(&self) -> ([f64; 2], f64) {
+        (self.plain_corner_m, self.m_per_px)
+    }
+
+    /// `get_photo_placement` gives where the map page's picture lies, which a picture from above
+    /// (`map_photo.rs`) covers: the Fermi (u, v) of its top left corner and its meters per pixel.
+    ///
+    /// Example: `let (corner_m, m_per_px) = layout.get_photo_placement();`
+    pub fn get_photo_placement(&self) -> ([f64; 2], f64) {
         (self.corner_m, self.m_per_px)
+    }
+
+    /// `get_copy_offsets_m` gives the multiples of the periods at which the cell repeats on the
+    /// picture of a looping map, none included, or only none on any other map.
+    ///
+    /// Example: `let offsets_m = layout.get_copy_offsets_m();`
+    fn get_copy_offsets_m(&self) -> Vec<[f64; 2]> {
+        match self.periods_m {
+            None => vec![[0.0, 0.0]],
+            Some(periods_m) => (-1..=1)
+                .flat_map(|i| {
+                    (-1..=1)
+                        .map(move |j| [f64::from(i) * periods_m[0], f64::from(j) * periods_m[1]])
+                })
+                .collect(),
+        }
+    }
+
+    /// `get_tiled_pixels` gives a picture of a looping map, `size_px` big with its top left corner
+    /// at Fermi (u, v) `corner_m`, each pixel taken from this picture at the same spot moved into
+    /// the cell.
+    ///
+    /// Example: `let pixels = layout.get_tiled_pixels([-136.0, -116.0], (1900, 1600));`
+    fn get_tiled_pixels(&self, corner_m: [f64; 2], size_px: (u32, u32)) -> Vec<u8> {
+        let periods_m: [f64; 2] = self.periods_m.expect("a looping map");
+        let (width, height) = (size_px.0 as usize, size_px.1 as usize);
+        let (from_width, from_height) = (self.size_px.0 as usize, self.size_px.1 as usize);
+        let mut pixels: Vec<u8> = vec![0; width * height * BYTES_PER_PIXEL];
+        for y in 0..height {
+            for x in 0..width {
+                let spot_m: [f64; 2] = [
+                    corner_m[0] + (x as f64 + 0.5) * self.m_per_px,
+                    corner_m[1] + (y as f64 + 0.5) * self.m_per_px,
+                ];
+                let offset_m: [f64; 2] = get_cell_offset_m(spot_m, periods_m);
+                let [from_x, from_y] = self
+                    .get_px([spot_m[0] + offset_m[0], spot_m[1] + offset_m[1]])
+                    .map(|p| p as usize);
+                let from: usize = (from_x.min(from_width - 1)
+                    + from_width * from_y.min(from_height - 1))
+                    * BYTES_PER_PIXEL;
+                let to: usize = (x + width * y) * BYTES_PER_PIXEL;
+                pixels[to..to + BYTES_PER_PIXEL]
+                    .copy_from_slice(&self.pixels[from..from + BYTES_PER_PIXEL]);
+            }
+        }
+        pixels
+    }
+
+    /// `paint_seams` paints dashed lines along the seams of a looping map, the cell's edges.
+    ///
+    /// Example: `layout.paint_seams();`
+    fn paint_seams(&mut self) {
+        let periods_m: [f64; 2] = self.periods_m.expect("a looping map");
+        let (width, height) = (self.size_px.0 as usize, self.size_px.1 as usize);
+        for sign in [-1.0, 1.0] {
+            let [x, y] = self
+                .get_px(periods_m.map(|p| sign * p / 2.0))
+                .map(|p| p as i64);
+            for along in (0..width.max(height)).filter(|i| (i / ZONE_DASH_PX).is_multiple_of(2)) {
+                self.paint_pixel(x, along as i64, SEAM_COLOR);
+                self.paint_pixel(along as i64, y, SEAM_COLOR);
+            }
+        }
     }
 
     /// `get_curvature_radius_m` gives the map's curvature radius.
@@ -352,11 +472,14 @@ impl MapLayout {
         let mut picture: MapLayout = MapLayout {
             pixels: self.get_range_pixels([u_m, v_m], range_m),
             plain_pixels: Vec::new(),
+            plain_size_px: self.plain_size_px,
+            plain_corner_m: self.plain_corner_m,
             dim_pixels: Vec::new(),
             size_px: self.size_px,
             r_m: self.r_m,
             corner_m: self.corner_m,
             m_per_px: self.m_per_px,
+            periods_m: self.periods_m,
         };
         for &(other, other_team) in others {
             let other_px: [f64; 2] = picture.get_ground_px(other);
@@ -389,7 +512,7 @@ impl MapLayout {
     }
 
     /// `get_range_pixels` gives the picture with the pixels whose ground point is farther than
-    /// `range_m` from ground point `center_m` (u, v) taken from the darker, blurred copy, and a
+    /// `range_m` from ground point `center_m` (u, v), or from each of its copies on a looping map, taken from the darker, blurred copy, and a
     /// white rim on the near side of that edge. The distance d is hyperbolic: for ground point X at
     /// (u, v) and the centre P, cosh d = −⟨X, P⟩ = cosh v (sinh u P_z + cosh u P_w) − sinh v P_x
     /// (in curvature radii), so with a term per column and per row each pixel costs a few
@@ -398,23 +521,37 @@ impl MapLayout {
     /// Example: `let pixels = layout.get_range_pixels([-60.0, 0.0], 60.0);`
     fn get_range_pixels(&self, center_m: [f64; 2], range_m: f64) -> Vec<u8> {
         let (width, height) = (self.size_px.0 as usize, self.size_px.1 as usize);
-        let p: DVec4 = make_fermi_point(center_m[0], center_m[1], 0.0, self.r_m);
         let max_cosh: f64 = (range_m / self.r_m).cosh();
-        let column_terms: Vec<f64> = (0..width)
-            .map(|x| {
-                let u: f64 = (self.corner_m[0] + (x as f64 + 0.5) * self.m_per_px) / self.r_m;
-                u.sinh() * p.z + u.cosh() * p.w
-            })
-            .collect();
-        let rows: Vec<(f64, f64)> = (0..height)
-            .map(|y| {
-                let v: f64 = (self.corner_m[1] + (y as f64 + 0.5) * self.m_per_px) / self.r_m;
-                (v.sinh() * p.x, v.cosh())
+        let copies: Vec<(Vec<f64>, Vec<(f64, f64)>)> = (self.get_copy_offsets_m().into_iter())
+            .map(|offset_m| {
+                let p: DVec4 = make_fermi_point(
+                    center_m[0] + offset_m[0],
+                    center_m[1] + offset_m[1],
+                    0.0,
+                    self.r_m,
+                );
+                let column_terms: Vec<f64> = (0..width)
+                    .map(|x| {
+                        let u: f64 =
+                            (self.corner_m[0] + (x as f64 + 0.5) * self.m_per_px) / self.r_m;
+                        u.sinh() * p.z + u.cosh() * p.w
+                    })
+                    .collect();
+                let rows: Vec<(f64, f64)> = (0..height)
+                    .map(|y| {
+                        let v: f64 =
+                            (self.corner_m[1] + (y as f64 + 0.5) * self.m_per_px) / self.r_m;
+                        (v.sinh() * p.x, v.cosh())
+                    })
+                    .collect();
+                (column_terms, rows)
             })
             .collect();
         let is_near = |x: usize, y: usize| -> bool {
-            let (sinh_term, cosh_v) = rows[y];
-            cosh_v * column_terms[x] - sinh_term <= max_cosh
+            copies.iter().any(|(column_terms, rows)| {
+                let (sinh_term, cosh_v) = rows[y];
+                cosh_v * column_terms[x] - sinh_term <= max_cosh
+            })
         };
         let mut pixels: Vec<u8> = self.pixels.clone();
         for y in 0..height {
@@ -478,11 +615,19 @@ impl MapLayout {
     ) -> Result<()> {
         let (width, height) = (self.size_px.0 as usize, self.size_px.1 as usize);
         let (corner_m, m_per_px, r_m) = (self.corner_m, self.m_per_px, self.r_m);
+        let periods_m: Option<[f64; 2]> = self.periods_m;
         let get_point_m = |x: usize, y: usize| -> [f64; 2] {
-            [
+            let point_m: [f64; 2] = [
                 corner_m[0] + (x as f64 + 0.5) * m_per_px,
                 corner_m[1] + (y as f64 + 0.5) * m_per_px,
-            ]
+            ];
+            match periods_m {
+                Some(periods_m) => {
+                    let offset_m: [f64; 2] = get_cell_offset_m(point_m, periods_m);
+                    [point_m[0] + offset_m[0], point_m[1] + offset_m[1]]
+                }
+                None => point_m,
+            }
         };
         let is_inside = |x: usize, y: usize| -> bool {
             let [u_m, v_m] = get_point_m(x, y);
@@ -882,6 +1027,7 @@ mod tests {
     //! | Other player's height | on the ground, above it (shown at the ground point under it) | `other_players_show_in_their_teams_colour` |
     //! | Pixel and the player's range | within it (as drawn), beyond it (darker), across its edge (a white rim) | `the_range_circle_dims_what_is_beyond` |
     //! | Fermi coordinates | the ground, above it | `fermi_coordinates_round_trip` |
+    //! | Map's ground | bounded (Lunar Surface), looping (Snow Planet: the margin past a seam, the minimap's picture far past it, the range circle across it) | `lunar_surface_fits_its_boundary`, `looping_map_repeats_past_its_seams` |
 
     use super::*;
     use crate::map::get_map_folder;
@@ -896,6 +1042,92 @@ mod tests {
     fn get_rgb(pixels: &[u8], size_px: (u32, u32), x: usize, y: usize) -> [u8; 3] {
         let i: usize = (x + size_px.0 as usize * y) * BYTES_PER_PIXEL;
         [pixels[i], pixels[i + 1], pixels[i + 2]]
+    }
+
+    /// `get_rgb_at` gives the pixel of a picture `size_px` big, with its top left corner at Fermi
+    /// (u, v) `corner_m`, at `m_per_px`, under ground spot `spot_m`.
+    ///
+    /// Example: `let rgb = get_rgb_at(&pixels, (992, 536), [-60.0, -40.0], 0.12, [3.0, 4.0]);`
+    fn get_rgb_at(
+        pixels: &[u8],
+        size_px: (u32, u32),
+        corner_m: [f64; 2],
+        m_per_px: f64,
+        spot_m: [f64; 2],
+    ) -> [u8; 3] {
+        let [x, y] = [0, 1].map(|a| ((spot_m[a] - corner_m[a]) / m_per_px) as usize);
+        get_rgb(pixels, size_px, x, y)
+    }
+
+    /// `get_pixel_centre_m` gives the centre of the pixel under ground spot `spot_m` on a picture
+    /// with its top left corner at Fermi (u, v) `corner_m`, at `m_per_px`.
+    ///
+    /// Example: `let centre_m = get_pixel_centre_m([3.0, 4.0], [-60.0, -40.0], 0.12);`
+    fn get_pixel_centre_m(spot_m: [f64; 2], corner_m: [f64; 2], m_per_px: f64) -> [f64; 2] {
+        [0, 1].map(|a| {
+            corner_m[a] + (((spot_m[a] - corner_m[a]) / m_per_px).floor() + 0.5) * m_per_px
+        })
+    }
+
+    #[test]
+    fn looping_map_repeats_past_its_seams() {
+        let mut map: Map = Map::Load(&get_map_folder("snow_planet")).expect("Snow Planet loads");
+        map.curve_flat(crate::map::FLAT_CURVATURE_RADIUS_M);
+        let layout: MapLayout = MapLayout::FromMap(&map, MAX_SIZE_PX).expect("a layout");
+        let [period_u_m, _] = map.space.torus_periods_m.expect("Snow Planet loops");
+        let page = |spot_m: [f64; 2]| -> [u8; 3] {
+            let (corner_m, m_per_px) = layout.get_photo_placement();
+            get_rgb_at(&layout.pixels, layout.size_px, corner_m, m_per_px, spot_m)
+        };
+        let (corner_m, m_per_px) = layout.get_photo_placement();
+        let past_seam_m: [f64; 2] =
+            get_pixel_centre_m([-period_u_m / 2.0 - 2.0, 10.3], corner_m, m_per_px);
+        assert_eq!(
+            page(past_seam_m),
+            page([past_seam_m[0] + period_u_m, past_seam_m[1]])
+        );
+        let (corner_m, m_per_px) = layout.get_placement();
+        let plain = |spot_m: [f64; 2]| -> [u8; 3] {
+            get_rgb_at(
+                layout.get_plain_pixels(),
+                layout.get_plain_size_px(),
+                corner_m,
+                m_per_px,
+                spot_m,
+            )
+        };
+        let far_past_seam_m: [f64; 2] =
+            get_pixel_centre_m([-period_u_m / 2.0 - 40.0, 10.3], corner_m, m_per_px);
+        assert_eq!(
+            plain(far_past_seam_m),
+            plain([far_past_seam_m[0] + period_u_m, far_past_seam_m[1]])
+        );
+        let range_pixels: Vec<u8> =
+            layout.get_range_pixels([period_u_m / 2.0 - 2.0, 0.0], RANGE_M / 3.0);
+        let (corner_m, m_per_px) = layout.get_photo_placement();
+        let across_seam_m: [f64; 2] = [-period_u_m / 2.0 + 2.0, 0.0];
+        assert_eq!(
+            get_rgb_at(
+                &range_pixels,
+                layout.size_px,
+                corner_m,
+                m_per_px,
+                across_seam_m
+            ),
+            page(across_seam_m),
+            "a spot 4 m away across the seam is within range"
+        );
+        let out_of_range_m: [f64; 2] = [-20.0, 25.0];
+        assert_ne!(
+            get_rgb_at(
+                &range_pixels,
+                layout.size_px,
+                corner_m,
+                m_per_px,
+                out_of_range_m
+            ),
+            page(out_of_range_m)
+        );
     }
 
     #[test]

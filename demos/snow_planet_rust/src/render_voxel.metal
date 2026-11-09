@@ -1194,9 +1194,27 @@ static void trace_scene(thread const Scene &scene, float4 x, float4 v, int warp,
 }
 
 /**
+ * @brief `get_rise_s` gives how far along the geodesic from x along unit v the height (Fermi h, with sinh(h / R) =
+ * y) reaches `top_y` = sinh(top / R), solving x.y cosh s + v.y sinh s = top_y; `NO_HIT_S` for a path that doesn't
+ * rise.
+ * @par Example
+ * @code
+ * float top_s = get_rise_s(x, l, sinh(SCENE_TOP_M / r));
+ * @endcode
+ */
+static float get_rise_s(float4 x, float4 v, float top_y) {
+    float a = x.y, b = v.y;
+    if (b <= 0.0) return NO_HIT_S;
+    if (a >= top_y) return 0.0;
+    if (b > abs(a)) return asinh(top_y / sqrt(b * b - a * a)) - atanh(a / b);
+    return acosh(top_y / sqrt(a * a - b * b)) - atanh(b / a);
+}
+
+/**
  * @brief `trace_shadow` gives 0 if something blocks the straight path toward the sun within `SHADOW_M`, else how lit
  * x is, from 0 to 1: a path that passes close to a surface, compared with how far it has gone, is in the penumbra. The
- * terrain counts only from `TERRAIN_SHADOW_START_M` on, so a ground point doesn't shadow itself.
+ * terrain counts only from `TERRAIN_SHADOW_START_M` on, so a ground point doesn't shadow itself. On a looping world
+ * the path ends where it rises above `SCENE_TOP_M`, over everything that can cast a shadow.
  * @par Example
  * @code
  * float lit = trace_shadow(scene, x, l);
@@ -1212,7 +1230,7 @@ static float trace_shadow(thread const Scene &scene, float4 x, float4 l) {
         trace_terrain<true>(scene, x, l, TERRAIN_SHADOW_START_M / scene.u.curvature_radius_m, h);
         if (h.mat != 0) return SHADOW_FLOOR;
     }
-    float left = h.s;
+    float left = scene.u.torus.w > 0.5 ? min(h.s, get_rise_s(x, l, sinh(SCENE_TOP_M / scene.u.curvature_radius_m))) : h.s;
     for (int piece = 0; piece < MAX_SHADOW_SEAM_COUNT; piece++) {
         int axis = -1;
         float seam_s = scene.u.torus.w > 0.5 ? find_seam_s(scene, x, l, axis) : NO_HIT_S;
