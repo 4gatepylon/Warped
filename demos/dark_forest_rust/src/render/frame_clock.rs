@@ -41,8 +41,9 @@ const SPEED_UP_FRAC: f64 = 0.75;
 
 /// `choose_refreshes_per_frame` is how many refreshes of `refresh_ms` each frame should stay on
 /// screen, given the current cadence and the GPU times of the frames since it was set (at least
-/// `MIN_GPU_SAMPLE_COUNT`): slower at once when the 90th percentile doesn't fit in `FIT_FRAC` of
-/// the frame's time, one step faster when it fits in `SPEED_UP_FRAC` of one refresh fewer.
+/// `MIN_GPU_SAMPLE_COUNT`): one step slower when the 90th percentile doesn't fit in `FIT_FRAC` of
+/// the frame's time (one step at a time, since frames that overlap on the GPU look longer than
+/// they are), one step faster when it fits in `SPEED_UP_FRAC` of one refresh fewer.
 ///
 /// Example: `let refreshes: u32 = choose_refreshes_per_frame(1, &gpu_ms, 10.0);`
 pub fn choose_refreshes_per_frame(current: u32, gpu_ms: &[f64], refresh_ms: f64) -> u32 {
@@ -57,7 +58,7 @@ pub fn choose_refreshes_per_frame(current: u32, gpu_ms: &[f64], refresh_ms: f64)
     let needed: u32 =
         ((p90_ms / (refresh_ms * FIT_FRAC)).ceil() as u32).clamp(1, MAX_REFRESHES_PER_FRAME);
     if needed > current {
-        needed
+        current + 1
     } else if current > 1 && p90_ms < f64::from(current - 1) * refresh_ms * SPEED_UP_FRAC {
         current - 1
     } else {
@@ -191,7 +192,8 @@ mod tests {
         assert_eq!(choose_refreshes_per_frame(2, &times(13.0), refresh_ms), 2);
         assert_eq!(choose_refreshes_per_frame(2, &times(9.0), refresh_ms), 2);
         assert_eq!(choose_refreshes_per_frame(2, &times(7.0), refresh_ms), 1);
-        assert_eq!(choose_refreshes_per_frame(1, &times(100.0), refresh_ms), 4);
+        assert_eq!(choose_refreshes_per_frame(1, &times(100.0), refresh_ms), 2);
+        assert_eq!(choose_refreshes_per_frame(4, &times(100.0), refresh_ms), 4);
     }
 
     /// `test_without_a_refresh_the_average_is_used` checks that without vsync the step is the
