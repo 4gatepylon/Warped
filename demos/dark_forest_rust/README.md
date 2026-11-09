@@ -55,8 +55,8 @@ and `make join-game SERVER=127.0.0.1 TEAM=blue` in a second terminal. `cargo run
 | `F9` | sharp centre on or off (foveation: full resolution around the crosshair, softer toward the edges; on by default) |
 
 The guns, hits, console holds and movement are the Lunar Surface demo's too (W-126; DECISIONS.md D17 to D22 and D26 to D28): one
-sniper hit eliminates a player, the rifle takes 12 hits to the body or 2 to the head; you walk at 10 m/s and sprint at
-18 m/s (no run-up, the same in the air), crouch to half speed with the eye at 0.6 of its height, a jump rises 1.25 m
+sniper hit eliminates a player, the rifle takes 12 hits to the body or 2 to the head; you walk at 8 m/s and sprint at
+15.5 m/s, halfway between City Sphere's and Lunar Surface's (D42; no run-up, the same in the air), crouch to half speed with the eye at 0.6 of its height, a jump rises 1.25 m
 and lasts 0.58 s, a hit slows you to half speed for 1 s, and a shot fires only 0.25 s after your last step upright or
 jump (crouch-walking doesn't count). Ladders keep the forest's own pace.
 
