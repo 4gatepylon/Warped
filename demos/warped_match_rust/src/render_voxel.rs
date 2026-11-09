@@ -88,6 +88,7 @@ const BEAM_SEED_PERIOD_MS: u64 = 1 << 24;
 const MS_PER_S: f64 = 1000.0;
 const GROUP_CELL_M: f64 = 12.0;
 const GROUP_MARGIN_M: f64 = 0.05;
+const SUPER_GROUP_CELLS: i64 = 4;
 const MIN_BUFFER_BYTES: usize = 256;
 const BYTES_PER_FLOAT4: usize = 16;
 const FLOAT4S_PER_DUST_BURST: usize = 7;
@@ -336,41 +337,66 @@ fn get_height_grid(terrain: &Option<crate::terrain::Terrain>) -> Option<&Arc<Hei
     terrain.as_ref().and_then(|t| t.height_grid.as_ref())
 }
 
+/// `make_bounding_sphere` gives the centre and radius (curvature units) of a sphere around
+/// spheres given by their centres and radii, grown by `GROUP_MARGIN_M`.
+///
+/// Example: `let (centre, radius) = make_bounding_sphere(&spheres, world.r);`
+fn make_bounding_sphere(spheres: &[(DVec4, f64)], r: f64) -> (DVec4, f64) {
+    let sum: DVec4 = spheres.iter().map(|&(centre, _)| centre).sum();
+    let centre: DVec4 = sum / (-minkowski_dot(sum, sum)).sqrt();
+    let radius: f64 = spheres
+        .iter()
+        .map(|&(member, member_radius)| get_distance(centre, member) + member_radius)
+        .fold(0.0, f64::max)
+        + GROUP_MARGIN_M / r;
+    (centre, radius)
+}
+
 /// `pack_structure_groups` appends to `lists` the world's static structures grouped by the
-/// `GROUP_CELL_M` cell of Fermi (u, v) their centre is in: each group's header (its centre, then
-/// the cosh of a radius that holds its members' bounding spheres, the index in `lists` of its
-/// first member and how many it has), then each member's index. It gives what the shader's
-/// `trace_structures` reads: the group count, the first header's index and the static count.
+/// `GROUP_CELL_M` cell of Fermi (u, v) their centre is in, the groups ordered by the
+/// `SUPER_GROUP_CELLS` × `SUPER_GROUP_CELLS` block of cells they lie in: each group's header (its
+/// centre, then the cosh of a radius that holds its members' bounding spheres, the index in
+/// `lists` of its first member and how many it has), then each block's header (its centre, then
+/// the cosh of a radius that holds its groups' spheres, its first group's number and how many it
+/// has), then each member's index. It gives what the shader's `trace_structures` reads: the group
+/// count, the first group header's index, the static count and the block count (whose headers
+/// follow the groups').
 ///
 /// Example: `let groups = pack_structure_groups(&world, &mut lists);`
 fn pack_structure_groups(world: &VoxelWorld, lists: &mut Vec<[f32; 4]>) -> [i32; 4] {
-    let mut cells: BTreeMap<(i64, i64), Vec<usize>> = BTreeMap::new();
+    let mut cells: BTreeMap<(i64, i64, i64, i64), Vec<usize>> = BTreeMap::new();
     for (k, st) in world.structures[..world.static_structure_count]
         .iter()
         .enumerate()
     {
         let [u_m, v_m, _] = get_fermi_coordinates(st.centre, world.r);
-        let cell: (i64, i64) = (
-            (u_m / GROUP_CELL_M).floor() as i64,
-            (v_m / GROUP_CELL_M).floor() as i64,
+        let i: i64 = (u_m / GROUP_CELL_M).floor() as i64;
+        let j: i64 = (v_m / GROUP_CELL_M).floor() as i64;
+        let cell = (
+            i.div_euclid(SUPER_GROUP_CELLS),
+            j.div_euclid(SUPER_GROUP_CELLS),
+            i,
+            j,
         );
         cells.entry(cell).or_default().push(k);
     }
     let first_header: usize = lists.len();
-    let mut first_member: usize = first_header + 2 * cells.len();
+    let mut blocks: BTreeMap<(i64, i64), Vec<(usize, DVec4, f64)>> = BTreeMap::new();
+    for (group_number, (&(block_i, block_j, _, _), group)) in cells.iter().enumerate() {
+        let spheres: Vec<(DVec4, f64)> = group
+            .iter()
+            .map(|&k| (world.structures[k].centre, world.structures[k].radius))
+            .collect();
+        let (centre, radius) = make_bounding_sphere(&spheres, world.r);
+        blocks
+            .entry((block_i, block_j))
+            .or_default()
+            .push((group_number, centre, radius));
+    }
+    let mut first_member: usize = first_header + 2 * (cells.len() + blocks.len());
     let mut headers: Vec<[f32; 4]> = Vec::new();
     let mut members: Vec<[f32; 4]> = Vec::new();
-    for group in cells.values() {
-        let sum: DVec4 = group.iter().map(|&k| world.structures[k].centre).sum();
-        let centre: DVec4 = sum / (-minkowski_dot(sum, sum)).sqrt();
-        let radius: f64 = group
-            .iter()
-            .map(|&k| {
-                let st = &world.structures[k];
-                get_distance(centre, st.centre) + st.radius
-            })
-            .fold(0.0, f64::max)
-            + GROUP_MARGIN_M / world.r;
+    for (group, &(_, centre, radius)) in cells.values().zip(blocks.values().flatten()) {
         headers.push(to_f32(centre));
         headers.push([
             radius.cosh() as f32,
@@ -381,13 +407,27 @@ fn pack_structure_groups(world: &VoxelWorld, lists: &mut Vec<[f32; 4]>) -> [i32;
         members.extend(group.iter().map(|&k| [k as f32, 0.0, 0.0, 0.0]));
         first_member += group.len();
     }
+    for block in blocks.values() {
+        let spheres: Vec<(DVec4, f64)> = block
+            .iter()
+            .map(|&(_, centre, radius)| (centre, radius))
+            .collect();
+        let (centre, radius) = make_bounding_sphere(&spheres, world.r);
+        headers.push(to_f32(centre));
+        headers.push([
+            radius.cosh() as f32,
+            block[0].0 as f32,
+            block.len() as f32,
+            0.0,
+        ]);
+    }
     lists.extend(headers);
     lists.extend(members);
     [
         cells.len() as i32,
         first_header as i32,
         world.static_structure_count as i32,
-        0,
+        blocks.len() as i32,
     ]
 }
 
