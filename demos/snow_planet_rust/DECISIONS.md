@@ -366,5 +366,8 @@ Built on `claude/snow-planet-torus-screens`, 2026-11-09 (Claude Code), on layer 
   (`VoxelFrame::Build`), not the bounded level's 60 × 40 m one, so the cell's corners are no longer darkened and
   ringed with hazard stripes as if they were outside the level.
 - **The map photo** is rendered again for the new picture (`make map-picture`).
+- **Shadow rays end above the scene:** on a looping world a shadow ray stops where it rises above `SCENE_TOP_M`
+  (`get_rise_s`), over every structure, so it gives up nothing; 0 to 0.9 ms per view at 2560×1440 (exclusive GPU
+  lock, best of 3 rounds, load 4 to 28).
 - **Not done:** the robot pose jump at a seam waits for `claude/shared-level-code` (wishlist W-120, Snow Planet
   demo).
