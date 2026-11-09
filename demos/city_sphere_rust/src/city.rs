@@ -136,6 +136,8 @@ const WORMHOLE_EXIT_M: f64 = 0.01;
 const UNLINKED_MOUTH_BALL_M: f64 = 0.3;
 const FLYING_MOUTH_BALL_M: f64 = 0.15;
 const CONSOLE_REPLAN_S: f64 = 3.0;
+const FIGHT_RETARGET_S: f64 = 2.0;
+const FIGHT_ARRIVE_M: f64 = 6.0;
 const SERVE_POLL_MS: u64 = 50;
 const STAIRS_ROUTE_END_WAIT_S: f64 = 2.0;
 
@@ -553,7 +555,7 @@ impl Brain {
         let hole: DVec3 = world
             .lift_holes
             .iter()
-            .map(|&(hole, _)| hole)
+            .map(|hole| hole.direction)
             .max_by(|a, b| a.dot(from).total_cmp(&b.dot(from)))
             .unwrap_or(from);
         let waypoint: DVec3 = if is_riding {
@@ -3078,7 +3080,8 @@ fn make_bench_views(world: &CityWorld) -> Vec<BenchView> {
     glass.feet = DVec3::new(0.9, 0.2, -0.3).normalize() * glass_m;
     glass.align_to_ground();
     let mut lift: CityPlayer = street;
-    lift.feet = world.get_glass().map_or(DVec3::X, |g| g.holes[0].0) * world.street_radius_m;
+    lift.feet =
+        world.get_glass().map_or(DVec3::X, |g| g.holes[0].direction) * world.street_radius_m;
     lift.align_to_ground();
     let _ = eye_m;
     vec![
@@ -3461,8 +3464,9 @@ impl Rng {
     }
 }
 
-/// `run_bot` plays without a window on `--join`'s server for `--exit-after-s`: it wanders between
-/// the levels shooting enemies it can hit, or with `--bot-objective consoles` walks up its stairs
+/// `run_bot` plays without a window on `--join`'s server for `--exit-after-s`: it walks after the
+/// nearest enemy (on the street or the glass level, choosing again every `FIGHT_RETARGET_S`; it
+/// wanders when nobody is there) shooting enemies it can hit, or with `--bot-objective consoles` walks up its stairs
 /// to each of the other team's consoles and holds `E` on it, aiming at it, until its team wins
 /// (`make_console_route`); if it can't aim at the console for `CONSOLE_REPLAN_S` (it fell off the
 /// glass level, say), it starts the walk again from its stairs.
@@ -3487,6 +3491,7 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
     let mut brain: Brain = Brain::New(Vec::new());
     let mut unaimed_s: f64 = 0.0;
     let mut last_s: f64 = 0.0;
+    let mut retarget_at_s: f64 = 0.0;
     while start.elapsed().as_secs_f64() < duration_s {
         std::thread::sleep(Duration::from_secs_f64(BOT_STEP_S));
         let now_s: f64 = start.elapsed().as_secs_f64();
@@ -3565,21 +3570,33 @@ fn run_bot(arguments: &Arguments) -> Result<()> {
         } else if arguments.bot_objective == Some(BotObjective::Target) {
             player = make_target_player(&world);
         } else if client.game.winner.is_none() {
-            if brain.is_done() {
-                let side: Side = if rng.next_frac() < 0.5 {
-                    Side::Street
-                } else {
-                    Side::Glass
+            let feet: DVec3 = CityPlayer::get_feet_up(player.get_eye_frame(), world.eye_height_m).0;
+            let nearest_enemy: Option<DVec3> = client
+                .players
+                .iter()
+                .filter(|p| Some(p.id) != client.id && p.team != team)
+                .map(|p| CityPlayer::get_feet_up(p.frame, world.eye_height_m).0)
+                .min_by(|a, b| a.distance(feet).total_cmp(&b.distance(feet)));
+            if brain.is_done() || now_s >= retarget_at_s {
+                retarget_at_s = now_s + FIGHT_RETARGET_S;
+                let (direction, side): (DVec3, Side) = match nearest_enemy {
+                    Some(enemy) => (enemy, world.get_side(enemy)),
+                    None => (
+                        DVec3::new(
+                            rng.next_frac() - 0.5,
+                            rng.next_frac() - 0.5,
+                            rng.next_frac() - 0.5,
+                        ),
+                        match rng.next_frac() < 0.5 {
+                            true => Side::Street,
+                            false => Side::Glass,
+                        },
+                    ),
                 };
-                let direction: DVec3 = DVec3::new(
-                    rng.next_frac() - 0.5,
-                    rng.next_frac() - 0.5,
-                    rng.next_frac() - 0.5,
-                );
                 brain = Brain::New(vec![Step::GoTo {
                     direction: direction.normalize_or(DVec3::X),
                     side,
-                    arrive_m: 2.0,
+                    arrive_m: FIGHT_ARRIVE_M,
                 }]);
             }
             let out: BrainOutput = brain.drive(
