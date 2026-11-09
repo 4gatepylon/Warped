@@ -373,7 +373,9 @@ What a player sees while playing:
 - **Map while `Tab` is held:** the MAP page's picture and legend over the dimmed game, which goes on taking the
   player's input, until `Tab` is let go.
 - **Menu** (`Esc`, which frees the mouse; `Esc` again closes it and captures the mouse), with five pages under a tab
-  bar; it opens on SCORES, and `Q` and `E` turn the pages. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
+  bar; it opens on SCORES, and `Q` and `E` turn the pages. Inside the one-window app a sixth page, MATCH, comes
+  first, with the match's status (the current level, the round, which team attacks and the scores), and the menu
+  opens on it. Inside the menu the arrows, `Return`, `Esc`, `Q` and `E` always work, whatever the key
   bindings say, so a bad binding can always be fixed. The player stands still while it is open,
   but the game goes on.
   - SCORES: the player count, and each player's team, kills and deaths in this game, sorted by

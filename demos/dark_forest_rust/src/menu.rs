@@ -2,12 +2,15 @@
 //! `menu.rs`): the scores page, with each player's team, kills and deaths from the server; the
 //! settings page, where a player changes the look speed, render scale, vsync, frame-time readout
 //! and minimap for this run and sees the controls; the map page, whose picture the window draws
-//! (`minimap.rs`); the credits page (`credits.rs`); and the quit page, which leaves the level.
+//! (`minimap.rs`); the credits page (`credits.rs`); the quit page, which leaves the level; and,
+//! when the caller supplies its lines (the one-window app's match status, `set_match_lines`), a
+//! MATCH page first.
 //! It keeps no window state: the window feeds it keys and the scores, and draws its lines. `Esc`
 //! opens and closes it, and the map page's lines also head the map shown while `Tab` is held
 //! (W-140, hold Tab for the map, Esc for the menu; `warped_shared::menu_and_map`).
 //!
-//! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`), `MenuOutcome`, `MenuSettings`,
+//! Interface: `Menu` (`New`, `handle`, `get_lines`, `get_page`, `set_match_lines`), `MenuOutcome`,
+//! `MenuSettings`,
 //! `Page`, `Scoreboard`, `MENU_PICTURE_PX`, `get_held_map_lines`.
 //!
 //! Example: `if menu.handle(Scancode::Escape, &mut menu_settings) == MenuOutcome::Close { ... }`
@@ -19,7 +22,7 @@ use std::cmp::Reverse;
 
 use sdl3::keyboard::Scancode;
 use warped_shared::key_bindings::Control;
-use warped_shared::menu_and_map::{QUIT_LINES, is_leave_control};
+use warped_shared::menu_and_map::{MATCH_PAGE_NAME, QUIT_LINES, format_tab_bar, is_leave_control};
 
 use crate::credits::CREDITS_LINES;
 use crate::net::{Score, TEAM_NAMES};
@@ -73,6 +76,7 @@ pub enum Page {
     Map,
     Credits,
     Quit,
+    Match,
 }
 
 /// `Scoreboard` is what the scores page shows: this player's own kills and deaths when playing
@@ -131,10 +135,12 @@ pub fn get_held_map_lines() -> Vec<(String, bool)> {
     ]
 }
 
-/// `Menu` is the menu's open page and the settings row chosen on it.
+/// `Menu` is the menu's open page (an index into `get_pages`), the settings row chosen on it, and
+/// the MATCH page's lines (`None`: no MATCH page).
 pub struct Menu {
     page_index: usize,
     row_index: usize,
+    match_lines: Option<Vec<(String, bool)>>,
 }
 
 /// `format_score_row` lines up a scores row's columns.
@@ -229,14 +235,41 @@ impl Menu {
         Menu {
             page_index: 0,
             row_index: 0,
+            match_lines: None,
         }
+    }
+
+    /// `get_pages` gives the menu's pages in order: MATCH first when it has lines, then `PAGES`.
+    ///
+    /// Example: `let page_count = self.get_pages().len();`
+    fn get_pages(&self) -> Vec<(Page, &'static str)> {
+        let match_page: Option<(Page, &'static str)> = self
+            .match_lines
+            .as_ref()
+            .map(|_| (Page::Match, MATCH_PAGE_NAME));
+        match_page.into_iter().chain(PAGES).collect()
+    }
+
+    /// `set_match_lines` gives the MATCH page its lines (the one-window app's match status, at
+    /// most 64 characters wide and 23 lines), or removes the page with `None`. The page opens
+    /// first: the menu turns to it when it first gets lines, and keeps its page as they change.
+    ///
+    /// Example: `menu.set_match_lines(Some(vec![("ROUND 2 of 5".to_string(), true)]));`
+    #[allow(dead_code)]
+    pub fn set_match_lines(&mut self, lines: Option<Vec<(String, bool)>>) {
+        match (self.match_lines.is_some(), lines.is_some()) {
+            (false, true) => self.page_index = 0,
+            (true, false) => self.page_index = self.page_index.saturating_sub(1),
+            _ => {}
+        }
+        self.match_lines = lines;
     }
 
     /// `get_page` gives the open page.
     ///
     /// Example: `if menu.get_page() == Page::Map { ... }`
     pub fn get_page(&self) -> Page {
-        PAGES[self.page_index].0
+        self.get_pages()[self.page_index].0
     }
 
     /// `handle` acts on one pressed key: Escape closes the menu, Q and E turn the page, on the
@@ -248,11 +281,12 @@ impl Menu {
         match key {
             Scancode::Escape => return MenuOutcome::Close,
             Scancode::Q => {
-                self.page_index = (self.page_index + PAGES.len() - 1) % PAGES.len();
+                let page_count: usize = self.get_pages().len();
+                self.page_index = (self.page_index + page_count - 1) % page_count;
                 return MenuOutcome::Stay;
             }
             Scancode::E => {
-                self.page_index = (self.page_index + 1) % PAGES.len();
+                self.page_index = (self.page_index + 1) % self.get_pages().len();
                 return MenuOutcome::Stay;
             }
             _ if self.get_page() == Page::Quit && is_leave_control(Control::Key(key)) => {
@@ -301,19 +335,13 @@ impl Menu {
         settings: &MenuSettings,
         scoreboard: Scoreboard,
     ) -> Vec<(String, bool)> {
-        let tabs: Vec<String> = PAGES
-            .iter()
-            .enumerate()
-            .map(|(i, (_, name))| match i == self.page_index {
-                true => format!("[{name}]"),
-                false => format!(" {name} "),
-            })
-            .collect();
+        let page_names: Vec<&str> = self.get_pages().iter().map(|(_, name)| *name).collect();
         let mut lines: Vec<(String, bool)> = vec![
-            (format!("MENU  {}   Q/E: page", tabs.join(" ")), true),
+            (format_tab_bar(&page_names, self.page_index), true),
             (String::new(), false),
         ];
         match self.get_page() {
+            Page::Match => lines.extend(self.match_lines.iter().flatten().cloned()),
             Page::Scores => lines.extend(get_score_lines(scoreboard)),
             Page::Map => lines.push((MAP_LEGEND.to_string(), false)),
             Page::Credits => {
@@ -373,6 +401,7 @@ mod tests {
     //! | Closing | Escape; not Tab (the held map's key) | `escape_closes_it_and_tab_does_not` |
     //! | Quit page | Return or Y (leave the level), another key (stay); Return elsewhere (no leaving) | `the_quit_page_leaves_the_level` |
     //! | Scoreboard | alone, waiting, scores (two teams, ties in kills, this player known or not) | `the_scores_page_sorts_and_totals` |
+    //! | MATCH page | none (the forest run alone), lines supplied (shown first, in the page turning, its lines), lines changed, removed | `the_match_page_shows_only_with_lines` |
     //! | Fit | every page's lines within the picture's 64 characters and 25 lines | `every_page_fits_the_picture` |
 
     use super::*;
@@ -552,5 +581,36 @@ mod tests {
         for (line, _) in get_held_map_lines() {
             assert!(line.chars().count() <= 64, "{line:?} is too wide");
         }
+    }
+
+    #[test]
+    fn the_match_page_shows_only_with_lines() {
+        let (mut menu, mut settings) = (Menu::New(), SETTINGS);
+        menu.handle(Scancode::E, &mut settings);
+        assert_eq!(menu.get_page(), Page::Settings);
+        let status = |round: u32| vec![(format!("ROUND {round} of 5"), true)];
+        menu.set_match_lines(Some(status(1)));
+        assert_eq!(menu.get_page(), Page::Match);
+        let lines: Vec<(String, bool)> = menu.get_lines(&settings, Scoreboard::Waiting);
+        assert!(lines[0].0.starts_with("[MATCH]"), "{}", lines[0].0);
+        assert!(lines[0].0.chars().count() <= 64, "{}", lines[0].0);
+        assert_eq!(lines[2..], status(1));
+        menu.set_match_lines(Some(status(2)));
+        assert_eq!(
+            menu.get_lines(&settings, Scoreboard::Waiting)[2..],
+            status(2)
+        );
+        menu.handle(Scancode::Q, &mut settings);
+        assert_eq!(menu.get_page(), Page::Quit);
+        menu.handle(Scancode::E, &mut settings);
+        menu.handle(Scancode::E, &mut settings);
+        assert_eq!(menu.get_page(), Page::Scores);
+        menu.set_match_lines(None);
+        assert_eq!(menu.get_page(), Page::Scores);
+        assert!(
+            menu.get_lines(&settings, Scoreboard::Waiting)[0]
+                .0
+                .starts_with("MENU  [SCORES]")
+        );
     }
 }

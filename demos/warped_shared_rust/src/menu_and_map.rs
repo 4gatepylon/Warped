@@ -3,11 +3,13 @@
 //! shows over the game, which goes on and keeps taking input; the open-menu control (`Escape`)
 //! opens the one menu and frees the mouse, and closing it captures the mouse again; and the menu's
 //! QUIT page leaves the level (`PlayOutcome::LeaveLevel`), which a level run alone treats as
-//! quitting and the one-window app as going back to its game menu.
+//! quitting and the one-window app as going back to its game menu. Inside the one-window app the
+//! menu also has a MATCH page first, with lines the app supplies (the match's status); a level run
+//! alone has none.
 //!
 //! Interface: `MenuAndMap` (`New`, `open_menu`, `close_menu`, `get_menu`, `get_menu_mut`,
 //! `is_menu_open`, `set_map_held`, `get_cover`), `Cover`, `MouseChange` (`apply`), `PlayOutcome`,
-//! `QUIT_LINES`, `is_leave_control`.
+//! `QUIT_LINES`, `MATCH_PAGE_NAME`, `is_leave_control`, `format_tab_bar`.
 //!
 //! Example: `let change = menu_and_map.open_menu(Menu::New()); change.apply(&mut is_captured, &window, &mouse);`
 //!
@@ -28,6 +30,13 @@ pub const QUIT_LINES: [&str; 3] = [
     "",
     "Return/Y: leave   Esc: back to the game",
 ];
+
+/// `MATCH_PAGE_NAME` is the tab name of the menu's optional MATCH page, shown first when the caller
+/// supplies its lines (each level's `Menu::set_match_lines`).
+pub const MATCH_PAGE_NAME: &str = "MATCH";
+const MENU_TITLE: &str = "MENU  ";
+const PAGE_KEYS_HINT: &str = "   Q/E: page";
+const MAX_TAB_BAR_CHAR_COUNT: usize = 64;
 
 /// `Cover` is what covers the game view: nothing, the map while its control is held, or the menu.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -72,6 +81,27 @@ impl MouseChange {
 /// Example: `if is_leave_control(Control::Key(Scancode::Y)) { ... }`
 pub fn is_leave_control(control: Control) -> bool {
     matches!(control, Control::Key(Scancode::Return | Scancode::Y))
+}
+
+/// `format_tab_bar` gives the menu's tab bar: every page's name, the shown one (`shown_index`) in
+/// brackets, then the page keys, headed by "MENU" when that fits in 64 characters (it doesn't
+/// with the MATCH page).
+///
+/// Example: `let bar = format_tab_bar(&["SCORES", "QUIT"], 0);`
+pub fn format_tab_bar(page_names: &[&str], shown_index: usize) -> String {
+    let tabs: Vec<String> = page_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| match i == shown_index {
+            true => format!("[{name}]"),
+            false => format!(" {name} "),
+        })
+        .collect();
+    let bar: String = format!("{MENU_TITLE}{}{PAGE_KEYS_HINT}", tabs.join(" "));
+    match bar.chars().count() <= MAX_TAB_BAR_CHAR_COUNT {
+        true => bar,
+        false => format!("{}{PAGE_KEYS_HINT}", tabs.join(" ")),
+    }
 }
 
 /// `MenuAndMap` is a level's menu (of the level's own type `M`, `None` while closed) and whether
@@ -162,6 +192,7 @@ mod tests {
     //! | Show-map control | pressed (the map shows), let go (it hides), held while the menu opens and closes | `holding_tab_shows_the_map_until_it_is_let_go`, `the_menu_covers_the_held_map` |
     //! | Menu | opened (frees the mouse), closed (captures it), opened again after closing | `escape_opens_and_closes_the_menu` |
     //! | Leave control on the QUIT page | `Return`, `Y` (leave); `Escape`, another key, a mouse button, the wheel (stay) | `return_and_y_leave` |
+    //! | Tab bar | fits with "MENU" (five pages), too long with it (six, MATCH first) | `the_tab_bar_fits_with_the_match_page` |
 
     use sdl3::mouse::MouseButton;
 
@@ -216,5 +247,16 @@ mod tests {
         ] {
             assert!(!is_leave_control(control), "{control:?}");
         }
+    }
+
+    #[test]
+    fn the_tab_bar_fits_with_the_match_page() {
+        let pages: [&str; 5] = ["SCORES", "SETTINGS", "MAP", "CREDITS", "QUIT"];
+        let bar: String = format_tab_bar(&pages, 1);
+        assert!(bar.starts_with("MENU   SCORES  [SETTINGS]"), "{bar}");
+        let with_match: Vec<&str> = [MATCH_PAGE_NAME].into_iter().chain(pages).collect();
+        let bar: String = format_tab_bar(&with_match, 0);
+        assert!(bar.starts_with("[MATCH]  SCORES "), "{bar}");
+        assert!(bar.chars().count() <= MAX_TAB_BAR_CHAR_COUNT, "{bar}");
     }
 }

@@ -1288,6 +1288,8 @@ users will want to see where on the map they are pretty often". This replaces D8
     leaves the level (`MenuOutcome::LeaveLevel`, then `PlayOutcome::LeaveLevel` from `handle_event`): a level run
     alone quits, and the one-window app (W-141, one window for the whole game) will go back to its game menu. The
     window's close button still quits at once.
+  - **MATCH page:** inside the one-window app the menu also shows a MATCH page first, with the match's status as
+    lines the app supplies (`Menu::set_match_lines`); a level run alone supplies none, so the page doesn't show.
   - **Shared:** `warped_shared::menu_and_map` (`MenuAndMap`) holds the menu, whether the map is held and what covers
     the view, the same in every level; `exit_prompt.rs` is removed.
   - **Saved settings:** a save from before (it has `release_mouse` and no `show_map`) is upgraded as it loads
