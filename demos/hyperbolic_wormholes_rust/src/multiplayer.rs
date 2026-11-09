@@ -646,6 +646,7 @@ mod tests {
     //! | Body colour | players of both teams, with ids whose old per-id colours differ from their team's | `players_are_drawn_in_their_teams_colours` |
     //! | Whose laser | this player's, another player's on Lunar Surface (drawn from their gun, out of their own body; strayed as in its shooter's window) | the tests above, `other_players_lasers_leave_their_bodies`, `a_strayed_shot_misses_alike_in_both_windows` |
     //! | This player's own body | not drawn (first person), drawn (third person: others' lasers stop at it, this player's own passes it) | `an_own_body_stops_others_lasers_only` |
+    //! | Another player's crouch (W-137 (crouched robots sink)) | standing (hit in the head at standing head height), crouched (feet where they stand; a shot at standing head height passes over, one at the squashed head hits it) | `a_crouched_player_stands_on_the_ground_and_is_hit_lower` |
 
     use super::*;
     use crate::net::MAX_PLAYER_COUNT;
@@ -662,6 +663,7 @@ mod tests {
         direction_rad: -std::f64::consts::FRAC_PI_4,
     };
     const SAME_SPOT_M: f64 = 1e-6;
+    const STANDING_HEAD_M: f64 = 1.75;
 
     #[test]
     fn spawn_points_are_apart_and_clear_of_mouths() {
@@ -848,6 +850,74 @@ mod tests {
             .spot
             .expect("the target's window sees the shot land");
         assert!(get_distance(own_spot, seen_spot) * world.r < SAME_SPOT_M);
+    }
+
+    #[test]
+    fn a_crouched_player_stands_on_the_ground_and_is_hit_lower() {
+        let map: crate::map::Map =
+            crate::map::Map::Load(&crate::map::get_map_folder("lunar_surface"))
+                .expect("the Lunar Surface map");
+        let world: VoxelWorld = VoxelWorld::FromMap(&map).expect("a voxel world");
+        let standing: VoxelPlayer =
+            VoxelPlayer::AtView(&world, LUNAR_TARGET_M, LUNAR_SHOOTER_M, None, 0.0);
+        let crouched: VoxelPlayer = VoxelPlayer {
+            crouch_frac: 1.0,
+            ..standing
+        };
+        let (feet, _, height_frac) = get_body(&world, crouched.get_camera_frame(&world), 1.0, 0);
+        let standing_feet: DMat4 = standing.get_feet_frame(&world);
+        assert!(get_distance(feet.col(AXIS_W), standing_feet.col(AXIS_W)) * world.r < SAME_SPOT_M);
+        assert_eq!(height_frac, world.settings.movement.crouch_eye_height_frac);
+        let floor_m: f64 = standing.h_m - world.player.eye_height_m;
+        let crouched_head_m: f64 = STANDING_HEAD_M * height_frac;
+        for (crouch_frac, aim_m, is_hit_and_head) in [
+            (0.0, STANDING_HEAD_M, (true, true)),
+            (1.0, STANDING_HEAD_M, (false, false)),
+            (1.0, crouched_head_m, (true, true)),
+        ] {
+            let body: VoxelPlayer = VoxelPlayer {
+                crouch_frac,
+                ..standing
+            };
+            let target: RemotePlayer = RemotePlayer {
+                id: 2,
+                frame: body.get_camera_frame(&world),
+                is_laser_on: false,
+                is_rifle: false,
+                team: 0,
+                disabling_console: None,
+                disabling_frac: 0.0,
+                beam_speckle_frac: 0.0,
+                wormholes: PlayerWormholes::default(),
+                crouch_frac,
+            };
+            let camera: DMat4 = VoxelPlayer::AtView(
+                &world,
+                LUNAR_SHOOTER_M,
+                LUNAR_TARGET_M,
+                Some(floor_m + aim_m),
+                0.0,
+            )
+            .get_camera_frame(&world);
+            let view: SharedVoxelView = pack_shared_voxel_view(
+                &world,
+                camera,
+                Some(camera),
+                1,
+                &[target],
+                &[IDLE_POSE],
+                &[],
+                None,
+                &[],
+                None,
+                (64, 40),
+            );
+            assert_eq!(
+                (view.hit_player_id.is_some(), view.is_head_hit),
+                is_hit_and_head,
+                "crouched {crouch_frac}, aimed {aim_m} m up"
+            );
+        }
     }
 
     #[test]

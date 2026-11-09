@@ -3711,6 +3711,7 @@ mod tests {
     //! | Walk from a spawn up the stairs | each team, each of its two spawns, walking and sprinting: reaches the glass level, then its pylon, never stuck | `every_spawn_walks_up_the_stairs_to_its_pylon` |
     //! | Level jumped in | City Sphere, Lunar Surface (the reference, its own settings and code): the same height and time in the air | `a_jump_matches_lunar_surface` |
     //! | Level crouched in, walking | City Sphere, Lunar Surface: the same time to crouch, crouched eye height and crouched speed, as shares of standing | `crouching_matches_lunar_surface` |
+    //! | Another player as this window places them (W-137 (crouched robots sink)) | standing, crouched: feet where they stand, height share as crouched | `a_crouched_player_stands_on_the_street` |
     //! | Settings file | server (all but the sprint and City's `glass`), player: the same as Lunar Surface's | `the_settings_files_match_lunar_surface` |
     //! | Walk on foot from a spawn to a console | each team, spawn and console (own, the other team's), 60 and 20 updates a second: aimed within reach at the end; not when facing away or with too short a reach | `every_pylon_is_reachable_on_foot_from_every_spawn` |
     use super::*;
@@ -4063,6 +4064,44 @@ mod tests {
             (city.speed_frac - lunar.speed_frac).abs() < CROUCH_SPEED_TOLERANCE_FRAC,
             "{city:?} {lunar:?}"
         );
+    }
+
+    #[test]
+    fn a_crouched_player_stands_on_the_street() {
+        let world: CityWorld = CityWorld::Builtin().expect("the built-in map");
+        let settings: ServerSettings = ServerSettings::Builtin();
+        for is_crouching in [false, true] {
+            let mut player: CityPlayer = world.make_player(0, 0);
+            let input: CityInput = CityInput {
+                is_crouching,
+                ..CityInput::default()
+            };
+            for _ in 0..(CROUCH_WALK_S / WALK_STEP_S).round() as usize {
+                world.move_player(&mut player, &input, &settings, &head_bob(), WALK_STEP_S);
+            }
+            let crouch_frac: f64 = player.move_state.crouch_frac;
+            let seen: net::RemotePlayer = net::RemotePlayer {
+                id: 2,
+                frame: player.get_eye_frame(),
+                is_laser_on: false,
+                is_rifle: false,
+                team: 0,
+                disabling_console: None,
+                disabling_frac: 0.0,
+                beam_speckle_frac: 0.0,
+                wormholes: PlayerWormholes::default(),
+                crouch_frac,
+            };
+            let (feet, _, height_frac) = get_remote_body(&world, &settings, &seen);
+            assert!(
+                (feet - player.feet).length() < 1e-9,
+                "crouching {is_crouching}"
+            );
+            assert_eq!(
+                height_frac,
+                get_crouched_height_frac(crouch_frac, &settings.movement)
+            );
+        }
     }
 
     /// `the_settings_files_match_lunar_surface` checks City Sphere's settings files against Lunar
